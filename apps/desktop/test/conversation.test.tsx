@@ -98,6 +98,36 @@ function imageView(attachments = [historyImage]) {
   return view;
 }
 
+it("插话消息按普通用户消息显示，并带「插话」标签（ADR-0070）", () => {
+  const view = createSessionView();
+  view.entries = [
+    {
+      kind: "user",
+      key: "u1",
+      seq: 1,
+      turnId: "t",
+      content: [{ type: "text", text: "做个页面" }],
+      attachments: [],
+    },
+    {
+      kind: "user",
+      key: "u2",
+      seq: 3,
+      turnId: "t",
+      content: [{ type: "text", text: "改成蓝色" }],
+      steer: true,
+      attachments: [],
+    },
+  ];
+  const rendered = mount(view);
+  expect(screen.getByText("改成蓝色")).toBeTruthy();
+  const tags = rendered.container.querySelectorAll(".u-steer");
+  expect(tags).toHaveLength(1);
+  expect(tags[0]?.textContent).toBe("插话");
+  // 普通用户消息没有标签
+  expect(screen.getAllByText("做个页面")).toHaveLength(1);
+});
+
 it("用户技能小标签使用日志快照，展开正文，工具行显示已加载", () => {
   const view = createSessionView();
   const loaded = tool({ name: "skill", input: { name: "alpha" } });

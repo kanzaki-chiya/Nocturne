@@ -205,6 +205,15 @@ export interface DesktopHost {
   /** 重启应用（非 Windows 平台装完更新需要手动重启） */
   relaunch: () => Promise<void>;
   /**
+   * 窗口关闭请求（ADR-0070 §6）：外壳把关闭拦下来交给界面，界面用
+   * `quitApp` / `cancelQuit` 收尾。返回取消订阅函数；不支持的环境（浏览器）没有。
+   */
+  onCloseRequested?: ((handler: () => void) => () => void) | undefined;
+  /** 确认退出（外壳随后关后台、结束进程） */
+  quitApp?: (() => Promise<void>) | undefined;
+  /** 放弃退出：界面留下，外壳解除关闭请求 */
+  cancelQuit?: (() => Promise<void>) | undefined;
+  /**
    * 往外壳日志写一行诊断（后台日志页「外壳」条目可见）。
    * 内部 fire-and-forget：写失败不抛错。
    */

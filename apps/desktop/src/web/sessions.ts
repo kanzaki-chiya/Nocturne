@@ -1,6 +1,7 @@
 import {
   createSessionView,
   type ModelRef,
+  type PendingInputsSnapshot,
   type ReasoningEffort,
   type RuntimeEvent,
   type RewindMode,
@@ -34,6 +35,8 @@ export interface PhoneSession {
   /** 本轮改动摘要（按用户消息 seq），Turn 结束与回退后刷新，同桌面 */
   turnChanges: Map<number, TurnChanges>;
   changeDiffs: Map<string, Promise<TurnChangeDiff>>;
+  /** 待发输入快照（ADR-0070）：运行中插话与排队，临时状态不写日志 */
+  pendingInputs: PendingInputsSnapshot;
 }
 export interface PhoneCreateOptions {
   model?: ModelRef | undefined;
@@ -104,6 +107,8 @@ export class PhoneSessions {
       entry.dead ||
       entry.replaying ||
       phoneStatus(entry) !== "idle" ||
+      // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
+      entry.pendingInputs.items.length > 0 ||
       this.opened.get(id) !== entry
     )
       return;
@@ -301,6 +306,7 @@ export class PhoneSessions {
       listeners,
       turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
       changeDiffs: new Map(),
+      pendingInputs: { items: [], paused: false },
     };
     this.opened.set(session.id, entry);
     // 与桌面 conversations.ts 一致：订阅窗口期间的新持久事件按 event.time 判断。
@@ -309,6 +315,8 @@ export class PhoneSessions {
     entry.tracker = await trackSessionView(
       session,
       (_view, event) => {
+        // 待发输入快照（ADR-0070）：临时事件，订阅后再取一次当前快照对齐
+        if (event.type === "input.pending") entry.pendingInputs = event.payload;
         const at = Date.parse(event.time);
         const live = subscribed || !("seq" in event) || (!Number.isNaN(at) && at >= subscribeStart);
         if (event.type === "turn.started" && !Number.isNaN(at)) this.turnStarts.set(session.id, at);
@@ -334,6 +342,18 @@ export class PhoneSessions {
     );
     subscribed = true;
     entry.replaying = false;
+    // 待发输入是临时状态，订阅后单独取一次快照（整份覆盖）。不挡打开：取回后
+    // 再通知一次，晚到的快照必定晚于此前发出的 input.pending（服务端按请求时刻生成）
+    void Promise.resolve()
+      .then(() => session.pendingInputs())
+      .then((snapshot) => {
+        // 空列表与打开时的初值一致，不必再触发一次通知
+        if (entry.dead || snapshot.items.length === 0) return;
+        entry.pendingInputs = snapshot;
+        for (const listener of entry.listeners) listener();
+        this.changed();
+      })
+      .catch(() => undefined);
     for (const listener of entry.listeners) listener();
     this.changed();
     void this.refreshTurnChanges(entry);
@@ -389,20 +409,29 @@ export class PhoneSessions {
   }
   async open(id: string, select = true): Promise<PhoneSession> {
     if (select) this.setSelected(id);
-    await this.closing.get(id);
-    const old = this.opened.get(id);
-    if (old && !old.dead) return old;
-    const pending = this.opening.get(id);
-    if (pending) return pending;
+    // 后台会把切走时空闲的会话关掉；打开与那次关闭可能交错，所以打开后再核对
+    // 一次：句柄已被关掉就重新打开，别把已关闭的会话交给调用方（ADR-0070 前就存在）
+    for (let attempt = 0; ; attempt += 1) {
+      await this.closing.get(id);
+      const old = this.opened.get(id);
+      if (old && !old.dead) return old;
+      const entry = await (this.opening.get(id) ?? this.beginOpen(id));
+      await this.closing.get(id);
+      if (!entry.dead && this.opened.get(id) === entry) {
+        await this.closeIfIdle(entry);
+        return entry;
+      }
+      if (attempt >= 1) return entry;
+    }
+  }
+  private async beginOpen(id: string): Promise<PhoneSession> {
     const client = this.requireClient();
     const generation = this.generation;
     const item = this.list.find((s) => s.id === id);
-    const run = this.resume(client, id, item?.cwd ?? "", old?.view, generation);
+    const run = this.resume(client, id, item?.cwd ?? "", this.opened.get(id)?.view, generation);
     this.opening.set(id, run);
     try {
-      const entry = await run;
-      await this.closeIfIdle(entry);
-      return entry;
+      return await run;
     } finally {
       if (this.opening.get(id) === run) this.opening.delete(id);
     }

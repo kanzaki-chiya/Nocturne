@@ -3,6 +3,7 @@ import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@noc
 import type {
   ExternalAgentOverview,
   ModelRef,
+  PendingInputsSnapshot,
   RewindMode,
   RuntimeEvent,
   SessionView,
@@ -30,6 +31,7 @@ import {
   activeConversationCount,
   Conversations,
   conversationStatus,
+  pendingInputCount,
   type CreateSessionChoice,
 } from "./conversations";
 import { parseSlash } from "./commands";
@@ -251,6 +253,8 @@ export function App({ host }: { host: DesktopHost }) {
     | { stage: "working"; text: string }
     | { stage: "error"; message: string }
   >(null);
+  /** 关闭请求有待发输入时的提醒（ADR-0070 §6）：null = 没有待确认的关闭 */
+  const [quitPrompt, setQuitPrompt] = useState<number | null>(null);
   // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
   const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
   workspaceRef.current = effectiveWorkspace;
@@ -312,6 +316,22 @@ export function App({ host }: { host: DesktopHost }) {
       ),
     [pool],
   );
+  /**
+   * 关闭窗口（ADR-0070 §6）：有待发输入时先提醒「还有 N 条没发出」；没有就
+   * 直接退出。关闭请求由外壳拦下后经 `app-close-requested` 交到这里。
+   */
+  const pendingInputsRef = useRef(0);
+  pendingInputsRef.current = pendingInputCount(conversations.opened.values());
+  useEffect(() => {
+    if (host.onCloseRequested === undefined) return;
+    return host.onCloseRequested(() => {
+      if (pendingInputsRef.current === 0) {
+        void host.quitApp?.();
+        return;
+      }
+      setQuitPrompt(pendingInputsRef.current);
+    });
+  }, [host]);
   /**
    * 会话事件 → 通知判定：只对本次运行实时到达的事件（live）判，重放与恢复不算；
    * 在看（窗口有焦点且正显示该会话）时不提醒。留痕另算，与通知开关无关。
@@ -771,16 +791,45 @@ export function App({ host }: { host: DesktopHost }) {
   // 发送消息：接受成功后登记附件缩略图源（以 sha256 命中消息流里的图片）
   const submitInput = async (
     input: ComposerSubmit,
+    mode?: "steer" | "queue",
     create?: CreateSessionChoice,
   ): Promise<boolean> => {
     // 先登记附件字节：发送被拒也只是缓存里多一条，而接受后首帧用户气泡就有缩略图
     await Promise.all(
       input.attachments.map((attachment) => images.register(attachment.data, attachment.mimeType)),
     );
-    await conversations.send(input, create);
+    // ADR-0070：Turn 运行中 Enter 插话、Alt+Enter 排队；空闲时都是普通发送
+    await conversations.submitInput(input, mode ?? "steer", create);
     setSelectedId(conversations.selectedId);
     await refresh();
     return true;
+  };
+
+  const updatePending = async (
+    id: string,
+    patch: { mode?: "steer" | "queue"; text?: string },
+  ): Promise<void> => {
+    try {
+      await conversations.updatePendingInput(id, patch);
+    } finally {
+      await refresh();
+    }
+  };
+
+  const cancelPending = async (id: string): Promise<void> => {
+    try {
+      await conversations.cancelPendingInput(id);
+    } finally {
+      await refresh();
+    }
+  };
+
+  const resumePending = async (): Promise<void> => {
+    try {
+      await conversations.resumePendingInputs();
+    } finally {
+      await refresh();
+    }
   };
 
   // 重发/编辑重发（U-01）：rewind 走会话串行锁，发送后同步会话列表
@@ -1431,10 +1480,14 @@ export function App({ host }: { host: DesktopHost }) {
                 loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
                 onViewChanges={sidePanel.viewChanges}
                 subagentLinks={sidePanel.subagentLinks}
-                onSubmit={(input) => submitInput(input)}
+                onSubmit={(input, mode) => submitInput(input, mode)}
                 onInterrupt={() => {
                   conversations.interrupt();
                 }}
+                pendingInputs={active.pendingInputs}
+                onUpdatePending={updatePending}
+                onCancelPending={cancelPending}
+                onResumePending={resumePending}
                 onSlash={runSlash}
                 pickImages={() => host.pickImages()}
                 openUrl={(url) => void host.openUrl(url)}
@@ -1594,6 +1647,39 @@ export function App({ host }: { host: DesktopHost }) {
             </div>
           </div>
         )}
+        {quitPrompt !== null && (
+          <div className="dialog-backdrop">
+            <div
+              className="desktop-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quit-title"
+            >
+              <h3 id="quit-title">还有 {quitPrompt} 条没发出</h3>
+              <p>关闭后会丢失。留在这里可以继续编辑，或等它们发出去再关。</p>
+              <div className="acts">
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setQuitPrompt(null);
+                    void host.cancelQuit?.();
+                  }}
+                >
+                  留在这里
+                </button>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    setQuitPrompt(null);
+                    void host.quitApp?.();
+                  }}
+                >
+                  仍然退出
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {lockedSession !== null && (
           <div className="dialog-backdrop">
             <div
@@ -1677,8 +1763,16 @@ interface SessionPaneProps {
   onViewChanges: (seq: number) => void;
   /** task 行的「在面板中查看」（右侧面板打开子代理标签）；没连着后台时没有 */
   subagentLinks: SubagentLinks | undefined;
-  onSubmit: (input: ComposerSubmit) => Promise<boolean>;
+  onSubmit: (input: ComposerSubmit, mode?: "steer" | "queue") => Promise<boolean>;
   onInterrupt: () => void;
+  /** 待发输入快照（ADR-0070）与它的编辑/撤回/恢复入口 */
+  pendingInputs: PendingInputsSnapshot;
+  onUpdatePending: (
+    id: string,
+    patch: { mode?: "steer" | "queue"; text?: string },
+  ) => Promise<void>;
+  onCancelPending: (id: string) => Promise<void>;
+  onResumePending: () => Promise<void>;
   onSlash: (line: string) => Promise<boolean>;
   pickImages: DesktopHost["pickImages"];
   openUrl: (url: string) => void;
@@ -1733,6 +1827,10 @@ function SessionPane({
   subagentLinks,
   onSubmit,
   onInterrupt,
+  pendingInputs,
+  onUpdatePending,
+  onCancelPending,
+  onResumePending,
   onSlash,
   pickImages,
   openUrl,
@@ -1850,6 +1948,10 @@ function SessionPane({
         running={running}
         onSubmit={onSubmit}
         onInterrupt={onInterrupt}
+        pendingInputs={pendingInputs}
+        onUpdatePending={onUpdatePending}
+        onCancelPending={onCancelPending}
+        onResumePending={onResumePending}
         historyKey={session.id}
         readInputHistory={() => session.readInputHistory()}
         fileRefs={isPlain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
@@ -1887,7 +1989,11 @@ interface DraftPaneProps {
   projects: { key: string; path: string; name: string }[];
   disabled: boolean;
   historyKey: string | null;
-  onSubmit: (input: ComposerSubmit, create: CreateSessionChoice) => Promise<boolean>;
+  onSubmit: (
+    input: ComposerSubmit,
+    mode: "steer" | "queue" | undefined,
+    create: CreateSessionChoice,
+  ) => Promise<boolean>;
   onSlash: (line: string) => Promise<boolean>;
   pickImages: DesktopHost["pickImages"];
   onSelectPlain: () => void;
@@ -1997,7 +2103,7 @@ function DraftPane({
           externalAgents={externalAgents}
           running={false}
           disabled={disabled}
-          onSubmit={(input) => onSubmit(input, draft.createOptions())}
+          onSubmit={(input, mode) => onSubmit(input, mode, draft.createOptions())}
           onInterrupt={() => undefined}
           historyKey={historyKey}
           controls={draft.controls}

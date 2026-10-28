@@ -992,6 +992,16 @@
   color: var(--a-muted);
   margin-bottom: 4px;
 }
+/* 运行中插话（ADR-0070）：用户气泡上的小标签 */
+.u-bubble .u-steer {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--a-border);
+  border-radius: 999px;
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+}
 .conversation .ask-actions {
   display: flex;
   flex-wrap: wrap;

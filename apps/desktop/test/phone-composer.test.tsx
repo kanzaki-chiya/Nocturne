@@ -287,3 +287,109 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
   });
   expect(container.querySelector("textarea")?.value).toBe("最近一条");
 });
+
+// ADR-0070：运行中输入栏可发送——发送键默认插话，旁边切换插话/排队
+it("运行中：插话/排队切换、发送键与中断键并存、待发列表操作", async () => {
+  const onSubmit = vi.fn((_input: ComposerSubmit, _mode?: "steer" | "queue") =>
+    Promise.resolve(true),
+  );
+  const onUpdate = vi.fn(() => Promise.resolve());
+  const onCancel = vi.fn(() => Promise.resolve());
+  const onResume = vi.fn(() => Promise.resolve());
+  const field = () => container.querySelector("textarea") as HTMLTextAreaElement;
+  await act(async () => {
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        controls={undefined}
+        running
+        onSubmit={onSubmit}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+        pendingInputs={{
+          items: [
+            {
+              id: "pi-1",
+              mode: "steer",
+              text: "插话一条",
+              attachments: 0,
+              createdAt: "2026-10-28T10:00:00Z",
+              paused: false,
+            },
+          ],
+          paused: true,
+        }}
+        onUpdatePending={onUpdate}
+        onCancelPending={onCancel}
+        onResumePending={onResume}
+      />,
+    );
+  });
+  // 待发列表：标签 + 说明 + 暂停提示
+  expect(container.querySelector(".pending-inputs")?.textContent).toContain("插话一条");
+  expect(container.textContent).toContain("将在当前步骤结束后送达");
+  expect(container.textContent).toContain("已暂停");
+  await act(() => button("继续发送").click());
+  expect(onResume).toHaveBeenCalledOnce();
+  // 运行中：■ 与发送键并存（有草稿时）
+  expect(container.querySelector('[aria-label="中断"]')).toBeTruthy();
+  expect(container.querySelector('[aria-label="发送"]')).toBeNull();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    setter?.call(field(), "运行中补一句");
+    field().dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click();
+    await Promise.resolve();
+  });
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "运行中补一句" }), "steer");
+  // 切到排队
+  const modeButton = (name: string) => {
+    const found = [
+      ...container.querySelectorAll<HTMLButtonElement>(".phone-send-mode button"),
+    ].find((b) => b.textContent === name);
+    if (!found) throw new Error(`缺少 ${name} 切换`);
+    return found;
+  };
+  await act(() => modeButton("排队").click());
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    setter?.call(field(), "排队这句");
+    field().dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click();
+    await Promise.resolve();
+  });
+  expect(onSubmit.mock.calls).toHaveLength(2);
+  expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ text: "排队这句" }), "queue");
+});
+
+it("空闲时发送键是普通发送，不带 mode", async () => {
+  const onSubmit = vi.fn((_input: ComposerSubmit) => Promise.resolve(true));
+  await act(async () => {
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        controls={undefined}
+        running={false}
+        onSubmit={onSubmit}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+      />,
+    );
+  });
+  const field = container.querySelector("textarea") as HTMLTextAreaElement;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    setter?.call(field, "普通发送");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    button("发送").click();
+    await Promise.resolve();
+  });
+  expect(onSubmit.mock.calls[0]).toHaveLength(1);
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "普通发送" }));
+});

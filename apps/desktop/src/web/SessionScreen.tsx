@@ -105,9 +105,27 @@ export function SessionScreen({
   }, [session, view.turnCount]);
 
   const running = busy || view.currentTurn !== undefined || view.status === "compacting";
-  const submit = async (input: ComposerSubmit): Promise<boolean> => {
+  /**
+   * 发送（ADR-0070）：Turn 运行中入列——插话在安全点并入当前 Turn，排队在
+   * done 之后开新 Turn；空闲时与普通发送相同。
+   */
+  const submit = async (
+    input: ComposerSubmit,
+    mode: "steer" | "queue" = "steer",
+  ): Promise<boolean> => {
     if (entry.dead) throw new Error("电脑尚未连接");
     if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
+    if (running || entry.pendingInputs.paused) {
+      await session.enqueueInput(mode, {
+        text: input.text,
+        ...(input.skill ? { skill: input.skill } : {}),
+        ...(input.delegate ? { delegate: input.delegate } : {}),
+        ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
+      });
+      if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
+      onChanged();
+      return true;
+    }
     setBusy(true);
     try {
       await submitAccepted(
@@ -229,6 +247,33 @@ export function SessionScreen({
         onSubmit={submit}
         onInterrupt={() => {
           session.interrupt();
+        }}
+        pendingInputs={entry.pendingInputs}
+        onUpdatePending={async (id, patch) => {
+          try {
+            await session.updateInput(id, {
+              ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+              ...(patch.text !== undefined ? { input: { text: patch.text } } : {}),
+            });
+          } finally {
+            entry.pendingInputs = await session.pendingInputs().catch(() => entry.pendingInputs);
+          }
+        }}
+        onCancelPending={async (id) => {
+          try {
+            await session.cancelInput(id);
+          } finally {
+            entry.pendingInputs = await session.pendingInputs().catch(() => entry.pendingInputs);
+          }
+        }}
+        onResumePending={async () => {
+          setBusy(true);
+          try {
+            await session.resumeInputs();
+          } finally {
+            setBusy(false);
+            entry.pendingInputs = await session.pendingInputs().catch(() => entry.pendingInputs);
+          }
         }}
         onSlash={slash}
         context={{

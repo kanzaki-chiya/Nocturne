@@ -477,6 +477,10 @@ function replayHost(
         case "session.readInputHistory":
           result = [];
           break;
+        // ADR-0070：待发输入快照（临时状态，订阅后单独取一次）
+        case "session.pendingInputs":
+          result = { items: [], paused: false };
+          break;
         case "session.setShell": {
           const kind = String(request.params.kind ?? "");
           shellState.set(id ?? "", { kind, path: `C:/tools/${kind}.exe` });

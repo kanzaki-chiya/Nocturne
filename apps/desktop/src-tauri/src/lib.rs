@@ -25,7 +25,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// 页面重载或窗口关闭时每个后台的关闭超时（与 backend_close 相同）。
 const SHUTDOWN_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -60,6 +60,53 @@ fn begin_shutdown(app: &AppHandle) {
     });
 }
 
+/// 关闭请求（ADR-0070 §6）：交给界面决定。界面有待发输入时先弹提醒，再回
+/// `app_close`（继续退出）或 `app_close_cancel`（留下）。界面不在或脚本出错时
+/// 兜底照常退出，避免关不掉窗口。
+fn request_close(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    if state.shutting_down.load(Ordering::SeqCst) {
+        return;
+    }
+    // 已经在等界面确认：重复的关闭请求不再重复弹窗
+    if state.close_prompt.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if app.emit("app-close-requested", ()).is_err() {
+        if !state.shutting_down.swap(true, Ordering::SeqCst) {
+            begin_shutdown(app);
+        }
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        // 兜底：界面一直没回话（脚本出错、webview 卡死）就照常退出
+        thread::sleep(Duration::from_secs(120));
+        let state = app.state::<Arc<AppState>>();
+        if state.close_prompt.load(Ordering::SeqCst) && !state.shutting_down.swap(true, Ordering::SeqCst)
+        {
+            begin_shutdown(&app);
+        }
+    });
+}
+
+/// 界面确认退出
+#[tauri::command]
+fn app_close(app: AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    if state.shutting_down.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    state.close_prompt.store(false, Ordering::SeqCst);
+    begin_shutdown(&app);
+}
+
+/// 界面放弃退出（有待发输入时用户选择留下）
+#[tauri::command]
+fn app_close_cancel(state: tauri::State<'_, Arc<AppState>>) {
+    state.close_prompt.store(false, Ordering::SeqCst);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 设了 WEBVIEW2_USER_DATA_FOLDER 时它会覆盖每个 WebView2 环境的数据目录，浏览器就和
@@ -78,6 +125,8 @@ pub fn run() {
         backend::backend_send,
         backend::backend_close,
         backend::backend_stderr,
+        app_close,
+        app_close_cancel,
         backend::node_probe,
         backend::plain_workspace,
         backend::shell_log,
@@ -214,10 +263,12 @@ pub fn run() {
                 api.prevent_close();
                 let state = window.state::<Arc<AppState>>();
                 // 已经在退出流程中：不重复执行，等关后台线程收尾
-                if state.shutting_down.swap(true, Ordering::SeqCst) {
+                if state.shutting_down.load(Ordering::SeqCst) {
                     return;
                 }
-                begin_shutdown(window.app_handle());
+                // ADR-0070 §6：先交给界面确认（有待发输入时提醒），界面回
+                // app_close 继续退出，或 app_close_cancel 留下
+                request_close(window.app_handle());
             }
         })
         .build(context)
@@ -225,12 +276,12 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let state = app.state::<Arc<AppState>>();
-                if state.shutting_down.swap(true, Ordering::SeqCst) {
+                if state.shutting_down.load(Ordering::SeqCst) {
                     // begin_shutdown 已经发过 app.exit：放行本次退出
                     return;
                 }
                 api.prevent_exit();
-                begin_shutdown(app);
+                request_close(app);
             }
         });
 }

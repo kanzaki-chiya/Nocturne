@@ -272,6 +272,7 @@ it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录�
     listeners: new Set(),
     turnChanges: new Map(),
     changeDiffs: new Map(),
+    pendingInputs: { items: [], paused: false },
   });
   sessions.setSelected("s");
   await sessions.connected(client);

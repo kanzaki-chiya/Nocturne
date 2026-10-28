@@ -943,3 +943,23 @@
 .phone-usage .usage-body {
   padding: 12px 16px 24px;
 }
+
+/* 运行中的发送方式（ADR-0070）：插话 / 排队 */
+.phone-send-mode {
+  display: flex;
+  gap: 6px;
+  margin: 0 2px 6px;
+}
+.phone-send-mode button {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--a-border);
+  border-radius: 999px;
+  background: var(--a-panel);
+  color: var(--a-dim);
+  font: inherit;
+}
+.phone-send-mode button.on {
+  border-color: var(--a-accent);
+  color: var(--a-accent);
+}

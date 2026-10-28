@@ -1292,6 +1292,11 @@ function UserMessage({
               {scheduleSource?.preface !== undefined && (
                 <span className="sched-pre">{scheduleSource.preface}</span>
               )}
+              {entry.steer === true && (
+                <span className="u-steer" title="运行中插话：已在当时的步骤结束后送达">
+                  插话
+                </span>
+              )}
               {(entry.attachments ?? []).map((attachment, index) => (
                 <UserImage
                   key={`${attachment.file}:${attachment.sha256}:${index}`}

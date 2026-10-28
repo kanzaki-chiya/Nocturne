@@ -16,6 +16,7 @@ import {
   parseFileRefs,
   type ImageMimeType,
   type ExternalAgentOverview,
+  type PendingInputsSnapshot,
   type SkillOverview,
   type SkillInvocation,
   type TodoItem,
@@ -37,6 +38,7 @@ import {
   type PickedImage,
 } from "./picked-images";
 import "./composer.css";
+import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
 
@@ -115,9 +117,21 @@ export interface ComposerProps {
   externalAgents?: readonly ExternalAgentOverview[];
   running: boolean;
   disabled?: boolean;
-  /** false 表示未接收；resolve 表示已接收（草稿与附件才可清空） */
-  onSubmit: (input: ComposerSubmit) => boolean | Promise<boolean>;
+  /**
+   * false 表示未接收；resolve 表示已接收（草稿与附件才可清空）。
+   * mode：Turn 运行中提交时为 steer（插话）或 queue（排队），空闲时为 undefined。
+   */
+  onSubmit: (input: ComposerSubmit, mode?: "steer" | "queue") => boolean | Promise<boolean>;
   onInterrupt: () => void | Promise<void>;
+  /** 待发输入快照（ADR-0070）；默认空列表 */
+  pendingInputs?: PendingInputsSnapshot | undefined;
+  /** 编辑/切换插话排队 */
+  onUpdatePending?:
+    ((id: string, patch: { mode?: "steer" | "queue"; text?: string }) => Promise<void>) | undefined;
+  /** 撤回一条待发输入 */
+  onCancelPending?: ((id: string) => Promise<void>) | undefined;
+  /** 解除暂停：「继续发送」 */
+  onResumePending?: (() => Promise<void>) | undefined;
   /**
    * draft（空状态）：卡片 + 下方 tray（目录/预设/提示）；模型/档位 chip 在卡内工具栏。
    * session：同一卡片，文字区在上、工具行左 ＋ 右发送/中断；无 tray、无 chip，切换都在底部状态栏。
@@ -247,6 +261,10 @@ export function Composer({
   disabled = false,
   onSubmit,
   onInterrupt,
+  pendingInputs,
+  onUpdatePending,
+  onCancelPending,
+  onResumePending,
   variant = "draft",
   historyKey,
   readInputHistory,
@@ -584,9 +602,10 @@ export function Composer({
   };
 
   // ── 发送 / 命令 ──
-  const submit = async () => {
+  const submit = async (mode?: "steer" | "queue") => {
     const text = draftRef.current;
-    if (disabled || running || submittingRef.current || composingRef.current) return;
+    // Turn 运行中也允许发送（ADR-0070）：mode 由 Enter / Alt+Enter 决定
+    if (disabled || submittingRef.current || composingRef.current) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     const submittedRevision = revision.current;
     const parsed = parseSlash(text, variant, skills, externalAgents);
@@ -612,7 +631,7 @@ export function Composer({
     setSubmitting(true);
     setError(null);
     try {
-      const accepted = await onSubmit(payload);
+      const accepted = mode === undefined ? await onSubmit(payload) : await onSubmit(payload, mode);
       if (!accepted) return;
       historyIndex.current = null;
       for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
@@ -742,6 +761,25 @@ export function Composer({
         return;
       }
     }
+    // Alt+Enter（ADR-0070）：运行中提交排队；空闲时与 Enter 相同
+    if (
+      event.key === "Enter" &&
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey
+    ) {
+      const line = draftRef.current;
+      const parsed = parseSlash(line, variant, skills, externalAgents);
+      if (parsed?.kind === "command") {
+        event.preventDefault();
+        void runSlash(line);
+        return;
+      }
+      event.preventDefault();
+      void submit(running ? "queue" : undefined);
+      return;
+    }
     if (event.key === "Enter" && plain) {
       event.preventDefault();
       const line = draftRef.current;
@@ -751,7 +789,7 @@ export function Composer({
         return;
       }
       if (parsed?.kind === "skill" || parsed?.kind === "agent") {
-        void submit();
+        void submit(running ? "steer" : undefined);
         return;
       }
       if (popup !== null && flatRows.length > 0) {
@@ -764,7 +802,7 @@ export function Composer({
         setEnterHint(parsed.hint);
         return;
       }
-      void submit();
+      void submit(running ? "steer" : undefined);
       return;
     }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -922,7 +960,7 @@ export function Composer({
     [composing, draft, variant, skills, externalAgents],
   );
   const slashHint = parsedSlash?.kind === "redirect" ? parsedSlash.hint : enterHint;
-  const canSend = !running && (draft.trim() !== "" || attachments.length > 0);
+  const canSend = draft.trim() !== "" || attachments.length > 0;
   // draft：能力提示落在 tray；session：无 tray，显示在卡片上方气泡。
   // 不再常驻 Enter/Shift+Enter 按键说明（聊天输入框的惯例）
   const hint = isSession ? null : (vision ?? null);
@@ -990,32 +1028,38 @@ export function Composer({
     </button>
   );
 
-  const sendButton = running ? (
-    <button
-      type="button"
-      className="send stop"
-      disabled={interrupting}
-      aria-label="中断"
-      title="中断（Esc）"
-      onClick={() => {
-        void interrupt();
-      }}
-    >
-      ■
-    </button>
-  ) : (
-    <button
-      type="button"
-      className={`send${canSend ? "" : " off"}`}
-      disabled={disabled || submitting || composing || !canSend}
-      aria-label="发送"
-      title="发送（Enter）"
-      onClick={() => {
-        void submit();
-      }}
-    >
-      ↑
-    </button>
+  // 运行中保留中断键 ■，输入非空时旁边再出现发送键：Enter 插话，Alt+Enter 排队
+  const sendButton = (
+    <>
+      {running && (
+        <button
+          type="button"
+          className="send stop"
+          disabled={interrupting}
+          aria-label="中断"
+          title="中断（Esc）"
+          onClick={() => {
+            void interrupt();
+          }}
+        >
+          ■
+        </button>
+      )}
+      {(running ? canSend : true) && (
+        <button
+          type="button"
+          className={`send${canSend ? "" : " off"}`}
+          disabled={disabled || submitting || composing || !canSend}
+          aria-label="发送"
+          title={running ? "插话（Enter），排队（Alt+Enter）" : "发送（Enter）"}
+          onClick={() => {
+            void submit(running ? "steer" : undefined);
+          }}
+        >
+          ↑
+        </button>
+      )}
+    </>
   );
 
   const defaultPlaceholder = "输入消息，@ 引用文件";
@@ -1035,7 +1079,9 @@ export function Composer({
         ref={textarea}
         rows={1}
         value={draft}
-        placeholder={placeholder ?? (running ? "继续输入，Esc 中断" : defaultPlaceholder)}
+        placeholder={
+          placeholder ?? (running ? "运行中，Enter 插话，Alt+Enter 排队" : defaultPlaceholder)
+        }
         aria-autocomplete="list"
         aria-controls={popup !== null ? listId : undefined}
         aria-activedescendant={popup !== null ? `${listId}-${activeIndex}` : undefined}
@@ -1152,6 +1198,15 @@ export function Composer({
           </div>
         )}
         {isSession && <TodoPanel items={todos} prefs={prefs} />}
+        {isSession && pendingInputs !== undefined && pendingInputs.items.length > 0 && (
+          <PendingInputs
+            snapshot={pendingInputs}
+            disabled={disabled}
+            onUpdate={onUpdatePending ?? (() => Promise.resolve())}
+            onCancel={onCancelPending ?? (() => Promise.resolve())}
+            onResume={onResumePending ?? (() => Promise.resolve())}
+          />
+        )}
         <div
           className={`cbox${dragOver ? " drop" : ""}`}
           onDragOver={(event) => {

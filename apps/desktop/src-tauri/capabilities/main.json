@@ -5,6 +5,8 @@
   "webviews": ["main"],
   "permissions": [
     "allow-app-note",
+    "allow-app-close",
+    "allow-app-close-cancel",
     "allow-backend-open",
     "allow-backend-send",
     "allow-backend-close",

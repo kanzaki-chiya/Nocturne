@@ -1,6 +1,7 @@
 import {
   createSessionView,
   type ModelRef,
+  type PendingInputsSnapshot,
   type ReasoningEffort,
   type RewindMode,
   type RuntimeEvent,
@@ -40,6 +41,11 @@ export interface OpenConversation {
   replaying?: boolean;
   turnChanges: Map<number, TurnChanges>;
   changeDiffs: Map<string, Promise<TurnChangeDiff>>;
+  /**
+   * 待发输入快照（ADR-0070）：运行中插话与排队。临时状态、不写日志，所以在
+   * 订阅后单独取一次 `session.pendingInputs()` 对齐，之后随 `input.pending` 更新。
+   */
+  pendingInputs: PendingInputsSnapshot;
   tracker?: SessionViewTracker;
   /**
    * 所在后台已退出（崩溃或被强杀）：会话保留在 opened 里等「重启后台」恢复，
@@ -64,6 +70,13 @@ export function conversationStatus(entry: Pick<OpenConversation, "view" | "busy"
 export function activeConversationCount(entries: Iterable<OpenConversation>): number {
   let count = 0;
   for (const entry of entries) if (conversationStatus(entry) !== "idle") count += 1;
+  return count;
+}
+
+/** 全部打开会话里还没发出的待发输入条数（退出前的提醒用，ADR-0070 §6） */
+export function pendingInputCount(entries: Iterable<OpenConversation>): number {
+  let count = 0;
+  for (const entry of entries) count += entry.pendingInputs.items.length;
   return count;
 }
 
@@ -184,6 +197,7 @@ export class Conversations {
       replaying: true,
       turnChanges: new Map(),
       changeDiffs: new Map(),
+      pendingInputs: { items: [], paused: false },
       listeners: new Set(),
     };
     this.opened.set(entry.session.id, entry);
@@ -209,6 +223,8 @@ export class Conversations {
       entry.tracker = await trackSessionView(
         entry.session,
         (_view, event) => {
+          // 待发输入的完整快照：临时事件不回放，订阅后另有一次性对齐
+          if (event.type === "input.pending") entry.pendingInputs = event.payload;
           if (entry.replaying !== true) {
             for (const listener of entry.listeners) listener();
             this.changed();
@@ -225,6 +241,18 @@ export class Conversations {
       );
       subscribed = true;
       entry.replaying = false;
+      // 待发输入是临时状态：订阅后单独取一次当前快照（与事件同形的整份快照，
+      // 后到的覆盖先到的，天然幂等）。不挡打开，取回后再通知一次
+      void Promise.resolve()
+        .then(() => entry.session.pendingInputs())
+        .then((snapshot) => {
+          // 空列表与打开时的初值一致，不必再触发一次通知（回放结束时只通知一次）
+          if (entry.dead === true || snapshot.items.length === 0) return;
+          entry.pendingInputs = snapshot;
+          for (const listener of entry.listeners) listener();
+          this.changed();
+        })
+        .catch(() => undefined);
       for (const listener of entry.listeners) listener();
       this.changed();
       await this.refreshTurnChanges(entry);
@@ -467,6 +495,92 @@ export class Conversations {
   }
 
   /**
+   * 发送一条输入（ADR-0070）：空闲时走普通 `send`，Turn 进行中则入列——插话在
+   * 安全点并入当前 Turn，排队在 done 之后开新 Turn。接受后返回 true，输入框
+   * 据此清空草稿；拒绝时抛出（草稿保留）。
+   */
+  async submitInput(
+    input: ComposerSubmit,
+    mode: "steer" | "queue" = "steer",
+    create?: CreateSessionChoice,
+  ): Promise<boolean> {
+    const entry = this.selected;
+    if (
+      entry === undefined ||
+      entry.dead === true ||
+      (conversationStatus(entry) === "idle" && !entry.pendingInputs.paused)
+    ) {
+      await this.send(input, create);
+      return true;
+    }
+    if (input.text !== "") await entry.session.recordInputHistory(input.text);
+    await entry.session.enqueueInput(mode, {
+      text: input.text,
+      ...(input.skill ? { skill: input.skill } : {}),
+      ...(input.delegate ? { delegate: input.delegate } : {}),
+      attachments: input.attachments,
+    });
+    return true;
+  }
+
+  /** 编辑待发输入（只换文本，或切换插话/排队）；已发出时提示并刷新快照 */
+  async updatePendingInput(
+    id: string,
+    patch: { mode?: "steer" | "queue"; text?: string },
+  ): Promise<void> {
+    const entry = this.selected;
+    if (entry === undefined) throw new Error("请先打开会话");
+    const input = patch.text !== undefined ? { text: patch.text } : undefined;
+    try {
+      await entry.session.updateInput(id, {
+        ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+        ...(input !== undefined ? { input } : {}),
+      });
+    } catch (error) {
+      // 条目已被 Turn 的安全点取走：快照会随事件更新，这里只把原因交给界面
+      await this.refreshPendingInputs(entry);
+      throw error;
+    }
+  }
+
+  /** 撤回待发输入；已发出时提示并刷新快照 */
+  async cancelPendingInput(id: string): Promise<void> {
+    const entry = this.selected;
+    if (entry === undefined) throw new Error("请先打开会话");
+    try {
+      await entry.session.cancelInput(id);
+    } catch (error) {
+      await this.refreshPendingInputs(entry);
+      throw error;
+    }
+  }
+
+  /** 解除暂停（ADR-0070 §4）：空闲时由后台立即发出队首 */
+  async resumePendingInputs(): Promise<void> {
+    const entry = this.selected;
+    if (entry === undefined) throw new Error("请先打开会话");
+    entry.busy = true;
+    this.changed();
+    try {
+      await entry.session.resumeInputs();
+    } finally {
+      entry.busy = false;
+      this.changed();
+      await this.refreshPendingInputs(entry);
+    }
+  }
+
+  private async refreshPendingInputs(entry: OpenConversation): Promise<void> {
+    if (entry.dead === true) return;
+    try {
+      entry.pendingInputs = await entry.session.pendingInputs();
+    } catch {
+      return;
+    }
+    this.changed();
+  }
+
+  /**
    * 重新启用后回到会话（ADR-0054 §4）：已打开的会话直接回到对话，未打开的
    * 仍留在「换模型」卡片，由用户选模型重新打开。
    */
@@ -599,6 +713,8 @@ export class Conversations {
       this.agentSessions.has(entry.session.id) ||
       entry.dead === true ||
       conversationStatus(entry) !== "idle" ||
+      // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
+      entry.pendingInputs.items.length > 0 ||
       this.opened.get(entry.session.id) !== entry
     )
       return;

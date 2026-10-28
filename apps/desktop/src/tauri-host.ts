@@ -133,6 +133,27 @@ export function createTauriHost(): DesktopHost {
       };
     },
     relaunch: () => tauriRelaunch(),
+    // 关闭请求（ADR-0070 §6）：外壳拦住关闭并问界面；有待发输入时界面先提醒
+    onCloseRequested(handler) {
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      void listen("app-close-requested", () => {
+        handler();
+      }).then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      });
+      return () => {
+        disposed = true;
+        unlisten?.();
+      };
+    },
+    quitApp: async () => {
+      await invoke("app_close");
+    },
+    cancelQuit: async () => {
+      await invoke("app_close_cancel");
+    },
     note(line) {
       void invoke("app_note", { line }).catch(() => undefined);
     },

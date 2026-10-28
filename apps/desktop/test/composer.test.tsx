@@ -174,13 +174,33 @@ describe("Composer 文本与历史", () => {
     });
   });
 
-  it("运行中按钮和 Esc 中断，原文保留；合成输入时 Esc 不中断", async () => {
+  it("运行中 Enter 插话、Alt+Enter 排队，■ 与发送键并存；Esc 中断", async () => {
     const onInterrupt = vi.fn();
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn(async () => true);
     render(<Composer {...props({ running: true, onInterrupt, onSubmit })} />);
     const field = input("下一条草稿");
+    // ADR-0070：运行中 Enter = 插话
     fireEvent.keyDown(field, { key: "Enter" });
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenLastCalledWith({ text: "下一条草稿", attachments: [] }, "steer");
+    await waitFor(() => {
+      expect(field.value).toBe("");
+    });
+    // Alt+Enter = 排队
+    fireEvent.change(field, { target: { value: "排队这条" } });
+    fireEvent.keyDown(field, { key: "Enter", altKey: true });
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenLastCalledWith({ text: "排队这条", attachments: [] }, "queue");
+    await waitFor(() => {
+      expect(field.value).toBe("");
+    });
+    // ■ 与发送键并存；没输入时只有 ■
+    expect(screen.getByRole("button", { name: "中断" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
+    fireEvent.change(field, { target: { value: "又一条" } });
+    expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     fireEvent.keyDown(field, { key: "Escape", isComposing: true });
     expect(onInterrupt).not.toHaveBeenCalled();
     fireEvent.keyDown(field, { key: "Escape" });
@@ -192,10 +212,34 @@ describe("Composer 文本与历史", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "中断" }));
     expect(onInterrupt).toHaveBeenCalledTimes(2);
-    expect(field.value).toBe("下一条草稿");
+    expect(field.value).toBe("又一条");
     await act(async () => {
       await Promise.resolve();
     });
+  });
+
+  it("空闲时 Alt+Enter 与 Enter 一样是普通发送，且不带 mode", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(<Composer {...props({ onSubmit })} />);
+    const field = input("普通发送");
+    fireEvent.keyDown(field, { key: "Enter", altKey: true });
+    expect(onSubmit).toHaveBeenCalledWith({ text: "普通发送", attachments: [] });
+    await waitFor(() => {
+      expect(field.value).toBe("");
+    });
+  });
+
+  it("组字中的 Enter 与 Alt+Enter 都不提交", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(<Composer {...props({ running: true, onSubmit })} />);
+    const field = input("组字");
+    fireEvent.keyDown(field, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(field, { key: "Enter", altKey: true, isComposing: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.compositionStart(field);
+    fireEvent.keyDown(field, { key: "Enter", altKey: true, isComposing: false });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(field);
   });
 
   it("输入框外 Esc 也可中断，而空闲 Esc 仅关闭弹层", async () => {
@@ -562,7 +606,7 @@ describe("Composer 控件与附件", () => {
     expect(document.querySelector(".atts .thumb2 img")).not.toBeNull();
   });
 
-  it("session 运行中：下层工具行右侧为 ■，点击中断且保留上层草稿", async () => {
+  it("session 运行中：下层工具行右侧为 ■ 与发送键，点击中断且保留上层草稿", async () => {
     const onInterrupt = vi.fn();
     const { container } = render(
       <Composer {...props({ variant: "session", running: true, onInterrupt })} />,
@@ -573,17 +617,20 @@ describe("Composer 控件与附件", () => {
     const toolbar = card?.querySelector(".tb");
     const plus = screen.getByRole("button", { name: "添加图片或引用文件" });
     const stop = screen.getByRole<HTMLButtonElement>("button", { name: "中断" });
-    expect(field.placeholder).toBe("继续输入，Esc 中断");
+    const send = screen.getByRole<HTMLButtonElement>("button", { name: "发送" });
+    expect(field.placeholder).toBe("运行中，Enter 插话，Alt+Enter 排队");
     expect(Array.from(card?.children ?? [])).toEqual([text, toolbar]);
     expect(text?.contains(field)).toBe(true);
+    // ADR-0070：运行中输入非空时 ■ 与发送键并存
     expect(Array.from(toolbar?.children ?? [])).toEqual([
       plus,
       toolbar?.querySelector(".sp"),
       stop,
+      send,
     ]);
     expect(stop.className).toBe("send stop");
     expect(stop.textContent).toBe("■");
-    expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
+    expect(send.disabled).toBe(false);
     expect(container.querySelector(".chip")).toBeNull();
     expect(container.querySelector(".tray")).toBeNull();
     fireEvent.click(stop);

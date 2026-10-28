@@ -1,0 +1,110 @@
+/* 待发输入列表（ADR-0070 §6）：输入框上方，逐条一行 */
+.pending-inputs {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
+  font-size: 12px;
+}
+
+.pi-paused {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 4px;
+  color: var(--a-warn, #b26a00);
+}
+
+.pi-row {
+  display: grid;
+  gap: 2px;
+}
+
+.pi-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pi-mode {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--a-border);
+  color: var(--a-dim);
+  line-height: 18px;
+}
+
+.pi-queue .pi-mode {
+  border-color: var(--a-accent);
+  color: var(--a-accent);
+}
+
+.pi-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--a-fg);
+}
+
+.pi-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--a-accent);
+  border-radius: 4px;
+  background: var(--a-bg);
+  color: var(--a-fg);
+  font: inherit;
+}
+
+.pi-atts {
+  flex: none;
+  color: var(--a-dim);
+}
+
+.pi-acts {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+
+.pi-btn {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--a-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pi-btn:hover:not(:disabled) {
+  border-color: var(--a-border);
+  color: var(--a-fg);
+}
+
+.pi-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pi-x {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pi-note {
+  padding-left: 2px;
+  color: var(--a-dim);
+}
+
+.pi-error {
+  color: var(--a-danger, #b3261e);
+}

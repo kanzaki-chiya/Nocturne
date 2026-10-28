@@ -146,6 +146,15 @@ function fixture(
           result = { data: "AQID", mimeType: "image/png", bytes: 3 };
         }
         if (request.method === "session.close") opened.delete(id);
+        // ADR-0070：待发输入
+        if (request.method === "session.pendingInputs") result = { items: [], paused: false };
+        if (request.method === "session.enqueueInput") result = { id: "pi-1", queued: true };
+        if (
+          request.method === "session.updateInput" ||
+          request.method === "session.cancelInput" ||
+          request.method === "session.resumeInputs"
+        )
+          result = null;
         if (request.method === "session.submit") {
           if (rejectSubmit) {
             serverEnd.send(
@@ -397,6 +406,60 @@ describe("desktop conversation lifecycle", () => {
     expect(f.calls.filter((call) => call.method === "session.submit")).toHaveLength(2);
     expect(f.calls.filter((call) => call.method === "runtime.createSession")).toHaveLength(1);
     f.complete(id);
+  });
+
+  it("运行中插话与排队走 enqueueInput，快照随 input.pending 更新（ADR-0070）", async () => {
+    const f = fixture();
+    await f.controller.open("s1", "plain");
+    f.event("s1", "turn.started", { turnIndex: 1 });
+    await vi.waitFor(() =>
+      expect(conversationStatus(f.controller.selected as never)).not.toBe("idle"),
+    );
+    await f.controller.submitInput({ text: "插话一条", attachments: [] }, "steer");
+    expect(f.calls.find((call) => call.method === "session.enqueueInput")?.params).toMatchObject({
+      text: "插话一条",
+      mode: "steer",
+    });
+    // 空闲时仍走普通 submit
+    f.event("s1", "turn.completed", {
+      reason: "done",
+      steps: 1,
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    await vi.waitFor(() => expect(f.controller.selected?.busy).toBe(false));
+    expect(f.calls.filter((call) => call.method === "session.enqueueInput")).toHaveLength(1);
+
+    // 快照：整份覆盖
+    f.emitEphemeral("s1", "input.pending", {
+      items: [
+        {
+          id: "pi-1",
+          mode: "steer",
+          text: "插话一条",
+          attachments: 0,
+          createdAt: "2026-01-01T00:00:00Z",
+          paused: false,
+        },
+      ],
+      paused: false,
+    });
+    await vi.waitFor(() => expect(f.controller.selected?.pendingInputs.items).toHaveLength(1));
+
+    // 有待发输入时切走也不关会话（这些输入不能无声丢掉）
+    await f.controller.open("s2", "plain");
+    expect(f.opened.has("s1")).toBe(true);
+    await f.controller.open("s1", "plain");
+
+    await f.controller.updatePendingInput("pi-1", { text: "改成绿色" });
+    expect(f.calls.find((call) => call.method === "session.updateInput")?.params).toMatchObject({
+      sessionId: "s1",
+      id: "pi-1",
+      text: "改成绿色",
+    });
+    await f.controller.cancelPendingInput("pi-1");
+    expect(f.calls.some((call) => call.method === "session.cancelInput")).toBe(true);
+    await f.controller.resumePendingInputs();
+    expect(f.calls.some((call) => call.method === "session.resumeInputs")).toBe(true);
   });
 
   it("不同项目的会话在同一个后台打开；切走的空闲会话释放锁", async () => {

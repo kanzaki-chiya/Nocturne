@@ -286,6 +286,8 @@ pub struct AppState {
     job_error: Mutex<Option<String>>,
     /// 退出流程进行中：拦截到的第二次关闭请求直接放行判断用
     pub shutting_down: AtomicBool,
+    /// 已把关闭请求交给界面确认（ADR-0070 §6）：等 app_close / app_close_cancel
+    pub close_prompt: AtomicBool,
 }
 
 impl AppState {
@@ -304,6 +306,7 @@ impl AppState {
             #[cfg(windows)]
             job_error: Mutex::new(None),
             shutting_down: AtomicBool::new(false),
+            close_prompt: AtomicBool::new(false),
         }
     }
 

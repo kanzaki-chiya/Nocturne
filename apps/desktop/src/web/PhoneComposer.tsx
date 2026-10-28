@@ -1,11 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type { ExternalAgentOverview, SkillOverview } from "@nocturne/core/protocol";
+import type {
+  ExternalAgentOverview,
+  PendingInputsSnapshot,
+  SkillOverview,
+} from "@nocturne/core/protocol";
 import type { ContextSummary } from "@nocturne/rpc/client";
 
 import { completeSlash, parseSlash, type ParsedSlash } from "../commands";
 import type { ChoiceControl, ComposerControls, ComposerSubmit, FileRefSource } from "../Composer";
 import { ContextPanel, percent } from "../context-panel";
+import { PendingInputs } from "../PendingInputs";
 import { useSessionRefresh } from "../use-session-refresh";
 import {
   completeFileRefs,
@@ -78,8 +83,18 @@ export interface PhoneComposerProps {
   placeholder?: string;
   skills?: readonly SkillOverview[];
   externalAgents?: readonly ExternalAgentOverview[];
-  onSubmit: (input: ComposerSubmit) => Promise<boolean>;
+  /**
+   * 发送（ADR-0070）：Turn 运行中第二参数为 steer（插话）或 queue（排队），
+   * 空闲时不传。
+   */
+  onSubmit: (input: ComposerSubmit, mode?: "steer" | "queue") => Promise<boolean>;
   onInterrupt: () => void;
+  /** 待发输入快照（ADR-0070）；缺省不显示待发列表 */
+  pendingInputs?: PendingInputsSnapshot | undefined;
+  onUpdatePending?:
+    ((id: string, patch: { mode?: "steer" | "queue"; text?: string }) => Promise<void>) | undefined;
+  onCancelPending?: ((id: string) => Promise<void>) | undefined;
+  onResumePending?: (() => Promise<void>) | undefined;
   /** /compact、/mcp：返回字符串时在浮层里显示（/mcp 状态） */
   onSlash: (line: string) => Promise<string | boolean>;
   context?: PhoneContextSource | undefined;
@@ -115,6 +130,10 @@ export function PhoneComposer({
   externalAgents = [],
   onSubmit,
   onInterrupt,
+  pendingInputs,
+  onUpdatePending,
+  onCancelPending,
+  onResumePending,
   onSlash,
   context,
   grantsFooter,
@@ -131,6 +150,8 @@ export function PhoneComposer({
   const [error, setError] = useState<string>();
   const [hint, setHint] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  /** 运行中发送的方式（ADR-0070）：默认插话，可切成排队 */
+  const [mode, setMode] = useState<"steer" | "queue">("steer");
   const [dismissed, setDismissed] = useState(false);
   const [summary, setSummary] = useState<ContextSummary>();
   const [contextError, setContextError] = useState<string>();
@@ -350,7 +371,7 @@ export function PhoneComposer({
 
   const submit = async () => {
     const text = draft;
-    if (disabled !== undefined || running || submitting || processing > 0) return;
+    if (disabled !== undefined || submitting || processing > 0) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     if (tooLarge) return;
     const slash = parseSlash(text, variant, skills, externalAgents);
@@ -371,7 +392,7 @@ export function PhoneComposer({
         if (mounted.current) update("");
         return;
       }
-      const accepted = await onSubmit({
+      const payload = {
         text,
         ...(slash?.kind === "skill" ? { skill: slash.invocation } : {}),
         ...(slash?.kind === "agent" ? { delegate: slash.delegate } : {}),
@@ -380,7 +401,8 @@ export function PhoneComposer({
           mimeType: attachment.mimeType,
           label: attachment.name,
         })),
-      });
+      };
+      const accepted = running ? await onSubmit(payload, mode) : await onSubmit(payload);
       if (accepted && mounted.current) {
         update("");
         for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
@@ -480,7 +502,6 @@ export function PhoneComposer({
     control === undefined ? "正在读取…" : control.disabled;
   const canSend =
     disabled === undefined &&
-    !running &&
     (draft.trim() !== "" || attachments.length > 0) &&
     !submitting &&
     processing === 0 &&
@@ -488,6 +509,41 @@ export function PhoneComposer({
 
   return (
     <div className="phone-composer">
+      {pendingInputs !== undefined && pendingInputs.items.length > 0 && (
+        <PendingInputs
+          snapshot={pendingInputs}
+          disabled={disabled !== undefined}
+          onUpdate={onUpdatePending ?? (() => Promise.resolve())}
+          onCancel={onCancelPending ?? (() => Promise.resolve())}
+          onResume={onResumePending ?? (() => Promise.resolve())}
+        />
+      )}
+      {running && (
+        <div className="phone-send-mode" role="group" aria-label="运行中的发送方式">
+          <button
+            type="button"
+            className={mode === "steer" ? "on" : ""}
+            aria-pressed={mode === "steer"}
+            title="当前步骤结束后送达"
+            onClick={() => {
+              setMode("steer");
+            }}
+          >
+            插话
+          </button>
+          <button
+            type="button"
+            className={mode === "queue" ? "on" : ""}
+            aria-pressed={mode === "queue"}
+            title="这一轮结束后再发"
+            onClick={() => {
+              setMode("queue");
+            }}
+          >
+            排队
+          </button>
+        </div>
+      )}
       {(hint ?? redirect) !== undefined && (
         <div className="phone-composer-hint" role="status">
           {hint ?? redirect}
@@ -591,9 +647,7 @@ export function PhoneComposer({
           aria-label="消息"
           rows={1}
           value={draft}
-          placeholder={
-            placeholder ?? (running ? "正在运行，可点右侧按钮中断" : "输入消息，/ 查看命令")
-          }
+          placeholder={placeholder ?? (running ? "运行中，可插话或排队" : "输入消息，/ 查看命令")}
           onChange={(event) => {
             update(event.target.value, event.target.selectionStart);
           }}
@@ -616,15 +670,31 @@ export function PhoneComposer({
           }}
         />
         {running ? (
-          <button
-            type="button"
-            className="phone-send stop"
-            aria-label="中断"
-            disabled={disabled !== undefined}
-            onClick={onInterrupt}
-          >
-            <IconStop />
-          </button>
+          <>
+            <button
+              type="button"
+              className="phone-send stop"
+              aria-label="中断"
+              disabled={disabled !== undefined}
+              onClick={onInterrupt}
+            >
+              <IconStop />
+            </button>
+            {canSend && (
+              <button
+                type="button"
+                className="phone-send"
+                aria-label="发送"
+                title={mode === "steer" ? "插话：当前步骤结束后送达" : "排队：这一轮结束后再发"}
+                disabled={!canSend}
+                onClick={() => {
+                  void submit();
+                }}
+              >
+                <IconSend />
+              </button>
+            )}
+          </>
         ) : (
           <button
             type="button"
