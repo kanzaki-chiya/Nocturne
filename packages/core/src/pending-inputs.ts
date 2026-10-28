@@ -90,18 +90,17 @@ export class PendingInputs {
     return taken.map((entry) => entry.input);
   }
 
-  /** Turn 以 done 结束后取队首的一条排队输入；被暂停的条目不算 */
+  /** 没有 Turn 可接收插话时，所有未暂停条目按提交顺序作为新 Turn 发出 */
   takeQueueHead(): PreparedInput | undefined {
-    const head = this.entries.find((entry) => entry.mode === "queue" && !entry.paused);
+    const head = this.entries.find((entry) => !entry.paused);
     if (head === undefined) return undefined;
+    // 已错过当前 Turn 的插话全部转排队，避免被接续 Turn 的安全点抢先消费。
+    for (const entry of this.entries) {
+      if (!entry.paused) entry.mode = "queue";
+    }
     this.remove(head);
     this.publish();
     return head.input;
-  }
-
-  /** 有未暂停的排队输入（Turn 结束时据此决定是否继续） */
-  hasReadyQueue(): boolean {
-    return this.entries.some((entry) => entry.mode === "queue" && !entry.paused);
   }
 
   update(id: string, patch: PendingInputPatch): PendingInputOutcome {
@@ -109,7 +108,11 @@ export class PendingInputs {
     if (entry === undefined) return "consumed";
     if (patch.mode !== undefined) entry.mode = patch.mode;
     if (patch.input?.text !== undefined) {
-      entry.input.content = [{ type: "text", text: patch.input.text }];
+      const text = { type: "text" as const, text: patch.input.text };
+      const firstText = entry.input.content.findIndex((block) => block.type === "text");
+      const content: ContentBlock[] = entry.input.content.filter((block) => block.type !== "text");
+      content.splice(firstText < 0 ? 0 : firstText, 0, text);
+      entry.input.content = content;
     }
     this.publish();
     return "ok";

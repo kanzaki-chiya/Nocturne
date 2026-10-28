@@ -65,9 +65,9 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `unsubscribe` | → `null`；服务端停止推送 |
 | `submit` | `{ text?, content?, attachments?, skill?, delegate? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
 | `enqueueInput` | `{ mode: "steer" \| "queue", text?, content?, attachments?, skill?, delegate? }` → `{ id, queued }`（ADR-0070）。Turn 进行中入列、立刻返回 `queued: true`；空闲时等同 `submit`、请求同样挂到 Turn 结束并返回 `queued: false`（`id` 只是对齐标记）；暂停中提交追加到队尾并恢复。子会话报 `invalid_command` |
-| `updateInput` | `{ id, mode?, text? }` → `null`；条目已被消费报 `input_consumed`。只替换文本，附件、`@` 引用与技能快照随原提交保留 |
+| `updateInput` | `{ id, mode?, text? }` → `null`；条目已被消费报 `input_consumed`。只替换用户正文的文本，非文本块及附件、`@` 引用、技能与委派快照随原提交保留；要换附件或引用须撤回后重发。空闲时未暂停条目（包括插话）按提交顺序发出 |
 | `cancelInput` | `{ id }` → `null`；条目已被消费报 `input_consumed` |
-| `resumeInputs` | → `null`；解除暂停，空闲时立即发出队首（请求挂到该 Turn 结束），忙时交给 Turn 的结束边界 |
+| `resumeInputs` | → `null`；解除暂停，空闲时立即发出队首（包括插话，请求挂到接续 Turn 结束），忙时交给安全点或 Turn 的结束边界 |
 | `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |

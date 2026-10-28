@@ -5,7 +5,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createRuntime,
@@ -14,12 +14,16 @@ import {
   type SubmitInput,
 } from "../src/index.js";
 import { createPlatform } from "../src/platform/index.js";
+import type { FileSystem } from "../src/platform/fs.js";
+import { PendingInputs } from "../src/pending-inputs.js";
 import { FakeProvider, type FakeScript, type ModelRequest } from "../src/provider/index.js";
 import type { RuntimeEvent } from "../src/protocol/index.js";
 import { createSessionStore } from "../src/session/index.js";
+import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of tmpRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -58,6 +62,21 @@ const textScript = (text: string): FakeScript => [
   { type: "text_delta", text },
   { type: "finish", reason: "stop" },
 ];
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function expectSentOnce(session: RuntimeSession, events: RuntimeEvent[], texts: string[]) {
+  const users = events.filter((event) => event.type === "message.user");
+  expect(users.map((event) => messageText(event.payload))).toEqual(texts);
+  expect(users.every((event) => event.payload.steer !== true)).toBe(true);
+  expect(session.pendingInputs()).toEqual({ items: [], paused: false });
+}
 
 /** 调用 ask_user 等待回答：测试用来把 Turn 稳定停在"工具执行中" */
 const askScript: FakeScript = [
@@ -240,6 +259,37 @@ describe("ADR-0070 插话（安全点消费）", () => {
 });
 
 describe("ADR-0070 编辑与撤回", () => {
+  it("编辑多块正文保留 reasoning、@ 引用快照，且重复编辑只替换正文文本", async () => {
+    const { runtime } = await makeRuntime({ scripts: [askScript, textScript("好")] });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    const fs = createPlatform().fs;
+    await fs.writeFile(path.join(session.state().meta.cwd, "reference.txt"), "引用原始快照");
+    onQuestion(session, async () => {
+      const id = await enqueue(session, "steer", {
+        content: [
+          { type: "reasoning", text: "保留的非文本块", providerData: { signature: "saved" } },
+          { type: "text", text: "原正文 @reference.txt" },
+          { type: "text", text: "第二段正文" },
+        ],
+      });
+      await fs.writeFile(path.join(session.state().meta.cwd, "reference.txt"), "引用已经改变");
+      await session.updateInput(id, { input: { text: "第一次编辑" } });
+      await session.updateInput(id, { input: { text: "最终正文" } });
+    });
+    expect(await session.submit({ text: "开始" })).toBe("done");
+    const content = steerMessages(events)[0]?.payload.content;
+    expect(content?.slice(0, 2)).toEqual([
+      { type: "reasoning", text: "保留的非文本块", providerData: { signature: "saved" } },
+      { type: "text", text: "最终正文" },
+    ]);
+    expect(JSON.stringify(content)).toContain("引用原始快照");
+    expect(JSON.stringify(content)).not.toContain("引用已经改变");
+    expect(JSON.stringify(content)).not.toContain("第二段正文");
+    expect(session.pendingInputs().items).toHaveLength(0);
+    await session.close();
+  });
+
   it("消费前编辑生效：发出的是新内容", async () => {
     const provider = new FakeProvider({ scripts: [askScript, textScript("好")] });
     const { runtime } = await makeRuntime({ provider });
@@ -296,6 +346,103 @@ describe("ADR-0070 编辑与撤回", () => {
 });
 
 describe("ADR-0070 排队", () => {
+  it.each(["update", "resume"] as const)("空闲时 %s 会发出未暂停的残留插话", async (action) => {
+    const { runtime, provider } = await makeRuntime({
+      scripts: [textScript("好"), textScript("已发出")],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    const take = PendingInputs.prototype.takeQueueHead;
+    let add: PendingInputs["add"] | undefined;
+    vi.spyOn(PendingInputs.prototype, "takeQueueHead").mockImplementation(function (
+      this: PendingInputs,
+    ) {
+      add = this.add.bind(this);
+      return take.call(this);
+    });
+    expect(await session.submit({ text: "开始" })).toBe("done");
+    if (add === undefined) throw new Error("未捕获待发列表");
+    // 模拟没有 Turn 消费的遗留条目；通过公开命令验证空闲恢复路径。
+    const id = add("steer", { content: [{ type: "text", text: "残留插话" }], appended: [] });
+    if (action === "update") await session.updateInput(id, { mode: "steer" });
+    else await session.resumeInputs();
+    expectSentOnce(session, events, ["开始", "残留插话"]);
+    expect(provider.requests).toHaveLength(2);
+    await session.close();
+  });
+
+  it("最后安全点之后、turn.completed 日志写入期间的插话按顺序开新 Turn", async () => {
+    const { runtime } = await makeRuntime({
+      provider: new FakeProvider({ handler: () => textScript("好") }),
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    const writing = deferred();
+    const release = deferred();
+    const fs = (internalSession(session) as unknown as { fs: FileSystem }).fs;
+    const append = fs.appendFile.bind(fs);
+    let held = false;
+    vi.spyOn(fs, "appendFile").mockImplementation(async (file, data, options) => {
+      if (!held && data.includes('"type":"turn.completed"')) {
+        held = true;
+        writing.resolve();
+        await release.promise;
+      }
+      await append(file, data, options);
+    });
+    const submitting = session.submit({ text: "开始" });
+    await writing.promise;
+    await enqueue(session, "queue", { text: "先排队" });
+    await enqueue(session, "steer", { text: "错过安全点的插话" });
+    await enqueue(session, "queue", { text: "后排队" });
+    release.resolve();
+    expect(await submitting).toBe("done");
+    expectSentOnce(session, events, ["开始", "先排队", "错过安全点的插话", "后排队"]);
+    await session.close();
+  });
+
+  it.each(["steer", "queue"] as const)(
+    "队首检查已空、循环清理时提交 %s 仍发出一次",
+    async (mode) => {
+      const modelStarted = deferred();
+      const releaseModel = deferred();
+      const provider = new FakeProvider({
+        handler: async (_request, index) => {
+          if (index === 0) {
+            modelStarted.resolve();
+            await releaseModel.promise;
+          }
+          return textScript("好");
+        },
+      });
+      const { runtime } = await makeRuntime({ provider });
+      const session = await runtime.createSession({ model: "fake/fake-model" });
+      const events = collect(session);
+      const take = PendingInputs.prototype.takeQueueHead;
+      let inserted = false;
+      vi.spyOn(PendingInputs.prototype, "takeQueueHead").mockImplementation(function (
+        this: PendingInputs,
+      ) {
+        const head = take.call(this);
+        if (head === undefined && !inserted) {
+          inserted = true;
+          // 精确停在最后一次空检查之后，模拟 enqueueInput 已完成准备并入列。
+          // 同步注入避免文件引用准备的微任务时序把输入推迟到空闲直发路径。
+          this.add(mode, { content: [{ type: "text", text: "收尾窗口输入" }], appended: [] });
+        }
+        return head;
+      });
+      const submitting = session.submit({ text: "开始" });
+      await modelStarted.promise;
+      releaseModel.resolve();
+      expect(await submitting).toBe("done");
+      expect(inserted).toBe(true);
+      expectSentOnce(session, events, ["开始", "收尾窗口输入"]);
+      expect(provider.requests).toHaveLength(2);
+      await session.close();
+    },
+  );
+
   it("done 后取队首一条开新 Turn，逐条发完", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -355,6 +502,26 @@ describe("ADR-0070 排队", () => {
 });
 
 describe("ADR-0070 非 done 结束：转排队并暂停", () => {
+  it("空闲时将暂停条目改为插话再恢复，按普通消息发出且仅一次", async () => {
+    const { runtime, provider } = await makeRuntime({ scripts: [askScript, textScript("恢复")] });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const events = collect(session);
+    let id = "";
+    onQuestionWithoutAnswer(session, async () => {
+      id = await enqueue(session, "queue", { text: "暂停后改插话" });
+      session.interrupt();
+    });
+    expect(await session.submit({ text: "开始" })).toBe("aborted");
+    await session.updateInput(id, { mode: "steer" });
+    expect(session.pendingInputs().items[0]).toMatchObject({ mode: "steer", paused: true });
+    expect(provider.requests).toHaveLength(1);
+    await session.resumeInputs();
+    await session.resumeInputs();
+    expectSentOnce(session, events, ["开始", "暂停后改插话"]);
+    expect(provider.requests).toHaveLength(2);
+    await session.close();
+  });
+
   it("中断后全部转排队并暂停，不自动发送；resumeInputs 从队首恢复", async () => {
     const provider = new FakeProvider({
       scripts: [askScript, textScript("恢复后继续"), textScript("第二条排队")],

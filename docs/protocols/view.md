@@ -344,6 +344,6 @@ function userEntryText(entry: UserEntry): string;   // 用户正文，去掉末�
 
 ## 待发输入（预览状态）
 
-待发输入（插话与排队，[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）**不属于** `SessionView`：它在被消费前不是对话事实，消费后以 `message.user(steer: true)` 进入视图。它只在临时事件 `input.pending` 里以完整快照出现，客户端各自保存一份（桌面/手机/TUI 都是整份覆盖）。
+待发输入（插话与排队，[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）**不属于** `SessionView`：它在被消费前不是对话事实，消费后以 `message.user` 进入视图（安全点消费的插话带 `steer: true`，空闲时或 `done` 后接续的新 Turn 不带）。它只在临时事件 `input.pending` 里以完整快照出现，客户端各自保存一份（桌面/手机/TUI 都是整份覆盖）。编辑只改用户正文的文本，非文本块及附件、`@` 引用、技能与委派快照保留；要换附件或引用须撤回后重发。
 
 `input.pending` 不回放，因此附加到已有会话的客户端在 `session.subscribe` 之后另调一次 `session.pendingInputs()` 取当前快照：两者同形（`{ items, paused }`），快照由服务端在收到请求时按当前列表生成，晚于此前发出的任何 `input.pending`，所以"订阅后取快照 + 之后按事件整份覆盖"不会把旧状态盖回去。进行中的权限请求与 `currentTurn` 不需要这种方法——它们分别由持久事件 `permission.requested`、`turn.started` 回放得出。

@@ -2588,7 +2588,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         return reason;
       } finally {
-        if (controller === ac) controller = undefined;
         await applySkills().catch((error: unknown) =>
           session.emitEphemeral("runtime.warning", {
             code: "skills_reload_failed",
@@ -2609,10 +2608,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         fileIndexPromise = undefined;
         activeTurnEffort = undefined;
         turnSettled = undefined;
+        if (controller === ac) controller = undefined;
         settleTurn();
+        // 清理期间仍可入列。释放 busy 与重新取队首之间没有异步间隙；
+        // pumpQueue 同步取走条目并重新占用 controller，避免遗漏或并发启动。
+        await pumpQueue();
       }
     };
-    /** 空闲时立即发出队首排队输入（恢复暂停、压缩结束后）；忙时留给 Turn 结束 */
+    /** 空闲时未暂停的插话也按排队发出；忙时留给安全点或 Turn 结束 */
     const pumpQueue = async (): Promise<boolean> => {
       if (busy() || compactController !== undefined || closing || session.health !== "ok")
         return false;
@@ -2978,13 +2981,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return { id: pendingInputStore.nextId(), queued: false };
       },
       updateInput: (id, patch) =>
-        Promise.resolve().then(() => {
+        Promise.resolve().then(async () => {
           assertUsable();
           assertMainSession();
           if (patch.mode !== undefined && !isPendingInputMode(patch.mode))
             throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
           if (pendingInputStore.update(id, patch) === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
+          await pumpQueue();
         }),
       cancelInput: (id) =>
         Promise.resolve().then(() => {
