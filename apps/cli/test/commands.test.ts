@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
-import { RuntimeCommandError, BUILTIN_SLASH_COMMANDS } from "@nocturne/core";
+import { RuntimeCommandError, SessionError, BUILTIN_SLASH_COMMANDS } from "@nocturne/core";
 import { SLASH_COMMANDS } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand } from "../src/commands.js";
@@ -130,6 +130,27 @@ function capture() {
 }
 
 describe("斜杠命令（cli.md 第 4 节）", () => {
+  it("/rename 保留标题内部空格；无参清空；锁冲突显示固定提示", async () => {
+    const renameSession = vi.fn(async (_id: string, title: string) => {
+      if (title === "锁") throw new SessionError("session_locked", "locked");
+    });
+    const runtime = { ...fakeRuntime, renameSession };
+    const { lines, io } = capture();
+    const session = fakeSession();
+    expect(await runSlashCommand("/rename  我的  标题  ", session, runtime, io)).toBe("handled");
+    expect(await runSlashCommand("/rename   ", session, runtime, io)).toBe("handled");
+    expect(await runSlashCommand("/rename 锁", session, runtime, io)).toBe("handled");
+    expect(renameSession.mock.calls).toEqual([
+      ["s1", "我的  标题"],
+      ["s1", ""],
+      ["s1", "锁"],
+    ]);
+    expect(lines).toEqual([
+      "会话已改名为「我的  标题」",
+      "会话标题已清空",
+      "! 这个会话正在别处打开，关掉后再改名",
+    ]);
+  });
   it("/settings 列出分组、生效值、来源和覆盖提示", async () => {
     const runtime = {
       ...fakeRuntime,

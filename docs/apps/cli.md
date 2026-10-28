@@ -125,6 +125,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `/fork` | 从当前位置分叉，复制会话后切换 | `runtime.forkSession()` + `/resume` 的打开逻辑 |
 | `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |
 | `/resume <id>` | 直接切换到指定会话 | 同上 |
+| `/rename <标题>`、`/rename` | 修改当前会话标题；无参数或纯空白参数清空显式标题，标题中的内部空格保留。成功显示「会话已改名为『标题』」或「会话标题已清空」；锁冲突显示「这个会话正在别处打开，关掉后再改名」。失败不退出 REPL | `runtime.renameSession(session.id, title)`，空标题传 `""` |
 | `/settings` | 按会话默认、界面、执行分组列出生效值、来源和覆盖提示；安全审查显示独立后端与模型引用，选择用 TUI `/settings` 或 settings.json；默认模型与档位只读，修改去 `/model`，Shell 去 `/shell`，`/theme` 仅 TUI | `runtime.describeSettings()` |
 | `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |

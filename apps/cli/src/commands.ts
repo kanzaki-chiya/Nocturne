@@ -12,6 +12,7 @@ import type {
 import {
   logoutProvider,
   RuntimeCommandError,
+  SessionError,
   skillListLines,
   type PermissionPresetName,
 } from "@nocturne/core";
@@ -126,6 +127,20 @@ export async function runSlashCommand(
 ): Promise<CommandOutcome> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   switch (cmd) {
+    case "/rename": {
+      const title = line.trim().slice(cmd.length).trim();
+      try {
+        await runtime.renameSession(session.id, title);
+        io.print(title ? `会话已改名为「${title}」` : "会话标题已清空");
+      } catch (error) {
+        io.print(
+          error instanceof SessionError && error.code === "session_locked"
+            ? "! 这个会话正在别处打开，关掉后再改名"
+            : `! ${errorText(error)}`,
+        );
+      }
+      return "handled";
+    }
     case "/grants": {
       try {
         io.print(await sessionGrants(runtime, session, rest));

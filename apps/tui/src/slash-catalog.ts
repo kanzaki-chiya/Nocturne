@@ -41,6 +41,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/agents", summary: "查看外部 agent", cli: "只读列出外部 agent、来源、启停与斜杠冲突" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
+  { name: "/rename", summary: "修改会话标题", cli: "<标题> 修改当前会话标题；无参数清空" },
   { name: "/rewind", summary: "回退对话或还原文件" },
   { name: "/fork", summary: "从当前位置分叉新会话" },
   { name: "/new", summary: "新建会话", cli: "新建并切换到空会话" },

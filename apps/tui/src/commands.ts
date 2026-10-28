@@ -8,6 +8,7 @@ import {
   skillListLines,
   normalizeModelRef,
   RuntimeCommandError,
+  SessionError,
   type RuntimeConfig,
   type RuntimeSession,
   type Runtime,
@@ -68,6 +69,22 @@ export async function runSlash(
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const arg = rest.join(" ").trim();
   switch (cmd) {
+    case "/rename": {
+      const title = line.trim().slice(cmd.length).trim();
+      if (!costContext) return { kind: "message", text: "! 当前环境不支持 /rename" };
+      try {
+        await costContext.runtime.renameSession(session.id, title);
+        return { kind: "message", text: title ? `会话已改名为「${title}」` : "会话标题已清空" };
+      } catch (error) {
+        return {
+          kind: "message",
+          text:
+            error instanceof SessionError && error.code === "session_locked"
+              ? "! 这个会话正在别处打开，关掉后再改名"
+              : `! ${errText(error)}`,
+        };
+      }
+    }
     case "/cost": {
       if (arg) return { kind: "message", text: "用法：/cost" };
       if (!costContext) return { kind: "message", text: "! 当前环境不支持 /cost" };

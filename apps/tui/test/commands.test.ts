@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   RuntimeCommandError,
+  SessionError,
   type Runtime,
   type RuntimeConfig,
   type RuntimeSession,
@@ -14,7 +15,7 @@ import {
 import { BUILTIN_SLASH_COMMANDS } from "@nocturne/core/protocol";
 
 import { contextLines, modelErrorText, runSlash, type ProviderBridge } from "../src/commands.js";
-import { SLASH_COMMANDS } from "../src/slash-catalog.js";
+import { SLASH_COMMANDS, cliHelpText, completeSlash, helpLines } from "../src/slash-catalog.js";
 
 it("TUI /agents 为只读列表，保留来源、停用和重名警告", async () => {
   const result = await runSlash(
@@ -86,6 +87,41 @@ function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
     ...overrides,
   } as unknown as RuntimeSession;
 }
+
+describe("TUI /rename", () => {
+  it("共用命令表进入双端帮助和命令名补全，不枚举标题参数", () => {
+    const ctx = { effortLevels: [], providerIds: [] };
+    expect(helpLines().join("\n")).toContain("/rename");
+    expect(cliHelpText()).toContain("/rename");
+    expect(completeSlash("/ren", ctx).map((item) => item.insert)).toContain("/rename");
+    expect(completeSlash("/rename ", ctx)).toEqual([]);
+  });
+  it("标题原文内部空格保留，无参清空，锁冲突显示固定提示", async () => {
+    const renameSession = vi.fn(async (_id: string, title: string) => {
+      if (title === "锁") throw new SessionError("session_locked", "locked");
+    });
+    const rt = { renameSession } as unknown as Runtime;
+    const context = { runtime: rt };
+    const session = fakeSession();
+    expect(await runSlash("/rename  我的  标题  ", session, undefined, context)).toEqual({
+      kind: "message",
+      text: "会话已改名为「我的  标题」",
+    });
+    expect(await runSlash("/rename ", session, undefined, context)).toEqual({
+      kind: "message",
+      text: "会话标题已清空",
+    });
+    expect(await runSlash("/rename 锁", session, undefined, context)).toEqual({
+      kind: "message",
+      text: "! 这个会话正在别处打开，关掉后再改名",
+    });
+    expect(renameSession.mock.calls).toEqual([
+      ["s1", "我的  标题"],
+      ["s1", ""],
+      ["s1", "锁"],
+    ]);
+  });
+});
 
 describe("TUI /shell", () => {
   it("无参数 → shell overlay", async () => {
