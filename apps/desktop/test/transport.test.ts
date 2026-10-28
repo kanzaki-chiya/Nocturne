@@ -103,13 +103,12 @@ describe("TauriLineTransport", () => {
 
   it("注册 onLine 前到达的行被缓冲并按序交付", async () => {
     const { pushMessage, transport } = await openTransport();
-    pushMessage({ kind: "line", line: "first" });
-    pushMessage({ kind: "line", line: "second" });
+    pushMessage({ kind: "lines", lines: ["first", "second"] });
     const lines: string[] = [];
     transport.onLine((l) => lines.push(l));
     expect(lines).toEqual(["first", "second"]);
-    pushMessage({ kind: "line", line: "third" });
-    expect(lines).toEqual(["first", "second", "third"]);
+    pushMessage({ kind: "lines", lines: ["third", "fourth"] });
+    expect(lines).toEqual(["first", "second", "third", "fourth"]);
   });
 
   it("多次 send 即使 invoke 乱序完成也按调用顺序发出", async () => {
@@ -176,7 +175,7 @@ describe("TauriLineTransport", () => {
 
   it("closed 消息触发 onClose 一次且在之前的行之后；exited 带出 code/stderr", async () => {
     const { pushMessage, transport } = await openTransport();
-    pushMessage({ kind: "line", line: "L1" });
+    pushMessage({ kind: "lines", lines: ["L1"] });
     const order: string[] = [];
     transport.onLine((l) => order.push(`line:${l}`));
     let closes = 0;
@@ -184,7 +183,7 @@ describe("TauriLineTransport", () => {
       closes += 1;
       order.push("close");
     });
-    pushMessage({ kind: "line", line: "L2" });
+    pushMessage({ kind: "lines", lines: ["L2"] });
     pushMessage({ kind: "closed", code: 3, stderr: ["e1"] });
     expect(order).toEqual(["line:L1", "line:L2", "close"]);
     expect(closes).toBe(1);
@@ -199,7 +198,7 @@ describe("TauriLineTransport", () => {
   it("closed 在 onLine 注册前到达时缓冲行交付完才触发 onClose", async () => {
     const { pushMessage, transport } = await openTransport();
     const order: string[] = [];
-    pushMessage({ kind: "line", line: "a" });
+    pushMessage({ kind: "lines", lines: ["a"] });
     pushMessage({ kind: "closed", code: 0, stderr: [] });
     // closed 已到但 onLine 尚未注册：不提前触发
     transport.onClose(() => order.push("close"));
@@ -254,7 +253,7 @@ describe("端到端：TauriLineTransport + createRpcClient", () => {
 
     // 服务端发来的每一行转成 channel line 消息推给 transport
     clientEnd.onLine((line) => {
-      f.pushMessage({ kind: "line", line });
+      f.pushMessage({ kind: "lines", lines: [line] });
     });
 
     // 假宿主把 backend_send 的行转给内存管道另一端

@@ -320,8 +320,10 @@ export class PhoneSessions {
           event.time,
         );
         this.onSessionEvent?.(session.id, event, live, entry, this.turnStarts.get(session.id));
-        for (const listener of entry.listeners) listener();
-        this.changed();
+        if (entry.replaying !== true) {
+          for (const listener of entry.listeners) listener();
+          this.changed();
+        }
         if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
         if (subscribed) void this.closeIfIdle(entry).catch(() => undefined);
       },
@@ -332,6 +334,7 @@ export class PhoneSessions {
     );
     subscribed = true;
     entry.replaying = false;
+    for (const listener of entry.listeners) listener();
     this.changed();
     void this.refreshTurnChanges(entry);
     return entry;

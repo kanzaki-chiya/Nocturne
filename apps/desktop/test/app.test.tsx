@@ -71,28 +71,30 @@ function replayHost(
   const emitEvent = (backendId: number, sessionId: string | undefined, event: object) => {
     const channel = channels.get(backendId);
     channel?.({
-      kind: "line",
-      line: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "event",
-        params: {
-          sessionId,
-          event: {
+      kind: "lines",
+      lines: [
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "event",
+          params: {
             sessionId,
-            turnId: `turn-${sessionId}`,
-            seq: nextSeq++,
-            time: "2026-10-04T00:00:00Z",
-            ...event,
+            event: {
+              sessionId,
+              turnId: `turn-${sessionId}`,
+              seq: nextSeq++,
+              time: "2026-10-04T00:00:00Z",
+              ...event,
+            },
           },
-        },
-      }),
+        }),
+      ],
     });
   };
   /** 外壳推一条 JSON-RPC 通知（providersChanged 等）给客户端 */
   const pushNotify = (backendId: number, method: string) => {
     channels.get(backendId)?.({
-      kind: "line",
-      line: JSON.stringify({ jsonrpc: "2.0", method, params: {} }),
+      kind: "lines",
+      lines: [JSON.stringify({ jsonrpc: "2.0", method, params: {} })],
     });
   };
   /** 后台进程退出：closed 消息携带 stderr 尾部，随后缓冲回收、通道移除 */
@@ -220,8 +222,8 @@ function replayHost(
           request: { id: request.id, method: request.method },
           respond: (r) => {
             channel({
-              kind: "line",
-              line: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: r }),
+              kind: "lines",
+              lines: [JSON.stringify({ jsonrpc: "2.0", id: request.id, result: r })],
             });
           },
         });
@@ -230,27 +232,35 @@ function replayHost(
       const rejected = rpcError?.({ method: request.method, params: request.params });
       if (rejected !== undefined) {
         channel({
-          kind: "line",
-          line: JSON.stringify({
-            jsonrpc: "2.0",
-            id: request.id,
-            error: {
-              code: -32001,
-              message: rejected.message,
-              data: { code: rejected.code, name: "RuntimeCommandError", ...(rejected.data ?? {}) },
-            },
-          }),
+          kind: "lines",
+          lines: [
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: request.id,
+              error: {
+                code: -32001,
+                message: rejected.message,
+                data: {
+                  code: rejected.code,
+                  name: "RuntimeCommandError",
+                  ...(rejected.data ?? {}),
+                },
+              },
+            }),
+          ],
         });
         return;
       }
       if (failRpc.includes(request.method)) {
         channel({
-          kind: "line",
-          line: JSON.stringify({
-            jsonrpc: "2.0",
-            id: request.id,
-            error: { code: "internal", message: `${request.method} 测试失败` },
-          }),
+          kind: "lines",
+          lines: [
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: request.id,
+              error: { code: "internal", message: `${request.method} 测试失败` },
+            }),
+          ],
         });
         return;
       }
@@ -345,40 +355,44 @@ function replayHost(
           ];
           events.forEach((event, index) =>
             channel({
-              kind: "line",
-              line: JSON.stringify({
-                jsonrpc: "2.0",
-                method: "event",
-                params: {
-                  sessionId: id,
-                  event: {
-                    ...event,
+              kind: "lines",
+              lines: [
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  method: "event",
+                  params: {
                     sessionId: id,
-                    turnId: `turn-${id}`,
-                    seq: index + 1,
-                    time: "2026-10-04T00:00:00Z",
+                    event: {
+                      ...event,
+                      sessionId: id,
+                      turnId: `turn-${id}`,
+                      seq: index + 1,
+                      time: "2026-10-04T00:00:00Z",
+                    },
                   },
-                },
-              }),
+                }),
+              ],
             }),
           );
           // runtime.status 是易失事件不进回放；与真实服务端一致，在回放后以实时事件补发当前状态
           if (id === "alpha" || id === "beta") {
             channel({
-              kind: "line",
-              line: JSON.stringify({
-                jsonrpc: "2.0",
-                method: "event",
-                params: {
-                  sessionId: id,
-                  event: {
-                    type: "runtime.status",
+              kind: "lines",
+              lines: [
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  method: "event",
+                  params: {
                     sessionId: id,
-                    time: "2026-10-04T00:00:00Z",
-                    payload: { status: "waiting_permission" },
+                    event: {
+                      type: "runtime.status",
+                      sessionId: id,
+                      time: "2026-10-04T00:00:00Z",
+                      payload: { status: "waiting_permission" },
+                    },
                   },
-                },
-              }),
+                }),
+              ],
             });
           }
           result = { lastSeq: 4 };
@@ -535,7 +549,10 @@ function replayHost(
         default:
           throw new Error(`未处理 RPC 方法 ${request.method}`);
       }
-      channel({ kind: "line", line: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) });
+      channel({
+        kind: "lines",
+        lines: [JSON.stringify({ jsonrpc: "2.0", id: request.id, result })],
+      });
     },
   };
   return host;

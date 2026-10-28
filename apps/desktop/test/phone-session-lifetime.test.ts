@@ -8,7 +8,7 @@ import {
 import { PhoneSessions } from "../src/web/sessions";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 
-function harness() {
+function harness(subscribeGate?: Promise<void>) {
   const [transport] = createMemoryTransportPair();
   const client = createRpcClient(transport, { clientName: "lifetime" });
   const listeners = new Map<string, (event: RuntimeEvent) => void>();
@@ -22,13 +22,16 @@ function harness() {
       turnChanges: async () => [],
       subscribe: async (listener: (event: RuntimeEvent) => void) => {
         listeners.set(id, listener);
+        await subscribeGate;
         return { lastSeq: 0, unsubscribe: vi.fn() };
       },
     } as unknown as RpcSession;
     return { session, opened: { warnings: [] } as unknown as SessionOpened };
   });
   const list = vi.spyOn(client.runtime, "listSessions").mockResolvedValue([]);
-  const sessions = new PhoneSessions(vi.fn());
+  const changed = vi.fn();
+  const onSessionEvent = vi.fn();
+  const sessions = new PhoneSessions(changed, undefined, onSessionEvent);
   const emit = (id: string, status: string) =>
     listeners.get(id)?.({
       type: "runtime.status",
@@ -36,9 +39,50 @@ function harness() {
       time: new Date().toISOString(),
       payload: { status },
     } as RuntimeEvent);
-  return { client, sessions, resume, list, emit, closes };
+  return { client, sessions, resume, list, emit, closes, changed, listeners, onSessionEvent };
 }
 afterEach(() => vi.restoreAllMocks());
+
+it("手机回放逐条折叠、记录 turnStarts，仅结束时通知 listeners", async () => {
+  let release!: () => void;
+  const h = harness(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  await h.sessions.connected(h.client);
+  const opening = h.sessions.open("s");
+  await vi.waitFor(() => expect(h.listeners.has("s")).toBe(true));
+  const entry = h.sessions.opened.get("s");
+  if (!entry) throw new Error("missing entry");
+  const listener = vi.fn();
+  entry.listeners.add(listener);
+  h.changed.mockClear();
+  for (let seq = 1; seq <= 20; seq++) {
+    h.listeners.get("s")?.({
+      type: "turn.started",
+      sessionId: "s",
+      seq,
+      turnId: `turn-${seq}`,
+      time: "2020-01-01T00:00:00Z",
+      payload: { turnIndex: seq },
+    } as RuntimeEvent);
+  }
+  expect(entry.view.lastSeq).toBe(20);
+  expect(h.onSessionEvent).toHaveBeenCalledTimes(20);
+  expect(h.onSessionEvent.mock.calls.every((call) => call[2] === false)).toBe(true);
+  expect(h.onSessionEvent.mock.calls.at(-1)?.[4]).toBe(Date.parse("2020-01-01T00:00:00Z"));
+  expect(listener).not.toHaveBeenCalled();
+  expect(h.changed).not.toHaveBeenCalled();
+  release();
+  await opening;
+  expect(entry.replaying).toBe(false);
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(h.changed).toHaveBeenCalledTimes(1);
+  h.emit("s", "running_model");
+  expect(listener).toHaveBeenCalledTimes(2);
+  h.client.close();
+});
 
 it("常驻连接：离开的运行会话在 Turn 结束并空闲后关闭，当前会话保留", async () => {
   const h = harness();

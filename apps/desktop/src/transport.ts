@@ -82,9 +82,11 @@ export class TauriLineTransport implements LineTransport {
   }
 
   private handle(message: BackendMessage): void {
-    if (message.kind === "line") {
-      if (this.lineHandler !== undefined) this.lineHandler(message.line);
-      else this.buffered.push(message.line);
+    if (message.kind === "lines") {
+      for (const line of message.lines) {
+        if (this.lineHandler !== undefined) this.lineHandler(line);
+        else this.buffered.push(line);
+      }
       return;
     }
     // closed：在已交付完缓冲行之后触发 onClose

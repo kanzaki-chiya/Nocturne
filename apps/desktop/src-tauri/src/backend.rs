@@ -34,8 +34,8 @@ const STDOUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BackendMessage {
-    Line {
-        line: String,
+    Lines {
+        lines: Vec<String>,
     },
     Closed {
         code: Option<i32>,
@@ -90,6 +90,25 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// 一次读取切出的行合成一个消息；超长标记之前的完整行先交付。
+fn forward_stdout_batch(splits: Vec<Split>, send: &impl Fn(BackendMessage)) -> bool {
+    let mut lines = Vec::new();
+    let mut overlong = false;
+    for split in splits {
+        match split {
+            Split::Line(line) => lines.push(line),
+            Split::Overlong { .. } => {
+                overlong = true;
+                break;
+            }
+        }
+    }
+    if !lines.is_empty() {
+        send(BackendMessage::Lines { lines });
+    }
+    overlong
+}
+
 /// spawn 一个已配置好的命令并接好读写与监督线程。
 /// `sink` 接收每条 BackendMessage（实现保证 line 全部在 closed 之前发出）；
 /// `on_exit` 在发出 closed 之后调用一次（生产里用于把后台从表里移除）。
@@ -121,28 +140,21 @@ pub fn spawn_backend(
         thread::spawn(move || {
             let send = |m: BackendMessage| (lock(&sink))(m);
             let mut splitter = LineSplitter::new(STDOUT_MAX_LINE);
-            let mut chunk = [0u8; 64 * 1024];
+            // 大块回放减少 Channel/fetch 往返；read 返回即发送，不等待填满缓冲。
+            let mut chunk = vec![0u8; 256 * 1024];
             let mut overlong = false;
             if let Some(pipe) = stdout.as_mut() {
                 loop {
                     match pipe.read(&mut chunk) {
                         Ok(0) => break,
                         Ok(n) => {
-                            for split in splitter.push(&chunk[..n]) {
-                                match split {
-                                    Split::Line(line) => send(BackendMessage::Line { line }),
-                                    Split::Overlong { .. } => {
-                                        backend.push_stderr_note(
-                                            "[nocturne-desktop] stdout 单行超过 64 MiB，已终止后台",
-                                        );
-                                        backend.killed.store(true, Ordering::SeqCst);
-                                        let _ = lock(&backend.child).kill();
-                                        overlong = true;
-                                        break;
-                                    }
-                                }
-                            }
+                            overlong = forward_stdout_batch(splitter.push(&chunk[..n]), &send);
                             if overlong {
+                                backend.push_stderr_note(
+                                    "[nocturne-desktop] stdout 单行超过 64 MiB，已终止后台",
+                                );
+                                backend.killed.store(true, Ordering::SeqCst);
+                                let _ = lock(&backend.child).kill();
                                 break;
                             }
                         }
@@ -150,10 +162,10 @@ pub fn spawn_backend(
                     }
                 }
             }
-            if !overlong {
-                if let Some(Split::Line(line)) = splitter.finish() {
-                    send(BackendMessage::Line { line });
-                }
+            if !overlong && forward_stdout_batch(splitter.finish().into_iter().collect(), &send) {
+                backend.push_stderr_note("[nocturne-desktop] stdout 单行超过 64 MiB，已终止后台");
+                backend.killed.store(true, Ordering::SeqCst);
+                let _ = lock(&backend.child).kill();
             }
             let _ = stdout_done_tx.send(());
         });
@@ -709,6 +721,56 @@ mod tests {
         )
     }
 
+    #[test]
+    fn stdout_batches_preserve_order_partial_lines_and_eof() {
+        let (sink, rx) = collect_sink();
+        let sink = Mutex::new(sink);
+        let send = |message| (lock(&sink))(message);
+        let mut splitter = LineSplitter::new(32);
+        assert!(!forward_stdout_batch(
+            splitter.push(b"one\ntwo\npar"),
+            &send
+        ));
+        assert!(!forward_stdout_batch(splitter.push(b"tial\nlast"), &send));
+        assert!(!forward_stdout_batch(splitter.push(b""), &send));
+        assert!(!forward_stdout_batch(
+            splitter.finish().into_iter().collect(),
+            &send
+        ));
+        let batches: Vec<Vec<String>> = rx
+            .try_iter()
+            .map(|message| match message {
+                BackendMessage::Lines { lines } => lines,
+                _ => panic!("expected lines"),
+            })
+            .collect();
+        assert_eq!(
+            batches,
+            vec![vec!["one", "two"], vec!["partial"], vec!["last"]]
+        );
+    }
+
+    #[test]
+    fn stdout_sends_preceding_lines_before_overlong_and_skips_empty_batches() {
+        let (sink, rx) = collect_sink();
+        let sink = Mutex::new(sink);
+        let send = |message| (lock(&sink))(message);
+        let mut splitter = LineSplitter::new(4);
+        assert!(forward_stdout_batch(
+            splitter.push(b"ok\n12345\nlater\n"),
+            &send
+        ));
+        match rx.try_recv().unwrap() {
+            BackendMessage::Lines { lines } => assert_eq!(lines, vec!["ok"]),
+            _ => panic!("expected lines"),
+        }
+        assert!(forward_stdout_batch(
+            vec![Split::Overlong { bytes: 5 }],
+            &send
+        ));
+        assert!(rx.try_recv().is_err());
+    }
+
     fn spawn_sort(state: &Arc<AppState>, id: u32) -> CmdResult<Arc<Backend>> {
         let mut command = Command::new("sort");
         command
@@ -905,8 +967,9 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
             match rx.recv_timeout(Duration::from_secs(15)) {
-                Ok(BackendMessage::Line { line }) => {
-                    kinds.push(format!("line:{line}"));
+                Ok(BackendMessage::Lines { lines }) => {
+                    assert!(!lines.is_empty());
+                    kinds.extend(lines.into_iter().map(|line| format!("line:{line}")));
                 }
                 Ok(BackendMessage::Closed { code, .. }) => {
                     kinds.push(format!("closed:{:?}", code));

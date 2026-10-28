@@ -57,10 +57,12 @@ Channel 消息（serde tag `kind`）：
 
 ```ts
 type BackendMessage =
-  { kind: "line"; line: string } | { kind: "closed"; code: number | null; stderr: string[] };
+  { kind: "lines"; lines: string[] } | { kind: "closed"; code: number | null; stderr: string[] };
 ```
 
-`code` 是退出码，被强杀或拿不到时为 `null`；`stderr` 是该后台内存缓冲的全部内容（≤500 行）。监督线程（`try_wait` 约 50ms 轮询）在进程退出后等待 stdout 读线程排空（最多 2 秒，防孙进程继承管道卡住），保证**所有 line 消息都在 closed 之前发出**；closed 每个后台只发一次。stdout 切行上限 64 MiB/行，超过则记一行 stderr 并强杀后台（宁可显式失败也不悄悄丢报文让请求挂死）。
+每条 `lines` 消息是一次读取切出的若干行，保持原有行序，空批次不发送；跨读取的半行继续拼接，EOF 的末行也通过 `lines` 交付。stdout 读取缓冲为 256 KiB，以减少大段回放的 Channel / fetch 往返；每次 `read()` 返回即发送，不等待填满，也不使用定时器。遇到超长行时先交付此前切出的完整行，再终止后台。
+
+`code` 是退出码，被强杀或拿不到时为 `null`；`stderr` 是该后台内存缓冲的全部内容（≤500 行）。监督线程（`try_wait` 约 50ms 轮询）在进程退出后等待 stdout 读线程排空（最多 2 秒，防孙进程继承管道卡住），保证**所有 lines 消息都在 closed 之前发出**；closed 每个后台只发一次。stdout 切行上限 64 MiB/行，超过则记一行 stderr 并强杀后台（宁可显式失败也不悄悄丢报文让请求挂死）。
 
 前端 `TauriLineTransport`（`src/transport.ts`）把这套命令实现成 `LineTransport`：`send` 经 promise 链串行保证顺序（写失败吞掉，断开会经 closed 体现）；注册 `onLine` 前到达的行被缓冲并按序交付；`closed` 在已交付完缓冲行后触发 `onClose`（只一次）；`exited` 暴露退出结果；`backend_open` 失败包装成带 `code` 的 `DesktopError`。`BackendPool`（`src/backends.ts`）管理唯一后台的连接：`ensure()` 在后台已在跑时直接返回同一个 client；真正启动时通过注入的取值函数读取当前生效的普通对话工作区（`prefs.plainWorkspace ?? defaultWorkspace`）作为 cwd，与触发启动的会话所属项目无关。并发 `ensure` 共享同一个握手 Promise，后台退出即清空条目并通知 UI。切换普通对话工作区不重启正在运行的后台，下次启动才使用新目录；会话自己的工作区仍由创建参数和恢复日志决定。握手失败（含后台 spawn 后秒退）的 `ensure` 会等 `exited` 拿到退出码与 stderr 尾部，把它们带进抛出的错误——否则横幅只看到「连接已断开」，后台为什么没起来无从排查。
 
@@ -223,7 +225,7 @@ interface NodeProbe {
 
 ### 5.4 状态栏与上下文
 
-打开/续接会话时，`Conversations`（手机为 `PhoneSessions`）在 `trackSessionView` 完成前标记 `replaying`。这期间不因历史条目数增长刷新状态栏上下文与会话控件；订阅回放完成后各集中刷新一次。实时阶段同一会话每组查询 single-flight：飞行中的多次变化只标记 latest-dirty，返回后补拉一次；切换会话或卸载后旧响应不得写入新界面。手机的控件和上下文圆环使用同一规则，传给圆环的查询函数按会话保持稳定，避免每次重绘重查。Core 的报告缓存与失效规则见 [context.md](../architecture/context.md#11-describecontext-的会话级缓存)。
+打开/续接会话时，`Conversations`（手机为 `PhoneSessions`）在 `trackSessionView` 完成前标记 `replaying`。这期间逐条折叠视图，但不调用会话 listeners 或画面更新回调；订阅回放完成、清除 `replaying` 后统一通知 listeners 并刷新画面一次，状态栏上下文与会话控件随之读取最终视图。事件观察者仍逐条接收回放与实时事件（保留 `live` 判定和历史 Turn 开始时间），改动摘要查询与空闲关闭沿用原有时机。首次打开、重新打开和按 `afterSeq` 续接均使用此规则。实时阶段同一会话每组查询 single-flight：飞行中的多次变化只标记 latest-dirty，返回后补拉一次；切换会话或卸载后旧响应不得写入新界面。手机的控件和上下文圆环使用同一规则，传给圆环的查询函数按会话保持稳定，避免每次重绘重查。Core 的报告缓存与失效规则见 [context.md](../architecture/context.md#11-describecontext-的会话级缓存)。
 
 **远程标识**：有远程 RPC 连接时显示「手机在线」，多台设备显示数量（按设备 id 去重）。点击展开当前手机列表，每台可立即「断开」，底部「打开远程设置」。没有连接不显示；已登记且被吊销或替换时显示警示，点击进入远程页。
 

@@ -4,7 +4,7 @@
  */
 
 export type BackendMessage =
-  { kind: "line"; line: string } | { kind: "closed"; code: number | null; stderr: string[] };
+  { kind: "lines"; lines: string[] } | { kind: "closed"; code: number | null; stderr: string[] };
 
 export type NodeSource = "env" | "bundled" | "path";
 

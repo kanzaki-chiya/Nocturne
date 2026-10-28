@@ -209,8 +209,10 @@ export class Conversations {
       entry.tracker = await trackSessionView(
         entry.session,
         (_view, event) => {
-          for (const listener of entry.listeners) listener();
-          this.changed();
+          if (entry.replaying !== true) {
+            for (const listener of entry.listeners) listener();
+            this.changed();
+          }
           const live = isLive(event);
           if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
           this.onEvent?.(entry.session.id, event, live);
@@ -223,6 +225,7 @@ export class Conversations {
       );
       subscribed = true;
       entry.replaying = false;
+      for (const listener of entry.listeners) listener();
       this.changed();
       await this.refreshTurnChanges(entry);
       return entry;

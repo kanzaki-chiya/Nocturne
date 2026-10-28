@@ -130,7 +130,7 @@ function realHost(ws: string, sessionsDir: string, fault?: FaultSpec) {
           } catch {
             // 非 JSON 行原样投递
           }
-          if (!drop) channels.get(id)?.({ kind: "line", line });
+          if (!drop) channels.get(id)?.({ kind: "lines", lines: [line] });
         });
         clientEnd.onClose(() => {
           channels.get(id)?.({ kind: "closed", code: 0, stderr: [] });

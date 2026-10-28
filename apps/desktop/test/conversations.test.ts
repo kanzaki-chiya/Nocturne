@@ -193,10 +193,11 @@ function fixture(
     get: () => client,
   };
   const failures: unknown[] = [];
+  const changed = vi.fn();
   const controller = new Conversations(
     pool,
     () => "plain",
-    () => undefined,
+    changed,
     (e) => failures.push(e),
     onEvent,
   );
@@ -294,6 +295,7 @@ function fixture(
     server.send(JSON.stringify({ jsonrpc: "2.0", id: pending.id, result: { lastSeq: 0 } }));
   }
   return {
+    changed,
     controller,
     pool,
     calls,
@@ -315,6 +317,50 @@ function fixture(
 }
 
 describe("desktop conversation lifecycle", () => {
+  it("首次打开、重新打开和 afterSeq 恢复的回放只在结束时通知 listeners", async () => {
+    const deferred = new Set(["a"]);
+    const observed = vi.fn();
+    const f = fixture(undefined, false, undefined, undefined, undefined, observed, deferred);
+    let seq = 0;
+    for (const mode of ["initial", "reopen", "afterSeq"] as const) {
+      const before = f.controller.opened.get("a")?.view.lastSeq ?? 0;
+      const opening =
+        mode === "afterSeq" ? f.controller.resumeBackend() : f.controller.open("a", "project");
+      await vi.waitFor(() => expect(f.controller.opened.get("a")?.replaying).toBe(true));
+      const entry = f.controller.opened.get("a");
+      if (!entry) throw new Error("missing entry");
+      const listener = vi.fn();
+      entry.listeners.add(listener);
+      f.changed.mockClear();
+      observed.mockClear();
+      for (let i = 0; i < 20; i++) {
+        f.event("a", "message.user", { content: [{ type: "text", text: `replay-${mode}-${i}` }] });
+      }
+      seq += 20;
+      await vi.waitFor(() => expect(entry.view.lastSeq).toBe(seq));
+      expect(listener).not.toHaveBeenCalled();
+      expect(f.changed).not.toHaveBeenCalled();
+      expect(observed).toHaveBeenCalledTimes(20);
+      expect(observed.mock.calls.every((call) => call[2] === false)).toBe(true);
+      expect(
+        f.calls.filter((call) => call.method === "session.subscribe").at(-1)?.params.afterSeq,
+      ).toBe(before);
+      f.releaseSubscribe("a");
+      await opening;
+      expect(entry.replaying).toBe(false);
+      expect(listener).toHaveBeenCalledTimes(1);
+      f.event("a", "session.titled", { title: "live" });
+      seq++;
+      await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
+      if (mode === "initial") {
+        await f.controller.newConversation("plain");
+      } else if (mode === "reopen") {
+        f.crash();
+        f.controller.backendExited();
+      }
+    }
+  });
+
   it("新建只选择工作区，首次消息才建会话；单后台常驻不释放", async () => {
     const f = fixture();
     await f.controller.newConversation("plain");
