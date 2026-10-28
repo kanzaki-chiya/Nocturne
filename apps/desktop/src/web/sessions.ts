@@ -312,11 +312,15 @@ export class PhoneSessions {
     // 与桌面 conversations.ts 一致：订阅窗口期间的新持久事件按 event.time 判断。
     const subscribeStart = Date.now();
     let subscribed = false;
+    let pendingRevision = 0;
     entry.tracker = await trackSessionView(
       session,
       (_view, event) => {
         // 待发输入快照（ADR-0070）：临时事件，订阅后再取一次当前快照对齐
-        if (event.type === "input.pending") entry.pendingInputs = event.payload;
+        if (event.type === "input.pending") {
+          pendingRevision += 1;
+          entry.pendingInputs = event.payload;
+        }
         const at = Date.parse(event.time);
         const live = subscribed || !("seq" in event) || (!Number.isNaN(at) && at >= subscribeStart);
         if (event.type === "turn.started" && !Number.isNaN(at)) this.turnStarts.set(session.id, at);
@@ -342,13 +346,13 @@ export class PhoneSessions {
     );
     subscribed = true;
     entry.replaying = false;
-    // 待发输入是临时状态，订阅后单独取一次快照（整份覆盖）。不挡打开：取回后
-    // 再通知一次，晚到的快照必定晚于此前发出的 input.pending（服务端按请求时刻生成）
+    // 订阅后取当前快照；请求在途期间若收到 input.pending，则事件优先。
+    const requestedRevision = pendingRevision;
     void Promise.resolve()
       .then(() => session.pendingInputs())
       .then((snapshot) => {
-        // 空列表与打开时的初值一致，不必再触发一次通知
-        if (entry.dead || snapshot.items.length === 0) return;
+        if (entry.dead || pendingRevision !== requestedRevision) return;
+        if (JSON.stringify(entry.pendingInputs) === JSON.stringify(snapshot)) return;
         entry.pendingInputs = snapshot;
         for (const listener of entry.listeners) listener();
         this.changed();

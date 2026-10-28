@@ -212,6 +212,7 @@ export class Conversations {
     // time 缺失或非法按回放处理（宁可漏提醒，不误报）。无需变协议。
     const subscribeStart = Date.now();
     let subscribed = false;
+    let pendingRevision = 0;
     const isLive = (event: RuntimeEvent): boolean => {
       if (subscribed) return true;
       if (!("seq" in event)) return true;
@@ -224,7 +225,10 @@ export class Conversations {
         entry.session,
         (_view, event) => {
           // 待发输入的完整快照：临时事件不回放，订阅后另有一次性对齐
-          if (event.type === "input.pending") entry.pendingInputs = event.payload;
+          if (event.type === "input.pending") {
+            pendingRevision += 1;
+            entry.pendingInputs = event.payload;
+          }
           if (entry.replaying !== true) {
             for (const listener of entry.listeners) listener();
             this.changed();
@@ -243,11 +247,13 @@ export class Conversations {
       entry.replaying = false;
       // 待发输入是临时状态：订阅后单独取一次当前快照（与事件同形的整份快照，
       // 后到的覆盖先到的，天然幂等）。不挡打开，取回后再通知一次
+      const requestedRevision = pendingRevision;
       void Promise.resolve()
         .then(() => entry.session.pendingInputs())
         .then((snapshot) => {
-          // 空列表与打开时的初值一致，不必再触发一次通知（回放结束时只通知一次）
-          if (entry.dead === true || snapshot.items.length === 0) return;
+          // 请求在途期间收到更新快照时，以事件为准，避免旧响应覆盖新状态。
+          if (entry.dead === true || pendingRevision !== requestedRevision) return;
+          if (JSON.stringify(entry.pendingInputs) === JSON.stringify(snapshot)) return;
           entry.pendingInputs = snapshot;
           for (const listener of entry.listeners) listener();
           this.changed();
