@@ -171,6 +171,8 @@ export function PhoneApp({
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
   const [menu, setMenu] = useState<"hosts" | "session" | null>(null);
   const [menuOutput, setMenuOutput] = useState<string>();
+  const [renameDraft, setRenameDraft] = useState<string>();
+  const [renameError, setRenameError] = useState("");
   const [addingHost, setAddingHost] = useState(false);
   /** 首页「其他目录…」正在输入的路径；undefined 表示收起 */
   const [otherDir, setOtherDir] = useState<string>();
@@ -1179,6 +1181,15 @@ export function PhoneApp({
           ) : (
             <>
               <PopoverOption
+                label="重命名"
+                disabled={connected ? undefined : "电脑尚未连接"}
+                onSelect={() => {
+                  setMenu(null);
+                  setRenameError("");
+                  setRenameDraft(title);
+                }}
+              />
+              <PopoverOption
                 label="压缩上下文"
                 detail="与输入 /compact 相同"
                 disabled={
@@ -1213,6 +1224,66 @@ export function PhoneApp({
             </>
           )}
         </Popover>
+      )}
+      {renameDraft !== undefined && page.kind === "session" && (
+        <div className="phone-rename-backdrop">
+          <form
+            className="phone-rename-dialog"
+            role="dialog"
+            aria-label="重命名会话"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const next = renameDraft;
+              if (next === title) {
+                setRenameDraft(undefined);
+                return;
+              }
+              setBusy(true);
+              void (async () => {
+                try {
+                  if (!sessions.client) throw new Error("电脑尚未连接");
+                  await sessions.client.runtime.renameSession(page.sessionId, next);
+                  await sessions.refresh();
+                  setRenameDraft(undefined);
+                } catch (reason) {
+                  setRenameError(
+                    reason instanceof RpcError && reason.code === "session_locked"
+                      ? "这个会话正在别处打开，关掉后再改名"
+                      : reason instanceof Error
+                        ? reason.message
+                        : "操作失败，请重试",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              })();
+            }}
+          >
+            <h2>重命名会话</h2>
+            <input
+              aria-label="会话名称"
+              autoFocus
+              value={renameDraft}
+              onChange={(e) => {
+                setRenameDraft(e.target.value);
+              }}
+            />
+            {renameError && <p role="alert">{renameError}</p>}
+            <div className="phone-rename-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setRenameDraft(undefined);
+                }}
+              >
+                取消
+              </button>
+              <button type="submit" disabled={busy}>
+                保存
+              </button>
+            </div>
+          </form>
+        </div>
       )}
       {connection?.state === "revoked" && hostId && (
         <button

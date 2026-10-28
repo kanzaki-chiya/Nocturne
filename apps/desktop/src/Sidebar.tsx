@@ -44,6 +44,7 @@ export interface SidebarProps {
   onMoveProject: (key: string, toIndex: number) => void;
   onPin: (id: string) => void;
   onUnpin: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<void>;
   onHideProject: (path: string) => void;
   onRestoreProject: (path: string) => void;
   onOpenProject: () => void;
@@ -315,6 +316,10 @@ function RowButton({
   onSelect,
   onContext,
   onMenu,
+  editing,
+  onCommit,
+  onCancel,
+  error,
 }: {
   row: SessionRow;
   pinned?: { project: string };
@@ -323,25 +328,69 @@ function RowButton({
   onContext: (e: React.MouseEvent) => void;
   /** 「…」按钮点击：在同一行右侧锚点打开右键同款菜单 */
   onMenu: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  editing: boolean;
+  onCommit: (title: string) => void;
+  onCancel: () => void;
+  error?: string | undefined;
 }) {
   const tag = rowTag(row);
+  const composing = useRef(false);
+  const cancelled = useRef(false);
   return (
     /* .irow 是容器 div：按钮不能嵌套按钮（悬停的「…」是兄弟元素） */
     <div className="irow">
-      <button
-        className={`item${selected ? " on" : ""}`}
-        onClick={onSelect}
-        onContextMenu={onContext}
-      >
-        <span className={dotClass(row)} />
-        <span className="t">{row.title}</span>
-        {pinned !== undefined && <span className="proj">{pinned.project}</span>}
-        {tag !== null ? (
-          <span className={`tag ${tag.cls}`}>{tag.text}</span>
-        ) : (
-          pinned === undefined && <span className="meta">{row.meta}</span>
-        )}
-      </button>
+      {editing ? (
+        <input
+          className="rename-input"
+          aria-label="重命名会话"
+          defaultValue={row.title}
+          autoFocus
+          onFocus={(e) => {
+            e.currentTarget.select();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
+            if (e.nativeEvent.isComposing || composing.current || e.nativeEvent.keyCode === 229)
+              return;
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancelled.current = true;
+              onCancel();
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              onCommit(e.currentTarget.value);
+            }
+          }}
+          onBlur={(e) => {
+            if (!cancelled.current) onCommit(e.currentTarget.value);
+          }}
+        />
+      ) : (
+        <button
+          className={`item${selected ? " on" : ""}`}
+          onClick={onSelect}
+          onContextMenu={onContext}
+        >
+          <span className={dotClass(row)} />
+          <span className="t">{row.title}</span>
+          {pinned !== undefined && <span className="proj">{pinned.project}</span>}
+          {tag !== null ? (
+            <span className={`tag ${tag.cls}`}>{tag.text}</span>
+          ) : (
+            pinned === undefined && <span className="meta">{row.meta}</span>
+          )}
+        </button>
+      )}
       <button
         type="button"
         className="imenu"
@@ -354,12 +403,20 @@ function RowButton({
       >
         …
       </button>
+      {error && (
+        <span className="rename-error" role="alert">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
 
 export function Sidebar(props: SidebarProps) {
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<{ id: string; message: string } | null>(null);
+  const renamePending = useRef(false);
   const [subOpen, setSubOpen] = useState<"sort" | "removed" | null>(null);
   /** 拖动中的项目 key 与插入位置（可见列表下标 0..n）；只在手动模式出现 */
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -455,10 +512,46 @@ export function Sidebar(props: SidebarProps) {
 
   const renderRow = (row: SessionRow, pinned?: PinnedRow) => (
     <RowButton
-      key={row.id}
+      key={`${row.id}:${renaming === row.id ? "editing" : "view"}`}
       row={row}
       {...(pinned !== undefined ? { pinned: { project: pinned.project } } : {})}
       selected={props.selectedId === row.id}
+      editing={renaming === row.id}
+      error={renameError?.id === row.id ? renameError.message : undefined}
+      onCancel={() => {
+        setRenaming(null);
+      }}
+      onCommit={(title) => {
+        if (renamePending.current) return;
+        setRenaming(null);
+        if (title === row.title) return;
+        renamePending.current = true;
+        void props
+          .onRename(row.id, title)
+          .then(
+            () => {
+              setRenameError(null);
+            },
+            (reason: unknown) => {
+              const locked =
+                reason !== null &&
+                typeof reason === "object" &&
+                "code" in reason &&
+                reason.code === "session_locked";
+              setRenameError({
+                id: row.id,
+                message: locked
+                  ? "这个会话正在别处打开，关掉后再改名"
+                  : reason instanceof Error
+                    ? reason.message
+                    : String(reason),
+              });
+            },
+          )
+          .finally(() => {
+            renamePending.current = false;
+          });
+      }}
       onSelect={() => {
         props.onSelectSession(row.id);
       }}
@@ -731,16 +824,27 @@ export function Sidebar(props: SidebarProps) {
       {menu !== null && (
         <div className="ctxmenu" ref={menuRef} style={{ left: menu.x, top: menu.y }}>
           {menu.kind === "session" && (
-            <button
-              autoFocus
-              onClick={() => {
-                if (menu.pinned) props.onUnpin(menu.id);
-                else props.onPin(menu.id);
-                setMenu(null);
-              }}
-            >
-              {menu.pinned ? "取消置顶" : "置顶"}
-            </button>
+            <>
+              <button
+                autoFocus
+                onClick={() => {
+                  if (menu.pinned) props.onUnpin(menu.id);
+                  else props.onPin(menu.id);
+                  setMenu(null);
+                }}
+              >
+                {menu.pinned ? "取消置顶" : "置顶"}
+              </button>
+              <button
+                onClick={() => {
+                  setRenameError(null);
+                  setRenaming(menu.id);
+                  setMenu(null);
+                }}
+              >
+                重命名
+              </button>
+            </>
           )}
           {menu.kind === "project" && (
             <>

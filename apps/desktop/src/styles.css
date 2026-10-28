@@ -545,6 +545,28 @@ button {
   flex: 1;
   min-width: 0;
 }
+.irow .rename-input {
+  flex: 1;
+  min-width: 0;
+  margin: 2px 28px 2px 12px;
+  font: inherit;
+  color: var(--a-text);
+  background: var(--a-side);
+  border: 1px solid var(--a-accent);
+  border-radius: var(--radius-1);
+}
+.irow .rename-error {
+  position: absolute;
+  z-index: 2;
+  top: 100%;
+  left: 12px;
+  right: 6px;
+  padding: 4px;
+  color: var(--a-error);
+  background: var(--a-side);
+  border-radius: var(--radius-1);
+  font-size: var(--fs-1);
+}
 .irow .imenu,
 .gh .gmenu {
   position: absolute;

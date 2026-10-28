@@ -109,6 +109,62 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
   expect(row?.textContent).toContain("测试会话");
   await act(() => row?.click());
+  const rename = vi
+    .spyOn(client.runtime, "renameSession")
+    .mockRejectedValueOnce(new RpcError("session_locked", "锁冲突"));
+  await act(() => container.querySelector<HTMLButtonElement>('[aria-label="会话菜单"]')?.click());
+  await act(() =>
+    [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === "重命名")
+      ?.click(),
+  );
+  const nameField = container.querySelector<HTMLInputElement>('[aria-label="会话名称"]');
+  expect(nameField?.value).toBe("测试会话");
+  await act(() => {
+    if (nameField) {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        nameField,
+        "",
+      );
+      nameField.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await act(async () => {
+    container
+      .querySelector<HTMLFormElement>(".phone-rename-dialog")
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  expect(rename).toHaveBeenCalledWith("s", "");
+  expect(container.querySelector('.phone-rename-dialog [role="alert"]')?.textContent).toBe(
+    "这个会话正在别处打开，关掉后再改名",
+  );
+  await act(() =>
+    container.querySelector<HTMLButtonElement>(".phone-rename-actions button")?.click(),
+  );
+  rename.mockResolvedValueOnce(undefined);
+  await act(() => container.querySelector<HTMLButtonElement>('[aria-label="会话菜单"]')?.click());
+  await act(() =>
+    [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === "重命名")
+      ?.click(),
+  );
+  await act(() => {
+    const input = container.querySelector<HTMLInputElement>('[aria-label="会话名称"]');
+    if (input) {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        input,
+        "新标题",
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await act(async () => {
+    container
+      .querySelector<HTMLFormElement>(".phone-rename-dialog")
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  expect(rename).toHaveBeenLastCalledWith("s", "新标题");
+  expect(container.querySelector(".phone-rename-dialog")).toBeNull();
   // ADR-0060：右侧面板、概览按钮只在桌面窗口里，手机共用前端但不出现
   expect(container.querySelector(".side-panel")).toBeNull();
   for (const label of ["右侧面板", "会话概览", "查看变更"]) {

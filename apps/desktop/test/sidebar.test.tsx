@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Sidebar, type SidebarProps } from "../src/Sidebar";
@@ -32,6 +32,7 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
     onMoveProject: noop,
     onPin: noop,
     onUnpin: noop,
+    onRename: async () => undefined,
     onHideProject: noop,
     onRestoreProject: noop,
     onOpenProject: noop,
@@ -195,6 +196,70 @@ describe("Sidebar", () => {
     // 右键路径仍可用且菜单一致
     fireEvent.contextMenu(screen.getByText("一号会话"));
     expect(screen.getByText("置顶")).toBeTruthy();
+  });
+
+  it("置顶后重命名预填全选，Enter 提交；同名和空串分别处理", async () => {
+    const onRename = vi.fn(async () => undefined);
+    render(<Sidebar {...props({ tree: rowTree, onRename })} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "会话菜单" })[0] as HTMLElement);
+    expect([...document.querySelectorAll(".ctxmenu button")].map((b) => b.textContent)).toEqual([
+      "置顶",
+      "重命名",
+    ]);
+    fireEvent.click(screen.getByText("重命名"));
+    const field = screen.getByRole("textbox", { name: "重命名会话" }) as HTMLInputElement;
+    expect(field.value).toBe("一号会话");
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onRename).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole("button", { name: "会话菜单" })[0] as HTMLElement);
+    fireEvent.click(screen.getByText("重命名"));
+    fireEvent.change(screen.getByRole("textbox", { name: "重命名会话" }), {
+      target: { value: "" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "重命名会话" }), { key: "Enter" });
+    await waitFor(() => expect(onRename).toHaveBeenCalledWith("s1", ""));
+  });
+
+  it("Escape 取消且 blur 不提交，IME Enter 不提交，正常 blur 提交", async () => {
+    const onRename = vi.fn(async () => undefined);
+    render(<Sidebar {...props({ tree: rowTree, onRename })} />);
+    const start = () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "会话菜单" })[0] as HTMLElement);
+      fireEvent.click(screen.getByText("重命名"));
+      return screen.getByRole("textbox", { name: "重命名会话" });
+    };
+    let field = start();
+    fireEvent.change(field, { target: { value: "取消" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(onRename).not.toHaveBeenCalled();
+    field = start();
+    fireEvent.change(field, { target: { value: "新名字" } });
+    fireEvent.compositionStart(field);
+    fireEvent.keyDown(field, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onRename).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(field);
+    fireEvent.keyDown(field, { key: "Enter", keyCode: 229 });
+    expect(onRename).not.toHaveBeenCalled();
+    fireEvent.blur(field);
+    await waitFor(() => expect(onRename).toHaveBeenCalledExactlyOnceWith("s1", "新名字"));
+  });
+
+  it("重命名失败保持原标题，在原行报错；锁冲突用明确文案", async () => {
+    const onRename = vi.fn().mockRejectedValue({ code: "session_locked" });
+    render(<Sidebar {...props({ tree: rowTree, onRename })} />);
+    fireEvent.contextMenu(screen.getByText("一号会话"));
+    fireEvent.click(screen.getByText("重命名"));
+    const field = screen.getByRole("textbox", { name: "重命名会话" });
+    fireEvent.change(field, { target: { value: "失败名字" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe("这个会话正在别处打开，关掉后再改名"),
+    );
+    expect(screen.getByText("一号会话")).toBeTruthy();
+    expect(screen.queryByText("失败名字")).toBeNull();
   });
 
   it("会话行「…」可键盘操作：真实按钮可聚焦，打开菜单后焦点进菜单项（F-02）", () => {

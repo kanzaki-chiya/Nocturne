@@ -691,6 +691,41 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.phone-rename-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0008;
+  padding: 20px;
+}
+.phone-rename-dialog {
+  width: min(100%, 400px);
+  padding: 20px;
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
+  color: var(--a-text);
+}
+.phone-rename-dialog h2 {
+  margin: 0 0 16px;
+  font-size: var(--fs-4);
+}
+.phone-rename-dialog input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font: inherit;
+}
+.phone-rename-dialog [role="alert"] {
+  color: var(--a-error);
+}
+.phone-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
 .phone-ring {
   display: block;
 }

@@ -1128,6 +1128,12 @@ export function App({ host }: { host: DesktopHost }) {
           prefs.update({ pinned: cur.pinned.filter((x) => x !== id) });
           bumpPrefs();
         }}
+        onRename={async (id, title) => {
+          const client = pool.get();
+          if (!client) throw new Error("后台尚未连接");
+          await client.runtime.renameSession(id, title);
+          await refresh();
+        }}
         onHideProject={(path) => {
           const cur = prefs.get();
           const key = projectKey(path);
