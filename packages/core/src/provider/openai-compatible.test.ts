@@ -381,3 +381,42 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     expect(noImgMsgs[1]?.["content"]).toBe("hi");
   });
 });
+
+// ADR-0070：插话紧跟工具结果。Chat Completions 用独立的 role=tool 消息承载结果，
+// 随后跟一条 role=user 是合法序列，不需要合并。
+it("工具结果后紧跟的用户文本是独立的 role=user 消息", async () => {
+  const capture: { body?: Record<string, unknown> } = {};
+  const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+  await p
+    .stream(
+      request({
+        messages: [
+          { role: "user", content: [{ type: "text", text: "做个页面" }] },
+          {
+            role: "assistant",
+            content: [],
+            toolCalls: [{ callId: "c1", name: "read", input: { path: "a.ts" } }],
+          },
+          { role: "tool", callId: "c1", name: "read", content: "file body", isError: false },
+          { role: "user", content: [{ type: "text", text: "改成蓝色" }] },
+        ],
+        tools: [{ name: "read", description: "读文件", inputSchema: { type: "object" } }],
+      }),
+      new AbortController().signal,
+    )
+    [Symbol.asyncIterator]()
+    .next();
+  expect(capture.body?.messages).toEqual([
+    { role: "system", content: "sys" },
+    { role: "user", content: "做个页面" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        { id: "c1", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } },
+      ],
+    },
+    { role: "tool", tool_call_id: "c1", content: "file body" },
+    { role: "user", content: "改成蓝色" },
+  ]);
+});

@@ -1006,3 +1006,38 @@ describe("声明式 Responses 约束（ADR-0042 §5）", () => {
     });
   });
 });
+
+// ADR-0070：插话紧跟工具结果。Responses 用独立的 function_call_output 输入项承载
+// 结果，随后跟一条 message(role=user) 是合法序列，不需要合并。
+it("工具结果后紧跟的用户文本是独立的 message 输入项", async () => {
+  const capture: Captured = {};
+  const p = createOpenAIResponsesProvider(
+    config(),
+    envWithKey,
+    sseFetch([...messageChunks(["ok", ""]), completed()], capture),
+  );
+  const events: ModelStreamEvent[] = [];
+  for await (const ev of p.stream(
+    request({
+      messages: [
+        { role: "user", content: [{ type: "text", text: "做个页面" }] },
+        {
+          role: "assistant",
+          content: [],
+          toolCalls: [{ callId: "c1", name: "read", input: { path: "a.ts" } }],
+        },
+        { role: "tool", callId: "c1", name: "read", content: "file body", isError: false },
+        { role: "user", content: [{ type: "text", text: "改成蓝色" }] },
+      ],
+    }),
+    new AbortController().signal,
+  ))
+    events.push(ev);
+  expect(capture.body?.input).toEqual([
+    { role: "system", content: "sys" },
+    { role: "user", content: [{ type: "input_text", text: "做个页面" }] },
+    { type: "function_call", call_id: "c1", name: "read", arguments: '{"path":"a.ts"}' },
+    { type: "function_call_output", call_id: "c1", output: "file body" },
+    { role: "user", content: [{ type: "input_text", text: "改成蓝色" }] },
+  ]);
+});

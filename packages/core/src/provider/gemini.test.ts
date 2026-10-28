@@ -300,3 +300,52 @@ describe("Gemini 流式契约（ADR-0061）", () => {
     ).rejects.toMatchObject({ name: "AbortError" });
   });
 });
+
+// ADR-0070：插话紧跟工具结果。Gemini 的 contents 按角色轮次组织，SDK 把工具结果与
+// 随后的用户文本各映射为一条 role=user 的 content（带附图的工具结果本来就这样发），
+// Gemini 接受连续 user 轮次；这里锁定线上形状，不做额外合并。
+it("工具结果与随后的用户文本各自是一条 role=user 的 content", async () => {
+  const { capture, fetcher } = fixture([chunk([{ text: "ok" }], "STOP")]);
+  const provider = createGeminiProvider(config, () => "test-key", fetcher);
+  await collect(
+    provider,
+    request({
+      messages: [
+        { role: "user", content: [{ type: "text", text: "做个页面" }] },
+        {
+          role: "assistant",
+          content: [],
+          toolCalls: [{ callId: "c1", name: "read", input: { path: "a.ts" } }],
+        },
+        { role: "tool", callId: "c1", name: "read", content: "file body", isError: false },
+        { role: "user", content: [{ type: "text", text: "改成蓝色" }] },
+      ],
+    }),
+  );
+  const contents = (capture.body as { contents: unknown }).contents;
+  expect(contents).toEqual([
+    { role: "user", parts: [{ text: "做个页面" }] },
+    {
+      role: "model",
+      parts: [
+        {
+          functionCall: { id: "c1", name: "read", args: { path: "a.ts" } },
+          thoughtSignature: "skip_thought_signature_validator",
+        },
+      ],
+    },
+    {
+      role: "user",
+      parts: [
+        {
+          functionResponse: {
+            id: "c1",
+            name: "read",
+            response: { name: "read", content: "file body" },
+          },
+        },
+      ],
+    },
+    { role: "user", parts: [{ text: "改成蓝色" }] },
+  ]);
+});

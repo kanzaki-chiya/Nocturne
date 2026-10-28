@@ -867,3 +867,45 @@ describe("anthropic 适配器：图片（ADR-0023）", () => {
     ]);
   });
 });
+
+// ADR-0070：插话紧跟在工具结果之后。Anthropic 要求 tool_result 位于 user 消息
+// 最前面、且同一轮只能有一条 user 消息——SDK 的分组把两者合并，这里锁定线上形状。
+it("工具结果后紧跟的用户文本并入同一条 user 消息（tool_result 在前）", async () => {
+  const capture: { body?: unknown } = {};
+  const p = createAnthropicProvider(
+    config(),
+    envWithKey,
+    sseFetch([msgStart(), ...msgEnd("end_turn")], capture),
+  );
+  await collect(
+    p,
+    request({
+      messages: [
+        { role: "user", content: [{ type: "text", text: "做个页面" }] },
+        {
+          role: "assistant",
+          content: [],
+          toolCalls: [{ callId: "c1", name: "read", input: { path: "a.ts" } }],
+        },
+        { role: "tool", callId: "c1", name: "read", content: "file body", isError: false },
+        { role: "user", content: [{ type: "text", text: "改成蓝色" }] },
+      ],
+      tools: [{ name: "read", description: "读文件", inputSchema: { type: "object" } }],
+    }),
+  );
+  const body = capture.body as { messages: unknown };
+  expect(body.messages).toEqual([
+    { role: "user", content: [{ type: "text", text: "做个页面" }] },
+    {
+      role: "assistant",
+      content: [{ type: "tool_use", id: "c1", name: "read", input: { path: "a.ts" } }],
+    },
+    {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "c1", content: "file body" },
+        { type: "text", text: "改成蓝色" },
+      ],
+    },
+  ]);
+});
