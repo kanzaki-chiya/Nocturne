@@ -1442,6 +1442,63 @@ describe("自动 L2 与进行中输入保留（context.md 6.5）", () => {
     expect(last?.role === "user" && JSON.stringify(last.content)).toContain("当前任务：修复登录");
   });
 
+  it("ADR-0070：被摘要覆盖的插话与原始请求合并成同一条重新注入的消息", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u2",
+        content: [{ type: "text", text: "当前任务：修复登录" }],
+      },
+      {
+        kind: "user",
+        seq: 3,
+        turnId: "t1",
+        messageId: "u3",
+        steer: true,
+        content: [{ type: "text", text: "补充：改用蓝色主题" }],
+      },
+      {
+        kind: "assistant",
+        seq: 4,
+        turnId: "t1",
+        messageId: "a4",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "已调整" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: "t1",
+        compactKind: "summary",
+        throughSeq: 3,
+        summary: "前半段摘要",
+      },
+    ];
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t1"),
+      evT(2, "message.user", { messageId: "u2" }, "t1"),
+      evT(3, "message.user", { messageId: "u3", steer: true }, "t1"),
+      evT(5, "context.compacted", { kind: "summary", throughSeq: 3, summary: "前半段摘要" }, "t1"),
+    ];
+    const built = buildContext(baseInput({ history, events }));
+    // 摘要消息之外只有一条重新注入的 user 消息（原始请求 + 插话）
+    const reinjected = built.request.messages.filter(
+      (message) =>
+        message.role === "user" && JSON.stringify(message.content).includes("当前 Turn 开始时"),
+    );
+    expect(reinjected).toHaveLength(1);
+    const text = JSON.stringify(reinjected[0]?.content);
+    expect(text).toContain("当前任务：修复登录");
+    expect(text).toContain("补充：改用蓝色主题");
+    // 插话在后
+    expect(text.indexOf("修复登录")).toBeLessThan(text.indexOf("蓝色主题"));
+  });
+
   // 日志分析（f0136a6d）：摘要压缩后模型把待办改回全部未开始并从头开工。
   // 待办全部完成 + 已提交 → 摘要压缩后，完成状态与提交信息必须仍在上下文里，
   // 且原始请求排在保留区之前，最后一条消息是模型自己的最新进展而不是"新请求"。

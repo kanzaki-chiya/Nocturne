@@ -45,6 +45,8 @@ export type CommandRejectCode =
   | "unknown_request"
   /** respondQuestion 的回复与待回答问题不匹配（ADR-0032 §3），请求保持等待 */
   | "invalid_reply"
+  /** 待发输入已被消费（ADR-0070 §5）：编辑或撤回时条目已在 Turn 的安全点发出 */
+  | "input_consumed"
   | "session_failed"
   | "invalid_command"
   | "invalid_model"

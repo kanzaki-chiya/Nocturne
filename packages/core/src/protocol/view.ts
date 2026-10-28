@@ -124,6 +124,8 @@ export interface UserEntry {
   /** 技能调用的正文快照（skills.md 第 2 节）；普通消息字段不出现 */
   skill?: SkillSnapshot | undefined;
   delegate?: AgentDelegation | undefined;
+  /** 运行中插话（ADR-0070）：界面加「插话」标签，不是新 Turn 的开始 */
+  steer?: true | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
@@ -407,7 +409,12 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       break;
     }
     case "message.user": {
-      if (view.todos.length > 0 && view.todos.every((item) => item.status === "completed"))
+      // ADR-0070 §7：任务清单归档只由非插话的用户消息触发
+      if (
+        event.payload.steer !== true &&
+        view.todos.length > 0 &&
+        view.todos.every((item) => item.status === "completed")
+      )
         view.todos = [];
       if (view.firstTitle === undefined && !view.entries.some((entry) => entry.kind === "user"))
         view.firstTitle = firstUserText(event.payload);
@@ -421,6 +428,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.fileRefs !== undefined ? { fileRefs: event.payload.fileRefs } : {}),
         ...(event.payload.skill !== undefined ? { skill: event.payload.skill } : {}),
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
+        ...(event.payload.steer === true ? { steer: true as const } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

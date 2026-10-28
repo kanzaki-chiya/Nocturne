@@ -51,9 +51,9 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 |---|---|
 | `create` | 生成时间有序的会话 ID → 以排他方式创建锁文件 → 写入 `session.created`（`seq = 1`）→ 生成 `runId` → 开放 |
 | `resume` | 按第 4 节打开 |
-| `submit` | 仅在 `idle` 时接受，启动一个 Turn |
-| `interrupt` | 中止当前 Turn；Turn 以 `aborted` 结束，会话回到 `idle` |
-| `close` | 先拒绝新操作；取消后台标题请求；若 Turn 已被接受（包括尚在提交准备阶段）或正在压缩，先发出中断并等待全部请求收束，再清理资源、释放锁。Turn 按中断语义写入 `turn.completed(reason="aborted")`（`failed` 状态下不再写入）。日志保留，可随时恢复 |
+| `submit` | 仅在 `idle` 时接受，启动一个 Turn；运行中的追加消息走 `enqueueInput`（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)） |
+| `interrupt` | 中止当前 Turn；Turn 以 `aborted` 结束，会话回到 `idle`，剩余待发输入转排队并暂停 |
+| `close` | 先拒绝新操作；取消后台标题请求；若 Turn 已被接受（包括尚在提交准备阶段）或正在压缩，先发出中断并等待全部请求收束，再清理资源、释放锁。Turn 按中断语义写入 `turn.completed(reason="aborted")`（`failed` 状态下不再写入）。日志保留，可随时恢复。**待发输入不阻止关闭**：它是内存状态，关闭即丢弃，提醒由客户端负责（桌面在关窗口前确认） |
 
 新建根会话首条 `message.user` 落盘后，Runtime 在后台用 smol 角色（未配置时用当时的会话模型）请求标题，不阻塞 Turn；只取用户文字前 2000 字符，要求同语言、不超过 20 字、不带工具与思考档位。结果去引号、换行、首尾空白并截到 40 显示宽度，写入 `session.titled`。与 Turn 共用 Session 写入队列，seq、日志与发布顺序一致；失败只记诊断，不发 warning。旧会话恢复与子会话均不生成。用户可改名或清除用户覆盖；已有任何标题事件（包括清空）时不启动自动生成，后台结果入队落盘前也要复查，避免覆盖用户操作。标题展示优先用户标题、生成标题、首句；回退不撤销标题，见 [ADR-0069](../decisions/ADR-0069-session-rename-title-sidecar.md)。
 

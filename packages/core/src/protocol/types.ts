@@ -454,6 +454,8 @@ export type HistoryEntry =
       /** 技能调用的正文快照（skills.md 第 2 节）；旧日志无此字段 */
       skill?: SkillSnapshot | undefined;
       delegate?: AgentDelegation | undefined;
+      /** 运行中插话（ADR-0070）；旧日志无此字段，缺省按普通用户消息处理 */
+      steer?: true | undefined;
     }
   | {
       kind: "assistant";
@@ -614,3 +616,34 @@ export type QuestionAnswer =
 
 /** MCP 工具按需加载模式（ADR-0067 §4）：auto（默认，超过 10,000 token 时按需）、always、never */
 export type McpToolSearchMode = "auto" | "always" | "never";
+
+// ── 待发输入（ADR-0070）──────────────────────────────────
+
+/** 待发输入的两种方式（ADR-0070 §1）：插话并入当前 Turn，排队在 done 后开新 Turn */
+export type PendingInputMode = "steer" | "queue";
+
+/**
+ * 一条待发输入的展示快照（ADR-0070 §6）：待发输入是 Runtime 内存中的会话状态，
+ * 不写日志；`input.pending` 临时事件与 `session.pendingInputs` 都给出完整列表，
+ * 客户端看到的是同一份。
+ */
+export interface PendingInputItem {
+  /** Runtime 分配的条目 id（会话内唯一） */
+  id: string;
+  mode: PendingInputMode;
+  /** 用户输入的文本（原文，未截断；界面自行按单行省略） */
+  text: string;
+  /** 已附图的数量；附件、@ 引用与技能快照随原提交保留，编辑只替换文本 */
+  attachments: number;
+  /** 提交时刻（ISO 8601） */
+  createdAt: string;
+  /** 暂停期间不自动发送（ADR-0070 §4） */
+  paused: boolean;
+}
+
+/** 待发输入的完整快照（`input.pending` payload 与 `pendingInputs()` 的返回） */
+export interface PendingInputsSnapshot {
+  items: PendingInputItem[];
+  /** 列表处于暂停：全部条目都带 paused（空列表为 false） */
+  paused: boolean;
+}

@@ -10,7 +10,7 @@
 - **进行中**：若干个 Step。每个 Step 是一次模型请求；模型返回工具调用时执行工具，然后进入下一个 Step。
 - **结束**：写入 `turn.completed`。`reason` 的取值与含义见 [events.md](../protocols/events.md) 第 3.1 节。**任何出口**在写入 `turn.completed` 之前，都必须先结算本 Turn 中所有尚未结算的工具调用（第 2 节的 `finish`）。
 
-MVP 中会话同一时间只有一个 Turn。Turn 进行中再次 `submit` 会被拒绝（`session_busy`）；CLI 在 Turn 期间只接受中断。运行中追加指令（steering）和输入排队属于后续设计。
+MVP 中会话同一时间只有一个 Turn。Turn 进行中再次 `submit` 仍会被拒绝（`session_busy`）；运行中追加指令（插话）与输入排队改用 `session.enqueueInput`（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）。CLI 在 Turn 期间只接受中断；插话与排队由桌面、手机和 TUI 提供。待发输入是 Runtime 内存状态，不进日志。
 
 ## 2. 伪代码
 
@@ -50,7 +50,9 @@ runTurn(session, input, signal):
       "aborted"        → return finish("aborted")          # 流式中被中断；不完整的工具调用已丢弃
       "length"         → return finish("truncated")
       "content_filter" → return finish("refused")
-      "stop"           → if toolCalls is empty: return finish("done")
+      "stop"           → if toolCalls is empty:            # 安全点 2（ADR-0070 §2）
+                          if deliverSteers(): continue     # 有插话：写入后继续下一个 Step，不结束 Turn
+                          return finish("done")
       "tool_calls"     → if toolCalls is empty: return finish("error", unexpected_finish)
       "other"          → return finish("error", unexpected_finish)
     # 只有 stop / tool_calls 且存在工具调用时才会走到这里
@@ -68,8 +70,26 @@ runTurn(session, input, signal):
         return finish("error", { code: "loop_detected", message })
       if deps.shouldFinish?(session.state): return finish("done")   # Phase 6 注入点（subagent.md 第 2 节）
     if signal.aborted: return finish("aborted")
-    # 回到循环顶部：工具结果已写入会话，下一次 build 会把它们带给模型
+    deliverSteers()                                        # 安全点 1（ADR-0070 §2）：工具全部结算后、下一次请求前
+    # 回到循环顶部：工具结果与插话都已写入会话，下一次 build 会把它们带给模型
 
+# 注入点（ADR-0070 §2）：与 prepareTools / shouldFinish 同形，Agent Loop 不认工具名、
+# 不认 Provider；子会话与压缩不注入，即没有插话
+deliverSteers() -> bool:
+  if signal.aborted: return false                        # 中断信号已触发时不消费
+  taken = deps.takeSteers?.() ?? []                      # 同步取出并立刻从待发列表移除、发 input.pending 快照
+  for item in taken:                                     # 按提交顺序逐条写
+    emit message.user(item, steer = true)                # 此后不可再编辑或撤回（input_consumed）
+  return taken 非空
+```
+
+第二个安全点在第 3 步的 `"stop"` 分支里：用户的选择是「等它说完再接」，所以不打断模型流，只是不结束 Turn。
+
+## 2.1 排队的接续
+
+一个 Turn 以 `done` 结束后，Runtime（不是 Agent Loop）取队首一条排队输入作为新的 `submit`，等它再次以 `done` 结束后取下一条（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §3）。其他结束原因（`aborted`、`error`、`truncated`、`refused`、`max_steps`）把剩余待发输入全部转成排队并暂停，不自动发送（§4）。新 Turn 与普通提交完全相同：TurnStart Hook、附件、`@` 引用、技能都在 Turn 边界重新生效。
+
+```text
 finish(reason, error?):
   for call in session.state.unsettledCalls(turnId):         # 本 Turn 中还没有 tool.completed 的调用
     emit tool.completed(call, status = "cancelled", error = { code: cancelCode(reason) })

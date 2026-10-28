@@ -72,7 +72,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `session.config_changed` | — | 变化的字段：`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `session.titled` | — | `title: string`、`source?: "generated" \| "user"`（旧事件缺省 `generated`；用户空标题清除覆盖）、`model?: string`（生成时的 provider/model；用户改名不填）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |
-| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥） |
+| `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥）、`steer?: true`（运行中插话，[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)：属于**当前** Turn 的补充消息，不是新 Turn 的开始；兼容扩展，旧版本按普通用户消息处理，不提升 `formatVersion`） |
 | `message.assistant` | ✓ | `messageId`、`model: ModelRef`、`content: ContentBlock[]`、`toolCalls: ToolCallRef[]`、`usage?: Usage`、`timing?: AssistantTiming`（请求计时，见第 4 节；旧日志无此字段）、`finishReason: FinishReason \| "aborted"`、`protocol?: "openai-compatible" \| "anthropic" \| "openai-responses"`（产生该消息时的生效协议，ADR-0026 §6、ADR-0031 §1；旧日志无此字段，缺省时 `providerData` 回传只比较服务商） |
 | `tool.started` | ✓ | `callId`、`name`、`input`（规范化后）、`target?: { name, input }`（经 `ToolTraits.dispatch` 代理调用时记录解析后的目标工具与目标输入，[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）、`pinResult?: boolean`（工具结果不参与 L1 修剪）、`subjects: PermissionSubject[]`（解析后）、`permission: { action, source, rule?, grant?: { scope: "session" \| "project", createdAt } }`（`rule` 为命中规则的人读说明，见 [permissions.md](../architecture/permissions.md) 5.3） |
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（权限层给出的选项子集：通常五项，高风险命令、编码命令或工作区外 edit 只有 `allow_once`、`deny`、`deny_stop`） |
@@ -122,6 +122,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）；`config_apply_failed`（配置已保存，但未能应用到该会话，见 [mcp.md](../architecture/mcp.md) 第 4 节）；ADR-0064 增补 `schedule_locked`（另一个 Nocturne 正在调度，本进程不启动调度循环）、`schedule_start_failed`、`schedule_config`（`schedules.json` 里被忽略的条目）、`schedule_check_failed`、`schedule_history_failed`，见 [schedule.md](../architecture/schedule.md)） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
 | `mcp.server` | — | `name`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节；归约进 `SessionView.mcpServers`，见 [view.md](view.md) §4） |
+| `input.pending` | — | `items: PendingInputItem[]`（每条 `{ id, mode: "steer" \| "queue", text, attachments, createdAt, paused }`）、`paused`（ADR-0070；待发输入的**完整快照**，每次变化整份下发，会话语义见 [agent-loop.md](../architecture/agent-loop.md) §2.1）。临时状态、不写日志，不回放：新附加的客户端在订阅后另调 `session.pendingInputs`（`rpc.md` 第 3.6 节）对齐 |
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
 
@@ -246,6 +247,11 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 | 命令 | 前置条件 | 效果事件 | 实现阶段 |
 |---|---|---|---|
 | `submit({ text?, content?, attachments?, skill?, delegate? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照；`skill` 与 `delegate` 互斥，点名 agent 必须已启用、任务必须非空，否则 `invalid_command` 且不写 Turn 事件 | `turn.started`、`message.user`（含 `attachments`、`fileRefs` 及可选调用快照）、…… | 图片见 ADR-0023、ADR-0040；文件引用见 ADR-0033；外部点名见 ADR-0049 |
+| `enqueueInput(mode, input)` | `mode` 为 `"steer" \| "queue"`，否则 `invalid_command`；子会话返回 `invalid_command`；Turn 运行中入列（返回 `{ id, queued: true }`），空闲时等同 `submit`（返回 `queued: false`，`id` 只是对齐标记）；暂停中提交追加到队尾并恢复 | 入列时 `input.pending`（临时）；插话在安全点写 `message.user(steer: true)`，排队在 `done` 后开新 Turn 写普通 `message.user` | ADR-0070 |
+| `updateInput(id, { mode?, input?: { text? } })` | 条目仍在列表中；已被消费返回 `input_consumed` | `input.pending`（临时） | ADR-0070；只替换文本，附件、`@` 引用与技能快照随原提交保留 |
+| `cancelInput(id)` | 条目仍在列表中；已被消费返回 `input_consumed` | `input.pending`（临时） | ADR-0070 |
+| `resumeInputs()` | 子会话返回 `invalid_command`；没有暂停的条目时无操作 | 空闲时立即发出队首（新 Turn 的事件）；`input.pending`（临时） | ADR-0070 §4 |
+| `pendingInputs()` | 会话可用 | 无事件，返回 `{ items, paused }` 完整快照（`input.pending` 不回放，订阅后用它对齐） | ADR-0070 §6 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |

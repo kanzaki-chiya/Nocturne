@@ -55,7 +55,7 @@ interface SessionView {
   pendingQuestion: PendingQuestion | undefined;
   /** 时间线：只由持久事件创建，可重放（§3） */
   entries: ViewEntry[];
-  /** 当前任务清单；全部完成后由下一条持久化 message.user 归档 */
+  /** 当前任务清单；全部完成后由下一条非插话的持久化 message.user 归档（ADR-0070） */
   todos: TodoItem[];
   /** 在途实体：只由临时事件创建，对应持久事件到达时转入 entries（§4） */
   live: {
@@ -78,7 +78,7 @@ interface SessionView {
 ```ts
 type ViewEntry =
   | { kind: "user"; key: string; seq: number; turnId: string; content: ContentBlock[];
-      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; descriptions?: AttachmentDescribedPayload[] }
+      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; steer?: true; descriptions?: AttachmentDescribedPayload[] }
   | AssistantEntry
   | ToolEntry
   | NoticeEntry;
@@ -195,7 +195,7 @@ interface SessionNotice {
 | `session.titled` | 按 `source`（缺省 `generated`）更新 `userTitle` 或 `generatedTitle`，重算 `title`；空用户标题只清除覆盖，不创建时间线条目、不累计角色用量 |
 | `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；追加 `config` notice 条目（shell 切换文案：`shell 已切换为 <kind>（<path>）`） |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
-| `message.user` | 当前 `todos` 非空且每项均为 `completed` 时先置空；尚有未完成项时保留，历史工具快照不变。追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs` 与 `skill`；首条消息以 `firstUserText`（第一个文本块的第一个非空行）记录 `firstTitle` 并重算 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
+| `message.user` | 当前 `todos` 非空且每项均为 `completed` 且这条**不是插话**（`steer !== true`）时先置空；尚有未完成项或这条是插话时保留，历史工具快照不变（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs`、`skill`，插话另带 `steer: true`（界面据此加「插话」标签，见 [apps/desktop.md](../apps/desktop.md) §6）；首条消息以 `firstUserText`（第一个文本块的第一个非空行）记录 `firstTitle` 并重算 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
 | `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |
 | `permission.reviewed` | 同 callId 的 live 工具晋升为 awaiting 条目，记录 `review`；不写 notice，避免同一审查显示两次。后续 requested 将审查理由复制到 `pendingPermission.review` |
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
@@ -339,3 +339,11 @@ function userEntryText(entry: UserEntry): string;   // 用户正文，去掉末�
 ## 回退
 
 `session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+
+回退目标只取非插话的 `message.user`（`steer !== true`）：回退到一条插话会把 Turn 截成半截（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。`rewindTargets()` 不列插话，`rewind` / `forkSession` 指向插话一律返回 `invalid_command`。
+
+## 待发输入（预览状态）
+
+待发输入（插话与排队，[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）**不属于** `SessionView`：它在被消费前不是对话事实，消费后以 `message.user(steer: true)` 进入视图。它只在临时事件 `input.pending` 里以完整快照出现，客户端各自保存一份（桌面/手机/TUI 都是整份覆盖）。
+
+`input.pending` 不回放，因此附加到已有会话的客户端在 `session.subscribe` 之后另调一次 `session.pendingInputs()` 取当前快照：两者同形（`{ items, paused }`），快照由服务端在收到请求时按当前列表生成，晚于此前发出的任何 `input.pending`，所以"订阅后取快照 + 之后按事件整份覆盖"不会把旧状态盖回去。进行中的权限请求与 `currentTurn` 不需要这种方法——它们分别由持久事件 `permission.requested`、`turn.started` 回放得出。

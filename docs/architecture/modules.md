@@ -167,6 +167,12 @@
 - **不负责**：历史的上屏与键位（各客户端实现）。
 - **依赖**：platform。**不能依赖**：session、agent、tools 等其余模块。
 
+### pending-inputs（`src/pending-inputs.ts`，单文件）
+
+- **负责**：待发输入（运行中插话与排队，[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）的内存列表——入列、同步取出插话、取队首排队、编辑、撤回、暂停与恢复，以及每次变化后的完整快照。条目保存**已准备好**的内容（附件已落盘、`@` 引用与技能正文已固定），消费时不再读盘；用户正文与 Core 追加的快照块分开保存，编辑文本不会丢掉附件与引用。
+- **不负责**：Turn 编排与安全点（Agent Loop，`agent/turn.ts`）、跨 Turn 接续与暂停策略（`core/index` 的 Turn 循环）、瞬态事件的发布（由 `core/index` 注入的回调交给 `Session.emitEphemeral`）。
+- **依赖**：仅 `protocol` 的类型。**不能依赖**：agent、session、tools、provider 等具体模块（避免与 `core/index` 循环）。
+
 ### core/index（公开 API）
 
 客户端看到的全部能力都经由这里：

@@ -168,6 +168,8 @@ import type {
   ImageMimeType,
   McpToolSearchMode,
   ModelRef,
+  PendingInputMode,
+  PendingInputsSnapshot,
   PermissionReply,
   PermissionSubject,
   QuestionReply,
@@ -190,7 +192,13 @@ import { DEFAULT_LOOP_GUARD, normalizePermissionPreset } from "./protocol/index.
 import type { FileRefResolution, LocalFileContent } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
-import { isReasoningEffort, REASONING_EFFORT_ORDER } from "./protocol/index.js";
+import {
+  isReasoningEffort,
+  preparedContent,
+  REASONING_EFFORT_ORDER,
+  type PreparedInput,
+} from "./protocol/index.js";
+import { PendingInputs, type PendingInputPatch } from "./pending-inputs.js";
 import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import {
@@ -444,6 +452,30 @@ export interface RuntimeSession {
   resolveFiles(paths: string[]): Promise<FileRefResolution[]>;
   /** 提交一个 Turn；Turn 结束时 resolve（events.md 第 7 节） */
   submit(input: SubmitInput): Promise<TurnEndReason>;
+  /**
+   * 提交一条待发输入（ADR-0070）：Turn 进行中入列——插话在安全点并入当前
+   * Turn，排队在 done 之后开新 Turn；空闲时与 submit 等价，立即开始并返回
+   * `queued: false`（id 只是对齐用的标记，不会出现在待发列表里）。暂停中提交
+   * 追加到队尾并恢复。子会话拒绝 `invalid_command`。
+   */
+  enqueueInput(
+    mode: PendingInputMode,
+    input: SubmitInput,
+  ): Promise<{ id: string; queued: boolean }>;
+  /**
+   * 编辑待发输入（ADR-0070 §5）：只替换文本，附件、`@` 引用与技能快照随原
+   * 提交保留；条目已被消费时拒绝 `input_consumed`。
+   */
+  updateInput(id: string, patch: PendingInputPatch): Promise<void>;
+  /** 撤回待发输入；条目已被消费时拒绝 `input_consumed` */
+  cancelInput(id: string): Promise<void>;
+  /** 解除暂停（ADR-0070 §4）；空闲时立即发出队首，Turn 进行中交给结束边界 */
+  resumeInputs(): Promise<void>;
+  /**
+   * 待发输入的当前快照。待发输入是临时状态、不写日志，`input.pending` 不回放，
+   * 新附加的客户端用它在订阅后对齐（view.md 第 6 节）。
+   */
+  pendingInputs(): PendingInputsSnapshot;
   /** 中断运行中的 Turn；无运行中 Turn 时无操作 */
   interrupt(): void;
   /**
@@ -770,6 +802,11 @@ function parseModelRef(model: string | ModelRef): ModelRef {
     );
   }
   return { provider: model.slice(0, i), model: model.slice(i + 1) };
+}
+
+/** ADR-0070：待发输入的方式；RPC 传来的值按运行时校验，避免信任客户端类型 */
+function isPendingInputMode(value: unknown): value is PendingInputMode {
+  return value === "steer" || value === "queue";
 }
 
 /**
@@ -2299,12 +2336,291 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     };
     const busy = () => controller !== undefined || rewinding;
+    const compacting = () => compactController !== undefined;
     const validateForkTarget = (targetSeq?: number) => {
       if (
         targetSeq !== undefined &&
-        !session.state().history.some((e) => e.kind === "user" && e.seq === targetSeq)
+        // ADR-0070 §7：插话不是回退目标
+        !session
+          .state()
+          .history.some((e) => e.kind === "user" && e.seq === targetSeq && e.steer !== true)
       )
         throw new RuntimeCommandError("invalid_command", "目标不是当前有效对话中的用户消息");
+    };
+
+    // 待发输入（ADR-0070）：会话内存中的运行态，不写日志。每次变化把完整快照发成
+    // 临时事件 input.pending；新附加的客户端经 pendingInputs() 取当前快照。
+    const pendingInputStore = new PendingInputs((snapshot) =>
+      session.emitEphemeral("input.pending", snapshot),
+    );
+    /** 子会话不参与待发输入（ADR-0070 §5） */
+    const assertMainSession = () => {
+      if (meta.parent !== undefined)
+        throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
+    };
+    /**
+     * 准备一条提交内容：附件落盘、`@` 引用与技能正文固定成快照块。普通提交与
+     * 待发输入共用——待发输入在被消费时不再读盘或重新解析。
+     */
+    const prepareInput = async (
+      input: SubmitInput,
+      signal: AbortSignal,
+    ): Promise<PreparedInput> => {
+      if (input.skill !== undefined && input.delegate !== undefined)
+        throw new RuntimeCommandError("invalid_command", "skill 与 delegate 互斥");
+      if (input.delegate !== undefined && !delegateSchema.safeParse(input.delegate).success)
+        throw new RuntimeCommandError(
+          "invalid_command",
+          "delegate.agent 和 delegate.task 必须是非空字符串",
+        );
+      const content: ContentBlock[] = [
+        ...(input.content ?? [{ type: "text", text: input.text ?? "" }]),
+      ];
+      if (
+        input.skill &&
+        (typeof input.skill.name !== "string" ||
+          !input.skill.name.trim() ||
+          (input.skill.arguments !== undefined && typeof input.skill.arguments !== "string"))
+      )
+        throw new RuntimeCommandError(
+          "invalid_command",
+          "技能 name 必须是非空字符串，arguments 必须是字符串",
+        );
+      let delegation: AgentDelegation | undefined;
+      if (input.delegate !== undefined) {
+        const agent = enabledExternalAgents.find(
+          (entry) => entry.name.toLowerCase() === input.delegate?.agent.toLowerCase(),
+        );
+        if (agent === undefined)
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `外部 agent ${input.delegate.agent} 不存在或未启用`,
+          );
+        delegation = { agent: agent.name, task: input.delegate.task };
+      }
+      const attachments = [];
+      for (const att of input.attachments ?? []) {
+        const mimeType = sniffImageMime(att.data);
+        const size = mimeType === undefined ? undefined : parseImageSize(att.data, mimeType);
+        if (
+          mimeType !== att.mimeType ||
+          size === undefined ||
+          att.data.byteLength > IMAGE_MAX_BYTES ||
+          size.width > IMAGE_MAX_EDGE ||
+          size.height > IMAGE_MAX_EDGE
+        ) {
+          throw new RuntimeCommandError("invalid_command", "图片格式或尺寸不符合要求");
+        }
+        if (execEnv.attachments === undefined) {
+          throw new RuntimeCommandError("invalid_command", "附件存储不可用");
+        }
+        attachments.push(await execEnv.attachments.save({ ...att, source: "paste" }));
+      }
+      const refs = await resolveFileRefs(content, {
+        fs: platform.fs,
+        paths: platform.paths,
+        cwd: session.state().meta.cwd,
+        workspaceRoot: session.state().meta.workspaceRoot,
+        readState: execEnv.readState,
+        attachments: execEnv.attachments,
+        imageInput:
+          model.model.capabilities.imageInput ||
+          resolveModelRole(
+            sessionRegistry,
+            config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
+            "vision",
+          ) !== undefined,
+        signal,
+      });
+      for (const message of refs.warnings) {
+        session.emitEphemeral("runtime.warning", { code: "file_reference", message });
+      }
+      // 追加块（@ 引用、技能正文、委派指令）与用户正文分开保存：编辑待发输入
+      // 的文本时只替换正文，快照块原样保留
+      const appended = refs.content.slice(content.length);
+      let skillSnapshot: SkillSnapshot | undefined;
+      const invocation = input.skill;
+      if (invocation) {
+        const overview = catalog.skills.find(
+          (s) => s.name.toLowerCase() === invocation.name.toLowerCase() && !s.shadowedBy,
+        );
+        const source = skillDiscovery.skills.find((s) => s.entryPath === overview?.entryPath);
+        if (
+          !overview ||
+          !source ||
+          !overview.enabled ||
+          overview.commandConflict ||
+          overview.fields["user-invocable"] === false
+        )
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `技能 ${invocation.name} 不能由用户调用`,
+          );
+        const body = renderSkill(source.body, overview, invocation, meta.workspaceRoot, session.id);
+        skillSnapshot = { name: overview.name, body };
+        const escaped = overview.name
+          .replace(/&/g, "&amp;")
+          .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;");
+        appended.push({
+          type: "text",
+          text: `<skill name="${escaped}">\n${body}\n</skill>`,
+        });
+      }
+      if (delegation !== undefined) {
+        appended.push({
+          type: "text",
+          text:
+            "用户明确要求委派给指定的外部 agent。请调用 task 工具，" +
+            `agent 设为 ${JSON.stringify(delegation.agent)}，将下面的任务原文作为 task 参数，不要改写；` +
+            "不要设置 preset、tools 或 outputSchema。委派入口仍遵循正常权限流程。\n任务原文：\n" +
+            delegation.task,
+        });
+      }
+      return {
+        content,
+        appended,
+        attachments: [...attachments, ...refs.attachments],
+        fileRefs: refs.fileRefs,
+        ...(skillSnapshot !== undefined ? { skill: skillSnapshot } : {}),
+        ...(delegation !== undefined ? { delegate: delegation } : {}),
+      };
+    };
+    /**
+     * 设置 Turn 控制器并跑一个或连续多个 Turn（ADR-0070 §3：`done` 结束后取队首
+     * 一条排队输入作为新 Turn；其他结束原因把剩余条目全部转排队并暂停）。
+     */
+    const startTurns = async (
+      ac: AbortController,
+      first: () => Promise<PreparedInput>,
+    ): Promise<TurnEndReason> => {
+      controller = ac;
+      let settleTurn!: () => void;
+      turnSettled = new Promise<void>((resolve) => {
+        settleTurn = resolve;
+      });
+      // 空闲边界：controller 先置位（busy 语义立即生效），再重建
+      // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
+      try {
+        let prepare: (() => Promise<PreparedInput>) | undefined = first;
+        let reason: TurnEndReason | "failed" = "done";
+        while (prepare !== undefined) {
+          await awaitMcpIdle(ac.signal);
+          await rebuildProviders();
+          await applySkills();
+          applyExternalAgents();
+          // ADR-0026 §5：刷新后条目/模型可能变化——原位重解析拿到最新的
+          // 协议与不可用标记（失败沿用旧解析，同一错误仍由 stream 路径报告）
+          try {
+            model = resolveSessionModel(session.state().config.model);
+          } catch {
+            // 保留旧解析
+          }
+          // 会话中的模型变为不可用时，本轮在发请求前以说明结束，不发 HTTP
+          if (model.model.unavailable !== undefined) {
+            throw invalidModelError(model.model.unavailable.reason, model.model);
+          }
+          const prepared = await prepare();
+          prepare = undefined;
+          const deps: TurnDeps = {
+            prepareTools: async (signal) => {
+              if (mcpSession?.status().some((s) => s.state === "starting")) {
+                const started = Date.now();
+                await mcpSession.startup(signal);
+                diagnostics.record("mcp.startup_wait", {
+                  sessionId: session.id,
+                  durationMs: Date.now() - started,
+                  aborted: signal.aborted,
+                });
+              }
+              // Turn 边界恢复尝试（mcp.md 第 4 节）：对 failed 且已过冷却的 HTTP
+              // 服务器并行重连一次，最多等 3 秒，超时后台继续；工具仍由随后的
+              // awaitMcpIdle → applyPendingTools 在本次边界统一切换。
+              if (!signal.aborted) await mcpSession?.prepareTurn?.(signal);
+              if (!signal.aborted) await awaitMcpIdle(signal);
+            },
+            // ADR-0070 §2：安全点取走插话；取走即从列表移除并广播快照
+            takeSteers: () => pendingInputStore.takeSteers(),
+            skills: catalog,
+            visionModel: () =>
+              resolveModelRole(
+                sessionRegistry,
+                config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
+                "vision",
+              ),
+            compactionThreshold: config?.resolvedSettings(session.state().meta.workspaceRoot)
+              .compactionThreshold,
+            compactionPruneLimit: config?.resolvedSettings(session.state().meta.workspaceRoot)
+              .compactionPruneLimit,
+            session,
+            model,
+            tools,
+            executor,
+            execEnv,
+            instructions,
+            environment,
+            config: turnConfig,
+            signal: ac.signal,
+          };
+          // 与 runTurn 入口快照同源：同一瞬时、同一输入（持久化意图 ×
+          // 本模型可用集合）——report 给 reasoningEffortInfo().effective
+          activeTurnEffort =
+            clampReasoningEffort(
+              session.state().config.reasoningEffort,
+              model.model.capabilities.reasoningEffort,
+            ) ?? "off";
+          reason = await runTurn(
+            deps,
+            preparedContent(prepared),
+            prepared.attachments ?? [],
+            prepared.fileRefs,
+            prepared.skill,
+            prepared.delegate,
+          );
+          // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
+          if (reason !== "done") pendingInputStore.pauseAll();
+          if (reason === "failed") {
+            throw new RuntimeCommandError("session_failed", "会话持久化失败");
+          }
+          if (reason !== "done") break;
+          const head = pendingInputStore.takeQueueHead();
+          if (head !== undefined) prepare = () => Promise.resolve(head);
+        }
+        return reason;
+      } finally {
+        if (controller === ac) controller = undefined;
+        await applySkills().catch((error: unknown) =>
+          session.emitEphemeral("runtime.warning", {
+            code: "skills_reload_failed",
+            message: `技能目录更新失败：${error instanceof Error ? error.message : String(error)}`,
+          }),
+        );
+        const mcpFlush = applyMcp().catch(() =>
+          session.emitEphemeral("runtime.warning", {
+            code: "mcp_server_failed",
+            message: "MCP 热更新失败，请重新加载配置",
+          }),
+        );
+        // 已中止的 Turn 不等重配收尾：后台 reconcile 继续跑，结果下一 Turn 应用；
+        // 失败告警仍挂在同一 Promise 上照常发出。
+        if (ac.signal.aborted) void mcpFlush;
+        else await mcpFlush;
+        applyExternalAgents();
+        fileIndexPromise = undefined;
+        activeTurnEffort = undefined;
+        turnSettled = undefined;
+        settleTurn();
+      }
+    };
+    /** 空闲时立即发出队首排队输入（恢复暂停、压缩结束后）；忙时留给 Turn 结束 */
+    const pumpQueue = async (): Promise<boolean> => {
+      if (busy() || compactController !== undefined || closing || session.health !== "ok")
+        return false;
+      const head = pendingInputStore.takeQueueHead();
+      if (head === undefined) return false;
+      const ac = new AbortController();
+      await startTurns(ac, () => Promise.resolve(head));
+      return true;
     };
 
     // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
@@ -2514,7 +2830,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
         if (
           !["both", "conversation", "files"].includes(mode) ||
-          !session.state().history.some((e) => e.kind === "user" && e.seq === targetSeq)
+          // ADR-0070 §7：插话不是回退目标
+          !session
+            .state()
+            .history.some((e) => e.kind === "user" && e.seq === targetSeq && e.steer !== true)
         )
           throw new RuntimeCommandError("invalid_command", "目标不是当前有效对话中的用户消息");
         rewinding = true;
@@ -2605,220 +2924,83 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
-        if (input.skill !== undefined && input.delegate !== undefined)
-          throw new RuntimeCommandError("invalid_command", "skill 与 delegate 互斥");
-        if (input.delegate !== undefined && !delegateSchema.safeParse(input.delegate).success)
-          throw new RuntimeCommandError(
-            "invalid_command",
-            "delegate.agent 和 delegate.task 必须是非空字符串",
-          );
-        const content: ContentBlock[] = [
-          ...(input.content ?? [{ type: "text", text: input.text ?? "" }]),
-        ];
-        if (
-          input.skill &&
-          (typeof input.skill.name !== "string" ||
-            !input.skill.name.trim() ||
-            (input.skill.arguments !== undefined && typeof input.skill.arguments !== "string"))
-        )
-          throw new RuntimeCommandError(
-            "invalid_command",
-            "技能 name 必须是非空字符串，arguments 必须是字符串",
-          );
         const ac = new AbortController();
-        controller = ac;
-        let settleTurn!: () => void;
-        turnSettled = new Promise<void>((resolve) => {
-          settleTurn = resolve;
-        });
-        // 空闲边界：controller 先置位（busy 语义立即生效），再重建
-        // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
-        try {
-          await awaitMcpIdle(ac.signal);
-          await rebuildProviders();
-          await applySkills();
-          applyExternalAgents();
-          let delegation: AgentDelegation | undefined;
-          if (input.delegate !== undefined) {
-            const agent = enabledExternalAgents.find(
-              (entry) => entry.name.toLowerCase() === input.delegate?.agent.toLowerCase(),
-            );
-            if (agent === undefined)
-              throw new RuntimeCommandError(
-                "invalid_command",
-                `外部 agent ${input.delegate.agent} 不存在或未启用`,
-              );
-            delegation = { agent: agent.name, task: input.delegate.task };
-          }
-          // ADR-0026 §5：刷新后条目/模型可能变化——原位重解析拿到最新的
-          // 协议与不可用标记（失败沿用旧解析，同一错误仍由 stream 路径报告）
-          try {
-            model = resolveSessionModel(session.state().config.model);
-          } catch {
-            // 保留旧解析
-          }
-          // 会话中的模型变为不可用时，本轮在发请求前以说明结束，不发 HTTP
-          if (model.model.unavailable !== undefined) {
-            throw invalidModelError(model.model.unavailable.reason, model.model);
-          }
-          const deps: TurnDeps = {
-            prepareTools: async (signal) => {
-              if (mcpSession?.status().some((s) => s.state === "starting")) {
-                const started = Date.now();
-                await mcpSession.startup(signal);
-                diagnostics.record("mcp.startup_wait", {
-                  sessionId: session.id,
-                  durationMs: Date.now() - started,
-                  aborted: signal.aborted,
-                });
-              }
-              // Turn 边界恢复尝试（mcp.md 第 4 节）：对 failed 且已过冷却的 HTTP
-              // 服务器并行重连一次，最多等 3 秒，超时后台继续；工具仍由随后的
-              // awaitMcpIdle → applyPendingTools 在本次边界统一切换。
-              if (!signal.aborted) await mcpSession?.prepareTurn?.(signal);
-              if (!signal.aborted) await awaitMcpIdle(signal);
-            },
-            skills: catalog,
-            visionModel: () =>
-              resolveModelRole(
-                sessionRegistry,
-                config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
-                "vision",
-              ),
-            compactionThreshold: config?.resolvedSettings(session.state().meta.workspaceRoot)
-              .compactionThreshold,
-            compactionPruneLimit: config?.resolvedSettings(session.state().meta.workspaceRoot)
-              .compactionPruneLimit,
-            session,
-            model,
-            tools,
-            executor,
-            execEnv,
-            instructions,
-            environment,
-            config: turnConfig,
-            signal: ac.signal,
-          };
-          // 与 runTurn 入口快照同源：同一瞬时、同一输入（持久化意图 ×
-          // 本模型可用集合）——report 给 reasoningEffortInfo().effective
-          activeTurnEffort =
-            clampReasoningEffort(
-              session.state().config.reasoningEffort,
-              model.model.capabilities.reasoningEffort,
-            ) ?? "off";
-          const attachments = [];
-          for (const att of input.attachments ?? []) {
-            const mimeType = sniffImageMime(att.data);
-            const size = mimeType === undefined ? undefined : parseImageSize(att.data, mimeType);
-            if (
-              mimeType !== att.mimeType ||
-              size === undefined ||
-              att.data.byteLength > IMAGE_MAX_BYTES ||
-              size.width > IMAGE_MAX_EDGE ||
-              size.height > IMAGE_MAX_EDGE
-            ) {
-              throw new RuntimeCommandError("invalid_command", "图片格式或尺寸不符合要求");
-            }
-            if (execEnv.attachments === undefined) {
-              throw new RuntimeCommandError("invalid_command", "附件存储不可用");
-            }
-            attachments.push(await execEnv.attachments.save({ ...att, source: "paste" }));
-          }
-          const refs = await resolveFileRefs(content, {
-            fs: platform.fs,
-            paths: platform.paths,
-            cwd: session.state().meta.cwd,
-            workspaceRoot: session.state().meta.workspaceRoot,
-            readState: execEnv.readState,
-            attachments: execEnv.attachments,
-            imageInput: model.model.capabilities.imageInput || deps.visionModel?.() !== undefined,
-            signal: ac.signal,
-          });
-          for (const message of refs.warnings) {
-            session.emitEphemeral("runtime.warning", { code: "file_reference", message });
-          }
-          let skillSnapshot: SkillSnapshot | undefined;
-          const invocation = input.skill;
-          if (invocation) {
-            const overview = catalog.skills.find(
-              (s) => s.name.toLowerCase() === invocation.name.toLowerCase() && !s.shadowedBy,
-            );
-            const source = skillDiscovery.skills.find((s) => s.entryPath === overview?.entryPath);
-            if (
-              !overview ||
-              !source ||
-              !overview.enabled ||
-              overview.commandConflict ||
-              overview.fields["user-invocable"] === false
-            )
-              throw new RuntimeCommandError(
-                "invalid_command",
-                `技能 ${invocation.name} 不能由用户调用`,
-              );
-            const body = renderSkill(
-              source.body,
-              overview,
-              invocation,
-              meta.workspaceRoot,
-              session.id,
-            );
-            skillSnapshot = { name: overview.name, body };
-            const escaped = overview.name
-              .replace(/&/g, "&amp;")
-              .replace(/"/g, "&quot;")
-              .replace(/</g, "&lt;");
-            refs.content.push({
-              type: "text",
-              text: `<skill name="${escaped}">\n${body}\n</skill>`,
-            });
-          }
-          if (delegation !== undefined) {
-            refs.content.push({
-              type: "text",
-              text:
-                "用户明确要求委派给指定的外部 agent。请调用 task 工具，" +
-                `agent 设为 ${JSON.stringify(delegation.agent)}，将下面的任务原文作为 task 参数，不要改写；` +
-                "不要设置 preset、tools 或 outputSchema。委派入口仍遵循正常权限流程。\n任务原文：\n" +
-                delegation.task,
-            });
-          }
-          const reason = await runTurn(
-            deps,
-            refs.content,
-            [...attachments, ...refs.attachments],
-            refs.fileRefs,
-            skillSnapshot,
-            delegation,
-          );
-          if (reason === "failed") {
-            throw new RuntimeCommandError("session_failed", "会话持久化失败");
-          }
-          return reason;
-        } finally {
-          if (controller === ac) controller = undefined;
-          await applySkills().catch((error: unknown) =>
-            session.emitEphemeral("runtime.warning", {
-              code: "skills_reload_failed",
-              message: `技能目录更新失败：${error instanceof Error ? error.message : String(error)}`,
-            }),
-          );
-          const mcpFlush = applyMcp().catch(() =>
-            session.emitEphemeral("runtime.warning", {
-              code: "mcp_server_failed",
-              message: "MCP 热更新失败，请重新加载配置",
-            }),
-          );
-          // 已中止的 Turn 不等重配收尾：后台 reconcile 继续跑，结果下一 Turn 应用；
-          // 失败告警仍挂在同一 Promise 上照常发出。
-          if (ac.signal.aborted) void mcpFlush;
-          else await mcpFlush;
-          applyExternalAgents();
-          fileIndexPromise = undefined;
-          activeTurnEffort = undefined;
-          turnSettled = undefined;
-          settleTurn();
-        }
+        return await startTurns(ac, () => prepareInput(input, ac.signal));
       },
+      async enqueueInput(mode, input) {
+        assertUsable();
+        assertMainSession();
+        if (!isPendingInputMode(mode))
+          throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
+        // 暂停中提交 = 追加到队尾并恢复（ADR-0070 §4）。没有进行中的 Turn 可以
+        // 插话，因此一律作为排队追加，避免越过队首抢在暂停队列之前
+        if (pendingInputStore.snapshot().paused) {
+          const prepared = await prepareInput(input, new AbortController().signal);
+          const id = pendingInputStore.add("queue", prepared);
+          pendingInputStore.resume();
+          void pumpQueue().catch((cause: unknown) => {
+            session.emitEphemeral("runtime.warning", {
+              code: "input_queue_failed",
+              message: `待发输入没能发出：${cause instanceof Error ? cause.message : String(cause)}`,
+            });
+          });
+          return { id, queued: true };
+        }
+        // Turn 进行中：进入待发列表，由安全点（插话）或 Turn 结束（排队）消费
+        if (busy()) {
+          const prepared = await prepareInput(input, new AbortController().signal);
+          assertUsable();
+          if (busy()) return { id: pendingInputStore.add(mode, prepared), queued: true };
+          if (pendingInputStore.snapshot().paused) {
+            const id = pendingInputStore.add("queue", prepared);
+            pendingInputStore.resume();
+            void pumpQueue().catch(() => {
+              pendingInputStore.pauseAll();
+            });
+            return { id, queued: true };
+          }
+          const ac = new AbortController();
+          await startTurns(ac, () => Promise.resolve(prepared));
+          return { id: pendingInputStore.nextId(), queued: false };
+        }
+        if (compacting()) {
+          // 压缩不占 Turn：等它收尾后按普通提交立即开始（ADR-0070 §1 空闲路径）
+          await compactSettled;
+          assertUsable();
+          if (busy() || compacting()) {
+            const prepared = await prepareInput(input, new AbortController().signal);
+            return { id: pendingInputStore.add(mode, prepared), queued: true };
+          }
+        }
+        // 空闲：按普通提交立即开始。返回的 id 只是对齐用的标记，不会出现在待发列表里
+        const ac = new AbortController();
+        await startTurns(ac, () => prepareInput(input, ac.signal));
+        return { id: pendingInputStore.nextId(), queued: false };
+      },
+      updateInput: (id, patch) =>
+        Promise.resolve().then(() => {
+          assertUsable();
+          assertMainSession();
+          if (patch.mode !== undefined && !isPendingInputMode(patch.mode))
+            throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
+          if (pendingInputStore.update(id, patch) === "consumed")
+            throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
+        }),
+      cancelInput: (id) =>
+        Promise.resolve().then(() => {
+          assertUsable();
+          assertMainSession();
+          if (pendingInputStore.cancel(id) === "consumed")
+            throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
+        }),
+      async resumeInputs() {
+        assertUsable();
+        assertMainSession();
+        pendingInputStore.resume();
+        // 空闲时立即发出队首；Turn 进行中留给它的结束边界（ADR-0070 §3）
+        await pumpQueue();
+      },
+      pendingInputs: () => pendingInputStore.snapshot(),
       async setModel(input) {
         assertUsable();
         if (busy() || compactController !== undefined) {
@@ -4193,6 +4375,7 @@ async function loadInstructions(
 
 // 公共契约类型与工具再导出：客户端只需要 @nocturne/core 与 @nocturne/core/protocol
 export * from "./protocol/index.js";
+export type { PendingInputPatch } from "./pending-inputs.js";
 export { McpSettingsError } from "./config/mcp.js";
 export { ScheduleError } from "./schedule/index.js";
 export type {

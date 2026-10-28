@@ -100,6 +100,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 用户改名与会话标题旁路缓存（日志仍为事实来源）见 [ADR-0069](decisions/ADR-0069-session-rename-title-sidecar.md)，主文档是 [sessions.md](architecture/sessions.md)。
 
+运行中插话与输入排队（安全点消费、待发列表不写日志、`done` 后逐条接续）见 [ADR-0070](decisions/ADR-0070-steer-and-queue-input.md)，主文档是 [agent-loop.md](architecture/agent-loop.md) §2 与 [events.md](protocols/events.md)。
+
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
 
 ## Roadmap

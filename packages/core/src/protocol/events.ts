@@ -12,6 +12,7 @@ import type {
   ImageAttachment,
   ModelProtocol,
   ModelRef,
+  PendingInputItem,
   PermissionAction,
   PermissionOption,
   PermissionSource,
@@ -68,6 +69,11 @@ export interface MessageUserPayload {
   skill?: SkillSnapshot | undefined;
   /** 外部委派快照；对应的明确 task 指令同时保存在 content 中。 */
   delegate?: AgentDelegation | undefined;
+  /**
+   * 运行中插话（ADR-0070）：该消息由当前 Turn 的安全点插入，不是新 Turn 的开始。
+   * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
+   */
+  steer?: true | undefined;
 }
 
 export interface AttachmentDescribedPayload {
@@ -268,6 +274,16 @@ export interface McpServerPayload {
 }
 
 /**
+ * 待发输入快照（ADR-0070 §6）：临时事件，每次变化整份下发；待发输入不写日志。
+ * 新附加的客户端经 `session.pendingInputs()` 取当前快照（临时事件不回放）。
+ */
+export interface InputPendingPayload {
+  items: PendingInputItem[];
+  /** 列表处于暂停（非 done 结束后的状态，ADR-0070 §4）；空列表为 false */
+  paused: boolean;
+}
+
+/**
  * ask_user 待回答的问题（ADR-0032 §3）：临时事件——问题已记录在
  * tool.started.input、回答记录在 tool.completed.output，不持久化。
  */
@@ -324,6 +340,7 @@ export interface EphemeralPayloadMap {
   "runtime.error": RuntimeErrorPayload;
   "mcp.server": McpServerPayload;
   "question.requested": QuestionRequestedPayload;
+  "input.pending": InputPendingPayload;
 }
 
 export type DurableType = keyof DurablePayloadMap;
@@ -404,6 +421,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "runtime.error",
   "mcp.server",
   "question.requested",
+  "input.pending",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

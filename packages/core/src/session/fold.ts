@@ -123,7 +123,13 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         break;
       }
       case "message.user": {
-        if (todos.length > 0 && todos.every((item) => item.status === "completed")) todos = [];
+        // ADR-0070 §7：清单归档只由非插话的用户消息触发
+        if (
+          event.payload.steer !== true &&
+          todos.length > 0 &&
+          todos.every((item) => item.status === "completed")
+        )
+          todos = [];
         const p = event.payload;
         history.push({
           kind: "user",
@@ -134,6 +140,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.fileRefs !== undefined ? { fileRefs: p.fileRefs } : {}),
           ...(p.skill !== undefined ? { skill: p.skill } : {}),
           ...(p.delegate !== undefined ? { delegate: p.delegate } : {}),
+          ...(p.steer === true ? { steer: true as const } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         });

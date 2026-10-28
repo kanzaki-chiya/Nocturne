@@ -1040,3 +1040,43 @@ it("mcpServers 是临时状态：持久重放不产生，不参与重放等价",
   expect(replaySessionView(durable).mcpServers).toEqual({});
   assertConvergedEqual(view, durable);
 });
+
+it("ADR-0070：插话条目带 steer 标记，任务清单归档只由非插话消息触发", () => {
+  const todoDone: DurableEvent = {
+    type: "tool.completed",
+    sessionId: "s",
+    seq: 1,
+    time: "t",
+    turnId: "t1",
+    payload: {
+      callId: "c1",
+      name: "todo_write",
+      status: "ok",
+      modelContent: "ok",
+      output: { items: [{ text: "完成项", status: "completed" }] },
+    },
+  };
+  const steer: DurableEvent = {
+    type: "message.user",
+    sessionId: "s",
+    seq: 2,
+    time: "t",
+    turnId: "t1",
+    payload: { messageId: "u2", steer: true, content: [{ type: "text", text: "插话" }] },
+  };
+  const view = liveView([todoDone, steer]);
+  // 插话不归档已完成的清单
+  expect(view.todos).toHaveLength(1);
+  const user = view.entries.find((entry) => entry.kind === "user");
+  expect(user?.kind === "user" && user.steer).toBe(true);
+  // 普通用户消息照旧归档
+  reduceSessionView(view, {
+    type: "message.user",
+    sessionId: "s",
+    seq: 3,
+    time: "t",
+    turnId: "t2",
+    payload: { messageId: "u3", content: [{ type: "text", text: "新请求" }] },
+  });
+  expect(view.todos).toEqual([]);
+});

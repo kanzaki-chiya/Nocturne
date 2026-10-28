@@ -121,6 +121,8 @@ export async function rewindTargets(
   const targets: RewindTarget[] = [];
   for (const event of effectiveEvents(events).toReversed()) {
     if (event.type !== "message.user") continue;
+    // ADR-0070 §7：插话不是回退目标——回退到一条插话会把 Turn 截成半截
+    if (event.payload.steer === true) continue;
     const { before } = rewindCheckpoints(events, event.seq, platform);
     const files: RewindFile[] = [];
     for (const [key, snapshot] of before) {

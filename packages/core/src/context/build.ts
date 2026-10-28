@@ -492,14 +492,14 @@ export function imageRefsInCap(
       if (entry.attachments !== undefined) refs.push(...entry.attachments);
     }
   }
-  // 与 buildContext 的"当前任务重新注入"同口径（context.md 6.5）
+  // 与 buildContext 的"当前任务重新注入"同口径（context.md 6.5）；ADR-0070：同一
+  // Turn 里被摘要覆盖的插话附件一起算
   const openTurn = events !== undefined ? lastOpenTurnId(events) : undefined;
   if (openTurn !== undefined) {
-    const covered = history.find(
-      (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryThrough,
-    );
-    if (covered?.kind === "user" && covered.attachments !== undefined) {
-      refs.push(...covered.attachments);
+    for (const covered of history) {
+      if (covered.kind !== "user" || covered.turnId !== openTurn || covered.seq > summaryThrough)
+        continue;
+      if (covered.attachments !== undefined) refs.push(...covered.attachments);
     }
   }
   return refs.slice(-MAX_IMAGES_PER_REQUEST);
@@ -1090,14 +1090,22 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
   const openTurn = input.events !== undefined ? lastOpenTurnId(input.events) : undefined;
   if (openTurn !== undefined) {
-    const coveredUser = input.history.find(
+    // ADR-0070 §6：被摘要覆盖的插话与原始请求按提交顺序合并到同一条重新注入的
+    // user 消息里（插话在后），不单独成为"新请求"
+    const coveredUsers = input.history.filter(
       (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryCut,
     );
-    if (coveredUser?.kind === "user") {
-      const atts = resolveAttachments(coveredUser.attachments, imageOpts);
+    const original = coveredUsers[0];
+    if (original?.kind === "user") {
+      const steers = coveredUsers.slice(1).flatMap((e) => (e.kind === "user" ? e.content : []));
+      const atts = resolveAttachments(
+        coveredUsers.flatMap((e) => (e.kind === "user" ? (e.attachments ?? []) : [])),
+        imageOpts,
+      );
       const blocks: ContentBlock[] = [
         { type: "text", text: REINJECTED_TASK_MARK },
-        ...coveredUser.content,
+        ...original.content,
+        ...steers,
         ...atts.texts.map((text) => ({ type: "text" as const, text })),
       ];
       const msg: ModelMessage = {

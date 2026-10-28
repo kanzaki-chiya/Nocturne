@@ -3,7 +3,7 @@
  * Agent 是 Core 内唯一的编排者：不感知工具名、Provider 名、权限规则与 UI。
  */
 import type { EnvironmentInfo, InstructionSet } from "../context/index.js";
-import type { LoopGuardConfig } from "../protocol/index.js";
+import type { LoopGuardConfig, PreparedInput } from "../protocol/index.js";
 import type { ResolvedModel } from "../provider/index.js";
 import type { Session, SessionState } from "../session/index.js";
 import type { ExecutionEnvironment, ToolExecutor, ToolRegistry } from "../tools/index.js";
@@ -42,6 +42,12 @@ export type IdFactory = (kind: "turn" | "message" | "call") => string;
 export interface TurnDeps {
   /** Turn 开始后、首个请求前的工具边界准备；子会话和压缩不使用。 */
   prepareTools?: ((signal: AbortSignal) => Promise<void>) | undefined;
+  /**
+   * ADR-0070 §2：安全点取走待发插话。调用即同步从队列移除并发布快照，
+   * 返回已准备好的内容；Agent Loop 随后按顺序写 `message.user(steer)`。
+   * 缺省（子会话等）即没有插话。
+   */
+  takeSteers?: (() => readonly PreparedInput[]) | undefined;
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;

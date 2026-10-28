@@ -200,6 +200,8 @@ const payloadSchemas = {
     fileRefs: z.array(fileRefSchema).optional(),
     skill: z.object({ name: z.string(), body: z.string() }).optional(),
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
+    // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
+    steer: z.literal(true).optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),

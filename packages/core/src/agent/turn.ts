@@ -43,6 +43,7 @@ import {
 } from "../protocol/index.js";
 import { SessionError } from "../session/index.js";
 import { createExecutionScope, type ExecutionScope } from "../tools/index.js";
+import { preparedContent } from "../protocol/input.js";
 import { consumeStream, EmptyResponseError, type StreamAccumulation } from "./stream.js";
 import type { TurnDeps } from "./types.js";
 import { describeImages } from "./roles.js";
@@ -132,6 +133,32 @@ export async function runTurn(
   const status = (s: RuntimeStatus) => {
     session.emitEphemeral("runtime.status", { status: s }, { turnId });
   };
+
+  /**
+   * 安全点取走插话（ADR-0070 §2）：`takeSteers` 同步移除条目并发布快照，
+   * 这里按提交顺序逐条写 `message.user(steer)`。中断信号已触发时不消费。
+   * 返回是否写入了插话（安全点 2 据此决定是否继续下一个 Step）。
+   */
+  async function deliverSteers(): Promise<boolean> {
+    if (deps.takeSteers === undefined || aborted(signal)) return false;
+    const taken = deps.takeSteers();
+    for (const item of taken) {
+      await session.emit(
+        "message.user",
+        {
+          messageId: id("message"),
+          content: preparedContent(item),
+          ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+          ...(item.fileRefs?.length ? { fileRefs: item.fileRefs } : {}),
+          ...(item.skill !== undefined ? { skill: item.skill } : {}),
+          ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
+          steer: true,
+        },
+        { turnId },
+      );
+    }
+    return taken.length > 0;
+  }
 
   const addUsage = (u: Usage | undefined) => {
     if (u === undefined) return;
@@ -546,6 +573,9 @@ export async function runTurn(
       }
       const toolCalls = outcome.acc.toolCalls;
       if (reason === "stop" && toolCalls.length === 0) {
+        // 安全点 2（ADR-0070 §2）：有待消费的插话就不结束 Turn——不打断纯文本
+        // 输出，写入插话后继续下一个 Step；maxSteps 照常计数
+        if (await deliverSteers()) continue;
         return await finish("done");
       }
       if (reason === "tool_calls" && toolCalls.length === 0) {
@@ -578,6 +608,9 @@ export async function runTurn(
         status("thinking");
       }
       if (aborted(signal)) return await finish("aborted");
+      // 安全点 1（ADR-0070 §2）：一个 Step 的工具调用全部结算后、下一次请求前
+      // 消费插话；build 会把它们随后带给模型（3.1）
+      await deliverSteers();
       // 回到循环顶部：工具结果已持久化，下一次 build 带给模型（3.1）
     }
   } catch (e) {
