@@ -64,6 +64,11 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `subscribe` | `{ afterSeq? }` → `{ lastSeq }`，见第 4 节 |
 | `unsubscribe` | → `null`；服务端停止推送 |
 | `submit` | `{ text?, content?, attachments?, skill?, delegate? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
+| `enqueueInput` | `{ mode: "steer" \| "queue", text?, content?, attachments?, skill?, delegate? }` → `{ id, queued }`（ADR-0070）。Turn 进行中入列、立刻返回 `queued: true`；空闲时等同 `submit`、请求同样挂到 Turn 结束并返回 `queued: false`（`id` 只是对齐标记）；暂停中提交追加到队尾并恢复。子会话报 `invalid_command` |
+| `updateInput` | `{ id, mode?, text? }` → `null`；条目已被消费报 `input_consumed`。只替换文本，附件、`@` 引用与技能快照随原提交保留 |
+| `cancelInput` | `{ id }` → `null`；条目已被消费报 `input_consumed` |
+| `resumeInputs` | → `null`；解除暂停，空闲时立即发出队首（请求挂到该 Turn 结束），忙时交给 Turn 的结束边界 |
+| `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |
 | `compact` | → `null` |
@@ -244,7 +249,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 
 `session.subscribe { sessionId, afterSeq }`：服务端先挂实时监听并缓冲，再读日志，推送 `seq > afterSeq` 的全部**持久**事件，随后冲刷缓冲（按 `seq` 去重，已推过的不再推），最后转入实时推送（持久与临时都推）。请求在回放与衔接完成后才返回 `{ lastSeq }`，因此回放期间产生的新事件不丢、不重，`seq` 连续。
 
-- **临时事件不回放**：断开期间错过的流式增量、进度不补发（[events.md](events.md) 第 1、2 节）。
+- **临时事件不回放**：断开期间错过的流式增量、进度不补发（[events.md](events.md) 第 1、2 节）。待发输入的 `input.pending` 属于此类：附加后另调 `session.pendingInputs` 取当前快照，两者同形，后到的整份覆盖（[view.md](view.md#待发输入预览状态)）。
 - **不限流**：第一版服务端不为慢客户端设有界队列，事件直接写入传输（stdio 管道由操作系统缓冲）；持久事件本来可按 `seq` 补读，临时事件的丢弃策略留到出现慢连接问题时再定（与 [events.md](events.md) 第 6 节同步）。
 - 同一连接内同一会话同一时刻只有一路订阅：再次 `subscribe` 替换该连接的前一路，不影响别的连接。不同连接各自按 `afterSeq` 回放并衔接实时推送，不丢不重。
 - 实际会话在后台级 Hub 共享：第一条连接真正打开，其他连接 `resumeSession` 返回当前 `SessionOpened`（含当前 `lastSeq`），同连接重复打开仍报 `session_already_open`。两端命令共用 Core 行为：后到的 submit 报 `session_busy`，权限/提问任一端回复生效，重复回复报 `unknown_request`，中断任一端可发。
@@ -351,7 +356,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `-32602` | 参数缺失或类型错误（在进入 Runtime 之前校验） | `invalid_params` |
 | `-32603` | RPC 层内部错误 | `internal_error` |
 | `-32000` | 其他 Core 错误（原样透传 `message`） | 原 `error.code`（如有） |
-| `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`invalid_command`、`invalid_model`（因模型不可用，如已停用；此时 `data` 另带 `disabled: "provider" \| "model"` 与 `model: { provider, model }`，双重停用时另带 `providerDisabled: true`（`disabled` 记 `"model"`，一键重新启用需同时恢复两者），见 [ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §3，客户端据此区分「已停用」与「已删除」） |
+| `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`input_consumed`（编辑或撤回的待发输入已被 Turn 取走，ADR-0070）、`invalid_command`、`invalid_model`（因模型不可用，如已停用；此时 `data` 另带 `disabled: "provider" \| "model"` 与 `model: { provider, model }`，双重停用时另带 `providerDisabled: true`（`disabled` 记 `"model"`，一键重新启用需同时恢复两者），见 [ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §3，客户端据此区分「已停用」与「已删除」） |
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
 | `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`workspace_not_found` / `workspace_untrusted`（远程新建会话的目录不存在或需在电脑上信任）、`response_too_large` / `attachment_too_large`（远程结果超过报文上限）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
@@ -382,6 +387,8 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
 | `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`） |
+| `session.enqueueInput` | 允许完整载荷（同 `submit`）。ADR-0070 的「追加消息」：手机可在运行中插话或排队 |
+| `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
 | `session.interrupt` | 请求与通知均允许 |
 | `session.respondPermission` | `reply.remember === "project"` 拒绝并保持待处理；`"session"` 或省略允许 |
 | `session.respondQuestion` | 允许 |

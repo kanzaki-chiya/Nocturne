@@ -41,6 +41,8 @@ import type {
   ModelSettingsPatch,
   ModelSettingsView,
   PermissionReply,
+  PendingInputMode,
+  PendingInputsSnapshot,
   PrepareProviderResult,
   ProviderEntryConfig,
   ProviderOverview,
@@ -124,6 +126,15 @@ export type WireLocalFile =
 
 export interface SessionParams {
   sessionId: string;
+}
+
+/** 提交内容的线上形状：`session.submit` 与 `session.enqueueInput` 共用 */
+export interface WireSubmitFields {
+  skill?: SkillInvocation;
+  delegate?: { agent: string; task: string };
+  text?: string;
+  content?: ContentBlock[];
+  attachments?: WireAttachment[];
 }
 
 /**
@@ -531,15 +542,39 @@ export interface RpcMethods {
     result: { data: string; mimeType: ImageMimeType; bytes: number };
   };
   "session.submit": {
-    params: SessionParams & {
-      skill?: SkillInvocation;
-      delegate?: { agent: string; task: string };
-      text?: string;
-      content?: ContentBlock[];
-      attachments?: WireAttachment[];
-    };
+    params: SessionParams & WireSubmitFields;
     result: TurnEndReason;
   };
+  /**
+   * 待发输入（ADR-0070）：Turn 进行中提交——插话在安全点并入当前 Turn，排队在
+   * done 之后开新 Turn。空闲时与 submit 等价并返回 `queued: false`（`id` 只是
+   * 对齐用的标记）。暂停中提交追加到队尾并恢复。子会话拒绝 invalid_command。
+   */
+  "session.enqueueInput": {
+    params: SessionParams & WireSubmitFields & { mode: PendingInputMode };
+    result: { id: string; queued: boolean };
+  };
+  /**
+   * 编辑待发输入：只替换文本，附件、`@` 引用与技能快照随原提交保留；
+   * 也可用 mode 切换插话/排队。条目已被消费时以 input_consumed 拒绝。
+   */
+  "session.updateInput": {
+    params: SessionParams & {
+      id: string;
+      mode?: PendingInputMode;
+      text?: string;
+    };
+    result: null;
+  };
+  /** 撤回待发输入；条目已被消费时以 input_consumed 拒绝 */
+  "session.cancelInput": { params: SessionParams & { id: string }; result: null };
+  /** 解除暂停（ADR-0070 §4）：空闲时立即发出队首 */
+  "session.resumeInputs": { params: SessionParams; result: null };
+  /**
+   * 待发输入的当前快照：`input.pending` 是临时事件、不回放，新附加的客户端在
+   * `session.subscribe` 之后用它对齐（返回与事件 payload 同形）
+   */
+  "session.pendingInputs": { params: SessionParams; result: PendingInputsSnapshot };
   "session.respondPermission": {
     params: SessionParams & { requestId: string; reply: PermissionReply };
     result: null;
@@ -728,6 +763,11 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.unsubscribe": true,
   "session.readAttachment": true,
   "session.submit": true,
+  "session.enqueueInput": true,
+  "session.updateInput": true,
+  "session.cancelInput": true,
+  "session.resumeInputs": true,
+  "session.pendingInputs": true,
   "session.respondPermission": true,
   "session.respondQuestion": true,
   "session.setModel": true,

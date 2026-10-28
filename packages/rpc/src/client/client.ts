@@ -60,6 +60,9 @@ import type {
   SessionRewoundPayload,
   ReadAttachmentResult,
   LocalFileContent,
+  PendingInputMode,
+  PendingInputPatch,
+  PendingInputsSnapshot,
   SettingItem,
   SettingsPatch,
   SubmitInput,
@@ -185,6 +188,22 @@ export interface RpcSession {
   readAttachment(file: string): Promise<ReadAttachmentResult>;
   /** 挂到 Turn 结束，结果与进程内 `submit()` 的 resolve 时机相同 */
   submit(input: SubmitInput): Promise<TurnEndReason>;
+  /**
+   * 待发输入（ADR-0070）：Turn 进行中提交插话或排队输入；空闲时与 submit
+   * 等价并返回 `queued: false`。子会话以 invalid_command 拒绝。
+   */
+  enqueueInput(
+    mode: PendingInputMode,
+    input: SubmitInput,
+  ): Promise<{ id: string; queued: boolean }>;
+  /** 编辑待发输入：只替换文本，mode 可切换插话/排队；已消费以 input_consumed 拒绝 */
+  updateInput(id: string, patch: PendingInputPatch): Promise<void>;
+  /** 撤回待发输入；已消费以 input_consumed 拒绝 */
+  cancelInput(id: string): Promise<void>;
+  /** 解除暂停；空闲时立即发出队首 */
+  resumeInputs(): Promise<void>;
+  /** 待发输入快照（`input.pending` 是临时事件，订阅后用它对齐） */
+  pendingInputs(): Promise<PendingInputsSnapshot>;
   /** 中断运行中的 Turn（通知，无应答）；submit 随后以 aborted 返回 */
   interrupt(): void;
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
@@ -507,6 +526,22 @@ interface SubagentWatch {
 const subagentPairKey = (parentSessionId: string, childSessionId: string): string =>
   `${parentSessionId}\u0000${childSessionId}`;
 
+/** SubmitInput → 线上形状（submit / enqueueInput 共用，附件转 base64） */
+function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
+  const attachments = input.attachments?.map((a) => ({
+    data: encodeBase64(a.data),
+    mimeType: a.mimeType,
+    ...(a.label !== undefined ? { label: a.label } : {}),
+  }));
+  return {
+    ...(input.skill !== undefined ? { skill: input.skill } : {}),
+    ...(input.delegate !== undefined ? { delegate: input.delegate } : {}),
+    ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.content !== undefined ? { content: input.content } : {}),
+    ...(attachments !== undefined ? { attachments } : {}),
+  } as RpcParams<"session.submit">;
+}
+
 export function createRpcClient(transport: LineTransport, options: RpcClientOptions): RpcClient {
   let nextId = 1;
   let isClosed = false;
@@ -707,20 +742,26 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         return { data: decodeBase64(result.data), mimeType: result.mimeType, bytes: result.bytes };
       },
       submit: async (input) => {
-        const attachments = input.attachments?.map((a) => ({
-          data: encodeBase64(a.data),
-          mimeType: a.mimeType,
-          ...(a.label !== undefined ? { label: a.label } : {}),
-        }));
-        return await call("session.submit", {
+        return await call("session.submit", { ...p, ...wireSubmitInput(input) });
+      },
+      enqueueInput: async (mode, input) => {
+        return await call("session.enqueueInput", { ...p, mode, ...wireSubmitInput(input) });
+      },
+      updateInput: async (id, patch) => {
+        await call("session.updateInput", {
           ...p,
-          ...(input.skill !== undefined ? { skill: input.skill } : {}),
-          ...(input.delegate !== undefined ? { delegate: input.delegate } : {}),
-          ...(input.text !== undefined ? { text: input.text } : {}),
-          ...(input.content !== undefined ? { content: input.content } : {}),
-          ...(attachments !== undefined ? { attachments } : {}),
+          id,
+          ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+          ...(patch.input?.text !== undefined ? { text: patch.input.text } : {}),
         });
       },
+      cancelInput: async (id) => {
+        await call("session.cancelInput", { ...p, id });
+      },
+      resumeInputs: async () => {
+        await call("session.resumeInputs", p);
+      },
+      pendingInputs: () => call("session.pendingInputs", p),
       interrupt: () => {
         notify("session.interrupt", p);
       },

@@ -33,6 +33,7 @@ import {
   type LoginResult,
   type LoginSession,
   type ModelRole,
+  type PendingInputPatch,
   type PermissionReply,
   type ProviderCredentialInput,
   type ProviderLoginOptions,
@@ -188,6 +189,11 @@ export const REMOTE_METHODS = [
   "session.close",
   "session.state",
   "session.submit",
+  "session.enqueueInput",
+  "session.updateInput",
+  "session.cancelInput",
+  "session.resumeInputs",
+  "session.pendingInputs",
   "session.interrupt",
   "session.respondPermission",
   "session.respondQuestion",
@@ -1640,31 +1646,41 @@ class Connection implements HubPeer {
       },
       "session.submit": async (p) => {
         const { session } = this.session(p);
-        const input: SubmitInput = {};
-        if (p.skill !== undefined) {
-          const skill = reqObject(p, "skill");
-          input.skill = {
-            name: reqString(skill, "name"),
-            arguments: optString(skill, "arguments"),
-          };
-        }
-        if (p.delegate !== undefined) {
-          const delegate = reqObject(p, "delegate");
-          input.delegate = {
-            agent: reqString(delegate, "agent"),
-            task: reqString(delegate, "task"),
-          };
-        }
-        const text = optString(p, "text");
-        if (text !== undefined) input.text = text;
-        if (p.content !== undefined && p.content !== null) {
-          input.content = parseContent(p.content);
-        }
-        if (p.attachments !== undefined && p.attachments !== null) {
-          input.attachments = parseAttachments(p.attachments);
-        }
+        const input = parseSubmitInput(p);
         return await this.hub.operate(session, () => session.submit(input));
       },
+      "session.enqueueInput": async (p) => {
+        const { session } = this.session(p);
+        const mode = p.mode;
+        if (mode !== "steer" && mode !== "queue")
+          throw new InvalidParamsError("mode 只能是 steer 或 queue");
+        const input = parseSubmitInput(p);
+        return await this.hub.operate(session, () => session.enqueueInput(mode, input));
+      },
+      "session.updateInput": async (p) => {
+        const { session } = this.session(p);
+        const id = reqString(p, "id");
+        if (p.mode !== undefined && p.mode !== null && p.mode !== "steer" && p.mode !== "queue")
+          throw new InvalidParamsError("mode 只能是 steer 或 queue");
+        const patch: PendingInputPatch = {};
+        if (p.mode === "steer" || p.mode === "queue") patch.mode = p.mode;
+        const text = optString(p, "text");
+        if (text !== undefined) patch.input = { text };
+        await this.hub.operate(session, () => session.updateInput(id, patch));
+        return null;
+      },
+      "session.cancelInput": async (p) => {
+        const { session } = this.session(p);
+        const id = reqString(p, "id");
+        await this.hub.operate(session, () => session.cancelInput(id));
+        return null;
+      },
+      "session.resumeInputs": async (p) => {
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.resumeInputs());
+        return null;
+      },
+      "session.pendingInputs": (p) => this.session(p).session.pendingInputs(),
       "session.respondPermission": async (p) => {
         await this.session(p).session.respondPermission(
           reqString(p, "requestId"),
@@ -1923,4 +1939,38 @@ function parseAttachments(value: unknown): NonNullable<SubmitInput["attachments"
       ...(o.label !== undefined ? { label: o.label } : {}),
     };
   });
+}
+
+/** `session.submit` / `session.enqueueInput` 共用的提交内容解析（ADR-0070） */
+function parseSubmitInput(p: {
+  skill?: unknown;
+  delegate?: unknown;
+  text?: unknown;
+  content?: unknown;
+  attachments?: unknown;
+}): SubmitInput {
+  const input: SubmitInput = {};
+  if (p.skill !== undefined) {
+    const skill = reqObject(p, "skill");
+    input.skill = {
+      name: reqString(skill, "name"),
+      arguments: optString(skill, "arguments"),
+    };
+  }
+  if (p.delegate !== undefined) {
+    const delegate = reqObject(p, "delegate");
+    input.delegate = {
+      agent: reqString(delegate, "agent"),
+      task: reqString(delegate, "task"),
+    };
+  }
+  const text = optString(p, "text");
+  if (text !== undefined) input.text = text;
+  if (p.content !== undefined && p.content !== null) {
+    input.content = parseContent(p.content);
+  }
+  if (p.attachments !== undefined && p.attachments !== null) {
+    input.attachments = parseAttachments(p.attachments);
+  }
+  return input;
 }
