@@ -62,6 +62,7 @@ import { createClickTracker } from "./click.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
+import { PendingInputsPanel, pendingPanelRows } from "./components/pending-inputs.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import {
@@ -128,7 +129,7 @@ import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
-import { useSessionView } from "./session-view.js";
+import { useSessionView, usePendingInputs } from "./session-view.js";
 import { useGenerationSpeed } from "./speed.js";
 import stringWidth from "string-width";
 import { useReasoning } from "./reasoning.js";
@@ -822,6 +823,35 @@ function SessionApp({
   // /resume 切换：session 变为新会话（useSessionView 自动重放新日志）
   const [session, setSession] = useState(initialSession);
   const view = useSessionView(session);
+  // 待发输入（ADR-0070）：运行中插话/排队，临时状态按整份快照覆盖
+  const pendingInputs = usePendingInputs(session);
+  const [pendingIndex, setPendingIndex] = useState(0);
+  const [editingPending, setEditingPending] = useState<string | undefined>(undefined);
+  const pendingInputsRef = useRef(pendingInputs);
+  pendingInputsRef.current = pendingInputs;
+  const pendingIndexRef = useRef(0);
+  const editingPendingRef = useRef<string | undefined>(undefined);
+  /** 早于 pushLine 定义的效果里要用它提示原因 */
+  const pushLineRef = useRef<((line: string) => void) | undefined>(undefined);
+  useEffect(() => {
+    const count = pendingInputs.items.length;
+    setPendingIndex((index) => (count === 0 ? 0 : Math.min(index, count - 1)));
+    if (
+      editingPendingRef.current !== undefined &&
+      !pendingInputs.items.some((i) => i.id === editingPendingRef.current)
+    ) {
+      // 正在编辑的条目已被 Turn 取走：退出编辑态，提示原因
+      editingPendingRef.current = undefined;
+      setEditingPending(undefined);
+      pushLineRef.current?.("! 这条待发消息已经发出，编辑没保存");
+    }
+  }, [pendingInputs]);
+  useEffect(() => {
+    pendingIndexRef.current = pendingIndex;
+  }, [pendingIndex]);
+  useEffect(() => {
+    editingPendingRef.current = editingPending;
+  }, [editingPending]);
   // 通知响铃（ADR-0056 §3）：终端没在看时三类事件各响一次 BEL（帧外写出）
   useNotifyBell({ session, runtime, focus, writeOob });
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
@@ -1083,6 +1113,7 @@ function SessionApp({
     },
     [fullscreen],
   );
+  pushLineRef.current = pushLine;
 
   useEffect(
     () =>
@@ -2057,6 +2088,12 @@ function SessionApp({
   };
 
   const recallHistory = (direction: -1 | 1): void => {
+    // 输入框为空且有待发输入时，↑/↓ 在待发列表里移动选中项（ADR-0070）
+    const pendingCount = pendingInputsRef.current.items.length;
+    if (pendingCount > 0 && inputRef.current === "" && editingPendingRef.current === undefined) {
+      setPendingIndex((index) => Math.min(pendingCount - 1, Math.max(0, index + direction)));
+      return;
+    }
     if (inputHistory.length === 0) return;
     const next = Math.max(
       0,
@@ -2111,6 +2148,13 @@ function SessionApp({
         void closeRecord();
         return;
       }
+      // 编辑待发输入时 Esc 取消（ADR-0070），不中断 Turn
+      if (editingPendingRef.current !== undefined) {
+        editingPendingRef.current = undefined;
+        setEditingPending(undefined);
+        clearInput();
+        return;
+      }
       if (!pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined) {
         if (completionOpen) setCompletionOn(false);
         else if (!busy && !submitting.current && !switching.current && inputRef.current === "") {
@@ -2153,6 +2197,49 @@ function SessionApp({
       if (pageOpen || dialogOpen) return;
       cyclePreset();
       return;
+    }
+    // 待发输入（ADR-0070 §6）：Alt+E 编辑选中项，Alt+X 撤回，Alt+T 切换插话/排队，
+    // Alt+R 继续发送（暂停后）
+    if (
+      key.meta &&
+      !key.ctrl &&
+      !pageOpen &&
+      !dialogOpen &&
+      pending === undefined &&
+      pendingQ === undefined
+    ) {
+      const queued = pendingInputsRef.current;
+      const picked = queued.items[Math.min(pendingIndexRef.current, queued.items.length - 1)];
+      if (ch === "e" || ch === "E") {
+        if (picked === undefined) return;
+        editingPendingRef.current = picked.id;
+        setEditingPending(picked.id);
+        updateInput(picked.text, picked.text.length);
+        return;
+      }
+      if (ch === "x" || ch === "X") {
+        if (picked === undefined) return;
+        void session.cancelInput(picked.id).catch((e: unknown) => {
+          pushLine(`! ${errText(e)}`);
+        });
+        return;
+      }
+      if (ch === "t" || ch === "T") {
+        if (picked === undefined) return;
+        void session
+          .updateInput(picked.id, { mode: picked.mode === "steer" ? "queue" : "steer" })
+          .catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          });
+        return;
+      }
+      if (ch === "r" || ch === "R") {
+        if (!queued.paused) return;
+        void session.resumeInputs().catch((e: unknown) => {
+          pushLine(`! ${errText(e)}`);
+        });
+        return;
+      }
     }
     if (key.meta && !key.ctrl && (ch === "v" || ch === "V")) {
       if (inputIdle) pasteClipboardImage();
@@ -2349,11 +2436,23 @@ function SessionApp({
     };
   }, [session]);
   const onSubmit = useCallback(
-    (line: string) => {
+    (line: string, mode: "steer" | "queue" = "steer") => {
       const text = line.trim();
       if (text === "") return;
       if (switching.current || openingRewind.current) {
         pushLine("! 正在切换会话，请稍候");
+        return;
+      }
+      // 编辑待发输入（ADR-0070）：Enter 保存新文本，Esc 取消
+      const editing = editingPendingRef.current;
+      if (editing !== undefined) {
+        const next = pastes.expand(text);
+        clearInput();
+        images.clear();
+        setEditingPending(undefined);
+        void session.updateInput(editing, { input: { text: next } }).catch((e: unknown) => {
+          pushLine(`! ${modelErrorText(e)}`);
+        });
         return;
       }
       const historyText = images.strip(pastes.expand(text));
@@ -2462,10 +2561,25 @@ function SessionApp({
         dispatchSlash(text);
         return;
       }
-      // ADR-0036 修订：忙时输入框保持可输入——斜杠命令（/preset 等）在上面已分发；
-      // 普通输入与委托任务仍要空闲，给个提示而不是静默丢弃
-      if (busy) {
-        pushLine("! 会话忙（本轮进行中）；Ctrl+C 可中断");
+      // ADR-0070：运行中 Enter 插话、Tab 排队——插话在安全点并入当前 Turn，
+      // 排队在 done 之后开新 Turn。斜杠命令（/preset 等）在上面已分发
+      if (busy || pendingInputsRef.current.paused) {
+        const attachments = images.in(text);
+        clearInput();
+        images.clear();
+        void session
+          .enqueueInput(mode, {
+            text: expanded,
+            ...(skill ? { skill } : {}),
+            ...(delegate !== undefined ? { delegate } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
+          })
+          .then(() => {
+            if (fullscreen) setScroll(scrollToBottom());
+          })
+          .catch((e: unknown) => {
+            pushLine(`! ${modelErrorText(e)}`);
+          });
         return;
       }
       if (delegate !== undefined) {
@@ -2583,6 +2697,8 @@ function SessionApp({
         : 0,
     input.split("\n").length,
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
+    // 待发输入列表（ADR-0070）：全屏才画，行数随条目数（最多 3 条 + 提示）
+    fullscreen ? pendingPanelRows(pendingInputs.items.length, pendingInputs.paused) : 0,
   );
   const promptOverlay = pending !== undefined || pendingQ !== undefined;
   const popupHeight = Math.min(
@@ -3226,6 +3342,16 @@ function SessionApp({
       {fullscreen && budget.todo > 0 ? (
         <TodoPanel items={view.todos} width={width} height={budget.todo} />
       ) : null}
+      {fullscreen && budget.pending > 0 ? (
+        <PendingInputsPanel
+          items={pendingInputs.items}
+          paused={pendingInputs.paused}
+          selected={pendingIndex}
+          editing={editingPending}
+          width={width}
+          height={budget.pending}
+        />
+      ) : null}
       {promptOverlay ? overlayBody : null}
       <Composer
         pastes={pastes}
@@ -3241,13 +3367,18 @@ function SessionApp({
         }}
         onHistory={recallHistory}
         onSubmit={onSubmit}
+        onQueue={(line) => {
+          // 运行中 Tab 排队（ADR-0070）；空闲时没有待排队的东西
+          if (busy) onSubmit(line, "queue");
+          else pushLine("! 排队只在运行中可用；空闲时直接 Enter 发送");
+        }}
         onPasteImage={onPasteImage}
         active={!dialogOpen && pending === undefined && pendingQ === undefined && !pageOpen}
         disabledReason={composerDisabled}
         width={width}
         height={budget.input}
         showRule={budget.inputRule > 0}
-        title={title}
+        title={editingPending !== undefined ? "编辑待发消息（Enter 保存，Esc 取消）" : title}
         suspendNav={completionOpen}
         swallowRef={swallowRef}
       />

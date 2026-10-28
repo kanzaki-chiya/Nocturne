@@ -738,13 +738,18 @@ describe("全屏界面", () => {
     await pause(80);
     stdin.write("\r");
     await waitFor(() => session.state().config.permissionPreset === "smart");
-    // 忙时普通输入不静默丢弃（回车单独发：一次性写入会被当成粘贴）
+    // ADR-0070：忙时普通输入回车 = 插话入列（不再只是忙时提示）
     stdin.write("第二条");
     await pause(80);
     stdin.write("\r");
-    await waitFor(() => (lastFrame() ?? "").includes("会话忙"));
+    await waitFor(() => (lastFrame() ?? "").includes("插话"));
+    await waitFor(() => session.pendingInputs().items.length === 1);
+    expect(session.pendingInputs().items[0]).toMatchObject({ mode: "steer", text: "第二条" });
+    // 中断后剩余的待发输入全部转排队并暂停
     stdin.write("\x1b");
     await turn;
+    await waitFor(() => (lastFrame() ?? "").includes("已暂停"));
+    expect(session.pendingInputs().paused).toBe(true);
     unmount();
     await session.close();
   }, 10000);

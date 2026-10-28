@@ -93,7 +93,7 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 - `@` 开头或紧跟空白的路径词用同一 completer 补全：异步读取 `session.fileIndex()`，复用 Core 的排序与逐级目录补全，空格路径自动加双引号。索引最多包含 20000 个工作区文件与目录，遵守 `.gitignore`，排除隐藏项与链接；当前 Turn 内复用，Turn 结束后重建。提交读取规则由 Core 统一处理，见 [ADR-0033](../decisions/ADR-0033-web-fetch-file-refs.md)。
 - `--cli` 的 TTY readline ↑/↓ 从当前工作区的持久输入历史回填，切换会话后改用新会话的工作区；历史经 Core 公开 API 保存，明文文件与保留规则见 [config.md](../architecture/config.md)。`/help` 同样提示明文存储。
 - EOF 发生在 Turn 进行中时：先 `session.interrupt()` 中断并等待该 Turn 收束后再退出；回退或分叉正在执行时等待操作完成。执行期间 Ctrl+C 提示等待，不取消文件还原或释放忙碌状态。readline 关闭后任何异步回调不得再显示提示符。
-- Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。
+- Turn 进行中不接受新的输入行（只响应中断）；权限确认提示出现时优先处理（第 6 节）。运行中插话与输入排队（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）不在行模式 CLI 提供：需要边跑边追加指令时用桌面端、手机或 TUI。
 - Phase 2 单行输入；多行与粘贴不作特殊处理。
 
 ## 4. 斜杠命令

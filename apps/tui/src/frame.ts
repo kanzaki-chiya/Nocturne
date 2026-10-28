@@ -11,18 +11,22 @@ export interface FrameBudget {
   input: number;
   completion: number;
   todo: number;
+  /** 待发输入列表（ADR-0070 §6） */
+  pending: number;
   status: number;
 }
 
 /**
  * @param rows 终端行数
  * @param completionWanted 希望显示的候选行数（已截到 0–8 之外也会被截断）
+ * @param pendingWanted 待发输入列表希望占的行数（ADR-0070）
  */
 export function frameBudget(
   rows: number,
   completionWanted: number,
   inputWanted = 1,
   todoWanted = 0,
+  pendingWanted = 0,
 ): FrameBudget {
   const frameHeight = Math.max(0, rows - 1);
   const status = frameHeight >= 1 ? 1 : 0;
@@ -43,5 +47,8 @@ export function frameBudget(
   }
   const todo = Math.min(Math.max(0, todoWanted), Math.max(0, conversation - 3));
   conversation -= todo;
-  return { frameHeight, conversation, inputRule, input, completion, todo, status };
+  // 待发输入给对话至少留 2 行；太矮时列表先消失（状态仍由状态栏与提示行表达）
+  const pending = Math.min(Math.max(0, pendingWanted), Math.max(0, conversation - 2));
+  conversation -= pending;
+  return { frameHeight, conversation, inputRule, input, completion, todo, pending, status };
 }

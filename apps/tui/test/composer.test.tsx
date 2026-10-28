@@ -101,3 +101,51 @@ describe("Composer 多行编辑", () => {
     unmount();
   });
 });
+
+describe("Composer 待发输入（ADR-0070）", () => {
+  it("运行中 Enter 提交、Tab 走排队回调，补全列表打开时 Tab 归列表", async () => {
+    const submitted: string[] = [];
+    const queued: string[] = [];
+    function Harness({ suspendNav }: { suspendNav: boolean }) {
+      const [value, setValue] = useState("继续一句");
+      const [cursor, setCursor] = useState(value.length);
+      return (
+        <TuiEnvContext.Provider value={env}>
+          <Composer
+            value={value}
+            cursor={cursor}
+            onChange={(next, pos) => {
+              setValue(next);
+              setCursor(pos);
+            }}
+            onCursor={setCursor}
+            onSubmit={(text) => submitted.push(text)}
+            onQueue={(text) => queued.push(text)}
+            active
+            width={40}
+            suspendNav={suspendNav}
+          />
+        </TuiEnvContext.Provider>
+      );
+    }
+    const first = render(<Harness suspendNav={false} />);
+    await vi.waitFor(() => expect(first.lastFrame()).toContain("继续一句"));
+    first.stdin.write("\t");
+    await vi.waitFor(() => expect(queued).toEqual(["继续一句"]));
+    expect(submitted).toEqual([]);
+    first.unmount();
+
+    // 补全列表打开时 Tab 不排队（交给列表）
+    const second = render(<Harness suspendNav />);
+    await vi.waitFor(() => expect(second.lastFrame()).toContain("继续一句"));
+    second.stdin.write("\t");
+    await new Promise((done) => setTimeout(done, 20));
+    expect(queued).toEqual(["继续一句"]);
+    // 补全列表打开时 Tab 与 Enter 都归列表
+    second.stdin.write("\r");
+    await new Promise((done) => setTimeout(done, 20));
+    expect(queued).toEqual(["继续一句"]);
+    expect(submitted).toEqual([]);
+    second.unmount();
+  });
+});

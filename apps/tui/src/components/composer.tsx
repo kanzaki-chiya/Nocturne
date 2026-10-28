@@ -20,6 +20,7 @@ export function Composer({
   cursor: cursorProp,
   onChange,
   onSubmit,
+  onQueue,
   active,
   disabledReason,
   width,
@@ -40,6 +41,8 @@ export function Composer({
   onCursor?: ((cursor: number) => void) | undefined;
   onHistory?: ((direction: -1 | 1) => void) | undefined;
   onSubmit: (line: string) => void;
+  /** Tab：运行中提交为排队（ADR-0070）；补全列表打开时 Tab 仍归列表 */
+  onQueue?: ((line: string) => void) | undefined;
   /** false 时输入不接收按键（弹层/权限对话框占用焦点） */
   active: boolean;
   /** 非空时输入禁用并显示原因（如"会话忙"）；已输入内容仍可见 */
@@ -148,6 +151,11 @@ export function Composer({
         return;
       }
       if (key.ctrl || key.meta) return; // Ctrl+C/Ctrl+D / Alt+M 由 App 路由
+      if (key.tab && !key.shift) {
+        // 运行中 Tab = 排队（ADR-0070）；空闲时没有意义，交给 App 忽略
+        onQueue?.(v);
+        return;
+      }
       if (key.return) {
         if (c > 0 && v[c - 1] === "\\" && (c === v.length || v[c] === "\n")) {
           apply(v.slice(0, c - 1) + "\n" + v.slice(c), c);
