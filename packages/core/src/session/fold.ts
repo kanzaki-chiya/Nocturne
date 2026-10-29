@@ -117,15 +117,14 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
             text: shellSwitchNote(p.shell.kind, p.shell.path),
           });
         }
-        if (p.mcp !== undefined && p.mcp.length > 0) {
+        if (p.mcp !== undefined && p.mcp.length > 0 && active) {
           for (const change of p.mcp) mcpAvailability[change.server] = change.available;
-          if (active)
-            history.push({
-              kind: "note",
-              seq: event.seq,
-              turnId,
-              text: mcpAvailabilityNote(p.mcp),
-            });
+          history.push({
+            kind: "note",
+            seq: event.seq,
+            turnId,
+            text: mcpAvailabilityNote(p.mcp),
+          });
         }
         break;
       }

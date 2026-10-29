@@ -66,6 +66,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 ### 3.1 持久化事件
 
+`session.config_changed.mcp` 的可用性与 note 只从回退后的有效事件折叠；`autoRetry` 表示无需用户操作，Runtime 后续仍会自行重连，具体条件见 [ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md) 第 2 节。
+
 | 类型 | turnId | payload |
 |---|---|---|
 | `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节）、`schedule?`（`{ taskId, scheduledAt, trigger }`，仅定时任务发起的会话存在；可选字段，旧版本忽略，ADR-0064，见 [schedule.md](../architecture/schedule.md)） |

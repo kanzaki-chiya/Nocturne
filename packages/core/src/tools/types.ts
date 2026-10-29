@@ -335,7 +335,7 @@ export interface McpServerStatus {
    * HTTP：连续重连失败次数（成功即清零，不设上限，失败后进入冷却）。
    */
   restarts: number;
-  /** 后续是否仍会自动重试（HTTP 恒为 true，stdio 达重连上限为 false）。 */
+  /** 无需用户操作，Runtime 后续仍会自行重连：HTTP 恒为 true；stdio 须保留工具且未达重连上限。 */
   autoRetry?: boolean | undefined;
 }
 

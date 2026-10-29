@@ -244,6 +244,7 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       );
       // 崩溃状态反映到 status 与 warning
       expect(session.status()[0]?.state).toBe("crashed");
+      expect(session.status()[0]?.autoRetry).toBe(true);
       expect(warnings.some((w) => w.code === "mcp_server_crashed")).toBe(true);
 
       const echo = await call(getTool(session, "mcp__fake__echo"), { text: "回来了" });
@@ -253,6 +254,38 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       expect(session.status()[0]?.autoRetry).toBe(true);
       expect(session.status()[0]?.state).toBe("ready");
     } finally {
+      await session.close();
+    }
+  });
+
+  it("惰性重连失败仍保留工具；未变配置重载不重启 failed 服务器", async () => {
+    const { session } = await openFake();
+    const spawn = vi.spyOn(platform.process, "spawnPipe");
+    try {
+      const tools = session.tools();
+      await call(getTool(session, "mcp__fake__crash"), {});
+      expect(session.applyPendingTools()).toEqual({ add: [], remove: [] });
+      expect(session.tools()).toEqual(tools);
+      spawn.mockImplementation(() => {
+        throw new Error("test reconnect failure");
+      });
+      expect((await call(getTool(session, "mcp__fake__echo"), {})).status).toBe("error");
+      expect(session.status()[0]).toMatchObject({ state: "failed", restarts: 1, autoRetry: true });
+      expect(session.applyPendingTools()).toEqual({ add: [], remove: [] });
+      expect(session.tools()).toEqual(tools);
+      spawn.mockClear();
+      await session.reconcile([
+        {
+          name: "fake",
+          origin: "user",
+          command: process.execPath,
+          args: [FAKE_SERVER],
+        },
+      ]);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(session.status()[0]?.state).toBe("failed");
+    } finally {
+      spawn.mockRestore();
       await session.close();
     }
   });
@@ -284,6 +317,7 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       }
       await call(getTool(session, "mcp__fake__crash"), {});
       const before = spawn.mock.calls.length;
+      expect(session.status()[0]?.autoRetry).toBe(false);
       const result = await call(getTool(session, "mcp__fake__echo"), {});
       expect(result.status === "error" && result.error?.code).toBe("mcp_unavailable");
       expect(result.modelContent).toContain("达到上限");
@@ -336,6 +370,7 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       await session.startup();
       const st = session.status()[0];
       expect(st?.state).toBe("failed");
+      expect(st?.autoRetry).toBe(false);
       expect(st?.error).toBeDefined();
       expect(warnings.some((w) => w.code === "mcp_server_failed")).toBe(true);
     } finally {
@@ -377,6 +412,7 @@ describe("连接阶段的关闭只报一次启动失败", () => {
       expect(warnings.map((w) => w.code)).toEqual(["mcp_server_failed"]);
       expect(servers.map((s) => s.state)).toEqual(["starting", "failed"]);
       expect(session.status()[0]?.state).toBe("failed");
+      expect(session.status()[0]?.autoRetry).toBe(true);
     } finally {
       await session.close();
     }

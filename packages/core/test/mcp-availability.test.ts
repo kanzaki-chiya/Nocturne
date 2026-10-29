@@ -187,7 +187,7 @@ it("starting 超时与重连耗尽使用对应文字", async () => {
       payload: { mcp: [{ reason: "startup timed out", autoRetry: false }] },
     });
     expect(JSON.stringify(f.provider.requests[0]?.messages)).toContain(
-      "will not retry it automatically again in this session",
+      "will not retry it automatically in this session",
     );
   } finally {
     await f.session.close();
@@ -215,7 +215,7 @@ it("准备阶段已中断不写说明", async () => {
   }
 });
 it.each(["disable", "delete"] as const)(
-  "配置 %s 经 reconcile 不写恢复，新增失败服务器也不记录",
+  "配置 %s 经 reconcile 不写恢复，新增失败服务器记录不可用",
   async (action) => {
     const f = await fixture("failed", true, false, true);
     try {
@@ -224,18 +224,55 @@ it.each(["disable", "delete"] as const)(
         await f.runtime.setMcpServerEnabled({ id: "browseros", enabled: false });
       else await f.runtime.deleteMcpServer({ id: "browseros" });
       await f.session.submit({ text: "second" });
+      expect(notes(f.events)).toHaveLength(1);
       await f.runtime.saveMcpServer({
         mode: "create",
         id: "newserver",
         config: { command: "unused" },
       });
       await f.session.submit({ text: "third" });
-      expect(notes(f.events)).toHaveLength(1);
+      expect(notes(f.events)).toHaveLength(2);
+      expect(notes(f.events)[1]).toMatchObject({
+        payload: { mcp: [{ server: "newserver", available: false }] },
+      });
     } finally {
       await f.session.close();
     }
   },
 );
+
+it("新增服务器正常时不记录说明", async () => {
+  const f = await fixture("ready", true, false, true);
+  try {
+    await f.session.submit({ text: "first" });
+    await f.runtime.saveMcpServer({
+      mode: "create",
+      id: "newserver",
+      config: { command: "unused" },
+    });
+    f.setState("ready");
+    await f.session.submit({ text: "second" });
+    expect(notes(f.events)).toEqual([]);
+  } finally {
+    await f.session.close();
+  }
+});
+
+it("回退掉不可用说明后仍失败，下一 Turn 重新记录", async () => {
+  const f = await fixture();
+  try {
+    await f.session.submit({ text: "first" });
+    const user = f.events.find((e) => e.type === "message.user");
+    if (user?.type !== "message.user") throw new Error("missing user message");
+    await f.session.rewind(user.seq, "conversation");
+    await f.session.submit({ text: "second" });
+    expect(notes(f.events)).toHaveLength(2);
+    expect(JSON.stringify(f.provider.requests[1]?.messages)).not.toContain("first");
+    expect(JSON.stringify(f.provider.requests[1]?.messages)).toContain("is unavailable");
+  } finally {
+    await f.session.close();
+  }
+});
 
 it("按需工具名服务器段规范化后指出不可用与原因，仍列可用服务器", () => {
   const pair = createMcpOnDemandTools([], ["healthy"], () => [

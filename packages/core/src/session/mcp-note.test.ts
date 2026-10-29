@@ -31,7 +31,7 @@ it("MCP 字段经 schema 保留；多台合一条 note，重放文字与可用�
     text: mcpAvailabilityNote(changes),
   });
   expect(JSON.stringify(state.history)).toContain(
-    "will not retry it automatically again in this session",
+    "will not retry it automatically in this session",
   );
   expect(JSON.stringify(state.history)).not.toContain("x".repeat(201));
   expect(foldEvents([event(JSON.parse(JSON.stringify(e.payload)))])).toEqual(state);
@@ -41,4 +41,20 @@ it("旧 config_changed 不生成 MCP 状态或说明", () => {
   const state = foldEvents([event({ permissionPreset: "default" })]);
   expect(state.history).toEqual([]);
   expect(state.mcpAvailability).toBeUndefined();
+});
+
+it("三种说明使用固定措辞", () => {
+  expect(
+    mcpAvailabilityNote([
+      { server: "browseros", available: false, reason: "connection refused", autoRetry: true },
+      { server: "stdio", available: false, reason: "process exited", autoRetry: false },
+      { server: "browseros", available: true },
+    ]),
+  ).toBe(
+    [
+      '[Environment change] MCP server "browseros" is unavailable (connection refused). Nocturne reconnects it automatically, so a new session will not help. If the user needs it, ask them to check that the server is running.',
+      '[Environment change] MCP server "stdio" is unavailable (process exited). Nocturne will not retry it automatically in this session. Ask the user to fix the server, then start a new session.',
+      '[Environment change] MCP server "browseros" is available again; its tools are loaded.',
+    ].join("\n"),
+  );
 });

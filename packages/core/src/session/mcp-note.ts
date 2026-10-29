@@ -11,9 +11,9 @@ export function mcpAvailabilityNote(
       const reason = change.reason ? ` (${change.reason.slice(0, 200)})` : "";
       const retry =
         change.autoRetry === false
-          ? "Nocturne will not retry it automatically again in this session. Ask the user to reload the configuration or start a new session."
-          : "Nocturne retries it automatically at the start of each turn, so a new session will not help. If the user needs it, ask them to check that the server is running.";
-      return `MCP server ${server} is unavailable${reason}; its tools are not loaded. ${retry}`;
+          ? "Nocturne will not retry it automatically in this session. Ask the user to fix the server, then start a new session."
+          : "Nocturne reconnects it automatically, so a new session will not help. If the user needs it, ask them to check that the server is running.";
+      return `MCP server ${server} is unavailable${reason}. ${retry}`;
     })
     .map((text) => `[Environment change] ${text}`)
     .join("\n");

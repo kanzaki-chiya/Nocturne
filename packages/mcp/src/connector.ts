@@ -1164,7 +1164,7 @@ function statusOf(st: Server): McpServerStatus {
     toolCount: st.staged?.size ?? st.tools.size,
     error: st.error,
     restarts: st.restarts,
-    autoRetry: st.cfg.type === "http" || st.restarts < MAX_RESTARTS,
+    autoRetry: st.cfg.type === "http" || (st.tools.size > 0 && st.restarts < MAX_RESTARTS),
   };
 }
 

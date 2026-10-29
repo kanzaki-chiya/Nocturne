@@ -23,7 +23,9 @@ Runtime 比较每台已配置服务器「对模型是否可用」与上一条记
 - **变为不可用**：`failed`、`crashed`，或等待结束时仍在 `starting`（启动超时）。
 - **恢复可用**：此前记录为不可用、现在是 `ready`。
 
-基线是「全部可用」：服务器一直正常就从不产生记录；第一次出问题才记。因用户改配置而停用、删除或新增的服务器不记录：这是用户的操作，工具集变化本身已经反映出来。
+基线是「全部可用」：服务器一直正常就从不产生记录；第一次出问题才记。因用户改配置而停用、删除或新增这件事本身不记录：这是用户的操作，工具集变化本身已经反映出来。新增服务器同样以可用为基线，启动失败会记录不可用，启动正常则不记录。
+
+可用性只从回退后的有效事件折叠。Runtime 在每个主 Turn 边界读取该折叠状态重新比较，不另存可用性内存表；被删除或 stopped 的服务器跳过。
 
 Turn 内的变化不立即记录：崩溃时在途调用已经以 `mcp_unavailable` 结算，模型从工具结果里就能知道。下一个 Turn 边界再按上面的规则比较。
 
@@ -38,11 +40,11 @@ mcp?: Array<{
   server: string;                       // 配置中的服务器 id
   available: boolean;
   reason?: string;                      // 仅 available=false：McpServerStatus.error 的人读原因（截到 200 字符）
-  autoRetry?: boolean;                  // 仅 available=false：Runtime 之后是否还会自动重试
+  autoRetry?: boolean;                  // 仅 available=false：无需用户操作，Runtime 之后是否还会自行重连
 }>;
 ```
 
-一个 Turn 边界的全部变化合成一条事件。这是兼容扩展：旧版本忽略未知字段，照常恢复会话，不提升 `formatVersion`。`reason` 用 `McpSession.status()` 已有的人读原因（mcp.md 第 4 节的分类，如连接被拒绝、请求超时、HTTP 502），不另带原始错误、地址、请求头或凭据；启动超时、仍在 `starting` 时记为启动超时。`autoRetry` 由 McpSession 按传输与重连次数给出（`McpServerStatus` 增加同名字段：HTTP 恒为 true，stdio 未达重连上限为 true），在事件里记下当时的值，重建说明时不再查询运行态。
+一个 Turn 边界的全部变化合成一条事件。这是兼容扩展：旧版本忽略未知字段，照常恢复会话，不提升 `formatVersion`。`reason` 用 `McpSession.status()` 已有的人读原因（mcp.md 第 4 节的分类，如连接被拒绝、请求超时、HTTP 502），不另带原始错误、地址、请求头或凭据；启动超时、仍在 `starting` 时记为启动超时。`autoRetry` 表示无需用户操作，Runtime 之后仍会自行重连：HTTP 恒为 true；stdio 只有保留已注册工具且未达重连上限时为 true（下一次工具调用触发惰性重连）。stdio 从未 ready、没有工具的启动失败为 false；崩溃与惰性重连失败保留工具。在事件里记下当时的值，重建说明时不再查询运行态。
 
 不新增持久事件类型：那样旧版本 Runtime 会拒绝恢复含它的会话（[events.md](../protocols/events.md) 第 8 节），这里没有对应收益。字段挂在 `config_changed` 上，是因为它和 shell 一样表达「模型所处环境的变化」，折叠与注入路径完全相同。
 
@@ -51,11 +53,12 @@ mcp?: Array<{
 折叠时在事件位置生成 `note` 历史条目，文字由代码按字段生成（与 shell 说明同样的做法，措辞随版本更新，旧事件按新措辞重建）。英文，以 `[Environment change]` 开头，基础提示已说明这类说明来自 Runtime。示例：
 
 ```text
-[Environment change] MCP server "browseros" is unavailable (connection refused); its tools are not loaded. Nocturne retries it automatically at the start of each turn, so a new session will not help. If the user needs it, ask them to check that the server is running.
+[Environment change] MCP server "browseros" is unavailable (connection refused). Nocturne reconnects it automatically, so a new session will not help. If the user needs it, ask them to check that the server is running.
+[Environment change] MCP server "stdio" is unavailable (process exited). Nocturne will not retry it automatically in this session. Ask the user to fix the server, then start a new session.
 [Environment change] MCP server "browseros" is available again; its tools are loaded.
 ```
 
-`autoRetry` 为 false（stdio 重连达到上限）时，第一句的后半改为说明本会话不会再自动重试，需要用户重新加载配置或重开会话。Context 只看事件字段，不按服务器类型写分支。
+`autoRetry` 为 false（stdio 启动失败且没有工具，或重连达到上限）时，说明本会话不会再自动重试，需要用户修复服务器后重开会话。配置与凭据未变时重新加载配置会跳过 failed 服务器，不会重启它，因此不建议仅重载配置。Context 只看事件字段，不按服务器类型写分支。
 
 ### 4. 上下文与缓存
 
@@ -73,6 +76,7 @@ MCP 按需加载模式（[ADR-0067](ADR-0067-mcp-tool-search.md)）下，`mcp_ca
 - 每次状态变化多一小段 user 消息（几十 token）。服务器反复抖动时每个 Turn 可能各记一条，规模有限，不做合并。
 - `session.config_changed` 不再只表示用户配置变更，events.md 说明它也承载环境状态。
 - 没有 Turn 进行时服务器状态变化不写日志，空闲会话不会因为后台重连产生事件。
+- 回退掉说明后若服务器状态未变，下一 Turn 会再说明一次。
 
 ## 备选方案
 

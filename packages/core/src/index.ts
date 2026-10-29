@@ -1699,14 +1699,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       })),
     ].filter((s) => s.enabled !== false);
     let mcpSession: McpSession | undefined;
-    const recordedMcpAvailability = new Map(Object.entries(session.state().mcpAvailability ?? {}));
     const recordMcpAvailability = async (signal: AbortSignal): Promise<void> => {
       if (signal.aborted || meta.parent !== undefined || mcpSession === undefined) return;
+      const previous = session.state().mcpAvailability ?? {};
       const changes: NonNullable<DurablePayload<"session.config_changed">["mcp"]> = [];
       for (const status of mcpSession.status()) {
         if (status.state === "stopped") continue;
         const available = status.state === "ready";
-        if (available === (recordedMcpAvailability.get(status.name) ?? true)) continue;
+        if (available === (previous[status.name] ?? true)) continue;
         changes.push({
           server: status.name,
           available,
@@ -1723,7 +1723,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       if (changes.length === 0) return;
       await session.emit("session.config_changed", { mcp: changes });
-      for (const change of changes) recordedMcpAvailability.set(change.server, change.available);
     };
     let pendingMcp = false;
     let mcpUpdate: Promise<void> = Promise.resolve();
@@ -1830,23 +1829,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const next = config
               ? (await config.forWorkspace(meta.workspaceRoot)).resolved.mcpServers
               : [];
-            const previousServers = new Set(mcpSession.status().map((s) => s.name));
             await mcpSession.reconcile([
               ...(options.mcpServers ?? []),
               ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
             ]);
-            const statuses = mcpSession.status();
-            const currentServers = new Set(
-              statuses.filter((s) => s.state !== "stopped").map((s) => s.name),
-            );
-            for (const name of recordedMcpAvailability.keys()) {
-              if (!currentServers.has(name)) recordedMcpAvailability.delete(name);
-            }
-            for (const status of statuses) {
-              if (!previousServers.has(status.name) && status.state !== "stopped") {
-                recordedMcpAvailability.set(status.name, status.state === "ready");
-              }
-            }
           }
           const diff = mcpSession.applyPendingTools();
           for (const name of diff.remove) {
