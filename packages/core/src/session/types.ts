@@ -61,6 +61,8 @@ export interface SessionState {
   meta: SessionMeta;
   config: SessionConfig;
   history: HistoryEntry[];
+  /** 最近记录的 MCP 可用性；缺省全部可用，配置与回退一样不撤销。 */
+  mcpAvailability?: Record<string, boolean> | undefined;
   /** 最后一次有效且持久化的 todo_write 快照 */
   todos: TodoItem[];
   /** 累计 token 用量（由 message.assistant 与 permission.reviewed 的 usage 累加） */

@@ -19,6 +19,8 @@ import type {
   UnsettledCall,
 } from "./types.js";
 
+import { mcpAvailabilityNote } from "./mcp-note.js";
+
 const ZERO_USAGE: Usage = {
   inputTokens: 0,
   outputTokens: 0,
@@ -52,6 +54,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   };
   const history: HistoryEntry[] = [];
   let todos: TodoItem[] = [];
+  const mcpAvailability: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
   const usage = { ...ZERO_USAGE };
   let openTurn: SessionState["openTurn"];
   const unsettled = new Map<string, UnsettledCall>();
@@ -113,6 +116,16 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
             turnId,
             text: shellSwitchNote(p.shell.kind, p.shell.path),
           });
+        }
+        if (p.mcp !== undefined && p.mcp.length > 0) {
+          for (const change of p.mcp) mcpAvailability[change.server] = change.available;
+          if (active)
+            history.push({
+              kind: "note",
+              seq: event.seq,
+              turnId,
+              text: mcpAvailabilityNote(p.mcp),
+            });
         }
         break;
       }
@@ -264,6 +277,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     meta,
     config,
     history,
+    ...(Object.keys(mcpAvailability).length > 0 ? { mcpAvailability } : {}),
     todos,
     usage,
     lastSeq,

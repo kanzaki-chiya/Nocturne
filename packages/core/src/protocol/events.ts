@@ -53,6 +53,15 @@ export interface SessionConfigChangedPayload {
    * 只记录实际发生切换的事件（上层 env/config 覆盖时不发）。
    */
   shell?: { kind: string; path: string } | undefined;
+  /** MCP 环境可用性变化（ADR-0071）；旧版本忽略，不提升日志版本。 */
+  mcp?:
+    | Array<{
+        server: string;
+        available: boolean;
+        reason?: string | undefined;
+        autoRetry?: boolean | undefined;
+      }>
+    | undefined;
 }
 
 export interface TurnStartedPayload {

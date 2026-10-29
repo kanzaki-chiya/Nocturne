@@ -191,6 +191,16 @@ const payloadSchemas = {
     permissionPreset: z.string().transform(normalizePermissionPreset).optional(),
     reasoningEffort: reasoningEffortSchema.optional(),
     shell: z.object({ kind: z.string(), path: z.string() }).optional(),
+    mcp: z
+      .array(
+        z.object({
+          server: z.string(),
+          available: z.boolean(),
+          reason: z.string().optional(),
+          autoRetry: z.boolean().optional(),
+        }),
+      )
+      .optional(),
   }),
   "turn.started": z.object({ turnIndex: z.number().int() }),
   "message.user": z.object({

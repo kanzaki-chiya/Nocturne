@@ -77,6 +77,8 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0069](ADR-0069-session-rename-title-sidecar.md) | 用户改名与会话标题旁路文件：日志为事实来源，列表有界读取 | 已接受 |
 | [ADR-0070](ADR-0070-steer-and-queue-input.md) | 运行中插话与输入排队：安全点消费、待发列表、done 后接续 | 已接受 |
 
+| [ADR-0071](ADR-0071-mcp-availability-notes.md) | MCP 服务器不可用时告诉模型：Turn 边界持久环境说明 | 已接受 |
+
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
 ## 模板

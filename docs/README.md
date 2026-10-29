@@ -102,6 +102,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 运行中插话与输入排队（安全点消费、待发列表不写日志、`done` 后逐条接续）见 [ADR-0070](decisions/ADR-0070-steer-and-queue-input.md)，主文档是 [agent-loop.md](architecture/agent-loop.md) §2 与 [events.md](protocols/events.md)。
 
+MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-0071-mcp-availability-notes.md)。
+
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
 
 ## Roadmap
