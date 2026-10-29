@@ -246,7 +246,7 @@ describe("HTTP 自动重连", () => {
     const { session, warnings } = await open(f.url);
     await f.stop();
     expect(await call(session)).toMatchObject({ error: { code: "mcp_unavailable" } });
-    expect(session.status()[0]).toMatchObject({ state: "failed", restarts: 1 });
+    expect(session.status()[0]).toMatchObject({ state: "failed", restarts: 1, autoRetry: true });
     expect(warnings).toEqual(["mcp_server_failed"]);
     await f.start();
     const before = f.requests;
@@ -256,7 +256,7 @@ describe("HTTP 自动重连", () => {
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 30_001);
     expect((await call(session)).status).toBe("ok");
-    expect(session.status()[0]).toMatchObject({ state: "ready", restarts: 0 });
+    expect(session.status()[0]).toMatchObject({ state: "ready", restarts: 0, autoRetry: true });
   });
 
   it.each(["500", "reset", "hang"] as const)(

@@ -250,6 +250,7 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
       expect(echo.status).toBe("ok");
       expect(echo.modelContent).toBe("回来了");
       expect(session.status()[0]?.restarts).toBe(1);
+      expect(session.status()[0]?.autoRetry).toBe(true);
       expect(session.status()[0]?.state).toBe("ready");
     } finally {
       await session.close();
@@ -279,6 +280,7 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
         await call(getTool(session, "mcp__fake__crash"), {});
         expect((await call(getTool(session, "mcp__fake__echo"), {})).status).toBe("ok");
         expect(session.status()[0]?.restarts).toBe(i);
+        expect(session.status()[0]?.autoRetry).toBe(i < 3);
       }
       await call(getTool(session, "mcp__fake__crash"), {});
       const before = spawn.mock.calls.length;

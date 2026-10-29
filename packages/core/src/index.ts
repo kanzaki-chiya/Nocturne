@@ -165,6 +165,7 @@ import type {
   HookEntry,
   HookPoint,
   DurableEvent,
+  DurablePayload,
   ImageMimeType,
   McpToolSearchMode,
   ModelRef,
@@ -1698,6 +1699,32 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       })),
     ].filter((s) => s.enabled !== false);
     let mcpSession: McpSession | undefined;
+    const recordedMcpAvailability = new Map(Object.entries(session.state().mcpAvailability ?? {}));
+    const recordMcpAvailability = async (signal: AbortSignal): Promise<void> => {
+      if (signal.aborted || meta.parent !== undefined || mcpSession === undefined) return;
+      const changes: NonNullable<DurablePayload<"session.config_changed">["mcp"]> = [];
+      for (const status of mcpSession.status()) {
+        if (status.state === "stopped") continue;
+        const available = status.state === "ready";
+        if (available === (recordedMcpAvailability.get(status.name) ?? true)) continue;
+        changes.push({
+          server: status.name,
+          available,
+          ...(!available
+            ? {
+                reason: (status.state === "starting"
+                  ? "startup timed out"
+                  : (status.error ?? "unknown reason")
+                ).slice(0, 200),
+                ...(status.autoRetry !== undefined ? { autoRetry: status.autoRetry } : {}),
+              }
+            : {}),
+        });
+      }
+      if (changes.length === 0) return;
+      await session.emit("session.config_changed", { mcp: changes });
+      for (const change of changes) recordedMcpAvailability.set(change.server, change.available);
+    };
     let pendingMcp = false;
     let mcpUpdate: Promise<void> = Promise.resolve();
     let mcpOnDemand = false;
@@ -1723,13 +1750,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mcpOnDemand = shouldEnableMcpToolSearch(currentMcpTools, mode);
       if (mcpOnDemand) {
         omittedMcpToolCount = currentMcpTools.length;
-        const readyServers = [
-          ...new Set([
-            ...mcpServerConfigs.map((s) => s.name),
-            ...(mcpSession?.status() ?? []).filter((s) => s.state === "ready").map((s) => s.name),
-          ]),
-        ];
-        const pair = createMcpOnDemandTools(currentMcpTools, readyServers);
+        const readyServers = (mcpSession?.status() ?? [])
+          .filter((s) => s.state === "ready")
+          .map((s) => s.name);
+        const pair = createMcpOnDemandTools(
+          currentMcpTools,
+          readyServers,
+          () => mcpSession?.status() ?? [],
+        );
         tools.register(pair.searchTool);
         tools.register(pair.callTool);
       } else {
@@ -1802,10 +1830,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const next = config
               ? (await config.forWorkspace(meta.workspaceRoot)).resolved.mcpServers
               : [];
+            const previousServers = new Set(mcpSession.status().map((s) => s.name));
             await mcpSession.reconcile([
               ...(options.mcpServers ?? []),
               ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
             ]);
+            const statuses = mcpSession.status();
+            const currentServers = new Set(
+              statuses.filter((s) => s.state !== "stopped").map((s) => s.name),
+            );
+            for (const name of recordedMcpAvailability.keys()) {
+              if (!currentServers.has(name)) recordedMcpAvailability.delete(name);
+            }
+            for (const status of statuses) {
+              if (!previousServers.has(status.name) && status.state !== "stopped") {
+                recordedMcpAvailability.set(status.name, status.state === "ready");
+              }
+            }
           }
           const diff = mcpSession.applyPendingTools();
           for (const name of diff.remove) {
@@ -2538,6 +2579,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               // awaitMcpIdle → applyPendingTools 在本次边界统一切换。
               if (!signal.aborted) await mcpSession?.prepareTurn?.(signal);
               if (!signal.aborted) await awaitMcpIdle(signal);
+              // 暂存工具已切入本轮注册表后再记录，说明与首次请求的工具集一致。
+              if (!signal.aborted) await recordMcpAvailability(signal);
             },
             // ADR-0070 §2：安全点取走插话；取走即从列表移除并广播快照
             takeSteers: () => pendingInputStore.takeSteers(),

@@ -335,6 +335,8 @@ export interface McpServerStatus {
    * HTTP：连续重连失败次数（成功即清零，不设上限，失败后进入冷却）。
    */
   restarts: number;
+  /** 后续是否仍会自动重试（HTTP 恒为 true，stdio 达重连上限为 false）。 */
+  autoRetry?: boolean | undefined;
 }
 
 /** open() 的运行环境：由 index.ts（Runtime 装配处）构造 */
