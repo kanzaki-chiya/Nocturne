@@ -1,219 +1,183 @@
 # Nocturne
 
-项目主页：<https://nocturne.koxia.cn/>
+**项目主页**：<https://nocturne.koxia.cn/> · **下载安装**：[GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases)
 
-Nocturne 是在代码仓库里工作的编程助手。用自然语言让它阅读和搜索代码、修改文件、运行命令，它会按你设定的权限执行，过程和改动都留在本地会话里，可以随时恢复、回退或分叉。
+Nocturne 是在本地代码仓库里工作的编程助手。你可以用自然语言让它阅读和搜索代码、修改文件、运行命令与测试；所有操作都受你设定的权限约束，对话过程和每一次文件改动都保存在本地，随时可以恢复、整轮撤销、回退或分叉。
 
-它有三种用法，共用同一套会话、服务商和权限配置：
+它提供三种使用方式，**共用同一套本地会话、服务商与权限配置**：
 
-- **Windows 桌面版**：会话按项目分组，右侧面板可以查看文件、本会话的改动、终端和网页，设置页里管理服务商、MCP、技能和子代理。
-- **终端**：`nctrn` 命令，默认全屏界面，也有普通屏幕模式、逐行模式和一次性执行。
-- **手机远程控制**：经中继用手机浏览器继续电脑上的会话，内容端到端加密。
+- **Windows 桌面版**：左侧按项目组织会话，右侧面板随时查看文件、Diff 变更、终端、网页和子代理状态；内置可视化设置页。
+- **终端 (`nctrn`)**：在项目目录直接启动，支持全屏终端界面（TUI）、普通屏幕模式、逐行模式和单次命令执行。
+- **手机远程控制**：出门在外时，通过端到端加密中继在手机浏览器上继续电脑里的会话、审批权限或交代新任务。
 
-主要功能：
+---
 
-- **服务商与模型**：支持 OpenAI 兼容、Anthropic、OpenAI Responses 和 Gemini 原生协议，内置 OpenCode Zen / Go 预设；ChatGPT、Grok 可以用账号登录，OpenRouter 可以用浏览器授权换取密钥。模型能力自动从上游和 models.dev 获取，个别模型可以手动修正。
-- **权限**：六档权限预设加逐条规则；`smart` 预设先让安全审查模型过一遍，拿不准的再交给你确认。
-- **子代理**：模型可以把独立任务交给子代理，按任务挑选你配置的档位（不同模型、思考档位和工具集），也可以委派给 omp、codex 等外部编程助手。
-- **扩展**：MCP 服务器（本地命令或远程 HTTP）、Hooks，以及 `.agents/skills`、`.claude/skills` 等目录里的 Agent Skills，用 `/技能名 参数` 调用。
-- **会话**：长对话自动压缩上下文；可以回退到之前的消息并撤销之后的文件改动，也可以从某条消息分叉出新会话；每轮的文件改动汇总在一张卡片里，可以整轮撤销。
+## 快速开始
 
-## 安装
+### 方式一：Windows 桌面版（推荐）
 
-桌面版安装包和命令行包都在 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载。
+1. 前往 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 `Nocturne_<版本>_x64-setup.exe` 并运行。
+   - 安装包内置了 Node.js 运行时，无需额外配置环境，也不需要管理员权限。
+   - 安装包暂未做代码签名，若 Windows SmartScreen 弹出提示，点击「更多信息」→「仍要运行」即可。
+2. 打开 Nocturne，进入左下角 **「设置 › 服务商」**：
+   - 可以直接登录 **ChatGPT**、**Grok** 账号，或通过浏览器一键授权 **OpenRouter**；
+   - 也可以添加任意 OpenAI 兼容、Anthropic、Gemini 或内置的 OpenCode Zen / Go 服务商并填入 API Key（密钥保存在系统安全凭据库中，不写明文配置）。
+3. 在左侧点击新建会话，选择一个本地项目文件夹（或直接开始普通对话），即可开始提问和改代码。
 
-### 桌面版（Windows）
+### 方式二：命令行 (`nctrn`)
 
-下载 `Nocturne_<版本>_x64-setup.exe` 运行即可。桌面版按用户安装到 `%LOCALAPPDATA%\Nocturne`，不需要管理员权限。安装包内随附官方 Node.js 运行时，无需另行安装；需要覆盖时用 `NOCTURNE_NODE` 环境变量指定其他 Node。桌面端会自动检查更新（每 24 小时最多一次，可在「设置 › 常规」关闭），发现新版本时在窗口底部提示，确认后下载安装并重启。安装包未做代码签名，Windows SmartScreen 可能提示「无法验证发行者」，确认来源后选择「仍要运行」。
+需要 **Node.js 24.14** 或更高版本。
 
-卸载走系统「应用与功能」或安装目录下的 `uninstall.exe`：只删除安装目录，会话、设置与凭据等用户数据（`%APPDATA%\io.github.kanzaki-chiya.nocturne` 与 `~/.nocturne`）保留。
+1. 从 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 `nctrn-<版本>.tgz` 并全局安装：
+   ```sh
+   npm install -g ./nctrn-<版本>.tgz
+   ```
+2. 首次运行向导配置服务商与模型：
+   ```sh
+   nctrn setup
+   ```
+3. 进入你的代码仓库目录，启动交互界面：
+   ```sh
+   cd /path/to/your-repo
+   nctrn
+   ```
 
-### 命令行
+---
 
-需要 Node.js 24.14 或更新版本。从 Releases 下载 `nctrn-<版本>.tgz`，用 npm 全局安装（也可以直接把下载地址传给 `npm install -g`）：
+## 日常使用
+
+### 对话与代码改动
+
+- **引用文件与发图**：输入 `@` 可搜索并附带仓库内的文件；支持粘贴截图或拖入 PNG、JPEG、GIF、WebP 图片交给支持视觉的模型分析。
+- **运行中插话与排队**：模型还在执行时可以继续发送消息，选择立即插话引导方向，或放入待发队列等当前回合结束后自动接续。
+- **改动卡片与一键撤销**：每一轮修改过文件后，对话中会汇总生成一张改动卡片，列出增删行数与涉及的文件，不满意可以整轮一键撤销。
+- **回退与分叉**：
+  - **回退（Rewind）**：回到之前的某条消息重新来过，可选择是否同时还原之后产生的文件修改。
+  - **分叉（Fork）**：从任意历史消息切出一条新会话，尝试不同的实现方案而不破坏原对话。
+- **自动压缩上下文**：长对话接近上下文预算时会自动生成摘要并修剪旧工具输出，无需手动清理。
+
+### 桌面版工作区
+
+桌面版右侧配有跟随当前会话的工作区面板（点击标题栏按钮或按 `Ctrl+B` 开关）：
+
+- **文件**：按 `Ctrl+P` 搜索文件名，只读预览并带语法高亮；点击回答里提到的代码路径（如 `src/index.ts:42`）会直接在这里打开并跳到对应行。
+- **变更**：查看本会话每一轮改动的完整 Diff 和目录树统计。
+- **终端**：按 `` Ctrl+` `` 呼出，工作目录自动设为当前项目，切换会话也不会丢失正在运行的进程。
+- **浏览器**：可打开网址或预览本地 HTML 文件。在「设置 › MCP」中开启「面板浏览器（桌面内置）」后，Agent 可以在专属标签页中打开网页、截图和点击操作；遇到需要登录的页面，你可以点击「接管」手动登录，完成后再交还给 Agent。
+- **子代理**：点击工具调用行上的「在面板中查看」，可实时查看子代理的思考过程、工具调用和输出。
+- **通知与定时任务**：当后台会话需要确认、报错停止或长任务完成时，会发送 Windows 系统通知（可在「设置 › 常规」定制）；支持在「定时任务」中设定按日、按周或间隔自动运行的无人值守任务。
+
+### 终端命令行 (`nctrn`)
+
+在项目目录下运行：
 
 ```sh
-npm install -g ./nctrn-<版本>.tgz
-nctrn --version
+nctrn                              # 默认全屏终端界面（TUI）
+nctrn --inline                     # 普通屏幕模式，保留终端原生滚动与搜索
+nctrn --cli                        # 传统逐行命令行模式
+nctrn -p "概述这个仓库的结构"       # 单次执行并输出结果后退出
+nctrn -c                           # 继续当前目录最近一次会话
+nctrn --resume <会话 ID>            # 恢复指定会话
+nctrn --sessions                   # 列出历史会话及 ID
 ```
 
-升级时安装新版本的 tgz 即可；卸载：`npm uninstall -g nctrn`。
+**常用斜杠命令**（在对话输入框中直接使用）：
+
+| 命令 | 作用 |
+|---|---|
+| `/model` | 切换当前模型 |
+| `/effort` | 切换思考深度档位（如 `low` / `medium` / `high`） |
+| `/preset` | 切换权限预设 |
+| `/provider` | 管理服务商、登录账号或修正单个模型的能力声明 |
+| `/rewind` / `/fork` | 回退到历史消息（可撤销文件修改） / 从历史消息分叉新会话 |
+| `/compact` / `/context` | 手动压缩上下文 / 查看当前上下文各部分占比 |
+| `/cost` | 查看本会话 Token 用量与预估费用 |
+| `/mcp` | 查看 MCP 服务器连接状态 |
+| `/shell` | 查看或切换命令执行 Shell（PowerShell / Git Bash / cmd 等） |
+| `/settings` / `/theme` | 修改默认权限、安全审查小模型与界面配色主题 |
+| `/resume` / `/exit` | 切换到其他会话 / 退出 |
+
+> **TUI 快捷操作**：鼠标滚轮翻阅历史，拖动选中文字松开即复制；`Ctrl+O` 展开或收起思考过程；`Alt+V` 粘贴剪贴板图片。
+
+### 手机远程控制
+
+电脑保持运行时，你可以用手机浏览器随时接管桌面端会话：
+
+1. 获取中继邀请码，或按 [中继自建指南](apps/relay/deploy/README.md) 部署自己的中继服务。
+2. 在桌面端打开 **「设置 › 远程」** 填入邀请完成登记，点击 **「配对新手机」**。
+3. 用手机相机扫描二维码（或粘贴配对链接）并确认设备名即可完成配对。
+   - **iOS 提示**：建议通过 Safari 分享菜单「添加到主屏幕」以获得最佳体验并支持推送通知；由于 iOS 主屏幕应用与 Safari 存储隔离，添加到主屏幕后请在新图标打开的应用内重新粘贴一次配对链接。
+
+手机端支持新建会话、发文字与图片、`@` 引用文件、审批权限、查看每轮代码改动、切换模型与权限预设、执行斜杠命令以及回退/分叉。所有会话内容均在你的电脑与手机之间**端到端加密**，中继服务器无法解密。
+
+---
+
+## 模型、权限与扩展
+
+### 服务商与模型
+
+- **多协议原生支持**：支持 OpenAI 兼容、Anthropic、OpenAI Responses 和 Google Gemini 原生协议。
+- **能力自动识别**：自动从上游接口与 [models.dev](https://models.dev) 获取模型的上下文窗口、思考能力与视觉支持；也可在服务商页针对单个模型手动修正（完全离线环境可在配置中设 `"modelsDev": false` 使用内置快照）。
+- **配合 Magpie 使用**：如果你使用 [Magpie](https://usemagpie.ai) 管理本机订阅账号与 API 网关，可通过仓库内的 [`packaging/magpie-plugin`](packaging/magpie-plugin/README.md) 插件一键接入，断开后自动还原，不影响 Nocturne 原有配置。
+
+### 权限控制
+
+Nocturne 不会在未经允许时乱改系统。你可以在状态栏或通过 `/preset` 随时切换六档权限预设：
+
+| 预设 | 行为说明 |
+|---|---|
+| `read-only` | 仅允许读取和搜索代码，禁止任何文件修改与命令执行 |
+| `default` | 只读操作自动放行；修改文件、运行非常规命令、联网等操作需你确认 |
+| `auto-edit` | 在 `default` 基础上自动允许工作区内的文件修改，适合专注写代码 |
+| `smart` | 除只读操作外，先交由独立的安全审查小模型判断风险，安全即放行、拿不准再询问你 |
+| `guarded` | 自动放行工作区内的文件读写与常规命令，仅拦截高风险操作与工作区外写入 |
+| `bypass` | 放开工作区外写入与内建风险提示（仍保留敏感凭据保护与你显式配置的拒绝规则） |
+
+当某个操作需要审批时，你可以选择**允许一次**、**本会话内允许**、**本项目内允许**或**拒绝**。
+
+### 子代理与外部编程助手
+
+- **内置子代理档位**：处理复杂任务时，主模型可以把独立子任务（如全仓搜索、模块重构）委派给子代理并行处理。你可以在「设置 › 子代理」中为不同档位（如轻量查找的 `quick`、深度修改的 `deep`）分别指定最划算的模型、思考强度和工具集。
+- **调用外部 Agent**：支持接入已安装的外部 ACP 编程助手（如 `omp`、`codex` 等）。配置后既可让主模型按需委派，也可以直接在输入框用 `/omp 你的任务` 点名交给它执行。
+
+### MCP、Skills 与 Hooks
+
+- **Agent Skills**：自动发现项目或用户目录下（`.agents/skills`、`.claude/skills`）的技能包，既可由模型按需加载，也能用 `/技能名 参数` 直接调用。
+- **MCP 服务器**：在「设置 › MCP」中添加本地命令行（stdio）或远程 HTTP MCP 服务器，扩展浏览器操作、数据库查询、文档检索等工具。
+- **Hooks**：支持在特定生命周期事件（如工具调用前 `PreToolUse`、回合结束 `TurnEnd`）触发自定义本地脚本。
+
+---
+
+## 进阶配置与开发
+
+绝大多数设置都可以直接通过桌面端「设置」或终端 `nctrn setup`、`/settings`、`/provider` 完成，无需手写配置文件。
+
+如果你需要手写配置、在团队仓库中共享项目级权限规则，或使用环境变量启动：
+
+- **配置文件位置**：用户级配置位于 `~/.nocturne/config.json`（可通过 `NOCTURNE_HOME` 环境变量更改目录），项目级配置位于仓库下的 `.nocturne/config.json`。程序自动维护的数据（服务商向导、MCP、设置等）保存在各自独立的 JSON 文件中，不会覆盖你手写的 `config.json`。
+- **项目配置信任**：克隆他人仓库时，仓库内的 `.nocturne/config.json` 默认不受信任（只能收紧权限，不能替换模型或启动 MCP / Hook）。确认安全后可在仓库目录运行 `nctrn trust` 信任，或用 `nctrn untrust` 撤销。
+- **网络代理**：代理环境下设置 `HTTPS_PROXY`（如 `http://127.0.0.1:7897`）、`HTTP_PROXY` 或 `NO_PROXY` 环境变量即可自动生效。
+- **环境变量直连**：不跑向导时，也可以直接设置 `NOCTURNE_API_KEY`、`NOCTURNE_BASE_URL` 和 `NOCTURNE_MODEL` 启动 `nctrn`。
+- **完整配置 Schema 与架构文档**：见 [文档索引 (`docs/README.md`)](docs/README.md) 与 [配置说明 (`docs/architecture/config.md`)](docs/architecture/config.md)。
 
 ### 从源码构建
 
-需要 Node.js 24.14 或更新版本，以及 pnpm 11.24.0。从源码构建，并把 `nctrn` 注册为全局命令：
+需要 **Node.js ≥ 24.14** 与 **pnpm 11.24.0**：
 
 ```sh
 git clone https://github.com/kanzaki-chiya/Nocturne.git
 cd Nocturne
 pnpm install --frozen-lockfile
 pnpm build
+
+# 将源码构建出的 nctrn 链接为全局命令（后续拉取新代码只需重新 pnpm build）
 cd apps/cli
 npm link
 nctrn --version
 ```
 
-`npm link` 把命令放进 npm 的全局目录（`npm prefix -g` 可查看），该目录需要在 `PATH` 中；Node.js 安装程序默认已经配置好。之后在任何目录、任何终端都可以直接运行 `nctrn`。
-
-这是链接而不是复制：更新源码后在 Nocturne 目录重新构建即可生效，不需要再次 `npm link`：
-
-```sh
-git pull
-pnpm install --frozen-lockfile
-pnpm build
-```
-
-卸载：`npm unlink -g @nocturne/cli`。
-
-## 配置
-
-首次使用直接运行 `nctrn setup`：在交互终端打开服务商页完成配置，随后自动进入模型选择页挑选模型。密钥交给操作系统安全存储（Windows DPAPI、macOS 钥匙串、Linux Secret Service），不写进任何配置文件；ChatGPT、Grok 可在服务商页用账号登录（浏览器授权或设备码），OpenRouter 可用浏览器授权换取密钥。会话内可用 `/provider` 打开服务商管理页、`/model` 查看与切换模型。
-
-也可以沿用环境变量方式连接 OpenAI 兼容服务：
-
-```powershell
-$env:NOCTURNE_API_KEY = "<你的密钥>"
-$env:NOCTURNE_BASE_URL = "https://<服务地址>/v1"
-$env:NOCTURNE_MODEL = "<模型 ID>"
-nctrn --sessions
-```
-
-代理环境下设置 `HTTPS_PROXY`（例如 `http://127.0.0.1:7897`）即可，Node 24.14.0 起会自动生效；也支持 `HTTP_PROXY` 和 `NO_PROXY`，详见[网络代理说明](docs/architecture/config.md#网络代理)。
-
-用户配置位于 `<NOCTURNE_HOME>/config.json`；项目配置位于仓库的 `.nocturne/config.json`。两者都是严格 JSON。向导写入独立的 `<NOCTURNE_HOME>/providers.json`，同名手写条目会覆盖向导条目。手写条目的 `type` 支持 `openai-compatible` 与 `anthropic`；OpenAI Responses 和 Gemini 协议在服务商页的「编辑模型」里按模型选择。
-
-下面是一份用户配置示例，展示 Provider、模型、权限预设、MCP、Hooks 和子代理的最小写法。把地址、模型 ID 和 MCP 服务器脚本路径换成实际值；`NOCTURNE_API_KEY` 仍须由环境变量提供。MCP 服务器只在会话打开时启动，Hook 命令会在相应事件发生时执行。
-
-```json
-{
-  "model": "example/example-model",
-  "providers": [
-    {
-      "id": "example",
-      "type": "openai-compatible",
-      "baseURL": "https://<服务地址>/v1",
-      "apiKeyEnv": "NOCTURNE_API_KEY",
-      "models": { "example-model": { "contextWindow": 128000 } }
-    }
-  ],
-  "permissions": {
-    "preset": "default",
-    "rules": [{ "kind": "subagent", "pattern": "explore", "action": "allow" }]
-  },
-  "mcp": {
-    "servers": {
-      "example": { "command": "node", "args": ["/path/to/mcp-server.mjs"] }
-    }
-  },
-  "hooks": {
-    "TurnEnd": [{ "command": "node", "args": ["/path/to/turn-end.mjs"] }]
-  }
-}
-```
-
-Anthropic 协议可用另一份 Provider 条目，模型引用随之改为 `anthropic/<模型 ID>`；未指定 `baseURL` 时使用官方端点：
-
-```json
-{
-  "model": "anthropic/<模型 ID>",
-  "providers": [
-    { "id": "anthropic", "type": "anthropic", "apiKeyEnv": "ANTHROPIC_API_KEY" }
-  ]
-}
-```
-
-项目配置初次加载时默认不受信任：它不能替换模型或启动 MCP、Hook；收紧权限的规则仍可生效。确认仓库内容可信后，在仓库目录运行 `nctrn trust`；用 `nctrn untrust` 撤销。比如项目配置可以只放一条权限规则：
-
-```json
-{
-  "permissions": {
-    "rules": [{ "kind": "shell", "pattern": "*", "action": "ask" }]
-  }
-}
-```
-
-预设可用 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass`；旧名称 `full-access` 兼容为 `guarded`。`smart` 对除只读命令外的操作先做安全审查，放行就执行，否则交给你确认；未配置审查器时这些操作直接询问你并提示一次。TUI `/settings` 的「安全审查」可独立选择小模型。`bypass` 放开工作区外写入和内建风险提示，仍保留凭据保护及显式权限规则。子代理通过内置 `task` 工具使用，`explore` 适合只读探索，`general` 可以承担更广的任务。会话中可用 `/preset` 查看或切换预设。流式首事件与空闲超时可在配置的 `turn.firstEventTimeoutMs`、`turn.idleTimeoutMs` 中调整，默认分别为 30000 和 120000 毫秒。更多配置说明见[项目文档](docs/README.md)。
-
-### 子代理档位
-
-在桌面端「设置 › 子代理」中可以添加内置档位，例如 quick 处理查找、汇总这类轻量任务，deep 处理跨模块的复杂任务。每个档位可以分别指定模型、思考强度和工具集，并写明适合什么任务；模型委派子任务时会按任务挑选合适的档位。
-
-### 外部 agent
-
-外部 agent 是独立安装、登录的编程助手，Nocturne 可以把子任务交给它执行。在桌面端「设置 › 子代理」中添加，或在用户 `config.json` 中配置 `externalAgents`，例如使用 omp 并指定模型：
-
-```json
-{
-  "externalAgents": [
-    {
-      "name": "omp",
-      "command": "omp",
-      "args": ["--mode", "acp", "--model", "<服务商>/<模型 ID>"],
-      "description": "使用 omp 执行独立任务",
-      "enabled": true
-    }
-  ]
-}
-```
-
-输入 `/omp 任务原文`（一般形式为 `/<名称> 任务`）可以点名委派。委派入口会请求确认，也可用权限规则放行，例如 `{ "kind": "subagent", "pattern": "external:omp", "action": "allow" }`。费用与额度计在该 agent 自己的账号上；执行期只能拦截它主动请求的操作，不能约束它直接执行、没有请求权限的操作。
-
-### 与 Magpie 配合
-
-[Magpie](https://usemagpie.ai) 是管理订阅账号和 API 服务商的本机网关。仓库里的 `packaging/magpie-plugin` 是 Magpie 的 Agent 插件：`magpie plugin add <该目录>` 安装后，在 Magpie 的 Agent 页连接 Nocturne、选择模型，重启 `nctrn` 即可使用 Magpie 的模型；断开后 Magpie 会还原它写过的内容。Nocturne 自己的服务商、设置和密钥不受影响。安装、切换与故障排查见[插件说明](packaging/magpie-plugin/README.md)。
-
-## 基础用法
-
-### 终端
-
-在要操作的仓库目录运行：
-
-```sh
-nctrn                              # 交互式终端：默认全屏界面（TUI）
-nctrn --inline                     # 普通屏幕模式，使用终端原生滚动与搜索
-nctrn --cli                        # 逐行命令行界面
-nctrn -p "概述这个仓库"             # 执行一次后退出
-nctrn -c                           # 继续当前目录最近的会话
-nctrn --resume <会话 ID>            # 恢复指定会话
-nctrn --sessions                   # 列出会话及 ID
-nctrn --debug -p "概述这个仓库"     # 写入诊断日志
-```
-
-交互模式常用 `/help` 查看命令，`/model`、`/effort` 和 `/preset` 查看或切换模型、思考档位与权限预设，`/shell` 查看或切换执行命令的 shell（pwsh / Git Bash / cmd 等，也可用 `NOCTURNE_SHELL` 或 `config.json` 的 `shell` 字段指定），`/context` 查看上下文用量，`/cost` 查看用量与预估费用，`/compact` 压缩上下文，`/mcp` 查看服务器状态，`/resume` 切换会话，`/rewind` 回退到之前的某条消息（可同时撤销之后的文件改动），`/fork` 从某条消息分叉出新会话，`/settings` 修改默认权限预设、安全审查、主题等设置，`/exit` 退出。TUI 中输入 `/theme` 可预览并切换适配深色或浅色终端背景的配色。执行时需要确认的操作会显示允许一次、会话内允许、项目内允许或拒绝等选项；非交互模式下需要确认的操作默认拒绝。
-
-模型能力自动从上游与 models.dev 获取；个别模型可在 `/provider` 的「编辑模型」（行式 CLI 用 `/provider model <服务商> <模型>`）中修正推理、图片输入、限额、协议和接口地址。模型支持图片输入时，`read` 可读取 PNG、JPEG、GIF、WebP 图片并交给模型查看；TUI 中 Alt+V 粘贴剪贴板截图，或把图片文件拖进终端。需要完全离线时，在 `config.json` 设置 `"modelsDev": false` 关闭联网更新，仍使用随版本内置的模型快照。
-
-默认全屏界面支持鼠标滚轮翻阅对话，拖动选中后松开即可复制；有选区时 Ctrl+C 复制，Esc 清除选区。Ctrl+O 原位展开或收起思考内容，Ctrl+V 粘贴。需要终端原生的回滚记录、选中与搜索时使用 `--inline`；退出全屏后，本次对话会打印回主屏。
-
-### 桌面版
-
-左侧按项目列出会话，可以置顶；新建会话时选择项目目录，也可以不选目录直接开普通对话。消息可以带图片和 `@` 文件引用，发出的消息可以编辑后重发；每轮改动文件后会出现一张更改卡片，列出增删行数，可以整轮撤销。状态栏显示模型、思考档位、权限预设和上下文用量，点开上下文用量可以看各部分的占比。
-
-右侧面板（标题栏按钮或 Ctrl+B）跟着会话走，用标签页查看：
-
-- **文件**：Ctrl+P 按文件名查找，只读查看并带语法高亮；回答里引用的文件路径点一下就在这里打开，并定位到所引的行。
-- **变更**：本会话每一轮改动的 diff，右边是带增删行数的目录树。
-- **终端**：`` Ctrl+` `` 打开，工作目录是当前项目，切换会话后进程和屏幕内容都还在。
-- **浏览器**：输入网址或本机 HTML 文件路径打开网页；回答里引用的 HTML 文件也在这里打开。
-- **子代理**：从工具行的「在面板中查看」打开，实时查看子代理的思考、工具调用和输出。
-
-在「设置 › MCP」打开「面板浏览器（桌面内置）」后，agent 可以在自己的浏览器标签里打开网页、截图、点击和输入，不碰你的标签；需要登录时点「接管」自己登录，再交回给 agent。这项功能默认关闭，开启前请阅读设置里的风险说明。
-
-会话需要你确认、出错停止，或运行较久后完成时，如果你没在看这个会话，桌面版会发 Windows 系统通知；在「设置 › 常规 › 通知」里可以选择提醒哪些事、完成提醒的最短用时和提示音。
-
-### 手机远程控制
-
-使用远程控制需要中继管理员的邀请，也可以自建中继：按[自建指南](apps/relay/deploy/README.md)部署 Release 中的中继 tgz。在桌面端「设置 › 远程」粘贴邀请登记，再点击「配对新手机」，用手机相机扫码并确认设备名。也可在手机网页粘贴电脑复制的配对链接。以后打开中继主页即可查看会话；电脑须保持运行，可随时关闭远程访问、断开手机或移除设备。
-
-建议在 Safari 分享菜单中「添加到主屏幕」。iOS 的主屏幕应用不共享 Safari 的 IndexedDB 身份，添加后需要在主屏幕应用里再粘贴一次新的配对链接。清除网站数据或换浏览器也需要重新配对。手机设置页可开启固定文案的推送提醒；iOS 16.4 及以上需要先装成主屏幕应用，再允许通知。通知不含会话内容。
-
-手机能做会话里的一切：在任意项目新建会话、发送文字与图片、@ 引用文件、切换模型、思考档位与权限预设、斜杠命令与技能、压缩、回退、分叉、查看本轮改动和用量；设置、服务商与凭据、MCP 与外部 agent 管理、永久授权、项目信任和 Shell 设置只能在电脑上改。传输内容端到端加密，中继看不到内容，但你仍需信任中继管理员不会篡改手机网页。
-
-## 已知限制
-
-- Nocturne 主进程被强杀时，如果 MCP 服务器在 stdin 关闭后没有自行退出，它可能残留为孤儿进程。Windows 上服务器不会随父进程自动退出；POSIX 上即使服务器处于独立进程组，父进程消失也不会自动向该组发信号。先核对服务器命令行和 PID，再在 Windows 用 `taskkill /PID <PID> /T /F`，或在 POSIX 用 `kill -TERM <PID>`，必要时逐一清理其子进程。正常关闭会话时 Nocturne 会清理服务器。
-- 工具返回的图片会发给支持图片输入的模型（可在「编辑模型」中声明）。桌面版在工具行里显示缩略图；终端界面和手机上只显示文本占位。音频等其他二进制资源一律以文本占位显示。
+卸载源码链接：`npm unlink -g @nocturne/cli`。
 
 ## 许可证
 
-[GNU GPL v3.0](LICENSE)。
+本项目基于 [GNU GPL v3.0](LICENSE) 开源。
