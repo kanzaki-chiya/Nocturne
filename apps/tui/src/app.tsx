@@ -165,6 +165,20 @@ export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
 export const splitTextBlocks = splitMarkdownBlocks;
 
 /**
+ * 磁盘上的输入历史与读取期间新提交的条目合并。新条目的写入可能已先于
+ * 读取落盘，此时 stored 末尾与 recent 开头重叠，只追加未重叠的部分。
+ */
+export function mergeInputHistory(stored: readonly string[], recent: readonly string[]): string[] {
+  let overlap = Math.min(stored.length, recent.length);
+  while (overlap > 0) {
+    const tail = stored.slice(stored.length - overlap);
+    if (tail.every((row, i) => row === recent[i])) break;
+    overlap--;
+  }
+  return [...stored, ...recent.slice(overlap)].slice(-1000);
+}
+
+/**
  * 持久化助手条目 → 写入回滚区的块条目。流式期间已写入的前缀按字符位置
  * 记账（written），这里只切剩余部分；键含尝试序号与绝对偏移，晋升后不重发。
  */
@@ -2428,8 +2442,10 @@ function SessionApp({
   useEffect(() => {
     let active = true;
     setHistoryIndex(undefined);
+    setInputHistory([]);
     void session.readInputHistory().then((rows) => {
-      if (active) setInputHistory(rows);
+      // 读取期间已提交的条目排在磁盘记录之后；直接覆盖会把它们丢掉
+      if (active) setInputHistory((current) => mergeInputHistory(rows, current));
     });
     return () => {
       active = false;

@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
 
 import { App } from "../src/app.js";
-import { splitTextBlocks } from "../src/app.js";
+import { mergeInputHistory, splitTextBlocks } from "../src/app.js";
 import { internalSession } from "./internal-session.js";
 
 const tmpRoots: string[] = [];
@@ -858,6 +858,47 @@ describe("全屏界面", () => {
     expect(lastFrame()).not.toContain("› 你好Xbc");
     unmount();
     await session.close();
+  });
+
+  it("历史读取晚于首次提交时，刚提交的条目仍可回填", async () => {
+    const { runtime, session } = await sessionWithEffort();
+    await session.recordInputHistory("旧的一条");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const read = session.readInputHistory.bind(session);
+    // 读到磁盘内容后先挂起，等首次提交完成再返回（模拟慢磁盘）
+    vi.spyOn(session, "readInputHistory").mockImplementation(async () => {
+      const rows = await read();
+      await gate;
+      return rows;
+    });
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    await pause(60);
+    stdin.write("你好abc");
+    stdin.write("\r");
+    await waitFor(() => {
+      const frame = lastFrame() ?? "";
+      return frame.includes("完毕") && frame.includes("idle") && !frame.includes("会话忙");
+    });
+    release();
+    await pause(30);
+    stdin.write("\x1b[A");
+    await waitFor(() => (lastFrame() ?? "").includes("› 你好abc"));
+    stdin.write("\x1b[A");
+    await waitFor(() => (lastFrame() ?? "").includes("› 旧的一条"));
+    unmount();
+    await session.close();
+  });
+
+  it("合并输入历史：去掉已落盘的重叠部分", () => {
+    expect(mergeInputHistory(["a", "b"], [])).toEqual(["a", "b"]);
+    expect(mergeInputHistory(["a"], ["b", "c"])).toEqual(["a", "b", "c"]);
+    expect(mergeInputHistory(["a", "b"], ["b", "c"])).toEqual(["a", "b", "c"]);
+    expect(mergeInputHistory(["b", "c"], ["b", "c"])).toEqual(["b", "c"]);
   });
 
   it("跨次保存的多行原文回填为粘贴占位", async () => {
