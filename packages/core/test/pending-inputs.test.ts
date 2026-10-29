@@ -572,11 +572,15 @@ describe("ADR-0070 非 done 结束：转排队并暂停", () => {
     // 暂停中提交 = 追加到队尾并恢复；空闲时队首先发出
     const result = await session.enqueueInput("steer", { text: "第三条待发" });
     expect(result.queued).toBe(true);
-    await expect.poll(() => session.pendingInputs().items.length).toBe(0);
-    const users = session
-      .state()
-      .history.filter((entry) => entry.kind === "user")
-      .map((entry) => JSON.stringify(entry.kind === "user" ? entry.content : ""));
+    // 条目在写入 message.user 之前就已离开列表，所以等历史而不是等列表清空
+    const userTexts = () =>
+      session
+        .state()
+        .history.filter((entry) => entry.kind === "user")
+        .map((entry) => JSON.stringify(entry.kind === "user" ? entry.content : ""));
+    await expect.poll(() => userTexts().length).toBe(4);
+    expect(session.pendingInputs().items).toHaveLength(0);
+    const users = userTexts();
     expect(users[1]).toContain("第一条待发");
     expect(users[2]).toContain("第二条待发");
     expect(users[3]).toContain("第三条待发");
