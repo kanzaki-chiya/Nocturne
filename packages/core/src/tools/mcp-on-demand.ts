@@ -4,7 +4,7 @@ import {
   type McpToolSearchMode,
   type ToolSpec,
 } from "../protocol/index.js";
-import type { ToolDefinition } from "./types.js";
+import type { McpServerStatus, ToolDefinition } from "./types.js";
 
 export type { McpToolSearchMode };
 
@@ -197,6 +197,7 @@ function formatSearchMatches(
 export function createMcpOnDemandTools(
   mcpTools: readonly ToolDefinition[],
   availableServers: readonly string[] = [],
+  serverStatus: () => readonly McpServerStatus[] = () => [],
 ): {
   searchTool: ToolDefinition<{ query: string; server?: string | undefined }, McpSearchOutput>;
   callTool: ToolDefinition<{ tool: string; arguments?: Record<string, unknown> | undefined }>;
@@ -302,9 +303,18 @@ export function createMcpOnDemandTools(
         const targetName = typeof input.tool === "string" ? input.tool.trim() : "";
         const target = toolMap.get(targetName);
         if (target === undefined) {
+          const unavailable = serverStatus().find(
+            (s) =>
+              ["failed", "crashed", "starting"].includes(s.state) &&
+              targetName.startsWith(`mcp__${s.name.toLowerCase().replace(/[^a-z0-9_]/g, "_")}__`),
+          );
+          const problem =
+            unavailable === undefined
+              ? `MCP 工具 "${targetName}" 不存在或不在本会话工具池中。`
+              : `MCP 服务器 "${unavailable.name}" 当前不可用（${(unavailable.state === "starting" ? "startup timed out" : (unavailable.error ?? "未知原因")).slice(0, 200)}）。`;
           return {
             code: "unknown_tool",
-            error: `MCP 工具 "${targetName}" 不存在或不在本会话工具池中。可用服务器：${serverNames.length > 0 ? serverNames.join(", ") : "（无）"}。请先用 mcp_search 搜索可用工具，再用 mcp_call 调用。`,
+            error: `${problem}可用服务器：${serverNames.length > 0 ? serverNames.join(", ") : "（无）"}。请先用 mcp_search 搜索可用工具，再用 mcp_call 调用。`,
           };
         }
         if (

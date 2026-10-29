@@ -400,7 +400,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         );
       // ADR-0022：shell 切换立即生效（下一次 shell 调用起）
       if (p.shell !== undefined) lines.push(`shell 已切换为 ${p.shell.kind}（${p.shell.path}）`);
-      pushNotice(view, event.seq, "config", lines.join("\n"), p);
+      if (lines.length > 0) pushNotice(view, event.seq, "config", lines.join("\n"), p);
       break;
     }
     case "turn.started": {

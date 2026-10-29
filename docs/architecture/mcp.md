@@ -79,6 +79,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 会话运行中
   ├── 主 Turn 已开始、首次请求前 startup(signal) 等待初始启动结束，可中断
   │   → 复用 applyMcp / applyPendingTools，将暂存工具并入注册表
+  │   → Turn 边界记录可用性变化为 session.config_changed.mcp，折叠成模型环境说明（ADR-0071）
   ├── tools/call 经执行管线（第 5、6 节）
   ├── tools/list_changed 通知 → 重新 tools/list 并**暂存**，下一个 Turn 边界才切换
   │   注册表（Turn 内工具集与上下文前缀保持稳定，不打断进行中的请求，也保住
@@ -94,6 +95,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
   - 上述崩溃与 3 次上限仅适用于 **stdio**。HTTP 的 `failed` 服务器在下一次调用时惰性重连：新建传输、不带旧 session id、重新 initialize 与 tools/list。并发调用共用一个重连 promise；次数按连续连接失败计，成功清零，不设永久上限。连接失败后冷却 **30 秒**，冷却内立即返回 `mcp_unavailable` 并说明剩余时间；冷却结束后的下一次调用再尝试。
   - 本次调用内只对带 session id 的 HTTP 404，或明确请求尚未发出的连接阶段错误（Node fetch 错误链中的 `ECONNREFUSED`、`ENOTFOUND`、`EAI_AGAIN`、`EHOSTUNREACH`、`ENETUNREACH`）立即重连并重试一次。多地址 AggregateError 只有所有子错误均为连接阶段错误才安全重试。请求发出后超时、reset、HTTP 500 等不重试，记 `failed`，下次调用重连，避免重复副作用。
   - 每个主 Turn 开始、`applyPendingTools()` 之前，`McpSession.prepareTurn(signal)` 对过冷却的失败 HTTP 服务器并行重连，最多等 **3 秒**；及时成功的工具本 Turn 生效，超时则后台继续、下一个 Turn 边界生效。首 Turn 的初始启动等待不变；stdio 不受影响；子会话与压缩不触发恢复等待。
+- **Turn 边界记录可用性变化**：主 Turn 在 MCP 准备与 `applyPendingTools()` 完成后、首次请求前追加持久环境说明，只记录相对日志折叠状态的变化；中断、子会话与后台请求不写。规则、措辞与恢复语义见 [ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)。`status().autoRetry` 为当时的重试能力：HTTP 恒为 true，stdio 达到重连上限为 false。
 - **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。**已知限制（Windows、POSIX 均适用）**：Nocturne 主进程被强杀时，无法执行主动清理；MCP 服务器的 stdin 管道会关闭。若服务器响应 EOF 自行退出，就不会残留；若服务器忽略 EOF 并继续运行，就可能成为孤儿进程。Windows 当前没有用 Job Object 绑定生命周期；POSIX 虽用独立进程组，但主进程强杀后也不会自动向该组发信号。手动清理前先核对服务器命令行及 PID：Windows 使用 `taskkill /PID <PID> /T /F`；POSIX 使用 `kill -TERM <PID>`，必要时逐一清理其子进程。真实 `nctrn` 进程与假 MCP 服务器的强杀验收见 `apps/cli/test/mcp-parent-kill.accept.mjs`；后续方案见 [roadmap](../roadmap/roadmap.md)。
 - **子会话复用（Phase 6）**：Subagent 子会话的工具集直接取父会话 `mcpSession.tools()` 的快照——同一连接、同一批服务器进程，**不为子会话启动新的 MCP 服务器**，也不做第二次 initialize（[subagent.md](subagent.md) 第 10 节）。
 - 服务器主动发来的请求（`sampling/createMessage`、`elicitation/create`、`roots/list` 等）：我们不声明对应 capability，一律回 JSON-RPC `method_not_found`；`ping` 由 SDK 自动应答。
@@ -130,7 +132,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 工具集合随会话注册表存在：本会话的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个 Turn 开始时一次性切换**——保证单个 Turn 内 `specs()` 稳定（模型看到的工具集不中途变化，请求前缀不变）。会话关闭后 MCP 工具随注册表一起消失。
 
-按需模式 `mcp_call` 的目标不存在或不在本会话工具池时，由工具的 dispatch 返回 unknown_tool，列可用服务器并提示先用 mcp_search；不列注册表里的内置工具名。它在通用执行器的目标查找之前结算，不为 MCP 在执行器增加名字分支（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）。
+按需模式 `mcp_call` 的目标不存在或不在本会话工具池时，由工具的 dispatch 返回 unknown_tool，列可用服务器并提示先用 mcp_search；目标工具名的服务器段属于当前不可用服务器时，说明该服务器不可用及原因（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）；不列注册表里的内置工具名。它在通用执行器的目标查找之前结算，不为 MCP 在执行器增加名字分支（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）。
 
 ## 6. 调用与结果映射
 

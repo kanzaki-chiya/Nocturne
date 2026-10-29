@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -621,6 +621,16 @@ describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、�
     });
     const reason = await session.submit({ text: "run subagent" });
     expect(reason).toBe("done");
+    for (const file of await readdir(path.join(root, "sessions"))) {
+      if (!file.endsWith(".jsonl")) continue;
+      const events = (await readFile(path.join(root, "sessions", file), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type: string; payload: { mcp?: unknown } });
+      expect(
+        events.filter((e) => e.type === "session.config_changed" && e.payload.mcp !== undefined),
+      ).toEqual([]);
+    }
 
     // 1. 子会话的 mcp_search 只搜得到只读的 search_issues，搜不到 create_issue
     expect(childToolResultContents[0]).toContain("mcp__github__search_issues");

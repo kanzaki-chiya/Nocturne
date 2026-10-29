@@ -193,7 +193,7 @@ interface SessionNotice {
 |---|---|
 | `session.created` | 填充 `meta`、`config` |
 | `session.titled` | 按 `source`（缺省 `generated`）更新 `userTitle` 或 `generatedTitle`，重算 `title`；空用户标题只清除覆盖，不创建时间线条目、不累计角色用量 |
-| `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；追加 `config` notice 条目（shell 切换文案：`shell 已切换为 <kind>（<path>）`） |
+| `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；有用户配置展示文字时追加 `config` notice 条目；仅含 MCP 环境状态时不追加空 notice（ADR-0071，状态已有临时事件展示）。shell 切换文案：`shell 已切换为 <kind>（<path>）` |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
 | `message.user` | 当前 `todos` 非空且每项均为 `completed` 且这条**不是插话**（`steer !== true`）时先置空；尚有未完成项或这条是插话时保留，历史工具快照不变（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs`、`skill`，插话另带 `steer: true`（界面据此加「插话」标签，见 [apps/desktop.md](../apps/desktop.md) §6）；首条消息以 `firstUserText`（第一个文本块的第一个非空行）记录 `firstTitle` 并重算 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
 | `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |
