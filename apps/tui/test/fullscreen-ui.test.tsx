@@ -850,11 +850,11 @@ describe("全屏界面", () => {
       return frame.includes("完毕") && frame.includes("idle") && !frame.includes("会话忙");
     });
     stdin.write("\x1b[A");
-    await pause(50);
+    // 等回填真正显示出来再编辑：慢机器上固定等待不够，退格会落在回填之前
+    await waitFor(() => (lastFrame() ?? "").includes("› 你好abc"));
     stdin.write("\x7f");
     stdin.write("X");
-    await pause(60);
-    expect(lastFrame()).toContain("› 你好abX");
+    await waitFor(() => (lastFrame() ?? "").includes("› 你好abX"));
     expect(lastFrame()).not.toContain("› 你好Xbc");
     unmount();
     await session.close();

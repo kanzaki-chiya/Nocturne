@@ -489,12 +489,14 @@ describe("提问面板 · App 集成", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    void session.submit({ text: "干活" });
+    const turn = session.submit({ text: "干活" });
     await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
     await pause(60); // 等面板 useInput 订阅生效
     stdin.write("\x1b"); // Esc：非输入态中断 Turn
     await waitFor(() => (lastFrame() ?? "").includes("已取消"));
     expect(interrupt).toHaveBeenCalledOnce();
+    // 先等 Turn 写完收尾再关闭，否则慢机器上关闭会抢在最后一次写入之前
+    expect(await turn).toBe("aborted");
     unmount();
     await session.close();
   });
@@ -507,11 +509,12 @@ describe("提问面板 · App 集成", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    void session.submit({ text: "干活" });
+    const turn = session.submit({ text: "干活" });
     await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
     stdin.write("\x03");
     await waitFor(() => interrupt.mock.calls.length > 0);
     await waitFor(() => (lastFrame() ?? "").includes("已取消"));
+    expect(await turn).toBe("aborted");
     unmount();
     await session.close();
   });
