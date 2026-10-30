@@ -15,8 +15,16 @@ try {
   $image.Dispose()
 }`;
 
+const FILES_SCRIPT = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+Add-Type -AssemblyName System.Windows.Forms
+if (-not [System.Windows.Forms.Clipboard]::ContainsFileDropList()) { exit 0 }
+$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+[Console]::Out.Write((ConvertTo-Json -InputObject @($files | ForEach-Object { [string]$_ }) -Compress))`;
+
 export interface Clipboard {
   readImage(): Promise<{ data: Uint8Array; mimeType: "image/png" } | undefined>;
+  /** Windows CF_HDROP, preserving Explorer selection order. Empty on other platforms. */
+  readFiles(): Promise<string[]>;
 }
 
 export function createClipboard(
@@ -24,6 +32,36 @@ export function createClipboard(
   execFile: typeof nodeExecFile = nodeExecFile,
 ): Clipboard {
   return {
+    readFiles() {
+      if (platform !== "win32") return Promise.resolve([]);
+      return new Promise((resolve, reject) => {
+        execFile(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-STA",
+            "-EncodedCommand",
+            Buffer.from(FILES_SCRIPT, "utf16le").toString("base64"),
+          ],
+          { timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true },
+          (error, stdout) => {
+            if (error !== null) {
+              reject(error instanceof Error ? error : new Error("剪贴板读取失败"));
+              return;
+            }
+            try {
+              const files: unknown = stdout.trim() ? JSON.parse(stdout) : [];
+              if (!Array.isArray(files) || !files.every((file) => typeof file === "string"))
+                throw new Error("无效的剪贴板文件列表");
+              resolve(files);
+            } catch (e) {
+              reject(e instanceof Error ? e : new Error("无效的剪贴板文件列表"));
+            }
+          },
+        );
+      });
+    },
     readImage() {
       if (platform !== "win32") return Promise.resolve(undefined);
       return new Promise((resolve, reject) => {

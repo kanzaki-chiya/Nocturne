@@ -22,6 +22,10 @@ export function splitInputTokens(
       start: match.index,
       end: match.index + match[0].length,
     })),
+    ...Array.from(fullText.matchAll(/\[File #\d+ [^\]\r\n]*\]/g), (match) => ({
+      start: match.index,
+      end: match.index + match[0].length,
+    })),
   ].sort((a, b) => a.start - b.start);
   const parts: { text: string; image: boolean }[] = [];
   let at = 0;

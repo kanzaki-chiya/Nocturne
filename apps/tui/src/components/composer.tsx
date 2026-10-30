@@ -10,6 +10,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { composerWindow, normalizeNewlines, verticalCursor } from "../cursor.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { imageTokenAt, imageTokenBefore } from "../images.js";
+import { fileTokenAt, fileTokenBefore } from "../files.js";
 import { splitInputTokens } from "../file-refs.js";
 import { pasteTokenAt, pasteTokenBefore, type PasteStore } from "../paste.js";
 import { useTheme } from "../theme.js";
@@ -31,6 +32,7 @@ export function Composer({
   onCursor,
   onHistory,
   pastes,
+  onPasteFile,
   onPasteImage,
   height = 1,
 }: {
@@ -59,6 +61,7 @@ export function Composer({
   swallowRef?: { current: boolean } | undefined;
   /** 多行/超长粘贴收成占位（提交时由父组件展开） */
   pastes?: PasteStore | undefined;
+  onPasteFile?: ((text: string) => string | undefined) | undefined;
   onPasteImage?: ((text: string) => Promise<boolean>) | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
@@ -95,7 +98,7 @@ export function Composer({
   const insert = (raw: string): void => {
     const normalized = normalizeNewlines(raw);
     if (normalized === "") return;
-    const text = pastes?.add(normalized) ?? normalized;
+    const text = onPasteFile?.(normalized) ?? pastes?.add(normalized) ?? normalized;
     const v = valRef.current;
     const c = cursorRef.current;
     apply(v.slice(0, c) + text + v.slice(c), c + text.length);
@@ -139,8 +142,8 @@ export function Composer({
         const left = key.leftArrow || input === "w";
         const part = left ? v.slice(0, c) : v.slice(c);
         const token = left
-          ? Math.max(pasteTokenBefore(part), imageTokenBefore(part))
-          : Math.max(pasteTokenAt(part), imageTokenAt(part));
+          ? Math.max(pasteTokenBefore(part), imageTokenBefore(part), fileTokenBefore(part))
+          : Math.max(pasteTokenAt(part), imageTokenAt(part), fileTokenAt(part));
         const match = left
           ? /(?:\s*\S+|\s+)$/u.exec(part)?.[0].length
           : /^(?:\s*\S+|\s+)/u.exec(part)?.[0].length;
@@ -167,14 +170,26 @@ export function Composer({
       if (key.leftArrow) {
         if (c > 0) {
           move(
-            c - (Math.max(pasteTokenBefore(v.slice(0, c)), imageTokenBefore(v.slice(0, c))) || 1),
+            c -
+              (Math.max(
+                pasteTokenBefore(v.slice(0, c)),
+                imageTokenBefore(v.slice(0, c)),
+                fileTokenBefore(v.slice(0, c)),
+              ) || 1),
           );
         }
         return;
       }
       if (key.rightArrow) {
         if (c < v.length) {
-          move(c + (Math.max(pasteTokenAt(v.slice(c)), imageTokenAt(v.slice(c))) || 1));
+          move(
+            c +
+              (Math.max(
+                pasteTokenAt(v.slice(c)),
+                imageTokenAt(v.slice(c)),
+                fileTokenAt(v.slice(c)),
+              ) || 1),
+          );
         }
         return;
       }
@@ -187,7 +202,12 @@ export function Composer({
       }
       if (key.backspace) {
         // 占位整块删除，不留半截 [Paste #n
-        const n = Math.max(1, pasteTokenBefore(v.slice(0, c)), imageTokenBefore(v.slice(0, c)));
+        const n = Math.max(
+          1,
+          pasteTokenBefore(v.slice(0, c)),
+          imageTokenBefore(v.slice(0, c)),
+          fileTokenBefore(v.slice(0, c)),
+        );
         if (c > 0) apply(v.slice(0, c - n) + v.slice(c), c - n);
         return;
       }
@@ -195,7 +215,14 @@ export function Composer({
         if (c < v.length)
           apply(
             v.slice(0, c) +
-              v.slice(c + (Math.max(pasteTokenAt(v.slice(c)), imageTokenAt(v.slice(c))) || 1)),
+              v.slice(
+                c +
+                  (Math.max(
+                    pasteTokenAt(v.slice(c)),
+                    imageTokenAt(v.slice(c)),
+                    fileTokenAt(v.slice(c)),
+                  ) || 1),
+              ),
             c,
           );
         return;

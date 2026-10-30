@@ -1,4 +1,8 @@
-import type { ImageAttachment, AttachmentDescribedPayload } from "@nocturne/core/protocol";
+import type {
+  ImageAttachment,
+  FileAttachment,
+  AttachmentDescribedPayload,
+} from "@nocturne/core/protocol";
 
 import { boxSafe } from "./format.js";
 
@@ -26,4 +30,10 @@ export function attachmentLine(att: ImageAttachment, index: number, ascii: boole
   return ascii
     ? `[Image #${number} | ${name} | ${dimensions} | ${size}]`
     : `[图片 #${number} • ${name} • ${dimensions} • ${size}]`;
+}
+
+export function fileAttachmentLine(att: FileAttachment, ascii: boolean): string {
+  const name = boxSafe(att.label);
+  const size = att.bytes < 1024 ? `${att.bytes} B` : `${Math.ceil(att.bytes / 1024)} KB`;
+  return ascii ? `[File | ${name} | ${size}]` : `[附带文件 ${name}（${size}）]`;
 }

@@ -98,12 +98,98 @@ async function session(imageInput = true, vision = false, wait = false) {
   };
 }
 const clip = (data?: Uint8Array): Clipboard => ({
+  readFiles: vi.fn(async () => []),
   readImage: vi.fn(async () =>
     data === undefined ? undefined : { data, mimeType: "image/png" as const },
   ),
 });
 
 describe("TUI 图片输入", () => {
+  it("真实 App：40 KiB 括号粘贴占位，提交文件与引用，模型 read 无审批", async () => {
+    const home = tmp();
+    const platform = createPlatform();
+    const data = "log line\n".repeat(5120);
+    const provider = new FakeProvider({
+      handler: (request, index) => {
+        const user = request.messages.find((message) => message.role === "user");
+        const text =
+          typeof user?.content === "string" ? user.content : JSON.stringify(user?.content);
+        const readPath = /path="([^"]+)"/.exec(text ?? "")?.[1]?.replaceAll("\\\\", "\\");
+        return index === 0
+          ? [
+              {
+                type: "tool_call",
+                toolCallId: "read",
+                name: "read",
+                input: { path: readPath, limit: 2 },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ]
+          : [
+              { type: "text_delta", text: "已读取文件" },
+              { type: "finish", reason: "stop" },
+            ];
+      },
+    });
+    const runtime = await createRuntime({
+      cwd: home,
+      sessionsDir: `${home}/sessions`,
+      providers: [provider],
+    });
+    const active = await runtime.createSession({ model: "fake/fake-1" });
+    // 使用真实 session id 重建脚本中的工具路径。
+    const readPath = `${home}/sessions/attachments/${active.id}/file-1.txt`;
+
+    const observed: string[] = [];
+    active.subscribe((event) => {
+      if (event.type === "permission.requested") observed.push(event.type);
+    });
+    const screen = render(createElement(App, { session: active, runtime, env }));
+    await waitFor(() => (screen.lastFrame() ?? "").includes("idle"));
+    screen.stdin.write(`\x1b[200~${data}\x1b[201~`);
+    await waitFor(() => (screen.lastFrame() ?? "").includes("[File #1 pasted-1.txt"));
+    screen.stdin.write("\r");
+    await waitFor(() => (screen.lastFrame() ?? "").includes("已读取文件"));
+    const user = active.state().history.find((h) => h.kind === "user");
+    expect(user?.kind === "user" && user.files?.[0]?.bytes).toBe(Buffer.byteLength(data));
+    expect(JSON.stringify(user)).toContain("<attachment");
+    expect(await platform.fs.exists(readPath)).toBe(true);
+    expect(observed).toEqual([]);
+    screen.unmount();
+    await active.close();
+  });
+  it("Alt+V 优先读取 CF_HDROP 多文件，不读取图片，并传递 source", async () => {
+    const { runtime, active } = await session();
+    const dir = tmp();
+    const first = path.join(dir, "build.log");
+    const second = path.join(dir, "report.pdf");
+    writeFileSync(first, "error");
+    writeFileSync(second, "%PDF-1.7");
+    const clipboard: Clipboard = {
+      readFiles: vi.fn(async () => [first, second]),
+      readImage: vi.fn(async () => ({ data: png, mimeType: "image/png" as const })),
+    };
+    const submit = vi.spyOn(active, "submit").mockResolvedValue("done");
+    const { stdin, lastFrame, unmount } = render(
+      createElement(App, { session: active, runtime, env, clipboard, clipboardPlatform: "win32" }),
+    );
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
+    stdin.write("\x1bv");
+    await waitFor(() => (lastFrame() ?? "").includes("[File #2 report.pdf"));
+    expect(lastFrame()).toContain("[File #1 build.log");
+    expect(clipboard.readImage).not.toHaveBeenCalled();
+    stdin.write("\r");
+    await waitFor(() => submit.mock.calls.length === 1);
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      attachments: [
+        { data: Buffer.from("error"), label: "build.log", source: "upload" },
+        { data: Buffer.from("%PDF-1.7"), label: "report.pdf", source: "upload" },
+      ],
+    });
+    unmount();
+    await active.close();
+  });
+
   it("vision 放行图片并显示提示，描述可点击展开、收起且保持锚点", async () => {
     const { runtime, active } = await session(true, true);
     const listeners = new Set<(event: MouseEvent) => void>();

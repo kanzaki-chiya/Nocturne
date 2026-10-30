@@ -10,7 +10,7 @@ import { todoItemsFromCompletion, subagentRowInfo } from "@nocturne/core/protoco
 
 import { questionToolLines } from "./question-format.js";
 import { webFetchSummary } from "./web-fetch.js";
-import { attachmentLine, descriptionLine } from "./attachment-line.js";
+import { attachmentLine, descriptionLine, fileAttachmentLine } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff, toolFileDiffs } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
@@ -226,6 +226,11 @@ function layoutEntryBody(
           : []),
         ...(entry.attachments ?? []).flatMap((att, i) =>
           rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
+            color: theme.accent,
+          }),
+        ),
+        ...(entry.files ?? []).flatMap((file, i) =>
+          rows(`${entry.key}:file:${i}`, `  ${fileAttachmentLine(file, ascii)}`, width, {
             color: theme.accent,
           }),
         ),

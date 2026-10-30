@@ -5,9 +5,53 @@ import { describe, expect, it, vi } from "vitest";
 import { Composer } from "../src/components/composer.js";
 import { TuiEnvContext } from "../src/env.js";
 import { createPasteStore } from "../src/paste.js";
+import { createFileStore } from "../src/files.js";
 
 const env = { ascii: false, animated: false };
 describe("Composer 多行编辑", () => {
+  it("文件占位整体左右移动及退格删除", async () => {
+    const files = createFileStore();
+    const token = files.add({
+      data: Buffer.from("abc"),
+      mimeType: "text/plain",
+      label: "a.log",
+      source: "upload",
+    });
+    let value = token;
+    let caret = token.length;
+    function Harness() {
+      const [text, setText] = useState(token);
+      const [cursor, setCursor] = useState(token.length);
+      value = text;
+      caret = cursor;
+      return (
+        <TuiEnvContext.Provider value={env}>
+          <Composer
+            value={text}
+            cursor={cursor}
+            onChange={(next, pos) => {
+              setText(next);
+              setCursor(pos);
+            }}
+            onCursor={setCursor}
+            onSubmit={() => {
+              throw new Error("不应提交");
+            }}
+            active
+            width={80}
+          />
+        </TuiEnvContext.Provider>
+      );
+    }
+    const screen = render(<Harness />);
+    screen.stdin.write("\x1b[D");
+    await vi.waitFor(() => expect(caret).toBe(0));
+    screen.stdin.write("\x1b[C");
+    await vi.waitFor(() => expect(caret).toBe(token.length));
+    screen.stdin.write("\x7f");
+    await vi.waitFor(() => expect(value).toBe(""));
+    screen.unmount();
+  });
   it("Ctrl+J 换行，方向键跨行移动，反斜杠回车换行，Enter 提交", async () => {
     const submitted: string[] = [];
     let current = "";

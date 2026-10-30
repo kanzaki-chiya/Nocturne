@@ -4,7 +4,7 @@
  */
 import { Box, Static, Text } from "ink";
 
-import { attachmentLine, descriptionLine } from "../attachment-line.js";
+import { attachmentLine, descriptionLine, fileAttachmentLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import { splitInputTokens, userText, fileRefLine } from "../file-refs.js";
 import { layoutEntry } from "../lines.js";
@@ -52,6 +52,11 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
       {(entry.attachments ?? []).map((att, i) => (
         <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
           {`  ${attachmentLine(att, i, env.ascii)}`}
+        </Text>
+      ))}
+      {(entry.files ?? []).map((file, i) => (
+        <Text key={`${file.file}:${i}`} color={theme.accent} wrap="truncate">
+          {`  ${fileAttachmentLine(file, env.ascii)}`}
         </Text>
       ))}
       {(entry.descriptions ?? []).map((description) => (

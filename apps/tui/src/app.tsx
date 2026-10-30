@@ -56,6 +56,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { copyText } from "./clipboard.js";
 import { composerWindow } from "./cursor.js";
 import { checkImage, createImageStore, droppedImage } from "./images.js";
+import { createFileStore } from "./files.js";
 import { renderAssistant, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import type { FocusSource, MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
@@ -880,6 +881,7 @@ function SessionApp({
   const inputRef = useRef("");
   const cursorRef = useRef(0);
   const images = useMemo(() => createImageStore(), []);
+  const files = useMemo(() => createFileStore(), []);
   const pastes = useMemo(() => createPasteStore(), []);
   const imagePlatform = useMemo(() => createPlatform(), []);
   const updateInput = (value: string, at: number): void => {
@@ -887,6 +889,7 @@ function SessionApp({
     inputRef.current = value;
     cursorRef.current = at;
     images.prune(value);
+    files.prune(value);
     setInput(value);
     setCursor(at);
     setCompletionIndex(0);
@@ -1529,6 +1532,7 @@ function SessionApp({
           setOverlay(undefined);
           if (draft !== undefined) {
             images.clear();
+            files.clear();
             updateInput(draft.text, draft.text.length);
             setCompletionOn(false);
             if (draft.hasImages) setRewindImageHint("原消息的图片未放回");
@@ -1590,6 +1594,7 @@ function SessionApp({
       await closeRewind();
       if (mode !== "files") {
         images.clear();
+        files.clear();
         pastes.reset(inputRef.current);
         updateInput(target.text, target.text.length);
         setCompletionOn(false);
@@ -1638,7 +1643,11 @@ function SessionApp({
       const res = await newSession();
       if (res.kind === "ok") {
         images.clear();
-        updateInput(images.strip(inputRef.current), images.strip(inputRef.current).length);
+        files.clear();
+        updateInput(
+          files.strip(images.strip(inputRef.current)),
+          files.strip(images.strip(inputRef.current)).length,
+        );
         pastes.reset(inputRef.current);
         if (fullscreen) {
           // 视口整体换成新会话：欢迎区重新出现，翻阅与选区清空（ADR-0021 第 2 条）
@@ -1962,37 +1971,84 @@ function SessionApp({
       pushLine("! 当前平台暂不支持从剪贴板粘贴图片");
       return;
     }
-    const model = imageModel();
-    if (!model.supported) {
-      pushLine(`! ${model.hint}`);
-      return;
-    }
-    void (clipboard ?? imagePlatform.clipboard)
-      .readImage()
-      .then((result) => {
-        if (result === undefined) {
-          pushLine("! 剪贴板中没有图片");
+    const clip = clipboard ?? imagePlatform.clipboard;
+    void clip
+      .readFiles()
+      .then(async (paths) => {
+        if (paths.length > 0) {
+          if (
+            paths.length + images.in(inputRef.current).length + files.in(inputRef.current).length >
+            10
+          ) {
+            pushLine("! 每条消息至多 10 个附件");
+            return;
+          }
+          for (const path of paths) {
+            const stat = await imagePlatform.fs.stat(path).catch(() => undefined);
+            if (stat?.type !== "file" || stat.size > 20 * 1024 * 1024) {
+              pushLine(`! 文件不可读取或超过 20 MB：${path}`);
+              continue;
+            }
+            const data = await imagePlatform.fs.readFile(path).catch(() => undefined);
+            if (!data) {
+              pushLine(`! 文件不可读取：${path}`);
+              continue;
+            }
+            const checked = checkImage(data);
+            const token =
+              checked.kind === "ok" && imageModel().supported
+                ? images.add({
+                    data,
+                    mimeType: checked.mimeType,
+                    label: imagePlatform.paths.basename(path),
+                  })
+                : files.add({
+                    data,
+                    mimeType: "application/octet-stream",
+                    label: imagePlatform.paths.basename(path),
+                    source: "upload",
+                  });
+            const v = inputRef.current,
+              c = cursorRef.current;
+            updateInput(v.slice(0, c) + token + v.slice(c), c + token.length);
+          }
           return;
         }
-        const checked = checkImage(result.data);
-        if (checked.kind !== "ok") {
-          pushLine("! 图片超过 5 MB / 8000 px 限制");
+        const model = imageModel();
+        if (!model.supported) {
+          pushLine(`! ${model.hint}`);
           return;
         }
-        const current = imageModel();
-        if (!current.supported) {
-          pushLine(`! ${current.hint}`);
-          return;
-        }
-        insertImage({ data: result.data, mimeType: checked.mimeType, label: "剪贴板" });
+        return clip
+          .readImage()
+          .then((result) => {
+            if (result === undefined) {
+              pushLine("! 剪贴板中没有图片");
+              return;
+            }
+            const checked = checkImage(result.data);
+            if (checked.kind !== "ok") {
+              pushLine("! 图片超过 5 MB / 8000 px 限制");
+              return;
+            }
+            const current = imageModel();
+            if (!current.supported) {
+              pushLine(`! ${current.hint}`);
+              return;
+            }
+            insertImage({ data: result.data, mimeType: checked.mimeType, label: "剪贴板" });
+          })
+          .catch((e: unknown) => {
+            // base64 输出超过读取缓冲（约 6 MB 原图）时 execFile 报 maxBuffer
+            pushLine(
+              /maxBuffer/i.test(errText(e))
+                ? "! 图片超过 5 MB / 8000 px 限制"
+                : `! 读取剪贴板失败：${errText(e)}`,
+            );
+          });
       })
       .catch((e: unknown) => {
-        // base64 输出超过读取缓冲（约 6 MB 原图）时 execFile 报 maxBuffer
-        pushLine(
-          /maxBuffer/i.test(errText(e))
-            ? "! 图片超过 5 MB / 8000 px 限制"
-            : `! 读取剪贴板失败：${errText(e)}`,
-        );
+        pushLine(`! 读取剪贴板失败：${errText(e)}`);
       });
   };
 
@@ -2113,12 +2169,16 @@ function SessionApp({
       0,
       Math.min(inputHistory.length, (historyIndex ?? inputHistory.length) + direction),
     );
-    if (historyIndex === undefined) setHistoryDraft(images.strip(input));
+    if (historyIndex === undefined)
+      setHistoryDraft(files.strip(images.strip(files.expandPaste(input))));
     setHistoryIndex(next === inputHistory.length ? undefined : next);
     const value =
       next === inputHistory.length
         ? historyDraft
-        : (pastes.add(inputHistory[next] ?? "") ?? inputHistory[next] ?? "");
+        : (files.addPaste(inputHistory[next] ?? "") ??
+          pastes.add(inputHistory[next] ?? "") ??
+          inputHistory[next] ??
+          "");
     updateInput(value, value.length);
   };
 
@@ -2465,13 +2525,14 @@ function SessionApp({
         const next = pastes.expand(text);
         clearInput();
         images.clear();
+        files.clear();
         setEditingPending(undefined);
         void session.updateInput(editing, { input: { text: next } }).catch((e: unknown) => {
           pushLine(`! ${modelErrorText(e)}`);
         });
         return;
       }
-      const historyText = images.strip(pastes.expand(text));
+      const historyText = files.strip(images.strip(files.expandPaste(pastes.expand(text))));
       if (!text.startsWith("/") && images.in(text).length > 0) {
         const model = imageModel();
         if (!model.supported) {
@@ -2487,6 +2548,15 @@ function SessionApp({
       }
       setHistoryIndex(undefined);
       const expanded = pastes.expand(text);
+      const pendingFiles = files.in(text);
+      const allAttachments = [...images.in(text), ...pendingFiles];
+      if (
+        allAttachments.length > 10 ||
+        allAttachments.some((item) => item.data.byteLength > 20 * 1024 * 1024)
+      ) {
+        pushLine("! 附件超过数量或 20 MB 单文件限制");
+        return;
+      }
       const skills = session.describeSkills().skills;
       const skill = parseSkillSlash(expanded, skills);
       const catalogReady = externalAgentCatalog?.session === session;
@@ -2533,9 +2603,10 @@ function SessionApp({
       };
       const submitExpanded = (resolved: { agent: string; task: string }): void => {
         if (submitting.current) return;
-        const attachments = images.in(text);
+        const attachments = allAttachments;
         clearInput();
         images.clear();
+        files.clear();
         if (fullscreen) setScroll(scrollToBottom());
         submitting.current = true;
         setSubmitPending(true);
@@ -2580,9 +2651,10 @@ function SessionApp({
       // ADR-0070：运行中 Enter 插话、Tab 排队——插话在安全点并入当前 Turn，
       // 排队在 done 之后开新 Turn。斜杠命令（/preset 等）在上面已分发
       if (busy || pendingInputsRef.current.paused) {
-        const attachments = images.in(text);
+        const attachments = allAttachments;
         clearInput();
         images.clear();
+        files.clear();
         void session
           .enqueueInput(mode, {
             text: expanded,
@@ -2603,9 +2675,10 @@ function SessionApp({
         return;
       }
       if (submitting.current) return;
-      const attachments = images.in(text);
+      const attachments = allAttachments;
       clearInput();
       images.clear();
+      files.clear();
       if (fullscreen) setScroll(scrollToBottom());
       // 历史存原文，发给模型的也是展开后的原文
       submitting.current = true;
@@ -3371,6 +3444,7 @@ function SessionApp({
       {promptOverlay ? overlayBody : null}
       <Composer
         pastes={pastes}
+        onPasteFile={(text) => files.addPaste(text)}
         value={input}
         cursor={cursor}
         onChange={(next, nextCursor) => {
