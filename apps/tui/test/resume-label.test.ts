@@ -33,4 +33,16 @@ describe("/resume 摘要行", () => {
     expect(resumeLabel(sample, 25, now)).toContain("…");
     expect(resumeLabel(sample, 25, now)).not.toContain("\n");
   });
+
+  it("外部 agent 创建的会话在行首带 ⇄ 标记字符（ADR-0074 §5）", () => {
+    const label = resumeLabel(
+      {
+        ...sample,
+        client: { kind: "agent", deviceId: "agent-1", name: "Claude Code" },
+      },
+      120,
+      now,
+    );
+    expect(label).toMatch(/^⇄ 修复窗口/);
+  });
 });

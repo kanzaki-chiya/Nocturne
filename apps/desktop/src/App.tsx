@@ -45,7 +45,7 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
-import { RemotePage } from "./RemotePage";
+import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
 import type { RemoteStatus } from "@nocturne/rpc/client";
 import { UsagePage } from "./UsagePage";
@@ -533,10 +533,14 @@ export function App({ host }: { host: DesktopHost }) {
           loadSchedules();
           void refresh();
         });
+        const stopSessions = client.onNotification("runtime.sessionsChanged", () => {
+          void refresh();
+        });
         return () => {
           alive = false;
           stopProviders();
           stopSchedules();
+          stopSessions();
         };
       }),
     [pool, refresh],
@@ -1731,6 +1735,12 @@ export function App({ host }: { host: DesktopHost }) {
             </div>
           </div>
         )}
+        {(() => {
+          const activeClient = pool.get();
+          const firstReq = remoteStatus?.pendingAgentPairings?.[0];
+          if (page === "remote" || !activeClient || !firstReq) return null;
+          return <AgentPairingDialog client={activeClient} request={firstReq} />;
+        })()}
       </div>
       {sidePanel.panel}
     </div>

@@ -387,4 +387,31 @@ describe("Sidebar", () => {
     fireEvent.drop(self, { clientY: 0, dataTransfer: dataTransfer() });
     expect(onMoveProject).not.toHaveBeenCalled();
   });
+
+  it("外部 agent 创建的会话在标题旁显示来源小图标，悬停属性为 agent 名称且不加文字标签（ADR-0074 §5）", () => {
+    const tree: SessionTree = {
+      ...emptyTree,
+      chats: {
+        rows: [
+          {
+            id: "s-agent",
+            title: "重构登录流程",
+            meta: "现在",
+            locked: false,
+            status: "idle",
+            client: { kind: "agent", deviceId: "ag-1", name: "Claude Code" },
+          },
+        ],
+        moreCount: 0,
+      },
+    };
+    const { container } = render(<Sidebar {...props({ tree })} />);
+    const icon = container.querySelector(".session-client-icon");
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute("title")).toBe("Claude Code");
+    expect(icon?.getAttribute("aria-label")).toBe("Claude Code");
+    const row = container.querySelector(".irow");
+    expect(row?.getAttribute("data-client-name")).toBe("Claude Code");
+    expect(row?.textContent).not.toContain("Claude Code");
+  });
 });

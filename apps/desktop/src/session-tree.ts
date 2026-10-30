@@ -63,6 +63,8 @@ export interface SessionRow {
   status: SessionStatus;
   /** 出错 / 已完成标记；没有时缺省 */
   mark?: SessionMark | undefined;
+  /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5） */
+  client?: { kind: "agent"; name: string; deviceId: string; id?: string | undefined } | undefined;
 }
 
 export interface PinnedRow extends SessionRow {
@@ -139,10 +141,10 @@ export interface TreeOptions {
 
 const DEFAULT_LIMIT = 5;
 
-/** 空会话（无用户消息且未锁定）不显示（ADR-0046 修订第 4 条） */
+/** 空会话（无用户消息且未锁定）不显示（ADR-0046 修订第 4 条）；外部 agent 新建会话显示 */
 function isVisible(session: SessionSummary): boolean {
   const hasText = session.firstText !== undefined && session.firstText.trim() !== "";
-  return hasText || session.locked === true;
+  return hasText || session.locked === true || session.client !== undefined;
 }
 
 function toRow(
@@ -161,6 +163,7 @@ function toRow(
     locked,
     status,
     ...(mark !== undefined ? { mark } : {}),
+    ...(session.client !== undefined ? { client: session.client } : {}),
   };
 }
 

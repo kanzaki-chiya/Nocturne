@@ -546,6 +546,16 @@
   font-size: var(--fs-3);
   overflow-wrap: anywhere;
 }
+.phone-session-client {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 5px;
+  color: var(--a-secondary);
+}
+.phone-session-client .phone-icon {
+  width: 14px;
+  height: 14px;
+}
 .phone .phone-history-row {
   width: 100%;
   padding: 8px 10px;

@@ -17,8 +17,9 @@ export function resumeLabel(summary: SessionSummary, width: number, now = Date.n
     Math.max(8, width - 34),
   );
   const detail = `${summary.id}  ${summary.model.provider}/${summary.model.model}  ${summary.workspaceRoot}`;
+  const clientMark = summary.client !== undefined ? "⇄ " : "";
   return truncateLine(
-    `${summary.forkedFrom ? "分叉  " : ""}${first}  ${relativeTime(summary.mtimeMs, now)}  ${boxSafe(detail)}`,
+    `${clientMark}${summary.forkedFrom ? "分叉  " : ""}${first}  ${relativeTime(summary.mtimeMs, now)}  ${boxSafe(detail)}`,
     Math.max(1, width),
   );
 }

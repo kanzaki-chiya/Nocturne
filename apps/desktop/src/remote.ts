@@ -20,6 +20,30 @@ export function useRemoteStatus(client: RpcClient | undefined): RemoteStatus | u
       updated = true;
       if (alive) setStatus(status);
     });
+    const offAgentStatus = client.onNotification("agent.statusChanged", (agentStatus) => {
+      if (!alive) return;
+      setStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              agents: agentStatus.agents,
+              pendingAgentPairings: agentStatus.pendingPairings,
+            }
+          : prev,
+      );
+    });
+    const offAgentPair = client.onNotification("agent.pairingRequested", (req) => {
+      if (!alive) return;
+      setStatus((prev) => {
+        if (!prev) return prev;
+        const list = prev.pendingAgentPairings ?? [];
+        if (list.some((item) => item.requestId === req.requestId)) return prev;
+        return {
+          ...prev,
+          pendingAgentPairings: [...list, req],
+        };
+      });
+    });
     void client
       .call("remote.describe", {})
       .then((status) => {
@@ -32,6 +56,8 @@ export function useRemoteStatus(client: RpcClient | undefined): RemoteStatus | u
     return () => {
       alive = false;
       unsubscribe();
+      offAgentStatus();
+      offAgentPair();
     };
   }, [client]);
   return status;

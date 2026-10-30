@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { RemoteStatus, RpcClient } from "@nocturne/rpc/client";
+import type { PermissionPresetName } from "@nocturne/core/protocol";
+import type {
+  AgentDevice,
+  AgentPairingRequest,
+  AgentScope,
+  RemoteStatus,
+  RpcClient,
+} from "@nocturne/rpc/client";
 import qrcode from "qrcode-generator";
 import { Scrim } from "./ProvidersPage";
 import { REMOTE_CONNECTION_TEXT, useRemoteStatus } from "./remote";
@@ -124,6 +131,157 @@ export function PairingDialog({
         <button className="btn3" onClick={onClose}>
           关闭
         </button>
+      </div>
+    </Scrim>
+  );
+}
+
+export function AgentPairingDialog({
+  client,
+  request,
+  onDone,
+}: {
+  client: RpcClient;
+  request: AgentPairingRequest;
+  onDone?: () => void;
+}) {
+  const [scope, setScope] = useState<AgentScope>("run");
+  const [maxPreset, setMaxPreset] = useState<PermissionPresetName>("default");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const respond = async (approved: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await client.call("agent.respondPairing", {
+        requestId: request.requestId,
+        approved,
+        ...(approved ? { scope, maxPermissionPreset: maxPreset } : {}),
+      });
+      onDone?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "操作失败，请重试");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Scrim
+      onClose={() => {
+        void respond(false);
+      }}
+    >
+      <div
+        className="dlg remote-pair agent-pair-dlg"
+        role="dialog"
+        aria-modal="true"
+        aria-label="外部 Agent 接入请求"
+      >
+        <h3>外部 Agent 接入请求</h3>
+        <div className="agent-pair-meta">
+          <div>
+            <span>名称</span>
+            <b>{request.name}</b>
+          </div>
+          <div>
+            <span>公钥指纹</span>
+            <code>{request.fingerprint}</code>
+          </div>
+          {request.processInfo && (
+            <div>
+              <span>进程</span>
+              <code>
+                PID {request.processInfo.pid}
+                {request.processInfo.command ? ` · ${request.processInfo.command}` : ""}
+              </code>
+            </div>
+          )}
+        </div>
+        <div className="agent-pair-options" role="radiogroup" aria-label="授权范围">
+          <label className={`agent-scope-opt${scope === "read-only" ? " selected" : ""}`}>
+            <input
+              type="radio"
+              name="agent-scope"
+              value="read-only"
+              checked={scope === "read-only"}
+              onChange={() => {
+                setScope("read-only");
+              }}
+            />
+            <div>
+              <b>只读</b>
+              <span>只能列出与读取会话内容</span>
+            </div>
+          </label>
+          <label className={`agent-scope-opt${scope === "run" ? " selected" : ""}`}>
+            <input
+              type="radio"
+              name="agent-scope"
+              value="run"
+              checked={scope === "run"}
+              onChange={() => {
+                setScope("run");
+              }}
+            />
+            <div>
+              <b>可运行</b>
+              <span>可新建会话、向会话发送任务或中止轮次</span>
+            </div>
+          </label>
+        </div>
+        {scope === "run" && (
+          <div className="agent-preset-field">
+            <label htmlFor="agent-max-preset">新建会话权限上限</label>
+            <select
+              id="agent-max-preset"
+              className="remote-select"
+              value={maxPreset}
+              onChange={(e) => {
+                setMaxPreset(e.target.value as PermissionPresetName);
+              }}
+            >
+              <option value="read-only">只读 (read-only)</option>
+              <option value="default">默认 (default)</option>
+              <option value="auto-edit">自动编辑 (auto-edit)</option>
+              <option value="guarded">受控 (guarded)</option>
+              <option value="smart">智能审查 (smart)</option>
+              <option value="bypass">无限制 (bypass)</option>
+            </select>
+          </div>
+        )}
+        <p className="agent-pair-note">
+          可运行的 agent 能往任何会话发消息，按该会话自己的权限预设执行
+        </p>
+        {error && (
+          <p className="remote-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="remote-actions agent-pair-actions">
+          <button
+            type="button"
+            className="btn3"
+            disabled={busy}
+            onClick={() => {
+              void respond(false);
+            }}
+          >
+            拒绝
+          </button>
+          <button
+            type="button"
+            className="btn3 primary"
+            disabled={busy}
+            onClick={() => {
+              void respond(true);
+            }}
+          >
+            批准
+          </button>
+        </div>
       </div>
     </Scrim>
   );
@@ -352,8 +510,17 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
             {warning}
           </p>
         ))}
+        <ExternalAgentsSection
+          client={client}
+          agents={status?.agents ?? []}
+          busy={busy}
+          onOperate={operation}
+        />
         <section className="remote-trust">
           <p>中继只转发密文，看不到你的对话、代码或命令。</p>
+          <p className="remote-agent-security">
+            本机配对用于可见性与误触发隔离，防不住本机同一用户下的恶意程序。
+          </p>
           <details>
             <summary>你需要信任谁</summary>
             <p>
@@ -363,7 +530,107 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
         </section>
       </div>
       {offer && client && <PairingDialog client={client} offer={offer} onClose={closePairing} />}
+      {client && status?.pendingAgentPairings?.[0] && (
+        <AgentPairingDialog client={client} request={status.pendingAgentPairings[0]} />
+      )}
     </div>
+  );
+}
+
+function ExternalAgentsSection({
+  client,
+  agents,
+  busy,
+  onOperate,
+}: {
+  client: RpcClient | undefined;
+  agents: AgentDevice[];
+  busy: boolean;
+  onOperate: (run: () => Promise<unknown>) => Promise<void>;
+}) {
+  return (
+    <section className="remote-devices remote-agents" aria-label="外部 Agent">
+      <div className="remote-heading">
+        <h4>外部 Agent</h4>
+      </div>
+      {agents.length === 0 ? (
+        <p>还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。</p>
+      ) : (
+        agents.map((agent) => (
+          <div className="remote-device" key={agent.id}>
+            <div>
+              <b>{agent.name}</b>
+              <p>
+                {agent.online ? "在线" : "离线"} · 指纹 <code>{agent.fingerprint}</code>
+                {agent.lastSeenAt
+                  ? ` · 最近活跃 ${new Date(agent.lastSeenAt).toLocaleString("zh-CN")}`
+                  : ""}
+              </p>
+            </div>
+            <div className="remote-actions">
+              <select
+                className="remote-select"
+                aria-label={`${agent.name} 范围`}
+                disabled={busy || !client}
+                value={agent.scope}
+                onChange={(e) => {
+                  const nextScope = e.target.value as AgentScope;
+                  void onOperate(
+                    () =>
+                      client?.call("agent.setScope", {
+                        id: agent.id,
+                        scope: nextScope,
+                        maxPermissionPreset: agent.maxPermissionPreset,
+                      }) ?? Promise.resolve(),
+                  );
+                }}
+              >
+                <option value="read-only">只读</option>
+                <option value="run">可运行</option>
+              </select>
+              {agent.scope === "run" && (
+                <select
+                  className="remote-select"
+                  aria-label={`${agent.name} 权限上限`}
+                  disabled={busy || !client}
+                  value={agent.maxPermissionPreset}
+                  onChange={(e) => {
+                    const nextPreset = e.target.value as PermissionPresetName;
+                    void onOperate(
+                      () =>
+                        client?.call("agent.setScope", {
+                          id: agent.id,
+                          scope: agent.scope,
+                          maxPermissionPreset: nextPreset,
+                        }) ?? Promise.resolve(),
+                    );
+                  }}
+                >
+                  <option value="read-only">上限：只读</option>
+                  <option value="default">上限：默认</option>
+                  <option value="auto-edit">上限：自动编辑</option>
+                  <option value="guarded">上限：受控</option>
+                  <option value="smart">上限：智能审查</option>
+                  <option value="bypass">上限：无限制</option>
+                </select>
+              )}
+              <button
+                type="button"
+                className="btn3"
+                disabled={busy || !client}
+                onClick={() => {
+                  void onOperate(
+                    () => client?.call("agent.revoke", { id: agent.id }) ?? Promise.resolve(),
+                  );
+                }}
+              >
+                吊销
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </section>
   );
 }
 

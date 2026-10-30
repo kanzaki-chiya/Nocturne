@@ -338,7 +338,7 @@ function RowButton({
   const cancelled = useRef(false);
   return (
     /* .irow 是容器 div：按钮不能嵌套按钮（悬停的「…」是兄弟元素） */
-    <div className="irow">
+    <div className="irow" data-client-name={row.client?.name}>
       {editing ? (
         <input
           className="rename-input"
@@ -382,6 +382,34 @@ function RowButton({
           onContextMenu={onContext}
         >
           <span className={dotClass(row)} />
+          {row.client !== undefined && (
+            <span
+              className="session-client-icon"
+              title={row.client.name}
+              aria-label={row.client.name}
+            >
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                <rect
+                  x="1.8"
+                  y="2.8"
+                  width="12.4"
+                  height="10.4"
+                  rx="2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M4.8 6.3 6.8 8l-2 1.7M8.2 9.7h3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          )}
           <span className="t">{row.title}</span>
           {pinned !== undefined && <span className="proj">{pinned.project}</span>}
           {tag !== null ? (

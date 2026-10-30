@@ -287,6 +287,26 @@ describe("buildSessionTree", () => {
     expect(repo?.sessions[0]?.title).toBe("未命名会话");
     expect(repo?.count).toBe(2);
   });
+
+  it("外部 agent 创建的会话保留 client 来源标记且无首句时仍可见（ADR-0074 §5）", () => {
+    const tree = buildSessionTree(
+      [
+        session("agent-sess", "Z:\\repo", NOW - 100, {
+          firstText: undefined,
+          client: { kind: "agent", deviceId: "ag-1", name: "Claude Code" },
+        }),
+      ],
+      noPrefs,
+      opts({ plainWorkspace: WS }),
+    );
+    const repo = tree.projects.find((p) => p.key === "z:\\repo");
+    expect(repo?.sessions).toHaveLength(1);
+    expect(repo?.sessions[0]?.client).toEqual({
+      kind: "agent",
+      deviceId: "ag-1",
+      name: "Claude Code",
+    });
+  });
 });
 
 describe("buildSessionTree 手动排序", () => {

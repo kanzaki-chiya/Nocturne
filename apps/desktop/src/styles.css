@@ -751,6 +751,35 @@ details[open] > summary:not(.tool-line)::before {
 .gh:focus-within .gh-right {
   visibility: hidden;
 }
+.session-client-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--a-secondary);
+  opacity: 0.85;
+}
+.nav .item.on .session-client-icon {
+  color: var(--a-text);
+  opacity: 1;
+}
+.irow[data-client-name]:hover::after {
+  content: attr(data-client-name);
+  position: absolute;
+  left: 26px;
+  bottom: calc(100% + 2px);
+  padding: 2px 7px;
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  border: 1px solid var(--a-borderStrong);
+  color: var(--a-text);
+  font-size: var(--fs-1);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
 
 /* 主区 */
 .main {

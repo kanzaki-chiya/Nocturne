@@ -180,9 +180,114 @@
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
 }
-.remote-body .btn3.primary {
+.remote-body .btn3.primary,
+.remote-pair .btn3.primary {
   color: var(--a-accent);
   border-color: var(--a-accent);
+}
+.remote-select {
+  border: 1px solid var(--a-borderStrong);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-text);
+  padding: 5px 10px;
+  font: var(--fs-2)/1.4 var(--sans);
+  cursor: pointer;
+}
+.scrim:has(> .agent-pair-dlg) {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 36%, transparent);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+}
+.dlg.agent-pair-dlg {
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--a-panel);
+  border: 1px solid var(--a-borderStrong);
+  border-radius: var(--radius-3);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  display: grid;
+  text-align: left;
+}
+.agent-pair-dlg h3 {
+  margin: 0 0 14px;
+}
+.agent-pair-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  margin-bottom: 14px;
+  font-size: var(--fs-2);
+}
+.agent-pair-meta > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.agent-pair-meta span {
+  color: var(--a-secondary);
+  flex-shrink: 0;
+}
+.agent-pair-meta code {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  word-break: break-all;
+}
+.agent-pair-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.agent-scope-opt {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  margin: 0 !important;
+  color: var(--a-text) !important;
+}
+.agent-scope-opt.selected {
+  border-color: var(--a-accent);
+  background: var(--a-sel);
+}
+.agent-scope-opt div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-scope-opt span {
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
+}
+.agent-preset-field {
+  margin-bottom: 12px;
+}
+.agent-preset-field .remote-select {
+  width: 100%;
+  padding: 8px 10px;
+}
+.agent-pair-note {
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
+  margin: 8px 0 16px;
+}
+.agent-pair-actions {
+  justify-content: flex-end;
+  margin-top: 8px;
 }
 @container (max-width: 520px) {
   .remote-body {

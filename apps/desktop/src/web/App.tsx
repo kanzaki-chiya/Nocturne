@@ -39,6 +39,7 @@ import {
   IconMore,
   IconPlus,
   IconSettings,
+  IconTerminal,
 } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
 import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
@@ -766,7 +767,18 @@ export function PhoneApp({
                 }}
               >
                 <span className="phone-row-main">
-                  <b>{heading}</b>
+                  <b>
+                    {(row.client ?? summary?.client) !== undefined && (
+                      <span
+                        className="phone-session-client"
+                        title={(row.client ?? summary?.client)?.name}
+                        aria-label={(row.client ?? summary?.client)?.name}
+                      >
+                        <IconTerminal />
+                      </span>
+                    )}
+                    {heading}
+                  </b>
                   {heading !== row.title && <span className="phone-row-summary">{row.title}</span>}
                   <small>
                     <span className={`phone-badge ${status}`}>

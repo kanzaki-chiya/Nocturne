@@ -6,7 +6,14 @@ import {
   createRpcClient,
   type RemoteStatus,
 } from "@nocturne/rpc/client";
-import { PairingDialog, PairingQr, RemoteBadge, RemotePage, qrModules } from "../src/RemotePage";
+import {
+  AgentPairingDialog,
+  PairingDialog,
+  PairingQr,
+  RemoteBadge,
+  RemotePage,
+  qrModules,
+} from "../src/RemotePage";
 import { pushRemoteNotification } from "../src/notify";
 
 afterEach(() => {
@@ -220,4 +227,124 @@ it("固定 URL 的二维码 SVG path 模块数与 M 纠错矩阵一致并有四�
   expect(qr.size).toBe(matrix.getModuleCount() + 8);
   const { container } = render(<PairingQr url={url} />);
   expect(container.querySelector("path")?.getAttribute("d")?.match(/M/g)).toHaveLength(count);
+});
+
+it("外部 Agent 配对弹窗显示名称、指纹、进程信息与权限说明，支持选择范围/权限上限并批准或拒绝（ADR-0074 §3）", async () => {
+  const h = harness();
+  const done = vi.fn();
+  render(
+    <AgentPairingDialog
+      client={h.client}
+      request={{
+        requestId: "req-1",
+        agentId: "agent-claude",
+        clientName: "Claude Code",
+        name: "Claude Code",
+        fingerprint: "a1b2:c3d4:e5f6:0011",
+        processInfo: { pid: 9527, command: "nctrn mcp --name claude" },
+        requestedAt: Date.now(),
+        expiresAt: Date.now() + 120_000,
+      }}
+      onDone={done}
+    />,
+  );
+  expect(screen.getByRole("dialog", { name: "外部 Agent 接入请求" })).toBeTruthy();
+  expect(screen.getByText("Claude Code")).toBeTruthy();
+  expect(screen.getByText("a1b2:c3d4:e5f6:0011")).toBeTruthy();
+  expect(screen.getByText(/PID 9527/)).toBeTruthy();
+  expect(
+    screen.getByText("可运行的 agent 能往任何会话发消息，按该会话自己的权限预设执行"),
+  ).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText("新建会话权限上限"), {
+    target: { value: "auto-edit" },
+  });
+  fireEvent.click(screen.getByText("批准"));
+
+  await waitFor(() => {
+    expect(h.calls).toContainEqual(
+      expect.objectContaining({
+        method: "agent.respondPairing",
+        params: {
+          requestId: "req-1",
+          approved: true,
+          scope: "run",
+          maxPermissionPreset: "auto-edit",
+        },
+      }),
+    );
+  });
+  expect(done).toHaveBeenCalledTimes(1);
+});
+
+it("设置 › 远程页独立展示外部 Agent 分组与安全说明，支持修改范围、修改权限上限与吊销（ADR-0074 §3）", async () => {
+  const withAgents: RemoteStatus = {
+    ...online,
+    agents: [
+      {
+        kind: "agent",
+        id: "ag-1",
+        name: "Claude Code",
+        fingerprint: "1122:3344:5566:7788",
+        scope: "run",
+        maxPermissionPreset: "default",
+        createdAt: 1000,
+        lastSeenAt: 2000,
+        online: true,
+      },
+    ],
+  };
+  const h = harness(withAgents);
+  render(<RemotePage client={h.client} />);
+
+  expect(await screen.findByText("外部 Agent")).toBeTruthy();
+  expect(screen.getByText("Claude Code")).toBeTruthy();
+  expect(
+    screen.getByText("本机配对用于可见性与误触发隔离，防不住本机同一用户下的恶意程序。"),
+  ).toBeTruthy();
+
+  // 修改权限上限
+  fireEvent.change(screen.getByLabelText("Claude Code 权限上限"), {
+    target: { value: "auto-edit" },
+  });
+  await waitFor(() => {
+    expect(h.calls).toContainEqual(
+      expect.objectContaining({
+        method: "agent.setScope",
+        params: {
+          id: "ag-1",
+          scope: "run",
+          maxPermissionPreset: "auto-edit",
+        },
+      }),
+    );
+  });
+
+  // 修改范围为只读
+  fireEvent.change(screen.getByLabelText("Claude Code 范围"), {
+    target: { value: "read-only" },
+  });
+  await waitFor(() => {
+    expect(h.calls).toContainEqual(
+      expect.objectContaining({
+        method: "agent.setScope",
+        params: {
+          id: "ag-1",
+          scope: "read-only",
+          maxPermissionPreset: "default",
+        },
+      }),
+    );
+  });
+
+  // 吊销
+  fireEvent.click(screen.getByText("吊销"));
+  await waitFor(() => {
+    expect(h.calls).toContainEqual(
+      expect.objectContaining({
+        method: "agent.revoke",
+        params: { id: "ag-1" },
+      }),
+    );
+  });
 });
