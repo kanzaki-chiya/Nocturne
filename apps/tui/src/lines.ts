@@ -6,7 +6,12 @@
 import stringWidth from "string-width";
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
-import { todoItemsFromCompletion, subagentRowInfo } from "@nocturne/core/protocol";
+import {
+  todoItemsFromCompletion,
+  subagentRowInfo,
+  subagentResultLine,
+  subagentResultText,
+} from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
 import { webFetchSummary } from "./web-fetch.js";
@@ -193,6 +198,17 @@ function layoutEntryBody(
   const prompt = ascii ? ">" : "›";
   switch (entry.kind) {
     case "user": {
+      if (entry.subagent) {
+        const id = `subagent:${entry.key}`;
+        const open = options.reasoningExpanded?.get(id) ?? false;
+        return [
+          ...rows(entry.key, `子代理结果 · ${subagentResultLine(entry.subagent)}`, width, {
+            color: theme.secondary,
+            toggle: { id, anchor: `${entry.key}:0` },
+          }),
+          ...(open ? rows(`${entry.key}:body`, subagentResultText(userText(entry)), width) : []),
+        ];
+      }
       const text = userText(entry);
       const fullText = stripControls(`${prompt} ${text}`.replace(/\r\n?/g, "\n"));
       let offset = 0;

@@ -120,6 +120,7 @@ import {
   type ProviderOp,
   type ProviderToggleBridge,
 } from "./components/provider-page.js";
+import { Subagents } from "./components/subagents.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
 import { SettingsPage } from "./components/settings-page.js";
@@ -899,6 +900,27 @@ function SessionApp({
   const [historyIndex, setHistoryIndex] = useState<number | undefined>(undefined);
   const [historyDraft, setHistoryDraft] = useState("");
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
+  const [backgroundCount, setBackgroundCount] = useState(0);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void runtime
+        .listSubagents({ parentSessionId: session.id })
+        .then((items) => {
+          if (active)
+            setBackgroundCount(
+              items.filter((item) => item.background && item.state === "running").length,
+            );
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 1000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [runtime, session]);
   const [clientLines, setClientLines] = useState<ClientLine[]>([]);
   const clientLineId = useRef(0);
   const [exiting, setExiting] = useState(false);
@@ -1333,7 +1355,11 @@ function SessionApp({
           const source = sourceRef.current;
           if (toggle === undefined || source === undefined) return;
           let nextSource = source;
-          if (clicked.startsWith("reasoning:") || clicked.startsWith("description:")) {
+          if (
+            clicked.startsWith("reasoning:") ||
+            clicked.startsWith("description:") ||
+            clicked.startsWith("subagent:")
+          ) {
             const next = new Map(reasoningExpandedRef.current);
             next.set(clicked, !(next.get(clicked) ?? source.expanded));
             reasoningExpandedRef.current = next;
@@ -2285,7 +2311,7 @@ function SessionApp({
       const queued = pendingInputsRef.current;
       const picked = queued.items[Math.min(pendingIndexRef.current, queued.items.length - 1)];
       if (ch === "e" || ch === "E") {
-        if (picked === undefined) return;
+        if (picked === undefined || picked.mode === "subagent") return;
         editingPendingRef.current = picked.id;
         setEditingPending(picked.id);
         updateInput(picked.text, picked.text.length);
@@ -2299,7 +2325,7 @@ function SessionApp({
         return;
       }
       if (ch === "t" || ch === "T") {
-        if (picked === undefined) return;
+        if (picked === undefined || picked.mode === "subagent") return;
         void session
           .updateInput(picked.id, { mode: picked.mode === "steer" ? "queue" : "steer" })
           .catch((e: unknown) => {
@@ -3182,6 +3208,15 @@ function SessionApp({
         onEscape={escapePrompt}
         width={width}
       />
+    ) : overlay === "subagents" ? (
+      <Subagents
+        runtime={runtime}
+        sessionId={session.id}
+        width={width}
+        onClose={() => {
+          setOverlay(undefined);
+        }}
+      />
     ) : overlay === "context" ? (
       <Panel
         title="/context"
@@ -3512,6 +3547,7 @@ function SessionApp({
           context={{ used: contextReport.estimatedTokens, limit: contextWindow }}
           models={runtime.listModels()}
           speed={speed}
+          backgroundCount={backgroundCount}
           highlight={highlight}
           note={note ?? (expanded && fullscreen ? "思考已展开（Ctrl+O 收起）" : undefined)}
         />

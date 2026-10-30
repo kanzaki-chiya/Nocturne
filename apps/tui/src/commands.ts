@@ -20,7 +20,16 @@ import { helpLines as catalogHelpLines, externalAgentListLines } from "./slash-c
 import { safeLoginError } from "./provider-login.js";
 
 export type OverlayName =
-  "context" | "help" | "resume" | "preset" | "effort" | "shell" | "theme" | "settings" | "grants";
+  | "context"
+  | "help"
+  | "resume"
+  | "preset"
+  | "effort"
+  | "shell"
+  | "theme"
+  | "settings"
+  | "grants"
+  | "subagents";
 
 /** /provider 向导启动形态（add / key） */
 export type ProviderWizardStart =
@@ -317,6 +326,8 @@ export async function runSlash(
     }
     case "/skills":
       return { kind: "message", text: skillListLines(session.describeSkills().skills).join("\n") };
+    case "/subagents":
+      return { kind: "overlay", name: "subagents" };
     case "/agents":
       return {
         kind: "message",

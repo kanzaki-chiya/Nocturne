@@ -60,6 +60,7 @@ export function StatusBar({
   highlight,
   note,
   speed,
+  backgroundCount = 0,
 }: {
   view: SessionView;
   width: number;
@@ -74,6 +75,7 @@ export function StatusBar({
   /** 短暂提示（复制结果等，由调用方控制时长）；显示为最左段 */
   note?: string | undefined;
   speed?: string | undefined;
+  backgroundCount?: number | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -93,6 +95,8 @@ export function StatusBar({
         : `思考:${effort.current}`;
 
   const segments: Segment[] = [{ text: status, color: statusColor, highlight: false }];
+  if (backgroundCount > 0)
+    segments.push({ text: `后台 ${backgroundCount}`, color: theme.secondary, highlight: false });
   let progress: Segment | undefined;
   if (view.todos.length > 0) {
     const done = view.todos.filter((item) => item.status === "completed").length;

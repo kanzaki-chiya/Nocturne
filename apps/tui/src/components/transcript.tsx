@@ -14,7 +14,7 @@ import { useTheme } from "../theme.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
-import type { ViewEntry } from "@nocturne/core/protocol";
+import { subagentResultLine, type ViewEntry } from "@nocturne/core/protocol";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
@@ -26,6 +26,13 @@ export type TranscriptItem =
 function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
+  // ADR-0073 §6：后台子代理结果只显示一行；回滚区不能展开，正文在全屏模式里展开看
+  if (entry.subagent !== undefined)
+    return (
+      <Box marginTop={1}>
+        <Text color={theme.secondary}>{`子代理结果 · ${subagentResultLine(entry.subagent)}`}</Text>
+      </Box>
+    );
   const text = userText(entry);
   return (
     <Box marginTop={1} flexDirection="column">
