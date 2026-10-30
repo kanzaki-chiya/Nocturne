@@ -9,7 +9,7 @@
 - 每条报文是**一行 JSON**，以 `\n` 分隔，不使用 Content-Length 头；不支持批量（数组报文报 `-32600`）。服务端对传输只有"按行收发"的要求（`LineTransport`），stdio 是第一种接入，`@nocturne/rpc/server` 提供 `createStdioTransport`，测试与嵌入方可用 `createMemoryTransportPair`。
 - 三种报文：客户端→服务端的**请求**（有 `id`，等结果）、客户端→服务端的**通知**（无 `id`）、服务端→客户端的**通知**。没有服务端→客户端的请求：需要用户参与的流程都是"事件请求 + 命令回复"（权限、提问）。
 - 约定：`undefined` 在线上是 `null`（客户端封装负责还原）；二进制数据（图片附件）用标准 base64 字符串；整数 `seq`、毫秒时间戳保持数字。
-- 一个服务端共享一个 Runtime，可同时服务一条本机连接与多条远程连接，各自打开多个会话；会话方法都带 `sessionId`。嵌入接口为 `serve(transport, { origin?: "local" | "remote" })`，缺省 `local`，同一时刻第二条本机连接被拒。`origin` 由服务端接入方指定，不从客户端报文获取；本轮只实现内存/stdio 接入，不新增网络。
+- 一个服务端共享一个 Runtime，可同时服务一条本机连接、多条远程连接与多条本机外部 agent 连接（[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md)），各自打开多个会话；会话方法都带 `sessionId`。嵌入接口为 `serve(transport, { origin?: "local" | "remote" | "agent" })`，缺省 `local`，同一时刻第二条本机连接被拒。`origin` 由服务端接入方指定，不从客户端报文获取。桌面端启动后台时传 `--agent-pipe`，后台在本机监听（Windows 为命名管道 `\\.\pipe\nocturne-agent-<用户 SID 哈希>`，ACL 仅允许当前用户；其他平台为 `<nocturneHome>/agent.sock`，权限 `0600`），管道上复用 `@nocturne/remote` 的握手与加密并以 `origin: "agent"` 接入。
 
 ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议新增浏览器/CDP 执行方法或反向请求。手机发起的 Turn 也可以用这组桌面浏览器工具，权限照常处理；调用者信息经 MCP 调用的 `_meta` 注入（见 [tool-api.md 第 7 节](tool-api.md#7-桌面运行时来源的调用者元数据)）。
 
@@ -365,7 +365,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `-32001` | `RuntimeCommandError`（命令被拒绝，原因码见 [events.md](events.md) 第 7 节） | `session_busy`、`unknown_request`、`invalid_reply`、`input_consumed`（编辑或撤回的待发输入已被 Turn 取走，ADR-0070）、`invalid_command`、`invalid_model`（因模型不可用，如已停用；此时 `data` 另带 `disabled: "provider" \| "model"` 与 `model: { provider, model }`，双重停用时另带 `providerDisabled: true`（`disabled` 记 `"model"`，一键重新启用需同时恢复两者），见 [ADR-0054](../decisions/ADR-0054-provider-model-toggle.md) §3，客户端据此区分「已停用」与「已删除」） |
 | `-32002` | `SessionError` | 会话层错误码 |
 | `-32003` | `ProviderLoginError` | 登录错误码 |
-| `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`workspace_not_found` / `workspace_untrusted`（远程新建会话的目录不存在或需在电脑上信任）、`response_too_large` / `attachment_too_large`（远程结果超过报文上限）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
+| `-32004` | RPC 层状态错误 | `runtime_unavailable`（本机尚未创建 Runtime）、`remote_not_allowed`（远程方法或参数越界，中文文案说明限制）、`agent_not_allowed`（外部 agent 方法越界，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）、`agent_pairing_pending`（外部 agent 尚未在桌面端获批配对）、`subagent_session_not_allowed`（外部 agent 尝试直接打开子代理会话）、`workspace_not_found` / `workspace_untrusted`（远程或外部 agent 新建会话的目录不存在或需在电脑上信任）、`response_too_large` / `attachment_too_large`（远程结果超过报文上限）、`not_initialized`、`already_initialized`、`protocol_version_mismatch`、`unknown_session`、`session_already_open`、`shutting_down`、`provider_config_unavailable`（服务端未注入服务商配置）、`provider_in_use`（后台任一会话正在使用的服务商拒绝删除）、`unknown_login`（登录会话不存在或已结束） |
 | `-32005` | `ProviderSetupError` / `McpSettingsError` / `ExternalAgentSettingsError` / `ScheduleError`（管理表单字段错误） | `invalid_field`；`data.field` 为对应字段名，客户端据此标输入框。外部 agent 使用 `name`、`mode`、`command`、`configOptions` 等，名称冲突同样返回 `name`（3.7） |
 
 客户端侧另有 `connection_closed`：连接断开时所有在途请求以它失败，而不是悬挂。
@@ -408,7 +408,14 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `grants.setTrusted`、`grants.describeProject` | 拒绝且不调用 Core；信任会放宽，项目命令无需发送手机 |
 | `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
 | `runtime.readFile` | 拒绝：只服务本机右侧面板（ADR-0060），手机没有面板，也不扩大远程可读的文件范围 |
-| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
+
+- **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
+  - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
+  - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`session.submit`、`session.enqueueInput`、`session.interrupt`（含别名 `session.abort`）。
+  - **一律拒绝**：`session.respondPermission`、`session.respondQuestion`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
+  - **新建会话约束**：`runtime.createSession` 的 `permissionPreset` 不得高于该 agent 登记的权限上限（超出报 `-32602 / invalid_params`），不传时取「权限上限」与「用户默认预设」中较低者；工作区信任规则同远程（`workspace_untrusted`）；服务端自动填入 `session.created.client`，忽略客户端同名参数。
+  - **本机管理方法（`agent.*`）**：`agent.describe`（别名 `agent.list`）、`agent.respondPairing`、`agent.setScope`（别名 `agent.update`）、`agent.revoke` 仅开放给本机连接（`origin === "local"`），通知 `agent.pairingRequested` 与 `agent.statusChanged` 仅发给本机连接。
 
 - **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「附件过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。
 - 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。

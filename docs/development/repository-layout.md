@@ -56,6 +56,9 @@ nocturne/
 │   ├── mcp/                     @nocturne/mcp：MCP 客户端（ADR-0011）
 │   │   ├── package.json         依赖 @nocturne/core 公开入口与 @modelcontextprotocol/sdk
 │   │   └── src/                 connector、stdio 传输、工具包装
+│   ├── mcp-server/              @nocturne/mcp-server：对外 MCP 服务器桥（ADR-0074）
+│   │   ├── package.json         依赖 @nocturne/rpc/client、@nocturne/remote、@nocturne/core/protocol 与 @modelcontextprotocol/sdk
+│   │   └── src/                 stdio MCP 服务器、RPC 客户端桥、身份持久化、视图折叠
 │   ├── acp/                     @nocturne/acp：外部 agent connector（ADR-0049）
 │   │   ├── package.json         依赖 @nocturne/core 公开入口与 @agentclientprotocol/sdk
 │   │   ├── src/                 ACP 调用、权限映射、transcript 与进程生命周期

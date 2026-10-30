@@ -28,6 +28,8 @@ nctrn grants revoke <编号|--all> [--workspace <dir>]  # 撤销项目授权
 nctrn trust | untrust        # 把当前目录加入/移出用户配置的 trustedWorkspaces 后退出
 nctrn setup                  # 服务商配置向导（TTY 打开服务商页，provider-setup.md）
 nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（ADR-0044，v0.5）
+nctrn rpc --stdio --agent-pipe # 同上，并监听本机外部 agent 管道（桌面端后台使用，ADR-0074）
+nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端后台驱动会话，ADR-0074）
 ```
 
 | 参数 | 说明 |
@@ -46,6 +48,8 @@ nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（AD
 | `--tui` | 以终端界面（TUI）启动交互模式（[apps/tui.md](tui.md)）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2）；显式给出且 stdin/stdout 非 TTY 时报错退出 2 |
 | `--inline` | TUI 走普通屏幕模式（已完结内容进终端回滚区，见 [tui.md](tui.md) §2 末节）；与 `-p`/`--print`/`--cli`/`--sessions` 互斥（退出码 2） |
 | `--stdio` | 只与 `rpc` 子命令搭配：传输走 stdin/stdout（缺省或脱离 `rpc` 都是用法错误，退出码 2） |
+| `--agent-pipe` | 只与 `rpc` 子命令搭配：监听本机外部 agent 管道（[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §2） |
+| `--name <label>` | 只与 `mcp` 子命令搭配：指定独立桥身份槽 `<NOCTURNE_HOME>/mcp-bridge/<label>.json`（[outside-agents.md](outside-agents.md)） |
 | `-y, --yes` | 把需要确认的操作按"允许一次"自动批准（第 6 节）；对两类模式都生效 |
 | `--debug` | 启用诊断日志（JSONL；[observability.md](../architecture/observability.md)），等价 `NOCTURNE_DEBUG=1` |
 | `--debug-file <path>` | 诊断输出文件；`-` 表示 stderr。缺省写 `<NOCTURNE_HOME>/logs/debug-<时间戳>-<pid>.jsonl` |

@@ -45,6 +45,7 @@
 | [apps/relay.md](apps/relay.md) | 邀请制密文中继：配置、数据、管理通道、限额、日志；用户部署见[自建指南](../apps/relay/deploy/README.md) |
 | [apps/tui.md](apps/tui.md) | 终端界面客户端：布局、主题、欢迎框、状态栏、模型选择页、服务商页、键位、降级行为；TTY 时为 `nctrn` 默认界面 |
 | [apps/desktop.md](apps/desktop.md) | 桌面端（Tauri）：进程结构、十个外壳命令与消息格式、stderr 缓冲与后台日志页、崩溃恢复、Node 查找与说明页、会话树、单文件后台与 NSIS 打包（随附 Node）、自动更新、界面状态与安全边界（ADR-0046、ADR-0050） |
+| [apps/outside-agents.md](apps/outside-agents.md) | 对外 MCP 接口（`nctrn mcp`）：在 Claude Code、Codex 中登记、本机配对与范围、`nocturne_*` 工具与安全口径（ADR-0074） |
 | [apps/android.md](apps/android.md) | 安卓 App（Tauri）：工程结构与构建命令、`AppHost`、前台服务与 WebView 后台保持、渲染进程恢复、后台探针、与网页版的差异（ADR-0059） |
 
 ## Protocols（精确契约）

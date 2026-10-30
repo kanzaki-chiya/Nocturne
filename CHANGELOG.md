@@ -1,5 +1,14 @@
 # 更新日志
 
+## Unreleased
+
+### 外部 agent 可以驱动 Nocturne 会话了
+
+- 新增：在 Claude Code、Codex 等外部 agent 中登记 `nctrn mcp` 后，可以通过 MCP 工具列出、读取、新建和继续桌面端里的 Nocturne 会话（`nocturne_list_sessions`、`nocturne_read_session`、`nocturne_list_models`、`nocturne_start_session`、`nocturne_send`、`nocturne_wait`、`nocturne_interrupt`）。
+- 新增：外部 agent 首次连接时，桌面端弹窗显示名称与指纹，让你选择「只读」或「可运行」及新建会话的权限上限；之后可以在「设置 › 远程 › 外部 Agent」里随时修改范围、权限上限或吊销。需要多个宿主分别管理时，可加 `--name <label>` 使用独立身份槽。
+- 新增：外部 agent 创建的会话在桌面端和手机网页会话列表标题旁显示来源图标（悬停显示 agent 名称），在 TUI `/resume` 列表行首显示 `⇄` 标记。
+- 说明：需要保持 Nocturne 桌面端处于打开状态；权限确认与提问仍由你在桌面端或已配对手机上处理，外部 agent 不能代为批准。可运行范围的 agent 向已有会话发消息时，按该会话自己的权限预设执行；本机配对用于可见性与误触发隔离，防不住本机同一用户下的恶意程序。
+
 ## 0.23.0
 
 ### 后台子代理可以改代码了

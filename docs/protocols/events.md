@@ -70,7 +70,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 | 类型 | turnId | payload |
 |---|---|---|
-| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节）、`schedule?`（`{ taskId, scheduledAt, trigger }`，仅定时任务发起的会话存在；可选字段，旧版本忽略，ADR-0064，见 [schedule.md](../architecture/schedule.md)） |
+| `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节）、`schedule?`（`{ taskId, scheduledAt, trigger }`，仅定时任务发起的会话存在；可选字段，旧版本忽略，ADR-0064，见 [schedule.md](../architecture/schedule.md)）、`client?`（`{ kind: "agent", name, deviceId }`，仅外部 agent 经 MCP 桥发起的会话存在，由 RPC 服务端在 `origin: "agent"` 连接创建会话时填入；可选字段，旧版本忽略，不提升 `formatVersion`，见 [ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §5） |
 | `session.config_changed` | — | 配置或环境状态变化的字段（不只表示用户配置）：`mcp?: Array<{ server: string; available: boolean; reason?: string; autoRetry?: boolean }>`（ADR-0071，折叠为一条 note，每台一句；reason 截到 200 字符），`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
 | `session.titled` | — | `title: string`、`source?: "generated" \| "user"`（旧事件缺省 `generated`；用户空标题清除覆盖）、`model?: string`（生成时的 provider/model；用户改名不填）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |

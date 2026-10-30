@@ -40,8 +40,9 @@
 - `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
 - `schedule`（定时任务的计划、存储与调度循环）依赖 protocol、platform，以及 session 的锁和 config 的原子写；不依赖 agent、tools。由 `core/index` 装配，`tools` 只经注入的接口读写（见 [schedule.md](schedule.md)）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
+- `packages/mcp-server`（`@nocturne/mcp-server`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md)）是对外 MCP 服务器桥：对外经 `@modelcontextprotocol/sdk` 提供 stdio MCP 服务，对内经 `@nocturne/rpc/client` 与 `@nocturne/remote` 连接桌面后台的本机管道，并使用 `@nocturne/core/protocol` 折叠会话视图。**不依赖 `@nocturne/core` 运行时或 `@nocturne/rpc/server`**，不读写会话日志与凭据；仅由 `apps/cli`（`nctrn mcp` 子命令入口）调用，由 depcheck `mcp-server-*` 与 `only-cli-imports-mcp-server` 规则强制。
 - `packages/acp`（`@nocturne/acp`）只依赖 Core 公开入口与 `@agentclientprotocol/sdk`，由 CLI 经 `RuntimeOptions.externalAgents` 注入；Core 不依赖 ACP 实现。权限判定留在 Core 权限层，connector 只映射 ACP 主体与一次性选项，见 [subagent.md](subagent.md#17-外部-agentacp)。
-- `packages/remote`（`@nocturne/remote`）负责同构配对、签名握手、加密通道与中继客户端，只用标准 Web API，不依赖 Node、第三方或任何项目内包；见 [remote-channel.md](../protocols/remote-channel.md) 与 [relay.md](../protocols/relay.md)。rpc 仅开发测试依赖它，src 不引用；apps/relay 运行时依赖它。Core 不依赖它。
+- `packages/remote`（`@nocturne/remote`）负责同构配对、签名握手、加密通道与中继客户端，只用标准 Web API，不依赖 Node、第三方或任何项目内包；见 [remote-channel.md](../protocols/remote-channel.md) 与 [relay.md](../protocols/relay.md)。`packages/rpc` 服务端（远程主机与本机 agent 管道）及 `packages/mcp-server`、`apps/relay` 运行时依赖它。Core 不依赖它。
 - `apps/relay` 只依赖 remote、ws 与 Node 内置模块，不依赖 Core、RPC 或其他 workspace；Core/RPC 仅为端到端开发测试依赖，depcheck relay-only-remote 强制 src 边界。
 - 客户端（`apps/*`）只能使用 `@nocturne/core` 的公开入口与 `protocol` 类型，不得深度导入内部路径。CLI 对 TUI 可惰性 `import()` 主入口，或静态引用 `@nocturne/tui/slash-catalog`、`@nocturne/tui/text-format`、`@nocturne/tui/provider-setup-flow`、`@nocturne/tui/provider-prompts` 与 `@nocturne/tui/provider-login`；命令表不得 import 任何模块，纯文本入口仅复用格式函数、protocol 类型与 `string-width`，三个共享向导入口及其间接依赖也不得加载 Ink/React，保证逐行模式不加载 Ink/React。其余 apps→apps 依赖禁止（[tui.md](../apps/tui.md) 第 9 节）。
 - 桌面端（`apps/desktop/src`）边界更窄：只能引 `@nocturne/rpc/client`、`@nocturne/core/protocol` 与同构 `@nocturne/remote`，不引 core 运行时、其他 workspace 包与 Node 内置模块（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 7 节，depcheck `desktop-*` 规则强制）。手机入口 `src/web` 及其可达依赖不得加载 Tauri API、`tauri-host`、`updater` 或桌面行传输，由 `phone-web-no-tauri` 强制；模块职责见 [桌面应用第 8 节](../apps/desktop.md#8-手机网页)。
@@ -228,6 +229,10 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 `@nocturne/acp` 实现 `ExternalAgentConnector`：每调用启动并清理一个 ACP 进程，映射外部权限请求，保存审计 transcript、转发单行工具进度并返回最终文本。依赖方向与 MCP 同类；不作为 Provider、不创建 Nocturne 子会话，不读取外部凭据。生命周期与边界见 [subagent.md](subagent.md#17-外部-agentacp)。
 
+
+### packages/mcp-server（独立于 Core 的包，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md)）
+
+`@nocturne/mcp-server` 是对外 MCP 服务器桥：把本机桌面端后台的会话能力暴露为 `nocturne_*` MCP 工具，供 Claude Code、Codex 等外部 agent 调用。只依赖 `@nocturne/rpc/client`、`@nocturne/remote`、`@nocturne/core/protocol` 与 `@modelcontextprotocol/sdk`；不依赖 Core 运行时，由 `apps/cli` 的 `nctrn mcp` 子命令入口调用。详见 [outside-agents.md](../apps/outside-agents.md) 与 [ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md)。
 
 ## 4. 客户端
 
