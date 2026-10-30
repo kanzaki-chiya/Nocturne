@@ -196,6 +196,14 @@ const payloadSchemas = {
         trigger: z.enum(["schedule", "catchup", "manual"]),
       })
       .optional(),
+    client: z
+      .object({
+        kind: z.literal("agent"),
+        name: z.string(),
+        deviceId: z.string(),
+        id: z.string().optional(),
+      })
+      .optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),

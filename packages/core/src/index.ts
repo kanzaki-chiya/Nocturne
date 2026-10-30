@@ -179,6 +179,7 @@ import type {
   RuntimeEvent,
   RewindTarget,
   RewindMode,
+  SessionClient,
   SessionRewoundPayload,
   SessionSchedule,
   SubagentObservation,
@@ -418,8 +419,12 @@ export interface CreateSessionOptions {
    * 重新打开后保持这一状态（来源写入日志），所以调度器之外不要单独使用 `false`。
    */
   interactive?: boolean | undefined;
+  /** 子会话父关联（仅进程内子代理或测试使用；RPC 不暴露） */
+  parent?: { sessionId: string; callId: string } | undefined;
   /** 定时任务来源（ADR-0064）：写入 `session.created.schedule`，只由调度器传 */
   schedule?: SessionSchedule | undefined;
+  /** 外部 agent 来源（ADR-0074 §5）：写入 `session.created.client`，只由 RPC 服务端在 `agent` 连接上填入 */
+  client?: SessionClient | undefined;
 }
 
 import {
@@ -4380,7 +4385,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         permissionPreset: preset,
         nocturneVersion: options.version ?? NOCTURNE_VERSION,
         ...(initialEffort !== undefined ? { reasoningEffort: initialEffort } : {}),
+        ...(opts.parent !== undefined ? { parent: opts.parent } : {}),
         ...(opts.schedule !== undefined ? { schedule: opts.schedule } : {}),
+        ...(opts.client !== undefined ? { client: opts.client } : {}),
       });
       try {
         const wrapped = await wrapSession(session, undefined, opts.interactive === false);

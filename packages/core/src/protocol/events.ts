@@ -20,6 +20,7 @@ import type {
   PermissionSubject,
   QuestionItem,
   ReasoningEffort,
+  SessionClient,
   SessionSchedule,
   ToolCallRef,
   Usage,
@@ -42,6 +43,8 @@ export interface SessionCreatedPayload {
   forkedFrom?: { sessionId: string; seq: number } | undefined;
   /** 定时任务发起的会话的来源（ADR-0064）；旧版本读到时忽略 */
   schedule?: SessionSchedule | undefined;
+  /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5）；旧版本读到时忽略 */
+  client?: SessionClient | undefined;
 }
 
 export interface SessionConfigChangedPayload {

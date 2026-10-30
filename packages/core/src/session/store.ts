@@ -378,6 +378,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             : {}),
           ...(input.parent !== undefined ? { parent: input.parent } : {}),
           ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
+          ...(input.client !== undefined ? { client: input.client } : {}),
         });
         return session;
       } catch (e) {
@@ -470,6 +471,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
               ? { forkedFrom: event.payload.forkedFrom }
               : {}),
             ...(event.payload.schedule !== undefined ? { schedule: event.payload.schedule } : {}),
+            ...(event.payload.client !== undefined ? { client: event.payload.client } : {}),
             ...(firstText !== undefined ? { firstText } : {}),
           });
         } catch {

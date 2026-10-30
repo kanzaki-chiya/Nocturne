@@ -13,6 +13,7 @@ import type {
   ModelRef,
   ReasoningEffort,
   RuntimeEvent,
+  SessionClient,
   SessionSchedule,
   Usage,
   TodoItem,
@@ -32,6 +33,8 @@ export interface SessionMeta {
   forkedFrom?: { sessionId: string; seq: number } | undefined;
   /** 定时任务发起的会话的来源（ADR-0064）；客户端据此显示来源、归组 */
   schedule?: SessionSchedule | undefined;
+  /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5） */
+  client?: SessionClient | undefined;
 }
 
 export interface SessionConfig {
@@ -151,6 +154,8 @@ export interface SessionSummary {
   parent?: { sessionId: string; callId: string } | undefined;
   /** 定时任务发起的会话的来源（ADR-0064）；侧栏据此归入「定时任务」分组 */
   schedule?: SessionSchedule | undefined;
+  /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5） */
+  client?: SessionClient | undefined;
   /**
    * 首条 message.user 的首行文本（TUI 欢迎框"最近会话"摘要，v0.3）；
    * 无用户消息或日志损坏时缺省
@@ -172,6 +177,8 @@ export interface CreateSessionInput {
   parent?: { sessionId: string; callId: string } | undefined;
   /** 定时任务来源（ADR-0064）；写入 session.created.schedule */
   schedule?: SessionSchedule | undefined;
+  /** 外部 agent 来源（ADR-0074 §5）；写入 session.created.client */
+  client?: SessionClient | undefined;
 }
 
 export interface LoadSessionOptions {

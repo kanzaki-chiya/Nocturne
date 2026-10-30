@@ -27,12 +27,13 @@ export interface SecureLineTransport {
 }
 export interface ConnectChannelOptions {
   identity: Identity;
-  hostPublicKey: Uint8Array;
+  hostPublicKey?: Uint8Array | undefined;
   timeoutMs?: number;
 }
 export interface AcceptChannelOptions {
   identity: Identity;
   lookupDevice: (id: string) => Promise<Uint8Array | undefined>;
+  allowUnknownDevice?: boolean | undefined;
   timeoutMs?: number;
 }
 
@@ -110,7 +111,7 @@ function channel(
   transport: FrameTransport,
   options: ConnectChannelOptions | AcceptChannelOptions,
   phone: boolean,
-): Promise<{ deviceId: string; channel: SecureLineTransport }> {
+): Promise<{ deviceId: string; devicePublicKey: Uint8Array; channel: SecureLineTransport }> {
   return new Promise((resolve, reject) => {
     let ready = false,
       stopped = false,
@@ -132,6 +133,7 @@ function channel(
     let temporary: Awaited<ReturnType<typeof ephemeral>> | undefined;
     let fields: Bytes[] | undefined;
     let deviceId = "";
+    let devicePublicKey: Bytes = new Uint8Array();
     let phase: "init" | "response" | "finish" | "ready" = phone ? "response" : "init";
     const timeout = options.timeoutMs ?? 10_000;
     const timer = setTimeout(() => {
@@ -232,7 +234,7 @@ function channel(
       temporary = undefined;
       fields = undefined;
       clearTimeout(timer);
-      resolve({ deviceId, channel: api });
+      resolve({ deviceId, devicePublicKey, channel: api });
     };
     const receiveData = async (frame: Bytes): Promise<void> => {
       if (frame.length > MAX_FRAME) fail("frame_too_large");
@@ -283,15 +285,30 @@ function channel(
         return;
       }
       if (phase === "init" && "lookupDevice" in options) {
-        const body = parseFrame(frame, FRAME_TYPES.init, ["v", "id", "e", "n"]);
+        let body: Record<string, unknown>;
+        let hasInlinePub = false;
+        if (options.allowUnknownDevice === true) {
+          try {
+            body = parseFrame(frame, FRAME_TYPES.init, ["v", "id", "pub", "e", "n"]);
+            hasInlinePub = true;
+          } catch {
+            body = parseFrame(frame, FRAME_TYPES.init, ["v", "id", "e", "n"]);
+          }
+        } else {
+          body = parseFrame(frame, FRAME_TYPES.init, ["v", "id", "e", "n"]);
+        }
         version(body);
         unb64u(body.id, 16);
         if (typeof body.id !== "string") fail();
         deviceId = body.id;
-        const pub = await options.lookupDevice(deviceId);
+        let pub = await options.lookupDevice(deviceId);
         if (unavailable()) return;
+        if (pub === undefined && options.allowUnknownDevice === true && hasInlinePub) {
+          pub = publicPoint(unb64u(body.pub));
+        }
         if (pub === undefined) fail("unknown_device");
         if ((await identityId(pub)) !== deviceId) fail();
+        devicePublicKey = publicPoint(pub);
         const peer = publicPoint(unb64u(body.e)),
           nP = unb64u(body.n, 32);
         temporary = await ephemeral();
@@ -301,7 +318,7 @@ function channel(
         }
         fields = [
           publicPoint(options.identity.publicKey),
-          publicPoint(pub),
+          devicePublicKey,
           peer,
           temporary.publicKey,
           nP,
@@ -321,23 +338,28 @@ function channel(
         transport.send(
           jsonFrame(FRAME_TYPES.response, {
             v: 1,
+            ...(hasInlinePub ? { pub: b64u(options.identity.publicKey) } : {}),
             e: b64u(fields[3] ?? fail()),
             n: b64u(fields[5] ?? fail()),
             sig: b64u(sig),
           }),
         );
-      } else if (phase === "response" && "hostPublicKey" in options) {
-        const body = parseFrame(frame, FRAME_TYPES.response, ["v", "e", "n", "sig"]);
+      } else if (phase === "response" && !("lookupDevice" in options)) {
+        const body =
+          options.hostPublicKey !== undefined
+            ? parseFrame(frame, FRAME_TYPES.response, ["v", "e", "n", "sig"])
+            : parseFrame(frame, FRAME_TYPES.response, ["v", "pub", "e", "n", "sig"]);
         version(body);
         if (temporary === undefined || fields === undefined) fail();
+        const hostPub =
+          options.hostPublicKey !== undefined
+            ? publicPoint(options.hostPublicKey)
+            : publicPoint(unb64u(body.pub));
+        fields[0] = hostPub;
         const peer = publicPoint(unb64u(body.e));
         fields[3] = peer;
         fields[5] = unb64u(body.n, 32);
-        await verify(
-          options.hostPublicKey,
-          unb64u(body.sig, 64),
-          transcript("nocturne/hs/v1/resp", ...fields),
-        );
+        await verify(hostPub, unb64u(body.sig, 64), transcript("nocturne/hs/v1/resp", ...fields));
         if (unavailable()) return;
         const keys = await deriveKeys(temporary.privateKey, peer, fields);
         temporary = undefined;
@@ -383,7 +405,7 @@ function channel(
         notify();
       });
     });
-    if (phone && "hostPublicKey" in options) {
+    if (phone && !("lookupDevice" in options)) {
       incoming = incoming
         .then(async () => {
           temporary = await ephemeral();
@@ -391,9 +413,12 @@ function channel(
             temporary = undefined;
             return;
           }
+          devicePublicKey = publicPoint(options.identity.publicKey);
           fields = [
-            publicPoint(options.hostPublicKey),
-            publicPoint(options.identity.publicKey),
+            options.hostPublicKey !== undefined
+              ? publicPoint(options.hostPublicKey)
+              : new Uint8Array(),
+            devicePublicKey,
             temporary.publicKey,
             new Uint8Array(),
             random(32),
@@ -405,6 +430,9 @@ function channel(
             jsonFrame(FRAME_TYPES.init, {
               v: 1,
               id: deviceId,
+              ...(options.hostPublicKey === undefined
+                ? { pub: b64u(options.identity.publicKey) }
+                : {}),
               e: b64u(temporary.publicKey),
               n: b64u(fields[4] ?? fail()),
             }),
@@ -427,6 +455,6 @@ export async function connectChannel(
 export function acceptChannel(
   transport: FrameTransport,
   options: AcceptChannelOptions,
-): Promise<{ deviceId: string; channel: SecureLineTransport }> {
+): Promise<{ deviceId: string; devicePublicKey: Uint8Array; channel: SecureLineTransport }> {
   return channel(transport, options, false);
 }

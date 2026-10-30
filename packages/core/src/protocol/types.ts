@@ -22,6 +22,14 @@ export interface SessionSchedule {
   trigger: ScheduleTrigger;
 }
 
+/** 外部 agent（经 MCP 桥）创建会话的来源（`session.created.client`，ADR-0074 第 5 节） */
+export interface SessionClient {
+  kind: "agent";
+  name: string;
+  deviceId: string;
+  id?: string | undefined;
+}
+
 /** 用户点名外部 agent 的任务原文快照（ADR-0049 第 2 步）。 */
 export interface AgentDelegation {
   agent: string;
