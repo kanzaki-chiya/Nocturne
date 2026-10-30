@@ -70,6 +70,7 @@ function fakeBackend() {
   };
   const client = {
     runtime: {
+      listSubagentWorktrees: vi.fn(async () => []),
       listSubagents: vi.fn(async (parent: string | { parentSessionId: string }) => {
         state.listCalls.push(typeof parent === "string" ? parent : parent.parentSessionId);
         return state.list;

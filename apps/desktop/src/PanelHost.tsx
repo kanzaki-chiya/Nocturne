@@ -31,6 +31,7 @@ import type { SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
 import type { BrowserBounds, DesktopHost } from "./host";
 import { keyDiag, panelKeyReason, shouldRecordKey } from "./key-diag";
+import { ConfirmDialog } from "./ProvidersPage";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
@@ -642,6 +643,29 @@ export function useSidePanel({
   // ── 子代理（ADR-0060 第 6 节与修订（五））──
   const runtime = client?.runtime;
   const [subagentCancelError, setSubagentCancelError] = useState<string>();
+  const [retainedWorktrees, setRetainedWorktrees] = useState<
+    Awaited<ReturnType<NonNullable<typeof runtime>["listSubagentWorktrees"]>>
+  >([]);
+  const [deletingWorktree, setDeletingWorktree] = useState<(typeof retainedWorktrees)[number]>();
+  useEffect(() => {
+    if (!runtime || !sessionId) {
+      setRetainedWorktrees([]);
+      return;
+    }
+    // 进入会话与每次打开概览时查一次（ADR-0075 §7）
+    let active = true;
+    void runtime
+      .listSubagentWorktrees({ parentSessionId: sessionId })
+      .then((records) => {
+        if (active) setRetainedWorktrees(records);
+      })
+      .catch((cause: unknown) => {
+        if (active) setSubagentCancelError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, [runtime, sessionId, overview]);
   const hasSession = active !== undefined;
   const [documentVisible, setDocumentVisible] = useState(
     () =>
@@ -737,8 +761,19 @@ export function useSidePanel({
         : {
             link: (entry) => linkFor(entry, summaries),
             open: openSubagentById,
+            diff: (childSessionId, file) => {
+              if (!sessionId) return;
+              void runtime
+                .readSubagentDiff({ parentSessionId: sessionId, childSessionId, file })
+                .then((diffText) => {
+                  placeTab({ id: newTabId(), kind: "file", absolutePath: file, diffText });
+                })
+                .catch((cause: unknown) => {
+                  setSubagentCancelError(String(cause));
+                });
+            },
           },
-    [runtime, hasSession, summaries, openSubagentById],
+    [runtime, hasSession, summaries, openSubagentById, sessionId, placeTab],
   );
   /** 外部 agent 调用没有 child：概览里首次看到它运行的本地时刻，用来本地计时 */
   const externalSeen = useRef(new Map<string, number>());
@@ -1127,6 +1162,19 @@ export function useSidePanel({
     external: externalRows,
     onOpen: openSubagent,
     cancelError: subagentCancelError,
+    isolated: new Set(retainedWorktrees.map((record) => record.childSessionId)),
+    retained: retainedWorktrees
+      .filter((record) => record.changes)
+      .map((record) => ({
+        childSessionId: record.childSessionId,
+        branch: record.branch,
+        files: record.changes?.files.length ?? 0,
+      })),
+    onDelete: (childSessionId) => {
+      setDeletingWorktree(
+        retainedWorktrees.find((record) => record.childSessionId === childSessionId),
+      );
+    },
     onCancel: (summary) => {
       setSubagentCancelError(undefined);
       void runtime
@@ -1279,6 +1327,30 @@ export function useSidePanel({
             openChanges();
           }}
           subagents={overviewSubagents}
+        />
+      )}
+      {deletingWorktree && sessionId && (
+        <ConfirmDialog
+          title="删除副本与分支？"
+          body={deletingWorktree.branch}
+          confirmLabel="删除"
+          danger
+          note="其中的改动会丢失"
+          onClose={() => {
+            setDeletingWorktree(undefined);
+          }}
+          onConfirm={async () => {
+            const childSessionId = deletingWorktree.childSessionId;
+            try {
+              await runtime?.deleteSubagentWorktree({ parentSessionId: sessionId, childSessionId });
+              setRetainedWorktrees((records) =>
+                records.filter((record) => record.childSessionId !== childSessionId),
+              );
+            } catch (cause: unknown) {
+              setSubagentCancelError(cause instanceof Error ? cause.message : String(cause));
+            }
+            setDeletingWorktree(undefined);
+          }}
         />
       )}
       {quickOpen && loadIndex !== undefined && active !== undefined && (

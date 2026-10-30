@@ -10,6 +10,7 @@ import {
   todoItemsFromCompletion,
   subagentRowInfo,
   subagentResultLine,
+  subagentApplyLine,
   subagentResultText,
   backgroundToolStatus,
 } from "@nocturne/core/protocol";
@@ -208,7 +209,13 @@ function layoutEntryBody(
             color: theme.secondary,
             toggle: { id, anchor: `${entry.key}:0` },
           }),
-          ...(open ? rows(`${entry.key}:body`, subagentResultText(userText(entry)), width) : []),
+          ...(open
+            ? rows(
+                `${entry.key}:body`,
+                `${entry.subagent.changes?.files.map((file) => `${file.path}${file.additions === undefined ? "" : ` +${file.additions} −${file.deletions ?? 0}`}`).join("\n") ?? ""}\n${subagentResultText(userText(entry), entry.subagent.changes !== undefined)}`,
+                width,
+              )
+            : []),
         ];
       }
       const text = userText(entry);
@@ -370,9 +377,11 @@ function layoutEntryBody(
       const summary = summarizeToolInput(shownName, shownInput);
       const status = backgroundToolStatus(entry, options.entries ?? []) ?? entry.status;
       const head =
-        shownName === "mcp_search"
-          ? `${mark} 搜索 MCP 工具：${summary} ${status}`
-          : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${status}`;
+        shownName === "apply_subagent_changes" && entry.result
+          ? `${mark} ${subagentApplyLine(entry.result.output)}`
+          : shownName === "mcp_search"
+            ? `${mark} 搜索 MCP 工具：${summary} ${status}`
+            : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${status}`;
       const lines = [
         ...review,
         ...rows(

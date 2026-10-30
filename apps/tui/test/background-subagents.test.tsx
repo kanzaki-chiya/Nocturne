@@ -138,6 +138,7 @@ describe("TUI 后台子代理", () => {
       listSubagents: () =>
         Promise.resolve([summary, { ...summary, childSessionId: "c2", background: false }]),
       cancelSubagent,
+      listSubagentWorktrees: () => Promise.resolve([]),
     } as unknown as Runtime;
     const onClose = vi.fn();
     const ui = render(
@@ -156,6 +157,100 @@ describe("TUI 后台子代理", () => {
       expect(cancelSubagent).toHaveBeenCalledWith({ parentSessionId: "p", childSessionId: "c1" }),
     );
     expect(onClose).toHaveBeenCalled();
+    ui.unmount();
+  });
+
+  it("ADR-0075：结果行带改动摘要，展开列文件与增删行数；并回行显示文件数与冲突", () => {
+    const entry = {
+      ...resultEntry,
+      subagent: {
+        ...resultEntry.subagent,
+        changes: {
+          branch: "nocturne/c1",
+          base: "a",
+          head: "b",
+          snapshot: false,
+          worktree: "w",
+          files: [{ path: "src/a.ts", status: "modified", additions: 3, deletions: 1 }],
+        },
+      },
+    } as unknown as UserEntry;
+    expect(layoutEntry(entry, 100, false)[0]?.text).toContain("改动 1 个文件 • nocturne/c1");
+    const open = layoutEntry(entry, 100, false, new Map(), 0, false, false, undefined, {
+      reasoningExpanded: new Map([["subagent:u:9", true]]),
+    })
+      .map((line) => line.text)
+      .join("\n");
+    expect(open).toContain("src/a.ts +3 −1");
+    const apply = (conflicts: string[]) =>
+      layoutEntry(
+        {
+          kind: "tool",
+          key: "t2",
+          callId: "t2",
+          name: "apply_subagent_changes",
+          status: "ok",
+          input: { id: "c1" },
+          liveOutput: "",
+          result: { output: { files: [{}, {}], conflicts }, modelContent: "" },
+        } as unknown as ToolEntry,
+        100,
+        false,
+      )
+        .map((line) => line.text)
+        .join("\n");
+    // TUI 把中点渲染为 •
+    expect(apply([])).toContain("并回子代理改动 • 2 个文件");
+    expect(apply(["src/a.ts"])).toContain("有冲突 • 1 个文件");
+  });
+
+  it("ADR-0075：/subagents 标出隔离的运行项，单列保留的副本与分支，确认后删除", async () => {
+    const summary = {
+      childSessionId: "c1",
+      parentSessionId: "p",
+      callId: "t1",
+      profile: "general",
+      background: true,
+      state: "running",
+      taskSummary: "改登录",
+      startedAt: new Date().toISOString(),
+    } as SubagentSummary;
+    const deleteSubagentWorktree = vi.fn(() => Promise.resolve());
+    const runtime = {
+      listSubagents: () => Promise.resolve([summary]),
+      listSubagentWorktrees: () =>
+        Promise.resolve([
+          { childSessionId: "c1", branch: "nocturne/c1" },
+          {
+            childSessionId: "c9",
+            branch: "nocturne/c9",
+            changes: { files: [{ path: "a" }, { path: "b" }] },
+          },
+        ]),
+      deleteSubagentWorktree,
+    } as unknown as Runtime;
+    const onClose = vi.fn();
+    const ui = render(
+      inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={onClose} />),
+    );
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain("nocturne/c9 • 改动 2 个文件"));
+    expect(ui.lastFrame()).toContain("general • 隔离");
+    expect(ui.lastFrame()).not.toContain("nocturne/c1");
+    await pause(100);
+    ui.stdin.write("\u001B[B");
+    await pause(30);
+    ui.stdin.write("\r");
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain("其中的改动会丢失"));
+    await pause(100);
+    ui.stdin.write("\u001B[B");
+    await pause(30);
+    ui.stdin.write("\r");
+    await vi.waitFor(() =>
+      expect(deleteSubagentWorktree, ui.lastFrame()).toHaveBeenCalledWith({
+        parentSessionId: "p",
+        childSessionId: "c9",
+      }),
+    );
     ui.unmount();
   });
 });

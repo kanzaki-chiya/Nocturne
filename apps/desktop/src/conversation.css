@@ -1413,6 +1413,25 @@
 .conversation .subagent-result > summary .subagent-view {
   margin-left: auto;
 }
+/* 工作树结果的改动文件（ADR-0075 §7）：点文件名在面板里看 base..head 差异 */
+.conversation .subagent-files {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font: var(--fs-1)/20px var(--mono);
+}
+.conversation .subagent-file {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--a-text);
+  font: inherit;
+  cursor: pointer;
+}
+.conversation .subagent-file:hover,
+.conversation .subagent-file:focus-visible {
+  text-decoration: underline;
+}
 .conversation .ro-user-tag {
   flex: none;
   padding: 0 6px;

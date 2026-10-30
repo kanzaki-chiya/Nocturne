@@ -263,6 +263,9 @@ export interface OverviewSubagents {
   onOpen: (summary: SubagentSummary) => void;
   onCancel?: (summary: SubagentSummary) => void;
   cancelError?: string | undefined;
+  retained?: readonly { childSessionId: string; branch: string; files: number }[];
+  onDelete?: (id: string) => void;
+  isolated?: ReadonlySet<string>;
 }
 
 /** 每秒刷新的本地时钟：概览里的秒数靠它，不靠查询 */
@@ -307,7 +310,11 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
             <span className="ovpop-agent-text">
               <span className="ovpop-agent-profile">
                 {agent.profile}
-                {agent.background === true && <span className="ovpop-bg">后台</span>}
+                {agent.background === true && (
+                  <span className="ovpop-bg">
+                    {subagents.isolated?.has(agent.childSessionId) ? "后台 · 隔离" : "后台"}
+                  </span>
+                )}
               </span>
               <span className="ovpop-agent-summary">
                 {Array.from(agent.taskSummary).slice(0, SUBAGENT_SUMMARY_MAX).join("")}
@@ -335,6 +342,25 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
           </div>
         );
       })}
+      {(subagents.retained?.length ?? 0) > 0 && <div className="ovpop-head">保留的副本与分支</div>}
+      {subagents.retained?.map((record) => (
+        <div className="ovpop-agent-row ovpop-retained" key={record.childSessionId}>
+          <span className="ovpop-agent-text" title={record.branch}>
+            <span className="ovpop-agent-profile ovpop-branch">{record.branch}</span>
+            <span className="ovpop-agent-summary">改动 {record.files} 个文件</span>
+          </span>
+          <button
+            type="button"
+            className="ovpop-cancel"
+            aria-label={`删除副本与分支 ${record.branch}`}
+            onClick={() => {
+              subagents.onDelete?.(record.childSessionId);
+            }}
+          >
+            删除
+          </button>
+        </div>
+      ))}
       {external.map((run) => (
         // 外部 agent 的过程只在主对话的进度里，没有 Nocturne 子会话可看：不可点击
         <div key={run.callId} className="ovpop-agent external" title={run.summary}>
@@ -421,9 +447,9 @@ export function SessionOverview({
           )}
         </span>
       </button>
-      {subagents !== undefined && subagents.running.length + subagents.external.length > 0 && (
-        <SubagentRows subagents={subagents} />
-      )}
+      {subagents !== undefined &&
+        subagents.running.length + subagents.external.length + (subagents.retained?.length ?? 0) >
+          0 && <SubagentRows subagents={subagents} />}
     </div>
   );
 }

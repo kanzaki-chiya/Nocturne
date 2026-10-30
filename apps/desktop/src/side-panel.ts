@@ -41,6 +41,7 @@ export interface FileTab {
   endLine?: number | undefined;
   /** 每次定位递增：同一文件再点另一行时重新滚动 */
   focusNonce?: number | undefined;
+  diffText?: string | undefined;
 }
 
 /**

@@ -1303,6 +1303,15 @@
 .ovpop-agent-row > .ovpop-agent {
   flex: 1;
 }
+/* 保留的工作树副本与分支（ADR-0075 §7）：与运行项同一排版，只能删除 */
+.ovpop-retained > .ovpop-agent-text {
+  padding: 7px 10px;
+}
+.ovpop-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ovpop .ovpop-cancel {
   flex: none;
   padding: 4px 8px;

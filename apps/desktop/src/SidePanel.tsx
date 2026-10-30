@@ -1326,6 +1326,10 @@ export function SidePanel(props: SidePanelProps) {
                   openUrl={props.subagents.openUrl}
                 />
               )
+            ) : tab.diffText !== undefined ? (
+              <pre className="thin-scroll" style={{ overflow: "auto", padding: 16, margin: 0 }}>
+                {tab.diffText}
+              </pre>
             ) : (
               <FileView
                 tab={tab}

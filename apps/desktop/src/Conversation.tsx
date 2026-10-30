@@ -132,6 +132,7 @@ export interface ReadOnlyMode {
 export interface SubagentLinks {
   link: (entry: ToolEntry) => SubagentLink;
   open: (childSessionId: string) => void;
+  diff?: (childSessionId: string, file: string) => void;
 }
 
 export function isLiveSession(session: RpcSession | ReadOnlySessionRef): session is RpcSession {
@@ -1503,6 +1504,7 @@ const TOOL_META: Record<string, { icon: string; label: string }> = {
   edit: { icon: "E", label: "编辑" },
   write: { icon: "W", label: "写入" },
   apply_patch: { icon: "P", label: "应用补丁" },
+  apply_subagent_changes: { icon: "P", label: "并回子代理改动" },
   shell: { icon: "$", label: "命令" },
   web_fetch: { icon: "U", label: "读取网页" },
   web_search: { icon: "Q", label: "网页搜索" },
@@ -1577,6 +1579,14 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
       return plain(input === undefined ? "" : text(input.url));
     case "web_search":
       return plain(input === undefined ? "" : text(input.query));
+    case "apply_subagent_changes": {
+      // ADR-0075 §7：行头「并回子代理改动 · N 个文件」，冲突时「有冲突 · N 个文件」
+      const output = entry.result?.output as { files?: unknown; conflicts?: unknown } | undefined;
+      if (output === undefined) return plain("");
+      const conflicts = Array.isArray(output.conflicts) ? output.conflicts.length : 0;
+      const files = Array.isArray(output.files) ? output.files.length : 0;
+      return plain(conflicts > 0 ? `有冲突 · ${conflicts} 个文件` : `${files} 个文件`);
+    }
     case "mcp_search": {
       const q = input === undefined ? "" : text(input.query);
       const srv = input === undefined ? "" : text(input.server);
@@ -2322,7 +2332,9 @@ function ToolRow({
   const backgroundStatus = backgroundToolStatus(entry, useContext(BackgroundEntriesContext));
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
-  const diffs = entry.status === "ok" ? fileDiffs(entry, cwd) : [];
+  // 并回的 output.files 只是清单（无 diff）：改动由下方变更卡片展示，行头保持「N 个文件」
+  const diffs =
+    entry.status === "ok" && shownName !== "apply_subagent_changes" ? fileDiffs(entry, cwd) : [];
   const asked = running && waiting;
   const status = preparing ? (
     <span className="tool-res">接收参数中</span>
@@ -2615,8 +2627,41 @@ function EntryView({
                 </button>
               )}
             </summary>
+            {subagent.changes && (
+              <ul className="subagent-files">
+                {subagent.changes.files.map((file) => (
+                  <li key={file.path}>
+                    {subagentLinks?.diff ? (
+                      <button
+                        type="button"
+                        className="subagent-file"
+                        onClick={() => {
+                          subagentLinks.diff?.(subagent.childSessionId, file.path);
+                        }}
+                      >
+                        {file.path}
+                      </button>
+                    ) : (
+                      file.path
+                    )}
+                    {file.additions !== undefined && (
+                      <>
+                        {" "}
+                        <span className="diff-add">+{file.additions}</span>
+                        {(file.deletions ?? 0) > 0 && (
+                          <>
+                            {" "}
+                            <span className="diff-del">−{file.deletions}</span>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
             <Markdown
-              text={subagentResultText(userText(entry))}
+              text={subagentResultText(userText(entry), subagent.changes !== undefined)}
               openUrl={openUrl}
               fileLinks={fileLinks}
             />

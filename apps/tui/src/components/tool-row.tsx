@@ -27,6 +27,7 @@ import type { LiveTool, ToolEntry, ViewEntry } from "@nocturne/core/protocol";
 import {
   todoItemsFromCompletion,
   subagentRowInfo,
+  subagentApplyLine,
   backgroundToolStatus,
 } from "@nocturne/core/protocol";
 
@@ -116,7 +117,10 @@ export function ToolRow({
     Math.max(10, width - 24),
     g.ellipsis,
   );
-  const head = ` ${name}${subagentModel(entry)} ${summary}`;
+  const head =
+    name === "apply_subagent_changes" && entry.result
+      ? ` ${subagentApplyLine(entry.result.output)}`
+      : ` ${name}${subagentModel(entry)} ${summary}`;
   const duration = entry.result?.durationMs;
   const suffix =
     backgroundToolStatus(entry, entries) ??
