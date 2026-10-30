@@ -1095,6 +1095,35 @@ describe("Conversation 提问卡片", () => {
     );
   });
 
+  it("其他可附文件，切回预设选项清空附件", async () => {
+    const view = createSessionView();
+    view.pendingQuestion = question({
+      questions: [{ question: "选方案", options: [{ label: "A" }, { label: "B" }] }],
+    });
+    const { methods } = mount(view);
+    expect(screen.queryByRole("button", { name: "添加文件" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /其他/ }));
+    expect(screen.getByRole("button", { name: "添加文件" }).closest(".qfoot")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("回答附件"), {
+      target: { files: [new File(["x"], "other.log")] },
+    });
+    expect(await screen.findByRole("button", { name: "移除 other.log" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /A/ }));
+    expect(screen.queryByRole("button", { name: "添加文件" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /其他/ }));
+    expect(screen.queryByRole("button", { name: "移除 other.log" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("回答附件"), {
+      target: { files: [new File(["x"], "other.log")] },
+    });
+    await screen.findByRole("button", { name: "移除 other.log" });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    await waitFor(() =>
+      expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
+        answers: [{ selected: [], attachments: [expect.objectContaining({ label: "other.log" })] }],
+      }),
+    );
+  });
+
   it("请求失败显示服务端错误，新 requestId 清空旧答案", async () => {
     const view = createSessionView();
     view.pendingQuestion = question({ questions: [{ question: "说明" }] });

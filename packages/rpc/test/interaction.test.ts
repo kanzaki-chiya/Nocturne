@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeProvider, type FakeScript } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
@@ -112,6 +112,20 @@ describe("提问往返（ask_user）", () => {
     const requested = events.find((e) => e.type === "question.requested");
     if (requested?.type !== "question.requested") throw new Error("缺少提问请求");
     const { requestId } = requested.payload;
+    const send = h.clientTransport.send.bind(h.clientTransport);
+    const malformed = vi.spyOn(h.clientTransport, "send").mockImplementation((line) => {
+      const request = JSON.parse(line) as {
+        method?: string;
+        params?: { reply?: { answers: unknown[] } };
+      };
+      if (request.method === "session.respondQuestion" && request.params?.reply)
+        request.params.reply.answers = [null];
+      send(JSON.stringify(request));
+    });
+    await expect(
+      session.respondQuestion(requestId, { answers: [{ selected: [] }] }),
+    ).rejects.toMatchObject({ code: "invalid_reply", rpcCode: -32001 });
+    malformed.mockRestore();
 
     await expect(
       session.respondQuestion(requestId, { answers: [{ selected: ["不存在的选项"] }] }),

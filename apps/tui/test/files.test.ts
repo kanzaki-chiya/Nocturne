@@ -2,6 +2,21 @@ import { describe, expect, it } from "vitest";
 import { createFileStore, fileTokenAt, fileTokenBefore, LARGE_PASTE_BYTES } from "../src/files.js";
 
 describe("TUI 文件占位", () => {
+  it.each([
+    [10, "10 B"],
+    [1025, "2 KB"],
+    [1024 * 1024, "1.0 MB"],
+    [20 * 1024 * 1024, "20.0 MB"],
+  ] as const)("%i 字节显示 %s", (bytes, size) => {
+    expect(
+      createFileStore().add({
+        data: new Uint8Array(bytes),
+        mimeType: "x",
+        label: "a.bin",
+        source: "upload",
+      }),
+    ).toBe(`[File #1 a.bin ${size}]`);
+  });
   it("按 UTF-8 字节阈值转附件，历史回填还原原文", () => {
     const files = createFileStore();
     expect(files.addPaste("中".repeat(10_922))).toBeUndefined();

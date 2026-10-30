@@ -1636,7 +1636,7 @@ class Connection implements HubPeer {
           this.origin === "remote" &&
           attachment.bytes > remoteAttachmentLimit(this.remoteLimit)
         ) {
-          throw new RpcProtocolError("attachment_too_large", "图片过大，请在电脑上查看");
+          throw new RpcProtocolError("attachment_too_large", "附件过大，请在电脑上查看");
         }
         return {
           data: Buffer.from(attachment.data).toString("base64"),
@@ -1704,7 +1704,13 @@ class Connection implements HubPeer {
         const reply = reqObject(p, "reply") as unknown as QuestionReply;
         if (Array.isArray(reply.answers)) {
           for (const answer of reply.answers) {
-            if (!("declined" in answer) && answer.attachments !== undefined)
+            const value: unknown = answer;
+            if (
+              typeof value === "object" &&
+              value !== null &&
+              !("declined" in answer) &&
+              answer.attachments !== undefined
+            )
               answer.attachments = parseAttachments(answer.attachments);
           }
           if (
@@ -1712,7 +1718,7 @@ class Connection implements HubPeer {
             reply.answers.reduce(
               (sum, a) =>
                 sum +
-                ("declined" in a
+                (typeof (a as unknown) !== "object" || (a as unknown) === null || "declined" in a
                   ? 0
                   : (a.attachments ?? []).reduce((n, att) => n + att.data.byteLength, 0)),
               0,

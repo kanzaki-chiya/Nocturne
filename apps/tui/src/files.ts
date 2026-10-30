@@ -25,9 +25,11 @@ export function createFileStore() {
       const id = next++;
       files.set(id, file);
       const size =
-        file.data.byteLength < 1024
-          ? `${file.data.byteLength} B`
-          : `${Math.ceil(file.data.byteLength / 1024)} KB`;
+        file.data.byteLength >= 1024 * 1024
+          ? `${(file.data.byteLength / (1024 * 1024)).toFixed(1)} MB`
+          : file.data.byteLength >= 1024
+            ? `${Math.ceil(file.data.byteLength / 1024)} KB`
+            : `${file.data.byteLength} B`;
       return `[File #${id} ${file.label.replace(/[\]\r\n]/g, "_")} ${size}]`;
     },
     addPaste(text: string): string | undefined {

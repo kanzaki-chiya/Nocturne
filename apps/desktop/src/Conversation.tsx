@@ -2980,6 +2980,7 @@ export function QuestionCard({
   const cardRef = useRef<HTMLElement>(null);
   const otherRef = useRef<HTMLTextAreaElement | null>(null);
   const freeRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachmentInput = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(
@@ -3058,11 +3059,15 @@ export function QuestionCard({
     if (option === count) {
       // 「其他」行：点一次就地变成输入框；单选同时清掉已选
       if (current.other !== null) return;
-      const multi = currentQuestion.multiSelect === true;
       setDrafts((prev) =>
         prev.map((item, itemIndex) =>
           itemIndex === at
-            ? { ...item, declined: false, other: "", ...(multi ? {} : { selected: [] }) }
+            ? {
+                ...item,
+                declined: false,
+                other: "",
+                ...(currentQuestion.multiSelect ? {} : { selected: [] }),
+              }
             : item,
         ),
       );
@@ -3078,6 +3083,7 @@ export function QuestionCard({
           return {
             ...item,
             declined: false,
+            attachments: [],
             selected: on
               ? item.selected.filter((entry) => entry !== label)
               : [...item.selected, label],
@@ -3088,7 +3094,9 @@ export function QuestionCard({
     }
     setDrafts((prev) =>
       prev.map((item, itemIndex) =>
-        itemIndex === at ? { ...item, declined: false, selected: [label], other: null } : item,
+        itemIndex === at
+          ? { ...item, declined: false, selected: [label], other: null, attachments: [] }
+          : item,
       ),
     );
     // 单选选中即 200ms 后自动下一题；末题停留等提交
@@ -3215,6 +3223,37 @@ export function QuestionCard({
   const options = question.options ?? [];
   const otherOn = draft.other !== null;
   const total = options.length + 1;
+  const canAttach = options.length === 0 || (otherOn && draft.selected.length === 0);
+  const attachmentRow =
+    canAttach && (draft.attachments?.length ?? 0) > 0 ? (
+      <div className="qattachments">
+        {(draft.attachments ?? []).map((file, i) => (
+          <span className="fcard" key={i}>
+            <span className="ficon" aria-hidden="true">
+              {fileIconText(file.label ?? "")}
+            </span>
+            <span className="fname">{file.label}</span>
+            <span className="fsize">{formatBytes(file.data.byteLength)}</span>
+            <button
+              type="button"
+              aria-label={`移除 ${file.label}`}
+              disabled={busy}
+              onClick={() => {
+                setDrafts((prev) =>
+                  prev.map((item, at) =>
+                    at === index
+                      ? { ...item, attachments: item.attachments?.filter((_, n) => n !== i) ?? [] }
+                      : item,
+                  ),
+                );
+              }}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+    ) : null;
   return (
     <section className="qcard" aria-label="提问" aria-busy={busy} tabIndex={-1} ref={cardRef}>
       <div className="qhead">
@@ -3265,69 +3304,32 @@ export function QuestionCard({
           </div>
         ) : null}
       </div>
-      <div className="qbody">
+      <div
+        className="qbody"
+        onDragOver={(event) => {
+          if (canAttach) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (canAttach && !busy) {
+            event.preventDefault();
+            void addAnswerFiles(Array.from(event.dataTransfer.files));
+          }
+        }}
+        onPaste={(event) => {
+          const files = Array.from(event.clipboardData.files);
+          if (canAttach && !busy && files.length) {
+            event.preventDefault();
+            void addAnswerFiles(files);
+          }
+        }}
+      >
         <p className="qtext">{question.question}</p>
         {multi && options.length > 0 ? <p className="qsub">可多选</p> : null}
         {options.length === 0 ? (
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              void addAnswerFiles(Array.from(event.dataTransfer.files));
-            }}
-          >
-            <label className="secondary">
-              添加文件
-              <input
-                type="file"
-                multiple
-                hidden
-                aria-label="回答附件"
-                disabled={busy}
-                onChange={(event) => {
-                  void addAnswerFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }}
-              />
-            </label>
-            {(draft.attachments ?? []).map((file, i) => (
-              <span className="fcard" key={i}>
-                <span className="ficon" aria-hidden="true">
-                  {fileIconText(file.label ?? "")}
-                </span>
-                <span className="fname">{file.label}</span>
-                <span className="fsize">{formatBytes(file.data.byteLength)}</span>
-                <button
-                  type="button"
-                  aria-label={`移除 ${file.label}`}
-                  onClick={() => {
-                    setDrafts((prev) =>
-                      prev.map((item, at) =>
-                        at === index
-                          ? {
-                              ...item,
-                              attachments: item.attachments?.filter((_, n) => n !== i) ?? [],
-                            }
-                          : item,
-                      ),
-                    );
-                  }}
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
+          <div>
+            {attachmentRow}
             <textarea
               ref={freeRef}
-              onPaste={(event) => {
-                const files = Array.from(event.clipboardData.files);
-                if (files.length) {
-                  event.preventDefault();
-                  void addAnswerFiles(files);
-                }
-              }}
               className="free"
               rows={1}
               autoFocus
@@ -3391,6 +3393,7 @@ export function QuestionCard({
                   {total}
                 </span>
                 <span className="lab">
+                  {attachmentRow}
                   <textarea
                     ref={otherRef}
                     className="other-in"
@@ -3448,6 +3451,44 @@ export function QuestionCard({
         )}
       </div>
       <div className="qfoot">
+        {canAttach && (
+          <>
+            <input
+              ref={attachmentInput}
+              type="file"
+              multiple
+              hidden
+              aria-label="回答附件"
+              disabled={busy}
+              onChange={(event) => {
+                void addAnswerFiles(Array.from(event.target.files ?? []));
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="ib"
+              aria-label="添加文件"
+              title="添加文件"
+              disabled={busy}
+              onClick={() => attachmentInput.current?.click()}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5L13 2a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+              </svg>
+            </button>
+          </>
+        )}
         <button type="button" className="link" disabled={busy} onClick={toggleDecline}>
           {draft.declined ? "撤销拒绝回答" : "拒绝回答"}
         </button>

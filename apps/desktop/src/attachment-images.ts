@@ -6,7 +6,7 @@ export interface AttachmentImageSource {
   placeholder?: string;
   /**
    * 读取失败时在占位条里显示错误原文而不是文件名（手机：后台对远程超限返回
-   * 「图片过大，请在电脑上查看」）。桌面不设，保持只在悬停提示里给出错误。
+   * 「附件过大，请在电脑上查看」）。桌面不设，保持只在悬停提示里给出错误。
    */
   showErrors?: boolean;
   url: (attachment: ImageAttachment) => string | undefined;

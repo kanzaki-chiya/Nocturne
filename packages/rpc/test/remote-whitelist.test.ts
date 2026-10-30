@@ -331,7 +331,7 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     ).rejects.toMatchObject({ code: "attachment_too_large" });
     const tooLarge = b.readAttachment("img-2.png");
     await expect(tooLarge).rejects.toMatchObject({ code: "attachment_too_large" });
-    await expect(tooLarge).rejects.toThrow("图片过大，请在电脑上查看");
+    await expect(tooLarge).rejects.toThrow("附件过大，请在电脑上查看");
     expect((await a.readAttachment("img-2.png")).bytes).toBe(big.length);
     expect(await b.state()).toBeDefined();
     await h.client.shutdown();

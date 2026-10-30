@@ -61,10 +61,7 @@ function checkReply(questions: QuestionItem[], reply: unknown): AskUserReply | u
     const attachments = (raw as { attachments?: AttachmentInput[] }).attachments;
     if (
       attachments !== undefined &&
-      (!Array.isArray(attachments) ||
-        (question.options?.length ?? 0) > 0 ||
-        selected.length > 0 ||
-        validateAttachmentInputs(attachments))
+      (!Array.isArray(attachments) || selected.length > 0 || validateAttachmentInputs(attachments))
     )
       return undefined;
     normalized.push({

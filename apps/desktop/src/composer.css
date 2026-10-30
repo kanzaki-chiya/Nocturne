@@ -187,7 +187,8 @@
   padding: 4px 10px 10px;
 }
 
-.composer .ib {
+.composer .ib,
+.qfoot .ib {
   width: 26px;
   height: 26px;
   border-radius: var(--radius-pill);
@@ -200,7 +201,8 @@
 }
 
 .composer .ib:hover,
-.composer .ib.on {
+.composer .ib.on,
+.qfoot .ib:hover {
   color: var(--a-accent);
   border-color: var(--a-accent);
 }

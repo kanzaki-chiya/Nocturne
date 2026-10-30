@@ -129,10 +129,18 @@ describe("回答附件（ADR-0072）", () => {
     if (requested.type !== "question.requested") throw new Error("missing question");
     await expect(
       session.respondQuestion(requested.payload.requestId, {
-        answers: [{ selected: [], attachments: [{ data: new Uint8Array([1]), mimeType: "x" }] }],
+        answers: [{ selected: ["A"], attachments: [{ data: new Uint8Array([1]), mimeType: "x" }] }],
       }),
     ).rejects.toMatchObject({ code: "invalid_reply" });
-    await session.respondQuestion(requested.payload.requestId, { answers: [{ selected: ["A"] }] });
+    await session.respondQuestion(requested.payload.requestId, {
+      answers: [
+        {
+          selected: [],
+          text: "其他方案",
+          attachments: [{ data: new Uint8Array([1]), mimeType: "x", label: "other.bin" }],
+        },
+      ],
+    });
     await turn;
     await session.close();
   });

@@ -1259,6 +1259,16 @@
 .qcard .free:focus {
   border-color: var(--a-accent);
 }
+.qattachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.qfoot .ib {
+  display: grid;
+  place-items: center;
+}
 .qfoot {
   display: flex;
   flex-wrap: wrap;

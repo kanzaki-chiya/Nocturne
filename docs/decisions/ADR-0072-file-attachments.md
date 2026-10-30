@@ -72,7 +72,7 @@ type FileAttachment = {
 
 ### 6. 提问回答附文件
 
-- `respondQuestion` 每道题的回答增加可选 `attachments`（形状同 `submit.attachments`），只在可以自由回答的题里允许；只能选预设选项的题带附件报 `invalid_reply`。一组回答合计受第 4 节的数量与大小限制。
+- `respondQuestion` 每道题的回答增加可选 `attachments`（形状同 `submit.attachments`），没有选项的题，或有选项的题选择「其他」时可以带附件；选了预设选项又带附件报 `invalid_reply`。一组回答合计受第 4 节的数量与大小限制。
 - 图片走 `tool.completed.attachments`，文件走 `tool.completed.files`，`source` 分别为原值与 `"answer"`；`modelContent` 在该题回答之后列出引用说明。
 - 界面：自由回答区可添加文件、粘贴图片或文件；可以只发附件、不写文字。
 
@@ -94,3 +94,5 @@ type FileAttachment = {
 - **小文本文件直接内联**：省一步 `read`，但要定阈值、处理截断，前缀随文件变大；与 `@` 引用重复，不采用。用户想让模型直接看到内容时，粘贴原文或 `@` 引用工作区文件即可。
 - **把文件并入 `attachments` 字段（`type: "file"`）**：形状更统一，但旧版本会把它当图片处理，可能恢复失败；不采用。
 - **大段粘贴保留在正文、只在压缩时处理**：上下文占用问题依旧，不采用。
+
+修订（2026-10-30）：第 6 节明确「其他」属于自由回答，可附文件；预设选项与附件不能同时提交。
