@@ -3,7 +3,32 @@
  * 不显示 `<subagent-result>` 外壳。
  */
 import type { SubagentResult } from "./events.js";
-import type { ViewEntry } from "./view.js";
+import type { ViewEntry, ToolEntry } from "./view.js";
+
+export function subagentProfile(
+  input: { profile?: unknown; preset?: unknown } | undefined,
+): string {
+  return typeof input?.profile === "string"
+    ? input.profile
+    : typeof input?.preset === "string"
+      ? input.preset
+      : "default";
+}
+
+/** 启动回执不代表任务完成；有结果消息时以结果状态为准。 */
+export function backgroundToolStatus(
+  entry: ToolEntry,
+  entries: readonly ViewEntry[],
+): string | undefined {
+  const output = entry.result?.output as { background?: unknown } | undefined;
+  if (entry.name !== "task" || output?.background !== true) return undefined;
+  const result = entries.find(
+    (item) => item.kind === "user" && item.subagent?.callId === entry.callId,
+  );
+  return result?.kind === "user" && result.subagent
+    ? subagentResultStatus(result.subagent.status)
+    : "后台运行中";
+}
 
 /** 去掉给模型看的 `<subagent-result …>` 头尾，只留正文 */
 export function subagentResultText(text: string): string {
@@ -41,12 +66,13 @@ export function pendingBackgroundSubagents(
     const output = entry.result?.output as
       { background?: unknown; childSessionId?: unknown } | undefined;
     if (output?.background !== true || typeof output.childSessionId !== "string") return [];
-    const input = entry.input as { profile?: unknown; task?: unknown } | undefined;
+    const input = entry.input as
+      { profile?: unknown; preset?: unknown; task?: unknown } | undefined;
     return [
       {
         callId: entry.callId,
         childSessionId: output.childSessionId,
-        profile: typeof input?.profile === "string" ? input.profile : "default",
+        profile: subagentProfile(input),
         task: typeof input?.task === "string" ? input.task : "",
       },
     ];

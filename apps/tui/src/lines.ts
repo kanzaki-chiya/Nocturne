@@ -11,6 +11,7 @@ import {
   subagentRowInfo,
   subagentResultLine,
   subagentResultText,
+  backgroundToolStatus,
 } from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
@@ -134,6 +135,7 @@ function diffLines(
 }
 
 interface LayoutOptions {
+  entries?: readonly ViewEntry[];
   fullscreen?: boolean;
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   continued?: boolean;
@@ -366,10 +368,11 @@ function layoutEntryBody(
       const shownName = entry.target?.name ?? entry.name;
       const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
       const summary = summarizeToolInput(shownName, shownInput);
+      const status = backgroundToolStatus(entry, options.entries ?? []) ?? entry.status;
       const head =
         shownName === "mcp_search"
-          ? `${mark} 搜索 MCP 工具：${summary} ${entry.status}`
-          : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${entry.status}`;
+          ? `${mark} 搜索 MCP 工具：${summary} ${status}`
+          : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${status}`;
       const lines = [
         ...review,
         ...rows(
@@ -603,7 +606,11 @@ function block(key: string, revision: string, lines: (width: number) => LaidLine
  */
 export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   const theme = src.theme ?? palettes.dark;
-  const options = { fullscreen: src.fullscreen ?? true, reasoningExpanded: src.reasoningExpanded };
+  const options = {
+    fullscreen: src.fullscreen ?? true,
+    reasoningExpanded: src.reasoningExpanded,
+    entries: src.entries,
+  };
   const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
   const blocks: LineBlock[] = [
     block("welcome", src.welcome.map((line) => line.text).join("\n"), () => src.welcome),
@@ -653,7 +660,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   function entryBlock(entry: ViewEntry): LineBlock {
     const revision =
       entry.kind === "tool"
-        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}`
+        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${backgroundToolStatus(entry, src.entries) ?? ""}`
         : entry.kind === "assistant"
           ? `${entry.text.length}:${entry.reasoning.length}:${
               src.reasoning

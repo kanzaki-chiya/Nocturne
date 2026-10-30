@@ -23,8 +23,12 @@ import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
 import { SegmentText, TodoRows } from "./todo-panel.js";
 
-import type { LiveTool, ToolEntry } from "@nocturne/core/protocol";
-import { todoItemsFromCompletion, subagentRowInfo } from "@nocturne/core/protocol";
+import type { LiveTool, ToolEntry, ViewEntry } from "@nocturne/core/protocol";
+import {
+  todoItemsFromCompletion,
+  subagentRowInfo,
+  backgroundToolStatus,
+} from "@nocturne/core/protocol";
 
 const LIVE_TAIL = 3;
 const RESULT_TAIL = 5;
@@ -75,7 +79,15 @@ function diffsOf(entry: ToolEntry): ToolFileDiff[] | undefined {
   return toolFileDiffs(entry.status, entry.result?.output, entry.input);
 }
 
-export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): React.JSX.Element {
+export function ToolRow({
+  entry,
+  width,
+  entries = [],
+}: {
+  entry: ToolEntry;
+  width: number;
+  entries?: readonly ViewEntry[];
+}): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
   const g = glyphs(env);
@@ -107,11 +119,12 @@ export function ToolRow({ entry, width }: { entry: ToolEntry; width: number }): 
   const head = ` ${name}${subagentModel(entry)} ${summary}`;
   const duration = entry.result?.durationMs;
   const suffix =
-    entry.status === "awaiting_permission"
+    backgroundToolStatus(entry, entries) ??
+    (entry.status === "awaiting_permission"
       ? ` ${b.word}`
       : entry.status === "running"
         ? ""
-        : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd();
+        : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd());
   const todos =
     entry.result === undefined
       ? undefined

@@ -166,7 +166,9 @@ export function EntryRow({
   width,
   reasoning,
   now,
+  entries = [],
 }: {
+  entries?: readonly ViewEntry[];
   entry: TranscriptItem;
   width: number;
   reasoning?: ReasoningMap | undefined;
@@ -180,7 +182,7 @@ export function EntryRow({
     case "tool":
       return (
         <Box flexDirection="column">
-          <ToolRow entry={entry} width={width} />
+          <ToolRow entry={entry} width={width} entries={entries} />
           {(entry.descriptions ?? []).map((description) => (
             <Text
               key={`description:${description.attachmentRef.index}`}

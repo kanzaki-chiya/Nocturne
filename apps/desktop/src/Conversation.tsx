@@ -63,6 +63,7 @@ import {
   subagentRowInfo,
   subagentResultText,
   subagentResultLine,
+  backgroundToolStatus,
   splitCodeRef,
   type PendingPermission,
   type ImageAttachment,
@@ -778,6 +779,7 @@ const ThinkScrollContext = createContext<ThinkScroll>({
 
 /** 只读且日志未收束：工具行停止转圈与计时（ReadOnlyMode.frozen） */
 const FrozenContext = createContext(false);
+const BackgroundEntriesContext = createContext<readonly ViewEntry[]>([]);
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
 
 function durationText(seconds: number): string {
@@ -2317,6 +2319,7 @@ function ToolRow({
   const links = useContext(SubagentLinksContext);
   const subagentLink = links !== null && !preparing ? links.link(entry) : undefined;
   const result = toolResultText(entry);
+  const backgroundStatus = backgroundToolStatus(entry, useContext(BackgroundEntriesContext));
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
   const diffs = entry.status === "ok" ? fileDiffs(entry, cwd) : [];
@@ -2349,7 +2352,8 @@ function ToolRow({
               : ""
           }`}
         >
-          {frozen ? "未收束" : error === undefined ? result.text : toolErrorSummary(entry, cwd)}
+          {backgroundStatus ??
+            (frozen ? "未收束" : error === undefined ? result.text : toolErrorSummary(entry, cwd))}
         </span>
       )}
     </>
@@ -2597,18 +2601,20 @@ function EntryView({
                 {subagentResultLine(subagent)}
                 {subagent.durationMs !== undefined && ` · ${elapsedText(subagent.durationMs)}`}
               </span>
+              {subagentLinks && (
+                <button
+                  type="button"
+                  className="subagent-view"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    subagentLinks.open(subagent.childSessionId);
+                  }}
+                >
+                  在面板中查看
+                </button>
+              )}
             </summary>
-            {subagentLinks && (
-              <button
-                type="button"
-                className="subagent-view"
-                onClick={() => {
-                  subagentLinks.open(subagent.childSessionId);
-                }}
-              >
-                在面板中查看
-              </button>
-            )}
             <Markdown
               text={subagentResultText(userText(entry))}
               openUrl={openUrl}
@@ -3923,7 +3929,9 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   return (
     <FrozenContext.Provider value={readOnly?.frozen === true}>
       <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
-        <ConversationContent key={props.session.id} {...props} />
+        <BackgroundEntriesContext.Provider value={props.view.entries}>
+          <ConversationContent key={props.session.id} {...props} />
+        </BackgroundEntriesContext.Provider>
       </SubagentLinksContext.Provider>
     </FrozenContext.Provider>
   );

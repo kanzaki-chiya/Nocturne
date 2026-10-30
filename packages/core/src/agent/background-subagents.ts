@@ -4,6 +4,7 @@
  */
 import {
   effectiveEvents,
+  subagentProfile,
   type DurableEvent,
   type PreparedInput,
   type SubagentResult,
@@ -155,10 +156,11 @@ export class BackgroundSubagents {
       if (event.type === "message.user" && event.payload.subagent !== undefined)
         delivered.add(event.payload.subagent.callId);
       if (event.type === "tool.started" && event.payload.name === "task") {
-        const input = event.payload.input as { profile?: unknown } | undefined;
         profiles.set(
           event.payload.callId,
-          typeof input?.profile === "string" ? input.profile : "default",
+          subagentProfile(
+            event.payload.input as { profile?: unknown; preset?: unknown } | undefined,
+          ),
         );
       }
     }
@@ -181,7 +183,7 @@ export class BackgroundSubagents {
             status: "interrupted",
             profile: profiles.get(event.payload.callId) ?? "default",
           },
-          "Background subagent was interrupted by a process restart; it produced no result.",
+          "Background subagent did not deliver its result before Nocturne restarted. It may have been interrupted, or its result was still waiting to be sent. Re-run it if the result is still needed.",
         ),
       ];
     });

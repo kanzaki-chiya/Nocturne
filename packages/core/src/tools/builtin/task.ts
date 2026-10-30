@@ -253,7 +253,9 @@ export function createTaskTool(
         {
           task: input.task,
           ...(input.background === true ? { background: true } : {}),
-          profile: input.profile ?? input.agent ?? "default",
+          ...(input.profile !== undefined || input.agent !== undefined
+            ? { profile: input.profile ?? input.agent }
+            : {}),
           ...(input.reason !== undefined
             ? { reason: Array.from(input.reason).slice(0, 200).join("") }
             : {}),

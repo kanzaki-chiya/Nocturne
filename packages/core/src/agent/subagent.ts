@@ -6,6 +6,7 @@ import type { ReviewInputSources, SecurityReviewer } from "../permission/index.j
  * 父子关联写在 session.created.parent；取消/超时经共享 AbortSignal
  * 传播；父侧恰好一个 tool.completed 由执行器不变量保证。
  */
+import { subagentProfile } from "../protocol/index.js";
 import type {
   Diagnostics,
   HistoryEntry,
@@ -384,7 +385,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             child,
             parentSessionId: ctx.sessionId,
             callId: ctx.callId,
-            profile: request.profile ?? "default",
+            profile: subagentProfile(request),
             taskSummary: summarizeSubagentTask(request.task),
             background: request.background === true,
           });
@@ -708,7 +709,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               parentSessionId: ctx.sessionId,
               childSessionId: child.id,
               callId: ctx.callId,
-              profile: request.profile ?? "default",
+              profile: subagentProfile(request),
               controller: cancellation,
             },
             async () => {

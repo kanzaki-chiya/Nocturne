@@ -3160,7 +3160,9 @@ function SessionApp({
         prefix.length,
         pendingLines.filter((line) => line.after < view.entries.length),
         (entry) => [
-          layoutEntry(entry, width, env.ascii, reasoning, reasoningNow, false, false, theme),
+          layoutEntry(entry, width, env.ascii, reasoning, reasoningNow, false, false, theme, {
+            entries: view.entries,
+          }),
         ],
         clientRows,
       ).flat(),

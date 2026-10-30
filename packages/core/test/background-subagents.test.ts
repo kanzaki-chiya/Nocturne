@@ -198,7 +198,7 @@ describe("启动与交付", () => {
       expect(result?.payload.subagent).toMatchObject({
         callId: completed?.payload.callId,
         status: "ok",
-        profile: "default",
+        profile: "explore",
       });
       expect(result?.payload.steer).toBeUndefined();
       const text = JSON.stringify(result?.payload.content);
@@ -405,7 +405,11 @@ describe("生命周期", () => {
       expect(results(resumed)[0]?.payload.subagent).toMatchObject({
         callId: taskCompleted(resumed)[0]?.payload.callId,
         status: "interrupted",
+        profile: "explore",
       });
+      expect(JSON.stringify(results(resumed)[0]?.payload.content)).toContain(
+        "Background subagent did not deliver its result before Nocturne restarted. It may have been interrupted, or its result was still waiting to be sent. Re-run it if the result is still needed.",
+      );
     } finally {
       await resumed.close();
     }

@@ -4,7 +4,12 @@ import { render } from "ink-testing-library";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Runtime } from "@nocturne/core";
-import { createSessionView, type SubagentSummary, type UserEntry } from "@nocturne/core/protocol";
+import {
+  createSessionView,
+  type SubagentSummary,
+  type UserEntry,
+  type ToolEntry,
+} from "@nocturne/core/protocol";
 
 import { PendingInputsPanel, pendingPanelRows } from "../src/components/pending-inputs.js";
 import { StatusBar } from "../src/components/status-bar.js";
@@ -33,6 +38,28 @@ const resultEntry: UserEntry = {
 } as unknown as UserEntry;
 
 describe("TUI 后台子代理", () => {
+  it("启动行运行中与最终结果状态一致", () => {
+    const entry = {
+      kind: "tool",
+      key: "t1",
+      callId: "t1",
+      name: "task",
+      status: "ok",
+      input: { preset: "explore", background: true },
+      liveOutput: "",
+      result: { output: { background: true }, modelContent: "started" },
+    } as unknown as ToolEntry;
+    expect(
+      layoutEntry(entry, 100, false)
+        .map((line) => line.text)
+        .join("\n"),
+    ).toContain("后台运行中");
+    const lines = layoutEntry(entry, 100, false, undefined, undefined, false, false, undefined, {
+      entries: [entry, resultEntry],
+    });
+    expect(lines.map((line) => line.text).join("\n")).toContain("完成");
+    expect(lines.map((line) => line.text).join("\n")).not.toContain("后台运行中");
+  });
   it("状态栏：运行中的后台数大于 0 才显示", () => {
     const view = createSessionView();
     view.config.model = { provider: "fake", model: "m" };

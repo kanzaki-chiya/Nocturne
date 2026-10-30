@@ -1410,6 +1410,9 @@
 .conversation .ro-user > summary::-webkit-details-marker {
   display: none;
 }
+.conversation .subagent-result > summary .subagent-view {
+  margin-left: auto;
+}
 .conversation .ro-user-tag {
   flex: none;
   padding: 0 6px;

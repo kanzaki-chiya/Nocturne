@@ -104,7 +104,10 @@ describe("结果卡片", () => {
     );
     const card = container.querySelector("details.subagent-result");
     expect(card).not.toBeNull();
-    expect(card?.querySelector("summary")?.textContent).toBe("子代理结果quick · 完成 · 1 分 5 秒");
+    expect(card?.querySelector("summary")?.textContent).toBe(
+      "子代理结果quick · 完成 · 1 分 5 秒在面板中查看",
+    );
+    expect(card?.querySelector("summary .subagent-view")).not.toBeNull();
     expect(container.textContent).not.toContain("subagent-result");
     expect(container.querySelector(".u-bubble")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "在面板中查看" }));
@@ -135,8 +138,44 @@ describe("结果卡片", () => {
         durationMs: 5,
       },
     } as ToolEntry;
+    const view = createSessionView();
+    view.entries = [started];
+    const props = {
+      view,
+      session: { id: "parent-1" } as unknown as RpcSession,
+      openUrl: vi.fn(),
+      cwd: "Z:/project",
+      subscribeEvents: () => () => undefined,
+      images: createAttachmentImageSource(),
+      busy: false,
+      onResubmit: vi.fn(async () => undefined),
+    };
+    const ui = render(<Conversation {...props} />);
+    expect(ui.container.querySelector(".tool-res")?.textContent).toBe("后台运行中");
+    ui.rerender(<Conversation {...props} view={{ ...view, entries: [started, resultEntry] }} />);
+    expect(ui.container.querySelector(".tool-res")?.textContent).toBe("完成");
+    for (const [status, label] of [
+      ["error", "失败"],
+      ["timeout", "超时"],
+      ["cancelled", "已取消"],
+      ["interrupted", "已中断"],
+    ] as const) {
+      ui.rerender(
+        <Conversation
+          {...props}
+          view={{
+            ...view,
+            entries: [
+              started,
+              { ...resultEntry, subagent: { childSessionId: "child-1", callId: "call-1", status } },
+            ],
+          }}
+        />,
+      );
+      expect(ui.container.querySelector(".tool-res")?.textContent).toBe(label);
+    }
     expect(pendingBackgroundSubagents([started])).toEqual([
-      { callId: "call-1", childSessionId: "child-1", profile: "default", task: "查找调用方" },
+      { callId: "call-1", childSessionId: "child-1", profile: "explore", task: "查找调用方" },
     ]);
     expect(pendingBackgroundSubagents([started, resultEntry])).toEqual([]);
   });
