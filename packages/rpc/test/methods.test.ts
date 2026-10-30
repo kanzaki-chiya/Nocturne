@@ -361,6 +361,31 @@ describe("session.* 方法映射", () => {
     await h.served;
   });
 
+  it("任意文件附件 base64 往返，引用内容可读", async () => {
+    const h = await connect({ scripts: [textScript("收到")] });
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    const events: RuntimeEvent[] = [];
+    await session.subscribe((e) => events.push(e));
+    const data = new TextEncoder().encode("rpc file\n");
+    await session.submit({
+      attachments: [{ data, mimeType: "text/plain", label: "a.txt", source: "paste" }],
+    });
+    const event = events.find((e) => e.type === "message.user");
+    expect(event?.type === "message.user" && event.payload.files?.[0]).toMatchObject({
+      label: "a.txt",
+      source: "paste",
+      file: "file-1.txt",
+    });
+    expect(await session.readAttachment("file-1.txt")).toEqual({
+      data,
+      mimeType: "text/plain",
+      bytes: data.length,
+    });
+    await session.close();
+    h.client.close();
+    await h.served;
+  });
+
   it("图片附件以 base64 传输，Core 校验后落盘", async () => {
     const h = await connect({ scripts: [textScript("看到了")] });
     const { session } = await h.client.runtime.createSession({ model: MODEL });

@@ -1647,6 +1647,12 @@ class Connection implements HubPeer {
       "session.submit": async (p) => {
         const { session } = this.session(p);
         const input = parseSubmitInput(p);
+        if (
+          this.origin === "remote" &&
+          (input.attachments ?? []).reduce((sum, a) => sum + a.data.byteLength, 0) >
+            remoteAttachmentLimit(this.remoteLimit)
+        )
+          throw new RpcProtocolError("attachment_too_large", "附件过大");
         return await this.hub.operate(session, () => session.submit(input));
       },
       "session.enqueueInput": async (p) => {
@@ -1655,6 +1661,12 @@ class Connection implements HubPeer {
         if (mode !== "steer" && mode !== "queue")
           throw new InvalidParamsError("mode 只能是 steer 或 queue");
         const input = parseSubmitInput(p);
+        if (
+          this.origin === "remote" &&
+          (input.attachments ?? []).reduce((sum, a) => sum + a.data.byteLength, 0) >
+            remoteAttachmentLimit(this.remoteLimit)
+        )
+          throw new RpcProtocolError("attachment_too_large", "附件过大");
         return await this.hub.operate(session, () => session.enqueueInput(mode, input));
       },
       "session.updateInput": async (p) => {
@@ -1689,10 +1701,26 @@ class Connection implements HubPeer {
         return null;
       },
       "session.respondQuestion": async (p) => {
-        await this.session(p).session.respondQuestion(
-          reqString(p, "requestId"),
-          reqObject(p, "reply") as unknown as QuestionReply,
-        );
+        const reply = reqObject(p, "reply") as unknown as QuestionReply;
+        if (Array.isArray(reply.answers)) {
+          for (const answer of reply.answers) {
+            if (!("declined" in answer) && answer.attachments !== undefined)
+              answer.attachments = parseAttachments(answer.attachments);
+          }
+          if (
+            this.origin === "remote" &&
+            reply.answers.reduce(
+              (sum, a) =>
+                sum +
+                ("declined" in a
+                  ? 0
+                  : (a.attachments ?? []).reduce((n, att) => n + att.data.byteLength, 0)),
+              0,
+            ) > remoteAttachmentLimit(this.remoteLimit)
+          )
+            throw new RpcProtocolError("attachment_too_large", "附件过大");
+        }
+        await this.session(p).session.respondQuestion(reqString(p, "requestId"), reply);
         return null;
       },
       "session.setModel": async (p) => {
@@ -1935,8 +1963,9 @@ function parseAttachments(value: unknown): NonNullable<SubmitInput["attachments"
     }
     return {
       data: decodeBase64(o.data, `attachments[${i}].data`),
-      mimeType: o.mimeType as WireAttachment["mimeType"],
+      mimeType: o.mimeType,
       ...(o.label !== undefined ? { label: o.label } : {}),
+      ...(o.source !== undefined ? { source: o.source as "paste" | "upload" | "answer" } : {}),
     };
   });
 }

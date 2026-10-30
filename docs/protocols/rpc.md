@@ -83,11 +83,13 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
 | `close` | → `null`；释放本连接对会话的引用与订阅，最后引用且空闲时才刷盘、释放会话锁，其余会话不受影响 |
 
-`submit.attachments` 是 `[{ data: base64, mimeType, label? }]`；解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
+`submit` / `enqueueInput` 的 `attachments` 是 `[{ data: base64, mimeType: string, label?, source?: "paste" | "upload" | "answer" }]`，任意 MIME 接受；合格图片沿用图片通道，其余包括不合格图片存为 `files`（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）。单个 20 MiB、合计至多 10 个，Core 超限报 `invalid_command`。`respondQuestion.reply.answers[i].attachments` 形状相同，仅自由回答可附文件，可只附文件；不合规报 `invalid_reply`。一组回答合计限额同提交。远程三个入口统一检查附件原始字节合计不超过 `remoteAttachmentLimit`（`floor(REMOTE_MESSAGE_LIMIT * 3 / 4) - 1024`），超限报 `attachment_too_large`。
+
+解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
 
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
-`readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` 或 `tool.completed.attachments`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
+`readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` / `files` 或 `tool.completed.attachments` / `files`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 
 附件错误以 `SessionError`（`-32002`）返回：`invalid_attachment_file`（非法文件名或链接路径）、`attachment_not_found`（本会话未登记）、`attachment_missing`（文件缺失）、`attachment_corrupt`（大小或 sha256 不符）、`attachment_read_failed`（其他文件读取 I/O 错误，如访问被拒绝）。
 

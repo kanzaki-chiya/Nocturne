@@ -532,6 +532,7 @@ function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
     data: encodeBase64(a.data),
     mimeType: a.mimeType,
     ...(a.label !== undefined ? { label: a.label } : {}),
+    ...(a.source !== undefined ? { source: a.source } : {}),
   }));
   return {
     ...(input.skill !== undefined ? { skill: input.skill } : {}),
@@ -769,7 +770,26 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         await call("session.respondPermission", { ...p, requestId, reply });
       },
       respondQuestion: async (requestId, reply) => {
-        await call("session.respondQuestion", { ...p, requestId, reply });
+        await call("session.respondQuestion", {
+          ...p,
+          requestId,
+          reply: {
+            answers: reply.answers.map((a) =>
+              "declined" in a
+                ? a
+                : {
+                    selected: a.selected,
+                    ...(a.text !== undefined ? { text: a.text } : {}),
+                    ...(a.attachments !== undefined
+                      ? {
+                          attachments:
+                            wireSubmitInput({ attachments: a.attachments }).attachments ?? [],
+                        }
+                      : {}),
+                  },
+            ),
+          },
+        });
       },
       setModel: async (model) => {
         await call("session.setModel", { ...p, model });

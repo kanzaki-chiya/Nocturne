@@ -29,7 +29,6 @@ import type {
   FileIndexEntry,
   FileRefResolution,
   LocalFileContent,
-  ImageMimeType,
   JevEndpoint,
   JevReviewerConfig,
   ReviewerSampleInfo,
@@ -51,7 +50,6 @@ import type {
   UpdateSetupProviderPatch,
   UpdateSetupProviderResult,
   UpstreamModelEntry,
-  QuestionReply,
   ReasoningEffort,
   RewindMode,
   RewindTarget,
@@ -115,8 +113,9 @@ export type ContextSummary = Omit<BuiltContext, "request">;
 export interface WireAttachment {
   /** base64（标准字母表，带填充） */
   data: string;
-  mimeType: ImageMimeType;
+  mimeType: string;
   label?: string;
+  source?: "paste" | "upload" | "answer";
 }
 
 /** `runtime.readFile` 的线上形状：图片的 `data` 是 base64 字符串 */
@@ -517,7 +516,7 @@ export interface RpcMethods {
   "subagent.list": { params: { parentSessionId: string }; result: SubagentSummary[] };
   "subagent.readAttachment": {
     params: { parentSessionId: string; childSessionId: string; file: string };
-    result: { data: string; mimeType: ImageMimeType; bytes: number };
+    result: { data: string; mimeType: string; bytes: number };
   };
   "subagent.subscribe": {
     params: {
@@ -539,7 +538,7 @@ export interface RpcMethods {
   "session.unsubscribe": { params: SessionParams; result: null };
   "session.readAttachment": {
     params: SessionParams & { file: string };
-    result: { data: string; mimeType: ImageMimeType; bytes: number };
+    result: { data: string; mimeType: string; bytes: number };
   };
   "session.submit": {
     params: SessionParams & WireSubmitFields;
@@ -580,7 +579,14 @@ export interface RpcMethods {
     result: null;
   };
   "session.respondQuestion": {
-    params: SessionParams & { requestId: string; reply: QuestionReply };
+    params: SessionParams & {
+      requestId: string;
+      reply: {
+        answers: (
+          { declined: true } | { selected: string[]; text?: string; attachments?: WireAttachment[] }
+        )[];
+      };
+    };
     result: null;
   };
   "session.setModel": { params: SessionParams & { model: string | ModelRef }; result: null };

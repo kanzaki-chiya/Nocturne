@@ -314,6 +314,21 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
       ],
     });
     expect((await b.readAttachment("img-1.png")).bytes).toBe(PNG_2x3.length);
+    await expect(
+      b.submit({
+        attachments: [{ data: big, mimeType: "application/octet-stream", label: "large.bin" }],
+      }),
+    ).rejects.toMatchObject({ code: "attachment_too_large" });
+    await expect(
+      b.enqueueInput("queue", {
+        attachments: [{ data: big, mimeType: "text/plain", label: "large.txt" }],
+      }),
+    ).rejects.toMatchObject({ code: "attachment_too_large" });
+    await expect(
+      b.respondQuestion("unused", {
+        answers: [{ selected: [], attachments: [{ data: big, mimeType: "text/plain" }] }],
+      }),
+    ).rejects.toMatchObject({ code: "attachment_too_large" });
     const tooLarge = b.readAttachment("img-2.png");
     await expect(tooLarge).rejects.toMatchObject({ code: "attachment_too_large" });
     await expect(tooLarge).rejects.toThrow("图片过大，请在电脑上查看");
