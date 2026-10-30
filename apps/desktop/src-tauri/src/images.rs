@@ -22,7 +22,7 @@ pub fn encode_records(records: &[(String, Vec<u8>)]) -> Vec<u8> {
 }
 
 #[tauri::command]
-pub async fn pick_images(
+pub async fn pick_files(
     app: tauri::AppHandle,
     window: tauri::Window,
 ) -> Result<tauri::ipc::Response, CommandError> {
@@ -30,7 +30,6 @@ pub async fn pick_images(
         app.dialog()
             .file()
             .set_parent(&window)
-            .add_filter("图片", &["png", "jpg", "jpeg", "gif", "webp"])
             .blocking_pick_files()
     })
     .await

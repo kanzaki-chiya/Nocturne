@@ -12,7 +12,6 @@ import {
   REENCODE_MAX_EDGE,
   SUBMIT_MESSAGE_LIMIT,
   type ImageCodec,
-  type PhoneImage,
 } from "../src/web/phone-images";
 
 let root: Root | undefined;
@@ -179,15 +178,7 @@ it("权限底栏附会话授权段", async () => {
 
 it("图片附件随消息发出，报文超限时不发送并提示", async () => {
   const onSubmit = vi.fn((_input: ComposerSubmit) => Promise.resolve(true));
-  let next = 1000;
-  const prepareImage = (file: File): Promise<PhoneImage> =>
-    Promise.resolve({
-      name: file.name,
-      data: new Uint8Array(next),
-      mimeType: "image/jpeg",
-      width: 10,
-      height: 10,
-    });
+
   await act(async () => {
     root?.render(
       <PhoneComposer
@@ -197,12 +188,11 @@ it("图片附件随消息发出，报文超限时不发送并提示", async () =
         onSubmit={onSubmit}
         onInterrupt={vi.fn()}
         onSlash={vi.fn()}
-        prepareImage={prepareImage}
         getVisionHint={() => Promise.resolve("当前模型不支持图片")}
       />,
     );
   });
-  await act(() => button("添加图片").click());
+  await act(() => button("添加文件").click());
   expect(container.textContent).toContain("拍照");
   expect(container.textContent).toContain("选择图片");
   await pick([new File(["x"], "a.jpg", { type: "image/jpeg" })]);
@@ -223,8 +213,8 @@ it("图片附件随消息发出，报文超限时不发送并提示", async () =
   });
 
   // 三张约 5 MB 的图片：base64 后超过远程单条上限
-  next = Math.floor((SUBMIT_MESSAGE_LIMIT / 3) * 0.8);
-  await pick([1, 2, 3].map((i) => new File(["x"], `${i}.jpg`, { type: "image/jpeg" })));
+  const bytes = new Uint8Array(Math.floor((SUBMIT_MESSAGE_LIMIT / 3) * 0.8));
+  await pick([1, 2, 3].map((i) => new File([bytes], `${i}.jpg`, { type: "image/jpeg" })));
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("超过远程连接单条上限");
   expect(button("发送").disabled).toBe(true);
   await act(() => button("移除 3.jpg").click());
@@ -255,9 +245,9 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
       );
     });
   await render(null);
-  await act(() => button("添加图片").click());
+  await act(() => button("添加文件").click());
   expect(button("引用文件").disabled).toBe(true);
-  await act(() => button("添加图片").click());
+  await act(() => button("添加文件").click());
 
   await render({ load, key: 1 });
   await setText("看 @mai");

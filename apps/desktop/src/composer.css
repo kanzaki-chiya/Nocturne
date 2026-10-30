@@ -77,6 +77,32 @@
   display: block;
 }
 
+.composer .thumb2 .ficon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-1);
+  background: var(--a-border);
+  color: var(--a-secondary);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.composer .thumb2 .fname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer .thumb2 .fsize {
+  flex: none;
+  color: var(--a-muted);
+}
+
 .composer .thumb2 .x {
   margin-left: 2px;
   background: none;

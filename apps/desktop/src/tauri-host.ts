@@ -99,7 +99,7 @@ export function createTauriHost(): DesktopHost {
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
     async pickImages() {
-      return decodePickedImages(await invoke<ArrayBuffer>("pick_images"));
+      return decodePickedImages(await invoke<ArrayBuffer>("pick_files"));
     },
     async homeDir() {
       try {

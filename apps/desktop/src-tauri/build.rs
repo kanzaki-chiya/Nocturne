@@ -13,7 +13,7 @@ fn main() {
             "shell_log",
             "key_diag_push",
             "key_diag_log",
-            "pick_images",
+            "pick_files",
             "open_skill_directory",
             "detect_editors",
             "open_in_editor",

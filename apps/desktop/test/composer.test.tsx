@@ -123,7 +123,7 @@ describe("Composer 文本与历史", () => {
     await act(async () => undefined);
     const field = input("提问前草稿");
     fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加图片/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
     await screen.findByText("draft.png");
     const image = rendered.container.querySelector(".thumb2 img");
     rendered.rerender(<Composer {...properties} hidden />);
@@ -271,7 +271,7 @@ describe("Composer 文本与历史", () => {
     render(<Composer {...props({ onSubmit, recordInputHistory, pickImages })} />);
     const field = input("保留这条消息");
     fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加图片/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
     expect(await screen.findByText("a.png")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => {
@@ -492,6 +492,29 @@ describe("Composer 斜杠命令", () => {
 });
 
 describe("Composer 控件与附件", () => {
+  it("32 KiB 粘贴转文件，CtrlShiftV 保留原文路径", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(<Composer {...props({ onSubmit })} />);
+    const field = input("");
+    const text = "x".repeat(32768);
+    fireEvent.paste(field, { clipboardData: { items: [], getData: () => text } });
+    expect(await screen.findByText("pasted-1.txt")).toBeTruthy();
+    expect(field.value).toBe("");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "",
+          attachments: [expect.objectContaining({ label: "pasted-1.txt", source: "paste" })],
+        }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByText("pasted-1.txt")).toBeNull());
+    fireEvent.keyDown(field, { key: "V", ctrlKey: true, shiftKey: true });
+    const allowed = fireEvent.paste(field, { clipboardData: { items: [], getData: () => text } });
+    expect(allowed).toBe(true);
+    expect(screen.queryByText("pasted-2.txt")).toBeNull();
+  });
   it("模型 chip 菜单选择调用 onSelect；档位与预设同样经 chip", async () => {
     const controls = props().controls;
     if (controls === undefined) throw new Error("fixture 缺少 controls");
@@ -524,7 +547,7 @@ describe("Composer 控件与附件", () => {
     render(<Composer {...props({ pickImages, onSubmit })} />);
     const field = input("看图");
     fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加图片/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
     expect(await screen.findByText("picked.png")).toBeTruthy();
     fireEvent.paste(field, {
       clipboardData: {
@@ -549,12 +572,12 @@ describe("Composer 控件与附件", () => {
     expect(submitted.attachments[0]?.label).toBe("shot.jpg");
   });
 
-  it("拖入非图片文件给出错误；图片附件存在时展示 visionHint", async () => {
+  it("拖入文件显示卡片；图片附件存在时展示 visionHint", async () => {
     const getVisionHint = vi.fn(async () => "当前模型不支持图片，将由 test/desc 描述后发送");
     render(<Composer {...props({ getVisionHint })} />);
     const field = input("");
     fireEvent.drop(field, { dataTransfer: { files: [file("a.txt", "text/plain")] } });
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("只能拖入图片"));
+    expect(await screen.findByText("a.txt")).toBeTruthy();
     fireEvent.paste(field, {
       clipboardData: {
         items: [{ kind: "file", type: "image/png", getAsFile: () => file("a.png", "image/png") }],

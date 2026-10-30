@@ -1,4 +1,4 @@
-import type { ImageAttachment, ImageMimeType } from "@nocturne/core/protocol";
+import type { ImageAttachment } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
 /** 消息流的窗口级图片缓存：按 sha256 复用 blob URL，未命中时回读当前会话附件。 */
@@ -11,7 +11,7 @@ export interface AttachmentImageSource {
   showErrors?: boolean;
   url: (attachment: ImageAttachment) => string | undefined;
   /** sha256（小写 hex）→ object URL，重复登记返回同一 URL */
-  register: (data: Uint8Array, mimeType: ImageMimeType) => Promise<string>;
+  register: (data: Uint8Array, mimeType: string) => Promise<string>;
   load: (
     attachment: ImageAttachment,
     session: Pick<RpcSession, "readAttachment">,
@@ -28,7 +28,7 @@ export function createAttachmentImageSource(): AttachmentImageSource {
   const urls = new Map<string, string>();
   const pending = new Map<string, Promise<string>>();
   let generation = 0;
-  const register = async (data: Uint8Array, mimeType: ImageMimeType): Promise<string> => {
+  const register = async (data: Uint8Array, mimeType: string): Promise<string> => {
     const current = generation;
     const key = hex(await crypto.subtle.digest("SHA-256", data as BufferSource));
     if (current !== generation) throw new Error("图片缓存已释放");

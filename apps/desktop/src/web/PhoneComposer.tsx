@@ -114,7 +114,11 @@ export interface PhoneComposerProps {
 type PopoverKind =
   "attach" | "preset" | "model" | "effort" | "context" | "more" | "output" | "history";
 
-interface PhoneAttachment extends PhoneImage {
+interface PhoneAttachment {
+  name: string;
+  data: Uint8Array;
+  mimeType: string;
+  source: "paste" | "upload";
   url: string;
 }
 
@@ -142,7 +146,7 @@ export function PhoneComposer({
   fileRefs = null,
   readInputHistory,
   getVisionHint,
-  prepareImage = preparePhoneImage,
+  prepareImage: _prepareImage = preparePhoneImage,
 }: PhoneComposerProps) {
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState<PopoverKind | null>(null);
@@ -313,19 +317,23 @@ export function PhoneComposer({
     placeCaret(position);
   };
 
-  const addFiles = async (files: File[]) => {
+  const literalPaste = useRef(false);
+  const pasteNumber = useRef(1);
+  const addFiles = async (files: File[], source: "paste" | "upload" = "upload") => {
     setOpen(null);
     if (files.length === 0) return;
     setProcessing((n) => n + files.length);
     setError(undefined);
     for (const file of files) {
       try {
-        const image = await prepareImage(file);
+        const image = {
+          name: file.name,
+          data: new Uint8Array(await file.arrayBuffer()),
+          mimeType: file.type || "application/octet-stream",
+        };
         if (!mounted.current) return;
-        const url = URL.createObjectURL(
-          new Blob([image.data as BlobPart], { type: image.mimeType }),
-        );
-        setAttachments((current) => [...current, { ...image, url }]);
+        const url = URL.createObjectURL(new Blob([image.data], { type: image.mimeType }));
+        setAttachments((current) => [...current, { ...image, source, url }]);
       } catch (reason) {
         if (mounted.current) setError(errorText(reason));
       } finally {
@@ -345,7 +353,10 @@ export function PhoneComposer({
     draft,
     attachments.map((attachment) => ({ data: attachment.data, label: attachment.name })),
   );
-  const tooLarge = messageBytes > SUBMIT_MESSAGE_LIMIT;
+  const tooLarge =
+    messageBytes > SUBMIT_MESSAGE_LIMIT ||
+    attachments.reduce((sum, file) => sum + file.data.byteLength, 0) >
+      Math.floor((SUBMIT_MESSAGE_LIMIT * 3) / 4) - 1024;
 
   const openHistory = () => {
     setOpen("history");
@@ -400,6 +411,7 @@ export function PhoneComposer({
           data: attachment.data,
           mimeType: attachment.mimeType,
           label: attachment.name,
+          source: attachment.source,
         })),
       };
       const accepted = running ? await onSubmit(payload, mode) : await onSubmit(payload);
@@ -617,12 +629,26 @@ export function PhoneComposer({
           ))}
         </div>
       )}
-      <div className="phone-card" ref={card}>
+      <div
+        className="phone-card"
+        ref={card}
+        onDragOver={(event) => {
+          event.preventDefault();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          void addFiles(Array.from(event.dataTransfer.files));
+        }}
+      >
         {(attachments.length > 0 || processing > 0) && (
           <div className="phone-attachments" aria-label="图片附件">
             {attachments.map((attachment, at) => (
               <span className="phone-attachment" key={attachment.url}>
-                <img src={attachment.url} alt={attachment.name} />
+                {attachment.mimeType.startsWith("image/") ? (
+                  <img src={attachment.url} alt={attachment.name} />
+                ) : (
+                  <span>▤ {attachment.name}</span>
+                )}
                 <button
                   type="button"
                   aria-label={`移除 ${attachment.name}`}
@@ -654,7 +680,26 @@ export function PhoneComposer({
           onSelect={(event) => {
             setCaret(event.currentTarget.selectionStart);
           }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files);
+            if (files.length) {
+              event.preventDefault();
+              void addFiles(files);
+              return;
+            }
+            const text = event.clipboardData.getData("text/plain");
+            if (!literalPaste.current && new TextEncoder().encode(text).byteLength >= 32768) {
+              event.preventDefault();
+              void addFiles(
+                [new File([text], `pasted-${pasteNumber.current++}.txt`, { type: "text/plain" })],
+                "paste",
+              );
+            }
+            literalPaste.current = false;
+          }}
           onKeyDown={(event) => {
+            literalPaste.current =
+              (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v";
             if (event.key !== "Backspace" && event.key !== "Delete") return;
             const node = event.currentTarget;
             if (node.selectionStart !== node.selectionEnd) return;
@@ -710,7 +755,7 @@ export function PhoneComposer({
         )}
       </div>
       <div className="phone-tools" role="toolbar" aria-label="会话控件">
-        {tool("attach", "添加图片", <IconPaperclip />)}
+        {tool("attach", "添加文件", <IconPaperclip />)}
         {tool("preset", "切换权限预设", <IconShield risk={controls?.preset.value === "bypass"} />, {
           disabled: busyDisabled(controls?.preset),
         })}
@@ -765,7 +810,6 @@ export function PhoneComposer({
       <input
         ref={gallery}
         type="file"
-        accept="image/*"
         multiple
         hidden
         aria-label="选择图片"

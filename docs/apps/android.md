@@ -4,6 +4,8 @@
 
 `apps/android` 是 Tauri 2 的安卓工程，把[手机网页](desktop.md#8-手机网页)随 APK 安装：WebView 只加载打包进 APK 的页面，页面代码不再由中继下发。界面、加密通道、RPC 客户端与会话视图全部复用 `apps/desktop/src/web`，App 只补平台差异。本轮含会话本地通知；仍不含扫码、拍照、正式签名与自动更新（第 3 轮）。
 
+文件附件与自由回答附件复用网页实现（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：选择任意文件、粘贴／拖入文件、32 KiB 大段粘贴转卡片；发送前检查远程合计原始字节上限，超限保留草稿。对话文件卡片经 `readAttachment` 下载；WebView 下载受宿主沙箱限制时仍可查看名称与大小。
+
 ## 1. 工程结构
 
 | 路径 | 内容 |

@@ -1441,3 +1441,59 @@
   max-width: 100%;
   object-fit: contain;
 }
+
+/* 文件附件卡片（ADR-0072）：对话、提问面板共用 */
+.fcard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  min-width: 0;
+  padding: 3px 8px 3px 3px;
+  font: inherit;
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
+  background: var(--a-side);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  text-align: left;
+}
+button.fcard {
+  cursor: pointer;
+}
+button.fcard:hover {
+  border-color: var(--a-muted);
+}
+.fcard .ficon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-1);
+  background: var(--a-border);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.fcard .fname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fcard .fsize {
+  flex: none;
+  color: var(--a-muted);
+}
+.fcard button {
+  background: none;
+  border: none;
+  color: var(--a-muted);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 2px;
+}
+.fcard button:hover {
+  color: var(--a-error);
+}

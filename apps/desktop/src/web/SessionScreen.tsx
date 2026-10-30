@@ -308,7 +308,12 @@ export function SessionScreen({
                 hidePersistentPermissions
               />
             ) : view.pendingQuestion ? (
-              <QuestionCard key={pendingKey} pending={view.pendingQuestion} session={reply} />
+              <QuestionCard
+                key={pendingKey}
+                pending={view.pendingQuestion}
+                session={reply}
+                attachmentLimit={Math.floor(((16 * 1024 * 1024 - 64 * 1024) * 3) / 4) - 1024}
+              />
             ) : null}
           </div>
         )}

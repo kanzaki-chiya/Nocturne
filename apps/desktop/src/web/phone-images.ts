@@ -176,6 +176,13 @@ export function estimateSubmitBytes(
   return total;
 }
 
+/** 文件卡片的类型标记：扩展名前 4 位大写，没有扩展名时为 FILE。 */
+export function fileIconText(name: string): string {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1).replace(/[^a-z0-9]/gi, "") : "";
+  return ext === "" ? "FILE" : ext.slice(0, 4).toUpperCase();
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;

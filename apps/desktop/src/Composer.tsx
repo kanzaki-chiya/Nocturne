@@ -31,16 +31,12 @@ import {
   type FileRefCandidate,
 } from "./file-refs";
 import { ChoiceMenu, Menu, MenuHeading, MenuItem, MenuSeparator } from "./Menu";
-import {
-  IMAGE_TYPES,
-  IMAGE_TYPE_ERROR,
-  mimeTypeForImageName,
-  type PickedImage,
-} from "./picked-images";
+import { IMAGE_TYPES, mimeTypeForImageName, type PickedImage } from "./picked-images";
 import "./composer.css";
 import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
+import { fileIconText, formatBytes } from "./web/phone-images";
 
 export interface ChoiceOption {
   value: string;
@@ -106,7 +102,7 @@ export interface ComposerSubmit {
   text: string;
   skill?: SkillInvocation;
   delegate?: { agent: string; task: string };
-  attachments: { data: Uint8Array; mimeType: ImageMimeType; label: string }[];
+  attachments: { data: Uint8Array; mimeType: string; label: string; source?: "paste" | "upload" }[];
 }
 
 export interface ComposerProps {
@@ -163,8 +159,9 @@ export interface ComposerProps {
 interface Attachment {
   name: string;
   data: Uint8Array;
-  mimeType: ImageMimeType;
+  mimeType: string;
   url: string;
+  source?: "paste" | "upload";
 }
 
 type MenuKind = "plus" | "model" | "effort" | "preset" | "dir";
@@ -534,24 +531,24 @@ export function Composer({
 
   // ── 附件 ──
   const addImages = useCallback(
-    (files: { name: string; data: Uint8Array; mimeType?: ImageMimeType }[]) => {
-      let unsupported = false;
+    (
+      files: { name: string; data: Uint8Array; mimeType?: string; source?: "paste" | "upload" }[],
+    ) => {
       const added: Attachment[] = [];
       for (const file of files) {
-        const mimeType = file.mimeType ?? mimeTypeForImageName(file.name);
-        if (mimeType === undefined) {
-          unsupported = true;
-          continue;
-        }
+        const mimeType =
+          (file.mimeType === "" ? undefined : file.mimeType) ??
+          mimeTypeForImageName(file.name) ??
+          "application/octet-stream";
         added.push({
           name: file.name,
+          ...(file.source ? { source: file.source } : {}),
           data: file.data,
           mimeType,
           url: URL.createObjectURL(new Blob([file.data as BlobPart], { type: mimeType })),
         });
       }
       if (added.length > 0) setAttachments((current) => [...current, ...added]);
-      if (unsupported) setError(IMAGE_TYPE_ERROR);
     },
     [],
   );
@@ -625,6 +622,7 @@ export function Composer({
         data: attachment.data,
         mimeType: attachment.mimeType,
         label: attachment.name,
+        ...(attachment.source ? { source: attachment.source } : {}),
       })),
     };
     submittingRef.current = true;
@@ -705,6 +703,8 @@ export function Composer({
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    literalPaste.current =
+      (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v";
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- 旧 IME 用 keyCode 229 标记组合中
     if (event.nativeEvent.isComposing || composingRef.current || event.nativeEvent.keyCode === 229)
       return;
@@ -841,7 +841,9 @@ export function Composer({
     };
   }, [running, interrupt, closeMenu]);
 
-  // ── 粘贴 / 拖入图片 ──
+  const literalPaste = useRef(false);
+  const pasteNumber = useRef(1);
+  // ── 粘贴 / 拖入文件 ──
   const onPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(event.clipboardData.items);
     const files = items.flatMap((item) => {
@@ -849,18 +851,24 @@ export function Composer({
       const file = item.getAsFile();
       return file === null ? [] : [file];
     });
-    if (files.length === 0) return;
-    const supported = files.filter((file) =>
-      (IMAGE_TYPES as readonly string[]).includes(file.type),
-    );
-    const unsupported = files.some(
-      (file) =>
-        file.type.startsWith("image/") && !(IMAGE_TYPES as readonly string[]).includes(file.type),
-    );
-    // 有文本时保持默认粘贴行为；只有文件时阻止文件名被粘贴成文本
-    if (!items.some((item) => item.kind === "string")) event.preventDefault();
-    if (unsupported) setError(IMAGE_TYPE_ERROR);
-    if (supported.length === 0) return;
+    if (files.length === 0) {
+      const text = event.clipboardData.getData("text/plain");
+      if (!literalPaste.current && new TextEncoder().encode(text).byteLength >= 32768) {
+        event.preventDefault();
+        addImages([
+          {
+            name: `pasted-${pasteNumber.current++}.txt`,
+            data: new TextEncoder().encode(text),
+            mimeType: "text/plain",
+            source: "paste",
+          },
+        ]);
+      }
+      literalPaste.current = false;
+      return;
+    }
+    event.preventDefault();
+    const supported = files;
     void Promise.all(
       supported.map(async (file) => ({
         name: file.name || "粘贴图片",
@@ -875,26 +883,7 @@ export function Composer({
     setDragOver(false);
     const files = Array.from(event.dataTransfer.files);
     if (files.length === 0) return;
-    const images: File[] = [];
-    let nonImage = false;
-    let unsupported = false;
-    for (const file of files) {
-      const mimeType = (IMAGE_TYPES as readonly string[]).includes(file.type)
-        ? (file.type as ImageMimeType)
-        : file.type === ""
-          ? mimeTypeForImageName(file.name)
-          : undefined;
-      if (file.type !== "" && !file.type.startsWith("image/")) {
-        nonImage = true;
-      } else if (mimeType === undefined) {
-        unsupported = true;
-      } else {
-        images.push(file);
-      }
-    }
-    if (nonImage) setError("只能拖入图片");
-    else if (unsupported) setError(IMAGE_TYPE_ERROR);
-    if (images.length === 0) return;
+    const images = files;
     void Promise.all(
       images.map(async (file) => ({
         name: file.name,
@@ -1229,8 +1218,15 @@ export function Composer({
             <div className="atts">
               {attachments.map((attachment, index) => (
                 <span className="thumb2" key={`${attachment.name}:${index}`}>
-                  <img src={attachment.url} alt="" />
-                  {attachment.name}
+                  {attachment.mimeType.startsWith("image/") ? (
+                    <img src={attachment.url} alt="" />
+                  ) : (
+                    <span className="ficon" aria-hidden="true">
+                      {fileIconText(attachment.name)}
+                    </span>
+                  )}
+                  <span className="fname">{attachment.name}</span>
+                  <span className="fsize">{formatBytes(attachment.data.byteLength)}</span>
                   <button
                     type="button"
                     className="x"
@@ -1321,7 +1317,7 @@ export function Composer({
         <Menu anchor={triggers.current.plus ?? null} label="添加" onClose={closeMenu}>
           <MenuItem
             icon={<IconImage />}
-            label="添加图片…"
+            label="添加文件…"
             right="也可粘贴、拖入"
             onSelect={openPicker}
           />

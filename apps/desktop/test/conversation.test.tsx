@@ -1074,6 +1074,27 @@ describe("Conversation 提问卡片", () => {
     );
   });
 
+  it("自由回答仅附文件可提交，支持添加与移除", async () => {
+    const view = createSessionView();
+    view.pendingQuestion = question({ questions: [{ question: "提供日志" }] });
+    const { methods } = mount(view);
+    const file = new File(["error\n"], "build.log", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("回答附件"), { target: { files: [file] } });
+    expect(await screen.findByRole("button", { name: "移除 build.log" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "提交" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    await waitFor(() =>
+      expect(methods.respondQuestion).toHaveBeenCalledWith("question-1", {
+        answers: [
+          {
+            selected: [],
+            attachments: [expect.objectContaining({ label: "build.log", mimeType: "text/plain" })],
+          },
+        ],
+      }),
+    );
+  });
+
   it("请求失败显示服务端错误，新 requestId 清空旧答案", async () => {
     const view = createSessionView();
     view.pendingQuestion = question({ questions: [{ question: "说明" }] });

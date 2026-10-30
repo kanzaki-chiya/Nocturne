@@ -69,6 +69,7 @@ import {
   type PermissionOption,
   type PermissionReply,
   type QuestionReply,
+  type AttachmentInput,
   type RewindMode,
   type RewindTarget,
   type RuntimeEvent,
@@ -84,6 +85,7 @@ import {
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
+import { fileIconText, formatBytes } from "./web/phone-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
 import { grantKind } from "./GrantsPage";
@@ -1079,7 +1081,9 @@ function UserMessage({
   onResubmit,
   onFork,
   scheduleSource,
+  fileLinks,
 }: {
+  fileLinks?: FileLinkHooks | undefined;
   entry: UserEntry;
   images: AttachmentImageSource;
   session: RpcSession | ReadOnlySessionRef;
@@ -1305,6 +1309,63 @@ function UserMessage({
                   session={session}
                   visible={visible}
                 />
+              ))}
+              {(entry.files ?? []).map((file) => (
+                <button
+                  type="button"
+                  className="fcard"
+                  key={file.file}
+                  onClick={() => {
+                    if (fileLinks) {
+                      const escaped = file.file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                      const reference = entry.content
+                        .filter((block) => block.type === "text")
+                        .map((block) => block.text)
+                        .join("\n");
+                      const raw = new RegExp(`path="([^"]*[\\\\/]${escaped})"`).exec(
+                        reference,
+                      )?.[1];
+                      if (raw) {
+                        const path = raw
+                          .replace(/&quot;/g, '"')
+                          .replace(/&lt;/g, "<")
+                          .replace(/&gt;/g, ">")
+                          .replace(/&amp;/g, "&");
+                        const action =
+                          file.text && fileLinks.viewSource
+                            ? fileLinks.viewSource(path)
+                            : fileLinks.reveal(path);
+                        void action.catch((reason: unknown) => {
+                          setError(String(reason));
+                        });
+                        return;
+                      }
+                    }
+                    void session.readAttachment(file.file).then(
+                      (result) => {
+                        const url = URL.createObjectURL(
+                          new Blob([result.data as BlobPart], { type: result.mimeType }),
+                        );
+                        const link = document.createElement("a");
+                        link.href = url;
+                        link.download = file.label;
+                        link.click();
+                        setTimeout(() => {
+                          URL.revokeObjectURL(url);
+                        }, 1000);
+                      },
+                      (reason: unknown) => {
+                        setError(String(reason));
+                      },
+                    );
+                  }}
+                >
+                  <span className="ficon" aria-hidden="true">
+                    {fileIconText(file.label)}
+                  </span>
+                  <span className="fname">{file.label}</span>
+                  <span className="fsize">{formatBytes(file.bytes)}</span>
+                </button>
               ))}
               {(body !== "" || entry.delegate) && <div className="u-text">{segments}</div>}
               {entry.skill && (
@@ -2534,6 +2595,7 @@ function EntryView({
               </span>
             </summary>
             <UserMessage
+              fileLinks={fileLinks}
               entry={entry}
               images={images}
               session={session}
@@ -2547,6 +2609,7 @@ function EntryView({
       }
       return (
         <UserMessage
+          fileLinks={fileLinks}
           entry={entry}
           images={images}
           session={session}
@@ -2867,6 +2930,7 @@ interface AnswerDraft {
   /** 自由文本题的输入（options 为空时） */
   text: string;
   declined: boolean;
+  attachments?: AttachmentInput[];
 }
 
 const OTHER_TEXT_LIMIT = 2000;
@@ -2890,18 +2954,29 @@ function resizeQuestionTextarea(
 export function QuestionCard({
   pending,
   session,
+  attachmentLimit,
 }: {
   pending: PendingQuestion;
   session: RpcSession;
+  attachmentLimit?: number;
 }) {
   const questions = pending.questions;
   const [drafts, setDrafts] = useState<AnswerDraft[]>(() =>
     questions.map(() => ({ selected: [], other: null, text: "", declined: false })),
   );
   const [cur, setCur] = useState(0);
-  const { reply, busy, error } = useReply((value: QuestionReply) =>
-    session.respondQuestion(pending.requestId, value),
-  );
+  const { reply, busy, error } = useReply(async (value: QuestionReply) => {
+    const bytes = value.answers.reduce(
+      (sum, answer) =>
+        sum +
+        ("declined" in answer
+          ? 0
+          : (answer.attachments ?? []).reduce((n, file) => n + file.data.byteLength, 0)),
+      0,
+    );
+    if (attachmentLimit !== undefined && bytes > attachmentLimit) throw new Error("附件过大");
+    await session.respondQuestion(pending.requestId, value);
+  });
   const cardRef = useRef<HTMLElement>(null);
   const otherRef = useRef<HTMLTextAreaElement | null>(null);
   const freeRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2914,6 +2989,24 @@ export function QuestionCard({
     [],
   );
 
+  const addAnswerFiles = async (files: File[]) => {
+    const at = stateRef.current.index;
+    const attachments = await Promise.all(
+      files.map(async (file) => ({
+        data: new Uint8Array(await file.arrayBuffer()),
+        mimeType: file.type || "application/octet-stream",
+        label: file.name,
+        source: "answer" as const,
+      })),
+    );
+    setDrafts((prev) =>
+      prev.map((item, i) =>
+        i === at
+          ? { ...item, declined: false, attachments: [...(item.attachments ?? []), ...attachments] }
+          : item,
+      ),
+    );
+  };
   const index = Math.min(cur, Math.max(questions.length - 1, 0));
   const question = questions[index];
   const draft = drafts[index];
@@ -2922,7 +3015,8 @@ export function QuestionCard({
     item.declined ||
     item.selected.length > 0 ||
     (item.other ?? "").trim() !== "" ||
-    item.text.trim() !== "";
+    item.text.trim() !== "" ||
+    (item.attachments?.length ?? 0) > 0;
   const allAnswered =
     questions.length > 0 &&
     questions.every((item, itemIndex) => {
@@ -3024,7 +3118,11 @@ export function QuestionCard({
         itemQuestion !== undefined && (itemQuestion.options?.length ?? 0) > 0
           ? (item.other ?? "").trim()
           : item.text.trim();
-      return { selected: item.selected, ...(extra !== "" ? { text: extra } : {}) };
+      return {
+        selected: item.selected,
+        ...(extra !== "" ? { text: extra } : {}),
+        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+      };
     });
     void replyRef.current({ answers });
   };
@@ -3171,30 +3269,88 @@ export function QuestionCard({
         <p className="qtext">{question.question}</p>
         {multi && options.length > 0 ? <p className="qsub">可多选</p> : null}
         {options.length === 0 ? (
-          <textarea
-            ref={freeRef}
-            className="free"
-            rows={1}
-            autoFocus
-            aria-label={`${question.question} · 回答`}
-            placeholder="输入回答，Enter 提交"
-            value={draft.text}
-            disabled={busy}
-            onCompositionStart={() => {
-              composingRef.current = true;
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
             }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
+            onDrop={(event) => {
+              event.preventDefault();
+              void addAnswerFiles(Array.from(event.dataTransfer.files));
             }}
-            onChange={(event) => {
-              const value = Array.from(event.target.value).slice(0, OTHER_TEXT_LIMIT).join("");
-              setDrafts((prev) =>
-                prev.map((item, itemIndex) =>
-                  itemIndex === index ? { ...item, text: value, declined: false } : item,
-                ),
-              );
-            }}
-          />
+          >
+            <label className="secondary">
+              添加文件
+              <input
+                type="file"
+                multiple
+                hidden
+                aria-label="回答附件"
+                disabled={busy}
+                onChange={(event) => {
+                  void addAnswerFiles(Array.from(event.target.files ?? []));
+                  event.target.value = "";
+                }}
+              />
+            </label>
+            {(draft.attachments ?? []).map((file, i) => (
+              <span className="fcard" key={i}>
+                <span className="ficon" aria-hidden="true">
+                  {fileIconText(file.label ?? "")}
+                </span>
+                <span className="fname">{file.label}</span>
+                <span className="fsize">{formatBytes(file.data.byteLength)}</span>
+                <button
+                  type="button"
+                  aria-label={`移除 ${file.label}`}
+                  onClick={() => {
+                    setDrafts((prev) =>
+                      prev.map((item, at) =>
+                        at === index
+                          ? {
+                              ...item,
+                              attachments: item.attachments?.filter((_, n) => n !== i) ?? [],
+                            }
+                          : item,
+                      ),
+                    );
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            <textarea
+              ref={freeRef}
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.files);
+                if (files.length) {
+                  event.preventDefault();
+                  void addAnswerFiles(files);
+                }
+              }}
+              className="free"
+              rows={1}
+              autoFocus
+              aria-label={`${question.question} · 回答`}
+              placeholder="输入回答，Enter 提交"
+              value={draft.text}
+              disabled={busy}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+              }}
+              onChange={(event) => {
+                const value = Array.from(event.target.value).slice(0, OTHER_TEXT_LIMIT).join("");
+                setDrafts((prev) =>
+                  prev.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, text: value, declined: false } : item,
+                  ),
+                );
+              }}
+            />
+          </div>
         ) : (
           <div className={`opts${multi ? " multi" : ""}`} role={multi ? "group" : "radiogroup"}>
             {options.map((option, optionIndex) => {

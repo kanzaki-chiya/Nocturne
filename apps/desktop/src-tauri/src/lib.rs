@@ -83,7 +83,8 @@ fn request_close(app: &AppHandle) {
         // 兜底：界面一直没回话（脚本出错、webview 卡死）就照常退出
         thread::sleep(Duration::from_secs(120));
         let state = app.state::<Arc<AppState>>();
-        if state.close_prompt.load(Ordering::SeqCst) && !state.shutting_down.swap(true, Ordering::SeqCst)
+        if state.close_prompt.load(Ordering::SeqCst)
+            && !state.shutting_down.swap(true, Ordering::SeqCst)
         {
             begin_shutdown(&app);
         }
@@ -132,7 +133,7 @@ pub fn run() {
         backend::shell_log,
         key_diag::key_diag_push,
         key_diag::key_diag_log,
-        images::pick_images,
+        images::pick_files,
         workspace::open_skill_directory,
         editor::detect_editors,
         editor::open_in_editor,

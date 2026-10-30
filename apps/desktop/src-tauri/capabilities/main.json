@@ -16,7 +16,7 @@
     "allow-shell-log",
     "allow-key-diag-push",
     "allow-key-diag-log",
-    "allow-pick-images",
+    "allow-pick-files",
     "allow-open-skill-directory",
     "core:app:allow-version",
     "core:path:allow-resolve-directory",
