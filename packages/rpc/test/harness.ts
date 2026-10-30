@@ -16,6 +16,7 @@ import {
   type McpConnector,
   type Runtime,
   type RuntimeConfig,
+  type RuntimeOptions,
   type RuntimeSession,
   type UpstreamModelEntry,
 } from "@nocturne/core";
@@ -93,6 +94,7 @@ export interface HarnessOptions {
   ws?: string;
   /** 远程单条报文上限（测试缩小以触发 response_too_large） */
   remoteMessageLimit?: number;
+  subagent?: RuntimeOptions["subagent"];
 }
 
 /** 内存管道连接 server 与 client；不 initialize 时由测试自己握手 */
@@ -121,6 +123,7 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
         sessionsDir,
         providers: [provider],
         interactive: init.interactive,
+        ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
       });
       runtimes.push(runtime);
       const remember = (session: RuntimeSession): RuntimeSession => {

@@ -65,7 +65,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `unsubscribe` | → `null`；服务端停止推送 |
 | `submit` | `{ text?, content?, attachments?, skill?, delegate? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
 | `enqueueInput` | `{ mode: "steer" \| "queue", text?, content?, attachments?, skill?, delegate? }` → `{ id, queued }`（ADR-0070）。Turn 进行中入列、立刻返回 `queued: true`；空闲时等同 `submit`、请求同样挂到 Turn 结束并返回 `queued: false`（`id` 只是对齐标记）；暂停中提交追加到队尾并恢复。子会话报 `invalid_command` |
-| `updateInput` | `{ id, mode?, text? }` → `null`；条目已被消费报 `input_consumed`。只替换用户正文的文本，非文本块及附件、`@` 引用、技能与委派快照随原提交保留；要换附件或引用须撤回后重发。空闲时未暂停条目（包括插话）按提交顺序发出 |
+| `updateInput` | `{ id, mode?, text? }` → `null`；条目已被消费报 `input_consumed`。只替换用户正文的文本，非文本块及附件、`@` 引用、技能与委派快照随原提交保留；要换附件或引用须撤回后重发。空闲时未暂停条目（包括插话）按提交顺序发出。`mode: "subagent"` 的条目（后台子代理结果，ADR-0073）不能编辑或切换，报 `invalid_command`；`cancelInput` 可撤回 |
 | `cancelInput` | `{ id }` → `null`；条目已被消费报 `input_consumed` |
 | `resumeInputs` | → `null`；解除暂停，空闲时立即发出队首（包括插话，请求挂到接续 Turn 结束），忙时交给安全点或 Turn 的结束边界 |
 | `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
@@ -282,6 +282,7 @@ interface SubagentSummary {
   callId: string;
   childSessionId: string;
   profile: string;                 // 启动参数 profile / agent / default，不读当前配置反推
+  background?: true;               // 后台子代理（ADR-0073）；父 task 已结算时 state 仍可为 running
   taskSummary: string;             // task 原文压成单行，最多 120 个 Unicode 码点
   startedAt: string;               // 子 session.created.time，ISO 8601
   state: "running" | "ended" | "unsealed";
@@ -317,6 +318,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | 方法 | 参数 → 结果 |
 |---|---|
 | `subagent.list` | `{ parentSessionId }` → `SubagentSummary[]`；不要求 `resumeSession` 或打开父会话 |
+| `subagent.cancel` | `{ parentSessionId, childSessionId }` → `null`；映射 `Runtime.cancelSubagent`（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §4）。只对本父会话运行中的后台子代理有效，否则 `invalid_command`；结果随后以 `message.user.subagent(status: "cancelled")` 交付父会话。与观察方法不同，它是会话内操作，远程允许（第 7 节） |
 | `subagent.readAttachment` | `{ parentSessionId, childSessionId, file }` → `{ data: base64, mimeType, bytes }`；只读子日志登记的图片附件，同 3.2 的文件名、真实路径、字节数和 sha256 校验，不借父目录兜底、不打开 child |
 | `subagent.subscribe` | `{ parentSessionId, childSessionId, subscriptionId, afterSeq? }` → `{ lastSeq, summary, mode }`；衔接完成后响应 |
 | `subagent.unsubscribe` | `{ subscriptionId }` → `null`；连接内幂等，也能取消正在回放的观察 |
@@ -341,7 +343,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 #### 只读边界、错误与清理
 
 - Core 对两个 session id 验证为安全的单文件名标识（非空、至多 128 个 ASCII 字母/数字/下划线/连字符），不接受路径；RPC 对字符串、subscriptionId（非空、至多 128 字符）及 afterSeq 做形状校验，重复的在用 subscriptionId 报 invalid_params。文件不存在为 `SessionError / session_not_found`，父子关系不匹配（包括把顶层会话当 child）为新增 `SessionError / subagent_parent_mismatch`，非法 Core id 为 `SessionError / invalid_session_id`；日志错误沿用 session_log_corrupt / session_log_newer，I/O 读取失败为新增 session_read_failed。均按第 5 节映射 -32002；RPC 形状错误为 -32602。list 单个不可读候选可按既有列表规则跳过，指定 child 的 subscribe 必须明确报错。
-- 新方法**均不进远程白名单**，按 ADR-0060 第 6 节，远程在 Core 调用前报 remote_not_allowed；ADR-0052 的配对、加密与既有 session 方法规则不变。新通知只发给持有观察的本机连接，不广播。以后手机要使用须另审白名单，不因「只读」自动开放。
+- 观察方法（list / subscribe / unsubscribe / readAttachment）**均不进远程白名单**（`subagent.cancel` 例外，见第 7 节），按 ADR-0060 第 6 节，远程在 Core 调用前报 remote_not_allowed；ADR-0052 的配对、加密与既有 session 方法规则不变。新通知只发给持有观察的本机连接，不广播。以后手机要使用须另审白名单，不因「只读」自动开放。
 - readAttachment 同样先校验父子关系与安全 id；file 必须为字符串，否则 invalid_params；附件层错误沿用第 3.2 节。该补充只读方法用于保持主对话的图片输出渲染，不使用 runtime.readFile 绕过附件引用校验。只读观察的 DTO 放 protocol，行为与观察源放 Core，RPC 客户端仍仅运行时依赖 protocol。
 - 观察不在 Hub.sessions / Connection.sessions 登记可交互句柄，不增持有子锁的引用，不提供 submit/respondPermission/respondQuestion/interrupt/close 子会话的方法。未显式打开的 child 对既有 session 命令仍为 unknown_session；已有显式 resume 的行为不在本接口中改变。它不是 agent 工具，不经权限求值，也不创建 Grant。
 - 连接持有观察表（含还在建立的观察）；unsubscribe、替换、父 `session.close`、连接断开和 shutdown 都撤监听、取消回放并丢缓冲。未完成的异步读取返回时检查取消代数并立即退订，不得复活。自然 closed 后释放表项；客户端缓存视图不影响服务器清理。观察退出不触碰 launcher、并发槽或 child.close。本机整条连接断开导致 Turn 中断是第 6 节既有宿主行为，不是观察的副作用。
@@ -392,6 +394,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.enqueueInput` | 允许完整载荷（同 `submit`）。ADR-0070 的「追加消息」：手机可在运行中插话或排队 |
 | `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
 | `session.interrupt` | 请求与通知均允许 |
+| `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作。手机不能用 `subagent.list`，运行中的后台子代理从会话视图推导（`pendingBackgroundSubagents`） |
 | `session.respondPermission` | `reply.remember === "project"` 拒绝并保持待处理；`"session"` 或省略允许 |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
@@ -420,6 +423,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | Core 公开 API | RPC 方法 | 客户端返回 |
 |---|---|---|
 | `RuntimeSession.readAttachment(file)` | `session.readAttachment({ sessionId, file })` | `{ data: Uint8Array, mimeType, bytes }`（线上 `data` 为 base64） |
+| `Runtime.cancelSubagent({ parentSessionId, childSessionId })` | `subagent.cancel` | `void` |
 
 ## 9. 服务端进程
 

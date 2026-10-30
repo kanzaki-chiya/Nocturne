@@ -88,6 +88,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           config: runtimeConfig,
           interactive,
           scheduler: args.scheduler,
+          subagent: { background: true },
           permissions: { autoApproveAsk: false },
           mcp:
             bootstrap === undefined

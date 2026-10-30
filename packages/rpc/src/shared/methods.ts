@@ -509,6 +509,8 @@ export interface RpcMethods {
   "login.submitManual": { params: { loginId: string; text: string }; result: null };
   "login.cancel": { params: { loginId: string }; result: null };
 
+  /** 后台子代理取消（ADR-0073），允许远程 */
+  "subagent.cancel": { params: { parentSessionId: string; childSessionId: string }; result: null };
   /**
    * 子会话只读观察（rpc.md 4.1，ADR-0060 第 4 轮）：不要求打开父会话，也不返回
    * RpcSession；仅本机开放，不进远程白名单。
@@ -761,6 +763,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "login.startDraft": true,
   "login.submitManual": true,
   "login.cancel": true,
+  "subagent.cancel": true,
   "subagent.list": true,
   "subagent.readAttachment": true,
   "subagent.subscribe": true,

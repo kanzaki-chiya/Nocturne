@@ -160,6 +160,8 @@ export interface RpcServer {
  * `session.setShell` 会写 settings.json（与 `runtime.setShellSetting` 同一处），不放开。
  */
 export const REMOTE_METHODS = [
+  // ADR-0073 §6：取消后台子代理是会话内操作；观察类 subagent.* 仍只限本机
+  "subagent.cancel",
   "grants.workspaces",
   "grants.list",
   "grants.revoke",
@@ -1593,7 +1595,14 @@ class Connection implements HubPeer {
         throw new RpcProtocolError("unknown_login", "登录会话不存在或已结束");
       },
 
-      // 不在 REMOTE_METHODS：只服务本机面板（ADR-0060 第 4 轮），远程在 Core 调用前被拒
+      // ADR-0073：取消是会话内操作，远程允许；下方观察方法仍只服务本机面板
+      "subagent.cancel": async (p) => {
+        await this.runtime().cancelSubagent({
+          parentSessionId: reqString(p, "parentSessionId"),
+          childSessionId: reqString(p, "childSessionId"),
+        });
+        return null;
+      },
       "subagent.list": (p) =>
         this.runtime().listSubagents({ parentSessionId: reqString(p, "parentSessionId") }),
       "subagent.readAttachment": async (p) => {

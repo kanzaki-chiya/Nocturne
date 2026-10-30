@@ -45,6 +45,7 @@ export const RUNTIME_METHODS: Record<
   resumeSession: "runtime.resumeSession",
   forkSession: "runtime.forkSession",
   renameSession: "runtime.renameSession",
+  cancelSubagent: "subagent.cancel",
   listSubagents: "subagent.list",
   observeSubagent: "subagent.subscribe",
   readSubagentAttachment: "subagent.readAttachment",

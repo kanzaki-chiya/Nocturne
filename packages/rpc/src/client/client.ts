@@ -294,6 +294,8 @@ export interface RpcRuntime {
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
   renameSession(sessionId: string, title: string): Promise<void>;
+  /** 取消本父会话运行中的后台子代理（ADR-0073），结果照常交付 cancelled */
+  cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
   /**
    * 只读发现父会话的直接内置子会话（含已结束；ADR-0060 第 4 轮，rpc.md 4.1）。
    * 不要求打开父会话。参数既可传 id，也可传与进程内 `Runtime.listSubagents` 相同的对象。
@@ -893,6 +895,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       (await call("runtime.forkSession", { sessionId: id, ...forkOptions })).sessionId,
     renameSession: async (sessionId, title) => {
       await call("runtime.renameSession", { sessionId, title });
+    },
+    async cancelSubagent(input) {
+      await call("subagent.cancel", input);
     },
     listSubagents: (parent) =>
       call("subagent.list", {
