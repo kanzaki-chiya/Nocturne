@@ -314,7 +314,6 @@ launch(request, ctx)
 - **角色系统 / 自定义 agent 定义文件**：第 14 节；
 - **Agent 间消息总线**：父子间唯一通道是 `task` 输入与 `finish` 结果；
 - **分布式执行**：子会话在同一进程内运行；
-- **后台/异步子任务**：`task` 是同步工具调用，父 Turn 等待结果；没有"提交后返回句柄"的形态；
 - **子代理常驻与唤醒**：`finish` 后子会话关闭，不存在再次唤起的入口；
 - **隔离工作区**（worktree/overlay）：子代理与父会话共享同一工作区视图；
 - **子会话权限冒泡**：见 7.1；
@@ -363,5 +362,15 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 timeoutMs 是默认值，请求可覆盖且封顶 3600 秒。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
 
 选择表由共享 subagentSelectionTable 生成，何时用后追加模型、强度和只读标记；外部标记账号费用。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
+
+## 20. 后台子代理
+
+[ADR-0073](../decisions/ADR-0073-background-subagents.md) 是主文档，这里只记实现落点。
+
+- **开关**：`RuntimeOptions.subagent.background`（缺省关闭）。TUI、桌面端后台、`nctrn rpc` 开启；`nctrn -p` 与定时任务会话关闭。只有顶层、非定时任务会话的 `task` 才在 schema 与描述里出现 `background`，子会话里没有。
+- **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 是唯一判断：外部 agent 一律拒绝，隔离方式为 `"none"` 时只放行全部 `traits.mutates === false` 的工具集（`explore`、只读档位、只读 `tools` 白名单）。launcher 在建子会话之前调用它，外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。
+- **启动**：子会话建好即返回 `output: { childSessionId, childLogPath, model, background: true }`，不发 `tool.progress`。子 Turn 的中止信号不含父 Turn 的 signal；超时沿用 `timeoutMs`。占用 `maxConcurrent` 槽直到收束；另有每父会话 `maxBackground`（缺省 3）。
+- **交付与生命周期**：`BackgroundSubagents` 集中收束、取消（`Runtime.cancelSubagent`）、丢弃（父会话关闭、回退到启动调用之前）与重启补报（按父日志补 `interrupted` 暂停条目，分叉继承的前缀不补）。结果以 `message.user.subagent` 交付，作为 `mode: "subagent"` 的待发输入（[agent-loop.md](agent-loop.md) §2、[view.md](../protocols/view.md)）。
+- **观察**：`listSubagents` 的 `SubagentSummary.background` 标出后台项；运行状态以登记簿为准，父 `task` 已结算不代表子代理结束。
 
 

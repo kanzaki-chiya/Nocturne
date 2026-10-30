@@ -89,6 +89,8 @@ deliverSteers() -> bool:
 
 一个 Turn 以 `done` 结束后，Runtime（不是 Agent Loop）取队首一条排队输入作为新的 `submit`，等它再次以 `done` 结束后取下一条（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §3）。其他结束原因（`aborted`、`error`、`truncated`、`refused`、`max_steps`）把剩余待发输入全部转成排队并暂停，不自动发送（§4）。新 Turn 与普通提交完全相同：TurnStart Hook、附件、`@` 引用、技能都在 Turn 边界重新生效。
 
+后台子代理的结果（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §3）也是待发输入（`mode: "subagent"`）：Turn 运行中按插话在安全点写入 `message.user(steer: true, subagent)`；空闲时立即开新 Turn；处于暂停时追加为暂停条目、不唤起。一个 Turn 以 `done` 结束即解除这种暂停追加。多个同时收束按收束顺序在同一安全点取出。Agent Loop 不认识它，差异只在 `message.user.subagent` 字段。
+
 未暂停的残留插话在没有进行中的 Turn 时也按排队消费，顺序与其他待发输入一致；运行循环完成清理并释放忙状态后立即复查列表，空闲时编辑和恢复也触发消费，详见 ADR-0070 §3。
 
 ```text

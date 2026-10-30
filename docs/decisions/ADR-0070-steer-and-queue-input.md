@@ -1,6 +1,6 @@
 # ADR-0070：运行中插话与排队
 
-- 状态：已接受
+- 状态：已接受（被 [ADR-0073](ADR-0073-background-subagents.md) 修订：子代理结果作为待发输入）
 - 日期：2026-10-28
 - 修订：[agent-loop.md](../architecture/agent-loop.md)、[events.md](../protocols/events.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[context.md](../architecture/context.md)
 
