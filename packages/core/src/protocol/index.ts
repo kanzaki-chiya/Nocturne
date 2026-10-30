@@ -26,3 +26,4 @@ export * from "./schedule.js";
 export * from "./grants.js";
 export * from "./subagent-profiles.js";
 export * from "./subagent-observation.js";
+export * from "./subagent-result.js";

@@ -30,10 +30,11 @@ export interface PendingInputPatch {
   input?: { text?: string | undefined } | undefined;
 }
 
-export type PendingInputOutcome = "ok" | "consumed";
+export type PendingInputOutcome = "ok" | "consumed" | "readonly";
 
 export class PendingInputs {
   private readonly entries: Entry[] = [];
+  private paused = false;
 
   constructor(
     private readonly emit: (snapshot: PendingInputsSnapshot) => void,
@@ -68,7 +69,7 @@ export class PendingInputs {
       id: this.newId(),
       mode,
       input,
-      paused: false,
+      paused: mode === "subagent" && this.paused,
       createdAt: new Date().toISOString(),
     };
     this.entries.push(entry);
@@ -86,7 +87,9 @@ export class PendingInputs {
    * `message.user(steer)`。没有插话时返回空数组，不发布快照。
    */
   takeSteers(): PreparedInput[] {
-    const taken = this.entries.filter((entry) => entry.mode === "steer" && !entry.paused);
+    const taken = this.entries.filter(
+      (entry) => (entry.mode === "steer" || entry.mode === "subagent") && !entry.paused,
+    );
     if (taken.length === 0) return [];
     for (const entry of taken) this.remove(entry);
     this.publish();
@@ -99,7 +102,7 @@ export class PendingInputs {
     if (head === undefined) return undefined;
     // 已错过当前 Turn 的插话全部转排队，避免被接续 Turn 的安全点抢先消费。
     for (const entry of this.entries) {
-      if (!entry.paused) entry.mode = "queue";
+      if (!entry.paused && entry.mode !== "subagent") entry.mode = "queue";
     }
     this.remove(head);
     this.publish();
@@ -109,6 +112,7 @@ export class PendingInputs {
   update(id: string, patch: PendingInputPatch): PendingInputOutcome {
     const entry = this.entries.find((candidate) => candidate.id === id);
     if (entry === undefined) return "consumed";
+    if (entry.mode === "subagent") return "readonly";
     if (patch.mode !== undefined) entry.mode = patch.mode;
     if (patch.input?.text !== undefined) {
       const text = { type: "text" as const, text: patch.input.text };
@@ -131,16 +135,36 @@ export class PendingInputs {
 
   /** 非 done 结束（ADR-0070 §4）：剩余条目全部转为排队并暂停，不自动发送 */
   pauseAll(): void {
+    this.paused = true;
     if (this.entries.length === 0) return;
     for (const entry of this.entries) {
-      entry.mode = "queue";
+      if (entry.mode !== "subagent") entry.mode = "queue";
       entry.paused = true;
     }
     this.publish();
   }
 
+  /** 回退（ADR-0073 §4）：丢弃启动调用不在 keep 里的子代理结果 */
+  dropSubagents(keep: ReadonlySet<string>): void {
+    const dropped = this.entries.filter(
+      (entry) =>
+        entry.mode === "subagent" &&
+        entry.input.subagent !== undefined &&
+        !keep.has(entry.input.subagent.callId),
+    );
+    if (dropped.length === 0) return;
+    for (const entry of dropped) this.remove(entry);
+    this.publish();
+  }
+
+  /** Turn 以 done 结束：之后收束的子代理结果不再按暂停追加（ADR-0073 §3） */
+  turnDone(): void {
+    this.paused = false;
+  }
+
   /** 解除暂停（ADR-0070 §4） */
   resume(): void {
+    this.paused = false;
     if (!this.entries.some((entry) => entry.paused)) return;
     for (const entry of this.entries) entry.paused = false;
     this.publish();

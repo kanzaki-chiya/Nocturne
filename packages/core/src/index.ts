@@ -200,6 +200,9 @@ import {
 import { PendingInputs, type PendingInputPatch } from "./pending-inputs.js";
 import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
+import { BackgroundSubagents, backgroundAdmission } from "./agent/background-subagents.js";
+import { DEFAULT_MAX_MODEL_CHARS, truncateModelContent, truncationNote } from "./tools/budget.js";
+import { writeSpill } from "./tools/spill.js";
 import {
   createSessionStore,
   createSubagentObservation,
@@ -347,6 +350,10 @@ export interface RuntimeOptions {
 }
 
 export interface RuntimeSubagentOptions {
+  /** ADR-0073：宿主是否开启后台子代理（非交互宿主关闭），默认关闭 */
+  background?: boolean | undefined;
+  /** 每个父会话运行中的后台子代理上限，默认 3 */
+  maxBackground?: number | undefined;
   enabled?: boolean | undefined;
   /** 允许的最大会话深度（顶层 0），默认 1 */
   maxDepth?: number | undefined;
@@ -724,6 +731,8 @@ export interface Runtime {
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
   renameSession(id: string, title: string): Promise<void>;
+  /** 取消本父会话运行中的后台子代理，结果照常交付 cancelled（ADR-0073 §4） */
+  cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
   /**
    * 只读发现父会话的直接内置子会话（含已结束，ADR-0060 第 4 轮、rpc.md 4.1）：
    * 登记簿里的活动项 ∪ 日志 `session.created.parent` 映射。不打开会话、不取锁、不修复。
@@ -1038,6 +1047,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
   // 观察登记簿与 limiter 同寿命：所有会话、所有嵌套层级的 launcher 共享（rpc.md 4.1）
   const subagentRegistry = createSubagentRegistry();
+  const backgroundSubagents = new BackgroundSubagents();
 
   const store: SessionStore = createSessionStore({
     platform,
@@ -2162,11 +2172,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return [{ ...profile, name }];
       });
       const hasExternalAgents = enabledExternalAgents.length > 0;
+      // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
+      const backgroundEnabled =
+        options.subagent?.background === true &&
+        meta.parent === undefined &&
+        meta.schedule === undefined;
       tools.unregister("task");
       if (!subagentEnabled && !hasExternalAgents) return;
       let launcher: SubagentLauncher | undefined;
       if (subagentEnabled)
         launcher = createSubagentLauncher({
+          background: backgroundEnabled
+            ? {
+                lifecycle: backgroundSubagents,
+                max: options.subagent?.maxBackground ?? 3,
+                deliver: (input) => deliverSubagentResult(input),
+              }
+            : undefined,
           checkpoint: execEnv.checkpoint,
           store,
           sessionsDir,
@@ -2338,6 +2360,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           subagentLimits.timeoutMs,
           profileSnapshot,
           config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
+          backgroundEnabled && launcher !== undefined
+            ? (input) => backgroundAdmission({ ...input, isolation: "none" })
+            : undefined,
         ),
       );
     };
@@ -2394,6 +2419,44 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const assertMainSession = () => {
       if (meta.parent !== undefined)
         throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
+    };
+    /**
+     * 后台子代理结果交付（ADR-0073 §3）：正文按工具结果同样的预算截断落盘，再作为
+     * mode=subagent 的待发输入；空闲且未暂停时立即开新 Turn，运行中留给安全点。
+     */
+    let subagentDelivery = Promise.resolve();
+    const deliverSubagentResult = (input: PreparedInput): Promise<void> => {
+      subagentDelivery = subagentDelivery.then(() => enqueueSubagentResult(input));
+      return subagentDelivery;
+    };
+    const enqueueSubagentResult = async (input: PreparedInput): Promise<void> => {
+      const block = input.content[0];
+      const callId = input.subagent?.callId;
+      if (block?.type === "text" && callId !== undefined) {
+        const budget = truncateModelContent(block.text, DEFAULT_MAX_MODEL_CHARS);
+        if (budget.truncated && budget.span !== undefined) {
+          let spillPath: string | undefined;
+          try {
+            spillPath = await writeSpill({
+              fs,
+              paths,
+              attachmentsDir: paths.join(sessionsDir, "attachments"),
+              sessionId: session.id,
+              callId: `${callId}-result`,
+              content: block.text,
+            });
+          } catch {
+            // 与工具结果相同：落盘失败降级为普通截断
+          }
+          block.text = `${budget.text}\n${truncationNote(block.text, budget.span, DEFAULT_MAX_MODEL_CHARS, spillPath)}`;
+        }
+      }
+      if (closing || session.health !== "ok") return;
+      pendingInputStore.add("subagent", input);
+      // 不等开启的 Turn 结束：后台任务在交付后即收束，不占并发计数
+      void pumpQueue().catch(() => {
+        pendingInputStore.pauseAll();
+      });
     };
     /**
      * 准备一条提交内容：附件落盘、`@` 引用与技能正文固定成快照块。普通提交与
@@ -2615,6 +2678,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.skill,
             prepared.delegate,
             prepared.files,
+            prepared.subagent,
           );
           // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
           if (reason !== "done") pendingInputStore.pauseAll();
@@ -2622,6 +2686,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
           }
           if (reason !== "done") break;
+          pendingInputStore.turnDone();
           const head = pendingInputStore.takeQueueHead();
           if (head !== undefined) prepare = () => Promise.resolve(head);
         }
@@ -2665,6 +2730,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return true;
     };
 
+    // ADR-0073 §4：重启不复活后台子代理，按父日志补 interrupted 暂停条目、不唤起；
+    // 分叉继承的前缀（forkedFrom.seq 之前）不补
+    if (resume !== undefined && meta.parent === undefined) {
+      const recovered = backgroundSubagents.recover(
+        session.durableEvents(),
+        meta.forkedFrom?.seq ?? 0,
+      );
+      if (recovered.length > 0) {
+        pendingInputStore.pauseAll();
+        for (const input of recovered) pendingInputStore.add("subagent", input);
+      }
+    }
     // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
     if (hookRunner !== undefined) {
       await hookRunner
@@ -2888,6 +2965,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             mode === "conversation"
               ? []
               : await restoreCheckpointFiles(session, platform, sessionsDir, targetSeq);
+          // ADR-0073 §4：回退到启动调用之前的后台子代理取消且不交付
+          if (mode !== "files") {
+            const kept = new Set<string>();
+            for (const event of session.durableEvents())
+              if (event.seq < targetSeq && event.type === "tool.started")
+                kept.add(event.payload.callId);
+            await backgroundSubagents.discard(session.id, kept);
+            pendingInputStore.dropSubagents(kept);
+          }
           await session.emit("session.rewound", { targetSeq, mode, files });
           if (mode !== "files") loadedSkills.clear();
           await session.flush();
@@ -3025,7 +3111,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           assertMainSession();
           if (patch.mode !== undefined && !isPendingInputMode(patch.mode))
             throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
-          if (pendingInputStore.update(id, patch) === "consumed")
+          const outcome = pendingInputStore.update(id, patch);
+          if (outcome === "readonly")
+            throw new RuntimeCommandError("invalid_command", "子代理结果不能编辑");
+          if (outcome === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
           await pumpQueue();
         }),
@@ -3353,7 +3442,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         compactController?.abort();
         gate.cancelAll?.();
         questions.cancelAll();
+        await backgroundSubagents.discard(session.id);
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
+        // 父工具可能正在创建 child；等父 Turn 退出后再收束这期间登记的后台任务。
+        await backgroundSubagents.discard(session.id);
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);
@@ -4209,6 +4301,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listSessions: (filter) => store.list(filter),
+    cancelSubagent(input) {
+      if (!backgroundSubagents.cancel(input.parentSessionId, input.childSessionId))
+        return Promise.reject(new RuntimeCommandError("invalid_command", "没有运行中的后台子代理"));
+      return Promise.resolve();
+    },
     listSubagents: (input) => subagentObservation.list(input),
     observeSubagent: (input, observer) => subagentObservation.observe(input, observer),
     readSubagentAttachment: (input) => subagentObservation.readAttachment(input),

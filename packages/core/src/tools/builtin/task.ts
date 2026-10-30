@@ -21,6 +21,7 @@ import type {
 interface TaskInput {
   /** 交给子代理的完整任务描述（子会话看不到父会话历史，必须自包含） */
   task: string;
+  background?: boolean;
   /** 已启用的外部 agent；与内置子代理的选择字段互斥 */
   agent?: string;
   profile?: string;
@@ -58,6 +59,12 @@ interface ExternalTaskRunner {
     ctx: ToolContext,
   ): Promise<ExternalAgentOutcome>;
 }
+/** 后台准入（ADR-0073 §2、§8）：输入工具集与是否外部 agent，拒绝时返回说明 */
+export type BackgroundAdmit = (input: {
+  tools: readonly Pick<ToolDefinition, "traits">[];
+  external?: boolean | undefined;
+}) => string | undefined;
+
 /**
  * createTaskTool 工厂（subagent.md 第 3 节）：launcher 由 core/index 装配；
  * 未启用时不注册（模型不可见），而非注册一个永远失败的工具。
@@ -68,6 +75,8 @@ export function createTaskTool(
   defaultTimeoutMs: number = TASK_DEFAULT_TIMEOUT_MS,
   profiles: readonly (SubagentProfileConfig & { name: string })[] = [],
   defaultModel?: string,
+  /** ADR-0073：宿主开启且在顶层会话时由 core/index 注入准入判断；缺省时 schema 不出现 background */
+  background?: BackgroundAdmit,
 ): ToolDefinition<TaskInput> {
   const agents = externalAgents?.agents ?? [];
   const hasExternalAgents = agents.length > 0;
@@ -85,6 +94,14 @@ export function createTaskTool(
     const name = input.profile ?? input.agent ?? "default";
     if (!available.includes(name))
       return `档位 ${name} 不存在、已停用或模型不可用；可选：${available.join(", ")}`;
+    if (input.background === true) {
+      if (background === undefined) return "当前会话不支持后台子代理";
+      // 外部 agent 不经内置 launcher，在这里走同一个准入判断
+      if (selectedAgent(input) !== undefined) {
+        const denied = background({ tools: [], external: true });
+        if (denied !== undefined) return denied;
+      }
+    }
     if (selectedAgent(input) !== undefined) {
       if (
         input.preset !== undefined ||
@@ -129,12 +146,24 @@ export function createTaskTool(
           "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。" +
           "外部 agent 看不到 task 工具，不能再委派（不能嵌套）。"
         : "") +
-      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : ""),
+      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : "") +
+      (background
+        ? " Use background for independent, read-only, time-consuming research; do not wait or poll for its result."
+        : ""),
     inputSchema: {
       type: "object",
       required: ["task"],
       properties: {
         task: { type: "string", description: "子代理的任务描述（自包含）" },
+        ...(background
+          ? {
+              background: {
+                type: "boolean",
+                description:
+                  "Run read-only work in the background and receive its result as a separate message.",
+              },
+            }
+          : {}),
         ...(hasProfiles
           ? {
               profile: { type: "string", enum: available, description: "子代理档位，缺省 default" },
@@ -223,6 +252,7 @@ export function createTaskTool(
       const outcome = await launcher.launch(
         {
           task: input.task,
+          ...(input.background === true ? { background: true } : {}),
           profile: input.profile ?? input.agent ?? "default",
           ...(input.reason !== undefined
             ? { reason: Array.from(input.reason).slice(0, 200).join("") }

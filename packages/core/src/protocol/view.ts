@@ -5,6 +5,7 @@ import type { SkillSnapshot } from "./skills.js";
  * 无 I/O、无 Node 内置依赖；entries 只由持久事件创建，live/notices 只由
  * 临时事件创建，收敛点上除 revision/notices 外重放等价（V1）。
  */
+import type { SubagentResult } from "./events.js";
 import type {
   AttachmentDescribedPayload,
   ContextCompactedPayload,
@@ -128,6 +129,7 @@ export interface UserEntry {
   delegate?: AgentDelegation | undefined;
   /** 运行中插话（ADR-0070）：界面加「插话」标签，不是新 Turn 的开始 */
   steer?: true | undefined;
+  subagent?: SubagentResult | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
@@ -434,6 +436,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.skill !== undefined ? { skill: event.payload.skill } : {}),
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
         ...(event.payload.steer === true ? { steer: true as const } : {}),
+        ...(event.payload.subagent !== undefined ? { subagent: event.payload.subagent } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

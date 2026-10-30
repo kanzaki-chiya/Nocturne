@@ -104,6 +104,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 任意文件附件、大段粘贴转附件和提问回答附文件见 [ADR-0072](decisions/ADR-0072-file-attachments.md)。
 
+后台子代理（只读准入、启动即返回、结果作为待发输入交付、生命周期）见 [ADR-0073](decisions/ADR-0073-background-subagents.md)，主文档是 [subagent.md](architecture/subagent.md) §20。
+
 MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-0071-mcp-availability-notes.md)。
 
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。

@@ -47,6 +47,8 @@ import {
   type ToolDefinition,
 } from "../tools/index.js";
 import { runTurn } from "./turn.js";
+import type { PreparedInput } from "../protocol/index.js";
+import { backgroundAdmission, type BackgroundSubagents } from "./background-subagents.js";
 import type { TurnConfig, TurnDeps } from "./types.js";
 
 /** 非交互拒绝时给子模型的指引（subagent.md 7.3）：受阻操作写进结果 */
@@ -97,6 +99,15 @@ export function createSubagentLimiter(max: number): SubagentLimiter {
 }
 
 export interface SubagentDeps {
+  /** ADR-0073：宿主开启且为顶层会话时注入；缺省时 background 请求报 invalid_input */
+  background?:
+    | {
+        lifecycle: BackgroundSubagents;
+        /** 每个父会话运行中的后台子代理上限（maxBackground） */
+        max: number;
+        deliver(input: PreparedInput): void | Promise<void>;
+      }
+    | undefined;
   skills?:
     | (() => {
         text: string;
@@ -304,6 +315,15 @@ function usageOf(session: Session): Usage | undefined {
 export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
   return {
     async launch(request: SubagentRequest, ctx: ToolContext): Promise<SubagentOutcome> {
+      if (request.background === true) {
+        if (deps.background === undefined || deps.depth !== 0)
+          return error("invalid_input", "当前会话不支持后台子代理");
+        if (deps.background.lifecycle.count(ctx.sessionId) >= deps.background.max)
+          return error(
+            "subagent_concurrency",
+            `后台子代理并发上限已满（每个会话 ${deps.background.max} 个），请稍后重试`,
+          );
+      }
       if (!deps.limiter.tryAcquire()) {
         return error(
           "subagent_concurrency",
@@ -312,6 +332,21 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
       }
       let child: Session | undefined;
       let registration: SubagentRegistration | undefined;
+      let detached = false;
+      const cleanup = async () => {
+        try {
+          if (child !== undefined) {
+            await deps
+              .makeHookRunner(child, meta)
+              ?.run("SessionEnd", { reason: "close" })
+              .catch(() => undefined);
+            await child.close();
+          }
+        } finally {
+          registration?.end();
+          deps.limiter.release();
+        }
+      };
       // Hook 标记里的 depth 是子会话自身深度（祖先进会话数）
       const meta = {
         parentSessionId: ctx.sessionId,
@@ -335,28 +370,32 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           profile?.effort ?? deps.reasoningEffort?.(),
           childModel.model.capabilities.reasoningEffort,
         );
-        child = await deps.store.create({
-          cwd: ctx.cwd,
-          workspaceRoot: ctx.workspaceRoot,
-          model: childModel.model.ref,
-          permissionPreset: deps.permissionPreset(),
-          nocturneVersion: deps.nocturneVersion,
-          parent: { sessionId: ctx.sessionId, callId: ctx.callId },
-          ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
-        });
-        // 子创建事件已提交：执行与进度转发之前登记观察源（rpc.md 4.1）
-        registration = deps.registry?.register({
-          child,
-          parentSessionId: ctx.sessionId,
-          callId: ctx.callId,
-          profile: request.profile ?? "default",
-          taskSummary: summarizeSubagentTask(request.task),
-        });
-        ctx.progress(
-          `子代理模型：${childModel.model.ref.provider}/${childModel.model.ref.model} · ${childEffort ?? "off"}`,
-          "info",
-        );
-
+        const createChild = async () => {
+          child = await deps.store.create({
+            cwd: ctx.cwd,
+            workspaceRoot: ctx.workspaceRoot,
+            model: childModel.model.ref,
+            permissionPreset: deps.permissionPreset(),
+            nocturneVersion: deps.nocturneVersion,
+            parent: { sessionId: ctx.sessionId, callId: ctx.callId },
+            ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
+          });
+          registration = deps.registry?.register({
+            child,
+            parentSessionId: ctx.sessionId,
+            callId: ctx.callId,
+            profile: request.profile ?? "default",
+            taskSummary: summarizeSubagentTask(request.task),
+            background: request.background === true,
+          });
+        };
+        if (!request.background) {
+          await createChild();
+          ctx.progress(
+            `子代理模型：${childModel.model.ref.provider}/${childModel.model.ref.model} · ${childEffort ?? "off"}`,
+            "info",
+          );
+        }
         // 可选池 = 内置 ∪ 父会话 MCP 快照 ∪ task（子会话自身深度未达上限才可再派生）。
         // ADR-0032 §4：子会话非交互，声明 needsUser 的工具按特性排除——
         // 显式 tools 白名单点名时也按不可用名处理；ADR-0064 第 7 节：声明 mutatesSchedule
@@ -445,6 +484,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           selected = pool;
         }
 
+        if (request.background) {
+          const denied = backgroundAdmission({ tools: selected, isolation: "none" });
+          if (denied !== undefined) return error("invalid_input", denied);
+        }
+        if (request.background) await createChild();
+        if (child === undefined) throw new Error("Child session unavailable");
         const registry = createToolRegistry();
         if (onDemandMcp) {
           const childMcpPool = selected.filter((t) => mcpToolNames.has(t.name));
@@ -512,13 +557,14 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         const executor = createToolExecutor(registry);
 
         // 进度转发：子会话的结算事件转写为父侧 tool.progress（subagent.md 第 12 节）
-        child.subscribe((e) => {
-          if (e.type === "turn.started") {
-            ctx.progress(`子会话第 ${e.payload.turnIndex} 轮开始`, "info");
-          } else if (e.type === "tool.completed") {
-            ctx.progress(`${e.payload.name} → ${e.payload.status}`, "info");
-          }
-        });
+        if (!request.background)
+          child.subscribe((e) => {
+            if (e.type === "turn.started") {
+              ctx.progress(`子会话第 ${e.payload.turnIndex} 轮开始`, "info");
+            } else if (e.type === "tool.completed") {
+              ctx.progress(`${e.payload.name} → ${e.payload.status}`, "info");
+            }
+          });
 
         deps.diagnostics?.record("subagent.launch", {
           parentSessionId: ctx.sessionId,
@@ -551,123 +597,143 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         // launcher 自己的超时计时器单独持有：Turn 以 aborted 结束时按
         // signal.aborted 区分「本次超时」与「父会话中断」（subagent.md 第 4 节）
         const launchTimeoutSignal = AbortSignal.timeout(timeoutMs);
+        const cancellation = request.background ? new AbortController() : undefined;
+        const parentSignal = cancellation?.signal ?? ctx.signal;
         const childSignal = AbortSignal.any([
-          ctx.signal,
+          parentSignal,
           launchTimeoutSignal,
           deps.parentFailedSignal,
           child.failedSignal,
         ]);
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          const last = attempt === maxAttempts;
-          const prompt =
-            attempt === 1
-              ? request.task
-              : last
-                ? "你还没有提交结果。立即调用 finish 工具提交 result；不要输出其他内容。"
-                : "你还没有提交结果；请调用 finish 工具提交 result 后结束。";
-          const turnDeps: TurnDeps = {
-            skills: skillSnapshot,
-            compactionThreshold: deps.compactionThreshold?.(),
-            compactionPruneLimit: deps.compactionPruneLimit?.(),
-            session: child,
-            model: childModel,
-            visionModel: () => deps.visionModel?.(),
-            tools: registry,
-            executor,
-            execEnv,
-            instructions: deps.instructions,
-            environment: childEnvironment,
-            config: { ...deps.turnConfig, maxSteps: deps.limits.maxStepsPerTurn },
-            signal: childSignal,
-            basePrompt: SUBAGENT_BASE_PROMPT,
-            shouldFinish: finishSubmitted,
-            // ADR-0031 §3：子代理请求填根会话 ID
-            rootSessionId: deps.rootSessionId,
-            ...(!last && childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
-            ...(last ? { toolChoice: { name: "finish" } } : {}),
-          };
-          const reason = await runTurn(turnDeps, [{ type: "text", text: prompt }]);
-          deps.diagnostics?.record("subagent.attempt", {
-            childSessionId: child.id,
-            attempt,
-            reason,
-            submitted: submitted !== undefined,
-          });
-          if (submitted !== undefined) {
-            const stats: SubagentStats = {
+        const execute = async (): Promise<SubagentOutcome> => {
+          if (child === undefined) throw new Error("Child session unavailable");
+          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const last = attempt === maxAttempts;
+            const prompt =
+              attempt === 1
+                ? request.task
+                : last
+                  ? "你还没有提交结果。立即调用 finish 工具提交 result；不要输出其他内容。"
+                  : "你还没有提交结果；请调用 finish 工具提交 result 后结束。";
+            const turnDeps: TurnDeps = {
+              skills: skillSnapshot,
+              compactionThreshold: deps.compactionThreshold?.(),
+              compactionPruneLimit: deps.compactionPruneLimit?.(),
+              session: child,
+              model: childModel,
+              visionModel: () => deps.visionModel?.(),
+              tools: registry,
+              executor,
+              execEnv,
+              instructions: deps.instructions,
+              environment: childEnvironment,
+              config: { ...deps.turnConfig, maxSteps: deps.limits.maxStepsPerTurn },
+              signal: childSignal,
+              basePrompt: SUBAGENT_BASE_PROMPT,
+              shouldFinish: finishSubmitted,
+              // ADR-0031 §3：子代理请求填根会话 ID
+              rootSessionId: deps.rootSessionId,
+              ...(!last && childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
+              ...(last ? { toolChoice: { name: "finish" } } : {}),
+            };
+            const reason = await runTurn(turnDeps, [{ type: "text", text: prompt }]);
+            deps.diagnostics?.record("subagent.attempt", {
+              childSessionId: child.id,
+              attempt,
+              reason,
+              submitted: submitted !== undefined,
+            });
+            if (submitted !== undefined) {
+              const stats: SubagentStats = {
+                childSessionId: child.id,
+                childLogPath: child.logPath,
+                model: `${childModel.model.ref.provider}/${childModel.model.ref.model}`,
+                reasoningEffort: childEffort ?? "off",
+                turns: attempt,
+                steps: child.state().history.filter((h) => h.kind === "tool").length,
+                ...(usageOf(child) !== undefined ? { usage: usageOf(child) } : {}),
+                ...(submitted.structured !== undefined ? { structured: submitted.structured } : {}),
+              };
+              return { status: "ok", resultText: submitted.text, stats };
+            }
+            if (reason !== "done") {
+              if (reason === "aborted") {
+                // 按中止信号来源结算（subagent.md 第 4 节）：本次 task 超时——
+                // launcher 自己的计时器或经 ctx.signal 传入的执行器超时——
+                // 结算 timeout；父会话中断 → cancelled；父/子日志
+                // failedSignal → subagent_turn_failed
+                if (launchTimeoutSignal.aborted || timeoutAbort(parentSignal)) {
+                  return error(
+                    "timeout",
+                    `子代理超过 ${timeoutMs}ms 未完成。它可能已修改工作区文件，请先检查 git status；` +
+                      `只读审查或调研任务也不要设短于默认值 ${deps.limits.timeoutMs}ms 的超时`,
+                    partialOutputOf(child),
+                    statsOf(child, attempt),
+                  );
+                }
+                if (parentSignal.aborted) {
+                  return error(
+                    "cancelled",
+                    "子会话已被父会话中断",
+                    partialOutputOf(child),
+                    statsOf(child, attempt),
+                  );
+                }
+              }
+              // error/max_steps/truncated/refused/failed 与 failedSignal 中止：
+              // 失败信号，不进催促循环
+              return error(
+                "subagent_turn_failed",
+                `子会话 Turn 以 ${reason} 结束`,
+                partialOutputOf(child),
+                statsOf(child, attempt),
+              );
+            }
+            if (parentSignal.aborted) break;
+          }
+          return error(
+            "subagent_no_result",
+            `子代理在 ${maxAttempts} 轮内未调用 finish 提交结果`,
+            partialOutputOf(child),
+            statsOf(child, maxAttempts),
+          );
+        };
+        if (request.background && deps.background && cancellation) {
+          // ADR-0073 §1：子会话已建好即返回；槽位与子会话在收束后由 cleanup 释放
+          detached = true;
+          const background = deps.background;
+          const deliver = (input: PreparedInput) => background.deliver(input);
+          background.lifecycle.track(
+            {
+              parentSessionId: ctx.sessionId,
+              childSessionId: child.id,
+              callId: ctx.callId,
+              profile: request.profile ?? "default",
+              controller: cancellation,
+            },
+            async () => {
+              try {
+                return await execute();
+              } finally {
+                await cleanup();
+              }
+            },
+            (input) => deliver(input),
+          );
+          return {
+            status: "ok",
+            resultText: `Background subagent started (id: ${child.id}). Its result will arrive as a separate message when it finishes. Do not wait or poll; continue with other work or end your turn.`,
+            stats: {
               childSessionId: child.id,
               childLogPath: child.logPath,
               model: `${childModel.model.ref.provider}/${childModel.model.ref.model}`,
-              reasoningEffort: childEffort ?? "off",
-              turns: attempt,
-              steps: child.state().history.filter((h) => h.kind === "tool").length,
-              ...(usageOf(child) !== undefined ? { usage: usageOf(child) } : {}),
-              ...(submitted.structured !== undefined ? { structured: submitted.structured } : {}),
-            };
-            return { status: "ok", resultText: submitted.text, stats };
-          }
-          if (reason !== "done") {
-            if (reason === "aborted") {
-              // 按中止信号来源结算（subagent.md 第 4 节）：本次 task 超时——
-              // launcher 自己的计时器或经 ctx.signal 传入的执行器超时——
-              // 结算 timeout；父会话中断 → cancelled；父/子日志
-              // failedSignal → subagent_turn_failed
-              if (launchTimeoutSignal.aborted || timeoutAbort(ctx.signal)) {
-                return error(
-                  "timeout",
-                  `子代理超过 ${timeoutMs}ms 未完成。它可能已修改工作区文件，请先检查 git status；` +
-                    `只读审查或调研任务也不要设短于默认值 ${deps.limits.timeoutMs}ms 的超时`,
-                  partialOutputOf(child),
-                  statsOf(child, attempt),
-                );
-              }
-              if (ctx.signal.aborted) {
-                return error(
-                  "cancelled",
-                  "子会话已被父会话中断",
-                  partialOutputOf(child),
-                  statsOf(child, attempt),
-                );
-              }
-            }
-            // error/max_steps/truncated/refused/failed 与 failedSignal 中止：
-            // 失败信号，不进催促循环
-            return error(
-              "subagent_turn_failed",
-              `子会话 Turn 以 ${reason} 结束`,
-              partialOutputOf(child),
-              statsOf(child, attempt),
-            );
-          }
-          if (ctx.signal.aborted) break;
+              background: true,
+            },
+          };
         }
-        return error(
-          "subagent_no_result",
-          `子代理在 ${maxAttempts} 轮内未调用 finish 提交结果`,
-          partialOutputOf(child),
-          statsOf(child, maxAttempts),
-        );
+        return await execute();
       } finally {
-        try {
-          if (child !== undefined) {
-            // SessionEnd Hook（hooks.md）：与父会话 close 同点位；失败已降级
-            await deps
-              .makeHookRunner(child, meta)
-              ?.run("SessionEnd", { reason: "close" })
-              .catch(() => undefined);
-            await child.close().catch((e: unknown) => {
-              deps.diagnostics?.record("subagent.close_failed", {
-                childSessionId: child?.id,
-                message: e instanceof Error ? e.message : String(e),
-              });
-            });
-          }
-        } finally {
-          // 写入落定、close 完成之后才发内存终止信号并移除登记项；异常与失败同样
-          // 经过这里，观察者的状态不影响并发槽的归还
-          registration?.end();
-          deps.limiter.release();
-        }
+        if (!detached) await cleanup();
       }
     },
   };

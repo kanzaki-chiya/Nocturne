@@ -69,7 +69,24 @@ export interface TurnStartedPayload {
   turnIndex: number;
 }
 
+/** 后台子代理结果（ADR-0073 §3）：`message.user.subagent` */
+export interface SubagentResult {
+  childSessionId: string;
+  /** 启动它的那次 task 调用 */
+  callId: string;
+  status: "ok" | "error" | "timeout" | "cancelled" | "interrupted";
+  /** error 时的错误码，同同步调用 */
+  code?: string | undefined;
+  /** 启动参数 profile / default，界面显示用 */
+  profile?: string | undefined;
+  /** 后台运行时长；interrupted 没有 */
+  durationMs?: number | undefined;
+  /** 预留给工作树隔离带回的改动摘要（ADR-0073 §8），本版不填 */
+  changes?: { summary: string } | undefined;
+}
+
 export interface MessageUserPayload {
+  subagent?: SubagentResult | undefined;
   messageId: string;
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */

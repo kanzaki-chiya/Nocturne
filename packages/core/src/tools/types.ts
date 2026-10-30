@@ -513,6 +513,7 @@ export interface ToolExecutor {
  * 的可见性）；task 工具只做输入预检与结果映射。
  */
 export interface SubagentRequest {
+  background?: boolean | undefined;
   profile?: string | undefined;
   reason?: string | undefined;
   /** 交给子代理的完整任务描述（子会话看不到父会话历史，必须自包含） */
@@ -540,8 +541,15 @@ export interface SubagentStats {
   structured?: unknown;
 }
 
+export interface BackgroundSubagentStarted {
+  childSessionId: string;
+  childLogPath: string;
+  model: string;
+  background: true;
+}
+
 export type SubagentOutcome =
-  | { status: "ok"; resultText: string; stats: SubagentStats }
+  | { status: "ok"; resultText: string; stats: SubagentStats | BackgroundSubagentStarted }
   | {
       status: "error";
       error: { code: string; message: string };

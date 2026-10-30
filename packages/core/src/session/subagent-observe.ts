@@ -79,6 +79,7 @@ interface ChildAnalysis {
 }
 
 interface ParentCall {
+  background?: boolean | undefined;
   profile: string;
   task: string | undefined;
   completed:
@@ -134,6 +135,7 @@ function extractParentCalls(events: Iterable<DurableEvent>): Map<string, ParentC
       calls.set(event.payload.callId, {
         profile: typeof named === "string" && named !== "" ? named : "default",
         task: typeof record.task === "string" ? record.task : undefined,
+        background: record.background === true,
         completed: previous?.completed,
       });
     } else if (event.type === "tool.completed" && event.payload.name === "task") {
@@ -141,6 +143,7 @@ function extractParentCalls(events: Iterable<DurableEvent>): Map<string, ParentC
       calls.set(event.payload.callId, {
         profile: previous?.profile ?? "default",
         task: previous?.task,
+        background: previous?.background,
         completed: {
           time: event.time,
           status: event.payload.status,
@@ -192,7 +195,7 @@ function durationFields(
  */
 function sealed(analysis: ChildAnalysis, call: ParentCall | undefined): boolean {
   if (analysis.openTurn) return false;
-  if (call?.completed !== undefined) return true;
+  if (call?.completed !== undefined && !call.background) return true;
   if (analysis.finishOk) return true;
   return analysis.lastTurn !== undefined && analysis.lastTurn.reason !== "done";
 }
@@ -205,7 +208,9 @@ function snapshotSummary(
 ): SubagentSummary {
   const callId = analysis.parent?.callId ?? "";
   const ended = sealed(analysis, call);
-  const endedAt = ended ? (call?.completed?.time ?? analysis.lastTurn?.time) : undefined;
+  // 后台 task 的结算只是启动回执，不能用于子代理的最终耗时。
+  const settlement = call?.background ? undefined : call;
+  const endedAt = ended ? (settlement?.completed?.time ?? analysis.lastTurn?.time) : undefined;
   return {
     parentSessionId,
     callId,
@@ -214,8 +219,9 @@ function snapshotSummary(
     taskSummary: summarizeSubagentTask(call?.task ?? analysis.firstUserText ?? ""),
     startedAt: analysis.startedAt,
     state: ended ? "ended" : "unsealed",
-    ...(ended ? durationFields(analysis.startedAt, endedAt, call) : {}),
-    ...outcomeOf(call),
+    ...(ended ? durationFields(analysis.startedAt, endedAt, settlement) : {}),
+    ...(call?.background ? { background: true } : {}),
+    ...outcomeOf(call?.background ? undefined : call),
   };
 }
 
@@ -225,6 +231,7 @@ function runningSummary(entry: ActiveSubagent): SubagentSummary {
     callId: entry.callId,
     childSessionId: entry.childSessionId,
     profile: entry.profile,
+    ...(entry.background ? { background: true } : {}),
     taskSummary: entry.taskSummary,
     startedAt: entry.startedAt,
     state: "running",
@@ -237,6 +244,7 @@ function launcherEndSummary(entry: ActiveSubagent): SubagentSummary {
   return {
     ...snapshotSummary(entry.parentSessionId, entry.childSessionId, analysis, undefined),
     profile: entry.profile,
+    ...(entry.background ? { background: true } : {}),
     taskSummary: entry.taskSummary,
   };
 }

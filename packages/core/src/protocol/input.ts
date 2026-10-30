@@ -3,6 +3,7 @@
  * 普通提交、待发输入（插话/排队）与 Agent Loop 共用这一形状，避免 Agent Loop
  * 认识待发列表或 Provider 细节。
  */
+import type { SubagentResult } from "./events.js";
 import type {
   AgentDelegation,
   ContentBlock,
@@ -13,6 +14,7 @@ import type {
 import type { SkillSnapshot } from "./skills.js";
 
 export interface PreparedInput {
+  subagent?: SubagentResult | undefined;
   /** 用户输入的正文块；编辑待发输入时只替换这里 */
   content: ContentBlock[];
   /** Core 追加给模型看的快照块（`@` 引用、技能正文、委派指令），编辑文本时原样保留 */

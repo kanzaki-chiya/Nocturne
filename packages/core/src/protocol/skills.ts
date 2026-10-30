@@ -142,6 +142,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "grants",
   "skills",
   "agents",
+  "subagents",
   "compact",
   "resume",
   "rewind",

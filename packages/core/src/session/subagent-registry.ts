@@ -15,6 +15,7 @@ export interface ActiveSubagent {
   readonly parentSessionId: string;
   readonly callId: string;
   readonly childSessionId: string;
+  readonly background: boolean;
   readonly profile: string;
   readonly taskSummary: string;
   readonly startedAt: string;
@@ -43,6 +44,7 @@ export interface SubagentRegistry {
     callId: string;
     profile: string;
     taskSummary: string;
+    background?: boolean;
   }): SubagentRegistration;
   find(childSessionId: string): ActiveSubagent | undefined;
   activeOf(parentSessionId: string): ActiveSubagent[];
@@ -57,7 +59,7 @@ export function createSubagentRegistry(): SubagentRegistry {
   const sessions = new Map<string, Session>();
 
   return {
-    register({ child, parentSessionId, callId, profile, taskSummary }) {
+    register({ child, parentSessionId, callId, profile, taskSummary, background = false }) {
       const listeners = new Set<(signal: ObservedSignal) => void>();
       let ended = false;
       const deliver = (signal: ObservedSignal): void => {
@@ -78,6 +80,7 @@ export function createSubagentRegistry(): SubagentRegistry {
         callId,
         childSessionId: child.id,
         profile,
+        background,
         taskSummary,
         startedAt: child.durableEvents()[0]?.time ?? new Date().toISOString(),
         durableEvents: () => child.durableEvents(),

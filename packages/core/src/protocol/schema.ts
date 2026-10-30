@@ -221,6 +221,17 @@ const payloadSchemas = {
     files: z.array(fileAttachmentSchema).optional(),
     fileRefs: z.array(fileRefSchema).optional(),
     skill: z.object({ name: z.string(), body: z.string() }).optional(),
+    subagent: z
+      .object({
+        childSessionId: z.string(),
+        callId: z.string(),
+        status: z.enum(["ok", "error", "timeout", "cancelled", "interrupted"]),
+        code: z.string().optional(),
+        profile: z.string().optional(),
+        durationMs: z.number().optional(),
+        changes: z.object({ summary: z.string() }).optional(),
+      })
+      .optional(),
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
     steer: z.literal(true).optional(),

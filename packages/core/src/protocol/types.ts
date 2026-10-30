@@ -1,3 +1,4 @@
+import type { SubagentResult } from "./events.js";
 import type { SkillSnapshot } from "./skills.js";
 /**
  * 公共数据类型（docs/protocols/events.md 第 4 节）。
@@ -475,6 +476,7 @@ export type HistoryEntry =
       delegate?: AgentDelegation | undefined;
       /** 运行中插话（ADR-0070）；旧日志无此字段，缺省按普通用户消息处理 */
       steer?: true | undefined;
+      subagent?: SubagentResult | undefined;
     }
   | {
       kind: "assistant";
@@ -641,7 +643,7 @@ export type McpToolSearchMode = "auto" | "always" | "never";
 // ── 待发输入（ADR-0070）──────────────────────────────────
 
 /** 待发输入的两种方式（ADR-0070 §1）：插话并入当前 Turn，排队在 done 后开新 Turn */
-export type PendingInputMode = "steer" | "queue";
+export type PendingInputMode = "steer" | "queue" | "subagent";
 
 /**
  * 一条待发输入的展示快照（ADR-0070 §6）：待发输入是 Runtime 内存中的会话状态，
