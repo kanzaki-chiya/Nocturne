@@ -85,6 +85,7 @@ import {
   type RpcId,
 } from "../shared/jsonrpc.js";
 import type {
+  AgentProcessInfo,
   ContextSummary,
   InitializeResult,
   LoginCompleted,
@@ -161,6 +162,8 @@ export interface RpcClientOptions {
   clientName: string;
   /** 能否回复权限与提问请求，默认 true；false 时服务端按非交互规则处理 */
   interactive?: boolean;
+  /** 外部 agent（MCP 桥）握手时附带的进程信息（ADR-0074 §3） */
+  processInfo?: AgentProcessInfo | undefined;
 }
 
 export type EventListener = (event: RuntimeEvent) => void;
@@ -1133,6 +1136,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         protocolVersion: RPC_PROTOCOL_VERSION,
         clientName: options.clientName,
         capabilities: { interactive: options.interactive ?? true },
+        ...(options.processInfo !== undefined ? { processInfo: options.processInfo } : {}),
       });
       if (result.protocolVersion !== RPC_PROTOCOL_VERSION) {
         throw new RpcError(

@@ -21,6 +21,11 @@ export {
 export { createMemoryTransportPair, type LineTransport } from "../shared/transport.js";
 export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
 export type {
+  AgentDevice,
+  AgentPairingRequest,
+  AgentProcessInfo,
+  AgentScope,
+  AgentStatus,
   ContextSummary,
   RemoteStatus,
   InitializeParams,

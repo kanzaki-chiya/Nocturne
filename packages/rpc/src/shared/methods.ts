@@ -40,6 +40,7 @@ import type {
   ModelRoleInfo,
   ModelSettingsPatch,
   ModelSettingsView,
+  PermissionPresetName,
   PermissionReply,
   PendingInputMode,
   PendingInputsSnapshot,
@@ -75,6 +76,43 @@ import type {
   UsageStats,
 } from "@nocturne/core";
 
+export type AgentScope = "read-only" | "run";
+
+export interface AgentProcessInfo {
+  pid: number;
+  ppid?: number | undefined;
+  command?: string | undefined;
+  cwd?: string | undefined;
+}
+
+export interface AgentDevice {
+  kind: "agent";
+  id: string;
+  name: string;
+  fingerprint: string;
+  scope: AgentScope;
+  maxPermissionPreset: PermissionPresetName;
+  createdAt: number;
+  lastSeenAt?: number | undefined;
+  online: boolean;
+}
+
+export interface AgentPairingRequest {
+  requestId: string;
+  agentId: string;
+  clientName: string;
+  name: string;
+  fingerprint: string;
+  processInfo?: AgentProcessInfo | undefined;
+  requestedAt: number;
+  expiresAt: number;
+}
+
+export interface AgentStatus {
+  agents: AgentDevice[];
+  pendingPairings: AgentPairingRequest[];
+}
+
 export interface InitializeParams {
   /** 客户端实现的协议版本；与服务端不一致直接报错（第一版不做向下兼容） */
   protocolVersion: number;
@@ -83,6 +121,8 @@ export interface InitializeParams {
     /** 客户端能否回复权限与提问请求；false 时权限请求按非交互规则处理 */
     interactive: boolean;
   };
+  /** 外部 agent（MCP 桥）握手时附带的进程信息（ADR-0074 §3） */
+  processInfo?: AgentProcessInfo | undefined;
 }
 
 export interface InitializeResult {
@@ -206,6 +246,10 @@ export interface RemoteStatus {
   }[];
   connections: { deviceId: string; name: string; since: number }[];
   pairing?: { expiresAt: number };
+  /** 已批准的外部 agent（ADR-0074 §3，与手机设备存于同一份配置，带 kind: "agent"） */
+  agents?: AgentDevice[];
+  /** 待确认的外部 agent 配对请求 */
+  pendingAgentPairings?: AgentPairingRequest[];
   warnings: string[];
 }
 
@@ -244,6 +288,39 @@ export interface RpcMethods {
   "remote.removeDevice": { params: { id: string }; result: RemoteStatus };
   "remote.disconnectDevice": { params: { id: string }; result: null };
   "remote.push": { params: Record<string, never>; result: { sent: number } };
+  "agent.describe": { params: Record<string, never>; result: AgentStatus };
+  "agent.list": { params: Record<string, never>; result: AgentStatus };
+  "agent.respondPairing": {
+    params: {
+      requestId?: string | undefined;
+      agentId?: string | undefined;
+      approve?: boolean | undefined;
+      approved?: boolean | undefined;
+      scope?: AgentScope | undefined;
+      maxPreset?: PermissionPresetName | undefined;
+      maxPermissionPreset?: PermissionPresetName | undefined;
+    };
+    result: AgentStatus;
+  };
+  "agent.setScope": {
+    params: {
+      id: string;
+      scope: AgentScope;
+      maxPreset?: PermissionPresetName | undefined;
+      maxPermissionPreset?: PermissionPresetName | undefined;
+    };
+    result: AgentStatus;
+  };
+  "agent.update": {
+    params: {
+      id: string;
+      scope: AgentScope;
+      maxPreset?: PermissionPresetName | undefined;
+      maxPermissionPreset?: PermissionPresetName | undefined;
+    };
+    result: AgentStatus;
+  };
+  "agent.revoke": { params: { id: string }; result: AgentStatus };
   "agents.describeExternalAgents": {
     params: { workspaceRoot?: string | undefined };
     result: ExternalAgentsDescription;
@@ -280,6 +357,8 @@ export interface RpcMethods {
   };
   initialize: { params: InitializeParams; result: InitializeResult };
   shutdown: { params: Record<string, never>; result: null };
+  "runtime.initialize": { params: InitializeParams; result: InitializeResult };
+  "runtime.shutdown": { params: Record<string, never>; result: null };
 
   "runtime.listSessions": {
     params: { cwd?: string; includeSubagents?: boolean };
@@ -287,11 +366,11 @@ export interface RpcMethods {
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   /**
-   * 不含 `interactive` 与 `schedule`：前者是进程内会话选项，后者只由调度器写入
-   * （ADR-0064），客户端不能经 RPC 伪造定时任务来源或把会话开成无人值守。
+   * 不含 `interactive`、`schedule` 与 `client`：前者是进程内会话选项，`schedule` 只由调度器写入
+   * （ADR-0064），`client` 只由服务端在 `origin: "agent"` 连接上填入（ADR-0074 §5）。
    */
   "runtime.createSession": {
-    params: Omit<CreateSessionOptions, "interactive" | "schedule">;
+    params: Omit<CreateSessionOptions, "interactive" | "schedule" | "client" | "parent">;
     result: SessionOpened;
   };
   "runtime.resumeSession": {
@@ -634,6 +713,8 @@ export interface RpcMethods {
   "session.recordInputHistory": { params: SessionParams & { text: string }; result: null };
   "session.close": { params: SessionParams; result: null };
   "session.interrupt": { params: SessionParams; result: null };
+  "session.open": { params: SessionParams; result: SessionOpened };
+  "session.abort": { params: SessionParams; result: null };
 }
 
 export type RpcMethodName = keyof RpcMethods;
@@ -643,6 +724,7 @@ export type RpcResult<M extends RpcMethodName> = RpcMethods[M]["result"];
 /** 客户端→服务端的通知（无 id、无应答） */
 export interface RpcClientNotifications {
   "session.interrupt": SessionParams;
+  "session.abort": SessionParams;
 }
 
 /** 服务端→客户端的通知 */
@@ -650,6 +732,8 @@ export interface RpcServerNotifications {
   "remote.statusChanged": { status: RemoteStatus };
   "remote.paired": { device: { id: string; name: string } };
   "remote.pairingFailed": { code: string };
+  "agent.pairingRequested": AgentPairingRequest;
+  "agent.statusChanged": AgentStatus;
   event: { sessionId: string; event: RuntimeEvent };
   /** 子会话事件，原样 RuntimeEvent（sessionId 等于 childSessionId）；不混入父 `event` 通道 */
   "subagent.event": {
@@ -705,8 +789,16 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "remote.removeDevice": true,
   "remote.disconnectDevice": true,
   "remote.push": true,
+  "agent.describe": true,
+  "agent.list": true,
+  "agent.respondPairing": true,
+  "agent.setScope": true,
+  "agent.update": true,
+  "agent.revoke": true,
   initialize: true,
   shutdown: true,
+  "runtime.initialize": true,
+  "runtime.shutdown": true,
   "runtime.listSessions": true,
   "runtime.usageStats": true,
   "runtime.createSession": true,
@@ -817,6 +909,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.recordInputHistory": true,
   "session.close": true,
   "session.interrupt": true,
+  "session.open": true,
+  "session.abort": true,
 };
 
 /** 全部请求方法名（`RpcMethods` 增删方法而这里没跟着改，编译失败） */

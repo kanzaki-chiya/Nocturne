@@ -6,10 +6,32 @@ export {
   createRpcServer,
   SENSITIVE_METHODS,
   REMOTE_METHODS,
+  AGENT_READONLY_METHODS,
+  AGENT_RUN_METHODS,
   REMOTE_MESSAGE_LIMIT,
   remoteAttachmentLimit,
 } from "./server.js";
-export type { RpcDiagnostic, RpcRuntimeHandle, RpcServer, RpcServerOptions } from "./server.js";
+export type {
+  RpcDiagnostic,
+  RpcRuntimeHandle,
+  RpcServer,
+  RpcServerOptions,
+  ServeConnectionOptions,
+} from "./server.js";
+export {
+  agentPipeAddress,
+  connectAgentPipe,
+  createSocketFrameTransport,
+  currentUserSid,
+  listenAgentPipe,
+  readWindowsPipeAclRules,
+  resolveNocturneHome,
+  restrictWindowsPipeAclToCurrentUser,
+  type AgentPipeListener,
+  type ConnectAgentPipeOptions,
+  type ListenAgentPipeOptions,
+  type WindowsPipeAclRule,
+} from "./agent/pipe.js";
 export { createStdioTransport } from "./stdio.js";
 export {
   CONFIG_METHODS,
@@ -24,4 +46,12 @@ export {
 export { createMemoryTransportPair } from "../shared/transport.js";
 export type { LineTransport } from "../shared/transport.js";
 export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
-export type { RpcMethodName, RpcMethods } from "../shared/methods.js";
+export type {
+  AgentDevice,
+  AgentPairingRequest,
+  AgentProcessInfo,
+  AgentScope,
+  AgentStatus,
+  RpcMethodName,
+  RpcMethods,
+} from "../shared/methods.js";

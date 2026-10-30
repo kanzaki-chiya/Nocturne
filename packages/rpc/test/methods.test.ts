@@ -567,6 +567,16 @@ describe("公开 API 与 RPC 方法集合一致", () => {
       "remote.removeDevice",
       "remote.disconnectDevice",
       "remote.push",
+      "agent.describe",
+      "agent.list",
+      "agent.respondPairing",
+      "agent.setScope",
+      "agent.update",
+      "agent.revoke",
+      "runtime.initialize",
+      "runtime.shutdown",
+      "session.open",
+      "session.abort",
     ]);
     for (const method of server.methods) {
       if (method === "initialize" || method === "shutdown") continue;

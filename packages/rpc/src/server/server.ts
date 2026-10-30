@@ -32,8 +32,10 @@ import {
   type JevReviewerConfig,
   type LoginResult,
   type LoginSession,
+  type ModelRef,
   type ModelRole,
   type PendingInputPatch,
+  type PermissionPresetName,
   type PermissionReply,
   type ProviderCredentialInput,
   type ProviderLoginOptions,
@@ -62,14 +64,23 @@ import {
 } from "../shared/jsonrpc.js";
 import {
   RPC_METHOD_NAMES,
+  type AgentProcessInfo,
   type LoginCompleted,
   type LoginStarted,
+  type RemoteStatus,
   type RpcMethodName,
   type RpcMethods,
   type SessionOpened,
   type WireAttachment,
 } from "../shared/methods.js";
 import type { LineTransport } from "../shared/transport.js";
+import {
+  AgentHost,
+  lowerPermissionPreset,
+  parsePermissionPreset,
+  presetRank,
+  type AgentConnectionContext,
+} from "./agent/host.js";
 import { MethodNotFoundError, RpcProtocolError, toRpcError } from "./errors.js";
 import { Hub, type HubPeer, type ProviderState, type RpcRuntimeHandle } from "./hub.js";
 import { RemoteHost, type RemoteHostOptions } from "./remote/host.js";
@@ -120,8 +131,14 @@ function headerSecrets(p: unknown): string[] {
   );
 }
 
+export { AGENT_READONLY_METHODS, AGENT_RUN_METHODS } from "./agent/host.js";
+
 export interface RpcServerOptions {
   remote?: RemoteHostOptions | undefined;
+  /** 本机外部 agent 管道（ADR-0074 §2）：true 使用默认地址，字符串指定管道路径，false/undefined 不监听 */
+  agentPipe?: boolean | string | undefined;
+  /** 外部 agent 配对确认超时毫秒数（默认 120_000 = 2 分钟） */
+  agentPairingTimeoutMs?: number | undefined;
   nocturneVersion: string;
   /**
    * 握手后创建 Runtime：客户端声明的 `interactive` 能力决定 Runtime 的 `interactive`
@@ -139,19 +156,37 @@ export interface RpcServerOptions {
 }
 
 export type RpcDiagnostic =
-  | { kind: "connection"; state: "open" | "closed"; origin: "local" | "remote" }
+  | { kind: "connection"; state: "open" | "closed"; origin: "local" | "remote" | "agent" }
   | { kind: "request"; id: RpcId; method: string }
   | { kind: "notification"; method: string }
   | { kind: "response"; id: RpcId | null; ok: boolean; errorCode?: string };
 
+export interface ServeConnectionOptions {
+  origin?: "local" | "remote" | "agent" | undefined;
+  /** 测试或自定义传输接入 `origin: "agent"` 时指定的桥身份信息 */
+  agent?:
+    | {
+        id: string;
+        publicKey?: string | undefined;
+        fingerprint?: string | undefined;
+        name?: string | undefined;
+        processInfo?: AgentProcessInfo | undefined;
+      }
+    | undefined;
+  /** 内部管道连接上下文 */
+  _agentContext?: AgentConnectionContext | undefined;
+}
+
 export interface RpcServer {
   /** 本服务端实现的请求方法（不含通知）；覆盖测试用它与公开 API 对照 */
   readonly methods: readonly RpcMethodName[];
+  /** 本机外部 agent 管道监听地址（仅当开启 agentPipe 且完成启动后有值） */
+  readonly agentPipeAddress?: string | undefined;
   /**
-   * 一条传输对应一条连接，缺省本机；本机断开收尾整个后台，远程只释放自身引用。
+   * 一条传输对应一条连接，缺省本机；本机断开收尾整个后台，远程/外部 agent 只释放自身引用。
    * 本机 shutdown 先清理再回复，远程不得 shutdown。
    */
-  serve(transport: LineTransport, options?: { origin?: "local" | "remote" }): Promise<void>;
+  serve(transport: LineTransport, options?: ServeConnectionOptions): Promise<void>;
 }
 
 /**
@@ -188,6 +223,7 @@ export const REMOTE_METHODS = [
   "schedule.runNow",
   "session.subscribe",
   "session.unsubscribe",
+  "session.open",
   "session.close",
   "session.state",
   "session.submit",
@@ -197,6 +233,7 @@ export const REMOTE_METHODS = [
   "session.resumeInputs",
   "session.pendingInputs",
   "session.interrupt",
+  "session.abort",
   "session.respondPermission",
   "session.respondQuestion",
   "session.setModel",
@@ -277,29 +314,106 @@ type HandlerTable = { [K in RpcMethodName]: Handler<K> };
 export function createRpcServer(options: RpcServerOptions): RpcServer {
   const hub = new Hub();
   let serving = false;
+  const attachAgentsToStatus = (status: RemoteStatus): RemoteStatus => {
+    const agentStatus = agentHost.describe();
+    return {
+      ...status,
+      agents: agentStatus.agents,
+      pendingAgentPairings: agentStatus.pendingPairings,
+    };
+  };
   const remote = options.remote
     ? new RemoteHost(
         options.remote,
         (message) => {
+          if (
+            "method" in message &&
+            message.method === "remote.statusChanged" &&
+            typeof message.params === "object" &&
+            message.params !== null &&
+            "status" in message.params
+          ) {
+            hub.notifyLocal({
+              ...message,
+              params: {
+                status: attachAgentsToStatus((message.params as { status: RemoteStatus }).status),
+              },
+            });
+            return;
+          }
           hub.notifyLocal(message);
         },
         (transport) => server.serve(transport, { origin: "remote" }),
       )
     : undefined;
+  const agentHost = new AgentHost({
+    home: options.remote?.home,
+    credentials: options.remote?.credentials,
+    pipe: options.agentPipe,
+    pairingTimeoutMs: options.agentPairingTimeoutMs,
+    serve: (transport, ctx) => server.serve(transport, { origin: "agent", _agentContext: ctx }),
+    notify: (method, params) => {
+      hub.notifyLocal({ jsonrpc: "2.0", method, params });
+    },
+    onStatusChanged: () => {
+      if (remote) {
+        void remote.describe().then((status) => {
+          hub.notifyLocal({
+            jsonrpc: "2.0",
+            method: "remote.statusChanged",
+            params: { status: attachAgentsToStatus(status) },
+          });
+        });
+      }
+    },
+  });
   const server: RpcServer = {
     methods: RPC_METHOD_NAMES,
+    get agentPipeAddress(): string | undefined {
+      return agentHost.pipeAddress;
+    },
     async serve(transport, connectionOptions) {
       const origin = connectionOptions?.origin ?? "local";
       if (hub.stopping) throw new RpcProtocolError("shutting_down", "服务端正在关闭");
       if (origin === "local" && serving)
         throw new Error("RPC 服务端同一时刻只接一个客户端（本机连接）");
       if (origin === "local") serving = true;
-      const connection = new Connection(options, hub, transport, origin, remote);
+      let agentCtx = connectionOptions?._agentContext;
+      let createdCustomCtx = false;
+      if (origin === "agent" && agentCtx === undefined) {
+        const info = connectionOptions?.agent;
+        agentCtx = {
+          connectionId: `custom:${Math.random().toString(36).slice(2)}`,
+          agentId: info?.id ?? "agent-default",
+          publicKey: info?.publicKey ?? "test-pub",
+          fingerprint: info?.fingerprint ?? "0000:0000:0000:0000",
+          name: info?.name ?? "MCP Bridge",
+          ...(info?.processInfo !== undefined ? { processInfo: info.processInfo } : {}),
+          close: () => {
+            transport.close();
+          },
+        };
+        agentHost.registerConnection(agentCtx);
+        createdCustomCtx = true;
+      }
+      const connection = new Connection(
+        options,
+        hub,
+        transport,
+        origin,
+        remote,
+        agentHost,
+        agentCtx,
+        attachAgentsToStatus,
+      );
       hub.attach(connection);
       try {
         await connection.run();
       } finally {
         hub.detach(connection);
+        if (createdCustomCtx && agentCtx !== undefined) {
+          agentHost.unregisterConnection(agentCtx.connectionId);
+        }
         if (origin === "local") serving = false;
       }
     },
@@ -338,8 +452,11 @@ class Connection implements HubPeer {
     private readonly options: RpcServerOptions,
     private readonly hub: Hub,
     private readonly transport: LineTransport,
-    readonly origin: "local" | "remote",
+    readonly origin: "local" | "remote" | "agent",
     private readonly remote: RemoteHost | undefined,
+    private readonly agentHost: AgentHost,
+    private readonly agentContext: AgentConnectionContext | undefined,
+    private readonly attachAgentsToStatus: (status: RemoteStatus) => RemoteStatus,
   ) {
     this.handlers = this.buildHandlers();
   }
@@ -357,6 +474,7 @@ class Connection implements HubPeer {
         if (this.origin === "local") {
           if (this.cleanupPromise === undefined) this.hub.stopping = true;
           this.remote?.stop();
+          void this.agentHost.stop();
           void this.hub.closeRemotes();
           this.hub.interruptAll();
         } else {
@@ -448,7 +566,17 @@ class Connection implements HubPeer {
 
   private onNotification(method: string, params: unknown): void {
     this.diagnose({ kind: "notification", method });
-    if (method === "session.interrupt") this.interrupt(params);
+    if (method === "session.interrupt" || method === "session.abort") {
+      if (this.origin === "agent") {
+        try {
+          if (this.agentContext === undefined) return;
+          this.agentHost.checkMethod(this.agentContext, method);
+        } catch {
+          return;
+        }
+      }
+      this.interrupt(params);
+    }
     // 其他通知没有定义，忽略
   }
 
@@ -465,8 +593,9 @@ class Connection implements HubPeer {
     this.diagnose({ kind: "request", id, method });
     try {
       if (this.origin === "remote") await this.checkRemote(method, params);
+      if (this.origin === "agent") await this.checkAgent(method, params);
       let result: unknown;
-      if (method === "session.interrupt") {
+      if (method === "session.interrupt" || method === "session.abort") {
         // 允许以请求形式发中断（便于需要确认送达的客户端）
         this.interrupt(params);
         result = null;
@@ -482,7 +611,7 @@ class Connection implements HubPeer {
         const loginId = (result as { loginId?: unknown } | null)?.loginId;
         if (typeof loginId === "string") this.logins.get(loginId)?.resolveStarted();
       }
-      if (method === "shutdown") this.transport.close();
+      if (method === "shutdown" || method === "runtime.shutdown") this.transport.close();
     } catch (error) {
       const err = this.redactSecrets(method, params, toRpcError(error));
       this.fail({ jsonrpc: "2.0", id, error: err });
@@ -490,14 +619,22 @@ class Connection implements HubPeer {
   }
 
   private async dispatch(method: string, params: unknown): Promise<unknown> {
-    if (this.origin === "remote" && (this.inputEnded || this.closed || this.hub.stopping)) {
+    if (
+      (this.origin === "remote" || this.origin === "agent") &&
+      (this.inputEnded || this.closed || this.hub.stopping)
+    ) {
       throw new RpcProtocolError("shutting_down", "连接正在关闭");
     }
     if (!Object.hasOwn(this.handlers, method)) {
       throw new MethodNotFoundError(method);
     }
     const name = method as RpcMethodName;
-    if (name !== "initialize" && name !== "shutdown") {
+    if (
+      name !== "initialize" &&
+      name !== "runtime.initialize" &&
+      name !== "shutdown" &&
+      name !== "runtime.shutdown"
+    ) {
       // 管线化的客户端可能在 initialize 未返回时就发后续请求：等握手结束
       if (this.initPromise !== undefined) await this.initPromise.catch(() => undefined);
       if (!this.initialized) {
@@ -520,13 +657,54 @@ class Connection implements HubPeer {
       deny(`远程连接不允许调用 ${method}`);
     }
     const p = asParams(params);
-    if (method !== "initialize" && this.initPromise !== undefined)
+    if (
+      method !== "initialize" &&
+      method !== "runtime.initialize" &&
+      this.initPromise !== undefined
+    )
       await this.initPromise.catch(() => undefined);
     // 持久授权（写入项目 Grant）只能在电脑上选；会话级与单次批准照常
     if (method === "session.respondPermission" && reqObject(p, "reply").remember === "project") {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
     }
     if (method === "runtime.createSession" && this.initialized && this.hub.available) {
+      await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
+    }
+  }
+
+  private async checkAgent(method: string, params: unknown): Promise<void> {
+    if (this.agentContext === undefined) {
+      throw new RpcProtocolError("agent_not_allowed", "未登记外部 agent 连接上下文");
+    }
+    if (
+      method !== "initialize" &&
+      method !== "runtime.initialize" &&
+      method !== "shutdown" &&
+      method !== "runtime.shutdown" &&
+      this.initPromise !== undefined
+    ) {
+      await this.initPromise.catch(() => undefined);
+    }
+    const agentDevice = this.agentHost.checkMethod(this.agentContext, method);
+    if (
+      method === "runtime.createSession" &&
+      this.initialized &&
+      this.hub.available &&
+      agentDevice
+    ) {
+      const p = asParams(params);
+      const rawPreset = optString(p, "permissionPreset");
+      if (rawPreset !== undefined) {
+        const normalized = parsePermissionPreset(rawPreset);
+        if (normalized === undefined) {
+          throw new InvalidParamsError(`无效的权限预设：${rawPreset}`);
+        }
+        if (presetRank(normalized) > presetRank(agentDevice.maxPermissionPreset)) {
+          throw new InvalidParamsError(
+            `权限预设 ${normalized} 超过外部 agent 的权限上限 ${agentDevice.maxPermissionPreset}`,
+          );
+        }
+      }
       await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
     }
   }
@@ -553,6 +731,7 @@ class Connection implements HubPeer {
       if (this.origin === "local") {
         this.hub.stopping = true;
         this.remote?.stop();
+        await this.agentHost.stop();
         await this.hub.closeRemotes();
         this.hub.interruptAll();
       }
@@ -583,7 +762,7 @@ class Connection implements HubPeer {
       }
       const sessionIds = [...this.sessions.keys()];
       this.sessions.clear();
-      if (this.origin === "remote") this.requests.clear();
+      if (this.origin === "remote" || this.origin === "agent") this.requests.clear();
       // 整个后台收尾：中断并关闭全部会话、释放 Runtime 资源
       if (this.origin === "local") await this.hub.shutdown();
       else await Promise.all(sessionIds.map((id) => this.hub.release(id)));
@@ -935,66 +1114,136 @@ class Connection implements HubPeer {
         throw new RpcProtocolError("remote_unavailable", "服务端未提供远程主机功能");
       return this.remote;
     };
+    const handleInitialize = async (p: Params) => {
+      if (this.initPromise !== undefined) {
+        throw new RpcProtocolError("already_initialized", "initialize 只能调用一次");
+      }
+      const version = reqInt(p, "protocolVersion");
+      if (version !== RPC_PROTOCOL_VERSION) {
+        throw new RpcProtocolError(
+          "protocol_version_mismatch",
+          `协议版本不一致：客户端 ${version}，服务端 ${RPC_PROTOCOL_VERSION}`,
+        );
+      }
+      const clientName = reqString(p, "clientName");
+      const interactive = optBool(reqObject(p, "capabilities"), "interactive") ?? false;
+      if ((this.origin === "remote" || this.origin === "agent") && !this.hub.available) {
+        throw new RpcProtocolError(
+          "runtime_unavailable",
+          "本机连接尚未完成握手，Runtime 不可用；可稍后重试",
+        );
+      }
+      const init = (
+        this.origin === "local"
+          ? this.options.createRuntime({ clientName, interactive })
+          : Promise.resolve(undefined)
+      )
+        .then(async (handle) => {
+          if (handle !== undefined) this.hub.setHandle(handle);
+          this.initialized = true;
+          if (this.origin === "local" && !this.hub.stopping) {
+            await this.remote?.start();
+            await this.agentHost.start();
+          }
+          if (this.origin === "agent" && this.agentContext !== undefined) {
+            this.agentHost.onInitialize(this.agentContext, {
+              clientName,
+              processInfo: parseAgentProcessInfo(p.processInfo),
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          // 创建失败：允许客户端修正后重试
+          this.initPromise = undefined;
+          throw error;
+        });
+      this.initPromise = init;
+      await init;
+      return {
+        protocolVersion: RPC_PROTOCOL_VERSION,
+        nocturneVersion: this.options.nocturneVersion,
+        ...(this.hub.sessionsDir !== undefined ? { sessionsDir: this.hub.sessionsDir } : {}),
+      };
+    };
+    const handleShutdown = async () => {
+      await this.cleanup();
+      return null;
+    };
+    const handleAgentDescribe = () => this.agentHost.describe();
+    const handleAgentSetScope = (p: Params) => {
+      const id = reqString(p, "id");
+      const scopeRaw = reqString(p, "scope");
+      if (scopeRaw !== "read-only" && scopeRaw !== "run") {
+        throw new InvalidParamsError("scope 必须是 read-only 或 run");
+      }
+      const maxPresetRaw = optString(p, "maxPreset") ?? optString(p, "maxPermissionPreset");
+      let maxPermissionPreset: PermissionPresetName | undefined;
+      if (maxPresetRaw !== undefined) {
+        const normalized = parsePermissionPreset(maxPresetRaw);
+        if (normalized === undefined) {
+          throw new InvalidParamsError(`无效的权限上限预设：${maxPresetRaw}`);
+        }
+        maxPermissionPreset = normalized;
+      }
+      return this.agentHost.setScope({
+        id,
+        scope: scopeRaw,
+        ...(maxPermissionPreset !== undefined ? { maxPermissionPreset } : {}),
+      });
+    };
     return {
-      "remote.describe": () => remote().describe(),
-      "remote.register": (p) => remote().register(reqString(p, "invite")),
-      "remote.unregister": () => remote().unregister(),
-      "remote.setEnabled": (p) => {
+      "remote.describe": async () => this.attachAgentsToStatus(await remote().describe()),
+      "remote.register": async (p) =>
+        this.attachAgentsToStatus(await remote().register(reqString(p, "invite"))),
+      "remote.unregister": async () => this.attachAgentsToStatus(await remote().unregister()),
+      "remote.setEnabled": async (p) => {
         const enabled = optBool(p, "enabled");
         if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
-        return remote().setEnabled(enabled);
+        return this.attachAgentsToStatus(await remote().setEnabled(enabled));
       },
       "remote.startPairing": () => remote().startPairing(),
       "remote.cancelPairing": () => remote().cancelPairing(),
-      "remote.removeDevice": (p) => remote().removeDevice(reqString(p, "id")),
+      "remote.removeDevice": async (p) =>
+        this.attachAgentsToStatus(await remote().removeDevice(reqString(p, "id"))),
       "remote.disconnectDevice": (p) => remote().disconnectDevice(reqString(p, "id")),
       "remote.push": () => remote().push(),
-      initialize: async (p) => {
-        if (this.initPromise !== undefined) {
-          throw new RpcProtocolError("already_initialized", "initialize 只能调用一次");
+      "agent.describe": handleAgentDescribe,
+      "agent.list": handleAgentDescribe,
+      "agent.respondPairing": (p) => {
+        const approved = optBool(p, "approve") ?? optBool(p, "approved");
+        if (approved === undefined) {
+          throw new InvalidParamsError("approve/approved 必须是布尔值");
         }
-        const version = reqInt(p, "protocolVersion");
-        if (version !== RPC_PROTOCOL_VERSION) {
-          throw new RpcProtocolError(
-            "protocol_version_mismatch",
-            `协议版本不一致：客户端 ${version}，服务端 ${RPC_PROTOCOL_VERSION}`,
-          );
+        const requestId = optString(p, "requestId");
+        const agentId = optString(p, "agentId");
+        const scopeRaw = optString(p, "scope");
+        if (scopeRaw !== undefined && scopeRaw !== "read-only" && scopeRaw !== "run") {
+          throw new InvalidParamsError("scope 必须是 read-only 或 run");
         }
-        const clientName = reqString(p, "clientName");
-        const interactive = optBool(reqObject(p, "capabilities"), "interactive") ?? false;
-        if (this.origin === "remote" && !this.hub.available) {
-          throw new RpcProtocolError(
-            "runtime_unavailable",
-            "本机连接尚未完成握手，Runtime 不可用；可稍后重试",
-          );
+        const maxPresetRaw = optString(p, "maxPreset") ?? optString(p, "maxPermissionPreset");
+        let maxPermissionPreset: PermissionPresetName | undefined;
+        if (maxPresetRaw !== undefined) {
+          const normalized = parsePermissionPreset(maxPresetRaw);
+          if (normalized === undefined) {
+            throw new InvalidParamsError(`无效的权限上限预设：${maxPresetRaw}`);
+          }
+          maxPermissionPreset = normalized;
         }
-        const init = (
-          this.origin === "local"
-            ? this.options.createRuntime({ clientName, interactive })
-            : Promise.resolve(undefined)
-        )
-          .then(async (handle) => {
-            if (handle !== undefined) this.hub.setHandle(handle);
-            this.initialized = true;
-            if (this.origin === "local" && !this.hub.stopping) await this.remote?.start();
-          })
-          .catch((error: unknown) => {
-            // 创建失败：允许客户端修正后重试
-            this.initPromise = undefined;
-            throw error;
-          });
-        this.initPromise = init;
-        await init;
-        return {
-          protocolVersion: RPC_PROTOCOL_VERSION,
-          nocturneVersion: this.options.nocturneVersion,
-          ...(this.hub.sessionsDir !== undefined ? { sessionsDir: this.hub.sessionsDir } : {}),
-        };
+        return this.agentHost.respondPairing({
+          ...(requestId !== undefined ? { requestId } : {}),
+          ...(agentId !== undefined ? { agentId } : {}),
+          approved,
+          ...(scopeRaw !== undefined ? { scope: scopeRaw } : {}),
+          ...(maxPermissionPreset !== undefined ? { maxPermissionPreset } : {}),
+        });
       },
-      shutdown: async () => {
-        await this.cleanup();
-        return null;
-      },
+      "agent.setScope": handleAgentSetScope,
+      "agent.update": handleAgentSetScope,
+      "agent.revoke": (p) => this.agentHost.revoke(reqString(p, "id")),
+      initialize: handleInitialize,
+      "runtime.initialize": handleInitialize,
+      shutdown: handleShutdown,
+      "runtime.shutdown": handleShutdown,
 
       "runtime.listSessions": async (p) => {
         const cwd = optString(p, "cwd");
@@ -1020,7 +1269,34 @@ class Connection implements HubPeer {
       "runtime.createSession": (p) =>
         this.track(
           (async () => {
-            const options: CreateSessionOptions = { model: reqModel(p, "model") };
+            const sessionCwd = optString(p, "cwd");
+            const sessionRoot = optString(p, "workspaceRoot");
+            const targetWorkspace =
+              (await this.workspaceOf(p)) ??
+              (sessionCwd !== undefined
+                ? await this.hub.workspaceOf({ workspaceRoot: sessionCwd })
+                : undefined);
+
+            let resolvedModel: ModelRef | string;
+            if (p.model !== undefined && p.model !== null) {
+              resolvedModel = reqModel(p, "model");
+            } else if (this.origin === "agent") {
+              const fallbackModel =
+                this.runtime().defaultModel(
+                  targetWorkspace !== undefined ? { workspaceRoot: targetWorkspace } : undefined,
+                ) ??
+                this.runtime().listModels(
+                  targetWorkspace !== undefined ? { workspaceRoot: targetWorkspace } : undefined,
+                )[0]?.ref;
+              if (fallbackModel === undefined) {
+                throw new InvalidParamsError("未指定 model 且未找到可用的默认模型");
+              }
+              resolvedModel = fallbackModel;
+            } else {
+              resolvedModel = reqModel(p, "model");
+            }
+
+            const options: CreateSessionOptions = { model: resolvedModel };
             const preset = optString(p, "permissionPreset");
             if (preset !== undefined) options.permissionPreset = preset;
             const effort = optString(p, "reasoningEffort");
@@ -1031,10 +1307,50 @@ class Connection implements HubPeer {
               options.reasoningEffort = effort;
             }
             // 会话级工作区（ADR-0051）：单后台模式下客户端按会话传 cwd
-            const sessionCwd = optString(p, "cwd");
             if (sessionCwd !== undefined) options.cwd = sessionCwd;
-            const sessionRoot = optString(p, "workspaceRoot");
             if (sessionRoot !== undefined) options.workspaceRoot = sessionRoot;
+
+            if (this.origin === "agent" && this.agentContext !== undefined) {
+              const agentDevice = this.agentHost.getRegisteredAgent(this.agentContext.agentId);
+              if (agentDevice === undefined) {
+                throw new RpcProtocolError(
+                  "agent_pairing_pending",
+                  "请在 Nocturne 桌面端确认外部 agent 接入请求后重试",
+                );
+              }
+              if (preset !== undefined) {
+                const normalized = parsePermissionPreset(preset);
+                if (normalized === undefined) {
+                  throw new InvalidParamsError(`无效的权限预设：${preset}`);
+                }
+                if (presetRank(normalized) > presetRank(agentDevice.maxPermissionPreset)) {
+                  throw new InvalidParamsError(
+                    `权限预设 ${normalized} 超过外部 agent 的权限上限 ${agentDevice.maxPermissionPreset}`,
+                  );
+                }
+                options.permissionPreset = normalized;
+              } else {
+                const settings = this.runtime().describeSettings(
+                  targetWorkspace !== undefined ? { workspaceRoot: targetWorkspace } : undefined,
+                );
+                const presetItem = settings.find((s) => s.key === "permissions.preset");
+                const userDefault =
+                  parsePermissionPreset(
+                    typeof presetItem?.effective === "string" ? presetItem.effective : "default",
+                  ) ?? "default";
+                options.permissionPreset = lowerPermissionPreset(
+                  userDefault,
+                  agentDevice.maxPermissionPreset,
+                );
+              }
+              options.client = {
+                kind: "agent",
+                name: agentDevice.name,
+                deviceId: agentDevice.id,
+                id: agentDevice.id,
+              };
+            }
+
             const opened = await this.register(await this.runtime().createSession(options));
             this.hub.notifySessionsChanged();
             return opened;
@@ -1050,15 +1366,28 @@ class Connection implements HubPeer {
                 `会话已在本连接中打开：${sessionId}`,
               );
             }
-            const force = optBool(p, "force");
+            const isReadOnlyAgent =
+              this.origin === "agent" &&
+              this.agentContext !== undefined &&
+              this.agentHost.getRegisteredAgent(this.agentContext.agentId)?.scope === "read-only";
+            const force = isReadOnlyAgent ? undefined : optBool(p, "force");
             const model =
-              p.model === undefined || p.model === null ? undefined : reqModel(p, "model");
+              isReadOnlyAgent || p.model === undefined || p.model === null
+                ? undefined
+                : reqModel(p, "model");
             this.openingIds.add(sessionId);
             try {
               const session = await this.hub.resume(sessionId, {
                 ...(force !== undefined ? { force } : {}),
                 ...(model !== undefined ? { model } : {}),
               });
+              if (this.origin === "agent" && session.state().meta.parent !== undefined) {
+                await this.hub.release(session.id).catch(() => undefined);
+                throw new RpcProtocolError(
+                  "subagent_session_not_allowed",
+                  "不能直接操作子代理会话，请通过父会话观察",
+                );
+              }
               return await this.register(session, true);
             } finally {
               this.openingIds.delete(sessionId);
@@ -1647,6 +1976,50 @@ class Connection implements HubPeer {
         this.interrupt(p);
         return null;
       },
+      "session.abort": (p) => {
+        this.interrupt(p);
+        return null;
+      },
+      "session.open": (p) =>
+        this.track(
+          (async () => {
+            const sessionId = reqString(p, "sessionId");
+            const existing = this.sessions.get(sessionId);
+            if (existing !== undefined) {
+              const state = existing.session.state();
+              return {
+                sessionId: existing.session.id,
+                meta: state.meta,
+                config: state.config,
+                warnings: [...existing.session.warnings],
+                ...(existing.session.recovery !== undefined
+                  ? { recovery: existing.session.recovery }
+                  : {}),
+                lastSeq: state.lastSeq,
+              };
+            }
+            if (this.openingIds.has(sessionId)) {
+              throw new RpcProtocolError(
+                "session_already_open",
+                `会话已在本连接中打开：${sessionId}`,
+              );
+            }
+            this.openingIds.add(sessionId);
+            try {
+              const session = await this.hub.resume(sessionId, {});
+              if (this.origin === "agent" && session.state().meta.parent !== undefined) {
+                await this.hub.release(session.id).catch(() => undefined);
+                throw new RpcProtocolError(
+                  "subagent_session_not_allowed",
+                  "不能直接操作子代理会话，请通过父会话观察",
+                );
+              }
+              return await this.register(session, true);
+            } finally {
+              this.openingIds.delete(sessionId);
+            }
+          })(),
+        ),
       "session.unsubscribe": (p) => {
         const entry = this.session(p);
         entry.generation++;
@@ -1998,6 +2371,18 @@ function parseAttachments(value: unknown): NonNullable<SubmitInput["attachments"
       ...(o.source !== undefined ? { source: o.source as "paste" | "upload" | "answer" } : {}),
     };
   });
+}
+
+function parseAgentProcessInfo(raw: unknown): AgentProcessInfo | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.pid !== "number" || !Number.isInteger(o.pid)) return undefined;
+  return {
+    pid: o.pid,
+    ...(typeof o.ppid === "number" && Number.isInteger(o.ppid) ? { ppid: o.ppid } : {}),
+    ...(typeof o.command === "string" ? { command: o.command } : {}),
+    ...(typeof o.cwd === "string" ? { cwd: o.cwd } : {}),
+  };
 }
 
 /** `session.submit` / `session.enqueueInput` 共用的提交内容解析（ADR-0070） */

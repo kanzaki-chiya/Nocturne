@@ -56,7 +56,7 @@ export interface ProviderState {
 
 /** Hub 向连接广播通知所需要的最小接口 */
 export interface HubPeer {
-  readonly origin: "local" | "remote";
+  readonly origin: "local" | "remote" | "agent";
   /** 已完成握手；通知只发给已握手的连接 */
   readonly initialized: boolean;
   send(message: RpcMessage): void;
@@ -92,7 +92,7 @@ export class Hub {
 
   async closeRemotes(): Promise<void> {
     await Promise.allSettled(
-      [...this.peers].filter((peer) => peer.origin === "remote").map((peer) => peer.disconnect()),
+      [...this.peers].filter((peer) => peer.origin !== "local").map((peer) => peer.disconnect()),
     );
   }
 

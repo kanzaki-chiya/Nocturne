@@ -125,7 +125,6 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
         interactive: init.interactive,
         ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
       });
-      runtimes.push(runtime);
       const remember = (session: RuntimeSession): RuntimeSession => {
         opened.set(session.id, session);
         return session;
@@ -135,6 +134,7 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
         createSession: async (o) => remember(await runtime.createSession(o)),
         resumeSession: async (id, o) => remember(await runtime.resumeSession(id, o)),
       };
+      runtimes.push(observed);
       return {
         runtime: observed,
         sessionsDir,
@@ -200,6 +200,12 @@ export interface ProviderHarnessOptions extends HarnessOptions {
   noProviderConfig?: boolean;
   /** 启用定时任务调度器（ADR-0064）；任务与历史写在这份配置的临时 NOCTURNE_HOME 下 */
   scheduler?: boolean;
+  /** 启用本机外部 agent 管道（ADR-0074 §2） */
+  agentPipe?: boolean | string;
+  /** 外部 agent 配对确认超时毫秒数 */
+  agentPairingTimeoutMs?: number;
+  /** 挂载 remote host 配置（home + credentials） */
+  enableRemote?: boolean;
 }
 
 /**
@@ -255,6 +261,18 @@ export async function connectWithConfig(
   let disposed = false;
   const server = createRpcServer({
     nocturneVersion: "0.0.0-test",
+    ...(options.agentPipe !== undefined ? { agentPipe: options.agentPipe } : {}),
+    ...(options.agentPairingTimeoutMs !== undefined
+      ? { agentPairingTimeoutMs: options.agentPairingTimeoutMs }
+      : {}),
+    ...(options.enableRemote
+      ? {
+          remote: {
+            home,
+            credentials,
+          },
+        }
+      : {}),
     ...(options.remoteMessageLimit !== undefined
       ? { remoteMessageLimit: options.remoteMessageLimit }
       : {}),
@@ -270,7 +288,6 @@ export async function connectWithConfig(
         providers: [provider],
         interactive: init.interactive,
       });
-      runtimes.push(runtime);
       const remember = (session: RuntimeSession): RuntimeSession => {
         opened.set(session.id, session);
         return session;
@@ -280,6 +297,7 @@ export async function connectWithConfig(
         createSession: async (o) => remember(await runtime.createSession(o)),
         resumeSession: async (id, o) => remember(await runtime.resumeSession(id, o)),
       };
+      runtimes.push(observed);
       return {
         runtime: observed,
         sessionsDir: config.sessionsDir,
