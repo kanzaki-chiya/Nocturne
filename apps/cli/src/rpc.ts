@@ -75,6 +75,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
 
     const server = createRpcServer({
       nocturneVersion: options.version,
+      agentPipe: args.agentPipe,
       remote: {
         home: runtimeConfig.nocturneHome,
         credentials: runtimeConfig.credentials,

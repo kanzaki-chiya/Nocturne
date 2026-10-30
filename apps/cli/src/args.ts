@@ -11,8 +11,8 @@ export class UsageError extends Error {
   }
 }
 
-/** trust / untrust / setup / rpc 子命令（trust 写 trust.json；setup 走配置向导；rpc 是 RPC 服务端） */
-export type CliCommand = "trust" | "untrust" | "setup" | "rpc" | "grants";
+/** trust / untrust / setup / rpc / mcp / grants 子命令（trust 写 trust.json；setup 走配置向导；rpc 是 RPC 服务端；mcp 是对外 MCP 服务器桥） */
+export type CliCommand = "trust" | "untrust" | "setup" | "rpc" | "mcp" | "grants";
 
 export interface CliArgs {
   /** -p/--print：非交互模式 */
@@ -48,9 +48,13 @@ export interface CliArgs {
   stdio: boolean;
   /** --scheduler：rpc 后台里运行定时任务调度器（ADR-0064；只有桌面端拉起的后台传） */
   scheduler: boolean;
+  /** --agent-pipe：rpc 后台监听本机外部 agent 管道（ADR-0074；只有桌面端拉起的后台传） */
+  agentPipe: boolean;
+  /** --name <label>：mcp 子命令可选桥身份槽名称（ADR-0074） */
+  mcpName?: string | undefined;
   help: boolean;
   version: boolean;
-  /** trust / untrust / setup / rpc 子命令 */
+  /** trust / untrust / setup / rpc / mcp 子命令 */
   command?: CliCommand | undefined;
   grantsAction?: "list" | "revoke" | undefined;
   grantsIndex?: number | undefined;
@@ -76,6 +80,8 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn setup                  服务商配置：TTY 打开服务商页；--cli 用行式向导
   nctrn rpc --stdio            RPC 服务端：stdin/stdout 上的 JSON-RPC（桌面端等进程外客户端使用）
   nctrn rpc --stdio --scheduler  同上，并在本进程里运行定时任务调度器（桌面端后台用）
+  nctrn rpc --stdio --agent-pipe 同上，并监听本机外部 agent 管道（桌面端后台用）
+  nctrn mcp [--name <label>]   对外 MCP 服务器桥（stdio，连接桌面端后台驱动会话）
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
@@ -95,6 +101,8 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
       --api-key-env <名> 读取凭据的环境变量名
       --stdio            rpc 子命令的传输：从 stdin 读、向 stdout 写 JSON-RPC，诊断走 stderr
       --scheduler        rpc 子命令：在本进程里运行定时任务调度器（同一 NOCTURNE_HOME 只有一个调度器）
+      --agent-pipe       rpc 子命令：在本进程里监听本机外部 agent 管道（桌面端后台使用）
+      --name <label>     mcp 子命令：指定独立桥身份槽名称（保存在 <NOCTURNE_HOME>/mcp-bridge/<label>.json）
   -y, --yes              自动批准需要确认的操作
       --debug            启用诊断输出（等价 NOCTURNE_DEBUG=1）
       --debug-file <p>   诊断输出文件；"-" 写 stderr（等价 NOCTURNE_DEBUG_FILE）
@@ -143,6 +151,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         preset: { type: "string" },
         stdio: { type: "boolean", default: false },
         scheduler: { type: "boolean", default: false },
+        "agent-pipe": { type: "boolean", default: false },
+        name: { type: "string" },
         yes: { type: "boolean", short: "y", default: false },
         debug: { type: "boolean", default: false },
         "debug-file": { type: "string" },
@@ -165,7 +175,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     const first = positionals[0];
     if (
       !print &&
-      (first === "trust" || first === "untrust" || first === "setup" || first === "rpc") &&
+      (first === "trust" ||
+        first === "untrust" ||
+        first === "setup" ||
+        first === "rpc" ||
+        first === "mcp") &&
       positionals.length === 1
     ) {
       command = first;
@@ -233,6 +247,26 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   if (values.scheduler && command !== "rpc") {
     throw new UsageError("--scheduler 只能与 rpc 子命令搭配：nctrn rpc --stdio --scheduler");
   }
+  if (values["agent-pipe"] && command !== "rpc") {
+    throw new UsageError("--agent-pipe 只能与 rpc 子命令搭配：nctrn rpc --stdio --agent-pipe");
+  }
+  if (values.name !== undefined && command !== "mcp") {
+    throw new UsageError("--name 只能与 mcp 子命令搭配：nctrn mcp --name <label>");
+  }
+  if (
+    command === "mcp" &&
+    (print ||
+      cli ||
+      values.yes ||
+      values.preset !== undefined ||
+      values.model !== undefined ||
+      values["api-type"] !== undefined ||
+      values["base-url"] !== undefined ||
+      values["api-key-env"] !== undefined ||
+      values["force-unlock"])
+  ) {
+    throw new UsageError("mcp 子命令只接受可选的 --name <label>");
+  }
   if (command !== undefined && command !== "setup" && command !== "rpc" && cli) {
     throw new UsageError(`${command} 子命令不接受 --cli`);
   }
@@ -280,6 +314,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     yes: values.yes,
     stdio: values.stdio,
     scheduler: values.scheduler,
+    agentPipe: values["agent-pipe"],
+    mcpName: values.name,
     debug: values.debug,
     debugFile: values["debug-file"],
     help: values.help,

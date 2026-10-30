@@ -587,6 +587,8 @@ fn backend_open(
             std::ffi::OsStr::new("--stdio"),
             // 定时任务只在桌面端打开时运行（ADR-0064）：只有这个后台启用调度器
             std::ffi::OsStr::new("--scheduler"),
+            // 对外 MCP 桥本机管道只在桌面端打开时监听（ADR-0074 §2）
+            std::ffi::OsStr::new("--agent-pipe"),
         ],
     );
     command

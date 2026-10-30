@@ -27,6 +27,7 @@
       "@nocturne/core/protocol": ["./packages/core/src/protocol/index.ts"],
       "@nocturne/core/*": ["./packages/core/src/*"],
       "@nocturne/mcp": ["./packages/mcp/src/index.ts"],
+      "@nocturne/mcp-server": ["./packages/mcp-server/src/index.ts"],
       "@nocturne/acp": ["./packages/acp/src/index.ts"],
       "@nocturne/remote": ["./packages/remote/src/index.ts"],
       "@nocturne/rpc/server": ["./packages/rpc/src/server/index.ts"],

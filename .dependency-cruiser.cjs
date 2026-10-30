@@ -226,8 +226,8 @@ module.exports = {
       name: "no-deep-import-from-outside-core",
       severity: "error",
       comment:
-        "包外（apps、packages/acp、packages/mcp、packages/rpc）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
-      from: { path: "^(apps|packages/acp|packages/mcp|packages/rpc)/" },
+        "包外（apps、packages/acp、packages/mcp、packages/mcp-server、packages/rpc）只能 import @nocturne/core（src/index.ts）或 @nocturne/core/protocol（src/protocol/index.ts），任何内部路径一律禁止",
+      from: { path: "^(apps|packages/acp|packages/mcp|packages/mcp-server|packages/rpc)/" },
       to: {
         path: "^packages/core/src/",
         pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/protocol/index\\.ts$"],
@@ -240,6 +240,46 @@ module.exports = {
         "packages/mcp 只能依赖 @nocturne/core 公开入口与 MCP SDK（modules.md：Core 不依赖 mcp，mcp 不依赖 apps）",
       from: { path: "^packages/mcp/src" },
       to: { path: "^(packages/(?!mcp)|apps)/" },
+    },
+    {
+      name: "mcp-server-deps",
+      severity: "error",
+      comment:
+        "packages/mcp-server 只能依赖 @nocturne/rpc/client、@nocturne/remote 与 @nocturne/core/protocol（ADR-0074：不依赖 Core 运行时，不依赖 apps 与其他 packages）",
+      from: { path: "^packages/mcp-server/src" },
+      to: { path: "^(packages/(?!mcp-server|rpc|remote|core)|apps)/" },
+    },
+    {
+      name: "mcp-server-no-core-runtime",
+      severity: "error",
+      comment:
+        "packages/mcp-server 不能依赖 @nocturne/core 运行时，只能依赖 @nocturne/core/protocol（ADR-0074 第 1 节）",
+      from: { path: "^packages/mcp-server/src" },
+      to: {
+        path: "^packages/core/src/",
+        pathNot: "^packages/core/src/protocol/index\\.ts$",
+      },
+    },
+    {
+      name: "mcp-server-rpc-client-only",
+      severity: "error",
+      comment:
+        "packages/mcp-server 只作为 RPC 客户端，不依赖 @nocturne/rpc/server（ADR-0074 第 1 节）",
+      from: { path: "^packages/mcp-server/src" },
+      to: {
+        path: "^packages/rpc/src/",
+        pathNot: "^packages/rpc/src/client/index\\.ts$",
+      },
+    },
+    {
+      name: "only-cli-imports-mcp-server",
+      severity: "error",
+      comment:
+        "除 apps/cli（nctrn mcp 子命令入口）外，其他包与宿主不依赖 packages/mcp-server（ADR-0074 第 1 节）",
+      from: {
+        path: "^(packages/(?!mcp-server/)|apps/(?!cli/))",
+      },
+      to: { path: "^packages/mcp-server/" },
     },
     {
       name: "acp-deps",

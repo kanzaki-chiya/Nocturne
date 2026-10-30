@@ -121,6 +121,25 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(() => parseArgs(["setup", "--scheduler"])).toThrow(UsageError);
   });
 
+  it("rpc --stdio --agent-pipe 与 mcp [--name <label>]（ADR-0074）", () => {
+    expect(parseArgs([]).agentPipe).toBe(false);
+    expect(parseArgs(["rpc", "--stdio"]).agentPipe).toBe(false);
+    expect(parseArgs(["rpc", "--stdio", "--agent-pipe"]).agentPipe).toBe(true);
+    expect(() => parseArgs(["--agent-pipe"])).toThrow("rpc");
+
+    const m = parseArgs(["mcp"]);
+    expect(m.command).toBe("mcp");
+    expect(m.mcpName).toBeUndefined();
+
+    const named = parseArgs(["mcp", "--name", "claude-code"]);
+    expect(named.command).toBe("mcp");
+    expect(named.mcpName).toBe("claude-code");
+
+    expect(() => parseArgs(["--name", "claude-code"])).toThrow("mcp");
+    expect(() => parseArgs(["mcp", "--preset", "default"])).toThrow(UsageError);
+    expect(() => parseArgs(["mcp", "--tui"])).toThrow(UsageError);
+  });
+
   it("--inline：默认 false；可与 -c / --resume 组合；互斥项与 --tui 相同", () => {
     expect(parseArgs([]).inline).toBe(false);
     expect(parseArgs(["--inline"]).inline).toBe(true);

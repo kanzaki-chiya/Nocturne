@@ -93,6 +93,9 @@ importers:
       '@nocturne/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@nocturne/mcp-server':
+        specifier: workspace:*
+        version: link:../../packages/mcp-server
       '@nocturne/rpc':
         specifier: workspace:*
         version: link:../../packages/rpc
@@ -309,6 +312,21 @@ importers:
       '@nocturne/core':
         specifier: workspace:*
         version: link:../core
+
+  packages/mcp-server:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(supports-color@7.2.0)(zod@4.6.5)
+      '@nocturne/core':
+        specifier: workspace:*
+        version: link:../core
+      '@nocturne/remote':
+        specifier: workspace:*
+        version: link:../remote
+      '@nocturne/rpc':
+        specifier: workspace:*
+        version: link:../rpc
 
   packages/remote: {}
 

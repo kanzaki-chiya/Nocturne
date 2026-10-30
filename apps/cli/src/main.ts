@@ -149,6 +149,16 @@ async function main(): Promise<number> {
     return code;
   }
 
+  // mcp：对外 MCP 服务器桥（ADR-0074），经 stdio 与外部 agent 宿主通信，对内连桌面后台管道
+  if (args.command === "mcp") {
+    const { runNocturneMcpStdioServer } = await import("@nocturne/mcp-server");
+    await runNocturneMcpStdioServer({
+      version: VERSION,
+      ...(args.mcpName !== undefined ? { name: args.mcpName } : {}),
+    });
+    return 0;
+  }
+
   // setup：服务商配置向导（provider-setup.md 第 1 节）。
   // TTY 默认打开全屏服务商页（第 1 步）→ 无默认模型时模型页（第 2 步）；
   // --cli 用行式向导；stdin/stdout 非 TTY 时退出码 2 并提示手写配置

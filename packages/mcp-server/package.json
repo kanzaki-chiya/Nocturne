@@ -1,0 +1,31 @@
+{
+  "name": "@nocturne/mcp-server",
+  "version": "0.23.0",
+  "description": "Nocturne 对外 MCP 服务器桥（ADR-0074）：把本机桌面后台的会话能力暴露为 MCP 工具",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@nocturne/core": "workspace:*",
+    "@nocturne/remote": "workspace:*",
+    "@nocturne/rpc": "workspace:*"
+  }
+}

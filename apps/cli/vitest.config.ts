@@ -13,6 +13,10 @@ export default defineConfig({
         replacement: path.resolve(here, "../../packages/mcp/src/index.ts"),
       },
       {
+        find: /^@nocturne\/mcp-server$/,
+        replacement: path.resolve(here, "../../packages/mcp-server/src/index.ts"),
+      },
+      {
         find: /^@nocturne\/remote$/,
         replacement: path.resolve(here, "../../packages/remote/src/index.ts"),
       },

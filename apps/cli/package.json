@@ -24,6 +24,7 @@
     "@nocturne/acp": "workspace:*",
     "@nocturne/core": "workspace:*",
     "@nocturne/mcp": "workspace:*",
+    "@nocturne/mcp-server": "workspace:*",
     "@nocturne/rpc": "workspace:*",
     "@nocturne/tui": "workspace:*"
   }

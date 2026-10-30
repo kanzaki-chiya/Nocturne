@@ -24,6 +24,7 @@ const base: CliArgs = {
   yes: false,
   stdio: false,
   scheduler: false,
+  agentPipe: false,
   debug: false,
   help: false,
   version: false,
