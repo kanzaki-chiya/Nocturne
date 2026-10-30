@@ -333,14 +333,19 @@ describe("启动与交付", () => {
     const log = path.join(root, "hooks.log");
     const args = [
       "-e",
-      `require("fs").appendFileSync(${JSON.stringify(log)}, process.env.NOCTURNE_HOOK_EVENT + "\\n")`,
+      `let d = ""; process.stdin.on("data", (c) => { d += c; }).on("end", () => { const who = JSON.parse(d).subagent ? "child" : "main"; require("fs").appendFileSync(${JSON.stringify(log)}, process.env.NOCTURNE_HOOK_EVENT + ":" + who + "\\n"); })`,
     ];
     const { session } = await setup({ hooks: { TurnStart: [{ command: "node", args }] } });
     try {
       await session.submit({ text: "go" });
       await vi.waitFor(() => expect(turns(session)).toBe(2), { timeout: 5000 });
+      // 子会话同样触发 TurnStart（hooks.md 子会话一节），写入顺序不定，排序后比较
       await vi.waitFor(() =>
-        expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["TurnStart", "TurnStart"]),
+        expect(readFileSync(log, "utf8").trim().split("\n").sort()).toEqual([
+          "TurnStart:child",
+          "TurnStart:main",
+          "TurnStart:main",
+        ]),
       );
     } finally {
       await session.close();

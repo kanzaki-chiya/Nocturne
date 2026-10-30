@@ -143,18 +143,18 @@ describe("TUI 后台子代理", () => {
     const ui = render(
       inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={onClose} />),
     );
-    await pause(50);
-    const list = ui.lastFrame() ?? "";
-    expect(list).toContain("explore • 5s • 查找调用方");
-    expect(list.match(/查找调用方/g)).toHaveLength(1);
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain("explore • 5s • 查找调用方"));
+    expect((ui.lastFrame() ?? "").match(/查找调用方/g)).toHaveLength(1);
+    // Ink 在首帧之后才订阅输入：按键前稍等，结果用 waitFor 判断而不是固定等待
+    await pause(100);
     ui.stdin.write("\r");
-    await pause(30);
-    expect(ui.lastFrame()).toContain("取消 explore？");
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain("取消 explore？"));
     ui.stdin.write("\u001B[B");
     await pause(30);
     ui.stdin.write("\r");
-    await pause(30);
-    expect(cancelSubagent).toHaveBeenCalledWith({ parentSessionId: "p", childSessionId: "c1" });
+    await vi.waitFor(() =>
+      expect(cancelSubagent).toHaveBeenCalledWith({ parentSessionId: "p", childSessionId: "c1" }),
+    );
     expect(onClose).toHaveBeenCalled();
     ui.unmount();
   });
