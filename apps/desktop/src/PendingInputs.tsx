@@ -111,7 +111,9 @@ export function PendingInputs({
       {items.map((item) => (
         <div key={item.id} className={`pi-row pi-${item.mode}`}>
           <div className="pi-main">
-            <span className="pi-mode">{item.mode === "steer" ? "插话" : "排队"}</span>
+            <span className="pi-mode">
+              {item.mode === "subagent" ? "子代理结果" : item.mode === "steer" ? "插话" : "排队"}
+            </span>
             {editing === item.id ? (
               <input
                 ref={input}
@@ -132,8 +134,12 @@ export function PendingInputs({
                 }}
               />
             ) : (
-              <span className="pi-text" title={item.text}>
-                {item.text === "" ? "（仅图片）" : item.text}
+              <span className="pi-text" title={item.mode === "subagent" ? "等待送达" : item.text}>
+                {item.mode === "subagent"
+                  ? "等待送达"
+                  : item.text === ""
+                    ? "（仅图片）"
+                    : item.text}
               </span>
             )}
             {item.attachments > 0 && <span className="pi-atts">{item.attachments} 张图</span>}
@@ -163,35 +169,39 @@ export function PendingInputs({
                 </>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    className="pi-btn"
-                    disabled={disabled || busy}
-                    onClick={() => {
-                      startEdit(item);
-                    }}
-                  >
-                    编辑
-                  </button>
-                  <button
-                    type="button"
-                    className="pi-btn"
-                    disabled={disabled || busy}
-                    title={
-                      item.mode === "steer"
-                        ? "改为排队，Turn 结束后再发"
-                        : "改为插话，当前步骤结束后送达"
-                    }
-                    onClick={() => {
-                      void run(async () => {
-                        await onUpdate(item.id, {
-                          mode: item.mode === "steer" ? "queue" : "steer",
-                        });
-                      });
-                    }}
-                  >
-                    {item.mode === "steer" ? "改排队" : "改插话"}
-                  </button>
+                  {item.mode !== "subagent" && (
+                    <>
+                      <button
+                        type="button"
+                        className="pi-btn"
+                        disabled={disabled || busy}
+                        onClick={() => {
+                          startEdit(item);
+                        }}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        className="pi-btn"
+                        disabled={disabled || busy}
+                        title={
+                          item.mode === "steer"
+                            ? "改为排队，Turn 结束后再发"
+                            : "改为插话，当前步骤结束后送达"
+                        }
+                        onClick={() => {
+                          void run(async () => {
+                            await onUpdate(item.id, {
+                              mode: item.mode === "steer" ? "queue" : "steer",
+                            });
+                          });
+                        }}
+                      >
+                        {item.mode === "steer" ? "改排队" : "改插话"}
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     className="pi-btn pi-x"

@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ExternalAgentOverview, SkillOverview } from "@nocturne/core/protocol";
+import {
+  pendingBackgroundSubagents,
+  type ExternalAgentOverview,
+  type SkillOverview,
+} from "@nocturne/core/protocol";
 import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "../attachment-images";
@@ -79,6 +83,8 @@ export function SessionScreen({
   );
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
+  // 远程不开放 subagent.list：运行中的后台子代理从视图推导（ADR-0073 §6）
+  const backgrounds = useMemo(() => pendingBackgroundSubagents(view.entries), [view.entries]);
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState("");
   useEffect(() => {
@@ -235,6 +241,32 @@ export function SessionScreen({
         }}
         loadChangeDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
       />
+      {backgrounds.length > 0 && (
+        <div className="pi-list" aria-label="后台子代理">
+          {backgrounds.map((item) => (
+            <div className="pi-item" key={item.childSessionId}>
+              <span>{item.profile} · 后台</span>
+              <span className="pi-text">{item.task}</span>
+              <button
+                type="button"
+                className="pi-btn"
+                onClick={() => {
+                  void entry.client.runtime
+                    .cancelSubagent({
+                      parentSessionId: session.id,
+                      childSessionId: item.childSessionId,
+                    })
+                    .catch((cause: unknown) => {
+                      onError(errorText(cause));
+                    });
+                }}
+              >
+                取消
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <PhoneComposer
         key={session.id}
         variant="session"

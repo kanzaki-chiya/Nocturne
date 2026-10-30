@@ -641,6 +641,7 @@ export function useSidePanel({
 
   // ── 子代理（ADR-0060 第 6 节与修订（五））──
   const runtime = client?.runtime;
+  const [subagentCancelError, setSubagentCancelError] = useState<string>();
   const hasSession = active !== undefined;
   const [documentVisible, setDocumentVisible] = useState(
     () =>
@@ -1125,6 +1126,22 @@ export function useSidePanel({
     running: runningBuiltin(summaries),
     external: externalRows,
     onOpen: openSubagent,
+    cancelError: subagentCancelError,
+    onCancel: (summary) => {
+      setSubagentCancelError(undefined);
+      void runtime
+        ?.cancelSubagent({
+          parentSessionId: summary.parentSessionId,
+          childSessionId: summary.childSessionId,
+        })
+        .then(() => {
+          directory.trigger();
+        })
+        .catch((cause: unknown) => {
+          setSubagentCancelError(cause instanceof Error ? cause.message : String(cause));
+          directory.trigger();
+        });
+    },
   };
   // 面板关着且对话区让位后仍放得下才停靠，否则盖在对话区上（修订 2026-10-18（三））
   const overviewDocked =

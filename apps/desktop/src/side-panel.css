@@ -1288,6 +1288,31 @@
   color: var(--a-muted);
   font-variant-numeric: tabular-nums;
 }
+.ovpop-bg {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  color: var(--a-muted);
+}
+.ovpop-agent-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.ovpop-agent-row > .ovpop-agent {
+  flex: 1;
+}
+.ovpop .ovpop-cancel {
+  flex: none;
+  padding: 4px 8px;
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+}
+.ovpop .ovpop-cancel:hover,
+.ovpop .ovpop-cancel:focus-visible {
+  color: var(--a-error);
+}
 .ovpop-agent.external {
   display: flex;
   align-items: center;

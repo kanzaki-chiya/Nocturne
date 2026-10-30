@@ -109,7 +109,11 @@ export class SubagentDirectory {
     if (this.active && (identityChanged || !wasActive)) {
       this.refresh();
     } else if (this.active) {
-      if (next.pollNeeded) this.schedule();
+      if (
+        next.pollNeeded ||
+        this.summaries_.some((item) => item.background && item.state === "running")
+      )
+        this.schedule();
       else this.clearTimer();
     }
   }
@@ -186,7 +190,14 @@ export class SubagentDirectory {
 
   /** 有未结算 task 时，距离上次开始至少 1 秒再补查一次 */
   private schedule(): void {
-    if (!this.active || !this.ctx.pollNeeded || this.inflight || this.timer !== undefined) return;
+    if (
+      !this.active ||
+      (!this.ctx.pollNeeded &&
+        !this.summaries_.some((item) => item.background && item.state === "running")) ||
+      this.inflight ||
+      this.timer !== undefined
+    )
+      return;
     const wait = Math.max(0, this.lastStart + DIRECTORY_POLL_MS - Date.now());
     this.timer = setTimeout(() => {
       this.timer = undefined;

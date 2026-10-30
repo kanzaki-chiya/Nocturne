@@ -261,6 +261,8 @@ export interface OverviewSubagents {
   running: readonly SubagentSummary[];
   external: readonly OverviewExternal[];
   onOpen: (summary: SubagentSummary) => void;
+  onCancel?: (summary: SubagentSummary) => void;
+  cancelError?: string | undefined;
 }
 
 /** 每秒刷新的本地时钟：概览里的秒数靠它，不靠查询 */
@@ -285,9 +287,10 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
   return (
     <div className="ovpop-group thin-scroll" role="group" aria-label="子代理">
       <div className="ovpop-head">子代理</div>
+      {subagents.cancelError !== undefined && <div role="alert">{subagents.cancelError}</div>}
       {running.map((agent) => {
         const ms = runningMs(agent.startedAt, now);
-        return (
+        const open = (
           <button
             key={agent.childSessionId}
             type="button"
@@ -302,13 +305,34 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
               <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
             </svg>
             <span className="ovpop-agent-text">
-              <span className="ovpop-agent-profile">{agent.profile}</span>
+              <span className="ovpop-agent-profile">
+                {agent.profile}
+                {agent.background === true && <span className="ovpop-bg">后台</span>}
+              </span>
               <span className="ovpop-agent-summary">
                 {Array.from(agent.taskSummary).slice(0, SUBAGENT_SUMMARY_MAX).join("")}
               </span>
             </span>
             <span className="ovpop-n ovpop-time">{ms === undefined ? "" : elapsedText(ms)}</span>
           </button>
+        );
+        const onCancel = subagents.onCancel;
+        if (agent.background !== true || onCancel === undefined) return open;
+        // 后台子代理（ADR-0073 §6）：打开与取消是同一行里的两个按钮，不嵌套
+        return (
+          <div key={agent.childSessionId} className="ovpop-agent-row">
+            {open}
+            <button
+              type="button"
+              className="ovpop-cancel"
+              aria-label={`取消后台子代理 ${agent.profile}`}
+              onClick={() => {
+                onCancel(agent);
+              }}
+            >
+              取消
+            </button>
+          </div>
         );
       })}
       {external.map((run) => (

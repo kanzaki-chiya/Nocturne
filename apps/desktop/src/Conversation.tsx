@@ -61,6 +61,8 @@ import {
   untrackedCallsText,
   todoItemsFromCompletion,
   subagentRowInfo,
+  subagentResultText,
+  subagentResultLine,
   splitCodeRef,
   type PendingPermission,
   type ImageAttachment,
@@ -93,7 +95,7 @@ import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
-import type { SubagentLink } from "./subagent-panel";
+import { elapsedText, type SubagentLink } from "./subagent-panel";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
@@ -2582,8 +2584,39 @@ function EntryView({
   userRole?: "task" | "nudge" | undefined;
   scheduleSource?: ConversationProps["scheduleSource"];
 }) {
+  const subagentLinks = useContext(SubagentLinksContext);
   switch (entry.kind) {
     case "user":
+      if (entry.subagent !== undefined) {
+        const subagent = entry.subagent;
+        return (
+          <details className="ro-user subagent-result" aria-label="子代理结果">
+            <summary>
+              <span className="ro-user-tag">子代理结果</span>
+              <span className="ro-user-preview">
+                {subagentResultLine(subagent)}
+                {subagent.durationMs !== undefined && ` · ${elapsedText(subagent.durationMs)}`}
+              </span>
+            </summary>
+            {subagentLinks && (
+              <button
+                type="button"
+                className="subagent-view"
+                onClick={() => {
+                  subagentLinks.open(subagent.childSessionId);
+                }}
+              >
+                在面板中查看
+              </button>
+            )}
+            <Markdown
+              text={subagentResultText(userText(entry))}
+              openUrl={openUrl}
+              fileLinks={fileLinks}
+            />
+          </details>
+        );
+      }
       if (userRole !== undefined) {
         // 只读：任务原文与催促折叠展示，不当作可编辑的用户气泡（没有编辑、重发、分叉）
         return (
