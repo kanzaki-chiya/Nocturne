@@ -71,6 +71,8 @@ function fakeBackend() {
   const client = {
     runtime: {
       listSubagentWorktrees: vi.fn(async () => []),
+      deleteSubagentWorktree: vi.fn(async () => undefined),
+      readSubagentDiff: vi.fn(async () => ""),
       listSubagents: vi.fn(async (parent: string | { parentSessionId: string }) => {
         state.listCalls.push(typeof parent === "string" ? parent : parent.parentSessionId);
         return state.list;
@@ -952,6 +954,125 @@ it("会话被删除：该会话的子代理观察和视图一并释放", async (
   expect(backend.state.subscriptions[0]?.unsubscribed).toBe(true);
   const saved = JSON.parse(localStorageDump(prefs)) as { panelSessions?: Record<string, unknown> };
   expect(Object.keys(saved.panelSessions ?? {})).not.toContain("p");
+});
+
+it("工作树：概览保留项区分已并回与未并回（删除确认文案不同），点击改动文件在面板复用 DiffBody 渲染差异", async () => {
+  const { prefs, host, backend } = setup({ overview: true });
+  vi.mocked(backend.client.runtime.listSubagentWorktrees).mockResolvedValue([
+    {
+      childSessionId: "unmerged",
+      parentSessionId: "p",
+      repository: "Z:\\p",
+      worktree: "Z:\\wt\\unmerged",
+      branch: "nocturne/unmerged",
+      base: "111",
+      snapshot: false,
+      cwd: "Z:\\wt\\unmerged",
+      workspaceRoot: "Z:\\wt\\unmerged",
+      task: "unmerged task",
+      includeSkipped: false,
+      changes: {
+        branch: "nocturne/unmerged",
+        base: "111",
+        head: "222",
+        snapshot: false,
+        worktree: "Z:\\wt\\unmerged",
+        files: [
+          { path: "src/a.ts", status: "modified", additions: 2, deletions: 1 },
+          { path: "src/b.ts", status: "added", additions: 5, deletions: 0 },
+        ],
+      },
+    },
+    {
+      childSessionId: "merged",
+      parentSessionId: "p",
+      repository: "Z:\\p",
+      worktree: "Z:\\wt\\merged",
+      branch: "nocturne/merged",
+      base: "111",
+      snapshot: false,
+      cwd: "Z:\\wt\\merged",
+      workspaceRoot: "Z:\\wt\\merged",
+      task: "merged task",
+      includeSkipped: false,
+      applied: true,
+      changes: {
+        branch: "nocturne/merged",
+        base: "111",
+        head: "333",
+        snapshot: false,
+        worktree: "Z:\\wt\\merged",
+        files: [{ path: "src/c.ts", status: "modified", additions: 1, deletions: 1 }],
+      },
+    },
+  ]);
+  vi.mocked(backend.client.runtime.readSubagentDiff).mockResolvedValue(
+    [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1,2 +1,3 @@",
+      " const x = 1;",
+      "-const oldVal = 2;",
+      "+const newVal = 3;",
+      "+const extra = 4;",
+      "",
+    ].join("\n"),
+  );
+  const controller = { current: null as SidePanelController | null };
+  render(
+    <Harness
+      prefs={prefs}
+      host={host}
+      sessionId="p"
+      client={backend.client}
+      controller={controller}
+    />,
+  );
+  await flush();
+  const box = group() as HTMLElement;
+  expect(box.textContent).toContain("nocturne/unmerged");
+  expect(box.textContent).toContain("改动 2 个文件");
+  expect(box.textContent).toContain("nocturne/merged");
+  expect(box.textContent).toContain("改动 1 个文件 · 已并回");
+
+  // 未并回项删除确认：显示「其中的改动会丢失」
+  fireEvent.click(within(box).getByRole("button", { name: "删除副本与分支 nocturne/unmerged" }));
+  await flush();
+  expect(screen.getByText("删除副本与分支？")).toBeTruthy();
+  expect(screen.getByText("其中的改动会丢失")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  await flush();
+
+  // 已并回项删除确认：不显示「其中的改动会丢失」
+  fireEvent.click(within(box).getByRole("button", { name: "删除副本与分支 nocturne/merged" }));
+  await flush();
+  expect(screen.getByText("删除副本与分支？")).toBeTruthy();
+  expect(screen.queryByText("其中的改动会丢失")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "删除" }));
+  await flush();
+  expect(backend.client.runtime.deleteSubagentWorktree).toHaveBeenCalledWith({
+    parentSessionId: "p",
+    childSessionId: "merged",
+  });
+
+  // 点击子代理改动文件：复用 DiffBody 差异视图组件渲染
+  act(() => {
+    controller.current?.subagentLinks?.diff?.("unmerged", "src/a.ts");
+  });
+  await flush();
+  expect(backend.client.runtime.readSubagentDiff).toHaveBeenCalledWith({
+    parentSessionId: "p",
+    childSessionId: "unmerged",
+    file: "src/a.ts",
+  });
+  const diffSection = document.querySelector(".sp-changes-diff .sp-change");
+  expect(diffSection).toBeTruthy();
+  expect(diffSection?.querySelector(".diff-body")).toBeTruthy();
+  expect(diffSection?.textContent).toContain("const newVal = 3;");
+  expect(diffSection?.textContent).toContain("+2");
+  expect(diffSection?.textContent).toContain("−1");
 });
 
 function localStorageDump(prefs: PrefsStore): string {

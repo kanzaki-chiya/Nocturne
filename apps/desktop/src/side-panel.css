@@ -376,7 +376,7 @@
     max-height: 190px;
     border-bottom: 1px solid var(--a-border);
   }
-  .sp-changes-diff {
+  .sp-changes .sp-changes-diff {
     grid-row: 2;
   }
 }

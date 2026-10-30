@@ -1,7 +1,7 @@
 /**
  * 后台子代理（ADR-0073）集成测试：FakeProvider 驱动父子会话，全程离线。
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -201,6 +201,29 @@ describe("准入与 schema", () => {
       expect(completed?.payload.modelContent).toContain('isolation: "worktree"');
       expect(childRequests).toHaveLength(0);
       expect(await running(runtime, session.id)).toHaveLength(0);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("background: false 加 isolation: worktree 报 invalid_input，不创建子会话、副本或分支", async () => {
+    const { session, childRequests, sessionsDir, root } = await setup({
+      git: true,
+      parent: [
+        [
+          call("t1", "task", { task: "sync isolated", background: false, isolation: "worktree" }),
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    try {
+      await session.submit({ text: "go" });
+      const completed = taskCompleted(session)[0];
+      expect(completed?.payload.status).toBe("error");
+      expect(completed?.payload.error?.code).toBe("invalid_input");
+      expect(childRequests).toHaveLength(0);
+      expect(await listWorktreeRecords(sessionsDir, session.id)).toHaveLength(0);
+      expect((await worktreeGit(root, ["branch", "--list", "nocturne/*"])).trim()).toBe("");
     } finally {
       await session.close();
     }
@@ -468,6 +491,265 @@ describe("工作树生命周期", () => {
       expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("child\n");
     } finally {
       await session.close();
+    }
+  });
+
+  it.each(["clean", "3way"] as const)(
+    "并回 (%s) 同时处理新增、修改、删除文件且保留无关未提交修改，index 不变，检查点回退恢复原状",
+    async (mode) => {
+      let childId = "";
+      let step = "launch";
+      const { root, runtime, session, sessionsDir } = await setup({
+        git: true,
+        childWait: () => 10_000,
+        parentHandler: () => {
+          if (step === "launch") {
+            step = "idle";
+            return [
+              bg("isolated", { isolation: "worktree" }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          if (step === "apply") {
+            step = "idle";
+            return [
+              call("apply", "apply_subagent_changes", { id: childId, mode }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return done;
+        },
+      });
+      try {
+        writeFileSync(path.join(root, "gone.txt"), "to delete\n");
+        writeFileSync(path.join(root, "unrelated.txt"), "clean unrelated\n");
+        await worktreeGit(root, ["add", "gone.txt", "unrelated.txt"]);
+        await worktreeGit(root, [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@localhost",
+          "-c",
+          "commit.gpgsign=false",
+          "commit",
+          "--no-verify",
+          "-m",
+          "baseline",
+        ]);
+
+        await session.submit({ text: "launch" });
+        const record = must((await listWorktreeRecords(sessionsDir, session.id))[0]);
+        childId = record.childSessionId;
+        writeFileSync(path.join(record.worktree, "added.txt"), "added content\n");
+        writeFileSync(path.join(record.worktree, "code.txt"), "modified content\n");
+        rmSync(path.join(record.worktree, "gone.txt"));
+        await runtime.cancelSubagent({ parentSessionId: session.id, childSessionId: childId });
+        await vi.waitFor(() =>
+          expect(
+            session.durableEvents().filter((event) => event.type === "turn.completed"),
+          ).toHaveLength(2),
+        );
+
+        writeFileSync(path.join(root, "unrelated.txt"), "dirty unrelated\n");
+        const indexBefore = await worktreeGit(root, ["write-tree"]);
+
+        step = "apply";
+        await session.submit({ text: "apply" });
+        const applyCompleted = session
+          .durableEvents()
+          .filter(
+            (event) =>
+              event.type === "tool.completed" && event.payload.name === "apply_subagent_changes",
+          )
+          .at(-1);
+        expect(applyCompleted?.payload).toMatchObject({
+          status: "ok",
+          output: { conflicts: [] },
+        });
+        expect(readFileSync(path.join(root, "added.txt"), "utf8")).toBe("added content\n");
+        expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("modified content\n");
+        expect(existsSync(path.join(root, "gone.txt"))).toBe(false);
+        expect(readFileSync(path.join(root, "unrelated.txt"), "utf8")).toBe("dirty unrelated\n");
+        expect(await worktreeGit(root, ["write-tree"])).toBe(indexBefore);
+        expect(
+          (await runtime.listSubagentWorktrees({ parentSessionId: session.id }))[0]?.applied,
+        ).toBe(true);
+
+        const applyUser = must(
+          session
+            .durableEvents()
+            .filter((event) => event.type === "message.user")
+            .at(-1),
+        );
+        await session.rewind(applyUser.seq, "both");
+        expect(existsSync(path.join(root, "added.txt"))).toBe(false);
+        expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("original\n");
+        expect(readFileSync(path.join(root, "gone.txt"), "utf8")).toBe("to delete\n");
+        expect(readFileSync(path.join(root, "unrelated.txt"), "utf8")).toBe("dirty unrelated\n");
+        expect(await worktreeGit(root, ["write-tree"])).toBe(indexBefore);
+        expect(
+          (await runtime.listSubagentWorktrees({ parentSessionId: session.id }))[0]?.applied,
+        ).toBeUndefined();
+      } finally {
+        await session.close();
+      }
+    },
+  );
+
+  it("不可信项目：仅当 .worktreeinclude 存在时在创建副本阶段发 worktree_include_skipped 警告", async () => {
+    let launchNext = false;
+    let callIndex = 0;
+    const { root, runtime, session } = await setup({
+      git: true,
+      childWait: () => 10_000,
+      parentHandler: () => {
+        if (launchNext) {
+          launchNext = false;
+          callIndex += 1;
+          return [
+            bg(`inc-${String(callIndex)}`, { isolation: "worktree" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return done;
+      },
+    });
+    const warnings: string[] = [];
+    session.subscribe((event) => {
+      if (event.type === "runtime.warning") warnings.push(event.payload.code);
+    });
+    try {
+      launchNext = true;
+      await session.submit({ text: "without include" });
+      expect(warnings).not.toContain("worktree_include_skipped");
+      for (const item of await running(runtime, session.id))
+        await runtime.cancelSubagent({
+          parentSessionId: session.id,
+          childSessionId: item.childSessionId,
+        });
+      await vi.waitFor(
+        () =>
+          expect(
+            session.durableEvents().filter((event) => event.type === "turn.completed"),
+          ).toHaveLength(2),
+        { timeout: 5000 },
+      );
+      expect(warnings).not.toContain("worktree_include_skipped");
+
+      writeFileSync(path.join(root, ".worktreeinclude"), "*.secret\n");
+      launchNext = true;
+      await session.submit({ text: "with include" });
+      // 子代理仍在运行（childWait 10s），创建副本阶段即已发出警告
+      expect(await running(runtime, session.id)).toHaveLength(1);
+      expect(warnings).toContain("worktree_include_skipped");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("跳过未跟踪的符号链接，发 worktree_symlink_skipped 警告并在子代理任务说明中注明", async () => {
+    const { root, session, childRequests } = await setup({
+      git: true,
+      childWait: () => 20,
+      parent: [[bg("sym", { isolation: "worktree" }), { type: "finish", reason: "tool_calls" }]],
+    });
+    const warnings: { code: string; message: string }[] = [];
+    session.subscribe((event) => {
+      if (event.type === "runtime.warning") warnings.push(event.payload);
+    });
+    try {
+      writeFileSync(path.join(root, "target.txt"), "target\n");
+      symlinkSync(
+        path.join(root, "target.txt"),
+        path.join(root, "untracked-link.txt"),
+        process.platform === "win32" ? "file" : undefined,
+      );
+      await session.submit({ text: "go" });
+      expect(warnings).toContainEqual(
+        expect.objectContaining({
+          code: "worktree_symlink_skipped",
+          message: expect.stringContaining("untracked-link.txt"),
+        }),
+      );
+      await vi.waitFor(() => expect(results(session)).toHaveLength(1), { timeout: 5000 });
+      expect(results(session)[0]?.payload.subagent?.status).toBe("ok");
+      const promptText = JSON.stringify(childRequests[0]?.messages ?? []);
+      expect(promptText).toContain("以下符号链接未复制");
+      expect(promptText).toContain("untracked-link.txt");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("工作树子会话真实执行 shell：git -C 主仓库被拒绝，副本内 git status 放行", async () => {
+    let childTurn = 0;
+    let parentLaunched = false;
+    let mainRoot = "";
+    const { root, session, childRequests } = await setup({
+      git: true,
+    });
+    mainRoot = root;
+    try {
+      const childProvider = new FakeProvider({
+        handler: (request) => {
+          if (isChild(request)) {
+            childRequests.push(request);
+            childTurn += 1;
+            if (childTurn === 1) {
+              return [
+                call("escape-git", "shell", { command: `git -C "${mainRoot}" status` }),
+                call("local-git", "shell", { command: "git status" }),
+                { type: "finish", reason: "tool_calls" },
+              ];
+            }
+            return [
+              call("finish", "finish", { result: "checked" }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          if (!parentLaunched) {
+            parentLaunched = true;
+            return [
+              call("t1", "task", {
+                task: "check git isolation",
+                background: true,
+                isolation: "worktree",
+                preset: "general",
+              }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return done;
+        },
+      });
+      await session.close();
+      const customSessionsRoot = mkdtempSync(path.join(tmpdir(), "nct-bg-shell-"));
+      roots.push(customSessionsRoot);
+      const customRuntime = await createRuntime({
+        cwd: root,
+        sessionsDir: path.join(customSessionsRoot, "sessions"),
+        providers: [childProvider],
+        subagent: { background: true },
+        permissions: { autoApproveAsk: true },
+      });
+      const customSession = await customRuntime.createSession({
+        model: "fake/fake-1",
+        permissionPreset: "bypass",
+      });
+      try {
+        await customSession.submit({ text: "go" });
+        await vi.waitFor(() => expect(results(customSession)).toHaveLength(1), { timeout: 10_000 });
+        expect(results(customSession)[0]?.payload.subagent?.status).toBe("ok");
+        const secondRequest = JSON.stringify(childRequests.at(-1)?.messages ?? []);
+        expect(secondRequest).toContain(
+          "This subagent is isolated in its own worktree; commands must stay inside it.",
+        );
+        expect(secondRequest).toContain("nocturne/");
+      } finally {
+        await customSession.close();
+      }
+    } finally {
+      await session.close().catch(() => undefined);
     }
   });
   it("公开 API 删除登记的副本与分支", async () => {

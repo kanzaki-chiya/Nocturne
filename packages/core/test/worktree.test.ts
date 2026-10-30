@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -172,10 +172,19 @@ describe("isolated worktree with real git", () => {
     "copies only ignored include matches in trusted=%s projects",
     async (trusted) => {
       const { repository, input } = await fixture();
+      const withoutInclude = await createWorktree({
+        ...input,
+        childSessionId: `noinc-${String(trusted)}`,
+        trusted,
+      });
+      expect(withoutInclude.includeSkipped).toBe(false);
+      await settleWorktree(withoutInclude);
+
       await writeFile(path.join(repository, ".worktreeinclude"), "copy.secret\n");
       await writeFile(path.join(repository, "copy.secret"), "included");
       await writeFile(path.join(repository, "skip.secret"), "excluded");
       const record = await createWorktree({ ...input, trusted });
+      expect(record.includeSkipped).toBe(!trusted);
       if (trusted)
         expect(await readFile(path.join(record.worktree, "copy.secret"), "utf8")).toBe("included");
       else await expect(readFile(path.join(record.worktree, "copy.secret"))).rejects.toThrow();
@@ -183,6 +192,20 @@ describe("isolated worktree with real git", () => {
       expect(await settleWorktree(record)).toBeUndefined();
     },
   );
+  it("skips untracked symbolic links and records their paths", async () => {
+    const { repository, input } = await fixture();
+    await writeFile(path.join(repository, "real.txt"), "real\n");
+    await symlink(
+      path.join(repository, "real.txt"),
+      path.join(repository, "link.txt"),
+      process.platform === "win32" ? "file" : undefined,
+    );
+    const record = await createWorktree(input);
+    expect(record.skippedSymlinks).toEqual(["link.txt"]);
+    expect(await readFile(path.join(record.worktree, "real.txt"), "utf8")).toBe("real\n");
+    await expect(lstat(path.join(record.worktree, "link.txt"))).rejects.toThrow();
+    await settleWorktree(record);
+  });
   it("maps a subdirectory workspace into the full checkout", async () => {
     const { repository, input } = await fixture();
     await mkdir(path.join(repository, "sub"));

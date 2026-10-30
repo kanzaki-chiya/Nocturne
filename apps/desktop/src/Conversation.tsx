@@ -1862,7 +1862,7 @@ function diffRows(diff: string): DiffRow[] {
   const rows: DiffRow[] = [];
   let oldLine = 0;
   let newLine = 0;
-  for (const line of diff.replace(/\r\n?/g, "\n").split("\n")) {
+  for (const line of diff.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n")) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
     if (hunk !== null) {
       oldLine = Number(hunk[1]);
@@ -1875,6 +1875,10 @@ function diffRows(diff: string): DiffRow[] {
       line.startsWith("+++ ") ||
       line.startsWith("diff ") ||
       line.startsWith("index ") ||
+      line.startsWith("new file mode ") ||
+      line.startsWith("deleted file mode ") ||
+      line.startsWith("old mode ") ||
+      line.startsWith("new mode ") ||
       line.startsWith("@@") ||
       line.startsWith("\\")
     )

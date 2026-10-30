@@ -54,6 +54,8 @@ export interface WorktreeRecord {
   workspaceRoot: string;
   task: string;
   includeSkipped: boolean;
+  skippedSymlinks?: string[] | undefined;
+  applied?: boolean | undefined;
   changes?: SubagentChanges | undefined;
 }
 
@@ -174,7 +176,7 @@ export async function createWorktree(input: {
     cwd: path.join(worktree, cwdRelative),
     workspaceRoot: path.join(worktree, workspaceRelative),
     task: input.task,
-    includeSkipped: !input.trusted,
+    includeSkipped: false,
   };
   let created = false;
   try {
@@ -188,11 +190,14 @@ export async function createWorktree(input: {
     )
       .split("\0")
       .filter(Boolean);
+    const skippedSymlinks: string[] = [];
     const copy = async (file: string) => {
       const source = safeWorktreePath(input.repository, file);
       const target = safeWorktreePath(worktree, file);
-      if ((await lstat(source)).isSymbolicLink())
-        throw new Error(`Cannot copy symbolic link: ${file}`);
+      if ((await lstat(source)).isSymbolicLink()) {
+        skippedSymlinks.push(file);
+        return;
+      }
       await mkdir(path.dirname(target), { recursive: true });
       await copyFile(source, target);
     };
@@ -203,13 +208,15 @@ export async function createWorktree(input: {
       record.snapshot = true;
     }
     record.base = (await worktreeGit(worktree, ["rev-parse", "HEAD"])).trim();
-    if (input.trusted) {
-      const include = await readFile(path.join(input.repository, ".worktreeinclude"), "utf8").catch(
-        (cause: unknown) => {
-          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return "";
-          throw cause;
-        },
-      );
+    const include = await readFile(path.join(input.repository, ".worktreeinclude"), "utf8").catch(
+      (cause: unknown) => {
+        if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw cause;
+      },
+    );
+    if (include !== undefined && !input.trusted) {
+      record.includeSkipped = true;
+    } else if (include && input.trusted) {
       const rules = compileGitignore(include);
       if (rules.length) {
         const ignored = (
@@ -227,6 +234,7 @@ export async function createWorktree(input: {
           if (matchGitignore(rules, file, false) === true) await copy(file);
       }
     }
+    if (skippedSymlinks.length > 0) record.skippedSymlinks = skippedSymlinks;
     await writeFile(`${worktree}.json`, JSON.stringify(record), "utf8");
     return record;
   } catch (cause) {
@@ -365,8 +373,19 @@ export async function applyWorktreeChanges(
   const env = { ...process.env, GIT_INDEX_FILE: path.join(temporary, "index") };
   try {
     await worktreeGit(repository, ["read-tree", "HEAD"], undefined, env);
-    for (const file of changes.files)
-      await worktreeGit(repository, ["add", "-A", "--", file.path], undefined, env);
+    const tracked = new Set(
+      (await worktreeGit(repository, ["ls-files", "-z"], undefined, env))
+        .split("\0")
+        .filter(Boolean),
+    );
+    for (const file of changes.files) {
+      const exists = await lstat(safeWorktreePath(repository, file.path)).then(
+        () => true,
+        () => false,
+      );
+      if (exists || tracked.has(file.path))
+        await worktreeGit(repository, ["add", "-A", "--", file.path], undefined, env);
+    }
     let failure: unknown;
     try {
       await worktreeGit(repository, ["apply", "--3way", "-"], patch, env);

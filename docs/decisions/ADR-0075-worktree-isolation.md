@@ -26,8 +26,8 @@ ADR-0073 的后台子代理只能只读：它和主代理共用一个工作区�
 - **分支**：`git worktree add -b nocturne/<子会话 id> <path> HEAD`，用完整的子会话 id（如 `nocturne/202610311032-a1b2c3d4`），保证唯一并能直接对应会话。分支建在用户的仓库里，用户和主代理都能直接用 git 操作它。
 - **基线 `base`**：子代理应当看到用户眼前的代码，包括未提交的改动。
   - 主工作区干净时，`base` 就是当时的 `HEAD`。
-  - 有未提交改动时，把它们同步进副本：已跟踪文件的改动（含暂存区）由主工作区 `git diff --binary HEAD` 生成、在副本里 `git apply --binary`；未跟踪且未被忽略的文件（`git ls-files --others --exclude-standard -z`）逐个复制。然后在副本的分支上提交一次「快照提交」，`base` 指向它。快照提交只在这个分支上，不碰用户的其他分支和工作区。
-- **被忽略的文件**：沿用 Claude Code 与 Codex 共用的 `.worktreeinclude`：仓库根目录下的这个文件用 gitignore 语法列出模式，**既匹配模式、又被 git 忽略**的文件才复制进副本（例如 `.env.local`）。只在项目可信时读取（[config.md](../architecture/config.md) 第 3 节的信任模型），不可信时忽略并在结果里注明。不提供软链接，依赖由子代理在副本里自己安装。
+  - 有未提交改动时，把它们同步进副本：已跟踪文件的改动（含暂存区）由主工作区 `git diff --binary HEAD` 生成、在副本里 `git apply --binary`；未跟踪且未被忽略的文件（`git ls-files --others --exclude-standard -z`）逐个复制（遇到未跟踪的符号链接时跳过，在子代理的任务说明里注明「以下符号链接未复制」，并发 `runtime.warning` 代码 `worktree_symlink_skipped`）。然后在副本的分支上提交一次「快照提交」，`base` 指向它。快照提交只在这个分支上，不碰用户的其他分支和工作区。
+- **被忽略的文件**：沿用 Claude Code 与 Codex 共用的 `.worktreeinclude`：仓库根目录下的这个文件用 gitignore 语法列出模式，**既匹配模式、又被 git 忽略**的文件才复制进副本（例如 `.env.local`）。只在项目可信时读取（[config.md](../architecture/config.md) 第 3 节的信任模型）；项目不可信且 `.worktreeinclude` 存在时，在创建副本时忽略并发 `runtime.warning`（`worktree_include_skipped`）。不提供软链接，依赖由子代理在副本里自己安装。
 - **提交身份**：Nocturne 在副本里做的提交（快照提交、第 4 节的结果提交）一律带 `--no-verify` 与 `-c user.name=Nocturne -c user.email=nocturne@localhost -c commit.gpgsign=false`，不读写用户的 git 配置，不触发仓库的提交钩子。
 - 任一步失败：删除已创建的副本与分支，`task` 以 `tool_failed` 结算并带 git 的错误摘要，不启动子会话。
 - 主工作区不在仓库根目录时（`workspaceRoot` 是仓库的子目录），副本仍是整个仓库；子会话的 `cwd` 与 `workspaceRoot` 映射到副本里对应的子目录。
@@ -39,8 +39,9 @@ ADR-0073 的后台子代理只能只读：它和主代理共用一个工作区�
   - 副本内的改动按「工作区内」规则判定；`default` 预设下工作区内写入是 `ask`，非交互即拒绝——与同步子代理一样，可写子代理需要 `guarded` / `smart` / `bypass` 或相应授权。
   - 主工作区对子会话是「工作区外」，写入按工作区外规则判定（`ask` → 非交互拒绝）。
   - 项目配置的信任与规则来自主工作区（与父会话相同的已解析配置），副本里的 `.nocturne/` 文件不产生任何效果。
-- **shell 的隔离检查**（参照 Claude Code 对隔离子代理的做法），在权限层对工作树子会话追加两条 `deny`，求值顺序同高风险命令（[permissions.md](../architecture/permissions.md) 第 6 节），不受预设与 Grant 放宽：
+- **shell 的隔离检查**（参照 Claude Code 对隔离子代理的做法），在权限层对工作树子会话追加三条 `deny`，求值顺序同高风险命令（[permissions.md](../architecture/permissions.md) 第 6 节），不受预设与 Grant 放宽：
   - 命令的工作目录解析后不在副本内；
+  - 命令文本里出现切换目录（`cd`、`chdir`、`pushd`、`Set-Location`、`sl`、`Push-Location`），其目标路径按当前 cwd 解析后不在副本内，或为无参数、`~`；
   - 命令文本里出现把 git 指向副本以外的写法：`git -C <路径>`、`--git-dir=`、`--work-tree=`、`GIT_DIR=` / `GIT_WORK_TREE=` 赋值，且路径解析后不在副本内。
   - 拒绝说明告诉子模型：「This subagent is isolated in its own worktree; commands must stay inside it.」
   - 与高风险命令表一样，这是基于命令文本的检查，不是沙箱。
@@ -79,7 +80,7 @@ changes?: {
   - 内容是 `git diff --binary --no-renames <base> <head>`，在仓库根目录用 `git apply` 应用到工作区（不提交、不切分支，效果是未暂存的修改）。
   - `traits.mutates = true`；`permissionSubjects` 为改动文件在主工作区的绝对路径（`edit` 主体）。权限层照常判定；执行器按 `edit` 主体记录检查点（ADR-0041），所以并回可以回退。
   - `"clean"`：先 `git apply --check`，能干净应用才应用；不能时以 `tool_failed` 结算，`modelContent` 列出冲突文件，并提示可以改用 `mode: "3way"` 或自己用 git 合并。
-  - `"3way"`：`git apply --3way`。能自动合并的合上，合不上的在文件里写冲突标记；结算为 `ok` 并在 `modelContent` 列出带冲突标记的文件，由主代理继续解决。冲突标记同样在检查点之后写入，回退可以撤销。
+  - `"3way"`：使用临时 index（`GIT_INDEX_FILE`）执行 `git apply --3way`，用户的 index 不留未合并状态，主工作区有未提交修改时也能并回。能自动合并的合上，合不上的在文件里写冲突标记；结算为 `ok` 并在 `modelContent` 列出带冲突标记的文件，由主代理继续解决。冲突标记同样在检查点之后写入，回退可以撤销。
   - 改动路径一律相对仓库根目录解析，拒绝绝对路径和 `..`。
   - 同一个 `id` 已成功并回过（按有效事件里该工具的 `ok` 结果判断）：报 `invalid_input`。回退掉那次并回后可以再次并回。
 
@@ -139,3 +140,7 @@ changes?: {
 | Antigravity `/boost` | 短暂隔离工作树 | 协调器自己汇总、跑回归后交付 | 用后即删 |
 
 本 ADR 的取舍：保留副本与分支、用 git 合并、只在不丢改动时清理，同 Claude Code；基线取当前状态含未提交改动，同 Codex；并回工具把改动作为未暂存修改带回，接近 Cursor 的 `/apply-worktree`，另外经过权限与检查点；被忽略文件沿用 `.worktreeinclude`。
+
+## 修订
+
+- 2026-10-31：补充未跟踪符号链接跳过与 `worktree_symlink_skipped` 警告、`.worktreeinclude` 仅在存在且不可信时于创建阶段发 `worktree_include_skipped`、shell 隔离增加切换目录检查、`3way` 并回使用临时 index 的说明。

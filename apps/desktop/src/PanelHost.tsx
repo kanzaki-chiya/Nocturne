@@ -763,17 +763,24 @@ export function useSidePanel({
             open: openSubagentById,
             diff: (childSessionId, file) => {
               if (!sessionId) return;
+              const ws = active.workspace;
               void runtime
                 .readSubagentDiff({ parentSessionId: sessionId, childSessionId, file })
                 .then((diffText) => {
-                  placeTab({ id: newTabId(), kind: "file", absolutePath: file, diffText });
+                  placeTab({
+                    id: newTabId(),
+                    kind: "file",
+                    absolutePath: joinWorkspace(ws, file),
+                    workspace: ws,
+                    diffText,
+                  });
                 })
                 .catch((cause: unknown) => {
                   setSubagentCancelError(String(cause));
                 });
             },
           },
-    [runtime, hasSession, summaries, openSubagentById, sessionId, placeTab],
+    [runtime, hasSession, summaries, openSubagentById, sessionId, placeTab, active],
   );
   /** 外部 agent 调用没有 child：概览里首次看到它运行的本地时刻，用来本地计时 */
   const externalSeen = useRef(new Map<string, number>());
@@ -1157,6 +1164,24 @@ export function useSidePanel({
     if (overviewVisible && !overviewWasVisible.current) directory.trigger();
     overviewWasVisible.current = overviewVisible;
   }, [overviewVisible, directory]);
+  const appliedWorktreeIds = useMemo(
+    () =>
+      new Set(
+        (view?.entries ?? []).flatMap((entry) => {
+          if (
+            entry.kind !== "tool" ||
+            entry.name !== "apply_subagent_changes" ||
+            entry.status !== "ok"
+          )
+            return [];
+          const id =
+            (entry.result?.output as { id?: unknown } | undefined)?.id ??
+            (entry.input as { id?: unknown } | undefined)?.id;
+          return typeof id === "string" ? [id] : [];
+        }),
+      ),
+    [view?.entries],
+  );
   const overviewSubagents: OverviewSubagents = {
     running: runningBuiltin(summaries),
     external: externalRows,
@@ -1169,10 +1194,17 @@ export function useSidePanel({
         childSessionId: record.childSessionId,
         branch: record.branch,
         files: record.changes?.files.length ?? 0,
+        applied: Boolean(record.applied) || appliedWorktreeIds.has(record.childSessionId),
       })),
     onDelete: (childSessionId) => {
+      const found = retainedWorktrees.find((record) => record.childSessionId === childSessionId);
       setDeletingWorktree(
-        retainedWorktrees.find((record) => record.childSessionId === childSessionId),
+        found
+          ? {
+              ...found,
+              applied: Boolean(found.applied) || appliedWorktreeIds.has(found.childSessionId),
+            }
+          : undefined,
       );
     },
     onCancel: (summary) => {
@@ -1335,7 +1367,7 @@ export function useSidePanel({
           body={deletingWorktree.branch}
           confirmLabel="删除"
           danger
-          note="其中的改动会丢失"
+          {...(!deletingWorktree.applied ? { note: "其中的改动会丢失" } : {})}
           onClose={() => {
             setDeletingWorktree(undefined);
           }}

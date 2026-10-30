@@ -22,7 +22,7 @@ import type { AttachmentImageSource } from "./attachment-images";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
-import { DiffBody } from "./Conversation";
+import { DiffBody, diffCounts } from "./Conversation";
 import type { CodeViewer } from "./code-viewer";
 import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
@@ -1190,6 +1190,47 @@ function FileView({
 
 // ── 面板 ──
 
+function FileDiffView({
+  tab,
+  wrap,
+  onWrap,
+}: {
+  tab: FileTab & { diffText: string };
+  wrap: boolean;
+  onWrap: (next: boolean) => void;
+}) {
+  const { path } = fileTabLabel(tab);
+  const counts = diffCounts(tab.diffText);
+  return (
+    <div className="sp-changes-diff thin-scroll">
+      <section className="sp-change" aria-label={path}>
+        <header className="sp-change-head">
+          <span className="sp-change-path" title={tab.absolutePath}>
+            <bdi>{path}</bdi>
+          </span>
+          <Counts added={counts.add} removed={counts.del} />
+          <button
+            type="button"
+            className="sp-wrap-btn"
+            aria-pressed={wrap}
+            title={wrap ? "长行自动换行（点击改为横向滚动）" : "长行横向滚动（点击改为自动换行）"}
+            onClick={() => {
+              onWrap(!wrap);
+            }}
+          >
+            换行
+          </button>
+        </header>
+        {tab.diffText.trim() === "" ? (
+          <p className="turn-change-note">无文本差异</p>
+        ) : (
+          <DiffBody diff={tab.diffText} wrap={wrap} />
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function SidePanel(props: SidePanelProps) {
   const { tabs, activeId, overlay, width, onResize, changes, hidden = false } = props;
   const panes = props.panes ?? tabs;
@@ -1327,9 +1368,11 @@ export function SidePanel(props: SidePanelProps) {
                 />
               )
             ) : tab.diffText !== undefined ? (
-              <pre className="thin-scroll" style={{ overflow: "auto", padding: 16, margin: 0 }}>
-                {tab.diffText}
-              </pre>
+              <FileDiffView
+                tab={{ ...tab, diffText: tab.diffText }}
+                wrap={props.wrap !== false}
+                onWrap={(next) => props.onWrap?.(next)}
+              />
             ) : (
               <FileView
                 tab={tab}

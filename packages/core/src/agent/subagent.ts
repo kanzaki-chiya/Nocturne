@@ -398,7 +398,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         );
         const createChild = async () => {
           const id = repository ? newSessionId() : undefined;
-          if (repository && id)
+          if (repository && id) {
             worktree = await createWorktree({
               childSessionId: id,
               parentSessionId: ctx.sessionId,
@@ -409,6 +409,17 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               task: request.task,
               trusted: deps.trusted === true,
             });
+            if (worktree.includeSkipped)
+              deps.warning?.(
+                "worktree_include_skipped",
+                "Untrusted project: .worktreeinclude was ignored.",
+              );
+            if (worktree.skippedSymlinks?.length)
+              deps.warning?.(
+                "worktree_symlink_skipped",
+                `Skipped untracked symbolic links: ${worktree.skippedSymlinks.join(", ")}`,
+              );
+          }
           try {
             child = await deps.store.create({
               ...(id ? { id } : {}),
@@ -664,9 +675,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           if (child === undefined) throw new Error("Child session unavailable");
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             const last = attempt === maxAttempts;
+            const taskPrompt = worktree?.skippedSymlinks?.length
+              ? `${request.task}\n\n以下符号链接未复制：${worktree.skippedSymlinks.join(", ")}`
+              : request.task;
             const prompt =
               attempt === 1
-                ? request.task
+                ? taskPrompt
                 : last
                   ? "你还没有提交结果。立即调用 finish 工具提交 result；不要输出其他内容。"
                   : "你还没有提交结果；请调用 finish 工具提交 result 后结束。";
@@ -777,11 +791,6 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             async () => {
               if (!worktree) return undefined;
               try {
-                if (worktree.includeSkipped)
-                  deps.warning?.(
-                    "worktree_include_skipped",
-                    "Untrusted project: .worktreeinclude was ignored.",
-                  );
                 return await settleWorktree(worktree);
               } catch (cause) {
                 deps.warning?.(

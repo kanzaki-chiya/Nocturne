@@ -59,12 +59,13 @@ export function Subagents({
       record.changes !== undefined &&
       !items.some((item) => item.childSessionId === record.childSessionId),
   );
-  if (deleting)
+  if (deleting) {
+    const deletingRecord = retained.find((record) => record.childSessionId === deleting);
     return (
       // 各弹层用不同 key：同位置的 PickList 会沿用上一层的光标
       <PickList
         key="delete"
-        title="删除副本与分支？其中的改动会丢失"
+        title={deletingRecord?.applied ? "删除副本与分支？" : "删除副本与分支？其中的改动会丢失"}
         items={[
           { label: "返回", value: false },
           { label: "删除", value: true },
@@ -88,6 +89,7 @@ export function Subagents({
         }}
       />
     );
+  }
   if (selected)
     return (
       <PickList
@@ -126,7 +128,7 @@ export function Subagents({
           value: item.childSessionId,
         })),
         ...retained.map((record) => ({
-          label: `${record.branch} · 改动 ${record.changes?.files.length ?? 0} 个文件`,
+          label: `${record.branch} · 改动 ${record.changes?.files.length ?? 0} 个文件${record.applied ? " · 已并回" : ""}`,
           value: record.childSessionId,
         })),
       ]}

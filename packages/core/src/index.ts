@@ -102,6 +102,7 @@ import {
   type RunOutcome,
 } from "./schedule/index.js";
 import { createCheckpointRecorder } from "./session/checkpoints.js";
+import { readLogReadonly } from "./session/readonly-log.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import { createTurnChanges } from "./session/turn-changes.js";
 import {
@@ -1117,6 +1118,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillModel: { workspaceRoot: string; contextWindow: () => number | undefined };
     fork(targetSeq?: number): Promise<string>;
     rename(title: string): Promise<void>;
+    durableEvents(): readonly DurableEvent[];
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
   }
@@ -2976,6 +2978,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         contextWindow: () => model.model.contextWindow,
       },
       fork: forkOpen,
+      durableEvents: () => session.durableEvents(),
       rename: async (title) => {
         assertUsable();
         if (meta.parent !== undefined)
@@ -4416,7 +4419,34 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw new RuntimeCommandError("invalid_command", "没有保留的子代理改动");
       return readWorktreeDiff(record.repository, record.changes, input.file);
     },
-    listSubagentWorktrees: (input) => listWorktreeRecords(sessionsDir, input.parentSessionId),
+    async listSubagentWorktrees(input) {
+      const records = await listWorktreeRecords(sessionsDir, input.parentSessionId);
+      if (records.length === 0) return records;
+      const events =
+        openSessions.get(input.parentSessionId)?.durableEvents() ??
+        (await readLogReadonly(
+          platform.fs,
+          platform.paths.resolve(sessionsDir, `${input.parentSessionId}.jsonl`),
+          input.parentSessionId,
+        )
+          .then((log) => log.events)
+          .catch(() => []));
+      const appliedIds = new Set(
+        effectiveEvents(events).flatMap((event) =>
+          event.type === "tool.completed" &&
+          event.payload.name === "apply_subagent_changes" &&
+          event.payload.status === "ok" &&
+          typeof (event.payload.output as { id?: unknown } | undefined)?.id === "string"
+            ? [(event.payload.output as { id: string }).id]
+            : [],
+        ),
+      );
+      return records.map((record) =>
+        record.applied || appliedIds.has(record.childSessionId)
+          ? { ...record, applied: true }
+          : record,
+      );
+    },
     async deleteSubagentWorktree(input) {
       const record = (await listWorktreeRecords(sessionsDir, input.parentSessionId)).find(
         (record) => record.childSessionId === input.childSessionId,

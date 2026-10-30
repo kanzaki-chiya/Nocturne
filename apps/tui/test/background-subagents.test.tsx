@@ -226,6 +226,12 @@ describe("TUI 后台子代理", () => {
             branch: "nocturne/c9",
             changes: { files: [{ path: "a" }, { path: "b" }] },
           },
+          {
+            childSessionId: "c8",
+            branch: "nocturne/c8",
+            applied: true,
+            changes: { files: [{ path: "c" }] },
+          },
         ]),
       deleteSubagentWorktree,
     } as unknown as Runtime;
@@ -233,7 +239,10 @@ describe("TUI 后台子代理", () => {
     const ui = render(
       inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={onClose} />),
     );
-    await vi.waitFor(() => expect(ui.lastFrame()).toContain("nocturne/c9 • 改动 2 个文件"));
+    await vi.waitFor(() => {
+      expect(ui.lastFrame()).toContain("nocturne/c9 • 改动 2 个文件");
+      expect(ui.lastFrame()).toContain("nocturne/c8 • 改动 1 个文件 • 已并回");
+    });
     expect(ui.lastFrame()).toContain("general • 隔离");
     expect(ui.lastFrame()).not.toContain("nocturne/c1");
     await pause(100);

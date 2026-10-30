@@ -263,7 +263,12 @@ export interface OverviewSubagents {
   onOpen: (summary: SubagentSummary) => void;
   onCancel?: (summary: SubagentSummary) => void;
   cancelError?: string | undefined;
-  retained?: readonly { childSessionId: string; branch: string; files: number }[];
+  retained?: readonly {
+    childSessionId: string;
+    branch: string;
+    files: number;
+    applied?: boolean | undefined;
+  }[];
   onDelete?: (id: string) => void;
   isolated?: ReadonlySet<string>;
 }
@@ -347,7 +352,9 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
         <div className="ovpop-agent-row ovpop-retained" key={record.childSessionId}>
           <span className="ovpop-agent-text" title={record.branch}>
             <span className="ovpop-agent-profile ovpop-branch">{record.branch}</span>
-            <span className="ovpop-agent-summary">改动 {record.files} 个文件</span>
+            <span className="ovpop-agent-summary">
+              改动 {record.files} 个文件{record.applied ? " · 已并回" : ""}
+            </span>
           </span>
           <button
             type="button"
