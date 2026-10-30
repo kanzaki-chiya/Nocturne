@@ -309,6 +309,7 @@ export interface SubjectRequest {
    * 权限层据此选择分词方言；缺省按 POSIX 保守处理。
    */
   shell?: string | undefined;
+  shellCwd?: string | undefined;
   /** shell 主体：生效描述符携带的高风险元数据；缺省时权限层按 POSIX 基础表保守处理 */
   shellRisk?: ShellRiskProfile | undefined;
   /**
@@ -337,6 +338,7 @@ export interface PermissionSubject {
   where?: SubjectWhere | undefined;
   /** shell 主体：执行该命令的 shell 种类（ADR-0022） */
   shell?: string | undefined;
+  shellCwd?: string | undefined;
   /** shell 主体：生效描述符携带的高风险元数据（由 tools 层从 ShellDescriptor 透传） */
   shellRisk?: ShellRiskProfile | undefined;
   /** shell 主体：各方言的高风险元数据，用于嵌套 shell 调用的命令体（见 SubjectRequest） */

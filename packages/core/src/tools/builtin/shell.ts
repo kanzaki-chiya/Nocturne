@@ -146,6 +146,10 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       {
         kind: "shell",
         target: input.command,
+        // ADR-0075 §3：工作树子会话按解析后的工作目录判断是否越出副本
+        ...((scope.paths as ToolScope["paths"] | undefined) !== undefined
+          ? { shellCwd: scope.paths.resolve(scope.cwd, input.cwd ?? ".") }
+          : {}),
         ...(descriptor !== undefined ? { shell: descriptor.kind, shellRisk: descriptor.risk } : {}),
         shellRiskByDialect: SHELL_RISK_BY_DIALECT,
       },

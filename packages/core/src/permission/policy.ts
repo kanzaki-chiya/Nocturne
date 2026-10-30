@@ -17,6 +17,7 @@ import type {
   RuleOrigin,
 } from "../protocol/index.js";
 import { matchGrant } from "./grants.js";
+import { escapesWorktree, WORKTREE_DENY } from "./worktree.js";
 import {
   isCompositeShell,
   isOpaquePowerShellCommand,
@@ -33,6 +34,7 @@ import { computeWhere } from "./where.js";
 import type { EvaluateOptions, PermissionPolicy, SubjectEvaluation } from "./types.js";
 
 export interface RulePolicyOptions {
+  worktree?: { root: string; cwd: string } | undefined;
   /** 已解析为真实路径的工作区根目录 */
   workspaceRoot: string;
   /** 路径比较是否大小写敏感（来自 platform 的文件系统信息） */
@@ -244,6 +246,11 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     evalOptions: EvaluateOptions | undefined,
   ): SubjectVerdict {
     const skipApprovals = evalOptions?.skipApprovals;
+    if (
+      options.worktree &&
+      escapesWorktree(s, options.worktree.root, options.worktree.cwd, caseSensitive)
+    )
+      return { action: "deny", hit: { origin: "default", description: WORKTREE_DENY } };
     // 内置硬拒绝（provider-setup.md 第 4 节）：凭据索引等文件在任何
     // 规则/Grant/--yes/guarded/Hook 下都不可读写——词法与真实路径都查
     const externalCredential = isExternalCredential(s);

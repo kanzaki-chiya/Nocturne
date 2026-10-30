@@ -73,6 +73,8 @@ export async function resolveSubjects(
         target: req.target,
         detail: req.detail,
         shell: req.shell,
+        shellCwd:
+          req.shellCwd === undefined ? undefined : await scope.platform.resolveReal(req.shellCwd),
         shellRisk: req.shellRisk,
         shellRiskByDialect: req.shellRiskByDialect,
         readOnly: req.readOnly,
