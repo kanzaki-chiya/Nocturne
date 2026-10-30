@@ -39,6 +39,33 @@ const PNG_2x3 = new Uint8Array([
 const makeStore = (attachmentsDir: string, sessionId: string) =>
   createAttachmentStore({ fs: platform.fs, paths: platform.paths, attachmentsDir, sessionId });
 
+describe("任意文件提交（ADR-0072）", () => {
+  it("只提交文件，引用隐藏于显示正文；授权读取、分叉副本、排队快照", async () => {
+    const ws = tmpDir("nct-files-ws-");
+    const sessionsDir = tmpDir("nct-files-sessions-");
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir,
+      providers: [new FakeProvider({ scripts: [[{ type: "finish", reason: "stop" }]] })],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const data = new TextEncoder().encode("log line\n");
+    await session.submit({ attachments: [{ data, mimeType: "text/plain", label: "build.log" }] });
+    const user = session.state().history.find((h) => h.kind === "user");
+    if (user?.kind !== "user" || !user.files?.[0]) throw new Error("missing file");
+    expect(user.files[0].text?.lines).toBe(1);
+    expect(JSON.stringify(user.content)).toContain('<attachment name=\\"build.log\\"');
+    expect((await session.readAttachment(user.files[0].file)).data).toEqual(Buffer.from(data));
+    await expect(session.readAttachment("file-999.txt")).rejects.toMatchObject({
+      code: "attachment_not_found",
+    });
+    const fork = await runtime.resumeSession(await runtime.forkSession(session.id));
+    expect((await fork.readAttachment(user.files[0].file)).data).toEqual(Buffer.from(data));
+    await fork.close();
+    await session.close();
+  });
+});
+
 describe("附件编号跨恢复续接（ADR-0023）", () => {
   it("带附件的会话恢复后历史含引用，新 save 续编号不撞旧文件", async () => {
     const sessionsDir = tmpDir("nct-att-sess-");

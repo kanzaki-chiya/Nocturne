@@ -2,6 +2,8 @@
 
 > 状态：已接受 v0.3 ｜ 前置阅读：[sessions.md](sessions.md) ｜ 相关契约：[provider-api.md](../protocols/provider-api.md)
 
+文件附件引用由 Core 在提交时追加到用户消息，Builder 不变，见 [ADR-0072](../decisions/ADR-0072-file-attachments.md)。
+
 ## 1. 两个不同的东西
 
 | | 会话历史（Session History） | 模型上下文（Model Context） |

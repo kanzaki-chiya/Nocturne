@@ -236,6 +236,7 @@ describe("执行器附件落盘（ADR-0023）", () => {
     const ws = tmpDir("nct-att-ws-");
     const failing: AttachmentStore = {
       save: () => Promise.reject(new Error("disk full")),
+      saveFile: () => Promise.reject(new Error("disk full")),
       load: () => Promise.resolve(undefined),
     };
     const diag: { kind: string; data: Record<string, unknown> | undefined }[] = [];

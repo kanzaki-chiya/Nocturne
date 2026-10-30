@@ -116,6 +116,71 @@ function waitEvent(
   });
 }
 
+describe("回答附件（ADR-0072）", () => {
+  it("选项题附件 invalid_reply，请求保持等待", async () => {
+    const { runtime } = await makeRuntime(
+      askThenDone([{ question: "选方案", options: [{ label: "A" }, { label: "B" }] }]),
+      { interactive: true, autoApproveAsk: true },
+    );
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const turn = session.submit({ text: "开始" });
+    const requested = await waitEvent(session, events, (e) => e.type === "question.requested");
+    if (requested.type !== "question.requested") throw new Error("missing question");
+    await expect(
+      session.respondQuestion(requested.payload.requestId, {
+        answers: [{ selected: [], attachments: [{ data: new Uint8Array([1]), mimeType: "x" }] }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_reply" });
+    await session.respondQuestion(requested.payload.requestId, { answers: [{ selected: ["A"] }] });
+    await turn;
+    await session.close();
+  });
+  it("仅文件回答落盘，工具引用可读且原始字节不进入事件", async () => {
+    const { runtime } = await makeRuntime(askThenDone([{ question: "提供日志" }]), {
+      interactive: true,
+      autoApproveAsk: true,
+    });
+    const session = await makeSession(runtime);
+    try {
+      const events = collect(session);
+      const turn = session.submit({ text: "检查" });
+      const requested = await waitEvent(session, events, (e) => e.type === "question.requested");
+      if (requested.type !== "question.requested") throw new Error("missing question");
+      await session.respondQuestion(requested.payload.requestId, {
+        answers: [
+          {
+            selected: [],
+            attachments: [
+              {
+                data: new TextEncoder().encode("private log\n"),
+                mimeType: "text/plain",
+                label: "build.log",
+              },
+            ],
+          },
+        ],
+      });
+      await turn;
+      const result = completedFor(events)[0]?.payload;
+      expect(result?.files?.[0]).toMatchObject({
+        label: "build.log",
+        source: "answer",
+        text: { lines: 1 },
+      });
+      expect(result?.modelContent).toContain('<attachment name="build.log"');
+      expect(JSON.stringify(events)).not.toContain("private log");
+      const file = result?.files?.[0];
+      if (!file) throw new Error("missing file");
+      expect(new TextDecoder().decode((await session.readAttachment(file.file)).data)).toBe(
+        "private log\n",
+      );
+    } finally {
+      await session.close();
+    }
+  });
+});
+
 describe("ask_user 输入校验（ADR-0032 §1）", () => {
   const invalidInputs: [string, unknown][] = [
     ["空数组", []],

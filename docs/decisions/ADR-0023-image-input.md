@@ -3,6 +3,8 @@
 - 状态：已接受（维护者 2026-09-28 确认：单图 5 MB / 8000 px 不缩放、Alt+V、拖入路径转占位、分三步实现）；第 1 节的声明入口（`/provider image`、`userCapabilities`）被 [ADR-0024](ADR-0024-model-settings-editor.md) 取代
 - 日期：2026-09-28
 
+> 被 [ADR-0072](ADR-0072-file-attachments.md) 扩展。
+
 ## 背景
 
 v0.5 要让模型能「看图」：先让 `read` 工具能读图片，再支持在 TUI 里粘贴截图。维护者日常使用的 deepseek-v4.1-flash 支持图片输入（Chat Completions 的 `image_url`，base64 data URL）。

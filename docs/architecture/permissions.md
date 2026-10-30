@@ -236,7 +236,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 表中没有覆盖到的组合落到"无规则匹配 → `ask`"。所有预设的规则序列都按以下次序排列（后写优先）：
 
 1. 宽规则（按上表，如 `default` 的 `read ** where=workspace → allow`）；
-2. **本会话落盘目录可读**：`read <sessionsDir>/attachments/<sessionId>/** → allow`——只放行**当前会话**的落盘输出（模型回读自己的完整输出不触发确认），读其他会话的附件仍走正常求值（`default` 下即 `ask`）；
+2. **本会话落盘目录可读**：`read <sessionsDir>/attachments/<sessionId>/** → allow`——只放行**当前会话**的落盘输出（包含图片、文件附件与工具落盘输出，模型回读不触发确认，见 [ADR-0072](../decisions/ADR-0072-file-attachments.md)），读其他会话的附件仍走正常求值（`default` 下即 `ask`）；
 3. **受保护路径**：对 `.git/` 内部与 `.nocturne/` 配置目录的 `edit` 保证"至少 ask"——在 `read-only`（`edit` 一律 `deny`）中不生成这两条 ask 规则，受保护路径保持 `deny`；其余预设中生成 `ask` 且排在宽 `allow` 之后；`bypass` 只保留 `.nocturne/` 的保护，不生成 `.git/` 的 ask；
 4. **Nocturne 授权数据**：对 `<NOCTURNE_HOME>/config.json`、`settings.json`（ADR-0034）、`trust.json`、`grants/**`、`providers.json`（v0.2）、`mcp.json`（ADR-0047）、`external-agents.json`（ADR-0049 第 2 步）的 `edit` 保证"至少 ask"（同上，`read-only` 保持 `deny`），`label` 为"修改 Nocturne 授权配置"，命中时出现在确认提示与 `permission.resolved.rule` 中。`<NOCTURNE_HOME>/schedules.json` 与 `schedules/**` 的 `edit` 同样至少 ask（`label` 为"修改定时任务"，`userOnly`）：直接改文件会绕过 `schedule` 主体的确认。**如实说明**：这是提示而非安全边界——`--yes` 会把这类 `ask` 提升为 `allow`，`guarded` 预设下的 `shell` 也可以绕过（权限不是沙箱，见第 1 节）；
 5. **可能读取凭据的命令**（v0.2，全部预设含 `bypass`）：命令字符串含 `credentials.json`、生效 `external-file` 的凭据文件名，或凭据后端命令（`security …-generic-password` 族、`secret-tool`、`ProtectedData`）的 `shell` 至少 `ask`，`label` 为"可能读取 Nocturne 凭据"，同样只是基于模式的提示（5.3、[provider-setup.md](provider-setup.md) 第 4 节）；

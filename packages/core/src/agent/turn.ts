@@ -24,6 +24,7 @@ import type {
   AgentDelegation,
   ContentBlock,
   FileRef,
+  FileAttachment,
   FinishReason,
   ImageAttachment,
   LoopGuardConfig,
@@ -103,6 +104,7 @@ export async function runTurn(
   fileRefs?: FileRef[],
   skill?: SkillSnapshot,
   delegate?: AgentDelegation,
+  files?: FileAttachment[],
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -149,6 +151,7 @@ export async function runTurn(
           messageId: id("message"),
           content: preparedContent(item),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+          ...(item.files?.length ? { files: item.files } : {}),
           ...(item.fileRefs?.length ? { fileRefs: item.fileRefs } : {}),
           ...(item.skill !== undefined ? { skill: item.skill } : {}),
           ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
@@ -347,6 +350,7 @@ export async function runTurn(
         messageId: id("message"),
         content,
         ...(attachments?.length ? { attachments } : {}),
+        ...(files?.length ? { files } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),

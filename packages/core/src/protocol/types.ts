@@ -213,6 +213,24 @@ export interface ImageAttachment {
   source: "paste" | "read" | "mcp";
 }
 
+export interface AttachmentInput {
+  data: Uint8Array;
+  mimeType: string;
+  label?: string | undefined;
+  source?: "paste" | "upload" | "answer" | undefined;
+}
+
+export interface FileAttachment {
+  type: "file";
+  file: string;
+  bytes: number;
+  sha256: string;
+  label: string;
+  mimeType?: string | undefined;
+  text?: { lines: number } | undefined;
+  source: "paste" | "upload" | "answer";
+}
+
 /** 一次工具调用的引用。callId 由 Runtime 分配、会话内唯一 */
 export interface ToolCallRef {
   callId: string;
@@ -450,6 +468,7 @@ export type HistoryEntry =
       content: ContentBlock[];
       /** 随用户消息附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;
+      files?: FileAttachment[] | undefined;
       fileRefs?: FileRef[] | undefined;
       /** 技能调用的正文快照（skills.md 第 2 节）；旧日志无此字段 */
       skill?: SkillSnapshot | undefined;
@@ -490,6 +509,7 @@ export type HistoryEntry =
       pinResult?: boolean | undefined;
       /** 工具结果附带的图片引用（ADR-0023）；旧日志无此字段 */
       attachments?: ImageAttachment[] | undefined;
+      files?: FileAttachment[] | undefined;
     }
   | {
       kind: "compaction";
@@ -612,6 +632,7 @@ export type QuestionAnswer =
       selected: string[];
       /** 「其他」自由文本；省略 = 没有文字补充 */
       text?: string | undefined;
+      attachments?: AttachmentInput[] | undefined;
     };
 
 /** MCP 工具按需加载模式（ADR-0067 §4）：auto（默认，超过 10,000 token 时按需）、always、never */
@@ -635,6 +656,7 @@ export interface PendingInputItem {
   text: string;
   /** 已附图的数量；附件、@ 引用与技能快照随原提交保留，编辑只替换文本 */
   attachments: number;
+  files?: { label: string; bytes: number }[] | undefined;
   /** 提交时刻（ISO 8601） */
   createdAt: string;
   /** 暂停期间不自动发送（ADR-0070 §4） */

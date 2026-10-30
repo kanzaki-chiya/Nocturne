@@ -4,6 +4,8 @@
 
 面向客户端的会话视图投影。`protocol` 中的纯函数 reducer 把事件流折叠成 `SessionView`，供 TUI 及后续所有客户端渲染使用（ADR-0002 第 5 条：派生视图由 `protocol` 提供，客户端不得各自重写投影逻辑）。
 
+文件附件（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）在 `UserEntry.files?` 与工具历史 `files?` 中投影；缺省保持旧日志形状。`userEntryText` 按 `files` 是否非空隐藏尾部一个引用说明文本块。
+
 ## 1. 定位与边界
 
 - **纯函数、无 I/O**：只依赖 `protocol` 的类型；不触碰文件系统、网络、时钟。遵守 protocol 的全部依赖红线（modules.md §6）。

@@ -188,6 +188,17 @@ type FileRef = {
   truncated: boolean
 }
 
+type FileAttachment = {
+  type: "file"
+  file: string
+  bytes: number
+  sha256: string
+  label: string
+  mimeType?: string
+  text?: { lines: number }
+  source: "paste" | "upload" | "answer"
+}
+
 type ImageAttachment = {
   type: "image"
   file: string              // 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3.png"
@@ -215,6 +226,7 @@ type QuestionItem = {
 type QuestionAnswer = { declined: true } | {
   selected: string[]
   text?: string
+  attachments?: { data: Uint8Array; mimeType: string; label?: string; source?: "paste" | "upload" | "answer" }[]
 }
 ```
 
@@ -267,6 +279,8 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 会话处于 `failed` 状态时，除 `close` 外的命令都返回 `session_failed`。
 
 `invalid_model` 在模型**不可用**时（协议不可识别，或[已停用](../decisions/ADR-0054-provider-model-toggle.md)）返回结构化补充 `CommandErrorDetail`：`{ disabled?: "provider" | "model", model?: ModelRef, providerDisabled?: boolean }`。双重停用（模型被逐个停用、其服务商也被停用）时 `disabled` 记 `"model"` 并带 `providerDisabled: true`，客户端一键重新启用需同时恢复两者。进程内是 `RuntimeCommandError.detail`，RPC 序列化进 `error.data`（见 [rpc.md](rpc.md) 第 5 节），客户端据此区分「已停用」（可重新启用）与「已删除」。
+
+ADR-0072：`message.user.files?` 和 `tool.completed.files?` 是 `FileAttachment[]`，旧日志缺省时不添加字段，formatVersion 不变。原始字节不进入事件；用户内容末尾额外一个文本块包含文件引用。单个附件最多 20 MiB、单消息或整组回答合计最多 10 个；提交无效报 `invalid_command`，回答无效报 `invalid_reply`，远程合计原始字节超过 `remoteAttachmentLimit` 报 `attachment_too_large`。`input.pending` 条目可含 `files?: { label, bytes }[]`，不含字节。
 
 ## 8. 演进与未知内容
 

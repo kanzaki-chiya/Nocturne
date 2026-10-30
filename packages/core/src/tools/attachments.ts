@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 
 import type { FileSystem, PathOps } from "../platform/index.js";
 import { fsErrorCode } from "../platform/index.js";
-import type { ImageAttachment, ImageMimeType } from "../protocol/index.js";
+import type { FileAttachment, ImageAttachment, ImageMimeType } from "../protocol/index.js";
 import { parseImageSize } from "./image.js";
 
 const EXT: Record<ImageMimeType, string> = {
@@ -29,8 +29,14 @@ export interface AttachmentStore {
     label?: string | undefined;
     source: ImageAttachment["source"];
   }): Promise<ImageAttachment>;
+  saveFile(input: {
+    data: Uint8Array;
+    mimeType?: string | undefined;
+    label: string;
+    source: FileAttachment["source"];
+  }): Promise<FileAttachment>;
   /** 按引用取回字节；文件缺失或 sha256 不符返回 undefined。运行期按 sha256 缓存 */
-  load(att: ImageAttachment): Promise<Uint8Array | undefined>;
+  load(att: ImageAttachment | FileAttachment): Promise<Uint8Array | undefined>;
 }
 
 export function createAttachmentStore(opts: {
@@ -117,6 +123,56 @@ export function createAttachmentStore(opts: {
   return {
     save(input) {
       const p = queue.then(() => doSave(input));
+      queue = p.then(
+        () => undefined,
+        () => undefined,
+      );
+      return p;
+    },
+    saveFile(input) {
+      const p = queue.then(async () => {
+        await fs.mkdir(dir);
+        const entries = await fs.readdir(dir);
+        let n =
+          1 +
+          Math.max(0, ...entries.map((e) => Number(/^file-(\d+)(?:\.|$)/.exec(e.name)?.[1] ?? 0)));
+        const ext = (input.label.split(".").length > 1 ? (input.label.split(".").at(-1) ?? "") : "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .slice(0, 10);
+        for (;;) {
+          const file = `file-${n}${ext ? `.${ext}` : ""}`;
+          try {
+            await fs.createExclusive(paths.join(dir, file), input.data);
+            let text: { lines: number } | undefined;
+            try {
+              const decoded = new TextDecoder("utf-8", { fatal: true }).decode(input.data);
+              if (!decoded.includes("\0"))
+                text = {
+                  lines:
+                    decoded === ""
+                      ? 0
+                      : decoded.split(/\r\n|\n|\r/).length - (/[\r\n]$/.test(decoded) ? 1 : 0),
+                };
+            } catch {
+              /* Binary files have no line count. */
+            }
+            return {
+              type: "file" as const,
+              file,
+              bytes: input.data.byteLength,
+              sha256: createHash("sha256").update(input.data).digest("hex"),
+              label: input.label,
+              ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+              ...(text ? { text } : {}),
+              source: input.source,
+            };
+          } catch (error) {
+            if (fsErrorCode(error) !== "EEXIST") throw error;
+            n++;
+          }
+        }
+      });
       queue = p.then(
         () => undefined,
         () => undefined,

@@ -10,6 +10,7 @@ import type {
   FileRef,
   FinishReason,
   ImageAttachment,
+  FileAttachment,
   ModelProtocol,
   ModelRef,
   PendingInputItem,
@@ -73,6 +74,7 @@ export interface MessageUserPayload {
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
   attachments?: ImageAttachment[] | undefined;
+  files?: FileAttachment[] | undefined;
   fileRefs?: FileRef[] | undefined;
   /** 技能调用随消息持久化的正文快照（skills.md 第 2 节）；普通消息缺省 */
   skill?: SkillSnapshot | undefined;
@@ -194,6 +196,7 @@ export interface ToolCompletedPayload {
   spillPath?: string | undefined;
   /** 工具结果附带的图片引用（ADR-0023）；字节已落盘，事件只含引用 */
   attachments?: ImageAttachment[] | undefined;
+  files?: FileAttachment[] | undefined;
   durationMs?: number | undefined;
 }
 

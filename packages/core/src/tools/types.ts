@@ -1,5 +1,7 @@
 import type {
   ExternalAgentConfig,
+  FileAttachment,
+  ImageAttachment,
   ExternalAgentProbeResult,
   McpProbeResult,
 } from "../protocol/index.js";
@@ -133,12 +135,16 @@ export type ToolResult<Output = unknown> =
       modelContent: string;
       output?: Output;
       attachments?: ToolResultAttachment[] | undefined;
+      files?: FileAttachment[] | undefined;
+      savedImages?: ImageAttachment[] | undefined;
     }
   | {
       status: "error";
       modelContent: string;
       output?: Output;
       attachments?: ToolResultAttachment[] | undefined;
+      files?: FileAttachment[] | undefined;
+      savedImages?: ImageAttachment[] | undefined;
       error: { code: string; message: string };
     };
 
@@ -286,7 +292,15 @@ export interface AskUserRequest {
  * 由执行器统一结算为 cancelled / timeout。
  */
 export type AskUserReply =
-  { kind: "answered"; answers: QuestionAnswer[] } | { kind: "unavailable" };
+  | {
+      kind: "answered";
+      answers: (QuestionAnswer & {
+        files?: FileAttachment[];
+        images?: ImageAttachment[];
+        references?: string;
+      })[];
+    }
+  | { kind: "unavailable" };
 
 /**
  * 提问请求的路由（ADR-0032 §3）：等待中的请求与会话命令

@@ -4,6 +4,8 @@
 
 本文定义工具的最小接口。所有工具（内置、MCP（见 [mcp.md](../architecture/mcp.md)）与将来的插件）都实现同一接口，经同一执行管线运行。
 
+ADR-0072：自由回答的 `QuestionAnswer.attachments` 经提问通道校验后由执行器保存，工具只接收文件／图片引用；`ToolResult.files` 与 `savedImages` 传递已保存引用到 `tool.completed`，文件说明写入 `modelContent`。工具实现不判权限，字节不进入事件或输出，见 [文件附件设计](../decisions/ADR-0072-file-attachments.md)。
+
 ## 1. ToolDefinition
 
 ```ts

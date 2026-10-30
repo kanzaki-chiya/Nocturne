@@ -3,7 +3,13 @@
  * 普通提交、待发输入（插话/排队）与 Agent Loop 共用这一形状，避免 Agent Loop
  * 认识待发列表或 Provider 细节。
  */
-import type { AgentDelegation, ContentBlock, FileRef, ImageAttachment } from "./types.js";
+import type {
+  AgentDelegation,
+  ContentBlock,
+  FileRef,
+  ImageAttachment,
+  FileAttachment,
+} from "./types.js";
 import type { SkillSnapshot } from "./skills.js";
 
 export interface PreparedInput {
@@ -12,6 +18,7 @@ export interface PreparedInput {
   /** Core 追加给模型看的快照块（`@` 引用、技能正文、委派指令），编辑文本时原样保留 */
   appended: ContentBlock[];
   attachments?: ImageAttachment[] | undefined;
+  files?: FileAttachment[] | undefined;
   fileRefs?: FileRef[] | undefined;
   skill?: SkillSnapshot | undefined;
   delegate?: AgentDelegation | undefined;

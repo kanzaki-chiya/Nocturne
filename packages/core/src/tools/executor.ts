@@ -13,6 +13,7 @@ import type {
   SubjectRequest,
   ToolCallRef,
 } from "../protocol/index.js";
+import { attachmentReferences, saveInputAttachments } from "./file-attachments.js";
 import { applyBudget, truncationNote } from "./budget.js";
 import { createSchemaCompiler } from "./schema.js";
 import { writeSpill } from "./spill.js";
@@ -206,7 +207,10 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             error: budget.result.status === "error" ? budget.result.error : undefined,
             truncated: budget.truncated || undefined,
             spillPath,
-            ...(attachments !== undefined ? { attachments } : {}),
+            ...(attachments?.length || result.savedImages?.length
+              ? { attachments: [...(attachments ?? []), ...(result.savedImages ?? [])] }
+              : {}),
+            ...(result.files?.length ? { files: result.files } : {}),
             durationMs: Date.now() - startedAt,
           },
           { turnId },
@@ -515,13 +519,33 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         readState: scope.readState,
         ...(questionBroker !== undefined
           ? {
-              askUser: (request: AskUserRequest) =>
-                questionBroker.ask(
+              askUser: async (request: AskUserRequest) => {
+                const reply = await questionBroker.ask(
                   call.callId,
                   request,
                   { turnId, events: scope.events },
                   combined,
-                ),
+                );
+                if (reply.kind === "answered") {
+                  for (const answer of reply.answers) {
+                    if ("declined" in answer || !answer.attachments?.length) continue;
+                    if (!scope.attachments || !scope.attachmentsDir)
+                      throw new Error("附件存储不可用");
+                    const saved = await saveInputAttachments(
+                      scope.attachments,
+                      answer.attachments,
+                      true,
+                    );
+                    answer.files = saved.files;
+                    answer.images = saved.attachments;
+                    answer.references = attachmentReferences(saved.files, (file) =>
+                      scope.paths.join(scope.attachmentsDir ?? "", scope.sessionId, file),
+                    );
+                    delete answer.attachments;
+                  }
+                }
+                return reply;
+              },
             }
           : {}),
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),

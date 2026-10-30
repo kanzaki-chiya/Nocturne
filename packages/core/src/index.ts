@@ -166,7 +166,6 @@ import type {
   HookPoint,
   DurableEvent,
   DurablePayload,
-  ImageMimeType,
   McpToolSearchMode,
   ModelRef,
   PendingInputMode,
@@ -188,7 +187,6 @@ import type {
   TurnChanges,
   TurnChangeDiff,
 } from "./protocol/index.js";
-import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
 import { DEFAULT_LOOP_GUARD, normalizePermissionPreset } from "./protocol/index.js";
 import type { FileRefResolution, LocalFileContent } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
@@ -404,12 +402,24 @@ export interface CreateSessionOptions {
   schedule?: SessionSchedule | undefined;
 }
 
+import {
+  attachmentReferences,
+  saveInputAttachments,
+  validateAttachmentInputs,
+} from "./tools/file-attachments.js";
+
 export interface SubmitInput {
   text?: string | undefined;
   content?: ContentBlock[] | undefined;
   /** 图片字节由 Core 落盘，事件只保存引用 */
   attachments?:
-    { data: Uint8Array; mimeType: ImageMimeType; label?: string | undefined }[] | undefined;
+    | {
+        data: Uint8Array;
+        mimeType: string;
+        label?: string | undefined;
+        source?: "paste" | "upload" | "answer" | undefined;
+      }[]
+    | undefined;
   /** 技能调用（skills.md 第 2 节）：Core 校验后把正文快照附到用户消息 */
   skill?: SkillInvocation | undefined;
   /** 外部 agent 点名；与 skill 互斥，任务原文随 message.user 固定。 */
@@ -2425,24 +2435,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
         delegation = { agent: agent.name, task: input.delegate.task };
       }
-      const attachments = [];
-      for (const att of input.attachments ?? []) {
-        const mimeType = sniffImageMime(att.data);
-        const size = mimeType === undefined ? undefined : parseImageSize(att.data, mimeType);
-        if (
-          mimeType !== att.mimeType ||
-          size === undefined ||
-          att.data.byteLength > IMAGE_MAX_BYTES ||
-          size.width > IMAGE_MAX_EDGE ||
-          size.height > IMAGE_MAX_EDGE
-        ) {
-          throw new RuntimeCommandError("invalid_command", "图片格式或尺寸不符合要求");
-        }
-        if (execEnv.attachments === undefined) {
-          throw new RuntimeCommandError("invalid_command", "附件存储不可用");
-        }
-        attachments.push(await execEnv.attachments.save({ ...att, source: "paste" }));
-      }
+      const attachmentError = validateAttachmentInputs(input.attachments ?? []);
+      if (attachmentError) throw new RuntimeCommandError("invalid_command", attachmentError);
+      if (input.attachments?.length && !execEnv.attachments)
+        throw new RuntimeCommandError("invalid_command", "附件存储不可用");
+      const { attachments, files } = execEnv.attachments
+        ? await saveInputAttachments(execEnv.attachments, input.attachments ?? [])
+        : { attachments: [], files: [] };
       const refs = await resolveFileRefs(content, {
         fs: platform.fs,
         paths: platform.paths,
@@ -2504,9 +2503,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             delegation.task,
         });
       }
+      if (attachments.length + refs.attachments.length + files.length > 10)
+        throw new RuntimeCommandError("invalid_command", "每条消息最多 10 个附件");
+      if (files.length)
+        appended.push({
+          type: "text",
+          text: attachmentReferences(files, (file) =>
+            platform.paths.join(sessionsDir, "attachments", session.id, file),
+          ),
+        });
       return {
         content,
         appended,
+        ...(files.length ? { files } : {}),
         attachments: [...attachments, ...refs.attachments],
         fileRefs: refs.fileRefs,
         ...(skillSnapshot !== undefined ? { skill: skillSnapshot } : {}),
@@ -2605,6 +2614,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.fileRefs,
             prepared.skill,
             prepared.delegate,
+            prepared.files,
           );
           // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
           if (reason !== "done") pendingInputStore.pauseAll();

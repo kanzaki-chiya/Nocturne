@@ -154,6 +154,31 @@ async function enqueue(
   return result.id;
 }
 
+describe("文件附件排队", () => {
+  it.each(["steer", "queue"] as const)("%s 带文件，快照只列名称大小，消费后可读", async (mode) => {
+    const { runtime } = await makeRuntime({
+      scripts: [askScript, textScript("done"), textScript("next")],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const data = new TextEncoder().encode("queued file\n");
+    onQuestion(session, async () => {
+      await enqueue(session, mode, {
+        attachments: [{ data, mimeType: "text/plain", label: "queue.log" }],
+      });
+      expect(session.pendingInputs().items[0]?.files).toEqual([
+        { label: "queue.log", bytes: data.byteLength },
+      ]);
+    });
+    await session.submit({ text: "start" });
+    const user = session.state().history.find((h) => h.kind === "user" && h.files?.length);
+    if (user?.kind !== "user" || !user.files?.[0]) throw new Error("missing queued file");
+    expect(new TextDecoder().decode((await session.readAttachment(user.files[0].file)).data)).toBe(
+      "queued file\n",
+    );
+    await session.close();
+  });
+});
+
 describe("ADR-0070 插话（安全点消费）", () => {
   it("工具执行中插话：下一次请求里位于工具结果之后，日志带 steer", async () => {
     const provider = new FakeProvider({

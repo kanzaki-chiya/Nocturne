@@ -28,6 +28,7 @@ import type {
   FileRef,
   FinishReason,
   ImageAttachment,
+  FileAttachment,
   ModelRef,
   PermissionAction,
   PermissionOption,
@@ -120,6 +121,7 @@ export interface UserEntry {
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023）；无附件时字段不出现 */
   attachments?: ImageAttachment[] | undefined;
+  files?: FileAttachment[] | undefined;
   fileRefs?: FileRef[] | undefined;
   /** 技能调用的正文快照（skills.md 第 2 节）；普通消息字段不出现 */
   skill?: SkillSnapshot | undefined;
@@ -141,7 +143,8 @@ export function userEntryText(entry: UserEntry): string {
   const snapshots =
     (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
     (entry.skill ? 1 : 0) +
-    (entry.delegate ? 1 : 0);
+    (entry.delegate ? 1 : 0) +
+    (entry.files?.length ? 1 : 0);
   const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
   return content
     .filter((block) => block.type === "text")
@@ -203,6 +206,7 @@ export interface ToolEntry {
         spillPath: string | undefined;
         /** 工具结果附带的图片引用（ADR-0023）；无附件时字段不出现 */
         attachments?: ImageAttachment[] | undefined;
+        files?: FileAttachment[] | undefined;
         durationMs: number | undefined;
       }
     | undefined;
@@ -425,6 +429,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         seq: event.seq,
         turnId: turnId ?? "",
         content: event.payload.content,
+        ...(event.payload.files !== undefined ? { files: event.payload.files } : {}),
         ...(event.payload.fileRefs !== undefined ? { fileRefs: event.payload.fileRefs } : {}),
         ...(event.payload.skill !== undefined ? { skill: event.payload.skill } : {}),
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
@@ -571,6 +576,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         truncated: p.truncated === true,
         spillPath: p.spillPath,
         ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
+        ...(p.files !== undefined ? { files: p.files } : {}),
         durationMs: p.durationMs,
       };
       b.attachments.set(event.seq, entry);

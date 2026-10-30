@@ -1,17 +1,17 @@
 /**
- * 读取会话持久事件登记的图片附件（rpc.md 3.2 readAttachment）：
+ * 读取会话持久事件登记的附件（rpc.md 3.2 readAttachment）：
  * RuntimeSession.readAttachment 与只读子会话观察共用同一套校验。
  */
 import { createHash } from "node:crypto";
 
-import type { DurableEvent, ImageAttachment, ImageMimeType } from "../protocol/index.js";
+import type { DurableEvent, ImageAttachment, FileAttachment } from "../protocol/index.js";
 import { fsErrorCode, type Platform } from "../platform/index.js";
 import { SessionError } from "./errors.js";
 
-/** 已登记并通过磁盘完整性校验的图片附件 */
+/** 已登记并通过磁盘完整性校验的附件 */
 export interface ReadAttachmentResult {
   data: Uint8Array;
-  mimeType: ImageMimeType;
+  mimeType: string;
   bytes: number;
 }
 
@@ -39,14 +39,16 @@ export async function readSessionAttachment(
     throw new SessionError("invalid_attachment_file", "附件必须是单个安全文件名");
   }
   // 原始持久日志是授权来源，包含已被回退或压缩隐藏的图片；不沿 parent 回溯。
-  let attachment: ImageAttachment | undefined;
+  let attachment: ImageAttachment | FileAttachment | undefined;
   for (const event of events) {
     if (event.type !== "message.user" && event.type !== "tool.completed") continue;
-    attachment = event.payload.attachments?.find((ref) => ref.file === file);
+    attachment = [...(event.payload.attachments ?? []), ...(event.payload.files ?? [])].find(
+      (ref) => ref.file === file,
+    );
     if (attachment !== undefined) break;
   }
   if (attachment === undefined) {
-    throw new SessionError("attachment_not_found", "本会话未登记该图片附件");
+    throw new SessionError("attachment_not_found", "本会话未登记该附件");
   }
   const root = paths.join(sessionsDir, "attachments");
   const dir = paths.join(root, sessionId);
@@ -70,7 +72,7 @@ export async function readSessionAttachment(
       throw new SessionError("invalid_attachment_file", "附件路径超出本会话目录");
     }
     if (stat.size !== attachment.bytes) {
-      throw new SessionError("attachment_corrupt", "图片附件大小与记录不符");
+      throw new SessionError("attachment_corrupt", "附件大小与记录不符");
     }
     // 不走 AttachmentStore.load 的 sha 缓存：落盘文件可能在上次读取后被改动。
     const data = await fs.readFile(realTarget);
@@ -78,15 +80,19 @@ export async function readSessionAttachment(
       data.byteLength !== attachment.bytes ||
       createHash("sha256").update(data).digest("hex") !== attachment.sha256
     ) {
-      throw new SessionError("attachment_corrupt", "图片附件内容与记录不符");
+      throw new SessionError("attachment_corrupt", "附件内容与记录不符");
     }
-    return { data, mimeType: attachment.mimeType, bytes: data.byteLength };
+    return {
+      data,
+      mimeType: attachment.mimeType ?? "application/octet-stream",
+      bytes: data.byteLength,
+    };
   } catch (error) {
     if (error instanceof SessionError) throw error;
     const code = fsErrorCode(error);
     if (code === "ENOENT" || code === "ENOTDIR") {
-      throw new SessionError("attachment_missing", "图片附件文件缺失", { cause: error });
+      throw new SessionError("attachment_missing", "附件文件缺失", { cause: error });
     }
-    throw new SessionError("attachment_read_failed", "图片附件读取失败", { cause: error });
+    throw new SessionError("attachment_read_failed", "附件读取失败", { cause: error });
   }
 }

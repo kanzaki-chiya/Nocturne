@@ -52,7 +52,10 @@ export class PendingInputs {
         .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
         .map((block) => block.text)
         .join("\n"),
-      attachments: entry.input.attachments?.length ?? 0,
+      attachments: (entry.input.attachments?.length ?? 0) + (entry.input.files?.length ?? 0),
+      ...(entry.input.files?.length
+        ? { files: entry.input.files.map(({ label, bytes }) => ({ label, bytes })) }
+        : {}),
       createdAt: entry.createdAt,
       paused: entry.paused,
     }));

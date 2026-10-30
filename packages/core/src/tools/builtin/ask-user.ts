@@ -4,7 +4,13 @@
  * 会话级提问通道（tools/question.ts），回答/逐题拒绝/不可用按 §2 结算，
  * 中断/超时由执行器按 signal 统一结算。本工具不产生任何权限主体。
  */
-import type { QuestionAnswer, QuestionItem, QuestionOption } from "../../protocol/index.js";
+import type {
+  QuestionAnswer,
+  QuestionItem,
+  QuestionOption,
+  FileAttachment,
+  ImageAttachment,
+} from "../../protocol/index.js";
 import type { ToolDefinition } from "../types.js";
 
 const MAX_QUESTIONS = 4;
@@ -24,7 +30,12 @@ const DECLINED_MESSAGE =
 
 /** tool.completed.output 的形状（ADR-0032 §2） */
 interface AskUserOutput {
-  answers: (QuestionAnswer & { question: string })[];
+  answers: (QuestionAnswer & {
+    question: string;
+    files?: FileAttachment[];
+    images?: ImageAttachment[];
+    references?: string;
+  })[];
 }
 const charLen = (s: string): number => Array.from(s).length;
 // ADR-0032 §1：所有文本字段禁止控制字符；label/header 额外不允许换行。
@@ -146,6 +157,7 @@ function formatAnswers(questions: QuestionItem[], answers: AskUserOutput["answer
     if (a?.text !== undefined) parts.push(`补充：${a.text}`);
     lines.push(`问：${q.question}`);
     lines.push(`答：${parts.length > 0 ? parts.join("；") : "（未回答）"}`);
+    if (a?.references) lines.push(a.references);
   }
   if (answers.some((a) => "declined" in a)) lines.push(DECLINED_MESSAGE);
   return lines.join("\n");
@@ -217,12 +229,17 @@ export const askUserTool: ToolDefinition<{ questions: unknown }, AskUserOutput> 
       return {
         question: q.question,
         selected: a?.selected ?? [],
+        ...(a?.files?.length ? { files: a.files } : {}),
+        ...(a?.images?.length ? { images: a.images } : {}),
+        ...(a?.references ? { references: a.references } : {}),
         ...(a?.text !== undefined ? { text: a.text } : {}),
       };
     });
     return {
       status: "ok",
       modelContent: formatAnswers(questions, answers),
+      files: answers.flatMap((a) => a.files ?? []),
+      savedImages: answers.flatMap((a) => a.images ?? []),
       output: { answers },
     };
   },

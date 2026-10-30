@@ -6,8 +6,9 @@
  * 与权限闸门（permission/gate.ts）同构但完全独立：提问回答「怎么做」，
  * 不接触权限层；等待中断的信号语义沿用同一约定（signal 中止 → Promise 拒绝）。
  */
-import type { QuestionAnswer, QuestionItem } from "../protocol/index.js";
+import type { QuestionAnswer, QuestionItem, AttachmentInput } from "../protocol/index.js";
 import type { AskUserReply, GateTurnContext, QuestionBroker } from "./types.js";
+import { validateAttachmentInputs } from "./file-attachments.js";
 
 /** 「其他」/自由文本回答的上限（ADR-0032 §2）：去首尾空白后至多 2000 字符 */
 const MAX_ANSWER_TEXT_CHARS = 2_000;
@@ -37,7 +38,12 @@ function checkReply(questions: QuestionItem[], reply: unknown): AskUserReply | u
     const question = questions[i];
     if (question === undefined || typeof raw !== "object" || raw === null) return undefined;
     if ("declined" in raw) {
-      if ((raw as { declined: unknown }).declined !== true || "selected" in raw || "text" in raw)
+      if (
+        (raw as { declined: unknown }).declined !== true ||
+        "selected" in raw ||
+        "text" in raw ||
+        "attachments" in raw
+      )
         return undefined;
       normalized.push({ declined: true });
       continue;
@@ -52,11 +58,27 @@ function checkReply(questions: QuestionItem[], reply: unknown): AskUserReply | u
     if (text !== undefined && typeof text !== "string") return undefined;
     const trimmed = typeof text === "string" ? text.trim() : "";
     if (Array.from(trimmed).length > MAX_ANSWER_TEXT_CHARS) return undefined;
+    const attachments = (raw as { attachments?: AttachmentInput[] }).attachments;
+    if (
+      attachments !== undefined &&
+      (!Array.isArray(attachments) ||
+        (question.options?.length ?? 0) > 0 ||
+        selected.length > 0 ||
+        validateAttachmentInputs(attachments))
+    )
+      return undefined;
     normalized.push({
+      ...(attachments?.length ? { attachments } : {}),
       selected: [...new Set(selected as string[])],
       ...(trimmed !== "" ? { text: trimmed } : {}),
     });
   }
+  if (
+    validateAttachmentInputs(
+      normalized.flatMap((a) => ("declined" in a ? [] : (a.attachments ?? []))),
+    )
+  )
+    return undefined;
   return { kind: "answered", answers: normalized };
 }
 

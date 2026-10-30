@@ -155,6 +155,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.steer === true ? { steer: true as const } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
+          ...(p.files !== undefined ? { files: p.files } : {}),
         });
         break;
       }
@@ -215,6 +216,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           inputSummary: startedInputs.get(p.callId),
           ...(pinnedResults.has(p.callId) ? { pinResult: true } : {}),
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
+          ...(p.files !== undefined ? { files: p.files } : {}),
         });
         unsettled.delete(p.callId);
         startedInputs.delete(p.callId);

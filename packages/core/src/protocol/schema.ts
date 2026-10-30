@@ -105,6 +105,17 @@ const imageAttachmentSchema = z.object({
   source: z.enum(["paste", "read", "mcp"]),
 });
 
+const fileAttachmentSchema = z.object({
+  type: z.literal("file"),
+  file: z.string(),
+  bytes: z.number().int().nonnegative(),
+  sha256: z.string(),
+  label: z.string(),
+  mimeType: z.string().optional(),
+  text: z.object({ lines: z.number().int().nonnegative() }).optional(),
+  source: z.enum(["paste", "upload", "answer"]),
+});
+
 const fileRefSchema = z.object({
   path: z.string(),
   kind: z.enum(["file", "directory", "image"]),
@@ -207,6 +218,7 @@ const payloadSchemas = {
     messageId: z.string(),
     content: z.array(contentBlockSchema),
     attachments: z.array(imageAttachmentSchema).optional(),
+    files: z.array(fileAttachmentSchema).optional(),
     fileRefs: z.array(fileRefSchema).optional(),
     skill: z.object({ name: z.string(), body: z.string() }).optional(),
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
@@ -286,6 +298,7 @@ const payloadSchemas = {
     truncated: z.boolean().optional(),
     spillPath: z.string().optional(),
     attachments: z.array(imageAttachmentSchema).optional(),
+    files: z.array(fileAttachmentSchema).optional(),
     durationMs: z.number().optional(),
   }),
   "context.compacted": z.object({
