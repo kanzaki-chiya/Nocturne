@@ -69,6 +69,20 @@ export interface TurnStartedPayload {
   turnIndex: number;
 }
 
+export interface SubagentChanges {
+  branch: string;
+  base: string;
+  head: string;
+  snapshot: boolean;
+  worktree: string;
+  files: {
+    path: string;
+    status: "added" | "modified" | "deleted";
+    additions?: number;
+    deletions?: number;
+  }[];
+}
+
 /** 后台子代理结果（ADR-0073 §3）：`message.user.subagent` */
 export interface SubagentResult {
   childSessionId: string;
@@ -81,8 +95,7 @@ export interface SubagentResult {
   profile?: string | undefined;
   /** 后台运行时长；interrupted 没有 */
   durationMs?: number | undefined;
-  /** 预留给工作树隔离带回的改动摘要（ADR-0073 §8），本版不填 */
-  changes?: { summary: string } | undefined;
+  changes?: SubagentChanges | undefined;
 }
 
 export interface MessageUserPayload {

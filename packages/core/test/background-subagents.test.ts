@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { worktreeGit, listWorktreeRecords } from "../src/agent/worktree.js";
 import { backgroundAdmission } from "../src/agent/background-subagents.js";
 import { createRuntime, type RuntimeOptions, type RuntimeSession } from "../src/index.js";
 import type { DurableEvent } from "../src/protocol/index.js";
@@ -47,30 +48,58 @@ interface Setup {
   childWait?: (request: ModelRequest) => number;
   subagent?: RuntimeOptions["subagent"];
   hooks?: RuntimeOptions["hooks"];
+  git?: boolean;
+  child?: FakeScript;
+  parentHandler?: (request: ModelRequest) => FakeScript;
 }
 
 async function setup(options: Setup = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "nct-background-"));
   roots.push(root);
+  if (options.git) {
+    await worktreeGit(root, ["init"]);
+    await worktreeGit(root, ["config", "core.autocrlf", "false"]);
+    writeFileSync(path.join(root, "code.txt"), "original\n");
+    await worktreeGit(root, ["add", "code.txt"]);
+    await worktreeGit(root, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@localhost",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--no-verify",
+      "-m",
+      "initial",
+    ]);
+  }
   let parentCalls = 0;
   const childRequests: ModelRequest[] = [];
   const provider = new FakeProvider({
     handler: (request) => {
       if (isChild(request)) {
         childRequests.push(request);
-        return [
-          { type: "wait", ms: options.childWait?.(request) ?? 150 },
-          call("finish", "finish", { result: "child result" }),
-          { type: "finish", reason: "tool_calls" },
-        ];
+        return (
+          options.child ?? [
+            { type: "wait", ms: options.childWait?.(request) ?? 150 },
+            call("finish", "finish", { result: "child result" }),
+            { type: "finish", reason: "tool_calls" },
+          ]
+        );
       }
+      if (options.parentHandler) return options.parentHandler(request);
       const script = (options.parent ?? [[bg("t1"), { type: "finish", reason: "tool_calls" }]])[
         parentCalls++
       ];
       return script ?? done;
     },
   });
-  const sessionsDir = path.join(root, "sessions");
+  const sessionsRoot = options.git
+    ? mkdtempSync(path.join(tmpdir(), "nct-background-sessions-"))
+    : root;
+  if (options.git) roots.push(sessionsRoot);
+  const sessionsDir = path.join(sessionsRoot, "sessions");
   const runtime = await createRuntime({
     cwd: root,
     sessionsDir,
@@ -80,7 +109,7 @@ async function setup(options: Setup = {}) {
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
   });
   const session = await runtime.createSession({ model: "fake/fake-1" });
-  return { root, runtime, session, childRequests };
+  return { root, runtime, session, childRequests, sessionsDir };
 }
 
 type UserEvent = Extract<DurableEvent, { type: "message.user" }>;
@@ -117,7 +146,7 @@ describe("准入与 schema", () => {
     for (const name of ["edit", "shell", "write"]) {
       const picked = tools.filter((tool) => !tool.traits.mutates || tool.name === name);
       expect(backgroundAdmission({ tools: picked, isolation: "none" })).toBe(
-        "后台子代理只能只读；需要写入请同步调用",
+        '后台子代理需要写入时请加 isolation: "worktree"；否则只能只读',
       );
     }
     expect(
@@ -169,7 +198,7 @@ describe("准入与 schema", () => {
       const completed = taskCompleted(session)[0];
       expect(completed?.payload.status).toBe("error");
       expect(completed?.payload.error?.code).toBe("invalid_input");
-      expect(completed?.payload.modelContent).toContain("后台子代理只能只读");
+      expect(completed?.payload.modelContent).toContain('isolation: "worktree"');
       expect(childRequests).toHaveLength(0);
       expect(await running(runtime, session.id)).toHaveLength(0);
     } finally {
@@ -193,7 +222,14 @@ describe("启动与交付", () => {
       expect(completed?.payload.modelContent).toMatch(/^Background subagent started \(id: /u);
       expect(progress).toHaveLength(0);
       expect(await running(runtime, session.id)).toHaveLength(1);
-      await vi.waitFor(() => expect(turns(session)).toBe(2), { timeout: 5000 });
+      // turn.started 先于结果的 message.user 落盘：两者都等到
+      await vi.waitFor(
+        () => {
+          expect(turns(session)).toBe(2);
+          expect(results(session)).toHaveLength(1);
+        },
+        { timeout: 5000 },
+      );
       const result = results(session)[0];
       expect(result?.payload.subagent).toMatchObject({
         callId: completed?.payload.callId,
@@ -349,6 +385,177 @@ describe("启动与交付", () => {
       );
     } finally {
       await session.close();
+    }
+  });
+});
+
+describe("工作树生命周期", () => {
+  it("并回拒绝重复、检查点回退后可再次并回", async () => {
+    let childId = "";
+    const scripts: FakeScript[] = [
+      [bg("isolated", { isolation: "worktree" }), { type: "finish", reason: "tool_calls" }],
+      done,
+    ];
+    let launching = true;
+    let applyNext = false;
+    const { root, runtime, session, sessionsDir } = await setup({
+      git: true,
+      childWait: () => 10_000,
+      parentHandler: () => {
+        if (launching) {
+          launching = false;
+          return scripts[0] ?? done;
+        }
+        if (applyNext) {
+          applyNext = false;
+          return [
+            call("apply", "apply_subagent_changes", { id: childId }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return done;
+      },
+    });
+    try {
+      await session.submit({ text: "launch" });
+      const record = must((await listWorktreeRecords(sessionsDir, session.id))[0]);
+      childId = record.childSessionId;
+      writeFileSync(path.join(record.worktree, "code.txt"), "child\n");
+      await runtime.cancelSubagent({ parentSessionId: session.id, childSessionId: childId });
+      await vi.waitFor(() =>
+        expect(
+          session.durableEvents().filter((event) => event.type === "turn.completed"),
+        ).toHaveLength(2),
+      );
+      applyNext = true;
+      await vi.waitFor(
+        async () => {
+          await session.submit({ text: "apply" });
+        },
+        { timeout: 5000 },
+      );
+      expect(
+        session
+          .durableEvents()
+          .filter(
+            (event) =>
+              event.type === "tool.completed" && event.payload.name === "apply_subagent_changes",
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({ status: "ok" });
+      expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("child\n");
+      const user = must(
+        session
+          .durableEvents()
+          .filter((event) => event.type === "message.user")
+          .at(-1),
+      );
+      applyNext = true;
+      await session.submit({ text: "duplicate" });
+      expect(
+        session
+          .durableEvents()
+          .filter(
+            (event) =>
+              event.type === "tool.completed" && event.payload.name === "apply_subagent_changes",
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({ status: "error", error: { code: "invalid_input" } });
+      await session.rewind(user.seq, "both");
+      expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("original\n");
+      applyNext = true;
+      await session.submit({ text: "apply again" });
+      expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("child\n");
+    } finally {
+      await session.close();
+    }
+  });
+  it("公开 API 删除登记的副本与分支", async () => {
+    const { root, runtime, session, sessionsDir } = await setup({
+      git: true,
+      childWait: () => 800,
+    });
+    await session.submit({ text: "initialize" });
+    await vi.waitFor(() => expect(results(session)).toHaveLength(1));
+    await session.close();
+    const record = await (async () => {
+      const { createWorktree, settleWorktree } = await import("../src/agent/worktree.js");
+      const record = await createWorktree({
+        repository: root,
+        sessionsDir,
+        childSessionId: "apply-test",
+        parentSessionId: session.id,
+        cwd: root,
+        workspaceRoot: root,
+        task: "change",
+        trusted: true,
+      });
+      writeFileSync(path.join(record.worktree, "code.txt"), "child\n");
+      await settleWorktree(record);
+      return record;
+    })();
+    expect(record.changes?.files[0]?.path).toBe("code.txt");
+    await runtime.deleteSubagentWorktree({
+      parentSessionId: session.id,
+      childSessionId: record.childSessionId,
+    });
+    expect(await listWorktreeRecords(sessionsDir, session.id)).toHaveLength(0);
+  });
+  it.each(["cancel", "timeout", "close", "restart"])("%s 收束工作树中的修改", async (mode) => {
+    const { root, runtime, session, sessionsDir } = await setup({
+      git: true,
+      parent: [
+        [
+          bg("isolated", {
+            isolation: "worktree",
+            ...(mode === "timeout" ? { timeoutMs: 1800 } : {}),
+          }),
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+      childWait: () => 10_000,
+    });
+    await session.submit({ text: "go" });
+    expect(
+      taskCompleted(session)[0]?.payload.status,
+      JSON.stringify(taskCompleted(session)[0]?.payload),
+    ).toBe("ok");
+    const records = await listWorktreeRecords(sessionsDir, session.id);
+    const record = must(records[0]);
+    writeFileSync(path.join(record.worktree, "code.txt"), "child result\n");
+    if (mode === "cancel")
+      await runtime.cancelSubagent({
+        parentSessionId: session.id,
+        childSessionId: record.childSessionId,
+      });
+    if (mode === "close" || mode === "restart") await session.close();
+    if (mode === "cancel" || mode === "timeout") {
+      await vi.waitFor(
+        () =>
+          expect(results(session)[0]?.payload.subagent?.changes?.files).toEqual([
+            { path: "code.txt", status: "modified", additions: 1, deletions: 1 },
+          ]),
+        { timeout: 8000 },
+      );
+      expect(results(session)[0]?.payload.subagent?.status).toBe(
+        mode === "cancel" ? "cancelled" : "timeout",
+      );
+      await session.close();
+    }
+    expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("original\n");
+    const retained = await listWorktreeRecords(sessionsDir, session.id);
+    expect(retained[0]?.changes?.files[0]?.path).toBe("code.txt");
+    if (mode === "restart") {
+      const resumed = await runtime.resumeSession(session.id);
+      try {
+        expect(resumed.pendingInputs().items[0]?.mode).toBe("subagent");
+        await resumed.resumeInputs();
+        await vi.waitFor(() =>
+          expect(results(resumed)[0]?.payload.subagent?.changes?.files[0]?.path).toBe("code.txt"),
+        );
+      } finally {
+        await resumed.close();
+      }
     }
   });
 });

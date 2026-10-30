@@ -201,6 +201,18 @@ import { PendingInputs, type PendingInputPatch } from "./pending-inputs.js";
 import { validateSettingsPatch } from "./config/settings.js";
 import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import { BackgroundSubagents, backgroundAdmission } from "./agent/background-subagents.js";
+import {
+  applyWorktreeChanges,
+  readWorktreeDiff,
+  inspectWorktreeRepository,
+  listWorktreeRecords,
+  cleanupMergedWorktrees,
+  removeWorktree,
+  settleWorktree,
+  type WorktreeRecord,
+} from "./agent/worktree.js";
+import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-changes.js";
+import { effectiveEvents } from "./protocol/index.js";
 import { DEFAULT_MAX_MODEL_CHARS, truncateModelContent, truncationNote } from "./tools/budget.js";
 import { writeSpill } from "./tools/spill.js";
 import {
@@ -733,6 +745,13 @@ export interface Runtime {
   renameSession(id: string, title: string): Promise<void>;
   /** 取消本父会话运行中的后台子代理，结果照常交付 cancelled（ADR-0073 §4） */
   cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
+  listSubagentWorktrees(input: { parentSessionId: string }): Promise<WorktreeRecord[]>;
+  deleteSubagentWorktree(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
+  readSubagentDiff(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    file: string;
+  }): Promise<string>;
   /**
    * 只读发现父会话的直接内置子会话（含已结束，ADR-0060 第 4 轮、rpc.md 4.1）：
    * 登记簿里的活动项 ∪ 日志 `session.created.parent` 映射。不打开会话、不取锁、不修复。
@@ -1455,10 +1474,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const buildPolicy = (
       presetName: string,
       policySessionId: string = session.id,
+      isolatedWorkspace?: string,
+      worktree?: { root: string; cwd: string },
     ): PermissionPolicy =>
       options.policy ??
       createRulePolicy({
-        workspaceRoot: meta.workspaceRoot,
+        workspaceRoot: isolatedWorkspace ?? meta.workspaceRoot,
+        ...(worktree ? { worktree } : {}),
         caseSensitive: platform.caseSensitivePaths,
         preset: isPermissionPresetName(presetName) ? presetName : "default",
         presetContext: {
@@ -2177,6 +2199,51 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         options.subagent?.background === true &&
         meta.parent === undefined &&
         meta.schedule === undefined;
+      tools.unregister("apply_subagent_changes");
+      if (backgroundEnabled) {
+        const lookup = (id: string) => {
+          const events = effectiveEvents(session.durableEvents());
+          const changes = events
+            .flatMap((event) =>
+              event.type === "message.user" &&
+              event.payload.subagent?.childSessionId === id &&
+              event.payload.subagent.changes
+                ? [event.payload.subagent.changes]
+                : [],
+            )
+            .at(-1);
+          if (!changes) return undefined;
+          const applied = events.some(
+            (event) =>
+              event.type === "tool.completed" &&
+              event.payload.name === "apply_subagent_changes" &&
+              event.payload.status === "ok" &&
+              (event.payload.output as { id?: string } | undefined)?.id === id,
+          );
+          return { changes, repository: meta.workspaceRoot, applied };
+        };
+        tools.register(
+          createApplySubagentChangesTool({
+            lookup,
+            async apply(id, mode) {
+              const result = lookup(id);
+              if (!result || result.applied) throw new Error("No unapplied isolated changes found");
+              const repository = await inspectWorktreeRepository(meta.workspaceRoot);
+              const applied = await applyWorktreeChanges(repository, result.changes, mode);
+              await removeWorktree(
+                { repository, worktree: result.changes.worktree, branch: result.changes.branch },
+                false,
+              ).catch((cause: unknown) =>
+                session.emitEphemeral("runtime.warning", {
+                  code: "worktree_cleanup_failed",
+                  message: String(cause),
+                }),
+              );
+              return applied;
+            },
+          }),
+        );
+      }
       tools.unregister("task");
       if (!subagentEnabled && !hasExternalAgents) return;
       let launcher: SubagentLauncher | undefined;
@@ -2239,8 +2306,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           // ADR-0031 §3：本会话即根会话（depth 0 launcher 只挂在顶层会话上），
           // 嵌套子代理沿 deps 透传同一个根 ID
           rootSessionId: session.id,
-          makePolicy: (childSessionId) =>
-            buildPolicy(session.state().config.permissionPreset, childSessionId),
+          trusted: ws?.projectConfig.trusted === true,
+          warning: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
+          makePolicy: (childSessionId, workspaceRoot, worktree) =>
+            buildPolicy(
+              session.state().config.permissionPreset,
+              childSessionId,
+              workspaceRoot,
+              worktree,
+            ),
           makeHookRunner,
           mcpTools: () => [...activeMcpTools.values()],
           mcpOnDemand: () => mcpOnDemand,
@@ -2680,6 +2754,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.files,
             prepared.subagent,
           );
+          await cleanupMergedWorktrees(sessionsDir, session.id).catch((cause: unknown) =>
+            session.emitEphemeral("runtime.warning", {
+              code: "worktree_cleanup_failed",
+              message: String(cause),
+            }),
+          );
           // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
           if (reason !== "done") pendingInputStore.pauseAll();
           if (reason === "failed") {
@@ -2733,10 +2813,32 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // ADR-0073 §4：重启不复活后台子代理，按父日志补 interrupted 暂停条目、不唤起；
     // 分叉继承的前缀（forkedFrom.seq 之前）不补
     if (resume !== undefined && meta.parent === undefined) {
+      await cleanupMergedWorktrees(sessionsDir, session.id).catch((cause: unknown) =>
+        session.emitEphemeral("runtime.warning", {
+          code: "worktree_cleanup_failed",
+          message: String(cause),
+        }),
+      );
+      const retained = await listWorktreeRecords(sessionsDir, session.id);
       const recovered = backgroundSubagents.recover(
         session.durableEvents(),
         meta.forkedFrom?.seq ?? 0,
       );
+      for (const input of recovered) {
+        const record = retained.find(
+          (record) => record.childSessionId === input.subagent?.childSessionId,
+        );
+        if (record && input.subagent) {
+          try {
+            input.subagent.changes = await settleWorktree(record);
+          } catch (cause) {
+            session.emitEphemeral("runtime.warning", {
+              code: "worktree_cleanup_failed",
+              message: String(cause),
+            });
+          }
+        }
+      }
       if (recovered.length > 0) {
         pendingInputStore.pauseAll();
         for (const input of recovered) pendingInputStore.add("subagent", input);
@@ -4305,6 +4407,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (!backgroundSubagents.cancel(input.parentSessionId, input.childSessionId))
         return Promise.reject(new RuntimeCommandError("invalid_command", "没有运行中的后台子代理"));
       return Promise.resolve();
+    },
+    async readSubagentDiff(input) {
+      const record = (await listWorktreeRecords(sessionsDir, input.parentSessionId)).find(
+        (record) => record.childSessionId === input.childSessionId,
+      );
+      if (!record?.changes)
+        throw new RuntimeCommandError("invalid_command", "没有保留的子代理改动");
+      return readWorktreeDiff(record.repository, record.changes, input.file);
+    },
+    listSubagentWorktrees: (input) => listWorktreeRecords(sessionsDir, input.parentSessionId),
+    async deleteSubagentWorktree(input) {
+      const record = (await listWorktreeRecords(sessionsDir, input.parentSessionId)).find(
+        (record) => record.childSessionId === input.childSessionId,
+      );
+      if (!record) throw new RuntimeCommandError("invalid_command", "没有保留的工作树");
+      if (subagentRegistry.find(input.childSessionId))
+        throw new RuntimeCommandError("invalid_command", "子代理仍在运行");
+      await removeWorktree(record, true);
     },
     listSubagents: (input) => subagentObservation.list(input),
     observeSubagent: (input, observer) => subagentObservation.observe(input, observer),

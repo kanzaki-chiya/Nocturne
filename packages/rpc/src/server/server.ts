@@ -1603,6 +1603,21 @@ class Connection implements HubPeer {
         });
         return null;
       },
+      "subagent.diff": (p) =>
+        this.runtime().readSubagentDiff({
+          parentSessionId: reqString(p, "parentSessionId"),
+          childSessionId: reqString(p, "childSessionId"),
+          file: reqString(p, "file"),
+        }),
+      "subagent.worktrees": (p) =>
+        this.runtime().listSubagentWorktrees({ parentSessionId: reqString(p, "parentSessionId") }),
+      "subagent.deleteWorktree": async (p) => {
+        await this.runtime().deleteSubagentWorktree({
+          parentSessionId: reqString(p, "parentSessionId"),
+          childSessionId: reqString(p, "childSessionId"),
+        });
+        return null;
+      },
       "subagent.list": (p) =>
         this.runtime().listSubagents({ parentSessionId: reqString(p, "parentSessionId") }),
       "subagent.readAttachment": async (p) => {

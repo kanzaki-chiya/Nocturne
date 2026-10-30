@@ -10,11 +10,12 @@ import {
   type SubagentResult,
 } from "../protocol/index.js";
 import type { SubagentOutcome, ToolDefinition } from "../tools/index.js";
+import { worktreeResultText } from "./worktree.js";
 
 /** 子代理的隔离方式；第一版只有「无」 */
-export type BackgroundIsolation = "none";
+export type BackgroundIsolation = "none" | "worktree";
 
-export const BACKGROUND_READ_ONLY = "后台子代理只能只读；需要写入请同步调用";
+export const BACKGROUND_READ_ONLY = '后台子代理需要写入时请加 isolation: "worktree"；否则只能只读';
 
 /**
  * 准入接缝（ADR-0073 §2、§8）：外部 agent 一律不放行；没有隔离时只放行全部只读的工具集。
@@ -25,7 +26,8 @@ export function backgroundAdmission(input: {
   isolation: BackgroundIsolation;
   external?: boolean | undefined;
 }): string | undefined {
-  if (input.external === true) return BACKGROUND_READ_ONLY;
+  if (input.external === true) return "外部 agent 不支持后台运行";
+  if (input.isolation === "worktree") return undefined;
   if (input.tools.some((tool) => tool.traits.mutates)) return BACKGROUND_READ_ONLY;
   return undefined;
 }
@@ -47,7 +49,7 @@ export function backgroundResultInput(meta: SubagentResult, text: string): Prepa
     content: [
       {
         type: "text",
-        text: `<subagent-result id="${meta.childSessionId}" call="${meta.callId}" status="${meta.status}">\n${text}\n</subagent-result>`,
+        text: `<subagent-result id="${meta.childSessionId}" call="${meta.callId}" status="${meta.status}">\n${text}${meta.changes ? worktreeResultText(meta.changes) : ""}\n</subagent-result>`,
       },
     ],
     appended: [],
@@ -81,6 +83,7 @@ export class BackgroundSubagents {
     input: Pick<Job, "parentSessionId" | "childSessionId" | "callId" | "profile" | "controller">,
     run: () => Promise<SubagentOutcome>,
     deliver: (input: PreparedInput) => void | Promise<void>,
+    settle?: () => Promise<SubagentResult["changes"]>,
   ): void {
     const job: Job = {
       ...input,
@@ -99,6 +102,7 @@ export class BackgroundSubagents {
         },
       }))
       .then(async (outcome) => {
+        const changes = await settle?.();
         if (job.discard) return;
         const code = outcome.status === "error" ? outcome.error.code : undefined;
         await deliver(
@@ -110,6 +114,7 @@ export class BackgroundSubagents {
               ...(code !== undefined ? { code } : {}),
               profile: job.profile,
               durationMs: Date.now() - job.startedAt,
+              ...(changes ? { changes } : {}),
             },
             resultText(outcome),
           ),

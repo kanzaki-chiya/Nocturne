@@ -6,6 +6,13 @@ import type { ReviewInputSources, SecurityReviewer } from "../permission/index.j
  * 父子关联写在 session.created.parent；取消/超时经共享 AbortSignal
  * 传播；父侧恰好一个 tool.completed 由执行器不变量保证。
  */
+import {
+  createWorktree,
+  inspectWorktreeRepository,
+  removeWorktree,
+  settleWorktree,
+  type WorktreeRecord,
+} from "./worktree.js";
 import { subagentProfile } from "../protocol/index.js";
 import type {
   Diagnostics,
@@ -17,6 +24,7 @@ import type {
 import type { InstructionSet, EnvironmentInfo } from "../context/index.js";
 import { clampReasoningEffort, type ResolvedModel } from "../provider/index.js";
 import {
+  newSessionId,
   summarizeSubagentTask,
   type Session,
   type SessionState,
@@ -152,7 +160,13 @@ export interface SubagentDeps {
    */
   rootSessionId: string;
   /** 按子会话参数重建策略：同一批规则/Grant/预设，presetContext.sessionId 换为子会话 */
-  makePolicy(childSessionId: string): PermissionPolicy;
+  makePolicy(
+    childSessionId: string,
+    workspaceRoot?: string,
+    worktree?: { root: string; cwd: string },
+  ): PermissionPolicy;
+  warning?(code: string, message: string): void;
+  trusted?: boolean | undefined;
   /** 同一批已过滤条目换子会话绑定重建；subagent 标记由实现方注入输入 */
   makeHookRunner(
     child: Session,
@@ -316,6 +330,16 @@ function usageOf(session: Session): Usage | undefined {
 export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
   return {
     async launch(request: SubagentRequest, ctx: ToolContext): Promise<SubagentOutcome> {
+      if (request.isolation !== undefined && !request.background)
+        return error("invalid_input", "isolation 只在 background: true 时可用");
+      let repository: string | undefined;
+      if (request.isolation === "worktree") {
+        try {
+          repository = await inspectWorktreeRepository(ctx.workspaceRoot);
+        } catch (cause) {
+          return error("invalid_input", cause instanceof Error ? cause.message : String(cause));
+        }
+      }
       if (request.background === true) {
         if (deps.background === undefined || deps.depth !== 0)
           return error("invalid_input", "当前会话不支持后台子代理");
@@ -332,6 +356,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         );
       }
       let child: Session | undefined;
+      let worktree: WorktreeRecord | undefined;
       let registration: SubagentRegistration | undefined;
       let detached = false;
       const cleanup = async () => {
@@ -372,15 +397,33 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           childModel.model.capabilities.reasoningEffort,
         );
         const createChild = async () => {
-          child = await deps.store.create({
-            cwd: ctx.cwd,
-            workspaceRoot: ctx.workspaceRoot,
-            model: childModel.model.ref,
-            permissionPreset: deps.permissionPreset(),
-            nocturneVersion: deps.nocturneVersion,
-            parent: { sessionId: ctx.sessionId, callId: ctx.callId },
-            ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
-          });
+          const id = repository ? newSessionId() : undefined;
+          if (repository && id)
+            worktree = await createWorktree({
+              childSessionId: id,
+              parentSessionId: ctx.sessionId,
+              repository,
+              sessionsDir: deps.sessionsDir,
+              cwd: ctx.cwd,
+              workspaceRoot: ctx.workspaceRoot,
+              task: request.task,
+              trusted: deps.trusted === true,
+            });
+          try {
+            child = await deps.store.create({
+              ...(id ? { id } : {}),
+              cwd: worktree?.cwd ?? ctx.cwd,
+              workspaceRoot: worktree?.workspaceRoot ?? ctx.workspaceRoot,
+              model: childModel.model.ref,
+              permissionPreset: deps.permissionPreset(),
+              nocturneVersion: deps.nocturneVersion,
+              parent: { sessionId: ctx.sessionId, callId: ctx.callId },
+              ...(childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
+            });
+          } catch (cause) {
+            if (worktree) await removeWorktree(worktree, true);
+            throw cause;
+          }
           registration = deps.registry?.register({
             child,
             parentSessionId: ctx.sessionId,
@@ -486,7 +529,10 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         }
 
         if (request.background) {
-          const denied = backgroundAdmission({ tools: selected, isolation: "none" });
+          const denied = backgroundAdmission({
+            tools: selected,
+            isolation: request.isolation ?? "none",
+          });
           if (denied !== undefined) return error("invalid_input", denied);
         }
         if (request.background) await createChild();
@@ -517,7 +563,11 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
 
         // 子会话权限：同一批策略输入（makePolicy 闭包），gate 恒非交互——
         // smart 先用父审查器；仍需用户确认时 non_interactive deny，附受阻指引
-        const childPolicy = deps.makePolicy(child.id);
+        const childPolicy = deps.makePolicy(
+          child.id,
+          worktree?.workspaceRoot,
+          worktree ? { root: worktree.worktree, cwd: worktree.cwd } : undefined,
+        );
         const childRunner = deps.makeHookRunner(child, meta);
         const gate = createPolicyGate(
           {
@@ -528,7 +578,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             interactive: false,
             preset: () => deps.permissionPreset(),
             reviewer: () => deps.reviewer?.(),
-            cwd: deps.environment.cwd,
+            cwd: worktree?.cwd ?? deps.environment.cwd,
             ...deps.reviewSources,
             caseSensitive: deps.platform.caseSensitivePaths,
             ...(deps.grants !== undefined ? { grants: deps.grants } : {}),
@@ -537,7 +587,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           },
         );
         const execEnv: ExecutionEnvironment = {
-          checkpoint: deps.checkpoint,
+          checkpoint: worktree ? undefined : deps.checkpoint,
           platform: deps.platform,
           gate,
           readState: createReadStateStore(deps.platform.paths),
@@ -583,12 +633,16 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         // 子会话环境信息在派生时刻生成（ADR-0022：Shell 行取当前生效值）
         const childEnvironment: EnvironmentInfo =
           deps.shellLine === undefined
-            ? deps.environment
+            ? { ...deps.environment }
             : {
                 ...deps.environment,
                 shell: deps.shellLine(),
                 sessionDate: new Date().toISOString(),
               };
+        if (worktree) {
+          childEnvironment.cwd = worktree.cwd;
+          childEnvironment.workspaceRoot = worktree.workspaceRoot;
+        }
         // 催促循环：done 且无 finish → 再开一轮催促；最后一轮 toolChoice 强制
         const maxAttempts = deps.limits.maxAttempts;
         const timeoutMs = Math.min(
@@ -720,6 +774,23 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               }
             },
             (input) => deliver(input),
+            async () => {
+              if (!worktree) return undefined;
+              try {
+                if (worktree.includeSkipped)
+                  deps.warning?.(
+                    "worktree_include_skipped",
+                    "Untrusted project: .worktreeinclude was ignored.",
+                  );
+                return await settleWorktree(worktree);
+              } catch (cause) {
+                deps.warning?.(
+                  "worktree_cleanup_failed",
+                  cause instanceof Error ? cause.message : String(cause),
+                );
+                return undefined;
+              }
+            },
           );
           return {
             status: "ok",

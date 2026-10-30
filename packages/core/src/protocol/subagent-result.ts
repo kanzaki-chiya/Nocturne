@@ -30,11 +30,12 @@ export function backgroundToolStatus(
     : "后台运行中";
 }
 
-/** 去掉给模型看的 `<subagent-result …>` 头尾，只留正文 */
-export function subagentResultText(text: string): string {
-  return text
+/** 去掉给模型看的 `<subagent-result …>` 头尾，只留正文；带改动时再去掉末尾给模型的合并说明（ADR-0075 §5） */
+export function subagentResultText(text: string, hasChanges = false): string {
+  const body = text
     .replace(/^<subagent-result[^>]*>\r?\n?/u, "")
     .replace(/\r?\n?<\/subagent-result>$/u, "");
+  return hasChanges ? body.replace(/\r?\n\r?\nChanges \(\d+ files?\):\r?\n[\s\S]*$/u, "") : body;
 }
 
 export function subagentResultStatus(status: SubagentResult["status"]): string {
@@ -80,6 +81,13 @@ export function pendingBackgroundSubagents(
 }
 
 /** `<档位> · <状态>`；补报条目或缺档位时按 default */
+export function subagentApplyLine(output: unknown): string {
+  const value = output as { files?: unknown[]; conflicts?: unknown[] } | undefined;
+  return (value?.conflicts?.length ?? 0) > 0
+    ? `有冲突 · ${value?.conflicts?.length ?? 0} 个文件`
+    : `并回子代理改动 · ${value?.files?.length ?? 0} 个文件`;
+}
+
 export function subagentResultLine(result: SubagentResult): string {
-  return `${result.profile ?? "default"} · ${subagentResultStatus(result.status)}`;
+  return `${result.profile ?? "default"} · ${subagentResultStatus(result.status)}${result.changes ? ` · 改动 ${result.changes.files.length} 个文件 · ${result.changes.branch}` : ""}`;
 }

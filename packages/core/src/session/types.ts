@@ -159,6 +159,8 @@ export interface SessionSummary {
 }
 
 export interface CreateSessionInput {
+  /** Reserved by the launcher before creating an isolated workspace. */
+  id?: string | undefined;
   cwd: string;
   workspaceRoot: string;
   model: ModelRef;

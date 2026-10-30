@@ -22,6 +22,7 @@ interface TaskInput {
   /** 交给子代理的完整任务描述（子会话看不到父会话历史，必须自包含） */
   task: string;
   background?: boolean;
+  isolation?: "none" | "worktree";
   /** 已启用的外部 agent；与内置子代理的选择字段互斥 */
   agent?: string;
   profile?: string;
@@ -89,6 +90,8 @@ export function createTaskTool(
   const selectedAgent = (input: TaskInput) =>
     agents.find((agent) => agent.name === (input.profile ?? input.agent));
   const validateInput = (input: TaskInput): string | undefined => {
+    if (input.isolation !== undefined && input.background !== true)
+      return "isolation 只在 background: true 时可用";
     if (input.agent !== undefined && input.profile !== undefined)
       return "agent 与 profile 不能同时给出";
     const name = input.profile ?? input.agent ?? "default";
@@ -148,7 +151,7 @@ export function createTaskTool(
         : "") +
       (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : "") +
       (background
-        ? " Use background for independent, read-only, time-consuming research; do not wait or poll for its result."
+        ? " Use background for independent tasks; writable tools require isolation: worktree. Do not wait or poll for its result."
         : ""),
     inputSchema: {
       type: "object",
@@ -157,10 +160,16 @@ export function createTaskTool(
         task: { type: "string", description: "子代理的任务描述（自包含）" },
         ...(background
           ? {
+              isolation: {
+                type: "string",
+                enum: ["none", "worktree"],
+                description:
+                  "Background workspace isolation; writable background tasks require worktree.",
+              },
               background: {
                 type: "boolean",
                 description:
-                  "Run read-only work in the background and receive its result as a separate message.",
+                  "Run work in the background and receive its result as a separate message. Writable work requires isolation: worktree.",
               },
             }
           : {}),
@@ -253,6 +262,7 @@ export function createTaskTool(
         {
           task: input.task,
           ...(input.background === true ? { background: true } : {}),
+          ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
           ...(input.profile !== undefined || input.agent !== undefined
             ? { profile: input.profile ?? input.agent }
             : {}),

@@ -25,8 +25,8 @@ import type {
   SessionSummary,
 } from "./types.js";
 
-/** 时间有序的会话 ID：可排序且冲突概率可忽略 */
-function newSessionId(now = new Date()): string {
+/** 时间有序的会话 ID：可排序且冲突概率可忽略；工作树子会话也先用它预留 ID（ADR-0075 §2） */
+export function newSessionId(now = new Date()): string {
   const t = now.toISOString().replace(/[-:T]/g, "").slice(0, 12); // YYYYMMDDHHmm
   return `${t}-${randomBytes(4).toString("hex")}`;
 }
@@ -353,7 +353,8 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
     },
     async create(input: CreateSessionInput): Promise<Session> {
       await fs.mkdir(sessionsDir);
-      const id = newSessionId();
+      const id = input.id ?? newSessionId();
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("Invalid session ID");
       const lock = await acquireSessionLock(fs, platform, lockPath(id));
       try {
         await fs.writeFile(logPath(id), "");

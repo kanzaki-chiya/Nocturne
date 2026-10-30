@@ -1,4 +1,9 @@
-import type { SkillImportInput, SkillImportOutput, SkillsDescription } from "@nocturne/core";
+import type {
+  Runtime,
+  SkillImportInput,
+  SkillImportOutput,
+  SkillsDescription,
+} from "@nocturne/core";
 /**
  * RPC 客户端（ADR-0044）：类型化封装。运行时只依赖 `@nocturne/core/protocol`，
  * 对 `@nocturne/core` 只有类型导入（由 dependency-cruiser 规则强制），桌面端前端
@@ -296,6 +301,9 @@ export interface RpcRuntime {
   renameSession(sessionId: string, title: string): Promise<void>;
   /** 取消本父会话运行中的后台子代理（ADR-0073），结果照常交付 cancelled */
   cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
+  readSubagentDiff: Runtime["readSubagentDiff"];
+  listSubagentWorktrees: Runtime["listSubagentWorktrees"];
+  deleteSubagentWorktree: Runtime["deleteSubagentWorktree"];
   /**
    * 只读发现父会话的直接内置子会话（含已结束；ADR-0060 第 4 轮，rpc.md 4.1）。
    * 不要求打开父会话。参数既可传 id，也可传与进程内 `Runtime.listSubagents` 相同的对象。
@@ -895,6 +903,11 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       (await call("runtime.forkSession", { sessionId: id, ...forkOptions })).sessionId,
     renameSession: async (sessionId, title) => {
       await call("runtime.renameSession", { sessionId, title });
+    },
+    readSubagentDiff: (input) => call("subagent.diff", input),
+    listSubagentWorktrees: (input) => call("subagent.worktrees", input),
+    async deleteSubagentWorktree(input) {
+      await call("subagent.deleteWorktree", input);
     },
     async cancelSubagent(input) {
       await call("subagent.cancel", input);

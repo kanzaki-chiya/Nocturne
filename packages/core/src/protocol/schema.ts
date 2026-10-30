@@ -229,7 +229,23 @@ const payloadSchemas = {
         code: z.string().optional(),
         profile: z.string().optional(),
         durationMs: z.number().optional(),
-        changes: z.object({ summary: z.string() }).optional(),
+        changes: z
+          .object({
+            branch: z.string(),
+            base: z.string(),
+            head: z.string(),
+            snapshot: z.boolean(),
+            worktree: z.string(),
+            files: z.array(
+              z.object({
+                path: z.string(),
+                status: z.enum(["added", "modified", "deleted"]),
+                additions: z.number().optional(),
+                deletions: z.number().optional(),
+              }),
+            ),
+          })
+          .optional(),
       })
       .optional(),
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),

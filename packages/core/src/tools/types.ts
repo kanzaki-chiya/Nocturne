@@ -513,6 +513,7 @@ export interface ToolExecutor {
  * 的可见性）；task 工具只做输入预检与结果映射。
  */
 export interface SubagentRequest {
+  isolation?: "none" | "worktree" | undefined;
   background?: boolean | undefined;
   profile?: string | undefined;
   reason?: string | undefined;
