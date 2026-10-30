@@ -113,6 +113,8 @@ execute(call, ctx):
 | `ask_user` | 需要用户拍板时暂停并提问（ADR-0032） | 无 | 输入与结果契约见 [tool-api.md](../protocols/tool-api.md)；等待经临时事件 `question.requested` 与会话命令 `respondQuestion`（[events.md](../protocols/events.md) 第 3、7 节）；声明 `needsUser`，子代理可选池按特性排除 |
 | `schedule` | 列出、创建、修改、暂停、删除定时任务（ADR-0064） | 写 `schedules.json`，不改工作区文件 | 见下方；声明 `mutatesSchedule`，定时会话与子代理按特性排除 |
 
+顶层后台功能开启时另注册 `apply_subagent_changes({ id, mode?: "clean" | "3way" })`，声明 `mutates`，以改动文件的 `edit` 主体记录检查点；成功并回按有效事件判断，回退后允许再次并回。完整 Git 与冲突语义见 [ADR-0075 §5](../decisions/ADR-0075-worktree-isolation.md#5-交付与合并)。
+
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 
 ### `schedule`

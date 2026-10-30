@@ -365,7 +365,7 @@ explore 档位不能请求 general，显式 tools 必须是只读池子集；gen
 
 ## 20. 后台子代理
 
-[ADR-0073](../decisions/ADR-0073-background-subagents.md) 是主文档，这里只记实现落点。
+后台交付与生命周期见 [ADR-0073](../decisions/ADR-0073-background-subagents.md)，可写后台隔离见 [ADR-0075](../decisions/ADR-0075-worktree-isolation.md)。Git 操作集中在 `agent/worktree.ts`；`task.isolation: "worktree"` 与 `background` 同显同隐，只接受后台调用，工作区与预设路径映射到副本，项目配置和信任仍来自父会话。收束时提交结果并附 `changes`；`apply_subagent_changes` 经过 edit 主体权限与检查点。
 
 - **开关**：`RuntimeOptions.subagent.background`（缺省关闭）。TUI、桌面端后台、`nctrn rpc` 开启；`nctrn -p` 与定时任务会话关闭。只有顶层、非定时任务会话的 `task` 才在 schema 与描述里出现 `background`，子会话里没有。
 - **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 是唯一判断：外部 agent 一律拒绝，隔离方式为 `"none"` 时只放行全部 `traits.mutates === false` 的工具集（`explore`、只读档位、只读 `tools` 白名单）。launcher 在建子会话之前调用它，外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。

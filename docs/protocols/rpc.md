@@ -309,6 +309,8 @@ interface SubagentObservation {
 
 `listSubagents` 返回该父会话的**直接内置子会话**（含已结束），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补档位和摘要；旧日志缺启动参数时档位用 `default`、摘要回退首条子 `message.user`，再缺则「子代理」（常量 `SUBAGENT_TASK_FALLBACK`，由 `@nocturne/core/protocol` 导出，Core 与桌面端共用）。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
 
+工作树隔离的保留项（[ADR-0075](../decisions/ADR-0075-worktree-isolation.md) §6）：`subagent.worktrees({ parentSessionId })` 返回该父会话登记的副本与分支（含已收束的 `changes`）；`subagent.deleteWorktree({ parentSessionId, childSessionId })` 删除副本与 `nocturne/` 分支，子代理仍在运行时报 `invalid_command`；`subagent.diff({ parentSessionId, childSessionId, file })` 返回该文件 `base..head` 的差异文本，文件必须在结果清单内。
+
 查询可复用 `listSessions({ includeSubagents: true })` 的只读日志头扫描建立候选索引，但不能把 `locked` 当作运行状态，也不能只靠该列表的容错跳过逻辑校验指定 child。运行态来自 Runtime 共享的 launcher 登记簿；缓存失效可重扫日志，不能把缓存作为持久事实源。
 
 #### RPC 映射与通知

@@ -104,6 +104,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 任意文件附件、大段粘贴转附件和提问回答附文件见 [ADR-0072](decisions/ADR-0072-file-attachments.md)。
 
+后台工作树隔离、快照、并回与清理见 [ADR-0075](decisions/ADR-0075-worktree-isolation.md)。
+
 后台子代理（只读准入、启动即返回、结果作为待发输入交付、生命周期）见 [ADR-0073](decisions/ADR-0073-background-subagents.md)，主文档是 [subagent.md](architecture/subagent.md) §20。
 
 MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-0071-mcp-availability-notes.md)。
