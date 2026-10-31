@@ -4,7 +4,7 @@ export interface SettingsGroupProps {
   /** 分组标题；不给时不渲染标题行 */
   title?: ReactNode;
   /** 计数，显示为「标题 · N」 */
-  count?: number | undefined;
+  count?: number | string | undefined;
   /** 标题行右侧操作 */
   action?: ReactNode;
   /** true 时内容不包进卡片（表格、说明、空状态） */

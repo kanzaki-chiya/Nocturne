@@ -20,7 +20,23 @@ import type {
   ToggleImpact,
   UpdateSetupProviderPatch,
 } from "./rpc-types";
-import { Badge, Button, SegmentedControl, Switch } from "./ui";
+import {
+  Badge,
+  Button,
+  DataTable,
+  DetailHeader,
+  EmptyState,
+  Field,
+  FormFooter,
+  ListGroup,
+  ListItem,
+  MasterDetail,
+  PageHeader,
+  SegmentedControl,
+  SettingsGroup,
+  SettingsRow,
+  Switch,
+} from "./ui";
 import "./pages.css";
 import "./mcp.css";
 
@@ -169,40 +185,57 @@ function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean
     );
   }
   return (
-    <div className="flist" data-testid="fetched-list">
-      <div className="fr h">
-        <span>模型</span>
-        <span>能力</span>
-        <span className="num model-context">上下文</span>
-        <span className="num model-output">最大输出</span>
-      </div>
-      <div className="fbody">
-        {models.map((m) => {
-          const r = m.reasoning !== undefined && m.reasoning !== "none";
-          const implausibleOutput =
-            m.maxOutputTokens !== undefined &&
-            m.contextWindow !== undefined &&
-            m.maxOutputTokens >= m.contextWindow;
-          return (
-            <div className="fr" key={m.id}>
-              <span className="m" title={m.displayName ?? m.id}>
-                {m.id}
-              </span>
+    <div className="fetched-models" data-testid="fetched-list">
+      <DataTable
+        aria-label="获取到的模型"
+        rows={models}
+        rowKey={(m) => m.id}
+        columns={[
+          {
+            key: "id",
+            header: "模型",
+            mono: true,
+            render: (m) => <span title={m.displayName ?? m.id}>{m.id}</span>,
+          },
+          {
+            key: "cap",
+            header: "能力",
+            render: (m) => (
               <span className="cap">
-                {r && <b title="推理">R</b>}
+                {m.reasoning !== undefined && m.reasoning !== "none" && <b title="推理">R</b>}
                 {m.imageInput === true && <b title="看图">I</b>}
               </span>
-              <span className="num model-context">{fullTokens(m.contextWindow)}</span>
-              <span
-                className={`num model-output${implausibleOutput ? " implausible" : ""}`}
-                title={implausibleOutput ? "上游声明的最大输出不小于上下文窗口，已忽略" : undefined}
-              >
-                {shortTokens(m.maxOutputTokens)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+            ),
+          },
+          {
+            key: "ctx",
+            header: "上下文",
+            numeric: true,
+            mono: true,
+            render: (m) => fullTokens(m.contextWindow),
+          },
+          {
+            key: "out",
+            header: "最大输出",
+            numeric: true,
+            mono: true,
+            render: (m) => {
+              const implausible =
+                m.maxOutputTokens !== undefined &&
+                m.contextWindow !== undefined &&
+                m.maxOutputTokens >= m.contextWindow;
+              return (
+                <span
+                  className={implausible ? "implausible" : undefined}
+                  title={implausible ? "上游声明的最大输出不小于上下文窗口，已忽略" : undefined}
+                >
+                  {shortTokens(m.maxOutputTokens)}
+                </span>
+              );
+            },
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -310,71 +343,73 @@ export function ProvidersPage({
   }, [sel, configured, available]);
 
   return (
-    <section className="page3" data-testid="providers-page">
-      <div className="ph3">
-        <div className="grow">
-          <h3>服务商</h3>
-          <span className="sub">{configured.length} 个已配置</span>
-        </div>
-      </div>
-      <div className="cols3">
-        <nav className="plist" aria-label="服务商列表">
-          <h5>已配置</h5>
-          {configured.length === 0 && <span className="fine pad">暂无</span>}
-          {configured.map((p) => {
-            const off = p.enabled === false;
-            const total = p.modelCount;
-            const on = p.enabledModelCount ?? total;
-            return (
-              <a
-                key={p.id}
-                className={sel?.kind === "provider" && sel.id === p.id ? "on" : undefined}
-                onClick={() => {
-                  setSel({ kind: "provider", id: p.id });
-                }}
-              >
-                <span className={`dot ${off ? "off" : statusDot(p)}`} />
-                <span
-                  className={`nm${off ? " off" : ""}`}
-                  title={p.displayName !== undefined ? p.id : undefined}
-                >
-                  {p.displayName ?? p.id}
-                </span>
-                <span className={`r${failed(p) ? " warn" : ""}`}>
-                  {p.id === currentProvider && <Badge variant="accent">当前</Badge>}
-                  {failed(p) ? (
-                    "已失效"
-                  ) : off ? (
-                    <Badge className="tagm">已停用</Badge>
-                  ) : on < total ? (
-                    `${on} / ${total}`
-                  ) : (
-                    `${total} 个模型`
-                  )}
-                </span>
-              </a>
-            );
-          })}
-          <h5>可添加</h5>
-          {available.map((p) => (
-            <a
-              key={p.id}
-              className={sel?.kind === "preset" && sel.id === p.id ? "on" : undefined}
-              onClick={() => {
-                setSel({ kind: "preset", id: p.id });
-              }}
-            >
-              <span className="dot off" />
-              <span className="nm">{p.label}</span>
-            </a>
-          ))}
-        </nav>
-        <div className="pane">
+    <section className="page3" data-testid="providers-page" aria-label="服务商">
+      <div className="spage flush">
+        <PageHeader title="服务商" />
+        <MasterDetail
+          listLabel="服务商列表"
+          list={
+            <>
+              {configured.length > 0 && (
+                <ListGroup title="已配置" count={configured.length}>
+                  {configured.map((p) => {
+                    const off = p.enabled === false;
+                    const total = p.modelCount;
+                    const on = p.enabledModelCount ?? total;
+                    return (
+                      <ListItem
+                        key={p.id}
+                        label={p.displayName ?? p.id}
+                        title={p.displayName !== undefined ? p.id : undefined}
+                        mono={p.displayName === undefined}
+                        selected={sel?.kind === "provider" && sel.id === p.id}
+                        dot={off ? "hollow" : statusDot(p)}
+                        off={off}
+                        badge={
+                          p.id === currentProvider ? (
+                            <Badge variant="accent">当前</Badge>
+                          ) : undefined
+                        }
+                        meta={
+                          failed(p)
+                            ? "已失效"
+                            : off
+                              ? "已停用"
+                              : on < total
+                                ? `${on} / ${total}`
+                                : `${total} 个模型`
+                        }
+                        onClick={() => {
+                          setSel({ kind: "provider", id: p.id });
+                        }}
+                      />
+                    );
+                  })}
+                </ListGroup>
+              )}
+              {available.length > 0 && (
+                <ListGroup title="可添加">
+                  {available.map((p) => (
+                    <ListItem
+                      key={p.id}
+                      label={p.label}
+                      dot="hollow"
+                      selected={sel?.kind === "preset" && sel.id === p.id}
+                      onClick={() => {
+                        setSel({ kind: "preset", id: p.id });
+                      }}
+                    />
+                  ))}
+                </ListGroup>
+              )}
+            </>
+          }
+        >
           {client === undefined ? (
-            <span className="fine">后台尚未就绪，稍后自动刷新。</span>
+            <EmptyState>后台尚未就绪，稍后自动刷新。</EmptyState>
           ) : (
             <>
-              {loadError !== null && <div className="errt">{loadError}</div>}
+              {loadError !== null && <p className="desc err">{loadError}</p>}
               {selProvider !== undefined && (
                 <ProviderDetail
                   key={selProvider.id}
@@ -414,10 +449,10 @@ export function ProvidersPage({
                   }}
                 />
               )}
-              {sel === null && loadError === null && <span className="fine">选择左侧条目</span>}
+              {sel === null && loadError === null && <EmptyState>选择左侧条目</EmptyState>}
             </>
           )}
-        </div>
+        </MasterDetail>
       </div>
     </section>
   );
@@ -620,85 +655,80 @@ function ProviderDetail({
 
   return (
     <>
-      <div className="t1">
-        <div className="provider-heading">
-          <h3 className="mono">{p.id}</h3>
-          {current && <Badge variant="accent">当前</Badge>}
-          {failed(p) && (
-            <Badge variant="warn" className="tagw">
-              已失效
-            </Badge>
-          )}
-          {p.overridden && (
-            <Badge variant="warn" className="tagw">
-              被更高层覆盖
-            </Badge>
-          )}
-        </div>
-        <span className="acts">
-          <Switch
-            checked={!off}
-            aria-label={`启用服务商 ${p.id}`}
-            disabled={busy !== null}
-            onChange={(next) => {
-              if (next) void applyProviderEnabled(true);
-              else void disable({ kind: "provider" });
-            }}
-          />
-          <span className="mcp-action-divider" aria-hidden="true" />
-          {editable && (
+      <DetailHeader
+        title={p.id}
+        mono
+        extra={
+          <>
+            {current && <Badge variant="accent">当前</Badge>}
+            {failed(p) && <Badge variant="warn">已失效</Badge>}
+            {off && <Badge>已停用</Badge>}
+            {p.overridden && <Badge variant="warn">被更高层覆盖</Badge>}
+          </>
+        }
+        actions={
+          <>
+            <Switch
+              checked={!off}
+              aria-label={`启用服务商 ${p.id}`}
+              disabled={busy !== null}
+              onChange={(next) => {
+                if (next) void applyProviderEnabled(true);
+                else void disable({ kind: "provider" });
+              }}
+            />
+            {editable && (
+              <Button
+                disabled={busy !== null}
+                onClick={() => {
+                  setDialog("edit");
+                }}
+              >
+                编辑
+              </Button>
+            )}
+            {(auth === "apiKey" || auth === "none") && p.managed && (
+              <Button
+                disabled={busy !== null}
+                onClick={() => {
+                  setDialog("rekey");
+                }}
+              >
+                {auth === "none" ? "设置密钥" : "换密钥"}
+              </Button>
+            )}
             <Button
               disabled={busy !== null}
-              onClick={() => {
-                setDialog("edit");
-              }}
+              onClick={() => void run("refresh", () => client.provider.refreshUpstreamLimits(p.id))}
             >
-              编辑
+              {busy === "refresh" ? "刷新中…" : "刷新模型列表"}
             </Button>
-          )}
-          {(auth === "apiKey" || auth === "none") && p.managed && (
-            <Button
-              disabled={busy !== null}
-              onClick={() => {
-                setDialog("rekey");
-              }}
-            >
-              {auth === "none" ? "设置密钥" : "换密钥"}
-            </Button>
-          )}
-          <Button
-            disabled={busy !== null}
-            onClick={() => void run("refresh", () => client.provider.refreshUpstreamLimits(p.id))}
-          >
-            {busy === "refresh" ? "刷新中…" : "刷新模型列表"}
-          </Button>
-          {auth === "account" && p.managed && (
-            <Button
-              disabled={busy !== null}
-              onClick={() => {
-                setDialog("logout");
-              }}
-            >
-              退出登录
-            </Button>
-          )}
-          <span title={deleteBlocked ?? undefined}>
-            <Button
-              variant="danger"
-              disabled={busy !== null || deleteBlocked !== null}
-              onClick={() => {
-                setDialog("remove");
-              }}
-            >
-              删除
-            </Button>
-          </span>
-        </span>
-      </div>
+            {auth === "account" && p.managed && (
+              <Button
+                disabled={busy !== null}
+                onClick={() => {
+                  setDialog("logout");
+                }}
+              >
+                退出登录
+              </Button>
+            )}
+            <span title={deleteBlocked ?? undefined}>
+              <Button
+                variant="danger"
+                disabled={busy !== null || deleteBlocked !== null}
+                onClick={() => {
+                  setDialog("remove");
+                }}
+              >
+                删除
+              </Button>
+            </span>
+          </>
+        }
+      />
 
-      {!p.managed && (
-        <div className="hint">只读：此条目来自 {originText(p)}，请修改对应配置文件。</div>
-      )}
+      {!p.managed && <p className="desc">只读：此条目来自 {originText(p)}，请修改对应配置文件。</p>}
       {showRelogin && (
         <div className="pbanner">
           账号登录已失效<span>需要重新登录才能继续调用 {p.id} 的模型</span>
@@ -718,7 +748,7 @@ function ProviderDetail({
           )}
         </div>
       )}
-      {relogin.kind === "storage" && <div className="hint">{relogin.setup.notice}</div>}
+      {relogin.kind === "storage" && <p className="desc">{relogin.setup.notice}</p>}
       {relogin.kind === "waiting" && (
         <LoginWaitCard
           login={relogin.login}
@@ -735,7 +765,7 @@ function ProviderDetail({
           }}
         />
       )}
-      {loginError !== null && <div className="errt">{loginError}</div>}
+      {loginError !== null && <p className="desc err">{loginError}</p>}
       {unstored !== null && <UnstoredKey value={unstored} />}
 
       {off && (
@@ -749,178 +779,217 @@ function ProviderDetail({
           </Button>
         </div>
       )}
-      <dl className="kv">
-        <div>
-          <dt>类型</dt>
-          <dd>{typeText(p.type)}</dd>
-        </div>
-        <div>
-          <dt>地址</dt>
-          <dd className="mono" title={p.host ?? "官方端点"}>
+      <SettingsGroup title="连接">
+        <SettingsRow label="类型">
+          <span className="val">{typeText(p.type)}</span>
+        </SettingsRow>
+        <SettingsRow label="地址">
+          <span className={p.host !== undefined ? "val mono" : "val"} title={p.host ?? "官方端点"}>
             {p.host ?? "官方端点"}
-          </dd>
-        </div>
-        <div>
-          <dt>认证</dt>
-          <dd title={p.auth ?? ""}>{p.auth ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>凭据</dt>
-          <dd className={cred.cls}>{cred.text}</dd>
-        </div>
-        <div>
-          <dt>保存位置</dt>
-          <dd>{storageText(p)}</dd>
-        </div>
-        <div>
-          <dt>来源</dt>
-          <dd className="mono">{originText(p)}</dd>
-        </div>
-      </dl>
+          </span>
+        </SettingsRow>
+        <SettingsRow label="认证">
+          <span className="val" title={p.auth ?? ""}>
+            {p.auth ?? "—"}
+          </span>
+        </SettingsRow>
+        <SettingsRow label="凭据">
+          <span
+            className={`val ${cred.cls === "warn" ? "warn-t" : cred.cls === "ok" ? "ok-t" : ""}`}
+          >
+            {cred.text}
+          </span>
+        </SettingsRow>
+        <SettingsRow label="保存位置">
+          <span className="val">{storageText(p)}</span>
+        </SettingsRow>
+        <SettingsRow label="来源">
+          <span className="val mono">{originText(p)}</span>
+        </SettingsRow>
+      </SettingsGroup>
 
       {(actionError !== null || notice !== null) && (
-        <div className={actionError !== null ? "errt" : "done"}>{actionError ?? notice}</div>
+        <p className={actionError !== null ? "desc err" : "desc ok-t"} role="status">
+          {actionError ?? notice}
+        </p>
       )}
 
-      <div className="sh">
-        <h4>模型</h4>
-        <small>
-          {models === null ? (
-            "…"
-          ) : q !== "" ? (
-            `${filtered.length} / ${models.length}`
-          ) : off ? (
-            <>
-              服务商已停用
-              <span className="muted-value">
-                逐个设置保留 {models.filter((m) => disabledByModel[m.modelId] !== "model").length} /{" "}
-                {total}
-              </span>
-            </>
-          ) : onCount < total ? (
-            `已启用 ${onCount} / ${total}`
-          ) : (
-            `${models.length} 个`
-          )}
-        </small>
-        <input
-          className="search"
-          placeholder="搜索模型"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-          }}
-          aria-label="搜索模型"
-        />
-        <button
-          className="lk"
-          disabled={
-            off || busy !== null || !filtered.some((m) => disabledByModel[m.modelId] === "model")
-          }
-          onClick={() =>
-            void applyModelsEnabled(
-              filtered.filter((m) => disabledByModel[m.modelId] === "model").map((m) => m.modelId),
-              true,
-            )
-          }
-        >
-          {q === "" ? "全部启用" : "启用筛选结果"}
-        </button>
-        <button
-          className="lk"
-          disabled={
-            off || busy !== null || !filtered.some((m) => disabledByModel[m.modelId] !== "model")
-          }
-          onClick={() =>
-            void disable({
-              kind: "models",
-              ids: filtered
-                .filter((m) => disabledByModel[m.modelId] !== "model")
-                .map((m) => m.modelId),
-            })
-          }
-        >
-          {q === "" ? "全部停用" : "停用筛选结果"}
-        </button>
-      </div>
-      <div className="mt">
-        <div className="mr h">
-          <span>启用</span>
-          <span>模型</span>
-          <span>能力</span>
-          <span className="num model-context">上下文</span>
-          <span className="num model-output">最大输出</span>
-          <span />
-        </div>
-        {filtered.map((m) => {
-          const c = caps(m);
-          const name = m.fields.displayName.value ?? m.modelId;
-          // 个别停用（disabled="model"）决定开关状态；服务商停用只让开关不可点，
-          // 逐个设置保留（ADR-0054 §4、效果图）。
-          const individuallyOff = disabledByModel[m.modelId] === "model";
-          const rowOff = off || disabledByModel[m.modelId] !== undefined;
-          const rawMaxOutput =
-            m.fields.maxOutputTokens.value ?? m.fields.maxOutputTokens.lowerValue;
-          const implausibleMaxOutput =
-            rawMaxOutput !== undefined &&
-            m.fields.contextWindow.value !== undefined &&
-            rawMaxOutput >= m.fields.contextWindow.value &&
-            m.fields.maxOutputTokens.userValue === undefined &&
-            m.fields.maxOutputTokens.source.kind !== "user" &&
-            m.fields.maxOutputTokens.source.kind !== "config";
-          return (
-            <div className={`mr${rowOff ? " off" : ""}`} key={m.modelId}>
-              <span className="tog">
-                <Switch
-                  checked={!individuallyOff}
-                  aria-label={`启用 ${m.modelId}`}
-                  disabled={off || busy !== null}
-                  onChange={() => void toggleModel(m.modelId, individuallyOff)}
-                />
-              </span>
-              <span className="m">
-                <span title={m.modelId}>{name}</span>
-                {defaultKey === `${p.id}/${m.modelId}` && (
-                  <Badge variant="accent" className="dflt">
-                    默认
-                  </Badge>
-                )}
-                {Object.values(m.fields).some((f) => f.userValue !== undefined) && (
-                  <Badge className="edited">已编辑</Badge>
-                )}
-                {rowOff && <Badge className="tagm">已停用</Badge>}
-              </span>
-              <span className="cap">
-                {c.r && <b title="推理">R</b>}
-                {c.i && <b title="图片输入">I</b>}
-              </span>
-              <span className="num model-context">{fullTokens(m.fields.contextWindow.value)}</span>
-              <span
-                className={`num model-output${implausibleMaxOutput ? " implausible" : ""}`}
-                title={
-                  implausibleMaxOutput ? "上游声明的最大输出不小于上下文窗口，已忽略" : undefined
-                }
-              >
-                {shortTokens(implausibleMaxOutput ? rawMaxOutput : m.fields.maxOutputTokens.value)}
-              </span>
-              <a
-                className="lnk"
-                onClick={() => {
-                  setEditModel(m);
-                }}
-              >
-                设置
-              </a>
-            </div>
-          );
-        })}
-        {models !== null && filtered.length === 0 && (
-          <div className="mr empty">
-            <span className="fine">{models.length === 0 ? "没有模型" : "无匹配模型"}</span>
-          </div>
+      <SettingsGroup
+        title="模型"
+        plain
+        count={
+          models === null
+            ? "…"
+            : q !== ""
+              ? `${filtered.length} / ${models.length}`
+              : off
+                ? `服务商已停用，逐个设置保留 ${
+                    models.filter((m) => disabledByModel[m.modelId] !== "model").length
+                  } / ${total}`
+                : onCount < total
+                  ? `已启用 ${onCount} / ${total}`
+                  : `${models.length} 个`
+        }
+        action={
+          <>
+            <input
+              className="input md-w"
+              placeholder="搜索模型"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+              }}
+              aria-label="搜索模型"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={
+                off ||
+                busy !== null ||
+                !filtered.some((m) => disabledByModel[m.modelId] === "model")
+              }
+              onClick={() =>
+                void applyModelsEnabled(
+                  filtered
+                    .filter((m) => disabledByModel[m.modelId] === "model")
+                    .map((m) => m.modelId),
+                  true,
+                )
+              }
+            >
+              {q === "" ? "全部启用" : "启用筛选结果"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={
+                off ||
+                busy !== null ||
+                !filtered.some((m) => disabledByModel[m.modelId] !== "model")
+              }
+              onClick={() =>
+                void disable({
+                  kind: "models",
+                  ids: filtered
+                    .filter((m) => disabledByModel[m.modelId] !== "model")
+                    .map((m) => m.modelId),
+                })
+              }
+            >
+              {q === "" ? "全部停用" : "停用筛选结果"}
+            </Button>
+          </>
+        }
+      >
+        {filtered.length > 0 && (
+          <DataTable
+            aria-label="模型"
+            rows={filtered}
+            rowKey={(m) => m.modelId}
+            rowClassName={(m) =>
+              off || disabledByModel[m.modelId] !== undefined ? "off" : undefined
+            }
+            columns={[
+              {
+                key: "on",
+                header: "启用",
+                render: (m) => (
+                  <Switch
+                    checked={disabledByModel[m.modelId] !== "model"}
+                    aria-label={`启用 ${m.modelId}`}
+                    disabled={off || busy !== null}
+                    onChange={() =>
+                      void toggleModel(m.modelId, disabledByModel[m.modelId] === "model")
+                    }
+                  />
+                ),
+              },
+              {
+                key: "model",
+                header: "模型",
+                render: (m) => (
+                  <span className="model-cell">
+                    <span title={m.modelId}>{m.fields.displayName.value ?? m.modelId}</span>
+                    {defaultKey === `${p.id}/${m.modelId}` && <Badge variant="accent">默认</Badge>}
+                    {Object.values(m.fields).some((f) => f.userValue !== undefined) && (
+                      <Badge>已编辑</Badge>
+                    )}
+                    {(off || disabledByModel[m.modelId] !== undefined) && <Badge>已停用</Badge>}
+                  </span>
+                ),
+              },
+              {
+                key: "cap",
+                header: "能力",
+                render: (m) => {
+                  const c = caps(m);
+                  return (
+                    <span className="cap">
+                      {c.r && <b title="推理">R</b>}
+                      {c.i && <b title="图片输入">I</b>}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "ctx",
+                header: "上下文",
+                numeric: true,
+                mono: true,
+                render: (m) => fullTokens(m.fields.contextWindow.value),
+              },
+              {
+                key: "out",
+                header: "最大输出",
+                numeric: true,
+                mono: true,
+                render: (m) => {
+                  const rawMaxOutput =
+                    m.fields.maxOutputTokens.value ?? m.fields.maxOutputTokens.lowerValue;
+                  const implausible =
+                    rawMaxOutput !== undefined &&
+                    m.fields.contextWindow.value !== undefined &&
+                    rawMaxOutput >= m.fields.contextWindow.value &&
+                    m.fields.maxOutputTokens.userValue === undefined &&
+                    m.fields.maxOutputTokens.source.kind !== "user" &&
+                    m.fields.maxOutputTokens.source.kind !== "config";
+                  return (
+                    <span
+                      className={`model-output${implausible ? " implausible" : ""}`}
+                      title={implausible ? "上游声明的最大输出不小于上下文窗口，已忽略" : undefined}
+                    >
+                      {shortTokens(implausible ? rawMaxOutput : m.fields.maxOutputTokens.value)}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "set",
+                header: "",
+                label: "操作",
+                numeric: true,
+                render: (m) => (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`设置 ${m.modelId}`}
+                    onClick={() => {
+                      setEditModel(m);
+                    }}
+                  >
+                    设置
+                  </Button>
+                ),
+              },
+            ]}
+          />
         )}
-      </div>
-      <span className="fine">停用的模型不出现在模型菜单里</span>
+        {models !== null && filtered.length === 0 && (
+          <EmptyState inline>{models.length === 0 ? "没有模型" : "无匹配模型"}</EmptyState>
+        )}
+        <p className="desc">停用的模型不出现在模型菜单里</p>
+      </SettingsGroup>
 
       {confirm !== null && (
         <ConfirmDialog
@@ -1386,33 +1455,30 @@ function ProviderEditDialog({
           </div>
         ) : (
           <div className="db">
-            <div className="field">
-              <div className="lab">
-                <label htmlFor="edit-provider-id">服务商 ID</label>
-                <small>会话、默认模型都按它引用，不可修改</small>
-              </div>
-              <input id="edit-provider-id" className="input" value={p.id} disabled />
-            </div>
-            <div className="field">
-              <div className="lab">
-                <label htmlFor="edit-provider-name">显示名称</label>
-                <small>可选；列表与菜单里显示</small>
-              </div>
+            <Field
+              label="服务商 ID"
+              htmlFor="edit-provider-id"
+              desc="会话、默认模型都按它引用，不可修改"
+            >
+              <input id="edit-provider-id" className="input lg mono" value={p.id} disabled />
+            </Field>
+            <Field
+              label="显示名称"
+              htmlFor="edit-provider-name"
+              aside={<small className="desc">可选；列表与菜单里显示</small>}
+              error={fieldErr?.field === "displayName" ? fieldErr.message : undefined}
+            >
               <input
                 id="edit-provider-name"
-                className={`input${fieldErr?.field === "displayName" ? " err" : ""}`}
+                className={`input lg${fieldErr?.field === "displayName" ? " err" : ""}`}
                 placeholder={p.id}
                 value={displayName}
                 onChange={(e) => {
                   setDisplayName(e.target.value);
                 }}
               />
-              {fieldErr?.field === "displayName" && <div className="errt">{fieldErr.message}</div>}
-            </div>
-            <div className="field">
-              <div className="lab">
-                <label>协议</label>
-              </div>
+            </Field>
+            <Field label="协议">
               <SegmentedControl
                 aria-label="协议"
                 value={type}
@@ -1425,15 +1491,18 @@ function ProviderEditDialog({
                   resetProbe();
                 }}
               />
-            </div>
-            <div className="field">
-              <div className="lab">
-                <label htmlFor="edit-provider-url">服务地址</label>
-                <small>{type === "anthropic" ? "留空使用官方端点" : "必填"}</small>
-              </div>
+            </Field>
+            <Field
+              label="服务地址"
+              htmlFor="edit-provider-url"
+              aside={
+                <small className="desc">{type === "anthropic" ? "留空使用官方端点" : "必填"}</small>
+              }
+              error={fieldErr?.field === "baseURL" ? fieldErr.message : undefined}
+            >
               <input
                 id="edit-provider-url"
-                className={`input${fieldErr?.field === "baseURL" ? " err" : ""}`}
+                className={`input lg mono${fieldErr?.field === "baseURL" ? " err" : ""}`}
                 placeholder={type === "anthropic" ? "https://api.anthropic.com" : "https://…"}
                 value={baseURL}
                 onChange={(e) => {
@@ -1441,17 +1510,16 @@ function ProviderEditDialog({
                   resetProbe();
                 }}
               />
-              {fieldErr?.field === "baseURL" && <div className="errt">{fieldErr.message}</div>}
-            </div>
-            <div className="field">
-              <div className="lab">
-                <label>自定义请求头</label>
-                <small>可选；每个请求都携带</small>
-              </div>
+            </Field>
+            <Field
+              label="自定义请求头"
+              aside={<small className="desc">可选；每个请求都携带</small>}
+              error={fieldErr?.field === "headers" ? fieldErr.message : undefined}
+            >
               {headers.map((row, i) => (
-                <div className="hrow" key={i}>
+                <div className="kvline" key={i}>
                   <input
-                    className="input"
+                    className="input lg mono"
                     aria-label={`请求头 ${i + 1} 名称`}
                     placeholder="名称"
                     value={row.name}
@@ -1463,7 +1531,7 @@ function ProviderEditDialog({
                     }}
                   />
                   <input
-                    className="input"
+                    className="input lg mono"
                     aria-label={`请求头 ${i + 1} 值`}
                     placeholder="值"
                     value={row.value}
@@ -1474,45 +1542,46 @@ function ProviderEditDialog({
                       resetProbe();
                     }}
                   />
-                  <a
-                    className="lnk"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       setHeaders((cur) => cur.filter((_, j) => j !== i));
                       resetProbe();
                     }}
                   >
                     删除
-                  </a>
+                  </Button>
                 </div>
               ))}
-              <a
-                className="lk"
-                onClick={() => {
-                  setHeaders((cur) => [...cur, { name: "", value: "" }]);
-                }}
-              >
-                ＋ 添加请求头
-              </a>
-              {fieldErr?.field === "headers" && <div className="errt">{fieldErr.message}</div>}
-            </div>
-            <div className="field">
-              <div className="lab">
-                <label htmlFor="edit-provider-session-header">会话标识请求头</label>
-                <small>可选；上游按此请求头区分会话</small>
+              <div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setHeaders((cur) => [...cur, { name: "", value: "" }]);
+                  }}
+                >
+                  ＋ 添加请求头
+                </Button>
               </div>
+            </Field>
+            <Field
+              label="会话标识请求头"
+              htmlFor="edit-provider-session-header"
+              aside={<small className="desc">可选；上游按此请求头区分会话</small>}
+              error={fieldErr?.field === "sessionHeader" ? fieldErr.message : undefined}
+            >
               <input
                 id="edit-provider-session-header"
-                className={`input${fieldErr?.field === "sessionHeader" ? " err" : ""}`}
+                className={`input lg mono${fieldErr?.field === "sessionHeader" ? " err" : ""}`}
                 placeholder="例如 X-Session-Id"
                 value={sessionHeader}
                 onChange={(e) => {
                   setSessionHeader(e.target.value);
                 }}
               />
-              {fieldErr?.field === "sessionHeader" && (
-                <div className="errt">{fieldErr.message}</div>
-              )}
-            </div>
+            </Field>
             {endpointChanged ? (
               <div className="fetch" data-testid="edit-probe">
                 {probe.kind === "idle" && (
@@ -1539,14 +1608,16 @@ function ProviderEditDialog({
                           </span>
                         ))}
                       {probe.models.length > PEEK_MODELS && (
-                        <a
-                          className="tog"
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-expanded={listOpen}
                           onClick={() => {
                             setListOpen((v) => !v);
                           }}
                         >
                           {listOpen ? "收起" : "展开"}
-                        </a>
+                        </Button>
                       )}
                     </div>
                     {probe.models.length > 0 && (
@@ -1565,7 +1636,7 @@ function ProviderEditDialog({
                 )}
               </div>
             ) : (
-              <div className="hint">地址与协议未变化，模型列表保持现状。</div>
+              <div className="desc">地址与协议未变化，模型列表保持现状。</div>
             )}
             {commitErr !== null && <div className="errt">{commitErr}</div>}
           </div>
@@ -1719,14 +1790,12 @@ function PresetForm({
   if (setupError !== null) {
     return (
       <>
-        <div className="t1">
-          <h3>添加 {preset.label}</h3>
-        </div>
-        <div className="errt">{setupError}</div>
+        <DetailHeader title={`添加 ${preset.label}`} />
+        <p className="desc err">{setupError}</p>
       </>
     );
   }
-  if (setup === null) return <span className="fine">加载表单…</span>;
+  if (setup === null) return <p className="desc">加载表单…</p>;
 
   const methods = setup.credential.methods;
   const apiKeyMethod = methods.find(
@@ -1935,37 +2004,38 @@ function PresetForm({
     }
   };
 
-  const errorUnder = (key: string) =>
-    fieldErr[key] !== undefined ? <div className="errt">{fieldErr[key]}</div> : null;
   const fixedFields = setup.fields.filter((f) => f.fixed !== undefined);
   const printNotices = (fetched?.notices ?? []).filter((n) => n.kind === "print");
 
   return (
     <>
-      <div className="t1">
-        <h3>添加 {setup.label}</h3>
-      </div>
+      <DetailHeader title={`添加 ${setup.label}`} />
       <div className="form">
         {fixedFields.length > 0 && (
-          <div className="fixed">
+          <div className="form-grid">
             {fixedFields.map((f) => (
-              <span key={f.key}>
-                {labelOf(f.prompt)} <b className="mono">{f.fixed}</b>
-              </span>
+              <Field key={f.key} label={labelOf(f.prompt)}>
+                <span className="val mono fixed-val">{f.fixed}</span>
+              </Field>
             ))}
           </div>
         )}
         {setup.fields
           .filter((f) => f.fixed === undefined)
           .map((f) => (
-            <div className="field" key={f.key}>
-              <div className="lab">
-                <label htmlFor={`pf-${f.key}`}>{labelOf(f.prompt)}</label>
-                {!f.required && <small>可选</small>}
-              </div>
+            <Field
+              key={f.key}
+              label={labelOf(f.prompt)}
+              htmlFor={`pf-${f.key}`}
+              aside={!f.required ? <small className="desc">可选</small> : undefined}
+              error={fieldErr[f.key]}
+              desc={
+                fieldErr[f.key] === undefined && hintOf(f.hint) !== "" ? hintOf(f.hint) : undefined
+              }
+            >
               <input
                 id={`pf-${f.key}`}
-                className={`input${fieldErr[f.key] !== undefined ? " err" : ""}`}
+                className={`input lg mono${fieldErr[f.key] !== undefined ? " err" : ""}`}
                 type="text"
                 spellCheck={false}
                 placeholder={f.key === "baseURL" ? (preset.baseURL ?? "") : undefined}
@@ -1974,16 +2044,11 @@ function PresetForm({
                   setField(f.key, e.target.value);
                 }}
               />
-              {errorUnder(f.key) ??
-                (hintOf(f.hint) !== "" && <div className="hint">{hintOf(f.hint)}</div>)}
-            </div>
+            </Field>
           ))}
 
         {setup.credential.choose !== undefined && (
-          <div className="field">
-            <div className="lab">
-              <label>{labelOf(setup.credential.choose.prompt).replace(/（[^）]*）/, "")}</label>
-            </div>
+          <Field label={labelOf(setup.credential.choose.prompt).replace(/（[^）]*）/, "")}>
             <SegmentedControl
               aria-label={labelOf(setup.credential.choose.prompt).replace(/（[^）]*）/, "")}
               value={choice}
@@ -1998,16 +2063,18 @@ function PresetForm({
                 invalidate();
               }}
             />
-          </div>
+          </Field>
         )}
 
         {mode === "apiKey" && apiKeyMethod !== undefined && (
-          <div className="field">
-            <div className="lab">
-              <label htmlFor="pf-key">{labelOf(apiKeyMethod.prompt)}</label>
-              {envMethod !== undefined && (
-                <a
-                  className="lk"
+          <Field
+            label={labelOf(apiKeyMethod.prompt)}
+            htmlFor="pf-key"
+            aside={
+              envMethod !== undefined ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
                     setUseEnv(true);
                     setApiKey("");
@@ -2016,12 +2083,24 @@ function PresetForm({
                   }}
                 >
                   改用环境变量
-                </a>
-              )}
-            </div>
+                </Button>
+              ) : undefined
+            }
+            error={fieldErr.credential}
+            desc={
+              fieldErr.credential === undefined
+                ? [
+                    hintOf(apiKeyMethod.hint),
+                    `交给 ${setup.credential.backend.label} 保存，不写进配置文件`,
+                  ]
+                    .filter((s) => s !== "")
+                    .join("；")
+                : undefined
+            }
+          >
             <input
               id="pf-key"
-              className={`input${fieldErr.credential !== undefined ? " err" : ""}`}
+              className={`input lg mono${fieldErr.credential !== undefined ? " err" : ""}`}
               type="password"
               autoComplete="off"
               placeholder="粘贴密钥"
@@ -2032,25 +2111,17 @@ function PresetForm({
                 invalidate();
               }}
             />
-            {errorUnder("credential") ?? (
-              <div className="hint">
-                {[
-                  hintOf(apiKeyMethod.hint),
-                  `交给 ${setup.credential.backend.label} 保存，不写进配置文件`,
-                ]
-                  .filter((s) => s !== "")
-                  .join("；")}
-              </div>
-            )}
-          </div>
+          </Field>
         )}
         {mode === "env" && envMethod !== undefined && (
-          <div className="field">
-            <div className="lab">
-              <label htmlFor="pf-env">{labelOf(envMethod.prompt)}</label>
-              {apiKeyMethod?.available === true && (
-                <a
-                  className="lk"
+          <Field
+            label={labelOf(envMethod.prompt)}
+            htmlFor="pf-env"
+            aside={
+              apiKeyMethod?.available === true ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
                     setUseEnv(false);
                     clearFieldErr("credential");
@@ -2058,12 +2129,21 @@ function PresetForm({
                   }}
                 >
                   改用密钥
-                </a>
-              )}
-            </div>
+                </Button>
+              ) : undefined
+            }
+            error={fieldErr.credential}
+            desc={
+              fieldErr.credential === undefined
+                ? apiKeyMethod?.available === false
+                  ? `${setup.credential.backend.label}不可用，改为读取环境变量；配置里只记变量名`
+                  : `${hintOf(envMethod.hint)}；配置里只记变量名`
+                : undefined
+            }
+          >
             <input
               id="pf-env"
-              className={`input mono${fieldErr.credential !== undefined ? " err" : ""}`}
+              className={`input lg mono${fieldErr.credential !== undefined ? " err" : ""}`}
               type="text"
               spellCheck={false}
               placeholder={envMethod.defaultName}
@@ -2074,21 +2154,14 @@ function PresetForm({
                 invalidate();
               }}
             />
-            {errorUnder("credential") ?? (
-              <div className="hint">
-                {apiKeyMethod?.available === false
-                  ? `${setup.credential.backend.label}不可用，改为读取环境变量；配置里只记变量名`
-                  : `${hintOf(envMethod.hint)}；配置里只记变量名`}
-              </div>
-            )}
-          </div>
+          </Field>
         )}
         {mode === "login" && loginMethod !== undefined && (
-          <div className="field">
-            <div className="lab">
-              <label>{loginMethod.label}</label>
-              <small>在浏览器完成授权后回到这里继续</small>
-            </div>
+          <Field
+            label={loginMethod.label}
+            aside={<small className="desc">在浏览器完成授权后回到这里继续</small>}
+            error={loginErr ?? undefined}
+          >
             {draftLogin.kind === "done" ? (
               <div className="done">
                 <b>✓</b>
@@ -2116,7 +2189,7 @@ function PresetForm({
               <>
                 {storageSetup !== undefined && (
                   <>
-                    <div className="hint warnt">{storageSetup.notice}</div>
+                    <div className="desc warn">{storageSetup.notice}</div>
                     <SegmentedControl
                       aria-label={labelOf(storageSetup.prompt)}
                       value={storagePick}
@@ -2141,16 +2214,10 @@ function PresetForm({
                 </div>
               </>
             )}
-            {loginErr !== null && <div className="errt">{loginErr}</div>}
-          </div>
+          </Field>
         )}
         {mode === "external-file" && externalMethod !== undefined && (
-          <div className="field">
-            <div className="lab">
-              <label>{externalMethod.label}</label>
-            </div>
-            <div className="hint">{externalMethod.renewHint}</div>
-          </div>
+          <Field label={externalMethod.label} desc={externalMethod.renewHint} />
         )}
         {unstored !== null && <UnstoredKey value={unstored} />}
 
@@ -2167,7 +2234,7 @@ function PresetForm({
                 {fetchState.kind === "ok" ? "重新获取" : "获取模型"}
               </Button>
             )}
-            {fetchState.kind === "busy" && <span className="fine">正在获取模型列表…</span>}
+            {fetchState.kind === "busy" && <span className="desc">正在获取模型列表…</span>}
             {fetchState.kind === "ok" && (
               <>
                 <span className={fetchState.result.modelCount > 0 ? "ok" : "bad"}>
@@ -2178,19 +2245,16 @@ function PresetForm({
                       : "✓ 凭据可用"}
                 </span>
                 {fetchState.result.models.length > PEEK_MODELS && (
-                  <button
-                    type="button"
-                    className="tog"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     aria-expanded={listOpen}
                     onClick={() => {
                       setListOpen((v) => !v);
                     }}
                   >
-                    {listOpen ? "收起" : "展开全部"}{" "}
-                    <span className={`fold-arrow${listOpen ? " up" : ""}`} aria-hidden="true">
-                      ▶
-                    </span>
-                  </button>
+                    {listOpen ? "收起" : "展开全部"}
+                  </Button>
                 )}
               </>
             )}
@@ -2209,18 +2273,26 @@ function PresetForm({
             />
           )}
           {printNotices.length > 0 && (
-            <div className="hint">{printNotices.map((n) => n.text).join(" ")}</div>
+            <div className="desc">{printNotices.map((n) => n.text).join(" ")}</div>
           )}
         </div>
 
         {needManual && (
-          <div className="field">
-            <div className="lab">
-              <label htmlFor="pf-model">{labelOf(setup.manualModel?.prompt ?? "模型 ID")}</label>
-            </div>
+          <Field
+            label={labelOf(setup.manualModel?.prompt ?? "模型 ID")}
+            htmlFor="pf-model"
+            error={fieldErr.modelId}
+            desc={
+              fieldErr.modelId === undefined &&
+              setup.manualModel !== undefined &&
+              hintOf(setup.manualModel.hint) !== ""
+                ? hintOf(setup.manualModel.hint)
+                : undefined
+            }
+          >
             <input
               id="pf-model"
-              className={`input mono${fieldErr.modelId !== undefined ? " err" : ""}`}
+              className={`input lg mono${fieldErr.modelId !== undefined ? " err" : ""}`}
               type="text"
               spellCheck={false}
               value={manualId}
@@ -2229,24 +2301,20 @@ function PresetForm({
                 clearFieldErr("modelId");
               }}
             />
-            {errorUnder("modelId") ??
-              (setup.manualModel !== undefined && hintOf(setup.manualModel.hint) !== "" && (
-                <div className="hint">{hintOf(setup.manualModel.hint)}</div>
-              ))}
-          </div>
+          </Field>
         )}
         {commitErr !== null && fieldErr.modelId === undefined && (
-          <div className="errt">{commitErr}</div>
+          <p className="desc err">{commitErr}</p>
         )}
 
-        <div className="formacts">
+        <FormFooter>
+          <Button disabled={committing} onClick={abandon}>
+            取消
+          </Button>
           <Button variant="primary" disabled={!canSave} onClick={() => void save()}>
             {committing ? "保存中…" : "保存"}
           </Button>
-          <Button variant="ghost" disabled={committing} onClick={abandon}>
-            取消
-          </Button>
-        </div>
+        </FormFooter>
       </div>
     </>
   );

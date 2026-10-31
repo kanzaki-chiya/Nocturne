@@ -2,7 +2,7 @@
  * 服务商页测试（假服务端）：列表渲染、获取前置灰、字段错误、草稿释放、取消获取、
  * 内联重新登录与取消、删除置灰、模型设置保存/取消。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
@@ -189,7 +189,11 @@ function pageProps(overrides?: {
 /** 打开「添加 自定义 OpenAI 兼容」表单，填名称和密钥 */
 async function openForm(name = "test-provider") {
   await screen.findByText("可添加");
-  fireEvent.click(screen.getByText(PRESET.label, { selector: "nav.plist .nm" }));
+  fireEvent.click(
+    within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
+      name: PRESET.label,
+    }),
+  );
   await screen.findByText(`添加 ${PRESET.label}`);
   fireEvent.change(screen.getByLabelText("名称"), { target: { value: name } });
   fireEvent.change(screen.getByPlaceholderText("粘贴密钥"), { target: { value: "sk-test" } });
@@ -226,26 +230,56 @@ describe("ProvidersPage 列表与详情", () => {
     render(
       <ProvidersPage {...pageProps({ client: server.client, currentProvider: "openrouter" })} />,
     );
-    await screen.findByText("已配置");
+    await screen.findByText(/已配置 ·/);
     const list = screen.getByRole("navigation", { name: "服务商列表" });
     const row = (text: string) =>
-      [...list.querySelectorAll("a")].find((a) => a.querySelector(".nm")?.textContent === text);
+      within(list)
+        .queryAllByRole("button")
+        .find((a) => a.textContent?.startsWith(text));
     await waitFor(() => expect(row("openrouter")).toBeDefined());
     expect(row("openrouter")?.textContent).toContain("当前");
     expect(row("openrouter")?.textContent).toContain("2 个模型");
     const page = screen.getByTestId("providers-page");
-    const heading = page.querySelector(".provider-heading");
-    expect(heading?.querySelector("h3")?.textContent).toBe("openrouter");
-    expect(heading?.querySelector(".badge.accent")?.textContent).toBe("当前");
-    expect(heading?.querySelector(".acts")).toBeNull();
-    expect(page.querySelector(".t1 > .acts")).not.toBeNull();
+    const heading = within(page).getByRole("heading", { level: 2, name: "openrouter" });
+    expect(heading.textContent).toBe("openrouter");
+    expect(
+      heading.parentElement
+        ? within(heading.parentElement).getByText("当前").textContent
+        : undefined,
+    ).toBe("当前");
+    expect(within(heading).queryByRole("button")).toBeNull();
+    expect(
+      heading.parentElement
+        ? within(heading.parentElement).getByRole("button", { name: "换密钥" })
+        : null,
+    ).not.toBeNull();
     await screen.findByText("Claude Sonnet 4");
-    expect(page.querySelectorAll(".mr .model-context")).toHaveLength(3);
-    expect(page.querySelectorAll(".mr .model-output")).toHaveLength(3);
-    expect(page.querySelector(".mr .m")).not.toBeNull();
-    expect(page.querySelector(".mr .cap")).not.toBeNull();
+    expect(
+      within(screen.getByRole("table", { name: "模型" }))
+        .getAllByRole("row")
+        .map(
+          (r) => within(r).queryAllByRole("cell")[3] ?? within(r).getAllByRole("columnheader")[3],
+        ),
+    ).toHaveLength(3);
+    expect(
+      within(screen.getByRole("table", { name: "模型" }))
+        .getAllByRole("row")
+        .map(
+          (r) => within(r).queryAllByRole("cell")[4] ?? within(r).getAllByRole("columnheader")[4],
+        ),
+    ).toHaveLength(3);
+    expect(
+      within(screen.getByRole("table", { name: "模型" })).getByRole("columnheader", {
+        name: "模型",
+      }),
+    ).not.toBeNull();
+    expect(
+      within(screen.getByRole("table", { name: "模型" })).getByRole("columnheader", {
+        name: "能力",
+      }),
+    ).not.toBeNull();
     expect(page.textContent).toContain("停用的模型不出现在模型菜单里");
-    expect(row("chatgpt")?.querySelector(".r.warn")?.textContent).toContain("已失效");
+    expect(row("chatgpt")?.textContent).toContain("已失效");
     // 已配置的 openrouter 不再出现在「可添加」；自定义预设始终可添加
     expect(row("OpenRouter")).toBeUndefined();
     expect(row(PRESET.label)).toBeDefined();
@@ -272,9 +306,13 @@ describe("ProvidersPage 列表与详情", () => {
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     const list = await screen.findByRole("navigation", { name: "服务商列表" });
     await waitFor(() => {
-      expect(list.querySelector("a.on .nm")?.textContent).toBe("openrouter");
+      expect(
+        within(list)
+          .getByRole("button", { current: true })
+          .textContent?.replace(/当前.*$/, ""),
+      ).toBe("openrouter");
     });
-    expect(list.querySelector("a.on")?.textContent).toContain("当前");
+    expect(within(list).getByRole("button", { current: true }).textContent).toContain("当前");
     server.close();
   });
 
@@ -293,7 +331,7 @@ describe("ProvidersPage 列表与详情", () => {
     expect(button("换密钥")).toBeTruthy();
     expect(button("刷新模型列表")).toBeTruthy();
     expect(button("删除").disabled).toBe(false);
-    expect(screen.getByText("默认", { selector: ".dflt" })).toBeTruthy();
+    expect(within(screen.getByRole("table", { name: "模型" })).getByText("默认")).toBeTruthy();
     expect(screen.getByText("已编辑")).toBeTruthy();
     expect(screen.getByText("200,000")).toBeTruthy();
     expect(screen.getByText("64K")).toBeTruthy();
@@ -302,7 +340,7 @@ describe("ProvidersPage 列表与详情", () => {
     expect(screen.queryByText("Claude Sonnet 4")).toBeNull();
     expect(screen.getByText("GPT 5 Pro")).toBeTruthy();
     // 行尾「设置」打开模型设置对话框
-    fireEvent.click(screen.getByText("设置", { selector: "a.lnk" }));
+    fireEvent.click(screen.getByRole("button", { name: "设置 openai/gpt-5" }));
     expect(await screen.findByRole("dialog", { name: "模型设置 · openai/gpt-5" })).toBeTruthy();
     server.close();
   });
@@ -351,7 +389,11 @@ describe("ProvidersPage 列表与详情", () => {
     await screen.findByText("没有模型");
     expect(button("删除").disabled).toBe(true);
     expect(button("删除").parentElement?.getAttribute("title")).toBe("当前会话正在使用，不能删除");
-    fireEvent.click(screen.getByText("local", { selector: "nav.plist .nm" }));
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
+        name: /^local/,
+      }),
+    );
     await waitFor(() => {
       expect(button("删除").parentElement?.getAttribute("title")).toMatch(/只读/);
     });
@@ -388,9 +430,9 @@ describe("添加服务商", () => {
     fireEvent.click(toggle);
     const list = screen.getByTestId("fetched-list");
     expect(screen.queryByTestId("fetched-peek")).toBeNull();
-    expect(list.querySelectorAll(".fbody .fr")).toHaveLength(120);
-    const first = list.querySelector(".fbody .fr");
-    expect(first?.querySelector(".cap")?.textContent).toBe("RI");
+    expect(within(list).getAllByRole("row").slice(1)).toHaveLength(120);
+    const first = within(list).getAllByRole("row")[1];
+    expect(first ? within(first).getAllByRole("cell")[1]?.textContent : undefined).toBe("RI");
     expect(first?.textContent).toContain("128,000");
 
     fireEvent.click(screen.getByRole("button", { name: /收起/ }));
@@ -455,7 +497,7 @@ describe("添加服务商", () => {
     fireEvent.click(button("获取模型"));
     await screen.findByText(/已获取 120 个模型/);
     fireEvent.click(button("保存"));
-    await screen.findByText("test-provider", { selector: "h3" });
+    await screen.findByRole("heading", { level: 2, name: "test-provider" });
     expect(called(server, "provider.commitProvider", "draftId", "draft-1")).toBe(true);
     server.close();
   });
@@ -589,7 +631,11 @@ describe("添加服务商", () => {
     await openForm();
     fireEvent.click(button("获取模型"));
     await screen.findByText(/已获取 120 个模型/);
-    fireEvent.click(screen.getByText("openrouter", { selector: "nav.plist .nm" }));
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
+        name: /^openrouter/,
+      }),
+    );
     await waitFor(() => {
       expect(called(server, "provider.discardProvider", "draftId", "draft-2")).toBe(true);
     });
@@ -641,7 +687,7 @@ describe("模型设置对话框", () => {
   const OPEN_DIALOG = async (server: ReturnType<typeof fakeServer>) => {
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await screen.findByText("Claude Sonnet 4");
-    const first = (await screen.findAllByText("设置", { selector: "a.lnk" }))[0];
+    const first = (await screen.findAllByRole("button", { name: /^设置 / }))[0];
     if (first === undefined) throw new Error("缺少「设置」入口");
     fireEvent.click(first);
     await screen.findByRole("dialog");
@@ -721,11 +767,13 @@ describe("编辑服务商（U-07）", () => {
     void server;
     const list = screen.getByRole("navigation", { name: "服务商列表" });
     return (text: string) =>
-      [...list.querySelectorAll("a")].find((a) => a.querySelector(".nm")?.textContent === text);
+      within(list)
+        .queryAllByRole("button")
+        .find((a) => a.textContent?.startsWith(text));
   }
 
   async function openEditDialog(server: ReturnType<typeof fakeServer>, entry: unknown = ENTRY) {
-    await screen.findByText("已配置");
+    await screen.findByText(/已配置 ·/);
     const row = openList(server)("corp");
     if (row === undefined) throw new Error("缺少 corp 行");
     fireEvent.click(row);
@@ -751,7 +799,7 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    await screen.findByText("已配置");
+    await screen.findByText(/已配置 ·/);
     const row = openList(server);
     // openrouter 是内置预设条目（id === preset.defaultName）→ 只读
     const openrouter = row("openrouter");
@@ -944,7 +992,7 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    await screen.findByText("已配置");
+    await screen.findByText(/已配置 ·/);
     const row = openList(server)("corp");
     if (row === undefined) throw new Error("缺少 corp 行");
     fireEvent.click(row);

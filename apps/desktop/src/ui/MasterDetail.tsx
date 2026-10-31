@@ -38,7 +38,7 @@ export function MasterDetail({
 export interface ListGroupProps {
   /** 分组标题；不给时不渲染标题（空分组由调用方整组不渲染） */
   title?: ReactNode;
-  count?: number | undefined;
+  count?: number | string | undefined;
   children?: ReactNode;
 }
 

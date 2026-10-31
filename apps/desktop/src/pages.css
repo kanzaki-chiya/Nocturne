@@ -321,10 +321,24 @@
 }
 
 /* 表单（添加服务商） */
-.page3 .form {
-  display: grid;
-  gap: 13px;
-  max-width: 560px;
+.page3 .model-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.page3 .fixed-val {
+  min-height: var(--ctl-h-lg);
+  display: flex;
+  align-items: center;
+}
+.page3 .fetched-models {
+  max-height: var(--w-list);
+  overflow-y: auto;
+}
+.page3 .implausible {
+  color: var(--a-faint);
+  text-decoration: line-through;
 }
 .page3 .field {
   display: grid;
