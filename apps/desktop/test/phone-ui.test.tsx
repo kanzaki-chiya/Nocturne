@@ -57,7 +57,9 @@ it.each([true, false])("iOS 非 standalone=%s：按钮显示与权限只在点�
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
-  const toggle = container.querySelector<HTMLInputElement>('input[aria-label="推送通知"]');
+  const toggle = container.querySelector<HTMLButtonElement>(
+    '[role="switch"][aria-label="推送通知"]',
+  );
   if (ios) {
     expect(toggle).toBeNull();
     expect(container.textContent).toContain("添加到主屏幕后才能接收推送");

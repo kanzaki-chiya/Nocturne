@@ -43,6 +43,7 @@ import {
 } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
 import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
+import { Switch } from "../ui";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
@@ -478,14 +479,12 @@ export function PhoneApp({
             <p>通知权限已被拒绝，请在系统设置或浏览器的网站设置中允许 Nocturne 通知。</p>
           )}
           {push.message && <p role="status">{push.message}</p>}
-          <label className="phone-switch">
+          <div className="phone-switch">
             <span>
               {push.state === "working" ? "正在设置推送…" : "需要处理时提醒我"}
               <small>只显示固定提醒，不发送会话内容</small>
             </span>
-            <input
-              type="checkbox"
-              role="switch"
+            <Switch
               aria-label="推送通知"
               checked={push.state === "enabled"}
               disabled={push.state === "working" || push.state === "denied" || !hostId}
@@ -493,7 +492,7 @@ export function PhoneApp({
                 void (push.state === "enabled" ? push.disable() : push.enable());
               }}
             />
-          </label>
+          </div>
           {!hostId && <small>先连上一台电脑再开启</small>}
         </>
       )}

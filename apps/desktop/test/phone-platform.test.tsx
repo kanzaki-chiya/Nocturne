@@ -123,7 +123,7 @@ it("App 平台：用电脑记录里的中继地址连接，没有推送区块，
   });
   expect(container.textContent).toContain("后台区块");
   expect(container.textContent).toContain("安装包信任说明");
-  expect(container.querySelector('input[aria-label="推送通知"]')).toBeNull();
+  expect(container.querySelector('[role="switch"][aria-label="推送通知"]')).toBeNull();
 });
 
 it("网页平台仍用页面源连接，推送区块照常", async () => {

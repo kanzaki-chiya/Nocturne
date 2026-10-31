@@ -25,6 +25,7 @@ import {
   scheduleSkipLabel,
   scheduleTriggerLabel,
 } from "./schedule-format";
+import { Badge, Button, SegmentedControl, Switch } from "./ui";
 import "./pages.css";
 import "./mcp.css";
 import "./schedule.css";
@@ -438,9 +439,8 @@ export function SchedulePage({
             只在 Nocturne 打开时运行 · 错过的只补最近一次 · 无人值守，需要确认的操作会被直接拒绝
           </span>
         </div>
-        <button
-          type="button"
-          className="btn primary"
+        <Button
+          variant="primary"
           disabled={readOnly}
           title={readOnly ? "请在电脑上操作" : undefined}
           onClick={() => {
@@ -452,7 +452,7 @@ export function SchedulePage({
           }}
         >
           ＋ 新建任务
-        </button>
+        </Button>
       </header>
       {(schedulerNote !== undefined ||
         (list?.warnings.length ?? 0) > 0 ||
@@ -493,38 +493,29 @@ export function SchedulePage({
             <>
               <div className="t1">
                 <h3>{selected?.name ?? (draft.name.trim() || "新任务")}</h3>
-                <span className="tagc">
+                <Badge>
                   {workspaceLabel(
                     draft.workspace === "" ? null : draft.workspace,
                     workspaceChoices,
                   )}
-                </span>
+                </Badge>
                 {selected !== undefined && (
                   <span className="acts">
-                    <button
-                      type="button"
-                      className={`mcp-switch${selected.enabled ? " on" : ""}`}
-                      role="switch"
-                      aria-checked={selected.enabled}
+                    <Switch
+                      aria-label="启用"
+                      checked={selected.enabled}
                       disabled={readOnly || busy}
                       title={readOnly ? "请在电脑上操作" : undefined}
-                      onClick={() => {
+                      onChange={(next) => {
                         void save({
                           ...inputFrom(draftFrom(selected), selected),
-                          enabled: !selected.enabled,
+                          enabled: next,
                         });
                       }}
-                    >
-                      {selected.enabled ? "启用" : "已暂停"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={busy}
-                      onClick={() => void runNow()}
-                    >
+                    />
+                    <Button disabled={busy} onClick={() => void runNow()}>
                       ▶ 立即运行
-                    </button>
+                    </Button>
                   </span>
                 )}
               </div>
@@ -570,30 +561,15 @@ export function SchedulePage({
                 </dl>
               )}
               {selected !== undefined && (
-                <div className="tabs" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === "settings"}
-                    className={tab === "settings" ? "on" : undefined}
-                    onClick={() => {
-                      setTab("settings");
-                    }}
-                  >
-                    设置
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === "history"}
-                    className={tab === "history" ? "on" : undefined}
-                    onClick={() => {
-                      setTab("history");
-                    }}
-                  >
-                    历史
-                  </button>
-                </div>
+                <SegmentedControl
+                  role="tablist"
+                  value={tab}
+                  options={[
+                    { value: "settings", label: "设置" },
+                    { value: "history", label: "历史" },
+                  ]}
+                  onChange={setTab}
+                />
               )}
               {(tab === "settings" || selectedId === "new") && (
                 <form
@@ -690,22 +666,18 @@ export function SchedulePage({
                       <span>计划</span>
                       <small>本地时间；最小间隔 30 分钟</small>
                     </span>
-                    <div className="seg" role="group" aria-label="计划类型">
-                      {PLAN_TYPES.map((item) => (
-                        <button
-                          key={item.type}
-                          type="button"
-                          aria-pressed={draft.planType === item.type}
-                          className={draft.planType === item.type ? "on" : undefined}
-                          disabled={readOnly}
-                          onClick={() => {
-                            setDraft({ ...draft, planType: item.type });
-                          }}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
+                    <SegmentedControl
+                      aria-label="计划类型"
+                      disabled={readOnly}
+                      value={draft.planType}
+                      options={PLAN_TYPES.map((item) => ({
+                        value: item.type,
+                        label: item.label,
+                      }))}
+                      onChange={(planType) => {
+                        setDraft({ ...draft, planType });
+                      }}
+                    />
                     <div className="sched-plan">
                       {draft.planType === "interval" && (
                         <>
@@ -869,12 +841,11 @@ export function SchedulePage({
                   )}
                   {notice !== undefined && <p className="hint">{notice}</p>}
                   <div className="formacts">
-                    <button type="submit" className="btn primary" disabled={readOnly || busy}>
+                    <Button type="submit" variant="primary" disabled={readOnly || busy}>
                       保存
-                    </button>
-                    <button
-                      type="button"
-                      className="btn ghost"
+                    </Button>
+                    <Button
+                      variant="ghost"
                       disabled={readOnly || busy}
                       onClick={() => {
                         if (selected !== undefined) setDraft(draftFrom(selected));
@@ -886,13 +857,12 @@ export function SchedulePage({
                       }}
                     >
                       取消
-                    </button>
+                    </Button>
                     <span className="grow" />
                     {selected !== undefined &&
                       (confirmDelete ? (
-                        <button
-                          type="button"
-                          className="btn danger"
+                        <Button
+                          variant="danger-solid"
                           disabled={readOnly || busy}
                           onClick={() => {
                             setBusy(true);
@@ -912,11 +882,10 @@ export function SchedulePage({
                           }}
                         >
                           确认删除
-                        </button>
+                        </Button>
                       ) : (
-                        <button
-                          type="button"
-                          className="btn danger"
+                        <Button
+                          variant="danger"
                           disabled={readOnly || busy}
                           title={readOnly ? "请在电脑上操作" : undefined}
                           onClick={() => {
@@ -924,7 +893,7 @@ export function SchedulePage({
                           }}
                         >
                           删除任务
-                        </button>
+                        </Button>
                       ))}
                   </div>
                   {selected !== undefined && (

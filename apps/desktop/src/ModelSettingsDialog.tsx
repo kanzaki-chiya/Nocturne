@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@nocturne/core/protocol";
 import type { RpcProvider } from "@nocturne/rpc/client";
 import type { ModelFieldSource, ModelSettingsPatch, ModelSettingsView } from "./rpc-types";
+import { Button, SegmentedControl } from "./ui";
 
 type FieldKey =
   | "displayName"
@@ -284,20 +285,14 @@ export function ModelSettingsDialog({
     onPick: (v: V) => void,
     enabled: boolean,
   ) => (
-    <div className="seg" role="group" aria-label={FIELD_LABELS[key]}>
-      {options.map((o) => (
-        <button
-          key={o.v}
-          className={current === o.v ? "on" : undefined}
-          disabled={!enabled}
-          onClick={() => {
-            onPick(o.v);
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      aria-label={FIELD_LABELS[key]}
+      size="sm"
+      disabled={!enabled}
+      value={current}
+      options={options.map((o) => ({ value: o.v, label: o.label }))}
+      onChange={onPick}
+    />
   );
 
   return (
@@ -517,20 +512,20 @@ export function ModelSettingsDialog({
         </div>
         {error !== null && <div className="errt">{error}</div>}
         <div className="df">
-          <button className="btn ghost" onClick={resetAll} disabled={saving || readonly}>
+          <Button variant="ghost" onClick={resetAll} disabled={saving || readonly}>
             全部恢复跟随
-          </button>
+          </Button>
           <span className="sp" />
-          <button className="btn" onClick={onClose} disabled={saving}>
+          <Button onClick={onClose} disabled={saving}>
             取消
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             disabled={saving || empty || readonly}
             onClick={() => void save()}
           >
             {saving ? "保存中…" : "保存"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

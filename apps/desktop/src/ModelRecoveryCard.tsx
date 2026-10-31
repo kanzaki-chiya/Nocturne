@@ -15,6 +15,7 @@ import { ChoiceMenu } from "./Menu";
 import type { ModelInfo } from "./rpc-types";
 import { modelGroups, refKey } from "./session-controls";
 import { modelRefText } from "./model-ref";
+import { Button } from "./ui";
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -129,9 +130,8 @@ export function ModelRecoveryCard({
       {empty && <div className="fine">当前配置里没有可用的模型，请先配置服务商。</div>}
       {data !== null && !empty && (
         <div>
-          <button
+          <Button
             ref={trigger}
-            className="btn"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-label="选择模型"
@@ -144,7 +144,7 @@ export function ModelRecoveryCard({
               ? "选择模型"
               : `${chosen.ref.provider} · ${chosen.displayName ?? chosen.ref.model}`}{" "}
             ▾
-          </button>
+          </Button>
           {menuOpen && (
             <ChoiceMenu
               anchor={trigger.current}
@@ -166,24 +166,20 @@ export function ModelRecoveryCard({
       )}
       <div className="acts">
         {data !== null && !empty && (
-          <button
-            className="btn primary"
+          <Button
+            variant="primary"
             disabled={chosen === undefined || chosen.unavailable !== undefined}
             onClick={() => {
               if (chosen !== undefined) onContinue(chosen.ref);
             }}
           >
             用这个模型继续
-          </button>
+          </Button>
         )}
         {disabledModel !== undefined && onReenable !== undefined ? (
-          <button className="btn" onClick={onReenable}>
-            {reenableLabel}
-          </button>
+          <Button onClick={onReenable}>{reenableLabel}</Button>
         ) : (
-          <button className="btn" onClick={onOpenProviders}>
-            去配置服务商
-          </button>
+          <Button onClick={onOpenProviders}>去配置服务商</Button>
         )}
       </div>
       <div className="fine">{error}</div>

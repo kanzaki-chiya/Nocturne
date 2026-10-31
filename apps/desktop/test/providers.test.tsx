@@ -236,7 +236,7 @@ describe("ProvidersPage 列表与详情", () => {
     const page = screen.getByTestId("providers-page");
     const heading = page.querySelector(".provider-heading");
     expect(heading?.querySelector("h3")?.textContent).toBe("openrouter");
-    expect(heading?.querySelector(".tagc")?.textContent).toBe("当前");
+    expect(heading?.querySelector(".badge.accent")?.textContent).toBe("当前");
     expect(heading?.querySelector(".acts")).toBeNull();
     expect(page.querySelector(".t1 > .acts")).not.toBeNull();
     await screen.findByText("Claude Sonnet 4");

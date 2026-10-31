@@ -20,6 +20,7 @@ import type {
   ToggleImpact,
   UpdateSetupProviderPatch,
 } from "./rpc-types";
+import { Badge, Button, SegmentedControl, Switch } from "./ui";
 import "./pages.css";
 import "./mcp.css";
 
@@ -340,11 +341,11 @@ export function ProvidersPage({
                   {p.displayName ?? p.id}
                 </span>
                 <span className={`r${failed(p) ? " warn" : ""}`}>
-                  {p.id === currentProvider && <span className="tagc">当前</span>}
+                  {p.id === currentProvider && <Badge variant="accent">当前</Badge>}
                   {failed(p) ? (
                     "已失效"
                   ) : off ? (
-                    <span className="tagm">已停用</span>
+                    <Badge className="tagm">已停用</Badge>
                   ) : on < total ? (
                     `${on} / ${total}`
                   ) : (
@@ -622,75 +623,75 @@ function ProviderDetail({
       <div className="t1">
         <div className="provider-heading">
           <h3 className="mono">{p.id}</h3>
-          {current && <span className="tagc">当前</span>}
-          {failed(p) && <span className="tagw">已失效</span>}
-          {p.overridden && <span className="tagw">被更高层覆盖</span>}
+          {current && <Badge variant="accent">当前</Badge>}
+          {failed(p) && (
+            <Badge variant="warn" className="tagw">
+              已失效
+            </Badge>
+          )}
+          {p.overridden && (
+            <Badge variant="warn" className="tagw">
+              被更高层覆盖
+            </Badge>
+          )}
         </div>
         <span className="acts">
-          <button
-            role="switch"
-            aria-checked={!off}
-            className={`mcp-switch ${off ? "" : "on"}`}
+          <Switch
+            checked={!off}
             aria-label={`启用服务商 ${p.id}`}
             disabled={busy !== null}
-            onClick={() => {
-              if (off) void applyProviderEnabled(true);
+            onChange={(next) => {
+              if (next) void applyProviderEnabled(true);
               else void disable({ kind: "provider" });
             }}
-          >
-            {off ? "已停用" : "已启用"}
-          </button>
+          />
           <span className="mcp-action-divider" aria-hidden="true" />
           {editable && (
-            <button
-              className="btn"
+            <Button
               disabled={busy !== null}
               onClick={() => {
                 setDialog("edit");
               }}
             >
               编辑
-            </button>
+            </Button>
           )}
           {(auth === "apiKey" || auth === "none") && p.managed && (
-            <button
-              className="btn"
+            <Button
               disabled={busy !== null}
               onClick={() => {
                 setDialog("rekey");
               }}
             >
               {auth === "none" ? "设置密钥" : "换密钥"}
-            </button>
+            </Button>
           )}
-          <button
-            className="btn"
+          <Button
             disabled={busy !== null}
             onClick={() => void run("refresh", () => client.provider.refreshUpstreamLimits(p.id))}
           >
             {busy === "refresh" ? "刷新中…" : "刷新模型列表"}
-          </button>
+          </Button>
           {auth === "account" && p.managed && (
-            <button
-              className="btn"
+            <Button
               disabled={busy !== null}
               onClick={() => {
                 setDialog("logout");
               }}
             >
               退出登录
-            </button>
+            </Button>
           )}
           <span title={deleteBlocked ?? undefined}>
-            <button
-              className="btn danger"
+            <Button
+              variant="danger"
               disabled={busy !== null || deleteBlocked !== null}
               onClick={() => {
                 setDialog("remove");
               }}
             >
               删除
-            </button>
+            </Button>
           </span>
         </span>
       </div>
@@ -702,21 +703,18 @@ function ProviderDetail({
         <div className="pbanner">
           账号登录已失效<span>需要重新登录才能继续调用 {p.id} 的模型</span>
           {relogin.kind === "waiting" ? null : relogin.kind === "storage" ? (
-            <span className="seg">
-              {relogin.setup.options.map((o) => (
-                <button key={o.value} onClick={() => void startLogin(o.value)}>
-                  {o.label}
-                </button>
-              ))}
-            </span>
+            <SegmentedControl
+              aria-label="保存位置"
+              value={undefined}
+              options={relogin.setup.options.map((o) => ({ value: o.value, label: o.label }))}
+              onChange={(val) => {
+                void startLogin(val);
+              }}
+            />
           ) : (
-            <button
-              className="btn"
-              disabled={relogin.kind === "starting"}
-              onClick={() => void startLogin()}
-            >
+            <Button disabled={relogin.kind === "starting"} onClick={() => void startLogin()}>
               {relogin.kind === "starting" ? "启动中…" : "重新登录"}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -746,13 +744,9 @@ function ProviderDetail({
           <span>
             这个服务商的模型不会出现在任何模型菜单里；用它的会话需要先换模型才能继续。配置和密钥都保留。
           </span>
-          <button
-            className="btn"
-            disabled={busy !== null}
-            onClick={() => void applyProviderEnabled(true)}
-          >
+          <Button disabled={busy !== null} onClick={() => void applyProviderEnabled(true)}>
             重新启用
-          </button>
+          </Button>
         </div>
       )}
       <dl className="kv">
@@ -877,22 +871,24 @@ function ProviderDetail({
           return (
             <div className={`mr${rowOff ? " off" : ""}`} key={m.modelId}>
               <span className="tog">
-                <button
-                  role="switch"
-                  aria-checked={!individuallyOff}
+                <Switch
+                  checked={!individuallyOff}
                   aria-label={`启用 ${m.modelId}`}
-                  className={`mcp-switch ${individuallyOff ? "" : "on"}`}
                   disabled={off || busy !== null}
-                  onClick={() => void toggleModel(m.modelId, individuallyOff)}
+                  onChange={() => void toggleModel(m.modelId, individuallyOff)}
                 />
               </span>
               <span className="m">
                 <span title={m.modelId}>{name}</span>
-                {defaultKey === `${p.id}/${m.modelId}` && <span className="dflt">默认</span>}
-                {Object.values(m.fields).some((f) => f.userValue !== undefined) && (
-                  <span className="edited">已编辑</span>
+                {defaultKey === `${p.id}/${m.modelId}` && (
+                  <Badge variant="accent" className="dflt">
+                    默认
+                  </Badge>
                 )}
-                {rowOff && <span className="tagm">已停用</span>}
+                {Object.values(m.fields).some((f) => f.userValue !== undefined) && (
+                  <Badge className="edited">已编辑</Badge>
+                )}
+                {rowOff && <Badge className="tagm">已停用</Badge>}
               </span>
               <span className="cap">
                 {c.r && <b title="推理">R</b>}
@@ -1130,12 +1126,12 @@ function RekeyDialog({
         </div>
         <div className="df">
           <span className="sp" />
-          <button className="btn" onClick={onClose} disabled={busy}>
+          <Button onClick={onClose} disabled={busy}>
             取消
-          </button>
-          <button className="btn primary" disabled={busy || key.trim() === ""} onClick={submit}>
+          </Button>
+          <Button variant="primary" disabled={busy || key.trim() === ""} onClick={submit}>
             {busy ? "保存中…" : "保存"}
-          </button>
+          </Button>
         </div>
       </div>
     </Scrim>
@@ -1201,12 +1197,11 @@ export function ConfirmDialog({
         </div>
         <div className="df">
           <span className="sp" />
-          <button type="button" className="btn" onClick={onClose} disabled={busy} autoFocus>
+          <Button onClick={onClose} disabled={busy} autoFocus>
             取消
-          </button>
-          <button
-            type="button"
-            className={`btn ${danger ? "danger" : "primary"}`}
+          </Button>
+          <Button
+            variant={danger ? "danger-solid" : "primary"}
             disabled={busy}
             onClick={() => {
               setBusy(true);
@@ -1216,7 +1211,7 @@ export function ConfirmDialog({
             }}
           >
             {busy ? "处理中…" : confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </Scrim>
@@ -1418,26 +1413,18 @@ function ProviderEditDialog({
               <div className="lab">
                 <label>协议</label>
               </div>
-              <span className="seg" role="group" aria-label="协议">
-                <button
-                  className={type === "openai-compatible" ? "on" : ""}
-                  onClick={() => {
-                    setType("openai-compatible");
-                    resetProbe();
-                  }}
-                >
-                  OpenAI 兼容
-                </button>
-                <button
-                  className={type === "anthropic" ? "on" : ""}
-                  onClick={() => {
-                    setType("anthropic");
-                    resetProbe();
-                  }}
-                >
-                  Anthropic 兼容
-                </button>
-              </span>
+              <SegmentedControl
+                aria-label="协议"
+                value={type}
+                options={[
+                  { value: "openai-compatible", label: "OpenAI 兼容" },
+                  { value: "anthropic", label: "Anthropic 兼容" },
+                ]}
+                onChange={(val) => {
+                  setType(val);
+                  resetProbe();
+                }}
+              />
             </div>
             <div className="field">
               <div className="lab">
@@ -1531,9 +1518,7 @@ function ProviderEditDialog({
                 {probe.kind === "idle" && (
                   <div className="fl">
                     <span>地址或协议已变化——保存前先按候选配置获取模型列表。</span>
-                    <button className="btn" onClick={() => void doProbe()}>
-                      获取模型
-                    </button>
+                    <Button onClick={() => void doProbe()}>获取模型</Button>
                   </div>
                 )}
                 {probe.kind === "busy" && (
@@ -1575,9 +1560,7 @@ function ProviderEditDialog({
                 {probe.kind === "err" && (
                   <div className="fl">
                     <span className="bad">✗ 获取失败：{probe.message}</span>
-                    <button className="btn" onClick={() => void doProbe()}>
-                      重试
-                    </button>
+                    <Button onClick={() => void doProbe()}>重试</Button>
                   </div>
                 )}
               </div>
@@ -1589,17 +1572,17 @@ function ProviderEditDialog({
         )}
         <div className="df">
           <span className="sp" />
-          <button className="btn" onClick={onClose} disabled={committing}>
+          <Button onClick={onClose} disabled={committing}>
             取消
-          </button>
+          </Button>
           {probeFailed ? (
-            <button className="btn danger" disabled={committing} onClick={() => void save(false)}>
+            <Button variant="danger" disabled={committing} onClick={() => void save(false)}>
               {committing ? "保存中…" : "仍然保存"}
-            </button>
+            </Button>
           ) : (
-            <button className="btn primary" disabled={!canSave} onClick={() => void save(true)}>
+            <Button variant="primary" disabled={!canSave} onClick={() => void save(true)}>
               {committing ? "保存中…" : "保存"}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -2001,22 +1984,20 @@ function PresetForm({
             <div className="lab">
               <label>{labelOf(setup.credential.choose.prompt).replace(/（[^）]*）/, "")}</label>
             </div>
-            <div className="seg">
-              {setup.credential.choose.options.map((o) => (
-                <button
-                  key={o.method}
-                  className={choice === o.method ? "on" : undefined}
-                  onClick={() => {
-                    if (choice === o.method) return;
-                    setChoice(o.method);
-                    if (draftLogin.kind !== "none") resetLogin();
-                    invalidate();
-                  }}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              aria-label={labelOf(setup.credential.choose.prompt).replace(/（[^）]*）/, "")}
+              value={choice}
+              options={setup.credential.choose.options.map((o) => ({
+                value: o.method,
+                label: o.label,
+              }))}
+              onChange={(method) => {
+                if (choice === method) return;
+                setChoice(method);
+                if (draftLogin.kind !== "none") resetLogin();
+                invalidate();
+              }}
+            />
           </div>
         )}
 
@@ -2136,24 +2117,19 @@ function PresetForm({
                 {storageSetup !== undefined && (
                   <>
                     <div className="hint warnt">{storageSetup.notice}</div>
-                    <div className="seg" role="group" aria-label={labelOf(storageSetup.prompt)}>
-                      {storageSetup.options.map((o) => (
-                        <button
-                          key={o.value}
-                          className={storagePick === o.value ? "on" : undefined}
-                          onClick={() => {
-                            setStoragePick(o.value);
-                          }}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
-                    </div>
+                    <SegmentedControl
+                      aria-label={labelOf(storageSetup.prompt)}
+                      value={storagePick}
+                      options={storageSetup.options.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                      }))}
+                      onChange={setStoragePick}
+                    />
                   </>
                 )}
                 <div>
-                  <button
-                    className="btn"
+                  <Button
                     disabled={
                       draftLogin.kind === "starting" ||
                       (storageSetup !== undefined && storagePick === null)
@@ -2161,7 +2137,7 @@ function PresetForm({
                     onClick={() => void startLogin()}
                   >
                     {draftLogin.kind === "starting" ? "启动中…" : "开始登录"}
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
@@ -2181,18 +2157,15 @@ function PresetForm({
         <div className="fetch" aria-live="polite">
           <div className="fl">
             {fetchState.kind === "busy" ? (
-              <button className="btn" onClick={cancelFetch}>
-                取消获取
-              </button>
+              <Button onClick={cancelFetch}>取消获取</Button>
             ) : (
-              <button
-                className="btn"
+              <Button
                 disabled={credential === null}
                 title={credential === null ? "先填好凭据（密钥、环境变量或登录）" : undefined}
                 onClick={() => void fetchModels()}
               >
                 {fetchState.kind === "ok" ? "重新获取" : "获取模型"}
-              </button>
+              </Button>
             )}
             {fetchState.kind === "busy" && <span className="fine">正在获取模型列表…</span>}
             {fetchState.kind === "ok" && (
@@ -2267,12 +2240,12 @@ function PresetForm({
         )}
 
         <div className="formacts">
-          <button className="btn primary" disabled={!canSave} onClick={() => void save()}>
+          <Button variant="primary" disabled={!canSave} onClick={() => void save()}>
             {committing ? "保存中…" : "保存"}
-          </button>
-          <button className="btn ghost" disabled={committing} onClick={abandon}>
+          </Button>
+          <Button variant="ghost" disabled={committing} onClick={abandon}>
             取消
-          </button>
+          </Button>
         </div>
       </div>
     </>

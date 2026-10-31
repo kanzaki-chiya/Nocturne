@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import type { LoginStarted } from "@nocturne/rpc/client";
+import { Button } from "./ui";
 
 function clock(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -85,8 +86,7 @@ export function LoginWaitCard({
         {login.authorizeUrl}
       </div>
       <div className="row">
-        <button
-          className="btn"
+        <Button
           onClick={() => {
             navigator.clipboard
               .writeText(login.authorizeUrl)
@@ -100,23 +100,21 @@ export function LoginWaitCard({
           }}
         >
           {copied ? "已复制" : "复制链接"}
-        </button>
-        <button className="btn" onClick={onOpenAuthorize}>
-          重新打开浏览器
-        </button>
+        </Button>
+        <Button onClick={onOpenAuthorize}>重新打开浏览器</Button>
         {manualLabel !== null && (
-          <button
-            className="btn ghost"
+          <Button
+            variant="ghost"
             aria-expanded={manualOpen}
             onClick={() => {
               setManualOpen((open) => !open);
             }}
           >
             {manualLabel}…
-          </button>
+          </Button>
         )}
-        <button
-          className="btn ghost"
+        <Button
+          variant="ghost"
           disabled={cancelling}
           onClick={() => {
             setCancelling(true);
@@ -126,7 +124,7 @@ export function LoginWaitCard({
           }}
         >
           {cancelling ? "取消中…" : "取消"}
-        </button>
+        </Button>
         <span className="cd" title="授权超时倒计时">
           {left > 0 ? clock(left) : "已超时"}
         </span>
@@ -153,13 +151,13 @@ export function LoginWaitCard({
               if (e.key === "Enter") void submitManual();
             }}
           />
-          <button
-            className="btn primary"
+          <Button
+            variant="primary"
             disabled={submitting || manualText.trim() === ""}
             onClick={() => void submitManual()}
           >
             {submitting ? "提交中…" : "提交"}
-          </button>
+          </Button>
         </div>
       )}
       {error !== null && <div className="errt">{error}</div>}

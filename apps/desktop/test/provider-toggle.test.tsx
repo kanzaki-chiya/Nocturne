@@ -89,7 +89,7 @@ describe("ProvidersPage 启停", () => {
 
     const sw = await screen.findByRole("switch", { name: "启用服务商 ocx" });
     expect(sw.getAttribute("aria-checked")).toBe("true");
-    expect(sw.textContent).toContain("已启用");
+    expect(sw.textContent).toBe("");
     // 有模型被停用时写「已启用 N / 总数」
     expect(await screen.findByText("已启用 2 / 3")).toBeTruthy();
 
