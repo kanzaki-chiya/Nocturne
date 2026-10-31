@@ -42,6 +42,18 @@ export const skillStatus = (skill: SkillOverview) =>
         : skill.ignored.length
           ? `${skill.ignored.length} 处不生效`
           : invocationText(skill);
+export const skillListMeta = (skill: SkillOverview): string | undefined =>
+  skill.shadowedBy
+    ? "被覆盖"
+    : !skill.enabled
+      ? "已停用"
+      : skill.missingDescription
+        ? "缺说明"
+        : skill.ignored.length
+          ? `${skill.ignored.length} 处不生效`
+          : skill.source === "extra"
+            ? "额外目录"
+            : undefined;
 
 export function SkillsPage({
   client,
@@ -199,8 +211,7 @@ export function SkillsPage({
                                   ? "warn"
                                   : "ok"
                             }
-                            badge={<Badge>{s.source === "extra" ? "额外目录" : s.source}</Badge>}
-                            meta={skillStatus(s)}
+                            meta={skillListMeta(s)}
                             onClick={() => {
                               setSelected(s.entryPath);
                             }}

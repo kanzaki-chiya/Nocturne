@@ -466,7 +466,6 @@ export function ExternalAgentsPage({
                 {externalAgentSlashConflict(current.name, skills)}
               </p>
             )}
-            <p className="sub">{current.description ?? "没有说明"}</p>
             <SettingsGroup title="连接">
               <SettingsRow label="命令">
                 <code>

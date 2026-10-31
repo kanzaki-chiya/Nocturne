@@ -11,8 +11,10 @@
 .external-agents-page .srow pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: var(--mono);
   margin: 0;
+}
+.external-agents-page .external-option code {
+  font-family: var(--mono);
 }
 .external-agents-page .external-option {
   margin-block: var(--space-4);

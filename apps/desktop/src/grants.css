@@ -93,7 +93,8 @@
   font-size: var(--fs-1);
   color: var(--a-accentAlt);
 }
-.grant-target {
+.grant-target,
+.grant-target code {
   font: var(--fs-1)/1.7 var(--mono);
   overflow-wrap: anywhere;
   white-space: pre-wrap;

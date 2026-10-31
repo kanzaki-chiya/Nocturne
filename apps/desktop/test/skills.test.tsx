@@ -86,7 +86,7 @@ it("补全命令优先，技能过滤、排序、参数提示及用户调用", (
 });
 
 it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明和解析失败路径", async () => {
-  const normal = skill();
+  const normal = skill({ source: ".nocturne" });
   const ignored = skill({
     name: "release",
     entryPath: "C:/home/release",
@@ -111,9 +111,21 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
     invocation: "user",
     catalogStatus: "omitted",
   });
+  const extra = skill({
+    name: "pdf-tools",
+    source: "extra",
+    entryPath: "D:/shared/pdf-tools",
+  });
+  const disabled = skill({
+    name: "deploy",
+    entryPath: "C:/home/deploy",
+    enabled: false,
+    invocation: "none",
+    catalogStatus: "omitted",
+  });
   const f = fakeServer(
     withInit({
-      "skills.describeSkills": data([normal, ignored, shadow, manual]),
+      "skills.describeSkills": data([normal, ignored, shadow, manual, extra, disabled]),
       "skills.setSkillEnabled": { affectedSessions: 2 },
     }),
   );
@@ -132,6 +144,21 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(screen.getByText(/完整说明 2 个，只显示名字 4 个，已停用 1 个/)).toBeTruthy();
   expect(screen.getByText("project").parentElement?.textContent).toBe("项目project · 1");
   const list = screen.getByRole("navigation", { name: "技能列表" });
+  const normalRow = within(list).getByRole("button", { name: "alpha" });
+  expect(normalRow.textContent).toBe("alpha");
+  expect(normalRow.textContent).not.toContain(".nocturne");
+  expect(normalRow.textContent).not.toContain("模型 + 用户");
+  expect(within(list).getByRole("button", { name: /release/ }).textContent).toBe(
+    "release2 处不生效",
+  );
+  expect(within(list).getByRole("button", { name: /alpha.*被覆盖/ }).textContent).toBe(
+    "alpha被覆盖",
+  );
+  expect(within(list).getByRole("button", { name: /manual/ }).textContent).toBe("manual缺说明");
+  expect(within(list).getByRole("button", { name: /pdf-tools/ }).textContent).toBe(
+    "pdf-tools额外目录",
+  );
+  expect(within(list).getByRole("button", { name: /deploy/ }).textContent).toBe("deploy已停用");
   fireEvent.click(within(list).getByRole("button", { name: /release/ }));
   expect(screen.getByText("有 2 处写法在 Nocturne 里不生效").className).toContain("warn");
   expect(screen.getByRole("columnheader", { name: "在 Nocturne 里" })).toBeTruthy();
@@ -145,7 +172,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(screen.getByText("缺少说明，模型看不到这个技能").className).toContain("warn");
   fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看 ›"));
   expect(screen.getByText("C:/home/bad/SKILL.md:3")).toBeTruthy();
-  fireEvent.click(within(list).getByRole("button", { name: /alpha.*模型/ }));
+  fireEvent.click(within(list).getByRole("button", { name: "alpha" }));
   fireEvent.click(screen.getByRole("switch"));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",

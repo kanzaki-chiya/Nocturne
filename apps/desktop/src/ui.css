@@ -461,13 +461,20 @@
   min-width: 0;
   margin-left: auto;
 }
-.srow .val {
+.srow code,
+.srow pre {
+  font-family: var(--mono);
+}
+.srow .val,
+.srow .ctl code {
   color: var(--a-secondary);
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.srow .val.mono {
+.srow .val.mono,
+.srow .ctl code {
   font-family: var(--mono);
+  font-size: var(--fs-2);
 }
 .srow .val.bad {
   color: var(--a-error);
