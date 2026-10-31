@@ -239,26 +239,31 @@ export function SubagentProfileEditor({
       >
         启用此档位
       </Checkbox>
-      <FormFooter>
+      <FormFooter
+        reason={
+          !creating &&
+          !isDefault &&
+          !readonly && (
+            <Button
+              variant="danger"
+              className="profile-delete"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setConfirmingDelete(true);
+              }}
+            >
+              删除档位
+            </Button>
+          )
+        }
+      >
         <Button type="button" onClick={onCancel}>
           取消
         </Button>
         <Button variant="primary" type="submit" disabled={busy || readonly}>
           {busy ? "保存中…" : "保存"}
         </Button>
-        {!creating && !isDefault && !readonly && (
-          <Button
-            variant="danger"
-            className="profile-delete"
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setConfirmingDelete(true);
-            }}
-          >
-            删除档位
-          </Button>
-        )}
       </FormFooter>
       {confirmingDelete && (
         <ConfirmDialog

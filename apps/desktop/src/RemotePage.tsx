@@ -606,7 +606,11 @@ function ExternalAgentsSection({
       : undefined;
   const pipeFailed = pipeMessage !== undefined;
   return (
-    <SettingsGroup title="外部 Agent" count={agents.length} plain={agents.length === 0}>
+    <SettingsGroup
+      title={agents.length > 0 ? "外部 Agent" : undefined}
+      count={agents.length}
+      plain={agents.length === 0}
+    >
       {pipeMessage !== undefined && (
         <p className="remote-warning" role="status">
           {pipeMessage}

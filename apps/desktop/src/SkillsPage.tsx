@@ -362,14 +362,11 @@ export function SkillsPage({
               </SettingsGroup>
               {skill.description && (
                 <>
-                  <SettingsGroup title="说明" plain count={`${skill.description.length} 字符`}>
-                    <small>
-                      {skill.description.length} 字符
-                      {skill.catalogStatus === "full" &&
-                      skill.displayedDescriptionLength < skill.description.length
-                        ? `，模型目录里显示前 ${skill.displayedDescriptionLength} 字符`
-                        : ""}
-                    </small>
+                  <SettingsGroup
+                    title="说明"
+                    plain
+                    count={`${skill.description.length} 字符${skill.catalogStatus === "full" && skill.displayedDescriptionLength < skill.description.length ? `，模型目录里显示前 ${skill.displayedDescriptionLength} 字符` : ""}`}
+                  >
                     <div className="skill-description">
                       {skill.catalogStatus === "full" &&
                       skill.displayedDescriptionLength < skill.description.length ? (

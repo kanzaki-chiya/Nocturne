@@ -358,7 +358,10 @@ it("设置 › 远程页在外部 agent 管道未启动时显示状态与原因�
   const h = harness(pipeFailedStatus);
   render(<RemotePage client={h.client} />);
 
-  expect(await screen.findByText("外部 Agent")).toBeTruthy();
+  await screen.findByText(
+    "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
+  );
+  expect(screen.queryByRole("heading", { name: /外部 Agent/ })).toBeNull();
   expect(
     screen.getByText(
       "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
