@@ -29,7 +29,7 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
 
 ### 2. 本机管道与 `agent` 来源
 
-- 桌面端启动后台时加 `--agent-pipe`，后台在本机监听：Windows 为命名管道 `\\.\pipe\nocturne-agent-<用户 SID 哈希>`，ACL 只允许当前用户；其他平台为 `<nocturneHome>/agent.sock`，权限 `0600`。TUI、`nctrn rpc` 不加该参数时不监听。
+- 桌面端启动后台时加 `--agent-pipe`，后台在本机监听：Windows 为命名管道 `\\.\pipe\nocturne-agent-<用户 SID 哈希>`，ACL 只允许当前用户；其他平台为 `<nocturneHome>/agent.sock`，权限 `0600`。TUI、`nctrn rpc` 不加该参数时不监听。管道作为附加能力启动：若因同一 `nocturneHome` 下已有另一后台占用管道（`address_in_use`）、Windows SID 无法获取（`sid_unavailable`）、ACL 收紧失败（`acl_failed`）或其他原因（`other`）失败，不阻断本机 `initialize`（若监听句柄已创建但 ACL 收紧失败则先关闭句柄），记录日志并在 `agent.describe` /「设置 › 远程 › 外部 Agent」中显示未启动状态与原因。
 - 管道上的每条连接以 `serve(transport, { origin: "agent" })` 接入。`origin` 由后台接入方指定，不从报文获取（同 rpc.md 第 1 节）。`agent` 连接与远程连接一样不创建 Runtime；本机连接尚未握手时报 `runtime_unavailable`。
 - 管道上跑远程通道的握手与加密（[remote-channel.md](../protocols/remote-channel.md) 第 4–6 节，`acceptChannel` / `connectChannel` 不依赖底层传输），身份认证与远程设备同一套，不另起鉴权。
 - **安全口径**：这是「征得用户同意、限定能力范围」的边界。同一系统用户下的其他程序能读到桥的身份文件，因此它防不住本机同用户的恶意程序；这与 `~/.nocturne` 本身的信任边界一致，在设置页的说明里写明。

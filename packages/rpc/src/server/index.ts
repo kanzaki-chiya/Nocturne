@@ -20,19 +20,24 @@ export type {
 } from "./server.js";
 export {
   agentPipeAddress,
+  AgentPipeAclError,
   connectAgentPipe,
   createSocketFrameTransport,
   currentUserSid,
   listenAgentPipe,
   readWindowsPipeAclRules,
+  resetCurrentUserSidCache,
   resolveNocturneHome,
   restrictWindowsPipeAclToCurrentUser,
+  setCurrentUserSidResolverForTest,
   WindowsSidError,
   type AgentPipeListener,
   type ConnectAgentPipeOptions,
+  type CurrentUserSidOptions,
   type ListenAgentPipeOptions,
   type WindowsPipeAclRule,
 } from "./agent/pipe.js";
+export { classifyAgentPipeError } from "./agent/host.js";
 export { createStdioTransport } from "./stdio.js";
 export {
   CONFIG_METHODS,
@@ -50,6 +55,9 @@ export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
 export type {
   AgentDevice,
   AgentPairingRequest,
+  AgentPipeFailureReason,
+  AgentPipeState,
+  AgentPipeStatus,
   AgentProcessInfo,
   AgentScope,
   AgentStatus,

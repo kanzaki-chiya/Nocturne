@@ -12,6 +12,20 @@ export class WindowsSidError extends Error {
   }
 }
 
+let cachedSid: string | undefined;
+let customSidResolver: (() => string) | undefined;
+
+/** 清空已缓存的当前用户 SID（仅供测试在修改环境变量后重置） */
+export function resetCurrentUserSidCache(): void {
+  cachedSid = undefined;
+}
+
+/** 仅用于测试：注入自定义 SID 解析函数（传 undefined 恢复默认并清空缓存） */
+export function setCurrentUserSidResolverForTest(resolver: (() => string) | undefined): void {
+  customSidResolver = resolver;
+  cachedSid = undefined;
+}
+
 function resolveSystemRoot(): string {
   const raw = process.env.SystemRoot ?? process.env.SYSTEMROOT;
   return raw !== undefined && raw.trim() !== "" ? raw.trim() : "C:\\Windows";
@@ -41,6 +55,7 @@ function powerShellEnv(): NodeJS.ProcessEnv {
 export interface CurrentUserSidOptions {
   whoamiExe?: string;
   powerShellExe?: string;
+  bypassCache?: boolean;
 }
 
 /**
@@ -48,11 +63,28 @@ export interface CurrentUserSidOptions {
  * Windows 上按顺序尝试：
  * 1. `%SystemRoot%\System32\whoami.exe /user /fo csv /nh`
  * 2. PowerShell `[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value`
- * 两种方法都失败时抛出明确的 `WindowsSidError`，绝不退回用户名。
+ * 成功取到的 SID 会被缓存；两种方法都失败时抛出明确的 `WindowsSidError`（不缓存失败结果），绝不退回用户名。
  */
 export function currentUserSid(options?: CurrentUserSidOptions): string {
+  const useCache =
+    options?.bypassCache !== true &&
+    options?.whoamiExe === undefined &&
+    options?.powerShellExe === undefined;
+
+  if (useCache && cachedSid !== undefined) {
+    return cachedSid;
+  }
+
+  if (useCache && customSidResolver !== undefined) {
+    const resolved = customSidResolver();
+    cachedSid = resolved;
+    return resolved;
+  }
+
   if (process.platform !== "win32") {
-    return os.userInfo().username;
+    const username = os.userInfo().username;
+    if (useCache) cachedSid = username;
+    return username;
   }
 
   const sysRoot = resolveSystemRoot();
@@ -67,6 +99,7 @@ export function currentUserSid(options?: CurrentUserSidOptions): string {
     });
     const match = /S-1-\d+(?:-\d+)+/.exec(out);
     if (match?.[0] !== undefined) {
+      if (useCache) cachedSid = match[0];
       return match[0];
     }
     errors.push(`whoami.exe 未返回有效 SID (${out.trim() || "空输出"})`);
@@ -97,6 +130,7 @@ export function currentUserSid(options?: CurrentUserSidOptions): string {
       );
       const match = /S-1-\d+(?:-\d+)+/.exec(out);
       if (match?.[0] !== undefined) {
+        if (useCache) cachedSid = match[0];
         return match[0];
       }
       psError = `PowerShell 未返回有效 SID (${out.trim() || "空输出"})`;

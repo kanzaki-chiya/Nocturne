@@ -348,3 +348,28 @@ it("设置 › 远程页独立展示外部 Agent 分组与安全说明，支持�
     );
   });
 });
+
+it("设置 › 远程页在外部 agent 管道未启动时显示状态与原因，不显示正常等待连接说明", async () => {
+  const pipeFailedStatus: RemoteStatus = {
+    ...empty,
+    agentPipe: {
+      state: "address_in_use",
+      reason: "address_in_use",
+      message: "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
+    },
+  };
+  const h = harness(pipeFailedStatus);
+  render(<RemotePage client={h.client} />);
+
+  expect(await screen.findByText("外部 Agent")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.queryByText(
+      "还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。",
+    ),
+  ).toBeNull();
+});

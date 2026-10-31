@@ -12,6 +12,8 @@ import { RpcProtocolError } from "../errors.js";
 import { InvalidParamsError } from "../params.js";
 import type {
   AgentPairingRequest,
+  AgentPipeFailureReason,
+  AgentPipeStatus,
   AgentProcessInfo,
   AgentScope,
   AgentStatus,
@@ -24,7 +26,12 @@ import {
   saveAgents,
   type StoredAgentDevice,
 } from "../remote/storage.js";
-import { listenAgentPipe, type AgentPipeListener } from "./pipe.js";
+import {
+  AgentPipeAclError,
+  listenAgentPipe,
+  WindowsSidError,
+  type AgentPipeListener,
+} from "./pipe.js";
 
 export const DEFAULT_AGENT_PAIRING_TIMEOUT_MS = 120_000;
 
@@ -123,6 +130,42 @@ export interface AgentHostOptions {
   onStatusChanged?: (() => void) | undefined;
 }
 
+export function classifyAgentPipeError(error: unknown): {
+  reason: AgentPipeFailureReason;
+  message: string;
+} {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "EADDRINUSE") {
+    return {
+      reason: "address_in_use",
+      message: "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
+    };
+  }
+  if (
+    error instanceof WindowsSidError ||
+    (error instanceof Error && error.name === "WindowsSidError")
+  ) {
+    return {
+      reason: "sid_unavailable",
+      message: "本机 agent 管道未启动：无法获取当前 Windows 用户 SID",
+    };
+  }
+  if (
+    error instanceof AgentPipeAclError ||
+    (error instanceof Error && error.name === "AgentPipeAclError")
+  ) {
+    return {
+      reason: "acl_failed",
+      message: "本机 agent 管道未启动：无法收紧管道访问权限",
+    };
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  return {
+    reason: "other",
+    message: `本机 agent 管道未启动：${detail}`,
+  };
+}
+
 export class AgentHost {
   private readonly home: string | undefined;
   private readonly credentials: AgentHostOptions["credentials"];
@@ -134,6 +177,7 @@ export class AgentHost {
 
   private identity: Identity | undefined;
   private listener: AgentPipeListener | undefined;
+  private pipeStatus: AgentPipeStatus = { state: "off" };
   private agents: StoredAgentDevice[] = [];
   private readonly pending = new Map<string, PendingPairingInternal>();
   private readonly connections = new Map<string, AgentConnectionContext>();
@@ -158,6 +202,7 @@ export class AgentHost {
       this.agents = await loadAgents(this.home).catch(() => []);
     }
     if (this.pipeOption === undefined || this.pipeOption === false) {
+      this.pipeStatus = { state: "off" };
       return;
     }
     if (this.home !== undefined && this.credentials !== undefined) {
@@ -173,6 +218,22 @@ export class AgentHost {
         void this.acceptPipeConnection(frameTransport);
       },
     });
+    this.pipeStatus = {
+      state: "listening",
+      address: this.listener.address,
+    };
+    this.emitStatus();
+  }
+
+  recordStartFailure(error: unknown): { reason: AgentPipeFailureReason; message: string } {
+    const classified = classifyAgentPipeError(error);
+    this.pipeStatus = {
+      state: classified.reason,
+      reason: classified.reason,
+      message: classified.message,
+    };
+    this.emitStatus();
+    return classified;
   }
 
   private async acceptPipeConnection(frameTransport: FrameTransport): Promise<void> {
@@ -358,6 +419,7 @@ export class AgentHost {
         online: onlineIds.has(a.id),
       })),
       pendingPairings: [...this.pending.values()].map((p) => this.toPublicRequest(p)),
+      pipe: { ...this.pipeStatus },
     };
   }
 
@@ -488,6 +550,9 @@ export class AgentHost {
     if (this.listener !== undefined) {
       await this.listener.close();
       this.listener = undefined;
+    }
+    if (this.pipeStatus.state === "listening") {
+      this.pipeStatus = { state: "off" };
     }
   }
 

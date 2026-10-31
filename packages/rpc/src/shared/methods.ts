@@ -108,9 +108,21 @@ export interface AgentPairingRequest {
   expiresAt: number;
 }
 
+export type AgentPipeFailureReason = "address_in_use" | "sid_unavailable" | "acl_failed" | "other";
+
+export type AgentPipeState = "off" | "listening" | AgentPipeFailureReason;
+
+export interface AgentPipeStatus {
+  state: AgentPipeState;
+  reason?: AgentPipeFailureReason | undefined;
+  message?: string | undefined;
+  address?: string | undefined;
+}
+
 export interface AgentStatus {
   agents: AgentDevice[];
   pendingPairings: AgentPairingRequest[];
+  pipe?: AgentPipeStatus | undefined;
 }
 
 export interface InitializeParams {
@@ -250,6 +262,8 @@ export interface RemoteStatus {
   agents?: AgentDevice[];
   /** 待确认的外部 agent 配对请求 */
   pendingAgentPairings?: AgentPairingRequest[];
+  /** 本机外部 agent 管道状态（未开启、监听中或未启动及原因） */
+  agentPipe?: AgentPipeStatus | undefined;
   warnings: string[];
 }
 

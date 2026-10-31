@@ -3,6 +3,8 @@ import type { PermissionPresetName } from "@nocturne/core/protocol";
 import type {
   AgentDevice,
   AgentPairingRequest,
+  AgentPipeFailureReason,
+  AgentPipeStatus,
   AgentScope,
   RemoteStatus,
   RpcClient,
@@ -513,6 +515,7 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
         <ExternalAgentsSection
           client={client}
           agents={status?.agents ?? []}
+          pipe={status?.agentPipe}
           busy={busy}
           onOperate={operation}
         />
@@ -537,99 +540,119 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
   );
 }
 
+const AGENT_PIPE_FAILURE_TEXT: Record<AgentPipeFailureReason, string> = {
+  address_in_use:
+    "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
+  sid_unavailable: "本机 agent 管道未启动：无法获取当前 Windows 用户 SID",
+  acl_failed: "本机 agent 管道未启动：无法收紧管道访问权限",
+  other: "本机 agent 管道未启动",
+};
+
 function ExternalAgentsSection({
   client,
   agents,
+  pipe,
   busy,
   onOperate,
 }: {
   client: RpcClient | undefined;
   agents: AgentDevice[];
+  pipe?: AgentPipeStatus | undefined;
   busy: boolean;
   onOperate: (run: () => Promise<unknown>) => Promise<void>;
 }) {
+  const pipeMessage =
+    pipe !== undefined && pipe.state !== "off" && pipe.state !== "listening"
+      ? (pipe.message ?? AGENT_PIPE_FAILURE_TEXT[pipe.state])
+      : undefined;
+  const pipeFailed = pipeMessage !== undefined;
   return (
     <section className="remote-devices remote-agents" aria-label="外部 Agent">
       <div className="remote-heading">
         <h4>外部 Agent</h4>
       </div>
-      {agents.length === 0 ? (
-        <p>还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。</p>
-      ) : (
-        agents.map((agent) => (
-          <div className="remote-device" key={agent.id}>
-            <div>
-              <b>{agent.name}</b>
-              <p>
-                {agent.online ? "在线" : "离线"} · 指纹 <code>{agent.fingerprint}</code>
-                {agent.lastSeenAt
-                  ? ` · 最近活跃 ${new Date(agent.lastSeenAt).toLocaleString("zh-CN")}`
-                  : ""}
-              </p>
-            </div>
-            <div className="remote-actions">
-              <select
-                className="remote-select"
-                aria-label={`${agent.name} 范围`}
-                disabled={busy || !client}
-                value={agent.scope}
-                onChange={(e) => {
-                  const nextScope = e.target.value as AgentScope;
-                  void onOperate(
-                    () =>
-                      client?.call("agent.setScope", {
-                        id: agent.id,
-                        scope: nextScope,
-                        maxPermissionPreset: agent.maxPermissionPreset,
-                      }) ?? Promise.resolve(),
-                  );
-                }}
-              >
-                <option value="read-only">只读</option>
-                <option value="run">可运行</option>
-              </select>
-              {agent.scope === "run" && (
+      {pipeMessage !== undefined && (
+        <p className="remote-warning" role="status">
+          {pipeMessage}
+        </p>
+      )}
+      {agents.length === 0
+        ? !pipeFailed && (
+            <p>还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。</p>
+          )
+        : agents.map((agent) => (
+            <div className="remote-device" key={agent.id}>
+              <div>
+                <b>{agent.name}</b>
+                <p>
+                  {agent.online ? "在线" : "离线"} · 指纹 <code>{agent.fingerprint}</code>
+                  {agent.lastSeenAt
+                    ? ` · 最近活跃 ${new Date(agent.lastSeenAt).toLocaleString("zh-CN")}`
+                    : ""}
+                </p>
+              </div>
+              <div className="remote-actions">
                 <select
                   className="remote-select"
-                  aria-label={`${agent.name} 权限上限`}
+                  aria-label={`${agent.name} 范围`}
                   disabled={busy || !client}
-                  value={agent.maxPermissionPreset}
+                  value={agent.scope}
                   onChange={(e) => {
-                    const nextPreset = e.target.value as PermissionPresetName;
+                    const nextScope = e.target.value as AgentScope;
                     void onOperate(
                       () =>
                         client?.call("agent.setScope", {
                           id: agent.id,
-                          scope: agent.scope,
-                          maxPermissionPreset: nextPreset,
+                          scope: nextScope,
+                          maxPermissionPreset: agent.maxPermissionPreset,
                         }) ?? Promise.resolve(),
                     );
                   }}
                 >
-                  <option value="read-only">上限：只读</option>
-                  <option value="default">上限：默认</option>
-                  <option value="auto-edit">上限：自动编辑</option>
-                  <option value="guarded">上限：受控</option>
-                  <option value="smart">上限：智能审查</option>
-                  <option value="bypass">上限：无限制</option>
+                  <option value="read-only">只读</option>
+                  <option value="run">可运行</option>
                 </select>
-              )}
-              <button
-                type="button"
-                className="btn3"
-                disabled={busy || !client}
-                onClick={() => {
-                  void onOperate(
-                    () => client?.call("agent.revoke", { id: agent.id }) ?? Promise.resolve(),
-                  );
-                }}
-              >
-                吊销
-              </button>
+                {agent.scope === "run" && (
+                  <select
+                    className="remote-select"
+                    aria-label={`${agent.name} 权限上限`}
+                    disabled={busy || !client}
+                    value={agent.maxPermissionPreset}
+                    onChange={(e) => {
+                      const nextPreset = e.target.value as PermissionPresetName;
+                      void onOperate(
+                        () =>
+                          client?.call("agent.setScope", {
+                            id: agent.id,
+                            scope: agent.scope,
+                            maxPermissionPreset: nextPreset,
+                          }) ?? Promise.resolve(),
+                      );
+                    }}
+                  >
+                    <option value="read-only">上限：只读</option>
+                    <option value="default">上限：默认</option>
+                    <option value="auto-edit">上限：自动编辑</option>
+                    <option value="guarded">上限：受控</option>
+                    <option value="smart">上限：智能审查</option>
+                    <option value="bypass">上限：无限制</option>
+                  </select>
+                )}
+                <button
+                  type="button"
+                  className="btn3"
+                  disabled={busy || !client}
+                  onClick={() => {
+                    void onOperate(
+                      () => client?.call("agent.revoke", { id: agent.id }) ?? Promise.resolve(),
+                    );
+                  }}
+                >
+                  吊销
+                </button>
+              </div>
             </div>
-          </div>
-        ))
-      )}
+          ))}
     </section>
   );
 }

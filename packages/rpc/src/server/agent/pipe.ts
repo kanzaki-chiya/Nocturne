@@ -13,6 +13,27 @@ export class WindowsSidError extends Error {
   }
 }
 
+export class AgentPipeAclError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "AgentPipeAclError";
+  }
+}
+
+let cachedSid: string | undefined;
+let customSidResolver: (() => string) | undefined;
+
+/** 清空已缓存的当前用户 SID（仅供测试在修改环境变量后重置） */
+export function resetCurrentUserSidCache(): void {
+  cachedSid = undefined;
+}
+
+/** 仅用于测试：注入自定义 SID 解析函数（传 undefined 恢复默认并清空缓存） */
+export function setCurrentUserSidResolverForTest(resolver: (() => string) | undefined): void {
+  customSidResolver = resolver;
+  cachedSid = undefined;
+}
+
 function resolveSystemRoot(): string {
   const raw = process.env.SystemRoot ?? process.env.SYSTEMROOT;
   return raw !== undefined && raw.trim() !== "" ? raw.trim() : "C:\\Windows";
@@ -42,6 +63,7 @@ function powerShellEnv(): NodeJS.ProcessEnv {
 export interface CurrentUserSidOptions {
   whoamiExe?: string;
   powerShellExe?: string;
+  bypassCache?: boolean;
 }
 
 /**
@@ -49,11 +71,28 @@ export interface CurrentUserSidOptions {
  * Windows 上按顺序尝试：
  * 1. `%SystemRoot%\System32\whoami.exe /user /fo csv /nh`
  * 2. PowerShell `[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value`
- * 两种方法都失败时抛出明确的 `WindowsSidError`，绝不退回用户名。
+ * 成功取到的 SID 会被缓存；两种方法都失败时抛出明确的 `WindowsSidError`（不缓存失败结果），绝不退回用户名。
  */
 export function currentUserSid(options?: CurrentUserSidOptions): string {
+  const useCache =
+    options?.bypassCache !== true &&
+    options?.whoamiExe === undefined &&
+    options?.powerShellExe === undefined;
+
+  if (useCache && cachedSid !== undefined) {
+    return cachedSid;
+  }
+
+  if (useCache && customSidResolver !== undefined) {
+    const resolved = customSidResolver();
+    cachedSid = resolved;
+    return resolved;
+  }
+
   if (process.platform !== "win32") {
-    return os.userInfo().username;
+    const username = os.userInfo().username;
+    if (useCache) cachedSid = username;
+    return username;
   }
 
   const sysRoot = resolveSystemRoot();
@@ -68,6 +107,7 @@ export function currentUserSid(options?: CurrentUserSidOptions): string {
     });
     const match = /S-1-\d+(?:-\d+)+/.exec(out);
     if (match?.[0] !== undefined) {
+      if (useCache) cachedSid = match[0];
       return match[0];
     }
     errors.push(`whoami.exe 未返回有效 SID (${out.trim() || "空输出"})`);
@@ -98,6 +138,7 @@ export function currentUserSid(options?: CurrentUserSidOptions): string {
       );
       const match = /S-1-\d+(?:-\d+)+/.exec(out);
       if (match?.[0] !== undefined) {
+        if (useCache) cachedSid = match[0];
         return match[0];
       }
       psError = `PowerShell 未返回有效 SID (${out.trim() || "空输出"})`;
@@ -129,9 +170,12 @@ export function resolveNocturneHome(nocturneHome?: string): string {
  */
 export function agentPipeAddress(nocturneHome?: string): string {
   const home = resolveNocturneHome(nocturneHome);
-  if (process.platform === "win32") {
+  if (process.platform === "win32" || customSidResolver !== undefined) {
     const defaultHome = path.resolve(os.homedir(), ".nocturne");
     const sid = currentUserSid();
+    if (process.platform !== "win32") {
+      return path.join(home, "agent.sock");
+    }
     const seed =
       home.toLowerCase() === defaultHome.toLowerCase() ? sid : `${sid}:${home.toLowerCase()}`;
     const hash = createHash("sha256").update(seed).digest("hex").slice(0, 16);
@@ -325,6 +369,27 @@ export interface AgentPipeListener {
   close(): Promise<void>;
 }
 
+async function isUnixSocketActive(socketPath: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = net.connect({ path: socketPath });
+    const timer = setTimeout(() => {
+      probe.destroy();
+      resolve(false);
+    }, 300);
+    timer.unref();
+    probe.once("connect", () => {
+      clearTimeout(timer);
+      probe.destroy();
+      resolve(true);
+    });
+    probe.once("error", (err: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      probe.destroy();
+      resolve(err.code === "EACCES" || err.code === "EPERM");
+    });
+  });
+}
+
 export async function listenAgentPipe(options: ListenAgentPipeOptions): Promise<AgentPipeListener> {
   let address: string;
   try {
@@ -337,6 +402,16 @@ export async function listenAgentPipe(options: ListenAgentPipeOptions): Promise<
   }
   if (process.platform !== "win32") {
     await mkdir(path.dirname(address), { recursive: true, mode: 0o700 });
+    if (await isUnixSocketActive(address)) {
+      const inUseError = Object.assign(
+        new Error(
+          `另一个 Nocturne 后台已经占用了本机 agent 管道 (${address})，外部 agent 会连到那一个`,
+        ),
+        { code: "EADDRINUSE" },
+      );
+      console.error(`[agent-pipe] ${inUseError.message}`);
+      throw inUseError;
+    }
     await unlink(address).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     });
@@ -366,6 +441,16 @@ export async function listenAgentPipe(options: ListenAgentPipeOptions): Promise<
       server.listen({ path: address, readableAll: false, writableAll: false });
     });
   } catch (err) {
+    if ((err as NodeJS.ErrnoException | undefined)?.code === "EADDRINUSE") {
+      const inUseError = Object.assign(
+        new Error(
+          `另一个 Nocturne 后台已经占用了本机 agent 管道 (${address})，外部 agent 会连到那一个`,
+        ),
+        { code: "EADDRINUSE", cause: err },
+      );
+      console.error(`[agent-pipe] ${inUseError.message}`);
+      throw inUseError;
+    }
     console.error(
       `[agent-pipe] 监听本机管道失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -379,15 +464,38 @@ export async function listenAgentPipe(options: ListenAgentPipeOptions): Promise<
       console.error(
         `[agent-pipe] 设置 Windows 命名管道 ACL 失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
       );
+      for (const s of sockets) s.destroy();
+      sockets.clear();
       await new Promise<void>((resolve) => {
         server.close(() => {
           resolve();
         });
       });
-      throw err;
+      throw new AgentPipeAclError(
+        `设置 Windows 命名管道 ACL 失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
   } else {
-    await chmod(address, 0o600);
+    try {
+      await chmod(address, 0o600);
+    } catch (err) {
+      console.error(
+        `[agent-pipe] 设置本机套接字权限失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      for (const s of sockets) s.destroy();
+      sockets.clear();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+      await unlink(address).catch(() => undefined);
+      throw new AgentPipeAclError(
+        `设置本机套接字权限失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
   }
 
   let closed = false;

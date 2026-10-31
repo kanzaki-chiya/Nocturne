@@ -23,6 +23,9 @@ export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
 export type {
   AgentDevice,
   AgentPairingRequest,
+  AgentPipeFailureReason,
+  AgentPipeState,
+  AgentPipeStatus,
   AgentProcessInfo,
   AgentScope,
   AgentStatus,

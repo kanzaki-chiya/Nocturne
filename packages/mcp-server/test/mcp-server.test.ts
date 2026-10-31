@@ -20,6 +20,7 @@ import { createMemoryTransportPair, createRpcClient, type RpcClient } from "@noc
 import { createRpcServer, type RpcServer } from "@nocturne/rpc/server";
 import {
   createNocturneMcpServer,
+  currentUserSid,
   DESKTOP_NOT_RUNNING_MESSAGE,
   formatReadSessionOutput,
   loadOrCreateBridgeIdentity,
@@ -27,7 +28,10 @@ import {
   McpBridge,
   NOCTURNE_MCP_TOOLS,
   PAIRING_PENDING_MESSAGE,
+  resetCurrentUserSidCache,
+  setCurrentUserSidResolverForTest,
   truncateMcpOutput,
+  WindowsSidError,
 } from "../src/index.js";
 
 const TEST_MODELS: ModelInfo[] = [
@@ -463,6 +467,7 @@ describe("packages/mcp-server 单元与集成测试", () => {
       cleanups.push(() => bridge.close());
 
       try {
+        resetCurrentUserSidCache();
         process.env.SystemRoot = emptyRoot;
         process.env.SYSTEMROOT = emptyRoot;
         for (const [key] of savedPathEntries) {
@@ -478,9 +483,31 @@ describe("packages/mcp-server 单元与集成测试", () => {
         for (const [key, val] of savedPathEntries) {
           process.env[key] = val;
         }
+        setCurrentUserSidResolverForTest(undefined);
+        resetCurrentUserSidCache();
       }
     },
   );
+
+  it("mcp-server 的 currentUserSid 同样支持成功缓存与失败后重试", () => {
+    let calls = 0;
+    try {
+      setCurrentUserSidResolverForTest(() => {
+        calls += 1;
+        if (calls === 1) throw new WindowsSidError("first fail");
+        return "S-1-5-21-999-1000";
+      });
+      expect(() => currentUserSid()).toThrow(WindowsSidError);
+      expect(calls).toBe(1);
+      expect(currentUserSid()).toBe("S-1-5-21-999-1000");
+      expect(calls).toBe(2);
+      expect(currentUserSid()).toBe("S-1-5-21-999-1000");
+      expect(calls).toBe(2);
+    } finally {
+      setCurrentUserSidResolverForTest(undefined);
+      resetCurrentUserSidCache();
+    }
+  });
 
   it("wait 超时时返回 running 状态，不中断正在运行的会话", async () => {
     const backend = await createTestBackend({

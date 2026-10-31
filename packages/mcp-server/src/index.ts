@@ -20,9 +20,12 @@ export {
   connectAgentPipe,
   createSocketFrameTransport,
   currentUserSid,
+  resetCurrentUserSidCache,
   resolveNocturneHome,
+  setCurrentUserSidResolverForTest,
   WindowsSidError,
   type ConnectAgentPipeOptions,
+  type CurrentUserSidOptions,
 } from "./pipe.js";
 export { loadOrCreateBridgeIdentity, type BridgeIdentityResult } from "./identity.js";
 export {

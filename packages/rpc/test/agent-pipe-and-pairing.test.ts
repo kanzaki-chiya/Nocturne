@@ -12,6 +12,8 @@ import {
   currentUserSid,
   listenAgentPipe,
   readWindowsPipeAclRules,
+  resetCurrentUserSidCache,
+  setCurrentUserSidResolverForTest,
   WindowsSidError,
 } from "../src/server/index.js";
 import { RPC_METHOD_NAMES } from "../src/shared/methods.js";
@@ -42,6 +44,8 @@ function readIndependentWindowsSid(): string {
 
 afterEach(async () => {
   vi.useRealTimers();
+  setCurrentUserSidResolverForTest(undefined);
+  resetCurrentUserSidCache();
   cleanupTmp();
 });
 
@@ -141,6 +145,7 @@ describe("本机外部 agent 管道 (--agent-pipe)", () => {
         for (const [key, val] of savedPathEntries) {
           process.env[key] = `${fakeBinDir}${delimiter}${val ?? ""}`;
         }
+        resetCurrentUserSidCache();
 
         const sid = currentUserSid();
         expect(sid).toBe(expectedSid);
@@ -162,6 +167,7 @@ describe("本机外部 agent 管道 (--agent-pipe)", () => {
         for (const [key, val] of savedPathEntries) {
           process.env[key] = val;
         }
+        resetCurrentUserSidCache();
       }
     },
   );
@@ -184,6 +190,7 @@ describe("本机外部 agent 管道 (--agent-pipe)", () => {
         );
 
         // 2. 两种方法都失败时，抛出 WindowsSidError，绝不退回用户名
+        resetCurrentUserSidCache();
         process.env.SystemRoot = emptyRoot;
         process.env.SYSTEMROOT = emptyRoot;
         for (const [key] of savedPathEntries) {
@@ -208,9 +215,127 @@ describe("本机外部 agent 管道 (--agent-pipe)", () => {
         for (const [key, val] of savedPathEntries) {
           process.env[key] = val;
         }
+        resetCurrentUserSidCache();
       }
     },
   );
+
+  it("currentUserSid 缓存：成功取到的 SID 会缓存，第二次调用不再起子进程；失败不缓存，下次调用重试", () => {
+    let calls = 0;
+    setCurrentUserSidResolverForTest(() => {
+      calls += 1;
+      if (calls === 1) {
+        throw new WindowsSidError("first call failed");
+      }
+      return "S-1-5-21-111-222-333-1001";
+    });
+
+    // 第一次调用失败：抛错且不缓存
+    expect(() => currentUserSid()).toThrow(WindowsSidError);
+    expect(calls).toBe(1);
+
+    // 第二次调用重试：成功并写入缓存
+    expect(currentUserSid()).toBe("S-1-5-21-111-222-333-1001");
+    expect(calls).toBe(2);
+
+    // 第三次调用命中缓存：不再调用底层解析器
+    expect(currentUserSid()).toBe("S-1-5-21-111-222-333-1001");
+    expect(calls).toBe(2);
+  });
+
+  it("同一 home 先起一个带 --agent-pipe 的后台，再起第二个：第二个 initialize 成功且能建会话，describe() 为 address_in_use，第一个管道仍可用", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const h1 = await connectWithConfig({ agentPipe: true, enableRemote: true });
+      cleanups.push(async () => {
+        h1.client.close();
+        await h1.served;
+      });
+      const firstStatus = await h1.client.call("agent.describe", {});
+      expect(firstStatus.pipe?.state).toBe("listening");
+
+      const s1 = await h1.client.runtime.createSession({ model: MODEL });
+      expect(s1.opened.sessionId).toBeTruthy();
+
+      // 同一 home 起第二个带 --agent-pipe 的后台
+      const h2 = await connectWithConfig({
+        config: h1.config,
+        agentPipe: true,
+        enableRemote: true,
+      });
+      cleanups.push(async () => {
+        h2.client.close();
+        await h2.served;
+      });
+
+      // 第二个后台 initialize 已成功，且可正常创建会话
+      const s2 = await h2.client.runtime.createSession({ model: MODEL });
+      expect(s2.opened.sessionId).toBeTruthy();
+
+      // describe() 中管道状态为 address_in_use，原因具体说明另一个后台已占用
+      const secondAgentStatus = await h2.client.call("agent.describe", {});
+      expect(secondAgentStatus.pipe?.state).toBe("address_in_use");
+      expect(secondAgentStatus.pipe?.reason).toBe("address_in_use");
+      expect(secondAgentStatus.pipe?.message).toContain("另一个 Nocturne 后台");
+
+      const secondRemoteStatus = await h2.client.call("remote.describe", {});
+      expect(secondRemoteStatus.agentPipe?.state).toBe("address_in_use");
+
+      // 第一个后台的管道仍然可用：外部 agent 连接管道能触发第一个后台的配对并看到第一个后台的会话
+      const bridgeIdentity = await generateIdentity({ extractable: false });
+      const h1Pairings: string[] = [];
+      h1.client.onNotification("agent.pairingRequested", (req) => {
+        h1Pairings.push(req.requestId);
+      });
+
+      const rawPipe = await connectAgentPipe({ home: h1.home });
+      const secureChannel = await connectChannel(rawPipe, { identity: bridgeIdentity });
+      const agentClient = createRpcClient(secureChannel, {
+        clientName: "Claude Code",
+        interactive: false,
+      });
+      cleanups.push(async () => {
+        agentClient.close();
+      });
+
+      await agentClient.initialize();
+      expect(h1Pairings).toHaveLength(1);
+      await h1.client.call("agent.respondPairing", {
+        requestId: h1Pairings[0] ?? "",
+        approved: true,
+        scope: "read-only",
+      });
+
+      const sessionsOnFirst = await agentClient.runtime.listSessions();
+      expect(sessionsOnFirst.some((item) => item.id === s1.opened.sessionId)).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("注入 currentUserSid 失败（抛 WindowsSidError）：initialize 仍成功，describe() 状态为 sid_unavailable", async () => {
+    setCurrentUserSidResolverForTest(() => {
+      throw new WindowsSidError("模拟 SID 获取失败");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const h = await connectWithConfig({ agentPipe: true, enableRemote: true });
+      cleanups.push(async () => {
+        h.client.close();
+        await h.served;
+      });
+
+      const session = await h.client.runtime.createSession({ model: MODEL });
+      expect(session.opened.sessionId).toBeTruthy();
+
+      const status = await h.client.call("agent.describe", {});
+      expect(status.pipe?.state).toBe("sid_unavailable");
+      expect(status.pipe?.reason).toBe("sid_unavailable");
+      expect(status.pipe?.message).toContain("本机 agent 管道未启动");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 
   it.skipIf(process.platform === "win32")("POSIX Unix 域套接字权限为 0600", async () => {
     const home = tmpDir("nocturne-posix-sock-");

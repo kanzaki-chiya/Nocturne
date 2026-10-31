@@ -28,6 +28,7 @@ export function useRemoteStatus(client: RpcClient | undefined): RemoteStatus | u
               ...prev,
               agents: agentStatus.agents,
               pendingAgentPairings: agentStatus.pendingPairings,
+              ...(agentStatus.pipe !== undefined ? { agentPipe: agentStatus.pipe } : {}),
             }
           : prev,
       );

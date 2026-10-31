@@ -320,6 +320,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
       ...status,
       agents: agentStatus.agents,
       pendingAgentPairings: agentStatus.pendingPairings,
+      ...(agentStatus.pipe !== undefined ? { agentPipe: agentStatus.pipe } : {}),
     };
   };
   const remote = options.remote
@@ -1134,7 +1135,7 @@ class Connection implements HubPeer {
         );
       }
       const init = (
-        this.origin === "local"
+        this.origin === "local" && !this.hub.available
           ? this.options.createRuntime({ clientName, interactive })
           : Promise.resolve(undefined)
       )
@@ -1142,8 +1143,21 @@ class Connection implements HubPeer {
           if (handle !== undefined) this.hub.setHandle(handle);
           this.initialized = true;
           if (this.origin === "local" && !this.hub.stopping) {
-            await this.remote?.start();
-            await this.agentHost.start();
+            try {
+              await this.remote?.start();
+            } catch (err) {
+              console.error(
+                `[remote] 启动远程主机失败: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            try {
+              await this.agentHost.start();
+            } catch (err) {
+              const failure = this.agentHost.recordStartFailure(err);
+              console.error(
+                `[agent-pipe] ${failure.message} (${err instanceof Error ? err.message : String(err)})`,
+              );
+            }
           }
           if (this.origin === "agent" && this.agentContext !== undefined) {
             this.agentHost.onInitialize(this.agentContext, {
@@ -1154,6 +1168,7 @@ class Connection implements HubPeer {
         })
         .catch((error: unknown) => {
           // 创建失败：允许客户端修正后重试
+          this.initialized = false;
           this.initPromise = undefined;
           throw error;
         });
