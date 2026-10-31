@@ -1,0 +1,272 @@
+/* 共享基础控件样式（Button、IconButton、Switch、Checkbox、SegmentedControl、Badge），与效果图一致，仅使用设计 token */
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex: none;
+  height: var(--ctl-h-md);
+  padding: 0 var(--ctl-px-md);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--a-border-strong);
+  background: transparent;
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur),
+    border-color var(--dur);
+}
+.btn:hover:not(:disabled) {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+.btn-primary {
+  background: var(--a-accent);
+  border-color: var(--a-accent);
+  color: var(--a-on-accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--a-accent-hover);
+  border-color: var(--a-accent-hover);
+  color: var(--a-on-accent);
+}
+.btn-ghost {
+  border-color: transparent;
+  color: var(--a-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--a-text);
+}
+.btn-danger:hover:not(:disabled) {
+  color: var(--a-error);
+  border-color: var(--a-error-border);
+  background: var(--a-error-bg);
+}
+.btn-danger.btn-ghost:hover:not(:disabled) {
+  border-color: transparent;
+}
+.btn-danger-solid {
+  background: var(--a-error);
+  border-color: var(--a-error);
+  color: var(--a-on-accent);
+}
+.btn-danger-solid:hover:not(:disabled) {
+  background: var(--a-error);
+  border-color: var(--a-error);
+  color: var(--a-on-accent);
+}
+.btn-sm {
+  height: var(--ctl-h-sm);
+  padding: 0 var(--ctl-px-sm);
+  font-size: var(--fs-1);
+}
+.btn-lg {
+  height: var(--ctl-h-lg);
+}
+.btn:disabled {
+  opacity: var(--disabled-opacity);
+  pointer-events: none;
+  cursor: default;
+}
+
+.ib {
+  width: var(--ctl-h-md);
+  height: var(--ctl-h-md);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border: 0;
+  padding: 0;
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--a-muted);
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
+}
+.ib:hover:not(:disabled) {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+.ib.sm {
+  width: var(--ctl-h-sm);
+  height: var(--ctl-h-sm);
+}
+.ib.on,
+.ib[aria-pressed="true"] {
+  color: var(--a-text);
+  background: var(--a-raised);
+}
+.ib:disabled {
+  opacity: var(--disabled-opacity);
+  pointer-events: none;
+  cursor: default;
+}
+
+/* ---------- 开关、复选框 ---------- */
+.switch {
+  width: var(--switch-w);
+  height: var(--switch-h);
+  flex: none;
+  border: 0;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  background: var(--a-switch-off);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--dur);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: calc((var(--switch-h) - var(--switch-knob)) / 2);
+  left: calc((var(--switch-h) - var(--switch-knob)) / 2);
+  width: var(--switch-knob);
+  height: var(--switch-knob);
+  border-radius: var(--radius-pill);
+  background: var(--a-switch-knob);
+  transition:
+    transform var(--dur),
+    background var(--dur);
+}
+.switch[aria-checked="true"] {
+  background: var(--a-accent);
+}
+.switch[aria-checked="true"]::after {
+  background: var(--a-on-accent);
+  transform: translateX(calc(var(--switch-w) - var(--switch-h)));
+}
+.switch:disabled {
+  opacity: var(--disabled-opacity);
+  pointer-events: none;
+  cursor: default;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.check input[type="checkbox"] {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  width: var(--check);
+  height: var(--check);
+  min-height: 0;
+  flex: none;
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-1);
+  background: var(--a-input);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.check input[type="checkbox"]:checked {
+  background: var(--a-accent);
+  border-color: var(--a-accent);
+}
+.check input[type="checkbox"]:checked::after {
+  content: "";
+  width: calc(var(--check) / 2);
+  height: calc(var(--check) / 4);
+  border: solid var(--a-on-accent);
+  border-width: 0 0 1.5px 1.5px;
+  transform: translateY(-1px) rotate(-45deg);
+}
+.check input[type="checkbox"]:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+.check:has(input[type="checkbox"]:disabled) {
+  opacity: var(--disabled-opacity);
+  pointer-events: none;
+  cursor: default;
+}
+.check:has(input[type="checkbox"]:disabled) input[type="checkbox"]:disabled {
+  opacity: 1;
+}
+
+/* ---------- 分段控件 ---------- */
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: var(--space-0-5);
+  gap: var(--space-0-5);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+}
+.seg button {
+  height: calc(var(--ctl-h-md) - 2 * var(--space-0-5) - 2px);
+  min-height: 0;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--a-muted);
+  font-size: var(--fs-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg button:hover:not(:disabled) {
+  color: var(--a-text);
+}
+.seg button[aria-pressed="true"],
+.seg button[aria-selected="true"],
+.seg button[aria-checked="true"] {
+  background: var(--a-sel-strong);
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
+}
+.seg button:disabled {
+  opacity: var(--disabled-opacity);
+  pointer-events: none;
+  cursor: default;
+}
+.seg.sm button {
+  height: calc(var(--ctl-h-sm) - 2 * var(--space-0-5) - 2px);
+  font-size: var(--fs-1);
+}
+
+/* ---------- 徽标 ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: var(--badge-h);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  flex: none;
+  line-height: 1;
+}
+.badge.accent {
+  background: var(--a-accent-subtle);
+  color: var(--a-accent);
+}
+.badge.warn {
+  background: var(--a-warning-bg);
+  color: var(--a-warning);
+}
+.badge.err {
+  background: var(--a-error-bg);
+  color: var(--a-error);
+}
+.badge.ok {
+  background: var(--a-success-bg);
+  color: var(--a-success);
+}

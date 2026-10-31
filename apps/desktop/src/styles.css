@@ -1,6 +1,7 @@
 /* 样式数值照抄 nocturne-mockups/desktop-v1.html（.app / .app.light 的 --a-* 变量与组件规则）。
    深色为默认，浅色跟随 prefers-color-scheme；只用本机字体，不引远程资源。 */
 @import "./tokens.css";
+@import "./ui.css";
 
 * {
   box-sizing: border-box;
