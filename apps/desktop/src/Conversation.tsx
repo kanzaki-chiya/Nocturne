@@ -2288,6 +2288,7 @@ function ToolRow({
   entry,
   cwd,
   preparing = false,
+  queued = false,
   waiting = false,
   images,
   session,
@@ -2295,6 +2296,7 @@ function ToolRow({
   entry: ToolEntry;
   cwd: string;
   preparing?: boolean;
+  queued?: boolean;
   waiting?: boolean;
   images?: AttachmentImageSource | undefined;
   session?: Pick<RpcSession, "readAttachment"> | undefined;
@@ -2336,7 +2338,7 @@ function ToolRow({
     entry.status === "ok" && shownName !== "apply_subagent_changes" ? fileDiffs(entry, cwd) : [];
   const asked = running && waiting;
   const status = preparing ? (
-    <span className="tool-res">接收参数中</span>
+    <span className="tool-res">{queued ? "排队中" : "接收参数中"}</span>
   ) : (
     <>
       {animating && !asked && <span className="tool-spin" aria-hidden="true" />}
@@ -2512,6 +2514,7 @@ function ToolEntryView({
   entry,
   cwd,
   preparing = false,
+  queued = false,
   waiting = false,
   images,
   session,
@@ -2519,6 +2522,7 @@ function ToolEntryView({
   entry: ToolEntry;
   cwd: string;
   preparing?: boolean;
+  queued?: boolean;
   /** 提问等待回答中：行尾用等待圆点，不计秒 */
   waiting?: boolean;
   images?: AttachmentImageSource | undefined;
@@ -2541,6 +2545,7 @@ function ToolEntryView({
       entry={entry}
       cwd={cwd}
       preparing={preparing}
+      queued={queued}
       waiting={waiting}
       images={images}
       session={session}
@@ -2573,6 +2578,7 @@ function EntryView({
   showReplyActions,
   changesCard,
   preparing = false,
+  queued = false,
   waitingCallId,
   userRole,
   scheduleSource,
@@ -2591,8 +2597,9 @@ function EntryView({
   fileLinks: ConversationProps["fileLinks"];
   showReplyActions: boolean;
   changesCard: ReactNode;
-  /** 实时工具行（参数尚在流式接收）以合成 ToolEntry 走同一条渲染路径 */
+  /** 实时工具行（参数尚在流式接收或排队等待执行）以合成 ToolEntry 走同一条渲染路径 */
   preparing?: boolean;
+  queued?: boolean;
   /** 与待回答提问同 callId 的工具行：行尾等待圆点，不计秒 */
   waitingCallId?: string | undefined;
   /** 只读视图里用户消息的角色：第一条是任务，之后是催促；缺省 = 普通用户气泡 */
@@ -2734,6 +2741,7 @@ function EntryView({
           entry={entry}
           cwd={cwd}
           preparing={preparing}
+          queued={queued}
           waiting={entry.callId === waitingCallId}
           images={images}
           session={session}
@@ -3918,6 +3926,7 @@ function ConversationContent({
                               showReplyActions={false}
                               changesCard={null}
                               preparing
+                              queued={tool.queued === true}
                             />
                             {null}
                           </Fragment>

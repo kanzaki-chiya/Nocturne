@@ -251,21 +251,23 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
   );
 }
 
-/** live.tools 中参数还在流式拼接的调用（尚无持久落点） */
+/** live.tools 中尚未进入执行管线的调用（流式接收参数或排队等待执行） */
 export function LiveToolRow({ tool, width }: { tool: LiveTool; width: number }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
   const g = glyphs(env);
   const spinner = useSpinner(true);
   if (tool.name === "ask_user") return <Text>? 提问</Text>;
+  const label = tool.queued ? "排队中" : "接收参数中";
   return (
     <Text wrap="truncate">
       <Text color={theme.accent}>{spinner}</Text>
       <Text> {tool.name}</Text>
       <Text dimColor>
         {" "}
-        {truncateLine(tool.inputText, Math.max(8, width - tool.name.length - 8), g.ellipsis)}
+        {truncateLine(tool.inputText, Math.max(8, width - tool.name.length - 16), g.ellipsis)}
       </Text>
+      <Text dimColor> {label}</Text>
     </Text>
   );
 }

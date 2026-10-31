@@ -23,8 +23,8 @@ import { App, splitCompletedPrefix } from "../src/app.js";
 import { captureConsole } from "../src/console-capture.js";
 import { PermissionDialog } from "../src/components/permission-dialog.js";
 import { StatusBar } from "../src/components/status-bar.js";
-import { layoutEntry } from "../src/lines.js";
-import { ToolRow } from "../src/components/tool-row.js";
+import { layoutEntry, layoutLive } from "../src/lines.js";
+import { LiveToolRow, ToolRow } from "../src/components/tool-row.js";
 import { Transcript } from "../src/components/transcript.js";
 import { TuiEnvContext } from "../src/env.js";
 import type { SwitchSessionFn } from "../src/types.js";
@@ -317,6 +317,39 @@ describe("TUI", () => {
     await pause();
     expect(reply).toHaveBeenCalledWith({ decision: "deny", stop: true });
     unmount();
+  });
+
+  it("live 工具区分「接收参数中」与「排队中」（LiveToolRow 与 layoutLive）", () => {
+    const receiving = {
+      kind: "tool" as const,
+      callId: "c1",
+      name: "task",
+      turnId: "turn-1",
+      inputText: '{"task":"a"',
+    };
+    const queued = {
+      kind: "tool" as const,
+      callId: "c2",
+      name: "task",
+      turnId: "turn-1",
+      inputText: '{"task":"b"}',
+      queued: true,
+    };
+
+    const r1 = render(inEnv(createElement(LiveToolRow, { tool: receiving, width: 80 })));
+    expect(r1.lastFrame()).toContain("接收参数中");
+    expect(r1.lastFrame()).not.toContain("排队中");
+    r1.unmount();
+
+    const r2 = render(inEnv(createElement(LiveToolRow, { tool: queued, width: 80 })));
+    expect(r2.lastFrame()).toContain("排队中");
+    expect(r2.lastFrame()).not.toContain("接收参数中");
+    r2.unmount();
+
+    const view = createSessionView();
+    view.live.tools = [receiving, queued];
+    const lines = layoutLive(view, 80, false).map((l) => l.text);
+    expect(lines).toEqual(["• task 接收参数中", "• task 排队中"]);
   });
 
   it("Shift+Tab（\\x1B[Z）循环思考档位：状态栏档位段随之更新", async () => {

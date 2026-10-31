@@ -238,6 +238,8 @@ export interface LiveTool {
   name: string;
   turnId: string | undefined;
   inputText: string;
+  /** 包含该调用的 message.assistant 已到达（参数完整，排队等待执行） */
+  queued?: boolean | undefined;
 }
 
 export interface PendingPermission {
@@ -460,6 +462,12 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
     case "message.assistant": {
       const p = event.payload;
       view.live.assistants = view.live.assistants.filter((a) => a.messageId !== p.messageId);
+      if (view.live.tools.length > 0 && p.toolCalls.length > 0) {
+        const callIds = new Set(p.toolCalls.map((c) => c.callId));
+        for (const tool of view.live.tools) {
+          if (callIds.has(tool.callId)) tool.queued = true;
+        }
+      }
       view.entries.push({
         kind: "assistant",
         key: `a:${p.messageId}`,

@@ -155,10 +155,11 @@ interface LiveTool {
   name: string;                 // tool.input.delta 的 payload.name
   turnId: string | undefined;
   inputText: string;            // 参数 JSON 片段累计（仅供显示）
+  queued?: boolean;             // 包含该 callId 的 message.assistant 已到达（参数已完整，排队等待执行）
 }
 ```
 
-`live` 是**纯瞬态**区：内容由 `message.assistant.delta` / `tool.input.delta` 创建，在对应的 `message.assistant` / `permission.requested` / `tool.started` / `tool.completed` 到达时**转入 `entries`**（inputText 等流式字段随之丢弃——它们本来就不该出现在可重放视图里）。`live` 中的实体不保证有持久落点：流被中断、参数没发完的调用可能永远没有 `tool.started`，这类孤儿在 `turn.completed` 时随 `live` 整体清空（不按 `turnId` 筛选——`LiveTool.turnId` 可为空，且串行管线同一时刻至多一个 Turn）。
+`live` 是**纯瞬态**区：内容由 `message.assistant.delta` / `tool.input.delta` 创建；`live.assistants` 在对应的 `message.assistant` 到达时**转入 `entries`**，而 `live.tools` 在包含该 `callId` 的 `message.assistant` 到达时仅置 `queued = true`（参数已完整、尚未开始执行），等到对应的 `permission.reviewed` / `permission.requested` / `tool.started` / `tool.completed` 到达时才**转入 `entries`**（`inputText`、`queued` 等流式/瞬态字段随之丢弃——它们本来就不该出现在可重放视图里）。`live` 中的实体不保证有持久落点：流被中断、参数没发完的调用可能永远没有 `tool.started`，这类孤儿在 `turn.completed` 时随 `live` 整体清空（不按 `turnId` 筛选——`LiveTool.turnId` 可为空，且串行管线同一时刻至多一个 Turn）。
 
 `PendingPermission`：
 
@@ -198,7 +199,7 @@ interface SessionNotice {
 | `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；有用户配置展示文字时追加 `config` notice 条目；仅含 MCP 环境状态时不追加空 notice（ADR-0071，状态已有临时事件展示）。shell 切换文案：`shell 已切换为 <kind>（<path>）` |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
 | `message.user` | 当前 `todos` 非空且每项均为 `completed` 且这条**不是插话**（`steer !== true`）时先置空；尚有未完成项或这条是插话时保留，历史工具快照不变（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs`、`skill`，插话另带 `steer: true`（界面据此加「插话」标签，见 [apps/desktop.md](../apps/desktop.md) §6）；后台子代理结果另带 `subagent`（界面显示为结果卡片/结果行，不显示 `<subagent-result>` 外壳，[ADR-0073](../decisions/ADR-0073-background-subagents.md) §6）；首条消息以 `firstUserText`（第一个文本块的第一个非空行）记录 `firstTitle` 并重算 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |
-| `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目 |
+| `message.assistant` | `live.assistants` 中同 `messageId` 者移除并晋升：新建条目插入时间线（流式 text/reasoning 丢弃，以 `content` 为准）；无 live 对应物则直接新建条目；`live.tools` 中命中 `toolCalls[].callId` 的项置 `queued = true` |
 | `permission.reviewed` | 同 callId 的 live 工具晋升为 awaiting 条目，记录 `review`；不写 notice，避免同一审查显示两次。后续 requested 将审查理由复制到 `pendingPermission.review` |
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目（`source: "reviewer"` 时不追加：结论已由该工具条目的 `review` 展示）。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |

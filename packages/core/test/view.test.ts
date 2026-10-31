@@ -813,6 +813,105 @@ describe("SessionView reducer", () => {
     expect(view.pendingPermission).toBeDefined();
   });
 
+  it("live.tools：tool.input.delta 为接收中，message.assistant 到达置 queued，tool.started 晋升，turn.completed 清空，重放同一序列一致", () => {
+    const eph = (
+      eseq: number,
+      type: EphemeralEvent["type"],
+      payload: unknown,
+      afterSeq = 0,
+      turnId = "turn-1",
+    ) =>
+      ({
+        type,
+        sessionId: "s",
+        runId: "r",
+        eseq,
+        afterSeq,
+        time: "t",
+        turnId,
+        payload,
+      }) as EphemeralEvent;
+    const dur = (seq: number, type: DurableEvent["type"], payload: unknown, turnId = "turn-1") =>
+      ({
+        type,
+        sessionId: "s",
+        seq,
+        time: "t",
+        turnId,
+        payload,
+      }) as DurableEvent;
+
+    const step1 = eph(1, "tool.input.delta", {
+      callId: "c1",
+      name: "task",
+      delta: '{"task":"first"}',
+    });
+    const step2 = eph(2, "tool.input.delta", {
+      callId: "c2",
+      name: "task",
+      delta: '{"task":"second"}',
+    });
+    const step3 = dur(1, "message.assistant", {
+      messageId: "m1",
+      model: { provider: "fake", model: "fake-model" },
+      content: [],
+      toolCalls: [
+        { callId: "c1", name: "task", input: { task: "first" } },
+        { callId: "c2", name: "task", input: { task: "second" } },
+      ],
+      finishReason: "tool_calls",
+    });
+    const step4 = dur(2, "tool.started", {
+      callId: "c1",
+      name: "task",
+      input: { task: "first" },
+      subjects: [],
+      permission: { action: "allow", source: "rule" },
+    });
+    const step5 = dur(3, "turn.completed", {
+      reason: "aborted",
+      steps: 1,
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+
+    const view = createSessionView();
+    // 1. tool.input.delta 之后是「接收中」（queued 未置位）
+    reduceSessionView(view, step1);
+    reduceSessionView(view, step2);
+    expect(view.live.tools).toEqual([
+      { kind: "tool", callId: "c1", name: "task", turnId: "turn-1", inputText: '{"task":"first"}' },
+      {
+        kind: "tool",
+        callId: "c2",
+        name: "task",
+        turnId: "turn-1",
+        inputText: '{"task":"second"}',
+      },
+    ]);
+    expect(view.live.tools[0]?.queued).toBeUndefined();
+    expect(view.live.tools[1]?.queued).toBeUndefined();
+
+    // 2. 同 callId 的 message.assistant 到达后是「参数完整」（queued = true）
+    reduceSessionView(view, step3);
+    expect(view.live.tools[0]?.queued).toBe(true);
+    expect(view.live.tools[1]?.queued).toBe(true);
+    // 重放同一串未收敛事件，得到的视图一致
+    expect(liveView([step1, step2, step3])).toEqual(view);
+
+    // 3. 第一个调用 tool.started 后转入 entries，第二个调用留在 live.tools 保持 queued
+    reduceSessionView(view, step4);
+    expect(view.live.tools).toHaveLength(1);
+    expect(view.live.tools[0]).toMatchObject({ callId: "c2", queued: true });
+    expect(toolEntries(view)).toHaveLength(1);
+    expect(toolEntries(view)[0]).toMatchObject({ callId: "c1", status: "running" });
+    expect(liveView([step1, step2, step3, step4])).toEqual(view);
+
+    // 4. turn.completed 整体清空 live
+    reduceSessionView(view, step5);
+    expect(view.live.tools).toEqual([]);
+    expect(liveView([step1, step2, step3, step4, step5])).toEqual(view);
+  });
+
   it("图片附件引用进入 user / tool 视图条目；无附件时键不出现（ADR-0023）", () => {
     const att = {
       type: "image" as const,

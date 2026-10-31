@@ -490,9 +490,13 @@ export function layoutLive(
   const lines: LaidLine[] = [];
   const cursor = ascii ? "_" : "|";
   for (const tool of view.live.tools) {
+    const label = tool.queued ? "排队中" : "接收参数中";
     lines.push({
       key: `live:${tool.callId}`,
-      text: paint(tool.name === "ask_user" ? "? 提问" : `${ascii ? "*" : "•"} ${tool.name}`, width),
+      text: paint(
+        tool.name === "ask_user" ? "? 提问" : `${ascii ? "*" : "•"} ${tool.name} ${label}`,
+        width,
+      ),
       color: theme.accent,
     });
   }
@@ -700,7 +704,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     src.expanded,
     overrides,
     src.live.live.assistants.map((a) => `${a.text.length}/${a.reasoning.length}`).join(","),
-    src.live.live.tools.map((t) => t.callId).join(","),
+    src.live.live.tools.map((t) => `${t.callId}:${t.queued ? 1 : 0}`).join(","),
     src.live.retry?.attempt ?? "",
     src.live.status,
     src.reasoning === undefined

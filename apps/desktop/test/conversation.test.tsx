@@ -1867,6 +1867,14 @@ describe("Conversation 工具行三个阶段同一结构", () => {
       );
       expect(node.querySelector(".tool-res")?.textContent).toBe("接收参数中");
 
+      // 2b. 参数完整但尚未开始执行（message.assistant 已到达，queued = true）：沿用 .preparing 样式，文案切换为「排队中」
+      (live as { queued?: boolean }).queued = true;
+      rerender();
+      expect(rendered.container.querySelector(".tool-line")).toBe(node);
+      expect(node.closest("article")?.classList.contains("preparing")).toBe(true);
+      expect(node.getAttribute("aria-disabled")).toBe("true");
+      expect(node.querySelector(".tool-res")?.textContent).toBe("排队中");
+
       // 3. 执行中：reducer 把实时行提升为正式条目（同 key t:<callId>），同一节点
       const entry = tool({
         key: "t:call-1",
