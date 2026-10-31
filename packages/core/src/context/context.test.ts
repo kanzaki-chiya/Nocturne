@@ -2174,7 +2174,8 @@ describe("history 细分（ADR-0046 第 5 节）", () => {
     expect(b?.summary.chars).toBe(summaryText.length);
     expect(b?.summary.estimatedTokens).toBe(estimateTokens(summaryText));
     // 修剪占位说明与未覆盖的新结果都归 tool；pending 工具结果同归 tool
-    const placeholder = "[输出已省略] 工具 read（path=b） 的结果已被 context.compacted 修剪";
+    const placeholder =
+      "[输出已省略] 工具 read（path=b） 的结果已被 context.compacted 修剪；需要原文请重新运行或重新读取，不要凭记忆复述或补写";
     expect(b?.tool.chars).toBe(placeholder.length + "新结果".length + "pending结果".length);
     // 旧问题被摘要覆盖不计；pending 用户输入归 user
     expect(b?.user.chars).toBe("pending输入".length);

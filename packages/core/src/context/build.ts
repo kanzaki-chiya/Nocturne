@@ -397,7 +397,7 @@ function pruneArgument(value: unknown): unknown {
 /** L1 修剪后工具结果的占位说明（context.md 6.5：保留工具名与参数摘要） */
 function prunedPlaceholder(entry: Extract<HistoryEntry, { kind: "tool" }>): string {
   const args = entry.inputSummary !== undefined ? `（${entry.inputSummary}）` : "";
-  return `[输出已省略] 工具 ${entry.name}${args} 的结果已被 context.compacted 修剪`;
+  return `[输出已省略] 工具 ${entry.name}${args} 的结果已被 context.compacted 修剪；需要原文请重新运行或重新读取，不要凭记忆复述或补写`;
 }
 
 /**

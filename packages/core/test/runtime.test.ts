@@ -927,7 +927,9 @@ describe("上下文与运行时命令（Phase 2）", () => {
     // 修剪后的请求里，工具结果是占位说明而非原文
     const req2 = provider.requests[1];
     const toolMsg = req2?.messages.find((m) => m.role === "tool");
-    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("输出已省略");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain(
+      "结果已被 context.compacted 修剪；需要原文请重新运行或重新读取，不要凭记忆复述或补写",
+    );
     expect(toolMsg?.role === "tool" && toolMsg.content).not.toContain("xxxx");
     // 修剪事件持久化：折叠后的历史带 inputSummary
     const toolEntry = session.state().history.find((h) => h.kind === "tool");
@@ -1227,7 +1229,9 @@ describe("上下文与运行时命令（Phase 2）", () => {
     expect(compacted?.type === "context.compacted" && compacted.payload.kind).toBe("prune");
     const req3 = provider.requests[2];
     const toolMsg = req3?.messages.find((m) => m.role === "tool");
-    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("输出已省略");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain(
+      "结果已被 context.compacted 修剪；需要原文请重新运行或重新读取，不要凭记忆复述或补写",
+    );
     await session.close();
   });
 
