@@ -13,6 +13,7 @@ import { externalAgentSlashConflict } from "./commands";
 import { profilesFromSettings, SubagentProfileEditor } from "./SubagentProfileEditor";
 import type { ModelInfo, SettingItem, SettingsPatch } from "./rpc-types";
 import type { SubagentProfileConfig } from "@nocturne/core/protocol";
+import { Badge, Button, Checkbox, Switch } from "./ui";
 import "./subagent-profiles.css";
 import "./pages.css";
 import "./mcp.css";
@@ -218,21 +219,22 @@ export function ExternalAgentsPage({
       <div className="cols3">
         <nav className="plist" aria-label="子代理列表">
           <div className="mcp-list-actions">
-            <button
-              className="btn primary"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={!client || busy}
               onClick={() => {
                 setAddingProfile((old) => !old);
               }}
             >
               添加档位
-            </button>
+            </Button>
           </div>
           {addingProfile && (
             <div className="profile-options">
               {(["空白", "quick", "deep"] as const).map((template) => (
-                <button
-                  className="btn"
+                <Button
+                  size="sm"
                   key={template}
                   onClick={() => {
                     setAddingProfile(false);
@@ -253,7 +255,7 @@ export function ExternalAgentsPage({
                   }}
                 >
                   {template}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -294,9 +296,9 @@ export function ExternalAgentsPage({
           ))}
           <h5>外部 agent</h5>
           <div className="mcp-list-actions">
-            <button className="btn primary" disabled={!client || busy} onClick={add}>
+            <Button variant="primary" size="sm" disabled={!client || busy} onClick={add}>
               添加 agent
-            </button>
+            </Button>
           </div>
           {(["app", "user"] as const).map((origin) => (
             <div key={origin}>
@@ -388,34 +390,29 @@ export function ExternalAgentsPage({
             <>
               <div className="t1">
                 <h3>{current.name}</h3>
-                <span className="tagc">{current.editable ? "程序管理" : "只读"}</span>
+                <Badge>{current.editable ? "程序管理" : "只读"}</Badge>
                 <span className="acts">
-                  <button
-                    role="switch"
+                  <Switch
                     aria-label="启用 agent"
-                    aria-checked={current.enabled}
-                    className={`mcp-switch ${current.enabled ? "on" : ""}`}
+                    checked={current.enabled}
                     disabled={!client || !current.editable || busy}
-                    onClick={() => {
+                    onChange={(next) => {
                       if (client)
                         void mutate(
                           () =>
                             client.runtime.setExternalAgentEnabled({
                               name: current.name,
-                              enabled: !current.enabled,
+                              enabled: next,
                             }),
                           current.enabled ? "已停用" : "已启用",
                         );
                     }}
-                  >
-                    启用
-                  </button>
+                  />
                   <span className="mcp-action-divider" aria-hidden="true" />
-                  <button className="btn" disabled={!client || busy} onClick={() => void probe()}>
+                  <Button disabled={!client || busy} onClick={() => void probe()}>
                     {busy ? "处理中…" : "测试连接"}
-                  </button>
-                  <button
-                    className="btn"
+                  </Button>
+                  <Button
                     disabled={!current.editable || busy}
                     onClick={() => {
                       setError("");
@@ -423,16 +420,16 @@ export function ExternalAgentsPage({
                     }}
                   >
                     编辑
-                  </button>
-                  <button
-                    className="btn"
+                  </Button>
+                  <Button
+                    variant="danger"
                     disabled={!current.editable || busy}
                     onClick={() => {
                       setDeleting(true);
                     }}
                   >
                     删除
-                  </button>
+                  </Button>
                 </span>
               </div>
               {externalAgentSlashConflict(current.name, skills) && (
@@ -481,9 +478,9 @@ export function ExternalAgentsPage({
           ) : (
             <div className="mcp-empty">
               <h3>还没有外部 agent</h3>
-              <button className="btn primary" disabled={!client} onClick={add}>
+              <Button variant="primary" disabled={!client} onClick={add}>
                 添加 agent
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -503,17 +500,16 @@ export function ExternalAgentsPage({
             <h3>删除 {current.name}？</h3>
             <p>只删除程序维护的配置，不会卸载命令行工具或删除它的账号。</p>
             <div className="acts">
-              <button
-                className="btn"
+              <Button
                 disabled={busy}
                 onClick={() => {
                   setDeleting(false);
                 }}
               >
                 取消
-              </button>
-              <button
-                className="btn danger"
+              </Button>
+              <Button
+                variant="danger-solid"
                 disabled={!client || busy}
                 onClick={() => {
                   if (!client) return;
@@ -524,7 +520,7 @@ export function ExternalAgentsPage({
                 }}
               >
                 确认删除
-              </button>
+              </Button>
             </div>
           </div>
         </Scrim>
@@ -739,16 +735,9 @@ function ExternalAgentForm({
           />
           <small>只接受字符串，支持字面值或 {"${NAME}"} 环境变量引用；不存储对方登录凭据。</small>
         </label>
-        <label className="external-enabled">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => {
-              setEnabled(event.target.checked);
-            }}
-          />
+        <Checkbox className="external-enabled" checked={enabled} onChange={setEnabled}>
           启用 agent
-        </label>
+        </Checkbox>
       </fieldset>
       <section>
         <h4>会话配置项</h4>
@@ -803,9 +792,9 @@ function ExternalAgentForm({
                   : `已指定：${selectedOptions[option.id]}`}
               </small>
               {selectedOptions[option.id] !== undefined && (
-                <button
-                  type="button"
-                  className="btn external-option-reset"
+                <Button
+                  size="sm"
+                  className="external-option-reset"
                   disabled={busy}
                   onClick={() => {
                     const { [option.id]: _removed, ...rest } = selectedOptions;
@@ -813,7 +802,7 @@ function ExternalAgentForm({
                   }}
                 >
                   恢复默认
-                </button>
+                </Button>
               )}
             </div>
           ))}
@@ -837,15 +826,15 @@ function ExternalAgentForm({
         </div>
       )}
       <div className="acts">
-        <button type="button" className="btn" disabled={busy} onClick={onCancel}>
+        <Button disabled={busy} onClick={onCancel}>
           取消
-        </button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void run(false)}>
+        </Button>
+        <Button disabled={busy} onClick={() => void run(false)}>
           {busy ? "处理中…" : "测试连接"}
-        </button>
-        <button className="btn primary" type="submit" disabled={busy}>
+        </Button>
+        <Button variant="primary" type="submit" disabled={busy}>
           保存
-        </button>
+        </Button>
       </div>
     </form>
   );

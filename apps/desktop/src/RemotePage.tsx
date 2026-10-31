@@ -12,6 +12,7 @@ import type {
 import qrcode from "qrcode-generator";
 import { Scrim } from "./ProvidersPage";
 import { REMOTE_CONNECTION_TEXT, useRemoteStatus } from "./remote";
+import { Badge, Button, Switch } from "./ui";
 import "./pages.css";
 import "./mcp.css";
 import "./remote.css";
@@ -112,8 +113,7 @@ export function PairingDialog({
             <label htmlFor="remote-pair-url">已打开过手机页面？复制链接到手机浏览器</label>
             <div className="remote-link">
               <input id="remote-pair-url" readOnly value={offer.url} />
-              <button
-                className="btn3"
+              <Button
                 onClick={() => {
                   void navigator.clipboard
                     .writeText(offer.url)
@@ -126,13 +126,11 @@ export function PairingDialog({
                 }}
               >
                 {copied ? "已复制" : "复制"}
-              </button>
+              </Button>
             </div>
           </>
         )}
-        <button className="btn3" onClick={onClose}>
-          关闭
-        </button>
+        <Button onClick={onClose}>关闭</Button>
       </div>
     </Scrim>
   );
@@ -263,26 +261,23 @@ export function AgentPairingDialog({
           </p>
         )}
         <div className="remote-actions agent-pair-actions">
-          <button
-            type="button"
-            className="btn3"
+          <Button
             disabled={busy}
             onClick={() => {
               void respond(false);
             }}
           >
             拒绝
-          </button>
-          <button
-            type="button"
-            className="btn3 primary"
+          </Button>
+          <Button
+            variant="primary"
             disabled={busy}
             onClick={() => {
               void respond(true);
             }}
           >
             批准
-          </button>
+          </Button>
         </div>
       </div>
     </Scrim>
@@ -356,8 +351,8 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                   setInvite(event.target.value);
                 }}
               />
-              <button
-                className="btn3 primary"
+              <Button
+                variant="primary"
                 disabled={busy || !client || !invite.trim()}
                 onClick={() => {
                   void operation(async () => {
@@ -367,7 +362,7 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                 }}
               >
                 {busy ? "登记中…" : "登记"}
-              </button>
+              </Button>
             </div>
           </>
         ) : (
@@ -375,34 +370,34 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
             <div className="remote-heading">
               <div>
                 <h4>{status.relay ? new URL(status.relay.origin).host : "中继"}</h4>
-                <span className={`remote-state ${status.connection}`}>
+                <Badge
+                  variant={
+                    status.connection === "online"
+                      ? "ok"
+                      : status.connection === "connecting"
+                        ? "neutral"
+                        : "warn"
+                  }
+                  className={`remote-state ${status.connection}`}
+                >
                   {REMOTE_CONNECTION_TEXT[status.connection]}
-                </span>
+                </Badge>
               </div>
-              <button
-                className={`mcp-switch${status.enabled ? " on" : ""}`}
-                role="switch"
+              <Switch
                 aria-label="允许远程访问"
-                aria-checked={status.enabled}
+                checked={status.enabled}
                 disabled={busy || !client}
-                onClick={() => {
+                onChange={(next) => {
                   void operation(
-                    () =>
-                      client?.call("remote.setEnabled", { enabled: !status.enabled }) ??
-                      Promise.resolve(),
+                    () => client?.call("remote.setEnabled", { enabled: next }) ?? Promise.resolve(),
                   );
                 }}
               />
             </div>
-            <p>
-              允许远程访问
-              <span className="muted-value">{status.enabled ? "已开启" : "已关闭"}</span>
-            </p>
             <section className="remote-devices">
               <div className="remote-heading">
                 <h4>已配对设备</h4>
-                <button
-                  className="btn3"
+                <Button
                   disabled={busy || status.connection !== "online" || !client}
                   onClick={() => {
                     void operation(async () => {
@@ -411,7 +406,7 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                   }}
                 >
                   配对新手机
-                </button>
+                </Button>
               </div>
               {status.devices.length === 0 ? (
                 <p>还没有配对手机。扫码后，这台手机才能访问你的会话。</p>
@@ -429,8 +424,8 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                       </p>
                     </div>
                     <div className="remote-actions">
-                      <button
-                        className="btn3"
+                      <Button
+                        size="sm"
                         disabled={busy || !status.connections.some((c) => c.deviceId === device.id)}
                         onClick={() => {
                           void operation(
@@ -441,30 +436,31 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                         }}
                       >
                         断开
-                      </button>
-                      <button
-                        className="btn3"
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
                         disabled={busy || status.connection !== "online"}
                         onClick={() => {
                           setConfirm({ kind: "remove", id: device.id, name: device.name });
                         }}
                       >
                         移除
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))
               )}
             </section>
-            <button
-              className="btn3"
+            <Button
+              variant="danger"
               disabled={busy}
               onClick={() => {
                 setConfirm({ kind: "unregister" });
               }}
             >
               退出登记
-            </button>
+            </Button>
             {confirm && (
               <div
                 className="remote-confirm"
@@ -477,17 +473,16 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                     : "退出登记并移除所有配对设备？所有手机连接将断开。"}
                 </p>
                 <div className="remote-actions">
-                  <button
-                    className="btn3"
+                  <Button
                     disabled={busy}
                     onClick={() => {
                       setConfirm(undefined);
                     }}
                   >
                     取消
-                  </button>
-                  <button
-                    className="btn3 primary"
+                  </Button>
+                  <Button
+                    variant="danger-solid"
                     disabled={busy}
                     onClick={() => {
                       void operation(async () => {
@@ -501,7 +496,7 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                     }}
                   >
                     确认{confirm.kind === "remove" ? "移除" : "退出登记"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -638,9 +633,9 @@ function ExternalAgentsSection({
                     <option value="bypass">上限：无限制</option>
                   </select>
                 )}
-                <button
-                  type="button"
-                  className="btn3"
+                <Button
+                  variant="danger"
+                  size="sm"
                   disabled={busy || !client}
                   onClick={() => {
                     void onOperate(
@@ -649,7 +644,7 @@ function ExternalAgentsSection({
                   }}
                 >
                   吊销
-                </button>
+                </Button>
               </div>
             </div>
           ))}
@@ -714,8 +709,8 @@ export function RemoteBadge({
           {devices.map((d) => (
             <div className="remote-device" key={d.deviceId}>
               <span>{d.name}</span>
-              <button
-                className="btn3"
+              <Button
+                size="sm"
                 onClick={() => {
                   if (client)
                     void client.call("remote.disconnectDevice", { id: d.deviceId }).catch(() => {
@@ -724,13 +719,11 @@ export function RemoteBadge({
                 }}
               >
                 断开
-              </button>
+              </Button>
             </div>
           ))}
           {error && <p role="alert">{error}</p>}
-          <button className="btn3" onClick={onOpen}>
-            打开远程设置
-          </button>
+          <Button onClick={onOpen}>打开远程设置</Button>
         </div>
       )}
     </div>
