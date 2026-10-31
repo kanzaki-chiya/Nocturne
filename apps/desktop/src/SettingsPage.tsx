@@ -518,13 +518,10 @@ export function SettingsPage({
                           });
                       }}
                     >
-                      <span className="dd-v">
+                      <span className="dd-label">
                         {shellItem.saved ?? shellItem.effective ?? "自动"}
                       </span>
-                      <span className="dd-d">
-                        {shellItem.saved ? "已选 Shell" : "按探测结果选择"}
-                      </span>
-                      <svg className="dd-a" viewBox="0 0 16 16" aria-hidden="true">
+                      <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
                         <path
                           d="M4 6l4 4 4-4"
                           fill="none"

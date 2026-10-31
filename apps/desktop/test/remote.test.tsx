@@ -256,9 +256,8 @@ it("外部 Agent 配对弹窗显示名称、指纹、进程信息与权限说明
     screen.getByText("可运行的 agent 能往任何会话发消息，按该会话自己的权限预设执行"),
   ).toBeTruthy();
 
-  fireEvent.change(screen.getByLabelText("新建会话权限上限"), {
-    target: { value: "auto-edit" },
-  });
+  fireEvent.click(screen.getByRole("combobox", { name: "新建会话权限上限" }));
+  fireEvent.click(screen.getByRole("option", { name: /自动编辑 \(auto-edit\)/ }));
   fireEvent.click(screen.getByText("批准"));
 
   await waitFor(() => {
@@ -304,9 +303,8 @@ it("设置 › 远程页独立展示外部 Agent 分组与安全说明，支持�
   ).toBeTruthy();
 
   // 修改权限上限
-  fireEvent.change(screen.getByLabelText("Claude Code 权限上限"), {
-    target: { value: "auto-edit" },
-  });
+  fireEvent.click(screen.getByRole("combobox", { name: "Claude Code 权限上限" }));
+  fireEvent.click(screen.getByRole("option", { name: /上限：自动编辑/ }));
   await waitFor(() => {
     expect(h.calls).toContainEqual(
       expect.objectContaining({
@@ -321,9 +319,8 @@ it("设置 › 远程页独立展示外部 Agent 分组与安全说明，支持�
   });
 
   // 修改范围为只读
-  fireEvent.change(screen.getByLabelText("Claude Code 范围"), {
-    target: { value: "read-only" },
-  });
+  fireEvent.click(screen.getByRole("combobox", { name: "Claude Code 范围" }));
+  fireEvent.click(screen.getByRole("option", { name: /^只读/ }));
   await waitFor(() => {
     expect(h.calls).toContainEqual(
       expect.objectContaining({

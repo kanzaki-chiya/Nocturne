@@ -103,14 +103,15 @@ describe("Dropdown", () => {
     expect(list.style.maxHeight).toBe("420px");
   });
 
-  it("触发器显示当前值与说明；打开后 listbox/option 关系完整，危险项排在最后", () => {
+  it("触发器只显示当前值（说明只在列表里）；打开后 listbox/option 关系完整，危险项排在最后", () => {
     render(<Harness onChange={vi.fn()} />);
     const trigger = screen.getByRole("combobox", { name: "默认权限预设" });
     expect(trigger.textContent).toContain("default");
-    expect(trigger.textContent).toContain("改文件要确认");
+    expect(trigger.textContent).not.toContain("改文件要确认");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(trigger);
+    expect(screen.getAllByRole("option")[1]?.textContent).toContain("改文件要确认");
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     const list = screen.getByRole("listbox", { name: "默认权限预设" });
     expect(trigger.getAttribute("aria-controls")).toBe(list.id);

@@ -157,15 +157,6 @@
 .remote-panel > .btn {
   margin-top: 14px;
 }
-.remote-select {
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  background: var(--a-input);
-  color: var(--a-text);
-  padding: 5px 10px;
-  font: var(--fs-2)/1.4 var(--sans);
-  cursor: pointer;
-}
 .scrim:has(> .agent-pair-dlg) {
   position: fixed;
   inset: 0;
@@ -246,11 +237,10 @@
   color: var(--a-secondary);
 }
 .agent-preset-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   margin-bottom: 12px;
-}
-.agent-preset-field .remote-select {
-  width: 100%;
-  padding: 8px 10px;
 }
 .agent-pair-note {
   font-size: var(--fs-1);

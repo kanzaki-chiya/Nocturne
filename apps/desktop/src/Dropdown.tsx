@@ -25,7 +25,7 @@ export interface DropdownOption {
   label: string;
   /** 右侧的中文名 */
   tag?: string;
-  /** 名字下面的一行说明；触发器上当前值后面的灰字也取它 */
+  /** 名字下面的一行说明，只在展开的列表里显示（触发器只显示选中项名字） */
   description?: string;
   /** 危险项：排在分隔线之后，警告色 */
   risk?: boolean;
@@ -39,8 +39,12 @@ export interface DropdownProps {
   value: string | undefined;
   options: readonly DropdownOption[];
   onChange: (value: string) => void;
-  /** field：设置页的输入框式触发器；pill：状态栏胶囊，内容由 children 给出 */
+  /** field：设置页的输入框式触发器（`.dd`）；pill：状态栏胶囊，内容由 children 给出 */
   variant?: "field" | "pill";
+  /** field 触发器变体：flat 无边框（页头、工具条）；lg 表单里整行宽、大号 */
+  appearance?: "default" | "flat" | "lg";
+  /** 触发器上的名字用等宽（模型 ID、路径） */
+  mono?: boolean;
   children?: ReactNode;
   /** pill 触发器的类名（沿用状态栏样式） */
   triggerClassName?: string;
@@ -73,6 +77,8 @@ export function Dropdown({
   options,
   onChange,
   variant = "field",
+  appearance = "default",
+  mono = false,
   children,
   triggerClassName,
   openClassName,
@@ -265,7 +271,7 @@ export function Dropdown({
   const listId = `${id}-list`;
   const pill = variant === "pill";
   return (
-    <span className={`ddw${pill ? " ddw-pill" : ""}`}>
+    <span className={`ddw${pill ? " ddw-pill" : ""}${appearance === "lg" ? " ddw-lg" : ""}`}>
       <button
         type="button"
         ref={trigger}
@@ -280,7 +286,7 @@ export function Dropdown({
         className={
           pill
             ? `${triggerClassName ?? ""}${open && openClassName !== undefined ? ` ${openClassName}` : ""}`
-            : `dd${open ? " open" : ""}`
+            : `dd${appearance === "default" ? "" : ` ${appearance}`}${open ? " open" : ""}`
         }
         onClick={() => {
           if (open) close(true);
@@ -292,11 +298,10 @@ export function Dropdown({
           children
         ) : (
           <>
-            <span className="dd-v">{current?.label ?? placeholder}</span>
-            {current?.description !== undefined && (
-              <span className="dd-d">{current.description}</span>
-            )}
-            <svg className="dd-a" viewBox="0 0 16 16" aria-hidden="true">
+            <span className={`dd-label${mono ? " mono" : ""}`}>
+              {current?.label ?? placeholder}
+            </span>
+            <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
               <path
                 d="M4 6l4 4 4-4"
                 fill="none"

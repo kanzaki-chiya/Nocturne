@@ -10,6 +10,7 @@ import type {
   RpcClient,
 } from "@nocturne/rpc/client";
 import qrcode from "qrcode-generator";
+import { Dropdown, type DropdownOption } from "./Dropdown";
 import { Scrim } from "./ProvidersPage";
 import { REMOTE_CONNECTION_TEXT, useRemoteStatus } from "./remote";
 import { Badge, Button, Switch } from "./ui";
@@ -48,6 +49,26 @@ export function PairingQr({ url }: { url: string }) {
     </svg>
   );
 }
+const PAIR_PRESET_OPTIONS: DropdownOption[] = [
+  { value: "read-only", label: "只读 (read-only)" },
+  { value: "default", label: "默认 (default)" },
+  { value: "auto-edit", label: "自动编辑 (auto-edit)" },
+  { value: "guarded", label: "受控 (guarded)" },
+  { value: "smart", label: "智能审查 (smart)" },
+  { value: "bypass", label: "无限制 (bypass)" },
+];
+const AGENT_SCOPE_OPTIONS: DropdownOption[] = [
+  { value: "read-only", label: "只读" },
+  { value: "run", label: "可运行" },
+];
+const AGENT_CAP_OPTIONS: DropdownOption[] = [
+  { value: "read-only", label: "上限：只读" },
+  { value: "default", label: "上限：默认" },
+  { value: "auto-edit", label: "上限：自动编辑" },
+  { value: "guarded", label: "上限：受控" },
+  { value: "smart", label: "上限：智能审查" },
+  { value: "bypass", label: "上限：无限制" },
+];
 const pairingErrors: Record<string, string> = {
   bad_mac: "配对密钥不匹配，请重新扫码",
   bad_signature: "设备签名校验失败，请重新配对",
@@ -234,22 +255,15 @@ export function AgentPairingDialog({
         </div>
         {scope === "run" && (
           <div className="agent-preset-field">
-            <label htmlFor="agent-max-preset">新建会话权限上限</label>
-            <select
-              id="agent-max-preset"
-              className="remote-select"
+            <span className="flabel">新建会话权限上限</span>
+            <Dropdown
+              label="新建会话权限上限"
               value={maxPreset}
-              onChange={(e) => {
-                setMaxPreset(e.target.value as PermissionPresetName);
+              options={PAIR_PRESET_OPTIONS}
+              onChange={(next) => {
+                setMaxPreset(next as PermissionPresetName);
               }}
-            >
-              <option value="read-only">只读 (read-only)</option>
-              <option value="default">默认 (default)</option>
-              <option value="auto-edit">自动编辑 (auto-edit)</option>
-              <option value="guarded">受控 (guarded)</option>
-              <option value="smart">智能审查 (smart)</option>
-              <option value="bypass">无限制 (bypass)</option>
-            </select>
+            />
           </div>
         )}
         <p className="agent-pair-note">
@@ -587,13 +601,13 @@ function ExternalAgentsSection({
                 </p>
               </div>
               <div className="remote-actions">
-                <select
-                  className="remote-select"
-                  aria-label={`${agent.name} 范围`}
-                  disabled={busy || !client}
+                <Dropdown
+                  label={`${agent.name} 范围`}
+                  disabled={busy || !client ? "" : undefined}
                   value={agent.scope}
-                  onChange={(e) => {
-                    const nextScope = e.target.value as AgentScope;
+                  options={AGENT_SCOPE_OPTIONS}
+                  onChange={(next) => {
+                    const nextScope = next as AgentScope;
                     void onOperate(
                       () =>
                         client?.call("agent.setScope", {
@@ -603,18 +617,15 @@ function ExternalAgentsSection({
                         }) ?? Promise.resolve(),
                     );
                   }}
-                >
-                  <option value="read-only">只读</option>
-                  <option value="run">可运行</option>
-                </select>
+                />
                 {agent.scope === "run" && (
-                  <select
-                    className="remote-select"
-                    aria-label={`${agent.name} 权限上限`}
-                    disabled={busy || !client}
+                  <Dropdown
+                    label={`${agent.name} 权限上限`}
+                    disabled={busy || !client ? "" : undefined}
                     value={agent.maxPermissionPreset}
-                    onChange={(e) => {
-                      const nextPreset = e.target.value as PermissionPresetName;
+                    options={AGENT_CAP_OPTIONS}
+                    onChange={(next) => {
+                      const nextPreset = next as PermissionPresetName;
                       void onOperate(
                         () =>
                           client?.call("agent.setScope", {
@@ -624,14 +635,7 @@ function ExternalAgentsSection({
                           }) ?? Promise.resolve(),
                       );
                     }}
-                  >
-                    <option value="read-only">上限：只读</option>
-                    <option value="default">上限：默认</option>
-                    <option value="auto-edit">上限：自动编辑</option>
-                    <option value="guarded">上限：受控</option>
-                    <option value="smart">上限：智能审查</option>
-                    <option value="bypass">上限：无限制</option>
-                  </select>
+                  />
                 )}
                 <Button
                   variant="danger"
