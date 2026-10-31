@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Dropdown } from "./Dropdown";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
 import {
   describeSchedulePlan,
@@ -25,7 +26,23 @@ import {
   scheduleSkipLabel,
   scheduleTriggerLabel,
 } from "./schedule-format";
-import { Badge, Button, SegmentedControl, Switch } from "./ui";
+import {
+  Badge,
+  Button,
+  SegmentedControl,
+  Switch,
+  DataTable,
+  DetailHeader,
+  EmptyState,
+  Field,
+  FormFooter,
+  ListGroup,
+  ListItem,
+  MasterDetail,
+  PageHeader,
+  SettingsGroup,
+  SettingsRow,
+} from "./ui";
 import "./pages.css";
 import "./mcp.css";
 import "./schedule.css";
@@ -432,133 +449,148 @@ export function SchedulePage({
 
   return (
     <section className="page3 schedule-page" aria-label="定时任务" aria-busy={loading || busy}>
-      <header className="ph3">
-        <div className="grow">
-          {!readOnly && <h3>定时任务</h3>}
-          <span className="sub">
-            只在 Nocturne 打开时运行 · 错过的只补最近一次 · 无人值守，需要确认的操作会被直接拒绝
-          </span>
-        </div>
-        <Button
-          variant="primary"
-          disabled={readOnly}
-          title={readOnly ? "请在电脑上操作" : undefined}
-          onClick={() => {
-            setSelectedId("new");
-            setDraft(EMPTY_DRAFT);
-            setTab("settings");
-            setConfirmDelete(false);
-            setFormError(undefined);
-          }}
+      <div className="spage flush">
+        <PageHeader
+          title={readOnly ? "" : "定时任务"}
+          actions={
+            <>
+              {" "}
+              <Button
+                variant="primary"
+                disabled={readOnly}
+                title={readOnly ? "请在电脑上操作" : undefined}
+                onClick={() => {
+                  setSelectedId("new");
+                  setDraft(EMPTY_DRAFT);
+                  setTab("settings");
+                  setConfirmDelete(false);
+                  setFormError(undefined);
+                }}
+              >
+                ＋ 新建任务
+              </Button>
+            </>
+          }
+        />
+        {(schedulerNote !== undefined ||
+          (list?.warnings.length ?? 0) > 0 ||
+          loadError !== undefined) && (
+          <p className="hint warnt sched-banner" role="status">
+            {loadError ?? schedulerNote}
+            {list?.warnings.map((warning) => (
+              <span key={warning}> {warning}</span>
+            ))}
+          </p>
+        )}
+        <MasterDetail
+          listLabel="任务"
+          list={
+            <>
+              {loading && tasks.length === 0 ? <p className="desc">正在读取…</p> : null}
+              {!loading && tasks.length === 0 ? (
+                <EmptyState inline>还没有定时任务。</EmptyState>
+              ) : null}
+              {enabled.length > 0 && (
+                <ListGroup title="启用" count={enabled.length}>
+                  {" "}
+                  {enabled.map((task) => (
+                    <TaskLink
+                      key={task.id}
+                      task={task}
+                      on={task.id === selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  ))}
+                </ListGroup>
+              )}
+              {paused.length > 0 && (
+                <ListGroup title="已暂停" count={paused.length}>
+                  {" "}
+                  {paused.map((task) => (
+                    <TaskLink
+                      key={task.id}
+                      task={task}
+                      on={task.id === selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  ))}
+                </ListGroup>
+              )}
+            </>
+          }
         >
-          ＋ 新建任务
-        </Button>
-      </header>
-      {(schedulerNote !== undefined ||
-        (list?.warnings.length ?? 0) > 0 ||
-        loadError !== undefined) && (
-        <p className="hint warnt sched-banner" role="status">
-          {loadError ?? schedulerNote}
-          {list?.warnings.map((warning) => (
-            <span key={warning}> {warning}</span>
-          ))}
-        </p>
-      )}
-      <div className="cols3">
-        <nav className="plist" aria-label="任务">
-          {loading && tasks.length === 0 ? <p className="hint">正在读取…</p> : null}
-          {!loading && tasks.length === 0 ? <p className="hint">还没有定时任务。</p> : null}
-          {enabled.length > 0 && <h5>启用</h5>}
-          {enabled.map((task) => (
-            <TaskLink
-              key={task.id}
-              task={task}
-              on={task.id === selectedId}
-              onSelect={setSelectedId}
-            />
-          ))}
-          {paused.length > 0 && <h5>已暂停</h5>}
-          {paused.map((task) => (
-            <TaskLink
-              key={task.id}
-              task={task}
-              on={task.id === selectedId}
-              onSelect={setSelectedId}
-            />
-          ))}
-        </nav>
-        <div className="pane">
-          {selectedId === null && <p className="hint">从左边选一个任务，或新建一个。</p>}
+          <p className="desc">
+            只在 Nocturne 打开时运行 · 错过的只补最近一次 · 无人值守，需要确认的操作会被直接拒绝
+          </p>
+          {selectedId === null && <EmptyState>从左边选一个任务，或新建一个。</EmptyState>}
           {(selected !== undefined || selectedId === "new") && (
             <>
-              <div className="t1">
-                <h3>{selected?.name ?? (draft.name.trim() || "新任务")}</h3>
-                <Badge>
-                  {workspaceLabel(
-                    draft.workspace === "" ? null : draft.workspace,
-                    workspaceChoices,
-                  )}
-                </Badge>
-                {selected !== undefined && (
-                  <span className="acts">
-                    <Switch
-                      aria-label="启用"
-                      checked={selected.enabled}
-                      disabled={readOnly || busy}
-                      title={readOnly ? "请在电脑上操作" : undefined}
-                      onChange={(next) => {
-                        void save({
-                          ...inputFrom(draftFrom(selected), selected),
-                          enabled: next,
-                        });
-                      }}
-                    />
-                    <Button disabled={busy} onClick={() => void runNow()}>
-                      ▶ 立即运行
-                    </Button>
-                  </span>
-                )}
-              </div>
+              <DetailHeader
+                title={selected?.name ?? (draft.name.trim() || "新任务")}
+                extra={
+                  <Badge>
+                    {workspaceLabel(
+                      draft.workspace === "" ? null : draft.workspace,
+                      workspaceChoices,
+                    )}
+                  </Badge>
+                }
+                actions={
+                  selected !== undefined ? (
+                    <>
+                      {" "}
+                      <Switch
+                        aria-label="启用"
+                        checked={selected.enabled}
+                        disabled={readOnly || busy}
+                        title={readOnly ? "请在电脑上操作" : undefined}
+                        onChange={(next) => {
+                          void save({
+                            ...inputFrom(draftFrom(selected), selected),
+                            enabled: next,
+                          });
+                        }}
+                      />
+                      <Button disabled={busy} onClick={() => void runNow()}>
+                        ▶ 立即运行
+                      </Button>
+                    </>
+                  ) : undefined
+                }
+              />
               {readOnly && (
                 <p className="sched-readonly" role="note">
                   请在电脑上操作。手机上可以查看，也可以立即运行。
                 </p>
               )}
               {selected !== undefined && (
-                <dl className="kv">
-                  <div>
-                    <dt>下次运行</dt>
-                    <dd>
+                <SettingsGroup title="运行状态">
+                  <SettingsRow label="下次运行">
+                    <span className="val">
                       {selected.schedule.type === "manual"
                         ? "只在点「立即运行」时运行"
                         : selected.enabled
                           ? formatScheduleWhen(selected.nextRunAt)
                           : "已暂停"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>上次运行</dt>
-                    <dd
-                      className={resultClass(
-                        selected.lastRun?.result,
-                        selected.lastRun?.denied ?? 0,
-                      )}
+                    </span>
+                  </SettingsRow>
+                  <SettingsRow label="上次运行">
+                    <span
+                      className={`val ${resultClass(selected.lastRun?.result, selected.lastRun?.denied ?? 0)}`}
                     >
                       {describeLastRun(selected.lastRun)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>最近 7 天</dt>
-                    <dd>
+                    </span>
+                  </SettingsRow>
+                  <SettingsRow label="最近 7 天">
+                    <span className="val">
                       运行 {selected.stats.last7Days.runs} 次 · 跳过{" "}
                       {selected.stats.last7Days.skipped} 次
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>平均用时</dt>
-                    <dd>{formatDuration(selected.stats.averageDurationMs)}</dd>
-                  </div>
-                </dl>
+                    </span>
+                  </SettingsRow>
+                  <SettingsRow label="平均用时">
+                    <span className="val">{formatDuration(selected.stats.averageDurationMs)}</span>
+                  </SettingsRow>
+                </SettingsGroup>
               )}
               {selected !== undefined && (
                 <SegmentedControl
@@ -580,26 +612,23 @@ export function SchedulePage({
                     void save(inputFrom(draft, selected));
                   }}
                 >
-                  <label className="field">
-                    <span className="lab">
-                      <span>名称</span>
-                    </span>
+                  <Field label="名称">
                     <input
-                      className={`input${field === "name" ? " err" : ""}`}
+                      aria-label="名称"
+                      className={`input lg${field === "name" ? " err" : ""}`}
                       value={draft.name}
                       disabled={readOnly}
                       onChange={(event) => {
                         setDraft({ ...draft, name: event.target.value });
                       }}
                     />
-                  </label>
-                  <label className="field">
-                    <span className="lab">
-                      <span>指令</span>
-                      <small>每次运行都在新会话里，作为第一条消息发出；需要的背景写在这里</small>
-                    </span>
+                  </Field>
+                  <Field
+                    label="指令"
+                    desc={<>每次运行都在新会话里，作为第一条消息发出；需要的背景写在这里</>}
+                  >
                     <textarea
-                      className={`input${field === "prompt" ? " err" : ""}`}
+                      className={`textarea${field === "prompt" ? " err" : ""}`}
                       aria-label="指令"
                       value={draft.prompt}
                       disabled={readOnly}
@@ -607,65 +636,50 @@ export function SchedulePage({
                         setDraft({ ...draft, prompt: event.target.value });
                       }}
                     />
-                  </label>
+                  </Field>
                   <div className="sched-row">
-                    <label className="field">
-                      <span className="lab">
-                        <span>工作区</span>
-                      </span>
-                      <select
-                        className="input"
-                        aria-label="工作区"
+                    <Field label="工作区">
+                      <Dropdown
+                        label="工作区"
+                        appearance="lg"
                         value={draft.workspace}
-                        disabled={readOnly}
-                        onChange={(event) => {
-                          setDraft({ ...draft, workspace: event.target.value });
+                        disabled={readOnly ? "请在电脑上操作" : undefined}
+                        options={[
+                          { value: "", label: "普通对话" },
+                          ...workspaceChoices
+                            .filter((item) => item.path !== null)
+                            .map((item) => ({ value: item.path ?? "", label: item.label })),
+                        ]}
+                        onChange={(value) => {
+                          setDraft({ ...draft, workspace: value });
                         }}
-                      >
-                        <option value="">普通对话</option>
-                        {workspaceChoices
-                          .filter((item) => item.path !== null)
-                          .map((item) => (
-                            <option key={item.path} value={item.path ?? ""}>
-                              {item.label}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span className="lab">
-                        <span>模型</span>
-                      </span>
-                      <select
-                        className={`input${field === "model" ? " err" : ""}`}
-                        aria-label="模型"
+                      />
+                    </Field>
+                    <Field label="模型">
+                      <Dropdown
+                        label="模型"
+                        appearance="lg"
                         value={draft.model}
-                        disabled={readOnly}
-                        onChange={(event) => {
-                          setDraft({ ...draft, model: event.target.value });
+                        disabled={readOnly ? "请在电脑上操作" : undefined}
+                        options={[
+                          { value: "", label: "默认" },
+                          ...(draft.model !== "" &&
+                          !models.some((m) => `${m.ref.provider}/${m.ref.model}` === draft.model)
+                            ? [{ value: draft.model, label: draft.model }]
+                            : []),
+                          ...models.map((m) => ({
+                            value: `${m.ref.provider}/${m.ref.model}`,
+                            label: m.displayName ?? m.ref.model,
+                            description: m.ref.provider,
+                          })),
+                        ]}
+                        onChange={(value) => {
+                          setDraft({ ...draft, model: value });
                         }}
-                      >
-                        <option value="">默认</option>
-                        {draft.model !== "" &&
-                          !models.some(
-                            (model) => `${model.ref.provider}/${model.ref.model}` === draft.model,
-                          ) && <option value={draft.model}>{draft.model}</option>}
-                        {models.map((model) => {
-                          const id = `${model.ref.provider}/${model.ref.model}`;
-                          return (
-                            <option key={id} value={id} title={model.ref.model}>
-                              {model.displayName ?? model.ref.model} · {model.ref.provider}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </label>
+                      />
+                    </Field>
                   </div>
-                  <div className="field">
-                    <span className="lab">
-                      <span>计划</span>
-                      <small>本地时间；最小间隔 30 分钟</small>
-                    </span>
+                  <Field label="计划" desc="本地时间；最小间隔 30 分钟">
                     <SegmentedControl
                       aria-label="计划类型"
                       disabled={readOnly}
@@ -699,33 +713,27 @@ export function SchedulePage({
                         draft.planType === "weekly") && (
                         <>
                           {draft.planType === "weekly" && (
-                            <select
-                              className="input"
-                              aria-label="星期"
+                            <Dropdown
+                              label="星期"
+                              appearance="lg"
                               value={draft.day}
-                              disabled={readOnly}
-                              onChange={(event) => {
-                                setDraft({ ...draft, day: event.target.value as ScheduleDay });
+                              disabled={readOnly ? "请在电脑上操作" : undefined}
+                              options={SCHEDULE_DAYS.map((day) => ({
+                                value: day,
+                                label: {
+                                  mon: "周一",
+                                  tue: "周二",
+                                  wed: "周三",
+                                  thu: "周四",
+                                  fri: "周五",
+                                  sat: "周六",
+                                  sun: "周日",
+                                }[day],
+                              }))}
+                              onChange={(value) => {
+                                setDraft({ ...draft, day: value as ScheduleDay });
                               }}
-                            >
-                              {SCHEDULE_DAYS.map((day) => (
-                                <option key={day} value={day}>
-                                  {day === "mon"
-                                    ? "周一"
-                                    : day === "tue"
-                                      ? "周二"
-                                      : day === "wed"
-                                        ? "周三"
-                                        : day === "thu"
-                                          ? "周四"
-                                          : day === "fri"
-                                            ? "周五"
-                                            : day === "sat"
-                                              ? "周六"
-                                              : "周日"}
-                                </option>
-                              ))}
-                            </select>
+                            />
                           )}
                           <span className="hint">时间</span>
                           <input
@@ -758,75 +766,67 @@ export function SchedulePage({
                         />
                       )}
                     </div>
-                    <span className="hint">{describeSchedulePlan(planFrom(draft))}</span>
-                  </div>
+                    <span className="desc">{describeSchedulePlan(planFrom(draft))}</span>
+                  </Field>
                   <div className="sched-row">
-                    <label className="field">
-                      <span className="lab">
-                        <span>权限</span>
-                      </span>
-                      <select
-                        className="input"
-                        aria-label="权限"
+                    <Field label="权限">
+                      <Dropdown
+                        label="权限"
+                        appearance="lg"
                         value={draft.preset}
-                        disabled={readOnly}
-                        onChange={(event) => {
-                          setDraft({ ...draft, preset: event.target.value });
+                        disabled={readOnly ? "请在电脑上操作" : undefined}
+                        options={[
+                          { value: "", label: "默认" },
+                          ...PERMISSION_PRESET_NAMES.map((name) => ({
+                            value: name,
+                            label: name,
+                            description: presetOption(name).tag ?? "",
+                          })),
+                        ]}
+                        onChange={(value) => {
+                          setDraft({ ...draft, preset: value });
                         }}
-                      >
-                        <option value="">默认</option>
-                        {PERMISSION_PRESET_NAMES.map((name) => (
-                          <option key={name} value={name}>
-                            {name} · {presetOption(name).tag}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span className="lab">
-                        <span>思考档位</span>
-                      </span>
-                      <select
-                        className="input"
-                        aria-label="思考档位"
+                      />
+                    </Field>
+                    <Field label="思考档位">
+                      <Dropdown
+                        label="思考档位"
+                        appearance="lg"
                         value={draft.effort}
-                        disabled={readOnly}
-                        onChange={(event) => {
-                          setDraft({ ...draft, effort: event.target.value });
+                        disabled={readOnly ? "请在电脑上操作" : undefined}
+                        options={[
+                          { value: "", label: "默认" },
+                          { value: "off", label: effortOption("off").tag ?? "off" },
+                          ...REASONING_EFFORT_LEVELS.map((level) => ({
+                            value: level,
+                            label: effortOption(level).tag ?? level,
+                          })),
+                        ]}
+                        onChange={(value) => {
+                          setDraft({ ...draft, effort: value });
                         }}
-                      >
-                        <option value="">默认</option>
-                        <option value="off">{effortOption("off").tag}</option>
-                        {REASONING_EFFORT_LEVELS.map((level) => (
-                          <option key={level} value={level}>
-                            {effortOption(level).tag}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span className="lab">
-                        <span>单次时长上限</span>
-                      </span>
-                      <select
-                        className={`input${field === "maxDurationMinutes" ? " err" : ""}`}
-                        aria-label="单次时长上限"
+                      />
+                    </Field>
+                    <Field label="单次时长上限">
+                      <Dropdown
+                        label="单次时长上限"
+                        appearance="lg"
                         value={draft.maxDuration}
-                        disabled={readOnly}
-                        onChange={(event) => {
-                          setDraft({ ...draft, maxDuration: event.target.value });
+                        disabled={readOnly ? "请在电脑上操作" : undefined}
+                        options={[
+                          ...(!DURATIONS.map(String).includes(draft.maxDuration)
+                            ? [{ value: draft.maxDuration, label: `${draft.maxDuration} 分钟` }]
+                            : []),
+                          ...DURATIONS.map((minutes) => ({
+                            value: String(minutes),
+                            label: `${minutes} 分钟`,
+                          })),
+                        ]}
+                        onChange={(value) => {
+                          setDraft({ ...draft, maxDuration: value });
                         }}
-                      >
-                        {!DURATIONS.map(String).includes(draft.maxDuration) && (
-                          <option value={draft.maxDuration}>{draft.maxDuration} 分钟</option>
-                        )}
-                        {DURATIONS.map((minutes) => (
-                          <option key={minutes} value={String(minutes)}>
-                            {minutes} 分钟
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      />
+                    </Field>
                   </div>
                   <div className="sched-callout">
                     <b>无人值守</b>
@@ -840,12 +840,50 @@ export function SchedulePage({
                     </p>
                   )}
                   {notice !== undefined && <p className="hint">{notice}</p>}
-                  <div className="formacts">
-                    <Button type="submit" variant="primary" disabled={readOnly || busy}>
-                      保存
-                    </Button>
+                  <FormFooter
+                    reason={
+                      <>
+                        {" "}
+                        {selected !== undefined &&
+                          (confirmDelete ? (
+                            <Button
+                              variant="danger-solid"
+                              disabled={readOnly || busy}
+                              onClick={() => {
+                                setBusy(true);
+                                void api
+                                  .deleteSchedule({ id: selected.id })
+                                  .then(() => {
+                                    setSelectedId(null);
+                                    setConfirmDelete(false);
+                                    refresh();
+                                  })
+                                  .catch((error: unknown) => {
+                                    setFormError(message(error));
+                                  })
+                                  .finally(() => {
+                                    setBusy(false);
+                                  });
+                              }}
+                            >
+                              确认删除
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="danger"
+                              disabled={readOnly || busy}
+                              title={readOnly ? "请在电脑上操作" : undefined}
+                              onClick={() => {
+                                setConfirmDelete(true);
+                              }}
+                            >
+                              删除任务
+                            </Button>
+                          ))}
+                      </>
+                    }
+                  >
                     <Button
-                      variant="ghost"
                       disabled={readOnly || busy}
                       onClick={() => {
                         if (selected !== undefined) setDraft(draftFrom(selected));
@@ -858,44 +896,11 @@ export function SchedulePage({
                     >
                       取消
                     </Button>
-                    <span className="grow" />
-                    {selected !== undefined &&
-                      (confirmDelete ? (
-                        <Button
-                          variant="danger-solid"
-                          disabled={readOnly || busy}
-                          onClick={() => {
-                            setBusy(true);
-                            void api
-                              .deleteSchedule({ id: selected.id })
-                              .then(() => {
-                                setSelectedId(null);
-                                setConfirmDelete(false);
-                                refresh();
-                              })
-                              .catch((error: unknown) => {
-                                setFormError(message(error));
-                              })
-                              .finally(() => {
-                                setBusy(false);
-                              });
-                          }}
-                        >
-                          确认删除
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="danger"
-                          disabled={readOnly || busy}
-                          title={readOnly ? "请在电脑上操作" : undefined}
-                          onClick={() => {
-                            setConfirmDelete(true);
-                          }}
-                        >
-                          删除任务
-                        </Button>
-                      ))}
-                  </div>
+
+                    <Button type="submit" variant="primary" disabled={readOnly || busy}>
+                      保存
+                    </Button>
+                  </FormFooter>
                   {selected !== undefined && (
                     <span className="hint">删除任务不会删除它运行出来的会话。</span>
                   )}
@@ -913,34 +918,20 @@ export function SchedulePage({
                   )}
                   {history?.length === 0 && <p className="hint">还没有运行记录。</p>}
                   {history !== undefined && history.length > 0 && (
-                    <div className="sched-hist" role="table" aria-label="运行历史">
-                      <div className="sched-hist-row sched-hist-head" role="row">
-                        {SCHED_HIST_COLUMNS.map((col) => (
-                          <span
-                            key={col.key}
-                            role="columnheader"
-                            className={col.align === "right" ? "go none" : undefined}
-                          >
-                            {col.label}
-                          </span>
-                        ))}
-                      </div>
-                      {history.map((entry) => (
-                        <div
-                          className="sched-hist-row"
-                          role="row"
-                          key={`${entry.id}:${entry.result}`}
-                        >
-                          {SCHED_HIST_COLUMNS.map((col) => (
-                            <Fragment key={col.key}>
-                              {col.render(entry, (id) => {
-                                void openSession(id);
-                              })}
-                            </Fragment>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
+                    <DataTable
+                      aria-label="运行历史"
+                      rows={history}
+                      rowKey={(entry) => `${entry.id}:${entry.result}`}
+                      columns={SCHED_HIST_COLUMNS.map((col) => ({
+                        key: col.key,
+                        header: col.label,
+                        numeric: col.align === "right",
+                        render: (entry: ScheduleHistoryEntry) =>
+                          col.render(entry, (id) => {
+                            void openSession(id);
+                          }),
+                      }))}
+                    />
                   )}
                   <p className="hint">
                     保留最近 200 条。跳过的原因：上一次还在运行、同时运行的定时任务已满 2
@@ -950,7 +941,7 @@ export function SchedulePage({
               )}
             </>
           )}
-        </div>
+        </MasterDetail>
       </div>
     </section>
   );
@@ -980,19 +971,15 @@ function TaskLink({
       ? "只在点「立即运行」时运行"
       : `${describeSchedulePlan(task.schedule)}${task.enabled && task.nextRunAt !== undefined ? ` · 下次 ${formatScheduleWhen(task.nextRunAt)}` : ""}`;
   return (
-    <button
-      type="button"
-      className={`sched-item${on ? " on" : ""}${task.enabled ? "" : " paused"}`}
-      aria-current={on ? "true" : undefined}
+    <ListItem
+      label={task.name}
+      selected={on}
+      dot={task.running ? "run" : task.enabled ? "ok" : "hollow"}
+      meta={result}
+      title={subtitle}
       onClick={() => {
         onSelect(task.id);
       }}
-    >
-      <span className="n">{task.name}</span>
-      <span className={`r ${resultClass(task.enabled ? task.lastRun?.result : undefined)}`}>
-        {result}
-      </span>
-      <span className="s">{subtitle}</span>
-    </button>
+    />
   );
 }

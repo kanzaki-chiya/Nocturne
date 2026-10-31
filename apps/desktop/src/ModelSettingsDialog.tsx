@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@nocturne/core/protocol";
 import type { RpcProvider } from "@nocturne/rpc/client";
 import type { ModelFieldSource, ModelSettingsPatch, ModelSettingsView } from "./rpc-types";
-import { Button, SegmentedControl } from "./ui";
+import { Button, SegmentedControl, Field, SourceMarker } from "./ui";
 
 type FieldKey =
   | "displayName"
@@ -248,7 +248,7 @@ export function ModelSettingsDialog({
 
   const textInput = (
     key: "displayName" | "contextWindow" | "maxOutputTokens" | "baseURL",
-    opts: { placeholder?: string; width?: number; mono?: boolean } = {},
+    opts: { mono?: boolean } = {},
   ) => {
     const f = field[key];
     if (readonly || !f.editable) {
@@ -257,12 +257,8 @@ export function ModelSettingsDialog({
     return (
       <input
         type="text"
-        className="input"
+        className={`input lg${opts.mono === false ? "" : " mono"}`}
         aria-label={FIELD_LABELS[key]}
-        style={{
-          width: opts.width ?? 180,
-          fontFamily: opts.mono === false ? "inherit" : "var(--mono)",
-        }}
         placeholder={
           key === "baseURL"
             ? String(f.lowerValue ?? "自动选择服务商地址")
@@ -302,7 +298,11 @@ export function ModelSettingsDialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="dlg" role="dialog" aria-label={`模型设置 · ${view.modelId}`}>
+      <div
+        className="dlg model-settings-dlg"
+        role="dialog"
+        aria-label={`模型设置 · ${view.modelId}`}
+      >
         <div className="dh3">
           <b className="mono">{view.modelId}</b>
           <span
@@ -322,33 +322,84 @@ export function ModelSettingsDialog({
         </div>
         <div className="db">
           {/* 显示名 / 上下文长度 / 最大输出 */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.displayName}</span>
-            {textInput("displayName", { width: 200 })}
-            <span className={`src ${field.displayName.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(field.displayName.source, field.displayName.userValue !== undefined)}
-            </span>
-          </div>
-          <div className="mrow">
-            <span>{FIELD_LABELS.contextWindow}</span>
-            {textInput("contextWindow", { width: 110 })}
-            <span className={`src ${field.contextWindow.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(field.contextWindow.source, field.contextWindow.userValue !== undefined)}
-            </span>
-          </div>
-          <div className="mrow">
-            <span>{FIELD_LABELS.maxOutputTokens}</span>
-            {textInput("maxOutputTokens", { width: 110 })}
-            <span className={`src ${field.maxOutputTokens.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(
-                field.maxOutputTokens.source,
-                field.maxOutputTokens.userValue !== undefined,
-              )}
-            </span>
-          </div>
+          <Field
+            label={FIELD_LABELS.displayName}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(
+                    field.displayName.source,
+                    field.displayName.userValue !== undefined,
+                  ) === "默认"
+                    ? undefined
+                    : sourceText(
+                        field.displayName.source,
+                        field.displayName.userValue !== undefined,
+                      )
+                }
+                tone={field.displayName.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
+            {textInput("displayName", { mono: false })}
+          </Field>
+          <Field
+            label={FIELD_LABELS.contextWindow}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(
+                    field.contextWindow.source,
+                    field.contextWindow.userValue !== undefined,
+                  ) === "默认"
+                    ? undefined
+                    : sourceText(
+                        field.contextWindow.source,
+                        field.contextWindow.userValue !== undefined,
+                      )
+                }
+                tone={field.contextWindow.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
+            {textInput("contextWindow")}
+          </Field>
+          <Field
+            label={FIELD_LABELS.maxOutputTokens}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(
+                    field.maxOutputTokens.source,
+                    field.maxOutputTokens.userValue !== undefined,
+                  ) === "默认"
+                    ? undefined
+                    : sourceText(
+                        field.maxOutputTokens.source,
+                        field.maxOutputTokens.userValue !== undefined,
+                      )
+                }
+                tone={field.maxOutputTokens.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
+            {textInput("maxOutputTokens")}
+          </Field>
           {/* 推理 */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.reasoning}</span>
+          <Field
+            label={FIELD_LABELS.reasoning}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(field.reasoning.source, field.reasoning.userValue !== undefined) ===
+                  "默认"
+                    ? undefined
+                    : sourceText(field.reasoning.source, field.reasoning.userValue !== undefined)
+                }
+                tone={field.reasoning.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
             {readonly || !field.reasoning.editable ? (
               <span className="ro">{showValue("reasoning", field.reasoning.value)}</span>
             ) : (
@@ -366,13 +417,22 @@ export function ModelSettingsDialog({
                 true,
               )
             )}
-            <span className={`src ${field.reasoning.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(field.reasoning.source, field.reasoning.userValue !== undefined)}
-            </span>
-          </div>
+          </Field>
           {/* 图片输入 */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.imageInput}</span>
+          <Field
+            label={FIELD_LABELS.imageInput}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(field.imageInput.source, field.imageInput.userValue !== undefined) ===
+                  "默认"
+                    ? undefined
+                    : sourceText(field.imageInput.source, field.imageInput.userValue !== undefined)
+                }
+                tone={field.imageInput.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
             {readonly || !field.imageInput.editable ? (
               <span className="ro">{showValue("imageInput", field.imageInput.value)}</span>
             ) : (
@@ -390,13 +450,27 @@ export function ModelSettingsDialog({
                 true,
               )
             )}
-            <span className={`src ${field.imageInput.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(field.imageInput.source, field.imageInput.userValue !== undefined)}
-            </span>
-          </div>
+          </Field>
           {/* 思考档位 */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.reasoningEffort}</span>
+          <Field
+            label={FIELD_LABELS.reasoningEffort}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(
+                    field.reasoningEffort.source,
+                    field.reasoningEffort.userValue !== undefined,
+                  ) === "默认"
+                    ? undefined
+                    : sourceText(
+                        field.reasoningEffort.source,
+                        field.reasoningEffort.userValue !== undefined,
+                      )
+                }
+                tone={field.reasoningEffort.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
             {readonly || !effortEditable ? (
               <span className="ro">{scalarText(field.reasoningEffort.value)}</span>
             ) : (
@@ -444,16 +518,22 @@ export function ModelSettingsDialog({
                 </button>
               </div>
             )}
-            <span className={`src ${field.reasoningEffort.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(
-                field.reasoningEffort.source,
-                field.reasoningEffort.userValue !== undefined,
-              )}
-            </span>
-          </div>
+          </Field>
           {/* 协议 */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.protocol}</span>
+          <Field
+            label={FIELD_LABELS.protocol}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(field.protocol.source, field.protocol.userValue !== undefined) ===
+                  "默认"
+                    ? undefined
+                    : sourceText(field.protocol.source, field.protocol.userValue !== undefined)
+                }
+                tone={field.protocol.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
             {readonly || !field.protocol.editable ? (
               <span className="ro">{showValue("protocol", field.protocol.value)}</span>
             ) : (
@@ -473,21 +553,38 @@ export function ModelSettingsDialog({
                 true,
               )
             )}
-            <span className={`src ${field.protocol.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(field.protocol.source, field.protocol.userValue !== undefined)}
-            </span>
-          </div>
+          </Field>
           {/* 接口地址（ADR-0061 §4） */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.baseURL}</span>
-            {textInput("baseURL", { width: 320 })}
-            <span className="src">
-              {sourceText(field.baseURL.source, field.baseURL.userValue !== undefined)}
-            </span>
-          </div>
+          <Field
+            label={FIELD_LABELS.baseURL}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(field.baseURL.source, field.baseURL.userValue !== undefined) === "默认"
+                    ? undefined
+                    : sourceText(field.baseURL.source, field.baseURL.userValue !== undefined)
+                }
+                tone={field.baseURL.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
+            {textInput("baseURL")}
+          </Field>
           {/* 编辑工具 */}
-          <div className="mrow">
-            <span>{FIELD_LABELS.editTool}</span>
+          <Field
+            label={FIELD_LABELS.editTool}
+            aside={
+              <SourceMarker
+                label={
+                  sourceText(field.editTool.source, field.editTool.userValue !== undefined) ===
+                  "默认"
+                    ? undefined
+                    : sourceText(field.editTool.source, field.editTool.userValue !== undefined)
+                }
+                tone={field.editTool.userValue !== undefined ? "accent" : "neutral"}
+              />
+            }
+          >
             {readonly || !field.editTool.editable ? (
               <span className="ro">{showValue("editTool", field.editTool.value)}</span>
             ) : (
@@ -505,10 +602,7 @@ export function ModelSettingsDialog({
                 true,
               )
             )}
-            <span className={`src ${field.editTool.userValue !== undefined ? "ed" : ""}`}>
-              {sourceText(field.editTool.source, field.editTool.userValue !== undefined)}
-            </span>
-          </div>
+          </Field>
         </div>
         {error !== null && <div className="errt">{error}</div>}
         <div className="df">

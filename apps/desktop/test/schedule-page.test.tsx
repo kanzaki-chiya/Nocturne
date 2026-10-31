@@ -101,8 +101,8 @@ describe("定时任务页", () => {
       />,
     );
     expect(await screen.findByDisplayValue("每日提交汇总")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "启用" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "已暂停" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "启用" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "已暂停" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /依赖更新检查/ }).textContent).toContain("已暂停");
     const page = screen.getByRole("region", { name: "定时任务" });
     expect(within(page).getByLabelText("指令")).toHaveProperty(
@@ -175,8 +175,8 @@ describe("定时任务页", () => {
     expect(rows.length).toBeGreaterThanOrEqual(2);
     const headRow = rows[0];
     if (headRow === undefined) throw new Error("缺少表头行");
-    expect(headRow.classList.contains("sched-hist-head")).toBe(true);
-    expect(headRow.classList.contains("head")).toBe(false);
+    expect(within(headRow).getAllByRole("columnheader")).toHaveLength(5);
+    expect(within(headRow).queryAllByRole("cell")).toHaveLength(0);
     const headers = within(headRow).getAllByRole("columnheader");
     expect(headers.map((el) => el.textContent)).toEqual([
       "计划时间",
