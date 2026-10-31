@@ -1,21 +1,5 @@
 /* 右侧面板（ADR-0060）：布局对照 side-panel-mockup.html；颜色只用主题变量 */
 
-:root {
-  /* 代码查看器配色：由主题色派生，深浅主题自动跟随 */
-  --cm-keyword: var(--a-accent);
-  --cm-string: var(--a-success);
-  --cm-number: var(--a-warning);
-  --cm-function: var(--a-accentAlt);
-  --cm-type: var(--a-cat4);
-  --cm-property: var(--a-cat5);
-  --cm-comment: var(--a-faint);
-  --cm-active-line: color-mix(in srgb, var(--a-raised) 70%, transparent);
-  --cm-target-line: color-mix(in srgb, var(--a-accent) 16%, transparent);
-  --cm-selection: color-mix(in srgb, var(--a-accent) 28%, transparent);
-  --cm-search: color-mix(in srgb, var(--a-warning) 28%, transparent);
-  --cm-search-current: color-mix(in srgb, var(--a-warning) 55%, transparent);
-}
-
 /* 面板并排时 .body 多出第三列；盖住对话区时面板绝对定位 */
 .body {
   position: relative;
@@ -866,7 +850,6 @@
 
 /* ── 会话概览浮层 ── */
 .ovpop {
-  --ovpop-w: 300px;
   position: absolute;
   top: 38px;
   right: 12px;
@@ -937,9 +920,6 @@
  * 浮层停靠（面板关着）：对话列、输入框往左让出浮层的宽度，文字不被遮挡。
  * 宽窗口里居中位置本来就够远时不动（取两者较大值）。
  */
-.main.ov-docked {
-  --ov-reserve: 300px;
-}
 .main.ov-docked .conversation-transcript,
 .main.ov-docked .composer.session .cw,
 .main.ov-docked .qcard,

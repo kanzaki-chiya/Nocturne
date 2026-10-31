@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/gen-tokens.mjs --check && node scripts/check-css-vars.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r --workspace-concurrency=1 test && vitest run --root scripts",

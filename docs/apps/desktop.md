@@ -474,7 +474,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 ## 9. 视觉规范（字号、圆角与文案）
 
-样式数值集中在 `src/styles.css` 的 `:root`：字号 `--fs-1`…`--fs-5`、圆角 `--radius-1`…`--radius-3` 与 `--radius-pill`。组件 CSS（含 `web/phone.css` 与 `code-viewer.ts` 的 CodeMirror 主题）只引用这些变量，不写字面量；例外见各小节末尾。动画时长不超过 0.15 秒、颜色只用 `--a-*` 令牌，沿用现状。
+颜色和尺寸 token 的来源是 `design/tokens.json`，CSS 由 `scripts/gen-tokens.mjs` 生成（输出到 `src/tokens.css`，由 `src/styles.css` 引入）；具体值不在文档里重复。字号 `--fs-1`…`--fs-5`、圆角 `--radius-1`…`--radius-3` 与 `--radius-pill` 等变量由组件 CSS（含 `web/phone.css` 与 `code-viewer.ts` 的 CodeMirror 主题）直接引用，不写字面量；例外见各小节末尾。动画时长不超过 0.15 秒、颜色只用 `--a-*` 令牌，沿用现状。
 
 ### 字号
 
