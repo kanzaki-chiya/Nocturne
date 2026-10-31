@@ -935,10 +935,10 @@
 .phone-usage {
   padding: 0;
 }
-.phone-usage .usage-page .ph3 {
+.phone-usage .usage-page .phead {
   padding: 12px 16px 0;
 }
-.phone-usage .usage-page .ph3 h3 {
+.phone-usage .usage-page .phead h1 {
   display: none;
 }
 .phone-usage .usage-body {
@@ -963,4 +963,11 @@
 .phone-send-mode button.on {
   border-color: var(--a-accent);
   color: var(--a-accent);
+}
+
+.phone-usage .usage-page .spage {
+  padding: 0;
+}
+.phone-usage .usage-page .usage-body {
+  gap: 0;
 }

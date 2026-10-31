@@ -6,7 +6,7 @@
 
 ## 1. 进程结构与后台策略
 
-ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可选「接口地址」；空值清除 `userModels.<id>.baseURL`，占位显示当前自动地址，来源列显示用户编辑 / models.dev / 默认。保持原有草稿、保存、全部恢复跟随与只读行为。解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
+ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可选「接口地址」；空值清除 `userModels.<id>.baseURL`，占位显示当前自动地址，标签旁来源标记显示用户编辑 / models.dev，默认来源不显示。保持原有草稿、保存、全部恢复跟随与只读行为。解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
 子代理档位见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)：设置导航「外部 agent」改名「子代理」，同页左列分内置档位和外部 agent。添加提供空白/quick/deep 模板（模型留空），编辑器包含名称（创建后锁定）、何时用、模型、超时、强度、工具上限、启用和删除。default 始终启用且不能删除，模型写 modelRoles.task；模型页的子代理模型行跳转到这里。预览复用 Core 的 subagentSelectionTable；对话工具行显示档位徽标、实际模型和强度，展开显示选择理由，旧调用无 profile 不显示徽标。外部编辑和探测保持原行为，说明标签改为何时用。
 
 
@@ -333,7 +333,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 | 常规 | 执行 | 压缩阈值 | 对话框，摘要阈值（百分比或 token 数）与修剪上限（`compaction.pruneLimit`，默认 200000，0 不设上限），留空恢复默认 |
 | 常规 | 普通对话 | 工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
 | 常规 | 更新 | 自动检查更新 | 拨动开关（`mcp-switch`），只写 `prefs.autoUpdate`（缺省开；显式关才存 `false`） |
-| 常规 | 通知 | 总开关 / 提醒哪些事 / 完成阈值 / 提示音 / 测试通知 | 「常规」页末尾新开一节（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：总开关（`notifications.enabled`，带「已开启/已关闭」文字）关闭时下面各项变灰禁用；三个事件复选（`notifications.events.attention/error/done`）同处一行共用来源列；完成阈值下拉（`notifications.doneAfterSeconds`：30 秒 / 1 分钟 / 3 分钟 / 5 分钟 / 10 分钟，保存值不在档位里时单列一项「N 秒」并保留，「完成」未勾选时整行变灰）；提示音开关（`notifications.sound`，只管桌面端 toast）；「发送测试通知」走同一个 `notify_show` 发一条「这是一条测试通知」，外壳报告 `disabled` 时在按钮旁显示「Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开」。逐项 `updateSettings`，失败值回到原样并在行下写红字 |
+| 常规 | 通知 | 总开关 / 提醒哪些事 / 完成阈值 / 提示音 / 测试通知 | 「常规」页末尾新开一节（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：总开关（`notifications.enabled`，带「已开启/已关闭」文字）关闭时下面各项变灰禁用；三个事件复选（`notifications.events.attention/error/done`）同处一行共用标签旁的来源标记；完成阈值下拉（`notifications.doneAfterSeconds`：30 秒 / 1 分钟 / 3 分钟 / 5 分钟 / 10 分钟，保存值不在档位里时单列一项「N 秒」并保留，「完成」未勾选时整行变灰）；提示音开关（`notifications.sound`，只管桌面端 toast）；「发送测试通知」走同一个 `notify_show` 发一条「这是一条测试通知」，外壳报告 `disabled` 时在按钮旁显示「Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开」。逐项 `updateSettings`，失败值回到原样并在行下写红字 |
 | 模型 | 默认 | 默认模型与档位 | 对话框，`setDefaultModel` 成对保存；所选模型没有档位时传 null |
 | 模型 | 模型角色 | 子代理模型 / 看图模型 / 轻量模型 | 对话框选择模型或清除；看图模型只列支持图片输入的模型。页尾链接「服务商 › 模型表」进入服务商页改单个模型的设置 |
 | 外观 | 主题 | 跟随系统 / 月之亮面（浅色） / 月之暗面（深色） | 三张预览卡片（`role="radio"`），主标签下用小字标注浅色/深色，只写 prefs（取值仍是 `system`/`light`/`dark`），立即生效 |
@@ -490,7 +490,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 - 归档规则：半档就近且不缩小（11.5 → 12、12.5 → 13、13.5 → 14）；小于 12 的一律提到 12。
 - 手机网页（`web/phone.css`）用同一套档位：根字号 16px（`--fs-4`），正文与输入框沿用根字号（输入框小于 16px 会触发 iOS 聚焦时的整页放大）；标签与说明文字 14px（`--fs-3`），最小 `--fs-1`。
 - 例外（保持字面量，均为按盒子尺寸配好的图标字形，不是文字）：
-  - 折叠箭头与指示符 `▶ ▾`：`styles.css` 的 `.fold-arrow`、`details > summary::before`、`.gh .tw`，`conversation.css` 的 `.think-tw`，`composer.css` 的 `.chip .caret`，`pages.css` 的 `.select::after`，`status-bar.css` 的 `.status-caret`，`side-panel.css` 的 `.sp-term-caret`；
+  - 折叠箭头与指示符 `▶ ▾`：`styles.css` 的 `.fold-arrow`、`details > summary::before`、`.gh .tw`，`conversation.css` 的 `.think-tw`，`composer.css` 的 `.chip .caret`，`status-bar.css` 的 `.status-caret`，`side-panel.css` 的 `.sp-term-caret`；
   - 勾选与状态符 `✓ —`：`composer.css` 的 `.menu-ck`，`conversation.css` 的 `.qcard .ok`/`.qcard .skip`，`phone.css` 的 `.phone-option-check`；
   - 关闭与移除 `✕`：`composer.css` 的 `.thumb2 .x`，`status-bar.css` 的概览弹层关闭按钮，`phone.css` 的附件移除按钮；
   - 工具图标字母与空态图标：`conversation.css` 的 `.tool .ic`（9px），`skills.css` 的 `.skill-empty-icon`（▤，32px）。
@@ -513,7 +513,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 ### 左侧色条
 
-提示条（`conversation-notice-warning`/`-error`）、权限确认卡（`.ask`）与 MCP 列表选中行不使用左侧色条：提示条用浅色底（警告 `--a-warning-bg`、错误 8% `--a-error`）加文字颜色区分级别；确认卡用整圈警告色边框（55% `--a-warning`）加 `--a-warning-bg` 浅底；MCP 选中行用整行 `--a-sel` 底色表示。引用块与思考块左侧的细线属于常规排版，侧栏与设置导航的选中指示条属于导航选中态，都保留。
+提示条（`conversation-notice-warning`/`-error`）、权限确认卡（`.ask`）不使用左侧色条：提示条用浅色底（警告 `--a-warning-bg`、错误 8% `--a-error`）加文字颜色区分级别；确认卡用整圈警告色边框（55% `--a-warning`）加 `--a-warning-bg` 浅底；MCP 等设置主从列表采用共享导航选中态。引用块与思考块左侧的细线属于常规排版，侧栏与设置导航的选中指示条属于导航选中态，都保留。
 
 ### 基础控件
 
@@ -526,6 +526,12 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 - `SegmentedControl`：分段单选控件（`.seg`），支持 `sm`、`md`（默认）尺寸及 `group`（`aria-pressed`）、`tablist`（`aria-selected`）、`radiogroup`（`aria-checked`）角色语义。
 - `Badge`：状态与类别徽标（`.badge`），变体 `neutral`（默认）、`accent`、`warn`、`err`、`ok`。
 
+### 设置页骨架
+
+设置页共享 `src/ui/` 中的结构组件：`PageHeader` 放标题与页级操作；`SettingsGroup` 统一分组标题、计数、右侧操作与卡片；`SettingsRow` 将标签、来源、徽标和说明放左侧，控件放右侧；`SourceMarker` 标记配置来源或已编辑状态。`MasterDetail`、`ListGroup`、`ListItem`、`DetailHeader` 统一主从列表及详情标题；`DataTable` 用于多列数据；`Field`、`Form`、`FormFooter` 统一表单和底部按钮；`EmptyState` 提供整页及行内空状态。设置内容按可读宽度左对齐，宽统计内容采用宽内容容器。下拉触发器使用 `Dropdown` 的普通、`flat`、`lg` 外观，触发器只显示选中名称，说明留在菜单中；输入框使用共享 `.input`、`.textarea` 样式。
+
+卡片用于每行一个对象且右侧有控件的设置项、设备、外部 Agent 和连接信息，多列数据用表格，说明和空状态不包卡片。来源标记贴着标签：默认值不显示，配置值显示文件名，被更高层覆盖时用警告样式并在悬停提示中指出覆盖层，模型设置中的「已编辑」用强调色。
+
 ### 焦点
 
 权限确认卡与提问卡出现时被程序聚焦（`tabIndex={-1}`），都不显示浏览器默认焦点框：卡片 `:focus` 去掉 outline，`:focus-within` 时用强调色边框加 3px `--a-sel` 外圈（`.conversation .ask`、`.qcard`，两张卡一致）；卡内按钮、输入框仍用各自的 `:focus-visible` 样式。确认卡聚焦时边框由警告色换成强调色，标题的「需要确认」仍是警告色。
@@ -534,7 +540,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 界面文字不用「 · 」串联不同性质的信息，按场景各用一种写法（桌面端与手机网页共用）：
 
-- **标签 + 状态值**：标签与值分成两个元素，值放进 `.muted-value`（`styles.css`，弱化色、左侧留半个字宽），不写分隔符。例：「允许远程访问」+「已开启」、「图片说明」+ 模型名、「已被覆盖」+ 层名、「需要确认」+ 操作名。
+- **标签 + 状态值**：标签与值分成两个元素，值放进 `.muted-value`（`styles.css`，弱化色、左侧留半个字宽），不写分隔符。例：「允许远程访问」+「已开启」、「图片说明」+ 模型名、「需要确认」+ 操作名。
 - **模型引用**：统一写「provider · model」，拼接只走 `src/model-ref.ts` 的 `modelRefText` / `modelKeyText`；状态栏的 provider 段可隐藏，用同文件的 `MODEL_REF_SEPARATOR` 自己拼。子代理档位标签「档位 · 任务摘要」空间有限，同样保留中点。
 - **并列短语**：用中文逗号或顿号（「识别到 3 台，可导入 2 台」）。
 - **数值附注**：用括号（「第 3 轮（已撤销）」「已获取 N 个模型（HTTP 401）」），或放进 `.muted-value`。
