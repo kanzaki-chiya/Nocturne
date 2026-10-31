@@ -179,12 +179,28 @@ describe("准入与 schema", () => {
     expect(backgroundAdmission({ tools: [], isolation: "none", external: true })).toBeDefined();
   });
 
-  it("开关关闭时 schema 与描述都没有 background；开启时有", () => {
-    const off = createTaskTool();
+  it("开关关闭时 schema 与描述都没有 background；开启时有；依次执行说明始终出现", () => {
+    const seqSentence = "同一步里的多个 task 会依次执行。";
+    const bgSentence =
+      '互相独立、想同时进行的任务用 background: true；要写文件的后台任务必须 isolation: "worktree"；不要等待或轮询结果。';
+    const launcher = {
+      launch: async () => ({
+        status: "error" as const,
+        error: { code: "subagent_unavailable", message: "fixture" },
+      }),
+    };
+    const off = createTaskTool(launcher);
     expect(off.inputSchema.properties).not.toHaveProperty("background");
+    expect(off.description).toContain(seqSentence);
     expect(off.description).not.toContain("background");
-    const on = createTaskTool(undefined, undefined, undefined, [], undefined, () => undefined);
+    expect(off.description).not.toContain(bgSentence);
+    const on = createTaskTool(launcher, undefined, undefined, [], undefined, () => undefined);
     expect(on.inputSchema.properties).toHaveProperty("background");
+    expect(on.description).toContain(seqSentence);
+    expect(on.description).toContain(bgSentence);
+    const externalOff = createTaskTool();
+    expect(externalOff.description).toContain(seqSentence);
+    expect(externalOff.description).not.toContain(bgSentence);
     expect(off.validateInput?.({ task: "x", background: true } as never)).toBe(
       "当前会话不支持后台子代理",
     );

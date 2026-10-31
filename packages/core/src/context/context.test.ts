@@ -276,9 +276,15 @@ describe("buildContext", () => {
     expect(names).toEqual(["system", "tools", "instructions", "environment", "history"]);
   });
 
-  it("系统提示词包含回合结束前检查最后一段规则，子会话覆盖 basePrompt 时不包含", () => {
+  it("系统提示词包含回合结束前检查最后一段规则与同一步 task 顺序执行说明，子会话覆盖 basePrompt 时不包含", () => {
     const main = buildContext(baseInput());
     expect(main.request.system[0]?.text).toContain("check your last paragraph");
+    expect(main.request.system[0]?.text).toContain(
+      "multiple task calls in one step run one after\n  another, not in parallel.",
+    );
+    expect(main.request.system[0]?.text).not.toContain("can run in parallel");
+    expect(main.request.system[0]?.text).not.toContain("background");
+    expect(main.request.system[0]?.text).not.toContain("worktree");
 
     // 子会话通过 basePrompt 注入子代理提示（subagent.md 第 8 节），不包含主会话的结束检查规则
     const child = buildContext(

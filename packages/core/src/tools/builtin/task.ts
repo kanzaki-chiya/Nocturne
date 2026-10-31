@@ -50,7 +50,8 @@ const DESCRIPTION =
   "也可以用 tools 给出显式白名单（与 preset 互斥）。outputSchema 要求子代理按该 schema 交结构化结果。" +
   "权限注意：子会话是非交互的，无法向用户请求确认——在默认权限规则下需要确认的操作" +
   "（写文件、执行命令、工作区外读取、MCP 调用等）在子会话内会被拒绝；" +
-  "只读或探索类任务优先用 explore；需要写入或执行的操作让子代理在结果中说明，由你自己执行。";
+  "只读或探索类任务优先用 explore；需要写入或执行的操作让子代理在结果中说明，由你自己执行。" +
+  "同一步里的多个 task 会依次执行。";
 
 /** Core 装配补全工作目录、附件路径和权限回调，工具只负责按输入字段分流。 */
 interface ExternalTaskRunner {
@@ -141,7 +142,7 @@ export function createTaskTool(
     description:
       (launcher !== undefined
         ? DESCRIPTION
-        : "委派自包含任务给已启用的外部 agent；通过 profile 选择执行者（agent 为兼容别名）。") +
+        : "委派自包含任务给已启用的外部 agent；通过 profile 选择执行者（agent 为兼容别名）。同一步里的多个 task 会依次执行。") +
       (hasExternalAgents
         ? `外部 agent：${agents.map((agent) => `${agent.name}${agent.description ? `（${agent.description}）` : ""}`).join("、")}。` +
           "选择外部档位时不得给 preset、tools、outputSchema。" +
@@ -151,7 +152,7 @@ export function createTaskTool(
         : "") +
       (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : "") +
       (background
-        ? " Use background for independent tasks; writable tools require isolation: worktree. Do not wait or poll for its result."
+        ? '互相独立、想同时进行的任务用 background: true；要写文件的后台任务必须 isolation: "worktree"；不要等待或轮询结果。'
         : ""),
     inputSchema: {
       type: "object",
