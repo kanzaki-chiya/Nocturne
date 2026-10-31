@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { Button } from "./ui";
 
 /**
  * 主面板渲染边界：会话/草稿任一组件抛错时不再白屏，
@@ -21,9 +22,7 @@ export class PaneErrorBoundary extends Component<
         <div className="pane-error" role="alert">
           <b>页面渲染出错</b>
           <p>{error.message}</p>
-          <button
-            type="button"
-            className="btn"
+          <Button
             onClick={() => {
               const action =
                 this.props.reload ??
@@ -34,7 +33,7 @@ export class PaneErrorBoundary extends Component<
             }}
           >
             重新加载
-          </button>
+          </Button>
         </div>
       );
     }

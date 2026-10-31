@@ -8,6 +8,7 @@ import {
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 import { displayPath } from "./paths";
+import { Badge, Button } from "./ui";
 
 interface Props {
   turn: TurnChanges;
@@ -87,8 +88,8 @@ function ChangedFile({
           <span className="turn-change-directory">{label.slice(0, slash + 1)}</span>
           {label.slice(slash + 1)}
         </span>
-        {file.status === "added" && <span className="turn-change-tag">新建</span>}
-        {file.status === "deleted" && <span className="turn-change-tag">已删除</span>}
+        {file.status === "added" && <Badge className="turn-change-tag">新建</Badge>}
+        {file.status === "deleted" && <Badge className="turn-change-tag">已删除</Badge>}
         {!file.unavailable && <Counts added={file.added ?? 0} removed={file.removed ?? 0} />}
       </button>
       {open &&
@@ -304,8 +305,12 @@ export function TurnChangesCard(props: Props) {
                     : `无法还原（${file.reason ?? "未追踪"}）`}
               </span>
               <span className="turn-change-path">{displayPath(file.path, cwd)}</span>
-              {file.action === "delete" && <span className="turn-change-tag">本轮新建</span>}
-              {file.external && <span className="turn-change-tag">已在外部修改</span>}
+              {file.action === "delete" && <Badge className="turn-change-tag">本轮新建</Badge>}
+              {file.external && (
+                <Badge variant="warn" className="turn-change-tag">
+                  已在外部修改
+                </Badge>
+              )}
             </div>
           ))}
           {external && (
@@ -326,12 +331,11 @@ export function TurnChangesCard(props: Props) {
             </p>
           )}
           <div className="u-edit-actions">
-            <button ref={cancel} type="button" className="btn" disabled={working} onClick={dismiss}>
+            <Button ref={cancel} disabled={working} onClick={dismiss}>
               取消
-            </button>
-            <button
-              type="button"
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               disabled={
                 busy ||
                 working ||
@@ -344,7 +348,7 @@ export function TurnChangesCard(props: Props) {
               }}
             >
               {working ? "正在撤销…" : "撤销文件改动"}
-            </button>
+            </Button>
           </div>
         </div>
       )}

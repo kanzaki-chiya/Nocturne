@@ -948,7 +948,7 @@ describe("Conversation 提问卡片", () => {
     });
     const { methods } = mount(view);
     expect(screen.queryByText("写说明")).toBeNull();
-    expect(screen.getByText("推荐").className).toBe("rec");
+    expect(screen.getByText("推荐").className).toBe("badge accent rec");
     fireEvent.keyDown(window, { key: "1" });
     await screen.findByRole("textbox", { name: "写说明 · 回答" });
     expect(screen.getByRole("tab", { name: /方案/ }).textContent).toContain("✓");

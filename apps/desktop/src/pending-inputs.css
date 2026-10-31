@@ -72,27 +72,8 @@
 .pi-acts {
   flex: none;
   display: flex;
+  align-items: center;
   gap: 2px;
-}
-
-.pi-btn {
-  padding: 1px 6px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: none;
-  color: var(--a-muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.pi-btn:hover:not(:disabled) {
-  border-color: var(--a-border);
-  color: var(--a-text);
-}
-
-.pi-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .pi-x {

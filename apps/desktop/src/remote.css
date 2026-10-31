@@ -136,7 +136,7 @@
   font-size: var(--fs-1);
   color: var(--a-secondary);
 }
-.remote-pair > .btn3 {
+.remote-pair > .btn {
   margin-top: 20px;
 }
 .remote-badge {
@@ -154,36 +154,8 @@
   color: var(--a-text);
   z-index: 25;
 }
-.remote-panel > .btn3 {
+.remote-panel > .btn {
   margin-top: 14px;
-}
-.remote-body .btn3,
-.remote-pair .btn3,
-.remote-panel .btn3 {
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  background: var(--a-raised);
-  color: var(--a-text);
-  padding: 6px 12px;
-  font: var(--fs-2)/1.5 var(--sans);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.btn3:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.btn3:not(:disabled):hover {
-  background: var(--a-sel);
-}
-.btn3:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: 2px;
-}
-.remote-body .btn3.primary,
-.remote-pair .btn3.primary {
-  color: var(--a-accent);
-  border-color: var(--a-accent);
 }
 .remote-select {
   border: 1px solid var(--a-border-strong);

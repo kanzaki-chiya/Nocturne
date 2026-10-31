@@ -13,6 +13,7 @@ import { Conversation, Markdown, type ReadOnlySessionRef } from "./Conversation"
 import type { SubagentTab } from "./side-panel";
 import { elapsedText, finalResult, runningMs, subagentStatus } from "./subagent-panel";
 import type { SubagentWatcher } from "./subagent-watch";
+import { Badge, Button } from "./ui";
 
 /** 子代理视图要用到的 runtime 能力（RpcClient.runtime 的子集） */
 export type SubagentRuntime = Pick<RpcRuntime, "observeSubagent" | "readSubagentAttachment">;
@@ -134,16 +135,15 @@ export function SubagentPane({
     (view.entries.length > 0 || view.live.assistants.length > 0 || view.live.tools.length > 0);
   const failed = watch?.phase === "error";
   const retry = (
-    <button
-      type="button"
-      className="btn"
+    <Button
+      size="sm"
       disabled={runtime === undefined}
       onClick={() => {
         if (runtime !== undefined) watcher.retry(runtime, parentSessionId, child);
       }}
     >
       重试
-    </button>
+    </Button>
   );
   const placeholder = hasContent ? undefined : failed ? (
     <div className="sp-empty sp-sub-error" role="alert">
@@ -169,7 +169,7 @@ export function SubagentPane({
   return (
     <div className="sp-sub">
       <header className="sp-sub-head">
-        <span className="subagent-badge">{tab.profile}</span>
+        <Badge className="subagent-badge">{tab.profile}</Badge>
         <span className="sp-sub-summary" title={tab.taskSummary}>
           {tab.taskSummary}
         </span>
@@ -178,7 +178,7 @@ export function SubagentPane({
           {status.label}
         </span>
         {timeLabel !== undefined && <span className="sp-sub-time">{timeLabel}</span>}
-        <span className="sp-badge">只读</span>
+        <Badge className="sp-badge">只读</Badge>
       </header>
       {status.error !== undefined && (
         <p className="sp-sub-note err" role="note">

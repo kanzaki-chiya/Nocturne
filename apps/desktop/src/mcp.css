@@ -15,10 +15,6 @@
   gap: 5px;
   margin-bottom: 14px;
 }
-.mcp-list-actions .btn {
-  padding: 5px 7px;
-  font-size: var(--fs-1);
-}
 .mcp-server-row {
   display: flex;
   align-items: center;
@@ -103,35 +99,6 @@
 .mcp-page .ms {
   flex-wrap: wrap;
 }
-.mcp-switch::before {
-  content: "";
-  display: inline-block;
-  width: 28px;
-  height: 16px;
-  border-radius: var(--radius-2);
-  vertical-align: middle;
-  background:
-    radial-gradient(circle at 8px 8px, var(--a-switch-knob) 5px, transparent 6px),
-    var(--a-switch-off);
-  margin-right: 6px;
-}
-.mcp-switch {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--a-secondary);
-  font: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.mcp-switch:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.mcp-switch:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: 4px;
-}
 .mcp-page .pane .t1 {
   flex-direction: row;
   align-items: center;
@@ -160,11 +127,4 @@
 }
 .mcp-value-editor .dd-d {
   display: none;
-}
-.mcp-switch.on::before {
-  background:
-    radial-gradient(circle at 20px 8px, var(--a-on-accent) 5px, transparent 6px), var(--a-accent);
-}
-.mcp-page .t1 > .tagc {
-  flex-shrink: 0;
 }

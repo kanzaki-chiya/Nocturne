@@ -51,6 +51,7 @@ import type { RemoteStatus } from "@nocturne/rpc/client";
 import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
 import { catchupPreface } from "./schedule-format";
+import { Button } from "./ui";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -1069,9 +1070,9 @@ export function App({ host }: { host: DesktopHost }) {
           <h3>无法检测 Node.js</h3>
           <div className="lead">{phase.message}</div>
           <div className="acts">
-            <button className="btn primary" onClick={reprobe}>
+            <Button variant="primary" onClick={reprobe}>
               重新检测
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -1227,21 +1228,20 @@ export function App({ host }: { host: DesktopHost }) {
                 <div className="t">
                   后台已退出（退出码 {backendExit.code ?? "未知"}）
                   <span className="acts">
-                    <button
-                      className="btn"
+                    <Button
                       onClick={() => {
                         setPage("logs");
                       }}
                     >
                       查看日志
-                    </button>
-                    <button
-                      className="btn primary"
+                    </Button>
+                    <Button
+                      variant="primary"
                       disabled={backendExit.restarting === true}
                       onClick={() => void restartBackend()}
                     >
                       {backendExit.restarting === true ? "重启中…" : "重启后台"}
-                    </button>
+                    </Button>
                   </span>
                 </div>
                 {backendExit.stderr.length > 0 && (
@@ -1253,8 +1253,10 @@ export function App({ host }: { host: DesktopHost }) {
                       ).join("\n")}
                     </pre>
                     {backendExit.stderr.length > CRASH_STDERR_PREVIEW && (
-                      <button
-                        className="btn ghost logmore"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="logmore"
                         onClick={() => {
                           setBackendExit((cur) =>
                             cur === null ? cur : { ...cur, expanded: cur.expanded !== true },
@@ -1264,7 +1266,7 @@ export function App({ host }: { host: DesktopHost }) {
                         {backendExit.expanded === true
                           ? "收起"
                           : `展开全部（${backendExit.stderr.length} 行）`}
-                      </button>
+                      </Button>
                     )}
                   </>
                 )}
@@ -1289,9 +1291,7 @@ export function App({ host }: { host: DesktopHost }) {
               <div className="crash">
                 <div className="t">
                   {startupError.message}
-                  <button className="btn" onClick={() => void boot()}>
-                    重试
-                  </button>
+                  <Button onClick={() => void boot()}>重试</Button>
                 </div>
               </div>
             )}
@@ -1551,12 +1551,12 @@ export function App({ host }: { host: DesktopHost }) {
                   <h3>打开会话失败</h3>
                   <div className="lead">{selectedOpenError.message}</div>
                   <div className="acts">
-                    <button
-                      className="btn primary"
+                    <Button
+                      variant="primary"
                       onClick={() => void selectSession(selectedId, selectedOpenError.workspace)}
                     >
                       重试
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1604,11 +1604,12 @@ export function App({ host }: { host: DesktopHost }) {
                 {updateFlow?.stage === "error" && (
                   <span className="err">{describeUpdateError(updateFlow.message)}</span>
                 )}
-                <button className="btn primary" onClick={beginUpdateInstall}>
+                <Button variant="primary" size="sm" onClick={beginUpdateInstall}>
                   {updateFlow?.stage === "error" ? "重试" : "立即更新"}
-                </button>
-                <button
-                  className="btn ghost"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
                     // 「稍后」只对本次运行有效：prefs.pendingUpdate 保留，
                     // 下次启动若仍比当前版本新会继续提示
@@ -1617,7 +1618,7 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                 >
                   稍后
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -1631,22 +1632,21 @@ export function App({ host }: { host: DesktopHost }) {
                 个正在运行的会话。安装更新会关闭窗口与后台进程，完成后自动重启。
               </p>
               <div className="acts">
-                <button
-                  className="btn"
+                <Button
                   onClick={() => {
                     setUpdateFlow(null);
                   }}
                 >
                   取消
-                </button>
-                <button
-                  className="btn primary"
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={() => {
                     void doUpdateInstall();
                   }}
                 >
                   继续更新
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1662,24 +1662,23 @@ export function App({ host }: { host: DesktopHost }) {
               <h3 id="quit-title">还有 {quitPrompt} 条没发出</h3>
               <p>关闭后会丢失。留在这里可以继续编辑，或等它们发出去再关。</p>
               <div className="acts">
-                <button
-                  className="btn"
+                <Button
                   onClick={() => {
                     setQuitPrompt(null);
                     void host.cancelQuit?.();
                   }}
                 >
                   留在这里
-                </button>
-                <button
-                  className="btn primary"
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={() => {
                     setQuitPrompt(null);
                     void host.quitApp?.();
                   }}
                 >
                   仍然退出
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1695,16 +1694,15 @@ export function App({ host }: { host: DesktopHost }) {
               <h3 id="locked-title">正在别处使用</h3>
               <p>强制打开会接管会话锁。请先确认其他进程已停止使用此会话，避免并发写入。</p>
               <div className="acts">
-                <button
-                  className="btn"
+                <Button
                   onClick={() => {
                     setLockedSession(null);
                   }}
                 >
                   取消
-                </button>
-                <button
-                  className="btn primary"
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={() =>
                     void selectSession(
                       lockedSession.id,
@@ -1715,7 +1713,7 @@ export function App({ host }: { host: DesktopHost }) {
                   }
                 >
                   强制打开
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1724,14 +1722,13 @@ export function App({ host }: { host: DesktopHost }) {
           <div className="dialog-backdrop">
             <div className="desktop-dialog" role="dialog" aria-modal="true" aria-label="命令结果">
               <pre>{commandOutput}</pre>
-              <button
-                className="btn"
+              <Button
                 onClick={() => {
                   setCommandOutput(null);
                 }}
               >
                 关闭
-              </button>
+              </Button>
             </div>
           </div>
         )}

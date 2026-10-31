@@ -36,6 +36,7 @@ import "./composer.css";
 import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
+import { IconButton } from "./ui";
 import { fileIconText, formatBytes } from "./web/phone-images";
 
 export interface ChoiceOption {
@@ -1000,12 +1001,11 @@ export function Composer({
   );
 
   const plusButton = (
-    <button
-      type="button"
+    <IconButton
       ref={(node) => {
         triggers.current.plus = node;
       }}
-      className={`ib${openMenu === "plus" ? " on" : ""}`}
+      active={openMenu === "plus"}
       aria-label="添加图片或引用文件"
       aria-haspopup="menu"
       aria-expanded={openMenu === "plus"}
@@ -1014,7 +1014,7 @@ export function Composer({
       }}
     >
       ＋
-    </button>
+    </IconButton>
   );
 
   // 运行中保留中断键 ■，输入非空时旁边再出现发送键：Enter 插话，Alt+Enter 排队

@@ -1,4 +1,5 @@
 import type { NodeProbe, NodeSource } from "./types";
+import { Button } from "./ui";
 
 export interface NodeHelpProps {
   probe: NodeProbe;
@@ -113,17 +114,17 @@ export function NodeHelp({ probe, checking, onProbe, openUrl }: NodeHelpProps) {
           <li>回到这里点「重新检测」。</li>
         </ol>
         <div className="acts">
-          <button
-            className="btn primary"
+          <Button
+            variant="primary"
             onClick={() => {
               openUrl("https://nodejs.org/");
             }}
           >
             打开 nodejs.org
-          </button>
-          <button className="btn" onClick={onProbe} disabled={checking}>
+          </Button>
+          <Button onClick={onProbe} disabled={checking}>
             重新检测
-          </button>
+          </Button>
         </div>
         <div className="fine">
           已装在别处？设置环境变量 NOCTURNE_NODE 指向 node.exe 后重新检测。

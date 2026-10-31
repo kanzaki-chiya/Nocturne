@@ -81,27 +81,6 @@
 .schedule-page .sched-item .r.dim {
   color: var(--a-faint);
 }
-.schedule-page .tabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  width: max-content;
-}
-.schedule-page .tabs button {
-  padding: 4px 14px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--a-muted);
-  cursor: pointer;
-  font: inherit;
-}
-.schedule-page .tabs button[aria-selected="true"] {
-  background: var(--a-sel);
-  color: var(--a-text);
-}
 .sched-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -226,8 +205,4 @@
 .phone-schedules .schedule-page .form,
 .phone-schedules .schedule-page .field {
   min-width: 0;
-}
-.phone-schedules .schedule-page .seg {
-  flex-wrap: wrap;
-  max-width: 100%;
 }

@@ -37,19 +37,10 @@
   gap: 6px;
   flex-wrap: wrap;
 }
-.profile-options .selected {
-  background: var(--a-sel);
-  border-color: var(--a-accent);
-}
 .profile-enabled {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-.external-agents-page .profile-enabled input {
-  width: auto;
-  flex: none;
-  accent-color: var(--a-accent);
 }
 .profile-editor .acts {
   display: flex;
@@ -62,7 +53,6 @@
 }
 .profile-delete {
   margin-left: auto;
-  color: var(--a-error);
 }
 .profile-preview {
   color: var(--a-muted);

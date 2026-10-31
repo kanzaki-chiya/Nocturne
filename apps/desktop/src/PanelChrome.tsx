@@ -20,6 +20,7 @@ import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
 import { KeyHint } from "./KeyHint";
 import { keyDiag } from "./key-diag";
+import { Badge, Button, IconButton } from "./ui";
 
 /** WindowFrame 标题栏里给 App 放按钮的位置；没有标题栏（测试、手机）时为 null */
 export const TitlebarSlot = createContext<HTMLElement | null>(null);
@@ -47,9 +48,9 @@ export function TitlebarButtons({
 }) {
   return (
     <TitlebarPortal>
-      <button
-        type="button"
-        className="tb-btn"
+      <IconButton
+        size="sm"
+        className="tb-icon"
         aria-label="会话概览"
         title={overviewDisabled ? "会话概览（先打开一个会话）" : "会话概览"}
         aria-haspopup="dialog"
@@ -61,10 +62,10 @@ export function TitlebarButtons({
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" />
         </svg>
-      </button>
-      <button
-        type="button"
-        className="tb-btn"
+      </IconButton>
+      <IconButton
+        size="sm"
+        className="tb-icon"
         aria-label="右侧面板"
         title={panelDisabled ? "右侧面板（先打开一个会话）" : "右侧面板 (Ctrl+B)"}
         aria-pressed={panelOpen}
@@ -75,7 +76,7 @@ export function TitlebarButtons({
           <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
           <path d="M10 2.5v11" />
         </svg>
-      </button>
+      </IconButton>
     </TitlebarPortal>
   );
 }
@@ -316,9 +317,9 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
               <span className="ovpop-agent-profile">
                 {agent.profile}
                 {agent.background === true && (
-                  <span className="ovpop-bg">
+                  <Badge className="ovpop-bg">
                     {subagents.isolated?.has(agent.childSessionId) ? "后台 · 隔离" : "后台"}
-                  </span>
+                  </Badge>
                 )}
               </span>
               <span className="ovpop-agent-summary">
@@ -334,8 +335,9 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
         return (
           <div key={agent.childSessionId} className="ovpop-agent-row">
             {open}
-            <button
-              type="button"
+            <Button
+              variant="ghost-danger"
+              size="sm"
               className="ovpop-cancel"
               aria-label={`取消后台子代理 ${agent.profile}`}
               onClick={() => {
@@ -343,7 +345,7 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
               }}
             >
               取消
-            </button>
+            </Button>
           </div>
         );
       })}
@@ -356,8 +358,9 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
               改动 {record.files} 个文件{record.applied ? " · 已并回" : ""}
             </span>
           </span>
-          <button
-            type="button"
+          <Button
+            variant="ghost-danger"
+            size="sm"
             className="ovpop-cancel"
             aria-label={`删除副本与分支 ${record.branch}`}
             onClick={() => {
@@ -365,7 +368,7 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
             }}
           >
             删除
-          </button>
+          </Button>
         </div>
       ))}
       {external.map((run) => (

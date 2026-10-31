@@ -111,22 +111,6 @@
   border-radius: var(--radius-1);
   background: var(--a-accent);
 }
-.page3 .tagc {
-  font-size: var(--fs-1);
-  color: var(--a-accent);
-  border: 1px solid color-mix(in srgb, var(--a-accent) 40%, transparent);
-  border-radius: var(--radius-1);
-  padding: 0 5px;
-  line-height: 17px;
-}
-.page3 .tagw {
-  font-size: var(--fs-1);
-  color: var(--a-warning);
-  border: 1px solid color-mix(in srgb, var(--a-warning) 45%, transparent);
-  border-radius: var(--radius-1);
-  padding: 0 5px;
-  line-height: 17px;
-}
 .page3 .pane {
   padding: 20px 30px;
   display: flex;
@@ -297,26 +281,10 @@
 .page3 .mr:hover .lnk {
   color: var(--a-accent);
 }
-.page3 .edited {
-  font: var(--fs-1)/16px var(--sans);
-  color: var(--a-accentAlt);
-  border: 1px solid color-mix(in srgb, var(--a-accentAlt) 45%, transparent);
-  border-radius: var(--radius-1);
-  padding: 0 5px;
-  flex: none;
-}
-.page3 .dflt {
-  font: var(--fs-1)/16px var(--sans);
-  color: var(--a-accent);
-  flex: none;
-}
 /* 停用（ADR-0054）：模型行的开关列、停用行变淡、列表停用标签 */
 .page3 .mr .tog {
   display: flex;
   align-items: center;
-}
-.page3 .mr .tog .mcp-switch::before {
-  margin-right: 0;
 }
 .page3 .mr.off .m,
 .page3 .mr.off .num {
@@ -324,14 +292,6 @@
 }
 .page3 .mr.off .cap b {
   color: var(--a-faint);
-}
-.page3 .tagm {
-  font-size: var(--fs-1);
-  color: var(--a-muted);
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-1);
-  padding: 0 5px;
-  line-height: 17px;
 }
 .page3 .plist a .nm.off {
   color: var(--a-faint);
@@ -447,35 +407,6 @@
 }
 .page3 .formacts .fine {
   margin-left: 6px;
-}
-.page3 .seg {
-  display: inline-flex;
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  overflow: hidden;
-  width: max-content;
-  max-width: 100%;
-}
-.page3 .seg button {
-  padding: 6px 14px;
-  font-size: var(--fs-2);
-  color: var(--a-secondary);
-  border: none;
-  border-right: 1px solid var(--a-border-strong);
-  background: transparent;
-  cursor: pointer;
-}
-.page3 .seg button:last-child {
-  border-right: none;
-}
-.page3 .seg button.on {
-  background: var(--a-sel);
-  color: var(--a-text);
-  box-shadow: inset 0 -2px 0 var(--a-accent);
-}
-.page3 .seg button:disabled {
-  color: var(--a-faint);
-  cursor: default;
 }
 .page3 .fetch {
   border: 1px solid var(--a-border);
@@ -746,9 +677,6 @@
 .page3 .mrow .input {
   padding: 4px 9px;
 }
-.page3 .mrow .seg button {
-  padding: 4px 11px;
-}
 .page3 .effs {
   display: flex;
   gap: 4px;
@@ -904,44 +832,6 @@
 /* 通知一节（ADR-0056）：总开关关掉、或阈值行依赖的「完成」没勾时整行变灰 */
 .page3 .s3.dimmed {
   opacity: 0.5;
-}
-.page3 .s3 .chk {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--a-text);
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  cursor: pointer;
-}
-.page3 .s3 .chk:disabled {
-  cursor: default;
-}
-.page3 .s3 .chk .box {
-  width: 15px;
-  height: 15px;
-  border-radius: var(--radius-1);
-  border: 1px solid var(--a-border-strong);
-  background: var(--a-input);
-  display: grid;
-  place-items: center;
-  font-size: var(--fs-1);
-  line-height: 1;
-  color: var(--a-on-accent);
-  flex: none;
-}
-.page3 .s3 .chk[aria-checked="true"] .box {
-  background: var(--a-accent);
-  border-color: var(--a-accent);
-}
-.page3 .s3 .chk[aria-checked="true"] .box::after {
-  content: "✓";
-}
-.page3 .s3 .chk:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: 2px;
 }
 .page3 .s3 .errl {
   grid-column: 2 / 4;
@@ -1265,8 +1155,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.page3 .tagc,
-.page3 .tagw,
+.page3 .badge,
 .page3 .acts .btn,
 .page3 .s3 .v .btn {
   flex-shrink: 0;
@@ -1469,20 +1358,6 @@
 .agent-browser-head h4 {
   margin: 0 0 3px;
   font-size: var(--fs-2);
-}
-.agent-browser-switch {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 7px;
-  color: var(--a-secondary);
-  font-size: var(--fs-1);
-  white-space: nowrap;
-}
-.agent-browser-switch input {
-  /* 不继承表单输入的百分比宽度：那会让标签缩到最小内容宽，文字逐字换行 */
-  width: auto;
-  margin: 0;
 }
 .agent-browser-risk {
   margin-top: 10px;

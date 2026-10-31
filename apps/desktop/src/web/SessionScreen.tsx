@@ -14,6 +14,7 @@ import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
+import { Button } from "../ui";
 import {
   submitAccepted,
   type PhoneCreateOptions,
@@ -247,9 +248,9 @@ export function SessionScreen({
             <div className="pi-item" key={item.childSessionId}>
               <span>{item.profile} · 后台</span>
               <span className="pi-text">{item.task}</span>
-              <button
-                type="button"
-                className="pi-btn"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   void entry.client.runtime
                     .cancelSubagent({
@@ -262,7 +263,7 @@ export function SessionScreen({
                 }}
               >
                 取消
-              </button>
+              </Button>
             </div>
           ))}
         </div>

@@ -22,6 +22,7 @@ import {
 } from "./browser-occlusion";
 import { NOTICE_HIDE_MS, type BrowserPool, type BrowserStatus } from "./browser-pool";
 import { parseAddress, type BrowserTab } from "./side-panel";
+import { Button, IconButton } from "./ui";
 
 const FALLBACK: BrowserStatus = {
   url: "",
@@ -274,9 +275,8 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
   return (
     <div className="sp-browser" ref={root}>
       <header className="sp-browser-bar">
-        <button
-          type="button"
-          className="sp-icon-btn"
+        <IconButton
+          size="sm"
           aria-label="后退"
           title="后退"
           disabled={!status.back}
@@ -285,10 +285,9 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           }}
         >
           <ToolGlyph kind="back" />
-        </button>
-        <button
-          type="button"
-          className="sp-icon-btn"
+        </IconButton>
+        <IconButton
+          size="sm"
           aria-label="前进"
           title="前进"
           disabled={!status.forward}
@@ -297,10 +296,9 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           }}
         >
           <ToolGlyph kind="forward" />
-        </button>
-        <button
-          type="button"
-          className="sp-icon-btn"
+        </IconButton>
+        <IconButton
+          size="sm"
           aria-label={status.loading ? "停止" : "重新加载"}
           title={status.loading ? "停止" : "重新加载"}
           onClick={() => {
@@ -308,7 +306,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           }}
         >
           <ToolGlyph kind={status.loading ? "stop" : "reload"} />
-        </button>
+        </IconButton>
         <form
           className="sp-browser-address"
           onSubmit={(event) => {
@@ -340,9 +338,8 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
             }}
           />
         </form>
-        <button
-          type="button"
-          className="sp-icon-btn"
+        <IconButton
+          size="sm"
           aria-label="在系统浏览器打开"
           title="在系统浏览器打开"
           disabled={status.url === "" || status.url === "about:blank"}
@@ -353,10 +350,9 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           }}
         >
           <ToolGlyph kind="external" />
-        </button>
-        <button
-          type="button"
-          className="sp-icon-btn"
+        </IconButton>
+        <IconButton
+          size="sm"
           aria-label="开发者工具"
           title="开发者工具"
           disabled={!status.live}
@@ -365,7 +361,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           }}
         >
           <ToolGlyph kind="dev" />
-        </button>
+        </IconButton>
       </header>
       {addressError !== undefined && (
         <p className="sp-browser-notice alert" role="alert">
@@ -375,9 +371,8 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
       {notice !== undefined && (
         <p className={`sp-browser-notice${notice.alert ? " alert" : ""}`} role="status">
           <span>{notice.text}</span>
-          <button
-            type="button"
-            className="sp-icon-btn"
+          <IconButton
+            size="sm"
             aria-label="关闭提示"
             title="关闭"
             onClick={() => {
@@ -385,7 +380,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
             }}
           >
             <ToolGlyph kind="stop" />
-          </button>
+          </IconButton>
         </p>
       )}
       <div className="sp-browser-slot" ref={slot}>
@@ -394,9 +389,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
           <div className="sp-empty sp-file-missing">
             <p>打不开这个网页：{status.error}</p>
             <div className="sp-file-actions">
-              <button
-                type="button"
-                className="btn"
+              <Button
                 onClick={() => {
                   const r = slot.current?.getBoundingClientRect();
                   if (r !== undefined) {
@@ -405,7 +398,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
                 }}
               >
                 重试
-              </button>
+              </Button>
             </div>
           </div>
         )}

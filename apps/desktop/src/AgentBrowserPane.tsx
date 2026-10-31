@@ -6,6 +6,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { AgentTabInfo, BrowserBounds } from "./host";
+import { Badge, Button, IconButton } from "./ui";
 
 const STATE_TEXT: Record<AgentTabInfo["state"], string> = {
   agent: "agent 控制中",
@@ -90,19 +91,18 @@ function DialogBanner({
       )}
       <div className="sp-agent-dialog-actions">
         {dialog.kind !== "alert" && (
-          <button
-            type="button"
-            className="btn"
+          <Button
+            size="sm"
             onClick={() => {
               onAnswer(false);
             }}
           >
             取消
-          </button>
+          </Button>
         )}
-        <button type="submit" className="btn primary">
+        <Button type="submit" variant="primary" size="sm">
           确定
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -157,13 +157,14 @@ export function AgentBrowserPane({
   return (
     <div className="sp-browser sp-agent-browser">
       <header className="sp-browser-bar">
-        <span
+        <Badge
+          variant={info.child ? "neutral" : "accent"}
           className={`sp-agent-badge${info.child ? " child" : ""}`}
           title="这个标签由 agent 打开"
         >
           <AgentGlyph kind="agent" />
           {info.child ? "子代理" : "agent"}
-        </span>
+        </Badge>
         <span className={`sp-agent-state${info.state === "busy" ? " busy" : ""}`} role="status">
           {STATE_TEXT[info.state]}
           {info.operation !== undefined && <span className="muted-value">{info.operation}</span>}
@@ -171,9 +172,10 @@ export function AgentBrowserPane({
         <span className="sp-agent-url" title={info.url}>
           {info.title !== "" ? info.title : info.url}
         </span>
-        <button
-          type="button"
-          className={`btn sp-agent-control${takenOver ? "" : " primary"}`}
+        <Button
+          variant={takenOver ? "default" : "primary"}
+          size="sm"
+          className="sp-agent-control"
           disabled={ended}
           title={
             takenOver
@@ -185,10 +187,9 @@ export function AgentBrowserPane({
           }}
         >
           {takenOver ? "交给 agent" : "接管"}
-        </button>
-        <button
-          type="button"
-          className="sp-icon-btn"
+        </Button>
+        <IconButton
+          size="sm"
           aria-label="关闭 agent 标签"
           title="关闭"
           onClick={() => {
@@ -196,7 +197,7 @@ export function AgentBrowserPane({
           }}
         >
           <AgentGlyph kind="close" />
-        </button>
+        </IconButton>
       </header>
       {/* 横幅、提示和说明放在同一行网格里：占位区固定在第 4 行，不能被挤乱 */}
       <div className="sp-agent-info">
@@ -225,16 +226,14 @@ export function AgentBrowserPane({
           <div className="sp-empty">
             <p>标签已关闭</p>
             <div className="sp-file-actions">
-              <button
-                type="button"
-                className="btn"
+              <Button
                 aria-label="移除已关闭的标签"
                 onClick={() => {
                   onClose(info.tabId);
                 }}
               >
                 <AgentGlyph kind="back" />
-              </button>
+              </Button>
             </div>
           </div>
         )}

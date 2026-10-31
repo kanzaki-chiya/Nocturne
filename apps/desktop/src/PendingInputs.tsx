@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import type { PendingInputItem, PendingInputsSnapshot } from "@nocturne/core/protocol";
+import { Badge, Button, IconButton } from "./ui";
 
 import "./pending-inputs.css";
 
@@ -96,24 +97,24 @@ export function PendingInputs({
       {snapshot.paused && (
         <div className="pi-paused" role="status">
           <span>已暂停</span>
-          <button
-            type="button"
-            className="pi-btn"
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={disabled || busy}
             onClick={() => {
               void run(onResume);
             }}
           >
             继续发送
-          </button>
+          </Button>
         </div>
       )}
       {items.map((item) => (
         <div key={item.id} className={`pi-row pi-${item.mode}`}>
           <div className="pi-main">
-            <span className="pi-mode">
+            <Badge variant={item.mode === "steer" ? "accent" : "neutral"} className="pi-mode">
               {item.mode === "subagent" ? "子代理结果" : item.mode === "steer" ? "插话" : "排队"}
-            </span>
+            </Badge>
             {editing === item.id ? (
               <input
                 ref={input}
@@ -146,44 +147,44 @@ export function PendingInputs({
             <span className="pi-acts">
               {editing === item.id ? (
                 <>
-                  <button
-                    type="button"
-                    className="pi-btn"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled={busy}
                     onClick={() => {
                       save(item);
                     }}
                   >
                     保存
-                  </button>
-                  <button
-                    type="button"
-                    className="pi-btn"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled={busy}
                     onClick={() => {
                       setEditing(null);
                     }}
                   >
                     取消
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <>
                   {item.mode !== "subagent" && (
                     <>
-                      <button
-                        type="button"
-                        className="pi-btn"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         disabled={disabled || busy}
                         onClick={() => {
                           startEdit(item);
                         }}
                       >
                         编辑
-                      </button>
-                      <button
-                        type="button"
-                        className="pi-btn"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         disabled={disabled || busy}
                         title={
                           item.mode === "steer"
@@ -199,12 +200,12 @@ export function PendingInputs({
                         }}
                       >
                         {item.mode === "steer" ? "改排队" : "改插话"}
-                      </button>
+                      </Button>
                     </>
                   )}
-                  <button
-                    type="button"
-                    className="pi-btn pi-x"
+                  <IconButton
+                    size="sm"
+                    className="pi-x"
                     disabled={disabled || busy}
                     aria-label="撤回这条待发消息"
                     title="撤回"
@@ -215,7 +216,7 @@ export function PendingInputs({
                     }}
                   >
                     ×
-                  </button>
+                  </IconButton>
                 </>
               )}
             </span>

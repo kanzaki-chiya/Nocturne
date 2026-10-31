@@ -814,39 +814,9 @@ details[open] > summary:not(.tool-line)::before {
   white-space: nowrap;
   flex: 1 1 auto;
 }
-.updbar .btn {
-  flex-shrink: 0;
-  padding: 5px 10px;
-}
 .updbar .t:last-child,
 .updbar .notes:last-child {
   margin-left: 0;
-}
-
-.btn {
-  font: 500 var(--fs-2)/1 var(--sans);
-  border-radius: var(--radius-2);
-  padding: 7px 12px;
-  border: 1px solid var(--a-border-strong);
-  background: transparent;
-  color: var(--a-secondary);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.btn.primary {
-  background: var(--a-accent);
-  border-color: var(--a-accent);
-  color: var(--a-on-accent);
-}
-.btn.ghost {
-  border-color: transparent;
-}
-.btn.danger {
-  color: var(--a-error);
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Node 说明页 */

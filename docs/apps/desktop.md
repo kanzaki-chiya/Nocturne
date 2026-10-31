@@ -398,7 +398,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 编辑器选型：CodeMirror 6 按模块按需引入，只读显示需要的部分（`@codemirror/view`、`state`、`language`、`search`、`@lezer/highlight` 与 9 个语言包）都是 MIT；Monaco 体积大一个量级且需要 worker 与额外 CSP 放开，不选。CodeMirror 与语言包都走动态 `import()`，不进主包：主包从 776.0 kB 增至 810.8 kB（gzip 232.8 → 243.5 kB，增量是面板本身），CSS 105.1 → 117.8 kB；打开第一个文件标签时才加载 `code-viewer` 297.6 kB（gzip 96.0 kB），语言包按扩展名再各自加载，11 个分块合计 375.2 kB（gzip 147.9 kB）。手机网页不包含 CodeMirror。
 
-**终端**（`src/TerminalPane.tsx`，进程控制在 `src/terminal-session.ts`，xterm 封装在 `src/terminal-view.ts`）：新标签页的「终端」卡片或 Ctrl+`（已有终端就切过去，没有就新开）。工作目录取当前会话的工作区（会话还在打开时用会话列表里的 cwd）；标签显示项目名（普通对话工作区显示「对话」），插在当前标签之后。终端属于会话：切到别的会话时进程和 xterm 屏幕都保留（标签页隐藏挂着，不卸载），切回来原样继续；会话被删除时、应用退出时结束进程。shell 缺省跟随「设置 › 常规 › 执行 › Shell」（开标签时按终端工作区读 `runtime.describeSettings` 的 `shell` 生效值）：`auto` 按 `runtime.listShells` 的 auto 顺序（pwsh → Git Bash → cmd）挑第一个外壳认得且已安装的，指定的种类或路径直接用，指定的没安装时退回 auto；头部「Shell」下拉只列外壳认得且已安装的，切换时结束旧进程、在同一标签起新进程，选择只记在这个标签上，不写回设置。外壳命令与校验见第 2 节。xterm.js 与 fit 插件（MIT）随标签首次打开动态加载，不进主包，手机网页不包含；回滚 5000 行，配色取 `--a-*` 主题令牌并跟随深浅主题切换；终端区跟随面板宽度重新排版。中文输入法的候选框跟随光标，上屏文字直接写入。浅色主题下 ANSI 黄 / 亮黄用加深的 `--a-termYellow` #7a5410 / `--a-termYellowBright` #8a5f12（对 #fafafb 背景 6.49:1 / 5.40:1），并开 xterm 的 `minimumContrastRatio: 4.5`，程序自己给的 256 色和真彩色也不低于这个对比度；深色主题不变。竖滚动条 10 px（`overviewRuler.width`），颜色取 `--a-scrollThumb`。复制粘贴按键（`src/terminal-keys.ts`）：有选区时 Ctrl+C 复制并清掉选区，没有选区时交给进程（中断）；Ctrl+Insert 同样复制并清掉选区，Shift+Insert 粘贴；Ctrl+Shift+C 复制但保留选区，Ctrl+Shift+V 走浏览器原生粘贴；带 Alt 的组合照旧交给进程。右键按 Windows Terminal 的规则、不弹菜单：程序开了鼠标上报（`term.modes.mouseTrackingMode !== "none"`，如 Claude Code、vim）时交给程序；否则有选区就复制并清掉选区，没有选区就粘贴。剪贴板都经外壳读写：复制用 `terminal_write_clipboard`（WebView2 里 `navigator.clipboard.writeText` 会静默失败），粘贴用 `terminal_read_clipboard`（不触发 WebView2 权限框）；失败时终端顶部显示「复制失败：…」/「粘贴失败：…」，几秒后消失。Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+Shift+G / Ctrl+` 不进终端，照常是应用快捷键。一个标签一个进程，关闭标签即结束进程；进程退出显示「进程已退出（代码 N）」和「重新启动」（重启后焦点回到终端）。开进程期间的输入（ConPTY 启动时 `ESC[6n` 的光标位置回答）排队，拿到终端 id 后按序发出。终端标签不恢复；agent 看不到也操作不了终端，不经过权限层。
+**终端**（`src/TerminalPane.tsx`，进程控制在 `src/terminal-session.ts`，xterm 封装在 `src/terminal-view.ts`）：新标签页的「终端」卡片或 Ctrl+`（已有终端就切过去，没有就新开）。工作目录取当前会话的工作区（会话还在打开时用会话列表里的 cwd）；标签显示项目名（普通对话工作区显示「对话」），插在当前标签之后。终端属于会话：切到别的会话时进程和 xterm 屏幕都保留（标签页隐藏挂着，不卸载），切回来原样继续；会话被删除时、应用退出时结束进程。shell 缺省跟随「设置 › 常规 › 执行 › Shell」（开标签时按终端工作区读 `runtime.describeSettings` 的 `shell` 生效值）：`auto` 按 `runtime.listShells` 的 auto 顺序（pwsh → Git Bash → cmd）挑第一个外壳认得且已安装的，指定的种类或路径直接用，指定的没安装时退回 auto；头部「Shell」下拉只列外壳认得且已安装的，切换时结束旧进程、在同一标签起新进程，选择只记在这个标签上，不写回设置。外壳命令与校验见第 2 节。xterm.js 与 fit 插件（MIT）随标签首次打开动态加载，不进主包，手机网页不包含；回滚 5000 行，配色取 `--a-*` 主题令牌并跟随深浅主题切换；终端区跟随面板宽度重新排版。中文输入法的候选框跟随光标，上屏文字直接写入。浅色主题下 ANSI 黄 / 亮黄用加深的 `--a-termYellow` #7a5410 / `--a-termYellowBright` #8a5f12（对 #fafafb 背景 6.49:1 / 5.40:1），并开 xterm 的 `minimumContrastRatio: 4.5`，程序自己给的 256 色和真彩色也不低于这个对比度；深色主题不变。竖滚动条 10 px（`overviewRuler.width`），颜色取 `--a-scroll`。复制粘贴按键（`src/terminal-keys.ts`）：有选区时 Ctrl+C 复制并清掉选区，没有选区时交给进程（中断）；Ctrl+Insert 同样复制并清掉选区，Shift+Insert 粘贴；Ctrl+Shift+C 复制但保留选区，Ctrl+Shift+V 走浏览器原生粘贴；带 Alt 的组合照旧交给进程。右键按 Windows Terminal 的规则、不弹菜单：程序开了鼠标上报（`term.modes.mouseTrackingMode !== "none"`，如 Claude Code、vim）时交给程序；否则有选区就复制并清掉选区，没有选区就粘贴。剪贴板都经外壳读写：复制用 `terminal_write_clipboard`（WebView2 里 `navigator.clipboard.writeText` 会静默失败），粘贴用 `terminal_read_clipboard`（不触发 WebView2 权限框）；失败时终端顶部显示「复制失败：…」/「粘贴失败：…」，几秒后消失。Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+Shift+G / Ctrl+` 不进终端，照常是应用快捷键。一个标签一个进程，关闭标签即结束进程；进程退出显示「进程已退出（代码 N）」和「重新启动」（重启后焦点回到终端）。开进程期间的输入（ConPTY 启动时 `ESC[6n` 的光标位置回答）排队，拿到终端 id 后按序发出。终端标签不恢复；agent 看不到也操作不了终端，不经过权限层。
 
 **浏览器**（ADR-0060 第 5 节与修订（四）；外壳在 `src-tauri/src/browser.rs`，规则是 `browser_policy.rs` 的纯函数，前端是 `src/BrowserPane.tsx`、`src/browser-pool.ts`、`src/browser-occlusion.ts`）：每个浏览器标签一个子 webview（`Window::add_child`，tauri 开 `unstable` 特性），压在面板占位区 `.sp-browser-slot` 的位置上；占位区尺寸变化（`ResizeObserver`、窗口 resize）时重新 `browser_layout`。工具栏是后退、前进、重新加载 / 停止、地址栏、「在系统浏览器打开」、「开发者工具」；地址栏规则同新标签页，Esc 撤回未提交的编辑。工作区内的 HTML 引用左键进浏览器标签（`file://`），和文件标签同一规则：本会话已有浏览器标签正在显示这个文件（比当前地址的路径，不计查询串和锚点）就切过去，没有才新开；文件标签头部的「在浏览器标签打开」也一样。工作区外的照旧是文件标签；引用的右键菜单有「查看源码」，按源码开文件标签。网页的 `target=_blank`、`window.open` 与 Ctrl+点击都在同一会话里、紧挨来源标签新开浏览器标签并切过去，不开原生弹窗；网页打开的新窗口不复用已有标签。网页的 `alert` / `confirm` / `prompt` 用 WebView2 自带的脚本对话框（画在网页 webview 里，标题写明来源网站，`confirm` 取消返回 `false`）。本地 HTML 里的 `download` 链接会直接打开文件，要下载请右键另存为：`file://` 页面的源是不透明的，Chromium 只对同源可读的地址执行 `download` 属性（`HTMLAnchorElement::HandleClick` 里的 `CanReadContent`），指向 `file:` 的链接被当成普通导航；同一页面里的 blob 下载和 http(s) 下载链接照常下载。下载弹「另存为」（rfd 同步对话框，挂主窗口为父窗口），取消即不下载、不提示（WebView2 取消时也会报一次失败的结束，外壳只对选好了保存位置的下载报结果）；开始、完成、失败在工具栏下方提示（「正在下载 x」「已下载 x」「下载失败：x」），失败时用开始时选的文件名；外壳按地址先进先出配对开始与结束（`browser_policy::Downloads`），同一地址连续下载两次各报一次，取消留下的失败结束只消掉取消记录、不会配走正在下载的那一个。被拦下的导航（见第 6 节）在同一位置提示，比如「已阻止打开外部程序（ms-settings:）」。这里只显示最近一条：新提示顶替旧的；「已下载」4 秒后自动消失（`NOTICE_HIDE_MS`），失败、拦截提示留到点 × 或下一次开始加载（加载只清拦截提示，不清下载提示）。
 
@@ -414,7 +414,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 **会话概览**：标题栏按钮或 Esc 开关，打开状态是全局的、存 prefs（`overviewOpen`），只在有打开会话时显示，没有时按钮置灰、Esc 也不打开。Esc 的优先级：已被别处处理（`preventDefault`）的不算——权限卡片拒绝、提问卡片、下拉与菜单、状态栏提示、输入框的补全弹层（先关弹层）和正在运行时的中断、终端里的 Esc（交给进程）；焦点在面板浏览器的网页里时 Esc 根本不到主界面；快速打开和设置页开着时也不算；其余情况包括焦点在空闲的输入框里（有没有草稿都一样，输入框没有 Esc 清空草稿的行为）都开关浮层。浮层有项目（名称与工作区路径）、「变更」（本会话累计 +/−，点开变更标签），以及有运行项时出现的「子代理」分组。面板关闭、且对话列让出浮层的位置（300 px）后对话区仍不小于 480 px 时（`overviewDocks`），浮层停靠在右侧，对话列、输入框、提问卡片整体左移让出位置；放不下就和面板开着时一样盖在对话区上。判定只看窗口与侧边栏宽度、不受停靠本身影响，拖动窗口跨过阈值时只切换一次，不来回闪；面板打开时浮层盖在对话区上，放在面板左边，对话区放不下时压在面板上，不盖侧边栏。
 
-**滚动条**：面板里所有滚动区（diff、目录树、「文件」的 CodeMirror、终端框）共用 `styles.css` 的 `.thin-scroll`：10 px、轨道透明、滑块取 `--a-scrollThumb`，悬停换 `--a-scrollThumbHover` 并变粗，深浅主题各一组令牌。只写 `::-webkit-scrollbar`，不写 `scrollbar-width` / `scrollbar-color`（Chromium 设了这两个标准属性就忽略前者，又露出箭头按钮）。xterm 6 的滚动条是自绘的，宽度与颜色经终端选项给。
+**滚动条**：面板里所有滚动区（diff、目录树、「文件」的 CodeMirror、终端框）共用 `styles.css` 的 `.thin-scroll`：10 px、轨道透明、滑块取 `--a-scroll`，悬停换 `--a-scrollThumbHover` 并变粗，深浅主题各一组令牌。只写 `::-webkit-scrollbar`，不写 `scrollbar-width` / `scrollbar-color`（Chromium 设了这两个标准属性就忽略前者，又露出箭头按钮）。xterm 6 的滚动条是自绘的，宽度与颜色经终端选项给。
 
 概览在项目、变更下增加「子代理」分组：只列当前会话的直接运行项，显示档位、任务摘要和本地每秒刷新的已运行时间；点击内置项开标签但不关浮层。无运行项时整组隐藏。外部项标「外部 agent · 仅主对话进度」，不可点击。后台子代理（ADR-0073）在档位后带「后台」标记，同一行右侧另有「取消」按钮（与打开按钮并列，不嵌套），点击调用 `cancelSubagent`。目录查询由父 task 生命周期变化合并触发，未结算或有后台子代理运行中时每秒至多补查一次；仅当前会话、窗口可见且有焦点、非设置页时进行，失焦/切走/进入设置/全部收束即停止补查，不靠补查更新时间。
 
@@ -484,7 +484,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 | `--fs-2` | 13px | 界面正文：工具行、菜单、设置行、状态栏 |
 | `--fs-3` | 14px | 强调正文：助手回答、用户气泡、输入框文字 |
 | `--fs-4` | 16px | 标题：页头、详情标题、对话框标题、助手 Markdown h3 |
-| `--fs-5` | 20px | 展示性大字：助手 Markdown h1/h2、用量页统计数字、手机欢迎标题 |
+| `--fs-5` | 22px | 展示性大字：助手 Markdown h1/h2、用量页统计数字、手机欢迎标题 |
 
 - 正文与界面文字共四档（12/13/14/16）；`--fs-5` 只用于展示性大字，不算界面正文档位。区分层级用字重、颜色（`--a-secondary`/`--a-muted`/`--a-faint`）和间距，不再增加字号。
 - 归档规则：半档就近且不缩小（11.5 → 12、12.5 → 13、13.5 → 14）；小于 12 的一律提到 12。
@@ -513,7 +513,18 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 ### 左侧色条
 
-提示条（`conversation-notice-warning`/`-error`）、权限确认卡（`.ask`）与 MCP 列表选中行不使用左侧色条：提示条用浅色底（警告 `--a-warnBg`、错误 8% `--a-error`）加文字颜色区分级别；确认卡用整圈警告色边框（55% `--a-warning`）加 `--a-warnBg` 浅底；MCP 选中行用整行 `--a-sel` 底色表示。引用块与思考块左侧的细线属于常规排版，侧栏与设置导航的选中指示条属于导航选中态，都保留。
+提示条（`conversation-notice-warning`/`-error`）、权限确认卡（`.ask`）与 MCP 列表选中行不使用左侧色条：提示条用浅色底（警告 `--a-warning-bg`、错误 8% `--a-error`）加文字颜色区分级别；确认卡用整圈警告色边框（55% `--a-warning`）加 `--a-warning-bg` 浅底；MCP 选中行用整行 `--a-sel` 底色表示。引用块与思考块左侧的细线属于常规排版，侧栏与设置导航的选中指示条属于导航选中态，都保留。
+
+### 基础控件
+
+共享基础控件定义在 `src/ui/`，样式集中于 `src/ui.css`（由 `src/styles.css` 引入，桌面端与手机网页共用），只负责外观与无障碍属性，不带业务逻辑。各页面一律使用这组控件，不再单独编写局部按钮、开关、复选框、分段控件或徽标样式：
+
+- `Button`：变体 `default`、`primary`、`ghost`、`danger`、`ghost-danger`、`danger-solid`（`danger-solid` 仅用于「确认删除」等最后一步确认）；尺寸 `sm`、`md`（默认）、`lg`。
+- `IconButton`：纯图标按钮，必填 `aria-label`；尺寸 `sm`、`md`（默认）。
+- `Switch`：`role="switch"` + `aria-checked`，按钮内部不放文字，开关状态由可访问名称表达。
+- `Checkbox`：统一复选框（`.check`），用于所有勾选项。
+- `SegmentedControl`：分段单选控件（`.seg`），支持 `sm`、`md`（默认）尺寸及 `group`（`aria-pressed`）、`tablist`（`aria-selected`）、`radiogroup`（`aria-checked`）角色语义。
+- `Badge`：状态与类别徽标（`.badge`），变体 `neutral`（默认）、`accent`、`warn`、`err`、`ok`。
 
 ### 焦点
 

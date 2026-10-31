@@ -11,6 +11,7 @@ import type { TerminalHost } from "./host";
 import { terminalShell, type ShellOption, type TerminalTab } from "./side-panel";
 import { TerminalSession, type TerminalStatus } from "./terminal-session";
 import type { MountedTerminal } from "./terminal-view";
+import { Button } from "./ui";
 
 /** 外壳只认这几个可执行文件名（src-tauri/src/terminal.rs），下拉里也只列它们 */
 const TERMINAL_EXECUTABLES = new Set(["pwsh.exe", "powershell.exe", "bash.exe", "cmd.exe"]);
@@ -197,7 +198,7 @@ export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: 
         <Dropdown
           label="Shell"
           variant="pill"
-          triggerClassName="sp-btn sp-term-shell"
+          triggerClassName="sp-term-shell"
           heading="Shell"
           note="换 shell 会结束当前进程，在这个标签里重新开始"
           value={executable}
@@ -216,9 +217,9 @@ export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: 
       {(status.kind === "exited" || status.kind === "error") && (
         <div className="sp-term-exit" role="status">
           <span>{status.kind === "exited" ? exitText(status.code) : status.message}</span>
-          <button
-            type="button"
-            className="sp-btn"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setRestarts((n) => n + 1);
               // 按钮随横条一起消失，焦点交回终端，不然要再点一下才能打字
@@ -226,7 +227,7 @@ export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: 
             }}
           >
             重新启动
-          </button>
+          </Button>
         </div>
       )}
       {clipError !== undefined && (

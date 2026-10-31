@@ -7,6 +7,8 @@
   justify-content: center;
   gap: var(--space-1);
   flex: none;
+  width: max-content;
+  max-width: 100%;
   height: var(--ctl-h-md);
   padding: 0 var(--ctl-px-md);
   border-radius: var(--radius-2);
@@ -154,10 +156,12 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  width: max-content;
+  max-width: 100%;
   cursor: pointer;
   white-space: nowrap;
 }
-.check input[type="checkbox"] {
+.check input {
   appearance: none;
   margin: 0;
   padding: 0;
@@ -172,11 +176,11 @@
   place-items: center;
   cursor: pointer;
 }
-.check input[type="checkbox"]:checked {
+.check input:checked {
   background: var(--a-accent);
   border-color: var(--a-accent);
 }
-.check input[type="checkbox"]:checked::after {
+.check input:checked::after {
   content: "";
   width: calc(var(--check) / 2);
   height: calc(var(--check) / 4);
@@ -184,16 +188,16 @@
   border-width: 0 0 1.5px 1.5px;
   transform: translateY(-1px) rotate(-45deg);
 }
-.check input[type="checkbox"]:disabled {
+.check input:disabled {
   opacity: var(--disabled-opacity);
   cursor: default;
 }
-.check:has(input[type="checkbox"]:disabled) {
+.check:has(input:disabled) {
   opacity: var(--disabled-opacity);
   pointer-events: none;
   cursor: default;
 }
-.check:has(input[type="checkbox"]:disabled) input[type="checkbox"]:disabled {
+.check:has(input:disabled) input:disabled {
   opacity: 1;
 }
 
@@ -201,6 +205,8 @@
 .seg {
   display: inline-flex;
   flex-wrap: wrap;
+  width: max-content;
+  max-width: 100%;
   padding: var(--space-0-5);
   gap: var(--space-0-5);
   border: 1px solid var(--a-border-strong);

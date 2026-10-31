@@ -15,29 +15,6 @@
   container-type: inline-size;
   flex: 1;
 }
-.usage-toggle {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-panel);
-}
-.usage-toggle button {
-  padding: 4px 12px;
-  border-radius: var(--radius-1);
-  color: var(--a-muted);
-  white-space: nowrap;
-}
-.usage-toggle button:hover {
-  color: var(--a-text);
-  background: var(--a-raised);
-}
-.usage-toggle button[aria-pressed="true"] {
-  color: var(--a-text);
-  background: var(--a-sel);
-}
 .usage-page button:focus-visible {
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;

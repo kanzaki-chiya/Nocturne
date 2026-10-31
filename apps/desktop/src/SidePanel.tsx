@@ -51,6 +51,7 @@ import {
 import { SubagentPane, type SubagentRuntime } from "./SubagentPane";
 import type { SubagentWatcher } from "./subagent-watch";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
+import { Badge, Button, IconButton } from "./ui";
 import "./side-panel.css";
 
 export type { TerminalShellChoice };
@@ -594,14 +595,15 @@ function ChangeSection({
         <span className="sp-change-path" title={title}>
           <bdi>{label}</bdi>
         </span>
-        {item.status === "added" && <span className="turn-change-tag">新建</span>}
-        {item.status === "deleted" && <span className="turn-change-tag">已删除</span>}
-        {item.reverted && <span className="turn-change-tag">已撤销</span>}
+        {item.status === "added" && <Badge className="turn-change-tag">新建</Badge>}
+        {item.status === "deleted" && <Badge className="turn-change-tag">已删除</Badge>}
+        {item.reverted && <Badge className="turn-change-tag">已撤销</Badge>}
         <span className="sp-change-round">第 {item.round} 轮</span>
         {item.unavailable === undefined && <Counts added={item.added} removed={item.removed} />}
-        <button
-          type="button"
-          className="sp-wrap-btn"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="sp-wrap"
           aria-pressed={wrap}
           title={wrap ? "长行自动换行（点击改为横向滚动）" : "长行横向滚动（点击改为自动换行）"}
           onClick={() => {
@@ -609,7 +611,7 @@ function ChangeSection({
           }}
         >
           换行
-        </button>
+        </Button>
       </header>
       {item.unavailable !== undefined ? (
         <p className="turn-change-note">{item.unavailable}</p>
@@ -1089,33 +1091,32 @@ function FileView({
           <span className="sp-crumb-sep">/</span>
           <span className="sp-crumb-path">{rel}</span>
         </span>
-        <span className="sp-badge">只读</span>
+        <Badge className="sp-badge">只读</Badge>
         {isHtmlPath(tab.absolutePath) && !missing && (
-          <button
-            type="button"
-            className="sp-btn"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               run(() => actions.openInBrowser(tab.absolutePath));
             }}
           >
             {actions.browserLabel}
-          </button>
+          </Button>
         )}
         {!missing && !externalOnly && (
-          <button
-            type="button"
-            className="sp-btn"
+          <Button
+            variant="ghost"
+            size="sm"
             title="在外部编辑器打开"
             onClick={() => {
               run(() => actions.openExternal(tab.absolutePath, tab.line));
             }}
           >
             {actions.externalLabel}
-          </button>
+          </Button>
         )}
-        <button
-          type="button"
-          className="sp-icon-btn"
+        <IconButton
+          size="sm"
           aria-label="重新读取"
           title="重新读取"
           onClick={() => {
@@ -1125,7 +1126,7 @@ function FileView({
           <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" />
           </svg>
-        </button>
+        </IconButton>
       </header>
       {actionError !== undefined && (
         <p className="sp-file-error" role="alert">
@@ -1148,37 +1149,31 @@ function FileView({
             <p>{fileErrorText(state.code, state.message)}</p>
             {timedOut && (
               <div className="sp-file-actions">
-                <button
-                  type="button"
-                  className="btn"
+                <Button
                   onClick={() => {
                     setReload((n) => n + 1);
                   }}
                 >
                   重试
-                </button>
+                </Button>
               </div>
             )}
             {externalOnly && (
               <div className="sp-file-actions">
-                <button
-                  type="button"
-                  className="btn"
+                <Button
                   onClick={() => {
                     run(() => actions.openExternal(tab.absolutePath));
                   }}
                 >
                   在外部编辑器打开
-                </button>
-                <button
-                  type="button"
-                  className="btn"
+                </Button>
+                <Button
                   onClick={() => {
                     run(() => actions.reveal(tab.absolutePath));
                   }}
                 >
                   在资源管理器中显示
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -1209,9 +1204,10 @@ function FileDiffView({
             <bdi>{path}</bdi>
           </span>
           <Counts added={counts.add} removed={counts.del} />
-          <button
-            type="button"
-            className="sp-wrap-btn"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="sp-wrap"
             aria-pressed={wrap}
             title={wrap ? "长行自动换行（点击改为横向滚动）" : "长行横向滚动（点击改为自动换行）"}
             onClick={() => {
@@ -1219,7 +1215,7 @@ function FileDiffView({
             }}
           >
             换行
-          </button>
+          </Button>
         </header>
         {tab.diffText.trim() === "" ? (
           <p className="turn-change-note">无文本差异</p>

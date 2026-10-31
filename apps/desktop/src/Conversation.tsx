@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { marked, type Token, type Tokens } from "marked";
+import { Badge, Button, Checkbox, IconButton } from "./ui";
 import "./grants.css";
 
 export function GrantedTag({
@@ -429,11 +430,11 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
         const items = list.items.map((item, itemIndex) => (
           <li key={itemIndex}>
             {item.task ? (
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={item.checked === true}
                 disabled
                 aria-label="任务完成状态"
+                onChange={() => undefined}
               />
             ) : null}
             {markdownNodes(item.tokens, openUrl)}
@@ -1272,19 +1273,16 @@ function UserMessage({
               </p>
             ) : null}
             <div className="u-edit-actions">
-              <button
-                type="button"
-                className="btn primary"
+              <Button
+                variant="primary"
                 disabled={pending || draft.trim() === ""}
                 onClick={() => {
                   sendResubmit(draft, mode);
                 }}
               >
                 {pending ? "发送中…" : "发送"}
-              </button>
-              <button
-                type="button"
-                className="btn"
+              </Button>
+              <Button
                 disabled={pending}
                 onClick={() => {
                   setEditing(false);
@@ -1292,7 +1290,7 @@ function UserMessage({
                 }}
               >
                 取消
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -1302,9 +1300,9 @@ function UserMessage({
                 <span className="sched-pre">{scheduleSource.preface}</span>
               )}
               {entry.steer === true && (
-                <span className="u-steer" title="运行中插话：已在当时的步骤结束后送达">
+                <Badge className="u-steer" title="运行中插话：已在当时的步骤结束后送达">
                   插话
-                </span>
+                </Badge>
               )}
               {(entry.attachments ?? []).map((attachment, index) => (
                 <UserImage
@@ -1438,9 +1436,8 @@ function UserMessage({
                   将以这条消息之前的对话新建会话，可在新会话里重新提问。原会话不变；工作区文件保持当前状态，不会回退。
                 </p>
                 <div className="u-edit-actions">
-                  <button
-                    type="button"
-                    className="btn primary"
+                  <Button
+                    variant="primary"
                     disabled={pending}
                     onClick={() => {
                       setPending(true);
@@ -1457,17 +1454,15 @@ function UserMessage({
                     }}
                   >
                     {pending ? "分叉中…" : "分叉"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
+                  </Button>
+                  <Button
                     disabled={pending}
                     onClick={() => {
                       setConfirmFork(false);
                     }}
                   >
                     取消
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : null}
@@ -2934,9 +2929,15 @@ export function PermissionCard({
                 ? `本会话允许访问 ${networks.map((subject) => subject.target).join("、")}`
                 : permissionLabels[option];
             return (
-              <button
+              <Button
                 key={option}
-                className={`btn${option === "allow_once" ? " primary" : ""}${option === "deny_stop" ? " danger" : ""}`}
+                variant={
+                  option === "allow_once"
+                    ? "primary"
+                    : option === "deny_stop"
+                      ? "danger"
+                      : "default"
+                }
                 disabled={busy}
                 onClick={() => {
                   if (option === "deny") setFeedback("");
@@ -2944,7 +2945,7 @@ export function PermissionCard({
                 }}
               >
                 {label}
-              </button>
+              </Button>
             );
           })}
           <KeyHint
@@ -2981,19 +2982,17 @@ export function PermissionCard({
             />
           </label>
           <div className="ask-actions">
-            <button className="btn" type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy}>
               发送拒绝
-            </button>
-            <button
-              className="btn"
-              type="button"
+            </Button>
+            <Button
               disabled={busy}
               onClick={() => {
                 setFeedback(null);
               }}
             >
               返回
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -3465,7 +3464,11 @@ export function QuestionCard({
                   <span className="lab">
                     <span>
                       {display}
-                      {recommended ? <span className="rec">推荐</span> : null}
+                      {recommended ? (
+                        <Badge variant="accent" className="rec">
+                          推荐
+                        </Badge>
+                      ) : null}
                     </span>
                     {option.description ? <small>{option.description}</small> : null}
                   </span>
@@ -3553,9 +3556,7 @@ export function QuestionCard({
                 event.target.value = "";
               }}
             />
-            <button
-              type="button"
-              className="ib"
+            <IconButton
               aria-label="添加文件"
               title="添加文件"
               disabled={busy}
@@ -3574,7 +3575,7 @@ export function QuestionCard({
               >
                 <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5L13 2a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
               </svg>
-            </button>
+            </IconButton>
           </>
         )}
         <button type="button" className="link" disabled={busy} onClick={toggleDecline}>
@@ -3591,25 +3592,24 @@ export function QuestionCard({
         />
         <span className="sp" />
         {index > 0 ? (
-          <button
-            type="button"
-            className="btn"
+          <Button
+            size="sm"
             disabled={busy}
             onClick={() => {
               go(index - 1);
             }}
           >
             上一题
-          </button>
+          </Button>
         ) : null}
-        <button
-          type="button"
-          className="btn primary"
+        <Button
+          variant="primary"
+          size="sm"
           disabled={busy || (last && !allAnswered)}
           onClick={handleNext}
         >
           {last ? "提交" : "下一题"}
-        </button>
+        </Button>
       </div>
       {busy ? (
         <p className="conversation-review" role="status">
@@ -3934,9 +3934,8 @@ function ConversationContent({
       </div>
       {!following ? (
         <div className="conversation-jump-row">
-          <button
-            type="button"
-            className="conversation-jump btn"
+          <Button
+            className="conversation-jump"
             onClick={() => {
               follow.current = true;
               setFollowing(true);
@@ -3944,7 +3943,7 @@ function ConversationContent({
             }}
           >
             回到最新消息
-          </button>
+          </Button>
         </div>
       ) : null}
       {readOnly !== undefined && view.pendingPermission ? (
