@@ -5,7 +5,7 @@
   position: relative;
 }
 .body.panel-docked {
-  grid-template-columns: var(--sidebar-width, 236px) minmax(0, 1fr) auto;
+  grid-template-columns: var(--w-sidebar) minmax(0, 1fr) auto;
 }
 
 .side-panel {
@@ -25,7 +25,7 @@
   right: 0;
   bottom: 0;
   z-index: 20;
-  max-width: calc(100% - var(--sidebar-width, 236px));
+  max-width: calc(100% - var(--w-sidebar));
   border-left-color: var(--a-border-strong);
   box-shadow: -14px 0 30px rgba(0, 0, 0, 0.28);
 }

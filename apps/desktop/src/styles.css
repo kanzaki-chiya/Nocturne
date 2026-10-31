@@ -54,7 +54,7 @@ button {
 /* 布局：左栏延伸到顶部，主区预留自绘标题栏 */
 .body {
   display: grid;
-  grid-template-columns: var(--sidebar-width, 236px) minmax(0, 1fr);
+  grid-template-columns: var(--w-sidebar) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }

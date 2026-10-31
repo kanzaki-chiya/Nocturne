@@ -732,7 +732,7 @@
 }
 
 /* ---------- 窄窗口（效果图「窄窗口」） ---------- */
-@container settings-layout (width < 1060px) {
+@container settings-layout (width <= 1060px) {
   .md {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);

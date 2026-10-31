@@ -6,7 +6,7 @@
 .window-titlebar {
   position: absolute;
   top: 0;
-  left: var(--sidebar-width, 236px);
+  left: var(--w-sidebar);
   right: 0;
   z-index: 21;
   display: flex;

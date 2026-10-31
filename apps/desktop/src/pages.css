@@ -1109,15 +1109,22 @@
 #root {
   container: settings-layout / inline-size;
 }
+/* 窄窗口（效果图「窄窗口」）：≤1240 主侧栏收窄、页边距变小；≤900 设置导航收窄 */
+@container settings-layout (width <= 1240px) {
+  .window-frame {
+    --w-sidebar: 232px;
+    --page-px: 24px;
+  }
+}
+@container settings-layout (width <= 900px) {
+  .window-frame {
+    --w-settings-nav: 168px;
+  }
+}
+/* 设置模式下左列是设置导航：布局、标题栏左边界都跟着它 */
 .window-frame:has(.body.settings-mode),
 .body.settings-mode {
-  --sidebar-width: 295px;
-}
-@container settings-layout (width < 1000px) {
-  .window-frame:has(.body.settings-mode),
-  .body.settings-mode {
-    --sidebar-width: 200px;
-  }
+  --w-sidebar: var(--w-settings-nav);
 }
 .settings-over {
   container: settings-content / inline-size;
