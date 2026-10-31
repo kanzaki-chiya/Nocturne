@@ -98,7 +98,7 @@
 }
 .conversation .u-act:hover:not(:disabled),
 .conversation .u-act:focus-visible {
-  color: var(--a-fg);
+  color: var(--a-text);
   background: var(--a-sel);
 }
 .conversation .u-act:disabled {
@@ -123,7 +123,7 @@
   font: inherit;
   font-size: var(--fs-3);
   line-height: 1.6;
-  color: var(--a-fg);
+  color: var(--a-text);
   background: var(--a-input);
   border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
@@ -139,7 +139,7 @@
   gap: 14px;
   margin-top: 6px;
   font-size: var(--fs-1);
-  color: var(--a-fg);
+  color: var(--a-text);
 }
 .conversation .u-edit-mode label {
   display: inline-flex;

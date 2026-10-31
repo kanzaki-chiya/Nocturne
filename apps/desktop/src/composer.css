@@ -456,7 +456,7 @@
 }
 
 .menu .menu-r.mono {
-  font-family: var(--a-mono, ui-monospace, monospace);
+  font-family: var(--mono);
 }
 
 .menu .menu-note {

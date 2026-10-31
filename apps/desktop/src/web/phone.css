@@ -966,7 +966,7 @@
   border: 1px solid var(--a-border);
   border-radius: 999px;
   background: var(--a-panel);
-  color: var(--a-dim);
+  color: var(--a-muted);
   font: inherit;
 }
 .phone-send-mode button.on {

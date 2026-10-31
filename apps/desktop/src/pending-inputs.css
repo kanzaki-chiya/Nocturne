@@ -15,7 +15,7 @@
   align-items: center;
   gap: 8px;
   padding: 2px 2px 4px;
-  color: var(--a-warn, #b26a00);
+  color: var(--a-warning);
 }
 
 .pi-row {
@@ -35,7 +35,7 @@
   padding: 0 6px;
   border-radius: 999px;
   border: 1px solid var(--a-border);
-  color: var(--a-dim);
+  color: var(--a-muted);
   line-height: 18px;
 }
 
@@ -50,7 +50,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--a-fg);
+  color: var(--a-text);
 }
 
 .pi-edit {
@@ -60,13 +60,13 @@
   border: 1px solid var(--a-accent);
   border-radius: 4px;
   background: var(--a-bg);
-  color: var(--a-fg);
+  color: var(--a-text);
   font: inherit;
 }
 
 .pi-atts {
   flex: none;
-  color: var(--a-dim);
+  color: var(--a-muted);
 }
 
 .pi-acts {
@@ -80,14 +80,14 @@
   border: 1px solid transparent;
   border-radius: 4px;
   background: none;
-  color: var(--a-dim);
+  color: var(--a-muted);
   font: inherit;
   cursor: pointer;
 }
 
 .pi-btn:hover:not(:disabled) {
   border-color: var(--a-border);
-  color: var(--a-fg);
+  color: var(--a-text);
 }
 
 .pi-btn:disabled {
@@ -102,9 +102,9 @@
 
 .pi-note {
   padding-left: 2px;
-  color: var(--a-dim);
+  color: var(--a-muted);
 }
 
 .pi-error {
-  color: var(--a-danger, #b3261e);
+  color: var(--a-error);
 }

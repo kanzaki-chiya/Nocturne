@@ -46,7 +46,7 @@ import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
-export const PAIR_TRUST_NOTE = "中继只转发密文；详细的信任说明见「设置 › 关于」。";
+export const PAIR_TRUST_NOTE = "中继只转发密文；详细的信任说明见电脑上的「设置 › 远程」。";
 export function iosBrowser(): boolean {
   return (
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
