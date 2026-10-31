@@ -1,51 +1,3 @@
-.mcp-page .pane {
-  overflow-y: auto;
-}
-.mcp-page .cols3.mcp-no-servers {
-  grid-template-columns: 1fr;
-}
-.mcp-no-servers .plist {
-  display: none;
-}
-.mcp-no-servers .mcp-empty {
-  flex: 1;
-}
-.mcp-list-actions {
-  display: flex;
-  gap: 5px;
-  margin-bottom: 14px;
-}
-.mcp-server-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: var(--a-secondary);
-  padding: 8px 10px;
-  border-radius: var(--radius-2);
-  cursor: pointer;
-  text-align: left;
-}
-/* 选中行用整行底色表示，不再加左侧色条 */
-.mcp-server-row.on {
-  background: var(--a-sel);
-  color: var(--a-text);
-}
-.mcp-server-row small {
-  margin-left: auto;
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-}
-.mcp-values > div {
-  display: grid;
-  grid-template-columns: 2fr 1fr 2fr;
-  padding: 9px 12px;
-  gap: 12px;
-  border-bottom: 1px solid var(--a-border);
-  overflow-wrap: anywhere;
-}
 .mcp-value-editor {
   display: grid;
   grid-template-columns: minmax(100px, 1fr) minmax(140px, 1fr) minmax(140px, 1.4fr) 30px;
@@ -58,73 +10,14 @@
   width: 100%;
   min-width: 0;
 }
-.mcp-page input,
-.mcp-page textarea {
-  width: 100%;
-  border: 1px solid var(--a-border-strong);
-  background: var(--a-input);
-  color: var(--a-text);
-  border-radius: var(--radius-2);
-  padding: 8px 10px;
-  font: inherit;
-}
-.mcp-page .field {
-  display: grid;
-  gap: 7px;
-}
-.mcp-page .form {
-  max-width: 830px;
-}
-.mcp-page .form small {
-  color: var(--a-muted);
-}
-.mcp-page .form {
-  display: grid;
-  gap: 17px;
-}
-.mcp-type {
-  display: flex;
-  gap: 8px;
-}
-.mcp-empty {
-  display: grid;
-  place-content: center;
-  min-height: 350px;
-  text-align: center;
-  gap: 15px;
-}
-.mcp-import {
-  width: min(760px, 90vw);
-}
 .mcp-page .ms {
   flex-wrap: wrap;
-}
-.mcp-page .pane .t1 {
-  flex-direction: row;
-  align-items: center;
-}
-.mcp-page .pane .t1 .acts {
-  margin-left: auto;
-  flex-wrap: nowrap;
-  align-items: center;
-}
-.mcp-action-divider {
-  height: 18px;
-  width: 1px;
-  background: var(--a-border-strong);
-  margin-inline: 6px;
-}
-.mcp-page .kv {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.mcp-page .kv .full {
-  grid-column: 1 / -1;
 }
 .mcp-page input.mcp-name-locked {
   background: var(--a-raised);
   color: var(--a-faint);
   cursor: default;
 }
-.mcp-value-editor .dd-d {
-  display: none;
+.mcp-import {
+  width: min(var(--w-dialog), 90vw);
 }

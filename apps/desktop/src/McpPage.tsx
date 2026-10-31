@@ -12,7 +12,23 @@ import {
   type McpDraft,
   type McpImportRow,
 } from "./mcp-import";
-import { Badge, Button, SegmentedControl, Switch } from "./ui";
+import {
+  Badge,
+  Button,
+  DetailHeader,
+  EmptyState,
+  Field,
+  Form,
+  FormFooter,
+  ListGroup,
+  ListItem,
+  MasterDetail,
+  PageHeader,
+  SegmentedControl,
+  SettingsGroup,
+  SettingsRow,
+  Switch,
+} from "./ui";
 import "./pages.css";
 import "./mcp.css";
 
@@ -142,27 +158,11 @@ export function McpPage({
   };
   const r = current ? results[current.id] : undefined;
   return (
-    <div className="page3 mcp-page">
-      <header className="ph3">
-        <div className="grow">
-          <h3>MCP</h3>
-          <span className="sub">{servers.length} 台服务器</span>
-        </div>
-      </header>
-      {agentBrowser !== undefined && prefs !== undefined && (
-        <AgentBrowserCard host={agentBrowser} prefs={prefs} />
-      )}
-      {error && (
-        <div className="errt" role="alert">
-          {error}
-        </div>
-      )}
-      <div className={`cols3 ${servers.length === 0 && !form ? "mcp-no-servers" : ""}`}>
-        <nav className="plist" aria-label="MCP 服务器列表">
-          <div className="mcp-list-actions">
-            <Button variant="primary" size="sm" onClick={add} disabled={!client}>
-              ＋ 添加服务器
-            </Button>
+    <div className="page3 mcp-page spage flush">
+      <PageHeader
+        title="MCP"
+        actions={
+          <>
             <Button
               size="sm"
               onClick={() => {
@@ -171,62 +171,81 @@ export function McpPage({
             >
               从 JSON 导入
             </Button>
-          </div>
-          {(["app", "readonly"] as const).map((group) => (
-            <div key={group}>
-              <h5>{group === "app" ? "程序管理" : "config.json（只读）"}</h5>
-              {servers
-                .filter((s) => (s.origin === "app") === (group === "app"))
-                .map((s) => (
-                  <button
-                    className={`mcp-server-row ${selected === s.id && !form ? "on" : ""}`}
-                    key={s.id}
-                    onClick={() => {
-                      setSelected(s.id);
-                      setForm(undefined);
-                      setQueue([]);
-                    }}
-                  >
-                    <span
-                      className={`dot ${results[s.id]?.ok ? "ok" : results[s.id] ? "warn" : "off"}`}
+            <Button variant="primary" size="sm" onClick={add} disabled={!client}>
+              ＋ 添加服务器
+            </Button>
+          </>
+        }
+      />
+      {error && (
+        <div className="errt" role="alert">
+          {error}
+        </div>
+      )}
+      <MasterDetail
+        listLabel="MCP 服务器列表"
+        list={(["app", "readonly"] as const).map((group) => {
+          const count = servers.filter((s) => (s.origin === "app") === (group === "app")).length;
+          return (
+            count > 0 && (
+              <ListGroup
+                key={group}
+                title={group === "app" ? "程序管理" : "config.json（只读）"}
+                count={count}
+              >
+                {servers
+                  .filter((s) => (s.origin === "app") === (group === "app"))
+                  .map((s) => (
+                    <ListItem
+                      key={s.id}
+                      label={s.id}
+                      mono
+                      selected={selected === s.id && !form}
+                      dot={!s.enabled ? "" : results[s.id]?.ok ? "ok" : results[s.id] ? "warn" : ""}
+                      badge={s.transport === "http" ? <Badge>HTTP</Badge> : undefined}
+                      meta={
+                        !s.enabled
+                          ? "已停用"
+                          : results[s.id]?.ok === false
+                            ? "测试失败"
+                            : resultText(results[s.id])
+                      }
+                      onClick={() => {
+                        setSelected(s.id);
+                        setForm(undefined);
+                        setQueue([]);
+                      }}
                     />
-                    <span className="nm">{s.id}</span>
-                    {s.transport === "http" && <Badge>HTTP</Badge>}
-                    <small>
-                      {!s.enabled
-                        ? "已停用"
-                        : results[s.id]?.ok === false
-                          ? "测试失败"
-                          : resultText(results[s.id])}
-                    </small>
-                  </button>
-                ))}
-            </div>
-          ))}
-        </nav>
-        <div className="pane">
-          {form && client ? (
-            <McpForm
-              key={`${form.replace}-${form.draft.id}`}
-              client={client}
-              draft={form.draft}
-              replace={form.replace}
-              backend={backend}
-              workspaceRoot={workspaceRoot}
-              onCancel={finish}
-              onSaved={async (id) => {
-                await changed(`已保存 ${id}`);
-                setSelected(id);
-                finish();
-              }}
-              onSaveFailed={() => void refresh()}
-            />
-          ) : current ? (
-            <>
-              <div className="t1">
-                <h3>{current.id}</h3>
-                <Badge>{current.editable ? "程序管理" : "只读"}</Badge>
-                <span className="acts">
+                  ))}
+              </ListGroup>
+            )
+          );
+        })}
+      >
+        {form && client ? (
+          <McpForm
+            key={`${form.replace}-${form.draft.id}`}
+            client={client}
+            draft={form.draft}
+            replace={form.replace}
+            backend={backend}
+            workspaceRoot={workspaceRoot}
+            onCancel={finish}
+            onSaved={async (id) => {
+              await changed(`已保存 ${id}`);
+              setSelected(id);
+              finish();
+            }}
+            onSaveFailed={() => void refresh()}
+          />
+        ) : current ? (
+          <>
+            <DetailHeader
+              title={current.id}
+              mono
+              extra={<Badge>{current.editable ? "程序管理" : "只读"}</Badge>}
+              actions={
+                <>
                   <Switch
                     aria-label="启用"
                     checked={current.enabled}
@@ -247,7 +266,6 @@ export function McpPage({
                         });
                     }}
                   />
-                  <span className="mcp-action-divider" aria-hidden="true" />
                   <Button disabled={busy || !current.trusted} onClick={() => void probe()}>
                     {busy ? "测试中…" : "测试连接"}
                   </Button>
@@ -270,52 +288,37 @@ export function McpPage({
                       </Button>
                     </>
                   )}
+                </>
+              }
+            />
+            {!current.editable && (
+              <div className="hint">只读：在 {current.path} 中定义，请修改对应配置文件。</div>
+            )}
+            <SettingsGroup title="连接">
+              <SettingsRow label={current.transport === "http" ? "地址" : "命令"}>
+                <span className="mono">
+                  {current.url ?? [current.command, ...(current.args ?? [])].join(" ")}
                 </span>
-              </div>
-              {!current.editable && (
-                <div className="hint">只读：在 {current.path} 中定义，请修改对应配置文件。</div>
-              )}
-              <dl className="kv">
-                <div className="full">
-                  <dt>{current.transport === "http" ? "地址" : "命令"}</dt>
-                  <dd className="mono">
-                    {current.url ?? [current.command, ...(current.args ?? [])].join(" ")}
-                  </dd>
-                </div>
-                <div>
-                  <dt>最近测试</dt>
-                  <dd>{resultText(r)}</dd>
-                </div>
-                <div>
-                  <dt>服务器</dt>
-                  <dd>{r?.serverInfo ? `${r.serverInfo.name} ${r.serverInfo.version}` : "—"}</dd>
-                </div>
-                <div>
-                  <dt>{current.transport === "http" ? "传输" : "工作目录"}</dt>
-                  <dd>
-                    {current.transport === "http"
-                      ? "流式 HTTP"
-                      : (current.cwd ?? "会话工作区（默认）")}
-                  </dd>
-                </div>
-                <div>
-                  <dt>超时（启动 / 调用）</dt>
-                  <dd>
-                    {current.startupTimeoutMs / 1000} 秒 / {current.callTimeoutMs / 1000} 秒
-                  </dd>
-                </div>
-              </dl>
-              {r && <ProbeResult result={r} />}
-              <div className="sh">
-                <h4>{current.transport === "http" ? "请求头" : "环境变量"}</h4>
-              </div>
-              <div className="mcp-values">
+              </SettingsRow>
+              <SettingsRow label="最近测试">{resultText(r)}</SettingsRow>
+              <SettingsRow label="服务器">
+                {r?.serverInfo ? `${r.serverInfo.name} ${r.serverInfo.version}` : "—"}
+              </SettingsRow>
+              <SettingsRow label={current.transport === "http" ? "传输" : "工作目录"}>
+                {current.transport === "http" ? "流式 HTTP" : (current.cwd ?? "会话工作区（默认）")}
+              </SettingsRow>
+              <SettingsRow label="超时（启动 / 调用）">
+                {current.startupTimeoutMs / 1000} 秒 / {current.callTimeoutMs / 1000} 秒
+              </SettingsRow>
+            </SettingsGroup>
+            {r && <ProbeResult result={r} />}
+            {(current.headers ?? current.env ?? []).length > 0 && (
+              <SettingsGroup title={current.transport === "http" ? "请求头" : "环境变量"}>
                 {(current.headers ?? current.env ?? []).map((row) => (
-                  <div key={row.name}>
-                    <code>{row.name}</code>
-                    <span>
+                  <SettingsRow key={row.name} label={<code>{row.name}</code>}>
+                    <Badge>
                       {row.kind === "stored" ? "凭据库" : row.kind === "env" ? "环境变量" : "明文"}
-                    </span>
+                    </Badge>
                     <span>
                       {row.kind === "stored"
                         ? row.stored === "set"
@@ -323,31 +326,39 @@ export function McpPage({
                           : "缺少凭据"
                         : row.value}
                     </span>
-                  </div>
+                  </SettingsRow>
                 ))}
-              </div>
-              <div className="fine">
-                模型调用这些工具时显示为 mcp {current.id}
-                /&lt;工具名&gt;，是否需要确认由权限设置决定。
-              </div>
-            </>
-          ) : (
-            <div className="mcp-empty">
-              <h3>给 Nocturne 接上外部工具</h3>
-              <Button variant="primary" onClick={add}>
-                ＋ 添加服务器
-              </Button>
-              <Button
-                onClick={() => {
-                  setImporting(true);
-                }}
-              >
-                从 JSON 导入
-              </Button>
+              </SettingsGroup>
+            )}
+            <div className="desc">
+              模型调用这些工具时显示为 mcp {current.id}
+              /&lt;工具名&gt;，是否需要确认由权限设置决定。
             </div>
-          )}
-        </div>
-      </div>
+          </>
+        ) : (
+          <EmptyState
+            action={
+              <>
+                <Button variant="primary" onClick={add}>
+                  ＋ 添加服务器
+                </Button>
+                <Button
+                  onClick={() => {
+                    setImporting(true);
+                  }}
+                >
+                  从 JSON 导入
+                </Button>
+              </>
+            }
+          >
+            给 Nocturne 接上外部工具
+          </EmptyState>
+        )}
+        {agentBrowser !== undefined && prefs !== undefined && (
+          <AgentBrowserCard host={agentBrowser} prefs={prefs} />
+        )}
+      </MasterDetail>
       {toast && (
         <div className="toast3" role="status">
           ✓ {toast}
@@ -566,18 +577,14 @@ function McpForm({
     ) : null;
   return (
     <div>
-      <div className="t1">
-        <h3>{replace ? `编辑 ${id}` : "添加 MCP 服务器"}</h3>
-      </div>
-      <form
-        className="form wide"
+      <DetailHeader title={replace ? `编辑 ${id}` : "添加 MCP 服务器"} />
+      <Form
         onSubmit={(e) => {
           e.preventDefault();
           void run(true);
         }}
       >
-        <label className="field">
-          类型
+        <Field label="类型">
           <SegmentedControl
             className="mcp-type"
             aria-label="传输类型"
@@ -594,11 +601,11 @@ function McpForm({
               }
             }}
           />
-        </label>
-        <label className="field">
-          名称
+        </Field>
+        <Field label="名称" desc="模型看到的工具前缀，创建后不能改">
           <input
-            className={replace ? "mcp-name-locked" : undefined}
+            className={replace ? "input lg mono mcp-name-locked" : "input lg mono"}
+            aria-label="名称"
             value={id}
             onChange={(e) => {
               setId(e.target.value);
@@ -607,12 +614,12 @@ function McpForm({
             autoFocus
           />
           {err("id")}
-          <small>模型看到的工具前缀，创建后不能改</small>
-        </label>
+        </Field>
         {type === "http" ? (
-          <label className="field">
-            地址
+          <Field label="地址" desc="支持流式 HTTP；如需 OAuth 登录，本版本暂不支持">
             <input
+              className="input lg mono"
+              aria-label="地址"
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);
@@ -620,38 +627,39 @@ function McpForm({
               placeholder="https://example.com/mcp"
             />
             {err("url")}
-            <small>支持流式 HTTP；如需 OAuth 登录，本版本暂不支持</small>
-          </label>
+          </Field>
         ) : (
           <>
-            <label className="field">
-              命令
+            <Field label="命令">
               <input
+                className="input lg mono"
+                aria-label="命令"
                 value={command}
                 onChange={(e) => {
                   setCommand(e.target.value);
                 }}
               />
               {err("command")}
-            </label>
-            <label className="field">
-              参数，一行一个
+            </Field>
+            <Field label="参数，一行一个">
               <textarea
+                className="textarea mono"
+                aria-label="参数，一行一个"
                 value={args}
                 onChange={(e) => {
                   setArgs(e.target.value);
                 }}
                 rows={3}
               />
-            </label>
+            </Field>
           </>
         )}
-        <div className="field">
-          <label>{type === "http" ? "请求头" : "环境变量"}</label>
+        <Field label={type === "http" ? "请求头" : "环境变量"}>
           {err(type === "http" ? "headers" : "env")}
           {rows.map((row, index) => (
             <div className="mcp-value-editor" key={index}>
               <input
+                className="input lg mono"
                 aria-label={`${type === "http" ? "请求头" : "变量"}名 ${index + 1}`}
                 value={row.name}
                 onChange={(e) => {
@@ -664,6 +672,7 @@ function McpForm({
                 }}
               />
               <Dropdown
+                appearance="lg"
                 label={`值类型 ${index + 1}`}
                 value={row.kind}
                 options={[
@@ -712,6 +721,7 @@ function McpForm({
                 </span>
               ) : (
                 <input
+                  className="input lg mono"
                   aria-label={`值 ${index + 1}`}
                   type={row.kind === "stored" ? "password" : "text"}
                   disabled={row.clear}
@@ -744,13 +754,14 @@ function McpForm({
             ＋ 添加{type === "http" ? "请求头" : "变量"}
           </Button>
           {!backend && <small>系统凭据后端不可用，保存到凭据库不可选；请引用环境变量。</small>}
-        </div>
+        </Field>
         <details>
           <summary>高级</summary>
           {type === "stdio" && (
-            <label className="field">
-              工作目录
+            <Field label="工作目录">
               <input
+                className="input lg mono"
+                aria-label="工作目录"
                 value={cwd}
                 onChange={(e) => {
                   setCwd(e.target.value);
@@ -758,11 +769,12 @@ function McpForm({
                 placeholder="会话工作区（默认）"
               />
               {err("cwd")}
-            </label>
+            </Field>
           )}
-          <label className="field">
-            启动超时（秒）
+          <Field label="启动超时（秒）">
             <input
+              className="input lg"
+              aria-label="启动超时（秒）"
               type="number"
               min="0.001"
               step="0.001"
@@ -772,10 +784,11 @@ function McpForm({
               }}
             />
             {err("startupTimeoutMs")}
-          </label>
-          <label className="field">
-            调用超时（秒）
+          </Field>
+          <Field label="调用超时（秒）">
             <input
+              className="input lg"
+              aria-label="调用超时（秒）"
               type="number"
               min="0.001"
               step="0.001"
@@ -785,11 +798,8 @@ function McpForm({
               }}
             />
             {err("callTimeoutMs")}
-          </label>
+          </Field>
         </details>
-        <Button disabled={busy} onClick={() => void run(false)}>
-          {busy ? "处理中…" : "测试连接"}
-        </Button>
         {result && <ProbeResult result={result} />}
         {error &&
           ![
@@ -806,16 +816,18 @@ function McpForm({
               {error.message}
             </div>
           )}
-        <div className="formacts">
+        <FormFooter reason="测试失败也可以保存">
+          <Button disabled={busy} onClick={onCancel}>
+            取消
+          </Button>
+          <Button disabled={busy} onClick={() => void run(false)}>
+            {busy ? "处理中…" : "测试连接"}
+          </Button>
           <Button variant="primary" type="submit" disabled={busy}>
             保存
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={onCancel}>
-            取消
-          </Button>
-          <span className="fine">测试失败也可以保存</span>
-        </div>
-      </form>
+        </FormFooter>
+      </Form>
     </div>
   );
 }
@@ -853,22 +865,23 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
     void apply(next);
   };
   return (
-    <section className="agent-browser-card" aria-labelledby="agent-browser-heading">
-      <div className="agent-browser-head">
-        <div className="grow">
-          <h4 id="agent-browser-heading">面板浏览器（桌面内置）</h4>
-          <p className="fine">
+    <SettingsGroup title="面板浏览器">
+      <SettingsRow
+        label="面板浏览器（桌面内置）"
+        desc={
+          <>
             让 agent 在 Nocturne
             的面板里打开网页、截图和操作页面。默认关闭；开启后只对新的后台进程生效。
-          </p>
-        </div>
+          </>
+        }
+      >
         <Switch
-          aria-labelledby="agent-browser-heading"
+          aria-label="面板浏览器（桌面内置）"
           checked={enabled}
           disabled={busy}
           onChange={onToggle}
         />
-      </div>
+      </SettingsRow>
       {confirming && (
         <div className="agent-browser-risk" role="alertdialog" aria-label="启用面板浏览器">
           <p>agent 会读取网页文字、截图并点击输入。网页内容不可信，可能诱导它操作其他页面。</p>
@@ -911,7 +924,7 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
           {error}
         </p>
       )}
-    </section>
+    </SettingsGroup>
   );
 }
 
@@ -942,6 +955,7 @@ function McpImport({
         </div>
         <div className="db">
           <textarea
+            className="input lg mono"
             aria-label="JSON 配置"
             rows={12}
             value={text}

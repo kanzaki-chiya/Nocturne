@@ -4,7 +4,22 @@ import type { SkillOverview, SkillsDescription } from "@nocturne/core/protocol";
 import { projectName } from "./session-tree";
 import { Scrim } from "./ProvidersPage";
 import type { SkillImportCommit, SkillImportPreview } from "./rpc-types";
-import { Badge, Button, Checkbox, SegmentedControl, Switch } from "./ui";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  DataTable,
+  DetailHeader,
+  EmptyState,
+  ListGroup,
+  ListItem,
+  MasterDetail,
+  PageHeader,
+  SegmentedControl,
+  SettingsGroup,
+  SettingsRow,
+  Switch,
+} from "./ui";
 import "./pages.css";
 import "./mcp.css";
 import "./skills.css";
@@ -100,36 +115,12 @@ export function SkillsPage({
   const budget = data?.budget;
   const empty = data?.skills.length === 0;
   return (
-    <div className="page3 mcp-page skills-page">
-      <header className="ph3">
-        <div className="grow">
-          <h3>技能</h3>
-          {budget && !empty ? (
-            <div className="skill-budget">
-              <span>模型目录</span>
-              <meter
-                min={0}
-                max={Math.max(1, budget.limitTokens)}
-                value={budget.usedTokens}
-                aria-label="模型目录预算"
-              />
-              <span>
-                <b>
-                  {budget.usedTokens.toLocaleString()} / {budget.limitTokens.toLocaleString()}
-                </b>{" "}
-                tokens：完整说明 {budget.fullCount} 个，只显示名字 {budget.nameCount} 个，已停用{" "}
-                {budget.disabledCount} 个
-              </span>
-            </div>
-          ) : (
-            <span className="sub">{empty ? "没有找到技能" : "正在扫描技能…"}</span>
-          )}
-          {budget?.basis === "fallback" && (
-            <span className="fine">模型上下文窗口未知，使用 8,000 token 上限</span>
-          )}
-        </div>
-        <div className="acts">
+    <div className="page3 skills-page spage flush">
+      <PageHeader
+        title="技能"
+        actions={
           <Button
+            size="sm"
             disabled={client === undefined || pickFolder === undefined}
             title={pickFolder === undefined ? "当前宿主不支持选择文件夹" : undefined}
             onClick={() => {
@@ -138,95 +129,143 @@ export function SkillsPage({
           >
             导入技能…
           </Button>
-        </div>
-      </header>
+        }
+      />
       {error && (
         <div className="errt" role="alert">
           {error}
         </div>
       )}
       {empty ? (
-        <div className="skill-empty">
-          <span className="skill-empty-icon">▤</span>
-          <h4>把常用的做法写成技能</h4>
-          <p>把常用做法写成带 SKILL.md 的文件夹；Claude Code、Codex 的技能可直接用</p>
-          <div>
-            <Button
-              variant="primary"
-              onClick={() => void attempt(() => openDirectory(data.homeDir, true))}
-            >
-              打开技能文件夹
-            </Button>
-            <Button onClick={() => void attempt(() => openUrl("https://agentskills.io"))}>
-              Agent Skills 规范 ↗
-            </Button>
-          </div>
+        <div>
+          <EmptyState
+            action={
+              <>
+                <Button
+                  variant="primary"
+                  onClick={() => void attempt(() => openDirectory(data.homeDir, true))}
+                >
+                  打开技能文件夹
+                </Button>
+                <Button onClick={() => void attempt(() => openUrl("https://agentskills.io"))}>
+                  Agent Skills 规范 ↗
+                </Button>
+              </>
+            }
+          >
+            把常用的做法写成技能。把常用做法写成带 SKILL.md 的文件夹；Claude Code、Codex
+            的技能可直接用
+          </EmptyState>
           <SkillWarnings warnings={parseWarnings} />
           <p className="fine">扫描目录：{data.scannedDirs.join("、")}</p>
         </div>
       ) : (
-        <div className="cols3">
-          <nav className="plist" aria-label="技能列表">
-            {(["user", "project"] as const).map((layer) => (
-              <div key={layer}>
-                <h5>
-                  {layer === "user" ? (
-                    "用户"
-                  ) : (
-                    <>
-                      项目
-                      <span className="muted-value">
-                        {workspaceRoot ? projectName(workspaceRoot) : "当前工作区"}
-                      </span>
-                    </>
-                  )}
-                </h5>
-                {data?.skills
-                  .filter((s) => s.layer === layer)
-                  .map((s) => (
-                    <button
-                      type="button"
-                      className={`mcp-server-row skill-row ${s.entryPath === selected ? "on" : ""}`}
-                      key={s.entryPath}
-                      onClick={() => {
-                        setSelected(s.entryPath);
-                      }}
-                      aria-current={s.entryPath === selected ? "true" : undefined}
+        <MasterDetail
+          listLabel="技能列表"
+          list={
+            <>
+              {(["user", "project"] as const).map(
+                (layer) =>
+                  data?.skills.some((s) => s.layer === layer) && (
+                    <ListGroup
+                      key={layer}
+                      count={data.skills.filter((s) => s.layer === layer).length}
+                      title={
+                        layer === "user" ? (
+                          "用户"
+                        ) : (
+                          <>
+                            项目
+                            <span className="muted-value">
+                              {workspaceRoot ? projectName(workspaceRoot) : "当前工作区"}
+                            </span>
+                          </>
+                        )
+                      }
                     >
-                      <span
-                        className={`dot ${!s.enabled || s.shadowedBy ? "off" : s.missingDescription || s.ignored.length ? "warn" : "ok"}`}
-                      />
-                      <span className={`nm ${s.shadowedBy ? "shadowed" : ""}`}>{s.name}</span>
-                      <Badge>{s.source === "extra" ? "额外目录" : s.source}</Badge>
-                      <small>{skillStatus(s)}</small>
-                    </button>
-                  ))}
-              </div>
-            ))}
-            <SkillWarnings warnings={parseWarnings} />
-            <span className="fine skill-scanned">扫描目录：{data?.scannedDirs.join("、")}</span>
-          </nav>
-          <div className="pane">
-            {skill && (
-              <>
-                <div className="t1">
-                  <h3>{skill.name}</h3>
+                      {data.skills
+                        .filter((s) => s.layer === layer)
+                        .map((s) => (
+                          <ListItem
+                            key={s.entryPath}
+                            label={s.name}
+                            mono
+                            selected={s.entryPath === selected}
+                            off={!s.enabled || !!s.shadowedBy}
+                            dot={
+                              !s.enabled || s.shadowedBy
+                                ? ""
+                                : s.missingDescription || s.ignored.length
+                                  ? "warn"
+                                  : "ok"
+                            }
+                            badge={<Badge>{s.source === "extra" ? "额外目录" : s.source}</Badge>}
+                            meta={skillStatus(s)}
+                            onClick={() => {
+                              setSelected(s.entryPath);
+                            }}
+                          />
+                        ))}
+                    </ListGroup>
+                  ),
+              )}
+              <SkillWarnings warnings={parseWarnings} />
+            </>
+          }
+          listFoot={
+            <>
+              {budget && (
+                <div className="skill-budget">
+                  <meter
+                    min={0}
+                    max={Math.max(1, budget.limitTokens)}
+                    value={budget.usedTokens}
+                    aria-label="模型目录预算"
+                  />
+                  <span>
+                    模型目录{" "}
+                    <b>
+                      {budget.usedTokens.toLocaleString()} / {budget.limitTokens.toLocaleString()}
+                    </b>{" "}
+                    tokens
+                  </span>
+                  <span>
+                    完整说明 {budget.fullCount} 个，只显示名字 {budget.nameCount} 个，已停用{" "}
+                    {budget.disabledCount} 个
+                  </span>
+                </div>
+              )}
+              {budget?.basis === "fallback" && (
+                <span className="fine">模型上下文窗口未知，使用 8,000 token 上限</span>
+              )}
+              <span className="fine skill-scanned">扫描目录：{data?.scannedDirs.join("、")}</span>
+            </>
+          }
+        >
+          {skill && (
+            <>
+              <DetailHeader
+                title={skill.name}
+                mono
+                extra={
                   <Badge>
                     {skill.layer === "user" ? "用户" : "项目"}
                     <span className="muted-value">
                       {skill.source === "extra" ? "额外目录" : skill.source}
                     </span>
                   </Badge>
-                  <div className="acts">
+                }
+                actions={
+                  <>
                     <Switch
                       checked={skill.enabled}
                       aria-label={`启用 ${skill.name}`}
                       disabled={!!skill.shadowedBy || busy}
                       onChange={() => void toggle()}
                     />
-                    <span className="mcp-action-divider" />
                     {skill.shadowedBy && (
                       <Button
+                        variant="ghost"
                         onClick={() => {
                           setSelected(skill.shadowedBy);
                         }}
@@ -234,121 +273,103 @@ export function SkillsPage({
                         查看生效的那份
                       </Button>
                     )}
-                    <Button onClick={() => void attempt(() => openDirectory(skill.realPath))}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => void attempt(() => openDirectory(skill.realPath))}
+                    >
                       在资源管理器中打开 ↗
                     </Button>
-                  </div>
-                </div>
-                {skill.shadowedBy && (
-                  <div className="skill-banner info">
-                    被
-                    {data?.skills.find((s) => s.entryPath === skill.shadowedBy)?.layer === "user"
-                      ? "用户"
-                      : "项目"}
-                    技能 {skill.name} 覆盖
-                    <span>
-                      同名时用户层优先，生效的是 <code>{skill.shadowedBy}</code>
-                      ，这一份不会被加载。想两份都用，把其中一份改名。
-                    </span>
-                  </div>
-                )}
-                {skill.missingDescription && (
-                  <div className="skill-banner warn">
-                    缺少说明，模型看不到这个技能
-                    <span>
-                      SKILL.md 的前言里没有 <code>description</code>。现在只能用{" "}
-                      <code>/{skill.name}</code>{" "}
-                      手动调用；补上一句「做什么、什么时候用」，下个会话起就会进入模型目录。
-                    </span>
-                  </div>
-                )}
-                {skill.commandConflict && (
-                  <div className="skill-banner warn">
-                    与内置命令重名，斜杠不能调用
-                    <span>
-                      <code>/{skill.name}</code>{" "}
-                      已经是内置命令，内置命令优先。模型仍然可以加载这个技能；想手动调用，把技能改名。
-                    </span>
-                  </div>
-                )}
-                {!!skill.ignored.length && (
-                  <>
-                    <div className="skill-banner warn">
-                      有 {skill.ignored.length} 处写法在 Nocturne 里不生效
-                    </div>
-                    <table className="skill-ignored">
-                      <thead>
-                        <tr>
-                          <th>写法</th>
-                          <th>在 Nocturne 里</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {skill.ignored.map((item, i) => (
-                          <tr key={i}>
-                            <td>
-                              <code>{item.syntax}</code>
-                            </td>
-                            <td>{item.reason}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
                   </>
-                )}
-                <dl className="kv skill-kv">
-                  <div className="full">
-                    <dt>位置</dt>
-                    <dd>
-                      <code>{skill.realPath}\SKILL.md</code>
-                      {skill.otherEntries.length > 0 && (
-                        <div className="fine">
-                          经 {skill.entryPath} 进入；另有入口 {skill.otherEntries.join("、")}{" "}
-                          指向同一目录，只算一个
-                        </div>
-                      )}
-                    </dd>
+                }
+              />
+              {skill.shadowedBy && (
+                <div className="skill-banner info">
+                  被
+                  {data?.skills.find((s) => s.entryPath === skill.shadowedBy)?.layer === "user"
+                    ? "用户"
+                    : "项目"}
+                  技能 {skill.name} 覆盖
+                  <span>
+                    同名时用户层优先，生效的是 <code>{skill.shadowedBy}</code>
+                    ，这一份不会被加载。想两份都用，把其中一份改名。
+                  </span>
+                </div>
+              )}
+              {skill.missingDescription && (
+                <div className="skill-banner warn">
+                  缺少说明，模型看不到这个技能
+                  <span>
+                    SKILL.md 的前言里没有 <code>description</code>。现在只能用{" "}
+                    <code>/{skill.name}</code>{" "}
+                    手动调用；补上一句「做什么、什么时候用」，下个会话起就会进入模型目录。
+                  </span>
+                </div>
+              )}
+              {skill.commandConflict && (
+                <div className="skill-banner warn">
+                  与内置命令重名，斜杠不能调用
+                  <span>
+                    <code>/{skill.name}</code>{" "}
+                    已经是内置命令，内置命令优先。模型仍然可以加载这个技能；想手动调用，把技能改名。
+                  </span>
+                </div>
+              )}
+              {!!skill.ignored.length && (
+                <>
+                  <div className="skill-banner warn">
+                    有 {skill.ignored.length} 处写法在 Nocturne 里不生效
                   </div>
-                  <div>
-                    <dt>调用</dt>
-                    <dd>{invocationText(skill)}</dd>
-                  </div>
-                  <div>
-                    <dt>斜杠</dt>
-                    <dd>
-                      <code>
-                        {skill.invocation === "both" || skill.invocation === "user"
-                          ? `/${skill.name} ${typeof skill.fields["argument-hint"] === "string" ? skill.fields["argument-hint"] : ""}`
-                          : "—"}
-                      </code>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>模型目录</dt>
-                    <dd>{catalogText(skill)}</dd>
-                  </div>
-                  <div>
-                    <dt>大小</dt>
-                    <dd>
-                      {(skill.size / 1024).toFixed(1)} KB
-                      {skill.files.some((f) => f.directory)
-                        ? `，${skill.files.filter((f) => f.directory).length} 个子目录`
-                        : ""}
-                    </dd>
-                  </div>
-                </dl>
-                {skill.description && (
-                  <>
-                    <div className="skill-heading">
-                      <h4>说明</h4>
-                      <small>
-                        {skill.description.length} 字符
-                        {skill.catalogStatus === "full" &&
-                        skill.displayedDescriptionLength < skill.description.length
-                          ? `，模型目录里显示前 ${skill.displayedDescriptionLength} 字符`
-                          : ""}
-                      </small>
+                  <DataTable
+                    rows={skill.ignored.map((item, i) => ({ ...item, key: String(i) }))}
+                    rowKey={(item) => item.key}
+                    columns={[
+                      {
+                        key: "syntax",
+                        header: "写法",
+                        mono: true,
+                        render: (item) => <code>{item.syntax}</code>,
+                      },
+                      { key: "reason", header: "在 Nocturne 里", render: (item) => item.reason },
+                    ]}
+                  />
+                </>
+              )}
+              <SettingsGroup title="概况">
+                <SettingsRow label="位置">
+                  <code>{skill.realPath}\SKILL.md</code>
+                  {skill.otherEntries.length > 0 && (
+                    <div className="fine">
+                      经 {skill.entryPath} 进入；另有入口 {skill.otherEntries.join("、")}{" "}
+                      指向同一目录，只算一个
                     </div>
+                  )}
+                </SettingsRow>
+                <SettingsRow label="调用">{invocationText(skill)}</SettingsRow>
+                <SettingsRow label="斜杠">
+                  <code>
+                    {skill.invocation === "both" || skill.invocation === "user"
+                      ? `/${skill.name} ${typeof skill.fields["argument-hint"] === "string" ? skill.fields["argument-hint"] : ""}`
+                      : "—"}
+                  </code>
+                </SettingsRow>
+                <SettingsRow label="模型目录">{catalogText(skill)}</SettingsRow>
+                <SettingsRow label="大小">
+                  {(skill.size / 1024).toFixed(1)} KB
+                  {skill.files.some((f) => f.directory)
+                    ? `，${skill.files.filter((f) => f.directory).length} 个子目录`
+                    : ""}
+                </SettingsRow>
+              </SettingsGroup>
+              {skill.description && (
+                <>
+                  <SettingsGroup title="说明" plain count={`${skill.description.length} 字符`}>
+                    <small>
+                      {skill.description.length} 字符
+                      {skill.catalogStatus === "full" &&
+                      skill.displayedDescriptionLength < skill.description.length
+                        ? `，模型目录里显示前 ${skill.displayedDescriptionLength} 字符`
+                        : ""}
+                    </small>
                     <div className="skill-description">
                       {skill.catalogStatus === "full" &&
                       skill.displayedDescriptionLength < skill.description.length ? (
@@ -363,11 +384,10 @@ export function SkillsPage({
                         skill.description
                       )}
                     </div>
-                  </>
-                )}
-                <div className="skill-heading">
-                  <h4>前言字段</h4>
-                </div>
+                  </SettingsGroup>
+                </>
+              )}
+              <SettingsGroup title="前言字段" plain>
                 <div className="chips">
                   {Object.keys(skill.fields).map((key) => (
                     <span key={key} title={JSON.stringify(skill.fields[key])}>
@@ -391,31 +411,38 @@ export function SkillsPage({
                       </span>
                     ))}
                 </div>
-                <div className="skill-heading">
-                  <h4>正文预览</h4>
-                  <small>
-                    前 {Math.min(40, skill.bodyLines)} / {skill.bodyLines} 行
-                  </small>
-                </div>
+              </SettingsGroup>
+              <SettingsGroup title="正文预览" plain>
+                <small>
+                  前 {Math.min(40, skill.bodyLines)} / {skill.bodyLines} 行
+                </small>
                 <pre className="tail">{skill.bodyPreview}</pre>
-                <div className="skill-heading">
-                  <h4>支持文件</h4>
-                  <small>模型读取这些文件不需要确认</small>
-                </div>
-                <div className="chips">
-                  {skill.files
-                    .filter((f) => f.name !== "SKILL.md")
-                    .map((f) => (
-                      <span key={f.name}>
-                        {f.name}
-                        {f.directory ? "/" : ""}
-                      </span>
-                    ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+              </SettingsGroup>
+              {skill.files.some((f) => f.name !== "SKILL.md") && (
+                <SettingsGroup
+                  title="支持文件"
+                  plain
+                  count={skill.files.filter((f) => f.name !== "SKILL.md").length}
+                  action={<span className="desc">模型读取这些文件不需要确认</span>}
+                >
+                  <DataTable
+                    aria-label="支持文件"
+                    rows={skill.files.filter((f) => f.name !== "SKILL.md")}
+                    rowKey={(f) => f.name}
+                    columns={[
+                      {
+                        key: "name",
+                        header: "文件",
+                        mono: true,
+                        render: (f) => `${f.name}${f.directory ? "/" : ""}`,
+                      },
+                    ]}
+                  />
+                </SettingsGroup>
+              )}
+            </>
+          )}
+        </MasterDetail>
       )}
       {toast && (
         <div className="skill-toast" role="status">

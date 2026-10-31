@@ -130,7 +130,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   await screen.findByText("模型目录到此为止");
   expect(screen.getByRole("meter").getAttribute("value")).toBe("678");
   expect(screen.getByText(/完整说明 2 个，只显示名字 4 个，已停用 1 个/)).toBeTruthy();
-  expect(screen.getByText("project").parentElement?.textContent).toBe("项目project");
+  expect(screen.getByText("project").parentElement?.textContent).toBe("项目project · 1");
   const list = screen.getByRole("navigation", { name: "技能列表" });
   fireEvent.click(within(list).getByRole("button", { name: /release/ }));
   expect(screen.getByText("有 2 处写法在 Nocturne 里不生效").className).toContain("warn");
@@ -138,7 +138,9 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   fireEvent.click(within(list).getByRole("button", { name: /alpha.*被覆盖/ }));
   expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText("被用户技能 alpha 覆盖").className).toContain("info");
-  expect(list.querySelector(".shadowed")?.textContent).toBe("alpha");
+  expect(within(list).getByRole("button", { name: /alpha.*被覆盖/ }).textContent).toContain(
+    "alpha",
+  );
   fireEvent.click(within(list).getByRole("button", { name: /manual/ }));
   expect(screen.getByText("缺少说明，模型看不到这个技能").className).toContain("warn");
   fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看 ›"));
@@ -172,8 +174,8 @@ it("大小格只在有子目录时显示子目录数", async () => {
       openUrl={vi.fn()}
     />,
   );
-  const size = () => screen.getByText("大小").nextElementSibling?.textContent;
-  expect((await screen.findByText("大小")).nextElementSibling?.textContent).toBe("1.0 KB");
+  const size = () => screen.getByRole("group", { name: "大小" }).textContent?.slice("大小".length);
+  expect((await screen.findByRole("group", { name: "大小" })).textContent).toBe("大小1.0 KB");
   const list = screen.getByRole("navigation", { name: "技能列表" });
   fireEvent.click(within(list).getByRole("button", { name: /nested/ }));
   expect(size()).toBe("1.0 KB，2 个子目录");

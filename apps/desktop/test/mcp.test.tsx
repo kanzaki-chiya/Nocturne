@@ -142,7 +142,7 @@ describe("MCP 设置页", () => {
     await screen.findByRole("heading", { name: "managed" });
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain(text));
-    expect(screen.getByText("最近测试").nextElementSibling?.textContent).toBe(text);
+    expect(screen.getByRole("group", { name: "最近测试" }).textContent).toBe(`最近测试${text}`);
     expect(screen.queryByText("连接失败，请检查服务器配置")).toBeNull();
     f.close();
   });
@@ -191,7 +191,7 @@ describe("MCP 设置页", () => {
       <McpPage client={f.client} workspaceRoot="test-workspace" version={0} onChanged={changed} />,
     );
     await screen.findByRole("heading", { name: "managed" });
-    expect(screen.getByText("config.json（只读）")).toBeDefined();
+    expect(screen.getByRole("group", { name: "config.json（只读）" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/home\/config.json/)).toBeDefined();
@@ -337,7 +337,7 @@ describe("面板浏览器（桌面内置）", () => {
         prefs={prefs}
       />,
     );
-    await screen.findByRole("heading", { name: "面板浏览器（桌面内置）" });
+    await screen.findByRole("group", { name: "面板浏览器（桌面内置）" });
     return { f, prefs, storage };
   }
 

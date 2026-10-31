@@ -1,27 +1,15 @@
-.skills-page .ph3 {
-  padding: 16px 28px 12px;
-}
-.skills-page .cols3 {
-  grid-template-columns: 330px minmax(0, 1fr);
-}
-.skills-page .pane .t1 {
-  flex-wrap: wrap;
-}
 .skill-budget {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
   color: var(--a-muted);
   font-size: var(--fs-1);
-  margin-top: 4px;
 }
 .skill-budget b {
   color: var(--a-text);
   font-weight: 500;
 }
 .skill-budget meter {
-  width: 95px;
+  width: 100%;
   height: 10px;
   accent-color: var(--a-accent);
 }
@@ -32,26 +20,6 @@
 }
 .skill-budget meter::-webkit-meter-optimum-value {
   background: var(--a-accent);
-}
-.skill-row {
-  gap: 6px;
-  min-width: 0;
-}
-.skill-row .nm {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.skill-row .tagc {
-  flex: none;
-  font-size: var(--fs-1);
-}
-.skill-row small {
-  flex: none;
-}
-.skill-row .shadowed {
-  text-decoration: line-through;
-  color: var(--a-faint);
 }
 .skill-scanned {
   overflow-wrap: anywhere;
@@ -81,44 +49,6 @@
   border-color: color-mix(in srgb, var(--a-accentAlt) 35%, var(--a-border));
   background: color-mix(in srgb, var(--a-accentAlt) 6%, transparent);
 }
-.skill-ignored {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-1);
-}
-.skill-ignored th {
-  text-align: left;
-  color: var(--a-faint);
-  font-weight: 400;
-}
-.skill-ignored th,
-.skill-ignored td {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--a-border);
-  vertical-align: top;
-  overflow-wrap: anywhere;
-}
-.skill-ignored td:first-child {
-  width: 45%;
-}
-.skills-page .skill-kv {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.skill-kv .full {
-  grid-column: 1 / -1;
-}
-.skill-kv dd {
-  min-width: 0;
-}
-.skills-page .pane {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.skill-kv code {
-  overflow-wrap: anywhere;
-  font-family: var(--mono);
-}
 .skill-heading {
   display: flex;
   align-items: baseline;
@@ -134,9 +64,7 @@
   font-size: var(--fs-1);
 }
 .skill-description {
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-3);
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-4);
   line-height: 1.75;
   font-size: var(--fs-2);
   white-space: pre-wrap;
@@ -199,31 +127,6 @@
 .skill-warnings div span {
   display: block;
   color: var(--a-muted);
-}
-.skill-empty {
-  margin: auto;
-  display: grid;
-  gap: 14px;
-  max-width: 510px;
-  padding: 40px;
-  text-align: center;
-}
-.skill-empty-icon {
-  font-size: 32px;
-  color: var(--a-faint);
-}
-.skill-empty h4 {
-  font-size: var(--fs-4);
-  margin: 0;
-}
-.skill-empty p {
-  color: var(--a-muted);
-  font-size: var(--fs-2);
-  line-height: 1.8;
-  margin: 0;
-}
-.skill-empty .btn + .btn {
-  margin-left: 8px;
 }
 .skill-toast {
   position: absolute;
