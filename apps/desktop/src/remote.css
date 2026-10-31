@@ -17,6 +17,7 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4);
+  max-width: var(--w-form);
 }
 .remote-setup p {
   margin: 0;
