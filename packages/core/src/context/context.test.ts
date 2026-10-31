@@ -771,11 +771,11 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
       maxOutputTokens: 1000,
     };
     expect(inputBudgetTokens(large)).toBe(1_000_000);
-    // R = min(20k, 0.1·B) = 20,000；tool(1, 25000) 可回收 > 20k
+    // 仅由 L 触发时需要回收 100k；比例/强制路径仍只需 R = 20k。
     const atLarge = (
       tokens: number,
       over: Partial<BuildContextInput> = {},
-      history: HistoryEntry[] = [tool(1, 25_000)],
+      history: HistoryEntry[] = [tool(1, 120_000)],
     ) =>
       buildContext(
         input([...history, assistant(7, 1, tokens - 100)], {
@@ -785,14 +785,32 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
         }),
       );
 
-    // 大窗口（B = 1M）、历史 210k、可回收 >= R：给出 prune；历史 190k：不给
+    // 大窗口（B = 1M）、历史 210k、可回收 120k：给出 prune；历史 190k：不给
     expect(atLarge(210_000).compaction?.kind).toBe("prune");
     expect(atLarge(190_000).compaction).toBeUndefined();
     expect(atLarge(200_000).compaction).toBeUndefined();
     expect(atLarge(200_001).compaction?.kind).toBe("prune");
 
-    // 回收量不足 R（20k）时不修剪（防止每步都修剪破坏缓存）
+    // 仅超过 L：80k 不足 L/2；到达 P_rel（等号）仍使用该门槛。
+    expect(atLarge(210_000, {}, [tool(1, 80_000)]).compaction).toBeUndefined();
+    expect(atLarge(800_000, {}, [tool(1, 80_000)]).compaction).toBeUndefined();
     expect(atLarge(210_000, {}, [tool(1, 10_000)]).compaction).toBeUndefined();
+    // 超过 P_rel、强制压缩、关闭 L 时仍使用 R，25k 可以回收。
+    expect(atLarge(800_001, {}, [tool(1, 25_000)]).compaction?.kind).toBe("prune");
+    expect(
+      atLarge(210_000, { compactionState: { force: true } }, [tool(1, 25_000)]).compaction?.kind,
+    ).toBe("prune");
+    expect(atLarge(1_000_001, {}, [tool(1, 25_000)]).compaction?.kind).toBe("prune");
+    expect(atLarge(800_001, { compactionPruneLimit: 0 }, [tool(1, 25_000)]).compaction?.kind).toBe(
+      "prune",
+    );
+    // 自定义 L 和 R 的较大值生效，不新增配置；不足 R 仍不能剪。
+    expect(
+      atLarge(210_000, { compactionPruneLimit: 100_000 }, [tool(1, 80_000)]).compaction?.kind,
+    ).toBe("prune");
+    expect(
+      atLarge(210_000, { compactionPruneLimit: 10_000 }, [tool(1, 15_000)]).compaction,
+    ).toBeUndefined();
 
     // pruneLimit = 0：大窗口不设绝对上限，回到只按比例 P_rel = 800k
     expect(atLarge(210_000, { compactionPruneLimit: 0 }).compaction).toBeUndefined();
@@ -1106,6 +1124,156 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
     expect(buildContext(input(history, { events })).report.estimatedTokens).toBe(
       pure(history, { events }),
     );
+  });
+});
+
+describe("ADR-0066 修剪调用参数投影", () => {
+  const long = "x".repeat(500);
+  const shortened = `${"x".repeat(200)}…[已省略 300 字符]`;
+  const args = {
+    path: "a.txt",
+    text: long,
+    nested: { count: 42, enabled: true, empty: null, items: [long, "短", false, { [long]: long }] },
+    atLimit: "x".repeat(200),
+    overLimit: "x".repeat(201),
+  };
+  const assistant = (
+    seq: number,
+    callId: string,
+  ): Extract<HistoryEntry, { kind: "assistant" }> => ({
+    kind: "assistant",
+    seq,
+    turnId: "t",
+    messageId: `a${seq}`,
+    model: model.ref,
+    protocol: "gemini",
+    content: [],
+    toolCalls: [{ callId, name: "arbitrary", input: args }],
+    usage: undefined,
+    finishReason: "tool_calls",
+  });
+  const tool = (seq: number, callId: string): Extract<HistoryEntry, { kind: "tool" }> => ({
+    kind: "tool",
+    seq,
+    turnId: "t",
+    callId,
+    name: "arbitrary",
+    status: "ok",
+    modelContent: "ok",
+  });
+  const compact: HistoryEntry = {
+    kind: "compaction",
+    seq: 5,
+    turnId: "t",
+    compactKind: "prune",
+    throughSeq: 2,
+    summary: undefined,
+  };
+  const input = (history: HistoryEntry[]) =>
+    baseInput({ history, model: { ...model, protocol: "gemini" } });
+  const calls = (built: ReturnType<typeof buildContext>) =>
+    built.request.messages.flatMap((m) => (m.role === "assistant" ? m.toolCalls : []));
+
+  it("按结果截止点截短，保留结构/所有键/标量，且历史不变、重建确定、增量前缀稳定", () => {
+    const history = [assistant(1, "a"), tool(2, "a"), assistant(3, "b"), tool(4, "b"), compact];
+    const original = JSON.stringify(history);
+    const built = buildContext(input(history));
+    expect(calls(built)[0]?.input).toEqual({
+      ...args,
+      text: shortened,
+      overLimit: `${"x".repeat(200)}…[已省略 1 字符]`,
+      nested: { ...args.nested, items: [shortened, "短", false, { [long]: shortened }] },
+    });
+    expect(calls(built)[1]?.input).toEqual(args);
+    expect(JSON.parse(JSON.stringify(calls(built)[0]?.input))).toEqual(calls(built)[0]?.input);
+    expect(JSON.stringify(history)).toBe(original);
+    expect(JSON.stringify(buildContext(input(history)).request)).toBe(
+      JSON.stringify(built.request),
+    );
+    const next = buildContext(input([...history, assistant(6, "c"), tool(7, "c")]));
+    expect(JSON.stringify(next.request.messages.slice(0, built.request.messages.length))).toBe(
+      JSON.stringify(built.request.messages),
+    );
+    const toolMessages = built.request.messages.filter((m) => m.role === "tool");
+    const serialized = calls(built).map((c) => JSON.stringify([c]));
+    const expectedTokens =
+      serialized.reduce((n, s) => n + estimateTokens(s), 0) +
+      toolMessages.reduce((n, m) => n + estimateTokens(m.content), 0);
+    const expectedChars =
+      serialized.reduce((n, s) => n + s.length, 0) +
+      toolMessages.reduce((n, m) => n + m.content.length, 0);
+    expect(built.report.sections.find((s) => s.name === "history")?.breakdown?.tool).toEqual({
+      chars: expectedChars,
+      estimatedTokens: expectedTokens,
+    });
+    expect(projectedTokens(history, { ...model, protocol: "gemini" })).toBe(expectedTokens);
+  });
+
+  it.each(["call", "parallel", "reasoning", "text"] as const)(
+    "%s 上带 providerData 时整组参数原样保留，跨协议去除数据后可以截短",
+    (where) => {
+      const entry = assistant(1, "a");
+      if (where === "call" || where === "parallel") {
+        entry.toolCalls[0] = {
+          callId: "a",
+          name: "arbitrary",
+          input: args,
+          providerData: { opaque: "signature" },
+        };
+        if (where === "parallel")
+          entry.toolCalls.push({ callId: "b", name: "arbitrary", input: args });
+      } else {
+        entry.content = [{ type: where, text: "signed", providerData: { opaque: "signature" } }];
+      }
+      const history = [entry, tool(2, "a"), tool(3, "b"), { ...compact, throughSeq: 3 }];
+      expect(calls(buildContext(input(history))).every((c) => c.input === args)).toBe(true);
+      const switched = buildContext({
+        ...input(history),
+        model: { ...model, protocol: "anthropic" },
+      });
+      expect(calls(switched).every((c) => (c.input as typeof args).text === shortened)).toBe(true);
+      expect(calls(switched).every((c) => c.providerData === undefined)).toBe(true);
+    },
+  );
+
+  it("pinResult 与未结算调用不截短；可解析 rawInput 保持合法 JSON，解析失败原样保留", () => {
+    const entry = assistant(1, "a");
+    entry.toolCalls.push({ callId: "pending", name: "other", input: args });
+    const pinned = [entry, { ...tool(2, "a"), pinResult: true }, compact];
+    expect(calls(buildContext(input(pinned))).every((c) => c.input === args)).toBe(true);
+    entry.toolCalls[0] = { callId: "a", name: "other", rawInput: JSON.stringify(args) };
+    const built = buildContext(input([entry, tool(2, "a"), compact]));
+    expect(JSON.parse(calls(built)[0]?.rawInput ?? "{}")).toMatchObject({ text: shortened });
+    expect(calls(built)[1]?.input).toBe(args);
+    entry.toolCalls[0] = { callId: "a", name: "other", rawInput: '{"invalid":' };
+    expect(calls(buildContext(input([entry, tool(2, "a"), compact])))[0]?.rawInput).toBe(
+      '{"invalid":',
+    );
+  });
+
+  it("回收门槛计入参数截短，即使工具输出很短也能达到 L/2", () => {
+    const entry = assistant(1, "a");
+    const call = { callId: "a", name: "arbitrary", input: { text: "中".repeat(120_500) } };
+    entry.toolCalls[0] = call;
+    const large: ModelInfo = { ...model, protocol: "gemini", contextWindow: 1_009_024 };
+    const anchor: HistoryEntry = {
+      ...assistant(4, "anchor"),
+      toolCalls: [],
+      usage: { inputTokens: 210_000, outputTokens: 0 },
+    };
+    const history = [entry, tool(2, "a"), anchor];
+    const built = buildContext(
+      baseInput({ model: large, history, events: [ev(3, "turn.completed", {})] }),
+    );
+    expect(built.compaction).toEqual({ kind: "prune", throughSeq: 3 });
+    const before = projectedTokens(history, large);
+    const after = projectedTokens([...history, { ...compact, throughSeq: 3 }], large);
+    expect(before - after).toBeGreaterThan(100_000);
+    entry.toolCalls[0] = { ...call, providerData: { opaque: "signature" } };
+    expect(
+      buildContext(baseInput({ model: large, history, events: [ev(3, "turn.completed", {})] }))
+        .compaction,
+    ).toBeUndefined();
   });
 });
 

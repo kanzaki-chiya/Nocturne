@@ -72,3 +72,32 @@ ADR-0063 §2：修剪后估算仍在 `P` 以上，就在同一窗口接着摘要
 - **配置分层与设置页**：`ConfigFile.compaction.pruneLimit`、`ResolvedConfig.compactionPruneLimit`、`SettingItem`（`"compaction.pruneLimit"`）与 `SettingsPatch`（`"compaction.pruneLimit": number | null`）沿用 `compaction.threshold` 的分层合并与设置层逐字段独立降级；`packages/core/src/index.ts` 在主会话 `submit`、子代理 `subagent` 与 `describeContext`（含缓存键）中统一传入 `compactionPruneLimit`。桌面端 `apps/desktop/src/SettingsPage.tsx` 的「压缩阈值」对话框新增「修剪上限」输入框。
 - **测试**：`packages/core/src/protocol/compaction.test.ts`、`packages/core/src/context/context.test.ts`、`packages/core/test/settings.test.ts` 与 `apps/desktop/test/settings.test.tsx` 覆盖全部验收项。
 
+## 修订（2026-11-01）
+
+### 背景：小额回收不足以抵偿缓存失效
+
+§4 关于「修剪后降到几万 token、几十到上百步才再修剪」的假设被真实编码会话 `202610311549-4e916d5d` 推翻。模型为 `magpie / antigravity/gemini-4-argon`，使用 OpenAI 兼容协议，可用预算约 1.03M。分析时的 184 次请求发生了 17 次 L1 修剪，输入 34,572,292 token、缓存读 29,223,756（84.5%）；相邻未修剪步骤通常命中 96%–99%，修剪后首步仅命中系统提示与工具声明的 14,559 token（6%–17%），部分第二步也未命中。534.9 万未命中 token 中约 65% 集中在这些修剪后的头两步。
+
+旧 L1 只替换工具结果，保留完整调用参数；大规模替换中 `edit` 参数累计约 37 万字符，`write` 约 7 万字符。后半段可见 203k → 161k、198k → 169k 的小额回收，末尾修剪后仍有 258k。§3 又允许在仍高于 L 时每新增可回收的 20k 内容就再剪，导致 seq 962–1084 附近几乎每一两步打断一次前缀缓存。
+
+修剪的收益是后续每一步少发送的 token，而它们原本大多按缓存价计费；代价却是一次、甚至两次完整输入按非缓存价计费。回收太少、频率太高时，代价会超过收益。
+
+### 决定与边界
+
+1. 仅由绝对上限 L 触发的修剪提高回收门槛至 `max(R, L/2)`（默认 100k），使一次前缀失效换来足够回收量；比例阈值与强制路径仍保持原有门槛，`pruneLimit = 0` 的触发与门槛行为不变，不新增配置。精确判定统一以 [context.md §6.5](../architecture/context.md#65-触发) 为准，取代本文原 §1、§3、§4 中相应假设。
+2. 修剪范围内工具结果对应的调用参数一并做确定性截短，仅改变投影。保留 JSON 结构能让模型继续识别路径和参数用途，同时释放旧替换文本、文件正文占据的空间；通用递归规则与估算口径统一放在 context.md §6.5，不按工具名分支、不改事件或协议。
+
+签名采用保守例外：同源 assistant 的内容块或调用只要含 `providerData`，整组调用参数保持原样。这比只检查单个调用更保守，因为 Gemini 并行调用可以仅在第一项携带签名，而 Anthropic 的签名在 reasoning 块。跨协议/服务商已剥离专有数据时仍可截短。
+
+依据：本地 `@ai-sdk/google` 4.0.77 的 `src/convert-to-google-messages.ts` 将 `part.input` 与 `thoughtSignature` 原样组合发送（463–515 行）；`@ai-sdk/anthropic` 4.0.58 的 `src/convert-to-anthropic-prompt.ts` 将 reasoning 的签名和工具 input 直接回传（727–781 行及其后的 tool-call 分支），均不会重新签名。[Google 官方 thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures) 要求签名回到原 Part，当前 turn 的函数调用会严格校验；[Anthropic 官方工具思考工作流](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows) 要求 assistant 内容原样回传，[官方 cookbook](https://platform.claude.com/cookbook/extended-thinking-extended-thinking-with-tool-use) 也警告修改先前内容可能拒绝请求。这些依据不足以证明改写签名关联参数安全，因此不做此改写。
+
+真实服务冒烟中，原生 Gemini `gemini-4-argon` 生成带签名且超过 200 字符的参数，L1 投影保留参数后续请求被接受；`gemini-4-argon-contributor` 别名返回 400 Model is unavailable，Anthropic 环境凭据返回 401，后者未完成真实签名往返验证。保守例外也适用于非签名的不透明 `providerData`，可能减少部分模型的可回收量，这是避免 Context 解释 Provider 数据的取舍。
+
+### 验收
+
+- Builder 单测覆盖：B=1M 时仅超过 L、回收 80k 不剪/120k 剪；达到 P_rel 的等号仍按 L 门槛，超过 P_rel 回收 25k 仍剪；强制路径、小窗口 B=200k、关闭 L、自定义 L 与基础 R 的关系。
+- 参数投影覆盖范围内外、pinResult、未结算调用、嵌套对象/数组/所有键/标量、合法 JSON、两次构建逐字节一致、截止点固定时增量前缀稳定；签名位于调用/并行首项/推理/文本时均保留，跨协议剥离数据后可截短；回收量与报告均计入参数投影。
+- 真实会话副本按事件顺序重放，去掉原压缩并调用新旧 Builder，所有 assistant 前求计划并插入模拟 prune。验收副本已有 186 次请求（输入 35,166,410、缓存读 29,517,746），比分析时多两次；旧规则重现全部 17 次修剪及截止点，新规则降至 6 次。
+- 回放使用 B=1,031,552、固定系统与工具底座 14,559 token；系统原文/工具快照不在日志中，用等 token 合成前缀。原请求 usage 加反事实历史投影差额校正锚点，避免新规则继续沿用旧请求的体积；未修剪时缓存按上步输入、修剪时按固定底座估算，首请求缓存为 0。估算命中率旧 89.255%、新 95.043%，输入总量旧 35,166,410、新 32,887,718。简化算法不模拟修剪后第二步失配、服务端分词与缓存块粒度，不代表真实计费预测；修剪后本地估算也可能低于下一次上游锚点。
+- 一次性回放脚本、会话副本及两组原始输出保留于仓库外 `nocturne-mockups/impl/r1031k/`，不进入提交；测试位于 `packages/core/src/context/context.test.ts`。
+

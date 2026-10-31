@@ -375,6 +375,24 @@ export function compactionCutoffs(history: readonly HistoryEntry[]): {
   return { summaryThrough, pruneThrough };
 }
 
+/** L1 参数投影：每个字符串保留的字符数（context.md 6.5）。 */
+const PRUNED_ARGUMENT_MAX_CHARS = 200;
+
+function pruneArgument(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.length > PRUNED_ARGUMENT_MAX_CHARS
+      ? `${value.slice(0, PRUNED_ARGUMENT_MAX_CHARS)}…[已省略 ${value.length - PRUNED_ARGUMENT_MAX_CHARS} 字符]`
+      : value;
+  }
+  if (Array.isArray(value)) return value.map(pruneArgument);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, pruneArgument(item)]),
+    );
+  }
+  return value;
+}
+
 /** L1 修剪后工具结果的占位说明（context.md 6.5：保留工具名与参数摘要） */
 function prunedPlaceholder(entry: Extract<HistoryEntry, { kind: "tool" }>): string {
   const args = entry.inputSummary !== undefined ? `（${entry.inputSummary}）` : "";
@@ -624,6 +642,16 @@ function historyToMessages(
     descriptions: attachmentDescriptions(history, events),
   };
   const { summaryThrough, pruneThrough } = compactionCutoffs(history);
+  const prunedCalls = new Set(
+    history.flatMap((entry) =>
+      entry.kind === "tool" &&
+      entry.seq > summaryThrough &&
+      entry.seq <= pruneThrough &&
+      !entry.pinResult
+        ? [entry.callId]
+        : [],
+    ),
+  );
   const latestSummary = history.find(
     (entry) =>
       entry.kind === "compaction" &&
@@ -694,16 +722,33 @@ function historyToMessages(
             });
         // 旧日志里失败轮次可能留下空 assistant；Messages 不接受空 content。
         if (content.length === 0 && entry.toolCalls.length === 0) break;
-        // 细分（ADR-0046 §5）：回答文字与推理归 assistant，调用参数归 tool
-        byChars.assistant += blockChars(content);
-        byChars.tool += JSON.stringify(entry.toolCalls).length;
-        messages.push({
-          role: "assistant",
-          content,
-          toolCalls: sameSource
-            ? entry.toolCalls
-            : entry.toolCalls.map(({ providerData: _data, ...call }) => call),
+        // 签名可能在正文/推理块或并行调用的首项上；同源回传时整组保留，
+        // Context 不解释 Provider 专有数据，也不按 Provider 或工具名分支。
+        const preserveArguments =
+          sameSource &&
+          (content.some((block) => block.providerData !== undefined) ||
+            entry.toolCalls.some((call) => call.providerData !== undefined));
+        const toolCalls = entry.toolCalls.map((original) => {
+          const { providerData: _data, ...neutral } = original;
+          const call = sameSource ? original : neutral;
+          if (preserveArguments || !prunedCalls.has(call.callId)) return call;
+          // rawInput 是解析失败时的原文，不能截断成非法 JSON；可解析时按同一规则投影。
+          if (call.input === undefined && call.rawInput !== undefined) {
+            try {
+              return {
+                ...call,
+                rawInput: JSON.stringify(pruneArgument(JSON.parse(call.rawInput))),
+              };
+            } catch {
+              return call;
+            }
+          }
+          return { ...call, input: pruneArgument(call.input) };
         });
+        // 细分（ADR-0046 §5）：回答文字与推理归 assistant，投影后的调用参数归 tool
+        byChars.assistant += blockChars(content);
+        byChars.tool += JSON.stringify(toolCalls).length;
+        messages.push({ role: "assistant", content, toolCalls });
         for (const c of entry.toolCalls) unsettled.add(c.callId);
         break;
       }
@@ -1284,8 +1329,12 @@ export function buildContext(input: BuildContextInput): BuiltContext {
           input.attachmentData,
           input.events,
         );
-      if (reclaimed >= Math.min(20_000, 0.1 * budgetTokens))
-        compaction = { kind: "prune", throughSeq: boundary };
+      const limitOnly = !forced && pruneLimit > 0 && estimated <= pruneRelativeLine;
+      const minimumReclaimed = Math.max(
+        Math.min(20_000, 0.1 * budgetTokens),
+        limitOnly ? pruneLimit / 2 : 0,
+      );
+      if (reclaimed >= minimumReclaimed) compaction = { kind: "prune", throughSeq: boundary };
     }
     if (
       compaction === undefined &&

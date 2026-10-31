@@ -106,7 +106,7 @@ protocol.estimateTokenUnits 返回未取整的四分之一 token 单位；estima
 
 | 级别 | 做法 | 成本 | 事件内容 |
 |---|---|---|---|
-| L1 修剪（prune） | 把 `throughSeq` 及之前的工具结果替换为占位说明（保留工具名、参数摘要与"输出已省略"），工具调用与结果本身仍然成对保留 | 无模型调用，确定性 | `kind: "prune"`、`throughSeq` |
+| L1 修剪（prune） | 把 `throughSeq` 及之前的非固定工具结果替换为占位说明，并截短对应调用的长字符串参数（签名例外见 §6.5）；调用与结果仍成对保留 | 无模型调用，确定性 | `kind: "prune"`、`throughSeq` |
 | L2 摘要（summary） | 用模型把 `throughSeq` 及之前的历史总结为一段结构化摘要（目标、已完成、关键文件、未决事项） | 一次模型调用 | `kind: "summary"`、`throughSeq`、`summary` |
 
 ### 6.2 职责划分
@@ -136,25 +136,26 @@ Agent Loop                 → prune：直接写入事件
 
 - 同一会话中，每种压缩的 `throughSeq` 必须严格递增；Agent Loop 保证这一点，折叠时遇到不递增的压缩事件视为不变量被破坏（记录诊断并忽略该事件）。
 - **摘要是累积的**：新摘要的输入是"上一个摘要 + 其后到新边界为止的历史"，因此只有最新的摘要生效，更早的摘要与其覆盖的历史都不再进入上下文。
-- **修剪只作用于最新摘要之后的历史**：生效的修剪截止点是最新摘要之后、`throughSeq` 最大的那次修剪；在其之前的工具结果显示为占位说明。
+- **修剪只作用于最新摘要之后的历史**：生效的修剪截止点是最新摘要之后、`throughSeq` 最大的那次修剪；覆盖的工具结果与调用参数按 §6.5 投影。
 - 最新摘要之后附上「本会话最近读过或改过的文件」提示：从被覆盖的 `tool.started.subjects` 中取 `kind: read/edit` 的路径，去重、最近优先，最多 20 个；不按工具名判断、不带文件内容。来源仍是持久事件，恢复后投影相同，不改变旧会话的事件重放与状态折叠结果。
 - 有效历史 = 最新摘要（若有）+ 最近文件提示 + 摘要之后的事件（修剪截止点之前的工具输出替换为占位）+ 被覆盖的进行中 Turn 的 `message.user` 原文。
 
 ### 6.5 触发
 
 - 摘要阈值 `S` 来自 `compaction.threshold`（默认 `90%`，格式与分层见 [config.md](config.md) §2）；修剪绝对上限 `L` 来自 `compaction.pruneLimit`（默认 `200000` token，`0` 表示不设绝对上限，[ADR-0066](../decisions/ADR-0066-prune-limit.md)）；修剪阈值 `P = min(0.8·B, S, L)`（`L = 0` 时退回比例阈值 `P_rel = min(0.8·B, S)`）。估算超过 `P` 时先尝试修剪；修剪后或不可修剪时仍超过 `S` 才尝试摘要。这类压缩是预防性的（`mustCompact = false`）。
-- **修剪不足时升级为摘要**（[ADR-0063](../decisions/ADR-0063-loop-guard.md) §2、[ADR-0065](../decisions/ADR-0065-compaction-per-request.md) §3、[ADR-0066](../decisions/ADR-0066-prune-limit.md) §3）：本次模型请求前刚执行过修剪（`compactionState.pruneAttempted`）而重建后的估算**仍在比例阈值 `P_rel = min(0.8·B, S)` 以上**时，同一配额窗口内接着给出 `summary` 计划，不必等再次超过 `S`。只因为超过 `L` 而修剪、修剪后仍高于 `L` 但低于或等于 `P_rel` 的，不升级为摘要（等下一次回收量再次满足 `≥ R` 时再修剪）。判定同样在 Builder 的压缩计划里，Agent Loop 只执行计划。这一次摘要算作当前请求窗口内的那一次，失败按 §6.6 处理，不额外重试。
+- **修剪不足时升级为摘要**（[ADR-0063](../decisions/ADR-0063-loop-guard.md) §2、[ADR-0065](../decisions/ADR-0065-compaction-per-request.md) §3、[ADR-0066](../decisions/ADR-0066-prune-limit.md) §3）：本次模型请求前刚执行过修剪（`compactionState.pruneAttempted`）而重建后的估算**仍在比例阈值 `P_rel = min(0.8·B, S)` 以上**时，同一配额窗口内接着给出 `summary` 计划，不必等再次超过 `S`。只因为超过 `L` 而修剪、修剪后仍高于 `L` 但低于或等于 `P_rel` 的，不升级为摘要，等待回收量再次满足下述门槛。判定同样在 Builder 的压缩计划里，Agent Loop 只执行计划。这一次摘要算作当前请求窗口内的那一次，失败按 §6.6 处理，不额外重试。
 - `S = B`（`100%` 或绝对值达到预算）时两种预防性压缩都停用，只在超预算或 `context_overflow` 时走强制路径。
 - 请求已超出预算，或 Provider 返回 `context_overflow` 时，`mustCompact = true`（见 [agent-loop.md](agent-loop.md) 第 3.5 节）。
 - 用户可以用 `/compact` 手动触发摘要，走同一条路径。
 
 落地细节（自动摘要自 Phase 3 起启用，与手动 `/compact` 共用同一条 L2 路径）：
 
-- Builder 的 `compaction` 计划按序给出：超过 `P` 且存在更新于当前修剪点的保留区边界时，计算该范围工具输出替换为占位后实际回收的估算 token；只有回收量 ≥ `R = min(20k, 0.1·B)` 才给出 `prune`。不足时跳过；超过 `S`、本次请求窗口已修剪后仍在 `P` 以上（上一节）、或必须压缩时再尝试 `summary`（计划携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
+- Builder 的 `compaction` 计划按序给出：超过 `P` 且存在更新于当前修剪点的保留区边界时，用修剪前后同一投影口径计算实际回收的估算 token（工具结果占位、调用参数截短及图片均计入）。基础回收门槛为 `R = min(20k, 0.1·B)`；若本次仅因超过 `L` 触发，即非强制、`L > 0` 且估算不高于 `P_rel`，门槛提高为 `max(R, L/2)`（默认 100k）。超过 `P_rel`、强制压缩或 `L` 不参与时仍用 `R`；`pruneLimit = 0` 保持原有门槛。回收不足时跳过；超过 `S`、本次请求窗口已修剪后仍在 `P_rel` 以上（上一节）、或必须压缩时再尝试 `summary`（计划携带 `summaryRequest`）。两种计划的判定都在 Builder 内完成，Agent Loop 只按计划执行。
 - **两次模型请求之间每种压缩至多执行一次**（[ADR-0065](../decisions/ADR-0065-compaction-per-request.md)）：每次模型请求完成（`message.assistant` 写入）后清零修剪和摘要的「已尝试」标记，长 Turn 在后续步骤再次超过阈值时可以继续自动修剪或摘要；但摘要请求一旦失败，本 Turn 内不再尝试摘要（§6.6），之后若超预算或收到 `context_overflow`，能修剪就修剪，否则以 `compaction_failed` 结束；同一请求窗口内 `context_overflow` 到达时从未尝试过的下一级继续（prune 未试过先 prune，否则 summary），两级都已尝试后仍溢出发 `compaction_failed`。
 - `summary` 计划执行成功后重建一次；重建结果仍超硬预算时不再追加尝试，Turn 以 `error(code = "compaction_failed")` 结束。
 - 摘要可以在 Turn 进行中发生：此时摘要边界只落在已闭合的步骤边界上（6.3），被覆盖的进行中 Turn 的 `message.user` 原文由 Builder 依据 `state.openTurn` 在摘要后重新注入。
-- prune 的呈现：最新摘要之后、`throughSeq` 及之前的工具结果替换为占位说明（保留工具名与参数摘要，标注"输出已省略"）；参数摘要来自 `tool.started.input` 折叠进历史条目的 `inputSummary` 字段（`HistoryEntry` 的兼容新增可选字段，见 [events.md](../protocols/events.md) 第 8 节）。
+- prune 的呈现：最新摘要之后、`throughSeq` 及之前的非 `pinResult` 工具结果替换为占位说明（保留工具名与参数摘要，标注"输出已省略"）；参数摘要来自 `tool.started.input` 折叠进历史条目的 `inputSummary` 字段（见 [events.md](../protocols/events.md) 第 8 节）。对应 assistant `toolCalls` 的参数同时按 JSON 结构递归投影：保留对象所有键、数组顺序、数字、布尔、null 和短字符串；超过 200 字符的字符串保留前 200 字符，追加 `…[已省略 N 字符]`。常量位于 `build.ts`，不按工具名分支；可解析的 `rawInput` 按同一规则序列化，解析失败的原文保留。范围由结果的 seq 与 `pinResult` 决定，不能只看 assistant 的 seq。
+- 参数签名例外：同源回传时，若该 assistant 的任一内容块或调用含 `providerData`，整组调用参数原样保留；Context 不解释不透明数据，以此覆盖推理块签名和并行调用只在首项带签名的情况。跨服务商/协议按第 7 节剥离专有数据后可正常截短。所有修剪仅改投影，不改事件；同一历史重建逐字节一致，截止点不变且只追加历史时已有前缀保持一致。`projectedTokens`、回收量及 `ContextReport.history.breakdown.tool` 的字符数/token 均以最终参数投影计数。
 
 ### 6.6 摘要请求本身的约束与失败处理
 
