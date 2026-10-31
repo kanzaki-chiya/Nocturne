@@ -73,7 +73,7 @@ describe("外部 agent 设置页", () => {
     expect((screen.getByRole("button", { name: "删除" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     await screen.findByText("Local login");
-    expect(screen.getByText("最近测试").nextElementSibling?.textContent).toContain("已连接Fake 1");
+    expect(screen.getByRole("group", { name: "最近测试" }).textContent).toContain("已连接Fake 1");
     expect(
       f.calls
         .filter((call) => call.method === "agents.probeExternalAgent")
@@ -240,7 +240,7 @@ describe("外部 agent 设置页", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
-    await screen.findByRole("heading", { name: "还没有外部 agent" });
+    await screen.findByText("还没有外部 Agent");
     expect(f.calls.find((call) => call.method === "agents.deleteExternalAgent")?.params).toEqual({
       name: "managed",
     });

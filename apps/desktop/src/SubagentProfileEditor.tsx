@@ -9,7 +9,15 @@ import {
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ProvidersPage";
-import { Badge, Button, Checkbox, SegmentedControl } from "./ui";
+import {
+  Button,
+  Checkbox,
+  SegmentedControl,
+  DetailHeader,
+  Field,
+  FormFooter,
+  SourceMarker,
+} from "./ui";
 
 export function profilesFromSettings(items: readonly SettingItem[]) {
   return items
@@ -87,7 +95,7 @@ export function SubagentProfileEditor({
   };
   return (
     <form
-      className="profile-editor"
+      className="profile-editor form"
       onSubmit={(event) => {
         event.preventDefault();
         void mutate(() =>
@@ -99,18 +107,23 @@ export function SubagentProfileEditor({
         );
       }}
     >
-      <div className="t1">
-        <h3>{creating ? "添加档位" : name}</h3>
-        <Badge>
-          {isDefault
-            ? "默认（始终启用）"
-            : source?.source === "project"
-              ? "项目配置（只读）"
-              : readonly
-                ? "config.json（只读）"
-                : "settings.json"}
-        </Badge>
-      </div>
+      <DetailHeader
+        title={creating ? "添加档位" : name}
+        mono
+        extra={
+          <SourceMarker
+            label={
+              isDefault
+                ? "默认（始终启用）"
+                : source?.source === "project"
+                  ? "项目配置（只读）"
+                  : readonly
+                    ? "config.json（只读）"
+                    : "settings.json"
+            }
+          />
+        }
+      />
       {error && (
         <p className="errt" role="alert">
           {error}
@@ -118,9 +131,9 @@ export function SubagentProfileEditor({
       )}
       {readonly && <p className="fine">请在来源配置文件中编辑此档位。</p>}
       {creating && (
-        <label className="profile-field">
-          名称
+        <Field label="名称" desc={<>小写字母、数字和 -；创建后不可改，default 为保留名。</>}>
           <input
+            className="input lg"
             aria-label="档位名称"
             value={name}
             maxLength={32}
@@ -130,12 +143,11 @@ export function SubagentProfileEditor({
               setName(event.target.value);
             }}
           />
-          <small>小写字母、数字和 -；创建后不可改，default 为保留名。</small>
-        </label>
+        </Field>
       )}
-      <label className="profile-field">
-        何时用（给模型看）
+      <Field label="何时用（给模型看）" desc={<>说明适合与不适合的任务。</>}>
         <textarea
+          className="textarea"
           aria-label="何时用"
           value={draft.description}
           disabled={isDefault || readonly}
@@ -144,12 +156,11 @@ export function SubagentProfileEditor({
             set({ description: event.target.value });
           }}
         />
-        <small>说明适合与不适合的任务。</small>
-      </label>
+      </Field>
       <div className="profile-pair">
-        <div className="profile-field">
-          <label>模型</label>
+        <Field label="模型">
           <Dropdown
+            appearance="lg"
             label="档位模型"
             value={draft.model ?? ""}
             searchable
@@ -168,10 +179,10 @@ export function SubagentProfileEditor({
               set({ model: model || undefined, effort: undefined });
             }}
           />
-        </div>
-        <label className="profile-field">
-          默认超时（秒）
+        </Field>
+        <Field label="默认超时（秒）">
           <input
+            className="input lg"
             aria-label="默认超时"
             type="number"
             min={1}
@@ -185,10 +196,9 @@ export function SubagentProfileEditor({
               });
             }}
           />
-        </label>
+        </Field>
       </div>
-      <div className="profile-field">
-        <label>思考档位</label>
+      <Field label="思考档位">
         <SegmentedControl
           role="radiogroup"
           aria-label="思考档位"
@@ -203,9 +213,8 @@ export function SubagentProfileEditor({
           }}
         />
         <small>继承或指定的强度会按子模型就近降档。</small>
-      </div>
-      <div className="profile-field">
-        <label>工具集上限</label>
+      </Field>
+      <Field label="工具集上限">
         <SegmentedControl
           role="radiogroup"
           aria-label="工具集上限"
@@ -219,7 +228,7 @@ export function SubagentProfileEditor({
             set({ tools });
           }}
         />
-      </div>
+      </Field>
       <Checkbox
         className="profile-enabled"
         checked={draft.enabled}
@@ -230,7 +239,7 @@ export function SubagentProfileEditor({
       >
         启用此档位
       </Checkbox>
-      <div className="acts">
+      <FormFooter>
         <Button type="button" onClick={onCancel}>
           取消
         </Button>
@@ -250,7 +259,7 @@ export function SubagentProfileEditor({
             删除档位
           </Button>
         )}
-      </div>
+      </FormFooter>
       {confirmingDelete && (
         <ConfirmDialog
           title={`删除档位 ${name}？`}

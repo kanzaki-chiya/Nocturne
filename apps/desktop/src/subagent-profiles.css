@@ -1,58 +1,12 @@
-.profile-editor {
-  display: grid;
-  gap: 18px;
-  max-width: 760px;
-}
-.profile-field {
-  display: grid;
-  gap: 7px;
-  font-size: var(--fs-2);
-  color: var(--a-secondary);
-}
-.profile-field small {
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-}
-.profile-field input,
-.profile-field textarea {
-  width: 100%;
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  background: var(--a-input);
-  color: var(--a-text);
-  padding: 7px 10px;
-  font: inherit;
-}
-.profile-field textarea {
-  min-height: 70px;
-  resize: vertical;
-}
 .profile-pair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(var(--w-field-md), 1fr));
+  gap: var(--space-4);
 }
 .profile-options {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-}
-.profile-enabled {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.profile-editor .acts {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-}
-.external-agents-page .profile-row .nm small {
-  margin-left: 0;
-  max-width: none;
-}
-.profile-delete {
-  margin-left: auto;
 }
 .profile-preview {
   color: var(--a-muted);
@@ -61,23 +15,8 @@
 .profile-preview pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: var(--fs-1)/1.7 var(--mono);
+  font-family: var(--mono);
   background: var(--a-panel);
-  padding: 12px;
+  padding: var(--space-3);
   border-radius: var(--radius-2);
-}
-.profile-row .nm {
-  display: grid;
-  min-width: 0;
-}
-.profile-row .nm small {
-  font: var(--fs-1) var(--mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-@media (max-width: 760px) {
-  .profile-pair {
-    grid-template-columns: 1fr;
-  }
 }
