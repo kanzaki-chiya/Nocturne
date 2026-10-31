@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import type { Grant, GrantWorkspace, ProjectTrustDescription } from "@nocturne/core/protocol";
 import { ConfirmDialog } from "./ProvidersPage";
+import { Badge, Button } from "./ui";
 import "./pages.css";
 import "./grants.css";
 
@@ -199,8 +200,7 @@ export function GrantsPage({
                   </small>
                 </div>
                 <div title={remote ? "请在电脑上操作" : undefined}>
-                  <button
-                    className="btn"
+                  <Button
                     disabled={remote || busy || !client || !current.hasProjectConfig}
                     onClick={() => {
                       if (!client) return;
@@ -225,7 +225,7 @@ export function GrantsPage({
                     }}
                   >
                     {current.trusted ? "取消信任" : "信任此项目"}
-                  </button>
+                  </Button>
                   {remote && <small>请在电脑上操作</small>}
                 </div>
               </section>
@@ -235,8 +235,8 @@ export function GrantsPage({
                     项目授权 <span>{grants.length}</span>
                   </h4>
                   {grants.length > 0 && (
-                    <button
-                      className={`btn ${confirmAll ? "danger" : ""}`}
+                    <Button
+                      variant={confirmAll ? "danger-solid" : "danger"}
                       disabled={busy || !client}
                       onClick={() => {
                         if (!confirmAll) {
@@ -251,7 +251,7 @@ export function GrantsPage({
                       }}
                     >
                       {confirmAll ? "确认全部撤销" : "全部撤销"}
-                    </button>
+                    </Button>
                   )}
                 </div>
                 {grants.length === 0 ? (
@@ -268,12 +268,14 @@ export function GrantsPage({
                     </div>
                     {grants.map((grant) => (
                       <div className="grant-row" role="row" key={`${grant.kind}:${grant.target}`}>
-                        <span className="grant-kind">{grantKind(grant.kind)}</span>
+                        <Badge className="grant-kind">{grantKind(grant.kind)}</Badge>
                         <GrantTarget target={grant.target} />
                         <time dateTime={grant.createdAt}>
                           {new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}
                         </time>
-                        <button
+                        <Button
+                          variant="ghost-danger"
+                          size="sm"
                           className="grant-revoke"
                           disabled={busy || !client}
                           onClick={() => {
@@ -290,7 +292,7 @@ export function GrantsPage({
                           }}
                         >
                           撤销
-                        </button>
+                        </Button>
                       </div>
                     ))}
                   </div>

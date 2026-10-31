@@ -19,6 +19,7 @@ import {
   modelPalette,
   usageModelKey,
 } from "./UsageCharts";
+import { Badge, Button, SegmentedControl } from "./ui";
 import "./usage.css";
 
 type Range = "7" | "30" | "all";
@@ -76,24 +77,17 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
         <h4>
           每日活跃 <span>近一年</span>
         </h4>
-        <div className="usage-toggle" aria-label="热力图着色">
-          <button
-            aria-pressed={mode === "tokens"}
-            onClick={() => {
-              setMode("tokens");
-            }}
-          >
-            Tokens
-          </button>
-          <button
-            aria-pressed={mode === "cost"}
-            onClick={() => {
-              setMode("cost");
-            }}
-          >
-            费用
-          </button>
-        </div>
+        <SegmentedControl
+          className="usage-toggle"
+          aria-label="热力图着色"
+          size="sm"
+          value={mode}
+          options={[
+            { value: "tokens", label: "Tokens" },
+            { value: "cost", label: "费用" },
+          ]}
+          onChange={setMode}
+        />
       </div>
       <div className="usage-heat-scroll">
         <div
@@ -375,30 +369,27 @@ export function UsageView({
           <h3>用量</h3>
           <span className="sub">{scope}</span>
         </div>
-        <div className="usage-toggle" aria-label="统计范围">
-          {(["7", "30", "all"] as const).map((r) => (
-            <button
-              key={r}
-              aria-pressed={range === r}
-              onClick={() => {
-                onRange(r);
-              }}
-            >
-              {r === "all" ? "全部" : `${r} 天`}
-            </button>
-          ))}
-        </div>
-        <button className="btn" disabled={loading} onClick={onRefresh}>
+        <SegmentedControl
+          className="usage-toggle"
+          aria-label="统计范围"
+          value={range}
+          options={(["7", "30", "all"] as const).map((r) => ({
+            value: r,
+            label: r === "all" ? "全部" : `${r} 天`,
+          }))}
+          onChange={onRange}
+        />
+        <Button disabled={loading} onClick={onRefresh}>
           {loading ? "读取中…" : "刷新"}
-        </button>
+        </Button>
       </header>
       <div className="usage-body">
         {error && (
           <div className="usage-error" role="alert">
             读取用量失败：{error}{" "}
-            <button className="btn" onClick={onRefresh}>
+            <Button size="sm" onClick={onRefresh}>
               重试
-            </button>
+            </Button>
           </div>
         )}
         {!stats ? (
@@ -561,13 +552,13 @@ export function UsageView({
                                 <span>{m.model.model}</span>
                                 <small>{m.model.provider}</small>
                                 {m.pricingSource && (
-                                  <small
+                                  <Badge
                                     className="usage-price-source"
                                     title={m.pricingSource === "vendor" ? VENDOR_NOTE : undefined}
                                   >
                                     {SOURCE[m.pricingSource]}
                                     {m.pricing?.tiers?.length ? "（分档）" : ""}
-                                  </small>
+                                  </Badge>
                                 )}
                               </div>
                             </div>

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
+import { Button } from "./ui";
 
 /** 「外壳」日志项的伪 backendId（不存在这样的后台，调用方按此值改走 shell_log） */
 export const SHELL_LOG_ID = -1;
@@ -115,18 +116,17 @@ export function BackendLogsPage({
           placeholder="没有运行中的后台"
           {...(backends.length === 0 ? { disabled: "当前没有运行中的后台" } : {})}
         />
-        <button
-          className="btn"
+        <Button
           disabled={current === undefined || loading}
           onClick={() => {
             if (current !== undefined) void load(current);
           }}
         >
           {loading ? "读取中…" : "刷新"}
-        </button>
-        <button className="btn" disabled={lines === null || lines.length === 0} onClick={copyAll}>
+        </Button>
+        <Button disabled={lines === null || lines.length === 0} onClick={copyAll}>
           {copied ? "已复制" : "复制全部"}
-        </button>
+        </Button>
       </div>
       <div className="logpage">
         {backends.length === 0 && (

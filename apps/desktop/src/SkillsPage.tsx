@@ -4,6 +4,7 @@ import type { SkillOverview, SkillsDescription } from "@nocturne/core/protocol";
 import { projectName } from "./session-tree";
 import { Scrim } from "./ProvidersPage";
 import type { SkillImportCommit, SkillImportPreview } from "./rpc-types";
+import { Badge, Button, Checkbox, SegmentedControl, Switch } from "./ui";
 import "./pages.css";
 import "./mcp.css";
 import "./skills.css";
@@ -128,8 +129,7 @@ export function SkillsPage({
           )}
         </div>
         <div className="acts">
-          <button
-            className="btn"
+          <Button
             disabled={client === undefined || pickFolder === undefined}
             title={pickFolder === undefined ? "当前宿主不支持选择文件夹" : undefined}
             onClick={() => {
@@ -137,7 +137,7 @@ export function SkillsPage({
             }}
           >
             导入技能…
-          </button>
+          </Button>
         </div>
       </header>
       {error && (
@@ -151,18 +151,15 @@ export function SkillsPage({
           <h4>把常用的做法写成技能</h4>
           <p>把常用做法写成带 SKILL.md 的文件夹；Claude Code、Codex 的技能可直接用</p>
           <div>
-            <button
-              className="btn primary"
+            <Button
+              variant="primary"
               onClick={() => void attempt(() => openDirectory(data.homeDir, true))}
             >
               打开技能文件夹
-            </button>
-            <button
-              className="btn"
-              onClick={() => void attempt(() => openUrl("https://agentskills.io"))}
-            >
+            </Button>
+            <Button onClick={() => void attempt(() => openUrl("https://agentskills.io"))}>
               Agent Skills 规范 ↗
-            </button>
+            </Button>
           </div>
           <SkillWarnings warnings={parseWarnings} />
           <p className="fine">扫描目录：{data.scannedDirs.join("、")}</p>
@@ -200,7 +197,7 @@ export function SkillsPage({
                         className={`dot ${!s.enabled || s.shadowedBy ? "off" : s.missingDescription || s.ignored.length ? "warn" : "ok"}`}
                       />
                       <span className={`nm ${s.shadowedBy ? "shadowed" : ""}`}>{s.name}</span>
-                      <span className="tagc">{s.source === "extra" ? "额外目录" : s.source}</span>
+                      <Badge>{s.source === "extra" ? "额外目录" : s.source}</Badge>
                       <small>{skillStatus(s)}</small>
                     </button>
                   ))}
@@ -214,40 +211,32 @@ export function SkillsPage({
               <>
                 <div className="t1">
                   <h3>{skill.name}</h3>
-                  <span className="tagc">
+                  <Badge>
                     {skill.layer === "user" ? "用户" : "项目"}
                     <span className="muted-value">
                       {skill.source === "extra" ? "额外目录" : skill.source}
                     </span>
-                  </span>
+                  </Badge>
                   <div className="acts">
-                    <button
-                      className={`mcp-switch ${skill.enabled ? "on" : ""}`}
-                      role="switch"
-                      aria-checked={skill.enabled}
+                    <Switch
+                      checked={skill.enabled}
                       aria-label={`启用 ${skill.name}`}
                       disabled={!!skill.shadowedBy || busy}
-                      onClick={() => void toggle()}
-                    >
-                      {skill.enabled ? "启用" : "停用"}
-                    </button>
+                      onChange={() => void toggle()}
+                    />
                     <span className="mcp-action-divider" />
                     {skill.shadowedBy && (
-                      <button
-                        className="btn"
+                      <Button
                         onClick={() => {
                           setSelected(skill.shadowedBy);
                         }}
                       >
                         查看生效的那份
-                      </button>
+                      </Button>
                     )}
-                    <button
-                      className="btn"
-                      onClick={() => void attempt(() => openDirectory(skill.realPath))}
-                    >
+                    <Button onClick={() => void attempt(() => openDirectory(skill.realPath))}>
                       在资源管理器中打开 ↗
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 {skill.shadowedBy && (
@@ -621,32 +610,26 @@ function SkillImportDialog({
             <div className="lab">
               <label>导入到</label>
             </div>
-            <span className="seg" role="group" aria-label="导入目标">
-              <button
-                className={target === "user" ? "on" : ""}
-                onClick={() => {
-                  setTarget("user");
-                }}
-              >
-                用户技能
-              </button>
-              <button
-                className={target === "project" ? "on" : ""}
-                disabled={workspaceRoot === undefined}
-                title={workspaceRoot ?? "先在左栏选中一个工作区"}
-                onClick={() => {
-                  setTarget("project");
-                }}
-              >
-                当前工作区
-              </button>
-            </span>
+            <SegmentedControl
+              aria-label="导入目标"
+              value={target}
+              options={[
+                { value: "user", label: "用户技能" },
+                {
+                  value: "project",
+                  label: "当前工作区",
+                  disabled: workspaceRoot === undefined,
+                  title: workspaceRoot ?? "先在左栏选中一个工作区",
+                },
+              ]}
+              onChange={setTarget}
+            />
           </div>
           {phase.kind === "pick" && (
             <div className="fl">
-              <button className="btn primary" onClick={() => void pick()}>
+              <Button variant="primary" onClick={() => void pick()}>
                 选择文件夹…
-              </button>
+              </Button>
             </div>
           )}
           {phase.kind === "previewing" && <div className="fl">正在扫描…</div>}
@@ -686,39 +669,19 @@ function SkillImportDialog({
                       {candidate.targetConflict && (
                         <div className="fl">
                           <span className="bad">目标已存在同名技能</span>
-                          <span
-                            className="seg"
-                            role="group"
+                          <SegmentedControl
                             aria-label={`${candidate.name} 重名处理`}
-                          >
-                            <button
-                              className={actions[candidate.sourcePath] === "rename" ? "on" : ""}
-                              onClick={() => {
-                                setActions((cur) => ({ ...cur, [candidate.sourcePath]: "rename" }));
-                              }}
-                            >
-                              改名
-                            </button>
-                            <button
-                              className={actions[candidate.sourcePath] === "overwrite" ? "on" : ""}
-                              onClick={() => {
-                                setActions((cur) => ({
-                                  ...cur,
-                                  [candidate.sourcePath]: "overwrite",
-                                }));
-                              }}
-                            >
-                              覆盖
-                            </button>
-                            <button
-                              className={actions[candidate.sourcePath] === "skip" ? "on" : ""}
-                              onClick={() => {
-                                setActions((cur) => ({ ...cur, [candidate.sourcePath]: "skip" }));
-                              }}
-                            >
-                              跳过
-                            </button>
-                          </span>
+                            size="sm"
+                            value={actions[candidate.sourcePath] ?? "rename"}
+                            options={[
+                              { value: "rename", label: "改名" },
+                              { value: "overwrite", label: "覆盖" },
+                              { value: "skip", label: "跳过" },
+                            ]}
+                            onChange={(val) => {
+                              setActions((cur) => ({ ...cur, [candidate.sourcePath]: val }));
+                            }}
+                          />
                         </div>
                       )}
                       {candidate.targetConflict && actions[candidate.sourcePath] === "rename" && (
@@ -742,19 +705,17 @@ function SkillImportDialog({
                       )}
                       {!candidate.targetConflict && (
                         <div className="fl">
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={(actions[candidate.sourcePath] ?? "overwrite") !== "skip"}
-                              onChange={(e) => {
-                                setActions((cur) => ({
-                                  ...cur,
-                                  [candidate.sourcePath]: e.target.checked ? "overwrite" : "skip",
-                                }));
-                              }}
-                            />{" "}
+                          <Checkbox
+                            checked={(actions[candidate.sourcePath] ?? "overwrite") !== "skip"}
+                            onChange={(checked) => {
+                              setActions((cur) => ({
+                                ...cur,
+                                [candidate.sourcePath]: checked ? "overwrite" : "skip",
+                              }));
+                            }}
+                          >
                             导入
-                          </label>
+                          </Checkbox>
                         </div>
                       )}
                     </>
@@ -785,13 +746,13 @@ function SkillImportDialog({
                       <span className="bad">缺少说明，模型看不到</span>
                     )}
                     {result.status === "imported" && (
-                      <button
-                        className="btn"
+                      <Button
+                        size="sm"
                         disabled={disabling !== null}
                         onClick={() => void disable(result.finalName ?? result.name)}
                       >
                         {disabling === (result.finalName ?? result.name) ? "停用中…" : "停用"}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -803,22 +764,20 @@ function SkillImportDialog({
         <div className="df">
           <span className="sp" />
           {phase.kind === "done" ? (
-            <button className="btn primary" onClick={onClose}>
+            <Button variant="primary" onClick={onClose}>
               关闭
-            </button>
+            </Button>
           ) : (
             <>
-              <button className="btn" onClick={onClose}>
-                取消
-              </button>
+              <Button onClick={onClose}>取消</Button>
               {(phase.kind === "review" || phase.kind === "committing") && (
-                <button
-                  className="btn primary"
+                <Button
+                  variant="primary"
                   disabled={phase.kind === "committing" || validCount === 0}
                   onClick={() => void commit()}
                 >
                   {phase.kind === "committing" ? "导入中…" : `导入 ${validCount} 个`}
-                </button>
+                </Button>
               )}
             </>
           )}

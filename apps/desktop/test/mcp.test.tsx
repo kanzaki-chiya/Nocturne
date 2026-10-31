@@ -344,8 +344,9 @@ describe("面板浏览器（桌面内置）", () => {
   it("第一次启用先弹风险提示，取消就不启用", async () => {
     const host = browserHost();
     const { f, prefs } = await mount(host);
-    expect(screen.getByText("已关闭")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox"));
+    const sw = screen.getByRole("switch", { name: "面板浏览器（桌面内置）" });
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(sw);
     expect(screen.getByRole("alertdialog", { name: "启用面板浏览器" })).toBeTruthy();
     expect(host.setEnabled).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -359,10 +360,11 @@ describe("面板浏览器（桌面内置）", () => {
   it("确认启用后记下风险已读，并提示重启后台后生效", async () => {
     const host = browserHost();
     const { f, prefs, storage } = await mount(host);
-    fireEvent.click(screen.getByRole("checkbox"));
+    const sw = screen.getByRole("switch", { name: "面板浏览器（桌面内置）" });
+    fireEvent.click(sw);
     fireEvent.click(screen.getByRole("button", { name: "仍然启用" }));
     expect(await screen.findByText(/重启应用后新的后台进程才会拿到工具/)).toBeTruthy();
-    expect(screen.getByText("已启用")).toBeTruthy();
+    expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(host.enabled).toEqual([true]);
     expect(prefs.get().agentBrowserEnabled).toBe(true);
     expect(prefs.get().agentBrowserRiskAccepted).toBe(true);
@@ -378,8 +380,9 @@ describe("面板浏览器（桌面内置）", () => {
     );
     const host = browserHost();
     const { f, prefs } = await mount(host, storage);
-    expect(screen.getByText("已启用")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox"));
+    const sw = screen.getByRole("switch", { name: "面板浏览器（桌面内置）" });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(sw);
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(await screen.findByText(/已关闭；已有绑定和标签已撤销/)).toBeTruthy();
     expect(host.enabled).toEqual([false]);

@@ -31,6 +31,7 @@ import type {
 } from "./rpc-types";
 import { describeUpdateError, type CheckResult } from "./updater";
 import { FILE_OPENER_LABELS, isFileOpener, type FileOpener } from "./prefs";
+import { Button, Checkbox, SegmentedControl, Switch } from "./ui";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -460,14 +461,14 @@ export function SettingsPage({
               </span>
               <span className="v">
                 <span className="t">{reviewerText(reviewerCfg)}</span>
-                <button
-                  className="btn"
+                <Button
+                  size="sm"
                   onClick={() => {
                     setDialog("reviewer");
                   }}
                 >
                   编辑
-                </button>
+                </Button>
               </span>
               {src(reviewerItem)}
               {errLine("permission.reviewer")}
@@ -578,14 +579,14 @@ export function SettingsPage({
                 <span className="t">
                   {thresholdText(thresholdItem?.effective, pruneLimitItem?.effective)}
                 </span>
-                <button
-                  className="btn"
+                <Button
+                  size="sm"
                   onClick={() => {
                     setDialog("threshold");
                   }}
                 >
                   编辑
-                </button>
+                </Button>
               </span>
               {src(pruneLimitItem?.overridden ? pruneLimitItem : thresholdItem)}
               {errLine("compaction.threshold")}
@@ -603,8 +604,8 @@ export function SettingsPage({
                 <span className="t" title={workspace ?? ""}>
                   {workspace ?? "未就绪"}
                 </span>
-                <button
-                  className="btn"
+                <Button
+                  size="sm"
                   disabled={wsBusy || workspace === null}
                   onClick={() => {
                     void pickFolder().then((dir) => {
@@ -613,16 +614,17 @@ export function SettingsPage({
                   }}
                 >
                   {wsBusy ? "切换中…" : "更改…"}
-                </button>
+                </Button>
                 {workspaceOverridden && (
-                  <button
-                    className="btn ghost"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled={wsBusy}
                     title={defaultWorkspace ?? undefined}
                     onClick={() => void changeWorkspace(null)}
                   >
                     恢复默认
-                  </button>
+                  </Button>
                 )}
               </span>
               <span className="src">本机</span>
@@ -670,13 +672,11 @@ export function SettingsPage({
             <div className={rowClass("autoUpdate")}>
               <span className="n">自动检查更新</span>
               <span className="v">
-                <button
-                  role="switch"
-                  aria-checked={update.autoUpdate}
+                <Switch
+                  checked={update.autoUpdate}
                   aria-label="自动检查更新"
-                  className={`mcp-switch ${update.autoUpdate ? "on" : ""}`}
-                  onClick={() => {
-                    const ok = update.onAutoUpdateChange(!update.autoUpdate);
+                  onChange={(next) => {
+                    const ok = update.onAutoUpdateChange(next);
                     setRowErr("autoUpdate", ok ? null : "本机存储不可写，开关只在本次运行内生效");
                   }}
                 />
@@ -689,9 +689,9 @@ export function SettingsPage({
                 检查更新<small>发现新版本时会在窗口底部提示</small>
               </span>
               <span className="v">
-                <button className="btn" disabled={updBusy} onClick={() => void runUpdateCheck()}>
+                <Button size="sm" disabled={updBusy} onClick={() => void runUpdateCheck()}>
                   {updBusy ? "检查中…" : "检查更新"}
-                </button>
+                </Button>
               </span>
               <span className="src" />
               {errLine("updateCheck")}
@@ -707,19 +707,15 @@ export function SettingsPage({
                 通知<small>窗口在前台且正看着该会话时不提醒</small>
               </span>
               <span className="v sans">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={notifyEnabled}
+                <Switch
+                  checked={notifyEnabled}
                   aria-label="通知"
-                  className={`mcp-switch${notifyEnabled ? " on" : ""}`}
-                  onClick={() => {
+                  onChange={(next) => {
                     void save("notifications.enabled", "通知", {
-                      "notifications.enabled": !notifyEnabled,
+                      "notifications.enabled": next,
                     });
                   }}
                 />
-                <span className="hint">{notifyEnabled ? "已开启" : "已关闭"}</span>
               </span>
               {src(item("notifications.enabled"))}
               {errLine("notifications.enabled")}
@@ -729,54 +725,42 @@ export function SettingsPage({
                 提醒哪些事<small>任一会话，含后台会话</small>
               </span>
               <span className="v sans">
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={notifyEvents.attention}
+                <Checkbox
+                  checked={notifyEvents.attention}
                   aria-label="需要确认"
-                  className="chk"
                   disabled={!notifyEnabled}
-                  onClick={() => {
+                  onChange={(next) => {
                     void save("notifications.events.attention", "需要确认", {
-                      "notifications.events.attention": !notifyEvents.attention,
+                      "notifications.events.attention": next,
                     });
                   }}
                 >
-                  <span className="box" />
                   需要确认（权限、提问）
-                </button>
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={notifyEvents.error}
+                </Checkbox>
+                <Checkbox
+                  checked={notifyEvents.error}
                   aria-label="出错停止"
-                  className="chk"
                   disabled={!notifyEnabled}
-                  onClick={() => {
+                  onChange={(next) => {
                     void save("notifications.events.error", "出错停止", {
-                      "notifications.events.error": !notifyEvents.error,
+                      "notifications.events.error": next,
                     });
                   }}
                 >
-                  <span className="box" />
                   出错停止
-                </button>
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={notifyEvents.done}
+                </Checkbox>
+                <Checkbox
+                  checked={notifyEvents.done}
                   aria-label="完成"
-                  className="chk"
                   disabled={!notifyEnabled}
-                  onClick={() => {
+                  onChange={(next) => {
                     void save("notifications.events.done", "完成", {
-                      "notifications.events.done": !notifyEvents.done,
+                      "notifications.events.done": next,
                     });
                   }}
                 >
-                  <span className="box" />
                   完成
-                </button>
+                </Checkbox>
               </span>
               {notifyEventsSrc()}
               {errLine("notifications.events.attention")}
@@ -814,16 +798,13 @@ export function SettingsPage({
             <div className={rowClassDim(!notifyEnabled, ["notifications.sound"])}>
               <span className="n">提示音</span>
               <span className="v sans">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={notifySound}
+                <Switch
+                  checked={notifySound}
                   aria-label="提示音"
-                  className={`mcp-switch${notifySound ? " on" : ""}`}
                   disabled={!notifyEnabled}
-                  onClick={() => {
+                  onChange={(next) => {
                     void save("notifications.sound", "提示音", {
-                      "notifications.sound": !notifySound,
+                      "notifications.sound": next,
                     });
                   }}
                 />
@@ -834,14 +815,13 @@ export function SettingsPage({
             <div className={rowClassDim(!notifyEnabled, ["notifications.test"])}>
               <span className="n">试一下</span>
               <span className="v sans">
-                <button
-                  type="button"
-                  className="btn"
+                <Button
+                  size="sm"
                   disabled={!notifyEnabled || notifyTest?.busy === true}
                   onClick={() => void runNotifyTest()}
                 >
                   {notifyTest?.busy === true ? "发送中…" : "发送测试通知"}
-                </button>
+                </Button>
                 {notifyTest?.blocked === true && (
                   <span className="hint warnt">
                     Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开
@@ -869,14 +849,14 @@ export function SettingsPage({
                     off={modelOff(defaultModelItem.effective)}
                   />
                 )}
-                <button
-                  className="btn"
+                <Button
+                  size="sm"
                   onClick={() => {
                     setDialog("defaultModel");
                   }}
                 >
                   选择
-                </button>
+                </Button>
               </span>
               {src(defaultModelItem)}
               {modelOff(defaultModelItem?.effective) && (
@@ -901,15 +881,15 @@ export function SettingsPage({
                     ) : (
                       <ModelValue value={it.effective} off={modelOff(it.effective)} />
                     )}
-                    <button
-                      className="btn"
+                    <Button
+                      size="sm"
                       onClick={() => {
                         if (role === "task") onOpenSubagents?.();
                         else setDialog({ role });
                       }}
                     >
                       {role === "task" ? "设置 › 子代理" : "选择"}
-                    </button>
+                    </Button>
                   </span>
                   {src(it)}
                   {modelOff(it?.effective) && <span className="warnl">已停用，按未设置处理</span>}
@@ -1101,12 +1081,12 @@ function Dialog({
         <div className="df">
           {extra}
           <span className="sp" />
-          <button className="btn" onClick={onClose} disabled={busy}>
+          <Button onClick={onClose} disabled={busy}>
             取消
-          </button>
-          <button className="btn primary" disabled={busy || !canSave} onClick={onSave}>
+          </Button>
+          <Button variant="primary" disabled={busy || !canSave} onClick={onSave}>
             {busy ? "保存中…" : "保存"}
-          </button>
+          </Button>
         </div>
       </div>
     </Scrim>
@@ -1324,15 +1304,15 @@ function ThresholdDialog({
       error={error}
       busy={busy}
       extra={
-        <button
-          className="btn ghost"
+        <Button
+          variant="ghost"
           disabled={busy || (current === "" && pruneLimitCurrent === "")}
           onClick={() => {
             submit(null, null);
           }}
         >
           恢复默认
-        </button>
+        </Button>
       }
       onClose={onClose}
       onSave={submitCurrent}
@@ -1602,19 +1582,12 @@ function ReviewerDialog({
     options: readonly (readonly [V, string])[],
     onPick: (v: V) => void,
   ) => (
-    <div className="seg" role="group" aria-label={label}>
-      {options.map(([v, text]) => (
-        <button
-          key={v}
-          className={value === v ? "on" : undefined}
-          onClick={() => {
-            onPick(v);
-          }}
-        >
-          {text}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      aria-label={label}
+      value={value}
+      options={options.map(([v, text]) => ({ value: v, label: text }))}
+      onChange={onPick}
+    />
   );
 
   return (
@@ -1881,18 +1854,15 @@ function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: 
       </div>
       <div className="srun">
         {running ? (
-          <button className="btn" onClick={cancel}>
-            取消测试
-          </button>
+          <Button onClick={cancel}>取消测试</Button>
         ) : (
-          <button
-            className="btn"
+          <Button
             disabled={!enabled}
             title={enabled ? undefined : "审查器为关闭时不可用"}
             onClick={start}
           >
             测试
-          </button>
+          </Button>
         )}
         {!enabled && <span className="hint">审查器已关闭：先选择后端并保存</span>}
         {running && (

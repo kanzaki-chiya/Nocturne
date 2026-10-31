@@ -12,6 +12,7 @@ import {
   type McpDraft,
   type McpImportRow,
 } from "./mcp-import";
+import { Badge, Button, SegmentedControl, Switch } from "./ui";
 import "./pages.css";
 import "./mcp.css";
 
@@ -159,17 +160,17 @@ export function McpPage({
       <div className={`cols3 ${servers.length === 0 && !form ? "mcp-no-servers" : ""}`}>
         <nav className="plist" aria-label="MCP 服务器列表">
           <div className="mcp-list-actions">
-            <button className="btn primary" onClick={add} disabled={!client}>
+            <Button variant="primary" size="sm" onClick={add} disabled={!client}>
               ＋ 添加服务器
-            </button>
-            <button
-              className="btn"
+            </Button>
+            <Button
+              size="sm"
               onClick={() => {
                 setImporting(true);
               }}
             >
               从 JSON 导入
-            </button>
+            </Button>
           </div>
           {(["app", "readonly"] as const).map((group) => (
             <div key={group}>
@@ -190,7 +191,7 @@ export function McpPage({
                       className={`dot ${results[s.id]?.ok ? "ok" : results[s.id] ? "warn" : "off"}`}
                     />
                     <span className="nm">{s.id}</span>
-                    {s.transport === "http" && <span className="tagc">HTTP</span>}
+                    {s.transport === "http" && <Badge>HTTP</Badge>}
                     <small>
                       {!s.enabled
                         ? "已停用"
@@ -224,18 +225,17 @@ export function McpPage({
             <>
               <div className="t1">
                 <h3>{current.id}</h3>
-                <span className="tagc">{current.editable ? "程序管理" : "只读"}</span>
+                <Badge>{current.editable ? "程序管理" : "只读"}</Badge>
                 <span className="acts">
-                  <button
-                    role="switch"
-                    aria-checked={current.enabled}
-                    className={`mcp-switch ${current.enabled ? "on" : ""}`}
+                  <Switch
+                    aria-label="启用"
+                    checked={current.enabled}
                     disabled={!current.editable || busy}
-                    onClick={() => {
+                    onChange={(next) => {
                       if (!client) return;
                       setBusy(true);
                       void client.runtime
-                        .setMcpServerEnabled({ id: current.id, enabled: !current.enabled })
+                        .setMcpServerEnabled({ id: current.id, enabled: next })
                         .then(() => changed(current.enabled ? "已停用" : "已启用"))
                         .catch((e: unknown) => {
                           setError(message(e));
@@ -246,35 +246,28 @@ export function McpPage({
                           setBusy(false);
                         });
                     }}
-                  >
-                    启用
-                  </button>
+                  />
                   <span className="mcp-action-divider" aria-hidden="true" />
-                  <button
-                    className="btn"
-                    disabled={busy || !current.trusted}
-                    onClick={() => void probe()}
-                  >
+                  <Button disabled={busy || !current.trusted} onClick={() => void probe()}>
                     {busy ? "测试中…" : "测试连接"}
-                  </button>
+                  </Button>
                   {current.editable && (
                     <>
-                      <button
-                        className="btn"
+                      <Button
                         onClick={() => {
                           setForm({ draft: draftOf(current), replace: true });
                         }}
                       >
                         编辑
-                      </button>
-                      <button
-                        className="btn danger"
+                      </Button>
+                      <Button
+                        variant="danger"
                         onClick={() => {
                           setDeleting(true);
                         }}
                       >
                         删除
-                      </button>
+                      </Button>
                     </>
                   )}
                 </span>
@@ -341,17 +334,16 @@ export function McpPage({
           ) : (
             <div className="mcp-empty">
               <h3>给 Nocturne 接上外部工具</h3>
-              <button className="btn primary" onClick={add}>
+              <Button variant="primary" onClick={add}>
                 ＋ 添加服务器
-              </button>
-              <button
-                className="btn"
+              </Button>
+              <Button
                 onClick={() => {
                   setImporting(true);
                 }}
               >
                 从 JSON 导入
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -387,16 +379,15 @@ export function McpPage({
               <span>同时删除这台服务器保存的凭据。</span>
             </div>
             <div className="df">
-              <button
-                className="btn"
+              <Button
                 onClick={() => {
                   setDeleting(false);
                 }}
               >
                 取消
-              </button>
-              <button
-                className="btn danger"
+              </Button>
+              <Button
+                variant="danger-solid"
                 disabled={busy}
                 onClick={() => {
                   if (!client) return;
@@ -418,7 +409,7 @@ export function McpPage({
                 }}
               >
                 删除
-              </button>
+              </Button>
             </div>
           </div>
         </Scrim>
@@ -587,25 +578,22 @@ function McpForm({
       >
         <label className="field">
           类型
-          <div className="mcp-type" role="group" aria-label="传输类型">
-            {(["stdio", "http"] as const).map((t) => (
-              <button
-                type="button"
-                key={t}
-                className={`btn ${type === t ? "primary" : ""}`}
-                aria-pressed={type === t}
-                onClick={() => {
-                  if (type !== t) {
-                    setType(t);
-                    setRows([]);
-                    setResult(undefined);
-                  }
-                }}
-              >
-                {t === "stdio" ? "本地命令" : "远程地址（HTTP）"}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            className="mcp-type"
+            aria-label="传输类型"
+            value={type}
+            options={[
+              { value: "stdio", label: "本地命令" },
+              { value: "http", label: "远程地址（HTTP）" },
+            ]}
+            onChange={(t) => {
+              if (type !== t) {
+                setType(t);
+                setRows([]);
+                setResult(undefined);
+              }
+            }}
+          />
         </label>
         <label className="field">
           名称
@@ -705,24 +693,22 @@ function McpForm({
               {row.saved && !row.clear ? (
                 <span>
                   ● 已保存{" "}
-                  <button
-                    type="button"
-                    className="btn"
+                  <Button
+                    size="sm"
                     onClick={() => {
                       update(index, { saved: false });
                     }}
                   >
                     替换
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
+                  </Button>
+                  <Button
+                    size="sm"
                     onClick={() => {
                       update(index, { clear: true });
                     }}
                   >
                     清除
-                  </button>
+                  </Button>
                 </span>
               ) : (
                 <input
@@ -738,27 +724,25 @@ function McpForm({
                   }
                 />
               )}
-              <button
-                type="button"
-                className="btn ghost"
+              <Button
+                variant="ghost"
                 aria-label={`删除变量 ${index + 1}`}
                 onClick={() => {
                   setRows((old) => old.filter((_, i) => i !== index));
                 }}
               >
                 ✕
-              </button>
+              </Button>
             </div>
           ))}
-          <button
-            type="button"
-            className="btn ghost"
+          <Button
+            variant="ghost"
             onClick={() => {
               setRows((old) => [...old, { name: "", kind: "literal", value: "", saved: false }]);
             }}
           >
             ＋ 添加{type === "http" ? "请求头" : "变量"}
-          </button>
+          </Button>
           {!backend && <small>系统凭据后端不可用，保存到凭据库不可选；请引用环境变量。</small>}
         </div>
         <details>
@@ -803,9 +787,9 @@ function McpForm({
             {err("callTimeoutMs")}
           </label>
         </details>
-        <button type="button" className="btn" disabled={busy} onClick={() => void run(false)}>
+        <Button disabled={busy} onClick={() => void run(false)}>
           {busy ? "处理中…" : "测试连接"}
-        </button>
+        </Button>
         {result && <ProbeResult result={result} />}
         {error &&
           ![
@@ -823,12 +807,12 @@ function McpForm({
             </div>
           )}
         <div className="formacts">
-          <button className="btn primary" type="submit" disabled={busy}>
+          <Button variant="primary" type="submit" disabled={busy}>
             保存
-          </button>
-          <button className="btn ghost" type="button" disabled={busy} onClick={onCancel}>
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={onCancel}>
             取消
-          </button>
+          </Button>
           <span className="fine">测试失败也可以保存</span>
         </div>
       </form>
@@ -878,17 +862,12 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
             的面板里打开网页、截图和操作页面。默认关闭；开启后只对新的后台进程生效。
           </p>
         </div>
-        <label className="agent-browser-switch">
-          <input
-            type="checkbox"
-            checked={enabled}
-            disabled={busy}
-            onChange={(e) => {
-              onToggle(e.target.checked);
-            }}
-          />
-          <span>{enabled ? "已启用" : "已关闭"}</span>
-        </label>
+        <Switch
+          aria-labelledby="agent-browser-heading"
+          checked={enabled}
+          disabled={busy}
+          onChange={onToggle}
+        />
       </div>
       {confirming && (
         <div className="agent-browser-risk" role="alertdialog" aria-label="启用面板浏览器">
@@ -900,16 +879,16 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
             <li>截图会作为工具结果附件进入模型上下文。</li>
           </ul>
           <div className="agent-browser-risk-actions">
-            <button
-              className="btn ghost"
+            <Button
+              variant="ghost"
               onClick={() => {
                 setConfirming(false);
               }}
             >
               取消
-            </button>
-            <button
-              className="btn primary"
+            </Button>
+            <Button
+              variant="primary"
               disabled={busy}
               onClick={() => {
                 prefs.update({ agentBrowserRiskAccepted: true });
@@ -918,7 +897,7 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
               }}
             >
               仍然启用
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -986,18 +965,18 @@ function McpImport({
           <span className="fine">
             识别到 {rows.length} 台，可导入 {drafts.length} 台
           </span>
-          <button className="btn ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             取消
-          </button>
-          <button
-            className="btn primary"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!drafts.length}
             onClick={() => {
               onConfirm(drafts);
             }}
           >
             逐台确认（1 / {drafts.length}）
-          </button>
+          </Button>
         </div>
       </div>
     </Scrim>

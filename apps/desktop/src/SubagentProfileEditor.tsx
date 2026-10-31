@@ -9,6 +9,7 @@ import {
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ProvidersPage";
+import { Badge, Button, Checkbox, SegmentedControl } from "./ui";
 
 export function profilesFromSettings(items: readonly SettingItem[]) {
   return items
@@ -100,7 +101,7 @@ export function SubagentProfileEditor({
     >
       <div className="t1">
         <h3>{creating ? "添加档位" : name}</h3>
-        <span className="tagc">
+        <Badge>
           {isDefault
             ? "默认（始终启用）"
             : source?.source === "project"
@@ -108,7 +109,7 @@ export function SubagentProfileEditor({
               : readonly
                 ? "config.json（只读）"
                 : "settings.json"}
-        </span>
+        </Badge>
       </div>
       {error && (
         <p className="errt" role="alert">
@@ -188,66 +189,58 @@ export function SubagentProfileEditor({
       </div>
       <div className="profile-field">
         <label>思考档位</label>
-        <div className="profile-options" role="radiogroup" aria-label="思考档位">
-          {["", ...efforts].map((effort) => (
-            <button
-              type="button"
-              role="radio"
-              key={effort}
-              aria-checked={(draft.effort ?? "") === effort}
-              disabled={isDefault || readonly}
-              className={`btn${(draft.effort ?? "") === effort ? " selected" : ""}`}
-              onClick={() => {
-                set({ effort: (effort || undefined) as ReasoningEffort | undefined });
-              }}
-            >
-              {effort || "跟随会话"}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          role="radiogroup"
+          aria-label="思考档位"
+          disabled={isDefault || readonly}
+          value={draft.effort ?? ""}
+          options={["", ...efforts].map((effort) => ({
+            value: effort,
+            label: effort || "跟随会话",
+          }))}
+          onChange={(effort) => {
+            set({ effort: (effort || undefined) as ReasoningEffort | undefined });
+          }}
+        />
         <small>继承或指定的强度会按子模型就近降档。</small>
       </div>
       <div className="profile-field">
         <label>工具集上限</label>
-        <div className="profile-options" role="radiogroup" aria-label="工具集上限">
-          {(["general", "explore"] as const).map((tools) => (
-            <button
-              type="button"
-              role="radio"
-              key={tools}
-              aria-checked={(draft.tools ?? "general") === tools}
-              disabled={isDefault || readonly}
-              className={`btn${(draft.tools ?? "general") === tools ? " selected" : ""}`}
-              onClick={() => {
-                set({ tools });
-              }}
-            >
-              {tools === "general" ? "全部（general）" : "只读（explore）"}
-            </button>
-          ))}
-        </div>
-      </div>
-      <label className="profile-enabled">
-        <input
-          type="checkbox"
-          checked={draft.enabled}
+        <SegmentedControl
+          role="radiogroup"
+          aria-label="工具集上限"
           disabled={isDefault || readonly}
-          onChange={(event) => {
-            set({ enabled: event.target.checked });
+          value={draft.tools ?? "general"}
+          options={[
+            { value: "general", label: "全部（general）" },
+            { value: "explore", label: "只读（explore）" },
+          ]}
+          onChange={(tools) => {
+            set({ tools });
           }}
         />
+      </div>
+      <Checkbox
+        className="profile-enabled"
+        checked={draft.enabled}
+        disabled={isDefault || readonly}
+        onChange={(checked) => {
+          set({ enabled: checked });
+        }}
+      >
         启用此档位
-      </label>
+      </Checkbox>
       <div className="acts">
-        <button className="btn" type="button" onClick={onCancel}>
+        <Button type="button" onClick={onCancel}>
           取消
-        </button>
-        <button className="btn primary" type="submit" disabled={busy || readonly}>
+        </Button>
+        <Button variant="primary" type="submit" disabled={busy || readonly}>
           {busy ? "保存中…" : "保存"}
-        </button>
+        </Button>
         {!creating && !isDefault && !readonly && (
-          <button
-            className="btn profile-delete"
+          <Button
+            variant="danger"
+            className="profile-delete"
             type="button"
             disabled={busy}
             onClick={() => {
@@ -255,7 +248,7 @@ export function SubagentProfileEditor({
             }}
           >
             删除档位
-          </button>
+          </Button>
         )}
       </div>
       {confirmingDelete && (

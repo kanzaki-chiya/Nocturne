@@ -815,7 +815,7 @@ describe("SettingsPage", () => {
     render(<SettingsPage {...props(server.client)} />);
     const master = await screen.findByRole("switch", { name: "通知" });
     expect(master.getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText("已关闭")).toBeTruthy();
+    expect(master.textContent).toBe("");
     // 总开关关闭：三事件复选、阈值、提示音、测试按钮全禁用
     expect(screen.getByRole("checkbox", { name: "需要确认" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "发送测试通知" }).hasAttribute("disabled")).toBe(
