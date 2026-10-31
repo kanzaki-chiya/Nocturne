@@ -77,7 +77,7 @@ it("未登记只查询 describe，显示说明和邀请输入，不调用写方�
   const h = harness();
   const view = render(<RemotePage client={h.client} />);
   await screen.findByPlaceholderText("粘贴邀请（nocturne-invite:…）");
-  expect(screen.getByText("你需要信任谁")).toBeTruthy();
+  expect(screen.getByText("中继只转发密文，看不到你的对话、代码或命令。你需要信任谁")).toBeTruthy();
   view.unmount();
   expect(h.calls.map((c) => c.method)).toEqual(["remote.describe"]);
 });

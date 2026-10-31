@@ -13,7 +13,16 @@ import qrcode from "qrcode-generator";
 import { Dropdown, type DropdownOption } from "./Dropdown";
 import { Scrim } from "./ProvidersPage";
 import { REMOTE_CONNECTION_TEXT, useRemoteStatus } from "./remote";
-import { Badge, Button, Switch } from "./ui";
+import {
+  Badge,
+  Button,
+  Switch,
+  EmptyState,
+  Field,
+  PageHeader,
+  SettingsGroup,
+  SettingsRow,
+} from "./ui";
 import "./pages.css";
 import "./mcp.css";
 import "./remote.css";
@@ -133,7 +142,7 @@ export function PairingDialog({
           <>
             <label htmlFor="remote-pair-url">已打开过手机页面？复制链接到手机浏览器</label>
             <div className="remote-link">
-              <input id="remote-pair-url" readOnly value={offer.url} />
+              <input id="remote-pair-url" className="input lg mono" readOnly value={offer.url} />
               <Button
                 onClick={() => {
                   void navigator.clipboard
@@ -331,87 +340,15 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
   );
   return (
     <div className="page3">
-      <header className="ph3">
-        <div className="grow">
-          <h3>远程</h3>
-        </div>
-      </header>
-      <div className="remote-body">
-        {error && (
-          <p className="remote-error" role="alert">
-            {error}
-          </p>
-        )}
-        {!status ? (
-          <p role="status">正在读取远程状态…</p>
-        ) : !status.registered ? (
-          <>
-            <h4>让手机连到这台电脑</h4>
-            <p>
-              远程控制让你在离开电脑时查看会话、发送文字、回答提问和确认操作。电脑需要保持运行。
-            </p>
-            <p>
-              向中继管理员索取一次性邀请，粘贴在下方即可登记。也可以在自己的服务器上搭建中继，再为这台电脑生成邀请；部署说明将随中继提供。
-            </p>
-            <label htmlFor="remote-invite">中继邀请</label>
-            <div className="remote-link">
-              <input
-                id="remote-invite"
-                value={invite}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="粘贴邀请（nocturne-invite:…）"
-                onChange={(event) => {
-                  setInvite(event.target.value);
-                }}
-              />
-              <Button
-                variant="primary"
-                disabled={busy || !client || !invite.trim()}
-                onClick={() => {
-                  void operation(async () => {
-                    await client?.call("remote.register", { invite });
-                    setInvite("");
-                  });
-                }}
-              >
-                {busy ? "登记中…" : "登记"}
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="remote-heading">
-              <div>
-                <h4>{status.relay ? new URL(status.relay.origin).host : "中继"}</h4>
-                <Badge
-                  variant={
-                    status.connection === "online"
-                      ? "ok"
-                      : status.connection === "connecting"
-                        ? "neutral"
-                        : "warn"
-                  }
-                  className={`remote-state ${status.connection}`}
-                >
-                  {REMOTE_CONNECTION_TEXT[status.connection]}
-                </Badge>
-              </div>
-              <Switch
-                aria-label="允许远程访问"
-                checked={status.enabled}
-                disabled={busy || !client}
-                onChange={(next) => {
-                  void operation(
-                    () => client?.call("remote.setEnabled", { enabled: next }) ?? Promise.resolve(),
-                  );
-                }}
-              />
-            </div>
-            <section className="remote-devices">
-              <div className="remote-heading">
-                <h4>已配对设备</h4>
+      <div className="spage">
+        <div className="readable">
+          <PageHeader
+            title="远程"
+            actions={
+              status?.registered ? (
                 <Button
+                  variant="primary"
+                  size="sm"
                   disabled={busy || status.connection !== "online" || !client}
                   onClick={() => {
                     void operation(async () => {
@@ -421,125 +358,218 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                 >
                   配对新手机
                 </Button>
-              </div>
-              {status.devices.length === 0 ? (
-                <p>还没有配对手机。扫码后，这台手机才能访问你的会话。</p>
-              ) : (
-                status.devices.map((device) => (
-                  <div className="remote-device" key={device.id}>
-                    <div>
-                      <b>{device.name}</b>
-                      <p>
-                        {device.online ? "在线" : "离线"}，
-                        {device.lastSeenAt
-                          ? `最近在线 ${new Date(device.lastSeenAt).toLocaleString("zh-CN")}`
-                          : "尚未上线"}
-                        ，{device.push ? "已订阅推送" : "无推送订阅"}
-                      </p>
-                    </div>
+              ) : undefined
+            }
+          />
+          <div className="sbody">
+            {error && (
+              <p className="remote-error" role="alert">
+                {error}
+              </p>
+            )}
+            {!status ? (
+              <p role="status">正在读取远程状态…</p>
+            ) : !status.registered ? (
+              <>
+                <SettingsGroup title="让手机连到这台电脑">
+                  <div className="remote-setup">
+                    <p>
+                      远程控制让你在离开电脑时查看会话、发送文字、回答提问和确认操作。电脑需要保持运行。
+                    </p>
+                    <p>
+                      向中继管理员索取一次性邀请，粘贴在下方即可登记。也可以在自己的服务器上搭建中继，再为这台电脑生成邀请；部署说明将随中继提供。
+                    </p>
+                    <Field label="中继邀请" htmlFor="remote-invite">
+                      <div className="remote-link">
+                        <input
+                          id="remote-invite"
+                          className="input lg mono"
+                          value={invite}
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder="粘贴邀请（nocturne-invite:…）"
+                          onChange={(event) => {
+                            setInvite(event.target.value);
+                          }}
+                        />
+                        <Button
+                          variant="primary"
+                          disabled={busy || !client || !invite.trim()}
+                          onClick={() => {
+                            void operation(async () => {
+                              await client?.call("remote.register", { invite });
+                              setInvite("");
+                            });
+                          }}
+                        >
+                          {busy ? "登记中…" : "登记"}
+                        </Button>
+                      </div>
+                    </Field>
+                  </div>
+                </SettingsGroup>
+              </>
+            ) : (
+              <>
+                <SettingsGroup title="中继">
+                  <SettingsRow label={status.relay ? new URL(status.relay.origin).host : "中继"}>
+                    <Badge
+                      variant={
+                        status.connection === "online"
+                          ? "ok"
+                          : status.connection === "connecting"
+                            ? "neutral"
+                            : "warn"
+                      }
+                    >
+                      {REMOTE_CONNECTION_TEXT[status.connection]}
+                    </Badge>
+                    <Button
+                      variant="danger"
+                      disabled={busy}
+                      onClick={() => {
+                        setConfirm({ kind: "unregister" });
+                      }}
+                    >
+                      退出登记
+                    </Button>
+                  </SettingsRow>
+                  <SettingsRow label="允许远程访问">
+                    {" "}
+                    <Switch
+                      aria-label="允许远程访问"
+                      checked={status.enabled}
+                      disabled={busy || !client}
+                      onChange={(next) => {
+                        void operation(
+                          () =>
+                            client?.call("remote.setEnabled", { enabled: next }) ??
+                            Promise.resolve(),
+                        );
+                      }}
+                    />
+                  </SettingsRow>
+                </SettingsGroup>
+                <SettingsGroup
+                  title="已配对设备"
+                  count={status.devices.length}
+                  plain={status.devices.length === 0}
+                >
+                  {status.devices.length === 0 ? (
+                    <EmptyState inline>
+                      还没有配对手机。扫码后，这台手机才能访问你的会话。
+                    </EmptyState>
+                  ) : (
+                    status.devices.map((device) => (
+                      <SettingsRow
+                        key={device.id}
+                        label={device.name}
+                        badge={device.online ? <Badge variant="ok">在线</Badge> : undefined}
+                        desc={
+                          <>
+                            {device.online ? "在线" : "离线"}，
+                            {device.lastSeenAt
+                              ? `最近在线 ${new Date(device.lastSeenAt).toLocaleString("zh-CN")}`
+                              : "尚未上线"}
+                            ，{device.push ? "已订阅推送" : "无推送订阅"}
+                          </>
+                        }
+                      >
+                        <div className="remote-actions">
+                          <Button
+                            size="sm"
+                            disabled={
+                              busy || !status.connections.some((c) => c.deviceId === device.id)
+                            }
+                            onClick={() => {
+                              void operation(
+                                () =>
+                                  client?.call("remote.disconnectDevice", { id: device.id }) ??
+                                  Promise.resolve(),
+                              );
+                            }}
+                          >
+                            断开
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            disabled={busy || status.connection !== "online"}
+                            onClick={() => {
+                              setConfirm({ kind: "remove", id: device.id, name: device.name });
+                            }}
+                          >
+                            移除
+                          </Button>
+                        </div>
+                      </SettingsRow>
+                    ))
+                  )}
+                </SettingsGroup>
+                {confirm && (
+                  <div
+                    className="remote-confirm"
+                    role="alertdialog"
+                    aria-label={confirm.kind === "remove" ? "移除设备确认" : "退出登记确认"}
+                  >
+                    <p>
+                      {confirm.kind === "remove"
+                        ? `移除「${confirm.name}」？移除后需要重新扫码配对。`
+                        : "退出登记并移除所有配对设备？所有手机连接将断开。"}
+                    </p>
                     <div className="remote-actions">
                       <Button
-                        size="sm"
-                        disabled={busy || !status.connections.some((c) => c.deviceId === device.id)}
+                        disabled={busy}
                         onClick={() => {
-                          void operation(
-                            () =>
-                              client?.call("remote.disconnectDevice", { id: device.id }) ??
-                              Promise.resolve(),
-                          );
+                          setConfirm(undefined);
                         }}
                       >
-                        断开
+                        取消
                       </Button>
                       <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={busy || status.connection !== "online"}
+                        variant="danger-solid"
+                        disabled={busy}
                         onClick={() => {
-                          setConfirm({ kind: "remove", id: device.id, name: device.name });
+                          void operation(async () => {
+                            if (client) {
+                              if (confirm.kind === "remove")
+                                await client.call("remote.removeDevice", { id: confirm.id });
+                              else await client.call("remote.unregister", {});
+                              setConfirm(undefined);
+                            }
+                          });
                         }}
                       >
-                        移除
+                        确认{confirm.kind === "remove" ? "移除" : "退出登记"}
                       </Button>
                     </div>
                   </div>
-                ))
-              )}
-            </section>
-            <Button
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                setConfirm({ kind: "unregister" });
-              }}
-            >
-              退出登记
-            </Button>
-            {confirm && (
-              <div
-                className="remote-confirm"
-                role="alertdialog"
-                aria-label={confirm.kind === "remove" ? "移除设备确认" : "退出登记确认"}
-              >
-                <p>
-                  {confirm.kind === "remove"
-                    ? `移除「${confirm.name}」？移除后需要重新扫码配对。`
-                    : "退出登记并移除所有配对设备？所有手机连接将断开。"}
-                </p>
-                <div className="remote-actions">
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      setConfirm(undefined);
-                    }}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    variant="danger-solid"
-                    disabled={busy}
-                    onClick={() => {
-                      void operation(async () => {
-                        if (client) {
-                          if (confirm.kind === "remove")
-                            await client.call("remote.removeDevice", { id: confirm.id });
-                          else await client.call("remote.unregister", {});
-                          setConfirm(undefined);
-                        }
-                      });
-                    }}
-                  >
-                    确认{confirm.kind === "remove" ? "移除" : "退出登记"}
-                  </Button>
-                </div>
-              </div>
+                )}
+              </>
             )}
-          </>
-        )}
-        {status?.warnings.map((warning) => (
-          <p className="remote-warning" key={warning}>
-            {warning}
-          </p>
-        ))}
-        <ExternalAgentsSection
-          client={client}
-          agents={status?.agents ?? []}
-          pipe={status?.agentPipe}
-          busy={busy}
-          onOperate={operation}
-        />
-        <section className="remote-trust">
-          <p>中继只转发密文，看不到你的对话、代码或命令。</p>
-          <p className="remote-agent-security">
-            本机配对用于可见性与误触发隔离，防不住本机同一用户下的恶意程序。
-          </p>
-          <details>
-            <summary>你需要信任谁</summary>
-            <p>
-              手机网页由中继管理员提供：你需要信任管理员不会篡改网页，并妥善保护服务器。被篡改的网页可以在手机解密后读取内容，端到端加密无法防止这一点。
-            </p>
-          </details>
-        </section>
+            {status?.warnings.map((warning) => (
+              <p className="remote-warning" key={warning}>
+                {warning}
+              </p>
+            ))}
+            <ExternalAgentsSection
+              client={client}
+              agents={status?.agents ?? []}
+              pipe={status?.agentPipe}
+              busy={busy}
+              onOperate={operation}
+            />
+            <details className="remote-trust group">
+              <summary>中继只转发密文，看不到你的对话、代码或命令。你需要信任谁</summary>
+              <p className="desc">
+                手机网页由中继管理员提供：你需要信任管理员不会篡改网页，并妥善保护服务器。被篡改的网页可以在手机解密后读取内容，端到端加密无法防止这一点。
+              </p>
+              <p className="desc">
+                本机配对用于可见性与误触发隔离，防不住本机同一用户下的恶意程序。
+              </p>
+            </details>
+          </div>
+        </div>
       </div>
       {offer && client && <PairingDialog client={client} offer={offer} onClose={closePairing} />}
       {client && status?.pendingAgentPairings?.[0] && (
@@ -576,10 +606,7 @@ function ExternalAgentsSection({
       : undefined;
   const pipeFailed = pipeMessage !== undefined;
   return (
-    <section className="remote-devices remote-agents" aria-label="外部 Agent">
-      <div className="remote-heading">
-        <h4>外部 Agent</h4>
-      </div>
+    <SettingsGroup title="外部 Agent" count={agents.length} plain={agents.length === 0}>
       {pipeMessage !== undefined && (
         <p className="remote-warning" role="status">
           {pipeMessage}
@@ -587,19 +614,24 @@ function ExternalAgentsSection({
       )}
       {agents.length === 0
         ? !pipeFailed && (
-            <p>还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。</p>
+            <EmptyState inline>
+              还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。
+            </EmptyState>
           )
         : agents.map((agent) => (
-            <div className="remote-device" key={agent.id}>
-              <div>
-                <b>{agent.name}</b>
-                <p>
+            <SettingsRow
+              key={agent.id}
+              label={agent.name}
+              badge={agent.online ? <Badge variant="ok">在线</Badge> : undefined}
+              desc={
+                <>
                   {agent.online ? "在线" : "离线"} · 指纹 <code>{agent.fingerprint}</code>
                   {agent.lastSeenAt
                     ? ` · 最近活跃 ${new Date(agent.lastSeenAt).toLocaleString("zh-CN")}`
                     : ""}
-                </p>
-              </div>
+                </>
+              }
+            >
               <div className="remote-actions">
                 <Dropdown
                   label={`${agent.name} 范围`}
@@ -650,9 +682,9 @@ function ExternalAgentsSection({
                   吊销
                 </Button>
               </div>
-            </div>
+            </SettingsRow>
           ))}
-    </section>
+    </SettingsGroup>
   );
 }
 
