@@ -19,7 +19,15 @@ import {
   modelPalette,
   usageModelKey,
 } from "./UsageCharts";
-import { Badge, Button, SegmentedControl } from "./ui";
+import {
+  Badge,
+  Button,
+  SegmentedControl,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  SettingsGroup,
+} from "./ui";
 import "./usage.css";
 
 type Range = "7" | "30" | "all";
@@ -72,23 +80,26 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
       : [],
   );
   return (
-    <section className="usage-section" aria-label="每日活跃">
-      <div className="usage-section-head">
-        <h4>
-          每日活跃 <span>近一年</span>
-        </h4>
-        <SegmentedControl
-          className="usage-toggle"
-          aria-label="热力图着色"
-          size="sm"
-          value={mode}
-          options={[
-            { value: "tokens", label: "Tokens" },
-            { value: "cost", label: "费用" },
-          ]}
-          onChange={setMode}
-        />
-      </div>
+    <SettingsGroup
+      title="每日活跃"
+      count="近一年"
+      plain
+      action={
+        <>
+          <SegmentedControl
+            className="usage-toggle"
+            aria-label="热力图着色"
+            size="sm"
+            value={mode}
+            options={[
+              { value: "tokens", label: "Tokens" },
+              { value: "cost", label: "费用" },
+            ]}
+            onChange={setMode}
+          />
+        </>
+      }
+    >
       <div className="usage-heat-scroll">
         <div
           className="usage-months"
@@ -159,7 +170,7 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
           多
         </span>
       </div>
-    </section>
+    </SettingsGroup>
   );
 }
 
@@ -172,10 +183,9 @@ function Ranking({
 }) {
   const max = Math.max(1, ...entries.map((e) => e.count));
   return (
-    <section className="usage-section" aria-label={title}>
-      <h4>{title}</h4>
+    <SettingsGroup title={title} plain>
       {entries.length === 0 ? (
-        <p className="usage-empty">还没有使用记录</p>
+        <EmptyState inline>还没有使用记录</EmptyState>
       ) : (
         <ol className="usage-ranking">
           {entries.slice(0, 8).map((e) => (
@@ -189,7 +199,7 @@ function Ranking({
           ))}
         </ol>
       )}
-    </section>
+    </SettingsGroup>
   );
 }
 
@@ -201,7 +211,6 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   return `${Math.round(hours / 24)} 天前`;
 }
 const percentText = (v: number) => `${(v * 100).toFixed(1)}%`;
-const MODEL_COLUMNS = 11;
 
 function ModelDetail({
   model: m,
@@ -364,174 +373,167 @@ export function UsageView({
   const tokenSum = (total?.inputTokens ?? 0) + (total?.outputTokens ?? 0);
   return (
     <section className="page3 usage-page" aria-label="用量" aria-busy={loading}>
-      <header className="ph3">
-        <div className="grow">
-          <h3>用量</h3>
-          <span className="sub">{scope}</span>
-        </div>
-        <SegmentedControl
-          className="usage-toggle"
-          aria-label="统计范围"
-          value={range}
-          options={(["7", "30", "all"] as const).map((r) => ({
-            value: r,
-            label: r === "all" ? "全部" : `${r} 天`,
-          }))}
-          onChange={onRange}
-        />
-        <Button disabled={loading} onClick={onRefresh}>
-          {loading ? "读取中…" : "刷新"}
-        </Button>
-      </header>
-      <div className="usage-body">
-        {error && (
-          <div className="usage-error" role="alert">
-            读取用量失败：{error}{" "}
-            <Button size="sm" onClick={onRefresh}>
-              重试
-            </Button>
-          </div>
-        )}
-        {!stats ? (
-          <p className="usage-empty">{loading ? "正在读取用量…" : "尚无统计数据"}</p>
-        ) : (
-          <>
-            <div className="usage-overview">
-              <div>
-                <span>累计 tokens</span>
-                <strong>{formatUsageTokens(tokenSum)}</strong>
-                <small>输入 + 输出 tokens</small>
+      <div className="spage">
+        <div className="widepage">
+          <PageHeader
+            title="用量"
+            actions={
+              <>
+                {" "}
+                <SegmentedControl
+                  className="usage-toggle"
+                  aria-label="统计范围"
+                  value={range}
+                  options={(["7", "30", "all"] as const).map((r) => ({
+                    value: r,
+                    label: r === "all" ? "全部" : `${r} 天`,
+                  }))}
+                  onChange={onRange}
+                />
+                <Button disabled={loading} onClick={onRefresh}>
+                  {loading ? "读取中…" : "刷新"}
+                </Button>
+              </>
+            }
+          />
+          <div className="usage-body sbody">
+            <p className="desc">{scope}</p>
+            {error && (
+              <div className="usage-error" role="alert">
+                读取用量失败：{error}{" "}
+                <Button size="sm" onClick={onRefresh}>
+                  重试
+                </Button>
               </div>
-              <div>
-                <span>预估费用</span>
-                <strong>{formatUsageCost(stats.totals.cost.total)}</strong>
-                <small>未计价模型不计入</small>
-              </div>
-              <div>
-                <span>缓存命中率</span>
-                <strong>
-                  {cacheRate.toFixed(1)}
-                  <em>%</em>
-                </strong>
-                <small>读取 / 输入 tokens</small>
-              </div>
-              <div>
-                <span>会话 / 轮</span>
-                <strong>{stats.sessions.toLocaleString("en-US")}</strong>
-                <small>
-                  {stats.turns.toLocaleString("en-US")} 轮，子代理 {stats.subagentTurns} 轮
-                </small>
-              </div>
-              <div>
-                <span>最长一轮</span>
-                <strong>
-                  {stats.longestTurn ? (stats.longestTurn.durationMs / 60_000).toFixed(1) : "—"}
-                  <em>{stats.longestTurn ? "分钟" : ""}</em>
-                </strong>
-                <small title={stats.longestTurn?.sessionTitle}>
-                  {stats.longestTurn
-                    ? `${stats.longestTurn.date}，${stats.longestTurn.sessionTitle}`
-                    : "暂无已完成的轮"}
-                </small>
-              </div>
-            </div>
-            <Activity stats={stats} range={range} />
-            <section className="usage-section" aria-label="Token 构成与费用">
-              <div className="usage-section-head">
-                <h4>Token 构成与费用</h4>
-                <span>输入含缓存读取与写入</span>
-              </div>
-              <div className="usage-composition-bar" aria-hidden="true">
-                {composition.map((c) => (
-                  <i
-                    key={c.kind}
-                    className={`usage-kind-${c.kind}`}
-                    style={{ width: `${tokenSum ? (c.tokens / tokenSum) * 100 : 0}%` }}
-                  />
-                ))}
-              </div>
-              <div className="usage-composition">
-                {composition.map((c) => (
-                  <div key={c.kind}>
-                    <span>
-                      <i className={`usage-kind-${c.kind}`} />
-                      {c.name}
-                    </span>
-                    <b>{formatUsageTokens(c.tokens)}</b>
-                    <small>约 {formatUsageCost(c.cost)}</small>
+            )}
+            {!stats ? (
+              <EmptyState>{loading ? "正在读取用量…" : "尚无统计数据"}</EmptyState>
+            ) : (
+              <>
+                <div className="usage-overview">
+                  <div>
+                    <span>累计 tokens</span>
+                    <strong>{formatUsageTokens(tokenSum)}</strong>
+                    <small>输入 + 输出 tokens</small>
                   </div>
-                ))}
-              </div>
-            </section>
-            <div className="usage-rankings">
-              <Ranking title="常用工具" entries={stats.tools} />
-              <Ranking title="常用技能" entries={stats.skills} />
-            </div>
-            {range === "7" && <DailyBars daily={stats.daily} palette={palette} />}
-            <section className="usage-section" aria-label="按模型">
-              <div className="usage-section-head">
-                <h4>
-                  按模型 <span>{stats.models.length} 个模型</span>
-                </h4>
-                <div className="usage-toggle" aria-label="模型排序">
-                  <button
-                    aria-pressed={sort === "cost"}
-                    onClick={() => {
-                      setSort("cost");
-                    }}
-                  >
-                    按费用
-                  </button>
-                  <button
-                    aria-pressed={sort === "input"}
-                    onClick={() => {
-                      setSort("input");
-                    }}
-                  >
-                    按输入
-                  </button>
+                  <div>
+                    <span>预估费用</span>
+                    <strong>{formatUsageCost(stats.totals.cost.total)}</strong>
+                    <small>未计价模型不计入</small>
+                  </div>
+                  <div>
+                    <span>缓存命中率</span>
+                    <strong>
+                      {cacheRate.toFixed(1)}
+                      <em>%</em>
+                    </strong>
+                    <small>读取 / 输入 tokens</small>
+                  </div>
+                  <div>
+                    <span>会话 / 轮</span>
+                    <strong>{stats.sessions.toLocaleString("en-US")}</strong>
+                    <small>
+                      {stats.turns.toLocaleString("en-US")} 轮，子代理 {stats.subagentTurns} 轮
+                    </small>
+                  </div>
+                  <div>
+                    <span>最长一轮</span>
+                    <strong>
+                      {stats.longestTurn ? (stats.longestTurn.durationMs / 60_000).toFixed(1) : "—"}
+                      <em>{stats.longestTurn ? "分钟" : ""}</em>
+                    </strong>
+                    <small title={stats.longestTurn?.sessionTitle}>
+                      {stats.longestTurn
+                        ? `${stats.longestTurn.date}，${stats.longestTurn.sessionTitle}`
+                        : "暂无已完成的轮"}
+                    </small>
+                  </div>
                 </div>
-              </div>
-              <div className="usage-table-scroll">
-                <table className="usage-table">
-                  <thead>
-                    <tr>
-                      <th>模型 / 服务商</th>
-                      <th>轮</th>
-                      <th>输入</th>
-                      <th>输出</th>
-                      <th>缓存命中</th>
-                      <th>预估费用</th>
-                      <th>Tokens/s</th>
-                      <th>TTFT</th>
-                      <th>近期速度</th>
-                      <th>输入单价</th>
-                      <th>输出单价</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {models.map((m) => {
-                      const p = prices(m.pricing);
-                      const key = usageModelKey(m.model);
-                      const open = expanded.has(key);
-                      const onKey = (event: KeyboardEvent<HTMLTableRowElement>) => {
-                        if (event.target !== event.currentTarget) return;
-                        if (event.key !== "Enter" && event.key !== " ") return;
+                <Activity stats={stats} range={range} />
+                <SettingsGroup
+                  title="Token 构成与费用"
+                  plain
+                  action={<span className="desc">输入含缓存读取与写入</span>}
+                >
+                  <div className="usage-composition-bar" aria-hidden="true">
+                    {composition.map((c) => (
+                      <i
+                        key={c.kind}
+                        className={`usage-kind-${c.kind}`}
+                        style={{ width: `${tokenSum ? (c.tokens / tokenSum) * 100 : 0}%` }}
+                      />
+                    ))}
+                  </div>
+                  <div className="usage-composition">
+                    {composition.map((c) => (
+                      <div key={c.kind}>
+                        <span>
+                          <i className={`usage-kind-${c.kind}`} />
+                          {c.name}
+                        </span>
+                        <b>{formatUsageTokens(c.tokens)}</b>
+                        <small>约 {formatUsageCost(c.cost)}</small>
+                      </div>
+                    ))}
+                  </div>
+                </SettingsGroup>
+                <div className="usage-rankings">
+                  <Ranking title="常用工具" entries={stats.tools} />
+                  <Ranking title="常用技能" entries={stats.skills} />
+                </div>
+                {range === "7" && <DailyBars daily={stats.daily} palette={palette} />}
+                <SettingsGroup
+                  title="按模型"
+                  count={stats.models.length}
+                  plain
+                  action={
+                    <SegmentedControl
+                      aria-label="模型排序"
+                      size="sm"
+                      value={sort}
+                      options={[
+                        { value: "cost", label: "按费用" },
+                        { value: "input", label: "按输入" },
+                      ]}
+                      onChange={setSort}
+                    />
+                  }
+                >
+                  <DataTable
+                    aria-label="按模型用量"
+                    className="usage-table-scroll usage-data"
+                    rows={models}
+                    rowKey={(m) => usageModelKey(m.model)}
+                    rowHeaderKey="model"
+                    rowClassName={() => "usage-model-row"}
+                    rowProps={(m) => ({
+                      tabIndex: 0,
+                      "aria-expanded": expanded.has(usageModelKey(m.model)),
+                      onClick: () => {
+                        toggle(usageModelKey(m.model));
+                      },
+                      onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
+                        if (
+                          event.target !== event.currentTarget ||
+                          (event.key !== "Enter" && event.key !== " ")
+                        )
+                          return;
                         event.preventDefault();
-                        toggle(key);
-                      };
-                      return [
-                        <tr
-                          key={key}
-                          className="usage-model-row"
-                          tabIndex={0}
-                          aria-expanded={open}
-                          onClick={() => {
-                            toggle(key);
-                          }}
-                          onKeyDown={onKey}
-                        >
-                          <th scope="row">
+                        toggle(usageModelKey(m.model));
+                      },
+                    })}
+                    renderDetail={(m) =>
+                      expanded.has(usageModelKey(m.model)) ? (
+                        <ModelDetail model={m} granularity={stats.performanceGranularity} />
+                      ) : null
+                    }
+                    columns={[
+                      {
+                        key: "model",
+                        header: "模型 / 服务商",
+                        render: (m) => {
+                          const key = usageModelKey(m.model);
+                          return (
                             <div className="usage-row-name">
                               <svg
                                 className="usage-chev"
@@ -562,58 +564,89 @@ export function UsageView({
                                 )}
                               </div>
                             </div>
-                          </th>
-                          <td>{m.turns}</td>
-                          <td>{formatUsageTokens(m.inputTokens)}</td>
-                          <td>{formatUsageTokens(m.outputTokens)}</td>
-                          <td>{(m.cacheHitRate * 100).toFixed(1)}%</td>
-                          <td>{m.pricing ? formatUsageCost(m.cost.total) : "—"}</td>
-                          <td
-                            className={m.latency?.tokensPerSecond === undefined ? "dim" : undefined}
-                          >
-                            {formatTokensPerSecond(m.latency?.tokensPerSecond)}
-                          </td>
-                          <td className={m.latency?.avgTtftMs === undefined ? "dim" : undefined}>
-                            {formatLatency(m.latency?.avgTtftMs)}
-                          </td>
-                          <td className="usage-spark-cell">
-                            <Sparkline points={m.performance} />
-                          </td>
-                          {p.map((v, i) => (
-                            <td key={i}>{v}</td>
-                          ))}
-                        </tr>,
-                        open && (
-                          <tr key={`${key}-detail`} className="usage-model-detail">
-                            <td colSpan={MODEL_COLUMNS}>
-                              <ModelDetail model={m} granularity={stats.performanceGranularity} />
-                            </td>
-                          </tr>
-                        ),
-                      ];
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {!models.length && <p className="usage-empty">这个时间范围内还没有模型用量</p>}
-              <p className="usage-table-note">
-                Tokens/s 和 TTFT 只统计带计时的请求；旧版本的记录没有计时，显示「—」。单价为 USD /
-                每百万 token。按声明价格估算，以服务商账单为准。
-              </p>
-              {stats.unpricedModels.length > 0 && (
-                <p className="usage-notice">
-                  {stats.unpricedModels.map((m) => `${m.provider}/${m.model}`).join("、")}{" "}
-                  未声明价格。在配置文件的模型条目里写 pricing。
-                </p>
-              )}
-            </section>
-            {stats.skippedFiles > 0 && (
-              <footer className="usage-footer">
-                已跳过 {stats.skippedFiles} 个损坏或无法读取的日志。
-              </footer>
+                          );
+                        },
+                      },
+                      { key: "turns", header: "轮", numeric: true, render: (m) => m.turns },
+                      {
+                        key: "in",
+                        header: "输入",
+                        numeric: true,
+                        render: (m) => formatUsageTokens(m.inputTokens),
+                      },
+                      {
+                        key: "out",
+                        header: "输出",
+                        numeric: true,
+                        render: (m) => formatUsageTokens(m.outputTokens),
+                      },
+                      {
+                        key: "cache",
+                        header: "缓存命中",
+                        numeric: true,
+                        render: (m) => (m.cacheHitRate * 100).toFixed(1) + "%",
+                      },
+                      {
+                        key: "cost",
+                        header: "预估费用",
+                        numeric: true,
+                        render: (m) => (m.pricing ? formatUsageCost(m.cost.total) : "—"),
+                      },
+                      {
+                        key: "tps",
+                        header: "Tokens/s",
+                        numeric: true,
+                        className: (m) =>
+                          m.latency?.tokensPerSecond === undefined ? "dim" : undefined,
+                        render: (m) => formatTokensPerSecond(m.latency?.tokensPerSecond),
+                      },
+                      {
+                        key: "ttft",
+                        header: "TTFT",
+                        numeric: true,
+                        className: (m) => (m.latency?.avgTtftMs === undefined ? "dim" : undefined),
+                        render: (m) => formatLatency(m.latency?.avgTtftMs),
+                      },
+                      {
+                        key: "spark",
+                        header: "近期速度",
+                        render: (m) => <Sparkline points={m.performance} />,
+                      },
+                      {
+                        key: "pi",
+                        header: "输入单价",
+                        numeric: true,
+                        render: (m) => prices(m.pricing)[0],
+                      },
+                      {
+                        key: "po",
+                        header: "输出单价",
+                        numeric: true,
+                        render: (m) => prices(m.pricing)[1],
+                      },
+                    ]}
+                  />
+                  {!models.length && <EmptyState inline>这个时间范围内还没有模型用量</EmptyState>}
+                  <p className="usage-table-note">
+                    Tokens/s 和 TTFT 只统计带计时的请求；旧版本的记录没有计时，显示「—」。单价为 USD
+                    / 每百万 token。按声明价格估算，以服务商账单为准。
+                  </p>
+                  {stats.unpricedModels.length > 0 && (
+                    <p className="usage-notice">
+                      {stats.unpricedModels.map((m) => `${m.provider}/${m.model}`).join("、")}{" "}
+                      未声明价格。在配置文件的模型条目里写 pricing。
+                    </p>
+                  )}
+                </SettingsGroup>
+                {stats.skippedFiles > 0 && (
+                  <footer className="usage-footer">
+                    已跳过 {stats.skippedFiles} 个损坏或无法读取的日志。
+                  </footer>
+                )}
+              </>
             )}
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </section>
   );

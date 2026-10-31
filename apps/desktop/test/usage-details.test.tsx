@@ -225,9 +225,9 @@ describe("模型行展开", () => {
 
   it("新列：有计时显示 Tokens/s、TTFT 与速度线，旧日志显示「—」", () => {
     render(view("30"));
-    const headers = [...document.querySelectorAll(".usage-table thead th")].map(
-      (e) => e.textContent,
-    );
+    const headers = within(screen.getByRole("table", { name: "按模型用量" }))
+      .getAllByRole("columnheader")
+      .map((e) => e.textContent);
     expect(headers).toEqual([
       "模型 / 服务商",
       "轮",
@@ -254,7 +254,7 @@ describe("模型行展开", () => {
     expect(spark?.querySelectorAll("circle")).toHaveLength(1);
     const [tps2, ttft2, spark2] = cells(row(/legacy/));
     expect(tps2?.textContent).toBe("—");
-    expect(tps2?.className).toBe("dim");
+    expect(tps2?.className).toBe("r dim");
     expect(ttft2?.textContent).toBe("—");
     expect(spark2?.querySelector("svg")).toBeNull();
   });
