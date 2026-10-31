@@ -31,7 +31,18 @@ import type {
 } from "./rpc-types";
 import { describeUpdateError, type CheckResult } from "./updater";
 import { FILE_OPENER_LABELS, isFileOpener, type FileOpener } from "./prefs";
-import { Button, Checkbox, SegmentedControl, Switch } from "./ui";
+import { LAYER_TEXT, sourceMarker } from "./setting-source";
+import {
+  Button,
+  Checkbox,
+  DataTable,
+  Field,
+  PageHeader,
+  SegmentedControl,
+  SettingsGroup,
+  SettingsRow,
+  Switch,
+} from "./ui";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -65,17 +76,6 @@ const NOTIFY_EVENT_KEYS = [
 ] as const;
 const NOTIFY_THRESHOLD_KEYS = ["notifications.doneAfterSeconds"] as const;
 const NOTIFY_TEST_KEY = "notifications.test";
-
-const LAYER_TEXT: Record<SettingItem["source"], string> = {
-  default: "默认",
-  setup: "providers.json",
-  settings: "settings.json",
-  user: "config.json",
-  magpie: "magpie.json",
-  project: "项目配置",
-  env: "环境变量",
-  cli: "命令行参数",
-};
 
 type RoleKey = "task" | "vision" | "smol";
 const ROLES: { role: RoleKey; label: string; hint?: string; unset: string }[] = [
@@ -290,30 +290,6 @@ export function SettingsPage({
   const shellItem = item("shell");
   const reviewerCfg = reviewerItem?.reviewer?.effective;
 
-  const src = (it: SettingItem | undefined) => {
-    if (it === undefined) return <span className="src" />;
-    return (
-      <span
-        className={`src${it.overridden ? " ov" : ""}`}
-        title={it.overridden ? "保存的值被更高层覆盖，改了也不生效" : undefined}
-      >
-        {it.overridden ? (
-          <>
-            已被覆盖<span className="muted-value">{LAYER_TEXT[it.source]}</span>
-          </>
-        ) : (
-          LAYER_TEXT[it.source]
-        )}
-      </span>
-    );
-  };
-  const errLine = (key: string) =>
-    rowError[key] !== undefined ? <span className="errl">{rowError[key]}</span> : null;
-  const rowClass = (key: string) => `s3${rowError[key] !== undefined ? " bad" : ""}`;
-  /** 变灰的行（总开关关闭、或该行依赖的项没勾）：禁用态由控件各自的 disabled 表达 */
-  const rowClassDim = (dim: boolean, keys: readonly string[]) =>
-    `s3${dim ? " dimmed" : ""}${keys.some((key) => rowError[key] !== undefined) ? " bad" : ""}`;
-
   // ── 通知（ADR-0056）：生效值读自 describeSettings，逐项保存 ──
   const notifyEnabled = item("notifications.enabled")?.effective !== "false";
   const notifyEvents = {
@@ -322,10 +298,10 @@ export function SettingsPage({
     done: item("notifications.events.done")?.effective !== "false",
   };
   const notifySound = item("notifications.sound")?.effective !== "false";
-  /** 「提醒哪些事」三个开关同处一行，共用右侧来源列：显示被覆盖的一项，否则第一项 */
-  const notifyEventsSrc = () => {
+  /** 「提醒哪些事」三个开关同处一行，共用一个来源标记：显示被覆盖的一项，否则第一项 */
+  const notifyEventsMarker = () => {
     const list = NOTIFY_EVENT_KEYS.map((key) => item(key));
-    return src(list.find((entry) => entry?.overridden === true) ?? list[0]);
+    return sourceMarker(list.find((entry) => entry?.overridden === true) ?? list[0]);
   };
   /** 阈值下拉：保存值不在档位里时单列一项「N 秒」并保留（不悄悄改成别的值） */
   const notifyThreshold = (() => {
@@ -402,541 +378,527 @@ export function SettingsPage({
 
   const head = SECTION_HEAD[section];
   const needsCore = section !== "appearance";
+  /** 一行可能对应多个键（「提醒哪些事」三项）：合并成一条红字 */
+  const errs = (...keys: string[]): ReactNode => {
+    const list = keys.flatMap((key) => (rowError[key] !== undefined ? [rowError[key]] : []));
+    if (list.length === 0) return undefined;
+    if (list.length === 1) return list[0];
+    return list.map((message) => <div key={message}>{message}</div>);
+  };
   return (
     <section className="page3" data-testid="settings-page" aria-label={head.title}>
-      <div className="ph3">
-        <div className="grow">
-          <h3>{head.title}</h3>
-          {head.sub !== undefined && <span className="sub">{head.sub}</span>}
-        </div>
-      </div>
       {toast !== null && (
         <div className="toast3" role="status">
           <b>✓</b>
           {toast}
         </div>
       )}
-      <div className="sets3">
-        {needsCore && client === undefined && (
-          <span className="fine">后台尚未就绪，稍后自动刷新。</span>
-        )}
-        {needsCore && loadError !== null && <div className="errt">{loadError}</div>}
-        {needsCore && client !== undefined && items === null && loadError === null && (
-          <span className="fine">加载中…</span>
-        )}
-        {section === "general" && items !== null && (
-          <>
-            <h5>权限</h5>
-            <div className={rowClass("permissions.preset")}>
-              <span className="n">默认权限预设</span>
-              <span className="v sans">
-                <Dropdown
-                  label="默认权限预设"
-                  value={pendingPreset ?? presetItem?.saved ?? ""}
-                  options={[
-                    {
-                      value: "",
-                      label: "跟随默认",
-                      tag: presetItem?.effective ?? "—",
-                      description: "不单独保存，使用更低层或内置的默认预设",
-                    },
-                    ...presetOptions(),
-                  ]}
-                  onChange={(v) => {
-                    setPendingPreset(v);
-                    void save("permissions.preset", "默认权限预设", {
-                      "permissions.preset": v === "" ? null : (v as PermissionPresetName),
-                    }).finally(() => {
-                      setPendingPreset(null);
-                    });
-                  }}
-                />
-              </span>
-              {src(presetItem)}
-              {errLine("permissions.preset")}
-            </div>
-            <div className={rowClass("permission.reviewer")}>
-              <span className="n">
-                安全审查<small>smart 下除只读命令外的操作先交给它判断</small>
-              </span>
-              <span className="v">
-                <span className="t">{reviewerText(reviewerCfg)}</span>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setDialog("reviewer");
-                  }}
-                >
-                  编辑
-                </Button>
-              </span>
-              {src(reviewerItem)}
-              {errLine("permission.reviewer")}
-            </div>
+      <div className="spage">
+        <div className="readable">
+          <PageHeader title={head.title} />
+          <div className="sbody">
+            {head.sub !== undefined && <p className="desc">{head.sub}</p>}
+            {needsCore && client === undefined && (
+              <p className="desc">后台尚未就绪，稍后自动刷新。</p>
+            )}
+            {needsCore && loadError !== null && <p className="desc err">{loadError}</p>}
+            {needsCore && client !== undefined && items === null && loadError === null && (
+              <p className="desc">加载中…</p>
+            )}
+            {section === "general" && items !== null && (
+              <>
+                <SettingsGroup title="权限">
+                  <SettingsRow
+                    label="默认权限预设"
+                    marker={sourceMarker(presetItem)}
+                    error={errs("permissions.preset")}
+                  >
+                    <Dropdown
+                      label="默认权限预设"
+                      value={pendingPreset ?? presetItem?.saved ?? ""}
+                      options={[
+                        {
+                          value: "",
+                          label: "跟随默认",
+                          tag: presetItem?.effective ?? "—",
+                          description: "不单独保存，使用更低层或内置的默认预设",
+                        },
+                        ...presetOptions(),
+                      ]}
+                      onChange={(v) => {
+                        setPendingPreset(v);
+                        void save("permissions.preset", "默认权限预设", {
+                          "permissions.preset": v === "" ? null : (v as PermissionPresetName),
+                        }).finally(() => {
+                          setPendingPreset(null);
+                        });
+                      }}
+                    />
+                  </SettingsRow>
+                </SettingsGroup>
 
-            <h5>执行</h5>
-            {shellItem !== undefined && (
-              <div className={rowClass("shell")}>
-                <span className="n">
-                  Shell<small>所有会话下一次调用起生效</small>
-                </span>
-                <span className="v">
-                  {shellItem.source === "env" ||
-                  shellItem.source === "user" ||
-                  shellItem.source === "project" ? (
-                    <>
-                      <span className="t">{shellItem.effective ?? "自动"}</span>
-                      <span className="ro">
-                        {shellItem.source === "env"
-                          ? "由环境变量 NOCTURNE_SHELL 指定"
-                          : `由${LAYER_TEXT[shellItem.source]}指定`}
-                      </span>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      ref={shellTrigger}
-                      className={`dd${shellMenu ? " open" : ""}`}
-                      aria-label="Shell"
-                      aria-haspopup="menu"
-                      aria-expanded={shellMenu}
-                      disabled={shellBusy}
+                <SettingsGroup title="执行">
+                  <SettingsRow
+                    label="安全审查"
+                    desc="smart 下除只读命令外的操作先交给它判断"
+                    marker={sourceMarker(reviewerItem)}
+                    error={errs("permission.reviewer")}
+                  >
+                    <span className="val">{reviewerText(reviewerCfg)}</span>
+                    <Button
+                      size="sm"
                       onClick={() => {
-                        if (shellMenu) {
-                          setShellMenu(false);
-                          return;
-                        }
-                        setRowErr("shell", null);
-                        void client?.runtime
-                          .listShells()
-                          .then((detected) => {
-                            setShells(detected);
-                            setShellMenu(true);
-                          })
-                          .catch((e: unknown) => {
-                            setRowErr("shell", errText(e));
-                          });
+                        setDialog("reviewer");
                       }}
                     >
-                      <span className="dd-label">
-                        {shellItem.saved ?? shellItem.effective ?? "自动"}
-                      </span>
-                      <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-                        <path
-                          d="M4 6l4 4 4-4"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                      编辑
+                    </Button>
+                  </SettingsRow>
+                  {shellItem !== undefined && (
+                    <SettingsRow
+                      label="Shell"
+                      desc="所有会话下一次调用起生效"
+                      marker={sourceMarker(shellItem)}
+                      error={errs("shell")}
+                    >
+                      {shellItem.source === "env" ||
+                      shellItem.source === "user" ||
+                      shellItem.source === "project" ? (
+                        <>
+                          <span className="val mono">{shellItem.effective ?? "自动"}</span>
+                          <span className="val dim">
+                            {shellItem.source === "env"
+                              ? "由环境变量 NOCTURNE_SHELL 指定"
+                              : `由${LAYER_TEXT[shellItem.source]}指定`}
+                          </span>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          ref={shellTrigger}
+                          className="dd"
+                          aria-label="Shell"
+                          aria-haspopup="menu"
+                          aria-expanded={shellMenu}
+                          disabled={shellBusy}
+                          onClick={() => {
+                            if (shellMenu) {
+                              setShellMenu(false);
+                              return;
+                            }
+                            setRowErr("shell", null);
+                            void client?.runtime
+                              .listShells()
+                              .then((detected) => {
+                                setShells(detected);
+                                setShellMenu(true);
+                              })
+                              .catch((e: unknown) => {
+                                setRowErr("shell", errText(e));
+                              });
+                          }}
+                        >
+                          <span className="dd-label">
+                            {shellItem.saved ?? shellItem.effective ?? "自动"}
+                          </span>
+                          <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+                            <path
+                              d="M4 6l4 4 4-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                      {shellMenu && (
+                        <ChoiceMenu
+                          anchor={shellTrigger.current}
+                          label="Shell"
+                          control={{
+                            value: shellItem.saved ?? "auto",
+                            groups: shellGroups(
+                              shells,
+                              shellItem.effective === "auto" || shellItem.effective === undefined
+                                ? (shells.find(
+                                    (item) => item.available && item.kind !== "powershell",
+                                  )?.kind ?? "—")
+                                : shellItem.effective,
+                            ),
+                            onSelect: async (value) => {
+                              if (!client) return;
+                              setShellBusy(true);
+                              setRowErr("shell", null);
+                              try {
+                                setItems(await client.runtime.setShellSetting(value));
+                                onConfigSaved?.();
+                              } catch (e) {
+                                setRowErr("shell", errText(e));
+                              } finally {
+                                setShellBusy(false);
+                              }
+                            },
+                          }}
+                          onClose={() => {
+                            setShellMenu(false);
+                          }}
                         />
-                      </svg>
-                    </button>
+                      )}
+                    </SettingsRow>
                   )}
-                </span>
-                {src(shellItem)}
-                {errLine("shell")}
-                {shellMenu && (
-                  <ChoiceMenu
-                    anchor={shellTrigger.current}
-                    label="Shell"
-                    control={{
-                      value: shellItem.saved ?? "auto",
-                      groups: shellGroups(
-                        shells,
-                        shellItem.effective === "auto" || shellItem.effective === undefined
-                          ? (shells.find((item) => item.available && item.kind !== "powershell")
-                              ?.kind ?? "—")
-                          : shellItem.effective,
-                      ),
-                      onSelect: async (value) => {
-                        if (!client) return;
-                        setShellBusy(true);
-                        setRowErr("shell", null);
-                        try {
-                          setItems(await client.runtime.setShellSetting(value));
-                          onConfigSaved?.();
-                        } catch (e) {
-                          setRowErr("shell", errText(e));
-                        } finally {
-                          setShellBusy(false);
-                        }
-                      },
-                    }}
-                    onClose={() => {
-                      setShellMenu(false);
-                    }}
-                  />
-                )}
-              </div>
-            )}
-            <div className={rowClass("compaction.threshold")}>
-              <span className="n">压缩阈值</span>
-              <span className="v sans">
-                <span className="t">
-                  {thresholdText(thresholdItem?.effective, pruneLimitItem?.effective)}
-                </span>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setDialog("threshold");
-                  }}
-                >
-                  编辑
-                </Button>
-              </span>
-              {src(pruneLimitItem?.overridden ? pruneLimitItem : thresholdItem)}
-              {errLine("compaction.threshold")}
-            </div>
-          </>
-        )}
-        {section === "general" && (
-          <>
-            <h5>普通对话</h5>
-            <div className={rowClass("workspace")}>
-              <span className="n">
-                工作区<small>换位置后，旧位置的对话仍显示在「对话」</small>
-              </span>
-              <span className="v">
-                <span className="t" title={workspace ?? ""}>
-                  {workspace ?? "未就绪"}
-                </span>
-                <Button
-                  size="sm"
-                  disabled={wsBusy || workspace === null}
-                  onClick={() => {
-                    void pickFolder().then((dir) => {
-                      if (dir !== null) void changeWorkspace(dir);
-                    });
-                  }}
-                >
-                  {wsBusy ? "切换中…" : "更改…"}
-                </Button>
-                {workspaceOverridden && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={wsBusy}
-                    title={defaultWorkspace ?? undefined}
-                    onClick={() => void changeWorkspace(null)}
+                  <SettingsRow
+                    label="压缩阈值"
+                    marker={sourceMarker(
+                      pruneLimitItem?.overridden ? pruneLimitItem : thresholdItem,
+                    )}
+                    error={errs("compaction.threshold")}
                   >
-                    恢复默认
+                    <span className="val">
+                      {thresholdText(thresholdItem?.effective, pruneLimitItem?.effective)}
+                    </span>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setDialog("threshold");
+                      }}
+                    >
+                      编辑
+                    </Button>
+                  </SettingsRow>
+                </SettingsGroup>
+              </>
+            )}
+            {section === "general" && (
+              <SettingsGroup title="普通对话">
+                <SettingsRow
+                  label="工作区"
+                  desc="换位置后，旧位置的对话仍显示在「对话」"
+                  error={errs("workspace")}
+                >
+                  <span className="val mono" title={workspace ?? ""}>
+                    {workspace ?? "未就绪"}
+                  </span>
+                  <Button
+                    size="sm"
+                    disabled={wsBusy || workspace === null}
+                    onClick={() => {
+                      void pickFolder().then((dir) => {
+                        if (dir !== null) void changeWorkspace(dir);
+                      });
+                    }}
+                  >
+                    {wsBusy ? "切换中…" : "更改…"}
                   </Button>
-                )}
-              </span>
-              <span className="src">本机</span>
-              {errLine("workspace")}
-            </div>
-            <h5>文件</h5>
-            <div className={rowClass("fileOpener")}>
-              <span className="n">
-                打开文件用<small>回答里的文件引用点开时用哪个程序</small>
-              </span>
-              <span className="v">
-                <Dropdown
+                  {workspaceOverridden && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={wsBusy}
+                      title={defaultWorkspace ?? undefined}
+                      onClick={() => void changeWorkspace(null)}
+                    >
+                      恢复默认
+                    </Button>
+                  )}
+                </SettingsRow>
+                <SettingsRow
                   label="打开文件用"
-                  value={fileOpener}
-                  options={[
-                    {
-                      value: "panel",
-                      label: "Nocturne 面板",
-                      description: "在右侧面板只读查看，带行号定位",
-                    },
-                    { value: "system", label: "系统默认程序", description: "不带行号" },
-                    ...(editors.vscode
-                      ? [{ value: "vscode", label: "VS Code", description: "带行号跳转" }]
-                      : []),
-                    ...(editors.cursor
-                      ? [{ value: "cursor", label: "Cursor", description: "带行号跳转" }]
-                      : []),
-                  ]}
-                  onChange={(value) => {
-                    if (!isFileOpener(value)) return;
-                    const ok = onFileOpenerChange(value);
-                    setRowErr("fileOpener", ok ? null : "本机存储不可写，设置只在本次运行内生效");
-                    showToast(`已保存 打开文件用 = ${FILE_OPENER_LABELS[value]}`);
-                  }}
-                />
-              </span>
-              <span className="src">本机</span>
-              {errLine("fileOpener")}
-            </div>
-          </>
-        )}
-        {section === "general" && update !== undefined && (
-          <>
-            <h5>更新</h5>
-            <div className={rowClass("autoUpdate")}>
-              <span className="n">自动检查更新</span>
-              <span className="v">
-                <Switch
-                  checked={update.autoUpdate}
-                  aria-label="自动检查更新"
-                  onChange={(next) => {
-                    const ok = update.onAutoUpdateChange(next);
-                    setRowErr("autoUpdate", ok ? null : "本机存储不可写，开关只在本次运行内生效");
-                  }}
-                />
-              </span>
-              <span className="src">本机</span>
-              {errLine("autoUpdate")}
-            </div>
-            <div className={rowClass("updateCheck")}>
-              <span className="n">
-                检查更新<small>发现新版本时会在窗口底部提示</small>
-              </span>
-              <span className="v">
-                <Button size="sm" disabled={updBusy} onClick={() => void runUpdateCheck()}>
-                  {updBusy ? "检查中…" : "检查更新"}
-                </Button>
-              </span>
-              <span className="src" />
-              {errLine("updateCheck")}
-            </div>
-          </>
-        )}
-
-        {section === "general" && items !== null && (
-          <>
-            <h5>通知</h5>
-            <div className={rowClass("notifications.enabled")}>
-              <span className="n">
-                通知<small>窗口在前台且正看着该会话时不提醒</small>
-              </span>
-              <span className="v sans">
-                <Switch
-                  checked={notifyEnabled}
-                  aria-label="通知"
-                  onChange={(next) => {
-                    void save("notifications.enabled", "通知", {
-                      "notifications.enabled": next,
-                    });
-                  }}
-                />
-              </span>
-              {src(item("notifications.enabled"))}
-              {errLine("notifications.enabled")}
-            </div>
-            <div className={rowClassDim(!notifyEnabled, NOTIFY_EVENT_KEYS)}>
-              <span className="n">
-                提醒哪些事<small>任一会话，含后台会话</small>
-              </span>
-              <span className="v sans">
-                <Checkbox
-                  checked={notifyEvents.attention}
-                  aria-label="需要确认"
-                  disabled={!notifyEnabled}
-                  onChange={(next) => {
-                    void save("notifications.events.attention", "需要确认", {
-                      "notifications.events.attention": next,
-                    });
-                  }}
+                  desc="回答里的文件引用点开时用哪个程序"
+                  error={errs("fileOpener")}
                 >
-                  需要确认（权限、提问）
-                </Checkbox>
-                <Checkbox
-                  checked={notifyEvents.error}
-                  aria-label="出错停止"
-                  disabled={!notifyEnabled}
-                  onChange={(next) => {
-                    void save("notifications.events.error", "出错停止", {
-                      "notifications.events.error": next,
-                    });
-                  }}
-                >
-                  出错停止
-                </Checkbox>
-                <Checkbox
-                  checked={notifyEvents.done}
-                  aria-label="完成"
-                  disabled={!notifyEnabled}
-                  onChange={(next) => {
-                    void save("notifications.events.done", "完成", {
-                      "notifications.events.done": next,
-                    });
-                  }}
-                >
-                  完成
-                </Checkbox>
-              </span>
-              {notifyEventsSrc()}
-              {errLine("notifications.events.attention")}
-              {errLine("notifications.events.error")}
-              {errLine("notifications.events.done")}
-            </div>
-            <div
-              className={rowClassDim(!notifyEnabled || !notifyEvents.done, NOTIFY_THRESHOLD_KEYS)}
-            >
-              <span className="n">
-                完成提醒的阈值<small>用时不到这么久的轮不提醒</small>
-              </span>
-              <span className="v sans">
-                <Dropdown
-                  label="完成提醒的阈值"
-                  value={String(notifyThreshold.seconds)}
-                  options={notifyThreshold.options}
-                  disabled={
-                    !notifyEnabled
-                      ? "通知已关闭"
-                      : !notifyEvents.done
-                        ? "未勾选「完成」"
-                        : undefined
-                  }
-                  onChange={(value) => {
-                    void save("notifications.doneAfterSeconds", "完成提醒的阈值", {
-                      "notifications.doneAfterSeconds": Number(value),
-                    });
-                  }}
-                />
-              </span>
-              {src(item("notifications.doneAfterSeconds"))}
-              {errLine("notifications.doneAfterSeconds")}
-            </div>
-            <div className={rowClassDim(!notifyEnabled, ["notifications.sound"])}>
-              <span className="n">提示音</span>
-              <span className="v sans">
-                <Switch
-                  checked={notifySound}
-                  aria-label="提示音"
-                  disabled={!notifyEnabled}
-                  onChange={(next) => {
-                    void save("notifications.sound", "提示音", {
-                      "notifications.sound": next,
-                    });
-                  }}
-                />
-              </span>
-              {src(item("notifications.sound"))}
-              {errLine("notifications.sound")}
-            </div>
-            <div className={rowClassDim(!notifyEnabled, ["notifications.test"])}>
-              <span className="n">试一下</span>
-              <span className="v sans">
-                <Button
-                  size="sm"
-                  disabled={!notifyEnabled || notifyTest?.busy === true}
-                  onClick={() => void runNotifyTest()}
-                >
-                  {notifyTest?.busy === true ? "发送中…" : "发送测试通知"}
-                </Button>
-                {notifyTest?.blocked === true && (
-                  <span className="hint warnt">
-                    Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开
-                  </span>
-                )}
-              </span>
-              <span className="src" />
-              {errLine("notifications.test")}
-            </div>
-          </>
-        )}
-
-        {section === "models" && items !== null && (
-          <>
-            <h5>默认</h5>
-            <div className={`${rowClass("defaultModel")} model-setting`}>
-              <span className="n">默认模型与档位</span>
-              <span className="v">
-                {defaultModelItem?.effective === undefined ? (
-                  <span className="ro">未设置</span>
-                ) : (
-                  <ModelValue
-                    value={defaultModelItem.effective}
-                    effort={effortItem?.effective}
-                    off={modelOff(defaultModelItem.effective)}
+                  <Dropdown
+                    label="打开文件用"
+                    value={fileOpener}
+                    options={[
+                      {
+                        value: "panel",
+                        label: "Nocturne 面板",
+                        description: "在右侧面板只读查看，带行号定位",
+                      },
+                      { value: "system", label: "系统默认程序", description: "不带行号" },
+                      ...(editors.vscode
+                        ? [{ value: "vscode", label: "VS Code", description: "带行号跳转" }]
+                        : []),
+                      ...(editors.cursor
+                        ? [{ value: "cursor", label: "Cursor", description: "带行号跳转" }]
+                        : []),
+                    ]}
+                    onChange={(value) => {
+                      if (!isFileOpener(value)) return;
+                      const ok = onFileOpenerChange(value);
+                      setRowErr("fileOpener", ok ? null : "本机存储不可写，设置只在本次运行内生效");
+                      showToast(`已保存 打开文件用 = ${FILE_OPENER_LABELS[value]}`);
+                    }}
                   />
-                )}
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setDialog("defaultModel");
-                  }}
+                </SettingsRow>
+              </SettingsGroup>
+            )}
+            {section === "general" && update !== undefined && (
+              <SettingsGroup title="更新">
+                <SettingsRow label="自动检查更新" error={errs("autoUpdate")}>
+                  <Switch
+                    checked={update.autoUpdate}
+                    aria-label="自动检查更新"
+                    onChange={(next) => {
+                      const ok = update.onAutoUpdateChange(next);
+                      setRowErr("autoUpdate", ok ? null : "本机存储不可写，开关只在本次运行内生效");
+                    }}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="检查更新"
+                  desc="发现新版本时会在窗口底部提示"
+                  error={errs("updateCheck")}
                 >
-                  选择
-                </Button>
-              </span>
-              {src(defaultModelItem)}
-              {modelOff(defaultModelItem?.effective) && (
-                <span className="warnl">已停用，按未设置处理：新会话需要先选模型</span>
-              )}
-              {errLine("defaultModel")}
-            </div>
+                  <Button size="sm" disabled={updBusy} onClick={() => void runUpdateCheck()}>
+                    {updBusy ? "检查中…" : "检查更新"}
+                  </Button>
+                </SettingsRow>
+              </SettingsGroup>
+            )}
 
-            <h5>模型角色</h5>
-            {ROLES.map(({ role, label, hint, unset }) => {
-              const key = `modelRoles.${role}` as const;
-              const it = item(key);
-              return (
-                <div key={role} className={`${rowClass(key)} model-setting`}>
-                  <span className="n">
-                    {label}
-                    {hint !== undefined && <small>{hint}</small>}
-                  </span>
-                  <span className="v">
-                    {it?.effective === undefined ? (
-                      <span className="ro">{unset}</span>
+            {section === "general" && items !== null && (
+              <SettingsGroup title="通知">
+                <SettingsRow
+                  label="通知"
+                  desc="窗口在前台且正看着该会话时不提醒"
+                  marker={sourceMarker(item("notifications.enabled"))}
+                  error={errs("notifications.enabled")}
+                >
+                  <Switch
+                    checked={notifyEnabled}
+                    aria-label="通知"
+                    onChange={(next) => {
+                      void save("notifications.enabled", "通知", {
+                        "notifications.enabled": next,
+                      });
+                    }}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="提醒哪些事"
+                  desc="任一会话，含后台会话"
+                  dimmed={!notifyEnabled}
+                  marker={notifyEventsMarker()}
+                  error={errs(...NOTIFY_EVENT_KEYS)}
+                >
+                  <Checkbox
+                    checked={notifyEvents.attention}
+                    aria-label="需要确认"
+                    disabled={!notifyEnabled}
+                    onChange={(next) => {
+                      void save("notifications.events.attention", "需要确认", {
+                        "notifications.events.attention": next,
+                      });
+                    }}
+                  >
+                    需要确认（权限、提问）
+                  </Checkbox>
+                  <Checkbox
+                    checked={notifyEvents.error}
+                    aria-label="出错停止"
+                    disabled={!notifyEnabled}
+                    onChange={(next) => {
+                      void save("notifications.events.error", "出错停止", {
+                        "notifications.events.error": next,
+                      });
+                    }}
+                  >
+                    出错停止
+                  </Checkbox>
+                  <Checkbox
+                    checked={notifyEvents.done}
+                    aria-label="完成"
+                    disabled={!notifyEnabled}
+                    onChange={(next) => {
+                      void save("notifications.events.done", "完成", {
+                        "notifications.events.done": next,
+                      });
+                    }}
+                  >
+                    完成
+                  </Checkbox>
+                </SettingsRow>
+                <SettingsRow
+                  label="完成提醒的阈值"
+                  desc="用时不到这么久的轮不提醒"
+                  dimmed={!notifyEnabled || !notifyEvents.done}
+                  marker={sourceMarker(item("notifications.doneAfterSeconds"))}
+                  error={errs(...NOTIFY_THRESHOLD_KEYS)}
+                >
+                  <Dropdown
+                    label="完成提醒的阈值"
+                    value={String(notifyThreshold.seconds)}
+                    options={notifyThreshold.options}
+                    disabled={
+                      !notifyEnabled
+                        ? "通知已关闭"
+                        : !notifyEvents.done
+                          ? "未勾选「完成」"
+                          : undefined
+                    }
+                    onChange={(value) => {
+                      void save("notifications.doneAfterSeconds", "完成提醒的阈值", {
+                        "notifications.doneAfterSeconds": Number(value),
+                      });
+                    }}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="提示音"
+                  dimmed={!notifyEnabled}
+                  marker={sourceMarker(item("notifications.sound"))}
+                  error={errs("notifications.sound")}
+                >
+                  <Switch
+                    checked={notifySound}
+                    aria-label="提示音"
+                    disabled={!notifyEnabled}
+                    onChange={(next) => {
+                      void save("notifications.sound", "提示音", {
+                        "notifications.sound": next,
+                      });
+                    }}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="试一下"
+                  dimmed={!notifyEnabled}
+                  warning={
+                    notifyTest?.blocked === true
+                      ? "Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开"
+                      : undefined
+                  }
+                  error={errs(NOTIFY_TEST_KEY)}
+                >
+                  <Button
+                    size="sm"
+                    disabled={!notifyEnabled || notifyTest?.busy === true}
+                    onClick={() => void runNotifyTest()}
+                  >
+                    {notifyTest?.busy === true ? "发送中…" : "发送测试通知"}
+                  </Button>
+                </SettingsRow>
+              </SettingsGroup>
+            )}
+
+            {section === "models" && items !== null && (
+              <>
+                <SettingsGroup title="默认">
+                  <SettingsRow
+                    label="默认模型与档位"
+                    marker={sourceMarker(defaultModelItem)}
+                    warning={
+                      modelOff(defaultModelItem?.effective)
+                        ? "已停用，按未设置处理：新会话需要先选模型"
+                        : undefined
+                    }
+                    error={errs("defaultModel")}
+                  >
+                    {defaultModelItem?.effective === undefined ? (
+                      <span className="val dim">未设置</span>
                     ) : (
-                      <ModelValue value={it.effective} off={modelOff(it.effective)} />
+                      <ModelValue
+                        value={defaultModelItem.effective}
+                        effort={effortItem?.effective}
+                        off={modelOff(defaultModelItem.effective)}
+                      />
                     )}
                     <Button
                       size="sm"
                       onClick={() => {
-                        if (role === "task") onOpenSubagents?.();
-                        else setDialog({ role });
+                        setDialog("defaultModel");
                       }}
                     >
-                      {role === "task" ? "设置 › 子代理" : "选择"}
+                      选择
                     </Button>
-                  </span>
-                  {src(it)}
-                  {modelOff(it?.effective) && <span className="warnl">已停用，按未设置处理</span>}
-                  {errLine(key)}
-                </div>
-              );
-            })}
-            <div className="fine sets-foot">
-              要改某个模型的上下文、最大输出、思考档位，到{" "}
-              <button type="button" className="lk" onClick={onOpenProviders}>
-                服务商 › 模型表
-              </button>{" "}
-              里点「设置」。
-            </div>
-          </>
-        )}
+                  </SettingsRow>
+                </SettingsGroup>
 
-        {section === "appearance" && (
-          <>
-            <h5>主题</h5>
-            <div className={`${rowClass("theme")} s3-themes`}>
-              <div className="themes" role="radiogroup" aria-label="主题">
-                {THEMES.map(({ value, label, sub, cls }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={theme === value}
-                    className={`tcard${cls !== "" ? ` ${cls}` : ""}${theme === value ? " on" : ""}`}
+                <SettingsGroup title="模型角色">
+                  {ROLES.map(({ role, label, hint, unset }) => {
+                    const key = `modelRoles.${role}` as const;
+                    const it = item(key);
+                    return (
+                      <SettingsRow
+                        key={role}
+                        label={label}
+                        desc={hint}
+                        marker={sourceMarker(it)}
+                        warning={modelOff(it?.effective) ? "已停用，按未设置处理" : undefined}
+                        error={errs(key)}
+                      >
+                        {it?.effective === undefined ? (
+                          <span className="val dim">{unset}</span>
+                        ) : (
+                          <ModelValue value={it.effective} off={modelOff(it.effective)} />
+                        )}
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            if (role === "task") onOpenSubagents?.();
+                            else setDialog({ role });
+                          }}
+                        >
+                          {role === "task" ? "设置 › 子代理" : "选择"}
+                        </Button>
+                      </SettingsRow>
+                    );
+                  })}
+                </SettingsGroup>
+                <p className="desc">
+                  要改某个模型的上下文、最大输出、思考档位，到{" "}
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
-                      if (theme === value) return;
-                      const ok = onThemeChange(value);
-                      setRowErr("theme", ok ? null : "本机存储不可写，主题只在本次运行内生效");
-                      showToast(`已保存 主题 = ${label}`);
+                      onOpenProviders?.();
                     }}
                   >
-                    <span className="pv" aria-hidden="true">
-                      <i />
-                      <i />
-                    </span>
-                    <span className="tlabel">{label}</span>
-                    {sub !== undefined && <small className="tsub">{sub}</small>}
-                  </button>
-                ))}
-              </div>
-              <span className="src">本机</span>
-              {errLine("theme")}
-            </div>
-          </>
-        )}
+                    服务商 › 模型表
+                  </Button>{" "}
+                  里点「设置」。
+                </p>
+              </>
+            )}
+
+            {section === "appearance" && (
+              <SettingsGroup title="主题">
+                <div className="themes" role="radiogroup" aria-label="主题">
+                  {THEMES.map(({ value, label, sub, cls }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={theme === value}
+                      className={`tcard${cls !== "" ? ` ${cls}` : ""}${theme === value ? " on" : ""}`}
+                      onClick={() => {
+                        if (theme === value) return;
+                        const ok = onThemeChange(value);
+                        setRowErr("theme", ok ? null : "本机存储不可写，主题只在本次运行内生效");
+                        showToast(`已保存 主题 = ${label}`);
+                      }}
+                    >
+                      <span className="pv" aria-hidden="true">
+                        <i />
+                        <i />
+                      </span>
+                      <span className="tlabel">{label}</span>
+                      {sub !== undefined && <small className="tsub">{sub}</small>}
+                    </button>
+                  ))}
+                </div>
+                {rowError.theme !== undefined && (
+                  <div className="desc err theme-err" role="alert">
+                    {rowError.theme}
+                  </div>
+                )}
+              </SettingsGroup>
+            )}
+          </div>
+        </div>
       </div>
 
       {dialog === "defaultModel" && client !== undefined && (
@@ -1235,11 +1197,14 @@ function DefaultModelDialog({
           setEffort(preselect(key));
         }}
       />
-      <div className="field">
-        <div className="lab">
-          <label>思考档位</label>
-          <small>{levels.length === 0 ? "所选模型没有可用档位" : "可选值随所选模型变化"}</small>
-        </div>
+      <Field
+        label="思考档位"
+        aside={
+          <small className="desc">
+            {levels.length === 0 ? "所选模型没有可用档位" : "可选值随所选模型变化"}
+          </small>
+        }
+      >
         {levels.length > 0 && (
           <div className="effs" role="group" aria-label="思考档位">
             {levels.map((lv) => (
@@ -1255,7 +1220,7 @@ function DefaultModelDialog({
             ))}
           </div>
         )}
-      </div>
+      </Field>
     </Dialog>
   );
 }
@@ -1314,13 +1279,14 @@ function ThresholdDialog({
       onClose={onClose}
       onSave={submitCurrent}
     >
-      <div className="field">
-        <div className="lab">
-          <label htmlFor="th-val">摘要阈值</label>
-        </div>
+      <Field
+        label="摘要阈值"
+        htmlFor="th-val"
+        desc="填百分比（如 85%）或 token 数（如 120000）；留空保存即恢复默认"
+      >
         <input
           id="th-val"
-          className="input mono"
+          className="input lg mono"
           value={value}
           placeholder={effective ?? "如 85% 或 120000"}
           autoFocus
@@ -1331,15 +1297,15 @@ function ThresholdDialog({
             if (e.key === "Enter") submitCurrent();
           }}
         />
-        <div className="hint">填百分比（如 85%）或 token 数（如 120000）；留空保存即恢复默认</div>
-      </div>
-      <div className="field">
-        <div className="lab">
-          <label htmlFor="th-prune">修剪上限</label>
-        </div>
+      </Field>
+      <Field
+        label="修剪上限"
+        htmlFor="th-prune"
+        desc="正整数 token（默认 200000），0 表示不设绝对上限；留空保存即恢复默认"
+      >
         <input
           id="th-prune"
-          className="input mono"
+          className="input lg mono"
           value={pruneLimit}
           placeholder={pruneLimitEffective ?? "200000"}
           onChange={(e) => {
@@ -1349,10 +1315,7 @@ function ThresholdDialog({
             if (e.key === "Enter") submitCurrent();
           }}
         />
-        <div className="hint">
-          正整数 token（默认 200000），0 表示不设绝对上限；留空保存即恢复默认
-        </div>
-      </div>
+      </Field>
     </Dialog>
   );
 }
@@ -1608,43 +1571,39 @@ function ReviewerDialog({
         </div>
       ) : (
         <>
-          {seg(
-            "审查器",
-            backend,
-            [
-              ["off", "关闭"],
-              ["jev", "Jev"],
-              ["model", "小模型"],
-            ] as const,
-            (v) => {
-              setBackend(v);
-              setError(null);
-            },
-          )}
+          <Field label="审查器">
+            {seg(
+              "审查器",
+              backend,
+              [
+                ["off", "关闭"],
+                ["jev", "Jev"],
+                ["model", "小模型"],
+              ] as const,
+              (v) => {
+                setBackend(v);
+                setError(null);
+              },
+            )}
+          </Field>
           {backend === "model" && (
             <ModelPicker models={models} picked={modelRef} onPick={setModelRef} />
           )}
           {backend === "jev" && (
             <>
-              <div className="field">
-                <div className="lab">
-                  <label>接入点</label>
-                </div>
+              <Field label="接入点">
                 {seg(
                   "接入点",
                   endpoint,
                   JEV_ENDPOINTS.map((e) => [e.v, e.label] as const),
                   setEndpoint,
                 )}
-              </div>
+              </Field>
               {endpoint === "custom" && (
-                <div className="field">
-                  <div className="lab">
-                    <label htmlFor="rv-url">地址</label>
-                  </div>
+                <Field label="地址" htmlFor="rv-url">
                   <input
                     id="rv-url"
-                    className="input mono"
+                    className="input lg mono"
                     spellCheck={false}
                     value={baseURL}
                     placeholder="https://"
@@ -1652,26 +1611,23 @@ function ReviewerDialog({
                       setBaseURL(e.target.value);
                     }}
                   />
-                </div>
+                </Field>
               )}
-              <div className="field">
-                <div className="lab">
-                  <label htmlFor="rv-model">模型</label>
-                </div>
+              <Field label="模型" htmlFor="rv-model">
                 <input
                   id="rv-model"
-                  className="input mono"
+                  className="input lg mono"
                   spellCheck={false}
                   value={jevModel}
                   onChange={(e) => {
                     setJevModel(e.target.value);
                   }}
                 />
-              </div>
-              <div className="field">
-                <div className="lab">
-                  <label>凭据</label>
-                </div>
+              </Field>
+              <Field
+                label="凭据"
+                desc={credKind === "stored" ? "密钥交给系统凭据存储，界面不留存" : undefined}
+              >
                 {seg(
                   "凭据",
                   credKind,
@@ -1685,6 +1641,7 @@ function ReviewerDialog({
                 {credKind === "provider" && (
                   <Dropdown
                     label="沿用的服务商"
+                    appearance="lg"
                     value={credProvider}
                     options={providers.map((p) => ({ value: p, label: p }))}
                     onChange={setCredProvider}
@@ -1692,7 +1649,7 @@ function ReviewerDialog({
                 )}
                 {credKind === "env" && (
                   <input
-                    className="input mono"
+                    className="input lg mono"
                     spellCheck={false}
                     value={credEnv}
                     aria-label="环境变量名"
@@ -1703,47 +1660,44 @@ function ReviewerDialog({
                   />
                 )}
                 {credKind === "stored" && (
-                  <>
-                    <input
-                      className="input"
-                      type="password"
-                      autoComplete="off"
-                      value={reviewerKey}
-                      aria-label="审查器密钥"
-                      placeholder="留空则沿用已保存的密钥"
-                      onChange={(e) => {
-                        setReviewerKey(e.target.value);
-                      }}
-                    />
-                    <div className="hint">密钥交给系统凭据存储，界面不留存</div>
-                  </>
+                  <input
+                    className="input lg"
+                    type="password"
+                    autoComplete="off"
+                    value={reviewerKey}
+                    aria-label="审查器密钥"
+                    placeholder="留空则沿用已保存的密钥"
+                    onChange={(e) => {
+                      setReviewerKey(e.target.value);
+                    }}
+                  />
                 )}
-              </div>
-              <div className="field">
-                <div className="lab">
-                  <label htmlFor="rv-conf">置信度阈值</label>
-                  <small>可选，0–1</small>
-                </div>
+              </Field>
+              <Field
+                label="置信度阈值"
+                htmlFor="rv-conf"
+                aside={<small className="desc">可选，0–1</small>}
+              >
                 <input
                   id="rv-conf"
-                  className="input mono narrow"
+                  className="input mono sm-w"
                   value={minConfidence}
                   placeholder="0.7"
                   onChange={(e) => {
                     setMinConfidence(e.target.value);
                   }}
                 />
-              </div>
+              </Field>
             </>
           )}
-          <div className="field">
-            <div className="lab">
-              <label htmlFor="rv-rules-ask">额外交人</label>
-              <small>自然语言，最多 {RULES_LIMIT} 字</small>
-            </div>
+          <Field
+            label="额外交人"
+            htmlFor="rv-rules-ask"
+            aside={<small className="desc">自然语言，最多 {RULES_LIMIT} 字</small>}
+          >
             <textarea
               id="rv-rules-ask"
-              className="input"
+              className="textarea"
               rows={3}
               maxLength={RULES_LIMIT}
               spellCheck={false}
@@ -1753,15 +1707,16 @@ function ReviewerDialog({
                 setRulesAsk(e.target.value);
               }}
             />
-          </div>
-          <div className="field">
-            <div className="lab">
-              <label htmlFor="rv-rules-allow">额外放行</label>
-              <small>自然语言，最多 {RULES_LIMIT} 字</small>
-            </div>
+          </Field>
+          <Field
+            label="额外放行"
+            htmlFor="rv-rules-allow"
+            aside={<small className="desc">自然语言，最多 {RULES_LIMIT} 字</small>}
+            desc="两段原样交给审查器，不改变只读白名单，也不能放行直接交给你确认的命令"
+          >
             <textarea
               id="rv-rules-allow"
-              className="input"
+              className="textarea"
               rows={3}
               maxLength={RULES_LIMIT}
               spellCheck={false}
@@ -1771,10 +1726,7 @@ function ReviewerDialog({
                 setRulesAllow(e.target.value);
               }}
             />
-            <div className="hint">
-              两段原样交给审查器，不改变只读白名单，也不能放行直接交给你确认的命令
-            </div>
-          </div>
+          </Field>
           <ReviewerSampleCheck
             client={client}
             enabled={current !== undefined && current.backend !== "off"}
@@ -1844,11 +1796,12 @@ function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: 
   const rate = rows.length === 0 ? 0 : Math.round((matched / rows.length) * 100);
   const running = run.state === "running";
   return (
-    <div className="field samples">
-      <div className="lab">
-        <label>样例检查</label>
-        <small>用已保存的审查器配置跑内置样例</small>
-      </div>
+    <Field
+      label="样例检查"
+      className="samples"
+      aside={<small className="desc">用已保存的审查器配置跑内置样例</small>}
+      error={run.state === "error" ? `测试失败：${run.message}` : undefined}
+    >
       <div className="srun">
         {running ? (
           <Button onClick={cancel}>取消测试</Button>
@@ -1861,45 +1814,43 @@ function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: 
             测试
           </Button>
         )}
-        {!enabled && <span className="hint">审查器已关闭：先选择后端并保存</span>}
+        {!enabled && <span className="desc">审查器已关闭：先选择后端并保存</span>}
         {running && (
-          <span className="hint">
+          <span className="desc">
             已跑 {rows.length}/{run.total ?? "?"} 条
           </span>
         )}
       </div>
       {rows.length > 0 && (
-        <table className="stable">
-          <thead>
-            <tr>
-              <th>样例</th>
-              <th>期望</th>
-              <th>实际</th>
-              <th>用时</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className={row.match ? undefined : "bad"} title={row.reason}>
-                <td>{row.title}</td>
-                <td>{EXPECT_TEXT[row.expected]}</td>
-                <td>
-                  {EXPECT_TEXT[row.actual]}
-                  {row.match ? "" : " ✗"}
-                </td>
-                <td>{(row.durationMs / 1000).toFixed(1)}s</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          aria-label="样例检查结果"
+          rows={rows}
+          rowKey={(row) => row.id}
+          rowClassName={(row) => (row.match ? undefined : "bad")}
+          rowTitle={(row) => row.reason}
+          columns={[
+            { key: "title", header: "样例", render: (row) => row.title },
+            { key: "expected", header: "期望", render: (row) => EXPECT_TEXT[row.expected] },
+            {
+              key: "actual",
+              header: "实际",
+              render: (row) => `${EXPECT_TEXT[row.actual]}${row.match ? "" : " ✗"}`,
+            },
+            {
+              key: "time",
+              header: "用时",
+              numeric: true,
+              render: (row) => `${(row.durationMs / 1000).toFixed(1)}s`,
+            },
+          ]}
+        />
       )}
       {(run.state === "done" || run.state === "cancelled") && (
-        <div className="ssum" role="status">
+        <div className="desc" role="status">
           {run.state === "cancelled" ? `已取消，已跑 ${rows.length}/${run.total} 条，` : ""}
           命中率 {matched}/{rows.length}（{rate}%）
         </div>
       )}
-      {run.state === "error" && <div className="errt">测试失败：{run.message}</div>}
-    </div>
+    </Field>
   );
 }

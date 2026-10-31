@@ -492,6 +492,11 @@
 .desc.err {
   color: var(--a-error);
 }
+.sbody > p.desc,
+.md-detail .inner > p.desc {
+  margin: 0;
+  padding: 0 var(--space-4);
+}
 .empty {
   padding: var(--space-12) var(--space-4) 0;
   display: flex;
@@ -729,6 +734,9 @@
 }
 .tbl tr.off td {
   color: var(--a-faint);
+}
+.tbl tr.bad td {
+  color: var(--a-error);
 }
 
 /* ---------- 窄窗口（效果图「窄窗口」） ---------- */

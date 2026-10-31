@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import { SourceMarker, type SourceMarkerProps } from "./SourceMarker";
 
@@ -23,7 +23,7 @@ export interface SettingsRowProps {
   children?: ReactNode;
 }
 
-/** 设置行（`.srow`）：左侧标签（可带来源标记、徽标、说明），右侧控件 */
+/** 设置行（`.srow`）：左侧标签（可带来源标记、徽标、说明），右侧控件；整行是以标签命名的 group */
 export function SettingsRow({
   label,
   labelFor,
@@ -45,14 +45,19 @@ export function SettingsRow({
     .filter(Boolean)
     .join(" ");
   const show = (node: ReactNode) => node !== undefined && node !== null && node !== false;
+  const labelId = useId();
   return (
-    <div className={classes}>
+    <div className={classes} role="group" aria-labelledby={labelId}>
       <div className="lab">
         <div className="lab-line">
           {labelFor !== undefined ? (
-            <label htmlFor={labelFor}>{label}</label>
+            <label id={labelId} htmlFor={labelFor}>
+              {label}
+            </label>
           ) : (
-            <span className="lab-text">{label}</span>
+            <span id={labelId} className="lab-text">
+              {label}
+            </span>
           )}
           {marker !== undefined && <SourceMarker {...marker} />}
           {badge}

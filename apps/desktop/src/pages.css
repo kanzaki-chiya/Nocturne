@@ -749,114 +749,6 @@
   color: var(--a-text);
 }
 
-/* 设置页 */
-.page3 .sets3 {
-  /* 内容限宽 880px，但滚动容器铺满，滚动条贴窗口右边而不是停在内容右侧 */
-  padding: 12px max(30px, calc(100% - 850px)) 14px 30px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 0;
-  overflow-y: auto;
-}
-.page3 .sets3 h5 {
-  margin: 8px 0 2px 12px;
-  font-size: var(--fs-1);
-  color: var(--a-accent);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-.page3 .sets3 h5:first-child {
-  margin-top: 0;
-}
-.page3 .s3 {
-  display: grid;
-  grid-template-columns: 170px minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
-  padding: 6px 12px;
-  border-radius: var(--radius-2);
-  position: relative;
-}
-.page3 .s3 .n {
-  color: var(--a-text);
-  display: grid;
-  gap: 0;
-}
-.page3 .s3 .n small {
-  color: var(--a-faint);
-  font-size: var(--fs-1);
-  line-height: 1.4;
-}
-.page3 .s3 .v {
-  color: var(--a-secondary);
-  font-family: var(--mono);
-  font-size: var(--fs-2);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.page3 .s3 .v.sans {
-  font-family: var(--sans);
-}
-.page3 .s3 .v .t {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.page3 .s3 .v .ro {
-  color: var(--a-faint);
-  font-family: var(--sans);
-}
-/* 下拉跟着值列收窄，不再顶出列压住右侧来源标签（侧面板开着时设置页会很窄） */
-.page3 .s3 .dd {
-  min-width: min(260px, 100%);
-}
-@container settings-content (width < 640px) {
-  .page3 .s3 .dd .dd-d {
-    display: none;
-  }
-}
-.page3 .s3 .src {
-  font-size: var(--fs-1);
-  color: var(--a-faint);
-  white-space: nowrap;
-}
-.page3 .s3 .src.ov {
-  color: var(--a-warning);
-}
-.page3 .s3.bad {
-  background: color-mix(in srgb, var(--a-error) 6%, transparent);
-}
-/* 通知一节（ADR-0056）：总开关关掉、或阈值行依赖的「完成」没勾时整行变灰 */
-.page3 .s3.dimmed {
-  opacity: 0.5;
-}
-.page3 .s3 .errl {
-  grid-column: 2 / 4;
-  font-size: var(--fs-1);
-  color: var(--a-error);
-  margin-top: -4px;
-}
-.page3 .s3 .select {
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  padding: 3px 10px;
-  background: var(--a-input);
-  color: var(--a-text);
-  font-family: var(--mono);
-  font-size: var(--fs-2);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.page3 .s3 .select::after {
-  content: "▾";
-  color: var(--a-faint);
-  font-size: 10px;
-}
 .page3 .toast3 {
   position: absolute;
   right: 26px;
@@ -883,7 +775,6 @@
 .page3 .pane::-webkit-scrollbar,
 .page3 .mt::-webkit-scrollbar,
 .page3 .fbody::-webkit-scrollbar,
-.page3 .sets3::-webkit-scrollbar,
 .page3 .dlg::-webkit-scrollbar,
 .page3 .dlg .picklist::-webkit-scrollbar {
   width: 6px;
@@ -893,7 +784,6 @@
 .page3 .pane::-webkit-scrollbar-button,
 .page3 .mt::-webkit-scrollbar-button,
 .page3 .fbody::-webkit-scrollbar-button,
-.page3 .sets3::-webkit-scrollbar-button,
 .page3 .dlg::-webkit-scrollbar-button,
 .page3 .dlg .picklist::-webkit-scrollbar-button {
   display: none;
@@ -904,7 +794,6 @@
 .page3 .pane::-webkit-scrollbar-track,
 .page3 .mt::-webkit-scrollbar-track,
 .page3 .fbody::-webkit-scrollbar-track,
-.page3 .sets3::-webkit-scrollbar-track,
 .page3 .dlg::-webkit-scrollbar-track,
 .page3 .dlg .picklist::-webkit-scrollbar-track {
   background: transparent;
@@ -913,7 +802,6 @@
 .page3 .pane::-webkit-scrollbar-thumb,
 .page3 .mt::-webkit-scrollbar-thumb,
 .page3 .fbody::-webkit-scrollbar-thumb,
-.page3 .sets3::-webkit-scrollbar-thumb,
 .page3 .dlg::-webkit-scrollbar-thumb,
 .page3 .dlg .picklist::-webkit-scrollbar-thumb {
   background: var(--a-border-strong);
@@ -991,31 +879,28 @@
 .page3 .input.narrow {
   width: 120px;
 }
-.page3 .s3 select.select::after {
-  content: none;
-}
+
 .page3 .pane .pbanner,
 .page3 .pane > .wait {
   max-width: none;
 }
 
-/* 外观页：主题卡片。「本机」紧跟在卡片后面，不再被推到整行最右边 */
-.page3 .s3.s3-themes {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: 16px;
-}
-.page3 .s3.s3-themes .errl {
-  flex-basis: 100%;
-}
+/* 外观页：主题卡片（效果图 .themes：卡片里三列，窄窗口一列） */
 .themes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+@container settings-layout (width <= 900px) {
+  .themes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.theme-err {
+  padding: 0 var(--space-4) var(--space-3);
 }
 .tcard {
-  width: 150px;
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   padding: 8px;
@@ -1077,10 +962,6 @@
   color: var(--a-faint);
 }
 
-/* 模型页尾的链接行 */
-.sets-foot {
-  margin: 10px 0 0 12px;
-}
 .page3 .lk {
   color: var(--a-accent);
   background: none;
@@ -1163,8 +1044,7 @@
   white-space: nowrap;
 }
 .page3 .badge,
-.page3 .acts .btn,
-.page3 .s3 .v .btn {
+.page3 .acts .btn {
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1199,12 +1079,7 @@
 .page3 .model-value.off .model-provider {
   color: var(--a-faint);
 }
-.page3 .s3 .warnl {
-  grid-column: 2 / 4;
-  font-size: var(--fs-1);
-  color: var(--a-warning);
-  margin-top: -4px;
-}
+
 @container settings-content (width < 900px) {
   .page3 .cols3 {
     grid-template-columns: 200px minmax(0, 1fr);
@@ -1246,19 +1121,6 @@
 @container provider-detail (width < 320px) {
   .page3 .kv {
     grid-template-columns: minmax(0, 1fr);
-  }
-}
-@container settings-content (width < 700px) {
-  .page3 .sets3 {
-    padding-inline: 16px;
-  }
-  .page3 .model-setting {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px 12px;
-  }
-  .page3 .model-setting .v {
-    grid-column: 1 / -1;
-    grid-row: 2;
   }
 }
 

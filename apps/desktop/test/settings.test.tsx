@@ -165,11 +165,16 @@ function props(
   };
 }
 
+/** 设置行是以标签命名的 group（SettingsRow） */
 function row(label: string): HTMLElement {
-  const name = screen.getByText(label, { selector: ".s3 .n, .s3 .n *" });
-  const el = name.closest(".s3");
-  if (!(el instanceof HTMLElement)) throw new Error(`找不到设置行 ${label}`);
-  return el;
+  return screen.getByRole("group", { name: label });
+}
+
+/** 样例检查结果表的数据行（不含表头） */
+function sampleRows(): HTMLElement[] {
+  const table = screen.queryByRole("table", { name: "样例检查结果" });
+  if (table === null) return [];
+  return within(table).getAllByRole("row").slice(1);
 }
 
 afterEach(cleanup);
@@ -269,19 +274,21 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("option", { name: /^bypass/ }));
     await screen.findByText(/保存失败：磁盘只读/);
     expect(trigger.textContent).toContain("read-only");
-    expect(row("默认权限预设").className).toContain("bad");
+    expect(within(row("默认权限预设")).getByRole("alert").textContent).toContain(
+      "保存失败：磁盘只读",
+    );
     expect(onConfigSaved).toHaveBeenCalledTimes(1);
     server.close();
   });
 
-  it("被覆盖的项标黄并写明覆盖层", async () => {
+  it("被覆盖的项用 warn 来源标记并在 title 写明覆盖层", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
     render(<SettingsPage {...props(server.client)} />);
     const ov = await screen.findByText("项目配置");
-    expect(ov.className).toContain("muted-value");
-    expect(ov.parentElement?.textContent).toBe("已被覆盖项目配置");
-    expect(ov.parentElement?.className).toContain("ov");
+    expect(ov.className).toBe("marker warn");
+    expect(ov.getAttribute("title")).toBe("保存的值被更高层（项目配置）覆盖，改了也不生效");
+    expect(row("压缩阈值").contains(ov)).toBe(true);
     server.close();
   });
 
@@ -296,7 +303,7 @@ describe("SettingsPage", () => {
     expect(primary.className).toBe("model-primary");
     expect(primary.parentElement?.title).toBe("openrouter · gpt-5");
     expect(primary.parentElement?.querySelector(".model-provider")?.textContent).toBe("openrouter");
-    expect(primary.closest(".s3")?.classList.contains("model-setting")).toBe(true);
+    expect(row("默认模型与档位").contains(primary)).toBe(true);
     fireEvent.click(row("默认模型与档位").querySelector("button") ?? document.body);
     await screen.findByRole("dialog", { name: "默认模型与档位" });
     fireEvent.click(screen.getByRole("button", { name: "medium" }));
@@ -338,7 +345,7 @@ describe("SettingsPage", () => {
       "opencode-go",
     );
     expect(primary.parentElement?.title).toBe("opencode-go · deepseek-v4.1-flash");
-    expect(primary.closest(".s3")?.classList.contains("model-setting")).toBe(true);
+    expect(row("看图模型").contains(primary)).toBe(true);
     server.close();
   });
 
@@ -530,7 +537,7 @@ describe("SettingsPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "测试" }));
       const status = await screen.findByRole("status");
       expect(status.textContent).toBe("命中率 2/3（67%）");
-      const rows = [...document.querySelectorAll(".stable tbody tr")];
+      const rows = sampleRows();
       expect(rows.map((r) => [...r.querySelectorAll("td")].map((td) => td.textContent))).toEqual([
         ["没有被要求就推送", "交人", "交人", "0.8s"],
         ["用户要求后推送", "放行", "交人 ✗", "1.2s"],
@@ -567,14 +574,14 @@ describe("SettingsPage", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "测试" }));
       await waitFor(() => {
-        expect(document.querySelectorAll(".stable tbody tr")).toHaveLength(1);
+        expect(sampleRows()).toHaveLength(1);
       });
       fireEvent.click(await screen.findByRole("button", { name: "取消测试" }));
       release(RESULTS.s2);
       const status = await screen.findByRole("status");
       expect(status.textContent).toBe("已取消，已跑 1/3 条，命中率 1/1（100%）");
       expect(screen.getByRole("button", { name: "测试" })).toHaveProperty("disabled", false);
-      expect(document.querySelectorAll(".stable tbody tr")).toHaveLength(1);
+      expect(sampleRows()).toHaveLength(1);
       expect(
         server.calls
           .filter((c) => c.method === "runtime.testReviewerSample")
@@ -633,8 +640,8 @@ describe("SettingsPage", () => {
     const onOpenProviders = vi.fn();
     const view = render(<SettingsPage {...props(server.client)} />);
     await screen.findByText("默认权限预设");
-    const groups = () => [...document.querySelectorAll("h5")].map((h) => h.textContent);
-    expect(groups()).toEqual(["权限", "执行", "普通对话", "文件", "通知"]);
+    const groups = () => screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(groups()).toEqual(["权限", "执行", "普通对话", "通知"]);
     expect(screen.getByRole("heading", { name: "常规" })).toBeTruthy();
     expect(screen.queryByText("看图模型")).toBeNull();
 

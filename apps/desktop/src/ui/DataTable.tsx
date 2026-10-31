@@ -20,6 +20,8 @@ export interface DataTableProps<Row> {
   rowKey: (row: Row) => string;
   /** 行类名（停用行变淡等） */
   rowClassName?: ((row: Row) => string | undefined) | undefined;
+  /** 行悬停说明 */
+  rowTitle?: ((row: Row) => string | undefined) | undefined;
   "aria-label"?: string | undefined;
   className?: string | undefined;
 }
@@ -30,6 +32,7 @@ export function DataTable<Row>({
   rows,
   rowKey,
   rowClassName,
+  rowTitle,
   "aria-label": ariaLabel,
   className,
 }: DataTableProps<Row>) {
@@ -56,7 +59,7 @@ export function DataTable<Row>({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={rowKey(row)} className={rowClassName?.(row)}>
+            <tr key={rowKey(row)} className={rowClassName?.(row)} title={rowTitle?.(row)}>
               {columns.map((c) => (
                 <td key={c.key} className={cellClass(c)}>
                   {c.render(row)}
