@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/mcp-server",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Nocturne 对外 MCP 服务器桥（ADR-0074）：把本机桌面后台的会话能力暴露为 MCP 工具",
   "license": "GPL-3.0-only",
   "private": true,

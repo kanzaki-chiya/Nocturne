@@ -174,6 +174,8 @@ export interface NocturneMcpServerHandle {
   close(): Promise<void>;
 }
 
+const SERVER_VERSION = "0.24.0";
+
 export function createNocturneMcpServer(
   options: NocturneMcpServerOptions = {},
 ): NocturneMcpServerHandle {
@@ -181,7 +183,7 @@ export function createNocturneMcpServer(
   const server = new Server(
     {
       name: "nocturne",
-      version: options.version ?? "0.23.0",
+      version: options.version ?? SERVER_VERSION,
     },
     {
       capabilities: {

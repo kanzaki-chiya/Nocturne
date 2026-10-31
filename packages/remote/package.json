@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/remote",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Nocturne 同构端到端加密通道、配对与签名握手",
   "license": "GPL-3.0-only",
   "private": true,
