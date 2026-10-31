@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as worktreeModule from "../src/agent/worktree.js";
 import { worktreeGit, listWorktreeRecords } from "../src/agent/worktree.js";
 import { backgroundAdmission } from "../src/agent/background-subagents.js";
 import { createRuntime, type RuntimeOptions, type RuntimeSession } from "../src/index.js";
@@ -109,7 +110,30 @@ async function setup(options: Setup = {}) {
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
   });
   const session = await runtime.createSession({ model: "fake/fake-1" });
+  const state = { status: "idle" };
+  sessionStatuses.set(session, state);
+  session.subscribe((event) => {
+    if (event.type === "runtime.status") {
+      state.status = event.payload.status;
+    }
+  });
   return { root, runtime, session, childRequests, sessionsDir };
+}
+
+const sessionStatuses = new WeakMap<RuntimeSession, { status: string }>();
+
+async function waitIdle(session: RuntimeSession, completedTurns: number): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(
+        session.durableEvents().filter((event) => event.type === "turn.completed"),
+      ).toHaveLength(completedTurns);
+      expect(session.pendingInputs().items).toHaveLength(0);
+      expect(sessionStatuses.get(session)?.status ?? "idle").toBe("idle");
+    },
+    { timeout: 5000 },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 type UserEvent = Extract<DurableEvent, { type: "message.user" }>;
@@ -445,18 +469,9 @@ describe("工作树生命周期", () => {
       childId = record.childSessionId;
       writeFileSync(path.join(record.worktree, "code.txt"), "child\n");
       await runtime.cancelSubagent({ parentSessionId: session.id, childSessionId: childId });
-      await vi.waitFor(() =>
-        expect(
-          session.durableEvents().filter((event) => event.type === "turn.completed"),
-        ).toHaveLength(2),
-      );
+      await waitIdle(session, 2);
       applyNext = true;
-      await vi.waitFor(
-        async () => {
-          await session.submit({ text: "apply" });
-        },
-        { timeout: 5000 },
-      );
+      await session.submit({ text: "apply" });
       expect(
         session
           .durableEvents()
@@ -489,6 +504,84 @@ describe("工作树生命周期", () => {
       applyNext = true;
       await session.submit({ text: "apply again" });
       expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("child\n");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("存在保留的工作树时，turn.completed 之后立刻 submit 不报 session_busy，且清理与并回串行", async () => {
+    let childId = "";
+    let step: "launch" | "idle" | "apply" = "launch";
+    const order: string[] = [];
+    const realCleanup = worktreeModule.cleanupMergedWorktrees;
+    const realApply = worktreeModule.applyWorktreeChanges;
+    vi.spyOn(worktreeModule, "cleanupMergedWorktrees").mockImplementation(async (dir, sid) => {
+      order.push("cleanup:start");
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await realCleanup(dir, sid);
+      order.push("cleanup:end");
+    });
+    vi.spyOn(worktreeModule, "applyWorktreeChanges").mockImplementation(
+      async (repo, changes, mode) => {
+        order.push("apply:start");
+        const out = await realApply(repo, changes, mode);
+        order.push("apply:end");
+        return out;
+      },
+    );
+
+    const { root, runtime, session, sessionsDir } = await setup({
+      git: true,
+      childWait: () => 10_000,
+      parentHandler: () => {
+        if (step === "launch") {
+          step = "idle";
+          return [
+            bg("isolated", { isolation: "worktree" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (step === "apply") {
+          step = "idle";
+          return [
+            call("apply", "apply_subagent_changes", { id: childId }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return done;
+      },
+    });
+    try {
+      await session.submit({ text: "launch" });
+      const record = must((await listWorktreeRecords(sessionsDir, session.id))[0]);
+      childId = record.childSessionId;
+      writeFileSync(path.join(record.worktree, "code.txt"), "from worktree\n");
+      await runtime.cancelSubagent({ parentSessionId: session.id, childSessionId: childId });
+
+      await vi.waitFor(() =>
+        expect(
+          session.durableEvents().filter((event) => event.type === "turn.completed"),
+        ).toHaveLength(2),
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // 此时存在保留的工作树且后台 cleanupMergedWorktrees 仍在运行（120ms），立刻 submit 不报 session_busy
+      step = "apply";
+      expect(await session.submit({ text: "apply immediately" })).toBe("done");
+      expect(readFileSync(path.join(root, "code.txt"), "utf8")).toBe("from worktree\n");
+      // 同一会话内清理与并回串行，apply:start 必定在上一轮的 cleanup:end 之后
+      const applyStartIdx = order.indexOf("apply:start");
+      const cleanupBeforeApplyEndIdx = order.lastIndexOf("cleanup:end", applyStartIdx);
+      expect(applyStartIdx).toBeGreaterThan(0);
+      expect(cleanupBeforeApplyEndIdx).toBeGreaterThan(0);
+      expect(order.slice(0, applyStartIdx + 2)).toEqual([
+        "cleanup:start",
+        "cleanup:end",
+        "cleanup:start",
+        "cleanup:end",
+        "apply:start",
+        "apply:end",
+      ]);
     } finally {
       await session.close();
     }
@@ -544,11 +637,7 @@ describe("工作树生命周期", () => {
         writeFileSync(path.join(record.worktree, "code.txt"), "modified content\n");
         rmSync(path.join(record.worktree, "gone.txt"));
         await runtime.cancelSubagent({ parentSessionId: session.id, childSessionId: childId });
-        await vi.waitFor(() =>
-          expect(
-            session.durableEvents().filter((event) => event.type === "turn.completed"),
-          ).toHaveLength(2),
-        );
+        await waitIdle(session, 2);
 
         writeFileSync(path.join(root, "unrelated.txt"), "dirty unrelated\n");
         const indexBefore = await worktreeGit(root, ["write-tree"]);
@@ -627,13 +716,7 @@ describe("工作树生命周期", () => {
           parentSessionId: session.id,
           childSessionId: item.childSessionId,
         });
-      await vi.waitFor(
-        () =>
-          expect(
-            session.durableEvents().filter((event) => event.type === "turn.completed"),
-          ).toHaveLength(2),
-        { timeout: 5000 },
-      );
+      await waitIdle(session, 2);
       expect(warnings).not.toContain("worktree_include_skipped");
 
       writeFileSync(path.join(root, ".worktreeinclude"), "*.secret\n");

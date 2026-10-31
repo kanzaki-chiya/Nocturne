@@ -2162,6 +2162,29 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
+    let worktreeChain: Promise<void> = Promise.resolve();
+    function runWorktreeTask<T>(fn: () => Promise<T>): Promise<T> {
+      const next = worktreeChain.then(fn, fn);
+      worktreeChain = next.then(
+        () => undefined,
+        () => undefined,
+      );
+      return next;
+    }
+    const scheduleWorktreeCleanup = (): void => {
+      if (closing) return;
+      void runWorktreeTask(async () => {
+        if (closing) return;
+        await cleanupMergedWorktrees(sessionsDir, session.id);
+      }).catch((cause: unknown) => {
+        if (closing) return;
+        session.emitEphemeral("runtime.warning", {
+          code: "worktree_cleanup_failed",
+          message: String(cause),
+        });
+      });
+    };
+
     const installTask = (): void => {
       enabledExternalAgents =
         externalConnector === undefined
@@ -2233,20 +2256,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           createApplySubagentChangesTool({
             lookup,
             async apply(id, mode) {
-              const result = lookup(id);
-              if (!result || result.applied) throw new Error("No unapplied isolated changes found");
-              const repository = await inspectWorktreeRepository(meta.workspaceRoot);
-              const applied = await applyWorktreeChanges(repository, result.changes, mode);
-              await removeWorktree(
-                { repository, worktree: result.changes.worktree, branch: result.changes.branch },
-                false,
-              ).catch((cause: unknown) =>
-                session.emitEphemeral("runtime.warning", {
-                  code: "worktree_cleanup_failed",
-                  message: String(cause),
-                }),
-              );
-              return applied;
+              return await runWorktreeTask(async () => {
+                const result = lookup(id);
+                if (!result || result.applied)
+                  throw new Error("No unapplied isolated changes found");
+                const repository = await inspectWorktreeRepository(meta.workspaceRoot);
+                const applied = await applyWorktreeChanges(repository, result.changes, mode);
+                await removeWorktree(
+                  { repository, worktree: result.changes.worktree, branch: result.changes.branch },
+                  false,
+                ).catch((cause: unknown) =>
+                  session.emitEphemeral("runtime.warning", {
+                    code: "worktree_cleanup_failed",
+                    message: String(cause),
+                  }),
+                );
+                return applied;
+              });
             },
           }),
         );
@@ -2761,12 +2787,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.files,
             prepared.subagent,
           );
-          await cleanupMergedWorktrees(sessionsDir, session.id).catch((cause: unknown) =>
-            session.emitEphemeral("runtime.warning", {
-              code: "worktree_cleanup_failed",
-              message: String(cause),
-            }),
-          );
           // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
           if (reason !== "done") pendingInputStore.pauseAll();
           if (reason === "failed") {
@@ -2801,6 +2821,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         turnSettled = undefined;
         if (controller === ac) controller = undefined;
         settleTurn();
+        scheduleWorktreeCleanup();
         // 清理期间仍可入列。释放 busy 与重新取队首之间没有异步间隙；
         // pumpQueue 同步取走条目并重新占用 controller，避免遗漏或并发启动。
         await pumpQueue();
@@ -3556,6 +3577,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
         // 父工具可能正在创建 child；等父 Turn 退出后再收束这期间登记的后台任务。
         await backgroundSubagents.discard(session.id);
+        await worktreeChain;
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
           await hookRunner.run("SessionEnd", { reason: "close" }).catch(() => undefined);

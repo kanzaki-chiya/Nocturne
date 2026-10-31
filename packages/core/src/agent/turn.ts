@@ -208,8 +208,8 @@ export async function runTurn(
     await deps.execEnv.hooks
       ?.run("TurnEnd", { turnId, reason, steps, usage: { ...turnUsage } })
       .catch(() => undefined);
-    status("idle");
     await session.flush().catch(() => undefined);
+    status("idle");
     return reason;
   }
 
