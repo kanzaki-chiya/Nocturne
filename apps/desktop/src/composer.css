@@ -176,7 +176,7 @@
 }
 
 .composer textarea::selection {
-  background: color-mix(in srgb, var(--a-selStrong) 55%, transparent);
+  background: color-mix(in srgb, var(--a-sel-strong) 55%, transparent);
 }
 
 /* ── 工具行 ── */
@@ -271,7 +271,7 @@
   border-radius: var(--radius-pill);
   border: none;
   background: var(--a-accent);
-  color: var(--a-onAccent);
+  color: var(--a-on-accent);
   font-size: var(--fs-2);
   line-height: 1;
   cursor: pointer;
@@ -342,7 +342,7 @@
   background: transparent;
 }
 .menu::-webkit-scrollbar-thumb {
-  background: var(--a-borderStrong);
+  background: var(--a-border-strong);
   border-radius: var(--radius-1);
 }
 
@@ -396,7 +396,7 @@
   box-sizing: border-box;
   padding: 6px 8px;
   margin-bottom: 4px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);

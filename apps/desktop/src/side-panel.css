@@ -26,7 +26,7 @@
   bottom: 0;
   z-index: 20;
   max-width: calc(100% - var(--sidebar-width, 236px));
-  border-left-color: var(--a-borderStrong);
+  border-left-color: var(--a-border-strong);
   box-shadow: -14px 0 30px rgba(0, 0, 0, 0.28);
 }
 .sp-splitter {
@@ -154,7 +154,7 @@
   height: 10px;
 }
 .sp-tab-close:hover {
-  background: var(--a-borderStrong);
+  background: var(--a-border-strong);
   color: var(--a-text);
 }
 .sp-newtab {
@@ -257,7 +257,7 @@
   text-align: left;
 }
 .sp-tool:not(:disabled):hover {
-  border-color: var(--a-borderStrong);
+  border-color: var(--a-border-strong);
   background: var(--a-raised);
 }
 .sp-tool:disabled {
@@ -550,10 +550,10 @@
   user-select: none;
 }
 .side-panel .diff-row-add {
-  background: var(--a-add);
+  background: var(--a-success-bg);
 }
 .side-panel .diff-row-delete {
-  background: var(--a-del);
+  background: var(--a-error-bg);
 }
 .side-panel .diff-row-add .diff-mark {
   color: var(--a-success);
@@ -592,10 +592,10 @@
   box-shadow: 1px 0 0 var(--a-border);
 }
 .sp-change .diff-body:not(.diff-wrap) .diff-row-add :is(.diff-num, .diff-mark) {
-  background: linear-gradient(var(--a-add), var(--a-add)), var(--a-panel);
+  background: linear-gradient(var(--a-success-bg), var(--a-success-bg)), var(--a-panel);
 }
 .sp-change .diff-body:not(.diff-wrap) .diff-row-delete :is(.diff-num, .diff-mark) {
-  background: linear-gradient(var(--a-del), var(--a-del)), var(--a-panel);
+  background: linear-gradient(var(--a-error-bg), var(--a-error-bg)), var(--a-panel);
 }
 /* 换行：代码列占满剩余宽度、可在任意位置断（中英文、长 URL），续行缩进到代码起点 */
 .side-panel .diff-wrap .diff-row {
@@ -647,7 +647,7 @@
 }
 .sp-badge {
   padding: 0 6px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-1);
   color: var(--a-muted);
   font-size: var(--fs-1);
@@ -655,7 +655,7 @@
 }
 .sp-btn {
   padding: 3px 9px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-panel);
   font-size: var(--fs-1);
@@ -770,7 +770,7 @@
   width: min(560px, 90%);
   overflow: hidden;
   transform: translateX(-50%);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   background: var(--a-panel);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
@@ -859,7 +859,7 @@
   width: var(--ovpop-w);
   max-width: calc(100% - 24px);
   padding: 10px 6px 8px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   background: var(--a-panel);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
@@ -994,7 +994,7 @@
   gap: 10px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--a-border);
-  background: var(--a-warnBg);
+  background: var(--a-warning-bg);
   color: var(--a-secondary);
   font-size: var(--fs-1);
 }
@@ -1018,7 +1018,7 @@
 .sp-term-host .xterm .xterm-viewport {
   background-color: var(--a-bg);
 }
-/* 竖滚动条宽度由 overviewRuler.width 定为 10px，颜色取 --a-scrollThumb（terminal-view.ts） */
+/* 竖滚动条宽度由 overviewRuler.width 定为 10px，颜色取 --a-scroll（terminal-view.ts） */
 .sp-term-host .xterm .xterm-scrollable-element > .scrollbar > .slider {
   border-radius: var(--radius-1);
 }
@@ -1106,7 +1106,7 @@
 .sp-spinner {
   display: inline-block;
   box-sizing: border-box;
-  border: 1.5px solid var(--a-borderStrong);
+  border: 1.5px solid var(--a-border-strong);
   border-top-color: var(--a-accent);
   border-radius: var(--radius-pill);
   animation: sp-spin 0.9s linear infinite;
@@ -1171,7 +1171,7 @@
   flex: none;
   width: 12px;
   height: 12px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-top-color: var(--a-secondary);
   border-radius: var(--radius-pill);
   animation: tool-spin 1s linear infinite;
@@ -1350,7 +1350,7 @@
   font: var(--fs-1) var(--mono);
 }
 .sp-agent-badge.child {
-  border-color: var(--a-borderStrong);
+  border-color: var(--a-border-strong);
   color: var(--a-accent);
 }
 .sp-agent-badge .sp-glyph {

@@ -120,7 +120,7 @@
   display: flex;
   gap: 8px;
   border: 1px solid color-mix(in srgb, var(--a-warning) 30%, transparent);
-  background: var(--a-warnBg, rgba(229, 189, 119, 0.08));
+  background: var(--a-warning-bg, rgba(229, 189, 119, 0.08));
   border-radius: var(--radius-2);
   padding: 8px 12px;
   color: var(--a-secondary);

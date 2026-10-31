@@ -484,7 +484,7 @@
   z-index: 4;
   pointer-events: none;
   padding: 10px 12px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-panel);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
@@ -761,7 +761,7 @@
   outline: none;
 }
 .usage-chart .cursor {
-  stroke: var(--a-borderStrong);
+  stroke: var(--a-border-strong);
   stroke-width: 1;
 }
 .usage-chart-tip {

@@ -99,7 +99,7 @@ button {
 }
 /*
  * 细滚动条（ADR-0060 修订 2026-10-18（二））：右侧面板所有滚动区共用。10px、轨道透明、
- * 滑块取 --a-scrollThumb，悬停加深变粗。不写 scrollbar-width / scrollbar-color：
+ * 滑块取 --a-scroll，悬停加深变粗。不写 scrollbar-width / scrollbar-color：
  * Chromium 设了这两个标准属性就忽略 ::-webkit-scrollbar，又会露出箭头按钮。
  */
 .thin-scroll::-webkit-scrollbar,
@@ -121,7 +121,7 @@ button {
 }
 .thin-scroll::-webkit-scrollbar-thumb,
 .thin-scroll *::-webkit-scrollbar-thumb {
-  background: var(--a-scrollThumb);
+  background: var(--a-scroll);
   background-clip: padding-box;
   border: 3px solid transparent;
   border-radius: var(--radius-3);
@@ -158,7 +158,7 @@ button {
 .stream::-webkit-scrollbar-thumb,
 .composer textarea::-webkit-scrollbar-thumb,
 .conversation-stream::-webkit-scrollbar-thumb {
-  background: var(--a-borderStrong);
+  background: var(--a-border-strong);
   border-radius: var(--radius-1);
 }
 .side .tree h4 {
@@ -612,7 +612,7 @@ details[open] > summary:not(.tool-line)::before {
   padding: 2px 7px;
   border-radius: var(--radius-1);
   background: var(--a-raised);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   color: var(--a-text);
   font-size: var(--fs-1);
   line-height: 1.4;
@@ -790,7 +790,7 @@ details[open] > summary:not(.tool-line)::before {
   align-items: center;
   gap: 10px;
   padding: 8px 24px;
-  border-top: 1px solid var(--a-borderStrong);
+  border-top: 1px solid var(--a-border-strong);
   background: var(--a-panel);
   font-size: var(--fs-2);
 }
@@ -826,7 +826,7 @@ details[open] > summary:not(.tool-line)::before {
   font: 500 var(--fs-2)/1 var(--sans);
   border-radius: var(--radius-2);
   padding: 7px 12px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   background: transparent;
   color: var(--a-secondary);
   white-space: nowrap;
@@ -835,7 +835,7 @@ details[open] > summary:not(.tool-line)::before {
 .btn.primary {
   background: var(--a-accent);
   border-color: var(--a-accent);
-  color: var(--a-onAccent);
+  color: var(--a-on-accent);
 }
 .btn.ghost {
   border-color: transparent;
@@ -881,7 +881,7 @@ details[open] > summary:not(.tool-line)::before {
   width: 14px;
   height: 14px;
   border-radius: var(--radius-pill);
-  border: 2px solid var(--a-selStrong);
+  border: 2px solid var(--a-sel-strong);
   border-top-color: var(--a-accent);
   animation: opening-spin 0.9s linear infinite;
 }
@@ -954,13 +954,13 @@ details[open] > summary:not(.tool-line)::before {
   color: var(--a-faint);
 }
 
-/* 右键菜单：面板语汇（--a-panel 底、--a-borderStrong 边、圆角 8px、阴影同 .ctxpop） */
+/* 右键菜单：面板语汇（--a-panel 底、--a-border-strong 边、圆角 8px、阴影同 .ctxpop） */
 .ctxmenu {
   position: fixed;
   z-index: 10;
   min-width: 140px;
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   padding: 4px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
@@ -1078,7 +1078,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .desktop-dialog {
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   padding: 20px;
   width: min(520px, 90%);

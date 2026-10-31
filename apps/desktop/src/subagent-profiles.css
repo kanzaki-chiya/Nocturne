@@ -16,7 +16,7 @@
 .profile-field input,
 .profile-field textarea {
   width: 100%;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);

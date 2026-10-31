@@ -34,7 +34,7 @@ const HISTORY = [
   { key: "user", label: "用户消息", color: "var(--a-success)" },
   { key: "assistant", label: "助手回答", color: "var(--a-warning)" },
   { key: "tool", label: "工具调用与结果", color: "var(--a-accent)" },
-  { key: "summary", label: "压缩摘要", color: "var(--a-selStrong)" },
+  { key: "summary", label: "压缩摘要", color: "var(--a-sel-strong)" },
 ] as const;
 export const number = new Intl.NumberFormat("zh-CN");
 

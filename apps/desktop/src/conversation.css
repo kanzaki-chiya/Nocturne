@@ -9,7 +9,7 @@
 .subagent-badge {
   font: var(--fs-1) var(--mono);
   padding: 1px 7px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   color: var(--a-accent);
   background: var(--a-raised);
@@ -159,7 +159,7 @@
   font-family: var(--mono);
   font-size: max(var(--fs-1), 0.85em);
   color: var(--a-accent);
-  background: var(--a-selStrong);
+  background: var(--a-sel-strong);
   border-radius: var(--radius-1);
   padding: 1px 4px;
 }
@@ -168,7 +168,7 @@
   font-family: var(--mono);
   font-size: max(var(--fs-1), 0.85em);
   color: var(--a-accent);
-  background: var(--a-selStrong);
+  background: var(--a-sel-strong);
   border-radius: var(--radius-1);
   padding: 1px 4px;
   white-space: nowrap;
@@ -509,7 +509,7 @@
 }
 .conversation-markdown hr {
   border: 0;
-  border-top: 1px solid var(--a-borderStrong);
+  border-top: 1px solid var(--a-border-strong);
   margin: 18px 0;
 }
 .conversation-code {
@@ -543,7 +543,7 @@
   width: 100%;
 }
 .conversation-table :is(th, td) {
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   padding: 6px 10px;
   min-width: 80px;
 }
@@ -662,7 +662,7 @@
   flex: none;
   width: 12px;
   height: 12px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-top-color: var(--a-secondary);
   border-radius: var(--radius-pill);
   animation: tool-spin 1s linear infinite;
@@ -700,7 +700,7 @@
 .conversation .tool-shell .tool-command {
   margin: 0;
   padding-bottom: 7px;
-  border-bottom: 1px dashed var(--a-borderStrong);
+  border-bottom: 1px dashed var(--a-border-strong);
 }
 .tool-command span {
   color: var(--a-faint);
@@ -829,10 +829,10 @@
   color: var(--a-muted);
 }
 .conversation .diff-row-add {
-  background: var(--a-add);
+  background: var(--a-success-bg);
 }
 .conversation .diff-row-delete {
-  background: var(--a-del);
+  background: var(--a-error-bg);
 }
 .conversation .diff-row-add .diff-mark {
   color: var(--a-success);
@@ -865,7 +865,7 @@
 .conversation-notice-error {
   padding: 8px 12px;
   border-radius: var(--radius-2);
-  background: var(--a-warnBg);
+  background: var(--a-warning-bg);
   color: var(--a-warning);
 }
 .conversation-notice-error {
@@ -898,7 +898,7 @@
   /* 「需要确认」用整张卡的警告色边框与浅底表达，不用左侧色条 */
   border: 1px solid color-mix(in srgb, var(--a-warning) 55%, var(--a-border));
   border-radius: var(--radius-3);
-  background: linear-gradient(var(--a-warnBg), var(--a-warnBg)), var(--a-panel);
+  background: linear-gradient(var(--a-warning-bg), var(--a-warning-bg)), var(--a-panel);
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
@@ -1035,7 +1035,7 @@
   padding: 7px 9px;
   color: var(--a-text);
   background: var(--a-input);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-1);
   font: inherit;
 }
@@ -1170,7 +1170,7 @@
   width: 20px;
   height: 20px;
   border-radius: var(--radius-1);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   display: grid;
   place-items: center;
   font: 500 var(--fs-1)/1 var(--mono);
@@ -1180,7 +1180,7 @@
 .qcard .opt[aria-checked="true"] .key {
   background: var(--a-accent);
   border-color: var(--a-accent);
-  color: var(--a-onAccent);
+  color: var(--a-on-accent);
 }
 .qcard .lab {
   display: flex;
@@ -1249,7 +1249,7 @@
   width: 100%;
   padding: 8px 10px;
   border-radius: var(--radius-2);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   background: var(--a-input);
   resize: none;
   line-height: 20px;
@@ -1376,7 +1376,7 @@
 .conversation .subagent-view {
   flex: none;
   padding: 0 8px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-panel);
   color: var(--a-secondary);
@@ -1454,7 +1454,7 @@
 .conversation .ro-pending {
   margin: 0;
   padding: 7px 10px;
-  border: 1px dashed var(--a-borderStrong);
+  border: 1px dashed var(--a-border-strong);
   border-radius: var(--radius-2);
   color: var(--a-muted);
   font-size: var(--fs-1);

@@ -228,7 +228,7 @@
   display: grid;
   gap: 10px;
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   color: var(--a-secondary);
@@ -417,7 +417,7 @@
 }
 .status-popover::-webkit-scrollbar-thumb {
   border-radius: var(--radius-1);
-  background: var(--a-borderStrong);
+  background: var(--a-border-strong);
 }
 @media (max-width: 800px) {
   .desktop-status {

@@ -160,7 +160,7 @@
 .remote-body .btn3,
 .remote-pair .btn3,
 .remote-panel .btn3 {
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-raised);
   color: var(--a-text);
@@ -186,7 +186,7 @@
   border-color: var(--a-accent);
 }
 .remote-select {
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);
@@ -208,7 +208,7 @@
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
   display: grid;

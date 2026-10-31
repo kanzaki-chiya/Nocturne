@@ -49,8 +49,8 @@ function readTheme(): ITheme {
     foreground: text,
     cursor: v("--a-accent", "#a6a4e8"),
     cursorAccent: bg,
-    selectionBackground: v("--a-selStrong", "#383555"),
-    black: light ? text : v("--a-borderStrong", "#3a4150"),
+    selectionBackground: v("--a-sel-strong", "#383555"),
+    black: light ? text : v("--a-border-strong", "#3a4150"),
     red: v("--a-error", "#e58f90"),
     green: v("--a-success", "#84c49a"),
     yellow: v("--a-termYellow", "#e5bd77"),
@@ -67,7 +67,7 @@ function readTheme(): ITheme {
     brightCyan: v("--a-cat2", "#83c4c8"),
     brightWhite: light ? v("--a-secondary", "#454f5c") : text,
     // 和面板其余滚动区一样的细滚动条颜色（styles.css .thin-scroll）
-    scrollbarSliderBackground: v("--a-scrollThumb", "rgba(183, 192, 204, 0.22)"),
+    scrollbarSliderBackground: v("--a-scroll", "rgba(183, 192, 204, 0.22)"),
     scrollbarSliderHoverBackground: v("--a-scrollThumbHover", "rgba(183, 192, 204, 0.38)"),
     scrollbarSliderActiveBackground: v("--a-scrollThumbHover", "rgba(183, 192, 204, 0.38)"),
   };

@@ -146,7 +146,7 @@ export function ContextRing({ percent }: { percent: number | null }) {
   const value = percent === null ? 0 : Math.max(0, Math.min(100, percent));
   return (
     <svg viewBox="0 0 20 20" width="22" height="22" className="phone-ring" aria-hidden="true">
-      <circle cx="10" cy="10" r={r} fill="none" stroke="var(--a-borderStrong)" strokeWidth="2.2" />
+      <circle cx="10" cy="10" r={r} fill="none" stroke="var(--a-border-strong)" strokeWidth="2.2" />
       {value > 0 && (
         <circle
           cx="10"

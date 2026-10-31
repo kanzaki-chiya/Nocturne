@@ -207,7 +207,7 @@
   margin-left: auto;
   width: 220px;
   max-width: 40%;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   padding: 4px 10px;
   font-size: var(--fs-2);
@@ -328,7 +328,7 @@
 .page3 .tagm {
   font-size: var(--fs-1);
   color: var(--a-muted);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-1);
   padding: 0 5px;
   line-height: 17px;
@@ -395,7 +395,7 @@
 .page3 .input,
 .page3 input.input,
 .page3 select.input {
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   background: var(--a-input);
   border-radius: var(--radius-2);
   padding: 7px 10px;
@@ -450,7 +450,7 @@
 }
 .page3 .seg {
   display: inline-flex;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   overflow: hidden;
   width: max-content;
@@ -461,7 +461,7 @@
   font-size: var(--fs-2);
   color: var(--a-secondary);
   border: none;
-  border-right: 1px solid var(--a-borderStrong);
+  border-right: 1px solid var(--a-border-strong);
   background: transparent;
   cursor: pointer;
 }
@@ -595,7 +595,7 @@
   width: 14px;
   height: 14px;
   border-radius: var(--radius-pill);
-  border: 2px solid var(--a-selStrong);
+  border: 2px solid var(--a-sel-strong);
   border-top-color: var(--a-accent);
   animation: page3-spin 0.9s linear infinite;
 }
@@ -640,7 +640,7 @@
   align-items: center;
   gap: 10px;
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
-  background: var(--a-warnBg);
+  background: var(--a-warning-bg);
   color: var(--a-warning);
   border-radius: var(--radius-3);
   padding: 9px 14px;
@@ -655,7 +655,7 @@
 }
 .page3 .keybox {
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
-  background: var(--a-warnBg);
+  background: var(--a-warning-bg);
   border-radius: var(--radius-3);
   padding: 10px 14px;
   display: grid;
@@ -690,7 +690,7 @@
   max-height: calc(100% - 48px);
   overflow-y: auto;
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
   display: grid;
@@ -758,7 +758,7 @@
   font: var(--fs-1)/22px var(--mono);
   padding: 0 8px;
   border-radius: var(--radius-2);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   color: var(--a-secondary);
   background: transparent;
   cursor: pointer;
@@ -923,13 +923,13 @@
   width: 15px;
   height: 15px;
   border-radius: var(--radius-1);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   background: var(--a-input);
   display: grid;
   place-items: center;
   font-size: var(--fs-1);
   line-height: 1;
-  color: var(--a-onAccent);
+  color: var(--a-on-accent);
   flex: none;
 }
 .page3 .s3 .chk[aria-checked="true"] .box {
@@ -950,7 +950,7 @@
   margin-top: -4px;
 }
 .page3 .s3 .select {
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   padding: 3px 10px;
   background: var(--a-input);
@@ -972,7 +972,7 @@
   right: 26px;
   top: 58px;
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   padding: 7px 12px;
   font-size: var(--fs-2);
@@ -1026,7 +1026,7 @@
 .page3 .sets3::-webkit-scrollbar-thumb,
 .page3 .dlg::-webkit-scrollbar-thumb,
 .page3 .dlg .picklist::-webkit-scrollbar-thumb {
-  background: var(--a-borderStrong);
+  background: var(--a-border-strong);
   border-radius: var(--radius-1);
 }
 
@@ -1126,7 +1126,7 @@
 }
 .tcard {
   width: 150px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   padding: 8px;
   display: grid;
@@ -1489,7 +1489,7 @@
   padding: 10px 12px;
   border: 1px solid var(--a-warning);
   border-radius: var(--radius-2);
-  background: var(--a-warnBg);
+  background: var(--a-warning-bg);
   color: var(--a-text);
   font-size: var(--fs-1);
 }

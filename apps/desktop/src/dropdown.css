@@ -21,7 +21,7 @@
   cursor: pointer;
 }
 .dd:hover {
-  border-color: var(--a-borderStrong);
+  border-color: var(--a-border-strong);
 }
 .dd:focus-visible {
   outline: none;
@@ -67,7 +67,7 @@
   z-index: 60;
   font-family: var(--sans);
   background: var(--a-panel);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   padding: 5px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
@@ -76,7 +76,7 @@
   white-space: normal;
   overflow-wrap: anywhere;
   scrollbar-width: thin;
-  scrollbar-color: var(--a-borderStrong) transparent;
+  scrollbar-color: var(--a-border-strong) transparent;
 }
 .ddm [role="listbox"] {
   display: grid;
@@ -158,7 +158,7 @@
   box-sizing: border-box;
   padding: 8px 10px;
   margin-bottom: 5px;
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);

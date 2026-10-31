@@ -74,7 +74,7 @@
 .skill-banner.warn {
   color: var(--a-warning);
   border-color: color-mix(in srgb, var(--a-warning) 35%, var(--a-border));
-  background: var(--a-warnBg);
+  background: var(--a-warning-bg);
 }
 .skill-banner.info {
   color: var(--a-accentAlt);
@@ -232,7 +232,7 @@
   transform: translateX(-50%);
   width: max-content;
   max-width: calc(100% - 32px);
-  border: 1px solid var(--a-borderStrong);
+  border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   padding: 10px 14px;
   background: var(--a-panel);
