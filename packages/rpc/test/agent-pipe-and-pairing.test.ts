@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { chmodSync, writeFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { connectChannel, generateIdentity } from "@nocturne/remote";
 import { createMemoryTransportPair, createRpcClient, RpcError } from "../src/client/index.js";
@@ -10,9 +12,33 @@ import {
   currentUserSid,
   listenAgentPipe,
   readWindowsPipeAclRules,
+  WindowsSidError,
 } from "../src/server/index.js";
 import { RPC_METHOD_NAMES } from "../src/shared/methods.js";
 import { cleanupTmp, connectWithConfig, MODEL, tmpDir } from "./harness.js";
+
+function readIndependentWindowsSid(): string {
+  const sysRoot = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
+  const psExe = join(sysRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase() === "PSMODULEPATH") continue;
+    env[k] = v;
+  }
+  const out = execFileSync(
+    psExe,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+    ],
+    { encoding: "utf8", env, timeout: 10_000, windowsHide: true },
+  ).trim();
+  expect(out).toMatch(/^S-1-\d+(?:-\d+)+$/);
+  return out;
+}
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -84,14 +110,105 @@ describe("本机外部 agent 管道 (--agent-pipe)", () => {
       cleanups.push(() => listener.close());
 
       expect(listener.address.startsWith("\\\\.\\pipe\\nocturne-agent-")).toBe(true);
+      const expectedSid = readIndependentWindowsSid();
+      expect(currentUserSid()).toBe(expectedSid);
       const rules = readWindowsPipeAclRules(listener.address);
-      const expectedSid = currentUserSid();
       expect(rules).toHaveLength(1);
       expect(rules[0]).toEqual({
         sid: expectedSid,
         accessType: "Allow",
         rights: "FullControl",
       });
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "PATH 最前面有假 whoami（调用即失败）时，仍得到真 SID 且与管道 ACL 一致",
+    async () => {
+      const home = tmpDir("nocturne-win-fake-whoami-");
+      const fakeBinDir = tmpDir("nocturne-fake-bin-");
+      writeFileSync(join(fakeBinDir, "whoami.exe"), "not-a-valid-pe-binary");
+      writeFileSync(join(fakeBinDir, "whoami.cmd"), "@echo off\r\nexit /b 1\r\n");
+      writeFileSync(join(fakeBinDir, "whoami.bat"), "@echo off\r\nexit /b 1\r\n");
+      writeFileSync(join(fakeBinDir, "whoami"), "#!/bin/sh\nexit 1\n");
+      chmodSync(join(fakeBinDir, "whoami"), 0o755);
+
+      const expectedSid = readIndependentWindowsSid();
+      const savedPathEntries = Object.entries(process.env).filter(
+        ([key]) => key.toUpperCase() === "PATH",
+      );
+      try {
+        for (const [key, val] of savedPathEntries) {
+          process.env[key] = `${fakeBinDir}${delimiter}${val ?? ""}`;
+        }
+
+        const sid = currentUserSid();
+        expect(sid).toBe(expectedSid);
+
+        const listener = await listenAgentPipe({
+          home,
+          onConnection: (t) => t.close(),
+        });
+        cleanups.push(() => listener.close());
+
+        const rules = readWindowsPipeAclRules(listener.address);
+        expect(rules).toHaveLength(1);
+        expect(rules[0]).toEqual({
+          sid: expectedSid,
+          accessType: "Allow",
+          rights: "FullControl",
+        });
+      } finally {
+        for (const [key, val] of savedPathEntries) {
+          process.env[key] = val;
+        }
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "whoami.exe 不可用时退回 PowerShell 取 SID；两种方法都失败时抛错并记日志",
+    async () => {
+      const emptyRoot = tmpDir("nocturne-empty-sysroot-");
+      const expectedSid = readIndependentWindowsSid();
+      const origSystemRoot = process.env.SystemRoot;
+      const origUpperSystemRoot = process.env.SYSTEMROOT;
+      const savedPathEntries = Object.entries(process.env).filter(
+        ([key]) => key.toUpperCase() === "PATH",
+      );
+
+      try {
+        // 1. whoami.exe 失败时，通过 PowerShell 后备取得真 SID
+        expect(currentUserSid({ whoamiExe: join(emptyRoot, "missing-whoami.exe") })).toBe(
+          expectedSid,
+        );
+
+        // 2. 两种方法都失败时，抛出 WindowsSidError，绝不退回用户名
+        process.env.SystemRoot = emptyRoot;
+        process.env.SYSTEMROOT = emptyRoot;
+        for (const [key] of savedPathEntries) {
+          process.env[key] = emptyRoot;
+        }
+        expect(() => currentUserSid()).toThrow(WindowsSidError);
+
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        await expect(
+          listenAgentPipe({
+            home: emptyRoot,
+            onConnection: (t) => t.close(),
+          }),
+        ).rejects.toThrow(WindowsSidError);
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining("[agent-pipe] 无法启动本机外部 agent 管道"),
+        );
+        errorSpy.mockRestore();
+      } finally {
+        if (origSystemRoot !== undefined) process.env.SystemRoot = origSystemRoot;
+        if (origUpperSystemRoot !== undefined) process.env.SYSTEMROOT = origUpperSystemRoot;
+        for (const [key, val] of savedPathEntries) {
+          process.env[key] = val;
+        }
+      }
     },
   );
 

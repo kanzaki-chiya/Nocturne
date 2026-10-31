@@ -10,7 +10,7 @@ import {
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
 import { loadOrCreateBridgeIdentity, type BridgeIdentityResult } from "./identity.js";
-import { connectAgentPipe } from "./pipe.js";
+import { connectAgentPipe, WindowsSidError } from "./pipe.js";
 import {
   deriveMcpSessionStatus,
   extractFoldedTurns,
@@ -159,6 +159,9 @@ export class McpBridge {
         if (error instanceof RpcError && error.code === "agent_pairing_pending") {
           throw error;
         }
+        if (error instanceof WindowsSidError) {
+          throw error;
+        }
         throw new BridgeNotRunningError(error instanceof Error ? error.message : String(error));
       } finally {
         this.connectingPromise = undefined;
@@ -213,10 +216,7 @@ export class McpBridge {
         case "nocturne_wait":
           return await this.handleWait(args, context);
         case "nocturne_interrupt":
-        case "nocturne_abort":
-          return await this.handleAbort(args);
-        case "nocturne_status":
-          return await this.handleStatus();
+          return await this.handleInterrupt(args);
         default:
           return this.errorResult(`未知的工具：${name}`);
       }
@@ -498,42 +498,14 @@ export class McpBridge {
     return this.buildSessionWaitResult(tracked);
   }
 
-  private async handleAbort(args: Record<string, unknown>): Promise<McpToolCallResult> {
+  private async handleInterrupt(args: Record<string, unknown>): Promise<McpToolCallResult> {
     const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
     if (!sessionId) return this.errorResult("参数错误：需要非空 sessionId");
 
     const client = await this.ensureConnected();
     await this.openSessionForRun(client, sessionId);
-    await client.call("session.abort", { sessionId });
+    await client.call("session.interrupt", { sessionId });
     return this.textResult(JSON.stringify({ sessionId, aborted: true }, null, 2));
-  }
-
-  private async handleStatus(): Promise<McpToolCallResult> {
-    const client = await this.ensureConnected();
-    const idResult = await this.getIdentity();
-    const sessions = await client.runtime.listSessions();
-    return this.textResult(
-      JSON.stringify(
-        {
-          connected: true,
-          bridge: {
-            id: idResult.identity.id,
-            name: this.effectiveName,
-            fingerprint: idResult.fingerprint,
-          },
-          sessionCount: sessions.length,
-          openSessionsInBridge: [...this.sessions.keys()],
-          recentSessions: sessions.slice(0, 5).map((s) => ({
-            sessionId: s.id,
-            title: s.firstText ?? "(无标题)",
-            cwd: s.cwd,
-            updatedAt: new Date(s.mtimeMs).toISOString(),
-          })),
-        },
-        null,
-        2,
-      ),
-    );
   }
 
   private async triggerEnqueueOnTracked(

@@ -24,6 +24,7 @@ import {
   formatReadSessionOutput,
   loadOrCreateBridgeIdentity,
   MAX_MCP_OUTPUT_BYTES,
+  McpBridge,
   NOCTURNE_MCP_TOOLS,
   PAIRING_PENDING_MESSAGE,
   truncateMcpOutput,
@@ -147,9 +148,9 @@ function parseToolJson(result: Record<string, unknown>): Record<string, unknown>
   return JSON.parse(arr[0]?.text ?? "{}") as Record<string, unknown>;
 }
 
-function getToolText(result: Record<string, unknown>): string {
-  const arr = result.content as { type: string; text: string }[];
-  return arr[0]?.text ?? "";
+function getToolText(result: Record<string, unknown> | { content?: unknown }): string {
+  const arr = (result as { content?: { type: string; text: string }[] }).content;
+  return arr?.[0]?.text ?? "";
 }
 
 describe("packages/mcp-server 单元与集成测试", () => {
@@ -281,7 +282,7 @@ describe("packages/mcp-server 单元与集成测试", () => {
 
     // 1. 尚未批准配对时调用工具，返回等待确认提示
     const pendingRes = await mcpClient.callTool({
-      name: "nocturne_status",
+      name: "nocturne_list_sessions",
       arguments: {},
     });
     expect(pendingRes.isError).toBe(true);
@@ -420,11 +421,66 @@ describe("packages/mcp-server 单元与集成测试", () => {
     expect(subReadRes.isError).toBe(true);
     expect(getToolText(subReadRes)).toContain("子代理会话");
 
-    // 8. 测试连接关闭后释放桥打开的会话引用，不影响桌面端已打开的同一会话
+    // 8. 不在 ADR-0074 §4 工具集中的旧别名应被拒绝
+    const unknownAbort = await mcpClient.callTool({
+      name: "nocturne_abort",
+      arguments: { sessionId },
+    });
+    expect(unknownAbort.isError).toBe(true);
+    expect(getToolText(unknownAbort)).toContain("未知的工具：nocturne_abort");
+
+    const unknownStatus = await mcpClient.callTool({
+      name: "nocturne_status",
+      arguments: {},
+    });
+    expect(unknownStatus.isError).toBe(true);
+    expect(getToolText(unknownStatus)).toContain("未知的工具：nocturne_status");
+
+    // 9. 测试连接关闭后释放桥打开的会话引用，不影响桌面端已打开的同一会话
     await mcpServer.close();
     const snap = await desktopSess.state();
     expect(snap.meta.id).toBe(sessionId);
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "Windows 下 SID 解析失败时，桥返回可读错误信息而非 desktop is not running",
+    async () => {
+      const home = await mkdtemp(path.join(tmpdir(), "nocturne-mcp-sid-fail-"));
+      const emptyRoot = await mkdtemp(path.join(tmpdir(), "nocturne-mcp-empty-root-"));
+      cleanups.push(async () => {
+        await rm(home, { recursive: true, force: true }).catch(() => undefined);
+        await rm(emptyRoot, { recursive: true, force: true }).catch(() => undefined);
+      });
+      const origSystemRoot = process.env.SystemRoot;
+      const origUpperSystemRoot = process.env.SYSTEMROOT;
+      const savedPathEntries = Object.entries(process.env).filter(
+        ([key]) => key.toUpperCase() === "PATH",
+      );
+      const bridge = new McpBridge({
+        home,
+        name: "sid-fail-bridge",
+      });
+      cleanups.push(() => bridge.close());
+
+      try {
+        process.env.SystemRoot = emptyRoot;
+        process.env.SYSTEMROOT = emptyRoot;
+        for (const [key] of savedPathEntries) {
+          process.env[key] = emptyRoot;
+        }
+        const res = await bridge.callTool("nocturne_list_sessions", {});
+        expect(res.isError).toBe(true);
+        expect(getToolText(res)).toContain("无法获取当前 Windows 用户的 SID");
+        expect(getToolText(res)).not.toBe(DESKTOP_NOT_RUNNING_MESSAGE);
+      } finally {
+        if (origSystemRoot !== undefined) process.env.SystemRoot = origSystemRoot;
+        if (origUpperSystemRoot !== undefined) process.env.SYSTEMROOT = origUpperSystemRoot;
+        for (const [key, val] of savedPathEntries) {
+          process.env[key] = val;
+        }
+      }
+    },
+  );
 
   it("wait 超时时返回 running 状态，不中断正在运行的会话", async () => {
     const backend = await createTestBackend({

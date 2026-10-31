@@ -5,28 +5,112 @@ import os from "node:os";
 import path from "node:path";
 import { MAX_FRAME, type FrameTransport } from "@nocturne/remote";
 
-let cachedSid: string | undefined;
+export class WindowsSidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WindowsSidError";
+  }
+}
 
-export function currentUserSid(): string {
-  if (cachedSid !== undefined) return cachedSid;
-  if (process.platform === "win32") {
+function resolveSystemRoot(): string {
+  const raw = process.env.SystemRoot ?? process.env.SYSTEMROOT;
+  return raw !== undefined && raw.trim() !== "" ? raw.trim() : "C:\\Windows";
+}
+
+function resolvePowerShellCandidates(): string[] {
+  const sysRoot = resolveSystemRoot();
+  const fullPath = path.win32.join(
+    sysRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  return [fullPath, "powershell.exe"];
+}
+
+function powerShellEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase() === "PSMODULEPATH") continue;
+    env[k] = v;
+  }
+  return env;
+}
+
+export interface CurrentUserSidOptions {
+  whoamiExe?: string;
+  powerShellExe?: string;
+}
+
+/**
+ * 获取当前 Windows 用户的 SID；非 Windows 返回当前 username。
+ * Windows 上按顺序尝试：
+ * 1. `%SystemRoot%\System32\whoami.exe /user /fo csv /nh`
+ * 2. PowerShell `[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value`
+ * 两种方法都失败时抛出明确的 `WindowsSidError`，绝不退回用户名。
+ */
+export function currentUserSid(options?: CurrentUserSidOptions): string {
+  if (process.platform !== "win32") {
+    return os.userInfo().username;
+  }
+
+  const sysRoot = resolveSystemRoot();
+  const whoamiPath = options?.whoamiExe ?? path.win32.join(sysRoot, "System32", "whoami.exe");
+  const errors: string[] = [];
+
+  try {
+    const out = execFileSync(whoamiPath, ["/user", "/fo", "csv", "/nh"], {
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+    });
+    const match = /S-1-\d+(?:-\d+)+/.exec(out);
+    if (match?.[0] !== undefined) {
+      return match[0];
+    }
+    errors.push(`whoami.exe 未返回有效 SID (${out.trim() || "空输出"})`);
+  } catch (err) {
+    errors.push(`whoami.exe 调用失败 (${err instanceof Error ? err.message : String(err)})`);
+  }
+
+  const psCandidates =
+    options?.powerShellExe !== undefined ? [options.powerShellExe] : resolvePowerShellCandidates();
+  let psError: string | undefined;
+  for (const psExe of psCandidates) {
     try {
-      const out = execFileSync("whoami.exe", ["/user", "/fo", "csv", "/nh"], {
-        encoding: "utf8",
-        timeout: 5000,
-        windowsHide: true,
-      });
+      const out = execFileSync(
+        psExe,
+        [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+        ],
+        {
+          encoding: "utf8",
+          env: powerShellEnv(),
+          timeout: 10_000,
+          windowsHide: true,
+        },
+      );
       const match = /S-1-\d+(?:-\d+)+/.exec(out);
       if (match?.[0] !== undefined) {
-        cachedSid = match[0];
-        return cachedSid;
+        return match[0];
       }
-    } catch {
-      /* 降级到 username */
+      psError = `PowerShell 未返回有效 SID (${out.trim() || "空输出"})`;
+    } catch (err) {
+      psError = `PowerShell 调用失败 (${err instanceof Error ? err.message : String(err)})`;
     }
   }
-  cachedSid = os.userInfo().username;
-  return cachedSid;
+  if (psError !== undefined) {
+    errors.push(psError);
+  }
+
+  throw new WindowsSidError(
+    `无法获取当前 Windows 用户的 SID（whoami.exe 与 PowerShell 均失败）：${errors.join("；")}`,
+  );
 }
 
 export function resolveNocturneHome(nocturneHome?: string): string {

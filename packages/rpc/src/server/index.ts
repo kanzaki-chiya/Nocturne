@@ -27,6 +27,7 @@ export {
   readWindowsPipeAclRules,
   resolveNocturneHome,
   restrictWindowsPipeAclToCurrentUser,
+  WindowsSidError,
   type AgentPipeListener,
   type ConnectAgentPipeOptions,
   type ListenAgentPipeOptions,

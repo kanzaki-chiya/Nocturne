@@ -161,7 +161,7 @@ describe("nctrn mcp 端到端测试 (真实子进程 + 本机管道)", () => {
 
     // 1. 配对前调用工具返回等待确认文案，且桌面端收到 agent.pairingRequested
     const preCall = await mcpClient.callTool({
-      name: "nocturne_status",
+      name: "nocturne_list_sessions",
       arguments: {},
     });
     expect(preCall.isError).toBe(true);

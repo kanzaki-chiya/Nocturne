@@ -6,29 +6,112 @@ import os from "node:os";
 import path from "node:path";
 import { MAX_FRAME, type FrameTransport } from "@nocturne/remote";
 
-let cachedSid: string | undefined;
+export class WindowsSidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WindowsSidError";
+  }
+}
 
-/** 获取当前 Windows 用户的 SID；非 Windows 返回当前 uid/username */
-export function currentUserSid(): string {
-  if (cachedSid !== undefined) return cachedSid;
-  if (process.platform === "win32") {
+function resolveSystemRoot(): string {
+  const raw = process.env.SystemRoot ?? process.env.SYSTEMROOT;
+  return raw !== undefined && raw.trim() !== "" ? raw.trim() : "C:\\Windows";
+}
+
+function resolvePowerShellCandidates(): string[] {
+  const sysRoot = resolveSystemRoot();
+  const fullPath = path.win32.join(
+    sysRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  return [fullPath, "powershell.exe"];
+}
+
+function powerShellEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase() === "PSMODULEPATH") continue;
+    env[k] = v;
+  }
+  return env;
+}
+
+export interface CurrentUserSidOptions {
+  whoamiExe?: string;
+  powerShellExe?: string;
+}
+
+/**
+ * 获取当前 Windows 用户的 SID；非 Windows 返回当前 username。
+ * Windows 上按顺序尝试：
+ * 1. `%SystemRoot%\System32\whoami.exe /user /fo csv /nh`
+ * 2. PowerShell `[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value`
+ * 两种方法都失败时抛出明确的 `WindowsSidError`，绝不退回用户名。
+ */
+export function currentUserSid(options?: CurrentUserSidOptions): string {
+  if (process.platform !== "win32") {
+    return os.userInfo().username;
+  }
+
+  const sysRoot = resolveSystemRoot();
+  const whoamiPath = options?.whoamiExe ?? path.win32.join(sysRoot, "System32", "whoami.exe");
+  const errors: string[] = [];
+
+  try {
+    const out = execFileSync(whoamiPath, ["/user", "/fo", "csv", "/nh"], {
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+    });
+    const match = /S-1-\d+(?:-\d+)+/.exec(out);
+    if (match?.[0] !== undefined) {
+      return match[0];
+    }
+    errors.push(`whoami.exe 未返回有效 SID (${out.trim() || "空输出"})`);
+  } catch (err) {
+    errors.push(`whoami.exe 调用失败 (${err instanceof Error ? err.message : String(err)})`);
+  }
+
+  const psCandidates =
+    options?.powerShellExe !== undefined ? [options.powerShellExe] : resolvePowerShellCandidates();
+  let psError: string | undefined;
+  for (const psExe of psCandidates) {
     try {
-      const out = execFileSync("whoami.exe", ["/user", "/fo", "csv", "/nh"], {
-        encoding: "utf8",
-        timeout: 5000,
-        windowsHide: true,
-      });
+      const out = execFileSync(
+        psExe,
+        [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+        ],
+        {
+          encoding: "utf8",
+          env: powerShellEnv(),
+          timeout: 10_000,
+          windowsHide: true,
+        },
+      );
       const match = /S-1-\d+(?:-\d+)+/.exec(out);
       if (match?.[0] !== undefined) {
-        cachedSid = match[0];
-        return cachedSid;
+        return match[0];
       }
-    } catch {
-      /* 降级到 username */
+      psError = `PowerShell 未返回有效 SID (${out.trim() || "空输出"})`;
+    } catch (err) {
+      psError = `PowerShell 调用失败 (${err instanceof Error ? err.message : String(err)})`;
     }
   }
-  cachedSid = os.userInfo().username;
-  return cachedSid;
+  if (psError !== undefined) {
+    errors.push(psError);
+  }
+
+  throw new WindowsSidError(
+    `无法获取当前 Windows 用户的 SID（whoami.exe 与 PowerShell 均失败）：${errors.join("；")}`,
+  );
 }
 
 export function resolveNocturneHome(nocturneHome?: string): string {
@@ -57,15 +140,6 @@ export function agentPipeAddress(nocturneHome?: string): string {
   return path.join(home, "agent.sock");
 }
 
-function powerShellEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k.toUpperCase() === "PSMODULEPATH") continue;
-    env[k] = v;
-  }
-  return env;
-}
-
 /**
  * 在 Windows 上将命名管道的 DACL 收紧为只允许当前用户（D:P(A;;FA;;;<SID>)），
  * 移除 libuv 默认赋予 Everyone/Anonymous 的读取权限。
@@ -91,12 +165,21 @@ export function restrictWindowsPipeAclToCurrentUser(pipePath: string): void {
     "  if ($null -ne $h) { $h.Dispose() }",
     "}",
   ].join("\n");
-  execFileSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8",
-    env: powerShellEnv(),
-    timeout: 10_000,
-    windowsHide: true,
-  });
+  let lastError: unknown;
+  for (const psExe of resolvePowerShellCandidates()) {
+    try {
+      execFileSync(psExe, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+        encoding: "utf8",
+        env: powerShellEnv(),
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export interface WindowsPipeAclRule {
@@ -127,16 +210,24 @@ export function readWindowsPipeAclRules(pipePath: string): WindowsPipeAclRule[] 
     "  if ($null -ne $h) { $h.Dispose() }",
     "}",
   ].join("\n");
-  const out = execFileSync(
-    "powershell.exe",
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    {
-      encoding: "utf8",
-      env: powerShellEnv(),
-      timeout: 10_000,
-      windowsHide: true,
-    },
-  );
+  let out: string | undefined;
+  let lastError: unknown;
+  for (const psExe of resolvePowerShellCandidates()) {
+    try {
+      out = execFileSync(psExe, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+        encoding: "utf8",
+        env: powerShellEnv(),
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (out === undefined) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
   return out
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -235,7 +326,15 @@ export interface AgentPipeListener {
 }
 
 export async function listenAgentPipe(options: ListenAgentPipeOptions): Promise<AgentPipeListener> {
-  const address = options.pipePath ?? agentPipeAddress(options.home);
+  let address: string;
+  try {
+    address = options.pipePath ?? agentPipeAddress(options.home);
+  } catch (err) {
+    console.error(
+      `[agent-pipe] 无法启动本机外部 agent 管道: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw err;
+  }
   if (process.platform !== "win32") {
     await mkdir(path.dirname(address), { recursive: true, mode: 0o700 });
     await unlink(address).catch((error: unknown) => {
@@ -252,24 +351,34 @@ export async function listenAgentPipe(options: ListenAgentPipeOptions): Promise<
     options.onConnection(createSocketFrameTransport(socket));
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error): void => {
-      server.off("listening", onListening);
-      reject(err);
-    };
-    const onListening = (): void => {
-      server.off("error", onError);
-      resolve();
-    };
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen({ path: address, readableAll: false, writableAll: false });
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: Error): void => {
+        server.off("listening", onListening);
+        reject(err);
+      };
+      const onListening = (): void => {
+        server.off("error", onError);
+        resolve();
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen({ path: address, readableAll: false, writableAll: false });
+    });
+  } catch (err) {
+    console.error(
+      `[agent-pipe] 监听本机管道失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw err;
+  }
 
   if (process.platform === "win32") {
     try {
       restrictWindowsPipeAclToCurrentUser(address);
     } catch (err) {
+      console.error(
+        `[agent-pipe] 设置 Windows 命名管道 ACL 失败 (${address}): ${err instanceof Error ? err.message : String(err)}`,
+      );
       await new Promise<void>((resolve) => {
         server.close(() => {
           resolve();

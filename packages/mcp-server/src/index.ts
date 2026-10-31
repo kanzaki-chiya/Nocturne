@@ -21,6 +21,7 @@ export {
   createSocketFrameTransport,
   currentUserSid,
   resolveNocturneHome,
+  WindowsSidError,
   type ConnectAgentPipeOptions,
 } from "./pipe.js";
 export { loadOrCreateBridgeIdentity, type BridgeIdentityResult } from "./identity.js";

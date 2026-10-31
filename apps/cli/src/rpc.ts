@@ -38,6 +38,8 @@ function redirectConsoleToStderr(stderr: Writable): () => void {
     log: console.log,
     info: console.info,
     debug: console.debug,
+    warn: console.warn,
+    error: console.error,
   };
   const write = (...parts: unknown[]): void => {
     stderr.write(`${parts.map((p) => (typeof p === "string" ? p : String(p))).join(" ")}\n`);
@@ -45,10 +47,14 @@ function redirectConsoleToStderr(stderr: Writable): () => void {
   console.log = write;
   console.info = write;
   console.debug = write;
+  console.warn = write;
+  console.error = write;
   return () => {
     console.log = originals.log;
     console.info = originals.info;
     console.debug = originals.debug;
+    console.warn = originals.warn;
+    console.error = originals.error;
   };
 }
 
