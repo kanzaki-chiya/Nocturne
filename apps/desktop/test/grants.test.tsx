@@ -48,7 +48,7 @@ function fixture(entries = [grant]) {
 afterEach(cleanup);
 async function project() {
   fireEvent.click(await screen.findByRole("button", { name: /nocturne/ }));
-  await screen.findByRole("heading", { name: /项目授权/ });
+  await screen.findByRole("heading", { name: "nocturne" });
 }
 it("普通对话最先、项目列表和空状态、撤销后刷新；失败保留列表", async () => {
   const h = fixture();

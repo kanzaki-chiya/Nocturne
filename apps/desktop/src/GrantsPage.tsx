@@ -2,7 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import type { Grant, GrantWorkspace, ProjectTrustDescription } from "@nocturne/core/protocol";
 import { ConfirmDialog } from "./ProvidersPage";
-import { Badge, Button } from "./ui";
+import {
+  Badge,
+  Button,
+  DataTable,
+  DetailHeader,
+  EmptyState,
+  ListGroup,
+  ListItem,
+  MasterDetail,
+  PageHeader,
+  SettingsGroup,
+  SettingsRow,
+} from "./ui";
 import "./pages.css";
 import "./grants.css";
 
@@ -123,191 +135,388 @@ export function GrantsPage({
   };
   return (
     <div className="page3 grants-page" aria-busy={busy}>
-      <header className="ph3">
-        <div className="grow">
-          <h3>授权</h3>
-          <span className="sub">查看和撤销确认时授予的允许</span>
-        </div>
-      </header>
-      {error && (
-        <div className="errt" role="alert">
-          {error}
-        </div>
-      )}
-      <div className="cols3">
-        <nav className="plist grants-workspaces" aria-label="工作区">
-          <h5>工作区</h5>
-          {workspaces.map((item) => (
-            <button
-              key={item.workspace}
-              className={`grant-workspace ${selected === item.workspace ? "on" : ""}`}
-              onClick={() => {
-                setSelected(item.workspace);
-              }}
-            >
-              <b>
-                {samePath(item.workspace, plainWorkspace) ? "普通对话" : basename(item.workspace)}
-              </b>
-              <small>
-                {item.grantCount} 项授权 ·{" "}
-                {!item.hasProjectConfig ? "没有项目配置" : item.trusted ? "已信任" : "未信任"}
-              </small>
-            </button>
-          ))}
-        </nav>
-        <label className="grants-workspace-select">
-          工作区
-          <select
-            value={selected ?? ""}
-            onChange={(event) => {
-              setSelected(event.target.value);
-            }}
-          >
-            {workspaces.map((item) => (
-              <option value={item.workspace} key={item.workspace}>
-                {samePath(item.workspace, plainWorkspace) ? "普通对话" : basename(item.workspace)} ·{" "}
-                {item.grantCount} 项授权
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="pane">
-          {current ? (
-            <>
-              <div className="t1">
-                <h3>
-                  {samePath(current.workspace, plainWorkspace)
-                    ? "普通对话"
-                    : basename(current.workspace)}
-                </h3>
-                <span className="sub grant-path">{current.workspace}</span>
-              </div>
-              <section className="grant-trust" aria-label="项目信任">
-                <div>
-                  <b>项目信任</b>
-                  <p>
-                    <span className={`grant-dot ${current.trusted ? "trusted" : ""}`} />
-                    {!current.hasProjectConfig
-                      ? "没有项目配置"
-                      : current.trusted
-                        ? "已信任"
-                        : "未信任"}
-                  </p>
+      {remote ? (
+        <>
+          <header className="phone-grants-head">
+            <div className="grow">
+              <h3>授权</h3>
+              <span className="sub">查看和撤销确认时授予的允许</span>
+            </div>
+          </header>
+          {error && (
+            <div className="errt" role="alert">
+              {error}
+            </div>
+          )}
+          <div className="cols3">
+            <nav className="phone-grants-list grants-workspaces" aria-label="工作区">
+              <h5>工作区</h5>
+              {workspaces.map((item) => (
+                <button
+                  key={item.workspace}
+                  className={`grant-workspace ${selected === item.workspace ? "on" : ""}`}
+                  onClick={() => {
+                    setSelected(item.workspace);
+                  }}
+                >
+                  <b>
+                    {samePath(item.workspace, plainWorkspace)
+                      ? "普通对话"
+                      : basename(item.workspace)}
+                  </b>
                   <small>
-                    {current.hasProjectConfig
-                      ? "信任后，项目配置里的 MCP、Hook 和权限规则会参与运行。"
-                      : "这个工作区没有 .nocturne/config.json。"}
+                    {item.grantCount} 项授权 ·{" "}
+                    {!item.hasProjectConfig ? "没有项目配置" : item.trusted ? "已信任" : "未信任"}
                   </small>
-                </div>
-                <div title={remote ? "请在电脑上操作" : undefined}>
-                  <Button
-                    disabled={remote || busy || !client || !current.hasProjectConfig}
-                    onClick={() => {
-                      if (!client) return;
-                      if (current.trusted)
-                        void mutate(
-                          () =>
-                            client.runtime.setWorkspaceTrusted({
-                              workspace: current.workspace,
-                              trusted: false,
-                            }),
-                          "已取消信任，新开或重新打开会话生效",
-                        );
-                      else {
-                        setError("");
-                        void client.runtime
-                          .describeProject({ workspace: current.workspace })
-                          .then(setDescription)
-                          .catch((reason: unknown) => {
-                            setError(message(reason));
-                          });
-                      }
-                    }}
-                  >
-                    {current.trusted ? "取消信任" : "信任此项目"}
-                  </Button>
-                  {remote && <small>请在电脑上操作</small>}
-                </div>
-              </section>
-              <section className="grant-project" aria-label="项目授权">
-                <div className="grant-section-head">
-                  <h4>
-                    项目授权 <span>{grants.length}</span>
-                  </h4>
-                  {grants.length > 0 && (
-                    <Button
-                      variant={confirmAll ? "danger-solid" : "danger"}
-                      disabled={busy || !client}
-                      onClick={() => {
-                        if (!confirmAll) {
-                          setConfirmAll(true);
-                          return;
-                        }
-                        if (client)
-                          void mutate(
-                            () => client.runtime.revokeAllGrants({ workspace: current.workspace }),
-                            "已撤销全部项目授权，下一次调用会重新询问",
-                          );
-                      }}
-                    >
-                      {confirmAll ? "确认全部撤销" : "全部撤销"}
-                    </Button>
-                  )}
-                </div>
-                {grants.length === 0 ? (
-                  <div className="grant-empty">
-                    还没有项目授权。确认时选『本项目允许』会出现在这里。
+                </button>
+              ))}
+            </nav>
+            <label className="grants-workspace-select">
+              工作区
+              <select
+                value={selected ?? ""}
+                onChange={(event) => {
+                  setSelected(event.target.value);
+                }}
+              >
+                {workspaces.map((item) => (
+                  <option value={item.workspace} key={item.workspace}>
+                    {samePath(item.workspace, plainWorkspace)
+                      ? "普通对话"
+                      : basename(item.workspace)}{" "}
+                    · {item.grantCount} 项授权
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="pane">
+              {current ? (
+                <>
+                  <div className="t1">
+                    <h3>
+                      {samePath(current.workspace, plainWorkspace)
+                        ? "普通对话"
+                        : basename(current.workspace)}
+                    </h3>
+                    <span className="sub grant-path">{current.workspace}</span>
                   </div>
-                ) : (
-                  <div className="grant-table" role="table" aria-label="项目授权列表">
-                    <div className="grant-table-head" role="row">
-                      <span>类别</span>
-                      <span>目标</span>
-                      <span>授予时间</span>
-                      <span />
+                  <section className="grant-trust" aria-label="项目信任">
+                    <div>
+                      <b>项目信任</b>
+                      <p>
+                        <span className={`grant-dot ${current.trusted ? "trusted" : ""}`} />
+                        {!current.hasProjectConfig
+                          ? "没有项目配置"
+                          : current.trusted
+                            ? "已信任"
+                            : "未信任"}
+                      </p>
+                      <small>
+                        {current.hasProjectConfig
+                          ? "信任后，项目配置里的 MCP、Hook 和权限规则会参与运行。"
+                          : "这个工作区没有 .nocturne/config.json。"}
+                      </small>
                     </div>
-                    {grants.map((grant) => (
-                      <div className="grant-row" role="row" key={`${grant.kind}:${grant.target}`}>
-                        <Badge className="grant-kind">{grantKind(grant.kind)}</Badge>
-                        <GrantTarget target={grant.target} />
-                        <time dateTime={grant.createdAt}>
-                          {new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}
-                        </time>
+                    <div title="请在电脑上操作">
+                      <Button
+                        disabled
+                        onClick={() => {
+                          if (!client) return;
+                          if (current.trusted)
+                            void mutate(
+                              () =>
+                                client.runtime.setWorkspaceTrusted({
+                                  workspace: current.workspace,
+                                  trusted: false,
+                                }),
+                              "已取消信任，新开或重新打开会话生效",
+                            );
+                          else {
+                            setError("");
+                            void client.runtime
+                              .describeProject({ workspace: current.workspace })
+                              .then(setDescription)
+                              .catch((reason: unknown) => {
+                                setError(message(reason));
+                              });
+                          }
+                        }}
+                      >
+                        {current.trusted ? "取消信任" : "信任此项目"}
+                      </Button>
+                      <small>请在电脑上操作</small>
+                    </div>
+                  </section>
+                  <section className="grant-project" aria-label="项目授权">
+                    <div className="grant-section-head">
+                      <h4>
+                        项目授权 <span>{grants.length}</span>
+                      </h4>
+                      {grants.length > 0 && (
                         <Button
-                          variant="ghost-danger"
-                          size="sm"
-                          className="grant-revoke"
+                          variant={confirmAll ? "danger-solid" : "danger"}
                           disabled={busy || !client}
                           onClick={() => {
+                            if (!confirmAll) {
+                              setConfirmAll(true);
+                              return;
+                            }
                             if (client)
                               void mutate(
                                 () =>
-                                  client.runtime.revokeGrant({
-                                    workspace: current.workspace,
-                                    kind: grant.kind,
-                                    target: grant.target,
-                                  }),
-                                "已撤销，下一次调用会重新询问",
+                                  client.runtime.revokeAllGrants({ workspace: current.workspace }),
+                                "已撤销全部项目授权，下一次调用会重新询问",
                               );
                           }}
                         >
-                          撤销
+                          {confirmAll ? "确认全部撤销" : "全部撤销"}
                         </Button>
+                      )}
+                    </div>
+                    {grants.length === 0 ? (
+                      <div className="grant-empty">
+                        还没有项目授权。确认时选『本项目允许』会出现在这里。
                       </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-              <p className="grant-note">
-                规则（例如「允许所有 git 命令」）写在 config.json 的
-                permissions.rules；这里只管理确认时点出来的授权。
-              </p>
-            </>
-          ) : (
-            <p className="grant-empty">还没有工作区授权记录。</p>
-          )}
-        </div>
-      </div>
+                    ) : (
+                      <div className="grant-table" role="table" aria-label="项目授权列表">
+                        <div className="grant-table-head" role="row">
+                          <span>类别</span>
+                          <span>目标</span>
+                          <span>授予时间</span>
+                          <span />
+                        </div>
+                        {grants.map((grant) => (
+                          <div
+                            className="grant-row"
+                            role="row"
+                            key={`${grant.kind}:${grant.target}`}
+                          >
+                            <Badge className="grant-kind">{grantKind(grant.kind)}</Badge>
+                            <GrantTarget target={grant.target} />
+                            <time dateTime={grant.createdAt}>
+                              {new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}
+                            </time>
+                            <Button
+                              variant="ghost-danger"
+                              size="sm"
+                              className="grant-revoke"
+                              disabled={busy || !client}
+                              onClick={() => {
+                                if (client)
+                                  void mutate(
+                                    () =>
+                                      client.runtime.revokeGrant({
+                                        workspace: current.workspace,
+                                        kind: grant.kind,
+                                        target: grant.target,
+                                      }),
+                                    "已撤销，下一次调用会重新询问",
+                                  );
+                              }}
+                            >
+                              撤销
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                  <p className="grant-note">
+                    规则（例如「允许所有 git 命令」）写在 config.json 的
+                    permissions.rules；这里只管理确认时点出来的授权。
+                  </p>
+                </>
+              ) : (
+                <p className="grant-empty">还没有工作区授权记录。</p>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="spage flush">
+            <PageHeader title="授权" />
+            {error && (
+              <div className="desc err" role="alert">
+                {error}
+              </div>
+            )}
+            <MasterDetail
+              listLabel="工作区"
+              list={
+                <ListGroup title="工作区" count={workspaces.length}>
+                  {workspaces.map((item) => (
+                    <ListItem
+                      key={item.workspace}
+                      label={
+                        samePath(item.workspace, plainWorkspace)
+                          ? "普通对话"
+                          : basename(item.workspace)
+                      }
+                      selected={selected === item.workspace}
+                      meta={`${item.grantCount} 项授权 · ${!item.hasProjectConfig ? "没有项目配置" : item.trusted ? "已信任" : "未信任"}`}
+                      onClick={() => {
+                        setSelected(item.workspace);
+                      }}
+                    />
+                  ))}
+                </ListGroup>
+              }
+            >
+              <p className="desc">查看和撤销确认时授予的允许</p>
+              {current ? (
+                <>
+                  <DetailHeader
+                    title={
+                      samePath(current.workspace, plainWorkspace)
+                        ? "普通对话"
+                        : basename(current.workspace)
+                    }
+                    extra={<span className="desc mono grant-path">{current.workspace}</span>}
+                  />
+                  <SettingsGroup title="配置">
+                    <SettingsRow
+                      label="项目信任"
+                      marker={
+                        current.hasProjectConfig ? { label: ".nocturne/config.json" } : undefined
+                      }
+                      desc={
+                        current.hasProjectConfig
+                          ? "信任后，项目配置里的 MCP、Hook 和权限规则会参与运行。"
+                          : "这个工作区没有 .nocturne/config.json。"
+                      }
+                    >
+                      <span className="val">
+                        {!current.hasProjectConfig
+                          ? "没有项目配置"
+                          : current.trusted
+                            ? "已信任"
+                            : "未信任"}
+                      </span>
+                      <Button
+                        disabled={busy || !client || !current.hasProjectConfig}
+                        onClick={() => {
+                          if (!client) return;
+                          if (current.trusted)
+                            void mutate(
+                              () =>
+                                client.runtime.setWorkspaceTrusted({
+                                  workspace: current.workspace,
+                                  trusted: false,
+                                }),
+                              "已取消信任，新开或重新打开会话生效",
+                            );
+                          else {
+                            setError("");
+                            void client.runtime
+                              .describeProject({ workspace: current.workspace })
+                              .then(setDescription)
+                              .catch((reason: unknown) => {
+                                setError(message(reason));
+                              });
+                          }
+                        }}
+                      >
+                        {current.trusted ? "取消信任" : "信任此项目"}
+                      </Button>
+                    </SettingsRow>
+                  </SettingsGroup>
+                  {grants.length > 0 ? (
+                    <SettingsGroup
+                      title="项目授权"
+                      count={grants.length}
+                      plain
+                      action={
+                        <Button
+                          size="sm"
+                          variant={confirmAll ? "danger-solid" : "ghost-danger"}
+                          disabled={busy || !client}
+                          onClick={() => {
+                            if (!confirmAll) {
+                              setConfirmAll(true);
+                              return;
+                            }
+                            if (client)
+                              void mutate(
+                                () =>
+                                  client.runtime.revokeAllGrants({ workspace: current.workspace }),
+                                "已撤销全部项目授权，下一次调用会重新询问",
+                              );
+                          }}
+                        >
+                          {confirmAll ? "确认全部撤销" : "全部撤销"}
+                        </Button>
+                      }
+                    >
+                      <DataTable
+                        aria-label="项目授权列表"
+                        rows={grants}
+                        rowKey={(g) => `${g.kind}:${g.target}`}
+                        columns={[
+                          { key: "kind", header: "类别", render: (g) => grantKind(g.kind) },
+                          {
+                            key: "target",
+                            header: "目标",
+                            mono: true,
+                            render: (g) => <GrantTarget target={g.target} />,
+                          },
+                          {
+                            key: "time",
+                            header: "授予时间",
+                            muted: true,
+                            render: (g) => (
+                              <time dateTime={g.createdAt}>
+                                {new Date(g.createdAt).toLocaleString("zh-CN", { hour12: false })}
+                              </time>
+                            ),
+                          },
+                          {
+                            key: "action",
+                            header: "",
+                            label: "操作",
+                            numeric: true,
+                            render: (g) => (
+                              <Button
+                                variant="ghost-danger"
+                                size="sm"
+                                disabled={busy || !client}
+                                onClick={() => {
+                                  if (client)
+                                    void mutate(
+                                      () =>
+                                        client.runtime.revokeGrant({
+                                          workspace: current.workspace,
+                                          kind: g.kind,
+                                          target: g.target,
+                                        }),
+                                      "已撤销，下一次调用会重新询问",
+                                    );
+                                }}
+                              >
+                                撤销
+                              </Button>
+                            ),
+                          },
+                        ]}
+                      />
+                    </SettingsGroup>
+                  ) : (
+                    <EmptyState inline>
+                      还没有项目授权。确认时选『本项目允许』会出现在这里。
+                    </EmptyState>
+                  )}
+                  <p className="desc">
+                    规则（例如「允许所有 git 命令」）写在 config.json 的
+                    permissions.rules；这里只管理确认时点出来的授权。
+                  </p>
+                </>
+              ) : (
+                <EmptyState>还没有工作区授权记录。</EmptyState>
+              )}
+            </MasterDetail>
+          </div>
+        </>
+      )}
       {notice && (
         <div className="toast3" role="status">
           {notice}

@@ -287,7 +287,7 @@
 }
 /* 手机：顶栏已有「授权」，正文只留副标题（同手机定时任务页）；
    撤销按钮保留 44px 触控区，文字与类别同一基线，右缘对齐列边 */
-.phone-grants .grants-page .ph3 h3 {
+.phone-grants .grants-page .phone-grants-head h3 {
   display: none;
 }
 .phone-grants .grant-row .grant-kind,
@@ -296,4 +296,26 @@
 }
 .phone-grants .grant-row .grant-revoke {
   margin-inline-end: -12px;
+}
+
+.phone-grants-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--a-border);
+}
+.phone-grants-head .grow {
+  flex: 1;
+}
+.phone-grants-head .sub {
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+}
+.phone-grants-list {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--a-border);
+  padding: 20px 18px;
+  overflow-y: auto;
 }
