@@ -904,9 +904,12 @@ describe("全屏界面", () => {
   it("跨次保存的多行原文回填为粘贴占位", async () => {
     const { runtime, session } = await sessionWithEffort();
     await session.recordInputHistory("甲\n乙");
+    const historyLoad = vi.spyOn(session, "readInputHistory");
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
+    await waitFor(() => historyLoad.mock.results.length > 0);
+    await historyLoad.mock.results[0]?.value;
     await pause(80);
     stdin.write("\x1b[A");
     await waitFor(() => (lastFrame() ?? "").includes("[Paste #1, +1 lines]"));
