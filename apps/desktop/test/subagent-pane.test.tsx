@@ -3,7 +3,7 @@
  * 图片走只读 RPC、错误与重试、只在显示时观察。
  */
 import { webcrypto } from "node:crypto";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { RuntimeEvent, SubagentObservation, SubagentObserver } from "@nocturne/core/protocol";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -360,11 +360,12 @@ it("图片经只读 RPC 读取（父/子/文件三元组），不 resume 子会�
       callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
     }
   });
-  await flush();
-  expect(backend.runtime.readSubagentAttachment).toHaveBeenCalledWith({
-    parentSessionId: "p",
-    childSessionId: "child-1",
-    file: "shot.png",
+  await waitFor(() => {
+    expect(backend.runtime.readSubagentAttachment).toHaveBeenCalledWith({
+      parentSessionId: "p",
+      childSessionId: "child-1",
+      file: "shot.png",
+    });
+    expect(document.querySelector("img.u-img")?.getAttribute("src")).toBe("blob:child-image");
   });
-  expect(document.querySelector("img.u-img")?.getAttribute("src")).toBe("blob:child-image");
 });
