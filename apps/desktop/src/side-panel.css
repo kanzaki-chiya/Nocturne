@@ -815,9 +815,6 @@
   background: var(--a-panel);
   box-shadow: var(--shadow-popover);
 }
-.ovpop.docked {
-  box-shadow: var(--shadow-popover);
-}
 .ovpop-proj {
   display: flex;
   align-items: center;
@@ -867,22 +864,9 @@
   color: var(--a-faint);
 }
 
-/*
- * 浮层停靠（面板关着）：对话列、输入框往左让出浮层的宽度，文字不被遮挡。
- * 宽窗口里居中位置本来就够远时不动（取两者较大值）。
- */
-.main.ov-docked .conversation-transcript,
-.main.ov-docked .composer.session .cw,
-.main.ov-docked .qcard,
-.main.ov-docked .conversation .ask {
-  /* 显式宽度：composer 外层是 grid，auto 外边距会让子项退回内容宽度 */
-  width: calc(100% - max(calc((100% - 820px) / 2), var(--ov-reserve)));
-  max-width: 820px;
-  margin-left: auto;
-  margin-right: max(calc((100% - 820px) / 2), var(--ov-reserve));
-}
-.main.ov-docked .head {
-  padding-right: calc(var(--ov-reserve) + 36px);
+/* 浮层盖在对话区上，对话列不让位；标题栏的路径留在浮层左边 */
+.main.ov-open .head {
+  padding-right: calc(var(--ovpop-w) + 36px);
 }
 
 /* 面板收起时仍挂着（终端进程不随面板收起结束） */

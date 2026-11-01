@@ -46,7 +46,6 @@ import {
   migrateGlobalPanel,
   moveTab,
   nextActiveAfterClose,
-  overviewDocks,
   PANEL_DEFAULT_WIDTH,
   panelOverlays,
   parseAddress,
@@ -1223,12 +1222,6 @@ export function useSidePanel({
         });
     },
   };
-  // 面板关着且对话区让位后仍放得下才停靠，否则盖在对话区上（修订 2026-10-18（三））
-  const overviewDocked =
-    overviewVisible &&
-    !shown &&
-    bodySize.width > 0 &&
-    overviewDocks(bodySize.width, bodySize.sidebar);
   const project =
     workspace === undefined
       ? ""
@@ -1353,7 +1346,6 @@ export function useSidePanel({
           project={project}
           workspace={workspace}
           totals={sessionChangeTotals(active.turnChanges.values())}
-          docked={overviewDocked}
           rightOffset={shown && overlay ? shownWidth : 0}
           onOpenChanges={() => {
             openChanges();
@@ -1416,7 +1408,7 @@ export function useSidePanel({
     viewChanges: openChanges,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
-    mainClass: overviewDocked ? " ov-docked" : "",
+    mainClass: overviewVisible && !shown ? " ov-open" : "",
     bodyRef: setBody,
     panel,
     mainOverlays,

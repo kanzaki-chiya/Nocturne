@@ -59,7 +59,6 @@ describe("概览", () => {
         project="proj"
         workspace="Z:\proj"
         totals={{ added: 0, removed: 0, files: 0 }}
-        docked
         rightOffset={0}
         onOpenChanges={vi.fn()}
         subagents={{

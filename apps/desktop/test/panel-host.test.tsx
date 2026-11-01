@@ -540,20 +540,17 @@ it("概览浮层：让位后对话区仍 ≥480px 才停靠，否则盖在对话
     );
     const main = () => document.querySelector("main");
     const pop = () => document.querySelector(".ovpop");
-    expect(main()?.classList.contains("ov-docked")).toBe(true);
-    expect(pop()?.classList.contains("docked")).toBe(true);
-    // 236 + 300 + 480 = 1016：差 1px 就改成覆盖
-    bodyWidth = 1015;
-    act(() => {
-      for (const measure of observers) measure();
-    });
-    expect(main()?.classList.contains("ov-docked")).toBe(false);
-    expect(pop()?.classList.contains("docked")).toBe(false);
-    bodyWidth = 1016;
-    act(() => {
-      for (const measure of observers) measure();
-    });
-    expect(main()?.classList.contains("ov-docked")).toBe(true);
+    expect(pop()).not.toBeNull();
+    // 任何窗口宽度下对话列都不让位：只留标题栏的路径，浮层盖在对话区上
+    for (const width of [1920, 1016, 1015, 800]) {
+      bodyWidth = width;
+      act(() => {
+        for (const measure of observers) measure();
+      });
+      expect(main()?.classList.contains("ov-open")).toBe(true);
+      expect(main()?.classList.contains("ov-docked")).toBe(false);
+      expect(pop()?.classList.contains("docked")).toBe(false);
+    }
   } finally {
     rect.mockRestore();
     vi.unstubAllGlobals();

@@ -394,14 +394,12 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
 
 /**
  * 会话概览浮层（ADR-0060 第 2 节）：项目行、「变更」行和「子代理」分组（没有运行项时隐藏）。
- * 开关只经标题栏按钮与 Esc，点「变更」不关浮层。docked 时停在对话区右侧
- * 空白（对话列让位），否则盖在对话上。
+ * 开关只经标题栏按钮与 Esc，点「变更」不关浮层。始终盖在对话区上，对话列不让位。
  */
 export function SessionOverview({
   project,
   workspace,
   totals,
-  docked,
   rightOffset,
   onOpenChanges,
   subagents,
@@ -409,7 +407,6 @@ export function SessionOverview({
   project: string;
   workspace: string;
   totals: { added: number; removed: number; files: number };
-  docked: boolean;
   /** 面板盖在对话区上时浮层让到面板左边；对话区放不下时压在面板上，不盖侧边栏 */
   rightOffset: number;
   onOpenChanges: () => void;
@@ -418,7 +415,7 @@ export function SessionOverview({
 }) {
   return (
     <div
-      className={`ovpop${docked ? " docked" : ""}`}
+      className="ovpop"
       role="dialog"
       aria-label="会话概览"
       style={

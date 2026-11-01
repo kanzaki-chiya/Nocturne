@@ -113,8 +113,6 @@ export const PANEL_MAX_WIDTH = 960;
 export const PANEL_DEFAULT_WIDTH = 520;
 /** 对话区至少留这么宽；更窄时面板改为盖在对话区上（ADR-0060 第 1 节） */
 export const CONVERSATION_MIN_WIDTH = 480;
-/** 概览浮层停靠时对话列让出的宽度（side-panel.css 的 --ov-reserve） */
-export const OVERVIEW_RESERVE = 300;
 /** 子代理标签名里任务摘要的码点上限（与 Core SubagentSummary.taskSummary 同一口径） */
 export const SUBAGENT_SUMMARY_MAX = 120;
 /** 每个会话记住的最近在面板里打开过的文件数（Ctrl+P 空查询排在前面） */
@@ -270,21 +268,12 @@ export function vanishedSessions(
   );
 }
 
-/**
- * 概览浮层能否停靠（ADR-0060 修订 2026-10-18（三））：面板关着、对话列让出浮层位置后
- * 对话区仍不小于 480px 才停靠；否则盖在对话区上。只看窗口宽度，不受停靠本身影响，
- * 拖动窗口跨过阈值时只切换一次。
- */
-export function overviewDocks(bodyWidth: number, sidebarWidth: number): boolean {
-  return bodyWidth - sidebarWidth - OVERVIEW_RESERVE >= CONVERSATION_MIN_WIDTH;
-}
-
-/** 面板宽度夹在上下限之间；窗口很窄时上限再让出对话区的一部分 */
+/** 面板宽度夹在上下限之间；上限给对话区留够 CONVERSATION_MIN_WIDTH，窗口太窄时退到下限 */
 export function clampPanelWidth(width: number, available?: number): number {
   const max =
     available === undefined
       ? PANEL_MAX_WIDTH
-      : Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, available - 160));
+      : Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, available - CONVERSATION_MIN_WIDTH));
   if (!Number.isFinite(width)) return Math.min(PANEL_DEFAULT_WIDTH, max);
   return Math.round(Math.min(max, Math.max(PANEL_MIN_WIDTH, width)));
 }

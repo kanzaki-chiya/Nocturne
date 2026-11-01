@@ -783,7 +783,6 @@ it("没有删除行时不写 −0：文件树、diff 卡片头、概览浮层", 
         project="proj"
         workspace="Z:\proj"
         totals={{ added: 7, removed, files: 2 }}
-        docked
         rightOffset={0}
         onOpenChanges={vi.fn()}
       />,

@@ -10,7 +10,6 @@ import {
   clampPanelWidth,
   clampTreeWidth,
   collectChanges,
-  CONVERSATION_MIN_WIDTH,
   dirName,
   fileTabLabel,
   groupChanges,
@@ -20,8 +19,6 @@ import {
   moveTab,
   nativeSeparators,
   nextActiveAfterClose,
-  OVERVIEW_RESERVE,
-  overviewDocks,
   PANEL_MAX_WIDTH,
   PANEL_MIN_WIDTH,
   panelOverlays,
@@ -58,11 +55,16 @@ const file = (id: string, path: string, extra?: Partial<FileTab>): FileTab => ({
 });
 
 describe("面板宽度", () => {
-  it("夹在上下限之间；窗口窄时上限让出对话区", () => {
+  it("夹在上下限之间；上限给对话区留够 480px", () => {
     expect(clampPanelWidth(100)).toBe(PANEL_MIN_WIDTH);
     expect(clampPanelWidth(5000)).toBe(PANEL_MAX_WIDTH);
     expect(clampPanelWidth(Number.NaN)).toBe(520);
-    expect(clampPanelWidth(900, 700)).toBe(540);
+    // 从最大化缩小窗口：显示宽度让出对话区，不改存下来的偏好
+    expect(clampPanelWidth(920, 1207)).toBe(727);
+    expect(panelOverlays(1500, 293, clampPanelWidth(920, 1207))).toBe(false);
+    expect(clampPanelWidth(520, 1207)).toBe(520);
+    // 放不下 480 + 320 时退到面板下限，改为覆盖
+    expect(clampPanelWidth(900, 700)).toBe(PANEL_MIN_WIDTH);
   });
   it("对话区不足 480px 时覆盖", () => {
     expect(panelOverlays(1400, 236, 520)).toBe(false);
@@ -489,14 +491,6 @@ describe("按会话的面板", () => {
       vanishedSessions(["a", "b", "c", "d", "e", "f", "c"], [{ id: "a" }], seen, open, "e"),
     ).toEqual(["c", "d", "f"]);
     expect(vanishedSessions(["e"], [], seen, open, null)).toEqual(["e"]);
-  });
-  it("概览浮层停靠阈值：让位后对话区仍 ≥480px 才停靠", () => {
-    const sidebar = 236;
-    const edge = sidebar + OVERVIEW_RESERVE + CONVERSATION_MIN_WIDTH;
-    expect(overviewDocks(edge, sidebar)).toBe(true);
-    expect(overviewDocks(edge - 1, sidebar)).toBe(false);
-    expect(overviewDocks(1200, sidebar)).toBe(true);
-    expect(overviewDocks(900, sidebar)).toBe(false);
   });
   it("文件树宽度夹在 180–420px", () => {
     expect(clampTreeWidth(100)).toBe(CHANGE_TREE_MIN_WIDTH);
