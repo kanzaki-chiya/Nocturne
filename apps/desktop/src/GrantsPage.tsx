@@ -140,7 +140,6 @@ export function GrantsPage({
           <header className="phone-grants-head">
             <div className="grow">
               <h3>授权</h3>
-              <span className="sub">查看和撤销确认时授予的允许</span>
             </div>
           </header>
           {error && (
@@ -211,11 +210,6 @@ export function GrantsPage({
                             ? "已信任"
                             : "未信任"}
                       </p>
-                      <small>
-                        {current.hasProjectConfig
-                          ? "信任后，项目配置里的 MCP、Hook 和权限规则会参与运行。"
-                          : "这个工作区没有 .nocturne/config.json。"}
-                      </small>
                     </div>
                     <div title="请在电脑上操作">
                       <Button
@@ -274,9 +268,7 @@ export function GrantsPage({
                       )}
                     </div>
                     {grants.length === 0 ? (
-                      <div className="grant-empty">
-                        还没有项目授权。确认时选『本项目允许』会出现在这里。
-                      </div>
+                      <EmptyState inline>还没有项目授权</EmptyState>
                     ) : (
                       <div className="grant-table" role="table" aria-label="项目授权列表">
                         <div className="grant-table-head" role="row">
@@ -321,10 +313,6 @@ export function GrantsPage({
                       </div>
                     )}
                   </section>
-                  <p className="grant-note">
-                    规则（例如「允许所有 git 命令」）写在 config.json 的
-                    permissions.rules；这里只管理确认时点出来的授权。
-                  </p>
                 </>
               ) : (
                 <p className="grant-empty">还没有工作区授权记录。</p>
@@ -364,7 +352,6 @@ export function GrantsPage({
                 </ListGroup>
               }
             >
-              <p className="desc">查看和撤销确认时授予的允许</p>
               {current ? (
                 <>
                   <DetailHeader
@@ -380,11 +367,6 @@ export function GrantsPage({
                       label="项目信任"
                       marker={
                         current.hasProjectConfig ? { label: ".nocturne/config.json" } : undefined
-                      }
-                      desc={
-                        current.hasProjectConfig
-                          ? "信任后，项目配置里的 MCP、Hook 和权限规则会参与运行。"
-                          : "这个工作区没有 .nocturne/config.json。"
                       }
                     >
                       <span className="val">
@@ -502,14 +484,8 @@ export function GrantsPage({
                       />
                     </SettingsGroup>
                   ) : (
-                    <EmptyState inline>
-                      还没有项目授权。确认时选『本项目允许』会出现在这里。
-                    </EmptyState>
+                    <EmptyState inline>还没有项目授权</EmptyState>
                   )}
-                  <p className="desc">
-                    规则（例如「允许所有 git 命令」）写在 config.json 的
-                    permissions.rules；这里只管理确认时点出来的授权。
-                  </p>
                 </>
               ) : (
                 <EmptyState>还没有工作区授权记录。</EmptyState>

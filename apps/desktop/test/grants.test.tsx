@@ -53,7 +53,8 @@ async function project() {
 it("普通对话最先、项目列表和空状态、撤销后刷新；失败保留列表", async () => {
   const h = fixture();
   render(<GrantsPage client={h.client} plainWorkspace="Z:/plain" />);
-  expect(await screen.findByText(/还没有项目授权/)).toBeTruthy();
+  expect(await screen.findByText("还没有项目授权")).toBeTruthy();
+  expect(screen.queryByText(/确认时选/)).toBeNull();
   expect(
     within(screen.getByRole("navigation", { name: "工作区" })).getAllByRole("button")[0]
       ?.textContent,
@@ -65,7 +66,7 @@ it("普通对话最先、项目列表和空状态、撤销后刷新；失败保�
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "写盘失败");
   expect(screen.getByText("git status")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "撤销" }));
-  await screen.findByText(/还没有项目授权/);
+  await screen.findByText("还没有项目授权");
   expect(h.runtime.revokeGrant).toHaveBeenLastCalledWith({
     workspace: "Z:/nocturne",
     kind: "shell",

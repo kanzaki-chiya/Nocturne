@@ -520,9 +520,6 @@ export function SchedulePage({
             </>
           }
         >
-          <p className="desc">
-            只在 Nocturne 打开时运行 · 错过的只补最近一次 · 无人值守，需要确认的操作会被直接拒绝
-          </p>
           {selectedId === null && <EmptyState>从左边选一个任务，或新建一个。</EmptyState>}
           {(selected !== undefined || selectedId === "new") && (
             <>
@@ -624,10 +621,7 @@ export function SchedulePage({
                       }}
                     />
                   </Field>
-                  <Field
-                    label="指令"
-                    desc={<>每次运行都在新会话里，作为第一条消息发出；需要的背景写在这里</>}
-                  >
+                  <Field label="指令">
                     <textarea
                       className={`textarea${field === "prompt" ? " err" : ""}`}
                       aria-label="指令"
@@ -828,12 +822,6 @@ export function SchedulePage({
                         }}
                       />
                     </Field>
-                  </div>
-                  <div className="sched-callout">
-                    <b>无人值守</b>
-                    <span>
-                      运行时没人能点确认：审查后仍需要你确认的操作会被直接拒绝，模型会在最终回复里列出没做成的部分。需要写文件或跑命令的任务，先点一次「立即运行」看看会被拒绝什么，再决定放宽权限或写规则。
-                    </span>
                   </div>
                   {formError !== undefined && (
                     <p className="errt" role="alert">

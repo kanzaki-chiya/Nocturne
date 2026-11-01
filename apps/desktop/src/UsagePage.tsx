@@ -306,7 +306,6 @@ export function UsageView({
   error,
   onRange,
   onRefresh,
-  scope = "本机全部会话（含子代理）",
 }: {
   stats: UsageStats | undefined;
   range: Range;
@@ -314,8 +313,6 @@ export function UsageView({
   error: string | undefined;
   onRange: (range: Range) => void;
   onRefresh: () => void;
-  /** 标题下的统计口径说明（手机上「本机」指电脑，改写措辞） */
-  scope?: string;
 }) {
   const [sort, setSort] = useState<"cost" | "input">("cost");
   // 展开状态按模型键保存，切换范围时保留
@@ -396,7 +393,6 @@ export function UsageView({
           }
         />
         <div className="usage-body sbody">
-          <p className="desc">{scope}</p>
           {error && (
             <div className="usage-error" role="alert">
               读取用量失败：{error}{" "}
@@ -449,11 +445,7 @@ export function UsageView({
                 </div>
               </div>
               <Activity stats={stats} range={range} />
-              <SettingsGroup
-                title="Token 构成与费用"
-                plain
-                action={<span className="desc">输入含缓存读取与写入</span>}
-              >
+              <SettingsGroup title="Token 构成与费用" plain>
                 <div className="usage-composition-bar" aria-hidden="true">
                   {composition.map((c) => (
                     <i
@@ -653,13 +645,7 @@ export function UsageView({
   );
 }
 
-export function UsagePage({
-  client,
-  scope,
-}: {
-  client: RpcClient | null | undefined;
-  scope?: string;
-}) {
+export function UsagePage({ client }: { client: RpcClient | null | undefined }) {
   const [range, setRange] = useState<Range>("30");
   const [stats, setStats] = useState<UsageStats>();
   const [loading, setLoading] = useState(false);
@@ -696,7 +682,6 @@ export function UsagePage({
       onRefresh={() => {
         setRefresh((n) => n + 1);
       }}
-      {...(scope !== undefined ? { scope } : {})}
     />
   );
 }

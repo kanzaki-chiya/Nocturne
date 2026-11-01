@@ -874,10 +874,7 @@ export function PhoneApp({
   } else if (page.kind === "usage") {
     body = (
       <section className="phone-body phone-usage">
-        <UsagePage
-          client={connected ? sessions.client : undefined}
-          scope={`${computer?.name ?? "电脑"}上的全部会话（含子代理）`}
-        />
+        <UsagePage client={connected ? sessions.client : undefined} />
       </section>
     );
   } else {

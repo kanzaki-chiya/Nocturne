@@ -111,7 +111,7 @@ describe("定时任务页", () => {
     );
     expect(page.textContent).toContain("工作日 09:00");
     expect(page.textContent).toContain("运行 4 次 · 跳过 2 次");
-    expect(page.textContent).toContain("无人值守");
+    expect(page.textContent).not.toContain("无人值守");
     expect(screen.getByRole("switch", { name: "启用" }).getAttribute("aria-checked")).toBe("true");
   });
 
@@ -225,7 +225,7 @@ describe("定时任务页", () => {
     );
     await screen.findByDisplayValue("每日提交汇总");
     expect(screen.queryByRole("heading", { name: "定时任务" })).toBeNull();
-    expect(screen.getByText(/只在 Nocturne 打开时运行/)).toBeTruthy();
+    expect(screen.queryByText(/只在 Nocturne 打开时运行/)).toBeNull();
     expect(screen.getByRole("note").textContent).toContain("请在电脑上操作");
     const create = screen.getByRole("button", { name: "＋ 新建任务" });
     expect(create).toHaveProperty("disabled", true);

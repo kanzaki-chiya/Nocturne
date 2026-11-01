@@ -728,7 +728,6 @@ function ProviderDetail({
         }
       />
 
-      {!p.managed && <p className="desc">只读：此条目来自 {originText(p)}，请修改对应配置文件。</p>}
       {showRelogin && (
         <div className="pbanner">
           账号登录已失效<span>需要重新登录才能继续调用 {p.id} 的模型</span>
@@ -988,7 +987,6 @@ function ProviderDetail({
         {models !== null && filtered.length === 0 && (
           <EmptyState inline>{models.length === 0 ? "没有模型" : "无匹配模型"}</EmptyState>
         )}
-        <p className="desc">停用的模型不出现在模型菜单里</p>
       </SettingsGroup>
 
       {confirm !== null && (
@@ -2088,13 +2086,8 @@ function PresetForm({
             }
             error={fieldErr.credential}
             desc={
-              fieldErr.credential === undefined
-                ? [
-                    hintOf(apiKeyMethod.hint),
-                    `交给 ${setup.credential.backend.label} 保存，不写进配置文件`,
-                  ]
-                    .filter((s) => s !== "")
-                    .join("；")
+              fieldErr.credential === undefined && hintOf(apiKeyMethod.hint) !== ""
+                ? hintOf(apiKeyMethod.hint)
                 : undefined
             }
           >

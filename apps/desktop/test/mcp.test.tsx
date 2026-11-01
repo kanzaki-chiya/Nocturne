@@ -194,7 +194,7 @@ describe("MCP 设置页", () => {
     expect(screen.getByRole("group", { name: "config.json（只读）" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText(/home\/config.json/)).toBeDefined();
+    expect(screen.queryByText(/只读：在 home\/config\.json 中定义/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "＋ 添加服务器" }));
     fireEvent.change(screen.getByLabelText(/^名称/), { target: { value: "test" } });
     fireEvent.click(screen.getByRole("button", { name: "远程地址（HTTP）" }));

@@ -65,7 +65,7 @@ describe("外部 agent 设置页", () => {
     render(<ExternalAgentsPage client={f.client} workspaceRoot="/work" version={0} />);
     fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
     await screen.findByRole("heading", { name: "managed" });
-    expect(screen.getByText(/外部费用计在其自己的账号/)).toBeDefined();
+    expect(screen.queryByText(/外部费用计在其自己的账号/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     await screen.findByRole("heading", { name: "manual" });
     expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);

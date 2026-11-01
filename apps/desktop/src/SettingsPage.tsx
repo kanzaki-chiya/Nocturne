@@ -49,12 +49,9 @@ export type ThemePref = "system" | "light" | "dark";
 /** 设置区里由本组件渲染的导航项（服务商页另见 ProvidersPage） */
 export type SettingsPageSection = "general" | "models" | "appearance";
 
-const SECTION_HEAD: Record<SettingsPageSection, { title: string; sub?: string }> = {
-  general: {
-    title: "常规",
-    sub: "默认值对新会话生效",
-  },
-  models: { title: "模型", sub: "新会话默认用哪个模型，以及子代理用哪些模型" },
+const SECTION_HEAD: Record<SettingsPageSection, { title: string }> = {
+  general: { title: "常规" },
+  models: { title: "模型" },
   appearance: { title: "外观" },
 };
 
@@ -78,10 +75,10 @@ const NOTIFY_THRESHOLD_KEYS = ["notifications.doneAfterSeconds"] as const;
 const NOTIFY_TEST_KEY = "notifications.test";
 
 type RoleKey = "task" | "vision" | "smol";
-const ROLES: { role: RoleKey; label: string; hint?: string; unset: string }[] = [
+const ROLES: { role: RoleKey; label: string; unset: string }[] = [
   { role: "task", label: "子代理模型", unset: "跟随当前模型" },
-  { role: "vision", label: "看图模型", hint: "当前模型不支持图片时使用", unset: "未设置" },
-  { role: "smol", label: "轻量模型", hint: "生成标题等小任务", unset: "跟随当前模型" },
+  { role: "vision", label: "看图模型", unset: "未设置" },
+  { role: "smol", label: "轻量模型", unset: "跟随当前模型" },
 ];
 
 const refText = modelKeyText;
@@ -144,7 +141,6 @@ export function SettingsPage({
   providersVersion,
   notifications,
   onConfigSaved,
-  onOpenProviders,
   onOpenSubagents,
 }: {
   section: SettingsPageSection;
@@ -184,8 +180,6 @@ export function SettingsPage({
   notifications: { sendTest: (sound: boolean) => Promise<NotifyResult> };
   /** 写设置成功后调用：桌面端据此刷新会话列表 */
   onConfigSaved?: () => void;
-  /** 「模型」页尾的链接：进入设置 › 服务商 */
-  onOpenProviders?: () => void;
   onOpenSubagents?: () => void;
 }) {
   const [items, setItems] = useState<SettingItem[] | null>(null);
@@ -397,7 +391,6 @@ export function SettingsPage({
         <div className="readable">
           <PageHeader title={head.title} />
           <div className="sbody">
-            {head.sub !== undefined && <p className="desc">{head.sub}</p>}
             {needsCore && client === undefined && (
               <p className="desc">后台尚未就绪，稍后自动刷新。</p>
             )}
@@ -440,7 +433,6 @@ export function SettingsPage({
                 <SettingsGroup title="执行">
                   <SettingsRow
                     label="安全审查"
-                    desc="smart 下除只读命令外的操作先交给它判断"
                     marker={sourceMarker(reviewerItem)}
                     error={errs("permission.reviewer")}
                   >
@@ -457,7 +449,6 @@ export function SettingsPage({
                   {shellItem !== undefined && (
                     <SettingsRow
                       label="Shell"
-                      desc="所有会话下一次调用起生效"
                       marker={sourceMarker(shellItem)}
                       error={errs("shell")}
                     >
@@ -603,11 +594,7 @@ export function SettingsPage({
                     </Button>
                   )}
                 </SettingsRow>
-                <SettingsRow
-                  label="打开文件用"
-                  desc="回答里的文件引用点开时用哪个程序"
-                  error={errs("fileOpener")}
-                >
+                <SettingsRow label="打开文件用" error={errs("fileOpener")}>
                   <Dropdown
                     label="打开文件用"
                     value={fileOpener}
@@ -647,11 +634,7 @@ export function SettingsPage({
                     }}
                   />
                 </SettingsRow>
-                <SettingsRow
-                  label="检查更新"
-                  desc="发现新版本时会在窗口底部提示"
-                  error={errs("updateCheck")}
-                >
+                <SettingsRow label="检查更新" error={errs("updateCheck")}>
                   <Button size="sm" disabled={updBusy} onClick={() => void runUpdateCheck()}>
                     {updBusy ? "检查中…" : "检查更新"}
                   </Button>
@@ -663,7 +646,6 @@ export function SettingsPage({
               <SettingsGroup title="通知">
                 <SettingsRow
                   label="通知"
-                  desc="窗口在前台且正看着该会话时不提醒"
                   marker={sourceMarker(item("notifications.enabled"))}
                   error={errs("notifications.enabled")}
                 >
@@ -679,7 +661,6 @@ export function SettingsPage({
                 </SettingsRow>
                 <SettingsRow
                   label="提醒哪些事"
-                  desc="任一会话，含后台会话"
                   dimmed={!notifyEnabled}
                   marker={notifyEventsMarker()}
                   error={errs(...NOTIFY_EVENT_KEYS)}
@@ -723,7 +704,6 @@ export function SettingsPage({
                 </SettingsRow>
                 <SettingsRow
                   label="完成提醒的阈值"
-                  desc="用时不到这么久的轮不提醒"
                   dimmed={!notifyEnabled || !notifyEvents.done}
                   marker={sourceMarker(item("notifications.doneAfterSeconds"))}
                   error={errs(...NOTIFY_THRESHOLD_KEYS)}
@@ -818,14 +798,13 @@ export function SettingsPage({
                 </SettingsGroup>
 
                 <SettingsGroup title="模型角色">
-                  {ROLES.map(({ role, label, hint, unset }) => {
+                  {ROLES.map(({ role, label, unset }) => {
                     const key = `modelRoles.${role}` as const;
                     const it = item(key);
                     return (
                       <SettingsRow
                         key={role}
                         label={label}
-                        desc={hint}
                         marker={sourceMarker(it)}
                         warning={modelOff(it?.effective) ? "已停用，按未设置处理" : undefined}
                         error={errs(key)}
@@ -848,19 +827,6 @@ export function SettingsPage({
                     );
                   })}
                 </SettingsGroup>
-                <p className="desc">
-                  要改某个模型的上下文、最大输出、思考档位，到{" "}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      onOpenProviders?.();
-                    }}
-                  >
-                    服务商 › 模型表
-                  </Button>{" "}
-                  里点「设置」。
-                </p>
               </>
             )}
 

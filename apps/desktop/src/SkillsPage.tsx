@@ -431,7 +431,6 @@ export function SkillsPage({
                   title="支持文件"
                   plain
                   count={skill.files.filter((f) => f.name !== "SKILL.md").length}
-                  action={<span className="desc">模型读取这些文件不需要确认</span>}
                 >
                   <DataTable
                     aria-label="支持文件"

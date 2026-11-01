@@ -131,7 +131,6 @@ function props(
     editors?: { vscode: boolean; cursor: boolean };
     onFileOpenerChange?: (o: FileOpener) => boolean;
     onConfigSaved?: () => void;
-    onOpenProviders?: () => void;
     onOpenSubagents?: () => void;
     notifications?: {
       sendTest: () => Promise<{ shown: boolean; reason?: "disabled" | "unsupported" | "error" }>;
@@ -160,7 +159,6 @@ function props(
     providersVersion: 0,
     notifications: overrides?.notifications ?? { sendTest: () => Promise.resolve({ shown: true }) },
     onConfigSaved: overrides?.onConfigSaved ?? noop,
-    onOpenProviders: overrides?.onOpenProviders ?? noop,
     onOpenSubagents: overrides?.onOpenSubagents ?? noop,
   };
 }
@@ -475,12 +473,12 @@ describe("SettingsPage", () => {
       return server;
     }
 
-    it("设置行副标题说明 smart 下除只读命令外先交给它判断", async () => {
+    it("设置行不展示冗余副标题", async () => {
       const server = fakeServer(handlers());
       await server.initialize();
       render(<SettingsPage {...props(server.client)} />);
       await screen.findByText("安全审查");
-      expect(row("安全审查").textContent).toContain("smart 下除只读命令外的操作先交给它判断");
+      expect(row("安全审查").textContent).not.toContain("smart 下除只读命令外的操作先交给它判断");
       expect(row("安全审查").textContent).not.toContain("规则拦下的操作");
       server.close();
     });
@@ -634,24 +632,21 @@ describe("SettingsPage", () => {
     server.close();
   });
 
-  it("各页只显示自己的分组；模型页尾的链接进入服务商", async () => {
+  it("各页只显示自己的分组且不显示冗余页头或页尾说明", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
-    const onOpenProviders = vi.fn();
     const view = render(<SettingsPage {...props(server.client)} />);
     await screen.findByText("默认权限预设");
     const groups = () => screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(groups()).toEqual(["权限", "执行", "普通对话", "通知"]);
     expect(screen.getByRole("heading", { name: "常规" })).toBeTruthy();
+    expect(screen.queryByText("默认值对新会话生效")).toBeNull();
     expect(screen.queryByText("看图模型")).toBeNull();
 
-    view.rerender(
-      <SettingsPage {...props(server.client, { section: "models", onOpenProviders })} />,
-    );
+    view.rerender(<SettingsPage {...props(server.client, { section: "models" })} />);
     expect(groups()).toEqual(["默认", "模型角色"]);
     expect(screen.queryByText("默认权限预设")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "服务商 › 模型表" }));
-    expect(onOpenProviders).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/要改某个模型的上下文/)).toBeNull();
 
     view.rerender(<SettingsPage {...props(server.client, { section: "appearance" })} />);
     expect(groups()).toEqual(["主题"]);

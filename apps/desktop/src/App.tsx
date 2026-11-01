@@ -1437,9 +1437,6 @@ export function App({ host }: { host: DesktopHost }) {
                     // 通知开关就写在这份设置里：保存后立刻按新值判定（ADR-0056）
                     void refreshNotifyPrefs();
                   }}
-                  onOpenProviders={() => {
-                    setPage("providers");
-                  }}
                   onOpenSubagents={() => {
                     setPage("agents");
                   }}

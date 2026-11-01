@@ -278,7 +278,7 @@ describe("ProvidersPage 列表与详情", () => {
         name: "能力",
       }),
     ).not.toBeNull();
-    expect(page.textContent).toContain("停用的模型不出现在模型菜单里");
+    expect(page.textContent).not.toContain("停用的模型不出现在模型菜单里");
     expect(row("chatgpt")?.textContent).toContain("已失效");
     // 已配置的 openrouter 不再出现在「可添加」；自定义预设始终可添加
     expect(row("OpenRouter")).toBeUndefined();

@@ -145,7 +145,7 @@ export function SubagentProfileEditor({
           />
         </Field>
       )}
-      <Field label="何时用（给模型看）" desc={<>说明适合与不适合的任务。</>}>
+      <Field label="何时用（给模型看）">
         <textarea
           className="textarea"
           aria-label="何时用"

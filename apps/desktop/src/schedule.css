@@ -19,18 +19,6 @@
 .sched-plan .input.narrow {
   width: var(--w-field-sm);
 }
-.sched-callout {
-  display: flex;
-  gap: var(--space-2);
-  color: var(--a-secondary);
-  font-size: var(--fs-1);
-  line-height: var(--lh-base);
-}
-.sched-callout b {
-  color: var(--a-warning);
-  font-weight: var(--fw-medium);
-  flex: none;
-}
 .sched-readonly {
   margin: 0;
   color: var(--a-warning);

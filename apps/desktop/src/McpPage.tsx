@@ -291,9 +291,6 @@ export function McpPage({
                 </>
               }
             />
-            {!current.editable && (
-              <div className="hint">只读：在 {current.path} 中定义，请修改对应配置文件。</div>
-            )}
             <SettingsGroup title="连接">
               <SettingsRow label={current.transport === "http" ? "地址" : "命令"}>
                 <span className="mono">
@@ -330,10 +327,6 @@ export function McpPage({
                 ))}
               </SettingsGroup>
             )}
-            <div className="desc">
-              模型调用这些工具时显示为 mcp {current.id}
-              /&lt;工具名&gt;，是否需要确认由权限设置决定。
-            </div>
           </>
         ) : (
           <EmptyState
@@ -866,15 +859,7 @@ function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: Pref
   };
   return (
     <SettingsGroup title="面板浏览器">
-      <SettingsRow
-        label="面板浏览器（桌面内置）"
-        desc={
-          <>
-            让 agent 在 Nocturne
-            的面板里打开网页、截图和操作页面。默认关闭；开启后只对新的后台进程生效。
-          </>
-        }
-      >
+      <SettingsRow label="面板浏览器（桌面内置）">
         <Switch
           aria-label="面板浏览器（桌面内置）"
           checked={enabled}

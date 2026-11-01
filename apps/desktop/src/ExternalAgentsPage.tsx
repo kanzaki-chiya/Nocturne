@@ -357,7 +357,6 @@ export function ExternalAgentsPage({
           </>
         }
       >
-        <p className="desc">外部费用计在其自己的账号</p>
         {profileConfig !== undefined ? (
           <SubagentProfileEditor
             key={
@@ -476,7 +475,6 @@ export function ExternalAgentsPage({
                 <span className="val mono">
                   {current.path ??
                     (current.origin === "app" ? "external-agents.json" : "config.json")}
-                  {!current.editable ? "（在 config.json 中定义，请在文件中修改）" : ""}
                 </span>
               </SettingsRow>
               <SettingsRow label="模式">
@@ -689,7 +687,7 @@ function ExternalAgentForm({
         </Field>
       )}
       <fieldset disabled={busy}>
-        <Field label="名称" desc={<>创建后不可改，与所有来源中的名称不区分大小写唯一。</>}>
+        <Field label="名称">
           <input
             aria-label="名称"
             className="input lg mono"
@@ -736,7 +734,7 @@ function ExternalAgentForm({
             }}
           />
         </Field>
-        <Field label="模式 id（可选）" desc={<>留空使用 agent 默认值，id 原样传递。</>}>
+        <Field label="模式 id（可选）">
           <input
             aria-label="模式 id（可选）"
             className="input lg mono"
@@ -747,10 +745,7 @@ function ExternalAgentForm({
             }}
           />
         </Field>
-        <Field
-          label="环境变量（JSON 对象）"
-          desc={<>只接受字符串，支持字面值或 {"${NAME}"} 环境变量引用；不存储对方登录凭据。</>}
-        >
+        <Field label="环境变量（JSON 对象）">
           <textarea
             aria-label="环境变量（JSON 对象）"
             className="textarea mono"
@@ -834,10 +829,7 @@ function ExternalAgentForm({
               )}
             </div>
           ))}
-        <Field
-          label="configOptions（JSON 对象）"
-          desc={<>可手动填写未探测到的 id 和字符串值；agent 拒绝某项时不会静默忽略。</>}
-        >
+        <Field label="configOptions（JSON 对象）">
           <textarea
             aria-label="configOptions（JSON 对象）"
             className="textarea mono"

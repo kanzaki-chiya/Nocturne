@@ -374,9 +374,6 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                 <SettingsGroup title="让手机连到这台电脑">
                   <div className="remote-setup">
                     <p>
-                      远程控制让你在离开电脑时查看会话、发送文字、回答提问和确认操作。电脑需要保持运行。
-                    </p>
-                    <p>
                       向中继管理员索取一次性邀请，粘贴在下方即可登记。也可以在自己的服务器上搭建中继，再为这台电脑生成邀请；部署说明将随中继提供。
                     </p>
                     <Field label="中继邀请" htmlFor="remote-invite">
