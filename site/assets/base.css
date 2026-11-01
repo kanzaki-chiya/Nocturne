@@ -1,0 +1,138 @@
+@font-face {
+  font-family: "Nocturne Serif";
+  src: url("fonts/noto-serif-sc-headings.woff2") format("woff2");
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --bg: #121419;
+  --layer: #1a1d24;
+  --raised: #22262f;
+  --line: #2c303a;
+  --ink: #eceef3;
+  --body: #b4b9c4;
+  --caption: #868c99;
+  --moon: #a6a4e8;
+  --on-moon: #15141f;
+  --serif: "Nocturne Serif", "Songti SC", SimSun, serif;
+  --mono: "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+  scrollbar-color: var(--line) var(--bg);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f3f4f7;
+    --layer: #ebedf2;
+    --raised: #ffffff;
+    --line: #d5d8e0;
+    --ink: #1c1f28;
+    --body: #3a404c;
+    --caption: #5d6472;
+    --moon: #4b3f94;
+    --on-moon: #ffffff;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+::selection {
+  color: var(--on-moon);
+  background: var(--moon);
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+a:focus-visible {
+  outline: 2px solid var(--moon);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+code,
+pre {
+  font-family: var(--mono);
+}
+.wrap {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -48px;
+  z-index: 20;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--moon);
+  color: var(--on-moon);
+}
+.skip-link:focus {
+  top: 8px;
+}
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.masthead .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 56px;
+}
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 18px;
+}
+.wordmark svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--moon);
+}
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 3vw, 28px);
+  font-size: 14px;
+  color: var(--body);
+  white-space: nowrap;
+}
+.site-nav a:hover,
+.site-nav a[aria-current] {
+  color: var(--ink);
+}
+.site-footer {
+  border-top: 1px solid var(--line);
+  color: var(--caption);
+  font-size: 14px;
+}
+.site-footer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding-block: 28px;
+}
+.site-footer a:hover {
+  color: var(--ink);
+}
