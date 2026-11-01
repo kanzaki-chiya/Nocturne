@@ -58,7 +58,8 @@ GitHub Actions 的 `ci` 工作流（`.github/workflows/ci.yml`）在推送 main 
 ```bash
 pnpm install        # 安装依赖
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
-pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、gen-tokens --check 与桌面端未定义 CSS 变量检查
+pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、stylelint 样式检查（pnpm lint:css，含警告数上限 --max-warnings，只能减不能增）、gen-tokens --check 与桌面端未定义 CSS 变量检查
+pnpm lint:css       # stylelint 检查 apps/desktop/src/**/*.css（排除 tokens.css），锁定存量间距警告上限
 pnpm format:check   # prettier --check；修复用 pnpm format
 pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，TUI 包内限 4 个 worker，避免渲染测试在并行负载下超时；`CI=true` 时（GitHub runner 明显更慢）core 与 cli 单测超时由 5s 放宽到 30s、TUI 由 15s 放宽到 60s，各包（含 `scripts/` 测试，其超时本地 30s、CI 60s）失败重试 2 次，本地不重试；TUI 测试固定 `CI=false`，避免 Ink 在 CI 下关闭增量渲染。本轮实测大致耗时：core 约 25 秒、TUI 约 312 秒、ACP 约 112 秒、桌面端约 9 秒，全量约 8 分钟；Agent 在本仓库跑全量测试时把 shell `timeoutMs` 设到足以覆盖全量的值（例如 600000 毫秒）。
 pnpm -r --workspace-concurrency=1 --no-bail test  # 全部包串行，失败后仍继续看各包结果（scripts/ 测试另跑下一行）
@@ -129,6 +130,17 @@ Phase 2 的 CLI 冒烟（`apps/cli`）：在临时目录生成一个含失败测
 仅在不含敏感信息的测试工作区中运行冒烟测试——工作区内容会发送给模型服务。文档改动至少检查所有相对链接可达。
 
 ADR-0061 Gemini 冒烟只要求 `NOCTURNE_SMOKE_OPENCODE_API_KEY` 与 `NOCTURNE_SMOKE_OPENCODE_GEMINI_MODEL`，覆盖纯文本、带工具调用的后续一步（签名回传）、`high` 思考档位；与三协议回归独立跳过。用例经隔离的 providers.json 和内置快照装配，实际请求走 models.dev `/inference/go/...` 地址，测试输出仅记录 URL，不输出鉴权头。可临时设置模型变量为 `gemini-4-argon-contributor`，无需改 `.env`。
+
+### UI 截图验收清单
+
+修改桌面端或手机网页的界面、布局与样式时，按以下清单逐项验收（设计规范见根目录 [`DESIGN.md`](../../DESIGN.md)）：
+
+- 改 UI 必须看实际渲染，不凭代码或单测推测视觉结果；
+- 深浅色主题各截一张；
+- 设置页和布局改动要截宽、窄多个尺寸；
+- 涉及手机网页要截 `390×844`；
+- 与上一版或效果图并排对比；
+- 检查有没有新增说明文字。
 
 ## 6. 许可证与第三方代码
 

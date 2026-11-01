@@ -35,6 +35,7 @@
 | Provider、模型能力、流式归一化 | [architecture/providers.md](docs/architecture/providers.md)、[protocols/provider-api.md](docs/protocols/provider-api.md) |
 | CLI 参数、REPL、事件渲染、权限确认 | [apps/cli.md](docs/apps/cli.md) |
 | TUI 布局、按键、渲染 | [apps/tui.md](docs/apps/tui.md)、[decisions/ADR-0010](docs/decisions/ADR-0010-tui-rendering.md) |
+| 界面样式、token、文案规范 | [DESIGN.md](DESIGN.md) |
 | 模块划分、依赖方向、目录 | [architecture/modules.md](docs/architecture/modules.md)、[development/repository-layout.md](docs/development/repository-layout.md) |
 | 测试、许可证、发布流程 | [development/workflow.md](docs/development/workflow.md)、[roadmap/roadmap.md](docs/roadmap/roadmap.md) |
 
