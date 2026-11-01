@@ -528,7 +528,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 ### 设置页骨架
 
-设置页共享 `src/ui/` 中的结构组件：`PageHeader` 放标题与页级操作；`SettingsGroup` 统一分组标题、计数、右侧操作与卡片；`SettingsRow` 将标签、来源、徽标和说明放左侧，控件放右侧；`SourceMarker` 标记配置来源或已编辑状态。`MasterDetail`、`ListGroup`、`ListItem`、`DetailHeader` 统一主从列表及详情标题；`DataTable` 用于多列数据；`Field`、`Form`、`FormFooter` 统一表单和底部按钮；`EmptyState` 提供整页及行内空状态。设置内容按可读宽度左对齐，宽统计内容采用宽内容容器。下拉触发器使用 `Dropdown` 的普通、`flat`、`lg` 外观，触发器只显示选中名称，说明留在菜单中；输入框使用共享 `.input`、`.textarea` 样式。
+设置页共享 `src/ui/` 中的结构组件：`PageHeader` 放标题与页级操作；`SettingsGroup` 统一分组标题、计数、右侧操作与卡片；`SettingsRow` 将标签、来源、徽标和说明放左侧，控件放右侧；`SourceMarker` 标记配置来源或已编辑状态。`MasterDetail`、`ListGroup`、`ListItem`、`DetailHeader` 统一主从列表及详情标题（`ListItem` 中名字 `.trunc` 设 `flex-shrink: 0` 优先完整显示，只在左栏本身放不下时才省略，右侧 `badge` 与 `meta` 允许收缩并先行省略）；`DataTable` 用于多列数据；`Field`、`Form`、`FormFooter` 统一表单和底部按钮；`EmptyState` 提供整页及行内空状态。以阅读和操作为主的设置内容保持 `--w-readable`（880px）最大宽度并在可用区域内水平居中（单栏页的 `PageHeader` 与内容共用同一条居中列，主从页的 `PageHeader` 横贯整页而详情区 `.md-detail > .inner` 在详情区内居中）；以表格和数据为主的页面（用量页、后台日志）不设宽度上限，铺满可用宽度，主从页详情内的表格则跟随所在内容列。下拉触发器使用 `Dropdown` 的普通、`flat`、`lg` 外观，触发器只显示选中名称，说明留在菜单中；输入框使用共享 `.input`、`.textarea` 样式。
 
 卡片用于每行一个对象且右侧有控件的设置项、设备、外部 Agent 和连接信息，多列数据用表格，说明和空状态不包卡片。来源标记贴着标签：默认值不显示，配置值显示文件名，被更高层覆盖时用警告样式并在悬停提示中指出覆盖层，模型设置中的「已编辑」用强调色。
 
