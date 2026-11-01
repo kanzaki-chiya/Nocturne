@@ -437,11 +437,12 @@ export function StatusBar({
         )}
         <span
           className="status-item status-tokens mono"
-          title={`累计输入 ${number.format(cacheUsage.inputTokens)} / 输出 ${number.format(cacheUsage.outputTokens)} tokens${
-            cache === null ? "" : `（缓存命中 ${cache}%）`
-          }`}
+          title={`累计输入 ${number.format(cacheUsage.inputTokens)} / 输出 ${number.format(cacheUsage.outputTokens)} tokens`}
         >
           {compactTokens(totalTokens)} tokens
+        </span>
+        <span className="status-item status-cache">
+          缓存 <span className="mono">{cache === null ? "—" : `${cache}%`}</span>
         </span>
         <SpeedBadge speed={speed} />
       </div>

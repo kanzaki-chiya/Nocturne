@@ -424,3 +424,19 @@
     padding-inline: 4px;
   }
 }
+/* 主区变窄时按优先级让位：速度 → tokens → 上下文进度条；运行状态、上下文百分比、缓存命中始终保留 */
+@container (max-width: 900px) {
+  .status-speed {
+    display: none;
+  }
+}
+@container (max-width: 760px) {
+  .status-tokens {
+    display: none;
+  }
+}
+@container (max-width: 640px) {
+  .status-meter {
+    display: none;
+  }
+}

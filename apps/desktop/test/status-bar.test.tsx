@@ -341,6 +341,7 @@ describe("StatusBar", () => {
     expect(leftClasses[0]).toContain("status-turn");
     expect(leftClasses[1]).toContain("status-context");
     expect(leftClasses[2]).toContain("status-tokens");
+    expect(leftClasses[3]).toContain("status-cache");
     const rightClasses = Array.from(groups[1]?.children ?? []).map((el) => el.className);
     expect(rightClasses[0]).toContain("status-mcp");
     expect(rightClasses[1]).toContain("remote-badge");
@@ -357,12 +358,13 @@ describe("StatusBar", () => {
     expect(container.textContent ?? "").not.toMatch(/·\s*·/);
   });
 
-  it("累计 tokens 与缓存说明在进行中 Turn 每步结束即更新，不等 Turn 结束", () => {
+  it("累计 tokens 与缓存命中在进行中 Turn 每步结束即更新，不等 Turn 结束", () => {
     const state = fixture();
     const tokensEl = () => document.querySelector<HTMLElement>(".status-tokens");
     const rendered = render(<StatusBar {...state} />);
     expect(tokensEl()?.textContent).toBe("0 tokens");
-    expect(tokensEl()?.title).not.toContain("缓存命中");
+    const cacheEl = () => document.querySelector<HTMLElement>(".status-cache");
+    expect(cacheEl()?.textContent).toBe("缓存 —");
     const view = {
       ...state.view,
       status: "running_tool" as const,
@@ -386,7 +388,7 @@ describe("StatusBar", () => {
     };
     rendered.rerender(<StatusBar {...state} view={view} />);
     expect(tokensEl()?.textContent).toBe("1.0k tokens");
-    expect(tokensEl()?.title).toContain("缓存命中 90%");
+    expect(cacheEl()?.textContent).toBe("缓存 90%");
   });
 
   it("已有数据时刷新不插入读取行；失败保留数据并在标题显示提示", async () => {
@@ -441,7 +443,7 @@ describe("StatusBar", () => {
     const calls = state.api.describeContext.mock.calls.length;
     rerender(<StatusBar {...state} view={{ ...view, revision: view.revision + 1 }} />);
     expect(state.api.describeContext.mock.calls.length).toBe(calls);
-    expect(screen.getByText("1.0k tokens").getAttribute("title")).toContain("缓存命中 80%");
+    expect(document.querySelector(".status-cache")?.textContent).toBe("缓存 80%");
   });
 
   it("点击上下文触发外部面板状态，保留父代理命令接口", async () => {
