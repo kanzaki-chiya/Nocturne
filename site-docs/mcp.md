@@ -1,52 +1,76 @@
 # MCP
 
+Nocturne 既可以作为 MCP（Model Context Protocol）客户端接入外部工具服务器，也可以通过 `nctrn mcp` 作为 MCP 服务器供其他编码工具调用桌面端会话。
+
 ## 接入外部 MCP 服务器
 
-Nocturne 支持接入本地进程（`stdio`）和远程 Streamable HTTP（`http`）两类 MCP（Model Context Protocol）服务器。
+### 添加服务器
 
-### 在桌面端添加或导入
+- **桌面端**：打开「设置」→「MCP」，点击右上角「＋ 添加服务器」打开表单，或点击「从 JSON 导入」粘贴现有配置。程序内添加的服务器保存在 `~/.nocturne/mcp.json`（归入左列「程序管理」分组）；也可以手写在 `config.json` 或 `.nocturne/config.json` 的 `mcpServers` 字段中（归入「config.json（只读）」分组）。
+- **项目级服务器信任**：写在工作区 `.nocturne/config.json` 里的项目级 MCP 服务器在工作区未信任前不会启动，需先在「设置」→「授权」中点击「信任此项目」后才能连接。
 
-1. 打开「设置 → MCP 服务器」。
-2. 点击右上角的「添加」，选择传输类型（「本地进程 (stdio)」或「远程 HTTP」），填写名称、命令或 URL、参数、环境变量等字段并点击「保存」。
-3. 如果本机已安装 Claude Desktop、Claude Code、Cursor、Windsurf 或 VS Code，点击右上角的「从外部导入」可自动扫描并导入已配置的 MCP 服务器。
-4. 在服务器列表中可查看每个服务器的连接状态、展开查看其暴露的工具列表，或点击「重连」、启用/停用开关、「编辑」与「删除」。
+在「添加 MCP 服务器」表单中选择「类型」：
 
-在终端 TUI 中，输入 `/mcp` 可查看与管理 MCP 服务器连接状态。
+| 类型 | 必填项 | 可选项 |
+|---|---|---|
+| 「本地命令」（`stdio`） | 「名称」、「命令」 | 「参数，一行一个」、「环境变量」 |
+| 「远程地址（HTTP）」（`http`） | 「名称」、「地址」 | 「请求头」 |
 
-### 在配置文件中定义
+MCP 服务器在工具定义中声明 `readOnlyHint: true` 的工具，可进入 `explore` 只读子代理的工具集，并在 `smart` 权限预设下直接放行；其余预设下 MCP 工具默认均为 `ask`（需审批或通过 `permissions.rules` / 项目授权放行）。
 
-桌面端添加的服务器保存在 `~/.nocturne/mcp.json`；你也可以在 `~/.nocturne/config.json` 或 `<workspace>/.nocturne/config.json` 的 `mcp.servers` 字段中配置：
+桌面端表单中的通用能力：
+
+- **凭据存储**：每条「环境变量」或「请求头」的值类型可选择「明文」、「引用环境变量」或「保存到凭据库」（敏感密钥加密存入系统凭据库，不在配置文件落盘明文）。
+- **「高级」选项**：展开「高级」可设置 `stdio` 服务器的「工作目录」（留空为「会话工作区（默认）」）、「启动超时（秒）」（默认 `15` 秒）和「调用超时（秒）」（默认 `60` 秒）。
+- **探测连接**：点击「测试连接」可立即验证握手并列出服务器提供的工具，确认无误后点击「保存」。
+
+桌面端还内置了受控浏览器服务器 `desktop_browser`，在「设置」→「常规」开启「面板浏览器」后可用（见 [右侧面板](panels.md)）。
+
+### 模型如何调用 MCP 工具
+
+- 当已连接服务器的工具总数不超过 16 个时，工具会以 `mcp__<server>__<tool>` 的形式直接注册给模型。
+- 当工具总数超过 16 个时，自动切换为按需检索模式：模型先调用 `mcp_search` 按关键词查找工具定义，再调用 `mcp_call` 执行目标工具，避免挤占上下文窗口。
+
+### 查看状态与重连
+
+- **桌面端**：会话底部状态栏显示已连接的服务器数（若有服务器报错或断开则显示 `MCP 未连接`），点击可展开浮层查看每个服务器的状态与工具数，并点击「重连」；在「设置」→「MCP」选中服务器后，也可切换「启用」开关、点击「测试连接」、「编辑」或「删除」。
+- **终端**：输入 `/mcp` 查看已配置的服务器状态、工具数与错误信息。
+
+## 对外提供 MCP 服务（`nctrn mcp`）
+
+运行 `nctrn mcp`（可加 `--name` 指定显示名称）会通过标准输入输出（`stdio`）启动对外 MCP 桥，并通过本机命名管道连接正在运行的 Nocturne 桌面端。
+
+### 在其他客户端中配置
+
+在 Claude Code、Cursor 等支持 MCP 的宿主中添加 `stdio` 服务器：
 
 ```json
 {
-  "mcp": {
-    "toolSearch": "auto",
-    "servers": {
-      "filesystem": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
-      },
-      "remote-docs": {
-        "url": "https://mcp.example.com/mcp",
-        "headers": {
-          "Authorization": "${DOCS_MCP_AUTH}"
-        }
-      }
+  "mcpServers": {
+    "nocturne": {
+      "command": "nctrn",
+      "args": ["mcp", "--name", "Claude Code"]
     }
   }
 }
 ```
 
-注意：
+### 首次配对与权限管理
 
-- 出于安全保护，未信任项目的项目级配置文件不会生效（参见 [权限模式](permissions.md)）。
-- `env` 和 `headers` 中涉及密钥或 Token 的字段不能写明文字面量，必须写成 `"${ENV_VAR}"` 引用环境变量。
+1. 宿主首次调用工具时，正在运行的 Nocturne 桌面端会弹出「外部 Agent 接入请求」对话框，展示请求方的「名称」、「公钥指纹」与「进程」信息。
+2. 选择「授权范围」：
+   - 「只读」（`read-only`）：仅允许查询会话和模型列表；
+   - 「可运行」（`run`）：允许新建会话、发送消息与中断会话，并可在「新建会话权限上限」下拉框中限制其新建会话可申请的最高权限预设。
+3. 点击「批准」完成配对。之后可在「设置」→「远程」底部的「外部 Agent」分组中随时修改其授权范围、权限上限，或点击「吊销」。
 
-## 工具命名与按需搜索
+### 暴露的 MCP 工具
 
-- 接入后的 MCP 工具在会话中统一命名为 `mcp__<server>__<tool>`。
-- 当所有 MCP 工具定义总计超过上下文窗口的 **10%** 时（默认 `mcp.toolSearch: "auto"`），Nocturne 会自动切换为按需搜索模式：不在每轮请求中全量注入所有工具 schema，而是只提供 `mcp_search` 和 `mcp_call` 两个工具，由模型按关键词搜索后再调用。你可以在 [配置参考](config.md) 的 `mcp.toolSearch` 中将其设为 `"always"` 或 `"never"`。
-
-## 对外提供 MCP
-
-Nocturne 同时提供 `nocturne-mcp` 桥接程序，可将正在运行的 Nocturne 桌面端作为 MCP 服务器暴露给 Claude Code、Codex、Cursor 等外部 Agent 调用，实现跨工具创建会话、发送指令和读取结果。具体配对步骤与暴露的 7 个工具见 [外部 Agent](outside-agents.md)。
+| 工具名 | 作用 |
+|---|---|
+| `nocturne_list_sessions` | 列出桌面端最近会话（可按 `cwd` 过滤） |
+| `nocturne_read_session` | 读取指定会话状态、最近若干轮对话与工具调用摘要 |
+| `nocturne_list_models` | 列出当前可用模型与默认模型 |
+| `nocturne_start_session` | 在指定 `cwd` 新建会话并发送首条 `prompt`（可选等待完成） |
+| `nocturne_send` | 向已有会话追加消息（走 `queue` 排队模式，不打断运行中回合） |
+| `nocturne_wait` | 等待正在运行的会话完成当前轮次，或在等待审批/回答提问时返回 |
+| `nocturne_interrupt` | 中断指定会话正在运行的轮次 |

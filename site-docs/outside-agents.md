@@ -1,62 +1,38 @@
 # 外部 Agent
 
-Nocturne 支持双向的外部 Agent 协作：既可以让其他 Agent 通过 MCP 接入操控 Nocturne，也可以在 Nocturne 内部调用本机安装的其他 CLI Agent 作为子代理。
+如果你本机已经安装了 Codex、omp 等支持 ACP（Agent Client Protocol）的编码命令行工具，可以把它们接入 Nocturne：既能由主会话通过 `task` 工具委派独立任务，也能在输入框里用斜杠命令直接跟它对话。
 
-## 让外部 Agent 接入 Nocturne（MCP）
+（若要反过来从其他编码工具通过 MCP 操控 Nocturne 桌面端，请见 [MCP](mcp.md) 中的 `nctrn mcp` 说明。）
 
-通过内置的 `nocturne-mcp` 桥接程序，Claude Code、Codex、Cursor 等外部 Agent 可以查看和操作正在运行的 Nocturne 桌面端会话。
+## 添加与测试外部 Agent
 
-### 配置与配对步骤
+1. 在桌面端打开「设置」→「子代理」，点击右上角「添加 agent」。
+2. 在「从预设填入」下拉框中选择内置预设，或手动填写任意支持 ACP 的命令：
 
-1. 确保已安装终端包（提供 `nocturne-mcp` 命令，见 [安装](index.md)）且 Nocturne 桌面端正在运行。
-2. 打开桌面端「设置 → 远程连接」，在页面下半部分的「外部 Agent 接入」区域点击「复制 MCP 配置」，将该 JSON 片段加入外部 Agent 的 MCP 配置文件：
+| 内置预设名 | 默认命令 (`command`) | 默认参数 (`args`) |
+|---|---|---|
+| `codex` | `npx` | `@agentclientprotocol/codex-acp` |
+| `omp` | `omp` | `--mode`、`acp` |
 
-```json
-{
-  "mcpServers": {
-    "nocturne": {
-      "command": "nocturne-mcp"
-    }
-  }
-}
-```
+3. 根据需要填写「名称」、「描述」、「命令」、「参数（逐行一个）」、「模式 id（可选）」和「环境变量（JSON 对象）」。
+4. 点击「测试连接」：Nocturne 会按配置启动进程并执行 ACP 握手。探测成功后，表单下方会显示对方支持的「登录方式」和「会话配置项」下拉框（例如选择对方使用的模型或模式，点击「恢复默认」可还原，也可直接编辑 `configOptions（JSON 对象）`）。
+5. 勾选「启用 agent」，点击「保存」。界面中添加的外部 Agent 保存在 `~/.nocturne/external-agents.json`（归入「程序管理」分组），也可以手写在 `~/.nocturne/config.json` 的 `externalAgents` 字段中（归入「config.json（只读）」分组；出于安全原因，项目级 `.nocturne/config.json` 中的 `externalAgents` 不会生效）。
 
-也可以在终端直接运行以下命令写入客户端配置：
+在终端（TUI 与 CLI）中，输入 `/agents` 可列出已配置的外部 Agent 及其状态。
 
-```bash
-claude mcp add --scope user nocturne -- nocturne-mcp
-# 或 Codex
-codex mcp add nocturne -- nocturne-mcp
-```
+## 两种使用方式
 
-3. 当外部 Agent 首次调用 `nocturne_*` 工具时，桌面端「设置 → 远程连接 → 外部 Agent 接入」区域会弹出配对请求，核对 6 位验证码一致后点击「批准」即可完成授权（记录保存在 `~/.nocturne/agent-clients.json`）。你可以随时在「已授权的外部 Agent」列表中点击「撤销」或「全部撤销」吊销权限。
+### 1. 在输入框用 `/<name>` 直接对话
 
-### 可用工具清单
+在会话输入框输入 `/<name>` 加任务内容（例如输入 `/codex` 后跟你的问题）：
 
-| 工具名 | 功能 |
-| --- | --- |
-| `nocturne_status` | 查询桌面端连接状态与工作区列表 |
-| `nocturne_list_sessions` | 列出最近会话及其运行状态 |
-| `nocturne_read_session` | 读取指定会话的消息历史、待决审批与改动摘要 |
-| `nocturne_create_session` | 在指定工作区创建新会话并可选发送首条消息 |
-| `nocturne_send_message` | 向会话发送新消息、插话（`steer`）或排队消息（`queue`） |
-| `nocturne_wait_for_idle` | 阻塞等待指定会话完成当前轮次并返回最新输出 |
-| `nocturne_interrupt_session` | 中断正在运行的会话 |
+- 这一轮提问**不经过当前会话的模型**，而是直接转发给该外部 Agent 执行；外部 Agent 的流式回复、思考过程和工具调用会实时显示在对话流中。
+- 后续再次使用 `/<name>` 会复用同一个外部 Agent 会话，支持连续多轮追问。
+- 如果外部 Agent 的名称与内置斜杠命令或已启用技能重名，`/` 菜单优先触发内置命令或技能（设置页会显示「名称冲突」提示），此时可使用下面的 `task` 工具委派。
 
-## 在 Nocturne 中调用外部 CLI Agent
+### 2. 由主会话通过 `task` 工具委派
 
-Nocturne 可以把本机安装的第三方 CLI Agent 当作 [子代理](subagents.md) 调用：
+已启用的外部 Agent 会自动加入内置 `task` 工具的 `agent` 参数可选列表，主会话可在需要时将子任务委派给它：
 
-| 预设名称 | 默认标识 | 默认可执行命令 |
-| --- | --- | --- |
-| Claude Code | `claude-code` | `claude` |
-| Codex | `codex` | `codex` |
-| OpenCode | `opencode` | `opencode` |
-| Gemini CLI | `gemini` | `gemini` |
-| Kimi CLI | `kimi` | `kimi` |
-
-### 启用与配置
-
-1. 打开桌面端「设置 → 外部 Agent」，点击「从预设添加」选择上述 5 种预设之一（或点击「自定义添加」配置任意支持 JSONL / 纯文本协议的 CLI Agent）。
-2. 按需确认可执行文件命令、附加参数与环境变量，点击「保存」，并在列表中点击「测试」验证命令可用。
-3. 启用后，主代理在调用 `task` 工具时即可将子任务委派给该外部 Agent 执行（配置保存在 `~/.nocturne/external-agents.json`，也可写在 `~/.nocturne/config.json` 的 `externalAgents` 字段中）。
+- **启动前审批**：委派外部 Agent 属于 `subagent` 权限类别（目标为 `external:<name>`），由于外部进程开启后将使用其自身的工具链直接读写文件或执行命令，Nocturne 在全部权限预设下默认均会先询问你（`ask`），批准后才会启动进程。
+- **Worktree 隔离改动**：主会话委派时若传入 `isolation: "worktree"`，外部 Agent 会在独立的 Git worktree 目录中工作；任务完成后，主会话可调用 `apply_subagent_changes`（「并回子代理改动」）将外部 Agent 的代码修改合入主工作区（见 [子代理](subagents.md)）。
