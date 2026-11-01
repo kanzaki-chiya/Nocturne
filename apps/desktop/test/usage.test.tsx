@@ -131,9 +131,10 @@ describe("desktop usage", () => {
     expect(vendor.textContent).not.toContain("厂商价");
     expect(vendor.textContent).not.toContain("models.dev");
     expect(vendor.querySelector(".usage-price-source")).toBeNull();
-    expect(document.querySelector(".usage-table-note")?.textContent).toContain(
-      "按声明价格估算，以服务商账单为准",
+    expect(document.querySelector(".usage-table-note")?.textContent).toBe(
+      "按声明价格估算，以服务商账单为准。",
     );
+    expect(document.querySelector(".usage-day-detail")?.textContent).toBe("");
     expect(screen.getByText(/在配置文件的模型条目里写 pricing/).tagName).toBe("P");
     expect(screen.queryByRole("link", { name: /pricing/ })).toBeNull();
   });

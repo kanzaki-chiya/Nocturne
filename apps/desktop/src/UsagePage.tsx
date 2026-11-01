@@ -150,7 +150,7 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
       </div>
       <div className="usage-heat-footer">
         <span className="usage-day-detail" aria-live="polite">
-          {selected ? describe(selected) : "悬停查看每日用量，点击固定日期"}
+          {selected ? describe(selected) : null}
         </span>
         <span className="usage-legend">
           少{" "}
@@ -602,10 +602,7 @@ export function UsageView({
                   ]}
                 />
                 {!models.length && <EmptyState inline>这个时间范围内还没有模型用量</EmptyState>}
-                <p className="usage-table-note">
-                  Tokens/s 和 TTFT 只统计带计时的请求；旧版本的记录没有计时，显示「—」。单价为 USD /
-                  每百万 token。按声明价格估算，以服务商账单为准。
-                </p>
+                <p className="usage-table-note">按声明价格估算，以服务商账单为准。</p>
                 {stats.unpricedModels.length > 0 && (
                   <p className="usage-notice">
                     {stats.unpricedModels.map((m) => `${m.provider}/${m.model}`).join("、")}{" "}
