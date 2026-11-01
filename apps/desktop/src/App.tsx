@@ -1116,7 +1116,6 @@ export function App({ host }: { host: DesktopHost }) {
     {
       backendId: KEY_DIAG_ID,
       label: "按键诊断",
-      detail: "焦点、输入法状态与快捷键去向（仅内存）",
     },
   ];
 

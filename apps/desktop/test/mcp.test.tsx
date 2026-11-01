@@ -82,8 +82,8 @@ describe("MCP 设置页", () => {
     );
     fireEvent.click(screen.getByRole("combobox", { name: "值类型 1" }));
     const list = within(screen.getByRole("listbox"));
-    expect(list.getByText("值原样写进 mcp.json，适合地址、开关这类非敏感内容")).toBeDefined();
-    expect(list.getByText("启动时从 Nocturne 的进程环境读取同名或指定变量")).toBeDefined();
+    expect(list.queryByText(/值原样写进 mcp\.json/)).toBeNull();
+    expect(list.queryByText(/启动时从 Nocturne 的进程环境读取/)).toBeNull();
     const stored = list.getByRole("option", { name: /保存到凭据库/ });
     expect(stored.getAttribute("aria-disabled")).toBe("true");
     expect(within(stored).getByText("系统凭据后端不可用，请引用环境变量")).toBeDefined();
@@ -214,9 +214,7 @@ describe("MCP 设置页", () => {
       name: /保存到凭据库/,
     });
     expect(stored.getAttribute("aria-disabled")).toBeNull();
-    expect(
-      within(stored).getByText("值存进系统凭据库，mcp.json 只记引用，界面不再显示"),
-    ).toBeDefined();
+    expect(within(stored).queryByText(/值存进系统凭据库/)).toBeNull();
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
     fireEvent.change(screen.getByLabelText("值 1"), { target: { value: "test-token-123" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -226,7 +224,8 @@ describe("MCP 设置页", () => {
       config: { type: "http", headers: { Authorization: { stored: true } } },
       secrets: { Authorization: "test-token-123" },
     });
-    expect(screen.getByRole("status").textContent).toContain("本轮结束后");
+    expect(screen.getByRole("status").textContent).toContain("已保存 test");
+    expect(screen.getByRole("status").textContent).not.toContain("本轮结束后");
     f.close();
   });
   it.each(["启用", "删除", "保存"])("%s失败后显示错误并重新拉取列表", async (action) => {

@@ -190,7 +190,7 @@
 }
 .agent-scope-opt {
   display: flex !important;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--a-border);
@@ -203,25 +203,11 @@
   border-color: var(--a-accent);
   background: var(--a-sel);
 }
-.agent-scope-opt div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.agent-scope-opt span {
-  font-size: var(--fs-1);
-  color: var(--a-secondary);
-}
 .agent-preset-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   margin-bottom: 12px;
-}
-.agent-pair-note {
-  font-size: var(--fs-1);
-  color: var(--a-secondary);
-  margin: 8px 0 16px;
 }
 .agent-pair-actions {
   justify-content: flex-end;

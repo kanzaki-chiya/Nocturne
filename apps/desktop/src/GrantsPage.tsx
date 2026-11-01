@@ -223,7 +223,7 @@ export function GrantsPage({
                                   workspace: current.workspace,
                                   trusted: false,
                                 }),
-                              "已取消信任，新开或重新打开会话生效",
+                              "已取消信任",
                             );
                           else {
                             setError("");
@@ -259,7 +259,7 @@ export function GrantsPage({
                               void mutate(
                                 () =>
                                   client.runtime.revokeAllGrants({ workspace: current.workspace }),
-                                "已撤销全部项目授权，下一次调用会重新询问",
+                                "已撤销全部项目授权",
                               );
                           }}
                         >
@@ -302,7 +302,7 @@ export function GrantsPage({
                                         kind: grant.kind,
                                         target: grant.target,
                                       }),
-                                    "已撤销，下一次调用会重新询问",
+                                    "已撤销",
                                   );
                               }}
                             >
@@ -387,7 +387,7 @@ export function GrantsPage({
                                   workspace: current.workspace,
                                   trusted: false,
                                 }),
-                              "已取消信任，新开或重新打开会话生效",
+                              "已取消信任",
                             );
                           else {
                             setError("");
@@ -423,7 +423,7 @@ export function GrantsPage({
                               void mutate(
                                 () =>
                                   client.runtime.revokeAllGrants({ workspace: current.workspace }),
-                                "已撤销全部项目授权，下一次调用会重新询问",
+                                "已撤销全部项目授权",
                               );
                           }}
                         >
@@ -472,7 +472,7 @@ export function GrantsPage({
                                           kind: g.kind,
                                           target: g.target,
                                         }),
-                                      "已撤销，下一次调用会重新询问",
+                                      "已撤销",
                                     );
                                 }}
                               >
@@ -532,7 +532,7 @@ export function GrantsPage({
             const saved = await mutate(
               () =>
                 client.runtime.setWorkspaceTrusted({ workspace: current.workspace, trusted: true }),
-              "已信任，新开或重新打开会话生效",
+              "已信任",
             );
             if (saved) setDescription(undefined);
           }}

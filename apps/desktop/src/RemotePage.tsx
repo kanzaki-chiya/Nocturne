@@ -140,7 +140,7 @@ export function PairingDialog({
         </p>
         {!success && (
           <>
-            <label htmlFor="remote-pair-url">已打开过手机页面？复制链接到手机浏览器</label>
+            <label htmlFor="remote-pair-url">配对链接</label>
             <div className="remote-link">
               <input id="remote-pair-url" className="input lg mono" readOnly value={offer.url} />
               <Button
@@ -241,10 +241,7 @@ export function AgentPairingDialog({
                 setScope("read-only");
               }}
             />
-            <div>
-              <b>只读</b>
-              <span>只能列出与读取会话内容</span>
-            </div>
+            <b>只读</b>
           </label>
           <label className={`agent-scope-opt${scope === "run" ? " selected" : ""}`}>
             <input
@@ -256,10 +253,7 @@ export function AgentPairingDialog({
                 setScope("run");
               }}
             />
-            <div>
-              <b>可运行</b>
-              <span>可新建会话、向会话发送任务或中止轮次</span>
-            </div>
+            <b>可运行</b>
           </label>
         </div>
         {scope === "run" && (
@@ -275,9 +269,6 @@ export function AgentPairingDialog({
             />
           </div>
         )}
-        <p className="agent-pair-note">
-          可运行的 agent 能往任何会话发消息，按该会话自己的权限预设执行
-        </p>
         {error && (
           <p className="remote-error" role="alert">
             {error}
@@ -373,9 +364,7 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
               <>
                 <SettingsGroup title="让手机连到这台电脑">
                   <div className="remote-setup">
-                    <p>
-                      向中继管理员索取一次性邀请，粘贴在下方即可登记。也可以在自己的服务器上搭建中继，再为这台电脑生成邀请；部署说明将随中继提供。
-                    </p>
+                    <p>向中继管理员索取一次性邀请</p>
                     <Field label="中继邀请" htmlFor="remote-invite">
                       <div className="remote-link">
                         <input
@@ -453,9 +442,7 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                   plain={status.devices.length === 0}
                 >
                   {status.devices.length === 0 ? (
-                    <EmptyState inline>
-                      还没有配对手机。扫码后，这台手机才能访问你的会话。
-                    </EmptyState>
+                    <EmptyState inline>还没有配对手机</EmptyState>
                   ) : (
                     status.devices.map((device) => (
                       <SettingsRow
@@ -614,11 +601,7 @@ function ExternalAgentsSection({
         </p>
       )}
       {agents.length === 0
-        ? !pipeFailed && (
-            <EmptyState inline>
-              还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。
-            </EmptyState>
-          )
+        ? !pipeFailed && <EmptyState inline>还没有已批准的外部 Agent</EmptyState>
         : agents.map((agent) => (
             <SettingsRow
               key={agent.id}

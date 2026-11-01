@@ -153,7 +153,7 @@ export function ExternalAgentsPage({
   const recent = current ? results[current.name] : undefined;
   const changed = async (text: string) => {
     // RPC 在响应之前发 providersChanged；单后台下 App 只刷新本会话的数据版本。
-    setToast(`${text}，空闲会话立即生效，正在回复的会话在本轮结束后切换`);
+    setToast(text);
     await refresh();
   };
   const mutate = async (action: () => Promise<unknown>, text: string) => {
@@ -197,7 +197,7 @@ export function ExternalAgentsPage({
     profileDraft?.config ??
     (profileName === "default"
       ? {
-          description: "通用。跟随当前会话模型和思考档位。",
+          description: "",
           enabled: true,
           ...(defaultModel ? { model: defaultModel } : {}),
         }
@@ -573,9 +573,6 @@ function ProbeDetails({ result }: { result: ExternalAgentProbeResult }) {
           {result.authMethods && result.authMethods.length > 0 && (
             <div>
               <h4>登录方式</h4>
-              <p className="sub">
-                这是 agent 支持的登录方式，不代表当前未登录；请在它自己的命令行工具里管理登录。
-              </p>
               {result.authMethods.map((method) => (
                 <p key={method.id}>
                   {method.name}
@@ -777,7 +774,6 @@ function ExternalAgentForm({
       </fieldset>
       <section>
         <h4>会话配置项</h4>
-        <p className="sub">未设置的项沿用 agent 默认值。</p>
         {result?.ok &&
           result.configOptions.map((option) => (
             <div className="field external-option" key={option.id}>

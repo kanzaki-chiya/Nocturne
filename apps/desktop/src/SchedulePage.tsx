@@ -568,7 +568,7 @@ export function SchedulePage({
               />
               {readOnly && (
                 <p className="sched-readonly" role="note">
-                  请在电脑上操作。手机上可以查看，也可以立即运行。
+                  请在电脑上操作
                 </p>
               )}
               {selected !== undefined && (
@@ -684,7 +684,7 @@ export function SchedulePage({
                       />
                     </Field>
                   </div>
-                  <Field label="计划" desc="本地时间；最小间隔 30 分钟">
+                  <Field label="计划">
                     <SegmentedControl
                       aria-label="计划类型"
                       disabled={readOnly}
@@ -910,9 +910,6 @@ export function SchedulePage({
                       保存
                     </Button>
                   </FormFooter>
-                  {selected !== undefined && (
-                    <span className="hint">删除任务不会删除它运行出来的会话。</span>
-                  )}
                 </form>
               )}
               {tab === "history" && selected !== undefined && (
@@ -942,10 +939,6 @@ export function SchedulePage({
                       }))}
                     />
                   )}
-                  <p className="hint">
-                    保留最近 200 条。跳过的原因：上一次还在运行、同时运行的定时任务已满 2
-                    个、错过的计划时间。
-                  </p>
                 </div>
               )}
             </>

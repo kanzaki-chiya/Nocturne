@@ -113,13 +113,11 @@ export function SkillsPage({
     if (!client || !skill || skill.shadowedBy || busy) return;
     setBusy(true);
     await attempt(async () => {
-      const result = await client.runtime.setSkillEnabled({
+      await client.runtime.setSkillEnabled({
         name: skill.name,
         enabled: !skill.enabled,
       });
-      setToast(
-        `已${skill.enabled ? "停用" : "启用"} ${skill.name}${result.affectedSessions > 0 ? "，进行中的会话本轮结束后生效" : ""}`,
-      );
+      setToast(`已${skill.enabled ? "停用" : "启用"} ${skill.name}`);
       await refresh();
     });
     setBusy(false);
@@ -164,10 +162,7 @@ export function SkillsPage({
                 </Button>
               </>
             }
-          >
-            把常用的做法写成技能。把常用做法写成带 SKILL.md 的文件夹；Claude Code、Codex
-            的技能可直接用
-          </EmptyState>
+          />
           <SkillWarnings warnings={parseWarnings} />
           <p className="fine">扫描目录：{data.scannedDirs.join("、")}</p>
         </div>
@@ -300,30 +295,13 @@ export function SkillsPage({
                     ? "用户"
                     : "项目"}
                   技能 {skill.name} 覆盖
-                  <span>
-                    同名时用户层优先，生效的是 <code>{skill.shadowedBy}</code>
-                    ，这一份不会被加载。想两份都用，把其中一份改名。
-                  </span>
                 </div>
               )}
               {skill.missingDescription && (
-                <div className="skill-banner warn">
-                  缺少说明，模型看不到这个技能
-                  <span>
-                    SKILL.md 的前言里没有 <code>description</code>。现在只能用{" "}
-                    <code>/{skill.name}</code>{" "}
-                    手动调用；补上一句「做什么、什么时候用」，下个会话起就会进入模型目录。
-                  </span>
-                </div>
+                <div className="skill-banner warn">缺少说明，模型看不到这个技能</div>
               )}
               {skill.commandConflict && (
-                <div className="skill-banner warn">
-                  与内置命令重名，斜杠不能调用
-                  <span>
-                    <code>/{skill.name}</code>{" "}
-                    已经是内置命令，内置命令优先。模型仍然可以加载这个技能；想手动调用，把技能改名。
-                  </span>
-                </div>
+                <div className="skill-banner warn">与内置命令重名，斜杠不能调用</div>
               )}
               {!!skill.ignored.length && (
                 <>
@@ -525,7 +503,6 @@ function SkillImportDialog({
   const [actions, setActions] = useState<Record<string, "rename" | "overwrite" | "skip">>({});
   const [names, setNames] = useState<Record<string, string>>({});
   const [results, setResults] = useState<SkillImportCommit["results"]>([]);
-  const [affectedSessions, setAffectedSessions] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [disabling, setDisabling] = useState<string | null>(null);
   const mounted = useRef(true);
@@ -607,7 +584,6 @@ function SkillImportDialog({
       if (!mounted.current) return;
       if (out.mode !== "commit") return;
       setResults(out.results);
-      setAffectedSessions(out.affectedSessions);
       setPhase({ kind: "done" });
     } catch (e) {
       if (!mounted.current) return;
@@ -619,11 +595,9 @@ function SkillImportDialog({
   const disable = async (name: string) => {
     setDisabling(name);
     try {
-      const result = await client.runtime.setSkillEnabled({ name, enabled: false });
+      await client.runtime.setSkillEnabled({ name, enabled: false });
       if (!mounted.current) return;
-      onDone(
-        `已导入并停用 ${name}${result.affectedSessions > 0 ? "，进行中的会话本轮结束后生效" : ""}`,
-      );
+      onDone(`已导入并停用 ${name}`);
     } catch (e) {
       if (!mounted.current) return;
       setError(e instanceof Error ? e.message : String(e));
@@ -637,7 +611,6 @@ function SkillImportDialog({
       <div className="dlg" role="dialog" aria-label="导入技能">
         <div className="dh3">
           <b>导入技能</b>
-          <span>只复制文件，不执行其中的脚本</span>
         </div>
         <div className="db">
           <div className="field">
@@ -722,7 +695,6 @@ function SkillImportDialog({
                         <div className="field">
                           <div className="lab">
                             <label>新名字</label>
-                            <small>自动加后缀，同时改写 SKILL.md 的 name</small>
                           </div>
                           <input
                             className="input"
@@ -763,7 +735,6 @@ function SkillImportDialog({
               <div className="fine">
                 {results.filter((r) => r.status === "imported").length} 个成功，跳过{" "}
                 {results.filter((r) => r.status === "skipped").length} 个
-                {affectedSessions > 0 ? "，进行中的会话本轮结束后看到新技能" : ""}
               </div>
               {results.map((result) => (
                 <div className="fetch" key={result.sourcePath}>

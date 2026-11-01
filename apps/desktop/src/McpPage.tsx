@@ -31,7 +31,6 @@ import "./pages.css";
 import "./mcp.css";
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const propagation = "正在回复的会话本轮结束后生效";
 const probeErrors = {
   auth_required: "认证失败，请检查请求头",
   spawn_failed: "启动失败，请检查命令是否已安装、路径是否正确",
@@ -116,7 +115,7 @@ export function McpPage({
   }, [refresh, version]);
   const changed = async (text: string) => {
     onChanged();
-    setToast(`${text}，${propagation}`);
+    setToast(text);
     await refresh();
   };
   const current = servers.find((s) => s.id === selected);
@@ -596,7 +595,7 @@ function McpForm({
             }}
           />
         </Field>
-        <Field label="名称" desc="模型看到的工具前缀，创建后不能改">
+        <Field label="名称">
           <input
             className={replace ? "input lg mono mcp-name-locked" : "input lg mono"}
             aria-label="名称"
@@ -610,7 +609,7 @@ function McpForm({
           {err("id")}
         </Field>
         {type === "http" ? (
-          <Field label="地址" desc="支持流式 HTTP；如需 OAuth 登录，本版本暂不支持">
+          <Field label="地址">
             <input
               className="input lg mono"
               aria-label="地址"
@@ -673,20 +672,20 @@ function McpForm({
                   {
                     value: "literal",
                     label: "明文",
-                    description: "值原样写进 mcp.json，适合地址、开关这类非敏感内容",
                   },
                   {
                     value: "env",
                     label: "引用环境变量",
-                    description: "启动时从 Nocturne 的进程环境读取同名或指定变量",
                   },
                   {
                     value: "stored",
                     label: "保存到凭据库",
-                    description: backend
-                      ? "值存进系统凭据库，mcp.json 只记引用，界面不再显示"
-                      : "系统凭据后端不可用，请引用环境变量",
-                    ...(!backend ? { disabled: "系统凭据后端不可用，请引用环境变量" } : {}),
+                    ...(backend
+                      ? {}
+                      : {
+                          description: "系统凭据后端不可用，请引用环境变量",
+                          disabled: "系统凭据后端不可用，请引用环境变量",
+                        }),
                   },
                 ]}
                 onChange={(kind) => {
@@ -810,7 +809,7 @@ function McpForm({
               {error.message}
             </div>
           )}
-        <FormFooter reason="测试失败也可以保存">
+        <FormFooter>
           <Button disabled={busy} onClick={onCancel}>
             取消
           </Button>
@@ -849,7 +848,6 @@ function McpImport({
       <div className="dlg mcp-import" role="dialog" aria-label="从 JSON 导入">
         <div className="dh3">
           <b>从 JSON 导入</b>
-          <span>粘贴服务器 README 里给的配置片段</span>
         </div>
         <div className="db">
           <textarea

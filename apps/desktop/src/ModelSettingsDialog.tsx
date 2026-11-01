@@ -305,13 +305,7 @@ export function ModelSettingsDialog({
       >
         <div className="dh3">
           <b className="mono">{view.modelId}</b>
-          <span
-            title={
-              readonlyHint === undefined
-                ? "写入 providers.json 的 userModels，不影响其他服务商"
-                : undefined
-            }
-          >
+          <span>
             {readonlyHint ?? (
               <>
                 {providerId}
@@ -474,12 +468,7 @@ export function ModelSettingsDialog({
             {readonly || !effortEditable ? (
               <span className="ro">{scalarText(field.reasoningEffort.value)}</span>
             ) : (
-              <div
-                className="effs"
-                role="group"
-                aria-label={FIELD_LABELS.reasoningEffort}
-                title={reasoningOff ? "推理选「否」时不使用思考档位" : undefined}
-              >
+              <div className="effs" role="group" aria-label={FIELD_LABELS.reasoningEffort}>
                 <button
                   className={effortShown === null ? "on" : undefined}
                   disabled={reasoningOff}

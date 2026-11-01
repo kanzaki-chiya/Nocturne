@@ -107,6 +107,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
     name: "manual",
     entryPath: "C:/home/manual",
     missingDescription: true,
+    commandConflict: true,
     description: "",
     invocation: "user",
     catalogStatus: "omitted",
@@ -164,20 +165,28 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(screen.getByRole("columnheader", { name: "在 Nocturne 里" })).toBeTruthy();
   fireEvent.click(within(list).getByRole("button", { name: /alpha.*被覆盖/ }));
   expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText("被用户技能 alpha 覆盖").className).toContain("info");
+  const shadowBanner = screen.getByText("被用户技能 alpha 覆盖");
+  expect(shadowBanner.className).toContain("info");
+  expect(shadowBanner.querySelector("span")).toBeNull();
+  expect(screen.queryByText(/同名时用户层优先/)).toBeNull();
   expect(within(list).getByRole("button", { name: /alpha.*被覆盖/ }).textContent).toContain(
     "alpha",
   );
   fireEvent.click(within(list).getByRole("button", { name: /manual/ }));
-  expect(screen.getByText("缺少说明，模型看不到这个技能").className).toContain("warn");
+  const missingBanner = screen.getByText("缺少说明，模型看不到这个技能");
+  expect(missingBanner.className).toContain("warn");
+  expect(missingBanner.querySelector("span")).toBeNull();
+  expect(screen.queryByText(/下个会话起就会进入模型目录/)).toBeNull();
+  const conflictBanner = screen.getByText("与内置命令重名，斜杠不能调用");
+  expect(conflictBanner.className).toContain("warn");
+  expect(conflictBanner.querySelector("span")).toBeNull();
+  expect(screen.queryByText(/已经是内置命令/)).toBeNull();
   fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看 ›"));
   expect(screen.getByText("C:/home/bad/SKILL.md:3")).toBeTruthy();
   fireEvent.click(within(list).getByRole("button", { name: "alpha" }));
   fireEvent.click(screen.getByRole("switch"));
-  expect(await screen.findByRole("status")).toHaveProperty(
-    "textContent",
-    "✓ 已停用 alpha，进行中的会话本轮结束后生效",
-  );
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "✓ 已停用 alpha");
+  expect(screen.queryByText(/进行中的会话本轮结束后生效/)).toBeNull();
 });
 
 it("大小格只在有子目录时显示子目录数", async () => {
@@ -435,10 +444,8 @@ it("导入技能：选择文件夹→预检→改名/跳过→结果与停用", 
   });
   // 成功项可停用
   fireEvent.click(within(dialog).getByRole("button", { name: "停用" }));
-  expect(await screen.findByRole("status")).toHaveProperty(
-    "textContent",
-    "✓ 已导入并停用 alpha，进行中的会话本轮结束后生效",
-  );
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "✓ 已导入并停用 alpha");
+  expect(screen.queryByText(/进行中的会话本轮结束后生效/)).toBeNull();
   expect(f.calls.find((c) => c.method === "skills.setSkillEnabled")?.params).toMatchObject({
     name: "alpha",
     enabled: false,

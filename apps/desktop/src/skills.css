@@ -32,14 +32,6 @@
   padding: 10px 12px;
   font-weight: 500;
 }
-.skill-banner span {
-  display: block;
-  margin-top: 4px;
-  font-size: var(--fs-1);
-  font-weight: 400;
-  color: var(--a-muted);
-}
-.skill-banner code,
 .skill-warnings code {
   font-family: var(--mono);
 }

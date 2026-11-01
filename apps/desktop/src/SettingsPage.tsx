@@ -420,7 +420,6 @@ export function SettingsPage({
                           value: "",
                           label: "跟随默认",
                           tag: presetItem?.effective ?? "—",
-                          description: "不单独保存，使用更低层或内置的默认预设",
                         },
                         ...presetOptions(),
                       ]}
@@ -572,11 +571,7 @@ export function SettingsPage({
             )}
             {section === "general" && (
               <SettingsGroup title="普通对话">
-                <SettingsRow
-                  label="工作区"
-                  desc="换位置后，旧位置的对话仍显示在「对话」"
-                  error={errs("workspace")}
-                >
+                <SettingsRow label="工作区" error={errs("workspace")}>
                   <span className="val mono" title={workspace ?? ""}>
                     {workspace ?? "未就绪"}
                   </span>
@@ -611,7 +606,6 @@ export function SettingsPage({
                       {
                         value: "panel",
                         label: "Nocturne 面板",
-                        description: "在右侧面板只读查看，带行号定位",
                       },
                       { value: "system", label: "系统默认程序", description: "不带行号" },
                       ...(editors.vscode
@@ -974,7 +968,6 @@ function thresholdText(value: string | undefined, pruneLimit?: string): string {
 
 function Dialog({
   title,
-  sub,
   width,
   error,
   busy,
@@ -985,7 +978,6 @@ function Dialog({
   children,
 }: {
   title: string;
-  sub: string;
   width?: number;
   error: string | null;
   busy: boolean;
@@ -1006,7 +998,6 @@ function Dialog({
       >
         <div className="dh3">
           <b>{title}</b>
-          <span>{sub}</span>
         </div>
         <div className="db">
           {children}
@@ -1155,7 +1146,6 @@ function DefaultModelDialog({
   return (
     <Dialog
       title="默认模型与档位"
-      sub="对之后新建的会话生效"
       error={error}
       busy={busy}
       canSave={picked !== null}
@@ -1175,9 +1165,7 @@ function DefaultModelDialog({
       <Field
         label="思考档位"
         aside={
-          <small className="desc">
-            {levels.length === 0 ? "所选模型没有可用档位" : "可选值随所选模型变化"}
-          </small>
+          levels.length === 0 ? <small className="desc">所选模型没有可用档位</small> : undefined
         }
       >
         {levels.length > 0 && (
@@ -1236,7 +1224,6 @@ function ThresholdDialog({
   return (
     <Dialog
       title="压缩阈值"
-      sub="上下文用到这个比例或 token 数时自动压缩"
       width={440}
       error={error}
       busy={busy}
@@ -1254,16 +1241,12 @@ function ThresholdDialog({
       onClose={onClose}
       onSave={submitCurrent}
     >
-      <Field
-        label="摘要阈值"
-        htmlFor="th-val"
-        desc="填百分比（如 85%）或 token 数（如 120000）；留空保存即恢复默认"
-      >
+      <Field label="摘要阈值" htmlFor="th-val">
         <input
           id="th-val"
           className="input lg mono"
           value={value}
-          placeholder={effective ?? "如 85% 或 120000"}
+          placeholder={effective ?? "85% 或 120000"}
           autoFocus
           onChange={(e) => {
             setValue(e.target.value);
@@ -1273,11 +1256,7 @@ function ThresholdDialog({
           }}
         />
       </Field>
-      <Field
-        label="修剪上限"
-        htmlFor="th-prune"
-        desc="正整数 token（默认 200000），0 表示不设绝对上限；留空保存即恢复默认"
-      >
+      <Field label="修剪上限" htmlFor="th-prune">
         <input
           id="th-prune"
           className="input lg mono"
@@ -1317,7 +1296,6 @@ function RoleDialog({
   return (
     <Dialog
       title={label}
-      sub="选第一项清除设置"
       error={error}
       busy={busy}
       onClose={onClose}
@@ -1528,7 +1506,6 @@ function ReviewerDialog({
   return (
     <Dialog
       title="安全审查"
-      sub="smart 下除只读命令外的操作先交给审查器判断"
       width={600}
       error={error}
       busy={busy}
@@ -1599,10 +1576,7 @@ function ReviewerDialog({
                   }}
                 />
               </Field>
-              <Field
-                label="凭据"
-                desc={credKind === "stored" ? "密钥交给系统凭据存储，界面不留存" : undefined}
-              >
+              <Field label="凭据">
                 {seg(
                   "凭据",
                   credKind,
@@ -1648,11 +1622,7 @@ function ReviewerDialog({
                   />
                 )}
               </Field>
-              <Field
-                label="置信度阈值"
-                htmlFor="rv-conf"
-                aside={<small className="desc">可选，0–1</small>}
-              >
+              <Field label="置信度阈值" htmlFor="rv-conf">
                 <input
                   id="rv-conf"
                   className="input mono sm-w"
@@ -1665,11 +1635,7 @@ function ReviewerDialog({
               </Field>
             </>
           )}
-          <Field
-            label="额外交人"
-            htmlFor="rv-rules-ask"
-            aside={<small className="desc">自然语言，最多 {RULES_LIMIT} 字</small>}
-          >
+          <Field label="额外交人" htmlFor="rv-rules-ask">
             <textarea
               id="rv-rules-ask"
               className="textarea"
@@ -1677,18 +1643,12 @@ function ReviewerDialog({
               maxLength={RULES_LIMIT}
               spellCheck={false}
               value={rulesAsk}
-              placeholder="例如：任何 docker 或 kubectl 命令都交给我确认"
               onChange={(e) => {
                 setRulesAsk(e.target.value);
               }}
             />
           </Field>
-          <Field
-            label="额外放行"
-            htmlFor="rv-rules-allow"
-            aside={<small className="desc">自然语言，最多 {RULES_LIMIT} 字</small>}
-            desc="两段原样交给审查器，不改变只读白名单，也不能放行直接交给你确认的命令"
-          >
+          <Field label="额外放行" htmlFor="rv-rules-allow">
             <textarea
               id="rv-rules-allow"
               className="textarea"
@@ -1696,7 +1656,6 @@ function ReviewerDialog({
               maxLength={RULES_LIMIT}
               spellCheck={false}
               value={rulesAllow}
-              placeholder="例如：在本仓库里运行 pnpm install 和 pnpm test 可以直接放行"
               onChange={(e) => {
                 setRulesAllow(e.target.value);
               }}
@@ -1774,7 +1733,6 @@ function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: 
     <Field
       label="样例检查"
       className="samples"
-      aside={<small className="desc">用已保存的审查器配置跑内置样例</small>}
       error={run.state === "error" ? `测试失败：${run.message}` : undefined}
     >
       <div className="srun">
@@ -1851,9 +1809,7 @@ function AgentBrowserRows({
       const result = await host.setEnabled(next);
       prefs.update({ agentBrowserEnabled: result.enabled });
       setEnabled(result.enabled);
-      onToast(
-        result.enabled ? "已开启；开启后只对新的后台进程生效" : "已关闭；已有绑定和标签已撤销",
-      );
+      onToast(result.enabled ? "已开启" : "已关闭；已有绑定和标签已撤销");
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -1874,13 +1830,7 @@ function AgentBrowserRows({
       </SettingsRow>
       {confirming && (
         <div className="agent-browser-risk" role="alertdialog" aria-label="启用面板浏览器">
-          <p>agent 会读取网页文字、截图并点击输入。网页内容不可信，可能诱导它操作其他页面。</p>
-          <ul>
-            <li>标签只属于发起它的会话；你可以随时接管、交回或关闭。</li>
-            <li>点网页或按「接管」会立即撤销 agent 的控制权。</li>
-            <li>下载会被取消，脚本对话框会转交给你处理。</li>
-            <li>截图会作为工具结果附件进入模型上下文。</li>
-          </ul>
+          <p>网页内容不可信，可能诱导它操作其他页面。</p>
           <div className="agent-browser-risk-actions">
             <Button
               variant="ghost"

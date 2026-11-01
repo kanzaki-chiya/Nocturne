@@ -399,12 +399,10 @@ export function UsageView({
                 <div>
                   <span>累计 tokens</span>
                   <strong>{formatUsageTokens(tokenSum)}</strong>
-                  <small>输入 + 输出 tokens</small>
                 </div>
                 <div>
                   <span>预估费用</span>
                   <strong>{formatUsageCost(stats.totals.cost.total)}</strong>
-                  <small>未计价模型不计入</small>
                 </div>
                 <div>
                   <span>缓存命中率</span>
@@ -412,7 +410,6 @@ export function UsageView({
                     {cacheRate.toFixed(1)}
                     <em>%</em>
                   </strong>
-                  <small>读取 / 输入 tokens</small>
                 </div>
                 <div>
                   <span>会话 / 轮</span>
@@ -606,7 +603,7 @@ export function UsageView({
                 {stats.unpricedModels.length > 0 && (
                   <p className="usage-notice">
                     {stats.unpricedModels.map((m) => `${m.provider}/${m.model}`).join("、")}{" "}
-                    未声明价格。在配置文件的模型条目里写 pricing。
+                    未声明价格
                   </p>
                 )}
               </SettingsGroup>

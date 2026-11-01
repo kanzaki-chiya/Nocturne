@@ -131,7 +131,7 @@ export function SubagentProfileEditor({
       )}
       {readonly && <p className="fine">请在来源配置文件中编辑此档位。</p>}
       {creating && (
-        <Field label="名称" desc={<>小写字母、数字和 -；创建后不可改，default 为保留名。</>}>
+        <Field label="名称">
           <input
             className="input lg"
             aria-label="档位名称"
@@ -212,7 +212,6 @@ export function SubagentProfileEditor({
             set({ effort: (effort || undefined) as ReasoningEffort | undefined });
           }}
         />
-        <small>继承或指定的强度会按子模型就近降档。</small>
       </Field>
       <Field label="工具集上限">
         <SegmentedControl

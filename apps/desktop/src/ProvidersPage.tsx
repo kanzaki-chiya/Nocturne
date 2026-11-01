@@ -770,9 +770,6 @@ function ProviderDetail({
       {off && (
         <div className="pbanner">
           已停用
-          <span>
-            这个服务商的模型不会出现在任何模型菜单里；用它的会话需要先换模型才能继续。配置和密钥都保留。
-          </span>
           <Button disabled={busy !== null} onClick={() => void applyProviderEnabled(true)}>
             重新启用
           </Button>
@@ -1171,7 +1168,6 @@ function RekeyDialog({
       <div className="dlg narrow" role="dialog" aria-label={`换密钥 · ${providerId}`}>
         <div className="dh3">
           <b>换密钥（{providerId}）</b>
-          <span>新密钥交给系统凭据存储，界面不留存。</span>
         </div>
         <div className="db">
           <input
@@ -1443,7 +1439,6 @@ function ProviderEditDialog({
       <div className="dlg" role="dialog" aria-label={`编辑 ${p.id}`}>
         <div className="dh3">
           <b>编辑 {p.id}</b>
-          <span>服务商 ID 不可修改；密钥在详情页「换密钥」修改。</span>
         </div>
         {loadErr !== null ? (
           <div className="errt">{loadErr}</div>
@@ -1453,17 +1448,12 @@ function ProviderEditDialog({
           </div>
         ) : (
           <div className="db">
-            <Field
-              label="服务商 ID"
-              htmlFor="edit-provider-id"
-              desc="会话、默认模型都按它引用，不可修改"
-            >
+            <Field label="服务商 ID" htmlFor="edit-provider-id">
               <input id="edit-provider-id" className="input lg mono" value={p.id} disabled />
             </Field>
             <Field
               label="显示名称"
               htmlFor="edit-provider-name"
-              aside={<small className="desc">可选；列表与菜单里显示</small>}
               error={fieldErr?.field === "displayName" ? fieldErr.message : undefined}
             >
               <input
@@ -1493,9 +1483,7 @@ function ProviderEditDialog({
             <Field
               label="服务地址"
               htmlFor="edit-provider-url"
-              aside={
-                <small className="desc">{type === "anthropic" ? "留空使用官方端点" : "必填"}</small>
-              }
+              aside={type === "anthropic" ? undefined : <small className="desc">必填</small>}
               error={fieldErr?.field === "baseURL" ? fieldErr.message : undefined}
             >
               <input
@@ -1511,7 +1499,6 @@ function ProviderEditDialog({
             </Field>
             <Field
               label="自定义请求头"
-              aside={<small className="desc">可选；每个请求都携带</small>}
               error={fieldErr?.field === "headers" ? fieldErr.message : undefined}
             >
               {headers.map((row, i) => (
@@ -1567,7 +1554,6 @@ function ProviderEditDialog({
             <Field
               label="会话标识请求头"
               htmlFor="edit-provider-session-header"
-              aside={<small className="desc">可选；上游按此请求头区分会话</small>}
               error={fieldErr?.field === "sessionHeader" ? fieldErr.message : undefined}
             >
               <input
@@ -1580,7 +1566,7 @@ function ProviderEditDialog({
                 }}
               />
             </Field>
-            {endpointChanged ? (
+            {endpointChanged && (
               <div className="fetch" data-testid="edit-probe">
                 {probe.kind === "idle" && (
                   <div className="fl">
@@ -1633,8 +1619,6 @@ function ProviderEditDialog({
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="desc">地址与协议未变化，模型列表保持现状。</div>
             )}
             {commitErr !== null && <div className="errt">{commitErr}</div>}
           </div>
@@ -2129,8 +2113,8 @@ function PresetForm({
             desc={
               fieldErr.credential === undefined
                 ? apiKeyMethod?.available === false
-                  ? `${setup.credential.backend.label}不可用，改为读取环境变量；配置里只记变量名`
-                  : `${hintOf(envMethod.hint)}；配置里只记变量名`
+                  ? `${setup.credential.backend.label}不可用，改为读取环境变量`
+                  : hintOf(envMethod.hint)
                 : undefined
             }
           >
@@ -2150,11 +2134,7 @@ function PresetForm({
           </Field>
         )}
         {mode === "login" && loginMethod !== undefined && (
-          <Field
-            label={loginMethod.label}
-            aside={<small className="desc">在浏览器完成授权后回到这里继续</small>}
-            error={loginErr ?? undefined}
-          >
+          <Field label={loginMethod.label} error={loginErr ?? undefined}>
             {draftLogin.kind === "done" ? (
               <div className="done">
                 <b>✓</b>

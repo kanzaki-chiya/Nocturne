@@ -844,8 +844,8 @@ describe("编辑服务商（U-07）", () => {
     expect((screen.getByLabelText("请求头 1 名称") as HTMLInputElement).value).toBe("X-Team");
     expect((screen.getByLabelText("请求头 1 值") as HTMLInputElement).value).toBe("core");
     expect((screen.getByLabelText("会话标识请求头") as HTMLInputElement).value).toBe("X-Session");
-    expect(dialog.textContent).toContain("密钥在详情页「换密钥」修改");
-    expect(dialog.textContent).toContain("地址与协议未变化，模型列表保持现状");
+    expect(dialog.textContent).not.toContain("密钥在详情页「换密钥」修改");
+    expect(dialog.textContent).not.toContain("地址与协议未变化，模型列表保持现状");
 
     // 改显示名后保存（地址未变 → 不需要探测）
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "新名字" } });

@@ -316,7 +316,10 @@ describe("模型行展开", () => {
     const other = document.querySelectorAll<HTMLElement>(".usage-detail")[1];
     expect(other?.querySelector(".usage-basis")?.textContent).toBe("没有带计时的请求");
     expect(other?.querySelector(".usage-chart-empty")?.textContent).toBe(
-      "这个范围内没有带计时的请求（旧版本记录不含计时）",
+      "这个范围内没有带计时的请求",
+    );
+    expect(other?.querySelector(".usage-chart-empty")?.textContent).not.toContain(
+      "旧版本记录不含计时",
     );
   });
 });
@@ -391,7 +394,10 @@ describe("性能图", () => {
   it("0 个点显示空状态", () => {
     render(<PerformanceChart points={[]} granularity="day" />);
     expect(document.querySelector(".usage-chart-empty")?.textContent).toBe(
-      "这个范围内没有带计时的请求（旧版本记录不含计时）",
+      "这个范围内没有带计时的请求",
+    );
+    expect(document.querySelector(".usage-chart-empty")?.textContent).not.toContain(
+      "旧版本记录不含计时",
     );
     expect(document.querySelector("svg")).toBeNull();
   });

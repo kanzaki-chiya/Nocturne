@@ -97,6 +97,9 @@ describe("desktop usage", () => {
     expect(overview?.textContent).toContain("$10.00");
     expect(overview?.textContent).toContain("30 轮，子代理 4 轮");
     expect(overview?.textContent).toContain("2.0分钟");
+    expect(overview?.textContent).not.toContain("输入 + 输出 tokens");
+    expect(overview?.textContent).not.toContain("未计价模型不计入");
+    expect(overview?.textContent).not.toContain("读取 / 输入 tokens");
     fireEvent.click(screen.getByRole("button", { name: "7 天" }));
     await waitFor(() =>
       expect(server.calls.filter((c) => c.method === "runtime.usageStats").at(-1)?.params).toEqual({
@@ -135,7 +138,8 @@ describe("desktop usage", () => {
       "按声明价格估算，以服务商账单为准。",
     );
     expect(document.querySelector(".usage-day-detail")?.textContent).toBe("");
-    expect(screen.getByText(/在配置文件的模型条目里写 pricing/).tagName).toBe("P");
+    expect(screen.getByText("p/unpriced 未声明价格").tagName).toBe("P");
+    expect(screen.queryByText(/在配置文件的模型条目里写 pricing/)).toBeNull();
     expect(screen.queryByRole("link", { name: /pricing/ })).toBeNull();
   });
   it("renders 365 heatmap days, fades out-of-range dates, supports hover, pin and cost coloring", async () => {

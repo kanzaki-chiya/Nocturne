@@ -136,11 +136,7 @@ export function LoginWaitCard({
             type="text"
             spellCheck={false}
             autoFocus
-            placeholder={
-              login.manualInput === "callback-url"
-                ? "回调失败或远程使用时，把浏览器地址栏的完整地址粘贴到这里"
-                : "把浏览器显示的授权码粘贴到这里"
-            }
+            placeholder={manualLabel}
             aria-label={manualLabel}
             value={manualText}
             disabled={submitting}

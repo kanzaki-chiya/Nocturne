@@ -21,7 +21,7 @@ export interface BackendLogTarget {
   /** 项目名或「对话（常驻）」「外壳」 */
   label: string;
   /** 工作区路径（选项里的说明行） */
-  detail: string;
+  detail?: string | undefined;
 }
 
 /** Tauri 命令拒绝的是 CommandError { code, message } 对象，不一定是 Error 实例 */
@@ -112,7 +112,7 @@ export function BackendLogsPage({
                 options={backends.map((b) => ({
                   value: String(b.backendId),
                   label: b.label,
-                  description: b.detail,
+                  ...(b.detail !== undefined && b.detail !== "" ? { description: b.detail } : {}),
                 }))}
                 onChange={setPicked}
                 placeholder="没有运行中的后台"
@@ -133,9 +133,7 @@ export function BackendLogsPage({
           }
         />
         <div className="logpage sbody">
-          {backends.length === 0 && (
-            <EmptyState>当前没有运行中的后台，打开一个会话后再来看。</EmptyState>
-          )}
+          {backends.length === 0 && <EmptyState>当前没有运行中的后台</EmptyState>}
           {error !== null && <div className="logerr">{error}</div>}
           {current !== undefined && lines !== null && lines.length === 0 && error === null && (
             <EmptyState>
@@ -143,7 +141,7 @@ export function BackendLogsPage({
                 ? "暂无记录"
                 : current.backendId === SHELL_LOG_ID
                   ? "外壳暂无诊断输出。"
-                  : "该后台暂无 stderr 输出；已退出后台的最后几行日志显示在崩溃横幅里。"}
+                  : "该后台暂无 stderr 输出"}
             </EmptyState>
           )}
           {lines !== null && lines.length > 0 && <pre className="logview">{lines.join("\n")}</pre>}

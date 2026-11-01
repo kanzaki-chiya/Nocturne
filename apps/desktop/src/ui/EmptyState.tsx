@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export interface EmptyStateProps {
   /** 一句话说明当前为空 */
-  children: ReactNode;
+  children?: ReactNode;
   /** 主操作（可选） */
   action?: ReactNode;
   /** inline：行内空状态（`.inline-empty`，表格、分组里）；默认整页（`.empty`） */
@@ -21,7 +21,9 @@ export function EmptyState({ children, action, inline = false }: EmptyStateProps
   }
   return (
     <div className="empty">
-      <div>{children}</div>
+      {children !== undefined && children !== null && children !== false && children !== "" && (
+        <div>{children}</div>
+      )}
       {action}
     </div>
   );

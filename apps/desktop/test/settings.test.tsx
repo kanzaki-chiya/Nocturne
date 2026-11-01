@@ -497,8 +497,8 @@ describe("SettingsPage", () => {
       const allow = screen.getByLabelText("额外放行");
       expect(ask.tagName).toBe("TEXTAREA");
       expect(allow.tagName).toBe("TEXTAREA");
-      expect(ask.getAttribute("placeholder")).toMatch(/^例如：/);
-      expect(allow.getAttribute("placeholder")).toMatch(/^例如：/);
+      expect(ask.getAttribute("placeholder")).toBeNull();
+      expect(allow.getAttribute("placeholder")).toBeNull();
       expect(ask).toHaveProperty("value", "任何 ssh 命令");
       fireEvent.change(ask, { target: { value: "  任何 docker 命令  " } });
       fireEvent.change(allow, { target: { value: "运行 pnpm test" } });
@@ -1081,7 +1081,10 @@ describe("面板浏览器（常规 › 执行）", () => {
     const sw = screen.getByRole("switch", { name: "面板浏览器" });
     expect(sw.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(sw);
-    expect(screen.getByRole("alertdialog", { name: "启用面板浏览器" })).toBeTruthy();
+    const dialog = screen.getByRole("alertdialog", { name: "启用面板浏览器" });
+    expect(within(dialog).getByText("网页内容不可信，可能诱导它操作其他页面。")).toBeTruthy();
+    expect(dialog.querySelector("ul")).toBeNull();
+    expect(within(dialog).queryByText(/agent 会读取网页文字/)).toBeNull();
     expect(host.setEnabled).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -1091,13 +1094,15 @@ describe("面板浏览器（常规 › 执行）", () => {
     server.close();
   });
 
-  it("确认启用后记下风险已读，并以 toast 提示开启后只对新的后台进程生效", async () => {
+  it("确认启用后记下风险已读，并以 toast 提示已开启", async () => {
     const host = browserHost();
     const { server, prefs, storage } = await mount(host);
     const sw = screen.getByRole("switch", { name: "面板浏览器" });
     fireEvent.click(sw);
     fireEvent.click(screen.getByRole("button", { name: "仍然启用" }));
-    expect((await screen.findByRole("status")).textContent).toContain("开启后只对新的后台进程生效");
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("已开启");
+    expect(status.textContent).not.toContain("开启后只对新的后台进程生效");
     expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(host.enabled).toEqual([true]);
     expect(prefs.get().agentBrowserEnabled).toBe(true);

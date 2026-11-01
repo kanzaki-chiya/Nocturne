@@ -330,7 +330,7 @@ export function PerformanceChart({
         </div>
       </div>
       {n === 0 ? (
-        <div className="usage-chart-empty">这个范围内没有带计时的请求（旧版本记录不含计时）</div>
+        <div className="usage-chart-empty">这个范围内没有带计时的请求</div>
       ) : (
         <div className="usage-chart" ref={setBox}>
           <svg

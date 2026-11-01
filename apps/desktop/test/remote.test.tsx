@@ -77,6 +77,8 @@ it("未登记只查询 describe，显示说明和邀请输入，不调用写方�
   const h = harness();
   const view = render(<RemotePage client={h.client} />);
   await screen.findByPlaceholderText("粘贴邀请（nocturne-invite:…）");
+  expect(screen.getByText("向中继管理员索取一次性邀请")).toBeTruthy();
+  expect(screen.queryByText(/部署说明将随中继提供/)).toBeNull();
   expect(screen.getByText("中继只转发密文，看不到你的对话、代码或命令。你需要信任谁")).toBeTruthy();
   view.unmount();
   expect(h.calls.map((c) => c.method)).toEqual(["remote.describe"]);
@@ -137,6 +139,10 @@ it("配对对话框存在二维码和倒计时，收到 paired 显示成功并�
     />,
   );
   expect(screen.getByRole("img", { name: "手机配对二维码" })).toBeTruthy();
+  expect((screen.getByLabelText("配对链接") as HTMLInputElement).value).toBe(
+    "https://relay.example/#pair=test",
+  );
+  expect(screen.queryByText(/已打开过手机页面/)).toBeNull();
   expect(screen.getByText(/2:00/)).toBeTruthy();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
@@ -253,8 +259,8 @@ it("外部 Agent 配对弹窗显示名称、指纹、进程信息与权限说明
   expect(screen.getByText("a1b2:c3d4:e5f6:0011")).toBeTruthy();
   expect(screen.getByText(/PID 9527/)).toBeTruthy();
   expect(
-    screen.getByText("可运行的 agent 能往任何会话发消息，按该会话自己的权限预设执行"),
-  ).toBeTruthy();
+    screen.queryByText("可运行的 agent 能往任何会话发消息，按该会话自己的权限预设执行"),
+  ).toBeNull();
 
   fireEvent.click(screen.getByRole("combobox", { name: "新建会话权限上限" }));
   fireEvent.click(screen.getByRole("option", { name: /自动编辑 \(auto-edit\)/ }));
@@ -367,9 +373,6 @@ it("设置 › 远程页在外部 agent 管道未启动时显示状态与原因�
       "本机 agent 管道未启动：另一个 Nocturne 后台已占用该管道，外部 agent 会连到那一个",
     ),
   ).toBeTruthy();
-  expect(
-    screen.queryByText(
-      "还没有已批准的外部 Agent。外部工具通过 nctrn mcp 首次连接时将弹窗请求确认。",
-    ),
-  ).toBeNull();
+  expect(screen.queryByText("还没有已批准的外部 Agent")).toBeNull();
+  expect(screen.queryByText(/外部工具通过 nctrn mcp 首次连接时将弹窗请求确认/)).toBeNull();
 });
