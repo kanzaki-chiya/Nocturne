@@ -175,23 +175,23 @@ describe("Composer 文本与历史", () => {
     });
   });
 
-  it("运行中 Enter 插话、Alt+Enter 排队，■ 与发送键并存；Esc 中断", async () => {
+  it("运行中 Enter 排队、Alt+Enter 插话，■ 与发送键并存；Esc 中断", async () => {
     const onInterrupt = vi.fn();
     const onSubmit = vi.fn(async () => true);
     render(<Composer {...props({ running: true, onInterrupt, onSubmit })} />);
     const field = input("下一条草稿");
-    // ADR-0070：运行中 Enter = 插话
+    // ADR-0070：运行中 Enter = 排队
     fireEvent.keyDown(field, { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenLastCalledWith({ text: "下一条草稿", attachments: [] }, "steer");
+    expect(onSubmit).toHaveBeenLastCalledWith({ text: "下一条草稿", attachments: [] }, "queue");
     await waitFor(() => {
       expect(field.value).toBe("");
     });
-    // Alt+Enter = 排队
-    fireEvent.change(field, { target: { value: "排队这条" } });
+    // Alt+Enter = 插话
+    fireEvent.change(field, { target: { value: "插话这条" } });
     fireEvent.keyDown(field, { key: "Enter", altKey: true });
     expect(onSubmit).toHaveBeenCalledTimes(2);
-    expect(onSubmit).toHaveBeenLastCalledWith({ text: "排队这条", attachments: [] }, "queue");
+    expect(onSubmit).toHaveBeenLastCalledWith({ text: "插话这条", attachments: [] }, "steer");
     await waitFor(() => {
       expect(field.value).toBe("");
     });

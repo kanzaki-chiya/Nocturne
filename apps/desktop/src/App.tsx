@@ -804,7 +804,7 @@ export function App({ host }: { host: DesktopHost }) {
     await Promise.all(
       input.attachments.map((attachment) => images.register(attachment.data, attachment.mimeType)),
     );
-    // ADR-0070：Turn 运行中 Enter 插话、Alt+Enter 排队；空闲时都是普通发送
+    // ADR-0070：Turn 运行中 Enter 排队、Alt+Enter 插话；空闲时都是普通发送
     await conversations.submitInput(input, mode ?? "steer", create);
     setSelectedId(conversations.selectedId);
     await refresh();

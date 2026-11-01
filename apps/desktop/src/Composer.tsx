@@ -765,7 +765,7 @@ export function Composer({
         return;
       }
     }
-    // Alt+Enter（ADR-0070）：运行中提交排队；空闲时与 Enter 相同
+    // Alt+Enter（ADR-0070）：运行中直接插话；空闲时与 Enter 相同
     if (
       event.key === "Enter" &&
       event.altKey &&
@@ -781,7 +781,7 @@ export function Composer({
         return;
       }
       event.preventDefault();
-      void submit(running ? "queue" : undefined);
+      void submit(running ? "steer" : undefined);
       return;
     }
     if (event.key === "Enter" && plain) {
@@ -793,7 +793,7 @@ export function Composer({
         return;
       }
       if (parsed?.kind === "skill" || parsed?.kind === "agent") {
-        void submit(running ? "steer" : undefined);
+        void submit(running ? "queue" : undefined);
         return;
       }
       if (popup !== null && flatRows.length > 0) {
@@ -806,7 +806,7 @@ export function Composer({
         setEnterHint(parsed.hint);
         return;
       }
-      void submit(running ? "steer" : undefined);
+      void submit(running ? "queue" : undefined);
       return;
     }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -1021,7 +1021,7 @@ export function Composer({
     </IconButton>
   );
 
-  // 运行中保留中断键 ■，输入非空时旁边再出现发送键：Enter 插话，Alt+Enter 排队
+  // 运行中保留中断键 ■，输入非空时旁边再出现发送键：Enter 排队，Alt+Enter 插话
   const sendButton = (
     <>
       {running && (
@@ -1046,7 +1046,7 @@ export function Composer({
           aria-label="发送"
           title={running ? "发送" : "发送（Enter）"}
           onClick={() => {
-            void submit(running ? "steer" : undefined);
+            void submit(running ? "queue" : undefined);
           }}
         >
           ↑
