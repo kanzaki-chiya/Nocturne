@@ -7,9 +7,11 @@ import {
   todoItemsFromCompletion,
   effectiveEvents,
   reduceGoal,
+  reducePlan,
   rewindNote,
   type DurableEvent,
   type GoalState,
+  type PlanConfig,
   type TodoItem,
   type Usage,
 } from "../protocol/index.js";
@@ -67,9 +69,11 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   // ADR-0076 §2：目标按全部事件推进（回退不撤销），Turn 是否进行中单独跟踪
   let goal: GoalState | undefined;
   let goalTurnOpen = false;
+  let plan: PlanConfig | undefined;
 
   for (const event of events) {
     goal = reduceGoal(goal, event, goalTurnOpen);
+    plan = reducePlan(plan, event);
     if (event.type === "turn.started") goalTurnOpen = true;
     if (event.type === "turn.completed") goalTurnOpen = false;
     const active = effective.has(event.seq);
@@ -290,6 +294,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     history,
     ...(Object.keys(mcpAvailability).length > 0 ? { mcpAvailability } : {}),
     ...(goal !== undefined ? { goal } : {}),
+    ...(plan !== undefined ? { plan } : {}),
     todos,
     usage,
     lastSeq,

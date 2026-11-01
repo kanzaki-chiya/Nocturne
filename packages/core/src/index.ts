@@ -221,6 +221,7 @@ import {
   GOAL_MAX_ROUNDS,
   isWorkModeName,
   type GoalStatus,
+  type PlanConfig,
   type WorkModeName,
   type WorkModeSnapshot,
 } from "./protocol/index.js";
@@ -229,6 +230,7 @@ import { writeSpill } from "./tools/spill.js";
 import {
   goalContinuation,
   goalResumeBody,
+  planApprovedBody,
   workModeBlock,
   workModeBody,
 } from "./work-modes/index.js";
@@ -535,6 +537,14 @@ export interface RuntimeSession {
    * 没有目标时 `invalid_command`。
    */
   resumeGoal(): Promise<void>;
+  /**
+   * 批准计划（ADR-0076 §5）：恢复进入计划模式前的预设（原本只读时用 default）、
+   * 退出计划模式，并开新 Turn 按计划实施，在它结束时返回。会话忙时
+   * `session_busy`；不在计划模式时 `invalid_command`。
+   */
+  approvePlan(): Promise<void>;
+  /** 放弃计划（ADR-0076 §5）：恢复进入前的预设并退出计划模式，不开 Turn */
+  cancelPlan(): Promise<void>;
   /**
    * 待发输入的当前快照。待发输入是临时状态、不写日志，`input.pending` 不回放，
    * 新附加的客户端用它在订阅后对齐（view.md 第 6 节）。
@@ -2781,9 +2791,31 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       appended: [{ type: "text", text: workModeBlock("goal", body) }],
       workMode: { name: "goal", body },
     });
+    // ── 计划模式（ADR-0076 §5）：预设与 plan 写在同一条 config_changed ──
+    const writePlanPreset = async (preset: string, plan: PlanConfig | null): Promise<void> => {
+      const name = isPermissionPresetName(preset) ? preset : "default";
+      await session.emit("session.config_changed", { permissionPreset: name, plan });
+      policy = buildPolicy(name);
+      warnMissingReviewer();
+    };
+    /** 退出计划模式时恢复的预设：进入前就是只读时改用 default */
+    const planExitPreset = (plan: PlanConfig): string =>
+      plan.restorePreset === "read-only" ? "default" : plan.restorePreset;
+    const requirePlan = (): PlanConfig => {
+      const plan = session.state().plan;
+      if (plan === undefined) throw new RuntimeCommandError("invalid_command", "不在计划模式");
+      return plan;
+    };
     /** 执行方式在新 Turn 开始前的副作用（§1）：排队取出的输入同样走这里 */
     const applyWorkModeStart = async (prepared: PreparedInput): Promise<void> => {
       const started = workModeStarts.has(prepared) ? prepared.workMode?.name : undefined;
+      if (started === "plan") {
+        // 已在计划模式时保留最初要恢复的预设
+        const state = session.state();
+        const restorePreset =
+          state.plan?.restorePreset ?? (state.config.permissionPreset || "default");
+        await writePlanPreset("read-only", { restorePreset });
+      }
       if (started === "goal") {
         const objective = prepared.content
           .flatMap((block) => (block.type === "text" ? [block.text] : []))
@@ -3418,6 +3450,29 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) return;
         const ac = new AbortController();
         await startTurns(ac, () => Promise.resolve(goalInput(goalResumeBody(goal.objective))));
+      },
+      async approvePlan() {
+        assertUsable();
+        assertMainSession();
+        if (busy() || compactController !== undefined)
+          throw new RuntimeCommandError("session_busy", "会话正忙，不能批准计划");
+        const plan = requirePlan();
+        await writePlanPreset(planExitPreset(plan), null);
+        const body = planApprovedBody();
+        const ac = new AbortController();
+        await startTurns(ac, () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "批准" }],
+            appended: [{ type: "text", text: workModeBlock("plan", body) }],
+            workMode: { name: "plan", body },
+          }),
+        );
+      },
+      async cancelPlan() {
+        assertUsable();
+        assertMainSession();
+        const plan = requirePlan();
+        await writePlanPreset(plan.restorePreset, null);
       },
       pendingInputs: () => pendingInputStore.snapshot(),
       async setModel(input) {

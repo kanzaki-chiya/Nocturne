@@ -435,7 +435,9 @@ function mount(
       | "images"
       | "fileLinks"
       | "onResubmit"
+      | "onApprovePlan"
       | "onFork"
+      | "busy"
       | "hidePersistentPermissions"
       | "openWarnings"
       | "scheduleSource"
@@ -593,6 +595,61 @@ describe("回复与代码复制", () => {
     mount(view);
     fireEvent.click(screen.getByRole("button", { name: "复制回复" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "复制失败");
+  });
+  it("计划模式（ADR-0076 §5、§7）：用户消息点命令名展开说明块；批准按钮只在计划模式且空闲时出现在最后一条助手消息下", () => {
+    const onApprovePlan = vi.fn();
+    const view = createSessionView();
+    view.plan = { restorePreset: "default" };
+    view.entries = [
+      {
+        kind: "user",
+        key: "u1",
+        seq: 1,
+        turnId: "t1",
+        content: [
+          { type: "text", text: "重构登录" },
+          { type: "text", text: '<work-mode name="plan">\n说明正文\n</work-mode>' },
+        ],
+        workMode: { name: "plan", body: "说明正文" },
+        attachments: [],
+      },
+      assistant({ key: "a1", turnId: "t1", messageId: "m1", text: "# 计划初稿" }),
+      {
+        kind: "user",
+        key: "u2",
+        seq: 3,
+        turnId: "t2",
+        content: [{ type: "text", text: "补充一步" }],
+        attachments: [],
+      },
+      assistant({ key: "a2", turnId: "t2", messageId: "m2", text: "# 计划二稿" }),
+    ];
+    const rendered = mount(view, { onApprovePlan });
+    const modeButton = screen.getByRole("button", { name: "/plan" });
+    expect(rendered.container.querySelector(".mode-body")).toBeNull();
+    fireEvent.click(modeButton);
+    expect(rendered.container.querySelector(".mode-body")?.textContent).toBe("说明正文");
+
+    const approveButton = screen.getByRole("button", { name: "批准" });
+    expect(approveButton.closest("article")?.textContent).toContain("计划二稿");
+    fireEvent.click(approveButton);
+    expect(onApprovePlan).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(
+      <Conversation
+        view={view}
+        {...conversationProps(rendered)}
+        onApprovePlan={onApprovePlan}
+        busy
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
+
+    view.plan = undefined;
+    rendered.rerender(
+      <Conversation view={view} {...conversationProps(rendered)} onApprovePlan={onApprovePlan} />,
+    );
+    expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
   });
 });
 

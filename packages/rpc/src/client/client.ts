@@ -214,6 +214,10 @@ export interface RpcSession {
   stopGoal(): Promise<void>;
   /** 继续目标；空闲时开新 Turn，结束时返回（ADR-0076） */
   resumeGoal(): Promise<void>;
+  /** 批准计划；开新 Turn，结束时返回（ADR-0076） */
+  approvePlan(): Promise<void>;
+  /** 放弃计划（ADR-0076） */
+  cancelPlan(): Promise<void>;
   /** 待发输入快照（`input.pending` 是临时事件，订阅后用它对齐） */
   pendingInputs(): Promise<PendingInputsSnapshot>;
   /** 中断运行中的 Turn（通知，无应答）；submit 随后以 aborted 返回 */
@@ -785,6 +789,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       resumeGoal: async () => {
         await call("session.resumeGoal", p);
+      },
+      approvePlan: async () => {
+        await call("session.approvePlan", p);
+      },
+      cancelPlan: async () => {
+        await call("session.cancelPlan", p);
       },
       pendingInputs: () => call("session.pendingInputs", p),
       interrupt: () => {

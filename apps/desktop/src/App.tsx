@@ -857,17 +857,26 @@ export function App({ host }: { host: DesktopHost }) {
     }
     const active = conversations.selected;
     if (active === undefined) throw new Error("请先打开会话");
-    if (parsed.name === "/goal") {
-      // ADR-0076 §7：/goal 看状态，/goal stop|resume 停止或继续
+    if (parsed.name === "/goal" || parsed.name === "/plan") {
+      // ADR-0076 §7：/goal 与 /plan 的无任务子命令
       const action = parseWorkModeSlash(line);
       if (action?.kind !== "action") return false;
       if (action.action === "goal-status") {
         setCommandOutput(goalStatusLines(active.view.goal, Date.now()).join("\n"));
         return true;
       }
-      if (active.view.goal === undefined) throw new Error("没有目标");
-      if (action.action === "goal-stop") await active.session.stopGoal();
-      else conversations.resumeGoal();
+      if (action.action === "goal-stop" || action.action === "goal-resume") {
+        if (active.view.goal === undefined) throw new Error("没有目标");
+        if (action.action === "goal-stop") await active.session.stopGoal();
+        else conversations.resumeGoal();
+        return true;
+      }
+      if (active.view.plan === undefined) throw new Error("不在计划模式");
+      if (action.action === "plan-cancel") await active.session.cancelPlan();
+      else {
+        if (conversationStatus(active) !== "idle") throw new Error("会话正忙，不能批准计划");
+        conversations.approvePlan();
+      }
       return true;
     }
     const servers = await active.session.mcpServers();
@@ -1490,6 +1499,9 @@ export function App({ host }: { host: DesktopHost }) {
                 selected={selected}
                 running={conversationStatus(active) !== "idle"}
                 onResubmit={resubmit}
+                onApprovePlan={() => {
+                  conversations.approvePlan();
+                }}
                 turnChanges={active.turnChanges}
                 onRewindFiles={(seq) => conversations.rewindFiles(seq)}
                 loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
@@ -1774,6 +1786,7 @@ interface SessionPaneProps {
   selected: SessionSummary | undefined;
   running: boolean;
   onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  onApprovePlan: () => void;
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;
   loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
@@ -1838,6 +1851,7 @@ function SessionPane({
   selected,
   running,
   onResubmit,
+  onApprovePlan,
   turnChanges,
   onRewindFiles,
   loadChangeDiff,
@@ -1940,6 +1954,7 @@ function SessionPane({
         busy={running}
         scheduleSource={scheduleSource}
         onResubmit={onResubmit}
+        onApprovePlan={onApprovePlan}
         turnChanges={turnChanges}
         onRewindFiles={onRewindFiles}
         loadChangeDiff={loadChangeDiff}

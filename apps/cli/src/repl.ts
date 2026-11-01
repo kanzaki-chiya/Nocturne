@@ -661,11 +661,19 @@ export async function runRepl(
             prompt();
             return;
           }
-          const stop = work.action === "goal-stop";
-          busy = !stop;
-          activeTurn = (stop ? session.stopGoal() : session.resumeGoal())
+          const opensTurn = work.action === "goal-resume" || work.action === "plan-approve";
+          busy = opensTurn;
+          const op =
+            work.action === "goal-stop"
+              ? session.stopGoal()
+              : work.action === "goal-resume"
+                ? session.resumeGoal()
+                : work.action === "plan-approve"
+                  ? session.approvePlan()
+                  : session.cancelPlan();
+          activeTurn = op
             .then(() => {
-              if (stop) out.line("stdout", "目标已停止");
+              if (work.action === "goal-stop") out.line("stdout", "目标已停止");
             })
             .catch((e: unknown) => {
               out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);

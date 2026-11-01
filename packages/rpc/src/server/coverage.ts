@@ -118,6 +118,8 @@ export const SESSION_METHODS: Record<
   resumeInputs: "session.resumeInputs",
   stopGoal: "session.stopGoal",
   resumeGoal: "session.resumeGoal",
+  approvePlan: "session.approvePlan",
+  cancelPlan: "session.cancelPlan",
   pendingInputs: "session.pendingInputs",
   respondPermission: "session.respondPermission",
   respondQuestion: "session.respondQuestion",

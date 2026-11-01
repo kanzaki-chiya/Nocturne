@@ -156,6 +156,8 @@ export interface ConversationProps {
   busy: boolean;
   /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
   onResubmit?: ((targetSeq: number, text: string, mode: RewindMode) => Promise<void>) | undefined;
+  /** 批准当前计划（ADR-0076 §5、§7）：在计划模式且空闲时显示在最后一条助手消息下方 */
+  onApprovePlan?: (() => void) | undefined;
   /**
    * 从一条用户消息之前分叉出新会话（runtime.forkSession 的 targetSeq）。缺省时不显示
    * 「分叉」：桌面暂无分叉入口，手机传入。
@@ -235,6 +237,7 @@ export type ReadOnlyConversationProps = Omit<
   ConversationProps,
   | "session"
   | "onResubmit"
+  | "onApprovePlan"
   | "onFork"
   | "turnChanges"
   | "onRewindFiles"
@@ -2592,6 +2595,7 @@ function EntryView({
   onFork,
   fileLinks,
   showReplyActions,
+  onApprovePlan,
   changesCard,
   preparing = false,
   queued = false,
@@ -2612,6 +2616,7 @@ function EntryView({
   onFork?: ConversationProps["onFork"];
   fileLinks: ConversationProps["fileLinks"];
   showReplyActions: boolean;
+  onApprovePlan?: (() => void) | undefined;
   changesCard: ReactNode;
   /** 实时工具行（参数尚在流式接收或排队等待执行）以合成 ToolEntry 走同一条渲染路径 */
   preparing?: boolean;
@@ -2743,6 +2748,11 @@ function EntryView({
           {changesCard}
           {showReplyActions && (
             <div className="assistant-actions" role="group" aria-label="回复操作">
+              {onApprovePlan && (
+                <button type="button" className="u-act" onClick={onApprovePlan}>
+                  批准
+                </button>
+              )}
               <CopyButton text={entry.text} label="复制回复" />
               <time dateTime={entry.time} title={entry.time}>
                 {replyTime(entry.time)}
@@ -3659,6 +3669,7 @@ function ConversationContent({
   images,
   busy,
   onResubmit,
+  onApprovePlan,
   onFork,
   fileLinks,
   turnChanges,
@@ -3732,6 +3743,8 @@ function ConversationContent({
     replies.set(key, entry.key);
   }
   const replyActionKeys = new Set(replies.values());
+  const latestReplyKey = [...replyActionKeys].at(-1);
+  const canApprovePlan = view.plan !== undefined && !busy && onApprovePlan !== undefined;
   const entryKeys = new Set(view.entries.map((entry) => entry.key));
   // U-01：每条用户消息之后将被撤回的回复轮数（按助手 turnId 去重）
   const repliesAfter = useMemo(() => {
@@ -3891,6 +3904,11 @@ function ConversationContent({
                           onFork={onFork}
                           fileLinks={fileLinks}
                           showReplyActions={replyActionKeys.has(entry.key)}
+                          onApprovePlan={
+                            canApprovePlan && entry.key === latestReplyKey
+                              ? onApprovePlan
+                              : undefined
+                          }
                           changesCard={
                             entry.kind === "assistant"
                               ? renderChanges(changesByKey.get(entry.key))

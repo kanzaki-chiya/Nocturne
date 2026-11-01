@@ -78,6 +78,13 @@ describe("parseSlash", () => {
       workMode: "goal",
       text: "修好测试",
     });
+    for (const line of ["/plan approve", " /plan cancel "])
+      expect(parseSlash(line)).toEqual({ kind: "command", name: "/plan", raw: line });
+    expect(parseSlash("/plan 重构登录")).toEqual({
+      kind: "work",
+      workMode: "plan",
+      text: "重构登录",
+    });
   });
 
   it("未知命令给出查看提示", () => {
@@ -100,6 +107,7 @@ describe("completeSlash", () => {
       "/mcp",
       "/grill-me",
       "/goal",
+      "/plan",
     ]);
   });
 

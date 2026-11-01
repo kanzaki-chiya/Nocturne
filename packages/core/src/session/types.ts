@@ -11,6 +11,7 @@ import type {
   EphemeralType,
   GoalState,
   HistoryEntry,
+  PlanConfig,
   ModelRef,
   ReasoningEffort,
   RuntimeEvent,
@@ -69,6 +70,8 @@ export interface SessionState {
   mcpAvailability?: Record<string, boolean> | undefined;
   /** 目标模式（ADR-0076 §2）：与预设一样，回退不撤销 */
   goal?: GoalState | undefined;
+  /** 计划模式（ADR-0076 §5）：与预设一样，回退不撤销 */
+  plan?: PlanConfig | undefined;
   /** 最后一次有效且持久化的 todo_write 快照 */
   todos: TodoItem[];
   /** 累计 token 用量（由 message.assistant 与 permission.reviewed 的 usage 累加） */

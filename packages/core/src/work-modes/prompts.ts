@@ -29,10 +29,28 @@ const GOAL = [
   `- If you end a reply without calling update_goal, the runtime asks you to verify the checklist and continue. This repeats at most ${GOAL_MAX_ROUNDS} times or for ${GOAL_MAX_MINUTES} minutes of work.`,
 ].join("\n");
 
+const PLAN = [
+  "Plan mode: produce an implementation plan for the request above. Do not change anything.",
+  "- The session is switched to the read-only permission preset. Explore by reading code, docs and configuration; do not edit files or run commands that change state.",
+  "- If a decision genuinely belongs to the user, ask with ask_user. Do not ask what you can find out yourself.",
+  "- End this reply with the complete plan in Markdown: the goal, the changes by file or module, the order of steps, how you will verify the result, and risks or open questions.",
+  "- The user will either comment on the plan or approve it. When they comment, revise the plan and give the complete updated plan again. Implementation starts only after approval.",
+].join("\n");
+
 const BODIES: Record<WorkModeName, (context: WorkModeContext) => string> = {
   "grill-me": () => GRILL_ME,
   goal: () => GOAL,
+  plan: () => PLAN,
 };
+
+/** 用户批准计划后开新 Turn 的说明（ADR-0076 §5） */
+export function planApprovedBody(): string {
+  return [
+    "The user approved the latest plan in this conversation. Implement it now.",
+    "- Follow the plan; if you must deviate, say why in the final reply.",
+    "- Verify the result as the plan describes, and report what you changed and how it was verified.",
+  ].join("\n");
+}
 
 export function workModeBody(name: WorkModeName, context: WorkModeContext = {}): string {
   return BODIES[name](context);

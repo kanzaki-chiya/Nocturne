@@ -221,6 +221,8 @@ const payloadSchemas = {
         reason: z.string().optional(),
       })
       .optional(),
+    // ADR-0076：计划模式；null = 退出
+    plan: z.object({ restorePreset: z.string() }).nullable().optional(),
     mcp: z
       .array(
         z.object({

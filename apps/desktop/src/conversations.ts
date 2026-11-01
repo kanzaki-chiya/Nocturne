@@ -532,11 +532,7 @@ export class Conversations {
     return true;
   }
 
-  /**
-   * 继续目标（ADR-0076 §4.5）：空闲时后台会开新 Turn，这里与 send 一样先标 busy，
-   * 不等整轮结束；Turn 完成由订阅更新。
-   */
-  resumeGoal(): void {
+  private startModeTurn(call: (session: RpcSession) => Promise<void>): void {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
     const idle = conversationStatus(entry) === "idle";
@@ -544,14 +540,23 @@ export class Conversations {
       entry.busy = true;
       this.changed();
     }
-    void entry.session
-      .resumeGoal()
+    void call(entry.session)
       .catch(this.failed)
       .finally(() => {
         if (!idle) return;
         entry.busy = false;
         this.changed();
       });
+  }
+
+  /** 继续目标（ADR-0076 §4.5）：空闲时后台开新 Turn */
+  resumeGoal(): void {
+    this.startModeTurn((session) => session.resumeGoal());
+  }
+
+  /** 批准计划（ADR-0076 §5）：恢复预设并开新 Turn */
+  approvePlan(): void {
+    this.startModeTurn((session) => session.approvePlan());
   }
 
   /** 编辑待发输入（只换文本，或切换插话/排队）；已发出时提示并刷新快照 */

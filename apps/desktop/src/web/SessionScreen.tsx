@@ -165,18 +165,30 @@ export function SessionScreen({
     onChanged();
     return true;
   };
+  const approvePlan = () => {
+    void session.approvePlan().then(onChanged, (error: unknown) => {
+      onError(errorText(error));
+    });
+  };
   const slash = async (line: string): Promise<string | boolean> => {
     void session.recordInputHistory(line).catch(() => undefined);
-    // ADR-0076 §7：/goal 看状态，/goal stop|resume 停止或继续
-    const goal = parseWorkModeSlash(line);
-    if (goal?.kind === "action") {
-      if (goal.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
-      if (view.goal === undefined) throw new Error("没有目标");
-      if (goal.action === "goal-stop") await session.stopGoal();
-      else
-        void session.resumeGoal().then(onChanged, (error: unknown) => {
-          onError(errorText(error));
-        });
+    // ADR-0076 §7：/goal 与 /plan 的无任务子命令
+    const work = parseWorkModeSlash(line);
+    if (work?.kind === "action") {
+      if (work.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
+      if (work.action === "goal-stop" || work.action === "goal-resume") {
+        if (view.goal === undefined) throw new Error("没有目标");
+        if (work.action === "goal-stop") await session.stopGoal();
+        else
+          void session.resumeGoal().then(onChanged, (error: unknown) => {
+            onError(errorText(error));
+          });
+        return true;
+      }
+      if (view.plan === undefined) throw new Error("不在计划模式");
+      if (work.action === "plan-cancel") await session.cancelPlan();
+      else if (running) throw new Error("会话正忙，不能批准计划");
+      else approvePlan();
       return true;
     }
     if (line.trim().toLowerCase().startsWith("/compact")) {
@@ -244,6 +256,7 @@ export function SessionScreen({
           }
           await submit({ text, attachments: [] });
         }}
+        onApprovePlan={approvePlan}
         onFork={async (targetSeq) => {
           const forked = await sessions.fork(entry, targetSeq);
           onForked(forked.session.id);

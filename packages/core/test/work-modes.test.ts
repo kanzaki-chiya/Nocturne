@@ -521,3 +521,168 @@ describe("/goal", () => {
     ).toEqual(["目标：修好测试", "状态：受阻（缺密钥）", "轮数：3/10", "时长：2/60 分钟"]);
   });
 });
+
+describe("/plan（ADR-0076 §5）", () => {
+  const writeScript = (file: string): FakeScript => [
+    {
+      type: "tool_call",
+      toolCallId: `write-${file}`,
+      name: "write",
+      input: { path: file, content: "x" },
+    },
+    { type: "finish", reason: "tool_calls" },
+  ];
+  const preset = (session: RuntimeSession) => session.state().config.permissionPreset;
+  const statusOf = (session: RuntimeSession, name: string) =>
+    session
+      .durableEvents()
+      .flatMap((e) =>
+        e.type === "tool.completed" && e.payload.name === name ? [e.payload.status] : [],
+      );
+
+  it("进入只读、记下原预设；计划轮内写入被拒；再次 /plan 保留最初的预设", async () => {
+    const provider = new FakeProvider({
+      scripts: [writeScript("a.txt"), textScript("# 计划\n1. 改 a"), textScript("# 计划 v2")],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "auto-edit",
+    });
+    await session.submit({ text: "加个功能", workMode: "plan" });
+    expect(preset(session)).toBe("read-only");
+    expect(session.state().plan).toEqual({ restorePreset: "auto-edit" });
+    expect(statusOf(session, "write")).toHaveLength(1);
+    expect(statusOf(session, "write")[0]).not.toBe("ok");
+    expect(requestText(provider.requests[0])).toContain("Plan mode");
+    // 预设与 plan 在同一条 config_changed 里，且早于 turn.started
+    const events = session.durableEvents();
+    const switched = events.findIndex(
+      (e) => e.type === "session.config_changed" && e.payload.plan !== undefined,
+    );
+    expect(events[switched]?.payload).toMatchObject({
+      permissionPreset: "read-only",
+      plan: { restorePreset: "auto-edit" },
+    });
+    expect(switched).toBeLessThan(events.findIndex((e) => e.type === "turn.started"));
+
+    await session.submit({ text: "改一下", workMode: "plan" });
+    expect(session.state().plan).toEqual({ restorePreset: "auto-edit" });
+    expect(replaySessionView(session.durableEvents()).plan).toEqual({ restorePreset: "auto-edit" });
+    await session.close();
+  });
+
+  it("批准：恢复原预设、退出计划模式，开新 Turn 按计划实施", async () => {
+    const provider = new FakeProvider({
+      scripts: [textScript("# 计划"), writeScript("a.txt"), textScript("已实施")],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "auto-edit",
+    });
+    await session.submit({ text: "加个功能", workMode: "plan" });
+    await session.approvePlan();
+    expect(preset(session)).toBe("auto-edit");
+    expect(session.state().plan).toBeUndefined();
+    expect(replaySessionView(session.durableEvents()).plan).toBeUndefined();
+    expect(session.durableEvents().filter((e) => e.type === "turn.started")).toHaveLength(2);
+    const approval = users(session).at(-1);
+    expect(approval?.payload.workMode?.name).toBe("plan");
+    expect(approval?.payload.steer).toBeUndefined();
+    const lastEntry = replaySessionView(session.durableEvents()).entries.findLast(
+      (item) => item.kind === "user",
+    );
+    expect(lastEntry && userEntryText(lastEntry)).toBe("批准");
+    expect(requestText(provider.requests[1])).toContain("approved the latest plan");
+    expect(statusOf(session, "write")).toEqual(["ok"]);
+    await session.close();
+  });
+
+  it("原本就是只读时批准改用 default；放弃恢复原预设且不开 Turn", async () => {
+    const provider = new FakeProvider({
+      scripts: [textScript("# 计划"), textScript("实施"), textScript("# 计划")],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "read-only",
+    });
+    await session.submit({ text: "任务", workMode: "plan" });
+    await session.approvePlan();
+    expect(preset(session)).toBe("default");
+
+    await session.setPermissionPreset("guarded");
+    await session.submit({ text: "任务二", workMode: "plan" });
+    const turns = session.durableEvents().filter((e) => e.type === "turn.started").length;
+    await session.cancelPlan();
+    expect(preset(session)).toBe("guarded");
+    expect(session.state().plan).toBeUndefined();
+    expect(session.durableEvents().filter((e) => e.type === "turn.started")).toHaveLength(turns);
+    await session.close();
+  });
+
+  it("不在计划模式时 approve / cancel 报 invalid_command；忙时批准报 session_busy", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const provider = new FakeProvider({
+      handler: async () => {
+        calls += 1;
+        if (calls === 2) await gate;
+        return textScript(calls === 1 ? "# 计划" : "继续");
+      },
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await rejects(session.approvePlan(), "invalid_command");
+    await rejects(session.cancelPlan(), "invalid_command");
+    await session.submit({ text: "任务", workMode: "plan" });
+    const running = session.submit({ text: "补充一点" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await rejects(session.approvePlan(), "session_busy");
+    release();
+    await running;
+    expect(session.state().plan).toBeDefined();
+    await session.close();
+  });
+
+  it("恢复会话：计划模式与只读预设原样保留，批准照常可用", async () => {
+    const provider = new FakeProvider({ scripts: [textScript("# 计划"), textScript("实施")] });
+    const sessionsDir = makeTmp("nct-wm-plan-");
+    const cwd = makeTmp("nct-wm-plan-ws-");
+    const first = await makeRuntime(provider, { sessionsDir, cwd });
+    const session = await first.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "default",
+    });
+    await session.submit({ text: "任务", workMode: "plan" });
+    const id = session.id;
+    await session.close();
+
+    const second = await makeRuntime(provider, { sessionsDir, cwd });
+    const resumed = await second.resumeSession(id);
+    expect(resumed.state().plan).toEqual({ restorePreset: "default" });
+    expect(preset(resumed)).toBe("read-only");
+    await resumed.approvePlan();
+    expect(preset(resumed)).toBe("default");
+    await resumed.close();
+  });
+
+  it("斜杠：/plan approve|cancel 是操作，只有命令名给用法，其余是任务", () => {
+    expect(parseWorkModeSlash("/plan approve")).toEqual({ kind: "action", action: "plan-approve" });
+    expect(parseWorkModeSlash(" /Plan CANCEL ")).toEqual({ kind: "action", action: "plan-cancel" });
+    expect(parseWorkModeSlash("/plan")).toEqual({
+      kind: "usage",
+      name: "plan",
+      hint: "用法：/plan 任务",
+    });
+    expect(parseWorkModeSlash("/plan approve the design")).toEqual({
+      kind: "submit",
+      workMode: "plan",
+      text: "approve the design",
+    });
+  });
+});

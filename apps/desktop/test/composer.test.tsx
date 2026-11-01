@@ -446,6 +446,7 @@ describe("Composer 斜杠命令", () => {
       expect.stringContaining("/mcp"),
       expect.stringContaining("/grill-me"),
       expect.stringContaining("/goal"),
+      expect.stringContaining("/plan"),
     ]);
     fireEvent.keyDown(field, { key: "Tab" });
     expect(field.value).toBe("/compact ");

@@ -4,7 +4,7 @@
  */
 import type { DurableEvent } from "./events.js";
 
-export const WORK_MODE_NAMES = ["grill-me", "goal"] as const;
+export const WORK_MODE_NAMES = ["grill-me", "goal", "plan"] as const;
 
 export type WorkModeName = (typeof WORK_MODE_NAMES)[number];
 
@@ -129,10 +129,29 @@ export function goalStatusLines(goal: GoalState | undefined, nowMs: number): str
   ];
 }
 
+// ── 计划模式（ADR-0076 §5）────────────────────────────────────
+
+/** `session.config_changed.plan`：进入时记下要恢复的预设；null = 退出 */
+export interface PlanConfig {
+  restorePreset: string;
+}
+
+/** 按持久事件推进计划模式状态；与目标一样回退不撤销，调用方对全部事件调用 */
+export function reducePlan(
+  plan: PlanConfig | undefined,
+  event: DurableEvent,
+): PlanConfig | undefined {
+  if (event.type !== "session.config_changed") return plan;
+  const next = event.payload.plan;
+  if (next === undefined) return plan;
+  return next === null ? undefined : { restorePreset: next.restorePreset };
+}
+
 // ── 客户端斜杠解析 ─────────────────────────────────────────
 
 /** 不开新任务的子命令（ADR-0076 §7） */
-export type WorkModeAction = "goal-status" | "goal-stop" | "goal-resume";
+export type WorkModeAction =
+  "goal-status" | "goal-stop" | "goal-resume" | "plan-approve" | "plan-cancel";
 
 /** 斜杠解析结果：带任务的提交、整行只是命令名时的用法提示，或会话操作 */
 export type WorkModeSlash =
@@ -143,11 +162,13 @@ export type WorkModeSlash =
 const USAGE: Record<WorkModeName, string> = {
   "grill-me": "用法：/grill-me 需求",
   goal: "用法：/goal 目标",
+  plan: "用法：/plan 任务",
 };
 
 /** 子命令：整行恰好是命令名（+ 一个单词）时才算，其余文字都当任务 */
 const ACTIONS: Partial<Record<WorkModeName, Record<string, WorkModeAction>>> = {
   goal: { "": "goal-status", stop: "goal-stop", resume: "goal-resume" },
+  plan: { approve: "plan-approve", cancel: "plan-cancel" },
 };
 
 /**
@@ -175,4 +196,5 @@ export function workModeDisplayText(text: string, workMode: { name: string } | u
 export const WORK_MODE_COMMANDS: readonly { name: `/${WorkModeName}`; summary: string }[] = [
   { name: "/grill-me", summary: "追问需求" },
   { name: "/goal", summary: "目标模式" },
+  { name: "/plan", summary: "计划模式" },
 ];

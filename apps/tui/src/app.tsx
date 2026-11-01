@@ -2623,16 +2623,17 @@ function SessionApp({
           void session.stopGoal().then(() => {
             pushLine("目标已停止");
           }, fail);
+        } else if (work.action === "plan-cancel") {
+          void session.cancelPlan().catch(fail);
         } else {
-          // 空闲时 resumeGoal 会开新 Turn：与普通提交一样占住提交位
+          // 空闲时继续目标、批准计划都会开新 Turn：与普通提交一样占住提交位
           const idle = !busy;
           if (idle && submitting.current) return;
           if (idle) {
             submitting.current = true;
             setSubmitPending(true);
           }
-          void session
-            .resumeGoal()
+          void (work.action === "plan-approve" ? session.approvePlan() : session.resumeGoal())
             .catch(fail)
             .finally(() => {
               if (!idle) return;
