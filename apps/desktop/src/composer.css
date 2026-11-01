@@ -329,23 +329,6 @@
   box-shadow: var(--shadow-popover);
 }
 
-/* 与侧栏/消息流一致的无按钮细滚动条 */
-.menu::-webkit-scrollbar {
-  width: 6px;
-}
-.menu::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-.menu::-webkit-scrollbar-track {
-  background: transparent;
-}
-.menu::-webkit-scrollbar-thumb {
-  background: var(--a-border-strong);
-  border-radius: var(--radius-1);
-}
-
 .menu .menu-h,
 .menu h6 {
   margin: 6px 8px 4px;

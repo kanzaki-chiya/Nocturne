@@ -1,3 +1,10 @@
+.profile-description {
+  field-sizing: content;
+  resize: none;
+  min-height: calc(3lh + var(--space-4) + 2px);
+  max-height: 240px;
+  overflow-y: auto;
+}
 .profile-pair {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(var(--w-field-md), 1fr));

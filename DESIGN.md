@@ -119,8 +119,9 @@
    - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-4`），正文 `.sbody`（分组间距 `--space-8`）；
    - 每组 `.group` 含 `.ghead`（标题 `--fs-2` + `--fw-semibold`）和 `.card`（圆角 `--radius-3`），行 `.srow`（最小高 `--row-h`，左 `.lab` 右 `.ctl`）。
 2. **主从设置页**（服务商、授权、MCP、技能、子代理、定时任务）：
-   - 外层 `.spage.flush` 不滚动，顶栏 `.phead` 下接 `.md`（左栏 `.md-list` 宽 `--w-list` 独立滚动，右栏 `.md-detail` 独立滚动，内部 `.inner` 宽 `--w-readable` 居中）；
+   - 外层 `.spage.flush` 不滚动，顶栏 `.phead` 下接 `.md`（左栏 `.md-list` 宽 `--w-list`（280px）独立滚动，右栏 `.md-detail` 独立滚动，内部 `.inner` 宽 `--w-readable` 居中）；名字单行省略，完整名字放名字的 `title`；MCP 列表只显示状态点与名字；
    - 新增按钮固定在左栏顶部，主操作与删除在右栏详情顶栏 `.dhead .actions`。
+   - 全部滚动区共用无箭头的细滚动条，隐藏滚动条的区域保留 `scrollbar-width: none`。子代理描述框按内容增高，最少约三行、最高 `240px`，超出才滚动；启用开关位于标题最右侧，不写可见标签，只读与默认档位禁用。
 3. **数据页**（用量、后台日志）：
    - 不套 `--w-readable` 窄栏限制，铺满可用宽度，表格仅用横线分隔行（`.tbl`）。
 4. **对话区与侧面板**：

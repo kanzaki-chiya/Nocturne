@@ -417,32 +417,6 @@
   font-weight: 500;
 }
 
-/* 页面列表滚动条与消息流一致（细、无箭头） */
-.grants-page .pane::-webkit-scrollbar,
-.page3 .dlg::-webkit-scrollbar,
-.page3 .dlg .picklist::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.grants-page .pane::-webkit-scrollbar-button,
-.page3 .dlg::-webkit-scrollbar-button,
-.page3 .dlg .picklist::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-.grants-page .pane::-webkit-scrollbar-track,
-.page3 .dlg::-webkit-scrollbar-track,
-.page3 .dlg .picklist::-webkit-scrollbar-track {
-  background: transparent;
-}
-.grants-page .pane::-webkit-scrollbar-thumb,
-.page3 .dlg::-webkit-scrollbar-thumb,
-.page3 .dlg .picklist::-webkit-scrollbar-thumb {
-  background: var(--a-border-strong);
-  border-radius: var(--radius-1);
-}
-
 .page3 .pad {
   padding: 4px 10px;
 }

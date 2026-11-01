@@ -86,8 +86,6 @@
   overflow-x: hidden;
   white-space: normal;
   overflow-wrap: anywhere;
-  scrollbar-width: thin;
-  scrollbar-color: var(--a-border-strong) transparent;
 }
 .ddm [role="listbox"] {
   display: grid;

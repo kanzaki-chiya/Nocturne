@@ -99,68 +99,33 @@ button {
   flex: 1;
 }
 /*
- * 细滚动条（ADR-0060 修订 2026-10-18（二））：右侧面板所有滚动区共用。10px、轨道透明、
- * 滑块取 --a-scroll，悬停加深变粗。不写 scrollbar-width / scrollbar-color：
- * Chromium 设了这两个标准属性就忽略 ::-webkit-scrollbar，又会露出箭头按钮。
+ * 所有元素统一细滚动条：10px、轨道透明，滑块取 --a-scroll，悬停加深变粗。
+ * 不写 scrollbar-width / scrollbar-color：Chromium 设了这两个标准属性就会
+ * 忽略 ::-webkit-scrollbar，又会露出原生滚动条和箭头；隐藏滚动条的 none 保留。
  */
-.thin-scroll::-webkit-scrollbar,
-.thin-scroll *::-webkit-scrollbar {
+*::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-.thin-scroll::-webkit-scrollbar-button,
-.thin-scroll *::-webkit-scrollbar-button {
+*::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
-.thin-scroll::-webkit-scrollbar-track,
-.thin-scroll::-webkit-scrollbar-corner,
-.thin-scroll *::-webkit-scrollbar-track,
-.thin-scroll *::-webkit-scrollbar-corner {
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
   background: transparent;
 }
-.thin-scroll::-webkit-scrollbar-thumb,
-.thin-scroll *::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
   background: var(--a-scroll);
   background-clip: padding-box;
   border: 3px solid transparent;
   border-radius: var(--radius-3);
 }
-.thin-scroll::-webkit-scrollbar-thumb:hover,
-.thin-scroll *::-webkit-scrollbar-thumb:hover {
+*::-webkit-scrollbar-thumb:hover {
   background: var(--a-scrollThumbHover);
   background-clip: padding-box;
   border-width: 2px;
-}
-/* WebView2 的原生 thin 滚动条仍会显示箭头；统一使用无按钮的自定义滚动条。 */
-.tree::-webkit-scrollbar,
-.stream::-webkit-scrollbar,
-.composer textarea::-webkit-scrollbar,
-.conversation-stream::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.tree::-webkit-scrollbar-button,
-.stream::-webkit-scrollbar-button,
-.composer textarea::-webkit-scrollbar-button,
-.conversation-stream::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-.tree::-webkit-scrollbar-track,
-.stream::-webkit-scrollbar-track,
-.composer textarea::-webkit-scrollbar-track,
-.conversation-stream::-webkit-scrollbar-track {
-  background: transparent;
-}
-.tree::-webkit-scrollbar-thumb,
-.stream::-webkit-scrollbar-thumb,
-.composer textarea::-webkit-scrollbar-thumb,
-.conversation-stream::-webkit-scrollbar-thumb {
-  background: var(--a-border-strong);
-  border-radius: var(--radius-1);
 }
 .side .tree h4 {
   margin-top: 6px;

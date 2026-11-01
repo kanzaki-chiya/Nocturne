@@ -56,9 +56,17 @@ it("default 不能删除停用；新增模板、编辑、预览和删除档位",
   render(<ExternalAgentsPage client={server.client} workspaceRoot={undefined} version={0} />);
   await screen.findByRole("heading", { name: "default" });
   expect(screen.queryByRole("button", { name: "删除档位" })).toBeNull();
-  expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByRole("switch", { name: "启用" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText("只读", { selector: ".badge" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "添加档位" }));
   fireEvent.click(screen.getByRole("button", { name: "quick" }));
+  const enabled = screen.getByRole("switch", { name: "启用" });
+  expect(enabled.getAttribute("aria-checked")).toBe("true");
+  expect(enabled.closest(".dhead .actions")).toBeTruthy();
+  expect(document.body.textContent).not.toContain("启用此档位");
+  expect(
+    screen.getByRole("textbox", { name: "描述" }).classList.contains("profile-description"),
+  ).toBe(true);
   fireEvent.change(screen.getByRole("textbox", { name: "描述" }), {
     target: { value: "查找调用点" },
   });
@@ -84,6 +92,14 @@ it("default 不能删除停用；新增模板、编辑、预览和删除档位",
   });
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(items[0]?.effective).toContain("读取文件"));
+  fireEvent.click(screen.getByRole("switch", { name: "启用" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() =>
+    expect(JSON.parse(items[0]?.effective ?? "null")).toMatchObject({
+      enabled: false,
+      description: "读取文件",
+    }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "删除档位" }));
   const dialog = screen.getByRole("dialog", { name: "删除档位 quick？" });
   fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
@@ -172,6 +188,23 @@ const radios = () =>
   within(screen.getByRole("radiogroup", { name: "思考档位" }))
     .getAllByRole("radio")
     .map((radio) => radio.textContent);
+
+it.each(["project", "user"] as const)("%s 层子代理只显示只读徽标，启用开关禁用", async (source) => {
+  const item = {
+    ...settingItem("subagents.profiles.locked", { description: "只读档位", enabled: true }),
+    source,
+  };
+  const { server } = profileServer([item]);
+  await server.initialize();
+  render(<ExternalAgentsPage client={server.client} workspaceRoot={undefined} version={0} />);
+  await screen.findByRole("heading", { name: "default" });
+  fireEvent.click(screen.getByRole("button", { name: /locked/ }));
+  await screen.findByRole("heading", { name: "locked" });
+  expect((screen.getByRole("switch", { name: "启用" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText("只读", { selector: ".badge" })).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/\.json|项目配置/);
+  server.close();
+});
 
 it("思考档位选项跟随所选模型：跟随当前模型列全部档位，选定模型只列它支持的，换模型清空已选强度", async () => {
   const { server } = profileServer([]);

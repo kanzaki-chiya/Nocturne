@@ -669,14 +669,12 @@
   background: var(--a-accent);
 }
 .nav-item .trunc {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.nav-item:has(> .dot) .trunc {
-  max-width: calc(100% - var(--dot) - var(--space-2));
 }
 .nav-item .trunc.mono {
   font-family: var(--mono);

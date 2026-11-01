@@ -195,6 +195,11 @@ describe("MCP 设置页", () => {
     expect(badge.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
     const sw = screen.getByRole("switch");
     expect(sw.hasAttribute("disabled")).toBe(true);
+    const nav = screen.getByRole("navigation", { name: "MCP 服务器列表" });
+    expect(nav.querySelector(".badge")).toBeNull();
+    expect(nav.querySelector(".meta")).toBeNull();
+    expect(nav.textContent).not.toMatch(/HTTP|已停用|测试失败|连接成功/);
+    expect(within(nav).getByText("manual").title).toBe("manual");
     expect(sw.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
     expect(screen.queryByText(/只读：在 home\/config\.json 中定义/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "＋ 添加服务器" }));

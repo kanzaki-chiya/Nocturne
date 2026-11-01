@@ -892,10 +892,6 @@
 .phone ::selection {
   background: var(--a-sel-strong);
 }
-.phone * {
-  scrollbar-color: var(--a-border-strong) transparent;
-  scrollbar-width: thin;
-}
 .phone .phone-list-action {
   display: block;
   width: 100%;

@@ -9,7 +9,7 @@ import {
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ProvidersPage";
-import { Button, Checkbox, SegmentedControl, DetailHeader, Field, FormFooter, Badge } from "./ui";
+import { Button, Switch, SegmentedControl, DetailHeader, Field, FormFooter, Badge } from "./ui";
 
 export function profilesFromSettings(items: readonly SettingItem[]) {
   return items
@@ -103,6 +103,16 @@ export function SubagentProfileEditor({
         title={creating ? "添加档位" : name}
         mono
         extra={isDefault || readonly ? <Badge>只读</Badge> : undefined}
+        actions={
+          <Switch
+            aria-label="启用"
+            checked={draft.enabled}
+            disabled={isDefault || readonly}
+            onChange={(enabled) => {
+              set({ enabled });
+            }}
+          />
+        }
       />
       {error && (
         <p className="errt" role="alert">
@@ -126,7 +136,7 @@ export function SubagentProfileEditor({
       )}
       <Field label="描述">
         <textarea
-          className="textarea"
+          className="textarea profile-description"
           aria-label="描述"
           value={draft.description}
           disabled={isDefault || readonly}
@@ -207,16 +217,6 @@ export function SubagentProfileEditor({
           }}
         />
       </Field>
-      <Checkbox
-        className="profile-enabled"
-        checked={draft.enabled}
-        disabled={isDefault || readonly}
-        onChange={(checked) => {
-          set({ enabled: checked });
-        }}
-      >
-        启用此档位
-      </Checkbox>
       <FormFooter
         reason={
           !creating &&

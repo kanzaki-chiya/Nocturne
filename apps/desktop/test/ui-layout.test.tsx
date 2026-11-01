@@ -136,7 +136,7 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
   });
 
-  it("ListItem：名字元素禁止收缩，右侧 badge 与 meta 允许收缩，长 meta 不会把名字压没", () => {
+  it("ListItem：长名字单行省略并提供完整 title，名字和右侧内容允许收缩", () => {
     render(
       <ListItem
         label="enterprise-customer-portal"
@@ -151,6 +151,7 @@ describe("设置页骨架组件 (src/ui)", () => {
     const badgeEl = btn.querySelector(".badge");
     const metaEl = btn.querySelector(".meta");
     expect(nameEl?.textContent).toBe("enterprise-customer-portal");
+    expect(nameEl?.getAttribute("title")).toBe("enterprise-customer-portal");
     expect(badgeEl?.textContent).toBe("只读");
     expect(metaEl?.textContent).toBe("0 项授权 · 没有项目配置 · 额外长说明文字");
 
@@ -159,7 +160,9 @@ describe("设置页骨架组件 (src/ui)", () => {
     const nameRule = /\.nav-item\s+\.trunc\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     const shrinkRule =
       /\.nav-item\s+\.badge,\s*\.nav-item\s+\.meta\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    expect(nameRule).toContain("flex-shrink: 0");
+    expect(nameRule).toContain("flex: 1 1 auto");
+    expect(nameRule).toContain("white-space: nowrap");
+    expect(nameRule).toContain("text-overflow: ellipsis");
     expect(shrinkRule).toContain("flex-shrink: 1");
     expect(shrinkRule).toContain("min-width: 0");
   });

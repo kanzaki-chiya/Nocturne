@@ -190,14 +190,6 @@ export function McpPage({
                       mono
                       selected={selected === s.id && !form}
                       dot={!s.enabled ? "" : results[s.id]?.ok ? "ok" : results[s.id] ? "warn" : ""}
-                      badge={s.transport === "http" ? <Badge>HTTP</Badge> : undefined}
-                      meta={
-                        !s.enabled
-                          ? "已停用"
-                          : results[s.id]?.ok === false
-                            ? "测试失败"
-                            : resultText(results[s.id])
-                      }
                       onClick={() => {
                         setSelected(s.id);
                         setForm(undefined);
