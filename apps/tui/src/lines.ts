@@ -23,6 +23,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import {
   boxSafe,
+  lastWrapSpace,
   permissionReviewLine,
   stripControls,
   summarizeToolInput,
@@ -53,6 +54,16 @@ interface WrappedLine {
   continued: boolean;
 }
 
+function charWidth(ch: string): number {
+  return Math.max(1, stringWidth(ch));
+}
+
+function textWidth(text: string): number {
+  let used = 0;
+  for (const ch of text) used += charWidth(ch);
+  return used;
+}
+
 function wrap(text: string, width: number): WrappedLine[] {
   const limit = budget(width);
   const flat = stripControls(text.replace(/\r\n?/g, "\n"));
@@ -66,14 +77,23 @@ function wrap(text: string, width: number): WrappedLine[] {
     let used = 0;
     let continued = false;
     for (const ch of part) {
-      const w = Math.max(1, stringWidth(ch));
-      if (used + w > limit && line !== "") {
-        out.push({ text: line, continued });
-        continued = true;
-        line = "";
-        used = 0;
-      }
+      const w = charWidth(ch);
       if (w > limit) continue;
+      if (used + w > limit && line !== "") {
+        const at = stringWidth(ch) < 2 ? lastWrapSpace(line) : -1;
+        if (at >= 0) {
+          out.push({ text: line.slice(0, at + 1), continued });
+          continued = true;
+          line = line.slice(at + 1);
+          used = textWidth(line);
+        }
+        if (used + w > limit && line !== "") {
+          out.push({ text: line, continued });
+          continued = true;
+          line = "";
+          used = 0;
+        }
+      }
       line += ch;
       used += w;
     }

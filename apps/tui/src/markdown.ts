@@ -2,6 +2,7 @@
 import { marked, type Token, type Tokens } from "marked";
 import stringWidth from "string-width";
 
+import { lastWrapSpace } from "./format.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import type { LaidLine, LineSegment } from "./viewport.js";
 
@@ -149,7 +150,7 @@ export function renderMarkdown(
 ): LaidLine[] {
   const lines: LaidLine[] = [];
   const max = limitFor(width);
-  const add = (runs: Run[], prefix = "", style: Partial<Run> = {}): void => {
+  const add = (runs: Run[], prefix = "", style: Partial<Run> = {}, wordWrap = true): void => {
     let segments: Run[] = prefix ? [{ text: prefix, ...style }] : [];
     let used = stringWidth(prefix);
     // 宽度溢出折行 → 下一行是同一逻辑行的续行；\n 与收尾 flush 之后重新开始
@@ -170,6 +171,23 @@ export function renderMarkdown(
       flush();
       continuing = true;
     };
+    const runsWidth = (parts: readonly Run[]): number => {
+      let n = 0;
+      for (const part of parts) for (const ch of part.text) n += stringWidth(ch);
+      return n;
+    };
+    const sliceRuns = (parts: readonly Run[], start: number, end: number): Run[] => {
+      const out: Run[] = [];
+      let at = 0;
+      for (const part of parts) {
+        const from = Math.max(start, at);
+        const to = Math.min(end, at + part.text.length);
+        if (from < to) out.push({ ...part, text: part.text.slice(from - at, to - at) });
+        at += part.text.length;
+        if (at >= end) break;
+      }
+      return out;
+    };
     for (const run of runs) {
       for (const ch of run.text) {
         if (ch === "\n") {
@@ -177,8 +195,21 @@ export function renderMarkdown(
           continue;
         }
         const w = stringWidth(ch);
-        if (used + w > max && used > 0) overflowFlush();
         if (w > max) continue;
+        if (used + w > max && used > 0) {
+          if (wordWrap && w < 2) {
+            const at = lastWrapSpace(segments.map((part) => part.text).join(""));
+            if (at >= 0) {
+              const tail = sliceRuns(segments, at + 1, Number.MAX_SAFE_INTEGER);
+              segments = sliceRuns(segments, 0, at + 1);
+              flush();
+              continuing = true;
+              segments = tail;
+              used = runsWidth(tail);
+            }
+          }
+          if (used + w > max && used > 0) overflowFlush();
+        }
         const last = segments.at(-1);
         if (
           last &&
@@ -217,6 +248,7 @@ export function renderMarkdown(
               [{ text: line, color: theme.secondary, backgroundColor: theme.codeBg }],
               `${prefix}│ `,
               { backgroundColor: theme.codeBg, color: theme.muted },
+              false,
             );
           break;
         case "hr":

@@ -160,6 +160,21 @@ export function summarizeToolInput(name: string | undefined, input: unknown): st
   return byKey ?? (input === undefined ? "" : JSON.stringify(input));
 }
 
+/**
+ * 行内最后一个可折行空白的下标，空白留在前一行。
+ * 空白后面没有正文时返回 -1（这一行已经在空白处结束）。
+ */
+export function lastWrapSpace(text: string): number {
+  let last = -1;
+  let index = 0;
+  for (const ch of text) {
+    if (ch === " " || ch === "\t") last = index;
+    index += ch.length;
+  }
+  if (last < 0 || last >= text.length - 1) return -1;
+  return last;
+}
+
 /** ADR-0036：审查来源及用量与主模型输出分开标注。 */
 export function permissionReviewLine(review: PermissionReviewedPayload): string {
   const label = { allow: "放行", block: "拦截", unsure: "交给你确认" }[review.verdict];
