@@ -67,7 +67,7 @@ export function TitlebarButtons({
         size="sm"
         className="tb-icon"
         aria-label="右侧面板"
-        title={panelDisabled ? "右侧面板（先打开一个会话）" : "右侧面板 (Ctrl+B)"}
+        title={panelDisabled ? "右侧面板（先打开一个会话）" : "右侧面板"}
         aria-pressed={panelOpen}
         disabled={panelDisabled}
         onClick={onTogglePanel}

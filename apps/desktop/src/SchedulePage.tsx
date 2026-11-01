@@ -530,7 +530,6 @@ export function SchedulePage({
             </>
           }
         >
-          {selectedId === null && <EmptyState>从左边选一个任务，或新建一个。</EmptyState>}
           {(selected !== undefined || selectedId === "new") && (
             <>
               <DetailHeader

@@ -157,7 +157,6 @@ function McpBadge({
               )}
             </div>
           ))}
-          <span className="status-note">点击打开 设置 › MCP</span>
         </div>
       )}
     </span>

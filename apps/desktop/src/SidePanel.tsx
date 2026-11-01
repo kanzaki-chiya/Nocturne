@@ -206,7 +206,7 @@ function Glyph({
 }
 
 function tabTitle(tab: PanelTab): { name: string; project?: string; title: string } {
-  if (tab.kind === "changes") return { name: "变更", title: "当前会话改过的文件" };
+  if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
   if (tab.kind === "browser") {
@@ -381,7 +381,7 @@ function TabBar(props: SidePanelProps) {
         type="button"
         className="sp-newtab"
         aria-label="新标签页"
-        title="新标签页 (Ctrl+T)"
+        title="新标签页"
         onClick={onNewTab}
       >
         <Glyph kind="plus" />

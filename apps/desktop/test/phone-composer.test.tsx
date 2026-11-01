@@ -194,6 +194,7 @@ it("图片附件随消息发出，报文超限时不发送并提示", async () =
   });
   await act(() => button("添加文件").click());
   expect(container.textContent).toContain("拍照");
+  expect(container.textContent).not.toContain("用相机拍一张发给模型");
   expect(container.textContent).toContain("选择图片");
   await pick([new File(["x"], "a.jpg", { type: "image/jpeg" })]);
   expect(container.querySelectorAll(".phone-attachment img")).toHaveLength(1);

@@ -141,6 +141,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
     />,
   );
   await screen.findByText("模型目录到此为止");
+  expect(screen.queryByText(/模型目录里显示前/)).toBeNull();
   expect(screen.getByRole("meter").getAttribute("value")).toBe("678");
   expect(screen.getByText(/完整说明 2 个，只显示名字 4 个，已停用 1 个/)).toBeTruthy();
   expect(screen.getByText("project").parentElement?.textContent).toBe("项目project · 1");

@@ -797,7 +797,6 @@ export function PhoneComposer({
           <PopoverOption
             icon={<IconCamera />}
             label="拍照"
-            detail="用相机拍一张发给模型"
             onSelect={() => {
               camera.current?.click();
             }}
@@ -805,7 +804,6 @@ export function PhoneComposer({
           <PopoverOption
             icon={<IconImage />}
             label="选择图片"
-            detail="从相册选取，支持 PNG、JPEG、GIF、WebP"
             onSelect={() => {
               gallery.current?.click();
             }}
@@ -813,7 +811,6 @@ export function PhoneComposer({
           <PopoverOption
             icon={<IconAt />}
             label="引用文件"
-            detail="插入 @，从项目文件里选"
             disabled={fileRefs === null ? "普通对话与新会话没有项目文件索引" : undefined}
             onSelect={insertRef}
           />
@@ -840,12 +837,7 @@ export function PhoneComposer({
         <Popover anchor={triggers.current.more ?? null} label="更多" onClose={close}>
           <div className="phone-popover-h">更多</div>
           {readInputHistory !== undefined && (
-            <PopoverOption
-              icon={<IconHistory />}
-              label="输入历史"
-              detail="选一条填回输入框"
-              onSelect={openHistory}
-            />
+            <PopoverOption icon={<IconHistory />} label="输入历史" onSelect={openHistory} />
           )}
           <PopoverOption
             icon={<IconTerminal />}
@@ -854,7 +846,7 @@ export function PhoneComposer({
                 Shell<span className="muted-value">{shell?.label ?? "—"}</span>
               </>
             }
-            detail={shell?.note ?? "Shell 设置只能在电脑上切换"}
+            detail={shell?.note}
           />
         </Popover>
       )}
