@@ -66,7 +66,7 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** 通知一节的键（ADR-0056）：「提醒哪些事」三项在界面里同处一行 */
+/** 通知一节的键（ADR-0056）：「通知内容」三项在界面里同处一行 */
 const NOTIFY_EVENT_KEYS = [
   "notifications.events.attention",
   "notifications.events.error",
@@ -78,7 +78,7 @@ const NOTIFY_TEST_KEY = "notifications.test";
 type RoleKey = "task" | "vision" | "smol";
 const ROLES: { role: RoleKey; label: string; unset: string }[] = [
   { role: "task", label: "子代理模型", unset: "跟随当前模型" },
-  { role: "vision", label: "看图模型", unset: "未设置" },
+  { role: "vision", label: "视觉模型", unset: "未设置" },
   { role: "smol", label: "轻量模型", unset: "跟随当前模型" },
 ];
 
@@ -149,7 +149,7 @@ export function SettingsPage({
   section: SettingsPageSection;
   client: RpcClient | undefined;
   theme: ThemePref;
-  /** 回答内文件引用"打开文件用"（本机 prefs，不进 Core） */
+  /** 回答内文件引用"默认打开方式"（本机 prefs，不进 Core） */
   fileOpener: FileOpener;
   /** 已安装的编辑器（只列检测到的） */
   editors: { vscode: boolean; cursor: boolean };
@@ -298,7 +298,7 @@ export function SettingsPage({
     done: item("notifications.events.done")?.effective !== "false",
   };
   const notifySound = item("notifications.sound")?.effective !== "false";
-  /** 「提醒哪些事」三个开关同处一行，共用一个来源标记：显示被覆盖的一项，否则第一项 */
+  /** 「通知内容」三个开关同处一行，共用一个来源标记：显示被覆盖的一项，否则第一项 */
   const notifyEventsMarker = () => {
     const list = NOTIFY_EVENT_KEYS.map((key) => item(key));
     return sourceMarker(list.find((entry) => entry?.overridden === true) ?? list[0]);
@@ -378,7 +378,7 @@ export function SettingsPage({
 
   const head = SECTION_HEAD[section];
   const needsCore = section !== "appearance";
-  /** 一行可能对应多个键（「提醒哪些事」三项）：合并成一条红字 */
+  /** 一行可能对应多个键（「通知内容」三项）：合并成一条红字 */
   const errs = (...keys: string[]): ReactNode => {
     const list = keys.flatMap((key) => (rowError[key] !== undefined ? [rowError[key]] : []));
     if (list.length === 0) return undefined;
@@ -603,9 +603,9 @@ export function SettingsPage({
                     </Button>
                   )}
                 </SettingsRow>
-                <SettingsRow label="打开文件用" error={errs("fileOpener")}>
+                <SettingsRow label="默认打开方式" error={errs("fileOpener")}>
                   <Dropdown
-                    label="打开文件用"
+                    label="默认打开方式"
                     value={fileOpener}
                     options={[
                       {
@@ -625,7 +625,7 @@ export function SettingsPage({
                       if (!isFileOpener(value)) return;
                       const ok = onFileOpenerChange(value);
                       setRowErr("fileOpener", ok ? null : "本机存储不可写，设置只在本次运行内生效");
-                      showToast(`已保存 打开文件用 = ${FILE_OPENER_LABELS[value]}`);
+                      showToast(`已保存 默认打开方式 = ${FILE_OPENER_LABELS[value]}`);
                     }}
                   />
                 </SettingsRow>
@@ -669,7 +669,7 @@ export function SettingsPage({
                   />
                 </SettingsRow>
                 <SettingsRow
-                  label="提醒哪些事"
+                  label="通知内容"
                   dimmed={!notifyEnabled}
                   marker={notifyEventsMarker()}
                   error={errs(...NOTIFY_EVENT_KEYS)}
@@ -712,13 +712,13 @@ export function SettingsPage({
                   </Checkbox>
                 </SettingsRow>
                 <SettingsRow
-                  label="完成提醒的阈值"
+                  label="提醒触发时长"
                   dimmed={!notifyEnabled || !notifyEvents.done}
                   marker={sourceMarker(item("notifications.doneAfterSeconds"))}
                   error={errs(...NOTIFY_THRESHOLD_KEYS)}
                 >
                   <Dropdown
-                    label="完成提醒的阈值"
+                    label="提醒触发时长"
                     value={String(notifyThreshold.seconds)}
                     options={notifyThreshold.options}
                     disabled={
@@ -729,7 +729,7 @@ export function SettingsPage({
                           : undefined
                     }
                     onChange={(value) => {
-                      void save("notifications.doneAfterSeconds", "完成提醒的阈值", {
+                      void save("notifications.doneAfterSeconds", "提醒触发时长", {
                         "notifications.doneAfterSeconds": Number(value),
                       });
                     }}

@@ -116,7 +116,7 @@ function withTab(panel: SessionPanel, tab: PanelTab): SessionPanel {
 
 export interface SidePanelController {
   /**
-   * 文件引用左键（打开文件用 = Nocturne 面板）：在当前会话的文件标签里打开并定位；
+   * 文件引用左键（默认打开方式 = Nocturne 面板）：在当前会话的文件标签里打开并定位；
    * 工作区内的 HTML 在浏览器标签里打开（有内置浏览器时）
    */
   openFile: (absolutePath: string, line?: number, ref?: { endLine?: number | undefined }) => void;

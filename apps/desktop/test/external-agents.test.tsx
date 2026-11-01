@@ -232,12 +232,12 @@ describe("外部 agent 设置页", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     expect((screen.getByLabelText(/^名称/) as HTMLInputElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("何时用（给模型看）"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "描述" }), {
       target: { value: "保持草稿" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await screen.findByRole("alert");
-    expect((screen.getByLabelText("何时用（给模型看）") as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "描述" }) as HTMLInputElement).value).toBe(
       "保持草稿",
     );
     reject = false;

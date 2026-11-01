@@ -129,7 +129,7 @@ function typeText(t: ProviderOverview["type"]): string {
 /** 模型角色中文名（describeToggleImpact 的停用确认列表） */
 const ROLE_LABELS: Record<ModelRoleInfo["role"], string> = {
   task: "子代理模型",
-  vision: "看图模型",
+  vision: "视觉模型",
   smol: "轻量模型",
 };
 

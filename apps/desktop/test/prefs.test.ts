@@ -328,7 +328,7 @@ describe("prefs store", () => {
     expect(bad.panelSessions).toEqual({ b: { tabs: [], treeWidth: 420 } });
   });
 
-  it("打开文件用：缺省为面板；旧选择一次性迁移到面板，之后改回 VS Code 保留", () => {
+  it("默认打开方式：缺省为面板；旧选择一次性迁移到面板，之后改回 VS Code 保留", () => {
     // 升级前存的是 VS Code：没有迁移标记，回到缺省（面板）并写回标记
     const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ fileOpener: "vscode" }) });
     const first = createPrefsStore(storage);

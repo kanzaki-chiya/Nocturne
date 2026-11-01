@@ -2828,7 +2828,7 @@ describe("回答内文件引用（U-09）", () => {
     });
   });
 
-  it("打开文件用 = Nocturne 面板：菜单「打开」项说明是面板，不另列重复项", async () => {
+  it("默认打开方式 = Nocturne 面板：菜单「打开」项说明是面板，不另列重复项", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "看 `src/a.ts:12`" })];
     const fileLinks = hooks({ openerLabel: () => "Nocturne 面板" });

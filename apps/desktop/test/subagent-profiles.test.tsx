@@ -59,7 +59,7 @@ it("default 不能删除停用；新增模板、编辑、预览和删除档位",
   expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "添加档位" }));
   fireEvent.click(screen.getByRole("button", { name: "quick" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "何时用" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "描述" }), {
     target: { value: "查找调用点" },
   });
   expect(screen.getByRole("radio", { name: "low" }).getAttribute("aria-checked")).toBe("true");
@@ -79,7 +79,7 @@ it("default 不能删除停用；新增模板、编辑、预览和删除档位",
   expect(document.querySelector(".profile-preview pre")?.textContent).toBe(
     subagentSelectionTable([{ ...config, name: "quick" }]),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "何时用" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "描述" }), {
     target: { value: "读取文件" },
   });
   fireEvent.click(screen.getByRole("button", { name: "保存" }));

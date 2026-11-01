@@ -145,10 +145,10 @@ export function SubagentProfileEditor({
           />
         </Field>
       )}
-      <Field label="何时用（给模型看）">
+      <Field label="描述">
         <textarea
           className="textarea"
-          aria-label="何时用"
+          aria-label="描述"
           value={draft.description}
           disabled={isDefault || readonly}
           required

@@ -81,11 +81,11 @@ describe("设置页骨架组件 (src/ui)", () => {
 
   it("SettingsRow：labelFor 让输入框获得可访问名称", () => {
     render(
-      <SettingsRow label="完成提醒的阈值" labelFor="th">
+      <SettingsRow label="提醒触发时长" labelFor="th">
         <input id="th" className="input sm-w" />
       </SettingsRow>,
     );
-    expect(screen.getByRole("textbox", { name: "完成提醒的阈值" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "提醒触发时长" })).toBeTruthy();
   });
 
   it("SourceMarker：无 label 不渲染；warn / accent 变体带类名与 title", () => {

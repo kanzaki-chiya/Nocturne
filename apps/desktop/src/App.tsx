@@ -132,7 +132,7 @@ export function App({ host }: { host: DesktopHost }) {
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
   const [home, setHome] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
-  /** 已安装的编辑器（设置页"打开文件用"只列检测到的；失败按都没装） */
+  /** 已安装的编辑器（设置页"默认打开方式"只列检测到的；失败按都没装） */
   const [editors, setEditors] = useState<{ vscode: boolean; cursor: boolean }>({
     vscode: false,
     cursor: false,
@@ -152,7 +152,7 @@ export function App({ host }: { host: DesktopHost }) {
     };
   }, [host]);
   /**
-   * 回答内文件引用的打开能力（U-09）：左键按"打开文件用"设置打开，右键菜单
+   * 回答内文件引用的打开能力（U-09）：左键按"默认打开方式"设置打开，右键菜单
    * 列出资源管理器与检测到的编辑器。prefsVersion 驱动设置变更后重算。
    */
   const panelRef = useRef<SidePanelController | null>(null);

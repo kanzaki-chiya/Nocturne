@@ -714,9 +714,9 @@ function ExternalAgentForm({
             required
           />
         </Field>
-        <Field label="何时用（给模型看）">
+        <Field label="描述">
           <input
-            aria-label="何时用（给模型看）"
+            aria-label="描述"
             className="input lg mono"
             value={description}
             onChange={(event) => {

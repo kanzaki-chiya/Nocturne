@@ -348,17 +348,17 @@ describe("SettingsPage", () => {
       "opencode-go",
     );
     expect(primary.parentElement?.title).toBe("opencode-go · deepseek-v4.1-flash");
-    expect(row("看图模型").contains(primary)).toBe(true);
+    expect(row("视觉模型").contains(primary)).toBe(true);
     server.close();
   });
 
-  it("看图模型只列支持图片输入的模型；取消不写", async () => {
+  it("视觉模型只列支持图片输入的模型；取消不写", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
     render(<SettingsPage {...props(server.client, { section: "models" })} />);
-    await screen.findByText("看图模型");
-    fireEvent.click(row("看图模型").querySelector("button") ?? document.body);
-    await screen.findByRole("dialog", { name: "看图模型" });
+    await screen.findByText("视觉模型");
+    fireEvent.click(row("视觉模型").querySelector("button") ?? document.body);
+    await screen.findByRole("dialog", { name: "视觉模型" });
     expect(screen.getByRole("option", { name: /gpt-5/ })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /tiny/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -646,7 +646,7 @@ describe("SettingsPage", () => {
     expect(groups()).toEqual(["权限", "执行", "普通对话", "通知"]);
     expect(screen.getByRole("heading", { name: "常规" })).toBeTruthy();
     expect(screen.queryByText("默认值对新会话生效")).toBeNull();
-    expect(screen.queryByText("看图模型")).toBeNull();
+    expect(screen.queryByText("视觉模型")).toBeNull();
 
     view.rerender(<SettingsPage {...props(server.client, { section: "models" })} />);
     expect(groups()).toEqual(["默认", "模型角色"]);
@@ -759,8 +759,9 @@ describe("SettingsPage", () => {
     render(<SettingsPage {...props(server.client)} />);
     await screen.findByRole("switch", { name: "通知" });
     // 「完成」未勾：阈值行变灰（disabled 带原因），事件行本身可用（总开关开着）
+    expect(screen.getByRole("group", { name: "通知内容" })).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "需要确认" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("combobox", { name: "完成提醒的阈值" }).getAttribute("title")).toBe(
+    expect(screen.getByRole("combobox", { name: "提醒触发时长" }).getAttribute("title")).toBe(
       "未勾选「完成」",
     );
     server.close();
@@ -886,7 +887,7 @@ describe("SettingsPage", () => {
     const view = render(<SettingsPage {...props(server.client)} />);
     await screen.findByRole("switch", { name: "通知" });
     // 45 秒不在档位里：触发器显示「45 秒」
-    expect(screen.getByRole("combobox", { name: "完成提醒的阈值" }).textContent).toContain("45 秒");
+    expect(screen.getByRole("combobox", { name: "提醒触发时长" }).textContent).toContain("45 秒");
     view.unmount();
     cleanup();
     server.close();
@@ -933,7 +934,7 @@ it("默认模型与角色指向停用模型时加删除线并注明按未设置�
   expect(taskRow.querySelector(".model-value.off")).toBeTruthy();
   expect(taskRow.textContent).toContain("已停用，按未设置处理");
   // 未停用的角色值与默认文案保持不变
-  expect(row("看图模型").querySelector(".model-value.off")).toBeNull();
+  expect(row("视觉模型").querySelector(".model-value.off")).toBeNull();
   server.close();
 });
 
@@ -949,7 +950,7 @@ it("模型页的子代理模型行跳转到设置 › 子代理，不再弹出�
   server.close();
 });
 
-it("打开文件用：缺省 Nocturne 面板，只列检测到的编辑器，选择写本机 prefs", async () => {
+it("默认打开方式：缺省 Nocturne 面板，只列检测到的编辑器，选择写本机 prefs", async () => {
   const server = fakeServer(handlers());
   await server.initialize();
   const onFileOpenerChange = vi.fn(() => true);
@@ -962,7 +963,7 @@ it("打开文件用：缺省 Nocturne 面板，只列检测到的编辑器，选
     />,
   );
   await screen.findByText("默认权限预设");
-  const trigger = screen.getByRole("combobox", { name: "打开文件用" });
+  const trigger = screen.getByRole("combobox", { name: "默认打开方式" });
   expect(trigger.textContent).toContain("Nocturne 面板");
   fireEvent.click(trigger);
   expect(screen.getByRole("option", { name: /Nocturne 面板/ })).toBeTruthy();
@@ -973,7 +974,7 @@ it("打开文件用：缺省 Nocturne 面板，只列检测到的编辑器，选
   expect(onFileOpenerChange).toHaveBeenCalledWith("vscode");
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "✓已保存 打开文件用 = VS Code",
+    "✓已保存 默认打开方式 = VS Code",
   );
   server.close();
 });
