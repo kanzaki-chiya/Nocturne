@@ -5,13 +5,14 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: nowrap;
-  gap: var(--space-3);
-  height: 26px;
+  gap: var(--space-4);
+  height: var(--h-statusbar);
   padding: 0 var(--space-4);
   border-top: 1px solid var(--a-border);
   background: var(--a-side);
-  color: var(--a-muted);
-  font-size: var(--fs-1);
+  color: var(--a-secondary);
+  font: var(--fs-2)/var(--lh-tight) var(--sans);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .status-left,
@@ -20,7 +21,7 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-width: 0;
 }
 .status-right {
@@ -34,33 +35,36 @@
   gap: var(--space-1);
   min-height: 20px;
   max-width: 100%;
-  padding: 2px var(--space-1);
+  padding: 0;
   border-radius: var(--radius-1);
-  color: var(--a-muted);
+  color: var(--a-secondary);
   white-space: nowrap;
 }
 .status-pill:hover,
-.status-pill-active {
+.status-pill-active,
+.status-right .status-item:hover {
   background: var(--a-raised);
-  color: var(--a-text);
 }
 .status-pill b {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--a-text);
+  color: inherit;
   font-weight: var(--fw-medium);
 }
+.desktop-status .status-turn .dot,
 .status-dot {
-  flex: 0 0 5px;
-  width: 5px;
-  height: 5px;
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
   border-radius: var(--radius-pill);
+}
+.status-dot {
   background: var(--a-success);
 }
 .status-meter {
-  width: 44px;
-  height: 4px;
+  width: var(--status-meter-w);
+  height: 5px;
   border-radius: var(--radius-pill);
   background: var(--a-border-strong);
   overflow: hidden;
@@ -74,16 +78,20 @@
 .status-turn {
   white-space: nowrap;
 }
+.status-turn .muted-value {
+  color: var(--a-secondary);
+}
 .status-turn-busy {
   color: var(--a-warning);
 }
-/* 速度段（ADR-0053 修订 2026-10-11）：弱化文字 + 等宽数字，流式期间前面一个跳动的强调色小点 */
+/* 速度段：流式期间前面一个跳动的强调色小点 */
 .status-speed {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-1);
+  min-height: 20px;
+  padding: 0;
   border-radius: var(--radius-1);
   cursor: default;
   white-space: nowrap;
@@ -96,16 +104,10 @@
   outline: none;
   box-shadow: var(--shadow-focus);
 }
-.status-speed .mono {
-  color: var(--a-muted);
-}
-.status-speed-est .mono {
-  color: var(--a-muted);
-}
 .status-speed-live {
-  flex: 0 0 5px;
-  width: 5px;
-  height: 5px;
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
   border-radius: var(--radius-pill);
   background: var(--a-accent);
   animation: status-speed-pulse 1.2s ease-in-out infinite;
@@ -153,18 +155,10 @@
   position: relative;
   display: inline-flex;
 }
-.status-mcp-trigger,
-.status-mcp-ready {
-  color: var(--a-muted);
-}
-.status-mcp-trigger b,
-.status-mcp-ready b {
-  color: var(--a-secondary);
-}
 .status-mcp-dot {
-  flex: 0 0 5px;
-  width: 5px;
-  height: 5px;
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
   border-radius: var(--radius-pill);
   background: var(--a-warning);
 }
@@ -373,41 +367,12 @@
 .context-details .context-nested {
   padding-left: 16px;
 }
-.status-popover::-webkit-scrollbar {
-  width: 6px;
-}
-.status-popover::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-.status-popover::-webkit-scrollbar-track {
-  background: transparent;
-}
-.status-popover::-webkit-scrollbar-thumb {
-  border-radius: var(--radius-1);
-  background: var(--a-border-strong);
-}
 @media (max-width: 800px) {
   .desktop-status {
     padding-inline: 8px;
   }
   .status-context-popover {
     left: 8px;
-  }
-}
-@container (max-width: 700px) {
-  .desktop-status {
-    gap: var(--space-2);
-    padding-inline: var(--space-2);
-    font-size: var(--fs-1);
-  }
-  .status-left,
-  .status-right {
-    gap: var(--space-2);
-  }
-  .status-pill {
-    padding-inline: 4px;
   }
 }
 /* 主区变窄时按优先级让位：速度 → tokens → 上下文进度条；运行状态、上下文百分比、缓存命中始终保留 */

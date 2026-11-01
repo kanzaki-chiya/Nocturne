@@ -150,6 +150,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(normalRow.textContent).toBe("alpha");
   expect(normalRow.textContent).not.toContain(".nocturne");
   expect(normalRow.textContent).not.toContain("模型 + 用户");
+  expect(document.querySelector(".dhead .badge")).toBeNull();
   expect(within(list).getByRole("button", { name: /release/ }).textContent).toBe(
     "release2 处不生效",
   );
@@ -157,9 +158,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
     "alpha被覆盖",
   );
   expect(within(list).getByRole("button", { name: /manual/ }).textContent).toBe("manual缺说明");
-  expect(within(list).getByRole("button", { name: /pdf-tools/ }).textContent).toBe(
-    "pdf-tools额外目录",
-  );
+  expect(within(list).getByRole("button", { name: /pdf-tools/ }).textContent).toBe("pdf-tools");
   expect(within(list).getByRole("button", { name: /deploy/ }).textContent).toBe("deploy已停用");
   fireEvent.click(within(list).getByRole("button", { name: /release/ }));
   expect(screen.getByText("有 2 处写法在 Nocturne 里不生效").className).toContain("warn");

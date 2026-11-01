@@ -5,7 +5,6 @@ import { projectName } from "./session-tree";
 import { Scrim } from "./ProvidersPage";
 import type { SkillImportCommit, SkillImportPreview } from "./rpc-types";
 import {
-  Badge,
   Button,
   Checkbox,
   DataTable,
@@ -51,9 +50,7 @@ export const skillListMeta = (skill: SkillOverview): string | undefined =>
         ? "缺说明"
         : skill.ignored.length
           ? `${skill.ignored.length} 处不生效`
-          : skill.source === "extra"
-            ? "额外目录"
-            : undefined;
+          : undefined;
 
 export function SkillsPage({
   client,
@@ -253,14 +250,6 @@ export function SkillsPage({
               <DetailHeader
                 title={skill.name}
                 mono
-                extra={
-                  <Badge>
-                    {skill.layer === "user" ? "用户" : "项目"}
-                    <span className="muted-value">
-                      {skill.source === "extra" ? "额外目录" : skill.source}
-                    </span>
-                  </Badge>
-                }
                 actions={
                   <>
                     <Switch

@@ -907,9 +907,6 @@ function ProviderDetail({
                   <span className="model-cell">
                     <span title={m.modelId}>{m.fields.displayName.value ?? m.modelId}</span>
                     {defaultKey === `${p.id}/${m.modelId}` && <Badge variant="accent">默认</Badge>}
-                    {Object.values(m.fields).some((f) => f.userValue !== undefined) && (
-                      <Badge>已编辑</Badge>
-                    )}
                     {(off || disabledByModel[m.modelId] !== undefined) && <Badge>已停用</Badge>}
                   </span>
                 ),

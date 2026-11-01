@@ -68,6 +68,7 @@ describe("外部 agent 设置页", () => {
     expect(screen.queryByText(/外部费用计在其自己的账号/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     await screen.findByRole("heading", { name: "manual" });
+    expect(document.querySelector(".md-detail p.desc")).toBeNull();
     const badge = screen.getByText("只读", { selector: ".badge" });
     expect(badge.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
     const sw = screen.getByRole("switch") as HTMLButtonElement;

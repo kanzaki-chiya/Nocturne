@@ -316,7 +316,7 @@ describe("ProvidersPage 列表与详情", () => {
     server.close();
   });
 
-  it("API key 类：换密钥 / 刷新 / 删除；模型列表的默认、已编辑、能力列、搜索与「设置」入口", async () => {
+  it("API key 类：换密钥 / 刷新 / 删除；模型列表保留默认与能力、不显示来源，搜索与「设置」可用", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER] },
@@ -332,7 +332,7 @@ describe("ProvidersPage 列表与详情", () => {
     expect(button("刷新模型列表")).toBeTruthy();
     expect(button("删除").disabled).toBe(false);
     expect(within(screen.getByRole("table", { name: "模型" })).getByText("默认")).toBeTruthy();
-    expect(screen.getByText("已编辑")).toBeTruthy();
+    expect(screen.queryByText("已编辑")).toBeNull();
     expect(screen.getByText("200,000")).toBeTruthy();
     expect(screen.getByText("64K")).toBeTruthy();
     // 搜索过滤
@@ -712,6 +712,7 @@ describe("模型设置对话框", () => {
     await server.initialize();
     await OPEN_DIALOG(server);
     expect(screen.getByRole("dialog").querySelector(".marker")).toBeNull();
+    expect(screen.queryByText("已编辑")).toBeNull();
     expect(screen.getByRole("dialog").textContent).not.toMatch(
       /用户编辑|models\.dev|\.json|userModels/,
     );

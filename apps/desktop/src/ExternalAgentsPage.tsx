@@ -468,7 +468,7 @@ export function ExternalAgentsPage({
                 />
               );
             })()}
-            <p className="desc">{current.description ?? "没有说明"}</p>
+            {current.description && <p className="desc">{current.description}</p>}
             {externalAgentSlashConflict(current.name, skills) && (
               <p className="errt" role="status">
                 {externalAgentSlashConflict(current.name, skills)}

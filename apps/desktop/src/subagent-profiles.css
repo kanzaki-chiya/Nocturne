@@ -1,4 +1,4 @@
-.profile-description {
+.profile-editor .profile-description {
   field-sizing: content;
   resize: none;
   min-height: calc(3lh + var(--space-4) + 2px);

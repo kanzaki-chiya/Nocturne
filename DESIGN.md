@@ -45,7 +45,7 @@
 | 变量 | 桌面端用途 | 手机端用途 |
 |---|---|---|
 | `--fs-1` | 次要信息、徽章、时间戳、表头、分组标题、折叠箭头、工具行与思考过程 | 角标、快捷键、次要标签 |
-| `--fs-2` | 导航项、按钮、表单标签、设置行、列表项、表格正文 | 辅助说明、状态栏、胶囊按钮、代码输出 |
+| `--fs-2` | 导航项、按钮、表单标签、设置行、列表项、表格正文、状态栏全部文字（13px） | 辅助说明、状态栏、胶囊按钮、代码输出 |
 | `--fs-3` | 对话正文、输入框、卡片标题、Markdown `h4`–`h6` | 正文、设置行、抽屉项、选项标题 |
 | `--fs-4` | 页面与弹窗标题、Markdown `h3` | 顶栏标题、对话框标题、发送按钮 |
 | `--fs-5` | 欢迎标题、用量大数字、Markdown `h1`/`h2` | 空状态标题 |
@@ -55,6 +55,7 @@
 - **字重**：`--fw-regular`（正文）、`--fw-medium`（导航选中、按钮、表单标签、小标题）、`--fw-semibold`（页面标题、分组标题、大数字），不使用 `700`。
 - **行高**：`--lh-tight`（标题、单行控件）、`--lh-base`（界面正文、表单说明）、`--lh-code`（代码块、日志、终端）、`--lh-prose`（对话 Markdown 正文）。
 - **数字对齐**：百分比、token 数、金额、时间、计数器统一加 `font-variant-numeric: tabular-nums`，避免跳动与错位。
+- **状态栏**：高 `--h-statusbar`（32px），本体统一 `--fs-2`、`--sans`，数字用 tabular-nums，不用 `.mono`；除状态色外文字统一 `--a-secondary`（含「第 N 轮」），项间距 `16px`，垂直居中并保持文字基线一致。各项无额外水平内边距，点击项保留悬停底色。进度条 `56 × 5px`，状态点 `6px`；浮层排版保持不变。
 
 ---
 
@@ -238,6 +239,6 @@
      - `reportDescriptionlessDisables` 与 `reportNeedlessDisables`：禁止无理由或已失效的 `stylelint-disable` 注释。
    - **警告级（warning）**：
      - `declaration-property-value-disallowed-list`：`padding*`、`margin*`、`gap`、`row-gap`、`column-gap` 只允许 `var(--*)`、`0`、`auto`；
-     - 通过 `--max-warnings 680` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
+     - 通过 `--max-warnings 677` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
 2. **`node scripts/gen-tokens.mjs --check`**：校验 `apps/desktop/src/tokens.css` 与 `design/tokens.json` 完全同步，手工编辑 `tokens.css` 会直接失败。
 3. **`node scripts/check-css-vars.mjs`**：扫描 `apps/desktop/src/**/*.{css,ts,tsx}` 中所有 `var(--*)` 引用，若无回退值且未在任何 CSS 文件中定义则报错退出。

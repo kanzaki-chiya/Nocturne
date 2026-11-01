@@ -112,7 +112,7 @@ function McpBadge({
           }}
         >
           <span className="dot ok" aria-hidden="true" />
-          MCP <b className="mono">{readyCount}</b>
+          MCP <b>{readyCount}</b>
         </button>
       </span>
     );
@@ -151,7 +151,7 @@ function McpBadge({
         }}
       >
         <span className="status-mcp-dot" aria-hidden="true" />
-        MCP 未连接 <b className="mono">{servers.length}</b>
+        MCP 未连接 <b>{servers.length}</b>
       </button>
       {open && (
         <div id={tipId} role="tooltip" className="status-popover status-mcp-tip">
@@ -259,7 +259,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
       }}
     >
       {speed.live && <span className="status-speed-live" aria-hidden="true" />}
-      <span className="mono">{speed.label}</span>
+      <span>{speed.label}</span>
       {open && hasTip && (
         <span id={tipId} role="tooltip" className="status-popover status-speed-tip">
           {speed.live ? (
@@ -434,17 +434,17 @@ export function StatusBar({
             <span className="status-meter ctx-bar" aria-hidden="true">
               <i style={{ width: `${Math.max(0, Math.min(100, used ?? 0))}%` }} />
             </span>
-            <span className="mono">{used === null ? "—" : `${used}%`}</span>
+            <span>{used === null ? "—" : `${used}%`}</span>
           </>,
         )}
         <span
-          className="status-item status-tokens mono"
+          className="status-item status-tokens"
           title={`累计输入 ${number.format(cacheUsage.inputTokens)} / 输出 ${number.format(cacheUsage.outputTokens)} tokens`}
         >
           {compactTokens(totalTokens)} tokens
         </span>
         <span className="status-item status-cache">
-          缓存 <span className="mono">{cache === null ? "—" : `${cache}%`}</span>
+          缓存 <span>{cache === null ? "—" : `${cache}%`}</span>
         </span>
         <SpeedBadge speed={speed} />
       </div>

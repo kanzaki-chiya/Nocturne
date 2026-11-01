@@ -322,6 +322,26 @@ describe("contextSourceLabel", () => {
 });
 
 describe("StatusBar", () => {
+  it("状态栏本体的数值与状态不使用等宽类，浮层不计入", async () => {
+    const state = fixture();
+    const view = {
+      ...state.view,
+      status: "thinking" as const,
+      currentTurn: { turnId: "t1", turnIndex: 3 },
+      mcpServers: { exa: { state: "ready" as const, toolCount: 2 } },
+    };
+    const { container } = render(<StatusBar {...state} view={view} panel="context" />);
+    await screen.findByText("14%");
+    const bar = must(container.querySelector<HTMLElement>(".desktop-status"));
+    const groups = bar.querySelectorAll<HTMLElement>(".status-group");
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.textContent).toContain("第 3 轮");
+    expect(groups[0]?.textContent).toContain("0 tokens");
+    expect(groups[0]?.textContent).toContain("缓存 —");
+    expect(groups[1]?.textContent).toContain("MCP 1");
+    for (const group of groups) expect(group.querySelector(".mono")).toBeNull();
+  });
+
   it("左组与右组内容及顺序固定，不含模型/档位/预设/Shell 按钮，无孤立中点", async () => {
     const state = fixture();
     const onManageMcp = vi.fn();
@@ -632,6 +652,7 @@ describe("状态栏速度段", () => {
       />,
     );
     expect(speed()?.textContent).toMatch(/^~\d+ tok\/s$/);
+    expect(speed()?.querySelector(".mono")).toBeNull();
     expect(speed()?.querySelector(".status-speed-live")).not.toBeNull();
     fireEvent.mouseEnter(must(speed()));
     const tip = screen.getByRole("tooltip");
