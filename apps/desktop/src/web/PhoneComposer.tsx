@@ -492,7 +492,7 @@ export function PhoneComposer({
                   </>
                 )
               }
-              detail={option.description ?? (kind === "model" ? undefined : option.detail)}
+              detail={kind === "model" ? undefined : option.detail}
               checked={option.value === control.value}
               disabled={option.disabled}
               risk={option.risk === true}

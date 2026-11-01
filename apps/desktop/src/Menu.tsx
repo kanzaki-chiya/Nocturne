@@ -153,7 +153,6 @@ export interface ChoiceMenuControl {
       value: string;
       label: string;
       detail?: ReactNode;
-      description?: string;
       tag?: string;
       risk?: boolean;
       title?: string;
@@ -223,8 +222,7 @@ export function ChoiceMenu({
             ...group,
             options: orderGroup(
               group.options.filter((option) => {
-                const detailText =
-                  typeof option.detail === "string" ? option.detail : (option.description ?? "");
+                const detailText = typeof option.detail === "string" ? option.detail : "";
                 const text =
                   `${option.label} ${option.value} ${option.tag ?? ""} ${detailText} ${option.title ?? ""}`.toLowerCase();
                 return text.includes(q);
@@ -351,11 +349,7 @@ export function ChoiceMenu({
                     {...(option.disabled !== undefined ? { disabled: option.disabled } : {})}
                     {...(option.title !== undefined ? { title: option.title } : {})}
                     label={option.label}
-                    {...(option.detail !== undefined
-                      ? { detail: option.detail }
-                      : option.description !== undefined
-                        ? { detail: <span aria-hidden="true">{option.description}</span> }
-                        : {})}
+                    {...(option.detail !== undefined ? { detail: option.detail } : {})}
                     {...(option.tag !== undefined
                       ? { right: <span aria-hidden="true">{option.tag}</span> }
                       : {})}

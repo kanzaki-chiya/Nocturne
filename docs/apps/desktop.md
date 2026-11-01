@@ -185,9 +185,9 @@ interface NodeProbe {
 待发输入是 Runtime 内存状态（[view.md](../protocols/view.md#待发输入预览状态)）：切走不关闭带待发输入的会话（否则这些输入会无声丢失），关闭窗口时如有待发输入先弹确认「还有 N 条没发出 / 关闭后会丢失」，可选「留在这里」或「仍然退出」。窗口关闭请求由外壳拦下（`CloseRequested` → 发 `app-close-requested` 事件给界面），界面确认后经命令 `app_close` 继续退出、`app_close_cancel` 留下；没有待发输入时界面立刻 `app_close`，脚本无响应时外壳 120 秒后照常退出，避免关不掉窗口。
 
 - 模型 chip（空状态与会话共用）：「最近使用」（`listRecentModels` ∩ `listModels`，按 recents 顺序）+ 其余按服务商分组（U-06，共用 `modelGroups`）；不可用的模型带原因置灰，底部有「管理服务商…」。
-- 档位 chip（空状态与会话共用）：当前模型可用档位（会话来自 `reasoningEffortInfo`，草稿来自 `ModelInfo.capabilities.reasoningEffort`）；current≠effective 时提示「本轮使用 X；Y 将在下一轮生效」。选择写入 `prefs.lastEffort`。
-- 预设 chip（空状态托盘、会话工具行）：`PERMISSION_PRESET_NAMES`；草稿里未触碰不计入选项，会话内带中文标签与说明、危险项排在分隔线之后。
-- 运行中模型控件锁定（title「本轮结束后可切换」），思考档位、权限预设仍可切（菜单内注明何时生效）。Shell 为全局设置，在「设置 › 常规」切换。
+- 档位 chip（空状态与会话共用）：当前模型可用档位（会话来自 `reasoningEffortInfo`，草稿来自 `ModelInfo.capabilities.reasoningEffort`）；选项只显示名称与中文名，不显示说明或忙时生效提示，保留「该模型未声明可用思考档位」空状态。选择写入 `prefs.lastEffort`。
+- 预设 chip（空状态托盘、会话工具行）：`PERMISSION_PRESET_NAMES`；草稿里未触碰不计入选项，选项只显示名称与中文名、危险项排在分隔线之后。
+- 运行中模型控件锁定（title「本轮结束后可切换」），思考档位、权限预设仍可切。Shell 为全局设置，在「设置 › 常规」切换；菜单不显示忙时生效提示，切换行为不变。
 - 「＋」菜单：「添加文件…」（系统对话框 `pick_files`，不限类型）与「引用文件…」（在光标处插入 `@` 并打开文件弹层）；`fileRefs` 为 null 时「引用文件…」置灰并给出原因。
 - 附件三条路径：不限类型的对话框、剪贴板文件、拖入任意文件（`dragDropEnabled: false` 让 HTML5 drop 拿到 File 对象）。图片保留缩略图；文件显示类型标记、文件名、大小、✕（`aria-label`「移除 <名>」），object URL 随移除/卸载回收。UTF-8 文本粘贴达到 32 KiB 转 `pasted-<n>.txt`，Ctrl+Shift+V 保留正文。发送载荷 `{ data: Uint8Array, mimeType: string, label, source? }` 由 Core 统一分流，提交被拒时保留附件与草稿；完整规则见 [ADR-0072](../decisions/ADR-0072-file-attachments.md)。
 - `@` 引用：文件索引懒加载（`fileRefs.load()`，`key` 变化才重取；会话内 `key` 用 `view.turnCount`）。弹层按 `src/file-refs.ts` 的排序（文件名前缀 > 文件名包含 > 路径包含，同级短路径优先），Tab/Enter 选择插入 `@路径 `（含空格路径写成 `@"a b.txt" `；目录不带尾随空格、弹层继续展开列下一级）。光标紧跟在一个完整 `@路径` 引用后面时 Backspace 一次删掉整个引用（含至多一个尾随分隔空格），光标在引用前面时 Delete 同理（U-05，`fileRefDeleteRange` 与补全共用同一套词法：行首或空白起、以 `@` 开头，引号形式须有收尾引号，无引号形式须被空白终止；有选区或输入法组合输入中保持默认行为）。纯文本里输入的 `@` 引用经 textarea 底下的镜像层高亮（`parseFileRefs` 区间上色，发送的仍是纯文本）。草稿/普通对话没有项目文件索引：`fileRefs` 为 null，输入 `@` 不弹层，菜单项 title 给出原因（`fileRefsUnavailable`）；空状态下项目文件搜索等 runtime 级 `fileIndex` 能力，见文末限制说明。

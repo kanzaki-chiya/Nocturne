@@ -833,10 +833,9 @@ it("忙时（等待确认）档位/预设可切换、模型锁定（U-03）", as
   expect(screen.getByRole("button", { name: "切换模型" })).toHaveProperty("disabled", true);
   expect(screen.getByRole("button", { name: "切换思考档位" })).toHaveProperty("disabled", false);
   expect(screen.getByRole("button", { name: "切换权限预设" })).toHaveProperty("disabled", false);
-  // 预设菜单说明：等待中的请求仍由用户决定
+  // 忙时菜单不写说明，切换仍走真实 RPC
   fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
-  const note = await screen.findByText(/等待确认的权限请求仍由你决定/);
-  expect(note).toBeTruthy();
+  expect(screen.getByRole("menu").textContent).not.toMatch(/本轮|下一次|等待确认|改文件|命令/);
   // 忙时切换预设走真实 RPC
   fireEvent.click(await screen.findByRole("menuitemradio", { name: /bypass/ }));
   await waitFor(() =>
@@ -846,9 +845,9 @@ it("忙时（等待确认）档位/预设可切换、模型锁定（U-03）", as
       ),
     ).toBe(true),
   );
-  // 思考档位菜单说明：下一轮生效
+  // 档位菜单同样不写生效时机
   fireEvent.click(screen.getByRole("button", { name: "切换思考档位" }));
-  expect(await screen.findByText(/下一轮生效/)).toBeTruthy();
+  expect(screen.getByRole("menu").textContent).not.toMatch(/本轮|下一轮|生效/);
 });
 
 it("/compact 走真实 RPC，移除命令只给界面提示", async () => {

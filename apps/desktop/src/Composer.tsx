@@ -45,9 +45,8 @@ export interface ChoiceOption {
   detail?: string;
   /** 悬停说明（如模型菜单里的原始模型 id） */
   title?: string;
-  /** 自绘下拉（Dropdown）里的中文名、说明与危险标记；说明统一来自 choice-info.ts */
+  /** 自绘下拉（Dropdown）里的中文名与危险标记；中文名统一来自 choice-info.ts */
   tag?: string;
-  description?: string;
   risk?: boolean;
   /** 禁用原因（menu item 的 title） */
   disabled?: string;

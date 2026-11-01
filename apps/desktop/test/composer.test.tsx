@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Composer, type ComposerProps } from "../src/Composer";
-import { presetOptions } from "../src/choice-info";
+import { effortOption, presetOptions } from "../src/choice-info";
 import type { FileIndexEntry } from "../src/file-refs";
 import type { PickedImage } from "../src/picked-images";
 
@@ -520,6 +520,12 @@ describe("Composer 控件与附件", () => {
     const controls = props().controls;
     if (controls === undefined) throw new Error("fixture 缺少 controls");
     controls.preset.groups = [{ options: presetOptions() }];
+    expect(presetOptions().every((option) => !("description" in option))).toBe(true);
+    expect(
+      ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+        .map(effortOption)
+        .every((option) => !("description" in option)),
+    ).toBe(true);
     const onManageProviders = vi.fn();
     render(<Composer {...props({ controls, onManageProviders })} />);
     fireEvent.click(screen.getByRole("button", { name: "切换模型" }));

@@ -214,21 +214,6 @@ export function useSessionControls(
   const model = snapshot?.model ?? view.config.model;
   const busy = view.status !== "idle" && view.status !== "failed";
   const effort = snapshot?.effort;
-  const effortNote = [
-    effort?.available.length === 0 ? "该模型未声明可用思考档位" : undefined,
-    busy ? "本轮正在进行：下一轮生效" : undefined,
-    effort !== undefined && effort.current !== effort.effective
-      ? `本轮使用 ${effort.effective}；${effort.current} 将在下一轮生效`
-      : undefined,
-  ]
-    .filter((text): text is string => text !== undefined)
-    .join("；");
-  // ADR-0036 修订：忙时切换从下一次权限判定起生效；等待确认的请求仍由用户决定
-  const presetNote = busy
-    ? view.status === "waiting_permission"
-      ? "本轮正在进行：从下一次权限判定起按新预设；等待确认的权限请求仍由你决定，切换不替它放行"
-      : "本轮正在进行：从下一次权限判定起按新预设，已执行的操作不受影响"
-    : undefined;
   const currentModel =
     model === undefined
       ? undefined
@@ -254,7 +239,7 @@ export function useSessionControls(
         options: ["off", ...(effort?.available ?? [])].map(effortOption),
       },
     ],
-    ...(effortNote !== "" ? { note: effortNote } : {}),
+    ...(effort?.available.length === 0 ? { note: "该模型未声明可用思考档位" } : {}),
     onSelect: (value) =>
       choose(async () => {
         await session.setReasoningEffort(value);
@@ -265,7 +250,6 @@ export function useSessionControls(
     value: snapshot?.preset ?? view.config.permissionPreset,
     label: snapshot?.preset ?? view.config.permissionPreset ?? "—",
     groups: [{ options: presetOptions() }],
-    ...(presetNote !== undefined ? { note: presetNote } : {}),
     onSelect: (value) =>
       choose(async () => {
         await session.setPermissionPreset(value);
@@ -285,7 +269,6 @@ export function useSessionControls(
     groups: shellGroups(shells ?? [], shell?.effective?.kind ?? "—"),
     ...(() => {
       const notes = [
-        busy ? "本轮正在进行：下一次命令生效" : undefined,
         shells === undefined
           ? "正在探测 Shell…"
           : shell?.overriddenBy !== undefined
