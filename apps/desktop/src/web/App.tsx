@@ -47,7 +47,6 @@ import { Switch } from "../ui";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
-export const PAIR_TRUST_NOTE = "中继只转发密文；详细的信任说明见电脑上的「设置 › 远程」。";
 export function iosBrowser(): boolean {
   return (
     /iPhone|iPad|iPod/.test(navigator.userAgent) ||
@@ -480,10 +479,7 @@ export function PhoneApp({
           )}
           {push.message && <p role="status">{push.message}</p>}
           <div className="phone-switch">
-            <span>
-              {push.state === "working" ? "正在设置推送…" : "需要处理时提醒我"}
-              <small>只显示固定提醒，不发送会话内容</small>
-            </span>
+            <span>{push.state === "working" ? "正在设置推送…" : "需要处理时提醒我"}</span>
             <Switch
               aria-label="推送通知"
               checked={push.state === "enabled"}
@@ -574,7 +570,6 @@ export function PhoneApp({
     body = (
       <section className="phone-body">
         <h2>确认这台手机的名称</h2>
-        <p>名称会显示在电脑的「设置 › 远程」中。</p>
         <label>
           设备名
           <input
@@ -630,7 +625,6 @@ export function PhoneApp({
               {platform.pairHint ??
                 "在电脑的「设置 › 远程」登记中继，然后选择「配对新手机」，用相机扫码。"}
             </p>
-            <p>{PAIR_TRUST_NOTE}</p>
             {pairForm}
           </>
         )}
@@ -641,7 +635,7 @@ export function PhoneApp({
     body = (
       <section className="phone-body phone-list">
         <h3 className="phone-list-h">项目</h3>
-        {!loaded && <p role="status">{connected ? "正在读取会话…" : "连接后会在这里显示项目。"}</p>}
+        {!loaded && connected && <p role="status">正在读取会话…</p>}
         <button
           className="phone-row"
           disabled={!connected}
@@ -654,9 +648,6 @@ export function PhoneApp({
           </span>
           <span className="phone-row-main">
             <b>定时任务</b>
-            <small>
-              <span>只在电脑端运行 · 新建和修改请在电脑上操作</span>
-            </small>
           </span>
         </button>
         {projects.map((project) => (
@@ -691,9 +682,6 @@ export function PhoneApp({
               </span>
               <span className="phone-row-main">
                 <b>其他目录…</b>
-                <small>
-                  <span>在电脑上的任意已有目录新建会话</span>
-                </small>
               </span>
             </button>
           ) : (
@@ -721,7 +709,6 @@ export function PhoneApp({
                   }}
                 />
               </label>
-              <small>目录必须已存在。项目配置未被信任的目录，需要先在电脑上信任该项目。</small>
               <div className="phone-actions">
                 <button
                   type="button"
@@ -749,7 +736,7 @@ export function PhoneApp({
           <p className="phone-sub" title={page.path}>
             {rows.length} 个会话<span className="muted-value">{page.path}</span>
           </p>
-          {rows.length === 0 && loaded && <p>还没有会话，在下方输入即可在这里新建。</p>}
+          {rows.length === 0 && loaded && <p>还没有会话</p>}
           {rows.map((row) => {
             const opened = sessions.opened.get(row.id);
             const summary = byId.get(row.id);
@@ -825,9 +812,7 @@ export function PhoneApp({
         }}
       />
     ) : (
-      <section className="phone-body">
-        <p role="status">{connected ? "正在打开会话…" : "连接后会打开会话。"}</p>
-      </section>
+      <section className="phone-body">{connected && <p role="status">正在打开会话…</p>}</section>
     );
   } else if (page.kind === "ext") {
     body = (
@@ -988,7 +973,6 @@ export function PhoneApp({
               </button>
             </>
           )}
-          <small>只记在这台手机上，不含会话内容。</small>
           {platform.diagnostics?.(extension)}
         </section>
         <section className="phone-section" aria-label="主题">
@@ -1199,7 +1183,6 @@ export function PhoneApp({
               />
               <PopoverOption
                 label="压缩上下文"
-                detail="与输入 /compact 相同"
                 disabled={
                   !connected
                     ? "电脑尚未连接"
@@ -1216,7 +1199,6 @@ export function PhoneApp({
               />
               <PopoverOption
                 label="MCP 状态"
-                detail="与输入 /mcp 相同"
                 disabled={connected ? undefined : "电脑尚未连接"}
                 onSelect={() => {
                   void entry.session.mcpServers().then(

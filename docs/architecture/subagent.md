@@ -264,7 +264,7 @@ launch(request, ctx)
 
 观察完成状态放在视图外的只读来源元数据中，不给 reducer 注入虚假的 turn.completed；未收束日志可以仍有 currentTurn / pendingPermission，但界面停止转圈并提示「日志未收束／运行状态未知」。实时订阅前丢失的思考增量不能补造；持久 message.assistant 到达后按完整内容收敛，思考时长只展示已知值。
 
-**权限语义不扩展**：当前内置子会话及 ACP 都是非交互 gate，剩余 ask 直接 non_interactive deny，不产生等待用户确认。父 task 启动前的确认留在主对话，此时还没有 child，不提供可用的子标签入口；标签内受阻操作提示「子代理无法请求确认；需由主代理在主对话处理」。若读取旧日志发现未决 permission.requested，只展示只读状态与「确认仍在主对话处理；此处不能批准」，无应答按钮；历史未收束请求不声称当前仍在等待。未来若做权限冒泡，另行设计，不能在这轮为了造一个等待状态而改变第 7 节。
+**权限语义不扩展**：当前内置子会话及 ACP 都是非交互 gate，剩余 ask 直接 non_interactive deny，不产生等待用户确认。父 task 启动前的确认留在主对话，此时还没有 child，不提供可用的子标签入口。若读取旧日志发现未决 permission.requested，只读视图不渲染确认提示、无应答按钮；历史未收束请求不声称当前仍在等待。未来若做权限冒泡，另行设计，不能在这轮为了造一个等待状态而改变第 7 节。
 
 只读观察不启动会话、不授予交互句柄，不进入工具权限管线、不新增 Grant。已有 resumeSession 仍是显式打开；不得借观察对象调用 submit、respondPermission、respondQuestion 或 interrupt。新 RPC 仅本机开放，远程由服务端白名单拒绝，ADR-0052 的通道与手机现有能力保持不变。
 

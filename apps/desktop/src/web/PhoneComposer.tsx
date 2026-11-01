@@ -646,7 +646,7 @@ export function PhoneComposer({
           aria-label="消息"
           rows={1}
           value={draft}
-          placeholder={placeholder ?? "输入消息，/ 查看命令"}
+          placeholder={placeholder ?? "输入消息"}
           onChange={(event) => {
             update(event.target.value, event.target.selectionStart);
           }}

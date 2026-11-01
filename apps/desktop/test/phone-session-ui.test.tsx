@@ -106,6 +106,7 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   );
   expect(project?.textContent).toContain("work");
   await act(() => project?.click());
+  expect(container.querySelector<HTMLTextAreaElement>("textarea")?.placeholder).toBe("输入消息");
   const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
   expect(row?.textContent).toContain("测试会话");
   await act(() => row?.click());
@@ -176,6 +177,7 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   }
   const field = container.querySelector<HTMLTextAreaElement>("textarea");
   if (!field) throw new Error("缺少文字输入");
+  expect(field.placeholder).toBe("输入消息");
   await act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
       field,

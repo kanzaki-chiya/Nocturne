@@ -376,7 +376,7 @@ export function DraftComposer({
       controls={draft.controls}
       running={false}
       disabled={!connected ? "电脑尚未连接" : draft.loading ? "正在读取电脑上的模型…" : undefined}
-      placeholder="输入消息，在这里新建会话"
+      placeholder="输入消息"
       onSubmit={async (input) => {
         await onCreate(input, draft.createOptions());
         return true;

@@ -151,7 +151,7 @@
 ## 8. 文案与显示规范
 
 - **界面不写描述性文字**：
-  - 不写模式标签（如待发队列不标排队/插话模式标签）、不写送达或状态说明、不在输入框占位符里塞快捷键提示、不写解释行为的 `title`；
+  - 不写模式标签（如待发队列不标排队/插话模式标签）、不写送达或状态说明、不在输入框占位符里塞快捷键提示、不写解释行为的 `title`；输入框占位只写「输入消息」；
   - 图标按钮的 `title` 与 `aria-label` 只写动作名（如「立即发送」「编辑」「取消」「关闭面板」）。
 - **工具行用中文名称**：对话流与子代理面板的工具行显示 `Conversation.tsx` 的 `TOOL_META`（读取、搜索、查找文件、编辑、写入、命令、读取网页等），不显示底层工具标识或单字母图标。
 - **默认状态不标**：设置项处于默认值时不加「默认」「本机」等标记；仅在被项目层或接入层覆盖、只读锁定或模型已停用时显示来源或警告标记。
@@ -237,6 +237,6 @@
      - `reportDescriptionlessDisables` 与 `reportNeedlessDisables`：禁止无理由或已失效的 `stylelint-disable` 注释。
    - **警告级（warning）**：
      - `declaration-property-value-disallowed-list`：`padding*`、`margin*`、`gap`、`row-gap`、`column-gap` 只允许 `var(--*)`、`0`、`auto`；
-     - 通过 `--max-warnings 690` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
+     - 通过 `--max-warnings 681` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
 2. **`node scripts/gen-tokens.mjs --check`**：校验 `apps/desktop/src/tokens.css` 与 `design/tokens.json` 完全同步，手工编辑 `tokens.css` 会直接失败。
 3. **`node scripts/check-css-vars.mjs`**：扫描 `apps/desktop/src/**/*.{css,ts,tsx}` 中所有 `var(--*)` 引用，若无回退值且未在任何 CSS 文件中定义则报错退出。

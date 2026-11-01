@@ -325,7 +325,8 @@ it("运行中：无切换按钮、发送默认排队、待发列表「立即发�
   });
   // 运行中没有 .phone-send-mode 切换按钮；占位与空闲时一致，不含「插话」「排队」
   expect(container.querySelector(".phone-send-mode")).toBeNull();
-  expect(field().placeholder).toBe("输入消息，/ 查看命令");
+  expect(field().placeholder).toBe("输入消息");
+  expect(field().placeholder).not.toContain("/ 查看命令");
   expect(field().placeholder).not.toMatch(/插话|排队/);
   // 待发列表：单行内容 + 暂停提示，无送达说明；排队条目提供「立即发送」转为插话
   expect(container.querySelector(".pending-inputs")?.textContent).toContain("插话一条");
