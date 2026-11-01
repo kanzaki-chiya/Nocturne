@@ -407,12 +407,14 @@
   font-size: var(--fs-1);
   color: var(--a-accent);
   background: transparent;
+  /* stylelint-disable-next-line function-disallowed-list -- 思考收起按钮用 35% --a-accent 混入 --a-border 的弱强调描边 */
   border: 1px solid color-mix(in srgb, var(--a-accent) 35%, var(--a-border));
   border-radius: var(--radius-2);
   padding: 3px 10px;
   cursor: pointer;
 }
 .conversation .think-end button:hover {
+  /* stylelint-disable-next-line function-disallowed-list -- 思考收起按钮悬停用 10% --a-accent 半透明底 */
   background: color-mix(in srgb, var(--a-accent) 10%, transparent);
 }
 .conversation div.think {
@@ -848,6 +850,7 @@
   color: var(--a-warning);
 }
 .conversation-notice-error {
+  /* stylelint-disable-next-line function-disallowed-list -- 对话内错误提示条用 8% --a-error 半透明底 */
   background: color-mix(in srgb, var(--a-error) 8%, transparent);
   color: var(--a-error);
 }
@@ -875,6 +878,7 @@
   margin: 0 auto;
   padding: 10px 12px;
   /* 「需要确认」用整张卡的警告色边框与浅底表达，不用左侧色条 */
+  /* stylelint-disable-next-line function-disallowed-list -- 权限确认卡用 55% --a-warning 混入 --a-border 的警告描边 */
   border: 1px solid color-mix(in srgb, var(--a-warning) 55%, var(--a-border));
   border-radius: var(--radius-3);
   background: linear-gradient(var(--a-warning-bg), var(--a-warning-bg)), var(--a-panel);
@@ -1133,6 +1137,7 @@
 }
 .qcard .opt[aria-checked="true"] {
   background: var(--a-sel);
+  /* stylelint-disable-next-line function-disallowed-list -- 提问卡选中项用 45% --a-accent 半透明描边 */
   border-color: color-mix(in srgb, var(--a-accent) 45%, transparent);
 }
 .qcard .key {

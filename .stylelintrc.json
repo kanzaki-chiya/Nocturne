@@ -1,0 +1,32 @@
+{
+  "ignoreFiles": ["apps/desktop/src/tokens.css"],
+  "reportDescriptionlessDisables": true,
+  "reportNeedlessDisables": true,
+  "rules": {
+    "color-no-hex": true,
+    "color-named": "never",
+    "function-disallowed-list": ["rgb", "rgba", "hsl", "hsla", "color-mix"],
+    "declaration-property-value-allowed-list": {
+      "font-size": ["/var\\(--/", "0", "none", "inherit", "50%"],
+      "/^border(-(top|bottom|start|end))?(-(left|right|start|end))?-radius$/": [
+        "/var\\(--/",
+        "0",
+        "none",
+        "inherit",
+        "50%"
+      ],
+      "box-shadow": ["/var\\(--/", "0", "none", "inherit", "50%"]
+    },
+    "declaration-property-value-disallowed-list": [
+      {
+        "/^(padding|margin)(-|$)/": [
+          "/^(?!(?:(?:var\\(--[a-zA-Z0-9_-]+\\)|0|auto)(?:\\s+|$))+$)[\\s\\S]+/"
+        ],
+        "/^(row-|column-)?gap$/": [
+          "/^(?!(?:(?:var\\(--[a-zA-Z0-9_-]+\\)|0|auto)(?:\\s+|$))+$)[\\s\\S]+/"
+        ]
+      },
+      { "severity": "warning" }
+    ]
+  }
+}

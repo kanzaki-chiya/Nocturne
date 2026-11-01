@@ -102,7 +102,7 @@
   max-width: 100%;
   display: block;
   margin: 18px auto;
-  background: #fff;
+  background: var(--a-qr-bg);
 }
 .remote-pair label {
   display: block;
@@ -135,6 +135,7 @@
 .scrim:has(> .agent-pair-dlg) {
   position: fixed;
   inset: 0;
+  /* stylelint-disable-next-line color-no-hex, function-disallowed-list -- 外部代理配对对话框遮罩固定 36% 黑，深浅色共用 */
   background: color-mix(in srgb, #000 36%, transparent);
   display: grid;
   place-items: center;

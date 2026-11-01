@@ -414,8 +414,11 @@
   min-height: 24px;
   padding: 0;
   border-radius: var(--radius-pill);
+  /* stylelint-disable-next-line function-disallowed-list -- 缩略图移除按钮深色半透明遮罩，与 --a-overlay 不同 */
   background: rgb(0 0 0 / 0.6);
+  /* stylelint-disable-next-line color-no-hex -- 深色图片遮罩上的固定白字 */
   color: #fff;
+  /* stylelint-disable-next-line declaration-property-value-allowed-list -- 附件移除 ✕ 字符在 24px 圆钮内光学居中 */
   font-size: 15px;
   line-height: 1;
 }
@@ -425,7 +428,9 @@
   right: 0;
   bottom: 0;
   padding: 1px 4px;
+  /* stylelint-disable-next-line function-disallowed-list -- 缩略图底部角标深色半透明遮罩，与 --a-overlay 不同 */
   background: rgb(0 0 0 / 0.5);
+  /* stylelint-disable-next-line color-no-hex -- 深色图片遮罩上的固定白字 */
   color: #fff;
   font-size: var(--fs-1);
   text-align: center;
@@ -590,6 +595,7 @@
   background: var(--a-panel);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
+  /* stylelint-disable-next-line color-no-hex, declaration-property-value-allowed-list -- 手机浮层加深阴影，与桌面 --shadow-popover 不同 */
   box-shadow: 0 12px 40px #0004;
 }
 .phone-popover.wide {
@@ -687,6 +693,7 @@
 .phone-option-check {
   flex: none;
   color: var(--a-success);
+  /* stylelint-disable-next-line declaration-property-value-allowed-list -- 手机选项勾选 ✓ 字符光学居中与触控辨识度 */
   font-size: 18px;
 }
 .phone-context {
@@ -709,6 +716,7 @@
   inset: 0;
   display: grid;
   place-items: center;
+  /* stylelint-disable-next-line color-no-hex -- 手机重命名弹窗 53% 黑遮罩，与 --a-overlay 不同 */
   background: #0008;
   padding: 20px;
 }
@@ -757,6 +765,7 @@
   background: var(--a-panel);
   border-top: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3) var(--radius-3) 0 0;
+  /* stylelint-disable-next-line color-no-hex, declaration-property-value-allowed-list -- 手机底部抽屉向上投影，无对应向上阴影 token */
   box-shadow: 0 -12px 40px #0003;
 }
 .phone-sheet .ask {

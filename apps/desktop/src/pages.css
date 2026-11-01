@@ -189,6 +189,7 @@
   max-width: 640px;
 }
 .page3 .wait.warnb {
+  /* stylelint-disable-next-line function-disallowed-list -- 登录等待警告态用 40% --a-warning 混入 --a-border 的描边 */
   border-color: color-mix(in srgb, var(--a-warning) 40%, var(--a-border));
 }
 .page3 .wait .l1 {
@@ -245,6 +246,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  /* stylelint-disable-next-line function-disallowed-list -- 服务商提示横幅用 45% --a-warning 混入 --a-border 的描边 */
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
   background: var(--a-warning-bg);
   color: var(--a-warning);
@@ -260,6 +262,7 @@
   margin-left: auto;
 }
 .page3 .keybox {
+  /* stylelint-disable-next-line function-disallowed-list -- 密钥提示框用 45% --a-warning 混入 --a-border 的描边 */
   border: 1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border));
   background: var(--a-warning-bg);
   border-radius: var(--radius-3);
@@ -285,6 +288,7 @@
 .page3 .scrim {
   position: absolute;
   inset: 0;
+  /* stylelint-disable-next-line color-no-hex, function-disallowed-list -- 设置页对话框遮罩固定 32% 黑，深浅色共用 */
   background: color-mix(in srgb, #000 32%, transparent);
   display: grid;
   place-items: center;
@@ -335,6 +339,7 @@
 }
 .page3 .effs button.on {
   background: var(--a-sel);
+  /* stylelint-disable-next-line function-disallowed-list -- 推理档位选中态用 50% --a-accent 半透明描边 */
   border-color: color-mix(in srgb, var(--a-accent) 50%, transparent);
   color: var(--a-text);
 }
@@ -519,6 +524,7 @@
 }
 .tcard.on {
   border-color: var(--a-accent);
+  /* stylelint-disable-next-line function-disallowed-list -- 主题卡片选中外圈用 30% --a-accent 2px 半透明环 */
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--a-accent) 30%, transparent);
   color: var(--a-text);
 }
@@ -535,24 +541,30 @@
   border: 1px solid var(--a-border);
 }
 .tcard .pv i:first-child {
+  /* stylelint-disable-next-line color-no-hex -- 浅色主题预览卡侧栏固定色，不随当前主题变化 */
   background: #f0f0f4;
 }
 .tcard .pv i:last-child {
+  /* stylelint-disable-next-line color-no-hex -- 浅色主题预览卡画布固定色，不随当前主题变化 */
   background: #fafafb;
 }
 .tcard.dk .pv i:first-child {
+  /* stylelint-disable-next-line color-no-hex -- 深色主题预览卡侧栏固定色，不随当前主题变化 */
   background: #0d0f13;
 }
 .tcard.dk .pv i:last-child {
+  /* stylelint-disable-next-line color-no-hex -- 深色主题预览卡画布固定色，不随当前主题变化 */
   background: #121419;
 }
 .tcard.sys .pv {
   grid-template-columns: 1fr 1fr;
 }
 .tcard.sys .pv i:first-child {
+  /* stylelint-disable-next-line color-no-hex -- 跟随系统预览卡浅色半边固定色，不随当前主题变化 */
   background: linear-gradient(90deg, #f0f0f4 34%, #fafafb 34%);
 }
 .tcard.sys .pv i:last-child {
+  /* stylelint-disable-next-line color-no-hex -- 跟随系统预览卡深色半边固定色，不随当前主题变化 */
   background: linear-gradient(90deg, #0d0f13 34%, #121419 34%);
 }
 .tcard .tlabel {

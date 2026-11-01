@@ -353,7 +353,7 @@
   width: 6px;
   height: 6px;
   flex: 0 0 6px;
-  border-radius: 2px;
+  border-radius: var(--radius-0-5);
 }
 .context-details dt small {
   max-width: 240px;

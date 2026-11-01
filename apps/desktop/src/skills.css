@@ -45,12 +45,15 @@
 }
 .skill-banner.warn {
   color: var(--a-warning);
+  /* stylelint-disable-next-line function-disallowed-list -- 技能警告横幅用 35% --a-warning 混入 --a-border 的描边 */
   border-color: color-mix(in srgb, var(--a-warning) 35%, var(--a-border));
   background: var(--a-warning-bg);
 }
 .skill-banner.info {
   color: var(--a-accentAlt);
+  /* stylelint-disable-next-line function-disallowed-list -- 技能信息横幅用 35% --a-accentAlt 混入 --a-border 的描边 */
   border-color: color-mix(in srgb, var(--a-accentAlt) 35%, var(--a-border));
+  /* stylelint-disable-next-line function-disallowed-list -- 技能信息横幅用 6% --a-accentAlt 半透明底 */
   background: color-mix(in srgb, var(--a-accentAlt) 6%, transparent);
 }
 .skill-heading {
@@ -79,6 +82,7 @@
   color: var(--a-warning);
   margin: 0 4px;
   padding: 0 5px;
+  /* stylelint-disable-next-line function-disallowed-list -- 技能截断标记用 60% --a-warning 半透明虚线框 */
   border: 1px dashed color-mix(in srgb, var(--a-warning) 60%, transparent);
   border-radius: var(--radius-1);
 }

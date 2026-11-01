@@ -175,6 +175,7 @@
 }
 
 .composer textarea::selection {
+  /* stylelint-disable-next-line function-disallowed-list -- 输入框选区用 55% --a-sel-strong 半透明底以透出语法高亮层 */
   background: color-mix(in srgb, var(--a-sel-strong) 55%, transparent);
 }
 

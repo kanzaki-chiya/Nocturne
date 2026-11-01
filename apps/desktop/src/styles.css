@@ -335,14 +335,17 @@ button {
 }
 .nav .item .tag.need {
   color: var(--a-warning);
+  /* stylelint-disable-next-line function-disallowed-list -- 会话行待确认标签用 14% --a-warning 半透明底 */
   background: color-mix(in srgb, var(--a-warning) 14%, transparent);
 }
 .nav .item .tag.err {
   color: var(--a-error);
+  /* stylelint-disable-next-line function-disallowed-list -- 会话行出错标签用 14% --a-error 半透明底 */
   background: color-mix(in srgb, var(--a-error) 14%, transparent);
 }
 .nav .item .tag.done {
   color: var(--a-success);
+  /* stylelint-disable-next-line function-disallowed-list -- 会话行已完成标签用 14% --a-success 半透明底 */
   background: color-mix(in srgb, var(--a-success) 14%, transparent);
 }
 .nav.sub .item {
@@ -457,6 +460,7 @@ button {
 }
 .dot.run {
   background: var(--a-accent);
+  /* stylelint-disable-next-line function-disallowed-list -- 运行中圆点外圈用 25% --a-accent 半透明光晕 */
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 25%, transparent);
 }
 .dot.ok,
@@ -711,11 +715,13 @@ details[open] > summary:not(.tool-line)::before {
   margin: 0 auto;
   max-width: 820px;
   width: 100%;
+  /* stylelint-disable-next-line function-disallowed-list -- 崩溃横幅用 45% --a-error 混入 --a-border 的描边 */
   border: 1px solid color-mix(in srgb, var(--a-error) 45%, var(--a-border));
   border-radius: var(--radius-3);
   padding: 10px 14px;
   display: grid;
   gap: 8px;
+  /* stylelint-disable-next-line function-disallowed-list -- 崩溃横幅用 7% --a-error 半透明底 */
   background: color-mix(in srgb, var(--a-error) 7%, transparent);
 }
 .crash .t {
@@ -753,8 +759,10 @@ details[open] > summary:not(.tool-line)::before {
   display: grid;
   gap: 8px;
   padding: 18px 20px;
+  /* stylelint-disable-next-line function-disallowed-list -- 面板错误卡用 45% --a-error 混入 --a-border 的描边 */
   border: 1px solid color-mix(in srgb, var(--a-error) 45%, var(--a-border));
   border-radius: var(--radius-3);
+  /* stylelint-disable-next-line function-disallowed-list -- 面板错误卡用 6% --a-error 半透明底 */
   background: color-mix(in srgb, var(--a-error) 6%, transparent);
 }
 .pane-error b {
@@ -1043,6 +1051,7 @@ details[open] > summary:not(.tool-line)::before {
   position: absolute;
   inset: 0;
   z-index: 20;
+  /* stylelint-disable-next-line function-disallowed-list -- 桌面更新对话框背景用 60% --a-bg 半透明遮罩 */
   background: color-mix(in srgb, var(--a-bg) 60%, transparent);
   display: grid;
   place-items: center;

@@ -43,7 +43,9 @@
   color: var(--a-text);
 }
 .window-controls .window-close:hover {
+  /* stylelint-disable-next-line color-no-hex -- Windows 关闭按钮悬停红系统惯例 */
   background: #c42b1c;
+  /* stylelint-disable-next-line color-no-hex -- Windows 关闭按钮悬停白字系统惯例 */
   color: #fff;
 }
 .window-controls button:focus-visible {

@@ -115,15 +115,19 @@
   outline-offset: 1px;
 }
 .usage-level-0 {
+  /* stylelint-disable-next-line function-disallowed-list -- 热力图 0 级用 8% --a-accent 混入 --a-panel */
   background: color-mix(in srgb, var(--a-accent) 8%, var(--a-panel));
 }
 .usage-level-1 {
+  /* stylelint-disable-next-line function-disallowed-list -- 热力图 1 级用 25% --a-accent 混入 --a-panel */
   background: color-mix(in srgb, var(--a-accent) 25%, var(--a-panel));
 }
 .usage-level-2 {
+  /* stylelint-disable-next-line function-disallowed-list -- 热力图 2 级用 45% --a-accent 混入 --a-panel */
   background: color-mix(in srgb, var(--a-accent) 45%, var(--a-panel));
 }
 .usage-level-3 {
+  /* stylelint-disable-next-line function-disallowed-list -- 热力图 3 级用 70% --a-accent 混入 --a-panel */
   background: color-mix(in srgb, var(--a-accent) 70%, var(--a-panel));
 }
 .usage-level-4 {
@@ -165,6 +169,7 @@
   margin-bottom: 16px;
 }
 .usage-kind-input {
+  /* stylelint-disable-next-line function-disallowed-list -- 用量构成条「输入」段用 60% --a-accent 混入 --a-panel */
   background: color-mix(in srgb, var(--a-accent) 60%, var(--a-panel));
 }
 .usage-kind-read {
@@ -174,6 +179,7 @@
   background: var(--a-accentAlt);
 }
 .usage-kind-output {
+  /* stylelint-disable-next-line function-disallowed-list -- 用量构成条「输出」段用 55% --a-accentAlt 混入 --a-panel */
   background: color-mix(in srgb, var(--a-accentAlt) 55%, var(--a-panel));
 }
 .usage-composition {
