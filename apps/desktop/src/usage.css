@@ -311,6 +311,16 @@
   padding-top: 16px;
   line-height: 1.8;
 }
+@container (max-width: 1080px) {
+  .usage-data .usage-col-price {
+    display: none;
+  }
+}
+@container (max-width: 920px) {
+  .usage-data .usage-col-spark {
+    display: none;
+  }
+}
 @container (max-width: 900px) {
   .usage-overview {
     grid-template-columns: repeat(3, minmax(0, 1fr));

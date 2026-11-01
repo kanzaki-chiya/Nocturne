@@ -609,18 +609,21 @@ export function UsageView({
                     {
                       key: "spark",
                       header: "近期速度",
+                      colClassName: "usage-col-spark",
                       render: (m) => <Sparkline points={m.performance} />,
                     },
                     {
                       key: "pi",
                       header: "输入单价",
                       numeric: true,
+                      colClassName: "usage-col-price",
                       render: (m) => prices(m.pricing)[0],
                     },
                     {
                       key: "po",
                       header: "输出单价",
                       numeric: true,
+                      colClassName: "usage-col-price",
                       render: (m) => prices(m.pricing)[1],
                     },
                   ]}

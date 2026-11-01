@@ -11,6 +11,8 @@ export interface DataColumn<Row> {
   muted?: boolean | undefined;
   /** 表头无障碍名称（表头文字为空时） */
   label?: string | undefined;
+  /** 列类名（同时作用于表头与单元格，如窄容器下隐藏次要列） */
+  colClassName?: string | undefined;
   className?: ((row: Row) => string | undefined) | undefined;
   render: (row: Row) => ReactNode;
 }
@@ -46,11 +48,14 @@ export function DataTable<Row>({
   "aria-label": ariaLabel,
   className,
 }: DataTableProps<Row>) {
+  const headClass = (c: DataColumn<Row>) =>
+    [c.numeric === true ? "r" : "", c.colClassName].filter(Boolean).join(" ") || undefined;
   const cellClass = (c: DataColumn<Row>, row: Row) =>
     [
       c.numeric === true ? "r" : "",
       c.mono === true ? "mono" : "",
       c.muted === true ? "muted" : "",
+      c.colClassName,
       c.className?.(row),
     ]
       .filter(Boolean)
@@ -61,12 +66,7 @@ export function DataTable<Row>({
         <thead>
           <tr>
             {columns.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                className={c.numeric === true ? "r" : undefined}
-                aria-label={c.label}
-              >
+              <th key={c.key} scope="col" className={headClass(c)} aria-label={c.label}>
                 {c.header}
               </th>
             ))}
@@ -91,7 +91,7 @@ export function DataTable<Row>({
                   )}
                 </tr>
                 {detail !== undefined && detail !== null && detail !== false && (
-                  <tr>
+                  <tr className="tbl-detail">
                     <td colSpan={columns.length}>{detail}</td>
                   </tr>
                 )}

@@ -356,7 +356,9 @@
 /* ---------- 设置页结构（效果图「设置结构」） ---------- */
 .spage {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
+  min-width: 0;
   min-height: 0;
   padding: 0 var(--page-px) var(--space-12);
 }
@@ -397,11 +399,13 @@
   flex-direction: column;
   gap: var(--space-8);
   padding-top: var(--page-py);
+  min-width: 0;
 }
 .group {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-width: 0;
 }
 .ghead {
   display: flex;
@@ -704,6 +708,8 @@
 /* ---------- 表格（只有横线） ---------- */
 .tbl-wrap {
   overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
 }
 .tbl {
   width: 100%;
@@ -728,6 +734,7 @@
 .tbl .r {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .tbl td.mono {
   font-family: var(--mono);
@@ -737,6 +744,9 @@
 }
 .tbl tr:last-child td {
   border-bottom: 0;
+}
+.tbl tr.tbl-detail > td {
+  padding: 0;
 }
 .tbl tr.off td {
   color: var(--a-faint);

@@ -229,6 +229,7 @@ const SCHED_HIST_COLUMNS: readonly {
   {
     key: "duration",
     label: "用时",
+    align: "right",
     render: (entry) => <span className="mono">{formatDurationClock(entry.durationMs)}</span>,
   },
   {

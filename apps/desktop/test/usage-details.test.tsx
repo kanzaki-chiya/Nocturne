@@ -259,6 +259,25 @@ describe("模型行展开", () => {
     expect(spark2?.querySelector("svg")).toBeNull();
   });
 
+  it("数字列带不折行类名，次要列带可按容器宽度隐藏的类名", () => {
+    render(view("30"));
+    const table = screen.getByRole("table", { name: "按模型用量" });
+    const colHeaders = within(table).getAllByRole("columnheader");
+    const tds = [...row(/timed/).querySelectorAll("td")];
+    // 除第 8 个 td（近期速度折线）外，其余 9 个数字单元格与对应表头均带不折行类名 r
+    for (const idx of [0, 1, 2, 3, 4, 5, 6, 8, 9]) {
+      expect(tds[idx]?.classList.contains("r")).toBe(true);
+      expect(colHeaders[idx + 1]?.classList.contains("r")).toBe(true);
+    }
+    // 次要列：近期速度、输入单价、输出单价在表头和单元格上均带可隐藏类名
+    expect(colHeaders[8]?.classList.contains("usage-col-spark")).toBe(true);
+    expect(tds[7]?.classList.contains("usage-col-spark")).toBe(true);
+    expect(colHeaders[9]?.classList.contains("usage-col-price")).toBe(true);
+    expect(colHeaders[10]?.classList.contains("usage-col-price")).toBe(true);
+    expect(tds[8]?.classList.contains("usage-col-price")).toBe(true);
+    expect(tds[9]?.classList.contains("usage-col-price")).toBe(true);
+  });
+
   it("展开区显示效率、延迟、Tokens 明细与首次 / 最近使用", () => {
     render(view("30"));
     fireEvent.click(row(/timed/));
