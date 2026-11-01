@@ -449,6 +449,7 @@ export function PhoneApp({
         text: input.text,
         ...(input.skill ? { skill: input.skill } : {}),
         ...(input.delegate ? { delegate: input.delegate } : {}),
+        ...(input.workMode ? { workMode: input.workMode } : {}),
         ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
       },
       (failure) => {

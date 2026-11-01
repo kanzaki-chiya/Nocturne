@@ -673,6 +673,8 @@ export interface PendingInputItem {
   createdAt: string;
   /** 暂停期间不自动发送（ADR-0070 §4） */
   paused: boolean;
+  /** 执行方式名（ADR-0076）：界面在文本前显示 `/名字` */
+  workMode?: string | undefined;
 }
 
 /** 待发输入的完整快照（`input.pending` payload 与 `pendingInputs()` 的返回） */

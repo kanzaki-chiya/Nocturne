@@ -18,6 +18,7 @@ import {
   createPlatform,
   completeFileRefs,
   parseSkillSlash,
+  parseWorkModeSlash,
   type FileIndexEntry,
   type ExternalAgentsDescription,
   type Clipboard,
@@ -2389,7 +2390,12 @@ function SessionApp({
         return;
       }
       if (key.return) {
-        if (selected.group === "skills" || selected.group === "agents") {
+        // 技能、外部 agent 与带任务的命令（ADR-0076）只补全，任务由用户接着写
+        if (
+          selected.group === "skills" ||
+          selected.group === "agents" ||
+          selected.insert.endsWith(" ")
+        ) {
           applyCandidate(selected, false);
           return;
         }
@@ -2591,6 +2597,44 @@ function SessionApp({
         : parseExternalAgentSlash(expanded, catalogReady ? externalAgents : [], skills);
       if (delegate?.task.trim() === "") {
         pushLine(`用法：/${delegate.agent} 任务`);
+        return;
+      }
+      // ADR-0076：执行方式命令带任务正文提交；运行中一律排队（不能作为插话）
+      const work = parseWorkModeSlash(expanded);
+      if (work?.kind === "usage") {
+        clearInput();
+        pushLine(work.hint);
+        return;
+      }
+      if (work?.kind === "submit") {
+        if (!busy && !pendingInputsRef.current.paused && submitting.current) return;
+        const attachments = allAttachments;
+        clearInput();
+        images.clear();
+        files.clear();
+        if (fullscreen) setScroll(scrollToBottom());
+        const input = {
+          text: work.text,
+          workMode: work.workMode,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        };
+        if (busy || pendingInputsRef.current.paused) {
+          void session.enqueueInput("queue", input).catch((e: unknown) => {
+            pushLine(`! ${modelErrorText(e)}`);
+          });
+          return;
+        }
+        submitting.current = true;
+        setSubmitPending(true);
+        void session
+          .submit(input)
+          .catch((e: unknown) => {
+            pushLine(`! ${modelErrorText(e)}`);
+          })
+          .finally(() => {
+            submitting.current = false;
+            setSubmitPending(false);
+          });
         return;
       }
       const dispatchSlash = (raw: string): void => {

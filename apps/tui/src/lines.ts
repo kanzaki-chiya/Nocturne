@@ -13,6 +13,7 @@ import {
   subagentApplyLine,
   subagentResultText,
   backgroundToolStatus,
+  workModeDisplayText,
 } from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
@@ -218,7 +219,7 @@ function layoutEntryBody(
             : []),
         ];
       }
-      const text = userText(entry);
+      const text = workModeDisplayText(userText(entry), entry.workMode);
       const fullText = stripControls(`${prompt} ${text}`.replace(/\r\n?/g, "\n"));
       let offset = 0;
       return [

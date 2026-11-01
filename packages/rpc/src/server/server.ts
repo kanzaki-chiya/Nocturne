@@ -15,6 +15,7 @@ import {
   discardDraftLogin,
   discardProvider,
   isReasoningEffort,
+  isWorkModeName,
   listProviderPresets,
   logoutProvider,
   MODEL_ROLES,
@@ -2404,6 +2405,7 @@ function parseAgentProcessInfo(raw: unknown): AgentProcessInfo | undefined {
 function parseSubmitInput(p: {
   skill?: unknown;
   delegate?: unknown;
+  workMode?: unknown;
   text?: unknown;
   content?: unknown;
   attachments?: unknown;
@@ -2422,6 +2424,10 @@ function parseSubmitInput(p: {
       agent: reqString(delegate, "agent"),
       task: reqString(delegate, "task"),
     };
+  }
+  if (p.workMode !== undefined && p.workMode !== null) {
+    if (!isWorkModeName(p.workMode)) throw new InvalidParamsError("workMode 不是已知的执行方式");
+    input.workMode = p.workMode;
   }
   const text = optString(p, "text");
   if (text !== undefined) input.text = text;

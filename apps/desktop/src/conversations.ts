@@ -463,6 +463,7 @@ export class Conversations {
       text: input.text,
       ...(input.skill ? { skill: input.skill } : {}),
       ...(input.delegate ? { delegate: input.delegate } : {}),
+      ...(input.workMode ? { workMode: input.workMode } : {}),
       attachments: input.attachments,
     });
     try {
@@ -520,10 +521,12 @@ export class Conversations {
       return true;
     }
     if (input.text !== "") await entry.session.recordInputHistory(input.text);
-    await entry.session.enqueueInput(mode, {
+    // ADR-0076：执行方式只能排队，不能作为插话
+    await entry.session.enqueueInput(input.workMode ? "queue" : mode, {
       text: input.text,
       ...(input.skill ? { skill: input.skill } : {}),
       ...(input.delegate ? { delegate: input.delegate } : {}),
+      ...(input.workMode ? { workMode: input.workMode } : {}),
       attachments: input.attachments,
     });
     return true;

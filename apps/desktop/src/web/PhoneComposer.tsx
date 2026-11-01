@@ -402,7 +402,8 @@ export function PhoneComposer({
         return;
       }
       const payload = {
-        text,
+        text: slash?.kind === "work" ? slash.text : text,
+        ...(slash?.kind === "work" ? { workMode: slash.workMode } : {}),
         ...(slash?.kind === "skill" ? { skill: slash.invocation } : {}),
         ...(slash?.kind === "agent" ? { delegate: slash.delegate } : {}),
         attachments: attachmentsRef.current.map((attachment) => ({

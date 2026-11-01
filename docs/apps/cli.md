@@ -125,6 +125,7 @@ nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端
 | `/context` | 显示若现在构建请求，上下文由什么组成 | `session.describeContext()` → `{ report: ContextReport; overBudget: boolean }`（见下） |
 | `/cost` | 只读显示当前会话与近 30 天全部本机会话（含子代理）的模型用量、缓存命中率与预估费用；未声明价格显示「未计价」，完整统计见桌面设置 › 用量 | `sessionUsageSoFar(replaySessionView(...))`、`runtime.usageStats({ days: 30 })` |
 | `/compact` | 手动触发 L2 摘要压缩 | `session.compact()` → `context.compacted(kind="summary")` |
+| `/grill-me <需求>` | 追问需求：模型先读代码，再用 `ask_user` 一次问一个问题，确认需求清单后再动手；只有命令名时打印用法（[ADR-0076](../decisions/ADR-0076-work-modes.md) §3） | `session.submit({ text, workMode: "grill-me" })` |
 | `/rewind` | 编号选择轮次、操作和预览确认；空行或默认 `N` 取消 | `session.rewindTargets()`、`session.rewind()` |
 | `/fork` | 从当前位置分叉，复制会话后切换 | `runtime.forkSession()` + `/resume` 的打开逻辑 |
 | `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |

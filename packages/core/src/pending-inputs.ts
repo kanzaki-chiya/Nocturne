@@ -30,7 +30,7 @@ export interface PendingInputPatch {
   input?: { text?: string | undefined } | undefined;
 }
 
-export type PendingInputOutcome = "ok" | "consumed" | "readonly";
+export type PendingInputOutcome = "ok" | "consumed" | "readonly" | "work_mode" | "empty_task";
 
 export class PendingInputs {
   private readonly entries: Entry[] = [];
@@ -59,6 +59,7 @@ export class PendingInputs {
         : {}),
       createdAt: entry.createdAt,
       paused: entry.paused,
+      ...(entry.input.workMode !== undefined ? { workMode: entry.input.workMode.name } : {}),
     }));
     return { items, paused: items.length > 0 && items.every((item) => item.paused) };
   }
@@ -113,6 +114,9 @@ export class PendingInputs {
     const entry = this.entries.find((candidate) => candidate.id === id);
     if (entry === undefined) return "consumed";
     if (entry.mode === "subagent") return "readonly";
+    // ADR-0076 §1：带执行方式的条目只能排队，不能转成插话
+    if (patch.mode === "steer" && entry.input.workMode !== undefined) return "work_mode";
+    if (entry.input.workMode !== undefined && patch.input?.text?.trim() === "") return "empty_task";
     if (patch.mode !== undefined) entry.mode = patch.mode;
     if (patch.input?.text !== undefined) {
       const text = { type: "text" as const, text: patch.input.text };

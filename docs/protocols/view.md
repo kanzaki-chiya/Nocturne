@@ -80,7 +80,7 @@ interface SessionView {
 ```ts
 type ViewEntry =
   | { kind: "user"; key: string; seq: number; turnId: string; content: ContentBlock[];
-      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; steer?: true; subagent?: SubagentResult; descriptions?: AttachmentDescribedPayload[] }
+      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; steer?: true; subagent?: SubagentResult; workMode?: { name: string; body: string }; descriptions?: AttachmentDescribedPayload[] }
   | AssistantEntry
   | ToolEntry
   | NoticeEntry;
@@ -136,7 +136,7 @@ interface NoticeEntry {
 }
 ```
 
-用户条目的 `content` 末尾带有给模型看的快照块（每个非图片 `@` 引用一块、技能正文一块、委派指令一块），客户端不显示。显示、复制与重发用户正文一律调用 `@nocturne/core/protocol` 的 `userEntryText(entry)`，它按 `fileRefs`、`skill`、`delegate` 的条数从末尾切掉快照块再拼接剩余 text 块；客户端不得各自实现这条规则。
+用户条目的 `content` 末尾带有给模型看的快照块（每个非图片 `@` 引用一块、技能正文一块、委派指令一块、文件附件引用说明一块、执行方式说明一块），客户端不显示。显示、复制与重发用户正文一律调用 `@nocturne/core/protocol` 的 `userEntryText(entry)`，它按 `fileRefs`、`skill`、`delegate`、`files`、`workMode` 的条数从末尾切掉快照块再拼接剩余 text 块；客户端不得各自实现这条规则。带 `workMode` 的条目在正文前显示命令名（[ADR-0076](../decisions/ADR-0076-work-modes.md)）；按纯文本显示的客户端用 `workModeDisplayText(text, entry.workMode)` 拼出这一行。
 
 ### 在途实体（live）
 

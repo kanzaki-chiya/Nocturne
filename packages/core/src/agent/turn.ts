@@ -35,6 +35,7 @@ import type {
   ToolCallRef,
   TurnEndReason,
   Usage,
+  WorkModeSnapshot,
 } from "../protocol/index.js";
 import {
   advanceLoopGuard,
@@ -107,6 +108,7 @@ export async function runTurn(
   delegate?: AgentDelegation,
   files?: FileAttachment[],
   subagent?: SubagentResult,
+  workMode?: WorkModeSnapshot,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -158,6 +160,7 @@ export async function runTurn(
           ...(item.skill !== undefined ? { skill: item.skill } : {}),
           ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
           ...(item.subagent !== undefined ? { subagent: item.subagent } : {}),
+          ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
           steer: true,
         },
         { turnId },
@@ -358,6 +361,7 @@ export async function runTurn(
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),
+        ...(workMode ? { workMode } : {}),
       },
       { turnId },
     );

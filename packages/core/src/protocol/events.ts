@@ -3,6 +3,7 @@
  * 持久化事件构成会话日志的唯一事实来源；临时事件只发布不写日志。
  */
 import type { SkillSnapshot } from "./skills.js";
+import type { WorkModeSnapshot } from "./work-modes.js";
 import type {
   AgentDelegation,
   AssistantTiming,
@@ -118,6 +119,11 @@ export interface MessageUserPayload {
    * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
    */
   steer?: true | undefined;
+  /**
+   * 执行方式（ADR-0076 §1）：说明块正文快照，content 末尾同时含 `<work-mode>` 文本块。
+   * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
+   */
+  workMode?: WorkModeSnapshot | undefined;
 }
 
 export interface AttachmentDescribedPayload {

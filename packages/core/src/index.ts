@@ -214,9 +214,15 @@ import {
   type WorktreeRecord,
 } from "./agent/worktree.js";
 import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-changes.js";
-import { effectiveEvents } from "./protocol/index.js";
+import {
+  effectiveEvents,
+  isWorkModeName,
+  type WorkModeName,
+  type WorkModeSnapshot,
+} from "./protocol/index.js";
 import { DEFAULT_MAX_MODEL_CHARS, truncateModelContent, truncationNote } from "./tools/budget.js";
 import { writeSpill } from "./tools/spill.js";
+import { workModeBlock, workModeBody } from "./work-modes/index.js";
 import {
   createSessionStore,
   createSubagentObservation,
@@ -449,6 +455,8 @@ export interface SubmitInput {
   skill?: SkillInvocation | undefined;
   /** 外部 agent 点名；与 skill 互斥，任务原文随 message.user 固定。 */
   delegate?: AgentDelegation | undefined;
+  /** 执行方式（ADR-0076）：与 skill、delegate 互斥，正文为任务，不得为空 */
+  workMode?: WorkModeName | undefined;
 }
 
 export type { ReadAttachmentResult };
@@ -2576,6 +2584,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ): Promise<PreparedInput> => {
       if (input.skill !== undefined && input.delegate !== undefined)
         throw new RuntimeCommandError("invalid_command", "skill 与 delegate 互斥");
+      // ADR-0076 §1：执行方式与技能、委派互斥，正文就是任务
+      if (input.workMode !== undefined) {
+        if (!isWorkModeName(input.workMode))
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `未知执行方式：${String(input.workMode)}`,
+          );
+        if (input.skill !== undefined || input.delegate !== undefined)
+          throw new RuntimeCommandError("invalid_command", "workMode 与 skill、delegate 互斥");
+        if (meta.parent !== undefined)
+          throw new RuntimeCommandError("invalid_command", "子会话不能使用执行方式");
+        const task = (input.content ?? [{ type: "text", text: input.text ?? "" }])
+          .map((block) => (block.type === "text" ? block.text : ""))
+          .join("")
+          .trim();
+        if (task === "")
+          throw new RuntimeCommandError("invalid_command", `/${input.workMode} 需要写明任务`);
+      }
       if (input.delegate !== undefined && !delegateSchema.safeParse(input.delegate).success)
         throw new RuntimeCommandError(
           "invalid_command",
@@ -2683,6 +2709,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             platform.paths.join(sessionsDir, "attachments", session.id, file),
           ),
         });
+      let workMode: WorkModeSnapshot | undefined;
+      if (input.workMode !== undefined) {
+        workMode = { name: input.workMode, body: workModeBody(input.workMode) };
+        appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
+      }
       return {
         content,
         appended,
@@ -2691,6 +2722,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         fileRefs: refs.fileRefs,
         ...(skillSnapshot !== undefined ? { skill: skillSnapshot } : {}),
         ...(delegation !== undefined ? { delegate: delegation } : {}),
+        ...(workMode !== undefined ? { workMode } : {}),
       };
     };
     /**
@@ -2787,6 +2819,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.delegate,
             prepared.files,
             prepared.subagent,
+            prepared.workMode,
           );
           // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
           if (reason !== "done") pendingInputStore.pauseAll();
@@ -3192,6 +3225,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         assertMainSession();
         if (!isPendingInputMode(mode))
           throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
+        // ADR-0076 §1：插话并入当前 Turn，不能中途换执行方式
+        if (mode === "steer" && input.workMode !== undefined)
+          throw new RuntimeCommandError("invalid_command", "执行方式不能作为插话发送");
         // 暂停中提交 = 追加到队尾并恢复（ADR-0070 §4）。没有进行中的 Turn 可以
         // 插话，因此一律作为排队追加，避免越过队首抢在暂停队列之前
         if (pendingInputStore.snapshot().paused) {
@@ -3246,6 +3282,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           const outcome = pendingInputStore.update(id, patch);
           if (outcome === "readonly")
             throw new RuntimeCommandError("invalid_command", "子代理结果不能编辑");
+          if (outcome === "work_mode")
+            throw new RuntimeCommandError("invalid_command", "执行方式不能作为插话发送");
+          if (outcome === "empty_task")
+            throw new RuntimeCommandError("invalid_command", "执行方式需要写明任务");
           if (outcome === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
           await pumpQueue();

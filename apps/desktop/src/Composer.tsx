@@ -20,6 +20,7 @@ import {
   type SkillOverview,
   type SkillInvocation,
   type TodoItem,
+  type WorkModeName,
 } from "@nocturne/core/protocol";
 
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
@@ -102,6 +103,8 @@ export interface ComposerSubmit {
   text: string;
   skill?: SkillInvocation;
   delegate?: { agent: string; task: string };
+  /** 执行方式（ADR-0076）；此时 text 是去掉命令名后的任务 */
+  workMode?: WorkModeName;
   attachments: { data: Uint8Array; mimeType: string; label: string; source?: "paste" | "upload" }[];
 }
 
@@ -618,7 +621,8 @@ export function Composer({
       return;
     }
     const payload: ComposerSubmit = {
-      text,
+      text: parsed?.kind === "work" ? parsed.text : text,
+      ...(parsed?.kind === "work" ? { workMode: parsed.workMode } : {}),
       ...(parsed?.kind === "skill" ? { skill: parsed.invocation } : {}),
       ...(parsed?.kind === "agent" ? { delegate: parsed.delegate } : {}),
       attachments: attachmentsRef.current.map((attachment) => ({
@@ -791,7 +795,7 @@ export function Composer({
         void runSlash(line);
         return;
       }
-      if (parsed?.kind === "skill" || parsed?.kind === "agent") {
+      if (parsed?.kind === "skill" || parsed?.kind === "agent" || parsed?.kind === "work") {
         void submit(running ? "queue" : undefined);
         return;
       }

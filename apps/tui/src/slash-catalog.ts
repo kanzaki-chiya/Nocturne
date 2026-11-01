@@ -14,6 +14,8 @@ export interface SlashCommand {
   args?: "effort" | "provider" | "preset" | "shell" | undefined;
   /** 页面命令只在 TUI 展示；逐行 CLI 不支持。 */
   tuiOnly?: boolean | undefined;
+  /** 命令后接任务正文（ADR-0076 执行方式）：补全插入「命令名 + 空格」，回车不直接执行 */
+  task?: boolean | undefined;
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
@@ -41,6 +43,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/subagents", summary: "管理后台子代理", tuiOnly: true },
   { name: "/agents", summary: "查看外部 agent", cli: "只读列出外部 agent、来源、启停与斜杠冲突" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
+  { name: "/grill-me", summary: "追问需求", cli: "<需求> 动手前逐个追问需求", task: true },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
   { name: "/rename", summary: "修改会话标题", cli: "<标题> 修改当前会话标题；无参数清空" },
   { name: "/rewind", summary: "回退对话或还原文件" },
@@ -218,7 +221,7 @@ function commandItems(tui: boolean): { key: string; label: string; insert: strin
   return SLASH_COMMANDS.filter((cmd) => tui || cmd.tuiOnly !== true).map((cmd) => ({
     key: cmd.name,
     label: `${cmd.name}  ${cmd.summary}`,
-    insert: cmd.name,
+    insert: cmd.task === true ? `${cmd.name} ` : cmd.name,
   }));
 }
 

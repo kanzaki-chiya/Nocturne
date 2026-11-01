@@ -184,6 +184,8 @@ export interface SessionParams {
 export interface WireSubmitFields {
   skill?: SkillInvocation;
   delegate?: { agent: string; task: string };
+  /** 执行方式（ADR-0076） */
+  workMode?: WorkModeName;
   text?: string;
   content?: ContentBlock[];
   attachments?: WireAttachment[];
@@ -272,6 +274,7 @@ import type {
   GrantWorkspace,
   ProjectTrustDescription,
   GrantsChangedPayload,
+  WorkModeName,
 } from "@nocturne/core/protocol";
 
 export interface RpcMethods {

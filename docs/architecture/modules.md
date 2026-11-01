@@ -174,6 +174,12 @@
 - **不负责**：Turn 编排与安全点（Agent Loop，`agent/turn.ts`）、跨 Turn 接续与暂停策略（`core/index` 的 Turn 循环）、瞬态事件的发布（由 `core/index` 注入的回调交给 `Session.emitEphemeral`）。
 - **依赖**：仅 `protocol` 的类型。**不能依赖**：agent、session、tools、provider 等具体模块（避免与 `core/index` 循环）。
 
+### work-modes（`src/work-modes/`）
+
+- **负责**：执行方式（[ADR-0076](../decisions/ADR-0076-work-modes.md)）的说明块正文与 `<work-mode>` 文本块拼装；由 `core/index` 在提交准备阶段接入。斜杠解析与显示文本是纯函数，放在 `protocol/work-modes.ts`，客户端共用。
+- **不负责**：Turn 编排（不进 Agent Loop）、权限判定。
+- **依赖**：仅 `protocol`（dependency-cruiser 规则 `work-modes-deps` 固化）。
+
 ### core/index（公开 API）
 
 客户端看到的全部能力都经由这里：

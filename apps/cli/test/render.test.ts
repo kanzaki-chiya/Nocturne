@@ -259,6 +259,15 @@ describe("事件渲染（cli.md 第 5 节）", () => {
     expect(renderDiff("@@ -1,1 +1,1 @@\n--- source\n+++ source")).toContain("        1 +++ source");
   });
 
+  it("执行方式消息（ADR-0076）：用户敲的不回显，Runtime 写入的插话只打命令名", () => {
+    const base = { messageId: "m", content: [{ type: "text" as const, text: "x" }] };
+    const workMode = { name: "grill-me", body: "b" };
+    expect(renderEvent(durable("message.user", { ...base, workMode }), "interactive")).toEqual([]);
+    expect(
+      renderEvent(durable("message.user", { ...base, workMode, steer: true }), "interactive"),
+    ).toEqual([{ channel: "stdout", text: "/grill-me" }]);
+  });
+
   it("结构化输出省略时显示真实省略提示", () => {
     const ev = renderEvent(
       durable("tool.completed", {

@@ -1118,6 +1118,7 @@ function UserMessage({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [confirmFork, setConfirmFork] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const { copy, copied } = useCopyText(setError);
   const hasImages = (entry.attachments?.length ?? 0) > 0;
   useEffect(() => {
@@ -1157,6 +1158,23 @@ function UserMessage({
     );
     if (leading) at = tag.length;
     else if (body !== "") segments.push(" ");
+  }
+  if (entry.workMode) {
+    // ADR-0076：执行方式消息在正文前显示命令名，点它展开说明块
+    segments.push(
+      <button
+        key="work-mode"
+        type="button"
+        className="delegate-ref mode-ref"
+        aria-expanded={modeOpen}
+        onClick={() => {
+          setModeOpen((open) => !open);
+        }}
+      >
+        {`/${entry.workMode.name}`}
+      </button>,
+    );
+    if (body !== "") segments.push(" ");
   }
   refs.forEach((ref, index) => {
     if (ref.start < at) return;
@@ -1307,7 +1325,9 @@ function UserMessage({
               {scheduleSource?.preface !== undefined && (
                 <span className="sched-pre">{scheduleSource.preface}</span>
               )}
-              {entry.steer === true && <Badge className="u-steer">插话</Badge>}
+              {entry.steer === true && entry.workMode === undefined && (
+                <Badge className="u-steer">插话</Badge>
+              )}
               {(entry.attachments ?? []).map((attachment, index) => (
                 <UserImage
                   key={`${attachment.file}:${attachment.sha256}:${index}`}
@@ -1374,7 +1394,10 @@ function UserMessage({
                   <span className="fsize">{formatBytes(file.bytes)}</span>
                 </button>
               ))}
-              {(body !== "" || entry.delegate) && <div className="u-text">{segments}</div>}
+              {(body !== "" || entry.delegate !== undefined || entry.workMode !== undefined) && (
+                <div className="u-text">{segments}</div>
+              )}
+              {entry.workMode && modeOpen && <pre className="mode-body">{entry.workMode.body}</pre>}
               {entry.skill && (
                 <details className="skill-message">
                   <summary>

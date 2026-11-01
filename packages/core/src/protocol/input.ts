@@ -12,6 +12,7 @@ import type {
   FileAttachment,
 } from "./types.js";
 import type { SkillSnapshot } from "./skills.js";
+import type { WorkModeSnapshot } from "./work-modes.js";
 
 export interface PreparedInput {
   subagent?: SubagentResult | undefined;
@@ -24,6 +25,8 @@ export interface PreparedInput {
   fileRefs?: FileRef[] | undefined;
   skill?: SkillSnapshot | undefined;
   delegate?: AgentDelegation | undefined;
+  /** 执行方式快照（ADR-0076）；说明块在 appended 里 */
+  workMode?: WorkModeSnapshot | undefined;
 }
 
 /** `message.user` 的 content：用户正文 + 追加的快照块（与普通提交同序） */

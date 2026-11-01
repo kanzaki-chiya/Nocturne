@@ -550,6 +550,7 @@ function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
   return {
     ...(input.skill !== undefined ? { skill: input.skill } : {}),
     ...(input.delegate !== undefined ? { delegate: input.delegate } : {}),
+    ...(input.workMode !== undefined ? { workMode: input.workMode } : {}),
     ...(input.text !== undefined ? { text: input.text } : {}),
     ...(input.content !== undefined ? { content: input.content } : {}),
     ...(attachments !== undefined ? { attachments } : {}),

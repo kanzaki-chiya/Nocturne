@@ -63,8 +63,8 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 |---|---|
 | `subscribe` | `{ afterSeq? }` → `{ lastSeq }`，见第 4 节 |
 | `unsubscribe` | → `null`；服务端停止推送 |
-| `submit` | `{ text?, content?, attachments?, skill?, delegate? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
-| `enqueueInput` | `{ mode: "steer" \| "queue", text?, content?, attachments?, skill?, delegate? }` → `{ id, queued }`（ADR-0070）。Turn 进行中入列、立刻返回 `queued: true`；空闲时等同 `submit`、请求同样挂到 Turn 结束并返回 `queued: false`（`id` 只是对齐标记）；暂停中提交追加到队尾并恢复。子会话报 `invalid_command` |
+| `submit` | `{ text?, content?, attachments?, skill?, delegate?, workMode? }` → `TurnEndReason`；**请求一直挂到 Turn 结束**，与进程内 `submit()` 的 resolve 时机相同 |
+| `enqueueInput` | `{ mode: "steer" \| "queue", text?, content?, attachments?, skill?, delegate?, workMode? }` → `{ id, queued }`（ADR-0070）。Turn 进行中入列、立刻返回 `queued: true`；空闲时等同 `submit`、请求同样挂到 Turn 结束并返回 `queued: false`（`id` 只是对齐标记）；暂停中提交追加到队尾并恢复。子会话报 `invalid_command` |
 | `updateInput` | `{ id, mode?, text? }` → `null`；条目已被消费报 `input_consumed`。只替换用户正文的文本，非文本块及附件、`@` 引用、技能与委派快照随原提交保留；要换附件或引用须撤回后重发。空闲时未暂停条目（包括插话）按提交顺序发出。`mode: "subagent"` 的条目（后台子代理结果，ADR-0073）不能编辑或切换，报 `invalid_command`；`cancelInput` 可撤回 |
 | `cancelInput` | `{ id }` → `null`；条目已被消费报 `input_consumed` |
 | `resumeInputs` | → `null`；解除暂停，空闲时立即发出队首（包括插话，请求挂到接续 Turn 结束），忙时交给安全点或 Turn 的结束边界 |
@@ -88,6 +88,8 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
 
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
+
+`submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用）在 Core，报 `invalid_command`。
 
 `readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` / `files` 或 `tool.completed.attachments` / `files`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 
@@ -392,7 +394,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `runtime.createSession` | 允许全部选项。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
-| `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`） |
+| `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`、`workMode`） |
 | `session.enqueueInput` | 允许完整载荷（同 `submit`）。ADR-0070 的「追加消息」：手机可在运行中插话或排队 |
 | `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
 | `session.interrupt` | 请求与通知均允许 |

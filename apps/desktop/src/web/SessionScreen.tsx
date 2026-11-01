@@ -123,10 +123,12 @@ export function SessionScreen({
     if (entry.dead) throw new Error("电脑尚未连接");
     if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
     if (running || entry.pendingInputs.paused) {
-      await session.enqueueInput(mode, {
+      // ADR-0076：执行方式只能排队
+      await session.enqueueInput(input.workMode ? "queue" : mode, {
         text: input.text,
         ...(input.skill ? { skill: input.skill } : {}),
         ...(input.delegate ? { delegate: input.delegate } : {}),
+        ...(input.workMode ? { workMode: input.workMode } : {}),
         ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
       });
       if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
@@ -141,6 +143,7 @@ export function SessionScreen({
           text: input.text,
           ...(input.skill ? { skill: input.skill } : {}),
           ...(input.delegate ? { delegate: input.delegate } : {}),
+          ...(input.workMode ? { workMode: input.workMode } : {}),
           ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
         },
         (error) => {

@@ -6,6 +6,9 @@
 import {
   BUILTIN_SLASH_COMMANDS,
   parseSkillSlash,
+  parseWorkModeSlash,
+  WORK_MODE_COMMANDS,
+  type WorkModeName,
   type ExternalAgentOverview,
   type SkillOverview,
   type SkillInvocation,
@@ -53,6 +56,8 @@ export const REDIRECTS: Record<string, RedirectHint> = {
 
 export type ParsedSlash =
   | { kind: "skill"; invocation: SkillInvocation }
+  /** 执行方式（ADR-0076）：text 是去掉命令名后的任务 */
+  | { kind: "work"; workMode: WorkModeName; text: string }
   | { kind: "agent"; delegate: { agent: string; task: string } }
   | { kind: "command"; name: SlashCommandName; raw: string }
   | { kind: "redirect"; name: string; hint: string }
@@ -80,6 +85,9 @@ export function parseSlash(
   const hint = REDIRECTS[lowerName];
   if (hint !== undefined)
     return { kind: "redirect", name, hint: typeof hint === "string" ? hint : hint[context] };
+  const work = parseWorkModeSlash(line);
+  if (work?.kind === "usage") return { kind: "unknown", name, hint: work.hint };
+  if (work?.kind === "submit") return { kind: "work", workMode: work.workMode, text: work.text };
   const invocation = parseSkillSlash(line.trimStart(), skills);
   if (invocation) return { kind: "skill", invocation };
   const agent = agents.find(
@@ -121,13 +129,13 @@ export function completeSlash(
   if (!text.startsWith("/") || /\s/.test(text.slice(1))) return [];
   const query = text.slice(1).toLowerCase();
   const leading = line.slice(0, line.length - text.length);
-  const items: SlashItem[] = COMMANDS.filter((command) =>
-    command.name.slice(1).startsWith(query),
-  ).map((command) => ({
-    label: command.name,
-    summary: command.summary,
-    insert: `${leading}${command.name} `,
-  }));
+  const items: SlashItem[] = [...COMMANDS, ...WORK_MODE_COMMANDS]
+    .filter((command) => command.name.slice(1).startsWith(query))
+    .map((command) => ({
+      label: command.name,
+      summary: command.summary,
+      insert: `${leading}${command.name} `,
+    }));
   const skillItems = skills
     .filter(
       (skill) =>
