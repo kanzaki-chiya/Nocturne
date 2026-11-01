@@ -45,7 +45,13 @@ export interface StatusBarProps {
   onManageGrants?: () => void;
 }
 
-export { ContextPanel, contextRows, contextSourceLabel, type ContextRow } from "./context-panel";
+export {
+  ContextPanel,
+  contextRows,
+  contextSourceLabel,
+  segmentWidths,
+  type ContextRow,
+} from "./context-panel";
 
 const PANEL_TITLES: Record<StatusPanel, string> = {
   context: "上下文用量",

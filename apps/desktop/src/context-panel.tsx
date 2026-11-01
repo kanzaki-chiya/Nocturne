@@ -30,6 +30,8 @@ const SECTIONS: Record<Section["name"], { label: string; color: string }> = {
   todos: { label: "任务清单", color: "var(--a-muted)" },
   history: { label: "对话历史", color: "var(--a-accent)" },
 };
+/** 来源是路径的行：只放进悬停提示，不占行内宽度 */
+const PATH_SOURCES = new Set(["instructions", "environment"]);
 const HISTORY = [
   { key: "user", label: "用户消息", color: "var(--a-success)" },
   { key: "assistant", label: "助手回答", color: "var(--a-warning)" },
@@ -92,6 +94,19 @@ export function contextSourceLabel(source: string, home?: string | null): string
   return abbreviateHome(source, home);
 }
 
+/** 堆叠条总长等于占预算的比例；各段只按明细分摊这段长度，明细之和可能与锚定后的总量不同。 */
+export function segmentWidths(report: Report, rows: ContextRow[]): Map<string, number> {
+  const parts = rows.filter((row) => !row.group);
+  const sum = parts.reduce((total, row) => total + row.tokens, 0);
+  const fill =
+    report.budgetTokens > 0
+      ? Math.min(report.estimatedTokens / report.budgetTokens, 1)
+      : report.estimatedTokens > 0
+        ? 1
+        : 0;
+  return new Map(parts.map((row) => [row.key, sum > 0 ? (row.tokens / sum) * fill * 100 : 0]));
+}
+
 export function percent(used: number, budget: number): number | null {
   return budget > 0 ? Math.round((used / budget) * 100) : null;
 }
@@ -106,6 +121,7 @@ export function ContextPanel({
   const { report } = context;
   const rows = contextRows(report);
   const used = percent(report.estimatedTokens, report.budgetTokens);
+  const widths = segmentWidths(report, rows);
   return (
     <>
       <div className="context-total">
@@ -124,7 +140,7 @@ export function ContextPanel({
               data-segment={row.key}
               title={`${row.label}：${number.format(row.tokens)} tokens`}
               style={{
-                width: `${report.estimatedTokens > 0 ? (row.tokens / report.estimatedTokens) * 100 : 0}%`,
+                width: `${widths.get(row.key) ?? 0}%`,
                 background: row.color,
               }}
             />
@@ -134,15 +150,18 @@ export function ContextPanel({
         {rows.map((row) => {
           const source =
             row.source === undefined ? undefined : contextSourceLabel(row.source, home);
+          const pathSource = PATH_SOURCES.has(row.key);
           return (
             <div
               key={row.key}
               className={row.nested ? "context-nested" : row.group ? "context-group" : undefined}
             >
-              <dt>
+              <dt title={pathSource ? source : undefined}>
                 {!row.group && <i style={{ background: row.color }} aria-hidden="true" />}
                 {row.label}
-                {source !== undefined && source !== "" && <small title={source}>{source}</small>}
+                {!pathSource && source !== undefined && source !== "" && (
+                  <small title={source}>{source}</small>
+                )}
                 {row.truncated && <small>已截断</small>}
               </dt>
               <dd title={row.chars === undefined ? undefined : `${number.format(row.chars)} chars`}>

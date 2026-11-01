@@ -14,6 +14,7 @@ import {
   StatusBar,
   contextRows,
   contextSourceLabel,
+  segmentWidths,
   type StatusPanel,
 } from "../src/StatusBar";
 import { presetOptions } from "../src/choice-info";
@@ -196,12 +197,43 @@ describe("上下文 breakdown", () => {
       (sum, segment) => sum + Number.parseFloat(segment.style.width),
       0,
     );
-    expect(totalWidth).toBeCloseTo(100);
+    expect(totalWidth).toBeCloseTo(14);
     expect(
       contextRows(context.report)
         .filter((row) => !row.group)
         .reduce((sum, row) => sum + row.tokens, 0),
     ).toBe(1400);
+  });
+
+  it("堆叠条总长跟总量占预算的比例走，明细之和不同也不影响", () => {
+    const fill = (estimatedTokens: number, budgetTokens: number) => {
+      const report = { ...context.report, estimatedTokens, budgetTokens };
+      return [...segmentWidths(report, contextRows(report)).values()].reduce((a, b) => a + b, 0);
+    };
+    expect(fill(5000, 10000)).toBeCloseTo(50);
+    expect(fill(20000, 10000)).toBeCloseTo(100);
+    expect(fill(1400, 0)).toBeCloseTo(100);
+  });
+
+  it("项目说明和环境的路径只在悬停提示里", () => {
+    render(
+      <ContextPanel
+        context={{
+          ...context,
+          report: {
+            ...context.report,
+            sections: [
+              { name: "instructions", source: "Z:/a/AGENTS.md", chars: 8, estimatedTokens: 2 },
+              { name: "environment", source: "Z:/a", chars: 8, estimatedTokens: 2 },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(screen.queryByText("Z:/a/AGENTS.md")).toBeNull();
+    expect(screen.queryByText("Z:/a")).toBeNull();
+    expect(screen.getByText("项目说明").getAttribute("title")).toBe("Z:/a/AGENTS.md");
+    expect(screen.getByText("环境").getAttribute("title")).toBe("Z:/a");
   });
 
   it("没有 breakdown 时只展示真实历史总数，不伪造四类数据", () => {
