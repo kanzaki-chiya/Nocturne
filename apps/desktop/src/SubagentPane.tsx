@@ -120,8 +120,6 @@ export function SubagentPane({
 
   const frozen = status.phase !== "unknown" && !status.animated && status.phase !== "submitted";
   const result = view === undefined ? undefined : finalResult(view);
-  const denied =
-    view?.entries.some((entry) => entry.kind === "tool" && entry.status === "denied") === true;
   const elapsed =
     status.animated && summary !== undefined ? runningMs(summary.startedAt, now) : undefined;
   const timeLabel =
@@ -183,11 +181,6 @@ export function SubagentPane({
       {status.error !== undefined && (
         <p className="sp-sub-note err" role="note">
           {status.error}
-        </p>
-      )}
-      {denied && (
-        <p className="sp-sub-note" role="note">
-          子代理无法请求确认；需由主代理在主对话处理。
         </p>
       )}
       {failed && hasContent && (

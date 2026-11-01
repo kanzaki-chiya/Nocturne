@@ -2423,7 +2423,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(ref?.getAttribute("title")).toBe("已附带 36/120 行");
     const placeholder = container.querySelector(".u-img-placeholder");
     expect(placeholder?.getAttribute("aria-label")).toBe("加载图片：img-1.png");
-    expect(placeholder?.getAttribute("title")).toBe("图片进入可视区后加载");
+    expect(placeholder?.getAttribute("title")).toBeNull();
   });
 });
 

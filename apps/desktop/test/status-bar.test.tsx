@@ -623,9 +623,9 @@ describe("状态栏速度段", () => {
       "TTFT1.0s",
       "生成用时3.0s",
       "请求总耗时4.0s",
-      "速度 = 输出 ÷ 生成用时（上一步）",
     ])
       expect(detail).toContain(part);
+    expect(detail).not.toContain("速度 = 输出 ÷ 生成用时（上一步）");
     fireEvent.keyDown(must(speed()), { key: "Escape" });
     expect(screen.queryByRole("tooltip")).toBeNull();
   });

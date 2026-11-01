@@ -42,7 +42,6 @@ export function GrantedTag({
       : [
           `${grant.scope === "session" ? "本会话允许" : "本项目允许"} · ${time}`,
           [kind && grantKind(kind), target].filter(Boolean).join(" · "),
-          ...(grant.scope === "project" ? ["可在 设置 › 授权 中撤销"] : []),
         ]
           .filter(Boolean)
           .join("\n");
@@ -640,7 +639,7 @@ function CodeRef({ text }: { text: string }) {
         role="button"
         tabIndex={0}
         className="file-ref-link"
-        title={`${hit.absolutePath}\n${canOpen ? "单击打开，右键更多" : "工作区外：单击查看选项"}`}
+        title={hit.absolutePath}
         onClick={(event) => {
           activate(event.currentTarget);
         }}
@@ -1075,7 +1074,7 @@ function UserImage({
       role="status"
       aria-label={`加载图片：${attachment.file}`}
       aria-busy={visible}
-      title={visible ? "图片加载中…" : "图片进入可视区后加载"}
+      title={visible ? "图片加载中…" : undefined}
     >
       <ImageIcon />
     </span>
@@ -1401,7 +1400,7 @@ function UserMessage({
                   type="button"
                   className="u-act"
                   disabled={busy || pending}
-                  title={busyTitle ?? "编辑消息并重新发送"}
+                  title={busyTitle ?? "编辑并重发"}
                   onClick={startEdit}
                 >
                   编辑并重发
@@ -1412,7 +1411,7 @@ function UserMessage({
                   type="button"
                   className="u-act"
                   disabled={busy || pending}
-                  title={busyTitle ?? "重新发送这条消息（连同之后的文件改动一起回退）"}
+                  title={busyTitle ?? "重发"}
                   onClick={() => {
                     sendResubmit(body, "both");
                   }}
@@ -1425,7 +1424,7 @@ function UserMessage({
                   type="button"
                   className="u-act"
                   disabled={pending}
-                  title="以这条消息之前的对话新建会话"
+                  title="分叉"
                   onClick={() => {
                     setError(undefined);
                     setConfirmFork(true);
@@ -2388,9 +2387,7 @@ function ToolRow({
           type="button"
           className="subagent-view"
           disabled={subagentLink.kind === "locating"}
-          title={
-            subagentLink.kind === "locating" ? "正在定位子代理…" : "在右侧面板中查看子代理过程"
-          }
+          title={subagentLink.kind === "locating" ? "正在定位子代理…" : "查看"}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -3425,7 +3422,7 @@ export function QuestionCard({
               rows={1}
               autoFocus
               aria-label={`${question.question} · 回答`}
-              placeholder="输入回答，Enter 提交"
+              placeholder="输入回答"
               value={draft.text}
               disabled={busy}
               onCompositionStart={() => {
@@ -3808,9 +3805,6 @@ function ConversationContent({
                 {warning}
               </div>
             ))}
-            {!view.entries.length && !view.live.assistants.length && !view.live.tools.length ? (
-              <div className="conversation-empty">发送消息，开始这个会话。</div>
-            ) : null}
             {(() => {
               const byAfterEntry = new Map<
                 number,
@@ -3951,16 +3945,10 @@ function ConversationContent({
           </Button>
         </div>
       ) : null}
-      {readOnly !== undefined && view.pendingPermission ? (
-        // 只读：旧日志里的未决确认只给提示，没有任何应答按钮或快捷键
-        <div className="conversation-requests">
-          <p className="ro-pending" role="status">
-            {readOnly.frozen
-              ? "这是历史日志里没有结算的确认请求；确认仍在主对话处理，此处不能批准。"
-              : "确认仍在主对话处理；此处不能批准。"}
-          </p>
-        </div>
-      ) : !hideRequests && view.pendingPermission && isLiveSession(session) ? (
+      {readOnly === undefined &&
+      !hideRequests &&
+      view.pendingPermission &&
+      isLiveSession(session) ? (
         <div className="conversation-requests">
           <PermissionCard
             key={`permission:${view.pendingPermission.requestId}`}

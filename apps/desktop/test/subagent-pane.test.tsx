@@ -233,7 +233,7 @@ it("未收束的日志：停止动画并标「日志未收束／运行状态未�
   expect(state?.view.entries.map((e) => e.kind)).toEqual(["user", "tool"]);
 });
 
-it("子会话非交互：被拒的操作提示由主代理在主对话处理；没有批准入口", async () => {
+it("子会话非交互：被拒的操作不渲染额外说明；没有批准入口", async () => {
   const { feed } = mount({ summary: summary() });
   await flush();
   feed(
@@ -244,11 +244,11 @@ it("子会话非交互：被拒的操作提示由主代理在主对话处理；�
       message: "子会话无法请求确认",
     }),
   );
-  expect(screen.getByText("子代理无法请求确认；需由主代理在主对话处理。")).toBeTruthy();
+  expect(screen.queryByText("子代理无法请求确认；需由主代理在主对话处理。")).toBeNull();
   expect(screen.queryByRole("button", { name: /允许|批准/ })).toBeNull();
 });
 
-it("历史待决确认只读提示，不提供批准按钮", async () => {
+it("历史待决确认不渲染提示，也不提供批准按钮", async () => {
   const { feed } = mount({ summary: summary({ state: "unsealed" }) });
   await flush();
   feed(
@@ -262,7 +262,10 @@ it("历史待决确认只读提示，不提供批准按钮", async () => {
       options: ["allow_once", "deny"],
     }),
   );
-  expect(screen.getByText(/历史日志里没有结算的确认请求/)).toBeTruthy();
+  expect(screen.queryByText(/历史日志里没有结算的确认请求/)).toBeNull();
+  expect(screen.queryByText(/确认仍在主对话处理/)).toBeNull();
+  expect(document.querySelector(".ro-pending")).toBeNull();
+  expect(document.querySelector(".conversation-requests")).toBeNull();
   expect(screen.queryByRole("button", { name: /允许|拒绝/ })).toBeNull();
 });
 

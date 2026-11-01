@@ -28,10 +28,6 @@
   flex-direction: column;
   gap: 10px;
 }
-.conversation-empty {
-  color: var(--a-muted);
-  padding: 32px 0;
-}
 .conversation pre {
   font: var(--fs-1)/1.65 var(--mono);
   white-space: pre-wrap;
@@ -1413,14 +1409,6 @@
 }
 .conversation .ro-user[open]:not(.subagent-result) .ro-user-preview {
   display: none;
-}
-.conversation .ro-pending {
-  margin: 0;
-  padding: 7px 10px;
-  border: 1px dashed var(--a-border-strong);
-  border-radius: var(--radius-2);
-  color: var(--a-muted);
-  font-size: var(--fs-1);
 }
 
 /* ── 工具结果里的截图（第 5 轮） ── */

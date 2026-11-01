@@ -160,7 +160,6 @@ export function AgentBrowserPane({
         <Badge
           variant={info.child ? "neutral" : "accent"}
           className={`sp-agent-badge${info.child ? " child" : ""}`}
-          title="这个标签由 agent 打开"
         >
           <AgentGlyph kind="agent" />
           {info.child ? "子代理" : "agent"}
@@ -177,11 +176,7 @@ export function AgentBrowserPane({
           size="sm"
           className="sp-agent-control"
           disabled={ended}
-          title={
-            takenOver
-              ? "把控制权交回 agent"
-              : "立即撤销 agent 的控制权，由你操作网页；直接点网页也会接管"
-          }
+          title={takenOver ? "把控制权交回 agent" : "接管"}
           onClick={() => {
             onControl(info.tabId, takenOver ? "return" : "takeover");
           }}
@@ -199,28 +194,20 @@ export function AgentBrowserPane({
           <AgentGlyph kind="close" />
         </IconButton>
       </header>
-      {/* 横幅、提示和说明放在同一行网格里：占位区固定在第 4 行，不能被挤乱 */}
-      <div className="sp-agent-info">
-        {info.dialog !== undefined && !ended && (
-          <DialogBanner
-            key={`${info.dialog.kind}|${info.dialog.message}`}
-            dialog={info.dialog}
-            onAnswer={(accept, text) => {
-              onDialog(info.tabId, accept, text);
-            }}
-          />
-        )}
-        {info.notice !== undefined && info.notice !== "" && (
-          <p className="sp-browser-notice" role="status">
-            {info.notice}
-          </p>
-        )}
-        <div className="sp-agent-hint">
-          {takenOver
-            ? "你已接管：直接操作网页；点「交给 agent」把控制权交回。"
-            : "agent 打开的标签，内容不可信"}
-        </div>
-      </div>
+      {info.dialog !== undefined && !ended && (
+        <DialogBanner
+          key={`${info.dialog.kind}|${info.dialog.message}`}
+          dialog={info.dialog}
+          onAnswer={(accept, text) => {
+            onDialog(info.tabId, accept, text);
+          }}
+        />
+      )}
+      {info.notice !== undefined && info.notice !== "" && (
+        <p className="sp-browser-notice" role="status">
+          {info.notice}
+        </p>
+      )}
       <div className="sp-browser-slot sp-agent-slot" ref={slot}>
         {ended && (
           <div className="sp-empty">

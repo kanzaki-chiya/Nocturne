@@ -96,10 +96,8 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
     />,
   );
   expect(screen.getByText("agent 控制中")).toBeTruthy();
-  expect(screen.getByText("agent 打开的标签，内容不可信")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "接管" }).getAttribute("title")).toContain(
-    "立即撤销 agent 的控制权",
-  );
+  expect(screen.queryByText("agent 打开的标签，内容不可信")).toBeNull();
+  expect(screen.getByRole("button", { name: "接管" }).getAttribute("title")).toBe("接管");
   fireEvent.click(screen.getByRole("button", { name: "接管" }));
   expect(onControl).toHaveBeenCalledWith("tab-1", "takeover");
 
@@ -114,7 +112,7 @@ it("接管和交回按钮调用各自的动作；接管后界面写明控制权�
     />,
   );
   expect(screen.getByText("已被你接管")).toBeTruthy();
-  expect(screen.getByText(/你已接管：直接操作网页/)).toBeTruthy();
+  expect(screen.queryByText(/你已接管：直接操作网页/)).toBeNull();
   expect(screen.queryByText(/点网页或「接管」会立即撤销/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "交给 agent" }));
   expect(onControl).toHaveBeenLastCalledWith("tab-1", "return");

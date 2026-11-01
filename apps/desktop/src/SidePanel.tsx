@@ -402,14 +402,12 @@ function NewTabPage({
   canOpenFiles,
   hasSession,
   hasTerminal,
-  hasBrowser,
 }: Pick<
   SidePanelProps,
   "onOpenChanges" | "onQuickOpen" | "onOpenTerminal" | "onAddress" | "canOpenFiles"
 > & {
   hasSession: boolean;
   hasTerminal: boolean;
-  hasBrowser: boolean;
 }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string>();
@@ -463,7 +461,6 @@ function NewTabPage({
                 <span className="sp-tool-name">变更</span>
                 <Kbd>Ctrl+Shift+G</Kbd>
               </span>
-              <span className="sp-tool-desc">当前会话改过的文件</span>
             </span>
           </button>
           <button
@@ -479,7 +476,6 @@ function NewTabPage({
                 <span className="sp-tool-name">文件</span>
                 <Kbd>Ctrl+P</Kbd>
               </span>
-              <span className="sp-tool-desc">搜索并查看工作区文件</span>
             </span>
           </button>
           <button
@@ -495,13 +491,9 @@ function NewTabPage({
                 <span className="sp-tool-name">终端</span>
                 <Kbd>Ctrl+`</Kbd>
               </span>
-              <span className="sp-tool-desc">在项目目录里开一个终端</span>
             </span>
           </button>
         </div>
-        <p className="sp-hint">
-          {hasBrowser ? "网址和 HTML 文件在这个标签里打开。" : "网址和 HTML 文件用系统浏览器打开。"}
-        </p>
       </div>
     </div>
   );
@@ -605,7 +597,7 @@ function ChangeSection({
           size="sm"
           className="sp-wrap"
           aria-pressed={wrap}
-          title={wrap ? "长行自动换行（点击改为横向滚动）" : "长行横向滚动（点击改为自动换行）"}
+          title="自动换行"
           onClick={() => {
             onWrap(!wrap);
           }}
@@ -1209,7 +1201,7 @@ function FileDiffView({
             size="sm"
             className="sp-wrap"
             aria-pressed={wrap}
-            title={wrap ? "长行自动换行（点击改为横向滚动）" : "长行横向滚动（点击改为自动换行）"}
+            title="自动换行"
             onClick={() => {
               onWrap(!wrap);
             }}
@@ -1298,7 +1290,6 @@ export function SidePanel(props: SidePanelProps) {
                 canOpenFiles={props.canOpenFiles}
                 hasSession={changes !== undefined}
                 hasTerminal={props.terminals !== undefined}
-                hasBrowser={props.browsers !== undefined}
               />
             ) : tab.kind === "changes" ? (
               <ChangesView

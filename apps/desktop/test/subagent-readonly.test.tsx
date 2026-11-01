@@ -229,7 +229,7 @@ it("只读视图里嵌套的 task 行不出现「在面板中查看」，即使�
   expect(viewButton()).toBeNull();
 });
 
-it("只读视图的待决权限：只给提示，没有应答按钮，按键不起作用；未收束的明确标历史", () => {
+it("只读视图的待决权限：不渲染提示，没有应答按钮，按键不起作用", () => {
   const view = childView();
   reduceSessionView(
     view,
@@ -243,16 +243,19 @@ it("只读视图的待决权限：只给提示，没有应答按钮，按键不�
   );
   expect(view.pendingPermission).toBeDefined();
   const { rerender } = render(<Conversation {...readOnlyProps(view)} />);
-  expect(screen.getByText("确认仍在主对话处理；此处不能批准。")).toBeTruthy();
+  expect(screen.queryByText("确认仍在主对话处理；此处不能批准。")).toBeNull();
+  expect(document.querySelector(".ro-pending")).toBeNull();
+  expect(document.querySelector(".conversation-requests")).toBeNull();
   for (const name of [/允许/, /拒绝/]) expect(screen.queryByRole("button", { name })).toBeNull();
   // 快捷键没有任何响应：不抛错、不出现卡片
   for (const key of ["1", "2", "Enter", "Escape", "y", "n"]) {
     fireEvent.keyDown(document.body, { key });
   }
   expect(screen.queryByRole("button", { name: /允许/ })).toBeNull();
-  // 未收束：明确是历史日志里没有结算的请求
   rerender(<Conversation {...readOnlyProps(view, { readOnly: { frozen: true } })} />);
-  expect(screen.getByText(/历史日志里没有结算的确认请求/)).toBeTruthy();
+  expect(screen.queryByText(/历史日志里没有结算的确认请求/)).toBeNull();
+  expect(document.querySelector(".ro-pending")).toBeNull();
+  expect(document.querySelector(".conversation-requests")).toBeNull();
   expect(screen.queryByRole("button", { name: /允许|拒绝/ })).toBeNull();
 });
 

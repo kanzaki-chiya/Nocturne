@@ -244,9 +244,7 @@ export function TurnChangesCard(props: Props) {
             type="button"
             className="u-act"
             disabled={busy}
-            title={
-              busy ? "请先等待或按 Esc 中断" : "把这一轮改过的文件还原到发送这条消息之前；对话保留"
-            }
+            title={busy ? "请先等待或按 Esc 中断" : "撤销"}
             onClick={() => {
               void preview();
             }}
@@ -258,7 +256,7 @@ export function TurnChangesCard(props: Props) {
           <button
             type="button"
             className="u-act"
-            title="在右侧面板查看这一轮的改动"
+            title="查看变更"
             onClick={() => {
               onViewChanges(turn.seq);
             }}

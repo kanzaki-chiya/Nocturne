@@ -278,13 +278,6 @@
 .sp-tool-name {
   font-size: var(--fs-2);
 }
-.sp-tool-desc {
-  overflow: hidden;
-  color: var(--a-faint);
-  font-size: var(--fs-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .sp-kbd {
   padding: 1px 5px;
   border: 1px solid var(--a-border);
@@ -292,11 +285,6 @@
   color: var(--a-faint);
   font: var(--fs-1) var(--mono);
   white-space: nowrap;
-}
-.sp-hint {
-  margin: 6px 0 0;
-  color: var(--a-faint);
-  font-size: var(--fs-1);
 }
 
 /*
@@ -1313,10 +1301,6 @@
   flex: none;
   white-space: nowrap;
 }
-.sp-agent-info {
-  grid-row: 2;
-  min-width: 0;
-}
 .sp-agent-dialog {
   display: grid;
   gap: 6px;
@@ -1356,12 +1340,6 @@
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-}
-.sp-agent-hint {
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--a-border);
-  color: var(--a-faint);
-  font-size: var(--fs-1);
 }
 .sp-agent-slot {
   position: relative;

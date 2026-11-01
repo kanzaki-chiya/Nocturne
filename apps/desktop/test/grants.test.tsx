@@ -205,8 +205,8 @@ it.each(["session", "project", undefined] as const)(
         new RegExp(`^${scope === "session" ? "本会话允许" : "本项目允许"} · 10-20 \\d{2}:\\d{2}$`),
       );
       expect(lines[1]).toBe("命令 · git status");
-      expect(lines).toHaveLength(scope === "project" ? 3 : 2);
-      if (scope === "project") expect(lines[2]).toBe("可在 设置 › 授权 中撤销");
+      expect(lines).toHaveLength(2);
+      expect(tag.title).not.toContain("可在 设置 › 授权 中撤销");
     }
   },
 );

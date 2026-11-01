@@ -1055,7 +1055,7 @@ export function Composer({
     </>
   );
 
-  const defaultPlaceholder = "输入消息，@ 引用文件";
+  const defaultPlaceholder = "输入消息";
 
   const txtBlock = (
     <div className="txt">

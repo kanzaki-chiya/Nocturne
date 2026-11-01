@@ -222,6 +222,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
             ? [["请求总耗时", formatSeconds(d.durationMs)] as [string, string]]
             : []),
         ];
+  const hasTip = speed.live || rows.length > 0;
   return (
     <span
       className={`status-speed${speed.estimated ? " status-speed-est" : ""}`}
@@ -231,7 +232,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
           ? `生成速度约 ${speed.label.replace(/^~/, "")}，估算中`
           : `上一步生成速度 ${speed.label}`
       }
-      aria-describedby={open ? tipId : undefined}
+      aria-describedby={open && hasTip ? tipId : undefined}
       onMouseEnter={() => {
         setOpen(true);
       }}
@@ -253,7 +254,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
     >
       {speed.live && <span className="status-speed-live" aria-hidden="true" />}
       <span className="mono">{speed.label}</span>
-      {open && (
+      {open && hasTip && (
         <span id={tipId} role="tooltip" className="status-popover status-speed-tip">
           {speed.live ? (
             <dl>
@@ -263,19 +264,14 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
               </div>
             </dl>
           ) : (
-            <>
-              {rows.length > 0 && (
-                <dl>
-                  {rows.map(([label, value]) => (
-                    <div key={label}>
-                      <dt>{label}</dt>
-                      <dd>{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              <span className="status-note">速度 = 输出 ÷ 生成用时（上一步）</span>
-            </>
+            <dl>
+              {rows.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
           )}
         </span>
       )}
