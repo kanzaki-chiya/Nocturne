@@ -357,6 +357,8 @@
     max(12px, env(safe-area-inset-left));
 }
 .phone-card {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -945,24 +947,20 @@
   padding: 12px 16px 24px;
 }
 
-/* 运行中的发送方式（ADR-0070）：插话 / 排队 */
-.phone-send-mode {
-  display: flex;
-  gap: 6px;
-  margin: 0 2px 6px;
+/* 待发输入列表：图标按钮放大到 44px 触控区，不放大图标 */
+.phone .pi-row,
+.phone .pi-paused {
+  min-height: 44px;
+  height: auto;
 }
-.phone-send-mode button {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--a-border);
-  border-radius: 999px;
-  background: var(--a-panel);
-  color: var(--a-muted);
-  font: inherit;
+.phone .pending-inputs .ib {
+  width: 44px;
+  height: 44px;
 }
-.phone-send-mode button.on {
-  border-color: var(--a-accent);
-  color: var(--a-accent);
+.phone .pi-edit {
+  margin: 0;
+  min-height: 36px;
+  padding: 0 10px;
 }
 
 .phone-usage .usage-page .spage {

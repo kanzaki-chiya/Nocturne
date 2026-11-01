@@ -278,8 +278,8 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
   expect(container.querySelector("textarea")?.value).toBe("最近一条");
 });
 
-// ADR-0070：运行中输入栏可发送——发送键默认插话，旁边切换插话/排队
-it("运行中：插话/排队切换、发送键与中断键并存、待发列表操作", async () => {
+// ADR-0070 修订 2026-11-01：运行中发送一律排队，待发列表排队行提供「立即发送」转为插话
+it("运行中：无切换按钮、发送默认排队、待发列表「立即发送」转插话", async () => {
   const onSubmit = vi.fn((_input: ComposerSubmit, _mode?: "steer" | "queue") =>
     Promise.resolve(true),
   );
@@ -306,6 +306,14 @@ it("运行中：插话/排队切换、发送键与中断键并存、待发列表
               createdAt: "2026-10-28T10:00:00Z",
               paused: false,
             },
+            {
+              id: "pi-2",
+              mode: "queue",
+              text: "排队一条",
+              attachments: 0,
+              createdAt: "2026-10-28T10:00:01Z",
+              paused: false,
+            },
           ],
           paused: true,
         }}
@@ -315,13 +323,29 @@ it("运行中：插话/排队切换、发送键与中断键并存、待发列表
       />,
     );
   });
-  // 待发列表：单行内容 + 暂停提示，无送达说明
+  // 运行中没有 .phone-send-mode 切换按钮；占位与空闲时一致，不含「插话」「排队」
+  expect(container.querySelector(".phone-send-mode")).toBeNull();
+  expect(field().placeholder).toBe("输入消息，/ 查看命令");
+  expect(field().placeholder).not.toMatch(/插话|排队/);
+  // 待发列表：单行内容 + 暂停提示，无送达说明；排队条目提供「立即发送」转为插话
   expect(container.querySelector(".pending-inputs")?.textContent).toContain("插话一条");
   expect(container.querySelector(".pending-inputs .pi-note")).toBeNull();
   expect(container.textContent).toContain("已暂停");
-  await act(() => button("继续发送").click());
+  await act(async () => {
+    button("继续发送").click();
+    await Promise.resolve();
+  });
   expect(onResume).toHaveBeenCalledOnce();
-  // 运行中：■ 与发送键并存（有草稿时）
+  const sendNow = container.querySelector<HTMLButtonElement>(
+    '.pending-inputs button[aria-label="立即发送"]',
+  );
+  expect(sendNow).toBeTruthy();
+  await act(async () => {
+    sendNow?.click();
+    await Promise.resolve();
+  });
+  expect(onUpdate).toHaveBeenCalledWith("pi-2", { mode: "steer" });
+  // 运行中：■ 与发送键并存（有草稿时），发送一律排队，title 只写「发送」
   expect(container.querySelector('[aria-label="中断"]')).toBeTruthy();
   expect(container.querySelector('[aria-label="发送"]')).toBeNull();
   await act(async () => {
@@ -329,31 +353,13 @@ it("运行中：插话/排队切换、发送键与中断键并存、待发列表
     setter?.call(field(), "运行中补一句");
     field().dispatchEvent(new Event("input", { bubbles: true }));
   });
+  const sendBtn = container.querySelector<HTMLButtonElement>('button[aria-label="发送"]');
+  expect(sendBtn?.title).toBe("发送");
   await act(async () => {
-    container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click();
+    sendBtn?.click();
     await Promise.resolve();
   });
-  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "运行中补一句" }), "steer");
-  // 切到排队
-  const modeButton = (name: string) => {
-    const found = [
-      ...container.querySelectorAll<HTMLButtonElement>(".phone-send-mode button"),
-    ].find((b) => b.textContent === name);
-    if (!found) throw new Error(`缺少 ${name} 切换`);
-    return found;
-  };
-  await act(() => modeButton("排队").click());
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    setter?.call(field(), "排队这句");
-    field().dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  await act(async () => {
-    container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click();
-    await Promise.resolve();
-  });
-  expect(onSubmit.mock.calls).toHaveLength(2);
-  expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ text: "排队这句" }), "queue");
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "运行中补一句" }), "queue");
 });
 
 it("空闲时发送键是普通发送，不带 mode", async () => {

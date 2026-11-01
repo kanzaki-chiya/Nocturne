@@ -113,12 +113,12 @@ export function SessionScreen({
 
   const running = busy || view.currentTurn !== undefined || view.status === "compacting";
   /**
-   * 发送（ADR-0070）：Turn 运行中入列——插话在安全点并入当前 Turn，排队在
-   * done 之后开新 Turn；空闲时与普通发送相同。
+   * 发送（ADR-0070 修订 2026-11-01）：Turn 运行中入列为排队，在 done 之后开新 Turn
+   * （待发列表的「立即发送」再将其转为插话并入当前 Turn）；空闲时与普通发送相同。
    */
   const submit = async (
     input: ComposerSubmit,
-    mode: "steer" | "queue" = "steer",
+    mode: "steer" | "queue" = "queue",
   ): Promise<boolean> => {
     if (entry.dead) throw new Error("电脑尚未连接");
     if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
