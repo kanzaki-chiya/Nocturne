@@ -451,12 +451,17 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
       case "table": {
         const table = token as Tokens.Table;
         return (
-          <div key={key} className="conversation-table">
-            <table>
+          <div key={key} className="tbl-wrap">
+            <table className="tbl">
               <thead>
                 <tr>
                   {table.header.map((cell, cellIndex) => (
-                    <th key={cellIndex} style={{ textAlign: cell.align ?? undefined }}>
+                    <th
+                      key={cellIndex}
+                      scope="col"
+                      className={cell.align === "right" ? "r" : undefined}
+                      style={{ textAlign: cell.align ?? "left" }}
+                    >
                       {markdownNodes(cell.tokens, openUrl)}
                     </th>
                   ))}
@@ -466,7 +471,11 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
                 {table.rows.map((row, rowIndex) => (
                   <tr key={rowIndex}>
                     {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} style={{ textAlign: cell.align ?? undefined }}>
+                      <td
+                        key={cellIndex}
+                        className={cell.align === "right" ? "r" : undefined}
+                        style={cell.align ? { textAlign: cell.align } : undefined}
+                      >
                         {markdownNodes(cell.tokens, openUrl)}
                       </td>
                     ))}

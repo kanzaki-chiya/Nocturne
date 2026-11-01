@@ -1803,7 +1803,7 @@ describe("Markdown 换行", () => {
     const view = createSessionView();
     view.entries = [
       assistant({
-        text: "```\nline1\nline2\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |",
+        text: "```\nline1\nline2\n```\n\n| A | B |\n| --- | ---: |\n| 1 | 2 |",
       }),
     ];
     const { container } = mount(view);
@@ -1811,10 +1811,17 @@ describe("Markdown 换行", () => {
       "line1\nline2",
     );
     expect(container.querySelector(".conversation-code br")).toBeNull();
-    expect(container.querySelectorAll(".conversation-table th")).toHaveLength(2);
-    expect(
-      [...container.querySelectorAll(".conversation-table td")].map((cell) => cell.textContent),
-    ).toEqual(["1", "2"]);
+    expect(container.querySelector(".conversation-table")).toBeNull();
+    expect(container.querySelector(".tbl-wrap > table.tbl")).not.toBeNull();
+    const headers = [...container.querySelectorAll<HTMLTableCellElement>(".tbl thead th")];
+    expect(headers).toHaveLength(2);
+    expect(headers[0]?.style.textAlign).toBe("left");
+    expect(headers[1]?.style.textAlign).toBe("right");
+    expect(headers[1]?.classList.contains("r")).toBe(true);
+    const cells = [...container.querySelectorAll<HTMLTableCellElement>(".tbl tbody td")];
+    expect(cells.map((cell) => cell.textContent)).toEqual(["1", "2"]);
+    expect(cells[1]?.style.textAlign).toBe("right");
+    expect(cells[1]?.classList.contains("r")).toBe(true);
   });
 });
 

@@ -534,21 +534,8 @@
   padding: 12px;
   margin: 0;
 }
-.conversation-table {
-  overflow-x: auto;
-  margin: 12px 0;
-}
-.conversation-table table {
-  border-collapse: collapse;
-  width: 100%;
-}
-.conversation-table :is(th, td) {
-  border: 1px solid var(--a-border-strong);
-  padding: 6px 10px;
-  min-width: 80px;
-}
-.conversation-table th {
-  background: var(--a-panel);
+.conversation-markdown .tbl-wrap {
+  margin: var(--space-2) 0;
 }
 .conversation-image-ref {
   color: var(--a-muted);
