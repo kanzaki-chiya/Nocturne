@@ -50,6 +50,7 @@
 | `--fs-4` | 页面与弹窗标题、Markdown `h3` | 顶栏标题、对话框标题、发送按钮 |
 | `--fs-5` | 欢迎标题、用量大数字、Markdown `h1`/`h2` | 空状态标题 |
 
+- **手机网页**：根字号 16px，正文与输入框沿用根字号（输入框小于 16px 会触发 iOS 聚焦时整页放大）；触控目标不小于 44px。
 - 行内代码与键盘提示在对话和面板内用 `max(var(--fs-1), 0.92em)`（或 `0.85em`），随外层正文缩放且不小于 `--fs-1`。
 - **字重**：`--fw-regular`（正文）、`--fw-medium`（导航选中、按钮、表单标签、小标题）、`--fw-semibold`（页面标题、分组标题、大数字），不使用 `700`。
 - **行高**：`--lh-tight`（标题、单行控件）、`--lh-base`（界面正文、表单说明）、`--lh-code`（代码块、日志、终端）、`--lh-prose`（对话 Markdown 正文）。
@@ -98,9 +99,10 @@
   - `.btn-danger`：常规态与次按钮相同，悬停变红；
   - `.btn-danger-solid`：破坏性确认弹窗内的实心红按钮；
   - 尺寸变体：`.btn-sm`（`--ctl-h-sm`）、`.btn-lg`（`--ctl-h-lg`），触控端按钮高度用 `--ctl-h-touch`。
+- **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 变体。
 - **图标按钮（`.ib`）**：宽高 `--ctl-h-md`（`.ib.sm` 为 `--ctl-h-sm`），圆角 `--radius-2`，激活态加 `.on` 或 `aria-pressed="true"`。图标按钮的 `title` 与 `aria-label` 只写动作名，不写状态或行为解释。
 - **折叠箭头（`.fold-arrow`）**：统一使用 `▶` 配合 CSS `transform: rotate(...)` 过渡，不混用 `▾`/`▸` 字符。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器的 `▾` 表示弹出菜单，不算折叠箭头。
-- **待发队列（`.pending-inputs`）**：压在输入框上沿，每条待发输入单行展示（`.pi-row`），左侧为序号与单行省略正文，右侧固定三个图标按钮（立即发送、编辑、取消），不写模式标签。
+- **待发队列（`.pending-inputs`）**：压在输入框上沿，每条待发输入单行（`.pi-row`）：弱化色箭头、单行省略的正文，右侧图标按钮依次为立即发送（只有运行中的排队条目才有）、编辑、取消；子代理结果条目只有取消。不写模式标签。
 - **开关（`.switch`）**：`button[role="switch"][aria-checked]`，尺寸 `--switch-w` × `--switch-h`，圆钮 `--switch-knob`。立即生效的布尔设置用开关；进表单点「保存」才生效的布尔字段用复选框 `.check`。
 - **分段控件（`.seg`）**：2–4 个互斥短选项，选中项 `[aria-pressed="true"]` / `[aria-selected="true"]` / `[aria-checked="true"]` 用 `--a-sel-strong` 底。
 - **下拉与输入框（`.dd`、`.input`、`.textarea`）**：默认高度 `--ctl-h-md`（`.lg` 为 `--ctl-h-lg`），机器值加 `.mono`，宽度档位 `.sm-w`（`--w-field-sm`）、`.md-w`（`--w-field-md`）。
@@ -112,15 +114,15 @@
 
 页面只有三种模板，布局宽度由 `design/tokens.json` 的 `layout` 分组控制：
 
-1. **单栏设置页**（常规、外观、模型、安全审查、远程与中继、外部代理）：
+1. **单栏设置页**（常规、模型、远程、外观）：
    - 外层 `.spage` 滚动，内套 `.readable`（`max-width: var(--w-readable)`，水平居中）；
    - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-4`），正文 `.sbody`（分组间距 `--space-8`）；
    - 每组 `.group` 含 `.ghead`（标题 `--fs-2` + `--fw-semibold`）和 `.card`（圆角 `--radius-3`），行 `.srow`（最小高 `--row-h`，左 `.lab` 右 `.ctl`）。
-2. **主从设置页**（服务商、子代理档位、MCP、技能、定时任务）：
+2. **主从设置页**（服务商、授权、MCP、技能、子代理、定时任务）：
    - 外层 `.spage.flush` 不滚动，顶栏 `.phead` 下接 `.md`（左栏 `.md-list` 宽 `--w-list` 独立滚动，右栏 `.md-detail` 独立滚动，内部 `.inner` 宽 `--w-readable` 居中）；
    - 新增按钮固定在左栏顶部，主操作与删除在右栏详情顶栏 `.dhead .actions`。
-3. **数据页**（用量与费用、授权与信任、后台日志）：
-   - 不套 `--w-readable` 窄栏限制，用量页使用 `--w-wide` 铺满可用宽度，表格仅用横线分隔行（`.tbl`）。
+3. **数据页**（用量、后台日志）：
+   - 不套 `--w-readable` 窄栏限制，铺满可用宽度，表格仅用横线分隔行（`.tbl`）。
 4. **对话区与侧面板**：
    - 对话消息流与输入框最大宽度 `--w-thread`；侧面板默认宽度 `--w-panel`；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）。
 
@@ -141,8 +143,8 @@
   - `width < 520px`：服务商模型表隐藏「最大输出」列（`.model-output`）；
   - `width < 400px`：隐藏「上下文」列（`.model-context`），横幅允许换行。
 - **`.usage-page`（容器查询）**：
-  - `max-width: 960px` 摘要卡改 2 列；`max-width: 820px` 构成改 2 列；`max-width: 680px` 表格隐藏输入/输出/缓存列；`max-width: 520px` 摘要与构成改单列。
-- **状态栏窄窗口让位顺序**：主区变窄时按「速度 → tokens → 上下文进度条」顺序隐藏，运行状态、上下文百分比和缓存命中始终保留，详见 [docs/apps/desktop.md](docs/apps/desktop.md#54-状态栏与顶部栏)。
+  - `max-width: 1080px` 表格隐藏单价列；`920px` 隐藏近期速度列；`900px` 概览改 3 列；`560px` 概览与构成改 2 列；`320px` 概览改单列。
+- **状态栏窄窗口让位顺序**：主区变窄时按「速度 → tokens → 上下文进度条」顺序隐藏，运行状态、上下文百分比和缓存命中始终保留，详见 [docs/apps/desktop.md](docs/apps/desktop.md#54-状态栏与上下文)。
 
 ---
 
@@ -151,12 +153,14 @@
 - **界面不写描述性文字**：
   - 不写模式标签（如待发队列不标排队/插话模式标签）、不写送达或状态说明、不在输入框占位符里塞快捷键提示、不写解释行为的 `title`；
   - 图标按钮的 `title` 与 `aria-label` 只写动作名（如「立即发送」「编辑」「取消」「关闭面板」）。
-- **工具调用统一用中文动词短语**：对话流与子代理面板中的工具行显示中文动词（读文件、改文件、写文件、跑命令、搜内容、找文件、抓网页、派子任务、列目录等），不显示底层工具标识或单字母图标。
+- **工具行用中文名称**：对话流与子代理面板的工具行显示 `Conversation.tsx` 的 `TOOL_META`（读取、搜索、查找文件、编辑、写入、命令、读取网页等），不显示底层工具标识或单字母图标。
 - **默认状态不标**：设置项处于默认值时不加「默认」「本机」等标记；仅在被项目层或接入层覆盖、只读锁定或模型已停用时显示来源或警告标记。
 - **条件不满足的操作隐藏**：当前状态下不成立的按钮直接隐藏；必须保留入口让用户知晓功能存在时，整块设为只读并在同一位置给出简短原因。
 - **中英文、分隔与代码混排**：
   - 路径、命令、模型 ID、环境变量名、键名用 `<code>` 或 `.mono`；人读的标签、状态、选项名用 `--sans`；
   - 标签与状态值分成两个元素，值放进 `.muted-value`，不用「 · 」串联不同性质的信息；模型引用统一写 `provider · model`（经 `src/model-ref.ts` 格式化），子代理标题行保留「档位 · 任务摘要」；
+  - 并列短语用中文逗号或顿号（「识别到 3 台，可导入 2 台」）；数值附注用括号（「第 3 轮（已撤销）」）或放进 `.muted-value`；
+  - `title`、`aria-label` 是纯文本语境，可以保留中点；
   - 键盘提示用 `KeyHint`（`<kbd>` 框靠间距分隔，聊天输入框不常驻快捷键提示）；
   - 统一用词：对话回合叫「轮」，`task` 与设置统一叫「子代理」，effort 叫「思考档位」，数值后写「tokens」、说明写「token」，MCP 传输写「本地命令」「远程地址（HTTP）」；手机网页不出现 CLI 命令；
   - 按钮用 2–4 字中文动词短语（添加服务商、重新探测、立即运行、撤回修改）；
@@ -208,8 +212,6 @@
 | `usage.css` | `.usage-level-3` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 70%, var(--a-panel))` | 热力图 3 级用 70% `--a-accent` 混入 `--a-panel` |
 | `usage.css` | `.usage-kind-input` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 60%, var(--a-panel))` | 用量构成条「输入」段用 60% `--a-accent` 混入 `--a-panel` |
 | `usage.css` | `.usage-kind-output` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accentAlt) 55%, var(--a-panel))` | 用量构成条「输出」段用 55% `--a-accentAlt` 混入 `--a-panel` |
-| `window-frame.css` | `.window-controls .window-close:hover`（`background`） | `color-no-hex` | `#c42b1c` | Windows 关闭按钮悬停红系统惯例 |
-| `window-frame.css` | `.window-controls .window-close:hover`（`color`） | `color-no-hex` | `#fff` | Windows 关闭按钮悬停白字系统惯例 |
 | `web/phone.css` | `.phone .phone-attachment button`（`background`） | `function-disallowed-list` | `rgb(0 0 0 / 0.6)` | 缩略图移除按钮深色半透明遮罩，与 `--a-overlay` 不同 |
 | `web/phone.css` | `.phone .phone-attachment button`（`color`） | `color-no-hex` | `#fff` | 深色图片遮罩上的固定白字 |
 | `web/phone.css` | `.phone .phone-attachment button`（`font-size`） | `declaration-property-value-allowed-list` | `15px` | 附件移除 `✕` 字符在 24px 圆钮内光学居中 |
@@ -235,6 +237,6 @@
      - `reportDescriptionlessDisables` 与 `reportNeedlessDisables`：禁止无理由或已失效的 `stylelint-disable` 注释。
    - **警告级（warning）**：
      - `declaration-property-value-disallowed-list`：`padding*`、`margin*`、`gap`、`row-gap`、`column-gap` 只允许 `var(--*)`、`0`、`auto`；
-     - 通过 `--max-warnings 690` 锁定存量警告上限，警告数只能减不能增。
+     - 通过 `--max-warnings 690` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
 2. **`node scripts/gen-tokens.mjs --check`**：校验 `apps/desktop/src/tokens.css` 与 `design/tokens.json` 完全同步，手工编辑 `tokens.css` 会直接失败。
 3. **`node scripts/check-css-vars.mjs`**：扫描 `apps/desktop/src/**/*.{css,ts,tsx}` 中所有 `var(--*)` 引用，若无回退值且未在任何 CSS 文件中定义则报错退出。

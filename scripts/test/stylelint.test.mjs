@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import stylelint from "stylelint";
 import { describe, expect, it } from "vitest";
 
+import formatter from "../stylelint-formatter.mjs";
+
 const rootDir = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const configFile = resolve(rootDir, ".stylelintrc.json");
 const codeFilename = resolve(rootDir, "apps/desktop/src/x.css");
@@ -61,5 +63,25 @@ describe("stylelint config", () => {
     );
     expect(res.errored).toBe(true);
     expect(res.errors.map((e) => e.rule)).toContain("--report-descriptionless-disables");
+  });
+});
+
+describe("lint:css 输出", () => {
+  const warning = { line: 1, column: 1, text: "padding", severity: "warning" };
+  const error = { line: 2, column: 3, text: "hex", severity: "error" };
+
+  it("错误逐条列出，警告只报总数", () => {
+    const output = formatter([{ source: "a.css", warnings: [warning, warning, error] }], {});
+    expect(output).toContain("a.css");
+    expect(output).toContain("2:3  hex");
+    expect(output).not.toContain("padding");
+    expect(output).toContain("间距警告 2 处");
+  });
+
+  it("超过上限时写明上限", () => {
+    const output = formatter([{ source: "a.css", warnings: [warning] }], {
+      maxWarningsExceeded: { maxWarnings: 0, foundWarnings: 1 },
+    });
+    expect(output).toContain("超过上限 0");
   });
 });
