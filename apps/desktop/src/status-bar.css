@@ -373,16 +373,6 @@
 .context-details .context-nested {
   padding-left: 16px;
 }
-.context-footer {
-  border-top: 1px solid var(--a-border);
-  padding-top: 8px;
-  font-size: var(--fs-1);
-  color: var(--a-faint);
-}
-.context-footer code {
-  font-family: var(--mono);
-  color: var(--a-secondary);
-}
 .status-popover::-webkit-scrollbar {
   width: 6px;
 }

@@ -79,7 +79,7 @@ export function contextRows(report: Report): ContextRow[] {
 
 /** 上下文报告里的英文来源文本 → 中文；路径按主目录缩写。 */
 export function contextSourceLabel(source: string, home?: string | null): string {
-  if (source === "nocturne base prompt") return "内置提示词";
+  if (source === "nocturne base prompt" || source === "会话技能目录") return "";
   if (source === "custom base prompt") return "自定义提示词";
   const tools = /^(\d+) tools(?:（(.+)）)?$/.exec(source);
   if (tools !== null) {
@@ -159,9 +159,6 @@ export function ContextPanel({
       {report.modelDefaults?.maxOutputTokens && (
         <p className="status-note">模型未声明输出上限，预算使用默认值。</p>
       )}
-      <div className="context-footer">
-        可以输入 <code>/compact</code> 压缩
-      </div>
     </>
   );
 }

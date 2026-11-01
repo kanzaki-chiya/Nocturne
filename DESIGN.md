@@ -237,6 +237,6 @@
      - `reportDescriptionlessDisables` 与 `reportNeedlessDisables`：禁止无理由或已失效的 `stylelint-disable` 注释。
    - **警告级（warning）**：
      - `declaration-property-value-disallowed-list`：`padding*`、`margin*`、`gap`、`row-gap`、`column-gap` 只允许 `var(--*)`、`0`、`auto`；
-     - 通过 `--max-warnings 681` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
+     - 通过 `--max-warnings 680` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
 2. **`node scripts/gen-tokens.mjs --check`**：校验 `apps/desktop/src/tokens.css` 与 `design/tokens.json` 完全同步，手工编辑 `tokens.css` 会直接失败。
 3. **`node scripts/check-css-vars.mjs`**：扫描 `apps/desktop/src/**/*.{css,ts,tsx}` 中所有 `var(--*)` 引用，若无回退值且未在任何 CSS 文件中定义则报错退出。

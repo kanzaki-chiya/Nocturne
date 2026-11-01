@@ -183,7 +183,7 @@ describe("上下文 breakdown", () => {
     }
     expect(screen.getByText("1,400 / 10,000 tokens（14%）")).toBeTruthy();
     expect(screen.getByText("8 条消息")).toBeTruthy();
-    expect(screen.getByText("/compact")).toBeTruthy();
+    expect(screen.queryByText("/compact")).toBeNull();
     const segments = Array.from(container.querySelectorAll<HTMLElement>("[data-segment]"));
     expect(segments.map((segment) => segment.dataset.segment)).toEqual([
       "system",
@@ -273,7 +273,8 @@ describe("上下文 breakdown", () => {
 
 describe("contextSourceLabel", () => {
   it("已知来源翻译成中文，其余原样返回（路径按主目录缩写）", () => {
-    expect(contextSourceLabel("nocturne base prompt")).toBe("内置提示词");
+    expect(contextSourceLabel("nocturne base prompt")).toBe("");
+    expect(contextSourceLabel("会话技能目录")).toBe("");
     expect(contextSourceLabel("custom base prompt")).toBe("自定义提示词");
     expect(contextSourceLabel("3 tools")).toBe("3 个工具");
     expect(contextSourceLabel("15 tools（MCP 按需，65 个工具未列出）")).toBe(
