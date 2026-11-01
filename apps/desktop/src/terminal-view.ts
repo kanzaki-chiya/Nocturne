@@ -3,6 +3,7 @@
  * 首屏包，手机网页版也不会打进 xterm。颜色取 `--a-*` 变量，深浅主题切换时跟着换。
  */
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
@@ -89,7 +90,8 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
     fontSize: 13,
     lineHeight: 1.15,
     cursorBlink: true,
-    allowProposedApi: false,
+    // Unicode 11 宽度表在实验性 unicode API 上，不开 proposed API 读不到
+    allowProposedApi: true,
     theme: readTheme(),
     minimumContrastRatio: isLightTheme() ? LIGHT_MIN_CONTRAST : 1,
     // 竖滚动条宽度跟随概览标尺宽度：与面板其余滚动区一样 10px
@@ -97,6 +99,10 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
   });
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
+  // xterm 6.0.0 自带 Unicode 6 宽度表，emoji 会被算成 1 列。配套的是同标签里的
+  // @xterm/addon-unicode11 0.9.0（与 addon-fit 0.11.0 一起发布）。
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
   term.open(parent);
   term.attachCustomKeyEventHandler((event) => {
     if (event.type !== "keydown") return !isAppShortcut(event);
