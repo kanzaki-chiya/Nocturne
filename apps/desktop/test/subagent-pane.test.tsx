@@ -335,7 +335,9 @@ it("图片经只读 RPC 读取（父/子/文件三元组），不 resume 子会�
   );
   const backend = runtimeOf();
   mount({ backend, summary: summary() });
-  await flush();
+  await waitFor(() => {
+    expect(backend.subs[0]?.observer).toBeTruthy();
+  });
   const withImage = durable("message.user", 1, {
     messageId: "u1",
     content: [{ type: "text", text: "看图" }],
@@ -357,6 +359,9 @@ it("图片经只读 RPC 读取（父/子/文件三元组），不 resume 子会�
   const details = document.querySelector("details.ro-user") as HTMLDetailsElement;
   act(() => {
     details.open = true;
+  });
+  await waitFor(() => {
+    expect(observers.length).toBeGreaterThan(0);
   });
   act(() => {
     for (const callback of observers) {

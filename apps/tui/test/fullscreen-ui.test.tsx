@@ -691,17 +691,29 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
     stdin.write("\x1b[Z");
-    await pause(80);
+    await waitFor(() => {
+      const frame = lastFrame() ?? "";
+      return frame.includes("思考:low") && !frame.includes("思考档位已切换");
+    });
     expect(lastFrame()).toContain("思考:low");
     expect(lastFrame()).not.toContain("思考档位已切换");
+    let previousPreset = "default";
     for (const preset of ["auto-edit", "guarded", "smart", "bypass", "read-only", "default"]) {
       stdin.write("\x1bm");
-      await pause(80);
+      await waitFor(() => {
+        const frame = lastFrame() ?? "";
+        return (
+          frame.includes(preset) &&
+          !frame.includes(previousPreset) &&
+          !frame.includes("权限预设已切换")
+        );
+      });
       expect(lastFrame()).toContain(preset);
       expect(lastFrame()).not.toContain("权限预设已切换");
       expect(lastFrame()).not.toContain("full-access");
+      previousPreset = preset;
     }
     unmount();
     await session.close();
