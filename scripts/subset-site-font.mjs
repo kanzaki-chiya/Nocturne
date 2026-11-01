@@ -18,7 +18,7 @@ const SOURCE =
 
 export async function headingCharacters(root = ROOT) {
   let text = "0123456789";
-  for (const page of ["index.html", "en/index.html"]) {
+  for (const page of ["index.html", "en/index.html", "changelog/index.html"]) {
     const html = await readFile(join(root, "site", page), "utf8");
     for (const match of html.matchAll(
       /<(h[12])\b[^>]*>([\s\S]*?)<\/\1>|<a\b[^>]*class="wordmark"[^>]*>([\s\S]*?)<\/a>/g,

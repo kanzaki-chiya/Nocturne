@@ -7,7 +7,8 @@
 - `site/index.html`、`site/en/index.html`：结构相同的双语页面。功能事实以根 README 为准。
 - `site/assets/`：共用 CSS、favicon、自托管字体和中英文分别拍摄的 WebP 截图。
 - `site/CNAME`：`nocturne.koxia.cn`。
-- `scripts/build-site.mjs`：仅使用 Node 内置模块，将 `site/` 复制到忽略的 `dist-site/`，并将 HTML 中全部 `{{version}}` 替换成根 `package.json` 的版本。
+- `site/changelog/index.html`：更新日志页模板，中文。构建时由根目录 `CHANGELOG.md` 生成版本目录和正文，发版不需要额外操作。
+- `scripts/build-site.mjs`：仅使用 Node 内置模块，将 `site/` 复制到忽略的 `dist-site/`，把 HTML 中全部 `{{version}}` 替换成根 `package.json` 的版本，并生成更新日志页。
 - `scripts/test/build-site.test.mjs`：版本、占位符、语言互链、本地资源与锚点、CNAME、字体标题清单检查。根 `pnpm test` 的 scripts 测试组会运行它。
 
 主页不是 pnpm workspace 成员，不参与 `pnpm build` 和 workspace 包测试。单独构建与验证：
@@ -21,7 +22,7 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 ## 发布与域名
 
-`.github/workflows/pages.yml` 使用官方 `upload-pages-artifact`、`deploy-pages`，以固定提交 SHA 锁定。仅运行 Node 静态构建，不安装项目依赖。触发条件：main 上的 `site/**`、构建脚本或工作流修改，Release 的 `published`，以及手动运行。Release 触发时检出发布标签，因此版本与该标签中的根 package.json 一致；其他触发检出对应提交。
+`.github/workflows/pages.yml` 使用官方 `upload-pages-artifact`、`deploy-pages`，以固定提交 SHA 锁定。仅运行 Node 静态构建，不安装项目依赖。触发条件：main 上的 `site/**`、`CHANGELOG.md`、构建脚本或工作流修改，Release 的 `published`，以及手动运行。Release 触发时检出发布标签，因此版本与该标签中的根 package.json 一致；其他触发检出对应提交。
 
 第一次上线由维护者完成：DNS 添加 `nocturne` CNAME 指向 `kanzaki-chiya.github.io`；仓库 Pages 来源设为 GitHub Actions；推送后在 Pages 设置确认域名并启用强制 HTTPS。提交代码本身不会开启 Pages。
 

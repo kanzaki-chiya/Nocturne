@@ -6,6 +6,7 @@ on:
     paths:
       - "site/**"
       - "scripts/build-site.mjs"
+      - "CHANGELOG.md"
       - ".github/workflows/pages.yml"
   release:
     types: [published]

@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildSite } from "../build-site.mjs";
+import { buildSite, renderChangelog } from "../build-site.mjs";
 import { headingCharacters } from "../subset-site-font.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -60,6 +60,41 @@ describe("static homepage", () => {
       }
     }
     await walk(out);
+  });
+  it("renders the changelog page from CHANGELOG.md", async () => {
+    const html = await readFile(join(out, "changelog/index.html"), "utf8");
+    const source = await readFile(join(ROOT, "CHANGELOG.md"), "utf8");
+    expect(html).not.toContain("{{changelog");
+    expect(html).toContain(`id="v${version}"`);
+    expect(html.match(/class="release"/g)).toHaveLength(source.match(/^## /gm).length);
+    expect(html.match(/<ul>/g)?.length).toBe(html.match(/<\/ul>/g)?.length);
+    expect(html).not.toMatch(/<script\b/i);
+    expect(pages[0]).toContain('href="changelog/"');
+    expect(pages[1]).toContain('href="../changelog/"');
+  });
+  it("converts changelog markdown and escapes HTML", () => {
+    const { index, body } = renderChangelog(
+      [
+        "# 更新日志",
+        "",
+        "## 1.0.0",
+        "",
+        "### 分组",
+        "",
+        "- **修复**：`<a>` & <b>",
+        "  - 子项",
+        "- 见 [说明](docs/a.md)",
+        "",
+        "段落",
+      ].join("\n"),
+    );
+    expect(index).toBe('<a href="#v1.0.0">1.0.0</a>');
+    expect(body).toContain("<strong>修复</strong>：<code>&lt;a&gt;</code> &amp; &lt;b&gt;");
+    expect(body).toContain("<ul>\n<li>子项");
+    expect(body).toContain("/blob/main/docs/a.md");
+    expect(body.match(/<ul>/g)).toHaveLength(2);
+    expect(body.match(/<\/ul>/g)).toHaveLength(2);
+    expect(body).toContain("<p>段落</p>");
   });
   it("copies the custom domain", async () => {
     expect(await readFile(join(out, "CNAME"), "utf8")).toBe("nocturne.koxia.cn\n");
