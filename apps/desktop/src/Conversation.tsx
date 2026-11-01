@@ -1499,24 +1499,24 @@ function UserMessage({
 
 // ── 工具行 ──
 
-const TOOL_META: Record<string, { icon: string; label: string }> = {
-  todo_write: { icon: "✓", label: "任务清单" },
-  skill: { icon: "S", label: "技能" },
-  read: { icon: "R", label: "读取" },
-  grep: { icon: "S", label: "搜索" },
-  glob: { icon: "F", label: "查找文件" },
-  edit: { icon: "E", label: "编辑" },
-  write: { icon: "W", label: "写入" },
-  apply_patch: { icon: "P", label: "应用补丁" },
-  apply_subagent_changes: { icon: "P", label: "并回子代理改动" },
-  shell: { icon: "$", label: "命令" },
-  web_fetch: { icon: "U", label: "读取网页" },
-  web_search: { icon: "Q", label: "网页搜索" },
-  subagent: { icon: "T", label: "子代理" },
-  task: { icon: "T", label: "子代理" },
-  ask_user: { icon: "?", label: "提问" },
-  schedule: { icon: "C", label: "定时任务" },
-  mcp_search: { icon: "Q", label: "搜索 MCP 工具" },
+const TOOL_META: Record<string, string> = {
+  todo_write: "任务清单",
+  skill: "技能",
+  read: "读取",
+  grep: "搜索",
+  glob: "查找文件",
+  edit: "编辑",
+  write: "写入",
+  apply_patch: "应用补丁",
+  apply_subagent_changes: "并回子代理改动",
+  shell: "命令",
+  web_fetch: "读取网页",
+  web_search: "网页搜索",
+  subagent: "子代理",
+  task: "子代理",
+  ask_user: "提问",
+  schedule: "定时任务",
+  mcp_search: "搜索 MCP 工具",
 };
 
 const MCP_NAME_PREFIX = "mcp__";
@@ -1536,15 +1536,12 @@ function mcpToolLabel(name: string, subjects?: ToolEntry["subjects"]): string | 
   return rest === "" ? undefined : rest;
 }
 
-export function toolMeta(
-  name: string,
-  subjects?: ToolEntry["subjects"],
-): { icon: string; label: string } {
+export function toolMeta(name: string, subjects?: ToolEntry["subjects"]): { label: string } {
   const known = TOOL_META[name];
-  if (known !== undefined) return known;
+  if (known !== undefined) return { label: known };
   const mcp = mcpToolLabel(name, subjects);
-  if (mcp !== undefined) return { icon: "·", label: mcp };
-  return { icon: "·", label: name };
+  if (mcp !== undefined) return { label: mcp };
+  return { label: name };
 }
 
 export function toolArgument(entry: ToolEntry, cwd: string): string {
@@ -1971,7 +1968,6 @@ function pathParts(path: string, suffix = ""): ArgParts {
 function ToolLine({
   open,
   disabled,
-  icon,
   label,
   arg,
   argClassName,
@@ -1982,7 +1978,6 @@ function ToolLine({
 }: {
   open: boolean;
   disabled: boolean;
-  icon: string;
   label: string;
   arg: ArgParts;
   argClassName?: string | undefined;
@@ -2004,9 +1999,6 @@ function ToolLine({
     >
       <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
         ▶
-      </span>
-      <span className="ic" aria-hidden="true">
-        {icon}
       </span>
       <span className="tool-name">{label}</span>
       {profile !== undefined && <span className="subagent-badge">{profile}</span>}
@@ -2436,7 +2428,6 @@ function ToolRow({
             <ToolLine
               open={isOpen}
               disabled={preparing}
-              icon={meta.icon}
               label={subagent.profile !== undefined ? "子代理" : meta.label}
               profile={subagent.profile}
               arg={

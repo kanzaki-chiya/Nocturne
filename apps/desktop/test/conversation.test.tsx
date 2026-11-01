@@ -1826,9 +1826,9 @@ describe("Markdown 换行", () => {
 });
 
 describe("Conversation 工具行三个阶段同一结构", () => {
-  const HEAD = ["fold-arrow", "ic", "tool-name", "tool-arg"];
+  const HEAD = ["fold-arrow", "tool-name", "tool-arg"];
   const headClasses = (line: Element | null) =>
-    Array.from(line?.children ?? [], (node) => node.className.split(" ")[0]).slice(0, 4);
+    Array.from(line?.children ?? [], (node) => node.className.split(" ")[0]).slice(0, 3);
   const editPath = "Z:/project/apps/desktop/src/Conversation.tsx";
   const editInput = { path: editPath, old_string: "old", new_string: "new" };
 
@@ -1854,6 +1854,8 @@ describe("Conversation 工具行三个阶段同一结构", () => {
 
       // 1. 接收参数，半截 JSON：箭头占位且禁用，参数位为空元素，原始片段不出现在文本或 title 里
       expect(headClasses(node)).toEqual(HEAD);
+      expect(node.querySelector(".ic")).toBeNull();
+      expect(node.querySelector(".tool-name")?.textContent).toBe("编辑");
       expect(node.getAttribute("aria-disabled")).toBe("true");
       expect(node.querySelector(".tool-arg")?.textContent).toBe("");
       expect(node.querySelector(".tool-res")?.textContent).toBe("接收参数中");

@@ -574,21 +574,10 @@
 .conversation .tool-details > summary.tool-line[aria-disabled="true"] .fold-arrow {
   opacity: 0.35;
 }
-.conversation .tool .ic {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-1);
-  border: 1px solid var(--a-border);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font: 600 9px/1 var(--mono);
-  color: var(--a-secondary);
-}
 .conversation .tool-name {
   flex: none;
   color: var(--a-secondary);
+  font-weight: var(--fw-medium);
 }
 .conversation .tool-arg {
   flex: 1;
