@@ -40,6 +40,7 @@ import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
 import { GrantsPage } from "./GrantsPage";
+import { SessionGrants, useSessionGrants } from "./SessionGrants";
 import { desktopWarningText } from "./open-warnings";
 import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
@@ -1858,6 +1859,7 @@ function SessionPane({
     workspace,
     replaying,
   );
+  const { grants } = useSessionGrants(session, client);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);
   useEffect(() => {
@@ -1947,6 +1949,9 @@ function SessionPane({
         skills={skills}
         externalAgents={externalAgents}
         variant="session"
+        controls={controls.controls}
+        onManageProviders={onManageProviders}
+        presetFooter={<SessionGrants grants={grants} session={session} onManage={onManageGrants} />}
         todos={view.todos}
         prefs={prefs}
         running={running}
@@ -1968,13 +1973,10 @@ function SessionPane({
         session={session}
         view={view}
         replaying={replaying}
-        controls={controls}
         panel={panel}
         onPanelChange={onPanelChange}
         home={home}
-        onManageProviders={onManageProviders}
         onManageMcp={onManageMcp}
-        onManageGrants={onManageGrants}
         remoteStatus={remoteStatus}
         remoteClient={client}
         onManageRemote={onManageRemote}

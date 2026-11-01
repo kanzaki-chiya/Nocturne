@@ -289,11 +289,80 @@ describe("contextSourceLabel", () => {
 });
 
 describe("StatusBar", () => {
-  it("缓存命中率在进行中 Turn 每步结束即更新，不等 Turn 结束", () => {
+  it("左组与右组内容及顺序固定，不含模型/档位/预设/Shell 按钮，无孤立中点", async () => {
     const state = fixture();
-    const cache = () => document.querySelector(".status-cache")?.textContent;
+    const onManageMcp = vi.fn();
+    const onManageRemote = vi.fn();
+    const view = {
+      ...state.view,
+      status: "thinking" as const,
+      currentTurn: { turnId: "t1", turnIndex: 2 },
+      usage: { inputTokens: 1200, outputTokens: 200, cacheReadTokens: 1080 },
+      mcpServers: {
+        exa: { state: "ready" as const, toolCount: 2 },
+      },
+    };
+    const remoteStatus = {
+      registered: true as const,
+      enabled: true,
+      connection: "online" as const,
+      connections: [
+        {
+          deviceId: "d1",
+          name: "iPhone",
+          since: 1,
+        },
+      ],
+      devices: [
+        {
+          id: "d1",
+          name: "iPhone",
+          createdAt: 1,
+          online: true,
+          push: false,
+        },
+      ],
+      warnings: [],
+    };
+    const { container } = render(
+      <StatusBar
+        {...state}
+        view={view}
+        onManageMcp={onManageMcp}
+        remoteStatus={remoteStatus}
+        onManageRemote={onManageRemote}
+      />,
+    );
+    await screen.findByText("14%");
+
+    const groups = container.querySelectorAll(".status-group");
+    expect(groups).toHaveLength(2);
+    const leftClasses = Array.from(groups[0]?.children ?? []).map((el) => el.className);
+    expect(leftClasses[0]).toContain("status-turn");
+    expect(leftClasses[1]).toContain("status-context");
+    expect(leftClasses[2]).toContain("status-tokens");
+    const rightClasses = Array.from(groups[1]?.children ?? []).map((el) => el.className);
+    expect(rightClasses[0]).toContain("status-mcp");
+    expect(rightClasses[1]).toContain("remote-badge");
+
+    expect(screen.queryByRole("button", { name: "切换模型" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换思考档位" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "切换思考档位" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换权限预设" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "切换权限预设" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换 Shell" })).toBeNull();
+
+    expect(container.querySelector(".status-sep")).toBeNull();
+    expect(container.textContent ?? "").not.toMatch(/·\s*$/);
+    expect(container.textContent ?? "").not.toMatch(/·\s*·/);
+  });
+
+  it("累计 tokens 与缓存说明在进行中 Turn 每步结束即更新，不等 Turn 结束", () => {
+    const state = fixture();
+    const tokensEl = () => document.querySelector<HTMLElement>(".status-tokens");
     const rendered = render(<StatusBar {...state} />);
-    expect(cache()).toBe("缓存 —");
+    expect(tokensEl()?.textContent).toBe("0 tokens");
+    expect(tokensEl()?.title).not.toContain("缓存命中");
     const view = {
       ...state.view,
       status: "running_tool" as const,
@@ -316,7 +385,8 @@ describe("StatusBar", () => {
       ],
     };
     rendered.rerender(<StatusBar {...state} view={view} />);
-    expect(cache()).toBe("缓存 90%");
+    expect(tokensEl()?.textContent).toBe("1.0k tokens");
+    expect(tokensEl()?.title).toContain("缓存命中 90%");
   });
 
   it("已有数据时刷新不插入读取行；失败保留数据并在标题显示提示", async () => {
@@ -360,65 +430,7 @@ describe("StatusBar", () => {
     expect(onPanelChange).toHaveBeenCalledWith(null);
   });
 
-  it("Shell 菜单列出生效值与候选，选择调用 controls.setShell", async () => {
-    const state = fixture();
-    render(<StatusBar {...state} />);
-    const trigger = screen.getByRole("button", { name: "切换 Shell" });
-    expect(trigger.textContent).toContain("pwsh");
-    fireEvent.click(trigger);
-    expect(state.controls.loadShells).toHaveBeenCalled();
-    const bash = await screen.findByRole("menuitemradio", { name: /bash · Bash/ });
-    const cmd = screen.getByRole("menuitemradio", { name: /cmd · cmd.exe/ });
-    expect((cmd as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(bash);
-    await waitFor(() => expect(state.controls.setShell).toHaveBeenCalledWith("bash"));
-    expect(screen.queryByRole("menu")).toBeNull();
-  });
-
-  it("setShell 失败显示真实错误", async () => {
-    const state = fixture();
-    state.controls.setShell = vi.fn(async () => {
-      throw new Error("session_busy");
-    });
-    state.controls.shellControl = {
-      ...state.controls.shellControl,
-      onSelect: state.controls.setShell,
-    };
-    render(<StatusBar {...state} />);
-    fireEvent.click(screen.getByRole("button", { name: "切换 Shell" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: /bash · Bash/ }));
-    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "session_busy");
-  });
-
-  it("模型菜单调用 onSelect；权限预设是自绘下拉，选项带说明，危险项在最后", async () => {
-    const state = fixture();
-    const onManageProviders = vi.fn();
-    render(<StatusBar {...state} onManageProviders={onManageProviders} />);
-    fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "one" }));
-    await waitFor(() =>
-      expect(state.controls.controls.model.onSelect).toHaveBeenCalledWith("fixture/one"),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "管理服务商…" }));
-    expect(onManageProviders).toHaveBeenCalledTimes(1);
-
-    const preset = screen.getByRole("combobox", { name: "切换权限预设" });
-    fireEvent.click(preset);
-    expect(preset.getAttribute("aria-expanded")).toBe("true");
-    const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(6);
-    expect(options.at(-1)?.textContent).toMatch(/bypass/);
-    expect(options.at(-1)?.className).toContain("risk");
-    expect(screen.getByRole("option", { name: /^default/ }).textContent).toContain("默认");
-    fireEvent.click(screen.getByRole("option", { name: /^default/ }));
-    await waitFor(() =>
-      expect(state.controls.controls.preset.onSelect).toHaveBeenCalledWith("default"),
-    );
-    expect(preset.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("流式 revision 不重复 describeContext，缓存来自包含口径的累计用量", async () => {
+  it("流式 revision 不重复 describeContext，累计用量来自包含口径", async () => {
     const state = fixture();
     const view = {
       ...state.view,
@@ -429,7 +441,7 @@ describe("StatusBar", () => {
     const calls = state.api.describeContext.mock.calls.length;
     rerender(<StatusBar {...state} view={{ ...view, revision: view.revision + 1 }} />);
     expect(state.api.describeContext.mock.calls.length).toBe(calls);
-    expect(screen.getByText("80%")).toBeTruthy();
+    expect(screen.getByText("1.0k tokens").getAttribute("title")).toContain("缓存命中 80%");
   });
 
   it("点击上下文触发外部面板状态，保留父代理命令接口", async () => {
@@ -441,15 +453,18 @@ describe("StatusBar", () => {
     expect(onPanelChange).toHaveBeenCalledWith("context");
   });
 
-  it("Turn 状态与当前 Turn 序号显示在右侧", async () => {
+  it("Turn 状态与当前 Turn 序号显示在左组首位", async () => {
     const state = fixture();
     const view = {
       ...state.view,
       status: "thinking" as const,
       currentTurn: { turnId: "t1", turnIndex: 3 },
     };
-    render(<StatusBar {...state} view={view} />);
+    const { container } = render(<StatusBar {...state} view={view} />);
     expect(await screen.findByText("第 3 轮")).toBeTruthy();
+    expect(container.querySelector(".status-left")?.firstElementChild?.className).toContain(
+      "status-turn",
+    );
   });
 });
 

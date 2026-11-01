@@ -11,11 +11,8 @@ import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession, RpcClient, RemoteStatus } from "@nocturne/rpc/client";
 import { RemoteBadge } from "./RemotePage";
 
-import { Dropdown } from "./Dropdown";
-import { SessionGrants, useSessionGrants } from "./SessionGrants";
 import { unavailableMcpServers, type UnavailableMcpServer } from "./mcp-status";
 import { ContextPanel, number, percent } from "./context-panel";
-import { ChoiceMenu } from "./Menu";
 import type { SessionControls } from "./session-controls";
 import { useSessionRefresh } from "./use-session-refresh";
 import {
@@ -25,7 +22,6 @@ import {
   type SpeedDisplay,
   type StepSpeed,
 } from "./speed";
-import { MODEL_REF_SEPARATOR, modelRefText } from "./model-ref";
 import "./status-bar.css";
 
 export type StatusPanel = "context";
@@ -38,14 +34,13 @@ export interface StatusBarProps {
   view: SessionView;
   /** 历史回放期间为 true：不按条目数刷新上下文，结束后刷新一次 */
   replaying?: boolean;
-  controls: SessionControls;
+  controls?: SessionControls | undefined;
   panel?: StatusPanel | null;
   onPanelChange?: (panel: StatusPanel | null) => void;
   /** 主目录（上下文来源路径的 ~ 缩写） */
   home?: string | null;
-  /** 模型菜单底部「管理服务商…」：进入设置 › 服务商 */
   onManageProviders?: () => void;
-  /** MCP 未连接标记的点击：进入设置 › MCP */
+  /** MCP 标记的点击：进入设置 › MCP */
   onManageMcp?: () => void;
   onManageGrants?: () => void;
 }
@@ -68,8 +63,6 @@ const STATUS_TEXT: Record<SessionView["status"], string> = {
 };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-type StatusMenu = "model" | "shell";
-
 const MCP_STATE_TEXT: Record<UnavailableMcpServer["state"], string> = {
   starting: "启动中",
   ready: "已连接",
@@ -77,17 +70,46 @@ const MCP_STATE_TEXT: Record<UnavailableMcpServer["state"], string> = {
   crashed: "连接断开",
 };
 
-/** MCP 未连接标记：只在有 failed / crashed 服务器时出现；悬停或聚焦列出原因，点击进入设置 › MCP */
+function compactTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return number.format(n);
+}
+
+/**
+ * MCP 状态标记：
+ * - 有 failed / crashed 服务器时显示警告色「MCP 未连接 N」，悬停或聚焦列出原因；
+ * - 全部就绪时显示「MCP N」；
+ * - 点击进入设置 › MCP。
+ */
 function McpBadge({
   servers,
+  readyCount,
   onOpen,
 }: {
   servers: UnavailableMcpServer[];
+  readyCount: number;
   onOpen: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const tipId = useId();
-  if (servers.length === 0) return null;
+  if (servers.length === 0) {
+    if (readyCount <= 0) return null;
+    return (
+      <span className="status-mcp">
+        <button
+          type="button"
+          className="status-pill status-mcp-ready"
+          aria-label={`MCP ${readyCount}，打开 MCP 设置`}
+          onClick={() => {
+            onOpen?.();
+          }}
+        >
+          <span className="dot ok" aria-hidden="true" />
+          MCP <b className="mono">{readyCount}</b>
+        </button>
+      </span>
+    );
+  }
   return (
     <span
       className="status-mcp"
@@ -265,28 +287,23 @@ export function StatusBar({
   session,
   view,
   replaying = false,
-  controls,
   panel,
   onPanelChange,
   home,
-  onManageProviders,
   onManageMcp,
-  onManageGrants,
   remoteStatus,
   remoteClient,
   onManageRemote,
 }: StatusBarProps) {
   const speed = useStepSpeed(session, view);
-  const { grants } = useSessionGrants(session, remoteClient);
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
   const activePanel = panel === undefined ? localPanel : panel;
-  const [openMenu, setOpenMenu] = useState<StatusMenu | null>(null);
   const [context, setContext] = useState<ContextSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
-  const triggers = useRef<Partial<Record<StatusPanel | StatusMenu, HTMLButtonElement | null>>>({});
+  const triggers = useRef<Partial<Record<StatusPanel, HTMLButtonElement | null>>>({});
   const dialogId = useId();
 
   const changePanel = useCallback(
@@ -323,7 +340,6 @@ export function StatusBar({
   useEffect(() => {
     setContext(null);
     setLocalPanel(null);
-    setOpenMenu(null);
   }, [session]);
   useEffect(() => {
     if (activePanel === null) return;
@@ -343,20 +359,6 @@ export function StatusBar({
       document.removeEventListener("pointerdown", outside);
     };
   }, [activePanel, changePanel]);
-
-  const toggleMenu = (kind: StatusMenu) => {
-    if (openMenu === kind) {
-      setOpenMenu(null);
-      return;
-    }
-    setError(null);
-    if (kind === "shell") controls.loadShells();
-    setOpenMenu(kind);
-  };
-  const closeMenu = (kind: StatusMenu) => {
-    setOpenMenu(null);
-    triggers.current[kind]?.focus();
-  };
 
   const keyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
@@ -385,211 +387,74 @@ export function StatusBar({
   const used = usage === undefined ? null : percent(usage.estimatedTokens, usage.budgetTokens);
   // 含进行中 Turn 已完成的步骤，每步结束即更新（view.md §8）
   const cacheUsage = sessionUsageSoFar(view);
+  const totalTokens = cacheUsage.inputTokens + cacheUsage.outputTokens;
   const cache =
     cacheUsage.cacheReadTokens === undefined || cacheUsage.inputTokens <= 0
       ? null
       : Math.round((cacheUsage.cacheReadTokens / cacheUsage.inputTokens) * 100);
   const busy = view.status !== "idle" && view.status !== "failed";
+  const readyMcpCount = Object.values(view.mcpServers).filter((s) => s.state === "ready").length;
+
   const trigger = (name: StatusPanel, label: string, content: ReactNode) => (
     <button
       type="button"
       ref={(node) => {
         triggers.current[name] = node;
       }}
-      className={`status-pill${activePanel === name ? " status-pill-active" : ""}`}
+      className={`status-pill status-${name}${activePanel === name ? " status-pill-active" : ""}`}
       aria-label={label}
       aria-expanded={activePanel === name}
       aria-controls={activePanel === name ? dialogId : undefined}
       aria-haspopup="dialog"
       onClick={() => {
-        setOpenMenu(null);
         if (activePanel === name) closePanel();
         else changePanel(name);
       }}
     >
       {content}
-      <span className="status-caret" aria-hidden="true">
-        {activePanel === name ? "▴" : "▾"}
-      </span>
     </button>
   );
-
-  const pill = (
-    kind: StatusMenu,
-    label: string,
-    control: { disabled?: string },
-    content: ReactNode,
-  ) => (
-    <button
-      type="button"
-      ref={(node) => {
-        triggers.current[kind] = node;
-      }}
-      className={`status-pill status-${kind}${openMenu === kind ? " status-pill-active" : ""}`}
-      aria-label={label}
-      aria-haspopup="menu"
-      aria-expanded={openMenu === kind}
-      disabled={control.disabled !== undefined}
-      title={
-        kind === "model"
-          ? `${model === undefined ? "模型 —" : modelRefText(model)}${control.disabled === undefined ? "" : `（${control.disabled}）`}`
-          : control.disabled
-      }
-      onClick={() => {
-        toggleMenu(kind);
-      }}
-    >
-      {content}
-      <span className="status-caret" aria-hidden="true">
-        ▾
-      </span>
-    </button>
-  );
-
-  /** 权限与思考档位：与设置页同一个自绘下拉（Dropdown），选项说明来自 choice-info.ts */
-  const choiceDropdown = (
-    label: string,
-    control: SessionControls["controls"]["effort"],
-    content: ReactNode,
-    preset = false,
-  ) => (
-    <Dropdown
-      variant="pill"
-      footer={
-        preset ? (
-          <SessionGrants grants={grants} session={session} onManage={onManageGrants} />
-        ) : undefined
-      }
-      label={label}
-      value={control.value}
-      options={control.groups.flatMap((group) => group.options)}
-      triggerClassName={`status-pill${preset ? " status-preset" : ""}`}
-      openClassName="status-pill-active"
-      {...(control.heading !== undefined ? { heading: control.heading } : {})}
-      {...(control.note !== undefined ? { note: control.note } : {})}
-      {...(control.disabled !== undefined ? { disabled: control.disabled } : {})}
-      onChange={(value) => {
-        setOpenMenu(null);
-        setError(null);
-        void Promise.resolve(control.onSelect(value)).catch((reason: unknown) => {
-          setError(message(reason));
-        });
-      }}
-    >
-      {content}
-      <span className="status-caret" aria-hidden="true">
-        ▾
-      </span>
-    </Dropdown>
-  );
-
-  const shell = controls.shell;
-  const model = view.config.model;
-  const menuControl = (kind: StatusMenu) => {
-    const control = kind === "model" ? controls.controls.model : controls.shellControl;
-    return (
-      <ChoiceMenu
-        anchor={triggers.current[kind] ?? null}
-        label={control.heading ?? control.label}
-        control={control}
-        searchable={kind === "model"}
-        action={
-          kind === "model" && onManageProviders !== undefined
-            ? { label: "管理服务商…", onSelect: onManageProviders }
-            : undefined
-        }
-        onClose={() => {
-          closeMenu(kind);
-        }}
-        onError={(reason: unknown) => {
-          setError(message(reason));
-        }}
-      />
-    );
-  };
 
   return (
-    <div className="desktop-status" ref={root}>
-      <div className="status-controls">
-        {pill(
-          "model",
-          "切换模型",
-          controls.controls.model,
-          <>
-            <span className="status-dot" aria-hidden="true" />
-            <b>
-              {model === undefined ? (
-                "模型 —"
-              ) : (
-                <>
-                  <span className="status-prov">
-                    {model.provider}
-                    {MODEL_REF_SEPARATOR}
-                  </span>
-                  {controls.controls.model.label !== "模型 —"
-                    ? controls.controls.model.label
-                    : model.model}
-                </>
-              )}
-            </b>
-          </>,
-        )}
-        {choiceDropdown(
-          "切换思考档位",
-          controls.controls.effort,
-          <>
-            思考 <b>{controls.controls.effort.label}</b>
-          </>,
-        )}
-        {choiceDropdown(
-          "切换权限预设",
-          controls.controls.preset,
-          <>
-            权限 <b>{controls.controls.preset.label}</b>
-          </>,
-          true,
-        )}
-        {pill(
-          "shell",
-          "切换 Shell",
-          controls.shellControl,
-          <>
-            Shell <b>{shell?.effective?.kind ?? shell?.selected ?? "—"}</b>
-          </>,
-        )}
-      </div>
-      <div className="status-right">
-        {onManageRemote && (
-          <RemoteBadge status={remoteStatus} client={remoteClient} onOpen={onManageRemote} />
-        )}
-        <McpBadge servers={unavailableMcpServers(view)} onOpen={onManageMcp} />
-        {trigger(
-          "context",
-          "上下文用量",
-          <>
-            上下文{" "}
-            <span className="status-meter" aria-hidden="true">
-              <i style={{ width: `${Math.max(0, Math.min(100, used ?? 0))}%` }} />
-            </span>
-            <span className="mono">
-              {usage === undefined
-                ? "—"
-                : `${used === null ? "—" : `${used}%`} / ${number.format(usage.budgetTokens)}`}
-            </span>
-          </>,
-        )}
-        <span className="status-cache" title="会话累计缓存读取 token / 输入 token">
-          缓存 <span className="mono">{cache === null ? "—" : `${cache}%`}</span>
-        </span>
-        <SpeedBadge speed={speed} />
-        <span className={`status-turn${busy ? " status-turn-busy" : ""}`}>
-          ● {STATUS_TEXT[view.status]}
+    <div className="desktop-status status-bar" ref={root}>
+      <div className="status-left status-group">
+        <span className={`status-item status-turn${busy ? " status-turn-busy" : ""}`}>
+          <span className={`dot${busy ? " warn" : " ok"}`} aria-hidden="true" />
+          <span>{STATUS_TEXT[view.status]}</span>
           {view.currentTurn && (
             <span className="muted-value">第 {view.currentTurn.turnIndex} 轮</span>
           )}
         </span>
+        {trigger(
+          "context",
+          "上下文用量",
+          <>
+            <span className="status-meter ctx-bar" aria-hidden="true">
+              <i style={{ width: `${Math.max(0, Math.min(100, used ?? 0))}%` }} />
+            </span>
+            <span className="mono">{used === null ? "—" : `${used}%`}</span>
+          </>,
+        )}
+        <span
+          className="status-item status-tokens mono"
+          title={`累计输入 ${number.format(cacheUsage.inputTokens)} / 输出 ${number.format(cacheUsage.outputTokens)} tokens${
+            cache === null ? "" : `（缓存命中 ${cache}%）`
+          }`}
+        >
+          {compactTokens(totalTokens)} tokens
+        </span>
+        <SpeedBadge speed={speed} />
       </div>
-      {openMenu !== null && menuControl(openMenu)}
+      <div className="status-right status-group">
+        <McpBadge
+          servers={unavailableMcpServers(view)}
+          readyCount={readyMcpCount}
+          onOpen={onManageMcp}
+        />
+        {onManageRemote && (
+          <RemoteBadge status={remoteStatus} client={remoteClient} onOpen={onManageRemote} />
+        )}
+      </div>
       {activePanel !== null && (
         <div
           id={dialogId}

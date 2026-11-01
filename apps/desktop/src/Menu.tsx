@@ -153,6 +153,9 @@ export interface ChoiceMenuControl {
       value: string;
       label: string;
       detail?: ReactNode;
+      description?: string;
+      tag?: string;
+      risk?: boolean;
       title?: string;
       disabled?: string;
     }[];
@@ -171,7 +174,7 @@ const SEARCHABLE_MIN_OPTIONS = 8;
 
 /**
  * 控件菜单：渲染 ChoiceControl 的分组选项（menuitemradio + ✓），
- * 输入框 chip 与底部状态栏共用。选择先同步关菜单再触发 onSelect，
+ * 输入框 chip 共用。选择先同步关菜单再触发 onSelect，
  * 异步失败经 onError 回传。可选 searchable 在选项数不少于 8 时显示搜索框。
  */
 export function ChoiceMenu({
@@ -180,6 +183,7 @@ export function ChoiceMenu({
   label,
   control,
   action,
+  footer,
   searchable = false,
   searchPlaceholder = "搜索模型",
   emptyText = "没有匹配的模型",
@@ -191,6 +195,7 @@ export function ChoiceMenu({
   label?: string;
   control: ChoiceMenuControl;
   action?: MenuAction | undefined;
+  footer?: ReactNode;
   searchable?: boolean;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -203,18 +208,28 @@ export function ChoiceMenu({
   const [query, setQuery] = useState("");
   const q = showSearch ? query.trim().toLowerCase() : "";
 
+  const orderGroup = (options: ChoiceMenuControl["groups"][number]["options"]) => [
+    ...options.filter((option) => option.risk !== true),
+    ...options.filter((option) => option.risk === true),
+  ];
+
   const filteredGroups =
     q === ""
-      ? control.groups.filter((group) => group.options.length > 0)
+      ? control.groups
+          .map((group) => ({ ...group, options: orderGroup(group.options) }))
+          .filter((group) => group.options.length > 0)
       : control.groups
           .map((group) => ({
             ...group,
-            options: group.options.filter((option) => {
-              const detailText = typeof option.detail === "string" ? option.detail : "";
-              const text =
-                `${option.label} ${option.value} ${detailText} ${option.title ?? ""}`.toLowerCase();
-              return text.includes(q);
-            }),
+            options: orderGroup(
+              group.options.filter((option) => {
+                const detailText =
+                  typeof option.detail === "string" ? option.detail : (option.description ?? "");
+                const text =
+                  `${option.label} ${option.value} ${option.tag ?? ""} ${detailText} ${option.title ?? ""}`.toLowerCase();
+                return text.includes(q);
+              }),
+            ),
           }))
           .filter((group) => group.options.length > 0);
 
@@ -318,40 +333,54 @@ export function ChoiceMenu({
           }}
         />
       )}
-      {filteredGroups.map((group, groupIndex) => (
-        <Fragment key={group.label ?? groupIndex}>
-          {groupIndex > 0 && <MenuSeparator />}
-          {group.label !== undefined && <MenuHeading>{group.label}</MenuHeading>}
-          {group.options.map((option) => {
-            const enabledIdx = option.disabled === undefined ? enabledCursor++ : -1;
-            return (
-              <MenuItem
-                key={option.value}
-                checked={option.value === control.value}
-                active={showSearch && enabledIdx === safeActive}
-                {...(option.disabled !== undefined ? { disabled: option.disabled } : {})}
-                {...(option.title !== undefined ? { title: option.title } : {})}
-                label={option.label}
-                {...(option.detail !== undefined ? { detail: option.detail } : {})}
-                {...(showSearch && enabledIdx >= 0
-                  ? {
-                      onHover: () => {
-                        if (safeActive !== enabledIdx) setActive(enabledIdx);
-                      },
-                    }
-                  : {})}
-                onSelect={() => {
-                  selectValue(option.value);
-                }}
-              />
-            );
-          })}
-        </Fragment>
-      ))}
+      {filteredGroups.map((group, groupIndex) => {
+        const firstRisk = group.options.findIndex((option) => option.risk === true);
+        return (
+          <Fragment key={group.label ?? groupIndex}>
+            {groupIndex > 0 && <MenuSeparator />}
+            {group.label !== undefined && <MenuHeading>{group.label}</MenuHeading>}
+            {group.options.map((option, optionIndex) => {
+              const enabledIdx = option.disabled === undefined ? enabledCursor++ : -1;
+              return (
+                <Fragment key={option.value}>
+                  {optionIndex === firstRisk && optionIndex > 0 && <MenuSeparator />}
+                  <MenuItem
+                    checked={option.value === control.value}
+                    active={showSearch && enabledIdx === safeActive}
+                    {...(option.risk === true ? { danger: true } : {})}
+                    {...(option.disabled !== undefined ? { disabled: option.disabled } : {})}
+                    {...(option.title !== undefined ? { title: option.title } : {})}
+                    label={option.label}
+                    {...(option.detail !== undefined
+                      ? { detail: option.detail }
+                      : option.description !== undefined
+                        ? { detail: <span aria-hidden="true">{option.description}</span> }
+                        : {})}
+                    {...(option.tag !== undefined
+                      ? { right: <span aria-hidden="true">{option.tag}</span> }
+                      : {})}
+                    {...(showSearch && enabledIdx >= 0
+                      ? {
+                          onHover: () => {
+                            if (safeActive !== enabledIdx) setActive(enabledIdx);
+                          },
+                        }
+                      : {})}
+                    onSelect={() => {
+                      selectValue(option.value);
+                    }}
+                  />
+                </Fragment>
+              );
+            })}
+          </Fragment>
+        );
+      })}
       {showSearch && filteredGroups.length === 0 && (
         <p className="menu-note menu-empty">{emptyText}</p>
       )}
       {control.note !== undefined && <p className="menu-note">{control.note}</p>}
+      {footer}
       {action !== undefined && (
         <>
           <MenuSeparator />
@@ -371,6 +400,7 @@ export function ChoiceMenu({
 export interface MenuItemProps {
   checked?: boolean;
   active?: boolean;
+  danger?: boolean;
   disabled?: string;
   title?: string;
   icon?: ReactNode;
@@ -384,6 +414,7 @@ export interface MenuItemProps {
 export function MenuItem({
   checked,
   active,
+  danger,
   disabled,
   title,
   icon,
@@ -398,7 +429,7 @@ export function MenuItem({
       type="button"
       role={checked === undefined ? "menuitem" : "menuitemradio"}
       aria-checked={checked}
-      className={`menu-item${active === true ? " act" : ""}`}
+      className={`menu-item${active === true ? " act" : ""}${danger === true ? " danger" : ""}`}
       data-active={active === true ? "true" : undefined}
       disabled={disabled !== undefined}
       title={disabled ?? title}

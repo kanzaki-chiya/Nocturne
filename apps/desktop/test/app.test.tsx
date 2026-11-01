@@ -399,7 +399,12 @@ function replayHost(
           break;
         }
         case "session.state":
-          result = { config: { model: cheap, permissionPreset: "default" } };
+          result = {
+            config: {
+              model: cheap,
+              permissionPreset: shellState.get(`preset:${id ?? ""}`)?.kind ?? "default",
+            },
+          };
           break;
         case "session.describeContext":
           result = {
@@ -491,13 +496,21 @@ function replayHost(
           });
           break;
         }
+        case "session.setPermissionPreset": {
+          const name = String(request.params.name ?? "default");
+          shellState.set(`preset:${id ?? ""}`, { kind: name, path: "" });
+          emitEvent(backendId, id, {
+            type: "session.config_changed",
+            payload: { permissionPreset: name },
+          });
+          break;
+        }
         case "session.recordInputHistory":
         case "session.compact":
         case "session.respondPermission":
         case "session.interrupt":
         case "session.setModel":
         case "session.setReasoningEffort":
-        case "session.setPermissionPreset":
         case "provider.setProviderEnabled":
         case "provider.setModelsEnabled":
           break;
@@ -742,14 +755,14 @@ it("提问替代输入框，完成后恢复同一草稿输入节点", async () =
   expect(field.value).toBe("提问前的草稿");
 });
 
-it("会话内状态栏控件调用真实 setter", async () => {
+it("会话内输入框工具栏控件调用真实 setter", async () => {
   const host = replayHost();
   render(<App host={host} />);
   // gamma 是空闲会话：忙时模型锁定的覆盖见 U-03 用例
   fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
   await screen.findByRole("region", { name: "会话消息" });
   await waitFor(() => expect(screen.getByRole("button", { name: "切换模型" })).toBeTruthy());
-  // 模型 pill（状态栏）
+  // 模型 chip
   fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
   fireEvent.click(await screen.findByRole("menuitemradio", { name: /fancy/ }));
   await waitFor(() =>
@@ -761,9 +774,9 @@ it("会话内状态栏控件调用真实 setter", async () => {
       ),
     ).toBe(true),
   );
-  // 档位 pill
-  fireEvent.click(screen.getByRole("combobox", { name: "切换思考档位" }));
-  fireEvent.click(await screen.findByRole("option", { name: /^high/ }));
+  // 档位 chip
+  fireEvent.click(screen.getByRole("button", { name: "切换思考档位" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /^high/ }));
   await waitFor(() =>
     expect(
       host.calls.some(
@@ -771,9 +784,9 @@ it("会话内状态栏控件调用真实 setter", async () => {
       ),
     ).toBe(true),
   );
-  // 预设 pill
-  fireEvent.click(screen.getByRole("combobox", { name: "切换权限预设" }));
-  fireEvent.click(await screen.findByRole("option", { name: /^smart/ }));
+  // 预设 chip
+  fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /^smart/ }));
   await waitFor(() =>
     expect(
       host.calls.some(
@@ -781,17 +794,9 @@ it("会话内状态栏控件调用真实 setter", async () => {
       ),
     ).toBe(true),
   );
-  // 状态栏 Shell（菜单打开时探测列表；选项文案与设置页共用 shellGroups：自动行 + 分隔线 + 各类一行）
-  fireEvent.click(screen.getByRole("button", { name: "切换 Shell" }));
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: "bash/bin/bash" }));
-  await waitFor(() =>
-    expect(
-      host.calls.some((call) => call.method === "session.setShell" && call.params.kind === "bash"),
-    ).toBe(true),
-  );
 });
 
-it("切换 Shell 后状态栏文字与菜单勾选立即更新（F-01）", async () => {
+it("切换权限预设后按钮文字与菜单勾选立即更新（F-01）", async () => {
   const host = replayHost();
   render(
     <StrictMode>
@@ -800,40 +805,40 @@ it("切换 Shell 后状态栏文字与菜单勾选立即更新（F-01）", async
   );
   fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
   await screen.findByRole("region", { name: "会话消息" });
-  const pill = await screen.findByRole("button", { name: "切换 Shell" });
-  await waitFor(() => expect(pill.textContent).toContain("pwsh"));
+  const pill = await screen.findByRole("button", { name: "切换权限预设" });
+  await waitFor(() => expect(pill.textContent).toContain("default"));
   fireEvent.click(pill);
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: "bash/bin/bash" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "smart" }));
   await waitFor(() =>
     expect(
-      host.calls.some((call) => call.method === "session.setShell" && call.params.kind === "bash"),
+      host.calls.some(
+        (call) => call.method === "session.setPermissionPreset" && call.params.name === "smart",
+      ),
     ).toBe(true),
   );
-  await waitFor(() => expect(pill.textContent).toContain("bash"));
-  // 菜单勾选也指向新值（自动行说明含当前种类名，按整名匹配种类行）
+  await waitFor(() => expect(pill.textContent).toContain("smart"));
   fireEvent.click(pill);
-  const item = await screen.findByRole("menuitemradio", { name: "bash/bin/bash" });
+  const item = await screen.findByRole("menuitemradio", { name: "smart" });
   expect(item.getAttribute("aria-checked")).toBe("true");
 });
 
-it("忙时（等待确认）档位/Shell/预设可切换、模型锁定（U-03）", async () => {
+it("忙时（等待确认）档位/预设可切换、模型锁定（U-03）", async () => {
   const host = replayHost();
   render(<App host={host} />);
   // alpha 回放 permission.requested → waiting_permission（忙态）
   fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
   await screen.findByRole("region", { name: "会话消息" });
   await screen.findAllByText(/等待确认/);
-  // 模型仍锁定，其余三项可点
+  // 模型仍锁定，其余两项可点
   expect(screen.getByRole("button", { name: "切换模型" })).toHaveProperty("disabled", true);
-  expect(screen.getByRole("combobox", { name: "切换思考档位" })).toHaveProperty("disabled", false);
-  expect(screen.getByRole("combobox", { name: "切换权限预设" })).toHaveProperty("disabled", false);
-  expect(screen.getByRole("button", { name: "切换 Shell" })).toHaveProperty("disabled", false);
+  expect(screen.getByRole("button", { name: "切换思考档位" })).toHaveProperty("disabled", false);
+  expect(screen.getByRole("button", { name: "切换权限预设" })).toHaveProperty("disabled", false);
   // 预设菜单说明：等待中的请求仍由用户决定
-  fireEvent.click(screen.getByRole("combobox", { name: "切换权限预设" }));
+  fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
   const note = await screen.findByText(/等待确认的权限请求仍由你决定/);
   expect(note).toBeTruthy();
   // 忙时切换预设走真实 RPC
-  fireEvent.click(await screen.findByRole("option", { name: /bypass/ }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /bypass/ }));
   await waitFor(() =>
     expect(
       host.calls.some(
@@ -841,9 +846,9 @@ it("忙时（等待确认）档位/Shell/预设可切换、模型锁定（U-03�
       ),
     ).toBe(true),
   );
-  // Shell 菜单说明：下一次命令生效
-  fireEvent.click(screen.getByRole("button", { name: "切换 Shell" }));
-  expect(await screen.findByText(/下一次命令生效/)).toBeTruthy();
+  // 思考档位菜单说明：下一轮生效
+  fireEvent.click(screen.getByRole("button", { name: "切换思考档位" }));
+  expect(await screen.findByText(/下一轮生效/)).toBeTruthy();
 });
 
 it("/compact 走真实 RPC，移除命令只给界面提示", async () => {

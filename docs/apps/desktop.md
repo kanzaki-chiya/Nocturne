@@ -176,7 +176,7 @@ interface NodeProbe {
 
 用户气泡里的图片附件经 `AttachmentImageSource`（`src/attachment-images.ts`）按 sha256 缓存为 blob URL；发送成功登记原始字节，缓存未命中时仅在气泡进入可视区后调用 `session.readAttachment`。缩略图保持比例，最大 160px，沿用输入框预览的圆角、边框与底色。加载中显示占位，读取或显示失败时退回文件名 chip，title 给出失败原因；工具结果中的图片（如 `read` 读到的图片、MCP 返回的截图）由 `ToolShots` 复用同一缓存显示缩略图，拿不到读取接口时退回文件名 chip。
 
-`src/Composer.tsx` 是空状态与会话共用的输入框（`variant: "draft" | "session"`）：Enter 发送，Shift+Enter 换行；`isComposing`、composition 状态或旧输入法 `keyCode=229` 时不发送。**运行中也能发送（ADR-0070）**：Enter 插话（并入当前 Turn，安全点送达）、Alt+Enter 排队（本轮 `done` 后开新 Turn），空闲时两者都是普通发送；Alt+Enter 在 Composer 与全局快捷键里没有其他占用。运行中输入非空时右侧同时出现 ■（中断，Esc 同样）与发送键（`aria-label`「发送」，title「插话（Enter），排队（Alt+Enter）」），输入为空时只有 ■。输入历史经 `readInputHistory` / `recordInputHistory`。两种布局：draft 是卡片 + 托盘（`.cbox`/`.tray`：附件缩略图行、textarea、工具行「＋ + 模型 chip + 档位 chip + 发送键」、托盘「目录 chip + 权限预设 chip + 能力提示」（只在当前模型不支持图片等情况下出现；不常驻 Enter / Shift+Enter 按键说明），托盘负 margin 塞在卡片底边之下、卡片压在上层）；session 使用同样的卡片外观，卡片内为两层，上层文字区、下层工具行，工具行左侧为「＋」、右侧为 ■／发送键，无 tray、无模型或档位 chip，这些设置由会话状态栏负责。textarea 自动长高到 ~40vh/280px 后内部滚动；redirect/vision 提示显示在卡片上方气泡，错误在下方。菜单统一走 `src/Menu.tsx`（`role="menu"`，打开即聚焦第一项、有选中项时聚焦选中项，↑↓/Home/End/Enter/Esc，外部点击关闭，焦点回触发键）；展开方向：渲染后量高度，下方放得下就向下（`top = anchor.bottom + 6`），放不下向上，两侧都放不下取较大一侧并限高滚动；项标题不换行、detail 单行省略号（悬停见全文），菜单宽 250–420px，滚动条与消息流一致（细、无箭头）。
+`src/Composer.tsx` 是空状态与会话共用的输入框（`variant: "draft" | "session"`）：Enter 发送，Shift+Enter 换行；`isComposing`、composition 状态或旧输入法 `keyCode=229` 时不发送。**运行中也能发送（ADR-0070）**：Enter 插话（并入当前 Turn，安全点送达）、Alt+Enter 排队（本轮 `done` 后开新 Turn），空闲时两者都是普通发送；Alt+Enter 在 Composer 与全局快捷键里没有其他占用。运行中输入非空时右侧同时出现 ■（中断，Esc 同样）与发送键（`aria-label`「发送」，title「插话（Enter），排队（Alt+Enter）」），输入为空时只有 ■。输入历史经 `readInputHistory` / `recordInputHistory`。两种布局：draft 是卡片 + 托盘（`.cbox`/`.tray`：附件缩略图行、textarea、工具行「＋ + 模型 chip + 档位 chip + 发送键」、托盘「目录 chip + 权限预设 chip + 能力提示」（只在当前模型不支持图片等情况下出现；不常驻 Enter / Shift+Enter 按键说明），托盘负 margin 塞在卡片底边之下、卡片压在上层）；session 使用同样的卡片外观，卡片内为两层，上层文字区、下层工具行，工具行左侧为「＋ + 权限预设 chip」、右侧为「模型 chip + 档位 chip + ■／发送键」，无 tray。textarea 自动长高到 ~40vh/280px 后内部滚动；redirect/vision 提示显示在卡片上方气泡，错误在下方。菜单统一走 `src/Menu.tsx`（`role="menu"`，打开即聚焦第一项、有选中项时聚焦选中项，↑↓/Home/End/Enter/Esc，外部点击关闭，焦点回触发键）；展开方向：渲染后量高度，下方放得下就向下（`top = anchor.bottom + 6`），放不下向上，两侧都放不下取较大一侧并限高滚动；项标题不换行、detail 单行省略号（悬停见全文），菜单宽 250–420px，滚动条与消息流一致（细、无箭头）。
 
 空状态与会话内的占位文字相同，为「输入消息，@ 引用文件」，不提示斜杠命令。
 
@@ -184,10 +184,10 @@ interface NodeProbe {
 
 待发输入是 Runtime 内存状态（[view.md](../protocols/view.md#待发输入预览状态)）：切走不关闭带待发输入的会话（否则这些输入会无声丢失），关闭窗口时如有待发输入先弹确认「还有 N 条没发出 / 关闭后会丢失」，可选「留在这里」或「仍然退出」。窗口关闭请求由外壳拦下（`CloseRequested` → 发 `app-close-requested` 事件给界面），界面确认后经命令 `app_close` 继续退出、`app_close_cancel` 留下；没有待发输入时界面立刻 `app_close`，脚本无响应时外壳 120 秒后照常退出，避免关不掉窗口。
 
-- 模型 chip（仅空状态）：「最近使用」（`listRecentModels` ∩ `listModels`，按 recents 顺序）+ 其余按服务商分组（U-06，会话内与空状态共用 `modelGroups`，见 5.4）；不可用的模型带原因置灰。会话内切换在状态栏 pill（同一 ChoiceControl 数据与 Menu）。
-- 档位 chip（仅空状态）：当前模型可用档位（会话来自 `reasoningEffortInfo`，草稿来自 `ModelInfo.capabilities.reasoningEffort`）；current≠effective 时提示「本轮使用 X；Y 将在下一轮生效」。选择写入 `prefs.lastEffort`。
-- 预设 chip（仅空状态托盘）：`PERMISSION_PRESET_NAMES`；草稿里未触碰不计入选项。
-- 运行中模型控件锁定（title「本轮结束后可切换」），思考档位、权限预设、Shell 仍可切（菜单内注明何时生效，见 5.4）。
+- 模型 chip（空状态与会话共用）：「最近使用」（`listRecentModels` ∩ `listModels`，按 recents 顺序）+ 其余按服务商分组（U-06，共用 `modelGroups`）；不可用的模型带原因置灰，底部有「管理服务商…」。
+- 档位 chip（空状态与会话共用）：当前模型可用档位（会话来自 `reasoningEffortInfo`，草稿来自 `ModelInfo.capabilities.reasoningEffort`）；current≠effective 时提示「本轮使用 X；Y 将在下一轮生效」。选择写入 `prefs.lastEffort`。
+- 预设 chip（空状态托盘、会话工具行）：`PERMISSION_PRESET_NAMES`；草稿里未触碰不计入选项，会话内带中文标签与说明、危险项排在分隔线之后。
+- 运行中模型控件锁定（title「本轮结束后可切换」），思考档位、权限预设仍可切（菜单内注明何时生效）。Shell 为全局设置，在「设置 › 常规」切换。
 - 「＋」菜单：「添加文件…」（系统对话框 `pick_files`，不限类型）与「引用文件…」（在光标处插入 `@` 并打开文件弹层）；`fileRefs` 为 null 时「引用文件…」置灰并给出原因。
 - 附件三条路径：不限类型的对话框、剪贴板文件、拖入任意文件（`dragDropEnabled: false` 让 HTML5 drop 拿到 File 对象）。图片保留缩略图；文件显示类型标记、文件名、大小、✕（`aria-label`「移除 <名>」），object URL 随移除/卸载回收。UTF-8 文本粘贴达到 32 KiB 转 `pasted-<n>.txt`，Ctrl+Shift+V 保留正文。发送载荷 `{ data: Uint8Array, mimeType: string, label, source? }` 由 Core 统一分流，提交被拒时保留附件与草稿；完整规则见 [ADR-0072](../decisions/ADR-0072-file-attachments.md)。
 - `@` 引用：文件索引懒加载（`fileRefs.load()`，`key` 变化才重取；会话内 `key` 用 `view.turnCount`）。弹层按 `src/file-refs.ts` 的排序（文件名前缀 > 文件名包含 > 路径包含，同级短路径优先），Tab/Enter 选择插入 `@路径 `（含空格路径写成 `@"a b.txt" `；目录不带尾随空格、弹层继续展开列下一级）。光标紧跟在一个完整 `@路径` 引用后面时 Backspace 一次删掉整个引用（含至多一个尾随分隔空格），光标在引用前面时 Delete 同理（U-05，`fileRefDeleteRange` 与补全共用同一套词法：行首或空白起、以 `@` 开头，引号形式须有收尾引号，无引号形式须被空白终止；有选区或输入法组合输入中保持默认行为）。纯文本里输入的 `@` 引用经 textarea 底下的镜像层高亮（`parseFileRefs` 区间上色，发送的仍是纯文本）。草稿/普通对话没有项目文件索引：`fileRefs` 为 null，输入 `@` 不弹层，菜单项 title 给出原因（`fileRefsUnavailable`）；空状态下项目文件搜索等 runtime 级 `fileIndex` 能力，见文末限制说明。
@@ -236,13 +236,13 @@ interface NodeProbe {
 
 **远程标识**：有远程 RPC 连接时显示「手机在线」，多台设备显示数量（按设备 id 去重）。点击展开当前手机列表，每台可立即「断开」，底部「打开远程设置」。没有连接不显示；已登记且被吊销或替换时显示警示，点击进入远程页。
 
-`src/StatusBar.tsx` 左侧是会话控件 pill 组：模型（绿点 +「provider · model」+ ▶）、「思考 <level> ▶」、「权限 <preset> ▶」（预设值用警告色）、「Shell <kind> ▶」。模型与 Shell 打开与空状态 chip 共用的 `ChoiceMenu`（`src/Menu.tsx`，锚定 pill 自动向上弹出），模型菜单为「最近使用」+ 按服务商分组（组名用服务商显示名、组序与服务商页一致，会话内、空状态与换模型恢复卡共用 `modelGroups`），条目标签优先用 `displayName ?? ref.model`、`detail` 为服务商、悬停显示原始 `ref.model`（设置页模型选择、子代理档位与定时任务模型选择同样优先显示 `displayName ?? ref.model` 并可见服务商与 `ref.model`）；`ChoiceMenu` 开启 `searchable` 且候选模型不少于 8 个时顶部显示搜索框（菜单打开即聚焦搜索框，按显示名、模型 id、服务商名不区分大小写实时跨组过滤并支持中文匹配，分组标题仅在组内仍有匹配项时显示，无匹配时显示「没有匹配的模型」，↑↓ 在可用结果间移动、Enter 选中、Esc 先清空搜索再按一次关闭菜单），底部有「管理服务商…」，进入 设置 › 服务商；思考档位与权限预设用自绘下拉 `Dropdown`（见 5.6），选项带中文名与一句说明；数据来自 `useSessionControls`（模型/档位/预设复用 `controls.controls`，Shell 是 `shellControl`：`auto`（「自动选择」）+ 探测到的 shell，未安装的置灰并标注「未安装」，被 env/config 覆盖时菜单底部给提示；打开 Shell 菜单时调 `loadShells()` 探测）。选择分别调 `setModel` / `setReasoningEffort`（并写 `prefs.lastEffort`）/ `setPermissionPreset` / `setShell`；手机远程改模型、档位或预设后，Core 广播 `session.config_changed`，状态栏随之刷新。Turn 进行中模型 pill 锁定（title「本轮结束后可切换」），思考档位、权限预设、Shell 仍可切换：档位菜单注明「下一轮生效」，预设菜单注明「从下一次权限判定起按新预设」（等待确认的请求仍由用户决定，切换不替它放行），Shell 菜单注明「下一次命令生效」。右侧不变：上下文用量（点击开上下文面板）、累计缓存命中（`sessionUsageSoFar`，含进行中 Turn 已完成的步骤，每步结束即更新，见 [view.md §8](../protocols/view.md#8-api)；服务商未返回缓存数据时显示「—」）、生成速度、Turn 状态（运行中在状态后以弱化色跟「第 N 轮」）。
+`src/StatusBar.tsx` 分为左右两组，组间留白，组内用间距排列、不写中点分隔符：左组依次为 Turn 运行状态（运行中在状态后以弱化色跟「第 N 轮」）、上下文进度条与百分比（点击开上下文面板）、累计 tokens（`sessionUsageSoFar`，含进行中 Turn 已完成的步骤，每步结束即更新，悬停显示输入 / 输出与缓存命中率，见 [view.md §8](../protocols/view.md#8-api)）、生成速度；右组依次为 MCP 状态、手机远程状态。模型、思考档位与权限预设统一在输入框工具栏切换（共用 `useSessionControls` 与 `ChoiceMenu`）；Shell 为全局设置，在「设置 › 常规」修改。
 
-**生成速度**（`src/speed.ts`，口径见 [ADR-0053 修订 2026-10-11](../decisions/ADR-0053-usage-and-cost.md)）：缓存之后、Turn 状态之前一段。流式期间显示 `~N tok/s`，用 `estimateTokens(正文 + 推理)` 除以客户端从首个增量起的用时，最多每秒刷新一次，前面有一个强调色脉动点（减少动态效果时不动）；这一步的 `message.assistant` 到达后改为 `usage.outputTokens ÷ (durationMs − ttftMs)`，缺 usage 或 timing 时退回客户端测得的用时（无 usage 时仍带 `~`）。生成用时不足 0.5 秒时不显示。只追踪本次打开后亲眼看到流式增量的步骤：历史消息没有到达时间，所以切换或恢复会话后、打开时已在流式的那一步结束前都不显示，直到下一次生成。悬停或聚焦弹出 `role="tooltip"`：结束后列输出、其中推理、TTFT、生成用时、请求总耗时（缺的项不列；时长小于 10 秒保留一位小数），底部一行「上一步 · 速度 = 输出 ÷ 生成用时」；流式期间只写「估算中」与已用时长。Esc 关闭。
+**生成速度**（`src/speed.ts`，口径见 [ADR-0053 修订 2026-10-11](../decisions/ADR-0053-usage-and-cost.md)）：左组 tokens 之后一段。流式期间显示 `~N tok/s`，用 `estimateTokens(正文 + 推理)` 除以客户端从首个增量起的用时，最多每秒刷新一次，前面有一个强调色脉动点（减少动态效果时不动）；这一步的 `message.assistant` 到达后改为 `usage.outputTokens ÷ (durationMs − ttftMs)`，缺 usage 或 timing 时退回客户端测得的用时（无 usage 时仍带 `~`）。生成用时不足 0.5 秒时不显示。只追踪本次打开后亲眼看到流式增量的步骤：历史消息没有到达时间，所以切换或恢复会话后、打开时已在流式的那一步结束前都不显示，直到下一次生成。悬停或聚焦弹出 `role="tooltip"`：结束后列输出、其中推理、TTFT、生成用时、请求总耗时（缺的项不列；时长小于 10 秒保留一位小数），底部一行「上一步 · 速度 = 输出 ÷ 生成用时」；流式期间只写「估算中」与已用时长。Esc 关闭。
 
-**MCP 未连接标记**：`view.mcpServers`（[view.md §4](../protocols/view.md#4-临时事件归约)）里有 `failed` 或 `crashed` 的服务器时，右侧在上下文用量之前出现「MCP 未连接 N」（警告色小圆点 + 弱化文字，与其他条目同样式，不做横幅）。悬停或键盘聚焦时弹出 `role="tooltip"`，按名称列出每台服务器的名称、状态（启动失败 / 连接断开）与错误原因；点击进入 设置 › MCP。服务器恢复为 `ready`，或被移除、停用（`mcp.server` 为 `stopped`）后，计数随之减少，归零时标记消失。
+**MCP 状态与未连接标记**：`view.mcpServers`（[view.md §4](../protocols/view.md#4-临时事件归约)）里有 `failed` 或 `crashed` 的服务器时，右组显示「MCP 未连接 N」（警告色小圆点 + 弱化文字，与其他条目同样式，不做横幅），悬停或键盘聚焦时弹出 `role="tooltip"`，按名称列出每台服务器的名称、状态（启动失败 / 连接断开）与错误原因；全部就绪时显示「MCP N」；点击进入 设置 › MCP。未配置或全部移除、停用（`mcp.server` 为 `stopped`）后标记不显示。
 
-状态栏始终一行：右侧上下文与 Turn 状态固定不缩，左侧仅模型 pill 可收缩，过长名称省略号截断，悬停显示完整「provider · model」（运行中同时提示不可切换）。主区变窄时按容器宽度依次让位：≤980px 隐藏生成速度 → ≤900px 隐藏累计缓存命中 → ≤820px 隐藏上下文进度条 → ≤740px 隐藏 Shell 项 → ≤660px 隐藏模型名前的「provider · 」前缀；≤700px 另外收紧间距。模型名最后才省略，至少保留约 10 个字符（`min-width: 10ch`），上下文数值与 Turn 状态始终保留；窗口最小宽度仍为 760px（主区宽度还要减去左栏）。
+状态栏始终一行，左右两组各自按间距排列，窄容器下收紧组内间距。
 
 上下文面板取 `describeContext`，展示总量与预算、分段堆叠条和数值；对话历史从 `history.breakdown` 细分用户消息、助手回答、工具调用与结果、压缩摘要，不从可见消息重新估算。来源文本按 `contextSourceLabel` 中文化（「内置提示词」「自定义提示词」「N 个工具」「N 项」「N 条」，路径按主目录缩写）。底部提示「可以输入 /compact 压缩」。
 
@@ -250,7 +250,7 @@ interface NodeProbe {
 
 已知限制（等 RPC 能力）：空状态的项目文件搜索需要 runtime 级 `fileIndex`（`fileIndex` 目前是 session 级，前端已用 `Composer.fileRefs` 作为数据接缝，届时只换数据源）。
 
-状态栏权限菜单底部展示「本会话已允许 N 项」（0 项隐藏），逐项撤销、二次确认全部撤销、「管理项目授权 →」跳转设置授权页。`src/SessionGrants.tsx` 同时用于手机权限浮层（`phone.css` 让页脚文字与说明行对齐，按钮保留 44px 触控区）；`grants.changed` 刷新，不从日志推断当前授权。按钮不附加数量，菜单内显示计数。下拉菜单独立恢复换行，进行中说明与长目标可折行，不出现横向滚动；Tab 可进入通用页脚容器里的首个可聚焦按钮。
+权限预设菜单底部展示「本会话已允许 N 项」（0 项隐藏），逐项撤销、二次确认全部撤销、「管理项目授权 →」跳转设置授权页。`src/SessionGrants.tsx` 同时用于手机权限浮层（`phone.css` 让页脚文字与说明行对齐，按钮保留 44px 触控区）；`grants.changed` 刷新，不从日志推断当前授权。按钮不附加数量，菜单内显示计数。菜单独立恢复换行，进行中说明与长目标可折行，不出现横向滚动。
 
 ### 5.5 设置区
 
@@ -542,7 +542,7 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 界面文字不用「 · 」串联不同性质的信息，按场景各用一种写法（桌面端与手机网页共用）：
 
 - **标签 + 状态值**：标签与值分成两个元素，值放进 `.muted-value`（`styles.css`，弱化色、左侧留半个字宽），不写分隔符。例：「允许远程访问」+「已开启」、「图片说明」+ 模型名、「需要确认」+ 操作名。
-- **模型引用**：统一写「provider · model」，拼接只走 `src/model-ref.ts` 的 `modelRefText` / `modelKeyText`；状态栏的 provider 段可隐藏，用同文件的 `MODEL_REF_SEPARATOR` 自己拼。子代理档位标签「档位 · 任务摘要」空间有限，同样保留中点。
+- **模型引用**：统一写「provider · model」，拼接只走 `src/model-ref.ts` 的 `modelRefText` / `modelKeyText`。子代理档位标签「档位 · 任务摘要」空间有限，同样保留中点。
 - **并列短语**：用中文逗号或顿号（「识别到 3 台，可导入 2 台」）。
 - **数值附注**：用括号（「第 3 轮（已撤销）」「已获取 N 个模型（HTTP 401）」），或放进 `.muted-value`。
 - **键盘提示**：用 `src/KeyHint.tsx`，键名放进 `<kbd>` 框，组与组之间只靠间距分开，不写分号或中点（`[1]–[4] 选择  [Esc] 拒绝`）。权限卡、提问卡与快速打开浮层都用它。聊天输入框不常驻 Enter / Shift+Enter 说明。

@@ -177,8 +177,8 @@ afterEach(() => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** 打开 App、建会话、返回 Shell 状态栏 pill（Turn 结束、菜单可开）。settleMs>0 时再等回复落盘并静默一段，确保随后没有滞留事件驱动刷新。 */
-async function openSessionWithShell(fault?: FaultSpec, settleMs = 0) {
+/** 打开 App、建会话、返回权限预设按钮（Turn 结束、菜单可开）。settleMs>0 时再等回复落盘并静默一段，确保随后没有滞留事件驱动刷新。 */
+async function openSessionWithPreset(fault?: FaultSpec, settleMs = 0) {
   const ws = mkdtempSync(path.join(tmpdir(), "f01-ws-"));
   const sessionsDir = mkdtempSync(path.join(tmpdir(), "f01-sessions-"));
   render(<App host={realHost(ws, sessionsDir, fault)} />);
@@ -200,8 +200,8 @@ async function openSessionWithShell(fault?: FaultSpec, settleMs = 0) {
     fireEvent.keyDown(field, { key: "Enter" });
   });
   await screen.findByRole("region", { name: "会话消息" }, { timeout: 15_000 });
-  const pill = await screen.findByRole("button", { name: "切换 Shell" }, { timeout: 10_000 });
-  await waitFor(() => expect(pill.textContent).toMatch(/Shell\s+\S+/), { timeout: 10_000 });
+  const pill = await screen.findByRole("button", { name: "切换权限预设" }, { timeout: 10_000 });
+  await waitFor(() => expect(pill.textContent).toContain("default"), { timeout: 10_000 });
   await waitFor(() => expect(pill).toHaveProperty("disabled", false), { timeout: 10_000 });
   if (settleMs > 0) {
     // 回复文本出现后再静默：turn.completed/runtime.status 等滞留事件折叠
@@ -212,18 +212,15 @@ async function openSessionWithShell(fault?: FaultSpec, settleMs = 0) {
   return { ws, sessionsDir, pill };
 }
 
-/** Shell 菜单选项的主标签（自动行说明含当前种类名，不能用整行子串匹配种类行）。 */
 function optionLabel(node: Element): string {
   return node.querySelector(".menu-label")?.textContent ?? "";
 }
 
-/** 开 Shell 菜单并点击包含 fragment 的可选项（重试一次点击，应对并发渲染延迟）。 */
-async function pickShell(fragment: string) {
+async function pickPreset(fragment: string) {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const pill = screen.getByRole("button", { name: "切换 Shell" });
+    const pill = screen.getByRole("button", { name: "切换权限预设" });
     fireEvent.click(pill);
     try {
-      // 菜单先显示 auto，探测结果返回后才有具体 shell；等目标项出现再选
       let target: HTMLElement | undefined;
       await waitFor(
         () => {
@@ -243,7 +240,7 @@ async function pickShell(fragment: string) {
   }
 }
 
-function shellItem(fragment: string): Promise<HTMLElement> {
+function presetItem(fragment: string): Promise<HTMLElement> {
   return waitFor(() => {
     const item = screen
       .getAllByRole("menuitemradio")
@@ -253,13 +250,13 @@ function shellItem(fragment: string): Promise<HTMLElement> {
   });
 }
 
-it("setShell 响应丢失时后续切换仍能放行", async () => {
+it("setPermissionPreset 响应丢失时后续切换仍能放行", async () => {
   sessionMutationTimeout.ms = 60;
-  // setShell 发出后丢其响应与紧随的 config_changed 事件：
+  // setPermissionPreset 发出后丢其响应与紧随的 config_changed 事件：
   // 事件丢了 → entries 不变 → 无触发刷新；响应丢了 → choose 挂起。
-  const { ws, sessionsDir, pill } = await openSessionWithShell(
+  const { ws, sessionsDir, pill } = await openSessionWithPreset(
     {
-      afterMethod: "session.setShell",
+      afterMethod: "session.setPermissionPreset",
       dropResponse: true,
       dropEvent: "session.config_changed",
     },
@@ -268,14 +265,14 @@ it("setShell 响应丢失时后续切换仍能放行", async () => {
   try {
     const before = pill.textContent;
     // 第一次选择：响应丢失，变更挂起（不中断后续选择）
-    await pickShell("bash");
+    await pickPreset("smart");
     await sleep(300);
     expect(pill.textContent).toBe(before);
-    // 第二次选择：排队并在超时后放行，新值写入并刷新状态栏
-    await pickShell("cmd");
-    await waitFor(() => expect(pill.textContent).toContain("cmd"), { timeout: 5000 });
+    // 第二次选择：排队并在超时后放行，新值写入并刷新按钮
+    await pickPreset("auto-edit");
+    await waitFor(() => expect(pill.textContent).toContain("auto-edit"), { timeout: 5000 });
     fireEvent.click(pill);
-    const item = await shellItem("cmd");
+    const item = await presetItem("auto-edit");
     expect(item.getAttribute("aria-checked")).toBe("true");
   } finally {
     rmSync(ws, { recursive: true, force: true });

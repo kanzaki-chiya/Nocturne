@@ -3,72 +3,53 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   flex-wrap: nowrap;
-  gap: 4px 12px;
-  min-height: 30px;
-  padding: 2px 16px;
+  gap: var(--space-3);
+  height: 26px;
+  padding: 0 var(--space-4);
   border-top: 1px solid var(--a-border);
   background: var(--a-side);
   color: var(--a-muted);
   font-size: var(--fs-1);
   white-space: nowrap;
 }
-.status-controls,
-.status-right {
+.status-left,
+.status-right,
+.status-group {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-3);
   min-width: 0;
-}
-.status-controls {
-  flex: 1 1 0;
-}
-.status-controls .status-pill,
-.status-controls .ddw-pill {
-  flex: none;
-}
-/* 模型名最后才省略，且至少保留约 10 个字符（悬停 title 显示全名） */
-.status-controls .status-model {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-.status-model b {
-  min-width: 10ch;
 }
 .status-right {
   flex: none;
   margin-left: auto;
-  gap: 12px;
 }
+.status-item,
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 26px;
+  gap: var(--space-1);
+  min-height: 20px;
   max-width: 100%;
-  padding: 2px 8px;
+  padding: 2px var(--space-1);
   border-radius: var(--radius-1);
-  color: var(--a-secondary);
+  color: var(--a-muted);
   white-space: nowrap;
 }
 .status-pill:hover,
 .status-pill-active {
   background: var(--a-raised);
+  color: var(--a-text);
 }
 .status-pill b {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--a-text);
-  font-weight: 500;
-}
-.status-preset b {
-  color: var(--a-warning);
-}
-.status-caret {
-  color: var(--a-faint);
-  font-size: 9px;
+  font-weight: var(--fw-medium);
 }
 .status-dot {
   flex: 0 0 5px;
@@ -78,11 +59,12 @@
   background: var(--a-success);
 }
 .status-meter {
-  width: 54px;
-  height: 5px;
-  border-radius: var(--radius-1);
-  background: var(--a-raised);
+  width: 44px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--a-border-strong);
   overflow: hidden;
+  display: inline-block;
 }
 .status-meter i {
   display: block;
@@ -100,9 +82,8 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  margin: 0 -6px;
+  gap: var(--space-1);
+  padding: 2px var(--space-1);
   border-radius: var(--radius-1);
   cursor: default;
   white-space: nowrap;
@@ -116,7 +97,7 @@
   outline-offset: 1px;
 }
 .status-speed .mono {
-  color: var(--a-secondary);
+  color: var(--a-muted);
 }
 .status-speed-est .mono {
   color: var(--a-muted);
@@ -140,8 +121,8 @@
   }
 }
 .status-speed .status-speed-tip {
-  left: auto;
-  right: 0;
+  left: 0;
+  right: auto;
   width: max-content;
   min-width: 220px;
   max-width: min(320px, 80vw);
@@ -176,10 +157,12 @@
   position: relative;
   display: inline-flex;
 }
-.status-mcp-trigger {
+.status-mcp-trigger,
+.status-mcp-ready {
   color: var(--a-muted);
 }
-.status-mcp-trigger b {
+.status-mcp-trigger b,
+.status-mcp-ready b {
   color: var(--a-secondary);
 }
 .status-mcp-dot {
@@ -205,7 +188,7 @@
 }
 .status-mcp-row b {
   color: var(--a-text);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   overflow-wrap: anywhere;
 }
 .status-mcp-state {
@@ -221,12 +204,12 @@
   bottom: calc(100% + 6px);
   left: 16px;
   z-index: 8;
-  width: min(400px, calc(100% - 32px));
+  width: min(320px, calc(100% - 32px));
   max-height: min(560px, 70vh);
   overflow-y: auto;
-  padding: 12px 14px;
+  padding: var(--space-3);
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
   background: var(--a-panel);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
@@ -235,9 +218,9 @@
   white-space: normal;
 }
 .status-context-popover {
-  left: auto;
-  right: min(120px, 8%);
-  width: min(400px, calc(100% - 32px));
+  left: 48px;
+  right: auto;
+  width: min(320px, calc(100% - 32px));
 }
 .status-popover-heading {
   display: flex;
@@ -252,7 +235,7 @@
   height: 24px;
   border-radius: var(--radius-1);
   color: var(--a-muted);
-  font-size: 18px;
+  font-size: var(--fs-4);
 }
 .status-popover-heading > button:hover {
   background: var(--a-raised);
@@ -333,12 +316,12 @@
 .context-total span {
   margin-left: auto;
   color: var(--a-muted);
-  font: var(--fs-1)/1.6 var(--mono);
+  font: var(--fs-1)/var(--lh-base) var(--mono);
 }
 .context-stack {
   display: flex;
-  height: 8px;
-  border-radius: var(--radius-1);
+  height: 6px;
+  border-radius: var(--radius-pill);
   overflow: hidden;
   background: var(--a-raised);
 }
@@ -356,7 +339,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 2px 0;
-  font-size: var(--fs-2);
+  font-size: var(--fs-1);
 }
 .context-details dt {
   display: flex;
@@ -367,10 +350,10 @@
   color: var(--a-secondary);
 }
 .context-details dt i {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-radius: var(--radius-1);
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 2px;
 }
 .context-details dt small {
   max-width: 240px;
@@ -382,14 +365,14 @@
 }
 .context-details dd {
   margin: 0 0 0 auto;
-  font: var(--fs-1)/1.6 var(--mono);
+  font: var(--fs-1)/var(--lh-base) var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--a-text);
 }
 .context-details .context-group dt {
   padding-left: 16px;
   color: var(--a-text);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 .context-details .context-nested {
   padding-left: 16px;
@@ -423,55 +406,19 @@
   .desktop-status {
     padding-inline: 8px;
   }
-  .status-right {
-    margin-left: 0;
-  }
   .status-context-popover {
-    right: 8px;
-  }
-}
-
-/*
- * 窄窗口让位顺序（ADR-0046 2026-10-05 修订第 4 条）：累计缓存命中 → 上下文进度条
- * → Shell → 模型名前的服务商前缀；模型名本身最后才省略。阈值按主区宽度。
- */
-/* 窄宽度时速度段最先隐藏（先于累计缓存命中） */
-@container (max-width: 980px) {
-  .status-speed {
-    display: none;
-  }
-}
-@container (max-width: 900px) {
-  .status-cache {
-    display: none;
-  }
-}
-@container (max-width: 820px) {
-  .status-meter {
-    display: none;
-  }
-}
-@container (max-width: 740px) {
-  .status-controls .status-shell {
-    display: none;
-  }
-}
-@container (max-width: 660px) {
-  .status-prov {
-    display: none;
+    left: 8px;
   }
 }
 @container (max-width: 700px) {
   .desktop-status {
-    gap: 4px;
-    padding-inline: 4px;
+    gap: var(--space-2);
+    padding-inline: var(--space-2);
     font-size: var(--fs-1);
   }
+  .status-left,
   .status-right {
-    gap: 4px;
-  }
-  .status-controls {
-    gap: 0;
+    gap: var(--space-2);
   }
   .status-pill {
     padding-inline: 4px;

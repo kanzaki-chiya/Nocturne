@@ -138,8 +138,10 @@ export interface ComposerProps {
   readInputHistory?: () => Promise<string[]>;
   /** 父层从当前会话引用记录，因而首次输入创建会话后也能写入历史。 */
   recordInputHistory?: (text: string) => Promise<void>;
-  /** draft 必需；session 变体忽略 */
+  /** draft 与 session 共用：模型、思考档位、权限预设选择 */
   controls?: ComposerControls | undefined;
+  /** 权限预设菜单底部附加内容（如本会话已允许的授权列表） */
+  presetFooter?: ReactNode;
   /** draft 必需；session 变体忽略 */
   workspace?: WorkspaceChoice | undefined;
   /** null 表示本目录无项目文件索引（普通对话、或尚未建会话） */
@@ -268,6 +270,7 @@ export function Composer({
   readInputHistory,
   recordInputHistory,
   controls,
+  presetFooter,
   workspace,
   fileRefs,
   fileRefsUnavailable = "无项目文件索引",
@@ -987,6 +990,7 @@ export function Composer({
       label={control.heading ?? control.label}
       control={control}
       searchable={kind === "model"}
+      {...(kind === "preset" && presetFooter !== undefined ? { footer: presetFooter } : {})}
       action={
         kind === "model" && onManageProviders !== undefined
           ? { label: "管理服务商…", onSelect: onManageProviders }
@@ -1244,9 +1248,21 @@ export function Composer({
           {txtBlock}
           <div className="tb">
             {plusButton}
-            <span className="sp" />
-            {!isSession &&
+            {isSession &&
               controls !== undefined &&
+              chip(
+                "preset",
+                controls.preset,
+                <>
+                  <IconShield />
+                  <b>{controls.preset.label}</b>
+                  <span className="caret" aria-hidden="true">
+                    ▾
+                  </span>
+                </>,
+              )}
+            <span className="sp" />
+            {controls !== undefined &&
               chip(
                 "model",
                 controls.model,
@@ -1258,8 +1274,7 @@ export function Composer({
                   </span>
                 </>,
               )}
-            {!isSession &&
-              controls !== undefined &&
+            {controls !== undefined &&
               chip(
                 "effort",
                 controls.effort,

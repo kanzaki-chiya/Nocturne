@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Composer, type ComposerProps } from "../src/Composer";
+import { presetOptions } from "../src/choice-info";
 import type { FileIndexEntry } from "../src/file-refs";
 import type { PickedImage } from "../src/picked-images";
 
@@ -515,19 +516,31 @@ describe("Composer 控件与附件", () => {
     expect(allowed).toBe(true);
     expect(screen.queryByText("pasted-2.txt")).toBeNull();
   });
-  it("模型 chip 菜单选择调用 onSelect；档位与预设同样经 chip", async () => {
+  it("模型 chip 菜单选择调用 onSelect，底部可管理服务商；档位与预设同样经 chip，危险项排在最后", async () => {
     const controls = props().controls;
     if (controls === undefined) throw new Error("fixture 缺少 controls");
-    render(<Composer {...props({ controls })} />);
+    controls.preset.groups = [{ options: presetOptions() }];
+    const onManageProviders = vi.fn();
+    render(<Composer {...props({ controls, onManageProviders })} />);
     fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: /fancy/ }));
     expect(controls.model.onSelect).toHaveBeenCalledWith("test/fancy");
+    fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "管理服务商…" }));
+    expect(onManageProviders).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "切换思考档位" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "high" }));
     expect(controls.effort.onSelect).toHaveBeenCalledWith("high");
-    fireEvent.click(screen.getByRole("button", { name: "切换权限预设" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "smart" }));
+    const presetTrigger = screen.getByRole("button", { name: "切换权限预设" });
+    fireEvent.click(presetTrigger);
+    expect(presetTrigger.getAttribute("aria-expanded")).toBe("true");
+    const options = screen.getAllByRole("menuitemradio");
+    expect(options).toHaveLength(6);
+    expect(options.at(-1)?.textContent).toContain("bypass");
+    expect(options.at(-1)?.className).toContain("danger");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "smart" }));
     expect(controls.preset.onSelect).toHaveBeenCalledWith("smart");
+    expect(presetTrigger.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("目录菜单列出普通对话与项目，选择走回调", async () => {
@@ -587,12 +600,12 @@ describe("Composer 控件与附件", () => {
     await screen.findByText(/test\/desc 描述后发送/);
   });
 
-  it("session 变体：卡片上层文字区、下层工具行，无 chip/无 tray，提示与附件仍工作", async () => {
+  it("session 变体：卡片上层文字区、下层工具行含预设/模型/档位 chip，无 tray，提示与附件仍工作", async () => {
     const getVisionHint = vi.fn(async () => "当前模型不支持图片，将由 test/desc 描述后发送");
     const { container } = render(<Composer {...props({ variant: "session", getVisionHint })} />);
-    expect(screen.queryByRole("button", { name: "切换模型" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "切换思考档位" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "切换权限预设" })).toBeNull();
+    const preset = screen.getByRole("button", { name: "切换权限预设" });
+    const model = screen.getByRole("button", { name: "切换模型" });
+    const effort = screen.getByRole("button", { name: "切换思考档位" });
     expect(screen.queryByRole("button", { name: "切换目录" })).toBeNull();
     const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
     const card = container.querySelector(".composer.session .cbox");
@@ -610,11 +623,13 @@ describe("Composer 控件与附件", () => {
     expect(send.parentElement).toBe(toolbar);
     expect(Array.from(toolbar?.children ?? [])).toEqual([
       plus,
+      preset,
       toolbar?.querySelector(".sp"),
+      model,
+      effort,
       send,
     ]);
     expect(container.querySelector(".session-row")).toBeNull();
-    expect(container.querySelector(".chip")).toBeNull();
     expect(container.querySelector(".tray")).toBeNull();
     // 附件缩略图在卡内，vision 提示显示在卡片上方气泡（role=status）
     fireEvent.paste(field, {
@@ -639,6 +654,9 @@ describe("Composer 控件与附件", () => {
     const text = card?.querySelector(".txt");
     const toolbar = card?.querySelector(".tb");
     const plus = screen.getByRole("button", { name: "添加图片或引用文件" });
+    const preset = screen.getByRole("button", { name: "切换权限预设" });
+    const model = screen.getByRole("button", { name: "切换模型" });
+    const effort = screen.getByRole("button", { name: "切换思考档位" });
     const stop = screen.getByRole<HTMLButtonElement>("button", { name: "中断" });
     const send = screen.getByRole<HTMLButtonElement>("button", { name: "发送" });
     expect(field.placeholder).toBe("运行中，Enter 插话，Alt+Enter 排队");
@@ -647,14 +665,16 @@ describe("Composer 控件与附件", () => {
     // ADR-0070：运行中输入非空时 ■ 与发送键并存
     expect(Array.from(toolbar?.children ?? [])).toEqual([
       plus,
+      preset,
       toolbar?.querySelector(".sp"),
+      model,
+      effort,
       stop,
       send,
     ]);
     expect(stop.className).toBe("send stop");
     expect(stop.textContent).toBe("■");
     expect(send.disabled).toBe(false);
-    expect(container.querySelector(".chip")).toBeNull();
     expect(container.querySelector(".tray")).toBeNull();
     fireEvent.click(stop);
     expect(onInterrupt).toHaveBeenCalledTimes(1);
