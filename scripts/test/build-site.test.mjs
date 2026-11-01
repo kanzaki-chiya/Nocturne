@@ -36,6 +36,32 @@ describe("static homepage", () => {
     expect(pages[0]).toMatch(/href="en\/"[^>]*hreflang="en"/);
     expect(pages[1]).toMatch(/href="\.\.\/"[^>]*hreflang="zh-CN"/);
   });
+  it("uses the shared masthead navigation and download anchor", () => {
+    const [zh, en] = pages;
+    const nav = (html) => /<nav class="site-nav"[^>]*>([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? "";
+    expect(nav(zh)).toContain('href="docs/"');
+    expect(nav(zh)).toContain('href="changelog/"');
+    expect(nav(en)).toMatch(/href="\.\.\/docs\/"[^>]*hreflang="zh-CN"/);
+    expect(nav(en)).toContain('href="../changelog/"');
+    for (const html of pages) {
+      expect(html).toContain('id="download"');
+      expect(html).toContain('href="#download"');
+      expect(html).not.toMatch(/#three|id="three"|#one|#two/);
+      expect(html).toMatch(/<link rel="stylesheet" href="(?:\.\.\/)?assets\/base\.css"/);
+    }
+  });
+  it("offers a light variant for every themed screenshot", () => {
+    for (const html of pages) {
+      const pictures = html.match(/<picture>[\s\S]*?<\/picture>/g) ?? [];
+      expect(pictures.length).toBeGreaterThanOrEqual(5);
+      for (const picture of pictures) {
+        expect(picture).toMatch(
+          /<source\s+media="\(prefers-color-scheme: light\)"\s+srcset="[^"]+\.webp"/,
+        );
+        expect(picture).toMatch(/<img\s[^>]*src="[^"]+\.webp"[^>]*width="\d+"[^>]*height="\d+"/);
+      }
+    }
+  });
   it("resolves all HTML and CSS local references, including anchors", async () => {
     async function checkReference(file, ref) {
       if (/^(?:https?:|mailto:|data:|\/\/)/.test(ref)) return;
@@ -53,7 +79,7 @@ describe("static homepage", () => {
         else if (/\.(html|css)$/.test(file)) {
           const text = await readFile(file, "utf8");
           const pattern = file.endsWith(".html")
-            ? /(?:href|src)="([^"]+)"/g
+            ? /(?:href|src|srcset)="([^"]+)"/g
             : /url\(["']?([^\s)"']+)["']?\)/g;
           for (const match of text.matchAll(pattern)) await checkReference(file, match[1]);
         }

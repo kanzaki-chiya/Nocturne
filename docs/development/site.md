@@ -1,6 +1,6 @@
 # 项目主页
 
-主页地址是 <https://nocturne.koxia.cn/>，中文默认，英文位于 `/en/`。采用「月光纸页」浅色视觉；纯静态 HTML + CSS，无运行时 JavaScript、统计、第三方脚本或 cookie。
+主页地址是 <https://nocturne.koxia.cn/>，中文默认，英文位于 `/en/`。深色优先，经 `prefers-color-scheme` 跟随系统切换浅色；主题变量、页头页脚只在 `base.css`，主页和更新日志页另加 `site.css`，有深浅两版的截图用 `<picture>` 的浅色 `source` 切换。纯静态 HTML + CSS，无运行时 JavaScript、统计、第三方脚本或 cookie。
 
 ## 目录与构建
 
@@ -28,7 +28,7 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 ## 字体子集
 
-标题、字标、章节编号使用 Noto Serif SC 2.003 的 SC Black，SIL OFL 1.1；英文用同一字体的拉丁字形。原始字体来自 `notofonts/noto-cjk` 的 `Serif2.003` 固定提交，完整 URL 写在脚本中，原文件只在 OS 临时目录保存并清理。许可见 [字体许可](../../site/assets/fonts/OFL.txt) 与 [第三方声明](../../THIRD-PARTY-NOTICES.md)。正文和代码使用系统字体，字体不可用时标题回退宋体/衬线字体。
+h1、h2 和字标使用 Noto Serif SC 2.003 的 SC Black，SIL OFL 1.1，`@font-face` 在 `base.css`；英文用同一字体的拉丁字形。原始字体来自 `notofonts/noto-cjk` 的 `Serif2.003` 固定提交，完整 URL 写在脚本中，原文件只在 OS 临时目录保存并清理。许可见 [字体许可](../../site/assets/fonts/OFL.txt) 与 [第三方声明](../../THIRD-PARTY-NOTICES.md)。正文和代码使用系统字体，字体不可用时标题回退宋体/衬线字体。
 
 标题变更后手动执行（需要 Node.js 24.14+ 与根依赖）：
 
@@ -39,7 +39,7 @@ node scripts/build-site.mjs
 pnpm exec vitest run --root scripts test/build-site.test.mjs
 ```
 
-脚本支持 `HTTPS_PROXY` / `HTTP_PROXY` 等 Node 环境代理；扫描双语页面的 h1、h2、字标，并加入章节数字。提交生成的 `noto-serif-sc-headings.woff2` 和 `characters.txt`，不提交 OTF。不要从境外字体服务加载字体。
+脚本支持 `HTTPS_PROXY` / `HTTP_PROXY` 等 Node 环境代理，只在这条命令上设置；扫描双语主页和更新日志页的 h1、h2、字标，并加入数字 0–9。提交生成的 `noto-serif-sc-headings.woff2` 和 `characters.txt`，不提交 OTF。不要从境外字体服务加载字体。
 
 ## 截图重拍
 
