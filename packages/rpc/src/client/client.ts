@@ -210,6 +210,10 @@ export interface RpcSession {
   cancelInput(id: string): Promise<void>;
   /** 解除暂停；空闲时立即发出队首 */
   resumeInputs(): Promise<void>;
+  /** 停止目标（ADR-0076） */
+  stopGoal(): Promise<void>;
+  /** 继续目标；空闲时开新 Turn，结束时返回（ADR-0076） */
+  resumeGoal(): Promise<void>;
   /** 待发输入快照（`input.pending` 是临时事件，订阅后用它对齐） */
   pendingInputs(): Promise<PendingInputsSnapshot>;
   /** 中断运行中的 Turn（通知，无应答）；submit 随后以 aborted 返回 */
@@ -775,6 +779,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       resumeInputs: async () => {
         await call("session.resumeInputs", p);
+      },
+      stopGoal: async () => {
+        await call("session.stopGoal", p);
+      },
+      resumeGoal: async () => {
+        await call("session.resumeGoal", p);
       },
       pendingInputs: () => call("session.pendingInputs", p),
       interrupt: () => {

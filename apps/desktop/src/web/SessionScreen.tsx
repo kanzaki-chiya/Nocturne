@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  goalStatusLines,
+  parseWorkModeSlash,
   pendingBackgroundSubagents,
   type ExternalAgentOverview,
   type SkillOverview,
@@ -165,6 +167,18 @@ export function SessionScreen({
   };
   const slash = async (line: string): Promise<string | boolean> => {
     void session.recordInputHistory(line).catch(() => undefined);
+    // ADR-0076 §7：/goal 看状态，/goal stop|resume 停止或继续
+    const goal = parseWorkModeSlash(line);
+    if (goal?.kind === "action") {
+      if (goal.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
+      if (view.goal === undefined) throw new Error("没有目标");
+      if (goal.action === "goal-stop") await session.stopGoal();
+      else
+        void session.resumeGoal().then(onChanged, (error: unknown) => {
+          onError(errorText(error));
+        });
+      return true;
+    }
     if (line.trim().toLowerCase().startsWith("/compact")) {
       setBusy(true);
       try {

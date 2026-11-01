@@ -14,13 +14,16 @@ import {
 } from "../src/index.js";
 import { FakeProvider, type FakeScript, type ModelRequest } from "../src/provider/index.js";
 import {
+  goalStatusLines,
   parseWorkModeSlash,
   replaySessionView,
   userEntryText,
   workModeDisplayText,
   type DurableEvent,
+  type GoalState,
   type RuntimeEvent,
 } from "../src/protocol/index.js";
+import { goalContinuation } from "../src/work-modes/index.js";
 
 const tmpRoots: string[] = [];
 afterEach(() => {
@@ -232,5 +235,282 @@ describe("/grill-me", () => {
     expect(requestText(provider.requests[0])).toContain("exactly one question per call");
     expect(requestText(provider.requests[2])).toContain("邮箱密码（推荐）");
     await session.close();
+  });
+});
+
+const goalMet = (id: string): FakeScript => [
+  {
+    type: "tool_call",
+    toolCallId: id,
+    name: "update_goal",
+    input: { status: "met", checklist: [{ item: "测试通过", evidence: "pnpm test 0 failed" }] },
+  },
+  { type: "finish", reason: "tool_calls" },
+];
+
+const goalSteers = (session: RuntimeSession) =>
+  users(session).filter((event) => event.payload.steer === true && event.payload.workMode);
+
+const toolNames = (request: ModelRequest | undefined): string[] =>
+  (request?.tools ?? []).map((tool) => tool.name);
+
+describe("/goal", () => {
+  it("斜杠解析：无参数看状态，stop/resume 是子命令，其余文字都是目标", () => {
+    expect(parseWorkModeSlash("/goal")).toEqual({ kind: "action", action: "goal-status" });
+    expect(parseWorkModeSlash("/goal Stop")).toEqual({ kind: "action", action: "goal-stop" });
+    expect(parseWorkModeSlash("/goal resume")).toEqual({ kind: "action", action: "goal-resume" });
+    expect(parseWorkModeSlash("/goal stop the dev server")).toEqual({
+      kind: "submit",
+      workMode: "goal",
+      text: "stop the dev server",
+    });
+  });
+
+  it("假模型跑通：Turn 想结束被拦下核对，update_goal(met) 后照常结束，只有一个 Turn", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        textScript("清单：1. 测试通过。已改完。"),
+        goalMet("g1"),
+        textScript("全部核对完成。"),
+      ],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    expect(await session.submit({ text: "修好测试", workMode: "goal" })).toBe("done");
+
+    const durable = session.durableEvents();
+    expect(durable.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    // 设定目标的 config_changed 写在 turn.started 之前
+    const goalAt = durable.findIndex(
+      (event) => event.type === "session.config_changed" && event.payload.goal !== undefined,
+    );
+    expect(goalAt).toBeLessThan(durable.findIndex((event) => event.type === "turn.started"));
+    const steers = goalSteers(session);
+    expect(steers).toHaveLength(1);
+    expect(steers[0]?.payload.workMode?.name).toBe("goal");
+    expect(steers[0]?.payload.workMode?.body).toContain("Goal check 1/10");
+    expect(steers[0]?.payload.workMode?.body).toContain("修好测试");
+    expect(toolNames(provider.requests[0])).toContain("update_goal");
+
+    const goal = session.state().goal;
+    expect(goal).toMatchObject({ objective: "修好测试", status: "met", rounds: 1 });
+    expect(goal?.turnStartedAt).toBeUndefined();
+    const completed = durable.find(
+      (event) => event.type === "tool.completed" && event.payload.name === "update_goal",
+    );
+    expect(completed?.type === "tool.completed" ? completed.payload.output : undefined).toEqual({
+      status: "met",
+      checklist: [{ item: "测试通过", evidence: "pnpm test 0 failed" }],
+    });
+    // 视图与 Core 折叠同源
+    expect(replaySessionView(durable).goal).toEqual(goal);
+    // 核对说明在视图里只有命令名
+    const entry = replaySessionView(durable).entries.filter((item) => item.kind === "user")[1];
+    if (entry?.kind !== "user") throw new Error("missing goal entry");
+    expect(workModeDisplayText(userEntryText(entry), entry.workMode)).toBe("/goal");
+    await session.close();
+  });
+
+  it("没有目标时不注册 update_goal、不续跑", async () => {
+    const provider = new FakeProvider({ scripts: [textScript("好")] });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    expect(await session.submit({ text: "随便聊聊" })).toBe("done");
+    expect(toolNames(provider.requests[0])).not.toContain("update_goal");
+    expect(provider.requests).toHaveLength(1);
+    expect(session.state().goal).toBeUndefined();
+    await session.close();
+  });
+
+  it("到达轮数上限：写 limit，送一条收尾说明，这一轮随后结束", async () => {
+    const provider = new FakeProvider({ handler: () => textScript("还在做") });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    expect(await session.submit({ text: "做完它", workMode: "goal" })).toBe("done");
+    // 首个请求 + 10 次核对 + 1 次收尾
+    expect(provider.requests).toHaveLength(12);
+    const steers = goalSteers(session);
+    expect(steers).toHaveLength(11);
+    expect(steers.at(-1)?.payload.workMode?.body).toContain("The goal limit was reached");
+    expect(session.state().goal).toMatchObject({ status: "limit", rounds: 10 });
+    expect(toolNames(provider.requests.at(-1))).not.toContain("update_goal");
+    await session.close();
+  });
+
+  it("用户中断：目标停止（interrupted），之后的普通消息不被接管", async () => {
+    const provider = new FakeProvider({
+      scripts: [[{ type: "wait" }], textScript("普通回复")],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const running = session.submit({ text: "长任务", workMode: "goal" });
+    await expect.poll(() => provider.waitState.waiting).toBe(1);
+    session.interrupt();
+    expect(await running).toBe("aborted");
+    expect(session.state().goal).toMatchObject({ status: "stopped", reason: "interrupted" });
+    expect(await session.submit({ text: "换个话题" })).toBe("done");
+    expect(provider.requests).toHaveLength(2);
+    await session.close();
+  });
+
+  it("stopGoal：Turn 进行中停止后不再续跑；update_goal 以 invalid_input 结算", async () => {
+    const provider = new FakeProvider({
+      scripts: [askScript("继续吗？"), goalMet("late"), textScript("停了")],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    session.subscribe((event) => {
+      if (event.type !== "question.requested") return;
+      void (async () => {
+        await session.stopGoal();
+        await session.respondQuestion(event.payload.requestId, {
+          answers: [{ selected: [], text: "嗯" }],
+        });
+      })();
+    });
+    expect(await session.submit({ text: "做个东西", workMode: "goal" })).toBe("done");
+    expect(session.state().goal).toMatchObject({ status: "stopped", reason: "user" });
+    expect(goalSteers(session)).toHaveLength(0);
+    const late = session
+      .durableEvents()
+      .find((event) => event.type === "tool.completed" && event.payload.name === "update_goal");
+    expect(late?.type === "tool.completed" ? late.payload.status : undefined).toBe("error");
+    expect(late?.type === "tool.completed" ? late.payload.error?.code : undefined).toBe(
+      "invalid_input",
+    );
+    await session.close();
+  });
+
+  it("update_goal 输入校验：met 要有带证据的清单，blocked 要有原因", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "bad-met",
+            name: "update_goal",
+            input: { status: "met", checklist: [{ item: "x", evidence: " " }] },
+          },
+          {
+            type: "tool_call",
+            toolCallId: "bad-blocked",
+            name: "update_goal",
+            input: { status: "blocked" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "tool_call",
+            toolCallId: "blocked",
+            name: "update_goal",
+            input: { status: "blocked", reason: "需要生产环境密钥" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        textScript("需要你提供密钥"),
+      ],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    expect(await session.submit({ text: "部署", workMode: "goal" })).toBe("done");
+    // callId 由 Runtime 重新编号，按顺序比对结果
+    const statuses = session
+      .durableEvents()
+      .flatMap((event) =>
+        event.type === "tool.completed"
+          ? [[event.payload.status, event.payload.error?.code ?? ""]]
+          : [],
+      );
+    expect(statuses).toEqual([
+      ["error", "invalid_input"],
+      ["error", "invalid_input"],
+      ["ok", ""],
+    ]);
+    expect(session.state().goal).toMatchObject({ status: "blocked", reason: "需要生产环境密钥" });
+    expect(goalSteers(session)).toHaveLength(0);
+    await session.close();
+  });
+
+  it("恢复会话：目标原样恢复且不自动开 Turn；resumeGoal 空闲时开新 Turn，轮数重算", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        textScript("先做一部分"),
+        goalMet("g1"),
+        textScript("完成"),
+        goalMet("g2"),
+        textScript("又核对了一遍"),
+      ],
+    });
+    const sessionsDir = makeTmp("nct-wm-resume-");
+    const cwd = makeTmp("nct-wm-resume-ws-");
+    const first = await makeRuntime(provider, { sessionsDir, cwd });
+    const session = await first.createSession({ model: "fake/fake-1" });
+    await session.submit({ text: "收尾", workMode: "goal" });
+    const id = session.id;
+    const before = session.state().goal;
+    await session.close();
+
+    const second = await makeRuntime(provider, { sessionsDir, cwd });
+    const resumed = await second.resumeSession(id);
+    expect(resumed.state().goal).toEqual(before);
+    expect(resumed.durableEvents().filter((e) => e.type === "turn.started")).toHaveLength(1);
+
+    await resumed.resumeGoal();
+    const turns = resumed.durableEvents().filter((e) => e.type === "turn.started");
+    expect(turns).toHaveLength(2);
+    const opener = users(resumed).at(-1);
+    expect(opener?.payload.steer).toBeUndefined();
+    expect(opener?.payload.workMode?.body).toContain("Resume working on this goal");
+    expect(resumed.state().goal).toMatchObject({ status: "met", rounds: 0 });
+    await resumed.close();
+  });
+
+  it("没有目标时 stopGoal / resumeGoal 报 invalid_command", async () => {
+    const runtime = await makeRuntime(new FakeProvider({ scripts: [] }));
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await rejects(session.stopGoal(), "invalid_command");
+    await rejects(session.resumeGoal(), "invalid_command");
+    await session.close();
+  });
+
+  it("续跑判断：后台子代理在跑或有排队输入时不续；时长上限同样生效", () => {
+    const goal: GoalState = {
+      objective: "x",
+      status: "active",
+      maxMinutes: 60,
+      maxRounds: 10,
+      since: 1,
+      rounds: 0,
+      activeMs: 0,
+    };
+    const base = { backgroundRunning: 0, queued: false, nowMs: 0 };
+    expect(goalContinuation(goal, base).kind).toBe("check");
+    expect(goalContinuation(goal, { ...base, backgroundRunning: 1 }).kind).toBe("none");
+    expect(goalContinuation(goal, { ...base, queued: true }).kind).toBe("none");
+    expect(goalContinuation({ ...goal, status: "met" }, base).kind).toBe("none");
+    expect(goalContinuation({ ...goal, activeMs: 60 * 60_000 }, base).kind).toBe("limit");
+    const running = { ...goal, turnStartedAt: new Date(0).toISOString() };
+    expect(goalContinuation(running, { ...base, nowMs: 59 * 60_000 }).kind).toBe("check");
+    expect(goalContinuation(running, { ...base, nowMs: 61 * 60_000 }).kind).toBe("limit");
+  });
+
+  it("状态行：目标、状态、轮数与时长", () => {
+    expect(goalStatusLines(undefined, 0)).toEqual(["没有目标"]);
+    expect(
+      goalStatusLines(
+        {
+          objective: "修好测试",
+          status: "blocked",
+          reason: "缺密钥",
+          maxMinutes: 60,
+          maxRounds: 10,
+          since: 1,
+          rounds: 3,
+          activeMs: 125_000,
+        },
+        0,
+      ),
+    ).toEqual(["目标：修好测试", "状态：受阻（缺密钥）", "轮数：3/10", "时长：2/60 分钟"]);
   });
 });

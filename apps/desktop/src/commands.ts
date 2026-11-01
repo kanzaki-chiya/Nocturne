@@ -59,7 +59,8 @@ export type ParsedSlash =
   /** 执行方式（ADR-0076）：text 是去掉命令名后的任务 */
   | { kind: "work"; workMode: WorkModeName; text: string }
   | { kind: "agent"; delegate: { agent: string; task: string } }
-  | { kind: "command"; name: SlashCommandName; raw: string }
+  /** `/goal` 的无任务子命令（ADR-0076 §7）也走 command，由 onSlash 再解析 */
+  | { kind: "command"; name: SlashCommandName | "/goal"; raw: string }
   | { kind: "redirect"; name: string; hint: string }
   | { kind: "unknown"; name: string; hint: string };
 
@@ -86,6 +87,7 @@ export function parseSlash(
   if (hint !== undefined)
     return { kind: "redirect", name, hint: typeof hint === "string" ? hint : hint[context] };
   const work = parseWorkModeSlash(line);
+  if (work?.kind === "action") return { kind: "command", name: "/goal", raw: line };
   if (work?.kind === "usage") return { kind: "unknown", name, hint: work.hint };
   if (work?.kind === "submit") return { kind: "work", workMode: work.workMode, text: work.text };
   const invocation = parseSkillSlash(line.trimStart(), skills);

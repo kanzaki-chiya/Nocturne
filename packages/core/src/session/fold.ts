@@ -6,8 +6,10 @@ import { shellSwitchNote } from "../platform/index.js";
 import {
   todoItemsFromCompletion,
   effectiveEvents,
+  reduceGoal,
   rewindNote,
   type DurableEvent,
+  type GoalState,
   type TodoItem,
   type Usage,
 } from "../protocol/index.js";
@@ -62,8 +64,14 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const startedInputs = new Map<string, string | undefined>();
   const pinnedResults = new Set<string>();
   const effective = new Set(effectiveEvents(events).map((e) => e.seq));
+  // ADR-0076 §2：目标按全部事件推进（回退不撤销），Turn 是否进行中单独跟踪
+  let goal: GoalState | undefined;
+  let goalTurnOpen = false;
 
   for (const event of events) {
+    goal = reduceGoal(goal, event, goalTurnOpen);
+    if (event.type === "turn.started") goalTurnOpen = true;
+    if (event.type === "turn.completed") goalTurnOpen = false;
     const active = effective.has(event.seq);
     if (
       !active &&
@@ -281,6 +289,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     config,
     history,
     ...(Object.keys(mcpAvailability).length > 0 ? { mcpAvailability } : {}),
+    ...(goal !== undefined ? { goal } : {}),
     todos,
     usage,
     lastSeq,

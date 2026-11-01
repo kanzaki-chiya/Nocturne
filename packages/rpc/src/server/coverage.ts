@@ -116,6 +116,8 @@ export const SESSION_METHODS: Record<
   updateInput: "session.updateInput",
   cancelInput: "session.cancelInput",
   resumeInputs: "session.resumeInputs",
+  stopGoal: "session.stopGoal",
+  resumeGoal: "session.resumeGoal",
   pendingInputs: "session.pendingInputs",
   respondPermission: "session.respondPermission",
   respondQuestion: "session.respondQuestion",

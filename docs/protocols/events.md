@@ -71,7 +71,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | 类型 | turnId | payload |
 |---|---|---|
 | `session.created` | — | `formatVersion`、`nocturneVersion`、`cwd`、`workspaceRoot`、`model: ModelRef`、`permissionPreset`、`reasoningEffort?`（思考档位，ADR-0018；缺省按 `off` 处理）、`parent?`（`{ sessionId, callId }`，仅子会话存在；Phase 6，[subagent.md](../architecture/subagent.md) 第 5 节）、`schedule?`（`{ taskId, scheduledAt, trigger }`，仅定时任务发起的会话存在；可选字段，旧版本忽略，ADR-0064，见 [schedule.md](../architecture/schedule.md)）、`client?`（`{ kind: "agent", name, deviceId }`，仅外部 agent 经 MCP 桥发起的会话存在，由 RPC 服务端在 `origin: "agent"` 连接创建会话时填入；可选字段，旧版本忽略，不提升 `formatVersion`，见 [ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §5） |
-| `session.config_changed` | — | 配置或环境状态变化的字段（不只表示用户配置）：`mcp?: Array<{ server: string; available: boolean; reason?: string; autoRetry?: boolean }>`（ADR-0071，折叠为一条 note，每台一句；reason 截到 200 字符），`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节） |
+| `session.config_changed` | — | 配置或环境状态变化的字段（不只表示用户配置）：`mcp?: Array<{ server: string; available: boolean; reason?: string; autoRetry?: boolean }>`（ADR-0071，折叠为一条 note，每台一句；reason 截到 200 字符），`model?`、`permissionPreset?`、`reasoningEffort?`（思考档位切换，ADR-0018）、`shell?: { kind, path }`（shell 切换，ADR-0022：折叠时在该事件位置留 `note` 历史条目给模型，见 [context.md](../architecture/context.md) 第 3 节）、`goal?: { objective, status: "active" \| "met" \| "blocked" \| "limit" \| "stopped", maxMinutes, maxRounds, reason? }`（目标模式，[ADR-0076](../decisions/ADR-0076-work-modes.md) §2、§4：每次写完整对象；不生成 note 与提示；与预设一样回退不撤销） |
 | `session.titled` | — | `title: string`、`source?: "generated" \| "user"`（旧事件缺省 `generated`；用户空标题清除覆盖）、`model?: string`（生成时的 provider/model；用户改名不填）、`usage?`（标题角色用量） |
 | `turn.started` | ✓ | `turnIndex` |
 | `message.user` | ✓ | `messageId`、`content: ContentBlock[]`、`attachments?: ImageAttachment[]`、`fileRefs?: FileRef[]`（用户引用的快照元数据，见第 4 节）、`skill?: { name: string; body: string }`（渲染正文快照，末尾 content 同时含 skill 文本块）、`delegate?: { agent: string; task: string }`（外部委派任务原文快照，末尾 content 同时含明确的 task 工具指令；与 skill 互斥）、`workMode?: { name: string; body: string }`（执行方式说明块快照，[ADR-0076](../decisions/ADR-0076-work-modes.md) §1：末尾 content 同时含 `<work-mode name="…">` 文本块；与 skill、delegate 互斥；兼容扩展，旧版本按普通用户消息处理，不提升 `formatVersion`）、`steer?: true`（运行中插话，[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)：属于**当前** Turn 的补充消息，不是新 Turn 的开始；兼容扩展，旧版本按普通用户消息处理，不提升 `formatVersion`）、`subagent?: { childSessionId, callId, status: "ok" \| "error" \| "timeout" \| "cancelled" \| "interrupted", code?, profile?, durationMs?, changes?: { branch, base, head, snapshot, worktree, files: { path, status: "added" | "modified" | "deleted", additions?, deletions? }[] } }`（后台子代理结果，[ADR-0073](../decisions/ADR-0073-background-subagents.md) §3：`callId` 是启动它的 `task` 调用；`content` 是 `<subagent-result …>` 包裹的正文；`profile`、`durationMs` 供界面显示，补报的 `interrupted` 没有耗时；`changes` 为工作树结果，路径相对仓库根目录，二进制文件没有行数，详见 ADR-0075 §5；运行中送达时同时带 `steer: true`；兼容扩展，不提升 `formatVersion`） |
@@ -266,6 +266,8 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 | `cancelInput(id)` | 条目仍在列表中；已被消费返回 `input_consumed` | `input.pending`（临时） | ADR-0070 |
 | `resumeInputs()` | 子会话返回 `invalid_command`；没有暂停的条目时无操作 | 空闲时立即发出队首（新 Turn 的事件）；`input.pending`（临时） | ADR-0070 §4 |
 | `pendingInputs()` | 会话可用 | 无事件，返回 `{ items, paused }` 完整快照（`input.pending` 不回放，订阅后用它对齐） | ADR-0070 §6 |
+| `stopGoal()` | 子会话返回 `invalid_command`；没有目标返回 `invalid_command`；目标不是 active 时无操作 | `session.config_changed`（`goal.status = "stopped"`、`reason = "user"`）；进行中的 Turn 不再续跑 | ADR-0076 §4.5 |
+| `resumeGoal()` | 同上；目标已是 active 时无操作 | `session.config_changed`（`goal.status = "active"`）；会话空闲时随即开新 Turn（`message.user.workMode.name = "goal"`），Turn 或压缩进行中只改状态 | ADR-0076 §4.5 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
@@ -295,6 +297,7 @@ ADR-0072：`message.user.files?` 和 `tool.completed.files?` 是 `FileAttachment
 
 - 新增临时事件类型、在已知事件中新增可选字段：兼容变更。新增字段不得改变已有字段的含义。v0.5 的 `message.user.attachments` 与 `tool.completed.attachments` 属于此类：不提升 `formatVersion`，旧版本按上表忽略未知字段。
 - `session.config_changed.mcp`（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）是已知事件的可选环境状态字段：不提升 `formatVersion`，旧版本忽略，旧日志折叠不变。
+- `session.config_changed.goal` 与 `message.user.workMode`（[ADR-0076](../decisions/ADR-0076-work-modes.md)）同为可选字段：不提升 `formatVersion`；旧版本照常恢复会话，只是不再按模式行事。
 - 新增持久化事件类型：旧版本 Runtime 将无法恢复包含它的会话（见上表）。这是有意的保守选择；变更说明中需写明。
 - 删除字段、改变字段含义：不兼容变更，提升 `formatVersion`，提供旧格式日志的读取迁移，并新增 ADR。
 

@@ -155,6 +155,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "quit",
   // ADR-0076 执行方式
   "grill-me",
+  "goal",
 ];
 
 export function parseSkillSlash(

@@ -136,6 +136,8 @@ interface SessionRecovery {
 
 当前任务清单由 [ADR-0028](../decisions/ADR-0028-session-task-list.md) 的 `todo_write` 结果派生：只有持久化成功的 `tool.completed` 同时满足 `name: "todo_write"`、`status: "ok"`、`output.items` 有效，才原子替换 `SessionState.todos`。`[]` 清空；拒绝、失败、中断、只有 `tool.started` 或日志写入失败均保留旧清单。清单非空且每项均为 `completed` 时，下一条持久化的 `message.user` 先将 `SessionState.todos` 置空，再处理该消息；尚有未完成项时保留清单，历史工具快照始终保留。恢复时从日志逐事件重放同一归档规则，不读取独立清单文件；旧日志初始清单为空。子会话有独立状态，不向父会话合并。客户端遵循同一规则，见 [view.md](../protocols/view.md)。
 
+目标模式的状态 `SessionState.goal` 由 `session.config_changed.goal` 折叠（[ADR-0076](../decisions/ADR-0076-work-modes.md) §2）：与预设一样对全部事件推进、回退不撤销，恢复与分叉原样继承；轮数与时长从持久事件算出（自最近一次变为 active 起的核对说明条数、各 Turn 的 `turn.started` 到 `turn.completed` 墙钟时间），恢复后照常累计。恢复会话不会因目标为 active 自动开 Turn。
+
 ## 9. 暂不设计
 
 分叉、回退见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。跨设备同步、会话分享、断电级持久性选项仍待单独设计。

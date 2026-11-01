@@ -51,6 +51,12 @@ export interface TurnDeps {
    * 缺省（子会话等）即没有插话。
    */
   takeSteers?: (() => readonly PreparedInput[]) | undefined;
+  /**
+   * agent-loop.md §3.10：只在安全点 2（模型 stop、无工具调用、无待消费插话、
+   * 本来要 done）调用。返回内容时按插话写入 `message.user(steer)` 并继续下一个
+   * Step；返回 undefined 照常 done。Agent Loop 不知道它来自哪个模块。
+   */
+  continueTurn?: ((signal: AbortSignal) => Promise<PreparedInput | undefined>) | undefined;
   skills?: { text: string; truncated: boolean } | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;

@@ -11,6 +11,7 @@ import type {
   TurnChanges,
   TurnChangeDiff,
 } from "@nocturne/core/protocol";
+import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import {
@@ -856,6 +857,19 @@ export function App({ host }: { host: DesktopHost }) {
     }
     const active = conversations.selected;
     if (active === undefined) throw new Error("请先打开会话");
+    if (parsed.name === "/goal") {
+      // ADR-0076 §7：/goal 看状态，/goal stop|resume 停止或继续
+      const action = parseWorkModeSlash(line);
+      if (action?.kind !== "action") return false;
+      if (action.action === "goal-status") {
+        setCommandOutput(goalStatusLines(active.view.goal, Date.now()).join("\n"));
+        return true;
+      }
+      if (active.view.goal === undefined) throw new Error("没有目标");
+      if (action.action === "goal-stop") await active.session.stopGoal();
+      else conversations.resumeGoal();
+      return true;
+    }
     const servers = await active.session.mcpServers();
     setCommandOutput(
       servers.length === 0

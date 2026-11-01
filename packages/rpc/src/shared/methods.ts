@@ -680,6 +680,10 @@ export interface RpcMethods {
   "session.cancelInput": { params: SessionParams & { id: string }; result: null };
   /** 解除暂停（ADR-0070 §4）：空闲时立即发出队首 */
   "session.resumeInputs": { params: SessionParams; result: null };
+  /** 停止目标（ADR-0076 §4.5）；没有目标时 invalid_command */
+  "session.stopGoal": { params: SessionParams; result: null };
+  /** 继续目标（ADR-0076 §4.5）：空闲时开新 Turn，请求挂到该 Turn 结束 */
+  "session.resumeGoal": { params: SessionParams; result: null };
   /**
    * 待发输入的当前快照：`input.pending` 是临时事件、不回放，新附加的客户端在
    * `session.subscribe` 之后用它对齐（返回与事件 payload 同形）
@@ -901,6 +905,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.updateInput": true,
   "session.cancelInput": true,
   "session.resumeInputs": true,
+  "session.stopGoal": true,
+  "session.resumeGoal": true,
   "session.pendingInputs": true,
   "session.respondPermission": true,
   "session.respondQuestion": true,

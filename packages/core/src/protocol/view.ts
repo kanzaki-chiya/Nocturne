@@ -1,5 +1,5 @@
 import type { SkillSnapshot } from "./skills.js";
-import type { WorkModeSnapshot } from "./work-modes.js";
+import { reduceGoal, type GoalState, type WorkModeSnapshot } from "./work-modes.js";
 /**
  * 派生视图（docs/protocols/view.md）：把事件流折叠成 SessionView 的纯函数
  * reducer，供 TUI 与后续客户端共享（ADR-0002 第 5 条）。
@@ -79,6 +79,8 @@ export interface SessionView {
     | undefined;
   turnCount: number;
   usage: Usage;
+  /** 目标模式（ADR-0076 §2）；从未设定时缺省 */
+  goal?: GoalState | undefined;
   pendingPermission: PendingPermission | undefined;
   /**
    * 待回答的提问（ADR-0032 §3）：只由临时事件 question.requested 产生；
@@ -330,7 +332,12 @@ export function reduceSessionView(view: SessionView, event: RuntimeEvent): void 
   if (isDurableEvent(event)) {
     book(view).events.push(event);
     view.lastSeq = event.seq;
-    if (isDurableEventType(event.type)) reduceDurable(view, event);
+    if (isDurableEventType(event.type)) {
+      // ADR-0076 §2：目标按全部事件推进，回退重建不重算
+      const goal = reduceGoal(view.goal, event, view.currentTurn !== undefined);
+      if (goal !== view.goal) view.goal = goal;
+      reduceDurable(view, event);
+    }
   } else if (isEphemeralEventType(event.type)) {
     reduceEphemeral(view, event);
   }

@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { DURABLE_EVENT_TYPES, type DurableEvent, type DurableType } from "./events.js";
 import { PROTOCOL_ENDPOINTS, normalizePermissionPreset, type ModelProtocol } from "./types.js";
+import { GOAL_STATUSES } from "./work-modes.js";
 
 // ── 公共类型 schema ────────────────────────────────────────
 
@@ -210,6 +211,16 @@ const payloadSchemas = {
     permissionPreset: z.string().transform(normalizePermissionPreset).optional(),
     reasoningEffort: reasoningEffortSchema.optional(),
     shell: z.object({ kind: z.string(), path: z.string() }).optional(),
+    // ADR-0076：目标模式；旧版本读取时丢弃
+    goal: z
+      .object({
+        objective: z.string(),
+        status: z.enum(GOAL_STATUSES),
+        maxMinutes: z.number().positive(),
+        maxRounds: z.number().int().positive(),
+        reason: z.string().optional(),
+      })
+      .optional(),
     mcp: z
       .array(
         z.object({

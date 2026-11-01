@@ -9,6 +9,7 @@ type HistoryInterface = Interface & { history: string[] };
 
 import {
   completeFileRefs,
+  goalStatusLines,
   parseSkillSlash,
   parseWorkModeSlash,
   type Runtime,
@@ -651,6 +652,28 @@ export async function runRepl(
         if (work?.kind === "usage") {
           out.line("stdout", work.hint);
           prompt();
+          return;
+        }
+        if (work?.kind === "action") {
+          if (work.action === "goal-status") {
+            for (const text of goalStatusLines(session.state().goal, Date.now()))
+              out.line("stdout", text);
+            prompt();
+            return;
+          }
+          const stop = work.action === "goal-stop";
+          busy = !stop;
+          activeTurn = (stop ? session.stopGoal() : session.resumeGoal())
+            .then(() => {
+              if (stop) out.line("stdout", "目标已停止");
+            })
+            .catch((e: unknown) => {
+              out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
+            })
+            .finally(() => {
+              busy = false;
+              prompt();
+            });
           return;
         }
         if (work?.kind === "submit") {

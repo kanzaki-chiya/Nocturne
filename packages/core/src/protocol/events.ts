@@ -3,7 +3,7 @@
  * 持久化事件构成会话日志的唯一事实来源；临时事件只发布不写日志。
  */
 import type { SkillSnapshot } from "./skills.js";
-import type { WorkModeSnapshot } from "./work-modes.js";
+import type { GoalConfig, WorkModeSnapshot } from "./work-modes.js";
 import type {
   AgentDelegation,
   AssistantTiming,
@@ -58,6 +58,8 @@ export interface SessionConfigChangedPayload {
    * 只记录实际发生切换的事件（上层 env/config 覆盖时不发）。
    */
   shell?: { kind: string; path: string } | undefined;
+  /** 目标模式（ADR-0076 §2、§4）：每次写完整对象；旧版本忽略，不提升日志版本。 */
+  goal?: GoalConfig | undefined;
   /** MCP 环境可用性变化（ADR-0071）；旧版本忽略，不提升日志版本。 */
   mcp?:
     | {

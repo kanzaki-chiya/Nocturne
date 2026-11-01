@@ -70,6 +70,16 @@ describe("parseSlash", () => {
     });
   });
 
+  it("/goal：无参数与 stop|resume 交给 onSlash，其余文字是目标", () => {
+    for (const line of ["/goal", "/goal stop", " /goal resume "])
+      expect(parseSlash(line)).toEqual({ kind: "command", name: "/goal", raw: line });
+    expect(parseSlash("/goal 修好测试")).toEqual({
+      kind: "work",
+      workMode: "goal",
+      text: "修好测试",
+    });
+  });
+
   it("未知命令给出查看提示", () => {
     expect(parseSlash("/unknown hello")).toEqual({
       kind: "unknown",
@@ -85,7 +95,12 @@ describe("completeSlash", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.id).toBe("commands");
     expect(groups[0]?.label).toBe("命令");
-    expect(groups[0]?.items.map((item) => item.label)).toEqual(["/compact", "/mcp", "/grill-me"]);
+    expect(groups[0]?.items.map((item) => item.label)).toEqual([
+      "/compact",
+      "/mcp",
+      "/grill-me",
+      "/goal",
+    ]);
   });
 
   it("前缀过滤并保留原始前导空白", () => {

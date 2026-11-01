@@ -46,7 +46,7 @@ import {
 } from "../protocol/index.js";
 import { SessionError } from "../session/index.js";
 import { createExecutionScope, type ExecutionScope } from "../tools/index.js";
-import { preparedContent } from "../protocol/input.js";
+import { preparedContent, type PreparedInput } from "../protocol/input.js";
 import { consumeStream, EmptyResponseError, type StreamAccumulation } from "./stream.js";
 import type { TurnDeps } from "./types.js";
 import { describeImages } from "./roles.js";
@@ -148,25 +148,36 @@ export async function runTurn(
   async function deliverSteers(): Promise<boolean> {
     if (deps.takeSteers === undefined || aborted(signal)) return false;
     const taken = deps.takeSteers();
-    for (const item of taken) {
-      await session.emit(
-        "message.user",
-        {
-          messageId: id("message"),
-          content: preparedContent(item),
-          ...(item.attachments?.length ? { attachments: item.attachments } : {}),
-          ...(item.files?.length ? { files: item.files } : {}),
-          ...(item.fileRefs?.length ? { fileRefs: item.fileRefs } : {}),
-          ...(item.skill !== undefined ? { skill: item.skill } : {}),
-          ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
-          ...(item.subagent !== undefined ? { subagent: item.subagent } : {}),
-          ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
-          steer: true,
-        },
-        { turnId },
-      );
-    }
+    for (const item of taken) await writeSteer(item);
     return taken.length > 0;
+  }
+
+  /** 安全点 2 的续跑（§3.10）：注入点给出内容就写成插话，返回是否继续 */
+  async function deliverContinuation(): Promise<boolean> {
+    if (deps.continueTurn === undefined || aborted(signal)) return false;
+    const item = await deps.continueTurn(signal);
+    if (item === undefined || aborted(signal)) return false;
+    await writeSteer(item);
+    return true;
+  }
+
+  async function writeSteer(item: PreparedInput): Promise<void> {
+    await session.emit(
+      "message.user",
+      {
+        messageId: id("message"),
+        content: preparedContent(item),
+        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+        ...(item.files?.length ? { files: item.files } : {}),
+        ...(item.fileRefs?.length ? { fileRefs: item.fileRefs } : {}),
+        ...(item.skill !== undefined ? { skill: item.skill } : {}),
+        ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
+        ...(item.subagent !== undefined ? { subagent: item.subagent } : {}),
+        ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
+        steer: true,
+      },
+      { turnId },
+    );
   }
 
   const addUsage = (u: Usage | undefined) => {
@@ -588,6 +599,8 @@ export async function runTurn(
         // 安全点 2（ADR-0070 §2）：有待消费的插话就不结束 Turn——不打断纯文本
         // 输出，写入插话后继续下一个 Step；maxSteps 照常计数
         if (await deliverSteers()) continue;
+        // §3.10：注入点决定是否续跑（例如目标模式的核对说明）
+        if (await deliverContinuation()) continue;
         return await finish("done");
       }
       if (reason === "tool_calls" && toolCalls.length === 0) {

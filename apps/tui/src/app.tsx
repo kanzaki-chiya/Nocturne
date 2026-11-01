@@ -17,6 +17,7 @@ import {
   logoutProvider,
   createPlatform,
   completeFileRefs,
+  goalStatusLines,
   parseSkillSlash,
   parseWorkModeSlash,
   type FileIndexEntry,
@@ -2389,7 +2390,12 @@ function SessionApp({
         setCompletionOn(false);
         return;
       }
-      if (key.return) {
+      // 已完整敲出的执行方式命令（如 /goal 看状态）回车直接提交，不再补空格
+      const typedTaskCommand =
+        selected.group === "commands" &&
+        selected.insert.endsWith(" ") &&
+        inputRef.current.trim().toLowerCase() === selected.insert.trim().toLowerCase();
+      if (key.return && !typedTaskCommand) {
         // 技能、外部 agent 与带任务的命令（ADR-0076）只补全，任务由用户接着写
         if (
           selected.group === "skills" ||
@@ -2604,6 +2610,36 @@ function SessionApp({
       if (work?.kind === "usage") {
         clearInput();
         pushLine(work.hint);
+        return;
+      }
+      if (work?.kind === "action") {
+        clearInput();
+        const fail = (e: unknown) => {
+          pushLine(`! ${modelErrorText(e)}`);
+        };
+        if (work.action === "goal-status") {
+          for (const line of goalStatusLines(view.goal, Date.now())) pushLine(line);
+        } else if (work.action === "goal-stop") {
+          void session.stopGoal().then(() => {
+            pushLine("目标已停止");
+          }, fail);
+        } else {
+          // 空闲时 resumeGoal 会开新 Turn：与普通提交一样占住提交位
+          const idle = !busy;
+          if (idle && submitting.current) return;
+          if (idle) {
+            submitting.current = true;
+            setSubmitPending(true);
+          }
+          void session
+            .resumeGoal()
+            .catch(fail)
+            .finally(() => {
+              if (!idle) return;
+              submitting.current = false;
+              setSubmitPending(false);
+            });
+        }
         return;
       }
       if (work?.kind === "submit") {
