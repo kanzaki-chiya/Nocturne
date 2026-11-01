@@ -27,7 +27,7 @@
   z-index: 20;
   max-width: calc(100% - var(--w-sidebar));
   border-left-color: var(--a-border-strong);
-  box-shadow: -14px 0 30px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-edge);
 }
 .sp-splitter {
   position: absolute;
@@ -113,8 +113,8 @@
   opacity: 0.5;
 }
 .sp-tab:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .sp-tab-label {
   display: flex;
@@ -713,7 +713,7 @@
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   background: var(--a-panel);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-dialog);
 }
 .qopen input {
   width: 100%;
@@ -802,10 +802,10 @@
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   background: var(--a-panel);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-popover);
 }
 .ovpop.docked {
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-popover);
 }
 .ovpop-proj {
   display: flex;

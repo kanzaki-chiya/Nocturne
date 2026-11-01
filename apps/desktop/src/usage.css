@@ -424,9 +424,14 @@
 .usage-daily-stack i + i {
   border-top: 1px solid var(--a-panel);
 }
-.usage-daily-on .usage-daily-track,
-.usage-daily-col:focus-visible .usage-daily-track {
+.usage-daily-on .usage-daily-track {
   box-shadow: 0 0 0 2px var(--a-accent);
+}
+.usage-daily-col:focus-visible {
+  outline: none;
+}
+.usage-daily-col:focus-visible .usage-daily-track {
+  box-shadow: var(--shadow-focus);
 }
 .usage-daily-val {
   font: var(--fs-1) var(--mono);
@@ -447,7 +452,7 @@
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-panel);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-popover);
   color: var(--a-secondary);
   font-size: var(--fs-1);
   white-space: nowrap;

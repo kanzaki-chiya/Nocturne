@@ -466,8 +466,8 @@
   color: var(--a-accentAlt);
 }
 .conversation-markdown .file-ref-link:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .conversation-markdown .file-ref-link:hover {
   background: var(--a-raised);
@@ -767,8 +767,8 @@
 }
 .conversation .diff-h:focus-visible,
 .conversation .tool-line:focus-visible {
-  outline: 2px solid var(--a-secondary);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .conversation .diff-body {
   overflow-x: auto;
@@ -883,7 +883,7 @@
 /* 卡片出现时被程序聚焦（tabIndex -1）：去掉浏览器默认焦点框，改用与提问卡一致的强调色边框和外圈 */
 .conversation .ask:focus-within {
   border-color: var(--a-accent);
-  box-shadow: 0 0 0 3px var(--a-sel);
+  box-shadow: var(--shadow-focus);
 }
 .conversation .ask:focus {
   outline: none;
@@ -1007,8 +1007,8 @@
 }
 .conversation :is(a, button, summary, textarea, input):focus-visible,
 .conversation-scroll:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 /* 提问占据输入框的位置；权限仍在消息流底部。 */
@@ -1029,7 +1029,7 @@
 }
 .qcard:focus-within {
   border-color: var(--a-accent);
-  box-shadow: 0 0 0 3px var(--a-sel);
+  box-shadow: var(--shadow-focus);
 }
 .qcard:focus {
   outline: none;
@@ -1262,8 +1262,8 @@
   cursor: default;
 }
 .qcard :is(button, input, textarea):focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .qcard .other-in:focus-visible {
   outline: none;

@@ -81,7 +81,7 @@
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
   padding: 5px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
   overflow-y: auto;
   overflow-x: hidden;
   white-space: normal;
@@ -176,6 +176,7 @@
   font: inherit;
 }
 .ddm .dd-search:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: -2px;
+  outline: none;
+  border-color: var(--a-accent);
+  box-shadow: var(--shadow-focus);
 }

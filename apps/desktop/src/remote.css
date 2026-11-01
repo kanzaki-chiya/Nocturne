@@ -148,7 +148,7 @@
   background: var(--a-panel);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-dialog);
   display: grid;
   text-align: left;
 }

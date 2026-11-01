@@ -47,8 +47,8 @@
   color: #fff;
 }
 .window-controls button:focus-visible {
-  outline: 2px solid var(--a-accent);
-  outline-offset: -3px;
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .window-controls svg {
   width: 12px;
