@@ -310,9 +310,10 @@ export async function consumeStream(
         attempt < maxAttempts
       ) {
         // 本次累积尚未持久化、工具尚未执行；丢弃后重发整个请求。
-        const delayMs =
+        const rawDelayMs =
           (isProviderError(e) ? e.retryAfterMs : undefined) ??
           config.retryBaseDelayMs * 2 ** (attempt - 1);
+        const delayMs = Math.min(rawDelayMs, config.retryMaxDelayMs);
         session.emitEphemeral(
           "provider.retry",
           {

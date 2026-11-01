@@ -56,6 +56,7 @@ async function makeRuntime(
     providers: extra?.providers ?? [provider],
     interactive: extra?.interactive,
     permissions: extra?.autoApproveAsk === true ? { autoApproveAsk: true } : undefined,
+    turn: { retryBaseDelayMs: 1 },
   });
   return { runtime, ws: workspace, provider };
 }
@@ -1846,7 +1847,10 @@ describe("上下文与运行时命令（Phase 2）", () => {
     const provider = new FakeProvider({
       handler: async () => {
         await new Promise((r) => setTimeout(r, 120));
-        return [{ type: "finish", reason: "stop" }];
+        return [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ];
       },
     });
     const { runtime } = await makeRuntime(undefined, undefined, { provider });

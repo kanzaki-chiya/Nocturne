@@ -147,6 +147,7 @@ describe("TUI 文件引用", () => {
       cwd,
       sessionsDir: temp(),
       providers: [new FakeProvider({ scripts: [] })],
+      turn: { retryBaseDelayMs: 1 },
     });
     const session = await runtime.createSession({ model: "fake/fake-model" });
     const submit = vi.spyOn(session, "submit").mockResolvedValue("aborted");
@@ -193,6 +194,7 @@ describe("TUI 文件引用", () => {
       cwd,
       sessionsDir: temp(),
       providers: [new FakeProvider({ scripts: [] })],
+      turn: { retryBaseDelayMs: 1 },
     });
     const session = await runtime.createSession({ model: "fake/fake-1" });
     const index = vi.spyOn(session, "fileIndex");

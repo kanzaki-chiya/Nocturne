@@ -267,7 +267,10 @@ describe("MCP schema、层与凭据事务", () => {
       handler: async () => {
         entered();
         await hold;
-        return [{ type: "finish", reason: "stop" }];
+        return [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ];
       },
     });
     const runtime = await createRuntime({

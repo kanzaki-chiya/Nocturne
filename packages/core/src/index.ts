@@ -331,7 +331,7 @@ export interface RuntimeOptions {
    * （无用户/项目配置、无 trust、无持久化 Grant）
    */
   config?: RuntimeConfig | undefined;
-  /** Turn 配置覆盖（maxSteps / retryLimit / retryBaseDelayMs） */
+  /** Turn 配置覆盖（maxSteps / retryLimit / retryBaseDelayMs / retryMaxDelayMs） */
   turn?: Partial<TurnConfig> | undefined;
   /**
    * MCP 连接器（modules.md：Core 不依赖 mcp，装配方注入；packages/mcp
@@ -1989,6 +1989,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (src?.maxSteps !== undefined) turnConfig.maxSteps = src.maxSteps;
       if (src?.retryLimit !== undefined) turnConfig.retryLimit = src.retryLimit;
       if (src?.retryBaseDelayMs !== undefined) turnConfig.retryBaseDelayMs = src.retryBaseDelayMs;
+      if (src?.retryMaxDelayMs !== undefined) turnConfig.retryMaxDelayMs = src.retryMaxDelayMs;
       if (src?.firstEventTimeoutMs !== undefined)
         turnConfig.firstEventTimeoutMs = src.firstEventTimeoutMs;
       if (src?.idleTimeoutMs !== undefined) turnConfig.idleTimeoutMs = src.idleTimeoutMs;

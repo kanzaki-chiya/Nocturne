@@ -199,7 +199,7 @@ await runtime.renameSession(sessionId, "新标题")              // 写 session.
 await session.close()
 ```
 
-`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`、`interactive`（是否有回复权限请求的客户端；默认 `false`）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs`）、`config`、`mcp`（`McpConnector`，`packages/mcp` 装配）、`debug`（诊断开关，`{ enabled?, file? }`）。
+`createRuntime` 的选项（`RuntimeOptions`）直接接收各模块的配置：`cwd`、`workspaceRoot`、`sessionsDir`、`providers`（直接注入的 Provider 实例，如测试用 `FakeProvider`）、`providerConfigs`（声明式 Provider 配置：`openai-compatible` 与 `anthropic` 的判别联合）、`modelOverrides`、`policy`、`permissions`、`interactive`（是否有回复权限请求的客户端；默认 `false`）、`instructions`、`turn`（`maxSteps` / `retryLimit` / `retryBaseDelayMs` / `retryMaxDelayMs`）、`config`、`mcp`（`McpConnector`，`packages/mcp` 装配）、`debug`（诊断开关，`{ enabled?, file? }`）。
 
 `permissions` 选项在 Phase 3 扩展为：`{ preset?: PermissionPresetName, rules?: { user?: PermissionRule[], cli?: PermissionRule[] }, autoApproveAsk?: boolean }`——预设与按层标注的规则；项目层规则与 Grant 集合在 `wrapSession` 时按会话的 `workspaceRoot` 从 `config` 取得（[config.md](config.md) 第 6 节），因为项目配置的信任与生效范围都以会话绑定的目录为准。`policy` 直注入保留，用于测试与特殊客户端；给定 `policy` 时规则系统不生效。
 

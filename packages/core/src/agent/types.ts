@@ -14,10 +14,12 @@ export interface TurnConfig {
    * undefined 即不限制，主对话默认如此（子会话有独立上限，subagent.md）
    */
   maxSteps?: number | undefined;
-  /** Provider 重试次数上限（3.5，默认 4） */
+  /** Provider 重试次数上限（3.5，默认 10） */
   retryLimit: number;
-  /** 重试退避基数（ms），指数退避并优先遵守 retryAfterMs */
+  /** 重试退避基数（ms，默认 1000），指数退避并受 retryMaxDelayMs 封顶 */
   retryBaseDelayMs: number;
+  /** 单次退避等待上限（ms，默认 10_000），retryAfterMs 同样受此上限约束 */
+  retryMaxDelayMs: number;
   /** 请求发出后等待首个流式事件的上限（ms） */
   firstEventTimeoutMs: number;
   /** 两个流式事件之间的上限（ms） */
@@ -30,8 +32,9 @@ export interface TurnConfig {
 }
 
 export const DEFAULT_TURN_CONFIG: TurnConfig = {
-  retryLimit: 4,
-  retryBaseDelayMs: 250,
+  retryLimit: 10,
+  retryBaseDelayMs: 1_000,
+  retryMaxDelayMs: 10_000,
   firstEventTimeoutMs: 30_000,
   idleTimeoutMs: 300_000,
 };

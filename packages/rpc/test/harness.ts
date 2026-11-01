@@ -123,6 +123,7 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
         sessionsDir,
         providers: [provider],
         interactive: init.interactive,
+        turn: { retryBaseDelayMs: 1 },
         ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
       });
       const remember = (session: RuntimeSession): RuntimeSession => {
@@ -287,6 +288,7 @@ export async function connectWithConfig(
         config,
         providers: [provider],
         interactive: init.interactive,
+        turn: { retryBaseDelayMs: 1 },
       });
       const remember = (session: RuntimeSession): RuntimeSession => {
         opened.set(session.id, session);

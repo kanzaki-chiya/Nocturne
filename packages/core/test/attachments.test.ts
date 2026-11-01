@@ -46,7 +46,16 @@ describe("任意文件提交（ADR-0072）", () => {
     const runtime = await createRuntime({
       cwd: ws,
       sessionsDir,
-      providers: [new FakeProvider({ scripts: [[{ type: "finish", reason: "stop" }]] })],
+      providers: [
+        new FakeProvider({
+          scripts: [
+            [
+              { type: "text_delta", text: "ok" },
+              { type: "finish", reason: "stop" },
+            ],
+          ],
+        }),
+      ],
     });
     const session = await runtime.createSession({ model: "fake/fake-model" });
     const data = new TextEncoder().encode("log line\n");

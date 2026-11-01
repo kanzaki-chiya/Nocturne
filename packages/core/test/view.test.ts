@@ -59,6 +59,7 @@ async function makeRuntime(
     sessionsDir,
     providers: [provider],
     interactive: options?.interactive,
+    turn: { retryBaseDelayMs: 1 },
   });
   return { runtime, ws, provider };
 }

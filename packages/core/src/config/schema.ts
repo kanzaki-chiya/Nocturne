@@ -461,6 +461,7 @@ const configFileSchema = z.object({
       maxSteps: z.number().int().positive().optional(),
       retryLimit: z.number().int().nonnegative().optional(),
       retryBaseDelayMs: z.number().int().nonnegative().optional(),
+      retryMaxDelayMs: z.number().int().nonnegative().optional(),
       firstEventTimeoutMs: z.number().int().positive().optional(),
       idleTimeoutMs: z.number().int().positive().optional(),
       // ADR-0063：重复调用保护；false 关闭，缺省 { warnAt: 3, stopAt: 6 }

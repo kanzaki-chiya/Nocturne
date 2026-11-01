@@ -315,7 +315,14 @@ it("用户正文快照恢复不重读；磁盘改动下一会话生效；停用�
     JSON.stringify({ modelsDev: false, skills: { sources: { agents: false, claude: false } } }),
   );
   const config = await loadConfig(f.platform, { nocturneHome: f.home });
-  const provider = new FakeProvider({});
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "finish", reason: "stop" },
+      ],
+    ],
+  });
   const runtime = await createRuntime({ cwd: f.workspace, config, providers: [provider] });
   const session = await runtime.createSession({ model: "fake/fake-1" });
   expect(session.describeContext().request.tools.some((t) => t.name === "skill")).toBe(false);
@@ -421,7 +428,10 @@ it("模型实际调用 skill 的 pinResult 写入日志并在恢复后保持", a
             },
             { type: "finish", reason: "tool_calls" },
           ]
-        : [{ type: "finish", reason: "stop" }],
+        : [
+            { type: "text_delta", text: "ok" },
+            { type: "finish", reason: "stop" },
+          ],
   });
   const runtime = await createRuntime({ cwd: f.workspace, config, providers: [provider] });
   const session = await runtime.createSession({ model: "fake/fake-1" });
@@ -474,7 +484,10 @@ it("explore 子会话默认可用 skill，使用父会话的正文快照", async
         ];
       }
       if (request.messages.some((m) => m.role === "tool"))
-        return [{ type: "finish", reason: "stop" }];
+        return [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ];
       writeFileSync(path.join(dir, "SKILL.md"), "---\ndescription: changed\n---\nchanged body");
       return [
         {

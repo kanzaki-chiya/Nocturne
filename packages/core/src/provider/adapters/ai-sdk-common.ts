@@ -470,7 +470,7 @@ export function mapPart(
       return events;
     }
     case "error":
-      throw toProviderError(part.error, undefined);
+      throw toStreamPartError(part.error);
     case "abort":
       throw abortError();
     default:
@@ -507,6 +507,9 @@ function mapFinishReason(r: string | undefined): FinishReason {
 
 // ── 错误归一化（duck-typing：@ai-sdk/provider 不是直接依赖） ──
 
+const CONTEXT_OVERFLOW_RE = /context|length|token|too long/i;
+const CONTENT_FILTER_RE = /content[_ -]?filter|content[_ -]?policy|safety|moderation|blocked by/i;
+
 interface SdkErrorShape {
   name?: string;
   message?: string;
@@ -516,6 +519,68 @@ interface SdkErrorShape {
   responseBody?: string;
   isRetryable?: boolean;
   cause?: unknown;
+  error?:
+    | {
+        message?: string;
+        statusCode?: number;
+        status?: number;
+        type?: string;
+        code?: string;
+      }
+    | string;
+}
+
+/**
+ * 流已开始后收到的无 HTTP 状态码流内错误归类（ADR-0055 修订 2026-11-01）：
+ * - 上下文超限沿用 400 的判定正则 → context_overflow（不可重试）；
+ * - 内容过滤 → content_filter（不可重试）；
+ * - 其余默认归为 server（可重试）。
+ */
+export function classifyStreamErrorKind(message: string): ProviderError["kind"] {
+  if (CONTEXT_OVERFLOW_RE.test(message)) return "context_overflow";
+  if (CONTENT_FILTER_RE.test(message)) return "content_filter";
+  return "server";
+}
+
+/**
+ * 流内 error 事件（mapPart 的 case "error"）归一化：
+ * 已有 HTTP 状态码或底层网络错误（TypeError / ECONN*）的路径不变；
+ * 其余无状态码流内错误按 classifyStreamErrorKind 归为 context_overflow / content_filter / server。
+ */
+export function toStreamPartError(e: unknown): Error {
+  const err = toProviderError(e, undefined);
+  if (!(err instanceof ProviderError) || err.kind !== "unknown" || err.status !== undefined) {
+    return err;
+  }
+  const s = (typeof e === "object" && e !== null ? e : {}) as SdkErrorShape;
+  const nested = typeof s.error === "object" ? s.error : undefined;
+  const nestedStatus = nested?.statusCode ?? nested?.status;
+  if (typeof nestedStatus === "number") {
+    return toProviderError(
+      {
+        ...s,
+        statusCode: nestedStatus,
+        ...(s.message === undefined && nested?.message !== undefined
+          ? { message: nested.message }
+          : {}),
+      },
+      undefined,
+    );
+  }
+  const message =
+    s.message ??
+    (typeof s.error === "string" ? s.error : nested?.message) ??
+    (typeof s.responseBody === "string" && s.responseBody.length > 0
+      ? s.responseBody.slice(0, 2000)
+      : String(e));
+  const kind = classifyStreamErrorKind(message);
+  return new ProviderError({
+    kind,
+    message,
+    retryAfterMs: err.retryAfterMs,
+    providerMessage: err.providerMessage ?? nested?.message,
+    cause: e,
+  });
 }
 
 export function toProviderError(e: unknown, signal: AbortSignal | undefined): Error {
@@ -541,7 +606,7 @@ export function toProviderError(e: unknown, signal: AbortSignal | undefined): Er
     else if (status >= 500) kind = "server";
     else if (status === 400 || status === 422) {
       // 部分服务用 400 表达上下文超限（含 Anthropic 的 "prompt is too long"）
-      kind = /context|length|token|too long/i.test(String(providerMessage))
+      kind = CONTEXT_OVERFLOW_RE.test(String(providerMessage))
         ? "context_overflow"
         : "invalid_request";
     } else if (status === 404) kind = "invalid_request"; // 端点路径或模型 id 有误

@@ -4,10 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { toProviderError } from "./adapters/ai-sdk-common.js";
 import {
   createOpenAICompatibleProvider,
   type OpenAICompatibleConfig,
 } from "./adapters/openai-compatible.js";
+import { ProviderError } from "./errors.js";
 import type { ModelRequest, ModelStreamEvent } from "./types.js";
 
 const envWithKey = (name: string) => (name === "TEST_OAI_KEY" ? "sk-test" : undefined);
@@ -419,4 +421,96 @@ it("工具结果后紧跟的用户文本是独立的 role=user 消息", async ()
     { role: "tool", tool_call_id: "c1", content: "file body" },
     { role: "user", content: "改成蓝色" },
   ]);
+});
+
+describe("openai-compatible 适配器：流内 error 事件归类（ADR-0055 修订 2026-11-01）", () => {
+  const deltaChunks = [
+    {
+      id: "c1",
+      object: "chat.completion.chunk",
+      choices: [{ index: 0, delta: { role: "assistant", content: "先输出第一段，" } }],
+    },
+    {
+      id: "c1",
+      object: "chat.completion.chunk",
+      choices: [{ index: 0, delta: { content: "再输出第二段" } }],
+    },
+  ];
+
+  async function drainWithFailure(p: ReturnType<typeof createOpenAICompatibleProvider>) {
+    const received: ModelStreamEvent[] = [];
+    let thrown: unknown;
+    try {
+      for await (const ev of p.stream(request(), new AbortController().signal)) {
+        if (ev.type !== "heartbeat") received.push(ev);
+      }
+    } catch (e) {
+      thrown = e;
+    }
+    return { received, thrown };
+  }
+
+  it("流中已出文本增量后收到无状态码 error 事件 → ProviderError(kind=server, retryable=true)", async () => {
+    const p = createOpenAICompatibleProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        ...deltaChunks,
+        {
+          error: {
+            message: "Antigravity: connection lost mid-reply (http2: client connection lost)",
+          },
+        },
+      ]),
+    );
+    const { received, thrown } = await drainWithFailure(p);
+    expect(received).toEqual([
+      { type: "text_delta", text: "先输出第一段，" },
+      { type: "text_delta", text: "再输出第二段" },
+    ]);
+    expect(thrown).toBeInstanceOf(ProviderError);
+    expect(thrown).toMatchObject({
+      kind: "server",
+      retryable: true,
+      message: "Antigravity: connection lost mid-reply (http2: client connection lost)",
+    });
+  });
+
+  it("流中无状态码 error 消息含上下文超限 → context_overflow（不可重试）；内容过滤 → content_filter", async () => {
+    const overflowProvider = createOpenAICompatibleProvider(
+      config(),
+      envWithKey,
+      sseFetch([
+        ...deltaChunks,
+        { error: { message: "maximum context length exceeded: 200000 tokens" } },
+      ]),
+    );
+    const overflow = await drainWithFailure(overflowProvider);
+    expect(overflow.received).toHaveLength(2);
+    expect(overflow.thrown).toBeInstanceOf(ProviderError);
+    expect(overflow.thrown).toMatchObject({
+      kind: "context_overflow",
+      retryable: false,
+    });
+
+    const filterProvider = createOpenAICompatibleProvider(
+      config(),
+      envWithKey,
+      sseFetch([...deltaChunks, { error: { message: "Output blocked by content filter" } }]),
+    );
+    const filtered = await drainWithFailure(filterProvider);
+    expect(filtered.thrown).toBeInstanceOf(ProviderError);
+    expect(filtered.thrown).toMatchObject({
+      kind: "content_filter",
+      retryable: false,
+    });
+
+    // 请求阶段（toProviderError 直接调用）无状态码且非网络错误时仍保持 unknown
+    const reqErr = toProviderError(new Error("some pre-request bug"), undefined);
+    expect(reqErr).toBeInstanceOf(ProviderError);
+    expect(reqErr).toMatchObject({
+      kind: "unknown",
+      retryable: false,
+    });
+  });
 });

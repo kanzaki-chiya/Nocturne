@@ -88,6 +88,7 @@ async function setup(scripts: FakeScript[] = []): Promise<Setup> {
     config,
     providers: [provider],
     permissions: { autoApproveAsk: true },
+    turn: { retryBaseDelayMs: 1 },
   });
   return { runtime, provider, config, wsA, wsB, wsC, sessionsDir };
 }

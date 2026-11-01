@@ -185,6 +185,7 @@ export interface TurnOverrides {
   maxSteps?: number | undefined;
   retryLimit?: number | undefined;
   retryBaseDelayMs?: number | undefined;
+  retryMaxDelayMs?: number | undefined;
   firstEventTimeoutMs?: number | undefined;
   idleTimeoutMs?: number | undefined;
   /** 重复调用保护（ADR-0063）：false 关闭；缺省 { warnAt: 3, stopAt: 6 } */

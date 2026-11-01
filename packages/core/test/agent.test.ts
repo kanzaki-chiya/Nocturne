@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runTurn, DEFAULT_TURN_CONFIG, type TurnDeps } from "../src/agent/index.js";
 import { redactRequestImages } from "../src/agent/redact.js";
@@ -376,6 +376,103 @@ describe("runTurn", () => {
     expect(reason).toBe("done");
     expect(h.provider.requests).toHaveLength(2);
     expect(h.events.some((e) => e.type === "provider.retry")).toBe(true);
+  });
+
+  it("默认退避与封顶（ADR-0055 修订 2026-11-01）：3 次失败 1000/2000/4000、第 5 次起 10000、retryAfterMs 封顶、maxAttempts=11", async () => {
+    // 1. 连续失败 3 次后成功：delayMs 依次为 1000、2000、4000，默认 maxAttempts 为 11
+    let attempt1 = 0;
+    const h1 = await makeHarness({
+      config: DEFAULT_TURN_CONFIG,
+      handler: () => {
+        attempt1++;
+        if (attempt1 <= 3) {
+          return [{ type: "throw", error: new ProviderError({ kind: "server", message: "lost" }) }];
+        }
+        return [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+    h1.session.subscribe((e) => {
+      if (e.type === "provider.retry") {
+        queueMicrotask(() => {
+          void vi.advanceTimersByTimeAsync(e.payload.delayMs);
+        });
+      }
+    });
+
+    // 2. 连续失败用尽默认重试：共 11 次请求（1 + 10 次重试），第 5 次及之后 delayMs 均为 10000
+    const h2 = await makeHarness({
+      config: DEFAULT_TURN_CONFIG,
+      handler: () => [
+        { type: "throw", error: new ProviderError({ kind: "server", message: "still down" }) },
+      ],
+    });
+    h2.session.subscribe((e) => {
+      if (e.type === "provider.retry") {
+        queueMicrotask(() => {
+          void vi.advanceTimersByTimeAsync(e.payload.delayMs);
+        });
+      }
+    });
+
+    // 3. retryAfterMs = 60000 时同样受 retryMaxDelayMs (10000) 封顶约束
+    const h3 = await makeHarness({
+      config: DEFAULT_TURN_CONFIG,
+      scripts: [
+        [
+          {
+            type: "throw",
+            error: new ProviderError({
+              kind: "rate_limit",
+              message: "slow down",
+              retryAfterMs: 60_000,
+            }),
+          },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    h3.session.subscribe((e) => {
+      if (e.type === "provider.retry") {
+        queueMicrotask(() => {
+          void vi.advanceTimersByTimeAsync(e.payload.delayMs);
+        });
+      }
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      expect(await runTurn(h1.deps, prompt())).toBe("done");
+      const retries1 = h1.events.filter((e) => e.type === "provider.retry");
+      expect(retries1).toHaveLength(3);
+      expect(retries1.map((e) => e.payload.delayMs)).toEqual([1000, 2000, 4000]);
+      expect(retries1.every((e) => e.payload.maxAttempts === 11)).toBe(true);
+
+      expect(await runTurn(h2.deps, prompt())).toBe("error");
+      expect(h2.provider.requests).toHaveLength(11);
+      const retries2 = h2.events.filter((e) => e.type === "provider.retry");
+      expect(retries2).toHaveLength(10);
+      expect(retries2.map((e) => e.payload.delayMs)).toEqual([
+        1000, 2000, 4000, 8000, 10000, 10000, 10000, 10000, 10000, 10000,
+      ]);
+      expect(retries2.slice(4).every((e) => e.payload.delayMs === 10000)).toBe(true);
+      expect(retries2[0]?.payload.maxAttempts).toBe(11);
+
+      expect(await runTurn(h3.deps, prompt())).toBe("done");
+      const retries3 = h3.events.filter((e) => e.type === "provider.retry");
+      expect(retries3).toHaveLength(1);
+      expect(retries3[0]?.payload.delayMs).toBe(10000);
+    } finally {
+      vi.useRealTimers();
+    }
+    await h1.session.close();
+    await h2.session.close();
+    await h3.session.close();
   });
 
   it("文字和推理输出后断流：丢弃首轮输出，以同一 messageId 重试成功", async () => {

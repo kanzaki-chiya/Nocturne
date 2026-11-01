@@ -181,6 +181,54 @@ describe("分层合并", () => {
     const { validateSettingsPatch } = await import("../src/config/settings.js");
     expect(() => validateSettingsPatch({ "turn.loopGuard": { warnAt: 3, stopAt: 6 } })).toThrow();
   });
+
+  it("turn.retryMaxDelayMs：从配置读取、按层合并覆盖默认值，并在 createRuntime 中生效", async () => {
+    await writeJson(path.join(home, "config.json"), {
+      turn: { retryLimit: 2, retryBaseDelayMs: 10, retryMaxDelayMs: 15 },
+    });
+    const rc = await load();
+    expect(rc.base.turn.retryMaxDelayMs).toBe(15);
+    const project = parseConfigFile({ turn: { retryMaxDelayMs: 5 } }, "project");
+    expect(
+      mergeLayers([
+        { kind: "user", file: rc.base },
+        { kind: "project", path: "project", file: project },
+      ]).resolved.turn.retryMaxDelayMs,
+    ).toBe(5);
+    expect(() => parseConfigFile({ turn: { retryMaxDelayMs: -1 } }, "config.json")).toThrow();
+
+    const { createRuntime, FakeProvider } = await import("../src/index.js");
+    const { ProviderError } = await import("../src/provider/index.js");
+    const ws = path.join(root, "ws-retry-max");
+    await fs.mkdir(ws, { recursive: true });
+    const provider = new FakeProvider({
+      scripts: [
+        [{ type: "throw", error: new ProviderError({ kind: "server", message: "err-1" }) }],
+        [{ type: "throw", error: new ProviderError({ kind: "server", message: "err-2" }) }],
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: path.join(root, "sessions-retry-max"),
+      providers: [provider],
+      config: rc,
+    });
+    const session = await runtime.createSession({ model: { provider: "fake", model: "fake-1" } });
+    const delays: number[] = [];
+    session.subscribe((e) => {
+      if (e.type === "provider.retry") delays.push(e.payload.delayMs);
+    });
+    expect(await session.submit({ text: "hi" })).toBe("done");
+    // base=10, max=15 → 第 1 次 10ms，第 2 次原本 20ms 被封顶为 15ms
+    expect(delays).toEqual([10, 15]);
+    await session.close();
+    await fs.unlink(path.join(home, "config.json"));
+  });
 });
 
 describe("外部 agent 配置（ADR-0049）", () => {

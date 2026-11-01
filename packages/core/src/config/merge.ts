@@ -512,6 +512,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
       if (t.maxSteps !== undefined) merged.maxSteps = t.maxSteps;
       if (t.retryLimit !== undefined) merged.retryLimit = t.retryLimit;
       if (t.retryBaseDelayMs !== undefined) merged.retryBaseDelayMs = t.retryBaseDelayMs;
+      if (t.retryMaxDelayMs !== undefined) merged.retryMaxDelayMs = t.retryMaxDelayMs;
       if (t.firstEventTimeoutMs !== undefined) merged.firstEventTimeoutMs = t.firstEventTimeoutMs;
       if (t.idleTimeoutMs !== undefined) merged.idleTimeoutMs = t.idleTimeoutMs;
       // ADR-0063：整个 loopGuard 值按层覆盖（false 同样生效）

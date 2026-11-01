@@ -76,14 +76,16 @@ interface ConfigFile {
       未给 shell 时：文件名匹配已知 shell（pwsh/powershell/bash/cmd/sh）可推断种类，
       否则声明无效——合并层警告后忽略（不静默回退 auto 吞掉路径） */
   shellPath?: string;
-  /** Turn 参数覆盖（agent-loop.md 3.8）。maxSteps 为可选正整数：设置后主对话
+  /** Turn 参数覆盖（agent-loop.md 3.5 / 3.8）。maxSteps 为可选正整数：设置后主对话
       单 Turn 步数受其限制并以 max_steps 收尾；未设即不限制。
+      重试缺省值：retryLimit=10、retryBaseDelayMs=1000、retryMaxDelayMs=10000。
       loopGuard（ADR-0063）为重复调用保护：{ warnAt, stopAt }，缺省
       { warnAt: 3, stopAt: 6 }，false 关闭；整值覆盖，不与低层逐字段合并 */
   turn?: {
     maxSteps?: number;
     retryLimit?: number;
     retryBaseDelayMs?: number;
+    retryMaxDelayMs?: number;
     firstEventTimeoutMs?: number;
     idleTimeoutMs?: number;
     loopGuard?: { warnAt: number; stopAt: number } | false;
