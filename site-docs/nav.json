@@ -2,10 +2,19 @@
   {
     "group": "上手",
     "pages": [
-      {
-        "slug": "",
-        "title": "安装"
-      }
+      { "slug": "", "title": "安装" },
+      { "slug": "providers", "title": "连接服务商" },
+      { "slug": "first-session", "title": "第一个会话" }
+    ]
+  },
+  {
+    "group": "日常使用",
+    "pages": [
+      { "slug": "permissions", "title": "权限模式" },
+      { "slug": "queue", "title": "排队和插话" },
+      { "slug": "rewind", "title": "回退和分叉" },
+      { "slug": "panels", "title": "右侧面板" },
+      { "slug": "context", "title": "上下文和用量" }
     ]
   }
 ]
