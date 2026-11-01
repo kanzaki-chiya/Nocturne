@@ -462,7 +462,12 @@ describe("/goal", () => {
     const opener = users(resumed).at(-1);
     expect(opener?.payload.steer).toBeUndefined();
     expect(opener?.payload.workMode?.body).toContain("Resume working on this goal");
-    expect(resumed.state().goal).toMatchObject({ status: "met", rounds: 0 });
+    // 继续目标不是新目标：目标正文保留
+    expect(resumed.state().goal).toMatchObject({ objective: "收尾", status: "met", rounds: 0 });
+    const goalWrites = resumed
+      .durableEvents()
+      .flatMap((e) => (e.type === "session.config_changed" && e.payload.goal ? [e.payload.goal] : []));
+    expect(goalWrites.every((goal) => goal.objective === "收尾")).toBe(true);
     await resumed.close();
   });
 

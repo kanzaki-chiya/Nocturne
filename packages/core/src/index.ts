@@ -2595,6 +2595,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     };
     /**
+     * 用户提交的执行方式输入（ADR-0076 §1）：只有它们在 Turn 开始前触发模式副作用。
+     * Runtime 自己写的模式消息（继续目标、批准计划）同样带 workMode，但不在这里。
+     */
+    const workModeStarts = new WeakSet<PreparedInput>();
+    /**
      * 准备一条提交内容：附件落盘、`@` 引用与技能正文固定成快照块。普通提交与
      * 待发输入共用——待发输入在被消费时不再读盘或重新解析。
      */
@@ -2734,7 +2739,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         workMode = { name: input.workMode, body: workModeBody(input.workMode) };
         appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
       }
-      return {
+      const prepared: PreparedInput = {
         content,
         appended,
         ...(files.length ? { files } : {}),
@@ -2744,6 +2749,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(delegation !== undefined ? { delegate: delegation } : {}),
         ...(workMode !== undefined ? { workMode } : {}),
       };
+      if (workMode !== undefined) workModeStarts.add(prepared);
+      return prepared;
     };
     // ── 目标模式（ADR-0076 §4）：状态在 config_changed.goal，由这里写入 ──
     const writeGoal = async (status: GoalStatus, reason?: string): Promise<void> => {
@@ -2776,7 +2783,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     });
     /** 执行方式在新 Turn 开始前的副作用（§1）：排队取出的输入同样走这里 */
     const applyWorkModeStart = async (prepared: PreparedInput): Promise<void> => {
-      if (prepared.workMode?.name === "goal") {
+      const started = workModeStarts.has(prepared) ? prepared.workMode?.name : undefined;
+      if (started === "goal") {
         const objective = prepared.content
           .flatMap((block) => (block.type === "text" ? [block.text] : []))
           .join("\n")
