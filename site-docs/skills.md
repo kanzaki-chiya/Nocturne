@@ -10,7 +10,7 @@ Nocturne 按以下顺序扫描技能目录，同名技能以**项目级优先于
    - `~/.nocturne/skills/<name>/SKILL.md`
    - `~/.agents/skills/<name>/SKILL.md`（兼容目录，默认开启）
    - `~/.claude/skills/<name>/SKILL.md`（兼容目录，默认开启）
-   - `config.json` 中 `skills.extraDirs` 指定的附加目录（显示「额外目录」标记）
+   - `config.json` 中 `skills.extraDirs` 指定的附加目录
 2. **项目级（「项目」分组，从当前工作目录向工作区根目录逐级查找）**：
    - `.nocturne/skills/<name>/SKILL.md`
    - `.agents/skills/<name>/SKILL.md`

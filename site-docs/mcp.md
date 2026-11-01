@@ -6,7 +6,7 @@ Nocturne 既可以作为 MCP（Model Context Protocol）客户端接入外部工
 
 ### 添加服务器
 
-- **桌面端**：打开「设置」→「MCP」，点击右上角「＋ 添加服务器」打开表单，或点击「从 JSON 导入」粘贴现有配置。程序内添加的服务器保存在 `~/.nocturne/mcp.json`（归入左列「程序管理」分组）；也可以手写在 `config.json` 或 `.nocturne/config.json` 的 `mcpServers` 字段中（归入「config.json（只读）」分组）。
+- **桌面端**：打开「设置」→「MCP」，点击右上角「＋ 添加服务器」打开表单，或点击「从 JSON 导入」粘贴现有配置。程序内添加的服务器保存在 `~/.nocturne/mcp.json`；也可以手写在 `config.json` 或 `.nocturne/config.json` 的 `mcp.servers` 字段中（归入左列「只读」分组）。
 - **项目级服务器信任**：写在工作区 `.nocturne/config.json` 里的项目级 MCP 服务器在工作区未信任前不会启动，需先在「设置」→「授权」中点击「信任此项目」后才能连接。
 
 在「添加 MCP 服务器」表单中选择「类型」：
@@ -28,8 +28,8 @@ MCP 服务器在工具定义中声明 `readOnlyHint: true` 的工具，可进入
 
 ### 模型如何调用 MCP 工具
 
-- 当已连接服务器的工具总数不超过 16 个时，工具会以 `mcp__<server>__<tool>` 的形式直接注册给模型。
-- 当工具总数超过 16 个时，自动切换为按需检索模式：模型先调用 `mcp_search` 按关键词查找工具定义，再调用 `mcp_call` 执行目标工具，避免挤占上下文窗口。
+- 当本会话 MCP 工具定义估算不超过 10,000 tokens 时，工具会以 `mcp__<server>__<tool>` 的形式直接注册给模型。
+- 超过 10,000 tokens 时，自动切换为按需检索模式：模型先调用 `mcp_search` 按关键词查找工具定义，再调用 `mcp_call` 执行目标工具，避免挤占上下文窗口。
 
 ### 查看状态与重连
 

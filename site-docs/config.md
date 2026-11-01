@@ -87,7 +87,7 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 | `turn.retryLimit` | `number` | 网络或上游瞬态错误自动重试次数（默认 `10`） |
 | `turn.loopGuard` | `warnAt`、`stopAt` 或 `false` | 重复工具调用保护阈值（默认 `warnAt` 为 `3`、`stopAt` 为 `6`，设 `false` 关闭） |
 | `mcp.servers` | `Record<string, McpServerEntry>` | 手写配置的 MCP 服务器 |
-| `mcp.toolSearch` | `auto`、`always`、`never` | MCP 工具按需搜索模式（默认 `auto`，超过 16 个工具时启用） |
+| `mcp.toolSearch` | `auto`、`always`、`never` | MCP 工具按需搜索模式（默认 `auto`，工具定义估算超过 10,000 tokens 时启用） |
 | `skills` | `sources`（`agents`、`claude`）、`extraDirs` | 技能兼容目录开关与附加扫描目录（仅用户级生效） |
 | `externalAgents` | `ExternalAgentConfig[]` | 手写配置的外部 ACP Agent（仅用户级生效） |
 | `notifications` | `enabled`、`events`、`doneAfterSeconds`、`sound` | 会话通知与完成提醒秒数阈值（默认 `60` 秒） |
