@@ -685,10 +685,14 @@
   background: var(--a-accent);
 }
 .nav-item .trunc {
-  min-width: 0;
+  flex-shrink: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.nav-item:has(> .dot) .trunc {
+  max-width: calc(100% - var(--dot) - var(--space-2));
 }
 .nav-item .trunc.mono {
   font-family: var(--mono);
@@ -696,13 +700,19 @@
 .nav-item.off .trunc {
   color: var(--a-faint);
 }
+.nav-item .badge,
+.nav-item .meta {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .nav-item .meta {
   margin-left: auto;
-  flex: none;
   font-size: var(--fs-1);
   color: var(--a-muted);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 /* ---------- 表格（只有横线） ---------- */

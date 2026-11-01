@@ -353,8 +353,9 @@ export function GrantsPage({
                           ? "普通对话"
                           : basename(item.workspace)
                       }
+                      dot={item.hasProjectConfig && !item.trusted ? "warn" : undefined}
                       selected={selected === item.workspace}
-                      meta={`${item.grantCount} 项授权 · ${!item.hasProjectConfig ? "没有项目配置" : item.trusted ? "已信任" : "未信任"}`}
+                      meta={item.grantCount > 0 ? String(item.grantCount) : undefined}
                       onClick={() => {
                         setSelected(item.workspace);
                       }}

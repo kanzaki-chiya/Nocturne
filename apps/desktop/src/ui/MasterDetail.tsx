@@ -104,7 +104,7 @@ export function ListItem({
       {dot !== undefined && (
         <span className={dot === "" ? "dot" : `dot ${dot}`} aria-hidden="true" />
       )}
-      <span className={`trunc${mono ? " mono" : ""}`}>{label}</span>
+      <span className={`name trunc${mono ? " mono" : ""}`}>{label}</span>
       {badge}
       {meta !== undefined && meta !== null && meta !== "" && <span className="meta">{meta}</span>}
     </button>

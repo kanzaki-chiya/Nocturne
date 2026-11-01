@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -128,6 +131,34 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(within(nav).getByRole("button", { name: "添加服务商" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "openrouter" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
+  });
+
+  it("ListItem：名字元素禁止收缩，右侧 badge 与 meta 允许收缩，长 meta 不会把名字压没", () => {
+    render(
+      <ListItem
+        label="enterprise-customer-portal"
+        mono
+        dot="warn"
+        badge={<span className="badge">只读</span>}
+        meta="0 项授权 · 没有项目配置 · 额外长说明文字"
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /enterprise-customer-portal/ });
+    const nameEl = btn.querySelector(".name.trunc.mono");
+    const badgeEl = btn.querySelector(".badge");
+    const metaEl = btn.querySelector(".meta");
+    expect(nameEl?.textContent).toBe("enterprise-customer-portal");
+    expect(badgeEl?.textContent).toBe("只读");
+    expect(metaEl?.textContent).toBe("0 项授权 · 没有项目配置 · 额外长说明文字");
+
+    const cssPath = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "ui.css");
+    const css = readFileSync(cssPath, "utf8");
+    const nameRule = /\.nav-item\s+\.trunc\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const shrinkRule =
+      /\.nav-item\s+\.badge,\s*\.nav-item\s+\.meta\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(nameRule).toContain("flex-shrink: 0");
+    expect(shrinkRule).toContain("flex-shrink: 1");
+    expect(shrinkRule).toContain("min-width: 0");
   });
 
   it("DataTable：表头为 columnheader，数字列右对齐", () => {

@@ -72,13 +72,38 @@ it("普通对话最先、项目列表和空状态、撤销后刷新；失败保�
     target: "git status",
   });
 });
-it("左栏无项目配置显示没有项目配置而非未信任", async () => {
+it("左栏只含名字和非零授权数，配置信任文字只在详情出现，状态点区分三种项目配置状态", async () => {
   const h = fixture();
+  h.runtime.listGrantWorkspaces.mockImplementation(async () => [
+    { workspace: "Z:/plain", grantCount: 0, trusted: false, hasProjectConfig: false },
+    { workspace: "Z:/nocturne", grantCount: 2, trusted: false, hasProjectConfig: true },
+    { workspace: "Z:/echo", grantCount: 4, trusted: true, hasProjectConfig: true },
+  ]);
   render(<GrantsPage client={h.client} plainWorkspace="Z:/plain" />);
-  const plain = await screen.findByRole("button", { name: /普通对话/ });
-  expect(plain.textContent).toContain("0 项授权 · 没有项目配置");
-  expect(plain.textContent).not.toContain("未信任");
-  expect(screen.getByRole("button", { name: /nocturne/ }).textContent).toContain("未信任");
+  const nav = await screen.findByRole("navigation", { name: "工作区" });
+  const plain = within(nav).getByRole("button", { name: "普通对话" });
+  const untrusted = within(nav).getByRole("button", { name: /nocturne/ });
+  const trusted = within(nav).getByRole("button", { name: /echo/ });
+
+  // 左栏行只含名字和非零授权数（0 项授权不显示数字）
+  expect(plain.textContent).toBe("普通对话");
+  expect(plain.querySelector(".meta")).toBeNull();
+  expect(untrusted.querySelector(".name")?.textContent).toBe("nocturne");
+  expect(untrusted.querySelector(".meta")?.textContent).toBe("2");
+  expect(trusted.querySelector(".name")?.textContent).toBe("echo");
+  expect(trusted.querySelector(".meta")?.textContent).toBe("4");
+
+  // 「没有项目配置」「已信任」「未信任」等文字不出现在左栏，只出现在右侧详情
+  expect(nav.textContent).not.toContain("没有项目配置");
+  expect(nav.textContent).not.toContain("未信任");
+  expect(nav.textContent).not.toContain("已信任");
+  expect(nav.textContent).not.toContain("项授权");
+  expect(screen.getByText("没有项目配置")).toBeTruthy();
+
+  // 状态点三种情况：无项目配置无点、有配置未信任有 warn 点、有配置已信任无点
+  expect(plain.querySelector(".dot")).toBeNull();
+  expect(untrusted.querySelector(".dot.warn")).not.toBeNull();
+  expect(trusted.querySelector(".dot")).toBeNull();
 });
 it("全部撤销需二次确认，刷新不重置确认", async () => {
   const h = fixture();
