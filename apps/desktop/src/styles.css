@@ -23,7 +23,7 @@ body {
 /* 文案规则 R1「标签 + 弱化值」：值单独成元素、弱化色，不再写中点（docs/apps/desktop.md §9） */
 .muted-value {
   color: var(--a-muted);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   margin-inline-start: 0.5em;
 }
 /* 文案规则 R5 键盘提示：键名用 kbd 框，组与组只靠间距分开，不写分隔符 */
@@ -75,7 +75,7 @@ button {
   font-size: var(--fs-1);
   letter-spacing: 0.1em;
   color: var(--a-faint);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 .side .shead {
   display: flex;
@@ -83,7 +83,7 @@ button {
   padding: 0 10px;
 }
 .side .brand {
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
   color: var(--a-text);
   font-size: var(--fs-3);
 }
@@ -219,7 +219,7 @@ button {
   padding: 6px 10px;
   border-radius: var(--radius-2);
   color: var(--a-secondary);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -318,7 +318,7 @@ button {
   border: 1px solid var(--a-border);
   border-radius: var(--radius-1);
   padding: 0 5px;
-  line-height: 16px;
+  line-height: var(--lh-tight);
   flex: none;
 }
 .nav .item .meta.pend {
@@ -328,7 +328,7 @@ button {
 .nav .item .tag {
   margin-left: auto;
   font-size: var(--fs-1);
-  line-height: 16px;
+  line-height: var(--lh-tight);
   padding: 0 6px;
   border-radius: var(--radius-2);
   flex: none;
@@ -417,7 +417,7 @@ button {
   transform: translateY(-50%);
   color: var(--a-faint);
   font-size: var(--fs-1);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   background: transparent;
   border: 0;
   border-radius: var(--radius-1);
@@ -492,7 +492,7 @@ button {
   align-items: center;
   padding: 5px 10px 5px 4px;
   color: var(--a-text);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   border-radius: var(--radius-2);
   position: relative;
 }
@@ -517,9 +517,9 @@ button {
 .fold-arrow {
   display: inline-block;
   flex: none;
-  font-size: 10px;
+  font-size: var(--fs-1);
   width: 1em;
-  line-height: 1;
+  line-height: var(--lh-tight);
   transform: rotate(0deg);
   transition: transform 0.15s;
 }
@@ -538,7 +538,7 @@ details > summary::-webkit-details-marker {
 details > summary:not(.tool-line)::before {
   content: "▶";
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--fs-1);
   margin-right: 6px;
   transition: transform 0.15s;
 }
@@ -548,7 +548,7 @@ details[open] > summary:not(.tool-line)::before {
 .gh .tw {
   width: 12px;
   color: var(--a-faint);
-  font-size: 10px;
+  font-size: var(--fs-1);
   text-align: center;
 }
 .gh .gname {
@@ -563,7 +563,7 @@ details[open] > summary:not(.tool-line)::before {
 .gh .meta {
   color: var(--a-faint);
   font-size: var(--fs-1);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   flex: none;
 }
 .gh .meta.stop {
@@ -577,7 +577,7 @@ details[open] > summary:not(.tool-line)::before {
   transform: translateY(-50%);
   color: var(--a-faint);
   font-size: var(--fs-1);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   background: transparent;
   border: 0;
   border-radius: var(--radius-1);
@@ -616,7 +616,7 @@ details[open] > summary:not(.tool-line)::before {
   border: 1px solid var(--a-border-strong);
   color: var(--a-text);
   font-size: var(--fs-1);
-  line-height: 1.4;
+  line-height: var(--lh-tight);
   white-space: nowrap;
   pointer-events: none;
   z-index: 30;
@@ -641,7 +641,7 @@ details[open] > summary:not(.tool-line)::before {
   min-width: 0;
 }
 .crumb {
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
   color: var(--a-accent);
   font-size: var(--fs-3);
   display: flex;
@@ -652,7 +652,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .crumb span {
   color: var(--a-faint);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   margin: 0 6px;
   flex: none;
 }
@@ -723,7 +723,7 @@ details[open] > summary:not(.tool-line)::before {
   gap: 10px;
   align-items: center;
   color: var(--a-error);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   font-size: var(--fs-2);
 }
 .crash .t .btn {
@@ -740,7 +740,7 @@ details[open] > summary:not(.tool-line)::before {
 .crash .fail {
   color: var(--a-error);
   font-size: var(--fs-1);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
 }
 .crash .logmore {
   justify-self: start;
@@ -797,7 +797,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .updbar .t {
   color: var(--a-text);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   white-space: nowrap;
 }
 .updbar .notes {
@@ -1019,7 +1019,7 @@ details[open] > summary:not(.tool-line)::before {
 }
 .hero h3 {
   font-size: var(--fs-4);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   margin: 12px 0 20px;
   text-align: center;
 }

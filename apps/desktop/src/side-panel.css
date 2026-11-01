@@ -239,7 +239,7 @@
   margin: 0;
   color: var(--a-muted);
   font-size: var(--fs-1);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 .sp-tool-grid {
   display: grid;
@@ -775,7 +775,7 @@
 .qopen mark {
   background: none;
   color: var(--a-accent);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 .qopen-note {
   margin: 0;
@@ -937,7 +937,7 @@
 }
 .sp-term-caret {
   color: var(--a-faint);
-  font-size: 9px;
+  font-size: var(--fs-1);
 }
 .sp-term-exit {
   display: flex;
@@ -1160,7 +1160,7 @@
   margin: 0 0 6px;
   color: var(--a-secondary);
   font-size: var(--fs-1);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 .sp-sub-result pre {
   margin: 0 0 8px;
@@ -1345,7 +1345,7 @@
 .sp-agent-dialog-title {
   margin: 0;
   color: var(--a-text);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .sp-agent-dialog-message {
   max-height: 96px;

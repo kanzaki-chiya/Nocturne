@@ -70,7 +70,7 @@
 
 .pi-x {
   font-size: var(--fs-3);
-  line-height: 1;
+  line-height: var(--lh-tight);
 }
 
 .pi-note {

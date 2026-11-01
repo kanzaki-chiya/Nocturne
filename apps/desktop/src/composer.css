@@ -85,8 +85,8 @@
   border-radius: var(--radius-1);
   background: var(--a-border);
   color: var(--a-secondary);
-  font-size: 9px;
-  font-weight: 600;
+  font-size: var(--fs-1);
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.02em;
 }
 
@@ -107,7 +107,7 @@
   background: none;
   border: none;
   color: var(--a-muted);
-  font-size: 9px;
+  font-size: var(--fs-1);
   cursor: pointer;
   padding: 2px;
 }
@@ -134,7 +134,7 @@
 .composer textarea {
   font: inherit;
   font-size: var(--fs-3);
-  line-height: 1.6;
+  line-height: var(--lh-base);
   padding: 12px 16px 4px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -253,11 +253,11 @@
 
 .composer .chip .caret {
   color: var(--a-muted);
-  font-size: 10px;
+  font-size: var(--fs-1);
 }
 
 .composer .chip b {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--a-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -272,7 +272,7 @@
   background: var(--a-accent);
   color: var(--a-on-accent);
   font-size: var(--fs-2);
-  line-height: 1;
+  line-height: var(--lh-tight);
   cursor: pointer;
   flex: none;
 }
@@ -349,7 +349,7 @@
 .menu h6 {
   margin: 6px 8px 4px;
   font-size: var(--fs-1);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   color: var(--a-muted);
 }
 
@@ -417,7 +417,7 @@
 .menu .menu-ck {
   width: 12px;
   color: var(--a-accent);
-  font-size: 10px;
+  font-size: var(--fs-1);
   flex: none;
   text-align: center;
 }

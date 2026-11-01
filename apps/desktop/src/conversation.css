@@ -70,7 +70,7 @@
   border-radius: var(--radius-3) var(--radius-3) var(--radius-1) var(--radius-3);
   padding: 8px 12px;
   font-size: var(--fs-3);
-  line-height: 1.6;
+  line-height: var(--lh-base);
   overflow-wrap: anywhere;
 }
 /* 悬停/聚焦时显示的三个操作；始终占位（透明）避免悬停时布局跳动 */
@@ -122,7 +122,7 @@
   resize: none;
   font: inherit;
   font-size: var(--fs-3);
-  line-height: 1.6;
+  line-height: var(--lh-base);
   color: var(--a-text);
   background: var(--a-input);
   border: 1px solid var(--a-border);
@@ -259,7 +259,7 @@
 }
 .turn-changes-title {
   color: var(--a-text);
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
 }
 .turn-changes-counts,
 .turn-change-counts {
@@ -317,12 +317,12 @@
 .turn-change-tag {
   color: var(--a-faint);
   font-size: var(--fs-1);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
 }
 .turn-change-note {
   margin: 6px 0;
   font-size: var(--fs-1);
-  line-height: 1.6;
+  line-height: var(--lh-base);
 }
 .turn-changes-shell-only {
   margin-top: 8px;
@@ -369,7 +369,7 @@
   color: var(--a-secondary);
 }
 .conversation .think-tw {
-  font-size: 10px;
+  font-size: var(--fs-1);
   color: var(--a-faint);
 }
 .conversation .think.open > .think-h {
@@ -385,7 +385,7 @@
 .conversation .think.open > .think-h .think-tw {
   margin-left: auto;
   color: var(--a-accent);
-  font-size: 12px;
+  font-size: var(--fs-1);
 }
 .conversation .think > pre {
   color: var(--a-muted);
@@ -421,7 +421,7 @@
   padding: 2px 0;
 }
 .conversation-markdown {
-  line-height: 1.75;
+  line-height: var(--lh-prose);
 }
 .conversation-markdown > :first-child {
   margin-top: 0;
@@ -433,8 +433,8 @@
   margin: 8px 0;
 }
 .conversation-markdown :is(h1, h2, h3, h4, h5, h6) {
-  font-weight: 650;
-  line-height: 1.4;
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
   margin: 18px 0 8px;
 }
 .conversation-markdown h1 {
@@ -896,12 +896,12 @@
 }
 .conversation .ask-t {
   font-size: var(--fs-1);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--a-warning);
 }
 .conversation .ask-why {
   margin-left: 10px;
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   font-size: var(--fs-1);
   color: var(--a-muted);
 }
@@ -1057,7 +1057,7 @@
   display: grid;
   place-items: center;
   font-size: var(--fs-1);
-  font-weight: 700;
+  font-weight: var(--fw-semibold);
 }
 .qlabel {
   font-size: var(--fs-1);
@@ -1091,11 +1091,11 @@
 }
 .qcard .ok {
   color: var(--a-success);
-  font-size: 10px;
+  font-size: var(--fs-1);
 }
 .qcard .skip {
   color: var(--a-faint);
-  font-size: 10px;
+  font-size: var(--fs-1);
 }
 .qbody {
   padding: 10px 14px 4px;
@@ -1105,7 +1105,7 @@
 .qtext {
   margin: 0;
   font-size: var(--fs-3);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 .qsub {
   margin: -6px 0 0;
@@ -1157,7 +1157,7 @@
   align-items: baseline;
   column-gap: 10px;
   min-width: 0;
-  line-height: 22px;
+  line-height: var(--lh-base);
 }
 .qcard .lab small {
   color: var(--a-muted);
@@ -1195,7 +1195,7 @@
   border-bottom: 1px solid var(--a-accent);
   background: transparent;
   resize: none;
-  line-height: 20px;
+  line-height: var(--lh-base);
   max-height: 164px;
   overflow-y: auto;
 }
@@ -1214,7 +1214,7 @@
   border: 1px solid var(--a-border-strong);
   background: var(--a-input);
   resize: none;
-  line-height: 20px;
+  line-height: var(--lh-base);
   max-height: 176px;
   overflow-y: auto;
 }
@@ -1462,8 +1462,8 @@ button.fcard:hover {
   place-items: center;
   border-radius: var(--radius-1);
   background: var(--a-border);
-  font-size: 9px;
-  font-weight: 600;
+  font-size: var(--fs-1);
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.02em;
 }
 .fcard .fname {
@@ -1480,7 +1480,7 @@ button.fcard:hover {
   background: none;
   border: none;
   color: var(--a-muted);
-  font-size: 9px;
+  font-size: var(--fs-1);
   cursor: pointer;
   padding: 2px;
 }

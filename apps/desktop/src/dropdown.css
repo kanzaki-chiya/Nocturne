@@ -103,7 +103,7 @@
   padding: 6px 10px 3px 8px;
   border-top: 1px solid var(--a-border);
   font-size: var(--fs-1);
-  line-height: 1.5;
+  line-height: var(--lh-base);
   color: var(--a-muted);
 }
 .ddm .ddo {
@@ -134,7 +134,7 @@
   text-align: center;
 }
 .ddm .ddo b {
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   font-size: var(--fs-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -148,7 +148,7 @@
   grid-column: 2 / 4;
   color: var(--a-muted);
   font-size: var(--fs-1);
-  line-height: 1.5;
+  line-height: var(--lh-base);
   /* 说明里可能是很长的可执行文件路径，没有空格也要能折行 */
   overflow-wrap: anywhere;
 }
