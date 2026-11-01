@@ -1,3 +1,6 @@
+.profile-editor .dhead {
+  padding-inline: 0;
+}
 .profile-editor .profile-description {
   field-sizing: content;
   resize: none;
