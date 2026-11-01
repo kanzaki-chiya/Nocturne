@@ -866,7 +866,7 @@ it("/compact 走真实 RPC，移除命令只给界面提示", async () => {
   fireEvent.change(field, { target: { value: "/model" } });
   fireEvent.keyDown(field, { key: "Enter" });
   await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toContain("在底部状态栏切换模型"),
+    expect(screen.getByRole("status").textContent).toContain("在输入框右下角切换模型"),
   );
   expect(host.calls.some((call) => call.method === "session.submit")).toBe(false);
 });

@@ -114,7 +114,7 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 对话输入之外的全局键：`Esc` 次序最前是清除选区，然后依次关闭补全列表、弹层、权限反馈行或提问文本输入；没有这些焦点时忙碌中中断 Turn，空闲时不退出、不清空输入，空输入下 600ms 内双 Esc 打开轮次列表（§12）。选区存在时其他按键（翻阅键除外）清除高亮。拆成 Esc + 字母的 Alt 组合在 80ms 内不会误中断。`Tab` 在权限对话框选项间移动焦点、在提问面板的题间切换；补全列表打开时 `Tab` 补全当前候选。`Shift+Tab`（`\x1B[Z`）在输入框状态下循环思考档位 `[off, …当前模型可用档位]`，只高亮状态栏，不插入对话条目；Turn 进行中同样可切，新档位从下一个 Turn 生效（状态栏显示 `思考:<生效档>→<新档>`，ADR-0018）。权限确认框内 `Shift+Tab` 仍是反向移动焦点；提问面板内 `Tab`/`Shift+Tab` 与 `←`/`→` 一样是题间切换。当前模型没有可用档位时 `Shift+Tab` 不响应、不插入提示。
 
-`Alt+M` 在 `read-only → default → auto-edit → guarded` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中也可切换（从下一次权限判定起生效，已在等待确认的请求保持原样）；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
+`Alt+M` 在 `read-only → default → auto-edit → guarded → smart → bypass` 间循环，走与 `/preset` 相同的 `setPermissionPreset`（`session.config_changed`），Turn 进行中也可切换（从下一次权限判定起生效，已在等待确认的请求保持原样）；只高亮状态栏，不插入对话条目。Windows Terminal 发送 `\x1bm`，必须能识别；若把 Alt 拆成 Esc 加字母，吞掉该字母，不写入输入框，也不触发其他操作。
 
 **待发输入（ADR-0070）**：运行中 `Enter` 插话（并入当前 Turn，安全点送达），`Tab` 排队（本轮 `done` 后开新 Turn）；补全列表打开时 `Tab` 仍补全，`Shift+Tab` 仍是思考档位，空闲时 `Tab` 提示「排队只在运行中可用」。待发列表非空且输入框为空时，`↑`/`↓` 在列表中移动选中项（不再回填输入历史）。`Alt+E` 编辑选中项：输入框内容换成该条文本、标题变成「编辑待发消息（Enter 保存，Esc 取消）」，Enter 只保存不提交、Esc 取消；`Alt+X` 撤回选中项；`Alt+T` 在插话与排队之间切换；`Alt+R` 在暂停态继续发送（`resumeInputs`）。编辑期间条目被 Turn 取走时退出编辑态并提示「这条待发消息已经发出，编辑没保存」；撤回或编辑被拒（`input_consumed`）同样以 `! ` 提示行给出原因。Windows Terminal 上 Alt 组合按上面同一条规则处理。
 

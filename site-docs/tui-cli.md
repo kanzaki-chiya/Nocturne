@@ -65,13 +65,13 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 
 ## 斜杠命令
 
-在 TUI、逐行 CLI（以及桌面端输入框）中输入 `/` 可触发斜杠命令：
+在 TUI 和逐行 CLI 中输入 `/` 可触发斜杠命令：
 
 | 命令 | 作用 |
 |---|---|
 | `/help` | 显示可用命令与快捷键帮助 |
 | `/model` | 切换当前会话模型（TUI 打开全屏模型选择页） |
-| `/effort` | 切换思考档位（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`） |
+| `/effort` | 切换思考档位（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`） |
 | `/preset` | 切换当前会话权限预设 |
 | `/shell` | 查看或切换命令执行使用的 Shell（`auto`、`pwsh`、`powershell`、`bash`、`cmd`、`sh`） |
 | `/provider` | 管理服务商（支持 `login`、`logout`、`add`、`key`、`refresh`、`model`、`enable`、`disable`、`remove`） |
@@ -100,7 +100,7 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 | `Tab` | 补全菜单打开时补全候选；运行中发送**排队**消息（`queue`） |
 | `Ctrl+J`（或行尾 `\` 加 `Enter`） | 在输入框内换行 |
 | `Shift+Tab` | 在输入框内循环切换当前模型支持的思考档位 |
-| `Alt+M` | 在 `read-only` → `default` → `auto-edit` → `guarded` 四个预设间循环切换 |
+| `Alt+M` | 在 `read-only` → `default` → `auto-edit` → `guarded` → `smart` → `bypass` 六个预设间循环切换 |
 | `Alt+V` | 读取剪贴板中的复制文件或图片作为附件插入（Windows） |
 | `Ctrl+O` | 展开或收起全部思考过程与长工具输出 |
 | `PgUp/PgDn`、`Ctrl+End` | 向上/向下翻阅对话视口，或跳回底部跟随最新输出（也支持鼠标滚轮与拖选复制） |

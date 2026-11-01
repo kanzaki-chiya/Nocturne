@@ -72,7 +72,7 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 | 字段 | 可选值 / 子字段 | 说明 |
 |---|---|---|
 | `model` | `"provider/model"` | 新会话默认模型 |
-| `reasoningEffort` | `off`、`minimal`、`low`、`medium`、`high`、`xhigh` | 新会话默认思考档位 |
+| `reasoningEffort` | `off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` | 新会话默认思考档位 |
 | `modelRoles` | `task`、`vision`、`smol` | 子代理默认模型、图片描述视觉模型、标题与摘要轻量模型 |
 | `subagents.profiles` | `Record<string, SubagentProfileConfig>` | 自定义子代理档位（见 [子代理](subagents.md)） |
 | `permissions.preset` | `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | 默认权限预设（见 [权限模式](permissions.md)） |

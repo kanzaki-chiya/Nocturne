@@ -33,7 +33,7 @@ describe("parseSlash", () => {
     expect(parseSlash("/model")).toEqual({
       kind: "redirect",
       name: "/model",
-      hint: "在底部状态栏切换模型",
+      hint: "在输入框右下角切换模型",
     });
     expect(parseSlash("/model", "draft")).toEqual({
       kind: "redirect",
@@ -46,7 +46,7 @@ describe("parseSlash", () => {
     });
     expect(parseSlash("/shell", "draft")).toMatchObject({
       kind: "redirect",
-      hint: expect.stringContaining("会话内"),
+      hint: "在 设置 › 常规 切换 Shell",
     });
     expect(parseSlash("/model provider/one")).toMatchObject({
       kind: "redirect",
