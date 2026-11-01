@@ -642,11 +642,9 @@ function ProviderDetail({
   const toggleModel = (modelId: string, enabled: boolean) =>
     enabled ? applyModelsEnabled([modelId], true) : disable({ kind: "models", ids: [modelId] });
 
-  const deleteBlocked = !p.managed
-    ? `此条目由 ${originText(p)} 定义，只读；请修改对应配置文件`
-    : inUse || refusedInUse
-      ? "当前会话正在使用，不能删除"
-      : null;
+  const readonlyReason = !p.managed ? `来自 ${originText(p)}，请修改该文件` : null;
+  const deleteBlocked =
+    readonlyReason ?? (inUse || refusedInUse ? "当前会话正在使用，不能删除" : null);
   const auth = p.authKind;
   const showRelogin = auth === "account" && failed(p);
   const off = p.enabled === false;
@@ -664,6 +662,7 @@ function ProviderDetail({
             {failed(p) && <Badge variant="warn">已失效</Badge>}
             {off && <Badge>已停用</Badge>}
             {p.overridden && <Badge variant="warn">被更高层覆盖</Badge>}
+            {readonlyReason !== null && <Badge title={readonlyReason}>只读</Badge>}
           </>
         }
         actions={
@@ -717,6 +716,7 @@ function ProviderDetail({
               <Button
                 variant="danger"
                 disabled={busy !== null || deleteBlocked !== null}
+                title={deleteBlocked ?? undefined}
                 onClick={() => {
                   setDialog("remove");
                 }}

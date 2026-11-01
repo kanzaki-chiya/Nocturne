@@ -412,53 +412,67 @@ export function ExternalAgentsPage({
           />
         ) : current ? (
           <>
-            <DetailHeader
-              title={current.name}
-              mono
-              extra={<Badge>{current.editable ? "程序管理" : "只读"}</Badge>}
-              actions={
-                <>
-                  {" "}
-                  <Switch
-                    aria-label="启用 agent"
-                    checked={current.enabled}
-                    disabled={!client || !current.editable || busy}
-                    onChange={(next) => {
-                      if (client)
-                        void mutate(
-                          () =>
-                            client.runtime.setExternalAgentEnabled({
-                              name: current.name,
-                              enabled: next,
-                            }),
-                          current.enabled ? "已停用" : "已启用",
-                        );
-                    }}
-                  />
-                  <Button disabled={!client || busy} onClick={() => void probe()}>
-                    {busy ? "处理中…" : "测试连接"}
-                  </Button>
-                  <Button
-                    disabled={!current.editable || busy}
-                    onClick={() => {
-                      setError("");
-                      setForm({ config: configOf(current), replace: true });
-                    }}
-                  >
-                    编辑
-                  </Button>
-                  <Button
-                    variant="danger"
-                    disabled={!current.editable || busy}
-                    onClick={() => {
-                      setDeleting(true);
-                    }}
-                  >
-                    删除
-                  </Button>
-                </>
-              }
-            />
+            {(() => {
+              const sourcePath =
+                current.path ?? (current.origin === "app" ? "external-agents.json" : "config.json");
+              const readonlyReason = !current.editable
+                ? `来自 ${sourcePath}，请修改该文件`
+                : undefined;
+              return (
+                <DetailHeader
+                  title={current.name}
+                  mono
+                  extra={
+                    <Badge title={readonlyReason}>{current.editable ? "程序管理" : "只读"}</Badge>
+                  }
+                  actions={
+                    <>
+                      {" "}
+                      <Switch
+                        aria-label="启用 agent"
+                        checked={current.enabled}
+                        disabled={!client || !current.editable || busy}
+                        title={readonlyReason}
+                        onChange={(next) => {
+                          if (client)
+                            void mutate(
+                              () =>
+                                client.runtime.setExternalAgentEnabled({
+                                  name: current.name,
+                                  enabled: next,
+                                }),
+                              current.enabled ? "已停用" : "已启用",
+                            );
+                        }}
+                      />
+                      <Button disabled={!client || busy} onClick={() => void probe()}>
+                        {busy ? "处理中…" : "测试连接"}
+                      </Button>
+                      <Button
+                        disabled={!current.editable || busy}
+                        title={readonlyReason}
+                        onClick={() => {
+                          setError("");
+                          setForm({ config: configOf(current), replace: true });
+                        }}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={!current.editable || busy}
+                        title={readonlyReason}
+                        onClick={() => {
+                          setDeleting(true);
+                        }}
+                      >
+                        删除
+                      </Button>
+                    </>
+                  }
+                />
+              );
+            })()}
             <p className="desc">{current.description ?? "没有说明"}</p>
             {externalAgentSlashConflict(current.name, skills) && (
               <p className="errt" role="status">

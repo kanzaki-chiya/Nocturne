@@ -395,8 +395,10 @@ describe("ProvidersPage 列表与详情", () => {
       }),
     );
     await waitFor(() => {
-      expect(button("删除").parentElement?.getAttribute("title")).toMatch(/只读/);
+      expect(button("删除").getAttribute("title")).toBe("来自 config.json，请修改该文件");
     });
+    const badge = screen.getByText("只读");
+    expect(badge.getAttribute("title")).toBe("来自 config.json，请修改该文件");
     expect(button("删除").disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "换密钥" })).toBeNull();
     server.close();

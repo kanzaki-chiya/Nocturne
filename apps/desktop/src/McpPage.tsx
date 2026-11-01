@@ -243,13 +243,18 @@ export function McpPage({
             <DetailHeader
               title={current.id}
               mono
-              extra={<Badge>{current.editable ? "程序管理" : "只读"}</Badge>}
+              extra={
+                <Badge title={!current.editable ? `来自 ${current.path}，请修改该文件` : undefined}>
+                  {current.editable ? "程序管理" : "只读"}
+                </Badge>
+              }
               actions={
                 <>
                   <Switch
                     aria-label="启用"
                     checked={current.enabled}
                     disabled={!current.editable || busy}
+                    title={!current.editable ? `来自 ${current.path}，请修改该文件` : undefined}
                     onChange={(next) => {
                       if (!client) return;
                       setBusy(true);
@@ -266,7 +271,13 @@ export function McpPage({
                         });
                     }}
                   />
-                  <Button disabled={busy || !current.trusted} onClick={() => void probe()}>
+                  <Button
+                    disabled={busy || !current.trusted}
+                    title={
+                      !current.trusted ? "项目尚未信任，请先在「授权」页信任此工作区" : undefined
+                    }
+                    onClick={() => void probe()}
+                  >
                     {busy ? "测试中…" : "测试连接"}
                   </Button>
                   {current.editable && (

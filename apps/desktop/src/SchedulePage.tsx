@@ -6,6 +6,7 @@ import {
   PERMISSION_PRESET_NAMES,
   REASONING_EFFORT_LEVELS,
   SCHEDULE_DAYS,
+  type PermissionPresetName,
   type ScheduleDay,
   type ScheduleHistoryEntry,
   type ScheduleListResult,
@@ -46,6 +47,15 @@ import {
 import "./pages.css";
 import "./mcp.css";
 import "./schedule.css";
+
+const SCHEDULE_PRESET_DESCRIPTIONS: Record<PermissionPresetName, string> = {
+  "read-only": "只读；任何需要确认的操作都会被直接拒绝",
+  default: "可读工作区与只读子代理；改文件、命令、联网等需要确认的操作会被直接拒绝",
+  "auto-edit": "可写工作区文件；需要确认的命令、联网会被直接拒绝",
+  guarded: "工作区内读写、常规命令与联网放行；高危命令与工作区外改文件会被直接拒绝",
+  smart: "工作区内读写放行，命令与联网先交安全审查判断；仍需确认的操作会被直接拒绝",
+  bypass: "除凭据与受保护配置外全部放行",
+};
 
 /** 页面只用到的运行时方法，桌面与手机网页都能传 `client.runtime` */
 export interface SchedulePageApi {
@@ -771,12 +781,22 @@ export function SchedulePage({
                         value={draft.preset}
                         disabled={readOnly ? "请在电脑上操作" : undefined}
                         options={[
-                          { value: "", label: "默认" },
-                          ...PERMISSION_PRESET_NAMES.map((name) => ({
-                            value: name,
-                            label: name,
-                            description: presetOption(name).tag ?? "",
-                          })),
+                          {
+                            value: "",
+                            label: "默认",
+                            description:
+                              "跟随工作区默认权限预设；无人值守下需要确认的操作会被直接拒绝",
+                          },
+                          ...PERMISSION_PRESET_NAMES.map((name) => {
+                            const info = presetOption(name);
+                            return {
+                              value: name,
+                              label: name,
+                              ...(info.tag !== undefined ? { tag: info.tag } : {}),
+                              description: SCHEDULE_PRESET_DESCRIPTIONS[name],
+                              ...(info.risk ? { risk: true } : {}),
+                            };
+                          }),
                         ]}
                         onChange={(value) => {
                           setDraft({ ...draft, preset: value });

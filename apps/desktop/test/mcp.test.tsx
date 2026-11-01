@@ -193,7 +193,11 @@ describe("MCP 设置页", () => {
     await screen.findByRole("heading", { name: "managed" });
     expect(screen.getByRole("group", { name: "config.json（只读）" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
-    expect(screen.getByRole("switch").hasAttribute("disabled")).toBe(true);
+    const badge = screen.getByText("只读");
+    expect(badge.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
+    const sw = screen.getByRole("switch");
+    expect(sw.hasAttribute("disabled")).toBe(true);
+    expect(sw.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
     expect(screen.queryByText(/只读：在 home\/config\.json 中定义/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "＋ 添加服务器" }));
     fireEvent.change(screen.getByLabelText(/^名称/), { target: { value: "test" } });

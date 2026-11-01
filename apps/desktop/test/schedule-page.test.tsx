@@ -112,6 +112,20 @@ describe("定时任务页", () => {
     expect(page.textContent).toContain("工作日 09:00");
     expect(page.textContent).toContain("运行 4 次 · 跳过 2 次");
     expect(page.textContent).not.toContain("无人值守");
+    fireEvent.click(within(page).getByRole("combobox", { name: "权限" }));
+    const listbox = screen.getByRole("listbox");
+    expect(
+      within(listbox).getByText("跟随工作区默认权限预设；无人值守下需要确认的操作会被直接拒绝"),
+    ).toBeTruthy();
+    expect(within(listbox).getByText("只读；任何需要确认的操作都会被直接拒绝")).toBeTruthy();
+    expect(
+      within(listbox).getByText("可写工作区文件；需要确认的命令、联网会被直接拒绝"),
+    ).toBeTruthy();
+    expect(
+      within(listbox).getByText(
+        "工作区内读写放行，命令与联网先交安全审查判断；仍需确认的操作会被直接拒绝",
+      ),
+    ).toBeTruthy();
     expect(screen.getByRole("switch", { name: "启用" }).getAttribute("aria-checked")).toBe("true");
   });
 
