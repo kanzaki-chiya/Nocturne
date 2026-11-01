@@ -237,6 +237,100 @@ main > section h3 {
   margin-top: clamp(72px, 10vw, 128px);
 }
 
+.changelog {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 64px;
+  padding-block: 64px 0;
+}
+.changelog h1 {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: clamp(32px, 4vw, 44px);
+  line-height: 1.25;
+  margin-bottom: 40px;
+}
+.changelog-index {
+  position: sticky;
+  top: 88px;
+  align-self: start;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  display: grid;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 2;
+}
+.changelog-index a {
+  color: var(--caption);
+}
+.changelog-index a:hover {
+  color: var(--moon);
+}
+.release {
+  max-width: 760px;
+  padding-block: 32px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 72px;
+  color: var(--body);
+}
+.release h2 {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+}
+.release h2 a {
+  color: var(--ink);
+}
+.release h2 a:hover {
+  color: var(--moon);
+}
+.release h3 {
+  margin-top: 24px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+}
+.release p {
+  margin-top: 12px;
+}
+.release ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.release li + li {
+  margin-top: 6px;
+}
+.release strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.release li a,
+.release p a {
+  color: var(--moon);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.release code {
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .changelog {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .changelog-index {
+    display: none;
+  }
+}
+
 @media (max-width: 800px) {
   .surfaces,
   .cards {
