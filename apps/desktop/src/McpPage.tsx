@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { RpcError, type RpcClient } from "@nocturne/rpc/client";
 import type { McpProbeResult, McpServerOverview, McpValueOverview } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
-import type { AgentBrowserHost } from "./host";
-import type { PrefsStore } from "./prefs";
 import { Scrim } from "./ProvidersPage";
 import {
   overviewValues,
@@ -82,16 +80,11 @@ export function McpPage({
   workspaceRoot,
   version,
   onChanged,
-  agentBrowser,
-  prefs,
 }: {
   client: RpcClient | undefined;
   workspaceRoot: string | undefined;
   version: number;
   onChanged: () => void;
-  /** 面板浏览器 · 桌面内置（第 5 轮）；没有外壳时设置里不显示 */
-  agentBrowser?: AgentBrowserHost | undefined;
-  prefs?: PrefsStore | undefined;
 }) {
   const [servers, setServers] = useState<McpServerOverview[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -358,9 +351,6 @@ export function McpPage({
           >
             给 Nocturne 接上外部工具
           </EmptyState>
-        )}
-        {agentBrowser !== undefined && prefs !== undefined && (
-          <AgentBrowserCard host={agentBrowser} prefs={prefs} />
         )}
       </MasterDetail>
       {toast && (
@@ -833,94 +823,6 @@ function McpForm({
         </FormFooter>
       </Form>
     </div>
-  );
-}
-
-function AgentBrowserCard({ host, prefs }: { host: AgentBrowserHost; prefs: PrefsStore }) {
-  const [enabled, setEnabled] = useState(() => prefs.get().agentBrowserEnabled === true);
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState("");
-
-  const apply = async (next: boolean) => {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await host.setEnabled(next);
-      prefs.update({ agentBrowserEnabled: result.enabled });
-      setEnabled(result.enabled);
-      setNote(
-        result.enabled
-          ? "已启用。重启应用后新的后台进程才会拿到工具。"
-          : "已关闭；已有绑定和标签已撤销。",
-      );
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const onToggle = (next: boolean) => {
-    if (next && prefs.get().agentBrowserRiskAccepted !== true) {
-      setConfirming(true);
-      return;
-    }
-    void apply(next);
-  };
-  return (
-    <SettingsGroup title="面板浏览器">
-      <SettingsRow label="面板浏览器（桌面内置）">
-        <Switch
-          aria-label="面板浏览器（桌面内置）"
-          checked={enabled}
-          disabled={busy}
-          onChange={onToggle}
-        />
-      </SettingsRow>
-      {confirming && (
-        <div className="agent-browser-risk" role="alertdialog" aria-label="启用面板浏览器">
-          <p>agent 会读取网页文字、截图并点击输入。网页内容不可信，可能诱导它操作其他页面。</p>
-          <ul>
-            <li>标签只属于发起它的会话；你可以随时接管、交回或关闭。</li>
-            <li>点网页或按「接管」会立即撤销 agent 的控制权。</li>
-            <li>下载会被取消，脚本对话框会转交给你处理。</li>
-            <li>截图会作为工具结果附件进入模型上下文。</li>
-          </ul>
-          <div className="agent-browser-risk-actions">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setConfirming(false);
-              }}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              disabled={busy}
-              onClick={() => {
-                prefs.update({ agentBrowserRiskAccepted: true });
-                setConfirming(false);
-                void apply(true);
-              }}
-            >
-              仍然启用
-            </Button>
-          </div>
-        </div>
-      )}
-      {note !== "" && (
-        <p className="fine" role="status">
-          {note}
-        </p>
-      )}
-      {error !== "" && (
-        <p className="errt" role="alert">
-          {error}
-        </p>
-      )}
-    </SettingsGroup>
   );
 }
 

@@ -1338,8 +1338,6 @@ export function App({ host }: { host: DesktopHost }) {
                   client={pageClient}
                   workspaceRoot={effectiveWorkspace ?? undefined}
                   version={providersVersion}
-                  agentBrowser={host.agentBrowser}
-                  prefs={prefs}
                   onChanged={() => {
                     void refresh();
                   }}
@@ -1440,6 +1438,8 @@ export function App({ host }: { host: DesktopHost }) {
                   onOpenSubagents={() => {
                     setPage("agents");
                   }}
+                  agentBrowser={host.agentBrowser}
+                  prefs={prefs}
                   notifications={{
                     sendTest: (sound) =>
                       host.notify({

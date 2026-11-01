@@ -22,9 +22,9 @@ Core 的 McpConnector 注入点 → 原执行管线、权限层、结果附件
 - 后台的运行时服务器来源在 `McpConnector.open(scope)` 用 **scope.sessionId** 向 `POST /bindings` 申请绑定（bootstrap 鉴权）；返回 `{ bindingId, bearer }`。外壳为该根会话分配独立、随机 256 bit bearer，MCP URL 为 `http://127.0.0.1:<port>/mcp/<bindingId>`；bearer 只进请求头，不进 URL。绑定与后台代际关联；不能用模型参数申请绑定。
 - 运行时来源是 `packages/mcp` 的通用注入能力，建议 `createMcpConnector({ runtimeServers })`：provider 的 `open(scope)` 返回内存服务器配置与 `close()`；`reconcile(userServers)` 保留运行时来源，`close()` 同时释放来源。不是把临时服务器塞进 `ResolvedConfig` 再让重载删掉。Core 仍只见既有 `McpConnector/McpSession`；不 import 桌面或 MCP 实现。
 - 生效的运行时来源保留其 id；同名用户/项目服务器（忽略大小写）报冲突并跳过该配置条目，不能覆盖、继承或替代内置来源。只在此来源存在时保留，不改变 CLI 原有合法配置。工具冲突沿既有显式告警路径。
-- `origin: app` 仅可作为现有内存类型的兼容值，不意味着写入 `mcp.json` 或允许调用配置管理方法编辑它。设置页单独显示「面板浏览器 · 桌面内置」、开关、状态、工具清单；普通 MCP 配置表不生成可编辑的虚假配置。CLI/TUI 自行启动的后台无来源。手机发起的 Turn 也可以用这组工具，权限照常处理。
+- `origin: app` 仅可作为现有内存类型的兼容值，不意味着写入 `mcp.json` 或允许调用配置管理方法编辑它。「设置 › 常规 › 执行」单独显示「面板浏览器」开关；普通 MCP 配置表不生成可编辑的虚假配置。CLI/TUI 自行启动的后台无来源。手机发起的 Turn 也可以用这组工具，权限照常处理。
 
-开关存桌面本机 prefs 的 `agentBrowserEnabled`，缺省 false；在设置里主动启用，启用后重启后台才生效。设置里能看到这个内置连接和它的状态；它不写进用户的 `mcp.json`。用户首次开启先看到第 5、6 节的登录身份与授权粒度告知（含「本会话允许」后不再逐次确认、`smart` 只看主体不看网页内容的风险），确认后由 Rust 在下次 backend_open 装配。停用立即撤销旧来源绑定；重启后台后不再给启动凭证。不是向模型请求启用许可，也不是给工具执行授权，调用仍逐次经过权限层。设置 UI 不持有 bearer。
+开关存桌面本机 prefs 的 `agentBrowserEnabled`，缺省 false；在「设置 › 常规 › 执行」里主动启用，开启后只对新的后台进程生效（重启应用后新的后台进程才会拿到工具）；它不写进用户的 `mcp.json`。用户首次开启先看到第 5、6 节的登录身份与授权粒度告知（含「本会话允许」后不再逐次确认、`smart` 只看主体不看网页内容的风险），确认后由 Rust 在下次 backend_open 装配。停用立即撤销旧来源绑定；重启后台后不再给启动凭证。不是向模型请求启用许可，也不是给工具执行授权，调用仍逐次经过权限层。设置 UI 不持有 bearer。
 
 ### 鉴权与生命周期
 
