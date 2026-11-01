@@ -157,8 +157,8 @@ export interface ConversationProps {
   /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
   onResubmit?: ((targetSeq: number, text: string, mode: RewindMode) => Promise<void>) | undefined;
   /**
-   * 从一条用户消息之前分叉出新会话（runtime.forkSession 的 targetSeq）。缺省时不显示
-   * 「分叉」：桌面暂无分叉入口，手机传入。
+   * 从一条用户消息之前分叉出新会话（runtime.forkSession 的 targetSeq）。
+   * 缺省时不显示「分叉」。
    */
   onFork?: ((targetSeq: number) => Promise<void>) | undefined;
   /** 手机端隐藏持久授权选项；缺省保留桌面行为。 */

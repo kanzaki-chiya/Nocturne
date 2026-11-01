@@ -663,6 +663,13 @@ export function App({ host }: { host: DesktopHost }) {
       // 其他失败：openErrors 已按错误码记录，占位区显示「换模型」卡片或错误与「重试」
     }
   };
+
+  const forkAt = async (targetSeq: number): Promise<void> => {
+    const active = conversations.selected;
+    if (active === undefined) throw new Error("请先打开会话");
+    const id = await active.client.runtime.forkSession(active.session.id, { targetSeq });
+    await selectSession(id, active.workspace);
+  };
   // 通知被点击时要切到那个会话：经 ref 读最新的列表与选择函数（监听只注册一次）
   const sessionsRef = useRef<SessionSummary[]>(sessions);
   sessionsRef.current = sessions;
@@ -1476,6 +1483,7 @@ export function App({ host }: { host: DesktopHost }) {
                 selected={selected}
                 running={conversationStatus(active) !== "idle"}
                 onResubmit={resubmit}
+                onFork={forkAt}
                 turnChanges={active.turnChanges}
                 onRewindFiles={(seq) => conversations.rewindFiles(seq)}
                 loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
@@ -1760,6 +1768,7 @@ interface SessionPaneProps {
   selected: SessionSummary | undefined;
   running: boolean;
   onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  onFork: (targetSeq: number) => Promise<void>;
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;
   loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
@@ -1824,6 +1833,7 @@ function SessionPane({
   selected,
   running,
   onResubmit,
+  onFork,
   turnChanges,
   onRewindFiles,
   loadChangeDiff,
@@ -1926,6 +1936,7 @@ function SessionPane({
         busy={running}
         scheduleSource={scheduleSource}
         onResubmit={onResubmit}
+        onFork={onFork}
         turnChanges={turnChanges}
         onRewindFiles={onRewindFiles}
         loadChangeDiff={loadChangeDiff}

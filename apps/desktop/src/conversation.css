@@ -69,7 +69,7 @@
   line-height: var(--lh-base);
   overflow-wrap: anywhere;
 }
-/* 悬停/聚焦时显示的三个操作；始终占位（透明）避免悬停时布局跳动 */
+/* 悬停/聚焦时显示操作；始终占位（透明）避免悬停时布局跳动 */
 .conversation .u-actions {
   display: flex;
   gap: 8px;

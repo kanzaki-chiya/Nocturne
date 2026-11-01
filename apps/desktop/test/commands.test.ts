@@ -48,6 +48,11 @@ describe("parseSlash", () => {
       kind: "redirect",
       hint: "在 设置 › 常规 切换 Shell",
     });
+    expect(parseSlash("/fork")).toEqual({
+      kind: "redirect",
+      name: "/fork",
+      hint: "在用户消息上点「分叉」",
+    });
     expect(parseSlash("/model provider/one")).toMatchObject({
       kind: "redirect",
       name: "/model",
