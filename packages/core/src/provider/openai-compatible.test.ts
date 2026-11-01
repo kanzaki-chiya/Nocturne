@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { toProviderError } from "./adapters/ai-sdk-common.js";
+import { classifyStreamErrorKind, toProviderError } from "./adapters/ai-sdk-common.js";
 import {
   createOpenAICompatibleProvider,
   type OpenAICompatibleConfig,
@@ -474,6 +474,24 @@ describe("openai-compatible 适配器：流内 error 事件归类（ADR-0055 修
       retryable: true,
       message: "Antigravity: connection lost mid-reply (http2: client connection lost)",
     });
+  });
+
+  it.each([
+    ["context deadline exceeded", "server"],
+    ["context canceled", "server"],
+    ["unexpected token < in JSON at position 0", "server"],
+    ["token refresh failed", "server"],
+    ["content-length mismatch", "server"],
+    ["Rate limit exceeded: tokens per minute", "server"],
+    ["http2: client connection lost", "server"],
+    ["This model's maximum context length is 200000 tokens", "context_overflow"],
+    ["context_length_exceeded", "context_overflow"],
+    ["prompt is too long: 213000 tokens", "context_overflow"],
+    ["The input token count exceeds the maximum number of tokens allowed", "context_overflow"],
+    ["Output blocked by content filter", "content_filter"],
+    ["response stopped by safety settings", "content_filter"],
+  ] as const)("流内错误归类：%s → %s", (message, kind) => {
+    expect(classifyStreamErrorKind(message)).toBe(kind);
   });
 
   it("流中无状态码 error 消息含上下文超限 → context_overflow（不可重试）；内容过滤 → content_filter", async () => {

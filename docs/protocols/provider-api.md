@@ -231,14 +231,15 @@ class ProviderError extends Error {
 | 来源 | `kind` | 默认 `retryable` |
 |---|---|---|
 | HTTP 401 / 403 | `auth` | `false` |
+| HTTP 408、流式首事件或空闲超时 | `timeout` | `true` |
+| HTTP 409 / 529 | `overloaded` | `true` |
+| HTTP 413 | `context_overflow` | `false` |
 | HTTP 429 | `rate_limit` | `true` |
-| HTTP 503 / 529 | `overloaded` | `true` |
-| HTTP 5xx（其余） | `server` | `true` |
-| HTTP 408 / 504、流式首事件或空闲超时 | `timeout` | `true` |
-| HTTP 400 / 413 / 422（含上下文超限提示） | `context_overflow` | `false` |
-| HTTP 400 / 413 / 422（其余） | `invalid_request` | `false` |
+| HTTP 5xx | `server` | `true` |
+| HTTP 400 / 422（含上下文超限提示） | `context_overflow` | `false` |
+| HTTP 400 / 422（其余）、404 | `invalid_request` | `false` |
 | `TypeError`、`ECONN*` / `ENOTFOUND` / `ETIMEDOUT` 等网络异常 | `network` | `true` |
-| 流内错误（流已开始后收到的无 HTTP 状态码 `error` 事件） | 消息匹配上下文超限为 `context_overflow`，匹配内容过滤为 `content_filter`，其余默认 `server` | `server` 为 `true`，其余 `false` |
+| 流内错误（流已开始后收到的无 HTTP 状态码 `error` 事件） | 明确的上下文超限为 `context_overflow`，内容过滤为 `content_filter`，其余为 `server` | `server` 为 `true`，其余 `false` |
 | 其余未识别异常（如请求阶段无状态码非网络错误） | `unknown` | `false` |
 
 默认可重试：`rate_limit`、`overloaded`、`network`、`timeout`、`server`。适配器可以根据响应细节修正 `retryable`。Agent Loop 只依据 `kind` 与 `retryable` 决策，不解析 `providerMessage`。

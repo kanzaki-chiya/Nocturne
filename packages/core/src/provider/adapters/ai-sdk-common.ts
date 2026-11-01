@@ -508,7 +508,14 @@ function mapFinishReason(r: string | undefined): FinishReason {
 // ── 错误归一化（duck-typing：@ai-sdk/provider 不是直接依赖） ──
 
 const CONTEXT_OVERFLOW_RE = /context|length|token|too long/i;
-const CONTENT_FILTER_RE = /content[_ -]?filter|content[_ -]?policy|safety|moderation|blocked by/i;
+/**
+ * 流内错误专用：比 400 的判定窄。没有状态码时不能只凭 context / token 判断，
+ * 否则 Go 代理的 "context deadline exceeded"、"unexpected token" 这类暂时性故障
+ * 会被当成上下文超限，触发压缩而不是重试。
+ */
+const STREAM_CONTEXT_OVERFLOW_RE =
+  /context[_ -]?(length|window|size|limit)|(prompt|input|request|message)s?( is| are)? too long|too many (input )?tokens|exceeds?\b.*\bmaximum\b.*\btokens?\b/i;
+const CONTENT_FILTER_RE = /content[_ -]?filter|content[_ -]?policy|safety|moderation/i;
 
 interface SdkErrorShape {
   name?: string;
@@ -532,12 +539,12 @@ interface SdkErrorShape {
 
 /**
  * 流已开始后收到的无 HTTP 状态码流内错误归类（ADR-0055 修订 2026-11-01）：
- * - 上下文超限沿用 400 的判定正则 → context_overflow（不可重试）；
+ * - 明确的上下文超限 → context_overflow（不可重试，由 Agent Loop 走压缩）；
  * - 内容过滤 → content_filter（不可重试）；
  * - 其余默认归为 server（可重试）。
  */
 export function classifyStreamErrorKind(message: string): ProviderError["kind"] {
-  if (CONTEXT_OVERFLOW_RE.test(message)) return "context_overflow";
+  if (STREAM_CONTEXT_OVERFLOW_RE.test(message)) return "context_overflow";
   if (CONTENT_FILTER_RE.test(message)) return "content_filter";
   return "server";
 }

@@ -43,5 +43,5 @@ Responses 适配器要求收到 `response.completed` 才算完成，缺失时抛
 
 ## 修订 2026-11-01
 
-- **流内错误归类**：代理或上游在 HTTP 200 流已开始后发来的 `error` 事件（如 `"Antigravity: connection lost mid-reply (http2: client connection lost)"`）常不携带 HTTP 状态码，也不属于 `TypeError` 或 `ECONN*`，此前被 `toProviderError` 归为不可重试的 `unknown`。现由适配器对无 HTTP 状态码的流内 `error` 事件单独归类：消息匹配上下文超限正则归为 `context_overflow`（不可重试），匹配内容过滤归为 `content_filter`（不可重试），其余默认归为 `server`（可重试）。已有 HTTP 状态码的路径及请求阶段抛出的错误保持不变。
+- **流内错误归类**：代理或上游在 HTTP 200 流已开始后发来的 `error` 事件（如 `"Antigravity: connection lost mid-reply (http2: client connection lost)"`）常不携带 HTTP 状态码，也不属于 `TypeError` 或 `ECONN*`，此前被 `toProviderError` 归为不可重试的 `unknown`。现由适配器对无 HTTP 状态码的流内 `error` 事件单独归类：消息明确表示上下文超限时归为 `context_overflow`（不可重试，由 Agent Loop 走压缩），匹配内容过滤归为 `content_filter`（不可重试），其余默认归为 `server`（可重试）。这里的上下文超限判定比 HTTP 400 的正则窄：没有状态码时单凭 `context`、`token` 不足以判断，否则 `context deadline exceeded` 这类暂时性故障会触发压缩而不是重试。已有 HTTP 状态码的路径及请求阶段抛出的错误保持不变。
 - **重试默认值与退避封顶**：`retryLimit` 默认值从 4 调为 10，`retryBaseDelayMs` 默认值从 250ms 调为 1000ms，新增 `turn.retryMaxDelayMs`（默认 10000ms）。单次等待时间为 `min(retryAfterMs ?? retryBaseDelayMs × 2^(attempt−1), retryMaxDelayMs)`（依次为 1、2、4、8、10、10……秒，最坏总等待约 75 秒），服务商给出的 `retryAfterMs` 同样受该上限约束。代理中途断线多为暂时性故障，旧默认 4 次共不足 4 秒不足以等到上游重连恢复。
