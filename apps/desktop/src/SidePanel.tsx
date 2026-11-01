@@ -665,7 +665,7 @@ function TreeDir({
             <div key={file.key} className="sp-tree-group">
               <button
                 type="button"
-                className={`sp-tree-file${on && !open ? " on" : ""}${file.reverted ? " reverted" : ""}`}
+                className={`list-row sp-tree-file${on && !open ? " on" : ""}${file.reverted ? " reverted" : ""}`}
                 style={{ paddingLeft: 8 + depth * 12 }}
                 title={`${fullPath(file.path)} · ${String(file.rounds.length)} 轮`}
                 aria-expanded={multi ? open : undefined}
@@ -692,7 +692,7 @@ function TreeDir({
                   <button
                     key={round.key}
                     type="button"
-                    className={`sp-tree-file sp-tree-roundrow${selected === round.key ? " on" : ""}${round.reverted ? " reverted" : ""}`}
+                    className={`list-row sp-tree-file sp-tree-roundrow${selected === round.key ? " on" : ""}${round.reverted ? " reverted" : ""}`}
                     style={{ paddingLeft: 8 + (depth + 1) * 12 + 12 }}
                     title={`${fullPath(file.path)} · 第 ${String(round.round)} 轮`}
                     onClick={() => {
@@ -715,7 +715,7 @@ function TreeDir({
           <div key={child.path} className="sp-tree-group">
             <button
               type="button"
-              className="sp-tree-dir"
+              className="list-row sp-tree-dir"
               style={{ paddingLeft: 8 + depth * 12 }}
               aria-expanded={open}
               onClick={() => {

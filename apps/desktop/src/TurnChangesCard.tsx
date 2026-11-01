@@ -25,10 +25,10 @@ interface Props {
 
 function Counts({ added, removed }: { added: number; removed: number }) {
   return (
-    <>
+    <span className="turn-change-counts">
       <span className="diff-add">+{added}</span>
       {removed > 0 && <span className="diff-del">−{removed}</span>}
-    </>
+    </span>
   );
 }
 

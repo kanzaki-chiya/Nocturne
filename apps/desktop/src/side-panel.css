@@ -400,11 +400,13 @@
 .sp-tree-file {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
+  height: var(--ctl-h-md);
   min-width: 0;
-  padding: 4px 8px;
-  border-radius: var(--radius-1);
-  font-size: var(--fs-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  font-size: var(--fs-2);
+  color: var(--a-secondary);
   text-align: left;
 }
 .sp-tree-dir {
@@ -413,9 +415,12 @@
 .sp-tree-dir:hover,
 .sp-tree-file:hover {
   background: var(--a-raised);
+  color: var(--a-text);
 }
 .sp-tree-file.on {
   background: var(--a-sel);
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
 }
 .sp-tree-name {
   flex: 1;
@@ -424,15 +429,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sp-tree-file .sp-tree-name {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+}
 .sp-tree-round {
   color: var(--a-faint);
   font: var(--fs-1) var(--mono);
 }
 .sp-counts {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--space-1);
   flex: none;
   font: var(--fs-1) var(--mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .side-panel .diff-add,
@@ -464,13 +474,14 @@
   z-index: 2; /* 高于不换行时吸左的行号格（z-index 1） */
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
-  padding: 7px 10px;
+  padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--a-border);
   border-radius: var(--radius-2) var(--radius-2) 0 0;
-  background: var(--a-panel);
-  font-size: var(--fs-1);
+  background: var(--a-side);
+  color: var(--a-secondary);
+  font: var(--fs-1) var(--mono);
 }
 /* 长路径从左边省略，保留文件名 */
 .sp-change-path {

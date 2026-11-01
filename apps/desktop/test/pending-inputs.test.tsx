@@ -41,8 +41,13 @@ describe("待发列表", () => {
       ],
       paused: false,
     });
-    const labels = Array.from(container.querySelectorAll(".pi-mode")).map((n) => n.textContent);
+    const badges = Array.from(container.querySelectorAll(".pi-mode"));
+    const labels = badges.map((n) => n.textContent);
     expect(labels).toEqual(["插话", "排队"]);
+    expect(badges[0]?.className).toContain("badge");
+    expect(badges[0]?.className).toContain("accent");
+    expect(badges[1]?.className).toContain("badge");
+    expect(badges[1]?.className).not.toContain("accent");
     expect(screen.getByText("插话内容")).toBeTruthy();
     expect(screen.getByText("排队内容")).toBeTruthy();
     expect(screen.getByText("2 张图")).toBeTruthy();

@@ -261,13 +261,16 @@
   color: var(--a-text);
   font-weight: 650;
 }
-.turn-changes-counts {
+.turn-changes-counts,
+.turn-change-counts {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--space-1);
+  flex: none;
   color: var(--a-muted);
   font-family: var(--mono);
   font-size: var(--fs-1);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .turn-changes.reverted .turn-changes-title,
 .turn-changes.reverted .turn-changes-counts {
@@ -748,10 +751,10 @@
   color: var(--a-secondary);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 10px;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
   background: var(--a-side);
-  font-size: var(--fs-1);
+  font: var(--fs-1) var(--mono);
 }
 .conversation .diff-add {
   color: var(--a-success);
