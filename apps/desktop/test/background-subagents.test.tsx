@@ -182,7 +182,7 @@ describe("结果卡片", () => {
 });
 
 describe("待发区", () => {
-  it("子代理结果条目可撤回、不可编辑或切换", async () => {
+  it("子代理结果条目显示「子代理结果」、不含「等待送达」，右侧只有「取消」", async () => {
     const onCancel = vi.fn(async () => undefined);
     const { container } = render(
       <PendingInputs
@@ -204,11 +204,13 @@ describe("待发区", () => {
         onResume={vi.fn(async () => undefined)}
       />,
     );
-    expect(container.querySelector(".pi-mode")?.textContent).toBe("子代理结果");
-    expect(screen.getByText("等待送达")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /改排队|改插话/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "撤回这条待发消息" }));
+    expect(container.querySelector(".pi-mode")).toBeNull();
+    expect(container.querySelector(".pi-text")?.textContent).toBe("子代理结果");
+    expect(container.textContent).not.toContain("等待送达");
+    expect(
+      Array.from(container.querySelectorAll("button")).map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["取消"]);
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => expect(onCancel).toHaveBeenCalledWith("s1"));
   });
 });

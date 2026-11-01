@@ -659,7 +659,9 @@ describe("Composer 控件与附件", () => {
     const effort = screen.getByRole("button", { name: "切换思考档位" });
     const stop = screen.getByRole<HTMLButtonElement>("button", { name: "中断" });
     const send = screen.getByRole<HTMLButtonElement>("button", { name: "发送" });
-    expect(field.placeholder).toBe("运行中，Enter 插话，Alt+Enter 排队");
+    expect(field.placeholder).toBe("输入消息，@ 引用文件");
+    expect(field.placeholder).not.toMatch(/Enter|插话|排队/);
+    expect(send.getAttribute("title")).toBe("发送");
     expect(Array.from(card?.children ?? [])).toEqual([text, toolbar]);
     expect(text?.contains(field)).toBe(true);
     // ADR-0070：运行中输入非空时 ■ 与发送键并存

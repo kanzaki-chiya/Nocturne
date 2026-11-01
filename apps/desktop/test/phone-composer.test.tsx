@@ -315,9 +315,9 @@ it("运行中：插话/排队切换、发送键与中断键并存、待发列表
       />,
     );
   });
-  // 待发列表：标签 + 说明 + 暂停提示
+  // 待发列表：单行内容 + 暂停提示，无送达说明
   expect(container.querySelector(".pending-inputs")?.textContent).toContain("插话一条");
-  expect(container.textContent).toContain("将在当前步骤结束后送达");
+  expect(container.querySelector(".pending-inputs .pi-note")).toBeNull();
   expect(container.textContent).toContain("已暂停");
   await act(() => button("继续发送").click());
   expect(onResume).toHaveBeenCalledOnce();

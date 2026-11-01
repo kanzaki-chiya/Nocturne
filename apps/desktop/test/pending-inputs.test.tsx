@@ -1,4 +1,4 @@
-/** 待发列表（ADR-0070 §6）：标签、编辑、切换、撤回、暂停与继续 */
+/** 待发列表（ADR-0070 §6）：单行展示、立即发送、编辑、取消、暂停与继续 */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -17,13 +17,14 @@ const item = (overrides: Partial<PendingInputItem> = {}): PendingInputItem => ({
   ...overrides,
 });
 
-function setup(snapshot: { items: PendingInputItem[]; paused: boolean }) {
+function setup(snapshot: { items: PendingInputItem[]; paused: boolean }, running = true) {
   const onUpdate = vi.fn(async () => undefined);
   const onCancel = vi.fn(async () => undefined);
   const onResume = vi.fn(async () => undefined);
   const view = render(
     <PendingInputs
       snapshot={snapshot}
+      running={running}
       onUpdate={onUpdate}
       onCancel={onCancel}
       onResume={onResume}
@@ -33,32 +34,58 @@ function setup(snapshot: { items: PendingInputItem[]; paused: boolean }) {
 }
 
 describe("待发列表", () => {
-  it("逐条显示标签、内容、附件数与插话说明", () => {
-    const { container } = setup({
+  it("逐条单行显示内容与附件数，无模式徽标与送达说明；排队条目带「立即发送」「编辑」「取消」，插话与空闲时无「立即发送」", () => {
+    const { container, rerender, onUpdate, onCancel, onResume } = setup({
       items: [
         item({ id: "i1", mode: "steer", text: "插话内容" }),
         item({ id: "i2", mode: "queue", text: "排队内容", attachments: 2 }),
       ],
       paused: false,
     });
-    const badges = Array.from(container.querySelectorAll(".pi-mode"));
-    const labels = badges.map((n) => n.textContent);
-    expect(labels).toEqual(["插话", "排队"]);
-    expect(badges[0]?.className).toContain("badge");
-    expect(badges[0]?.className).toContain("accent");
-    expect(badges[1]?.className).toContain("badge");
-    expect(badges[1]?.className).not.toContain("accent");
-    expect(screen.getByText("插话内容")).toBeTruthy();
-    expect(screen.getByText("排队内容")).toBeTruthy();
+    expect(container.querySelectorAll(".pi-mode")).toHaveLength(0);
+    expect(container.querySelectorAll(".pi-note")).toHaveLength(0);
+    expect(screen.getByText("插话内容").getAttribute("title")).toBe("插话内容");
+    expect(screen.getByText("排队内容").getAttribute("title")).toBe("排队内容");
     expect(screen.getByText("2 张图")).toBeTruthy();
-    // 只有插话条目带送达说明
-    expect(screen.getAllByText("将在当前步骤结束后送达")).toHaveLength(1);
+    const rows = Array.from(container.querySelectorAll(".pi-row"));
+    expect(rows).toHaveLength(2);
+    // 插话条目没有「立即发送」，只有「编辑」「取消」
+    expect(
+      Array.from(rows[0]?.querySelectorAll("button") ?? []).map((b) =>
+        b.getAttribute("aria-label"),
+      ),
+    ).toEqual(["编辑", "取消"]);
+    // 排队条目有「立即发送」「编辑」「取消」三个按钮，顺序固定
+    expect(
+      Array.from(rows[1]?.querySelectorAll("button") ?? []).map((b) =>
+        b.getAttribute("aria-label"),
+      ),
+    ).toEqual(["立即发送", "编辑", "取消"]);
     expect(screen.queryByText("已暂停")).toBeNull();
+    // 不在运行中时也没有「立即发送」
+    rerender(
+      <PendingInputs
+        snapshot={{
+          items: [item({ id: "i2", mode: "queue", text: "排队内容" })],
+          paused: false,
+        }}
+        running={false}
+        onUpdate={onUpdate}
+        onCancel={onCancel}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
   });
 
-  it("编辑：Enter 保存只换文本，Esc 取消，组字中不提交", async () => {
-    const { onUpdate } = setup({ items: [item()], paused: false });
+  it("编辑：保存与取消两个图标按钮；Enter 保存只换文本，Esc 取消，组字中不提交", async () => {
+    const { container, onUpdate } = setup({ items: [item()], paused: false });
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(
+      Array.from(container.querySelectorAll(".pi-acts button")).map((b) =>
+        b.getAttribute("aria-label"),
+      ),
+    ).toEqual(["保存", "取消"]);
     const field = screen.getByLabelText<HTMLInputElement>("编辑待发消息");
     fireEvent.change(field, { target: { value: "改成绿色" } });
     fireEvent.keyDown(field, { key: "Enter", isComposing: true });
@@ -75,14 +102,14 @@ describe("待发列表", () => {
     expect(screen.queryByLabelText("编辑待发消息")).toBeNull();
   });
 
-  it("切换插话/排队与撤回", async () => {
+  it("「立即发送」把排队条目转为插话，「取消」撤回条目", async () => {
     const { onUpdate, onCancel } = setup({
-      items: [item({ id: "i1", mode: "steer" })],
+      items: [item({ id: "i1", mode: "queue" })],
       paused: false,
     });
-    fireEvent.click(screen.getByRole("button", { name: "改排队" }));
-    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith("i1", { mode: "queue" }));
-    fireEvent.click(screen.getByRole("button", { name: "撤回这条待发消息" }));
+    fireEvent.click(screen.getByRole("button", { name: "立即发送" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith("i1", { mode: "steer" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => expect(onCancel).toHaveBeenCalledWith("i1"));
   });
 
@@ -102,13 +129,13 @@ describe("待发列表", () => {
     });
     render(
       <PendingInputs
-        snapshot={{ items: [item()], paused: false }}
+        snapshot={{ items: [item({ mode: "queue" })], paused: false }}
         onUpdate={onUpdate}
         onCancel={async () => undefined}
         onResume={async () => undefined}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "改排队" }));
+    fireEvent.click(screen.getByRole("button", { name: "立即发送" }));
     expect((await screen.findByRole("alert")).textContent).toContain("这条待发输入已经发出");
   });
 });

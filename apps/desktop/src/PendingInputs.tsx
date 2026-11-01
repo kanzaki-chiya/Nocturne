@@ -1,19 +1,74 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import type { PendingInputItem, PendingInputsSnapshot } from "@nocturne/core/protocol";
-import { Badge, Button, IconButton } from "./ui";
+import { Button, IconButton } from "./ui";
 
 import "./pending-inputs.css";
 
 export interface PendingInputsProps {
   snapshot: PendingInputsSnapshot;
+  running?: boolean | undefined;
   /** 编辑（只换文本）或切换插话/排队 */
   onUpdate: (id: string, patch: { mode?: "steer" | "queue"; text?: string }) => Promise<void>;
-  /** 撤回 */
+  /** 取消 */
   onCancel: (id: string) => Promise<void>;
   /** 解除暂停：空闲时立即发出队首 */
   onResume: () => Promise<void>;
   disabled?: boolean;
+}
+
+const iconStroke = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true as const,
+};
+
+function IconLead() {
+  return (
+    <svg width="14" height="14" {...iconStroke}>
+      <path d="M4 5v6a3 3 0 0 0 3 3h12" />
+      <path d="m15 10 4 4-4 4" />
+    </svg>
+  );
+}
+
+function IconSendNow() {
+  return (
+    <svg width="15" height="15" {...iconStroke}>
+      <path d="M12 19V5" />
+      <path d="m5 12 7-7 7 7" />
+    </svg>
+  );
+}
+
+function IconEdit() {
+  return (
+    <svg width="14" height="14" {...iconStroke}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg width="15" height="15" {...iconStroke}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function IconCancel() {
+  return (
+    <svg width="15" height="15" {...iconStroke}>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
 }
 
 function errorText(error: unknown): string {
@@ -21,11 +76,11 @@ function errorText(error: unknown): string {
 }
 
 /**
- * 待发列表（ADR-0070 §6）：输入框上方逐条显示还没发出的插话与排队输入。
- * 插话在运行中插队的消息里另有「插话」标签；这里只管发送前的编辑与撤回。
+ * 待发列表（ADR-0070 §6）：输入框上方逐条显示还没发出的待发消息。
  */
 export function PendingInputs({
   snapshot,
+  running = true,
   onUpdate,
   onCancel,
   onResume,
@@ -109,13 +164,16 @@ export function PendingInputs({
           </Button>
         </div>
       )}
-      {items.map((item) => (
-        <div key={item.id} className={`pi-row pi-${item.mode}`}>
-          <div className="pi-main">
-            <Badge variant={item.mode === "steer" ? "accent" : "neutral"} className="pi-mode">
-              {item.mode === "subagent" ? "子代理结果" : item.mode === "steer" ? "插话" : "排队"}
-            </Badge>
-            {editing === item.id ? (
+      {items.map((item) => {
+        const isEditing = editing === item.id;
+        const isSubagent = item.mode === "subagent";
+        const rowText = isSubagent ? "子代理结果" : item.text === "" ? "（仅图片）" : item.text;
+        return (
+          <div key={item.id} className={`pi-row pi-${item.mode}`}>
+            <span className="pi-lead" aria-hidden="true">
+              <IconLead />
+            </span>
+            {isEditing ? (
               <input
                 ref={input}
                 className="pi-edit"
@@ -135,95 +193,84 @@ export function PendingInputs({
                 }}
               />
             ) : (
-              <span className="pi-text" title={item.mode === "subagent" ? "等待送达" : item.text}>
-                {item.mode === "subagent"
-                  ? "等待送达"
-                  : item.text === ""
-                    ? "（仅图片）"
-                    : item.text}
+              <span className="pi-text" title={rowText}>
+                {rowText}
               </span>
             )}
             {item.attachments > 0 && <span className="pi-atts">{item.attachments} 张图</span>}
             <span className="pi-acts">
-              {editing === item.id ? (
+              {isEditing ? (
                 <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                  <IconButton
                     disabled={busy}
+                    title="保存"
+                    aria-label="保存"
                     onClick={() => {
                       save(item);
                     }}
                   >
-                    保存
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                    <IconCheck />
+                  </IconButton>
+                  <IconButton
+                    className="del"
                     disabled={busy}
+                    title="取消"
+                    aria-label="取消"
                     onClick={() => {
                       setEditing(null);
                     }}
                   >
-                    取消
-                  </Button>
+                    <IconCancel />
+                  </IconButton>
                 </>
               ) : (
                 <>
-                  {item.mode !== "subagent" && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={disabled || busy}
-                        onClick={() => {
-                          startEdit(item);
-                        }}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={disabled || busy}
-                        title={
-                          item.mode === "steer"
-                            ? "改为排队，Turn 结束后再发"
-                            : "改为插话，当前步骤结束后送达"
-                        }
-                        onClick={() => {
-                          void run(async () => {
-                            await onUpdate(item.id, {
-                              mode: item.mode === "steer" ? "queue" : "steer",
-                            });
-                          });
-                        }}
-                      >
-                        {item.mode === "steer" ? "改排队" : "改插话"}
-                      </Button>
-                    </>
+                  {running && item.mode === "queue" && (
+                    <IconButton
+                      className="send"
+                      disabled={disabled || busy}
+                      title="立即发送"
+                      aria-label="立即发送"
+                      onClick={() => {
+                        void run(async () => {
+                          await onUpdate(item.id, { mode: "steer" });
+                        });
+                      }}
+                    >
+                      <IconSendNow />
+                    </IconButton>
+                  )}
+                  {!isSubagent && (
+                    <IconButton
+                      disabled={disabled || busy}
+                      title="编辑"
+                      aria-label="编辑"
+                      onClick={() => {
+                        startEdit(item);
+                      }}
+                    >
+                      <IconEdit />
+                    </IconButton>
                   )}
                   <IconButton
-                    size="sm"
-                    className="pi-x"
+                    className="del"
                     disabled={disabled || busy}
-                    aria-label="撤回这条待发消息"
-                    title="撤回"
+                    title="取消"
+                    aria-label="取消"
                     onClick={() => {
                       void run(async () => {
                         await onCancel(item.id);
                       });
                     }}
                   >
-                    ×
+                    <IconCancel />
                   </IconButton>
                 </>
               )}
             </span>
           </div>
-          {item.mode === "steer" && <div className="pi-note">将在当前步骤结束后送达</div>}
-        </div>
-      ))}
+        );
+      })}
       {error !== null && (
         <div className="pi-error" role="alert">
           {error}

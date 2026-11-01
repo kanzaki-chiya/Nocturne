@@ -1044,7 +1044,7 @@ export function Composer({
           className={`send${canSend ? "" : " off"}`}
           disabled={disabled || submitting || composing || !canSend}
           aria-label="发送"
-          title={running ? "插话（Enter），排队（Alt+Enter）" : "发送（Enter）"}
+          title={running ? "发送" : "发送（Enter）"}
           onClick={() => {
             void submit(running ? "steer" : undefined);
           }}
@@ -1072,9 +1072,7 @@ export function Composer({
         ref={textarea}
         rows={1}
         value={draft}
-        placeholder={
-          placeholder ?? (running ? "运行中，Enter 插话，Alt+Enter 排队" : defaultPlaceholder)
-        }
+        placeholder={placeholder ?? defaultPlaceholder}
         aria-autocomplete="list"
         aria-controls={popup !== null ? listId : undefined}
         aria-activedescendant={popup !== null ? `${listId}-${activeIndex}` : undefined}
@@ -1194,6 +1192,7 @@ export function Composer({
         {isSession && pendingInputs !== undefined && pendingInputs.items.length > 0 && (
           <PendingInputs
             snapshot={pendingInputs}
+            running={running}
             disabled={disabled}
             onUpdate={onUpdatePending ?? (() => Promise.resolve())}
             onCancel={onCancelPending ?? (() => Promise.resolve())}

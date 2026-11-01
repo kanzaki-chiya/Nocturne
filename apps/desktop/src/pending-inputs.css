@@ -1,13 +1,15 @@
-/* 待发输入列表（ADR-0070 §6）：输入框上方，逐条一行 */
+/* 待发输入列表（ADR-0070 §6）：压在输入框上沿之下，左右各收 12px */
 .pending-inputs {
-  display: grid;
-  gap: var(--space-1);
-  margin-bottom: var(--space-2);
-  padding: var(--space-1) var(--space-3);
+  position: relative;
+  z-index: 1;
+  margin: 0 var(--space-3) -10px;
+  padding: var(--space-1) 6px 14px;
   border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-panel);
-  font-size: var(--fs-1);
+  border-bottom: 0;
+  border-radius: var(--radius-3) var(--radius-3) 0 0;
+  background: var(--a-raised);
+  font-size: var(--fs-3);
+  line-height: var(--lh-base);
   color: var(--a-secondary);
 }
 
@@ -15,25 +17,33 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 2px 2px 4px;
+  height: 30px;
+  padding: 0 var(--space-1) 0 6px;
+  font-size: var(--fs-1);
   color: var(--a-warning);
 }
 
 .pi-row {
-  display: grid;
-  gap: 2px;
-}
-
-.pi-main {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-1) 0 6px;
+  border-radius: var(--radius-2);
   min-width: 0;
 }
 
-.pi-mode {
+.pi-row + .pi-row,
+.pi-paused + .pi-row {
+  border-top: 1px solid var(--a-border);
+  border-radius: 0;
+}
+
+.pi-lead {
   flex: none;
-  user-select: none;
+  color: var(--a-faint);
+  display: grid;
+  place-items: center;
 }
 
 .pi-text {
@@ -48,16 +58,19 @@
 .pi-edit {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 1px 6px;
+  height: var(--ctl-h-sm);
+  padding: 0 6px;
   border: 1px solid var(--a-accent);
   border-radius: var(--radius-1);
-  background: var(--a-bg);
+  background: var(--a-input);
   color: var(--a-text);
   font: inherit;
+  outline: none;
 }
 
 .pi-atts {
   flex: none;
+  font-size: var(--fs-1);
   color: var(--a-muted);
 }
 
@@ -65,19 +78,41 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-0-5);
 }
 
-.pi-x {
-  font-size: var(--fs-3);
-  line-height: var(--lh-tight);
-}
-
-.pi-note {
-  padding-left: 2px;
+.composer .pending-inputs .ib,
+.pending-inputs .ib {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-2);
+  background: transparent;
   color: var(--a-muted);
+  cursor: pointer;
+}
+
+.composer .pending-inputs .ib:hover:not(:disabled),
+.pending-inputs .ib:hover:not(:disabled) {
+  background: var(--a-border);
+  color: var(--a-text);
+  border-color: transparent;
+}
+
+.composer .pending-inputs .ib.del:hover:not(:disabled),
+.pending-inputs .ib.del:hover:not(:disabled) {
+  color: var(--a-error);
+}
+
+.composer .pending-inputs .ib.send:hover:not(:disabled),
+.pending-inputs .ib.send:hover:not(:disabled) {
+  color: var(--a-accent);
 }
 
 .pi-error {
+  padding: 2px 6px 0;
+  font-size: var(--fs-1);
   color: var(--a-error);
 }
