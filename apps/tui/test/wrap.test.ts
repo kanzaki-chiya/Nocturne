@@ -10,13 +10,11 @@ const user = (text: string): UserEntry => ({
   kind: "user",
   key: "u",
   turnId: "t",
-  messageId: "m",
   seq: 1,
-  time: "2026-10-08T02:00:00.000Z",
   content: [{ type: "text", text }],
 });
 
-function copied(lines: { text: string; continued?: boolean | undefined }[]): string {
+function copied(lines: readonly { key: string; text: string; continued?: boolean | undefined }[]): string {
   const last = lines.at(-1);
   return selCopyText(lines, {
     anchor: { abs: 0, col: 0 },

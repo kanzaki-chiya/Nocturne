@@ -7,10 +7,10 @@ if (typeof window.matchMedia !== "function") {
     ({
       matches: false,
       media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
       dispatchEvent: () => false,
       onchange: null,
     }) as MediaQueryList;
