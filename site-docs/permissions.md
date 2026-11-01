@@ -34,7 +34,7 @@ Nocturne 将工具操作分为五类：读取文件（`read`）、修改文件�
 
 ## 自定义权限规则
 
-你可以在 `~/.nocturne/config.json` 或 `<workspace>/.nocturne/config.json` 的 `permissions.rules` 中编写细粒度规则：
+你可以在 [配置参考](config.md) 的 `permissions.rules` 中编写细粒度规则：
 
 ```json
 {

@@ -16,5 +16,24 @@
       { "slug": "panels", "title": "右侧面板" },
       { "slug": "context", "title": "上下文和用量" }
     ]
+  },
+  {
+    "group": "进阶",
+    "pages": [
+      { "slug": "mcp", "title": "MCP" },
+      { "slug": "skills", "title": "技能" },
+      { "slug": "subagents", "title": "子代理" },
+      { "slug": "schedule", "title": "定时任务" },
+      { "slug": "remote", "title": "手机远程" },
+      { "slug": "outside-agents", "title": "外部 Agent" }
+    ]
+  },
+  {
+    "group": "参考",
+    "pages": [
+      { "slug": "tui-cli", "title": "TUI 和命令行" },
+      { "slug": "config", "title": "配置参考" },
+      { "slug": "faq", "title": "常见问题" }
+    ]
   }
 ]
