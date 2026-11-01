@@ -8,8 +8,9 @@
 - `site/assets/`：共用 CSS、favicon、自托管字体和中英文分别拍摄的 WebP 截图。
 - `site/CNAME`：`nocturne.koxia.cn`。
 - `site/changelog/index.html`：更新日志页模板，中文。构建时由根目录 `CHANGELOG.md` 生成版本目录和正文，发版不需要额外操作。
-- `scripts/build-site.mjs`：仅使用 Node 内置模块，将 `site/` 复制到忽略的 `dist-site/`，把 HTML 中全部 `{{version}}` 替换成根 `package.json` 的版本，并生成更新日志页。
-- `scripts/test/build-site.test.mjs`：版本、占位符、语言互链、本地资源与锚点、CNAME、字体标题清单检查。根 `pnpm test` 的 scripts 测试组会运行它。
+- `site-docs/`：中文用户文档 Markdown 正文、导航配置与页面模板。
+- `scripts/build-site.mjs`：使用 Node 内置模块与根工作区的 `marked` 依赖，将 `site/` 复制到忽略的 `dist-site/`，把 HTML 与文档中全部 `{{version}}` 替换成根 `package.json` 的版本，并生成更新日志页和 `/docs/` 用户文档页面。
+- `scripts/test/build-site.test.mjs`：版本、占位符、语言互链、本地资源与锚点、CNAME、字体标题清单、用户文档构建检查。根 `pnpm test` 的 scripts 测试组会运行它。
 
 主页不是 pnpm workspace 成员，不参与 `pnpm build` 和 workspace 包测试。单独构建与验证：
 
@@ -20,9 +21,22 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 可用任意静态服务预览 `dist-site/`；需把目录请求解析到 `index.html`。服务仅监听 `127.0.0.1`，启动时记下 PID，结束时只关闭该 PID 及其子进程。
 
+## 用户文档
+
+用户文档位于 `site-docs/`，构建后输出到 `dist-site/docs/`：
+
+- `site-docs/nav.json`：定义分组（`group`）与页面顺序（`pages` 数组，每项含 `slug` 和 `title`；首页 `slug` 为 `""`，对应 `site-docs/index.md` 和 `/docs/index.html`，其余 `<slug>` 对应 `site-docs/<slug>.md` 和 `/docs/<slug>/index.html`）。
+- `site-docs/*.md`：各页面 Markdown 正文，第一行必须是 `# <标题>` 且与 `nav.json` 中的 `title` 一致。不允许内联原始 HTML。站内互链直接写 `other.md` 或 `other.md#章节`，构建时会自动转换为相对路径。
+- `site-docs/template.html` 与 `site/assets/docs.css`：文档页面 HTML 模板与三栏响应式样式（仅引用 `base.css` 变量，无运行时 JavaScript）。
+
+新增或修改文档页面时：
+
+1. 在 `site-docs/` 下新建或编辑 `<slug>.md`，并在 `site-docs/nav.json` 中登记对应条目（目录中的 `.md` 文件集合必须与 `nav.json` 完全一致，否则构建失败）。
+2. 运行 `node scripts/build-site.mjs` 生成静态页面，再运行 `pnpm exec vitest run --root scripts test/build-site.test.mjs` 验证导航、锚点和本地链接。
+
 ## 发布与域名
 
-`.github/workflows/pages.yml` 使用官方 `upload-pages-artifact`、`deploy-pages`，以固定提交 SHA 锁定。仅运行 Node 静态构建，不安装项目依赖。触发条件：main 上的 `site/**`、`CHANGELOG.md`、构建脚本或工作流修改，Release 的 `published`，以及手动运行。Release 触发时检出发布标签，因此版本与该标签中的根 package.json 一致；其他触发检出对应提交。
+`.github/workflows/pages.yml` 使用官方 `upload-pages-artifact`、`deploy-pages`，以固定提交 SHA 锁定。在构建前安装根工作区依赖（`pnpm install --frozen-lockfile --filter .`），再运行 Node 静态构建。触发条件：main 上的 `site/**`、`site-docs/**`、`CHANGELOG.md`、`package.json`、`pnpm-lock.yaml`、构建脚本或工作流修改，Release 的 `published`，以及手动运行。Release 触发时检出发布标签，因此版本与该标签中的根 package.json 一致；其他触发检出对应提交。
 
 第一次上线由维护者完成：DNS 添加 `nocturne` CNAME 指向 `kanzaki-chiya.github.io`；仓库 Pages 来源设为 GitHub Actions；推送后在 Pages 设置确认域名并启用强制 HTTPS。提交代码本身不会开启 Pages。
 

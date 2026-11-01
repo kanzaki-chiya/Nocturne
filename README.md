@@ -1,6 +1,6 @@
 # Nocturne
 
-**项目主页**：<https://nocturne.koxia.cn/> · **下载安装**：[GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases)
+**项目主页**：<https://nocturne.koxia.cn/> · **用户文档**：<https://nocturne.koxia.cn/docs/> · **下载安装**：[GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases)
 
 Nocturne 是在本地代码仓库里工作的编程助手。你可以用自然语言让它阅读和搜索代码、修改文件、运行命令与测试；所有操作都受你设定的权限约束，对话过程和每一次文件改动都保存在本地，随时可以恢复、整轮撤销、回退或分叉。
 

@@ -1,0 +1,110 @@
+# TUI 和命令行
+
+在交互式终端中直接运行 `nctrn`，默认进入全屏终端界面（TUI）；也可以切到普通屏幕模式、逐行 REPL 或非交互的单次执行模式。
+
+## 启动参数与子命令
+
+### 界面与会话选择
+
+| 命令 / 参数 | 说明 |
+|---|---|
+| `nctrn` | 交互模式：在 TTY 终端中默认打开全屏 TUI 并新建会话 |
+| `--inline` | TUI 普通屏幕模式：不进入备用屏幕，已完结内容写入终端回滚区 |
+| `--cli` | 逐行 REPL 模式（与 `--tui`、`--inline`、`-p`、`--sessions` 互斥） |
+| `--tui` | 显式要求全屏 TUI（非 TTY 下以退出码 `2` 报错退出） |
+| `-c`、`--continue` | 恢复当前工作目录最近一次会话（若无则新建） |
+| `--resume <id>` | 恢复指定 ID 的会话（可与 `--model`、`-p` 组合） |
+| `--sessions` | 列出本机全部会话（ID、时间、目录、模型、锁状态）后退出 |
+| `--force-unlock` | 恢复会话前先清理残留会话锁（确认原持有进程已退出时使用） |
+
+### 模型、权限与诊断参数
+
+| 参数 | 说明 |
+|---|---|
+| `--preset <name>` | 新建会话的权限预设：`read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` |
+| `-y`、`--yes` | 自动批准所有需要确认（`ask`）的操作 |
+| `--model <id>` | 指定模型 ID（覆盖 `NOCTURNE_MODEL` 与配置文件） |
+| `--api-type <type>` | 临时服务商协议：`openai-compatible`（默认）或 `anthropic` |
+| `--base-url <url>` | 临时服务商端点（覆盖 `NOCTURNE_BASE_URL`） |
+| `--api-key-env <名>` | 指定读取 API Key 的环境变量名 |
+| `--debug` | 启用诊断日志输出（等价于 `NOCTURNE_DEBUG=1`） |
+| `--debug-file <p>` | 诊断日志输出路径（传 `-` 输出到 `stderr`） |
+| `-h`、`--help` | 打印帮助信息 |
+| `-v`、`--version` | 打印版本号 |
+
+### 子命令
+
+| 子命令 | 说明 |
+|---|---|
+| `nctrn setup` | 打开服务商配置页（加 `--cli` 使用逐行配置向导） |
+| `nctrn trust` | 信任当前工作目录的 `.nocturne/config.json` |
+| `nctrn untrust` | 取消信任当前工作目录 |
+| `nctrn grants` | 查看当前目录（或 `--workspace <dir>`）的项目级授权 |
+| `nctrn grants revoke` | 撤销指定编号或 `--all` 全部项目级授权 |
+| `nctrn mcp` | 启动对外 MCP 服务器桥（`stdio`，可加 `--name <label>`） |
+| `nctrn rpc --stdio` | 启动 JSON-RPC 服务端（供桌面端等进程外客户端调用） |
+
+## 单次非交互执行（`-p` / `--print`）
+
+适合在脚本、CI 或管道中运行一轮任务后直接退出：
+
+```bash
+# 直接传入提示词执行一轮
+nctrn -p "解释当前仓库的目录结构"
+
+# 从标准输入读取提示词，搭配 auto-edit 预设与自动确认
+git diff | nctrn -p "审查这段改动" --preset auto-edit -y
+```
+
+退出码约定：
+
+- `0`：正常完成（`done`）。
+- `1`：回合执行出错、被拒绝或达到上限。
+- `2`：命令行参数错误、配置校验失败或恢复会话失败。
+- `130`：被用户中断（`Ctrl+C`）。
+
+## 斜杠命令
+
+在 TUI、逐行 CLI（以及桌面端输入框）中输入 `/` 可触发斜杠命令：
+
+| 命令 | 作用 |
+|---|---|
+| `/help` | 显示可用命令与快捷键帮助 |
+| `/model` | 切换当前会话模型（TUI 打开全屏模型选择页） |
+| `/effort` | 切换思考档位（`off`、`minimal`、`low`、`medium`、`high`、`xhigh`） |
+| `/preset` | 切换当前会话权限预设 |
+| `/shell` | 查看或切换命令执行使用的 Shell（`auto`、`pwsh`、`powershell`、`bash`、`cmd`、`sh`） |
+| `/provider` | 管理服务商（支持 `login`、`logout`、`add`、`key`、`refresh`、`model`、`enable`、`disable`、`remove`） |
+| `/settings` | 设置新会话默认值与界面偏好 |
+| `/theme` | 在「月之暗面」（`dark`）与「月之亮面」（`light`）主题间切换（仅 TUI） |
+| `/context` | 查看当前上下文窗口占用与组成细分 |
+| `/cost` | 查看当前会话与近 30 天的 Token 用量与预估费用 |
+| `/compact` | 立即手动压缩当前会话上下文 |
+| `/grants` | 查看会话与项目授权，或用 `/grants revoke` 撤销 |
+| `/mcp` | 查看 MCP 服务器连接状态与工具数 |
+| `/skills` | 查看当前会话已加载的技能、来源与目录预算 |
+| `/subagents` | 查看或取消运行中的后台子代理（仅 TUI） |
+| `/agents` | 查看已配置的外部 Agent 与状态 |
+| `/resume` | 列出历史会话或按 ID 切换会话 |
+| `/rename` | 修改当前会话标题（不带参数清空显式标题） |
+| `/rewind` | 选择历史用户消息回退对话或还原文件 |
+| `/fork` | 从当前位置分叉出新会话 |
+| `/new`、`/clear` | 新建并切换到空会话 |
+| `/exit`、`/quit` | 退出程序 |
+
+## TUI 常用快捷键
+
+| 按键 | 作用 |
+|---|---|
+| `Enter` | 空闲时发送消息；运行中发送**插话**（`steer`） |
+| `Tab` | 补全菜单打开时补全候选；运行中发送**排队**消息（`queue`） |
+| `Ctrl+J`（或行尾 `\` 加 `Enter`） | 在输入框内换行 |
+| `Shift+Tab` | 在输入框内循环切换当前模型支持的思考档位 |
+| `Alt+M` | 在 `read-only` → `default` → `auto-edit` → `guarded` 四个预设间循环切换 |
+| `Alt+V` | 读取剪贴板中的复制文件或图片作为附件插入（Windows） |
+| `Ctrl+O` | 展开或收起全部思考过程与长工具输出 |
+| `PgUp/PgDn`、`Ctrl+End` | 向上/向下翻阅对话视口，或跳回底部跟随最新输出（也支持鼠标滚轮与拖选复制） |
+| `Esc` | 清除选区、关闭弹层；运行中中断当前回合；空闲且输入框为空时连按两次 `Esc` 打开回退列表 |
+| `Ctrl+C` | 有文本选区时复制选区；运行中中断当前回合；空闲时退出 |
+| `Alt+E` / `Alt+X` / `Alt+T` / `Alt+R` | 管理待发消息队列：编辑选中项、撤回、切换插话/排队、暂停后继续发送 |
+| `a` / `s` / `p` / `d` / `x` | 权限确认框快捷键：允许一次、本会话允许、本项目允许、拒绝（可附带原因）、拒绝并停止 |
