@@ -389,6 +389,17 @@ describe("StatusBar", () => {
     rendered.rerender(<StatusBar {...state} view={view} />);
     expect(tokensEl()?.textContent).toBe("1.0k tokens");
     expect(cacheEl()?.textContent).toBe("缓存 90%");
+    const withInput = (inputTokens: number) => ({
+      ...view,
+      entries: view.entries.map((entry) => ({
+        ...entry,
+        usage: { ...entry.usage, inputTokens },
+      })),
+    });
+    rendered.rerender(<StatusBar {...state} view={withInput(9_999_000)} />);
+    expect(tokensEl()?.textContent).toBe("9999.0k tokens");
+    rendered.rerender(<StatusBar {...state} view={withInput(24_579_100)} />);
+    expect(tokensEl()?.textContent).toBe("24.6m tokens");
   });
 
   it("已有数据时刷新不插入读取行；失败保留数据并在标题显示提示", async () => {

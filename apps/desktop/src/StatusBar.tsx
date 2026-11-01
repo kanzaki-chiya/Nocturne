@@ -71,6 +71,7 @@ const MCP_STATE_TEXT: Record<UnavailableMcpServer["state"], string> = {
 };
 
 function compactTokens(n: number): string {
+  if (n >= 10_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return number.format(n);
 }
