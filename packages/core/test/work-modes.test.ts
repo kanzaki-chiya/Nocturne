@@ -466,7 +466,9 @@ describe("/goal", () => {
     expect(resumed.state().goal).toMatchObject({ objective: "收尾", status: "met", rounds: 0 });
     const goalWrites = resumed
       .durableEvents()
-      .flatMap((e) => (e.type === "session.config_changed" && e.payload.goal ? [e.payload.goal] : []));
+      .flatMap((e) =>
+        e.type === "session.config_changed" && e.payload.goal ? [e.payload.goal] : [],
+      );
     expect(goalWrites.every((goal) => goal.objective === "收尾")).toBe(true);
     await resumed.close();
   });
