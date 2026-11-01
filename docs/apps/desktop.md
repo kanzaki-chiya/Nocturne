@@ -6,7 +6,7 @@
 
 ## 1. 进程结构与后台策略
 
-ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可选「接口地址」；空值清除 `userModels.<id>.baseURL`，占位显示当前自动地址，标签旁来源标记显示用户编辑 / models.dev，默认来源不显示。保持原有草稿、保存、全部恢复跟随与只读行为。解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
+ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可选「接口地址」；空值清除 `userModels.<id>.baseURL`，占位显示当前自动地址，不显示用户编辑 / models.dev 等字段来源标记。保持原有草稿、保存、全部恢复跟随与只读行为。解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
 子代理档位见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)：设置导航「外部 agent」改名「子代理」，同页左列分内置档位和外部 agent。添加提供空白/quick/deep 模板（模型留空），编辑器包含名称（创建后锁定）、描述、模型、超时、强度、工具上限、启用和删除。default 始终启用且不能删除，模型写 modelRoles.task；模型页的子代理模型行跳转到这里。预览复用 Core 的 subagentSelectionTable；对话工具行显示档位徽标、实际模型和强度，展开显示选择理由，旧调用无 profile 不显示徽标。外部编辑和探测保持原行为，说明标签改为描述。
 
 
@@ -287,10 +287,10 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 服务商页（`src/ProvidersPage.tsx`）在设置区内有自己的两列：
 
 - **列表**：左列分「已配置」（`describeProviders`）与「可添加」（`listProviderPresets`，已按默认名配置过的预设不再列出，自定义类预设始终可添加）。行内显示状态点、显示名（条目声明了 `displayName` 时用显示名，否则 id）、「N 个模型」；当前会话正在用的服务商标「当前」（没有选中会话时取 `defaultModel` 的服务商，即新会话将用的那个），进入页面时默认选中它，凭据失效的行尾写「已失效」并标黄。停用的服务商（`ProviderOverview.enabled === false`）用空心状态点、名字变淡并标「已停用」；有模型被逐个停用时模型数写「已启用 N / 总数」。
-- **详情**：标题行最左是本服务商的启用开关（`role="switch"`，位置与 MCP 页一致，`setProviderEnabled`），随后是操作按钮 + 信息卡（类型、地址、认证、凭据、保存位置、来源）+ 模型表。停用时信息卡上方出现「已停用」横幅和「重新启用」。按钮组只看 `ProviderOverview.authKind`，不按预设名或文案推断：`apiKey` 有「换密钥」（`setCredential`，password 输入，保存后清空），`none` 且为向导条目时显示为「设置密钥」；`account` 有「退出登录」（`logoutProvider`，只删本机凭据，确认对话框说明），失效时信息卡上方出现「账号登录已失效」横幅和「重新登录」，登录等待卡片内联在详情里；向导条目另有「刷新模型列表」（`refreshUpstreamLimits`）与「删除」（`removeSetupProvider`）。自定义条目（providers.json 里 id 不与内置预设相同的条目）另有「编辑」：打开与添加表单同款的编辑对话框，`describeSetupProvider` 预填显示名、服务地址、协议、自定义请求头与会话标识请求头；服务商 ID 锁定、凭据不进表单（仍走「换密钥」）。地址或协议变化时必须先「获取模型」（`probeSetupProviderModels` 按候选配置探测，不写配置），结果提示模型数与当前在用模型是否仍在清单里；探测失败允许「仍然保存」（不带新清单，条目保留原模型列表）。保存经 `updateSetupProvider` 整条替换（规则见 [provider-setup.md](../architecture/provider-setup.md) 第 6 节）。打开的会话在用该服务商时删除按钮置灰，悬停说明「当前会话正在使用，不能删除」；服务端返回 `provider_in_use` 时同样置灰。来自其他配置层（config.json、项目配置）的条目只读：详情页头显示「只读」徽标，徽标与置灰的删除按钮均以 `title` 说明来源文件及「请修改该文件」，没有换密钥。删除是否允许以服务端为准。账号的访问令牌过期但刷新令牌还在时显示「有效」（Core 规则，[provider-setup.md](../architecture/provider-setup.md) 第 6 节）。
+- **详情**：标题行最左是本服务商的启用开关（`role="switch"`，位置与 MCP 页一致，`setProviderEnabled`），随后是操作按钮 + 信息卡（类型、地址、认证、凭据、保存位置）+ 模型表。停用时信息卡上方出现「已停用」横幅和「重新启用」。按钮组只看 `ProviderOverview.authKind`，不按预设名或文案推断：`apiKey` 有「换密钥」（`setCredential`，password 输入，保存后清空），`none` 且为向导条目时显示为「设置密钥」；`account` 有「退出登录」（`logoutProvider`，只删本机凭据，确认对话框说明），失效时信息卡上方出现「账号登录已失效」横幅和「重新登录」，登录等待卡片内联在详情里；向导条目另有「刷新模型列表」（`refreshUpstreamLimits`）与「删除」（`removeSetupProvider`）。自定义条目（providers.json 里 id 不与内置预设相同的条目）另有「编辑」：打开与添加表单同款的编辑对话框，`describeSetupProvider` 预填显示名、服务地址、协议、自定义请求头与会话标识请求头；服务商 ID 锁定、凭据不进表单（仍走「换密钥」）。地址或协议变化时必须先「获取模型」（`probeSetupProviderModels` 按候选配置探测，不写配置），结果提示模型数与当前在用模型是否仍在清单里；探测失败允许「仍然保存」（不带新清单，条目保留原模型列表）。保存经 `updateSetupProvider` 整条替换（规则见 [provider-setup.md](../architecture/provider-setup.md) 第 6 节）。打开的会话在用该服务商时删除按钮置灰，悬停说明「当前会话正在使用，不能删除」；服务端返回 `provider_in_use` 时同样置灰。来自其他配置层（config.json、项目配置）的条目只读：详情页头显示「只读」徽标，徽标与置灰的删除按钮均以 `title` 说明来源文件及「请修改该文件」，没有换密钥。删除是否允许以服务端为准。账号的访问令牌过期但刷新令牌还在时显示「有效」（Core 规则，[provider-setup.md](../architecture/provider-setup.md) 第 6 节）。
 - **模型表**：可搜索；第一列是逐个模型的启用开关（`setModelsEnabled`，服务商停用时保留状态但不可点），列为名称、能力（R 推理、I 图片输入）、上下文（千分位）、最大输出（K；上游声明的最大输出 ≥ 上下文窗口时显示为灰色加删除线，悬停说明「上游声明的最大输出不小于上下文窗口，已忽略」，用户手填值不做此检查），带「默认」「已编辑」「已停用」标记；表头右侧「全部启用」「全部停用」批量作用于当前列出的模型，有搜索词时改为「启用筛选结果」「停用筛选结果」并只作用于筛出的模型；表头计数在有模型被逐个停用时写「已启用 N / 总数」，服务商停用时写「服务商已停用」并以弱化色跟「逐个设置保留 N / 总数」（N 由 `ModelInfo.disabled === "model"` 之外的模型数得出，开关状态即由此还原）；悬停行显示「设置」，打开模型设置对话框。
 - **启停与确认**（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)）：停用前先问 `describeToggleImpact`，受影响的打开会话数、默认模型、模型角色非空时弹页内确认（列出这些影响，确认后才写设置），没人使用时直接切换；重新启用不确认。开关状态只读 Core 字段：`ProviderOverview.enabled` / `enabledModelCount` 与 `ModelInfo.disabled`（`"provider" | "model"`），客户端不自行判断停用；模型清单用 `runtime.listModels({ includeDisabled: true })`——服务商页是唯一使用它的地方，其余模型列表默认滤除停用模型（设置页只用它给「已停用」的值加删除线）。停用写入 settings.json，配置与凭据保留，重新启用即恢复。
-- **模型设置对话框**（`src/ModelSettingsDialog.tsx`）：显示名、上下文、最大输出、图片输入、推理、思考档位、协议、编辑工具八项，每项写来源（上游、推导、默认、已编辑等）；「全部恢复跟随」清掉全部用户值。改动只在「保存」时经 `saveModelSettings` 写入 providers.json 的 userModels，「取消」不写。推理选「否」时思考档位置灰。
+- **模型设置对话框**（`src/ModelSettingsDialog.tsx`）：显示名、上下文、最大输出、图片输入、推理、思考档位、协议、编辑工具八项，不写字段来源，只读时显示「只读」徽标；「全部恢复跟随」清掉全部用户值。改动只在「保存」时经 `saveModelSettings` 写入 providers.json 的 userModels，「取消」不写。推理选「否」时思考档位置灰。
 - **添加服务商**：选「可添加」里的预设进入表单，字段由 `describeProviderSetup` 驱动（固定值只读显示；凭据方式按 apiKey / 环境变量 / 账号登录 / 外部文件，OpenRouter 可选浏览器登录或粘贴密钥）。「获取模型」调 `prepareProvider` 拿到草稿，之后「保存」才可点（`commitProvider`）；获取前保存置灰，获取后改任何字段都作废结果、释放草稿并重新置灰。获取期间可「取消获取」：前端立即回到可编辑，输入保留，晚到的响应若带回草稿立即 `discardProvider` 释放。结果区显示「已获取 N 个模型」与 notices，并按 `PrepareProviderResult.models` 预览：折叠时列前 4 个模型名和「等 N 个」，「展开全部 ▶」后是限高、内部滚动的表格（名称、能力、上下文、最大输出），「收起 ▶」还原，每次重新获取都回到折叠。失败写「获取失败」与原因；`-32005` 带 `data.field` 时错误只显示在对应字段下，结果区不再重复「获取失败」——与已有服务商重名也以 `field: "name"` 报告（[provider-setup.md](../architecture/provider-setup.md) 第 2 节「名称唯一性」）。`needsManualModel` 时出现「模型 ID」输入框。「取消」、切走或离开页面都会 `discardProvider` 释放草稿，进行中的草稿登录经 `login.cancel` 取消（RPC 层把 Core 的 `discardDraftLogin` 映射为 `login.cancel`）。
 - **登录**：`login.start` / `login.startDraft` 后用外链白名单打开系统浏览器；等待卡片（`src/LoginWaitCard.tsx`）有复制链接、重新打开浏览器、取消、倒计时（以 `LoginStarted.expiresAt` 为准，仅展示），可展开「粘贴回调地址 / 粘贴授权码」走 `login.submitManual`。`login.completed` 带 `unstoredKey` 时密钥只在卡片里显示这一次，前端不存储、不打日志。
 - **同步**：服务商变更后后台推 `runtime.providersChanged`，页面、状态栏模型菜单与空状态模型 chip 随之刷新（单后台，无跨后台传播）。
@@ -305,7 +305,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 #### MCP
 
-「服务商」后的「MCP」页（`src/McpPage.tsx`）复用列表、详情和 Dropdown。按程序管理与 config.json 只读分组，HTTP 标示标签；详情标题行包含来源小标签、启用拨动开关、分隔线与操作按钮。只读详情的「只读」徽标与置灰开关在 `title` 说明来源路径及「请修改该文件」，保留测试连接（未信任项目时置灰并在 `title` 说明原因）。信息卡首行完整显示等宽命令或地址，允许任意字符折行，下面四格为最近测试、服务器、工作目录（HTTP 为传输）、超时。空态提供添加和 JSON 导入。测试结果仅保存在本次页面内存，不落盘；失败按错误码给出具体说明，401/403 显示「认证失败，请检查请求头」。
+「服务商」后的「MCP」页（`src/McpPage.tsx`）复用列表、详情和 Dropdown。只读组标题仅写「只读」，可编辑组不写来源；详情标题行只在只读时显示「只读」徽标，保留启用拨动开关、分隔线与操作按钮。只读详情的「只读」徽标与置灰开关在 `title` 说明来源路径及「请修改该文件」，保留测试连接（未信任项目时置灰并在 `title` 说明原因）。信息卡首行完整显示等宽命令或地址，允许任意字符折行，下面四格为最近测试、服务器、工作目录（HTTP 为传输）、超时。空态提供添加和 JSON 导入。测试结果仅保存在本次页面内存，不落盘；失败按错误码给出具体说明，401/403 显示「认证失败，请检查请求头」。
 
 添加和编辑可切换「本地命令」/「远程地址（HTTP）」，保留名称和超时；编辑名称以灰底淡色文字显示锁定态。环境变量与请求头共用值表，可选明文、环境变量引用或凭据库；密钥形名称默认 stored，已保存值只显示状态并提供替换、清除，后端不可用时禁用 stored 并在说明行写原因。测试连接使用未保存草稿，失败也可保存，字段错误显示于输入框下方。导入在前端解析三种 JSON 形状，推断 HTTP，跳过 SSE 和混写条目，提示 OAuth 不支持，并逐台进入确认表单。
 
@@ -313,7 +313,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 #### 外部 agent
 
-外部 agent 现在是「技能」之后的「子代理」页里的一个分组（页面仍是 `src/ExternalAgentsPage.tsx`，左列另有内置档位分组，见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)）。外部 agent 分组沿用 MCP 的列表/详情/内联表单布局。列表按 `external-agents.json` 程序管理与 `config.json` 只读分组；详情显示来源路径、命令、模式、字符串环境变量、会话配置项、启用开关和最近一次测试的时间/耗时/结果。手写配置只能查看和测试，不能在程序里编辑、删除或启停（详情页头「只读」徽标及置灰的开关、编辑、删除按钮均在 `title` 说明来源文件及「请修改该文件」）；项目级外部 agent 不读取，查询警告原样展示。
+外部 agent 现在是「技能」之后的「子代理」页里的一个分组（页面仍是 `src/ExternalAgentsPage.tsx`，左列另有内置档位分组，见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)）。外部 agent 分组沿用 MCP 的列表/详情/内联表单布局。列表只读组标题写「只读」，可编辑组不写来源；详情不显示来源行，保留命令、模式、字符串环境变量、会话配置项、启用开关和最近一次测试的时间/耗时/结果。手写配置只能查看和测试，不能在程序里编辑、删除或启停（详情页头「只读」徽标及置灰的开关、编辑、删除按钮均在 `title` 说明来源文件及「请修改该文件」）；项目级外部 agent 不读取，查询警告原样展示。
 
 添加表单可填入本地预设 `omp --mode acp` 与 `npx @agentclientprotocol/codex-acp`，默认停用，不强制 approval 参数、模式或配置项。名称创建后锁定；命令、逐行参数、说明、可选模式、环境变量 JSON 和 `configOptions` JSON 均可编辑。环境变量只接受字符串字面值或 `${NAME}` 引用，不用 Nocturne 的凭据库。保存失败保留草稿，测试失败仍允许保存。删除需确认，只删除程序维护配置，不卸载外部工具或删除它的账号。
 
@@ -323,7 +323,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 ### 5.6 常规、模型与外观页
 
-`src/SettingsPage.tsx` 按导航项渲染三页，页头只显示标题（标签已说明含义的设置行不再重复副标题）。按 [ADR-0045](../decisions/ADR-0045-fullscreen-page-shell.md) 第 7 节逐项保存，每行右侧写来源层：
+`src/SettingsPage.tsx` 按导航项渲染三页，页头只显示标题（标签已说明含义的设置行不再重复副标题）。按 [ADR-0045](../decisions/ADR-0045-fullscreen-page-shell.md) 第 7 节逐项保存，不显示配置来源；被更高层覆盖的行，右侧值用 `--a-warning` 色，值的 `title` 保留「保存的值被更高层（…）覆盖，改了也不生效」，不加徽标或可见说明：
 
 | 页 | 分组 | 项 | 保存方式 |
 | --- | --- | --- | --- |
@@ -334,7 +334,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 | 常规 | 执行 | 面板浏览器 | 拨动开关（仅桌面端提供 `agentBrowser` 外壳时显示），首次开启先内联显示风险确认框（「网页内容不可信，可能诱导它操作其他页面。」，偏好 `agentBrowserRiskAccepted`），切换写入 `prefs.agentBrowserEnabled` 并调外壳 `agent_browser_set_enabled`，成功后以 toast 提示「已开启」 |
 | 常规 | 普通对话 | 工作区 | 「更改…」选目录、「恢复默认」；只写 prefs |
 | 常规 | 更新 | 自动检查更新 | 拨动开关（`mcp-switch`），只写 `prefs.autoUpdate`（缺省开；显式关才存 `false`） |
-| 常规 | 通知 | 总开关 / 通知内容 / 提醒触发时长 / 提示音 / 测试通知 | 「常规」页末尾新开一节（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：总开关（`notifications.enabled`，带「已开启/已关闭」文字）关闭时下面各项变灰禁用；三个事件复选（`notifications.events.attention/error/done`）同处一行共用标签旁的来源标记；提醒触发时长下拉（`notifications.doneAfterSeconds`：30 秒 / 1 分钟 / 3 分钟 / 5 分钟 / 10 分钟，保存值不在档位里时单列一项「N 秒」并保留，「完成」未勾选时整行变灰）；提示音开关（`notifications.sound`，只管桌面端 toast）；「发送测试通知」走同一个 `notify_show` 发一条「这是一条测试通知」，外壳报告 `disabled` 时在按钮旁显示「Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开」。逐项 `updateSettings`，失败值回到原样并在行下写红字 |
+| 常规 | 通知 | 总开关 / 通知内容 / 提醒触发时长 / 提示音 / 测试通知 | 「常规」页末尾新开一节（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：总开关（`notifications.enabled`，带「已开启/已关闭」文字）关闭时下面各项变灰禁用；三个事件复选（`notifications.events.attention/error/done`）同处一行，共用被覆盖项的悬停警告；提醒触发时长下拉（`notifications.doneAfterSeconds`：30 秒 / 1 分钟 / 3 分钟 / 5 分钟 / 10 分钟，保存值不在档位里时单列一项「N 秒」并保留，「完成」未勾选时整行变灰）；提示音开关（`notifications.sound`，只管桌面端 toast）；「发送测试通知」走同一个 `notify_show` 发一条「这是一条测试通知」，外壳报告 `disabled` 时在按钮旁显示「Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开」。逐项 `updateSettings`，失败值回到原样并在行下写红字 |
 | 模型 | 默认 | 默认模型与档位 | 对话框，`setDefaultModel` 成对保存；所选模型没有档位时传 null |
 | 模型 | 模型角色 | 子代理模型 / 视觉模型 / 轻量模型 | 对话框选择模型或清除；视觉模型只列支持图片输入的模型 |
 | 外观 | 主题 | 跟随系统 / 月之亮面（浅色） / 月之暗面（深色） | 三张预览卡片（`role="radio"`），主标签下用小字标注浅色/深色，只写 prefs（取值仍是 `system`/`light`/`dark`），立即生效 |
@@ -345,7 +345,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 主题写 `document.documentElement.dataset.theme`，跟随系统时删掉该属性回到 `prefers-color-scheme`。更改普通对话工作区只写 `prefs.plainWorkspace` 并把新旧路径记进 `prefs.plainWorkspaces`，旧位置的对话仍归「对话」区；单后台不随工作区切换重启（ADR-0051）——若后台尚未启动则以新工作区为 cwd 启动，新会话按所选目录传 `cwd`/`workspaceRoot`。
 
-**下拉**（`src/Dropdown.tsx`，desktop-v4.html A 屏）：设置页的下拉与状态栏的思考档位、权限预设菜单共用这一个组件，不用原生 `select`。触发器是 `role="combobox"`（`aria-haspopup="listbox"`、`aria-expanded`、打开时 `aria-controls` 指向 `role="listbox"`），焦点始终留在触发器，当前项用 `aria-activedescendant` 指示，选项是 `role="option"`（`aria-selected`，不可选的 `aria-disabled` 并悬停说明原因）。键盘：Tab 聚焦；Enter / 空格 / ↓ 打开；↑↓ 移动并跳过不可选项，Home / End 到首尾；Enter / 空格选择并关闭；Esc 关闭、焦点留在触发器且不冒泡给外层；Tab 关闭。点外部关闭。列表 `position: fixed`，优先向下，下方放不下且上方更宽裕时向上（状态栏在底部），放不下时限高滚动，最小宽 300px。每个选项是「名称 + 中文名 + 一行说明」，危险项（`bypass`）排在分隔线之后并用警告色。权限预设与思考档位的中文名和说明只在 `src/choice-info.ts` 维护一份。输入框卡片与托盘里的 chip 菜单仍用 `ChoiceMenu`。
+**下拉**（`src/Dropdown.tsx`，desktop-v4.html A 屏）：设置页的下拉与状态栏的思考档位、权限预设菜单共用这一个组件，不用原生 `select`。触发器是 `role="combobox"`（`aria-haspopup="listbox"`、`aria-expanded`、打开时 `aria-controls` 指向 `role="listbox"`），焦点始终留在触发器，当前项用 `aria-activedescendant` 指示，选项是 `role="option"`（`aria-selected`，不可选的 `aria-disabled` 并悬停说明原因）。键盘：Tab 聚焦；Enter / 空格 / ↓ 打开；↑↓ 移动并跳过不可选项，Home / End 到首尾；Enter / 空格选择并关闭；Esc 关闭、焦点留在触发器且不冒泡给外层；Tab 关闭。点外部关闭。列表 `position: fixed`，优先向下，下方放不下且上方更宽裕时向上（状态栏在底部），放不下时限高滚动，最小宽 300px。权限与思考档位选项只显示名称与中文名，危险项（`bypass`）排在分隔线之后并用警告色。权限预设与思考档位的中文名只在 `src/choice-info.ts` 维护一份。输入框卡片与托盘里的 chip 菜单仍用 `ChoiceMenu`。
 
 可搜索下拉始终设置可用空间与 420px 中较小的高度上限；列表自身或其内部选项滚动不重新定位，页面或触发器祖先容器滚动时重新跟随触发器，仍保留限高。`Menu` 不监听 scroll，没有此类滚动后移除限高的问题。
 
@@ -476,3 +476,5 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 ## 9. 视觉规范（字号、圆角与文案）
 
 桌面端与手机网页的颜色、字体、字号、间距、圆角、阴影、基础控件、页面模板、文案规范与例外清单见根目录 [`DESIGN.md`](../../DESIGN.md)。
+
+设置页面除覆盖值的警告色与悬停提示、只读徽标外不显示配置来源；Shell 行既有的「由…指定」保留。压缩阈值只显示 `400k`、`80%` 等值，未设置为「默认」，非默认修剪上限仍保留后缀；安全审查的模型值直接显示 `provider · model`，模型值下方的服务商名保留。

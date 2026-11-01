@@ -1,13 +1,11 @@
 import { useId, type ReactNode } from "react";
 
-import { SourceMarker, type SourceMarkerProps } from "./SourceMarker";
-
 export interface SettingsRowProps {
   label: ReactNode;
   /** 标签与控件关联（控件是原生输入框时） */
   labelFor?: string | undefined;
-  /** 来源标记；不传或值等于默认时不显示 */
-  marker?: SourceMarkerProps | undefined;
+  /** 保存值被更高层覆盖时，值以警告色显示，悬停说明覆盖层 */
+  overrideTitle?: string | undefined;
   /** 标签旁的徽标 */
   badge?: ReactNode;
   /** 标签下面的说明 */
@@ -23,11 +21,11 @@ export interface SettingsRowProps {
   children?: ReactNode;
 }
 
-/** 设置行（`.srow`）：左侧标签（可带来源标记、徽标、说明），右侧控件；整行是以标签命名的 group */
+/** 设置行（`.srow`）：左侧标签（可带徽标、说明），右侧控件；整行是以标签命名的 group */
 export function SettingsRow({
   label,
   labelFor,
-  marker,
+  overrideTitle,
   badge,
   desc,
   error,
@@ -59,7 +57,6 @@ export function SettingsRow({
               {label}
             </span>
           )}
-          {marker !== undefined && <SourceMarker {...marker} />}
           {badge}
         </div>
         {show(desc) && <div className="desc">{desc}</div>}
@@ -70,7 +67,11 @@ export function SettingsRow({
           </div>
         )}
       </div>
-      {show(children) && <div className="ctl">{children}</div>}
+      {show(children) && (
+        <div className={`ctl${overrideTitle ? " overridden" : ""}`} title={overrideTitle}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }

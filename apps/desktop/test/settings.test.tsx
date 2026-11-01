@@ -284,14 +284,50 @@ describe("SettingsPage", () => {
     server.close();
   });
 
-  it("被覆盖的项用 warn 来源标记并在 title 写明覆盖层", async () => {
+  it("被覆盖的值用 warning class 并在 title 写明覆盖层，页面不写来源", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
     render(<SettingsPage {...props(server.client)} />);
-    const ov = await screen.findByText("项目配置");
-    expect(ov.className).toBe("marker warn");
-    expect(ov.getAttribute("title")).toBe("保存的值被更高层（项目配置）覆盖，改了也不生效");
-    expect(row("压缩阈值").contains(ov)).toBe(true);
+    await screen.findByText("85%");
+    const ov = row("压缩阈值").querySelector<HTMLElement>(".ctl.overridden");
+    expect(ov?.className).toBe("ctl overridden");
+    expect(ov?.getAttribute("title")).toBe("保存的值被更高层（项目配置）覆盖，改了也不生效");
+    expect(ov?.textContent).toContain("85%");
+    expect(document.body.textContent).not.toMatch(/\.json|项目配置/);
+    server.close();
+  });
+
+  it.each(["400000", "80%"])("压缩阈值 %s 只显示值，审查器模型不带前缀", async (threshold) => {
+    const server = fakeServer(
+      handlers({
+        "runtime.describeSettings": ITEMS.map((item) =>
+          item.key === "compaction.threshold"
+            ? { ...item, effective: threshold }
+            : item.key === "permission.reviewer"
+              ? {
+                  ...item,
+                  reviewer: {
+                    effective: {
+                      backend: "model",
+                      model: { provider: "opencode-go", model: "deepseek-v4.1-flash" },
+                    },
+                    saved: undefined,
+                  },
+                }
+              : item,
+        ),
+      }),
+    );
+    await server.initialize();
+    render(<SettingsPage {...props(server.client)} />);
+    await screen.findByText(threshold === "400000" ? "400k" : "80%");
+    expect(row("压缩阈值").querySelector(".val")?.textContent).toBe(
+      threshold === "400000" ? "400k" : "80%",
+    );
+    expect(row("安全审查").querySelector(".val")?.textContent).toBe(
+      "opencode-go · deepseek-v4.1-flash",
+    );
+    expect(document.body.textContent).not.toContain(".json");
     server.close();
   });
 

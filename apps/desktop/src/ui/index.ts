@@ -30,5 +30,4 @@ export {
 } from "./SegmentedControl";
 export { SettingsGroup, type SettingsGroupProps } from "./SettingsGroup";
 export { SettingsRow, type SettingsRowProps } from "./SettingsRow";
-export { SourceMarker, type SourceMarkerProps, type SourceMarkerTone } from "./SourceMarker";
 export { Switch, type SwitchProps } from "./Switch";

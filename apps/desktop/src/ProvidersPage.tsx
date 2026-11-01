@@ -103,7 +103,7 @@ function storageText(p: ProviderOverview): string {
     case "memory":
       return "仅本次运行";
     case undefined:
-      return p.keySource === "env" ? `环境变量 ${p.keyEnvName ?? ""}`.trim() : "—";
+      return "—";
   }
 }
 function originText(p: ProviderOverview): string {
@@ -796,12 +796,11 @@ function ProviderDetail({
             {cred.text}
           </span>
         </SettingsRow>
-        <SettingsRow label="保存位置">
-          <span className="val">{storageText(p)}</span>
-        </SettingsRow>
-        <SettingsRow label="来源">
-          <span className="val mono">{originText(p)}</span>
-        </SettingsRow>
+        {p.keySource !== "env" && (
+          <SettingsRow label="保存位置">
+            <span className="val">{storageText(p)}</span>
+          </SettingsRow>
+        )}
       </SettingsGroup>
 
       {(actionError !== null || notice !== null) && (
@@ -1032,7 +1031,6 @@ function ProviderDetail({
           provider={client.provider}
           providerId={p.id}
           readonly={!p.managed}
-          readonlyHint={!p.managed ? `只读：此条目来自 ${originText(p)}` : undefined}
           onClose={() => {
             setEditModel(null);
           }}

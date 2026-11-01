@@ -180,11 +180,7 @@ export function McpPage({
           const count = servers.filter((s) => (s.origin === "app") === (group === "app")).length;
           return (
             count > 0 && (
-              <ListGroup
-                key={group}
-                title={group === "app" ? "程序管理" : "config.json（只读）"}
-                count={count}
-              >
+              <ListGroup key={group} title={group === "app" ? undefined : "只读"} count={count}>
                 {servers
                   .filter((s) => (s.origin === "app") === (group === "app"))
                   .map((s) => (
@@ -236,9 +232,9 @@ export function McpPage({
               title={current.id}
               mono
               extra={
-                <Badge title={!current.editable ? `来自 ${current.path}，请修改该文件` : undefined}>
-                  {current.editable ? "程序管理" : "只读"}
-                </Badge>
+                !current.editable && (
+                  <Badge title={`来自 ${current.path}，请修改该文件`}>只读</Badge>
+                )
               }
               actions={
                 <>

@@ -711,6 +711,10 @@ describe("模型设置对话框", () => {
     );
     await server.initialize();
     await OPEN_DIALOG(server);
+    expect(screen.getByRole("dialog").querySelector(".marker")).toBeNull();
+    expect(screen.getByRole("dialog").textContent).not.toMatch(
+      /用户编辑|models\.dev|\.json|userModels/,
+    );
     fireEvent.change(screen.getByLabelText("显示名"), { target: { value: "Sonnet 4.5" } });
     const endpoint = screen.getByLabelText("接口地址") as HTMLInputElement;
     expect(endpoint.placeholder).toBe("https://api.test/v1");

@@ -309,10 +309,7 @@ export function ExternalAgentsPage({
                 {(["app", "user"] as const).map(
                   (origin) =>
                     agents.some((a) => a.origin === origin) && (
-                      <ListGroup
-                        key={origin}
-                        title={origin === "app" ? "程序管理" : "config.json（只读）"}
-                      >
+                      <ListGroup key={origin} title={origin === "app" ? undefined : "只读"}>
                         {agents
                           .filter((a) => a.origin === origin)
                           .map((a) => (
@@ -422,9 +419,7 @@ export function ExternalAgentsPage({
                 <DetailHeader
                   title={current.name}
                   mono
-                  extra={
-                    <Badge title={readonlyReason}>{current.editable ? "程序管理" : "只读"}</Badge>
-                  }
+                  extra={!current.editable && <Badge title={readonlyReason}>只读</Badge>}
                   actions={
                     <>
                       {" "}
@@ -484,12 +479,6 @@ export function ExternalAgentsPage({
                 <code>
                   {current.command} {current.args.join(" ")}
                 </code>
-              </SettingsRow>
-              <SettingsRow label="来源">
-                <span className="val mono">
-                  {current.path ??
-                    (current.origin === "app" ? "external-agents.json" : "config.json")}
-                </span>
               </SettingsRow>
               <SettingsRow label="模式">
                 <span className="val">{current.mode ?? "使用 agent 默认模式"}</span>

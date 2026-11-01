@@ -189,7 +189,7 @@ describe("MCP 设置页", () => {
       <McpPage client={f.client} workspaceRoot="test-workspace" version={0} onChanged={changed} />,
     );
     await screen.findByRole("heading", { name: "managed" });
-    expect(screen.getByRole("group", { name: "config.json（只读）" })).toBeDefined();
+    expect(screen.getByRole("group", { name: "只读" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
     const badge = screen.getByText("只读");
     expect(badge.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");

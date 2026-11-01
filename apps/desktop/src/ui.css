@@ -333,26 +333,6 @@
   cursor: default;
 }
 
-/* ---------- 来源标记 ---------- */
-.marker {
-  font-family: var(--mono);
-  font-size: var(--fs-1);
-  color: var(--a-muted);
-  white-space: nowrap;
-}
-.marker.accent {
-  color: var(--a-accent);
-}
-/* 被更高层覆盖：比普通标记醒目（警告色底 + 警告色字） */
-.marker.warn {
-  color: var(--a-warning);
-  background: var(--a-warning-bg);
-  border-radius: var(--radius-1);
-  padding: 0 var(--space-1);
-  font-weight: var(--fw-medium);
-  cursor: help;
-}
-
 /* ---------- 设置页结构（效果图「设置结构」） ---------- */
 .spage {
   flex: 1;
@@ -472,6 +452,10 @@
   color: var(--a-secondary);
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.srow .ctl.overridden,
+.srow .ctl.overridden :is(.val, code, .model-value, .model-provider, .muted-value, .dd-label) {
+  color: var(--a-warning);
 }
 .srow .val.mono,
 .srow .ctl code {

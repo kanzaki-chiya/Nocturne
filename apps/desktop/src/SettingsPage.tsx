@@ -32,7 +32,7 @@ import type {
 import { describeUpdateError, type CheckResult } from "./updater";
 import type { AgentBrowserHost } from "./host";
 import { FILE_OPENER_LABELS, isFileOpener, type FileOpener, type PrefsStore } from "./prefs";
-import { LAYER_TEXT, sourceMarker } from "./setting-source";
+import { LAYER_TEXT, settingOverrideTitle } from "./setting-source";
 import {
   Button,
   Checkbox,
@@ -89,16 +89,18 @@ function ModelValue({
   value,
   effort,
   off = false,
+  overrideTitle,
 }: {
   value: string;
   effort?: string | undefined;
   off?: boolean;
+  overrideTitle?: string | undefined;
 }) {
   const at = value.indexOf("/");
   const provider = at < 0 ? "" : value.slice(0, at);
   const model = at < 0 ? value : value.slice(at + 1);
   return (
-    <span className={`model-value${off ? " off" : ""}`} title={refText(value)}>
+    <span className={`model-value${off ? " off" : ""}`} title={overrideTitle ?? refText(value)}>
       <span className="model-primary">
         {model}
         {effort !== undefined && <span className="muted-value">{effort}</span>}
@@ -110,12 +112,7 @@ function ModelValue({
 
 function reviewerText(cfg: SecurityReviewerConfig | undefined): ReactNode {
   if (cfg === undefined || cfg.backend === "off") return "关闭";
-  if (cfg.backend === "model")
-    return (
-      <>
-        模型<span className="muted-value">{refText(refKey(cfg.model))}</span>
-      </>
-    );
+  if (cfg.backend === "model") return refText(refKey(cfg.model));
   const endpoint = cfg.endpoint === "custom" ? (cfg.baseURL ?? "自定义地址") : cfg.endpoint;
   return (
     <>
@@ -298,10 +295,10 @@ export function SettingsPage({
     done: item("notifications.events.done")?.effective !== "false",
   };
   const notifySound = item("notifications.sound")?.effective !== "false";
-  /** 「通知内容」三个开关同处一行，共用一个来源标记：显示被覆盖的一项，否则第一项 */
-  const notifyEventsMarker = () => {
+  /** 「通知内容」三个开关同处一行，共用覆盖警告：取被覆盖的一项 */
+  const notifyEventsOverrideTitle = () => {
     const list = NOTIFY_EVENT_KEYS.map((key) => item(key));
-    return sourceMarker(list.find((entry) => entry?.overridden === true) ?? list[0]);
+    return settingOverrideTitle(list.find((entry) => entry?.overridden === true) ?? list[0]);
   };
   /** 阈值下拉：保存值不在档位里时单列一项「N 秒」并保留（不悄悄改成别的值） */
   const notifyThreshold = (() => {
@@ -409,7 +406,7 @@ export function SettingsPage({
                 <SettingsGroup title="权限">
                   <SettingsRow
                     label="默认权限预设"
-                    marker={sourceMarker(presetItem)}
+                    overrideTitle={settingOverrideTitle(presetItem)}
                     error={errs("permissions.preset")}
                   >
                     <Dropdown
@@ -438,7 +435,7 @@ export function SettingsPage({
                 <SettingsGroup title="执行">
                   <SettingsRow
                     label="安全审查"
-                    marker={sourceMarker(reviewerItem)}
+                    overrideTitle={settingOverrideTitle(reviewerItem)}
                     error={errs("permission.reviewer")}
                   >
                     <span className="val">{reviewerText(reviewerCfg)}</span>
@@ -454,7 +451,7 @@ export function SettingsPage({
                   {shellItem !== undefined && (
                     <SettingsRow
                       label="Shell"
-                      marker={sourceMarker(shellItem)}
+                      overrideTitle={settingOverrideTitle(shellItem)}
                       error={errs("shell")}
                     >
                       {shellItem.source === "env" ||
@@ -546,7 +543,7 @@ export function SettingsPage({
                   )}
                   <SettingsRow
                     label="压缩阈值"
-                    marker={sourceMarker(
+                    overrideTitle={settingOverrideTitle(
                       pruneLimitItem?.overridden ? pruneLimitItem : thresholdItem,
                     )}
                     error={errs("compaction.threshold")}
@@ -649,7 +646,7 @@ export function SettingsPage({
               <SettingsGroup title="通知">
                 <SettingsRow
                   label="通知"
-                  marker={sourceMarker(item("notifications.enabled"))}
+                  overrideTitle={settingOverrideTitle(item("notifications.enabled"))}
                   error={errs("notifications.enabled")}
                 >
                   <Switch
@@ -665,7 +662,7 @@ export function SettingsPage({
                 <SettingsRow
                   label="通知内容"
                   dimmed={!notifyEnabled}
-                  marker={notifyEventsMarker()}
+                  overrideTitle={notifyEventsOverrideTitle()}
                   error={errs(...NOTIFY_EVENT_KEYS)}
                 >
                   <Checkbox
@@ -708,7 +705,7 @@ export function SettingsPage({
                 <SettingsRow
                   label="提醒触发时长"
                   dimmed={!notifyEnabled || !notifyEvents.done}
-                  marker={sourceMarker(item("notifications.doneAfterSeconds"))}
+                  overrideTitle={settingOverrideTitle(item("notifications.doneAfterSeconds"))}
                   error={errs(...NOTIFY_THRESHOLD_KEYS)}
                 >
                   <Dropdown
@@ -732,7 +729,7 @@ export function SettingsPage({
                 <SettingsRow
                   label="提示音"
                   dimmed={!notifyEnabled}
-                  marker={sourceMarker(item("notifications.sound"))}
+                  overrideTitle={settingOverrideTitle(item("notifications.sound"))}
                   error={errs("notifications.sound")}
                 >
                   <Switch
@@ -772,7 +769,7 @@ export function SettingsPage({
                 <SettingsGroup title="默认">
                   <SettingsRow
                     label="默认模型与档位"
-                    marker={sourceMarker(defaultModelItem)}
+                    overrideTitle={settingOverrideTitle(defaultModelItem)}
                     warning={
                       modelOff(defaultModelItem?.effective)
                         ? "已停用，按未设置处理：新会话需要先选模型"
@@ -786,6 +783,7 @@ export function SettingsPage({
                       <ModelValue
                         value={defaultModelItem.effective}
                         effort={effortItem?.effective}
+                        overrideTitle={settingOverrideTitle(defaultModelItem)}
                         off={modelOff(defaultModelItem.effective)}
                       />
                     )}
@@ -808,14 +806,18 @@ export function SettingsPage({
                       <SettingsRow
                         key={role}
                         label={label}
-                        marker={sourceMarker(it)}
+                        overrideTitle={settingOverrideTitle(it)}
                         warning={modelOff(it?.effective) ? "已停用，按未设置处理" : undefined}
                         error={errs(key)}
                       >
                         {it?.effective === undefined ? (
                           <span className="val dim">{unset}</span>
                         ) : (
-                          <ModelValue value={it.effective} off={modelOff(it.effective)} />
+                          <ModelValue
+                            value={it.effective}
+                            off={modelOff(it.effective)}
+                            overrideTitle={settingOverrideTitle(it)}
+                          />
                         )}
                         <Button
                           size="sm"
@@ -957,9 +959,7 @@ export function SettingsPage({
 
 function thresholdText(value: string | undefined, pruneLimit?: string): string {
   if (value === undefined) return "默认";
-  const base = value.endsWith("%")
-    ? `上下文用到 ${value} 时自动压缩`
-    : `上下文达到 ${value} token 时自动压缩`;
+  const base = value.endsWith("%") ? value : `${Number(value) / 1000}k`;
   if (pruneLimit === undefined || pruneLimit === "200000") return base;
   return pruneLimit === "0" ? `${base} · 不设修剪上限` : `${base} · 修剪上限 ${pruneLimit}`;
 }

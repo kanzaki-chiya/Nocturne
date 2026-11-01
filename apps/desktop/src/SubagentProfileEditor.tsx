@@ -9,15 +9,7 @@ import {
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ProvidersPage";
-import {
-  Button,
-  Checkbox,
-  SegmentedControl,
-  DetailHeader,
-  Field,
-  FormFooter,
-  SourceMarker,
-} from "./ui";
+import { Button, Checkbox, SegmentedControl, DetailHeader, Field, FormFooter, Badge } from "./ui";
 
 export function profilesFromSettings(items: readonly SettingItem[]) {
   return items
@@ -110,26 +102,13 @@ export function SubagentProfileEditor({
       <DetailHeader
         title={creating ? "添加档位" : name}
         mono
-        extra={
-          <SourceMarker
-            label={
-              isDefault
-                ? "默认（始终启用）"
-                : source?.source === "project"
-                  ? "项目配置（只读）"
-                  : readonly
-                    ? "config.json（只读）"
-                    : "settings.json"
-            }
-          />
-        }
+        extra={isDefault || readonly ? <Badge>只读</Badge> : undefined}
       />
       {error && (
         <p className="errt" role="alert">
           {error}
         </p>
       )}
-      {readonly && <p className="fine">请在来源配置文件中编辑此档位。</p>}
       {creating && (
         <Field label="名称">
           <input

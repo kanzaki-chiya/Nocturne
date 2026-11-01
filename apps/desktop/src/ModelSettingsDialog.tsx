@@ -1,12 +1,12 @@
 /**
- * 模型设置对话框（desktop-v3.html D 屏）：八项字段 + 来源 + 「全部恢复跟随」。
+ * 模型设置对话框（desktop-v3.html D 屏）：字段 + 「全部恢复跟随」。
  * 草稿→补丁语义与 TUI model-settings-view 一致：跟随/为空写 null 清除用户编辑。
  */
 import { useMemo, useState } from "react";
 import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@nocturne/core/protocol";
 import type { RpcProvider } from "@nocturne/rpc/client";
-import type { ModelFieldSource, ModelSettingsPatch, ModelSettingsView } from "./rpc-types";
-import { Button, SegmentedControl, Field, SourceMarker } from "./ui";
+import type { ModelSettingsPatch, ModelSettingsView } from "./rpc-types";
+import { Button, SegmentedControl, Field, Badge } from "./ui";
 
 type FieldKey =
   | "displayName"
@@ -148,45 +148,11 @@ function showValue(key: FieldKey, value: unknown): string {
   return scalarText(value);
 }
 
-/** 字段来源文案（复刻 core 的 modelFieldSourceText，desktop 不能引 core） */
-function sourceText(source: ModelFieldSource, edited: boolean): string {
-  if (edited) return "已编辑";
-  switch (source.kind) {
-    case "upstream":
-      return "上游";
-    case "modelsDev":
-      return "models.dev";
-    case "user":
-      return "用户编辑";
-    case "config":
-      switch (source.layer) {
-        case "user":
-          return `由 ${source.path ?? "config.json"} 决定`;
-        case "project":
-          return `由 ${source.path ?? "项目配置"} 决定`;
-        case "env":
-          return "由环境变量决定";
-        case "cli":
-          return "由命令行参数决定";
-      }
-      break;
-    case "builtin":
-      return "内置";
-    case "default":
-      return "默认";
-    case "derived":
-      return "推导";
-    case "entryType":
-      return "服务商类型";
-  }
-}
-
 export function ModelSettingsDialog({
   view,
   provider,
   providerId,
   readonly = false,
-  readonlyHint,
   onClose,
   onSaved,
 }: {
@@ -194,7 +160,6 @@ export function ModelSettingsDialog({
   provider: RpcProvider;
   providerId: string;
   readonly?: boolean;
-  readonlyHint?: string | undefined;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -305,95 +270,17 @@ export function ModelSettingsDialog({
       >
         <div className="dh3">
           <b className="mono">{view.modelId}</b>
-          <span>
-            {readonlyHint ?? (
-              <>
-                {providerId}
-                <span className="muted-value">改动只写入 userModels</span>
-              </>
-            )}
-          </span>
+          {readonly && <Badge>只读</Badge>}
         </div>
         <div className="db">
           {/* 显示名 / 上下文长度 / 最大输出 */}
-          <Field
-            label={FIELD_LABELS.displayName}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(
-                    field.displayName.source,
-                    field.displayName.userValue !== undefined,
-                  ) === "默认"
-                    ? undefined
-                    : sourceText(
-                        field.displayName.source,
-                        field.displayName.userValue !== undefined,
-                      )
-                }
-                tone={field.displayName.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
+          <Field label={FIELD_LABELS.displayName}>
             {textInput("displayName", { mono: false })}
           </Field>
-          <Field
-            label={FIELD_LABELS.contextWindow}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(
-                    field.contextWindow.source,
-                    field.contextWindow.userValue !== undefined,
-                  ) === "默认"
-                    ? undefined
-                    : sourceText(
-                        field.contextWindow.source,
-                        field.contextWindow.userValue !== undefined,
-                      )
-                }
-                tone={field.contextWindow.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
-            {textInput("contextWindow")}
-          </Field>
-          <Field
-            label={FIELD_LABELS.maxOutputTokens}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(
-                    field.maxOutputTokens.source,
-                    field.maxOutputTokens.userValue !== undefined,
-                  ) === "默认"
-                    ? undefined
-                    : sourceText(
-                        field.maxOutputTokens.source,
-                        field.maxOutputTokens.userValue !== undefined,
-                      )
-                }
-                tone={field.maxOutputTokens.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
-            {textInput("maxOutputTokens")}
-          </Field>
+          <Field label={FIELD_LABELS.contextWindow}>{textInput("contextWindow")}</Field>
+          <Field label={FIELD_LABELS.maxOutputTokens}>{textInput("maxOutputTokens")}</Field>
           {/* 推理 */}
-          <Field
-            label={FIELD_LABELS.reasoning}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(field.reasoning.source, field.reasoning.userValue !== undefined) ===
-                  "默认"
-                    ? undefined
-                    : sourceText(field.reasoning.source, field.reasoning.userValue !== undefined)
-                }
-                tone={field.reasoning.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
+          <Field label={FIELD_LABELS.reasoning}>
             {readonly || !field.reasoning.editable ? (
               <span className="ro">{showValue("reasoning", field.reasoning.value)}</span>
             ) : (
@@ -413,20 +300,7 @@ export function ModelSettingsDialog({
             )}
           </Field>
           {/* 图片输入 */}
-          <Field
-            label={FIELD_LABELS.imageInput}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(field.imageInput.source, field.imageInput.userValue !== undefined) ===
-                  "默认"
-                    ? undefined
-                    : sourceText(field.imageInput.source, field.imageInput.userValue !== undefined)
-                }
-                tone={field.imageInput.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
+          <Field label={FIELD_LABELS.imageInput}>
             {readonly || !field.imageInput.editable ? (
               <span className="ro">{showValue("imageInput", field.imageInput.value)}</span>
             ) : (
@@ -446,25 +320,7 @@ export function ModelSettingsDialog({
             )}
           </Field>
           {/* 思考档位 */}
-          <Field
-            label={FIELD_LABELS.reasoningEffort}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(
-                    field.reasoningEffort.source,
-                    field.reasoningEffort.userValue !== undefined,
-                  ) === "默认"
-                    ? undefined
-                    : sourceText(
-                        field.reasoningEffort.source,
-                        field.reasoningEffort.userValue !== undefined,
-                      )
-                }
-                tone={field.reasoningEffort.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
+          <Field label={FIELD_LABELS.reasoningEffort}>
             {readonly || !effortEditable ? (
               <span className="ro">{scalarText(field.reasoningEffort.value)}</span>
             ) : (
@@ -509,20 +365,7 @@ export function ModelSettingsDialog({
             )}
           </Field>
           {/* 协议 */}
-          <Field
-            label={FIELD_LABELS.protocol}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(field.protocol.source, field.protocol.userValue !== undefined) ===
-                  "默认"
-                    ? undefined
-                    : sourceText(field.protocol.source, field.protocol.userValue !== undefined)
-                }
-                tone={field.protocol.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
+          <Field label={FIELD_LABELS.protocol}>
             {readonly || !field.protocol.editable ? (
               <span className="ro">{showValue("protocol", field.protocol.value)}</span>
             ) : (
@@ -544,36 +387,9 @@ export function ModelSettingsDialog({
             )}
           </Field>
           {/* 接口地址（ADR-0061 §4） */}
-          <Field
-            label={FIELD_LABELS.baseURL}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(field.baseURL.source, field.baseURL.userValue !== undefined) === "默认"
-                    ? undefined
-                    : sourceText(field.baseURL.source, field.baseURL.userValue !== undefined)
-                }
-                tone={field.baseURL.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
-            {textInput("baseURL")}
-          </Field>
+          <Field label={FIELD_LABELS.baseURL}>{textInput("baseURL")}</Field>
           {/* 编辑工具 */}
-          <Field
-            label={FIELD_LABELS.editTool}
-            aside={
-              <SourceMarker
-                label={
-                  sourceText(field.editTool.source, field.editTool.userValue !== undefined) ===
-                  "默认"
-                    ? undefined
-                    : sourceText(field.editTool.source, field.editTool.userValue !== undefined)
-                }
-                tone={field.editTool.userValue !== undefined ? "accent" : "neutral"}
-              />
-            }
-          >
+          <Field label={FIELD_LABELS.editTool}>
             {readonly || !field.editTool.editable ? (
               <span className="ro">{showValue("editTool", field.editTool.value)}</span>
             ) : (

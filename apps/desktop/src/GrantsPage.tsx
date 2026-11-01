@@ -363,12 +363,7 @@ export function GrantsPage({
                     extra={<span className="desc mono grant-path">{current.workspace}</span>}
                   />
                   <SettingsGroup title="配置">
-                    <SettingsRow
-                      label="项目信任"
-                      marker={
-                        current.hasProjectConfig ? { label: ".nocturne/config.json" } : undefined
-                      }
-                    >
+                    <SettingsRow label="项目信任">
                       <span className="val">
                         {!current.hasProjectConfig
                           ? "没有项目配置"

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sourceMarker } from "../src/setting-source";
+import { settingOverrideTitle } from "../src/setting-source";
 import {
   DataTable,
   DetailHeader,
@@ -18,7 +18,6 @@ import {
   PageHeader,
   SettingsGroup,
   SettingsRow,
-  SourceMarker,
 } from "../src/ui";
 
 afterEach(() => {
@@ -59,11 +58,11 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(container.querySelector("h2")).toBeNull();
   });
 
-  it("SettingsRow：标签、说明、来源标记、徽标与右侧控件；错误为 alert", () => {
+  it("SettingsRow：标签、说明、覆盖警告、徽标与右侧控件；错误为 alert", () => {
     render(
       <SettingsRow
         label="默认权限预设"
-        marker={{ label: "config.json" }}
+        overrideTitle="被覆盖"
         badge={<span>只读</span>}
         desc="换位置后，旧位置的对话仍显示在「对话」里"
         error="保存失败"
@@ -72,7 +71,7 @@ describe("设置页骨架组件 (src/ui)", () => {
       </SettingsRow>,
     );
     expect(screen.getByText("默认权限预设")).toBeTruthy();
-    expect(screen.getByText("config.json")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "编辑" }).parentElement?.title).toBe("被覆盖");
     expect(screen.getByText("只读")).toBeTruthy();
     expect(screen.getByText("换位置后，旧位置的对话仍显示在「对话」里")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toBe("保存失败");
@@ -88,20 +87,24 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(screen.getByRole("textbox", { name: "提醒触发时长" })).toBeTruthy();
   });
 
-  it("SourceMarker：无 label 不渲染；warn / accent 变体带类名与 title", () => {
-    const { container, rerender } = render(<SourceMarker />);
-    expect(container.textContent).toBe("");
-
-    rerender(<SourceMarker label="settings.json" />);
-    expect(screen.getByText("settings.json").className).toBe("marker");
-
-    rerender(<SourceMarker label="magpie.json" tone="warn" title="被覆盖" />);
-    const warn = screen.getByText("magpie.json");
-    expect(warn.className).toBe("marker warn");
-    expect(warn.getAttribute("title")).toBe("被覆盖");
-
-    rerender(<SourceMarker label="已编辑" tone="accent" />);
-    expect(screen.getByText("已编辑").className).toBe("marker accent");
+  it("SettingsRow：无覆盖时无警告；覆盖时只在值上给 warning class 与 title", () => {
+    const { container, rerender } = render(
+      <SettingsRow label="模型">
+        <span className="val">m1</span>
+      </SettingsRow>,
+    );
+    expect(container.querySelector(".overridden")).toBeNull();
+    expect(screen.getByText("m1").parentElement?.title).toBe("");
+    rerender(
+      <SettingsRow label="模型" overrideTitle="被覆盖">
+        <span className="val">m1</span>
+      </SettingsRow>,
+    );
+    const value = screen.getByText("m1").parentElement;
+    expect(value?.className).toBe("ctl overridden");
+    expect(value?.title).toBe("被覆盖");
+    expect(screen.getByText("模型").getAttribute("title")).toBeNull();
+    expect(container.textContent).not.toMatch(/\.json|被覆盖/);
   });
 
   it("MasterDetail：左栏为导航，分组带计数，条目选中为 aria-current，详情区有标题与操作", () => {
@@ -230,28 +233,29 @@ describe("设置页骨架组件 (src/ui)", () => {
   });
 });
 
-describe("来源标记规则 (setting-source)", () => {
+describe("覆盖警告规则 (setting-source)", () => {
   it("默认值不显示标记", () => {
-    expect(sourceMarker({ source: "default", overridden: false })).toBeUndefined();
-    expect(sourceMarker(undefined)).toBeUndefined();
+    expect(settingOverrideTitle({ source: "default", overridden: false })).toBeUndefined();
+    expect(settingOverrideTitle(undefined)).toBeUndefined();
   });
 
-  it("来自配置文件时显示文件名，普通样式", () => {
-    expect(sourceMarker({ source: "user", overridden: false })).toEqual({ label: "config.json" });
-    expect(sourceMarker({ source: "settings", overridden: false })).toEqual({
-      label: "settings.json",
-    });
+  it("来自配置文件但未被覆盖时不显示来源", () => {
+    expect(settingOverrideTitle({ source: "user", overridden: false })).toBeUndefined();
+    expect(settingOverrideTitle({ source: "settings", overridden: false })).toBeUndefined();
   });
 
   it("被更高层覆盖时为 warn，并在 title 写明覆盖它的那一层", () => {
-    const marker = sourceMarker({ source: "magpie", overridden: true });
-    expect(marker?.tone).toBe("warn");
-    expect(marker?.label).toBe("magpie.json");
-    expect(marker?.title).toBe("保存的值被更高层（magpie.json）覆盖，改了也不生效");
-
-    render(<SettingsRow label="压缩阈值" marker={marker} />);
-    const el = screen.getByText("magpie.json");
-    expect(el.className).toBe("marker warn");
-    expect(el.getAttribute("title")).toContain("magpie.json");
+    const title = settingOverrideTitle({ source: "magpie", overridden: true });
+    expect(title).toBe("保存的值被更高层（magpie.json）覆盖，改了也不生效");
+    const { container } = render(
+      <SettingsRow label="压缩阈值" overrideTitle={title}>
+        <span className="val">400k</span>
+      </SettingsRow>,
+    );
+    const el = screen.getByText("400k").parentElement;
+    expect(el?.className).toBe("ctl overridden");
+    expect(el?.getAttribute("title")).toContain("magpie.json");
+    expect(container.textContent).not.toContain(".json");
+    expect(container.querySelector(".marker")).toBeNull();
   });
 });
