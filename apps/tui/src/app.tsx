@@ -979,7 +979,7 @@ function SessionApp({
           lines: [
             {
               key,
-              text: `! 响应流中断，以上部分输出已作废，正在重试（${attempt}/${maxAttempts}）`,
+              text: `! 响应流中断，以上部分输出已作废，正在重试（${attempt}/${maxAttempts - 1}）`,
               dim: true,
             },
           ],

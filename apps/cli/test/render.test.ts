@@ -188,7 +188,7 @@ describe("事件渲染（cli.md 第 5 节）", () => {
       "interactive",
     );
     expect(retry[0]?.text).toContain("rate_limit");
-    expect(retry[0]?.text).toContain("1/3");
+    expect(retry[0]?.text).toContain("1/2");
 
     const err = renderEvent(ephemeral("runtime.error", { code: "boom", message: "坏了" }), "print");
     expect(err[0]?.channel).toBe("stderr");
@@ -368,7 +368,7 @@ describe("写出器：整行与流式片段的换行（cli.md 第 5 节）", () 
       discarded: { messageId: "m", callIds: [] },
     });
     writer.write(renderEvent(event, mode));
-    const line = "! 响应流中断，已丢弃上面的部分输出，100ms 后第 1/3 次重试\n";
+    const line = "! 响应流中断，已丢弃上面的部分输出，100ms 后第 1/2 次重试\n";
     expect(joined(mode === "interactive" ? "stdout" : "stderr")).toBe(
       mode === "interactive" ? `作废文字\n${line}` : line,
     );

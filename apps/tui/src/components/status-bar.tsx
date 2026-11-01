@@ -82,7 +82,7 @@ export function StatusBar({
   const sep = env.ascii ? " - " : " • ";
   const status =
     view.status === "retrying" && view.retry !== undefined
-      ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts}`
+      ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts - 1}`
       : STATUS_TEXT[view.status];
   const statusColor = view.status === "idle" ? theme.secondary : theme.warning;
   const ctx = `上下文 ${formatContextOccupancy(context.used, context.limit)}`;

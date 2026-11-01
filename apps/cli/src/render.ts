@@ -258,13 +258,13 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       if (p.discarded !== undefined) {
         return [
           aux(
-            `! 响应流中断，已丢弃上面的部分输出，${p.delayMs}ms 后第 ${p.attempt}/${p.maxAttempts} 次重试`,
+            `! 响应流中断，已丢弃上面的部分输出，${p.delayMs}ms 后第 ${p.attempt}/${p.maxAttempts - 1} 次重试`,
           ),
         ];
       }
       return [
         aux(
-          `! Provider 错误（${p.error.kind}），${p.delayMs}ms 后第 ${p.attempt}/${p.maxAttempts} 次重试`,
+          `! Provider 错误（${p.error.kind}），${p.delayMs}ms 后第 ${p.attempt}/${p.maxAttempts - 1} 次重试`,
         ),
       ];
     }

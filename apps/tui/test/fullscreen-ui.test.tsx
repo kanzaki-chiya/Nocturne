@@ -480,7 +480,7 @@ describe("全屏界面", () => {
       { turnId: "turn" },
     );
     await waitFor(() => (lastFrame() ?? "").includes("响应流中断，已丢弃部分输出"));
-    const hint = "! 响应流中断，以上部分输出已作废，正在重试（1/3）";
+    const hint = "! 响应流中断，以上部分输出已作废，正在重试（1/2）";
     expect(lastFrame()).not.toContain("旧尾部");
     if (written) {
       expect(lastFrame()).toContain("作废块");
