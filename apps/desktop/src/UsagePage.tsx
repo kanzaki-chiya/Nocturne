@@ -19,15 +19,7 @@ import {
   modelPalette,
   usageModelKey,
 } from "./UsageCharts";
-import {
-  Badge,
-  Button,
-  SegmentedControl,
-  DataTable,
-  EmptyState,
-  PageHeader,
-  SettingsGroup,
-} from "./ui";
+import { Button, SegmentedControl, DataTable, EmptyState, PageHeader, SettingsGroup } from "./ui";
 import "./usage.css";
 
 type Range = "7" | "30" | "all";
@@ -42,8 +34,6 @@ const prices = (p: ModelPricing | undefined) => [price(p?.input), price(p?.outpu
 /** 展开区的完整单价行；分档模型显示基础档 */
 export const priceLine = (p: ModelPricing | undefined): string =>
   `单价 输入 ${price(p?.input)}，缓存读 ${price(p?.cacheRead)} / 写 ${price(p?.cacheWrite)}，输出 ${price(p?.output)}（USD / 每百万 token）${p?.tiers?.length ? "，分档" : ""}`;
-const SOURCE = { config: "配置", upstream: "上游", "models.dev": "models.dev", vendor: "厂商价" };
-const VENDOR_NOTE = "按模型厂商官方 API 价估算，不代表代理或中转服务的实际收费";
 
 function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
   const [mode, setMode] = useState<"tokens" | "cost">("tokens");
@@ -544,15 +534,6 @@ export function UsageView({
                             <div>
                               <span>{m.model.model}</span>
                               <small>{m.model.provider}</small>
-                              {m.pricingSource && (
-                                <Badge
-                                  className="usage-price-source"
-                                  title={m.pricingSource === "vendor" ? VENDOR_NOTE : undefined}
-                                >
-                                  {SOURCE[m.pricingSource]}
-                                  {m.pricing?.tiers?.length ? "（分档）" : ""}
-                                </Badge>
-                              )}
                             </div>
                           </div>
                         );

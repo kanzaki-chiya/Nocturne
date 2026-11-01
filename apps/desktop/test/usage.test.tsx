@@ -127,10 +127,10 @@ describe("desktop usage", () => {
     // 费用 + 输入 / 输出单价 + 无计时的 Tokens/s、TTFT
     expect(unpriced?.textContent?.match(/—/g)).toHaveLength(5);
     const vendor = within(table).getByRole("rowheader", { name: /grok-4\.7/ });
-    expect(vendor.textContent).toContain("厂商价");
-    expect(vendor.querySelector(".usage-price-source")?.getAttribute("title")).toContain(
-      "不代表代理或中转服务的实际收费",
-    );
+    // 模型名下只有服务商，不写价格来源
+    expect(vendor.textContent).not.toContain("厂商价");
+    expect(vendor.textContent).not.toContain("models.dev");
+    expect(vendor.querySelector(".usage-price-source")).toBeNull();
     expect(document.querySelector(".usage-table-note")?.textContent).toContain(
       "按声明价格估算，以服务商账单为准",
     );
