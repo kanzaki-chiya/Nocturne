@@ -1131,6 +1131,76 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
       pure(history, { events }),
     );
   });
+  it("锚点高于明细时报告差额，低于时不缩放各项", () => {
+    const high = buildContext(input([assistant(1, 1, 50_000)]));
+    const accounted = (built: ReturnType<typeof buildContext>) =>
+      built.report.sections.reduce((total, section) => total + section.estimatedTokens, 0) +
+      (built.report.images?.estimatedTokens ?? 0);
+    expect(high.report.estimatedTokens).toBe(50_100);
+    expect(high.report.unattributedTokens).toBe(high.report.estimatedTokens - accounted(high));
+    expect(high.report.unattributedTokens).toBeGreaterThan(0);
+
+    const low = buildContext(
+      input([
+        {
+          ...assistant(1, 20_000, 10),
+          usage: { inputTokens: 10, outputTokens: 0 },
+        },
+      ]),
+    );
+    expect(low.report.estimatedTokens).toBe(10);
+    expect(accounted(low)).toBeGreaterThan(low.report.estimatedTokens);
+    expect(low.report.unattributedTokens).toBeUndefined();
+    expect(
+      low.report.sections.find((section) => section.name === "history")?.breakdown?.assistant
+        .estimatedTokens,
+    ).toBe(20_000);
+  });
+  it("content providerData 计入 assistant，但不改变 estimated", () => {
+    const providerData = { sig: "x".repeat(80) };
+    const opaque = JSON.stringify(providerData);
+    const entry = (data: unknown): Extract<HistoryEntry, { kind: "assistant" }> => ({
+      ...assistant(1, 1, 50_000),
+      content: [{ type: "reasoning", text: "想", providerData: data }],
+    });
+    const withData = buildContext(input([entry(providerData)]));
+    const without = buildContext(input([entry(undefined)]));
+    expect(withData.report.estimatedTokens).toBe(without.report.estimatedTokens);
+    expect(withData.report.estimatedTokens).toBe(50_100);
+    const assistantTokens = (built: ReturnType<typeof buildContext>) =>
+      built.report.sections.find((section) => section.name === "history")?.breakdown?.assistant
+        .estimatedTokens;
+    expect(assistantTokens(withData)).toBe(
+      (assistantTokens(without) ?? 0) + estimateTokens(opaque),
+    );
+    expect(withData.report.unattributedTokens).toBe(
+      (without.report.unattributedTokens ?? 0) - estimateTokens(opaque),
+    );
+    const plain = buildContext(
+      baseInput({
+        history: [
+          {
+            ...assistant(1, 1),
+            model: model.ref,
+            content: [{ type: "reasoning", text: "想", providerData }],
+          },
+        ],
+      }),
+    );
+    const stripped = buildContext(
+      baseInput({
+        history: [
+          {
+            ...assistant(1, 1),
+            model: model.ref,
+            content: [{ type: "reasoning", text: "想" }],
+          },
+        ],
+      }),
+    );
+    expect(plain.report.estimatedTokens).toBe(stripped.report.estimatedTokens);
+    expect(plain.report.unattributedTokens).toBeUndefined();
+  });
 });
 
 describe("ADR-0066 修剪调用参数投影", () => {
@@ -2126,15 +2196,18 @@ describe("history 细分（ADR-0046 第 5 节）", () => {
     ];
     const s = historySection(buildContext(baseInput({ history })));
     const b = s.breakdown;
+    const opaque = JSON.stringify({ sig: 1 });
     expect(b?.user.chars).toBe("读一下 a".length + noteText.length + "继续".length);
-    expect(b?.assistant.chars).toBe("推理内容".length + "回答".length);
+    expect(b?.assistant.chars).toBe("推理内容".length + "回答".length + opaque.length);
     expect(b?.tool.chars).toBe(JSON.stringify(toolCalls).length + "工具结果".length);
     expect(b?.summary.chars).toBe(0);
-    // note 以 user 角色投影，token 同样归 user；推理内容回传模型，归 assistant
+    // note 以 user 角色投影，token 同样归 user；推理文本与 providerData 回传模型，归 assistant
     expect(b?.user.estimatedTokens).toBe(
       estimateTokens("读一下 a") + estimateTokens(noteText) + estimateTokens("继续"),
     );
-    expect(b?.assistant.estimatedTokens).toBe(estimateTokens("推理内容") + estimateTokens("回答"));
+    expect(b?.assistant.estimatedTokens).toBe(
+      estimateTokens("推理内容") + estimateTokens("回答") + estimateTokens(opaque),
+    );
     expect(b?.tool.estimatedTokens).toBe(
       estimateTokens(JSON.stringify(toolCalls)) + estimateTokens("工具结果"),
     );

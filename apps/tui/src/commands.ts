@@ -426,6 +426,11 @@ export function contextLines(session: RuntimeSession): string[] {
       `  ${"images".padEnd(12)} ${String(report.images.count).padStart(7)} 张  ~${report.images.estimatedTokens} tok`,
     );
   }
+  if (report.unattributedTokens !== undefined && report.unattributedTokens > 0) {
+    lines.push(
+      `  ${"other".padEnd(12)} ${String(0).padStart(7)} chars  ~${report.unattributedTokens} tok`,
+    );
+  }
   return [
     "上下文组成：",
     ...lines,

@@ -79,7 +79,7 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 - **增量构建**：除压缩边界外，不改写已经发给模型的历史，让相邻 Step 的请求共享最长前缀。
 - 旧会话日志中无内容且无工具调用的 assistant 条目在请求投影时跳过；事件日志本身保持原样，避免向 Messages 接口发送空消息。
 - **每一项都有上限**：工具结果在执行时就按预算截断（见 [tools.md](tools.md)），指令文件有上限，任何注入内容都不能无界增长。上下文层不负责修补无界输入。
-- **可解释**：`ContextReport` 列出每一部分的来源与估算 token，用户和开发者能看到"窗口被什么占满了"。`history` 段附带 `breakdown`（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 5 节）：user / assistant / tool / summary 各自的字符数与估算 token，四项之和即该段总数——assistant 的 toolCalls 序列化归 `tool`、推理块归 `assistant`、L1 修剪占位归 `tool`、摘要注入（含最近文件提示）归 `summary`、以 user 角色投影的 note 归 `user`；图片附件不计入任何一项（`report.images` 单列），其占位/描述文字随所在消息归类。估算模式与正式请求同口径给出。
+- **可解释**：`ContextReport` 列出每一部分的来源与估算 token，用户和开发者能看到"窗口被什么占满了"。`history` 段附带 `breakdown`（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 5 节）：user / assistant / tool / summary 各自的字符数与估算 token，四项之和即该段总数——assistant 的 toolCalls 序列化归 `tool`（调用上的 `providerData` 含在这次序列化里）、推理块的文本与该块上的 `providerData` 归 `assistant`、L1 修剪占位归 `tool`、摘要注入（含最近文件提示）归 `summary`、以 user 角色投影的 note 归 `user`；图片附件不计入任何一项（`report.images` 单列），其占位/描述文字随所在消息归类。估算模式与正式请求同口径给出。跨服务商或跨协议被剥掉的 `providerData` 不计入。
 
 ## 5. Token 预算
 
@@ -91,6 +91,8 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 `inputTokens` 已包含缓存读写，不重复加缓存用量（[events.md](../protocols/events.md) 的 Usage 口径）。锚点之后发生图片描述、压缩或切换模型/服务商（包括切走再切回）即失效；没有有效锚点时完全使用估算，直到主请求再次返回用量。摘要请求不建立锚点。
 
 所有字符估算统一为：CJK 统一表意文字、假名、谚文、全角标点按 1 字 1 token，其余按 4 字符 1 token；适用于纯估算、锚点后的增量、保留区边界和 `/context`。各 section 仍展示本地估算，总用量在有效时采用上游锚点。估算用于预算和压缩判定，不是计费用量。
+
+明细（各 section，history 用四项细分而不重复该段总数，再加上 `report.images`）按上面的字符估算。正文与推理块的 `providerData` 计入 assistant 明细。总量比这些明细之和更大时，`report.unattributedTokens` 等于差额，且只在差额为正时出现；桌面端这一行显示为「其他」，TUI 与 CLI 的 `/context` 显示为 `other`。明细之和大于总量时不设该字段，也不按比例改写各项估算。无锚点时，压缩判定用的 `estimatedTokens` 仍不含这部分 `providerData`，与补记之前的字符估算相同；有锚点时总量就是锚点，不随明细调整。
 
 protocol.estimateTokenUnits 返回未取整的四分之一 token 单位；estimateTokens 统一 ceil(units / 4)。技能目录按单位增量累计、最后取整，避免逐项重扫整段文本，输出与预算保持相同。
 

@@ -205,6 +205,31 @@ describe("上下文 breakdown", () => {
     ).toBe(1400);
   });
 
+  it("总量大于明细时补一行其他，明细更大时不改各项数字", () => {
+    const bigger = {
+      ...context,
+      report: { ...context.report, estimatedTokens: 5000, unattributedTokens: 3600 },
+    };
+    render(<ContextPanel context={bigger} />);
+    const row = screen.getByText("其他").closest("div");
+    expect(row?.textContent).toContain("3,600");
+    expect(
+      contextRows(bigger.report)
+        .filter((item) => !item.group)
+        .reduce((sum, item) => sum + item.tokens, 0),
+    ).toBe(5000);
+
+    const smaller = {
+      ...context,
+      report: { ...context.report, estimatedTokens: 100 },
+    };
+    cleanup();
+    render(<ContextPanel context={smaller} />);
+    expect(screen.queryByText("其他")).toBeNull();
+    expect(screen.getByText("用户消息").closest("div")?.textContent).toContain("100");
+    expect(screen.getByText("工具调用与结果").closest("div")?.textContent).toContain("600");
+  });
+
   it("堆叠条总长跟总量占预算的比例走，明细之和不同也不影响", () => {
     const fill = (estimatedTokens: number, budgetTokens: number) => {
       const report = { ...context.report, estimatedTokens, budgetTokens };
