@@ -38,7 +38,7 @@ interface TaskInput {
 }
 
 /** task 默认/上限超时（subagent.md 第 1 节）；默认值可被 RuntimeOptions.subagent.timeoutMs 覆盖 */
-const TASK_DEFAULT_TIMEOUT_MS = 600_000;
+const TASK_DEFAULT_TIMEOUT_MS = 1_800_000;
 const TASK_MAX_TIMEOUT_MS = 3_600_000;
 
 const schemas = createSchemaCompiler({ strict: false });

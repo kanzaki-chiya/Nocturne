@@ -37,7 +37,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 | `outputSchema` | `JsonSchema`（object） | 要求子代理按此 schema 提交结构化结果；无法编译 → `invalid_input` |
 | `timeoutMs` | `integer` | 本次调用的超时上限，正整数生效、封顶 `traits.maxTimeoutMs`（读取规则见 tool-api.md 第 1 节）。参数说明要求：省略即默认；实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才缩短 |
 
-`traits`：`{ mutates: true, concurrencySafe: false, timeoutMs: 600_000, maxTimeoutMs: 3_600_000, maxModelChars: 30_000 }`。`traits.timeoutMs` 取 `RuntimeOptions.subagent.timeoutMs`（默认 600_000，上限 3_600_000，第 3 节），与 launcher 的默认超时是同一个值。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 因为并行子代理在没有工作区隔离的前提下可能同时改同一批文件（隔离明确不做，见第 16 节）。
+`traits`：`{ mutates: true, concurrencySafe: false, timeoutMs: 1_800_000, maxTimeoutMs: 3_600_000, maxModelChars: 30_000 }`。`traits.timeoutMs` 取 `RuntimeOptions.subagent.timeoutMs`（默认 1_800_000，上限 3_600_000，第 3 节），与 launcher 的默认超时是同一个值。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 因为并行子代理在没有工作区隔离的前提下可能同时改同一批文件（隔离明确不做，见第 16 节）。
 
 `permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节（`default`/`auto-edit` 下 `explore` 默认放行、`general`/`custom` 需确认）。
 
@@ -106,7 +106,7 @@ subagent?: {
   maxStepsPerTurn?: number   // 子会话单 Turn 步数上限，默认 50
   maxAttempts?: number       // 缺 finish 时的总轮次上限（首轮 + 催促），默认 3
   timeoutMs?: number         // task 默认超时：同时是 traits.timeoutMs 与 launcher
-                             // 的缺省值；默认 600_000，超过 3_600_000 按上限计
+                             // 的缺省值；默认 1_800_000，超过 3_600_000 按上限计
 }
 ```
 
@@ -331,9 +331,9 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 
 每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、逐项 `session/set_config_option`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。`configOptions` 的键和值是不透明字符串；对方拒绝某项时返回 `external_agent_config_rejected` 并指出该 id。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻、不复用会话。
 
-超时统一由 `task` 执行器控制（默认 600_000ms，超时触发 `ctx.signal`）；connector 不另设隐式默认超时。只有 `request.timeoutMs` 显式传入时，connector 才设置对应计时器。
+超时统一由 `task` 执行器控制（默认 1_800_000ms，超时触发 `ctx.signal`）；connector 不另设隐式默认超时。只有 `request.timeoutMs` 显式传入时，connector 才设置对应计时器。
 
-`timeoutMs` 省略时使用默认 10 分钟；工具参数说明要求实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才主动缩短（同一条说明覆盖内置子代理与外部 agent 两条路径）。默认值不变。connector 的计时器或执行器的 TimeoutError 信号导致超时时，失败信息附最近至多 5 条进度标题，并提示「它可能已修改工作区文件，请先检查 git status」。标题去控制字符、压成单行并截断至 300 字符，名称至 100 字符，整条超时说明不超过 2048 字符。
+`timeoutMs` 省略时使用默认 30 分钟；工具参数说明要求实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才主动缩短（同一条说明覆盖内置子代理与外部 agent 两条路径）。默认值 2026-11-02 从 10 分钟改为 30 分钟：本机日志里 122 次 task 有 24 次超时，未超时且有时长记录的 95 次里 18 次超过 10 分钟、没有超过 60 分钟的。connector 的计时器或执行器的 TimeoutError 信号导致超时时，失败信息附最近至多 5 条进度标题，并提示「它可能已修改工作区文件，请先检查 git status」。标题去控制字符、压成单行并截断至 300 字符，名称至 100 字符，整条超时说明不超过 2048 字符。
 
 仅带非空 `title` 的 `tool_call` / `tool_call_update` 输出进度，不用 `status` 或 `kind` 兜底；同一调用的相同标题去重。`failed` 单独输出一次「<名称>：<标题>（失败）」，没有新标题时使用该调用先前记录的标题；没有任何标题的失败更新也不输出。原始更新仍完整进入审计日志。
 

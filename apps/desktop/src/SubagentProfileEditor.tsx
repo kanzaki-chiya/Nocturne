@@ -177,7 +177,7 @@ export function SubagentProfileEditor({
             min={1}
             max={3600}
             value={draft.timeoutMs === undefined ? "" : draft.timeoutMs / 1000}
-            placeholder="600"
+            placeholder="1800"
             disabled={isDefault || readonly}
             onChange={(event) => {
               set({

@@ -61,7 +61,7 @@ subagent?: {
 ### 4. 生命周期：不跟父 Turn 走，跟父会话走
 
 - 后台子 Turn 的中止信号是 `AbortSignal.any([后台取消, 超时计时器, 父会话关闭, 父/子会话 failedSignal])`，**不含父 Turn 的 signal**：用户中断主对话（Esc）不取消后台子代理。
-- 超时沿用 `timeoutMs`（默认 600 秒，上限 3600 秒）。
+- 超时沿用 `timeoutMs`（默认 1800 秒，上限 3600 秒）。
 - **取消**：新增 `Runtime.cancelSubagent({ parentSessionId, childSessionId })` 与同名 RPC；只对运行中的后台子代理有效，否则 `invalid_command`。取消后照常交付 `status: "cancelled"` 的结果（附已有产出）。模型侧第一版不提供取消工具。
 - **父会话关闭、删除或 Runtime 退出**：取消所有后台子代理，等子日志写下收束后再释放；结果不交付（父会话已不在运行）。
 - **重启**：不复活子代理（与现状相同）。父会话加载时，对「启动过后台子代理、日志里却没有对应 `subagent` 消息」的调用，各补一条 `status: "interrupted"` 的暂停待发条目，随用户下一次提交送达，不自动唤起。判断依据是父日志里的 `task` 结果 `output.background` 与 `message.user.subagent.callId`，不读子日志。待发输入不落盘：尚未送达或已撤回的结果，重启后同样补报为 `interrupted`。
