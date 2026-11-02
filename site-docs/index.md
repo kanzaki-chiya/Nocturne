@@ -16,7 +16,7 @@ Nocturne 提供 Windows 桌面端和终端命令行 `nctrn`。两者共用本地
 
 ## 终端命令行（`nctrn`）
 
-命令行版需要 **Node.js `>=24.14`**。
+命令行版需要 **Node.js `>=24.16`**。
 
 1. 从 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 [nctrn-{{version}}.tgz](https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz)。
 2. 在下载目录全局安装：

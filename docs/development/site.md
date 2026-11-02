@@ -44,7 +44,7 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 h1、h2 和字标使用 Noto Serif SC 2.003 的 SC Black，SIL OFL 1.1，`@font-face` 在 `base.css`；英文用同一字体的拉丁字形。原始字体来自 `notofonts/noto-cjk` 的 `Serif2.003` 固定提交，完整 URL 写在脚本中，原文件只在 OS 临时目录保存并清理。许可见 [字体许可](../../site/assets/fonts/OFL.txt) 与 [第三方声明](../../THIRD-PARTY-NOTICES.md)。正文和代码使用系统字体，字体不可用时标题回退宋体/衬线字体。
 
-标题变更后手动执行（需要 Node.js 24.14+ 与根依赖）：
+标题变更后手动执行（需要 Node.js 24.16+ 与根依赖）：
 
 ```bash
 pnpm install --frozen-lockfile

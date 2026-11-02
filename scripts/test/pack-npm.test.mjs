@@ -50,7 +50,7 @@ describe("pack-npm", () => {
     const manifest = JSON.parse(files.get("package/package.json"));
     expect(manifest.name).toBe("nctrn");
     expect(manifest.bin).toEqual({ nctrn: "nctrn.mjs" });
-    expect(manifest.engines.node).toBe(">=24.14");
+    expect(manifest.engines.node).toBe(">=24.16");
     expect(manifest).not.toHaveProperty("dependencies");
     expect(manifest).not.toHaveProperty("scripts");
     // 单文件内容原样进入包

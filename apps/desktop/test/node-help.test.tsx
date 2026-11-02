@@ -7,7 +7,7 @@ import type { NodeProbe } from "../src/types";
 afterEach(cleanup);
 
 const noop = () => undefined;
-const REQUIRED = "24.14.0";
+const REQUIRED = "24.16.0";
 
 function probe(partial: Partial<NodeProbe>): NodeProbe {
   return { required: REQUIRED, steps: [], selected: null, ok: false, ...partial };
@@ -50,7 +50,7 @@ describe("probeRows", () => {
       { label: "NOCTURNE_NODE", text: "未设置", cls: "dim" },
       { label: "随附 Node", text: "缺失（未随附或已损坏）", cls: "dim" },
       { label: "PATH", text: "C:\\Program Files\\nodejs\\node.exe", cls: undefined },
-      { label: "版本", text: "v22.11.0，需要 ≥ 24.14.0", cls: "bad" },
+      { label: "版本", text: "v22.11.0，需要 ≥ 24.16.0", cls: "bad" },
     ]);
   });
 
@@ -76,9 +76,9 @@ describe("probeRows", () => {
 describe("NodeHelp", () => {
   it("版本过低的页面文案", () => {
     render(<NodeHelp probe={tooOld} checking={false} onProbe={noop} openUrl={noop} />);
-    expect(screen.getByText("需要 Node.js 24.14 或更高版本")).toBeTruthy();
+    expect(screen.getByText("需要 Node.js 24.16 或更高版本")).toBeTruthy();
     expect(screen.getByText(/当前找到的版本太旧/)).toBeTruthy();
-    expect(screen.getByText("v22.11.0，需要 ≥ 24.14.0")).toBeTruthy();
+    expect(screen.getByText("v22.11.0，需要 ≥ 24.16.0")).toBeTruthy();
   });
 
   it("未找到的页面文案", () => {

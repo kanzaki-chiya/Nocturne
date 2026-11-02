@@ -78,7 +78,7 @@ type BackendMessage =
 2. 资源目录 `<resource_dir>/node/node.exe`（非 Windows 为 `node`；发布安装包随附，开发构建经 `pnpm desktop:dev`/`desktop:build` 先跑 `scripts/fetch-node.mjs` 补齐；缺文件时记 `not-bundled`）；
 3. `PATH` 逐目录找 `node.exe` / 可执行的 `node`。
 
-找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本由 Rust std 自动经 cmd.exe 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.14.0（ADR-0046 第 2 节；与根及 CLI 的 `engines` `>=24.14` 一致）。
+找到后运行 `<node> --version`（5 秒超时，Windows 加 `CREATE_NO_WINDOW`；`.cmd`/`.bat` 脚本由 Rust std 自动经 cmd.exe 执行），取 stdout 第一行。版本解析接受可选 `v` 前缀、忽略 `-`/`+` 后缀，要求 ≥ 24.16.0（ADR-0046 第 2 节；与根及 CLI 的 `engines` `>=24.16` 一致）。
 
 `NodeProbe` 结构（camelCase；步骤恒为 env/bundled/path 三项，`status` 为 kebab-case）：
 
@@ -90,7 +90,7 @@ interface NodeProbeStep {
   path: string | null;
 }
 interface NodeProbe {
-  required: string; // "24.14.0"
+  required: string; // "24.16.0"
   steps: NodeProbeStep[];
   selected: {
     source: NodeSource;
@@ -104,7 +104,7 @@ interface NodeProbe {
 
 探测不通过时前端显示说明页（`src/NodeHelp.tsx`）：逐项展示查找结果、要求版本与「打开 nodejs.org」「重新检测」按钮；重新检测通过后不重启应用直接进正常流程。
 
-**随附 Node（ADR-0050）**：`scripts/node-version.json` 固定 Node 版本（24.x LTS，不低于 24.14）与官方 `node-v<ver>-win-x64.zip` 的 SHA-256；`scripts/fetch-node.mjs` 下载、校验哈希后只解出 `node.exe` 与 `LICENSE` 放进 `apps/desktop/src-tauri/resources/node/`（.gitignore 排除，不入库），`tauri.conf.json` 的 `bundle.resources` 把它们装进安装目录。校验失败直接中止，没有跳过选项。`backend_open` 成功后往该后台的 stderr 缓冲写一行 `[nocturne-desktop] Node <bundled|env|path>：<路径>（<版本>）`，「后台日志」页能看出 Node 的实际来源。
+**随附 Node（ADR-0050）**：`scripts/node-version.json` 固定 Node 版本（24.x LTS，不低于 24.16）与官方 `node-v<ver>-win-x64.zip` 的 SHA-256；`scripts/fetch-node.mjs` 下载、校验哈希后只解出 `node.exe` 与 `LICENSE` 放进 `apps/desktop/src-tauri/resources/node/`（.gitignore 排除，不入库），`tauri.conf.json` 的 `bundle.resources` 把它们装进安装目录。校验失败直接中止，没有跳过选项。`backend_open` 成功后往该后台的 stderr 缓冲写一行 `[nocturne-desktop] Node <bundled|env|path>：<路径>（<版本>）`，「后台日志」页能看出 Node 的实际来源。
 
 ## 4. 后台脚本路径与单文件打包
 

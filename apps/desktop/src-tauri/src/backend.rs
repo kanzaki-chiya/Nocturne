@@ -557,7 +557,7 @@ fn backend_open(
     if !probe.ok {
         return Err(CommandError::new(
             "node_unavailable",
-            "没有找到满足要求的 Node.js（需要 v24.14.0 或更高版本）",
+            "没有找到满足要求的 Node.js（需要 v24.16.0 或更高版本）",
         ));
     }
     let selected = probe.selected;

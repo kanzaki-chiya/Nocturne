@@ -1,5 +1,5 @@
 //! Node.js 查找与版本检查（ADR-0046 第 2 节）。
-//! 顺序：NOCTURNE_NODE → 资源目录随附 node → PATH；找到后跑 `node --version` 校验 ≥ 24.14。
+//! 顺序：NOCTURNE_NODE → 资源目录随附 node → PATH；找到后跑 `node --version` 校验 ≥ 24.16。
 
 use serde::Serialize;
 use std::env;
@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-pub const REQUIRED_NODE: (u64, u64, u64) = (24, 14, 0);
-pub const REQUIRED_NODE_STR: &str = "24.14.0";
+pub const REQUIRED_NODE: (u64, u64, u64) = (24, 16, 0);
+pub const REQUIRED_NODE_STR: &str = "24.16.0";
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -372,8 +372,8 @@ mod tests {
 
     #[test]
     fn satisfies_required() {
-        assert!(satisfies((24, 14, 0)));
-        assert!(!satisfies((24, 13, 9)));
+        assert!(satisfies((24, 16, 0)));
+        assert!(!satisfies((24, 15, 9)));
         assert!(satisfies((25, 0, 0)));
         assert!(!satisfies((22, 11, 0)));
     }

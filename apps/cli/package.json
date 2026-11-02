@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/cli",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "nctrn — Nocturne CLI client",
   "license": "GPL-3.0-only",
   "private": true,
@@ -12,7 +12,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=24.14"
+    "node": ">=24.16"
   },
   "scripts": {
     "build": "tsdown",

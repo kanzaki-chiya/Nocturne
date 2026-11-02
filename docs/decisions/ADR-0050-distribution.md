@@ -118,6 +118,10 @@
 
 ## 修订
 
+### 2026-11-02：最低 Node 提到 24.16
+
+Node 24.15.0 在 Windows 上大量建立出站连接时，libuv 的 TCP 连接路径可能触发栈缓冲区溢出，进程直接退出（退出码 `0xC0000409`，见 [Node #63620](https://github.com/nodejs/node/issues/63620)，该报告在 24.16.0 上不再复现）。`engines` 与桌面端的版本校验都提到 24.16，随附 Node 已是 24.21.0。
+
 ### 2026-10-07：npm 首发暂缓
 
 维护者注册 npm 账号时，注册页持续返回「Access is temporarily restricted」，换设备也一样，首发无法进行。决定：

@@ -26,7 +26,7 @@ Nocturne 是在本地代码仓库里工作的编程助手。你可以用自然�
 
 ### 方式二：命令行 (`nctrn`)
 
-需要 **Node.js 24.14** 或更高版本。
+需要 **Node.js 24.16** 或更高版本。
 
 1. 从 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 `nctrn-<版本>.tgz` 并全局安装：
    ```sh
@@ -162,7 +162,7 @@ Nocturne 不会在未经允许时乱改系统。你可以在状态栏或通过 `
 
 ### 从源码构建
 
-需要 **Node.js ≥ 24.14** 与 **pnpm 11.24.0**：
+需要 **Node.js ≥ 24.16** 与 **pnpm 11.24.0**：
 
 ```sh
 git clone https://github.com/kanzaki-chiya/Nocturne.git

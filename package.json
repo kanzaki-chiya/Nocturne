@@ -1,12 +1,12 @@
 {
   "name": "nocturne",
   "private": true,
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Nocturne — open-source coding agent runtime",
   "license": "GPL-3.0-only",
   "packageManager": "pnpm@11.24.0",
   "engines": {
-    "node": ">=24.14"
+    "node": ">=24.16"
   },
   "scripts": {
     "build": "pnpm -r build",
