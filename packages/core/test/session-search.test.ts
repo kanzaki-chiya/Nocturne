@@ -200,6 +200,29 @@ describe("跨会话全文搜索", () => {
     expect(results[0]?.seq).toBe(3);
   });
 
+  it("最早的命中被回退后取回退之后的命中，未被裁掉的最早命中不受后续回退影响", async () => {
+    const { dir, search } = fixture();
+    const rewound = (id: string, seq: number, targetSeq: number) =>
+      event(id, seq, "session.rewound", { targetSeq, mode: "both", files: [] });
+    writeLog(dir, "redo", [
+      created("redo"),
+      user("redo", 2, "目标词 第一次"),
+      user("redo", 3, "目标词 第二次"),
+      rewound("redo", 4, 2),
+      user("redo", 5, "目标词 重新问"),
+    ]);
+    writeLog(dir, "keep", [
+      created("keep"),
+      user("keep", 2, "目标词 保留"),
+      user("keep", 3, "其它"),
+      user("keep", 4, "目标词 被裁掉"),
+      rewound("keep", 5, 3),
+    ]);
+    const results = await search("目标词");
+    expect(results.find((item) => item.sessionId === "redo")?.seq).toBe(5);
+    expect(results.find((item) => item.sessionId === "keep")?.seq).toBe(2);
+  });
+
   it("读取完整日志，能命中 64 KiB 头部之外的尾部", async () => {
     const { dir, search } = fixture();
     writeLog(dir, "deep", [

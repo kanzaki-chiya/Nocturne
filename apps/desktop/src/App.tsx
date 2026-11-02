@@ -242,7 +242,7 @@ export function App({ host }: { host: DesktopHost }) {
   /** 定时任务页盖在会话区上，左栏会话树保持显示（不同于设置区） */
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [scheduleTasks, setScheduleTasks] = useState<ScheduleTaskOverview[]>([]);
-  const [scheduleTarget, setScheduleTarget] = useState<string | undefined>();
+  const [scheduleTarget, setScheduleTarget] = useState<{ id: string } | undefined>();
   const [searchOpen, setSearchOpenState] = useState(false);
   const searchOpenRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -746,12 +746,29 @@ export function App({ host }: { host: DesktopHost }) {
   const selectSessionRef = useRef<typeof selectSession | null>(null);
   selectSessionRef.current = selectSession;
 
+  // 跳转只生效一次：离开目标会话后作废，切回来时回到平常的位置。
+  const searchArrived = useRef(false);
+  const selectedSessionId = conversations.selected?.session.id;
+  useEffect(() => {
+    if (searchTarget === null) return;
+    if (selectedSessionId === searchTarget.sessionId) {
+      searchArrived.current = true;
+    } else if (searchArrived.current) {
+      searchArrived.current = false;
+      setSearchTarget(null);
+    }
+  }, [searchTarget, selectedSessionId]);
+  useEffect(() => {
+    if (!schedulesOpen) setScheduleTarget(undefined);
+  }, [schedulesOpen]);
+
   const openSearchItem = (item: SearchItem) => {
     setSearchOpen(false);
     setPage(null);
     if (item.kind === "sessions" && item.sessionId !== undefined) {
       const summary = sessions.find((session) => session.id === item.sessionId);
       setSchedulesOpen(false);
+      searchArrived.current = false;
       setSearchTarget({ sessionId: item.sessionId, seq: item.seq, nonce: Date.now() });
       void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
       return;
@@ -773,7 +790,7 @@ export function App({ host }: { host: DesktopHost }) {
       return;
     }
     if (item.kind === "schedules" && item.scheduleId !== undefined) {
-      setScheduleTarget(item.scheduleId);
+      setScheduleTarget({ id: item.scheduleId });
       setSchedulesOpen(true);
     }
   };
@@ -1446,7 +1463,7 @@ export function App({ host }: { host: DesktopHost }) {
               <SchedulePage
                 api={pageClient?.runtime}
                 workspaces={scheduleWorkspaces}
-                targetId={scheduleTarget}
+                target={scheduleTarget}
                 onOpenSession={async (sessionId) => {
                   const summary =
                     sessions.find((item) => item.id === sessionId) ??

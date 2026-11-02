@@ -44,12 +44,12 @@
 ### 3. 不建索引、流式扫描与结果上限
 
 - 不建立独立全文索引。`Platform.fs.readLines(path, signal)` 用流式按行读取完整 `<sessionId>.jsonl`，不复用 `list()` 的 64 KiB 头部切片，因此超过 64 KiB 的长日志尾部照常命中。
-- 先取 `store.list()` 得到的顶层会话摘要并按 `mtimeMs` 倒序排列，再以固定并发上限（4 个文件 worker）扫描日志；单行 JSON 损坏或包含未知未来事件时跳过该行，不中断整次搜索。
-- 每次搜索最多返回 200 条结果，达到上限后停止产出；超出部分不返回，界面不显示计数或截断提示。
+- 先取 `store.list()` 得到的顶层会话摘要并按 `mtimeMs` 倒序排列，再以固定并发上限（4 个文件 worker）扫描日志；单行 JSON 损坏或包含未知未来事件时跳过该行，不中断整次搜索。每个文件只在内存里留最早的一条命中事件，不把事件攒成列表：回退只裁掉尾部，最早的命中被裁掉时当时已有的命中都一起没了。
+- 每次搜索最多返回 200 条结果，够数后不再打开更旧的日志；超出部分不返回，界面不显示计数或截断提示。
 
 ### 4. 回退事件的过滤与跳转定位
 
-- 日志中每个会话的事件序列先经 `effectiveEvents(events)`（`packages/core/src/protocol/rewind.ts`）折叠，复用现有的对话回退裁剪逻辑（`session.rewound` 且 `mode !== "files"` 时丢弃 `targetSeq <= seq < rewound.seq` 的对话事件）。已被回退丢弃的消息与工具结果不会命中，保证搜索结果的跳转目标在 `SessionView.entries` 中真实存在。
+- 读到 `session.rewound` 时，把当前保留的命中事件和它一起交给 `effectiveEvents`（`packages/core/src/protocol/rewind.ts`）判断是否被裁掉，复用现有的对话回退裁剪逻辑（`session.rewound` 且 `mode !== "files"` 时丢弃 `targetSeq <= seq < rewound.seq` 的对话事件）。已被回退丢弃的消息与工具结果不会命中，保证搜索结果的跳转目标在 `SessionView.entries` 中真实存在。
 - `SessionView` 的 `ToolEntry.seq` 记录的是首个支撑持久事件（通常为 `tool.started`）的 `seq`，而工具输出命中来自 `tool.completed` 的 `seq`。为此在 `ToolEntry` 增加可选字段 `completedSeq?: number`，在归约 `tool.completed` 时记下其 `event.seq`。
 - 打开会话搜索结果时：
   - 若带有 `seq`，打开会话后按 `entry.seq === seq` 或 `entry.completedSeq === seq` 找到对应条目，滚入视口中央并对整条消息/工具行做短暂高亮（`Conversation.tsx` 的助手消息由 Markdown 渲染为多节点 DOM，不做跨节点逐字高亮）；

@@ -657,6 +657,22 @@ describe("桌面端跨会话搜索集成", () => {
     });
     expect(await screen.findByText("工具输出里包含工具命中词")).toBeTruthy();
 
+    // 离开再切回：跳转已作废，工具行回到默认折叠，不再高亮
+    fireEvent.click(screen.getByText("alpha 会话"));
+    await waitFor(() => {
+      expect(screen.queryByText("工具输出里包含工具命中词")).toBeNull();
+    });
+    const betaRow = document.querySelector<HTMLElement>(
+      '[data-project-key="z:\\\\qa-beta"] .nav.sub .item',
+    );
+    expect(betaRow).not.toBeNull();
+    if (betaRow !== null) fireEvent.click(betaRow);
+    await waitFor(() => {
+      expect(document.querySelector("article.tool, .tool")).not.toBeNull();
+    });
+    expect(screen.queryByText("工具输出里包含工具命中词")).toBeNull();
+    expect(document.querySelector(".search-hit")).toBeNull();
+
     // 折叠 qa-alpha 项目组，再通过搜索打开该项目：项目组自动展开且不新建会话
     const alphaGroup = document.querySelector<HTMLElement>('[data-project-key="z:\\\\qa-alpha"]');
     alphaGroup?.querySelector<HTMLButtonElement>(".gh-toggle")?.click();
