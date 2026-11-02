@@ -169,9 +169,8 @@ describe("补全", () => {
   it("前缀优先于包含，/help 与补全共用命令表", () => {
     const hits = completeSlash("/p", ctx);
     const inserts = hits.map((h) => h.insert);
-    expect(inserts[0]).toBe("/preset");
-    expect(inserts[1]).toBe("/provider");
-    expect(hits[1]?.label).toContain("管理服务商");
+    expect(inserts.slice(0, 3)).toEqual(["/preset", "/plan ", "/provider"]);
+    expect(hits[2]?.label).toContain("管理服务商");
     const help = helpLines().join("\n");
     for (const hit of hits) {
       const name = hit.insert.split(" ")[0] ?? "";
