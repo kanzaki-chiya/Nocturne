@@ -203,6 +203,24 @@ describe("SearchDialog 组件", () => {
     expect(screen.getAllByRole("option")[0]?.getAttribute("aria-selected")).toBe("true");
   });
 
+  it("第一次查询不显示未过滤的会话；没动过选中时高亮跟随第一行", async () => {
+    vi.useFakeTimers();
+    const h = progressive({ query: "", matches: [] });
+    expect(screen.queryByText("新会话一")).toBeNull();
+    const first = screen.getAllByRole("option")[0];
+    expect(first?.textContent).toContain("旧项目");
+    expect(first?.getAttribute("aria-selected")).toBe("true");
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    act(() => h.notify(0, [{ sessionId: "s1", mtimeMs: 2 }]));
+    const rows = screen.getAllByRole("option");
+    expect(rows[0]?.textContent).toContain("新会话一");
+    expect(rows[0]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "搜索" }), { key: "Enter" });
+    expect(h.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: "s1" }));
+  });
+
   it("扫描中空白，结束才显示没有结果；IME冻结本地列表，过期通知与返回和关闭后的通知无效", async () => {
     vi.useFakeTimers();
     const h = progressive({ query: "旧", matches: [] });
@@ -434,8 +452,8 @@ describe("SearchDialog 组件", () => {
       vi.advanceTimersByTime(20);
     });
     expect(searchSessions).toHaveBeenCalledWith({ query: "旧", searchId: expect.any(String) });
-    // 结果未返回前仍保留上次列表（最近使用）
-    expect(screen.getAllByRole("option")[0]?.textContent).toContain("旧结果会话");
+    // 从最近使用开始的第一次查询，结果未返回前不把未过滤的会话当结果显示
+    expect(screen.queryByRole("option", { name: /旧结果会话/ })).toBeNull();
 
     // 紧接着输入新查询「新」
     query = "新";

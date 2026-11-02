@@ -324,7 +324,7 @@ export function SearchDialog({
 
     const nextSessions: SearchItem[] =
       settledQuery === ""
-        ? [...visibleSessions]
+        ? (filterQuery === "" ? [...visibleSessions] : [])
             .sort((a, b) => b.mtimeMs - a.mtimeMs)
             .map((session) => ({
               key: `session:${session.id}`,
@@ -442,8 +442,9 @@ export function SearchDialog({
     visible.findIndex((item) => item.key === selectedKey),
   );
   useEffect(() => {
-    if (!visible.some((item) => item.key === selectedKey)) {
-      setSelectedKey(visible[0]?.key ?? null);
+    // 没动过选中时 selectedKey 为 null，始终是第一行；动过的行消失后也回到第一行。
+    if (selectedKey !== null && !visible.some((item) => item.key === selectedKey)) {
+      setSelectedKey(null);
     }
   }, [selectedKey, visible]);
 
