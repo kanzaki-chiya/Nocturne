@@ -606,10 +606,13 @@ describe("运行中的 child：真实 Runtime 门闩", () => {
     expect(got.order.at(-1)).toBe("end");
     expect(notifications(r.h.wire, "subagent.closed")).toHaveLength(1);
     // 自然结束后退订是空操作，不再发请求
-    const before = r.h.wire.length;
+    // 父会话的 idle 在 submit 返回后才发（提交锁释放之后），这里只看观察相关的消息
+    const observationMessages = (): number =>
+      r.h.wire.length - notifications(r.h.wire, "event").length;
+    const before = observationMessages();
     observation.unsubscribe();
     await sleep(20);
-    expect(r.h.wire.length).toBe(before);
+    expect(observationMessages()).toBe(before);
     expect(r.h.calls[0]?.unsubscribed).toBe(0);
     await r.session.close();
     r.h.client.close();
