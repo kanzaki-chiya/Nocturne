@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { describeSchedulePlan, type ScheduleTaskOverview } from "@nocturne/core/protocol";
-import type { RpcResult, RpcRuntime } from "@nocturne/rpc/client";
+import type { RpcClient, RpcResult, RpcRuntime } from "@nocturne/rpc/client";
 
 import { formatRelative, projectKey, type ProjectNode, type SessionSummary } from "./session-tree";
 import "./search.css";
@@ -19,7 +19,10 @@ export type SessionMatch = RpcResult<"runtime.searchSessions">[number];
 export interface SettledSearch {
   query: string;
   matches: SessionMatch[];
+  complete?: boolean;
 }
+
+let nextSearchId = 0;
 
 export interface SearchItem {
   key: string;
@@ -178,6 +181,7 @@ function scheduleLastRunMs(schedule: ScheduleTaskOverview): number {
 
 export function SearchDialog({
   api,
+  client,
   sessions,
   projects,
   hiddenProjects,
@@ -191,6 +195,7 @@ export function SearchDialog({
   onOpen,
 }: {
   api: Pick<RpcRuntime, "searchSessions">;
+  client?: Pick<RpcClient, "onNotification"> | undefined;
   sessions: SessionSummary[];
   projects: ProjectNode[];
   hiddenProjects: Set<string>;
@@ -210,7 +215,15 @@ export function SearchDialog({
   const request = useRef(0);
   const [compositionVersion, setCompositionVersion] = useState(0);
   const [tab, setTab] = useState<SearchTab>("all");
-  const [selected, setSelected] = useState(0);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [filterQuery, setFilterQuery] = useState(query.trim());
+  const [completedQuery, setCompletedQuery] = useState<string | undefined>(
+    settled.complete === false ? undefined : settled.query,
+  );
+  const settledRef = useRef(settled);
+  settledRef.current = settled;
+  const onSettledRef = useRef(onSettledChange);
+  onSettledRef.current = onSettledChange;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -233,36 +246,57 @@ export function SearchDialog({
     };
   }, []);
 
-  const trimmedQuery = query.trim();
   const settledQuery = settled.query;
   const sessionMatches = settled.matches;
 
   useEffect(() => {
+    if (!composing.current) setFilterQuery(query.trim());
+  }, [query, compositionVersion]);
+
+  useEffect(() => {
     const version = ++request.current;
-    if (trimmedQuery === "") {
-      if (settledQuery !== "" || sessionMatches.length > 0) {
-        onSettledChange({ query: "", matches: [] });
+    if (filterQuery === "") {
+      if (settledRef.current.query !== "" || settledRef.current.matches.length > 0) {
+        onSettledRef.current({ query: "", matches: [] });
       }
+      setCompletedQuery("");
       return;
     }
     if (composing.current) return;
-    if (trimmedQuery === settledQuery) return;
+    if (filterQuery === settledRef.current.query && settledRef.current.complete !== false) {
+      setCompletedQuery(filterQuery);
+      return;
+    }
+    setCompletedQuery(undefined);
+    const searchId = `search-${++nextSearchId}`;
+    let matches: SessionMatch[] = [];
+    const unsubscribe = client?.onNotification("runtime.sessionSearchProgress", (progress) => {
+      if (request.current !== version || progress.searchId !== searchId) return;
+      matches = [...matches, ...progress.results];
+      onSettledRef.current({ query: filterQuery, matches, complete: false });
+    });
     const timer = window.setTimeout(() => {
-      void api.searchSessions({ query: trimmedQuery }).then(
+      void api.searchSessions({ query: filterQuery, searchId }).then(
         (matches) => {
           if (request.current !== version) return;
-          onSettledChange({ query: trimmedQuery, matches });
+          unsubscribe?.();
+          setCompletedQuery(filterQuery);
+          onSettledRef.current({ query: filterQuery, matches });
         },
         () => {
           if (request.current !== version) return;
-          onSettledChange({ query: trimmedQuery, matches: [] });
+          unsubscribe?.();
+          setCompletedQuery(filterQuery);
+          onSettledRef.current({ query: filterQuery, matches: [] });
         },
       );
     }, 150);
     return () => {
       window.clearTimeout(timer);
+      unsubscribe?.();
+      request.current += 1;
     };
-  }, [api, compositionVersion, onSettledChange, sessionMatches.length, settledQuery, trimmedQuery]);
+  }, [api, client, compositionVersion, filterQuery]);
 
   const { sessionItems, projectItems, designItems, scheduleItems } = useMemo(() => {
     const now = Date.now();
@@ -323,9 +357,9 @@ export function SearchDialog({
     const nextProjects: SearchItem[] = visibleProjects
       .filter(
         (project) =>
-          settledQuery === "" ||
-          includes(project.name, settledQuery) ||
-          includes(project.path, settledQuery),
+          filterQuery === "" ||
+          includes(project.name, filterQuery) ||
+          includes(project.path, filterQuery),
       )
       .map((project): SearchItem => ({
         key: `project:${project.key}`,
@@ -340,13 +374,13 @@ export function SearchDialog({
     const nextSchedules: SearchItem[] = schedules
       .filter(
         (schedule) =>
-          settledQuery === "" ||
-          includes(schedule.name, settledQuery) ||
-          includes(schedule.prompt, settledQuery),
+          filterQuery === "" ||
+          includes(schedule.name, filterQuery) ||
+          includes(schedule.prompt, filterQuery),
       )
       .map((schedule): SearchItem => {
         const excerpt =
-          settledQuery === "" ? undefined : promptSnippet(schedule.prompt, settledQuery);
+          filterQuery === "" ? undefined : promptSnippet(schedule.prompt, filterQuery);
         return {
           key: `schedule:${schedule.id}`,
           kind: "schedules",
@@ -361,9 +395,9 @@ export function SearchDialog({
 
     const nextDesigns = designResults().filter(
       (item) =>
-        settledQuery === "" ||
-        includes(item.title, settledQuery) ||
-        (item.snippet !== undefined && includes(item.snippet, settledQuery)),
+        filterQuery === "" ||
+        includes(item.title, filterQuery) ||
+        (item.snippet !== undefined && includes(item.snippet, filterQuery)),
     );
 
     return {
@@ -372,7 +406,16 @@ export function SearchDialog({
       designItems: nextDesigns,
       scheduleItems: nextSchedules,
     };
-  }, [hiddenProjects, plainKey, projects, schedules, sessionMatches, sessions, settledQuery]);
+  }, [
+    filterQuery,
+    hiddenProjects,
+    plainKey,
+    projects,
+    schedules,
+    sessionMatches,
+    sessions,
+    settledQuery,
+  ]);
 
   const visible = useMemo<SearchItem[]>(() => {
     const byKind: Record<ItemKind, SearchItem[]> = {
@@ -382,25 +425,27 @@ export function SearchDialog({
       schedules: scheduleItems,
     };
     if (tab !== "all") return byKind[tab];
-    if (settledQuery === "") {
+    if (filterQuery === "") {
       return [...sessionItems, ...projectItems, ...designItems, ...scheduleItems]
         .sort((a, b) => b.timeMs - a.timeMs)
         .slice(0, 8);
     }
     return GROUPS.flatMap((group) => byKind[group.id]);
-  }, [designItems, projectItems, scheduleItems, sessionItems, settledQuery, tab]);
+  }, [designItems, filterQuery, projectItems, scheduleItems, sessionItems, tab]);
 
   useEffect(() => {
-    setSelected(0);
-  }, [settledQuery, tab]);
+    setSelectedKey(null);
+    rows.current[0]?.scrollIntoView({ block: "nearest" });
+  }, [filterQuery, tab]);
+  const selected = Math.max(
+    0,
+    visible.findIndex((item) => item.key === selectedKey),
+  );
   useEffect(() => {
-    if (selected >= visible.length && visible.length > 0) {
-      setSelected(visible.length - 1);
+    if (!visible.some((item) => item.key === selectedKey)) {
+      setSelectedKey(visible[0]?.key ?? null);
     }
-  }, [selected, visible.length]);
-  useEffect(() => {
-    rows.current[selected]?.scrollIntoView({ block: "nearest" });
-  }, [selected, visible]);
+  }, [selectedKey, visible]);
 
   const openSelected = () => {
     const item = visible[selected];
@@ -418,11 +463,12 @@ export function SearchDialog({
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (visible.length > 0) {
-        setSelected((current) =>
+        const next =
           event.key === "ArrowDown"
-            ? (current + 1) % visible.length
-            : (current - 1 + visible.length) % visible.length,
-        );
+            ? (selected + 1) % visible.length
+            : (selected - 1 + visible.length) % visible.length;
+        setSelectedKey(visible[next]?.key ?? null);
+        rows.current[next]?.scrollIntoView({ block: "nearest" });
       }
       return;
     }
@@ -451,6 +497,7 @@ export function SearchDialog({
   const renderRow = (item: SearchItem) => {
     const index = rowIndex++;
     const active = selected === index;
+    const itemQuery = item.kind === "sessions" ? settledQuery : filterQuery;
     return (
       <button
         type="button"
@@ -462,7 +509,7 @@ export function SearchDialog({
           rows.current[index] = element;
         }}
         onMouseMove={() => {
-          if (selected !== index) setSelected(index);
+          if (selected !== index) setSelectedKey(item.key);
         }}
         onClick={() => {
           onOpen(item);
@@ -471,17 +518,17 @@ export function SearchDialog({
         <span className="search-row-icon">{itemIcon(item.kind)}</span>
         <span className="search-row-main">
           <span className="search-row-title">
-            <Highlighted text={item.title} query={settledQuery} />
+            <Highlighted text={item.title} query={itemQuery} />
           </span>
           {item.snippet !== undefined && (
             <span className="search-row-snippet">
-              <Highlighted text={item.snippet} query={settledQuery} ranges={item.ranges} />
+              <Highlighted text={item.snippet} query={itemQuery} ranges={item.ranges} />
             </span>
           )}
         </span>
         <span className={`search-row-info${item.kind === "projects" ? " mono" : ""}`}>
           {item.kind === "projects" ? (
-            <Highlighted text={item.info} query={settledQuery} />
+            <Highlighted text={item.info} query={itemQuery} />
           ) : (
             item.info
           )}
@@ -514,6 +561,10 @@ export function SearchDialog({
             spellCheck={false}
             value={query}
             onChange={(event) => {
+              if (composing.current || event.target.value.trim() !== filterQuery) {
+                request.current += 1;
+              }
+              if (!composing.current) setSelectedKey(null);
               onQueryChange(event.target.value);
             }}
             onCompositionStart={() => {
@@ -549,8 +600,10 @@ export function SearchDialog({
         </div>
         <div className="search-results" role="listbox">
           {visible.length === 0 ? (
-            <div className="search-empty">没有结果</div>
-          ) : settledQuery === "" ? (
+            (filterQuery === "" ||
+              completedQuery === filterQuery ||
+              (tab !== "all" && tab !== "sessions")) && <div className="search-empty">没有结果</div>
+          ) : filterQuery === "" ? (
             <>
               <div className="search-section-title">最近使用</div>
               {visible.map(renderRow)}

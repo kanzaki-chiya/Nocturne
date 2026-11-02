@@ -71,6 +71,7 @@ import {
   type RemoteStatus,
   type RpcMethodName,
   type RpcMethods,
+  type RpcResult,
   type SessionOpened,
   type WireAttachment,
 } from "../shared/methods.js";
@@ -1284,15 +1285,46 @@ class Connection implements HubPeer {
       },
       "runtime.searchSessions": async (p) => {
         const query = reqString(p, "query");
+        const searchId = optString(p, "searchId");
         this.sessionSearch?.abort();
         const controller = new AbortController();
         this.sessionSearch = controller;
+        let pending: RpcResult<"runtime.searchSessions"> = [];
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const flush = () => {
+          timer = undefined;
+          if (controller.signal.aborted || pending.length === 0 || searchId === undefined) return;
+          this.send({
+            jsonrpc: "2.0",
+            method: "runtime.sessionSearchProgress",
+            params: { searchId, results: pending },
+          });
+          pending = [];
+        };
+        const clear = () => {
+          if (timer !== undefined) clearTimeout(timer);
+          timer = undefined;
+          pending = [];
+        };
+        controller.signal.addEventListener("abort", clear, { once: true });
         try {
-          return await this.runtime().searchSessions(query, { signal: controller.signal });
+          const results = await this.runtime().searchSessions(query, {
+            signal: controller.signal,
+            onProgress: (batch) => {
+              if (controller.signal.aborted || searchId === undefined) return;
+              pending.push(...batch);
+              timer ??= setTimeout(flush, 100);
+            },
+          });
+          if (timer !== undefined) clearTimeout(timer);
+          flush();
+          return controller.signal.aborted ? [] : results;
         } catch (error) {
           if (controller.signal.aborted) return [];
           throw error;
         } finally {
+          clear();
+          controller.signal.removeEventListener("abort", clear);
           if (this.sessionSearch === controller) this.sessionSearch = undefined;
         }
       },

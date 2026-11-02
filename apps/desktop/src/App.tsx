@@ -1922,6 +1922,7 @@ export function App({ host }: { host: DesktopHost }) {
       {searchOpen && pageClient?.runtime !== undefined && (
         <SearchDialog
           api={pageClient.runtime}
+          client={pageClient}
           sessions={treeSessions}
           projects={tree.projects}
           hiddenProjects={new Set(p.hidden.map(projectKey))}

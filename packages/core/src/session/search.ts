@@ -139,18 +139,44 @@ export async function searchSessions(
     .filter((summary) => summary.id.length > 0)
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const results: SessionSearchResult[] = [];
+  let found = 0;
+  const completed = new Map<number, SessionSearchResult | undefined>();
+  let frontier = 0;
+  let flushScheduled = false;
+  const flush = () => {
+    flushScheduled = false;
+    if (signal?.aborted) return;
+    const batch: SessionSearchResult[] = [];
+    while (completed.has(frontier) && results.length < RESULT_LIMIT) {
+      const result = completed.get(frontier);
+      completed.delete(frontier++);
+      if (result !== undefined) {
+        results.push(result);
+        batch.push(result);
+      }
+    }
+    if (batch.length > 0) options?.onProgress?.(batch);
+  };
   let next = 0;
   const workers = Array.from({ length: Math.min(FILE_CONCURRENCY, summaries.length) }, async () => {
     // 按更新时间倒序取文件：够数后没开始的都更旧，不必再读。
-    while (next < summaries.length && results.length < RESULT_LIMIT) {
+    while (next < summaries.length && found < RESULT_LIMIT) {
       throwIfAborted(signal);
-      const summary = summaries[next++];
+      const index = next++;
+      const summary = summaries[index];
       if (summary === undefined) return;
       const result = await searchFile(platform, sessionsDir, summary, query, signal);
-      if (result !== undefined) results.push(result);
+      throwIfAborted(signal);
+      if (result !== undefined) found += 1;
+      completed.set(index, result);
+      if (!flushScheduled) {
+        flushScheduled = true;
+        queueMicrotask(flush);
+      }
     }
   });
   await Promise.all(workers);
   throwIfAborted(signal);
-  return results.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, RESULT_LIMIT);
+  flush();
+  return results;
 }

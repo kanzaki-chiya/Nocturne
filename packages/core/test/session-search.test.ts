@@ -1,12 +1,13 @@
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPlatform } from "../src/platform/index.js";
 import {
   createSessionStore,
   searchSessions,
+  type SessionSearchOptions,
   type SessionSearchResult,
 } from "../src/session/index.js";
 
@@ -15,14 +16,17 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(): { dir: string; search: (query: string) => Promise<SessionSearchResult[]> } {
+function fixture(): {
+  dir: string;
+  search: (query: string, options?: SessionSearchOptions) => Promise<SessionSearchResult[]>;
+} {
   const dir = mkdtempSync(path.join(tmpdir(), "nct-session-search-"));
   roots.push(dir);
   const platform = createPlatform();
   const store = createSessionStore({ platform, sessionsDir: dir });
   return {
     dir,
-    search: (query) => searchSessions(platform, store, dir, query),
+    search: (query, options) => searchSessions(platform, store, dir, query, options),
   };
 }
 
@@ -85,6 +89,113 @@ function writeLog(dir: string, id: string, lines: string[], mtimeMs = 1000): voi
 }
 
 describe("跨会话全文搜索", () => {
+  it("前排文件未完成时，缓冲中的命中达到上限也停止打开更旧日志", async () => {
+    const platform = createPlatform();
+    const gate = Promise.withResolvers<undefined>();
+    const summaries = Array.from({ length: 500 }, (_, i) => ({
+      id: `s${i}`,
+      mtimeMs: 500 - i,
+      createdAt: "",
+      cwd: "",
+      workspaceRoot: "",
+      model: { provider: "fake", model: "fake" },
+    }));
+    const opened: string[] = [];
+    platform.fs.readLines = async function* (file) {
+      const id = path.basename(file, ".jsonl");
+      opened.push(id);
+      if (id === "s0") await gate.promise;
+      yield user(id, 2, "目标");
+    };
+    const batches: SessionSearchResult[][] = [];
+    const pending = searchSessions(platform, { list: async () => summaries }, "unused", "目标", {
+      onProgress: (batch) => batches.push(batch),
+    });
+    await vi.waitFor(() => expect(opened.length).toBeGreaterThanOrEqual(200));
+    expect(opened.length).toBeLessThanOrEqual(203);
+    expect(batches).toEqual([]);
+    gate.resolve(undefined);
+    const results = await pending;
+    expect(results.map((item) => item.sessionId)).toEqual(
+      Array.from({ length: 200 }, (_, i) => `s${i}`),
+    );
+    expect(batches.flat()).toEqual(results);
+    expect(opened.length).toBeLessThanOrEqual(203);
+  });
+  it("乱序完成只交出已确定的前缀，同轮合批，拼接等于最终结果", async () => {
+    const platform = createPlatform();
+    const summaries = Array.from({ length: 5 }, (_, i) => ({
+      id: `s${i}`,
+      mtimeMs: 5 - i,
+      createdAt: "",
+      cwd: "",
+      workspaceRoot: "",
+      model: { provider: "fake", model: "fake" },
+    }));
+    const gates = summaries.map(() => Promise.withResolvers<undefined>());
+    const started: string[] = [];
+    platform.fs.readLines = async function* (file) {
+      const id = path.basename(file, ".jsonl");
+      started.push(id);
+      await gates[Number(id.slice(1))]?.promise;
+      yield user(id, 2, "目标");
+    };
+    const batches: SessionSearchResult[][] = [];
+    const pending = searchSessions(platform, { list: async () => summaries }, "unused", "目标", {
+      onProgress: (batch) => batches.push(batch),
+    });
+    await vi.waitFor(() => expect(started).toHaveLength(4));
+    gates[1]?.resolve(undefined);
+    gates[2]?.resolve(undefined);
+    await vi.waitFor(() => expect(started).toHaveLength(5));
+    expect(batches).toEqual([]);
+    gates[0]?.resolve(undefined);
+    await vi.waitFor(() => expect(batches).toHaveLength(1));
+    expect(batches[0]?.map((item) => item.sessionId)).toEqual(["s0", "s1", "s2"]);
+    gates[4]?.resolve(undefined);
+    await Promise.resolve(undefined);
+    gates[3]?.resolve(undefined);
+    const results = await pending;
+    expect(batches.flat()).toEqual(results);
+    expect(results.map((item) => item.sessionId)).toEqual(["s0", "s1", "s2", "s3", "s4"]);
+  });
+
+  it("取消后已排队或迟到的完成不再回调", async () => {
+    const platform = createPlatform();
+    const gate = Promise.withResolvers<undefined>();
+    const started = Promise.withResolvers<undefined>();
+    platform.fs.readLines = async function* () {
+      started.resolve(undefined);
+      await gate.promise;
+      yield user("s", 2, "目标");
+    };
+    const controller = new AbortController();
+    const onProgress = vi.fn();
+    const pending = searchSessions(
+      platform,
+      {
+        list: async () => [
+          {
+            id: "s",
+            mtimeMs: 1,
+            createdAt: "",
+            cwd: "",
+            workspaceRoot: "",
+            model: { provider: "fake", model: "fake" },
+          },
+        ],
+      },
+      "unused",
+      "目标",
+      { signal: controller.signal, onProgress },
+    );
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await started.promise;
+    controller.abort();
+    gate.resolve(undefined);
+    await rejected;
+    expect(onProgress).not.toHaveBeenCalled();
+  });
   it("搜索当前标题、用户消息、助手正文和工具展示文本；每会话至多一条并按更新时间排序", async () => {
     const { dir, search } = fixture();
     writeLog(
@@ -244,7 +355,9 @@ describe("跨会话全文搜索", () => {
       const id = `session-${index}`;
       writeLog(dir, id, [created(id), user(id, 2, "共同命中")], index + 1);
     }
-    const results = await search("共同命中");
+    const batches: SessionSearchResult[][] = [];
+    const results = await search("共同命中", { onProgress: (batch) => batches.push(batch) });
+    expect(batches.flat()).toEqual(results);
     expect(results).toHaveLength(200);
     expect(results[0]?.sessionId).toBe("session-204");
     expect(results.at(-1)?.sessionId).toBe("session-5");

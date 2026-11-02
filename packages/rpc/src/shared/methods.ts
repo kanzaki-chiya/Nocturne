@@ -383,7 +383,7 @@ export interface RpcMethods {
     result: (SessionSummary & { openHere?: boolean })[];
   };
   "runtime.searchSessions": {
-    params: { query: string };
+    params: { query: string; searchId?: string };
     result: SessionSearchResult[];
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
@@ -790,6 +790,8 @@ export interface RpcServerNotifications {
    * 或标题落盘之后推送，短时间内的多次变化合并为一条。不带任何会话内容；别的进程改的列表不在此列
    */
   "runtime.sessionsChanged": Record<string, never>;
+  /** 只交给发起查询的连接；results 是按更新时间倒序的增量。 */
+  "runtime.sessionSearchProgress": { searchId: string; results: SessionSearchResult[] };
   /**
    * 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（易失，不写日志，不带任务内容）：
    * 保存、删除、一次运行开始/结束/被跳过之后推送，广播给所有已握手的连接（含远程）。

@@ -34,7 +34,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listSessions` | `{ cwd?, includeSubagents? }` → `(SessionSummary & { openHere?: boolean })[]`；`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
-| `searchSessions` | `{ query: string }` → `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串，同一连接发起新查询或断线时立即中止上一次未完成的扫描（被取代的旧查询返回 `[]`） |
+| `searchSessions` | `{ query: string, searchId?: string }` → 完整 `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串。`searchId` 由客户端为每次查询生成，提供时经 `runtime.sessionSearchProgress` 交付有序增量，省略时不发进度通知。同一连接发起新查询或断线时立即中止上一次扫描、丢弃待发批次（被取代的旧查询返回 `[]`）；最终响应始终为完整结果 |
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
@@ -214,6 +214,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | 服务端→客户端 | `grants.changed` | `{ workspace?, sessionId? }` | 新增、撤销授权或改信任后重拉；会话 ID 为树根。易失、不写日志，广播给所有已握手连接（含远程） |
 | 服务端→客户端 | `schedule.changed` | `{ taskId? }` | 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（ADR-0064）。易失，不写日志，不带任务内容；保存、删除、一次运行开始/结束/被跳过之后发。`taskId` 缺省表示整体变化。广播给所有已握手连接（含远程）。每次发出时同时触发一次 `runtime.sessionsChanged`（运行会建出新会话，照常 300 ms 合并） |
 | 服务端→客户端 | `login.completed` | `LoginCompleted` | 登录会话完成或失败（含取消）；绝不先于对应 `login.start`/`startDraft` 的响应到达（3.4） |
+| 服务端→客户端 | `runtime.sessionSearchProgress` | `{ searchId: string, results: SessionSearchResult[] }` | 只发送给发起搜索的连接，绝不广播。`results` 为按更新时间倒序的增量，批次间顺序也保证；首次待发批次起 100 ms 固定窗口合并，结束时冲刷尾批后返回完整结果。取消、取代或断线后不再发送；易失，不写日志。客户端丢弃过期标识及关闭后的通知，以最终响应校准 |
 
 ### 3.9 `shutdown`
 
@@ -427,7 +428,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
   - **本机管理方法（`agent.*`）**：`agent.describe`（别名 `agent.list`，含 `pipe` 管道状态）、`agent.respondPairing`、`agent.setScope`（别名 `agent.update`）、`agent.revoke` 仅开放给本机连接（`origin === "local"`），通知 `agent.pairingRequested` 与 `agent.statusChanged` 仅发给本机连接。本机管道是附加能力，初始化时若因管道已被另一后台占用（`address_in_use`）、Windows SID 不可用（`sid_unavailable`）、ACL 收紧失败（`acl_failed`）或其他原因（`other`）未能启动，服务端关闭半成品句柄并记 stderr 日志，`initialize` 照常成功，失败状态与原因经 `agent.describe` 的 `pipe` 及 `remote.describe` 的 `agentPipe` 返回。
 
 - **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「附件过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。
-- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
+- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.sessionSearchProgress` 只发发起搜索的连接（`runtime.searchSessions` 仍不在 `REMOTE_METHODS`，远程收不到搜索内容），`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。

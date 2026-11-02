@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScheduleTaskOverview } from "@nocturne/core/protocol";
-import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
+import { RPC_PROTOCOL_VERSION, type RpcClient, type RpcParams } from "@nocturne/rpc/client";
 
 import { App } from "../src/App";
 import type { DesktopHost } from "../src/host";
@@ -97,6 +98,161 @@ function makeSchedule(
 }
 
 describe("SearchDialog 组件", () => {
+  function progressive(
+    initial: SettledSearch = {
+      query: "旧",
+      matches: [{ sessionId: "s0", mtimeMs: 3, snippet: "旧片段" }],
+    },
+  ) {
+    const calls: {
+      input: RpcParams<"runtime.searchSessions">;
+      resolve: (matches: SessionMatch[]) => void;
+    }[] = [];
+    const listeners = new Set<(value: { searchId: string; results: SessionMatch[] }) => void>();
+    const captured: ((value: { searchId: string; results: SessionMatch[] }) => void)[] = [];
+    const api = {
+      searchSessions: vi.fn(
+        (input: RpcParams<"runtime.searchSessions">) =>
+          new Promise<SessionMatch[]>((resolve) => calls.push({ input, resolve })),
+      ),
+    };
+    const client = {
+      onNotification: ((_method, listener) => {
+        const handler = listener as (value: { searchId: string; results: SessionMatch[] }) => void;
+        listeners.add(handler);
+        captured.push(handler);
+        return () => listeners.delete(handler);
+      }) as RpcClient["onNotification"],
+    };
+    const onOpen = vi.fn();
+    const onSettled = vi.fn();
+    function Harness() {
+      const [query, setQuery] = useState("旧");
+      const [settled, setSettled] = useState(initial);
+      return (
+        <SearchDialog
+          api={api}
+          client={client}
+          sessions={[
+            makeSession("s0", "Z:/repo", 3, "旧标题"),
+            makeSession("s1", "Z:/repo", 2, "新会话一"),
+            makeSession("s2", "Z:/repo", 1, "新会话二"),
+          ]}
+          projects={[makeProject("Z:/new", "新项目"), makeProject("Z:/old", "旧项目")]}
+          schedules={[
+            makeSchedule("new", "新任务", "新内容"),
+            makeSchedule("old", "旧任务", "旧内容"),
+          ]}
+          hiddenProjects={new Set()}
+          query={query}
+          settled={settled}
+          onQueryChange={setQuery}
+          onSettledChange={(value) => {
+            onSettled(value);
+            setSettled(value);
+          }}
+          onClose={vi.fn()}
+          onOpen={onOpen}
+        />
+      );
+    }
+    const view = render(<Harness />);
+    const notify = (index: number, results: SessionMatch[]) => {
+      const searchId = calls[index]?.input.searchId ?? "missing";
+      for (const listener of listeners) listener({ searchId, results });
+    };
+    return { ...view, calls, notify, captured, onOpen, onSettled };
+  }
+
+  it("本地立即过滤，旧行用旧词高亮，首批替换后续追加，身份选中不随组变长移动，最终响应校准", async () => {
+    vi.useFakeTimers();
+    const h = progressive();
+    const input = screen.getByRole("textbox", { name: "搜索" });
+    fireEvent.change(input, { target: { value: "新" } });
+    expect(screen.getByRole("option", { name: /新项目/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /新任务/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /旧项目/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /旧任务/ })).toBeNull();
+    const old = screen.getAllByRole("option")[0];
+    expect(old?.querySelector("mark")?.textContent).toBe("旧");
+    expect(h.calls).toHaveLength(0);
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    act(() => h.notify(0, [{ sessionId: "s1", mtimeMs: 2 }]));
+    expect(screen.queryByText("旧标题")).toBeNull();
+    const project = screen
+      .getAllByRole("option")
+      .find((item) => item.textContent?.includes("新项目"));
+    if (!project) throw new Error("缺少项目行");
+    fireEvent.mouseMove(project);
+    expect(project.getAttribute("aria-selected")).toBe("true");
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+    act(() => h.notify(0, [{ sessionId: "s2", mtimeMs: 1 }]));
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(project.getAttribute("aria-selected")).toBe("true");
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(h.onOpen).toHaveBeenLastCalledWith(
+      expect.objectContaining({ key: `project:${projectKey("Z:/new")}` }),
+    );
+    await act(async () => h.calls[0]?.resolve([{ sessionId: "s1", mtimeMs: 2 }]));
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(project.getAttribute("aria-selected")).toBe("true");
+    fireEvent.change(input, { target: { value: "新会话" } });
+    expect(screen.getAllByRole("option")[0]?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("扫描中空白，结束才显示没有结果；IME冻结本地列表，过期通知与返回和关闭后的通知无效", async () => {
+    vi.useFakeTimers();
+    const h = progressive({ query: "旧", matches: [] });
+    const input = screen.getByRole("textbox", { name: "搜索" });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "新" } });
+    expect(screen.getByRole("option", { name: /旧项目/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /新项目/ })).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(h.calls).toHaveLength(0);
+    fireEvent.compositionEnd(input);
+    expect(screen.getByRole("option", { name: /新项目/ })).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    fireEvent.change(input, { target: { value: "无命中" } });
+    expect(screen.queryByText("没有结果")).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    act(() => h.notify(0, [{ sessionId: "s0", mtimeMs: 3 }]));
+    await act(async () => h.calls[0]?.resolve([{ sessionId: "s0", mtimeMs: 3 }]));
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.queryByText("没有结果")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
+    expect(screen.queryByText("没有结果")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "项目" }));
+    expect(screen.getByText("没有结果")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
+    await act(async () => h.calls[1]?.resolve([]));
+    expect(screen.getByText("没有结果")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "关闭" } });
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    h.unmount();
+    h.onSettled.mockClear();
+    act(() => {
+      for (const listener of h.captured)
+        listener({
+          searchId: h.calls[2]?.input.searchId ?? "",
+          results: [{ sessionId: "s0", mtimeMs: 3 }],
+        });
+    });
+    await act(async () => h.calls[2]?.resolve([]));
+    expect(h.onSettled).not.toHaveBeenCalled();
+  });
+
   it("空输入显示「最近使用」且全部栏最多 8 条，切栏显示全量，设计栏为空，不调 searchSessions", () => {
     const searchSessions = vi.fn(async () => []);
     const sessions = Array.from({ length: 6 }, (_, i) =>
@@ -277,9 +433,9 @@ describe("SearchDialog 组件", () => {
     await act(async () => {
       vi.advanceTimersByTime(20);
     });
-    expect(searchSessions).toHaveBeenCalledWith({ query: "旧" });
+    expect(searchSessions).toHaveBeenCalledWith({ query: "旧", searchId: expect.any(String) });
     // 结果未返回前仍保留上次列表（最近使用）
-    expect(screen.getByText("最近使用")).toBeTruthy();
+    expect(screen.getAllByRole("option")[0]?.textContent).toContain("旧结果会话");
 
     // 紧接着输入新查询「新」
     query = "新";
@@ -305,7 +461,7 @@ describe("SearchDialog 组件", () => {
     await act(async () => {
       vi.advanceTimersByTime(150);
     });
-    expect(searchSessions).toHaveBeenCalledWith({ query: "新" });
+    expect(searchSessions).toHaveBeenCalledWith({ query: "新", searchId: expect.any(String) });
 
     // 新请求先返回
     await act(async () => {

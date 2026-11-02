@@ -298,7 +298,9 @@ export interface RpcRuntime {
     cwd?: string;
     includeSubagents?: boolean;
   }): Promise<RpcResult<"runtime.listSessions">>;
-  searchSessions(input: { query: string }): Promise<RpcResult<"runtime.searchSessions">>;
+  searchSessions(
+    input: RpcParams<"runtime.searchSessions">,
+  ): Promise<RpcResult<"runtime.searchSessions">>;
   usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
    * createSession 可携带 cwd/workspaceRoot（ADR-0051）：单后台模式下

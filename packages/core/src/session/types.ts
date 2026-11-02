@@ -165,6 +165,8 @@ export interface SessionSearchResult {
 
 export interface SessionSearchOptions {
   signal?: AbortSignal | undefined;
+  /** 已确定的有序增量；拼接所有批次等于最终结果。 */
+  onProgress?: ((batch: SessionSearchResult[]) => void) | undefined;
 }
 
 export interface SessionSummary {
