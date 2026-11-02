@@ -331,19 +331,18 @@ describe("历史", () => {
   it("保留最近 200 条：写满后压实，不丢最新的", async () => {
     const { home, store } = setup();
     const start = Date.parse("2026-01-01T00:00:00Z");
-    // 压实阈值是 400 行。先一次写入刚好未压实的 400 行，再经 appendHistory 越过阈值，
-    // 避免 450 次读改写在高负载下把整文件拖过测试时限。断言仍是压实后的那 450 条。
-    const seeded = Array.from({ length: 400 }, (_, i) =>
-      JSON.stringify({
+    // 正好 400 行时不压实；追加第 401 行触发压实，保留 r250..r449。
+    const seeded = Array.from({ length: 400 }, (_, offset) => {
+      const i = offset + 49;
+      return JSON.stringify({
         ...row(`r${i}`, new Date(start + i * 3_600_000).toISOString()),
         taskId: "t1",
-      }),
-    );
+      });
+    });
     const dir = path.join(home, "schedules", "history");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "t1.jsonl"), `${seeded.join("\n")}\n`);
-    for (let i = 400; i < 450; i++)
-      await store.appendHistory("t1", row(`r${i}`, new Date(start + i * 3_600_000).toISOString()));
+    await store.appendHistory("t1", row("r449", new Date(start + 449 * 3_600_000).toISOString()));
     const history = await store.history("t1");
     expect(history).toHaveLength(200);
     expect(history[0]?.id).toBe("r449");
