@@ -16,7 +16,7 @@ import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
-import { SessionHeaderTools } from "./SessionHeaderTools";
+import { SessionHeaderTools, sessionInputHistory } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { Button } from "../ui";
 import {
@@ -278,7 +278,7 @@ export function SessionScreen({
               });
             }}
             loadMcp={async () => mcpText(await session.mcpServers())}
-            readInputHistory={() => session.readInputHistory()}
+            inputHistory={() => sessionInputHistory(view.entries)}
             onPickHistory={(text) => {
               setFill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
             }}

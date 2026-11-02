@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ComposerSubmit } from "../src/Composer";
 import type { ContextSummary } from "@nocturne/rpc/client";
 import { PhoneComposer } from "../src/web/PhoneComposer";
-import { SessionHeaderTools } from "../src/web/SessionHeaderTools";
+import { SessionHeaderTools, sessionInputHistory } from "../src/web/SessionHeaderTools";
 import {
   estimateSubmitBytes,
   IMAGE_MAX_BYTES,
@@ -58,7 +58,7 @@ const headerTools = (
     onRename={vi.fn()}
     onCompact={vi.fn()}
     loadMcp={() => Promise.resolve("")}
-    readInputHistory={() => Promise.resolve([])}
+    inputHistory={() => []}
     onPickHistory={vi.fn()}
     {...props}
   />
@@ -232,13 +232,31 @@ it("图片附件随消息发出，报文超限时不发送并提示", async () =
   expect(button("发送").disabled).toBe(false);
 });
 
+it("输入历史只取当前会话的消息：带命令名，不含 Runtime 写入的消息和助手回复", () => {
+  const user = (text: string, workMode?: { name: string; source?: string }) =>
+    ({
+      kind: "user",
+      // 执行方式的说明块排在正文之后，userEntryText 会去掉
+      content: [{ type: "text", text }, ...(workMode ? [{ type: "text", text: "说明块" }] : [])],
+      ...(workMode ? { workMode } : {}),
+    }) as never;
+  expect(
+    sessionInputHistory([
+      user("普通消息"),
+      { kind: "assistant" } as never,
+      user("目标", { name: "goal" }),
+      user("", { name: "goal", source: "runtime" }),
+    ]),
+  ).toEqual(["普通消息", "/goal 目标"]);
+});
+
 it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历史交给输入框", async () => {
   const onPickHistory = vi.fn();
   await act(async () => {
     root?.render(
       headerTools({
         context: { load: () => new Promise<ContextSummary>(() => undefined), key: "0" },
-        readInputHistory: () => Promise.resolve(["旧的一条", "最近一条", "旧的一条"]),
+        inputHistory: () => ["旧的一条", "最近一条", "旧的一条"],
         onPickHistory,
       }),
     );

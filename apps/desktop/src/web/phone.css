@@ -612,14 +612,17 @@
   width: 100%;
   padding: 8px 10px;
   text-align: left;
+  border-bottom: 1px solid var(--a-border);
+  border-radius: 0;
+}
+/* 截断放在内层：放在按钮上时第 4 行会露进下内边距 */
+.phone-history-row span {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  border-bottom: 1px solid var(--a-border);
-  border-radius: 0;
 }
 .phone-slash-row span {
   display: block;

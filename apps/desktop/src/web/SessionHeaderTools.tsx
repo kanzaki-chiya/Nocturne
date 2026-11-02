@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
+import {
+  isRuntimeWorkMode,
+  userEntryText,
+  workModeDisplayText,
+  type ViewEntry,
+} from "@nocturne/core/protocol";
 import type { ContextSummary } from "@nocturne/rpc/client";
 
 import { ContextPanel, percent } from "../context-panel";
@@ -17,6 +23,15 @@ export interface PhoneContextSource {
 
 type Open = "context" | "menu" | "mcp" | "history";
 
+/** 当前会话发过的消息（旧到新）：带执行方式命令名，不含 Runtime 写入的消息 */
+export function sessionInputHistory(entries: readonly ViewEntry[]): string[] {
+  return entries.flatMap((entry) => {
+    if (entry.kind !== "user" || isRuntimeWorkMode(entry.workMode)) return [];
+    const text = workModeDisplayText(userEntryText(entry), entry.workMode);
+    return text === "" ? [] : [text];
+  });
+}
+
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -32,7 +47,7 @@ export function SessionHeaderTools({
   onRename,
   onCompact,
   loadMcp,
-  readInputHistory,
+  inputHistory,
   onPickHistory,
 }: {
   context: PhoneContextSource;
@@ -45,7 +60,8 @@ export function SessionHeaderTools({
   onRename: () => void;
   onCompact: () => void;
   loadMcp: () => Promise<string>;
-  readInputHistory: () => Promise<string[]>;
+  /** 当前会话发过的消息，旧到新 */
+  inputHistory: () => string[];
   onPickHistory: (text: string) => void;
 }) {
   const [open, setOpen] = useState<Open | null>(null);
@@ -53,7 +69,6 @@ export function SessionHeaderTools({
   const [contextError, setContextError] = useState<string>();
   const [mcp, setMcp] = useState<string>();
   const [history, setHistory] = useState<string[]>();
-  const [historyError, setHistoryError] = useState<string>();
   const ring = useRef<HTMLButtonElement>(null);
   const more = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
@@ -101,16 +116,7 @@ export function SessionHeaderTools({
   };
   const showHistory = () => {
     setOpen("history");
-    setHistory(undefined);
-    setHistoryError(undefined);
-    void readInputHistory().then(
-      (rows) => {
-        if (mounted.current) setHistory([...new Set(rows.slice(-200).reverse())]);
-      },
-      (reason: unknown) => {
-        if (mounted.current) setHistoryError(errorText(reason));
-      },
-    );
+    setHistory([...new Set(inputHistory().reverse())]);
   };
 
   const used =
@@ -212,11 +218,7 @@ export function SessionHeaderTools({
       {open === "history" && (
         <Popover anchor={more.current} label="输入历史" onClose={close} wide>
           <div className="phone-popover-h">输入历史</div>
-          {history === undefined ? (
-            <p className="phone-popover-note" role={historyError ? "alert" : "status"}>
-              {historyError ?? "正在读取…"}
-            </p>
-          ) : history.length === 0 ? (
+          {history === undefined || history.length === 0 ? (
             <p className="phone-popover-note">还没有输入历史</p>
           ) : (
             history.map((row) => (
@@ -229,7 +231,7 @@ export function SessionHeaderTools({
                   onPickHistory(row);
                 }}
               >
-                {row}
+                <span>{row}</span>
               </button>
             ))
           )}
