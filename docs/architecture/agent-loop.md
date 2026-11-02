@@ -102,6 +102,8 @@ deliverContinuation() -> bool:
 
 未暂停的残留插话在没有进行中的 Turn 时也按排队消费，顺序与其他待发输入一致；运行循环完成清理并释放忙状态后立即复查列表，空闲时编辑和恢复也触发消费，详见 ADR-0070 §3。
 
+Runtime 通过 `TurnDeps.deferIdle` 接管 Turn 结束后的 `idle` 发布：先完成技能/MCP 等会话级收尾、释放提交锁，再检查待发队列；没有后续 Turn 时才发布 `runtime.status(idle)`。`turn.completed` 表示日志中的 Turn 已完成，不能单独用作立即提交的就绪信号。未注入此回调的独立 `runTurn` 仍在自身收尾后发布 idle。
+
 ```text
 finish(reason, error?):
   for call in session.state.unsettledCalls(turnId):         # 本 Turn 中还没有 tool.completed 的调用

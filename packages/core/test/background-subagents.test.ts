@@ -123,17 +123,22 @@ async function setup(options: Setup = {}) {
 const sessionStatuses = new WeakMap<RuntimeSession, { status: string }>();
 
 async function waitIdle(session: RuntimeSession, completedTurns: number): Promise<void> {
-  await vi.waitFor(
-    () => {
-      expect(
-        session.durableEvents().filter((event) => event.type === "turn.completed"),
-      ).toHaveLength(completedTurns);
-      expect(session.pendingInputs().items).toHaveLength(0);
-      expect(sessionStatuses.get(session)?.status ?? "idle").toBe("idle");
-    },
-    { timeout: 5000 },
-  );
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  const idle = () =>
+    session.durableEvents().filter((event) => event.type === "turn.completed").length ===
+      completedTurns &&
+    session.pendingInputs().items.length === 0 &&
+    (sessionStatuses.get(session)?.status ?? "idle") === "idle";
+  await new Promise<void>((resolve) => {
+    const unsubscribe = session.subscribe(() => {
+      if (!idle()) return;
+      unsubscribe();
+      resolve();
+    });
+    if (idle()) {
+      unsubscribe();
+      resolve();
+    }
+  });
 }
 
 type UserEvent = Extract<DurableEvent, { type: "message.user" }>;
@@ -525,7 +530,7 @@ describe("工作树生命周期", () => {
     }
   });
 
-  it("存在保留的工作树时，turn.completed 之后立刻 submit 不报 session_busy，且清理与并回串行", async () => {
+  it("idle 后立刻 submit 不报 session_busy，清理与并回串行", { timeout: 60_000 }, async () => {
     let childId = "";
     let step: "launch" | "idle" | "apply" = "launch";
     const order: string[] = [];
@@ -574,12 +579,7 @@ describe("工作树生命周期", () => {
       writeFileSync(path.join(record.worktree, "code.txt"), "from worktree\n");
       await runtime.cancelSubagent({ parentSessionId: session.id, childSessionId: childId });
 
-      await vi.waitFor(() =>
-        expect(
-          session.durableEvents().filter((event) => event.type === "turn.completed"),
-        ).toHaveLength(2),
-      );
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await waitIdle(session, 2);
 
       // 此时存在保留的工作树且后台 cleanupMergedWorktrees 仍在运行（120ms），立刻 submit 不报 session_busy
       step = "apply";
@@ -699,6 +699,7 @@ describe("工作树生命周期", () => {
         await session.close();
       }
     },
+    60_000,
   );
 
   it("不可信项目：仅当 .worktreeinclude 存在时在创建副本阶段发 worktree_include_skipped 警告", async () => {

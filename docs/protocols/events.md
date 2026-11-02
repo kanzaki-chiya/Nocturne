@@ -128,6 +128,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
 
+Runtime 的 Turn 收尾在释放提交锁、检查待发队列之后才发布 `runtime.status(idle)`；`turn.completed` 本身不保证会话级收尾已结束（见 [agent-loop.md §2.1](../architecture/agent-loop.md#21-排队的接续)）。
+
 定时任务不新增任何 `RuntimeEvent`（ADR-0064）：任务列表、启停与运行状态的变化走 RPC 的服务端通知 `schedule.changed`（[rpc.md](rpc.md) 3.8），它不属于会话事件流、不写日志；一次运行产生的是普通会话，来源只记在 `session.created.schedule`，被无人值守拒绝的操作照常是 `permission.resolved(source: "non_interactive")`。
 
 Phase 5 新增事件的取舍：`mcp.server` 与 Hook 执行记录都选**临时事件/诊断**而非持久化——MCP 服务器进程是本次打开的运行态，恢复时重新拉起；Hook 的效果已体现在 `permission.resolved`、`tool.completed`、`turn.completed` 里。若写进持久日志，包含这些事件的会话将无法被旧版本 Runtime 恢复（第 8 节），没有对应收益。

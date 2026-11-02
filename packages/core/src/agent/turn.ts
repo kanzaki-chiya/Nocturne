@@ -223,7 +223,8 @@ export async function runTurn(
       ?.run("TurnEnd", { turnId, reason, steps, usage: { ...turnUsage } })
       .catch(() => undefined);
     await session.flush().catch(() => undefined);
-    status("idle");
+    if (deps.deferIdle !== undefined) deps.deferIdle(turnId);
+    else status("idle");
     return reason;
   }
 

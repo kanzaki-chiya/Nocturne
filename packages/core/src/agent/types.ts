@@ -43,6 +43,8 @@ export const DEFAULT_TURN_CONFIG: TurnConfig = {
 export type IdFactory = (kind: "turn" | "message" | "call") => string;
 
 export interface TurnDeps {
+  /** Runtime 延后发布 idle，直到会话级收尾完成并释放提交锁；缺省由 Turn 发布。 */
+  deferIdle?: ((turnId: string) => void) | undefined;
   /** Turn 开始后、首个请求前的工具边界准备；子会话和压缩不使用。 */
   prepareTools?: ((signal: AbortSignal) => Promise<void>) | undefined;
   /**
