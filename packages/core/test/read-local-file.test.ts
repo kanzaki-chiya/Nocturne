@@ -6,7 +6,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPlatform, type FileSystem, type FileStat } from "../src/platform/index.js";
 import { loadConfig } from "../src/config/index.js";
@@ -43,6 +43,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -242,18 +243,23 @@ describe("读取与存在性判断的时限（ADR-0060 修订 2026-10-18（二�
   });
 
   it("resolveFileRef：判断超时按不存在返回，不拖住其余路径", async () => {
+    vi.useFakeTimers();
+    const local = path.join(ws, "src", "a.ts");
+    const localStat: FileStat = { type: "file", size: 8, mtimeMs: 0 };
     const fs: FileSystem = {
       ...platform.fs,
       lstat: (p) =>
-        p.startsWith(root) ? new Promise<never>(() => undefined) : platform.fs.lstat(p),
+        p.startsWith(root)
+          ? new Promise<never>(() => undefined)
+          : Promise.resolve(p === local ? localStat : directory),
+      stat: () => Promise.resolve(localStat),
     };
-    const local = path.join(ws, "src", "a.ts");
-    const started = Date.now();
-    const [slow, fast] = await Promise.all([
+    const resolving = Promise.all([
       resolveFileRef(fs, platform.paths, ws, file, 50),
       resolveFileRef(fs, platform.paths, ws, local, 50),
     ]);
-    expect(Date.now() - started).toBeLessThan(1000);
+    await vi.advanceTimersByTimeAsync(50);
+    const [slow, fast] = await resolving;
     expect(slow).toMatchObject({ exists: false, isDirectory: false, withinWorkspace: false });
     expect(fast).toMatchObject({ exists: true, withinWorkspace: true });
   });

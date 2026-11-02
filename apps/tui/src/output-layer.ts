@@ -75,7 +75,10 @@ export class OutputLayer {
     const shifted = [...old];
     if (scroll !== 0) {
       output += `\x1b[1;${viewport}r\x1b[1;1H\x1b[${Math.abs(scroll)}${scroll > 0 ? "S" : "T"}\x1b[r`;
-      for (let i = 0; i < viewport; i++) shifted[i] = old[i + scroll] ?? "";
+      for (let i = 0; i < viewport; i++) {
+        const source = i + scroll;
+        shifted[i] = source >= 0 && source < viewport ? (old[source] ?? "") : "";
+      }
     }
     for (let i = 0; i < height; i++) {
       const line = next[i];

@@ -29,6 +29,25 @@ const mixed = "这个函数调用了一个名字很长的方法someVeryLongFunct
 const earlySpace = "我们 在这里写了一大段很长很长的中文abc";
 
 describe("按词折行", () => {
+  it("任务复选框与短正文同一行，保留勾选状态和嵌套缩进", () => {
+    const lines = renderMarkdown("- [ ] 短任务\n- [x] 已完成\n  - [ ] 子任务", 40, "tasks");
+    expect(lines.map((line) => line.text)).toEqual([
+      "• [ ] 短任务",
+      "• [x] 已完成",
+      "  • [ ] 子任务",
+    ]);
+    expect(renderMarkdown("1. [ ] 短任务", 40, "ordered").map((line) => line.text)).toEqual([
+      "1. [ ] 短任务",
+    ]);
+  });
+
+  it("任务长正文沿用按词折行，复制保留复选框与正文", () => {
+    const lines = renderMarkdown("- [ ] alpha beta gamma", 20, "task-wrap");
+    expect(lines.map((line) => line.text)).toEqual(["• [ ] alpha ", "beta gamma"]);
+    expect(lines[1]?.continued).toBe(true);
+    expect(copied(lines)).toBe("• [ ] alpha beta gamma");
+  });
+
   it("拉丁文本在空白处断开，复制拼回时保留空格", () => {
     const lines = layoutEntry(user("alpha beta gamma"), 16, true);
     const body = lines.map((line) => line.text);

@@ -2880,6 +2880,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       turnSettled = new Promise<void>((resolve) => {
         settleTurn = resolve;
       });
+      let idleTurnId: string | undefined;
       // 空闲边界：controller 先置位（busy 语义立即生效），再重建
       // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
       try {
@@ -2905,6 +2906,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           prepare = undefined;
           await applyWorkModeStart(prepared);
           const deps: TurnDeps = {
+            deferIdle: (turnId) => {
+              idleTurnId = turnId;
+            },
             prepareTools: async (signal) => {
               if (mcpSession?.status().some((s) => s.state === "starting")) {
                 const started = Date.now();
@@ -3006,7 +3010,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         scheduleWorktreeCleanup();
         // 清理期间仍可入列。释放 busy 与重新取队首之间没有异步间隙；
         // pumpQueue 同步取走条目并重新占用 controller，避免遗漏或并发启动。
-        await pumpQueue();
+        const pumped = await pumpQueue();
+        if (
+          !pumped &&
+          !busy() &&
+          compactController === undefined &&
+          session.health === "ok" &&
+          idleTurnId !== undefined
+        )
+          session.emitEphemeral("runtime.status", { status: "idle" }, { turnId: idleTurnId });
       }
     };
     /** 空闲时未暂停的插话也按排队发出；忙时留给安全点或 Turn 结束 */
