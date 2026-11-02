@@ -17,6 +17,7 @@ import {
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
 import { conversationStatus } from "../conversations";
+import { forkDraftText } from "../fork-session";
 import type { SessionSummary, SessionStatus } from "../session-tree";
 
 export interface PhoneSession {
@@ -83,6 +84,8 @@ export async function submitAccepted(
 }
 export class PhoneSessions {
   readonly opened = new Map<string, PhoneSession>();
+  /** 分叉出的会话 id → 待填进输入框的原消息（内存里，会话页取用后删除） */
+  readonly forkDrafts = new Map<string, string>();
   list: SessionSummary[] = [];
   /** 本次连接已拿到会话列表 */
   loaded = false;
@@ -399,17 +402,25 @@ export class PhoneSessions {
   }
   /**
    * 从 targetSeq 那条用户消息之前分叉（runtime.forkSession）：新会话复制日志并只回退
-   * 对话，工作区文件不动。返回新会话 id，随即打开。
+   * 对话，工作区文件不动。返回新会话 id，随即打开；原消息在打开前记进 forkDrafts，
+   * 由新会话页取用一次（同桌面）。
    */
   async fork(entry: PhoneSession, targetSeq: number): Promise<PhoneSession> {
     const client = this.requireClient();
+    const text = await forkDraftText(entry.session, targetSeq);
     const id = await client.runtime.forkSession(entry.session.id, { targetSeq });
-    await this.refresh().catch(() => undefined);
-    const result = await client.runtime.resumeSession(id);
-    this.setSelected(id);
-    const forked = await this.attach(client, result, entry.workspace);
-    void this.refresh().catch(() => undefined);
-    return forked;
+    if (text !== "") this.forkDrafts.set(id, text);
+    try {
+      await this.refresh().catch(() => undefined);
+      const result = await client.runtime.resumeSession(id);
+      this.setSelected(id);
+      const forked = await this.attach(client, result, entry.workspace);
+      void this.refresh().catch(() => undefined);
+      return forked;
+    } catch (error) {
+      this.forkDrafts.delete(id);
+      throw error;
+    }
   }
   async open(id: string, select = true): Promise<PhoneSession> {
     if (select) this.setSelected(id);

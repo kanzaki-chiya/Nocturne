@@ -99,12 +99,6 @@ export const IconImage = () => (
     <path d="m3.5 15 4.5-4.2 3 2.6 2.4-2 3.1 2.9" {...stroke} />
   </Icon>
 );
-export const IconHistory = () => (
-  <Icon>
-    <path d="M3.5 10a6.5 6.5 0 1 0 2-4.7M3.5 3.5v3h3" {...stroke} />
-    <path d="M10 6.5V10l2.5 1.8" {...stroke} />
-  </Icon>
-);
 export const IconAt = () => (
   <Icon>
     <circle cx="10" cy="10" r="3" {...stroke} />

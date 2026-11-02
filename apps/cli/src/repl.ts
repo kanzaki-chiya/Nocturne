@@ -119,7 +119,8 @@ export async function runRepl(
 
   const onEvent = (ev: RuntimeEvent): void => {
     if (ev.type === "session.rewound") {
-      out.line("stdout", rewindNotification(ev.payload, session.durableEvents()));
+      if (ev.payload.fork !== true)
+        out.line("stdout", rewindNotification(ev.payload, session.durableEvents()));
       return;
     }
     if (ev.type === "question.requested") {

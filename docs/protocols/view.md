@@ -341,7 +341,7 @@ function userEntryText(entry: UserEntry): string;   // 用户正文，去掉末�
 
 ## 回退
 
-`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；分叉追加的回退（`fork: true`）只截断，不生成通知；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
 
 回退目标只取非插话的 `message.user`（`steer !== true`）：回退到一条插话会把 Turn 截成半截（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。`rewindTargets()` 不列插话，`rewind` / `forkSession` 指向插话一律返回 `invalid_command`。
 

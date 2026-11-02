@@ -359,6 +359,8 @@ export interface SessionRewoundPayload {
     result: "restored" | "deleted" | "skipped" | "failed";
     reason?: string | undefined;
   }[];
+  /** 分叉时在复制日志末尾追加的回退（ADR-0041 修订 2026-11-02）：视图不显示回退提示 */
+  fork?: true | undefined;
 }
 export type CheckpointFilePayload = {
   callId: string;

@@ -4,7 +4,7 @@ import type { ContextSummary } from "@nocturne/rpc/client";
 
 import { ContextPanel, percent } from "../context-panel";
 import { useSessionRefresh } from "../use-session-refresh";
-import { ContextRing, IconHistory, IconMore, IconTerminal } from "./icons";
+import { ContextRing, IconMore } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
 
 export interface PhoneContextSource {
@@ -39,7 +39,8 @@ export function SessionHeaderTools({
   connected: boolean;
   /** 有进行中的 Turn：压缩上下文要等本轮结束 */
   running: boolean;
-  shell: { label: string; note?: string | undefined };
+  /** probing：还在探测可用 Shell，这一行置灰；load 在打开菜单时触发探测 */
+  shell: { label: string; probing?: boolean; load?: () => void };
   home?: string | null;
   onRename: () => void;
   onCompact: () => void;
@@ -142,6 +143,7 @@ export function SessionHeaderTools({
         aria-haspopup="dialog"
         aria-expanded={menuOpen}
         onClick={() => {
+          if (!menuOpen && shell.probing === true) shell.load?.();
           setOpen(menuOpen ? null : "menu");
         }}
       >
@@ -149,7 +151,6 @@ export function SessionHeaderTools({
       </button>
       {open === "context" && (
         <Popover anchor={ring.current} label="上下文用量" onClose={close} wide>
-          <div className="phone-popover-h">上下文用量</div>
           {summary !== undefined ? (
             <div className="phone-context">
               <ContextPanel context={summary} home={home} />
@@ -163,7 +164,6 @@ export function SessionHeaderTools({
       )}
       {open === "menu" && (
         <Popover anchor={more.current} label="会话菜单" onClose={close}>
-          <div className="phone-popover-h">会话</div>
           <PopoverOption
             label="重命名"
             disabled={offline}
@@ -181,21 +181,20 @@ export function SessionHeaderTools({
             }}
           />
           <PopoverOption label="MCP 状态" disabled={offline} onSelect={showMcp} />
-          <PopoverOption
-            icon={<IconHistory />}
-            label="输入历史"
-            disabled={offline}
-            onSelect={showHistory}
-          />
-          <PopoverOption
-            icon={<IconTerminal />}
-            label={
-              <>
+          <PopoverOption label="输入历史" disabled={offline} onSelect={showHistory} />
+          {/* 只读：显示当前 Shell，探测中置灰 */}
+          <button
+            type="button"
+            role="menuitem"
+            className={`phone-option${shell.probing ? "" : " readout"}`}
+            disabled
+          >
+            <span className="phone-option-text">
+              <b>
                 Shell<span className="muted-value">{shell.label}</span>
-              </>
-            }
-            detail={shell.note}
-          />
+              </b>
+            </span>
+          </button>
         </Popover>
       )}
       {open === "mcp" && (

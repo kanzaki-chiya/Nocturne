@@ -137,6 +137,9 @@ export interface ComposerProps {
    */
   variant?: "draft" | "session";
   historyKey?: string | null;
+  /** 挂载时填入的文字（分叉后的原消息），光标放在末尾；只在首次挂载取用 */
+  initialDraft?: string | undefined;
+  onInitialDraftUsed?: (() => void) | undefined;
   readInputHistory?: () => Promise<string[]>;
   /** 父层从当前会话引用记录，因而首次输入创建会话后也能写入历史。 */
   recordInputHistory?: (text: string) => Promise<void>;
@@ -269,6 +272,8 @@ export function Composer({
   onResumePending,
   variant = "draft",
   historyKey,
+  initialDraft,
+  onInitialDraftUsed,
   readInputHistory,
   recordInputHistory,
   controls,
@@ -289,7 +294,7 @@ export function Composer({
   prefs,
 }: ComposerProps) {
   const isSession = variant === "session";
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(0);
@@ -319,7 +324,7 @@ export function Composer({
   const composingRef = useRef(false);
   const submittingRef = useRef(false);
   const interruptingRef = useRef(false);
-  const draftRef = useRef("");
+  const draftRef = useRef(draft);
   const attachmentsRef = useRef<Attachment[]>([]);
   const revision = useRef(0);
   const pendingCaret = useRef<number | null>(null);
@@ -402,6 +407,17 @@ export function Composer({
     return () => {
       mounted.current = false;
     };
+  }, []);
+  const initialDraftUsed = useRef(initialDraft === undefined ? undefined : onInitialDraftUsed);
+  useEffect(() => {
+    const text = draftRef.current;
+    if (text !== "") {
+      const field = textarea.current;
+      field?.focus();
+      field?.setSelectionRange(text.length, text.length);
+      setCaret(text.length);
+    }
+    initialDraftUsed.current?.();
   }, []);
   useEffect(() => {
     let active = true;

@@ -139,6 +139,7 @@ const payloadSchemas = {
         reason: z.string().optional(),
       }),
     ),
+    fork: z.literal(true).optional(),
   }),
   "checkpoint.file": z.intersection(
     z.object({ callId: z.string(), path: z.string(), sessionId: z.string().optional() }),

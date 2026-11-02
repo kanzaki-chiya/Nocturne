@@ -708,6 +708,10 @@
 .phone .phone-option:disabled .phone-option-text b {
   color: var(--a-muted);
 }
+/* 只读行（会话菜单的 Shell）：不可点，但只在探测中置灰 */
+.phone .phone-option.readout:disabled .phone-option-text b {
+  color: var(--a-text);
+}
 .phone-option-icon {
   flex: none;
   color: var(--a-secondary);

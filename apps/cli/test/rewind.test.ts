@@ -130,6 +130,46 @@ it("/fork 和中途分叉复用会话切换，/resume 显示分叉标记", async
     await ui.close();
   }
 });
+it("从执行方式消息分叉带命令名回填、不打回退提示；Runtime 写入的消息不回填", async () => {
+  const ui = await repl();
+  try {
+    await internalSession(ui.original).emit("message.user", {
+      messageId: "goal",
+      content: [
+        { type: "text", text: "修好登录" },
+        { type: "text", text: "目标说明块" },
+      ],
+      workMode: { name: "goal", body: "目标说明块" },
+    });
+    await internalSession(ui.original).emit("message.user", {
+      messageId: "check",
+      content: [{ type: "text", text: "核对说明块" }],
+      workMode: { name: "goal", body: "核对说明块", source: "runtime" },
+    });
+    // 轮次列表最新在上：1 = Runtime 核对消息
+    await ui.line("/rewind", "选择轮次");
+    await ui.line("1", "从这里分叉新会话");
+    await ui.line("4", "文件保持当前状态");
+    const beforeRuntimeFork = ui.output().length;
+    await ui.line("y", "已切换到会话");
+    expect(ui.output().slice(beforeRuntimeFork)).not.toContain("可修改后重发");
+    expect(ui.current().state().meta.forkedFrom?.sessionId).toBe(ui.original.id);
+    // 新会话里最新一条是 /goal 消息
+    await ui.line("/rewind", "选择轮次");
+    await ui.line("1", "从这里分叉新会话");
+    await ui.line("4", "文件保持当前状态");
+    await ui.line("y", "可修改后重发：/goal 修好登录");
+    expect(ui.output()).not.toContain("已回退到");
+    expect(
+      ui
+        .current()
+        .state()
+        .history.filter((e) => e.kind === "user"),
+    ).toHaveLength(2);
+  } finally {
+    await ui.close();
+  }
+});
 it("Turn 进行中拒绝 /rewind、/fork，EOF 中断并等待收束", async () => {
   const ui = await repl(true);
   try {
