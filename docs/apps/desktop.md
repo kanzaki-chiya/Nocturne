@@ -218,6 +218,7 @@ interface NodeProbe {
 | `/goal stop`、`/goal resume` | `session.stopGoal()`；`session.resumeGoal()`，空闲时与发送一样先标忙、不等整轮结束。没有目标时提示「没有目标」 |
 | `/plan <任务>` | 计划模式（ADR-0076 §5），提交方式同上 |
 | `/plan approve`、`/plan cancel` | `session.approvePlan()`（空闲时先标忙、不等整轮结束；忙时提示「会话正忙，不能批准计划」）；`session.cancelPlan()`。不在计划模式时提示「不在计划模式」 |
+| `/boost <任务>` | 多代理攻坚（ADR-0076 §6），提交方式同 `/grill-me` |
 
 | 已移除命令                            | 提示的界面操作                                          |
 | ------------------------------------- | ------------------------------------------------------- |

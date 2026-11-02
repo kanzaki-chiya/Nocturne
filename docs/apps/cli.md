@@ -131,6 +131,7 @@ nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端
 | `/goal stop`、`/goal resume` | 停止目标（打印「目标已停止」）；继续目标，空闲时开新 Turn 并等它结束 | `session.stopGoal()`、`session.resumeGoal()` |
 | `/plan <任务>` | 计划模式：Turn 开始前切到 `read-only` 并记下原预设，只读探索后产出 Markdown 计划（ADR-0076 §5）；直接回复即评论并修订计划 | `session.submit({ text, workMode: "plan" })` |
 | `/plan approve`、`/plan cancel` | 批准计划：恢复原预设（原本只读时改用 `default`）、退出计划模式并开新 Turn 实施；放弃计划：恢复原预设且不开 Turn | `session.approvePlan()`、`session.cancelPlan()` |
+| `/boost <任务>` | 多代理攻坚：拆解子任务、用后台子代理（`isolation: "worktree"` 或只读）并行实现与调查、`apply_subagent_changes` 并回并做回归（ADR-0076 §6） | `session.submit({ text, workMode: "boost" })` |
 | `/rewind` | 编号选择轮次、操作和预览确认；空行或默认 `N` 取消 | `session.rewindTargets()`、`session.rewind()` |
 | `/fork` | 从当前位置分叉，复制会话后切换 | `runtime.forkSession()` + `/resume` 的打开逻辑 |
 | `/resume` | 列出**当前目录**的会话（编号、id、创建时间、绑定目录、模型、锁状态），与 `-c/--continue` 同口径；输入编号切换，空行取消；其他目录的会话用 `/resume <id>`，全部会话用 `--sessions` 查看 | `runtime.listSessions({ cwd })` + 会话打开逻辑（见下） |

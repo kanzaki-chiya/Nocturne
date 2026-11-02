@@ -56,6 +56,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     cli: "<任务> 只读出计划；approve 批准实施；cancel 放弃",
     task: true,
   },
+  {
+    name: "/boost",
+    summary: "多代理攻坚",
+    cli: "<任务> 拆解任务、并行后台子代理实现与调查、汇总回归",
+    task: true,
+  },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
   { name: "/rename", summary: "修改会话标题", cli: "<标题> 修改当前会话标题；无参数清空" },
   { name: "/rewind", summary: "回退对话或还原文件" },

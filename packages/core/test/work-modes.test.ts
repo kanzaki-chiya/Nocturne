@@ -1,10 +1,12 @@
 /**
  * ADR-0076 执行方式：提交入口 `workMode`、说明块快照、待发输入与各模式的状态与行为。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { worktreeGit } from "../src/agent/worktree.js";
 
 import {
   createRuntime,
@@ -31,7 +33,7 @@ afterEach(() => {
 });
 
 const makeTmp = (prefix: string): string => {
-  const dir = mkdtempSync(path.join(tmpdir(), prefix));
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), prefix)));
   tmpRoots.push(dir);
   return dir;
 };
@@ -685,4 +687,161 @@ describe("/plan（ADR-0076 §5）", () => {
       text: "approve the design",
     });
   });
+});
+
+describe("/boost（ADR-0076 §6）", () => {
+  async function initGitRepo(): Promise<string> {
+    const root = makeTmp("nct-wm-boost-");
+    await worktreeGit(root, ["init"]);
+    await worktreeGit(root, ["config", "core.autocrlf", "false"]);
+    writeFileSync(path.join(root, "readme.txt"), "base\n");
+    await worktreeGit(root, ["add", "readme.txt"]);
+    await worktreeGit(root, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@localhost",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--no-verify",
+      "-m",
+      "initial",
+    ]);
+    return root;
+  }
+
+  it("未开启后台子代理或子代理停用时报 invalid_command；非 git 目录写明只并行调查", async () => {
+    const noBg = await makeRuntime(new FakeProvider({ scripts: [] }));
+    const s1 = await noBg.createSession({ model: "fake/fake-1" });
+    await rejects(s1.submit({ text: "攻坚", workMode: "boost" }), "invalid_command");
+    await s1.close();
+
+    const disabled = await makeRuntime(new FakeProvider({ scripts: [] }), {
+      subagent: { enabled: false, background: true },
+    });
+    const s2 = await disabled.createSession({ model: "fake/fake-1" });
+    await rejects(s2.submit({ text: "攻坚", workMode: "boost" }), "invalid_command");
+    await s2.close();
+
+    const provider = new FakeProvider({ scripts: [textScript("已调查")] });
+    const nonGit = await makeRuntime(provider, {
+      subagent: { background: true, maxBackground: 2 },
+    });
+    const s3 = await nonGit.createSession({ model: "fake/fake-1" });
+    await s3.submit({ text: "攻坚", workMode: "boost" });
+    const body = users(s3)[0]?.payload.workMode?.body ?? "";
+    expect(body).toContain("at most 2 background subagents");
+    expect(body).toContain("not a git repository");
+    await s3.close();
+  });
+
+  it("并行工作树子代理实现 → 收束唤起 → apply_subagent_changes 并回两份改动", async () => {
+    const root = await initGitRepo();
+    const childStarted = new Set<string>();
+    let parentStep = 0;
+    const provider = new FakeProvider({
+      handler: (request) => {
+        const isChild = request.tools.some((tool) => tool.name === "finish");
+        if (isChild) {
+          const text = requestText(request);
+          const file = text.includes("模块 A") ? "a.txt" : "b.txt";
+          if (!childStarted.has(file)) {
+            childStarted.add(file);
+            return [
+              {
+                type: "tool_call",
+                toolCallId: `cw-${file}`,
+                name: "write",
+                input: { path: file, content: `${file}-done\n` },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            {
+              type: "tool_call",
+              toolCallId: `cf-${file}`,
+              name: "finish",
+              input: { result: `已写入 ${file}` },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        parentStep += 1;
+        if (parentStep === 1) {
+          return [
+            {
+              type: "tool_call",
+              toolCallId: "t-a",
+              name: "task",
+              input: { task: "实现模块 A", background: true, isolation: "worktree" },
+            },
+            {
+              type: "tool_call",
+              toolCallId: "t-b",
+              name: "task",
+              input: { task: "实现模块 B", background: true, isolation: "worktree" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (parentStep === 2) return textScript("已启动两个后台子代理，等待结果。");
+        // 子代理结果到达：找出尚未并回的 childSessionId 并回
+        const applied = new Set(
+          session
+            .durableEvents()
+            .flatMap((e) =>
+              e.type === "tool.completed" &&
+              e.payload.name === "apply_subagent_changes" &&
+              e.payload.status === "ok"
+                ? [(e.payload.output as { id?: string } | undefined)?.id ?? ""]
+                : [],
+            ),
+        );
+        const unapplied = session
+          .durableEvents()
+          .flatMap((e) =>
+            e.type === "message.user" &&
+            e.payload.subagent?.changes &&
+            !applied.has(e.payload.subagent.childSessionId)
+              ? [e.payload.subagent.childSessionId]
+              : [],
+          );
+        if (unapplied.length > 0) {
+          return [
+            ...unapplied.map((id, index) => ({
+              type: "tool_call" as const,
+              toolCallId: `apply-${parentStep}-${index}`,
+              name: "apply_subagent_changes",
+              input: { id },
+            })),
+            { type: "finish" as const, reason: "tool_calls" as const },
+          ];
+        }
+        return textScript("全部并回并验证通过。");
+      },
+    });
+    const runtime = await makeRuntime(provider, {
+      cwd: root,
+      subagent: { background: true, maxBackground: 3 },
+    });
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "guarded",
+    });
+    await session.submit({ text: "并行实现 A 和 B", workMode: "boost" });
+    const boostBody = users(session)[0]?.payload.workMode?.body ?? "";
+    expect(boostBody).toContain('isolation: "worktree"');
+    expect(boostBody).toContain("apply_subagent_changes");
+
+    await vi.waitFor(
+      () => {
+        expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("a.txt-done\n");
+        expect(readFileSync(path.join(root, "b.txt"), "utf8")).toBe("b.txt-done\n");
+      },
+      { timeout: 15_000 },
+    );
+    await session.close();
+  }, 25_000);
 });

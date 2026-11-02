@@ -85,6 +85,11 @@ describe("parseSlash", () => {
       workMode: "plan",
       text: "重构登录",
     });
+    expect(parseSlash("/boost 并行改造")).toEqual({
+      kind: "work",
+      workMode: "boost",
+      text: "并行改造",
+    });
   });
 
   it("未知命令给出查看提示", () => {
@@ -108,6 +113,7 @@ describe("completeSlash", () => {
       "/grill-me",
       "/goal",
       "/plan",
+      "/boost",
     ]);
   });
 

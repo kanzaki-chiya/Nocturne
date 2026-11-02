@@ -97,8 +97,10 @@ describe("执行方式命令（ADR-0076）", () => {
     expect(completeSlash("/grill-me ", ctx)).toEqual([]);
     expect(completeSlash("/goa", ctx).map((item) => item.insert)).toEqual(["/goal "]);
     expect(completeSlash("/pla", ctx).map((item) => item.insert)).toEqual(["/plan "]);
+    expect(completeSlash("/boo", ctx).map((item) => item.insert)).toEqual(["/boost "]);
     expect(cliHelpText()).toContain("/goal");
     expect(cliHelpText()).toContain("/plan");
+    expect(cliHelpText()).toContain("/boost");
   });
 });
 

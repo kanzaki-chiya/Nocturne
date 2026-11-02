@@ -367,7 +367,7 @@ explore 档位不能请求 general，显式 tools 必须是只读池子集；gen
 
 后台交付与生命周期见 [ADR-0073](../decisions/ADR-0073-background-subagents.md)，可写后台隔离见 [ADR-0075](../decisions/ADR-0075-worktree-isolation.md)。Git 操作集中在 `agent/worktree.ts`；`task.isolation: "worktree"` 与 `background` 同显同隐，只接受后台调用，工作区与预设路径映射到副本，项目配置和信任仍来自父会话。收束时提交结果并附 `changes`；`apply_subagent_changes` 经过 edit 主体权限与检查点。
 
-- **开关**：`RuntimeOptions.subagent.background`（缺省关闭）。TUI、桌面端后台、`nctrn rpc` 开启；`nctrn -p` 与定时任务会话关闭。只有顶层、非定时任务会话的 `task` 才在 schema 与描述里出现 `background`，子会话里没有。
+- **开关**：`RuntimeOptions.subagent.background`（缺省关闭）。TUI、逐行 CLI、桌面端后台、`nctrn rpc` 开启；`nctrn -p` 与定时任务会话关闭。只有顶层、非定时任务会话的 `task` 才在 schema 与描述里出现 `background`，子会话里没有。多代理攻坚（`/boost`，[ADR-0076](../decisions/ADR-0076-work-modes.md) §6）依赖这一开关，未开启或子代理停用时在提交准备阶段拒绝 `invalid_command`。
 - **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 是唯一判断：外部 agent 一律拒绝，隔离方式为 `"none"` 时只放行全部 `traits.mutates === false` 的工具集（`explore`、只读档位、只读 `tools` 白名单）。launcher 在建子会话之前调用它，外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。
 - **启动**：子会话建好即返回 `output: { childSessionId, childLogPath, model, background: true }`，不发 `tool.progress`。子 Turn 的中止信号不含父 Turn 的 signal；超时沿用 `timeoutMs`。占用 `maxConcurrent` 槽直到收束；另有每父会话 `maxBackground`（缺省 3）。
 - **交付与生命周期**：`BackgroundSubagents` 集中收束、取消（`Runtime.cancelSubagent`）、丢弃（父会话关闭、回退到启动调用之前）与重启补报（按父日志补 `interrupted` 暂停条目，分叉继承的前缀不补）。结果以 `message.user.subagent` 交付，作为 `mode: "subagent"` 的待发输入（[agent-loop.md](agent-loop.md) §2、[view.md](../protocols/view.md)）。

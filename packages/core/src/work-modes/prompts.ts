@@ -37,10 +37,31 @@ const PLAN = [
   "- The user will either comment on the plan or approve it. When they comment, revise the plan and give the complete updated plan again. Implementation starts only after approval.",
 ].join("\n");
 
+function boostBody(context: WorkModeContext): string {
+  const max = context.maxBackground ?? 3;
+  const git = context.gitRepository !== false;
+  return [
+    "Boost mode: decompose the request above, run independent work in parallel with background subagents, then integrate and run regression checks.",
+    `- You can run at most ${max} background subagents at the same time in this session. Never poll or sleep waiting for them; end your turn after launching a batch and their results will arrive as messages.`,
+    git
+      ? '- For read-only investigation, call task with preset "explore" and background: true. For independent code changes, call task with background: true and isolation: "worktree" so each subagent edits an isolated git worktree.'
+      : '- This workspace is not a git repository with a commit, so worktree isolation is unavailable. Use background subagents (preset "explore", background: true) only for parallel investigation, and make all file changes yourself in the main workspace.',
+    "- Give every subagent a self-contained task description: the exact files or module it owns, the constraints, and how to verify its slice. Keep writable slices on disjoint files to avoid conflicts.",
+    "- Subagents are non-interactive and cannot ask the user for approval; under stricter permission presets their writes or commands may be denied. When a subagent reports a permission denial, complete that slice yourself.",
+    ...(git
+      ? [
+          '- As each writable subagent finishes, review its result and apply its changes with apply_subagent_changes (use mode "clean" first, then "3way" and resolve conflict markers if needed).',
+        ]
+      : []),
+    "- After all slices are integrated, run the project's tests or typechecks in the main workspace to catch regressions, then summarize the outcome by subtask.",
+  ].join("\n");
+}
+
 const BODIES: Record<WorkModeName, (context: WorkModeContext) => string> = {
   "grill-me": () => GRILL_ME,
   goal: () => GOAL,
   plan: () => PLAN,
+  boost: boostBody,
 };
 
 /** 用户批准计划后开新 Turn 的说明（ADR-0076 §5） */

@@ -2630,6 +2630,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("invalid_command", "workMode 与 skill、delegate 互斥");
         if (meta.parent !== undefined)
           throw new RuntimeCommandError("invalid_command", "子会话不能使用执行方式");
+        // ADR-0076 §6：/boost 依赖后台子代理
+        if (
+          input.workMode === "boost" &&
+          (!subagentEnabled || options.subagent?.background !== true || meta.schedule !== undefined)
+        )
+          throw new RuntimeCommandError("invalid_command", "当前环境不支持后台子代理");
         const task = (input.content ?? [{ type: "text", text: input.text ?? "" }])
           .map((block) => (block.type === "text" ? block.text : ""))
           .join("")
@@ -2746,7 +2752,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
       let workMode: WorkModeSnapshot | undefined;
       if (input.workMode !== undefined) {
-        workMode = { name: input.workMode, body: workModeBody(input.workMode) };
+        const gitRepository =
+          input.workMode === "boost"
+            ? await inspectWorktreeRepository(meta.workspaceRoot).then(
+                () => true,
+                () => false,
+              )
+            : undefined;
+        workMode = {
+          name: input.workMode,
+          body: workModeBody(input.workMode, {
+            maxBackground: options.subagent?.maxBackground ?? 3,
+            gitRepository,
+          }),
+        };
         appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
       }
       const prepared: PreparedInput = {
