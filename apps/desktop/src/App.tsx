@@ -35,6 +35,7 @@ import {
   type CreateSessionChoice,
 } from "./conversations";
 import { parseSlash } from "./commands";
+import { openForkedSession } from "./fork-session";
 import { StatusBar, type StatusPanel } from "./StatusBar";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
@@ -667,8 +668,16 @@ export function App({ host }: { host: DesktopHost }) {
   const forkAt = async (targetSeq: number): Promise<void> => {
     const active = conversations.selected;
     if (active === undefined) throw new Error("请先打开会话");
-    const id = await active.client.runtime.forkSession(active.session.id, { targetSeq });
-    await selectSession(id, active.workspace);
+    await openForkedSession(
+      {
+        sessionId: active.session.id,
+        workspace: active.workspace,
+        forkSession: (sessionId, seq) =>
+          active.client.runtime.forkSession(sessionId, { targetSeq: seq }),
+      },
+      targetSeq,
+      (id, workspace) => selectSession(id, workspace),
+    );
   };
   // 通知被点击时要切到那个会话：经 ref 读最新的列表与选择函数（监听只注册一次）
   const sessionsRef = useRef<SessionSummary[]>(sessions);
