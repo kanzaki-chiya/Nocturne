@@ -142,6 +142,33 @@ it("中途分叉追加 conversation 回退，原会话不截断，关闭后的�
   await reopened.close();
 }, 20_000);
 
+it("分叉追加的回退不产生回退提示，之后的普通回退照常提示", async () => {
+  const { runtime, source } = await setup();
+  const first = await internalSession(source).emit("message.user", {
+    messageId: "one",
+    content: [{ type: "text", text: "第一句" }],
+  });
+  const second = await internalSession(source).emit("message.user", {
+    messageId: "two",
+    content: [{ type: "text", text: "第二句" }],
+  });
+  const id = await runtime.forkSession(source.id, { targetSeq: second.seq });
+  const fork = await runtime.resumeSession(id);
+  expect(fork.durableEvents().at(-1)).toMatchObject({
+    type: "session.rewound",
+    payload: { targetSeq: second.seq, fork: true },
+  });
+  const rewoundNotices = (events: Parameters<typeof replaySessionView>[0]) =>
+    replaySessionView(events).entries.filter((e) => e.kind === "notice" && e.subtype === "rewound");
+  expect(rewoundNotices(fork.durableEvents())).toEqual([]);
+  await fork.rewind(first.seq, "conversation");
+  expect(rewoundNotices(fork.durableEvents())).toEqual([
+    expect.objectContaining({ message: "已回退到「第一句」之前 • 还原 0 个文件" }),
+  ]);
+  await fork.close();
+  await source.close();
+}, 20_000);
+
 it("Turn 进行中与非法分叉点拒绝操作", async () => {
   const { runtime, source } = await setup(new FakeProvider({ scripts: [[{ type: "wait" }]] }));
   await expect(runtime.forkSession(source.id, { targetSeq: 1 })).rejects.toMatchObject({

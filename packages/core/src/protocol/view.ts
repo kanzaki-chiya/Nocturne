@@ -387,7 +387,8 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         b.attachments = book(rebuilt).attachments;
         b.tools = book(rebuilt).tools;
         b.resolved = book(rebuilt).resolved;
-      } else {
+      } else if (event.payload.fork !== true) {
+        // 分叉追加的回退只截断对话，不提示（新会话本就从那条消息之前开始）
         pushNotice(
           view,
           event.seq,

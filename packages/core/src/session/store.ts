@@ -333,7 +333,12 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         const fork = new SessionImpl({ id, logPath: pendingLog, fs, events });
         try {
           if (targetSeq !== undefined)
-            await fork.emit("session.rewound", { targetSeq, mode: "conversation", files: [] });
+            await fork.emit("session.rewound", {
+              targetSeq,
+              mode: "conversation",
+              files: [],
+              fork: true,
+            });
           await fork.flush();
           await fs.rename(pendingLog, logPath(id));
           await reconcileTitle(id, events);

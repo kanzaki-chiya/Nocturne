@@ -187,6 +187,8 @@ it("中途分叉预览确认后换入新会话并恢复文字", async () => {
         ui.lastFrame()?.includes("原消息的图片未放回") === true,
     );
     const middle = ui.current();
+    // 分叉追加的回退不出「已回退到…」提示（所有客户端一致）
+    expect(ui.lastFrame()).not.toContain("已回退到");
     expect(middle.state().history.filter((entry) => entry.kind === "user")).toHaveLength(1);
     expect(middle.state().meta.forkedFrom?.sessionId).toBe(ui.original.id);
   } finally {
