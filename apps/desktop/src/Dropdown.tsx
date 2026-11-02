@@ -31,6 +31,10 @@ export interface DropdownOption {
   risk?: boolean;
   /** 不可选的原因（悬停显示） */
   disabled?: string;
+  /** 分组号：相邻两项分组不同时在它们之间画分隔线 */
+  group?: number;
+  /** 选项名的行内样式（字体列表用各自的字体显示名字） */
+  style?: CSSProperties;
 }
 
 export interface DropdownProps {
@@ -63,6 +67,10 @@ export interface DropdownProps {
   title?: string;
   /** 大量配置项可搜索；不改变已有下拉的交互 */
   searchable?: boolean;
+  /** 搜不到时的提示；null 不显示 */
+  emptyText?: string | null;
+  /** 触发器上选中项名字的行内样式 */
+  labelStyle?: CSSProperties;
 }
 
 const MENU_GAP = 6;
@@ -89,6 +97,8 @@ export function Dropdown({
   placeholder = "—",
   title,
   searchable = false,
+  emptyText = "没有匹配的选项",
+  labelStyle,
 }: DropdownProps) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -298,7 +308,7 @@ export function Dropdown({
           children
         ) : (
           <>
-            <span className={`dd-label${mono ? " mono" : ""}`}>
+            <span className={`dd-label${mono ? " mono" : ""}`} style={labelStyle}>
               {current?.label ?? placeholder}
             </span>
             <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
@@ -341,7 +351,7 @@ export function Dropdown({
                   aria-selected={o.value === value}
                   aria-disabled={o.disabled !== undefined || undefined}
                   title={o.disabled}
-                  className={`ddo${o.value === value ? " on" : ""}${i === active ? " act" : ""}${o.risk === true ? " risk" : ""}${i === firstRisk && i > 0 ? " sep" : ""}`}
+                  className={`ddo${o.value === value ? " on" : ""}${i === active ? " act" : ""}${o.risk === true ? " risk" : ""}${(i === firstRisk && i > 0) || (i > 0 && ordered[i - 1]?.group !== o.group) ? " sep" : ""}`}
                   onPointerMove={() => {
                     if (o.disabled === undefined && active !== i) setActive(i);
                   }}
@@ -356,13 +366,13 @@ export function Dropdown({
                   <span className="ck" aria-hidden="true">
                     {o.value === value ? "✓" : ""}
                   </span>
-                  <b>{o.label}</b>
+                  <b style={o.style}>{o.label}</b>
                   {o.tag !== undefined && <span className="tg">{o.tag}</span>}
                   {o.description !== undefined && <span className="ds">{o.description}</span>}
                 </div>
               </Fragment>
             ))}
-            {ordered.length === 0 && <p className="ddm-n">没有匹配的选项</p>}
+            {ordered.length === 0 && emptyText !== null && <p className="ddm-n">{emptyText}</p>}
           </div>
           {note !== undefined && <p className="ddm-n">{note}</p>}
           {footer && (

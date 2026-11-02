@@ -26,6 +26,8 @@ serde_json = "=1.0.151"
 chrono = "=0.4.45"
 # 面板终端（ADR-0060 第 4 节）：Windows 上走 ConPTY
 portable-pty = "=0.9.0"
+# 设置 › 外观的字体列表：只读系统字体的族名与等宽标记，不打包字体
+fontdb = "=0.24.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [

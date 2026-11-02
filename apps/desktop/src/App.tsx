@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
 import type {
   ExternalAgentOverview,
@@ -14,6 +14,7 @@ import type {
 } from "@nocturne/core/protocol";
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
+import { applyAppearance, applyTheme } from "./appearance";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import {
   BackendLogsPage,
@@ -72,6 +73,7 @@ import { useSidePanel, type SidePanelController } from "./PanelHost";
 import {
   createPrefsStore,
   FILE_OPENER_LABELS,
+  FONT_SIZE_DEFAULT,
   migrateLegacyProjectOrder,
   outsideOpenable,
   type PrefsStore,
@@ -506,11 +508,18 @@ export function App({ host }: { host: DesktopHost }) {
   }, [phase.kind, host, updateSvc]);
 
   // 主题：prefs.theme 覆盖系统外观，立即生效；跟随系统则删掉属性回到 media query
-  useEffect(() => {
-    const theme = p.theme ?? "system";
-    if (theme === "system") delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = theme;
+  useLayoutEffect(() => {
+    applyTheme(document.documentElement, p.theme ?? "system");
   }, [p.theme]);
+
+  // 字体与字号（设置 › 外观）：覆盖根元素上的 --sans / --mono / --fs-*，立即生效
+  useLayoutEffect(() => {
+    applyAppearance(document.documentElement, {
+      uiFont: p.uiFont,
+      codeFont: p.codeFont,
+      fontSize: p.fontSize,
+    });
+  }, [p.uiFont, p.codeFont, p.fontSize]);
 
   // 后台的 providersChanged：刷新会话列表并 bump providersVersion，
   // 状态栏与空状态的模型菜单、打开中的服务商页随之重取数据。
@@ -1495,6 +1504,17 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                   agentBrowser={host.agentBrowser}
                   prefs={prefs}
+                  appearance={{
+                    uiFont: p.uiFont,
+                    codeFont: p.codeFont,
+                    fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
+                    listFonts: host.listFonts,
+                    onChange: (patch) => {
+                      prefs.update(patch);
+                      bumpPrefs();
+                      return prefs.persistent;
+                    },
+                  }}
                   notifications={{
                     sendTest: (sound) =>
                       host.notify({

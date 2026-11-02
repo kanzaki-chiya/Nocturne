@@ -7,8 +7,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PermissionPresetName, ReasoningEffort } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
+import {
+  baseFontStack,
+  fontGroups,
+  fontStack,
+  type AppearancePrefs,
+  type FontFamily,
+  type ThemePref,
+} from "./appearance";
+import { AppearancePreview } from "./AppearancePreview";
 import { presetOptions } from "./choice-info";
-import { Dropdown } from "./Dropdown";
+import { Dropdown, type DropdownOption } from "./Dropdown";
 import {
   DONE_THRESHOLD_CHOICES,
   NOTIFY_DEFAULTS,
@@ -31,13 +40,22 @@ import type {
 } from "./rpc-types";
 import { describeUpdateError, type CheckResult } from "./updater";
 import type { AgentBrowserHost } from "./host";
-import { FILE_OPENER_LABELS, isFileOpener, type FileOpener, type PrefsStore } from "./prefs";
+import {
+  FILE_OPENER_LABELS,
+  FONT_SIZE_DEFAULT,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  isFileOpener,
+  type FileOpener,
+  type PrefsStore,
+} from "./prefs";
 import { LAYER_TEXT, settingOverrideTitle } from "./setting-source";
 import {
   Button,
   Checkbox,
   DataTable,
   Field,
+  IconButton,
   PageHeader,
   SegmentedControl,
   SettingsGroup,
@@ -45,7 +63,78 @@ import {
   Switch,
 } from "./ui";
 
-export type ThemePref = "system" | "light" | "dark";
+export type { ThemePref };
+
+/** 设置 › 外观的字体与字号（本机 prefs，只在桌面端应用） */
+export interface AppearanceControls {
+  uiFont: string | undefined;
+  codeFont: string | undefined;
+  fontSize: number;
+  /** 本机字体；没有外壳或读取失败时列表只剩「默认」 */
+  listFonts?: (() => Promise<FontFamily[]>) | undefined;
+  /** 写本机 prefs；返回 false 表示写不进存储（本次运行内仍生效） */
+  onChange: (patch: Partial<AppearancePrefs>) => boolean;
+}
+
+const RESET_ICON = (
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+    <path
+      d="M3 5.5A4.5 4.5 0 1 1 2.5 8M3 2.5v3h3"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+/** 字体下拉：首项「默认」，再按等宽/非等宽分两组；每个名字用它自己的字体显示 */
+function FontPicker({
+  kind,
+  label,
+  value,
+  fonts,
+  onChange,
+}: {
+  kind: "ui" | "code";
+  label: string;
+  value: string | undefined;
+  fonts: readonly FontFamily[];
+  onChange: (value: string | undefined) => void;
+}) {
+  const base = baseFontStack(document.documentElement, kind);
+  const [first, second] = fontGroups(fonts, kind);
+  // 存着的字体已卸载：仍列在第一组，触发器照常显示名字
+  const missing =
+    value !== undefined && !fonts.some((font) => font.name === value)
+      ? [{ name: value, mono: kind === "code" }]
+      : [];
+  const option = (font: FontFamily, group: number): DropdownOption => ({
+    value: font.name,
+    label: font.name,
+    group,
+    style: { fontFamily: fontStack(font.name, base) },
+  });
+  const options: DropdownOption[] = [
+    { value: "", label: "默认", group: 0, style: { fontFamily: base } },
+    ...[...missing, ...first].map((font) => option(font, 1)),
+    ...second.map((font) => option(font, 2)),
+  ];
+  return (
+    <Dropdown
+      label={label}
+      value={value ?? ""}
+      options={options}
+      searchable
+      emptyText={null}
+      labelStyle={{ fontFamily: kind === "code" ? "var(--mono)" : "var(--sans)" }}
+      onChange={(next) => {
+        onChange(next === "" ? undefined : next);
+      }}
+    />
+  );
+}
 
 /** 设置区里由本组件渲染的导航项（服务商页另见 ProvidersPage） */
 export type SettingsPageSection = "general" | "models" | "appearance";
@@ -142,6 +231,7 @@ export function SettingsPage({
   onOpenSubagents,
   agentBrowser,
   prefs,
+  appearance,
 }: {
   section: SettingsPageSection;
   client: RpcClient | undefined;
@@ -184,8 +274,28 @@ export function SettingsPage({
   /** 面板浏览器 · 桌面内置（第 5 轮）；没有外壳时设置里不显示 */
   agentBrowser?: AgentBrowserHost | undefined;
   prefs?: PrefsStore | undefined;
+  /** 外观页的字体与字号；不给时不显示这两组 */
+  appearance?: AppearanceControls | undefined;
 }) {
   const [items, setItems] = useState<SettingItem[] | null>(null);
+  const [fonts, setFonts] = useState<FontFamily[]>([]);
+  const listFonts = appearance?.listFonts;
+  useEffect(() => {
+    if (section !== "appearance" || listFonts === undefined) return;
+    let alive = true;
+    listFonts().then(
+      (list) => {
+        if (alive) setFonts(list);
+      },
+      () => {
+        // 读取失败：列表只剩「默认」，不出错误文字
+        if (alive) setFonts([]);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [section, listFonts]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [reviewerProviders, setReviewerProviders] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -867,6 +977,93 @@ export function SettingsPage({
                   </div>
                 )}
               </SettingsGroup>
+            )}
+            {section === "appearance" && appearance !== undefined && (
+              <>
+                <SettingsGroup title="字体" className="font-group">
+                  <SettingsRow label="界面字体" className="font-row">
+                    <FontPicker
+                      kind="ui"
+                      label="界面字体"
+                      value={appearance.uiFont}
+                      fonts={fonts}
+                      onChange={(uiFont) => {
+                        const ok = appearance.onChange({ uiFont });
+                        setRowErr(
+                          "appearance",
+                          ok ? null : "本机存储不可写，字体只在本次运行内生效",
+                        );
+                      }}
+                    />
+                  </SettingsRow>
+                  <SettingsRow label="代码字体" className="font-row">
+                    <FontPicker
+                      kind="code"
+                      label="代码字体"
+                      value={appearance.codeFont}
+                      fonts={fonts}
+                      onChange={(codeFont) => {
+                        const ok = appearance.onChange({ codeFont });
+                        setRowErr(
+                          "appearance",
+                          ok ? null : "本机存储不可写，字体只在本次运行内生效",
+                        );
+                      }}
+                    />
+                  </SettingsRow>
+                  <SettingsRow label="字号" labelFor="appearance-font-size" className="font-row">
+                    <div className="size-ctl">
+                      <input
+                        id="appearance-font-size"
+                        type="range"
+                        min={FONT_SIZE_MIN}
+                        max={FONT_SIZE_MAX}
+                        step={1}
+                        value={appearance.fontSize}
+                        onChange={(event) => {
+                          const size = Number(event.target.value);
+                          const ok = appearance.onChange({
+                            fontSize: size === FONT_SIZE_DEFAULT ? undefined : size,
+                          });
+                          setRowErr(
+                            "appearance",
+                            ok ? null : "本机存储不可写，字体只在本次运行内生效",
+                          );
+                        }}
+                      />
+                      <span className="size-num">{appearance.fontSize}</span>
+                      <span className="size-reset-slot">
+                        {appearance.fontSize !== FONT_SIZE_DEFAULT && (
+                          <IconButton
+                            size="sm"
+                            aria-label="恢复默认"
+                            title="恢复默认"
+                            className="size-reset"
+                            onClick={() => {
+                              const ok = appearance.onChange({ fontSize: undefined });
+                              setRowErr(
+                                "appearance",
+                                ok ? null : "本机存储不可写，字体只在本次运行内生效",
+                              );
+                              document.getElementById("appearance-font-size")?.focus();
+                            }}
+                          >
+                            {RESET_ICON}
+                          </IconButton>
+                        )}
+                      </span>
+                    </div>
+                  </SettingsRow>
+                  {rowError.appearance !== undefined && (
+                    <div className="desc err theme-err" role="alert">
+                      {rowError.appearance}
+                    </div>
+                  )}
+                </SettingsGroup>
+                <SettingsGroup title="预览">
+                  <AppearancePreview />
+                </SettingsGroup>
+              </>
             )}
           </div>
         </div>

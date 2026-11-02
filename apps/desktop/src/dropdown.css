@@ -14,8 +14,8 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  height: var(--ctl-h-md);
-  padding: 0 var(--space-2) 0 var(--ctl-px-md);
+  min-height: var(--ctl-h-md);
+  padding: var(--space-0-5) var(--space-2) var(--space-0-5) var(--ctl-px-md);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-input);

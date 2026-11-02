@@ -369,3 +369,36 @@ describe("工作区外文件的左键", () => {
     expect(outsideOpenable("cursor", { vscode: true, cursor: false })).toBe(false);
   });
 });
+
+describe("外观：字体与字号", () => {
+  it("存取往返；恢复默认（写 undefined）后不再存这个字段", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    store.update({ uiFont: "Segoe UI", codeFont: "Fira Code", fontSize: 18 });
+    const again = createPrefsStore(storage).get();
+    expect([again.uiFont, again.codeFont, again.fontSize]).toEqual(["Segoe UI", "Fira Code", 18]);
+    store.update({ fontSize: undefined, uiFont: undefined });
+    const raw = JSON.parse(storage.data.get(PREFS_KEY) ?? "{}") as Record<string, unknown>;
+    expect("fontSize" in raw).toBe(false);
+    expect("uiFont" in raw).toBe(false);
+    expect(raw.codeFont).toBe("Fira Code");
+  });
+
+  it("字号只认 12–20 的整数，字体名只认非空字符串", () => {
+    for (const [fontSize, kept] of [
+      [12, 12],
+      [20, 20],
+      [11, undefined],
+      [21, undefined],
+      [15.5, undefined],
+      ["16", undefined],
+    ] as const) {
+      const store = createPrefsStore(
+        memoryStorage({ [PREFS_KEY]: JSON.stringify({ fontSize, uiFont: "  ", codeFont: 3 }) }),
+      );
+      expect(store.get().fontSize).toBe(kept);
+      expect(store.get().uiFont).toBeUndefined();
+      expect(store.get().codeFont).toBeUndefined();
+    }
+  });
+});

@@ -9,6 +9,7 @@ mod browser;
 mod browser_fullscreen;
 mod browser_policy;
 mod editor;
+mod fonts;
 mod images;
 mod job;
 mod key_diag;
@@ -138,6 +139,7 @@ pub fn run() {
         editor::detect_editors,
         editor::open_in_editor,
         editor::open_with_default,
+        fonts::list_fonts,
         notify::notify_show,
         notify::notify_dismiss,
         terminal::terminal_open,

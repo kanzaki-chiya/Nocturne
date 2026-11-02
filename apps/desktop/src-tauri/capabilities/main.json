@@ -54,6 +54,7 @@
     "allow-detect-editors",
     "allow-open-in-editor",
     "allow-open-with-default",
+    "allow-list-fonts",
     "allow-notify-show",
     "allow-notify-dismiss",
     "allow-terminal-open",

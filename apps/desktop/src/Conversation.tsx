@@ -1984,13 +1984,13 @@ export function DiffBody({ diff, wrap = false }: { diff: string; wrap?: boolean 
 }
 
 /** 参数位：路径类参数拆成「文件名 + 淡色目录」，其余整段放在 name。 */
-interface ArgParts {
+export interface ArgParts {
   name: string;
   dir: string;
   title: string;
 }
 
-function pathParts(path: string, suffix = ""): ArgParts {
+export function pathParts(path: string, suffix = ""): ArgParts {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   const name = slash < 0 ? path : path.slice(slash + 1);
   if (slash < 0 || name === "") {
@@ -2004,7 +2004,7 @@ function pathParts(path: string, suffix = ""): ArgParts {
  * （箭头 · 图标 · 名称 · 参数位 · 可选附加 · 行尾状态），只有行尾在变。
  * 接收参数阶段箭头占位但不可点。
  */
-function ToolLine({
+export function ToolLine({
   open,
   disabled,
   label,
@@ -2059,7 +2059,7 @@ function ToolLine({
   );
 }
 
-function DiffCounts({ diff }: { diff: string | undefined }) {
+export function DiffCounts({ diff }: { diff: string | undefined }) {
   const counts = diff === undefined ? undefined : diffCounts(diff);
   return (
     <span className="tool-res tool-counts">

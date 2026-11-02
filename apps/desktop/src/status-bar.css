@@ -139,6 +139,7 @@
 }
 .status-speed-tip dl > div {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 14px;
 }

@@ -58,6 +58,12 @@ export interface Prefs {
   lastEffort?: string | undefined;
   /** 主题：跟随系统 / 月之亮面（浅色） / 月之暗面（深色）；取值仍是 system/light/dark（桌面端本机设置，不进 Core） */
   theme?: "system" | "light" | "dark" | undefined;
+  /** 界面字体族名；缺省用 --sans（只在桌面端应用，手机网页不读） */
+  uiFont?: string | undefined;
+  /** 代码字体族名；缺省用 --mono */
+  codeFont?: string | undefined;
+  /** 基础字号 12–20（整数）；缺省 14，--fs-1..5 按它等比缩放 */
+  fontSize?: number | undefined;
   /** 用户选过的普通对话工作区；undefined 用外壳 plain_workspace 的默认路径 */
   plainWorkspace?: string | undefined;
   /** 所有当普通对话工作区用过的路径：cwd 命中任意一个的会话都归入「对话」 */
@@ -130,6 +136,29 @@ function strings(value: unknown): string[] | undefined {
   return value;
 }
 
+/** 字号设置的取值：12–20 的整数 */
+export const FONT_SIZE_MIN = 12;
+export const FONT_SIZE_MAX = 20;
+export const FONT_SIZE_DEFAULT = 14;
+
+export function isFontSize(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= FONT_SIZE_MIN &&
+    value <= FONT_SIZE_MAX
+  );
+}
+
+/** 只读一次存储里的 prefs（首屏前应用主题与字体用），不写回任何迁移标记 */
+export function readPrefs(storage: Storage | undefined): Prefs {
+  try {
+    return parse(storage?.getItem(PREFS_KEY) ?? null);
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+
 /** 逐字段校验：损坏或类型不对的字段回退默认值 */
 function parse(raw: string | null): Prefs {
   const prefs: Prefs = { ...DEFAULTS };
@@ -161,6 +190,9 @@ function parse(raw: string | null): Prefs {
   if (obj.theme === "system" || obj.theme === "light" || obj.theme === "dark") {
     prefs.theme = obj.theme;
   }
+  if (typeof obj.uiFont === "string" && obj.uiFont.trim() !== "") prefs.uiFont = obj.uiFont;
+  if (typeof obj.codeFont === "string" && obj.codeFont.trim() !== "") prefs.codeFont = obj.codeFont;
+  if (isFontSize(obj.fontSize)) prefs.fontSize = obj.fontSize;
   if (typeof obj.plainWorkspace === "string" && obj.plainWorkspace.trim() !== "") {
     prefs.plainWorkspace = obj.plainWorkspace;
   }
@@ -251,6 +283,9 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         plainWorkspaces: [...prefs.plainWorkspaces],
         ...(prefs.lastEffort !== undefined ? { lastEffort: prefs.lastEffort } : {}),
         ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),
+        ...(prefs.uiFont !== undefined ? { uiFont: prefs.uiFont } : {}),
+        ...(prefs.codeFont !== undefined ? { codeFont: prefs.codeFont } : {}),
+        ...(prefs.fontSize !== undefined ? { fontSize: prefs.fontSize } : {}),
         ...(prefs.plainWorkspace !== undefined ? { plainWorkspace: prefs.plainWorkspace } : {}),
         ...(prefs.autoUpdate !== undefined ? { autoUpdate: prefs.autoUpdate } : {}),
         ...(prefs.todosCollapsed !== undefined ? { todosCollapsed: prefs.todosCollapsed } : {}),

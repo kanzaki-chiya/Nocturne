@@ -9,8 +9,8 @@
   flex: none;
   width: max-content;
   max-width: 100%;
-  height: var(--ctl-h-md);
-  padding: 0 var(--ctl-px-md);
+  min-height: var(--ctl-h-md);
+  padding: var(--space-0-5) var(--ctl-px-md);
   border-radius: var(--radius-2);
   border: 1px solid var(--a-border-strong);
   background: transparent;
@@ -65,12 +65,12 @@
   color: var(--a-on-accent);
 }
 .btn-sm {
-  height: var(--ctl-h-sm);
-  padding: 0 var(--ctl-px-sm);
+  min-height: var(--ctl-h-sm);
+  padding: var(--space-0-5) var(--ctl-px-sm);
   font-size: var(--fs-1);
 }
 .btn-lg {
-  height: var(--ctl-h-lg);
+  min-height: var(--ctl-h-lg);
 }
 .btn:disabled {
   opacity: var(--disabled-opacity);
@@ -214,9 +214,8 @@
   background: var(--a-input);
 }
 .seg button {
-  height: calc(var(--ctl-h-md) - 2 * var(--space-0-5) - 2px);
-  min-height: 0;
-  padding: 0 var(--space-2);
+  min-height: calc(var(--ctl-h-md) - 2 * var(--space-0-5) - 2px);
+  padding: var(--space-0-5) var(--space-2);
   border: 0;
   border-radius: var(--radius-1);
   background: transparent;
@@ -280,8 +279,8 @@
 /* ---------- 输入框（效果图「下拉、输入」） ---------- */
 .input,
 .textarea {
-  height: var(--ctl-h-md);
-  padding: 0 var(--ctl-px-md);
+  min-height: var(--ctl-h-md);
+  padding: var(--space-0-5) var(--ctl-px-md);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
   background: var(--a-input);
@@ -292,7 +291,7 @@
   box-sizing: border-box;
 }
 .input.lg {
-  height: var(--ctl-h-lg);
+  min-height: var(--ctl-h-lg);
   width: 100%;
 }
 .textarea {
@@ -627,8 +626,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  height: var(--ctl-h-sm);
-  padding: 0 var(--space-2);
+  min-height: var(--ctl-h-sm);
+  padding: var(--space-0-5) var(--space-2);
   font-size: var(--fs-1);
   color: var(--a-muted);
 }
@@ -636,8 +635,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: var(--item-h);
-  padding: 0 var(--space-2);
+  min-height: var(--item-h);
+  padding: var(--space-0-5) var(--space-2);
   border: 0;
   border-radius: var(--radius-2);
   background: transparent;

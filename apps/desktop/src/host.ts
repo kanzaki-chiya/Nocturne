@@ -1,3 +1,4 @@
+import type { FontFamily } from "./appearance";
 import type { NotifyResult } from "./notify";
 import type { PickedImage } from "./picked-images";
 import type { BackendMessage } from "./types";
@@ -190,6 +191,8 @@ export interface DesktopHost {
   revealItem: (path: string) => Promise<void>;
   /** 检测已安装的编辑器（VS Code、Cursor） */
   detectEditors: () => Promise<{ vscode: boolean; cursor: boolean }>;
+  /** 本机已安装字体族（设置 › 外观）；读取失败返回空列表 */
+  listFonts?: () => Promise<FontFamily[]>;
   /** 用指定编辑器打开文件并跳到行号（Rust 命令经 code/cursor -g 启动） */
   openInEditor: (editor: "vscode" | "cursor", path: string, line?: number) => Promise<void>;
   /** 系统文件夹选择对话框；取消返回 null */

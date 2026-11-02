@@ -223,7 +223,8 @@
 .usage-ranking li {
   display: grid;
   grid-template-columns: minmax(80px, 1fr) 1fr 5ch;
-  align-items: center;
+  /* 无衬线的模型名与等宽的百分比按基线对齐；条形图单独居中 */
+  align-items: baseline;
   gap: 14px;
   margin-top: 10px;
 }
@@ -239,6 +240,7 @@
   color: var(--a-secondary);
 }
 .usage-bar {
+  align-self: center;
   height: 5px;
   background: var(--a-raised);
   border-radius: var(--radius-1);

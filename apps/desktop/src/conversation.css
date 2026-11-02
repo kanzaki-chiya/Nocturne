@@ -563,12 +563,13 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* 无衬线的工具名与等宽的参数同处一行：按基线对齐，不按盒子居中 */
 .conversation .tool-line {
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 7px;
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
   color: var(--a-muted);
   white-space: nowrap;
   min-width: 0;
@@ -601,7 +602,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--mono);
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
 }
 .conversation .tool-dir {
   color: var(--a-faint);
@@ -652,6 +653,8 @@
 }
 .conversation .tool-spin {
   flex: none;
+  /* 空盒子没有文字基线：在基线对齐的行里单独居中 */
+  align-self: center;
   width: 12px;
   height: 12px;
   border: 1px solid var(--a-border-strong);
@@ -763,7 +766,8 @@
   cursor: pointer;
   color: var(--a-secondary);
   display: flex;
-  align-items: center;
+  /* 等宽路径、计数与无衬线的「新建」等标记同处一行：按基线对齐 */
+  align-items: baseline;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
   background: var(--a-side);

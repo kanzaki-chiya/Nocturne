@@ -18,6 +18,7 @@ fn main() {
             "detect_editors",
             "open_in_editor",
             "open_with_default",
+            "list_fonts",
             "notify_show",
             "notify_dismiss",
             "terminal_open",

@@ -8,6 +8,7 @@ import { openUrl as tauriOpenUrl, revealItemInDir as tauriReveal } from "@tauri-
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 
+import type { FontFamily } from "./appearance";
 import { isAllowedExternalUrl } from "./external-url";
 import type {
   AgentWatchMessage,
@@ -88,6 +89,14 @@ export function createTauriHost(): DesktopHost {
         return await invoke<{ vscode: boolean; cursor: boolean }>("detect_editors");
       } catch {
         return { vscode: false, cursor: false };
+      }
+    },
+    // 读取失败时列表只剩「默认」，不出错误文字
+    async listFonts() {
+      try {
+        return await invoke<FontFamily[]>("list_fonts");
+      } catch {
+        return [];
       }
     },
     async openInEditor(editor, path, line) {

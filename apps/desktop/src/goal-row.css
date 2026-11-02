@@ -46,6 +46,17 @@
   height: var(--ctl-h-sm);
   color: var(--a-muted);
 }
+/* 目标行在输入框（.composer）里：不要 .composer .ib 的圆形描边，常态无边框无底色，悬停才有底色 */
+.goal-row .ib.goal-action {
+  border: 0;
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--a-muted);
+}
+.goal-row .ib.goal-action:hover:not(:disabled) {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
 .goal-detail {
   border-top: 1px dashed var(--a-border-strong);
   padding: var(--space-3);

@@ -82,12 +82,25 @@ function luminance(color: string): number {
   return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
 }
 
-export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks): MountedTerminal {
+/**
+ * 终端字体跟随设置 › 外观：字号取计算后的 --fs-2，字体取计算后的 --mono（含所选代码字体）。
+ * 没有单独的终端字号设置。
+ */
+export function readTerminalFont(): { fontFamily: string; fontSize: number } {
   const style = getComputedStyle(document.documentElement);
+  const size = Number.parseFloat(style.getPropertyValue("--fs-2"));
+  return {
+    fontFamily: style.getPropertyValue("--mono").trim() || "Consolas, monospace",
+    fontSize: Number.isFinite(size) && size > 0 ? size : 13,
+  };
+}
+
+export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks): MountedTerminal {
+  const font = readTerminalFont();
   const term = new Terminal({
     scrollback: 5000,
-    fontFamily: style.getPropertyValue("--mono").trim() || "Consolas, monospace",
-    fontSize: 13,
+    fontFamily: font.fontFamily,
+    fontSize: font.fontSize,
     lineHeight: 1.15,
     cursorBlink: true,
     // Unicode 11 宽度表在实验性 unicode API 上，不开 proposed API 读不到
@@ -142,10 +155,24 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
     term.options.theme = readTheme();
     term.options.minimumContrastRatio = isLightTheme() ? LIGHT_MIN_CONTRAST : 1;
   };
-  const themeObserver = new MutationObserver(retheme);
+  // 字体与字号：设置页改根元素行内样式上的 --mono / --fs-*；变了就换字体并按新字格重算行列
+  // （fit 触发 onResize，pty 跟着改尺寸）
+  const refont = () => {
+    const next = readTerminalFont();
+    if (next.fontFamily === term.options.fontFamily && next.fontSize === term.options.fontSize) {
+      return;
+    }
+    term.options.fontFamily = next.fontFamily;
+    term.options.fontSize = next.fontSize;
+    fit();
+  };
+  const themeObserver = new MutationObserver((records) => {
+    if (records.some((record) => record.attributeName === "data-theme")) retheme();
+    if (records.some((record) => record.attributeName === "style")) refont();
+  });
   themeObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["data-theme"],
+    attributeFilter: ["data-theme", "style"],
   });
   const media = window.matchMedia("(prefers-color-scheme: light)");
   media.addEventListener("change", retheme);
