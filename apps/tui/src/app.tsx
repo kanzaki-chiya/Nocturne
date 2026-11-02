@@ -18,6 +18,7 @@ import {
   createPlatform,
   completeFileRefs,
   goalStatusLines,
+  goalStopText,
   parseSkillSlash,
   parseWorkModeSlash,
   type FileIndexEntry,
@@ -2395,7 +2396,12 @@ function SessionApp({
         selected.group === "commands" &&
         selected.insert.endsWith(" ") &&
         inputRef.current.trim().toLowerCase() === selected.insert.trim().toLowerCase();
-      if (key.return && !typedTaskCommand) {
+      if (key.return && typedTaskCommand) {
+        // 补全弹层打开时 Composer 不收回车（suspendNav），由这里提交
+        onSubmit(inputRef.current);
+        return;
+      }
+      if (key.return) {
         // 技能、外部 agent 与带任务的命令（ADR-0076）只补全，任务由用户接着写
         if (
           selected.group === "skills" ||
@@ -2620,8 +2626,9 @@ function SessionApp({
         if (work.action === "goal-status") {
           for (const line of goalStatusLines(view.goal, Date.now())) pushLine(line);
         } else if (work.action === "goal-stop") {
+          const before = view.goal?.status;
           void session.stopGoal().then(() => {
-            pushLine("目标已停止");
+            pushLine(goalStopText(before));
           }, fail);
         } else if (work.action === "plan-cancel") {
           void session.cancelPlan().catch(fail);

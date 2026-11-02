@@ -51,6 +51,7 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
   const base = fakeSessionWithPendingTurn({ value: false }).session;
   const submitted: unknown[] = [];
   let stopped = 0;
+  let goalStatus = "active";
   let approved = 0;
   let cancelled = 0;
   const session: RuntimeSession = {
@@ -73,7 +74,7 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
         config: { model: { provider: "p", model: "m1" } },
         goal: {
           objective: "修好测试",
-          status: "active",
+          status: goalStatus,
           maxMinutes: 60,
           maxRounds: 10,
           since: 1,
@@ -97,6 +98,12 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
   await tick();
   expect(stopped).toBe(1);
   expect(stdoutChunks.join("")).toContain("目标已停止");
+  // 目标已完成时 stopGoal 不改动：回执如实说明
+  goalStatus = "met";
+  stdin.write("/goal stop\n");
+  await tick();
+  expect(stopped).toBe(2);
+  expect(stdoutChunks.join("")).toContain("目标已完成，无需停止");
   stdin.write("/plan approve\n");
   await tick();
   stdin.write("/plan cancel\n");

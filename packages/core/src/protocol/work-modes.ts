@@ -147,6 +147,12 @@ export function goalStatusLines(goal: GoalState | undefined, nowMs: number): str
   ];
 }
 
+/** `/goal stop` 的回执：按调用前的状态说明结果；目标不在进行中时 stopGoal 不改动 */
+export function goalStopText(before: GoalStatus | undefined): string {
+  if (before === undefined || before === "active" || before === "stopped") return "目标已停止";
+  return `目标${GOAL_STATUS_TEXT[before]}，无需停止`;
+}
+
 // ── 计划模式（ADR-0076 §5）────────────────────────────────────
 
 /** `session.config_changed.plan`：进入时记下要恢复的预设；null = 退出 */
