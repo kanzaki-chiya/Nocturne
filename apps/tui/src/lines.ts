@@ -23,7 +23,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import {
   boxSafe,
-  lastWrapSpace,
+  lastWrapBreak,
   permissionReviewLine,
   stripControls,
   summarizeToolInput,
@@ -64,7 +64,7 @@ function textWidth(text: string): number {
   return used;
 }
 
-function wrap(text: string, width: number): WrappedLine[] {
+function wrap(text: string, width: number, wordWrap = true): WrappedLine[] {
   const limit = budget(width);
   const flat = stripControls(text.replace(/\r\n?/g, "\n"));
   const out: WrappedLine[] = [];
@@ -80,11 +80,11 @@ function wrap(text: string, width: number): WrappedLine[] {
       const w = charWidth(ch);
       if (w > limit) continue;
       if (used + w > limit && line !== "") {
-        const at = stringWidth(ch) < 2 ? lastWrapSpace(line) : -1;
-        if (at >= 0) {
-          out.push({ text: line.slice(0, at + 1), continued });
+        const at = wordWrap ? lastWrapBreak(line, { nextWide: stringWidth(ch) >= 2 }) : -1;
+        if (at > 0 && at < line.length) {
+          out.push({ text: line.slice(0, at), continued });
           continued = true;
-          line = line.slice(at + 1);
+          line = line.slice(at);
           used = textWidth(line);
         }
         if (used + w > limit && line !== "") {
@@ -474,7 +474,8 @@ function layoutEntryBody(
         ? entry.result?.modelContent
         : (webFetchSummary(entry) ?? entry.result?.modelContent);
       if (content !== undefined && content !== "") {
-        if (diffExpanded) lines.push(...reasoningBody(`${entry.key}:out`, content, width));
+        if (diffExpanded)
+          lines.push(...reasoningBody(`${entry.key}:out`, content, width, { wordWrap: false }));
         else
           for (const [i, line] of tailLines(content, 4).entries()) {
             lines.push({
@@ -599,8 +600,13 @@ export function layoutLive(
   return lines;
 }
 
-function reasoningBody(key: string, text: string, width: number): LaidLine[] {
-  return wrap(text, width - 2).map((line, i) => ({
+function reasoningBody(
+  key: string,
+  text: string,
+  width: number,
+  options: { wordWrap?: boolean } = {},
+): LaidLine[] {
+  return wrap(text, width - 2, options.wordWrap !== false).map((line, i) => ({
     key: `${key}:body:${i}`,
     text: paint(`  ${line.text}`, width),
     continued: line.continued,

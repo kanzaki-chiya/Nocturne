@@ -160,19 +160,39 @@ export function summarizeToolInput(name: string | undefined, input: unknown): st
   return byKey ?? (input === undefined ? "" : JSON.stringify(input));
 }
 
+const WRAP_CONTENT = /[\p{L}\p{N}]/u;
+
 /**
- * 行内最后一个可折行空白的下标，空白留在前一行。
- * 空白后面没有正文时返回 -1（这一行已经在空白处结束）。
+ * 下一个字符放不下时，当前行应保留的码元数。
+ * 可断位置取最后一个：空白之后（空白留在前一行），以及宽字符与相邻字符之间。
+ * 断点之前只有符号或空白（前缀、缩进，不按具体字符串列举）时不当断点。
+ * `guard` 以内是调用方已知的前缀，里面的位置同样不当断点。
+ * 没有可用断点时返回 -1，调用方硬切。
  */
-export function lastWrapSpace(text: string): number {
-  let last = -1;
+export function lastWrapBreak(
+  text: string,
+  options: { nextWide?: boolean; guard?: number } = {},
+): number {
+  const guard = options.guard ?? 0;
+  const chars = [...text];
+  if (chars.length === 0) return -1;
+  const last = chars.at(-1) ?? "";
+  if ((options.nextWide === true || stringWidth(last) >= 2) && text.length > guard)
+    return text.length;
+  let cut = -1;
   let index = 0;
-  for (const ch of text) {
-    if (ch === " " || ch === "\t") last = index;
+  let seenContent = false;
+  let prevWide = false;
+  for (const ch of chars) {
+    const wide = stringWidth(ch) >= 2;
+    if (index > guard && (wide || prevWide)) cut = index;
+    if ((ch === " " || ch === "\t") && seenContent && index + ch.length > guard)
+      cut = index + ch.length;
+    if (wide || WRAP_CONTENT.test(ch)) seenContent = true;
+    prevWide = wide;
     index += ch.length;
   }
-  if (last < 0 || last >= text.length - 1) return -1;
-  return last;
+  return cut > guard && cut < text.length ? cut : -1;
 }
 
 /** ADR-0036：审查来源及用量与主模型输出分开标注。 */

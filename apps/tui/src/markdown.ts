@@ -2,7 +2,7 @@
 import { marked, type Token, type Tokens } from "marked";
 import stringWidth from "string-width";
 
-import { lastWrapSpace } from "./format.js";
+import { lastWrapBreak } from "./format.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import type { LaidLine, LineSegment } from "./viewport.js";
 
@@ -155,6 +155,8 @@ export function renderMarkdown(
     let used = stringWidth(prefix);
     // 宽度溢出折行 → 下一行是同一逻辑行的续行；\n 与收尾 flush 之后重新开始
     let continuing = false;
+    // 前缀只占首行。折过一次之后续行没有前缀，guard 归零。
+    let guard = prefix.length;
     const flush = (): void => {
       const parts = segments.length > 0 ? segments : [{ text: " " }];
       lines.push({
@@ -166,6 +168,7 @@ export function renderMarkdown(
       segments = [];
       used = 0;
       continuing = false;
+      guard = 0;
     };
     const overflowFlush = (): void => {
       flush();
@@ -197,11 +200,12 @@ export function renderMarkdown(
         const w = stringWidth(ch);
         if (w > max) continue;
         if (used + w > max && used > 0) {
-          if (wordWrap && w < 2) {
-            const at = lastWrapSpace(segments.map((part) => part.text).join(""));
-            if (at >= 0) {
-              const tail = sliceRuns(segments, at + 1, Number.MAX_SAFE_INTEGER);
-              segments = sliceRuns(segments, 0, at + 1);
+          if (wordWrap) {
+            const joined = segments.map((part) => part.text).join("");
+            const at = lastWrapBreak(joined, { nextWide: w >= 2, guard });
+            if (at > 0 && at < joined.length) {
+              const tail = sliceRuns(segments, at, Number.MAX_SAFE_INTEGER);
+              segments = sliceRuns(segments, 0, at);
               flush();
               continuing = true;
               segments = tail;
