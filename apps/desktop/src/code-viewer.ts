@@ -164,6 +164,7 @@ export async function mountCodeViewer(
   const language = await languageFor(options.path)?.().catch(() => undefined);
   const base: Extension[] = [
     lineNumbers(),
+    EditorView.lineWrapping,
     drawSelection(),
     highlightActiveLine(),
     highlightSelectionMatches(),
