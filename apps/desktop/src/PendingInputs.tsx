@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
-import type { PendingInputItem, PendingInputsSnapshot } from "@nocturne/core/protocol";
+import {
+  workModeDisplayText,
+  type PendingInputItem,
+  type PendingInputsSnapshot,
+} from "@nocturne/core/protocol";
 import { Button, IconButton } from "./ui";
 
 import "./pending-inputs.css";
@@ -167,7 +171,13 @@ export function PendingInputs({
       {items.map((item) => {
         const isEditing = editing === item.id;
         const isSubagent = item.mode === "subagent";
-        const rowText = isSubagent ? "子代理结果" : item.text === "" ? "（仅图片）" : item.text;
+        const rowText = isSubagent
+          ? "子代理结果"
+          : item.workMode !== undefined
+            ? workModeDisplayText(item.text, { name: item.workMode })
+            : item.text === ""
+              ? "（仅图片）"
+              : item.text;
         return (
           <div key={item.id} className={`pi-row pi-${item.mode}`}>
             <span className="pi-lead" aria-hidden="true">
@@ -225,7 +235,7 @@ export function PendingInputs({
                 </>
               ) : (
                 <>
-                  {running && item.mode === "queue" && (
+                  {running && item.mode === "queue" && item.workMode === undefined && (
                     <IconButton
                       className="send"
                       disabled={disabled || busy}

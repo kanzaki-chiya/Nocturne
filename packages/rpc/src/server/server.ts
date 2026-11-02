@@ -15,6 +15,7 @@ import {
   discardDraftLogin,
   discardProvider,
   isReasoningEffort,
+  isWorkModeName,
   listProviderPresets,
   logoutProvider,
   MODEL_ROLES,
@@ -231,6 +232,11 @@ export const REMOTE_METHODS = [
   "session.updateInput",
   "session.cancelInput",
   "session.resumeInputs",
+  // ADR-0076 §7：执行方式的会话内操作
+  "session.stopGoal",
+  "session.resumeGoal",
+  "session.approvePlan",
+  "session.cancelPlan",
   "session.pendingInputs",
   "session.interrupt",
   "session.abort",
@@ -2104,6 +2110,26 @@ class Connection implements HubPeer {
         await this.hub.operate(session, () => session.resumeInputs());
         return null;
       },
+      "session.stopGoal": async (p) => {
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.stopGoal());
+        return null;
+      },
+      "session.resumeGoal": async (p) => {
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.resumeGoal());
+        return null;
+      },
+      "session.approvePlan": async (p) => {
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.approvePlan());
+        return null;
+      },
+      "session.cancelPlan": async (p) => {
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.cancelPlan());
+        return null;
+      },
       "session.pendingInputs": (p) => this.session(p).session.pendingInputs(),
       "session.respondPermission": async (p) => {
         await this.session(p).session.respondPermission(
@@ -2404,6 +2430,7 @@ function parseAgentProcessInfo(raw: unknown): AgentProcessInfo | undefined {
 function parseSubmitInput(p: {
   skill?: unknown;
   delegate?: unknown;
+  workMode?: unknown;
   text?: unknown;
   content?: unknown;
   attachments?: unknown;
@@ -2422,6 +2449,10 @@ function parseSubmitInput(p: {
       agent: reqString(delegate, "agent"),
       task: reqString(delegate, "task"),
     };
+  }
+  if (p.workMode !== undefined && p.workMode !== null) {
+    if (!isWorkModeName(p.workMode)) throw new InvalidParamsError("workMode 不是已知的执行方式");
+    input.workMode = p.workMode;
   }
   const text = optString(p, "text");
   if (text !== undefined) input.text = text;

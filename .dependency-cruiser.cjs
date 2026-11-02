@@ -206,6 +206,13 @@ module.exports = {
       },
     },
     {
+      name: "work-modes-deps",
+      severity: "error",
+      comment: "work-modes（执行方式，ADR-0076）只能依赖 protocol；由 core/index 接入",
+      from: { path: "^packages/core/src/work-modes/" },
+      to: { path: "^packages/core/src/(?!work-modes/|protocol/)" },
+    },
+    {
       name: "input-history-deps",
       severity: "error",
       comment: "input-history 只能依赖 platform（modules.md：单文件业务模块）",

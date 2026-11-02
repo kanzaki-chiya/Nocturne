@@ -52,6 +52,7 @@ runTurn(session, input, signal):
       "content_filter" → return finish("refused")
       "stop"           → if toolCalls is empty:            # 安全点 2（ADR-0070 §2）
                           if deliverSteers(): continue     # 有插话：写入后继续下一个 Step，不结束 Turn
+                          if deliverContinuation(): continue   # 注入点 continueTurn（第 3.10 节）
                           return finish("done")
       "tool_calls"     → if toolCalls is empty: return finish("error", unexpected_finish)
       "other"          → return finish("error", unexpected_finish)
@@ -81,6 +82,14 @@ deliverSteers() -> bool:
   for item in taken:                                     # 按提交顺序逐条写
     emit message.user(item, steer = true)                # 此后不可再编辑或撤回（input_consumed）
   return taken 非空
+
+# 注入点（ADR-0076 §4.3）：只在安全点 2 调用；子会话不注入
+deliverContinuation() -> bool:
+  if signal.aborted: return false
+  item = await deps.continueTurn?.(signal)
+  if item is undefined or signal.aborted: return false
+  emit message.user(item, steer = true)
+  return true
 ```
 
 第二个安全点在第 3 步的 `"stop"` 分支里：用户的选择是「等它说完再接」，所以不打断模型流，只是不结束 Turn。
@@ -190,13 +199,14 @@ Context Builder 是纯计算，不调用 Provider。需要压缩时它返回压�
 
 ### 3.10 Turn 的可选注入点（Phase 6）
 
-`TurnDeps` 的三个可选字段为 Subagent 引入，缺省时行为与既有版本逐项一致：
+`TurnDeps` 的以下可选字段缺省时行为与既有版本逐项一致（前三个为 Subagent 引入）：
 
 | 字段 | 作用 |
 |---|---|
 | `basePrompt?: string` | 覆盖基础系统提示段（context.md 第 3 节第 1 项）；子会话用它换成子代理提示 |
 | `shouldFinish?(state): boolean` | 每个工具调用结算后检查；返回 true 即 `finish("done")`。谓词由调用方注入，Agent Loop 不读工具名 |
 | `toolChoice?: { name: string }` | 设置时进入本 Turn 每个 `ModelRequest`（强制调用某工具，见 provider-api.md 第 3 节）；仅 Subagent 的催促兜底轮使用 |
+| `continueTurn?(signal): Promise<PreparedInput \| undefined>` | 与 `takeSteers` 同形，只在安全点 2（模型 `stop`、没有工具调用、没有待消费插话、本来要 `done`）调用；返回内容时写成 `message.user(steer: true)` 并继续下一个 Step，`maxSteps` 照常计数；返回空照常 `done`。目标模式用它在 Turn 想结束时拦下核对（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.3）；Agent Loop 不知道内容来自哪个模块 |
 
 子会话由 `SubagentLauncher` 用同一 `runTurn` 驱动另一条会话日志（[subagent.md](subagent.md)）——没有"子会话模式"的 Agent Loop 分支。
 
@@ -222,4 +232,4 @@ idle ──submit──▶ thinking ──工具调用──▶ running_tool ─
 - "是否需要确认"的判断；
 - 渲染、颜色、spinner；
 - 持久化格式；
-- 计划模式、目标管理、定时任务等产品功能（将来若需要，作为独立模块通过工具或事件接入；定时任务见 [ADR-0064](../decisions/ADR-0064-scheduled-tasks.md)，由独立的调度模块新建会话驱动，不改 Agent Loop）。
+- 计划模式、目标管理、定时任务等产品功能（作为独立模块通过工具或事件接入；定时任务见 [ADR-0064](../decisions/ADR-0064-scheduled-tasks.md)，由独立的调度模块新建会话驱动，不改 Agent Loop；四种执行方式见 [ADR-0076](../decisions/ADR-0076-work-modes.md)，状态在 `core/work-modes` 与 `session.config_changed`，Agent Loop 只多一个通用注入点 `continueTurn`）。

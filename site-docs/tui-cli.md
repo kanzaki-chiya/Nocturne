@@ -80,6 +80,10 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 | `/context` | 查看当前上下文窗口占用与组成细分 |
 | `/cost` | 查看当前会话与近 30 天的 Token 用量与预估费用 |
 | `/compact` | 立即手动压缩当前会话上下文 |
+| `/grill-me` | 追问需求：先读代码，再用 `ask_user` 逐个追问、确认需求清单后再动手 |
+| `/goal` | 目标模式：带目标时做到核对通过为止；不带参数查看当前目标状态；支持 `stop`、`resume` |
+| `/plan` | 计划模式：切到 `read-only` 产出实施计划；支持 `approve`、`cancel` |
+| `/boost` | 多代理攻坚：拆解任务并用后台子代理并行调查与实现 |
 | `/grants` | 查看会话与项目授权，或用 `/grants revoke` 撤销 |
 | `/mcp` | 查看 MCP 服务器连接状态与工具数 |
 | `/skills` | 查看当前会话已加载的技能、来源与目录预算 |

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  goalStatusLines,
+  parseWorkModeSlash,
   pendingBackgroundSubagents,
   type ExternalAgentOverview,
   type SkillOverview,
@@ -123,10 +125,12 @@ export function SessionScreen({
     if (entry.dead) throw new Error("电脑尚未连接");
     if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
     if (running || entry.pendingInputs.paused) {
-      await session.enqueueInput(mode, {
+      // ADR-0076：执行方式只能排队
+      await session.enqueueInput(input.workMode ? "queue" : mode, {
         text: input.text,
         ...(input.skill ? { skill: input.skill } : {}),
         ...(input.delegate ? { delegate: input.delegate } : {}),
+        ...(input.workMode ? { workMode: input.workMode } : {}),
         ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
       });
       if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
@@ -141,6 +145,7 @@ export function SessionScreen({
           text: input.text,
           ...(input.skill ? { skill: input.skill } : {}),
           ...(input.delegate ? { delegate: input.delegate } : {}),
+          ...(input.workMode ? { workMode: input.workMode } : {}),
           ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
         },
         (error) => {
@@ -160,8 +165,32 @@ export function SessionScreen({
     onChanged();
     return true;
   };
+  const approvePlan = () => {
+    void session.approvePlan().then(onChanged, (error: unknown) => {
+      onError(errorText(error));
+    });
+  };
   const slash = async (line: string): Promise<string | boolean> => {
     void session.recordInputHistory(line).catch(() => undefined);
+    // ADR-0076 §7：/goal 与 /plan 的无任务子命令
+    const work = parseWorkModeSlash(line);
+    if (work?.kind === "action") {
+      if (work.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
+      if (work.action === "goal-stop" || work.action === "goal-resume") {
+        if (view.goal === undefined) throw new Error("没有目标");
+        if (work.action === "goal-stop") await session.stopGoal();
+        else
+          void session.resumeGoal().then(onChanged, (error: unknown) => {
+            onError(errorText(error));
+          });
+        return true;
+      }
+      if (view.plan === undefined) throw new Error("不在计划模式");
+      if (work.action === "plan-cancel") await session.cancelPlan();
+      else if (running) throw new Error("会话正忙，不能批准计划");
+      else approvePlan();
+      return true;
+    }
     if (line.trim().toLowerCase().startsWith("/compact")) {
       setBusy(true);
       try {
@@ -217,16 +246,17 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
-        onResubmit={async (targetSeq, text, mode) => {
-          // 同桌面 resubmit：先回退再按普通发送；重发只带文本
+        onResubmit={async (targetSeq, text, mode, workMode) => {
+          // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
           setBusy(true);
           try {
             await sessions.rewind(entry, targetSeq, mode);
           } finally {
             setBusy(false);
           }
-          await submit({ text, attachments: [] });
+          await submit({ text, attachments: [], ...(workMode ? { workMode } : {}) });
         }}
+        onApprovePlan={approvePlan}
         onFork={async (targetSeq) => {
           const forked = await sessions.fork(entry, targetSeq);
           onForked(forked.session.id);

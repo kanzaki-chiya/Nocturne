@@ -464,3 +464,111 @@ it("其他目录：输入路径进入项目页，后台拒绝时在输入框下�
   });
   client.close();
 });
+
+it("执行方式消息重发带原 workMode；Runtime 写入的模式消息没有重发（ADR-0076 §1）", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const [transport] = createMemoryTransportPair();
+  const client = createRpcClient(transport, { clientName: "test" });
+  const storage = memoryStorage();
+  await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+  await storage.identity();
+  let receive: ((e: RuntimeEvent) => void) | undefined;
+  const calls: string[] = [];
+  const submit = vi.fn(() => {
+    calls.push("submit");
+    return Promise.resolve("done");
+  });
+  const rewind = vi.fn(() => {
+    calls.push("rewind");
+    return Promise.resolve([]);
+  });
+  const session = fakeSession({
+    id: "s",
+    submit,
+    rewind,
+    subscribe: (fn: typeof receive) => {
+      receive = fn;
+      return Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() });
+    },
+  });
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+    {
+      id: "s",
+      createdAt: new Date().toISOString(),
+      model: { provider: "fake", model: "fake-1" },
+      cwd: "Z:/work",
+      workspaceRoot: "Z:/work",
+      mtimeMs: 1,
+      locked: true,
+      firstText: "模式会话",
+    },
+  ]);
+  vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+    session,
+    opened: { warnings: [] as string[] } as SessionOpened,
+  } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
+  const push = new PhonePush({
+    registration: () => Promise.reject(new Error("unsupported")),
+    permission: () => "default",
+    requestPermission: vi.fn(),
+    info: vi.fn(),
+    changed: vi.fn(),
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(<PhoneApp storage={storage} push={push} />);
+  });
+  await act(async () => {
+    await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
+  });
+  const project = [...container.querySelectorAll<HTMLButtonElement>(".phone-row")].find((row) =>
+    row.textContent?.includes("work"),
+  );
+  await act(() => project?.click());
+  await act(() => container.querySelector<HTMLButtonElement>(".phone-row.session")?.click());
+  let seq = 0;
+  const user = async (turnId: string, text: string, source?: string) => {
+    await act(() =>
+      receive?.({
+        sessionId: "s",
+        seq: ++seq,
+        time: new Date().toISOString(),
+        turnId,
+        type: "message.user",
+        payload: {
+          messageId: `m${seq}`,
+          content: [
+            { type: "text", text },
+            { type: "text", text: '<work-mode name="plan">说明</work-mode>' },
+          ],
+          workMode: { name: "plan", body: "说明", ...(source ? { source } : {}) },
+        },
+      }),
+    );
+  };
+  await user("t1", "加功能");
+  await user("t2", "批准", "runtime");
+  const bubbles = [...container.querySelectorAll<HTMLElement>('article[aria-label="用户消息"]')];
+  expect(bubbles).toHaveLength(2);
+  const buttons = (article: HTMLElement | undefined) =>
+    [...(article?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
+  expect(buttons(bubbles[1])).not.toContain("重发");
+  expect(buttons(bubbles[1])).not.toContain("编辑并重发");
+  const resend = [...(bubbles[0]?.querySelectorAll("button") ?? [])].find(
+    (b) => b.textContent === "重发",
+  );
+  if (!resend) throw new Error("缺少重发");
+  await act(async () => {
+    resend.click();
+    await Promise.resolve();
+  });
+  await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+  expect(rewind).toHaveBeenCalledWith(1, "both");
+  expect(calls).toEqual(["rewind", "submit"]);
+  expect(submit).toHaveBeenCalledWith({ text: "加功能", workMode: "plan" });
+  client.close();
+});

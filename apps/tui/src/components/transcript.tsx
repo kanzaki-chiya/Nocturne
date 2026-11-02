@@ -14,7 +14,7 @@ import { useTheme } from "../theme.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
-import { subagentResultLine, type ViewEntry } from "@nocturne/core/protocol";
+import { subagentResultLine, workModeDisplayText, type ViewEntry } from "@nocturne/core/protocol";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
@@ -33,7 +33,7 @@ function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): Re
         <Text color={theme.secondary}>{`子代理结果 · ${subagentResultLine(entry.subagent)}`}</Text>
       </Box>
     );
-  const text = userText(entry);
+  const text = workModeDisplayText(userText(entry), entry.workMode);
   return (
     <Box marginTop={1} flexDirection="column">
       <Text color={theme.accent} bold>

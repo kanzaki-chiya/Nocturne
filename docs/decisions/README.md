@@ -83,6 +83,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0073](ADR-0073-background-subagents.md) | 后台子代理：只读准入、启动即返回、结果作为待发输入交付 | 已接受 |
 | [ADR-0074](ADR-0074-mcp-server-for-outside-agents.md) | 对外 MCP 接口：外部 agent 经桌面后台驱动会话 | 已接受 |
 | [ADR-0075](ADR-0075-worktree-isolation.md) | 后台子代理的工作树隔离：副本与分支、并回工具、保留与清理 | 已接受 |
+| [ADR-0076](ADR-0076-work-modes.md) | 四种执行方式：追问需求、目标模式、计划模式、多代理攻坚 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

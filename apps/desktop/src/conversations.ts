@@ -8,6 +8,7 @@ import {
   type SessionView,
   type TurnChanges,
   type TurnChangeDiff,
+  type WorkModeName,
 } from "@nocturne/core/protocol";
 import {
   RpcError,
@@ -463,6 +464,7 @@ export class Conversations {
       text: input.text,
       ...(input.skill ? { skill: input.skill } : {}),
       ...(input.delegate ? { delegate: input.delegate } : {}),
+      ...(input.workMode ? { workMode: input.workMode } : {}),
       attachments: input.attachments,
     });
     try {
@@ -520,13 +522,42 @@ export class Conversations {
       return true;
     }
     if (input.text !== "") await entry.session.recordInputHistory(input.text);
-    await entry.session.enqueueInput(mode, {
+    // ADR-0076：执行方式只能排队，不能作为插话
+    await entry.session.enqueueInput(input.workMode ? "queue" : mode, {
       text: input.text,
       ...(input.skill ? { skill: input.skill } : {}),
       ...(input.delegate ? { delegate: input.delegate } : {}),
+      ...(input.workMode ? { workMode: input.workMode } : {}),
       attachments: input.attachments,
     });
     return true;
+  }
+
+  private startModeTurn(call: (session: RpcSession) => Promise<void>): void {
+    const entry = this.selected;
+    if (entry === undefined) throw new Error("请先打开会话");
+    const idle = conversationStatus(entry) === "idle";
+    if (idle) {
+      entry.busy = true;
+      this.changed();
+    }
+    void call(entry.session)
+      .catch(this.failed)
+      .finally(() => {
+        if (!idle) return;
+        entry.busy = false;
+        this.changed();
+      });
+  }
+
+  /** 继续目标（ADR-0076 §4.5）：空闲时后台开新 Turn */
+  resumeGoal(): void {
+    this.startModeTurn((session) => session.resumeGoal());
+  }
+
+  /** 批准计划（ADR-0076 §5）：恢复预设并开新 Turn */
+  approvePlan(): void {
+    this.startModeTurn((session) => session.approvePlan());
   }
 
   /** 编辑待发输入（只换文本，或切换插话/排队）；已发出时提示并刷新快照 */
@@ -600,13 +631,19 @@ export class Conversations {
    * 重发/编辑重发（U-01）：先 rewind 回退到目标用户消息之前，再走普通 send
    * （接受/busy/历史记录逻辑一致）。rewind 拒绝时抛出——编辑框据此保留草稿；
    * rewind 成功后 submit 被拒同样抛出，但会话视图已被回退截断。
-   * 附件、@文件 快照与技能/委派快照不复用：重发只带消息文本。
+   * 附件、@文件 快照与技能/委派快照不复用：重发只带消息文本；用户提交的执行方式
+   * 保留（ADR-0076 §1），重发时照常走模式起始流程。
    */
-  async resubmit(targetSeq: number, text: string, mode: RewindMode): Promise<void> {
+  async resubmit(
+    targetSeq: number,
+    text: string,
+    mode: RewindMode,
+    workMode?: WorkModeName,
+  ): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
     await this.rewindEntry(entry, targetSeq, mode);
-    await this.send({ text, attachments: [] });
+    await this.send({ text, attachments: [], ...(workMode ? { workMode } : {}) });
   }
 
   /** Files-only rewind shares the serialized busy boundary, never the submit path. */

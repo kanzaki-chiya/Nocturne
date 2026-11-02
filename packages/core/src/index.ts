@@ -214,9 +214,27 @@ import {
   type WorktreeRecord,
 } from "./agent/worktree.js";
 import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-changes.js";
-import { effectiveEvents } from "./protocol/index.js";
+import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
+import {
+  effectiveEvents,
+  GOAL_MAX_MINUTES,
+  GOAL_MAX_ROUNDS,
+  isWorkModeName,
+  workModeOrigins,
+  type GoalStatus,
+  type PlanConfig,
+  type WorkModeName,
+  type WorkModeSnapshot,
+} from "./protocol/index.js";
 import { DEFAULT_MAX_MODEL_CHARS, truncateModelContent, truncationNote } from "./tools/budget.js";
 import { writeSpill } from "./tools/spill.js";
+import {
+  goalContinuation,
+  goalResumeBody,
+  planApprovedBody,
+  workModeBlock,
+  workModeBody,
+} from "./work-modes/index.js";
 import {
   createSessionStore,
   createSubagentObservation,
@@ -449,6 +467,8 @@ export interface SubmitInput {
   skill?: SkillInvocation | undefined;
   /** 外部 agent 点名；与 skill 互斥，任务原文随 message.user 固定。 */
   delegate?: AgentDelegation | undefined;
+  /** 执行方式（ADR-0076）：与 skill、delegate 互斥，正文为任务，不得为空 */
+  workMode?: WorkModeName | undefined;
 }
 
 export type { ReadAttachmentResult };
@@ -507,6 +527,25 @@ export interface RuntimeSession {
   cancelInput(id: string): Promise<void>;
   /** 解除暂停（ADR-0070 §4）；空闲时立即发出队首，Turn 进行中交给结束边界 */
   resumeInputs(): Promise<void>;
+  /**
+   * 停止目标（ADR-0076 §4.5）：写 `status: "stopped"`，进行中的 Turn 不再续跑。
+   * 没有目标时 `invalid_command`；目标不是 active 时无操作。
+   */
+  stopGoal(): Promise<void>;
+  /**
+   * 继续目标（ADR-0076 §4.5）：目标不是 active 时写回 active（轮数与时长重新计算）。
+   * 会话空闲时立即开新 Turn 并在它结束时返回；Turn 或压缩进行中只改状态。
+   * 没有目标时 `invalid_command`。
+   */
+  resumeGoal(): Promise<void>;
+  /**
+   * 批准计划（ADR-0076 §5）：恢复进入计划模式前的预设（原本只读时用 default）、
+   * 退出计划模式，并开新 Turn 按计划实施，在它结束时返回。会话忙时
+   * `session_busy`；不在计划模式时 `invalid_command`。
+   */
+  approvePlan(): Promise<void>;
+  /** 放弃计划（ADR-0076 §5）：恢复进入前的预设并退出计划模式，不开 Turn */
+  cancelPlan(): Promise<void>;
   /**
    * 待发输入的当前快照。待发输入是临时状态、不写日志，`input.pending` 不回放，
    * 新附加的客户端用它在订阅后对齐（view.md 第 6 节）。
@@ -2567,6 +2606,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     };
     /**
+     * 用户提交的执行方式输入（ADR-0076 §1）：只有它们在 Turn 开始前触发模式副作用。
+     * Runtime 自己写的模式消息（继续目标、批准计划）同样带 workMode，但不在这里。
+     */
+    const workModeStarts = new WeakSet<PreparedInput>();
+    /**
      * 准备一条提交内容：附件落盘、`@` 引用与技能正文固定成快照块。普通提交与
      * 待发输入共用——待发输入在被消费时不再读盘或重新解析。
      */
@@ -2576,6 +2620,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ): Promise<PreparedInput> => {
       if (input.skill !== undefined && input.delegate !== undefined)
         throw new RuntimeCommandError("invalid_command", "skill 与 delegate 互斥");
+      // ADR-0076 §1：执行方式与技能、委派互斥，正文就是任务
+      if (input.workMode !== undefined) {
+        if (!isWorkModeName(input.workMode))
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `未知执行方式：${String(input.workMode)}`,
+          );
+        if (input.skill !== undefined || input.delegate !== undefined)
+          throw new RuntimeCommandError("invalid_command", "workMode 与 skill、delegate 互斥");
+        if (meta.parent !== undefined)
+          throw new RuntimeCommandError("invalid_command", "子会话不能使用执行方式");
+        // ADR-0076 §6：/boost 依赖后台子代理
+        if (
+          input.workMode === "boost" &&
+          (!subagentEnabled || options.subagent?.background !== true || meta.schedule !== undefined)
+        )
+          throw new RuntimeCommandError("invalid_command", "当前环境不支持后台子代理");
+        const task = (input.content ?? [{ type: "text", text: input.text ?? "" }])
+          .map((block) => (block.type === "text" ? block.text : ""))
+          .join("")
+          .trim();
+        if (task === "")
+          throw new RuntimeCommandError("invalid_command", `/${input.workMode} 需要写明任务`);
+      }
       if (input.delegate !== undefined && !delegateSchema.safeParse(input.delegate).success)
         throw new RuntimeCommandError(
           "invalid_command",
@@ -2683,7 +2751,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             platform.paths.join(sessionsDir, "attachments", session.id, file),
           ),
         });
-      return {
+      let workMode: WorkModeSnapshot | undefined;
+      if (input.workMode !== undefined) {
+        const gitRepository =
+          input.workMode === "boost"
+            ? await inspectWorktreeRepository(meta.workspaceRoot).then(
+                () => true,
+                () => false,
+              )
+            : undefined;
+        workMode = {
+          name: input.workMode,
+          body: workModeBody(input.workMode, {
+            maxBackground: options.subagent?.maxBackground ?? 3,
+            gitRepository,
+          }),
+        };
+        appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
+      }
+      const prepared: PreparedInput = {
         content,
         appended,
         ...(files.length ? { files } : {}),
@@ -2691,7 +2777,95 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         fileRefs: refs.fileRefs,
         ...(skillSnapshot !== undefined ? { skill: skillSnapshot } : {}),
         ...(delegation !== undefined ? { delegate: delegation } : {}),
+        ...(workMode !== undefined ? { workMode } : {}),
       };
+      if (workMode !== undefined) workModeStarts.add(prepared);
+      return prepared;
+    };
+    // ── 目标模式（ADR-0076 §4）：状态在 config_changed.goal，由这里写入 ──
+    const writeGoal = async (status: GoalStatus, reason?: string): Promise<void> => {
+      const goal = session.state().goal;
+      if (goal === undefined) return;
+      await session.emit("session.config_changed", {
+        goal: {
+          objective: goal.objective,
+          status,
+          maxMinutes: goal.maxMinutes,
+          maxRounds: goal.maxRounds,
+          ...(reason !== undefined ? { reason } : {}),
+        },
+      });
+    };
+    const updateGoalTool = createUpdateGoalTool({
+      active: () => session.state().goal?.status === "active",
+      report: (result) =>
+        writeGoal(result.status, result.status === "blocked" ? result.reason : undefined),
+    });
+    /** update_goal 只在目标为 active 时注册（§4.2），在 Turn 边界与续跑时按状态装卸 */
+    const installGoalTool = () => {
+      tools.unregister(updateGoalTool.name);
+      if (session.state().goal?.status === "active") tools.register(updateGoalTool);
+    };
+    const goalInput = (body: string): PreparedInput => ({
+      content: [],
+      appended: [{ type: "text", text: workModeBlock("goal", body) }],
+      workMode: { name: "goal", body, source: "runtime" },
+    });
+    // ── 计划模式（ADR-0076 §5）：预设与 plan 写在同一条 config_changed ──
+    const writePlanPreset = async (preset: string, plan: PlanConfig | null): Promise<void> => {
+      const name = isPermissionPresetName(preset) ? preset : "default";
+      await session.emit("session.config_changed", { permissionPreset: name, plan });
+      policy = buildPolicy(name);
+      warnMissingReviewer();
+    };
+    /** 退出计划模式时恢复的预设：进入前就是只读时改用 default */
+    const planExitPreset = (plan: PlanConfig): string =>
+      plan.restorePreset === "read-only" ? "default" : plan.restorePreset;
+    const requirePlan = (): PlanConfig => {
+      const plan = session.state().plan;
+      if (plan === undefined) throw new RuntimeCommandError("invalid_command", "不在计划模式");
+      return plan;
+    };
+    /** 执行方式在新 Turn 开始前的副作用（§1）：排队取出的输入同样走这里 */
+    const applyWorkModeStart = async (prepared: PreparedInput): Promise<void> => {
+      const started = workModeStarts.has(prepared) ? prepared.workMode?.name : undefined;
+      if (started === "plan") {
+        // 已在计划模式时保留最初要恢复的预设
+        const state = session.state();
+        const restorePreset =
+          state.plan?.restorePreset ?? (state.config.permissionPreset || "default");
+        await writePlanPreset("read-only", { restorePreset });
+      }
+      if (started === "goal") {
+        const objective = prepared.content
+          .flatMap((block) => (block.type === "text" ? [block.text] : []))
+          .join("\n")
+          .trim();
+        await session.emit("session.config_changed", {
+          goal: {
+            objective,
+            status: "active",
+            maxMinutes: GOAL_MAX_MINUTES,
+            maxRounds: GOAL_MAX_ROUNDS,
+          },
+        });
+      }
+      installGoalTool();
+    };
+    /** 安全点 2 的续跑判断（§4.3）；子会话不接 */
+    const continueGoal = async (): Promise<PreparedInput | undefined> => {
+      const next = goalContinuation(session.state().goal, {
+        backgroundRunning: backgroundSubagents.count(session.id),
+        queued: pendingInputStore
+          .snapshot()
+          .items.some((item) => item.mode === "queue" && !item.paused),
+        planning: session.state().plan !== undefined,
+        nowMs: Date.now(),
+      });
+      if (next.kind === "none") return undefined;
+      if (next.kind === "limit") await writeGoal("limit");
+      installGoalTool();
+      return goalInput(next.body);
     };
     /**
      * 设置 Turn 控制器并跑一个或连续多个 Turn（ADR-0070 §3：`done` 结束后取队首
@@ -2729,6 +2903,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           const prepared = await prepare();
           prepare = undefined;
+          await applyWorkModeStart(prepared);
           const deps: TurnDeps = {
             prepareTools: async (signal) => {
               if (mcpSession?.status().some((s) => s.state === "starting")) {
@@ -2750,6 +2925,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             },
             // ADR-0070 §2：安全点取走插话；取走即从列表移除并广播快照
             takeSteers: () => pendingInputStore.takeSteers(),
+            // ADR-0076 §4.3：目标模式在 Turn 想结束时决定是否续跑
+            ...(meta.parent === undefined ? { continueTurn: continueGoal } : {}),
             skills: catalog,
             visionModel: () =>
               resolveModelRole(
@@ -2787,7 +2964,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.delegate,
             prepared.files,
             prepared.subagent,
+            prepared.workMode,
           );
+          // ADR-0076 §4.5：用户中断即停止目标，之后的普通对话不被核对说明接管
+          if (reason === "aborted" && session.state().goal?.status === "active")
+            await writeGoal("stopped", "interrupted");
           // ADR-0070 §4：非 done 结束把剩余条目全部转排队并暂停，不自动发送
           if (reason !== "done") pendingInputStore.pauseAll();
           if (reason === "failed") {
@@ -3106,7 +3287,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             await backgroundSubagents.discard(session.id, kept);
             pendingInputStore.dropSubagents(kept);
           }
+          // ADR-0076 §2：回退到设定目标、进入计划的那条消息之前（含它本身），模式随之撤回
+          const origins = mode === "files" ? undefined : workModeOrigins(session.durableEvents());
           await session.emit("session.rewound", { targetSeq, mode, files });
+          if (origins !== undefined) {
+            const goal = session.state().goal;
+            if (
+              goal !== undefined &&
+              goal.status !== "stopped" &&
+              origins.goal !== undefined &&
+              targetSeq <= origins.goal
+            )
+              await writeGoal("stopped", "rewound");
+            const plan = session.state().plan;
+            if (plan !== undefined && origins.plan !== undefined && targetSeq <= origins.plan)
+              await writePlanPreset(plan.restorePreset, null);
+            installGoalTool();
+          }
           if (mode !== "files") loadedSkills.clear();
           await session.flush();
           execEnv.readState = createReadStateStore(paths);
@@ -3192,6 +3389,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         assertMainSession();
         if (!isPendingInputMode(mode))
           throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
+        // ADR-0076 §1：插话并入当前 Turn，不能中途换执行方式
+        if (mode === "steer" && input.workMode !== undefined)
+          throw new RuntimeCommandError("invalid_command", "执行方式不能作为插话发送");
         // 暂停中提交 = 追加到队尾并恢复（ADR-0070 §4）。没有进行中的 Turn 可以
         // 插话，因此一律作为排队追加，避免越过队首抢在暂停队列之前
         if (pendingInputStore.snapshot().paused) {
@@ -3246,6 +3446,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           const outcome = pendingInputStore.update(id, patch);
           if (outcome === "readonly")
             throw new RuntimeCommandError("invalid_command", "子代理结果不能编辑");
+          if (outcome === "work_mode")
+            throw new RuntimeCommandError("invalid_command", "执行方式不能作为插话发送");
+          if (outcome === "empty_task")
+            throw new RuntimeCommandError("invalid_command", "执行方式需要写明任务");
           if (outcome === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
           await pumpQueue();
@@ -3263,6 +3467,49 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         pendingInputStore.resume();
         // 空闲时立即发出队首；Turn 进行中留给它的结束边界（ADR-0070 §3）
         await pumpQueue();
+      },
+      async stopGoal() {
+        assertUsable();
+        assertMainSession();
+        const goal = session.state().goal;
+        if (goal === undefined) throw new RuntimeCommandError("invalid_command", "没有目标");
+        if (goal.status !== "active") return;
+        await writeGoal("stopped", "user");
+      },
+      async resumeGoal() {
+        assertUsable();
+        assertMainSession();
+        const goal = session.state().goal;
+        if (goal === undefined) throw new RuntimeCommandError("invalid_command", "没有目标");
+        if (goal.status === "active") return;
+        await writeGoal("active");
+        // 进行中的 Turn 在安全点 2 接手；空闲时用一条说明开新 Turn
+        if (busy() || compactController !== undefined) return;
+        const ac = new AbortController();
+        await startTurns(ac, () => Promise.resolve(goalInput(goalResumeBody(goal.objective))));
+      },
+      async approvePlan() {
+        assertUsable();
+        assertMainSession();
+        if (busy() || compactController !== undefined)
+          throw new RuntimeCommandError("session_busy", "会话正忙，不能批准计划");
+        const plan = requirePlan();
+        await writePlanPreset(planExitPreset(plan), null);
+        const body = planApprovedBody();
+        const ac = new AbortController();
+        await startTurns(ac, () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "批准" }],
+            appended: [{ type: "text", text: workModeBlock("plan", body) }],
+            workMode: { name: "plan", body, source: "runtime" },
+          }),
+        );
+      },
+      async cancelPlan() {
+        assertUsable();
+        assertMainSession();
+        const plan = requirePlan();
+        await writePlanPreset(plan.restorePreset, null);
       },
       pendingInputs: () => pendingInputStore.snapshot(),
       async setModel(input) {

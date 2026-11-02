@@ -115,6 +115,8 @@ execute(call, ctx):
 
 顶层后台功能开启时另注册 `apply_subagent_changes({ id, mode?: "clean" | "3way" })`，声明 `mutates`，以改动文件的 `edit` 主体记录检查点；成功并回按有效事件判断，回退后允许再次并回。完整 Git 与冲突语义见 [ADR-0075 §5](../decisions/ADR-0075-worktree-isolation.md#5-交付与合并)。
 
+主会话的目标为 active 时另注册 `update_goal({ status: "met" | "blocked", checklist?: { item, evidence }[], reason? })`（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.2）：在 Turn 边界与续跑时按目标状态装卸；`met` 须有至少一项、证据非空的清单，`blocked` 须有原因，否则 `invalid_input`；目标此刻已不是 active 时同样以 `invalid_input` 结算。无权限主体，`mutates: false`、`fileEffects: "none"`，写入由目标模块完成（`session.config_changed.goal`），`tool.completed.output` 保存清单与证据。
+
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 
 ### `schedule`

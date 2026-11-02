@@ -88,6 +88,22 @@ function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   } as unknown as RuntimeSession;
 }
 
+describe("执行方式命令（ADR-0076）", () => {
+  it("双端帮助都列出；补全插入命令名加空格，命令后不再补参数", () => {
+    const ctx = { effortLevels: [], providerIds: [] };
+    expect(helpLines().join("\n")).toContain("/grill-me");
+    expect(cliHelpText()).toContain("/grill-me");
+    expect(completeSlash("/gri", ctx).map((item) => item.insert)).toEqual(["/grill-me "]);
+    expect(completeSlash("/grill-me ", ctx)).toEqual([]);
+    expect(completeSlash("/goa", ctx).map((item) => item.insert)).toEqual(["/goal "]);
+    expect(completeSlash("/pla", ctx).map((item) => item.insert)).toEqual(["/plan "]);
+    expect(completeSlash("/boo", ctx).map((item) => item.insert)).toEqual(["/boost "]);
+    expect(cliHelpText()).toContain("/goal");
+    expect(cliHelpText()).toContain("/plan");
+    expect(cliHelpText()).toContain("/boost");
+  });
+});
+
 describe("TUI /rename", () => {
   it("共用命令表进入双端帮助和命令名补全，不枚举标题参数", () => {
     const ctx = { effortLevels: [], providerIds: [] };

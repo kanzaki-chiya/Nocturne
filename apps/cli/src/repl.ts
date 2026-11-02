@@ -9,7 +9,10 @@ type HistoryInterface = Interface & { history: string[] };
 
 import {
   completeFileRefs,
+  goalStatusLines,
+  goalStopText,
   parseSkillSlash,
+  parseWorkModeSlash,
   type Runtime,
   type RuntimeConfig,
   type RuntimeSession,
@@ -283,6 +286,8 @@ export async function runRepl(
 
   const refill = (target: RewindTarget): void => {
     if (target.hasImages) out.line("stdout", "原消息的图片未放回");
+    // Runtime 写入的执行方式消息没有可回填的文字（ADR-0076 §1）
+    if (target.text === "") return;
     if (io.stdin.isTTY === true && !closed) rl.write(target.text);
     else out.line("stdout", `可修改后重发：${target.text}`);
   };
@@ -643,6 +648,57 @@ export async function runRepl(
         if (delegate?.task.trim() === "") {
           out.line("stdout", `用法：/${delegate.agent} 任务`);
           prompt();
+          return;
+        }
+        // ADR-0076：执行方式命令带任务正文提交
+        const work = parseWorkModeSlash(line);
+        if (work?.kind === "usage") {
+          out.line("stdout", work.hint);
+          prompt();
+          return;
+        }
+        if (work?.kind === "action") {
+          if (work.action === "goal-status") {
+            for (const text of goalStatusLines(session.state().goal, Date.now()))
+              out.line("stdout", text);
+            prompt();
+            return;
+          }
+          const opensTurn = work.action === "goal-resume" || work.action === "plan-approve";
+          const goalBefore = session.state().goal?.status;
+          busy = opensTurn;
+          const op =
+            work.action === "goal-stop"
+              ? session.stopGoal()
+              : work.action === "goal-resume"
+                ? session.resumeGoal()
+                : work.action === "plan-approve"
+                  ? session.approvePlan()
+                  : session.cancelPlan();
+          activeTurn = op
+            .then(() => {
+              if (work.action === "goal-stop") out.line("stdout", goalStopText(goalBefore));
+            })
+            .catch((e: unknown) => {
+              out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
+            })
+            .finally(() => {
+              busy = false;
+              prompt();
+            });
+          return;
+        }
+        if (work?.kind === "submit") {
+          busy = true;
+          activeTurn = session
+            .submit({ text: work.text, workMode: work.workMode })
+            .catch((e: unknown) => {
+              out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
+            })
+            .finally(() => {
+              busy = false;
+              prompt();
+            });
           return;
         }
         if (line.startsWith("/") && !skill && !delegate) {

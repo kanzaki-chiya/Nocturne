@@ -169,6 +169,21 @@
   padding: 1px 4px;
   white-space: nowrap;
 }
+/* 执行方式命令名（ADR-0076）：点它展开说明块 */
+.conversation .mode-ref {
+  border: 0;
+  cursor: pointer;
+  line-height: inherit;
+}
+.conversation .mode-body {
+  margin: var(--space-2) 0 0;
+  font: var(--fs-1) / 1.5 var(--mono);
+  color: var(--a-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow: auto;
+}
 .conversation .u-img-frame,
 .conversation .u-img-placeholder {
   display: inline-flex;

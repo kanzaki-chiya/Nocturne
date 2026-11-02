@@ -5,7 +5,7 @@
 import { Box, Text } from "ink";
 
 import { truncateLine } from "../format.js";
-import type { PendingInputItem } from "@nocturne/core/protocol";
+import { workModeDisplayText, type PendingInputItem } from "@nocturne/core/protocol";
 import { useTheme } from "../theme.js";
 
 export function pendingPanelRows(items: number, paused: boolean): number {
@@ -54,7 +54,12 @@ export function PendingInputsPanel({
     const prefix = `${active ? "›" : " "} ${i + 1} ${label} `;
     const tail = `${attachments}${hint}`;
     const text = truncateLine(
-      item.mode === "subagent" ? "" : item.text.replace(/\n/gu, " "),
+      item.mode === "subagent"
+        ? ""
+        : workModeDisplayText(
+            item.text,
+            item.workMode ? { name: item.workMode } : undefined,
+          ).replace(/\n/gu, " "),
       Math.max(4, width - prefix.length - tail.length - 1),
       "…",
     );

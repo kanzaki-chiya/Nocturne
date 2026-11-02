@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { DURABLE_EVENT_TYPES, type DurableEvent, type DurableType } from "./events.js";
 import { PROTOCOL_ENDPOINTS, normalizePermissionPreset, type ModelProtocol } from "./types.js";
+import { GOAL_STATUSES } from "./work-modes.js";
 
 // ── 公共类型 schema ────────────────────────────────────────
 
@@ -210,6 +211,18 @@ const payloadSchemas = {
     permissionPreset: z.string().transform(normalizePermissionPreset).optional(),
     reasoningEffort: reasoningEffortSchema.optional(),
     shell: z.object({ kind: z.string(), path: z.string() }).optional(),
+    // ADR-0076：目标模式；旧版本读取时丢弃
+    goal: z
+      .object({
+        objective: z.string(),
+        status: z.enum(GOAL_STATUSES),
+        maxMinutes: z.number().positive(),
+        maxRounds: z.number().int().positive(),
+        reason: z.string().optional(),
+      })
+      .optional(),
+    // ADR-0076：计划模式；null = 退出
+    plan: z.object({ restorePreset: z.string() }).nullable().optional(),
     mcp: z
       .array(
         z.object({
@@ -259,6 +272,10 @@ const payloadSchemas = {
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
     steer: z.literal(true).optional(),
+    // ADR-0076：执行方式说明块快照；未知名字的旧/新日志照常读取
+    workMode: z
+      .object({ name: z.string(), body: z.string(), source: z.string().optional() })
+      .optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),

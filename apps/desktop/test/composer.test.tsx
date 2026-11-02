@@ -434,7 +434,7 @@ describe("Composer 文本与历史", () => {
 });
 
 describe("Composer 斜杠命令", () => {
-  it("/ 弹层按「命令」组列出 /compact 与 /mcp，Tab 补全不发送", async () => {
+  it("/ 弹层按「命令」组列出 /compact、/mcp 与执行方式，Tab 补全不发送", async () => {
     const onSubmit = vi.fn();
     render(<Composer {...props({ onSubmit })} />);
     const field = input("/");
@@ -444,6 +444,10 @@ describe("Composer 斜杠命令", () => {
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining("/compact"),
       expect.stringContaining("/mcp"),
+      expect.stringContaining("/grill-me"),
+      expect.stringContaining("/goal"),
+      expect.stringContaining("/plan"),
+      expect.stringContaining("/boost"),
     ]);
     fireEvent.keyDown(field, { key: "Tab" });
     expect(field.value).toBe("/compact ");
@@ -489,6 +493,31 @@ describe("Composer 斜杠命令", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("未知命令 /zzz"));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(field.value).toBe("/zzz");
+  });
+});
+
+describe("Composer 执行方式（ADR-0076）", () => {
+  it("/grill-me 任务：去掉命令名后带 workMode 提交；运行中只排队", async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { rerender } = render(<Composer {...props({ onSubmit })} />);
+    const field = input("/grill-me 做个登录页");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith({
+        text: "做个登录页",
+        workMode: "grill-me",
+        attachments: [],
+      }),
+    );
+    rerender(<Composer {...props({ onSubmit, running: true })} />);
+    fireEvent.change(field, { target: { value: "/grill-me 第二件" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenLastCalledWith(
+        { text: "第二件", workMode: "grill-me", attachments: [] },
+        "queue",
+      ),
+    );
   });
 });
 

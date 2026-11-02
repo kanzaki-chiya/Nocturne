@@ -1,4 +1,11 @@
 import type { SkillSnapshot } from "./skills.js";
+import {
+  reduceGoal,
+  reducePlan,
+  type GoalState,
+  type PlanConfig,
+  type WorkModeSnapshot,
+} from "./work-modes.js";
 /**
  * 派生视图（docs/protocols/view.md）：把事件流折叠成 SessionView 的纯函数
  * reducer，供 TUI 与后续客户端共享（ADR-0002 第 5 条）。
@@ -78,6 +85,10 @@ export interface SessionView {
     | undefined;
   turnCount: number;
   usage: Usage;
+  /** 目标模式（ADR-0076 §2）；从未设定时缺省 */
+  goal?: GoalState | undefined;
+  /** 计划模式（ADR-0076 §5）；不在计划模式时缺省 */
+  plan?: PlanConfig | undefined;
   pendingPermission: PendingPermission | undefined;
   /**
    * 待回答的提问（ADR-0032 §3）：只由临时事件 question.requested 产生；
@@ -130,6 +141,8 @@ export interface UserEntry {
   /** 运行中插话（ADR-0070）：界面加「插话」标签，不是新 Turn 的开始 */
   steer?: true | undefined;
   subagent?: SubagentResult | undefined;
+  /** 执行方式快照（ADR-0076）：界面在正文旁显示命令名 */
+  workMode?: WorkModeSnapshot | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
@@ -138,7 +151,8 @@ export interface UserEntry {
  *
  * 提交时 Core 在 `content` 末尾按顺序追加给模型看的快照块（`src/index.ts`
  * 的 submit 路径，经 `runTurn` 落盘）：每个非图片 `@` 引用一块（`resolveFileRefs`）、
- * 技能正文一块、委派指令一块。这里按条数从末尾切掉，再拼接剩下的 text 块。
+ * 技能正文一块、委派指令一块、文件引用一块、执行方式说明一块。这里按条数从末尾切掉，
+ * 再拼接剩下的 text 块。
  * 以后新增快照种类或改变追加数量，必须同步改这里。
  */
 export function userEntryText(entry: UserEntry): string {
@@ -146,7 +160,8 @@ export function userEntryText(entry: UserEntry): string {
     (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
     (entry.skill ? 1 : 0) +
     (entry.delegate ? 1 : 0) +
-    (entry.files?.length ? 1 : 0);
+    (entry.files?.length ? 1 : 0) +
+    (entry.workMode ? 1 : 0);
   const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
   return content
     .filter((block) => block.type === "text")
@@ -325,7 +340,14 @@ export function reduceSessionView(view: SessionView, event: RuntimeEvent): void 
   if (isDurableEvent(event)) {
     book(view).events.push(event);
     view.lastSeq = event.seq;
-    if (isDurableEventType(event.type)) reduceDurable(view, event);
+    if (isDurableEventType(event.type)) {
+      // ADR-0076 §2：目标按全部事件推进，回退重建不重算
+      const goal = reduceGoal(view.goal, event, view.currentTurn !== undefined);
+      if (goal !== view.goal) view.goal = goal;
+      const plan = reducePlan(view.plan, event);
+      if (plan !== view.plan) view.plan = plan;
+      reduceDurable(view, event);
+    }
   } else if (isEphemeralEventType(event.type)) {
     reduceEphemeral(view, event);
   }
@@ -439,6 +461,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
         ...(event.payload.steer === true ? { steer: true as const } : {}),
         ...(event.payload.subagent !== undefined ? { subagent: event.payload.subagent } : {}),
+        ...(event.payload.workMode !== undefined ? { workMode: event.payload.workMode } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

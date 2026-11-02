@@ -62,6 +62,41 @@ describe("parseSlash", () => {
     }
   });
 
+  it("执行方式（ADR-0076）：带任务返回 work，任务可多行；只有命令名给用法", () => {
+    expect(parseSlash("/grill-me 做个登录页\n要暗色")).toEqual({
+      kind: "work",
+      workMode: "grill-me",
+      text: "做个登录页\n要暗色",
+    });
+    expect(parseSlash("/grill-me")).toEqual({
+      kind: "unknown",
+      name: "/grill-me",
+      hint: "用法：/grill-me 需求",
+    });
+  });
+
+  it("/goal：无参数与 stop|resume 交给 onSlash，其余文字是目标", () => {
+    for (const line of ["/goal", "/goal stop", " /goal resume "])
+      expect(parseSlash(line)).toEqual({ kind: "command", name: "/goal", raw: line });
+    expect(parseSlash("/goal 修好测试")).toEqual({
+      kind: "work",
+      workMode: "goal",
+      text: "修好测试",
+    });
+    for (const line of ["/plan approve", " /plan cancel "])
+      expect(parseSlash(line)).toEqual({ kind: "command", name: "/plan", raw: line });
+    expect(parseSlash("/plan 重构登录")).toEqual({
+      kind: "work",
+      workMode: "plan",
+      text: "重构登录",
+    });
+    expect(parseSlash("/boost 并行改造")).toEqual({
+      kind: "work",
+      workMode: "boost",
+      text: "并行改造",
+    });
+  });
+
   it("未知命令给出查看提示", () => {
     expect(parseSlash("/unknown hello")).toEqual({
       kind: "unknown",
@@ -77,7 +112,14 @@ describe("completeSlash", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.id).toBe("commands");
     expect(groups[0]?.label).toBe("命令");
-    expect(groups[0]?.items.map((item) => item.label)).toEqual(["/compact", "/mcp"]);
+    expect(groups[0]?.items.map((item) => item.label)).toEqual([
+      "/compact",
+      "/mcp",
+      "/grill-me",
+      "/goal",
+      "/plan",
+      "/boost",
+    ]);
   });
 
   it("前缀过滤并保留原始前导空白", () => {

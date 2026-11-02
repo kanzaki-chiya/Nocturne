@@ -908,6 +908,20 @@ describe("每轮文件更改查询与文件撤销", () => {
     expect(entry.turnChanges.get(1)?.reverted).toBeDefined();
     expect(f.calls.filter((c) => c.method === "session.turnChanges")).toHaveLength(before + 1);
   });
+  it("重发：先回退再提交，用户提交的执行方式随提交带上（ADR-0076 §1）", async () => {
+    const f = fixture();
+    await f.controller.open("a", "project");
+    await f.controller.resubmit(3, "加功能", "conversation", "plan");
+    const rewindAt = f.calls.findIndex((c) => c.method === "session.rewind");
+    const submitAt = f.calls.findIndex((c) => c.method === "session.submit");
+    expect(f.calls[rewindAt]?.params).toMatchObject({ targetSeq: 3, mode: "conversation" });
+    expect(submitAt).toBeGreaterThan(rewindAt);
+    expect(f.calls[submitAt]?.params).toMatchObject({
+      text: "加功能",
+      attachments: [],
+      workMode: "plan",
+    });
+  });
   it("懒加载 diff 命中缓存；计数变化清缓存，external 单独变化不清", async () => {
     const f = fixture();
     const turn = change();

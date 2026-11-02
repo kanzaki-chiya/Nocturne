@@ -10,7 +10,9 @@ import type {
   SkillOverview,
   TurnChanges,
   TurnChangeDiff,
+  WorkModeName,
 } from "@nocturne/core/protocol";
+import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import {
@@ -855,8 +857,13 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   // 重发/编辑重发（U-01）：rewind 走会话串行锁，发送后同步会话列表
-  const resubmit = async (targetSeq: number, text: string, mode: RewindMode): Promise<void> => {
-    await conversations.resubmit(targetSeq, text, mode);
+  const resubmit = async (
+    targetSeq: number,
+    text: string,
+    mode: RewindMode,
+    workMode?: WorkModeName,
+  ): Promise<void> => {
+    await conversations.resubmit(targetSeq, text, mode, workMode);
     setSelectedId(conversations.selectedId);
     await refresh();
   };
@@ -872,6 +879,28 @@ export function App({ host }: { host: DesktopHost }) {
     }
     const active = conversations.selected;
     if (active === undefined) throw new Error("请先打开会话");
+    if (parsed.name === "/goal" || parsed.name === "/plan") {
+      // ADR-0076 §7：/goal 与 /plan 的无任务子命令
+      const action = parseWorkModeSlash(line);
+      if (action?.kind !== "action") return false;
+      if (action.action === "goal-status") {
+        setCommandOutput(goalStatusLines(active.view.goal, Date.now()).join("\n"));
+        return true;
+      }
+      if (action.action === "goal-stop" || action.action === "goal-resume") {
+        if (active.view.goal === undefined) throw new Error("没有目标");
+        if (action.action === "goal-stop") await active.session.stopGoal();
+        else conversations.resumeGoal();
+        return true;
+      }
+      if (active.view.plan === undefined) throw new Error("不在计划模式");
+      if (action.action === "plan-cancel") await active.session.cancelPlan();
+      else {
+        if (conversationStatus(active) !== "idle") throw new Error("会话正忙，不能批准计划");
+        conversations.approvePlan();
+      }
+      return true;
+    }
     const servers = await active.session.mcpServers();
     setCommandOutput(
       servers.length === 0
@@ -1493,6 +1522,9 @@ export function App({ host }: { host: DesktopHost }) {
                 running={conversationStatus(active) !== "idle"}
                 onResubmit={resubmit}
                 onFork={forkAt}
+                onApprovePlan={() => {
+                  conversations.approvePlan();
+                }}
                 turnChanges={active.turnChanges}
                 onRewindFiles={(seq) => conversations.rewindFiles(seq)}
                 loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
@@ -1776,8 +1808,14 @@ interface SessionPaneProps {
   home: string | null;
   selected: SessionSummary | undefined;
   running: boolean;
-  onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  onResubmit: (
+    targetSeq: number,
+    text: string,
+    mode: RewindMode,
+    workMode?: WorkModeName,
+  ) => Promise<void>;
   onFork: (targetSeq: number) => Promise<void>;
+  onApprovePlan: () => void;
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;
   loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
@@ -1843,6 +1881,7 @@ function SessionPane({
   running,
   onResubmit,
   onFork,
+  onApprovePlan,
   turnChanges,
   onRewindFiles,
   loadChangeDiff,
@@ -1946,6 +1985,7 @@ function SessionPane({
         scheduleSource={scheduleSource}
         onResubmit={onResubmit}
         onFork={onFork}
+        onApprovePlan={onApprovePlan}
         turnChanges={turnChanges}
         onRewindFiles={onRewindFiles}
         loadChangeDiff={loadChangeDiff}

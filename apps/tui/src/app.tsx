@@ -17,7 +17,10 @@ import {
   logoutProvider,
   createPlatform,
   completeFileRefs,
+  goalStatusLines,
+  goalStopText,
   parseSkillSlash,
+  parseWorkModeSlash,
   type FileIndexEntry,
   type ExternalAgentsDescription,
   type Clipboard,
@@ -2411,8 +2414,23 @@ function SessionApp({
         setCompletionOn(false);
         return;
       }
+      // 已完整敲出的执行方式命令（如 /goal 看状态）回车直接提交，不再补空格
+      const typedTaskCommand =
+        selected.group === "commands" &&
+        selected.insert.endsWith(" ") &&
+        inputRef.current.trim().toLowerCase() === selected.insert.trim().toLowerCase();
+      if (key.return && typedTaskCommand) {
+        // 补全弹层打开时 Composer 不收回车（suspendNav），由这里提交
+        onSubmit(inputRef.current);
+        return;
+      }
       if (key.return) {
-        if (selected.group === "skills" || selected.group === "agents") {
+        // 技能、外部 agent 与带任务的命令（ADR-0076）只补全，任务由用户接着写
+        if (
+          selected.group === "skills" ||
+          selected.group === "agents" ||
+          selected.insert.endsWith(" ")
+        ) {
           applyCandidate(selected, false);
           return;
         }
@@ -2614,6 +2632,76 @@ function SessionApp({
         : parseExternalAgentSlash(expanded, catalogReady ? externalAgents : [], skills);
       if (delegate?.task.trim() === "") {
         pushLine(`用法：/${delegate.agent} 任务`);
+        return;
+      }
+      // ADR-0076：执行方式命令带任务正文提交；运行中一律排队（不能作为插话）
+      const work = parseWorkModeSlash(expanded);
+      if (work?.kind === "usage") {
+        clearInput();
+        pushLine(work.hint);
+        return;
+      }
+      if (work?.kind === "action") {
+        clearInput();
+        const fail = (e: unknown) => {
+          pushLine(`! ${modelErrorText(e)}`);
+        };
+        if (work.action === "goal-status") {
+          for (const line of goalStatusLines(view.goal, Date.now())) pushLine(line);
+        } else if (work.action === "goal-stop") {
+          const before = view.goal?.status;
+          void session.stopGoal().then(() => {
+            pushLine(goalStopText(before));
+          }, fail);
+        } else if (work.action === "plan-cancel") {
+          void session.cancelPlan().catch(fail);
+        } else {
+          // 空闲时继续目标、批准计划都会开新 Turn：与普通提交一样占住提交位
+          const idle = !busy;
+          if (idle && submitting.current) return;
+          if (idle) {
+            submitting.current = true;
+            setSubmitPending(true);
+          }
+          void (work.action === "plan-approve" ? session.approvePlan() : session.resumeGoal())
+            .catch(fail)
+            .finally(() => {
+              if (!idle) return;
+              submitting.current = false;
+              setSubmitPending(false);
+            });
+        }
+        return;
+      }
+      if (work?.kind === "submit") {
+        if (!busy && !pendingInputsRef.current.paused && submitting.current) return;
+        const attachments = allAttachments;
+        clearInput();
+        images.clear();
+        files.clear();
+        if (fullscreen) setScroll(scrollToBottom());
+        const input = {
+          text: work.text,
+          workMode: work.workMode,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        };
+        if (busy || pendingInputsRef.current.paused) {
+          void session.enqueueInput("queue", input).catch((e: unknown) => {
+            pushLine(`! ${modelErrorText(e)}`);
+          });
+          return;
+        }
+        submitting.current = true;
+        setSubmitPending(true);
+        void session
+          .submit(input)
+          .catch((e: unknown) => {
+            pushLine(`! ${modelErrorText(e)}`);
+          })
+          .finally(() => {
+            submitting.current = false;
+            setSubmitPending(false);
+          });
         return;
       }
       const dispatchSlash = (raw: string): void => {

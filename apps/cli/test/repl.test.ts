@@ -46,6 +46,73 @@ it("REPL 外部 agent 点名传递delegate和任务原文，空任务不提交",
   expect(await done).toBe(0);
 });
 
+it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态，stop 调 stopGoal", async () => {
+  const { io, stdin, stdoutChunks } = makeIo();
+  const base = fakeSessionWithPendingTurn({ value: false }).session;
+  const submitted: unknown[] = [];
+  let stopped = 0;
+  let goalStatus = "active";
+  let approved = 0;
+  let cancelled = 0;
+  const session: RuntimeSession = {
+    ...base,
+    submit: async (input) => {
+      submitted.push(input);
+      return "done";
+    },
+    stopGoal: async () => {
+      stopped++;
+    },
+    approvePlan: async () => {
+      approved++;
+    },
+    cancelPlan: async () => {
+      cancelled++;
+    },
+    state: () =>
+      ({
+        config: { model: { provider: "p", model: "m1" } },
+        goal: {
+          objective: "修好测试",
+          status: goalStatus,
+          maxMinutes: 60,
+          maxRounds: 10,
+          since: 1,
+          rounds: 2,
+          activeMs: 0,
+        },
+      }) as ReturnType<RuntimeSession["state"]>,
+  };
+  const done = runRepl(session, fakeRuntime, io);
+  await tick();
+  stdin.write("/grill-me\n");
+  await tick();
+  expect(stdoutChunks.join("")).toContain("用法：/grill-me 需求");
+  stdin.write("/goal 修好测试\n");
+  await tick();
+  expect(submitted).toEqual([{ text: "修好测试", workMode: "goal" }]);
+  stdin.write("/goal\n");
+  await tick();
+  expect(stdoutChunks.join("")).toContain("轮数：2/10");
+  stdin.write("/goal stop\n");
+  await tick();
+  expect(stopped).toBe(1);
+  expect(stdoutChunks.join("")).toContain("目标已停止");
+  // 目标已完成时 stopGoal 不改动：回执如实说明
+  goalStatus = "met";
+  stdin.write("/goal stop\n");
+  await tick();
+  expect(stopped).toBe(2);
+  expect(stdoutChunks.join("")).toContain("目标已完成，无需停止");
+  stdin.write("/plan approve\n");
+  await tick();
+  stdin.write("/plan cancel\n");
+  await tick();
+  expect([approved, cancelled]).toEqual([1, 1]);
+  stdin.end();
+  expect(await done).toBe(0);
+});
+
 function makeIo() {
   const stdin = new PassThrough();
   const stdoutChunks: string[] = [];

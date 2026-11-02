@@ -12,18 +12,18 @@
   padding-top: env(safe-area-inset-top);
   font-size: var(--fs-4);
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button),
+.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref),
 .phone input:not(.check input),
 .phone select,
 .phone textarea,
 .phone summary {
   min-height: 44px;
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button) {
+.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref) {
   padding: 8px 12px;
   border-radius: var(--radius-3);
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):disabled {
+.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref):disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -34,7 +34,7 @@
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):hover:not(:disabled) {
+.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref):hover:not(:disabled) {
   background: var(--a-raised);
 }
 .phone-icon {

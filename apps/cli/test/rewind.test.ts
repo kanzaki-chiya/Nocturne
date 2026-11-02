@@ -175,3 +175,42 @@ it("分叉期间 Ctrl+C 不释放忙碌状态，EOF 等待操作完成", async (
   expect(exited).toHaveBeenCalledOnce();
   expect(ui.current().id).not.toBe(ui.original.id);
 });
+it("执行方式消息：列表与回填带命令名、不含说明块；Runtime 写入的消息不回填（ADR-0076 §1）", async () => {
+  const ui = await repl();
+  try {
+    const session = internalSession(ui.original);
+    await session.emit("message.user", {
+      messageId: "goal",
+      content: [
+        { type: "text", text: "修好测试" },
+        { type: "text", text: '<work-mode name="goal">Goal mode</work-mode>' },
+      ],
+      workMode: { name: "goal", body: "Goal mode" },
+    });
+    await session.emit("message.user", {
+      messageId: "approve",
+      content: [
+        { type: "text", text: "批准" },
+        { type: "text", text: '<work-mode name="plan">Approved</work-mode>' },
+      ],
+      workMode: { name: "plan", body: "Approved", source: "runtime" },
+    });
+    await ui.line("/rewind", "选择轮次");
+    expect(ui.output()).toContain("1. /plan 批准");
+    expect(ui.output()).toContain("2. /goal 修好测试");
+    expect(ui.output()).not.toContain("Goal mode");
+    await ui.line("1", "只回退对话");
+    await ui.line("2", "文件保持当前状态");
+    const before = ui.output().length;
+    await ui.line("y", "已回退到");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(ui.output().slice(before)).not.toContain("可修改后重发");
+    await ui.line("/rewind", "选择轮次");
+    await ui.line("1", "只回退对话");
+    await ui.line("2", "文件保持当前状态");
+    await ui.line("y", "可修改后重发：/goal 修好测试");
+    expect(ui.output()).not.toContain("<work-mode");
+  } finally {
+    await ui.close();
+  }
+});
