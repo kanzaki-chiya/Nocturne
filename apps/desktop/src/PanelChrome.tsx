@@ -49,7 +49,6 @@ export function TitlebarButtons({
   return (
     <TitlebarPortal>
       <IconButton
-        size="sm"
         className="tb-icon"
         aria-label="会话概览"
         title={overviewDisabled ? "会话概览（先打开一个会话）" : "会话概览"}
@@ -64,7 +63,6 @@ export function TitlebarButtons({
         </svg>
       </IconButton>
       <IconButton
-        size="sm"
         className="tb-icon"
         aria-label="右侧面板"
         title={panelDisabled ? "右侧面板（先打开一个会话）" : "右侧面板"}

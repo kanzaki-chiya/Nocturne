@@ -22,6 +22,9 @@
 .window-tools {
   display: flex;
   flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: var(--space-2);
 }
 /* 面板并排时按钮停在对话区右上角，窗口按钮在面板右上角（--panel-dock 由 App 设置） */
 .window-panel-gap {
