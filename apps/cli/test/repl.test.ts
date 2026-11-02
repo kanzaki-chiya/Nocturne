@@ -51,6 +51,7 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
   const base = fakeSessionWithPendingTurn({ value: false }).session;
   const submitted: unknown[] = [];
   let stopped = 0;
+  let goalCancelled = 0;
   let goalStatus = "active";
   let approved = 0;
   let cancelled = 0;
@@ -62,6 +63,9 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
     },
     stopGoal: async () => {
       stopped++;
+    },
+    cancelGoal: async () => {
+      goalCancelled++;
     },
     approvePlan: async () => {
       approved++;
@@ -93,7 +97,7 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
   expect(submitted).toEqual([{ text: "修好测试", workMode: "goal" }]);
   stdin.write("/goal\n");
   await tick();
-  expect(stdoutChunks.join("")).toContain("轮数：2/10");
+  expect(stdoutChunks.join("")).toContain("轮数：2");
   stdin.write("/goal stop\n");
   await tick();
   expect(stopped).toBe(1);
@@ -104,6 +108,10 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
   await tick();
   expect(stopped).toBe(2);
   expect(stdoutChunks.join("")).toContain("目标已完成，无需停止");
+  stdin.write("/goal cancel\n");
+  await tick();
+  expect(goalCancelled).toBe(1);
+  expect(stdoutChunks.join("")).toContain("目标已取消");
   stdin.write("/plan approve\n");
   await tick();
   stdin.write("/plan cancel\n");

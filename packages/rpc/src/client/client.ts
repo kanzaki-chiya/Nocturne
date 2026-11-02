@@ -212,6 +212,8 @@ export interface RpcSession {
   resumeInputs(): Promise<void>;
   /** 停止目标（ADR-0076） */
   stopGoal(): Promise<void>;
+  /** 取消目标并中断进行中的 Turn。 */
+  cancelGoal(): Promise<void>;
   /** 继续目标；空闲时开新 Turn，结束时返回（ADR-0076） */
   resumeGoal(): Promise<void>;
   /** 批准计划；开新 Turn，结束时返回（ADR-0076） */
@@ -786,6 +788,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       stopGoal: async () => {
         await call("session.stopGoal", p);
+      },
+      cancelGoal: async () => {
+        await call("session.cancelGoal", p);
       },
       resumeGoal: async () => {
         await call("session.resumeGoal", p);

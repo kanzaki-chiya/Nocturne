@@ -1,14 +1,11 @@
 /**
  * 目标模式的续跑判断（ADR-0076 §4.3）：纯函数，Runtime 在安全点 2 调用。
  */
-import { goalElapsedMs, type GoalState } from "../protocol/index.js";
-import { goalCheckBody, goalLimitBody } from "./prompts.js";
+import { GOAL_NO_PROGRESS_REASON, type GoalState } from "../protocol/index.js";
+import { goalCheckBody } from "./prompts.js";
 
 export type GoalContinuation =
-  | { kind: "none" }
-  /** 已达上限：先写 status: "limit"，再送这条收尾说明 */
-  | { kind: "limit"; body: string }
-  | { kind: "check"; body: string };
+  { kind: "none" } | { kind: "blocked"; reason: string } | { kind: "check"; body: string };
 
 export function goalContinuation(
   goal: GoalState | undefined,
@@ -26,8 +23,7 @@ export function goalContinuation(
   if (context.planning) return { kind: "none" };
   if (context.backgroundRunning > 0) return { kind: "none" };
   if (context.queued) return { kind: "none" };
-  const elapsed = goalElapsedMs(goal, context.nowMs);
-  if (goal.rounds >= goal.maxRounds || elapsed >= goal.maxMinutes * 60_000)
-    return { kind: "limit", body: goalLimitBody(goal.rounds, Math.floor(elapsed / 60_000)) };
-  return { kind: "check", body: goalCheckBody(goal.objective, goal.rounds + 1, goal.maxRounds) };
+  if ((goal.noProgressRounds ?? 0) >= 3)
+    return { kind: "blocked", reason: GOAL_NO_PROGRESS_REASON };
+  return { kind: "check", body: goalCheckBody(goal.objective, goal.rounds + 1) };
 }

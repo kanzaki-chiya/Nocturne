@@ -2,7 +2,7 @@
  * 执行方式的说明块正文（ADR-0076）：英文，追加在用户消息末尾的 `<work-mode>` 块里。
  * 正文随 message.user.workMode 快照落盘，改这里不影响已有会话。
  */
-import { GOAL_MAX_MINUTES, GOAL_MAX_ROUNDS, type WorkModeName } from "../protocol/index.js";
+import type { WorkModeName } from "../protocol/index.js";
 
 export interface WorkModeContext {
   /** 宿主声明的每会话后台子代理上限（/boost） */
@@ -26,7 +26,7 @@ const GOAL = [
   "- Keep working without asking for confirmation unless a decision genuinely belongs to the user.",
   '- When you believe you are done, check every deliverable against concrete evidence (command output, test results, file contents), then call update_goal with status "met" and the checklist with evidence.',
   '- If you cannot continue without the user, call update_goal with status "blocked" and the reason.',
-  `- If you end a reply without calling update_goal, the runtime asks you to verify the checklist and continue. This repeats at most ${GOAL_MAX_ROUNDS} times or for ${GOAL_MAX_MINUTES} minutes of work.`,
+  "- If you end a reply without calling update_goal, the runtime asks you to verify the checklist and continue.",
 ].join("\n");
 
 const PLAN = [
@@ -78,9 +78,9 @@ export function workModeBody(name: WorkModeName, context: WorkModeContext = {}):
 }
 
 /** 目标核对说明（ADR-0076 §4.3 第 5 步） */
-export function goalCheckBody(objective: string, round: number, maxRounds: number): string {
+export function goalCheckBody(objective: string, round: number): string {
   return [
-    `Goal check ${round}/${maxRounds}. The goal:`,
+    `Goal check ${round}. The goal:`,
     objective,
     "",
     "Before ending, verify each deliverable on your checklist against concrete evidence.",
@@ -99,14 +99,6 @@ export function goalResumeBody(objective: string): string {
     "Re-check your deliverable checklist against the current state of the workspace, then continue with whatever is unmet.",
     '- When every item is verified, call update_goal with status "met" and the checklist with evidence.',
     '- If you cannot continue without the user, call update_goal with status "blocked" and explain why.',
-  ].join("\n");
-}
-
-/** 到达上限后的收尾说明（ADR-0076 §4.3 第 4 步） */
-export function goalLimitBody(rounds: number, minutes: number): string {
-  return [
-    `The goal limit was reached (${rounds} checks, ${minutes} minutes of work). Stop working now.`,
-    "Reply with a short summary: which deliverables are done (with evidence), which are not, and what is left to do.",
   ].join("\n");
 }
 

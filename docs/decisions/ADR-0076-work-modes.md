@@ -147,3 +147,13 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 - **计划用专门的 `submit_plan` 工具提交**：结构更清楚，但多一个工具和一套显示；计划本来就是一条 Markdown 回复，第一版不做。
 - **按金额限制目标花费**：依赖价格数据，很多模型没有；以后有统一价格来源再加。
 - **`/boost` 自动切到 `guarded`**：静默放宽权限违背用户意图；不采用。
+
+## 修订（2026-11-02：取消固定目标上限）
+
+本修订覆盖 §2 的新目标字段、§4.3 的上限判断、§4.4 的轮数/时长停止规则、§4.5 的继续计时，以及 §7 与「后果」中的上限描述；历史正文保留作为原决定记录。新目标事件不写 `maxRounds`/`maxMinutes`，旧日志中的这两个可选字段和旧 `limit` 状态仍可读取、显示并继续。目标没有轮数或时长停止条件；仅连续三轮目标核对都没有任何工具调用时自动转为 `blocked`（`update_goal` 也算工具），原因固定为 `No progress: three consecutive goal checks completed without any tool calls. Resume when you can take action.`，用户界面显示中文。一轮有工具即清零，计数由持久事件折叠。`resumeGoal` 重算 `since` 与 `rounds`，但 `activeMs` 累计；空闲和暂停不计时。
+
+`cancelGoal()` 立刻中断运行中的 Turn 并写 `goal: null`，无需确认；没有目标时返回 `invalid_command`。`/goal cancel` 与 RPC 同步提供。状态显示共用 `visibleGoal`：active、blocked、stopped（user/interrupted）及旧 limit 可见，met、取消和 rewound 隐藏。桌面目标行在 TodoPanel 内，手机在输入上方，不移动任务清单；展开默认收起且不持久化，不改变 `todosCollapsed`。时长显示共用 `formatGoalDuration`（毫秒换算，例如 8秒、12分8秒、1小时0分8秒），秒表只更新目标小组件。TUI 增一行目标状态，`/goal` 核对消息仅显示原文，不加图标或计时；CLI 不设常驻目标行。
+
+后果：不再以固定轮数或时长截断正常的长任务，主对话也不默认限制步数；需要停止时由用户取消、中断或由无工具进展保护阻断。旧 `limit` 只是历史状态，不再由新目标产生。
+
+兼容边界：新版本恢复旧目标不丢失状态；尚不认识 goal 的旧版本忽略该字段。最初要求两个上限字段且不接受 null 的中间版本无法解析新目标事件，需升级；取消 RPC 对不支持它的旧服务端返回未知方法。日志格式版本保持不变。

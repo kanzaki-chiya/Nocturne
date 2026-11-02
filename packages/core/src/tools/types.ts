@@ -85,7 +85,9 @@ export interface ToolTraits {
   /** 能否与其他 concurrencySafe 调用并行执行 */
   concurrencySafe: boolean;
   /** 默认超时（毫秒） */
-  timeoutMs: number;
+  timeoutMs?: number | undefined;
+  /** 允许输入 timeoutMs 覆盖，未声明 maxTimeoutMs 时不封顶。 */
+  inputTimeoutMs?: boolean | undefined;
   /** 调用方可指定超时时的上限 */
   maxTimeoutMs?: number | undefined;
   /** 模型可见输出字符上限，默认 30000 */

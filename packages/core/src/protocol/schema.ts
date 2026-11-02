@@ -217,10 +217,11 @@ const payloadSchemas = {
       .object({
         objective: z.string(),
         status: z.enum(GOAL_STATUSES),
-        maxMinutes: z.number().positive(),
-        maxRounds: z.number().int().positive(),
+        maxMinutes: z.number().positive().optional(),
+        maxRounds: z.number().int().positive().optional(),
         reason: z.string().optional(),
       })
+      .nullable()
       .optional(),
     // ADR-0076：计划模式；null = 退出
     plan: z.object({ restorePreset: z.string() }).nullable().optional(),

@@ -64,6 +64,39 @@ it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到�
     await enter("/goal stop");
     await settleOn("目标已停止");
     expect(session.state().goal).toMatchObject({ status: "stopped", reason: "user" });
+    await enter("/goal cancel");
+    await settleOn("目标已取消");
+    expect(session.state().goal).toBeUndefined();
+  } finally {
+    ui.unmount();
+    await session.close();
+  }
+});
+
+it("全屏无任务清单也显示目标；暂停、继续和取消往返", async () => {
+  const provider = new FakeProvider({ scripts: [[{ type: "wait" }]] });
+  const runtime = await createRuntime({ cwd: temp(), sessionsDir: temp(), providers: [provider] });
+  const session = await runtime.createSession({ model: "fake/fake-1" });
+  const ui = render(
+    createElement(App, { session, runtime, inline: false, env: { ascii: false, animated: false } }),
+  );
+  const enter = async (value: string) => {
+    ui.stdin.write(value);
+    await pause();
+    ui.stdin.write("\r");
+  };
+  try {
+    await enter("/goal x");
+    await settle(() => (ui.lastFrame() ?? "").includes("│ /goal x │"));
+    await enter("/goal stop");
+    await settle(() => session.state().goal?.status === "stopped");
+    await enter("/goal resume");
+    await settle(() => session.state().goal?.status === "active");
+    await enter("/goal cancel");
+    await settle(
+      () => session.state().goal === undefined && !(ui.lastFrame() ?? "").includes("│ /goal x │"),
+    );
+    expect(ui.lastFrame()).toContain("目标已取消");
   } finally {
     ui.unmount();
     await session.close();

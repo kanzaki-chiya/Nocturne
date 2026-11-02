@@ -52,8 +52,9 @@ execute(call, ctx):
                       先经 Hook 与 smart 审查，仍 ask 时发出 permission.requested，等待客户端回复（可被中断）
   6. 开始      emit tool.started（含解析后的 subjects 与权限决定，代理调用写 target: { name, input }），写入成功后才继续
   7. 执行      tool.execute(input, ctx)，ctx.subjects = 已批准的解析结果，携带 AbortSignal 与超时
-               生效超时：工具同时声明 maxTimeoutMs 与 inputSchema 的 timeoutMs 时，输入正
-               整数覆盖默认值（封顶 maxTimeoutMs）；其余情况用 traits.timeoutMs
+               生效超时：工具声明 inputTimeoutMs: true 或 maxTimeoutMs，且 inputSchema 声明整数 timeoutMs
+               时，输入正整数覆盖默认值（仅有 maxTimeoutMs 时封顶）；否则取可选
+               traits.timeoutMs，无值时不启动执行器计时器
                （tool-api.md 第 1 节）。执行器计时器只是兜底，取生效值 + 1s 余量，
                让工具自带计时器（launcher、connector、spawn、callTool）先触发、
                给出更具体的超时说明；工具不响应 signal 时才轮到执行器结算
@@ -89,7 +90,7 @@ execute(call, ctx):
 
 ## 5. 超时、中断与并发
 
-- 每个工具声明默认超时；同时声明 `maxTimeoutMs` 并在 `inputSchema` 中声明整数 `timeoutMs` 的工具（目前只有 `task`）允许调用方在上限内指定超时，读取规则见第 2 节第 7 步；未声明的工具不受该输入影响。`shell` 也接受 `timeoutMs` 输入，但未声明 `maxTimeoutMs`，超时由它自己的计时器实现，执行器不读该输入。
+- 工具可声明默认超时；`inputTimeoutMs: true` 或 `maxTimeoutMs` 配合 `inputSchema` 整数 `timeoutMs` 声明允许输入覆盖，`maxTimeoutMs` 只对有限工具封顶。`task` 默认不设超时，显式输入 > profile > Runtime 配置；`shell` 的输入超时仍由其自带计时器实现，执行器不读取。读取规则见第 2 节第 7 步。
 - 中断信号来自 Turn 的 `AbortController`。工具应尽快停止；超过宽限期后执行器放弃等待并记为 `cancelled`。`shell` 尝试终止整个进程树（Windows 与 POSIX 的实现不同，由 `platform` 负责）；Nocturne 自身异常退出时子进程是否随之结束不作保证，见 [sessions.md](sessions.md) 第 6 节。
 - **各平台进程树终止**：Windows 用 `taskkill /pid <pid> /T /F` 终止整棵树，`kill()` 等 taskkill 结束（上限 15 秒，超时或失败时至少收回根进程）——它自己启动就要约 2 秒（见下方实测记录），不能当成瞬时操作；POSIX 在 `spawn` 时以 `detached: true` 使子进程成为进程组组长，用 `kill(-pid, SIGKILL)` 整组终止。正常中断与主进程被强杀是不同场景；后者对 MCP 服务器的已知限制见 [mcp.md](mcp.md) 第 4 节。
 - 工具声明 `concurrencySafe`。MVP 串行执行所有调用；以后可以并行执行连续的 `concurrencySafe` 调用，不需要修改工具。

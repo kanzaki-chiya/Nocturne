@@ -2653,6 +2653,10 @@ function SessionApp({
           void session.stopGoal().then(() => {
             pushLine(goalStopText(before));
           }, fail);
+        } else if (work.action === "goal-cancel") {
+          void session.cancelGoal().then(() => {
+            pushLine("目标已取消");
+          }, fail);
         } else if (work.action === "plan-cancel") {
           void session.cancelPlan().catch(fail);
         } else {
@@ -2922,7 +2926,7 @@ function SessionApp({
         ? 1
         : 0,
     input.split("\n").length,
-    fullscreen && !pageOpen ? todoPanelRows(view.todos.length) : 0,
+    fullscreen && !pageOpen ? todoPanelRows(view.todos.length, view.goal) : 0,
     // 待发输入列表（ADR-0070）：全屏才画，行数随条目数（最多 3 条 + 提示）
     fullscreen ? pendingPanelRows(pendingInputs.items.length, pendingInputs.paused) : 0,
   );
@@ -3573,7 +3577,7 @@ function SessionApp({
         y={inputY + editor.cursorRow}
       />
       {fullscreen && budget.todo > 0 ? (
-        <TodoPanel items={view.todos} width={width} height={budget.todo} />
+        <TodoPanel items={view.todos} goal={view.goal} width={width} height={budget.todo} />
       ) : null}
       {fullscreen && budget.pending > 0 ? (
         <PendingInputsPanel

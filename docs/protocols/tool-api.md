@@ -42,12 +42,12 @@ interface ToolTraits {
   mutates: boolean
   /** 能否与其他 concurrencySafe 调用并行执行 */
   concurrencySafe: boolean
-  /** 默认超时；可由输入覆盖时，执行器以 maxTimeoutMs 为上限 */
-  timeoutMs: number
-  /** 声明即「可由输入覆盖」：inputSchema 同时声明整数 timeoutMs 且输入值为
-      正整数时，执行器取 min(输入值, maxTimeoutMs) 作为本次生效超时；两个声明
-      缺一或输入不合法即不读输入。未声明本字段的工具（shell、MCP 包装等）
-      超时由工具自己的计时器实现，执行器只留兜底 */
+  /** 可选默认超时；省略且未由输入覆盖时不启动执行器超时计时器 */
+  timeoutMs?: number
+  /** 声明为 true 且 inputSchema 声明整数 timeoutMs 时，输入正整数可覆盖默认值；
+      maxTimeoutMs 存在时封顶，否则不封顶。未声明时不读输入 */
+  inputTimeoutMs?: boolean
+  /** 兼容有限时工具：单独声明也允许整数 timeoutMs 输入覆盖并封顶 */
   maxTimeoutMs?: number
   /** 模型可见输出的字符上限，默认 30000 */
   maxModelChars?: number

@@ -17,6 +17,7 @@ import {
 import { FakeProvider, type FakeScript, type ModelRequest } from "../src/provider/index.js";
 import {
   goalStatusLines,
+  formatGoalDuration,
   parseWorkModeSlash,
   replaySessionView,
   userEntryText,
@@ -263,6 +264,7 @@ describe("/goal", () => {
     expect(parseWorkModeSlash("/goal")).toEqual({ kind: "action", action: "goal-status" });
     expect(parseWorkModeSlash("/goal Stop")).toEqual({ kind: "action", action: "goal-stop" });
     expect(parseWorkModeSlash("/goal resume")).toEqual({ kind: "action", action: "goal-resume" });
+    expect(parseWorkModeSlash("/goal cancel")).toEqual({ kind: "action", action: "goal-cancel" });
     expect(parseWorkModeSlash("/goal stop the dev server")).toEqual({
       kind: "submit",
       workMode: "goal",
@@ -292,7 +294,7 @@ describe("/goal", () => {
     const steers = goalSteers(session);
     expect(steers).toHaveLength(1);
     expect(steers[0]?.payload.workMode?.name).toBe("goal");
-    expect(steers[0]?.payload.workMode?.body).toContain("Goal check 1/10");
+    expect(steers[0]?.payload.workMode?.body).toContain("Goal check 1.");
     expect(steers[0]?.payload.workMode?.body).toContain("修好测试");
     expect(toolNames(provider.requests[0])).toContain("update_goal");
 
@@ -326,18 +328,48 @@ describe("/goal", () => {
     await session.close();
   });
 
-  it("到达轮数上限：写 limit，送一条收尾说明，这一轮随后结束", async () => {
+  it("取消运行中的目标立即中断；恢复后仍无目标", async () => {
+    const provider = new FakeProvider({ scripts: [[{ type: "wait" }]] });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    const running = session.submit({ text: "长任务", workMode: "goal" });
+    await expect.poll(() => provider.waitState.waiting).toBe(1);
+    await session.cancelGoal();
+    expect(await running).toBe("aborted");
+    expect(session.state().goal).toBeUndefined();
+    expect(goalSteers(session)).toHaveLength(0);
+    const id = session.id;
+    await session.close();
+    const restored = await runtime.resumeSession(id);
+    expect(restored.state().goal).toBeUndefined();
+    await restored.close();
+  });
+
+  it("空闲受阻的目标也可取消，持久重放后不存在", async () => {
+    const runtime = await makeRuntime(new FakeProvider({ handler: () => textScript("无工具") }));
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await session.submit({ text: "x", workMode: "goal" });
+    expect(session.state().goal?.status).toBe("blocked");
+    await session.cancelGoal();
+    expect(replaySessionView(session.durableEvents()).goal).toBeUndefined();
+    await session.close();
+  });
+
+  it("连续三轮核对无工具调用：写 blocked 并结束，不额外请求模型", async () => {
     const provider = new FakeProvider({ handler: () => textScript("还在做") });
     const runtime = await makeRuntime(provider);
     const session = await runtime.createSession({ model: "fake/fake-1" });
     expect(await session.submit({ text: "做完它", workMode: "goal" })).toBe("done");
-    // 首个请求 + 10 次核对 + 1 次收尾
-    expect(provider.requests).toHaveLength(12);
+    expect(provider.requests).toHaveLength(4);
     const steers = goalSteers(session);
-    expect(steers).toHaveLength(11);
-    expect(steers.at(-1)?.payload.workMode?.body).toContain("The goal limit was reached");
-    expect(session.state().goal).toMatchObject({ status: "limit", rounds: 10 });
-    expect(toolNames(provider.requests.at(-1))).not.toContain("update_goal");
+    expect(steers).toHaveLength(3);
+    expect(session.state().goal).toMatchObject({
+      status: "blocked",
+      rounds: 3,
+      noProgressRounds: 3,
+    });
+    expect(session.state().goal?.reason).toContain("No progress");
+    expect(replaySessionView(session.durableEvents()).goal).toEqual(session.state().goal);
     await session.close();
   });
 
@@ -482,10 +514,11 @@ describe("/goal", () => {
     const session = await runtime.createSession({ model: "fake/fake-1" });
     await rejects(session.stopGoal(), "invalid_command");
     await rejects(session.resumeGoal(), "invalid_command");
+    await rejects(session.cancelGoal(), "invalid_command");
     await session.close();
   });
 
-  it("续跑判断：后台子代理在跑或有排队输入时不续；时长上限同样生效", () => {
+  it("续跑判断：后台子代理、排队、计划暂停核对；50轮和2小时仍继续", () => {
     const goal: GoalState = {
       objective: "x",
       status: "active",
@@ -505,10 +538,12 @@ describe("/goal", () => {
     expect(goalContinuation(goal, { ...base, backgroundRunning: 1 }).kind).toBe("none");
     expect(goalContinuation(goal, { ...base, queued: true }).kind).toBe("none");
     expect(goalContinuation({ ...goal, status: "met" }, base).kind).toBe("none");
-    expect(goalContinuation({ ...goal, activeMs: 60 * 60_000 }, base).kind).toBe("limit");
+    expect(goalContinuation({ ...goal, rounds: 50, activeMs: 2 * 60 * 60_000 }, base).kind).toBe(
+      "check",
+    );
     const running = { ...goal, turnStartedAt: new Date(0).toISOString() };
     expect(goalContinuation(running, { ...base, nowMs: 59 * 60_000 }).kind).toBe("check");
-    expect(goalContinuation(running, { ...base, nowMs: 61 * 60_000 }).kind).toBe("limit");
+    expect(goalContinuation(running, { ...base, nowMs: 120 * 60_000 }).kind).toBe("check");
   });
 
   it("状态行：目标、状态、轮数与时长", () => {
@@ -527,7 +562,18 @@ describe("/goal", () => {
         },
         0,
       ),
-    ).toEqual(["目标：修好测试", "状态：受阻（缺密钥）", "轮数：3/10", "时长：2/60 分钟"]);
+    ).toEqual(["目标：修好测试", "状态：受阻（缺密钥）", "轮数：3", "时长：2分5秒"]);
+  });
+  it.each([
+    [0, "0秒"],
+    [59_000, "59秒"],
+    [60_000, "1分0秒"],
+    [3_599_000, "59分59秒"],
+    [3_600_000, "1小时0分0秒"],
+    [3_788_000, "1小时3分8秒"],
+    [728_999, "12分8秒"],
+  ])("时长 %ims → %s", (ms, text) => {
+    expect(formatGoalDuration(ms)).toBe(text);
   });
 });
 
@@ -960,7 +1006,7 @@ describe("模式消息来源与重发（ADR-0076 §1）", () => {
         await session.cancelPlan();
       }
       if (name === "goal") {
-        // 回退撤回了目标（rewound）；重发重新设定并照常核对，假模型不报完成，跑到上限
+        // 回退撤回了目标；重发重新设定并核对，假模型持续无工具时受阻。
         const configs = session
           .durableEvents()
           .filter(
@@ -970,7 +1016,7 @@ describe("模式消息来源与重发（ADR-0076 §1）", () => {
               e.payload.goal?.status === "active",
           );
         expect(configs.length).toBeGreaterThan(0);
-        expect(session.state().goal).toMatchObject({ objective: "任务 goal", status: "limit" });
+        expect(session.state().goal).toMatchObject({ objective: "任务 goal", status: "blocked" });
       }
     }
     await session.close();

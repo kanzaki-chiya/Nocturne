@@ -78,12 +78,12 @@ export interface SubagentLimits {
   maxDepth: number;
   /** Runtime 级并存子会话上限 */
   maxConcurrent: number;
-  /** 子会话单 Turn 步数上限 */
-  maxStepsPerTurn: number;
+  /** 子会话单 Turn 步数上限，未指定时不限 */
+  maxStepsPerTurn?: number | undefined;
   /** 缺 finish 时的总轮次上限（首轮 + 催促） */
   maxAttempts: number;
-  /** task 默认超时（毫秒） */
-  timeoutMs: number;
+  /** task 显式配置的超时（毫秒），未指定时不计时 */
+  timeoutMs?: number | undefined;
 }
 
 /** Runtime 级并发信号量（fail-fast：满即 subagent_concurrency，不排队） */
@@ -656,18 +656,16 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         }
         // 催促循环：done 且无 finish → 再开一轮催促；最后一轮 toolChoice 强制
         const maxAttempts = deps.limits.maxAttempts;
-        const timeoutMs = Math.min(
-          request.timeoutMs ?? profile?.timeoutMs ?? deps.limits.timeoutMs,
-          3_600_000,
-        );
+        const timeoutMs = request.timeoutMs ?? profile?.timeoutMs ?? deps.limits.timeoutMs;
         // launcher 自己的超时计时器单独持有：Turn 以 aborted 结束时按
         // signal.aborted 区分「本次超时」与「父会话中断」（subagent.md 第 4 节）
-        const launchTimeoutSignal = AbortSignal.timeout(timeoutMs);
+        const launchTimeoutSignal =
+          timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
         const cancellation = request.background ? new AbortController() : undefined;
         const parentSignal = cancellation?.signal ?? ctx.signal;
         const childSignal = AbortSignal.any([
           parentSignal,
-          launchTimeoutSignal,
+          ...(launchTimeoutSignal ? [launchTimeoutSignal] : []),
           deps.parentFailedSignal,
           child.failedSignal,
         ]);
@@ -731,11 +729,10 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 // launcher 自己的计时器或经 ctx.signal 传入的执行器超时——
                 // 结算 timeout；父会话中断 → cancelled；父/子日志
                 // failedSignal → subagent_turn_failed
-                if (launchTimeoutSignal.aborted || timeoutAbort(parentSignal)) {
+                if (launchTimeoutSignal?.aborted || timeoutAbort(parentSignal)) {
                   return error(
                     "timeout",
-                    `子代理超过 ${timeoutMs}ms 未完成。它可能已修改工作区文件，请先检查 git status；` +
-                      `只读审查或调研任务也不要设短于默认值 ${deps.limits.timeoutMs}ms 的超时`,
+                    `子代理超过 ${timeoutMs}ms 未完成。它可能已修改工作区文件，请先检查 git status`,
                     partialOutputOf(child),
                     statsOf(child, attempt),
                   );

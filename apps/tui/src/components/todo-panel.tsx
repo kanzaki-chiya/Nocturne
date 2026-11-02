@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 
-import type { TodoItem } from "@nocturne/core/protocol";
+import { visibleGoal, type GoalState, type TodoItem } from "@nocturne/core/protocol";
 
 import { useTuiEnv } from "../env.js";
 import { useTheme } from "../theme.js";
@@ -20,8 +20,9 @@ import type { LineSegment } from "../viewport.js";
 export const TODO_PANEL_MAX_ROWS = 10;
 
 /** 固定区想要的行数：边框两行 + 标题一行 + 每项一行，封顶 TODO_PANEL_MAX_ROWS。 */
-export function todoPanelRows(count: number): number {
-  return count === 0 ? 0 : Math.min(TODO_PANEL_MAX_ROWS, count + 3);
+export function todoPanelRows(count: number, goal?: GoalState): number {
+  const goalRows = visibleGoal(goal) ? 1 : 0;
+  return count === 0 ? (goalRows ? 3 : 0) : Math.min(TODO_PANEL_MAX_ROWS, count + 3 + goalRows);
 }
 
 /** 一行分段文本；固定区与普通屏幕工具行共用。 */
@@ -69,21 +70,26 @@ export function TodoRows({
 
 export function TodoPanel({
   items,
+  goal: inputGoal,
   width,
   height,
 }: {
   items: readonly TodoItem[];
+  goal?: GoalState | undefined;
   width: number;
   height: number;
 }): React.JSX.Element | null {
   const env = useTuiEnv();
   const theme = useTheme();
-  if (height === 0 || items.length === 0) return null;
+  const goal = visibleGoal(inputGoal);
+  if (height === 0 || (items.length === 0 && !goal)) return null;
   // 终端太矮（框内放不下标题加两行）时去掉边框，把行留给标题和条目。
-  const framed = height >= Math.min(items.length + 3, 6) && width >= 12;
+  const goalRows = goal ? 1 : 0;
+  const framed =
+    height >= Math.min(items.length + 3 + goalRows, items.length ? 6 : 3) && width >= 12;
   const rows = framed ? height - 2 : height;
   // 框内首行是标题，其余行给条目与「另有 N 项」
-  const { shown, after } = todoWindow(items, Math.max(0, rows - 1), true);
+  const { shown, after } = todoWindow(items, Math.max(0, rows - 1 - goalRows), true);
   const done = todoDone(items);
   const finished = done === items.length;
   const ellipsis = env.ascii ? "..." : "…";
@@ -94,7 +100,18 @@ export function TodoPanel({
     ...(finished ? [{ text: "  " }, todoDoneBadge(theme)] : []),
   ];
   const lines: LineSegment[][] = [
-    header,
+    ...(goal
+      ? [
+          [
+            {
+              text: "/goal",
+              ...(goal.status === "active" ? { color: theme.accent, bold: true } : { dim: true }),
+            },
+            { text: ` ${goal.objective.replace(/\s+/g, " ")}`, dim: goal.status !== "active" },
+          ],
+        ]
+      : []),
+    ...(items.length ? [header] : []),
     ...shown.map(
       (item) => todoItemRows(item, env.ascii, Number.MAX_SAFE_INTEGER, "", theme)[0] ?? [],
     ),

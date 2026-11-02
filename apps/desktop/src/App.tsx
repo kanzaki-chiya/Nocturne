@@ -893,6 +893,10 @@ export function App({ host }: { host: DesktopHost }) {
         setCommandOutput(goalStatusLines(active.view.goal, Date.now()).join("\n"));
         return true;
       }
+      if (action.action === "goal-cancel") {
+        await active.session.cancelGoal();
+        return true;
+      }
       if (action.action === "goal-stop" || action.action === "goal-resume") {
         if (active.view.goal === undefined) throw new Error("没有目标");
         if (action.action === "goal-stop") await active.session.stopGoal();
@@ -2027,6 +2031,15 @@ function SessionPane({
         onManageProviders={onManageProviders}
         presetFooter={<SessionGrants grants={grants} session={session} onManage={onManageGrants} />}
         todos={view.todos}
+        goal={view.goal}
+        goalActions={{
+          onStopGoal: () => session.stopGoal(),
+          onResumeGoal: () => session.resumeGoal(),
+          onCancelGoal: () => session.cancelGoal(),
+        }}
+        onGoalError={(error) => {
+          console.error("目标操作失败", error);
+        }}
         prefs={prefs}
         running={running}
         onSubmit={onSubmit}

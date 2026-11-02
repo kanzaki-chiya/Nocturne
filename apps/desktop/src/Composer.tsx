@@ -20,6 +20,7 @@ import {
   type SkillOverview,
   type SkillInvocation,
   type TodoItem,
+  type GoalState,
   type WorkModeName,
 } from "@nocturne/core/protocol";
 
@@ -37,6 +38,7 @@ import "./composer.css";
 import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
+import type { GoalActions } from "./GoalRow";
 import { IconButton } from "./ui";
 import { fileIconText, formatBytes } from "./web/phone-images";
 
@@ -111,6 +113,9 @@ export interface ComposerSubmit {
 export interface ComposerProps {
   hidden?: boolean;
   todos?: readonly TodoItem[];
+  goal?: GoalState | undefined;
+  goalActions?: GoalActions | undefined;
+  onGoalError?: (error: unknown) => void;
   prefs?: PrefsStore;
   skills?: readonly SkillOverview[];
   externalAgents?: readonly ExternalAgentOverview[];
@@ -291,6 +296,9 @@ export function Composer({
   skills = [],
   externalAgents = [],
   todos = [],
+  goal,
+  goalActions,
+  onGoalError,
   prefs,
 }: ComposerProps) {
   const isSession = variant === "session";
@@ -1207,7 +1215,15 @@ export function Composer({
             )}
           </div>
         )}
-        {isSession && <TodoPanel items={todos} prefs={prefs} />}
+        {isSession && (
+          <TodoPanel
+            items={todos}
+            prefs={prefs}
+            goal={goal}
+            goalActions={goalActions}
+            onGoalError={onGoalError}
+          />
+        )}
         {isSession && pendingInputs !== undefined && pendingInputs.items.length > 0 && (
           <PendingInputs
             snapshot={pendingInputs}

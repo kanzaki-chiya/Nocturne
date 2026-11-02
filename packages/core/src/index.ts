@@ -217,8 +217,6 @@ import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-c
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
   effectiveEvents,
-  GOAL_MAX_MINUTES,
-  GOAL_MAX_ROUNDS,
   isWorkModeName,
   workModeOrigins,
   type GoalStatus,
@@ -391,11 +389,11 @@ export interface RuntimeSubagentOptions {
   maxDepth?: number | undefined;
   /** Runtime 级并存子会话上限，默认 4 */
   maxConcurrent?: number | undefined;
-  /** 子会话单 Turn 步数上限，默认 50 */
+  /** 子会话单 Turn 步数上限，未设置时不限 */
   maxStepsPerTurn?: number | undefined;
   /** 缺 finish 时的总轮次上限（首轮 + 催促），默认 3 */
   maxAttempts?: number | undefined;
-  /** task 默认超时（毫秒），默认 1_800_000 */
+  /** task 显式超时（毫秒），未设置时不设超时 */
   timeoutMs?: number | undefined;
 }
 
@@ -532,8 +530,10 @@ export interface RuntimeSession {
    * 没有目标时 `invalid_command`；目标不是 active 时无操作。
    */
   stopGoal(): Promise<void>;
+  /** 取消目标，立即中断当前 Turn，并持久清除目标。 */
+  cancelGoal(): Promise<void>;
   /**
-   * 继续目标（ADR-0076 §4.5）：目标不是 active 时写回 active（轮数与时长重新计算）。
+   * 继续目标（ADR-0076 §4.5）：目标不是 active 时写回 active，轮数重算，时长累计。
    * 会话空闲时立即开新 Turn 并在它结束时返回；Turn 或压缩进行中只改状态。
    * 没有目标时 `invalid_command`。
    */
@@ -1102,11 +1102,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const subagentLimits = {
     maxDepth: options.subagent?.maxDepth ?? 1,
     maxConcurrent: options.subagent?.maxConcurrent ?? 4,
-    maxStepsPerTurn: options.subagent?.maxStepsPerTurn ?? 50,
+    maxStepsPerTurn: options.subagent?.maxStepsPerTurn,
     maxAttempts: options.subagent?.maxAttempts ?? 3,
-    // 默认 1_800_000，上限 3_600_000（subagent.md 第 3 节）；同时是 task 的
-    // traits.timeoutMs——执行器兜底与 launcher 计时器共用同一个值
-    timeoutMs: Math.min(Math.max(options.subagent?.timeoutMs ?? 1_800_000, 1), 3_600_000),
+    timeoutMs: options.subagent?.timeoutMs,
   };
   const subagentLimiter = createSubagentLimiter(subagentLimits.maxConcurrent);
   // 观察登记簿与 limiter 同寿命：所有会话、所有嵌套层级的 launcher 共享（rpc.md 4.1）
@@ -2783,15 +2781,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return prepared;
     };
     // ── 目标模式（ADR-0076 §4）：状态在 config_changed.goal，由这里写入 ──
+    let clearingGoal = false;
     const writeGoal = async (status: GoalStatus, reason?: string): Promise<void> => {
+      if (clearingGoal) return;
       const goal = session.state().goal;
       if (goal === undefined) return;
       await session.emit("session.config_changed", {
         goal: {
           objective: goal.objective,
           status,
-          maxMinutes: goal.maxMinutes,
-          maxRounds: goal.maxRounds,
           ...(reason !== undefined ? { reason } : {}),
         },
       });
@@ -2841,12 +2839,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           .flatMap((block) => (block.type === "text" ? [block.text] : []))
           .join("\n")
           .trim();
+        if (session.state().goal !== undefined)
+          await session.emit("session.config_changed", { goal: null });
         await session.emit("session.config_changed", {
           goal: {
             objective,
             status: "active",
-            maxMinutes: GOAL_MAX_MINUTES,
-            maxRounds: GOAL_MAX_ROUNDS,
           },
         });
       }
@@ -2863,7 +2861,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         nowMs: Date.now(),
       });
       if (next.kind === "none") return undefined;
-      if (next.kind === "limit") await writeGoal("limit");
+      if (next.kind === "blocked") {
+        await writeGoal("blocked", next.reason);
+        installGoalTool();
+        return undefined;
+      }
       installGoalTool();
       return goalInput(next.body);
     };
@@ -3499,6 +3501,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) return;
         const ac = new AbortController();
         await startTurns(ac, () => Promise.resolve(goalInput(goalResumeBody(goal.objective))));
+      },
+      async cancelGoal() {
+        assertUsable();
+        assertMainSession();
+        if (session.state().goal === undefined)
+          throw new RuntimeCommandError("invalid_command", "没有目标");
+        clearingGoal = true;
+        try {
+          controller?.abort();
+          await session.emit("session.config_changed", { goal: null });
+        } finally {
+          clearingGoal = false;
+        }
       },
       async approvePlan() {
         assertUsable();

@@ -846,14 +846,23 @@ describe("subagent：中断、超时与失败", () => {
   });
 
   it(
-    "父 Turn 上限不影响子会话独立默认 50 步：子 50 步后 max_steps → subagent_turn_failed",
+    "默认不限步数：超过旧 50 步仍可提交，不受父 Turn 显式上限影响",
     { timeout: 60_000 },
     async () => {
       const provider = new FakeProvider({
         handler: (req) => {
           if (isChildRequest(req)) {
-            // 子模型永远只调用 glob 不提交：耗尽默认 50 步上限。
-            // 入参随步数变化，避免触发 ADR-0063 的重复调用保护（那是另一个用例）
+            if (req.messages.filter((m) => m.role === "tool").length >= 51)
+              return [
+                {
+                  type: "tool_call",
+                  toolCallId: "done",
+                  name: "finish",
+                  input: { result: "完成" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ];
+            // 入参随步数变化，避免触发重复调用保护。
             return [
               {
                 type: "tool_call",
@@ -880,8 +889,6 @@ describe("subagent：中断、超时与失败", () => {
               ];
         },
       });
-      // 父 Turn maxSteps=3：父会话两步内结束证明上限未触发；若子会话
-      // 继承父上限只会发出 3 个请求
       const { runtime } = await makeRuntime(undefined, {
         provider,
         turn: { maxSteps: 3 },
@@ -891,15 +898,10 @@ describe("subagent：中断、超时与失败", () => {
       const reason = await session.submit({ text: "go" });
       expect(reason).toBe("done");
 
-      expect(provider.requests.filter(isChildRequest)).toHaveLength(50);
+      expect(provider.requests.filter(isChildRequest)).toHaveLength(52);
       const completed = taskCompleted(events);
-      expect(completed?.type === "tool.completed" && completed.payload.error?.code).toBe(
-        "subagent_turn_failed",
-      );
-      expect(completed?.type === "tool.completed" && completed.payload.error?.message).toContain(
-        "max_steps",
-      );
-      // 子会话日志佐证：turn.completed 以 max_steps、steps=50 结算
+      expect(completed?.type === "tool.completed" && completed.payload.status).toBe("ok");
+      // 子会话日志佐证：超过旧默认上限后正常提交。
       const output =
         completed?.type === "tool.completed"
           ? (completed.payload.output as { childLogPath?: string } | undefined)
@@ -911,8 +913,8 @@ describe("subagent：中断、超时与失败", () => {
         .filter(Boolean)
         .map((l) => JSON.parse(l) as { type: string; payload: { reason?: string; steps?: number } })
         .find((e) => e.type === "turn.completed");
-      expect(childCompleted?.payload.reason).toBe("max_steps");
-      expect(childCompleted?.payload.steps).toBe(50);
+      expect(childCompleted?.payload.reason).toBe("done");
+      expect(childCompleted?.payload.steps).toBe(52);
       await session.close();
     },
   );
@@ -1058,7 +1060,7 @@ describe("subagent：中断、超时与失败", () => {
     expect(err?.code).toBe("timeout");
     expect(err?.message).toContain("超过 120ms 未完成");
     expect(err?.message).toContain("git status");
-    expect(err?.message).toContain("不要设短于默认值");
+    expect(err?.message).not.toContain("默认值");
     // 子会话路径/已完成步数走 stats output；尾部文本经 modelContent 附给父模型
     const output =
       completed?.type === "tool.completed"

@@ -671,14 +671,17 @@ export async function runRepl(
           const op =
             work.action === "goal-stop"
               ? session.stopGoal()
-              : work.action === "goal-resume"
-                ? session.resumeGoal()
-                : work.action === "plan-approve"
-                  ? session.approvePlan()
-                  : session.cancelPlan();
+              : work.action === "goal-cancel"
+                ? session.cancelGoal()
+                : work.action === "goal-resume"
+                  ? session.resumeGoal()
+                  : work.action === "plan-approve"
+                    ? session.approvePlan()
+                    : session.cancelPlan();
           activeTurn = op
             .then(() => {
               if (work.action === "goal-stop") out.line("stdout", goalStopText(goalBefore));
+              if (work.action === "goal-cancel") out.line("stdout", "目标已取消");
             })
             .catch((e: unknown) => {
               out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);

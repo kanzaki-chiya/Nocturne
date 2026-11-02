@@ -69,6 +69,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `cancelInput` | `{ id }` → `null`；条目已被消费报 `input_consumed` |
 | `resumeInputs` | → `null`；解除暂停，空闲时立即发出队首（包括插话，请求挂到接续 Turn 结束），忙时交给安全点或 Turn 的结束边界 |
 | `stopGoal` | → `null`；停止目标（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.5），没有目标报 `invalid_command` |
+| `cancelGoal` | → `null`；立刻中断进行中 Turn，持久写入 `goal: null`，不确认；没有目标报 `invalid_command` |
 | `resumeGoal` | → `null`；继续目标，空闲时开新 Turn，**请求挂到该 Turn 结束**；没有目标报 `invalid_command` |
 | `approvePlan` | → `null`；批准计划（[ADR-0076](../decisions/ADR-0076-work-modes.md) §5），恢复进入前的预设（原本只读时改用 `default`）并开新 Turn，**请求挂到该 Turn 结束**；忙时报 `session_busy`，不在计划模式报 `invalid_command` |
 | `cancelPlan` | → `null`；放弃计划，恢复预设且不开 Turn；不在计划模式报 `invalid_command` |
@@ -401,7 +402,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`、`workMode`） |
 | `session.enqueueInput` | 允许完整载荷（同 `submit`）。ADR-0070 的「追加消息」：手机可在运行中插话或排队 |
 | `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
-| `session.stopGoal` / `session.resumeGoal` / `session.approvePlan` / `session.cancelPlan` | 允许；属于会话内操作（ADR-0076 §7） |
+| `session.stopGoal` / `session.cancelGoal` / `session.resumeGoal` / `session.approvePlan` / `session.cancelPlan` | 允许；属于会话内操作（ADR-0076 §7 及修订） |
 | `session.interrupt` | 请求与通知均允许 |
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作。手机不能用 `subagent.list`，运行中的后台子代理从会话视图推导（`pendingBackgroundSubagents`） |
 | `session.respondPermission` | `reply.remember === "project"` 拒绝并保持待处理；`"session"` 或省略允许 |

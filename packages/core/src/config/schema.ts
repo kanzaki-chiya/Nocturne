@@ -88,7 +88,7 @@ function parseSubagentProfile(
     ["model", profileModelSchema],
     ["effort", reasoningEffortSchema],
     ["tools", z.enum(["general", "explore"])],
-    ["timeoutMs", z.number().int().positive().max(3_600_000)],
+    ["timeoutMs", z.number().int().positive()],
   ] as const) {
     if (raw[field] === undefined) continue;
     const parsed = schema.safeParse(raw[field]);

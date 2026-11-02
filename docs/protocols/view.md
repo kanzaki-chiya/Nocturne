@@ -136,7 +136,7 @@ interface NoticeEntry {
 }
 ```
 
-用户条目的 `content` 末尾带有给模型看的快照块（每个非图片 `@` 引用一块、技能正文一块、委派指令一块、文件附件引用说明一块、执行方式说明一块），客户端不显示。显示、复制与重发用户正文一律调用 `@nocturne/core/protocol` 的 `userEntryText(entry)`，它按 `fileRefs`、`skill`、`delegate`、`files`、`workMode` 的条数从末尾切掉快照块再拼接剩余 text 块；客户端不得各自实现这条规则。`SessionView.goal?` 是目标模式的折叠状态（目标、状态、上限，以及自最近一次变为 active 起的 `rounds`、`activeMs`、进行中 Turn 的 `turnStartedAt`），与 Core 的 `SessionState.goal` 由同一个 `reduceGoal` 推进，回退重建不重算；`/goal` 的状态行用 `goalStatusLines(view.goal, now)`。`SessionView.plan?` 是计划模式的折叠状态（`{ restorePreset }`，退出后为 `undefined`），由 `reducePlan` 推进；桌面与手机据此在空闲时为最后一条助手消息显示「批准」按钮。带 `workMode` 的条目在正文前显示命令名（[ADR-0076](../decisions/ADR-0076-work-modes.md)）；按纯文本显示的客户端用 `workModeDisplayText(text, entry.workMode)` 拼出这一行。
+用户条目的 `content` 末尾带有给模型看的快照块（每个非图片 `@` 引用一块、技能正文一块、委派指令一块、文件附件引用说明一块、执行方式说明一块），客户端不显示。显示、复制与重发用户正文一律调用 `@nocturne/core/protocol` 的 `userEntryText(entry)`，它按 `fileRefs`、`skill`、`delegate`、`files`、`workMode` 的条数从末尾切掉快照块再拼接剩余 text 块；客户端不得各自实现这条规则。`SessionView.goal?` 是目标模式的折叠状态（目标、状态、旧上限字段可选，以及 `rounds`、累计 `activeMs`、进行中 Turn 的 `turnStartedAt`）；`reduceGoal` 从持久事件折叠连续无工具核对计数，一轮有工具重置，三轮无工具自动 blocked。`resumeGoal` 重算 `since`/`rounds`，不清零 `activeMs`；空闲、暂停时间不计。`goalStatusLines(view.goal, now)` 用于 `/goal` 状态行，时长共用 `formatGoalDuration`（毫秒转 8秒、12分8秒、1小时0分8秒）。界面用 `visibleGoal` 仅显示 active、blocked、stopped(user/interrupted) 和旧 limit；met、取消、rewound 隐藏。`SessionView.plan?` 是计划模式的折叠状态（`{ restorePreset }`，退出后为 `undefined`），由 `reducePlan` 推进；桌面与手机据此在空闲时为最后一条助手消息显示「批准」按钮。带 `workMode` 的条目在正文前显示命令名（[ADR-0076](../decisions/ADR-0076-work-modes.md)）；按纯文本显示的客户端用 `workModeDisplayText(text, entry.workMode)` 拼出这一行。
 
 ### 在途实体（live）
 

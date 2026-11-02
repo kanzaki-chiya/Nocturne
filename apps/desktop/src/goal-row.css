@@ -1,0 +1,119 @@
+.goal-row {
+  min-width: 0;
+}
+.goal-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--ctl-h-lg);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  box-sizing: border-box;
+}
+.goal-row-line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.goal-mode-ref {
+  flex: none;
+  font: var(--fs-1)/1 var(--mono);
+  padding: var(--space-1) var(--space-2);
+  margin-right: var(--space-2);
+  color: var(--a-accent);
+  background: var(--a-accent-subtle);
+  border-radius: var(--radius-1);
+}
+.goal-objective {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--a-text);
+  font-size: var(--fs-2);
+}
+.goal-time {
+  flex: none;
+  margin: 0 var(--space-1) 0 var(--space-2);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.goal-row .goal-action {
+  flex: none;
+  width: var(--ctl-h-sm);
+  height: var(--ctl-h-sm);
+  color: var(--a-muted);
+}
+.goal-detail {
+  border-top: 1px dashed var(--a-border-strong);
+  padding: var(--space-3);
+  overflow-y: auto;
+  max-height: var(--cpop-max-h);
+  box-sizing: border-box;
+}
+.goal-detail-text {
+  color: var(--a-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--lh-base);
+}
+.goal-reason {
+  color: var(--a-warning);
+  margin-top: var(--space-2);
+  font-size: var(--fs-1);
+}
+.goal-off .goal-objective,
+.goal-off .goal-detail-text {
+  color: var(--a-muted);
+}
+.goal-off .goal-mode-ref {
+  color: var(--a-muted);
+  background: var(--a-raised);
+}
+.todo-panel .goal-row + .todo-panel-toggle,
+.todo-panel .goal-row + .todo-list {
+  border-top: 1px dashed var(--a-border-strong);
+}
+.todo-panel .goal-row + .goal-content-grid {
+  border-top: 1px dashed var(--a-border-strong);
+}
+.todo-panel .goal-content-grid {
+  display: grid;
+  position: relative;
+  min-height: 0;
+}
+.todo-panel .goal-content-grid > * {
+  grid-area: 1 / 1;
+}
+.todo-panel .goal-content-grid > [aria-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.todo-panel .goal-content-grid .goal-detail {
+  position: absolute;
+  inset: 0;
+  border-top: 0;
+}
+.phone .goal-row {
+  margin: 0 var(--space-3);
+  background: var(--a-side);
+  border: 1px solid var(--a-border);
+  border-bottom: 0;
+  border-radius: var(--radius-3) var(--radius-3) 0 0;
+}
+.phone .goal-row-head {
+  padding-left: var(--space-3);
+  gap: 0;
+  min-height: var(--row-h);
+}
+.phone .goal-row .goal-action {
+  width: var(--row-h);
+  height: var(--row-h);
+  min-height: var(--row-h);
+  padding: 0;
+}
+.phone .goal-detail {
+  max-height: var(--out-max-h);
+}

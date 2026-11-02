@@ -35,9 +35,9 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 | `preset` | `"general" \| "explore"` | 工具集预设（第 6 节）。缺省 `general`；与 `tools` 互斥 |
 | `tools` | `string[]` | 显式工具名白名单（与 `preset` 互斥）；未知名 → `invalid_input` 并列出可用名 |
 | `outputSchema` | `JsonSchema`（object） | 要求子代理按此 schema 提交结构化结果；无法编译 → `invalid_input` |
-| `timeoutMs` | `integer` | 本次调用的超时上限，正整数生效、封顶 `traits.maxTimeoutMs`（读取规则见 tool-api.md 第 1 节）。参数说明要求：省略即默认；实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才缩短 |
+| `timeoutMs` | `integer` | 可选的本次超时，正整数生效，不设固定封顶；省略时依次采用 profile、Runtime 的显式值，否则不超时（读取规则见 tool-api.md 第 1 节） |
 
-`traits`：`{ mutates: true, concurrencySafe: false, timeoutMs: 1_800_000, maxTimeoutMs: 3_600_000, maxModelChars: 30_000 }`。`traits.timeoutMs` 取 `RuntimeOptions.subagent.timeoutMs`（默认 1_800_000，上限 3_600_000，第 3 节），与 launcher 的默认超时是同一个值。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 因为并行子代理在没有工作区隔离的前提下可能同时改同一批文件（隔离明确不做，见第 16 节）。
+`traits`：`{ mutates: true, concurrencySafe: false, inputTimeoutMs: true, maxModelChars: 30_000 }`，不声明默认 `timeoutMs` 或 `maxTimeoutMs`。显式输入由执行器兜底；profile 与 Runtime 的显式值由 launcher 计时，避免较短的工具默认值截断较长的 profile 时限。优先级为显式输入 > profile > Runtime，均缺省时不启动计时器。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 因为并行子代理在没有工作区隔离的前提下可能同时改同一批文件（隔离明确不做，见第 16 节）。
 
 `permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节（`default`/`auto-edit` 下 `explore` 默认放行、`general`/`custom` 需确认）。
 
@@ -103,10 +103,9 @@ subagent?: {
   enabled?: boolean          // 默认 true；false 时 task 不注册（模型不可见）
   maxDepth?: number          // 允许的最大会话深度，默认 1（子代理默认不能再派生）
   maxConcurrent?: number     // Runtime 级并存子会话上限，默认 4（第 11 节）
-  maxStepsPerTurn?: number   // 子会话单 Turn 步数上限，默认 50
+  maxStepsPerTurn?: number   // 子会话单 Turn 步数上限；省略时不限
   maxAttempts?: number       // 缺 finish 时的总轮次上限（首轮 + 催促），默认 3
-  timeoutMs?: number         // task 默认超时：同时是 traits.timeoutMs 与 launcher
-                             // 的缺省值；默认 1_800_000，超过 3_600_000 按上限计
+  timeoutMs?: number         // 可选 task 超时；省略时不设默认超时
 }
 ```
 
@@ -132,7 +131,7 @@ launch(request, ctx)
 
 **恰好一个 `tool.completed`**：`launch` 只被 `task.execute` 调用一次、只返回一次；无论子会话内部经历了多少轮/多少工具，父日志中这次调用的事件序列与普通工具完全一致（`tool.started` → `tool.completed`；期间的子会话进度以 `tool.progress` 临时事件呈现，见第 12 节）。子会话的所有事实都写在子日志里，父日志不记录子会话内部事件。
 
-**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附「超过 Nms 未完成 + 可能已修改工作区请先检查 git status + 只读审查/调研任务也不要设短于默认值的超时」提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed`、`subagent_no_result` 一样附子会话已有的产出（`partialOutputOf`）和 `statsOf`（子会话路径、已完成步数）：已完成工具调用的清单（最近 15 条：工具名、参数摘要、状态、结果首行至多 120 字）加最后一段助手文本；`task` 工具把它以「子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）」交给模型。超时常落在写报告的最后一步，那一步的文字不会落盘，前面的调研靠这份清单留给父模型。父会话中断时执行器按既有规则把整个调用归一为 `cancelled`（Turn 随之结束），产出只留在子会话日志里，不进入父模型的上下文。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
+**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附显式时限及检查工作区改动的提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed`、`subagent_no_result` 一样附子会话已有的产出（`partialOutputOf`）和 `statsOf`（子会话路径、已完成步数）：已完成工具调用的清单（最近 15 条：工具名、参数摘要、状态、结果首行至多 120 字）加最后一段助手文本；`task` 工具把它以「子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）」交给模型。超时常落在写报告的最后一步，那一步的文字不会落盘，前面的调研靠这份清单留给父模型。父会话中断时执行器按既有规则把整个调用归一为 `cancelled`（Turn 随之结束），产出只留在子会话日志里，不进入父模型的上下文。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
 
 **重复调用保护**（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）：`turnConfig` 原样传给子 Turn（只额外压 `maxSteps`），所以 `turn.loopGuard` 在子会话同样生效。子模型在自己的 Turn 里连续重复同一调用到 `stopAt` 时，子 Turn 以 `error(code = "loop_detected")` 收束，按上面的规则映射为 `subagent_turn_failed`（message 为「子会话 Turn 以 error 结束」），父模型拿到普通错误结果、附已有的产出清单。触发第 `warnAt` 次的说明由子会话的 Builder 用同一份实现重建，因此子日志里同样没有额外事件。
 
@@ -331,9 +330,9 @@ ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户�
 
 每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、逐项 `session/set_config_option`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。`configOptions` 的键和值是不透明字符串；对方拒绝某项时返回 `external_agent_config_rejected` 并指出该 id。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻、不复用会话。
 
-超时统一由 `task` 执行器控制（默认 1_800_000ms，超时触发 `ctx.signal`）；connector 不另设隐式默认超时。只有 `request.timeoutMs` 显式传入时，connector 才设置对应计时器。
+外部 `task` 无默认超时；显式输入由执行器和 connector 计时，Runtime 显式值由 connector 计时。外部调用不使用内置 profile。connector 不另设隐式默认超时，已有可选 `request.timeoutMs` 设置对应计时器。
 
-`timeoutMs` 省略时使用默认 30 分钟；工具参数说明要求实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才主动缩短（同一条说明覆盖内置子代理与外部 agent 两条路径）。默认值 2026-11-02 从 10 分钟改为 30 分钟：本机日志里 122 次 task 有 24 次超时，未超时且有时长记录的 95 次里 18 次超过 10 分钟、没有超过 60 分钟的。connector 的计时器或执行器的 TimeoutError 信号导致超时时，失败信息附最近至多 5 条进度标题，并提示「它可能已修改工作区文件，请先检查 git status」。标题去控制字符、压成单行并截断至 300 字符，名称至 100 字符，整条超时说明不超过 2048 字符。
+显式超时时，connector 的计时器或执行器的 TimeoutError 信号导致超时时，失败信息附最近至多 5 条进度标题，并提示「它可能已修改工作区文件，请先检查 git status」。标题去控制字符、压成单行并截断至 300 字符，名称至 100 字符，整条超时说明不超过 2048 字符。
 
 仅带非空 `title` 的 `tool_call` / `tool_call_update` 输出进度，不用 `status` 或 `kind` 兜底；同一调用的相同标题去重。`failed` 单独输出一次「<名称>：<标题>（失败）」，没有新标题时使用该调用先前记录的标题；没有任何标题的失败更新也不输出。原始更新仍完整进入审计日志。
 
@@ -359,7 +358,7 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 
 声明为 `{description, model?, effort?, tools?, timeoutMs?, enabled}`，由 config 层解析，launcher 使用解析结果；Agent Loop 不认识档位。default 模型即 modelRoles.task，不迁移数据，不能删或停用。其他档位模型留空跟随当前会话；effort 留空继承父会话，再以 clampReasoningEffort 就近降档。实际模型和强度记 session.created，并由 task.output.model / reasoningEffort 供客户端呈现（后者可选，旧输出兼容）。运行中以既有 tool.progress 传递模型和强度。
 
-explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 timeoutMs 是默认值，请求可覆盖且封顶 3600 秒。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
+explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 `timeoutMs` 是可选默认值，显式请求可覆盖，不封顶；profile 配置不再有 3600 秒上限。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
 
 选择表由共享 subagentSelectionTable 生成，何时用后追加模型、强度和只读标记；外部标记账号费用。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
 

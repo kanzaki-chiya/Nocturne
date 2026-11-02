@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import {
   goalStatusLines,
+  visibleGoal,
   parseWorkModeSlash,
   pendingBackgroundSubagents,
   type ExternalAgentOverview,
@@ -19,6 +20,7 @@ import { PhoneComposer } from "./PhoneComposer";
 import { SessionHeaderTools, sessionInputHistory } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { Button } from "../ui";
+import { GoalRow, useGoalExpansion } from "../GoalRow";
 import {
   submitAccepted,
   type PhoneCreateOptions,
@@ -81,6 +83,7 @@ export function SessionScreen({
   onChanged: () => void;
 }) {
   const { session, view } = entry;
+  const shownGoal = visibleGoal(view.goal);
   const { grants } = useSessionGrants(session, entry.client);
   // 查询函数按会话稳定：圆环的刷新边界由 replaying/key 决定，不因父组件重绘重建。
   const loadContext = useCallback(() => session.describeContext(), [session]);
@@ -98,6 +101,7 @@ export function SessionScreen({
   // 远程不开放 subagent.list：运行中的后台子代理从视图推导（ADR-0073 §6）
   const backgrounds = useMemo(() => pendingBackgroundSubagents(view.entries), [view.entries]);
   const [busy, setBusy] = useState(false);
+  const [goalExpanded, setGoalExpanded] = useGoalExpansion(shownGoal);
   const [dismissed, setDismissed] = useState("");
   // 分叉后的原消息只填一次：取用后清掉，切走再回来或重新打开都不再填
   const [fill, setFill] = useState<{ text: string; seq: number } | undefined>(() => {
@@ -202,6 +206,10 @@ export function SessionScreen({
     const work = parseWorkModeSlash(line);
     if (work?.kind === "action") {
       if (work.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
+      if (work.action === "goal-cancel") {
+        await session.cancelGoal();
+        return true;
+      }
       if (work.action === "goal-stop" || work.action === "goal-resume") {
         if (view.goal === undefined) throw new Error("没有目标");
         if (work.action === "goal-stop") await session.stopGoal();
@@ -348,6 +356,19 @@ export function SessionScreen({
             </div>
           ))}
         </div>
+      )}
+      {shownGoal && (
+        <GoalRow
+          goal={shownGoal}
+          expanded={goalExpanded}
+          onExpand={setGoalExpanded}
+          onError={(error) => {
+            onError(errorText(error));
+          }}
+          onStopGoal={() => session.stopGoal()}
+          onResumeGoal={() => session.resumeGoal()}
+          onCancelGoal={() => session.cancelGoal()}
+        />
       )}
       <PhoneComposer
         key={session.id}

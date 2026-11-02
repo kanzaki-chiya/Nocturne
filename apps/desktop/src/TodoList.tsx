@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { TodoItem } from "@nocturne/core/protocol";
+import { visibleGoal, type GoalState } from "@nocturne/core/protocol";
+import { GoalDetail, GoalRow, useGoalExpansion, type GoalActions } from "./GoalRow";
 import type { PrefsStore } from "./prefs";
 import "./todos.css";
 
@@ -54,38 +56,77 @@ export function TodoList({ items }: { items: readonly TodoItem[] }) {
 export function TodoPanel({
   items,
   prefs,
+  goal,
+  goalActions,
+  onGoalError = () => undefined,
 }: {
   items: readonly TodoItem[];
   prefs?: PrefsStore | undefined;
+  goal?: GoalState | undefined;
+  goalActions?: GoalActions | undefined;
+  onGoalError?: ((error: unknown) => void) | undefined;
 }) {
   const [collapsed, setCollapsed] = useState(() => prefs?.get().todosCollapsed ?? false);
+  const shownGoal = visibleGoal(goal);
+  const [goalExpanded, setGoalExpanded] = useGoalExpansion(shownGoal);
   const { done, complete } = todoSummary(items);
   const current = items.find((item) => item.status === "in_progress");
-  if (items.length === 0) return null;
+  if (items.length === 0 && shownGoal === undefined) return null;
   return (
     <section className="todo-panel" aria-label="当前任务清单">
-      {!collapsed && <TodoList items={items} />}
-      <button
-        type="button"
-        className="todo-panel-toggle"
-        aria-expanded={!collapsed}
-        onClick={() => {
-          setCollapsed(!collapsed);
-          prefs?.update({ todosCollapsed: !collapsed ? true : undefined });
-        }}
-      >
-        <span className={`fold-arrow${collapsed ? "" : " up"}`} aria-hidden="true">
-          ▶
-        </span>
-        <span aria-hidden="true">✓</span>
-        <span>
-          {done}/{items.length}
-        </span>
-        <TodoProgress items={items} />
-        <span className={`todo-current${complete ? " complete" : ""}`}>
-          {complete ? "全部完成" : current ? `正在：${current.text}` : "任务清单"}
-        </span>
-      </button>
+      {shownGoal && goalActions && (
+        <GoalRow
+          goal={shownGoal}
+          expanded={goalExpanded}
+          onExpand={setGoalExpanded}
+          onError={onGoalError}
+          detailInRow={items.length === 0 || collapsed}
+          {...goalActions}
+        />
+      )}
+      {items.length > 0 &&
+        !collapsed &&
+        (goalExpanded && shownGoal ? (
+          <div className="goal-content-grid">
+            <div aria-hidden="true">
+              <TodoList items={items} />
+            </div>
+            <GoalDetail goal={shownGoal} />
+          </div>
+        ) : (
+          <TodoList items={items} />
+        ))}
+      {items.length > 0 && (
+        <button
+          type="button"
+          className="todo-panel-toggle"
+          aria-expanded={!collapsed}
+          onClick={() => {
+            if (goalExpanded) {
+              setGoalExpanded(false);
+              if (collapsed) {
+                setCollapsed(false);
+                prefs?.update({ todosCollapsed: undefined });
+              }
+              return;
+            }
+            setCollapsed(!collapsed);
+            prefs?.update({ todosCollapsed: !collapsed ? true : undefined });
+          }}
+        >
+          <span className={`fold-arrow${collapsed ? "" : " up"}`} aria-hidden="true">
+            ▶
+          </span>
+          <span aria-hidden="true">✓</span>
+          <span>
+            {done}/{items.length}
+          </span>
+          <TodoProgress items={items} />
+          <span className={`todo-current${complete ? " complete" : ""}`}>
+            {complete ? "全部完成" : current ? `正在：${current.text}` : "任务清单"}
+          </span>
+        </button>
+      )}
     </section>
   );
 }

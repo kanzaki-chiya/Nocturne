@@ -611,7 +611,7 @@ describe("执行器超时", () => {
     expect(errorPayload(h).code).toBe("timeout");
   });
 
-  it("task：输入 timeoutMs 超过 maxTimeoutMs 时封顶后转发给 launcher", async () => {
+  it("task：输入 timeoutMs 不封顶，原样转发给 launcher", async () => {
     const h = await makeHarness(tmpWorkspace(), allowAll);
     let forwarded: number | undefined;
     const launcher: SubagentLauncher = {
@@ -629,7 +629,35 @@ describe("执行器超时", () => {
       call("task", { task: "x", timeoutMs: 9_000_000 }),
       h.scope,
     );
-    expect(forwarded).toBe(3_600_000);
+    expect(forwarded).toBe(9_000_000);
+  });
+  it("task 省略超时没有默认计时，内置与外部请求都保持未指定", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const timeouts: (number | undefined)[] = [];
+    const launcher: SubagentLauncher = {
+      launch(request) {
+        timeouts.push(request.timeoutMs);
+        return Promise.resolve({ status: "error", error: { code: "x", message: "x" } });
+      },
+    };
+    const task = createTaskTool(launcher, {
+      agents: [{ name: "offline", description: "x" }],
+      run(request) {
+        timeouts.push(request.timeoutMs);
+        return Promise.resolve({
+          status: "error",
+          modelContent: "x",
+          error: { code: "x", message: "x" },
+        });
+      },
+    });
+    expect(task.traits.timeoutMs).toBeUndefined();
+    const registry = createToolRegistry();
+    registry.register(task);
+    const executor = createToolExecutor(registry);
+    await executor.execute(call("task", { task: "x" }), h.scope);
+    await executor.execute(call("task", { task: "x", agent: "offline" }), h.scope);
+    expect(timeouts).toEqual([undefined, undefined]);
   });
 });
 

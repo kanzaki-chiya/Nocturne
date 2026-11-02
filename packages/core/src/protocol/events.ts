@@ -59,7 +59,7 @@ export interface SessionConfigChangedPayload {
    */
   shell?: { kind: string; path: string } | undefined;
   /** 目标模式（ADR-0076 §2、§4）：每次写完整对象；旧版本忽略，不提升日志版本。 */
-  goal?: GoalConfig | undefined;
+  goal?: GoalConfig | null | undefined;
   /** 计划模式（ADR-0076 §2、§5）：进入时记下要恢复的预设，null 表示退出 */
   plan?: PlanConfig | null | undefined;
   /** MCP 环境可用性变化（ADR-0071）；旧版本忽略，不提升日志版本。 */

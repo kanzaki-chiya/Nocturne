@@ -234,6 +234,7 @@ export const REMOTE_METHODS = [
   "session.resumeInputs",
   // ADR-0076 §7：执行方式的会话内操作
   "session.stopGoal",
+  "session.cancelGoal",
   "session.resumeGoal",
   "session.approvePlan",
   "session.cancelPlan",
@@ -2113,6 +2114,11 @@ class Connection implements HubPeer {
       "session.stopGoal": async (p) => {
         const { session } = this.session(p);
         await this.hub.operate(session, () => session.stopGoal());
+        return null;
+      },
+      "session.cancelGoal": async (p) => {
+        const { session } = this.session(p);
+        await this.hub.operate(session, () => session.cancelGoal());
         return null;
       },
       "session.resumeGoal": async (p) => {

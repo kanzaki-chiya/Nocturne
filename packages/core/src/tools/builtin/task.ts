@@ -33,13 +33,9 @@ interface TaskInput {
   tools?: string[];
   /** 要求子代理按此 schema 提交结构化结果 */
   outputSchema?: JsonSchema;
-  /** 本次调用的超时上限（毫秒），封顶 traits.maxTimeoutMs */
+  /** 显式指定的本次调用超时（毫秒） */
   timeoutMs?: number;
 }
-
-/** task 默认/上限超时（subagent.md 第 1 节）；默认值可被 RuntimeOptions.subagent.timeoutMs 覆盖 */
-const TASK_DEFAULT_TIMEOUT_MS = 1_800_000;
-const TASK_MAX_TIMEOUT_MS = 3_600_000;
 
 const schemas = createSchemaCompiler({ strict: false });
 
@@ -74,7 +70,7 @@ export type BackgroundAdmit = (input: {
 export function createTaskTool(
   launcher?: SubagentLauncher,
   externalAgents?: ExternalTaskRunner,
-  defaultTimeoutMs: number = TASK_DEFAULT_TIMEOUT_MS,
+  defaultTimeoutMs?: number,
   profiles: readonly (SubagentProfileConfig & { name: string })[] = [],
   defaultModel?: string,
   /** ADR-0073：宿主开启且在顶层会话时由 core/index 注入准入判断；缺省时 schema 不出现 background */
@@ -134,9 +130,6 @@ export function createTaskTool(
     modelContent: message,
     error: { code: "invalid_input", message },
   });
-  /** 实际生效的默认超时（装配可经 RuntimeOptions.subagent.timeoutMs 覆盖），不超过上限 */
-  const effectiveDefaultTimeoutMs = Math.min(defaultTimeoutMs, TASK_MAX_TIMEOUT_MS);
-
   return {
     name: "task",
     description:
@@ -209,7 +202,7 @@ export function createTaskTool(
         timeoutMs: {
           type: "integer",
           minimum: 1,
-          description: `本次调用超时上限（毫秒）；省略即默认 ${effectiveDefaultTimeoutMs}；实现、修改代码、审查、调研类任务都不要设短于默认值的超时，只有确定很快的查询才缩短；上限 ${TASK_MAX_TIMEOUT_MS}。`,
+          description: "本次调用超时（毫秒）；省略且档位或运行时未显式设置时不设超时，不封顶。",
         },
       },
       additionalProperties: false,
@@ -219,11 +212,7 @@ export function createTaskTool(
     traits: {
       mutates: true,
       concurrencySafe: false,
-      timeoutMs: Math.max(
-        effectiveDefaultTimeoutMs,
-        ...profiles.map((profile) => profile.timeoutMs ?? effectiveDefaultTimeoutMs),
-      ),
-      maxTimeoutMs: TASK_MAX_TIMEOUT_MS,
+      inputTimeoutMs: true,
       maxModelChars: 30_000,
     },
     validateInput,
@@ -243,17 +232,16 @@ export function createTaskTool(
     async execute(input: TaskInput, ctx: ToolContext): Promise<ToolResult> {
       const invalidReason = validateInput(input);
       if (invalidReason !== undefined) return invalid(invalidReason);
-      // 输入的超时上限封顶 maxTimeoutMs 后再交给下层计时器，使
-      // launcher/connector 自己的计时器与执行器的兜底一致（都先触发于生效值）
-      const timeoutMs =
-        input.timeoutMs === undefined ? undefined : Math.min(input.timeoutMs, TASK_MAX_TIMEOUT_MS);
+      const timeoutMs = input.timeoutMs;
       const agent = selectedAgent(input);
       if (agent !== undefined && externalAgents !== undefined) {
         return externalAgents.run(
           {
             agent: agent.name,
             task: input.task,
-            timeoutMs: timeoutMs ?? effectiveDefaultTimeoutMs,
+            ...((timeoutMs ?? defaultTimeoutMs) !== undefined
+              ? { timeoutMs: timeoutMs ?? defaultTimeoutMs }
+              : {}),
           },
           ctx,
         );

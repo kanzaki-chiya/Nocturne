@@ -44,16 +44,16 @@ export function isWorkModeName(value: unknown): value is WorkModeName {
 export const GOAL_STATUSES = ["active", "met", "blocked", "limit", "stopped"] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 
-/** 默认上限（ADR-0076 §4.4） */
-export const GOAL_MAX_ROUNDS = 10;
-export const GOAL_MAX_MINUTES = 60;
+/** 持久化英文原因；展示时由 goalReasonText 翻译。 */
+export const GOAL_NO_PROGRESS_REASON =
+  "No progress: three consecutive goal checks completed without any tool calls. Resume when you can take action.";
 
 /** `session.config_changed.goal`：每次都写完整对象 */
 export interface GoalConfig {
   objective: string;
   status: GoalStatus;
-  maxMinutes: number;
-  maxRounds: number;
+  maxMinutes?: number | undefined;
+  maxRounds?: number | undefined;
   /** blocked 的原因；stopped 的来源（"user" | "interrupted" | "rewound"） */
   reason?: string | undefined;
 }
@@ -64,8 +64,12 @@ export interface GoalState extends GoalConfig {
   since: number;
   /** 自 since 起写入的核对说明条数 */
   rounds: number;
-  /** 自 since 起已结束 Turn 的运行时长之和（毫秒） */
+  /** 同一目标累计的 Turn 运行时长（毫秒），继续时保留 */
   activeMs: number;
+  /** 连续无工具调用的核对轮数，从持久消息折叠，继续时重置 */
+  noProgressRounds?: number | undefined;
+  checking?: boolean | undefined;
+  checkHadTools?: boolean | undefined;
   /** 目标为 active 时进行中 Turn 的计时起点（墙钟 ISO） */
   turnStartedAt?: string | undefined;
 }
@@ -86,12 +90,14 @@ export function reduceGoal(
     case "session.config_changed": {
       const next = event.payload.goal;
       if (next === undefined) return goal;
+      if (next === null) return undefined;
       if (next.status === "active")
         return {
           ...next,
           since: event.seq,
           rounds: 0,
-          activeMs: 0,
+          activeMs: goal && goal.status !== "active" ? goal.activeMs : 0,
+          noProgressRounds: 0,
           ...(turnOpen ? { turnStartedAt: event.time } : {}),
         };
       const running = goal?.turnStartedAt;
@@ -99,6 +105,7 @@ export function reduceGoal(
         ...next,
         since: goal?.since ?? event.seq,
         rounds: goal?.rounds ?? 0,
+        noProgressRounds: goal?.noProgressRounds ?? 0,
         activeMs: (goal?.activeMs ?? 0) + (running ? elapsedSince(running, event.time) : 0),
       };
     }
@@ -109,11 +116,22 @@ export function reduceGoal(
       const { turnStartedAt, ...rest } = goal;
       return { ...rest, activeMs: goal.activeMs + elapsedSince(turnStartedAt, event.time) };
     }
+    case "message.assistant": {
+      if (goal?.status !== "active") return goal;
+      if (event.payload.toolCalls.length > 0)
+        return { ...goal, noProgressRounds: 0, checkHadTools: true };
+      if (!goal.checking || event.payload.finishReason !== "stop") return goal;
+      return {
+        ...goal,
+        checking: false,
+        noProgressRounds: goal.checkHadTools ? 0 : (goal.noProgressRounds ?? 0) + 1,
+      };
+    }
     case "message.user":
       return goal?.status === "active" &&
         event.payload.steer === true &&
         event.payload.workMode?.name === "goal"
-        ? { ...goal, rounds: goal.rounds + 1 }
+        ? { ...goal, rounds: goal.rounds + 1, checking: true, checkHadTools: false }
         : goal;
     default:
       return goal;
@@ -126,24 +144,41 @@ export function goalElapsedMs(goal: GoalState, nowMs: number): number {
   return goal.activeMs + (running ? Math.max(0, nowMs - Date.parse(running)) : 0);
 }
 
+export function formatGoalDuration(ms: number): string {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours > 0 ? `${hours}小时` : ""}${hours > 0 || minutes > 0 ? `${minutes}分` : ""}${seconds % 60}秒`;
+}
+
+export function visibleGoal(goal: GoalState | undefined): GoalState | undefined {
+  return goal?.status === "met" || (goal?.status === "stopped" && goal.reason === "rewound")
+    ? undefined
+    : goal;
+}
+
+export function goalReasonText(reason: string): string {
+  return reason === GOAL_NO_PROGRESS_REASON ? "连续三轮核对没有调用任何工具，目标已受阻" : reason;
+}
+
 const GOAL_STATUS_TEXT: Record<GoalStatus, string> = {
   active: "进行中",
   met: "已完成",
   blocked: "受阻",
-  limit: "已达上限",
+  limit: "已停止",
   stopped: "已停止",
 };
 
 /** `/goal` 无参数时显示的行：目标、状态、已用轮数与时长 */
 export function goalStatusLines(goal: GoalState | undefined, nowMs: number): string[] {
   if (goal === undefined) return ["没有目标"];
-  const minutes = Math.floor(goalElapsedMs(goal, nowMs) / 60_000);
-  const reason = goal.status === "blocked" && goal.reason ? `（${goal.reason}）` : "";
+  const reason =
+    goal.status === "blocked" && goal.reason ? `（${goalReasonText(goal.reason)}）` : "";
   return [
     `目标：${goal.objective}`,
     `状态：${GOAL_STATUS_TEXT[goal.status]}${reason}`,
-    `轮数：${goal.rounds}/${goal.maxRounds}`,
-    `时长：${minutes}/${goal.maxMinutes} 分钟`,
+    `轮数：${goal.rounds}`,
+    `时长：${formatGoalDuration(goalElapsedMs(goal, nowMs))}`,
   ];
 }
 
@@ -197,7 +232,7 @@ export function workModeOrigins(events: readonly DurableEvent[]): {
 
 /** 不开新任务的子命令（ADR-0076 §7） */
 export type WorkModeAction =
-  "goal-status" | "goal-stop" | "goal-resume" | "plan-approve" | "plan-cancel";
+  "goal-status" | "goal-stop" | "goal-resume" | "goal-cancel" | "plan-approve" | "plan-cancel";
 
 /** 斜杠解析结果：带任务的提交、整行只是命令名时的用法提示，或会话操作 */
 export type WorkModeSlash =
@@ -214,7 +249,7 @@ const USAGE: Record<WorkModeName, string> = {
 
 /** 子命令：整行恰好是命令名（+ 一个单词）时才算，其余文字都当任务 */
 const ACTIONS: Partial<Record<WorkModeName, Record<string, WorkModeAction>>> = {
-  goal: { "": "goal-status", stop: "goal-stop", resume: "goal-resume" },
+  goal: { "": "goal-status", stop: "goal-stop", resume: "goal-resume", cancel: "goal-cancel" },
   plan: { approve: "plan-approve", cancel: "plan-cancel" },
 };
 

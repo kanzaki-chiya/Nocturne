@@ -682,6 +682,7 @@ export interface RpcMethods {
   "session.resumeInputs": { params: SessionParams; result: null };
   /** 停止目标（ADR-0076 §4.5）；没有目标时 invalid_command */
   "session.stopGoal": { params: SessionParams; result: null };
+  "session.cancelGoal": { params: SessionParams; result: null };
   /** 继续目标（ADR-0076 §4.5）：空闲时开新 Turn，请求挂到该 Turn 结束 */
   "session.resumeGoal": { params: SessionParams; result: null };
   /** 批准计划（ADR-0076 §5）：恢复预设并开新 Turn，请求挂到该 Turn 结束 */
@@ -910,6 +911,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.cancelInput": true,
   "session.resumeInputs": true,
   "session.stopGoal": true,
+  "session.cancelGoal": true,
   "session.resumeGoal": true,
   "session.approvePlan": true,
   "session.cancelPlan": true,

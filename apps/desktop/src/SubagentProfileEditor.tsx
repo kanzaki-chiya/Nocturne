@@ -175,9 +175,7 @@ export function SubagentProfileEditor({
             aria-label="默认超时"
             type="number"
             min={1}
-            max={3600}
             value={draft.timeoutMs === undefined ? "" : draft.timeoutMs / 1000}
-            placeholder="1800"
             disabled={isDefault || readonly}
             onChange={(event) => {
               set({

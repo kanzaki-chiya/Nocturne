@@ -104,14 +104,16 @@ const EXECUTOR_TIMEOUT_GRACE_MS = 1_000;
  * 它们的超时由工具自己的计时器实现，执行器只留兜底。
  */
 function timeoutMsOverrideOf(tool: ToolDefinition, input: unknown): number | undefined {
-  if (tool.traits.maxTimeoutMs === undefined) return undefined;
+  if (tool.traits.maxTimeoutMs === undefined && !tool.traits.inputTimeoutMs) return undefined;
   const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties;
   if (properties?.timeoutMs === undefined) return undefined;
   const requested = (input as { timeoutMs?: unknown }).timeoutMs;
   if (typeof requested !== "number" || !Number.isInteger(requested) || requested <= 0) {
     return undefined;
   }
-  return Math.min(requested, tool.traits.maxTimeoutMs);
+  return tool.traits.maxTimeoutMs === undefined
+    ? requested
+    : Math.min(requested, tool.traits.maxTimeoutMs);
 }
 
 export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
@@ -499,8 +501,13 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       // 生效超时：可由输入覆盖时取输入值（封顶 maxTimeoutMs），否则取声明默认值；
       // 兜底计时器在生效值外加余量，让工具自带的超时先触发。
       const timeoutMs = timeoutMsOverrideOf(tool, input) ?? tool.traits.timeoutMs;
-      const timeoutSignal = AbortSignal.timeout(timeoutMs + EXECUTOR_TIMEOUT_GRACE_MS);
-      const combined = AbortSignal.any([scope.signal, timeoutSignal]);
+      const timeoutSignal =
+        timeoutMs === undefined
+          ? undefined
+          : AbortSignal.timeout(timeoutMs + EXECUTOR_TIMEOUT_GRACE_MS);
+      const combined = timeoutSignal
+        ? AbortSignal.any([scope.signal, timeoutSignal])
+        : scope.signal;
       // ADR-0032：提问通道注入（与 gate 同手法）——工具只见 askUser 能力；
       // 缺省该字段时声明 needsUser 的工具按 not_interactive 结算
       const questionBroker = scope.askUser;
@@ -572,7 +579,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         if (aborted(scope.signal)) {
           executionStatus = "cancelled";
           result = errorResult("cancelled", "调用已被中断");
-        } else if (aborted(timeoutSignal)) {
+        } else if (timeoutSignal && aborted(timeoutSignal)) {
           result = errorResult("timeout", `工具 "${tool.name}" 超过 ${timeoutMs}ms 超时`);
           executionStatus = "error";
         } else {
