@@ -5,13 +5,10 @@ import type {
   PendingInputsSnapshot,
   SkillOverview,
 } from "@nocturne/core/protocol";
-import type { ContextSummary } from "@nocturne/rpc/client";
 
 import { completeSlash, parseSlash, type ParsedSlash } from "../commands";
 import type { ChoiceControl, ComposerControls, ComposerSubmit, FileRefSource } from "../Composer";
-import { ContextPanel, percent } from "../context-panel";
 import { PendingInputs } from "../PendingInputs";
-import { useSessionRefresh } from "../use-session-refresh";
 import {
   completeFileRefs,
   fileRefDeleteRange,
@@ -19,17 +16,13 @@ import {
   type FileIndexEntry,
 } from "../file-refs";
 import {
-  ContextRing,
   IconAt,
   IconCamera,
-  IconHistory,
   IconImage,
-  IconMore,
   IconPaperclip,
   IconSend,
   IconShield,
   IconStop,
-  IconTerminal,
 } from "./icons";
 import {
   estimateSubmitBytes,
@@ -50,7 +43,7 @@ const PHONE_HINTS: Record<string, string> = {
   "/effort": "在输入框下方切换思考档位",
   "/preset": "在输入框下方切换权限预设",
   "/shell": "Shell 只能在电脑上切换",
-  "/context": "点输入框下方的上下文圆环查看占比",
+  "/context": "点右上角的上下文圆环查看占比",
   "/provider": "服务商只能在电脑上管理",
   "/agents": "子代理只能在电脑上管理",
   "/skills": "技能只能在电脑上管理",
@@ -64,14 +57,6 @@ export function phoneSlashHint(parsed: ParsedSlash | null): string | undefined {
   if (parsed?.kind === "redirect") return PHONE_HINTS[parsed.name.toLowerCase()] ?? parsed.hint;
   if (parsed?.kind === "unknown") return parsed.hint;
   return undefined;
-}
-
-export interface PhoneContextSource {
-  load: () => Promise<ContextSummary>;
-  /** 历史回放期间为 true：不按条目数刷新，结束后刷新一次 */
-  replaying?: boolean;
-  /** 变化时重新读取（持久条目数与状态） */
-  key: string;
 }
 
 export interface PhoneComposerProps {
@@ -97,22 +82,18 @@ export interface PhoneComposerProps {
   onResumePending?: (() => Promise<void>) | undefined;
   /** /compact、/mcp：返回字符串时在浮层里显示（/mcp 状态） */
   onSlash: (line: string) => Promise<string | boolean>;
-  context?: PhoneContextSource | undefined;
   grantsFooter?: ReactNode;
-  shell?: { label: string; note?: string | undefined } | undefined;
-  home?: string | null;
   /** null：本目录没有项目文件索引（普通对话、草稿），@ 引用不可用 */
   fileRefs?: FileRefSource | null;
-  /** 输入历史（「更多」里的「输入历史」） */
-  readInputHistory?: (() => Promise<string[]>) | undefined;
+  /** 从会话菜单「输入历史」选中的一条：seq 变化时填回输入框 */
+  fill?: { text: string; seq: number } | undefined;
   /** 首张图片加入时读一次，模型不支持图片时给出提示（与桌面相同） */
   getVisionHint?: (() => Promise<string | undefined>) | undefined;
   /** 测试注入：图片处理 */
   prepareImage?: (file: File) => Promise<PhoneImage>;
 }
 
-type PopoverKind =
-  "attach" | "preset" | "model" | "effort" | "context" | "more" | "output" | "history";
+type PopoverKind = "attach" | "preset" | "model" | "effort" | "output";
 
 interface PhoneAttachment {
   name: string;
@@ -139,12 +120,9 @@ export function PhoneComposer({
   onCancelPending,
   onResumePending,
   onSlash,
-  context,
   grantsFooter,
-  shell,
-  home,
   fileRefs = null,
-  readInputHistory,
+  fill,
   getVisionHint,
   prepareImage: _prepareImage = preparePhoneImage,
 }: PhoneComposerProps) {
@@ -155,8 +133,6 @@ export function PhoneComposer({
   const [hint, setHint] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const [summary, setSummary] = useState<ContextSummary>();
-  const [contextError, setContextError] = useState<string>();
   const field = useRef<HTMLTextAreaElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const triggers = useRef<Partial<Record<PopoverKind, HTMLButtonElement | null>>>({});
@@ -176,8 +152,6 @@ export function PhoneComposer({
     failed?: boolean;
   }>();
   const indexLoading = useRef<string | number | null>(null);
-  const [history, setHistory] = useState<string[]>();
-  const [historyError, setHistoryError] = useState<string>();
   useEffect(
     () => () => {
       mounted.current = false;
@@ -236,30 +210,6 @@ export function PhoneComposer({
     : undefined;
   const indexReady = fileRefs !== null && index?.key === fileRefs.key;
 
-  const contextKey = context?.key;
-  const loadContext = context?.load;
-  const contextOwner = useRef({});
-  const refreshContext = useSessionRefresh(
-    loadContext ?? contextOwner.current,
-    loadContext !== undefined && context?.replaying !== true,
-    async (isCurrent) => {
-      if (!loadContext) return;
-      await loadContext().then(
-        (result) => {
-          if (!isCurrent()) return;
-          setSummary(result);
-          setContextError(undefined);
-        },
-        (reason: unknown) => {
-          if (isCurrent()) setContextError(errorText(reason));
-        },
-      );
-    },
-  );
-  useEffect(() => {
-    void refreshContext();
-  }, [contextKey, refreshContext, context?.replaying, open === "context"]);
-
   useEffect(() => {
     const node = field.current;
     if (node === null) return;
@@ -294,6 +244,13 @@ export function PhoneComposer({
       setCaret(position);
     });
   };
+  // 只在会话菜单选中新的一条输入历史时填回（update/placeCaret 每次渲染重建，不作依赖）
+  const fillSeq = fill?.seq;
+  useEffect(() => {
+    if (fill === undefined) return;
+    update(fill.text);
+    placeCaret(fill.text.length);
+  }, [fillSeq]);
   const insertRef = () => {
     setOpen(null);
     const node = field.current;
@@ -356,20 +313,6 @@ export function PhoneComposer({
     attachments.reduce((sum, file) => sum + file.data.byteLength, 0) >
       Math.floor((SUBMIT_MESSAGE_LIMIT * 3) / 4) - 1024;
 
-  const openHistory = () => {
-    setOpen("history");
-    setHistory(undefined);
-    setHistoryError(undefined);
-    if (readInputHistory === undefined) return;
-    void readInputHistory().then(
-      (rows) => {
-        if (mounted.current) setHistory([...new Set(rows.slice(-200).reverse())]);
-      },
-      (reason: unknown) => {
-        if (mounted.current) setHistoryError(errorText(reason));
-      },
-    );
-  };
   const toggle = (kind: PopoverKind) => {
     setOpen((current) => (current === kind ? null : kind));
     setError(undefined);
@@ -434,10 +377,6 @@ export function PhoneComposer({
     });
   };
 
-  const used =
-    summary === undefined
-      ? null
-      : percent(summary.report.estimatedTokens, summary.report.budgetTokens);
   const tool = (
     kind: PopoverKind,
     label: string,
@@ -756,13 +695,6 @@ export function PhoneComposer({
           </span>,
           { disabled: busyDisabled(controls?.effort) },
         )}
-        {context !== undefined &&
-          tool(
-            "context",
-            `上下文用量${used === null ? "" : ` ${used}%`}`,
-            <ContextRing percent={used} />,
-          )}
-        {variant === "session" && tool("more", "更多", <IconMore />)}
       </div>
       {(error ?? controls?.error) !== undefined && (
         <div className="phone-composer-error" role="alert">
@@ -820,64 +752,6 @@ export function PhoneComposer({
       {open === "preset" && controls !== undefined && choicePopover("preset", controls.preset)}
       {open === "model" && controls !== undefined && choicePopover("model", controls.model)}
       {open === "effort" && controls !== undefined && choicePopover("effort", controls.effort)}
-      {open === "context" && (
-        <Popover anchor={triggers.current.context ?? null} label="上下文用量" onClose={close} wide>
-          <div className="phone-popover-h">上下文用量</div>
-          {summary !== undefined ? (
-            <div className="phone-context">
-              <ContextPanel context={summary} home={home} />
-            </div>
-          ) : (
-            <p className="phone-popover-note" role={contextError ? "alert" : "status"}>
-              {contextError ?? "正在读取…"}
-            </p>
-          )}
-        </Popover>
-      )}
-      {open === "more" && (
-        <Popover anchor={triggers.current.more ?? null} label="更多" onClose={close}>
-          <div className="phone-popover-h">更多</div>
-          {readInputHistory !== undefined && (
-            <PopoverOption icon={<IconHistory />} label="输入历史" onSelect={openHistory} />
-          )}
-          <PopoverOption
-            icon={<IconTerminal />}
-            label={
-              <>
-                Shell<span className="muted-value">{shell?.label ?? "—"}</span>
-              </>
-            }
-            detail={shell?.note}
-          />
-        </Popover>
-      )}
-      {open === "history" && (
-        <Popover anchor={triggers.current.more ?? null} label="输入历史" onClose={close} wide>
-          <div className="phone-popover-h">输入历史</div>
-          {history === undefined ? (
-            <p className="phone-popover-note" role={historyError ? "alert" : "status"}>
-              {historyError ?? "正在读取…"}
-            </p>
-          ) : history.length === 0 ? (
-            <p className="phone-popover-note">还没有输入历史</p>
-          ) : (
-            history.map((row) => (
-              <button
-                type="button"
-                key={row}
-                className="phone-history-row"
-                onClick={() => {
-                  setOpen(null);
-                  update(row);
-                  placeCaret(row.length);
-                }}
-              >
-                {row}
-              </button>
-            ))
-          )}
-        </Popover>
-      )}
       {open === "output" && output !== undefined && (
         <Popover anchor={card.current} label={output.title} onClose={close} wide>
           <div className="phone-popover-h">{output.title}</div>

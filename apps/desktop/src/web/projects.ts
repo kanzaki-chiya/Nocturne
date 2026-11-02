@@ -34,6 +34,15 @@ export function plainWorkspaceOf(sessionsDir: string | undefined): string | unde
 
 const EMPTY_PREFS = { pinned: [], projects: [], hidden: [], projectSort: "activity" } as const;
 
+const PLAIN_NAME = "普通对话";
+
+/** 目录的显示名：普通对话工作区为「普通对话」，其余取末段（首页、项目页标题与会话页顶栏共用） */
+export function phoneProjectName(path: string, plainWorkspace: string | undefined): string {
+  return plainWorkspace !== undefined && projectKey(path) === projectKey(plainWorkspace)
+    ? PLAIN_NAME
+    : projectName(path);
+}
+
 function latestOf(sessions: SessionSummary[], key: string): number | undefined {
   let latest: number | undefined;
   for (const s of sessions)
@@ -59,7 +68,7 @@ export function phoneProjects(
     const latest = latestOf(sessions, key);
     result.push({
       key,
-      name: "普通对话",
+      name: PLAIN_NAME,
       path: plainWorkspace,
       count: tree.chats.rows.length,
       plain: true,

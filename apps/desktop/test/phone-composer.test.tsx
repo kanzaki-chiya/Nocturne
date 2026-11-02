@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ComposerSubmit } from "../src/Composer";
 import type { ContextSummary } from "@nocturne/rpc/client";
 import { PhoneComposer } from "../src/web/PhoneComposer";
+import { SessionHeaderTools } from "../src/web/SessionHeaderTools";
 import {
   estimateSubmitBytes,
   IMAGE_MAX_BYTES,
@@ -45,21 +46,30 @@ const codec = (width: number, height: number, sizes: number[] = []) => {
   return { fake, encoded };
 };
 
-it("手机上下文回放时不查，完成只查一次，实时变化合并补拉", async () => {
+const headerTools = (
+  props: Partial<Parameters<typeof SessionHeaderTools>[0]> & {
+    context: Parameters<typeof SessionHeaderTools>[0]["context"];
+  },
+) => (
+  <SessionHeaderTools
+    connected
+    running={false}
+    shell={{ label: "pwsh" }}
+    onRename={vi.fn()}
+    onCompact={vi.fn()}
+    loadMcp={() => Promise.resolve("")}
+    readInputHistory={() => Promise.resolve([])}
+    onPickHistory={vi.fn()}
+    {...props}
+  />
+);
+
+it("顶栏上下文圆环回放时不查，完成只查一次，实时变化合并补拉", async () => {
   // 与桌面状态栏同一 single-flight：回放不查，结束后一次，飞行中的变化只补一次。
   const pending: ((value: ContextSummary) => void)[] = [];
   const load = vi.fn(() => new Promise<ContextSummary>((resolve) => pending.push(resolve)));
-  const ui = (replaying: boolean, key: string) => (
-    <PhoneComposer
-      variant="session"
-      controls={undefined}
-      running={false}
-      onSubmit={async () => true}
-      onInterrupt={vi.fn()}
-      onSlash={async () => false}
-      context={{ load, key, replaying }}
-    />
-  );
+  const ui = (replaying: boolean, key: string) =>
+    headerTools({ context: { load, key, replaying } });
   for (let i = 0; i < 4; i++) await act(() => root?.render(ui(true, String(i))));
   expect(load).not.toHaveBeenCalled();
   await act(() => root?.render(ui(false, "ready")));
@@ -222,6 +232,34 @@ it("图片附件随消息发出，报文超限时不发送并提示", async () =
   expect(button("发送").disabled).toBe(false);
 });
 
+it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历史交给输入框", async () => {
+  const onPickHistory = vi.fn();
+  await act(async () => {
+    root?.render(
+      headerTools({
+        context: { load: () => new Promise<ContextSummary>(() => undefined), key: "0" },
+        readInputHistory: () => Promise.resolve(["旧的一条", "最近一条", "旧的一条"]),
+        onPickHistory,
+      }),
+    );
+  });
+  expect(
+    [...container.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")),
+  ).toEqual(["上下文用量", "会话菜单"]);
+  await act(() => button("会话菜单").click());
+  const options = [...container.querySelectorAll(".phone-option")].map((o) => o.textContent);
+  expect(options).toEqual(["重命名", "压缩上下文", "MCP 状态", "输入历史", "Shellpwsh"]);
+  await act(async () => {
+    button("输入历史").click();
+    await Promise.resolve();
+  });
+  const rows = [...container.querySelectorAll(".phone-history-row")].map((r) => r.textContent);
+  expect(rows).toEqual(["旧的一条", "最近一条"]);
+  await act(() => button("最近一条").click());
+  expect(onPickHistory).toHaveBeenCalledWith("最近一条");
+  expect(container.querySelector(".phone-history-row")).toBeNull();
+});
+
 it("@ 文件引用用文件索引补全，普通对话不可用；输入历史填回输入框", async () => {
   const load = vi.fn(() =>
     Promise.resolve([
@@ -230,6 +268,7 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
       { path: "README.md", kind: "file" as const },
     ]),
   );
+  const extra: { fill?: { text: string; seq: number } } = {};
   const render = (fileRefs: { load: typeof load; key: number } | null) =>
     act(async () => {
       root?.render(
@@ -241,7 +280,7 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
           onInterrupt={vi.fn()}
           onSlash={vi.fn()}
           fileRefs={fileRefs}
-          readInputHistory={() => Promise.resolve(["旧的一条", "最近一条"])}
+          fill={extra.fill}
         />,
       );
     });
@@ -265,18 +304,17 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
   expect(container.querySelector("textarea")?.value).toBe("看 @src/main.ts ");
   expect(container.querySelector('[aria-label="文件引用补全"]')).toBeNull();
 
-  await act(() => button("更多").click());
-  await act(async () => {
-    button("输入历史").click();
-    await Promise.resolve();
-  });
-  const rows = [...container.querySelectorAll(".phone-history-row")].map((r) => r.textContent);
-  expect(rows).toEqual(["最近一条", "旧的一条"]);
-  await act(async () => {
-    button("最近一条").click();
-    await new Promise((done) => setTimeout(done, 0));
-  });
+  // 工具行不再有「更多」和上下文圆环：两者在会话页顶栏
+  expect(container.querySelector('[aria-label="更多"]')).toBeNull();
+  expect(container.querySelector('[aria-label^="上下文用量"]')).toBeNull();
+  extra.fill = { text: "最近一条", seq: 1 };
+  await render({ load, key: 1 });
+  await act(() => new Promise((done) => setTimeout(done, 0)));
   expect(container.querySelector("textarea")?.value).toBe("最近一条");
+  // 同一 seq 重渲染不覆盖用户之后的输入
+  await setText("改过了");
+  await render({ load, key: 1 });
+  expect(container.querySelector("textarea")?.value).toBe("改过了");
 });
 
 // ADR-0070 修订 2026-11-01：运行中发送一律排队，待发列表排队行提供「立即发送」转为插话

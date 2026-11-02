@@ -107,9 +107,24 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   expect(project?.textContent).toContain("work");
   await act(() => project?.click());
   expect(container.querySelector<HTMLTextAreaElement>("textarea")?.placeholder).toBe("输入消息");
+  // 项目页的新会话输入框没有上下文圆环与会话菜单
+  expect(container.querySelector(".phone-header-tools")).toBeNull();
+  expect(container.querySelector('[aria-label^="上下文用量"]')).toBeNull();
+  expect(container.querySelector('[aria-label="会话菜单"]')).toBeNull();
   const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
   expect(row?.textContent).toContain("测试会话");
   await act(() => row?.click());
+  // 会话页顶栏：返回、标题与项目名、上下文圆环、会话菜单；工具行不再有这两个入口
+  const header = container.querySelector(".phone-header");
+  expect(header?.querySelector(".phone-header-project")?.textContent).toBe("work");
+  expect(
+    [...(header?.querySelectorAll(".phone-header-tools button") ?? [])].map((b) =>
+      b.getAttribute("aria-label")?.replace(/ \d+%$/, ""),
+    ),
+  ).toEqual(["上下文用量", "会话菜单"]);
+  expect(container.querySelectorAll('[aria-label="会话菜单"]')).toHaveLength(1);
+  expect(container.querySelector('.phone-composer [aria-label="更多"]')).toBeNull();
+  expect(container.querySelector('.phone-composer [aria-label^="上下文用量"]')).toBeNull();
   const rename = vi
     .spyOn(client.runtime, "renameSession")
     .mockRejectedValueOnce(new RpcError("session_locked", "锁冲突"));
