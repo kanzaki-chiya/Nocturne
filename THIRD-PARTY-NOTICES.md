@@ -38,12 +38,13 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@lezer/highlight` | 1.2.5 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
+| `@xterm/addon-unicode11` | 0.9.0 | MIT |
 
 桌面端第 2 步复用 `marked` **18.0.7**（MIT；2026-07-21 发布，采用时已满 7 天）解析 Markdown token，由 React 元素渲染；不使用其 HTML 输出，不渲染原始 HTML。
 
 桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载，不进手机网页。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。
 
-桌面端右侧面板的终端用 xterm.js（上表 `@xterm/xterm` 与 `@xterm/addon-fit`，均为 MIT，无运行时依赖），随终端标签首次打开动态加载，不进手机网页。
+桌面端右侧面板的终端用 xterm.js（上表 `@xterm/xterm`、`@xterm/addon-fit` 与 `@xterm/addon-unicode11`，均为 MIT，无运行时依赖），随终端标签首次打开动态加载，不进手机网页。
 
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|
