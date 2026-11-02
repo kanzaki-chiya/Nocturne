@@ -1155,7 +1155,8 @@
   min-width: 0;
 }
 .sp-sub-body .conversation .conversation-scroll {
-  padding: 12px;
+  --conversation-scroll-top: 12px;
+  padding: var(--conversation-scroll-top);
 }
 
 /* 概览浮层的「子代理」分组 */

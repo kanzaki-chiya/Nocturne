@@ -2936,7 +2936,7 @@ function SessionApp({
     pending !== undefined
       ? permissionDialogRows(pending, width, permissionExpanded)
       : pendingQ !== undefined
-        ? questionDialogRows(pendingQ, questionPage.index, questionPage.confirm)
+        ? questionDialogRows(pendingQ, width, questionPage.index, questionPage.confirm)
         : 0,
   );
   const conversationHeight = budget.conversation - popupHeight;

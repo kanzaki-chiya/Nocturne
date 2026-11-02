@@ -622,7 +622,7 @@ export interface QuestionOption {
  * options 省略或为空表示自由文本题；multiSelect 为真可多选。
  */
 export interface QuestionItem {
-  /** 去掉首尾空白后非空，至多 300 字符 */
+  /** 去掉首尾空白后非空 */
   question: string;
   /** 短标签（至多 12 字符），界面显示为问题前的小标记 */
   header?: string | undefined;

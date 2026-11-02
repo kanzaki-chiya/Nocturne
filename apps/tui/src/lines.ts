@@ -66,7 +66,7 @@ function textWidth(text: string): number {
   return used;
 }
 
-function wrap(text: string, width: number, wordWrap = true): WrappedLine[] {
+export function wrap(text: string, width: number, wordWrap = true): WrappedLine[] {
   const limit = budget(width);
   const flat = stripControls(text.replace(/\r\n?/g, "\n"));
   const out: WrappedLine[] = [];

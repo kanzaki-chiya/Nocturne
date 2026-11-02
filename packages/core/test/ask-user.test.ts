@@ -194,7 +194,6 @@ describe("ask_user 输入校验（ADR-0032 §1）", () => {
     ["空数组", []],
     ["超过 4 题", [1, 2, 3, 4, 5].map((i) => ({ question: `问题${i}` }))],
     ["question 空白", [{ question: "   " }]],
-    ["question 超 300 字符", [{ question: "长".repeat(301) }]],
     ["question 含控制字符（Tab）", [{ question: "选\t哪个" }]],
     ["header 超 12 字符", [{ question: "q", header: "1234567890123" }]],
     ["header 含换行", [{ question: "q", header: "a\nb" }]],
@@ -269,7 +268,7 @@ describe("ask_user 输入校验（ADR-0032 §1）", () => {
   it("边界合法输入规范化后发出 question.requested（修整/空 options 视作省略）", async () => {
     const questions = [
       {
-        question: ` ${"边".repeat(299)} `,
+        question: ` ${"边".repeat(5000)} `,
         header: ` ${"标".repeat(12)} `,
         options: [],
       },
@@ -297,7 +296,7 @@ describe("ask_user 输入校验（ADR-0032 §1）", () => {
     expect(requested).toHaveLength(1);
     const qs = requested[0]?.type === "question.requested" ? requested[0].payload.questions : [];
     // question/header/label/description 去首尾空白；options: [] 与缺省等价
-    expect(qs[0]?.question).toBe("边".repeat(299));
+    expect(qs[0]?.question).toBe("边".repeat(5000));
     expect(qs[0]?.header).toBe("标".repeat(12));
     expect(qs[0]?.options).toBeUndefined();
     expect(qs[1]?.options?.[0]?.label).toBe("长".repeat(60));

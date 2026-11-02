@@ -16,7 +16,8 @@
   flex: none;
 }
 .conversation .conversation-scroll {
-  padding: 22px 24px 24px;
+  --conversation-scroll-top: 22px;
+  padding: var(--conversation-scroll-top) 24px 24px;
   overflow-anchor: none;
   overscroll-behavior: contain;
 }
@@ -385,7 +386,8 @@
 }
 .conversation .think.open > .think-h {
   position: sticky;
-  top: 0;
+  /* 粘性定位从滚动容器的内边距内侧算起，抵消后才贴到可视区顶边 */
+  top: calc(-1 * var(--conversation-scroll-top));
   z-index: 1;
   padding: 8px 2px 7px;
   font-size: var(--fs-2);
@@ -1125,6 +1127,11 @@
   margin: 0;
   font-size: var(--fs-3);
   font-weight: var(--fw-medium);
+  white-space: pre-wrap;
+}
+.question-dock .qtext {
+  max-height: 40vh;
+  overflow-y: auto;
 }
 .qsub {
   margin: -6px 0 0;
@@ -1326,7 +1333,8 @@
 }
 @media (max-width: 640px) {
   .conversation .conversation-scroll {
-    padding: 16px 12px;
+    --conversation-scroll-top: 16px;
+    padding: var(--conversation-scroll-top) 12px;
   }
   .conversation-requests {
     padding: 10px 12px;

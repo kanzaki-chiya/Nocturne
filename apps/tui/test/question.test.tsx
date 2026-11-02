@@ -182,6 +182,43 @@ describe("提问面板", () => {
     screen.unmount();
   });
 
+  it("长问题按宽度折行，放不下时 PgUp/PgDn 翻看，移动焦点回到选项", async () => {
+    const pending = choiceQ();
+    const question = Array.from({ length: 12 }, (_, i) => `第${i + 1}段说明文字内容`).join("");
+    pending.questions = [{ question, options: [{ label: "甲" }, { label: "乙" }] }];
+    const screen = render(
+      inEnv(
+        createElement(QuestionDialog, {
+          pending,
+          active: true,
+          onReply: vi.fn(),
+          width: 24,
+          height: 8,
+        }),
+      ),
+    );
+    await pause();
+    expect(screen.lastFrame()).toContain("甲");
+    expect(screen.lastFrame()).not.toContain("第1段");
+    screen.stdin.write("[5~");
+    await pause();
+    screen.stdin.write("[5~");
+    await pause();
+    screen.stdin.write("[5~");
+    await pause();
+    screen.stdin.write("[5~");
+    await pause();
+    expect(screen.lastFrame()).toContain("第1段");
+    expect(screen.lastFrame()).not.toContain("甲");
+    screen.stdin.write("[6~");
+    await pause();
+    expect(screen.lastFrame()).not.toContain("第1段");
+    screen.stdin.write("[B");
+    await pause();
+    expect(screen.lastFrame()).toContain("> ( ) 乙");
+    screen.unmount();
+  });
+
   it("单选：Enter 选中焦点项并进确认行，再 Enter 提交", async () => {
     const reply = vi.fn();
     const { lastFrame, stdin, unmount } = render(

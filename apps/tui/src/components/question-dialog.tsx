@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import { glyphs, useTuiEnv } from "../env.js";
 import { boxSafe, truncateLine, truncateLineHead } from "../format.js";
+import { wrap } from "../lines.js";
 import { useTheme } from "../theme.js";
 import type { PendingQuestion } from "@nocturne/core/protocol";
 import type { QuestionAnswer, QuestionReply } from "@nocturne/core";
@@ -28,12 +29,22 @@ function answerText(a: QuestionAnswer): string {
     ? "拒绝回答"
     : [...a.selected, ...(a.text ? [a.text] : [])].join("、") || "（未回答）";
 }
-export function questionDialogRows(pending: PendingQuestion, index = 0, confirm = false): number {
+/** 问题正文在弹窗内折行后的各行；wrap 已按边框和内边距留出 4 列。 */
+function questionRows(question: string, width: number): string[] {
+  return wrap(question, width).map((line) => line.text);
+}
+export function questionDialogRows(
+  pending: PendingQuestion,
+  width: number,
+  index = 0,
+  confirm = false,
+): number {
   if (confirm) return pending.questions.length + 5;
   const q = pending.questions[index];
   return (
     (q?.options?.length ?? 0) +
-    7 +
+    6 +
+    questionRows(q?.question ?? "", width).length +
     (q?.header !== undefined || pending.questions.length > 1 ? 1 : 0)
   );
 }
@@ -60,6 +71,8 @@ export function QuestionDialog({
   const [index, setIndex] = useState(0);
   const [focus, setFocus] = useState(0);
   const [confirm, setConfirm] = useState(false);
+  // 从焦点所在窗口往上翻的行数；移动焦点或切题后回到焦点
+  const [peek, setPeek] = useState(0);
   const [drafts, setDrafts] = useState<Draft[]>(() =>
     pending.questions.map((q) => ({
       selected: [],
@@ -79,6 +92,7 @@ export function QuestionDialog({
     setIndex(next);
     setConfirm(confirmation);
     setFocus(0);
+    setPeek(0);
     onPageChange?.(next, confirmation);
   };
   const advance = (): void => {
@@ -89,6 +103,12 @@ export function QuestionDialog({
       if (key.escape) {
         if (!confirm && draft?.editing) update({ editing: false });
         else onEscape?.();
+        return;
+      }
+      if (key.pageUp || key.pageDown) {
+        setPeek((p) =>
+          Math.max(0, Math.min(focusStart, p + (key.pageUp ? 1 : -1) * Math.max(1, capacity - 1))),
+        );
         return;
       }
       if (key.leftArrow || (key.tab && key.shift)) {
@@ -106,6 +126,7 @@ export function QuestionDialog({
       if (!q || !draft) return;
       if (key.upArrow || key.downArrow) {
         update({ editing: false });
+        setPeek(0);
         setFocus((f) => (f + (key.upArrow ? opts.length + 1 : 1)) % (opts.length + 2));
         return;
       }
@@ -189,7 +210,7 @@ export function QuestionDialog({
               `${q?.header ? "[" + q.header + "] " : ""}第 ${index + 1}/${pending.questions.length} 题`,
             ]
           : []),
-        q?.question ?? "",
+        ...questionRows(q?.question ?? "", width),
         ...opts.map(
           (o, i) =>
             (i === focus ? ">" : " ") +
@@ -211,14 +232,15 @@ export function QuestionDialog({
           (q?.multiSelect ? (draft?.declined ? "[x]" : "[ ]") : draft?.declined ? "(o)" : "( )") +
           " 拒绝回答",
       ];
-  const h = height ?? questionDialogRows(pending, index, confirm);
+  const h = height ?? questionDialogRows(pending, width, index, confirm);
   const bordered = h >= 3;
   const room = Math.max(0, h - (bordered ? 2 : 0));
   const titleRows = room >= 3 ? 1 : 0;
   const hintRows = room >= 3 ? 1 : 0;
   const capacity = Math.max(0, room - titleRows - hintRows);
   const focusedRow = confirm ? rows.length - 1 : rows.length - (opts.length + 2) + focus;
-  const start = Math.max(0, Math.min(rows.length - capacity, focusedRow - capacity + 1));
+  const focusStart = Math.max(0, Math.min(rows.length - capacity, focusedRow - capacity + 1));
+  const start = Math.max(0, focusStart - peek);
   const hint = confirm
     ? "Enter 提交  ←/Shift+Tab 返回  Esc 中断"
     : draft?.editing

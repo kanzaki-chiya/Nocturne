@@ -14,7 +14,6 @@ import type {
 import type { ToolDefinition } from "../types.js";
 
 const MAX_QUESTIONS = 4;
-const MAX_QUESTION_CHARS = 300;
 const MAX_HEADER_CHARS = 12;
 const MAX_LABEL_CHARS = 60;
 const MAX_DESCRIPTION_CHARS = 200;
@@ -71,9 +70,6 @@ function normalizeQuestions(raw: unknown): NormalizedInput | { error: string } {
     const question = q.question.trim();
     if (question === "") {
       return { error: `${tag}的 question 去首尾空白后不能为空` };
-    }
-    if (charLen(question) > MAX_QUESTION_CHARS) {
-      return { error: `${tag}的 question 超过 ${MAX_QUESTION_CHARS} 字符` };
     }
     if (hasForbiddenChar(question, true)) {
       return { error: `${tag}的 question 含禁止的控制字符（允许换行）` };
