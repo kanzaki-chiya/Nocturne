@@ -47,13 +47,13 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {
     name: "/goal",
     summary: "目标模式",
-    cli: "<目标> 做到核对通过为止；无参数看状态；stop|resume",
+    cli: "<目标> 做到核对通过为止；无参数看状态；/goal stop 停止；/goal resume 继续",
     task: true,
   },
   {
     name: "/plan",
     summary: "计划模式",
-    cli: "<任务> 只读出计划；approve 批准实施；cancel 放弃",
+    cli: "<任务> 只读出计划；/plan approve 批准实施；/plan cancel 放弃",
     task: true,
   },
   {
