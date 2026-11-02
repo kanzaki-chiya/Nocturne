@@ -70,6 +70,8 @@ pnpm build          # tsdown 构建 packages/core/dist
 
 全量验收要看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
 
+本地 vitest 按包限制并发（TUI 4 个 worker，core、rpc、cli、desktop、`scripts/` 6 个），开发机同时还在使用；CI 保持默认。
+
 各包与 `scripts/` 的 vitest 配置都固定 `test.env.NODE_ENV = "test"`（vitest 只在未设置时才默认取 `test`），外层环境——包括 Agent 从 `nctrn` 继承来的值——不影响测试，跑测试前不需要手动设 `NODE_ENV`。
 
 core 的默认测试经 `test/setup-offline.ts` 把全局 `fetch` 限制为只能访问本机地址，访问外网直接报错；需要网络行为的用例自行注入 fetch（如 `modelsDevFetch`）或用 `vi.stubGlobal` 桩掉。rpc 包的同名文件还把 `NOCTURNE_HOME` 指向每个测试文件独立的临时目录，测试不得读写维护者的真实数据目录。
