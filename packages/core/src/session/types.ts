@@ -145,6 +145,28 @@ export interface Session {
   close(): Promise<void>;
 }
 
+export interface SessionSearchRange {
+  /** snippet 内的 UTF-16 起止偏移，end 不包含在命中范围内 */
+  start: number;
+  end: number;
+}
+
+export interface SessionSearchResult {
+  sessionId: string;
+  /** 会话日志最后修改时间，结果按它倒序 */
+  mtimeMs: number;
+  /** 正文命中时的单行片段；只命中标题时不出现 */
+  snippet?: string | undefined;
+  /** snippet 内所有命中词的范围 */
+  ranges?: SessionSearchRange[] | undefined;
+  /** 命中的持久事件序号；只命中标题时不出现 */
+  seq?: number | undefined;
+}
+
+export interface SessionSearchOptions {
+  signal?: AbortSignal | undefined;
+}
+
 export interface SessionSummary {
   id: string;
   forkedFrom?: { sessionId: string; seq: number } | undefined;

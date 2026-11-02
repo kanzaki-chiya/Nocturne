@@ -298,6 +298,7 @@ export interface RpcRuntime {
     cwd?: string;
     includeSubagents?: boolean;
   }): Promise<RpcResult<"runtime.listSessions">>;
+  searchSessions(input: { query: string }): Promise<RpcResult<"runtime.searchSessions">>;
   usageStats(input: { days?: number }): Promise<UsageStats>;
   /**
    * createSession 可携带 cwd/workspaceRoot（ADR-0051）：单后台模式下
@@ -919,6 +920,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     runSchedule: (input) => call("schedule.runNow", input),
     scheduleHistory: (input) => call("schedule.history", input),
     listSessions: (filter) => call("runtime.listSessions", filter ?? {}),
+    searchSessions: (input) => call("runtime.searchSessions", input),
     usageStats: (input) => call("runtime.usageStats", input),
     createSession: async (createOptions) => {
       const opened = await call("runtime.createSession", createOptions);

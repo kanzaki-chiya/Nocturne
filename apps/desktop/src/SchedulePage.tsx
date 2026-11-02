@@ -266,12 +266,14 @@ const SCHED_HIST_COLUMNS: readonly {
 export function SchedulePage({
   api,
   workspaces,
+  targetId,
   readOnly = false,
   onOpenSession,
   onChanged,
 }: {
   api: SchedulePageApi | undefined;
   workspaces: readonly ScheduleWorkspaceOption[];
+  targetId?: string | undefined;
   /** 手机端：新建、编辑、删除、启停禁用，立即运行仍可用 */
   readOnly?: boolean;
   /** 返回 false 表示目标会话不存在（已删除），页面留在原处并提示 */
@@ -294,6 +296,13 @@ export function SchedulePage({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
   const filledId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (targetId !== undefined) {
+      setSelectedId(targetId);
+      setTab("settings");
+    }
+  }, [targetId]);
 
   useEffect(() => {
     if (api === undefined) return;

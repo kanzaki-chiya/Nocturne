@@ -56,6 +56,7 @@ const STILL_LOCAL = [
   "runtime.listReviewerProviders",
   "runtime.listReviewerModels",
   "runtime.listReviewerSamples",
+  "runtime.searchSessions",
   "runtime.defaultReviewer",
   "session.setShell",
   "runtime.readFile",

@@ -34,6 +34,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listSessions` | `{ cwd?, includeSubagents? }` → `(SessionSummary & { openHere?: boolean })[]`；`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
+| `searchSessions` | `{ query: string }` → `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串，同一连接发起新查询或断线时立即中止上一次未完成的扫描（被取代的旧查询返回 `[]`） |
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
@@ -415,7 +416,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `grants.workspaces`、`grants.list`、`grants.revoke`、`grants.revokeAll`、`session.listGrants`、`session.revokeGrant`、`session.revokeAllGrants` | 允许：查看和收紧授权，不允许新增项目授权 |
 | `grants.setTrusted`、`grants.describeProject` | 拒绝且不调用 Core；信任会放宽，项目命令无需发送手机 |
 | `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
-| `runtime.readFile` | 拒绝：只服务本机右侧面板（ADR-0060），手机没有面板，也不扩大远程可读的文件范围 |
+| `runtime.readFile`、`runtime.searchSessions` | 拒绝：`readFile` 只服务本机右侧面板（ADR-0060），`searchSessions` 只服务桌面端跨会话搜索（ADR-0077），手机没有这两个入口 |
 | 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：

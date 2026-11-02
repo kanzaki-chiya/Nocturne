@@ -131,6 +131,9 @@ describe("runtime.* 方法映射", () => {
     expect(await session.submit({ text: "hi" })).toBe("done");
     const listed = await h.client.runtime.listSessions();
     expect(listed.map((s) => s.id)).toEqual([session.id]);
+    expect(await h.client.runtime.searchSessions({ query: "hello" })).toEqual([
+      expect.objectContaining({ sessionId: session.id }),
+    ]);
     expect(await h.client.runtime.listSessions({ cwd: path.join(h.ws, "elsewhere") })).toEqual([]);
 
     // 同一连接里已打开的会话不能再 resume
@@ -150,6 +153,45 @@ describe("runtime.* 方法映射", () => {
 
     // 已关闭的会话上的调用报 unknown_session
     await expect(session.state()).rejects.toMatchObject({ code: "unknown_session" });
+    h.client.close();
+    await h.served;
+  });
+
+  it("searchSessions 校验 query，并由同一连接的新查询中止旧查询", async () => {
+    const h = await connect();
+    await expect(h.client.call("runtime.searchSessions", {} as never)).rejects.toMatchObject({
+      rpcCode: -32602,
+    });
+    await expect(
+      h.client.call("runtime.searchSessions", { query: 1 as never }),
+    ).rejects.toMatchObject({ rpcCode: -32602 });
+
+    const runtime = h.runtimes[0];
+    if (runtime === undefined) throw new Error("缺少测试 Runtime");
+    let oldStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      oldStarted = resolve;
+    });
+    let oldAborted = false;
+    vi.spyOn(runtime, "searchSessions").mockImplementation(async (query, options) => {
+      if (query !== "old") return [{ sessionId: query, mtimeMs: 2 }];
+      oldStarted?.();
+      await new Promise<void>((resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => {
+          oldAborted = true;
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      });
+      return [];
+    });
+    const old = h.client.runtime.searchSessions({ query: "old" });
+    await started;
+    const fresh = await h.client.runtime.searchSessions({ query: "new" });
+    expect(fresh).toEqual([{ sessionId: "new", mtimeMs: 2 }]);
+    expect(await old).toEqual([]);
+    expect(oldAborted).toBe(true);
     h.client.close();
     await h.served;
   });

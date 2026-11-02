@@ -1,5 +1,6 @@
 import type {
   Runtime,
+  SessionSearchResult,
   SkillImportInput,
   SkillImportOutput,
   SkillInvocation,
@@ -380,6 +381,10 @@ export interface RpcMethods {
   "runtime.listSessions": {
     params: { cwd?: string; includeSubagents?: boolean };
     result: (SessionSummary & { openHere?: boolean })[];
+  };
+  "runtime.searchSessions": {
+    params: { query: string };
+    result: SessionSearchResult[];
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   /**
@@ -826,6 +831,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.initialize": true,
   "runtime.shutdown": true,
   "runtime.listSessions": true,
+  "runtime.searchSessions": true,
   "runtime.usageStats": true,
   "runtime.createSession": true,
   "runtime.resumeSession": true,

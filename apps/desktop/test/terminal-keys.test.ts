@@ -38,6 +38,7 @@ describe("终端按键", () => {
     expect(terminalKeyAction(key("p", { ctrlKey: true }), true)).toBe("app");
     expect(terminalKeyAction(key("G", { ctrlKey: true, shiftKey: true }), false)).toBe("app");
     expect(terminalKeyAction(key("`", { ctrlKey: true }, "Backquote"), false)).toBe("app");
+    expect(terminalKeyAction(key("k", { ctrlKey: true }), false)).toBe("terminal");
     expect(terminalKeyAction(key("c", { ctrlKey: true, altKey: true }), true)).toBe("terminal");
     expect(terminalKeyAction(key("a"), true)).toBe("terminal");
     expect(terminalKeyAction(key("v", { ctrlKey: true }), false)).toBe("terminal");

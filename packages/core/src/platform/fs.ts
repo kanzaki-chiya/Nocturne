@@ -2,9 +2,10 @@
  * 文件系统访问（modules.md：platform 节）。
  * 全部真实 FS I/O 集中在这里；业务模块不得直接使用 node:fs。
  */
-import type { Dirent, Stats } from "node:fs";
+import { createReadStream, type Dirent, type Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import readline from "node:readline";
 
 export type FileType = "file" | "directory" | "symlink" | "other";
 
@@ -30,6 +31,8 @@ export interface FileSystem {
    * 文件更短则返回全部；截断可能落在多字节字符或一行的中间，由调用方按业务规则处理。
    */
   readFileSlice(path: string, maxBytes: number): Promise<Uint8Array>;
+  /** 按行流式读取 UTF-8 文本；用于不能把整份日志读进内存的扫描。 */
+  readLines(path: string, signal?: AbortSignal): AsyncIterable<string>;
   /** 覆盖写入；mode 仅 POSIX 生效且只在新建文件时应用（如凭据索引 0600） */
   writeFile(path: string, data: string | Uint8Array, options?: { mode?: number }): Promise<void>;
   /** 排他创建（文件已存在时报 EEXIST）：会话锁等存在性锁的实现原语 */
@@ -93,6 +96,16 @@ export function createNodeFileSystem(): FileSystem {
         return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
       } finally {
         await handle.close();
+      }
+    },
+    async *readLines(p, signal) {
+      const input = createReadStream(p, { encoding: "utf8", signal });
+      const lines = readline.createInterface({ input, crlfDelay: Infinity });
+      try {
+        for await (const line of lines) yield line;
+      } finally {
+        lines.close();
+        input.destroy();
       }
     },
     writeFile: (p, data, options) => fs.writeFile(p, data, { mode: options?.mode }),

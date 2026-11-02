@@ -107,6 +107,7 @@ interface ToolEntry {
   callId: string;
   name: string | undefined;     // 首个带来名字的持久事件提供；requested 先于 started 时可能暂缺
   seq: number;                  // 首个支撑持久事件的 seq
+  completedSeq?: number;        // tool.completed 的 seq（供跨会话搜索按完成事件 seq 定位工具行）
   /** 展示状态机：awaiting_permission → running → 终态（无 preparing，见 §4） */
   status: "awaiting_permission" | "running"
         | "ok" | "error" | "denied" | "cancelled" | "interrupted";

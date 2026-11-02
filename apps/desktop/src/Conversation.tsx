@@ -197,6 +197,7 @@ export interface ConversationProps {
    * 定时任务发起的会话：标在第一条用户消息上（ADR-0064）。
    * preface 只在补跑时有，写在气泡正文前面。
    */
+  searchTarget?: { sessionId: string; seq?: number | undefined; nonce: number } | undefined;
   scheduleSource?:
     | {
         name: string;
@@ -1104,6 +1105,7 @@ function UserImage({
  */
 function UserMessage({
   entry,
+  searchHit = false,
   images,
   session,
   cwd,
@@ -1116,6 +1118,7 @@ function UserMessage({
 }: {
   fileLinks?: FileLinkHooks | undefined;
   entry: UserEntry;
+  searchHit?: boolean;
   images: AttachmentImageSource;
   session: RpcSession | ReadOnlySessionRef;
   cwd: string;
@@ -1248,7 +1251,11 @@ function UserMessage({
   const busyTitle = busy ? "请先等待或按 Esc 中断" : undefined;
   const restorable = target?.files.filter((file) => file.action !== "untracked") ?? [];
   return (
-    <article className={`u${editing ? " editing" : ""}`} aria-label="用户消息">
+    <article
+      className={`u${editing ? " editing" : ""}${searchHit ? " search-hit" : ""}`}
+      data-session-seq={entry.seq}
+      aria-label="用户消息"
+    >
       {scheduleSource !== undefined && (
         <span className="sched-src">
           由定时任务 <span className="k">{scheduleSource.name}</span> 发送
@@ -2326,6 +2333,8 @@ function DetailGroup({ label, value, cwd }: { label: string; value: unknown; cwd
  */
 function ToolRow({
   entry,
+  searchHit = false,
+  searchExpand = false,
   cwd,
   preparing = false,
   queued = false,
@@ -2334,6 +2343,8 @@ function ToolRow({
   session,
 }: {
   entry: ToolEntry;
+  searchHit?: boolean;
+  searchExpand?: boolean;
   cwd: string;
   preparing?: boolean;
   queued?: boolean;
@@ -2341,8 +2352,11 @@ function ToolRow({
   images?: AttachmentImageSource | undefined;
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(searchExpand);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (searchExpand) setOpen(true);
+  }, [searchExpand]);
   const shownName = effectiveToolName(entry);
   const meta = toolMeta(shownName, entry.subjects);
   const subagent = subagentRowInfo(entry);
@@ -2458,7 +2472,9 @@ function ToolRow({
   const rows: (FileDiff | undefined)[] = diffs.length > 0 ? diffs : [undefined];
   return (
     <article
-      className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}`}
+      className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}${searchHit ? " search-hit" : ""}`}
+      data-session-seq={entry.seq}
+      data-completed-seq={entry.completedSeq}
       aria-label={`工具 ${shownName || entry.callId}`}
     >
       {rows.map((file, index) => {
@@ -2556,6 +2572,8 @@ function preparingEntry(tool: LiveTool): ToolEntry {
 
 function ToolEntryView({
   entry,
+  searchHit = false,
+  searchExpand = false,
   cwd,
   preparing = false,
   queued = false,
@@ -2564,6 +2582,8 @@ function ToolEntryView({
   session,
 }: {
   entry: ToolEntry;
+  searchHit?: boolean;
+  searchExpand?: boolean;
   cwd: string;
   preparing?: boolean;
   queued?: boolean;
@@ -2587,6 +2607,8 @@ function ToolEntryView({
   return (
     <ToolRow
       entry={entry}
+      searchHit={searchHit}
+      searchExpand={searchExpand}
       cwd={cwd}
       preparing={preparing}
       queued={queued}
@@ -2606,8 +2628,16 @@ const TURN_END_LABELS: Record<TurnEndReason, string> = {
   error: "发生错误",
 };
 
+function matchesSearchSeq(entry: ViewEntry, seq: number | undefined): boolean {
+  if (seq === undefined) return false;
+  if (entry.seq === seq) return true;
+  return entry.kind === "tool" && entry.completedSeq === seq;
+}
+
 function EntryView({
   entry,
+  searchHit = false,
+  searchExpand = false,
   openUrl,
   cwd,
   parts,
@@ -2629,6 +2659,8 @@ function EntryView({
   scheduleSource,
 }: {
   entry: ViewEntry;
+  searchHit?: boolean;
+  searchExpand?: boolean;
   openUrl: OpenUrl;
   cwd: string;
   parts: ReasoningMap;
@@ -2747,6 +2779,7 @@ function EntryView({
         <UserMessage
           fileLinks={fileLinks}
           entry={entry}
+          searchHit={searchHit}
           images={images}
           session={session}
           cwd={cwd}
@@ -2759,7 +2792,11 @@ function EntryView({
       );
     case "assistant":
       return (
-        <article className="a" aria-label="助手消息">
+        <article
+          className={`a${searchHit ? " search-hit" : ""}`}
+          data-session-seq={entry.seq}
+          aria-label="助手消息"
+        >
           <Think messageId={entry.messageId} text={entry.reasoning} parts={parts} now={now} />
           <Markdown
             text={entry.text}
@@ -2790,6 +2827,8 @@ function EntryView({
       return (
         <ToolEntryView
           entry={entry}
+          searchHit={searchHit}
+          searchExpand={searchExpand}
           cwd={cwd}
           preparing={preparing}
           queued={queued}
@@ -3706,12 +3745,14 @@ function ConversationContent({
   openWarnings,
   readOnly,
   scheduleSource,
+  searchTarget,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const previousTop = useRef(0);
   const [following, setFollowing] = useState(true);
+  const [highlightedSeq, setHighlightedSeq] = useState<number | undefined>();
   const { parts, now } = useReasoning(subscribeEvents);
   const users = view.entries.filter((e) => e.kind === "user");
   const lastSeq = users.at(-1)?.seq;
@@ -3796,6 +3837,35 @@ function ConversationContent({
     element.scrollTop = element.scrollHeight;
     previousTop.current = element.scrollTop;
   };
+  const scrolledNonce = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (searchTarget?.seq === undefined) return;
+    const seq = searchTarget.seq;
+    follow.current = false;
+    setFollowing(false);
+    setHighlightedSeq(seq);
+    const timer = window.setTimeout(() => {
+      setHighlightedSeq(undefined);
+    }, 1800);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [searchTarget]);
+  useEffect(() => {
+    if (searchTarget?.seq === undefined || scrolledNonce.current === searchTarget.nonce) return;
+    const seq = searchTarget.seq;
+    const anchor = content.current?.querySelector<HTMLElement>(
+      `[data-session-seq="${seq}"], [data-completed-seq="${seq}"]`,
+    );
+    if (anchor === null || anchor === undefined) return;
+    scrolledNonce.current = searchTarget.nonce;
+    const frame = requestAnimationFrame(() => {
+      anchor.scrollIntoView({ block: "center" });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [searchTarget, view.entries.length]);
   useLayoutEffect(() => {
     if (follow.current) scrollToBottom();
   });
@@ -3907,6 +3977,8 @@ function ConversationContent({
                       <Fragment key={entry.key}>
                         <EntryView
                           entry={entry}
+                          searchHit={matchesSearchSeq(entry, highlightedSeq)}
+                          searchExpand={matchesSearchSeq(entry, searchTarget?.seq)}
                           openUrl={openUrl}
                           cwd={cwd}
                           parts={parts}

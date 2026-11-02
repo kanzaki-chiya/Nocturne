@@ -30,6 +30,7 @@ export interface SidebarProps {
   /** 主区正在显示定时任务页 */
   schedulesOpen?: boolean;
   onOpenSchedules?: () => void;
+  onSearch?: () => void;
   onToggleScheduled?: () => void;
   /** 项目排序（菜单「排序」选择）；只有 manual 能拖动、上移下移 */
   projectSort: ProjectSort;
@@ -611,6 +612,7 @@ export function Sidebar(props: SidebarProps) {
       <div
         className={cls}
         key={project.key}
+        data-project-key={project.key}
         // 落点按整个项目组（标题 + 会话）计算：上半区插在它前面，下半区插在它后面
         onDragOver={(e) => {
           if (dragKey === null) return;
@@ -734,6 +736,19 @@ export function Sidebar(props: SidebarProps) {
           }}
         >
           <span className="glyph">＋</span>新会话
+        </button>
+        <button type="button" className="item" onClick={props.onSearch}>
+          <svg {...GLYPH_PROPS}>
+            <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            <path
+              d="m10.5 10.5 3.2 3.2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className="t">搜索</span>
         </button>
         <button
           type="button"

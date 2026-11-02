@@ -53,6 +53,7 @@ export const RUNTIME_METHODS: Record<
   observeSubagent: "subagent.subscribe",
   readSubagentAttachment: "subagent.readAttachment",
   listSessions: "runtime.listSessions",
+  searchSessions: "runtime.searchSessions",
   usageStats: "runtime.usageStats",
   listModels: "runtime.listModels",
   defaultModel: "runtime.defaultModel",

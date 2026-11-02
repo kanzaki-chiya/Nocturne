@@ -237,6 +237,7 @@ import {
   createSessionStore,
   createSubagentObservation,
   createSubagentRegistry,
+  searchSessions,
   readLocalFile,
   readSessionAttachment,
   resolveFileRef,
@@ -244,6 +245,8 @@ import {
   type ReadAttachmentResult,
   type Session,
   type SessionRecovery,
+  type SessionSearchOptions,
+  type SessionSearchResult,
   type SessionState,
   type SessionStore,
   type SessionSummary,
@@ -827,6 +830,8 @@ export interface Runtime {
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
     includeSubagents?: boolean | undefined;
   }): Promise<SessionSummary[]>;
+  /** 无索引地搜索本机会话标题与有效正文；默认排除子会话。 */
+  searchSessions(query: string, options?: SessionSearchOptions): Promise<SessionSearchResult[]>;
   /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
   listModels(input?: {
     workspaceRoot?: string | undefined;
@@ -4710,6 +4715,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     listSessions: (filter) => store.list(filter),
+    searchSessions: (query, options) =>
+      searchSessions(platform, store, sessionsDir, query, options),
     cancelSubagent(input) {
       if (!backgroundSubagents.cancel(input.parentSessionId, input.childSessionId))
         return Promise.reject(new RuntimeCommandError("invalid_command", "没有运行中的后台子代理"));
@@ -4983,7 +4990,13 @@ export type {
 } from "./provider/index.js";
 export type { InstructionSet, EnvironmentInfo, BuiltContext } from "./context/index.js";
 export * from "./config/index.js";
-export type { SessionState, SessionSummary } from "./session/index.js";
+export type {
+  SessionSearchOptions,
+  SessionSearchRange,
+  SessionSearchResult,
+  SessionState,
+  SessionSummary,
+} from "./session/index.js";
 export {
   FakeProvider,
   clampReasoningEffort,

@@ -6,6 +6,7 @@ import type {
   PendingInputsSnapshot,
   RewindMode,
   RuntimeEvent,
+  ScheduleTaskOverview,
   SessionView,
   SkillOverview,
   TurnChanges,
@@ -55,6 +56,7 @@ import { useRemoteStatus } from "./remote";
 import type { RemoteStatus } from "@nocturne/rpc/client";
 import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
+import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
 import { catchupPreface } from "./schedule-format";
 import { Button } from "./ui";
 
@@ -239,6 +241,21 @@ export function App({ host }: { host: DesktopHost }) {
   const [page, setPage] = useState<SettingsSection | null>(null);
   /** 定时任务页盖在会话区上，左栏会话树保持显示（不同于设置区） */
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [scheduleTasks, setScheduleTasks] = useState<ScheduleTaskOverview[]>([]);
+  const [scheduleTarget, setScheduleTarget] = useState<string | undefined>();
+  const [searchOpen, setSearchOpenState] = useState(false);
+  const searchOpenRef = useRef(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchSettled, setSearchSettled] = useState<SettledSearch>({ query: "", matches: [] });
+  const [searchTarget, setSearchTarget] = useState<{
+    sessionId: string;
+    seq?: number | undefined;
+    nonce: number;
+  } | null>(null);
+  const setSearchOpen = useCallback((open: boolean) => {
+    searchOpenRef.current = open;
+    setSearchOpenState(open);
+  }, []);
   const [scheduledExpanded, setScheduledExpanded] = useState(false);
   const [enabledScheduleCount, setEnabledScheduleCount] = useState<number | undefined>();
   const [scheduleNames, setScheduleNames] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -540,6 +557,7 @@ export function App({ host }: { host: DesktopHost }) {
             .then((result) => {
               if (!alive) return;
               setEnabledScheduleCount(result.tasks.filter((task) => task.enabled).length);
+              setScheduleTasks(result.tasks);
               setScheduleNames(new Map(result.tasks.map((task) => [task.id, task.name])));
             })
             .catch(() => undefined);
@@ -566,7 +584,7 @@ export function App({ host }: { host: DesktopHost }) {
   useEffect(() => {
     if (page === null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.key !== "Escape" || event.defaultPrevented || searchOpenRef.current) return;
       if (settingsRef.current?.querySelector('[role="dialog"]') != null) return;
       setPage(null);
     };
@@ -575,6 +593,32 @@ export function App({ host }: { host: DesktopHost }) {
       window.removeEventListener("keydown", onKey);
     };
   }, [page]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        event.isComposing ||
+        event.key === "Process" ||
+        event.altKey ||
+        event.shiftKey ||
+        (!event.ctrlKey && !event.metaKey) ||
+        event.key.toLowerCase() !== "k"
+      )
+        return;
+      if (
+        (event.target instanceof Element && event.target.closest(".xterm") !== null) ||
+        (document.activeElement instanceof Element &&
+          document.activeElement.closest(".xterm") !== null)
+      )
+        return;
+      event.preventDefault();
+      setSearchOpen(!searchOpenRef.current);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [setSearchOpen]);
 
   // 主目录只读一次（路径 ~ 缩写）
   useEffect(() => {
@@ -701,6 +745,38 @@ export function App({ host }: { host: DesktopHost }) {
   sessionsRef.current = sessions;
   const selectSessionRef = useRef<typeof selectSession | null>(null);
   selectSessionRef.current = selectSession;
+
+  const openSearchItem = (item: SearchItem) => {
+    setSearchOpen(false);
+    setPage(null);
+    if (item.kind === "sessions" && item.sessionId !== undefined) {
+      const summary = sessions.find((session) => session.id === item.sessionId);
+      setSchedulesOpen(false);
+      setSearchTarget({ sessionId: item.sessionId, seq: item.seq, nonce: Date.now() });
+      void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
+      return;
+    }
+    if (item.kind === "projects" && item.projectKey !== undefined) {
+      const key = item.projectKey;
+      setSchedulesOpen(false);
+      setCollapsed((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      requestAnimationFrame(() => {
+        const group = Array.from(document.querySelectorAll<HTMLElement>("[data-project-key]")).find(
+          (element) => element.dataset.projectKey === key,
+        );
+        group?.scrollIntoView({ block: "nearest" });
+      });
+      return;
+    }
+    if (item.kind === "schedules" && item.scheduleId !== undefined) {
+      setScheduleTarget(item.scheduleId);
+      setSchedulesOpen(true);
+    }
+  };
 
   // 外壳在通知被点击（toast 激活）时调用：把窗口带到前台后切到对应会话
   useEffect(
@@ -1198,6 +1274,9 @@ export function App({ host }: { host: DesktopHost }) {
         scheduledExpanded={scheduledExpanded}
         enabledScheduleCount={enabledScheduleCount}
         schedulesOpen={schedulesOpen}
+        onSearch={() => {
+          setSearchOpen(true);
+        }}
         onOpenSchedules={() => {
           setPage(null);
           setSchedulesOpen(true);
@@ -1367,6 +1446,7 @@ export function App({ host }: { host: DesktopHost }) {
               <SchedulePage
                 api={pageClient?.runtime}
                 workspaces={scheduleWorkspaces}
+                targetId={scheduleTarget}
                 onOpenSession={async (sessionId) => {
                   const summary =
                     sessions.find((item) => item.id === sessionId) ??
@@ -1550,6 +1630,9 @@ export function App({ host }: { host: DesktopHost }) {
                 home={home}
                 selected={selected}
                 running={conversationStatus(active) !== "idle"}
+                searchTarget={
+                  searchTarget?.sessionId === active.session.id ? searchTarget : undefined
+                }
                 onResubmit={resubmit}
                 onFork={forkAt}
                 initialDraft={forkDraft?.id === active.session.id ? forkDraft.text : undefined}
@@ -1819,6 +1902,24 @@ export function App({ host }: { host: DesktopHost }) {
           return <AgentPairingDialog client={activeClient} request={firstReq} />;
         })()}
       </div>
+      {searchOpen && pageClient?.runtime !== undefined && (
+        <SearchDialog
+          api={pageClient.runtime}
+          sessions={treeSessions}
+          projects={tree.projects}
+          hiddenProjects={new Set(p.hidden.map(projectKey))}
+          plainKey={plainKey}
+          schedules={scheduleTasks}
+          query={searchQuery}
+          settled={searchSettled}
+          onQueryChange={setSearchQuery}
+          onSettledChange={setSearchSettled}
+          onClose={() => {
+            setSearchOpen(false);
+          }}
+          onOpen={openSearchItem}
+        />
+      )}
       {sidePanel.panel}
     </div>
   );
@@ -1884,6 +1985,7 @@ interface SessionPaneProps {
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
   scheduleSource?: ConversationProps["scheduleSource"];
+  searchTarget?: { sessionId: string; seq?: number | undefined; nonce: number } | undefined;
 }
 
 function scheduleSourceFor(
@@ -1944,6 +2046,7 @@ function SessionPane({
   remoteStatus,
   onManageRemote,
   scheduleSource,
+  searchTarget,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(
@@ -2022,6 +2125,7 @@ function SessionPane({
         images={images}
         busy={running}
         scheduleSource={scheduleSource}
+        searchTarget={searchTarget}
         onResubmit={onResubmit}
         onFork={onFork}
         onApprovePlan={onApprovePlan}

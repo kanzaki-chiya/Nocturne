@@ -155,7 +155,9 @@ export interface UserEntry {
  * 再拼接剩下的 text 块。
  * 以后新增快照种类或改变追加数量，必须同步改这里。
  */
-export function userEntryText(entry: UserEntry): string {
+export function userEntryText(
+  entry: Pick<UserEntry, "content" | "fileRefs" | "skill" | "delegate" | "files" | "workMode">,
+): string {
   const snapshots =
     (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
     (entry.skill ? 1 : 0) +
@@ -196,6 +198,8 @@ export interface ToolEntry {
   callId: string;
   name: string | undefined;
   seq: number;
+  /** tool.completed 的 seq；供按 tool.completed.seq 定位该工具行 */
+  completedSeq?: number | undefined;
   status: ToolEntryStatus;
   input: unknown;
   /** 经 ToolTraits.dispatch 代理调用时解析后的目标工具与输入（ADR-0067 §3） */
@@ -600,6 +604,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       // 未执行即终态：丢弃 preparing 残片（inputText 不属于可重放视图）
       view.live.tools = view.live.tools.filter((t) => t.callId !== p.callId);
       const entry = promoteTool(view, b, p.callId, turnId ?? "", event.seq);
+      entry.completedSeq = event.seq;
       entry.name = p.name;
       entry.status = p.status;
       entry.liveOutput = "";

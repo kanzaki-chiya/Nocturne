@@ -445,6 +445,7 @@ class Connection implements HubPeer {
   private readonly opening = new Set<Promise<unknown>>();
   private readonly openingIds = new Set<string>();
   private readonly abort = new AbortController();
+  private sessionSearch: AbortController | undefined;
   private readonly handlers: HandlerTable;
   /** draftId → 创建草稿时的配置对象（与该登录的创建配置一致；见 buildHandlers 的 prepareProvider） */
   private readonly providerDrafts = new Map<
@@ -477,6 +478,7 @@ class Connection implements HubPeer {
       });
       this.transport.onClose(() => {
         this.inputEnded = true;
+        this.sessionSearch?.abort();
         // 子会话观察不等在途请求：断线时立即撤监听、取消尚在建立的回放
         this.cancelSubagentWatches();
         if (this.origin === "local") {
@@ -504,6 +506,7 @@ class Connection implements HubPeer {
 
   disconnect(): Promise<void> {
     this.closed = true;
+    this.sessionSearch?.abort();
     this.transport.close();
     return this.cleanup();
   }
@@ -1278,6 +1281,20 @@ class Connection implements HubPeer {
           ...summary,
           openHere: this.hub.isOpenHere(summary.id),
         }));
+      },
+      "runtime.searchSessions": async (p) => {
+        const query = reqString(p, "query");
+        this.sessionSearch?.abort();
+        const controller = new AbortController();
+        this.sessionSearch = controller;
+        try {
+          return await this.runtime().searchSessions(query, { signal: controller.signal });
+        } catch (error) {
+          if (controller.signal.aborted) return [];
+          throw error;
+        } finally {
+          if (this.sessionSearch === controller) this.sessionSearch = undefined;
+        }
       },
       "runtime.usageStats": (p) => {
         const days = p.days;
