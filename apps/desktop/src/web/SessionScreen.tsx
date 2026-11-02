@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   pendingBackgroundSubagents,
@@ -13,6 +14,7 @@ import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
+import { SessionHeaderTools } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { Button } from "../ui";
 import {
@@ -39,8 +41,9 @@ export function mcpText(
 }
 
 /**
- * 会话页：消息流 + 输入框 + 工具栏 + 权限/提问面板。模型、档位、预设与桌面
- * 状态栏共用 useSessionControls；手机不写桌面的 lastEffort 偏好。
+ * 会话页：消息流 + 输入框 + 工具栏 + 权限/提问面板，顶栏右侧的上下文圆环与会话菜单
+ * 经 portal 放进外壳给的 headerSlot。模型、档位、预设与桌面状态栏共用
+ * useSessionControls；手机不写桌面的 lastEffort 偏好。
  */
 export function SessionScreen({
   entry,
@@ -53,6 +56,8 @@ export function SessionScreen({
   sessions,
   onForked,
   onManageGrants,
+  headerSlot,
+  onRename,
 }: {
   entry: PhoneSession;
   /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
@@ -60,6 +65,10 @@ export function SessionScreen({
   /** 分叉出的新会话已打开，跳过去 */
   onForked: (sessionId: string) => void;
   onManageGrants?: (() => void) | undefined;
+  /** 顶栏右侧的位置：上下文圆环与会话菜单渲染在这里 */
+  headerSlot?: HTMLElement | null;
+  /** 会话菜单「重命名」：弹框在外壳里 */
+  onRename?: (() => void) | undefined;
   /** 普通对话工作区：没有项目文件索引，@ 引用不可用（同桌面） */
   plain?: boolean;
   connected: boolean;
@@ -88,6 +97,7 @@ export function SessionScreen({
   const backgrounds = useMemo(() => pendingBackgroundSubagents(view.entries), [view.entries]);
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState("");
+  const [fill, setFill] = useState<{ text: string; seq: number }>();
   useEffect(() => {
     let active = true;
     void session.describeSkills().then(
@@ -160,16 +170,19 @@ export function SessionScreen({
     onChanged();
     return true;
   };
+  const compact = async () => {
+    setBusy(true);
+    try {
+      await session.compact();
+    } finally {
+      setBusy(false);
+    }
+    onChanged();
+  };
   const slash = async (line: string): Promise<string | boolean> => {
     void session.recordInputHistory(line).catch(() => undefined);
     if (line.trim().toLowerCase().startsWith("/compact")) {
-      setBusy(true);
-      try {
-        await session.compact();
-      } finally {
-        setBusy(false);
-      }
-      onChanged();
+      await compact();
       return true;
     }
     return mcpText(await session.mcpServers());
@@ -205,6 +218,34 @@ export function SessionScreen({
 
   return (
     <>
+      {headerSlot &&
+        createPortal(
+          <SessionHeaderTools
+            context={{
+              load: loadContext,
+              replaying: entry.replaying === true,
+              key: `${view.entries.length}:${view.status}`,
+            }}
+            connected={connected && !entry.dead}
+            running={view.currentTurn !== undefined}
+            shell={{
+              label: controls.shell?.effective?.kind ?? controls.shell?.selected ?? "—",
+              note: controls.shellControl.note,
+            }}
+            onRename={() => onRename?.()}
+            onCompact={() => {
+              void compact().catch((reason: unknown) => {
+                onError(errorText(reason));
+              });
+            }}
+            loadMcp={async () => mcpText(await session.mcpServers())}
+            readInputHistory={() => session.readInputHistory()}
+            onPickHistory={(text) => {
+              setFill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
+            }}
+          />,
+          headerSlot,
+        )}
       <Conversation
         session={session}
         view={view}
@@ -309,18 +350,9 @@ export function SessionScreen({
           }
         }}
         onSlash={slash}
-        context={{
-          load: loadContext,
-          replaying: entry.replaying === true,
-          key: `${view.entries.length}:${view.status}`,
-        }}
         fileRefs={plain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
-        readInputHistory={() => session.readInputHistory()}
+        fill={fill}
         getVisionHint={controls.visionHint}
-        shell={{
-          label: controls.shell?.effective?.kind ?? controls.shell?.selected ?? "—",
-          note: controls.shellControl.note,
-        }}
       />
       {pendingKey !== undefined &&
         pendingKey !== dismissed &&

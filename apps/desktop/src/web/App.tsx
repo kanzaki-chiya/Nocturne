@@ -24,9 +24,9 @@ import {
   type PhoneTheme,
 } from "./local";
 import {
+  phoneProjectName,
   phoneProjects,
   plainWorkspaceOf,
-  projectName,
   projectSessions,
   shortDate,
 } from "./projects";
@@ -36,13 +36,12 @@ import {
   IconComputer,
   IconFolder,
   IconHome,
-  IconMore,
   IconPlus,
   IconSettings,
   IconTerminal,
 } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
-import { DraftComposer, SessionScreen, mcpText } from "./SessionScreen";
+import { DraftComposer, SessionScreen } from "./SessionScreen";
 import { Switch } from "../ui";
 
 export const TRUST_TEXT =
@@ -170,15 +169,15 @@ export function PhoneApp({
   const [installHint, setInstallHint] = useState(false);
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
-  const [menu, setMenu] = useState<"hosts" | "session" | null>(null);
-  const [menuOutput, setMenuOutput] = useState<string>();
+  const [menu, setMenu] = useState<"hosts" | null>(null);
+  /** 会话页顶栏右侧的位置：SessionScreen 把上下文圆环与会话菜单放进来 */
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   const [renameDraft, setRenameDraft] = useState<string>();
   const [renameError, setRenameError] = useState("");
   const [addingHost, setAddingHost] = useState(false);
   /** 首页「其他目录…」正在输入的路径；undefined 表示收起 */
   const [otherDir, setOtherDir] = useState<string>();
   const hostTrigger = useRef<HTMLButtonElement>(null);
-  const sessionTrigger = useRef<HTMLButtonElement>(null);
   // 从推送点进来：连上电脑后跳到需要处理的会话
   const [attention, setAttention] = useState(() =>
     new URLSearchParams(location.search).has("attention"),
@@ -551,9 +550,7 @@ export function PhoneApp({
       case "ext":
         return platform.pages?.[page.page]?.title ?? "设置";
       case "project":
-        return plainWorkspace !== undefined && projectKey(page.path) === projectKey(plainWorkspace)
-          ? "普通对话"
-          : projectName(page.path);
+        return phoneProjectName(page.path, plainWorkspace);
       case "session":
         return (
           entry?.view.title ??
@@ -804,6 +801,11 @@ export function PhoneApp({
           void sessions.refresh().catch(() => undefined);
         }}
         sessions={sessions}
+        headerSlot={headerSlot}
+        onRename={() => {
+          setRenameError("");
+          setRenameDraft(title);
+        }}
         onManageGrants={() => {
           navigate({ kind: "grants", hostId: page.hostId });
         }}
@@ -1031,9 +1033,16 @@ export function PhoneApp({
   }
 
   const homeHeader = page.kind === "home" && !offer;
+  const sessionHeader = page.kind === "session" && !offer;
+  const sessionPath =
+    page.kind === "session"
+      ? (entry?.workspace ?? sessions.list.find((item) => item.id === page.sessionId)?.cwd)
+      : undefined;
   return (
     <main className="phone">
-      <header className={`phone-header${homeHeader ? " home" : ""}`}>
+      <header
+        className={`phone-header${homeHeader ? " home" : ""}${sessionHeader ? " session" : ""}`}
+      >
         {homeHeader ? (
           <span className="phone-header-side" />
         ) : (
@@ -1069,24 +1078,20 @@ export function PhoneApp({
             />
             <IconChevron />
           </button>
+        ) : sessionHeader ? (
+          <div className="phone-header-title">
+            <h1>{title}</h1>
+            {sessionPath !== undefined && (
+              <p className="phone-header-project">
+                {phoneProjectName(sessionPath, plainWorkspace)}
+              </p>
+            )}
+          </div>
         ) : (
           <h1>{title}</h1>
         )}
-        {page.kind === "session" ? (
-          <button
-            ref={sessionTrigger}
-            className="phone-icon-button"
-            aria-label="会话菜单"
-            aria-haspopup="dialog"
-            aria-expanded={menu === "session"}
-            disabled={!entry}
-            onClick={() => {
-              setMenuOutput(undefined);
-              setMenu(menu === "session" ? null : "session");
-            }}
-          >
-            <IconMore />
-          </button>
+        {sessionHeader ? (
+          <div className="phone-header-tools" ref={setHeaderSlot} />
         ) : page.kind === "settings" ||
           page.kind === "usage" ||
           page.kind === "schedules" ||
@@ -1156,63 +1161,6 @@ export function PhoneApp({
               navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
             }}
           />
-        </Popover>
-      )}
-      {menu === "session" && entry && (
-        <Popover
-          anchor={sessionTrigger.current}
-          label="会话菜单"
-          onClose={() => {
-            setMenu(null);
-          }}
-          wide={menuOutput !== undefined}
-        >
-          <div className="phone-popover-h">{menuOutput !== undefined ? "MCP 状态" : "会话"}</div>
-          {menuOutput !== undefined ? (
-            <pre className="phone-output">{menuOutput}</pre>
-          ) : (
-            <>
-              <PopoverOption
-                label="重命名"
-                disabled={connected ? undefined : "电脑尚未连接"}
-                onSelect={() => {
-                  setMenu(null);
-                  setRenameError("");
-                  setRenameDraft(title);
-                }}
-              />
-              <PopoverOption
-                label="压缩上下文"
-                disabled={
-                  !connected
-                    ? "电脑尚未连接"
-                    : entry.view.currentTurn !== undefined
-                      ? "本轮结束后可压缩"
-                      : undefined
-                }
-                onSelect={() => {
-                  setMenu(null);
-                  void operation(async () => {
-                    await entry.session.compact();
-                  });
-                }}
-              />
-              <PopoverOption
-                label="MCP 状态"
-                disabled={connected ? undefined : "电脑尚未连接"}
-                onSelect={() => {
-                  void entry.session.mcpServers().then(
-                    (servers) => {
-                      setMenuOutput(mcpText(servers));
-                    },
-                    (reason: unknown) => {
-                      setMenuOutput(reason instanceof Error ? reason.message : String(reason));
-                    },
-                  );
-                }}
-              />
-            </>
-          )}
         </Popover>
       )}
       {renameDraft !== undefined && page.kind === "session" && (

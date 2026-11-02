@@ -12,6 +12,7 @@
   padding-top: env(safe-area-inset-top);
   font-size: var(--fs-4);
 }
+/* 触控目标不小于 44px（DESIGN.md 第 2 节）：保持高优先级，按钮类写的更小 min-height 不生效 */
 .phone button:not(.btn):not(.ib):not(.switch):not(.seg button),
 .phone input:not(.check input),
 .phone select,
@@ -19,11 +20,15 @@
 .phone summary {
   min-height: 44px;
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button) {
+/*
+ * 按钮的 padding、圆角、禁用与悬停基线：:where() 把优先级压到 (0,1,1)，
+ * 各按钮类自己写的 .phone .xxx 才能覆盖；共享组件的单类规则仍以此为准。
+ */
+.phone button:where(:not(.btn, .ib, .switch, .seg button)) {
   padding: 8px 12px;
   border-radius: var(--radius-3);
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):disabled {
+.phone button:where(:not(.btn, .ib, .switch, .seg button)):disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -34,12 +39,23 @@
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
 }
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):hover:not(:disabled) {
+.phone button:where(:not(.btn, .ib, .switch, .seg button)):hover:not(:disabled) {
   background: var(--a-raised);
 }
 .phone-icon {
   flex: none;
   display: block;
+}
+/*
+ * 触屏上用系统滚动条：手机与安卓 App 的系统滚动条是叠加式，不占布局宽度，左右留白相等。
+ * 设了 scrollbar-color 后 Chromium 不再套用 styles.css 的 ::-webkit-scrollbar；
+ * 桌面浏览器打开手机网页、以及桌面端本身不受影响。
+ */
+@media (hover: none) and (pointer: coarse) {
+  .phone,
+  .phone * {
+    scrollbar-color: var(--a-scroll) transparent;
+  }
 }
 
 /* ── 标题栏 ── */
@@ -69,6 +85,35 @@
   padding: 0;
   display: grid;
   place-items: center;
+}
+.phone .phone-icon-button.on {
+  background: var(--a-sel);
+}
+/* 会话页：右侧是上下文圆环与会话菜单，左右两栏等宽，标题与项目名相对整屏居中 */
+.phone-header.session {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 88px;
+}
+.phone-header-title {
+  min-width: 0;
+}
+.phone-header-title h1 {
+  display: block;
+  line-height: var(--lh-tight);
+}
+.phone .phone-header-project {
+  margin: 0;
+  font-size: var(--fs-2);
+  line-height: var(--lh-tight);
+  color: var(--a-muted);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone-header-tools {
+  display: flex;
+  justify-content: flex-end;
 }
 .phone-host-switch {
   flex: 1;
