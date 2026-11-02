@@ -12,38 +12,14 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { syntaxHighlighting } from "@codemirror/language";
+import { codeHighlighter } from "./code-tags";
+import "./code-colors.css";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { tags } from "@lezer/highlight";
 
 import { languageFor } from "./code-language";
 
 export { languageFor } from "./code-language";
-
-// 颜色取主题变量：深浅主题切换不用重建编辑器
-const highlight = HighlightStyle.define([
-  {
-    tag: [tags.comment, tags.lineComment, tags.blockComment],
-    color: "var(--cm-comment)",
-    fontStyle: "italic",
-  },
-  {
-    tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword],
-    color: "var(--cm-keyword)",
-  },
-  { tag: [tags.string, tags.special(tags.string), tags.regexp], color: "var(--cm-string)" },
-  { tag: [tags.number, tags.bool, tags.null, tags.atom, tags.color], color: "var(--cm-number)" },
-  {
-    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
-    color: "var(--cm-function)",
-  },
-  { tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: "var(--cm-type)" },
-  { tag: [tags.propertyName, tags.attributeName], color: "var(--cm-property)" },
-  { tag: [tags.heading], color: "var(--cm-keyword)", fontWeight: "600" },
-  { tag: [tags.link, tags.url], color: "var(--cm-string)", textDecoration: "underline" },
-  { tag: [tags.meta, tags.processingInstruction], color: "var(--cm-comment)" },
-  { tag: tags.invalid, color: "var(--a-error)" },
-]);
 
 const theme = EditorView.theme({
   "&": {
@@ -137,7 +113,7 @@ export async function mountCodeViewer(
     highlightSelectionMatches(),
     search({ top: true }),
     keymap.of(searchKeymap),
-    syntaxHighlighting(highlight),
+    syntaxHighlighting(codeHighlighter),
     EditorState.readOnly.of(true),
     EditorState.phrases.of(PHRASES),
     theme,

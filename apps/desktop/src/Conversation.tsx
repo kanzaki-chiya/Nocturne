@@ -12,6 +12,9 @@ import {
 import { marked, type Token, type Tokens } from "marked";
 import { Badge, Button, Checkbox, IconButton } from "./ui";
 import "./grants.css";
+import "./code-colors.css";
+import { diffRows } from "./code-lines";
+import { useCodeHighlight } from "./use-code-highlight";
 
 export function GrantedTag({
   permission,
@@ -1917,60 +1920,6 @@ function fileDiffs(entry: ToolEntry, cwd: string): FileDiff[] {
   return [];
 }
 
-interface DiffRow {
-  kind: "add" | "delete" | "context" | "sep";
-  num?: number;
-  mark?: string;
-  code?: string;
-}
-
-/** 去掉 ---/+++/diff/index 头和 "\" 行；@@ 变成分隔行。行号：新增与上下文用新号、删除用旧号。 */
-function diffRows(diff: string): DiffRow[] {
-  const rows: DiffRow[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-  for (const line of diff.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-    if (hunk !== null) {
-      oldLine = Number(hunk[1]);
-      newLine = Number(hunk[2]);
-      if (rows.length > 0) rows.push({ kind: "sep" });
-      continue;
-    }
-    if (
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ") ||
-      line.startsWith("diff ") ||
-      line.startsWith("index ") ||
-      line.startsWith("new file mode ") ||
-      line.startsWith("deleted file mode ") ||
-      line.startsWith("old mode ") ||
-      line.startsWith("new mode ") ||
-      line.startsWith("@@") ||
-      line.startsWith("\\")
-    )
-      continue;
-    const mark = line[0];
-    if (mark === "+") {
-      rows.push({ kind: "add", num: newLine, mark: "+", code: line.slice(1) });
-      newLine += 1;
-    } else if (mark === "-") {
-      rows.push({ kind: "delete", num: oldLine, mark: "−", code: line.slice(1) });
-      oldLine += 1;
-    } else {
-      rows.push({
-        kind: "context",
-        num: newLine,
-        mark: " ",
-        code: mark === " " ? line.slice(1) : line,
-      });
-      oldLine += 1;
-      newLine += 1;
-    }
-  }
-  return rows;
-}
-
 export function diffCounts(diff: string): { add: number; del: number } {
   let add = 0;
   let del = 0;
@@ -1986,9 +1935,18 @@ export function diffCounts(diff: string): { add: number; del: number } {
  * 差异行。wrap：长行自动换行，续行缩进到代码起点（行号和 +/− 不重复）；
  * 不传时整行不折、横向滚动（对话里的改动卡片）。
  */
-export function DiffBody({ diff, wrap = false }: { diff: string; wrap?: boolean }) {
+export function DiffBody({
+  diff,
+  wrap = false,
+  path,
+}: {
+  diff: string;
+  wrap?: boolean;
+  path?: string | undefined;
+}) {
+  const ref = useCodeHighlight<HTMLDivElement>(path, diff, "diff");
   return (
-    <div className={`diff-body${wrap ? " diff-wrap" : ""}`} aria-label="文件差异">
+    <div ref={ref} className={`diff-body${wrap ? " diff-wrap" : ""}`} aria-label="文件差异">
       {diffRows(diff).map((row, index) =>
         row.kind === "sep" ? (
           <div key={index} className="diff-row diff-sep" aria-hidden="true">
@@ -2002,7 +1960,7 @@ export function DiffBody({ diff, wrap = false }: { diff: string; wrap?: boolean 
             <span className="diff-mark" aria-hidden="true">
               {row.mark}
             </span>
-            <code>{row.code === "" ? " " : row.code}</code>
+            <code data-code-line={index}>{row.code === "" ? " " : row.code}</code>
           </div>
         ),
       )}
@@ -2170,6 +2128,15 @@ function LiveOutput({ text }: { text: string }) {
   );
 }
 
+function ToolCode({ text, path, numbered }: { text: string; path: string; numbered: boolean }) {
+  const ref = useCodeHighlight<HTMLPreElement>(path, text, numbered ? "numbered" : "text");
+  return (
+    <pre ref={ref} className="tool-payload conversation-tool-output">
+      {text}
+    </pre>
+  );
+}
+
 function ToolDetails({
   entry,
   cwd,
@@ -2225,6 +2192,14 @@ function ToolDetails({
         ) : body !== "" ? (
           entry.status === "running" ? (
             <LiveOutput text={body} />
+          ) : !result?.error &&
+            (entry.name === "read" || entry.name === "write") &&
+            typeof input?.path === "string" ? (
+            <ToolCode
+              text={displayResultPaths(body, cwd)}
+              path={input.path}
+              numbered={entry.name === "read"}
+            />
           ) : (
             <pre className="tool-payload conversation-tool-output">
               {result?.error ? body : displayResultPaths(body, cwd)}
@@ -2536,7 +2511,7 @@ function ToolRow({
                 <div className="tool-body">
                   {file?.diff !== undefined ? (
                     <div className="tool-diff">
-                      <DiffBody diff={file.diff} />
+                      <DiffBody diff={file.diff} path={file.path} />
                     </div>
                   ) : null}
                   <ToolDetails entry={entry} cwd={cwd} images={images} session={session} />
@@ -3810,7 +3785,7 @@ function ConversationContent({
         session={session}
         onRewind={onRewindFiles}
         loadDiff={loadChangeDiff}
-        renderDiff={(diff) => <DiffBody diff={diff} />}
+        renderDiff={(diff, path) => <DiffBody diff={diff} path={path} />}
         onViewChanges={onViewChanges}
       />
     ) : null;

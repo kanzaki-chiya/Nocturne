@@ -18,7 +18,7 @@ interface Props {
   session: RpcSession;
   onRewind: (seq: number) => Promise<void>;
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
-  renderDiff: (diff: string) => ReactNode;
+  renderDiff: (diff: string, path: string) => ReactNode;
   /** 「查看变更」：在右侧面板的变更标签里定位这一轮（只有桌面传入） */
   onViewChanges?: ((seq: number) => void) | undefined;
 }
@@ -100,7 +100,7 @@ function ChangedFile({
             {error}
           </p>
         ) : result ? (
-          renderDiff(result.diff)
+          renderDiff(result.diff, file.path)
         ) : (
           <p className="turn-change-note" role="status">
             正在读取差异…

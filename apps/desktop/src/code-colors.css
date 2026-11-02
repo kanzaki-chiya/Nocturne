@@ -1,0 +1,32 @@
+.syntax-comment,
+::highlight(syntax-comment) {
+  color: var(--cm-comment);
+}
+.syntax-keyword,
+::highlight(syntax-keyword) {
+  color: var(--cm-keyword);
+}
+.syntax-string,
+::highlight(syntax-string) {
+  color: var(--cm-string);
+}
+.syntax-number,
+::highlight(syntax-number) {
+  color: var(--cm-number);
+}
+.syntax-function,
+::highlight(syntax-function) {
+  color: var(--cm-function);
+}
+.syntax-type,
+::highlight(syntax-type) {
+  color: var(--cm-type);
+}
+.syntax-property,
+::highlight(syntax-property) {
+  color: var(--cm-property);
+}
+.syntax-invalid,
+::highlight(syntax-invalid) {
+  color: var(--a-error);
+}

@@ -612,7 +612,7 @@ function ChangeSection({
           {error}
         </p>
       ) : result !== undefined ? (
-        <DiffBody diff={result.diff} wrap={wrap} />
+        <DiffBody diff={result.diff} wrap={wrap} path={item.path} />
       ) : (
         <p className="turn-change-note" role="status">
           正在读取差异…
@@ -1212,7 +1212,7 @@ function FileDiffView({
         {tab.diffText.trim() === "" ? (
           <p className="turn-change-note">无文本差异</p>
         ) : (
-          <DiffBody diff={tab.diffText} wrap={wrap} />
+          <DiffBody diff={tab.diffText} wrap={wrap} path={tab.absolutePath} />
         )}
       </section>
     </div>
