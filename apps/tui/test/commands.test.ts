@@ -388,6 +388,25 @@ describe("TUI /context 面板（ADR-0046 第 5 节）", () => {
     expect(text).not.toContain("assistant");
   });
 
+  it("差额为正时在末尾列出 other，不为 0 或负数", () => {
+    const lines = contextLines(contextSession()).join("\n");
+    expect(lines).not.toContain("other");
+    const session = fakeSession({
+      describeContext: () =>
+        ({
+          report: {
+            sections: [{ name: "system", source: "v1", chars: 100, estimatedTokens: 25 }],
+            totalChars: 100,
+            estimatedTokens: 90,
+            budgetTokens: 100,
+            unattributedTokens: 65,
+          },
+          overBudget: false,
+        }) as ReturnType<RuntimeSession["describeContext"]>,
+    });
+    expect(contextLines(session).join("\n")).toContain("other              0 chars  ~65 tok");
+  });
+
   it("无 breakdown（旧报告）时只渲染分区行", () => {
     const text = contextLines(contextSession()).join("\n");
     expect(text).toContain("history");

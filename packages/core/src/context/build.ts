@@ -313,6 +313,23 @@ function blockChars(blocks: readonly ContentBlock[]): number {
   return n;
 }
 
+/** 回传给上游的 providerData。序列化失败或不是 JSON 值时不计。 */
+function opaqueText(data: unknown): string {
+  if (data === undefined) return "";
+  try {
+    const text = JSON.stringify(data);
+    return typeof text === "string" ? text : "";
+  } catch {
+    return "";
+  }
+}
+
+function contentOpaqueChars(blocks: readonly ContentBlock[]): number {
+  let n = 0;
+  for (const block of blocks) n += opaqueText(block.providerData).length;
+  return n;
+}
+
 /**
  * 全部已闭合步骤边界的 seq（context.md 6.3）：turn.completed，
  * 或某条 message.assistant 的全部工具调用都结算后的最后一个 tool.completed。
@@ -746,8 +763,10 @@ function historyToMessages(
           }
           return { ...call, input: pruneArgument(call.input) };
         });
-        // 细分（ADR-0046 §5）：回答文字与推理归 assistant，投影后的调用参数归 tool
-        byChars.assistant += blockChars(content);
+        // 细分（ADR-0046 §5）：回答文字与推理归 assistant，投影后的调用参数归 tool。
+        // 正文/推理块上的 providerData 随块回传，归 assistant；调用上的 providerData
+        // 已在 toolCalls 序列化里，归 tool，不另计。
+        byChars.assistant += blockChars(content) + contentOpaqueChars(content);
         byChars.tool += JSON.stringify(toolCalls).length;
         messages.push({ role: "assistant", content, toolCalls });
         for (const c of entry.toolCalls) unsettled.add(c.callId);
@@ -1181,7 +1200,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // pending 按角色归类（assistant 的 toolCalls 序列化与持久条目同口径不计字符数）
   for (const m of input.pendingMessages ?? []) {
     if (m.role === "tool") byChars.tool += m.content.length;
-    else if (m.role === "assistant") byChars.assistant += blockChars(m.content);
+    else if (m.role === "assistant")
+      byChars.assistant += blockChars(m.content) + contentOpaqueChars(m.content);
     else byChars.user += blockChars(m.content);
   }
   // ADR-0023：单次请求最多 20 张图片；从最新往前保留，更早的换上限占位。
@@ -1224,13 +1244,17 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // 清单在工具结果里时计入 tool；只有压缩后注入的独立消息计入 todos section，
   // 此处从历史细分中跳过它。
   const byTokens = emptyBreakdown();
+  // 只用于让无锚点时的 estimated 与计入 providerData 之前保持一致，不参与压缩公式本身。
+  let opaqueTokens = 0;
   for (const m of messages) {
     if (m === todosInjectedMessage) continue;
     if (m.role === "assistant") {
-      byTokens.assistant += m.content.reduce(
-        (total, block) => total + estimateTokens(block.text),
-        0,
-      );
+      byTokens.assistant += m.content.reduce((total, block) => {
+        const extra = opaqueText(block.providerData);
+        const extraTokens = extra.length > 0 ? estimateTokens(extra) : 0;
+        opaqueTokens += extraTokens;
+        return total + estimateTokens(block.text) + extraTokens;
+      }, 0);
       byTokens.tool += estimateTokens(JSON.stringify(m.toolCalls));
     } else if (m.role === "tool") {
       byTokens.tool += estimateTokens(m.content);
@@ -1258,8 +1282,11 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   const budgetTokens = inputBudgetTokens(model);
   const totalChars = sections.reduce((a, s) => a + s.chars, 0);
   const imageTokens = imageCap.count * IMAGE_TOKEN_ESTIMATE;
-  const estimated =
-    anchoredEstimate(input) ?? sections.reduce((a, s) => a + s.estimatedTokens, 0) + imageTokens;
+  const sectionTokens = sections.reduce((a, s) => a + s.estimatedTokens, 0);
+  // 无锚点时扣掉刚补进明细的 providerData，使压缩判定用的 estimated 与原先的字符估算一致。
+  // 有锚点时总量仍是锚点，不随明细调整。
+  const estimated = anchoredEstimate(input) ?? sectionTokens - opaqueTokens + imageTokens;
+  const unattributedTokens = estimated - (sectionTokens + imageTokens);
   const overBudget = estimated > budgetTokens;
 
   // 6.5：估算超过阈值（或已超预算）→ 两级压缩计划：
@@ -1381,6 +1408,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       ...(imageCap.count > 0
         ? { images: { count: imageCap.count, estimatedTokens: imageTokens } }
         : {}),
+      ...(unattributedTokens > 0 ? { unattributedTokens } : {}),
     },
     overBudget,
     ...((imageOpts.missing?.length ?? 0) > 0 ? { missingAttachments: imageOpts.missing } : {}),

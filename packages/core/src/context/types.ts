@@ -114,7 +114,7 @@ export interface ContextSize {
 export interface ContextHistoryBreakdown {
   /** 用户消息与以 user 角色注入的 note（含其中的文字附件说明） */
   user: ContextSize;
-  /** 助手回答文字与回传给模型的推理内容 */
+  /** 助手回答文字、回传的推理文本，以及这些块上的 providerData */
   assistant: ContextSize;
   /** 工具调用参数与工具结果（含 L1 修剪后的占位文本） */
   tool: ContextSize;
@@ -156,6 +156,12 @@ export interface ContextReport {
    * 估算模式下同样给出（按将发送的引用数）。
    */
   images?: { count: number; estimatedTokens: number } | undefined;
+  /**
+   * 总量比各 section 与图片的本地估算之和多出的 token。
+   * 仅在差额为正时出现；明细更大时省略，各项估算不按总量缩放。
+   * 压缩判定用 estimatedTokens，不用本字段。
+   */
+  unattributedTokens?: number | undefined;
 }
 
 export interface BuiltContext {

@@ -46,7 +46,7 @@ export const REDIRECTS: Record<string, RedirectHint> = {
   "/settings": "点左栏底部「设置」打开 设置 › 常规",
   "/theme": "在 设置 › 外观 切换主题",
   "/rewind": "在用户消息上点「编辑并重发」回退",
-  "/fork": "分叉在后续版本提供",
+  "/fork": "在用户消息上点「分叉」",
   "/exit": "关闭窗口即可退出",
   "/quit": "关闭窗口即可退出",
 };

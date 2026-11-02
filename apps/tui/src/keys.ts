@@ -1,7 +1,8 @@
 /**
  * 快捷键识别。Alt+M 在 Windows Terminal 上是一条 `\x1bm`（Ink 标成 meta）。
  * conhost 可能把 Alt 拆成 Esc 再跟一个字母：不识别为切换，但吞掉该字母，
- * 避免写进输入框或触发其他操作。
+ * 避免写进输入框或触发其他操作。中断再推迟到下一轮 I/O 之后，避免定时器
+ * 比已经在队列里的字母先跑。
  */
 export interface KeyFlags {
   ctrl: boolean;

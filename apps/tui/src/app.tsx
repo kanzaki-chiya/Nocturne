@@ -1101,9 +1101,28 @@ function SessionApp({
   const permissionExpanded = pending !== undefined && expandedPermission === pending.requestId;
   const interruptible = useRef(false);
   interruptible.current = busy;
+  // 80ms 定时器到期后不立刻中断：Node 先跑 timers 再读 stdin。字母如果已经在
+  // I/O 队列里，要等这次 poll 先把它吞掉，再在 check 阶段决定要不要中断。
+  const escapeImmediate = useRef<ReturnType<typeof setImmediate> | undefined>(undefined);
+  const clearEscapeTimer = (): void => {
+    if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
+    escapeTimer.current = undefined;
+    if (escapeImmediate.current !== undefined) clearImmediate(escapeImmediate.current);
+    escapeImmediate.current = undefined;
+  };
+  const armEscapeInterrupt = (): void => {
+    clearEscapeTimer();
+    escapeTimer.current = setTimeout(() => {
+      escapeTimer.current = undefined;
+      escapeImmediate.current = setImmediate(() => {
+        escapeImmediate.current = undefined;
+        if (interruptible.current) session.interrupt();
+      });
+    }, 80);
+  };
   useEffect(
     () => () => {
-      if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
+      clearEscapeTimer();
     },
     [],
   );
@@ -2212,9 +2231,17 @@ function SessionApp({
   useInput((ch, key) => {
     const now = Date.now();
     if (!(key.escape && ch === "" && !key.meta && !key.ctrl)) lastEscape.current = 0;
-    if (shouldSwallowAfterEscape(ch, key, swallowUntil.current, now)) {
-      if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
-      escapeTimer.current = undefined;
+    const pendingEscape =
+      escapeTimer.current !== undefined || escapeImmediate.current !== undefined;
+    const splitLetter =
+      ch.length === 1 &&
+      /[a-zA-Z]/.test(ch) &&
+      !key.meta &&
+      !key.ctrl &&
+      !key.escape &&
+      (shouldSwallowAfterEscape(ch, key, swallowUntil.current, now) || pendingEscape);
+    if (splitLetter) {
+      clearEscapeTimer();
       swallowUntil.current = 0;
       swallowRef.current = true;
       return;
@@ -2239,8 +2266,7 @@ function SessionApp({
       return;
     }
     if (key.escape && ch === "" && !key.meta && !key.ctrl) {
-      if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
-      escapeTimer.current = undefined;
+      clearEscapeTimer();
       swallowUntil.current = noteBareEscape(now);
       const previousEscape = lastEscape.current;
       lastEscape.current = 0;
@@ -2261,10 +2287,7 @@ function SessionApp({
           if (previousEscape > 0 && now - previousEscape <= 600) openRewind();
           else lastEscape.current = now;
         } else {
-          escapeTimer.current = setTimeout(() => {
-            escapeTimer.current = undefined;
-            if (interruptible.current) session.interrupt();
-          }, 80);
+          armEscapeInterrupt();
         }
         return;
       }
@@ -2826,11 +2849,7 @@ function SessionApp({
   );
   const conversationHeight = budget.conversation - popupHeight;
   const escapePrompt = (): void => {
-    if (escapeTimer.current !== undefined) clearTimeout(escapeTimer.current);
-    escapeTimer.current = setTimeout(() => {
-      escapeTimer.current = undefined;
-      if (interruptible.current) session.interrupt();
-    }, 80);
+    armEscapeInterrupt();
   };
   const g = glyphs(env);
   const editor = composerWindow(`${g.prompt} `, input, cursor, width, budget.input);

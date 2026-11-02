@@ -23,6 +23,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import {
   boxSafe,
+  lastWrapBreak,
   permissionReviewLine,
   stripControls,
   summarizeToolInput,
@@ -53,7 +54,17 @@ interface WrappedLine {
   continued: boolean;
 }
 
-function wrap(text: string, width: number): WrappedLine[] {
+function charWidth(ch: string): number {
+  return Math.max(1, stringWidth(ch));
+}
+
+function textWidth(text: string): number {
+  let used = 0;
+  for (const ch of text) used += charWidth(ch);
+  return used;
+}
+
+function wrap(text: string, width: number, wordWrap = true): WrappedLine[] {
   const limit = budget(width);
   const flat = stripControls(text.replace(/\r\n?/g, "\n"));
   const out: WrappedLine[] = [];
@@ -66,14 +77,23 @@ function wrap(text: string, width: number): WrappedLine[] {
     let used = 0;
     let continued = false;
     for (const ch of part) {
-      const w = Math.max(1, stringWidth(ch));
-      if (used + w > limit && line !== "") {
-        out.push({ text: line, continued });
-        continued = true;
-        line = "";
-        used = 0;
-      }
+      const w = charWidth(ch);
       if (w > limit) continue;
+      if (used + w > limit && line !== "") {
+        const at = wordWrap ? lastWrapBreak(line, { nextWide: stringWidth(ch) >= 2 }) : -1;
+        if (at > 0 && at < line.length) {
+          out.push({ text: line.slice(0, at), continued });
+          continued = true;
+          line = line.slice(at);
+          used = textWidth(line);
+        }
+        if (used + w > limit && line !== "") {
+          out.push({ text: line, continued });
+          continued = true;
+          line = "";
+          used = 0;
+        }
+      }
       line += ch;
       used += w;
     }
@@ -454,7 +474,8 @@ function layoutEntryBody(
         ? entry.result?.modelContent
         : (webFetchSummary(entry) ?? entry.result?.modelContent);
       if (content !== undefined && content !== "") {
-        if (diffExpanded) lines.push(...reasoningBody(`${entry.key}:out`, content, width));
+        if (diffExpanded)
+          lines.push(...reasoningBody(`${entry.key}:out`, content, width, { wordWrap: false }));
         else
           for (const [i, line] of tailLines(content, 4).entries()) {
             lines.push({
@@ -579,8 +600,13 @@ export function layoutLive(
   return lines;
 }
 
-function reasoningBody(key: string, text: string, width: number): LaidLine[] {
-  return wrap(text, width - 2).map((line, i) => ({
+function reasoningBody(
+  key: string,
+  text: string,
+  width: number,
+  options: { wordWrap?: boolean } = {},
+): LaidLine[] {
+  return wrap(text, width - 2, options.wordWrap !== false).map((line, i) => ({
     key: `${key}:body:${i}`,
     text: paint(`  ${line.text}`, width),
     continued: line.continued,

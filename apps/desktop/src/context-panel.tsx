@@ -76,6 +76,14 @@ export function contextRows(report: Report): ContextRow[] {
       source: `${report.images.count} 张`,
     });
   }
+  if (report.unattributedTokens !== undefined && report.unattributedTokens > 0) {
+    rows.push({
+      key: "other",
+      label: "其他",
+      color: "var(--a-muted)",
+      tokens: report.unattributedTokens,
+    });
+  }
   return rows;
 }
 
@@ -94,7 +102,7 @@ export function contextSourceLabel(source: string, home?: string | null): string
   return abbreviateHome(source, home);
 }
 
-/** 堆叠条总长等于占预算的比例；各段只按明细分摊这段长度，明细之和可能与锚定后的总量不同。 */
+/** 堆叠条总长等于总量占预算的比例。差额为正时末行补齐；明细大于总量时各项数值不缩放。 */
 export function segmentWidths(report: Report, rows: ContextRow[]): Map<string, number> {
   const parts = rows.filter((row) => !row.group);
   const sum = parts.reduce((total, row) => total + row.tokens, 0);

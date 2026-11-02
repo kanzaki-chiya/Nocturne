@@ -21,7 +21,8 @@ describe("assistant Markdown", () => {
     expect(text).toContain("标题");
     expect(lines[0]?.segments?.[0]?.bold).toBe(true);
     expect(text).toContain("• 一\n  • 二");
-    expect(text).toContain("文档 (https://");
+    expect(text).toContain("文档");
+    expect(text).toContain("(https://");
     expect(text).toContain("列名：中文内容");
     expect(text).toContain("数值：123");
     expect(lines.every((line) => line.text.length > 0)).toBe(true);

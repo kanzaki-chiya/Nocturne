@@ -319,6 +319,25 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(lines.join("")).toContain("invalid_command");
   });
 
+  it("/context 差额为正时列出 other", async () => {
+    const { lines, io } = capture();
+    const session = fakeSession({
+      describeContext: () =>
+        ({
+          report: {
+            sections: [{ name: "system", source: "v1", chars: 100, estimatedTokens: 25 }],
+            totalChars: 100,
+            estimatedTokens: 90,
+            budgetTokens: 100,
+            unattributedTokens: 65,
+          },
+          overBudget: false,
+        }) as ReturnType<RuntimeSession["describeContext"]>,
+    });
+    await runSlashCommand("/context", session, fakeRuntime, io);
+    expect(lines.join("")).toContain("other              0 chars  ~65 tok");
+  });
+
   it("/context 渲染分区与合计", async () => {
     const { lines, io } = capture();
     await runSlashCommand("/context", fakeSession(), fakeRuntime, io);
