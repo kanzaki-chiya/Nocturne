@@ -453,6 +453,8 @@ button {
 
 .grp {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 1px;
 }
 /* .gh 是 div 容器：.gh-toggle 负责折叠切换，悬停出现的 .gadd 是不能嵌套的兄弟按钮 */
@@ -521,6 +523,8 @@ details[open] > summary:not(.tool-line)::before {
   text-align: center;
 }
 .gh .gname {
+  min-width: 0;
+  padding-right: var(--space-8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
