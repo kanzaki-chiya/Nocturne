@@ -1050,10 +1050,12 @@
   border-radius: var(--radius-1);
   font: inherit;
 }
-.conversation :is(a, button, summary, textarea, input):focus-visible,
-.conversation-scroll:focus-visible {
+.conversation :is(a, button, summary, textarea, input):focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
+}
+.conversation-scroll:focus-visible {
+  outline: none;
 }
 
 /* 提问占据输入框的位置；权限仍在消息流底部。 */
