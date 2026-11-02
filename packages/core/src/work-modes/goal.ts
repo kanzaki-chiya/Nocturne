@@ -17,10 +17,13 @@ export function goalContinuation(
     backgroundRunning: number;
     /** 待发列表里有未暂停的排队输入 */
     queued: boolean;
+    /** 处于计划模式：计划要等用户评论或批准，目标不续跑（ADR-0076 §4.3 第 2 步） */
+    planning: boolean;
     nowMs: number;
   },
 ): GoalContinuation {
   if (goal?.status !== "active") return { kind: "none" };
+  if (context.planning) return { kind: "none" };
   if (context.backgroundRunning > 0) return { kind: "none" };
   if (context.queued) return { kind: "none" };
   const elapsed = goalElapsedMs(goal, context.nowMs);

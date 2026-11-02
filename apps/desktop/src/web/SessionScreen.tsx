@@ -246,15 +246,15 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
-        onResubmit={async (targetSeq, text, mode) => {
-          // 同桌面 resubmit：先回退再按普通发送；重发只带文本
+        onResubmit={async (targetSeq, text, mode, workMode) => {
+          // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
           setBusy(true);
           try {
             await sessions.rewind(entry, targetSeq, mode);
           } finally {
             setBusy(false);
           }
-          await submit({ text, attachments: [] });
+          await submit({ text, attachments: [], ...(workMode ? { workMode } : {}) });
         }}
         onApprovePlan={approvePlan}
         onFork={async (targetSeq) => {

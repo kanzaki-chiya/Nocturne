@@ -20,7 +20,9 @@ import {
   parseWorkModeSlash,
   replaySessionView,
   userEntryText,
+  userWorkMode,
   workModeDisplayText,
+  workModeOrigins,
   type DurableEvent,
   type GoalState,
   type RuntimeEvent,
@@ -493,8 +495,13 @@ describe("/goal", () => {
       rounds: 0,
       activeMs: 0,
     };
-    const base = { backgroundRunning: 0, queued: false, nowMs: 0 };
+    const base = { backgroundRunning: 0, queued: false, planning: false, nowMs: 0 };
     expect(goalContinuation(goal, base).kind).toBe("check");
+    expect(goalContinuation(goal, { ...base, planning: true }).kind).toBe("none");
+    // 计划模式期间连上限收尾也不做：等计划结束后的下一轮再判断
+    expect(goalContinuation({ ...goal, rounds: 10 }, { ...base, planning: true }).kind).toBe(
+      "none",
+    );
     expect(goalContinuation(goal, { ...base, backgroundRunning: 1 }).kind).toBe("none");
     expect(goalContinuation(goal, { ...base, queued: true }).kind).toBe("none");
     expect(goalContinuation({ ...goal, status: "met" }, base).kind).toBe("none");
@@ -844,4 +851,324 @@ describe("/boost（ADR-0076 §6）", () => {
     );
     await session.close();
   }, 25_000);
+});
+
+describe("模式消息来源与重发（ADR-0076 §1）", () => {
+  it("用户提交的模式消息没有 source；核对、继续目标、批准计划是 runtime", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        textScript("在做"),
+        goalMet("m1"),
+        textScript("完成"),
+        textScript("接着做"),
+        goalMet("m2"),
+        textScript("又完成"),
+        textScript("# 计划"),
+        textScript("实施完"),
+      ],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await session.submit({ text: "修好测试", workMode: "goal" });
+    await session.resumeGoal();
+    await session.submit({ text: "加功能", workMode: "plan" });
+    await session.approvePlan();
+    const modes = users(session).map((event) => ({
+      name: event.payload.workMode?.name,
+      source: event.payload.workMode?.source,
+      steer: event.payload.steer,
+      user: userWorkMode(event.payload.workMode),
+    }));
+    expect(modes).toEqual([
+      { name: "goal", source: undefined, steer: undefined, user: "goal" },
+      { name: "goal", source: "runtime", steer: true, user: undefined },
+      { name: "goal", source: "runtime", steer: undefined, user: undefined },
+      { name: "goal", source: "runtime", steer: true, user: undefined },
+      { name: "plan", source: undefined, steer: undefined, user: "plan" },
+      { name: "plan", source: "runtime", steer: undefined, user: undefined },
+    ]);
+    await session.close();
+  });
+
+  it("/rewind 列表与回填：用户模式消息带命令名、不含说明块；Runtime 写入的不回填", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        textScript("在做"),
+        goalMet("m1"),
+        textScript("完成"),
+        textScript("接着做"),
+        goalMet("m2"),
+        textScript("又完成"),
+        textScript("# 计划"),
+        textScript("实施完"),
+      ],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await session.submit({ text: "修好测试\n第二行", workMode: "goal" });
+    await session.resumeGoal();
+    await session.submit({ text: "加功能", workMode: "plan" });
+    await session.approvePlan();
+    const rows = (await session.rewindTargets()).map((row) => [row.firstLine, row.text]);
+    // 新的在前；核对说明是插话，不是回退目标
+    expect(rows).toEqual([
+      ["/plan 批准", ""],
+      ["/plan 加功能", "/plan 加功能"],
+      ["/goal", ""],
+      ["/goal 修好测试", "/goal 修好测试\n第二行"],
+    ]);
+    // 回填的文字按原模式解析
+    expect(parseWorkModeSlash(rows[3]?.[1] ?? "")).toEqual({
+      kind: "submit",
+      workMode: "goal",
+      text: "修好测试\n第二行",
+    });
+    await session.close();
+  });
+
+  it("四种模式各重发一次：回退后带原 workMode 提交，照常走模式起始流程", async () => {
+    const provider = new FakeProvider({ handler: () => textScript("好") });
+    const runtime = await makeRuntime(provider, { subagent: { background: true } });
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "auto-edit",
+    });
+    for (const name of ["grill-me", "boost", "plan", "goal"] as const) {
+      await session.submit({ text: `任务 ${name}`, workMode: name });
+      if (name === "plan") await session.cancelPlan();
+      if (name === "goal") await session.stopGoal();
+      const target = users(session).findLast(
+        (event) => userWorkMode(event.payload.workMode) === name,
+      );
+      if (target === undefined) throw new Error(`missing ${name}`);
+      // 与客户端重发相同：回退到这条消息之前，再以 userWorkMode 提交原文
+      await session.rewind(target.seq, "conversation");
+      const entry = replaySessionView([...session.durableEvents()]).entries;
+      expect(entry.some((item) => item.kind === "user" && item.seq === target.seq)).toBe(false);
+      await session.submit({
+        text: `任务 ${name}`,
+        workMode: userWorkMode(target.payload.workMode),
+      });
+      // 核对说明是插话；重发的那条是最后一条非插话用户消息
+      const resent = users(session).findLast((event) => event.payload.steer !== true);
+      expect(resent?.seq).toBeGreaterThan(target.seq);
+      expect(resent?.payload.workMode).toMatchObject({ name });
+      expect(resent?.payload.workMode?.source).toBeUndefined();
+      if (name === "plan") {
+        expect(session.state().plan).toEqual({ restorePreset: "auto-edit" });
+        expect(session.state().config.permissionPreset).toBe("read-only");
+        await session.cancelPlan();
+      }
+      if (name === "goal") {
+        // 回退撤回了目标（rewound）；重发重新设定并照常核对，假模型不报完成，跑到上限
+        const configs = session
+          .durableEvents()
+          .filter(
+            (e) =>
+              e.type === "session.config_changed" &&
+              e.seq > target.seq &&
+              e.payload.goal?.status === "active",
+          );
+        expect(configs.length).toBeGreaterThan(0);
+        expect(session.state().goal).toMatchObject({ objective: "任务 goal", status: "limit" });
+      }
+    }
+    await session.close();
+  });
+});
+
+describe("目标与计划同时存在（ADR-0076 §4.3）", () => {
+  const idle = async (session: RuntimeSession, turns: number) => {
+    await expect
+      .poll(
+        () =>
+          session.pendingInputs().items.length === 0 &&
+          session.durableEvents().filter((e) => e.type === "turn.completed").length === turns,
+      )
+      .toBe(true);
+  };
+
+  it("目标进行中进入计划：计划回复不被核对接管；批准后实施轮照常核对", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const scripts = [
+      textScript("# 计划"),
+      textScript("实施完"),
+      goalMet("g1"),
+      textScript("目标完成"),
+    ];
+    let calls = 0;
+    const provider = new FakeProvider({
+      handler: async () => {
+        calls += 1;
+        if (calls === 1) {
+          await gate;
+          return textScript("在做目标");
+        }
+        return scripts[calls - 2] ?? textScript("多余");
+      },
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "auto-edit",
+    });
+    const running = session.submit({ text: "修好测试", workMode: "goal" });
+    await expect.poll(() => calls).toBe(1);
+    // 目标那一轮进行中排队一条 /plan：安全点 2 让排队先发，之后进入计划模式
+    await session.enqueueInput("queue", { text: "加功能", workMode: "plan" });
+    release();
+    await running;
+    await idle(session, 2);
+    expect(session.state().goal?.status).toBe("active");
+    expect(session.state().plan).toEqual({ restorePreset: "auto-edit" });
+    // 计划回复结束后没有核对说明，等用户评论或批准
+    expect(goalSteers(session)).toHaveLength(0);
+    expect(provider.requests).toHaveLength(2);
+
+    await session.approvePlan();
+    expect(session.state().config.permissionPreset).toBe("auto-edit");
+    expect(goalSteers(session)).toHaveLength(1);
+    expect(session.state().goal?.status).toBe("met");
+    await session.close();
+  });
+
+  it("计划模式里设定目标：计划期间不续跑；批准后目标照常生效", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        textScript("# 计划"),
+        textScript("# 计划 v2：含目标"),
+        textScript("实施完"),
+        goalMet("g2"),
+        textScript("目标完成"),
+      ],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "auto-edit",
+    });
+    await session.submit({ text: "加功能", workMode: "plan" });
+    expect(await session.submit({ text: "测试全过", workMode: "goal" })).toBe("done");
+    expect(session.state().goal?.status).toBe("active");
+    expect(session.state().config.permissionPreset).toBe("read-only");
+    expect(goalSteers(session)).toHaveLength(0);
+    expect(provider.requests).toHaveLength(2);
+
+    await session.approvePlan();
+    expect(goalSteers(session)).toHaveLength(1);
+    expect(session.state().goal?.status).toBe("met");
+    await session.close();
+  });
+
+  it("放弃计划后目标仍是 active：下一条消息照常核对", async () => {
+    const provider = new FakeProvider({
+      scripts: [
+        textScript("# 计划"),
+        textScript("# 计划 v2"),
+        textScript("在做"),
+        goalMet("g3"),
+        textScript("目标完成"),
+      ],
+    });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await session.submit({ text: "加功能", workMode: "plan" });
+    await session.submit({ text: "测试全过", workMode: "goal" });
+    await session.cancelPlan();
+    expect(goalSteers(session)).toHaveLength(0);
+    await session.submit({ text: "开始吧" });
+    expect(goalSteers(session)).toHaveLength(1);
+    expect(session.state().goal?.status).toBe("met");
+    await session.close();
+  });
+});
+
+describe("回退撤回模式（ADR-0076 §2）", () => {
+  it("回退到设定目标的消息：目标停止（rewound）；回退到它之后不受影响；恢复会话一致", async () => {
+    const provider = new FakeProvider({ handler: () => textScript("好") });
+    const sessionsDir = makeTmp("nct-wm-rw-");
+    const cwd = makeTmp("nct-wm-rw-ws-");
+    const first = await makeRuntime(provider, { sessionsDir, cwd });
+    const session = await first.createSession({ model: "fake/fake-1" });
+    // 计划模式里设定目标：目标保持 active 且会话空闲（§4.3 计划期间不续跑）
+    await session.submit({ text: "加功能", workMode: "plan" });
+    await session.submit({ text: "修好测试", workMode: "goal" });
+    await session.submit({ text: "随便说一句" });
+    const [, goalMessage, later] = users(session);
+    if (goalMessage === undefined || later === undefined) throw new Error("missing messages");
+    expect(session.state().goal?.status).toBe("active");
+
+    await session.rewind(later.seq, "conversation");
+    expect(session.state().goal?.status).toBe("active");
+    expect(workModeOrigins(session.durableEvents()).goal).toBe(goalMessage.seq);
+
+    await session.rewind(goalMessage.seq, "conversation");
+    expect(session.state().goal).toMatchObject({ status: "stopped", reason: "rewound" });
+    expect(replaySessionView(session.durableEvents()).goal).toMatchObject({
+      status: "stopped",
+      reason: "rewound",
+    });
+    // 计划不受目标回退影响
+    expect(session.state().plan).toBeDefined();
+    // 退出计划后的普通消息不再被核对接管
+    await session.cancelPlan();
+    const before = provider.requests.length;
+    await session.submit({ text: "换个话题" });
+    expect(provider.requests.length - before).toBe(1);
+    const id = session.id;
+    await session.close();
+
+    const second = await makeRuntime(provider, { sessionsDir, cwd });
+    const resumed = await second.resumeSession(id);
+    expect(resumed.state().goal).toMatchObject({ status: "stopped", reason: "rewound" });
+    await resumed.close();
+  });
+
+  it("回退到进入计划的消息：恢复原预设并退出；回退到修订消息仍在计划模式", async () => {
+    const provider = new FakeProvider({ handler: () => textScript("# 计划") });
+    const sessionsDir = makeTmp("nct-wm-rwp-");
+    const cwd = makeTmp("nct-wm-rwp-ws-");
+    const first = await makeRuntime(provider, { sessionsDir, cwd });
+    const session = await first.createSession({
+      model: "fake/fake-1",
+      permissionPreset: "auto-edit",
+    });
+    await session.submit({ text: "加功能", workMode: "plan" });
+    await session.submit({ text: "改一下", workMode: "plan" });
+    const [entered, revised] = users(session);
+    if (entered === undefined || revised === undefined) throw new Error("missing messages");
+
+    await session.rewind(revised.seq, "conversation");
+    expect(session.state().plan).toEqual({ restorePreset: "auto-edit" });
+    expect(session.state().config.permissionPreset).toBe("read-only");
+
+    await session.rewind(entered.seq, "conversation");
+    expect(session.state().plan).toBeUndefined();
+    expect(session.state().config.permissionPreset).toBe("auto-edit");
+    expect(replaySessionView(session.durableEvents()).plan).toBeUndefined();
+    await rejects(session.approvePlan(), "invalid_command");
+    const id = session.id;
+    await session.close();
+
+    const second = await makeRuntime(provider, { sessionsDir, cwd });
+    const resumed = await second.resumeSession(id);
+    expect(resumed.state().plan).toBeUndefined();
+    expect(resumed.state().config.permissionPreset).toBe("auto-edit");
+    await resumed.close();
+  });
+
+  it("只还原文件不撤回模式", async () => {
+    const provider = new FakeProvider({ handler: () => textScript("# 计划") });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    await session.submit({ text: "加功能", workMode: "plan" });
+    const entered = users(session)[0];
+    if (entered === undefined) throw new Error("missing message");
+    await session.rewind(entered.seq, "files");
+    expect(session.state().plan).toBeDefined();
+    await session.close();
+  });
 });

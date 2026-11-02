@@ -285,6 +285,8 @@ export async function runRepl(
 
   const refill = (target: RewindTarget): void => {
     if (target.hasImages) out.line("stdout", "原消息的图片未放回");
+    // Runtime 写入的执行方式消息没有可回填的文字（ADR-0076 §1）
+    if (target.text === "") return;
     if (io.stdin.isTTY === true && !closed) rl.write(target.text);
     else out.line("stdout", `可修改后重发：${target.text}`);
   };

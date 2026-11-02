@@ -66,7 +66,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const startedInputs = new Map<string, string | undefined>();
   const pinnedResults = new Set<string>();
   const effective = new Set(effectiveEvents(events).map((e) => e.seq));
-  // ADR-0076 §2：目标按全部事件推进（回退不撤销），Turn 是否进行中单独跟踪
+  // ADR-0076 §2：目标按全部事件推进（回退撤回由 Runtime 另写事件），Turn 是否进行中单独跟踪
   let goal: GoalState | undefined;
   let goalTurnOpen = false;
   let plan: PlanConfig | undefined;

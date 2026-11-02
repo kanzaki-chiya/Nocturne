@@ -220,6 +220,7 @@ import {
   GOAL_MAX_MINUTES,
   GOAL_MAX_ROUNDS,
   isWorkModeName,
+  workModeOrigins,
   type GoalStatus,
   type PlanConfig,
   type WorkModeName,
@@ -2808,7 +2809,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const goalInput = (body: string): PreparedInput => ({
       content: [],
       appended: [{ type: "text", text: workModeBlock("goal", body) }],
-      workMode: { name: "goal", body },
+      workMode: { name: "goal", body, source: "runtime" },
     });
     // ── 计划模式（ADR-0076 §5）：预设与 plan 写在同一条 config_changed ──
     const writePlanPreset = async (preset: string, plan: PlanConfig | null): Promise<void> => {
@@ -2858,6 +2859,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         queued: pendingInputStore
           .snapshot()
           .items.some((item) => item.mode === "queue" && !item.paused),
+        planning: session.state().plan !== undefined,
         nowMs: Date.now(),
       });
       if (next.kind === "none") return undefined;
@@ -3285,7 +3287,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             await backgroundSubagents.discard(session.id, kept);
             pendingInputStore.dropSubagents(kept);
           }
+          // ADR-0076 §2：回退到设定目标、进入计划的那条消息之前（含它本身），模式随之撤回
+          const origins = mode === "files" ? undefined : workModeOrigins(session.durableEvents());
           await session.emit("session.rewound", { targetSeq, mode, files });
+          if (origins !== undefined) {
+            const goal = session.state().goal;
+            if (
+              goal !== undefined &&
+              goal.status !== "stopped" &&
+              origins.goal !== undefined &&
+              targetSeq <= origins.goal
+            )
+              await writeGoal("stopped", "rewound");
+            const plan = session.state().plan;
+            if (plan !== undefined && origins.plan !== undefined && targetSeq <= origins.plan)
+              await writePlanPreset(plan.restorePreset, null);
+            installGoalTool();
+          }
           if (mode !== "files") loadedSkills.clear();
           await session.flush();
           execEnv.readState = createReadStateStore(paths);
@@ -3483,7 +3501,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           Promise.resolve({
             content: [{ type: "text", text: "批准" }],
             appended: [{ type: "text", text: workModeBlock("plan", body) }],
-            workMode: { name: "plan", body },
+            workMode: { name: "plan", body, source: "runtime" },
           }),
         );
       },

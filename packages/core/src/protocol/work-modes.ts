@@ -15,6 +15,24 @@ export type WorkModeName = (typeof WORK_MODE_NAMES)[number];
 export interface WorkModeSnapshot {
   name: WorkModeName | (string & {});
   body: string;
+  /**
+   * 写入来源：缺省为用户提交；`"runtime"` 为 Runtime 自己写的模式消息（目标核对、
+   * 继续目标、批准计划），客户端不对它提供重发。按字符串读取，未知值同样视为非用户提交。
+   */
+  source?: "runtime" | (string & {}) | undefined;
+}
+
+/** 用户提交的执行方式名；Runtime 写入的模式消息与未知名字返回 undefined（重发据此保留模式） */
+export function userWorkMode(
+  workMode: { name: string; source?: string | undefined } | undefined,
+): WorkModeName | undefined {
+  if (workMode === undefined || workMode.source !== undefined) return undefined;
+  return isWorkModeName(workMode.name) ? workMode.name : undefined;
+}
+
+/** Runtime 写入的模式消息（不是用户提交的） */
+export function isRuntimeWorkMode(workMode: { source?: string | undefined } | undefined): boolean {
+  return workMode?.source !== undefined;
 }
 
 export function isWorkModeName(value: unknown): value is WorkModeName {
@@ -36,7 +54,7 @@ export interface GoalConfig {
   status: GoalStatus;
   maxMinutes: number;
   maxRounds: number;
-  /** blocked 的原因；stopped 的来源（"user" | "interrupted"） */
+  /** blocked 的原因；stopped 的来源（"user" | "interrupted" | "rewound"） */
   reason?: string | undefined;
 }
 
@@ -56,8 +74,8 @@ const elapsedSince = (from: string, to: string): number =>
   Math.max(0, Date.parse(to) - Date.parse(from));
 
 /**
- * 按持久事件推进目标状态。Core 折叠与客户端视图共用，回退不撤销：调用方对
- * 回退区间外的事件同样调用。`turnOpen` 是处理该事件前是否有进行中的 Turn。
+ * 按持久事件推进目标状态。Core 折叠与客户端视图共用，折叠本身不看回退：调用方对
+ * 回退区间外的事件同样调用；回退撤回目标由 Runtime 另写事件（ADR-0076 §2）。`turnOpen` 是处理该事件前是否有进行中的 Turn。
  */
 export function reduceGoal(
   goal: GoalState | undefined,
@@ -136,7 +154,7 @@ export interface PlanConfig {
   restorePreset: string;
 }
 
-/** 按持久事件推进计划模式状态；与目标一样回退不撤销，调用方对全部事件调用 */
+/** 按持久事件推进计划模式状态；与目标一样折叠本身不看回退，调用方对全部事件调用 */
 export function reducePlan(
   plan: PlanConfig | undefined,
   event: DurableEvent,
@@ -145,6 +163,28 @@ export function reducePlan(
   const next = event.payload.plan;
   if (next === undefined) return plan;
   return next === null ? undefined : { restorePreset: next.restorePreset };
+}
+
+/**
+ * 当前目标与当前计划的起点消息（ADR-0076 §2）：`goal` 是最近一条用户提交的 `/goal`
+ * 消息；`plan` 是自最近一次退出计划模式以来第一条用户提交的 `/plan` 消息（之后的
+ * `/plan` 只是修订）。回退到起点或更早时，Runtime 停止目标、放弃计划。按原始日志
+ * 计算，已被回退截掉的消息同样算起点：回退时模式已随之撤回。
+ */
+export function workModeOrigins(events: readonly DurableEvent[]): {
+  goal?: number | undefined;
+  plan?: number | undefined;
+} {
+  let goal: number | undefined;
+  let plan: number | undefined;
+  for (const event of events) {
+    if (event.type === "session.config_changed" && event.payload.plan === null) plan = undefined;
+    if (event.type !== "message.user") continue;
+    const name = userWorkMode(event.payload.workMode);
+    if (name === "goal") goal = event.seq;
+    if (name === "plan") plan ??= event.seq;
+  }
+  return { goal, plan };
 }
 
 // ── 客户端斜杠解析 ─────────────────────────────────────────

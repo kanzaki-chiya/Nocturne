@@ -16,7 +16,9 @@
 
 - `SubmitInput` 增加可选 `workMode: "grill-me" | "plan" | "goal" | "boost"`，与 `skill`、`delegate` 互斥（同时出现报 `invalid_command`）。字段名不用 `mode`，因为 `enqueueInput` 的 `mode` 已经表示插话或排队。
 - 用户正文就是任务（`/goal` 的目标、`/plan` 的任务……），去首尾空白后不得为空，否则 `invalid_command`。
-- Core 在提交准备阶段（与技能正文同处）给消息末尾追加一个英文说明块 `<work-mode name="…">…</work-mode>`，`message.user` 带可选字段 `workMode: { name, body }`，`body` 即该块正文。这和技能快照同构：回放、回退、分叉、导出都沿用快照，不重新生成。兼容扩展，旧版本按普通用户消息显示，不提升 `formatVersion`。
+- Core 在提交准备阶段（与技能正文同处）给消息末尾追加一个英文说明块 `<work-mode name="…">…</work-mode>`，`message.user` 带可选字段 `workMode: { name, body, source? }`，`body` 即该块正文。这和技能快照同构：回放、回退、分叉、导出都沿用快照，不重新生成。兼容扩展，旧版本按普通用户消息显示，不提升 `formatVersion`。
+- `source` 区分写入来源（修订 2026-11-02）：用户提交的消息不带；Runtime 自己写的模式消息（目标核对与收尾说明、`resumeGoal` 的继续说明、`approvePlan` 的「批准」）带 `source: "runtime"`。未知值同样按非用户提交处理。客户端据此决定重发：用户提交的模式消息重发、编辑并重发时带原 `workMode` 重新提交，照常走模式起始流程（切预设、设定目标）；Runtime 写入的消息不提供重发。不按正文是否为空判断，因为「批准」有正文。
+- 回退列表（`rewindTargets`）对执行方式消息给出带命令名的首行与回填文字（如 `/goal 修好测试`），不含说明块，回填后按原模式重新解析；Runtime 写入的消息回填文字为空。
 - 待发输入：`enqueueInput("queue", { workMode })` 可以排队，模式的副作用（切换预设、设定目标）在这条输入被取出、新 Turn 开始前生效；`enqueueInput("steer", { workMode })` 报 `invalid_command`（插话并入当前 Turn，不能在中途换模式）。
 - 子会话不接受 `workMode`（`invalid_command`）。
 - 没有采用「内置技能」：技能可以被同名用户技能覆盖、可以停用、会出现在技能设置页和模型目录里；而 `/plan`、`/goal` 带状态，四个模式需要同一套入口与显示。四个名字加入 `BUILTIN_SLASH_COMMANDS`，同名技能按既有规则标 `commandConflict`。
@@ -31,12 +33,14 @@ goal?: {
   status: "active" | "met" | "blocked" | "limit" | "stopped"
   maxMinutes: number      // 默认 60
   maxRounds: number       // 默认 10
-  reason?: string         // blocked 的原因、stopped 的来源（"user" | "interrupted"）
+  reason?: string         // blocked 的原因、stopped 的来源（"user" | "interrupted" | "rewound"）
 }
 plan?: { restorePreset: string } | null   // null = 退出计划模式
 ```
 
-- `SessionState` 与 `SessionView` 各折叠出 `goal`（附 `since`：最近一次变为 `active` 的事件 seq）与 `plan`。与预设、MCP 可用性一样，回退不撤销这两项。
+- `SessionState` 与 `SessionView` 各折叠出 `goal`（附 `since`：最近一次变为 `active` 的事件 seq）与 `plan`。
+- **回退**（修订 2026-11-02，原决定是「与预设一样回退不撤销」）：对话回退（`both`、`conversation`）的目标早于或等于设定当前目标的那条用户消息时，Runtime 在 `session.rewound` 之后写 `goal.status: "stopped", reason: "rewound"`；早于或等于进入当前计划的那条用户消息（自上次退出计划模式后第一条 `/plan`，之后的 `/plan` 只是修订）时，按放弃计划处理：写 `permissionPreset: restorePreset`、`plan: null`。回退到这些消息之后的位置不受影响；只还原文件不改变两项。起点只认用户提交的模式消息（`source` 缺省）。写入走 `config_changed`，恢复会话后状态一致。
+  - 理由：预设是用户自己选的会话设置，与对话内容无关；目标和计划却是由那条消息设定的，消息撤回后它们失去来源。目标若保留，回退后再发一句别的话，这一轮结束仍会被核对说明接管，去做用户已撤回的目标——与 §4.5 中断即停止的理由相同；计划若保留，会话仍是 `read-only`，「批准」按钮也还在。
 - **恢复会话**：两项都从日志原样恢复。目标处于 `active` 时不自动开新 Turn，下一个 Turn 照常受目标约束；计划模式下预设本来就以 `config_changed` 记着 `read-only`，批准按钮照常出现。
 - **分叉**：复制日志，状态一并继承。
 - 这两个字段不生成历史说明（`note`），也不在对话里生成提示条；计划模式开始时的预设切换沿用既有的预设切换提示。
@@ -63,10 +67,11 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 目标模块的判断顺序：
 
 1. 目标不是 `active`：不续。
-2. 本会话还有运行中的后台子代理（ADR-0073）：不续。Turn 照常结束，子代理收束时结果作为待发输入唤起新 Turn，那一轮想结束时再判断。
-3. 待发列表里有未暂停的排队输入：不续，让排队先发。
-4. 已达上限（4.4）：写 `status: "limit"`，返回一次收尾说明（要求停止工作，列出已完成与未完成的项及证据），这一轮随后照常结束。
-5. 否则返回核对说明：要求按交付清单逐条核对证据；全部满足就调用 `update_goal(met)` 后结束；有未满足的就接着做；离开用户无法继续时调用 `update_goal(blocked)`。核对说明的 `message.user.workMode.name` 为 `goal`，用户正文为空。
+2. 处于计划模式（修订 2026-11-02）：不续，上限也不检查。计划回复要等用户评论或批准，续跑会让「批准」因会话忙而不出现、核对说明空转到上限。先设目标再进计划、先进计划再设目标都一样；批准或放弃后目标若仍是 `active` 就照常生效：批准开的实施 Turn 在安全点 2 照常核对，放弃后的下一条消息同样如此。
+3. 本会话还有运行中的后台子代理（ADR-0073）：不续。Turn 照常结束，子代理收束时结果作为待发输入唤起新 Turn，那一轮想结束时再判断。
+4. 待发列表里有未暂停的排队输入：不续，让排队先发。
+5. 已达上限（4.4）：写 `status: "limit"`，返回一次收尾说明（要求停止工作，列出已完成与未完成的项及证据），这一轮随后照常结束。
+6. 否则返回核对说明：要求按交付清单逐条核对证据；全部满足就调用 `update_goal(met)` 后结束；有未满足的就接着做；离开用户无法继续时调用 `update_goal(blocked)`。核对说明的 `message.user.workMode` 为 `name: "goal"`、`source: "runtime"`，用户正文为空。
 
 整个目标通常在一个 Turn 里完成，会话通知（ADR-0056）只在真正结束时提醒一次。
 
@@ -88,7 +93,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 
 - **开始**：`workMode: "plan"` 的输入在 Turn 开始前写一个 `config_changed`：`permissionPreset: "read-only"`、`plan: { restorePreset: 当前预设 }`（已在计划模式时保留原来的 `restorePreset`）。说明块要求：只读探索，必要时用 `ask_user` 问需要用户拍板的事，然后以完整的 Markdown 实施计划作为本轮最后的回复（目标、按文件或模块的改动、步骤顺序、验证方式、风险与待定事项），不做任何修改。用户回复意见时修改计划并重新完整给出。
 - **评论**：计划就是一条普通的助手消息，用户在输入框里直接回复意见即可；计划模式下的普通消息仍是只读。
-- **批准**：`RuntimeSession.approvePlan()`，会话须空闲（否则 `session_busy`），且处于计划模式（否则 `invalid_command`）。写 `config_changed`：`permissionPreset` 取 `restorePreset`（它是 `read-only` 时改用 `default`）、`plan: null`；随即开新 Turn，用户正文为「批准」，说明块要求按已批准的计划实施并验证，`workMode.name` 为 `plan`。
+- **批准**：`RuntimeSession.approvePlan()`，会话须空闲（否则 `session_busy`），且处于计划模式（否则 `invalid_command`）。写 `config_changed`：`permissionPreset` 取 `restorePreset`（它是 `read-only` 时改用 `default`）、`plan: null`；随即开新 Turn，用户正文为「批准」，说明块要求按已批准的计划实施并验证，`workMode` 为 `name: "plan"`、`source: "runtime"`。
 - **放弃**：`RuntimeSession.cancelPlan()`，写 `permissionPreset: restorePreset`、`plan: null`，不开 Turn。
 - 计划模式期间用户手动切换预设照常生效；批准与放弃仍按 `restorePreset` 恢复。
 
@@ -123,7 +128,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 | `/boost` | ✓ | ✓ | ✓ | ✓ | — |
 
 - `nctrn -p` 不解析斜杠命令。逐行 CLI 在 Turn 期间只接受中断，命令在空闲时输入。桌面端与手机网页运行中发送带模式的命令按排队处理。
-- 用户消息显示：在用户正文旁显示命令名（如 `/plan`），可展开查看说明块；核对说明只有命令名。不加模式徽标、状态说明、副标题或占位提示；「批准」按钮只在计划模式、会话空闲时出现在最后一条助手消息下方。
+- 用户消息显示：在用户正文旁显示命令名（如 `/plan`），可展开查看说明块；核对说明只有命令名。Runtime 写入的模式消息（§1 `source`）不显示「编辑并重发」「重发」。不加模式徽标、状态说明、副标题或占位提示；「批准」按钮只在计划模式、会话空闲时出现在最后一条助手消息下方。
 - RPC 新增 `session.approvePlan`、`session.cancelPlan`、`session.stopGoal`、`session.resumeGoal`，`session.submit` / `session.enqueueInput` 接受 `workMode`；都属于会话内操作，远程连接可用（ADR-0052 第 7 轮的口径）。对外 MCP 接口（ADR-0074）不变。
 
 ## 后果

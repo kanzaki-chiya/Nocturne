@@ -65,6 +65,9 @@ import {
   subagentResultLine,
   backgroundToolStatus,
   splitCodeRef,
+  isRuntimeWorkMode,
+  userWorkMode,
+  type WorkModeName,
   type PendingPermission,
   type ImageAttachment,
   type LiveTool,
@@ -154,8 +157,18 @@ export interface ConversationProps {
   images: AttachmentImageSource;
   /** 非空闲（Turn 进行中 / 等待确认）时禁用重发与编辑重发（U-01） */
   busy: boolean;
-  /** 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit） */
-  onResubmit?: ((targetSeq: number, text: string, mode: RewindMode) => Promise<void>) | undefined;
+  /**
+   * 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit）。
+   * 用户提交的执行方式消息带 workMode 重发（ADR-0076 §1）。
+   */
+  onResubmit?:
+    | ((
+        targetSeq: number,
+        text: string,
+        mode: RewindMode,
+        workMode?: WorkModeName,
+      ) => Promise<void>)
+    | undefined;
   /** 批准当前计划（ADR-0076 §5、§7）：在计划模式且空闲时显示在最后一条助手消息下方 */
   onApprovePlan?: (() => void) | undefined;
   /**
@@ -1221,12 +1234,16 @@ function UserMessage({
     if (!onResubmit) return;
     setError(undefined);
     setPending(true);
-    void onResubmit(entry.seq, content, rewindMode).catch((reason: unknown) => {
-      // 回退/发送失败：编辑内容保留（编辑框仍打开时错误显示在框内）
-      setError(`重发失败：${reasonText(reason)}`);
-      setPending(false);
-    });
+    void onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode)).catch(
+      (reason: unknown) => {
+        // 回退/发送失败：编辑内容保留（编辑框仍打开时错误显示在框内）
+        setError(`重发失败：${reasonText(reason)}`);
+        setPending(false);
+      },
+    );
   };
+  // ADR-0076：Runtime 写入的模式消息（目标核对、继续目标、批准计划）不能重发
+  const resubmittable = onResubmit !== undefined && !isRuntimeWorkMode(entry.workMode);
   const busyTitle = busy ? "请先等待或按 Esc 中断" : undefined;
   const restorable = target?.files.filter((file) => file.action !== "untracked") ?? [];
   return (
@@ -1421,7 +1438,7 @@ function UserMessage({
               >
                 {copied ? "已复制" : "复制"}
               </button>
-              {onResubmit && (
+              {resubmittable && (
                 <button
                   type="button"
                   className="u-act"
@@ -1432,7 +1449,7 @@ function UserMessage({
                   编辑并重发
                 </button>
               )}
-              {onResubmit && (
+              {resubmittable && (
                 <button
                   type="button"
                   className="u-act"

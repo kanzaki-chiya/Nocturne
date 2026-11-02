@@ -8,6 +8,7 @@ import {
   type SessionView,
   type TurnChanges,
   type TurnChangeDiff,
+  type WorkModeName,
 } from "@nocturne/core/protocol";
 import {
   RpcError,
@@ -630,13 +631,19 @@ export class Conversations {
    * 重发/编辑重发（U-01）：先 rewind 回退到目标用户消息之前，再走普通 send
    * （接受/busy/历史记录逻辑一致）。rewind 拒绝时抛出——编辑框据此保留草稿；
    * rewind 成功后 submit 被拒同样抛出，但会话视图已被回退截断。
-   * 附件、@文件 快照与技能/委派快照不复用：重发只带消息文本。
+   * 附件、@文件 快照与技能/委派快照不复用：重发只带消息文本；用户提交的执行方式
+   * 保留（ADR-0076 §1），重发时照常走模式起始流程。
    */
-  async resubmit(targetSeq: number, text: string, mode: RewindMode): Promise<void> {
+  async resubmit(
+    targetSeq: number,
+    text: string,
+    mode: RewindMode,
+    workMode?: WorkModeName,
+  ): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
     await this.rewindEntry(entry, targetSeq, mode);
-    await this.send({ text, attachments: [] });
+    await this.send({ text, attachments: [], ...(workMode ? { workMode } : {}) });
   }
 
   /** Files-only rewind shares the serialized busy boundary, never the submit path. */

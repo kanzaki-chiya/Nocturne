@@ -10,6 +10,7 @@ import type {
   SkillOverview,
   TurnChanges,
   TurnChangeDiff,
+  WorkModeName,
 } from "@nocturne/core/protocol";
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
@@ -840,8 +841,13 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   // 重发/编辑重发（U-01）：rewind 走会话串行锁，发送后同步会话列表
-  const resubmit = async (targetSeq: number, text: string, mode: RewindMode): Promise<void> => {
-    await conversations.resubmit(targetSeq, text, mode);
+  const resubmit = async (
+    targetSeq: number,
+    text: string,
+    mode: RewindMode,
+    workMode?: WorkModeName,
+  ): Promise<void> => {
+    await conversations.resubmit(targetSeq, text, mode, workMode);
     setSelectedId(conversations.selectedId);
     await refresh();
   };
@@ -1785,7 +1791,12 @@ interface SessionPaneProps {
   home: string | null;
   selected: SessionSummary | undefined;
   running: boolean;
-  onResubmit: (targetSeq: number, text: string, mode: RewindMode) => Promise<void>;
+  onResubmit: (
+    targetSeq: number,
+    text: string,
+    mode: RewindMode,
+    workMode?: WorkModeName,
+  ) => Promise<void>;
   onApprovePlan: () => void;
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;

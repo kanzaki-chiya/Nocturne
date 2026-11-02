@@ -68,9 +68,9 @@ export interface SessionState {
   history: HistoryEntry[];
   /** 最近记录的 MCP 可用性；缺省全部可用，配置与回退一样不撤销。 */
   mcpAvailability?: Record<string, boolean> | undefined;
-  /** 目标模式（ADR-0076 §2）：与预设一样，回退不撤销 */
+  /** 目标模式（ADR-0076 §2）：按全部事件折叠；回退到设定消息时 Runtime 另写 stopped */
   goal?: GoalState | undefined;
-  /** 计划模式（ADR-0076 §5）：与预设一样，回退不撤销 */
+  /** 计划模式（ADR-0076 §5）：按全部事件折叠；回退到进入消息时 Runtime 另写 plan: null */
   plan?: PlanConfig | undefined;
   /** 最后一次有效且持久化的 todo_write 快照 */
   todos: TodoItem[];

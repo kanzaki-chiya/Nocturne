@@ -3,6 +3,8 @@ import { fsErrorCode, resolveRealPath, type Platform } from "../platform/index.j
 import {
   effectiveEvents,
   firstUserText,
+  isRuntimeWorkMode,
+  workModeDisplayText,
   type CheckpointBefore,
   type DurableEvent,
   type RewindFile,
@@ -156,19 +158,30 @@ export async function rewindTargets(
       });
     }
     const untracked = countUntrackedCalls(events.filter((e) => e.seq > event.seq));
+    const workMode = event.payload.workMode;
+    const typed = event.payload.content
+      .slice(
+        0,
+        event.payload.content.length -
+          (event.payload.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) -
+          // ADR-0076：执行方式说明块在末尾，不回填
+          (workMode ? 1 : 0),
+      )
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+    // 执行方式消息：列表与回填带命令名，回填后照原模式重新提交；Runtime 写入的模式消息不回填
+    const shown = workModeDisplayText(typed, workMode);
     targets.push({
       seq: event.seq,
-      firstLine: firstUserText(event.payload) ?? "",
+      firstLine: workMode
+        ? (shown
+            .split("\n")
+            .find((line) => line.trim() !== "")
+            ?.trim() ?? shown)
+        : (firstUserText(event.payload) ?? ""),
       time: event.time,
-      text: event.payload.content
-        .slice(
-          0,
-          event.payload.content.length -
-            (event.payload.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0),
-        )
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("\n"),
+      text: workMode === undefined ? typed : isRuntimeWorkMode(workMode) ? "" : shown,
       hasImages: (event.payload.attachments?.length ?? 0) > 0,
       files,
       untrackedCalls: untracked.total,

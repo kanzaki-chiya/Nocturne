@@ -15,6 +15,7 @@ import {
   type SessionView,
   type ToolEntry,
   type TurnEndReason,
+  type UserEntry,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
@@ -650,6 +651,63 @@ describe("回复与代码复制", () => {
       <Conversation view={view} {...conversationProps(rendered)} onApprovePlan={onApprovePlan} />,
     );
     expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
+  });
+
+  const modeEntry = (name: string, text: string, source?: string, steer?: true): UserEntry => ({
+    kind: "user",
+    key: `u-${name}-${source ?? "user"}`,
+    seq: 7,
+    turnId: "t1",
+    content: [
+      ...(text !== "" ? [{ type: "text" as const, text }] : []),
+      { type: "text", text: `<work-mode name="${name}">\n说明\n</work-mode>` },
+    ],
+    workMode: { name, body: "说明", ...(source !== undefined ? { source } : {}) },
+    ...(steer ? { steer } : {}),
+    attachments: [],
+  });
+
+  it.each(["grill-me", "goal", "plan", "boost"])(
+    "用户提交的 /%s 消息：重发与编辑并重发都带原 workMode（ADR-0076 §1）",
+    async (name) => {
+      const onResubmit = vi.fn(async () => undefined);
+      const view = createSessionView();
+      view.entries = [modeEntry(name, "做个登录页")];
+      const first = mount(view, { onResubmit });
+      fireEvent.click(screen.getByRole("button", { name: "重发" }));
+      expect(onResubmit).toHaveBeenLastCalledWith(7, "做个登录页", "both", name);
+      // 发出后按钮保持发送中，换一次挂载测编辑并重发
+      first.unmount();
+      const rendered = mount(view, { onResubmit });
+      Object.assign(rendered.methods, {
+        rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+      });
+      fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+      const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+      expect(box.value).toBe("做个登录页");
+      fireEvent.change(box, { target: { value: "做个注册页" } });
+      fireEvent.click(
+        within(box.closest(".u-edit") as HTMLElement).getByRole("button", { name: "发送" }),
+      );
+      expect(onResubmit).toHaveBeenLastCalledWith(7, "做个注册页", "both", name);
+    },
+  );
+
+  it("Runtime 写入的模式消息（核对、继续目标、批准计划）不显示编辑并重发与重发", () => {
+    for (const entry of [
+      modeEntry("goal", "", "runtime", true),
+      modeEntry("goal", "", "runtime"),
+      modeEntry("plan", "批准", "runtime"),
+    ]) {
+      const view = createSessionView();
+      view.entries = [entry];
+      const rendered = mount(view);
+      expect(screen.getByRole("button", { name: `/${entry.workMode?.name ?? ""}` })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "重发" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "编辑并重发" })).toBeNull();
+      rendered.unmount();
+    }
   });
 });
 

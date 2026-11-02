@@ -273,7 +273,9 @@ const payloadSchemas = {
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
     steer: z.literal(true).optional(),
     // ADR-0076：执行方式说明块快照；未知名字的旧/新日志照常读取
-    workMode: z.object({ name: z.string(), body: z.string() }).optional(),
+    workMode: z
+      .object({ name: z.string(), body: z.string(), source: z.string().optional() })
+      .optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),
