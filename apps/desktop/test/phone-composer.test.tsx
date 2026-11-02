@@ -249,6 +249,11 @@ it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历�
   await act(() => button("会话菜单").click());
   const options = [...container.querySelectorAll(".phone-option")].map((o) => o.textContent);
   expect(options).toEqual(["重命名", "压缩上下文", "MCP 状态", "输入历史", "Shellpwsh"]);
+  // 五项都没有图标与说明行，浮层没有可见标题，aria-label 保留
+  const menu = container.querySelector('[role="dialog"][aria-label="会话菜单"]');
+  expect(menu).not.toBeNull();
+  expect(menu?.querySelector(".phone-option-icon, small, .phone-popover-h")).toBeNull();
+  expect(menu?.querySelector(".phone-option.readout")?.textContent).toBe("Shellpwsh");
   await act(async () => {
     button("输入历史").click();
     await Promise.resolve();
@@ -258,6 +263,29 @@ it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历�
   await act(() => button("最近一条").click());
   expect(onPickHistory).toHaveBeenCalledWith("最近一条");
   expect(container.querySelector(".phone-history-row")).toBeNull();
+});
+
+it("探测 Shell 中只置灰，不写说明，打开菜单时触发探测；上下文浮层没有可见标题", async () => {
+  const load = vi.fn();
+  await act(async () => {
+    root?.render(
+      headerTools({
+        context: { load: () => new Promise<ContextSummary>(() => undefined), key: "0" },
+        shell: { label: "—", probing: true, load },
+      }),
+    );
+  });
+  await act(() => button("会话菜单").click());
+  expect(load).toHaveBeenCalledTimes(1);
+  const shell = [...container.querySelectorAll(".phone-option")].at(-1);
+  expect(shell?.textContent).toBe("Shell—");
+  expect(shell?.classList.contains("readout")).toBe(false);
+  expect(container.textContent).not.toContain("探测");
+  await act(() => button("上下文用量").click());
+  const panel = container.querySelector('[role="dialog"][aria-label="上下文用量"]');
+  expect(panel).not.toBeNull();
+  expect(panel?.querySelector(".phone-popover-h")).toBeNull();
+  expect(panel?.textContent).not.toContain("上下文用量");
 });
 
 it("@ 文件引用用文件索引补全，普通对话不可用；输入历史填回输入框", async () => {

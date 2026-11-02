@@ -99,7 +99,14 @@ export function SessionScreen({
   const backgrounds = useMemo(() => pendingBackgroundSubagents(view.entries), [view.entries]);
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState("");
-  const [fill, setFill] = useState<{ text: string; seq: number }>();
+  // 分叉后的原消息只填一次：取用后清掉，切走再回来或重新打开都不再填
+  const [fill, setFill] = useState<{ text: string; seq: number } | undefined>(() => {
+    const text = sessions.forkDrafts.get(session.id);
+    return text === undefined ? undefined : { text, seq: 1 };
+  });
+  useEffect(() => {
+    sessions.forkDrafts.delete(session.id);
+  }, [sessions, session.id]);
   useEffect(() => {
     let active = true;
     void session.describeSkills().then(
@@ -259,7 +266,10 @@ export function SessionScreen({
             running={view.currentTurn !== undefined}
             shell={{
               label: controls.shell?.effective?.kind ?? controls.shell?.selected ?? "—",
-              note: controls.shellControl.note,
+              probing: controls.shells === undefined,
+              load: () => {
+                controls.loadShells();
+              },
             }}
             onRename={() => onRename?.()}
             onCompact={() => {

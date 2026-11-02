@@ -197,6 +197,8 @@ export function App({ host }: { host: DesktopHost }) {
     };
   }, [host, prefs, prefsVersion, editors]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  /** 分叉出的新会话首次挂载输入框时填入的原消息；取用后清掉，不随恢复或重开再填 */
+  const [forkDraft, setForkDraft] = useState<{ id: string; text: string } | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [chatsExpanded, setChatsExpanded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -676,9 +678,13 @@ export function App({ host }: { host: DesktopHost }) {
         workspace: active.workspace,
         forkSession: (sessionId, seq) =>
           active.client.runtime.forkSession(sessionId, { targetSeq: seq }),
+        rewindTargets: () => active.session.rewindTargets(),
       },
       targetSeq,
       (id, workspace) => selectSession(id, workspace),
+      (id, text) => {
+        setForkDraft({ id, text });
+      },
     );
   };
   // 通知被点击时要切到那个会话：经 ref 读最新的列表与选择函数（监听只注册一次）
@@ -1522,6 +1528,10 @@ export function App({ host }: { host: DesktopHost }) {
                 running={conversationStatus(active) !== "idle"}
                 onResubmit={resubmit}
                 onFork={forkAt}
+                initialDraft={forkDraft?.id === active.session.id ? forkDraft.text : undefined}
+                onInitialDraftUsed={() => {
+                  setForkDraft(null);
+                }}
                 onApprovePlan={() => {
                   conversations.approvePlan();
                 }}
@@ -1815,6 +1825,9 @@ interface SessionPaneProps {
     workMode?: WorkModeName,
   ) => Promise<void>;
   onFork: (targetSeq: number) => Promise<void>;
+  /** 分叉后填进输入框的原消息（Composer 首次挂载时取用） */
+  initialDraft: string | undefined;
+  onInitialDraftUsed: () => void;
   onApprovePlan: () => void;
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;
@@ -1881,6 +1894,8 @@ function SessionPane({
   running,
   onResubmit,
   onFork,
+  initialDraft,
+  onInitialDraftUsed,
   onApprovePlan,
   turnChanges,
   onRewindFiles,
@@ -2021,6 +2036,8 @@ function SessionPane({
         onCancelPending={onCancelPending}
         onResumePending={onResumePending}
         historyKey={session.id}
+        initialDraft={initialDraft}
+        onInitialDraftUsed={onInitialDraftUsed}
         readInputHistory={() => session.readInputHistory()}
         fileRefs={isPlain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
         fileRefsUnavailable="普通对话没有项目文件"
