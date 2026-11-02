@@ -24,6 +24,24 @@ async function text(proc: PipeProcess): Promise<string> {
 }
 
 describe("spawnPipe 的协议消费者边界", () => {
+  it("detachOutput 在 stdout 只有 close、没有 end 时也结束原始字节读取", async () => {
+    const proc = platform.process.spawnPipe(process.execPath, [
+      "-e",
+      'process.stdout.write("ready"); setInterval(() => {}, 1000);',
+    ]);
+    let raw = "";
+    let finished = false;
+    const reading = (async () => {
+      for await (const chunk of proc.stdoutRaw) raw += chunk.toString("utf8");
+      finished = true;
+    })();
+    await vi.waitFor(() => expect(raw).toBe("ready"));
+    proc.detachOutput();
+    await vi.waitFor(() => expect(finished).toBe(true));
+    await reading;
+    expect(raw).toBe("ready");
+  });
+
   it("wait 仍等 close，exited 独立于后代管道，detachOutput 有界结束读取", async () => {
     const pidFile = path.join(root, "child.pid");
     processes.watchPidFile(pidFile);

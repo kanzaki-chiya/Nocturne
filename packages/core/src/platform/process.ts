@@ -489,6 +489,10 @@ function rawOutput(stream: Readable): AsyncIterable<Buffer> {
     state.ended = true;
     notify();
   });
+  stream.once("close", () => {
+    state.ended = true;
+    notify();
+  });
   stream.once("error", (error: Error) => {
     state.failure = error;
     state.ended = true;
