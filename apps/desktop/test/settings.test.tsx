@@ -3,7 +3,7 @@
  * 覆盖标黄、默认模型与档位成对保存、模型角色、审查器密钥按 password 处理、主题卡片、
  * 写成功后通知桌面端协调其他后台。
  */
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
@@ -183,6 +183,65 @@ function sampleRows(): HTMLElement[] {
 afterEach(cleanup);
 
 describe("SettingsPage", () => {
+  it("模型 RPC 与审查服务商迟迟不返回时，已返回的设置先显示；外观不等待 RPC", async () => {
+    const server = fakeServer(
+      handlers({
+        "runtime.listModels": () => new Promise(() => undefined),
+        "runtime.listReviewerProviders": () => new Promise(() => undefined),
+      }),
+    );
+    await server.initialize();
+    const view = render(<SettingsPage {...props(server.client, { section: "models" })} />);
+    await screen.findByRole("group", { name: "默认模型与档位" });
+    expect(screen.queryByText("加载中…")).toBeNull();
+    view.rerender(<SettingsPage {...props(server.client, { section: "appearance" })} />);
+    expect(screen.getByText("月之亮面")).toBeTruthy();
+    server.client.close();
+  });
+
+  it("已有数据刷新不闪加载；保存后的新值不被晚到的旧刷新覆盖，失败仍显示原错误", async () => {
+    let resolveOld!: (value: SettingItem[]) => void;
+    let reads = 0;
+    let fail = false;
+    const server = fakeServer(
+      handlers({
+        "runtime.describeSettings": () => {
+          if (fail) return new RpcFail(-32000, "刷新失败样例");
+          reads++;
+          return reads === 1
+            ? ITEMS
+            : new Promise<SettingItem[]>((resolve) => {
+                resolveOld = resolve;
+              });
+        },
+        "runtime.updateSettings": () =>
+          ITEMS.map((item) =>
+            item.key === "permissions.preset"
+              ? { ...item, effective: "read-only", saved: "read-only" }
+              : item,
+          ),
+      }),
+    );
+    await server.initialize();
+    const view = render(<SettingsPage {...props(server.client)} />);
+    const trigger = await screen.findByRole("combobox", { name: "默认权限预设" });
+    view.rerender(<SettingsPage {...props(server.client)} providersVersion={1} />);
+    await waitFor(() => expect(reads).toBe(2));
+    expect(screen.queryByText("加载中…")).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: /^read-only/ }));
+    await screen.findByText(/已保存 默认权限预设/);
+    await act(async () => {
+      resolveOld(ITEMS);
+    });
+    expect(trigger.textContent).toContain("read-only");
+    fail = true;
+    view.rerender(<SettingsPage {...props(server.client)} providersVersion={2} />);
+    await screen.findByText("刷新失败样例");
+    expect(trigger.textContent).toContain("read-only");
+    server.client.close();
+  });
+
   it("Shell 下拉复用探测选项，不可用置灰；保存刷新，失败保持值并显示原文", async () => {
     let fail = false;
     const server = fakeServer(

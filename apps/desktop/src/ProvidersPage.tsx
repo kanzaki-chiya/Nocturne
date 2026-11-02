@@ -276,20 +276,32 @@ export function ProvidersPage({
   const currentRef = useRef(sessionProvider);
   currentRef.current = sessionProvider;
 
+  const generation = useRef(0);
   const refresh = useCallback(async () => {
     if (client === undefined) return;
+    const current = ++generation.current;
     try {
       const [d, presets, def] = await Promise.all([
-        client.provider.describeProviders(),
-        client.provider.listProviderPresets(),
-        client.runtime.defaultModel(),
+        client.provider.describeProviders().then((value) => {
+          if (current === generation.current)
+            setData((old) => ({ ...old, providers: value.providers }));
+          return value;
+        }),
+        client.provider.listProviderPresets().then((value) => {
+          if (current === generation.current) setData((old) => ({ ...old, presets: value }));
+          return value;
+        }),
+        client.runtime.defaultModel().then((value) => {
+          if (current === generation.current)
+            setData((old) => ({
+              ...old,
+              defaultKey: value === undefined ? null : refKey(value),
+              defaultProvider: value?.provider,
+            }));
+          return value;
+        }),
       ]);
-      setData({
-        providers: d.providers,
-        presets,
-        defaultKey: def === undefined ? null : refKey(def),
-        defaultProvider: def?.provider,
-      });
+      if (current !== generation.current) return;
       setLoadError(null);
       // 首次拿到数据时定默认选中（当前服务商 > 第一个已配置 > 第一个可添加）
       setSel((cur) => {
@@ -304,11 +316,14 @@ export function ProvidersPage({
         return preset !== undefined ? { kind: "preset", id: preset.id } : null;
       });
     } catch (e) {
-      setLoadError(errText(e));
+      if (current === generation.current) setLoadError(errText(e));
     }
   }, [client]);
   useEffect(() => {
     void refresh();
+    return () => {
+      generation.current++;
+    };
   }, [refresh, providersVersion]);
 
   const configured = data.providers;

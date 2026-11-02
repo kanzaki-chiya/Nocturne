@@ -1,5 +1,13 @@
 /* 设置区各页（desktop-v3.html A–E 屏、desktop-v4.html；变量沿用 styles.css 主题语义名）。 */
 
+.settings-deck,
+.settings-slot {
+  display: contents;
+}
+.settings-slot[hidden] {
+  display: none;
+}
+
 /* 设置区盖在会话区上；会话区保持挂载（inert），返回时滚动位置不变 */
 .settings-over {
   position: absolute;

@@ -1024,12 +1024,12 @@ it("后台日志页按后台显示 stderr，支持刷新与复制全部", async 
   const page = await screen.findByTestId("logs-page");
   // 单后台（ADR-0051）：选择器只有「后台」与「外壳」
   expect(within(page).getByRole("combobox", { name: "后台" }).textContent).toContain("后台");
-  // 打开页面即拉取一次
+  // 进入设置时预加载一次；进入日志页保留数据并后台刷新一次。
   await within(page).findByText(/backend-1 stderr 样例/);
-  expect(host.stderrReads.length).toBe(1);
-  // 刷新再拉一次
+  expect(host.stderrReads.length).toBe(2);
+  // 手动刷新再拉一次
   fireEvent.click(within(page).getByRole("button", { name: "刷新" }));
-  await waitFor(() => expect(host.stderrReads.length).toBe(2));
+  await waitFor(() => expect(host.stderrReads.length).toBe(3));
   // 复制全部把日志写进剪贴板
   fireEvent.click(within(page).getByRole("button", { name: "复制全部" }));
   await waitFor(() =>

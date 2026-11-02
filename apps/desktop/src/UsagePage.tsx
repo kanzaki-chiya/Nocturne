@@ -620,7 +620,13 @@ export function UsageView({
   );
 }
 
-export function UsagePage({ client }: { client: RpcClient | null | undefined }) {
+export function UsagePage({
+  client,
+  version = 0,
+}: {
+  client: RpcClient | null | undefined;
+  version?: number;
+}) {
   const [range, setRange] = useState<Range>("30");
   const [stats, setStats] = useState<UsageStats>();
   const [loading, setLoading] = useState(false);
@@ -646,7 +652,7 @@ export function UsagePage({ client }: { client: RpcClient | null | undefined }) 
     return () => {
       cancelled = true;
     };
-  }, [client, range, refresh]);
+  }, [client, range, refresh, version]);
   return (
     <UsageView
       stats={stats}

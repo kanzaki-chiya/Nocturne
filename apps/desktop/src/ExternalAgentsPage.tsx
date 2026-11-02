@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import { EXTERNAL_AGENT_PRESETS } from "@nocturne/core/protocol";
 import type {
@@ -125,29 +125,40 @@ export function ExternalAgentsPage({
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const generation = useRef(0);
   const refresh = useCallback(async () => {
     if (!client) return;
+    const current = ++generation.current;
+    const accept = () => current === generation.current;
     try {
-      const [data, skillData, settings, models] = await Promise.all([
-        client.runtime.describeExternalAgents({ workspaceRoot }),
-        client.runtime.describeSkills({ workspaceRoot }),
-        client.runtime.describeSettings({ workspaceRoot }),
-        client.runtime.listModels({ workspaceRoot }),
+      await Promise.all([
+        client.runtime.describeExternalAgents({ workspaceRoot }).then((data) => {
+          if (!accept()) return;
+          setAgents(data.agents);
+          setWarnings(data.warnings);
+          setSelected((old) =>
+            data.agents.some((agent) => agent.name === old) ? old : data.agents[0]?.name,
+          );
+        }),
+        client.runtime.describeSkills({ workspaceRoot }).then((data) => {
+          if (accept()) setSkills(data.skills);
+        }),
+        client.runtime.describeSettings({ workspaceRoot }).then((data) => {
+          if (accept()) setItems(data);
+        }),
+        client.runtime.listModels({ workspaceRoot }).then((data) => {
+          if (accept()) setModels(data);
+        }),
       ]);
-      setAgents(data.agents);
-      setItems(settings);
-      setModels(models);
-      setWarnings(data.warnings);
-      setSkills(skillData.skills);
-      setSelected((old) =>
-        data.agents.some((agent) => agent.name === old) ? old : data.agents[0]?.name,
-      );
     } catch (e) {
-      setError(message(e));
+      if (accept()) setError(message(e));
     }
   }, [client, workspaceRoot]);
   useEffect(() => {
     void refresh();
+    return () => {
+      generation.current++;
+    };
   }, [refresh, version]);
   const current = agents.find((agent) => agent.name === selected);
   const recent = current ? results[current.name] : undefined;

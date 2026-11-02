@@ -51,6 +51,7 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
+import { SettingsDeck } from "./SettingsDeck";
 import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
 import type { RemoteStatus } from "@nocturne/rpc/client";
@@ -1480,152 +1481,160 @@ export function App({ host }: { host: DesktopHost }) {
             </PaneErrorBoundary>
           </div>
         )}
-        {page !== null && (
-          <div className="settings-over" ref={settingsRef}>
-            {page === "providers" ? (
-              <PaneErrorBoundary key="providers">
-                <ProvidersPage
-                  client={pageClient}
-                  currentProvider={active?.view.config.model?.provider}
-                  currentModel={active?.view.config.model?.model}
-                  inUse={providersInUse}
-                  openUrl={(url) => void host.openUrl(url)}
-                  providersVersion={providersVersion}
-                />
-              </PaneErrorBoundary>
-            ) : page === "mcp" ? (
-              <PaneErrorBoundary key="mcp">
-                <McpPage
-                  client={pageClient}
-                  workspaceRoot={effectiveWorkspace ?? undefined}
-                  version={providersVersion}
-                  onChanged={() => {
-                    void refresh();
-                  }}
-                />
-              </PaneErrorBoundary>
-            ) : page === "grants" ? (
-              <PaneErrorBoundary key="grants">
-                <GrantsPage client={pageClient} plainWorkspace={effectiveWorkspace ?? undefined} />
-              </PaneErrorBoundary>
-            ) : page === "agents" ? (
-              <PaneErrorBoundary key="agents">
-                <ExternalAgentsPage
-                  client={pageClient}
-                  workspaceRoot={effectiveWorkspace ?? undefined}
-                  version={providersVersion}
-                />
-              </PaneErrorBoundary>
-            ) : page === "remote" ? (
-              <PaneErrorBoundary key="remote">
-                <RemotePage client={pageClient} />
-              </PaneErrorBoundary>
-            ) : page === "skills" ? (
-              <PaneErrorBoundary key="skills">
-                <SkillsPage
-                  client={pageClient}
-                  workspaceRoot={effectiveWorkspace ?? undefined}
-                  version={providersVersion}
-                  openDirectory={(path, create) =>
-                    host.invoke("open_skill_directory", {
-                      path,
-                      create: create ?? false,
-                    }) as Promise<void>
-                  }
-                  openUrl={host.openUrl}
-                  pickFolder={() => host.pickFolder()}
-                />
-              </PaneErrorBoundary>
-            ) : page === "usage" ? (
-              <PaneErrorBoundary key="usage">
-                <UsagePage client={pageClient} />
-              </PaneErrorBoundary>
-            ) : page === "logs" ? (
-              <PaneErrorBoundary key="logs">
-                <BackendLogsPage
-                  backends={logTargets}
-                  fetchStderr={(backendId) =>
-                    backendId === KEY_DIAG_ID
-                      ? (host.invoke("key_diag_log") as Promise<string[]>)
-                      : backendId === SHELL_LOG_ID
-                        ? (host.invoke("shell_log") as Promise<string[]>)
-                        : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
-                  }
-                />
-              </PaneErrorBoundary>
-            ) : (
-              <PaneErrorBoundary key="settings">
-                <SettingsPage
-                  section={page}
-                  client={pageClient}
-                  theme={p.theme ?? "system"}
-                  fileOpener={p.fileOpener ?? "panel"}
-                  editors={editors}
-                  onFileOpenerChange={(opener) => {
-                    prefs.update({ fileOpener: opener === "panel" ? undefined : opener });
-                    bumpPrefs();
-                    return prefs.persistent;
-                  }}
-                  workspace={effectiveWorkspace}
-                  defaultWorkspace={defaultWorkspace}
-                  workspaceOverridden={p.plainWorkspace !== undefined}
-                  update={{
-                    autoUpdate: p.autoUpdate !== false,
-                    onAutoUpdateChange: (enabled) => {
-                      // 默认开：开启时清掉显式值，关闭才写 false
-                      prefs.update({ autoUpdate: enabled ? undefined : false });
+        <SettingsDeck page={page} client={pageClient} version={providersVersion}>
+          {(settingsPage, settingsVersion) => (
+            <div className="settings-over" ref={page === settingsPage ? settingsRef : undefined}>
+              {settingsPage === "providers" ? (
+                <PaneErrorBoundary key="providers">
+                  <ProvidersPage
+                    client={pageClient}
+                    currentProvider={active?.view.config.model?.provider}
+                    currentModel={active?.view.config.model?.model}
+                    inUse={providersInUse}
+                    openUrl={(url) => void host.openUrl(url)}
+                    providersVersion={settingsVersion}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "mcp" ? (
+                <PaneErrorBoundary key="mcp">
+                  <McpPage
+                    client={pageClient}
+                    workspaceRoot={effectiveWorkspace ?? undefined}
+                    version={settingsVersion}
+                    onChanged={() => {
+                      void refresh();
+                    }}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "grants" ? (
+                <PaneErrorBoundary key="grants">
+                  <GrantsPage
+                    client={pageClient}
+                    plainWorkspace={effectiveWorkspace ?? undefined}
+                    version={settingsVersion}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "agents" ? (
+                <PaneErrorBoundary key="agents">
+                  <ExternalAgentsPage
+                    client={pageClient}
+                    workspaceRoot={effectiveWorkspace ?? undefined}
+                    version={settingsVersion}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "remote" ? (
+                <PaneErrorBoundary key="remote">
+                  <RemotePage client={pageClient} />
+                </PaneErrorBoundary>
+              ) : settingsPage === "skills" ? (
+                <PaneErrorBoundary key="skills">
+                  <SkillsPage
+                    client={pageClient}
+                    workspaceRoot={effectiveWorkspace ?? undefined}
+                    version={settingsVersion}
+                    openDirectory={(path, create) =>
+                      host.invoke("open_skill_directory", {
+                        path,
+                        create: create ?? false,
+                      }) as Promise<void>
+                    }
+                    openUrl={host.openUrl}
+                    pickFolder={() => host.pickFolder()}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "usage" ? (
+                <PaneErrorBoundary key="usage">
+                  <UsagePage client={pageClient} version={settingsVersion} />
+                </PaneErrorBoundary>
+              ) : settingsPage === "logs" ? (
+                <PaneErrorBoundary key="logs">
+                  <BackendLogsPage
+                    backends={logTargets}
+                    version={settingsVersion}
+                    fetchStderr={(backendId) =>
+                      backendId === KEY_DIAG_ID
+                        ? (host.invoke("key_diag_log") as Promise<string[]>)
+                        : backendId === SHELL_LOG_ID
+                          ? (host.invoke("shell_log") as Promise<string[]>)
+                          : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
+                    }
+                  />
+                </PaneErrorBoundary>
+              ) : (
+                <PaneErrorBoundary key="settings">
+                  <SettingsPage
+                    section={settingsPage}
+                    client={pageClient}
+                    theme={p.theme ?? "system"}
+                    fileOpener={p.fileOpener ?? "panel"}
+                    editors={editors}
+                    onFileOpenerChange={(opener) => {
+                      prefs.update({ fileOpener: opener === "panel" ? undefined : opener });
                       bumpPrefs();
                       return prefs.persistent;
-                    },
-                    onCheck: async () => {
-                      const result = await updateSvc.manualCheck();
-                      if (result.kind === "update") setUpdateNotice(result.notice);
-                      return result;
-                    },
-                  }}
-                  onThemeChange={(theme) => {
-                    prefs.update({ theme: theme === "system" ? undefined : theme });
-                    bumpPrefs();
-                    return prefs.persistent;
-                  }}
-                  onWorkspaceChange={changePlainWorkspace}
-                  pickFolder={() => host.pickFolder()}
-                  providersVersion={providersVersion}
-                  onConfigSaved={() => {
-                    void refresh();
-                    // 通知开关就写在这份设置里：保存后立刻按新值判定（ADR-0056）
-                    void refreshNotifyPrefs();
-                  }}
-                  onOpenSubagents={() => {
-                    setPage("agents");
-                  }}
-                  agentBrowser={host.agentBrowser}
-                  prefs={prefs}
-                  appearance={{
-                    uiFont: p.uiFont,
-                    codeFont: p.codeFont,
-                    fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
-                    listFonts: host.listFonts,
-                    onChange: (patch) => {
-                      prefs.update(patch);
+                    }}
+                    workspace={effectiveWorkspace}
+                    defaultWorkspace={defaultWorkspace}
+                    workspaceOverridden={p.plainWorkspace !== undefined}
+                    update={{
+                      autoUpdate: p.autoUpdate !== false,
+                      onAutoUpdateChange: (enabled) => {
+                        // 默认开：开启时清掉显式值，关闭才写 false
+                        prefs.update({ autoUpdate: enabled ? undefined : false });
+                        bumpPrefs();
+                        return prefs.persistent;
+                      },
+                      onCheck: async () => {
+                        const result = await updateSvc.manualCheck();
+                        if (result.kind === "update") setUpdateNotice(result.notice);
+                        return result;
+                      },
+                    }}
+                    onThemeChange={(theme) => {
+                      prefs.update({ theme: theme === "system" ? undefined : theme });
                       bumpPrefs();
                       return prefs.persistent;
-                    },
-                  }}
-                  notifications={{
-                    sendTest: (sound) =>
-                      host.notify({
-                        sessionId: "test",
-                        title: "Nocturne",
-                        body: "这是一条测试通知",
-                        sound,
-                      }),
-                  }}
-                />
-              </PaneErrorBoundary>
-            )}
-          </div>
-        )}
+                    }}
+                    onWorkspaceChange={changePlainWorkspace}
+                    pickFolder={() => host.pickFolder()}
+                    providersVersion={settingsVersion}
+                    onConfigSaved={() => {
+                      setProvidersVersion((version) => version + 1);
+                      void refresh();
+                      // 通知开关就写在这份设置里：保存后立刻按新值判定（ADR-0056）
+                      void refreshNotifyPrefs();
+                    }}
+                    onOpenSubagents={() => {
+                      setPage("agents");
+                    }}
+                    agentBrowser={host.agentBrowser}
+                    prefs={prefs}
+                    appearance={{
+                      uiFont: p.uiFont,
+                      codeFont: p.codeFont,
+                      fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
+                      listFonts: host.listFonts,
+                      onChange: (patch) => {
+                        prefs.update(patch);
+                        bumpPrefs();
+                        return prefs.persistent;
+                      },
+                    }}
+                    notifications={{
+                      sendTest: (sound) =>
+                        host.notify({
+                          sessionId: "test",
+                          title: "Nocturne",
+                          body: "这是一条测试通知",
+                          sound,
+                        }),
+                    }}
+                  />
+                </PaneErrorBoundary>
+              )}
+            </div>
+          )}
+        </SettingsDeck>
         <div
           className="mainpane"
           inert={page !== null || schedulesOpen}

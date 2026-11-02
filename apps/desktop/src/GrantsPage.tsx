@@ -47,10 +47,12 @@ export function GrantsPage({
   client,
   plainWorkspace,
   remote = false,
+  version = 0,
 }: {
   client: RpcClient | undefined;
   plainWorkspace?: string | undefined;
   remote?: boolean;
+  version?: number;
 }) {
   const [workspaces, setWorkspaces] = useState<GrantWorkspace[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -98,7 +100,8 @@ export function GrantsPage({
   }, [client, selected]);
   useEffect(() => {
     void refreshWorkspaces();
-  }, [refreshWorkspaces]);
+    void refresh();
+  }, [refreshWorkspaces, refresh, version]);
   useEffect(() => {
     setGrants([]);
     setConfirmAll(false);

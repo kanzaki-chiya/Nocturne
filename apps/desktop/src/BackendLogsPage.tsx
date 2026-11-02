@@ -40,9 +40,11 @@ function errText(e: unknown): string {
 export function BackendLogsPage({
   backends,
   fetchStderr,
+  version = 0,
 }: {
   backends: BackendLogTarget[];
   fetchStderr: (backendId: number) => Promise<string[]>;
+  version?: number;
 }) {
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const [lines, setLines] = useState<string[] | null>(null);
@@ -54,28 +56,36 @@ export function BackendLogsPage({
   // 后台退出或新增后列表会变：选中项不在了就回落到第一个
   const current = backends.find((b) => String(b.backendId) === picked) ?? backends[0];
 
+  const generation = useRef(0);
+  const previousTarget = useRef<number>(undefined);
   const load = async (target: BackendLogTarget) => {
+    const current = ++generation.current;
     setLoading(true);
     try {
-      setLines(await fetchStderr(target.backendId));
+      const result = await fetchStderr(target.backendId);
+      if (current !== generation.current) return;
+      setLines(result);
       setError(null);
     } catch (e) {
-      setLines(null);
-      setError(errText(e));
+      if (current === generation.current) setError(errText(e));
     } finally {
-      setLoading(false);
+      if (current === generation.current) setLoading(false);
     }
   };
 
   // 只在打开页面或切换后台时拉取；进程侧缓存在内存里，不持久化
   const currentId = current?.backendId;
   useEffect(() => {
-    setLines(null);
+    if (previousTarget.current !== currentId) setLines(null);
+    previousTarget.current = currentId;
     setError(null);
     const target = backends.find((b) => b.backendId === currentId);
     if (target !== undefined) void load(target);
-    // 依赖只挂 backendId：load 只随目标变化；backends 数组身份每次渲染都变
-  }, [currentId]);
+    return () => {
+      generation.current++;
+    };
+    // backends 数组身份每次渲染都变，只在目标或页面刷新代际变化时读取。
+  }, [currentId, version]);
 
   useEffect(
     () => () => {

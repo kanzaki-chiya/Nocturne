@@ -317,24 +317,38 @@ export function SettingsPage({
   const shellTrigger = useRef<HTMLButtonElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
+  const generation = useRef(0);
+  const writing = useRef(0);
   const refresh = useCallback(async () => {
-    if (client === undefined) return;
-    try {
-      const [s, m, rp] = await Promise.all([
-        client.runtime.describeSettings(),
-        client.runtime.listModels(),
-        client.runtime.listReviewerProviders(),
-      ]);
-      setItems(s);
-      setModels(m);
-      setReviewerProviders(rp.map((x) => x.id));
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(errText(e));
-    }
-  }, [client]);
+    if (client === undefined || section === "appearance" || writing.current > 0) return;
+    const current = ++generation.current;
+    setLoadError(null);
+    const accept = () => current === generation.current && writing.current === 0;
+    const load = async <T,>(request: Promise<T>, apply: (value: T) => void) => {
+      try {
+        const value = await request;
+        if (accept()) apply(value);
+      } catch (e) {
+        if (accept()) setLoadError(errText(e));
+      }
+    };
+    await Promise.all([
+      load(client.runtime.describeSettings(), setItems),
+      ...(section === "models"
+        ? [
+            load(client.runtime.listModels(), setModels),
+            load(client.runtime.listReviewerProviders(), (providers) => {
+              setReviewerProviders(providers.map((provider) => provider.id));
+            }),
+          ]
+        : []),
+    ]);
+  }, [client, section]);
   useEffect(() => {
     void refresh();
+    return () => {
+      generation.current++;
+    };
   }, [refresh, providersVersion]);
   useEffect(
     () => () => {
@@ -359,6 +373,19 @@ export function SettingsPage({
     });
   };
 
+  const commitSettings = async (action: () => Promise<SettingItem[]>) => {
+    writing.current++;
+    generation.current++;
+    try {
+      const next = await action();
+      generation.current++;
+      setItems(next);
+      return next;
+    } finally {
+      writing.current--;
+    }
+  };
+
   /** 逐项保存：成功写回 items 并提示；失败把原因挂到该行（值仍是 items 里的原值） */
   const save = async (
     key: string,
@@ -369,8 +396,7 @@ export function SettingsPage({
     if (client === undefined) return "后台尚未就绪";
     setRowErr(key, null);
     try {
-      const next = await client.runtime.updateSettings(patch, options);
-      setItems(next);
+      const next = await commitSettings(() => client.runtime.updateSettings(patch, options));
       onConfigSaved?.();
       const value = next.find((x) => x.key === key)?.effective;
       showToast(`已保存 ${label}${value !== undefined ? ` = ${value}` : ""}`);
@@ -635,7 +661,7 @@ export function SettingsPage({
                               setShellBusy(true);
                               setRowErr("shell", null);
                               try {
-                                setItems(await client.runtime.setShellSetting(value));
+                                await commitSettings(() => client.runtime.setShellSetting(value));
                                 onConfigSaved?.();
                               } catch (e) {
                                 setRowErr("shell", errText(e));
@@ -1079,8 +1105,7 @@ export function SettingsPage({
           }}
           onSave={async (model, effort) => {
             try {
-              const next = await client.runtime.setDefaultModel(model, effort);
-              setItems(next);
+              await commitSettings(() => client.runtime.setDefaultModel(model, effort));
               onConfigSaved?.();
               setRowErr("defaultModel", null);
               setDialog(null);
