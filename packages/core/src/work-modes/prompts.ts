@@ -40,19 +40,18 @@ const PLAN = [
 function boostBody(context: WorkModeContext): string {
   const max = context.maxBackground ?? 3;
   const git = context.gitRepository !== false;
+  const apply =
+    'As each writable subagent finishes, review its result and apply its changes with apply_subagent_changes (use mode "clean" first, then "3way" and resolve conflict markers if needed).';
   return [
-    "Boost mode: decompose the request above, run independent work in parallel with background subagents, then integrate and run regression checks.",
-    `- You can run at most ${max} background subagents at the same time in this session. Never poll or sleep waiting for them; end your turn after launching a batch and their results will arrive as messages.`,
+    "Boost mode: the user explicitly chose parallel execution for the request above. Decompose it, run independent work in parallel with background subagents, then integrate and run regression checks.",
+    "- Delegate by default: when the request splits into two or more independent slices, give each one to a background subagent, even if you could finish them yourself. If it does not split, do it yourself and say why in one sentence.",
+    `- You can run at most ${max} background subagents at the same time in this session. Never poll or sleep waiting for them. After launching a batch, end your turn without starting the integration work; their results will arrive as messages.`,
     git
-      ? '- For read-only investigation, call task with preset "explore" and background: true. For independent code changes, call task with background: true and isolation: "worktree" so each subagent edits an isolated git worktree.'
-      : '- This workspace is not a git repository with a commit, so worktree isolation is unavailable. Use background subagents (preset "explore", background: true) only for parallel investigation, and make all file changes yourself in the main workspace.',
+      ? '- For read-only investigation, call task with preset "explore" and background: true. For independent code changes, call task with background: true and isolation: "worktree" so each subagent edits an isolated git worktree. Worktrees start from the latest commit, so uncommitted changes are not in them.'
+      : `- This workspace is not a git repository with a commit, so worktree isolation is unavailable until it has one. If the request has writable slices, use ask_user to ask whether to set that up. If the user agrees, run git init when needed, make sure .gitignore covers dependencies, build output and secrets, commit the current files, then call task with background: true and isolation: "worktree" for each slice. ${apply} If the user declines or ask_user is not available, use background subagents (preset "explore", background: true) only for parallel investigation, and make all file changes yourself in the main workspace.`,
     "- Give every subagent a self-contained task description: the exact files or module it owns, the constraints, and how to verify its slice. Keep writable slices on disjoint files to avoid conflicts.",
-    "- Subagents are non-interactive and cannot ask the user for approval; under stricter permission presets their writes or commands may be denied. When a subagent reports a permission denial, complete that slice yourself.",
-    ...(git
-      ? [
-          '- As each writable subagent finishes, review its result and apply its changes with apply_subagent_changes (use mode "clean" first, then "3way" and resolve conflict markers if needed).',
-        ]
-      : []),
+    "- Subagents are non-interactive and cannot ask the user for approval. Actions that still need approval under the current permissions are denied; when a subagent reports a permission denial, complete that slice yourself.",
+    ...(git ? [`- ${apply}`] : []),
     "- After all slices are integrated, run the project's tests or typechecks in the main workspace to catch regressions, then summarize the outcome by subtask.",
   ].join("\n");
 }

@@ -280,7 +280,7 @@ describe("buildContext", () => {
     const main = buildContext(baseInput());
     expect(main.request.system[0]?.text).toContain("check your last paragraph");
     expect(main.request.system[0]?.text).toContain(
-      "multiple task calls in one step run one after\n  another, not in parallel.",
+      "multiple foreground task calls in one step run one\n  after another, not in parallel.",
     );
     expect(main.request.system[0]?.text).not.toContain("can run in parallel");
     expect(main.request.system[0]?.text).not.toContain("background");

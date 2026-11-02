@@ -786,6 +786,8 @@ describe("/boost（ADR-0076 §6）", () => {
     const body = users(s3)[0]?.payload.workMode?.body ?? "";
     expect(body).toContain("at most 2 background subagents");
     expect(body).toContain("not a git repository");
+    expect(body).toContain("use ask_user to ask whether to set that up");
+    expect(body).toContain("Delegate by default");
     await s3.close();
   });
 

@@ -41,7 +41,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 
 `permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节（`default`/`auto-edit` 下 `explore` 默认放行、`general`/`custom` 需确认）。
 
-工具描述向父模型如实说明权限收敛：子会话非交互，需要确认的操作在子会话内会被拒（第 7 节）——只读/探索任务优先用 `explore`，需要写入或执行的任务要么先由规则/Grant/`--yes` 放行，要么由父代理自己执行。避免父模型派出注定失败的写操作子代理浪费步数。
+工具描述向父模型如实说明权限收敛：子会话非交互，需要确认的操作在子会话内会被拒（第 7 节）——只读/探索任务优先用 `explore`，被拒绝的操作由子代理说明、父代理自己执行；是否被拒按当前权限判定，`guarded`、`smart`、`bypass` 或规则/Grant/`--yes` 放行时子代理可以写入和执行。避免父模型派出注定失败的写操作子代理浪费步数。
 
 **ToolResult**：
 
