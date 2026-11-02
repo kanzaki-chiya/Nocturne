@@ -128,6 +128,10 @@ describe("按词折行", () => {
         status: "ok",
         modelContent: "abc defghijklm",
         output: "abc defghijklm",
+        error: undefined,
+        truncated: false,
+        spillPath: undefined,
+        durationMs: undefined,
       },
     };
     const lines = layoutEntry(tool, 16, true, new Map(), 0, false, true);

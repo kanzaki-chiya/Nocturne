@@ -174,16 +174,20 @@ export function lastWrapBreak(
   options: { nextWide?: boolean; guard?: number } = {},
 ): number {
   const guard = options.guard ?? 0;
-  const chars = [...text];
-  if (chars.length === 0) return -1;
-  const last = chars.at(-1) ?? "";
+  let last = "";
+  let count = 0;
+  for (const ch of text) {
+    last = ch;
+    count += 1;
+  }
+  if (count === 0) return -1;
   if ((options.nextWide === true || stringWidth(last) >= 2) && text.length > guard)
     return text.length;
   let cut = -1;
   let index = 0;
   let seenContent = false;
   let prevWide = false;
-  for (const ch of chars) {
+  for (const ch of text) {
     const wide = stringWidth(ch) >= 2;
     if (index > guard && (wide || prevWide)) cut = index;
     if ((ch === " " || ch === "\t") && seenContent && index + ch.length > guard)
