@@ -12,46 +12,13 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { HighlightStyle, syntaxHighlighting, type LanguageSupport } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags } from "@lezer/highlight";
 
-type LanguageLoader = () => Promise<LanguageSupport>;
+import { languageFor } from "./code-language";
 
-const LANGUAGES: Record<string, LanguageLoader> = {
-  js: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
-  mjs: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
-  cjs: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
-  jsx: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true })),
-  ts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
-  mts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
-  cts: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ typescript: true })),
-  tsx: () =>
-    import("@codemirror/lang-javascript").then((m) =>
-      m.javascript({ typescript: true, jsx: true }),
-    ),
-  css: () => import("@codemirror/lang-css").then((m) => m.css()),
-  scss: () => import("@codemirror/lang-css").then((m) => m.css()),
-  html: () => import("@codemirror/lang-html").then((m) => m.html()),
-  htm: () => import("@codemirror/lang-html").then((m) => m.html()),
-  vue: () => import("@codemirror/lang-html").then((m) => m.html()),
-  json: () => import("@codemirror/lang-json").then((m) => m.json()),
-  jsonc: () => import("@codemirror/lang-json").then((m) => m.json()),
-  md: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
-  markdown: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
-  py: () => import("@codemirror/lang-python").then((m) => m.python()),
-  rs: () => import("@codemirror/lang-rust").then((m) => m.rust()),
-  yaml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
-  yml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
-  xml: () => import("@codemirror/lang-xml").then((m) => m.xml()),
-  svg: () => import("@codemirror/lang-xml").then((m) => m.xml()),
-};
-
-/** 扩展名对应的语言包；未知扩展名按纯文本显示 */
-export function languageFor(path: string): LanguageLoader | undefined {
-  const ext = /\.([^.\\/]+)$/.exec(path)?.[1]?.toLowerCase();
-  return ext === undefined ? undefined : LANGUAGES[ext];
-}
+export { languageFor } from "./code-language";
 
 // 颜色取主题变量：深浅主题切换不用重建编辑器
 const highlight = HighlightStyle.define([

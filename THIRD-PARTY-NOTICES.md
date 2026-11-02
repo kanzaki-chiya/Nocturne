@@ -26,15 +26,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@codemirror/state` | 6.7.6 | MIT |
 | `@codemirror/language` | 6.13.1 | MIT |
 | `@codemirror/search` | 6.7.2 | MIT |
-| `@codemirror/lang-css` | 6.3.1 | MIT |
-| `@codemirror/lang-html` | 6.4.12 | MIT |
-| `@codemirror/lang-javascript` | 6.2.5 | MIT |
-| `@codemirror/lang-json` | 6.0.2 | MIT |
-| `@codemirror/lang-markdown` | 6.5.2 | MIT |
-| `@codemirror/lang-python` | 6.2.1 | MIT |
-| `@codemirror/lang-rust` | 6.0.2 | MIT |
-| `@codemirror/lang-xml` | 6.1.0 | MIT |
-| `@codemirror/lang-yaml` | 6.1.3 | MIT |
+| `@codemirror/language-data` | 6.5.2 | MIT |
 | `@lezer/highlight` | 1.2.5 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
@@ -42,7 +34,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 
 桌面端第 2 步复用 `marked` **18.0.7**（MIT；2026-07-21 发布，采用时已满 7 天）解析 Markdown token，由 React 元素渲染；不使用其 HTML 输出，不渲染原始 HTML。
 
-桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载，不进手机网页。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。
+桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载。`@codemirror/language-data` 6.5.2 及它引入的 `@codemirror/lang-*`、`@codemirror/legacy-modes`、对应 `@lezer/*` 解析器均为 MIT，与 GPL-3.0-only 兼容；语言包通过目录的 `load()` 按需加载。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。
 
 桌面端右侧面板的终端用 xterm.js（上表 `@xterm/xterm`、`@xterm/addon-fit` 与 `@xterm/addon-unicode11`，均为 MIT，无运行时依赖），随终端标签首次打开动态加载，不进手机网页。
 
