@@ -51,6 +51,37 @@ it("满视口上下平移只覆盖新露出的行；位移过大退回逐行覆�
   expect(rewritten(far)).toHaveLength(9);
 });
 
+it("视口缩短后平移，新露出的行不能复用滚动区域外的旧内容", () => {
+  const layer = new OutputLayer();
+  const original = [
+    "row-0",
+    "row-1",
+    "row-2",
+    "row-3",
+    "row-4",
+    "row-5",
+    "● 交付清单：测试通过",
+    "  先处理第 1 项。",
+    "row-8",
+    "input",
+    "status",
+  ];
+  layer.render(frame(original), 80, 12, 9, "conversation", undefined);
+  const write = layer.render(
+    frame([...original.slice(2, 8), "command", "help", "settings", "input", "status"]),
+    80,
+    12,
+    6,
+    "conversation",
+    undefined,
+  );
+  expect(write).toContain("\x1b[1;6r\x1b[1;1H\x1b[2S\x1b[r");
+  expect(rewritten(write)).toContain(5);
+  expect(rewritten(write)).toContain(6);
+  expect(write).toContain("● 交付清单：测试通过");
+  expect(write).toContain("先处理第 1 项。");
+});
+
 it("单行变更和选区反显只覆盖受影响的行", () => {
   const layer = new OutputLayer();
   const original = Array.from({ length: 9 }, (_, i) => `row-${i}`);

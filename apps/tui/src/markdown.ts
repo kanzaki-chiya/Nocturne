@@ -264,11 +264,17 @@ export function renderMarkdown(
         case "list":
           (token as Tokens.List).items.forEach((item, i) => {
             const list = token as Tokens.List;
-            const bullet = list.ordered
+            let bullet = list.ordered
               ? `${(typeof list.start === "number" ? list.start : 1) + i}. `
               : "• ";
-            for (const [index, part] of item.tokens.entries()) {
-              render([part], `${prefix}${index === 0 ? bullet : " ".repeat(bullet.length)}`);
+            const indent = " ".repeat(bullet.length);
+            const parts = item.tokens.filter((part) => {
+              if (part.type !== "checkbox") return true;
+              bullet += part.raw;
+              return false;
+            });
+            for (const [index, part] of parts.entries()) {
+              render([part], `${prefix}${index === 0 ? bullet : indent}`);
             }
           });
           break;
