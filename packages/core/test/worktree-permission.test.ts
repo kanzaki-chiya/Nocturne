@@ -32,6 +32,7 @@ describe("worktree shell hard denial", () => {
   ])("denies external git paths, cd targets, and cwd even in bypass: %s", (subject) => {
     const result = policy.evaluate([{ kind: "shell", ...subject }]);
     expect(result.decision.action).toBe("deny");
+    expect(result.decision.reason).toContain(root);
     expect(result.decision.reason).toContain(
       "This subagent is isolated in its own worktree; commands must stay inside it.",
     );

@@ -288,7 +288,7 @@ interface SubagentSummary {
   parentSessionId: string;
   callId: string;
   childSessionId: string;
-  profile: string;                 // 启动参数 profile / agent / default，不读当前配置反推
+  profile: string;                 // 启动参数 preset 优先，其次非 default 的 profile / agent；缺省空字符串，不读当前配置反推
   background?: true;               // 后台子代理（ADR-0073）；父 task 已结算时 state 仍可为 running
   taskSummary: string;             // task 原文压成单行，最多 120 个 Unicode 码点
   startedAt: string;               // 子 session.created.time，ISO 8601
@@ -314,7 +314,7 @@ interface SubagentObservation {
 
 `ToolCallStatus` 沿用 protocol。summary 是查询投影，不是新的会话状态或事件；最终结果正文仍从父 `task.completed.modelContent` 或子 `finish` 的已持久化输入读取，不复制进 summary。`outcome` 只来自父调用已持久化的结算，没有时省略；`endedAt` 优先取父结算时间，否则取可判定终止的最后一个子 `turn.completed.time`。缺父耗时的时间差是近似耗时，客户端须标注；没有结束事实时不提供最终耗时。
 
-`listSubagents` 返回该父会话的**直接内置子会话**（含已结束），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补档位和摘要；旧日志缺启动参数时档位用 `default`、摘要回退首条子 `message.user`，再缺则「子代理」（常量 `SUBAGENT_TASK_FALLBACK`，由 `@nocturne/core/protocol` 导出，Core 与桌面端共用）。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
+`listSubagents` 返回该父会话的**直接内置子会话**（含已结束），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补标识和摘要；标识由共享 `subagentProfile` 优先取 preset，其次非 default 的 profile/agent，缺省为空。旧日志缺启动参数时摘要回退首条子 `message.user`，再缺则「子代理」（常量 `SUBAGENT_TASK_FALLBACK`，由 `@nocturne/core/protocol` 导出，Core 与桌面端共用）。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
 
 工作树隔离的保留项（[ADR-0075](../decisions/ADR-0075-worktree-isolation.md) §6）：`subagent.worktrees({ parentSessionId })` 返回该父会话登记的副本与分支（含已收束的 `changes`）；`subagent.deleteWorktree({ parentSessionId, childSessionId })` 删除副本与 `nocturne/` 分支，子代理仍在运行时报 `invalid_command`；`subagent.diff({ parentSessionId, childSessionId, file })` 返回该文件 `base..head` 的差异文本，文件必须在结果清单内。
 

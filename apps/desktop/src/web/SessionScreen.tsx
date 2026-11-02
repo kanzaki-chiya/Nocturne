@@ -335,7 +335,7 @@ export function SessionScreen({
         <div className="pi-list" aria-label="后台子代理">
           {backgrounds.map((item) => (
             <div className="pi-item" key={item.childSessionId}>
-              <span>{item.profile} · 后台</span>
+              <span>{item.profile ? `${item.profile} · ` : ""}后台</span>
               <span className="pi-text">{item.task}</span>
               <Button
                 variant="ghost"

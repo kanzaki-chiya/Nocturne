@@ -13,6 +13,7 @@ import {
   subagentApplyLine,
   subagentResultText,
   backgroundToolStatus,
+  subagentStartRejected,
   workModeDisplayText,
 } from "@nocturne/core/protocol";
 
@@ -396,7 +397,10 @@ function layoutEntryBody(
       const shownName = entry.target?.name ?? entry.name;
       const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
       const summary = summarizeToolInput(shownName, shownInput);
-      const status = backgroundToolStatus(entry, options.entries ?? []) ?? entry.status;
+      const notStarted = subagentStartRejected(entry);
+      const status = notStarted
+        ? "未启动"
+        : (backgroundToolStatus(entry, options.entries ?? []) ?? entry.status);
       const head =
         shownName === "apply_subagent_changes" && entry.result
           ? `${mark} ${subagentApplyLine(entry.result.output)}`
@@ -473,7 +477,9 @@ function layoutEntryBody(
       }
       const content = diffExpanded
         ? entry.result?.modelContent
-        : (webFetchSummary(entry) ?? entry.result?.modelContent);
+        : notStarted
+          ? undefined
+          : (webFetchSummary(entry) ?? entry.result?.modelContent);
       if (content !== undefined && content !== "") {
         if (diffExpanded)
           lines.push(...reasoningBody(`${entry.key}:out`, content, width, { wordWrap: false }));

@@ -414,7 +414,7 @@ export function restoreTabs(
 export function subagentTabName(tab: Pick<SubagentTab, "profile" | "taskSummary">): string {
   const flat = tab.taskSummary.replace(/\s+/g, " ").trim();
   const summary = Array.from(flat).slice(0, SUBAGENT_SUMMARY_MAX).join("");
-  return summary === "" ? tab.profile : `${tab.profile} · ${summary}`;
+  return [tab.profile === "default" ? "" : tab.profile, summary].filter(Boolean).join(" · ");
 }
 
 /** 父会话里已开的这个 child 的标签（按 childSessionId 去重） */

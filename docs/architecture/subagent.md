@@ -37,7 +37,7 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 | `outputSchema` | `JsonSchema`（object） | 要求子代理按此 schema 提交结构化结果；无法编译 → `invalid_input` |
 | `timeoutMs` | `integer` | 可选的本次超时，正整数生效，不设固定封顶；省略时依次采用 profile、Runtime 的显式值，否则不超时（读取规则见 tool-api.md 第 1 节） |
 
-`traits`：`{ mutates: true, concurrencySafe: false, inputTimeoutMs: true, maxModelChars: 30_000 }`，不声明默认 `timeoutMs` 或 `maxTimeoutMs`。显式输入由执行器兜底；profile 与 Runtime 的显式值由 launcher 计时，避免较短的工具默认值截断较长的 profile 时限。优先级为显式输入 > profile > Runtime，均缺省时不启动计时器。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 因为并行子代理在没有工作区隔离的前提下可能同时改同一批文件（隔离明确不做，见第 16 节）。
+`traits`：`{ mutates: true, concurrencySafe: false, inputTimeoutMs: true, maxModelChars: 30_000 }`，不声明默认 `timeoutMs` 或 `maxTimeoutMs`。显式输入由执行器兜底；profile 与 Runtime 的显式值由 launcher 计时，避免较短的工具默认值截断较长的 profile 时限。优先级为显式输入 > profile > Runtime，均缺省时不启动计时器。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 保留同步调用串行契约，后台隔离见第 20 节。
 
 `permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节（`default`/`auto-edit` 下 `explore` 默认放行、`general`/`custom` 需确认）。
 
@@ -314,7 +314,7 @@ launch(request, ctx)
 - **Agent 间消息总线**：父子间唯一通道是 `task` 输入与 `finish` 结果；
 - **分布式执行**：子会话在同一进程内运行；
 - **子代理常驻与唤醒**：`finish` 后子会话关闭，不存在再次唤起的入口；
-- **隔离工作区**（worktree/overlay）：子代理与父会话共享同一工作区视图；
+- **同步隔离工作区**：同步子代理与父会话共享工作区；后台工作树见第 20 节；
 - **子会话权限冒泡**：见 7.1；
 - **并行 task 数组**：一次调用一个子会话；批量并行等并行调度存在后再评估；
 
@@ -367,9 +367,11 @@ explore 档位不能请求 general，显式 tools 必须是只读池子集；gen
 后台交付与生命周期见 [ADR-0073](../decisions/ADR-0073-background-subagents.md)，可写后台隔离见 [ADR-0075](../decisions/ADR-0075-worktree-isolation.md)。Git 操作集中在 `agent/worktree.ts`；`task.isolation: "worktree"` 与 `background` 同显同隐，只接受后台调用，工作区与预设路径映射到副本，项目配置和信任仍来自父会话。收束时提交结果并附 `changes`；`apply_subagent_changes` 经过 edit 主体权限与检查点。
 
 - **开关**：`RuntimeOptions.subagent.background`（缺省关闭）。TUI、逐行 CLI、桌面端后台、`nctrn rpc` 开启；`nctrn -p` 与定时任务会话关闭。只有顶层、非定时任务会话的 `task` 才在 schema 与描述里出现 `background`，子会话里没有。多代理攻坚（`/boost`，[ADR-0076](../decisions/ADR-0076-work-modes.md) §6）依赖这一开关，未开启或子代理停用时在提交准备阶段拒绝 `invalid_command`。
-- **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 是唯一判断：外部 agent 一律拒绝，隔离方式为 `"none"` 时只放行全部 `traits.mutates === false` 的工具集（`explore`、只读档位、只读 `tools` 白名单）。launcher 在建子会话之前调用它，外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。
+- **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 拒绝外部 agent，以及显式 `"none"` 的可写工具集。launcher 根据最终选定工具集，在省略 isolation 时为含写操作的后台任务创建工作树，只读任务不检查 git、不建工作树。非 git、无 HEAD 提交、裸仓库在创建子会话前准确拒绝并建议只读子代理或主代理完成；其他创建失败保留 git 错误，不回退共享目录。外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。
 - **启动**：子会话建好即返回 `output: { childSessionId, childLogPath, model, background: true }`，不发 `tool.progress`。子 Turn 的中止信号不含父 Turn 的 signal；超时沿用 `timeoutMs`。占用 `maxConcurrent` 槽直到收束；另有每父会话 `maxBackground`（缺省 3）。
 - **交付与生命周期**：`BackgroundSubagents` 集中收束、取消（`Runtime.cancelSubagent`）、丢弃（父会话关闭、回退到启动调用之前）与重启补报（按父日志补 `interrupted` 暂停条目，分叉继承的前缀不补）。结果以 `message.user.subagent` 交付，作为 `mode: "subagent"` 的待发输入（[agent-loop.md](agent-loop.md) §2、[view.md](../protocols/view.md)）。
 - **观察**：`listSubagents` 的 `SubagentSummary.background` 标出后台项；运行状态以登记簿为准，父 `task` 已结算不代表子代理结束。
+- **展示**：桌面、手机与 TUI 收起的准入失败工具行只显示「未启动」；模型仍接收完整错误，桌面/手机和 TUI 全屏展开可看原因，inline 不额外输出原始错误。工具行、后台结果、运行登记与历史观察共用 `subagentProfile`：优先显式 preset，其次非 default 的 profile，无标识时省略 default。
+- **路径**：工作树子模型系统说明包含绝对路径和主仓库到副本的映射；权限层的 WORKTREE_DENY 带实际工作树路径，具体规则见 ADR-0075 §3。
 
 

@@ -29,6 +29,45 @@ import {
 import { createAttachmentImageSource } from "../src/attachment-images";
 
 const imageData = new Uint8Array([1, 2, 3]);
+
+it("桌面与手机共用工具行：子代理准入拒绝收起为未启动，展开保留原因", () => {
+  const view = createSessionView();
+  view.entries = [
+    {
+      kind: "tool",
+      key: "rejected",
+      turnId: "t",
+      seq: 1,
+      callId: "c",
+      name: "task",
+      status: "error",
+      input: { task: "检查文件", profile: "default", preset: "explore" },
+      subjects: [],
+      permission: undefined,
+      resolution: undefined,
+      liveOutput: "",
+      result: {
+        status: "error",
+        durationMs: 1,
+        output: undefined,
+        truncated: false,
+        spillPath: undefined,
+        modelContent: "technical admission reason",
+        error: { code: "invalid_input", message: "technical admission reason" },
+      },
+    },
+  ];
+  const { container } = mount(view);
+  expect(screen.getByText("未启动")).toBeTruthy();
+  expect(container.querySelector(".tool-res.err")).toBeNull();
+  expect(container.querySelector(".subagent-badge")?.textContent).toBe("explore");
+  expect(container.textContent).not.toContain("default");
+  expect(container.textContent).not.toContain("technical admission reason");
+  const summary = container.querySelector("summary");
+  if (!summary) throw new Error("missing tool summary");
+  fireEvent.click(summary);
+  expect(container.textContent).toContain("technical admission reason");
+});
 const historyImage: ImageAttachment = {
   type: "image",
   file: "history.png",

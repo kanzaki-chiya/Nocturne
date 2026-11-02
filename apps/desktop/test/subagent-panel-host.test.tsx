@@ -360,7 +360,7 @@ it("点击概览里的内置项：面板里打开子代理标签（档位 · 摘
   await flush();
   expect(tabNames()).toEqual([
     expect.stringContaining("explore · 检查依赖方向"),
-    expect.stringContaining("default · 整理日志"),
+    expect.stringContaining("整理日志"),
   ]);
   // 只观察当前显示的那一个
   const live = backend.state.subscriptions.filter((s) => !s.unsubscribed);
@@ -394,9 +394,8 @@ it("工具行入口：「在面板中查看」打开（或切到）同一个标�
   });
   await flush();
   expect(tabNames()).toHaveLength(1);
-  expect(screen.getByRole("tab", { selected: true }).textContent).toContain(
-    "default · 审查登录模块",
-  );
+  expect(screen.getByRole("tab", { selected: true }).textContent).toContain("审查登录模块");
+  expect(screen.getByRole("tab", { selected: true }).textContent).not.toContain("default");
   // 新标签页的工具列表仍只有变更、文件、终端
   fireEvent.click(screen.getByRole("button", { name: "新标签页" }));
   const tools = document.querySelectorAll(".sp-tool");
@@ -410,7 +409,7 @@ it("工具行入口：「在面板中查看」打开（或切到）同一个标�
     links?.open("unknown");
   });
   await flush();
-  expect(tabNames().filter((n) => n.includes("default"))).toHaveLength(1);
+  expect(tabNames().filter((n) => n.includes("审查登录模块"))).toHaveLength(1);
 });
 
 it("没有连着后台时不提供工具行入口", async () => {
@@ -529,7 +528,7 @@ it("标签只观察显示时：切走、关面板、进设置都退订，回看�
   expect(subs[4]?.afterSeq).toBe(2);
 
   // 关标签：退订并释放视图；再打开从 0 重放
-  fireEvent.click(screen.getByRole("button", { name: /^关闭 default/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^关闭 审查登录模块/ }));
   await flush();
   expect(subs[4]?.unsubscribed).toBe(true);
   act(() => {
@@ -573,7 +572,7 @@ it("重启恢复：标签、顺序、当前项回来，首次显示从 0 只读�
   render(<Harness prefs={prefs} host={host} sessionId="p" client={backend.client} />);
   await flush();
   expect(tabNames()).toEqual([
-    expect.stringContaining("default · 已删除日志的任务"),
+    expect.stringContaining("已删除日志的任务"),
     expect.stringContaining("explore · 检查依赖方向"),
   ]);
   expect(screen.getByRole("tab", { selected: true }).textContent).toContain("explore");
@@ -757,7 +756,8 @@ it("从浏览器标签切到子代理标签：先藏起网页，再切换", asyn
     await flush();
     expect(log.indexOf("layout 1 hide")).toBeGreaterThan(-1);
     expect(tabNames()).toHaveLength(before.length + 1);
-    expect(screen.getByRole("tab", { selected: true }).textContent).toContain("default");
+    expect(screen.getByRole("tab", { selected: true }).textContent).toContain("审查登录模块");
+    expect(screen.getByRole("tab", { selected: true }).textContent).not.toContain("default");
     // 从子代理切回浏览器：浏览器重新显示
     fireEvent.click(screen.getAllByRole("tab")[0] as HTMLElement);
     await flush();

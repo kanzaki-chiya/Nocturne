@@ -97,15 +97,32 @@ export async function listWorktreeRecords(
 }
 
 export async function inspectWorktreeRepository(cwd: string): Promise<string> {
+  let bare: string;
   try {
-    if ((await worktreeGit(cwd, ["rev-parse", "--is-bare-repository"])).trim() === "true")
-      throw new Error("Bare repositories do not support isolated subagents");
-    return (await worktreeGit(cwd, ["rev-parse", "--show-toplevel"])).trim();
+    bare = (await worktreeGit(cwd, ["rev-parse", "--is-bare-repository"])).trim();
   } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (message.includes("not a git repository"))
+      throw new Error(
+        "This directory is not a git repository, so a worktree cannot be created. Use a read-only subagent, or complete the task directly in the main agent.",
+      );
     throw new Error(
-      `Worktree isolation requires git and a non-bare git workspace: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Unable to inspect the git repository for worktree isolation: ${message}. Use a read-only subagent, or complete the task directly in the main agent.`,
     );
   }
+  if (bare === "true")
+    throw new Error(
+      "This is a bare git repository, so an isolated subagent worktree cannot be created. Use a read-only subagent, or complete the task directly in the main agent.",
+    );
+  const repository = (await worktreeGit(cwd, ["rev-parse", "--show-toplevel"])).trim();
+  try {
+    await worktreeGit(repository, ["rev-parse", "--verify", "HEAD"]);
+  } catch {
+    throw new Error(
+      "This git repository has no commit at HEAD, so a worktree cannot be created. Use a read-only subagent, or complete the task directly in the main agent.",
+    );
+  }
+  return repository;
 }
 
 export function safeWorktreePath(repository: string, file: string): string {

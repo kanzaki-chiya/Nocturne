@@ -14,11 +14,11 @@ ADR-0073 的后台子代理只能只读：它和主代理共用一个工作区�
 
 ### 1. 启用：`task.isolation`
 
-- `task` 输入增加可选 `isolation: "none" | "worktree"`，缺省 `"none"`。**只在 `background: true` 时可用**；同步调用带 `"worktree"` 报 `invalid_input`（同步时主代理在等，不存在并发写，隔离没有收益）。
+- `task` 输入增加可选 `isolation: "none" | "worktree"`。省略时按最终工具集选择：含 `traits.mutates` 工具用 `"worktree"`，全部只读用 `"none"`。**只在 `background: true` 时可用**；同步调用带隔离参数报 `invalid_input`。
 - 字段与 `background` 同时出现或同时隐藏（ADR-0073 第 5 节的宿主开关、子会话不出现）。
 - 准入（ADR-0073 第 8 节的接缝）：`backgroundAdmission` 增加一条——隔离方式为 `"worktree"` 时放行可写的工具集。外部 agent（ACP）仍不放行。
-- 后台调用的工具集含可写工具、但没有声明 `isolation: "worktree"` 时，报错文案改为提示用法：「后台子代理需要写入时请加 `isolation: "worktree"`；否则只能只读」。
-- 前提检查，任一不满足报 `invalid_input` 并说明原因，不创建子会话：会话工作区位于 git 仓库内（`git rev-parse --show-toplevel` 成功）、能找到 `git` 可执行文件、仓库不是裸仓库。普通对话工作区多数不是 git 仓库，在那里只能用只读后台子代理。
+- 后台调用含可写工具、显式 `isolation: "none"` 时拒绝，并明确说明是显式设置造成的；省略参数则在 launcher 既有准入与创建接缝中默认建工作树。
+- 前提检查，任一不满足报 `invalid_input` 并说明原因，不创建子会话：能调用 git、工作区位于非裸 git 仓库、有有效 HEAD 提交。非 git 与没有提交的仓库分别说明无法创建工作树，建议只读子代理或主代理直接完成，不提示重复添加隔离参数，也不静默回退共享目录。
 
 ### 2. 创建副本与分支
 
@@ -35,6 +35,7 @@ ADR-0073 的后台子代理只能只读：它和主代理共用一个工作区�
 ### 3. 子会话的工作区与权限
 
 - 子会话的 `cwd`、`workspaceRoot` 是副本里的对应路径。
+- 子模型的系统说明写明工作树绝对路径、主仓库根目录到工作树根目录的对应关系，以及映射后的 cwd/workspaceRoot；父模型的 task 说明要求用相对路径描述隔离任务中的文件。
 - 权限沿用子会话的规则（[subagent.md](../architecture/subagent.md) 第 7 节：同一预设、合并规则、共享会话 Grant、非交互），**只把构造预设时的 `workspaceRoot` 换成副本路径**：
   - 副本内的改动按「工作区内」规则判定；`default` 预设下工作区内写入是 `ask`，非交互即拒绝——与同步子代理一样，可写子代理需要 `guarded` / `smart` / `bypass` 或相应授权。
   - 主工作区对子会话是「工作区外」，写入按工作区外规则判定（`ask` → 非交互拒绝）。
@@ -43,7 +44,7 @@ ADR-0073 的后台子代理只能只读：它和主代理共用一个工作区�
   - 命令的工作目录解析后不在副本内；
   - 命令文本里出现切换目录（`cd`、`chdir`、`pushd`、`Set-Location`、`sl`、`Push-Location`），其目标路径按当前 cwd 解析后不在副本内，或为无参数、`~`；
   - 命令文本里出现把 git 指向副本以外的写法：`git -C <路径>`、`--git-dir=`、`--work-tree=`、`GIT_DIR=` / `GIT_WORK_TREE=` 赋值，且路径解析后不在副本内。
-  - 拒绝说明告诉子模型：「This subagent is isolated in its own worktree; commands must stay inside it.」
+  - 拒绝说明由权限层生成：「This subagent is isolated in its own worktree; commands must stay inside it. Worktree: <实际工作树绝对路径>」。
   - 与高风险命令表一样，这是基于命令文本的检查，不是沙箱。
 - 检查点：副本里的改动不记入根会话的检查点（它们不在用户的工作区里）。
 
@@ -144,3 +145,4 @@ changes?: {
 ## 修订
 
 - 2026-10-31：补充未跟踪符号链接跳过与 `worktree_symlink_skipped` 警告、`.worktreeinclude` 仅在存在且不可信时于创建阶段发 `worktree_include_skipped`、shell 隔离增加切换目录检查、`3way` 并回使用临时 index 的说明。
+- 2026-11-02（r1102q）：省略 isolation 的可写后台任务默认建工作树；明确非 git、无提交和显式 none 的拒绝说明，补全子模型路径映射与权限层路径指引。

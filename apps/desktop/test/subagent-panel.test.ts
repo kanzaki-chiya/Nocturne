@@ -45,6 +45,14 @@ function viewOf(...events: RuntimeEvent[]) {
   return view;
 }
 
+it("子代理标签没有预设时省略 default 和分隔符", () => {
+  expect(subagentTabName({ profile: "", taskSummary: "检查代码" })).toBe("检查代码");
+  expect(subagentTabName({ profile: "default", taskSummary: "检查代码" })).toBe("检查代码");
+  expect(subagentTabName({ profile: "explore", taskSummary: "检查代码" })).toBe(
+    "explore · 检查代码",
+  );
+});
+
 it("外部 agent 按父持久工具主体识别，不读当前配置；内置不算外部", () => {
   expect(externalAgentOf(externalEntry("claude"))).toBe("claude");
   expect(externalAgentOf(taskEntry())).toBeUndefined();

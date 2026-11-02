@@ -333,13 +333,6 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
       if (request.isolation !== undefined && !request.background)
         return error("invalid_input", "isolation 只在 background: true 时可用");
       let repository: string | undefined;
-      if (request.isolation === "worktree") {
-        try {
-          repository = await inspectWorktreeRepository(ctx.workspaceRoot);
-        } catch (cause) {
-          return error("invalid_input", cause instanceof Error ? cause.message : String(cause));
-        }
-      }
       if (request.background === true) {
         if (deps.background === undefined || deps.depth !== 0)
           return error("invalid_input", "当前会话不支持后台子代理");
@@ -542,9 +535,19 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         if (request.background) {
           const denied = backgroundAdmission({
             tools: selected,
-            isolation: request.isolation ?? "none",
+            isolation: request.isolation,
           });
           if (denied !== undefined) return error("invalid_input", denied);
+          if (
+            request.isolation === "worktree" ||
+            (request.isolation === undefined && selected.some((tool) => tool.traits.mutates))
+          ) {
+            try {
+              repository = await inspectWorktreeRepository(ctx.workspaceRoot);
+            } catch (cause) {
+              return error("invalid_input", cause instanceof Error ? cause.message : String(cause));
+            }
+          }
         }
         if (request.background) await createChild();
         if (child === undefined) throw new Error("Child session unavailable");
@@ -696,7 +699,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               environment: childEnvironment,
               config: { ...deps.turnConfig, maxSteps: deps.limits.maxStepsPerTurn },
               signal: childSignal,
-              basePrompt: SUBAGENT_BASE_PROMPT,
+              basePrompt: worktree
+                ? `${SUBAGENT_BASE_PROMPT}\n\n你的隔离工作树绝对路径：${worktree.worktree}。主仓库根目录 ${worktree.repository} 对应工作树根目录 ${worktree.worktree}；文件的相对路径保持一致，请在工作树内操作。你的工作目录：${worktree.cwd}；工作区根目录：${worktree.workspaceRoot}。`
+                : SUBAGENT_BASE_PROMPT,
               shouldFinish: finishSubmitted,
               // ADR-0031 §3：子代理请求填根会话 ID
               rootSessionId: deps.rootSessionId,

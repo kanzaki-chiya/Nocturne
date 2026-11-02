@@ -145,7 +145,7 @@ export function createTaskTool(
         : "") +
       (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : "") +
       (background
-        ? '互相独立、想同时进行的任务用 background: true；要写文件的后台任务必须 isolation: "worktree"；不要等待或轮询结果。'
+        ? "互相独立、想同时进行的任务用 background: true；含写操作时默认使用工作树隔离，只读任务默认不隔离。交给隔离任务时用相对路径描述文件。不要等待或轮询结果。"
         : ""),
     inputSchema: {
       type: "object",
@@ -158,12 +158,12 @@ export function createTaskTool(
                 type: "string",
                 enum: ["none", "worktree"],
                 description:
-                  "Background workspace isolation; writable background tasks require worktree.",
+                  "Background workspace isolation; defaults to worktree for writable tasks and none for read-only tasks.",
               },
               background: {
                 type: "boolean",
                 description:
-                  "Run work in the background and receive its result as a separate message. Writable work requires isolation: worktree.",
+                  "Run work in the background and receive its result as a separate message. Writable tasks default to worktree isolation.",
               },
             }
           : {}),

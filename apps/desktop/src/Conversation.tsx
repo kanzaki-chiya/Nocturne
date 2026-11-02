@@ -64,6 +64,7 @@ import {
   subagentResultText,
   subagentResultLine,
   backgroundToolStatus,
+  subagentStartRejected,
   splitCodeRef,
   isRuntimeWorkMode,
   userWorkMode,
@@ -2372,6 +2373,7 @@ function ToolRow({
   const backgroundStatus = backgroundToolStatus(entry, useContext(BackgroundEntriesContext));
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
+  const notStarted = subagentStartRejected(entry);
   // 并回的 output.files 只是清单（无 diff）：改动由下方变更卡片展示，行头保持「N 个文件」
   const diffs =
     entry.status === "ok" && shownName !== "apply_subagent_changes" ? fileDiffs(entry, cwd) : [];
@@ -2397,15 +2399,21 @@ function ToolRow({
       {(!running || frozen) && todos === undefined && (
         <span
           className={`tool-res${
-            error !== undefined
+            error !== undefined && !notStarted
               ? isRecoverableToolErrorCode(error.code)
                 ? " recoverable"
                 : " err"
               : ""
           }`}
         >
-          {backgroundStatus ??
-            (frozen ? "未收束" : error === undefined ? result.text : toolErrorSummary(entry, cwd))}
+          {notStarted
+            ? "未启动"
+            : (backgroundStatus ??
+              (frozen
+                ? "未收束"
+                : error === undefined
+                  ? result.text
+                  : toolErrorSummary(entry, cwd)))}
         </span>
       )}
     </>

@@ -12,7 +12,7 @@ export interface SubagentSummary {
   parentSessionId: string;
   callId: string;
   childSessionId: string;
-  /** 启动参数 profile / agent / default，不读当前配置反推 */
+  /** 启动参数 preset 优先，其次非 default 的 profile / agent；缺省为空，不读当前配置反推 */
   profile: string;
   background?: boolean;
   /** task 原文压成单行，最多 120 个 Unicode 码点 */

@@ -303,7 +303,7 @@ describe("只读快照：已结束的子会话", () => {
       parentSessionId: parent.id,
       callId: "call-1",
       childSessionId: child.id,
-      profile: "default",
+      profile: "",
       taskSummary: "整理 日志 文件",
       state: "ended",
       durationMs: 4321,
@@ -594,7 +594,7 @@ describe("listSubagents", () => {
     const second = await makeChild(f, parent, "call-2");
     await childTurn(second.child, 1, { open: true });
     await second.child.close();
-    // 旧日志缺启动参数：档位 default，摘要回退首条子 message.user
+    // 旧日志缺启动参数：不显示档位，摘要回退首条子 message.user
     const third = await makeChild(f, parent, "call-3");
     await childTurn(third.child, 1, { text: "子里的\n首条消息", open: true });
     await third.child.close();
@@ -621,7 +621,7 @@ describe("listSubagents", () => {
     expect(by(second.child.id)).toMatchObject({ profile: "legacy", state: "unsealed" });
     expect(Array.from(by(second.child.id)?.taskSummary ?? "")).toHaveLength(120);
     expect(by(third.child.id)).toMatchObject({
-      profile: "default",
+      profile: "",
       taskSummary: "子里的 首条消息",
     });
     expect(list.some((s) => s.childSessionId === foreign.child.id)).toBe(false);

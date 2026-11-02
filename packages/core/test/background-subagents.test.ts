@@ -1,7 +1,15 @@
 /**
  * 后台子代理（ADR-0073）集成测试：FakeProvider 驱动父子会话，全程离线。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -175,7 +183,7 @@ describe("准入与 schema", () => {
     for (const name of ["edit", "shell", "write"]) {
       const picked = tools.filter((tool) => !tool.traits.mutates || tool.name === name);
       expect(backgroundAdmission({ tools: picked, isolation: "none" })).toBe(
-        '后台子代理需要写入时请加 isolation: "worktree"；否则只能只读',
+        '显式设置 isolation: "none" 时后台子代理只能只读；含写操作时请省略 isolation 或使用 "worktree"',
       );
     }
     expect(
@@ -187,7 +195,7 @@ describe("准入与 schema", () => {
   it("开关关闭时 schema 与描述都没有 background；开启时有；依次执行说明始终出现", () => {
     const seqSentence = "同一步里的多个 task 会依次执行。";
     const bgSentence =
-      '互相独立、想同时进行的任务用 background: true；要写文件的后台任务必须 isolation: "worktree"；不要等待或轮询结果。';
+      "互相独立、想同时进行的任务用 background: true；含写操作时默认使用工作树隔离，只读任务默认不隔离。交给隔离任务时用相对路径描述文件。不要等待或轮询结果。";
     const launcher = {
       launch: async () => ({
         status: "error" as const,
@@ -243,7 +251,8 @@ describe("准入与 schema", () => {
       const completed = taskCompleted(session)[0];
       expect(completed?.payload.status).toBe("error");
       expect(completed?.payload.error?.code).toBe("invalid_input");
-      expect(completed?.payload.modelContent).toContain('isolation: "worktree"');
+      expect(completed?.payload.modelContent).toContain("not a git repository");
+      expect(completed?.payload.modelContent).not.toContain('isolation: "worktree"');
       expect(childRequests).toHaveLength(0);
       expect(await running(runtime, session.id)).toHaveLength(0);
     } finally {
@@ -276,6 +285,79 @@ describe("准入与 schema", () => {
 });
 
 describe("启动与交付", () => {
+  it("git 仓库可写后台任务默认建工作树，并向子模型说明绝对路径映射", async () => {
+    const { session, root, sessionsDir, childRequests } = await setup({
+      git: true,
+      childWait: () => 500,
+      parent: [[bg("writable", { preset: "general" }), { type: "finish", reason: "tool_calls" }]],
+    });
+    try {
+      await session.submit({ text: "go" });
+      expect(taskCompleted(session)[0]?.payload.status).toBe("ok");
+      const record = must((await listWorktreeRecords(sessionsDir, session.id))[0]);
+      expect(realpathSync.native(record.repository)).toBe(realpathSync.native(root));
+      expect(record.worktree).not.toBe(root);
+      await vi.waitFor(() => expect(childRequests).toHaveLength(1));
+      const prompt = JSON.stringify(childRequests[0]);
+      expect(prompt).toContain(JSON.stringify(record.worktree).slice(1, -1));
+      expect(prompt).toContain(JSON.stringify(record.repository).slice(1, -1));
+      expect(prompt).toContain("对应工作树根目录");
+      await vi.waitFor(() => expect(results(session)).toHaveLength(1), { timeout: 10_000 });
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("只读后台任务不检查仓库、不创建工作树", async () => {
+    const inspect = vi.spyOn(worktreeModule, "inspectWorktreeRepository");
+    const create = vi.spyOn(worktreeModule, "createWorktree");
+    const { session } = await setup({ git: true });
+    try {
+      await session.submit({ text: "go" });
+      expect(taskCompleted(session)[0]?.payload.status).toBe("ok");
+      expect(inspect).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("git 仓库可写后台任务显式 none 被拒，不能自动建工作树", async () => {
+    const { session, childRequests, sessionsDir } = await setup({
+      git: true,
+      parent: [
+        [
+          bg("none", { preset: "general", isolation: "none" }),
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    try {
+      await session.submit({ text: "go" });
+      expect(taskCompleted(session)[0]?.payload.error?.message).toContain(
+        '显式设置 isolation: "none"',
+      );
+      expect(childRequests).toHaveLength(0);
+      expect(await listWorktreeRecords(sessionsDir, session.id)).toHaveLength(0);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("没有提交的仓库准确拒绝默认工作树，不回退共享目录", async () => {
+    const { root, session, childRequests } = await setup({
+      parent: [[bg("empty", { preset: "general" }), { type: "finish", reason: "tool_calls" }]],
+    });
+    await worktreeGit(root, ["init"]);
+    try {
+      await session.submit({ text: "go" });
+      expect(taskCompleted(session)[0]?.payload.error?.message).toContain("no commit at HEAD");
+      expect(childRequests).toHaveLength(0);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("立即返回、父 Turn 先结束；空闲收束自动开新 Turn；fold 保留 subagent", async () => {
     const progress: string[] = [];
     const { runtime, session } = await setup({ childWait: () => 300 });

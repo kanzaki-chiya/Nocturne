@@ -2,8 +2,8 @@ import path from "node:path";
 import { realpathSync } from "node:fs";
 import type { PermissionSubject } from "../protocol/index.js";
 
-export const WORKTREE_DENY =
-  "This subagent is isolated in its own worktree; commands must stay inside it.";
+export const WORKTREE_DENY = (root: string): string =>
+  `This subagent is isolated in its own worktree; commands must stay inside it. Worktree: ${root}`;
 
 function resolveRealSync(target: string): string {
   const abs = path.resolve(target);

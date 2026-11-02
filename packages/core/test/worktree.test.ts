@@ -138,7 +138,7 @@ describe("isolated worktree with real git", () => {
   it("rejects a non-git workspace", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "nocturne-nongit-"));
     temporary.push(root);
-    await expect(inspectWorktreeRepository(root)).rejects.toThrow("non-bare git workspace");
+    await expect(inspectWorktreeRepository(root)).rejects.toThrow("not a git repository");
   });
   it("uses HEAD for a clean baseline and removes unchanged worktrees and branches", async () => {
     const { repository, input } = await fixture();

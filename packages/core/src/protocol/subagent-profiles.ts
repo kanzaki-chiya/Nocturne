@@ -5,6 +5,7 @@
  */
 import type { ReasoningEffort } from "./types.js";
 import type { ToolEntry } from "./view.js";
+import { subagentProfile } from "./subagent-result.js";
 
 /** `default` 是保留档位名：即今天的 modelRoles.task 行为，不能用作自定义档位名 */
 export const DEFAULT_SUBAGENT_PROFILE = "default";
@@ -81,8 +82,9 @@ export function subagentRowInfo(entry: ToolEntry): {
   const input = entry.input as Record<string, unknown> | undefined;
   const output = entry.result?.output as Record<string, unknown> | undefined;
   const live = /子代理模型：([^\n]+) · (\w+)/u.exec(entry.liveOutput);
+  const profile = subagentProfile(input);
   return {
-    ...(typeof input?.profile === "string" ? { profile: input.profile } : {}),
+    ...(profile ? { profile } : {}),
     ...(typeof input?.reason === "string"
       ? { reason: Array.from(input.reason).slice(0, 200).join("") }
       : {}),

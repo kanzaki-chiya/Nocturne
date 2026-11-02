@@ -12,23 +12,26 @@ import {
 import type { SubagentOutcome, ToolDefinition } from "../tools/index.js";
 import { worktreeResultText } from "./worktree.js";
 
-/** 子代理的隔离方式；第一版只有「无」 */
+/** 子代理的隔离方式。 */
 export type BackgroundIsolation = "none" | "worktree";
 
-export const BACKGROUND_READ_ONLY = '后台子代理需要写入时请加 isolation: "worktree"；否则只能只读';
+export const BACKGROUND_READ_ONLY =
+  '显式设置 isolation: "none" 时后台子代理只能只读；含写操作时请省略 isolation 或使用 "worktree"';
 
 /**
- * 准入接缝（ADR-0073 §2、§8）：外部 agent 一律不放行；没有隔离时只放行全部只读的工具集。
+ * 准入接缝（ADR-0073 §2、§8）：拒绝外部 agent 和显式 none 的可写任务；
+ * 省略隔离参数时由 launcher 按最终工具集创建工作树。
  * 返回拒绝说明，放行返回 undefined。
  */
 export function backgroundAdmission(input: {
   tools: readonly Pick<ToolDefinition, "traits">[];
-  isolation: BackgroundIsolation;
+  isolation?: BackgroundIsolation | undefined;
   external?: boolean | undefined;
 }): string | undefined {
   if (input.external === true) return "外部 agent 不支持后台运行";
   if (input.isolation === "worktree") return undefined;
-  if (input.tools.some((tool) => tool.traits.mutates)) return BACKGROUND_READ_ONLY;
+  if (input.isolation === "none" && input.tools.some((tool) => tool.traits.mutates))
+    return BACKGROUND_READ_ONLY;
   return undefined;
 }
 
@@ -186,7 +189,7 @@ export class BackgroundSubagents {
             childSessionId: output.childSessionId,
             callId: event.payload.callId,
             status: "interrupted",
-            profile: profiles.get(event.payload.callId) ?? "default",
+            profile: profiles.get(event.payload.callId) ?? "",
           },
           "Background subagent did not deliver its result before Nocturne restarted. It may have been interrupted, or its result was still waiting to be sent. Re-run it if the result is still needed.",
         ),

@@ -94,7 +94,7 @@ export function Subagents({
     return (
       <PickList
         key="cancel"
-        title={`取消 ${selected.profile}？`}
+        title={`取消${selected.profile ? ` ${selected.profile}` : ""}？`}
         items={[
           { label: "返回", value: false },
           { label: "取消子代理", value: true },
@@ -124,7 +124,14 @@ export function Subagents({
       title="后台子代理"
       items={[
         ...items.map((item) => ({
-          label: `${item.profile}${isolated.has(item.childSessionId) ? " · 隔离" : ""} · ${Math.max(0, Math.floor((now - Date.parse(item.startedAt)) / 1000))}s · ${item.taskSummary}`,
+          label: [
+            item.profile,
+            isolated.has(item.childSessionId) ? "隔离" : "",
+            `${Math.max(0, Math.floor((now - Date.parse(item.startedAt)) / 1000))}s`,
+            item.taskSummary,
+          ]
+            .filter(Boolean)
+            .join(" · "),
           value: item.childSessionId,
         })),
         ...retained.map((record) => ({

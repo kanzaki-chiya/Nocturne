@@ -43,6 +43,31 @@ const entry = (input: unknown, output: unknown, modelContent: string): ToolEntry
 });
 
 describe("清单快照窗口", () => {
+  it("inline 子代理准入拒绝只显示未启动和实际预设", () => {
+    const tool = entry(
+      { preset: "explore", profile: "default", task: "research" },
+      undefined,
+      "technical admission reason",
+    );
+    tool.name = "task";
+    tool.status = "error";
+    if (!tool.result) throw new Error("fixture missing tool result");
+    tool.result.status = "error";
+    tool.result.error = { code: "invalid_input", message: "technical admission reason" };
+    const frame = render(
+      createElement(
+        TuiEnvContext.Provider,
+        { value: { ascii: true, animated: false } },
+        createElement(ToolRow, { entry: tool, width: 100 }),
+      ),
+    );
+    const text = frame.lastFrame() ?? "";
+    frame.unmount();
+    expect(text).toContain("未启动");
+    expect(text).toContain("[explore]");
+    expect(text).not.toContain("default");
+    expect(text).not.toContain("technical admission reason");
+  });
   const list = (done: number, total = 10) =>
     Array.from({ length: total }, (_, i) => ({
       text: `第${i + 1}步`,

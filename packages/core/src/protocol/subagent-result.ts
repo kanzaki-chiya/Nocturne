@@ -8,11 +8,17 @@ import type { ViewEntry, ToolEntry } from "./view.js";
 export function subagentProfile(
   input: { profile?: unknown; preset?: unknown } | undefined,
 ): string {
-  return typeof input?.profile === "string"
-    ? input.profile
-    : typeof input?.preset === "string"
-      ? input.preset
-      : "default";
+  if (typeof input?.preset === "string" && input.preset !== "") return input.preset;
+  return typeof input?.profile === "string" && input.profile !== "default" ? input.profile : "";
+}
+
+/** 准入/输入失败没有启动子会话；原始原因仍留在工具结果中。 */
+export function subagentStartRejected(entry: ToolEntry): boolean {
+  return (
+    entry.name === "task" &&
+    (entry.result?.error?.code === "invalid_input" ||
+      entry.result?.error?.code === "subagent_concurrency")
+  );
 }
 
 /** 启动回执不代表任务完成；有结果消息时以结果状态为准。 */
@@ -80,7 +86,7 @@ export function pendingBackgroundSubagents(
   });
 }
 
-/** `<档位> · <状态>`；补报条目或缺档位时按 default */
+/** 并回结果摘要。 */
 export function subagentApplyLine(output: unknown): string {
   const value = output as { files?: unknown[]; conflicts?: unknown[] } | undefined;
   return (value?.conflicts?.length ?? 0) > 0
@@ -89,5 +95,6 @@ export function subagentApplyLine(output: unknown): string {
 }
 
 export function subagentResultLine(result: SubagentResult): string {
-  return `${result.profile ?? "default"} · ${subagentResultStatus(result.status)}${result.changes ? ` · 改动 ${result.changes.files.length} 个文件 · ${result.changes.branch}` : ""}`;
+  const profile = subagentProfile({ profile: result.profile });
+  return `${profile ? `${profile} · ` : ""}${subagentResultStatus(result.status)}${result.changes ? ` · 改动 ${result.changes.files.length} 个文件 · ${result.changes.branch}` : ""}`;
 }

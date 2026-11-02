@@ -133,7 +133,7 @@ describe("运行中的子会话", () => {
       }
       return req.messages.at(-1)?.role === "tool"
         ? done
-        : taskScript({ task: "整理\n   日志文件" });
+        : taskScript({ task: "整理\n   日志文件", preset: "explore" });
     });
     const session = await runtime.createSession({ model: "fake/fake-1" });
     const submitting = session.submit({ text: "go" });
@@ -142,7 +142,7 @@ describe("运行中的子会话", () => {
     expect(child).toMatchObject({
       parentSessionId: session.id,
       state: "running",
-      profile: "default",
+      profile: "explore",
       taskSummary: "整理 日志文件",
     });
     const started = session
@@ -456,7 +456,7 @@ describe("重启后（新 Runtime、同一目录）", () => {
     expect(summary).toMatchObject({
       parentSessionId: sessionId,
       state: "ended",
-      profile: "default",
+      profile: "",
       taskSummary: "历史任务",
       outcome: { status: "ok" },
     });

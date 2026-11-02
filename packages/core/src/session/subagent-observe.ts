@@ -11,6 +11,7 @@
  */
 import {
   SUBAGENT_TASK_FALLBACK,
+  subagentProfile,
   decodeDurableEvent,
   isDurableEvent,
   type DurableEvent,
@@ -130,10 +131,12 @@ function extractParentCalls(events: Iterable<DurableEvent>): Map<string, ParentC
       const input = event.payload.input;
       const record =
         typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
-      const named = record.profile ?? record.agent;
       const previous = calls.get(event.payload.callId);
       calls.set(event.payload.callId, {
-        profile: typeof named === "string" && named !== "" ? named : "default",
+        profile: subagentProfile({
+          profile: record.profile ?? record.agent,
+          preset: record.preset,
+        }),
         task: typeof record.task === "string" ? record.task : undefined,
         background: record.background === true,
         completed: previous?.completed,
@@ -141,7 +144,7 @@ function extractParentCalls(events: Iterable<DurableEvent>): Map<string, ParentC
     } else if (event.type === "tool.completed" && event.payload.name === "task") {
       const previous = calls.get(event.payload.callId);
       calls.set(event.payload.callId, {
-        profile: previous?.profile ?? "default",
+        profile: previous?.profile ?? "",
         task: previous?.task,
         background: previous?.background,
         completed: {
@@ -215,7 +218,7 @@ function snapshotSummary(
     parentSessionId,
     callId,
     childSessionId,
-    profile: call?.profile ?? "default",
+    profile: call?.profile ?? "",
     taskSummary: summarizeSubagentTask(call?.task ?? analysis.firstUserText ?? ""),
     startedAt: analysis.startedAt,
     state: ended ? "ended" : "unsealed",

@@ -9,6 +9,34 @@ import type { ToolEntry } from "@nocturne/core/protocol";
 const line = (id: number, after: number) => ({ id, text: `! 提示${id}`, after });
 
 describe("本地提示行定位", () => {
+  it("准入失败收起只显示未启动，展开保留原因，预设显示 explore", () => {
+    const entry = {
+      kind: "tool",
+      key: "rejected",
+      name: "task",
+      status: "error",
+      input: { task: "research", profile: "default", preset: "explore" },
+      subjects: [],
+      liveOutput: "",
+      result: {
+        status: "error",
+        modelContent: "technical admission reason",
+        error: { code: "invalid_input", message: "technical admission reason" },
+      },
+    } as unknown as ToolEntry;
+    const collapsed = layoutEntry(entry, 120, false)
+      .map((line) => line.text)
+      .join("\n");
+    expect(collapsed).toContain("未启动");
+    expect(collapsed).toContain("[explore]");
+    expect(collapsed).not.toContain("default");
+    expect(collapsed).not.toContain("technical admission reason");
+    const expanded = layoutEntry(entry, 120, false, undefined, undefined, false, true)
+      .map((line) => line.text)
+      .join("\n");
+    expect(expanded).toContain("technical admission reason");
+    expect(subagentModel({ ...entry, input: { profile: "default" } })).toBe("");
+  });
   it("task 摘要显示实际执行模型，旧结果和普通工具保持兼容", () => {
     const entry = { name: "task", result: { output: { model: "fake/child" } } } as ToolEntry;
     expect(subagentModel(entry)).toBe(" [fake/child]");

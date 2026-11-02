@@ -6,8 +6,10 @@
 
 ## 1. 启动入口
 
+子代理准入失败的工具行收起仅显示「未启动」，全屏展开可看原始原因，inline 不额外输出技术性错误。子代理标识优先显示启动参数中的 preset，其次非 default 命名档位，无标识时省略；规则见 [subagent.md §20](../architecture/subagent.md#20-后台子代理)。
+
 ADR-0061：模型编辑的协议选项为「跟随 / Chat Completions / Messages / Responses / Gemini」，在「协议」之后增加可选文本字段「接口地址」（与桌面端、CLI 同序，其后是「编辑工具」），空值自动选择，占位显示当前下层地址。来源仍用用户编辑 / models.dev / 默认标注；实际解析规则见 [provider-setup.md](../architecture/provider-setup.md) 第 2 节。
-子代理工具行显示 `[档位]`、实际模型与思考档位及选择理由；旧调用没有 profile 时不显示档位。`/settings › 模型角色` 中 task 改名为「default 档位模型」，其他档位只读列出（Enter 只显示编辑位置），并提示到桌面端「设置 › 子代理」或 settings.json 编辑。运行规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
+子代理工具行显示 `[预设或命名档位]`、实际模型与思考档位及选择理由；标识的缺省与兼容规则统一见 subagent.md 第 20 节。`/settings › 模型角色` 中 task 改名为「default 档位模型」，其他档位只读列出（Enter 只显示编辑位置），并提示到桌面端「设置 › 子代理」或 settings.json 编辑。运行规则见 [subagent.md 第 19 节](../architecture/subagent.md#19-子代理档位)。
 
 
 v0.3 起，**stdin 与 stdout 都是 TTY 时 `nctrn` 默认启动 TUI**（含 `-c`/`--resume`）：CLI 完成参数解析、配置收集、会话选择后，把已打开的 `Session` 与 `Runtime` 交给 `runTui(session, runtime, opts)`。v0.4 起默认形态是**全屏模式**；`--inline` 选普通屏幕模式（§2 末节）；`--cli` 进入逐行 REPL；`--tui` 保留为兼容参数。界面参数与 `--cli`/`-p`/`--print`/`--sessions` 互斥，冲突为用法错误退出码 2。任一端非 TTY 时自动走逐行模式，不因"默认选择 TUI"报错；显式 `--tui` 在非 TTY 下保持原语义退出码 2（§5）。

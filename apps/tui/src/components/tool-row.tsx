@@ -29,6 +29,7 @@ import {
   subagentRowInfo,
   subagentApplyLine,
   backgroundToolStatus,
+  subagentStartRejected,
 } from "@nocturne/core/protocol";
 
 const LIVE_TAIL = 3;
@@ -122,13 +123,14 @@ export function ToolRow({
       ? ` ${subagentApplyLine(entry.result.output)}`
       : ` ${name}${subagentModel(entry)} ${summary}`;
   const duration = entry.result?.durationMs;
-  const suffix =
-    backgroundToolStatus(entry, entries) ??
-    (entry.status === "awaiting_permission"
-      ? ` ${b.word}`
-      : entry.status === "running"
-        ? ""
-        : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd());
+  const suffix = subagentStartRejected(entry)
+    ? "未启动"
+    : (backgroundToolStatus(entry, entries) ??
+      (entry.status === "awaiting_permission"
+        ? ` ${b.word}`
+        : entry.status === "running"
+          ? ""
+          : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd()));
   const todos =
     entry.result === undefined
       ? undefined
@@ -167,7 +169,9 @@ export function ToolRow({
             </Text>
           ))
         : null}
-      {entry.result !== undefined ? <ToolResult entry={entry} width={width} /> : null}
+      {entry.result !== undefined && !subagentStartRejected(entry) ? (
+        <ToolResult entry={entry} width={width} />
+      ) : null}
       {(entry.result?.attachments ?? []).map((att, i) => (
         <Text key={`${att.file}:${i}`} color={theme.accent} wrap="truncate">
           {`  ${attachmentLine(att, i, env.ascii)}`}

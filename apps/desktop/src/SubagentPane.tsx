@@ -167,7 +167,9 @@ export function SubagentPane({
   return (
     <div className="sp-sub">
       <header className="sp-sub-head">
-        <Badge className="subagent-badge">{tab.profile}</Badge>
+        {tab.profile && tab.profile !== "default" && (
+          <Badge className="subagent-badge">{tab.profile}</Badge>
+        )}
         <span className="sp-sub-summary" title={tab.taskSummary}>
           {tab.taskSummary}
         </span>

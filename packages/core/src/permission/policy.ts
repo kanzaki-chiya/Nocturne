@@ -250,7 +250,10 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       options.worktree &&
       escapesWorktree(s, options.worktree.root, options.worktree.cwd, caseSensitive)
     )
-      return { action: "deny", hit: { origin: "default", description: WORKTREE_DENY } };
+      return {
+        action: "deny",
+        hit: { origin: "default", description: WORKTREE_DENY(options.worktree.root) },
+      };
     // 内置硬拒绝（provider-setup.md 第 4 节）：凭据索引等文件在任何
     // 规则/Grant/--yes/guarded/Hook 下都不可读写——词法与真实路径都查
     const externalCredential = isExternalCredential(s);
