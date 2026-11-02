@@ -343,6 +343,19 @@ const inputOf = (entry: ToolEntry): Record<string, unknown> | undefined => {
  */
 const MARKED_OPTIONS = { gfm: true, breaks: true } as const;
 
+/**
+ * 表格短格（源文本不超过 10 个半角宽，全角算 2）：整格不换行，窄屏不再逐字折开。
+ * 只抬高这一列的最小宽度，不改它的自然宽度，宽窗口下列宽分配与原来一样。
+ */
+function isShortTableCell(source: string): boolean {
+  let width = 0;
+  for (const char of source.trim()) {
+    width += (char.codePointAt(0) ?? 0) >= 0x2e80 ? 2 : 1;
+    if (width > 10) return false;
+  }
+  return true;
+}
+
 /** Only lexer tokens become React elements. Raw HTML and remote images stay inert text. */
 function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] {
   return tokens.map((token, index) => {
@@ -490,7 +503,14 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
                     {row.map((cell, cellIndex) => (
                       <td
                         key={cellIndex}
-                        className={cell.align === "right" ? "r" : undefined}
+                        className={
+                          [
+                            cell.align === "right" ? "r" : undefined,
+                            isShortTableCell(cell.text) ? "short" : undefined,
+                          ]
+                            .filter(Boolean)
+                            .join(" ") || undefined
+                        }
                         style={cell.align ? { textAlign: cell.align } : undefined}
                       >
                         {markdownNodes(cell.tokens, openUrl)}

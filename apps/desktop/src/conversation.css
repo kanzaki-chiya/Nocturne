@@ -552,8 +552,29 @@
   padding: 12px;
   margin: 0;
 }
+/* 回答里的表格：装不下时只在 .tbl-wrap 里横向滚动，滚到头不带动页面或触发返回手势 */
 .conversation-markdown .tbl-wrap {
   margin: var(--space-2) 0;
+  overscroll-behavior-x: contain;
+}
+/* 单元格不继承消息的 overflow-wrap: anywhere（否则列最小宽度缩到一个字符，窄屏逐字折行）。
+   中文在字间都能断开，所以短格（.short，见 isShortTableCell）整格不换行；其余格子垫一个
+   5 字宽、零高的块作下限，长说明在剩余宽度里换行，横向滚动的表格里也不会被压成一字一行。
+   表格单元格上的 min-width 在 Chromium 里不参与列宽计算，只能这样垫 */
+.conversation-markdown .tbl td {
+  overflow-wrap: break-word;
+}
+.conversation-markdown .tbl td.short {
+  white-space: nowrap;
+}
+.conversation-markdown .tbl td:not(.short)::before {
+  content: "";
+  display: block;
+  width: 5em;
+}
+/* 长路径、URL、行内代码仍可任意断开，不把列撑到整段长度 */
+.conversation-markdown .tbl td :is(code, a, .file-ref-text) {
+  overflow-wrap: anywhere;
 }
 .conversation-image-ref {
   color: var(--a-muted);

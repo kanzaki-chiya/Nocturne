@@ -1,4 +1,7 @@
 import { webcrypto } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ReadAttachmentResult } from "@nocturne/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -1976,6 +1979,56 @@ describe("Markdown 换行", () => {
     expect(cells.map((cell) => cell.textContent)).toEqual(["1", "2"]);
     expect(cells[1]?.style.textAlign).toBe("right");
     expect(cells[1]?.classList.contains("r")).toBe(true);
+  });
+
+  it("窄屏表格：短格整格不换行，长说明、路径与链接仍可换行，表格在自己的容器里横向滚动", () => {
+    const view = createSessionView();
+    view.entries = [
+      assistant({
+        text: [
+          "| 核对项 | 结果 | 版本 | 说明 |",
+          "| --- | --- | ---: | --- |",
+          "| 依赖方向 | 通过 | 0.30.0 | 重连后只恢复当前查看或仍在运行、等待请求的会话，不清空已经显示的内容。 |",
+          "| 路径 | 失败 | 1204 | `Z:/nocturne-mockups/impl/r1103d/harness/very-long-directory-name/output.json` |",
+          "| 链接 | 跳过 | 0 | [https://example.com/docs/architecture/remote-channel](https://example.com/docs/architecture/remote-channel) |",
+        ].join("\n"),
+      }),
+    ];
+    const { container } = mount(view);
+    const table = container.querySelector(".conversation-markdown .tbl-wrap > table.tbl");
+    expect(table).not.toBeNull();
+    const rows = [...(table?.querySelectorAll("tbody tr") ?? [])].map((row) =>
+      [...row.querySelectorAll("td")].map((cell) => cell.classList.contains("short")),
+    );
+    expect(rows).toEqual([
+      [true, true, true, false],
+      [true, true, true, false],
+      [true, true, true, false],
+    ]);
+    // 右对齐的短格两个类都在
+    expect(table?.querySelector("tbody td:nth-child(3)")?.className).toBe("r short");
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(join(here, "..", "src", "conversation.css"), "utf8");
+    const uiCss = readFileSync(join(here, "..", "src", "ui.css"), "utf8");
+    const rule = (source: string, selector: string) => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      return new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`).exec(source)?.[1] ?? "";
+    };
+    // 横向滚动只发生在表格自己的容器里，滚到头不带动页面
+    expect(rule(uiCss, ".tbl-wrap")).toMatch(/overflow-x:\s*auto/);
+    expect(rule(css, ".conversation-markdown .tbl-wrap")).toMatch(
+      /overscroll-behavior-x:\s*contain/,
+    );
+    // 单元格不继承消息的 overflow-wrap: anywhere
+    expect(rule(css, ".conversation .a")).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule(css, ".conversation-markdown .tbl td")).toMatch(/overflow-wrap:\s*break-word/);
+    expect(rule(css, ".conversation-markdown .tbl td.short")).toMatch(/white-space:\s*nowrap/);
+    expect(rule(css, ".conversation-markdown .tbl td:not(.short)::before")).toMatch(/width:\s*5em/);
+    // 长路径、URL、行内代码仍可任意断开
+    expect(rule(css, ".conversation-markdown .tbl td :is(code, a, .file-ref-text)")).toMatch(
+      /overflow-wrap:\s*anywhere/,
+    );
   });
 });
 

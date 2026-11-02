@@ -129,6 +129,7 @@
    - 不套 `--w-readable` 窄栏限制，铺满可用宽度，表格仅用横线分隔行（`.tbl`）。
 4. **对话区与侧面板**：
    - 对话消息流与输入框最大宽度 `--w-thread`；侧面板默认宽度 `--w-panel`；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）。
+   - 回答里的 Markdown 表格（`.conversation-markdown .tbl`，桌面、子代理面板与手机共用）：单元格不继承消息的 `overflow-wrap: anywhere`；源文本不超过 10 个半角宽（全角算 2）的短格整格不换行，其余格子至少 5em 宽，长说明在剩余宽度内换行，格内路径、URL 与行内代码仍可任意断开；装不下时只在 `.tbl-wrap` 内横向滚动（`overscroll-behavior-x: contain`），页面不横向滚动，不加滚动提示或遮罩。宽度足够时列宽分配与普通表格相同。
 
 ---
 
