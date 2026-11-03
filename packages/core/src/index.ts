@@ -134,6 +134,10 @@ import {
   type DetectedShell,
   type Platform,
   type ShellSpec,
+  gitRepository,
+  gitCurrentBranch,
+  gitWorkspaceBranches,
+  gitSwitchBranch,
 } from "./platform/index.js";
 import {
   clampReasoningEffort,
@@ -188,6 +192,7 @@ import type {
   TurnEndReason,
   TurnChanges,
   TurnChangeDiff,
+  WorkspaceBranches,
 } from "./protocol/index.js";
 import { DEFAULT_LOOP_GUARD, normalizePermissionPreset } from "./protocol/index.js";
 import type { FileRefResolution, LocalFileContent } from "./protocol/file-refs.js";
@@ -658,6 +663,8 @@ export interface ResumeSessionOptions {
 }
 
 export interface Runtime {
+  workspaceBranches(input: { workspace: string }): Promise<WorkspaceBranches>;
+  switchBranch(input: { workspace: string; branch: string; create?: boolean }): Promise<void>;
   listSessionGrants(input: { sessionId: string }): Grant[];
   revokeSessionGrant(input: {
     sessionId: string;
@@ -1150,6 +1157,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    * 会话打开的最后一步整体登记；close 与打开失败共用同一撤销步骤移除（sessions.md 第 4 节）。
    */
   interface OpenSessionHooks {
+    workspace: string;
+    branchBusy(): boolean;
     grantWarning(message: string): void;
     shellCurrent(): ReturnType<ReturnType<typeof createShellResolver>["current"]>;
     shellChanged(
@@ -1170,6 +1179,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     applyFailed(scope: string, error: unknown): void;
   }
   const openSessions = new Map<string, OpenSessionHooks>();
+  const branchSwitches = new Set<string>();
+  const directoryKey = (path: string) => platform.paths.canonicalize(path);
+  const switching = (path: string) =>
+    [...branchSwitches].some((root) => platform.paths.isWithin(root, path));
+  const branchBusy = (root: string): boolean =>
+    branchSwitches.has(directoryKey(root)) ||
+    [...openSessions.values()].some(
+      (hooks) => platform.paths.isWithin(root, hooks.workspace) && hooks.branchBusy(),
+    ) ||
+    subagentRegistry.activeAll().some((child) => {
+      if (!child.background) return false;
+      const created = child.durableEvents()[0];
+      if (created?.type !== "session.created") return false;
+      const parent = subagentRegistry.liveSession(child.parentSessionId)?.state().meta.cwd;
+      return (
+        platform.paths.isWithin(root, created.payload.cwd) ||
+        (parent !== undefined &&
+          platform.paths.isWithin(root, openSessions.get(child.parentSessionId)?.workspace ?? "") &&
+          platform.paths.equals(parent, created.payload.cwd))
+      );
+    });
   const grantsListeners = new Set<(payload: GrantsChangedPayload) => void>();
   const grantLists = new Map<string, Grant[]>();
   const grantsChanged = (payload: GrantsChangedPayload): void => {
@@ -1336,6 +1366,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     unattendedOption: boolean,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
+    const branchRoot = await gitRepository(meta.cwd);
     // 会话级非交互（ADR-0064）：带定时任务来源的会话、或创建时声明 interactive:false，
     // 在客户端提交第二条用户消息之前按非交互处理；之后转为交互（permissions.md 第 7 节）
     const unattendedSession = unattendedOption || meta.schedule !== undefined;
@@ -2549,6 +2580,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     const busy = () => controller !== undefined || rewinding;
     const compacting = () => compactController !== undefined;
+    const assertBranchNotSwitching = () => {
+      if (branchRoot !== null && switching(branchRoot))
+        throw new RuntimeCommandError("session_busy", "工作目录正在切换分支");
+    };
+    const recordBranch = async (): Promise<void> => {
+      const current = await gitCurrentBranch(meta.cwd);
+      if (current === null || controller?.signal.aborted) return;
+      const previous = session.state().config.branch;
+      if (previous !== current)
+        await session.emit("session.config_changed", {
+          branch: { current, ...(previous !== undefined ? { previous } : {}) },
+        });
+    };
     const validateForkTarget = (targetSeq?: number) => {
       if (
         targetSeq !== undefined &&
@@ -2882,6 +2926,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ac: AbortController,
       first: () => Promise<PreparedInput>,
     ): Promise<TurnEndReason> => {
+      assertBranchNotSwitching();
       controller = ac;
       let settleTurn!: () => void;
       turnSettled = new Promise<void>((resolve) => {
@@ -2911,6 +2956,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           const prepared = await prepare();
           prepare = undefined;
+          await recordBranch().catch(() => undefined);
           await applyWorkModeStart(prepared);
           const deps: TurnDeps = {
             deferIdle: (turnId) => {
@@ -3030,7 +3076,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     /** 空闲时未暂停的插话也按排队发出；忙时留给安全点或 Turn 结束 */
     const pumpQueue = async (): Promise<boolean> => {
-      if (busy() || compactController !== undefined || closing || session.health !== "ok")
+      if (
+        busy() ||
+        compactController !== undefined ||
+        closing ||
+        session.health !== "ok" ||
+        (branchRoot !== null && switching(branchRoot))
+      )
         return false;
       const head = pendingInputStore.takeQueueHead();
       if (head === undefined) return false;
@@ -3155,6 +3207,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     const forkOpen = async (targetSeq?: number): Promise<string> => {
       assertUsable();
+      assertBranchNotSwitching();
       if (busy() || compactController !== undefined)
         throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
       validateForkTarget(targetSeq);
@@ -3182,6 +3235,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingExternalAgents = true;
     }
     const runtimeHooks: OpenSessionHooks = {
+      workspace: branchRoot ?? meta.cwd,
+      branchBusy: () => busy() || compacting() || closing,
       grantWarning: (message) =>
         session.emitEphemeral("runtime.warning", { code: "grants_invalid", message }),
       shellCurrent: () => shellResolver.current(),
@@ -3276,6 +3331,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return result;
       },
       async rewind(targetSeq, mode) {
+        assertBranchNotSwitching();
         assertUsable();
         if (busy() || compactController !== undefined)
           throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
@@ -3704,6 +3760,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async compact() {
         assertUsable();
+        assertBranchNotSwitching();
         if (busy()) {
           throw new RuntimeCommandError("session_busy", "Turn 运行中，不能压缩");
         }
@@ -4053,6 +4110,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     return current.id;
   };
   const runtime: Runtime = {
+    async workspaceBranches({ workspace }) {
+      const root = await gitRepository(workspace);
+      if (root === null) return { current: null, branches: [], busy: false };
+      try {
+        return { ...(await gitWorkspaceBranches(workspace)), busy: branchBusy(root) };
+      } catch {
+        return { current: null, branches: [], busy: branchBusy(root) };
+      }
+    },
+    async switchBranch({ workspace, branch, create = false }) {
+      const root = await gitRepository(workspace);
+      if (root === null) throw new RuntimeCommandError("invalid_command", "工作目录不是 Git 仓库");
+      const key = directoryKey(root);
+      if (branchBusy(root)) throw new RuntimeCommandError("session_busy", "工作目录正忙");
+      branchSwitches.add(key);
+      try {
+        await gitSwitchBranch(workspace, branch, create);
+      } finally {
+        branchSwitches.delete(key);
+      }
+    },
     listSessionGrants({ sessionId }) {
       return (grantLists.get(sessionGrantRoot(sessionId)) ?? []).map((grant) => ({ ...grant }));
     },

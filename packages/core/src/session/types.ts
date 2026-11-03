@@ -47,6 +47,8 @@ export interface SessionConfig {
   reasoningEffort?: ReasoningEffort | undefined;
   /** 最近一次生效的 shell 切换（ADR-0022）；无切换事件时缺省 */
   shell?: { kind: string; path: string } | undefined;
+  /** Last effective Git branch observation, independent of user configuration. */
+  branch?: string | undefined;
 }
 
 export interface OpenTurn {

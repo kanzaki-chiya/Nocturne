@@ -58,6 +58,8 @@ export interface SessionConfigChangedPayload {
    * 只记录实际发生切换的事件（上层 env/config 覆盖时不发）。
    */
   shell?: { kind: string; path: string } | undefined;
+  /** First observation has no previous value; subsequent changes record the previous branch. */
+  branch?: { current: string; previous?: string } | undefined;
   /** 目标模式（ADR-0076 §2、§4）：每次写完整对象；旧版本忽略，不提升日志版本。 */
   goal?: GoalConfig | null | undefined;
   /** 计划模式（ADR-0076 §2、§5）：进入时记下要恢复的预设，null 表示退出 */

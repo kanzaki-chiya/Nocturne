@@ -48,6 +48,7 @@ export interface SubagentRegistry {
   }): SubagentRegistration;
   find(childSessionId: string): ActiveSubagent | undefined;
   activeOf(parentSessionId: string): ActiveSubagent[];
+  activeAll(): ActiveSubagent[];
   /** 登记本 Runtime 打开的会话，供查询父调用时直接读已提交事件；返回撤销函数 */
   trackSession(session: Session): () => void;
   /** 已打开的顶层会话或仍在运行的子会话 */
@@ -110,6 +111,7 @@ export function createSubagentRegistry(): SubagentRegistry {
     find: (childSessionId) => active.get(childSessionId),
     activeOf: (parentSessionId) =>
       [...active.values()].filter((entry) => entry.parentSessionId === parentSessionId),
+    activeAll: () => [...active.values()],
     trackSession(session) {
       sessions.set(session.id, session);
       return () => {
