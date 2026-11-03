@@ -311,8 +311,11 @@ export function App({ host }: { host: DesktopHost }) {
     | { stage: "working"; text: string }
     | { stage: "error"; message: string }
   >(null);
-  /** 关闭请求有待发输入时的提醒（ADR-0070 §6）：null = 没有待确认的关闭 */
-  const [quitPrompt, setQuitPrompt] = useState<number | null>(null);
+  /** 关闭或重启请求有待发输入时的提醒（ADR-0070 §6）：null = 没有待确认的关闭/重启 */
+  const [quitPrompt, setQuitPrompt] = useState<{
+    count: number;
+    action: "quit" | "restart";
+  } | null>(null);
   // 生效的普通对话工作区 = prefs 覆盖 ?? 外壳默认
   const effectiveWorkspace = p.plainWorkspace ?? defaultWorkspace;
   workspaceRef.current = effectiveWorkspace;
@@ -380,6 +383,17 @@ export function App({ host }: { host: DesktopHost }) {
    */
   const pendingInputsRef = useRef(0);
   pendingInputsRef.current = pendingInputCount(conversations.opened.values());
+  const runRestart = useCallback(
+    () => (host.restartApp !== undefined ? host.restartApp() : host.relaunch()),
+    [host],
+  );
+  const requestRestart = useCallback(async () => {
+    if (pendingInputsRef.current === 0) {
+      await runRestart();
+      return;
+    }
+    setQuitPrompt({ count: pendingInputsRef.current, action: "restart" });
+  }, [runRestart]);
   useEffect(() => {
     if (host.onCloseRequested === undefined) return;
     return host.onCloseRequested(() => {
@@ -387,7 +401,7 @@ export function App({ host }: { host: DesktopHost }) {
         void host.quitApp?.();
         return;
       }
-      setQuitPrompt(pendingInputsRef.current);
+      setQuitPrompt({ count: pendingInputsRef.current, action: "quit" });
     });
   }, [host]);
   /**
@@ -1568,7 +1582,7 @@ export function App({ host }: { host: DesktopHost }) {
                     agentBrowser={host.agentBrowser}
                     browsingData={browsingData}
                     downloads={browserDownloads}
-                    relaunch={() => host.relaunch()}
+                    relaunch={requestRestart}
                     version={settingsVersion}
                   />
                 </PaneErrorBoundary>
@@ -1896,7 +1910,7 @@ export function App({ host }: { host: DesktopHost }) {
               aria-modal="true"
               aria-labelledby="quit-title"
             >
-              <h3 id="quit-title">还有 {quitPrompt} 条没发出</h3>
+              <h3 id="quit-title">还有 {quitPrompt.count} 条没发出</h3>
               <p>关闭后会丢失。留在这里可以继续编辑，或等它们发出去再关。</p>
               <div className="acts">
                 <Button
@@ -1910,11 +1924,16 @@ export function App({ host }: { host: DesktopHost }) {
                 <Button
                   variant="primary"
                   onClick={() => {
+                    const action = quitPrompt.action;
                     setQuitPrompt(null);
-                    void host.quitApp?.();
+                    if (action === "restart") {
+                      void runRestart();
+                    } else {
+                      void host.quitApp?.();
+                    }
                   }}
                 >
-                  仍然退出
+                  {quitPrompt.action === "restart" ? "仍然重启" : "仍然退出"}
                 </Button>
               </div>
             </div>

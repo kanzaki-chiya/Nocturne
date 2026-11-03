@@ -135,14 +135,19 @@ function AgentBrowserRow({
     let live = true;
     host.status().then(
       (status) => {
-        if (live) setRestartRequired(status.restartRequired);
+        if (!live) return;
+        setEnabled(status.enabled);
+        setRestartRequired(status.restartRequired);
+        if ((prefs.get().agentBrowserEnabled === true) !== status.enabled) {
+          prefs.update({ agentBrowserEnabled: status.enabled });
+        }
       },
       () => undefined,
     );
     return () => {
       live = false;
     };
-  }, [host, version]);
+  }, [host, prefs, version]);
 
   const apply = async (next: boolean) => {
     setBusy(true);

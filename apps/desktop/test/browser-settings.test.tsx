@@ -121,10 +121,13 @@ describe("Agent 浏览器", () => {
       PREFS_KEY,
       JSON.stringify({ agentBrowserEnabled: true, agentBrowserRiskAccepted: true }),
     );
-    const host = agentHost([
-      { enabled: false, restartRequired: true },
+    const host = agentHost(
+      [
+        { enabled: false, restartRequired: true },
+        { enabled: true, restartRequired: false },
+      ],
       { enabled: true, restartRequired: false },
-    ]);
+    );
     mount(host, storage);
     // 旧配置继续生效：已开、看过风险提示，不再弹确认
     expect(agentSwitch().getAttribute("aria-checked")).toBe("true");
@@ -136,9 +139,18 @@ describe("Agent 浏览器", () => {
     expect(host.calls).toEqual([false, true]);
   });
 
-  it("进入页面按外壳状态还原「重启应用」（页面重载后）", async () => {
-    mount(agentHost([], { enabled: true, restartRequired: true }));
+  it("进入页面按外壳状态还原「重启应用」与开关，并同步不一致的 prefs", async () => {
+    const { prefs } = mount(agentHost([], { enabled: true, restartRequired: true }));
     expect(await screen.findByRole("button", { name: "重启应用" })).toBeTruthy();
+    expect(agentSwitch().getAttribute("aria-checked")).toBe("true");
+    expect(prefs.get().agentBrowserEnabled).toBe(true);
+
+    cleanup();
+    const storage = memory();
+    storage.setItem(PREFS_KEY, JSON.stringify({ agentBrowserEnabled: true }));
+    const second = mount(agentHost([], { enabled: false, restartRequired: false }), storage);
+    await waitFor(() => expect(agentSwitch().getAttribute("aria-checked")).toBe("false"));
+    expect(second.prefs.get().agentBrowserEnabled).toBe(false);
   });
 
   it("外壳报错写在行内，开关不变", async () => {

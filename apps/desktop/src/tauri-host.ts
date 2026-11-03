@@ -163,6 +163,9 @@ export function createTauriHost(): DesktopHost {
     quitApp: async () => {
       await invoke("app_close");
     },
+    restartApp: async () => {
+      await invoke("app_restart");
+    },
     cancelQuit: async () => {
       await invoke("app_close_cancel");
     },

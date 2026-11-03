@@ -44,9 +44,9 @@ fn close_backends(backends: Vec<Arc<backend::Backend>>) {
     }
 }
 
-/// 开始退出流程：拦截关闭、后台线程关后台、结束后 app.exit(0)。
-/// 重复触发直接返回（shutting_down 已置位）。
-fn begin_shutdown(app: &AppHandle) {
+/// 开始退出或重启流程：后台线程关终端、关浏览器与 agent 标签、关后台，结束后
+/// `app.exit(0)` 或 `app.restart()`。重复触发由调用方以 `shutting_down` 挡掉。
+fn begin_shutdown(app: &AppHandle, restart: bool) {
     let app = app.clone();
     thread::spawn(move || {
         let terminals = Arc::clone(app.state::<Arc<terminal::TerminalState>>().inner());
@@ -58,7 +58,11 @@ fn begin_shutdown(app: &AppHandle) {
         agents.destroy_all();
         close_backends(app.state::<Arc<AppState>>().backends_snapshot());
         let _ = closing_terminals.join();
-        app.exit(0);
+        if restart {
+            app.restart();
+        } else {
+            app.exit(0);
+        }
     });
 }
 
@@ -76,7 +80,7 @@ fn request_close(app: &AppHandle) {
     }
     if app.emit("app-close-requested", ()).is_err() {
         if !state.shutting_down.swap(true, Ordering::SeqCst) {
-            begin_shutdown(app);
+            begin_shutdown(app, false);
         }
         return;
     }
@@ -88,7 +92,7 @@ fn request_close(app: &AppHandle) {
         if state.close_prompt.load(Ordering::SeqCst)
             && !state.shutting_down.swap(true, Ordering::SeqCst)
         {
-            begin_shutdown(&app);
+            begin_shutdown(&app, false);
         }
     });
 }
@@ -101,7 +105,18 @@ fn app_close(app: AppHandle) {
         return;
     }
     state.close_prompt.store(false, Ordering::SeqCst);
-    begin_shutdown(&app);
+    begin_shutdown(&app, false);
+}
+
+/// 界面确认重启（设置 › 浏览器「重启应用」）：走与退出相同的清理，结束后 app.restart()
+#[tauri::command]
+fn app_restart(app: AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    if state.shutting_down.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    state.close_prompt.store(false, Ordering::SeqCst);
+    begin_shutdown(&app, true);
 }
 
 /// 界面放弃退出（有待发输入时用户选择留下）
@@ -130,6 +145,7 @@ pub fn run() {
         backend::backend_close,
         backend::backend_stderr,
         app_close,
+        app_restart,
         app_close_cancel,
         backend::node_probe,
         backend::plain_workspace,

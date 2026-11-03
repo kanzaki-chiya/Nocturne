@@ -24,7 +24,7 @@ Core 的 McpConnector 注入点 → 原执行管线、权限层、结果附件
 - 生效的运行时来源保留其 id；同名用户/项目服务器（忽略大小写）报冲突并跳过该配置条目，不能覆盖、继承或替代内置来源。只在此来源存在时保留，不改变 CLI 原有合法配置。工具冲突沿既有显式告警路径。
 - `origin: app` 仅可作为现有内存类型的兼容值，不意味着写入 `mcp.json` 或允许调用配置管理方法编辑它。「设置 › 浏览器」单独显示「模型操作网页」开关（[ADR-0078](../decisions/ADR-0078-browser-settings.md)）；普通 MCP 配置表不生成可编辑的虚假配置。CLI/TUI 自行启动的后台无来源。手机发起的 Turn 也可以用这组工具，权限照常处理。
 
-开关存桌面本机 prefs 的 `agentBrowserEnabled`，缺省 false；在「设置 › 浏览器 › Agent 浏览器」的「模型操作网页」里主动启用，开启后只对新的后台进程生效（重启应用后新的后台进程才会拿到工具）。外壳记下最近一次 spawn 后台时交出去的服务器代（`backend_bootstrap`；每次 `start_server` 生成新端口与凭证，代加一，未启用时交出的是「无」），`restartRequired` = 当前该给的（开着为当前代、关着为无）≠ 交出去的那份：启动时关着、开了再关，不用重启；启动时开着、关了再开，旧后台持有上一代凭证接不上新服务，仍要重启。设置页据此在开关左边显示「重启应用」（`host.relaunch()`）；它不写进用户的 `mcp.json`。用户首次开启先看到内联风险确认框（「网页内容不可信，可能诱导它操作其他页面。」），确认后由 Rust 在下次 backend_open 装配。停用立即撤销旧来源绑定；重启后台后不再给启动凭证。不是向模型请求启用许可，也不是给工具执行授权，调用仍逐次经过权限层。设置 UI 不持有 bearer。
+开关存桌面本机 prefs 的 `agentBrowserEnabled`，缺省 false；在「设置 › 浏览器 › Agent 浏览器」的「模型操作网页」里主动启用，开启后只对新的后台进程生效（重启应用后新的后台进程才会拿到工具）。外壳记下最近一次 spawn 后台时交出去的服务器代（`backend_bootstrap`；每次 `start_server` 生成新端口与凭证，代加一，未启用时交出的是「无」），`restartRequired` = 当前该给的（开着为当前代、关着为无）≠ 交出去的那份：启动时关着、开了再关，不用重启；启动时开着、关了再开，旧后台持有上一代凭证接不上新服务，仍要重启。设置页据此在开关左边显示「重启应用」（和关窗口走同一条路：有待发输入时弹「还有 N 条没发出」，确认后或无待发输入时调 `app_restart`，走 `begin_shutdown` 关终端、关浏览器与后台后 `app.restart()`）；它不写进用户的 `mcp.json`。用户首次开启先看到内联风险确认框（「网页内容不可信，可能诱导它操作其他页面。」），确认后由 Rust 在下次 backend_open 装配。停用立即撤销旧来源绑定；重启后台后不再给启动凭证。不是向模型请求启用许可，也不是给工具执行授权，调用仍逐次经过权限层。设置 UI 不持有 bearer。
 
 ### 鉴权与生命周期
 
@@ -74,7 +74,7 @@ HTTP bootstrap 控制协议（不是通用 RPC，不对前端开放）：
 | `agent_browser_control` | `{ tabId, action: "takeover" \| "return" \| "close" }` → `{ revision, state }`；用户主动控制；return只对同代保留的agent标签有效，失效refs后允许原owner actor继续 |
 | `agent_browser_dialog` | `{ tabId, accept: boolean, text?: string }` → null；用户在横幅里答复该标签挂起的脚本对话框（第 5 节）；`text` 只对 prompt 的确定生效；没有挂起的对话框报 `no_dialog` |
 | `agent_browser_set_enabled` | `{ enabled: boolean }` → `{ enabled, restartRequired: boolean }`；停用立即撤销，启用不在现有后台伪造凭证；`restartRequired` 按第 1 节与正在运行的后台比较；prefs落盘由主界面现有偏好路径维护，Rust内存开关缺省false |
-| `agent_browser_status` | `{}` → `{ enabled, restartRequired }`；设置页进入时还原「重启应用」 |
+| `agent_browser_status` | `{}` → `{ enabled, restartRequired }`；设置页进入时还原开关与「重启应用」（开关以外壳为准并同步不一致的 prefs） |
 
 `AgentBrowserTab = { tabId, rootSessionId, actorSessionId, title, url, live, pinned, state: "agent" | "busy" | "taken_over" | "ended", operation?: string }`，不含bearer、截图、网页内容或type文本。Channel消息为 `{ shellGeneration, revision, kind: "tabs", tabs }`（完整有界快照）、`{ ..., kind: "present", operationId, tabId }`、`{ ..., kind: "operation", tabId, operationId, state: "started" | "completed" | "cancelled", operation, errorCode? }`。revision严格递增；主界面发现缺口/重连重新watch，不解析进度文字找id。
 

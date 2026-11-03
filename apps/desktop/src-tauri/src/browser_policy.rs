@@ -328,22 +328,13 @@ pub struct DownloadPrefs {
     pub dir: Option<PathBuf>,
 }
 
-/// 谁发起的下载。agent 标签的下载一律取消，和下载设置无关（desktop-browser.md 第 5 节）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DownloadSource {
-    User,
-    Agent,
-}
-
-/// 一次下载怎么处理。
+/// 一次下载怎么处理（用户标签；agent 标签的下载由 `agent_browser/shell.rs` 直接取消）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadPlan {
     /// 弹「另存为」，初始目录为 `dir`（`None` 时用 WebView2 给的默认位置）
     Ask { dir: Option<PathBuf> },
     /// 不问，直接存到这个路径
     Save(PathBuf),
-    /// 取消下载，不弹对话框、不存盘
-    Cancel,
 }
 
 /// 同名文件最多试到这个序号；再往后退回另存为
@@ -367,21 +358,16 @@ pub fn unique_file_name(name: &str, taken: impl Fn(&str) -> bool) -> Option<Stri
 
 /// 决定下载去哪（纯函数；文件系统探测由调用方传入）。
 ///
-/// - agent：一律取消；
 /// - 还没收到前端的设置（下载早于同步）或每次询问：弹另存为，初始目录是保存位置；
 /// - 不询问：保存位置（未设置用系统「下载」文件夹）存在且可写时直接存，同名加序号；
 ///   不存在、不可写或序号用完时退回另存为。
 pub fn plan_download(
-    source: DownloadSource,
     prefs: Option<&DownloadPrefs>,
     default_dir: Option<&Path>,
     name: &str,
     writable_dir: impl Fn(&Path) -> bool,
     exists: impl Fn(&Path) -> bool,
 ) -> DownloadPlan {
-    if source == DownloadSource::Agent {
-        return DownloadPlan::Cancel;
-    }
     let Some(prefs) = prefs else {
         return DownloadPlan::Ask { dir: None };
     };
@@ -512,13 +498,12 @@ mod tests {
         let no = |_: &Path| false;
         // 还没同步设置：按询问处理，初始目录交给 WebView2
         assert_eq!(
-            plan_download(DownloadSource::User, None, Some(default), "a.zip", yes, no),
+            plan_download(None, Some(default), "a.zip", yes, no),
             DownloadPlan::Ask { dir: None }
         );
         // 询问：初始目录是保存位置；没设保存位置用系统「下载」
         assert_eq!(
             plan_download(
-                DownloadSource::User,
                 Some(&prefs(true, Some("D:/dl"))),
                 Some(default),
                 "a.zip",
@@ -530,14 +515,7 @@ mod tests {
             }
         );
         assert_eq!(
-            plan_download(
-                DownloadSource::User,
-                Some(&prefs(true, None)),
-                Some(default),
-                "a.zip",
-                yes,
-                no
-            ),
+            plan_download(Some(&prefs(true, None)), Some(default), "a.zip", yes, no),
             DownloadPlan::Ask {
                 dir: Some(default.to_path_buf())
             }
@@ -546,7 +524,6 @@ mod tests {
         let exists = |p: &Path| p == Path::new("D:/dl").join("a.zip");
         assert_eq!(
             plan_download(
-                DownloadSource::User,
                 Some(&prefs(false, Some("D:/dl"))),
                 Some(default),
                 "a.zip",
@@ -556,20 +533,12 @@ mod tests {
             DownloadPlan::Save(Path::new("D:/dl").join("a (1).zip"))
         );
         assert_eq!(
-            plan_download(
-                DownloadSource::User,
-                Some(&prefs(false, None)),
-                Some(default),
-                "a.zip",
-                yes,
-                no
-            ),
+            plan_download(Some(&prefs(false, None)), Some(default), "a.zip", yes, no),
             DownloadPlan::Save(default.join("a.zip"))
         );
         // 保存位置不存在或不可写：退回另存为
         assert_eq!(
             plan_download(
-                DownloadSource::User,
                 Some(&prefs(false, Some("Z:/gone"))),
                 Some(default),
                 "a.zip",
@@ -578,29 +547,6 @@ mod tests {
             ),
             DownloadPlan::Ask { dir: None }
         );
-    }
-
-    #[test]
-    fn agent_downloads_are_always_cancelled() {
-        // 不管用户的下载设置是什么、目录能不能写，agent 标签的下载都取消
-        for p in [
-            None,
-            Some(prefs(true, None)),
-            Some(prefs(false, None)),
-            Some(prefs(false, Some("D:/dl"))),
-        ] {
-            assert_eq!(
-                plan_download(
-                    DownloadSource::Agent,
-                    p.as_ref(),
-                    Some(Path::new("C:/Users/me/Downloads")),
-                    "a.zip",
-                    |_| true,
-                    |_| false
-                ),
-                DownloadPlan::Cancel
-            );
-        }
     }
 
     #[test]

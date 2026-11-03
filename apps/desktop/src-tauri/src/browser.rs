@@ -14,7 +14,7 @@
 use crate::backend::CommandError;
 use crate::browser_fullscreen::{Fullscreen, Step};
 use crate::browser_policy::{
-    self, Blocked, DownloadPlan, DownloadPrefs, DownloadReport, DownloadSource, Downloads,
+    self, Blocked, DownloadPlan, DownloadPrefs, DownloadReport, Downloads,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -244,7 +244,6 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
             let plan = {
                 let pending = lock(&state.pending_saves);
                 browser_policy::plan_download(
-                    DownloadSource::User,
                     prefs.as_ref(),
                     default_dir.as_deref(),
                     &name,
@@ -261,7 +260,6 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
                     lock(&state.pending_saves).push((url.to_string(), path.clone()));
                     Some(path)
                 }
-                DownloadPlan::Cancel => None,
             };
             match target {
                 Some(path) => {

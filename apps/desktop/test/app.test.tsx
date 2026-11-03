@@ -1814,3 +1814,72 @@ it("定时任务页：立即运行先刷新会话列表再打开新会话；历�
   const stream = await screen.findByRole("region", { name: "会话消息" });
   expect(await within(stream).findByText("sched-run-1 正文")).toBeTruthy();
 });
+
+it("设置 › 浏览器「重启应用」与关闭窗口共用待发输入提醒：取消留下，确认调 restartApp，无待发直接重启", async () => {
+  const host = replayHost();
+  const restartApp = vi.fn(async () => undefined);
+  host.restartApp = restartApp;
+  host.agentBrowser = {
+    watch: () => Promise.resolve({ shellGeneration: 1, revision: 0, enabled: true, tabs: [] }),
+    uiState: async () => undefined,
+    presented: async () => undefined,
+    control: async () => ({ revision: 1 }),
+    dialog: async () => undefined,
+    status: async () => ({ enabled: true, restartRequired: true }),
+    setEnabled: async (enabled) => ({ enabled, restartRequired: true }),
+  };
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  const backendId = host.calls.find(
+    (c) => c.method === "runtime.resumeSession" && c.params.sessionId === "alpha",
+  )?.backendId;
+  if (backendId === undefined) throw new Error("缺少 alpha 的后台");
+
+  act(() => {
+    host.emitEvent(backendId, "alpha", {
+      type: "input.pending",
+      time: "2026-10-04T00:00:02Z",
+      payload: {
+        items: [{ id: "p1", text: "待发 1", mode: "queue", attachments: [] }],
+        paused: false,
+      },
+    });
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  fireEvent.click(within(nav).getByRole("button", { name: /浏览器/ }));
+  const restartBtn = await screen.findByRole("button", { name: "重启应用" });
+
+  // 有待发输入时点「重启应用」：弹提醒，取消后留下
+  fireEvent.click(restartBtn);
+  const dialog = await screen.findByRole("dialog", { name: "还有 1 条没发出" });
+  expect(within(dialog).getByRole("button", { name: "仍然重启" })).toBeTruthy();
+  expect(restartApp).not.toHaveBeenCalled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "留在这里" }));
+  expect(screen.queryByRole("dialog", { name: "还有 1 条没发出" })).toBeNull();
+  expect(restartApp).not.toHaveBeenCalled();
+
+  // 再次点击并确认「仍然重启」：调 restartApp
+  fireEvent.click(restartBtn);
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "还有 1 条没发出" })).getByRole("button", {
+      name: "仍然重启",
+    }),
+  );
+  await waitFor(() => expect(restartApp).toHaveBeenCalledTimes(1));
+
+  // 无待发输入时点「重启应用」：直接调 restartApp
+  act(() => {
+    host.emitEvent(backendId, "alpha", {
+      type: "input.pending",
+      time: "2026-10-04T00:00:03Z",
+      payload: { items: [], paused: false },
+    });
+  });
+  fireEvent.click(restartBtn);
+  await waitFor(() => expect(restartApp).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("dialog")).toBeNull();
+});

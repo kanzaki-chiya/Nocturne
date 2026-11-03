@@ -3,6 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "app_note",
             "app_close",
+            "app_restart",
             "app_close_cancel",
             "backend_open",
             "backend_send",

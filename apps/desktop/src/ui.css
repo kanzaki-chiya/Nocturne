@@ -473,6 +473,12 @@
 .srow.bad {
   background: var(--a-error-bg);
 }
+.srow[role="alertdialog"] {
+  background: var(--a-raised);
+}
+.srow[role="alertdialog"]:last-child {
+  border-radius: 0 0 var(--radius-3) var(--radius-3);
+}
 .desc {
   font-size: var(--fs-1);
   color: var(--a-muted);

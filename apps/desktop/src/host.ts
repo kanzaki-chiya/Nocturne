@@ -232,6 +232,8 @@ export interface DesktopHost {
   onCloseRequested?: ((handler: () => void) => () => void) | undefined;
   /** 确认退出（外壳随后关后台、结束进程） */
   quitApp?: (() => Promise<void>) | undefined;
+  /** 确认重启（外壳随后关终端与后台、重启进程） */
+  restartApp?: (() => Promise<void>) | undefined;
   /** 放弃退出：界面留下，外壳解除关闭请求 */
   cancelQuit?: (() => Promise<void>) | undefined;
   /**
