@@ -243,12 +243,19 @@ pub fn user_data_override(value: Option<std::ffi::OsString>) -> Option<PathBuf> 
 
 /// 读出并删掉 `WEBVIEW2_USER_DATA_FOLDER`。只能在启动、还没有别的线程时调用。
 pub fn take_user_data_override() -> Option<PathBuf> {
-    const KEY: &str = "WEBVIEW2_USER_DATA_FOLDER";
-    let value = user_data_override(std::env::var_os(KEY));
+    let value = user_data_override(std::env::var_os(USER_DATA_KEY));
     if value.is_some() {
-        std::env::remove_var(KEY);
+        std::env::remove_var(USER_DATA_KEY);
     }
     value
+}
+
+const USER_DATA_KEY: &str = "WEBVIEW2_USER_DATA_FOLDER";
+
+/// 「重启应用」前把 [`take_user_data_override`] 删掉的目录放回进程环境，让重启出来的
+/// 进程用同一个目录。只在即将退出时调用：之后本进程不再新建 WebView2 环境。
+pub fn restore_user_data_override(dir: &Path) {
+    std::env::set_var(USER_DATA_KEY, dir);
 }
 
 /// 下载结果提示（发给前端的 `Download` 消息）。

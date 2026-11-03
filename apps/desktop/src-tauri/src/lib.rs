@@ -115,6 +115,7 @@ pub fn run() {
     // 主界面共用一个目录（browser_policy::take_user_data_override）。这里还没有别的线程：
     // 读出来删掉，主窗口改在 setup 里显式用这个目录创建
     let webview_data = browser_policy::take_user_data_override();
+    let restart_data = webview_data.clone();
     let mut context = tauri::generate_context!();
     let main_window = webview_data.as_ref().and_then(|_| {
         let windows = &mut context.config_mut().app.windows;
@@ -278,8 +279,17 @@ pub fn run() {
         })
         .build(context)
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+        .run(move |app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                // 「重启应用」（host.relaunch）：tauri 放行退出后用本进程的环境再起一个。
+                // 启动时删掉的数据目录要交还，否则新进程落到默认目录（隔离环境下就是
+                // 真实的应用数据）；也不弹关闭确认
+                if code == Some(tauri::RESTART_EXIT_CODE) {
+                    if let Some(dir) = &restart_data {
+                        browser_policy::restore_user_data_override(dir);
+                    }
+                    return;
+                }
                 let state = app.state::<Arc<AppState>>();
                 if state.shutting_down.load(Ordering::SeqCst) {
                     // begin_shutdown 已经发过 app.exit：放行本次退出
