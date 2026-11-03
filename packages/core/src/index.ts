@@ -1159,6 +1159,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   interface OpenSessionHooks {
     workspace: string;
     branchBusy(): boolean;
+    pumpPending(): void;
     grantWarning(message: string): void;
     shellCurrent(): ReturnType<ReturnType<typeof createShellResolver>["current"]>;
     shellChanged(
@@ -3237,6 +3238,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const runtimeHooks: OpenSessionHooks = {
       workspace: branchRoot ?? meta.cwd,
       branchBusy: () => busy() || compacting() || closing,
+      pumpPending: () => {
+        void pumpQueue().catch(() => {
+          pendingInputStore.pauseAll();
+        });
+      },
       grantWarning: (message) =>
         session.emitEphemeral("runtime.warning", { code: "grants_invalid", message }),
       shellCurrent: () => shellResolver.current(),
@@ -4129,6 +4135,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await gitSwitchBranch(workspace, branch, create);
       } finally {
         branchSwitches.delete(key);
+        for (const hooks of openSessions.values()) {
+          if (platform.paths.isWithin(root, hooks.workspace)) hooks.pumpPending();
+        }
       }
     },
     listSessionGrants({ sessionId }) {

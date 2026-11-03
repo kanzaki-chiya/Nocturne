@@ -59,7 +59,7 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 
 ### 3.1 工作目录分支操作（ADR-0079）
 
-Runtime 的 `workspaceBranches({ workspace })` 与 `switchBranch({ workspace, branch, create? })` 按 Git 工作树根目录归并活动，同一仓库子目录的会话也共用准入判定。所有已打开会话的 Turn（含准备、收尾）、压缩、回退，以及仍登记的共享目录后台子会话都会阻止切换，返回 `session_busy`。隔离工作树中的后台子会话只影响自己的副本。切换持有目录准入锁，异步 Git 校验与切换期间不能插入新的 Turn、压缩或回退。它是直接用户操作，不经过工具权限层。
+Runtime 的 `workspaceBranches({ workspace })` 与 `switchBranch({ workspace, branch, create? })` 按 Git 工作树根目录归并活动，同一仓库子目录的会话也共用准入判定。所有已打开会话的 Turn（含准备、收尾）、压缩、回退，以及仍登记的共享目录后台子会话都会阻止切换，返回 `session_busy`。隔离工作树中的后台子会话只影响自己的副本。切换持有目录准入锁，异步 Git 校验与切换期间不能插入新的 Turn、压缩或回退；切换结束（成功或失败）后唤醒该目录下已打开会话的待发输入队列。它是直接用户操作，不经过工具权限层。
 
 Turn 前分支基准与说明从 `session.config_changed.branch` 的有效历史重建，恢复、回退与分叉规则见 [context.md 3.1](context.md#31-分支变化说明adr-0079)；Git 调用在 platform 边界，失败时不修改会话比较基准。接口见 [rpc.md 3.12](../protocols/rpc.md#312-workspaceadr-0079)。
 

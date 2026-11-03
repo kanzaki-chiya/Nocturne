@@ -97,21 +97,6 @@
   font-family: var(--sans);
   color: var(--a-accent);
 }
-.branch-path {
-  position: fixed;
-  z-index: 51;
-  max-width: min(360px, calc(100vw - 16px));
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-panel);
-  color: var(--a-text);
-  box-shadow: var(--shadow-popover);
-  font: var(--fs-1)/var(--lh-base) var(--mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  pointer-events: none;
-}
 .branch-error {
   margin: var(--space-1) 0 0;
   padding: var(--space-2);

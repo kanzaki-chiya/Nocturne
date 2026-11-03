@@ -60,11 +60,8 @@ describe("桌面分支菜单 ADR-0079", () => {
     expect(document.activeElement).toBe(input);
     const occupied = screen.getByRole("menuitemradio", { name: "feat/auth" });
     expect(occupied.hasAttribute("disabled")).toBe(true);
-    expect(occupied.getAttribute("title")).toBe("Z:/other/auth");
-    if (!occupied.parentElement) throw new Error("missing branch row");
-    fireEvent.mouseEnter(occupied.parentElement);
-    expect(screen.getByRole("tooltip").textContent).toBe("Z:/other/auth");
-    fireEvent.mouseLeave(occupied.parentElement);
+    expect(occupied.hasAttribute("title")).toBe(false);
+    expect(occupied.parentElement?.getAttribute("title")).toBe("Z:/other/auth");
     expect(screen.queryByRole("tooltip")).toBeNull();
     expect(screen.getByRole("menuitemradio", { name: "main" }).getAttribute("aria-checked")).toBe(
       "true",
@@ -73,6 +70,8 @@ describe("桌面分支菜单 ADR-0079", () => {
     expect(screen.queryByRole("menuitemradio", { name: "main" })).toBeNull();
     expect(screen.getByRole("menuitemradio", { name: "fix/style" })).toBeTruthy();
     fireEvent.change(input, { target: { value: "feat/new" } });
+    const createOption = screen.getByRole("menuitemradio", { name: "新建分支 feat/new" });
+    expect(createOption.querySelector(".branch-check svg")).not.toBeNull();
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
       expect(h.client.switchBranch).toHaveBeenCalledWith({
@@ -121,10 +120,35 @@ describe("桌面分支菜单 ADR-0079", () => {
     await act(async () => {
       fireEvent(window, new Event("focus"));
     });
-    expect((await screen.findByRole("button", { name: "external" })).hasAttribute("disabled")).toBe(
+    const triggerButton = await screen.findByRole("button", { name: "external" });
+    expect(triggerButton.hasAttribute("disabled")).toBe(false);
+    let resolveRefresh: ((value: WorkspaceBranches) => void) | undefined;
+    h.client.workspaceBranches.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    fireEvent.click(triggerButton);
+    await screen.findByRole("menu");
+    expect(screen.getByRole("menuitemradio", { name: "fix/style" }).hasAttribute("disabled")).toBe(
       true,
     );
-    expect(h.client.switchBranch).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveRefresh?.({ ...initial, current: "external", busy: false });
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("menuitemradio", { name: "fix/style" }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "fix/style" }));
+    await waitFor(() =>
+      expect(h.client.switchBranch).toHaveBeenCalledWith({
+        workspace: "Z:/fixture",
+        branch: "fix/style",
+      }),
+    );
   });
 
   it("方向键跳过禁用项，Escape关闭归焦；输入选项样名字不被当作界面指令", async () => {

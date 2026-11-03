@@ -465,3 +465,101 @@ it("does not block the parent repository for an isolated background worktree", a
   await new Promise((resolve) => setTimeout(resolve, 1500));
   await session.close();
 });
+
+it("pumps inputs queued while a branch switch is running after the switch finishes or fails", async () => {
+  const root = repository();
+  const hooks = temp();
+  const gate = path.join(hooks, "hold");
+  const fail = path.join(hooks, "fail");
+  const hook = path.join(hooks, "post-checkout");
+  writeFileSync(
+    hook,
+    `#!/bin/sh\nwhile [ -f "${gate.replace(/\\/g, "/")}" ]; do sleep 0.05; done\n[ ! -f "${fail.replace(/\\/g, "/")}" ]\n`,
+  );
+  chmodSync(hook, 0o755);
+  git(root, "config", "core.hooksPath", hooks);
+  let parentCalls = 0;
+  let childCalls = 0;
+  const provider = new FakeProvider({
+    handler: (request) => {
+      if (request.tools.some((tool) => tool.name === "finish")) {
+        const id = ++childCalls;
+        return [
+          { type: "wait", ms: 80 },
+          {
+            type: "tool_call",
+            toolCallId: `finished-${id}`,
+            name: "finish",
+            input: { result: `bg-${id}` },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ];
+      }
+      if (parentCalls === 0 || parentCalls === 2) {
+        parentCalls++;
+        return [
+          {
+            type: "tool_call",
+            toolCallId: `task-${parentCalls}`,
+            name: "task",
+            input: { task: "isolated", preset: "explore", background: true, isolation: "worktree" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ];
+      }
+      parentCalls++;
+      return [
+        { type: "text_delta", text: "delivered" },
+        { type: "finish", reason: "stop" },
+      ];
+    },
+  });
+  const rt = await createRuntime({
+    cwd: root,
+    sessionsDir: temp(),
+    providers: [provider],
+    subagent: { background: true },
+    permissions: { autoApproveAsk: true },
+  });
+  const session = await rt.createSession({ model: "fake/fake-1" });
+  const delivered = (marker: string) =>
+    session.pendingInputs().items.length === 0 &&
+    session.state().openTurn === undefined &&
+    session
+      .state()
+      .history.some((e) => e.kind === "user" && JSON.stringify(e.content).includes(marker));
+  await session.submit({ text: "launch-success" });
+  writeFileSync(gate, "1");
+  const switching = rt.switchBranch({
+    workspace: root,
+    branch: "queued-during-success",
+    create: true,
+  });
+  for (let i = 0; i < 40 && session.pendingInputs().items.length === 0; i++)
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(session.pendingInputs().items).toHaveLength(1);
+  rmSync(gate);
+  await switching;
+  for (let i = 0; i < 25 && !delivered("bg-1"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(session.pendingInputs().items).toHaveLength(0);
+  expect(delivered("bg-1")).toBe(true);
+  await session.submit({ text: "launch-failure" });
+  writeFileSync(gate, "1");
+  writeFileSync(fail, "1");
+  const failing = rt.switchBranch({
+    workspace: root,
+    branch: "queued-during-failure",
+    create: true,
+  });
+  for (let i = 0; i < 40 && session.pendingInputs().items.length === 0; i++)
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(session.pendingInputs().items).toHaveLength(1);
+  rmSync(gate);
+  await expect(failing).rejects.toThrow();
+  for (let i = 0; i < 25 && !delivered("bg-2"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(session.pendingInputs().items).toHaveLength(0);
+  expect(delivered("bg-2")).toBe(true);
+  await session.close();
+});
