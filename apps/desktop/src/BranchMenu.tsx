@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
 import type { SessionView, WorkspaceBranches } from "@nocturne/core/protocol";
 import type { RpcRuntime, RpcSession } from "@nocturne/rpc/client";
 import { Menu } from "./Menu";
@@ -51,12 +52,26 @@ export function BranchMenu({
     void refresh();
   }, [refresh, replaying, view.turnCount, view.status]);
   useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
     const focus = () => {
       void refresh();
     };
     window.addEventListener("focus", focus);
+    try {
+      void Promise.resolve(listen("tauri://focus", focus))
+        .then((off) => {
+          if (disposed) off();
+          else unlisten = off;
+        })
+        .catch(() => undefined);
+    } catch {
+      // Non-Tauri test environments rely on window focus.
+    }
     return () => {
+      disposed = true;
       window.removeEventListener("focus", focus);
+      unlisten?.();
     };
   }, [refresh]);
 
@@ -73,9 +88,8 @@ export function BranchMenu({
   const close = () => {
     setHoverPath(null);
     setOpened(null);
-    trigger.current?.focus();
   };
-  const choose = async (branch: string, create: boolean) => {
+  const choose = async (branch: string, create: boolean, returnFocus: boolean) => {
     if (busy) return;
     setSwitching(owner);
     setError(null);
@@ -85,9 +99,11 @@ export function BranchMenu({
       await refresh();
       if (currentOwner.current !== owner) return;
       close();
-      requestAnimationFrame(() => {
-        if (currentOwner.current === owner) trigger.current?.focus();
-      });
+      if (returnFocus) {
+        requestAnimationFrame(() => {
+          if (currentOwner.current === owner) trigger.current?.focus();
+        });
+      }
     } catch (failure) {
       if (currentOwner.current === owner)
         setError(failure instanceof Error ? failure.message : String(failure));
@@ -101,7 +117,7 @@ export function BranchMenu({
       if (event.target instanceof HTMLButtonElement) return;
       event.preventDefault();
       const option = enabled[selected >= 0 ? selected : 0];
-      if (option) void choose(option.name, option.create);
+      if (option) void choose(option.name, option.create, true);
     } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
       const next =
@@ -201,7 +217,7 @@ export function BranchMenu({
                       if (index >= 0) setActive(index);
                     }}
                     onClick={() => {
-                      void choose(option.name, option.create);
+                      void choose(option.name, option.create, false);
                     }}
                   >
                     <span className="branch-check">

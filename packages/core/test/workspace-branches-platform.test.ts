@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const { execFile } = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock("node:fs", () => ({ existsSync: () => true }));
 vi.mock("node:child_process", () => {
   const execute = (...args: unknown[]) => execFile(...args);
   Object.defineProperty(execute, Symbol.for("nodejs.util.promisify.custom"), {

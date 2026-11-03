@@ -132,6 +132,7 @@ describe("桌面分支菜单 ADR-0079", () => {
     render(<BranchMenu {...h.props} />);
     const input = await open();
     fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
       expect(h.client.switchBranch).toHaveBeenCalledWith({

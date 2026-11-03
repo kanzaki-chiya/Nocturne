@@ -1,8 +1,19 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const runFile = promisify(execFile);
+
+function hasGitMarker(workspace: string): boolean {
+  let current = resolve(workspace);
+  for (;;) {
+    if (existsSync(join(current, ".git"))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
 
 async function git(cwd: string, args: string[], timeout = 4000): Promise<string> {
   try {
@@ -22,6 +33,7 @@ async function git(cwd: string, args: string[], timeout = 4000): Promise<string>
 }
 
 export async function gitRepository(workspace: string): Promise<string | null> {
+  if (!hasGitMarker(workspace)) return null;
   try {
     return resolve((await git(workspace, ["rev-parse", "--show-toplevel"])).trim());
   } catch {
@@ -30,6 +42,7 @@ export async function gitRepository(workspace: string): Promise<string | null> {
 }
 
 export async function gitCurrentBranch(workspace: string): Promise<string | null> {
+  if (!hasGitMarker(workspace)) return null;
   try {
     const name = (await git(workspace, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
     if (name !== "HEAD") return name || null;
