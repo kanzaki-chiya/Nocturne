@@ -10,6 +10,25 @@ import { createRpcClient } from "@nocturne/rpc/client";
 afterEach(cleanupTmp);
 
 describe("多连接共享后台", () => {
+  it("分支查询和切换只允许本机连接，远程调用在进入 Runtime 前被拒绝", async () => {
+    const h = await connectMany();
+    const remote = await h.add();
+    for (const method of ["workspace.branches", "workspace.switchBranch"] as const) {
+      expect(REMOTE_METHODS).not.toContain(method);
+      await expect(
+        remote.client.call(method, { workspace: h.ws, branch: "main" }),
+      ).rejects.toMatchObject({
+        code: "remote_not_allowed",
+      });
+    }
+    expect(await h.client.runtime.workspaceBranches({ workspace: h.ws })).toEqual({
+      current: null,
+      branches: [],
+      busy: false,
+    });
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
   it("远程模型读方法不再限定工作区，cwd 过滤不受限", async () => {
     const h = await connectMany();
     const remote = await h.add();

@@ -66,6 +66,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 ### 3.1 持久化事件
 
+`session.config_changed.branch?: { current: string; previous?: string }`（[ADR-0079](../decisions/ADR-0079-branch-switch.md)）记录 Turn 前读取的分支基准；首次只带 current，不生成 note，变化时带 previous 并折叠为一条持久 note。基准和 note 只从有效事件重建，L1/L2 投影规则见 [context.md](../architecture/context.md#31-分支变化说明adr-0079)。不提升 formatVersion，旧日志不变，旧版本忽略此可选字段。
+
 `session.config_changed.mcp` 的可用性与 note 只从回退后的有效事件折叠；`autoRetry` 表示无需用户操作，Runtime 后续仍会自行重连，具体条件见 [ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md) 第 2 节。
 
 | 类型 | turnId | payload |

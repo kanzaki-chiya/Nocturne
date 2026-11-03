@@ -13,6 +13,7 @@ export interface MenuProps {
   anchor: HTMLElement | null;
   /** 与触发元素左缘或右缘对齐 */
   align?: "left" | "right";
+  className?: string;
   label?: string;
   onClose: () => void;
   /** 可选自定义键盘处理；若已 preventDefault 则不再执行默认菜单方向键与 Esc */
@@ -30,7 +31,15 @@ const MENU_MARGIN = 8;
  * 并把焦点还给触发元素。定位用 fixed，量出菜单实际高度后优先向下弹
  * （下方至少能容 ~5 行时）；放不下才向上。空间不足的一侧给 max-height 内滚。
  */
-export function Menu({ anchor, align = "left", label, onClose, onKeyDown, children }: MenuProps) {
+export function Menu({
+  anchor,
+  align = "left",
+  className,
+  label,
+  onClose,
+  onKeyDown,
+  children,
+}: MenuProps) {
   const root = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
 
@@ -123,7 +132,7 @@ export function Menu({ anchor, align = "left", label, onClose, onKeyDown, childr
 
   return (
     <div
-      className="menu"
+      className={className ? `menu ${className}` : "menu"}
       role="menu"
       aria-label={label}
       ref={root}

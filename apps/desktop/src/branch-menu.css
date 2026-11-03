@@ -1,0 +1,124 @@
+.status-branch {
+  max-width: 180px;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: var(--radius-1);
+  font-family: var(--mono);
+}
+.status-branch > svg {
+  flex: none;
+  color: var(--a-muted);
+}
+.status-branch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.status-branch:disabled:hover {
+  background: none;
+}
+.menu.branch-menu {
+  width: 320px;
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  overflow: hidden;
+}
+.branch-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-muted);
+}
+.branch-search > svg {
+  flex: none;
+}
+.branch-search .menu-search {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--a-text);
+  font: var(--fs-2)/var(--lh-tight) var(--mono);
+  outline: none;
+  box-shadow: none;
+}
+.branch-search:focus-within {
+  border-color: var(--a-border-strong);
+}
+.branch-search .menu-search:focus-visible {
+  border: none;
+  box-shadow: none;
+}
+.branch-list {
+  max-height: 240px;
+  overflow: auto;
+}
+.branch-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  min-height: 30px;
+  margin: 1px 8px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--a-secondary);
+  text-align: left;
+  font: var(--fs-2)/var(--lh-tight) var(--mono);
+}
+.branch-option > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-check {
+  display: flex;
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  color: var(--a-accent);
+}
+.branch-option.act,
+.branch-option:focus-visible {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+.branch-option[aria-checked="true"] {
+  color: var(--a-text);
+}
+.branch-option:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.branch-create {
+  color: var(--a-accent);
+}
+.branch-error {
+  margin: 5px 8px 4px;
+  padding: 8px 9px;
+  border-radius: var(--radius-2);
+  background: var(--a-error-bg);
+  color: var(--a-error);
+  font: var(--fs-1)/var(--lh-base) var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@container (max-width: 640px) {
+  .status-branch {
+    max-width: 100px;
+  }
+}
+@container (max-width: 480px) {
+  .status-branch {
+    max-width: 64px;
+  }
+}

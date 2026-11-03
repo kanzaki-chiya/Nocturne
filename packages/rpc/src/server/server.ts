@@ -1500,6 +1500,17 @@ class Connection implements HubPeer {
         if (file.kind === "text") return file;
         return { ...file, data: Buffer.from(file.data).toString("base64") };
       },
+      "workspace.branches": (p) =>
+        this.runtime().workspaceBranches({ workspace: reqString(p, "workspace") }),
+      "workspace.switchBranch": async (p) => {
+        const create = optBool(p, "create");
+        await this.runtime().switchBranch({
+          workspace: reqString(p, "workspace"),
+          branch: reqString(p, "branch"),
+          ...(create !== undefined ? { create } : {}),
+        });
+        return null;
+      },
       "runtime.setShellSetting": async (p) =>
         this.runtime().setShellSetting(reqString(p, "kind"), {
           workspaceRoot: await this.workspaceOf(p),
