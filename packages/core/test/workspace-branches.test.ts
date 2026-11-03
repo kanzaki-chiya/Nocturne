@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider } from "../src/index.js";
 import { internalSession } from "./internal-session.js";
 
@@ -44,11 +44,15 @@ it("lists local branches, detached HEAD, worktree occupancy and an absent reposi
     current: main,
     busy: false,
   });
+  expect(
+    (await rt.workspaceBranches({ workspace: root })).branches.find((b) => b.name === main)
+      ?.worktree,
+  ).toBeUndefined();
   await rt.switchBranch({ workspace: root, branch: "feature", create: true });
   expect((await rt.workspaceBranches({ workspace: root })).branches.map((b) => b.name)).toContain(
     "feature",
   );
-  const other = temp();
+  const other = path.join(temp(), "占用 worktree");
   git(root, "worktree", "add", "-q", other, main);
   expect(
     (await rt.workspaceBranches({ workspace: root })).branches
@@ -56,6 +60,7 @@ it("lists local branches, detached HEAD, worktree occupancy and an absent reposi
       ?.worktree?.toLowerCase()
       .replaceAll("/", "\\"),
   ).toContain(path.basename(other).toLowerCase());
+  await expect(rt.switchBranch({ workspace: root, branch: main })).rejects.toThrow();
   git(root, "checkout", "-q", "--detach");
   expect((await rt.workspaceBranches({ workspace: root })).current).toBe(
     git(root, "rev-parse", "--short=8", "HEAD"),
@@ -70,7 +75,7 @@ it("lists local branches, detached HEAD, worktree occupancy and an absent reposi
 it("validates names without a shell and leaves conflicting working files alone", async () => {
   const root = repository();
   const rt = await runtime(root);
-  for (const branch of ["-x", "--force", "bad name", "a..b", "@{-1}"])
+  for (const branch of ["-x", "--force", "bad name", "..", "a..b", "@{-1}"])
     await expect(rt.switchBranch({ workspace: root, branch })).rejects.toThrow();
   await rt.switchBranch({ workspace: root, branch: "main;calc", create: true });
   expect(git(root, "branch", "--show-current")).toBe("main;calc");
@@ -81,6 +86,18 @@ it("validates names without a shell and leaves conflicting working files alone",
   writeFileSync(path.join(root, "file.txt"), "dirty\n");
   await expect(rt.switchBranch({ workspace: root, branch: main })).rejects.toThrow();
   expect(git(root, "branch", "--show-current")).toBe("main;calc");
+});
+
+it("carries compatible uncommitted changes without creating a stash", async () => {
+  const root = repository();
+  const rt = await runtime(root);
+  writeFileSync(path.join(root, "file.txt"), "uncommitted\n");
+  const head = git(root, "rev-parse", "HEAD");
+  await rt.switchBranch({ workspace: root, branch: "carry", create: true });
+  expect(git(root, "rev-parse", "HEAD")).toBe(head);
+  expect(git(root, "branch", "--show-current")).toBe("carry");
+  expect(readFileSync(path.join(root, "file.txt"), "utf8")).toBe("uncommitted\n");
+  expect(git(root, "stash", "list")).toBe("");
 });
 
 it("records first observation silently, then an English note in the next raw model request; resume retains baseline", async () => {
@@ -117,6 +134,16 @@ it("records first observation silently, then an English note in the next raw mod
   await resumed.submit({ text: "third" });
   expect(resumed.state().history.filter((e) => e.kind === "note")).toHaveLength(1);
   await resumed.close();
+  git(root, "switch", "-c", "offline");
+  const offline = await rt.resumeSession(id);
+  expect(offline.state().config.branch).toBe("next");
+  await offline.submit({ text: "after offline switch" });
+  expect(offline.state().config.branch).toBe("offline");
+  expect(offline.state().history.filter((e) => e.kind === "note")).toHaveLength(2);
+  expect(JSON.stringify(provider.requests.at(-1)?.messages)).toContain(
+    "Git branch changed from next to offline",
+  );
+  await offline.close();
 });
 
 it("blocks another session's running Turn and compaction, including nested workspace paths", async () => {
@@ -207,6 +234,71 @@ it("treats a manual summary as directory activity", async () => {
   ).rejects.toMatchObject({ code: "session_busy" });
   session.interrupt();
   await expect(compacting).rejects.toMatchObject({ code: "compaction_interrupted" });
+  await session.close();
+});
+
+it("blocks switching while another session is still committing a rewind", async () => {
+  const root = repository();
+  const provider = new FakeProvider({
+    handler: () => [
+      { type: "text_delta", text: "ok" },
+      { type: "finish", reason: "stop" },
+    ],
+  });
+  const rt = await runtime(root, provider);
+  const session = await rt.createSession({ model: "fake/fake-1" });
+  await session.submit({ text: "first" });
+  const target = session.state().history.find((e) => e.kind === "user")?.seq;
+  if (target === undefined) throw new Error("missing user message");
+  const inner = internalSession(session);
+  const emit = inner.emit.bind(inner);
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const spy = vi.spyOn(inner, "emit").mockImplementation(async (type, payload, options) => {
+    if (type === "session.rewound") {
+      started();
+      await gate;
+    }
+    return emit(type, payload, options);
+  });
+  const rewind = session.rewind(target, "conversation");
+  try {
+    await entered;
+    expect((await rt.workspaceBranches({ workspace: root })).busy).toBe(true);
+    await expect(
+      rt.switchBranch({ workspace: root, branch: "blocked", create: true }),
+    ).rejects.toMatchObject({ code: "session_busy" });
+  } finally {
+    release();
+    await rewind;
+    spy.mockRestore();
+    await session.close();
+  }
+});
+
+it("does not record branch observations or block a Turn outside Git", async () => {
+  const root = temp();
+  const provider = new FakeProvider({
+    handler: () => [
+      { type: "text_delta", text: "ok" },
+      { type: "finish", reason: "stop" },
+    ],
+  });
+  const rt = await runtime(root, provider);
+  const session = await rt.createSession({ model: "fake/fake-1" });
+  expect(await session.submit({ text: "continue" })).toBe("done");
+  expect(
+    session
+      .durableEvents()
+      .filter((e) => e.type === "session.config_changed" && e.payload.branch !== undefined),
+  ).toHaveLength(0);
+  expect(session.state().history.filter((e) => e.kind === "note")).toHaveLength(0);
   await session.close();
 });
 

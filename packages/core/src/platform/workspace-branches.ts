@@ -31,30 +31,30 @@ export async function gitRepository(workspace: string): Promise<string | null> {
 
 export async function gitCurrentBranch(workspace: string): Promise<string | null> {
   try {
-    const name = (await git(workspace, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
-    return name || null;
+    const name = (await git(workspace, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    if (name !== "HEAD") return name || null;
+    const hash = (await git(workspace, ["rev-parse", "--verify", "HEAD"])).trim();
+    return /^[0-9a-f]{40,64}$/i.test(hash) ? hash.slice(0, 8) : null;
   } catch {
-    try {
-      const hash = (await git(workspace, ["rev-parse", "--verify", "HEAD"])).trim();
-      return /^[0-9a-f]{40,64}$/i.test(hash) ? hash.slice(0, 8) : null;
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 
-export async function gitWorkspaceBranches(workspace: string): Promise<{
+export async function gitWorkspaceBranches(
+  workspace: string,
+  repository: string,
+): Promise<{
   current: string | null;
   branches: { name: string; worktree?: string }[];
 }> {
   const [current, names, worktrees] = await Promise.all([
     gitCurrentBranch(workspace),
     git(workspace, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]),
-    git(workspace, ["worktree", "list", "--porcelain"]),
+    git(workspace, ["worktree", "list", "--porcelain", "-z"]),
   ]);
   const occupied = new Map<string, string>();
   let path: string | undefined;
-  for (const line of worktrees.split(/\r?\n/)) {
+  for (const line of worktrees.split("\0")) {
     if (line.startsWith("worktree ")) path = line.slice(9);
     if (line.startsWith("branch refs/heads/") && path !== undefined)
       occupied.set(line.slice(18), path);
@@ -66,7 +66,12 @@ export async function gitWorkspaceBranches(workspace: string): Promise<{
       .filter(Boolean)
       .map((name) => {
         const worktree = occupied.get(name);
-        return { name, ...(worktree !== undefined ? { worktree } : {}) };
+        const key = (value: string) =>
+          process.platform === "win32" ? resolve(value).toLowerCase() : resolve(value);
+        return {
+          name,
+          ...(worktree !== undefined && key(worktree) !== key(repository) ? { worktree } : {}),
+        };
       }),
   };
 }
@@ -76,9 +81,9 @@ export async function gitSwitchBranch(
   branch: string,
   create: boolean,
 ): Promise<void> {
-  // check-ref-format accepts @{-1} as a previous-checkout expression: reject expansion explicitly.
-  if (!branch || branch.startsWith("-") || /@\{-[0-9]+\}/.test(branch))
-    throw new Error("Invalid branch name");
   await git(workspace, ["check-ref-format", "--branch", branch]);
+  // Prefixing the ref makes checkout-history expressions literal so Git rejects them itself.
+  if (/@\{-[0-9]+\}/.test(branch))
+    await git(workspace, ["check-ref-format", "--branch", `refs/heads/${branch}`]);
   await git(workspace, create ? ["switch", "-c", branch, "--"] : ["switch", "--", branch], 60000);
 }

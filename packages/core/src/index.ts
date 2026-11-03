@@ -2581,7 +2581,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const busy = () => controller !== undefined || rewinding;
     const compacting = () => compactController !== undefined;
     const assertBranchNotSwitching = () => {
-      if (branchRoot !== null && switching(branchRoot))
+      if (switching(branchRoot ?? meta.cwd))
         throw new RuntimeCommandError("session_busy", "工作目录正在切换分支");
     };
     const recordBranch = async (): Promise<void> => {
@@ -3081,7 +3081,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         compactController !== undefined ||
         closing ||
         session.health !== "ok" ||
-        (branchRoot !== null && switching(branchRoot))
+        switching(branchRoot ?? meta.cwd)
       )
         return false;
       const head = pendingInputStore.takeQueueHead();
@@ -4114,7 +4114,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const root = await gitRepository(workspace);
       if (root === null) return { current: null, branches: [], busy: false };
       try {
-        return { ...(await gitWorkspaceBranches(workspace)), busy: branchBusy(root) };
+        return { ...(await gitWorkspaceBranches(workspace, root)), busy: branchBusy(root) };
       } catch {
         return { current: null, branches: [], busy: branchBusy(root) };
       }
