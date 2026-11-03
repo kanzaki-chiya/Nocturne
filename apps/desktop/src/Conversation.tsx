@@ -2339,6 +2339,7 @@ function ToolRow({
 }) {
   const [open, setOpen] = useState(searchExpand);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
+  const renderedDetails = useRef(new Set<string>());
   useEffect(() => {
     if (searchExpand) setOpen(true);
   }, [searchExpand]);
@@ -2464,6 +2465,8 @@ function ToolRow({
     >
       {rows.map((file, index) => {
         const isOpen = file === undefined ? open : (fileOpen[file.label] ?? open);
+        const detailKey = file?.label ?? "row";
+        if (isOpen) renderedDetails.current.add(detailKey);
         return (
           <details
             key={index === 0 ? "row" : `file:${file?.label ?? index}`}
@@ -2494,7 +2497,7 @@ function ToolRow({
                 }));
               }}
             />
-            {isOpen ? (
+            {renderedDetails.current.has(detailKey) ? (
               todos !== undefined ? (
                 <TodoList items={todos} />
               ) : (
