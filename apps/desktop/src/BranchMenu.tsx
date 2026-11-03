@@ -27,7 +27,7 @@ export function BranchMenu({
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState<object | null>(null);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(-1);
   const [hoverPath, setHoverPath] = useState<{ path: string; left: number; top: number } | null>(
     null,
   );
@@ -69,7 +69,7 @@ export function BranchMenu({
     ...(create ? [{ name: query, create: true, worktree: undefined }] : []),
   ];
   const enabled = options.filter((option) => option.worktree === undefined);
-  const selected = Math.min(active, Math.max(0, enabled.length - 1));
+  const selected = active < 0 ? -1 : Math.min(active, Math.max(0, enabled.length - 1));
   const close = () => {
     setHoverPath(null);
     setOpened(null);
@@ -100,7 +100,7 @@ export function BranchMenu({
     if (event.key === "Enter") {
       if (event.target instanceof HTMLButtonElement) return;
       event.preventDefault();
-      const option = enabled[selected];
+      const option = enabled[selected >= 0 ? selected : 0];
       if (option) void choose(option.name, option.create);
     } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
@@ -109,8 +109,12 @@ export function BranchMenu({
           ? 0
           : event.key === "End"
             ? enabled.length - 1
-            : (selected + (event.key === "ArrowUp" ? -1 : 1) + enabled.length) %
-              Math.max(1, enabled.length);
+            : selected < 0
+              ? event.key === "ArrowUp"
+                ? enabled.length - 1
+                : 0
+              : (selected + (event.key === "ArrowUp" ? -1 : 1) + enabled.length) %
+                Math.max(1, enabled.length);
       setActive(Math.max(0, next));
       search.current?.focus();
       const option = event.currentTarget.querySelectorAll<HTMLElement>(
@@ -135,7 +139,7 @@ export function BranchMenu({
           else {
             setQuery("");
             setError(null);
-            setActive(0);
+            setActive(-1);
             setOpened(owner);
             void refresh();
           }
@@ -161,7 +165,8 @@ export function BranchMenu({
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
-                  setActive(0);
+                  setActive(-1);
+                  setHoverPath(null);
                 }}
               />
             </label>
