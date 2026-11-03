@@ -147,3 +147,42 @@ describe("Agent 浏览器", () => {
     expect(screen.queryByRole("switch", { name: "模型操作网页" })).toBeNull();
   });
 });
+
+describe("打开方式", () => {
+  it("网页链接与本地网址缺省系统浏览器；选面板才写入，选回系统浏览器清掉字段", () => {
+    const { prefs, storage } = mount(undefined);
+    const group = screen.getByRole("region", { name: "打开方式" });
+    const web = within(group).getByRole("combobox", { name: "网页链接" });
+    const local = within(group).getByRole("combobox", { name: "本地网址" });
+    expect(web.textContent).toContain("系统浏览器");
+    expect(local.textContent).toContain("系统浏览器");
+    expect(storage.getItem(PREFS_KEY) ?? "").not.toMatch(/LinkOpener/);
+
+    fireEvent.click(local);
+    const options = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual([
+      expect.stringContaining("系统浏览器"),
+      expect.stringContaining("Nocturne 面板"),
+    ]);
+    fireEvent.click(screen.getByRole("option", { name: /Nocturne 面板/ }));
+    expect(local.textContent).toContain("Nocturne 面板");
+    expect(prefs.get().localLinkOpener).toBe("panel");
+    expect(prefs.get().webLinkOpener).toBeUndefined();
+    expect(storage.getItem(PREFS_KEY)).toContain('"localLinkOpener":"panel"');
+
+    fireEvent.click(local);
+    fireEvent.click(screen.getByRole("option", { name: /系统浏览器/ }));
+    expect(prefs.get().localLinkOpener).toBeUndefined();
+    expect(storage.getItem(PREFS_KEY)).not.toContain("localLinkOpener");
+  });
+
+  it("存过的选择重新进入页面时还原", () => {
+    const storage = memory();
+    storage.setItem(PREFS_KEY, JSON.stringify({ webLinkOpener: "panel" }));
+    mount(undefined, storage);
+    expect(screen.getByRole("combobox", { name: "网页链接" }).textContent).toContain(
+      "Nocturne 面板",
+    );
+    expect(screen.getByRole("combobox", { name: "本地网址" }).textContent).toContain("系统浏览器");
+  });
+});

@@ -1,15 +1,21 @@
 /**
- * 设置 › 浏览器（ADR-0078）：Agent 浏览器开关。只有桌面端有这一页。
+ * 设置 › 浏览器（ADR-0078）：Agent 浏览器开关、模型回复里链接的打开方式。只有桌面端有这一页。
  */
 import { useEffect, useState } from "react";
 
+import { Dropdown } from "./Dropdown";
 import type { AgentBrowserHost } from "./host";
-import type { PrefsStore } from "./prefs";
+import type { LinkOpener, PrefsStore } from "./prefs";
 import { Button } from "./ui/Button";
 import { PageHeader } from "./ui/PageHeader";
 import { SettingsGroup } from "./ui/SettingsGroup";
 import { SettingsRow } from "./ui/SettingsRow";
 import { Switch } from "./ui/Switch";
+
+const LINK_OPENERS = [
+  { value: "system", label: "系统浏览器" },
+  { value: "panel", label: "Nocturne 面板" },
+] as const;
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -45,6 +51,10 @@ export function BrowserSettingsPage({
                 />
               </SettingsGroup>
             )}
+            <SettingsGroup title="打开方式">
+              <LinkOpenerRow label="网页链接" field="webLinkOpener" prefs={prefs} />
+              <LinkOpenerRow label="本地网址" field="localLinkOpener" prefs={prefs} />
+            </SettingsGroup>
           </div>
         </div>
       </div>
@@ -153,5 +163,32 @@ function AgentBrowserRow({
         </div>
       )}
     </>
+  );
+}
+
+/** 缺省系统浏览器：选回系统浏览器时清掉字段，不写入缺省值 */
+function LinkOpenerRow({
+  label,
+  field,
+  prefs,
+}: {
+  label: string;
+  field: "webLinkOpener" | "localLinkOpener";
+  prefs: PrefsStore;
+}) {
+  const [value, setValue] = useState<LinkOpener>(() => prefs.get()[field] ?? "system");
+  return (
+    <SettingsRow label={label}>
+      <Dropdown
+        label={label}
+        value={value}
+        options={LINK_OPENERS}
+        onChange={(next) => {
+          const opener: LinkOpener = next === "panel" ? "panel" : "system";
+          prefs.update({ [field]: opener === "panel" ? "panel" : undefined });
+          setValue(opener);
+        }}
+      />
+    </SettingsRow>
   );
 }

@@ -17,6 +17,7 @@ import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
 import { applyAppearance, applyTheme } from "./appearance";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
+import { replyLinkOpener } from "./external-url";
 import {
   BackendLogsPage,
   KEY_DIAG_ID,
@@ -200,6 +201,18 @@ export function App({ host }: { host: DesktopHost }) {
       },
     };
   }, [host, prefs, prefsVersion, editors]);
+  /**
+   * 模型回复里的链接（设置 › 浏览器 › 打开方式，ADR-0078）：选了 Nocturne 面板就在当前会话
+   * 面板开浏览器标签；没有可用面板时退回系统浏览器，不提示。其他外链照旧用系统浏览器。
+   */
+  const openReplyLink = useCallback(
+    (url: string) => {
+      if (replyLinkOpener(url, prefs.get()) === "panel" && panelRef.current?.openUrl(url) === true)
+        return;
+      void host.openUrl(url);
+    },
+    [host, prefs],
+  );
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   /** 分叉出的新会话首次挂载输入框时填入的原消息；取用后清掉，不随恢复或重开再填 */
   const [forkDraft, setForkDraft] = useState<{ id: string; text: string } | null>(null);
@@ -1697,7 +1710,7 @@ export function App({ host }: { host: DesktopHost }) {
                 onResumePending={resumePending}
                 onSlash={runSlash}
                 pickImages={() => host.pickImages()}
-                openUrl={(url) => void host.openUrl(url)}
+                openUrl={openReplyLink}
                 panel={panel}
                 onPanelChange={setPanel}
                 providersVersion={providersVersion}

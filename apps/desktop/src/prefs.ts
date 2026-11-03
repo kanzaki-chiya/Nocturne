@@ -38,6 +38,9 @@ export function isFileOpener(value: unknown): value is FileOpener {
   return value === "panel" || value === "system" || value === "vscode" || value === "cursor";
 }
 
+/** 设置 › 浏览器 › 打开方式：模型回复里的链接用系统浏览器还是 Nocturne 面板（ADR-0078） */
+export type LinkOpener = "system" | "panel";
+
 export const PREFS_KEY = "nocturne.desktop.prefs.v1";
 
 export interface Prefs {
@@ -111,6 +114,10 @@ export interface Prefs {
   agentBrowserEnabled?: boolean | undefined;
   /** 用户已经看过启用风险说明（只在第一次启用时拦一下） */
   agentBrowserRiskAccepted?: boolean | undefined;
+  /** 模型回复里的网页链接；缺省系统浏览器，只存 "panel" */
+  webLinkOpener?: LinkOpener | undefined;
+  /** 模型回复里的本地网址（localhost / 127.0.0.1 / [::1]）；缺省系统浏览器，只存 "panel" */
+  localLinkOpener?: LinkOpener | undefined;
   /** 上次检查发现的新版本；「稍后」只清本次运行，重启后若仍比当前新则继续提示 */
   pendingUpdate?: { version: string; notes: string | null } | undefined;
 }
@@ -229,6 +236,8 @@ function parse(raw: string | null): Prefs {
     prefs.agentBrowserEnabled = obj.agentBrowserEnabled;
   }
   if (obj.agentBrowserRiskAccepted === true) prefs.agentBrowserRiskAccepted = true;
+  if (obj.webLinkOpener === "panel") prefs.webLinkOpener = "panel";
+  if (obj.localLinkOpener === "panel") prefs.localLinkOpener = "panel";
   const pending = obj.pendingUpdate;
   if (
     typeof pending === "object" &&
@@ -320,6 +329,8 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.agentBrowserRiskAccepted !== undefined
           ? { agentBrowserRiskAccepted: prefs.agentBrowserRiskAccepted }
           : {}),
+        ...(prefs.webLinkOpener !== undefined ? { webLinkOpener: prefs.webLinkOpener } : {}),
+        ...(prefs.localLinkOpener !== undefined ? { localLinkOpener: prefs.localLinkOpener } : {}),
         ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),
       };
     },

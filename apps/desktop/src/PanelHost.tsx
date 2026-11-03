@@ -123,6 +123,12 @@ export interface SidePanelController {
   previewsHtml: (absolutePath: string) => boolean;
   /** 「查看源码」：总在文件标签里打开 */
   viewSource: (absolutePath: string, line?: number) => void;
+  /**
+   * 模型回复里的链接选了「Nocturne 面板」（ADR-0078）：在当前会话面板新开浏览器标签，
+   * 和地址栏同一个入口。没有内置浏览器、没有会话面板或地址不是 http(s) 时返回 false，
+   * 调用方改用系统浏览器。
+   */
+  openUrl: (url: string) => boolean;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
   /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
@@ -978,6 +984,16 @@ export function useSidePanel({
     },
     [host, workspace],
   );
+  const openUrl = useCallback<SidePanelController["openUrl"]>(
+    (url) => {
+      if (pool === undefined || !hasPanel) return false;
+      const target = parseAddress(url, workspace);
+      if (target.kind !== "url" || !/^https?:/i.test(target.url)) return false;
+      openBrowser(target.url);
+      return true;
+    },
+    [pool, hasPanel, workspace, openBrowser],
+  );
   const onAddress = useCallback(
     async (text: string): Promise<string | undefined> => {
       const target = parseAddress(text, workspace);
@@ -1405,6 +1421,7 @@ export function useSidePanel({
     openFile,
     previewsHtml,
     viewSource,
+    openUrl,
     viewChanges: openChanges,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",

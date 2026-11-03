@@ -684,6 +684,68 @@ it("地址栏输入网址：新标签页就地变成浏览器标签；不像网�
   }
 });
 
+it("回复里的链接选面板（ADR-0078）：openUrl 走地址栏同一入口新开浏览器标签；没有面板返回 false", async () => {
+  const restore = withSlotSize();
+  try {
+    const { prefs, host, log } = browserSetup();
+    const controller = { current: null as SidePanelController | null };
+    const view = render(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId="a"
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+        controller={controller}
+      />,
+    );
+    let opened: boolean | undefined;
+    act(() => {
+      opened = controller.current?.openUrl("http://localhost:5173/app");
+    });
+    await flushAsync();
+    expect(opened).toBe(true);
+    expect(log[0]).toBe("create 1 http://localhost:5173/app");
+    act(() => {
+      opened = controller.current?.openUrl("https://example.com/docs");
+    });
+    await flushAsync();
+    expect(opened).toBe(true);
+    expect(log).toContain("create 2 https://example.com/docs");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.at(-1)?.getAttribute("aria-selected")).toBe("true");
+    // 非 http(s) 不接
+    expect(controller.current?.openUrl("file:///Z:/a/index.html")).toBe(false);
+    expect(controller.current?.openUrl("mailto:a@b.c")).toBe(false);
+    // 首页没有会话面板
+    view.rerender(
+      <Harness
+        prefs={prefs}
+        host={host}
+        sessionId={null}
+        sessions={[{ id: "a", mtimeMs: 1 }]}
+        controller={controller}
+      />,
+    );
+    expect(controller.current?.openUrl("https://example.com/")).toBe(false);
+  } finally {
+    restore();
+  }
+  // 没有内置浏览器的宿主
+  cleanup();
+  const base = setup();
+  const controller = { current: null as SidePanelController | null };
+  render(
+    <Harness
+      prefs={base.prefs}
+      host={base.host}
+      sessionId="a"
+      sessions={[{ id: "a", mtimeMs: 1 }]}
+      controller={controller}
+    />,
+  );
+  expect(controller.current?.openUrl("https://example.com/")).toBe(false);
+});
+
 it("工作区内的 HTML 引用左键进浏览器标签，「查看源码」进文件标签；工作区外的照旧是文件", async () => {
   const restore = withSlotSize();
   try {
