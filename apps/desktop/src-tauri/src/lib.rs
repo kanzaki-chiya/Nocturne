@@ -8,6 +8,7 @@ mod backend;
 mod browser;
 mod browser_fullscreen;
 mod browser_policy;
+mod browsing_data;
 mod editor;
 mod fonts;
 mod images;
@@ -156,6 +157,8 @@ pub fn run() {
         browser::browser_capture,
         browser::browser_destroy,
         browser::browser_downloads_set,
+        browsing_data::browser_data_sizes,
+        browsing_data::browser_data_clear,
         agent_browser::agent_browser_watch,
         agent_browser::agent_browser_ui_state,
         agent_browser::agent_browser_presented,

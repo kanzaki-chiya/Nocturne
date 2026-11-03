@@ -93,6 +93,10 @@ export interface BrowserHost {
    * 设置 › 浏览器 › 下载同步给外壳（ADR-0078）；dir 为 null = 系统「下载」文件夹。
    * 返回系统「下载」文件夹（取不到为 null）。测试宿主可以没有。
    */
+  /** 两份浏览数据的占用字节数（ADR-0078）；测试宿主可以没有 */
+  dataSizes?: (() => Promise<{ user: number; agent: number }>) | undefined;
+  /** 清除一份浏览数据，返回清除后的实际字节数 */
+  clearData?: ((which: "user" | "agent") => Promise<number>) | undefined;
   setDownloads?:
     ((ask: boolean, dir: string | null) => Promise<{ defaultDir: string | null }>) | undefined;
 }

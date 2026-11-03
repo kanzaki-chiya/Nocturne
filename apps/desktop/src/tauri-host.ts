@@ -64,6 +64,8 @@ export function createTauriHost(): DesktopHost {
         return new Uint8Array(await invoke<ArrayBuffer>("browser_capture", { id }));
       },
       destroy: (id) => invoke("browser_destroy", { id }),
+      dataSizes: () => invoke<{ user: number; agent: number }>("browser_data_sizes"),
+      clearData: (which) => invoke<number>("browser_data_clear", { which }),
       setDownloads: (ask, dir) =>
         invoke<{ defaultDir: string | null }>("browser_downloads_set", { ask, dir }),
     },

@@ -4,7 +4,12 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BrowserSettingsPage, type DownloadsHost } from "../src/BrowserSettingsPage";
+import {
+  BrowserSettingsPage,
+  formatSize,
+  type BrowsingDataHost,
+  type DownloadsHost,
+} from "../src/BrowserSettingsPage";
 import type { AgentBrowserHost, AgentBrowserStatus } from "../src/host";
 import { createPrefsStore, PREFS_KEY } from "../src/prefs";
 
@@ -192,6 +197,111 @@ describe("打开方式", () => {
       "Nocturne 面板",
     );
     expect(screen.getByRole("combobox", { name: "本地网址" }).textContent).toContain("系统浏览器");
+  });
+});
+
+describe("浏览数据", () => {
+  function dataHost(after = { user: 9 * 1024, agent: 2048 }) {
+    const host: BrowsingDataHost & { cleared: string[] } = {
+      cleared: [],
+      sizes: vi.fn(async () => ({ user: 184 * 1024 * 1024, agent: 62 * 1024 * 1024 })),
+      clear: vi.fn(async (which: "user" | "agent") => {
+        host.cleared.push(which);
+        return after[which];
+      }),
+    };
+    return host;
+  }
+  function mountData(host: BrowsingDataHost, version = 1) {
+    const prefs = createPrefsStore(memory());
+    const relaunch = vi.fn(async () => undefined);
+    const ui = (v: number) => (
+      <BrowserSettingsPage prefs={prefs} browsingData={host} relaunch={relaunch} version={v} />
+    );
+    const view = render(ui(version));
+    return { rerender: (v: number) => view.rerender(ui(v)) };
+  }
+  const row = (name: string) => screen.getByRole("group", { name });
+
+  it("formatSize", () => {
+    expect(formatSize(0)).toBe("0 B");
+    expect(formatSize(1023)).toBe("1023 B");
+    expect(formatSize(1536)).toBe("2 KB");
+    expect(formatSize(184 * 1024 * 1024)).toBe("184 MB");
+    expect(formatSize(1.5 * 1024 * 1024 * 1024)).toBe("1.5 GB");
+  });
+
+  it("进入页面显示两份大小，再次进入时刷新", async () => {
+    const host = dataHost();
+    const view = mountData(host);
+    expect(await within(row("我的浏览")).findByText("184 MB")).toBeTruthy();
+    expect(within(row("Agent 浏览")).getByText("62 MB")).toBeTruthy();
+    expect(host.sizes).toHaveBeenCalledTimes(1);
+    view.rerender(2);
+    await waitFor(() => {
+      expect(host.sizes).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("「清除…」展开内联确认；取消不清；确认后显示外壳给的实际大小", async () => {
+    const host = dataHost();
+    mountData(host);
+    await screen.findByText("184 MB");
+    fireEvent.click(within(row("我的浏览")).getByRole("button", { name: "清除…" }));
+    const dialog = screen.getByRole("alertdialog", { name: "清除我的浏览数据" });
+    expect(dialog.textContent).toContain("面板里登录过的网站都要重新登录。");
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(host.cleared).toEqual([]);
+
+    fireEvent.click(within(row("Agent 浏览")).getByRole("button", { name: "清除…" }));
+    const agent = screen.getByRole("alertdialog", { name: "清除 Agent 浏览数据" });
+    expect(agent.textContent).toContain("Agent 登录过的网站都要重新登录。");
+    fireEvent.click(within(agent).getByRole("button", { name: "清除" }));
+    expect(await within(row("Agent 浏览")).findByText("2 KB")).toBeTruthy();
+    expect(within(row("我的浏览")).getByText("184 MB")).toBeTruthy();
+    expect(host.cleared).toEqual(["agent"]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("清除失败写在那一行", async () => {
+    const host = dataHost();
+    host.clear = vi.fn(async () => {
+      throw new Error("清除浏览数据超时");
+    });
+    mountData(host);
+    await screen.findByText("184 MB");
+    fireEvent.click(within(row("我的浏览")).getByRole("button", { name: "清除…" }));
+    fireEvent.click(screen.getByRole("button", { name: "清除" }));
+    expect((await within(row("我的浏览")).findByRole("alert")).textContent).toBe(
+      "清除浏览数据超时",
+    );
+    expect(within(row("Agent 浏览")).queryByRole("alert")).toBeNull();
+  });
+
+  it("没有内置浏览器时不显示这一组", () => {
+    mount(undefined);
+    expect(screen.queryByRole("region", { name: "浏览数据" })).toBeNull();
+  });
+});
+
+describe("分组顺序与文字", () => {
+  it("按效果图：Agent 浏览器、打开方式、浏览数据、下载；没有网站权限", () => {
+    const prefs = createPrefsStore(memory());
+    render(
+      <BrowserSettingsPage
+        prefs={prefs}
+        agentBrowser={agentHost()}
+        browsingData={{ sizes: async () => ({ user: 0, agent: 0 }), clear: async () => 0 }}
+        downloads={{ set: async () => ({ defaultDir: null }), pickFolder: async () => null }}
+        relaunch={async () => undefined}
+        version={1}
+      />,
+    );
+    const titles = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
+    expect(titles).toEqual(["浏览器", "Agent 浏览器", "打开方式", "浏览数据", "下载"]);
+    expect(document.querySelector(".desc")).toBeNull();
+    expect(screen.queryByText(/网站权限|允许|拒绝/)).toBeNull();
   });
 });
 

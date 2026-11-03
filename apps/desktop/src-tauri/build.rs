@@ -34,6 +34,8 @@ fn main() {
             "browser_capture",
             "browser_destroy",
             "browser_downloads_set",
+            "browser_data_sizes",
+            "browser_data_clear",
             "agent_browser_watch",
             "agent_browser_ui_state",
             "agent_browser_presented",

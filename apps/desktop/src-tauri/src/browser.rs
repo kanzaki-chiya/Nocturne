@@ -160,6 +160,14 @@ impl BrowserState {
         })
     }
 
+    /// agent 浏览数据目录：和 agent 标签创建时（`agent_browser::shell`）同一个路径函数与覆盖目录。
+    pub fn agent_data_dir(&self, app: &AppHandle) -> CmdResult<std::path::PathBuf> {
+        Ok(browser_policy::agent_data_dir(
+            &app.path().app_local_data_dir().map_err(native_error)?,
+            self.data_override.as_deref(),
+        ))
+    }
+
     /// 当前存活的用户浏览器标签数。容量判定把 agent 标签另算（desktop-browser.md 第 2 节）。
     pub fn live_count(&self) -> usize {
         lock(&self.browsers).len()
@@ -174,7 +182,7 @@ impl BrowserState {
 /// 析构 webview 又去拿同一把锁，主线程把自己锁死，整个应用无响应。从别的线程
 /// `close()` 只是给事件循环发一条消息；事件处理器还没返回时 tao 先把它缓冲起来，
 /// 等 webview 建完、锁放开后再关。
-fn close_later(webview: tauri::Webview) {
+pub(crate) fn close_later(webview: tauri::Webview) {
     std::thread::spawn(move || {
         let _ = webview.close();
     });

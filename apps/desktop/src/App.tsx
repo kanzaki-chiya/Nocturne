@@ -52,7 +52,12 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
-import { BrowserSettingsPage, downloadSettings, type DownloadsHost } from "./BrowserSettingsPage";
+import {
+  BrowserSettingsPage,
+  downloadSettings,
+  type BrowsingDataHost,
+  type DownloadsHost,
+} from "./BrowserSettingsPage";
 import { SettingsDeck } from "./SettingsDeck";
 import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
@@ -164,6 +169,11 @@ export function App({ host }: { host: DesktopHost }) {
   const browserDownloads = useMemo<DownloadsHost | undefined>(() => {
     const set = host.browsers?.setDownloads;
     return set === undefined ? undefined : { set, pickFolder: () => host.pickFolder() };
+  }, [host]);
+  const browsingData = useMemo<BrowsingDataHost | undefined>(() => {
+    const sizes = host.browsers?.dataSizes;
+    const clear = host.browsers?.clearData;
+    return sizes === undefined || clear === undefined ? undefined : { sizes, clear };
   }, [host]);
   // 下载设置启动时同步给外壳一次（ADR-0078）；之后由设置页在改动时同步
   useEffect(() => {
@@ -1556,6 +1566,7 @@ export function App({ host }: { host: DesktopHost }) {
                   <BrowserSettingsPage
                     prefs={prefs}
                     agentBrowser={host.agentBrowser}
+                    browsingData={browsingData}
                     downloads={browserDownloads}
                     relaunch={() => host.relaunch()}
                     version={settingsVersion}

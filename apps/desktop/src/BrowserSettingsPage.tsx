@@ -1,8 +1,9 @@
 /**
- * 设置 › 浏览器（ADR-0078）：Agent 浏览器开关、模型回复里链接的打开方式、用户标签的下载。
+ * 设置 › 浏览器（ADR-0078）：Agent 浏览器开关、模型回复里链接的打开方式、两份浏览数据、
+ * 用户标签的下载。
  * 只有桌面端有这一页。
  */
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
 import type { AgentBrowserHost } from "./host";
@@ -27,6 +28,24 @@ export function downloadSettings(prefs: Prefs): { ask: boolean; dir: string | nu
   return { ask: prefs.downloadAsk !== false, dir: prefs.downloadDir ?? null };
 }
 
+/** 占用大小：B / KB / MB 取整，GB 留一位小数 */
+export function formatSize(bytes: number): string {
+  const KB = 1024;
+  const MB = KB * 1024;
+  const GB = MB * 1024;
+  if (bytes < KB) return `${bytes} B`;
+  if (bytes < MB) return `${Math.round(bytes / KB)} KB`;
+  if (bytes < GB) return `${Math.round(bytes / MB)} MB`;
+  return `${(bytes / GB).toFixed(1)} GB`;
+}
+
+/** 两份浏览数据的大小与清除；没有内置浏览器的宿主不给 */
+export interface BrowsingDataHost {
+  sizes: () => Promise<{ user: number; agent: number }>;
+  /** 返回清除后的实际字节数 */
+  clear: (which: "user" | "agent") => Promise<number>;
+}
+
 /** 下载设置同步给外壳、选目录；没有内置浏览器的宿主不给 */
 export interface DownloadsHost {
   set: (ask: boolean, dir: string | null) => Promise<{ defaultDir: string | null }>;
@@ -36,11 +55,14 @@ export interface DownloadsHost {
 export function BrowserSettingsPage({
   prefs,
   agentBrowser,
+  browsingData,
   downloads,
   relaunch,
   version,
 }: {
   prefs: PrefsStore;
+  /** 没有内置浏览器时不显示「浏览数据」 */
+  browsingData?: BrowsingDataHost | undefined;
   /** 没有内置浏览器时不显示「下载」 */
   downloads?: DownloadsHost | undefined;
   /** 没有外壳时不显示「Agent 浏览器」 */
@@ -70,6 +92,11 @@ export function BrowserSettingsPage({
               <LinkOpenerRow label="网页链接" field="webLinkOpener" prefs={prefs} />
               <LinkOpenerRow label="本地网址" field="localLinkOpener" prefs={prefs} />
             </SettingsGroup>
+            {browsingData !== undefined && (
+              <SettingsGroup title="浏览数据">
+                <BrowsingDataRows host={browsingData} version={version} />
+              </SettingsGroup>
+            )}
             {downloads !== undefined && (
               <SettingsGroup title="下载">
                 <DownloadRows host={downloads} prefs={prefs} />
@@ -286,6 +313,98 @@ function DownloadRows({ host, prefs }: { host: DownloadsHost; prefs: PrefsStore 
           更改…
         </Button>
       </SettingsRow>
+    </>
+  );
+}
+
+const DATA_ROWS = [
+  {
+    which: "user",
+    label: "我的浏览",
+    confirm: "面板里登录过的网站都要重新登录。",
+    dialog: "清除我的浏览数据",
+  },
+  {
+    which: "agent",
+    label: "Agent 浏览",
+    confirm: "Agent 登录过的网站都要重新登录。",
+    dialog: "清除 Agent 浏览数据",
+  },
+] as const;
+
+/** 「我的浏览」「Agent 浏览」：进入页面时刷新大小；「清除…」在行下展开内联确认 */
+function BrowsingDataRows({ host, version }: { host: BrowsingDataHost; version: number }) {
+  const [sizes, setSizes] = useState<{ user: number; agent: number } | null>(null);
+  const [confirming, setConfirming] = useState<"user" | "agent" | null>(null);
+  const [clearing, setClearing] = useState<"user" | "agent" | null>(null);
+  const [errors, setErrors] = useState<{ user?: string; agent?: string }>({});
+
+  useEffect(() => {
+    let live = true;
+    host.sizes().then(
+      (next) => {
+        if (live) setSizes(next);
+      },
+      (e: unknown) => {
+        if (live) setErrors({ user: errText(e), agent: errText(e) });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [host, version]);
+
+  const clear = async (which: "user" | "agent") => {
+    setConfirming(null);
+    setClearing(which);
+    setErrors((prev) => ({ ...prev, [which]: undefined }));
+    try {
+      const size = await host.clear(which);
+      setSizes((prev) => (prev === null ? prev : { ...prev, [which]: size }));
+    } catch (e) {
+      setErrors((prev) => ({ ...prev, [which]: errText(e) }));
+    } finally {
+      setClearing(null);
+    }
+  };
+
+  return (
+    <>
+      {DATA_ROWS.map((row) => (
+        <Fragment key={row.which}>
+          <SettingsRow label={row.label} error={errors[row.which]}>
+            {sizes !== null && <span className="val">{formatSize(sizes[row.which])}</span>}
+            <Button
+              size="sm"
+              disabled={clearing !== null}
+              aria-expanded={confirming === row.which}
+              onClick={() => {
+                setConfirming(confirming === row.which ? null : row.which);
+              }}
+            >
+              清除…
+            </Button>
+          </SettingsRow>
+          {confirming === row.which && (
+            <div className="agent-browser-risk" role="alertdialog" aria-label={row.dialog}>
+              <p>{row.confirm}</p>
+              <div className="agent-browser-risk-actions">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setConfirming(null);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button variant="danger" onClick={() => void clear(row.which)}>
+                  清除
+                </Button>
+              </div>
+            </div>
+          )}
+        </Fragment>
+      ))}
     </>
   );
 }
