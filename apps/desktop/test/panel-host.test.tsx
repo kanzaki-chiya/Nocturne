@@ -53,7 +53,7 @@ it("clips a visible panel through both directions without reusing the startup sp
     prefs.update({
       panelSessionsMigrated: true,
       panelSessions: {
-        a: { open: false, activeId: "", tabs: [], recent: [] },
+        a: { open: false, tabs: [] },
       },
     });
     const { container } = render(<Harness prefs={prefs} host={host} sessionId="a" sessions={[]} />);
