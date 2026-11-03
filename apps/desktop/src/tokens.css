@@ -167,6 +167,12 @@
   --heat-cell: 10px;
   --disabled-opacity: 0.5;
   --dur: 0.12s;
+  --dur-menu: 100ms;
+  --dur-dialog: 120ms;
+  --dur-fold: 180ms;
+  --dur-panel: 200ms;
+  --ease-out: cubic-bezier(.2, .8, .3, 1);
+  --ease-both: cubic-bezier(.4, 0, .2, 1);
   --badge-h: 18px;
   --chip-h: 20px;
   --bar-w: 3px;

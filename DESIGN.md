@@ -245,3 +245,19 @@
      - 通过 `--max-warnings 677` 锁定存量警告上限，警告数只能减不能增；`lint:css` 只输出警告总数，看明细直接跑 `pnpm exec stylelint "apps/desktop/src/**/*.css"`。
 2. **`node scripts/gen-tokens.mjs --check`**：校验 `apps/desktop/src/tokens.css` 与 `design/tokens.json` 完全同步，手工编辑 `tokens.css` 会直接失败。
 3. **`node scripts/check-css-vars.mjs`**：扫描 `apps/desktop/src/**/*.{css,ts,tsx}` 中所有 `var(--*)` 引用，若无回退值且未在任何 CSS 文件中定义则报错退出。
+
+## 11. 动效
+
+| 位置 | 时长 token | 时长 | 曲线 |
+|---|---|---|---|
+| 菜单打开 | `--dur-menu` | 100ms | `--ease-out`：`cubic-bezier(.2, .8, .3, 1)` |
+| 对话框打开 | `--dur-dialog` | 120ms | `--ease-out` |
+| 折叠区展开和收起 | `--dur-fold` | 180ms | `--ease-both`：`cubic-bezier(.4, 0, .2, 1)` |
+| 面板开合 | `--dur-panel` | 200ms | `--ease-both` |
+
+- 所有新增动效只在 `prefers-reduced-motion: no-preference` 下启用；不支持所需 CSS 能力时直接切换状态。
+- 菜单淡入并沿弹出方向移动 4px；对话框淡入、移动 6px 并从 `scale(.985)` 恢复，遮罩只淡入。菜单与对话框关闭直接消失，不延迟卸载。
+- 输入刷新不重播浮层入场；设置切页和会话切换不触发动效。
+- 折叠区高度和透明度同时变化，箭头同步旋转，展开后指向内容。程序查找与跳转直接展开并准确定位；超长正文可直接展开。
+- 面板内容在开合时保持最终宽度，由外层裁切；拖动调宽没有过渡，启动恢复不播放动效。原生网页开合期间先换截图，结束后按最终位置恢复；终端与代码查看器只在结束后测量尺寸。
+- 不给新消息、流式输出、切页、提示气泡、Toast 或侧栏折叠添加动效。不改变现有按钮和开关的 `--dur`。
