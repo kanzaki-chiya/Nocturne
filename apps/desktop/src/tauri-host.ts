@@ -11,6 +11,7 @@ import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import type { FontFamily } from "./appearance";
 import { isAllowedExternalUrl } from "./external-url";
 import type {
+  AgentBrowserStatus,
   AgentWatchMessage,
   AgentWatchSnapshot,
   BrowserMessage,
@@ -79,10 +80,8 @@ export function createTauriHost(): DesktopHost {
         }),
       dialog: (tabId, accept, text) =>
         invoke("agent_browser_dialog", { tabId, accept, text: text ?? null }),
-      setEnabled: (enabled) =>
-        invoke<{ enabled: boolean; restartRequired: boolean }>("agent_browser_set_enabled", {
-          enabled,
-        }),
+      setEnabled: (enabled) => invoke<AgentBrowserStatus>("agent_browser_set_enabled", { enabled }),
+      status: () => invoke<AgentBrowserStatus>("agent_browser_status"),
     },
     async detectEditors() {
       try {

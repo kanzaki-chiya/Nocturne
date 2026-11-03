@@ -51,6 +51,7 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
+import { BrowserSettingsPage } from "./BrowserSettingsPage";
 import { SettingsDeck } from "./SettingsDeck";
 import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
@@ -1528,6 +1529,15 @@ export function App({ host }: { host: DesktopHost }) {
                     version={settingsVersion}
                   />
                 </PaneErrorBoundary>
+              ) : settingsPage === "browser" ? (
+                <PaneErrorBoundary key="browser">
+                  <BrowserSettingsPage
+                    prefs={prefs}
+                    agentBrowser={host.agentBrowser}
+                    relaunch={() => host.relaunch()}
+                    version={settingsVersion}
+                  />
+                </PaneErrorBoundary>
               ) : settingsPage === "remote" ? (
                 <PaneErrorBoundary key="remote">
                   <RemotePage client={pageClient} />
@@ -1613,8 +1623,6 @@ export function App({ host }: { host: DesktopHost }) {
                     onOpenSubagents={() => {
                       setPage("agents");
                     }}
-                    agentBrowser={host.agentBrowser}
-                    prefs={prefs}
                     appearance={{
                       uiFont: p.uiFont,
                       codeFont: p.codeFont,

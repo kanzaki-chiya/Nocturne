@@ -11,6 +11,7 @@ export type SettingsSection =
   | "grants"
   | "skills"
   | "agents"
+  | "browser"
   | "remote"
   | "appearance"
   | "usage"
@@ -185,6 +186,21 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
         <circle cx="8" cy="2.2" r="0.9" fill="currentColor" />
         <circle cx="5.9" cy="8.4" r="0.95" fill="currentColor" />
         <circle cx="10.1" cy="8.4" r="0.95" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    key: "browser",
+    label: "浏览器",
+    icon: (
+      <svg {...GLYPH_PROPS}>
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path
+          d="M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14c-1.8-1.7-2.6-3.7-2.6-6S6.2 3.7 8 2z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+        />
       </svg>
     ),
   },

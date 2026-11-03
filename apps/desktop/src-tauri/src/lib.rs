@@ -160,6 +160,7 @@ pub fn run() {
         agent_browser::agent_browser_control,
         agent_browser::agent_browser_dialog,
         agent_browser::agent_browser_set_enabled,
+        agent_browser::agent_browser_status,
     ];
     tauri::Builder::default()
         // 不要插件往每个 webview 注入的 alert / confirm 改写（plugin_script.rs）：网页和主界面都用

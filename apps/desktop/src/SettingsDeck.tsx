@@ -10,6 +10,7 @@ const SECTIONS: SettingsSection[] = [
   "grants",
   "skills",
   "agents",
+  "browser",
   "remote",
   "appearance",
   "usage",

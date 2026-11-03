@@ -75,6 +75,7 @@
     "allow-agent-browser-control",
     "allow-agent-browser-dialog",
     "allow-agent-browser-set-enabled",
+    "allow-agent-browser-status",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-request-user-attention"

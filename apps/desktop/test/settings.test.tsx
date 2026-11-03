@@ -8,9 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
 import { SettingsPage, type SettingsPageSection, type ThemePref } from "../src/SettingsPage";
-import type { AgentBrowserHost } from "../src/host";
 import type { SettingItem } from "../src/rpc-types";
-import { createPrefsStore, PREFS_KEY, type FileOpener, type PrefsStore } from "../src/prefs";
+import { type FileOpener } from "../src/prefs";
 import type { CheckResult } from "../src/updater";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
@@ -133,8 +132,6 @@ function props(
     onFileOpenerChange?: (o: FileOpener) => boolean;
     onConfigSaved?: () => void;
     onOpenSubagents?: () => void;
-    agentBrowser?: AgentBrowserHost;
-    prefs?: PrefsStore;
     notifications?: {
       sendTest: () => Promise<{ shown: boolean; reason?: "disabled" | "unsupported" | "error" }>;
     };
@@ -153,8 +150,6 @@ function props(
     defaultWorkspace: "C:\\Users\\me\\Nocturne",
     workspaceOverridden: false,
     ...(overrides?.update !== undefined ? { update: overrides.update } : {}),
-    ...(overrides?.agentBrowser !== undefined ? { agentBrowser: overrides.agentBrowser } : {}),
-    ...(overrides?.prefs !== undefined ? { prefs: overrides.prefs } : {}),
     onThemeChange: overrides?.onThemeChange ?? (() => true),
     fileOpener: overrides?.fileOpener ?? ("panel" as const),
     editors: overrides?.editors ?? { vscode: true, cursor: false },
@@ -1136,113 +1131,13 @@ it("压缩阈值对话框支持同时编辑摘要阈值与修剪上限（ADR-006
   server.close();
 });
 
-describe("面板浏览器（常规 › 执行）", () => {
-  function memory(): Storage {
-    const data = new Map<string, string>();
-    return {
-      get length() {
-        return data.size;
-      },
-      clear: () => data.clear(),
-      getItem: (key) => data.get(key) ?? null,
-      key: (index) => [...data.keys()][index] ?? null,
-      removeItem: (key) => {
-        data.delete(key);
-      },
-      setItem: (key, value) => {
-        data.set(key, value);
-      },
-    };
-  }
-
-  function browserHost(): AgentBrowserHost & { enabled: boolean[] } {
-    const enabled: boolean[] = [];
-    return {
-      enabled,
-      watch: vi.fn(async () => ({ shellGeneration: 0, revision: 0, enabled: false, tabs: [] })),
-      uiState: vi.fn(async () => undefined),
-      presented: vi.fn(async () => undefined),
-      control: vi.fn(async () => ({ revision: 0 })),
-      dialog: vi.fn(async () => undefined),
-      setEnabled: vi.fn(async (next) => {
-        enabled.push(next);
-        return { enabled: next, restartRequired: next };
-      }),
-    };
-  }
-
-  async function mount(host: AgentBrowserHost, storage = memory()) {
-    const server = fakeServer(handlers());
-    await server.initialize();
-    const prefs = createPrefsStore(storage);
-    render(<SettingsPage {...props(server.client, { agentBrowser: host, prefs })} />);
-    await screen.findByRole("group", { name: "面板浏览器" });
-    return { server, prefs, storage };
-  }
-
-  it("第一次启用先弹风险提示，取消就不启用", async () => {
-    const host = browserHost();
-    const { server, prefs } = await mount(host);
-    const sw = screen.getByRole("switch", { name: "面板浏览器" });
-    expect(sw.getAttribute("aria-checked")).toBe("false");
-    fireEvent.click(sw);
-    const dialog = screen.getByRole("alertdialog", { name: "启用面板浏览器" });
-    expect(within(dialog).getByText("网页内容不可信，可能诱导它操作其他页面。")).toBeTruthy();
-    expect(dialog.querySelector("ul")).toBeNull();
-    expect(within(dialog).queryByText(/agent 会读取网页文字/)).toBeNull();
-    expect(host.setEnabled).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(prefs.get().agentBrowserEnabled).toBeUndefined();
-    expect(prefs.get().agentBrowserRiskAccepted).toBeUndefined();
-    expect(host.enabled).toEqual([]);
-    server.close();
-  });
-
-  it("确认启用后记下风险已读，并以 toast 提示已开启", async () => {
-    const host = browserHost();
-    const { server, prefs, storage } = await mount(host);
-    const sw = screen.getByRole("switch", { name: "面板浏览器" });
-    fireEvent.click(sw);
-    fireEvent.click(screen.getByRole("button", { name: "仍然启用" }));
-    const status = await screen.findByRole("status");
-    expect(status.textContent).toContain("已开启");
-    expect(status.textContent).not.toContain("开启后只对新的后台进程生效");
-    expect(sw.getAttribute("aria-checked")).toBe("true");
-    expect(host.enabled).toEqual([true]);
-    expect(prefs.get().agentBrowserEnabled).toBe(true);
-    expect(prefs.get().agentBrowserRiskAccepted).toBe(true);
-    expect(storage.getItem(PREFS_KEY)).toContain('"agentBrowserEnabled":true');
-    server.close();
-  });
-
-  it("已经看过风险提示后再开不再弹；关闭时调用关闭命令", async () => {
-    const storage = memory();
-    storage.setItem(
-      PREFS_KEY,
-      JSON.stringify({ agentBrowserEnabled: true, agentBrowserRiskAccepted: true }),
-    );
-    const host = browserHost();
-    const { server, prefs } = await mount(host, storage);
-    const sw = screen.getByRole("switch", { name: "面板浏览器" });
-    expect(sw.getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(sw);
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect((await screen.findByRole("status")).textContent).toContain(
-      "已关闭；已有绑定和标签已撤销",
-    );
-    expect(host.enabled).toEqual([false]);
-    expect(prefs.get().agentBrowserEnabled).toBe(false);
-    server.close();
-  });
-
-  it("没有外壳时设置里不出现这个开关", async () => {
-    const server = fakeServer(handlers());
-    await server.initialize();
-    render(<SettingsPage {...props(server.client)} />);
-    await screen.findByText("默认权限预设");
-    expect(screen.queryByRole("group", { name: "面板浏览器" })).toBeNull();
-    expect(screen.queryByRole("switch", { name: "面板浏览器" })).toBeNull();
-    server.close();
-  });
+it("常规 › 执行不再有 Agent 浏览器的开关（移到「浏览器」页）", async () => {
+  const server = fakeServer(handlers());
+  await server.initialize();
+  render(<SettingsPage {...props(server.client)} />);
+  await screen.findByText("默认权限预设");
+  expect(screen.queryByRole("group", { name: "面板浏览器" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "模型操作网页" })).toBeNull();
+  expect(screen.queryAllByRole("switch", { name: /面板浏览器|模型操作网页/ })).toHaveLength(0);
+  server.close();
 });

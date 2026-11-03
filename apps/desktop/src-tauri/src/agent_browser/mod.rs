@@ -329,6 +329,11 @@ pub struct AgentBrowserState {
     enabled_path: Option<PathBuf>,
     enabled: AtomicBool,
     server: Mutex<Option<Server>>,
+    /// 每次 start_server 加一：每代服务器的启动凭证都不同
+    server_epoch: AtomicU64,
+    /// 最近一次 spawn 后台时交出去的服务器代（`Some(None)` = 当时没启用，没给凭证）；
+    /// 还没 spawn 过后台为 `None`。设置页据此判断要不要重启应用（见 [`Self::restart_required`]）
+    served_epoch: Mutex<Option<Option<u64>>>,
     /// 前端 UI 状态代际（主界面每次整页加载会递增）
     shell_generation: AtomicU64,
     revision: AtomicU64,
@@ -403,6 +408,8 @@ impl AgentBrowserState {
             enabled_path,
             enabled: AtomicBool::new(false),
             server: Mutex::new(None),
+            server_epoch: AtomicU64::new(0),
+            served_epoch: Mutex::new(None),
             shell_generation: AtomicU64::new(1),
             revision: AtomicU64::new(0),
             ui_revision: AtomicU64::new(0),
@@ -473,8 +480,24 @@ impl AgentBrowserState {
         let stop = Arc::new(AtomicBool::new(false));
         let port = http::serve(Arc::clone(self), secret.clone(), Arc::clone(&stop))?;
         *lock(&self.server) = Some(Server { port, secret, stop });
+        self.server_epoch.fetch_add(1, Ordering::SeqCst);
         self.enabled.store(true, Ordering::SeqCst);
         Ok(port)
+    }
+
+    /// 正在运行的后台拿到的和当前开关不一致，要重启应用才生效。
+    ///
+    /// 不能只比「改之前是不是开着」：启动时开着 → 关 → 再开，开关回到了启动时的值，
+    /// 但再开是新一代服务器、新的启动凭证，旧后台拿着旧凭证绑定不上，仍然要重启。
+    /// 启动时关着 → 开 → 关，后台从来没拿到凭证，和现在一致，不用重启。
+    pub fn restart_required(&self) -> bool {
+        let current = self
+            .enabled()
+            .then(|| self.server_epoch.load(Ordering::SeqCst));
+        match *lock(&self.served_epoch) {
+            None => false,
+            Some(served) => served != current,
+        }
     }
 
     /// 停用：撤销全部绑定与在途操作、关闭 agent 标签、停止监听。
@@ -511,6 +534,16 @@ impl AgentBrowserState {
             "NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP".to_string(),
             payload.to_string(),
         ))
+    }
+
+    /// spawn 后台时取启动凭证，并记下交出去的是哪一代（[`Self::restart_required`]）。
+    pub fn backend_bootstrap(&self) -> Option<(String, String)> {
+        let env = self.bootstrap_env();
+        let epoch = env
+            .is_some()
+            .then(|| self.server_epoch.load(Ordering::SeqCst));
+        *lock(&self.served_epoch) = Some(epoch);
+        env
     }
 
     // ── 绑定 ──
@@ -1221,8 +1254,27 @@ pub fn agent_browser_dialog(
 #[serde(rename_all = "camelCase")]
 pub struct EnabledResult {
     pub enabled: bool,
-    /// 需要重启后台才生效（启停都不在现有后台伪造或悄悄撤掉凭证）
+    /// 正在运行的后台和当前开关不一致，要重启应用才生效
+    /// （启停都不在现有后台伪造或悄悄撤掉凭证，见 [`AgentBrowserState::restart_required`]）
     pub restart_required: bool,
+}
+
+fn enabled_result(state: &AgentBrowserState) -> EnabledResult {
+    EnabledResult {
+        enabled: state.enabled(),
+        restart_required: state.restart_required(),
+    }
+}
+
+/// 设置 › 浏览器：开关与改动之后是否需要重启应用。
+pub fn set_enabled(state: &Arc<AgentBrowserState>, enabled: bool) -> Result<EnabledResult, String> {
+    if enabled && !state.enabled() {
+        state.start_server()?;
+    } else if !enabled && state.enabled() {
+        state.stop_server();
+    }
+    state.persist_enabled(state.enabled());
+    Ok(enabled_result(state))
 }
 
 #[tauri::command]
@@ -1230,17 +1282,13 @@ pub fn agent_browser_set_enabled(
     state: State<'_, Arc<AgentBrowserState>>,
     enabled: bool,
 ) -> Result<EnabledResult, String> {
-    let restart_required = state.enabled() != enabled;
-    if enabled && !state.enabled() {
-        state.start_server()?;
-    } else if !enabled && state.enabled() {
-        state.stop_server();
-    }
-    state.persist_enabled(state.enabled());
-    Ok(EnabledResult {
-        enabled: state.enabled(),
-        restart_required,
-    })
+    set_enabled(state.inner(), enabled)
+}
+
+/// 设置页进入时读开关和是否待重启（页面重载后「重启应用」按钮也能还原）。
+#[tauri::command]
+pub fn agent_browser_status(state: State<'_, Arc<AgentBrowserState>>) -> EnabledResult {
+    enabled_result(state.inner())
 }
 
 /// 主界面重新加载：旧页面代际的绑定、标签、watch 全部作废。先撤绑定再关 webview。
@@ -1719,6 +1767,34 @@ mod tests {
         state.stop_server();
         assert!(state.bootstrap_env().is_none());
         assert!(!state.enabled());
+    }
+
+    #[test]
+    fn restart_is_required_only_when_the_running_backend_differs() {
+        let fresh = || AgentBrowserState::new(MockPlatform::new(), None);
+        // 启动时关着：开 → 要重启；再关回去 → 和后台一致，不用重启
+        let state = fresh();
+        assert!(!state.restart_required(), "还没 spawn 过后台");
+        assert!(state.backend_bootstrap().is_none());
+        let on = set_enabled(&state, true).unwrap();
+        assert!(on.enabled && on.restart_required);
+        let off = set_enabled(&state, false).unwrap();
+        assert!(!off.enabled && !off.restart_required);
+
+        // 启动时开着：关 → 要重启；再开 → 新一代凭证，旧后台绑定不上，仍要重启
+        let state = fresh();
+        state.start_server().unwrap();
+        assert!(state.backend_bootstrap().is_some());
+        assert!(!state.restart_required());
+        assert!(set_enabled(&state, false).unwrap().restart_required);
+        let again = set_enabled(&state, true).unwrap();
+        assert!(again.enabled && again.restart_required);
+        // 重启（重新 spawn 后台）后一致
+        assert!(state.backend_bootstrap().is_some());
+        assert!(!state.restart_required());
+        // 重复设成同一个值不改变结论
+        assert!(!set_enabled(&state, true).unwrap().restart_required);
+        state.stop_server();
     }
 
     #[test]

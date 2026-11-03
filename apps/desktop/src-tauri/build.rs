@@ -39,6 +39,7 @@ fn main() {
             "agent_browser_control",
             "agent_browser_dialog",
             "agent_browser_set_enabled",
+            "agent_browser_status",
         ]),
     ))
     .expect("failed to run tauri-build");

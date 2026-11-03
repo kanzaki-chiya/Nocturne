@@ -521,7 +521,7 @@ pub fn handle_backend_open(invoke: tauri::ipc::Invoke) {
         .state::<Arc<crate::agent_browser::AgentBrowserState>>()
         .inner()
         .clone()
-        .bootstrap_env();
+        .backend_bootstrap();
     let (workspace, channel) = match (workspace, channel) {
         (Ok(workspace), Ok(channel)) => (workspace, channel),
         (Err(error), _) | (_, Err(error)) => {

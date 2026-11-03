@@ -169,7 +169,15 @@ export interface AgentBrowserHost {
   ) => Promise<{ revision: number; state?: string | undefined }>;
   /** 用户答复挂起的脚本对话框：确定（prompt 带输入）或取消 */
   dialog: (tabId: string, accept: boolean, text?: string) => Promise<void>;
-  setEnabled: (enabled: boolean) => Promise<{ enabled: boolean; restartRequired: boolean }>;
+  /** restartRequired：正在运行的后台和开关不一致，要重启应用才生效 */
+  setEnabled: (enabled: boolean) => Promise<AgentBrowserStatus>;
+  /** 设置页进入时读开关与是否待重启；测试宿主可以没有 */
+  status?: (() => Promise<AgentBrowserStatus>) | undefined;
+}
+
+export interface AgentBrowserStatus {
+  enabled: boolean;
+  restartRequired: boolean;
 }
 
 /**

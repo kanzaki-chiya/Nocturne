@@ -39,7 +39,6 @@ import type {
   SettingsPatch,
 } from "./rpc-types";
 import { describeUpdateError, type CheckResult } from "./updater";
-import type { AgentBrowserHost } from "./host";
 import {
   FILE_OPENER_LABELS,
   FONT_SIZE_DEFAULT,
@@ -47,7 +46,6 @@ import {
   FONT_SIZE_MIN,
   isFileOpener,
   type FileOpener,
-  type PrefsStore,
 } from "./prefs";
 import { LAYER_TEXT, settingOverrideTitle } from "./setting-source";
 import {
@@ -229,8 +227,6 @@ export function SettingsPage({
   notifications,
   onConfigSaved,
   onOpenSubagents,
-  agentBrowser,
-  prefs,
   appearance,
 }: {
   section: SettingsPageSection;
@@ -271,9 +267,6 @@ export function SettingsPage({
   /** 写设置成功后调用：桌面端据此刷新会话列表 */
   onConfigSaved?: () => void;
   onOpenSubagents?: () => void;
-  /** 面板浏览器 · 桌面内置（第 5 轮）；没有外壳时设置里不显示 */
-  agentBrowser?: AgentBrowserHost | undefined;
-  prefs?: PrefsStore | undefined;
   /** 外观页的字体与字号；不给时不显示这两组 */
   appearance?: AppearanceControls | undefined;
 }) {
@@ -692,9 +685,6 @@ export function SettingsPage({
                       编辑
                     </Button>
                   </SettingsRow>
-                  {agentBrowser !== undefined && prefs !== undefined && (
-                    <AgentBrowserRows host={agentBrowser} prefs={prefs} onToast={showToast} />
-                  )}
                 </SettingsGroup>
               </>
             )}
@@ -2052,75 +2042,5 @@ function ReviewerSampleCheck({ client, enabled }: { client: RpcClient; enabled: 
         </div>
       )}
     </Field>
-  );
-}
-
-function AgentBrowserRows({
-  host,
-  prefs,
-  onToast,
-}: {
-  host: AgentBrowserHost;
-  prefs: PrefsStore;
-  onToast: (text: string) => void;
-}) {
-  const [enabled, setEnabled] = useState(() => prefs.get().agentBrowserEnabled === true);
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const apply = async (next: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await host.setEnabled(next);
-      prefs.update({ agentBrowserEnabled: result.enabled });
-      setEnabled(result.enabled);
-      onToast(result.enabled ? "已开启" : "已关闭；已有绑定和标签已撤销");
-    } catch (e) {
-      setError(errText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const onToggle = (next: boolean) => {
-    if (next && prefs.get().agentBrowserRiskAccepted !== true) {
-      setConfirming(true);
-      return;
-    }
-    void apply(next);
-  };
-  return (
-    <>
-      <SettingsRow label="面板浏览器" error={error ?? undefined}>
-        <Switch aria-label="面板浏览器" checked={enabled} disabled={busy} onChange={onToggle} />
-      </SettingsRow>
-      {confirming && (
-        <div className="agent-browser-risk" role="alertdialog" aria-label="启用面板浏览器">
-          <p>网页内容不可信，可能诱导它操作其他页面。</p>
-          <div className="agent-browser-risk-actions">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setConfirming(false);
-              }}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              disabled={busy}
-              onClick={() => {
-                prefs.update({ agentBrowserRiskAccepted: true });
-                setConfirming(false);
-                void apply(true);
-              }}
-            >
-              仍然启用
-            </Button>
-          </div>
-        </div>
-      )}
-    </>
   );
 }
