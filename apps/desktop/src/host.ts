@@ -89,6 +89,12 @@ export interface BrowserHost {
   /** 当前页面截图（PNG）；主界面浮层伸进面板时做占位 */
   capture: (id: number) => Promise<Uint8Array>;
   destroy: (id: number) => Promise<void>;
+  /**
+   * 设置 › 浏览器 › 下载同步给外壳（ADR-0078）；dir 为 null = 系统「下载」文件夹。
+   * 返回系统「下载」文件夹（取不到为 null）。测试宿主可以没有。
+   */
+  setDownloads?:
+    ((ask: boolean, dir: string | null) => Promise<{ defaultDir: string | null }>) | undefined;
 }
 
 /** agent 标签的展示状态（desktop-browser.md 第 7 节） */

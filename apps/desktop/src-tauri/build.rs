@@ -33,6 +33,7 @@ fn main() {
             "browser_action",
             "browser_capture",
             "browser_destroy",
+            "browser_downloads_set",
             "agent_browser_watch",
             "agent_browser_ui_state",
             "agent_browser_presented",

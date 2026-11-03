@@ -597,6 +597,37 @@ mod tests {
         assert_eq!(rect.width, OFFSCREEN_SIZE.0);
     }
 
+    /// agent 标签的下载一律取消（desktop-browser.md 第 5 节）：「设置 › 浏览器 › 下载」只管
+    /// 用户标签，不能接到这里。没法在单测里建 webview，只检查下载回调的源码：请求一律
+    /// 返回 false，不弹另存为、不读下载设置、不直接存盘。
+    #[test]
+    fn agent_downloads_stay_cancelled() {
+        let source = include_str!("shell.rs");
+        let code = &source[..source.find("#[cfg(test)]").unwrap_or(source.len())];
+        let start = code.find(".on_download(").expect("agent 标签挂了下载回调");
+        let block = &code[start..];
+        let block = &block[..block.find(".add_child(").expect("回调在 add_child 之前")];
+        let requested = &block[block.find("DownloadEvent::Requested").unwrap()..];
+        let requested = &requested[..requested.find("_ =>").unwrap()];
+        assert!(requested
+            .trim_end()
+            .trim_end_matches('}')
+            .trim_end()
+            .ends_with("false"));
+        for forbidden in [
+            "save_as",
+            "download_prefs",
+            "plan_download",
+            "DownloadPlan",
+            "destination",
+        ] {
+            assert!(
+                !block.contains(forbidden),
+                "agent 下载回调不应出现 {forbidden}"
+            );
+        }
+    }
+
     #[test]
     fn unused_imports_are_referenced() {
         let mutex = Mutex::new(1u8);

@@ -52,7 +52,7 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
-import { BrowserSettingsPage } from "./BrowserSettingsPage";
+import { BrowserSettingsPage, downloadSettings, type DownloadsHost } from "./BrowserSettingsPage";
 import { SettingsDeck } from "./SettingsDeck";
 import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
@@ -161,6 +161,15 @@ export function App({ host }: { host: DesktopHost }) {
       alive = false;
     };
   }, [host]);
+  const browserDownloads = useMemo<DownloadsHost | undefined>(() => {
+    const set = host.browsers?.setDownloads;
+    return set === undefined ? undefined : { set, pickFolder: () => host.pickFolder() };
+  }, [host]);
+  // 下载设置启动时同步给外壳一次（ADR-0078）；之后由设置页在改动时同步
+  useEffect(() => {
+    const { ask, dir } = downloadSettings(prefs.get());
+    void host.browsers?.setDownloads?.(ask, dir).catch(() => undefined);
+  }, [host, prefs]);
   /**
    * 回答内文件引用的打开能力（U-09）：左键按"默认打开方式"设置打开，右键菜单
    * 列出资源管理器与检测到的编辑器。prefsVersion 驱动设置变更后重算。
@@ -1547,6 +1556,7 @@ export function App({ host }: { host: DesktopHost }) {
                   <BrowserSettingsPage
                     prefs={prefs}
                     agentBrowser={host.agentBrowser}
+                    downloads={browserDownloads}
                     relaunch={() => host.relaunch()}
                     version={settingsVersion}
                   />

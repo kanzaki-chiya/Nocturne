@@ -1,11 +1,12 @@
 /**
- * 设置 › 浏览器（ADR-0078）：Agent 浏览器开关、模型回复里链接的打开方式。只有桌面端有这一页。
+ * 设置 › 浏览器（ADR-0078）：Agent 浏览器开关、模型回复里链接的打开方式、用户标签的下载。
+ * 只有桌面端有这一页。
  */
 import { useEffect, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
 import type { AgentBrowserHost } from "./host";
-import type { LinkOpener, PrefsStore } from "./prefs";
+import type { LinkOpener, Prefs, PrefsStore } from "./prefs";
 import { Button } from "./ui/Button";
 import { PageHeader } from "./ui/PageHeader";
 import { SettingsGroup } from "./ui/SettingsGroup";
@@ -21,13 +22,27 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 同步给外壳的下载设置：询问缺省开；dir 为 null = 系统「下载」文件夹 */
+export function downloadSettings(prefs: Prefs): { ask: boolean; dir: string | null } {
+  return { ask: prefs.downloadAsk !== false, dir: prefs.downloadDir ?? null };
+}
+
+/** 下载设置同步给外壳、选目录；没有内置浏览器的宿主不给 */
+export interface DownloadsHost {
+  set: (ask: boolean, dir: string | null) => Promise<{ defaultDir: string | null }>;
+  pickFolder: () => Promise<string | null>;
+}
+
 export function BrowserSettingsPage({
   prefs,
   agentBrowser,
+  downloads,
   relaunch,
   version,
 }: {
   prefs: PrefsStore;
+  /** 没有内置浏览器时不显示「下载」 */
+  downloads?: DownloadsHost | undefined;
   /** 没有外壳时不显示「Agent 浏览器」 */
   agentBrowser?: AgentBrowserHost | undefined;
   /** 「重启应用」 */
@@ -55,6 +70,11 @@ export function BrowserSettingsPage({
               <LinkOpenerRow label="网页链接" field="webLinkOpener" prefs={prefs} />
               <LinkOpenerRow label="本地网址" field="localLinkOpener" prefs={prefs} />
             </SettingsGroup>
+            {downloads !== undefined && (
+              <SettingsGroup title="下载">
+                <DownloadRows host={downloads} prefs={prefs} />
+              </SettingsGroup>
+            )}
           </div>
         </div>
       </div>
@@ -190,5 +210,82 @@ function LinkOpenerRow({
         }}
       />
     </SettingsRow>
+  );
+}
+
+/**
+ * 「每次询问保存位置」「保存位置」：写 prefs（缺省值不写），再同步给外壳。
+ * 没设保存位置时显示系统「下载」文件夹（外壳给的路径）。
+ */
+function DownloadRows({ host, prefs }: { host: DownloadsHost; prefs: PrefsStore }) {
+  const [settings, setSettings] = useState(() => downloadSettings(prefs.get()));
+  const [defaultDir, setDefaultDir] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const sync = async (next: { ask: boolean; dir: string | null }) => {
+    setError(null);
+    try {
+      const result = await host.set(next.ask, next.dir);
+      setDefaultDir(result.defaultDir);
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+  // 进入页面时取系统「下载」文件夹（同步一次当前设置）
+  useEffect(() => {
+    let live = true;
+    const { ask, dir } = downloadSettings(prefs.get());
+    host.set(ask, dir).then(
+      (result) => {
+        if (live) setDefaultDir(result.defaultDir);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [host, prefs]);
+
+  const apply = (next: { ask: boolean; dir: string | null }) => {
+    prefs.update({
+      downloadAsk: next.ask ? undefined : false,
+      downloadDir: next.dir ?? undefined,
+    });
+    setSettings(next);
+    void sync(next);
+  };
+  const shown = settings.dir ?? defaultDir ?? "";
+  return (
+    <>
+      <SettingsRow label="每次询问保存位置">
+        <Switch
+          aria-label="每次询问保存位置"
+          checked={settings.ask}
+          onChange={(ask) => {
+            apply({ ...settings, ask });
+          }}
+        />
+      </SettingsRow>
+      <SettingsRow label="保存位置" error={error ?? undefined}>
+        <span className="val mono" title={shown}>
+          {shown}
+        </span>
+        <Button
+          size="sm"
+          onClick={() => {
+            void host.pickFolder().then(
+              (dir) => {
+                if (dir !== null) apply({ ...settings, dir });
+              },
+              (e: unknown) => {
+                setError(errText(e));
+              },
+            );
+          }}
+        >
+          更改…
+        </Button>
+      </SettingsRow>
+    </>
   );
 }

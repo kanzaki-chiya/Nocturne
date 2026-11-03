@@ -312,6 +312,116 @@ impl Downloads {
     }
 }
 
+/// 设置 › 浏览器 › 下载（ADR-0078），由前端经 `browser_downloads_set` 同步给外壳。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadPrefs {
+    /// 每次询问保存位置（缺省开）
+    pub ask: bool,
+    /// 保存位置；`None` = 系统「下载」文件夹
+    pub dir: Option<PathBuf>,
+}
+
+/// 谁发起的下载。agent 标签的下载一律取消，和下载设置无关（desktop-browser.md 第 5 节）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadSource {
+    User,
+    Agent,
+}
+
+/// 一次下载怎么处理。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DownloadPlan {
+    /// 弹「另存为」，初始目录为 `dir`（`None` 时用 WebView2 给的默认位置）
+    Ask { dir: Option<PathBuf> },
+    /// 不问，直接存到这个路径
+    Save(PathBuf),
+    /// 取消下载，不弹对话框、不存盘
+    Cancel,
+}
+
+/// 同名文件最多试到这个序号；再往后退回另存为
+const MAX_NAME_SUFFIX: u32 = 9999;
+
+/// 同名文件自动加序号：`a.zip`、`a (1).zip`、`a (2).zip`；没有扩展名的是 `a (1)`，
+/// `.gitignore` 这种以点开头的整个当名字。`taken` 判断某个文件名是否已被占用。
+/// 序号用完返回 `None`。
+pub fn unique_file_name(name: &str, taken: impl Fn(&str) -> bool) -> Option<String> {
+    if !taken(name) {
+        return Some(name.to_string());
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    (1..=MAX_NAME_SUFFIX)
+        .map(|n| format!("{stem} ({n}){ext}"))
+        .find(|candidate| !taken(candidate))
+}
+
+/// 决定下载去哪（纯函数；文件系统探测由调用方传入）。
+///
+/// - agent：一律取消；
+/// - 还没收到前端的设置（下载早于同步）或每次询问：弹另存为，初始目录是保存位置；
+/// - 不询问：保存位置（未设置用系统「下载」文件夹）存在且可写时直接存，同名加序号；
+///   不存在、不可写或序号用完时退回另存为。
+pub fn plan_download(
+    source: DownloadSource,
+    prefs: Option<&DownloadPrefs>,
+    default_dir: Option<&Path>,
+    name: &str,
+    writable_dir: impl Fn(&Path) -> bool,
+    exists: impl Fn(&Path) -> bool,
+) -> DownloadPlan {
+    if source == DownloadSource::Agent {
+        return DownloadPlan::Cancel;
+    }
+    let Some(prefs) = prefs else {
+        return DownloadPlan::Ask { dir: None };
+    };
+    let dir = prefs.dir.as_deref().or(default_dir);
+    if prefs.ask {
+        return DownloadPlan::Ask {
+            dir: dir.map(Path::to_path_buf),
+        };
+    }
+    let Some(dir) = dir.filter(|d| writable_dir(d)) else {
+        return DownloadPlan::Ask { dir: None };
+    };
+    match unique_file_name(name, |candidate| exists(&dir.join(candidate))) {
+        Some(file) => DownloadPlan::Save(dir.join(file)),
+        None => DownloadPlan::Ask {
+            dir: Some(dir.to_path_buf()),
+        },
+    }
+}
+
+/// 目录存在且能在里面建文件（建一个临时文件再删掉）。
+pub fn dir_writable(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let probe = dir.join(format!(
+        ".nocturne-write-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(file) => {
+            drop(file);
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 const VK_B: u32 = 0x42;
 const VK_P: u32 = 0x50;
 const VK_T: u32 = 0x54;
@@ -339,6 +449,165 @@ mod tests {
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
+    }
+
+    // ── 下载（ADR-0078） ──
+
+    #[test]
+    fn same_name_downloads_get_numbered() {
+        let taken = |names: &'static [&'static str]| move |n: &str| names.contains(&n);
+        assert_eq!(unique_file_name("a.zip", taken(&[])).unwrap(), "a.zip");
+        assert_eq!(
+            unique_file_name("a.zip", taken(&["a.zip"])).unwrap(),
+            "a (1).zip"
+        );
+        assert_eq!(
+            unique_file_name("a.zip", taken(&["a.zip", "a (1).zip"])).unwrap(),
+            "a (2).zip"
+        );
+        // 中间空出来的序号先用
+        assert_eq!(
+            unique_file_name("a.zip", taken(&["a.zip", "a (2).zip"])).unwrap(),
+            "a (1).zip"
+        );
+        // 多个点只把最后一段当扩展名；没有扩展名、点开头的文件名整体当名字
+        assert_eq!(
+            unique_file_name("x.tar.gz", taken(&["x.tar.gz"])).unwrap(),
+            "x.tar (1).gz"
+        );
+        assert_eq!(
+            unique_file_name("README", taken(&["README"])).unwrap(),
+            "README (1)"
+        );
+        assert_eq!(
+            unique_file_name(".env", taken(&[".env"])).unwrap(),
+            ".env (1)"
+        );
+        assert_eq!(
+            unique_file_name("报告.pdf", taken(&["报告.pdf"])).unwrap(),
+            "报告 (1).pdf"
+        );
+        // 序号用完
+        assert_eq!(unique_file_name("a.zip", |_| true), None);
+    }
+
+    fn prefs(ask: bool, dir: Option<&str>) -> DownloadPrefs {
+        DownloadPrefs {
+            ask,
+            dir: dir.map(PathBuf::from),
+        }
+    }
+
+    #[test]
+    fn download_plan_follows_prefs() {
+        let default = Path::new("C:/Users/me/Downloads");
+        let yes = |_: &Path| true;
+        let no = |_: &Path| false;
+        // 还没同步设置：按询问处理，初始目录交给 WebView2
+        assert_eq!(
+            plan_download(DownloadSource::User, None, Some(default), "a.zip", yes, no),
+            DownloadPlan::Ask { dir: None }
+        );
+        // 询问：初始目录是保存位置；没设保存位置用系统「下载」
+        assert_eq!(
+            plan_download(
+                DownloadSource::User,
+                Some(&prefs(true, Some("D:/dl"))),
+                Some(default),
+                "a.zip",
+                yes,
+                no
+            ),
+            DownloadPlan::Ask {
+                dir: Some(PathBuf::from("D:/dl"))
+            }
+        );
+        assert_eq!(
+            plan_download(
+                DownloadSource::User,
+                Some(&prefs(true, None)),
+                Some(default),
+                "a.zip",
+                yes,
+                no
+            ),
+            DownloadPlan::Ask {
+                dir: Some(default.to_path_buf())
+            }
+        );
+        // 不询问：直接存，同名加序号
+        let exists = |p: &Path| p == Path::new("D:/dl").join("a.zip");
+        assert_eq!(
+            plan_download(
+                DownloadSource::User,
+                Some(&prefs(false, Some("D:/dl"))),
+                Some(default),
+                "a.zip",
+                yes,
+                exists
+            ),
+            DownloadPlan::Save(Path::new("D:/dl").join("a (1).zip"))
+        );
+        assert_eq!(
+            plan_download(
+                DownloadSource::User,
+                Some(&prefs(false, None)),
+                Some(default),
+                "a.zip",
+                yes,
+                no
+            ),
+            DownloadPlan::Save(default.join("a.zip"))
+        );
+        // 保存位置不存在或不可写：退回另存为
+        assert_eq!(
+            plan_download(
+                DownloadSource::User,
+                Some(&prefs(false, Some("Z:/gone"))),
+                Some(default),
+                "a.zip",
+                no,
+                no
+            ),
+            DownloadPlan::Ask { dir: None }
+        );
+    }
+
+    #[test]
+    fn agent_downloads_are_always_cancelled() {
+        // 不管用户的下载设置是什么、目录能不能写，agent 标签的下载都取消
+        for p in [
+            None,
+            Some(prefs(true, None)),
+            Some(prefs(false, None)),
+            Some(prefs(false, Some("D:/dl"))),
+        ] {
+            assert_eq!(
+                plan_download(
+                    DownloadSource::Agent,
+                    p.as_ref(),
+                    Some(Path::new("C:/Users/me/Downloads")),
+                    "a.zip",
+                    |_| true,
+                    |_| false
+                ),
+                DownloadPlan::Cancel
+            );
+        }
+    }
+
+    #[test]
+    fn writable_dir_probe() {
+        let dir = std::env::temp_dir().join(format!("nct-dl-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(dir_writable(&dir));
+        // 探测文件不留下
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert!(!dir_writable(&dir.join("missing")));
+        let file = dir.join("file.txt");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(!dir_writable(&file));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn dev() -> Url {

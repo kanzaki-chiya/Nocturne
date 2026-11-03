@@ -154,6 +154,7 @@ pub fn run() {
         browser::browser_action,
         browser::browser_capture,
         browser::browser_destroy,
+        browser::browser_downloads_set,
         agent_browser::agent_browser_watch,
         agent_browser::agent_browser_ui_state,
         agent_browser::agent_browser_presented,

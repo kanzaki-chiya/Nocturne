@@ -43,6 +43,42 @@ describe("prefs store", () => {
     expect(store2.persistent).toBe(true);
   });
 
+  it("设置 › 浏览器：打开方式与下载只存非缺省值，非法值按未设置处理", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    store.update({
+      webLinkOpener: "panel",
+      localLinkOpener: "panel",
+      downloadAsk: false,
+      downloadDir: "D:\\dl",
+    });
+    const back = createPrefsStore(storage).get();
+    expect(back.webLinkOpener).toBe("panel");
+    expect(back.localLinkOpener).toBe("panel");
+    expect(back.downloadAsk).toBe(false);
+    expect(back.downloadDir).toBe("D:\\dl");
+    store.update({
+      webLinkOpener: undefined,
+      localLinkOpener: undefined,
+      downloadAsk: undefined,
+      downloadDir: undefined,
+    });
+    expect(storage.data.get(PREFS_KEY)).not.toMatch(/LinkOpener|download/);
+    const bad = memoryStorage({
+      [PREFS_KEY]: JSON.stringify({
+        webLinkOpener: "system",
+        localLinkOpener: 1,
+        downloadAsk: true,
+        downloadDir: "",
+      }),
+    });
+    const parsed = createPrefsStore(bad).get();
+    expect(parsed.webLinkOpener).toBeUndefined();
+    expect(parsed.localLinkOpener).toBeUndefined();
+    expect(parsed.downloadAsk).toBeUndefined();
+    expect(parsed.downloadDir).toBeUndefined();
+  });
+
   it("损坏 JSON 回退默认", () => {
     const store = createPrefsStore(memoryStorage({ [PREFS_KEY]: "{oops" }));
     expect(store.get()).toEqual({

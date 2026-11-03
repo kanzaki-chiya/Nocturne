@@ -13,7 +13,9 @@
 
 use crate::backend::CommandError;
 use crate::browser_fullscreen::{Fullscreen, Step};
-use crate::browser_policy::{self, Blocked, DownloadReport, Downloads};
+use crate::browser_policy::{
+    self, Blocked, DownloadPlan, DownloadPrefs, DownloadReport, DownloadSource, Downloads,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -108,6 +110,10 @@ pub struct BrowserState {
     data_override: Option<std::path::PathBuf>,
     /// 网页全屏前主窗口是最大化的：退出全屏后重新最大化（见 [`window_fullscreen`]）
     restore_maximized: AtomicBool,
+    /// 设置 › 浏览器 › 下载（前端启动时和改动时同步）；还没同步时按询问处理
+    download_prefs: Mutex<Option<DownloadPrefs>>,
+    /// 直接保存、还没结束的下载（地址, 路径）：同时下两个同名文件时不撞同一个路径
+    pending_saves: Mutex<Vec<(String, std::path::PathBuf)>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -140,6 +146,18 @@ impl BrowserState {
                 close_later(webview);
             }
         }
+    }
+
+    /// 用户浏览数据目录（`<应用本地数据>/browser`，隔离环境放在
+    /// `WEBVIEW2_USER_DATA_FOLDER` 下）。浏览器创建与「设置 › 浏览器 › 浏览数据」共用。
+    pub fn user_data_dir(&self, app: &AppHandle) -> CmdResult<std::path::PathBuf> {
+        Ok(match self.data_override.as_deref() {
+            Some(dir) => browser_policy::browser_data_dir(dir, Some(dir)),
+            None => browser_policy::browser_data_dir(
+                &app.path().app_local_data_dir().map_err(native_error)?,
+                None,
+            ),
+        })
     }
 
     /// 当前存活的用户浏览器标签数。容量判定把 agent 标签另算（desktop-browser.md 第 2 节）。
@@ -202,7 +220,8 @@ fn native_error(error: impl std::fmt::Display) -> CommandError {
     CommandError::new("browser_failed", format!("浏览器操作失败：{error}"))
 }
 
-/// 下载：弹系统的「另存为」，取消就不下载；不自动存进默认目录。结果配对见
+/// 下载：按「设置 › 浏览器 › 下载」弹「另存为」或直接存到保存位置
+/// （[`browser_policy::plan_download`]）；另存为里取消就不下载。结果配对见
 /// [`browser_policy::Downloads`]。
 fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> bool {
     match event {
@@ -211,7 +230,32 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "download".into());
-            match save_as(app, destination, &name) {
+            let state = app.state::<Arc<BrowserState>>();
+            let prefs = lock(&state.download_prefs).clone();
+            let default_dir = default_download_dir(app);
+            let plan = {
+                let pending = lock(&state.pending_saves);
+                browser_policy::plan_download(
+                    DownloadSource::User,
+                    prefs.as_ref(),
+                    default_dir.as_deref(),
+                    &name,
+                    browser_policy::dir_writable,
+                    |path| path.exists() || pending.iter().any(|(_, p)| p == path),
+                )
+            };
+            let target = match plan {
+                DownloadPlan::Ask { dir } => {
+                    let dir = dir.or_else(|| destination.parent().map(|d| d.to_path_buf()));
+                    save_as(app, dir.as_deref(), &name)
+                }
+                DownloadPlan::Save(path) => {
+                    lock(&state.pending_saves).push((url.to_string(), path.clone()));
+                    Some(path)
+                }
+                DownloadPlan::Cancel => None,
+            };
+            match target {
                 Some(path) => {
                     let chosen = path
                         .file_name()
@@ -232,6 +276,13 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
             }
         }
         DownloadEvent::Finished { url, path, success } => {
+            {
+                let state = app.state::<Arc<BrowserState>>();
+                let mut pending = lock(&state.pending_saves);
+                if let Some(index) = pending.iter().position(|(u, _)| u == url.as_str()) {
+                    pending.remove(index);
+                }
+            }
             let file_name = path
                 .as_ref()
                 .and_then(|p| p.file_name())
@@ -257,11 +308,15 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
 /// 另存为对话框。下载回调在主线程上同步等结果，Tauri 对话框插件的阻塞接口在主线程上
 /// 会和父窗口互相等待，所以直接用它底下的 rfd 同步对话框（模态，自带消息循环）。
 #[cfg(windows)]
-fn save_as(app: &AppHandle, default: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+fn save_as(
+    app: &AppHandle,
+    dir: Option<&std::path::Path>,
+    name: &str,
+) -> Option<std::path::PathBuf> {
     let mut dialog = rfd::FileDialog::new()
         .set_title("另存为")
         .set_file_name(name);
-    if let Some(dir) = default.parent().filter(|d| d.is_dir()) {
+    if let Some(dir) = dir.filter(|d| d.is_dir()) {
         dialog = dialog.set_directory(dir);
     }
     if let Some(window) = app.get_window("main") {
@@ -271,8 +326,37 @@ fn save_as(app: &AppHandle, default: &std::path::Path, name: &str) -> Option<std
 }
 
 #[cfg(not(windows))]
-fn save_as(_: &AppHandle, _: &std::path::Path, _: &str) -> Option<std::path::PathBuf> {
+fn save_as(_: &AppHandle, _: Option<&std::path::Path>, _: &str) -> Option<std::path::PathBuf> {
     None
+}
+
+/// 系统「下载」文件夹；取不到为 None。
+fn default_download_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().download_dir().ok()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadSettings {
+    /// 系统「下载」文件夹（没设保存位置时设置页显示它）
+    default_dir: Option<String>,
+}
+
+/// 设置 › 浏览器 › 下载：前端启动时和改动时同步过来。`dir` 为空 = 系统「下载」文件夹。
+#[tauri::command]
+pub fn browser_downloads_set(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<BrowserState>>,
+    ask: bool,
+    dir: Option<String>,
+) -> DownloadSettings {
+    let dir = dir
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    *lock(&state.download_prefs) = Some(DownloadPrefs { ask, dir });
+    DownloadSettings {
+        default_dir: default_download_dir(&app).map(|d| d.to_string_lossy().into_owned()),
+    }
 }
 
 #[tauri::command]
@@ -289,13 +373,7 @@ pub async fn browser_create(
     let window = app
         .get_window("main")
         .ok_or_else(|| CommandError::new("browser_failed", "主窗口不存在"))?;
-    let data_dir = match state.data_override.as_deref() {
-        Some(dir) => browser_policy::browser_data_dir(dir, Some(dir)),
-        None => browser_policy::browser_data_dir(
-            &app.path().app_local_data_dir().map_err(native_error)?,
-            None,
-        ),
-    };
+    let data_dir = state.user_data_dir(&app)?;
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
     let browser = Arc::new(Browser {
         label: browser_policy::browser_label(id),

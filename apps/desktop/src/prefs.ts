@@ -114,6 +114,10 @@ export interface Prefs {
   agentBrowserEnabled?: boolean | undefined;
   /** 用户已经看过启用风险说明（只在第一次启用时拦一下） */
   agentBrowserRiskAccepted?: boolean | undefined;
+  /** 设置 › 浏览器 › 下载：每次询问保存位置；缺省开，只存 false */
+  downloadAsk?: false | undefined;
+  /** 下载保存位置；缺省系统「下载」文件夹 */
+  downloadDir?: string | undefined;
   /** 模型回复里的网页链接；缺省系统浏览器，只存 "panel" */
   webLinkOpener?: LinkOpener | undefined;
   /** 模型回复里的本地网址（localhost / 127.0.0.1 / [::1]）；缺省系统浏览器，只存 "panel" */
@@ -236,6 +240,10 @@ function parse(raw: string | null): Prefs {
     prefs.agentBrowserEnabled = obj.agentBrowserEnabled;
   }
   if (obj.agentBrowserRiskAccepted === true) prefs.agentBrowserRiskAccepted = true;
+  if (obj.downloadAsk === false) prefs.downloadAsk = false;
+  if (typeof obj.downloadDir === "string" && obj.downloadDir !== "") {
+    prefs.downloadDir = obj.downloadDir;
+  }
   if (obj.webLinkOpener === "panel") prefs.webLinkOpener = "panel";
   if (obj.localLinkOpener === "panel") prefs.localLinkOpener = "panel";
   const pending = obj.pendingUpdate;
@@ -329,6 +337,8 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.agentBrowserRiskAccepted !== undefined
           ? { agentBrowserRiskAccepted: prefs.agentBrowserRiskAccepted }
           : {}),
+        ...(prefs.downloadAsk !== undefined ? { downloadAsk: prefs.downloadAsk } : {}),
+        ...(prefs.downloadDir !== undefined ? { downloadDir: prefs.downloadDir } : {}),
         ...(prefs.webLinkOpener !== undefined ? { webLinkOpener: prefs.webLinkOpener } : {}),
         ...(prefs.localLinkOpener !== undefined ? { localLinkOpener: prefs.localLinkOpener } : {}),
         ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),

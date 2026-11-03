@@ -64,6 +64,8 @@ export function createTauriHost(): DesktopHost {
         return new Uint8Array(await invoke<ArrayBuffer>("browser_capture", { id }));
       },
       destroy: (id) => invoke("browser_destroy", { id }),
+      setDownloads: (ask, dir) =>
+        invoke<{ defaultDir: string | null }>("browser_downloads_set", { ask, dir }),
     },
     agentBrowser: {
       watch(onMessage) {
