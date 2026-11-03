@@ -171,7 +171,7 @@ interface NodeProbe {
 
 **目标行**：会话有 `visibleGoal(view.goal)` 时，在任务清单上方显示 `GoalRow`，没有清单也显示；草稿不显示。顶行是不可点的 `/goal` chip、单行省略目标、已运行时长及「展开/收起」「暂停/继续」「取消」图标操作。时长从 `goalElapsedMs` 格式化，只有进行中的 Turn 每秒更新子组件，停止计时后不设 timer。展开后目标全文替代清单正文且独立滚动，有清单时保留同一 grid 格子的隐藏清单占位，底部 N/M 开关位置不动；点击 N/M 只收目标全文并显示清单，不写 `todosCollapsed`。展开默认收起、不持久化。暂停在当前轮结束后停止续跑，继续和取消分别调用 `resumeGoal` 与 `cancelGoal`。非 active 的目标与 chip 灰显；blocked 展开时额外显示警告色原因，内置英文原因经 Core 转中文；met 和 rewound 隐藏。
 
-桌面端折叠箭头统一使用同一字符 `▶`，展开向下旋转 90°、向上旋转 −90°，保留 0.15 秒短过渡；原生 details 隐藏浏览器三角，改用同样字符与 CSS 旋转。下拉菜单触发按钮沿用原有的 ▾ 指示符，不属于折叠箭头。
+桌面端与手机网页界面图标统一使用 `src/ui/Icon.tsx`（MingCute 线性图标 `mingcute_icon` 2.9.72，桌面三档尺寸 18 / 16 / 14px）。折叠箭头统一使用 `<Icon name="right_small" size={ICON_SM} className="fold-arrow" />`，展开向下旋转 90°、向上旋转 −90°（对话流内用户点击 `<summary>` 展开/收起过渡为 `--dur-fold` 180ms，其余保留 0.15s 短过渡）；原生 details 隐藏浏览器三角，`<summary>` 内同样使用 `.fold-arrow` 图标与 CSS 旋转。下拉菜单触发按钮统一使用 `<Icon name="down_small" size={ICON_SM} />`，不属于折叠箭头。
 
 思考时长不足 1 秒时，无论进行中还是已结束都只显示「思考」。
 

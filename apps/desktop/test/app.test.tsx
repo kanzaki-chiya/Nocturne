@@ -962,7 +962,7 @@ it("设置区接管左栏：返回与 Esc 回到原会话且滚动位置不变",
   fireEvent.click(within(nav).getByRole("button", { name: /服务商/ }));
   expect(await screen.findByTestId("providers-page")).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("button", { name: /← 返回/ }));
+  fireEvent.click(screen.getByRole("button", { name: /返回/ }));
   await waitFor(() => {
     expect(screen.queryByRole("navigation", { name: "设置" })).toBeNull();
   });

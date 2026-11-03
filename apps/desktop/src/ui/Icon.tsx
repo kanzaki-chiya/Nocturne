@@ -278,7 +278,7 @@ export function Icon({
   "aria-label": ariaLabel,
 }: IconProps) {
   const def: IconDefinition = ICON_DATA[name];
-  const classes = ["icon", className].filter(Boolean).join(" ");
+  const classes = [className, "icon"].filter(Boolean).join(" ");
   return (
     <svg
       className={classes}

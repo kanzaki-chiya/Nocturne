@@ -44,7 +44,7 @@
 
 | 变量 | 桌面端用途 | 手机端用途 |
 |---|---|---|
-| `--fs-1` | 次要信息、徽章、时间戳、表头、分组标题、折叠箭头、思考过程 | 角标、快捷键、次要标签 |
+| `--fs-1` | 次要信息、徽章、时间戳、表头、分组标题、思考过程 | 角标、快捷键、次要标签 |
 | `--fs-2` | 导航项、按钮、表单标签、设置行、列表项、表格正文、工具行、状态栏全部文字（默认 13px） | 辅助说明、状态栏、胶囊按钮、代码输出 |
 | `--fs-3` | 对话正文、输入框、卡片标题、Markdown `h4`–`h6` | 正文、设置行、抽屉项、选项标题 |
 | `--fs-4` | 页面与弹窗标题、Markdown `h3` | 顶栏标题、对话框标题、发送按钮 |
@@ -102,9 +102,10 @@
   - `.btn-danger`：常规态与次按钮相同，悬停变红；
   - `.btn-danger-solid`：破坏性确认弹窗内的实心红按钮；
   - 尺寸变体：`.btn-sm`（`--ctl-h-sm`）、`.btn-lg`（`--ctl-h-lg`），触控端按钮高度用 `--ctl-h-touch`。
-- **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 变体。
+- **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Icon`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 变体。
+- **图标（`<Icon>`）**：界面图标统一使用 MingCute 线性图标（`mingcute_icon` 2.9.72，`_line.svg` 填充路径），由公共组件 `apps/desktop/src/ui/Icon.tsx`（`<Icon name="..." size={...} />`）渲染，继承 `currentColor`，默认 `aria-hidden`。桌面端三档尺寸定义在 `design/tokens.json` 的 `control` 分组：侧栏和设置页导航用 `--icon-lg`（`ICON_LG`），工具栏和图标按钮用 `--icon-md`（`ICON_MD`），小字旁边（工具行、标签、状态栏、下拉箭头、折叠箭头）用 `--icon-sm`（`ICON_SM`）；手机网页沿用现有显示尺寸。窗口控制按钮、品牌标记、数据图形及终端和代码查看器内部内容除外。
 - **图标按钮（`.ib`）**：宽高 `--ctl-h-md`（`.ib.sm` 为 `--ctl-h-sm`），圆角 `--radius-2`，激活态加 `.on` 或 `aria-pressed="true"`。图标按钮的 `title` 与 `aria-label` 只写动作名，不写状态或行为解释。
-- **折叠箭头（`.fold-arrow`）**：统一使用 `▶` 配合 CSS `transform: rotate(...)` 过渡，不混用 `▾`/`▸` 字符。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器的 `▾` 表示弹出菜单，不算折叠箭头。
+- **折叠箭头（`.fold-arrow`）**：统一使用 `<Icon name="right_small" size={ICON_SM} className="fold-arrow" />` 配合 CSS `transform: rotate(...)` 过渡（对话流内用户触发的 `<details>` 为 `--dur-fold`），不混用文本三角字符或 `summary::before` 伪元素。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down` 或 `details[open] > summary > .fold-arrow`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器统一使用 `<Icon name="down_small" size={ICON_SM} />`，不算折叠箭头。
 - **待发队列（`.pending-inputs`）**：压在输入框上沿，每条待发输入单行（`.pi-row`）：弱化色箭头、单行省略的正文，右侧图标按钮依次为立即发送（只有运行中的排队条目才有）、编辑、取消；子代理结果条目只有取消。不写模式标签。
 - **开关（`.switch`）**：`button[role="switch"][aria-checked]`，尺寸 `--switch-w` × `--switch-h`，圆钮 `--switch-knob`。立即生效的布尔设置用开关；进表单点「保存」才生效的布尔字段用复选框 `.check`。
 - **分段控件（`.seg`）**：2–4 个互斥短选项，选中项 `[aria-pressed="true"]` / `[aria-selected="true"]` / `[aria-checked="true"]` 用 `--a-sel-strong` 底。
