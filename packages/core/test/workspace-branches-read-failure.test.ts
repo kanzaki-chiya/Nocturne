@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import type * as WorkspaceGit from "../src/platform/workspace-branches.js";
 const { current } = vi.hoisted(() => ({ current: vi.fn() }));
 vi.mock("../src/platform/workspace-branches.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/platform/workspace-branches.js")>()),
+  ...(await importOriginal<typeof WorkspaceGit>()),
   gitCurrentBranch: current,
 }));
 import { createRuntime, FakeProvider } from "../src/index.js";

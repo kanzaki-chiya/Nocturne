@@ -61,6 +61,11 @@ describe("桌面分支菜单 ADR-0079", () => {
     const occupied = screen.getByRole("menuitemradio", { name: "feat/auth" });
     expect(occupied.hasAttribute("disabled")).toBe(true);
     expect(occupied.getAttribute("title")).toBe("Z:/other/auth");
+    if (!occupied.parentElement) throw new Error("missing branch row");
+    fireEvent.mouseEnter(occupied.parentElement);
+    expect(screen.getByRole("tooltip").textContent).toBe("Z:/other/auth");
+    fireEvent.mouseLeave(occupied.parentElement);
+    expect(screen.queryByRole("tooltip")).toBeNull();
     expect(screen.getByRole("menuitemradio", { name: "main" }).getAttribute("aria-checked")).toBe(
       "true",
     );

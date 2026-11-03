@@ -28,6 +28,9 @@ export function BranchMenu({
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState<object | null>(null);
   const [active, setActive] = useState(0);
+  const [hoverPath, setHoverPath] = useState<{ path: string; left: number; top: number } | null>(
+    null,
+  );
   const trigger = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const currentOwner = useRef(owner);
@@ -52,7 +55,9 @@ export function BranchMenu({
       void refresh();
     };
     window.addEventListener("focus", focus);
-    return () => window.removeEventListener("focus", focus);
+    return () => {
+      window.removeEventListener("focus", focus);
+    };
   }, [refresh]);
 
   const filtered =
@@ -66,6 +71,7 @@ export function BranchMenu({
   const enabled = options.filter((option) => option.worktree === undefined);
   const selected = Math.min(active, Math.max(0, enabled.length - 1));
   const close = () => {
+    setHoverPath(null);
     setOpened(null);
     trigger.current?.focus();
   };
@@ -107,9 +113,10 @@ export function BranchMenu({
               Math.max(1, enabled.length);
       setActive(Math.max(0, next));
       search.current?.focus();
-      event.currentTarget
-        .querySelectorAll<HTMLElement>('[data-branch-enabled="true"]')
-        [next]?.scrollIntoView?.({ block: "nearest" });
+      const option = event.currentTarget.querySelectorAll<HTMLElement>(
+        '[data-branch-enabled="true"]',
+      )[next];
+      if (option && "scrollIntoView" in option) option.scrollIntoView({ block: "nearest" });
     }
   };
 
@@ -138,59 +145,86 @@ export function BranchMenu({
         <b>{data.current}</b>
       </button>
       {open && (
-        <Menu
-          anchor={trigger.current}
-          align="right"
-          className="branch-menu"
-          onClose={close}
-          onKeyDown={keyboard}
-        >
-          <label className="branch-search">
-            <Icon name="search" size={ICON_SM} />
-            <input
-              ref={search}
-              className="menu-search"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setActive(0);
-              }}
-            />
-          </label>
-          <div className="branch-list">
-            {options.map((option) => (
-              <button
-                type="button"
-                key={option.name}
-                role="menuitemradio"
-                aria-checked={!option.create && option.name === data.current}
-                data-branch-enabled={option.worktree === undefined}
-                className={`branch-option${enabled[selected] === option ? " act" : ""}${option.create ? " branch-create" : ""}`}
-                disabled={busy || option.worktree !== undefined}
-                title={option.worktree}
-                onMouseEnter={() => {
-                  const index = enabled.indexOf(option);
-                  if (index >= 0) setActive(index);
+        <>
+          <Menu
+            anchor={trigger.current}
+            align="right"
+            className="branch-menu"
+            onClose={close}
+            onKeyDown={keyboard}
+          >
+            <label className="branch-search">
+              <Icon name="search" size={ICON_SM} />
+              <input
+                ref={search}
+                className="menu-search"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActive(0);
                 }}
-                onClick={() => {
-                  void choose(option.name, option.create);
-                }}
-              >
-                <span className="branch-check">
-                  {!option.create && option.name === data.current && (
-                    <Icon name="check" size={ICON_SM} />
-                  )}
-                </span>
-                <span>{option.create ? `新建分支 ${option.name}` : option.name}</span>
-              </button>
-            ))}
-          </div>
-          {error !== null && (
-            <pre className="branch-error" role="alert">
-              {error}
-            </pre>
+              />
+            </label>
+            <div className="branch-list">
+              {options.map((option) => (
+                <div
+                  key={option.name}
+                  className="branch-row"
+                  onMouseEnter={(event) => {
+                    if (option.worktree === undefined) return;
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setHoverPath({
+                      path: option.worktree,
+                      left: Math.max(8, Math.min(bounds.left, window.innerWidth - 368)),
+                      top: Math.min(bounds.bottom + 4, window.innerHeight - 64),
+                    });
+                  }}
+                  onMouseLeave={() => {
+                    setHoverPath(null);
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={!option.create && option.name === data.current}
+                    data-branch-enabled={option.worktree === undefined}
+                    className={`branch-option${enabled[selected] === option ? " act" : ""}${option.create ? " branch-create" : ""}`}
+                    disabled={busy || option.worktree !== undefined}
+                    title={option.worktree}
+                    onMouseEnter={() => {
+                      const index = enabled.indexOf(option);
+                      if (index >= 0) setActive(index);
+                    }}
+                    onClick={() => {
+                      void choose(option.name, option.create);
+                    }}
+                  >
+                    <span className="branch-check">
+                      {!option.create && option.name === data.current && (
+                        <Icon name="check" size={ICON_SM} />
+                      )}
+                    </span>
+                    <span>{option.create ? `新建分支 ${option.name}` : option.name}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+            {error !== null && (
+              <pre className="branch-error" role="alert">
+                {error}
+              </pre>
+            )}
+          </Menu>
+          {hoverPath && (
+            <div
+              role="tooltip"
+              className="branch-path"
+              style={{ left: hoverPath.left, top: hoverPath.top }}
+            >
+              {hoverPath.path}
+            </div>
           )}
-        </Menu>
+        </>
       )}
     </>
   );
