@@ -62,11 +62,7 @@
   background: var(--a-raised);
 }
 .search-close svg {
-  width: 14px;
-  height: 14px;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
+  display: block;
 }
 .search-tabs {
   flex: none;

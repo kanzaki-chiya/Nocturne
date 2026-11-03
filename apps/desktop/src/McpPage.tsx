@@ -18,6 +18,8 @@ import {
   Field,
   Form,
   FormFooter,
+  ICON_SM,
+  Icon,
   ListGroup,
   ListItem,
   MasterDetail,
@@ -479,7 +481,10 @@ function ProbeResult({ result }: { result: McpProbeResult }) {
       </span>
       {result.stderrTail?.length ? (
         <details>
-          <summary>诊断信息</summary>
+          <summary>
+            <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+            诊断信息
+          </summary>
           <pre>{result.stderrTail.join("\n")}</pre>
         </details>
       ) : null}
@@ -796,7 +801,10 @@ function McpForm({
           {!backend && <small>系统凭据后端不可用，保存到凭据库不可选；请引用环境变量。</small>}
         </Field>
         <details>
-          <summary>高级</summary>
+          <summary>
+            <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+            高级
+          </summary>
           {type === "stdio" && (
             <Field label="工作目录">
               <input

@@ -20,7 +20,7 @@ import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
 import { KeyHint } from "./KeyHint";
 import { keyDiag } from "./key-diag";
-import { Badge, Button, IconButton } from "./ui";
+import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 
 /** WindowFrame 标题栏里给 App 放按钮的位置；没有标题栏（测试、手机）时为 null */
 export const TitlebarSlot = createContext<HTMLElement | null>(null);
@@ -58,9 +58,7 @@ export function TitlebarButtons({
         disabled={overviewDisabled}
         onClick={onToggleOverview}
       >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" />
-        </svg>
+        <Icon name="list_check" size={ICON_MD} />
       </IconButton>
       <IconButton
         className="tb-icon"
@@ -70,10 +68,7 @@ export function TitlebarButtons({
         disabled={panelDisabled}
         onClick={onTogglePanel}
       >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-          <path d="M10 2.5v11" />
-        </svg>
+        <Icon name="layout_right" size={ICON_MD} />
       </IconButton>
     </TitlebarPortal>
   );
@@ -307,10 +302,7 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
               onOpen(agent);
             }}
           >
-            <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="8" cy="5" r="2.4" />
-              <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
-            </svg>
+            <Icon name="robot" size={ICON_SM} className="sp-glyph" />
             <span className="ovpop-agent-text">
               <span className="ovpop-agent-profile">
                 {agent.profile}
@@ -372,10 +364,7 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
       {external.map((run) => (
         // 外部 agent 的过程只在主对话的进度里，没有 Nocturne 子会话可看：不可点击
         <div key={run.callId} className="ovpop-agent external" title={run.summary}>
-          <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="5" r="2.4" />
-            <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
-          </svg>
+          <Icon name="robot" size={ICON_SM} className="sp-glyph" />
           <span className="ovpop-agent-text">
             <span className="ovpop-agent-profile">{run.agent}</span>
             <span className="ovpop-agent-summary">{run.summary}</span>
@@ -423,17 +412,12 @@ export function SessionOverview({
       }
     >
       <div className="ovpop-proj">
-        <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.4 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1Z" />
-        </svg>
+        <Icon name="folder" size={ICON_SM} className="sp-glyph" />
         <span>{project}</span>
         <small title={workspace}>{workspace}</small>
       </div>
       <button type="button" onClick={onOpenChanges}>
-        <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-          <path d="M8 5.5v4M6 7.5h4M6 11h4" />
-        </svg>
+        <Icon name="git_commit" size={ICON_SM} className="sp-glyph" />
         <span>变更</span>
         <span className="ovpop-n">
           {totals.files === 0 ? (

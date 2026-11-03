@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PinnedRow, ProjectNode, ProjectSort, SessionRow, SessionTree } from "./session-tree";
+import { ICON_LG, ICON_SM, Icon } from "./ui";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
 export type SettingsSection =
@@ -59,225 +60,66 @@ export interface SidebarProps {
   onLeaveSettings?: () => void;
 }
 
-const GLYPH_PROPS = {
-  className: "glyph",
-  viewBox: "0 0 16 16",
-  width: 15,
-  height: 15,
-  "aria-hidden": true,
-} as const;
-
 const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
   {
     key: "general",
     label: "常规",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path
-          d="M2.5 4.5h11M2.5 11.5h11"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-        />
-        <circle
-          cx="10.5"
-          cy="4.5"
-          r="1.7"
-          fill="var(--a-side)"
-          stroke="currentColor"
-          strokeWidth="1.3"
-        />
-        <circle
-          cx="5.5"
-          cy="11.5"
-          r="1.7"
-          fill="var(--a-side)"
-          stroke="currentColor"
-          strokeWidth="1.3"
-        />
-      </svg>
-    ),
+    icon: <Icon name="settings_6" size={ICON_LG} className="glyph" />,
   },
   {
     key: "models",
     label: "模型",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path
-          d="M8 1.8 13.5 4.8v6.4L8 14.2 2.5 11.2V4.8zM2.5 4.8 8 7.8l5.5-3M8 7.8v6.4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
+    icon: <Icon name="box_3" size={ICON_LG} className="glyph" />,
   },
   {
     key: "providers",
     label: "服务商",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path
-          d="M5.5 1.8v3M10.5 1.8v3M3.5 4.8h9v2.6a4.5 4.5 0 0 1-9 0zM8 11.9v2.3"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
+    icon: <Icon name="cloud" size={ICON_LG} className="glyph" />,
   },
   {
     key: "mcp",
     label: "MCP",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path d="M2 3h12v4H2zM2 10h12v4H2zM5 5h5M5 12h5" fill="none" stroke="currentColor" />
-      </svg>
-    ),
+    icon: <Icon name="server" size={ICON_LG} className="glyph" />,
   },
   {
     key: "grants",
     label: "授权",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path
-          d="M8 1.5 13.5 4v4c0 3-3 5-5.5 6.5C5.5 13 2.5 11 2.5 8V4zM5.5 8l1.7 1.7 3.5-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-        />
-      </svg>
-    ),
+    icon: <Icon name="safe_shield" size={ICON_LG} className="glyph" />,
   },
   {
     key: "skills",
     label: "技能",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path d="M3 2h7l3 3v9H3zM5 7h6M5 10h5" fill="none" stroke="currentColor" />
-      </svg>
-    ),
+    icon: <Icon name="file" size={ICON_LG} className="glyph" />,
   },
   {
     key: "agents",
     label: "子代理",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <rect
-          x="2.5"
-          y="5"
-          width="11"
-          height="8.5"
-          rx="2.2"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-        />
-        <path
-          d="M8 5V2.6M6 10.9h4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-        />
-        <circle cx="8" cy="2.2" r="0.9" fill="currentColor" />
-        <circle cx="5.9" cy="8.4" r="0.95" fill="currentColor" />
-        <circle cx="10.1" cy="8.4" r="0.95" fill="currentColor" />
-      </svg>
-    ),
+    icon: <Icon name="robot" size={ICON_LG} className="glyph" />,
   },
   {
     key: "browser",
     label: "浏览器",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path
-          d="M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14c-1.8-1.7-2.6-3.7-2.6-6S6.2 3.7 8 2z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.3"
-        />
-      </svg>
-    ),
+    icon: <Icon name="earth" size={ICON_LG} className="glyph" />,
   },
   {
     key: "remote",
     label: "远程",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <rect
-          x="4"
-          y="1.5"
-          width="8"
-          height="13"
-          rx="1.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.3"
-        />
-        <path d="M7 12h2" stroke="currentColor" strokeWidth="1.3" />
-      </svg>
-    ),
+    icon: <Icon name="cellphone" size={ICON_LG} className="glyph" />,
   },
   {
     key: "appearance",
     label: "外观",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <circle cx="8" cy="8" r="2.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path
-          d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-        />
-      </svg>
-    ),
+    icon: <Icon name="sun" size={ICON_LG} className="glyph" />,
   },
   {
     key: "usage",
     label: "用量",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <path
-          d="M2.5 13.5h11M4.5 10.5v-4M8 10.5v-8M11.5 10.5v-6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-        />
-      </svg>
-    ),
+    icon: <Icon name="chart_bar" size={ICON_LG} className="glyph" />,
   },
   {
     key: "logs",
     label: "后台日志",
-    icon: (
-      <svg {...GLYPH_PROPS}>
-        <rect
-          x="1.8"
-          y="2.5"
-          width="12.4"
-          height="11"
-          rx="1.6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-        />
-        <path
-          d="M4.4 6.2l2.3 1.9-2.3 1.9M7.8 10h3.8"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
+    icon: <Icon name="terminal_box" size={ICON_LG} className="glyph" />,
   },
 ];
 
@@ -307,23 +149,6 @@ function rowTag(row: SessionRow): { text: string; cls: string } | null {
   if (row.mark === "error") return { text: "出错", cls: "err" };
   if (row.mark === "done") return { text: "已完成", cls: "done" };
   return null;
-}
-
-const FOLD_OPEN = "M1.5 4.5v8h11l2-5.5H4l-2 5.5M1.5 4.5V3h4l1.5 1.5h5.5V7";
-const FOLD_CLOSED = "M1.5 3h4l1.5 1.5h7.5v8h-13z";
-
-function FoldIcon({ open }: { open: boolean }) {
-  return (
-    <svg className="fold" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d={open ? FOLD_OPEN : FOLD_CLOSED}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 function RowButton({
@@ -405,26 +230,7 @@ function RowButton({
               title={row.client.name}
               aria-label={row.client.name}
             >
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                <rect
-                  x="1.8"
-                  y="2.8"
-                  width="12.4"
-                  height="10.4"
-                  rx="2"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-                <path
-                  d="M4.8 6.3 6.8 8l-2 1.7M8.2 9.7h3"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <Icon name="terminal" size={ICON_SM} />
             </span>
           )}
           <span className="t">{row.title}</span>
@@ -501,7 +307,8 @@ export function Sidebar(props: SidebarProps) {
             props.onLeaveSettings?.();
           }}
         >
-          ← 返回<span className="k">Esc</span>
+          <Icon name="arrow_left" size={ICON_LG} />
+          返回<span className="k">Esc</span>
         </button>
         <h4>设置</h4>
         <nav className="nav" aria-label="设置">
@@ -670,10 +477,12 @@ export function Sidebar(props: SidebarProps) {
               projectMenu(e, project, index);
             }}
           >
-            <span className={`tw fold-arrow${collapsed ? "" : " down"}`} aria-hidden="true">
-              ▶
-            </span>
-            <FoldIcon open={!collapsed} />
+            <Icon
+              name="right_small"
+              size={ICON_SM}
+              className={`tw fold-arrow${collapsed ? "" : " down"}`}
+            />
+            <Icon name="folder" size={ICON_LG} className="fold" />
             <span className="gname">{project.name}</span>
             <span className="gh-right">
               {collapsed && <span className="meta">{project.count}</span>}
@@ -751,19 +560,11 @@ export function Sidebar(props: SidebarProps) {
             props.onNewSession();
           }}
         >
-          <span className="glyph">＋</span>新会话
+          <Icon name="add" size={ICON_LG} className="glyph" />
+          新会话
         </button>
         <button type="button" className="item" onClick={props.onSearch}>
-          <svg {...GLYPH_PROPS}>
-            <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
-            <path
-              d="m10.5 10.5 3.2 3.2"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-            />
-          </svg>
+          <Icon name="search" size={ICON_LG} className="glyph" />
           <span className="t">搜索</span>
         </button>
         <button
@@ -774,16 +575,7 @@ export function Sidebar(props: SidebarProps) {
             props.onOpenSchedules?.();
           }}
         >
-          <svg {...GLYPH_PROPS}>
-            <circle cx="8" cy="8.6" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
-            <path
-              d="M8 5.6v3.2l2.2 1.4M5.4 1.6h5.2"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-            />
-          </svg>
+          <Icon name="time" size={ICON_LG} className="glyph" />
           <span className="t">定时任务</span>
           {props.enabledScheduleCount !== undefined && (
             <span className="meta">{props.enabledScheduleCount}</span>
@@ -964,9 +756,7 @@ export function Sidebar(props: SidebarProps) {
                 }}
               >
                 <span>排序</span>
-                <span className="arr fold-arrow" aria-hidden="true">
-                  ▶
-                </span>
+                <Icon name="right_small" size={ICON_SM} className="arr fold-arrow" />
                 <div className="ctxmenu sub">
                   {(
                     [
@@ -1006,9 +796,7 @@ export function Sidebar(props: SidebarProps) {
                 }}
               >
                 <span>已移除的项目…</span>
-                <span className="arr fold-arrow" aria-hidden="true">
-                  ▶
-                </span>
+                <Icon name="right_small" size={ICON_SM} className="arr fold-arrow" />
                 <div className="ctxmenu sub">
                   {props.hiddenProjects.length === 0 ? (
                     <button disabled>（没有已移除的项目）</button>
@@ -1034,15 +822,7 @@ export function Sidebar(props: SidebarProps) {
       )}
       <nav className="nav foot" aria-label="页面">
         <button type="button" className="item" onClick={() => props.onOpenPage?.("general")}>
-          <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-            <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-            <path
-              d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4-1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-            />
-          </svg>
+          <Icon name="settings_1" size={ICON_LG} className="glyph" />
           设置
         </button>
       </nav>

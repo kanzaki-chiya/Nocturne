@@ -39,7 +39,7 @@ import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
 import type { GoalActions } from "./GoalRow";
-import { IconButton } from "./ui";
+import { ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 import { fileIconText, formatBytes } from "./web/phone-images";
 
 export interface ChoiceOption {
@@ -188,71 +188,6 @@ function errorText(error: unknown): string {
 
 function appendHistory(history: readonly string[], text: string): string[] {
   return history.at(-1) === text ? [...history] : [...history.slice(-999), text];
-}
-
-// mockup 托盘/菜单图标（stroke 图标，currentColor）
-const stroke = {
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.3,
-  strokeLinejoin: "round" as const,
-};
-function IconChat() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M2 3.5h12v7H6.5L3.5 13v-2.5H2z" {...stroke} />
-    </svg>
-  );
-}
-function IconFolder() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M1.5 3h4l1.5 1.5h7.5v8h-13z" {...stroke} />
-    </svg>
-  );
-}
-function IconShield() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 1.8 13 3.6v4c0 3.2-2.2 5.4-5 6.6-2.8-1.2-5-3.4-5-6.6v-4z" {...stroke} />
-    </svg>
-  );
-}
-function IconImage() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.8" {...stroke} />
-      <circle cx="5.6" cy="6.3" r="1.2" fill="currentColor" stroke="none" />
-      <path d="m2.5 12 3.8-3.6 2.6 2.2 2-1.7 2.8 2.6" {...stroke} />
-    </svg>
-  );
-}
-function IconAt() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="2.6" {...stroke} />
-      <path
-        d="M10.6 8v1.1a1.9 1.9 0 0 0 3.8 0V8A6.4 6.4 0 1 0 11 13.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.3}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-function IconPlus() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M8 3.5v9M3.5 8h9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.3}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
 }
 
 interface PopupRow {
@@ -1044,7 +979,7 @@ export function Composer({
         setMenuExclusive(openMenu === "plus" ? null : "plus");
       }}
     >
-      ＋
+      <Icon name="add" size={ICON_MD} />
     </IconButton>
   );
 
@@ -1076,7 +1011,7 @@ export function Composer({
             void submit(running ? "queue" : undefined);
           }}
         >
-          ↑
+          <Icon name="arrow_up" size={ICON_MD} />
         </button>
       )}
     </>
@@ -1288,11 +1223,9 @@ export function Composer({
                 "preset",
                 controls.preset,
                 <>
-                  <IconShield />
+                  <Icon name="shield" size={ICON_SM} />
                   <b>{controls.preset.label}</b>
-                  <span className="caret" aria-hidden="true">
-                    ▾
-                  </span>
+                  <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
             <span className="sp" />
@@ -1303,9 +1236,7 @@ export function Composer({
                 <>
                   <span className="pd" aria-hidden="true" />
                   {controls.model.label}
-                  <span className="caret" aria-hidden="true">
-                    ▾
-                  </span>
+                  <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
             {controls !== undefined &&
@@ -1314,9 +1245,7 @@ export function Composer({
                 controls.effort,
                 <>
                   {controls.effort.label}
-                  <span className="caret" aria-hidden="true">
-                    ▾
-                  </span>
+                  <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
             {sendButton}
@@ -1339,23 +1268,21 @@ export function Composer({
                 if (!workspace.readOnly) requestDirOpen(!dirOpen);
               }}
             >
-              {workspace.kind === "plain" ? <IconChat /> : <IconFolder />}
-              <b>{workspace.label}</b>
-              {!workspace.readOnly && (
-                <span className="caret" aria-hidden="true">
-                  ▾
-                </span>
+              {workspace.kind === "plain" ? (
+                <Icon name="chat_1" size={ICON_SM} />
+              ) : (
+                <Icon name="folder" size={ICON_SM} />
               )}
+              <b>{workspace.label}</b>
+              {!workspace.readOnly && <Icon name="down_small" size={ICON_SM} className="caret" />}
             </button>
             {chip(
               "preset",
               controls.preset,
               <>
-                <IconShield />
+                <Icon name="shield" size={ICON_SM} />
                 <b>{controls.preset.label}</b>
-                <span className="caret" aria-hidden="true">
-                  ▾
-                </span>
+                <Icon name="down_small" size={ICON_SM} className="caret" />
               </>,
             )}
             {hint !== null && <span className="hint">{hint}</span>}
@@ -1365,13 +1292,13 @@ export function Composer({
       {openMenu === "plus" && (
         <Menu anchor={triggers.current.plus ?? null} label="添加" onClose={closeMenu}>
           <MenuItem
-            icon={<IconImage />}
+            icon={<Icon name="pic" size={ICON_SM} />}
             label="添加文件…"
             right="也可粘贴、拖入"
             onSelect={openPicker}
           />
           <MenuItem
-            icon={<IconAt />}
+            icon={<Icon name="at" size={ICON_SM} />}
             label="引用文件…"
             right={<span className="mono">@</span>}
             {...(fileRefs === null ? { disabled: fileRefsUnavailable } : {})}
@@ -1388,7 +1315,7 @@ export function Composer({
       {workspace !== undefined && openMenu === "dir" && !workspace.readOnly && (
         <Menu anchor={triggers.current.dir ?? null} label="工作区" onClose={closeMenu}>
           <MenuItem
-            icon={<IconChat />}
+            icon={<Icon name="chat_1" size={ICON_SM} />}
             checked={workspace.currentKey === null}
             label="普通对话"
             right="不属于任何项目"
@@ -1406,7 +1333,7 @@ export function Composer({
           {workspace.projects.map((project) => (
             <MenuItem
               key={project.key}
-              icon={<IconFolder />}
+              icon={<Icon name="folder" size={ICON_SM} />}
               checked={workspace.currentKey === project.key}
               label={project.name}
               detail={project.path}
@@ -1418,7 +1345,7 @@ export function Composer({
           ))}
           <MenuSeparator />
           <MenuItem
-            icon={<IconPlus />}
+            icon={<Icon name="add" size={ICON_SM} />}
             label="打开其他文件夹…"
             onSelect={() => {
               closeMenu();

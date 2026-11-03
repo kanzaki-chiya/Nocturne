@@ -53,6 +53,9 @@ import {
   Checkbox,
   DataTable,
   Field,
+  ICON_MD,
+  ICON_SM,
+  Icon,
   IconButton,
   PageHeader,
   SegmentedControl,
@@ -74,18 +77,7 @@ export interface AppearanceControls {
   onChange: (patch: Partial<AppearancePrefs>) => boolean;
 }
 
-const RESET_ICON = (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-    <path
-      d="M3 5.5A4.5 4.5 0 1 1 2.5 8M3 2.5v3h3"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+const RESET_ICON = <Icon name="refresh_2" size={ICON_MD} />;
 
 /** 字体下拉：首项「默认」，再按等宽/非等宽分两组；每个名字用它自己的字体显示 */
 function FontPicker({
@@ -619,16 +611,7 @@ export function SettingsPage({
                           <span className="dd-label">
                             {shellItem.saved ?? shellItem.effective ?? "自动"}
                           </span>
-                          <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-                            <path
-                              d="M4 6l4 4 4-4"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
+                          <Icon name="down_small" size={ICON_SM} className="ic" />
                         </button>
                       )}
                       {shellMenu && (

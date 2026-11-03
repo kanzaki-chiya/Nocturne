@@ -15,7 +15,7 @@ import { ChoiceMenu } from "./Menu";
 import type { ModelInfo } from "./rpc-types";
 import { modelGroups, refKey } from "./session-controls";
 import { modelRefText } from "./model-ref";
-import { Button } from "./ui";
+import { Button, ICON_SM, Icon } from "./ui";
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -142,8 +142,8 @@ export function ModelRecoveryCard({
           >
             {chosen === undefined
               ? "选择模型"
-              : `${chosen.ref.provider} · ${chosen.displayName ?? chosen.ref.model}`}{" "}
-            ▾
+              : `${chosen.ref.provider} · ${chosen.displayName ?? chosen.ref.model}`}
+            <Icon name="down_small" size={ICON_SM} />
           </Button>
           {menuOpen && (
             <ChoiceMenu

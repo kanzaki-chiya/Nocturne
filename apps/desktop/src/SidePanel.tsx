@@ -12,7 +12,6 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
 } from "react";
 import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
 import type { SubagentSummary, ToolEntry } from "@nocturne/core/protocol";
@@ -51,7 +50,7 @@ import {
 import { SubagentPane, type SubagentRuntime } from "./SubagentPane";
 import type { SubagentWatcher } from "./subagent-watch";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
-import { Badge, Button, IconButton } from "./ui";
+import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
 import "./side-panel.css";
 
 export type { TerminalShellChoice };
@@ -171,41 +170,17 @@ function Glyph({
 }: {
   kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent";
 }) {
-  const paths: Record<typeof kind, ReactNode> = {
-    changes: (
-      <>
-        <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-        <path d="M8 5.5v4M6 7.5h4M6 11h4" />
-      </>
-    ),
-    file: (
-      <path d="M4 1.5h5l3.5 3.5v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11.5a1 1 0 0 1 1-1ZM9 1.5V5h3.5" />
-    ),
-    terminal: (
-      <>
-        <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-        <path d="m4.5 6 2 2-2 2M8 10.5h3.5" />
-      </>
-    ),
-    globe: (
-      <>
-        <circle cx="8" cy="8" r="6.2" />
-        <path d="M1.8 8h12.4M8 1.8c2 2.2 2 10.2 0 12.4M8 1.8c-2 2.2-2 10.2 0 12.4" />
-      </>
-    ),
-    agent: (
-      <>
-        <circle cx="8" cy="5" r="2.4" />
-        <path d="M3.2 13.5c.4-2.6 2.3-4 4.8-4s4.4 1.4 4.8 4" />
-      </>
-    ),
-    plus: <path d="M8 3v10M3 8h10" />,
-    close: <path d="m4 4 8 8m0-8-8 8" />,
+  const names: Record<typeof kind, IconName> = {
+    changes: "git_commit",
+    file: "file",
+    terminal: "terminal",
+    globe: "earth",
+    agent: "robot",
+    plus: "add",
+    close: "close",
   };
   return (
-    <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-      {paths[kind]}
-    </svg>
+    <Icon name={names[kind]} size={kind === "plus" ? ICON_MD : ICON_SM} className="sp-glyph" />
   );
 }
 
@@ -671,9 +646,11 @@ function TreeDir({
                 }}
               >
                 {multi ? (
-                  <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
-                    ▶
-                  </span>
+                  <Icon
+                    name="right_small"
+                    size={ICON_SM}
+                    className={`fold-arrow${open ? " down" : ""}`}
+                  />
                 ) : (
                   <span className="sp-tree-spacer" aria-hidden="true" />
                 )}
@@ -718,9 +695,11 @@ function TreeDir({
                 onToggle(child.path);
               }}
             >
-              <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
-                ▶
-              </span>
+              <Icon
+                name="right_small"
+                size={ICON_SM}
+                className={`fold-arrow${open ? " down" : ""}`}
+              />
               <span className="sp-tree-name">{child.name}</span>
             </button>
             {open && (
@@ -1119,9 +1098,7 @@ function FileView({
             setReload((n) => n + 1);
           }}
         >
-          <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" />
-          </svg>
+          <Icon name="refresh_2" size={ICON_MD} className="sp-glyph" />
         </IconButton>
       </header>
       {actionError !== undefined && (

@@ -19,6 +19,8 @@ import {
   Switch,
   EmptyState,
   Field,
+  ICON_SM,
+  Icon,
   PageHeader,
   SettingsGroup,
   SettingsRow,
@@ -544,7 +546,10 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
               onOperate={operation}
             />
             <details className="remote-trust group">
-              <summary>中继只转发密文，看不到你的对话、代码或命令。你需要信任谁</summary>
+              <summary>
+                <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+                中继只转发密文，看不到你的对话、代码或命令。你需要信任谁
+              </summary>
               <p className="desc">
                 手机网页由中继管理员提供：你需要信任管理员不会篡改网页，并妥善保护服务器。被篡改的网页可以在手机解密后读取内容，端到端加密无法防止这一点。
               </p>

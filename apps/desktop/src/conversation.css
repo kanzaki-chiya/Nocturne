@@ -231,8 +231,7 @@
   margin: 0 6px 6px 0;
 }
 .conversation .u-img-chip svg {
-  width: 13px;
-  height: 13px;
+  flex: none;
 }
 
 /* ── 助手消息（无标签、无竖线） ── */
@@ -381,7 +380,8 @@
   color: var(--a-secondary);
 }
 .conversation .think-tw {
-  font-size: var(--fs-1);
+  display: inline-flex;
+  align-items: center;
   color: var(--a-faint);
 }
 .conversation .think.open > .think-h {
@@ -500,13 +500,9 @@
   overflow-wrap: anywhere;
 }
 .conversation-markdown .file-ref-glyph {
-  width: 13px;
-  height: 13px;
-  margin-right: 4px;
+  display: inline-block;
+  margin-right: var(--space-1);
   vertical-align: -2px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.2;
   opacity: 0.8;
 }
 .conversation-markdown .file-ref-error {
@@ -597,6 +593,10 @@
   white-space: nowrap;
   min-width: 0;
   padding: 2px 0;
+}
+.conversation .tool-line > .fold-arrow,
+.conversation .diff-h > .fold-arrow {
+  align-self: center;
 }
 .conversation .tool-details > summary.tool-line {
   list-style: none;
@@ -734,6 +734,9 @@
   color: var(--a-muted);
 }
 .tool-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   margin-left: auto;
   border: 0;
   background: none;

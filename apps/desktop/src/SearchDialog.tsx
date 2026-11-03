@@ -10,6 +10,7 @@ import { describeSchedulePlan, type ScheduleTaskOverview } from "@nocturne/core/
 import type { RpcClient, RpcResult, RpcRuntime } from "@nocturne/rpc/client";
 
 import { formatRelative, projectKey, type ProjectNode, type SessionSummary } from "./session-tree";
+import { ICON_MD, Icon, type IconName } from "./ui";
 import "./search.css";
 
 export type SearchTab = "all" | "sessions" | "projects" | "designs" | "schedules";
@@ -53,55 +54,13 @@ const GROUPS: { id: ItemKind; label: string }[] = [
 ];
 
 function itemIcon(kind: ItemKind): ReactNode {
-  if (kind === "sessions") {
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        aria-hidden="true"
-      >
-        <path d="M2.5 3.5h11v7.5H7l-3 2.5V11H2.5z" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (kind === "projects") {
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        aria-hidden="true"
-      >
-        <path
-          d="M2 4.2c0-.5.4-.9.9-.9h3.2l1.5 1.7h5.5c.5 0 .9.4.9.9v6.3c0 .5-.4.9-.9.9H2.9a.9.9 0 0 1-.9-.9z"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-  if (kind === "designs") {
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        aria-hidden="true"
-      >
-        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
-        <path d="M2.5 6h11M6.5 6v7.5" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-      <circle cx="8" cy="8.6" r="5.6" />
-      <path d="M8 5.6v3.2l2.2 1.4M5.4 1.6h5.2" strokeLinecap="round" />
-    </svg>
-  );
+  const names: Record<ItemKind, IconName> = {
+    sessions: "chat_1",
+    projects: "folder",
+    designs: "layout",
+    schedules: "time",
+  };
+  return <Icon name={names[kind]} size={ICON_MD} />;
 }
 
 function matchRanges(text: string, query: string): { start: number; end: number }[] {
@@ -577,9 +536,7 @@ export function SearchDialog({
             }}
           />
           <button type="button" className="search-close" aria-label="关闭" onClick={onClose}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="m2.5 2.5 9 9m0-9-9 9" />
-            </svg>
+            <Icon name="close" size={ICON_MD} />
           </button>
         </div>
         <div className="search-tabs" role="tablist">

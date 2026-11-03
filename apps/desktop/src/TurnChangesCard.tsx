@@ -8,7 +8,7 @@ import {
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 import { displayPath } from "./paths";
-import { Badge, Button } from "./ui";
+import { Badge, Button, ICON_SM, Icon } from "./ui";
 
 interface Props {
   turn: TurnChanges;
@@ -81,9 +81,7 @@ function ChangedFile({
           setOpen(!open);
         }}
       >
-        <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
-          ▶
-        </span>
+        <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " down" : ""}`} />
         <span className="turn-change-path" title={file.path}>
           <span className="turn-change-directory">{label.slice(0, slash + 1)}</span>
           {label.slice(slash + 1)}
@@ -278,9 +276,11 @@ export function TurnChangesCard(props: Props) {
               setShowAll(!showAll);
             }}
           >
-            <span className={`fold-arrow${showAll ? " up" : ""}`} aria-hidden="true">
-              ▶
-            </span>
+            <Icon
+              name="right_small"
+              size={ICON_SM}
+              className={`fold-arrow${showAll ? " up" : ""}`}
+            />
             {showAll ? "收起" : `再显示 ${turn.files.length - PREVIEW} 个文件`}
           </button>
         )}
