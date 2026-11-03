@@ -9,7 +9,17 @@ import {
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { ConfirmDialog } from "./ProvidersPage";
-import { Button, Switch, SegmentedControl, DetailHeader, Field, FormFooter, Badge } from "./ui";
+import {
+  Button,
+  Switch,
+  SegmentedControl,
+  DetailHeader,
+  Field,
+  FormFooter,
+  Badge,
+  ICON_SM,
+  Icon,
+} from "./ui";
 
 export function profilesFromSettings(items: readonly SettingItem[]) {
   return items
@@ -257,7 +267,10 @@ export function SubagentProfileEditor({
         />
       )}
       <details className="profile-preview">
-        <summary>预览模型看到的文字</summary>
+        <summary>
+          <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+          预览模型看到的文字
+        </summary>
         <pre>{preview}</pre>
       </details>
     </form>

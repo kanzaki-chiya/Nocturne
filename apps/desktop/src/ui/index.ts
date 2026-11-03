@@ -11,6 +11,16 @@ export {
   type FormFooterProps,
   type FormProps,
 } from "./Form";
+export {
+  ICON_DATA,
+  ICON_LG,
+  ICON_MD,
+  ICON_SM,
+  Icon,
+  type IconDefinition,
+  type IconName,
+  type IconProps,
+} from "./Icon";
 export { IconButton, type IconButtonProps, type IconButtonSize } from "./IconButton";
 export {
   DetailHeader,

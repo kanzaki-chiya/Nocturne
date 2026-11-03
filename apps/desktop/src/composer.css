@@ -240,9 +240,8 @@
 }
 
 .composer .chip svg {
-  width: 13px;
-  height: 13px;
   flex: none;
+  color: var(--a-muted);
 }
 
 .composer .chip .pd {
@@ -255,7 +254,6 @@
 
 .composer .chip .caret {
   color: var(--a-muted);
-  font-size: var(--fs-1);
 }
 
 .composer .chip b {
@@ -269,6 +267,9 @@
 .composer .send {
   width: 26px;
   height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
   border-radius: var(--radius-pill);
   border: none;
   background: var(--a-accent);
@@ -408,8 +409,6 @@
 }
 
 .menu .menu-item svg {
-  width: 13px;
-  height: 13px;
   flex: none;
   color: var(--a-muted);
 }

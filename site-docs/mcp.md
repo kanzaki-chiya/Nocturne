@@ -6,7 +6,7 @@ Nocturne 既可以作为 MCP（Model Context Protocol）客户端接入外部工
 
 ### 添加服务器
 
-- **桌面端**：打开「设置」→「MCP」，点击右上角「＋ 添加服务器」打开表单，或点击「从 JSON 导入」粘贴现有配置。程序内添加的服务器保存在 `~/.nocturne/mcp.json`；也可以手写在 `config.json` 或 `.nocturne/config.json` 的 `mcp.servers` 字段中（归入左列「只读」分组）。
+- **桌面端**：打开「设置」→「MCP」，点击右上角「添加服务器」打开表单，或点击「从 JSON 导入」粘贴现有配置。程序内添加的服务器保存在 `~/.nocturne/mcp.json`；也可以手写在 `config.json` 或 `.nocturne/config.json` 的 `mcp.servers` 字段中（归入左列「只读」分组）。
 - **项目级服务器信任**：写在工作区 `.nocturne/config.json` 里的项目级 MCP 服务器在工作区未信任前不会启动，需先在「设置」→「授权」中点击「信任此项目」后才能连接。
 
 在「添加 MCP 服务器」表单中选择「类型」：

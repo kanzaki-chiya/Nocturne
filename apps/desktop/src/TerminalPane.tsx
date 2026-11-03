@@ -11,7 +11,7 @@ import type { TerminalHost } from "./host";
 import { terminalShell, type ShellOption, type TerminalTab } from "./side-panel";
 import { TerminalSession, type TerminalStatus } from "./terminal-session";
 import type { MountedTerminal } from "./terminal-view";
-import { Button } from "./ui";
+import { Button, ICON_SM, Icon } from "./ui";
 
 /** 外壳只认这几个可执行文件名（src-tauri/src/terminal.rs），下拉里也只列它们 */
 const TERMINAL_EXECUTABLES = new Set(["pwsh.exe", "powershell.exe", "bash.exe", "cmd.exe"]);
@@ -220,9 +220,7 @@ export function TerminalPane({
           }}
         >
           {shell?.name ?? "Shell"}
-          <span className="sp-term-caret" aria-hidden="true">
-            ▾
-          </span>
+          <Icon name="down_small" size={ICON_SM} className="sp-term-caret" />
         </Dropdown>
       </header>
       {(status.kind === "exited" || status.kind === "error") && (

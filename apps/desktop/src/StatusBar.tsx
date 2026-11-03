@@ -23,6 +23,7 @@ import {
   type StepSpeed,
 } from "./speed";
 import "./status-bar.css";
+import { ICON_SM, Icon } from "./ui";
 
 export type StatusPanel = "context";
 
@@ -485,7 +486,7 @@ export function StatusBar({
               )}
             </b>
             <button type="button" aria-label="关闭面板" onClick={closePanel}>
-              ×
+              <Icon name="close" size={ICON_SM} />
             </button>
           </div>
           {loading && context === null && (

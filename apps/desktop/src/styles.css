@@ -214,8 +214,6 @@ button {
   padding: 7px 10px;
 }
 .snav .nav .item svg {
-  width: 15px;
-  height: 15px;
   color: var(--a-muted);
   flex: none;
 }
@@ -445,11 +443,11 @@ button {
 }
 
 .glyph {
-  width: 16px;
-  text-align: center;
   color: var(--a-muted);
-  font-size: var(--fs-2);
   flex: none;
+}
+.nav .item.on .glyph {
+  color: var(--a-accent);
 }
 
 .grp {
@@ -481,17 +479,12 @@ button {
   cursor: pointer;
 }
 .gh .fold {
-  width: 15px;
-  height: 15px;
   color: var(--a-muted);
   flex: none;
 }
 .fold-arrow {
   display: inline-block;
   flex: none;
-  font-size: var(--fs-1);
-  width: 1em;
-  line-height: var(--lh-tight);
   transform: rotate(0deg);
   transition: transform 0.15s;
 }
@@ -507,21 +500,17 @@ details > summary {
 details > summary::-webkit-details-marker {
   display: none;
 }
-details > summary:not(.tool-line)::before {
-  content: "▶";
-  display: inline-block;
-  font-size: var(--fs-1);
-  margin-right: 6px;
-  transition: transform 0.15s;
+details > summary:not(.tool-line) > .fold-arrow {
+  vertical-align: -2px;
 }
-details[open] > summary:not(.tool-line)::before {
+details:not(.ro-user) > summary:not(.tool-line) > .fold-arrow {
+  margin-right: var(--space-1);
+}
+details[open] > summary:not(.tool-line) > .fold-arrow {
   transform: rotate(90deg);
 }
 .gh .tw {
-  width: 12px;
   color: var(--a-faint);
-  font-size: var(--fs-1);
-  text-align: center;
 }
 .gh .gname {
   min-width: 0;
@@ -625,6 +614,8 @@ details[open] > summary:not(.tool-line)::before {
   white-space: nowrap;
 }
 .crumb span {
+  display: inline-flex;
+  align-self: center;
   color: var(--a-faint);
   font-weight: var(--fw-regular);
   margin: 0 6px;

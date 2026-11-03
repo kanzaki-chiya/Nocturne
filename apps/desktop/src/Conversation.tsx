@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { marked, type Token, type Tokens } from "marked";
-import { Badge, Button, Checkbox, IconButton } from "./ui";
+import { Badge, Button, Checkbox, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
@@ -283,13 +283,14 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     <>
       <button
         type="button"
-        className="u-act"
-        aria-label={label}
+        className="u-act u-act-icon"
+        aria-label={copied ? "已复制" : label}
+        title={copied ? "已复制" : label}
         onClick={() => {
           void copy(text);
         }}
       >
-        {copied ? "已复制" : "复制"}
+        <Icon name={copied ? "check" : "copy_2"} size={ICON_SM} />
       </button>
       {error !== undefined && (
         <span className="conversation-error" role="alert">
@@ -776,31 +777,18 @@ function CodeRef({ text }: { text: string }) {
   );
 }
 
-/** 文件引用前的类型图标：文件 / 目录（描边，随文字色） */
+/** 文件引用前的类型图标：文件 / 目录 */
 function FileGlyph({ directory }: { directory: boolean }) {
-  return (
-    <svg className="file-ref-glyph" viewBox="0 0 16 16" aria-hidden="true">
-      {directory ? (
-        <path d="M1.5 4.5v8a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6.5a1 1 0 0 0-1-1H8L6.5 3.5h-4a1 1 0 0 0-1 1Z" />
-      ) : (
-        <path d="M4 1.5h5l3.5 3.5v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11.5a1 1 0 0 1 1-1ZM9 1.5V5h3.5" />
-      )}
-    </svg>
-  );
+  return <Icon name={directory ? "folder" : "file"} size={ICON_SM} className="file-ref-glyph" />;
 }
 
 /** 文件引用菜单的通用图标（不用编辑器商标） */
 function MenuGlyph({ kind }: { kind: "folder" | "editor" | "copy" }) {
   return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2">
-      {kind === "folder" && (
-        <path d="M1.5 4.5v8a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6.5a1 1 0 0 0-1-1H8L6.5 3.5h-4a1 1 0 0 0-1 1Z" />
-      )}
-      {kind === "editor" && <path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5M9 3l-2 10" />}
-      {kind === "copy" && (
-        <path d="M5.5 5.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM2.5 10.5v-7a1 1 0 0 1 1-1h7" />
-      )}
-    </svg>
+    <Icon
+      name={kind === "folder" ? "folder" : kind === "editor" ? "code" : "copy_2"}
+      size={ICON_SM}
+    />
   );
 }
 
@@ -902,7 +890,7 @@ function Think({
       >
         <span className="think-label">{open ? openLabel : label}</span>
         <span className="think-tw" aria-hidden="true">
-          <span className={`fold-arrow${open ? " up" : ""}`}>▶</span>
+          <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " up" : ""}`} />
         </span>
       </button>
       {open && (
@@ -911,10 +899,7 @@ function Think({
           {tall && (
             <div className="think-end">
               <button type="button" onClick={collapse}>
-                <span className="fold-arrow up" aria-hidden="true">
-                  ▶
-                </span>{" "}
-                收起思考
+                <Icon name="right_small" size={ICON_SM} className="fold-arrow up" /> 收起思考
               </button>
             </div>
           )}
@@ -925,28 +910,7 @@ function Think({
 }
 
 function ImageIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <rect
-        x="1.8"
-        y="2.8"
-        width="12.4"
-        height="10.4"
-        rx="1.8"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.3}
-      />
-      <circle cx="5.6" cy="6.3" r="1.2" fill="currentColor" stroke="none" />
-      <path
-        d="m2.5 12 3.8-3.6 2.6 2.2 2-1.7 2.8 2.6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.3}
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <Icon name="pic" size={ICON_SM} />;
 }
 
 /**
@@ -1442,6 +1406,7 @@ function UserMessage({
               {entry.skill && (
                 <details className="skill-message">
                   <summary>
+                    <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
                     技能 <b>{entry.skill.name}</b>（已附加正文{" "}
                     {entry.skill.body.length.toLocaleString()} 字）
                   </summary>
@@ -1546,6 +1511,7 @@ function UserMessage({
         description.text ? (
           <details key={index}>
             <summary>
+              <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
               图片说明<span className="muted-value">{description.model}</span>
             </summary>
             <pre>{description.text}</pre>
@@ -2011,9 +1977,7 @@ export function ToolLine({
         if (!disabled) onToggle();
       }}
     >
-      <span className={`fold-arrow${open ? " down" : ""}`} aria-hidden="true">
-        ▶
-      </span>
+      <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " down" : ""}`} />
       <span className="tool-name">{label}</span>
       {profile !== undefined && <span className="subagent-badge">{profile}</span>}
       <span
@@ -2230,9 +2194,11 @@ function ToolDetails({
               setDetailsOpen((current) => !current);
             }}
           >
-            <span className={`fold-arrow${detailsOpen ? " down" : ""}`} aria-hidden="true">
-              ▶
-            </span>{" "}
+            <Icon
+              name="right_small"
+              size={ICON_SM}
+              className={`fold-arrow${detailsOpen ? " down" : ""}`}
+            />{" "}
             详情
           </button>
         )}
@@ -2687,6 +2653,7 @@ function EntryView({
         return (
           <details className="ro-user subagent-result" aria-label="子代理结果">
             <summary>
+              <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
               <span className="ro-user-tag">子代理结果</span>
               <span className="ro-user-preview">
                 {subagentResultLine(subagent)}
@@ -2752,6 +2719,7 @@ function EntryView({
         return (
           <details className="ro-user">
             <summary>
+              <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
               <span className="ro-user-tag">{userRole === "task" ? "任务" : "催促"}</span>
               <span className="ro-user-preview">
                 {Array.from(userText(entry).replace(/\s+/g, " ").trim()).slice(0, 120).join("")}
@@ -3428,7 +3396,7 @@ export function QuestionCard({
                 );
               }}
             >
-              ✕
+              <Icon name="close" size={ICON_SM} />
             </button>
           </span>
         ))}
@@ -3655,19 +3623,7 @@ export function QuestionCard({
               disabled={busy}
               onClick={() => attachmentInput.current?.click()}
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5L13 2a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" />
-              </svg>
+              <Icon name="attachment" size={ICON_MD} />
             </IconButton>
           </>
         )}

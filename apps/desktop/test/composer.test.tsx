@@ -711,7 +711,7 @@ describe("Composer 控件与附件", () => {
       send,
     ]);
     expect(stop.className).toBe("send stop");
-    expect(stop.textContent).toBe("■");
+    expect(stop.querySelector("svg")).not.toBeNull();
     expect(send.disabled).toBe(false);
     expect(container.querySelector(".tray")).toBeNull();
     fireEvent.click(stop);

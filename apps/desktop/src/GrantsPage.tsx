@@ -8,6 +8,8 @@ import {
   DataTable,
   DetailHeader,
   EmptyState,
+  ICON_SM,
+  Icon,
   ListGroup,
   ListItem,
   MasterDetail,
@@ -35,7 +37,10 @@ const samePath = (a: string, b: string | undefined) =>
 export function GrantTarget({ target }: { target: string }) {
   return target.length > 100 ? (
     <details className="grant-target">
-      <summary>{target.slice(0, 96)}…</summary>
+      <summary>
+        <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+        {target.slice(0, 96)}…
+      </summary>
       <code>{target}</code>
     </details>
   ) : (

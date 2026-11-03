@@ -39,6 +39,7 @@ import {
   IconPlus,
   IconSettings,
   IconTerminal,
+  IconTime,
 } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
 import { DraftComposer, SessionScreen } from "./SessionScreen";
@@ -642,7 +643,7 @@ export function PhoneApp({
           }}
         >
           <span className="phone-row-icon">
-            <IconHome />
+            <IconTime />
           </span>
           <span className="phone-row-main">
             <b>定时任务</b>

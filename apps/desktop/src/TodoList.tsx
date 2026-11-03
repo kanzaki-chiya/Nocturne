@@ -3,6 +3,7 @@ import type { TodoItem } from "@nocturne/core/protocol";
 import { visibleGoal, type GoalState } from "@nocturne/core/protocol";
 import { GoalDetail, GoalRow, useGoalExpansion, type GoalActions } from "./GoalRow";
 import type { PrefsStore } from "./prefs";
+import { ICON_SM, Icon } from "./ui";
 import "./todos.css";
 
 /** count 是「N/M」，note 是弱化的附注（全部完成 / 正在：…，R4 不写中点）；text 供悬停提示 */
@@ -114,9 +115,11 @@ export function TodoPanel({
             prefs?.update({ todosCollapsed: !collapsed ? true : undefined });
           }}
         >
-          <span className={`fold-arrow${collapsed ? "" : " up"}`} aria-hidden="true">
-            ▶
-          </span>
+          <Icon
+            name="right_small"
+            size={ICON_SM}
+            className={`fold-arrow${collapsed ? "" : " up"}`}
+          />
           <span aria-hidden="true">✓</span>
           <span>
             {done}/{items.length}

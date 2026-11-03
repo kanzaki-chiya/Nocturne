@@ -3,10 +3,10 @@
  * 占位区上，这里只画工具栏（徽标、活动状态、接管/交回、关闭）、网页脚本对话框的横幅和
  * 占位区，并把占位区的位置报给外壳。agent 的截图走工具结果附件，不在这里显示。
  */
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import type { AgentTabInfo, BrowserBounds } from "./host";
-import { Badge, Button, IconButton } from "./ui";
+import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 
 const STATE_TEXT: Record<AgentTabInfo["state"], string> = {
   agent: "agent 控制中",
@@ -14,27 +14,6 @@ const STATE_TEXT: Record<AgentTabInfo["state"], string> = {
   taken_over: "已被你接管",
   ended: "已关闭",
 };
-
-function AgentGlyph({ kind }: { kind: "agent" | "hand" | "back" | "close" }): ReactNode {
-  const paths: Record<typeof kind, ReactNode> = {
-    agent: (
-      <>
-        <rect x="3" y="5" width="10" height="7.5" rx="2" />
-        <path d="M8 5V2.5M5.5 8h.01M10.5 8h.01M5.5 11h5" />
-      </>
-    ),
-    hand: (
-      <path d="M5 8.5V5a1 1 0 0 1 2 0v3-4a1 1 0 0 1 2 0v4-3a1 1 0 0 1 2 0v5.5l-1.5 3h-4L3.5 9.5a1 1 0 0 1 1.5-1Z" />
-    ),
-    back: <path d="M10 3 5 8l5 5M5 8h6" />,
-    close: <path d="m4 4 8 8m0-8-8 8" />,
-  };
-  return (
-    <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-      {paths[kind]}
-    </svg>
-  );
-}
 
 const DIALOG_KIND: Record<string, string> = {
   alert: "提示框",
@@ -161,7 +140,7 @@ export function AgentBrowserPane({
           variant={info.child ? "neutral" : "accent"}
           className={`sp-agent-badge${info.child ? " child" : ""}`}
         >
-          <AgentGlyph kind="agent" />
+          <Icon name="robot" size={ICON_SM} className="sp-glyph" />
           {info.child ? "子代理" : "agent"}
         </Badge>
         <span className={`sp-agent-state${info.state === "busy" ? " busy" : ""}`} role="status">
@@ -191,7 +170,7 @@ export function AgentBrowserPane({
             onClose(info.tabId);
           }}
         >
-          <AgentGlyph kind="close" />
+          <Icon name="close" size={ICON_MD} className="sp-glyph" />
         </IconButton>
       </header>
       {info.dialog !== undefined && !ended && (
@@ -219,7 +198,7 @@ export function AgentBrowserPane({
                   onClose(info.tabId);
                 }}
               >
-                <AgentGlyph kind="back" />
+                <Icon name="arrow_left" size={ICON_MD} className="sp-glyph" />
               </Button>
             </div>
           </div>

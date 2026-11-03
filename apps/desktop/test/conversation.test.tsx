@@ -598,7 +598,7 @@ describe("回复与代码复制", () => {
     expect(screen.getAllByRole("group", { name: "回复操作" })).toHaveLength(1);
     const copy = screen.getByRole("button", { name: "复制回复" });
     fireEvent.click(copy);
-    await waitFor(() => expect(copy.textContent).toBe("已复制"));
+    await waitFor(() => expect(copy.getAttribute("aria-label")).toBe("已复制"));
     expect(writeText).toHaveBeenCalledWith("第二段 `原文`");
     expect(copy.closest("article")?.textContent).toContain("第二段");
   });
@@ -2035,7 +2035,10 @@ describe("Markdown 换行", () => {
 describe("Conversation 工具行三个阶段同一结构", () => {
   const HEAD = ["fold-arrow", "tool-name", "tool-arg"];
   const headClasses = (line: Element | null) =>
-    Array.from(line?.children ?? [], (node) => node.className.split(" ")[0]).slice(0, 3);
+    Array.from(
+      line?.children ?? [],
+      (node) => (node.getAttribute("class") ?? "").split(" ")[0],
+    ).slice(0, 3);
   const editPath = "Z:/project/apps/desktop/src/Conversation.tsx";
   const editInput = { path: editPath, old_string: "old", new_string: "new" };
 
@@ -2969,7 +2972,7 @@ describe("长思考收起", () => {
       });
       const header = screen.getByRole("button", { name: "思考了 72s" });
       fireEvent.click(header);
-      expect(header.textContent).toBe("思考1 分 12 秒▶");
+      expect(header.textContent).toBe("思考1 分 12 秒");
       expect(header.querySelector(".muted-value")?.textContent).toBe("1 分 12 秒");
       expect(header.querySelector(".fold-arrow.up")).not.toBeNull();
       expect(header.getAttribute("title")).toBe("收起思考");

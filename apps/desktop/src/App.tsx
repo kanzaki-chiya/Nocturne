@@ -66,7 +66,7 @@ import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
 import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
 import { catchupPreface } from "./schedule-format";
-import { Button } from "./ui";
+import { Button, ICON_SM, Icon } from "./ui";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -2198,7 +2198,9 @@ function SessionPane({
       <div className="head">
         <div className="crumb">
           {isPlain ? "对话" : projectName(workspace)}
-          <span>›</span>
+          <span>
+            <Icon name="right_small" size={ICON_SM} />
+          </span>
           <em title={view.title ?? selected?.firstText ?? "新会话"}>
             {view.title ?? selected?.firstText ?? "新会话"}
           </em>

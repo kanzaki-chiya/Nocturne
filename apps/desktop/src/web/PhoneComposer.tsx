@@ -32,6 +32,7 @@ import {
   type PhoneImage,
 } from "./phone-images";
 import { Popover, PopoverOption } from "./Popover";
+import { Icon } from "../ui";
 
 /** 桌面提示里指向左栏、设置页的命令，在手机上换成手机的去处 */
 const PHONE_HINTS: Record<string, string> = {
@@ -569,7 +570,7 @@ export function PhoneComposer({
                     removeAttachment(at);
                   }}
                 >
-                  ×
+                  <Icon name="close" size={14} />
                 </button>
                 <small>{formatBytes(attachment.data.length)}</small>
               </span>

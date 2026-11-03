@@ -5,7 +5,7 @@ import {
   goalReasonText,
   type GoalState,
 } from "@nocturne/core/protocol";
-import { IconButton } from "./ui";
+import { ICON_MD, Icon, IconButton, type IconName } from "./ui";
 import "./goal-row.css";
 
 export interface GoalActions {
@@ -40,25 +40,14 @@ function GoalClock({ goal }: { goal: GoalState }) {
 }
 
 function GoalIcon({ kind }: { kind: "expand" | "collapse" | "pause" | "resume" | "cancel" }) {
-  const paths = {
-    expand: "M8.5 2.5h3v3M11.5 2.5L8 6M5.5 11.5h-3v-3M2.5 11.5L6 8",
-    collapse: "M8 3v3h3M8 6l3.5-3.5M6 11V8H3M6 8l-3.5 3.5",
-    pause: "M5 3v8M9 3v8",
-    resume: "M4 2.5v9l7-4.5z",
-    cancel: "M3.5 3.5l7 7M10.5 3.5l-7 7",
+  const names: Record<typeof kind, IconName> = {
+    expand: "fullscreen",
+    collapse: "fullscreen_exit",
+    pause: "pause",
+    resume: "play",
+    cancel: "close",
   };
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      <path
-        d={paths[kind]}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <Icon name={names[kind]} size={ICON_MD} />;
 }
 
 /** 桌面和手机共用的目标行；展开状态由容器持有，以便清单开关也能收起目标。 */

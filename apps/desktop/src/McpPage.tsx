@@ -18,6 +18,8 @@ import {
   Field,
   Form,
   FormFooter,
+  ICON_SM,
+  Icon,
   ListGroup,
   ListItem,
   MasterDetail,
@@ -221,7 +223,8 @@ export function McpPage({
               从 JSON 导入
             </Button>
             <Button variant="primary" size="sm" onClick={add} disabled={!client}>
-              ＋ 添加服务器
+              <Icon name="add" size={ICON_SM} />
+              添加服务器
             </Button>
           </>
         }
@@ -383,7 +386,8 @@ export function McpPage({
             action={
               <>
                 <Button variant="primary" onClick={add}>
-                  ＋ 添加服务器
+                  <Icon name="add" size={ICON_SM} />
+                  添加服务器
                 </Button>
                 <Button
                   onClick={() => {
@@ -479,7 +483,10 @@ function ProbeResult({ result }: { result: McpProbeResult }) {
       </span>
       {result.stderrTail?.length ? (
         <details>
-          <summary>诊断信息</summary>
+          <summary>
+            <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+            诊断信息
+          </summary>
           <pre>{result.stderrTail.join("\n")}</pre>
         </details>
       ) : null}
@@ -781,7 +788,7 @@ function McpForm({
                   setRows((old) => old.filter((_, i) => i !== index));
                 }}
               >
-                ✕
+                <Icon name="close" size={ICON_SM} />
               </Button>
             </div>
           ))}
@@ -791,12 +798,16 @@ function McpForm({
               setRows((old) => [...old, { name: "", kind: "literal", value: "", saved: false }]);
             }}
           >
-            ＋ 添加{type === "http" ? "请求头" : "变量"}
+            <Icon name="add" size={ICON_SM} />
+            添加{type === "http" ? "请求头" : "变量"}
           </Button>
           {!backend && <small>系统凭据后端不可用，保存到凭据库不可选；请引用环境变量。</small>}
         </Field>
         <details>
-          <summary>高级</summary>
+          <summary>
+            <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+            高级
+          </summary>
           {type === "stdio" && (
             <Field label="工作目录">
               <input

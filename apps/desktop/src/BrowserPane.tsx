@@ -22,7 +22,7 @@ import {
 } from "./browser-occlusion";
 import { NOTICE_HIDE_MS, type BrowserPool, type BrowserStatus } from "./browser-pool";
 import { parseAddress, type BrowserTab } from "./side-panel";
-import { Button, IconButton } from "./ui";
+import { Button, ICON_MD, Icon, IconButton, type IconName } from "./ui";
 
 const FALLBACK: BrowserStatus = {
   url: "",
@@ -66,21 +66,15 @@ function ToolGlyph({
 }: {
   kind: "back" | "forward" | "reload" | "stop" | "external" | "dev";
 }) {
-  const paths: Record<typeof kind, ReactNode> = {
-    back: <path d="M10 3.5 5.5 8l4.5 4.5" />,
-    forward: <path d="m6 3.5 4.5 4.5L6 12.5" />,
-    reload: <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" />,
-    stop: <path d="m4.5 4.5 7 7m0-7-7 7" />,
-    external: (
-      <path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" />
-    ),
-    dev: <path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5M9 3 7 13" />,
+  const names: Record<typeof kind, IconName> = {
+    back: "left",
+    forward: "right",
+    reload: "refresh_2",
+    stop: "close",
+    external: "external_link",
+    dev: "code",
   };
-  return (
-    <svg className="sp-glyph" viewBox="0 0 16 16" aria-hidden="true">
-      {paths[kind]}
-    </svg>
-  );
+  return <Icon name={names[kind]} size={ICON_MD} className="sp-glyph" />;
 }
 
 export interface BrowserPaneProps {

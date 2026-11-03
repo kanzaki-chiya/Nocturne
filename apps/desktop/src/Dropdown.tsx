@@ -17,6 +17,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { ICON_SM, Icon } from "./ui";
 import "./dropdown.css";
 
 export interface DropdownOption {
@@ -311,16 +312,7 @@ export function Dropdown({
             <span className={`dd-label${mono ? " mono" : ""}`} style={labelStyle}>
               {current?.label ?? placeholder}
             </span>
-            <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M4 6l4 4 4-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <Icon name="down_small" size={ICON_SM} className="ic" />
           </>
         )}
       </button>

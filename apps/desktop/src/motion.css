@@ -1,5 +1,4 @@
-.conversation .fold-arrow,
-.conversation summary::before {
+.conversation .fold-arrow {
   transition: none;
 }
 
@@ -26,8 +25,7 @@
   [data-nct-cover-hold] * {
     animation-play-state: paused !important;
   }
-  .conversation details[data-motion-fold] > summary .fold-arrow,
-  .conversation details[data-motion-fold] > summary::before {
+  .conversation details[data-motion-fold] > summary .fold-arrow {
     transition: transform var(--dur-fold) var(--ease-both);
   }
   @supports (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {

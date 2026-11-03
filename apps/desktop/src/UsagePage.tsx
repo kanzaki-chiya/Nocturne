@@ -19,7 +19,16 @@ import {
   modelPalette,
   usageModelKey,
 } from "./UsageCharts";
-import { Button, SegmentedControl, DataTable, EmptyState, PageHeader, SettingsGroup } from "./ui";
+import {
+  Button,
+  SegmentedControl,
+  DataTable,
+  EmptyState,
+  ICON_SM,
+  Icon,
+  PageHeader,
+  SettingsGroup,
+} from "./ui";
 import "./usage.css";
 
 type Range = "7" | "30" | "all";
@@ -513,15 +522,7 @@ export function UsageView({
                         const key = usageModelKey(m.model);
                         return (
                           <div className="usage-row-name">
-                            <svg
-                              className="usage-chev"
-                              width="8"
-                              height="10"
-                              viewBox="0 0 8 10"
-                              aria-hidden="true"
-                            >
-                              <path d="M1.5 1 L6 5 L1.5 9" />
-                            </svg>
+                            <Icon name="right_small" size={ICON_SM} className="usage-chev" />
                             <i
                               className="usage-swatch"
                               data-color={palette.get(key) ?? OTHER_COLOR}
