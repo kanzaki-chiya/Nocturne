@@ -2,6 +2,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { DiffBody } from "../src/Conversation";
 import { highlightCode } from "../src/code-highlight-client";
+import { visibleLineWindow } from "../src/code-lines";
 import * as parseModule from "../src/code-parse";
 
 afterEach(() => {
@@ -57,4 +58,13 @@ it("着色保持原文字与行号前缀，取消后的响应不能修改 DOM", 
   other.abort();
   await Promise.resolve();
   expect(root.textContent).toBe("42|const n = 1;");
+});
+
+it("可视行范围按实际行位置计算，不受折行和行高影响", () => {
+  // 前 100 行每行折成 5 个视觉行（90px），之后每行 18px
+  const top = (line: number) => (line <= 100 ? line * 90 : 9000 + (line - 100) * 18);
+  expect(visibleLineWindow(1000, top, 9000, 9280, 2)).toEqual({ start: 97, end: 118 });
+  expect(visibleLineWindow(1000, top, 0, 280, 2)).toEqual({ start: 0, end: 6 });
+  expect(visibleLineWindow(1000, top, 99999, 100279, 2).end).toBe(1000);
+  expect(visibleLineWindow(0, top, 0, 280)).toEqual({ start: 0, end: 0 });
 });

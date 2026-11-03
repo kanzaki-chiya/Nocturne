@@ -1,4 +1,4 @@
-import type { CodeRequest } from "./code-lines";
+import { visibleLineWindow, type CodeRequest } from "./code-lines";
 
 interface CustomHighlight {
   add: (range: AbstractRange) => void;
@@ -34,6 +34,24 @@ function clearElementHighlights(root: HTMLElement): void {
   activeRanges.delete(root);
 }
 
+/** 这一行首字符的屏幕位置；空行没有可量的字形，取后面最近的非空行。 */
+function lineTop(
+  textNode: Text,
+  lines: { text: string }[],
+  lineOffsets: number[],
+  index: number,
+): number {
+  const range = document.createRange();
+  for (let i = index; i < lines.length; i++) {
+    const start = lineOffsets[i];
+    if (start === undefined || lines[i]?.text === "") continue;
+    range.setStart(textNode, start);
+    range.setEnd(textNode, start + 1);
+    return range.getBoundingClientRect().top;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
 function paintWithCustomHighlights(
   root: HTMLElement,
   lines: { text: string; spans: { from: number; to: number; classes: string }[] }[],
@@ -64,8 +82,13 @@ function paintWithCustomHighlights(
     clearElementHighlights(root);
     const owned = new Map<string, AbstractRange[]>();
     activeRanges.set(root, owned);
-    const start = Math.max(0, Math.floor(root.scrollTop / 18) - 40);
-    const end = Math.min(lines.length, start + Math.ceil((root.clientHeight || 280) / 18) + 120);
+    const view = root.getBoundingClientRect();
+    const { start, end } = visibleLineWindow(
+      lines.length,
+      (index) => lineTop(textNode, lines, lineOffsets, index),
+      view.top,
+      view.bottom,
+    );
     for (let i = start; i < end; i++) {
       const line = lines[i];
       const base = lineOffsets[i];

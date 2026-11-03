@@ -56,3 +56,31 @@ export interface CodeRequest {
   text: string;
   kind: "text" | "numbered" | "diff";
 }
+
+/**
+ * 可视区对应的行范围（前后各多留 margin 行）。行高不固定：长行会折行，字号也能调，
+ * 所以按每行的实际位置二分，不能用滚动距离除以行高。
+ */
+export function visibleLineWindow(
+  count: number,
+  topOf: (line: number) => number,
+  viewTop: number,
+  viewBottom: number,
+  margin = 40,
+): { start: number; end: number } {
+  /** 第一个顶边到达 y 的行 */
+  const firstAtOrBelow = (y: number): number => {
+    let low = 0;
+    let high = count;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (topOf(middle) < y) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  return {
+    start: Math.max(0, firstAtOrBelow(viewTop) - 1 - margin),
+    end: Math.min(count, firstAtOrBelow(viewBottom) + margin),
+  };
+}
