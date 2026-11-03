@@ -771,7 +771,7 @@
   color: var(--a-secondary);
 }
 
-/* ── 面板浏览器 · 桌面内置（第 5 轮） ── */
+/* ── Agent 浏览器（desktop-browser.md） ── */
 .agent-browser-card {
   /* 与页头的左右内边距对齐，不贴着导航分隔线和窗口右缘 */
   margin: 14px 28px;

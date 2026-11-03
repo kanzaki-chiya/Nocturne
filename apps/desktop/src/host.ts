@@ -161,7 +161,7 @@ export interface AgentUiState {
 }
 
 /**
- * 面板浏览器 · 桌面内置（desktop-browser.md）：功能默认关闭；启用后 agent 经回环 MCP
+ * Agent 浏览器（desktop-browser.md，开关是「设置 › 浏览器 › 模型操作网页」）：默认关闭；启用后 agent 经回环 MCP
  * 操作自己的标签。前端只做展示、接管/交回与布局，不接触 bearer 或网页正文。
  */
 export interface AgentBrowserHost {
@@ -263,6 +263,6 @@ export interface DesktopHost {
   terminals?: TerminalHost;
   /** 面板内置浏览器；没有时网址与 HTML 交给系统浏览器 */
   browsers?: BrowserHost;
-  /** 面板浏览器 · 桌面内置（agent）；没有时设置里不显示这一项 */
+  /** Agent 浏览器；没有时「设置 › 浏览器」不显示「Agent 浏览器」一组 */
   agentBrowser?: AgentBrowserHost;
 }

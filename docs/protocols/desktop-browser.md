@@ -22,9 +22,9 @@ Core 的 McpConnector 注入点 → 原执行管线、权限层、结果附件
 - 后台的运行时服务器来源在 `McpConnector.open(scope)` 用 **scope.sessionId** 向 `POST /bindings` 申请绑定（bootstrap 鉴权）；返回 `{ bindingId, bearer }`。外壳为该根会话分配独立、随机 256 bit bearer，MCP URL 为 `http://127.0.0.1:<port>/mcp/<bindingId>`；bearer 只进请求头，不进 URL。绑定与后台代际关联；不能用模型参数申请绑定。
 - 运行时来源是 `packages/mcp` 的通用注入能力，建议 `createMcpConnector({ runtimeServers })`：provider 的 `open(scope)` 返回内存服务器配置与 `close()`；`reconcile(userServers)` 保留运行时来源，`close()` 同时释放来源。不是把临时服务器塞进 `ResolvedConfig` 再让重载删掉。Core 仍只见既有 `McpConnector/McpSession`；不 import 桌面或 MCP 实现。
 - 生效的运行时来源保留其 id；同名用户/项目服务器（忽略大小写）报冲突并跳过该配置条目，不能覆盖、继承或替代内置来源。只在此来源存在时保留，不改变 CLI 原有合法配置。工具冲突沿既有显式告警路径。
-- `origin: app` 仅可作为现有内存类型的兼容值，不意味着写入 `mcp.json` 或允许调用配置管理方法编辑它。「设置 › 常规 › 执行」单独显示「面板浏览器」开关；普通 MCP 配置表不生成可编辑的虚假配置。CLI/TUI 自行启动的后台无来源。手机发起的 Turn 也可以用这组工具，权限照常处理。
+- `origin: app` 仅可作为现有内存类型的兼容值，不意味着写入 `mcp.json` 或允许调用配置管理方法编辑它。「设置 › 浏览器」单独显示「模型操作网页」开关（[ADR-0078](../decisions/ADR-0078-browser-settings.md)）；普通 MCP 配置表不生成可编辑的虚假配置。CLI/TUI 自行启动的后台无来源。手机发起的 Turn 也可以用这组工具，权限照常处理。
 
-开关存桌面本机 prefs 的 `agentBrowserEnabled`，缺省 false；在「设置 › 常规 › 执行」里主动启用，开启后只对新的后台进程生效（重启应用后新的后台进程才会拿到工具）；它不写进用户的 `mcp.json`。用户首次开启先看到内联风险确认框（「网页内容不可信，可能诱导它操作其他页面。」），确认后由 Rust 在下次 backend_open 装配。停用立即撤销旧来源绑定；重启后台后不再给启动凭证。不是向模型请求启用许可，也不是给工具执行授权，调用仍逐次经过权限层。设置 UI 不持有 bearer。
+开关存桌面本机 prefs 的 `agentBrowserEnabled`，缺省 false；在「设置 › 浏览器 › Agent 浏览器」的「模型操作网页」里主动启用，开启后只对新的后台进程生效（重启应用后新的后台进程才会拿到工具）。外壳记下最近一次 spawn 后台时交出去的服务器代（`backend_bootstrap`；每次 `start_server` 生成新端口与凭证，代加一，未启用时交出的是「无」），`restartRequired` = 当前该给的（开着为当前代、关着为无）≠ 交出去的那份：启动时关着、开了再关，不用重启；启动时开着、关了再开，旧后台持有上一代凭证接不上新服务，仍要重启。设置页据此在开关左边显示「重启应用」（`host.relaunch()`）；它不写进用户的 `mcp.json`。用户首次开启先看到内联风险确认框（「网页内容不可信，可能诱导它操作其他页面。」），确认后由 Rust 在下次 backend_open 装配。停用立即撤销旧来源绑定；重启后台后不再给启动凭证。不是向模型请求启用许可，也不是给工具执行授权，调用仍逐次经过权限层。设置 UI 不持有 bearer。
 
 ### 鉴权与生命周期
 
@@ -32,7 +32,7 @@ Core 的 McpConnector 注入点 → 原执行管线、权限层、结果附件
 
 别的本机进程能连接 TCP，但没有 token 一律 403；网页还会被 Origin/Host 拒绝。**不承诺抵御同用户恶意进程、调试器或管理员**：它们可能读取启动环境/内存，或直接控制浏览器；不是 OS 沙箱。专用环境字段必须在启动早期移除，不能靠 MCP 环境白名单替代这一点。
 
-根会话 close、设置停用、前端整页重载、后台退出/重启和外壳退出均撤销绑定、取消队列、失效 refs；bearer 不落盘、不跨代复用。普通传输重连可在同一存活绑定内重新 initialize；旧代/已撤销凭证不允许惰性复活。MCP `DELETE` 只结束协议连接，根绑定由来源 `close()` 或上述生命周期单独撤销；意外断线不把重连误认为新会话。禁用立即阻止调用，界面提示重启后台移除工具；重新启用同样需重启后台取得新启动凭证，重启由用户明确操作，不暗中中断 Turn。
+根会话 close、设置停用、前端整页重载、后台退出/重启和外壳退出均撤销绑定、取消队列、失效 refs；bearer 不落盘、不跨代复用。普通传输重连可在同一存活绑定内重新 initialize；旧代/已撤销凭证不允许惰性复活。MCP `DELETE` 只结束协议连接，根绑定由来源 `close()` 或上述生命周期单独撤销；意外断线不把重连误认为新会话。禁用立即阻止调用，设置页在开关左边显示「重启应用」，重启后移除工具；重新启用同样需重启取得新启动凭证，重启由用户点「重启应用」明确操作，不暗中中断 Turn。
 
 本机直连必须使用不走系统/环境代理的专属 fetch dispatcher；不能为了它修改全局代理或 `NO_PROXY`。bootstrap 和 MCP 请求均不允许重定向。HTTP 超时/reset/5xx 后不重发可能已执行的动作，遵循 [mcp.md](../architecture/mcp.md) 的副作用重试边界。
 
@@ -73,7 +73,8 @@ HTTP bootstrap 控制协议（不是通用 RPC，不对前端开放）：
 | `agent_browser_presented` | `{ shellGeneration, operationId, tabId, layoutVersion }` → null；仅响应外壳在本代pending的展示请求，不能借它为任意标签授权 |
 | `agent_browser_control` | `{ tabId, action: "takeover" \| "return" \| "close" }` → `{ revision, state }`；用户主动控制；return只对同代保留的agent标签有效，失效refs后允许原owner actor继续 |
 | `agent_browser_dialog` | `{ tabId, accept: boolean, text?: string }` → null；用户在横幅里答复该标签挂起的脚本对话框（第 5 节）；`text` 只对 prompt 的确定生效；没有挂起的对话框报 `no_dialog` |
-| `agent_browser_set_enabled` | `{ enabled: boolean }` → `{ enabled, restartRequired: boolean }`；停用立即撤销，启用不在现有后台伪造凭证；prefs落盘由主界面现有偏好路径维护，Rust内存开关缺省false |
+| `agent_browser_set_enabled` | `{ enabled: boolean }` → `{ enabled, restartRequired: boolean }`；停用立即撤销，启用不在现有后台伪造凭证；`restartRequired` 按第 1 节与正在运行的后台比较；prefs落盘由主界面现有偏好路径维护，Rust内存开关缺省false |
+| `agent_browser_status` | `{}` → `{ enabled, restartRequired }`；设置页进入时还原「重启应用」 |
 
 `AgentBrowserTab = { tabId, rootSessionId, actorSessionId, title, url, live, pinned, state: "agent" | "busy" | "taken_over" | "ended", operation?: string }`，不含bearer、截图、网页内容或type文本。Channel消息为 `{ shellGeneration, revision, kind: "tabs", tabs }`（完整有界快照）、`{ ..., kind: "present", operationId, tabId }`、`{ ..., kind: "operation", tabId, operationId, state: "started" | "completed" | "cancelled", operation, errorCode? }`。revision严格递增；主界面发现缺口/重连重新watch，不解析进度文字找id。
 
@@ -170,13 +171,15 @@ schema 均 `additionalProperties: false`。所有网页工具显式 tabId；动�
 
 - 代码实际名为 `browser_policy::allow_navigation` / `check_target` / `parse_user_url`，并没有 `check_navigation`。agent 的打开/导航、新窗口、页面重定向与历史跳转须复用同一核心检查，并额外拒绝 **所有 file:**；不能把 agent 操作写入现有 `user_target` 来冒充用户主动打开文件。只允许 http/https/about:blank；应用协议/映射主机/devUrl、自定义协议、data/blob/javascript 等外壳打开一律拒绝。document 内网页 JS 链接照修订（四），不是外壳任意 JS 通道。
 - 本机 http 开发服务允许，但应用 devUrl 同源仍拒绝；禁入启动端口的 bootstrap/MCP 路径，Origin/鉴权仍是独立防线。不宣称这是网络沙箱，页面的子资源可连接网络。
-- agent 标签的下载在 Requested 直接取消，返回/提示 `download_blocked`，**不弹另存为、不自动存盘**。已有普通用户标签的下载不改。用户要下载必须先接管，用普通浏览器流程；不因一次 click 的批准隐式取得本机写文件权。
+- agent 标签的下载在 Requested 直接取消，返回/提示 `download_blocked`，**不弹另存为、不自动存盘**，也不读「设置 › 浏览器 › 下载」（那组设置只管用户标签，见 [desktop.md](../apps/desktop.md) 5.10）。用户要下载必须先接管，用普通浏览器流程；不因一次 click 的批准隐式取得本机写文件权。
 - `window.open`/target=_blank 沿现有 Deny 原生弹窗路径：仅在来源调用仍有效、可归属该 actor 时建同根/同 actor 的 agent 标签，校验 URL/容量后纳入列表并报告 opener/newTabId；不切换用户当前标签，不继承为用户标签。about:blank 后脚本写入依赖 opener 的复杂弹窗第一版不支持，说明被拦；拒绝迟到/无法归属的 popup。重定向/历史仍逐次校验。
 - JS alert/confirm/prompt（以及 beforeunload）既不自动接受也不自动取消：agent 标签关闭默认脚本对话框，外壳订阅 ScriptDialogOpening 并取 deferral 挂起它，网页脚本停在对话框上；类型、站点来源、文字（prompt 另带默认值）进 `AgentBrowserTab.dialog`，面板在该标签的工具栏下方显示横幅，「确定」/「取消」（prompt 带输入框）由用户答复，经 `agent_browser_dialog` 完成 deferral。agent 控制和用户接管时一样挂起，接管不会替用户点确定。触发对话框的动作（CDP 要等对话框关掉才回复，外壳看到对话框就不再等）、加载中弹出对话框的 open/navigate，以及挂起期间这个标签的其他网页动作，都返回 `dialog_open`，`structuredContent` 带 `{ tabId, dialog: { kind, message, uri, defaultText? } }`，text 写明类型和文字；`list_tabs` 标出 `dialog`。用户答复后横幅消失，agent 重新 read 后继续；关闭标签先取消挂起的对话框。不能让隐藏网页原生 modal 卡住 UI/HTTP 线程。登录、验证码、权限弹窗同样交人，不自动批准。
 
 ### 数据目录
 
 agent 使用专用的持久目录 `<app-local-data>/agent-browser`，不和用户在面板里浏览时的数据共用；普通用户浏览仍用 `/browser`，主界面仍为默认目录。隔离环境下分别放 `<WEBVIEW2_USER_DATA_FOLDER>/agent-browser`、`/browser`、主目录（正式主界面），启动早期取出并删除环境覆盖，不能让 WebView2 隐式合并。
+
+「设置 › 浏览器 › 浏览数据」可以分别清除这两个目录的浏览数据：外壳以同一数据目录临时建隐藏 webview，调 Profile 的 `ClearBrowsingDataAll`，只作用于这一个 Profile，另一个目录和主界面不受影响；agent 正在操作时也可以清，已打开的 agent 标签不刷新，清除时还在加载的页面响应到达后照常写入（[ADR-0078](../decisions/ADR-0078-browser-settings.md)）。
 
 agent 目录跨会话共用：此浏览器登录的账号可被 agent 操作，不同会话共用登录状态。它只隔离普通用户浏览器，不保证根会话间的账号/服务端状态隔离。需要登录时，用户在 agent 的标签里接管、登录，然后交回；交回控制须显式点击「交给 agent」，强制旧 refs 失效。不能导入/复制普通浏览目录的 cookie、不能自动切换目录。浏览器数据不进 NOCTURNE_HOME 会话日志。
 
