@@ -17,6 +17,9 @@ export interface SettingsRowProps {
   /** 整行变淡（依赖的总开关关闭等），禁用态仍由控件自身表达 */
   dimmed?: boolean | undefined;
   className?: string | undefined;
+  /** 行内确认（标签是确认文字、右侧是按钮）用 alertdialog，并以 ariaLabel 命名 */
+  role?: "group" | "alertdialog" | undefined;
+  ariaLabel?: string | undefined;
   /** 右侧控件 */
   children?: ReactNode;
 }
@@ -32,6 +35,8 @@ export function SettingsRow({
   warning,
   dimmed = false,
   className,
+  role = "group",
+  ariaLabel,
   children,
 }: SettingsRowProps) {
   const classes = [
@@ -45,7 +50,12 @@ export function SettingsRow({
   const show = (node: ReactNode) => node !== undefined && node !== null && node !== false;
   const labelId = useId();
   return (
-    <div className={classes} role="group" aria-labelledby={labelId}>
+    <div
+      className={classes}
+      role={role}
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabel === undefined ? labelId : undefined}
+    >
       <div className="lab">
         <div className="lab-line">
           {labelFor !== undefined ? (

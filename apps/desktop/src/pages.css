@@ -793,24 +793,6 @@
   margin: 0 0 3px;
   font-size: var(--fs-2);
 }
-.agent-browser-risk {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--a-warning);
-  border-radius: var(--radius-2);
-  background: var(--a-warning-bg);
-  color: var(--a-text);
-  font-size: var(--fs-1);
-}
-.agent-browser-risk p {
-  margin: 0 0 var(--space-2);
-}
-.agent-browser-risk-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .page3 .dlg .db {
   gap: var(--space-4);
 }

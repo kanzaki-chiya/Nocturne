@@ -184,30 +184,32 @@ function AgentBrowserRow({
         <Switch aria-label="模型操作网页" checked={enabled} disabled={busy} onChange={onToggle} />
       </SettingsRow>
       {confirming && (
-        <div className="agent-browser-risk" role="alertdialog" aria-label="启用模型操作网页">
-          <p>网页内容不可信，可能诱导它操作其他页面。</p>
-          <div className="agent-browser-risk-actions">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setConfirming(false);
-              }}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              disabled={busy}
-              onClick={() => {
-                prefs.update({ agentBrowserRiskAccepted: true });
-                setConfirming(false);
-                void apply(true);
-              }}
-            >
-              仍然启用
-            </Button>
-          </div>
-        </div>
+        <SettingsRow
+          label="网页内容不可信，可能诱导它操作其他页面。"
+          role="alertdialog"
+          ariaLabel="启用模型操作网页"
+        >
+          <Button
+            size="sm"
+            onClick={() => {
+              setConfirming(false);
+            }}
+          >
+            取消
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={busy}
+            onClick={() => {
+              prefs.update({ agentBrowserRiskAccepted: true });
+              setConfirming(false);
+              void apply(true);
+            }}
+          >
+            仍然启用
+          </Button>
+        </SettingsRow>
       )}
     </>
   );
@@ -386,22 +388,19 @@ function BrowsingDataRows({ host, version }: { host: BrowsingDataHost; version: 
             </Button>
           </SettingsRow>
           {confirming === row.which && (
-            <div className="agent-browser-risk" role="alertdialog" aria-label={row.dialog}>
-              <p>{row.confirm}</p>
-              <div className="agent-browser-risk-actions">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setConfirming(null);
-                  }}
-                >
-                  取消
-                </Button>
-                <Button variant="danger" onClick={() => void clear(row.which)}>
-                  清除
-                </Button>
-              </div>
-            </div>
+            <SettingsRow label={row.confirm} role="alertdialog" ariaLabel={row.dialog}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setConfirming(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button size="sm" variant="danger-solid" onClick={() => void clear(row.which)}>
+                清除
+              </Button>
+            </SettingsRow>
           )}
         </Fragment>
       ))}
