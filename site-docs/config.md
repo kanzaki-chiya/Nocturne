@@ -82,7 +82,7 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 | `permissions.preset` | `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | 默认权限预设（见 [权限模式](permissions.md)） |
 | `permissions.rules` | `PermissionRule[]` | 追加的权限规则（`kind`、`pattern`、`action`） |
 | `permission.reviewer` | `SecurityReviewerConfig` | `smart` 预设使用的安全审查器配置（`off`、`jev` 或 `model`） |
-| `permission.reviewerRules` | `ask`、`allow` | 追加给安全审查器的自然语言「额外交人」与「额外放行」规则 |
+| `permission.reviewerRules` | `ask`、`allow` | 追加给安全审查器的自然语言「需要确认」与「自动放行」规则 |
 | `compaction.threshold` | `"90%"`、`"200k"` 或正整数 | 自动压缩摘要阈值，默认 `"90%"` |
 | `compaction.pruneLimit` | `number` | 预防性修剪绝对上限，默认 `200000`（设 `0` 关闭绝对上限） |
 | `shell` | `auto`、`pwsh`、`powershell`、`bash`、`cmd`、`sh` | `shell` 工具使用的命令行解释器 |

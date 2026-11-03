@@ -13,11 +13,6 @@
   grid-template-columns: repeat(auto-fit, minmax(var(--w-field-md), 1fr));
   gap: var(--space-4);
 }
-.profile-options {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
 .profile-preview {
   color: var(--a-muted);
   font-size: var(--fs-1);

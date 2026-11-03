@@ -76,9 +76,9 @@ export function reviewerText(reviewer: SecurityReviewerConfig | undefined): stri
 export function reviewerRulesText(rules: ReviewerRulesConfig | undefined): string {
   const parts: string[] = [];
   if (rules?.ask !== undefined && rules.ask.trim() !== "")
-    parts.push(`额外交人 ${rules.ask.length} 字`);
+    parts.push(`需要确认 ${rules.ask.length} 字`);
   if (rules?.allow !== undefined && rules.allow.trim() !== "")
-    parts.push(`额外放行 ${rules.allow.length} 字`);
+    parts.push(`自动放行 ${rules.allow.length} 字`);
   return parts.length === 0 ? "未设置" : parts.join(" · ");
 }
 

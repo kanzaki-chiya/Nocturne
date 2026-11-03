@@ -102,7 +102,6 @@ export function ExternalAgentsPage({
     name: string;
     config: SubagentProfileConfig;
   }>();
-  const [addingProfile, setAddingProfile] = useState(false);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -235,7 +234,9 @@ export function ExternalAgentsPage({
               size="sm"
               disabled={!client || busy}
               onClick={() => {
-                setAddingProfile((old) => !old);
+                setProfileName(undefined);
+                setForm(undefined);
+                setProfileDraft({ name: "", config: { description: "", enabled: true } });
               }}
             >
               添加档位
@@ -257,35 +258,6 @@ export function ExternalAgentsPage({
         listLabel="子代理列表"
         list={
           <>
-            {addingProfile && (
-              <div className="profile-options">
-                {(["空白", "quick", "deep"] as const).map((template) => (
-                  <Button
-                    size="sm"
-                    key={template}
-                    onClick={() => {
-                      setAddingProfile(false);
-                      setProfileName(undefined);
-                      setForm(undefined);
-                      setProfileDraft({
-                        name: template === "空白" ? "" : template,
-                        config: {
-                          description: "",
-                          enabled: true,
-                          ...(template === "quick"
-                            ? { tools: "explore", effort: "low" }
-                            : template === "deep"
-                              ? { tools: "general", effort: "high" }
-                              : {}),
-                        },
-                      });
-                    }}
-                  >
-                    {template}
-                  </Button>
-                ))}
-              </div>
-            )}
             <ListGroup title="内置档位" count={profiles.length + 1}>
               {[
                 {

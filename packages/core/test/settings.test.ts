@@ -632,8 +632,8 @@ describe("ADR-0034 设置层", () => {
     expect(
       merged.describeSettings().find((item) => item.key === "permission.reviewerRules"),
     ).toMatchObject({
-      effective: "额外交人 9 字 · 额外放行 15 字",
-      saved: "额外放行 15 字",
+      effective: "需要确认 9 字 · 自动放行 15 字",
+      saved: "自动放行 15 字",
       reviewerRules: {
         effective: { ask: "任何 ssh 命令", allow: "允许 pnpm install" },
         saved: { allow: "允许 pnpm install" },

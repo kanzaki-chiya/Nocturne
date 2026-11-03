@@ -30,7 +30,7 @@
 
 - 选择「小模型」时，从已配置的模型列表中选一个模型负责审查；
 - 选择「Jev」时，可选择接入点（`opencode-zen`、`typesafe` 或「自定义地址」）、凭据来源（「沿用服务商」、「环境变量」或「单独密钥」）和「置信度阈值」（默认 `0.7`）；
-- 下方的「额外交人」和「额外放行」文本框可补充自定义审查要求（对应的配置字段为 `permission.reviewer` 与 `permission.reviewerRules`）。
+- 下方的「需要确认」和「自动放行」可逐条补充自定义审查规则（对应的配置字段为 `permission.reviewer` 与 `permission.reviewerRules`）。
 
 ## 审批操作
 

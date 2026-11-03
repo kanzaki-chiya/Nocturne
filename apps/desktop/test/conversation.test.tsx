@@ -2981,7 +2981,6 @@ describe("长思考收起", () => {
 
 describe("回答内文件引用（U-09）", () => {
   const hooks = (overrides: Partial<FileLinkHooks> = {}) => ({
-    openerLabel: () => "系统默认程序",
     open: vi.fn(async (_path: string, _line?: number) => undefined),
     outsideOpenable: () => false,
     editors: () => ({ vscode: true, cursor: false }),
@@ -3044,27 +3043,26 @@ describe("回答内文件引用（U-09）", () => {
     });
   });
 
-  it("默认打开方式 = Nocturne 面板：菜单「打开」项说明是面板，不另列重复项", async () => {
+  it("菜单「打开」项不带说明，面板不另列重复项", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "看 `src/a.ts:12`" })];
-    const fileLinks = hooks({ openerLabel: () => "Nocturne 面板" });
+    const fileLinks = hooks();
     mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
     fireEvent.contextMenu(await screen.findByRole("button", { name: "src/a.ts:12" }));
     const menu = await screen.findByRole("menu");
     const items = within(menu).getAllByRole("menuitem");
-    expect(items[0]?.textContent).toContain("Nocturne 面板（第 12 行）");
-    expect(items.filter((item) => item.textContent?.includes("Nocturne 面板"))).toHaveLength(1);
+    expect(items[0]?.textContent).toBe("打开");
+    expect(items.some((item) => item.textContent?.includes("Nocturne 面板"))).toBe(false);
   });
 
   it("右键菜单：打开、资源管理器、检测到的编辑器、复制绝对与相对路径", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "看 `src/a.ts:12`" })];
-    const fileLinks = hooks({ openerLabel: () => "VS Code" });
+    const fileLinks = hooks();
     mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
     const link = await screen.findByRole("button", { name: "src/a.ts:12" });
     fireEvent.contextMenu(link);
     let menu = await screen.findByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: /打开/ }).textContent).toContain("VS Code");
     expect(within(menu).queryByRole("menuitem", { name: "Cursor" })).toBeNull();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "VS Code" }));
     expect(fileLinks.openInEditor).toHaveBeenCalledWith("vscode", "Z:/project/src/a.ts", 12);
@@ -3113,7 +3111,7 @@ describe("回答内文件引用（U-09）", () => {
   it("工作区外的文件 + 面板：左键在面板打开，菜单多一项「打开」（ADR-0060 修订）", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "报告在 `Z:/sibling/report.md:3`" })];
-    const fileLinks = hooks({ openerLabel: () => "Nocturne 面板", outsideOpenable: () => true });
+    const fileLinks = hooks({ outsideOpenable: () => true });
     mount(view, { fileLinks, resolveFilesImpl: outside("Z:/sibling/report.md") });
     const link = await screen.findByRole("button", { name: "Z:/sibling/report.md:3" });
     fireEvent.click(link);
@@ -3125,9 +3123,7 @@ describe("回答内文件引用（U-09）", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.contextMenu(link);
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: /打开/ }).textContent).toContain(
-      "Nocturne 面板",
-    );
+    expect(within(menu).getByRole("menuitem", { name: "打开" })).toBeTruthy();
     // 其余保持工作区外的菜单：不列编辑器、不给相对路径
     expect(within(menu).queryByRole("menuitem", { name: "VS Code" })).toBeNull();
     expect(within(menu).queryByRole("menuitem", { name: "复制相对路径" })).toBeNull();

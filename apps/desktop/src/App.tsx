@@ -75,7 +75,6 @@ import { abbreviateHome, middleTruncate } from "./paths";
 import { useSidePanel, type SidePanelController } from "./PanelHost";
 import {
   createPrefsStore,
-  FILE_OPENER_LABELS,
   FONT_SIZE_DEFAULT,
   migrateLegacyProjectOrder,
   outsideOpenable,
@@ -169,7 +168,6 @@ export function App({ host }: { host: DesktopHost }) {
     // 缺省 Nocturne 面板（ADR-0060）；面板之外的选择照旧
     const opener = () => prefs.get().fileOpener ?? "panel";
     return {
-      openerLabel: () => FILE_OPENER_LABELS[opener()],
       open: async (absolutePath, line, ref) => {
         const kind = opener();
         if (kind === "panel") {
@@ -1108,6 +1106,12 @@ export function App({ host }: { host: DesktopHost }) {
   const pinnedIds = new Set(p.pinned);
 
   const active = conversations.selected;
+  const activeSession = active?.session;
+  const loadLiveMcp = useMemo(
+    () => (activeSession ? () => activeSession.mcpServers() : undefined),
+    [activeSession],
+  );
+  const liveMcpRevision = JSON.stringify(active?.view.mcpServers);
   const selected = sessions.find((s) => s.id === selectedId);
   /** 当前选中会话的打开失败（占位区显示错误与「重试」，不退回上一个会话） */
   const selectedOpenError =
@@ -1504,6 +1508,8 @@ export function App({ host }: { host: DesktopHost }) {
                     onChanged={() => {
                       void refresh();
                     }}
+                    loadLive={loadLiveMcp}
+                    liveRevision={liveMcpRevision}
                   />
                 </PaneErrorBoundary>
               ) : settingsPage === "grants" ? (

@@ -34,7 +34,7 @@ export type ModelInfo = Awaited<ReturnType<RpcRuntime["listModels"]>>[number];
 export type ModelRoleInfo = Awaited<ReturnType<RpcRuntime["describeModelRoles"]>>[number];
 export type JevReviewerConfig = Awaited<ReturnType<RpcRuntime["defaultReviewer"]>>;
 export type SecurityReviewerConfig = NonNullable<SettingsPatch["permission.reviewer"]>;
-/** ADR-0057：用户追加的审查规则（额外交人 / 额外放行） */
+/** ADR-0057：用户追加的审查规则（需要确认 / 自动放行） */
 export type ReviewerRules = NonNullable<SettingsPatch["permission.reviewerRules"]>;
 export type ReviewerSampleResult = Awaited<ReturnType<RpcRuntime["testReviewerSample"]>>;
 export type JevEndpoint = JevReviewerConfig["endpoint"];

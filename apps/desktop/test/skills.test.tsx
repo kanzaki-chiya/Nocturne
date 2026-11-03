@@ -99,9 +99,16 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
     layer: "project",
     source: ".nocturne",
     entryPath: "Z:/project/alpha",
+    realPath: "Z:/project/alpha",
     shadowedBy: normal.entryPath,
     invocation: "none",
     catalogStatus: "omitted",
+  });
+  const local = skill({
+    name: "local-only",
+    layer: "project",
+    source: ".nocturne",
+    entryPath: "Z:/project/local-only",
   });
   const manual = skill({
     name: "manual",
@@ -126,7 +133,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   });
   const f = fakeServer(
     withInit({
-      "skills.describeSkills": data([normal, ignored, shadow, manual, extra, disabled]),
+      "skills.describeSkills": data([normal, ignored, shadow, local, manual, extra, disabled]),
       "skills.setSkillEnabled": { affectedSessions: 2 },
     }),
   );
@@ -154,24 +161,16 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(within(list).getByRole("button", { name: /release/ }).textContent).toBe(
     "release2 处不生效",
   );
-  expect(within(list).getByRole("button", { name: /alpha.*被覆盖/ }).textContent).toBe(
-    "alpha被覆盖",
-  );
+  expect(within(list).getAllByRole("button", { name: /alpha/ })).toHaveLength(1);
+  expect(list.textContent).not.toContain("被覆盖");
+  expect(screen.getByRole("group", { name: "同名" }).textContent).toContain("Z:/project/alpha");
+  expect(screen.queryByRole("button", { name: "查看生效的那份" })).toBeNull();
   expect(within(list).getByRole("button", { name: /manual/ }).textContent).toBe("manual缺说明");
   expect(within(list).getByRole("button", { name: /pdf-tools/ }).textContent).toBe("pdf-tools");
   expect(within(list).getByRole("button", { name: /deploy/ }).textContent).toBe("deploy已停用");
   fireEvent.click(within(list).getByRole("button", { name: /release/ }));
   expect(screen.getByText("有 2 处写法在 Nocturne 里不生效").className).toContain("warn");
   expect(screen.getByRole("columnheader", { name: "在 Nocturne 里" })).toBeTruthy();
-  fireEvent.click(within(list).getByRole("button", { name: /alpha.*被覆盖/ }));
-  expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
-  const shadowBanner = screen.getByText("被用户技能 alpha 覆盖");
-  expect(shadowBanner.className).toContain("info");
-  expect(shadowBanner.querySelector("span")).toBeNull();
-  expect(screen.queryByText(/同名时用户层优先/)).toBeNull();
-  expect(within(list).getByRole("button", { name: /alpha.*被覆盖/ }).textContent).toContain(
-    "alpha",
-  );
   fireEvent.click(within(list).getByRole("button", { name: /manual/ }));
   const missingBanner = screen.getByText("缺少说明，模型看不到这个技能");
   expect(missingBanner.className).toContain("warn");

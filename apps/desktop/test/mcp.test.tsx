@@ -37,6 +37,73 @@ describe("MCP JSON 导入", () => {
   });
 });
 describe("MCP 设置页", () => {
+  it("状态点和状态格取当前会话的连接状态，手动测试结果优先", async () => {
+    const server = (id: string, enabled = true) => ({
+      id,
+      origin: "app",
+      editable: true,
+      trusted: true,
+      path: "home/mcp.json",
+      transport: "http",
+      enabled,
+      url: "https://example.com/mcp",
+      headers: [],
+      startupTimeoutMs: 15000,
+      callTimeoutMs: 60000,
+    });
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": {
+          servers: [server("up"), server("down"), server("off", false), server("none")],
+          warnings: [],
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+        "mcp.probeMcpServer": {
+          ok: false,
+          durationMs: 100,
+          tools: [],
+          error: { code: "connect_failed", message: "x" },
+        },
+      }),
+    );
+    await f.initialize();
+    const statuses = [
+      { name: "up", state: "ready" as const, toolCount: 3 },
+      { name: "down", state: "failed" as const, toolCount: 0, error: "连接被拒绝" },
+      { name: "off", state: "ready" as const, toolCount: 1 },
+    ];
+    const loadLive = () => Promise.resolve(statuses);
+    const page = (version: number) => (
+      <McpPage
+        client={f.client}
+        workspaceRoot={undefined}
+        version={version}
+        onChanged={() => undefined}
+        loadLive={loadLive}
+      />
+    );
+    const { container, rerender } = render(page(0));
+    await screen.findByRole("heading", { name: "up" });
+    const status = () => screen.getByRole("group", { name: "状态" }).textContent;
+    await waitFor(() => expect(status()).toBe("状态已连接3 个工具"));
+    const dots = () =>
+      Array.from(container.querySelectorAll(".dot")).map((dot) =>
+        dot.className.replace(/^dot ?/, ""),
+      );
+    expect(dots()).toEqual(["ok", "warn", "", ""]);
+    fireEvent.click(screen.getByText("down"));
+    expect(status()).toBe("状态连接被拒绝");
+    fireEvent.click(screen.getByText("off"));
+    expect(status()).toBe("状态未测试");
+    fireEvent.click(screen.getByText("none"));
+    expect(status()).toBe("状态未测试");
+    fireEvent.click(screen.getByText("up"));
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+    await waitFor(() => expect(dots()).toEqual(["warn", "warn", "", ""]));
+    rerender(page(1));
+    await waitFor(() => expect(dots()).toEqual(["ok", "warn", "", ""]));
+    f.close();
+  });
   it.each(["stdio", "http"])("%s 编辑名称锁定、值类型说明与凭据不可用提示", async (transport) => {
     const f = fakeServer(
       withInit({
@@ -97,7 +164,7 @@ describe("MCP 设置页", () => {
     ["startup_timeout", "启动超时，请检查服务器是否正常启动或增加启动超时"],
     ["http_redirect", "服务器重定向到其他地址，请检查 HTTP 地址"],
     ["mcp_secret_missing", "缺少已保存的凭据，请替换密钥或引用环境变量"],
-  ])("%s 在最近测试与失败横幅显示具体说明", async (code, text) => {
+  ])("%s 在状态与失败横幅显示具体说明", async (code, text) => {
     const f = fakeServer(
       withInit({
         "mcp.describeMcpServers": {
@@ -140,7 +207,7 @@ describe("MCP 设置页", () => {
     await screen.findByRole("heading", { name: "managed" });
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain(text));
-    expect(screen.getByRole("group", { name: "最近测试" }).textContent).toBe(`最近测试${text}`);
+    expect(screen.getByRole("group", { name: "状态" }).textContent).toBe(`状态${text}`);
     expect(screen.queryByText("连接失败，请检查服务器配置")).toBeNull();
     f.close();
   });

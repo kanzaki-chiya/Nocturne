@@ -212,8 +212,6 @@ export interface ConversationProps {
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
 export interface FileLinkHooks {
-  /** 左键默认动作用的程序名（"默认打开方式"设置），菜单「打开」项的说明 */
-  openerLabel: () => string;
   /**
    * 左键：按"默认打开方式"设置打开（面板与编辑器带行号，系统默认不带）。
    * ref 给面板用：endLine 高亮行范围。
@@ -710,13 +708,6 @@ function CodeRef({ text }: { text: string }) {
             <>
               <MenuItem
                 label="打开"
-                detail={
-                  hit.isDirectory
-                    ? "资源管理器"
-                    : preview
-                      ? "面板浏览器"
-                      : `${hooks.openerLabel()}${hit.line !== undefined ? `（第 ${hit.line} 行）` : ""}`
-                }
                 onSelect={() => {
                   run(openDefault);
                 }}
@@ -724,7 +715,6 @@ function CodeRef({ text }: { text: string }) {
               {preview && (
                 <MenuItem
                   label="查看源码"
-                  detail={`${hooks.openerLabel()}${hit.line !== undefined ? `（第 ${hit.line} 行）` : ""}`}
                   onSelect={() => {
                     run(() => viewSource(hit.absolutePath, hit.line));
                   }}

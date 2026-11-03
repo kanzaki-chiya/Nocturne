@@ -32,25 +32,21 @@ export const catalogText = (skill: SkillOverview) =>
       ? "只显示名字"
       : "不列出";
 export const skillStatus = (skill: SkillOverview) =>
-  skill.shadowedBy
-    ? "被覆盖"
-    : !skill.enabled
-      ? "已停用"
-      : skill.missingDescription
-        ? "缺说明"
-        : skill.ignored.length
-          ? `${skill.ignored.length} 处不生效`
-          : invocationText(skill);
+  !skill.enabled
+    ? "已停用"
+    : skill.missingDescription
+      ? "缺说明"
+      : skill.ignored.length
+        ? `${skill.ignored.length} 处不生效`
+        : invocationText(skill);
 export const skillListMeta = (skill: SkillOverview): string | undefined =>
-  skill.shadowedBy
-    ? "被覆盖"
-    : !skill.enabled
-      ? "已停用"
-      : skill.missingDescription
-        ? "缺说明"
-        : skill.ignored.length
-          ? `${skill.ignored.length} 处不生效`
-          : undefined;
+  !skill.enabled
+    ? "已停用"
+    : skill.missingDescription
+      ? "缺说明"
+      : skill.ignored.length
+        ? `${skill.ignored.length} 处不生效`
+        : undefined;
 
 export function SkillsPage({
   client,
@@ -82,8 +78,9 @@ export function SkillsPage({
       const result = await client.runtime.describeSkills({ workspaceRoot });
       if (generation !== refreshGeneration.current) return;
       setData(result);
+      const effective = result.skills.filter((s) => !s.shadowedBy);
       setSelected((old) =>
-        result.skills.some((s) => s.entryPath === old) ? old : result.skills[0]?.entryPath,
+        effective.some((s) => s.entryPath === old) ? old : effective[0]?.entryPath,
       );
       setError("");
     } catch (e) {
@@ -97,7 +94,9 @@ export function SkillsPage({
       refreshGeneration.current++;
     };
   }, [refresh, version]);
-  const skill = data?.skills.find((s) => s.entryPath === selected);
+  const effective = data?.skills.filter((s) => !s.shadowedBy) ?? [];
+  const skill = effective.find((s) => s.entryPath === selected);
+  const shadowed = data?.skills.filter((s) => s.shadowedBy === skill?.entryPath) ?? [];
   const parseWarnings = data?.warnings.filter((w) => w.kind === "parse") ?? [];
   const attempt = async (action: () => Promise<void>) => {
     try {
@@ -107,7 +106,7 @@ export function SkillsPage({
     }
   };
   const toggle = async () => {
-    if (!client || !skill || skill.shadowedBy || busy) return;
+    if (!client || !skill || busy) return;
     setBusy(true);
     await attempt(async () => {
       await client.runtime.setSkillEnabled({
@@ -170,10 +169,10 @@ export function SkillsPage({
             <>
               {(["user", "project"] as const).map(
                 (layer) =>
-                  data?.skills.some((s) => s.layer === layer) && (
+                  effective.some((s) => s.layer === layer) && (
                     <ListGroup
                       key={layer}
-                      count={data.skills.filter((s) => s.layer === layer).length}
+                      count={effective.filter((s) => s.layer === layer).length}
                       title={
                         layer === "user" ? (
                           "用户"
@@ -187,7 +186,7 @@ export function SkillsPage({
                         )
                       }
                     >
-                      {data.skills
+                      {effective
                         .filter((s) => s.layer === layer)
                         .map((s) => (
                           <ListItem
@@ -195,9 +194,9 @@ export function SkillsPage({
                             label={s.name}
                             mono
                             selected={s.entryPath === selected}
-                            off={!s.enabled || !!s.shadowedBy}
+                            off={!s.enabled}
                             dot={
-                              !s.enabled || s.shadowedBy
+                              !s.enabled
                                 ? ""
                                 : s.missingDescription || s.ignored.length
                                   ? "warn"
@@ -255,19 +254,9 @@ export function SkillsPage({
                     <Switch
                       checked={skill.enabled}
                       aria-label={`启用 ${skill.name}`}
-                      disabled={!!skill.shadowedBy || busy}
+                      disabled={busy}
                       onChange={() => void toggle()}
                     />
-                    {skill.shadowedBy && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setSelected(skill.shadowedBy);
-                        }}
-                      >
-                        查看生效的那份
-                      </Button>
-                    )}
                     <Button
                       variant="ghost"
                       onClick={() => void attempt(() => openDirectory(skill.realPath))}
@@ -277,15 +266,6 @@ export function SkillsPage({
                   </>
                 }
               />
-              {skill.shadowedBy && (
-                <div className="skill-banner info">
-                  被
-                  {data?.skills.find((s) => s.entryPath === skill.shadowedBy)?.layer === "user"
-                    ? "用户"
-                    : "项目"}
-                  技能 {skill.name} 覆盖
-                </div>
-              )}
               {skill.missingDescription && (
                 <div className="skill-banner warn">缺少说明，模型看不到这个技能</div>
               )}
@@ -322,6 +302,15 @@ export function SkillsPage({
                     </div>
                   )}
                 </SettingsRow>
+                {shadowed.length > 0 && (
+                  <SettingsRow label="同名">
+                    {shadowed.map((s) => (
+                      <div key={s.entryPath}>
+                        <code>{s.realPath}\SKILL.md</code>
+                      </div>
+                    ))}
+                  </SettingsRow>
+                )}
                 <SettingsRow label="调用">{invocationText(skill)}</SettingsRow>
                 <SettingsRow label="斜杠">
                   <code>

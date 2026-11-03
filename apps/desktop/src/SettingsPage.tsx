@@ -334,14 +334,10 @@ export function SettingsPage({
     };
     await Promise.all([
       load(client.runtime.describeSettings(), setItems),
-      ...(section === "models"
-        ? [
-            load(client.runtime.listModels(), setModels),
-            load(client.runtime.listReviewerProviders(), (providers) => {
-              setReviewerProviders(providers.map((provider) => provider.id));
-            }),
-          ]
-        : []),
+      load(client.runtime.listModels(), setModels),
+      load(client.runtime.listReviewerProviders(), (providers) => {
+        setReviewerProviders(providers.map((provider) => provider.id));
+      }),
     ]);
   }, [client, section]);
   useEffect(() => {
@@ -1540,6 +1536,67 @@ const JEV_ENDPOINTS: { v: JevEndpoint; label: string }[] = [
 
 const RULES_LIMIT = 1000;
 
+const ruleRows = (text: string | undefined): string[] => {
+  const rows = (text ?? "").split(/\r?\n/).filter((row) => row.trim() !== "");
+  return rows.length > 0 ? rows : [""];
+};
+const ruleText = (rows: readonly string[]): string =>
+  rows
+    .map((row) => row.trim())
+    .filter((row) => row !== "")
+    .join("\n");
+
+function ReviewerRuleList({
+  label,
+  example,
+  rows,
+  onChange,
+}: {
+  label: string;
+  example: string;
+  rows: readonly string[];
+  onChange: (rows: string[]) => void;
+}) {
+  return (
+    <Field label={label}>
+      {rows.map((row, index) => (
+        <div className="rule-row" key={index}>
+          <input
+            className="input lg"
+            aria-label={`${label} ${index + 1}`}
+            spellCheck={false}
+            value={row}
+            placeholder={index === 0 ? example : undefined}
+            onChange={(e) => {
+              onChange(rows.map((old, i) => (i === index ? e.target.value : old)));
+            }}
+          />
+          {(rows.length > 1 || row !== "") && (
+            <Button
+              variant="ghost"
+              aria-label={`删除${label} ${index + 1}`}
+              onClick={() => {
+                const next = rows.filter((_, i) => i !== index);
+                onChange(next.length > 0 ? next : [""]);
+              }}
+            >
+              ✕
+            </Button>
+          )}
+        </div>
+      ))}
+      <Button
+        variant="ghost"
+        onClick={() => {
+          onChange([...rows, ""]);
+        }}
+      >
+        ＋ 添加规则
+      </Button>
+    </Field>
+  );
+}
+
 function ReviewerDialog({
   client,
   models,
@@ -1592,8 +1649,8 @@ function ReviewerDialog({
   const [disclosure, setDisclosure] = useState<"unknown" | "needed" | "shown" | "accepted">(
     "unknown",
   );
-  const [rulesAsk, setRulesAsk] = useState(currentRules?.ask ?? "");
-  const [rulesAllow, setRulesAllow] = useState(currentRules?.allow ?? "");
+  const [rulesAsk, setRulesAsk] = useState(() => ruleRows(currentRules?.ask));
+  const [rulesAllow, setRulesAllow] = useState(() => ruleRows(currentRules?.allow));
   const { busy, error, setError, run } = useDialogSave();
 
   useEffect(() => {
@@ -1630,8 +1687,8 @@ function ReviewerDialog({
 
   /** 两段追加规则随审查器配置一起保存；全空表示清除 */
   const rulesPatch = (): SettingsPatch => {
-    const ask = rulesAsk.trim();
-    const allow = rulesAllow.trim();
+    const ask = ruleText(rulesAsk);
+    const allow = ruleText(rulesAllow);
     return {
       "permission.reviewerRules":
         ask === "" && allow === ""
@@ -1644,6 +1701,8 @@ function ReviewerDialog({
     { patch: SettingsPatch; options: { reviewerKey: string } | undefined } | string => {
     const built = buildReviewer();
     if (typeof built === "string") return built;
+    if (ruleText(rulesAsk).length > RULES_LIMIT || ruleText(rulesAllow).length > RULES_LIMIT)
+      return `规则不能超过 ${RULES_LIMIT} 字`;
     return { patch: { ...built.patch, ...rulesPatch() }, options: built.options };
   };
 
@@ -1857,32 +1916,18 @@ function ReviewerDialog({
               </Field>
             </>
           )}
-          <Field label="额外交人" htmlFor="rv-rules-ask">
-            <textarea
-              id="rv-rules-ask"
-              className="textarea"
-              rows={3}
-              maxLength={RULES_LIMIT}
-              spellCheck={false}
-              value={rulesAsk}
-              onChange={(e) => {
-                setRulesAsk(e.target.value);
-              }}
-            />
-          </Field>
-          <Field label="额外放行" htmlFor="rv-rules-allow">
-            <textarea
-              id="rv-rules-allow"
-              className="textarea"
-              rows={3}
-              maxLength={RULES_LIMIT}
-              spellCheck={false}
-              value={rulesAllow}
-              onChange={(e) => {
-                setRulesAllow(e.target.value);
-              }}
-            />
-          </Field>
+          <ReviewerRuleList
+            label="需要确认"
+            example="任何 ssh 命令"
+            rows={rulesAsk}
+            onChange={setRulesAsk}
+          />
+          <ReviewerRuleList
+            label="自动放行"
+            example="运行 pnpm test"
+            rows={rulesAllow}
+            onChange={setRulesAllow}
+          />
           <ReviewerSampleCheck
             client={client}
             enabled={current !== undefined && current.backend !== "off"}
@@ -1893,7 +1938,7 @@ function ReviewerDialog({
   );
 }
 
-const EXPECT_TEXT = { allow: "放行", ask: "交人" } as const;
+const EXPECT_TEXT = { allow: "放行", ask: "确认" } as const;
 
 type SampleRun =
   | { state: "idle" }

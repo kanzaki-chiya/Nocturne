@@ -30,6 +30,13 @@ import {
 import "./pages.css";
 import "./mcp.css";
 
+export interface McpLiveStatus {
+  name: string;
+  state: "starting" | "ready" | "failed" | "crashed" | "stopped";
+  toolCount: number;
+  error?: string | undefined;
+}
+
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const probeErrors = {
   auth_required: "认证失败，请检查请求头",
@@ -52,6 +59,18 @@ const resultText = (r: McpProbeResult | undefined): ReactNode =>
     probeErrors[r.error.code]
   ) : (
     "测试失败"
+  );
+const liveText = (live: McpLiveStatus | undefined): ReactNode =>
+  !live ? (
+    "未测试"
+  ) : live.state === "ready" ? (
+    <>
+      已连接<span className="muted-value">{live.toolCount} 个工具</span>
+    </>
+  ) : live.state === "starting" ? (
+    "连接中"
+  ) : (
+    (live.error ?? "未连接")
   );
 function draftOf(server: McpServerOverview): McpDraft {
   return {
@@ -79,16 +98,23 @@ export function McpPage({
   workspaceRoot,
   version,
   onChanged,
+  loadLive,
+  liveRevision,
 }: {
   client: RpcClient | undefined;
   workspaceRoot: string | undefined;
   version: number;
   onChanged: () => void;
+  /** 当前会话的连接状态；没有打开的会话时不传 */
+  loadLive?: (() => Promise<readonly McpLiveStatus[]>) | undefined;
+  /** 会话连接状态变化时改变，触发重新读取 */
+  liveRevision?: string | undefined;
 }) {
   const [servers, setServers] = useState<McpServerOverview[]>([]);
   const [selected, setSelected] = useState<string>();
   const [form, setForm] = useState<{ draft: McpDraft; replace: boolean }>();
   const [results, setResults] = useState<Record<string, McpProbeResult>>({});
+  const [live, setLive] = useState<readonly McpLiveStatus[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -113,6 +139,37 @@ export function McpPage({
   useEffect(() => {
     void refresh();
   }, [refresh, version]);
+  // 页面离开后仍保留：重新进入、配置变化或切换会话时，手动测试结果让位给会话状态
+  useEffect(() => {
+    if (loadLive) setResults({});
+  }, [loadLive, version]);
+  useEffect(() => {
+    if (!loadLive) {
+      setLive([]);
+      return;
+    }
+    let stale = false;
+    loadLive().then(
+      (next) => {
+        if (!stale) setLive(next);
+      },
+      () => {
+        if (!stale) setLive([]);
+      },
+    );
+    return () => {
+      stale = true;
+    };
+  }, [loadLive, liveRevision, version]);
+  const liveOf = (server: McpServerOverview) =>
+    server.enabled ? live.find((s) => s.name === server.id && s.state !== "stopped") : undefined;
+  const dotOf = (server: McpServerOverview): "ok" | "warn" | "" => {
+    if (!server.enabled) return "";
+    const probed = results[server.id];
+    if (probed) return probed.ok ? "ok" : "warn";
+    const state = liveOf(server)?.state;
+    return state === "ready" ? "ok" : state === "failed" || state === "crashed" ? "warn" : "";
+  };
   const changed = async (text: string) => {
     onChanged();
     setToast(text);
@@ -189,7 +246,7 @@ export function McpPage({
                       label={s.id}
                       mono
                       selected={selected === s.id && !form}
-                      dot={!s.enabled ? "" : results[s.id]?.ok ? "ok" : results[s.id] ? "warn" : ""}
+                      dot={dotOf(s)}
                       onClick={() => {
                         setSelected(s.id);
                         setForm(undefined);
@@ -288,7 +345,9 @@ export function McpPage({
                   {current.url ?? [current.command, ...(current.args ?? [])].join(" ")}
                 </span>
               </SettingsRow>
-              <SettingsRow label="最近测试">{resultText(r)}</SettingsRow>
+              <SettingsRow label="状态">
+                {r ? resultText(r) : liveText(liveOf(current))}
+              </SettingsRow>
               <SettingsRow label="服务器">
                 {r?.serverInfo ? `${r.serverInfo.name} ${r.serverInfo.version}` : "—"}
               </SettingsRow>

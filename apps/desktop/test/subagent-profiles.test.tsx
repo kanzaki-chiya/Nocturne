@@ -59,7 +59,12 @@ it("default 不能删除停用；新增模板、编辑、预览和删除档位",
   expect((screen.getByRole("switch", { name: "启用" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText("只读", { selector: ".badge" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "添加档位" }));
-  fireEvent.click(screen.getByRole("button", { name: "quick" }));
+  expect((screen.getByRole("textbox", { name: "档位名称" }) as HTMLInputElement).value).toBe("");
+  fireEvent.change(screen.getByRole("textbox", { name: "档位名称" }), {
+    target: { value: "quick" },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "只读（explore）" }));
+  fireEvent.click(screen.getByRole("radio", { name: "low" }));
   const enabled = screen.getByRole("switch", { name: "启用" });
   expect(enabled.getAttribute("aria-checked")).toBe("true");
   expect(enabled.closest(".dhead .actions")).toBeTruthy();
@@ -212,7 +217,6 @@ it("思考档位选项跟随所选模型：跟随当前模型列全部档位，�
   render(<ExternalAgentsPage client={server.client} workspaceRoot={undefined} version={0} />);
   await screen.findByRole("heading", { name: "default" });
   fireEvent.click(screen.getByRole("button", { name: "添加档位" }));
-  fireEvent.click(screen.getByRole("button", { name: "空白" }));
   expect(radios()).toEqual(["跟随会话", ...REASONING_EFFORT_ORDER]);
   fireEvent.click(screen.getByRole("combobox", { name: "档位模型" }));
   fireEvent.click(screen.getByRole("option", { name: /strong/ }));

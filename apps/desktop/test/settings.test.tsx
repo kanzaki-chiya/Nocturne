@@ -583,26 +583,36 @@ describe("SettingsPage", () => {
       server.close();
     });
 
-    it("对话框带两个多行输入框和示例占位，保存走 permission.reviewerRules", async () => {
+    it("常规页打开对话框时小模型列表已加载", async () => {
+      const server = await openDialog({}, itemsWith(MODEL_REVIEWER));
+      expect(await screen.findAllByRole("option")).not.toHaveLength(0);
+      expect(screen.queryByText("无匹配模型")).toBeNull();
+      server.close();
+    });
+
+    it("规则逐条填写，带示例占位，保存走 permission.reviewerRules", async () => {
       const server = await openDialog(
         { "runtime.updateSettings": ITEMS },
         itemsWith(undefined, { ask: "任何 ssh 命令" }),
       );
-      const ask = screen.getByLabelText("额外交人");
-      const allow = screen.getByLabelText("额外放行");
-      expect(ask.tagName).toBe("TEXTAREA");
-      expect(allow.tagName).toBe("TEXTAREA");
-      expect(ask.getAttribute("placeholder")).toBeNull();
-      expect(allow.getAttribute("placeholder")).toBeNull();
+      const ask = screen.getByLabelText("需要确认 1");
+      const allow = screen.getByLabelText("自动放行 1");
+      expect(allow.getAttribute("placeholder")).toBe("运行 pnpm test");
       expect(ask).toHaveProperty("value", "任何 ssh 命令");
-      fireEvent.change(ask, { target: { value: "  任何 docker 命令  " } });
+      fireEvent.click(screen.getAllByRole("button", { name: "＋ 添加规则" })[0] as HTMLElement);
+      fireEvent.change(screen.getByLabelText("需要确认 2"), {
+        target: { value: "  任何 docker 命令  " },
+      });
       fireEvent.change(allow, { target: { value: "运行 pnpm test" } });
       fireEvent.click(screen.getByRole("button", { name: "保存" }));
       await waitFor(() => {
         const call = server.calls.find((c) => c.method === "runtime.updateSettings");
         expect(call?.params.patch).toEqual({
           "permission.reviewer": { backend: "off" },
-          "permission.reviewerRules": { ask: "任何 docker 命令", allow: "运行 pnpm test" },
+          "permission.reviewerRules": {
+            ask: "任何 ssh 命令\n任何 docker 命令",
+            allow: "运行 pnpm test",
+          },
         });
       });
       server.close();
@@ -613,7 +623,7 @@ describe("SettingsPage", () => {
         { "runtime.updateSettings": ITEMS },
         itemsWith(undefined, { ask: "任何 ssh 命令" }),
       );
-      fireEvent.change(screen.getByLabelText("额外交人"), { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: "删除需要确认 1" }));
       fireEvent.click(screen.getByRole("button", { name: "保存" }));
       await waitFor(() => {
         const call = server.calls.find((c) => c.method === "runtime.updateSettings");
@@ -637,9 +647,9 @@ describe("SettingsPage", () => {
       expect(status.textContent).toBe("命中率 2/3（67%）");
       const rows = sampleRows();
       expect(rows.map((r) => [...r.querySelectorAll("td")].map((td) => td.textContent))).toEqual([
-        ["没有被要求就推送", "交人", "交人", "0.8s"],
-        ["用户要求后推送", "放行", "交人 ✗", "1.2s"],
-        ["读取 .env", "交人", "交人", "0.5s"],
+        ["没有被要求就推送", "确认", "确认", "0.8s"],
+        ["用户要求后推送", "放行", "确认 ✗", "1.2s"],
+        ["读取 .env", "确认", "确认", "0.5s"],
       ]);
       expect(rows.map((r) => r.classList.contains("bad"))).toEqual([false, true, false]);
       expect(server.calls.filter((c) => c.method === "runtime.testReviewerSample")).toHaveLength(3);
