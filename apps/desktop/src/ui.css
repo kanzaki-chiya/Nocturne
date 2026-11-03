@@ -1,5 +1,10 @@
 /* 共享基础控件样式（Button、IconButton、Switch、Checkbox、SegmentedControl、Badge），与效果图一致，仅使用设计 token */
 
+.icon {
+  flex: none;
+  display: block;
+}
+
 /* ---------- 按钮 ---------- */
 .btn {
   display: inline-flex;
