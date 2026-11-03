@@ -22,7 +22,7 @@ function fixture(value = initial) {
     ),
   };
   const session = { id: "branch-fixture" } as RpcSession;
-  const view = createSessionView("branch-fixture");
+  const view = createSessionView();
   const props = { client, session, workspace: "Z:/fixture", view };
   return { ...props, props };
 }
