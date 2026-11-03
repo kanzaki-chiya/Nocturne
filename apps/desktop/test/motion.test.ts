@@ -27,7 +27,7 @@ it("settles retained overlays after completion or hiding without suppressing a n
   expect(replacement.hasAttribute("data-motion-entered")).toBe(false);
 });
 
-it("only summary activation animates details; programmatic expansion stays immediate", () => {
+it("only summary activation animates details; programmatic expansion stays immediate", async () => {
   dispose = installMotion();
   const conversation = document.createElement("div");
   conversation.className = "conversation";
@@ -37,9 +37,28 @@ it("only summary activation animates details; programmatic expansion stays immed
   conversation.append(details);
   document.body.append(conversation);
   details.open = true;
+  await Promise.resolve();
   expect(details.hasAttribute("data-motion-fold")).toBe(false);
   summary.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(details.hasAttribute("data-motion-fold")).toBe(true);
   details.dispatchEvent(event("transitionend", { propertyName: "height" }));
+  expect(details.hasAttribute("data-motion-fold")).toBe(false);
+});
+
+it("clears a stale fold opt-in before a later programmatic jump, even without transitionend", async () => {
+  dispose = installMotion();
+  const conversation = document.createElement("div");
+  conversation.className = "conversation";
+  const details = document.createElement("details");
+  const summary = document.createElement("summary");
+  details.append(summary);
+  conversation.append(details);
+  document.body.append(conversation);
+  summary.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  details.open = true;
+  await Promise.resolve();
+  expect(details.hasAttribute("data-motion-fold")).toBe(true);
+  details.open = false;
+  await Promise.resolve();
   expect(details.hasAttribute("data-motion-fold")).toBe(false);
 });

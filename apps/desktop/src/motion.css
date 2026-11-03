@@ -1,3 +1,8 @@
+.conversation .fold-arrow,
+.conversation summary::before {
+  transition: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   :is(.menu, .ddm, .composer-popup, .ctxmenu):not([data-motion-entered]) {
     animation: nct-enter-menu var(--dur-menu) var(--ease-out);
@@ -21,8 +26,8 @@
   [data-nct-cover-hold] * {
     animation-play-state: paused !important;
   }
-  .conversation .fold-arrow,
-  .conversation summary::before {
+  .conversation details[data-motion-fold] > summary .fold-arrow,
+  .conversation details[data-motion-fold] > summary::before {
     transition: transform var(--dur-fold) var(--ease-both);
   }
   @supports (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {
@@ -36,7 +41,7 @@
       transition:
         height var(--dur-fold) var(--ease-both),
         opacity var(--dur-fold) var(--ease-both),
-        content-visibility var(--dur-fold) allow-discrete;
+        content-visibility var(--dur-fold) var(--ease-both) allow-discrete;
     }
     .conversation details[open]::details-content {
       height: auto;
