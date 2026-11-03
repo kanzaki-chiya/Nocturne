@@ -1553,7 +1553,7 @@ function ReviewerRuleList({
                 onChange(next.length > 0 ? next : [""]);
               }}
             >
-              ✕
+              <Icon name="close" size={ICON_SM} />
             </Button>
           )}
         </div>
@@ -1564,7 +1564,8 @@ function ReviewerRuleList({
           onChange([...rows, ""]);
         }}
       >
-        ＋ 添加规则
+        <Icon name="add" size={ICON_SM} />
+        添加规则
       </Button>
     </Field>
   );

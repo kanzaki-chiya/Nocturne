@@ -205,7 +205,7 @@ describe("定时任务页", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开会话 →" }));
     expect(open).toHaveBeenCalledWith("s1");
     fireEvent.click(screen.getByRole("tab", { name: "设置" }));
-    fireEvent.click(screen.getByRole("button", { name: "▶ 立即运行" }));
+    fireEvent.click(screen.getByRole("button", { name: "立即运行" }));
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(2));
     expect(client.runSchedule).toHaveBeenCalledWith({ id: "daily" });
   });
@@ -241,7 +241,7 @@ describe("定时任务页", () => {
     expect(screen.queryByRole("heading", { name: "定时任务" })).toBeNull();
     expect(screen.queryByText(/只在 Nocturne 打开时运行/)).toBeNull();
     expect(screen.getByRole("note").textContent).toContain("请在电脑上操作");
-    const create = screen.getByRole("button", { name: "＋ 新建任务" });
+    const create = screen.getByRole("button", { name: "新建任务" });
     expect(create).toHaveProperty("disabled", true);
     expect(create.getAttribute("title")).toBe("请在电脑上操作");
     expect(screen.getByRole("switch")).toHaveProperty("disabled", true);
@@ -249,8 +249,8 @@ describe("定时任务页", () => {
     expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "删除任务" })).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("指令")).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: "▶ 立即运行" })).toHaveProperty("disabled", false);
-    fireEvent.click(screen.getByRole("button", { name: "▶ 立即运行" }));
+    expect(screen.getByRole("button", { name: "立即运行" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "立即运行" }));
     await vi.waitFor(() => expect(client.runSchedule).toHaveBeenCalledWith({ id: "daily" }));
   });
 

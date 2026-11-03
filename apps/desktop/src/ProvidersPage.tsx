@@ -36,6 +36,8 @@ import {
   SettingsGroup,
   SettingsRow,
   Switch,
+  ICON_SM,
+  Icon,
 } from "./ui";
 import "./pages.css";
 import "./mcp.css";
@@ -1557,7 +1559,8 @@ function ProviderEditDialog({
                     setHeaders((cur) => [...cur, { name: "", value: "" }]);
                   }}
                 >
-                  ＋ 添加请求头
+                  <Icon name="add" size={ICON_SM} />
+                  添加请求头
                 </Button>
               </div>
             </Field>

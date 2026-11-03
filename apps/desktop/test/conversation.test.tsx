@@ -598,7 +598,7 @@ describe("回复与代码复制", () => {
     expect(screen.getAllByRole("group", { name: "回复操作" })).toHaveLength(1);
     const copy = screen.getByRole("button", { name: "复制回复" });
     fireEvent.click(copy);
-    await waitFor(() => expect(copy.textContent).toBe("已复制"));
+    await waitFor(() => expect(copy.getAttribute("aria-label")).toBe("已复制"));
     expect(writeText).toHaveBeenCalledWith("第二段 `原文`");
     expect(copy.closest("article")?.textContent).toContain("第二段");
   });

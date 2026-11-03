@@ -434,7 +434,7 @@ function SkillWarnings({ warnings }: { warnings: SkillsDescription["warnings"] }
     <details className="skill-warnings">
       <summary>
         <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
-        {warnings.length} 个技能的前言解析失败，查看 ›
+        {warnings.length} 个技能的前言解析失败，查看
       </summary>
       {warnings.map((w, i) => (
         <div key={i}>

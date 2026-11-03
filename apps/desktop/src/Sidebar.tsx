@@ -516,7 +516,7 @@ export function Sidebar(props: SidebarProps) {
               props.onNewSession(project.path);
             }}
           >
-            ＋
+            <Icon name="add" size={ICON_SM} />
           </button>
         </div>
         {!collapsed && (
@@ -666,7 +666,7 @@ export function Sidebar(props: SidebarProps) {
                 props.onOpenProject();
               }}
             >
-              ＋
+              <Icon name="add" size={ICON_SM} />
             </button>
           </span>
         </div>

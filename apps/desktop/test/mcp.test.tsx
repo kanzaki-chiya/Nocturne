@@ -145,7 +145,7 @@ describe("MCP 设置页", () => {
     expect(name.disabled).toBe(true);
     expect(name.classList.contains("mcp-name-locked")).toBe(true);
     fireEvent.click(
-      screen.getByRole("button", { name: transport === "http" ? "＋ 添加请求头" : "＋ 添加变量" }),
+      screen.getByRole("button", { name: transport === "http" ? "添加请求头" : "添加变量" }),
     );
     fireEvent.click(screen.getByRole("combobox", { name: "值类型 1" }));
     const list = within(screen.getByRole("listbox"));
@@ -269,14 +269,14 @@ describe("MCP 设置页", () => {
     expect(within(nav).getByText("manual").title).toBe("manual");
     expect(sw.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
     expect(screen.queryByText(/只读：在 home\/config\.json 中定义/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加服务器" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加服务器" }));
     fireEvent.change(screen.getByLabelText(/^名称/), { target: { value: "test" } });
     fireEvent.click(screen.getByRole("button", { name: "远程地址（HTTP）" }));
     expect((screen.getByLabelText(/^名称/) as HTMLInputElement).value).toBe("test");
     fireEvent.change(screen.getByLabelText(/^地址/), {
       target: { value: "https://example.com/mcp" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "＋ 添加请求头" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加请求头" }));
     fireEvent.change(screen.getByLabelText("请求头名 1"), { target: { value: "Authorization" } });
     expect(screen.getByRole("combobox", { name: "值类型 1" }).textContent).toContain(
       "保存到凭据库",

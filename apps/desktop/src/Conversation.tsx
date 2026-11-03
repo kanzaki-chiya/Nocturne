@@ -283,13 +283,14 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     <>
       <button
         type="button"
-        className="u-act"
-        aria-label={label}
+        className="u-act u-act-icon"
+        aria-label={copied ? "已复制" : label}
+        title={copied ? "已复制" : label}
         onClick={() => {
           void copy(text);
         }}
       >
-        {copied ? "已复制" : "复制"}
+        <Icon name={copied ? "check" : "copy_2"} size={ICON_SM} />
       </button>
       {error !== undefined && (
         <span className="conversation-error" role="alert">
@@ -3395,7 +3396,7 @@ export function QuestionCard({
                 );
               }}
             >
-              ✕
+              <Icon name="close" size={ICON_SM} />
             </button>
           </span>
         ))}

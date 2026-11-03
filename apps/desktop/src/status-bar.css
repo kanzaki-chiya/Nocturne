@@ -222,6 +222,8 @@
   font-size: var(--fs-2);
 }
 .status-popover-heading > button {
+  display: grid;
+  place-items: center;
   width: 24px;
   height: 24px;
   border-radius: var(--radius-1);

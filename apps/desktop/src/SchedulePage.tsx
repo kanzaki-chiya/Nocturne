@@ -43,6 +43,8 @@ import {
   PageHeader,
   SettingsGroup,
   SettingsRow,
+  ICON_SM,
+  Icon,
 } from "./ui";
 import "./pages.css";
 import "./mcp.css";
@@ -487,7 +489,8 @@ export function SchedulePage({
                   setFormError(undefined);
                 }}
               >
-                ＋ 新建任务
+                <Icon name="add" size={ICON_SM} />
+                新建任务
               </Button>
             </>
           }
@@ -568,7 +571,8 @@ export function SchedulePage({
                         }}
                       />
                       <Button disabled={busy} onClick={() => void runNow()}>
-                        ▶ 立即运行
+                        <Icon name="play" size={ICON_SM} />
+                        立即运行
                       </Button>
                     </>
                   ) : undefined

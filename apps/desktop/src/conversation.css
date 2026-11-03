@@ -93,6 +93,10 @@
   cursor: pointer;
   border-radius: var(--radius-1);
 }
+.conversation .u-act-icon {
+  display: inline-flex;
+  align-items: center;
+}
 .conversation .u-act:hover:not(:disabled),
 .conversation .u-act:focus-visible {
   color: var(--a-text);

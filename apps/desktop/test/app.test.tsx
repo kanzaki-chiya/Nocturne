@@ -1809,7 +1809,7 @@ it("定时任务页：立即运行先刷新会话列表再打开新会话；历�
   expect(screen.getByRole("region", { name: "定时任务" })).toBeTruthy();
 
   // 2) 立即运行：新建的会话尚不在旧 sessions 中，先刷新列表再打开该会话并关闭定时任务页
-  fireEvent.click(within(page).getByRole("button", { name: "▶ 立即运行" }));
+  fireEvent.click(within(page).getByRole("button", { name: "立即运行" }));
   await waitFor(() => expect(screen.queryByRole("region", { name: "定时任务" })).toBeNull());
   const stream = await screen.findByRole("region", { name: "会话消息" });
   expect(await within(stream).findByText("sched-run-1 正文")).toBeTruthy();

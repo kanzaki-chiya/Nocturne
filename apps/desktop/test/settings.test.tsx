@@ -594,7 +594,7 @@ describe("SettingsPage", () => {
       const allow = screen.getByLabelText("自动放行 1");
       expect(allow.getAttribute("placeholder")).toBe("运行 pnpm test");
       expect(ask).toHaveProperty("value", "任何 ssh 命令");
-      fireEvent.click(screen.getAllByRole("button", { name: "＋ 添加规则" })[0] as HTMLElement);
+      fireEvent.click(screen.getAllByRole("button", { name: "添加规则" })[0] as HTMLElement);
       fireEvent.change(screen.getByLabelText("需要确认 2"), {
         target: { value: "  任何 docker 命令  " },
       });

@@ -180,7 +180,7 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
   expect(conflictBanner.className).toContain("warn");
   expect(conflictBanner.querySelector("span")).toBeNull();
   expect(screen.queryByText(/已经是内置命令/)).toBeNull();
-  fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看 ›"));
+  fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看"));
   expect(screen.getByText("C:/home/bad/SKILL.md:3")).toBeTruthy();
   fireEvent.click(within(list).getByRole("button", { name: "alpha" }));
   fireEvent.click(screen.getByRole("switch"));

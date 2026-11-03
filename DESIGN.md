@@ -220,7 +220,6 @@
 | `usage.css` | `.usage-kind-output` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accentAlt) 55%, var(--a-panel))` | 用量构成条「输出」段用 55% `--a-accentAlt` 混入 `--a-panel` |
 | `web/phone.css` | `.phone .phone-attachment button`（`background`） | `function-disallowed-list` | `rgb(0 0 0 / 0.6)` | 缩略图移除按钮深色半透明遮罩，与 `--a-overlay` 不同 |
 | `web/phone.css` | `.phone .phone-attachment button`（`color`） | `color-no-hex` | `#fff` | 深色图片遮罩上的固定白字 |
-| `web/phone.css` | `.phone .phone-attachment button`（`font-size`） | `declaration-property-value-allowed-list` | `15px` | 附件移除 `✕` 字符在 24px 圆钮内光学居中 |
 | `web/phone.css` | `.phone-attachment small`（`background`） | `function-disallowed-list` | `rgb(0 0 0 / 0.5)` | 缩略图底部角标深色半透明遮罩，与 `--a-overlay` 不同 |
 | `web/phone.css` | `.phone-attachment small`（`color`） | `color-no-hex` | `#fff` | 深色图片遮罩上的固定白字 |
 | `web/phone.css` | `.phone-popover` | `color-no-hex, declaration-property-value-allowed-list` | `0 12px 40px #0004` | 手机浮层加深阴影，与桌面 `--shadow-popover` 不同 |

@@ -463,8 +463,8 @@
   background: rgb(0 0 0 / 0.6);
   /* stylelint-disable-next-line color-no-hex -- 深色图片遮罩上的固定白字 */
   color: #fff;
-  /* stylelint-disable-next-line declaration-property-value-allowed-list -- 附件移除 ✕ 字符在 24px 圆钮内光学居中 */
-  font-size: 15px;
+  display: grid;
+  place-items: center;
   line-height: 1;
 }
 .phone-attachment small {

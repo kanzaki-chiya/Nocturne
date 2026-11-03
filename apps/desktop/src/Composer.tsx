@@ -997,7 +997,7 @@ export function Composer({
             void interrupt();
           }}
         >
-          ■
+          <Icon name="stop" size={ICON_MD} />
         </button>
       )}
       {(running ? canSend : true) && (
@@ -1208,7 +1208,7 @@ export function Composer({
                       removeAttachment(index);
                     }}
                   >
-                    ✕
+                    <Icon name="close" size={ICON_SM} />
                   </button>
                 </span>
               ))}
