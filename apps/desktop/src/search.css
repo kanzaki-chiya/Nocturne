@@ -206,14 +206,3 @@
   border-radius: var(--radius-2);
   box-shadow: 0 0 0 var(--space-2) var(--cm-search);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .search-dialog {
-    animation: search-rise var(--dur) ease-out;
-  }
-  @keyframes search-rise {
-    from {
-      transform: translateY(var(--space-1));
-      opacity: 0.6;
-    }
-  }
-}

@@ -25,6 +25,8 @@ export interface MountedTerminal {
 }
 
 export interface TerminalCallbacks {
+  /** Opening/closing clips a fixed-size view; fit once after it has settled. */
+  canFit?: () => boolean;
   onData: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
   /** 复制选区；clear 为 true 时复制后清掉选区 */
@@ -141,6 +143,7 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
     callbacks.onResize(cols, rows);
   });
   const fit = () => {
+    if (callbacks.canFit?.() === false) return;
     if (parent.clientWidth === 0 || parent.clientHeight === 0) return;
     try {
       fitAddon.fit();

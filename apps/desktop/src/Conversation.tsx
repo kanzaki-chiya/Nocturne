@@ -2339,8 +2339,15 @@ function ToolRow({
 }) {
   const [open, setOpen] = useState(searchExpand);
   const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
+  const renderedDetails = useRef(new Set<string>());
+  const rowElement = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (searchExpand) setOpen(true);
+    if (searchExpand) {
+      for (const details of rowElement.current?.querySelectorAll("details") ?? []) {
+        delete details.dataset.motionFold;
+      }
+      setOpen(true);
+    }
   }, [searchExpand]);
   const shownName = effectiveToolName(entry);
   const meta = toolMeta(shownName, entry.subjects);
@@ -2457,6 +2464,7 @@ function ToolRow({
   const rows: (FileDiff | undefined)[] = diffs.length > 0 ? diffs : [undefined];
   return (
     <article
+      ref={rowElement}
       className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}${searchHit ? " search-hit" : ""}`}
       data-session-seq={entry.seq}
       data-completed-seq={entry.completedSeq}
@@ -2464,6 +2472,8 @@ function ToolRow({
     >
       {rows.map((file, index) => {
         const isOpen = file === undefined ? open : (fileOpen[file.label] ?? open);
+        const detailKey = file?.label ?? "row";
+        if (isOpen) renderedDetails.current.add(detailKey);
         return (
           <details
             key={index === 0 ? "row" : `file:${file?.label ?? index}`}
@@ -2494,7 +2504,7 @@ function ToolRow({
                 }));
               }}
             />
-            {isOpen ? (
+            {renderedDetails.current.has(detailKey) ? (
               todos !== undefined ? (
                 <TodoList items={todos} />
               ) : (

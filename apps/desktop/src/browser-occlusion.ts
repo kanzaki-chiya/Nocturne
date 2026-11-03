@@ -45,11 +45,15 @@ export const OVERLAY_SELECTOR = [
   '[role="listbox"]',
   '[role="tooltip"]',
   ".composer-popup",
+  ".ddm",
   ".ctxmenu",
   ".imenu",
   ".gmenu",
   ".skill-toast",
   ".dialog-backdrop",
+  ".scrim",
+  ".search-backdrop",
+  ".qopen-backdrop",
   ".dlg",
   ".desktop-dialog",
 ].join(",");
@@ -77,7 +81,22 @@ export function overlaysOver(root: ParentNode, slot: Rect, exclude?: Element | n
     if (hits.some((hit) => hit.contains(node))) continue;
     const rect = node.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) continue;
-    if (intersects(rect, slot)) hits.push(node);
+    // Include the whole entrance envelope, not only the translated/scaled intermediate frame.
+    const entering = getComputedStyle(node).animationName.includes("nct-enter-");
+    const dx = entering ? 6 + rect.width * 0.015 : 0;
+    const dy = entering ? 6 + rect.height * 0.015 : 0;
+    if (
+      intersects(
+        {
+          left: rect.left - dx,
+          right: rect.right + dx,
+          top: rect.top - dy,
+          bottom: rect.bottom + dy,
+        },
+        slot,
+      )
+    )
+      hits.push(node);
   }
   return hits;
 }

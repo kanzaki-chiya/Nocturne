@@ -2,6 +2,7 @@
    深色为默认，浅色跟随 prefers-color-scheme；只用本机字体，不引远程资源。 */
 @import "./tokens.css";
 @import "./ui.css";
+@import "./motion.css";
 
 * {
   box-sizing: border-box;

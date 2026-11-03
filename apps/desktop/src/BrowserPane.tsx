@@ -84,6 +84,8 @@ function ToolGlyph({
 }
 
 export interface BrowserPaneProps {
+  moving?: boolean;
+  snapshot?: string | undefined;
   tab: BrowserTab;
   pool: BrowserPool;
   /** 标签可见（面板开着、是当前会话的选中标签）：可见时显示 webview */
@@ -94,7 +96,15 @@ export interface BrowserPaneProps {
   openExternal: (url: string) => Promise<void>;
 }
 
-export function BrowserPane({ tab, pool, visible, workspace, openExternal }: BrowserPaneProps) {
+export function BrowserPane({
+  tab,
+  pool,
+  visible,
+  workspace,
+  openExternal,
+  moving = false,
+  snapshot,
+}: BrowserPaneProps) {
   const root = useRef<HTMLDivElement>(null);
   const slot = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<string>();
@@ -128,7 +138,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
   // ── 位置：可见时跟着占位区走；用 layout effect，隐藏命令在这一帧绘制前发出 ──
   useLayoutEffect(() => {
     const node = slot.current;
-    if (!visible || node === null) {
+    if (!visible || moving || node === null) {
       pool.hide(tab.id);
       return;
     }
@@ -147,14 +157,20 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
       window.removeEventListener("resize", place);
       pool.hide(tab.id);
     };
-  }, [visible, pool, tab.id]);
+  }, [visible, moving, pool, tab.id]);
 
   // ── 遮挡：可见时盯着主界面浮层；网页全屏时 webview 盖满窗口，浮层本来就看不见，
   // 再截图隐藏反而会让外壳把网页退出全屏 ──
   const fullscreen = status.fullscreen === true;
   useEffect(() => {
     const node = slot.current;
-    if (!visible || fullscreen || node === null || typeof MutationObserver === "undefined") {
+    if (
+      !visible ||
+      moving ||
+      fullscreen ||
+      node === null ||
+      typeof MutationObserver === "undefined"
+    ) {
       return;
     }
     let alive = true;
@@ -256,7 +272,7 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
       if (placeholder !== undefined) URL.revokeObjectURL(placeholder);
       setCover(undefined);
     };
-  }, [visible, fullscreen, pool, tab.id]);
+  }, [visible, moving, fullscreen, pool, tab.id]);
 
   const submit = () => {
     const text = editing ?? status.url;
@@ -384,7 +400,9 @@ export function BrowserPane({ tab, pool, visible, workspace, openExternal }: Bro
         </p>
       )}
       <div className="sp-browser-slot" ref={slot}>
-        {cover !== undefined && <img className="sp-browser-cover" src={cover} alt="" />}
+        {(cover ?? snapshot) !== undefined && (
+          <img className="sp-browser-cover" src={cover ?? snapshot} alt="" />
+        )}
         {status.error !== undefined && (
           <div className="sp-empty sp-file-missing">
             <p>打不开这个网页：{status.error}</p>

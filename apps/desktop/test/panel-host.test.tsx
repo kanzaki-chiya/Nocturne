@@ -42,6 +42,43 @@ vi.mock("../src/terminal-view", () => ({
 
 afterEach(cleanup);
 
+it("clips a visible panel through both directions without reusing the startup splash class", () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("no-preference"),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  try {
+    const { prefs, host } = setup();
+    prefs.update({
+      panelSessionsMigrated: true,
+      panelSessions: {
+        a: { open: false, tabs: [] },
+      },
+    });
+    const { container } = render(<Harness prefs={prefs} host={host} sessionId="a" sessions={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "右侧面板" }));
+    const rail = container.querySelector<HTMLElement>(".sp-rail");
+    const panel = container.querySelector<HTMLElement>(".side-panel");
+    expect(rail?.classList.contains("sp-opening")).toBe(true);
+    expect(rail?.classList.contains("opening")).toBe(false);
+    expect(panel?.hidden).toBe(false);
+    if (rail === null) throw new Error("missing panel rail");
+    // jsdom lacks AnimationEvent, so React may register its WebKit fallback event.
+    fireEvent.animationEnd(rail, { animationName: "sp-rail-open" });
+    fireEvent(rail, new Event("webkitAnimationEnd", { bubbles: true }));
+    fireEvent.click(screen.getByRole("button", { name: "右侧面板" }));
+    expect(rail.classList.contains("sp-closing")).toBe(true);
+    expect(panel?.hidden).toBe(false);
+    expect(panel?.hasAttribute("inert")).toBe(true);
+    fireEvent.animationEnd(rail, { animationName: "sp-rail-close" });
+    fireEvent(rail, new Event("webkitAnimationEnd", { bubbles: true }));
+    expect(rail.hidden).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 function memoryStorage(initial?: Record<string, string>): Storage & { data: Map<string, string> } {
   const data = new Map(Object.entries(initial ?? {}));
   return {
