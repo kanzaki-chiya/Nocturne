@@ -85,9 +85,10 @@
   border-radius: var(--radius-1);
   background: var(--a-border);
   color: var(--a-secondary);
-  font-size: var(--fs-1);
+  font-size: var(--fs-file-badge);
   font-weight: var(--fw-semibold);
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .composer .thumb2 .fname {

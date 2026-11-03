@@ -1505,9 +1505,10 @@ button.fcard:hover {
   place-items: center;
   border-radius: var(--radius-1);
   background: var(--a-border);
-  font-size: var(--fs-1);
+  font-size: var(--fs-file-badge);
   font-weight: var(--fw-semibold);
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 .fcard .fname {
   min-width: 0;
