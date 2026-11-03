@@ -8,8 +8,54 @@
   grid-template-columns: var(--w-sidebar) minmax(0, 1fr) auto;
 }
 
-.side-panel {
+/* The rail is the only moving width. Its child keeps its final layout throughout, so
+   CodeMirror/xterm do not reflow (or fit) for every frame of an open/close. */
+.sp-rail {
   position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.sp-rail[hidden] {
+  display: none;
+}
+.sp-rail.overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  max-width: calc(100% - var(--w-sidebar));
+}
+.sp-rail.overlay .side-panel {
+  max-width: none;
+  border-left-color: var(--a-border-strong);
+  box-shadow: var(--shadow-edge);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sp-rail.sp-opening {
+    animation: sp-rail-open var(--dur-panel) var(--ease-both) both;
+  }
+  .sp-rail.sp-closing {
+    animation: sp-rail-close var(--dur-panel) var(--ease-both) both;
+  }
+  @keyframes sp-rail-open {
+    from {
+      width: 0;
+    }
+  }
+  @keyframes sp-rail-close {
+    to {
+      width: 0;
+    }
+  }
+}
+
+.side-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   display: grid;
   grid-template-rows: 38px minmax(0, 1fr);
   min-width: 0;
@@ -18,22 +64,13 @@
   border-left: 1px solid var(--a-border);
   background: var(--a-bg);
   color: var(--a-text);
-}
-.side-panel.overlay {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 20;
-  max-width: calc(100% - var(--w-sidebar));
-  border-left-color: var(--a-border-strong);
-  box-shadow: var(--shadow-edge);
+  height: 100%;
 }
 .sp-splitter {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -4px;
+  left: 0;
   z-index: 22;
   width: 8px;
   cursor: col-resize;

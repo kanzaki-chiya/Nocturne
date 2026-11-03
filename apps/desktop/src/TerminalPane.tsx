@@ -48,6 +48,7 @@ export interface TerminalShellChoice {
 }
 
 export interface TerminalPaneProps {
+  moving?: boolean;
   tab: TerminalTab;
   host: TerminalHost;
   /** runtime.listShells + describeSettings（后台还没连上时等它连上），按终端工作目录取 */
@@ -57,9 +58,18 @@ export interface TerminalPaneProps {
   onShellChange: (tabId: string, executable: string) => void;
 }
 
-export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: TerminalPaneProps) {
+export function TerminalPane({
+  tab,
+  host,
+  loadShells,
+  visible,
+  moving = false,
+  onShellChange,
+}: TerminalPaneProps) {
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<MountedTerminal | null>(null);
+  const movingRef = useRef(moving);
+  movingRef.current = moving;
   const session = useRef<TerminalSession | null>(null);
   const [shells, setShells] = useState<ShellOption[]>();
   const [setting, setSetting] = useState<string>();
@@ -145,6 +155,7 @@ export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: 
     void import("./terminal-view").then(({ mountTerminal }) => {
       if (disposed) return;
       view.current = mountTerminal(parent, {
+        canFit: () => !movingRef.current,
         onData: (data) => {
           controller.write(data);
         },
@@ -178,10 +189,10 @@ export function TerminalPane({ tab, host, loadShells, visible, onShellChange }: 
   }, [ready, executable, tab.cwd, restarts]);
 
   useEffect(() => {
-    if (!visible || !ready) return;
+    if (!visible || moving || !ready) return;
     view.current?.fit();
     view.current?.focus();
-  }, [visible, ready]);
+  }, [visible, moving, ready]);
 
   const options = (shells ?? []).map((s) => ({
     value: s.executable ?? s.kind,

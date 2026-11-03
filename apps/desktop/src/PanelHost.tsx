@@ -8,6 +8,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -274,6 +275,62 @@ export function useSidePanel({
   /** 会话面板记录里的开关；显示与否还要看 hasPanel */
   const open = current?.open === true;
   const shown = open && hasPanel;
+  // Only a change within the same conversation is an interactive open/close. Restoring a
+  // conversation or entering/leaving settings must not replay the panel animation.
+  const previousPanel = useRef({ sessionId, settingsOpen, shown });
+  const [panelSnapshot, setPanelSnapshot] = useState<{ tabId: string; url: string }>();
+  useEffect(
+    () => () => {
+      if (panelSnapshot !== undefined) URL.revokeObjectURL(panelSnapshot.url);
+    },
+    [panelSnapshot],
+  );
+  const [panelMotion, setPanelMotion] = useState<{
+    sessionId: string;
+    closing: boolean;
+  }>();
+  const motionTab = current?.tabs.find((tab) => tab.id === current.activeId);
+  const nativeBrowser = motionTab?.kind === "browser";
+  const canAnimate =
+    sessionId !== null &&
+    !settingsOpen &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: no-preference)").matches &&
+    (!nativeBrowser || (motionTab.agent === undefined && panelSnapshot?.tabId === motionTab.id));
+  const previous = previousPanel.current;
+  const changing =
+    previous.shown !== shown &&
+    previous.sessionId === sessionId &&
+    previous.settingsOpen === settingsOpen &&
+    canAnimate;
+  const motion = changing ? { sessionId, closing: !shown } : panelMotion;
+  useLayoutEffect(() => {
+    const previous = previousPanel.current;
+    previousPanel.current = { sessionId, settingsOpen, shown };
+    if (
+      previous.shown === shown ||
+      previous.sessionId !== sessionId ||
+      previous.settingsOpen !== settingsOpen ||
+      !canAnimate
+    ) {
+      setPanelMotion(undefined);
+      return;
+    }
+    setPanelMotion({ sessionId, closing: !shown });
+  }, [sessionId, settingsOpen, shown, canAnimate]);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-reduced-motion: no-preference)");
+    const changed = () => {
+      setPanelMotion(undefined);
+    };
+    media.addEventListener("change", changed);
+    return () => {
+      media.removeEventListener("change", changed);
+    };
+  }, []);
+  const closing = motion?.sessionId === sessionId && motion.closing && !shown;
+  const panelVisible = shown || closing;
   const tabs = useMemo(() => current?.tabs ?? [], [current]);
   const activeId = current?.activeId ?? "";
   /** 当前选中的是 agent 标签时，外壳里的对应标签信息 */
@@ -411,9 +468,56 @@ export function useSidePanel({
         update((panel) => ({ ...panel, open: next }));
       };
       if (next) apply();
-      else hideBrowserThen(apply);
+      else {
+        const tab = current?.tabs.find((tab) => tab.id === current.activeId);
+        const pool = poolRef.current;
+        if (
+          tab?.kind !== "browser" ||
+          tab.agent !== undefined ||
+          pool === undefined ||
+          typeof window.matchMedia !== "function" ||
+          !window.matchMedia("(prefers-reduced-motion: no-preference)").matches
+        ) {
+          hideBrowserThen(apply);
+          return;
+        }
+        // Decode and paint the same screenshot placeholder used for overlay occlusion before hiding.
+        void (async () => {
+          let url: string | undefined;
+          let timer: number | undefined;
+          try {
+            const png = await Promise.race([
+              pool.capture(tab.id),
+              new Promise<undefined>((resolve) => {
+                timer = window.setTimeout(resolve, 300);
+              }),
+            ]);
+            if (png !== undefined) {
+              url = URL.createObjectURL(new Blob([png as BlobPart], { type: "image/png" }));
+              const image = new Image();
+              image.src = url;
+              await image.decode();
+              setPanelSnapshot({ tabId: tab.id, url });
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    resolve();
+                  });
+                }),
+              );
+            } else setPanelSnapshot(undefined);
+          } catch {
+            if (url !== undefined) URL.revokeObjectURL(url);
+            setPanelSnapshot(undefined);
+          } finally {
+            clearTimeout(timer);
+          }
+          await pool.hideShown();
+          apply();
+        })();
+      }
     },
-    [update, hideBrowserThen],
+    [update, hideBrowserThen, current],
   );
   const setOverviewOpen = useCallback(
     (next: boolean) => {
@@ -441,7 +545,7 @@ export function useSidePanel({
   const available = bodySize.width > 0 ? bodySize.width - bodySize.sidebar : undefined;
   const shownWidth = clampPanelWidth(width, available);
   const overlay = bodySize.width > 0 && panelOverlays(bodySize.width, bodySize.sidebar, shownWidth);
-  const docked = shown && !overlay;
+  const docked = panelVisible && !overlay;
   // 标题栏：并排时窗口按钮让到面板上方
   useEffect(() => {
     const root = document.documentElement;
@@ -1252,7 +1356,20 @@ export function useSidePanel({
   // 没有面板时整个隐藏（首页、新建会话页、设置页），但各会话的终端仍然挂着
   const panel = (
     <SidePanel
-      hidden={!shown}
+      hidden={!panelVisible}
+      motion={
+        motion?.sessionId === sessionId
+          ? closing
+            ? "closing"
+            : shown
+              ? "opening"
+              : undefined
+          : undefined
+      }
+      onMotionEnd={() => {
+        setPanelMotion(undefined);
+      }}
+      browserSnapshot={panelSnapshot}
       tabs={tabs}
       panes={panes}
       activeId={activeId}
