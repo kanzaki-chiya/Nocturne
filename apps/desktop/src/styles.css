@@ -1038,6 +1038,12 @@ details[open] > summary:not(.tool-line)::before {
 .desktop-dialog h3 {
   margin: 0 0 10px;
 }
+.desktop-dialog .acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
 .desktop-dialog pre {
   white-space: pre-wrap;
   font: var(--fs-2)/1.8 var(--mono);
