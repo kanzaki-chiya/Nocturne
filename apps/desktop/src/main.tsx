@@ -5,6 +5,7 @@ import { App } from "./App";
 import { applyStoredAppearance } from "./appearance";
 import { installInlineStyleShim } from "./inline-style-shim";
 import { installKeyDiag } from "./key-diag";
+import { installMotion } from "./motion";
 import { createTauriHost } from "./tauri-host";
 import { WindowFrame } from "./WindowFrame";
 import "./styles.css";
@@ -17,6 +18,7 @@ import.meta.hot?.on("vite:beforeUpdate", () => {
 
 // CodeMirror、xterm 运行时插的 <style> 在正式包 CSP 下会被拦，见 inline-style-shim.ts
 installInlineStyleShim();
+installMotion();
 
 // 主题与字体在首次渲染前就位，不闪默认外观；之后由 App 随设置更新
 applyStoredAppearance(document.documentElement);

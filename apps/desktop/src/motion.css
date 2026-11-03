@@ -1,0 +1,76 @@
+@media (prefers-reduced-motion: no-preference) {
+  :is(.menu, .ddm, .composer-popup, .ctxmenu):not([data-motion-entered]) {
+    animation: nct-enter-menu var(--dur-menu) var(--ease-out);
+  }
+  :is(.menu, .ddm)[style*="bottom:"],
+  .composer-popup {
+    --motion-y: 4px;
+  }
+  .ctxmenu.sub {
+    --motion-y: 0px;
+    --motion-x: -4px;
+  }
+  :is(.dlg, .desktop-dialog, .search-dialog, .qopen):not([data-motion-entered]) {
+    animation: nct-enter-dialog var(--dur-dialog) var(--ease-out);
+  }
+  :is(.scrim, .dialog-backdrop, .search-backdrop, .qopen-backdrop):not([data-motion-entered]) {
+    animation: nct-enter-backdrop var(--dur-dialog) var(--ease-out);
+  }
+  /* A held overlay starts only after the native webview has been replaced by its screenshot. */
+  [data-nct-cover-hold],
+  [data-nct-cover-hold] * {
+    animation-play-state: paused !important;
+  }
+  .conversation .fold-arrow,
+  .conversation summary::before {
+    transition: transform var(--dur-fold) var(--ease-both);
+  }
+  @supports (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {
+    .conversation details::details-content {
+      interpolate-size: allow-keywords;
+      height: 0;
+      opacity: 0;
+      overflow: clip;
+    }
+    .conversation details[data-motion-fold]::details-content {
+      transition:
+        height var(--dur-fold) var(--ease-both),
+        opacity var(--dur-fold) var(--ease-both),
+        content-visibility var(--dur-fold) allow-discrete;
+    }
+    .conversation details[open]::details-content {
+      height: auto;
+      opacity: 1;
+    }
+  }
+  @keyframes nct-enter-menu {
+    from {
+      opacity: 0;
+      translate: var(--motion-x, 0px) var(--motion-y, -4px);
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
+    }
+  }
+  @keyframes nct-enter-dialog {
+    from {
+      opacity: 0;
+      translate: 0 6px;
+      scale: 0.985;
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
+      scale: 1;
+    }
+  }
+  @keyframes nct-enter-backdrop {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
