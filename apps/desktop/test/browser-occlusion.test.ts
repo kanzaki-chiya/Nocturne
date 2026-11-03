@@ -69,6 +69,19 @@ describe("找伸进浏览器区域的浮层", () => {
       toJSON: () => ({}),
     }) as DOMRect;
 
+  it("keeps the dropdown frame and backdrop held, and includes an entrance's final bounds", () => {
+    const menu = document.createElement("div");
+    menu.className = "ddm";
+    menu.style.animationName = "nct-enter-menu";
+    menu.getBoundingClientRect = () => rect(500, 100, 99, 40);
+    document.body.append(menu);
+    expect(overlaysOver(document, { left: 600, top: 80, right: 1000, bottom: 600 })).toEqual([
+      menu,
+    ]);
+    menu.style.animationName = "none";
+    expect(overlaysOver(document, { left: 600, top: 80, right: 1000, bottom: 600 })).toEqual([]);
+  });
+
   it("只算和区域相交、有尺寸的浮层；嵌套只算外层；浏览器面板自己的元素不算", () => {
     document.body.innerHTML = `
       <div id="menu" role="menu"><div id="inner" role="listbox"></div></div>
