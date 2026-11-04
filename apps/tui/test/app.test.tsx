@@ -834,6 +834,27 @@ describe("TUI", () => {
     for (const next of created) await next.close();
   });
 
+  it("/resume 列表不显示当前目录的归档会话", async () => {
+    const { runtime, session } = await makeSession();
+    const archived = await runtime.createSession({ model: "fake/fake-model" });
+    await archived.close();
+    await runtime.archiveSession(archived.id);
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, switchSession: vi.fn() }),
+    );
+    try {
+      await pause(50);
+      stdin.write("/resume");
+      stdin.write("\r");
+      await waitFor(() => (lastFrame() ?? "").includes("切换到会话（当前目录）"));
+      await waitFor(() => (lastFrame() ?? "").includes(session.id));
+      expect(lastFrame()).not.toContain(archived.id);
+    } finally {
+      unmount();
+      await session.close();
+    }
+  });
+
   it("/resume 列表只显示当前目录的会话", async () => {
     const sessionsDir = tmp("nct-tui-sd-");
     const mk = (cwd: string) =>

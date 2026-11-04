@@ -11,6 +11,7 @@ import type { RpcMethodName } from "../shared/methods.js";
 /** 没有（或没有一一对应的）RPC 方法的 Runtime 成员，附原因 */
 export const RUNTIME_NOT_MAPPED = {
   onGrantsChanged: "事件订阅：Hub 广播 grants.changed 给全部已握手连接",
+  onSessionsChanged: "事件订阅：Hub 广播 runtime.sessionsChanged，含发送时自动恢复归档",
   onScheduleChanged: "事件订阅：Hub 订阅后以 schedule.changed 通知广播给所有已握手的连接",
   stopScheduler: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
 } as const satisfies Partial<Record<keyof Runtime, string>>;
@@ -47,6 +48,8 @@ export const RUNTIME_METHODS: Record<
   resumeSession: "runtime.resumeSession",
   forkSession: "runtime.forkSession",
   renameSession: "runtime.renameSession",
+  archiveSession: "runtime.archiveSession",
+  unarchiveSession: "runtime.unarchiveSession",
   cancelSubagent: "subagent.cancel",
   readSubagentDiff: "subagent.diff",
   listSubagentWorktrees: "subagent.worktrees",

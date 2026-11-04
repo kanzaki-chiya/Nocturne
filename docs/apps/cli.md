@@ -70,6 +70,7 @@ nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端
 规则：
 
 - 工作目录即进程 cwd；`workspaceRoot` 取 cwd 的真实路径。
+- **归档会话**（[ADR-0080](../decisions/ADR-0080-session-archive.md)）：`--sessions`、`--continue` 和 `/resume` 选择列表使用缺省 `includeArchived: false`，不显示已归档会话；`--resume <id>` 与 `/resume <id>` 直接按 ID 打开，仍可打开归档会话。打开不恢复，发送消息自动恢复；CLI 不提供归档入口。
 - **恢复与会话目录绑定**：`--resume` / `--continue` 打开的会话记录了它自己的 `cwd`/`workspaceRoot`（sessions.md 第 7 节）。会话目录与进程 cwd 不一致时：交互模式提示并默认拒绝（显式确认后继续，工具仍以会话记录的目录为准）；非交互模式直接报错（退出码 2）。
 - **锁冲突**：会话被其他进程占用时报 `session_locked` 并显示锁内容（pid、主机名、启动时间），退出码 2；确认持有者已退出时用 `--force-unlock`。
 - **恢复失败的其余情形**（不存在、`session_log_corrupt`、`session_log_newer`）同样以退出码 2 退出并打印原因。

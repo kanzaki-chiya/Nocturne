@@ -196,6 +196,33 @@ describe("packages/mcp-server 单元与集成测试", () => {
     expect(getToolText(callRes)).toBe(DESKTOP_NOT_RUNNING_MESSAGE);
   });
 
+  it("对外 MCP 会话列表不显示归档会话", async () => {
+    const backend = await createTestBackend();
+    cleanups.push(() => backend.close());
+    const { session } = await backend.desktopClient.runtime.createSession({
+      model: "fake/fake-model",
+      cwd: backend.workspace,
+    });
+    await backend.desktopClient.runtime.archiveSession(session.id);
+    const mcpServer = createNocturneMcpServer({ home: backend.home, name: "archive-test" });
+    cleanups.push(() => mcpServer.close());
+    await mcpServer.bridge.callTool("nocturne_list_sessions", {});
+    const identity = await mcpServer.bridge.getIdentity();
+    await backend.desktopClient.call("agent.respondPairing", {
+      agentId: identity.identity.id,
+      approved: true,
+      scope: "read-only",
+      maxPermissionPreset: "default",
+    });
+    const result = await mcpServer.bridge.callTool("nocturne_list_sessions", {});
+    expect(result.isError).not.toBe(true);
+    const payload = parseToolJson(result);
+    expect(payload.sessions).not.toContainEqual(expect.objectContaining({ sessionId: session.id }));
+    expect(
+      await backend.desktopClient.runtime.listSessions({ includeArchived: true }),
+    ).toContainEqual(expect.objectContaining({ id: session.id }));
+  });
+
   it("桥身份文件持久化：默认保存 identity.json，指定 --name 保存独立槽 <label>.json", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "nct-mcp-id-"));
     cleanups.push(() => rm(home, { recursive: true, force: true }));

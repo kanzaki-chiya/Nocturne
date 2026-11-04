@@ -33,12 +33,13 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `listSessions` | `{ cwd?, includeSubagents? }` → `(SessionSummary & { openHere?: boolean })[]`；`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
-| `searchSessions` | `{ query: string, searchId?: string }` → 完整 `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串。`searchId` 由客户端为每次查询生成，提供时经 `runtime.sessionSearchProgress` 交付有序增量，省略时不发进度通知。同一连接发起新查询或断线时立即中止上一次扫描、丢弃待发批次（被取代的旧查询返回 `[]`）；最终响应始终为完整结果 |
+| `listSessions` | `{ cwd?, includeSubagents?, includeArchived? }`（归档默认排除，本机可显式包含并返回 `archivedAt`；非本机强制排除，ADR-0080） → `(SessionSummary & { openHere?: boolean })[]`；`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
+| `searchSessions` | `{ query: string, searchId?: string, includeArchived?: boolean }`（默认不搜归档，本机可显式包含） → 完整 `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串。`searchId` 由客户端为每次查询生成，提供时经 `runtime.sessionSearchProgress` 交付有序增量，省略时不发进度通知。同一连接发起新查询或断线时立即中止上一次扫描、丢弃待发批次（被取代的旧查询返回 `[]`）；最终响应始终为完整结果 |
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
 | `renameSession` | `{ sessionId, title }` → `null`；调用 Core 的 `Runtime.renameSession`，成功后通知会话列表变化；参数必须为字符串，标题内容的校验由 Core 负责 |
+| `archiveSession` / `unarchiveSession` | `{ sessionId }` → `null`；仅本机连接可调用。调用 Core 的同名方法，成功后发送 `runtime.sessionsChanged`；忙状态返回 `session_busy`，子会话返回 `invalid_command`（ADR-0080）。不写会话事件 |
 | `usageStats` | `{ days?: number }`（正整数，缺省全部）→ protocol 的 `UsageStats`（含按模型的 `requests`、`latency`、`performance`、`cacheSavings`、首末使用时间，范围内逐日的 `requests` 与 `models` 拆分，以及 `performanceGranularity`）；只读，不打开会话或取锁，见 [usage.md](../architecture/usage.md) |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot`；`listModels` 另可带 `includeDisabled`（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)：true 时含停用模型并带 `disabled`，默认滤除；停用模型也带 `unavailable`） |
 | `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }`；`describeSettings` 的模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
@@ -409,9 +410,9 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | 方法 | 远程 |
 |---|---|
 | `initialize` | 仅连接握手，不创建 Runtime |
-| `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件 |
+| `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件，远程即使传 `includeArchived: true` 仍强制排除归档 |
 | `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限 |
-| `runtime.createSession` | 允许全部选项。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是列表可见的非子代理会话用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
+| `runtime.createSession` | 允许全部选项。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
 | `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`、`workMode`） |
@@ -430,13 +431,15 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `grants.workspaces`、`grants.list`、`grants.revoke`、`grants.revokeAll`、`session.listGrants`、`session.revokeGrant`、`session.revokeAllGrants` | 允许：查看和收紧授权，不允许新增项目授权 |
 | `grants.setTrusted`、`grants.describeProject` | 拒绝且不调用 Core；信任会放宽，项目命令无需发送手机 |
 | `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
+| `runtime.archiveSession`、`runtime.unarchiveSession` | 拒绝且不调用 Core（ADR-0080）；手机与安卓没有归档或恢复入口 |
 | `runtime.readFile`、`runtime.searchSessions` | 拒绝：`readFile` 只服务本机右侧面板（ADR-0060），`searchSessions` 只服务桌面端跨会话搜索（ADR-0077），手机没有这两个入口 |
 | 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
   - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`session.submit`、`session.enqueueInput`、`session.interrupt`（含别名 `session.abort`）。
-  - **一律拒绝**：`session.respondPermission`、`session.respondQuestion`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
+  - `runtime.listSessions` 在 agent 连接中强制排除已归档会话，忽略 `includeArchived: true`；按已知 ID 打开不改既有规则。
+  - **一律拒绝**：`runtime.archiveSession`、`runtime.unarchiveSession`、`session.respondPermission`、`session.respondQuestion`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
   - **新建会话约束**：`runtime.createSession` 的 `permissionPreset` 不得高于该 agent 登记的权限上限（超出报 `-32602 / invalid_params`），不传时取「权限上限」与「用户默认预设」中较低者；工作区信任规则同远程（`workspace_untrusted`）；服务端自动填入 `session.created.client`，忽略客户端同名参数。
   - **本机管理方法（`agent.*`）**：`agent.describe`（别名 `agent.list`，含 `pipe` 管道状态）、`agent.respondPairing`、`agent.setScope`（别名 `agent.update`）、`agent.revoke` 仅开放给本机连接（`origin === "local"`），通知 `agent.pairingRequested` 与 `agent.statusChanged` 仅发给本机连接。本机管道是附加能力，初始化时若因管道已被另一后台占用（`address_in_use`）、Windows SID 不可用（`sid_unavailable`）、ACL 收紧失败（`acl_failed`）或其他原因（`other`）未能启动，服务端关闭半成品句柄并记 stderr 日志，`initialize` 照常成功，失败状态与原因经 `agent.describe` 的 `pipe` 及 `remote.describe` 的 `agentPipe` 返回。
 

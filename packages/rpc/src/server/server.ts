@@ -1274,7 +1274,9 @@ class Connection implements HubPeer {
       "runtime.listSessions": async (p) => {
         const cwd = optString(p, "cwd");
         const includeSubagents = optBool(p, "includeSubagents");
+        const includeArchived = this.origin === "local" && optBool(p, "includeArchived") === true;
         const summaries = await this.runtime().listSessions({
+          includeArchived,
           ...(cwd !== undefined ? { cwd } : {}),
           ...(includeSubagents !== undefined ? { includeSubagents } : {}),
         });
@@ -1309,6 +1311,7 @@ class Connection implements HubPeer {
         controller.signal.addEventListener("abort", clear, { once: true });
         try {
           const results = await this.runtime().searchSessions(query, {
+            includeArchived: this.origin === "local" && optBool(p, "includeArchived") === true,
             signal: controller.signal,
             onProgress: (batch) => {
               if (controller.signal.aborted || searchId === undefined) return;
@@ -1477,6 +1480,16 @@ class Connection implements HubPeer {
         const sessionId = reqString(p, "sessionId");
         const title = reqString(p, "title");
         await this.runtime().renameSession(sessionId, title);
+        this.hub.notifySessionsChanged();
+        return null;
+      },
+      "runtime.archiveSession": async (p) => {
+        await this.runtime().archiveSession(reqString(p, "sessionId"));
+        this.hub.notifySessionsChanged();
+        return null;
+      },
+      "runtime.unarchiveSession": async (p) => {
+        await this.runtime().unarchiveSession(reqString(p, "sessionId"));
         this.hub.notifySessionsChanged();
         return null;
       },

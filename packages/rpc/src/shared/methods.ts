@@ -379,11 +379,11 @@ export interface RpcMethods {
   "runtime.shutdown": { params: Record<string, never>; result: null };
 
   "runtime.listSessions": {
-    params: { cwd?: string; includeSubagents?: boolean };
+    params: { cwd?: string; includeSubagents?: boolean; includeArchived?: boolean };
     result: (SessionSummary & { openHere?: boolean })[];
   };
   "runtime.searchSessions": {
-    params: { query: string; searchId?: string };
+    params: { query: string; searchId?: string; includeArchived?: boolean };
     result: SessionSearchResult[];
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
@@ -405,6 +405,8 @@ export interface RpcMethods {
     result: { sessionId: string };
   };
   "runtime.renameSession": { params: { sessionId: string; title: string }; result: null };
+  "runtime.archiveSession": { params: { sessionId: string }; result: null };
+  "runtime.unarchiveSession": { params: { sessionId: string }; result: null };
   /**
    * workspaceRoot（ADR-0051）：下列运行时级查询/写方法可携带 workspaceRoot，
    * 指定按哪个工作区合并配置层；缺省为后台启动目录。旧客户端不传不受影响。
@@ -847,6 +849,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.resumeSession": true,
   "runtime.forkSession": true,
   "runtime.renameSession": true,
+  "runtime.archiveSession": true,
+  "runtime.unarchiveSession": true,
   "runtime.listModels": true,
   "runtime.defaultModel": true,
   "runtime.listRecentModels": true,

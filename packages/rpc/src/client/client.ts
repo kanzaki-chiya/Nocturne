@@ -297,6 +297,7 @@ export interface RpcRuntime {
   listSessions(filter?: {
     cwd?: string;
     includeSubagents?: boolean;
+    includeArchived?: boolean;
   }): Promise<RpcResult<"runtime.listSessions">>;
   searchSessions(
     input: RpcParams<"runtime.searchSessions">,
@@ -317,6 +318,8 @@ export interface RpcRuntime {
   ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
   renameSession(sessionId: string, title: string): Promise<void>;
+  archiveSession(sessionId: string): Promise<void>;
+  unarchiveSession(sessionId: string): Promise<void>;
   /** 取消本父会话运行中的后台子代理（ADR-0073），结果照常交付 cancelled */
   cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
   readSubagentDiff: Runtime["readSubagentDiff"];
@@ -942,6 +945,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       (await call("runtime.forkSession", { sessionId: id, ...forkOptions })).sessionId,
     renameSession: async (sessionId, title) => {
       await call("runtime.renameSession", { sessionId, title });
+    },
+    archiveSession: async (sessionId) => {
+      await call("runtime.archiveSession", { sessionId });
+    },
+    unarchiveSession: async (sessionId) => {
+      await call("runtime.unarchiveSession", { sessionId });
     },
     readSubagentDiff: (input) => call("subagent.diff", input),
     listSubagentWorktrees: (input) => call("subagent.worktrees", input),

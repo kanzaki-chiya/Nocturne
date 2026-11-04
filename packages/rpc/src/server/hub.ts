@@ -84,6 +84,7 @@ export class Hub {
   private readonly watchers = new Map<string, () => void>();
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribeSchedule: (() => void) | undefined;
+  private unsubscribeSessions: (() => void) | undefined;
   private unsubscribeGrants: (() => void) | undefined;
 
   get available(): boolean {
@@ -180,6 +181,8 @@ export class Hub {
   /** 握手创建 Runtime 成功后登记句柄与服务商配置 */
   setHandle(handle: RpcRuntimeHandle): void {
     this.handle = handle;
+    this.unsubscribeSessions?.();
+    this.unsubscribeSessions = handle.runtime.onSessionsChanged(() => this.notifySessionsChanged());
     this.unsubscribeGrants?.();
     this.unsubscribeGrants = handle.runtime.onGrantsChanged((payload) => {
       if (this.stopping) return;
@@ -344,7 +347,10 @@ export class Hub {
   async allowWorkspace(input: string): Promise<boolean> {
     const root = await this.platform.resolveReal(input).catch(() => undefined);
     if (root === undefined) return false;
-    const summaries = await this.runtime().listSessions({ includeSubagents: false });
+    const summaries = await this.runtime().listSessions({
+      includeSubagents: false,
+      includeArchived: true,
+    });
     for (const summary of summaries) {
       for (const directory of [summary.cwd, summary.workspaceRoot]) {
         if (root === (await this.platform.resolveReal(directory).catch(() => undefined)))
@@ -415,6 +421,8 @@ export class Hub {
     this.watchers.clear();
     this.unsubscribeSchedule?.();
     this.unsubscribeSchedule = undefined;
+    this.unsubscribeSessions?.();
+    this.unsubscribeSessions = undefined;
     this.unsubscribeGrants?.();
     this.unsubscribeGrants = undefined;
     clearTimeout(this.sessionsChangedTimer);

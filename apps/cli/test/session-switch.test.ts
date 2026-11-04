@@ -64,6 +64,20 @@ function makeSwitcher(runtime: Runtime, cwd: string, session: RuntimeSession) {
 }
 
 describe("createSessionSwitcher", () => {
+  it("归档不进入列表，但 /resume <id> 仍直接打开且不取消归档", async () => {
+    const cwd = await tmp("nct-sw-archive-");
+    const runtime = await makeRuntime(cwd, await tmp("nct-sw-sd-"));
+    const current = await runtime.createSession({ model: "fake/fake-1" });
+    const archived = await runtime.createSession({ model: "fake/fake-1" });
+    await archived.close();
+    await runtime.archiveSession(archived.id);
+    expect((await runtime.listSessions({ cwd })).map((s) => s.id)).not.toContain(archived.id);
+    const { switcher } = makeSwitcher(runtime, cwd, current);
+    const result = await switcher(archived.id);
+    expect(result.kind).toBe("ok");
+    expect((await runtime.listSessions({ cwd })).map((s) => s.id)).not.toContain(archived.id);
+    if (result.kind === "ok") await result.session.close();
+  });
   it("成功切换：holder 换入新会话，旧会话被关闭", async () => {
     const cwd = await tmp("nct-sw-cwd-");
     const sd = await tmp("nct-sw-sd-");
