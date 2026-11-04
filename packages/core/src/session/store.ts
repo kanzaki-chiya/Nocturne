@@ -383,13 +383,8 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
     },
     async unarchiveClosed(id) {
       assertSessionId(id);
-      const lock = await acquireSessionLock(fs, platform, lockPath(id));
-      try {
-        await assertRootSession(id);
-        await removeArchivedAt(id);
-      } finally {
-        await lock.release();
-      }
+      await assertRootSession(id);
+      await removeArchivedAt(id);
     },
     async renameClosed(id, title) {
       assertSessionId(id);

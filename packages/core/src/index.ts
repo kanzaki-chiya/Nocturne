@@ -1197,8 +1197,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillModel: { workspaceRoot: string; contextWindow: () => number | undefined };
     fork(targetSeq?: number): Promise<string>;
     rename(title: string): Promise<void>;
-    /** 已打开会话的归档写/删；忙判定与异步互斥在会话闭包里（ADR-0080） */
-    archive(archivedAt: string | undefined): Promise<void>;
+    /** 已打开会话的归档写入；忙判定与异步互斥在会话闭包里（ADR-0080） */
+    archive(archivedAt: string): Promise<void>;
+    /** 已打开会话的恢复：只校验根会话并删除旁路，不判断忙（ADR-0080） */
+    unarchive(): Promise<void>;
     durableEvents(): readonly DurableEvent[];
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
@@ -2656,10 +2658,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
     };
     /**
-     * 已打开会话的归档写/删（ADR-0080）。复用 Turn/压缩/回退/关闭/后台子代理/待发输入
-     * 的忙判定；`archiving` 占忙，与 submit 同步置位的 controller 互斥，异步旁路不会和 Turn 交错。
+     * 已打开会话的归档写入（ADR-0080）。复用 Turn/压缩/回退/关闭/后台子代理/待发输入
+     * 的忙判定；`archiving` 占忙，与 startTurns 同步置位的 controller 互斥，异步旁路不会和 Turn 交错。
      */
-    const setArchived = async (archivedAt: string | undefined): Promise<void> => {
+    const setArchived = async (archivedAt: string): Promise<void> => {
       assertUsable();
       if (meta.parent !== undefined)
         throw new RuntimeCommandError("invalid_command", "子会话不能归档或恢复");
@@ -2677,6 +2679,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       } finally {
         archiving = false;
       }
+    };
+    /** 已打开会话的恢复（ADR-0080）：只校验 ID 与根会话，删除旁路，不判断忙。 */
+    const unarchiveOpen = async (): Promise<void> => {
+      if (meta.parent !== undefined)
+        throw new RuntimeCommandError("invalid_command", "子会话不能归档或恢复");
+      await store.removeArchivedAt(session.id);
     };
     /** submit 前无条件删除归档旁路；失败只记诊断（store 内），不挡发送。 */
     const restoreArchivedForSubmit = async (): Promise<boolean> => {
@@ -3027,6 +3035,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (model.model.unavailable !== undefined) {
             throw invalidModelError(model.model.unavailable.reason, model.model);
           }
+          // 归档旁路在首个输入准备前删除；此时 controller 已占用，并发的
+          // archiveSession 只能看到 busy，接续的下一轮不重复处理（ADR-0080）。
+          if (prepare === first) {
+            const restored = await restoreArchivedForSubmit();
+            if (restored) notifySessionsChanged();
+          }
           const prepared = await prepare();
           prepare = undefined;
           await recordBranch().catch(() => undefined);
@@ -3339,6 +3353,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       fork: forkOpen,
       archive: setArchived,
+      unarchive: unarchiveOpen,
       durableEvents: () => session.durableEvents(),
       rename: async (title) => {
         assertUsable();
@@ -3536,14 +3551,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
         // controller 必须同步置位：之后的 interrupt 一定落在这一轮上。
-        // 归档旁路在首个 prepare 里、发请求前删除；此时 controller 已占用，
-        // 并发的 archiveSession 只能看到 busy（ADR-0080）。
         const ac = new AbortController();
-        return await startTurns(ac, async () => {
-          const restored = await restoreArchivedForSubmit();
-          if (restored) notifySessionsChanged();
-          return prepareInput(input, ac.signal);
-        });
+        return await startTurns(ac, () => prepareInput(input, ac.signal));
       },
       async enqueueInput(mode, input) {
         assertUsable();
@@ -4900,14 +4909,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async unarchiveSession(id) {
       const open = openSessions.get(id);
       try {
-        if (open !== undefined) await open.archive(undefined);
+        if (open !== undefined) await open.unarchive();
         else await store.unarchiveClosed(id);
       } catch (error) {
-        if (error instanceof SessionError) {
-          if (error.code === "session_locked")
-            throw new RuntimeCommandError("session_busy", "会话被另一个进程占用");
-          if (error.code === "invalid_command")
-            throw new RuntimeCommandError("invalid_command", error.message);
+        if (error instanceof SessionError && error.code === "invalid_command") {
+          throw new RuntimeCommandError("invalid_command", error.message);
         }
         throw error;
       }

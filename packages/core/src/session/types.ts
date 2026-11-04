@@ -234,7 +234,7 @@ export interface SessionStore {
   removeArchivedAt(id: string): Promise<boolean>;
   /** 未打开会话归档：先取得排他锁，再只读首行校验根会话，写旁路（不修复日志）。 */
   archiveClosed(id: string): Promise<string>;
-  /** 未打开会话恢复：先取得排他锁，再只读首行校验根会话，删除旁路（不修复日志）。 */
+  /** 未打开会话恢复：只校验 ID 与日志首行根会话，删除旁路（不取锁、不修复日志）。 */
   unarchiveClosed(id: string): Promise<void>;
   fork(source: Session, targetSeq?: number): Promise<string>;
   /**

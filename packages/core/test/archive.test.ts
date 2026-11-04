@@ -241,6 +241,9 @@ describe("Core 会话归档", () => {
     await expect(s.runtime.archiveSession(childId)).rejects.toMatchObject({
       code: "invalid_command",
     });
+    await expect(s.runtime.unarchiveSession(childId)).rejects.toMatchObject({
+      code: "invalid_command",
+    });
     await child.close();
     await expect(s.runtime.archiveSession(childId)).rejects.toMatchObject({
       code: "invalid_command",
@@ -316,6 +319,120 @@ describe("Core 会话归档", () => {
     rmSync(path.join(s.sessionsDir, `${id}.lock`));
   });
 
+  it("恢复会话不判断忙、不取会话锁，旁路文件不存在也视为成功", async () => {
+    let parentCalls = 0;
+    const s = await setup({
+      handler: (request) => {
+        if (request.tools.some((tool) => tool.name === "finish")) {
+          return [
+            { type: "wait", ms: 2000 },
+            {
+              type: "tool_call",
+              toolCallId: "finish",
+              name: "finish",
+              input: { result: "child result" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        const lastText = JSON.stringify(request.messages.at(-1) ?? "");
+        if (
+          lastText.includes("启动后台子代理") ||
+          JSON.stringify(request.messages).includes("启动后台子代理")
+        ) {
+          parentCalls += 1;
+          return parentCalls === 1
+            ? [
+                {
+                  type: "tool_call",
+                  toolCallId: "bg-1",
+                  name: "task",
+                  input: { task: "research", background: true, preset: "explore" },
+                },
+                { type: "finish", reason: "tool_calls" },
+              ]
+            : textScript("bg started");
+        }
+        if (lastText.includes("种子消息")) {
+          return textScript("种子回复");
+        }
+        return [{ type: "wait" }];
+      },
+      runtime: { subagent: { background: true }, permissions: { autoApproveAsk: true } },
+    });
+    const session = await s.create();
+    const id = session.id;
+    const markArchived = () => {
+      writeFileSync(
+        archivePath(s.sessionsDir, id),
+        JSON.stringify({ archivedAt: new Date().toISOString() }),
+      );
+    };
+
+    // 1. 旁路文件本来不存在时（已打开），恢复成功
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+    await expect(s.runtime.unarchiveSession(id)).resolves.toBeUndefined();
+
+    // 先跑一轮种子消息，供后续压缩使用
+    await session.submit({ text: "种子消息" });
+
+    // 2. Turn 进行中恢复成功，且有待发输入时恢复也成功
+    const turn = session.submit({ text: "挂起轮" });
+    await vi.waitFor(() => {
+      expect(s.provider.waitState.waiting).toBe(1);
+    });
+    markArchived();
+    await s.runtime.unarchiveSession(id);
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+
+    const { id: pendingId } = await session.enqueueInput("queue", { text: "待发条目" });
+    markArchived();
+    await s.runtime.unarchiveSession(id);
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+
+    session.interrupt();
+    await turn;
+    // Turn 中断后待发输入处于暂停态，恢复仍成功
+    expect(session.pendingInputs().items).toHaveLength(1);
+    markArchived();
+    await s.runtime.unarchiveSession(id);
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+    await session.cancelInput(pendingId);
+
+    // 3. 压缩进行中恢复成功
+    await s.runtime.archiveSession(id);
+    const compacting = session.compact();
+    await vi.waitFor(() => {
+      expect(s.provider.waitState.waiting).toBe(1);
+    });
+    await s.runtime.unarchiveSession(id);
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+    session.interrupt();
+    await compacting.catch(() => undefined);
+
+    // 4. 后台子代理运行中恢复成功
+    await session.submit({ text: "启动后台子代理" });
+    await vi.waitFor(async () => {
+      expect((await s.runtime.listSubagents({ parentSessionId: id })).length).toBe(1);
+    });
+    markArchived();
+    await s.runtime.unarchiveSession(id);
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+
+    await session.close();
+
+    // 5. 未打开会话被外部锁占用时恢复仍成功（不取会话锁），且文件不存在时也成功
+    markArchived();
+    writeFileSync(
+      path.join(s.sessionsDir, `${id}.lock`),
+      JSON.stringify({ pid: process.pid, hostname: hostname(), startedAt: Date.now(), token: "t" }),
+    );
+    await s.runtime.unarchiveSession(id);
+    expect(existsSync(archivePath(s.sessionsDir, id))).toBe(false);
+    await expect(s.runtime.unarchiveSession(id)).resolves.toBeUndefined();
+    rmSync(path.join(s.sessionsDir, `${id}.lock`));
+  }, 20_000);
+
   it("后台子代理运行中拒绝归档", async () => {
     let parentCalls = 0;
     const s = await setup({
@@ -371,6 +488,117 @@ describe("Core 会话归档", () => {
       2,
     );
     await waitForDiagnostic(s.diag, "session.unarchive_failed");
+    await session.close();
+  });
+
+  it("所有开始新一轮的入口（enqueueInput 空闲/压缩后、继续发送、继续目标、批准计划）都自动恢复且接续轮不重复处理", async () => {
+    const goalMet = (id: string): FakeScript => [
+      {
+        type: "tool_call",
+        toolCallId: id,
+        name: "update_goal",
+        input: { status: "met", checklist: [{ item: "测试通过", evidence: "0 failed" }] },
+      },
+      { type: "finish", reason: "tool_calls" },
+    ];
+    let sessionId = "";
+    let sessionsDir = "";
+    let goalCalls = 0;
+    const s = await setup({
+      handler: (request) => {
+        const serialized = JSON.stringify(request.messages);
+        if (serialized.includes("阻塞轮") && !serialized.includes("继续一")) {
+          return [{ type: "wait" }];
+        }
+        if (
+          serialized.includes("继续一") &&
+          !serialized.includes("继续发送第一条") &&
+          sessionId &&
+          sessionsDir
+        ) {
+          // 在「继续一」首轮模型请求期间重写归档旁路，验证接续的「继续二」不会再次自动恢复
+          writeFileSync(
+            archivePath(sessionsDir, sessionId),
+            JSON.stringify({ archivedAt: new Date().toISOString() }),
+          );
+          return textScript("继续发送第一条");
+        }
+        if (serialized.includes("收敛目标")) {
+          const last = request.messages.at(-1);
+          if (last?.role === "tool") return textScript("目标轮完成");
+          goalCalls += 1;
+          return goalMet(`g-${goalCalls}`);
+        }
+        return [{ type: "wait", ms: 20 }, ...textScript("完成")];
+      },
+    });
+    const session = await s.create();
+    sessionId = session.id;
+    sessionsDir = s.sessionsDir;
+    const notifications: number[] = [];
+    const off = s.runtime.onSessionsChanged(() => notifications.push(1));
+
+    // 1. enqueueInput 空闲路径
+    await s.runtime.archiveSession(session.id);
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(true);
+    notifications.length = 0;
+    expect(await session.enqueueInput("queue", { text: "空闲入列" })).toMatchObject({
+      queued: false,
+    });
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(false);
+    expect(notifications.length).toBe(1);
+
+    // 2. 压缩结束后发送路径
+    await s.runtime.archiveSession(session.id);
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(true);
+    notifications.length = 0;
+    const compacting = session.compact();
+    const afterCompact = session.enqueueInput("queue", { text: "压缩后入列" });
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(true);
+    await Promise.all([compacting, afterCompact]);
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(false);
+    expect(notifications.length).toBe(1);
+
+    // 3. 继续发送（pumpQueue）及接续下一轮不重复处理
+    const blockedTurn = session.submit({ text: "阻塞轮" });
+    await vi.waitFor(() => {
+      expect(s.provider.waitState.waiting).toBe(1);
+    });
+    await session.enqueueInput("queue", { text: "继续一" });
+    await session.enqueueInput("queue", { text: "继续二" });
+    session.interrupt();
+    await blockedTurn;
+    expect(session.pendingInputs().paused).toBe(true);
+    writeFileSync(
+      archivePath(s.sessionsDir, session.id),
+      JSON.stringify({ archivedAt: new Date().toISOString() }),
+    );
+    notifications.length = 0;
+    await session.resumeInputs();
+    // 首轮开始前删除了旁路并通知 1 次；首轮中途重写旁路后，接续的第二轮不重复删除或通知
+    expect(notifications.length).toBe(1);
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(true);
+    rmSync(archivePath(s.sessionsDir, session.id));
+
+    // 4. 继续目标（resumeGoal）
+    await session.submit({ text: "收敛目标", workMode: "goal" });
+    await s.runtime.archiveSession(session.id);
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(true);
+    notifications.length = 0;
+    await session.resumeGoal();
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(false);
+    expect(notifications.length).toBe(1);
+
+    // 5. 批准计划（approvePlan）
+    await session.submit({ text: "拟定计划", workMode: "plan" });
+    await s.runtime.archiveSession(session.id);
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(true);
+    notifications.length = 0;
+    await session.approvePlan();
+    expect(existsSync(archivePath(s.sessionsDir, session.id))).toBe(false);
+    expect(notifications.length).toBe(1);
+
+    off();
     await session.close();
   });
 
