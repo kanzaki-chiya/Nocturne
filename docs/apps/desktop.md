@@ -280,43 +280,52 @@ interface NodeProbe {
 
 进入设置区时，`SettingsDeck` 首次挂载所有设置页以预加载数据；隐藏页使用 `hidden` 与 `inert`，切回时沿用已加载的数据，再以页面刷新代际静默更新。离开设置仍保留页面，切换 RPC 后台身份时重建整代页面，缓存不会交给下一后台。服务商与模型变更、设置保存会使各页刷新代际递增。`SettingsPage` 的设置、模型、审查服务商请求独立回填；刷新响应及错误带代际检查，保存前后作废旧刷新，保存中不启动刷新，已有数据不闪加载态。外观页不依赖 Core RPC。其他页按其数据依赖各自显示结果，远程状态持续通过事件更新。
 
-| 设置页   | 预加载与进入时使用的数据                                                                                                       |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 常规     | `describeSettings`；Shell 菜单展开才 `listShells`                                                                              |
-| 模型     | `describeSettings`、`listModels`、`listReviewerProviders` 独立回填                                                             |
-| 外观     | 本地偏好与字体枚举，不等待 Core                                                                                                |
-| 服务商   | `describeProviders`、`listProviderPresets`、`defaultModel` 独立回填；所选服务商的 `listModelSettings`、含停用项的 `listModels` |
-| MCP      | `describeMcpServers` 先显示；`describeProviderSetup` 确认凭据后端                                                              |
-| 授权     | `listGrantWorkspaces` 与所选工作区 `listGrants`                                                                                |
-| 技能     | `describeSkills`                                                                                                               |
-| 子代理   | `describeExternalAgents`、`describeSkills`、`describeSettings`、`listModels` 独立回填                                          |
-| 浏览器   | 本地偏好；外壳 `agent_browser_status`、`browser_data_sizes`、`browser_downloads_set`（返回系统「下载」文件夹），不等待 Core     |
-| 远程     | `remote.describe` 初值与 `remote.changed` 事件                                                                                 |
-| 用量     | `usageStats`，按所选时间范围刷新                                                                                               |
-| 后台日志 | `backend_stderr` / `shell_log` / `key_diag_log`，重进页面后台刷新，保留已有日志                                                |
+| 设置页 | 预加载与进入时使用的数据 |
+| --- | --- |
+| 常规 | `describeSettings`；Shell 菜单展开才 `listShells` |
+| 外观 | 本地偏好与字体枚举，不等待 Core |
+| 服务商 | `describeProviders`、`listProviderPresets`、`defaultModel` 独立回填；所选服务商的 `listModelSettings`、含停用项的 `listModels` |
+| 模型 | `describeSettings`、`listModels`、`listReviewerProviders` 独立回填 |
+| 子代理 | `describeExternalAgents`、`describeSkills`、`describeSettings`、`listModels` 独立回填 |
+| 技能 | `describeSkills` |
+| MCP | `describeMcpServers` 先显示；`describeProviderSetup` 确认凭据后端 |
+| 浏览器 | 本地偏好；外壳 `agent_browser_status`、`browser_data_sizes`、`browser_downloads_set`（返回系统「下载」文件夹），不等待 Core |
+| 授权 | `listGrantWorkspaces` 与所选工作区 `listGrants` |
+| 远程 | `remote.describe` 初值与 `remote.changed` 事件 |
+| 已归档的会话 | 复用 App 的 `listSessions({ includeArchived: true })` 摘要，随 `runtime.sessionsChanged` 刷新 |
+| 用量 | `usageStats`，按所选时间范围刷新 |
+| 后台日志 | `backend_stderr` / `shell_log` / `key_diag_log`，重进页面后台刷新，保留已有日志 |
 
 `listModels` 每次重建模型注册表，`listReviewerProviders` 会描述服务商并读取配置与凭据元数据；隔离的单模型环境未复现约一秒耗时，未修改 Core 的缓存或配置语义。连接身份隔离、预加载、页面保留与失效由 `settings-deck.test.tsx` 验证，独立回填、保存竞态和刷新失败由 `settings.test.tsx` 验证。
 
-「子代理」之后的「浏览器」页（`src/BrowserSettingsPage.tsx`，[ADR-0078](../decisions/ADR-0078-browser-settings.md)）只有桌面端有，不调 Core RPC，四个分组：
+「MCP」之后的「浏览器」页（`src/BrowserSettingsPage.tsx`，[ADR-0078](../decisions/ADR-0078-browser-settings.md)）只有桌面端有，不调 Core RPC，四个分组：
 
 - **Agent 浏览器**：「模型操作网页」开关（原「常规 › 执行」的「面板浏览器」，字段仍是 `prefs.agentBrowserEnabled`），没有 `agentBrowser` 外壳时整组不显示。首次开启先在卡片里展开一行确认（「网页内容不可信，可能诱导它操作其他页面。」「取消」「仍然启用」，`--a-raised` 底色，偏好 `agentBrowserRiskAccepted`），切换调 `agent_browser_set_enabled`；返回的 `restartRequired` 为真时开关左边出现「重启应用」（和关窗口一样先检查待发输入，通过后调 `app_restart` 走 `begin_shutdown` 清理再 `app.restart()`），进入页面经 `agent_browser_status` 还原开关与「重启应用」，开关显示以外壳为准并同步不一致的 prefs。判定见 [desktop-browser.md 第 1 节](../protocols/desktop-browser.md#1-边界与接入)。
 - **打开方式**：「网页链接」「本地网址」下拉（「系统浏览器」「Nocturne 面板」，缺省系统浏览器，`prefs.webLinkOpener` / `localLinkOpener` 只存 `"panel"`）。只管模型回复里的链接（`Conversation` 的 `openUrl` → `App` 的 `openReplyLink`）：选面板时经面板控制器 `openUrl` 走地址栏同一入口在当前会话面板新开浏览器标签，返回 false（没有内置浏览器或会话面板、不是 http(s)）时退回 `host.openUrl`。分类是 `external-url.ts` 的 `linkKind`（http(s) 且主机是 `localhost` / `127.0.0.1` / `[::1]` 为本地网址）。其余外链照旧用系统浏览器。
 - **浏览数据**：「我的浏览」「Agent 浏览」显示占用大小（`browser_data_sizes`，进入页面刷新）与「清除…」；「清除…」在该行下展开确认行（「面板里登录过的网站都要重新登录。」/「Agent 登录过的网站都要重新登录。」，「取消」「清除」），确认后 `browser_data_clear` 返回清除后的实际大小。外壳实现见第 6 节。
 - **下载**：「每次询问保存位置」（缺省开，`prefs.downloadAsk` 只存 `false`）、「保存位置」（`prefs.downloadDir`，缺省显示系统「下载」文件夹，「更改…」用 `pickFolder`）。改动后经 `browser_downloads_set` 同步给外壳，`App` 启动时也同步一次。行为见 5.10。
 
-「浏览器」之后的「远程」页（`src/RemotePage.tsx`）只使用本机 `remote.*` RPC，未登记只读取 `remote.describe` 缓存，显示索取邀请/自建中继说明、邀请输入和登记按钮，不联网。已登记显示中继域名、状态、允许远程访问开关、设备在线与最近在线时间、推送订阅、断开/移除和退出登记；后两项必须在页内确认。状态变化通过 `remote.statusChanged` 更新。
+「授权」之后的「远程」页（`src/RemotePage.tsx`）只使用本机 `remote.*` RPC，未登记只读取 `remote.describe` 缓存，显示索取邀请/自建中继说明、邀请输入和登记按钮，不联网。已登记显示中继域名、状态、允许远程访问开关、设备在线与最近在线时间、推送订阅、断开/移除和退出登记；后两项必须在页内确认。状态变化通过 `remote.statusChanged` 更新。
 
 「配对新手机」需要在线，弹出二维码、截止倒计时和可复制链接；`remote.paired` 显示设备名后自动关闭，失败显示中文原因，关闭或离开页面取消配对。`qrcode-generator@2.0.4` 以 M 纠错生成矩阵，React 渲染一个 SVG path，四模块留白，深浅主题均为浅底深码，不使用 innerHTML。页面只常驻一句「中继只转发密文，看不到你的对话、代码或命令」，完整信任说明（必须信任管理员不会篡改手机网页）收在下方「你需要信任谁」折叠里，与手机网页的短句 + 详情入口一致。存储与精确契约见 [rpc.md 第 11 节](../protocols/rpc.md#11-远程主机)。
 
-左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 模型 / 服务商 / MCP / 授权 / 技能 / 子代理 / 浏览器 / 远程 / 外观 / 用量 / 后台日志、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻后台读写全局配置（不带 `workspaceRoot`，即后台启动目录的项目层参与合并）；会话控件（状态栏 pill、会话内查询）则带该会话的工作区——`listModels` / `defaultModel` / `describeSettings` / `describeSkills` / `describeExternalAgents` 等运行时查询都接受可选 `workspaceRoot`（rpc.md 3.1）。
+左栏底部「设置」进入设置区：左栏整列换成设置导航（「← 返回 Esc」、「设置」标题、常规 / 外观 / 服务商 / 模型 / 子代理 / 技能 / MCP / 浏览器 / 授权 / 远程 / 已归档的会话 / 用量 / 后台日志、底部一行说明），会话树不显示；主区换成对应页面。空状态与状态栏的模型菜单底部「管理服务商…」直接进入「服务商」。设置区以 `.settings-over` 盖在主区之上，原来的会话或空状态（`.mainpane`）保持挂载并设为 `inert`，所以「← 返回」或 Esc 回到的是同一个会话，滚动位置不变；在导航项之间切换不算返回。Esc 只在没有被下拉、对话框先处理时才返回（下拉的 Esc 会 `preventDefault` 并停止冒泡；设置区里有打开的对话框时不返回）。被盖住的会话的窗口级快捷键（权限卡片的 Esc 拒绝与数字键作答、输入框的 Esc 中断）在其所在区域 `inert` 时一律不响应。服务商页与常规 / 模型 / 外观页都走常驻后台读写全局配置（不带 `workspaceRoot`，即后台启动目录的项目层参与合并）；会话控件（状态栏 pill、会话内查询）则带该会话的工作区——`listModels` / `defaultModel` / `describeSettings` / `describeSkills` / `describeExternalAgents` 等运行时查询都接受可选 `workspaceRoot`（rpc.md 3.1）。
 
 设置布局按容器宽度调整，不使用窗口媒体查询：根布局容器 ≤900px 时设置导航收窄为 168px；主从列表统一为 280px，根布局容器 ≤1060px 时改为上下堆叠、列表最高 220px，名称与右侧模型数各自单行省略。详情标题与不收缩的状态标签一行，操作按钮另起一行横排并允许换行。详情内容 <520px 时信息卡改两列，<320px 时改一列，值允许折行。模型表名称列至少 12ch，<520px 先隐藏最大输出，<400px 再隐藏上下文；名称和能力始终保留，长模型名折行，无横向滚动。页尾说明为「R 推理 · I 图片输入。默认模型在「模型」页修改。」，其中「模型」可进入模型页。
 
 **配置同步（ADR-0051 后单后台）**：只有一个后台，不再存在跨后台 `reloadConfig` 协调与「由我发起」计数。`provider.*` / `skills.*` / `agents.*` 的写方法由服务端串行执行「变更 → 重载 → 推 `runtime.providersChanged`」，页面、状态栏模型菜单与空状态模型 chip 收到通知后各自重新查询；`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层、不推通知，页面用返回值直接刷新。
 
+#### 已归档的会话
+
+[ADR-0080](../decisions/ADR-0080-session-archive.md) 定义归档规则。侧栏会话右键菜单在「重命名…」后提供「归档」，运行中禁用。成功后移除置顶；若归档当前会话，优先切到同项目按侧栏顺序的下一条，否则侧栏第一条，否则新会话。项目仅有归档会话时仍保留项目，计数为零；归档会话不参与侧栏行与排序。
+
+桌面列表显式使用 `includeArchived: true`，归档页只取带 `archivedAt` 的摘要。按侧栏归属（含隐藏项目、对话和定时任务）分组，组按最新归档时间、行按归档时间降序。标题单行省略并以 `title` 展示全文，搜索只按标题忽略大小写即时筛选；无数据只显示「没有已归档的会话」且不显示搜索框，无匹配显示「没有匹配的会话」。页面不添加说明、徽标或 toast。
+
+「恢复」删除归档状态并取消所属项目隐藏，按原日志修改时间回到侧栏，不自动置顶。点击标题离开设置并打开会话，不自动恢复；发送消息自动恢复。`Ctrl+K` 有查询时包含归档搜索结果，空查询「最近使用」排除归档。手机网页和安卓列表默认不包含归档，也不提供操作入口。该页复用全量会话摘要，随 `runtime.sessionsChanged` 更新，加入 `SettingsDeck` 预加载和导航。
+
 #### 用量
 
-「外观」与「后台日志」之间的「用量」页（`src/UsagePage.tsx`、`usage.css`）只读调用 `runtime.usageStats`：7 天 / 30 天 / 全部（默认 30 天），进入、切换范围或刷新时请求，不轮询；加载保留上次内容，失败显示错误与重试，迟到的旧范围响应不覆盖新范围。
+「已归档的会话」与「后台日志」之间的「用量」页（`src/UsagePage.tsx`、`usage.css`）只读调用 `runtime.usageStats`：7 天 / 30 天 / 全部（默认 30 天），进入、切换范围或刷新时请求，不轮询；加载保留上次内容，失败显示错误与重试，迟到的旧范围响应不覆盖新范围。
 
 概览五格：累计 tokens、预估费用、缓存命中率、会话 / 轮、最长一轮。近一年热力图固定 365 天，最后一列结束于本地今天，月份标签按真实日期对应列定位；按 tokens / 费用着色，范围外日期淡化，悬停或键盘聚焦显示日期、tokens、约费用与 Turn 数，点击固定在下方；使用强调色五档，不用绿色。下方为 Token 构成与费用、常用工具与技能、可按费用或输入排序的模型表，共 11 列：模型 / 服务商、Turns、输入、输出、缓存命中、预估费用、Tokens/s、TTFT、近期速度、输入单价、输出单价；模型名下只写服务商，不写价格来源。
 
