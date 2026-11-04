@@ -1,4 +1,4 @@
-import type { SkillOverview, SubagentProfileConfig } from "../protocol/index.js";
+import type { ModelPricing, SkillOverview, SubagentProfileConfig } from "../protocol/index.js";
 import type { ReviewInputSources, SecurityReviewer } from "../permission/index.js";
 /**
  * SubagentLauncher 实现（subagent.md 第 3–5 节）。
@@ -134,7 +134,12 @@ export interface SubagentDeps {
   environment: EnvironmentInfo;
   /** 启动时刻读取父会话当前模型/预设（setModel/setPermissionPreset 后派生反映最新值） */
   model(): ResolvedModel;
-  profiles?: readonly (SubagentProfileConfig & { name: string })[];
+  profiles?: readonly (SubagentProfileConfig & {
+    name: string;
+    pricing?: ModelPricing | undefined;
+  })[];
+  defaultModel?: string | undefined;
+  defaultPricing?: ModelPricing | undefined;
   resolveProfile?(
     name: string,
     currentModel?: ResolvedModel,
@@ -490,6 +495,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               undefined,
               deps.limits.timeoutMs,
               deps.profiles,
+              deps.defaultModel,
+              undefined,
+              deps.defaultPricing,
             ),
           );
         }

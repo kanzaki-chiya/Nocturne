@@ -360,7 +360,7 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 
 explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 `timeoutMs` 是可选默认值，显式请求可覆盖，不封顶；profile 配置不再有 3600 秒上限。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
 
-选择表由共享 subagentSelectionTable 生成，何时用后追加模型、强度和只读标记；外部标记账号费用。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
+选择表由共享 subagentSelectionTable 生成，首行只写一次单位（每百万 token 的输入/输出美元），default 与各自定义档位在括号末尾追加基础档输入/输出单价（`$<input>/$<output>`，与用量统计同源解析；跟随当前模型时写当前模型价格，价格为 0 时照写，查不到完整输入/输出价格时不写价格与占位文字）；外部 agent 不写价格，标记账号费用。选择表在创建 `task` 工具时定下，会话中途刷新价格不会改变已创建工具的选择表。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
 
 ## 20. 后台子代理
 

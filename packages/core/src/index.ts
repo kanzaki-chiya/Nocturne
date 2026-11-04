@@ -172,11 +172,13 @@ import type {
   DurableEvent,
   DurablePayload,
   McpToolSearchMode,
+  ModelPricing,
   ModelRef,
   PendingInputMode,
   PendingInputsSnapshot,
   PermissionReply,
   PermissionSubject,
+  PricingSource,
   QuestionReply,
   ReasoningEffort,
   ReasoningEffortLevel,
@@ -1157,21 +1159,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionsDir,
     registry: subagentRegistry,
   });
+  const resolvePricing = (
+    reg: ProviderRegistry,
+    ref: ModelRef,
+  ):
+    | { pricing?: ModelPricing | undefined; pricingSource?: PricingSource | undefined }
+    | undefined => {
+    let model: ReturnType<ProviderRegistry["resolve"]>["model"] | undefined;
+    try {
+      model = reg.resolve(ref).model;
+    } catch {
+      model = undefined;
+    }
+    if (model?.pricing !== undefined) return model;
+    const vendor = config?.vendorPricing?.(ref.model);
+    return vendor !== undefined ? { pricing: vendor, pricingSource: "vendor" as const } : model;
+  };
   const usageStats = createUsageStats({
     platform,
     sessionsDir,
     // 注册表给不出价格（服务商已删除或改名、模型不在清单）时按模型厂商兜底（ADR-0053 修订）
-    pricing: (ref) => {
-      let model: ReturnType<ProviderRegistry["resolve"]>["model"] | undefined;
-      try {
-        model = registry.resolve(ref).model;
-      } catch {
-        model = undefined;
-      }
-      if (model?.pricing !== undefined) return model;
-      const vendor = config?.vendorPricing?.(ref.model);
-      return vendor !== undefined ? { pricing: vendor, pricingSource: "vendor" as const } : model;
-    },
+    pricing: (ref) => resolvePricing(registry, ref),
   });
 
   /**
@@ -2310,6 +2318,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 .map(({ origin: _origin, path: _path, ...agent }) => agent),
             );
       const agentSnapshot = enabledExternalAgents;
+      const pricingForModel = (modelStr: string | undefined): ModelPricing | undefined => {
+        let ref: ModelRef;
+        if (modelStr !== undefined) {
+          try {
+            ref = parseModelRef(modelStr);
+          } catch {
+            return undefined;
+          }
+        } else {
+          ref = model.model.ref;
+        }
+        return resolvePricing(sessionRegistry, ref)?.pricing;
+      };
+      const defaultTaskModel = config?.resolvedSettings(session.state().meta.workspaceRoot)
+        .modelRoles?.task;
+      const defaultTaskPricing = pricingForModel(defaultTaskModel);
       const configuredProfiles =
         config?.resolvedSettings(session.state().meta.workspaceRoot).subagentProfiles ?? {};
       const profileSnapshot = Object.entries(configuredProfiles).flatMap(([name, profile]) => {
@@ -2336,7 +2360,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return [];
         }
         unavailableProfiles.delete(key);
-        return [{ ...profile, name }];
+        const pricing = pricingForModel(profile.model);
+        return [{ ...profile, name, ...(pricing !== undefined ? { pricing } : {}) }];
       });
       const hasExternalAgents = enabledExternalAgents.length > 0;
       // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
@@ -2412,6 +2437,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           instructions,
           environment,
           profiles: profileSnapshot,
+          defaultModel: defaultTaskModel,
+          defaultPricing: defaultTaskPricing,
           resolveProfile: (name, currentModel) =>
             resolveSubagentProfile(
               name,
@@ -2581,10 +2608,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           externalRunner,
           subagentLimits.timeoutMs,
           profileSnapshot,
-          config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
+          defaultTaskModel,
           backgroundEnabled && launcher !== undefined
             ? (input) => backgroundAdmission({ ...input, isolation: "none" })
             : undefined,
+          defaultTaskPricing,
         ),
       );
     };

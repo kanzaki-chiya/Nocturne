@@ -6,7 +6,11 @@
  * 完成（tools 不 import agent；接口在本模块，实现在 agent/subagent.ts）。
  */
 import { createSchemaCompiler } from "../schema.js";
-import { subagentSelectionTable, type SubagentProfileConfig } from "../../protocol/index.js";
+import {
+  subagentSelectionTable,
+  type ModelPricing,
+  type SubagentProfileConfig,
+} from "../../protocol/index.js";
 import type { JsonSchema, SubjectRequest } from "../../protocol/index.js";
 import type {
   ExternalAgentInfo,
@@ -71,10 +75,14 @@ export function createTaskTool(
   launcher?: SubagentLauncher,
   externalAgents?: ExternalTaskRunner,
   defaultTimeoutMs?: number,
-  profiles: readonly (SubagentProfileConfig & { name: string })[] = [],
+  profiles: readonly (SubagentProfileConfig & {
+    name: string;
+    pricing?: ModelPricing | undefined;
+  })[] = [],
   defaultModel?: string,
   /** ADR-0073：宿主开启且在顶层会话时由 core/index 注入准入判断；缺省时 schema 不出现 background */
   background?: BackgroundAdmit,
+  pricing?: ModelPricing | ((model: string | undefined) => ModelPricing | undefined),
 ): ToolDefinition<TaskInput> {
   const agents = externalAgents?.agents ?? [];
   const hasExternalAgents = agents.length > 0;
@@ -143,7 +151,7 @@ export function createTaskTool(
           "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。" +
           "外部 agent 看不到 task 工具，不能再委派（不能嵌套）。"
         : "") +
-      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel)}` : "") +
+      (hasProfiles ? `\n${subagentSelectionTable(profiles, agents, defaultModel, pricing)}` : "") +
       (background
         ? "互相独立、想同时进行的任务用 background: true；含写操作时默认使用工作树隔离，只读任务默认不隔离。交给隔离任务时用相对路径描述文件。不要等待或轮询结果。"
         : ""),

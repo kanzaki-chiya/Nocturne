@@ -83,6 +83,10 @@ export function SubagentProfileEditor({
     ),
     agents.filter((agent) => agent.enabled),
     isDefault ? draft.model : items.find((item) => item.key === "modelRoles.task")?.effective,
+    (ref) =>
+      ref !== undefined
+        ? models.find((model) => `${model.ref.provider}/${model.ref.model}` === ref)?.pricing
+        : undefined,
   );
   const mutate = async (action: () => Promise<void>) => {
     setBusy(true);

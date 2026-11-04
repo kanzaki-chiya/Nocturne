@@ -2,12 +2,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadConfig, createPlatform } from "../src/index.js";
+import {
+  loadConfig,
+  createPlatform,
+  createRuntime,
+  type ModelInfo,
+  type ModelPricing,
+  type ModelRequest,
+} from "../src/index.js";
 import { parseConfigFile } from "../src/config/schema.js";
 import { mergeLayers } from "../src/config/merge.js";
 import { resolveSubagentProfile } from "../src/config/subagent-profiles.js";
 import { createTaskTool } from "../src/tools/index.js";
 import { subagentSelectionTable, isValidSubagentProfileName } from "../src/protocol/index.js";
+import { FakeProvider } from "../src/provider/index.js";
 
 const profile = { description: "查找和读取", tools: "explore" as const, enabled: true };
 const roots: string[] = [];
@@ -162,5 +170,310 @@ describe("task 档位表", () => {
         { cwd: ".", workspaceRoot: ".", paths: createPlatform().paths },
       ),
     ).toEqual([{ kind: "subagent", target: "explore" }]);
+  });
+
+  it("选择表写上价格：覆盖有价格、查不到价格、default 跟随当前模型、分档模型、价格为 0、外部 agent 与两条生成路径一致", () => {
+    const priceMap: Record<string, ModelPricing | undefined> = {
+      "magpie/auto/deepseek-v4.1-flash": { input: 0.045, output: 0.5 },
+      "magpie/workbuddy/deepseek-v4.1-flash": { input: 0.045, output: 0.5 },
+      "magpie/antigravity/gemini-4-argon": {
+        input: 1.25,
+        output: 10,
+        tiers: [{ aboveInputTokens: 200_000, input: 2.5, output: 15 }],
+      },
+      "p/free": { input: 0, output: 0 },
+      "p/partial": { input: 1 },
+    };
+    const currentPricing: ModelPricing = { input: 2, output: 10 };
+    const lookup = (model: string | undefined): ModelPricing | undefined =>
+      model === undefined ? currentPricing : priceMap[model];
+
+    const profiles = [
+      {
+        name: "quick",
+        description: "只读查找",
+        model: "magpie/workbuddy/deepseek-v4.1-flash",
+        tools: "explore" as const,
+        enabled: true,
+      },
+      {
+        name: "deepseek",
+        description: "实现与排查",
+        model: "magpie/auto/deepseek-v4.1-flash",
+        effort: "max" as const,
+        enabled: true,
+      },
+      {
+        name: "deep",
+        description: "跨模块修改",
+        model: "magpie/antigravity/gemini-4-argon",
+        effort: "medium" as const,
+        enabled: true,
+      },
+      {
+        name: "free",
+        description: "零价模型",
+        model: "p/free",
+        enabled: true,
+      },
+      {
+        name: "unpriced",
+        description: "未声明价格",
+        model: "p/unknown",
+        enabled: true,
+      },
+      {
+        name: "partial",
+        description: "单边价格缺失",
+        model: "p/partial",
+        enabled: true,
+      },
+    ];
+    const agents = [{ name: "codex", description: "Codex CLI" }];
+
+    const table = subagentSelectionTable(profiles, agents, undefined, lookup);
+    const lines = table.split("\n");
+    expect(lines[0]).toContain("每百万 token 的输入/输出美元");
+    expect(table.match(/每百万 token/g)).toHaveLength(1);
+    expect(table).toContain("  - default：通用。（跟随当前模型，跟随会话，$2/$10）");
+    expect(table).toContain(
+      "  - quick：只读查找（magpie/workbuddy/deepseek-v4.1-flash，跟随会话，只读，$0.045/$0.5）",
+    );
+    expect(table).toContain(
+      "  - deepseek：实现与排查（magpie/auto/deepseek-v4.1-flash，max，$0.045/$0.5）",
+    );
+    expect(table).toContain(
+      "  - deep：跨模块修改（magpie/antigravity/gemini-4-argon，medium，$1.25/$10）",
+    );
+    expect(table).toContain("  - free：零价模型（p/free，跟随会话，$0/$0）");
+    expect(table).toContain("  - unpriced：未声明价格（p/unknown，跟随会话）");
+    expect(table).toContain("  - partial：单边价格缺失（p/partial，跟随会话）");
+    expect(table).toContain(
+      "  - codex（外部 agent）：Codex CLI；费用与额度计在该 agent 自己的账号上。",
+    );
+
+    const tool = createTaskTool(
+      launcher,
+      { agents, run: async () => ({ status: "ok", modelContent: "ok" }) },
+      600000,
+      profiles,
+      undefined,
+      undefined,
+      lookup,
+    );
+    expect(tool.description).toContain(table);
+  });
+
+  it("Runtime 会话注册 task 工具与 subagentSelectionTable 输出一致，复用用量页同源价格（含 vendor 兜底），且会话中途刷新价格不改变已创建工具的选择表", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "nctrn-task-price-"));
+    roots.push(root);
+    const home = path.join(root, "home");
+    mkdirSync(path.join(home, "cache"), { recursive: true });
+    writeFileSync(
+      path.join(home, "cache", "models-dev.json"),
+      JSON.stringify({
+        fetchedAt: "2099-01-01T00:00:00Z",
+        models: {
+          "deepseek/deepseek-v4.1-flash": { reasoning: true, input: ["text"] },
+        },
+        providers: {
+          deepseek: {
+            models: {
+              "deepseek-v4.1-flash": { cost: { input: 0.045, output: 0.5 } },
+            },
+          },
+        },
+      }),
+    );
+    writeFileSync(
+      path.join(home, "settings.json"),
+      JSON.stringify({
+        version: 1,
+        subagents: {
+          profiles: {
+            deepseek: {
+              description: "范围明确的实现与排查",
+              model: "magpie/auto/deepseek-v4.1-flash",
+              effort: "max",
+              enabled: true,
+            },
+            tiered: {
+              description: "分档计价模型",
+              model: "magpie/gemini-4-argon",
+              effort: "medium",
+              enabled: true,
+            },
+            free: {
+              description: "零价模型",
+              model: "magpie/free-model",
+              enabled: true,
+            },
+            unknown: {
+              description: "无价格模型",
+              model: "magpie/unpriced-model",
+              enabled: true,
+            },
+          },
+        },
+      }),
+    );
+
+    const baseModel = new FakeProvider({}).models()[0];
+    if (baseModel === undefined) throw new Error("missing base fake model");
+    const models: ModelInfo[] = [
+      {
+        ...baseModel,
+        ref: { provider: "magpie", model: "main-model" },
+        pricing: { input: 2, output: 10 },
+      },
+      {
+        ...baseModel,
+        ref: { provider: "magpie", model: "auto/deepseek-v4.1-flash" },
+        capabilities: {
+          ...baseModel.capabilities,
+          reasoningEffort: ["low", "medium", "high", "max"],
+        },
+        // 不声明 model.pricing，验证通过 config.vendorPricing("auto/deepseek-v4.1-flash") 兜底解析
+      },
+      {
+        ...baseModel,
+        ref: { provider: "magpie", model: "gemini-4-argon" },
+        capabilities: {
+          ...baseModel.capabilities,
+          reasoningEffort: ["low", "medium", "high"],
+        },
+        pricing: {
+          input: 1.25,
+          output: 10,
+          tiers: [{ aboveInputTokens: 200_000, input: 2.5, output: 15 }],
+        },
+      },
+      {
+        ...baseModel,
+        ref: { provider: "magpie", model: "free-model" },
+        pricing: { input: 0, output: 0 },
+      },
+      {
+        ...baseModel,
+        ref: { provider: "magpie", model: "unpriced-model" },
+      },
+    ];
+
+    const requests: ModelRequest[] = [];
+    const provider = new FakeProvider({
+      id: "magpie",
+      models,
+      handler: (req) => {
+        requests.push(req);
+        return [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+
+    let refreshedPrice = 0.045;
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: home,
+      env: () => undefined,
+      modelsDevFetch: async (url) =>
+        new Response(
+          String(url).endsWith("/models.json")
+            ? JSON.stringify({
+                "deepseek/deepseek-v4.1-flash": {
+                  reasoning: true,
+                  modalities: { input: ["text"] },
+                },
+              })
+            : JSON.stringify({
+                deepseek: {
+                  id: "deepseek",
+                  models: {
+                    "deepseek-v4.1-flash": {
+                      id: "deepseek-v4.1-flash",
+                      cost: { input: refreshedPrice, output: 9.9 },
+                    },
+                  },
+                },
+              }),
+          { status: 200 },
+        ),
+    });
+
+    const runtime = await createRuntime({
+      config,
+      providers: [provider],
+      sessionsDir: path.join(root, "sessions"),
+      cwd: root,
+      workspaceRoot: root,
+    });
+    const session = await runtime.createSession({ model: "magpie/main-model" });
+    await session.submit({ text: "first" });
+
+    const firstTaskDesc = requests[0]?.tools.find((t) => t.name === "task")?.description ?? "";
+    expect(firstTaskDesc).toContain("  - default：通用。（跟随当前模型，跟随会话，$2/$10）");
+    expect(firstTaskDesc).toContain(
+      "  - deepseek：范围明确的实现与排查（magpie/auto/deepseek-v4.1-flash，max，$0.045/$0.5）",
+    );
+    expect(firstTaskDesc).toContain(
+      "  - tiered：分档计价模型（magpie/gemini-4-argon，medium，$1.25/$10）",
+    );
+    expect(firstTaskDesc).toContain("  - free：零价模型（magpie/free-model，跟随会话，$0/$0）");
+    expect(firstTaskDesc).toContain("  - unknown：无价格模型（magpie/unpriced-model，跟随会话）");
+    const expectedTable = subagentSelectionTable(
+      [
+        {
+          name: "deepseek",
+          description: "范围明确的实现与排查",
+          model: "magpie/auto/deepseek-v4.1-flash",
+          effort: "max",
+          enabled: true,
+          pricing: { input: 0.045, output: 0.5 },
+        },
+        {
+          name: "tiered",
+          description: "分档计价模型",
+          model: "magpie/gemini-4-argon",
+          effort: "medium",
+          enabled: true,
+          pricing: {
+            input: 1.25,
+            output: 10,
+            tiers: [{ aboveInputTokens: 200_000, input: 2.5, output: 15 }],
+          },
+        },
+        {
+          name: "free",
+          description: "零价模型",
+          model: "magpie/free-model",
+          enabled: true,
+          pricing: { input: 0, output: 0 },
+        },
+        {
+          name: "unknown",
+          description: "无价格模型",
+          model: "magpie/unpriced-model",
+          enabled: true,
+        },
+      ],
+      [],
+      undefined,
+      { input: 2, output: 10 },
+    );
+    expect(firstTaskDesc).toContain(expectedTable);
+
+    // 会话中途刷新价格：选择表已在工具创建时定下，不应因刷新价格而变化
+    refreshedPrice = 0.88;
+    await config.refreshModelsDev?.();
+    expect(config.vendorPricing?.("auto/deepseek-v4.1-flash")).toEqual({
+      input: 0.88,
+      output: 9.9,
+    });
+    await session.submit({ text: "second" });
+    const secondTaskDesc = requests[1]?.tools.find((t) => t.name === "task")?.description ?? "";
+    expect(secondTaskDesc).toBe(firstTaskDesc);
+    expect(secondTaskDesc).toContain("（magpie/auto/deepseek-v4.1-flash，max，$0.045/$0.5）");
+
+    await session.close();
   });
 });

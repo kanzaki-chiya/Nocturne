@@ -3,6 +3,7 @@
  * `task` 工具的 `profile` 字段从中挑选执行者。类型与纯函数放 protocol，
  * 客户端（桌面/TUI）与 Core 共用同一份校验与显示规则。
  */
+import type { ModelPricing } from "./pricing.js";
 import type { ReasoningEffort } from "./types.js";
 import type { ToolEntry } from "./view.js";
 import { subagentProfile } from "./subagent-result.js";
@@ -51,18 +52,36 @@ export interface SubagentProfilesDescription {
   warnings: string[];
 }
 
+function formatProfilePricing(pricing: ModelPricing | undefined): string {
+  if (pricing?.input === undefined || pricing.output === undefined) return "";
+  return `，$${pricing.input}/$${pricing.output}`;
+}
+
 /** Core 与客户端共用的模型可见选择表；不负责解析模型或权限。 */
 export function subagentSelectionTable(
-  profiles: readonly (SubagentProfileConfig & { name: string })[],
+  profiles: readonly (SubagentProfileConfig & {
+    name: string;
+    pricing?: ModelPricing | undefined;
+  })[],
   agents: readonly { name: string; description?: string | undefined }[] = [],
   defaultModel?: string,
+  pricing?: ModelPricing | ((model: string | undefined) => ModelPricing | undefined),
 ): string {
+  const resolvePricing = (
+    model: string | undefined,
+    explicit?: ModelPricing,
+  ): ModelPricing | undefined => {
+    if (explicit !== undefined) return explicit;
+    if (typeof pricing === "function") return pricing(model);
+    return undefined;
+  };
+  const defaultPricing = typeof pricing === "function" ? pricing(defaultModel) : pricing;
   return [
-    "按任务难度和性质挑最便宜的够用档位；拿不准用 default。",
-    `  - default：通用。（${defaultModel ?? "跟随当前模型"}，跟随会话）`,
+    "按任务难度和性质挑最便宜的够用档位（单价为每百万 token 的输入/输出美元）；拿不准用 default。",
+    `  - default：通用。（${defaultModel ?? "跟随当前模型"}，跟随会话${formatProfilePricing(defaultPricing)}）`,
     ...profiles.map(
       (profile) =>
-        `  - ${profile.name}：${profile.description}（${profile.model ?? "跟随当前模型"}，${profile.effort ?? "跟随会话"}${profile.tools === "explore" ? "，只读" : ""}）`,
+        `  - ${profile.name}：${profile.description}（${profile.model ?? "跟随当前模型"}，${profile.effort ?? "跟随会话"}${profile.tools === "explore" ? "，只读" : ""}${formatProfilePricing(resolvePricing(profile.model, profile.pricing))}）`,
     ),
     ...agents.map(
       (agent) =>
