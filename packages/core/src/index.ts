@@ -137,6 +137,7 @@ import {
   gitRepository,
   gitCurrentBranch,
   gitWorkspaceBranches,
+  gitWorktrees,
   gitSwitchBranch,
 } from "./platform/index.js";
 import {
@@ -266,6 +267,7 @@ import {
   createQuestionBroker,
   createReadStateStore,
   createTaskTool,
+  createSwitchWorktreeTool,
   createSkillTool,
   createToolExecutor,
   createToolRegistry,
@@ -1836,6 +1838,66 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const tool of builtinTools()) {
       if (meta.schedule !== undefined && tool.traits.mutatesSchedule === true) continue;
       tools.register(tool);
+    }
+    if (meta.parent === undefined) {
+      const isolatedWorktreesRoot = await platform.resolveReal(
+        paths.join(sessionsDir, "worktrees"),
+      );
+      tools.register(
+        createSwitchWorktreeTool({
+          async switchWorktree(rawTarget) {
+            const repoRoot = await gitRepository(projectCwd);
+            if (repoRoot === null) throw new Error("Project directory is not a git repository");
+            const repoReal = await platform.resolveReal(repoRoot);
+            const subRel = paths.relative(repoReal, projectCwd);
+            const rawList = await gitWorktrees(projectCwd);
+            const realList = await Promise.all(rawList.map((p) => platform.resolveReal(p)));
+            const available = realList.filter((p) => !paths.isWithin(isolatedWorktreesRoot, p));
+            const resolvedInput = await platform.resolveReal(
+              paths.resolve(currentCwd(), rawTarget),
+            );
+            if (paths.isWithin(isolatedWorktreesRoot, resolvedInput))
+              throw new Error(
+                `Cannot switch into isolated subagent worktree under ${isolatedWorktreesRoot}. Available worktrees: ${available.join(", ")}`,
+              );
+            const matchedRoot = available.find((wt) => paths.equals(wt, resolvedInput));
+            if (matchedRoot === undefined)
+              throw new Error(
+                `Target is not an available git worktree of this repository. Available worktrees: ${available.join(", ")}`,
+              );
+            const targetCwd = subRel ? paths.resolve(matchedRoot, subRel) : matchedRoot;
+            const stat = await fs.stat(targetCwd).catch(() => undefined);
+            if (stat?.type !== "directory")
+              throw new Error(`Target worktree is missing subdirectory ${subRel}: ${targetCwd}`);
+            const realTarget = await fs.realpath(targetCwd);
+            const previous = await platform.resolveReal(currentCwd());
+            const branch = (await gitCurrentBranch(realTarget)) ?? undefined;
+            const prevBranch = session.state().config.branch;
+            if (!paths.equals(previous, realTarget)) {
+              fileIndexPromise = undefined;
+              await session.emit("session.config_changed", {
+                worktree: {
+                  current: realTarget,
+                  previous,
+                  ...(branch !== undefined ? { branch } : {}),
+                },
+                ...(branch !== undefined
+                  ? {
+                      branch: {
+                        current: branch,
+                        ...(prevBranch !== undefined && prevBranch !== branch
+                          ? { previous: prevBranch }
+                          : {}),
+                      },
+                    }
+                  : {}),
+              });
+              policy = buildPolicy(session.state().config.permissionPreset);
+            }
+            return { current: realTarget, ...(branch !== undefined ? { branch } : {}) };
+          },
+        }),
+      );
     }
     const loadedSkills = new Map<string, string>();
     const installSkills = () => {

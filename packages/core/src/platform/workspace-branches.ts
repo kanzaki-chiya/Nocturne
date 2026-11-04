@@ -100,3 +100,15 @@ export async function gitSwitchBranch(
     await git(workspace, ["check-ref-format", "--branch", `refs/heads/${branch}`]);
   await git(workspace, create ? ["switch", "-c", branch, "--"] : ["switch", "--", branch], 60000);
 }
+
+export async function gitWorktrees(workspace: string): Promise<string[]> {
+  if (!hasGitMarker(workspace)) return [];
+  try {
+    const out = await git(workspace, ["worktree", "list", "--porcelain", "-z"]);
+    return out
+      .split("\0")
+      .flatMap((line) => (line.startsWith("worktree ") ? [resolve(line.slice(9))] : []));
+  } catch {
+    return [];
+  }
+}

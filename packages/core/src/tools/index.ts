@@ -34,6 +34,7 @@ export { scheduleTool, scheduleSubjectDetail, type ScheduleToolInput } from "./b
 export { webFetchTool } from "./builtin/web-fetch.js";
 export { diffLines } from "./builtin/diff.js";
 export { createTaskTool } from "./builtin/task.js";
+export { createSwitchWorktreeTool } from "./builtin/switch-worktree.js";
 export {
   createMcpOnDemandTools,
   estimateMcpToolsTokens,
