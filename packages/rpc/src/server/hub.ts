@@ -182,7 +182,9 @@ export class Hub {
   setHandle(handle: RpcRuntimeHandle): void {
     this.handle = handle;
     this.unsubscribeSessions?.();
-    this.unsubscribeSessions = handle.runtime.onSessionsChanged(() => this.notifySessionsChanged());
+    this.unsubscribeSessions = handle.runtime.onSessionsChanged(() => {
+      this.notifySessionsChanged();
+    });
     this.unsubscribeGrants?.();
     this.unsubscribeGrants = handle.runtime.onGrantsChanged((payload) => {
       if (this.stopping) return;

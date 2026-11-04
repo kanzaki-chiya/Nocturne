@@ -216,7 +216,7 @@ describe("packages/mcp-server 单元与集成测试", () => {
     });
     const result = await mcpServer.bridge.callTool("nocturne_list_sessions", {});
     expect(result.isError).not.toBe(true);
-    const payload = parseToolJson(result);
+    const payload = parseToolJson({ ...result });
     expect(payload.sessions).not.toContainEqual(expect.objectContaining({ sessionId: session.id }));
     expect(
       await backend.desktopClient.runtime.listSessions({ includeArchived: true }),

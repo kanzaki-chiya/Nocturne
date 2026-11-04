@@ -278,7 +278,9 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     // 本机照常创建（未信任方式），此后手机可在这个已用过的工作区新建
     const used = await h.client.runtime.createSession({ model: MODEL, cwd: project });
     await h.client.runtime.archiveSession(used.session.id);
-    expect(await remote.client.runtime.listSessions({ cwd: project, includeArchived: true })).toEqual([]);
+    expect(
+      await remote.client.runtime.listSessions({ cwd: project, includeArchived: true }),
+    ).toEqual([]);
     // 归档只影响列表，不改变 allowWorkspace 的已用工作区判定。
     await (
       await remote.client.runtime.createSession({ model: MODEL, cwd: project })

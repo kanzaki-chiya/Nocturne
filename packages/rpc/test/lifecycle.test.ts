@@ -123,6 +123,7 @@ describe("连接约束", () => {
               runtime: {
                 onScheduleChanged: () => () => undefined,
                 onGrantsChanged: () => () => undefined,
+                onSessionsChanged: () => () => undefined,
               } as never,
             });
       },

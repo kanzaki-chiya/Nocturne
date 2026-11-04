@@ -796,8 +796,9 @@ export interface RpcServerNotifications {
    */
   "runtime.providersChanged": Record<string, never>;
   /**
-   * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建、分叉或重命名会话成功、会话首条用户消息
-   * 或标题落盘之后推送，短时间内的多次变化合并为一条。不带任何会话内容；别的进程改的列表不在此列
+   * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建、分叉、重命名、归档或恢复会话成功，
+   * 发送消息自动恢复归档、首条用户消息或标题落盘之后推送，短时间内的多次变化合并为一条。
+   * 不带任何会话内容；别的进程改的列表不在此列
    */
   "runtime.sessionsChanged": Record<string, never>;
   /** 只交给发起查询的连接；results 是按更新时间倒序的增量。 */
