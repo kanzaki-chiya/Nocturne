@@ -522,12 +522,31 @@ it("pumps inputs queued while a branch switch is running after the switch finish
     permissions: { autoApproveAsk: true },
   });
   const session = await rt.createSession({ model: "fake/fake-1" });
+  let turnIdle = true;
+  session.subscribe((event) => {
+    if (event.type === "turn.started") turnIdle = false;
+    if (event.type === "runtime.status" && event.payload.status === "idle") turnIdle = true;
+  });
   const delivered = (marker: string) =>
+    turnIdle &&
     session.pendingInputs().items.length === 0 &&
     session.state().openTurn === undefined &&
     session
       .state()
       .history.some((e) => e.kind === "user" && JSON.stringify(e.content).includes(marker));
+  const waitForDelivered = (marker: string) =>
+    new Promise<void>((resolve) => {
+      if (delivered(marker)) {
+        resolve();
+        return;
+      }
+      const off = session.subscribe(() => {
+        if (delivered(marker)) {
+          off();
+          resolve();
+        }
+      });
+    });
   await session.submit({ text: "launch-success" });
   writeFileSync(gate, "1");
   const switching = rt.switchBranch({
@@ -540,8 +559,7 @@ it("pumps inputs queued while a branch switch is running after the switch finish
   expect(session.pendingInputs().items).toHaveLength(1);
   rmSync(gate);
   await switching;
-  for (let i = 0; i < 25 && !delivered("bg-1"); i++)
-    await new Promise((resolve) => setTimeout(resolve, 40));
+  await waitForDelivered("bg-1");
   expect(session.pendingInputs().items).toHaveLength(0);
   expect(delivered("bg-1")).toBe(true);
   await session.submit({ text: "launch-failure" });
@@ -557,8 +575,7 @@ it("pumps inputs queued while a branch switch is running after the switch finish
   expect(session.pendingInputs().items).toHaveLength(1);
   rmSync(gate);
   await expect(failing).rejects.toThrow();
-  for (let i = 0; i < 25 && !delivered("bg-2"); i++)
-    await new Promise((resolve) => setTimeout(resolve, 40));
+  await waitForDelivered("bg-2");
   expect(session.pendingInputs().items).toHaveLength(0);
   expect(delivered("bg-2")).toBe(true);
   await session.close();
