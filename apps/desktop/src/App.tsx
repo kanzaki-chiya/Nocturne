@@ -116,8 +116,12 @@ function errMessage(error: unknown): string {
 }
 
 /**
- * 归档当前会话后去哪（ADR-0080）：同项目侧栏顺序里的下一条；没有就侧栏第一条；
- * 都没有就是 undefined（回新会话页）。被归档行本身已从树里拿掉。
+ * 归档当前会话后去哪（ADR-0080）：
+ * 1. 同项目侧栏顺序里的下一条（包括折叠没显示的）；
+ * 2. 同项目的上一条；
+ * 3. 侧栏第一条；
+ * 4. 都没有就是 undefined（回新会话页）。
+ * 不显示在项目行里的置顶会话沿用同项目第一条。
  */
 function nextSidebarSession(
   tree: SessionTree,
@@ -129,22 +133,35 @@ function nextSidebarSession(
   const byId = new Map(sessions.map((session) => [session.id, session]));
   const summary = byId.get(id);
   const key = projectKey(workspace);
-  const sameProject =
-    summary?.schedule !== undefined
-      ? tree.scheduled.rows
-      : plainKeys.has(key)
-        ? tree.chats.rows
-        : (tree.projects.find((project) => project.key === key)?.sessions ?? []);
-  const index = sameProject.findIndex((row) => row.id === id);
-  const sameNext = index >= 0 ? sameProject[index + 1] : sameProject[0];
+  const pinnedIds = new Set(tree.pinned.map((row) => row.id));
+  const sectionVisible =
+    summary?.schedule !== undefined ||
+    plainKeys.has(key) ||
+    tree.projects.some((project) => project.key === key);
+  const sameProject = sectionVisible
+    ? sessions
+        .filter((session) => {
+          if (session.archivedAt !== undefined || pinnedIds.has(session.id)) return false;
+          const hasText = session.firstText !== undefined && session.firstText.trim() !== "";
+          if (!hasText && session.locked !== true && session.client === undefined) return false;
+          if (summary?.schedule !== undefined) return session.schedule !== undefined;
+          if (session.schedule !== undefined) return false;
+          const sessionKey = projectKey(session.cwd);
+          return plainKeys.has(key) ? plainKeys.has(sessionKey) : sessionKey === key;
+        })
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    : [];
+  const index = sameProject.findIndex((session) => session.id === id);
+  const sameTarget =
+    index >= 0 ? (sameProject[index + 1] ?? sameProject[index - 1]) : sameProject[0];
+  if (sameTarget !== undefined) return sameTarget;
   const fallback = [
     ...tree.pinned,
     ...tree.chats.rows,
     ...tree.scheduled.rows,
     ...tree.projects.flatMap((project) => project.sessions),
   ].find((row) => row.id !== id);
-  const candidate = sameNext ?? fallback;
-  return candidate === undefined ? undefined : byId.get(candidate.id);
+  return fallback === undefined ? undefined : byId.get(fallback.id);
 }
 
 interface StartupError {

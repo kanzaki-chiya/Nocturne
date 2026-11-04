@@ -1903,29 +1903,59 @@ it("会话菜单归档：移除置顶、行消失，全部归档后项目节点�
   });
 });
 
-it("归档当前会话后依次跳到同项目下一条、侧栏第一条、新会话页", async () => {
+it("归档当前会话后依次跳到同项目下一条（含折叠）、同项目上一条、侧栏第一条、新会话页", async () => {
   const host = replayHost();
   host.sessions.splice(
     0,
     host.sessions.length,
-    fakeSession("p1", "Z:/proj", "p1 会话", 300),
-    fakeSession("p2", "Z:/proj", "p2 会话", 200),
+    fakeSession("p1", "Z:/proj", "p1 会话", 700),
+    fakeSession("p2", "Z:/proj", "p2 会话", 600),
+    fakeSession("p3", "Z:/proj", "p3 会话", 500),
+    fakeSession("p4", "Z:/proj", "p4 会话", 400),
+    fakeSession("p5", "Z:/proj", "p5 会话", 300),
+    fakeSession("p6", "Z:/proj", "p6 会话", 200),
+    fakeSession("p7", "Z:/proj", "p7 会话", 150),
     fakeSession("g1", "Z:/other", "g1 会话", 100),
   );
   render(<App host={host} />);
-  fireEvent.click(await screen.findByRole("button", { name: /^p1 (?:会话|正文)/ }));
-  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("p1 正文");
 
-  archiveSessionRow("p1");
+  // 1. 中间一条（p2）→ 同项目下一条（p3）
+  fireEvent.click(await screen.findByRole("button", { name: /^p2 (?:会话|正文)/ }));
   await waitFor(() =>
     expect(
-      host.calls.some(
-        (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "p2",
-      ),
-    ).toBe(true),
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("p2 正文"),
+    ).toBeTruthy(),
   );
-  // p1 是项目里最后一条可跳转的：下一条落在同项目的 p2
-  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("p2 正文");
+  archiveSessionRow("p2");
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("p3 正文"),
+    ).toBeTruthy(),
+  );
+
+  // 2. 显示的最后一条（p6）且折叠里还有（p7）→ 同项目折叠里的下一条（p7）
+  expect(screen.getByRole("button", { name: "展开显示（还有 1 个）" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^p7 (?:会话|正文)/ })).toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: /^p6 (?:会话|正文)/ }));
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("p6 正文"),
+    ).toBeTruthy(),
+  );
+  archiveSessionRow("p6");
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("p7 正文"),
+    ).toBeTruthy(),
+  );
+
+  // 3. 真正的最后一条（p7）→ 同项目的上一条（p5）
+  archiveSessionRow("p7");
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("p5 正文"),
+    ).toBeTruthy(),
+  );
 
   cleanup();
   const second = replayHost();
@@ -1933,20 +1963,41 @@ it("归档当前会话后依次跳到同项目下一条、侧栏第一条、新�
     0,
     second.sessions.length,
     fakeSession("q1", "Z:/one", "q1 会话", 300),
+    fakeSession("q0", "Z:/two", "q0 置顶", 250),
     fakeSession("r1", "Z:/two", "r1 会话", 200),
     fakeSession("r2", "Z:/two", "r2 会话", 100),
   );
+  localStorage.setItem(
+    "nocturne.desktop.prefs.v1",
+    JSON.stringify({ pinned: ["q0"], projects: [], hidden: [], expanded: [], collapsed: [] }),
+  );
   render(<App host={second} />);
-  fireEvent.click(await screen.findByRole("button", { name: /^q1 (?:会话|正文)/ }));
-  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("q1 正文");
-  archiveSessionRow("q1");
-  // 同项目没有下一条：切到侧栏第一条（r1）
+  // 不显示在项目行里的置顶会话（q0，属于 Z:/two）→ 同项目第一条（r1，而非排在前面的 Z:/one 的 q1）
+  fireEvent.click(await screen.findByRole("button", { name: /^q0 (?:置顶|正文)/ }));
   await waitFor(() =>
     expect(
-      second.calls.some(
-        (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "r1",
-      ),
-    ).toBe(true),
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("q0 正文"),
+    ).toBeTruthy(),
+  );
+  archiveSessionRow("q0");
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("r1 正文"),
+    ).toBeTruthy(),
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: /^q1 (?:会话|正文)/ }));
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("q1 正文"),
+    ).toBeTruthy(),
+  );
+  archiveSessionRow("q1");
+  // 4. 同项目只有这一条且侧栏有别的会话：切到侧栏第一条（r1）
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "会话消息" })).getByText("r1 正文"),
+    ).toBeTruthy(),
   );
 
   cleanup();
@@ -1956,6 +2007,7 @@ it("归档当前会话后依次跳到同项目下一条、侧栏第一条、新�
   fireEvent.click(await screen.findByRole("button", { name: /^z1 (?:会话|正文)/ }));
   await within(await screen.findByRole("region", { name: "会话消息" })).findByText("z1 正文");
   archiveSessionRow("z1");
+  // 5. 整个侧栏没有别的会话：回到新会话页
   expect(await screen.findByText("有什么可以帮你？")).toBeTruthy();
   await waitFor(() => expect(screen.queryByRole("region", { name: "会话消息" })).toBeNull());
 });
