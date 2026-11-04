@@ -12,9 +12,9 @@ import {
   type Usage,
 } from "../protocol/index.js";
 import {
+  isContentEvent,
   isProviderError,
   timedStream,
-  type ModelOutputEvent,
   type ModelRequest,
 } from "../provider/index.js";
 import { redactRequestImages } from "./redact.js";
@@ -73,21 +73,6 @@ function sleep(ms: number, signal: AbortSignal): Promise<boolean> {
       { once: true },
     );
   });
-}
-
-/** 计 TTFT 的内容事件：正文、推理或工具调用（含增量）；usage / finish 不算 */
-function isContentEvent(ev: ModelOutputEvent): boolean {
-  switch (ev.type) {
-    case "text_delta":
-    case "reasoning_delta":
-      return ev.text !== "";
-    case "reasoning_block":
-    case "tool_call_delta":
-    case "tool_call":
-      return true;
-    default:
-      return false;
-  }
 }
 
 /** 追加 delta 到有序内容块：与末尾同类块合并，否则开新块 */

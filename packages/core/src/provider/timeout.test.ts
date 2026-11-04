@@ -65,4 +65,87 @@ describe("timedStream 心跳（ADR-0014 修订）", () => {
       collect(provider([{ wait: 80 }, { type: "text_delta", text: "ok" }]), 30, 500),
     ).rejects.toMatchObject({ kind: "timeout", retryable: true });
   });
+
+  it("内容之前的长时间保活与空增量不触发超时，正常结束的流不受影响", async () => {
+    const events = await collect(
+      provider([
+        { wait: 20 },
+        { type: "heartbeat" },
+        { wait: 25 },
+        { type: "text_delta", text: "" },
+        { wait: 25 },
+        { type: "heartbeat" },
+        { wait: 45 },
+        { type: "heartbeat" },
+        { wait: 30 },
+        { type: "text_delta", text: "ok" },
+        { wait: 20 },
+        { type: "heartbeat" },
+        { wait: 20 },
+        { type: "finish", reason: "stop" },
+      ]),
+      40,
+      65,
+    );
+    expect(events).toEqual([
+      { type: "text_delta", text: "" },
+      { type: "text_delta", text: "ok" },
+      { type: "finish", reason: "stop" },
+    ]);
+  });
+
+  it("收到首个内容事件后，心跳与空增量不再重置空闲计时，按剩余时间超时", async () => {
+    const started = Date.now();
+    await expect(
+      collect(
+        provider([
+          { type: "text_delta", text: "first" },
+          { wait: 25 },
+          { type: "heartbeat" },
+          { wait: 25 },
+          { type: "text_delta", text: "" },
+          { wait: 25 },
+          { type: "heartbeat" },
+          { wait: 25 },
+          { type: "heartbeat" },
+          { wait: 25 },
+          { type: "text_delta", text: "too-late" },
+        ]),
+        40,
+        80,
+      ),
+    ).rejects.toMatchObject({ kind: "timeout", retryable: true });
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(70);
+    expect(elapsed).toBeLessThan(125);
+  });
+
+  it("保活夹在内容之间时，超时从最后一个内容事件算起", async () => {
+    const started = Date.now();
+    await expect(
+      collect(
+        provider([
+          { type: "text_delta", text: "c1" },
+          { wait: 35 },
+          { type: "heartbeat" },
+          { wait: 30 },
+          { type: "text_delta", text: "c2" },
+          { wait: 30 },
+          { type: "heartbeat" },
+          { wait: 30 },
+          { type: "heartbeat" },
+          { wait: 30 },
+          { type: "heartbeat" },
+          { wait: 80 },
+          { type: "text_delta", text: "never" },
+        ]),
+        40,
+        85,
+      ),
+    ).rejects.toMatchObject({ kind: "timeout", retryable: true });
+    const elapsed = Date.now() - started;
+    // c2 在 ~65ms 到达并把空闲上限重置到 ~150ms；若从 c1 算会在 85ms 超时，若被后续心跳续住则 >235ms
+    expect(elapsed).toBeGreaterThanOrEqual(135);
+    expect(elapsed).toBeLessThan(215);
+  });
 });

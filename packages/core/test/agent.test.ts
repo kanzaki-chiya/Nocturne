@@ -9,12 +9,14 @@ import { redactRequestImages } from "../src/agent/redact.js";
 import { createWorkspaceReadPolicy } from "../src/permission/index.js";
 import { createPlatform, type Platform } from "../src/platform/index.js";
 import {
+  createOpenAICompatibleProvider,
   FakeProvider,
   ProviderError,
   type FakeHandler,
   type FakeScript,
   type FakeScriptEvent,
   type ModelRequest,
+  type Provider,
   type ResolvedModel,
 } from "../src/provider/index.js";
 import type { RuntimeEvent, ToolCallRef } from "../src/protocol/index.js";
@@ -231,6 +233,199 @@ describe("runTurn", () => {
     expect(h.events.filter((e) => e.type === "provider.retry")).toHaveLength(1);
     const end = h.events.find((e) => e.type === "turn.completed");
     expect(end?.type === "turn.completed" && end.payload.error?.code).toBe("provider_timeout");
+  });
+
+  it("openai-compatible 真实响应体形状：内容后只发 : keepalive 不再续住空闲超时，按时重发且未结束流中的 edit 不执行", async () => {
+    let attempt = 0;
+    const encoder = new TextEncoder();
+    const sseChunk = (delta: Record<string, unknown>, finishReason: string | null = null) =>
+      `data: ${JSON.stringify({
+        id: "chatcmpl-keepalive",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "m",
+        choices: [{ index: 0, delta, finish_reason: finishReason }],
+      })}\n\n`;
+
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      attempt += 1;
+      const currentAttempt = attempt;
+      const signal = init?.signal ?? undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const timers: ReturnType<typeof setTimeout>[] = [];
+          const push = (delayMs: number, text: string) => {
+            timers.push(
+              setTimeout(() => {
+                try {
+                  controller.enqueue(encoder.encode(text));
+                } catch {
+                  // closed/aborted
+                }
+              }, delayMs),
+            );
+          };
+          signal?.addEventListener(
+            "abort",
+            () => {
+              for (const t of timers) clearTimeout(t);
+              try {
+                controller.error(new DOMException("Aborted", "AbortError"));
+              } catch {
+                // already closed
+              }
+            },
+            { once: true },
+          );
+
+          if (currentAttempt === 1) {
+            // 1. 先有几行 : keepalive，然后一个空 content 的 role delta，再有几行 : keepalive（总时长超过 firstEventTimeoutMs 与 idleTimeoutMs）
+            push(1_100, ": keepalive\n\n");
+            push(2_200, ": keepalive\n\n");
+            push(3_300, sseChunk({ content: "", role: "assistant" }));
+            push(4_400, ": keepalive\n\n");
+            push(5_500, ": keepalive\n\n");
+            // 2. 接着 reasoning_content、content 增量，以及一个 edit 的 tool_calls，分片后参数 JSON 已闭合
+            push(6_000, sseChunk({ reasoning_content: "先看文件内容" }));
+            push(6_100, sseChunk({ content: "准备修改 note.txt" }));
+            push(
+              6_200,
+              sseChunk({
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_edit_1",
+                    type: "function",
+                    function: {
+                      name: "edit",
+                      arguments: '{"path":"note.txt",',
+                    },
+                  },
+                ],
+              }),
+            );
+            push(
+              6_300,
+              sseChunk({
+                tool_calls: [
+                  {
+                    index: 0,
+                    function: {
+                      arguments: '"old":"before","new":"after"}',
+                    },
+                  },
+                ],
+              }),
+            );
+            // 3. 之后没有 finish_reason，没有 [DONE]，只持续发 : keepalive
+            for (let t = 7_400; t <= 20_000; t += 1_100) {
+              push(t, ": keepalive\n\n");
+            }
+          } else {
+            push(100, ": keepalive\n\n");
+            push(200, sseChunk({ role: "assistant", content: "重试后正常完成" }));
+            push(300, sseChunk({}, "stop"));
+            timers.push(
+              setTimeout(() => {
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+              }, 350),
+            );
+          }
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+
+    const compatProvider: Provider = createOpenAICompatibleProvider(
+      {
+        id: "compat",
+        baseURL: "https://example.test/v1",
+        apiKeyEnv: "TEST_KEY",
+        models: {
+          m: {
+            capabilities: {
+              toolCalls: true,
+              reasoning: "visible",
+              imageInput: false,
+              parallelToolCalls: true,
+              promptCache: false,
+              editTool: "edit",
+            },
+          },
+        },
+      },
+      () => "secret",
+      fetchImpl,
+    );
+
+    const h = await makeHarness({
+      provider: compatProvider as unknown as FakeProvider,
+      config: {
+        firstEventTimeoutMs: 2_500,
+        idleTimeoutMs: 3_000,
+        retryLimit: 2,
+        retryBaseDelayMs: 100,
+        retryMaxDelayMs: 100,
+      },
+    });
+    const rawPath = path.join(h.ws, "note.txt");
+    await platform.fs.writeFile(rawPath, "before\n");
+    const filePath = await platform.resolveReal(rawPath);
+    const stat = await platform.fs.stat(filePath);
+    h.deps.execEnv.readState.record(filePath, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      hash: createHash("sha256").update("before\n", "utf8").digest("hex"),
+      text: "before\n",
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      let settled: string | undefined;
+      const turnPromise = runTurn(h.deps, prompt()).then((r) => {
+        settled = r;
+        return r;
+      });
+      while (attempt === 0) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      // 推进到 9_000ms（最后一个输出内容事件 6_100ms + idleTimeoutMs 3_000ms = 9_100ms 之前）：还在第 1 次尝试中
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(attempt).toBe(1);
+      expect(settled).toBeUndefined();
+      expect(h.events.filter((e) => e.type === "provider.retry")).toHaveLength(0);
+
+      // 推进到 9_150ms（越过 9_100ms，但尚未走完 100ms 退避）：第 1 次尝试按时空闲超时，发出 provider.retry
+      await vi.advanceTimersByTimeAsync(150);
+      const retries = h.events.filter((e) => e.type === "provider.retry");
+      expect(retries).toHaveLength(1);
+      expect(retries[0]?.payload).toMatchObject({
+        attempt: 1,
+        error: { kind: "timeout" },
+        discarded: { messageId: expect.any(String) },
+      });
+
+      // 推进完成退避与第 2 次尝试
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.useRealTimers();
+      expect(await turnPromise).toBe("done");
+      expect(attempt).toBe(2);
+
+      // 未正常结束的流里的 edit 工具绝不执行
+      expect(h.events.filter((e) => e.type === "tool.started")).toHaveLength(0);
+      expect(h.events.filter((e) => e.type === "tool.completed")).toHaveLength(0);
+      expect(new TextDecoder().decode(await platform.fs.readFile(filePath))).toBe("before\n");
+      expect(
+        h.session.durableEvents().find((e) => e.type === "message.assistant")?.payload.content,
+      ).toEqual([{ type: "text", text: "重试后正常完成" }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("完整 Turn：prompt → 流式文本 → 工具调用 → 工具结果回模型 → done", async () => {
