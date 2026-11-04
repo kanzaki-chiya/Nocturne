@@ -474,6 +474,12 @@ describe("task 档位表", () => {
     expect(secondTaskDesc).toBe(firstTaskDesc);
     expect(secondTaskDesc).toContain("（magpie/auto/deepseek-v4.1-flash，max，$0.045/$0.5）");
 
+    // 切换模型：default 跟随当前模型，价格要换成新模型的
+    await session.setModel("magpie/gemini-4-argon");
+    await session.submit({ text: "third" });
+    const thirdTaskDesc = requests[2]?.tools.find((t) => t.name === "task")?.description ?? "";
+    expect(thirdTaskDesc).toContain("  - default：通用。（跟随当前模型，跟随会话，$1.25/$10）");
+
     await session.close();
   });
 });

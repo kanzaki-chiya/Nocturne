@@ -3760,6 +3760,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.emit("session.config_changed", { model: ref });
         model = resolved;
         installSkills();
+        // default 档位跟随当前模型时，选择表里的价格要换成新模型的
+        installTask();
         warnIfCapabilitiesDefaulted(resolved.model);
         warnIfEffortClamped(resolved.model);
         // recent-models.json（provider-setup.md 第 6 节）：写入失败不阻塞切换
