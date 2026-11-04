@@ -150,9 +150,9 @@ interface SessionRecovery {
 
 [ADR-0080](../decisions/ADR-0080-session-archive.md)：归档是日志之外的旁路状态，不改 `formatVersion`，不写任何会话事件，也不修改 `<id>.jsonl`。每个会话至多一个 `<sessionsDir>/<id>.archive.json`，内容为 `{ "archivedAt": "<ISO 时间>" }`；先写临时文件再原子重命名，恢复即删除该文件。
 
-`Runtime.archiveSession(id)` / `unarchiveSession(id)` 只接受根会话，子会话返回 `invalid_command`。未打开的会话先按 `renameClosed` 同一正则校验 id 再构造路径，取得排他锁后只读日志首行确认 `session.created.parent` 缺省；不调用 `loadEvents` 或 `repair`，因此不会截尾、追加修复事件或改变日志 mtime。锁被占用时映射为 `session_busy`。已打开的会话走 `OpenSessionHooks`：Turn、压缩、回退、关闭、后台子代理计数或待发输入任一存在时返回 `session_busy`；旁路操作进行中同样占忙，`submit` 的 `controller` 仍同步置位，二者不会交错。
+`Runtime.archiveSession(id)` / `unarchiveSession(id)` 只接受根会话，子会话返回 `invalid_command`。归档时，未打开的会话先按 `renameClosed` 同一正则校验 id 再构造路径，取得排他锁后只读日志首行确认 `session.created.parent` 缺省（不调用 `loadEvents` 或 `repair`，不会截尾、追加修复事件或改变日志 mtime），锁被占用时映射为 `session_busy`；已打开的会话走 `OpenSessionHooks`，Turn、压缩、回退、关闭、后台子代理计数或待发输入任一存在时返回 `session_busy`，归档写入进行中同样占忙，与 `startTurns` 同步置位的 `controller` 互斥。恢复（`unarchiveSession`）对已打开和未打开的会话都只校验 id 与根会话并删除旁路文件，不判断忙状态，也不取会话锁；旁路文件本来不存在时视为成功。
 
-`listSessions` 与 `searchSessions` 新增 `includeArchived`，缺省 false；摘要仅在归档时带 `archivedAt`。归档旁路损坏按未归档处理并记 `session.archive_sidecar_invalid`，不阻塞列表。已归档的会话收到 `submit` 时先删除旁路再发请求；删除失败记 `session.unarchive_failed`，不挡发送。写入失败记 `session.archive_write_failed`。打开、查看、压缩、回退都不改变归档状态；分叉不复制旁路，新会话默认未归档。`Runtime.onSessionsChanged(listener)` 在归档、恢复及 submit 自动恢复成功后通知，供 RPC Hub 并入 `runtime.sessionsChanged` 的合并窗口。
+`listSessions` 与 `searchSessions` 新增 `includeArchived`，缺省 false；摘要仅在归档时带 `archivedAt`。归档旁路损坏按未归档处理并记 `session.archive_sidecar_invalid`，不阻塞列表。已归档的会话在开始新一轮（`startTurns` 首个输入准备之前，涵盖 `submit`、`enqueueInput` 空闲与压缩后路径、`pumpQueue` 含「继续发送」、`resumeGoal`、`approvePlan`）时先删除旁路，实际删除了文件才通知列表变化，同一 `startTurns` 接续的下一轮不重复处理；删除失败记 `session.unarchive_failed`，不挡本轮。写入失败记 `session.archive_write_failed`。打开、查看、压缩、回退都不改变归档状态；分叉不复制旁路，新会话默认未归档。`Runtime.onSessionsChanged(listener)` 在归档、恢复及新一轮自动恢复实际删除旁路后通知，供 RPC Hub 并入 `runtime.sessionsChanged` 的合并窗口。
 
 ## 9. 暂不设计
 

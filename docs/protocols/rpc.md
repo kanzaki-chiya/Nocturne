@@ -39,7 +39,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
 | `renameSession` | `{ sessionId, title }` → `null`；调用 Core 的 `Runtime.renameSession`，成功后通知会话列表变化；参数必须为字符串，标题内容的校验由 Core 负责 |
-| `archiveSession` / `unarchiveSession` | `{ sessionId }` → `null`；仅本机连接可调用。调用 Core 的同名方法，成功后发送 `runtime.sessionsChanged`；忙状态返回 `session_busy`，子会话返回 `invalid_command`（ADR-0080）。不写会话事件 |
+| `archiveSession` / `unarchiveSession` | `{ sessionId }` → `null`；仅本机连接可调用。调用 Core 的同名方法，成功后发送 `runtime.sessionsChanged`；`archiveSession` 在忙状态时返回 `session_busy`（`unarchiveSession` 不判断忙状态、不取锁，旁路不存在也视为成功），子会话均返回 `invalid_command`（ADR-0080）。不写会话事件 |
 | `usageStats` | `{ days?: number }`（正整数，缺省全部）→ protocol 的 `UsageStats`（含按模型的 `requests`、`latency`、`performance`、`cacheSavings`、首末使用时间，范围内逐日的 `requests` 与 `models` 拆分，以及 `performanceGranularity`）；只读，不打开会话或取锁，见 [usage.md](../architecture/usage.md) |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot`；`listModels` 另可带 `includeDisabled`（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)：true 时含停用模型并带 `disabled`，默认滤除；停用模型也带 `unavailable`） |
 | `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }`；`describeSettings` 的模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
