@@ -84,7 +84,7 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 ### 2. 启动与进程
 
-用 `Start-Process -PassThru` 依次启动：当前工作树 `apps/desktop` 的 Vite（`--port 31420 --strictPort`）、`apps/relay/dist/main.mjs serve --listen 127.0.0.1:18787 --web-root apps/desktop/dist-web`、调试版桌面 exe（`NOCTURNE_DESKTOP_BACKEND` 指向工作树 `apps/cli/dist/main.js`，WebView 加 `--remote-debugging-port=19334`）、独立 user-data-dir 的 headless Edge（`--remote-debugging-port=19444`）。PID 写入文件，结束时只停这些 PID 及其子进程，不按进程名结束；先确认端口空闲，不碰正在运行的安装版或开发版。启动脚本的子进程会占住输出管道，单独启动，不要和截图命令串在一起。每次操作前核对 CDP 端口对应的 exe 路径。
+用 Node 的 `spawn(..., { detached: true, windowsHide: true, stdio: ["ignore", outFd, errFd] })`（或 `Start-Process -PassThru`）依次启动：当前工作树 `apps/desktop` 的 Vite（`--port 31420 --strictPort`，注意 `stdin` 需设为 `"ignore"`，否则在无控制台的后台进程中 Vite 读 stdin 会因 `EPIPE` 退出）、`apps/relay/dist/main.mjs serve --listen 127.0.0.1:18787 --web-root apps/desktop/dist-web`、调试版桌面 exe（`NOCTURNE_DESKTOP_BACKEND` 指向工作树 `apps/cli/dist/main.js`，WebView 加 `--remote-debugging-port=19334`；注意调试 exe 需是 `devUrl` 指向 `http://localhost:31420` 的构建，而不是设置了 `NOCTURNE_TAURI_CDP=1` 内嵌静态 `frontendDist` 的构建）、独立 user-data-dir 的 headless Edge（`--remote-debugging-port=19444`）。PID 写入文件，结束时只停这些 PID 及其子进程，不按进程名结束；先确认端口空闲，不碰正在运行的安装版或开发版。启动脚本的子进程会占住输出管道，单独启动，不要和截图命令串在一起。每次操作前核对 CDP 端口对应的 exe 路径。
 
 ### 3. 桌面、上下文与用量
 
