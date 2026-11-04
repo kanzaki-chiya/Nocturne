@@ -114,7 +114,7 @@ export function ToolRow({
   const b = badge(entry.status, spinner, env, theme);
   const name = entry.name ?? "?";
   const summary = truncateLine(
-    summarizeToolInput(entry.name, entry.input),
+    summarizeToolInput(entry.name, entry.input, entry.result?.output),
     Math.max(10, width - 24),
     g.ellipsis,
   );

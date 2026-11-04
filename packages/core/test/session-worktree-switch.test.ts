@@ -760,3 +760,37 @@ it("cross-switch rewind restores files across worktrees, reports only deleted-wo
   expect(existsSync(f.worktree)).toBe(false);
   await resumedGone.close();
 }, 30_000);
+
+it("switch_worktree results do not include sibling worktree read notice when switching to worktree and back, while subsequent read still includes notice", async () => {
+  const f = fixture();
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        call("sw-wt", "switch_worktree", { path: f.worktree }),
+        call("sw-proj", "switch_worktree", { path: f.project }),
+        call("read-wt", "read", { path: path.join(f.worktree, "file.txt") }),
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ],
+    ],
+  });
+  const rt = await createRuntime({
+    cwd: f.project,
+    sessionsDir: f.sessionsDir,
+    providers: [provider],
+    subagent: { enabled: false },
+  });
+  const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
+  await s.submit({ text: "switch and read" });
+  const tools = s.state().history.filter((e) => e.kind === "tool");
+  expect(tools).toHaveLength(3);
+  expect(tools[0]?.modelContent).not.toContain("[Note:");
+  expect(tools[1]?.modelContent).not.toContain("[Note:");
+  expect(tools[2]?.modelContent).toContain(
+    `[Note: This file is in another worktree (${f.worktree}); current worktree is ${f.project}.]`,
+  );
+  await s.close();
+});

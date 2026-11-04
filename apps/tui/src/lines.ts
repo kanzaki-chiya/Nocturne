@@ -396,7 +396,7 @@ function layoutEntryBody(
       }
       const shownName = entry.target?.name ?? entry.name;
       const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
-      const summary = summarizeToolInput(shownName, shownInput);
+      const summary = summarizeToolInput(shownName, shownInput, entry.result?.output);
       const notStarted = subagentStartRejected(entry);
       const status = notStarted
         ? "未启动"

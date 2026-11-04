@@ -522,7 +522,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       const resultNotices = [
         ...new Set(
           evaluated.flatMap((subject) => {
-            if (subject.kind !== "read") return [];
+            if (subject.kind !== "read" || subject.switchesWorktree === true) return [];
             const sibling = findSiblingWorktree(
               subject,
               options?.session?.worktrees,

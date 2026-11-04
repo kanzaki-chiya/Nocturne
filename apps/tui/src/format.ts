@@ -129,16 +129,22 @@ const inputString = (input: unknown, key: string): string | undefined => {
 };
 
 /** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern；apply_patch→文件清单 */
-export function summarizeToolInput(name: string | undefined, input: unknown): string {
+export function summarizeToolInput(
+  name: string | undefined,
+  input: unknown,
+  output?: unknown,
+): string {
   if (name === "task") return inputString(input, "task") ?? "";
   if (name === "mcp_search") return inputString(input, "query") ?? "";
-  if (name === "switch_worktree")
+  if (name === "switch_worktree") {
+    const source = inputString(output, "current") ?? inputString(input, "path") ?? "";
     return (
-      (inputString(input, "path") ?? "")
+      source
         .replace(/[\\/]+$/, "")
         .split(/[\\/]/)
         .at(-1) ?? ""
     );
+  }
   if (name === "todo_write") {
     const items =
       typeof input === "object" && input !== null && "items" in input ? input.items : undefined;

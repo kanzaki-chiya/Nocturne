@@ -15,7 +15,13 @@ export function createSwitchWorktreeTool(deps: {
     },
     traits: { mutates: true, concurrencySafe: false, fileEffects: "none", timeoutMs: 15_000 },
     permissionSubjects(input, scope) {
-      return [{ kind: "read", target: scope.paths.resolve(scope.cwd, input.path) }];
+      return [
+        {
+          kind: "read",
+          target: scope.paths.resolve(scope.cwd, input.path),
+          switchesWorktree: true,
+        },
+      ];
     },
     async execute(input) {
       try {

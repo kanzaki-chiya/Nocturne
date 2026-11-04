@@ -330,6 +330,11 @@ export interface SubjectRequest {
    * 权限层只在 smart 预设下据此直接放行；声明不可信，用户配置的服务器本就在本机运行。
    */
   readOnly?: boolean | undefined;
+  /**
+   * read 主体：目标是切换当前工作树（ADR-0081），权限判定按 read 进行，
+   * 但不附加「文件位于其他工作树」的结果提示。
+   */
+  switchesWorktree?: boolean | undefined;
 }
 
 export type SubjectWhere = "workspace" | "outside";
@@ -353,6 +358,8 @@ export interface PermissionSubject {
   shellRiskByDialect?: Readonly<Record<string, ShellRiskProfile>> | undefined;
   /** mcp 主体：服务器自我声明只读（见 SubjectRequest.readOnly） */
   readOnly?: boolean | undefined;
+  /** read 主体：目标是切换当前工作树（见 SubjectRequest.switchesWorktree） */
+  switchesWorktree?: boolean | undefined;
 }
 
 export type PermissionAction = "allow" | "ask" | "deny";
