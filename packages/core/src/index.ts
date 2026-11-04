@@ -3048,6 +3048,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         let prepare: (() => Promise<PreparedInput>) | undefined = first;
         let reason: TurnEndReason | "failed" = "done";
         while (prepare !== undefined) {
+          pendingInputStore.turnStarted();
           await awaitMcpIdle(ac.signal);
           await rebuildProviders();
           await applySkills();

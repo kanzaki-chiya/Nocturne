@@ -709,4 +709,51 @@ describe("ADR-0070 快照、回退与子会话", () => {
     await childSession.close();
     await parent.close();
   });
+
+  it("turnStarted：无暂停条目时清除残留 paused，有暂停条目时保留暂停状态", () => {
+    const store = new PendingInputs(() => undefined);
+    const input = (text: string) => ({
+      content: [{ type: "text" as const, text }],
+      appended: [],
+    });
+
+    // 列表为空时 pauseAll 设 paused=true；开始新一轮前后台结果仍按暂停追加
+    store.pauseAll();
+    const id1 = store.add("subagent", input("before-new-turn"));
+    expect(store.snapshot()).toMatchObject({
+      paused: true,
+      items: [{ id: id1, mode: "subagent", paused: true }],
+    });
+
+    // 有暂停条目时 turnStarted 不清掉暂停
+    store.turnStarted();
+    const id2 = store.add("subagent", input("while-paused-entries-exist"));
+    expect(store.snapshot()).toMatchObject({
+      paused: true,
+      items: [
+        { id: id1, paused: true },
+        { id: id2, paused: true },
+      ],
+    });
+
+    // 撤回全部暂停条目后再次 pauseAll（空列表残留标记），turnStarted 清除该标记
+    store.cancel(id1);
+    store.cancel(id2);
+    store.pauseAll();
+    store.turnStarted();
+    const id3 = store.add("subagent", input("in-new-turn"));
+    expect(store.snapshot()).toMatchObject({
+      paused: false,
+      items: [{ id: id3, mode: "subagent", paused: false }],
+    });
+    expect(store.takeSteers()).toHaveLength(1);
+
+    // 新一轮再次中断后重新暂停
+    store.pauseAll();
+    const id4 = store.add("subagent", input("after-second-abort"));
+    expect(store.snapshot()).toMatchObject({
+      paused: true,
+      items: [{ id: id4, mode: "subagent", paused: true }],
+    });
+  });
 });

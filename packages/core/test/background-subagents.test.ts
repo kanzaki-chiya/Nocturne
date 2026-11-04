@@ -469,6 +469,95 @@ describe("启动与交付", () => {
     }
   });
 
+  it("中断（列表为空）后发新消息清除残留暂停标记，新一轮后台子代理结果在安全点送达；再次中断后重新暂停", async () => {
+    const { root, session } = await setup({
+      childWait: (req) => (JSON.stringify(req.messages).includes("research t1") ? 50 : 300),
+      parent: [
+        // Turn 1：等待时被用户中断（此时待发列表为空）
+        [{ type: "wait", ms: 10_000 }, ...done],
+        // Turn 2：启动后台子代理 t1，随后在长工具步期间 t1 收束并在安全点作为 steer 送达
+        [bg("t1"), { type: "finish", reason: "tool_calls" }],
+        [
+          { type: "wait", ms: 500 },
+          call("r1", "read", { path: "a.txt" }),
+          { type: "finish", reason: "tool_calls" },
+        ],
+        done,
+        // Turn 3：再次启动后台子代理 t2 并被中断，t2 收束后仍按暂停条目追加
+        [bg("t2"), { type: "finish", reason: "tool_calls" }],
+        [{ type: "wait", ms: 10_000 }, ...done],
+      ],
+    });
+    writeFileSync(path.join(root, "a.txt"), "hello");
+    try {
+      // 1. 第一轮中断（列表为空）
+      const turn1 = session.submit({ text: "turn 1" });
+      await vi.waitFor(() => expect(turns(session)).toBe(1));
+      session.interrupt();
+      expect(await turn1).toBe("aborted");
+      expect(session.pendingInputs()).toEqual({ items: [], paused: false });
+
+      // 2. 第二轮发新消息：t1 在安全点自动作为 steer 送达，不会残留为暂停条目
+      expect(await session.submit({ text: "turn 2" })).toBe("done");
+      expect(results(session)).toHaveLength(1);
+      expect(results(session)[0]?.payload.subagent?.status).toBe("ok");
+      expect(results(session)[0]?.payload.steer).toBe(true);
+      expect(session.pendingInputs().items).toHaveLength(0);
+
+      // 3. 第三轮再次中断（尚未发新消息）：t2 收束后重新追加为暂停条目，不自动唤起
+      const turn3 = session.submit({ text: "turn 3" });
+      await vi.waitFor(() => expect(taskCompleted(session)).toHaveLength(2));
+      session.interrupt();
+      expect(await turn3).toBe("aborted");
+      await vi.waitFor(() => expect(session.pendingInputs().items).toHaveLength(1), {
+        timeout: 5000,
+      });
+      expect(session.pendingInputs()).toMatchObject({
+        paused: true,
+        items: [{ mode: "subagent", paused: true }],
+      });
+      expect(results(session)).toHaveLength(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("有暂停条目时开始新一轮不会丢掉暂停", async () => {
+    const { session } = await setup({
+      childWait: () => 250,
+      parent: [
+        // Turn 1：启动后台子代理 t1 后中断，t1 收束成为暂停条目
+        [bg("t1"), { type: "finish", reason: "tool_calls" }],
+        [{ type: "wait", ms: 10_000 }, ...done],
+        // Turn 2：直接 submit 新一轮（不走 resumeInputs），已有暂停条目仍保持暂停
+        done,
+      ],
+    });
+    try {
+      const turn1 = session.submit({ text: "turn 1" });
+      await vi.waitFor(() => expect(taskCompleted(session)).toHaveLength(1));
+      session.interrupt();
+      expect(await turn1).toBe("aborted");
+      await vi.waitFor(() => expect(session.pendingInputs().items).toHaveLength(1), {
+        timeout: 5000,
+      });
+      expect(session.pendingInputs()).toMatchObject({
+        paused: true,
+        items: [{ mode: "subagent", paused: true }],
+      });
+
+      // 直接开始新一轮：原有的暂停条目不应被清除暂停或自动消费
+      expect(await session.submit({ text: "turn 2" })).toBe("done");
+      expect(session.pendingInputs()).toMatchObject({
+        paused: true,
+        items: [{ mode: "subagent", paused: true }],
+      });
+      expect(results(session)).toHaveLength(0);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("取消后交付 cancelled；非运行中再取消报 invalid_command", async () => {
     const { runtime, session } = await setup({ childWait: () => 10_000 });
     try {

@@ -161,6 +161,13 @@ export class PendingInputs {
     this.publish();
   }
 
+  /** 开始新一轮：若列表中没有暂停条目，清除上一轮残留的 paused 标记（ADR-0070 §4、ADR-0073 §3） */
+  turnStarted(): void {
+    if (!this.entries.some((entry) => entry.paused)) {
+      this.paused = false;
+    }
+  }
+
   /** Turn 以 done 结束：之后收束的子代理结果不再按暂停追加（ADR-0073 §3） */
   turnDone(): void {
     this.paused = false;
