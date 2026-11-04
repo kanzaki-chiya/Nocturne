@@ -132,6 +132,47 @@ it("时间文案：本地计时与人读时长", () => {
   expect(runningMs("2026-10-21T00:00:10.000Z", Date.parse("2026-10-21T00:00:00.000Z"))).toBe(0);
 });
 
+it("后台子代理：父 task 已结算不算结束，状态只看登记簿与子日志", () => {
+  const started = taskEntry({
+    status: "ok",
+    input: { task: "t", background: true },
+    result: settled("ok", { durationMs: 1000 }),
+  });
+  const running = subagentStatus({
+    summary: summary({ state: "running", background: true }),
+    parent: started,
+    childView: undefined,
+  });
+  expect(running).toMatchObject({ phase: "running", label: "运行中", animated: true });
+  expect(running.durationMs).toBeUndefined();
+  // 目录还没返回时也不能闪出「已完成」
+  expect(subagentStatus({ summary: undefined, parent: started, childView: undefined }).phase).toBe(
+    "unknown",
+  );
+  const finish = {
+    entries: [taskEntry({ name: "finish", status: "ok", input: { result: "x" } })],
+  };
+  expect(
+    subagentStatus({
+      summary: summary({
+        state: "ended",
+        background: true,
+        durationMs: 579_000,
+        durationApproximate: true,
+      }),
+      parent: started,
+      childView: finish,
+    }),
+  ).toMatchObject({ phase: "ok", label: "已完成", durationMs: 579_000, durationApproximate: true });
+  expect(
+    subagentStatus({
+      summary: summary({ state: "ended", background: true, durationMs: 2000 }),
+      parent: started,
+      childView: undefined,
+    }),
+  ).toMatchObject({ phase: "unknown", label: "已结束", durationMs: 2000 });
+});
+
 it("状态优先父 task 的持久结算，耗时优先父 tool.completed.durationMs", () => {
   const ok = subagentStatus({
     summary: summary({ state: "running" }),

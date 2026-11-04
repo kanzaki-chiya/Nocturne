@@ -184,11 +184,17 @@ export function finalResult(
  * - 耗时优先父 tool.completed.durationMs，其次服务端给的耗时（可能是近似），
  *   都没有就不编造最终耗时；
  * - 父尚未结算但已收到成功 finish：先显示「结果已提交」；
- * - 无终止事实的日志（summary.state = unsealed）：「日志未收束／运行状态未知」，不转圈。
+ * - 无终止事实的日志（summary.state = unsealed）：「日志未收束／运行状态未知」，不转圈；
+ * - 后台子代理的父 task 启动后立刻结算，不代表子代理结束（subagent.md 第 20 节）：
+ *   状态只看登记簿与子日志，有成功 finish 且已结束才算完成。
  */
 export function subagentStatus(input: {
   summary:
-    Pick<SubagentSummary, "state" | "outcome" | "durationMs" | "durationApproximate"> | undefined;
+    | Pick<
+        SubagentSummary,
+        "state" | "outcome" | "durationMs" | "durationApproximate" | "background"
+      >
+    | undefined;
   parent: ToolEntry | undefined;
   childView: Pick<SessionView, "entries"> | undefined;
 }): SubagentStatus {
@@ -197,7 +203,9 @@ export function subagentStatus(input: {
   if (summary?.state === "unsealed") {
     return { phase: "unsealed", label: "日志未收束／运行状态未知", animated: false };
   }
-  const parentResult = parent?.result;
+  const parentInput = parent?.input as { background?: unknown } | undefined;
+  const background = summary?.background === true || parentInput?.background === true;
+  const parentResult = background ? undefined : parent?.result;
   const settled =
     parentResult !== undefined && parent?.status !== "running" && parent?.status !== undefined
       ? {
@@ -233,9 +241,10 @@ export function subagentStatus(input: {
     return { phase: "running", label: "运行中", animated: true };
   }
   if (childView !== undefined && childFinish(childView) !== undefined) {
+    const done = background && summary?.state === "ended";
     return {
-      phase: "submitted",
-      label: "结果已提交",
+      phase: done ? "ok" : "submitted",
+      label: done ? "已完成" : "结果已提交",
       animated: false,
       ...(summary?.durationMs !== undefined ? { durationMs: summary.durationMs } : {}),
       ...(summary?.durationApproximate === true ? { durationApproximate: true } : {}),
