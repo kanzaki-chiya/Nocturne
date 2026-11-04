@@ -33,6 +33,7 @@ export interface StatusBarProps {
   onManageRemote?: () => void;
   session: RpcSession;
   view: SessionView;
+  branch?: ReactNode;
   /** 历史回放期间为 true：不按条目数刷新上下文，结束后刷新一次 */
   replaying?: boolean;
   controls?: SessionControls | undefined;
@@ -289,6 +290,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
 export function StatusBar({
   session,
   view,
+  branch,
   replaying = false,
   panel,
   onPanelChange,
@@ -450,6 +452,7 @@ export function StatusBar({
         <SpeedBadge speed={speed} />
       </div>
       <div className="status-right status-group">
+        {branch}
         <McpBadge
           servers={unavailableMcpServers(view)}
           readyCount={readyMcpCount}

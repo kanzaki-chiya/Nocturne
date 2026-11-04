@@ -57,6 +57,12 @@ MVP 不做快照；若将来出现加载瓶颈，再追加 `session.snapshot` �
 
 新建根会话首条 `message.user` 落盘后，Runtime 在后台用 smol 角色（未配置时用当时的会话模型）请求标题，不阻塞 Turn；只取用户文字前 2000 字符，要求同语言、不超过 20 字、不带工具与思考档位。结果去引号、换行、首尾空白并截到 40 显示宽度，写入 `session.titled`。与 Turn 共用 Session 写入队列，seq、日志与发布顺序一致；失败只记诊断，不发 warning。旧会话恢复与子会话均不生成。用户可改名或清除用户覆盖；已有任何标题事件（包括清空）时不启动自动生成，后台结果入队落盘前也要复查，避免覆盖用户操作。标题展示优先用户标题、生成标题、首句；回退不撤销标题，见 [ADR-0069](../decisions/ADR-0069-session-rename-title-sidecar.md)。
 
+### 3.1 工作目录分支操作（ADR-0079）
+
+Runtime 的 `workspaceBranches({ workspace })` 与 `switchBranch({ workspace, branch, create? })` 按 Git 工作树根目录归并活动，同一仓库子目录的会话也共用准入判定。所有已打开会话的 Turn（含准备、收尾）、压缩、回退，以及仍登记的共享目录后台子会话都会阻止切换，返回 `session_busy`。隔离工作树中的后台子会话只影响自己的副本。切换持有目录准入锁，异步 Git 校验与切换期间不能插入新的 Turn、压缩或回退；切换结束（成功或失败）后唤醒该目录下已打开会话的待发输入队列。它是直接用户操作，不经过工具权限层。
+
+Turn 前分支基准与说明从 `session.config_changed.branch` 的有效历史重建，恢复、回退与分叉规则见 [context.md 3.1](context.md#31-分支变化说明adr-0079)；Git 调用在 platform 边界，失败时不修改会话比较基准。接口见 [rpc.md 3.12](../protocols/rpc.md#312-workspaceadr-0079)。
+
 ## 4. 打开会话（恢复）的顺序
 
 顺序不能调换：**先取得锁，再读取和修改日志**。否则两个进程同时恢复时，可能各自追加修复事件后才发现对方存在。

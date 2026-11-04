@@ -431,6 +431,14 @@ export interface RpcMethods {
    * 不依赖会话，拒绝网络路径；只读，不进远程白名单；图片字节为标准 base64。
    */
   "runtime.readFile": { params: { path: string }; result: WireLocalFile };
+  "workspace.branches": {
+    params: { workspace: string };
+    result: Awaited<ReturnType<Runtime["workspaceBranches"]>>;
+  };
+  "workspace.switchBranch": {
+    params: { workspace: string; branch: string; create?: boolean };
+    result: null;
+  };
   "runtime.setShellSetting": {
     params: { kind: string; workspaceRoot?: string | undefined };
     result: SettingItem[];
@@ -845,6 +853,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.describeSettings": true,
   "runtime.listShells": true,
   "runtime.readFile": true,
+  "workspace.branches": true,
+  "workspace.switchBranch": true,
   "runtime.setShellSetting": true,
   "runtime.updateSettings": true,
   "runtime.setDefaultModel": true,

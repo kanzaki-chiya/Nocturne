@@ -33,6 +33,8 @@ export const RUNTIME_METHODS: Record<
   describeSettings: "runtime.describeSettings",
   listShells: "runtime.listShells",
   readFile: "runtime.readFile",
+  workspaceBranches: "workspace.branches",
+  switchBranch: "workspace.switchBranch",
   setShellSetting: "runtime.setShellSetting",
   updateSettings: "runtime.updateSettings",
   listReviewerProviders: "runtime.listReviewerProviders",

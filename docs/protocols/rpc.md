@@ -256,6 +256,19 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 
 会话方法由 Core Runtime 的 `listSessionGrants/revokeSessionGrant/revokeAllSessionGrants` 解析会话树根，活动子会话 ID 与根 ID 等效；不打开或恢复子会话。单项以 kind + target 精确匹配，写入失败报错且列表不变。成功新增、撤销、改信任后由 Core 发易失变更，再由 Hub 广播；RPC 不缓存授权、不参与权限求值。工作区汇总与解析输出口径见 [config.md 第 4 节](../architecture/config.md#4-grant-的持久化)。远程只可查看和撤销，信任与命令描述在 Core 调用前拒绝（第 7 节）。
 
+### 3.12 `workspace.*`（ADR-0079）
+
+桌面端状态栏的直接用户操作，不注册模型工具、不经过工具权限层；两个方法均不在远程白名单，远程连接在进入 Core 前返回 `remote_not_allowed`。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `workspace.branches` | `{ workspace: string }` → `{ current: string \| null, branches: { name: string, worktree?: string }[], busy: boolean }` |
+| `workspace.switchBranch` | `{ workspace: string, branch: string, create?: boolean }` → `null` |
+
+`current` 是分支名，游离 HEAD 时为提交号前 8 位。非仓库或读取失败返回 `current: null` 与空列表，不报读取错误。`worktree` 仅标注其他工作树占用分支的路径。`busy` 表示目录下存在活动；Core 切换时重新判定所有会话，忙时返回 `session_busy`，不能依赖界面禁用。活动与目录隔离规则见 [sessions.md](../architecture/sessions.md)。
+
+切换以参数数组调用 Git，先校验分支名，`create` 从当前提交创建并切换。未提交改动交给 Git 原生处理，不 stash；失败消息保留 Git stderr 原文。读取有超时，失败不影响 Turn。界面刷新时机见 [desktop.md](../apps/desktop.md#54-状态栏与上下文)。
+
 ## 4. 订阅与回放
 
 `session.subscribe { sessionId, afterSeq }`：服务端先挂实时监听并缓冲，再读日志，推送 `seq > afterSeq` 的全部**持久**事件，随后冲刷缓冲（按 `seq` 去重，已推过的不再推），最后转入实时推送（持久与临时都推）。请求在回放与衔接完成后才返回 `{ lastSeq }`，因此回放期间产生的新事件不丢、不重，`seq` 连续。

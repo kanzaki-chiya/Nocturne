@@ -119,7 +119,17 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.shell !== undefined || config.shell !== undefined
             ? { shell: p.shell ?? config.shell }
             : {}),
+          ...(config.branch !== undefined ? { branch: config.branch } : {}),
+          ...(active && p.branch !== undefined ? { branch: p.branch.current } : {}),
         };
+        if (active && p.branch?.previous !== undefined) {
+          history.push({
+            kind: "note",
+            seq: event.seq,
+            turnId,
+            text: `[Environment change] Git branch changed from ${p.branch.previous} to ${p.branch.current}. File contents read earlier may now be outdated.`,
+          });
+        }
         // ADR-0022 第 4 节：shell 切换在历史中该位置留一条给模型的说明；
         // 措辞与环境信息同源（platform/shells.ts），恢复后旧说明原样重建
         if (p.shell !== undefined && active) {

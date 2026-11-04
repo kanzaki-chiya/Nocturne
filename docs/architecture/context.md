@@ -74,6 +74,12 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 
 **循环说明**（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）：同一 Turn 内同一调用连续第 `warnAt` 次（默认 3）返回完全相同的结果时，Builder 在该条 `tool` 消息的 `content` 末尾追加一段英文说明（前导空行 + `[Loop guard] In this turn, the tool "<name>" has returned an identical result <n> times in a row …`），告诉模型继续重复不会得到新信息、要么换做法要么停下说明。它**不写事件**：说明由 `loopGuardWarnings(events, config)` 从持久事件按与 Agent Loop 相同的签名与计数规则重建（`protocol/loop-guard.ts`），投影时按 `tool.completed` 的 seq 挂上去。因此同一份历史每次构建结果逐字节相同、位置固定在原结果之后（L1 修剪成占位时说明同样保留），下一次请求只是上一次的严格前缀，缓存不被打断；回放与恢复也一样。`config` 取本 Turn 的 `turn.loopGuard`，`false` 时不生成任何说明。判定点与 `loop_detected` 停止见 [agent-loop.md](agent-loop.md) 第 3.9 节。**清单久未更新提醒**（[ADR-0028 2026-10-25 修订](../decisions/ADR-0028-session-task-list.md)）走同一套确定性投影机制：当前清单存在且有未完成项时，从最近一次成功的清单更新后每满 30 次有效 `tool.completed`（跨 Turn 累计，`cancelled`/`interrupted` 不计），在该条 `tool` 消息末尾追加 `[Task list] ...` 提醒（与循环说明同处一条时排在循环说明之后，L1 修剪后同样保留）。
 
+### 3.1 分支变化说明（ADR-0079）
+
+每个 Turn 准备请求前，Runtime 有超时地读取当前 Git 分支（游离 HEAD 为提交号前 8 位），与有效历史里最近的 `session.config_changed.branch` 比较。首次读取只持久化基准，不生成说明；变化时持久化新旧分支，在该事件位置折叠为一条 `note`，只说明分支从何处切到何处，以及之前读到的文件内容可能已过时。非仓库、读取失败和超时不记录、不说明，也不阻断 Turn。
+
+分支基准和 note 沿用 MCP 环境状态的有效事件规则：恢复时从日志重建，能发现离线切换；对话回退和分叉按有效事件前缀重建基准，文件回退保留比较基准。note 沿用现有 user 角色投影和工具结果邻接规则，L1 不修剪 note，L2 将其随被覆盖历史纳入摘要，不另加系统提示。分支显示和切换见 [desktop.md](../apps/desktop.md#54-状态栏与上下文)，写入过时文件仍由文件 guard 判定。
+
 ## 4. 基本原则
 
 - **增量构建**：除压缩边界外，不改写已经发给模型的历史，让相邻 Step 的请求共享最长前缀。

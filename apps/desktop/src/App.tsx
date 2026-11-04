@@ -42,6 +42,7 @@ import {
 import { parseSlash } from "./commands";
 import { openForkedSession } from "./fork-session";
 import { StatusBar, type StatusPanel } from "./StatusBar";
+import { BranchMenu } from "./BranchMenu";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
@@ -2281,6 +2282,15 @@ function SessionPane({
       <StatusBar
         session={session}
         view={view}
+        branch={
+          <BranchMenu
+            client={client.runtime}
+            session={session}
+            workspace={workspace}
+            view={view}
+            replaying={replaying}
+          />
+        }
         replaying={replaying}
         panel={panel}
         onPanelChange={onPanelChange}
