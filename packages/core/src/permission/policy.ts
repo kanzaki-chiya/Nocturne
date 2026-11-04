@@ -17,7 +17,13 @@ import type {
   RuleOrigin,
 } from "../protocol/index.js";
 import { matchGrant } from "./grants.js";
-import { escapesWorktree, WORKTREE_DENY } from "./worktree.js";
+import {
+  escapesWorktree,
+  findSiblingWorktree,
+  SIBLING_WORKTREE_EDIT_DENY,
+  SIBLING_WORKTREE_READ_NOTICE,
+  WORKTREE_DENY,
+} from "./worktree.js";
 import {
   isCompositeShell,
   isOpaquePowerShellCommand,
@@ -266,6 +272,16 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
         },
       };
     }
+    const sibling = findSiblingWorktree(s, evalOptions?.session?.worktrees, caseSensitive);
+    if (sibling !== undefined && s.kind === "edit") {
+      return {
+        action: "deny",
+        hit: {
+          origin: "default",
+          description: SIBLING_WORKTREE_EDIT_DENY(sibling.other, sibling.current),
+        },
+      };
+    }
 
     const trustedHit = lastMatch(trusted, s);
     let action: PermissionAction = trustedHit?.rule?.action ?? "ask";
@@ -503,8 +519,24 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
             ? `需确认——${descriptions}（命中：${hitDesc}）${note !== undefined ? `；${note}` : ""}`
             : `拒绝——${descriptions}（命中：${hitDesc}）${note !== undefined ? `；${note}` : ""}`;
 
+      const resultNotices = [
+        ...new Set(
+          evaluated.flatMap((subject) => {
+            if (subject.kind !== "read") return [];
+            const sibling = findSiblingWorktree(
+              subject,
+              options?.session?.worktrees,
+              caseSensitive,
+            );
+            return sibling === undefined
+              ? []
+              : [SIBLING_WORKTREE_READ_NOTICE(sibling.other, sibling.current)];
+          }),
+        ),
+      ];
       return {
         subjects: evaluated,
+        ...(resultNotices.length > 0 ? { resultNotice: resultNotices.join("\n") } : {}),
         userOnly: verdicts.some((v) => v.action === "ask" && v.userOnly),
         reviewSubjects: evaluated.flatMap((s, i) =>
           verdicts[i]?.action === "ask"

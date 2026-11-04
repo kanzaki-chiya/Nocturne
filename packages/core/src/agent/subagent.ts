@@ -185,6 +185,7 @@ export interface SubagentDeps {
   mcpServers?(): readonly string[];
   /** Grant 落点：session 数组只读共享（子 gate 无 respond 路径） */
   grants?: GateGrantSink | undefined;
+  worktrees?: (() => { current: string; roots: readonly string[] } | undefined) | undefined;
   /**
    * shell 子进程剥离的凭据变量名（provider-setup.md 第 4 节）：
    * 与父会话同一数组引用，装配层原地重算后子会话同步生效
@@ -605,6 +606,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             caseSensitive: deps.platform.caseSensitivePaths,
             ...(deps.grants !== undefined ? { grants: deps.grants } : {}),
             ...(childRunner !== undefined ? { hooks: childRunner } : {}),
+            ...(deps.worktrees !== undefined && worktree === undefined
+              ? { worktrees: deps.worktrees }
+              : {}),
             nonInteractiveDenyHint: NON_INTERACTIVE_DENY_HINT,
           },
         );

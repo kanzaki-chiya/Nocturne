@@ -575,6 +575,12 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       await scope.checkpoint?.("before", call.callId, outcome.subjects, scope.sessionId);
       try {
         result = await tool.execute(input, toolCtx);
+        if (result.status === "ok" && outcome.resultNotice !== undefined) {
+          result = {
+            ...result,
+            modelContent: `${result.modelContent}\n${outcome.resultNotice}`,
+          };
+        }
       } catch (e) {
         if (aborted(scope.signal)) {
           executionStatus = "cancelled";

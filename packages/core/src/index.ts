@@ -1801,7 +1801,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     warnMissingReviewer();
 
-    // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由；
+    const isolatedWorktreesRoot = await platform.resolveReal(paths.join(sessionsDir, "worktrees"));
+    let knownWorktreeRoots: string[] = [];
+    const readAvailableWorktreeRoots = async (): Promise<string[]> => {
+      const rawList = await gitWorktrees(projectCwd);
+      const realList = await Promise.all(rawList.map((p) => platform.resolveReal(p)));
+      return realList.filter((p) => !paths.isWithin(isolatedWorktreesRoot, p));
+    };
+    if (session.state().config.worktree !== undefined) {
+      knownWorktreeRoots = await readAvailableWorktreeRoots();
+    }
+    const activeWorktrees = () =>
+      session.state().config.worktree !== undefined && knownWorktreeRoots.length > 0
+        ? { current: currentCwd(), roots: knownWorktreeRoots }
+        : undefined;
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
     const gate: PermissionGate = createPolicyGate(
       {
@@ -1825,6 +1838,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
         hooks: hookRunner,
+        worktrees: activeWorktrees,
       },
     );
     // 提问通道（ADR-0032）按会话持有：等待中的请求与会话绑定，
@@ -1840,9 +1854,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       tools.register(tool);
     }
     if (meta.parent === undefined) {
-      const isolatedWorktreesRoot = await platform.resolveReal(
-        paths.join(sessionsDir, "worktrees"),
-      );
       tools.register(
         createSwitchWorktreeTool({
           async switchWorktree(rawTarget) {
@@ -1850,9 +1861,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             if (repoRoot === null) throw new Error("Project directory is not a git repository");
             const repoReal = await platform.resolveReal(repoRoot);
             const subRel = paths.relative(repoReal, projectCwd);
-            const rawList = await gitWorktrees(projectCwd);
-            const realList = await Promise.all(rawList.map((p) => platform.resolveReal(p)));
-            const available = realList.filter((p) => !paths.isWithin(isolatedWorktreesRoot, p));
+            const available = await readAvailableWorktreeRoots();
+            knownWorktreeRoots = available;
             const resolvedInput = await platform.resolveReal(
               paths.resolve(currentCwd(), rawTarget),
             );
@@ -2600,6 +2610,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             session: sessionGrants,
             ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
           },
+          worktrees: activeWorktrees,
           depth: 0,
           limits: subagentLimits,
           limiter: subagentLimiter,
@@ -2647,6 +2658,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                       ...reviewSources,
                       caseSensitive: platform.caseSensitivePaths,
                       hooks: hookRunner,
+                      worktrees: activeWorktrees,
                     },
                   );
                   return await externalConnector.run(

@@ -39,6 +39,7 @@ export interface SubjectEvaluation {
   /** 最终仍需确认的主体；只由用户确认的主体禁止交给审查器。 */
   reviewSubjects?: ReviewSubject[] | undefined;
   userOnly?: boolean | undefined;
+  resultNotice?: string | undefined;
 }
 
 /** evaluate 的可选行为开关 */
@@ -60,6 +61,7 @@ export interface EvaluateOptions {
         cwd?: string | undefined;
         /** 本会话放行过的 edit 目标（target 与 resolved，均按 normalizePathText 规范化） */
         approvedEdits?: ReadonlySet<string> | undefined;
+        worktrees?: { current: string; roots: readonly string[] } | undefined;
       }
     | undefined;
 }
@@ -130,6 +132,7 @@ export interface GateOutcome {
   feedback?: string | undefined;
   /** 本次应答生成的 Grant 范围（permission.resolved.remember） */
   remember?: "session" | "project" | undefined;
+  resultNotice?: string | undefined;
 }
 
 /** check 的 Turn 级上下文：ask 流程发出 permission.requested / resolved 需要它 */

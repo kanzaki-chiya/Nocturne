@@ -5,6 +5,37 @@ import type { PermissionSubject } from "../protocol/index.js";
 export const WORKTREE_DENY = (root: string): string =>
   `This subagent is isolated in its own worktree; commands must stay inside it. Worktree: ${root}`;
 
+export const SIBLING_WORKTREE_EDIT_DENY = (other: string, current: string): string =>
+  `File is in another worktree (${other}); current worktree is ${current}. Switch worktree first or edit files in the current worktree.`;
+
+export const SIBLING_WORKTREE_READ_NOTICE = (other: string, current: string): string =>
+  `[Note: This file is in another worktree (${other}); current worktree is ${current}.]`;
+
+export function findSiblingWorktree(
+  subject: PermissionSubject,
+  worktrees: { current: string; roots: readonly string[] } | undefined,
+  caseSensitive: boolean,
+): { other: string; current: string } | undefined {
+  if (!worktrees || (subject.kind !== "read" && subject.kind !== "edit")) return undefined;
+  const candidate = subject.resolved ?? subject.target;
+  const norm = (value: string) => {
+    const resolved = resolveRealSync(path.resolve(value));
+    const text = resolved.replaceAll("\\", "/").replace(/\/$/, "");
+    return caseSensitive ? text : text.toLowerCase();
+  };
+  const inside = (root: string, target: string) => {
+    const r = norm(root);
+    const t = norm(target);
+    return t === r || t.startsWith(`${r}/`);
+  };
+  const roots = [...worktrees.roots].sort((a, b) => norm(b).length - norm(a).length);
+  const currentRoot = roots.find((root) => inside(root, worktrees.current)) ?? worktrees.current;
+  const hit = roots.find((root) => inside(root, candidate));
+  return hit === undefined || norm(hit) === norm(currentRoot)
+    ? undefined
+    : { other: hit, current: currentRoot };
+}
+
 function resolveRealSync(target: string): string {
   const abs = path.resolve(target);
   const missing: string[] = [];

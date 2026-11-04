@@ -85,6 +85,7 @@ export interface PolicyGateOptions extends ReviewInputSources {
    * "无法请求用户确认，受阻操作写进 finish 结果"（subagent.md 7.3）。
    */
   nonInteractiveDenyHint?: string | undefined;
+  worktrees?: (() => { current: string; roots: readonly string[] } | undefined) | undefined;
 }
 
 /** 完整的确认选项集（permissions.md 第 7 节） */
@@ -330,8 +331,17 @@ export function createPolicyGate(
     const forceAsk = hookCtx?.forceAsk === true;
     const evaluation = policy.evaluate(subjects, {
       ...(forceAsk ? { skipApprovals: true } : {}),
-      session: { cwd: options.cwd, approvedEdits },
+      session: {
+        cwd: options.cwd,
+        approvedEdits,
+        ...(options.worktrees !== undefined ? { worktrees: options.worktrees() } : {}),
+      },
     });
+    const resultNotice = evaluation.resultNotice;
+    const withNotice = (out: GateOutcome): GateOutcome =>
+      resultNotice !== undefined && out.decision.action === "allow"
+        ? { ...out, resultNotice }
+        : out;
     let decision = evaluation.decision;
     // forceAsk 下规则层的 allow/ask 都走确认流程；deny 不受影响直接返回
     if (forceAsk && decision.action !== "deny") {
@@ -357,9 +367,13 @@ export function createPolicyGate(
           decision.matchedRule?.description ?? decision.reason,
           turn,
         );
-        return { subjects: evaluation.subjects, decision, resolvedEmitted: turn !== undefined };
+        return withNotice({
+          subjects: evaluation.subjects,
+          decision,
+          resolvedEmitted: turn !== undefined,
+        });
       }
-      return { subjects: evaluation.subjects, decision };
+      return withNotice({ subjects: evaluation.subjects, decision });
     }
 
     // PermissionRequest Hook（hooks.md 第 3 节）：在交互/非交互分支之前运行——
@@ -395,11 +409,11 @@ export function createPolicyGate(
               : (out.reason ?? "PermissionRequest Hook 拒绝"),
         };
         await emitResolved({ callId }, hookDecision, "hook PermissionRequest", turn);
-        return {
+        return withNotice({
           subjects: evaluation.subjects,
           decision: hookDecision,
           resolvedEmitted: turn !== undefined,
-        };
+        });
       }
     }
 
@@ -456,11 +470,11 @@ export function createPolicyGate(
           reason: result.reason,
         };
         await emitResolved({ callId }, reviewedDecision, `安全审查：${result.reason}`, turn);
-        return {
+        return withNotice({
           subjects: evaluation.subjects,
           decision: reviewedDecision,
           resolvedEmitted: turn !== undefined,
-        };
+        });
       }
       decision = { ...decision, reason: `${decision.reason}；审查：交给你确认 — ${result.reason}` };
     }
@@ -551,7 +565,7 @@ export function createPolicyGate(
       feedback: outcome.feedback,
       remember: outcome.remember,
     });
-    return { ...outcome, resolvedEmitted: true };
+    return withNotice({ ...outcome, resolvedEmitted: true });
   }
 
   return {
@@ -564,16 +578,25 @@ export function createPolicyGate(
 
     checkLexical(request: SubjectRequest) {
       // permissions.md 4.4：枚举结果位于已解析根目录之下，词法路径即可判定
-      const evaluation = policy.evaluate([
+      const evaluation = policy.evaluate(
+        [
+          {
+            kind: request.kind,
+            target: request.target,
+            resolved: request.target,
+            shell: request.shell,
+            shellRisk: request.shellRisk,
+            shellRiskByDialect: request.shellRiskByDialect,
+          },
+        ],
         {
-          kind: request.kind,
-          target: request.target,
-          resolved: request.target,
-          shell: request.shell,
-          shellRisk: request.shellRisk,
-          shellRiskByDialect: request.shellRiskByDialect,
+          session: {
+            cwd: options.cwd,
+            approvedEdits,
+            ...(options.worktrees !== undefined ? { worktrees: options.worktrees() } : {}),
+          },
         },
-      ]);
+      );
       return evaluation.decision.action;
     },
 

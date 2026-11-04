@@ -10,14 +10,70 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import * as workspaceBranches from "../src/platform/workspace-branches.js";
 import { createPlatform, createRuntime, FakeProvider, loadConfig } from "../src/index.js";
 import { replaySessionView } from "../src/protocol/index.js";
 import { internalSession } from "./internal-session.js";
 
+import { createRulePolicy, grantFromSubject } from "../src/permission/index.js";
+
+it("sibling read notice preserves deny, ask and Grant decisions from the permission policy", async () => {
+  const f = fixture();
+  const subject = {
+    kind: "read" as const,
+    target: path.join(f.project, "file.txt"),
+    resolved: path.join(f.project, "file.txt"),
+  };
+  const session = {
+    cwd: f.worktree,
+    worktrees: { current: f.worktree, roots: await workspaceBranches.gitWorktrees(f.project) },
+  };
+  const base = { workspaceRoot: f.worktree, caseSensitive: false };
+  const blocked = createRulePolicy({
+    ...base,
+    preset: "bypass",
+    rules: [{ origin: "user", rule: { kind: "read", pattern: "**", action: "deny" } }],
+  });
+  expect(blocked.evaluate([subject], { session }).decision.action).toBe("deny");
+  const asking = createRulePolicy({ ...base, preset: "default" });
+  expect(asking.evaluate([subject], { session }).decision.action).toBe("ask");
+  const granted = createRulePolicy({
+    ...base,
+    preset: "default",
+    grants: {
+      project: [grantFromSubject(subject, false, "2026-11-04T00:00:00.000Z")],
+    },
+  });
+  const result = granted.evaluate([subject], { session });
+  expect(result.decision.source).toBe("grant");
+  expect(result.resultNotice).toContain(f.worktree);
+});
+
+it("nested worktrees use the most specific worktree root for current and target paths", async () => {
+  const f = fixture();
+  const nested = path.join(f.project, "trees", "nested");
+  git(f.project, "worktree", "add", "-qb", "nested", nested);
+  const policy = createRulePolicy({
+    workspaceRoot: nested,
+    caseSensitive: false,
+    preset: "bypass",
+  });
+  const worktrees = { current: nested, roots: await workspaceBranches.gitWorktrees(f.project) };
+  const file = (root: string) => path.join(root, "file.txt");
+  const check = (root: string) =>
+    policy.evaluate([{ kind: "edit", target: file(root), resolved: file(root) }], {
+      session: { cwd: nested, worktrees },
+    });
+  expect(check(nested).decision.action).toBe("allow");
+  expect(check(f.project).decision.action).toBe("deny");
+  expect(check(f.worktree).decision.action).toBe("deny");
+});
+
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).trim();
@@ -148,6 +204,7 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
           call("bad-out", "switch_worktree", { path: f.base }),
           call("bad-iso", "switch_worktree", { path: isolatedCopy }),
           call("bad-sub", "switch_worktree", { path: missingSub }),
+          call("bad-mapped", "switch_worktree", { path: path.join(f.worktree, "packages", "sub") }),
           call("sw", "switch_worktree", { path: mixed }),
           call("after-read", "read", { path: "item.txt" }),
           { type: "finish", reason: "tool_calls" },
@@ -213,7 +270,7 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
   for (
     let i = 0;
     i < 120 &&
-    s.state().history.filter((e) => e.kind === "tool" && e.name === "switch_worktree").length < 5;
+    s.state().history.filter((e) => e.kind === "tool" && e.name === "switch_worktree").length < 6;
     i++
   ) {
     if (
@@ -233,6 +290,7 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
   const tools = s.state().history.filter((e) => e.kind === "tool");
   const swCalls = tools.filter((e) => e.name === "switch_worktree");
   expect(swCalls.map((e) => `${e.status}:${e.modelContent}`)).toEqual([
+    expect.stringContaining("error:"),
     expect.stringContaining("error:"),
     expect.stringContaining("error:"),
     expect.stringContaining("error:"),
@@ -261,3 +319,101 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
   expect(s.state().config.worktree?.current).toBe(path.join(f.project, "packages", "sub"));
   await s.close();
 }, 30_000);
+
+it("sibling worktrees deny edit in bypass, allow read with notice, persist after switching back to project, and deactivate when rewound before the first switch", async () => {
+  const f = fixture();
+  const wt2 = path.join(f.base, "worktree-2");
+  git(f.project, "worktree", "add", "-qb", "feature-2", wt2);
+  writeFileSync(path.join(wt2, "file.txt"), "from-wt2\n");
+  const provider = new FakeProvider({
+    handler: (_req, idx) => {
+      if (idx === 0)
+        return [
+          call("pre-read", "read", { path: path.join(f.worktree, "file.txt") }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      if (idx === 1)
+        return [
+          { type: "text_delta", text: "pre" },
+          { type: "finish", reason: "stop" },
+        ];
+      if (idx === 2) {
+        return [
+          call("sw-wt", "switch_worktree", { path: f.worktree }),
+          call("read-proj", "read", { path: path.join(f.project, "file.txt") }),
+          call("edit-proj", "edit", {
+            path: path.join(f.project, "file.txt"),
+            old: "project",
+            new: "blocked",
+          }),
+          call("sw-proj", "switch_worktree", { path: f.project }),
+          call("read-wt2", "read", { path: path.join(wt2, "file.txt") }),
+          call("edit-wt2", "edit", {
+            path: path.join(wt2, "file.txt"),
+            old: "from-wt2",
+            new: "blocked-2",
+          }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      }
+      if (idx === 3)
+        return [
+          { type: "text_delta", text: "checked" },
+          { type: "finish", reason: "stop" },
+        ];
+      if (idx === 4)
+        return [
+          call("after-rewind-read", "read", { path: path.join(f.worktree, "file.txt") }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      return [
+        { type: "text_delta", text: "after rewind" },
+        { type: "finish", reason: "stop" },
+      ];
+    },
+  });
+  const wtSpy = vi.spyOn(workspaceBranches, "gitWorktrees");
+  const rt = await createRuntime({
+    cwd: f.project,
+    sessionsDir: f.sessionsDir,
+    providers: [provider],
+    subagent: { enabled: false },
+  });
+  const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
+  expect(wtSpy).not.toHaveBeenCalled();
+  const asked: string[] = [];
+  s.subscribe((e) => {
+    if (e.type === "permission.requested") asked.push(e.payload.requestId);
+  });
+  await s.submit({ text: "zero" });
+  expect(wtSpy).not.toHaveBeenCalled();
+  await s.submit({ text: "first" });
+  expect(wtSpy).toHaveBeenCalledTimes(2);
+  expect(asked).toEqual([]);
+  const tools = s.state().history.filter((e) => e.kind === "tool");
+  expect(tools[0]?.modelContent).not.toContain("[Note: This file is in another worktree");
+  expect(tools[2]?.modelContent).toContain(
+    `[Note: This file is in another worktree (${f.project}); current worktree is ${f.worktree}.]`,
+  );
+  expect(tools[3]?.status).toBe("denied");
+  expect(tools[3]?.modelContent).toContain(f.project);
+  expect(tools[3]?.modelContent).toContain(f.worktree);
+  expect(tools[5]?.modelContent).toContain(
+    `[Note: This file is in another worktree (${wt2}); current worktree is ${f.project}.]`,
+  );
+  expect(tools[6]?.status).toBe("denied");
+  expect(tools[6]?.modelContent).toContain(wt2);
+  expect(tools[6]?.modelContent).toContain(f.project);
+  expect(readFileSync(path.join(f.project, "file.txt"), "utf8")).toBe("project\n");
+  expect(readFileSync(path.join(wt2, "file.txt"), "utf8")).toBe("from-wt2\n");
+
+  const firstUserSeq = s.state().history.find((e) => e.kind === "user")?.seq ?? 1;
+  await s.rewind(firstUserSeq, "conversation");
+  await s.submit({ text: "second" });
+  const afterRewindRead = s
+    .state()
+    .history.filter((e) => e.kind === "tool")
+    .at(-1);
+  expect(afterRewindRead?.modelContent).not.toContain("[Note: This file is in another worktree");
+  await s.close();
+});
