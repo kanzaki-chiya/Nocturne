@@ -455,6 +455,7 @@ export interface ShellProvider {
  * 不直接接触 Platform——平台能力经 ExecutionScope 进入工具。
  */
 export interface ExecutionEnvironment {
+  currentDirectory?: (() => { cwd: string; workspaceRoot: string }) | undefined;
   /** ADR-0041: root-session recorder; executors supply resolved subjects. */
   checkpoint?:
     | ((

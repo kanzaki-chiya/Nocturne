@@ -54,6 +54,7 @@ import type {
 /** 会话标题与恢复列表：首条用户消息的第一个文本块的原文首行。 */
 
 export interface SessionView {
+  currentCwd?: string | undefined;
   title: string | undefined;
   firstTitle: string | undefined;
   generatedTitle: string | undefined;
@@ -405,6 +406,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
     }
     case "session.created": {
       const p = event.payload;
+      view.currentCwd = p.cwd;
       view.meta = {
         cwd: p.cwd,
         workspaceRoot: p.workspaceRoot,
@@ -420,6 +422,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
     }
     case "session.config_changed": {
       const p = event.payload;
+      if (p.worktree !== undefined) view.currentCwd = p.worktree.current;
       if (p.model !== undefined) view.config.model = p.model;
       if (p.permissionPreset !== undefined) view.config.permissionPreset = p.permissionPreset;
       if (p.reasoningEffort !== undefined) view.config.reasoningEffort = p.reasoningEffort;

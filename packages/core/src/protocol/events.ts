@@ -49,6 +49,7 @@ export interface SessionCreatedPayload {
 }
 
 export interface SessionConfigChangedPayload {
+  worktree?: { current: string; previous: string; branch?: string | undefined } | undefined;
   model?: ModelRef | undefined;
   permissionPreset?: string | undefined;
   /** 思考档位切换（ADR-0018）；payload 中存在的键覆盖当前值 */

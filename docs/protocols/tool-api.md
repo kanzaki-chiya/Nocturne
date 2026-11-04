@@ -97,6 +97,8 @@ type SubjectRequest = {
 
 ## 2. 上下文
 
+ADR-0081：装配层可以注入 `ExecutionEnvironment.currentDirectory(): { cwd, workspaceRoot }`；Agent Loop 在每次调用构建 scope 时读取，未注入时使用会话创建目录。正在执行的 scope 保留本次快照。
+
 ```ts
 /** 求值权限主体时可用的最少信息 */
 interface ToolScope {

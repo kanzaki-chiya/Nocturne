@@ -28,6 +28,7 @@ interface SessionView {
   /** 最近一次用户标题；空串表示清除用户覆盖 */
   userTitle: string | undefined;
   /** 会话元信息（session.created 填充） */
+  currentCwd?: string               // ADR-0081：执行目录，默认 session.created.cwd；随有效 worktree 事件推进
   meta: {
     cwd: string;
     workspaceRoot: string;

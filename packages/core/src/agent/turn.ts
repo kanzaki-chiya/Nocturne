@@ -256,8 +256,10 @@ export async function runTurn(
   function executionScope(): ExecutionScope {
     const state = session.state();
     return createExecutionScope(deps.execEnv, {
-      cwd: state.meta.cwd,
-      workspaceRoot: state.meta.workspaceRoot,
+      ...(deps.execEnv.currentDirectory?.() ?? {
+        cwd: state.meta.cwd,
+        workspaceRoot: state.meta.workspaceRoot,
+      }),
       sessionId: session.id,
       turnId,
       signal,

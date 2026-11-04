@@ -213,6 +213,9 @@ const payloadSchemas = {
     reasoningEffort: reasoningEffortSchema.optional(),
     shell: z.object({ kind: z.string(), path: z.string() }).optional(),
     branch: z.object({ current: z.string(), previous: z.string().optional() }).optional(),
+    worktree: z
+      .object({ current: z.string(), previous: z.string(), branch: z.string().optional() })
+      .optional(),
     // ADR-0076：目标模式；旧版本读取时丢弃
     goal: z
       .object({

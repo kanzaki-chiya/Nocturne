@@ -49,6 +49,7 @@ export interface SessionConfig {
   shell?: { kind: string; path: string } | undefined;
   /** Last effective Git branch observation, independent of user configuration. */
   branch?: string | undefined;
+  worktree?: { current: string; previous: string; branch?: string | undefined } | undefined;
 }
 
 export interface OpenTurn {

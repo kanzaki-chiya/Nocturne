@@ -25,6 +25,8 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 - **权限只继承或收紧**：子会话的有效判定对每个主体都不宽于父会话（第 7 节）。
 - **不新增事件类型**：父子关联用 `session.created` 的 `parent` 字段；客户端可见进度走既有 `tool.progress` 临时事件；重放等价不变量不受影响。
 
+[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：`task` 从父会话当前执行目录起步，隔离副本基线与并回目标跟随当前工作树；配置、信任、项目 Grant 和技能仍来自创建时的项目目录。
+
 ## 1. 工具契约（`task`）
 
 `task` 是内置工具（`tools/builtin/`），形状为普通 `ToolDefinition`：

@@ -119,10 +119,20 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.shell !== undefined || config.shell !== undefined
             ? { shell: p.shell ?? config.shell }
             : {}),
+          ...(config.worktree !== undefined ? { worktree: config.worktree } : {}),
+          ...(active && p.worktree !== undefined ? { worktree: p.worktree } : {}),
           ...(config.branch !== undefined ? { branch: config.branch } : {}),
           ...(active && p.branch !== undefined ? { branch: p.branch.current } : {}),
         };
-        if (active && p.branch?.previous !== undefined) {
+        if (active && p.worktree !== undefined) {
+          history.push({
+            kind: "note",
+            seq: event.seq,
+            turnId,
+            text: `[Environment change] Working directory changed from ${p.worktree.previous} to ${p.worktree.current}. Relative paths now resolve from ${p.worktree.current}. Replace absolute paths under the previous directory in earlier context with paths under the new directory. File contents read earlier may now be outdated.`,
+          });
+        }
+        if (active && p.worktree === undefined && p.branch?.previous !== undefined) {
           history.push({
             kind: "note",
             seq: event.seq,

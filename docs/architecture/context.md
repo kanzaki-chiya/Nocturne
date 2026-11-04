@@ -4,6 +4,8 @@
 
 文件附件引用由 Core 在提交时追加到用户消息，Builder 不变，见 [ADR-0072](../decisions/ADR-0072-file-attachments.md)。
 
+[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：当前执行目录的变化由 `worktree` 事件折叠成持久 note，沿用分支说明的投影、修剪和摘要边界；系统提示环境、项目指令与技能发现仍取创建时的项目目录。
+
 ## 1. 两个不同的东西
 
 | | 会话历史（Session History） | 模型上下文（Model Context） |

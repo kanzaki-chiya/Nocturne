@@ -2,6 +2,8 @@
 
 > 状态：已接受 v0.3 ｜ 前置阅读：[overview.md](overview.md) ｜ 接口契约：[tool-api.md](../protocols/tool-api.md) ｜ 权限：[permissions.md](permissions.md)
 
+[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md) 将项目目录与当前执行目录分开：每次调用组装 scope 时读取 `ExecutionEnvironment.currentDirectory()`，用于工具、相对路径、git、Hook 及外部 agent；配置和发现仍取项目目录。
+
 ## 1. 原则
 
 - 工具是一等公民：每个工具独立定义、独立注册、有输入 schema、声明自身特性、返回结构化结果。

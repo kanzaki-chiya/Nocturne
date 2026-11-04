@@ -1227,12 +1227,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (!child.background) return false;
       const created = child.durableEvents()[0];
       if (created?.type !== "session.created") return false;
-      const parent = subagentRegistry.liveSession(child.parentSessionId)?.state().meta.cwd;
+      const parent = subagentRegistry.liveSession(child.parentSessionId)?.state();
+      const parentCwd = parent?.config.worktree?.current ?? parent?.meta.cwd;
       return (
         platform.paths.isWithin(root, created.payload.cwd) ||
-        (parent !== undefined &&
+        (parentCwd !== undefined &&
           platform.paths.isWithin(root, openSessions.get(child.parentSessionId)?.workspace ?? "") &&
-          platform.paths.equals(parent, created.payload.cwd))
+          platform.paths.equals(parentCwd, created.payload.cwd))
       );
     });
   /**
@@ -1415,7 +1416,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     unattendedOption: boolean,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
-    const branchRoot = await gitRepository(meta.cwd);
+    const projectCwd = await platform.resolveReal(meta.cwd);
+    const branchWatchPath = () => session.state().config.worktree?.current ?? projectCwd;
+    const currentCwd = () => session.state().config.worktree?.current ?? meta.cwd;
+    const currentWorkspaceRoot = () => {
+      const worktree = session.state().config.worktree;
+      return worktree === undefined
+        ? meta.workspaceRoot
+        : paths.resolve(worktree.current, paths.relative(projectCwd, meta.workspaceRoot));
+    };
     // 会话级非交互（ADR-0064）：带定时任务来源的会话、或创建时声明 interactive:false，
     // 在客户端提交第二条用户消息之前按非交互处理；之后转为交互（permissions.md 第 7 节）
     const unattendedSession = unattendedOption || meta.schedule !== undefined;
@@ -1608,7 +1617,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ): PermissionPolicy =>
       options.policy ??
       createRulePolicy({
-        workspaceRoot: isolatedWorkspace ?? meta.workspaceRoot,
+        workspaceRoot: isolatedWorkspace ?? currentWorkspaceRoot(),
         ...(worktree ? { worktree } : {}),
         caseSensitive: platform.caseSensitivePaths,
         preset: isPermissionPresetName(presetName) ? presetName : "default",
@@ -1657,8 +1666,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         hooks: hookEntries,
         platform,
         sessionId: owner.id,
-        cwd: meta.cwd,
-        workspaceRoot: meta.workspaceRoot,
+        get cwd() {
+          return owner === session ? currentCwd() : owner.state().meta.cwd;
+        },
+        get workspaceRoot() {
+          return owner === session ? currentWorkspaceRoot() : owner.state().meta.workspaceRoot;
+        },
         warn: (code, message) => owner.emitEphemeral("runtime.warning", { code, message }),
         diagnostics,
       });
@@ -1729,7 +1742,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const runGit: GitRunner = async (args, signal) => {
       try {
         const child = platform.process.spawn("git", args, {
-          cwd: meta.cwd,
+          cwd: currentCwd(),
           signal,
           timeoutMs: 5_000,
           env: { GIT_OPTIONAL_LOCKS: "0" },
@@ -1764,7 +1777,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         config === undefined
           ? resolved?.permissionReviewerRules
           : config.resolvedSettings(meta.workspaceRoot).permissionReviewerRules,
-      environment: { workspaceRoot: meta.workspaceRoot, nocturneHome },
+      environment: {
+        get workspaceRoot() {
+          return currentWorkspaceRoot();
+        },
+        nocturneHome,
+      },
     };
     let warnedMissingReviewer = false;
     const warnMissingReviewer = () => {
@@ -1784,7 +1802,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // gate 按会话持有：等待中的权限请求与会话绑定，respondPermission 按会话路由；
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
     const gate: PermissionGate = createPolicyGate(
-      { evaluate: (subjects, evaluationOptions) => policy.evaluate(subjects, evaluationOptions) },
+      {
+        evaluate: (subjects, evaluationOptions) => {
+          policy = buildPolicy(session.state().config.permissionPreset);
+          return policy.evaluate(subjects, evaluationOptions);
+        },
+      },
       {
         interactive: sessionInteractive,
         ...(unattendedSession ? { nonInteractiveDenyHint: UNATTENDED_DENY_HINT } : {}),
@@ -1793,7 +1816,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           warnMissingReviewer();
           return getReviewer();
         },
-        cwd: meta.cwd,
+        get cwd() {
+          return currentCwd();
+        },
         ...reviewSources,
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
@@ -2083,6 +2108,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...(options.providerConfigs ?? []),
     ]);
     const execEnv: ExecutionEnvironment = {
+      currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
       checkpoint: createCheckpointRecorder(session, platform, sessionsDir),
       platform,
       gate,
@@ -2390,7 +2416,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               event.payload.status === "ok" &&
               (event.payload.output as { id?: string } | undefined)?.id === id,
           );
-          return { changes, repository: meta.workspaceRoot, applied };
+          return { changes, repository: currentWorkspaceRoot(), applied };
         };
         tools.register(
           createApplySubagentChangesTool({
@@ -2400,7 +2426,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 const result = lookup(id);
                 if (!result || result.applied)
                   throw new Error("No unapplied isolated changes found");
-                const repository = await inspectWorktreeRepository(meta.workspaceRoot);
+                const repository = await inspectWorktreeRepository(currentWorkspaceRoot());
                 const applied = await applyWorktreeChanges(repository, result.changes, mode);
                 await removeWorktree(
                   { repository, worktree: result.changes.worktree, branch: result.changes.branch },
@@ -2555,7 +2581,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                       interactive: false,
                       preset: () => session.state().config.permissionPreset,
                       reviewer: getReviewer,
-                      cwd: meta.cwd,
+                      cwd: currentCwd(),
                       ...reviewSources,
                       caseSensitive: platform.caseSensitivePaths,
                       hooks: hookRunner,
@@ -2565,7 +2591,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     agentConfig,
                     {
                       ...request,
-                      cwd: meta.workspaceRoot,
+                      cwd: currentWorkspaceRoot(),
                       transcriptPath: paths.join(
                         sessionsDir,
                         "attachments",
@@ -2629,6 +2655,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     let controller: AbortController | undefined;
     let fileIndexPromise: Promise<FileIndexEntry[]> | undefined;
+    let fileIndexRoot: string | undefined;
     let compactController: AbortController | undefined;
     let turnSettled: Promise<void> | undefined;
     let compactSettled: Promise<void> | undefined;
@@ -2652,11 +2679,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const busy = () => controller !== undefined || rewinding || archiving;
     const compacting = () => compactController !== undefined;
     const assertBranchNotSwitching = () => {
-      if (switching(branchRoot ?? meta.cwd))
+      if (switching(branchWatchPath()))
         throw new RuntimeCommandError("session_busy", "工作目录正在切换分支");
     };
     const recordBranch = async (): Promise<void> => {
-      const current = await gitCurrentBranch(meta.cwd);
+      const current = await gitCurrentBranch(currentCwd());
       if (current === null || controller?.signal.aborted) return;
       const previous = session.state().config.branch;
       if (previous !== current)
@@ -2839,8 +2866,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const refs = await resolveFileRefs(content, {
         fs: platform.fs,
         paths: platform.paths,
-        cwd: session.state().meta.cwd,
-        workspaceRoot: session.state().meta.workspaceRoot,
+        cwd: currentCwd(),
+        workspaceRoot: currentWorkspaceRoot(),
         readState: execEnv.readState,
         attachments: execEnv.attachments,
         imageInput:
@@ -2910,7 +2937,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (input.workMode !== undefined) {
         const gitRepository =
           input.workMode === "boost"
-            ? await inspectWorktreeRepository(meta.workspaceRoot).then(
+            ? await inspectWorktreeRepository(currentWorkspaceRoot()).then(
                 () => true,
                 () => false,
               )
@@ -3197,7 +3224,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         compactController !== undefined ||
         closing ||
         session.health !== "ok" ||
-        switching(branchRoot ?? meta.cwd)
+        switching(branchWatchPath())
       )
         return false;
       const head = pendingInputStore.takeQueueHead();
@@ -3351,7 +3378,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingExternalAgents = true;
     }
     const runtimeHooks: OpenSessionHooks = {
-      workspace: branchRoot ?? meta.cwd,
+      get workspace() {
+        return branchWatchPath();
+      },
       branchBusy: () => busy() || compacting() || closing,
       pumpPending: () => {
         void pumpQueue().catch(() => {
@@ -3539,17 +3568,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       fileIndex() {
         assertUsable();
-        fileIndexPromise ??= buildFileIndex(fs, paths, meta.workspaceRoot).catch(
-          (error: unknown) => {
-            fileIndexPromise = undefined;
-            throw error;
-          },
-        );
+        const root = currentWorkspaceRoot();
+        if (fileIndexRoot !== root) fileIndexPromise = undefined;
+        fileIndexRoot = root;
+        fileIndexPromise ??= buildFileIndex(fs, paths, root).catch((error: unknown) => {
+          fileIndexPromise = undefined;
+          throw error;
+        });
         return fileIndexPromise;
       },
       async resolveFiles(inputs) {
         assertUsable();
-        const root = await fs.realpath(meta.workspaceRoot).catch(() => meta.workspaceRoot);
+        const root = await fs.realpath(currentWorkspaceRoot()).catch(() => currentWorkspaceRoot());
         return Promise.all(inputs.map((input) => resolveFileRef(fs, paths, root, input)));
       },
       interrupt() {

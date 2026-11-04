@@ -600,7 +600,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             interactive: false,
             preset: () => deps.permissionPreset(),
             reviewer: () => deps.reviewer?.(),
-            cwd: worktree?.cwd ?? deps.environment.cwd,
+            cwd: worktree?.cwd ?? ctx.cwd,
             ...deps.reviewSources,
             caseSensitive: deps.platform.caseSensitivePaths,
             ...(deps.grants !== undefined ? { grants: deps.grants } : {}),
@@ -661,10 +661,8 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 shell: deps.shellLine(),
                 sessionDate: new Date().toISOString(),
               };
-        if (worktree) {
-          childEnvironment.cwd = worktree.cwd;
-          childEnvironment.workspaceRoot = worktree.workspaceRoot;
-        }
+        childEnvironment.cwd = worktree?.cwd ?? ctx.cwd;
+        childEnvironment.workspaceRoot = worktree?.workspaceRoot ?? ctx.workspaceRoot;
         // 催促循环：done 且无 finish → 再开一轮催促；最后一轮 toolChoice 强制
         const maxAttempts = deps.limits.maxAttempts;
         const timeoutMs = request.timeoutMs ?? profile?.timeoutMs ?? deps.limits.timeoutMs;
