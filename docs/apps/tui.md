@@ -2,7 +2,7 @@
 
 > 状态：v0.3 已发布；v0.4 按 [ADR-0021](../decisions/ADR-0021-tui-daily-usability.md) 实施中｜前置阅读：[apps/cli.md](cli.md)、[protocols/view.md](../protocols/view.md)｜代码位置：`apps/tui/`
 
-`apps/tui` 是 Nocturne 的终端界面客户端：与 CLI 驱动同一套 Runtime，只消费公开 API（`@nocturne/core`）与 `protocol`（含 `SessionView` reducer）。TUI 不包含任何 Agent 逻辑，不复用 CLI 的渲染代码，不自行做事件投影。
+`apps/tui` 是 Nocturne 的终端界面客户端：与 CLI 驱动同一套 Runtime，只消费公开 API（`@nocturne/core`）与 `protocol`（含 `SessionView` reducer）。TUI 不包含任何 Agent 逻辑，不复用 CLI 的渲染代码，不自行做事件投影。[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：`switch_worktree` 工具行显示 `切换工作树 <路径>`，欢迎区和状态栏目录保持项目目录。
 
 ## 1. 启动入口
 

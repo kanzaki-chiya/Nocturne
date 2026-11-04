@@ -37,4 +37,4 @@
 通过 `task` 委派时默认不设固定超时，随主会话取消；可在调用中显式传入 `timeoutMs`，已有 ACP 可选超时仍生效。直接用 `/<name>` 对话不经 `task`，按该入口的会话中断操作处理。
 
 - **启动前审批**：委派外部 Agent 属于 `subagent` 权限类别（目标为 `external:<name>`），由于外部进程开启后将使用其自身的工具链直接读写文件或执行命令，Nocturne 在全部权限预设下默认均会先询问你（`ask`），批准后才会启动进程。
-- **Worktree 隔离改动**：主会话委派时若传入 `isolation: "worktree"`，外部 Agent 会在独立的 Git worktree 目录中工作；任务完成后，主会话可调用 `apply_subagent_changes`（「并回子代理改动」）将外部 Agent 的代码修改合入主工作区（见 [子代理](subagents.md)）。
+- **Worktree 隔离改动**：主会话委派时若传入 `isolation: "worktree"`，外部 Agent 会在独立的 Git worktree 目录中工作；任务完成后，主会话可调用 `apply_subagent_changes`（「并回子代理改动」）将外部 Agent 的代码修改合入主会话当前工作树（见 [子代理](subagents.md) 与 [切换工作树](context.md#切换工作树)）。

@@ -404,9 +404,11 @@ function layoutEntryBody(
       const head =
         shownName === "apply_subagent_changes" && entry.result
           ? `${mark} ${subagentApplyLine(entry.result.output)}`
-          : shownName === "mcp_search"
-            ? `${mark} 搜索 MCP 工具：${summary} ${status}`
-            : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${status}`;
+          : shownName === "switch_worktree"
+            ? `${mark} 切换工作树 · ${summary} ${status}`
+            : shownName === "mcp_search"
+              ? `${mark} 搜索 MCP 工具：${summary} ${status}`
+              : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${status}`;
       const lines = [
         ...review,
         ...rows(

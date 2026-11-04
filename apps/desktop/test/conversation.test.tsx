@@ -2207,6 +2207,16 @@ describe("Conversation 工具行三个阶段同一结构", () => {
 });
 
 describe("Conversation 工具行与拒绝", () => {
+  it("切换工作树工具行显示目录名，切回项目时也不显示点或完整路径", () => {
+    const view = createSessionView();
+    const entry = tool({ name: "switch_worktree", input: { path: "../project/" } });
+    if (entry.result) entry.result.output = { current: "Z:\\project", branch: "main" };
+    view.entries = [entry];
+    const { container } = mount(view);
+    expect(container.querySelector(".tool-name")?.textContent).toBe("切换工作树");
+    expect(container.querySelector(".tool-arg")?.textContent).toBe("· project");
+    expect(container.querySelector(".tool-dir")).toBeNull();
+  });
   it("工作区内路径相对化、区外绝对化；10 秒以上才显示时长", () => {
     const view = createSessionView();
     const inside = tool({ name: "edit", input: { path: "Z:/project/src/a.ts" } });

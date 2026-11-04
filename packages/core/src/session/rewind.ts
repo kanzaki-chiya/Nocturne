@@ -198,11 +198,32 @@ export async function restoreCheckpointFiles(
   targetSeq: number,
 ): Promise<SessionRewoundPayload["files"]> {
   const { before } = rewindCheckpoints(session.durableEvents(), targetSeq, platform);
+  const projectCwd = await platform.resolveReal(session.state().meta.cwd);
+  const toWorkspaceRoot = platform.paths.relative(projectCwd, session.state().meta.workspaceRoot);
+  const switchedRoots = [
+    ...new Set(
+      session
+        .durableEvents()
+        .flatMap((event) =>
+          event.type === "session.config_changed" && event.payload.worktree !== undefined
+            ? [event.payload.worktree.current, event.payload.worktree.previous].map((cwd) =>
+                platform.paths.resolve(cwd, toWorkspaceRoot),
+              )
+            : [],
+        ),
+    ),
+  ];
   const results: SessionRewoundPayload["files"] = [];
   for (const { path, before: snapshot } of before.values()) {
     try {
       if (!platform.paths.isAbsolute(path)) throw new Error("检查点路径不是绝对路径");
       if (snapshot !== null && "untracked" in snapshot) throw new Error(snapshot.untracked);
+      for (const root of switchedRoots) {
+        if (platform.paths.isWithin(root, path)) {
+          const stat = await platform.fs.stat(root).catch(() => undefined);
+          if (stat?.type !== "directory") throw new Error(`工作树目录已不存在：${root}`);
+        }
+      }
       if (!platform.paths.equals(path, await resolveRealPath(platform.fs, platform.paths, path)))
         throw new Error("当前路径已指向其他位置");
       // Reject changed symlinks: restoring a recorded path must not overwrite a new target.

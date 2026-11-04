@@ -146,3 +146,4 @@ changes?: {
 
 - 2026-10-31：补充未跟踪符号链接跳过与 `worktree_symlink_skipped` 警告、`.worktreeinclude` 仅在存在且不可信时于创建阶段发 `worktree_include_skipped`、shell 隔离增加切换目录检查、`3way` 并回使用临时 index 的说明。
 - 2026-11-02（r1102q）：省略 isolation 的可写后台任务默认建工作树；明确非 git、无提交和显式 none 的拒绝说明，补全子模型路径映射与权限层路径指引。
+- 2026-11-04（[ADR-0081](ADR-0081-session-worktree-switch.md)）：主会话支持 `switch_worktree` 切换执行工作树；隔离副本基线与 `apply_subagent_changes` 目标跟随当前工作树，切换过的会话对用户自建的其他工作树直接拒绝修改并在读取结果追加英文提示。

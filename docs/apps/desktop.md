@@ -2,7 +2,7 @@
 
 > 状态：v0.5 骨架与连接、对话、设置区（服务商、常规、模型、外观）已实现（[ADR-0046](../decisions/ADR-0046-desktop-tauri.md) 第 9 节第 1–3 步） | 前置阅读：[protocols/rpc.md](../protocols/rpc.md) | 代码位置：`apps/desktop/`
 
-`apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。
+`apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：侧栏分组、会话概览项目名固定使用创建时的项目目录；状态栏分支、文件面板、快速打开、本地 HTML 预览与新建终端跟随 `SessionView.currentCwd`；`switch_worktree` 工具行显示为 `切换工作树 <路径>`。
 
 ## 1. 进程结构与后台策略
 

@@ -23,6 +23,7 @@ import type {
 } from "../src/host";
 import { useSidePanel, type SidePanelController } from "../src/PanelHost";
 import { TitlebarSlot } from "../src/PanelChrome";
+import { buildSessionTree } from "../src/session-tree";
 import { createPrefsStore, PREFS_KEY, type PrefsStore } from "../src/prefs";
 
 vi.mock("../src/terminal-view", () => ({
@@ -144,12 +145,14 @@ interface HarnessProps {
   sessions: readonly { id: string; mtimeMs: number }[] | undefined;
   openIds?: ReadonlySet<string>;
   settingsOpen?: boolean;
+  currentCwd?: string;
   controller?: { current: SidePanelController | null };
 }
 
 function Panel(props: HarnessProps) {
   const active =
     props.sessionId === null ? undefined : conversation(props.sessionId, `Z:\\${props.sessionId}`);
+  if (active && props.currentCwd) active.view.currentCwd = props.currentCwd;
   const panel = useSidePanel({
     prefs: props.prefs,
     host: props.host,
@@ -1181,4 +1184,49 @@ it("agent 标签所在的会话：只算活着的标签，集合内容不变时�
     agents.push({ kind: "tabs", shellGeneration: 2, revision: 3, tabs: [] });
   });
   expect(controller.current?.agentSessions.size).toBe(0);
+});
+
+it("worktree switch: file panel and terminal follow view.currentCwd while project identity stays on active.workspace", async () => {
+  const { prefs, host, terminals } = setup();
+  const controller: { current: SidePanelController | null } = { current: null };
+  const summaries = [
+    {
+      id: "proj",
+      createdAt: "2026-10-01T00:00:00Z",
+      cwd: "Z:\\proj",
+      workspaceRoot: "Z:\\proj",
+      model: { provider: "p", model: "m" },
+      mtimeMs: 1,
+      firstText: "会话",
+    },
+  ];
+  expect(
+    buildSessionTree(
+      summaries,
+      { pinned: [], projects: [], hidden: [] },
+      {
+        plainWorkspace: null,
+        chatsExpanded: false,
+        expanded: new Set(),
+        collapsed: new Set(),
+      },
+    ).projects[0]?.path,
+  ).toBe("Z:\\proj");
+  render(
+    <Harness
+      prefs={prefs}
+      host={host}
+      sessionId="proj"
+      currentCwd="Z:\proj-wt"
+      sessions={[{ id: "proj", mtimeMs: 1 }]}
+      controller={controller}
+    />,
+  );
+  act(() => {
+    controller.current?.openFile("Z:\\proj-wt\\src\\index.ts");
+  });
+  fireEvent.keyDown(window, { key: "`", code: "Backquote", ctrlKey: true });
+  await waitFor(() => {
+    expect(terminals.opened[0]?.cwd).toBe("Z:\\proj-wt");
+  });
 });

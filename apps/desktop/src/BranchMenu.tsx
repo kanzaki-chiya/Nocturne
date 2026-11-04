@@ -20,7 +20,11 @@ export function BranchMenu({
   view: SessionView;
   replaying?: boolean;
 }) {
-  const owner = useMemo(() => ({ session, workspace, client }), [session, workspace, client]);
+  const effectiveWorkspace = view.currentCwd ?? workspace;
+  const owner = useMemo(
+    () => ({ session, workspace: effectiveWorkspace, client }),
+    [session, effectiveWorkspace, client],
+  );
   const [snapshot, setSnapshot] = useState<{ owner: object; value: WorkspaceBranches }>();
   const data = snapshot?.owner === owner ? snapshot.value : undefined;
   const [opened, setOpened] = useState<object | null>(null);
@@ -37,7 +41,7 @@ export function BranchMenu({
   const optionBusy = triggerBusy || data?.busy === true;
   const refresh = useSessionRefresh(owner, !replaying, async (isCurrent) => {
     try {
-      const value = await client.workspaceBranches({ workspace });
+      const value = await client.workspaceBranches({ workspace: effectiveWorkspace });
       if (isCurrent()) setSnapshot({ owner, value });
     } catch {
       if (isCurrent()) setSnapshot(undefined);
@@ -88,7 +92,11 @@ export function BranchMenu({
     setSwitching(owner);
     setError(null);
     try {
-      await client.switchBranch({ workspace, branch, ...(create ? { create: true } : {}) });
+      await client.switchBranch({
+        workspace: effectiveWorkspace,
+        branch,
+        ...(create ? { create: true } : {}),
+      });
       if (currentOwner.current !== owner) return;
       await refresh();
       if (currentOwner.current !== owner) return;

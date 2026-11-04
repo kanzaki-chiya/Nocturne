@@ -121,7 +121,9 @@ export function ToolRow({
   const head =
     name === "apply_subagent_changes" && entry.result
       ? ` ${subagentApplyLine(entry.result.output)}`
-      : ` ${name}${subagentModel(entry)} ${summary}`;
+      : name === "switch_worktree"
+        ? ` 切换工作树 · ${summary}`
+        : ` ${name}${subagentModel(entry)} ${summary}`;
   const duration = entry.result?.durationMs;
   const suffix = subagentStartRejected(entry)
     ? "未启动"

@@ -70,6 +70,165 @@ it("nested worktrees use the most specific worktree root for current and target 
   expect(check(f.worktree).decision.action).toBe("deny");
 });
 
+it("switching keeps trusted project configuration and applies project Grants without importing worktree configuration", async () => {
+  const f = fixture();
+  const home = path.join(f.base, "home");
+  const outside = path.join(f.base, "comparison.txt");
+  writeFileSync(outside, "comparison\n");
+  for (const directory of [f.project, f.worktree])
+    mkdirSync(path.join(directory, ".nocturne"), { recursive: true });
+  writeFileSync(
+    path.join(f.project, ".nocturne", "config.json"),
+    JSON.stringify({ compaction: { pruneLimit: 12345 } }),
+  );
+  writeFileSync(
+    path.join(f.worktree, ".nocturne", "config.json"),
+    JSON.stringify({ permissions: { rules: [{ kind: "read", pattern: "**", action: "deny" }] } }),
+  );
+  const cfg = await loadConfig(createPlatform(), { nocturneHome: home });
+  await cfg.setWorkspaceTrusted(f.project, true);
+  const workspace = await cfg.forWorkspace(f.project);
+  await workspace.grants.add(
+    grantFromSubject(
+      { kind: "read", target: outside, resolved: outside },
+      process.platform !== "win32",
+      "2026-11-04T00:00:00.000Z",
+    ),
+  );
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        call("switch", "switch_worktree", { path: f.worktree }),
+        call("comparison", "read", { path: outside }),
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ],
+    ],
+  });
+  const rt = await createRuntime({
+    cwd: f.project,
+    sessionsDir: f.sessionsDir,
+    config: cfg,
+    providers: [provider],
+    interactive: true,
+    subagent: { enabled: false },
+  });
+  const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "default" });
+  const asks: string[] = [];
+  s.subscribe((event) => {
+    if (event.type === "permission.requested") {
+      asks.push(event.payload.callId);
+      void s.respondPermission(event.payload.requestId, { decision: "allow" });
+    }
+  });
+  await s.submit({ text: "switch then compare" });
+  expect(asks).toHaveLength(1);
+  const read = replaySessionView(internalSession(s).durableEvents()).entries.find(
+    (entry) => entry.kind === "tool" && entry.name === "read",
+  );
+  expect(read?.kind === "tool" && read.status).toBe("ok");
+  expect(read?.kind === "tool" && read.permission?.source).toBe("grant");
+  expect(workspace.projectConfig.trusted).toBe(true);
+  expect(workspace.resolved.compactionPruneLimit).toBe(12345);
+  expect(provider.requests[1]?.system).toEqual(provider.requests[0]?.system);
+  await s.close();
+});
+
+it("file index and file resolution follow the mapped current subdirectory", async () => {
+  const f = fixture();
+  for (const root of [f.project, f.worktree])
+    mkdirSync(path.join(root, "sub"), { recursive: true });
+  writeFileSync(path.join(f.worktree, "sub", "local.txt"), "local\n");
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        call("sw", "switch_worktree", { path: f.worktree }),
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ],
+      [
+        call("parent-read", "read", { path: "../file.txt" }),
+        call("parent-edit", "edit", { path: "../file.txt", old: "worktree", new: "modified" }),
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "modified" },
+        { type: "finish", reason: "stop" },
+      ],
+    ],
+  });
+  const rt = await createRuntime({
+    cwd: path.join(f.project, "sub"),
+    workspaceRoot: f.project,
+    sessionsDir: f.sessionsDir,
+    providers: [provider],
+    subagent: { enabled: false },
+  });
+  const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
+  await s.submit({ text: "switch" });
+  expect(await s.fileIndex()).toContainEqual(expect.objectContaining({ path: "local.txt" }));
+  expect((await s.resolveFiles(["local.txt"]))[0]?.absolutePath).toBe(
+    path.join(f.worktree, "sub", "local.txt"),
+  );
+  await s.submit({ text: "edit parent" });
+  const editSeq = s.state().history.findLast((entry) => entry.kind === "user")?.seq ?? 1;
+  rmSync(f.worktree, { recursive: true, force: true });
+  const files = await s.rewind(editSeq, "files");
+  expect(files.find((file) => file.path === path.join(f.worktree, "file.txt"))?.result).toBe(
+    "failed",
+  );
+  expect(existsSync(f.worktree)).toBe(false);
+  await s.close();
+});
+
+it("nested current worktree activity does not block switching the project branch", async () => {
+  const f = fixture();
+  const nested = path.join(f.project, "trees", "nested");
+  git(f.project, "worktree", "add", "-qb", "nested", nested);
+  let release: (() => void) | undefined;
+  const provider = new FakeProvider({
+    handler: async (_req, idx) => {
+      if (idx === 0)
+        return [
+          call("sw", "switch_worktree", { path: nested }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ];
+    },
+  });
+  const rt = await createRuntime({
+    cwd: f.project,
+    sessionsDir: f.sessionsDir,
+    providers: [provider],
+    subagent: { enabled: false },
+  });
+  const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
+  const running = s.submit({ text: "switch and hold" });
+  try {
+    for (let i = 0; i < 100 && release === undefined; i++)
+      await new Promise((r) => setTimeout(r, 10));
+    expect(release).toBeDefined();
+    expect((await rt.workspaceBranches({ workspace: f.project })).busy).toBe(false);
+    expect((await rt.workspaceBranches({ workspace: nested })).busy).toBe(true);
+  } finally {
+    release?.();
+    await running;
+    await s.close();
+  }
+});
+
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -235,22 +394,22 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
   const home = path.join(f.base, "home");
   mkdirSync(home, { recursive: true });
   writeFileSync(
-    path.join(home, "trust.json"),
-    JSON.stringify({ trustedWorkspaces: [f.project, f.worktree] }),
-  );
-  writeFileSync(
     path.join(f.project, ".nocturne", "config.json"),
-    JSON.stringify({ compactionPruneLimit: 12345 }),
+    JSON.stringify({ compaction: { pruneLimit: 12345 } }),
   );
   writeFileSync(
     path.join(f.worktree, ".nocturne", "config.json"),
     JSON.stringify({
-      compactionPruneLimit: 54321,
-      permissions: [{ action: "deny", kind: "read", pattern: "**" }],
+      compaction: { pruneLimit: 54321 },
+      permissions: { rules: [{ action: "deny", kind: "read", pattern: "**" }] },
     }),
   );
   const cfg = await loadConfig(createPlatform(), { nocturneHome: home });
+  await cfg.setWorkspaceTrusted(f.project, true);
   const wsCfg = await cfg.forWorkspace(f.project);
+  expect(wsCfg.projectConfig.trusted).toBe(true);
+  expect(wsCfg.resolved.compactionPruneLimit).toBe(12345);
+  const configRoots = vi.spyOn(cfg, "forWorkspace");
   await wsCfg.grants.add({
     kind: "shell",
     target: "git status",
@@ -297,6 +456,29 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
     expect.stringContaining("ok:"),
     expect.stringContaining("ok:"),
   ]);
+  const switchErrors = internalSession(s)
+    .durableEvents()
+    .flatMap((event) =>
+      event.type === "tool.completed" &&
+      event.payload.name === "switch_worktree" &&
+      event.payload.status === "error"
+        ? [event.payload.error?.code]
+        : [],
+    );
+  expect(switchErrors).toEqual([
+    "invalid_input",
+    "invalid_input",
+    "invalid_input",
+    "invalid_input",
+  ]);
+  const activeCalls = new Set<string>();
+  for (const event of internalSession(s).durableEvents()) {
+    if (event.type === "tool.started") activeCalls.add(event.payload.callId);
+    if (event.type === "tool.completed") activeCalls.delete(event.payload.callId);
+    expect(activeCalls.size).toBeLessThanOrEqual(1);
+  }
+  expect(activeCalls.size).toBe(0);
+  expect(configRoots.mock.calls.every(([root]) => root === f.project)).toBe(true);
   expect(tools.find((e) => e.name === "read")?.modelContent).toContain("wt-sub");
   expect(readFileSync(path.join(f.worktree, "packages", "sub", "item.txt"), "utf8")).toBe(
     "child-sub\n",
@@ -417,3 +599,164 @@ it("sibling worktrees deny edit in bypass, allow read with notice, persist after
   expect(afterRewindRead?.modelContent).not.toContain("[Note: This file is in another worktree");
   await s.close();
 });
+
+it("cross-switch rewind restores files across worktrees, reports only deleted-worktree files as failed, forks inherit current directory, resume falls back when deleted and reloads sibling rules, switchBranch busy follows current directory, and next turn does not duplicate branch note", async () => {
+  const f = fixture();
+  const wt2 = path.join(f.base, "worktree-2");
+  git(f.project, "worktree", "add", "-qb", "feature-2", wt2);
+  writeFileSync(path.join(wt2, "file.txt"), "wt2-orig\n");
+  let gateResolve: (() => void) | undefined;
+  const provider = new FakeProvider({
+    handler: async (_req, idx) => {
+      if (idx === 0)
+        return [
+          call("r1", "read", { path: "file.txt" }),
+          call("e1", "edit", { path: "file.txt", old: "project", new: "project-mod" }),
+          call("sw1", "switch_worktree", { path: f.worktree }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      if (idx === 1)
+        return [
+          { type: "text_delta", text: "turn1" },
+          { type: "finish", reason: "stop" },
+        ];
+      if (idx === 2)
+        return [
+          call("r2", "read", { path: "file.txt" }),
+          call("e2", "edit", { path: "file.txt", old: "worktree", new: "worktree-mod" }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      if (idx === 3) {
+        if (gateResolve === undefined) {
+          await new Promise<void>((r) => {
+            gateResolve = r;
+          });
+        }
+        return [
+          { type: "text_delta", text: "turn2" },
+          { type: "finish", reason: "stop" },
+        ];
+      }
+      return [
+        { type: "text_delta", text: "next" },
+        { type: "finish", reason: "stop" },
+      ];
+    },
+  });
+  const rt = await createRuntime({
+    cwd: f.project,
+    sessionsDir: f.sessionsDir,
+    providers: [provider],
+    subagent: { enabled: false },
+  });
+  const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
+  await s.submit({ text: "m1" });
+  const running = s.submit({ text: "m2" });
+  for (let i = 0; i < 50 && gateResolve === undefined; i++)
+    await new Promise((r) => setTimeout(r, 20));
+  expect((await rt.workspaceBranches({ workspace: f.project })).busy).toBe(false);
+  expect((await rt.workspaceBranches({ workspace: f.worktree })).busy).toBe(true);
+  await rt.switchBranch({ workspace: f.project, branch: "proj-b", create: true });
+  await expect(
+    rt.switchBranch({ workspace: f.worktree, branch: "wt-b", create: true }),
+  ).rejects.toThrow();
+  gateResolve?.();
+  await running;
+
+  const branchNotesBefore = s
+    .state()
+    .history.filter((e) => e.kind === "note" && e.text.includes("Git branch changed"));
+  await s.submit({ text: "m3" });
+  const branchNotesAfter = s
+    .state()
+    .history.filter((e) => e.kind === "note" && e.text.includes("Git branch changed"));
+  expect(branchNotesAfter.length).toBe(branchNotesBefore.length);
+
+  const forkedId = await rt.forkSession(s.id);
+  const forked = await rt.resumeSession(forkedId);
+  expect(forked.state().config.worktree?.current).toBe(f.worktree);
+  await forked.close();
+
+  const u1 = s.state().history.find((e) => e.kind === "user")?.seq ?? 1;
+  const beforeSwitchId = await rt.forkSession(s.id, { targetSeq: u1 });
+  const beforeSwitch = await rt.resumeSession(beforeSwitchId);
+  expect(beforeSwitch.state().config.worktree).toBeUndefined();
+  await beforeSwitch.close();
+  const restoredAll = await s.rewind(u1, "both");
+  expect(restoredAll.every((r) => r.result === "restored")).toBe(true);
+  expect(readFileSync(path.join(f.project, "file.txt"), "utf8")).toBe("project\n");
+  expect(readFileSync(path.join(f.worktree, "file.txt"), "utf8")).toBe("worktree\n");
+  expect(s.state().config.worktree).toBeUndefined();
+  expect(replaySessionView(internalSession(s).durableEvents()).currentCwd).toBe(f.project);
+  await s.close();
+
+  const p2 = new FakeProvider({
+    handler: (_req, idx) => {
+      if (idx === 0)
+        return [
+          call("r1", "read", { path: "file.txt" }),
+          call("e1", "edit", { path: "file.txt", old: "project", new: "project-mod2" }),
+          call("sw", "switch_worktree", { path: f.worktree }),
+          call("r2", "read", { path: "file.txt" }),
+          call("e2", "edit", { path: "file.txt", old: "worktree", new: "worktree-mod2" }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      if (idx === 1)
+        return [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ];
+      if (idx === 2)
+        return [
+          call("r-wt2", "read", { path: path.join(wt2, "file.txt") }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      return [
+        { type: "text_delta", text: "after" },
+        { type: "finish", reason: "stop" },
+      ];
+    },
+  });
+  const rt2 = await createRuntime({
+    cwd: f.project,
+    sessionsDir: f.sessionsDir,
+    providers: [p2],
+    subagent: { enabled: false },
+  });
+  const s2 = await rt2.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
+  await s2.submit({ text: "edit-both" });
+  const id2 = s2.id;
+  await s2.close();
+
+  const resumedAlive = await rt2.resumeSession(id2);
+  expect(resumedAlive.state().config.worktree?.current).toBe(f.worktree);
+  await resumedAlive.submit({ text: "check-sibling-after-resume" });
+  expect(
+    resumedAlive
+      .state()
+      .history.filter((e) => e.kind === "tool")
+      .at(-1)?.modelContent,
+  ).toContain(
+    `[Note: This file is in another worktree (${wt2}); current worktree is ${f.worktree}.]`,
+  );
+  await resumedAlive.close();
+
+  rmSync(f.worktree, { recursive: true, force: true });
+  const resumedGone = await rt2.resumeSession(id2);
+  expect(resumedGone.state().config.worktree?.current).toBe(f.project);
+  expect(
+    resumedGone
+      .state()
+      .history.some(
+        (e) =>
+          e.kind === "note" &&
+          e.text.includes(`Working directory changed from ${f.worktree} to ${f.project}`),
+      ),
+  ).toBe(true);
+  const firstSeq2 = resumedGone.state().history.find((e) => e.kind === "user")?.seq ?? 1;
+  const filesGone = await resumedGone.rewind(firstSeq2, "files");
+  expect(filesGone.find((x) => x.path.startsWith(f.project))?.result).toBe("restored");
+  expect(filesGone.find((x) => x.path.startsWith(f.worktree))?.result).toBe("failed");
+  expect(existsSync(f.worktree)).toBe(false);
+  await resumedGone.close();
+}, 30_000);

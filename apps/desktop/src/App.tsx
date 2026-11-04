@@ -2332,6 +2332,7 @@ function SessionPane({
     [client, session.id],
   );
   const isPlain = plainKey !== null && projectKey(workspace) === plainKey;
+  const currentCwd = view.currentCwd ?? workspace;
   const head = abbreviateHome(workspace, home);
   const shown = middleTruncate(head, 56);
   return (
@@ -2413,7 +2414,11 @@ function SessionPane({
         initialDraft={initialDraft}
         onInitialDraftUsed={onInitialDraftUsed}
         readInputHistory={() => session.readInputHistory()}
-        fileRefs={isPlain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
+        fileRefs={
+          isPlain
+            ? null
+            : { load: () => session.fileIndex(), key: `${view.turnCount}:${currentCwd}` }
+        }
         fileRefsUnavailable="普通对话没有项目文件"
         getVisionHint={controls.visionHint}
         pickImages={pickImages}
@@ -2426,7 +2431,7 @@ function SessionPane({
           <BranchMenu
             client={client.runtime}
             session={session}
-            workspace={workspace}
+            workspace={currentCwd}
             view={view}
             replaying={replaying}
           />

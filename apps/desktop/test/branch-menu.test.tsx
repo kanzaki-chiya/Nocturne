@@ -3,6 +3,7 @@ import type { RpcSession } from "@nocturne/rpc/client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BranchMenu } from "../src/BranchMenu";
+import { toolMeta } from "../src/Conversation";
 
 afterEach(cleanup);
 const initial: WorkspaceBranches = {
@@ -172,5 +173,15 @@ describe("桌面分支菜单 ADR-0079", () => {
     }
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("switch_worktree 更新 view.currentCwd 时立即重取对应工作树分支，并显示切换工作树工具行", async () => {
+    const h = fixture();
+    h.view.currentCwd = "Z:/fixture-wt";
+    expect(toolMeta("switch_worktree").label).toBe("切换工作树");
+    render(<BranchMenu {...h.props} />);
+    await waitFor(() =>
+      expect(h.client.workspaceBranches).toHaveBeenCalledWith({ workspace: "Z:/fixture-wt" }),
+    );
   });
 });

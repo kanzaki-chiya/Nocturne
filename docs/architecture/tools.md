@@ -2,7 +2,7 @@
 
 > 状态：已接受 v0.3 ｜ 前置阅读：[overview.md](overview.md) ｜ 接口契约：[tool-api.md](../protocols/tool-api.md) ｜ 权限：[permissions.md](permissions.md)
 
-[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md) 将项目目录与当前执行目录分开：每次调用组装 scope 时读取 `ExecutionEnvironment.currentDirectory()`，用于工具、相对路径、git、Hook 及外部 agent；配置和发现仍取项目目录。
+[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md) 将项目目录与当前执行目录分开：每次调用组装 scope 时读取 `ExecutionEnvironment.currentDirectory()`，用于工具、相对路径、git、Hook 及外部 agent；配置和发现仍取项目目录。切换后 `fileIndex()` 和 `resolveFiles()` 以映射后的当前目录为根，保证文件面板选中项与执行相对路径一致；从未切换的会话保留原来的工作区根行为。
 
 ## 1. 原则
 

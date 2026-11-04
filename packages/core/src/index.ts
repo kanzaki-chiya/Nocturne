@@ -1190,6 +1190,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    */
   interface OpenSessionHooks {
     workspace: string;
+    repositoryFor(cwd: string): string;
     branchBusy(): boolean;
     pumpPending(): void;
     grantWarning(message: string): void;
@@ -1219,24 +1220,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const branchSwitches = new Set<string>();
   const directoryKey = (path: string) => platform.paths.canonicalize(path);
   const switching = (path: string) =>
-    [...branchSwitches].some((root) => platform.paths.isWithin(root, path));
+    [...branchSwitches].some((root) => platform.paths.equals(root, path));
   const branchBusy = (root: string): boolean =>
     branchSwitches.has(directoryKey(root)) ||
     [...openSessions.values()].some(
-      (hooks) => platform.paths.isWithin(root, hooks.workspace) && hooks.branchBusy(),
+      (hooks) => platform.paths.equals(root, hooks.workspace) && hooks.branchBusy(),
     ) ||
     subagentRegistry.activeAll().some((child) => {
       if (!child.background) return false;
       const created = child.durableEvents()[0];
       if (created?.type !== "session.created") return false;
-      const parent = subagentRegistry.liveSession(child.parentSessionId)?.state();
-      const parentCwd = parent?.config.worktree?.current ?? parent?.meta.cwd;
-      return (
-        platform.paths.isWithin(root, created.payload.cwd) ||
-        (parentCwd !== undefined &&
-          platform.paths.isWithin(root, openSessions.get(child.parentSessionId)?.workspace ?? "") &&
-          platform.paths.equals(parentCwd, created.payload.cwd))
-      );
+      const parent = openSessions.get(child.parentSessionId);
+      return parent !== undefined
+        ? platform.paths.equals(root, parent.repositoryFor(created.payload.cwd))
+        : platform.paths.isWithin(root, created.payload.cwd);
     });
   /**
    * 会话列表可见状态变化（ADR-0080）：归档/恢复与 submit 自动恢复。
@@ -1419,7 +1416,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
     const projectCwd = await platform.resolveReal(meta.cwd);
-    const branchWatchPath = () => session.state().config.worktree?.current ?? projectCwd;
+    const projectRepository = (await gitRepository(projectCwd)) ?? projectCwd;
+    const repositoryFor = (cwd: string) =>
+      paths.equals(cwd, meta.cwd)
+        ? projectRepository
+        : paths.resolve(cwd, paths.relative(projectCwd, projectRepository));
+    const branchWatchPath = () =>
+      repositoryFor(session.state().config.worktree?.current ?? meta.cwd);
     const currentCwd = () => session.state().config.worktree?.current ?? meta.cwd;
     const currentWorkspaceRoot = () => {
       const worktree = session.state().config.worktree;
@@ -1808,6 +1811,33 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const realList = await Promise.all(rawList.map((p) => platform.resolveReal(p)));
       return realList.filter((p) => !paths.isWithin(isolatedWorktreesRoot, p));
     };
+    if (resume !== undefined) {
+      const current = session.state().config.worktree?.current;
+      if (current !== undefined && !paths.equals(current, projectCwd)) {
+        const stat = await fs.stat(current).catch(() => undefined);
+        if (stat?.type !== "directory") {
+          const branch = (await gitCurrentBranch(projectCwd)) ?? undefined;
+          const prevBranch = session.state().config.branch;
+          await session.emit("session.config_changed", {
+            worktree: {
+              current: projectCwd,
+              previous: current,
+              ...(branch !== undefined ? { branch } : {}),
+            },
+            ...(branch !== undefined
+              ? {
+                  branch: {
+                    current: branch,
+                    ...(prevBranch !== undefined && prevBranch !== branch
+                      ? { previous: prevBranch }
+                      : {}),
+                  },
+                }
+              : {}),
+          });
+        }
+      }
+    }
     if (session.state().config.worktree !== undefined) {
       knownWorktreeRoots = await readAvailableWorktreeRoots();
     }
@@ -3455,6 +3485,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       get workspace() {
         return branchWatchPath();
       },
+      repositoryFor,
       branchBusy: () => busy() || compacting() || closing,
       pumpPending: () => {
         void pumpQueue().catch(() => {
@@ -3642,7 +3673,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       fileIndex() {
         assertUsable();
-        const root = currentWorkspaceRoot();
+        const root = session.state().config.worktree?.current ?? meta.workspaceRoot;
         if (fileIndexRoot !== root) fileIndexPromise = undefined;
         fileIndexRoot = root;
         fileIndexPromise ??= buildFileIndex(fs, paths, root).catch((error: unknown) => {
@@ -3653,7 +3684,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async resolveFiles(inputs) {
         assertUsable();
-        const root = await fs.realpath(currentWorkspaceRoot()).catch(() => currentWorkspaceRoot());
+        const currentRoot = session.state().config.worktree?.current ?? meta.workspaceRoot;
+        const root = await fs.realpath(currentRoot).catch(() => currentRoot);
         return Promise.all(inputs.map((input) => resolveFileRef(fs, paths, root, input)));
       },
       interrupt() {

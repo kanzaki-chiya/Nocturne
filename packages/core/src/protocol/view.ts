@@ -378,6 +378,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         book(rebuilt).events = b.events;
         for (const ev of effectiveEvents(b.events)) reduceDurable(rebuilt, ev, true);
         view.entries = rebuilt.entries;
+        view.currentCwd = rebuilt.currentCwd;
         view.firstTitle = rebuilt.firstTitle;
         // 标题是会话元数据，不随对话回退；保留当前两个显式来源。
         view.title = visibleTitle(view);

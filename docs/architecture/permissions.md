@@ -1,5 +1,7 @@
 # 权限（Permission）
 
+[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：主会话调用过 `switch_worktree`（且未被回退到首次切换前）时，权限层持有同仓库工作树根目录清单；落入非当前工作树的 `edit` 主体直接 `deny`（不询问，优先于预设与放行规则），`read` 主体沿用原判定，通过后由工具执行层在结果末尾追加一行英文提示。
+
 > 状态：已接受 v0.3 ｜ 前置阅读：[tools.md](tools.md)、[config.md](config.md) ｜ 决策：[ADR-0004](../decisions/ADR-0004-permission-rules.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md)
 
 ## 1. 定位

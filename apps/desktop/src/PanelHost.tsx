@@ -693,24 +693,25 @@ export function useSidePanel({
     [tabs, update, placeTab],
   );
 
+  const currentWorkspace = active?.view.currentCwd ?? active?.workspace;
   const viewSource = useCallback<SidePanelController["viewSource"]>(
     (absolutePath, line) => {
       // 工作区外的文件不记工作区：标签显示所在目录名
       const workspace =
-        active !== undefined && relativeTo(active.workspace, absolutePath) !== undefined
-          ? active.workspace
+        currentWorkspace !== undefined && relativeTo(currentWorkspace, absolutePath) !== undefined
+          ? currentWorkspace
           : undefined;
       openFileTab({ absolutePath, workspace, line });
     },
-    [active, openFileTab],
+    [currentWorkspace, openFileTab],
   );
   const previewsHtml = useCallback(
     (absolutePath: string) =>
       host.browsers !== undefined &&
       isHtmlPath(absolutePath) &&
-      active !== undefined &&
-      relativeTo(active.workspace, absolutePath) !== undefined,
-    [host.browsers, active],
+      currentWorkspace !== undefined &&
+      relativeTo(currentWorkspace, absolutePath) !== undefined,
+    [host.browsers, currentWorkspace],
   );
   const openBrowser = useCallback(
     (url: string) => {
@@ -741,12 +742,12 @@ export function useSidePanel({
         return;
       }
       const workspace =
-        active !== undefined && relativeTo(active.workspace, absolutePath) !== undefined
-          ? active.workspace
+        currentWorkspace !== undefined && relativeTo(currentWorkspace, absolutePath) !== undefined
+          ? currentWorkspace
           : undefined;
       openFileTab({ absolutePath, workspace, line, endLine: ref?.endLine });
     },
-    [active, openFileTab, previewsHtml, openHtml],
+    [currentWorkspace, openFileTab, previewsHtml, openHtml],
   );
 
   // ── 子代理（ADR-0060 第 6 节与修订（五））──
@@ -872,7 +873,7 @@ export function useSidePanel({
             open: openSubagentById,
             diff: (childSessionId, file) => {
               if (!sessionId) return;
-              const ws = active.workspace;
+              const ws = currentWorkspace ?? active.workspace;
               void runtime
                 .readSubagentDiff({ parentSessionId: sessionId, childSessionId, file })
                 .then((diffText) => {
@@ -889,7 +890,16 @@ export function useSidePanel({
                 });
             },
           },
-    [runtime, hasSession, summaries, openSubagentById, sessionId, placeTab, active],
+    [
+      runtime,
+      hasSession,
+      summaries,
+      openSubagentById,
+      sessionId,
+      placeTab,
+      active,
+      currentWorkspace,
+    ],
   );
   /** 外部 agent 调用没有 child：概览里首次看到它运行的本地时刻，用来本地计时 */
   const externalSeen = useRef(new Map<string, number>());
@@ -1006,7 +1016,8 @@ export function useSidePanel({
     ]);
     return { shells, setting };
   }, []);
-  const workspace = active?.workspace ?? sessionCwd;
+  const workspace = currentWorkspace ?? sessionCwd;
+  const projectWorkspace = active?.workspace ?? sessionCwd;
   const openTerminal = useCallback(
     (reuse: boolean) => {
       if (host.terminals === undefined || workspace === undefined) return;
@@ -1120,13 +1131,13 @@ export function useSidePanel({
   const changes: PanelChangesSource | undefined = useMemo(() => {
     if (active === undefined) return undefined;
     return {
-      workspace: active.workspace,
+      workspace: currentWorkspace ?? active.workspace,
       turns: active.turnChanges,
       userSeqs: active.view.entries.filter((e) => e.kind === "user").map((e) => e.seq),
       loadDiff: (seq, path) => loadDiff(active, seq, path),
     };
     // turnChanges 每次刷新换新 Map；用户消息随 view 变化
-  }, [active, active?.turnChanges, active?.view, loadDiff]);
+  }, [active, active?.turnChanges, active?.view, currentWorkspace, loadDiff]);
 
   const loadIndex = useMemo(() => {
     const session = active?.session;
@@ -1343,11 +1354,11 @@ export function useSidePanel({
     },
   };
   const project =
-    workspace === undefined
+    projectWorkspace === undefined
       ? ""
-      : plainKey !== null && projectKey(workspace) === plainKey
+      : plainKey !== null && projectKey(projectWorkspace) === plainKey
         ? "对话"
-        : projectName(workspace);
+        : projectName(projectWorkspace);
 
   /**
    * 要挂着的标签页：当前会话的全部标签，加上别的会话的终端和浏览器（隐藏，进程和网页
@@ -1474,10 +1485,10 @@ export function useSidePanel({
           setPanelOpen(!open);
         }}
       />
-      {overviewVisible && workspace !== undefined && (
+      {overviewVisible && projectWorkspace !== undefined && (
         <SessionOverview
           project={project}
-          workspace={workspace}
+          workspace={projectWorkspace}
           totals={sessionChangeTotals(active.turnChanges.values())}
           rightOffset={shown && overlay ? shownWidth : 0}
           onOpenChanges={() => {
@@ -1510,12 +1521,12 @@ export function useSidePanel({
           }}
         />
       )}
-      {quickOpen && loadIndex !== undefined && active !== undefined && (
+      {quickOpen && loadIndex !== undefined && active !== undefined && workspace !== undefined && (
         <QuickOpen
           project={project}
           load={loadIndex}
           recent={(current?.recent ?? []).flatMap((path) => {
-            const rel = relativeTo(active.workspace, path);
+            const rel = relativeTo(workspace, path);
             // fileIndex 的相对路径用 / 分隔
             return rel === undefined ? [] : [rel.replaceAll("\\", "/")];
           })}
@@ -1525,8 +1536,8 @@ export function useSidePanel({
           onPick={(relativePath) => {
             setQuickOpen(false);
             openFileTab({
-              workspace: active.workspace,
-              absolutePath: joinWorkspace(active.workspace, relativePath),
+              workspace,
+              absolutePath: joinWorkspace(workspace, relativePath),
             });
           }}
         />

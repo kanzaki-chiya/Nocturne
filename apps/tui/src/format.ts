@@ -132,6 +132,13 @@ const inputString = (input: unknown, key: string): string | undefined => {
 export function summarizeToolInput(name: string | undefined, input: unknown): string {
   if (name === "task") return inputString(input, "task") ?? "";
   if (name === "mcp_search") return inputString(input, "query") ?? "";
+  if (name === "switch_worktree")
+    return (
+      (inputString(input, "path") ?? "")
+        .replace(/[\\/]+$/, "")
+        .split(/[\\/]/)
+        .at(-1) ?? ""
+    );
   if (name === "todo_write") {
     const items =
       typeof input === "object" && input !== null && "items" in input ? input.items : undefined;

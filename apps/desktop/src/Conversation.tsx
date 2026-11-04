@@ -1534,6 +1534,7 @@ const TOOL_META: Record<string, string> = {
   write: "写入",
   apply_patch: "应用补丁",
   apply_subagent_changes: "并回子代理改动",
+  switch_worktree: "切换工作树",
   shell: "命令",
   web_fetch: "读取网页",
   web_search: "网页搜索",
@@ -1587,6 +1588,18 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
     case "edit":
     case "write":
       return { text: input === undefined ? "" : displayPath(text(input.path), cwd), path: true };
+    case "switch_worktree": {
+      const output = entry.result?.output as { current?: unknown } | undefined;
+      const target = text(output?.current) || text(input?.path);
+      return plain(
+        `· ${
+          target
+            .replace(/[\\/]+$/, "")
+            .split(/[\\/]/)
+            .at(-1) ?? ""
+        }`,
+      );
+    }
     case "grep": {
       const path = input === undefined ? "" : text(input.path);
       return plain(
