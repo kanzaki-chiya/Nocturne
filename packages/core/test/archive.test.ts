@@ -195,23 +195,26 @@ describe("Core 会话归档", () => {
     ).toEqual(expect.arrayContaining([one.id, two.id, three.id]));
   });
 
-  it("损坏的归档旁路按未归档处理并记诊断", async () => {
-    const s = await setup();
-    const session = await s.create();
-    const id = session.id;
-    await session.close();
-    writeFileSync(archivePath(s.sessionsDir, id), "{not json");
+  it.each(["{not json", "null", '{"archivedAt":12}', '{"archivedAt":"123"}'])(
+    "损坏的归档旁路按未归档处理并记诊断：%s",
+    async (content) => {
+      const s = await setup();
+      const session = await s.create();
+      const id = session.id;
+      await session.close();
+      writeFileSync(archivePath(s.sessionsDir, id), content);
 
-    expect((await s.runtime.listSessions())[0]?.id).toBe(id);
-    expect(
-      (await s.runtime.listSessions({ includeArchived: true }))[0]?.archivedAt,
-    ).toBeUndefined();
-    await waitForDiagnostic(s.diag, "session.archive_sidecar_invalid");
+      expect((await s.runtime.listSessions())[0]?.id).toBe(id);
+      expect(
+        (await s.runtime.listSessions({ includeArchived: true }))[0]?.archivedAt,
+      ).toBeUndefined();
+      await waitForDiagnostic(s.diag, "session.archive_sidecar_invalid");
 
-    await s.runtime.archiveSession(id);
-    expect((await s.runtime.listSessions()).some((item) => item.id === id)).toBe(false);
-    expect((await s.runtime.listSessions({ includeArchived: true }))[0]?.archivedAt).toBeTruthy();
-  });
+      await s.runtime.archiveSession(id);
+      expect((await s.runtime.listSessions()).some((item) => item.id === id)).toBe(false);
+      expect((await s.runtime.listSessions({ includeArchived: true }))[0]?.archivedAt).toBeTruthy();
+    },
+  );
 
   it("非法 id 在构造路径前拒绝", async () => {
     const s = await setup();

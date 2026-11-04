@@ -220,7 +220,9 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         data !== null &&
         "archivedAt" in data &&
         typeof data.archivedAt === "string" &&
-        data.archivedAt.length > 0 &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+          data.archivedAt,
+        ) &&
         !Number.isNaN(Date.parse(data.archivedAt))
       )
         return data.archivedAt;
