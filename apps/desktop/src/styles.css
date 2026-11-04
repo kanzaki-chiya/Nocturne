@@ -177,6 +177,13 @@ button {
 /* 设置区接管左栏（desktop-v4.html） */
 .snav {
   gap: 6px;
+  min-height: 0;
+}
+/* 窄窗时设置导航可滚动，返回按钮与标题固定 */
+.snav .nav {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .snav .sback {
   display: flex;

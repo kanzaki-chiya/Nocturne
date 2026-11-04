@@ -288,6 +288,53 @@ describe("buildSessionTree", () => {
     expect(repo?.count).toBe(2);
   });
 
+  it("归档会话只参与项目存在：不出现在行、计数、置顶与「对话」区（ADR-0080）", () => {
+    const tree = buildSessionTree(
+      [
+        session("live", "Z:\\repo", NOW - 3000),
+        session("arch", "Z:\\repo", NOW - 100, { archivedAt: "2026-10-04T08:00:00Z" }),
+        session("old", "Z:\\old", NOW - 50, { archivedAt: "2026-10-04T09:00:00Z" }),
+        session("chat-arch", WS, NOW - 10, { archivedAt: "2026-10-04T09:30:00Z" }),
+      ],
+      { ...noPrefs, pinned: ["arch"] },
+      opts({ plainWorkspace: WS }),
+    );
+    const repo = tree.projects.find((project) => project.key === "z:\\repo");
+    expect(repo?.sessions.map((row) => row.id)).toEqual(["live"]);
+    expect(repo?.count).toBe(1);
+    const old = tree.projects.find((project) => project.key === "z:\\old");
+    expect(old?.sessions).toHaveLength(0);
+    expect(old?.count).toBe(0);
+    expect(tree.pinned).toEqual([]);
+    expect(tree.chats.rows).toEqual([]);
+    expect(tree.projects.map((project) => project.key).sort()).toEqual(["z:\\old", "z:\\repo"]);
+  });
+
+  it("归档会话不影响项目 activity 排序与 moreCount", () => {
+    const tree = buildSessionTree(
+      [
+        session("a-live", "Z:\\a", NOW - 9000),
+        session("a-arch", "Z:\\a", NOW - 10, { archivedAt: "2026-10-04T09:00:00Z" }),
+        session("b-live", "Z:\\b", NOW - 5000),
+      ],
+      { ...noPrefs, projectSort: "activity" },
+      opts(),
+    );
+    // b 最近的未归档会话比 a 新：归档的 a-arch 不参与排序
+    expect(tree.projects.map((project) => project.key)).toEqual(["z:\\b", "z:\\a"]);
+    expect(tree.projects[1]?.moreCount).toBe(0);
+    expect(tree.projects[1]?.count).toBe(1);
+    const expanded = buildSessionTree(
+      [
+        session("a-live", "Z:\\a", NOW - 9000),
+        session("a-arch", "Z:\\a", NOW - 10, { archivedAt: "2026-10-04T09:00:00Z" }),
+      ],
+      noPrefs,
+      opts({ expanded: ["z:\\a"] }),
+    );
+    expect(expanded.projects[0]?.sessions.map((row) => row.id)).toEqual(["a-live"]);
+  });
+
   it("外部 agent 创建的会话保留 client 来源标记且无首句时仍可见（ADR-0074 §5）", () => {
     const tree = buildSessionTree(
       [

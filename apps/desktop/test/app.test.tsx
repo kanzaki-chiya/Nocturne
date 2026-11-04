@@ -6,6 +6,7 @@ import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import { App } from "../src/App";
 import { WindowFrame } from "../src/WindowFrame";
 import type { DesktopHost } from "../src/host";
+import type { SessionSummary } from "../src/session-tree";
 import type { BackendMessage } from "../src/types";
 
 interface RpcCall {
@@ -49,16 +50,18 @@ function replayHost(
       capabilities: { reasoningEffort: ["low", "high"] },
     },
   ];
-  const cheap = models[0]?.ref;
-  const sessions = ["alpha", "beta", "gamma"].map((id) => ({
-    id,
-    createdAt: "2026-10-04T00:00:00Z",
-    cwd: `Z:/qa-${id}`,
-    workspaceRoot: `Z:/qa-${id}`,
-    model: cheap,
-    mtimeMs: 100,
-    firstText: `${id} 会话`,
-  }));
+  const cheap = models[0]?.ref ?? { provider: "test", model: "cheap" };
+  const sessions: (SessionSummary & { archivedAt?: string })[] = ["alpha", "beta", "gamma"].map(
+    (id) => ({
+      id,
+      createdAt: "2026-10-04T00:00:00Z",
+      cwd: `Z:/qa-${id}`,
+      workspaceRoot: `Z:/qa-${id}`,
+      model: cheap,
+      mtimeMs: 100,
+      firstText: `${id} 会话`,
+    }),
+  );
   const workspaces = new Map<number, string>();
   /** 带状态的 Shell：session.setShell 改写、session.shellInfo 返回最新值（与真实后台一致） */
   const shellState = new Map<string, { kind: string; path: string }>();
@@ -116,6 +119,7 @@ function replayHost(
   let activated: ((sessionId: string) => void) | null = null;
   const host: DesktopHost & {
     calls: RpcCall[];
+    sessions: typeof sessions;
     workspaces: Map<number, string>;
     providerNotify: typeof pushNotify;
     emitEvent: typeof emitEvent;
@@ -130,6 +134,7 @@ function replayHost(
     activateNotification: (sessionId: string) => void;
   } = {
     calls,
+    sessions,
     models,
     workspaces,
     providerNotify: pushNotify,
@@ -271,6 +276,18 @@ function replayHost(
         case "runtime.listSessions":
           result = sessions;
           break;
+        case "runtime.archiveSession": {
+          const target = sessions.find((session) => session.id === id);
+          if (target !== undefined) target.archivedAt = "2026-10-04T12:00:00Z";
+          result = null;
+          break;
+        }
+        case "runtime.unarchiveSession": {
+          const target = sessions.find((session) => session.id === id);
+          if (target !== undefined) delete target.archivedAt;
+          result = null;
+          break;
+        }
         case "runtime.listModels":
           result = models;
           break;
@@ -326,9 +343,8 @@ function replayHost(
               type: "message.user",
               payload: { messageId: `user-${id}`, content: [{ type: "text", text: `${id} 正文` }] },
             },
-            ...(id === "gamma"
-              ? []
-              : [
+            ...(id === "alpha" || id === "beta" || id === "draft-1" || id === "sched-run-1"
+              ? [
                   { type: "turn.started", payload: { turnIndex: 1 } },
                   {
                     type: "tool.started",
@@ -350,7 +366,8 @@ function replayHost(
                       options: ["allow_once", "deny"],
                     },
                   },
-                ]),
+                ]
+              : []),
             ...(id === undefined ? [] : (seedReplay?.(id) ?? [])),
           ];
           events.forEach((event, index) =>
@@ -1813,6 +1830,231 @@ it("定时任务页：立即运行先刷新会话列表再打开新会话；历�
   await waitFor(() => expect(screen.queryByRole("region", { name: "定时任务" })).toBeNull());
   const stream = await screen.findByRole("region", { name: "会话消息" });
   expect(await within(stream).findByText("sched-run-1 正文")).toBeTruthy();
+});
+
+function archiveSessionRow(title: string) {
+  const row = [...document.querySelectorAll<HTMLElement>(".irow")].find((element) =>
+    (element.textContent ?? "").startsWith(title),
+  );
+  if (row === undefined) throw new Error(`缺少会话行 ${title}`);
+  const menu = row.querySelector<HTMLButtonElement>(".imenu");
+  if (menu === null) throw new Error(`缺少会话菜单 ${title}`);
+  fireEvent.click(menu);
+  fireEvent.click(screen.getByRole("button", { name: "归档" }));
+}
+
+function fakeSession(
+  id: string,
+  cwd: string,
+  firstText: string,
+  mtimeMs: number,
+  archivedAt?: string,
+): SessionSummary & { archivedAt?: string } {
+  return {
+    id,
+    createdAt: "2026-10-01T00:00:00Z",
+    cwd,
+    workspaceRoot: cwd,
+    model: { provider: "test", model: "cheap" },
+    mtimeMs,
+    firstText,
+    ...(archivedAt === undefined ? {} : { archivedAt }),
+  };
+}
+
+it("会话菜单归档：移除置顶、行消失，全部归档后项目节点仍保留（ADR-0080）", async () => {
+  const host = replayHost();
+  host.sessions.splice(
+    0,
+    host.sessions.length,
+    fakeSession("a1", "Z:/shared", "一号会话", 300),
+    fakeSession("a2", "Z:/shared", "二号会话", 200),
+  );
+  localStorage.setItem(
+    "nocturne.desktop.prefs.v1",
+    JSON.stringify({ pinned: ["a2"], projects: [], hidden: [], expanded: [], collapsed: [] }),
+  );
+  render(<App host={host} />);
+  await screen.findByText("一号会话");
+  expect(screen.getByText("二号会话")).toBeTruthy();
+
+  archiveSessionRow("二号会话");
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) => call.method === "runtime.archiveSession" && call.params.sessionId === "a2",
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() => expect(screen.queryByText("二号会话")).toBeNull());
+  const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
+    pinned?: string[];
+  };
+  expect(stored.pinned).toEqual([]);
+
+  archiveSessionRow("一号会话");
+  await waitFor(() => expect(screen.queryByText("一号会话")).toBeNull());
+  await waitFor(() => {
+    expect(
+      Array.from(document.querySelectorAll<HTMLElement>("[data-project-key]")).some(
+        (element) => element.dataset.projectKey === "z:\\shared",
+      ),
+    ).toBe(true);
+  });
+});
+
+it("归档当前会话后依次跳到同项目下一条、侧栏第一条、新会话页", async () => {
+  const host = replayHost();
+  host.sessions.splice(
+    0,
+    host.sessions.length,
+    fakeSession("p1", "Z:/proj", "p1 会话", 300),
+    fakeSession("p2", "Z:/proj", "p2 会话", 200),
+    fakeSession("g1", "Z:/other", "g1 会话", 100),
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^p1 (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("p1 正文");
+
+  archiveSessionRow("p1");
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "p2",
+      ),
+    ).toBe(true),
+  );
+  // p1 是项目里最后一条可跳转的：下一条落在同项目的 p2
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("p2 正文");
+
+  cleanup();
+  const second = replayHost();
+  second.sessions.splice(
+    0,
+    second.sessions.length,
+    fakeSession("q1", "Z:/one", "q1 会话", 300),
+    fakeSession("r1", "Z:/two", "r1 会话", 200),
+    fakeSession("r2", "Z:/two", "r2 会话", 100),
+  );
+  render(<App host={second} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^q1 (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("q1 正文");
+  archiveSessionRow("q1");
+  // 同项目没有下一条：切到侧栏第一条（r1）
+  await waitFor(() =>
+    expect(
+      second.calls.some(
+        (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "r1",
+      ),
+    ).toBe(true),
+  );
+
+  cleanup();
+  const last = replayHost();
+  last.sessions.splice(0, last.sessions.length, fakeSession("z1", "Z:/only", "z1 会话", 100));
+  render(<App host={last} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^z1 (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("z1 正文");
+  archiveSessionRow("z1");
+  expect(await screen.findByText("有什么可以帮你？")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByRole("region", { name: "会话消息" })).toBeNull());
+});
+
+it("有待发输入的会话提前禁用归档（行状态仍为空闲）", async () => {
+  const host = replayHost();
+  host.sessions.splice(
+    0,
+    host.sessions.length,
+    fakeSession("waiting", "Z:/waiting", "waiting 会话", 100),
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^waiting (?:会话|正文)/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("waiting 正文");
+  const waitingBackend = host.calls.find(
+    (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "waiting",
+  )?.backendId;
+  if (waitingBackend === undefined) throw new Error("缺少 waiting 后台");
+  act(() => {
+    host.emitEvent(waitingBackend, "waiting", {
+      type: "input.pending",
+      time: "2026-10-04T00:00:02Z",
+      payload: {
+        items: [{ id: "p1", text: "待发", mode: "queue", attachments: [] }],
+        paused: false,
+      },
+    });
+  });
+  await waitFor(() => {
+    const row = screen.getByRole("button", { name: /^waiting (?:会话|正文)/ }).closest(".irow");
+    const menu = row?.querySelector<HTMLButtonElement>(".imenu");
+    if (menu === null || menu === undefined) throw new Error("缺少等待会话菜单");
+    fireEvent.click(menu);
+  });
+  expect((screen.getByRole("button", { name: "归档" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("设置 › 已归档的会话：分组包含隐藏项目，恢复取消 hidden 且不置顶，点标题离开设置并打开", async () => {
+  const host = replayHost();
+  host.sessions.splice(
+    0,
+    host.sessions.length,
+    fakeSession("v1", "Z:/secret", "隐藏项目会话", 200, "2026-10-04T11:00:00Z"),
+    fakeSession("v2", "Z:/visible", "可见项目会话", 100, "2026-10-04T10:00:00Z"),
+  );
+  localStorage.setItem(
+    "nocturne.desktop.prefs.v1",
+    JSON.stringify({
+      pinned: ["v1"],
+      hidden: ["Z:/secret"],
+      projects: [],
+      expanded: [],
+      collapsed: [],
+    }),
+  );
+  render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const nav = await screen.findByRole("navigation", { name: "设置" });
+  fireEvent.click(within(nav).getByRole("button", { name: "已归档的会话" }));
+  const page = await screen.findByRole("heading", { name: "已归档的会话" });
+  const root = page.closest(".spage") as HTMLElement;
+  expect(within(root).getByText("secret")).toBeTruthy();
+  expect(within(root).getByText("visible")).toBeTruthy();
+  expect(
+    (within(root).getByRole("textbox", { name: "搜索" }) as HTMLInputElement).getAttribute(
+      "placeholder",
+    ),
+  ).toBeNull();
+
+  const archivedRow = within(root).getByText("隐藏项目会话").closest(".archive-row");
+  if (archivedRow === null) throw new Error("缺少归档行");
+  fireEvent.click(within(archivedRow as HTMLElement).getByRole("button", { name: "恢复" }));
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) => call.method === "runtime.unarchiveSession" && call.params.sessionId === "v1",
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() => expect(screen.queryByText("隐藏项目会话")).toBeNull());
+  const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
+    pinned?: string[];
+    hidden?: string[];
+  };
+  expect(stored.pinned).toEqual([]);
+  expect(stored.hidden).toEqual([]);
+
+  fireEvent.click(screen.getByRole("button", { name: "可见项目会话" }));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: "已归档的会话" })).toBeNull());
+  await waitFor(() =>
+    expect(
+      host.calls.some(
+        (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "v2",
+      ),
+    ).toBe(true),
+  );
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("v2 正文");
+  // 打开归档会话后侧栏没有选中行；发消息由 Core 自动恢复
+  expect(document.querySelector(".tree .item.on")).toBeNull();
 });
 
 it("设置 › 浏览器「重启应用」与关闭窗口共用待发输入提醒：取消留下，确认调 restartApp，无待发直接重启", async () => {

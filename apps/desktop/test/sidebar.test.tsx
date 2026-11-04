@@ -33,6 +33,7 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
     onPin: noop,
     onUnpin: noop,
     onRename: async () => undefined,
+    onArchive: noop,
     onHideProject: noop,
     onRestoreProject: noop,
     onOpenProject: noop,
@@ -205,6 +206,7 @@ describe("Sidebar", () => {
     expect([...document.querySelectorAll(".ctxmenu button")].map((b) => b.textContent)).toEqual([
       "置顶",
       "重命名",
+      "归档",
     ]);
     fireEvent.click(screen.getByText("重命名"));
     const field = screen.getByRole("textbox", { name: "重命名会话" }) as HTMLInputElement;
@@ -220,6 +222,71 @@ describe("Sidebar", () => {
     });
     fireEvent.keyDown(screen.getByRole("textbox", { name: "重命名会话" }), { key: "Enter" });
     await waitFor(() => expect(onRename).toHaveBeenCalledWith("s1", ""));
+  });
+
+  it("会话菜单在重命名后提供「归档」，点击立即归档且不再显示菜单", () => {
+    const onArchive = vi.fn();
+    render(<Sidebar {...props({ tree: rowTree, onArchive })} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "会话菜单" })[0] as HTMLElement);
+    fireEvent.click(screen.getByText("归档"));
+    expect(onArchive).toHaveBeenCalledWith("s1");
+    expect(screen.queryByText("归档")).toBeNull();
+  });
+
+  it("运行中、等待确认和别处持有的会话禁用「归档」", () => {
+    const running: SessionTree = {
+      ...emptyTree,
+      chats: {
+        rows: [
+          { id: "run", title: "运行会话", meta: "现在", locked: false, status: "running" },
+          { id: "wait", title: "等待会话", meta: "现在", locked: false, status: "pending" },
+          { id: "locked", title: "锁定会话", meta: "现在", locked: true, status: "idle" },
+          { id: "idle", title: "空闲会话", meta: "现在", locked: false, status: "idle" },
+        ],
+        moreCount: 0,
+      },
+    };
+    const onArchive = vi.fn();
+    render(<Sidebar {...props({ tree: running, onArchive })} />);
+    const archiveFor = (title: string) => {
+      const row = screen.getByText(title).closest(".irow");
+      if (row === null) throw new Error("缺少会话行");
+      const menu = row.querySelector<HTMLButtonElement>(".imenu");
+      if (menu === null) throw new Error("缺少会话菜单");
+      fireEvent.click(menu);
+      return screen.getByRole("button", { name: "归档" }) as HTMLButtonElement;
+    };
+    expect(archiveFor("运行会话").disabled).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(archiveFor("等待会话").disabled).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(archiveFor("锁定会话").disabled).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    const idle = archiveFor("空闲会话");
+    expect(idle.disabled).toBe(false);
+    fireEvent.click(idle);
+    expect(onArchive).toHaveBeenCalledWith("idle");
+  });
+
+  it("设置导航顺序：常规、外观、服务商、模型、子代理、技能、MCP、浏览器、授权、远程、已归档的会话、用量、后台日志", () => {
+    render(<Sidebar {...props({ page: "general" })} />);
+    const nav = screen.getByRole("navigation", { name: "设置" });
+    const labels = [...nav.querySelectorAll("button.item")].map((button) => button.textContent);
+    expect(labels).toEqual([
+      "常规",
+      "外观",
+      "服务商",
+      "模型",
+      "子代理",
+      "技能",
+      "MCP",
+      "浏览器",
+      "授权",
+      "远程",
+      "已归档的会话",
+      "用量",
+      "后台日志",
+    ]);
   });
 
   it("Escape 取消且 blur 不提交，IME Enter 不提交，正常 blur 提交", async () => {

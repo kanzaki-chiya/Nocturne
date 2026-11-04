@@ -2,7 +2,7 @@ import { useState } from "react";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScheduleTaskOverview } from "@nocturne/core/protocol";
 import { RPC_PROTOCOL_VERSION, type RpcClient, type RpcParams } from "@nocturne/rpc/client";
@@ -451,7 +451,11 @@ describe("SearchDialog 组件", () => {
     await act(async () => {
       vi.advanceTimersByTime(20);
     });
-    expect(searchSessions).toHaveBeenCalledWith({ query: "旧", searchId: expect.any(String) });
+    expect(searchSessions).toHaveBeenCalledWith({
+      query: "旧",
+      searchId: expect.any(String),
+      includeArchived: true,
+    });
     // 从最近使用开始的第一次查询，结果未返回前不把未过滤的会话当结果显示
     expect(screen.queryByRole("option", { name: /旧结果会话/ })).toBeNull();
 
@@ -479,7 +483,11 @@ describe("SearchDialog 组件", () => {
     await act(async () => {
       vi.advanceTimersByTime(150);
     });
-    expect(searchSessions).toHaveBeenCalledWith({ query: "新", searchId: expect.any(String) });
+    expect(searchSessions).toHaveBeenCalledWith({
+      query: "新",
+      searchId: expect.any(String),
+      includeArchived: true,
+    });
 
     // 新请求先返回
     await act(async () => {
@@ -566,6 +574,9 @@ function createTestHost() {
   const sessions = [
     makeSession("alpha", "Z:/qa-alpha", NOW - 60_000, "alpha 会话"),
     makeSession("beta", "Z:/qa-beta", NOW - 120_000, "beta 会话"),
+    makeSession("archived", "Z:/qa-archived", NOW - 180_000, "旧会话", {
+      archivedAt: "2026-10-04T10:00:00Z",
+    }),
   ];
   const schedules = [
     makeSchedule("daily", "每日构建检查", "运行 pnpm test 并汇报", "2026-11-02T09:00:00Z"),
@@ -631,7 +642,9 @@ function createTestHost() {
                     seq: 4,
                   },
                 ]
-              : [];
+              : req.params.query === "旧会话"
+                ? [{ sessionId: "archived", mtimeMs: NOW - 180_000 }]
+                : [];
           break;
         case "schedule.list":
           result = { tasks: schedules, scheduler: { running: true }, warnings: [] };
@@ -875,6 +888,33 @@ describe("桌面端跨会话搜索集成", () => {
     });
     fireEvent.keyDown(input3, { key: "Enter" });
     expect(await screen.findByDisplayValue("每日构建检查")).toBeTruthy();
+  });
+
+  it("Ctrl+K 有查询时带 includeArchived 搜索，归档会话可打开且无归档徽标；空查询最近使用不含归档", async () => {
+    const host = createTestHost();
+    render(<App host={host} />);
+    await screen.findByText("alpha 会话");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "搜索" });
+    expect(within(dialog).queryByText("旧会话")).toBeNull();
+
+    const input = within(dialog).getByRole("textbox", { name: "搜索" });
+    fireEvent.change(input, { target: { value: "旧会话" } });
+    await waitFor(() => {
+      expect(within(dialog).getAllByRole("option")[0]?.textContent).toContain("旧会话");
+    });
+    const searchCall = host.calls.find((call) => call.method === "runtime.searchSessions");
+    expect(searchCall?.params.includeArchived).toBe(true);
+    const option = within(dialog).getAllByRole("option")[0];
+    expect(option?.textContent).not.toContain("已归档");
+    expect(within(dialog).queryByText("已归档")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "搜索" })).toBeNull());
+    expect(
+      host.calls.some(
+        (call) => call.method === "runtime.resumeSession" && call.params.sessionId === "archived",
+      ),
+    ).toBe(true);
   });
 
   it("手机端（src/web/）不包含跨会话搜索入口也不调用 searchSessions", () => {

@@ -16,6 +16,7 @@ import type {
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
 import { applyAppearance, applyTheme } from "./appearance";
+import { ArchivePage } from "./ArchivePage";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { replyLinkOpener } from "./external-url";
 import {
@@ -112,6 +113,38 @@ type ConnectResult = { ok: true } | { ok: false; message: string };
 
 function errMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 归档当前会话后去哪（ADR-0080）：同项目侧栏顺序里的下一条；没有就侧栏第一条；
+ * 都没有就是 undefined（回新会话页）。被归档行本身已从树里拿掉。
+ */
+function nextSidebarSession(
+  tree: SessionTree,
+  sessions: readonly SessionSummary[],
+  id: string,
+  workspace: string,
+  plainKeys: ReadonlySet<string>,
+): SessionSummary | undefined {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const summary = byId.get(id);
+  const key = projectKey(workspace);
+  const sameProject =
+    summary?.schedule !== undefined
+      ? tree.scheduled.rows
+      : plainKeys.has(key)
+        ? tree.chats.rows
+        : (tree.projects.find((project) => project.key === key)?.sessions ?? []);
+  const index = sameProject.findIndex((row) => row.id === id);
+  const sameNext = index >= 0 ? sameProject[index + 1] : sameProject[0];
+  const fallback = [
+    ...tree.pinned,
+    ...tree.chats.rows,
+    ...tree.scheduled.rows,
+    ...tree.projects.flatMap((project) => project.sessions),
+  ].find((row) => row.id !== id);
+  const candidate = sameNext ?? fallback;
+  return candidate === undefined ? undefined : byId.get(candidate.id);
 }
 
 interface StartupError {
@@ -473,7 +506,10 @@ export function App({ host }: { host: DesktopHost }) {
     const client = pool.get();
     if (client === undefined) return [];
     try {
-      const list = await client.runtime.listSessions();
+      // 归档页与项目存在判定也要归档摘要；侧栏树自己剔除（ADR-0080）
+      const list = await client.runtime.listSessions({
+        includeArchived: true,
+      });
       setSessions(list);
       setListed(true);
       setStartupError(null);
@@ -1301,6 +1337,78 @@ export function App({ host }: { host: DesktopHost }) {
   }
 
   const plainKey = effectiveWorkspace === null ? null : projectKey(effectiveWorkspace);
+  const archivePlainWorkspaces = [effectiveWorkspace, ...p.plainWorkspaces].filter(
+    (path): path is string => path !== null,
+  );
+  const archivePlainKeys = new Set(archivePlainWorkspaces.map(projectKey));
+  // 行状态之外的提前量：有排队/插话没发出、或忙着的会话，菜单里先禁用归档
+  const archiveBlocked = new Set(
+    [...conversations.opened]
+      .filter(([, entry]) => entry.busy || entry.pendingInputs.items.length > 0)
+      .map(([id]) => id),
+  );
+
+  /** 归档（ADR-0080）：不确认；移除置顶；归档当前会话时按树里的顺序切走 */
+  const archiveSession = async (id: string): Promise<void> => {
+    const client = pool.get();
+    if (client === undefined) return;
+    const summary = sessions.find((session) => session.id === id);
+    const wasSelected = selectedId === id;
+    const next =
+      wasSelected && summary !== undefined
+        ? nextSidebarSession(tree, sessions, id, summary.cwd, archivePlainKeys)
+        : undefined;
+    try {
+      await client.runtime.archiveSession(id);
+    } catch {
+      return;
+    }
+    const current = prefs.get();
+    if (current.pinned.includes(id)) {
+      prefs.update({ pinned: current.pinned.filter((entry) => entry !== id) });
+      bumpPrefs();
+    }
+    await refresh();
+    if (!wasSelected) return;
+    const target = next ?? undefined;
+    if (target !== undefined) {
+      await selectSession(target.id, target.cwd);
+      return;
+    }
+    await newSession(effectiveWorkspace ?? summary?.cwd ?? defaultWorkspace ?? undefined);
+  };
+
+  /** 恢复（ADR-0080）：取消项目 hidden，且不置顶；留在归档页 */
+  const restoreSession = async (id: string): Promise<void> => {
+    const client = pool.get();
+    if (client === undefined) return;
+    try {
+      await client.runtime.unarchiveSession(id);
+    } catch {
+      return;
+    }
+    const summary = sessions.find((session) => session.id === id);
+    const current = prefs.get();
+    const key = summary === undefined ? undefined : projectKey(summary.cwd);
+    const unhide =
+      key !== undefined && summary?.schedule === undefined && !archivePlainKeys.has(key);
+    prefs.update({
+      hidden: unhide ? current.hidden.filter((path) => projectKey(path) !== key) : current.hidden,
+      pinned: current.pinned.filter((entry) => entry !== id),
+    });
+    bumpPrefs();
+    await refresh();
+  };
+
+  /** 点归档页标题：离开设置并打开；打开归档会话本身不取消归档 */
+  const openArchivedSession = (id: string): void => {
+    const summary = sessions.find((session) => session.id === id);
+    if (summary === undefined) return;
+    setPage(null);
+    setSchedulesOpen(false);
+    void selectSession(summary.id, summary.cwd);
+  };
+
   const projects = tree.projects.map((project) => ({
     key: project.key,
     path: project.path,
@@ -1401,6 +1509,10 @@ export function App({ host }: { host: DesktopHost }) {
           await client.runtime.renameSession(id, title);
           await refresh();
         }}
+        onArchive={(id) => {
+          void archiveSession(id);
+        }}
+        archiveBlocked={archiveBlocked}
         onHideProject={(path) => {
           const cur = prefs.get();
           const key = projectKey(path);
@@ -1605,6 +1717,17 @@ export function App({ host }: { host: DesktopHost }) {
                     }
                     openUrl={host.openUrl}
                     pickFolder={() => host.pickFolder()}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "archive" ? (
+                <PaneErrorBoundary key="archive">
+                  <ArchivePage
+                    sessions={treeSessions}
+                    plainWorkspaces={archivePlainWorkspaces}
+                    onOpen={openArchivedSession}
+                    onRestore={(id) => {
+                      void restoreSession(id);
+                    }}
                   />
                 </PaneErrorBoundary>
               ) : settingsPage === "usage" ? (

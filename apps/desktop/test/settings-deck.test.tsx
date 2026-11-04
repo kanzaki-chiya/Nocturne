@@ -29,7 +29,8 @@ it("进入设置区预加载每页；返回页面立即保留数据，并在后�
   const view = render(deck(null));
   expect(loaded).not.toHaveBeenCalled();
   view.rerender(deck("general"));
-  expect(loaded).toHaveBeenCalledTimes(12);
+  expect(loaded).toHaveBeenCalledTimes(13);
+  expect(loaded.mock.calls.map((call) => call[0])).toContain("archive");
   fireEvent.click(screen.getByRole("button", { name: "general:旧数据" }));
   view.rerender(deck("providers"));
   view.rerender(deck(null));
@@ -37,7 +38,7 @@ it("进入设置区预加载每页；返回页面立即保留数据，并在后�
   expect(screen.getByRole("button", { name: "general:保存的新数据" })).toBeTruthy();
   const before = loaded.mock.calls.length;
   view.rerender(deck("general", 1));
-  expect(loaded.mock.calls.length - before).toBe(12);
+  expect(loaded.mock.calls.length - before).toBe(13);
   view.rerender(deck("general", 1, {} as RpcClient));
   expect(screen.getByRole("button", { name: "general:旧数据" })).toBeTruthy();
   expect(within(view.container).queryByText("general:保存的新数据")).toBeNull();

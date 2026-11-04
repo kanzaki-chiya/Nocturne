@@ -14,6 +14,7 @@ export type SettingsSection =
   | "agents"
   | "browser"
   | "remote"
+  | "archive"
   | "appearance"
   | "usage"
   | "logs";
@@ -48,6 +49,10 @@ export interface SidebarProps {
   onPin: (id: string) => void;
   onUnpin: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void>;
+  /** 归档会话（ADR-0080）；运行中/待发输入时菜单项禁用 */
+  onArchive: (id: string) => void;
+  /** 状态之外还要提前挡住的归档（例如待发输入、正在关闭） */
+  archiveBlocked?: ReadonlySet<string>;
   onHideProject: (path: string) => void;
   onRestoreProject: (path: string) => void;
   onOpenProject: () => void;
@@ -67,9 +72,9 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     icon: <Icon name="settings_6" size={ICON_LG} className="glyph" />,
   },
   {
-    key: "models",
-    label: "模型",
-    icon: <Icon name="box_3" size={ICON_LG} className="glyph" />,
+    key: "appearance",
+    label: "外观",
+    icon: <Icon name="sun" size={ICON_LG} className="glyph" />,
   },
   {
     key: "providers",
@@ -77,19 +82,9 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     icon: <Icon name="cloud" size={ICON_LG} className="glyph" />,
   },
   {
-    key: "mcp",
-    label: "MCP",
-    icon: <Icon name="server" size={ICON_LG} className="glyph" />,
-  },
-  {
-    key: "grants",
-    label: "授权",
-    icon: <Icon name="safe_shield" size={ICON_LG} className="glyph" />,
-  },
-  {
-    key: "skills",
-    label: "技能",
-    icon: <Icon name="file" size={ICON_LG} className="glyph" />,
+    key: "models",
+    label: "模型",
+    icon: <Icon name="box_3" size={ICON_LG} className="glyph" />,
   },
   {
     key: "agents",
@@ -97,9 +92,24 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     icon: <Icon name="robot" size={ICON_LG} className="glyph" />,
   },
   {
+    key: "skills",
+    label: "技能",
+    icon: <Icon name="file" size={ICON_LG} className="glyph" />,
+  },
+  {
+    key: "mcp",
+    label: "MCP",
+    icon: <Icon name="server" size={ICON_LG} className="glyph" />,
+  },
+  {
     key: "browser",
     label: "浏览器",
     icon: <Icon name="earth" size={ICON_LG} className="glyph" />,
+  },
+  {
+    key: "grants",
+    label: "授权",
+    icon: <Icon name="safe_shield" size={ICON_LG} className="glyph" />,
   },
   {
     key: "remote",
@@ -107,9 +117,9 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     icon: <Icon name="cellphone" size={ICON_LG} className="glyph" />,
   },
   {
-    key: "appearance",
-    label: "外观",
-    icon: <Icon name="sun" size={ICON_LG} className="glyph" />,
+    key: "archive",
+    label: "已归档的会话",
+    icon: <Icon name="archive" size={ICON_LG} className="glyph" />,
   },
   {
     key: "usage",
@@ -338,6 +348,18 @@ export function Sidebar(props: SidebarProps) {
 
   const manual = props.projectSort === "manual";
   const projects = props.tree.projects;
+  /** 归档：运行中/等待确认由行状态挡住；待发输入等提前状态由 App 传入 */
+  const archiveDisabled = (id: string): boolean => {
+    if (props.archiveBlocked?.has(id) === true) return true;
+    const rows = [
+      ...props.tree.pinned,
+      ...props.tree.chats.rows,
+      ...props.tree.scheduled.rows,
+      ...props.tree.projects.flatMap((project) => project.sessions),
+    ];
+    const row = rows.find((entry) => entry.id === id);
+    return row === undefined || row.locked || row.status !== "idle";
+  };
 
   const projectMenu = (e: React.MouseEvent, project: ProjectNode, index: number) => {
     e.preventDefault();
@@ -694,6 +716,15 @@ export function Sidebar(props: SidebarProps) {
                 }}
               >
                 重命名
+              </button>
+              <button
+                disabled={archiveDisabled(menu.id)}
+                onClick={() => {
+                  props.onArchive(menu.id);
+                  setMenu(null);
+                }}
+              >
+                归档
               </button>
             </>
           )}

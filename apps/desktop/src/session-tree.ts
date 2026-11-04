@@ -2,6 +2,7 @@
  * 会话树（纯函数）：置顶区、普通对话区（<NOCTURNE_HOME>/workspace 的会话）、
  * 按项目分组、默认每区 5 条。项目归并以 projectKey 比较（Windows 路径忽略大小写
  * 与分隔符差异），显示用第一次见到的原始路径（docs/apps/desktop.md）。
+ * 归档会话只参与项目存在判定，不进入行、计数、排序与置顶（ADR-0080）。
  */
 import type { RpcRuntime } from "@nocturne/rpc/client";
 
@@ -171,6 +172,7 @@ function toRow(
  * 构建会话树：
  * - 空会话（firstText 缺省/空白且未锁定）一律过滤；
  * - cwd == plainWorkspace 的会话进 chats（不进 projects），手动项目里同路径的也不显示为项目；
+ * - 归档会话只用来保留项目节点，其余计算只用未归档会话（ADR-0080）；
  * - projects = 其余会话 cwd 的 key ∪ 手动项目 − hidden；
  *   排序：manual（缺省）按 projectOrder，不在其中的新项目排最上面（无会话的在前，
  *   其余按最早会话 createdAt 降序）；activity 有会话的按最新 mtimeMs 降序，其后是
@@ -190,7 +192,9 @@ export function buildSessionTree(
   if (options.plainWorkspace !== null) chatKeys.add(projectKey(options.plainWorkspace));
   for (const path of options.plainWorkspaces ?? []) chatKeys.add(projectKey(path));
 
-  const visible = sessions.filter(isVisible);
+  // 归档会话只用于确认项目仍然存在（ADR-0080）：不进行、计数、排序、置顶与「对话」区
+  const live = sessions.filter((s) => s.archivedAt === undefined);
+  const visible = live.filter(isVisible);
   // 定时任务运行出来的会话单独成组，不进「对话」或「项目」
   const scheduledIds = new Set(visible.filter((s) => s.schedule !== undefined).map((s) => s.id));
 
@@ -221,14 +225,28 @@ export function buildSessionTree(
   };
 
   // 项目分组（对话会话、定时任务会话与对话工作区本身不进 projects）
-  const groups = new Map<string, { path: string; sessions: SessionSummary[] }>();
-  for (const session of visible) {
+  const groups = new Map<string, { path: string; sessions: SessionSummary[]; archived: number }>();
+  for (const session of sessions) {
+    if (session.archivedAt !== undefined) {
+      // 归档的定时任务会话不建立「定时任务」组；归档的对话会话不建立项目
+      if (session.schedule !== undefined) continue;
+      const key = projectKey(session.cwd);
+      if (chatKeys.has(key)) continue;
+      let group = groups.get(key);
+      if (group === undefined) {
+        group = { path: session.cwd, sessions: [], archived: 0 };
+        groups.set(key, group);
+      }
+      group.archived += 1;
+      continue;
+    }
+    if (!isVisible(session)) continue;
     if (scheduledIds.has(session.id)) continue;
     const key = projectKey(session.cwd);
     if (chatKeys.has(key)) continue;
     let group = groups.get(key);
     if (group === undefined) {
-      group = { path: session.cwd, sessions: [] };
+      group = { path: session.cwd, sessions: [], archived: 0 };
       groups.set(key, group);
     }
     group.sessions.push(session);
@@ -240,7 +258,7 @@ export function buildSessionTree(
     const key = projectKey(path);
     if (chatKeys.has(key)) continue;
     if (!groups.has(key)) {
-      groups.set(key, { path, sessions: [] });
+      groups.set(key, { path, sessions: [], archived: 0 });
     }
     manualOrder.push(key);
   }
@@ -262,7 +280,7 @@ export function buildSessionTree(
   const visibleKeys: string[] = [];
   for (const [key, group] of groups) {
     if (hidden.has(key)) continue;
-    if (group.sessions.length === 0 && !manualOrder.includes(key)) continue;
+    if (group.sessions.length === 0 && group.archived === 0 && !manualOrder.includes(key)) continue;
     visibleKeys.push(key);
   }
 

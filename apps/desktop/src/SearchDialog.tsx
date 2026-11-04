@@ -7,8 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { describeSchedulePlan, type ScheduleTaskOverview } from "@nocturne/core/protocol";
-import type { RpcClient, RpcResult, RpcRuntime } from "@nocturne/rpc/client";
-
+import type { RpcClient, RpcParams, RpcResult } from "@nocturne/rpc/client";
 import { formatRelative, projectKey, type ProjectNode, type SessionSummary } from "./session-tree";
 import { ICON_MD, Icon, type IconName } from "./ui";
 import "./search.css";
@@ -153,7 +152,8 @@ export function SearchDialog({
   onClose,
   onOpen,
 }: {
-  api: Pick<RpcRuntime, "searchSessions">;
+  /** 有查询时带 includeArchived，归档会话也可被搜到（ADR-0080） */
+  api: { searchSessions(input: RpcParams<"runtime.searchSessions">): Promise<SessionMatch[]> };
   client?: Pick<RpcClient, "onNotification"> | undefined;
   sessions: SessionSummary[];
   projects: ProjectNode[];
@@ -235,7 +235,7 @@ export function SearchDialog({
       onSettledRef.current({ query: filterQuery, matches, complete: false });
     });
     const timer = window.setTimeout(() => {
-      void api.searchSessions({ query: filterQuery, searchId }).then(
+      void api.searchSessions({ query: filterQuery, searchId, includeArchived: true }).then(
         (matches) => {
           if (request.current !== version) return;
           unsubscribe?.();
@@ -259,14 +259,18 @@ export function SearchDialog({
 
   const { sessionItems, projectItems, designItems, scheduleItems } = useMemo(() => {
     const now = Date.now();
-    const visibleSessions = sessions.filter((session) => {
+    const searchableSessions = sessions.filter((session) => {
       if (session.parent !== undefined) return false;
       const hasText = session.firstText !== undefined && session.firstText.trim() !== "";
       if (!hasText && session.locked !== true && session.client === undefined) return false;
       const key = projectKey(session.cwd);
       return !hiddenProjects.has(key);
     });
-    const sessionById = new Map(visibleSessions.map((session) => [session.id, session]));
+    const sessionById = new Map(searchableSessions.map((session) => [session.id, session]));
+    // 空查询的「最近使用」只列未归档；有查询时归档结果照常出现在命中里
+    const visibleSessions = searchableSessions.filter(
+      (session) => session.archivedAt === undefined,
+    );
     const projectTimes = new Map<string, number>();
     for (const session of visibleSessions) {
       const key = projectKey(session.cwd);
