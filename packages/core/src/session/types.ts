@@ -169,6 +169,8 @@ export interface SessionSearchOptions {
   signal?: AbortSignal | undefined;
   /** 已确定的有序增量；拼接所有批次等于最终结果。 */
   onProgress?: ((batch: SessionSearchResult[]) => void) | undefined;
+  /** 默认 false：不搜索已归档会话（ADR-0080） */
+  includeArchived?: boolean | undefined;
 }
 
 export interface SessionSummary {
@@ -180,6 +182,8 @@ export interface SessionSummary {
   model: ModelRef;
   /** 日志文件修改时间 */
   mtimeMs: number;
+  /** 归档时间（ISO）；未归档或缺省（ADR-0080） */
+  archivedAt?: string | undefined;
   /** 锁文件存在且持有者看起来存活（只读探测，不取得锁） */
   locked?: boolean | undefined;
   /** 子会话的父关联；仅子会话存在（默认不进入列表，见 list 的 includeSubagents） */
@@ -222,6 +226,16 @@ export interface SessionStore {
   create(input: CreateSessionInput): Promise<Session>;
   /** 只取得锁、校验/截尾并追加标题；不修复 Turn 或解析模型。 */
   renameClosed(id: string, title: string): Promise<void>;
+  /** 读取归档旁路；文件不存在或内容损坏时返回 undefined（损坏记诊断，ADR-0080）。 */
+  archivedAt(id: string): Promise<string | undefined>;
+  /** 原子写入归档旁路；`archivedAt` 为 undefined 时删除。只校验 ID，不取锁。 */
+  setArchivedAt(id: string, archivedAt: string | undefined): Promise<void>;
+  /** 删除归档旁路；返回是否实际删除。删除失败记诊断并抛出。 */
+  removeArchivedAt(id: string): Promise<boolean>;
+  /** 未打开会话归档：先取得排他锁，再只读首行校验根会话，写旁路（不修复日志）。 */
+  archiveClosed(id: string): Promise<string>;
+  /** 未打开会话恢复：先取得排他锁，再只读首行校验根会话，删除旁路（不修复日志）。 */
+  unarchiveClosed(id: string): Promise<void>;
   fork(source: Session, targetSeq?: number): Promise<string>;
   /**
    * 打开会话：先取得排他锁，再读取日志——截断损坏尾部、校验、
@@ -235,5 +249,7 @@ export interface SessionStore {
   list(filter?: {
     cwd?: string | undefined;
     includeSubagents?: boolean | undefined;
+    /** 默认 false：不列出已归档会话（ADR-0080） */
+    includeArchived?: boolean | undefined;
   }): Promise<SessionSummary[]>;
 }

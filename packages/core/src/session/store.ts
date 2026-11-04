@@ -92,6 +92,20 @@ export interface SessionStoreDeps {
   /** 会话目录：<NOCTURNE_HOME>/sessions */
   sessionsDir: string;
   onTitleDiagnostic?: ((id: string, reason: string) => void) | undefined;
+  /** 归档旁路损坏、写入或删除失败（ADR-0080）；不参与正常控制流。 */
+  onArchiveDiagnostic?:
+    | ((
+        id: string,
+        reason: "invalid_sidecar" | "write_failed" | "delete_failed",
+        error?: string,
+      ) => void)
+    | undefined;
+}
+
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 interface LoadedLog {
@@ -162,6 +176,92 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       if (actual?.title !== expected.title || actual.seq !== expected.seq)
         await writeTitle(id, expected.title, expected.seq);
     } else if (await fs.exists(titlePath(id))) await writeTitle(id, "", 0);
+  }
+
+  function assertSessionId(id: string): void {
+    if (!SESSION_ID_PATTERN.test(id)) throw new SessionError("invalid_session_id", "无效的会话 ID");
+  }
+  /** 归档旁路；路径只在 ID 校验之后构造（与 renameClosed 同一正则，ADR-0080） */
+  function archivePath(id: string): string {
+    assertSessionId(id);
+    return paths.join(sessionsDir, `${id}.archive.json`);
+  }
+  async function writeArchivedAt(id: string, archivedAt: string): Promise<void> {
+    const target = archivePath(id);
+    const temp = `${target}.${randomBytes(6).toString("hex")}.tmp`;
+    try {
+      await fs.writeFile(temp, JSON.stringify({ archivedAt }));
+      await fs.rename(temp, target);
+    } catch (error) {
+      deps.onArchiveDiagnostic?.(id, "write_failed", errorText(error));
+      throw error;
+    } finally {
+      await fs.unlink(temp).catch(() => undefined);
+    }
+  }
+  async function removeArchivedAt(id: string): Promise<boolean> {
+    const target = archivePath(id);
+    try {
+      await fs.unlink(target);
+      return true;
+    } catch (error) {
+      if (fsErrorCode(error) === "ENOENT") return false;
+      deps.onArchiveDiagnostic?.(id, "delete_failed", errorText(error));
+      throw error;
+    }
+  }
+  async function readArchivedAt(id: string): Promise<string | undefined> {
+    const target = archivePath(id);
+    if (!(await fs.exists(target))) return undefined;
+    try {
+      const data: unknown = JSON.parse(await fs.readTextFile(target));
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        "archivedAt" in data &&
+        typeof data.archivedAt === "string" &&
+        data.archivedAt.length > 0 &&
+        !Number.isNaN(Date.parse(data.archivedAt))
+      )
+        return data.archivedAt;
+    } catch (error) {
+      if (fsErrorCode(error) === "ENOENT") return undefined;
+    }
+    // 损坏按未归档处理；留诊断，不阻止列表或发送。
+    deps.onArchiveDiagnostic?.(id, "invalid_sidecar");
+    return undefined;
+  }
+  /**
+   * 只读日志首行（归档/恢复不调用 loadEvents：不能截断损坏尾部或追加修复事件）。
+   * 首行超过头部窗口时回退读整份。
+   */
+  async function readFirstEvent(id: string): Promise<DurableEvent> {
+    let text: string;
+    try {
+      const head = await fs.readFileSlice(logPath(id), LIST_HEAD_BYTES);
+      text = new TextDecoder().decode(head);
+      if (!text.includes("\n") && head.length >= LIST_HEAD_BYTES) {
+        text = await fs.readTextFile(logPath(id));
+      }
+    } catch (error) {
+      if (fsErrorCode(error) === "ENOENT")
+        throw new SessionError("session_not_found", `会话不存在: ${id}`);
+      throw error;
+    }
+    let event: DurableEvent;
+    try {
+      event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
+    } catch {
+      throw new SessionError("session_log_corrupt", "日志第一行不是合法的 session.created");
+    }
+    if (event.type !== "session.created")
+      throw new SessionError("session_log_corrupt", "日志第一行不是 session.created");
+    return event;
+  }
+  async function assertRootSession(id: string): Promise<void> {
+    const first = await readFirstEvent(id);
+    if ("parent" in first.payload && first.payload.parent !== undefined)
+      throw new SessionError("invalid_command", "子会话不能归档或恢复");
   }
 
   /**
@@ -259,9 +359,38 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
   }
 
   return {
+    archivedAt: readArchivedAt,
+    async setArchivedAt(id, archivedAt) {
+      assertSessionId(id);
+      if (archivedAt === undefined) await removeArchivedAt(id);
+      else await writeArchivedAt(id, archivedAt);
+    },
+    removeArchivedAt,
+    async archiveClosed(id) {
+      // 先校验 ID 再构造任何路径；先取锁，再只读首行（不加载/修复日志）
+      assertSessionId(id);
+      const lock = await acquireSessionLock(fs, platform, lockPath(id));
+      try {
+        await assertRootSession(id);
+        const archivedAt = new Date().toISOString();
+        await writeArchivedAt(id, archivedAt);
+        return archivedAt;
+      } finally {
+        await lock.release();
+      }
+    },
+    async unarchiveClosed(id) {
+      assertSessionId(id);
+      const lock = await acquireSessionLock(fs, platform, lockPath(id));
+      try {
+        await assertRootSession(id);
+        await removeArchivedAt(id);
+      } finally {
+        await lock.release();
+      }
+    },
     async renameClosed(id, title) {
-      if (!/^[A-Za-z0-9_-]+$/.test(id))
-        throw new SessionError("invalid_session_id", "无效的会话 ID");
+      assertSessionId(id);
       const lock = await acquireSessionLock(fs, platform, lockPath(id));
       try {
         const { events } = await loadEvents(id);
@@ -457,6 +586,9 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             continue;
           }
           const id = entry.name.slice(0, -".jsonl".length);
+          // 归档旁路只按文件名读取；非法文件名不是本应用生成的会话，按未归档处理。
+          const archivedAt = SESSION_ID_PATTERN.test(id) ? await readArchivedAt(id) : undefined;
+          if (filter.includeArchived !== true && archivedAt !== undefined) continue;
           let scan = firstUserTextInLog(text);
           if (!scan.sawUser && head.truncated && text === head.text) {
             text = await fs.readTextFile(entry.path);
@@ -470,6 +602,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             workspaceRoot: event.payload.workspaceRoot,
             model: event.payload.model,
             mtimeMs: stat.mtimeMs,
+            ...(archivedAt !== undefined ? { archivedAt } : {}),
             locked: await lockLooksHeld(fs, platform, lockPath(id)),
             ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
             ...(event.payload.forkedFrom !== undefined

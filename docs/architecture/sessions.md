@@ -146,6 +146,14 @@ interface SessionRecovery {
 
 目标模式的状态 `SessionState.goal` 与计划模式的状态 `SessionState.plan` 由 `session.config_changed` 的 `goal`、`plan` 字段折叠（[ADR-0076](../decisions/ADR-0076-work-modes.md) §2）：与预设一样对全部事件推进（折叠本身不看回退），恢复与分叉原样继承；回退到设定目标或进入计划的那条消息时，由 Runtime 另写 `config_changed` 停止目标（`reason: "rewound"`）或放弃计划（ADR-0076 §2）；目标的轮数与时长从持久事件算出（自最近一次变为 active 起的核对说明条数、各 Turn 的 `turn.started` 到 `turn.completed` 墙钟时间），恢复后照常累计。恢复会话不会因目标为 active 自动开 Turn。
 
+## 会话归档
+
+[ADR-0080](../decisions/ADR-0080-session-archive.md)：归档是日志之外的旁路状态，不改 `formatVersion`，不写任何会话事件，也不修改 `<id>.jsonl`。每个会话至多一个 `<sessionsDir>/<id>.archive.json`，内容为 `{ "archivedAt": "<ISO 时间>" }`；先写临时文件再原子重命名，恢复即删除该文件。
+
+`Runtime.archiveSession(id)` / `unarchiveSession(id)` 只接受根会话，子会话返回 `invalid_command`。未打开的会话先按 `renameClosed` 同一正则校验 id 再构造路径，取得排他锁后只读日志首行确认 `session.created.parent` 缺省；不调用 `loadEvents` 或 `repair`，因此不会截尾、追加修复事件或改变日志 mtime。锁被占用时映射为 `session_busy`。已打开的会话走 `OpenSessionHooks`：Turn、压缩、回退、关闭、后台子代理计数或待发输入任一存在时返回 `session_busy`；旁路操作进行中同样占忙，`submit` 的 `controller` 仍同步置位，二者不会交错。
+
+`listSessions` 与 `searchSessions` 新增 `includeArchived`，缺省 false；摘要仅在归档时带 `archivedAt`。归档旁路损坏按未归档处理并记 `session.archive_sidecar_invalid`，不阻塞列表。已归档的会话收到 `submit` 时先删除旁路再发请求；删除失败记 `session.unarchive_failed`，不挡发送。写入失败记 `session.archive_write_failed`。打开、查看、压缩、回退都不改变归档状态；分叉不复制旁路，新会话默认未归档。`Runtime.onSessionsChanged(listener)` 在归档、恢复及 submit 自动恢复成功后通知，供 RPC Hub 并入 `runtime.sessionsChanged` 的合并窗口。
+
 ## 9. 暂不设计
 
 分叉、回退见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。跨设备同步、会话分享、断电级持久性选项仍待单独设计。

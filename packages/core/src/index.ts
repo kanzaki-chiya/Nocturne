@@ -798,6 +798,16 @@ export interface Runtime {
   resumeSession(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   forkSession(id: string, options?: { targetSeq?: number }): Promise<string>;
   renameSession(id: string, title: string): Promise<void>;
+  /**
+   * 归档根会话（ADR-0080）：写 `<id>.archive.json` 旁路，不写事件、不改日志 mtime。
+   * 子会话 `invalid_command`；Turn/压缩/回退/关闭/后台子代理/待发输入/外部锁
+   * 返回 `session_busy`。
+   */
+  archiveSession(id: string): Promise<void>;
+  /** 恢复归档；只删旁路，不改日志与摘要 mtime（ADR-0080）。 */
+  unarchiveSession(id: string): Promise<void>;
+  /** 会话列表可见状态变化（归档、恢复与 submit 自动恢复）；返回取消订阅函数。 */
+  onSessionsChanged(listener: () => void): () => void;
   /** 取消本父会话运行中的后台子代理，结果照常交付 cancelled（ADR-0073 §4） */
   cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
   listSubagentWorktrees(input: { parentSessionId: string }): Promise<WorktreeRecord[]>;
@@ -836,8 +846,10 @@ export interface Runtime {
     cwd?: string | undefined;
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
     includeSubagents?: boolean | undefined;
+    /** 默认 false：已归档会话不进列表（ADR-0080） */
+    includeArchived?: boolean | undefined;
   }): Promise<SessionSummary[]>;
-  /** 无索引地搜索本机会话标题与有效正文；默认排除子会话。 */
+  /** 无索引地搜索本机会话标题与有效正文；默认排除子会话与已归档会话。 */
   searchSessions(query: string, options?: SessionSearchOptions): Promise<SessionSearchResult[]>;
   /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
   listModels(input?: {
@@ -1129,6 +1141,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     onTitleDiagnostic: (sessionId, reason) => {
       diagnostics.record("session.title_sidecar_invalid", { sessionId, reason });
     },
+    onArchiveDiagnostic: (sessionId, reason, error) => {
+      diagnostics.record(
+        reason === "invalid_sidecar"
+          ? "session.archive_sidecar_invalid"
+          : reason === "write_failed"
+            ? "session.archive_write_failed"
+            : "session.unarchive_failed",
+        { sessionId, reason, ...(error !== undefined ? { error } : {}) },
+      );
+    },
   });
   const subagentObservation = createSubagentObservation({
     platform,
@@ -1175,6 +1197,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillModel: { workspaceRoot: string; contextWindow: () => number | undefined };
     fork(targetSeq?: number): Promise<string>;
     rename(title: string): Promise<void>;
+    /** 已打开会话的归档写/删；忙判定与异步互斥在会话闭包里（ADR-0080） */
+    archive(archivedAt: string | undefined): Promise<void>;
     durableEvents(): readonly DurableEvent[];
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
@@ -1201,6 +1225,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           platform.paths.equals(parent, created.payload.cwd))
       );
     });
+  /**
+   * 会话列表可见状态变化（ADR-0080）：归档/恢复与 submit 自动恢复。
+   * 只带信号不带内容；RPC Hub 订阅后并入 `runtime.sessionsChanged` 的 300 ms 合并窗口。
+   */
+  const sessionsChangedListeners = new Set<() => void>();
+  const notifySessionsChanged = (): void => {
+    for (const listener of sessionsChangedListeners) {
+      try {
+        listener();
+      } catch {
+        /* 监听者不能阻断归档或发送。 */
+      }
+    }
+  };
   const grantsListeners = new Set<(payload: GrantsChangedPayload) => void>();
   const grantLists = new Map<string, Grant[]>();
   const grantsChanged = (payload: GrantsChangedPayload): void => {
@@ -2567,6 +2605,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let closing = false;
     let rewinding = false;
     let rewindSettled: Promise<void> | undefined;
+    /** 归档旁路写入/删除进行中；与 submit 的 Turn 启动互相排斥（ADR-0080） */
+    let archiving = false;
     const changes = createTurnChanges(session, platform, sessionsDir);
     // 进行中 Turn 的档位快照（ADR-0018 §3）：submit 时对持久化意图
     // 就近降档一次，reasoningEffortInfo().effective 据此报告；
@@ -2579,7 +2619,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw new RuntimeCommandError("session_failed", "会话已处于 failed 状态");
       }
     };
-    const busy = () => controller !== undefined || rewinding;
+    const busy = () => controller !== undefined || rewinding || archiving;
     const compacting = () => compactController !== undefined;
     const assertBranchNotSwitching = () => {
       if (switching(branchRoot ?? meta.cwd))
@@ -2614,6 +2654,37 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const assertMainSession = () => {
       if (meta.parent !== undefined)
         throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
+    };
+    /**
+     * 已打开会话的归档写/删（ADR-0080）。复用 Turn/压缩/回退/关闭/后台子代理/待发输入
+     * 的忙判定；`archiving` 占忙，与 submit 同步置位的 controller 互斥，异步旁路不会和 Turn 交错。
+     */
+    const setArchived = async (archivedAt: string | undefined): Promise<void> => {
+      assertUsable();
+      if (meta.parent !== undefined)
+        throw new RuntimeCommandError("invalid_command", "子会话不能归档或恢复");
+      if (
+        busy() ||
+        compacting() ||
+        closing ||
+        backgroundSubagents.count(session.id) > 0 ||
+        pendingInputStore.snapshot().items.length > 0
+      )
+        throw new RuntimeCommandError("session_busy", "会话正忙，不能归档");
+      archiving = true;
+      try {
+        await store.setArchivedAt(session.id, archivedAt);
+      } finally {
+        archiving = false;
+      }
+    };
+    /** submit 前无条件删除归档旁路；失败只记诊断（store 内），不挡发送。 */
+    const restoreArchivedForSubmit = async (): Promise<boolean> => {
+      try {
+        return await store.removeArchivedAt(session.id);
+      } catch {
+        return false;
+      }
     };
     /**
      * 后台子代理结果交付（ADR-0073 §3）：正文按工具结果同样的预算截断落盘，再作为
@@ -2928,6 +2999,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       first: () => Promise<PreparedInput>,
     ): Promise<TurnEndReason> => {
       assertBranchNotSwitching();
+      if (archiving) throw new RuntimeCommandError("session_busy", "会话正在归档");
       controller = ac;
       let settleTurn!: () => void;
       turnSettled = new Promise<void>((resolve) => {
@@ -3266,6 +3338,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         contextWindow: () => model.model.contextWindow,
       },
       fork: forkOpen,
+      archive: setArchived,
       durableEvents: () => session.durableEvents(),
       rename: async (title) => {
         assertUsable();
@@ -3462,8 +3535,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
+        // controller 必须同步置位：之后的 interrupt 一定落在这一轮上。
+        // 归档旁路在首个 prepare 里、发请求前删除；此时 controller 已占用，
+        // 并发的 archiveSession 只能看到 busy（ADR-0080）。
         const ac = new AbortController();
-        return await startTurns(ac, () => prepareInput(input, ac.signal));
+        return await startTurns(ac, async () => {
+          const restored = await restoreArchivedForSubmit();
+          if (restored) notifySessionsChanged();
+          return prepareInput(input, ac.signal);
+        });
       },
       async enqueueInput(mode, input) {
         assertUsable();
@@ -4800,6 +4880,44 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.close().catch(() => undefined);
         throw e;
       }
+    },
+    async archiveSession(id) {
+      const open = openSessions.get(id);
+      try {
+        if (open !== undefined) await open.archive(new Date().toISOString());
+        else await store.archiveClosed(id);
+      } catch (error) {
+        if (error instanceof SessionError) {
+          if (error.code === "session_locked")
+            throw new RuntimeCommandError("session_busy", "会话被另一个进程占用");
+          if (error.code === "invalid_command")
+            throw new RuntimeCommandError("invalid_command", error.message);
+        }
+        throw error;
+      }
+      notifySessionsChanged();
+    },
+    async unarchiveSession(id) {
+      const open = openSessions.get(id);
+      try {
+        if (open !== undefined) await open.archive(undefined);
+        else await store.unarchiveClosed(id);
+      } catch (error) {
+        if (error instanceof SessionError) {
+          if (error.code === "session_locked")
+            throw new RuntimeCommandError("session_busy", "会话被另一个进程占用");
+          if (error.code === "invalid_command")
+            throw new RuntimeCommandError("invalid_command", error.message);
+        }
+        throw error;
+      }
+      notifySessionsChanged();
+    },
+    onSessionsChanged(listener) {
+      sessionsChangedListeners.add(listener);
+      return () => {
+        sessionsChangedListeners.delete(listener);
+      };
     },
     listSessions: (filter) => store.list(filter),
     searchSessions: (query, options) =>

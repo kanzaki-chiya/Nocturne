@@ -135,7 +135,7 @@ export async function searchSessions(
   if (query === "") return [];
   const signal = options?.signal;
   throwIfAborted(signal);
-  const summaries = (await store.list())
+  const summaries = (await store.list({ includeArchived: options?.includeArchived === true }))
     .filter((summary) => summary.id.length > 0)
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const results: SessionSearchResult[] = [];
