@@ -91,6 +91,9 @@ type SubjectRequest = {
   /** mcp 主体：服务器经 readOnlyHint: true 自我声明只读。smart 预设据此直接放行
       （信任服务器的自我声明，ADR-0057）；不参与规则匹配、Grant 键与 Hook 判定 */
   readOnly?: boolean
+  /** read 主体：目标是切换当前工作树（ADR-0081）。权限判定仍按 read 进行，
+      但不附加「文件位于其他工作树」的结果提示 */
+  switchesWorktree?: boolean
 }
 // 解析后的 PermissionSubject 定义见 events.md 第 4 节
 ```
