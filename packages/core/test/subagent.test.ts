@@ -288,6 +288,45 @@ describe("子代理档位：模型、强度、工具集与超时", () => {
         e.type === "tool.completed" && e.payload.name === "task",
     );
 
+  it.each([
+    [{ model: "fake/cheap" }, "cheap", "low", true],
+    [{ model: "cheap" }, "cheap", "low", true],
+    [{ effort: "medium" }, "fake-1", "medium", true],
+    [{ effort: "max" }, "fake-1", "high", true],
+    [{ model: "fake/fake-1", effort: "medium" }, "fake-1", "medium", true],
+    [{ model: "fake/cheap", effort: "max" }, "cheap", "low", true],
+    [{ profile: "quick", model: "fake/fake-1", effort: "medium" }, "fake-1", "medium", false],
+  ])("临时覆盖 %j", async (input, model, effort, shell) => {
+    const result = await runProfile(
+      { task: "test", ...(input as Record<string, unknown>) },
+      { profiles: { quick: { ...quick, model: "fake/cheap", effort: "low", timeoutMs: 60000 } } },
+    );
+    try {
+      expect(result.childRequests[0]?.model).toBe(model);
+      expect(result.childRequests[0]?.reasoningEffort).toBe(effort);
+      expect(result.childRequests[0]?.tools.some((tool) => tool.name === "shell")).toBe(shell);
+      expect(lastTask(result.events)?.payload.output).toMatchObject({
+        model: `fake/${String(model)}`,
+        reasoningEffort: effort,
+      });
+    } finally {
+      await result.session.close();
+    }
+  });
+
+  it("不存在的临时模型列出全部可选模型，非交互也不启动子会话", async () => {
+    const result = await runProfile({ task: "test", model: "missing" }, { interactive: false });
+    try {
+      expect(lastTask(result.events)?.payload.error).toMatchObject({ code: "invalid_input" });
+      expect(lastTask(result.events)?.payload.error?.message).toContain("fake/fake-1");
+      expect(lastTask(result.events)?.payload.error?.message).toContain("fake/cheap");
+      expect(result.childRequests).toHaveLength(0);
+      expect(taskTool(result.parentRequests[0])?.description).toContain("ask_user");
+    } finally {
+      await result.session.close();
+    }
+  });
+
   it("档位模型生效，档位强度在子模型上就近降档，实际值进入请求与输出", async () => {
     const r = await runProfile(
       { task: "t", profile: "quick" },
@@ -355,7 +394,13 @@ describe("子代理档位：模型、强度、工具集与超时", () => {
     "超时：档位值作默认，请求可覆盖（档位 $profileTimeout，请求 $request）",
     async ({ profileTimeout, request, expected }) => {
       const r = await runProfile(
-        { task: "t", profile: "quick", ...(request !== undefined ? { timeoutMs: request } : {}) },
+        {
+          task: "t",
+          profile: "quick",
+          model: "fake/cheap",
+          effort: "medium",
+          ...(request !== undefined ? { timeoutMs: request } : {}),
+        },
         { profiles: { quick: { ...quick, timeoutMs: profileTimeout } } },
         {
           child: [
@@ -384,7 +429,7 @@ describe("子代理档位：模型、强度、工具集与超时", () => {
   });
 
   it("default 档位就是 modelRoles.task；设置改动后选择表与子模型同步", async () => {
-    const r = await runProfile({ task: "t", profile: "default" }, { profiles: { quick } });
+    const r = await runProfile({ task: "t", effort: "high" }, { profiles: { quick } });
     expect(taskTool(r.parentRequests[0])?.description).toContain(
       "default：通用。（跟随当前模型，跟随会话）",
     );
@@ -395,6 +440,7 @@ describe("子代理档位：模型、强度、工具集与超时", () => {
       "default：通用。（fake/cheap，跟随会话）",
     );
     expect(r.childRequests.at(-1)?.model).toBe("cheap");
+    expect(r.childRequests.at(-1)?.reasoningEffort).toBe("low");
     await r.session.close();
   });
 

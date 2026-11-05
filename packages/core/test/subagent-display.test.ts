@@ -3,6 +3,22 @@ import { subagentProfile, subagentResultLine, subagentRowInfo } from "../src/pro
 import type { ToolEntry } from "../src/protocol/index.js";
 
 describe("subagent display identity", () => {
+  it("临时参数在启动前显示，实际结果与进度优先", () => {
+    const entry = {
+      name: "task",
+      input: { profile: "quick", model: "p/m", effort: "high" },
+      liveOutput: "",
+    } as ToolEntry;
+    expect(subagentRowInfo(entry)).toMatchObject({
+      profile: "quick",
+      model: "p/m",
+      effort: "high",
+    });
+    expect(subagentRowInfo({ ...entry, liveOutput: "子代理模型：p/m · low" })).toMatchObject({
+      model: "p/m",
+      effort: "low",
+    });
+  });
   it.each([
     [{ preset: "explore" }, "explore"],
     [{ preset: "explore", profile: "default" }, "explore"],

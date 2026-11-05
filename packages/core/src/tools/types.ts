@@ -516,6 +516,8 @@ export interface ToolExecutor {
  * 的可见性）；task 工具只做输入预检与结果映射。
  */
 export interface SubagentRequest {
+  model?: string | undefined;
+  effort?: ReasoningEffort | undefined;
   isolation?: "none" | "worktree" | undefined;
   background?: boolean | undefined;
   profile?: string | undefined;
@@ -546,6 +548,7 @@ export interface SubagentStats {
 }
 
 export interface BackgroundSubagentStarted {
+  reasoningEffort?: ReasoningEffort | undefined;
   childSessionId: string;
   childLogPath: string;
   model: string;
@@ -569,6 +572,8 @@ export type SubagentOutcome =
  * launch 只受 ctx.signal 约束返回；取消/超时由执行器统一结算。
  */
 export interface SubagentLauncher {
+  /** 纯输入解析；由会话注册表提供精确模型匹配与可选项，不做权限判定。 */
+  resolveModel?(ref: string): { model: string } | { error: string };
   launch(request: SubagentRequest, ctx: ToolContext): Promise<SubagentOutcome>;
 }
 

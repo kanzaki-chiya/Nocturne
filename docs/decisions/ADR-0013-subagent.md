@@ -38,3 +38,13 @@ Phase 6 引入子代理：父会话的模型调用一个工具，启动一条独
 ## 修订（2026-11-02：执行时限）
 
 `task` 默认不设超时，也不设固定封顶；显式输入 `timeoutMs` 优先于 profile，再优先于 `RuntimeOptions.subagent.timeoutMs`，均为正整数时生效。`maxStepsPerTurn` 默认不限，显式值仍生效；这也与主对话默认不限步数一致，避免固定上限阻断日常长任务。结束协议 §决定 4 的 `finish` 催促 `maxAttempts`、重复调用保护与后台 `maxBackground = 3` 不变。外部 agent 通过同一 `task` 入口共享默认取消语义，ACP 已有的显式可选超时保留；定时任务独立的 60 分钟限时不变。当前契约见 [subagent.md](../architecture/subagent.md)。
+
+## 修订（2026-11-06：本次调用的模型与思考档位）
+
+`task` 新增可选 `model: string`、`effort: ReasoningEffort`。省略 `profile` 时按 `default` 解析；显式 `model` 替换档位模型，显式 `effort` 替换档位或父会话的思考意图。档位的工具集上限和默认超时仍生效；请求强度统一经过既有 `clampReasoningEffort`，按最终模型可用集合就近降档，无可用档位时关闭思考。前台、后台与工作树隔离共享这条派生路径，用量和费用按实际子模型记录。
+
+模型使用当前会话注册表及 `resolveModelRole(..., "task")` 判定可用性，不要求先建档位。`model` 不做 enum、不在说明中枚举模型：完整 `provider/model` 精确命中优先，否则将输入与每个完整 id 的首个 `/` 后的模型名精确比较（模型名本身可以含 `/`）。唯一匹配可用；多个匹配返回 `invalid_input` 并列出候选完整 id；零匹配或不可用返回 `invalid_input` 并列出会话全部可选模型，不回退。工具说明要求主模型在用户意图不明或遇到多个候选时，有 `ask_user` 就让用户选择；没有该工具的会话仍正常收到错误，不自动挑选。
+
+`model`、`effort` 均与外部执行者互斥，包括通过 `agent` 或 `profile` 选择外部 agent；沿用 `agent 与 … 互斥` 的输入错误。权限主体、权限层和 Agent Loop 不增加模型选择分支。
+
+三个客户端在原有档位和模型位置显示临时选择；实际启动信息优先于请求值。面板使用派生配置，旧日志缺少信息时不读取当前档位配置反推。观察摘要的兼容可选字段见 [rpc.md §4.1](../protocols/rpc.md#41-子会话只读观察adr-0060-第-4-轮)。

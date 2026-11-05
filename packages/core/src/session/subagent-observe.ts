@@ -71,6 +71,8 @@ export interface SubagentObservationService {
 }
 
 interface ChildAnalysis {
+  model?: string | undefined;
+  effort?: string | undefined;
   startedAt: string;
   parent: { sessionId: string; callId: string } | undefined;
   firstUserText: string | undefined;
@@ -80,6 +82,7 @@ interface ChildAnalysis {
 }
 
 interface ParentCall {
+  overrides?: boolean | undefined;
   background?: boolean | undefined;
   profile: string;
   task: string | undefined;
@@ -98,6 +101,12 @@ function analyzeChild(events: readonly DurableEvent[]): ChildAnalysis {
   const analysis: ChildAnalysis = {
     startedAt: first?.time ?? "",
     parent: first?.type === "session.created" ? first.payload.parent : undefined,
+    ...(first?.type === "session.created"
+      ? {
+          model: `${first.payload.model.provider}/${first.payload.model.model}`,
+          effort: first.payload.reasoningEffort ?? "off",
+        }
+      : {}),
     firstUserText: undefined,
     openTurn: false,
     finishOk: false,
@@ -139,6 +148,7 @@ function extractParentCalls(events: Iterable<DurableEvent>): Map<string, ParentC
         }),
         task: typeof record.task === "string" ? record.task : undefined,
         background: record.background === true,
+        overrides: record.model !== undefined || record.effort !== undefined,
         completed: previous?.completed,
       });
     } else if (event.type === "tool.completed" && event.payload.name === "task") {
@@ -147,6 +157,7 @@ function extractParentCalls(events: Iterable<DurableEvent>): Map<string, ParentC
         profile: previous?.profile ?? "",
         task: previous?.task,
         background: previous?.background,
+        overrides: previous?.overrides,
         completed: {
           time: event.time,
           status: event.payload.status,
@@ -219,6 +230,7 @@ function snapshotSummary(
     callId,
     childSessionId,
     profile: call?.profile ?? "",
+    ...(call?.overrides ? { model: analysis.model, effort: analysis.effort } : {}),
     taskSummary: summarizeSubagentTask(call?.task ?? analysis.firstUserText ?? ""),
     startedAt: analysis.startedAt,
     state: ended ? "ended" : "unsealed",
@@ -234,6 +246,7 @@ function runningSummary(entry: ActiveSubagent): SubagentSummary {
     callId: entry.callId,
     childSessionId: entry.childSessionId,
     profile: entry.profile,
+    ...(entry.model !== undefined ? { model: entry.model, effort: entry.effort } : {}),
     ...(entry.background ? { background: true } : {}),
     taskSummary: entry.taskSummary,
     startedAt: entry.startedAt,
@@ -247,6 +260,7 @@ function launcherEndSummary(entry: ActiveSubagent): SubagentSummary {
   return {
     ...snapshotSummary(entry.parentSessionId, entry.childSessionId, analysis, undefined),
     profile: entry.profile,
+    ...(entry.model !== undefined ? { model: entry.model, effort: entry.effort } : {}),
     ...(entry.background ? { background: true } : {}),
     taskSummary: entry.taskSummary,
   };

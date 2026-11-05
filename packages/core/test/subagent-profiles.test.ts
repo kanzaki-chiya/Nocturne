@@ -142,7 +142,7 @@ describe("task 档位表", () => {
   it("只有 default 不公开 profile，描述保持原状", () => {
     const tool = createTaskTool(launcher);
     expect(tool.inputSchema.properties).not.toHaveProperty("profile");
-    expect(tool.description).not.toContain("档位");
+    expect(tool.description).not.toContain("按任务难度和性质挑");
   });
   it("公开 profile 枚举与共享表，兼容 agent 别名并拒绝同时指定", () => {
     const agents = [{ name: "offline", description: "外部" }];

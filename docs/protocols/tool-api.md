@@ -146,6 +146,8 @@ type AskUserReply =
 
 `ToolContext` 不暴露会话对象、事件发布器、Provider 或其他工具。工具之间不能互相调用；需要组合能力时由模型在多个 Step 中完成。
 
+`task` 的内置子代理输入支持 `model?: string`、`effort?: ReasoningEffort`，临时覆盖 `profile`（缺省 `default`）的模型和思考档位，保留工具集上限与超时。模型精确匹配、歧义/不可用的 `invalid_input`、外部 agent 互斥及就近降档规则以 [subagent.md §1](../architecture/subagent.md#1-工具契约task) 为准；模型集合不作为 enum 写入 schema。`SubagentRequest` 透传这两个兼容可选字段，后台启动回执的 `reasoningEffort` 记录实际强度。
+
 `progress` 允许发送半行。`stdout`/`stderr` 的 `chunk` 是原始片段；客户端按同一工具、同一输出流的到达顺序拼接，遇到 `\n` 才结束一行，不在每次调用后自动换行。`info` 用于独立的一行式状态摘要：每次调用传一行内容，不带末尾换行；CLI/TUI 在呈现时结束该行。因此发送方不必为客户端补换行。这只明确了现有 `tool.progress` 的显示约定，没有更改事件字段、`ToolResult` 或执行管线保证，不触发本协议第 6 节的 ADR 条件；也不是 Provider 流式契约或错误语义变更。
 
 ## 3. ToolResult

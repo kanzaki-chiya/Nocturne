@@ -58,6 +58,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 `SessionOpened`：`{ sessionId, meta, config, warnings, recovery?, lastSeq }`。打开会话**不推事件**——事件要另行 `session.subscribe`。同一连接里已打开的会话再次 `resumeSession` 报 `session_already_open`。`Runtime.updateProviders` 映射为 `runtime.reloadConfig`：服务端在每个 `provider.*` 变更方法之后已经自动重载配置并推 `runtime.providersChanged`（见 3.3），`reloadConfig` 用于**别的进程**改了配置文件之后让本服务端同步（例如桌面端后台运行期间用户用 CLI 改了 providers.json 或 settings.json）。`updateSettings` / `setDefaultModel` / `setModelRole` 只写设置层，不推 `runtime.providersChanged`。服务端不追踪重载的来源：多个服务端进程之间协调时，客户端必须自己识别由 `reloadConfig` 引起的那次通知，不再转发，否则会互相触发成环。
 
 ### 3.2 `session.*`
+
 子代理档位使用既有 runtime.describeSettings/updateSettings，逐条键 subagents.profiles.<name>，值与删除语义见 [config.md](../architecture/config.md#子代理档位设置)，不新增 RPC 方法。
 
 
@@ -284,6 +285,8 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 
 ### 4.1 子会话只读观察（ADR-0060 第 4 轮）
 
+子代理观察摘要 `SubagentSummary` 增加兼容可选字段 `model?: string`、`effort?: string`：当父 `task` 临时指定模型或思考档位时，提供子会话实际的完整模型 id 和降档后的思考档位（关闭为 `off`）。活动项从启动配置取得，历史项按父输入和子 `session.created` 重建；不修改事件、不增加 RPC 方法，远程仍用父工具输入和启动回执推导显示。
+
 **不新增或修改 RuntimeEvent**，不改变协议版本 `1` 或日志格式；新增 JSON-RPC 方法与通知，旧客户端不调用、不受影响。行为与事实来源见 [subagent.md 第 12 节](../architecture/subagent.md#12-客户端呈现)。
 
 #### 查询与 Core API
@@ -305,6 +308,8 @@ interface SubagentSummary {
   callId: string;
   childSessionId: string;
   profile: string;                 // 启动参数 preset 优先，其次非 default 的 profile / agent；缺省空字符串，不读当前配置反推
+  model?: string;                  // 临时指定 model/effort 时的实际完整模型 id
+  effort?: string;                 // 同上，实际思考档位；关闭为 off
   background?: true;               // 后台子代理（ADR-0073）；父 task 已结算时 state 仍可为 running
   taskSummary: string;             // task 原文压成单行，最多 120 个 Unicode 码点
   startedAt: string;               // 子 session.created.time，ISO 8601

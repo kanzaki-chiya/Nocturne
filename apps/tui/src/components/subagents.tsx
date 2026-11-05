@@ -126,6 +126,8 @@ export function Subagents({
         ...items.map((item) => ({
           label: [
             item.profile,
+            item.model,
+            item.effort,
             isolated.has(item.childSessionId) ? "隔离" : "",
             `${Math.max(0, Math.floor((now - Date.parse(item.startedAt)) / 1000))}s`,
             item.taskSummary,

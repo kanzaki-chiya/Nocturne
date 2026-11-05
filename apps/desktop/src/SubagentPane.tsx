@@ -5,7 +5,7 @@
  * 只在标签显示时观察，切走即退订（保留视图，回看按 seq 补读）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { SubagentSummary, ToolEntry } from "@nocturne/core/protocol";
+import { subagentRowInfo, type SubagentSummary, type ToolEntry } from "@nocturne/core/protocol";
 import type { RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
@@ -164,12 +164,20 @@ export function SubagentPane({
 
   // 没在显示的标签不渲染对话内容：观察已退订，视图保留在 watcher 里，回看时再画
   if (!visible) return null;
+  const selection = parentEntry === undefined ? {} : subagentRowInfo(parentEntry);
+  const input = parentEntry?.input as { model?: unknown; effort?: unknown } | undefined;
+  const overridden =
+    input?.model !== undefined || input?.effort !== undefined || summary?.model !== undefined;
+  const selectionText = [summary?.model ?? selection.model, summary?.effort ?? selection.effort]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="sp-sub">
       <header className="sp-sub-head">
         {tab.profile && tab.profile !== "default" && (
           <Badge className="subagent-badge">{tab.profile}</Badge>
         )}
+        {overridden && selectionText && <Badge className="subagent-badge">{selectionText}</Badge>}
         <span className="sp-sub-summary" title={tab.taskSummary}>
           {tab.taskSummary}
         </span>

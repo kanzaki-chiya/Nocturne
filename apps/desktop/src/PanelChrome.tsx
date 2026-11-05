@@ -305,7 +305,7 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
             <Icon name="robot" size={ICON_SM} className="sp-glyph" />
             <span className="ovpop-agent-text">
               <span className="ovpop-agent-profile">
-                {agent.profile}
+                {[agent.profile, agent.model, agent.effort].filter(Boolean).join(" · ")}
                 {agent.background === true && (
                   <Badge className="ovpop-bg">
                     {subagents.isolated?.has(agent.childSessionId) ? "后台 · 隔离" : "后台"}

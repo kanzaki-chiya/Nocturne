@@ -38,6 +38,26 @@ const resultEntry: UserEntry = {
 } as unknown as UserEntry;
 
 describe("TUI 后台子代理", () => {
+  it.each([{ model: "p/m", effort: "high" }, { effort: "high" }])(
+    "工具行显示临时选择 %j",
+    (selection) => {
+      const entry = {
+        kind: "tool",
+        key: "t",
+        callId: "t",
+        name: "task",
+        status: "running",
+        input: { task: "test", profile: "quick", ...selection },
+        liveOutput: "",
+      } as ToolEntry;
+      const text = layoutEntry(entry, 160, false)
+        .map((line) => line.text)
+        .join("\n");
+      expect(text).toContain("[quick]");
+      expect(text).toContain("high");
+      if ("model" in selection) expect(text).toContain("p/m");
+    },
+  );
   it("启动行运行中与最终结果状态一致", () => {
     const entry = {
       kind: "tool",

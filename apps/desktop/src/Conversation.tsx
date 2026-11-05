@@ -2368,7 +2368,7 @@ function ToolRow({
   ) : (
     <>
       {animating && !asked && <span className="tool-spin" aria-hidden="true" />}
-      {subagent.model !== undefined && (
+      {(subagent.model !== undefined || subagent.effort !== undefined) && (
         <span className="tool-range">
           {subagent.model}
           {subagent.effort !== undefined && <span className="muted-value">{subagent.effort}</span>}

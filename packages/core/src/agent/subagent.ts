@@ -140,6 +140,8 @@ export interface SubagentDeps {
   })[];
   defaultModel?: string | undefined;
   defaultPricing?: ModelPricing | undefined;
+  availableModels?(): readonly string[];
+  resolveModel?(ref: string): ResolvedModel | undefined;
   resolveProfile?(
     name: string,
     currentModel?: ResolvedModel,
@@ -334,7 +336,24 @@ function usageOf(session: Session): Usage | undefined {
 }
 
 export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
+  const selectModel = (ref: string): { model: ResolvedModel } | { error: string } => {
+    const available = deps.availableModels?.() ?? [];
+    const matches = available.includes(ref)
+      ? [ref]
+      : available.filter((id) => id.slice(id.indexOf("/") + 1) === ref);
+    if (matches.length > 1) return { error: `模型 ${ref} 有多个匹配；可选：${matches.join(", ")}` };
+    const model = matches[0] === undefined ? undefined : deps.resolveModel?.(matches[0]);
+    return model === undefined
+      ? { error: `模型 ${ref} 不存在或不可用；可选：${available.join(", ") || "无"}` }
+      : { model };
+  };
   return {
+    resolveModel(ref) {
+      const result = selectModel(ref);
+      return "error" in result
+        ? result
+        : { model: `${result.model.model.ref.provider}/${result.model.model.ref.model}` };
+    },
     async launch(request: SubagentRequest, ctx: ToolContext): Promise<SubagentOutcome> {
       if (request.isolation !== undefined && !request.background)
         return error("invalid_input", "isolation 只在 background: true 时可用");
@@ -386,13 +405,16 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             `档位 ${request.profile ?? "default"} 不存在、已停用或模型不可用；可选：${["default", ...(deps.profiles ?? []).map((p) => p.name)].join(", ")}`,
           );
         const profile = resolvedProfile?.profile;
-        const childModel = resolvedProfile?.model ?? deps.model();
+        const override = request.model === undefined ? undefined : selectModel(request.model);
+        if (override !== undefined && "error" in override)
+          return error("invalid_input", override.error);
+        const childModel = override?.model ?? resolvedProfile?.model ?? deps.model();
         if (profile?.tools === "explore" && request.preset === "general")
           return error("invalid_input", "只读档位不能请求 general 工具集");
         // 子代理继承父会话档位（ADR-0018 §4）：按子模型可用集合就近降档；
         // off / 无可用档 → 不写字段（等价 off）
         const childEffort = clampReasoningEffort(
-          profile?.effort ?? deps.reasoningEffort?.(),
+          request.effort ?? profile?.effort ?? deps.reasoningEffort?.(),
           childModel.model.capabilities.reasoningEffort,
         );
         const createChild = async () => {
@@ -439,6 +461,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             parentSessionId: ctx.sessionId,
             callId: ctx.callId,
             profile: subagentProfile(request),
+            ...(request.model !== undefined || request.effort !== undefined
+              ? {
+                  model: `${childModel.model.ref.provider}/${childModel.model.ref.model}`,
+                  effort: childEffort ?? "off",
+                }
+              : {}),
             taskSummary: summarizeSubagentTask(request.task),
             background: request.background === true,
           });
@@ -820,6 +848,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               childSessionId: child.id,
               childLogPath: child.logPath,
               model: `${childModel.model.ref.provider}/${childModel.model.ref.model}`,
+              reasoningEffort: childEffort ?? "off",
               background: true,
             },
           };

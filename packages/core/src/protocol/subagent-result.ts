@@ -51,6 +51,8 @@ export function subagentResultStatus(status: SubagentResult["status"]): string {
 }
 
 export interface PendingBackgroundSubagent {
+  model?: string | undefined;
+  effort?: string | undefined;
   callId: string;
   childSessionId: string;
   profile: string;
@@ -71,15 +73,38 @@ export function pendingBackgroundSubagents(
   return entries.flatMap((entry) => {
     if (entry.kind !== "tool" || entry.name !== "task" || delivered.has(entry.callId)) return [];
     const output = entry.result?.output as
-      { background?: unknown; childSessionId?: unknown } | undefined;
+      | {
+          background?: unknown;
+          childSessionId?: unknown;
+          model?: unknown;
+          reasoningEffort?: unknown;
+        }
+      | undefined;
     if (output?.background !== true || typeof output.childSessionId !== "string") return [];
     const input = entry.input as
-      { profile?: unknown; preset?: unknown; task?: unknown } | undefined;
+      | { profile?: unknown; preset?: unknown; task?: unknown; model?: unknown; effort?: unknown }
+      | undefined;
     return [
       {
         callId: entry.callId,
         childSessionId: output.childSessionId,
         profile: subagentProfile(input),
+        ...(input?.model !== undefined || input?.effort !== undefined
+          ? {
+              model:
+                typeof output.model === "string"
+                  ? output.model
+                  : typeof input.model === "string"
+                    ? input.model
+                    : undefined,
+              effort:
+                typeof output.reasoningEffort === "string"
+                  ? output.reasoningEffort
+                  : typeof input.effort === "string"
+                    ? input.effort
+                    : undefined,
+            }
+          : {}),
         task: typeof input?.task === "string" ? input.task : "",
       },
     ];

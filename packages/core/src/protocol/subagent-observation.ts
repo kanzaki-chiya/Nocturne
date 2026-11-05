@@ -14,6 +14,9 @@ export interface SubagentSummary {
   childSessionId: string;
   /** 启动参数 preset 优先，其次非 default 的 profile / agent；缺省为空，不读当前配置反推 */
   profile: string;
+  /** task 临时指定 model 或 effort 时，显示实际派生配置。 */
+  model?: string | undefined;
+  effort?: string | undefined;
   background?: boolean;
   /** task 原文压成单行，最多 120 个 Unicode 码点 */
   taskSummary: string;

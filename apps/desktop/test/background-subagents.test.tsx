@@ -11,6 +11,7 @@ import {
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import { createAttachmentImageSource } from "../src/attachment-images";
+import { taskEntry } from "./subagent-fixtures";
 import { Conversation } from "../src/Conversation";
 import { SessionOverview } from "../src/PanelChrome";
 import { PendingInputs } from "../src/PendingInputs";
@@ -51,6 +52,31 @@ const resultEntry = {
 } as unknown as UserEntry;
 
 describe("概览", () => {
+  it.each(["desktop", "phone"])("%s 共用工具行显示临时模型和强度", (client) => {
+    const view = createSessionView();
+    view.entries = [
+      taskEntry({
+        input: { task: "test", profile: "quick", model: "p/m", effort: "high" },
+      }),
+    ];
+    const { container } = render(
+      <div className={client === "phone" ? "web-app" : ""}>
+        <Conversation
+          view={view}
+          session={{ id: "p" } as RpcSession}
+          openUrl={vi.fn()}
+          cwd="Z:/project"
+          subscribeEvents={() => () => undefined}
+          images={createAttachmentImageSource()}
+          busy={false}
+          onResubmit={vi.fn(async () => undefined)}
+        />
+      </div>,
+    );
+    expect(container.textContent).toContain("quick");
+    expect(container.querySelector(".tool-range")?.textContent).toContain("p/m");
+    expect(container.querySelector(".tool-range")?.textContent).toContain("high");
+  });
   it("后台子代理带「后台」标记与取消按钮；同步子代理没有；点名字仍打开观察", () => {
     const onOpen = vi.fn();
     const onCancel = vi.fn();

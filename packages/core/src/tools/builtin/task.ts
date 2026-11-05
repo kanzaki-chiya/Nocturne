@@ -8,6 +8,8 @@
 import { createSchemaCompiler } from "../schema.js";
 import {
   subagentSelectionTable,
+  REASONING_EFFORT_ORDER,
+  type ReasoningEffort,
   type ModelPricing,
   type SubagentProfileConfig,
 } from "../../protocol/index.js";
@@ -30,6 +32,8 @@ interface TaskInput {
   /** 已启用的外部 agent；与内置子代理的选择字段互斥 */
   agent?: string;
   profile?: string;
+  model?: string;
+  effort?: ReasoningEffort;
   reason?: string;
   /** 工具集预设；缺省 general；与 tools 互斥 */
   preset?: "general" | "explore";
@@ -51,7 +55,9 @@ const DESCRIPTION =
   "权限注意：子会话是非交互的，无法向用户请求确认——在默认权限规则下需要确认的操作" +
   "（写文件、执行命令、工作区外读取、MCP 调用等）在子会话内会被拒绝；" +
   "只读或探索类任务优先用 explore；子代理的操作被拒绝时，让它在结果中说明要做什么，由你自己执行。" +
-  "同一步里的多个 task 会依次执行。";
+  "同一步里的多个 task 会依次执行。" +
+  "可用 model、effort 临时指定子代理的模型和思考档位，model 写 provider/model 或模型名。" +
+  "从对话里判断不出用户指的是哪个模型，或报错给出多个候选时，有 ask_user 就用它让用户选，不要自己挑。";
 
 /** Core 装配补全工作目录、附件路径和权限回调，工具只负责按输入字段分流。 */
 interface ExternalTaskRunner {
@@ -114,13 +120,20 @@ export function createTaskTool(
       if (
         input.preset !== undefined ||
         input.tools !== undefined ||
-        input.outputSchema !== undefined
+        input.outputSchema !== undefined ||
+        input.model !== undefined ||
+        input.effort !== undefined
       ) {
-        return "agent 与 preset、tools、outputSchema 互斥";
+        return "agent 与 preset、tools、outputSchema、model、effort 互斥";
       }
       return undefined;
     }
     if (launcher === undefined) return "内置子代理未启用，必须给出 agent";
+    if (input.model !== undefined) {
+      const resolved = launcher.resolveModel?.(input.model);
+      if (resolved === undefined) return `模型 ${input.model} 不可用；可选：无`;
+      if ("error" in resolved) return resolved.error;
+    }
     if (input.preset !== undefined && input.tools !== undefined) {
       return "preset 与 tools 互斥，只能给一个";
     }
@@ -146,7 +159,7 @@ export function createTaskTool(
         : "委派自包含任务给已启用的外部 agent；通过 profile 选择执行者（agent 为兼容别名）。同一步里的多个 task 会依次执行。") +
       (hasExternalAgents
         ? `外部 agent：${agents.map((agent) => `${agent.name}${agent.description ? `（${agent.description}）` : ""}`).join("、")}。` +
-          "选择外部档位时不得给 preset、tools、outputSchema。" +
+          "选择外部档位时不得给 preset、tools、outputSchema、model、effort。" +
           "执行期权限请求经过非交互判定，剩余询问会被拒绝；仅覆盖外部 agent 主动请求的操作，不是沙箱。" +
           "外部 agent 的文件修改不受检查点或按文件回退追踪；费用与额度计在该 agent 自己的账号上。" +
           "外部 agent 看不到 task 工具，不能再委派（不能嵌套）。"
@@ -191,6 +204,16 @@ export function createTaskTool(
           : {}),
         ...(launcher !== undefined
           ? {
+              model: {
+                type: "string",
+                minLength: 1,
+                description: "本次子代理模型，provider/model 或模型名",
+              },
+              effort: {
+                type: "string",
+                enum: [...REASONING_EFFORT_ORDER],
+                description: "本次子代理思考档位",
+              },
               preset: {
                 type: "string",
                 enum: ["general", "explore"],
@@ -258,6 +281,8 @@ export function createTaskTool(
       const outcome = await launcher.launch(
         {
           task: input.task,
+          ...(input.model !== undefined ? { model: input.model } : {}),
+          ...(input.effort !== undefined ? { effort: input.effort } : {}),
           ...(input.background === true ? { background: true } : {}),
           ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
           ...(input.profile !== undefined || input.agent !== undefined

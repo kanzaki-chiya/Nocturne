@@ -2567,6 +2567,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           profiles: profileSnapshot,
           defaultModel: defaultTaskModel,
           defaultPricing: defaultTaskPricing,
+          availableModels: () =>
+            sessionRegistry.providers().flatMap((provider) =>
+              provider.models().flatMap((info) => {
+                const id = `${info.ref.provider}/${info.ref.model}`;
+                return resolveModelRole(sessionRegistry, id, "task") === undefined ? [] : [id];
+              }),
+            ),
+          resolveModel: (ref) => resolveModelRole(sessionRegistry, ref, "task"),
           resolveProfile: (name, currentModel) =>
             resolveSubagentProfile(
               name,

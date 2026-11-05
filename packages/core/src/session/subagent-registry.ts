@@ -17,6 +17,8 @@ export interface ActiveSubagent {
   readonly childSessionId: string;
   readonly background: boolean;
   readonly profile: string;
+  readonly model?: string | undefined;
+  readonly effort?: string | undefined;
   readonly taskSummary: string;
   readonly startedAt: string;
   /** 子会话已提交的全部持久事件（只读视图） */
@@ -43,6 +45,8 @@ export interface SubagentRegistry {
     parentSessionId: string;
     callId: string;
     profile: string;
+    model?: string | undefined;
+    effort?: string | undefined;
     taskSummary: string;
     background?: boolean;
   }): SubagentRegistration;
@@ -60,7 +64,16 @@ export function createSubagentRegistry(): SubagentRegistry {
   const sessions = new Map<string, Session>();
 
   return {
-    register({ child, parentSessionId, callId, profile, taskSummary, background = false }) {
+    register({
+      child,
+      parentSessionId,
+      callId,
+      profile,
+      model,
+      effort,
+      taskSummary,
+      background = false,
+    }) {
       const listeners = new Set<(signal: ObservedSignal) => void>();
       let ended = false;
       const deliver = (signal: ObservedSignal): void => {
@@ -81,6 +94,8 @@ export function createSubagentRegistry(): SubagentRegistry {
         callId,
         childSessionId: child.id,
         profile,
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { effort } : {}),
         background,
         taskSummary,
         startedAt: child.durableEvents()[0]?.time ?? new Date().toISOString(),

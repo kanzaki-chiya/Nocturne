@@ -36,6 +36,9 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 | `task` | `string`（必填） | 交给子代理的完整任务描述。子会话看不到父会话历史，任务必须自包含（需要的文件、约束、产出格式都写在这里） |
 | `preset` | `"general" \| "explore"` | 工具集预设（第 6 节）。缺省 `general`；与 `tools` 互斥 |
 | `tools` | `string[]` | 显式工具名白名单（与 `preset` 互斥）；未知名 → `invalid_input` 并列出可用名 |
+| `profile` | `string` | 缺省 `default`；内置命名档位保留工具集上限和默认超时，也可选择外部 agent |
+| `model` | `string` | 本次覆盖内置档位模型；接受完整 `provider/model` 或精确模型名，不限制于已建档位。完整 id 优先、模型名唯一匹配才使用；歧义返回 `invalid_input` 并列出候选完整 id，未知或不可用列出当前会话全部可选模型，不回退 |
+| `effort` | `ReasoningEffort` | 本次覆盖档位或会话的思考意图，可单独给出；与最终模型不兼容时统一沿用既有就近降档规则 |
 | `outputSchema` | `JsonSchema`（object） | 要求子代理按此 schema 提交结构化结果；无法编译 → `invalid_input` |
 | `timeoutMs` | `integer` | 可选的本次超时，正整数生效，不设固定封顶；省略时依次采用 profile、Runtime 的显式值，否则不超时（读取规则见 tool-api.md 第 1 节） |
 
@@ -46,6 +49,8 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 工具描述向父模型如实说明权限收敛：子会话非交互，需要确认的操作在子会话内会被拒（第 7 节）——只读/探索任务优先用 `explore`，被拒绝的操作由子代理说明、父代理自己执行；是否被拒按当前权限判定，`guarded`、`smart`、`bypass` 或规则/Grant/`--yes` 放行时子代理可以写入和执行。避免父模型派出注定失败的写操作子代理浪费步数。
 
 **ToolResult**：
+
+`model`、`effort` 与外部 agent 互斥（无论通过 `agent` 还是 `profile` 选择）。主模型不清楚用户指哪个模型或遇到多个候选时，有 `ask_user` 就让用户选；没有提问工具时仍以 `invalid_input` 返回。精确决策见 [ADR-0013 修订](../decisions/ADR-0013-subagent.md#修订2026-11-06本次调用的模型与思考档位)。
 
 - `status: "ok"`：`modelContent` 为子代理 `finish` 提交的结果文本（`outputSchema` 时为序列化 JSON）；`output` 携带 `{ childSessionId, childLogPath, model, turns, steps, usage, structured? }`。`modelContent` 超预算走既有截断+落盘路径（[tools.md](tools.md) 第 4 节，`spillPath` 在父会话附件目录）；完整过程永远在子会话日志里，`childLogPath` 随结果告知。
 - `status: "error"` 的错误码：

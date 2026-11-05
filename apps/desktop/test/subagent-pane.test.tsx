@@ -41,6 +41,17 @@ const tab: SubagentTab = {
   taskSummary: "检查依赖方向",
 };
 
+it("面板在档位旁显示实际模型和思考档位", () => {
+  const parent = taskEntry();
+  parent.input = { task: "test", profile: "quick", model: "p/m", effort: "high" };
+  const actual = { ...summary(), model: "p/m", effort: "low" };
+  const { watcher, view } = mount({ runtime: undefined, summary: actual, parentEntry: parent });
+  expect(document.querySelector(".sp-sub-head")?.textContent).toContain("p/m · low");
+  expect(document.querySelector(".sp-sub-head")?.textContent).not.toContain("high");
+  view.unmount();
+  watcher.dispose();
+});
+
 function runtimeOf() {
   const subs: { observer: SubagentObserver; unsubscribed: boolean; afterSeq?: number }[] = [];
   const runtime = {

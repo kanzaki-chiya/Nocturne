@@ -30,7 +30,7 @@ export interface SubagentProfileConfig {
   effort?: ReasoningEffort | undefined;
   /** 工具集上限；缺省 general。模型调用只能在此之上收窄，不能放宽 */
   tools?: "general" | "explore" | undefined;
-  /** 该档位的默认超时（毫秒）；请求的 timeoutMs 仍可覆盖（封顶 3600 秒不变） */
+  /** 该档位的默认超时（毫秒）；请求的 timeoutMs 仍可覆盖，不封顶 */
   timeoutMs?: number | undefined;
   enabled: boolean;
 }
@@ -111,11 +111,15 @@ export function subagentRowInfo(entry: ToolEntry): {
       ? { model: output.model }
       : live
         ? { model: live[1] }
-        : {}),
+        : typeof input?.model === "string"
+          ? { model: input.model }
+          : {}),
     ...(typeof output?.reasoningEffort === "string"
       ? { effort: output.reasoningEffort }
       : live
         ? { effort: live[2] }
-        : {}),
+        : typeof input?.effort === "string"
+          ? { effort: input.effort }
+          : {}),
   };
 }

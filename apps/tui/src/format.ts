@@ -9,7 +9,8 @@ import { subagentRowInfo } from "@nocturne/core/protocol";
 
 export function subagentModel(entry: ToolEntry): string {
   const info = subagentRowInfo(entry);
-  return `${info.profile !== undefined ? ` [${info.profile}]` : ""}${info.model !== undefined ? ` [${info.model}${info.effort !== undefined ? ` · ${info.effort}` : ""}]` : ""}`;
+  const selection = [info.model, info.effort].filter(Boolean).join(" · ");
+  return `${info.profile !== undefined ? ` [${info.profile}]` : ""}${selection ? ` [${selection}]` : ""}`;
 }
 
 /**
