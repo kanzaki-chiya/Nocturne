@@ -338,9 +338,10 @@ function usageOf(session: Session): Usage | undefined {
 export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
   const selectModel = (ref: string): { model: ResolvedModel } | { error: string } => {
     const available = deps.availableModels?.() ?? [];
+    // 模型名本身可以含 `/`（如 magpie/workbuddy/deepseek-v4.1-flash）：按任意 `/` 之后的末尾部分匹配
     const matches = available.includes(ref)
       ? [ref]
-      : available.filter((id) => id.slice(id.indexOf("/") + 1) === ref);
+      : available.filter((id) => id.endsWith(`/${ref}`));
     if (matches.length > 1) return { error: `模型 ${ref} 有多个匹配；可选：${matches.join(", ")}` };
     const model = matches[0] === undefined ? undefined : deps.resolveModel?.(matches[0]);
     return model === undefined
@@ -764,7 +765,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 ...(usageOf(child) !== undefined ? { usage: usageOf(child) } : {}),
                 ...(submitted.structured !== undefined ? { structured: submitted.structured } : {}),
               };
-              return { status: "ok", resultText: submitted.text, stats };
+              // 显式指定模型或思考档位时告诉父模型实际生效的值（思考档位可能被降档）
+              const selection =
+                request.model !== undefined || request.effort !== undefined
+                  ? `[subagent model: ${stats.model}, effort: ${stats.reasoningEffort ?? "off"}]\n`
+                  : "";
+              return { status: "ok", resultText: selection + submitted.text, stats };
             }
             if (reason !== "done") {
               if (reason === "aborted") {

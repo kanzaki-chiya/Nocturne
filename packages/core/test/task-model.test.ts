@@ -140,6 +140,34 @@ it("模型名包含斜线时仍按 provider/ 后的完整模型名精确匹配",
   }
 });
 
+it("只写末尾的模型名也能匹配含斜线的模型 id，结果告诉父模型实际模型和思考档位", async () => {
+  const result = await run({ model: "name", effort: "medium" });
+  try {
+    expect(result.childRequests[0]).toMatchObject({
+      model: "nested/name",
+      reasoningEffort: "medium",
+    });
+    const completion = result.completion;
+    if (completion?.type !== "tool.completed") throw new Error("missing task completion");
+    expect(completion.payload.modelContent).toBe(
+      "[subagent model: p/nested/name, effort: medium]\nchild result",
+    );
+  } finally {
+    await result.session.close();
+  }
+});
+
+it("不指定 model 和 effort 时结果不加前缀", async () => {
+  const result = await run({});
+  try {
+    const completion = result.completion;
+    if (completion?.type !== "tool.completed") throw new Error("missing task completion");
+    expect(completion.payload.modelContent).toBe("child result");
+  } finally {
+    await result.session.close();
+  }
+});
+
 it.each([false, true])("后台模型、用量与费用记到实际模型（隔离 %s）", async (isolated) => {
   const result = await run(
     {
