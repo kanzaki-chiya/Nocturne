@@ -10,6 +10,7 @@ import {
 } from "../permission/index.js";
 import { createPlatform, type Platform } from "../platform/index.js";
 import type { Grant, ToolCallRef } from "../protocol/index.js";
+import { parseRipgrepFiles } from "./builtin/glob.js";
 import { globToRegExp } from "./builtin/globmatch.js";
 import { compileGitignore, matchGitignore } from "./builtin/gitignore.js";
 import {
@@ -995,6 +996,27 @@ describe("grep / glob 边界与行为", () => {
     expect(r.result.modelContent).toContain("keep.ts");
     expect(r.result.modelContent).not.toContain("x.ts");
     expect(r.result.modelContent).not.toContain("drop.tmp");
+  });
+
+  it("glob 的 * 只匹配顶层文件，结果路径不带 ./ 前缀", async () => {
+    const ws = tmpWorkspace();
+    await writeWs(ws, "top.py", "x");
+    await writeWs(ws, "sub/deep.py", "y");
+    const h = await makeHarness(ws);
+    const top = await h.executor.execute(call("glob", { pattern: "*" }), h.scope);
+    expect(top.result.modelContent).toBe("top.py");
+    const nested = await h.executor.execute(call("glob", { pattern: "sub/*" }), h.scope);
+    expect(nested.result.modelContent).toBe("sub/deep.py");
+  });
+});
+
+describe("parseRipgrepFiles", () => {
+  it("Windows 的 .\\ 前缀和反斜杠统一成相对路径", () => {
+    expect(parseRipgrepFiles(".\\top.py\r\n.\\sub\\deep.py\r\n")).toEqual([
+      "top.py",
+      "sub/deep.py",
+    ]);
+    expect(parseRipgrepFiles("./top.py\n./sub/deep.py\n")).toEqual(["top.py", "sub/deep.py"]);
   });
 });
 

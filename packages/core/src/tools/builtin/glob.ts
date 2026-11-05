@@ -54,11 +54,15 @@ async function globWithRipgrep(rootAbs: string, ctx: ToolContext): Promise<strin
   ]);
   if (exit.code === null) return null;
   if (exit.code !== 0 && exit.code !== 1) return [];
+  return parseRipgrepFiles(stdout);
+}
+
+/** Windows 上 rg 输出 `.\a\b`：先统一分隔符再去掉 `./`，否则前缀留在 rel 里，模式整体错一层 */
+export function parseRipgrepFiles(stdout: string): string[] {
   return stdout
-    .split("\n")
-    .map((l) => l.replace(/^\.\//, ""))
-    .filter((l) => l !== "")
-    .map((l) => l.replaceAll("\\", "/"));
+    .split(/\r?\n/u)
+    .map((l) => l.replaceAll("\\", "/").replace(/^\.\//u, ""))
+    .filter((l) => l !== "");
 }
 
 async function globInternal(
