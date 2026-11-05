@@ -33,13 +33,28 @@ function answerText(a: QuestionAnswer): string {
 function questionRows(question: string, width: number): string[] {
   return wrap(question, width).map((line) => line.text);
 }
+/** 确认页：问题和回答各自折行，窄窗口下回答不会被截在问题行尾部。 */
+function confirmRows(
+  pending: PendingQuestion,
+  answers: readonly QuestionAnswer[],
+  width: number,
+): string[] {
+  return [
+    "确认回答：",
+    ...pending.questions.flatMap((qq, i) => [
+      ...questionRows(qq.question, width),
+      ...questionRows("→ " + answerText(answers[i] ?? { selected: [] }), width),
+    ]),
+  ];
+}
 export function questionDialogRows(
   pending: PendingQuestion,
   width: number,
   index = 0,
   confirm = false,
+  answers: readonly QuestionAnswer[] = [],
 ): number {
-  if (confirm) return pending.questions.length + 5;
+  if (confirm) return confirmRows(pending, answers, width).length + 4;
   const q = pending.questions[index];
   return (
     (q?.options?.length ?? 0) +
@@ -62,7 +77,7 @@ export function QuestionDialog({
   onReply: (reply: QuestionReply) => void;
   width: number;
   height?: number;
-  onPageChange?: (index: number, confirm: boolean) => void;
+  onPageChange?: (index: number, confirm: boolean, answers: QuestionAnswer[]) => void;
   onEscape?: () => void;
 }): React.JSX.Element {
   const env = useTuiEnv();
@@ -85,18 +100,25 @@ export function QuestionDialog({
   const q = pending.questions[index];
   const opts = q?.options ?? [];
   const draft = drafts[index];
-  const update = (patch: Partial<Draft>): void => {
+  const update = (patch: Partial<Draft>): Draft[] => {
+    const next = drafts.map((d, i) => (i === index ? { ...d, ...patch } : d));
     setDrafts((ds) => ds.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+    return next;
   };
-  const page = (next: number, confirmation = false): void => {
+  const page = (next: number, confirmation = false, current = drafts): void => {
     setIndex(next);
     setConfirm(confirmation);
     setFocus(0);
     setPeek(0);
-    onPageChange?.(next, confirmation);
+    // 带上答案：确认页按折行后的行数算高度
+    onPageChange?.(next, confirmation, toAnswers(current));
   };
-  const advance = (): void => {
-    page(Math.min(index + 1, pending.questions.length - 1), index === pending.questions.length - 1);
+  const advance = (current = drafts): void => {
+    page(
+      Math.min(index + 1, pending.questions.length - 1),
+      index === pending.questions.length - 1,
+      current,
+    );
   };
   useInput(
     (input, key) => {
@@ -133,13 +155,20 @@ export function QuestionDialog({
       const other = focus === opts.length;
       const decline = focus === opts.length + 1;
       if (key.return) {
-        if (q.multiSelect !== true) {
-          if (decline) update({ declined: true, selected: [], text: "", editing: false });
-          else if (!other && opts[focus])
-            update({ declined: false, selected: [opts[focus].label], text: "", editing: false });
-          else update({ declined: false, editing: false });
-        } else update({ editing: false });
-        advance();
+        advance(
+          q.multiSelect === true
+            ? update({ editing: false })
+            : decline
+              ? update({ declined: true, selected: [], text: "", editing: false })
+              : !other && opts[focus]
+                ? update({
+                    declined: false,
+                    selected: [opts[focus].label],
+                    text: "",
+                    editing: false,
+                  })
+                : update({ declined: false, editing: false }),
+        );
         return;
       }
       if (input === " " && q.multiSelect === true && !other && !key.ctrl && !key.meta) {
@@ -198,12 +227,7 @@ export function QuestionDialog({
         ? "其他（自己输入）"
         : "回答：" + OTHER_PLACEHOLDER);
   const rows: string[] = confirm
-    ? [
-        "确认回答：",
-        ...pending.questions.map(
-          (qq, i) => qq.question + " → " + answerText(answers[i] ?? { selected: [] }),
-        ),
-      ]
+    ? confirmRows(pending, answers, width)
     : [
         ...(q?.header !== undefined || pending.questions.length > 1
           ? [
@@ -232,7 +256,7 @@ export function QuestionDialog({
           (q?.multiSelect ? (draft?.declined ? "[x]" : "[ ]") : draft?.declined ? "(o)" : "( )") +
           " 拒绝回答",
       ];
-  const h = height ?? questionDialogRows(pending, width, index, confirm);
+  const h = height ?? questionDialogRows(pending, width, index, confirm, answers);
   const bordered = h >= 3;
   const room = Math.max(0, h - (bordered ? 2 : 0));
   const titleRows = room >= 3 ? 1 : 0;

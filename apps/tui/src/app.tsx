@@ -29,6 +29,7 @@ import {
   type ReasoningEffort,
   type PermissionReply,
   type ProviderOverview,
+  type QuestionAnswer,
   type QuestionReply,
   type Runtime,
   type RuntimeSession,
@@ -1094,11 +1095,12 @@ function SessionApp({
     requestId: string | undefined;
     index: number;
     confirm: boolean;
-  }>({ requestId: undefined, index: 0, confirm: false });
+    answers: QuestionAnswer[];
+  }>({ requestId: undefined, index: 0, confirm: false, answers: [] });
   const questionPage =
     pendingQ !== undefined && questionPageState.requestId === pendingQ.requestId
       ? questionPageState
-      : { index: 0, confirm: false };
+      : { index: 0, confirm: false, answers: [] };
   // schedule 权限详情（ADR-0064）的展开状态按 requestId 记录并在渲染时派生：新请求默认折叠
   const [expandedPermission, setExpandedPermission] = useState<string | undefined>(undefined);
   const permissionExpanded = pending !== undefined && expandedPermission === pending.requestId;
@@ -2936,7 +2938,13 @@ function SessionApp({
     pending !== undefined
       ? permissionDialogRows(pending, width, permissionExpanded)
       : pendingQ !== undefined
-        ? questionDialogRows(pendingQ, width, questionPage.index, questionPage.confirm)
+        ? questionDialogRows(
+            pendingQ,
+            width,
+            questionPage.index,
+            questionPage.confirm,
+            questionPage.answers,
+          )
         : 0,
   );
   const conversationHeight = budget.conversation - popupHeight;
@@ -3315,8 +3323,8 @@ function SessionApp({
         active={!dialogOpen}
         onReply={replyQuestion}
         height={popupHeight}
-        onPageChange={(index, confirm) => {
-          setQuestionPage({ requestId: pendingQ.requestId, index, confirm });
+        onPageChange={(index, confirm, answers) => {
+          setQuestionPage({ requestId: pendingQ.requestId, index, confirm, answers });
         }}
         onEscape={escapePrompt}
         width={width}

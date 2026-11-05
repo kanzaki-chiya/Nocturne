@@ -92,8 +92,8 @@ describe("提问面板", () => {
     await pause();
     screen.stdin.write("\r");
     await pause(); // 第二题选丙
-    expect(screen.lastFrame()).toContain("第一题？ > 拒绝回答");
-    expect(screen.lastFrame()).toContain("第二题？ > 丙");
+    expect(screen.lastFrame()).toMatch(/第一题？[^\n]*\n[^\n]*> 拒绝回答/);
+    expect(screen.lastFrame()).toMatch(/第二题？[^\n]*\n[^\n]*> 丙/);
     screen.stdin.write("\r");
     await pause();
     expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }, { selected: ["丙"] }] });
@@ -245,7 +245,7 @@ describe("提问面板", () => {
     stdin.write("\r");
     await pause();
     expect(lastFrame()).toContain("确认回答");
-    expect(lastFrame()).toContain("选哪个方案？ > 方案B"); // 框内 → 经 boxSafe 显示为 >
+    expect(lastFrame()).toMatch(/选哪个方案？[^\n]*\n[^\n]*> 方案B/); // 框内 → 经 boxSafe 显示为 >
     stdin.write("\r");
     await pause();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案B"] }] });
@@ -331,7 +331,7 @@ describe("提问面板", () => {
     expect(lastFrame()).not.toContain("小夜曲_");
     stdin.write("\r");
     await pause();
-    expect(lastFrame()).toContain("想要什么名字？ > 小夜曲");
+    expect(lastFrame()).toMatch(/想要什么名字？[^\n]*\n[^\n]*> 小夜曲/);
     stdin.write("\r");
     await pause();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: [], text: "小夜曲" }] });
@@ -387,7 +387,7 @@ describe("提问面板", () => {
     await pause();
     stdin.write("\r");
     await pause();
-    expect(lastFrame()).toContain("选哪个方案？ > 方案B");
+    expect(lastFrame()).toMatch(/选哪个方案？[^\n]*\n[^\n]*> 方案B/);
     stdin.write("\r");
     await pause();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案B"] }] });
@@ -489,6 +489,34 @@ describe("提问面板", () => {
     stdin.write("\r");
     await pause();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案A"] }] });
+    unmount();
+  });
+  it("窄终端确认页：长问题与长回答都折行显示完整，Enter 仍可提交", async () => {
+    const reply = vi.fn();
+    const pending: PendingQuestion = {
+      requestId: "q-narrow",
+      callId: "c-narrow",
+      questions: [
+        {
+          question: "要把只写模型名会因多个服务商命中而报错这条行为写进文档吗？",
+          options: [{ label: "写进文档并补一张对照表" }, { label: "不用" }],
+        },
+      ],
+    };
+    const { lastFrame, stdin, unmount } = render(
+      inEnv(createElement(QuestionDialog, { pending, active: true, onReply: reply, width: 24 })),
+    );
+    await pause();
+    stdin.write("\r");
+    await pause();
+    const frame = (lastFrame() ?? "").replace(/[│╭╮╰╯─\s]/g, "");
+    expect(frame).toContain("确认回答");
+    expect(frame).toContain("要把只写模型名会因多个服务商命中而报错这条行为写进文档吗？");
+    expect(frame).toContain(">写进文档并补一张对照表");
+    expect(frame).toContain("Enter提交");
+    stdin.write("\r");
+    await pause();
+    expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["写进文档并补一张对照表"] }] });
     unmount();
   });
 });
