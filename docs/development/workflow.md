@@ -68,7 +68,7 @@ pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖�
 pnpm build          # tsdown 构建 packages/core/dist
 ```
 
-全量验收要看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
+日常改动在本地只跑 `typecheck`、`lint`、`format:check`、`depcheck`、`build` 和改动涉及的包（`pnpm --filter <包名> test`；改了共享类型时加上依赖它的包），全量测试交给推送后的 CI。需要在本地看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
 
 本地 vitest 按包限制并发（TUI 4 个 worker，core、rpc、cli、desktop、`scripts/` 6 个），开发机同时还在使用；CI 保持默认。
 
@@ -76,7 +76,7 @@ pnpm build          # tsdown 构建 packages/core/dist
 
 core 的默认测试经 `test/setup-offline.ts` 把全局 `fetch` 限制为只能访问本机地址，访问外网直接报错；需要网络行为的用例自行注入 fetch（如 `modelsDevFetch`）或用 `vi.stubGlobal` 桩掉。rpc 包的同名文件还把 `NOCTURNE_HOME` 指向每个测试文件独立的临时目录，测试不得读写维护者的真实数据目录。
 
-发布前手动运行 `node scripts/update-models-dev-snapshot.mjs` 更新随版本内置的 models.dev 裁剪快照；检查生成文件的模型数、大小与变更，再执行完整验证。运行时启动不联网，添加服务商或刷新模型列表才更新本地缓存（[config.md](../architecture/config.md)）。
+发布前手动运行 `node scripts/update-models-dev-snapshot.mjs` 更新随版本内置的 models.dev 裁剪快照；检查生成文件的模型数、大小与变更。运行时启动不联网，添加服务商或刷新模型列表才更新本地缓存（[config.md](../architecture/config.md)）。
 
 真实 OpenAI 兼容服务冒烟测试与默认测试集分离，不进 `pnpm test`：
 
@@ -164,7 +164,7 @@ ADR-0061 Gemini 冒烟只要求 `NOCTURNE_SMOKE_OPENCODE_API_KEY` 与 `NOCTURNE_
 
 1. **版本号**：`node scripts/release-version.mjs <version>` 一次改齐所有 `package.json`、桌面与安卓的 `tauri.conf.json`、`Cargo.toml`、`Cargo.lock` 本包版本、npm 模板，以及源码里的版本常量（core `NOCTURNE_VERSION`、mcp/acp `CLIENT_VERSION`、mcp-server `SERVER_VERSION`、cli `VERSION`、tui `APP_VERSION`、relay `RELAY_VERSION`）；重复执行同一版本号不报错；`--check <version>` 只校验不写（流水线用它核对标签）。
 2. **CHANGELOG.md**：为 `<version>` 补一节（`## <version>` 标题格式），[release-notes.mjs](../../scripts/release-notes.mjs) 提取该节作为 Release 说明与 `latest.json` 的 `notes`；找不到对应小节会让发布构建失败。
-3. **打标签**：审阅变更后 `git tag v<version>` 并推送标签。
+3. **打标签**：审阅变更后先推送 `main`，等该提交的 CI 通过，再 `git tag v<version>` 并推送标签。
 4. **流水线**：`.github/workflows/release.yml` 在 windows-latest 上跑完整检查（typecheck / lint / format / depcheck / build / test）、版本一致性校验、`pnpm release:build`（带签名环境变量）、两种 tgz 安装冒烟，然后 `gh release create --draft`（版本号含 `-` 时另加 `--prerelease`）上传 `setup.exe`、`.sig`、`latest.json`、`nctrn-<version>.tgz`、`nocturne-relay-<version>.tgz`；ubuntu-latest 与 macos-latest 对两种 tgz 做安装冒烟，结果分别追加进草稿说明。
 5. **审草稿**：核对产物、说明与冒烟结果，确认无误后发布 Release（草稿转正式）。主页由 `pages.yml` 在 Release 发布后自动更新，不需要手动处理（[主页维护](site.md)）。
 6. **npm 发布**（暂缓，见 [ADR-0050 修订](../decisions/ADR-0050-distribution.md#修订)；当前命令行版只随 Release 附 tgz）：`.github/workflows/publish-npm.yml`（workflow_dispatch，输入版本号）从已发布的 Release 下载 tgz 后 `npm publish`，走 npm 受信发布（OIDC）；预发布号挂 `next` 标签，不动 `latest`；版本号输入只经环境变量进入 shell，并先按 semver 正则校验。
