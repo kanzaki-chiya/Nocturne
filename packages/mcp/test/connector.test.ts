@@ -447,3 +447,51 @@ describe("连接阶段的关闭只报一次启动失败", () => {
     }
   });
 });
+
+describe("工具 outputSchema 的非标准 format", () => {
+  it("uint64 等未知 format 的警告写进诊断日志，不经 console", async () => {
+    const records: { kind: string; data: Record<string, unknown> }[] = [];
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const session = await createMcpConnector().open({
+      servers: [
+        {
+          name: "fake",
+          origin: "user",
+          command: process.execPath,
+          args: [FAKE_SERVER],
+          env: { NOCTURNE_TEST_OUTPUT_SCHEMA: "1" },
+        },
+      ],
+      cwd,
+      workspaceRoot: cwd,
+      sessionId: "test-session",
+      platform,
+      emitServer: () => undefined,
+      warn: () => undefined,
+      diagnostics: { record: (kind, data) => records.push({ kind, data: data ?? {} }) },
+    });
+    try {
+      await session.startup();
+      session.applyPendingTools();
+      const result = await call(getTool(session, "mcp__fake__typed"), {});
+      expect(result.status).toBe("ok");
+      const printed = [...consoleWarn.mock.calls, ...consoleLog.mock.calls].map((args) =>
+        args.map(String).join(" "),
+      );
+      expect(printed.filter((line) => line.includes("unknown format"))).toEqual([]);
+      expect(
+        records.some(
+          (r) =>
+            r.kind === "mcp.event" &&
+            r.data.server === "fake" &&
+            String(r.data.warning).includes('unknown format "uint64"'),
+        ),
+      ).toBe(true);
+    } finally {
+      consoleWarn.mockRestore();
+      consoleLog.mockRestore();
+      await session.close();
+    }
+  });
+});

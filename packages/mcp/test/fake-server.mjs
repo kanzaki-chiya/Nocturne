@@ -62,6 +62,20 @@ const tools = [
   },
 ];
 
+// outputSchema 里带非标准 format（与 cua-driver 相同的 uint64），只在需要时声明
+if (process.env.NOCTURNE_TEST_OUTPUT_SCHEMA !== undefined) {
+  tools.push({
+    name: "typed",
+    description: "返回带非标准 format 的结构化结果",
+    inputSchema: { type: "object", properties: {} },
+    outputSchema: {
+      type: "object",
+      properties: { window_id: { type: "integer", format: "uint64" } },
+      required: ["window_id"],
+    },
+  });
+}
+
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
 }
@@ -104,6 +118,12 @@ function handleCall(id, params) {
       respond(id, { content: [{ type: "text", text: JSON.stringify(report) }] });
       return;
     }
+    case "typed":
+      respond(id, {
+        content: [{ type: "text", text: '{"window_id":42}' }],
+        structuredContent: { window_id: 42 },
+      });
+      return;
     case "mutate":
       tools.push({
         name: "added",

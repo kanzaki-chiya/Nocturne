@@ -24,6 +24,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@nocturne/core": "workspace:*"
+    "@nocturne/core": "workspace:*",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
   }
 }

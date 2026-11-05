@@ -7,6 +7,9 @@
  * - close() 终止全部服务器进程树。
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import { Ajv } from "ajv";
+import addFormatsModule from "ajv-formats";
 import { createHash } from "node:crypto";
 import {
   StreamableHTTPClientTransport,
@@ -48,6 +51,35 @@ const MAX_RESTARTS = 3;
 const HTTP_RETRY_COOLDOWN_MS = 30_000;
 /** Turn 边界恢复尝试的最长等待：超时后转入后台，结果下一次 Turn 边界应用 */
 const TURN_RECONNECT_WAIT_MS = 3_000;
+
+const addFormats = addFormatsModule as unknown as typeof addFormatsModule.default;
+
+/**
+ * 工具 outputSchema 的校验器：选项与 SDK 默认实例一致，只把 Ajv 的日志从 console
+ * 改写进诊断日志。服务器 schema 里的非标准 format（如 uint64）会触发 warn，
+ * 走 console 时会直接画进 TUI。
+ */
+export function createOutputSchemaValidator(
+  warn: (message: string) => void,
+): AjvJsonSchemaValidator {
+  const ajv = new Ajv({
+    strict: false,
+    validateFormats: true,
+    validateSchema: false,
+    allErrors: true,
+    logger: {
+      log: () => undefined,
+      warn: (...args: unknown[]) => {
+        warn(args.map(String).join(" "));
+      },
+      error: (...args: unknown[]) => {
+        warn(args.map(String).join(" "));
+      },
+    },
+  });
+  addFormats(ajv);
+  return new AjvJsonSchemaValidator(ajv);
+}
 
 interface ServerRuntime {
   proc?: PipeProcess | undefined;
@@ -524,7 +556,18 @@ async function connectServer(scope: McpOpenScope, st: Server, run: number): Prom
     }
     transport = new StdioPipeTransport(proc);
   }
-  const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION }, { capabilities: {} });
+  const client = new Client(
+    { name: CLIENT_NAME, version: CLIENT_VERSION },
+    {
+      capabilities: {},
+      jsonSchemaValidator: createOutputSchemaValidator((message) => {
+        scope.diagnostics?.record("mcp.event", {
+          server: st.cfg.name,
+          warning: safeText(st, message),
+        });
+      }),
+    },
+  );
   const runtime: ServerRuntime = { proc, transport, client };
   if (!isCurrentAttempt(st, run)) {
     // 尝试已被关闭/重配取代：丢弃刚建的运行时，不发布任何状态
