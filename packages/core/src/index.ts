@@ -1880,7 +1880,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         grants: { session: sessionGrants, project: ws?.grants },
         saveAppPermissions: async (subjects) => {
           const store = config?.appPermissions;
-          if (store === undefined) throw new Error("用户规则存储不可用");
+          if (store === undefined || subjects.some((subject) => subject.appUnresolved === true))
+            throw new Error("用户规则存储不可用");
           for (const subject of subjects) await store.set(subject.target, "allow");
         },
         hooks: hookRunner,

@@ -20,6 +20,8 @@ interface ToolDefinition<Input = unknown, Output = unknown> {
   traits: ToolTraits
   /** 纯函数：本次调用会碰到哪些对象（未解析），供执行器解析后交给权限层判定。不得做 I/O */
   permissionSubjects(input: Input, scope: ToolScope): SubjectRequest[]
+  resolveSubject?(request: SubjectRequest, scope: ToolScope): Promise<PermissionSubject>
+  finishTurn?(sessionId: string, turnId: string): Promise<void>
   /**
    * 可选的输入语义预检（纯函数，无 I/O）：在 schema 校验与 PreToolUse Hook
    *（含 updatedInput 重新校验）之后、permissionSubjects 之前调用；返回非空

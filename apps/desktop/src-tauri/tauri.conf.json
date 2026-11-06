@@ -4,8 +4,8 @@
   "version": "0.34.0",
   "identifier": "io.github.kanzaki-chiya.nocturne",
   "build": {
-    "beforeDevCommand": "pnpm vite",
-    "beforeBuildCommand": "pnpm vite build",
+    "beforeDevCommand": "node ../../scripts/fetch-computer.mjs && pnpm vite",
+    "beforeBuildCommand": "node ../../scripts/fetch-computer.mjs && pnpm vite build",
     "devUrl": "http://localhost:31420",
     "frontendDist": "../dist"
   },
@@ -35,7 +35,8 @@
     "resources": {
       "resources/nctrn.mjs": "nctrn.mjs",
       "resources/node/node.exe": "node/node.exe",
-      "resources/node/LICENSE": "node/LICENSE"
+      "resources/node/LICENSE": "node/LICENSE",
+      "resources/computer/": "computer/"
     },
     "windows": {
       "nsis": {

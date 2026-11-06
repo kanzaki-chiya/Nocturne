@@ -189,11 +189,30 @@ export async function runTurn(
     turnUsage.reasoningTokens += u.reasoningTokens ?? 0;
   };
 
+  let cleanedUp = false;
+  async function cleanupTurn() {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    const cleanups = new Set(
+      deps.tools.list().flatMap((tool) => (tool.finishTurn === undefined ? [] : [tool.finishTurn])),
+    );
+    for (const cleanup of cleanups) {
+      try {
+        await cleanup(session.id, turnId);
+      } catch (error) {
+        deps.execEnv.diagnostics?.record("tool.cleanup_failed", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+      }
+    }
+  }
+
   /** Turn 唯一出口：结算未完成调用 → turn.completed（持久化失败时直接返回） */
   async function finish(
     reason: TurnEndReason,
     error?: { code: string; message: string },
   ): Promise<TurnEndReason> {
+    await cleanupTurn();
     if (session.health !== "ok") return reason; // 3.6：无法再可靠写入
     // 结算本 Turn 中尚未 tool.completed 的调用
     for (const call of session.state().unsettledCalls.values()) {
@@ -672,5 +691,7 @@ export async function runTurn(
       if (!isPersistenceFailure(inner)) throw inner;
       return "failed";
     }
+  } finally {
+    await cleanupTurn();
   }
 }

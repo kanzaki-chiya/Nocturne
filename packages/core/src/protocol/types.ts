@@ -307,8 +307,19 @@ export interface ShellRiskProfile {
 }
 
 /** 工具声明的、未解析的权限主体（tool-api.md 第 1 节；permissionSubjects 纯函数产出） */
+export interface ApplicationTarget {
+  pid?: number | undefined;
+  windowId?: number | undefined;
+  name?: string | undefined;
+  title?: string | undefined;
+  icon?: string | undefined;
+  identity?: string | undefined;
+}
+
 export interface SubjectRequest {
   kind: SubjectKind;
+  app?: ApplicationTarget | undefined;
+  appUnresolved?: boolean | undefined;
   /** 词法规范化后的目标（绝对路径、命令字符串、URL） */
   target: string;
   /** 仅供用户查看，不参与规则、Grant 或 Hook 判定（ADR-0033）。 */
@@ -343,6 +354,8 @@ export type SubjectWhere = "workspace" | "outside";
 /** 解析后的权限主体（permissions.md 第 2 节） */
 export interface PermissionSubject {
   kind: SubjectKind;
+  app?: ApplicationTarget | undefined;
+  appUnresolved?: boolean | undefined;
   /** 工具给出的目标（规范化后的路径、命令、URL） */
   target: string;
   /** 仅供用户查看，不参与规则、Grant 或 Hook 判定（ADR-0033）。 */

@@ -279,8 +279,9 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
           };
         }
       }
+      if (s.appUnresolved === true && action !== "deny") action = "ask";
       const grant =
-        action === "ask" && skipApprovals !== true
+        action === "ask" && s.appUnresolved !== true && skipApprovals !== true
           ? matchGrant(resolveGrants(grantsOpt?.session), s, caseSensitive)
           : undefined;
       if (grant !== undefined) {

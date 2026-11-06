@@ -1220,6 +1220,7 @@ function statusOf(st: Server): McpServerStatus {
 export interface RuntimeMcpSource {
   open(scope: McpOpenScope): Promise<{
     servers: readonly McpServerConfig[];
+    connection?: McpSession | undefined;
     credentials: { get(id: string): Promise<string | undefined> };
     callerMetadata: boolean;
     close(): Promise<void>;
@@ -1282,6 +1283,7 @@ export function createMcpConnector(options?: {
       // 受信运行时来源先装配：不写用户 mcp.json，凭据只放内存；同名（忽略大小写）
       // 报冲突并跳过用户配置条目。
       const runtimeClosers: (() => Promise<void>)[] = [];
+      const runtimeConnections: McpSession[] = [];
       const runtimeServers: { cfg: McpServerConfig; callerMetadata: boolean }[] = [];
       let effectiveScope: McpOpenScope = scope;
       const sources = options?.runtimeServers ?? [];
@@ -1292,6 +1294,7 @@ export function createMcpConnector(options?: {
         const runtimeCreds: { get(id: string): Promise<string | undefined> }[] = [];
         for (const res of opened) {
           if (res === undefined) continue;
+          if (res.connection !== undefined) runtimeConnections.push(res.connection);
           for (const cfg of res.servers) {
             if (cfg.enabled === false) continue;
             runtimeServers.push({ cfg, callerMetadata: res.callerMetadata });
@@ -1318,7 +1321,12 @@ export function createMcpConnector(options?: {
           };
         }
       }
-      const runtimeNames = new Set(runtimeServers.map((s) => s.cfg.name.toLowerCase()));
+      const runtimeNames = new Set([
+        ...runtimeServers.map((s) => s.cfg.name.toLowerCase()),
+        ...runtimeConnections.flatMap((connection) =>
+          connection.status().map((server) => server.name.toLowerCase()),
+        ),
+      ]);
       const removed: string[] = [];
       const servers: Server[] = effectiveScope.servers
         .filter((cfg) => cfg.enabled !== false)
@@ -1416,7 +1424,13 @@ export function createMcpConnector(options?: {
             signal?.addEventListener("abort", aborted, { once: true });
           });
           try {
-            await Promise.race([initialStartup, cancel]);
+            await Promise.race([
+              Promise.all([
+                initialStartup,
+                ...runtimeConnections.map((connection) => connection.startup(signal)),
+              ]),
+              cancel,
+            ]);
           } finally {
             if (aborted) signal?.removeEventListener("abort", aborted);
           }
@@ -1506,7 +1520,10 @@ export function createMcpConnector(options?: {
           }
         },
         tools() {
-          return servers.flatMap((st) => [...st.tools.values()]);
+          return [
+            ...servers.flatMap((st) => [...st.tools.values()]),
+            ...runtimeConnections.flatMap((connection) => [...connection.tools()]),
+          ];
         },
         /**
          * Turn 边界恢复（mcp.md 第 4 节）：对 failed 且已过冷却的 HTTP 服务器
@@ -1516,6 +1533,11 @@ export function createMcpConnector(options?: {
          */
         async prepareTurn(signal?: AbortSignal) {
           if (signal?.aborted) return;
+          await Promise.all(
+            runtimeConnections.map(async (connection) => {
+              await connection.prepareTurn?.(signal);
+            }),
+          );
           const now = Date.now();
           const targets = servers.filter(
             (st) =>
@@ -1552,10 +1574,19 @@ export function createMcpConnector(options?: {
           }
         },
         status() {
-          return servers.map(statusOf);
+          return [
+            ...servers.map(statusOf),
+            ...runtimeConnections.flatMap((connection) => connection.status()),
+          ];
         },
         applyPendingTools(): McpToolDiff {
-          const diff: McpToolDiff = { add: [], remove: removed.splice(0) };
+          const runtimeDiffs = runtimeConnections.map((connection) =>
+            connection.applyPendingTools(),
+          );
+          const diff: McpToolDiff = {
+            add: runtimeDiffs.flatMap((change) => change.add),
+            remove: [...removed.splice(0), ...runtimeDiffs.flatMap((change) => change.remove)],
+          };
           for (const st of servers) {
             if (st.staged === undefined) continue;
             const staged = st.staged;
@@ -1570,6 +1601,13 @@ export function createMcpConnector(options?: {
             st.tools = staged;
           }
           return diff;
+        },
+        async finishTurn(sessionId) {
+          await Promise.all(
+            runtimeConnections.map(async (connection) => {
+              await connection.finishTurn?.(sessionId);
+            }),
+          );
         },
         async close() {
           await Promise.all(

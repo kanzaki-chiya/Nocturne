@@ -101,6 +101,7 @@ function main() {
 
   console.log("== 5/7 随附 Node");
   run("node", [join(root, "scripts", "fetch-node.mjs")], { cwd: root });
+  run("node", [join(root, "scripts", "fetch-computer.mjs")], { cwd: root });
 
   console.log("== 6/7 cargo test");
   run("cargo", ["test", "--manifest-path", join(tauriDir, "Cargo.toml")], { cwd: root });

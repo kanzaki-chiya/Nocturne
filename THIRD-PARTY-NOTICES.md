@@ -81,6 +81,12 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 
 这些是通过各包 `package.json` 核对的直接依赖；间接依赖与完整许可文本可从 `pnpm-lock.yaml` 和安装后的 `node_modules` 查阅。仓库未从参考项目复制第三方源文件，故没有需要附加的来源 NOTICE。
 
+## 电脑操控驱动
+
+Windows 桌面包随附 Cua AI, Inc. 官方签名的 cua-driver `0.40.2` 发布包（MIT，Copyright (c) 2025 Cua AI, Inc.），作为独立 stdio 子进程运行，不链接进 Core。版本、官方发布包地址、压缩包和全部文件的 SHA-256 统一记录在 [computer-release.json](packages/mcp/src/computer-release.json)。下载与打包会校验压缩包、逐文件哈希及可执行文件的 Authenticode 签名，源码仓库不收录二进制。
+
+官方包自带 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`，原样随同全部发布文件安装到 `computer/` 资源目录；其中记录驱动内 Rust、原生及其他第三方组件的声明。驱动与这些组件的许可证、版权和进一步声明以这两个随附文件为准。本项目没有重新编译或修改驱动。
+
 ## 中继包内的手机网页
 
 按 Vite 产物 chunk.modules 核对，手机网页实际内联 `react` 19.3.0、`react-dom` 19.3.0、`scheduler` 0.28.0、`marked` 18.0.7、`zod` 4.6.5，均已列入上表；另内联 `mingcute_icon` 2.9.72 的部分线性图标路径数据（Apache-2.0，见下方「界面图标」）；不包含 Tauri 或 qrcode-generator。中继服务内联本仓库的 remote，`ws` 8.22.0 保留为安装依赖并附带其原始许可。以下保留手机网页第三方代码的版权和许可文本。

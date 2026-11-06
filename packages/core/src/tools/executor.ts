@@ -61,10 +61,19 @@ function errorResult(code: string, message: string): ToolResult {
 export async function resolveSubjects(
   requests: SubjectRequest[],
   scope: Pick<ExecutionScope, "platform">,
+  resolver?: (request: SubjectRequest) => Promise<PermissionSubject>,
 ): Promise<PermissionSubject[]> {
   const subjects: PermissionSubject[] = [];
   for (const req of requests) {
-    if (PATH_KINDS.has(req.kind)) {
+    if (req.kind === "app") {
+      try {
+        subjects.push(
+          resolver === undefined ? { ...req, appUnresolved: true } : await resolver(req),
+        );
+      } catch {
+        subjects.push({ ...req, appUnresolved: true });
+      }
+    } else if (PATH_KINDS.has(req.kind)) {
       const resolved = await scope.platform.resolveReal(req.target);
       subjects.push({
         kind: req.kind,
@@ -407,7 +416,12 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       // 4. 解析资源（唯一做 I/O 的准备步骤）
       let subjects: PermissionSubject[];
       try {
-        subjects = await resolveSubjects(requests, scope);
+        const resolver = tool.resolveSubject;
+        subjects = await resolveSubjects(
+          requests,
+          scope,
+          resolver === undefined ? undefined : (request) => resolver(request, scope),
+        );
       } catch (e) {
         return finish(
           "error",

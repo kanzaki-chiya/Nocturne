@@ -10,7 +10,12 @@ import type { Readable, Writable } from "node:stream";
 
 import { createAcpConnector } from "@nocturne/acp";
 import { createRuntime, type Platform } from "@nocturne/core";
-import { createMcpConnector, type RuntimeMcpSource } from "@nocturne/mcp";
+import {
+  createMcpConnector,
+  createComputerSource,
+  takeComputerBootstrap,
+  type RuntimeMcpSource,
+} from "@nocturne/mcp";
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
 
 import type { CliArgs } from "./args.js";
@@ -65,7 +70,9 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
   // 桌面浏览器启动凭证（desktop-browser.md 第 1 节）：进程专属环境字段，读出后立即删除，
   // 不进 shellEnvStrip/子进程/日志；无该字段时（CLI/TUI 自行启动）无内置来源。
   const bootstrap = takeDesktopBrowserBootstrap();
+  let computer: ReturnType<typeof createComputerSource> | undefined;
   try {
+    const computerBootstrap = takeComputerBootstrap(process.env);
     // 与 trust/setup 一致：不要求已有模型或服务商——桌面端首次启动时还没配置，
     // 之后经配置相关方法补齐；已声明却无法解析的配置照常报错（退出码 2）
     const collected = await collectConfig(args, platform, undefined, { requireModel: false });
@@ -78,6 +85,16 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
     const debugEnabled = args.debug || /^(1|true|yes|on)$/i.test(process.env.NOCTURNE_DEBUG ?? "");
     const runtimeConfig = collected.config.runtime;
     const { sessionsDir } = runtimeConfig;
+    if (computerBootstrap !== undefined)
+      computer = createComputerSource({
+        platform,
+        cwd,
+        home: runtimeConfig.nocturneHome,
+        executable: computerBootstrap.executable,
+      });
+    const runtimeServers: RuntimeMcpSource[] = [];
+    if (bootstrap !== undefined) runtimeServers.push(createDesktopBrowserSource(bootstrap));
+    if (computer !== undefined) runtimeServers.push(computer);
 
     const server = createRpcServer({
       nocturneVersion: options.version,
@@ -97,10 +114,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           scheduler: args.scheduler,
           subagent: { background: true },
           permissions: { autoApproveAsk: false },
-          mcp:
-            bootstrap === undefined
-              ? createMcpConnector()
-              : createMcpConnector({ runtimeServers: [createDesktopBrowserSource(bootstrap)] }),
+          mcp: createMcpConnector({ runtimeServers }),
           externalAgents: createAcpConnector(platform),
           debug: {
             enabled: debugEnabled,
@@ -144,6 +158,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
     io.stderr.write(`! ${e instanceof Error ? e.message : String(e)}\n`);
     return 1;
   } finally {
+    await computer?.close();
     restoreConsole();
   }
 }

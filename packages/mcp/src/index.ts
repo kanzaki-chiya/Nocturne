@@ -4,3 +4,5 @@
  */
 export { createMcpConnector } from "./connector.js";
 export type { RuntimeMcpSource } from "./connector.js";
+export { createComputerSource, takeComputerBootstrap } from "./computer.js";
+export type { ComputerState } from "./computer.js";

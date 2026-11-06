@@ -55,6 +55,16 @@ function setup(
 }
 
 describe("ADR-0082 app 权限", () => {
+  it("未解析 PID 不能由通配 allow 或会话 Grant 放行", () => {
+    const policy = createRulePolicy({
+      ...ctx,
+      rules: [rule("*", "allow")],
+      grants: { session: [{ kind: "app", target: "PID 99", createdAt: "now" }] },
+    });
+    expect(
+      policy.evaluate([{ kind: "app", target: "PID 99", appUnresolved: true }]).decision.action,
+    ).toBe("ask");
+  });
   it.each(PERMISSION_PRESET_NAMES)("%s 下 app 默认 ask，不能自动批准", (preset) => {
     const policy = createRulePolicy({ ...ctx, preset, autoApproveAsk: true });
     expect(policy.evaluate([app()])).toMatchObject({ decision: { action: "ask" }, userOnly: true });

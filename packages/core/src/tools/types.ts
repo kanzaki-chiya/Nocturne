@@ -231,6 +231,9 @@ export interface ToolDefinition<Input = unknown, Output = unknown> {
   origin?: "mcp" | undefined;
   /** 纯函数：本次调用会碰到什么；不得做 I/O */
   permissionSubjects(input: Input, scope: ToolScope): SubjectRequest[];
+  resolveSubject?:
+    ((request: SubjectRequest, scope: ToolScope) => Promise<PermissionSubject>) | undefined;
+  finishTurn?: ((sessionId: string, turnId: string) => Promise<void>) | undefined;
   /**
    * 可选的额外输入预检（纯函数，无 I/O）：在 schema 校验与 PreToolUse Hook
    * （含 updatedInput 重新校验）之后、权限主体求值之前调用；返回非空的
@@ -394,6 +397,7 @@ export interface McpSession {
    * 空闲 `reconcile` 不调用它。未实现时行为与本钩子不存在时一致。
    */
   prepareTurn?(signal?: AbortSignal): Promise<void>;
+  finishTurn?(sessionId: string): Promise<void>;
   reconcile(servers: readonly McpServerConfig[]): Promise<void>;
   tools(): readonly ToolDefinition[];
   status(): McpServerStatus[];

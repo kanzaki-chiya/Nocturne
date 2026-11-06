@@ -174,6 +174,16 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 - **部分失败降级**：启动失败的服务器不阻塞会话——其工具不存在，模型调用到不存在的工具名时得到 `unknown_tool`（列出可用工具名，与工具名漂移的既有自愈路径一致）。
 - **恢复兼容**：历史中含 `mcp__*` 调用、本次打开时该服务器未配置或启动失败——历史回放不受影响（`tool.completed` 是按 `callId` 配对的消息记录，发给 Provider 的请求不校验历史工具名是否仍在 `specs()` 中；openai-compatible 与 anthropic 两个适配器都要在验收中验证这一点，见 roadmap Phase 5）。
 
+## 电脑操控运行时来源（ADR-0082）
+
+Windows 桌面外壳将随附驱动路径经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` 传给后台，入口读取即删除。CLI/TUI 自行启动不装配来源。来源在后台装配层持有唯一 `mcp --direct` stdio 连接；`RuntimeMcpSource.open(scope)` 可返回 `connection: McpSession` 租约，connector 聚合其工具、启动、准备、变更、状态与收尾。每个租约维护已应用工具集合，关闭会话只退订；总开关关闭和后台退出关闭 owner。普通 MCP 仍保持每会话连接。
+
+版本与全部文件哈希见 `packages/mcp/src/computer-release.json`；构建和本地开发经 `scripts/fetch-computer.mjs` 下载校验官方签名包，启动来源前再次逐文件校验。驱动子进程关闭遥测，并把 HOME、USERPROFILE、LOCALAPPDATA、APPDATA、临时目录及 Cua 自有目录变量都隔离到 Nocturne 用户数据目录下的 `computer/`。不读取或改写用户独立安装的 Cua 配置。
+
+来源严格按 `COMPUTER_TOOLS` 白名单包装工具，未知工具与 browser、更新、扩展、脚本、批处理、录制/回放不进入模型工具列表。无目标列举、桌面状态、剪贴板、光标控制不声明 app 主体；针对软件的请求声明 app，并由执行器在资源解析阶段调用声明式 `resolveSubject`。身份规则见 [permissions.md](permissions.md) 5.6。仅有未解析 PID/窗口/token 时仍询问，不能用通配 allow 或历史 Grant 跳过。
+
+首次剪贴板写入先备份文本，通用 `ToolDefinition.finishTurn` 在所有 Turn 出口运行；当前剪贴板仍等于该 Turn 最后写入值时才恢复。共享连接序列化驱动调用，所有调用结果（包括无法核对的结果）只返回一次，工具说明要求先观察再决定下一步。图片沿通用附件管线返回。
+
 ## 8. 与 Core 的接线
 
 Runtime 管理方法为 `describeMcpServers`、`saveMcpServer`、`deleteMcpServer`、`setMcpServerEnabled`、`probeMcpServer`；只修改 `app` 来源。保存先更新凭据再原子写配置，失败回滚凭据，成功自动重载并 reconcile。创建时任何来源同 id（不区分大小写）均报字段错误；手写来源只读。RPC 同名映射在 `mcp.*`；桌面端为单后台（ADR-0051），服务端重载即覆盖全部已打开会话，无跨后台传播。

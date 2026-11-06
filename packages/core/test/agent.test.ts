@@ -132,6 +132,39 @@ const durableTypes = (events: RuntimeEvent[]) =>
 const prompt = (text = "hi"): Parameters<typeof runTurn>[1] => [{ type: "text", text }];
 
 describe("runTurn", () => {
+  it.each(["done", "aborted"] as const)(
+    "通用工具资源在 %s 出口收尾，按回调去重且先于 Turn 完成",
+    async (reason) => {
+      const abort = new AbortController();
+      if (reason === "aborted") abort.abort();
+      const h = await makeHarness({
+        signal: abort.signal,
+        scripts: [
+          [
+            { type: "text_delta", text: "ok" },
+            { type: "finish", reason: "stop" },
+          ],
+        ],
+      });
+      const base = h.deps.tools.list()[0];
+      if (base === undefined) throw new Error("缺少基础工具");
+      const order: string[] = [];
+      h.session.subscribe((event) => {
+        if (event.type === "turn.completed") order.push("completed");
+      });
+      const cleanup = vi.fn(() => {
+        order.push("cleanup");
+        return Promise.resolve();
+      });
+      h.deps.tools.register({ ...base, name: "resource_a", finishTurn: cleanup });
+      h.deps.tools.register({ ...base, name: "resource_b", finishTurn: cleanup });
+      expect(await runTurn(h.deps, prompt())).toBe(reason);
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(order).toEqual(["cleanup", "completed"]);
+      await h.session.close();
+    },
+  );
+
   it.each(["completed", "in_progress"] as const)(
     "新用户消息后的请求仅保留未完成清单（%s）",
     async (status) => {

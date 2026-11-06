@@ -8,7 +8,7 @@
 
 - **开始**：客户端调用 `session.submit(input)`，会话处于空闲状态。Runtime 写入 `turn.started` 与 `message.user`。
 - **进行中**：若干个 Step。每个 Step 是一次模型请求；模型返回工具调用时执行工具，然后进入下一个 Step。
-- **结束**：写入 `turn.completed`。`reason` 的取值与含义见 [events.md](../protocols/events.md) 第 3.1 节。**任何出口**在写入 `turn.completed` 之前，都必须先结算本 Turn 中所有尚未结算的工具调用（第 2 节的 `finish`）。
+- **结束**：先执行已注册工具的通用 `finishTurn(sessionId, turnId)` 资源收尾（按函数去重，持久化失败也尝试），再写入 `turn.completed`。`reason` 的取值与含义见 [events.md](../protocols/events.md) 第 3.1 节。**任何出口**在写入 `turn.completed` 之前，都必须先结算本 Turn 中所有尚未结算的工具调用（第 2 节的 `finish`）。
 
 MVP 中会话同一时间只有一个 Turn。Turn 进行中再次 `submit` 仍会被拒绝（`session_busy`）；运行中追加指令（插话）与输入排队改用 `session.enqueueInput`（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md)）。CLI 在 Turn 期间只接受中断；插话与排队由桌面、手机和 TUI 提供。待发输入是 Runtime 内存状态，不进日志。
 

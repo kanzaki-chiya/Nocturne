@@ -66,6 +66,17 @@ export const subjectKindSchema = z.enum([
 
 const permissionSubjectSchema = z.object({
   kind: subjectKindSchema,
+  app: z
+    .object({
+      pid: z.number().optional(),
+      windowId: z.number().optional(),
+      name: z.string().optional(),
+      title: z.string().optional(),
+      icon: z.string().optional(),
+      identity: z.string().optional(),
+    })
+    .optional(),
+  appUnresolved: z.boolean().optional(),
   target: z.string(),
   detail: z.string().optional(),
   resolved: z.string().optional(),

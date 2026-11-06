@@ -598,6 +598,19 @@ fn backend_open(
         .stderr(Stdio::piped());
     // 每次 spawn 都先清掉再按需写入：后台不会从外壳继承到一个过期的凭证
     command.env_remove("NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP");
+    command.env_remove("NOCTURNE_COMPUTER_USE_BOOTSTRAP");
+    #[cfg(windows)]
+    {
+        let computer = if cfg!(debug_assertions) {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("resources").join("computer").join("cua-driver.exe")
+        } else {
+            state.resource_dir().join("computer").join("cua-driver.exe")
+        };
+        command.env("NOCTURNE_COMPUTER_USE_BOOTSTRAP", serde_json::json!({
+            "executable": node::strip_verbatim_prefix(computer).to_string_lossy()
+        }).to_string());
+    }
     if let Some((key, value)) = &browser_bootstrap {
         command.env(key, value);
     }
