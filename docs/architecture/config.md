@@ -313,6 +313,7 @@ CLI:   loadConfig(platform, { cliArgs })          → RuntimeConfig
 - 项目层按**会话记录的 `workspaceRoot`** 加载，而不是进程 cwd：恢复会话时信任判定与规则都以会话绑定的目录为准。项目指令（AGENTS.md 等）同样按会话的 `workspaceRoot`/`cwd` 加载并按 `(workspaceRoot, cwd)` 缓存（ADR-0051：一个 Runtime 服务多个工作区）；运行时级的设置/模型/审查器查询与写入接受可选 `workspaceRoot` 指定按哪个工作区合并（缺省为启动目录），方法本身只读已加载的工作区层——`forWorkspace` 的加载由调用方（会话打开或 RPC 服务端派发前）负责。
 - `ResolvedConfig` 的各段经原有 `RuntimeOptions` 字段注入：`providers`→`providerConfigs`、`models`→`modelOverrides`、`turn`→`turn`、权限层（preset + 各层规则 + Grant 集合 + 命令行提升）→ 新的 `permissions` 选项。`policy` 直注入仍保留，供测试与特殊客户端使用。`reasoningEffort` 落在 `ResolvedConfig` 上，新建会话时作为 `session.created.reasoningEffort` 的默认值（ADR-0018 第 4 节）。
 - Phase 5 增补：`mcp.servers` → `ResolvedConfig.mcpServers`（按会话 workspaceRoot 解析，带 `origin` 标注，供 `RuntimeOptions.mcp` 的 connector 消费，见 [mcp.md](mcp.md) 第 8 节）；`hooks` → `ResolvedConfig.hooks`（供 `wrapSession` 构造 `HookRunner`，见 [hooks.md](hooks.md) 第 6 节）。两段都只在 `forWorkspace` 展开——项目层是否参与取决于信任状态（第 3 节）。
+- ADR-0082 增补：`RuntimeConfig.appPermissions` 管理用户级 `~/.nocturne/config.json` 中 `kind: "app"` 的软件权限规则（原子写回并保留未知字段，`*` 排在具体软件规则之前保证精确规则后匹配生效）。确认卡选择「始终允许」或设置页修改软件权限时直接写入该存储，新会话立即读取最新规则。
 
 ## 7. 暂不设计
 

@@ -487,6 +487,10 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 **第 5 轮 agent 浏览器**：agent 经外壳提供的 MCP 只操作自己的面板标签，接入、后台离屏、资源权威、接管、专用数据目录及通用图片附件见 [desktop-browser.md](../protocols/desktop-browser.md)；不把本节现有用户浏览器的行为当作 agent 已获授权的行为。离屏的 agent 标签不参与浮层遮挡的截图占位逻辑，也不盖住主界面的任何区域；离屏期间标签上的 agent 徽标带活动状态，概览浮层或标签栏能看出「agent 正在后台操作某个标签」。`open` 新开标签时，所属会话正显示在前台就打开面板并切到新标签，不在前台就在后台新建，不抢用户当前的会话、页面或标签。
 
+### 5.11 电脑操控（ADR-0082）
+
+Windows 桌面随附官方签名 `cua-driver`（`scripts/fetch-computer.mjs` 校验压缩包 SHA-256、文件哈希与 Authenticode 签名后提取到 `src-tauri/resources/computer/`，打包进安装目录 `computer/`）。外壳启动后台时经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` 传入路径，后台入口读取即删除。设置导航在「浏览器」与「授权」之间提供「电脑操控」（`src/ComputerSettingsPage.tsx`）：总开关首次打开在同行展开确认行，开关、驱动重启与「显示光标」经 `computer.*` RPC 当场生效并同步本机 prefs（`computerEnabled`、`computerCursor`）；「权限」组管理用户层 `app` 规则，「+ 添加软件」列出当前有可见窗口的软件（已在列表中的置灰不可选）并提供「浏览…」选择 `.exe`。全部主体为 `app` 的确认卡固定展示三按钮（「本会话允许」「始终允许 <软件名>」「拒绝」，快捷键 `1`–`3` / `Esc`）。驱动运行期间外壳经 `computer_set_hotkey` 注册全局 `Ctrl+Alt+Esc`（失败时状态标「运行中（停止快捷键未绑定）」），前台送达期间状态栏右侧显示当前软件名与「停止」按钮，点击或按快捷键中断所属会话 Turn。
+
 #### 动效生命周期
 
 动效参数与禁用范围以 [DESIGN.md §11](../../DESIGN.md#11-动效) 为准。`motion.css` 集中声明浮层入场与会话折叠区过渡，`motion.ts` 只给用户激活的 summary 标记过渡，并记住已入场的浮层实例；输入刷新或保留的设置页再次显示不会重播。工具详情首次展开才创建正文，随后保留正文供原生 `::details-content` 收起；不支持尺寸插值的浏览器直接展开。

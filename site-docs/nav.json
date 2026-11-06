@@ -15,6 +15,7 @@
       { "slug": "queue", "title": "排队和插话" },
       { "slug": "rewind", "title": "回退和分叉" },
       { "slug": "panels", "title": "右侧面板" },
+      { "slug": "computer-use", "title": "电脑操控" },
       { "slug": "context", "title": "上下文和用量" }
     ]
   },

@@ -271,6 +271,20 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 
 切换以参数数组调用 Git，先校验分支名，`create` 从当前提交创建并切换。未提交改动交给 Git 原生处理，不 stash；失败消息保留 Git stderr 原文。读取有超时，失败不影响 Turn。界面刷新时机见 [desktop.md](../apps/desktop.md#54-状态栏与上下文)。
 
+### 3.13 `computer.*`（ADR-0082）
+
+桌面端「设置 › 电脑操控」与状态栏使用，均不在远程白名单；通知 `computer.changed` 只发给本机连接。
+
+| 方法 / 通知 | 参数 → 结果 |
+|---|---|
+| `computer.describe` | `{}` → `ComputerDescription`（`{ available, state?, rules }`） |
+| `computer.setEnabled` | `{ enabled: boolean }` → `ComputerDescription` |
+| `computer.setCursor` | `{ cursor: boolean }` → `ComputerDescription` |
+| `computer.restart` | `{}` → `ComputerDescription` |
+| `computer.runningApps` | `{}` → `ApplicationTarget[]` |
+| `computer.setPermission` | `{ identity: string, action: PermissionAction \| null, app?: { name?, icon? } }` → `ComputerDescription` |
+| `computer.changed`（服务端→客户端） | `ComputerDescription` |
+
 ## 4. 订阅与回放
 
 `session.subscribe { sessionId, afterSeq }`：服务端先挂实时监听并缓冲，再读日志，推送 `seq > afterSeq` 的全部**持久**事件，随后冲刷缓冲（按 `seq` 去重，已推过的不再推），最后转入实时推送（持久与临时都推）。请求在回放与衔接完成后才返回 `{ lastSeq }`，因此回放期间产生的新事件不丢、不重，`seq` 连续。
