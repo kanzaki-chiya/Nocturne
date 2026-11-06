@@ -70,6 +70,7 @@ if ([IO.Path]::GetFileName($identity[0]) -ieq 'ApplicationFrameHost.exe') {
 $processInfo = Get-Process -Id $processId -ErrorAction SilentlyContinue
 $displayName = [Diagnostics.FileVersionInfo]::GetVersionInfo($identity[0]).FileDescription
 if (-not $displayName) { $displayName = [IO.Path]::GetFileNameWithoutExtension($identity[0]) }
+if ($displayName -match '\.exe$') { $displayName = $displayName.Substring(0, $displayName.Length - 4) }
 $result = @{ exePath = $identity[0]; packageFamilyName = $identity[1]; name = $displayName; title = $processInfo.MainWindowTitle }
 try {
   Add-Type -AssemblyName System.Drawing

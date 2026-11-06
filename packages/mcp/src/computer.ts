@@ -485,6 +485,11 @@ export function createComputerSource(options: ComputerOptions) {
       const lease: McpSession = {
         startup: async () => {
           await start();
+          applied = new Map(
+            (state.enabled ? (owner?.tools() ?? []) : [])
+              .filter((t) => COMPUTER_TOOLS.has(t.name.slice(PREFIX.length)))
+              .map((t) => [t.name, wrap(t)]),
+          );
         },
         prepareTurn: async (signal) => {
           if (!signal?.aborted) {
