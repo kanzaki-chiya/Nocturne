@@ -593,7 +593,9 @@ export function createComputerSource(options: ComputerOptions) {
           ...info,
           pid,
           windowId,
-          name: typeof item.app_name === "string" ? item.app_name : (info.name ?? identity),
+          name:
+            info.name ??
+            (typeof item.app_name === "string" ? item.app_name.replace(/\.exe$/iu, "") : identity),
           identity,
         });
       }
