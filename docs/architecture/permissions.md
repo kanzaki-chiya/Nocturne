@@ -210,6 +210,12 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 - **管理与撤销**（[ADR-0068](../decisions/ADR-0068-grants-management.md)）：`GrantStore.remove(kind, target)`、`clear()` 与 `add` 共用串行原子写，写盘成功后才更新内存，失败抛错且列表不变；全部撤销保留空数组文件。同一进程内按 NOCTURNE_HOME 与真实工作区共享 store，重新加载配置不重建（[config.md 第 4 节](config.md#4-grant-的持久化)），权限层每次求值读取最新集合；撤销从下一次调用生效，不改变等待中或执行中的调用。
 - `RuntimeSession.listGrants/revokeGrant/revokeAllGrants` 管理会话树共享的内存集合。活动子会话没有 RuntimeSession，因此 Runtime 另提供 `listSessionGrants({ sessionId })`、`revokeSessionGrant({ sessionId, kind, target })`、`revokeAllSessionGrants({ sessionId })`，在 Core 内沿活动登记簿解析到根，供 RPC 原有 `session.*` 方法转发；已关闭的树无内存授权。根和子会话的下一次判定同时生效。管理入口不是模型工具，授权数据保护规则不变。
 
+### 5.6 软件授权（ADR-0082）
+
+`app` 是按应用身份匹配的类别：普通程序使用小写 exe 文件名，打包应用使用包族名；显示名、图标和窗口标题不参与匹配。所有预设的默认动作均为 `ask`，不接受 `--yes` 或 smart 审查代批。用户层明确的 `app *` 与精确身份规则生效；泛类别 allow 不放宽 app。项目层和其他来源的规则仅能收紧，项目 Grant 不能放行 app，PermissionRequest Hook 的 allow 也不能代批。
+
+全体主体均为 `app` 时，选项固定为 `allow_session`、`allow_always`、`deny`，混合主体不提供 `allow_always`。回复 `remember: "always"` 由权限层调用用户配置存储，在 `<NOCTURNE_HOME>/config.json` 的 `permissions.rules` 写入精确 `app <身份> → allow`。写入串行、原子替换，保留无关配置；成功后所有会话下一次求值读取最新规则，新会话也生效。失败降级为会话 Grant，发出 `runtime.warning(code: "app_permission_save_failed")`，结算的 `remember` 为 `session`。持久授权是用户规则，不伪装为项目 Grant。
+
 ## 6. 预设
 
 为本会话已发现技能的真实根目录生成 `read allow <root>/**` 规则，与本会话落盘目录规则一起在宽规则之后求值。技能实现不做权限判定；链接到根目录外的支持文件仍按解析后真实路径求值。写入、shell 与技能目录外读取不放宽，详见 [skills.md](skills.md) 第 3 节。
@@ -262,6 +268,7 @@ PermissionGate.check(subjects, signal)
 | 允许一次 | `allow_once` | 仅本次调用 |
 | 本会话内允许 | `allow_session` | 生成会话 Grant（5.4 精确目标），保存在内存中，会话关闭即失效 |
 | 在此项目中始终允许 | `allow_project` | 生成项目 Grant，写入**用户数据目录**中按工作区区分的记录（[config.md](config.md) 第 4 节），而不是仓库内的项目配置 |
+| 始终允许软件 | `allow_always` | 仅全体主体为 app 时提供，写用户层精确规则（5.6），回复 `remember: "always"` |
 | 拒绝 | `deny` | 工具结果为拒绝，可附带反馈给模型，Turn 继续 |
 | 拒绝并停止 | `deny_stop` | 工具结果为拒绝，并中止当前 Turn |
 

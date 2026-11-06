@@ -148,6 +148,7 @@ export const SESSION_METHODS: Record<
 
 /** 没有（或没有一一对应的）RPC 方法的 RuntimeConfig 成员，附原因 */
 export const CONFIG_NOT_MAPPED = {
+  appPermissions: "用户层软件规则存储，由权限层持久授权使用，不直接暴露存储对象",
   skillConfig: "用户级技能来源设置由 skills.describeSkills 使用",
   disabledSkills: "技能开关由 skills.describeSkills 返回",
   setSkillEnabled: "Runtime 统一写入并更新会话，映射 skills.setSkillEnabled",

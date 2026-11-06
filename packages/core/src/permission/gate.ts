@@ -77,6 +77,7 @@ export interface PolicyGateOptions extends ReviewInputSources {
   newRequestId?: (callId: string) => string;
   /** Grant 落点与授权键大小写规则 */
   grants?: GateGrantSink | undefined;
+  saveAppPermissions?: ((subjects: PermissionSubject[]) => Promise<void>) | undefined;
   caseSensitive?: boolean | undefined;
   /** PermissionRequest Hook 执行器（hooks.md）；缺省时与未启用一致 */
   hooks?: HookRunner | undefined;
@@ -154,7 +155,10 @@ export function createPolicyGate(
     decision: PermissionDecision,
     ruleDesc: string,
     turn: GateTurnContext | undefined,
-    extra?: { feedback?: string | undefined; remember?: "session" | "project" | undefined },
+    extra?: {
+      feedback?: string | undefined;
+      remember?: "session" | "project" | "always" | undefined;
+    },
   ): Promise<void> {
     if (turn === undefined) return;
     await turn.events.emit(
@@ -183,6 +187,9 @@ export function createPolicyGate(
   }
 
   function confirmationOptions(subjects: PermissionSubject[]): PermissionOption[] {
+    if (subjects.length > 0 && subjects.every((subject) => subject.kind === "app")) {
+      return ["allow_session", "allow_always", "deny"];
+    }
     const once = subjects.some(
       (s) =>
         (s.kind === "edit" && s.where === "outside") ||
@@ -399,7 +406,10 @@ export function createPolicyGate(
         },
         signal,
       );
-      if (out?.action === "allow" || out?.action === "deny") {
+      if (
+        out?.action === "deny" ||
+        (out?.action === "allow" && !evaluation.subjects.some((subject) => subject.kind === "app"))
+      ) {
         const hookDecision: PermissionDecision = {
           action: out.action,
           source: "hook",
@@ -605,20 +615,39 @@ export function createPolicyGate(
       if (p === undefined) return false;
       const selected: PermissionOption =
         reply.decision === "allow"
-          ? reply.remember === "project"
-            ? "allow_project"
-            : reply.remember === "session"
-              ? "allow_session"
-              : "allow_once"
+          ? reply.remember === "always"
+            ? "allow_always"
+            : reply.remember === "project"
+              ? "allow_project"
+              : reply.remember === "session"
+                ? "allow_session"
+                : "allow_once"
           : reply.stop
             ? "deny_stop"
             : "deny";
       if (!p.options.includes(selected)) return false;
-      let remember: "session" | "project" | undefined;
+      let remember: "session" | "project" | "always" | undefined;
       if (reply.decision === "allow" && reply.remember !== undefined) {
         const grants = p.subjects.map((s) => grantFromSubject(s, caseSensitive));
         const sink = options.grants;
-        if (reply.remember === "project" && sink?.project !== undefined) {
+        if (reply.remember === "always") {
+          try {
+            if (options.saveAppPermissions === undefined) throw new Error("用户规则存储不可用");
+            await options.saveAppPermissions(p.subjects);
+            remember = "always";
+          } catch (e) {
+            sink?.session.push(...grants);
+            remember = "session";
+            p.turn.events.emitEphemeral(
+              "runtime.warning",
+              {
+                code: "app_permission_save_failed",
+                message: `软件授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+              },
+              { turnId: p.turn.turnId },
+            );
+          }
+        } else if (reply.remember === "project" && sink?.project !== undefined) {
           try {
             for (const g of grants) await sink.project.add(g);
             remember = "project";
@@ -648,11 +677,13 @@ export function createPolicyGate(
               action: "allow",
               source: "user",
               reason:
-                remember === "project"
-                  ? "用户允许：本项目始终允许（已写入授权）"
-                  : remember === "session"
-                    ? "用户允许：本会话内允许"
-                    : "用户允许一次",
+                remember === "always"
+                  ? "用户允许：始终允许（已写入用户规则）"
+                  : remember === "project"
+                    ? "用户允许：本项目始终允许（已写入授权）"
+                    : remember === "session"
+                      ? "用户允许：本会话内允许"
+                      : "用户允许一次",
             }
           : {
               action: "deny",

@@ -42,6 +42,8 @@
 - 「拒绝」：拒绝本次调用，可填写反馈告诉模型原因，当前回合继续；
 - 「拒绝并停止」：拒绝本次调用并立即中止当前回合。
 
+软件授权 `app` 在全部预设下默认询问，不由安全审查或自动批准放行。仅包含软件的确认提供「本会话允许」「始终允许」「拒绝」三项。「始终允许」保存到用户级 `config.json` 的精确软件规则，新会话继续生效；写入失败时降为本会话授权并给出警告。项目配置即使受信任也不能放宽软件权限。
+
 ## 自定义规则
 
 需要按通配符批量放行或禁止某类操作时，在用户级 `~/.nocturne/config.json` 或项目级 `.nocturne/config.json` 的 `permissions.rules` 中编写规则（见 [配置参考](config.md)）：
@@ -58,7 +60,7 @@
 }
 ```
 
-`kind` 支持 `read`、`edit`、`shell`、`network`、`mcp`、`subagent`、`schedule`（省略或 `*` 匹配全部）；`action` 取 `allow`、`ask`、`deny`。同一层内后写的规则优先。
+`kind` 支持 `read`、`edit`、`shell`、`network`、`mcp`、`subagent`、`schedule`、`app`（省略或 `*` 匹配全部，泛类别 allow 不放宽 app）；`action` 取 `allow`、`ask`、`deny`。同一层内后写的规则优先。
 
 仓库内的 `.nocturne/config.json` 默认处于「未信任」状态：未信任项目的 `allow` 规则会被忽略，`ask` / `deny` 只能收紧权限。只有信任项目后，项目的放宽规则、MCP 服务器与 Hook 才会生效。
 

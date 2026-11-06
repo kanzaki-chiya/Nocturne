@@ -386,6 +386,8 @@ export async function runRepl(
               session: "allow_session",
               p: "allow_project",
               project: "allow_project",
+              w: "allow_always",
+              always: "allow_always",
               d: "deny",
               deny: "deny",
               x: "deny_stop",
@@ -407,6 +409,8 @@ export async function runRepl(
             reply({ decision: "allow", remember: "session" });
           } else if (key === "p" || key === "project") {
             reply({ decision: "allow", remember: "project" });
+          } else if (key === "w" || key === "always") {
+            reply({ decision: "allow", remember: "always" });
           } else if (key === "x") {
             reply({ decision: "deny", stop: true });
           } else if (key === "d" || key === "deny") {

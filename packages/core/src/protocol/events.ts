@@ -219,7 +219,7 @@ export interface PermissionResolvedPayload {
   action: "allow" | "deny";
   source: PermissionSource;
   rule?: string | undefined;
-  remember?: "session" | "project" | undefined;
+  remember?: "session" | "project" | "always" | undefined;
   grant?: { scope: "session" | "project"; createdAt: string } | undefined;
   feedback?: string | undefined;
 }

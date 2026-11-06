@@ -10,7 +10,7 @@ export interface PermissionReply {
   /** decision = deny 时可用：拒绝并停止当前 Turn */
   stop?: boolean | undefined;
   /** decision = allow 时可用：授予会话 / 项目级 Grant */
-  remember?: "session" | "project" | undefined;
+  remember?: "session" | "project" | "always" | undefined;
   /** 拒绝时可附带给模型的反馈 */
   feedback?: string | undefined;
 }

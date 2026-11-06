@@ -89,6 +89,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0079](ADR-0079-branch-switch.md) | 桌面端状态栏切换分支 | 已接受 |
 | [ADR-0080](ADR-0080-session-archive.md) | 会话归档 | 已接受 |
 | [ADR-0081](ADR-0081-session-worktree-switch.md) | 会话切换工作树 | 已接受 |
+| [ADR-0082](ADR-0082-computer-use.md) | 电脑操控 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

@@ -676,7 +676,10 @@ class Connection implements HubPeer {
     )
       await this.initPromise.catch(() => undefined);
     // 持久授权（写入项目 Grant）只能在电脑上选；会话级与单次批准照常
-    if (method === "session.respondPermission" && reqObject(p, "reply").remember === "project") {
+    if (
+      method === "session.respondPermission" &&
+      ["project", "always"].includes(String(reqObject(p, "reply").remember))
+    ) {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
     }
     if (method === "runtime.createSession" && this.initialized && this.hub.available) {

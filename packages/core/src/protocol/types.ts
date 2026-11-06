@@ -272,7 +272,8 @@ export interface AssistantTiming {
   durationMs: number;
 }
 
-export type SubjectKind = "read" | "edit" | "shell" | "network" | "mcp" | "subagent" | "schedule";
+export type SubjectKind =
+  "read" | "edit" | "shell" | "network" | "mcp" | "subagent" | "schedule" | "app";
 
 /**
  * 每 shell 种类的高风险命令元数据（ADR-0022 第 1 节：表集中在 platform 的
@@ -446,7 +447,7 @@ export interface AnnotatedRule {
 
 /** permission.requested 中提供给客户端的选项（permissions.md 第 7 节） */
 export type PermissionOption =
-  "allow_once" | "allow_session" | "allow_project" | "deny" | "deny_stop";
+  "allow_once" | "allow_session" | "allow_project" | "allow_always" | "deny" | "deny_stop";
 
 /** Provider 流式响应的结束原因（provider-api.md 第 4 节） */
 export type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "other";

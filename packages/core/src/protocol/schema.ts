@@ -61,6 +61,7 @@ export const subjectKindSchema = z.enum([
   "mcp",
   "subagent",
   "schedule",
+  "app",
 ]);
 
 const permissionSubjectSchema = z.object({
@@ -323,7 +324,9 @@ const payloadSchemas = {
     callId: z.string(),
     subjects: z.array(permissionSubjectSchema),
     reason: z.string(),
-    options: z.array(z.enum(["allow_once", "allow_session", "allow_project", "deny", "deny_stop"])),
+    options: z.array(
+      z.enum(["allow_once", "allow_session", "allow_project", "allow_always", "deny", "deny_stop"]),
+    ),
   }),
   "permission.reviewed": z.object({
     callId: z.string(),
@@ -342,7 +345,7 @@ const payloadSchemas = {
     action: z.enum(["allow", "deny"]),
     source: permissionSourceSchema,
     rule: z.string().optional(),
-    remember: z.enum(["session", "project"]).optional(),
+    remember: z.enum(["session", "project", "always"]).optional(),
     grant: z.object({ scope: z.enum(["session", "project"]), createdAt: z.string() }).optional(),
     feedback: z.string().optional(),
   }),

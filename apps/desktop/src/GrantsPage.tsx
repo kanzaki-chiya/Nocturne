@@ -29,6 +29,7 @@ export const grantKind = (kind: Grant["kind"]): string =>
     mcp: "MCP",
     subagent: "子代理",
     schedule: "定时任务",
+    app: "电脑操控",
   })[kind];
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).at(-1) ?? value;

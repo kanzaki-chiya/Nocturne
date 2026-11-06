@@ -252,6 +252,49 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     evalOptions: EvaluateOptions | undefined,
   ): SubjectVerdict {
     const skipApprovals = evalOptions?.skipApprovals;
+    if (s.kind === "app") {
+      const userHit = lastMatch(
+        trusted.filter((entry) => entry.origin === "user" && entry.rule.kind === "app"),
+        s,
+      );
+      let action: PermissionAction = userHit?.rule?.action ?? "ask";
+      let hit: RuleHit = userHit ?? {
+        origin: "default",
+        description: describeHit("default", undefined, presetName),
+      };
+      for (const entry of [...trusted, ...untrusted]) {
+        if (
+          entry.origin === "user" ||
+          entry.origin === "preset" ||
+          entry.rule.action === "allow" ||
+          lastMatch([entry], s) === undefined
+        )
+          continue;
+        if (STRICTNESS[entry.rule.action] > STRICTNESS[action]) {
+          action = entry.rule.action;
+          hit = {
+            origin: entry.origin,
+            rule: entry.rule,
+            description: describeHit(entry.origin, undefined, presetName),
+          };
+        }
+      }
+      const grant =
+        action === "ask" && skipApprovals !== true
+          ? matchGrant(resolveGrants(grantsOpt?.session), s, caseSensitive)
+          : undefined;
+      if (grant !== undefined) {
+        return {
+          action: "allow",
+          hit: {
+            origin: "grant",
+            grant: { scope: "session", createdAt: grant.createdAt },
+            description: `Grant（本会话）：app ${grant.target}`,
+          },
+        };
+      }
+      return { action, hit, userOnly: action === "ask" };
+    }
     if (
       options.worktree &&
       escapesWorktree(s, options.worktree.root, options.worktree.cwd, caseSensitive)

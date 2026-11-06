@@ -54,6 +54,7 @@ import {
   type ProviderSetupState,
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
+import { loadAppPermissions } from "./app-permissions.js";
 import { reviewerRulesText, reviewerText } from "./reviewer.js";
 import { readTrustList } from "./trust.js";
 import type {
@@ -133,6 +134,7 @@ export async function loadConfig(
 
   // 用户配置：损坏即快速失败（config.md 第 2 节）
   const userFile: ConfigFile = (await loadConfigFile(fs, userConfigPath)) ?? {};
+  const appPermissions = await loadAppPermissions(platform, home);
   // Magpie 接入层（ADR-0062）：Magpie 维护的只读文件；损坏只告警，按未接入处理
   const magpie = await loadMagpieLayer(platform, magpiePath);
   const magpieLayers = (): MergeLayer[] =>
@@ -661,6 +663,7 @@ export async function loadConfig(
   // 用户鉴权 URL 无效时在加载阶段失败，而不是等首次读取 base。
   base();
   return {
+    appPermissions,
     reload: () => loadConfig(platform, { ...options, nocturneHome: home, credentials }),
     async listGrantWorkspaces(openWorkspaces, warn) {
       const trustNow = await readTrustList(platform, trustPath);

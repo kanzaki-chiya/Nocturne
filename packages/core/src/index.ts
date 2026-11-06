@@ -1632,7 +1632,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           sessionId: policySessionId,
           nocturneHome,
         },
-        rules: resolved?.rules ?? [],
+        rules: [
+          ...(resolved?.rules ?? []).filter(
+            (entry) =>
+              !(
+                config?.appPermissions !== undefined &&
+                entry.origin === "user" &&
+                entry.rule.kind === "app"
+              ),
+          ),
+          ...(config?.appPermissions?.list().map((rule) => ({ origin: "user" as const, rule })) ??
+            []),
+        ],
         untrustedRules: resolved?.untrustedRules ?? [],
         protectedPaths: {
           lexical: [credentialsIndexLexical],
@@ -1867,6 +1878,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...reviewSources,
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
+        saveAppPermissions: async (subjects) => {
+          const store = config?.appPermissions;
+          if (store === undefined) throw new Error("用户规则存储不可用");
+          for (const subject of subjects) await store.set(subject.target, "allow");
+        },
         hooks: hookRunner,
         worktrees: activeWorktrees,
       },

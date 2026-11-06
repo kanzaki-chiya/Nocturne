@@ -358,6 +358,7 @@ const OPTION_LABELS: Record<string, string> = {
   allow_once: "允许一次",
   allow_session: "本会话内允许",
   allow_project: "在此项目中始终允许",
+  allow_always: "始终允许",
   deny: "拒绝（可附反馈）",
   deny_stop: "拒绝并停止本轮",
 };
@@ -365,6 +366,7 @@ const OPTION_KEYS: Record<string, string> = {
   allow_once: "a",
   allow_session: "s",
   allow_project: "p",
+  allow_always: "w",
   deny: "d",
   deny_stop: "x",
 };

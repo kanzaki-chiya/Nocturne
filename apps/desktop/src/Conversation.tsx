@@ -2831,6 +2831,7 @@ const permissionLabels: Record<PermissionOption, string> = {
   allow_once: "允许一次",
   allow_session: "本会话允许",
   allow_project: "本项目允许",
+  allow_always: "始终允许",
   deny: "拒绝",
   deny_stop: "拒绝并停止",
 };
@@ -2838,6 +2839,7 @@ const permissionReplies: Record<PermissionOption, PermissionReply> = {
   allow_once: { decision: "allow" },
   allow_session: { decision: "allow", remember: "session" },
   allow_project: { decision: "allow", remember: "project" },
+  allow_always: { decision: "allow", remember: "always" },
   deny: { decision: "deny" },
   deny_stop: { decision: "deny", stop: true },
 };
@@ -2900,7 +2902,9 @@ export function PermissionCard({
   const options: PermissionOption[] = (
     pending.options.length ? pending.options : (["allow_once", "deny"] as PermissionOption[])
   ).filter(
-    (option) => !hidePersistentPermissions || permissionReplies[option].remember !== "project",
+    (option) =>
+      !hidePersistentPermissions ||
+      !["project", "always"].includes(permissionReplies[option].remember ?? ""),
   );
   const optionsRef = useRef(options);
   optionsRef.current = options;

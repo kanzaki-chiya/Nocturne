@@ -131,7 +131,7 @@ export interface GateOutcome {
   /** 用户拒绝时附带给模型的反馈（PermissionReply.feedback） */
   feedback?: string | undefined;
   /** 本次应答生成的 Grant 范围（permission.resolved.remember） */
-  remember?: "session" | "project" | undefined;
+  remember?: "session" | "project" | "always" | undefined;
   resultNotice?: string | undefined;
 }
 

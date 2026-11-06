@@ -426,7 +426,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.stopGoal` / `session.cancelGoal` / `session.resumeGoal` / `session.approvePlan` / `session.cancelPlan` | 允许；属于会话内操作（ADR-0076 §7 及修订） |
 | `session.interrupt` | 请求与通知均允许 |
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作。手机不能用 `subagent.list`，运行中的后台子代理从会话视图推导（`pendingBackgroundSubagents`） |
-| `session.respondPermission` | `reply.remember === "project"` 拒绝并保持待处理；`"session"` 或省略允许 |
+| `session.respondPermission` | `reply.remember === "project"` 或 `"always"` 拒绝并保持待处理；`"session"` 或省略允许 |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
 | `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |

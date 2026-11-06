@@ -32,6 +32,7 @@ const OPTION_KEYS: Record<PermissionOption, string> = {
   allow_once: "a",
   allow_session: "s",
   allow_project: "p",
+  allow_always: "w",
   deny: "d",
   deny_stop: "x",
 };
@@ -39,6 +40,7 @@ const OPTION_LABELS: Record<PermissionOption, string> = {
   allow_once: "允许一次",
   allow_session: "本会话内允许",
   allow_project: "在此项目中始终允许",
+  allow_always: "始终允许",
   deny: "拒绝（可附反馈）",
   deny_stop: "拒绝并停止本轮",
 };
@@ -46,6 +48,7 @@ const OPTION_REPLIES: Record<PermissionOption, PermissionReply> = {
   allow_once: { decision: "allow" },
   allow_session: { decision: "allow", remember: "session" },
   allow_project: { decision: "allow", remember: "project" },
+  allow_always: { decision: "allow", remember: "always" },
   deny: { decision: "deny" },
   deny_stop: { decision: "deny", stop: true },
 };

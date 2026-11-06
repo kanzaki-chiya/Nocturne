@@ -1,4 +1,5 @@
 import type { SkillsConfig, GrantWorkspace, ProjectTrustDescription } from "../protocol/index.js";
+import type { AppPermissionStore } from "./app-permissions.js";
 /**
  * 配置层类型（config.md 第 1、2、6 节）。
  * 本模块只做加载、校验、合并、标注来源；规则的解释在 permission，
@@ -626,6 +627,7 @@ export type SettingsPatch = Partial<{
  * base 不含项目层；forWorkspace 按会话 workspaceRoot 加载项目层与 Grant。
  */
 export interface RuntimeConfig {
+  appPermissions?: AppPermissionStore | undefined;
   listGrantWorkspaces(
     openWorkspaces: string[],
     warn: (message: string) => void,
