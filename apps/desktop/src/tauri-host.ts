@@ -110,6 +110,8 @@ export function createTauriHost(): DesktopHost {
       });
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
+    pickExecutable: () =>
+      openDialog({ multiple: false, filters: [{ name: "exe", extensions: ["exe"] }] }),
     async pickImages() {
       return decodePickedImages(await invoke<ArrayBuffer>("pick_files"));
     },

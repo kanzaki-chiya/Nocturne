@@ -70,6 +70,9 @@ import type {
   SettingItem,
   SubagentReadEnd,
   SubagentObservationInfo,
+  ApplicationTarget,
+  PermissionAction,
+  PermissionRule,
   SubagentSummary,
   SettingsPatch,
   ToggleImpact,
@@ -278,7 +281,34 @@ import type {
   WorkModeName,
 } from "@nocturne/core/protocol";
 
+export interface ComputerDriverState {
+  enabled: boolean;
+  cursor: boolean;
+  state: "stopped" | "starting" | "running" | "error";
+  version: string;
+  error?: string | undefined;
+  active?: { sessionId: string; turnId: string; app: ApplicationTarget } | undefined;
+}
+export interface ComputerDescription {
+  available: boolean;
+  state?: ComputerDriverState | undefined;
+  rules: PermissionRule[];
+}
+
 export interface RpcMethods {
+  "computer.describe": { params: Record<string, never>; result: ComputerDescription };
+  "computer.setEnabled": { params: { enabled: boolean }; result: ComputerDescription };
+  "computer.setCursor": { params: { cursor: boolean }; result: ComputerDescription };
+  "computer.restart": { params: Record<string, never>; result: ComputerDescription };
+  "computer.runningApps": { params: Record<string, never>; result: ApplicationTarget[] };
+  "computer.setPermission": {
+    params: {
+      identity: string;
+      action: PermissionAction | null;
+      app?: { name?: string | undefined; icon?: string | undefined } | undefined;
+    };
+    result: ComputerDescription;
+  };
   "grants.workspaces": { params: Record<string, never>; result: GrantWorkspace[] };
   "grants.list": { params: { workspace: string }; result: Grant[] };
   "grants.revoke": {
@@ -770,6 +800,7 @@ export interface RpcClientNotifications {
 
 /** 服务端→客户端的通知 */
 export interface RpcServerNotifications {
+  "computer.changed": ComputerDescription;
   "remote.statusChanged": { status: RemoteStatus };
   "remote.paired": { device: { id: string; name: string } };
   "remote.pairingFailed": { code: string };
@@ -815,6 +846,12 @@ export interface RpcServerNotifications {
 }
 
 const METHOD_TABLE: Record<RpcMethodName, true> = {
+  "computer.describe": true,
+  "computer.setEnabled": true,
+  "computer.setCursor": true,
+  "computer.restart": true,
+  "computer.runningApps": true,
+  "computer.setPermission": true,
   "grants.workspaces": true,
   "grants.list": true,
   "grants.revoke": true,

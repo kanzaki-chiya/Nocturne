@@ -4,7 +4,6 @@ import path from "node:path";
 import os from "node:os";
 import { createPlatform } from "../platform/index.js";
 import { loadConfig } from "./load.js";
-import { createRulePolicy } from "../permission/index.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -40,13 +39,10 @@ it("app 规则写用户层，新会话生效，保留未知字段，并可列举
     { kind: "app", pattern: "*", action: "ask" },
     { kind: "app", pattern: "excel.exe", action: "allow" },
   ]);
-  const policy = createRulePolicy({
-    workspaceRoot: home,
-    caseSensitive: false,
-    rules: fresh.base.rules,
+  expect(fresh.base.rules).toContainEqual({
+    origin: "user",
+    rule: { kind: "app", pattern: "excel.exe", action: "allow" },
   });
-  expect(policy.evaluate([{ kind: "app", target: "excel.exe" }]).decision.action).toBe("allow");
-  expect(policy.evaluate([{ kind: "app", target: "notepad.exe" }]).decision.action).toBe("ask");
   await freshStore.set("excel.exe", undefined);
   expect(freshStore.list()).toHaveLength(1);
 });

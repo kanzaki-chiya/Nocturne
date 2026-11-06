@@ -5,6 +5,8 @@
  */
 import {
   createPlatform,
+  type ApplicationTarget,
+  type PermissionRule,
   type Platform,
   type ScheduleChangedPayload,
   type Runtime,
@@ -12,6 +14,7 @@ import {
   type RuntimeSession,
 } from "@nocturne/core";
 
+import type { ComputerDescription, ComputerDriverState } from "../shared/methods.js";
 import type { RpcMessage } from "../shared/jsonrpc.js";
 import { RpcProtocolError } from "./errors.js";
 import { optString, type Params } from "./params.js";
@@ -19,6 +22,16 @@ import { optString, type Params } from "./params.js";
 /** createRuntime 的产物：Runtime 加上服务端要对外报告与收尾的信息 */
 export interface RpcRuntimeHandle {
   runtime: Runtime;
+  computer?:
+    | {
+        getState(): ComputerDriverState;
+        setEnabled(enabled: boolean): Promise<void>;
+        setCursor(cursor: boolean): Promise<void>;
+        restart(): Promise<void>;
+        runningApps(): Promise<ApplicationTarget[]>;
+        subscribe(listener: () => void): () => void;
+      }
+    | undefined;
   /** 会话日志目录，握手时作为只读信息返回 */
   sessionsDir?: string | undefined;
   /** 全部会话关闭之后调用，释放 Runtime 之外的资源 */
@@ -86,6 +99,8 @@ export class Hub {
   private unsubscribeSchedule: (() => void) | undefined;
   private unsubscribeSessions: (() => void) | undefined;
   private unsubscribeGrants: (() => void) | undefined;
+  private unsubscribeComputer: (() => void) | undefined;
+  private unsubscribeAppPermissions: (() => void) | undefined;
 
   get available(): boolean {
     return this.handle !== undefined && !this.stopping;
@@ -197,6 +212,14 @@ export class Hub {
     this.unsubscribeSchedule = handle.runtime.onScheduleChanged((payload) => {
       this.notifyScheduleChanged(payload);
     });
+    this.unsubscribeComputer?.();
+    this.unsubscribeComputer = handle.computer?.subscribe(() => {
+      this.notifyComputerChanged();
+    });
+    this.unsubscribeAppPermissions?.();
+    this.unsubscribeAppPermissions = handle.providerConfig?.config.appPermissions?.subscribe(() => {
+      this.notifyComputerChanged();
+    });
     const providerConfig = handle.providerConfig;
     this.providerState =
       providerConfig !== undefined
@@ -206,6 +229,25 @@ export class Hub {
             workspaceRoot: providerConfig.workspaceRoot,
           }
         : undefined;
+  }
+
+  describeComputer(): ComputerDescription {
+    const computer = this.handle?.computer;
+    const rules: PermissionRule[] = this.providerState?.current.appPermissions?.list() ?? [];
+    return computer === undefined
+      ? { available: false, rules }
+      : { available: true, state: computer.getState(), rules };
+  }
+  notifyComputerChanged(): void {
+    if (!this.stopping)
+      this.notifyLocal({
+        jsonrpc: "2.0",
+        method: "computer.changed",
+        params: { ...this.describeComputer() },
+      });
+  }
+  computer() {
+    return this.handle?.computer;
   }
 
   get sessionsDir(): string | undefined {
@@ -263,6 +305,10 @@ export class Hub {
     const next = await this.providerConfig().reload();
     await this.runtime().updateProviders(next);
     this.providerConfig().current = next;
+    this.unsubscribeAppPermissions?.();
+    this.unsubscribeAppPermissions = next.appPermissions?.subscribe(() => {
+      this.notifyComputerChanged();
+    });
     if (notify) this.notifyProvidersChanged();
   }
 
@@ -427,6 +473,10 @@ export class Hub {
     this.unsubscribeSessions = undefined;
     this.unsubscribeGrants?.();
     this.unsubscribeGrants = undefined;
+    this.unsubscribeComputer?.();
+    this.unsubscribeComputer = undefined;
+    this.unsubscribeAppPermissions?.();
+    this.unsubscribeAppPermissions = undefined;
     clearTimeout(this.sessionsChangedTimer);
     this.sessionsChangedTimer = undefined;
     for (const session of sessions) session.interrupt();

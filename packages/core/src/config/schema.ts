@@ -108,6 +108,7 @@ const permissionRuleSchema = z.object({
   where: z.enum(["workspace", "outside"]).optional(),
   label: z.string().optional(),
   userOnly: z.boolean().optional(),
+  app: z.object({ name: z.string().optional(), icon: z.string().optional() }).optional(),
 });
 
 const capabilitiesSchema = z.object({

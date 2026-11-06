@@ -13,6 +13,7 @@ export type SettingsSection =
   | "skills"
   | "agents"
   | "browser"
+  | "computer"
   | "remote"
   | "archive"
   | "appearance"
@@ -105,6 +106,11 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     key: "browser",
     label: "浏览器",
     icon: <Icon name="earth" size={ICON_LG} className="glyph" />,
+  },
+  {
+    key: "computer",
+    label: "电脑操控",
+    icon: <Icon name="computer" size={ICON_LG} className="glyph" />,
   },
   {
     key: "grants",

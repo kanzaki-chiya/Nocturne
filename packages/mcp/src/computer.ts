@@ -171,8 +171,10 @@ export function createComputerSource(options: ComputerOptions) {
   const wrappers = new WeakMap<ToolDefinition, ToolDefinition>();
   const tokens = new Map<string, ApplicationTarget>();
   const clipboards = new Map<string, { before: string; last: string; ctx: ToolContext }>();
+  const listeners = new Set<() => void>();
   const emit = () => {
     options.changed?.({ ...state });
+    for (const listener of listeners) listener();
   };
   const resolveApplication =
     options.resolveApplication ?? ((target) => resolveWindowsApplication(platform, target));
@@ -526,6 +528,12 @@ export function createComputerSource(options: ComputerOptions) {
   return {
     ...source,
     getState: (): ComputerState => ({ ...state }),
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     setEnabled(enabled: boolean) {
       state = { ...state, enabled };
       emit();

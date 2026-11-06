@@ -6,7 +6,12 @@ import { parseConfigFile } from "./schema.js";
 
 export interface AppPermissionStore {
   list(): PermissionRule[];
-  set(identity: string, action: PermissionAction | undefined): Promise<void>;
+  set(
+    identity: string,
+    action: PermissionAction | undefined,
+    app?: PermissionRule["app"],
+  ): Promise<void>;
+  subscribe(listener: () => void): () => void;
 }
 
 export async function loadAppPermissions(
@@ -26,9 +31,16 @@ export async function loadAppPermissions(
   }
   const initial = parseConfigFile(await read(), file);
   let rules = initial.permissions?.rules?.filter((rule) => rule.kind === "app") ?? [];
+  const listeners = new Set<() => void>();
   return {
     list: () => rules.map((rule) => ({ ...rule })),
-    async set(identity, action) {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    async set(identity, action, app) {
       if (
         identity.length === 0 ||
         identity.trim() !== identity ||
@@ -42,7 +54,16 @@ export async function loadAppPermissions(
         const previous = parsed.permissions?.rules ?? [];
         const others = previous.filter((rule) => rule.kind !== "app");
         const apps = previous.filter((rule) => rule.kind === "app" && rule.pattern !== identity);
-        if (action !== undefined) apps.push({ kind: "app", pattern: identity, action });
+        const existing = previous.find((rule) => rule.kind === "app" && rule.pattern === identity);
+        if (action !== undefined) {
+          const meta = app ?? existing?.app;
+          apps.push({
+            kind: "app",
+            pattern: identity,
+            action,
+            ...(meta === undefined ? {} : { app: meta }),
+          });
+        }
         apps.sort((a, b) => Number(b.pattern === "*") - Number(a.pattern === "*"));
         const permissions = raw.permissions as Record<string, unknown> | undefined;
         await writeJsonAtomic(platform.fs, platform.paths, file, {
@@ -51,6 +72,7 @@ export async function loadAppPermissions(
         });
         rules = apps;
       });
+      for (const listener of listeners) listener();
     },
   };
 }

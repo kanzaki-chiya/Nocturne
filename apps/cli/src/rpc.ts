@@ -123,6 +123,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
         });
         return {
           runtime,
+          computer,
           sessionsDir,
           // 后台退出前停调度器：中止运行中的定时任务、释放锁文件
           dispose: () => runtime.stopScheduler(),

@@ -158,6 +158,8 @@ export function operationForSubjectKind(kind: SubjectKind | undefined, fallback 
       return "启动子代理";
     case "schedule":
       return "定时任务";
+    case "app":
+      return "操作软件";
     default:
       return fallback;
   }

@@ -215,6 +215,7 @@ export interface DesktopHost {
   openInEditor: (editor: "vscode" | "cursor", path: string, line?: number) => Promise<void>;
   /** 系统文件夹选择对话框；取消返回 null */
   pickFolder: () => Promise<string | null>;
+  pickExecutable?: (() => Promise<string | null>) | undefined;
   /** 系统图片选择对话框；取消返回空列表 */
   pickImages: () => Promise<PickedImage[]>;
   /** 用户主目录（路径 ~ 缩写用）；取不到返回 null */

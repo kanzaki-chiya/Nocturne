@@ -1553,6 +1553,7 @@ const MCP_NAME_PREFIX = "mcp__";
  * 没有 subjects（如实时工具行）时从注册名 `mcp__<server>__<tool>` 解析，去掉前缀。
  */
 function mcpToolLabel(name: string, subjects?: ToolEntry["subjects"]): string | undefined {
+  if (name.startsWith("mcp__computer__")) return "电脑操控";
   const subject = subjects?.find((entry) => entry.kind === "mcp");
   if (subject !== undefined) return subject.target;
   if (!name.startsWith(MCP_NAME_PREFIX)) return undefined;
@@ -1634,6 +1635,11 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
     default:
       // MCP 工具的名称列已是 server/tool；参数位展示主要输入（第一个非空
       // 字符串入参，如搜索 query、抓取 url），拿不到就留空，不再显示一遍名字。
+      if (name.startsWith("mcp__computer__")) {
+        const action = name.slice("mcp__computer__".length);
+        const target = entry.subjects.find((subject) => subject.kind === "app")?.target;
+        return plain(target === undefined ? action : `${action} · ${target}`);
+      }
       if (mcpToolLabel(name, entry.subjects) !== undefined) {
         if (input === undefined) return plain("");
         return plain(
@@ -2948,7 +2954,9 @@ export function PermissionCard({
       const option = optionsRef.current[Number(digit[0]) - 1];
       if (option === undefined) return;
       event.preventDefault();
-      if (option === "deny") {
+      const allApp =
+        pending.subjects.length > 0 && pending.subjects.every((subject) => subject.kind === "app");
+      if (option === "deny" && !allApp) {
         setFeedbackRef.current("");
       } else {
         void replyRef.current(permissionReplies[option]);
@@ -2972,6 +2980,27 @@ export function PermissionCard({
       </div>
       <ul className="ask-subjects">
         {pending.subjects.map((subject, index) => {
+          if (subject.kind === "app") {
+            const name = subject.app?.name ?? subject.target;
+            const title = subject.app?.title ?? subject.detail;
+            return (
+              <li key={index} className="ask-app">
+                <span
+                  className="app-ic"
+                  style={{ background: subject.app?.icon ? "transparent" : "#1f7a46" }}
+                >
+                  {subject.app?.icon ? (
+                    <img src={`data:image/png;base64,${subject.app.icon}`} alt="" />
+                  ) : (
+                    (name[0] ?? "A")
+                  )}
+                </span>
+                <span className="app-name">{name}</span>
+                {subject.target !== name && <span className="exe">{subject.target}</span>}
+                {title !== undefined && title !== "" && <span className="title">{title}</span>}
+              </li>
+            );
+          }
           if (subject.kind === "schedule") {
             return (
               <li key={index} className="ask-schedule">
@@ -3003,14 +3032,16 @@ export function PermissionCard({
         <div className="ask-actions">
           {options.map((option) => {
             const label =
-              option === "allow_session" && networks.length
-                ? `本会话允许访问 ${networks.map((subject) => subject.target).join("、")}`
-                : permissionLabels[option];
+              option === "allow_always" && pending.subjects[0]?.kind === "app"
+                ? `始终允许 ${pending.subjects[0].app?.name ?? pending.subjects[0].target}`
+                : option === "allow_session" && networks.length
+                  ? `本会话允许访问 ${networks.map((subject) => subject.target).join("、")}`
+                  : permissionLabels[option];
             return (
               <Button
                 key={option}
                 variant={
-                  option === "allow_once"
+                  option === options[0] && (option === "allow_once" || option === "allow_session")
                     ? "primary"
                     : option === "deny_stop"
                       ? "danger"
@@ -3018,7 +3049,14 @@ export function PermissionCard({
                 }
                 disabled={busy}
                 onClick={() => {
-                  if (option === "deny") setFeedback("");
+                  if (
+                    option === "deny" &&
+                    !(
+                      pending.subjects.length > 0 &&
+                      pending.subjects.every((subject) => subject.kind === "app")
+                    )
+                  )
+                    setFeedback("");
                   else void reply(permissionReplies[option]);
                 }}
               >

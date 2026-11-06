@@ -54,6 +54,7 @@ import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage } from "./SettingsPage";
+import { ComputerSettingsPage } from "./ComputerSettingsPage";
 import {
   BrowserSettingsPage,
   downloadSettings,
@@ -644,6 +645,13 @@ export function App({ host }: { host: DesktopHost }) {
   useEffect(
     () =>
       pool.onClient((client) => {
+        const currentPrefs = prefs.get();
+        void client.computer
+          .setCursor(currentPrefs.computerCursor !== false)
+          .catch(() => undefined);
+        void client.computer
+          .setEnabled(currentPrefs.computerEnabled === true)
+          .catch(() => undefined);
         // 新后台出现也刷新一次渲染：「后台日志」页的后台条目才有候选
         setConversationVersion((v) => v + 1);
         const stopProviders = client.onProvidersChanged(() => {
@@ -1714,6 +1722,15 @@ export function App({ host }: { host: DesktopHost }) {
                     downloads={browserDownloads}
                     relaunch={requestRestart}
                     version={settingsVersion}
+                  />
+                </PaneErrorBoundary>
+              ) : settingsPage === "computer" ? (
+                <PaneErrorBoundary key="computer">
+                  <ComputerSettingsPage
+                    computer={pageClient?.computer}
+                    prefs={prefs}
+                    version={settingsVersion}
+                    pickExecutable={host.pickExecutable}
                   />
                 </PaneErrorBoundary>
               ) : settingsPage === "remote" ? (

@@ -114,6 +114,8 @@ export interface Prefs {
   agentBrowserEnabled?: boolean | undefined;
   /** 用户已经看过启用风险说明（只在第一次启用时拦一下） */
   agentBrowserRiskAccepted?: boolean | undefined;
+  computerEnabled?: boolean | undefined;
+  computerCursor?: boolean | undefined;
   /** 设置 › 浏览器 › 下载：每次询问保存位置；缺省开，只存 false */
   downloadAsk?: false | undefined;
   /** 下载保存位置；缺省系统「下载」文件夹 */
@@ -240,6 +242,8 @@ function parse(raw: string | null): Prefs {
     prefs.agentBrowserEnabled = obj.agentBrowserEnabled;
   }
   if (obj.agentBrowserRiskAccepted === true) prefs.agentBrowserRiskAccepted = true;
+  if (typeof obj.computerEnabled === "boolean") prefs.computerEnabled = obj.computerEnabled;
+  if (typeof obj.computerCursor === "boolean") prefs.computerCursor = obj.computerCursor;
   if (obj.downloadAsk === false) prefs.downloadAsk = false;
   if (typeof obj.downloadDir === "string" && obj.downloadDir !== "") {
     prefs.downloadDir = obj.downloadDir;
@@ -337,6 +341,8 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.agentBrowserRiskAccepted !== undefined
           ? { agentBrowserRiskAccepted: prefs.agentBrowserRiskAccepted }
           : {}),
+        ...(prefs.computerEnabled !== undefined ? { computerEnabled: prefs.computerEnabled } : {}),
+        ...(prefs.computerCursor !== undefined ? { computerCursor: prefs.computerCursor } : {}),
         ...(prefs.downloadAsk !== undefined ? { downloadAsk: prefs.downloadAsk } : {}),
         ...(prefs.downloadDir !== undefined ? { downloadDir: prefs.downloadDir } : {}),
         ...(prefs.webLinkOpener !== undefined ? { webLinkOpener: prefs.webLinkOpener } : {}),

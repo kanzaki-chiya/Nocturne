@@ -2023,6 +2023,49 @@ class Connection implements HubPeer {
       },
 
       // ADR-0073：取消是会话内操作，远程允许；下方观察方法仍只服务本机面板
+      "computer.describe": () => {
+        this.runtime();
+        return this.hub.describeComputer();
+      },
+      "computer.setEnabled": async (p) => {
+        this.runtime();
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("参数 enabled 必须是布尔值");
+        await this.hub.computer()?.setEnabled(enabled);
+        return this.hub.describeComputer();
+      },
+      "computer.setCursor": async (p) => {
+        this.runtime();
+        const cursor = optBool(p, "cursor");
+        if (cursor === undefined) throw new InvalidParamsError("参数 cursor 必须是布尔值");
+        await this.hub.computer()?.setCursor(cursor);
+        return this.hub.describeComputer();
+      },
+      "computer.restart": async () => {
+        this.runtime();
+        await this.hub.computer()?.restart();
+        return this.hub.describeComputer();
+      },
+      "computer.runningApps": () => {
+        this.runtime();
+        return this.hub.computer()?.runningApps() ?? Promise.resolve([]);
+      },
+      "computer.setPermission": async (p) => {
+        this.runtime();
+        const identity = reqString(p, "identity");
+        const action = p.action === null ? undefined : optString(p, "action");
+        if (action !== undefined && action !== "allow" && action !== "ask" && action !== "deny")
+          throw new InvalidParamsError("参数 action 必须是 allow / ask / deny / null");
+        const app = p.app === undefined || p.app === null ? undefined : reqObject(p, "app");
+        await this.providerConfig().current.appPermissions?.set(
+          identity,
+          action,
+          app === undefined
+            ? undefined
+            : { name: optString(app, "name"), icon: optString(app, "icon") },
+        );
+        return this.hub.describeComputer();
+      },
       "subagent.cancel": async (p) => {
         await this.runtime().cancelSubagent({
           parentSessionId: reqString(p, "parentSessionId"),

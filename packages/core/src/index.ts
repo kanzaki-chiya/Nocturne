@@ -1882,7 +1882,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           const store = config?.appPermissions;
           if (store === undefined || subjects.some((subject) => subject.appUnresolved === true))
             throw new Error("用户规则存储不可用");
-          for (const subject of subjects) await store.set(subject.target, "allow");
+          for (const subject of subjects)
+            await store.set(
+              subject.target,
+              "allow",
+              subject.app === undefined
+                ? undefined
+                : { name: subject.app.name, icon: subject.app.icon },
+            );
         },
         hooks: hookRunner,
         worktrees: activeWorktrees,

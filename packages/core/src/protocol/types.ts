@@ -408,6 +408,7 @@ export function normalizePermissionPreset(name: string): string {
  */
 export interface PermissionRule {
   kind?: SubjectKind | "*" | undefined;
+  app?: { name?: string | undefined; icon?: string | undefined } | undefined;
   /**
    * 匹配模式：路径类为 glob（相对模式拼接到 workspaceRoot 之下），
    * shell / network / mcp 为字符串通配符（permissions.md 5.1）

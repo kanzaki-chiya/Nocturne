@@ -92,6 +92,7 @@ import type {
   LoginStarted,
   PrepareProviderParams,
   ProvidersDescribed,
+  ComputerDescription,
   RpcMethodName,
   RpcParams,
   RpcResult,
@@ -505,7 +506,17 @@ export interface RpcLogin {
   cancel(loginId: string): Promise<void>;
 }
 
+export interface RpcComputer {
+  describe(): Promise<ComputerDescription>;
+  setEnabled(enabled: boolean): Promise<ComputerDescription>;
+  setCursor(cursor: boolean): Promise<ComputerDescription>;
+  restart(): Promise<ComputerDescription>;
+  runningApps(): Promise<RpcResult<"computer.runningApps">>;
+  setPermission(input: RpcParams<"computer.setPermission">): Promise<ComputerDescription>;
+  onChanged(handler: (description: ComputerDescription) => void): () => void;
+}
 export interface RpcClient {
+  readonly computer: RpcComputer;
   onNotification<M extends keyof RpcServerNotifications>(
     method: M,
     handler: (params: RpcServerNotifications[M]) => void,
@@ -1168,6 +1179,23 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   };
 
   return {
+    computer: {
+      describe: () => call("computer.describe", {}),
+      setEnabled: (enabled) => call("computer.setEnabled", { enabled }),
+      setCursor: (cursor) => call("computer.setCursor", { cursor }),
+      restart: () => call("computer.restart", {}),
+      runningApps: () => call("computer.runningApps", {}),
+      setPermission: (input) => call("computer.setPermission", input),
+      onChanged: (handler) => {
+        const listeners =
+          notificationListeners.get("computer.changed") ?? new Set<(params: never) => void>();
+        notificationListeners.set("computer.changed", listeners);
+        listeners.add(handler);
+        return () => {
+          listeners.delete(handler);
+        };
+      },
+    },
     onNotification(method, handler) {
       const listeners = notificationListeners.get(method) ?? new Set<(params: never) => void>();
       notificationListeners.set(method, listeners);
