@@ -96,6 +96,12 @@ it("驱动重启与显示光标当场调用后台，不要求重启应用", asyn
   fireEvent.click(screen.getByRole("switch", { name: "电脑操控" }));
   fireEvent.click(screen.getByRole("button", { name: "仍然启用" }));
   await screen.findByText("运行中");
+  cleanup();
+  render(<ComputerSettingsPage computer={api} prefs={prefs} version={1} hotkeyBound={false} />);
+  await screen.findByText("运行中（停止快捷键未绑定）");
+  cleanup();
+  render(<ComputerSettingsPage computer={api} prefs={prefs} version={1} />);
+  await screen.findByText("运行中");
   fireEvent.click(screen.getByRole("button", { name: "重启" }));
   await waitFor(() => expect(api.restart).toHaveBeenCalledOnce());
   fireEvent.click(screen.getByRole("switch", { name: "显示光标" }));

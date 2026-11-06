@@ -825,4 +825,31 @@ describe("状态栏速度段", () => {
     );
     expect(speed()?.textContent).toMatch(/^~\d+ tok\/s$/);
   });
+
+  it("前台送达期间显示操控软件与停止按钮，点击停止中断当前 Turn", () => {
+    const state = fixture();
+    const stop = vi.fn();
+    const view = render(
+      <StatusBar
+        {...state}
+        computerActive={{ name: "Excel", identity: "excel.exe" }}
+        onStopComputer={stop}
+      />,
+    );
+    expect(screen.getByText(/Excel/u)).not.toBeNull();
+    expect(screen.getByRole("button", { name: /停止/u }).getAttribute("title")).toContain(
+      "Ctrl+Alt+Esc",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /停止/u }));
+    expect(stop).toHaveBeenCalledOnce();
+    view.rerender(
+      <StatusBar
+        {...state}
+        computerActive={{ name: "Excel", identity: "excel.exe" }}
+        onStopComputer={stop}
+        computerHotkeyBound={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /停止/u }).getAttribute("title")).toBe("停止");
+  });
 });

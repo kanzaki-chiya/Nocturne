@@ -7,7 +7,11 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
+import {
+  sessionUsageSoFar,
+  type ApplicationTarget,
+  type SessionView,
+} from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession, RpcClient, RemoteStatus } from "@nocturne/rpc/client";
 import { RemoteBadge } from "./RemotePage";
 
@@ -45,6 +49,9 @@ export interface StatusBarProps {
   /** MCP 标记的点击：进入设置 › MCP */
   onManageMcp?: () => void;
   onManageGrants?: () => void;
+  computerActive?: ApplicationTarget | undefined;
+  onStopComputer?: (() => void) | undefined;
+  computerHotkeyBound?: boolean | undefined;
 }
 
 export {
@@ -299,6 +306,9 @@ export function StatusBar({
   remoteStatus,
   remoteClient,
   onManageRemote,
+  computerActive,
+  onStopComputer,
+  computerHotkeyBound = true,
 }: StatusBarProps) {
   const speed = useStepSpeed(session, view);
   const [localPanel, setLocalPanel] = useState<StatusPanel | null>(null);
@@ -452,6 +462,21 @@ export function StatusBar({
         <SpeedBadge speed={speed} />
       </div>
       <div className="status-right status-group">
+        {computerActive && (
+          <span className="status-item status-computer-active">
+            <span>{computerActive.name ?? computerActive.identity ?? "电脑操控"}</span>
+            {onStopComputer && (
+              <button
+                type="button"
+                className="status-pill"
+                title={computerHotkeyBound ? "停止（Ctrl+Alt+Esc）" : "停止"}
+                onClick={onStopComputer}
+              >
+                停止
+              </button>
+            )}
+          </span>
+        )}
         {branch}
         <McpBadge
           servers={unavailableMcpServers(view)}

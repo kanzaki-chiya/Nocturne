@@ -9,6 +9,7 @@ mod browser;
 mod browser_fullscreen;
 mod browser_policy;
 mod browsing_data;
+mod computer;
 mod editor;
 mod fonts;
 mod images;
@@ -182,6 +183,7 @@ pub fn run() {
         agent_browser::agent_browser_dialog,
         agent_browser::agent_browser_set_enabled,
         agent_browser::agent_browser_status,
+        computer::computer_set_hotkey,
     ];
     tauri::Builder::default()
         // 不要插件往每个 webview 注入的 alert / confirm 改写（plugin_script.rs）：网页和主界面都用
@@ -215,6 +217,7 @@ pub fn run() {
             state.init_job();
             app.manage(state);
             app.manage(key_diag::KeyDiag::default());
+            app.manage(Arc::new(computer::ComputerHotkey::default()));
             // 通知：持有每个会话当前那条 toast，点击回调才有效（ADR-0056）
             app.manage(notify::NotifyState::default());
             // 面板终端（ADR-0060 第 4 节）：页面重载、应用退出时全部结束

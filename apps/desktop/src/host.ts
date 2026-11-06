@@ -262,6 +262,8 @@ export interface DesktopHost {
   requestAttention: () => Promise<void>;
   /** 通知被点击（外壳在 toast 激活时空调用）：回调会话 id；返回取消订阅 */
   onNotificationActivated: (handler: (sessionId: string) => void) => () => void;
+  setComputerHotkey?: ((active: boolean) => Promise<boolean>) | undefined;
+  onComputerStopHotkey?: ((handler: () => void) => () => void) | undefined;
   /** 面板终端；没有（测试宿主）时新标签页的「终端」入口置灰 */
   terminals?: TerminalHost;
   /** 面板内置浏览器；没有时网址与 HTML 交给系统浏览器 */

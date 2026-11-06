@@ -209,5 +209,17 @@ export function createTauriHost(): DesktopHost {
         stop?.();
       };
     },
+    setComputerHotkey: (active) => invoke<boolean>("computer_set_hotkey", { active }),
+    onComputerStopHotkey(handler) {
+      let stop: (() => void) | undefined;
+      void listen("computer-stop-hotkey", () => {
+        handler();
+      }).then((unlisten) => {
+        stop = unlisten;
+      });
+      return () => {
+        stop?.();
+      };
+    },
   };
 }

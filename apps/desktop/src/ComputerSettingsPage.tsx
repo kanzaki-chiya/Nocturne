@@ -33,11 +33,13 @@ export function ComputerSettingsPage({
   prefs,
   version,
   pickExecutable,
+  hotkeyBound = true,
 }: {
   computer?: RpcComputer | undefined;
   prefs: PrefsStore;
   version: number;
   pickExecutable?: (() => Promise<string | null>) | undefined;
+  hotkeyBound?: boolean | undefined;
 }) {
   const [description, setDescription] = useState<ComputerDescription | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -149,7 +151,9 @@ export function ComputerSettingsPage({
                 <span
                   className={`computer-dot${state?.state === "running" && enabled ? "" : " stopped"}`}
                 >
-                  {stateLabel(state?.state ?? "stopped", enabled)}
+                  {state?.state === "running" && enabled && !hotkeyBound
+                    ? "运行中（停止快捷键未绑定）"
+                    : stateLabel(state?.state ?? "stopped", enabled)}
                 </span>
                 <span className="num">cua-driver {state?.version ?? "0.40.2"}</span>
                 <Button

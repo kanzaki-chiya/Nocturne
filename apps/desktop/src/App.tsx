@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { RpcError, type RpcClient, type RpcRuntime, type RpcSession } from "@nocturne/rpc/client";
+import {
+  RpcError,
+  type ComputerDescription,
+  type RpcClient,
+  type RpcRuntime,
+  type RpcSession,
+} from "@nocturne/rpc/client";
 import type {
+  ApplicationTarget,
   ExternalAgentOverview,
   ModelRef,
   PendingInputsSnapshot,
@@ -306,6 +313,16 @@ export function App({ host }: { host: DesktopHost }) {
     /** stderr 块默认只显示最后几行，展开看全部 */
     expanded?: boolean;
   } | null>(null);
+  const [computerActive, setComputerActive] = useState<{
+    sessionId: string;
+    app: ApplicationTarget;
+  } | null>(null);
+  const [computerHotkeyBound, setComputerHotkeyBound] = useState(true);
+  const computerActiveRef = useRef<{
+    sessionId: string;
+    app: ApplicationTarget;
+  } | null>(null);
+  computerActiveRef.current = computerActive;
   const lastFocusRefresh = useRef(0);
   const [conversationVersion, setConversationVersion] = useState(0);
   const [providersVersion, setProvidersVersion] = useState(0);
@@ -429,6 +446,12 @@ export function App({ host }: { host: DesktopHost }) {
       ),
     [pool],
   );
+  const stopActiveComputer = useCallback(() => {
+    const activeComputer = computerActiveRef.current;
+    if (activeComputer) conversations.opened.get(activeComputer.sessionId)?.session.interrupt();
+    else conversations.interrupt();
+  }, [conversations]);
+  useEffect(() => host.onComputerStopHotkey?.(stopActiveComputer), [host, stopActiveComputer]);
   /**
    * 关闭窗口（ADR-0070 §6）：有待发输入时先提醒「还有 N 条没发出」；没有就
    * 直接退出。关闭请求由外壳拦下后经 `app-close-requested` 交到这里。
@@ -678,11 +701,38 @@ export function App({ host }: { host: DesktopHost }) {
         const stopSessions = client.onNotification("runtime.sessionsChanged", () => {
           void refresh();
         });
+        const syncComputer = (description: ComputerDescription) => {
+          if (!alive) return;
+          const activeComputer = description.state?.active;
+          setComputerActive(
+            activeComputer
+              ? { sessionId: activeComputer.sessionId, app: activeComputer.app }
+              : null,
+          );
+          const running =
+            description.state?.enabled === true && description.state.state === "running";
+          if (host.setComputerHotkey) {
+            void host
+              .setComputerHotkey(running)
+              .then((bound) => {
+                if (alive) setComputerHotkeyBound(bound);
+              })
+              .catch(() => {
+                if (alive) setComputerHotkeyBound(false);
+              });
+          }
+        };
+        const stopComputer = client.computer.onChanged(syncComputer);
+        void client.computer
+          .describe()
+          .then(syncComputer)
+          .catch(() => undefined);
         return () => {
           alive = false;
           stopProviders();
           stopSchedules();
           stopSessions();
+          stopComputer();
         };
       }),
     [pool, refresh],
@@ -704,6 +754,11 @@ export function App({ host }: { host: DesktopHost }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.altKey && !event.shiftKey && event.key === "Escape") {
+        event.preventDefault();
+        stopActiveComputer();
+        return;
+      }
       if (
         event.isComposing ||
         event.key === "Process" ||
@@ -726,7 +781,7 @@ export function App({ host }: { host: DesktopHost }) {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [setSearchOpen]);
+  }, [setSearchOpen, stopActiveComputer]);
 
   // 主目录只读一次（路径 ~ 缩写）
   useEffect(() => {
@@ -1731,6 +1786,7 @@ export function App({ host }: { host: DesktopHost }) {
                     prefs={prefs}
                     version={settingsVersion}
                     pickExecutable={host.pickExecutable}
+                    hotkeyBound={computerHotkeyBound}
                   />
                 </PaneErrorBoundary>
               ) : settingsPage === "remote" ? (
@@ -1908,6 +1964,9 @@ export function App({ host }: { host: DesktopHost }) {
                 onPanelChange={setPanel}
                 providersVersion={providersVersion}
                 scheduleSource={scheduleSourceFor(sessions, scheduleNames, active.session.id)}
+                computerActive={computerActive?.app}
+                onStopComputer={stopActiveComputer}
+                computerHotkeyBound={computerHotkeyBound}
                 onManageProviders={() => {
                   setPage("providers");
                 }}
@@ -2234,6 +2293,9 @@ interface SessionPaneProps {
   onManageGrants: () => void;
   remoteStatus: RemoteStatus | undefined;
   onManageRemote: () => void;
+  computerActive?: ApplicationTarget | undefined;
+  onStopComputer?: (() => void) | undefined;
+  computerHotkeyBound?: boolean | undefined;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
   scheduleSource?: ConversationProps["scheduleSource"];
@@ -2297,6 +2359,9 @@ function SessionPane({
   onManageGrants,
   remoteStatus,
   onManageRemote,
+  computerActive,
+  onStopComputer,
+  computerHotkeyBound,
   scheduleSource,
   searchTarget,
 }: SessionPaneProps) {
@@ -2461,6 +2526,9 @@ function SessionPane({
         remoteStatus={remoteStatus}
         remoteClient={client}
         onManageRemote={onManageRemote}
+        computerActive={computerActive}
+        onStopComputer={onStopComputer}
+        computerHotkeyBound={computerHotkeyBound}
       />
     </>
   );
