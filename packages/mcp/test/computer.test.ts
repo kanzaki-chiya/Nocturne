@@ -182,6 +182,89 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
     for (const name of ["list_windows", "list_apps", "clipboard_read"])
       expect(tool(session, name).permissionSubjects({}, scope)).toEqual([]);
   });
+  it("同一 PID 第二次解析命中缓存不再调底层；创建时间变化时重新解析；同一 ApplicationFrameHost 不同窗口分别解析；解析时不取图标", async () => {
+    const creationTimes = new Map<number, string>([
+      [20, "1000"],
+      [30, "2000"],
+    ]);
+    const calls: Array<{ pid?: number; windowId?: number; includeIcon?: boolean }> = [];
+    const source = createComputerSource({
+      platform,
+      cwd,
+      verifyPackage: async () => undefined,
+      home: platform.paths.join(cwd, "dist/test-computer"),
+      executable: process.execPath,
+      args: [fileURLToPath(new URL("./fake-computer.mjs", import.meta.url))],
+      getProcessCreationTime: async (pid) => creationTimes.get(pid),
+      resolveApplication: async (target, opts) => {
+        calls.push({ pid: target.pid, windowId: target.windowId, includeIcon: opts?.includeIcon });
+        if (target.pid === 20) {
+          return creationTimes.get(20) === "1000"
+            ? { exePath: "C:/Office/EXCEL.EXE", name: "Excel" }
+            : { exePath: "C:/Windows/notepad.exe", name: "Notepad" };
+        }
+        if (target.pid === 30) {
+          return {
+            exePath: "C:/Windows/System32/ApplicationFrameHost.exe",
+            packageFamilyName:
+              target.windowId === 101
+                ? "Microsoft.Calculator_8wekyb3d8bbwe"
+                : "Microsoft.WindowsStore_8wekyb3d8bbwe",
+            name: target.windowId === 101 ? "计算器" : "Microsoft Store",
+          };
+        }
+        return undefined;
+      },
+    });
+    sources.push(source);
+    await source.setEnabled(true);
+    const connector = createMcpConnector({ runtimeServers: [source] });
+    const session = await connector.open({
+      servers: [],
+      cwd,
+      workspaceRoot: cwd,
+      sessionId: "cache-test",
+      platform,
+      emitServer: () => undefined,
+      warn: () => undefined,
+    });
+    sessions.push(session);
+    await session.startup();
+    session.applyPendingTools();
+    const t = tool(session, "get_window_state");
+    const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+    const resolve = async (pid: number, window_id: number) => {
+      const req = t.permissionSubjects({ pid, window_id }, scope)[0];
+      if (!req || !t.resolveSubject) throw new Error("缺少解析器");
+      return t.resolveSubject(req, scope);
+    };
+
+    const first = await resolve(20, 100);
+    expect(first.target).toBe("excel.exe");
+    expect(first.app?.icon).toBeUndefined();
+    expect(calls).toEqual([{ pid: 20, windowId: 100, includeIcon: false }]);
+
+    const second = await resolve(20, 100);
+    expect(second.target).toBe("excel.exe");
+    expect(calls).toHaveLength(1);
+
+    creationTimes.set(20, "1001");
+    const reused = await resolve(20, 100);
+    expect(reused.target).toBe("notepad.exe");
+    expect(calls).toHaveLength(2);
+
+    const uwp1 = await resolve(30, 101);
+    expect(uwp1.target).toBe("Microsoft.Calculator_8wekyb3d8bbwe");
+    expect(calls).toHaveLength(3);
+
+    const uwp1Cached = await resolve(30, 101);
+    expect(uwp1Cached.target).toBe("Microsoft.Calculator_8wekyb3d8bbwe");
+    expect(calls).toHaveLength(3);
+
+    const uwp2 = await resolve(30, 102);
+    expect(uwp2.target).toBe("Microsoft.WindowsStore_8wekyb3d8bbwe");
+    expect(calls).toHaveLength(4);
+  });
   it("剪贴板首次写入前备份，Turn 结束恢复；外部修改后不恢复", async () => {
     const { source, open } = make();
     await source.setEnabled(true);

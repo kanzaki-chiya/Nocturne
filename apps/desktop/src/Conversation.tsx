@@ -208,6 +208,7 @@ export interface ConversationProps {
         preface?: string | undefined;
       }
     | undefined;
+  resolveAppIcon?: ((target: string) => Promise<string | undefined>) | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -2888,20 +2889,44 @@ function useReply<Reply>(send: (reply: Reply) => Promise<void>) {
   return { reply, busy, error };
 }
 
+const appIconCache = new Map<string, string>();
+
 export function PermissionCard({
   pending,
   session,
   cwd,
   shellKind,
   hidePersistentPermissions = false,
+  resolveAppIcon,
 }: {
   pending: PendingPermission;
   session: RpcSession;
   cwd: string;
   shellKind?: string | undefined;
   hidePersistentPermissions?: boolean;
+  resolveAppIcon?: ((target: string) => Promise<string | undefined>) | undefined;
 }) {
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [icons, setIcons] = useState<ReadonlyMap<string, string>>(() => new Map(appIconCache));
+  useEffect(() => {
+    let alive = true;
+    for (const s of pending.subjects) {
+      if (s.kind !== "app") continue;
+      if (s.app?.icon) {
+        appIconCache.set(s.target, s.app.icon);
+        continue;
+      }
+      if (appIconCache.has(s.target) || !resolveAppIcon) continue;
+      void resolveAppIcon(s.target).then((icon) => {
+        if (!alive || !icon) return;
+        appIconCache.set(s.target, icon);
+        setIcons(new Map(appIconCache));
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [pending.subjects, resolveAppIcon]);
   const { reply, busy, error } = useReply((value: PermissionReply) =>
     session.respondPermission(pending.requestId, value),
   );
@@ -2983,17 +3008,11 @@ export function PermissionCard({
           if (subject.kind === "app") {
             const name = subject.app?.name ?? subject.target;
             const title = subject.app?.title ?? subject.detail;
+            const icon = subject.app?.icon ?? icons.get(subject.target);
             return (
               <li key={index} className="ask-app">
-                <span
-                  className="app-ic"
-                  style={{ background: subject.app?.icon ? "transparent" : "#1f7a46" }}
-                >
-                  {subject.app?.icon ? (
-                    <img src={`data:image/png;base64,${subject.app.icon}`} alt="" />
-                  ) : (
-                    (name[0] ?? "A")
-                  )}
+                <span className="app-ic" style={{ background: icon ? "transparent" : "#1f7a46" }}>
+                  {icon ? <img src={`data:image/png;base64,${icon}`} alt="" /> : (name[0] ?? "A")}
                 </span>
                 <span className="app-name">{name}</span>
                 {subject.target !== name && <span className="exe">{subject.target}</span>}
@@ -3752,6 +3771,7 @@ function ConversationContent({
   readOnly,
   scheduleSource,
   searchTarget,
+  resolveAppIcon,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -4101,6 +4121,7 @@ function ConversationContent({
             cwd={cwd}
             {...(hidePersistentPermissions !== undefined ? { hidePersistentPermissions } : {})}
             {...(shellKind !== undefined ? { shellKind } : {})}
+            {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
           />
         </div>
       ) : null}

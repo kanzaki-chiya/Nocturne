@@ -13,7 +13,11 @@ import type {
 import { createMcpConnector, type RuntimeMcpSource } from "./connector.js";
 import release from "./computer-release.json" with { type: "json" };
 import { createHash } from "node:crypto";
-import { resolveWindowsApplication, type ApplicationEvidence } from "./windows-app.js";
+import {
+  createWindowsAppHelper,
+  type ApplicationEvidence,
+  type ResolveApplicationOptions,
+} from "./windows-app.js";
 
 export const COMPUTER_TOOLS = new Set([
   "list_apps",
@@ -80,8 +84,13 @@ export interface ComputerOptions {
   args?: string[] | undefined;
   enabled?: boolean | undefined;
   cursor?: boolean | undefined;
+  getProcessCreationTime?: ((pid: number) => Promise<string | undefined>) | undefined;
   resolveApplication?:
-    ((target: ApplicationTarget) => Promise<ApplicationEvidence | undefined>) | undefined;
+    | ((
+        target: ApplicationTarget,
+        options?: ResolveApplicationOptions,
+      ) => Promise<ApplicationEvidence | undefined>)
+    | undefined;
   changed?: ((state: ComputerState) => void) | undefined;
   verifyPackage?: (() => Promise<void>) | undefined;
 }
@@ -180,8 +189,17 @@ export function createComputerSource(options: ComputerOptions) {
     options.changed?.({ ...state });
     for (const listener of listeners) listener();
   };
+  const helper = createWindowsAppHelper(platform);
+  const getProcessCreationTime =
+    options.getProcessCreationTime ??
+    (options.resolveApplication !== undefined
+      ? () => Promise.resolve("0")
+      : (pid) => helper.getCreationTime(pid));
   const resolveApplication =
-    options.resolveApplication ?? ((target) => resolveWindowsApplication(platform, target));
+    options.resolveApplication ?? ((target, opts) => helper.resolve(target, opts));
+  const appCache = new Map<string, { evidence: ApplicationEvidence; identity: string }>();
+  const frameHostPids = new Set<string>();
+  const iconCache = new Map<string, string>();
   const serialized = <T>(work: () => Promise<T>): Promise<T> => {
     const next = operations.then(work);
     operations = next.catch(() => undefined);
@@ -296,15 +314,68 @@ export function createComputerSource(options: ComputerOptions) {
     visit(input);
     return [...new Map(found.map((request) => [JSON.stringify(request.app), request])).values()];
   }
+  async function resolveCached(
+    app: ApplicationTarget,
+  ): Promise<{ evidence?: ApplicationEvidence; identity?: string }> {
+    if (app.pid !== undefined) {
+      const creationTime = (await getProcessCreationTime(app.pid).catch(() => undefined)) ?? "0";
+      const pidKey = `${app.pid}:${creationTime}`;
+      const isFrameHost = frameHostPids.has(pidKey);
+      const cacheKey = isFrameHost
+        ? app.windowId !== undefined
+          ? `window:${pidKey}:${app.windowId}`
+          : undefined
+        : `pid:${pidKey}`;
+      if (cacheKey !== undefined) {
+        const hit = appCache.get(cacheKey);
+        if (hit) return hit;
+      }
+      const evidence = await resolveApplication(app, { includeIcon: false }).catch(() => undefined);
+      const identity = evidence === undefined ? undefined : applicationIdentity(evidence);
+      const exeName = evidence?.exePath?.replaceAll("\\", "/").split("/").at(-1)?.toLowerCase();
+      if (exeName === "applicationframehost.exe") {
+        frameHostPids.add(pidKey);
+        if (app.windowId !== undefined && evidence !== undefined && identity !== undefined) {
+          appCache.set(`window:${pidKey}:${app.windowId}`, { evidence, identity });
+        }
+      } else if (evidence !== undefined && identity !== undefined) {
+        appCache.set(`pid:${pidKey}`, { evidence, identity });
+      }
+      return { evidence, identity };
+    }
+    const evidence = await resolveApplication(app, { includeIcon: false }).catch(() => undefined);
+    const identity = evidence === undefined ? undefined : applicationIdentity(evidence);
+    return { evidence, identity };
+  }
+  async function resolveIcon(
+    app: ApplicationTarget,
+    identity?: string,
+  ): Promise<string | undefined> {
+    if (identity !== undefined) {
+      const cached = iconCache.get(identity);
+      if (cached !== undefined) return cached;
+    }
+    const withIcon = await resolveApplication(app, { includeIcon: true }).catch(() => undefined);
+    const id = identity ?? (withIcon === undefined ? undefined : applicationIdentity(withIcon));
+    if (id !== undefined && withIcon?.icon !== undefined) {
+      iconCache.set(id, withIcon.icon);
+    }
+    return withIcon?.icon;
+  }
   async function resolveSubject(request: SubjectRequest): Promise<PermissionSubject> {
     const app = request.app ?? {};
-    const evidence = await resolveApplication(app).catch(() => undefined);
-    const identity = evidence === undefined ? undefined : applicationIdentity(evidence);
+    const { evidence, identity } = await resolveCached(app);
+    const cachedIcon = identity === undefined ? undefined : iconCache.get(identity);
     return {
       kind: "app",
       target: identity ?? request.target,
       appUnresolved: identity === undefined,
-      app: { ...app, ...evidence, identity },
+      app: {
+        ...app,
+        ...evidence,
+        ...(cachedIcon !== undefined ? { icon: cachedIcon } : {}),
+        identity,
+      },
       detail: evidence?.title,
     };
   }
@@ -443,7 +514,12 @@ export function createComputerSource(options: ComputerOptions) {
           for (const scope of scopes) scope.warn(code, message);
         },
       });
-      await connection.startup();
+      await Promise.all([
+        connection.startup(),
+        options.resolveApplication === undefined && options.getProcessCreationTime === undefined
+          ? helper.warmup().catch(() => undefined)
+          : Promise.resolve(),
+      ]);
       connection.applyPendingTools();
       if (epoch !== generation || !usable()) {
         await connection.close();
@@ -485,7 +561,10 @@ export function createComputerSource(options: ComputerOptions) {
     const previous = owner;
     owner = undefined;
     await previous?.close();
+    await helper.close();
     tokens.clear();
+    appCache.clear();
+    frameHostPids.clear();
     state = { ...state, state: "stopped", active: undefined };
     emitStatus();
   }
@@ -608,10 +687,9 @@ export function createComputerSource(options: ComputerOptions) {
               : undefined;
         const windowId = typeof item.window_id === "number" ? item.window_id : undefined;
         if (pid === undefined) continue;
-        const info = await resolveApplication({ pid, windowId });
-        if (!info) continue;
-        const identity = applicationIdentity(info);
-        if (!identity || INTERNAL_APPS.has(identity) || apps.has(identity)) continue;
+        const { evidence: info, identity } = await resolveCached({ pid, windowId });
+        if (!info || !identity || INTERNAL_APPS.has(identity) || apps.has(identity)) continue;
+        const icon = await resolveIcon({ pid, windowId, identity }, identity);
         const rawName =
           typeof item.app_name === "string"
             ? item.app_name
@@ -620,6 +698,7 @@ export function createComputerSource(options: ComputerOptions) {
               : identity;
         apps.set(identity, {
           ...info,
+          ...(icon !== undefined ? { icon } : {}),
           pid,
           windowId,
           name: info.name ?? rawName.replace(/\.exe$/iu, ""),
@@ -628,6 +707,7 @@ export function createComputerSource(options: ComputerOptions) {
       }
       return [...apps.values()];
     },
+    resolveIcon,
     async close() {
       closed = true;
       state = { ...state, enabled: false };
