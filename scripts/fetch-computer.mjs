@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -64,6 +65,12 @@ async function main() {
       { cwd: root },
     );
     mkdirSync(destination, { recursive: true });
+    const allowed = new Set(Object.keys(spec.files));
+    for (const existing of readdirSync(destination)) {
+      if (!allowed.has(existing)) {
+        rmSync(join(destination, existing), { recursive: true, force: true });
+      }
+    }
     for (const name of Object.keys(spec.files))
       copyFileSync(join(packageDir, name), join(destination, name));
     console.log(

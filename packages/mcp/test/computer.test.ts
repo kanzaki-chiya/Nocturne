@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import release from "../src/computer-release.json" with { type: "json" };
 import {
   createPlatform,
   type McpOpenScope,
@@ -93,6 +96,20 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
         platform.paths.join(cwd, "cua-driver.exe"),
       ),
     ).rejects.toThrow("SHA-256");
+  });
+  it("随附驱动清单只保留所需文件，且 fetch-computer 清理目标目录多余旧文件", async () => {
+    const expectedFiles = ["LICENSE", "THIRD_PARTY_NOTICES.md", "cua-driver.exe"];
+    expect(Object.keys(release.files).sort()).toEqual(expectedFiles);
+    const rootDir = join(fileURLToPath(new URL("../../..", import.meta.url)));
+    const destDir = join(rootDir, "apps/desktop/src-tauri/resources/computer");
+    writeFileSync(join(destDir, "stale-unused.dll"), "stale");
+    const proc = platform.process.spawnPipe(process.execPath, [
+      join(rootDir, "scripts/fetch-computer.mjs"),
+    ]);
+    proc.stdin.end();
+    const exit = await proc.wait();
+    expect(exit.code).toBe(0);
+    expect(readdirSync(destDir).sort()).toEqual(expectedFiles);
   });
   it("两会话共享一个 stdio 进程；单会话关闭不停止；关闭开关后边界移除，重新开启恢复", async () => {
     const { source, open } = make();
