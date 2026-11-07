@@ -3,7 +3,11 @@
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
 import { z } from "zod";
-import { BackgroundShells, type BackgroundShellTask } from "./tools/background-shell.js";
+import {
+  BackgroundShells,
+  observerOutput,
+  type BackgroundShellTask,
+} from "./tools/background-shell.js";
 import { createShellTool } from "./tools/builtin/shell.js";
 import { shellTaskTools } from "./tools/builtin/shell-tasks.js";
 import {
@@ -490,7 +494,7 @@ export type { ReadAttachmentResult };
 
 export interface RuntimeSession {
   shellTasks(): BackgroundShellTask[];
-  shellOutput(taskId: string, since?: "start"): ReturnType<BackgroundShells["output"]>;
+  shellOutput(taskId: string, offset?: number): ReturnType<BackgroundShells["observe"]>;
   shellKill(taskId: string): Promise<void>;
   listGrants(): Grant[];
   revokeGrant(input: { kind: Grant["kind"]; target: string }): Promise<void>;
@@ -3626,23 +3630,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         return tasks;
       },
-      async shellOutput(taskId, since) {
+      async shellOutput(taskId, offset) {
         assertUsable();
-        try {
-          return await backgroundShells.output(taskId, since, false);
-        } catch {
-          const task = runtimeSession.shellTasks().find((item) => item.taskId === taskId);
-          if (!task) throw new RuntimeCommandError("invalid_command", `未知后台任务：${taskId}`);
-          const text = await platform.fs.readTextFile(task.logPath).catch(() => "");
-          return {
-            task,
-            text,
-            durationMs: Math.max(
-              0,
-              Date.parse(task.endedAt ?? new Date().toISOString()) - Date.parse(task.startedAt),
-            ),
-          };
-        }
+        if (offset !== undefined && (!Number.isInteger(offset) || offset < 0))
+          throw new RuntimeCommandError("invalid_command", "offset must be a non-negative integer");
+        if (backgroundShells.list().some((task) => task.taskId === taskId))
+          return backgroundShells.observe(taskId, offset);
+        const task = runtimeSession.shellTasks().find((item) => item.taskId === taskId);
+        if (!task) throw new RuntimeCommandError("invalid_command", `未知后台任务：${taskId}`);
+        const text = await platform.fs.readTextFile(task.logPath).catch(() => "");
+        return observerOutput(task, text, offset);
       },
       async shellKill(taskId) {
         assertUsable();

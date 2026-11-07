@@ -405,6 +405,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
           command: input?.command ?? "",
           name: input?.name ?? input?.command?.split(/\r?\n/)[0] ?? "",
           logPath: output.logPath,
+          outputChars: 0,
           startedAt: started?.time ?? event.time,
           status: "running",
         });

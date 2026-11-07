@@ -2276,9 +2276,14 @@ class Connection implements HubPeer {
       },
       "shell.tasks": (p) => this.session(p).session.shellTasks(),
       "shell.output": (p) => {
-        const since = optString(p, "since");
-        if (since !== undefined && since !== "start") throw new InvalidParamsError("since");
-        return this.session(p).session.shellOutput(reqString(p, "taskId"), since);
+        const offset = p.offset;
+        if ("since" in p) throw new InvalidParamsError("since");
+        if (
+          offset !== undefined &&
+          (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0)
+        )
+          throw new InvalidParamsError("offset");
+        return this.session(p).session.shellOutput(reqString(p, "taskId"), offset);
       },
       "shell.kill": async (p) => {
         await this.session(p).session.shellKill(reqString(p, "taskId"));

@@ -224,7 +224,7 @@ export interface RpcSession {
   /** 待发输入快照（`input.pending` 是临时事件，订阅后用它对齐） */
   pendingInputs(): Promise<PendingInputsSnapshot>;
   shellTasks(): Promise<RpcResult<"shell.tasks">>;
-  shellOutput(taskId: string, since?: "start"): Promise<RpcResult<"shell.output">>;
+  shellOutput(taskId: string, offset?: number): Promise<RpcResult<"shell.output">>;
   shellKill(taskId: string): Promise<void>;
   /** 中断运行中的 Turn（通知，无应答）；submit 随后以 aborted 返回 */
   interrupt(): void;
@@ -826,8 +826,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       pendingInputs: () => call("session.pendingInputs", p),
       shellTasks: () => call("shell.tasks", p),
-      shellOutput: (taskId, since) =>
-        call("shell.output", { ...p, taskId, ...(since ? { since } : {}) }),
+      shellOutput: (taskId, offset) =>
+        call("shell.output", { ...p, taskId, ...(offset !== undefined ? { offset } : {}) }),
       shellKill: async (taskId) => {
         await call("shell.kill", { ...p, taskId });
       },

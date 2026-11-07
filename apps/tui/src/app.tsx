@@ -956,7 +956,7 @@ function SessionApp({
       const output = new Map<string, string>();
       for (const task of session.shellTasks()) {
         if (!diffExpanded.has(`t:${task.callId}`)) continue;
-        const result = await session.shellOutput(task.taskId, "start");
+        const result = await session.shellOutput(task.taskId);
         output.set(task.callId, result.text);
       }
       if (active) setShellOutputs(output);

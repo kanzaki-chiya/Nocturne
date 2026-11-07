@@ -47,6 +47,22 @@ const events: DurableEvent[] = [
   result,
 ];
 describe("backgroundShells projection", () => {
+  it("outputChars updates the live task without entering durable replay or conversation entries", () => {
+    const live = replaySessionView(events.slice(0, 2));
+    const task = live.backgroundShells[0];
+    if (!task) throw new Error("missing task");
+    reduceSessionView(live, {
+      ...base,
+      type: "shell.task_updated",
+      runId: "run",
+      eseq: 1,
+      afterSeq: 2,
+      payload: { task: { ...task, outputChars: 123 } },
+    });
+    expect(live.backgroundShells[0]?.outputChars).toBe(123);
+    expect(replaySessionView(events.slice(0, 2)).backgroundShells[0]?.outputChars).toBe(0);
+    expect(live.entries).toEqual(replaySessionView(events.slice(0, 2)).entries);
+  });
   it("derives start and completion with end time and retains finished tasks on replay", () => {
     const view = replaySessionView(events);
     expect(view.backgroundShells).toEqual([
@@ -56,6 +72,7 @@ describe("backgroundShells projection", () => {
         name: "fixture",
         command: "node fixture",
         logPath: "/sessions/s.tasks/task.log",
+        outputChars: 0,
         startedAt: base.time,
         endedAt: end,
         status: "exited",

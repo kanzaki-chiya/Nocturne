@@ -30,6 +30,24 @@ interface Job {
   writes: Promise<void>;
   settled: Promise<void>;
   discard: boolean;
+  updateTimer?: ReturnType<typeof setTimeout>;
+  updatedAt: number;
+}
+
+/** 客户端观察者使用绝对字符偏移，与模型读取游标和预算无关。 */
+export function observerOutput(task: BackgroundShellTask, text: string, offset?: number) {
+  const end = text.length;
+  const start = Math.max(Math.min(offset ?? 0, end), end - 200000);
+  return {
+    task: { ...task, outputChars: end },
+    text: text.slice(start),
+    start,
+    end,
+    durationMs: Math.max(
+      0,
+      Date.parse(task.endedAt ?? new Date().toISOString()) - Date.parse(task.startedAt),
+    ),
+  };
 }
 export interface ShellStart {
   command: string;
@@ -81,6 +99,7 @@ export class BackgroundShells {
       command: input.command,
       logPath,
       status: "running",
+      outputChars: 0,
       startedAt: new Date().toISOString(),
     };
     const job: Job = {
@@ -90,12 +109,33 @@ export class BackgroundShells {
       writes: Promise.resolve(),
       settled: Promise.resolve(),
       discard: false,
+      updatedAt: Date.now(),
     };
     this.jobs.set(taskId, job);
     this.options.updated?.({ ...task });
+    const notifyOutput = () => {
+      if (job.discard || task.status !== "running" || job.updateTimer) return;
+      job.updateTimer = setTimeout(
+        () => {
+          delete job.updateTimer;
+          if (job.discard || task.status !== "running") return;
+          if (Date.now() - job.updatedAt < 500) {
+            notifyOutput();
+            return;
+          }
+          job.updatedAt = Date.now();
+          this.options.updated?.({ ...task });
+        },
+        Math.max(0, 500 - (Date.now() - job.updatedAt)),
+      );
+    };
     const pump = async (stream: AsyncIterable<string>) => {
       for await (const chunk of stream) {
-        job.writes = job.writes.then(() => platform.fs.appendFile(logPath, chunk));
+        job.writes = job.writes.then(async () => {
+          await platform.fs.appendFile(logPath, chunk);
+          task.outputChars += chunk.length;
+          if (chunk.length > 0) notifyOutput();
+        });
         await job.writes;
       }
     };
@@ -126,6 +166,8 @@ export class BackgroundShells {
         await proc.kill();
         task.status = "interrupted";
       }
+      if (job.updateTimer) clearTimeout(job.updateTimer);
+      delete job.updateTimer;
       task.endedAt = new Date().toISOString();
       if (!job.discard) this.options.updated?.({ ...task });
       if (!job.discard && this.options.deliver) {
@@ -174,6 +216,13 @@ export class BackgroundShells {
         Date.parse(job.task.endedAt ?? new Date().toISOString()) - Date.parse(job.task.startedAt),
       ),
     };
+  }
+
+  async observe(id: string, offset?: number) {
+    const job = this.require(id);
+    await job.writes;
+    const text = await this.options.platform.fs.readTextFile(job.task.logPath);
+    return observerOutput(job.task, text, offset);
   }
 
   async kill(id: string): Promise<void> {

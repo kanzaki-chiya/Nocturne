@@ -112,7 +112,7 @@ describe("ADR-0083 Runtime", () => {
     await vi.waitFor(() => expect(readFileSync(task.logPath, "utf8")).toContain("ready"), {
       timeout: 5000,
     });
-    expect((await session.shellOutput(task.taskId, "start")).text).toContain("ready");
+    expect((await session.shellOutput(task.taskId)).text).toContain("ready");
     await session.shellKill(task.taskId);
     await vi.waitFor(() => expect(results(session)).toHaveLength(1));
     const result = must(results(session)[0]);

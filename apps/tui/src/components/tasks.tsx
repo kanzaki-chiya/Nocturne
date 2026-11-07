@@ -28,7 +28,7 @@ export function Tasks({
           items.sort((a, b) => Number(b.status === "running") - Number(a.status === "running")),
         );
       if (selected) {
-        const result = await session.shellOutput(selected, "start");
+        const result = await session.shellOutput(selected);
         if (active) setOutput(result.text);
       }
     };

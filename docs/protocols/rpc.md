@@ -107,7 +107,11 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 ### 3.2.1 `shell.*`（ADR-0083）
 
-`shell.tasks({ sessionId }) → BackgroundShellTask[]`、`shell.output({ sessionId, taskId, since?: "start" }) → { task: BackgroundShellTask, text, durationMs }`、`shell.kill({ sessionId, taskId }) → null`。只能访问指定已打开会话自身的登记任务；未知 id 返回 `invalid_command`。输出与停止复用 Core 会话 API；客户端观察输出不推进模型的 `shell_output` 游标。参数形状错误返回 `invalid_params`。`input.pending` 增加 `mode: "shell"`，可撤回不可编辑。客户端可通过会话订阅接收临时 `shell.task_updated`，并以 `shell.tasks` 对齐内存快照。任务视图保留已结束条目，由客户端按结束五分钟后过滤。
+`shell.tasks({ sessionId }) → BackgroundShellTask[]`、`shell.output({ sessionId, taskId, offset?: number }) → { task: BackgroundShellTask, text, start, end, durationMs }`、`shell.kill({ sessionId, taskId }) → null`。只能访问指定已打开会话自身的登记任务；未知 id 返回 `invalid_command`。输出与停止复用 Core 会话 API。观察者按日志文本的字符偏移读取，与模型 `shell_output` 的游标和预算完全无关；RPC 不再接受 `since`。`offset` 必须为非负整数，否则 `invalid_params`。
+
+不带 `offset` 返回末尾最多 200000 字符；带 `offset` 返回从该偏移到末尾的内容，超过 200000 字符时也只返回最后 200000 字符。`offset` 超出日志长度时按日志长度处理。`start` 为返回文本在日志中的起点，`end` 为日志当前长度。客户端在 `start` 等于本地已有 `end` 时追加，否则整段替换。打开时不带偏移读一次，此后收到 `shell.task_updated.task.outputChars` 大于本地 `end` 时带该 `end` 读取增量，无需轮询。`outputChars` 是当前已写日志的字符数，运行中的增长通知按同一任务最多每 500ms 一次；启动与结束仍各发送一次。
+
+`input.pending` 增加 `mode: "shell"`，可撤回不可编辑。客户端可通过会话订阅接收临时 `shell.task_updated`，并以 `shell.tasks` 对齐内存快照。任务视图保留已结束条目，由客户端按结束五分钟后过滤。
 
 ### 3.3 `provider.*`
 

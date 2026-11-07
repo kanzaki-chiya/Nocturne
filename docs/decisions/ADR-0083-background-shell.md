@@ -4,6 +4,8 @@
 - 日期：2026-11-07
 - 修订：[tools.md](../architecture/tools.md)（shell 一节与「暂不做」列表）、[agent-loop.md](../architecture/agent-loop.md)、[events.md](../protocols/events.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md)、[roadmap.md](../roadmap/roadmap.md)（「之后」里的后台任务）
 
+- 修订：2026-11-08：RPC 观察者按偏移读取、运行中节流推送 `shell.task_updated`；客户端需要首读全量和增量追加，不能共用模型游标。
+
 ## 背景
 
 `shell` 是同步的：模型调用后一直等到命令结束，默认 2 分钟、上限 30 分钟（`shell.ts:36-37`）。这带来三类问题：
@@ -87,7 +89,7 @@ backgroundShell?: {
 - **手机网页**：概览里同样的分组，点开看输出、可停止。
 - **TUI**：状态栏显示运行中任务数；新增 `/tasks` 列出本会话后台任务，选中可看输出尾部或停止。
 - 待发区的条目显示为「后台任务 · 等待送达」，可撤回。
-- 新增 RPC：`shell.tasks({ sessionId })`、`shell.output({ sessionId, taskId, since? })`、`shell.kill({ sessionId, taskId })`；`SessionView` 增加 `backgroundShells` 派生列表（由 `tool.started`/`tool.completed` 与 `message.user.backgroundShell` 推出，运行中状态由新的临时事件 `shell.task_updated` 补齐，不落盘）。
+- 新增 RPC：`shell.tasks({ sessionId })`、`shell.output({ sessionId, taskId, offset?: number }) → { task, text, start, end, durationMs }`、`shell.kill({ sessionId, taskId })`。观察者按独立字符偏移读末尾最多 200000 字符，不共用模型游标或预算；无偏移首读尾部，后续以 `end` 读取，`start` 等于本地 `end` 时追加，否则替换。`BackgroundShellTask.outputChars` 为当前日志字符数；运行中输出增长以同任务最多每 500ms 一次的临时 `shell.task_updated` 推送，启动和结束各发送一次。`SessionView.backgroundShells` 由持久工具与结果事件派生，并由临时事件更新；`outputChars` 不落盘，不参与重放等价。精确契约见 [rpc.md](../protocols/rpc.md#321-shelladr-0083)。
 
 ### 7. 权限与上下文不变
 

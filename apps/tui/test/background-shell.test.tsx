@@ -20,6 +20,7 @@ const task: BackgroundShellTask = {
   name: "fixture",
   command: "node fixture",
   logPath: "/log",
+  outputChars: 0,
   startedAt: "2026-11-07T00:00:00Z",
   status: "running",
 };

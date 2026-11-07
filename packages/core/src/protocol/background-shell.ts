@@ -4,6 +4,7 @@ export interface BackgroundShellTask {
   name: string;
   command: string;
   logPath: string;
+  outputChars: number;
   status: "running" | "exited" | "timeout" | "killed" | "interrupted";
   startedAt: string;
   endedAt?: string;

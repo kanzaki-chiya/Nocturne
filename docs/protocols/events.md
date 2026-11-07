@@ -123,7 +123,7 @@ ADR-0083：`message.user.backgroundShell?: { taskId, callId, status: "exited" | 
 
 ### 3.2 临时事件
 
-ADR-0083：`shell.task_updated` 携带 `{ task: BackgroundShellTask }`，任务字段见 [view.md](view.md)。它不写日志、不占用持久 seq；订阅后以 `shell.tasks` 对齐当前内存快照。
+ADR-0083：`shell.task_updated` 携带 `{ task: BackgroundShellTask }`，任务字段见 [view.md](view.md)。启动和结束时发送；运行中日志写入增长后按同一任务最多每 500ms 一次发送，`task.outputChars` 为已写日志的字符数，结束时发送最终状态并清除未触发的节流定时器。它不写日志、不占用持久 seq；订阅后以 `shell.tasks` 对齐当前内存快照。
 
 | 类型 | turnId | payload |
 |---|---|---|
