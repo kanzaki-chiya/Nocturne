@@ -6,6 +6,8 @@
 
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：侧栏分组、会话概览项目名固定使用创建时的项目目录；状态栏分支、文件面板、快速打开、本地 HTML 预览与新建终端跟随 `SessionView.currentCwd`；`switch_worktree` 工具行显示为 `切换工作树 <路径>`。
 
+[ADR-0083](../decisions/ADR-0083-background-shell.md) 的后台命令已接入常驻 RPC 后台；桌面端与手机网页的任务分组、输出标签及结果卡片留待下一轮实现，本轮不增加界面入口。
+
 ## 1. 进程结构与后台策略
 
 子代理准入失败的桌面/手机共用工具行，收起仅显示「未启动」，展开保留完整原因。子代理标识优先显示实际传入的 preset，其次非 default 的命名档位，无标识时省略；数据规则见 [subagent.md §20](../architecture/subagent.md#20-后台子代理)。

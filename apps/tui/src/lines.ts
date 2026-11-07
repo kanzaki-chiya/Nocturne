@@ -4,6 +4,7 @@
  * （欢迎区 + 冻结前缀 + 条目 + live）铺成 LineBlock 交给视口按需布局。
  */
 import stringWidth from "string-width";
+import { shellToolStatus, shellResultLine, shellResultText } from "./background-shell.js";
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 import {
@@ -158,6 +159,8 @@ function diffLines(
 }
 
 interface LayoutOptions {
+  backgroundShells?: SessionView["backgroundShells"];
+  shellOutputs?: ReadonlyMap<string, string>;
   entries?: readonly ViewEntry[];
   fullscreen?: boolean;
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
@@ -223,6 +226,19 @@ function layoutEntryBody(
   const prompt = ascii ? ">" : "›";
   switch (entry.kind) {
     case "user": {
+      if (entry.backgroundShell) {
+        const id = `shell:${entry.key}`;
+        const open = options.reasoningExpanded?.get(id) ?? false;
+        return [
+          ...rows(
+            entry.key,
+            shellResultLine(entry, options.entries ?? [], options.backgroundShells),
+            width,
+            { color: theme.secondary, toggle: { id, anchor: `${entry.key}:0` } },
+          ),
+          ...(open ? rows(`${entry.key}:body`, shellResultText(userText(entry)), width) : []),
+        ];
+      }
       if (entry.subagent) {
         const id = `subagent:${entry.key}`;
         const open = options.reasoningExpanded?.get(id) ?? false;
@@ -400,7 +416,9 @@ function layoutEntryBody(
       const notStarted = subagentStartRejected(entry);
       const status = notStarted
         ? "未启动"
-        : (backgroundToolStatus(entry, options.entries ?? []) ?? entry.status);
+        : (shellToolStatus(entry, options.entries ?? [], options.backgroundShells) ??
+          backgroundToolStatus(entry, options.entries ?? []) ??
+          entry.status);
       const head =
         shownName === "apply_subagent_changes" && entry.result
           ? `${mark} ${subagentApplyLine(entry.result.output)}`
@@ -418,6 +436,17 @@ function layoutEntryBody(
           { toggle },
         ),
       ];
+      if (
+        entry.name === "shell" &&
+        (entry.result?.output as { background?: unknown } | undefined)?.background === true
+      ) {
+        if (diffExpanded) {
+          const command = (entry.input as { command?: string } | undefined)?.command ?? "";
+          const output = options.shellOutputs?.get(entry.callId) ?? "";
+          lines.push(...rows(`${entry.key}:shell`, `${command}\n${output}`, width));
+        }
+        return lines;
+      }
       const reason = subagentRowInfo(entry).reason;
       if (reason !== undefined)
         lines.push(...rows(`${entry.key}:reason`, `  选择理由：${reason}`, width, { dim: true }));
@@ -625,6 +654,7 @@ function reasoningBody(
 }
 
 interface TranscriptSource {
+  shellOutputs?: ReadonlyMap<string, string>;
   welcome: LaidLine[];
   notices: readonly string[];
   frozen: readonly TranscriptItem[];
@@ -658,6 +688,8 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     fullscreen: src.fullscreen ?? true,
     reasoningExpanded: src.reasoningExpanded,
     entries: src.entries,
+    backgroundShells: src.live.backgroundShells,
+    ...(src.shellOutputs ? { shellOutputs: src.shellOutputs } : {}),
   };
   const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
   const blocks: LineBlock[] = [
@@ -708,7 +740,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   function entryBlock(entry: ViewEntry): LineBlock {
     const revision =
       entry.kind === "tool"
-        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${backgroundToolStatus(entry, src.entries) ?? ""}`
+        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${shellToolStatus(entry, src.entries, src.live.backgroundShells) ?? backgroundToolStatus(entry, src.entries) ?? ""}:${src.shellOutputs?.get(entry.callId) ?? ""}`
         : entry.kind === "assistant"
           ? `${entry.text.length}:${entry.reasoning.length}:${
               src.reasoning

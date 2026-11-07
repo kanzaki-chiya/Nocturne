@@ -749,7 +749,10 @@ export interface RpcMethods {
    */
   "session.pendingInputs": { params: SessionParams; result: PendingInputsSnapshot };
   "shell.tasks": { params: SessionParams; result: ReturnType<RuntimeSession["shellTasks"]> };
-  "shell.output": { params: SessionParams & { taskId: string; since?: "start" }; result: Awaited<ReturnType<RuntimeSession["shellOutput"]>> };
+  "shell.output": {
+    params: SessionParams & { taskId: string; since?: "start" };
+    result: Awaited<ReturnType<RuntimeSession["shellOutput"]>>;
+  };
   "shell.kill": { params: SessionParams & { taskId: string }; result: null };
   "session.respondPermission": {
     params: SessionParams & { requestId: string; reply: PermissionReply };

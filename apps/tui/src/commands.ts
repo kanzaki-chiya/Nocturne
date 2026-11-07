@@ -29,7 +29,8 @@ export type OverlayName =
   | "theme"
   | "settings"
   | "grants"
-  | "subagents";
+  | "subagents"
+  | "tasks";
 
 /** /provider 向导启动形态（add / key） */
 export type ProviderWizardStart =
@@ -326,6 +327,8 @@ export async function runSlash(
     }
     case "/skills":
       return { kind: "message", text: skillListLines(session.describeSkills().skills).join("\n") };
+    case "/tasks":
+      return { kind: "overlay", name: "tasks" };
     case "/subagents":
       return { kind: "overlay", name: "subagents" };
     case "/agents":

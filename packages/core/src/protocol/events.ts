@@ -109,6 +109,7 @@ export interface SubagentResult {
   changes?: SubagentChanges | undefined;
 }
 
+import type { BackgroundShellTask } from "./background-shell.js";
 export interface BackgroundShellResult {
   taskId: string;
   callId: string;
@@ -400,7 +401,7 @@ export interface DurablePayloadMap {
 }
 
 export interface EphemeralPayloadMap {
-  "shell.task_updated": { task: import("./background-shell.js").BackgroundShellTask };
+  "shell.task_updated": { task: BackgroundShellTask };
   "message.assistant.delta": AssistantDeltaPayload;
   "tool.input.delta": ToolInputDeltaPayload;
   "tool.progress": ToolProgressPayload;

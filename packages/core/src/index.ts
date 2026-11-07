@@ -7,6 +7,7 @@ import { BackgroundShells, type BackgroundShellTask } from "./tools/background-s
 import { createShellTool } from "./tools/builtin/shell.js";
 import { shellTaskTools } from "./tools/builtin/shell-tasks.js";
 import {
+  replaySessionView,
   subjectKindSchema,
   type GrantWorkspace,
   type ProjectTrustDescription,
@@ -2241,7 +2242,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...(options.providerConfigs ?? []),
     ]);
     const backgroundShells = new BackgroundShells({
-      platform, sessionsDir, sessionId: session.id,
+      platform,
+      sessionsDir,
+      sessionId: session.id,
       deliver: (input) => deliverBackgroundResult(input),
       updated: (task) => session.emitEphemeral("shell.task_updated", { task }),
     });
@@ -2529,7 +2532,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
       const hasExternalAgents = enabledExternalAgents.length > 0;
       // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
-      if (options.shell?.background === true && meta.parent === undefined && meta.schedule === undefined) {
+      if (
+        options.shell?.background === true &&
+        meta.parent === undefined &&
+        meta.schedule === undefined
+      ) {
         tools.unregister("shell");
         tools.register(createShellTool(backgroundShells));
         for (const tool of shellTaskTools(backgroundShells)) {
@@ -3420,10 +3427,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
         }
       }
-      recovered.push(...backgroundShells.recover(session.durableEvents(), meta.forkedFrom?.seq ?? 0));
+      recovered.push(
+        ...backgroundShells.recover(session.durableEvents(), meta.forkedFrom?.seq ?? 0),
+      );
       if (recovered.length > 0) {
         pendingInputStore.pauseAll();
-        for (const input of recovered) pendingInputStore.add(input.backgroundShell ? "shell" : "subagent", input);
+        for (const input of recovered)
+          pendingInputStore.add(input.backgroundShell ? "shell" : "subagent", input);
       }
     }
     // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
@@ -3600,17 +3610,47 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // 只缓存最近一次 describeContext；键覆盖 seq 与不写事件的 Builder 输入。
     // 返回值和缓存各自深拷贝，避免调用者改到缓存或持久历史。
     let contextCache: { key: string; value: BuiltContext } | undefined;
+    const recoveredAt = new Date().toISOString();
     const runtimeSession: RuntimeSession = {
-      shellTasks() { assertUsable(); return backgroundShells.list(); },
+      shellTasks() {
+        assertUsable();
+        const tasks = backgroundShells.list();
+        const known = new Set(tasks.map((task) => task.taskId));
+        for (const task of replaySessionView(session.durableEvents()).backgroundShells) {
+          if (!known.has(task.taskId))
+            tasks.push(
+              task.status === "running"
+                ? { ...task, status: "interrupted", endedAt: recoveredAt }
+                : task,
+            );
+        }
+        return tasks;
+      },
       async shellOutput(taskId, since) {
         assertUsable();
-        try { return await backgroundShells.output(taskId, since); }
-        catch (cause) { throw new RuntimeCommandError("invalid_command", String(cause)); }
+        try {
+          return await backgroundShells.output(taskId, since, false);
+        } catch {
+          const task = runtimeSession.shellTasks().find((item) => item.taskId === taskId);
+          if (!task) throw new RuntimeCommandError("invalid_command", `未知后台任务：${taskId}`);
+          const text = await platform.fs.readTextFile(task.logPath).catch(() => "");
+          return {
+            task,
+            text,
+            durationMs: Math.max(
+              0,
+              Date.parse(task.endedAt ?? new Date().toISOString()) - Date.parse(task.startedAt),
+            ),
+          };
+        }
       },
       async shellKill(taskId) {
         assertUsable();
-        try { await backgroundShells.kill(taskId); }
-        catch (cause) { throw new RuntimeCommandError("invalid_command", String(cause)); }
+        try {
+          await backgroundShells.kill(taskId);
+        } catch (cause) {
+          throw new RuntimeCommandError("invalid_command", String(cause));
+        }
       },
       describeSkills: () => ({
         skills: catalog.skills,
@@ -3713,7 +3753,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
       },
       state: () => session.state(),
-      subscribe: (listener) => session.subscribe(listener),
+      subscribe: (listener) => {
+        const unsub = session.subscribe(listener);
+        for (const task of runtimeSession.shellTasks()) {
+          listener({
+            type: "shell.task_updated",
+            sessionId: session.id,
+            runId: session.runId,
+            eseq: 0,
+            afterSeq: session.state().lastSeq,
+            time: recoveredAt,
+            payload: { task },
+          });
+        }
+        return unsub;
+      },
       async readInputHistory() {
         try {
           await historyWrite;

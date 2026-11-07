@@ -89,7 +89,9 @@ export class PendingInputs {
    */
   takeSteers(): PreparedInput[] {
     const taken = this.entries.filter(
-      (entry) => (entry.mode === "steer" || entry.mode === "subagent" || entry.mode === "shell") && !entry.paused,
+      (entry) =>
+        (entry.mode === "steer" || entry.mode === "subagent" || entry.mode === "shell") &&
+        !entry.paused,
     );
     if (taken.length === 0) return [];
     for (const entry of taken) this.remove(entry);
@@ -103,7 +105,8 @@ export class PendingInputs {
     if (head === undefined) return undefined;
     // 已错过当前 Turn 的插话全部转排队，避免被接续 Turn 的安全点抢先消费。
     for (const entry of this.entries) {
-      if (!entry.paused && entry.mode !== "subagent" && entry.mode !== "shell") entry.mode = "queue";
+      if (!entry.paused && entry.mode !== "subagent" && entry.mode !== "shell")
+        entry.mode = "queue";
     }
     this.remove(head);
     this.publish();
@@ -152,10 +155,12 @@ export class PendingInputs {
   dropSubagents(keep: ReadonlySet<string>): void {
     const dropped = this.entries.filter(
       (entry) =>
-        ((entry.mode === "subagent" && entry.input.subagent !== undefined &&
+        (entry.mode === "subagent" &&
+          entry.input.subagent !== undefined &&
           !keep.has(entry.input.subagent.callId)) ||
-         (entry.mode === "shell" && entry.input.backgroundShell !== undefined &&
-          !keep.has(entry.input.backgroundShell.callId))),
+        (entry.mode === "shell" &&
+          entry.input.backgroundShell !== undefined &&
+          !keep.has(entry.input.backgroundShell.callId)),
     );
     if (dropped.length === 0) return;
     for (const entry of dropped) this.remove(entry);

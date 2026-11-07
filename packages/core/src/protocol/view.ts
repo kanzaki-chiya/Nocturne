@@ -13,6 +13,7 @@ import {
  * 临时事件创建，收敛点上除 revision/notices 外重放等价（V1）。
  */
 import type { BackgroundShellResult, SubagentResult } from "./events.js";
+import type { BackgroundShellTask } from "./background-shell.js";
 import type {
   AttachmentDescribedPayload,
   ContextCompactedPayload,
@@ -54,7 +55,7 @@ import type {
 /** 会话标题与恢复列表：首条用户消息的第一个文本块的原文首行。 */
 
 export interface SessionView {
-  backgroundShells: import("./background-shell.js").BackgroundShellTask[];
+  backgroundShells: BackgroundShellTask[];
   currentCwd?: string | undefined;
   title: string | undefined;
   firstTitle: string | undefined;
@@ -373,16 +374,40 @@ export function replaySessionView(events: readonly DurableEvent[]): SessionView 
 function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = false): void {
   const b = book(view);
   const turnId = event.turnId;
-  if (event.type === "tool.completed" && event.payload.name === "shell" && event.payload.status === "ok") {
-    const output = event.payload.output as { background?: unknown; taskId?: unknown; logPath?: unknown } | undefined;
-    if (output?.background === true && typeof output.taskId === "string" && typeof output.logPath === "string") {
-      const started = b.events.find((item) => item.type === "tool.started" && item.payload.callId === event.payload.callId);
-      const input = started?.type === "tool.started" ? started.payload.input as { name?: string; command?: string } : undefined;
+  const created = b.events[0];
+  const forkSeq = created?.type === "session.created" ? (created.payload.forkedFrom?.seq ?? 0) : 0;
+  if (
+    event.seq > forkSeq &&
+    event.type === "tool.completed" &&
+    event.payload.name === "shell" &&
+    event.payload.status === "ok"
+  ) {
+    const output = event.payload.output as
+      { background?: unknown; taskId?: unknown; logPath?: unknown } | undefined;
+    if (
+      output?.background === true &&
+      typeof output.taskId === "string" &&
+      typeof output.logPath === "string"
+    ) {
+      const started = b.events.find(
+        (item) => item.type === "tool.started" && item.payload.callId === event.payload.callId,
+      );
+      const input =
+        started?.type === "tool.started"
+          ? (started.payload.input as { name?: string; command?: string })
+          : undefined;
       const old = view.backgroundShells.find((task) => task.taskId === output.taskId);
       if (old) old.startedAt = started?.time ?? event.time;
-      if (!old) view.backgroundShells.push({ taskId: output.taskId, callId: event.payload.callId,
-        command: input?.command ?? "", name: input?.name ?? input?.command?.split(/\r?\n/)[0] ?? "",
-        logPath: output.logPath, startedAt: started?.time ?? event.time, status: "running" });
+      if (!old)
+        view.backgroundShells.push({
+          taskId: output.taskId,
+          callId: event.payload.callId,
+          command: input?.command ?? "",
+          name: input?.name ?? input?.command?.split(/\r?\n/)[0] ?? "",
+          logPath: output.logPath,
+          startedAt: started?.time ?? event.time,
+          status: "running",
+        });
     }
   }
   if (event.type === "message.user" && event.payload.backgroundShell) {
@@ -491,7 +516,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
         ...(event.payload.steer === true ? { steer: true as const } : {}),
         ...(event.payload.subagent !== undefined ? { subagent: event.payload.subagent } : {}),
-        ...(event.payload.backgroundShell !== undefined ? { backgroundShell: event.payload.backgroundShell } : {}),
+        ...(event.payload.backgroundShell !== undefined
+          ? { backgroundShell: event.payload.backgroundShell }
+          : {}),
         ...(event.payload.workMode !== undefined ? { workMode: event.payload.workMode } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
@@ -808,7 +835,7 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
     const index = view.backgroundShells.findIndex((item) => item.taskId === task.taskId);
     if (index < 0) view.backgroundShells.push(task);
     else {
-      task.startedAt = view.backgroundShells[index]!.startedAt;
+      task.startedAt = view.backgroundShells[index]?.startedAt ?? task.startedAt;
       view.backgroundShells[index] = task;
     }
     return;

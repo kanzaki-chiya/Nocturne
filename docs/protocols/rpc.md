@@ -107,7 +107,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 ### 3.2.1 `shell.*`（ADR-0083）
 
-`shell.tasks({ sessionId }) → BackgroundShellTask[]`、`shell.output({ sessionId, taskId, since?: "start" }) → { taskId, logPath, text }`、`shell.kill({ sessionId, taskId }) → null`。只能访问指定已打开会话自身的登记任务；未知 id 返回 `invalid_command`。输出与停止复用 Core 会话 API，参数形状错误返回 `invalid_params`。`input.pending` 增加 `mode: "shell"`，可撤回不可编辑。客户端可通过会话订阅接收临时 `shell.task_updated`，并以 `shell.tasks` 对齐内存快照。任务视图保留已结束条目，由客户端按结束五分钟后过滤。
+`shell.tasks({ sessionId }) → BackgroundShellTask[]`、`shell.output({ sessionId, taskId, since?: "start" }) → { task: BackgroundShellTask, text, durationMs }`、`shell.kill({ sessionId, taskId }) → null`。只能访问指定已打开会话自身的登记任务；未知 id 返回 `invalid_command`。输出与停止复用 Core 会话 API；客户端观察输出不推进模型的 `shell_output` 游标。参数形状错误返回 `invalid_params`。`input.pending` 增加 `mode: "shell"`，可撤回不可编辑。客户端可通过会话订阅接收临时 `shell.task_updated`，并以 `shell.tasks` 对齐内存快照。任务视图保留已结束条目，由客户端按结束五分钟后过滤。
 
 ### 3.3 `provider.*`
 

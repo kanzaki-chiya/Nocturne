@@ -826,8 +826,11 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       pendingInputs: () => call("session.pendingInputs", p),
       shellTasks: () => call("shell.tasks", p),
-      shellOutput: (taskId, since) => call("shell.output", { ...p, taskId, ...(since ? { since } : {}) }),
-      shellKill: async (taskId) => { await call("shell.kill", { ...p, taskId }); },
+      shellOutput: (taskId, since) =>
+        call("shell.output", { ...p, taskId, ...(since ? { since } : {}) }),
+      shellKill: async (taskId) => {
+        await call("shell.kill", { ...p, taskId });
+      },
       interrupt: () => {
         notify("session.interrupt", p);
       },

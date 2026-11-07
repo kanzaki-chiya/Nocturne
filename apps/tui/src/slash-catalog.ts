@@ -41,6 +41,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "/mcp", summary: "MCP 状态", cli: "显示本会话 MCP 服务器状态" },
   { name: "/skills", summary: "查看技能目录", cli: "列出当前会话的技能、来源和模型目录状态" },
   { name: "/subagents", summary: "管理后台子代理", tuiOnly: true },
+  { name: "/tasks", summary: "后台任务", tuiOnly: true },
   { name: "/agents", summary: "查看外部 agent", cli: "只读列出外部 agent、来源、启停与斜杠冲突" },
   { name: "/compact", summary: "压缩上下文", cli: "手动压缩上下文" },
   { name: "/grill-me", summary: "追问需求", cli: "<需求> 动手前逐个追问需求", task: true },

@@ -4,6 +4,8 @@
 
 `apps/tui` 是 Nocturne 的终端界面客户端：与 CLI 驱动同一套 Runtime，只消费公开 API（`@nocturne/core`）与 `protocol`（含 `SessionView` reducer）。TUI 不包含任何 Agent 逻辑，不复用 CLI 的渲染代码，不自行做事件投影。[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：`switch_worktree` 工具行显示 `切换工作树 <路径>`，欢迎区和状态栏目录保持项目目录。
 
+[ADR-0083](../decisions/ADR-0083-background-shell.md)：后台 shell 工具行显示「后台」，结束后显示状态与退出码；全屏点击展开时读日志并实时刷新。结果消息是一行可折叠卡片，含命令首行、状态、退出码和时长，展开只看输出尾部。状态栏显示运行中「后台任务」数；`/tasks` 列出本会话任务，Enter 查看尾部，再选择「停止」可终止运行中的任务。结束超过五分钟的记录从列表隐藏，结果消息仍在对话中。待发条目显示「后台任务 · 等待送达」，仅可撤回。后端交付与生命周期见 tools.md。
+
 ## 1. 启动入口
 
 子代理准入失败的工具行收起仅显示「未启动」，全屏展开可看原始原因，inline 不额外输出技术性错误。子代理标识优先显示启动参数中的 preset，其次非 default 命名档位，无标识时省略；规则见 [subagent.md §20](../architecture/subagent.md#20-后台子代理)。

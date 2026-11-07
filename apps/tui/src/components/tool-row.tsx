@@ -3,6 +3,7 @@
  * 进行中显示 liveOutput 尾部；完结后按 output.diff / modelContent 展示。
  */
 import { Box, Text } from "ink";
+import { shellToolStatus } from "../background-shell.js";
 import { useEffect, useState } from "react";
 
 import { questionToolLines } from "../question-format.js";
@@ -127,7 +128,8 @@ export function ToolRow({
   const duration = entry.result?.durationMs;
   const suffix = subagentStartRejected(entry)
     ? "未启动"
-    : (backgroundToolStatus(entry, entries) ??
+    : (shellToolStatus(entry, entries) ??
+      backgroundToolStatus(entry, entries) ??
       (entry.status === "awaiting_permission"
         ? ` ${b.word}`
         : entry.status === "running"
