@@ -97,7 +97,38 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
         windows: [{ pid: 20, window_id: 100, app_name: "Excel", title: "Budget" }],
       };
     else if (name === "list_apps")
-      structuredContent = { apps: [{ pid: 20, name: "Excel", path: "C:/Office/EXCEL.EXE" }] };
+      structuredContent = {
+        apps: [
+          { pid: 20, name: "Excel", path: "C:/Office/EXCEL.EXE" },
+          {
+            pid: 0,
+            name: "Notepad",
+            kind: "desktop",
+            launch_path: "C:/Windows/System32/notepad.exe",
+          },
+          {
+            pid: 0,
+            name: "Notepad",
+            kind: "uwp",
+            bundle_id: "Microsoft.WindowsNotepad_8wekyb3d8bbwe",
+            launch_path: "shell:appsFolder\\Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
+          },
+          {
+            pid: 0,
+            name: "计算器",
+            kind: "uwp",
+            bundle_id: "Microsoft.WindowsCalculator_8wekyb3d8bbwe",
+            launch_path: "shell:appsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+          },
+          {
+            pid: 0,
+            name: "画图",
+            kind: "uwp",
+            bundle_id: "Microsoft.Paint_8wekyb3d8bbwe",
+            launch_path: "shell:appsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
+          },
+        ],
+      };
     send(request.id, {
       content: [{ type: "text", text: JSON.stringify(structuredContent) }],
       structuredContent,

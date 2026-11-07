@@ -184,6 +184,8 @@ Windows 桌面外壳将随附驱动路径经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` �
 
 来源在执行器裁剪输出前保存成功结果的 `snapshot_id → {pid, windowId}`，元素句柄 `<snapshot_id>:<row>` 按快照归属解析软件；优先结构化元数据，缺少时解析文本首行 `window_id=… pid=… elements=… snapshot_id=…`，并兼容逐元素 `element_token` 字段。停止驱动时清空映射。未知快照仍保留未解析 app 主体，有显式 PID/窗口时显示其数字，否则 target 为空、沿用确认卡现有标题；不把句柄当软件名，也不借用其他快照的软件身份。
 
+启动主体按驱动的 `launch_path`、`path`、`aumid`、含 `!` 的 `bundle_id`、`name`、普通 `bundle_id` 优先级取目标。异步解析时只读查询 `list_apps`：名称去 `.exe` 后按不区分大小写的精确/最短前缀匹配安装索引，打包结果从 AUMID 提取包族名；显式 AppsFolder 路径按完整值匹配。已解析到 Windows/System32 的 notepad、calc、mspaint 转发 stub，且索引含对应已安装包时，也统一到包族名。自定义路径不套系统 stub 规则，普通 exe 保持小写文件名；不改实际启动入参，不缓存安装索引。索引不可用或未知第三方转发器仍可能无法在启动前获得最终身份。此过程只解析主体，是否询问由权限层判定。
+
 首次剪贴板写入先备份文本，通用 `ToolDefinition.finishTurn` 在所有 Turn 出口运行；当前剪贴板仍等于该 Turn 最后写入值时才恢复。共享连接序列化驱动调用，所有调用结果（包括无法核对的结果）只返回一次，工具说明要求先观察再决定下一步。图片沿通用附件管线返回。
 
 ## 8. 与 Core 的接线

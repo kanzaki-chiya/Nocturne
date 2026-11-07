@@ -184,6 +184,7 @@ export function createComputerSource(options: ComputerOptions) {
   const wrappers = new WeakMap<ToolDefinition, ToolDefinition>();
   const tokens = new Map<string, ApplicationTarget>();
   const snapshots = new Map<string, ApplicationTarget>();
+  const launchNames = new WeakSet<ApplicationTarget>();
   const clipboards = new Map<string, { before: string; last: string; ctx: ToolContext }>();
   const listeners = new Set<() => void>();
   const emit = () => {
@@ -275,20 +276,37 @@ export function createComputerSource(options: ComputerOptions) {
     const pid = typeof input.pid === "number" ? input.pid : token?.pid;
     const windowId = typeof input.window_id === "number" ? input.window_id : token?.windowId;
     const identity = launching
-      ? typeof input.path === "string"
-        ? input.path
-        : typeof input.bundle_id === "string"
-          ? `shell:appsFolder\\${input.bundle_id}`
-          : typeof input.name === "string"
-            ? input.name
-            : undefined
+      ? typeof input.launch_path === "string"
+        ? input.launch_path
+        : typeof input.path === "string"
+          ? input.path
+          : typeof input.aumid === "string"
+            ? `shell:appsFolder\\${input.aumid}`
+            : typeof input.bundle_id === "string" && input.bundle_id.includes("!")
+              ? `shell:appsFolder\\${input.bundle_id}`
+              : typeof input.name === "string"
+                ? input.name
+                : typeof input.bundle_id === "string"
+                  ? input.bundle_id
+                  : undefined
       : undefined;
-    return pid !== undefined ||
-      windowId !== undefined ||
-      identity !== undefined ||
-      input.element_token !== undefined
-      ? { pid, windowId, identity }
-      : undefined;
+    if (
+      pid === undefined &&
+      windowId === undefined &&
+      identity === undefined &&
+      input.element_token === undefined
+    )
+      return undefined;
+    const app = { pid, windowId, identity };
+    if (
+      launching &&
+      input.launch_path === undefined &&
+      input.path === undefined &&
+      input.aumid === undefined &&
+      !(typeof input.bundle_id === "string" && input.bundle_id.includes("!"))
+    )
+      launchNames.add(app);
+    return app;
   }
   function requests(name: string, input: Record<string, unknown>): SubjectRequest[] {
     if (UNTARGETED.has(name)) return [];
@@ -304,8 +322,7 @@ export function createComputerSource(options: ComputerOptions) {
         found.push({
           kind: "app",
           target:
-            app.identity ??
-            (app.pid === undefined ? String(app.windowId ?? "") : `PID ${app.pid}`),
+            app.identity ?? (app.pid === undefined ? String(app.windowId ?? "") : `PID ${app.pid}`),
           app,
         });
       for (const nested of Object.values(object))
@@ -362,9 +379,91 @@ export function createComputerSource(options: ComputerOptions) {
     }
     return withIcon?.icon;
   }
-  async function resolveSubject(request: SubjectRequest): Promise<PermissionSubject> {
+  async function resolveLaunch(app: ApplicationTarget) {
+    let resolved = await resolveCached(app);
+    if (!app.identity || app.pid !== undefined || !owner) return resolved;
+    const ctx = {
+      sessionId: "computer-identity",
+      turnId: "identity",
+      callId: "apps",
+      signal: new AbortController().signal,
+      subjects: [],
+    } as unknown as ToolContext;
+    const result = await serialized(() => call("list_apps", {}, ctx)).catch(() => undefined);
+    if (result?.status !== "ok") return resolved;
+    const listed = data(result).apps;
+    if (!Array.isArray(listed)) return resolved;
+    const apps = listed.map(record).filter((item) => typeof item.launch_path === "string");
+    const family = (item: Record<string, unknown>) => {
+      const launchFamily =
+        typeof item.launch_path === "string"
+          ? /^shell:appsFolder\\([^!\\/]+)![^!\\/]+$/iu.exec(item.launch_path)?.[1]
+          : undefined;
+      const bundleFamily =
+        typeof item.bundle_id === "string" ? item.bundle_id.split("!")[0] : undefined;
+      return item.kind === "uwp" &&
+        launchFamily !== undefined &&
+        (bundleFamily === undefined || bundleFamily === launchFamily)
+        ? launchFamily
+        : undefined;
+    };
+    const query = app.identity
+      .trim()
+      .replace(/\.exe$/iu, "")
+      .toLowerCase();
+    const matchingName =
+      launchNames.has(app) && query.length > 0
+        ? apps
+            .filter(
+              (item) => typeof item.name === "string" && item.name.toLowerCase().startsWith(query),
+            )
+            .sort((a, b) => String(a.name).length - String(b.name).length)[0]
+        : undefined;
+    const direct = apps.find(
+      (item) =>
+        typeof item.launch_path === "string" &&
+        item.launch_path.toLowerCase() === app.identity?.toLowerCase(),
+    );
+    if (
+      matchingName !== undefined &&
+      family(matchingName) === undefined &&
+      typeof matchingName.launch_path === "string" &&
+      /^[a-z]:[\\/].*\.exe$/iu.test(matchingName.launch_path)
+    )
+      resolved = await resolveCached({ identity: matchingName.launch_path });
+    const stub = resolved.evidence?.exePath
+      ?.replaceAll("\\", "/")
+      .match(/^[a-z]:\/windows\/system32\/(notepad|calc|mspaint)\.exe$/iu)?.[1]
+      ?.toLowerCase();
+    const stubFamilies: Record<string, string> = {
+      notepad: "Microsoft.WindowsNotepad_8wekyb3d8bbwe",
+      calc: "Microsoft.WindowsCalculator_8wekyb3d8bbwe",
+      mspaint: "Microsoft.Paint_8wekyb3d8bbwe",
+    };
+    const redirected =
+      (matchingName === undefined || family(matchingName) === undefined) && stub !== undefined
+        ? apps.find((item) => family(item) === stubFamilies[stub])
+        : undefined;
+    const matched = [direct, matchingName, redirected].find(
+      (item) => item !== undefined && family(item) !== undefined,
+    );
+    const packageFamilyName = matched === undefined ? undefined : family(matched);
+    if (packageFamilyName === undefined) return resolved;
+    return {
+      evidence: {
+        ...resolved.evidence,
+        packageFamilyName,
+        ...(typeof matched?.name === "string" ? { name: matched.name } : {}),
+      },
+      identity: packageFamilyName,
+    };
+  }
+  async function resolveSubject(
+    request: SubjectRequest,
+    launching = false,
+  ): Promise<PermissionSubject> {
     const app = request.app ?? {};
-    const { evidence, identity } = await resolveCached(app);
+    const { evidence, identity } = await (launching ? resolveLaunch(app) : resolveCached(app));
     const cachedIcon = identity === undefined ? undefined : iconCache.get(identity);
     return {
       kind: "app",
@@ -408,7 +507,9 @@ export function createComputerSource(options: ComputerOptions) {
   function rememberResult(result: ToolResult, app?: ApplicationTarget) {
     if (result.status !== "ok" || rememberTokens(data(result), app)) return;
     const header = result.modelContent.split(/\r?\n/u, 1)[0] ?? "";
-    const match = /^window_id=(\d+) pid=(\d+) elements=\d+ snapshot_id=(s[0-9a-f]{8})$/u.exec(header);
+    const match = /^window_id=(\d+) pid=(\d+) elements=\d+ snapshot_id=(s[0-9a-f]{8})$/u.exec(
+      header,
+    );
     if (match)
       rememberTokens({ window_id: Number(match[1]), pid: Number(match[2]), snapshot_id: match[3] });
   }
@@ -421,7 +522,7 @@ export function createComputerSource(options: ComputerOptions) {
       description:
         tool.description + "\n结果不确定时先观察窗口或桌面，再决定下一步；不要自动重试。",
       permissionSubjects: (input) => requests(name, record(input)),
-      resolveSubject,
+      resolveSubject: (request) => resolveSubject(request, name === "launch_app"),
       finishTurn,
       execute: async (input, ctx) =>
         serialized(async () => {

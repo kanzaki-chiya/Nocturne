@@ -43,7 +43,15 @@ function make() {
           ? { exePath: "C:/Office/EXCEL.EXE", name: "Excel" }
           : target.pid === 86512
             ? { packageFamilyName: "Microsoft.WindowsNotepad_8wekyb3d8bbwe", name: "Notepad" }
-            : undefined,
+            : target.identity?.toLowerCase() === "notepad.exe"
+              ? { exePath: "C:/Windows/System32/notepad.exe", name: "notepad" }
+              : target.identity?.toLowerCase() === "calc.exe"
+                ? { exePath: "C:/Windows/System32/calc.exe", name: "calc" }
+                : target.identity?.toLowerCase() === "mspaint.exe"
+                  ? { exePath: "C:/Windows/System32/mspaint.exe", name: "mspaint" }
+                  : target.identity !== undefined && /^[a-z]:[\\/].*\.exe$/iu.test(target.identity)
+                    ? { exePath: target.identity }
+                    : undefined,
   });
   sources.push(source);
   const connector = createMcpConnector({ runtimeServers: [source] });
@@ -238,6 +246,60 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
     expect(subject.target).toBe("");
     expect(JSON.stringify(subject)).not.toContain("sffffffff:88");
     expect(subject.app?.pid).toBeUndefined();
+  });
+  it("启动记事本别名与后续 PID 使用同一包族身份；普通 exe 保持小写名", async () => {
+    const { source, open } = make();
+    await source.setEnabled(true);
+    const session = await open("a");
+    const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+    const launch = tool(session, "launch_app");
+    const window = tool(session, "get_window_state");
+    const launchRequest = launch.permissionSubjects({ name: "notepad.exe" }, scope)[0];
+    const windowRequest = window.permissionSubjects({ pid: 86512, window_id: 78711444 }, scope)[0];
+    if (!launchRequest || !windowRequest || !launch.resolveSubject || !window.resolveSubject)
+      throw new Error("缺少解析器");
+    const before = await launch.resolveSubject(launchRequest, scope);
+    const after = await window.resolveSubject(windowRequest, scope);
+    expect(before.target).toBe("Microsoft.WindowsNotepad_8wekyb3d8bbwe");
+    expect(before.appUnresolved).toBe(false);
+    expect(before.app?.identity).toBe(after.app?.identity);
+    expect(before.app).toMatchObject({ packageFamilyName: after.target });
+    const ordinary = launch.permissionSubjects({ name: "C:/Office/EXCEL.EXE" }, scope)[0];
+    if (!ordinary) throw new Error("缺少主体");
+    expect((await launch.resolveSubject(ordinary, scope)).target).toBe("excel.exe");
+  });
+  it.each([
+    [{ name: "calc.exe" }, "Microsoft.WindowsCalculator_8wekyb3d8bbwe"],
+    [{ name: "mspaint.exe" }, "Microsoft.Paint_8wekyb3d8bbwe"],
+    [{ name: "Notep" }, "Microsoft.WindowsNotepad_8wekyb3d8bbwe"],
+    [{ path: "C:/Custom/NOTEPAD.EXE", name: "Notepad" }, "notepad.exe"],
+    [
+      { aumid: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App" },
+      "Microsoft.WindowsNotepad_8wekyb3d8bbwe",
+    ],
+    [
+      { bundle_id: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App" },
+      "Microsoft.WindowsNotepad_8wekyb3d8bbwe",
+    ],
+    [
+      {
+        launch_path: "shell:appsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App",
+        path: "C:/Office/EXCEL.EXE",
+      },
+      "Microsoft.Paint_8wekyb3d8bbwe",
+    ],
+  ])("启动身份尊重别名与目标字段优先级：%j", async (input, identity) => {
+    const { source, open } = make();
+    await source.setEnabled(true);
+    const session = await open("a");
+    const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+    const launch = tool(session, "launch_app");
+    const request = launch.permissionSubjects(input, scope)[0];
+    if (!request || !launch.resolveSubject) throw new Error("缺少解析器");
+    expect(await launch.resolveSubject(request, scope)).toMatchObject({
+      target: identity,
+      appUnresolved: false,
+    });
   });
   it("同一 PID 第二次解析命中缓存不再调底层；创建时间变化时重新解析；同一 ApplicationFrameHost 不同窗口分别解析；解析时不取图标", async () => {
     const creationTimes = new Map<number, string>([
