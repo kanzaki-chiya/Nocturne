@@ -12,9 +12,12 @@ import {
 } from "../../platform/index.js";
 import type { SubjectRequest } from "../../protocol/index.js";
 import type { ToolDefinition, ToolScope } from "../types.js";
+import type { BackgroundShells } from "../background-shell.js";
 
 interface ShellInput {
   command: string;
+  background?: boolean;
+  name?: string;
   /** 超时（毫秒），默认 120s，上限 30min */
   timeoutMs?: number;
   /** 工作目录（默认会话 cwd）；解析后必须位于工作区内 */
@@ -111,16 +114,21 @@ class OutputBuffer {
   }
 }
 
-export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
+export function createShellTool(background?: BackgroundShells): ToolDefinition<ShellInput, ShellOutput | { taskId: string; logPath: string; background: true }> {
+return {
   name: "shell",
   // ADR-0022：描述保持中性、稳定——具体种类与语法见环境信息 Shell 行
   description:
-    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。可能卡住的命令（自己写的脚本、交互式可能等待输入的程序、网络请求）：按预计耗时设较短的超时，或在命令里加 timeout（如 timeout 30 python3 test.py；PowerShell/cmd 用对应写法），超时后根据已有输出定位；已知耗时长的命令（全量测试、构建、安装依赖、大型编译）：按预计耗时直接设足，宁可宽一些，一次跑完。",
+    "经当前会话选定的 shell 执行非交互式命令（种类与语法见环境信息）。合并 stdout/stderr 输出并截断，返回退出码。超时或中断会尝试终止进程树中仍可达的后代；detached 方式脱离进程树的后台进程可能仍在运行。可能卡住的命令（自己写的脚本、交互式可能等待输入的程序、网络请求）：按预计耗时设较短的超时，或在命令里加 timeout（如 timeout 30 python3 test.py；PowerShell/cmd 用对应写法），超时后根据已有输出定位；已知耗时长的命令（全量测试、构建、安装依赖、大型编译）：按预计耗时直接设足，宁可宽一些，一次跑完。" + (background ? ' background: true 启动后台命令，name 只在后台时作为短名；结束时另行送达结果，不要循环轮询。可以后台等待 10 分钟后唤起处理（sleep 600；PowerShell 用 Start-Sleep 600）。后台默认不设超时，只有显式 timeoutMs 才计时。' : ""),
   inputSchema: {
     type: "object",
     required: ["command"],
     properties: {
       command: { type: "string", minLength: 1, description: "要执行的命令行" },
+      ...(background ? {
+        background: { type: "boolean", description: "后台运行，结束时另行送达结果" },
+        name: { type: "string", description: "background: true 时的任务短名，默认命令首行" },
+      } : {}),
       timeoutMs: {
         type: "integer",
         minimum: 1,
@@ -201,6 +209,17 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
       cwd = real;
     }
 
+    if (input.background && background) {
+      const output = await background.start({
+        command: input.command, name: input.name, cwd, callId: ctx.callId,
+        timeoutMs: input.timeoutMs, shell: ctx.shell?.descriptor, envStrip: ctx.shellEnvStrip,
+      });
+      return {
+        status: "ok",
+        output,
+        modelContent: `Background command started (id: ${output.taskId}). Its exit status and last output will arrive as a separate message when it ends. Use shell_output to read output so far; do not poll in a loop.`,
+      };
+    }
     const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
     const startedAt = Date.now();
     const proc = ctx.process.spawnShell(input.command, {
@@ -293,3 +312,6 @@ export const shellTool: ToolDefinition<ShellInput, ShellOutput> = {
     };
   },
 };
+}
+
+export const shellTool = createShellTool();
