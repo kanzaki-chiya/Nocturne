@@ -15,6 +15,7 @@ import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
 import { useCodeHighlight } from "./use-code-highlight";
+import { shellResultSummary, shellResultText, shellToolStatus } from "./background-shell";
 
 export function GrantedTag({
   permission,
@@ -810,7 +811,10 @@ const ThinkScrollContext = createContext<ThinkScroll>({
 
 /** 只读且日志未收束：工具行停止转圈与计时（ReadOnlyMode.frozen） */
 const FrozenContext = createContext(false);
-const BackgroundEntriesContext = createContext<readonly ViewEntry[]>([]);
+const BackgroundViewContext = createContext<Pick<SessionView, "entries" | "backgroundShells">>({
+  entries: [],
+  backgroundShells: [],
+});
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
 
 function durationText(seconds: number): string {
@@ -2364,7 +2368,9 @@ function ToolRow({
   const links = useContext(SubagentLinksContext);
   const subagentLink = links !== null && !preparing ? links.link(entry) : undefined;
   const result = toolResultText(entry);
-  const backgroundStatus = backgroundToolStatus(entry, useContext(BackgroundEntriesContext));
+  const backgroundView = useContext(BackgroundViewContext);
+  const backgroundStatus =
+    shellToolStatus(entry, backgroundView) ?? backgroundToolStatus(entry, backgroundView.entries);
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
   const notStarted = subagentStartRejected(entry);
@@ -2668,8 +2674,21 @@ function EntryView({
   scheduleSource?: ConversationProps["scheduleSource"];
 }) {
   const subagentLinks = useContext(SubagentLinksContext);
+  const backgroundView = useContext(BackgroundViewContext);
   switch (entry.kind) {
     case "user":
+      if (entry.backgroundShell !== undefined) {
+        return (
+          <details className="ro-user shell-result" aria-label="后台任务">
+            <summary>
+              <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
+              <Icon name="terminal" size={ICON_SM} />
+              <span className="ro-user-preview">{shellResultSummary(entry, backgroundView)}</span>
+            </summary>
+            <pre className="conversation-tool-output">{shellResultText(userText(entry))}</pre>
+          </details>
+        );
+      }
       if (entry.subagent !== undefined) {
         const subagent = entry.subagent;
         return (
@@ -4145,9 +4164,9 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   return (
     <FrozenContext.Provider value={readOnly?.frozen === true}>
       <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
-        <BackgroundEntriesContext.Provider value={props.view.entries}>
+        <BackgroundViewContext.Provider value={props.view}>
           <ConversationContent key={props.session.id} {...props} />
-        </BackgroundEntriesContext.Provider>
+        </BackgroundViewContext.Provider>
       </SubagentLinksContext.Provider>
     </FrozenContext.Provider>
   );

@@ -137,13 +137,16 @@ export function PendingInputs({
       {items.map((item) => {
         const isEditing = editing === item.id;
         const isSubagent = item.mode === "subagent";
-        const rowText = isSubagent
-          ? "子代理结果"
-          : item.workMode !== undefined
-            ? workModeDisplayText(item.text, { name: item.workMode })
-            : item.text === ""
-              ? "（仅图片）"
-              : item.text;
+        const isShell = item.mode === "shell";
+        const rowText = isShell
+          ? "后台任务 · 等待送达"
+          : isSubagent
+            ? "子代理结果"
+            : item.workMode !== undefined
+              ? workModeDisplayText(item.text, { name: item.workMode })
+              : item.text === ""
+                ? "（仅图片）"
+                : item.text;
         return (
           <div key={item.id} className={`pi-row pi-${item.mode}`}>
             <span className="pi-lead" aria-hidden="true">
@@ -216,7 +219,7 @@ export function PendingInputs({
                       <IconSendNow />
                     </IconButton>
                   )}
-                  {!isSubagent && (
+                  {!isSubagent && !isShell && (
                     <IconButton
                       disabled={disabled || busy}
                       title="编辑"

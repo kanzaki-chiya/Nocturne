@@ -1480,7 +1480,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.conversation .ro-user[open]:not(.subagent-result) .ro-user-preview {
+.conversation .ro-user[open]:not(.subagent-result, .shell-result) .ro-user-preview {
   display: none;
 }
 
