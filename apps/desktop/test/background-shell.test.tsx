@@ -103,6 +103,40 @@ it.each(["desktop", "phone"])(
   },
 );
 
+it("expanded background launch reads and appends live output instead of launch metadata", async () => {
+  const view = createSessionView();
+  view.entries = [tool];
+  view.backgroundShells = [{ ...task, outputChars: 3 }];
+  const shellOutput = vi.fn(async (_id: string, offset?: number) => ({
+    task,
+    text: offset === undefined ? "one" : "two",
+    start: offset ?? 0,
+    end: offset === undefined ? 3 : 6,
+    durationMs: 0,
+  }));
+  const live = { id: "parent-1", shellOutput } as unknown as RpcSession;
+  const props = {
+    session: live,
+    view,
+    cwd: "Z:/test",
+    images: createAttachmentImageSource(),
+    busy: false,
+    openUrl: vi.fn(),
+    subscribeEvents: () => () => undefined,
+    onResubmit: vi.fn(async () => undefined),
+  };
+  const rendered = render(<Conversation {...props} />);
+  const line = screen.getByLabelText("工具 shell").querySelector("summary");
+  if (!line) throw new Error("missing tool line");
+  fireEvent.click(line);
+  await waitFor(() => expect(screen.getByTestId("shell-tool-output").textContent).toBe("one"));
+  view.backgroundShells = [{ ...task, outputChars: 6 }];
+  view.revision++;
+  rendered.rerender(<Conversation {...props} />);
+  await waitFor(() => expect(screen.getByTestId("shell-tool-output").textContent).toBe("onetwo"));
+  expect(shellOutput).toHaveBeenNthCalledWith(2, task.taskId, 3);
+});
+
 it("shell tool shows background then exit code before result delivery", () => {
   const ui = render(
     conversation(

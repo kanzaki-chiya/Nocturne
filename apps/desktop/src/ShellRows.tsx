@@ -5,7 +5,7 @@ import { Button, Icon, ICON_SM } from "./ui";
 import "./shell.css";
 
 export interface OverviewShells {
-  tasks: readonly BackgroundShellTask[];
+  tasks?: readonly BackgroundShellTask[];
   onOpen: (task: BackgroundShellTask) => void;
   onStop?: (task: BackgroundShellTask) => void;
 }

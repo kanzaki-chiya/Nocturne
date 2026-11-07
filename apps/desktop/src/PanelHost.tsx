@@ -1458,6 +1458,7 @@ export function useSidePanel({
       browsers={pool}
       workspace={workspace}
       openExternalUrl={openExternalUrl}
+      shells={active ? { session: active.session, tasks: active.view.backgroundShells } : undefined}
       subagents={
         sessionId === null
           ? undefined

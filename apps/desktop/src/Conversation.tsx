@@ -112,6 +112,8 @@ import { useReasoning, type ReasoningMap } from "./reasoning";
 import { MCP_STATE_NOTICE_CODES } from "./mcp-status";
 import { openWarningsToShow } from "./open-warnings";
 import { useStickyOutput } from "./useStickyOutput";
+import { ShellToolOutput } from "./ShellPane";
+import type { ShellSession } from "./use-shell-output";
 import { useCopyText } from "./useCopyText";
 import { KeyHint } from "./KeyHint";
 import "./conversation.css";
@@ -811,6 +813,7 @@ const ThinkScrollContext = createContext<ThinkScroll>({
 
 /** 只读且日志未收束：工具行停止转圈与计时（ReadOnlyMode.frozen） */
 const FrozenContext = createContext(false);
+const ShellSessionContext = createContext<ShellSession | undefined>(undefined);
 const BackgroundViewContext = createContext<Pick<SessionView, "entries" | "backgroundShells">>({
   entries: [],
   backgroundShells: [],
@@ -2369,6 +2372,8 @@ function ToolRow({
   const subagentLink = links !== null && !preparing ? links.link(entry) : undefined;
   const result = toolResultText(entry);
   const backgroundView = useContext(BackgroundViewContext);
+  const shellSession = useContext(ShellSessionContext);
+  const shellTask = backgroundView.backgroundShells.find((task) => task.callId === entry.callId);
   const backgroundStatus =
     shellToolStatus(entry, backgroundView) ?? backgroundToolStatus(entry, backgroundView.entries);
   const error = entry.result?.error;
@@ -2508,7 +2513,11 @@ function ToolRow({
                       <DiffBody diff={file.diff} path={file.path} />
                     </div>
                   ) : null}
-                  <ToolDetails entry={entry} cwd={cwd} images={images} session={session} />
+                  {shellTask && shellSession ? (
+                    <ShellToolOutput session={shellSession} task={shellTask} enabled={isOpen} />
+                  ) : (
+                    <ToolDetails entry={entry} cwd={cwd} images={images} session={session} />
+                  )}
                 </div>
               )
             ) : null}
@@ -4165,7 +4174,13 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
     <FrozenContext.Provider value={readOnly?.frozen === true}>
       <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
         <BackgroundViewContext.Provider value={props.view}>
-          <ConversationContent key={props.session.id} {...props} />
+          <ShellSessionContext.Provider
+            value={
+              readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
+            }
+          >
+            <ConversationContent key={props.session.id} {...props} />
+          </ShellSessionContext.Provider>
         </BackgroundViewContext.Provider>
       </SubagentLinksContext.Provider>
     </FrozenContext.Provider>
