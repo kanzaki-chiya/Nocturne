@@ -16,6 +16,8 @@ import { createPortal } from "react-dom";
 import type { SubagentSummary } from "@nocturne/core/protocol";
 
 import type { FileIndexEntry } from "./file-refs";
+import { useNow } from "./use-now";
+import { ShellRows, type OverviewShells } from "./ShellRows";
 import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
 import { KeyHint } from "./KeyHint";
@@ -267,22 +269,6 @@ export interface OverviewSubagents {
   isolated?: ReadonlySet<string>;
 }
 
-/** 每秒刷新的本地时钟：概览里的秒数靠它，不靠查询 */
-function useNow(enabled: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!enabled) return;
-    setNow(Date.now());
-    const timer = setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [enabled]);
-  return now;
-}
-
 function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
   const { running, external, onOpen } = subagents;
   const now = useNow(running.length + external.length > 0);
@@ -390,6 +376,7 @@ export function SessionOverview({
   rightOffset,
   onOpenChanges,
   subagents,
+  shells,
 }: {
   project: string;
   workspace: string;
@@ -399,6 +386,7 @@ export function SessionOverview({
   onOpenChanges: () => void;
   /** 子代理分组；没有运行项（或不传）时整组隐藏 */
   subagents?: OverviewSubagents | undefined;
+  shells?: OverviewShells | undefined;
 }) {
   return (
     <div
@@ -439,6 +427,7 @@ export function SessionOverview({
       {subagents !== undefined &&
         subagents.running.length + subagents.external.length + (subagents.retained?.length ?? 0) >
           0 && <SubagentRows subagents={subagents} />}
+      {shells && <ShellRows {...shells} />}
     </div>
   );
 }

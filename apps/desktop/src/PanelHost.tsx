@@ -15,7 +15,12 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { LocalFileContent, SubagentSummary, TurnChangeDiff } from "@nocturne/core/protocol";
+import type {
+  BackgroundShellTask,
+  LocalFileContent,
+  SubagentSummary,
+  TurnChangeDiff,
+} from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
@@ -857,6 +862,21 @@ export function useSidePanel({
     },
     [tabs, update, hideBrowserThen],
   );
+  const openShell = (task: BackgroundShellTask) => {
+    hideBrowserThen(() => {
+      update((panel) => {
+        const found = panel.tabs.find((tab) => tab.kind === "shell" && tab.taskId === task.taskId);
+        if (found) return { ...panel, open: true, activeId: found.id };
+        return withTab(panel, {
+          id: newTabId(),
+          kind: "shell",
+          taskId: task.taskId,
+          name: task.name,
+          command: task.command,
+        });
+      });
+    });
+  };
   const openSubagentById = useCallback(
     (childSessionId: string) => {
       const summary = directory.summaries.find((s) => s.childSessionId === childSessionId);
@@ -1495,6 +1515,13 @@ export function useSidePanel({
             openChanges();
           }}
           subagents={overviewSubagents}
+          shells={{
+            tasks: active.view.backgroundShells,
+            onOpen: openShell,
+            onStop: (task) => {
+              void active.session.shellKill(task.taskId).catch(() => undefined);
+            },
+          }}
         />
       )}
       {deletingWorktree && sessionId && (

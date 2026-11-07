@@ -20,6 +20,7 @@ import {
 } from "@nocturne/rpc/client";
 
 import type { ComposerSubmit } from "./Composer";
+import { syncShellSnapshot } from "./shell-snapshot";
 import type { SessionStatus } from "./session-tree";
 
 /**
@@ -246,6 +247,13 @@ export class Conversations {
       );
       subscribed = true;
       entry.replaying = false;
+      void syncShellSnapshot(entry.session, entry.view)
+        .then(() => {
+          if (entry.dead === true) return;
+          for (const listener of entry.listeners) listener();
+          this.changed();
+        })
+        .catch(() => undefined);
       // 待发输入是临时状态：订阅后单独取一次当前快照（与事件同形的整份快照，
       // 后到的覆盖先到的，天然幂等）。不挡打开，取回后再通知一次
       const requestedRevision = pendingRevision;

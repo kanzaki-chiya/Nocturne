@@ -195,6 +195,8 @@ function tabTitle(tab: PanelTab): { name: string; project?: string; title: strin
     }
     return { name: browserTabName(tab), title: tab.url };
   }
+  if (tab.kind === "shell")
+    return { name: tab.name || tab.command.split(/\r?\n/)[0] || "", title: tab.command };
   if (tab.kind === "subagent") {
     const name = subagentTabName(tab);
     return { name, title: name };
@@ -326,7 +328,9 @@ function TabBar(props: SidePanelProps) {
                       ? "globe"
                       : tab.kind === "subagent"
                         ? "agent"
-                        : tab.kind
+                        : tab.kind === "shell"
+                          ? "terminal"
+                          : tab.kind
                   }
                 />
               )}
@@ -1352,6 +1356,8 @@ export function SidePanel(props: SidePanelProps) {
                     openUrl={props.subagents.openUrl}
                   />
                 )
+              ) : tab.kind === "shell" ? (
+                <pre className="shell-output">{tab.command}</pre>
               ) : tab.diffText !== undefined ? (
                 <FileDiffView
                   tab={{ ...tab, diffText: tab.diffText }}
