@@ -85,10 +85,20 @@ export interface SubagentTab {
   taskSummary: string;
 }
 
-export type PanelTab = NewTab | ChangesTab | FileTab | TerminalTab | BrowserTab | SubagentTab;
+export interface ShellTab {
+  id: string;
+  kind: "shell";
+  taskId: string;
+  name: string;
+  command: string;
+}
+
+export type PanelTab =
+  NewTab | ChangesTab | FileTab | TerminalTab | BrowserTab | SubagentTab | ShellTab;
 
 /** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」（新标签页、终端不恢复） */
 export type StoredPanelTab =
+  | ShellTab
   | { id: string; kind: "changes" }
   | {
       id: string;
@@ -297,6 +307,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const tabs: StoredPanelTab[] = [];
   const ids = new Set<string>();
   const subagentChildren = new Set<string>();
+  const shellTasks = new Set<string>();
   let changes = false;
   for (const item of value) {
     if (typeof item !== "object" || item === null) continue;
@@ -323,6 +334,22 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
         parentCallId: raw.parentCallId,
         profile: raw.profile,
         taskSummary: raw.taskSummary,
+      });
+    } else if (
+      raw.kind === "shell" &&
+      str(raw.taskId) &&
+      typeof raw.name === "string" &&
+      typeof raw.command === "string" &&
+      !shellTasks.has(raw.taskId)
+    ) {
+      shellTasks.add(raw.taskId);
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "shell",
+        taskId: raw.taskId,
+        name: raw.name,
+        command: raw.command,
       });
     } else if (raw.kind === "browser" && str(raw.url) && isBrowserUrl(raw.url)) {
       ids.add(raw.id);
@@ -352,6 +379,10 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
 export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
+    if (tab.kind === "shell")
+      return [
+        { id: tab.id, kind: "shell", taskId: tab.taskId, name: tab.name, command: tab.command },
+      ];
     if (tab.kind === "subagent") {
       return [
         {

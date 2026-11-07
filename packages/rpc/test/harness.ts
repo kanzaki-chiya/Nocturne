@@ -100,6 +100,7 @@ export interface HarnessOptions {
   /** 远程单条报文上限（测试缩小以触发 response_too_large） */
   remoteMessageLimit?: number;
   subagent?: RuntimeOptions["subagent"];
+  shell?: RuntimeOptions["shell"];
   /** 注入假的电脑操控来源（computer.* 测试用） */
   computer?: RpcRuntimeHandle["computer"];
 }
@@ -132,6 +133,7 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
         interactive: init.interactive,
         turn: { retryBaseDelayMs: 1 },
         ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
+        ...(options.shell !== undefined ? { shell: options.shell } : {}),
       });
       const remember = (session: RuntimeSession): RuntimeSession => {
         opened.set(session.id, session);

@@ -12,7 +12,8 @@ import {
  * 无 I/O、无 Node 内置依赖；entries 只由持久事件创建，live/notices 只由
  * 临时事件创建，收敛点上除 revision/notices 外重放等价（V1）。
  */
-import type { SubagentResult } from "./events.js";
+import type { BackgroundShellResult, SubagentResult } from "./events.js";
+import type { BackgroundShellTask } from "./background-shell.js";
 import type {
   AttachmentDescribedPayload,
   ContextCompactedPayload,
@@ -54,6 +55,7 @@ import type {
 /** 会话标题与恢复列表：首条用户消息的第一个文本块的原文首行。 */
 
 export interface SessionView {
+  backgroundShells: BackgroundShellTask[];
   currentCwd?: string | undefined;
   title: string | undefined;
   firstTitle: string | undefined;
@@ -142,6 +144,7 @@ export interface UserEntry {
   /** 运行中插话（ADR-0070）：界面加「插话」标签，不是新 Turn 的开始 */
   steer?: true | undefined;
   subagent?: SubagentResult | undefined;
+  backgroundShell?: BackgroundShellResult | undefined;
   /** 执行方式快照（ADR-0076）：界面在正文旁显示命令名 */
   workMode?: WorkModeSnapshot | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
@@ -321,6 +324,7 @@ export function createSessionView(): SessionView {
     generatedTitle: undefined,
     userTitle: undefined,
     todos: [],
+    backgroundShells: [],
     revision: 0,
     meta: undefined,
     config: { model: undefined, permissionPreset: undefined, reasoningEffort: undefined },
@@ -370,6 +374,48 @@ export function replaySessionView(events: readonly DurableEvent[]): SessionView 
 function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = false): void {
   const b = book(view);
   const turnId = event.turnId;
+  const created = b.events[0];
+  const forkSeq = created?.type === "session.created" ? (created.payload.forkedFrom?.seq ?? 0) : 0;
+  if (
+    event.seq > forkSeq &&
+    event.type === "tool.completed" &&
+    event.payload.name === "shell" &&
+    event.payload.status === "ok"
+  ) {
+    const output = event.payload.output as
+      { background?: unknown; taskId?: unknown; logPath?: unknown } | undefined;
+    if (
+      output?.background === true &&
+      typeof output.taskId === "string" &&
+      typeof output.logPath === "string"
+    ) {
+      const started = b.events.find(
+        (item) => item.type === "tool.started" && item.payload.callId === event.payload.callId,
+      );
+      const input =
+        started?.type === "tool.started"
+          ? (started.payload.input as { name?: string; command?: string })
+          : undefined;
+      const old = view.backgroundShells.find((task) => task.taskId === output.taskId);
+      if (old) old.startedAt = started?.time ?? event.time;
+      if (!old)
+        view.backgroundShells.push({
+          taskId: output.taskId,
+          callId: event.payload.callId,
+          command: input?.command ?? "",
+          name: input?.name ?? input?.command?.split(/\r?\n/)[0] ?? "",
+          logPath: output.logPath,
+          outputChars: 0,
+          startedAt: started?.time ?? event.time,
+          status: "running",
+        });
+    }
+  }
+  if (event.type === "message.user" && event.payload.backgroundShell) {
+    const result = event.payload.backgroundShell;
+    const task = view.backgroundShells.find((item) => item.taskId === result.taskId);
+    if (task) Object.assign(task, result, { endedAt: event.time });
+  }
   switch (event.type) {
     case "session.rewound": {
       if (!rebuilding && event.payload.mode !== "files") {
@@ -378,6 +424,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         book(rebuilt).events = b.events;
         for (const ev of effectiveEvents(b.events)) reduceDurable(rebuilt, ev, true);
         view.entries = rebuilt.entries;
+        view.backgroundShells = rebuilt.backgroundShells;
         view.currentCwd = rebuilt.currentCwd;
         view.firstTitle = rebuilt.firstTitle;
         // 标题是会话元数据，不随对话回退；保留当前两个显式来源。
@@ -470,6 +517,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
         ...(event.payload.steer === true ? { steer: true as const } : {}),
         ...(event.payload.subagent !== undefined ? { subagent: event.payload.subagent } : {}),
+        ...(event.payload.backgroundShell !== undefined
+          ? { backgroundShell: event.payload.backgroundShell }
+          : {}),
         ...(event.payload.workMode !== undefined ? { workMode: event.payload.workMode } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
@@ -781,6 +831,16 @@ function addUsage(a: Usage, b: Usage): Usage {
 // ── 临时事件 ────────────────────────────────────────────────
 
 function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
+  if (event.type === "shell.task_updated") {
+    const task = { ...event.payload.task };
+    const index = view.backgroundShells.findIndex((item) => item.taskId === task.taskId);
+    if (index < 0) view.backgroundShells.push(task);
+    else {
+      task.startedAt = view.backgroundShells[index]?.startedAt ?? task.startedAt;
+      view.backgroundShells[index] = task;
+    }
+    return;
+  }
   switch (event.type) {
     case "runtime.status": {
       view.status = event.payload.status;

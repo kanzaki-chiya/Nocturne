@@ -3,6 +3,7 @@
  * <Static> 只接收"完结前缀"——遇到第一个未完结工具条目即停（App 负责切段）。
  */
 import { Box, Static, Text } from "ink";
+import { shellResultLine } from "../background-shell.js";
 
 import { attachmentLine, descriptionLine, fileAttachmentLine } from "../attachment-line.js";
 import { glyphs, useTuiEnv } from "../env.js";
@@ -14,7 +15,12 @@ import { useTheme } from "../theme.js";
 import type { LaidLine } from "../viewport.js";
 import { ToolRow } from "./tool-row.js";
 
-import { subagentResultLine, workModeDisplayText, type ViewEntry } from "@nocturne/core/protocol";
+import {
+  subagentResultLine,
+  workModeDisplayText,
+  type BackgroundShellTask,
+  type ViewEntry,
+} from "@nocturne/core/protocol";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
@@ -23,9 +29,23 @@ export type TranscriptItem =
   | { kind: "separator"; key: string; text: string }
   | { kind: "header"; key: string; lines: LaidLine[] };
 
-function UserRow({ entry }: { entry: Extract<ViewEntry, { kind: "user" }> }): React.JSX.Element {
+function UserRow({
+  entry,
+  entries,
+  backgroundShells,
+}: {
+  entry: Extract<ViewEntry, { kind: "user" }>;
+  entries: readonly ViewEntry[];
+  backgroundShells: BackgroundShellTask[];
+}): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
+  if (entry.backgroundShell !== undefined)
+    return (
+      <Box marginTop={1}>
+        <Text color={theme.secondary}>{shellResultLine(entry, entries, backgroundShells)}</Text>
+      </Box>
+    );
   // ADR-0073 §6：后台子代理结果只显示一行；回滚区不能展开，正文在全屏模式里展开看
   if (entry.subagent !== undefined)
     return (
@@ -167,7 +187,9 @@ export function EntryRow({
   reasoning,
   now,
   entries = [],
+  backgroundShells = [],
 }: {
+  backgroundShells?: BackgroundShellTask[];
   entries?: readonly ViewEntry[];
   entry: TranscriptItem;
   width: number;
@@ -176,7 +198,7 @@ export function EntryRow({
 }): React.JSX.Element {
   switch (entry.kind) {
     case "user":
-      return <UserRow entry={entry} />;
+      return <UserRow entry={entry} entries={entries} backgroundShells={backgroundShells} />;
     case "assistant":
       return <AssistantRow entry={entry} width={width} reasoning={reasoning} now={now} />;
     case "tool":
@@ -235,12 +257,16 @@ export function EntryRow({
  * （第一个未完结条目及其后条目由活动区渲染，App 负责切分）。
  */
 export function Transcript({
+  backgroundShells = [],
+  allEntries = [],
   entries,
   width,
   reasoning,
   now,
 }: {
   entries: readonly TranscriptItem[];
+  backgroundShells?: BackgroundShellTask[];
+  allEntries?: readonly ViewEntry[];
   width: number;
   reasoning?: ReasoningMap | undefined;
   now?: number | undefined;
@@ -248,7 +274,15 @@ export function Transcript({
   return (
     <Static items={[...entries]}>
       {(entry) => (
-        <EntryRow key={entry.key} entry={entry} width={width} reasoning={reasoning} now={now} />
+        <EntryRow
+          key={entry.key}
+          entry={entry}
+          width={width}
+          reasoning={reasoning}
+          now={now}
+          entries={allEntries}
+          backgroundShells={backgroundShells}
+        />
       )}
     </Static>
   );

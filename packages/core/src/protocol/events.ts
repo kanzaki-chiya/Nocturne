@@ -109,7 +109,17 @@ export interface SubagentResult {
   changes?: SubagentChanges | undefined;
 }
 
+import type { BackgroundShellTask } from "./background-shell.js";
+export interface BackgroundShellResult {
+  taskId: string;
+  callId: string;
+  status: "exited" | "timeout" | "killed" | "interrupted";
+  exitCode?: number | undefined;
+  signal?: string | undefined;
+}
+
 export interface MessageUserPayload {
+  backgroundShell?: BackgroundShellResult | undefined;
   subagent?: SubagentResult | undefined;
   messageId: string;
   content: ContentBlock[];
@@ -391,6 +401,7 @@ export interface DurablePayloadMap {
 }
 
 export interface EphemeralPayloadMap {
+  "shell.task_updated": { task: BackgroundShellTask };
   "message.assistant.delta": AssistantDeltaPayload;
   "tool.input.delta": ToolInputDeltaPayload;
   "tool.progress": ToolProgressPayload;
@@ -482,6 +493,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "mcp.server",
   "question.requested",
   "input.pending",
+  "shell.task_updated",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

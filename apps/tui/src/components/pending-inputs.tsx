@@ -48,13 +48,19 @@ export function PendingInputsPanel({
     if (item === undefined) continue;
     const active = i === selected;
     const label =
-      item.mode === "subagent" ? "子代理结果 · 等待送达" : item.mode === "steer" ? "插话" : "排队";
+      item.mode === "shell"
+        ? "后台任务 · 等待送达"
+        : item.mode === "subagent"
+          ? "子代理结果 · 等待送达"
+          : item.mode === "steer"
+            ? "插话"
+            : "排队";
     const attachments = item.attachments > 0 ? `  ${item.attachments} 张图` : "";
     const hint = active ? `  ${item.id === editing ? "编辑中" : ""}` : "";
     const prefix = `${active ? "›" : " "} ${i + 1} ${label} `;
     const tail = `${attachments}${hint}`;
     const text = truncateLine(
-      item.mode === "subagent"
+      item.mode === "subagent" || item.mode === "shell"
         ? ""
         : workModeDisplayText(
             item.text,
@@ -84,7 +90,7 @@ export function PendingInputsPanel({
     rows.push(
       <Text key="keys" dimColor wrap="truncate">
         {/* 子代理结果只能撤回（ADR-0073 §3） */}
-        {items[selected]?.mode === "subagent"
+        {items[selected]?.mode === "subagent" || items[selected]?.mode === "shell"
           ? "Alt+X 撤回"
           : "Alt+E 编辑  Alt+X 撤回  Alt+T 切换插话/排队"}
       </Text>,

@@ -60,6 +60,7 @@ interface SessionView {
   entries: ViewEntry[];
   /** 当前任务清单；全部完成后由下一条非插话的持久化 message.user 归档（ADR-0070） */
   todos: TodoItem[];
+  backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
   /** 在途实体：只由临时事件创建，对应持久事件到达时转入 entries（§4） */
   live: {
     assistants: LiveAssistant[];
@@ -212,7 +213,11 @@ interface SessionNotice {
 
 顺序约束：视图**不要求**事件全序——`resolved` 可在 `requested` 前（规则拒绝直接产生 `resolved`）、`completed` 可在 `started` 前、`requested` 可在 `input.delta` 前（Provider 不流式参数时）。所有关联都通过 `callId`/`messageId`/`requestId` 键查找。
 
+后台命令（ADR-0083）：`BackgroundShellTask` 为 `{ taskId, callId, name, command, logPath, outputChars, status, startedAt, endedAt?, exitCode?, signal? }`。`tool.completed.output.background === true` 结合启动输入建立运行中任务；`message.user.backgroundShell` 更新状态与结束时间。`UserEntry.backgroundShell` 保留结果元数据。条目不会因时间经过从视图删除；客户端按结束五分钟后过滤。关闭与重启之间尚未送达的结束结果按 interrupted 暂停条目恢复。
+
 ## 4. 临时事件归约
+
+`shell.task_updated` 用任务 id 更新 `backgroundShells`，不追加对话条目。启动和结束各发送一次，运行中日志增长按同一任务最多每 500ms 一次发送。`outputChars` 是已写日志的字符数，只通过临时事件、`shell.tasks` 和 `shell.output` 获得；持久重放初始化为 0，不参与重放等价。客户端订阅后用 `shell.tasks` 校准，再以字符数增长驱动偏移读取（见 [rpc.md](rpc.md#321-shelladr-0083)）。状态与结果元数据仍由持久事件重建。
 
 临时事件只写瞬态字段（`status`/`retry`/`live`/`notices`/`mcpServers`/`liveOutput`），**不创建 `entries` 条目**——这是重放等价（§6）成立的前提：
 
@@ -273,13 +278,13 @@ ask 判定
 
 **收敛点**：`currentTurn === undefined && pendingPermission === undefined && pendingQuestion === undefined && live` 为空。
 
-> **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices`、`mcpServers` 外的全部字段相等。
+> **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars` 外的全部字段相等。
 
 支撑 V1 的三条构造规则：
 
 1. `entries` 条目只能由持久事件创建/更新（§3）——`permission.reviewed`/`requested`/`resolved`/`tool.started`/`completed` 都是持久事件，两条路径产生**相同顺序相同内容**的条目；
 2. 临时事件只写瞬态区（§4），且每个瞬态字段都有归零/晋升规则：`live` 条目在持久落点到达时转入 entries（流式字段丢弃），`liveOutput` 在 `completed` 时清空，`retry` 离开 `retrying` 时清空，`status` 在 `turn.completed` 归 `idle`；
-3. `revision`、`notices`、`mcpServers` 被显式排除：`revision` 随临时事件计数，两路径必然不同；`notices` 与 `mcpServers` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志）。
+3. `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars` 被显式排除（日志字符数只在运行时取得，重放为 0）：`revision` 随临时事件计数，两路径必然不同；`notices` 与 `mcpServers` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志）。
 
 重放等价允许客户端用**同一 reducer** 处理两条路径：
 
@@ -292,7 +297,7 @@ ask 判定
 
 | # | 不变量 | 验证方式 |
 |---|---|---|
-| V1 | 收敛点重放等价（§6；排除 `revision`、`notices`、`mcpServers`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
+| V1 | 收敛点重放等价（§6；排除 `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
 | V2 | 每个 `toolCalls[].callId` 恰有一条 `tool` 条目；`tool.completed` 落定且只落定一次 | 场景断言 |
 | V3 | `pendingPermission` 至多一个，且其 `requestId` 未被 `resolved`；`pendingQuestion` 至多一个，且其 `callId` 无对应 `tool.completed` | 场景断言 |
 | V4 | `entries` 顺序 = 首个支撑持久事件的 `seq` 升序；条目 `seq` 单调不降 | 场景断言 |

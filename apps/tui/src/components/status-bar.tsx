@@ -97,6 +97,9 @@ export function StatusBar({
   const segments: Segment[] = [{ text: status, color: statusColor, highlight: false }];
   if (backgroundCount > 0)
     segments.push({ text: `后台 ${backgroundCount}`, color: theme.secondary, highlight: false });
+  const shellCount = view.backgroundShells.filter((task) => task.status === "running").length;
+  if (shellCount > 0)
+    segments.push({ text: `后台任务 ${shellCount}`, color: theme.secondary, highlight: false });
   let progress: Segment | undefined;
   if (view.todos.length > 0) {
     const done = view.todos.filter((item) => item.status === "completed").length;

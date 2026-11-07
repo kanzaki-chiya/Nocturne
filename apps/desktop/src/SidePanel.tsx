@@ -48,6 +48,9 @@ import {
   type PanelTab,
 } from "./side-panel";
 import { SubagentPane, type SubagentRuntime } from "./SubagentPane";
+import { ShellPane } from "./ShellPane";
+import type { ShellSession } from "./use-shell-output";
+import type { BackgroundShellTask } from "@nocturne/core/protocol";
 import type { SubagentWatcher } from "./subagent-watch";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
@@ -144,6 +147,8 @@ export interface SidePanelProps {
   openExternalUrl?: (url: string) => Promise<void>;
   /** 子代理标签；没有时子代理标签显示说明 */
   subagents?: PanelSubagents | undefined;
+  shells?:
+    { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] } | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
   agents?: PanelAgents | undefined;
 }
@@ -195,6 +200,8 @@ function tabTitle(tab: PanelTab): { name: string; project?: string; title: strin
     }
     return { name: browserTabName(tab), title: tab.url };
   }
+  if (tab.kind === "shell")
+    return { name: tab.name || (tab.command.split(/\r?\n/)[0] ?? ""), title: tab.command };
   if (tab.kind === "subagent") {
     const name = subagentTabName(tab);
     return { name, title: name };
@@ -326,7 +333,9 @@ function TabBar(props: SidePanelProps) {
                       ? "globe"
                       : tab.kind === "subagent"
                         ? "agent"
-                        : tab.kind
+                        : tab.kind === "shell"
+                          ? "terminal"
+                          : tab.kind
                   }
                 />
               )}
@@ -1352,6 +1361,15 @@ export function SidePanel(props: SidePanelProps) {
                     openUrl={props.subagents.openUrl}
                   />
                 )
+              ) : tab.kind === "shell" ? (
+                <ShellPane
+                  taskId={tab.taskId}
+                  name={tab.name}
+                  command={tab.command}
+                  task={props.shells?.tasks.find((task) => task.taskId === tab.taskId)}
+                  session={props.shells?.session}
+                  visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                />
               ) : tab.diffText !== undefined ? (
                 <FileDiffView
                   tab={{ ...tab, diffText: tab.diffText }}

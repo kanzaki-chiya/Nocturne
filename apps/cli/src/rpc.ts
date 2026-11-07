@@ -113,6 +113,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           interactive,
           scheduler: args.scheduler,
           subagent: { background: true },
+          shell: { background: true },
           permissions: { autoApproveAsk: false },
           mcp: createMcpConnector({ runtimeServers }),
           externalAgents: createAcpConnector(platform),

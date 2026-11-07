@@ -17,6 +17,7 @@ import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
+import { PhoneTasks } from "./PhoneTasks";
 import { SessionHeaderTools, sessionInputHistory } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { Button } from "../ui";
@@ -264,33 +265,41 @@ export function SessionScreen({
     <>
       {headerSlot &&
         createPortal(
-          <SessionHeaderTools
-            context={{
-              load: loadContext,
-              replaying: entry.replaying === true,
-              key: `${view.entries.length}:${view.status}`,
-            }}
-            connected={connected && !entry.dead}
-            running={view.currentTurn !== undefined}
-            shell={{
-              label: controls.shell?.effective?.kind ?? controls.shell?.selected ?? "—",
-              probing: controls.shells === undefined,
-              load: () => {
-                controls.loadShells();
-              },
-            }}
-            onRename={() => onRename?.()}
-            onCompact={() => {
-              void compact().catch((reason: unknown) => {
-                onError(errorText(reason));
-              });
-            }}
-            loadMcp={async () => mcpText(await session.mcpServers())}
-            inputHistory={() => sessionInputHistory(view.entries)}
-            onPickHistory={(text) => {
-              setFill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
-            }}
-          />,
+          <>
+            <PhoneTasks
+              key={session.id}
+              tasks={view.backgroundShells}
+              session={session}
+              connected={connected && !entry.dead}
+            />
+            <SessionHeaderTools
+              context={{
+                load: loadContext,
+                replaying: entry.replaying === true,
+                key: `${view.entries.length}:${view.status}`,
+              }}
+              connected={connected && !entry.dead}
+              running={view.currentTurn !== undefined}
+              shell={{
+                label: controls.shell?.effective?.kind ?? controls.shell?.selected ?? "—",
+                probing: controls.shells === undefined,
+                load: () => {
+                  controls.loadShells();
+                },
+              }}
+              onRename={() => onRename?.()}
+              onCompact={() => {
+                void compact().catch((reason: unknown) => {
+                  onError(errorText(reason));
+                });
+              }}
+              loadMcp={async () => mcpText(await session.mcpServers())}
+              inputHistory={() => sessionInputHistory(view.entries)}
+              onPickHistory={(text) => {
+                setFill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
+              }}
+            />
+          </>,
           headerSlot,
         )}
       <Conversation

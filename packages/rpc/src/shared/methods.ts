@@ -748,6 +748,12 @@ export interface RpcMethods {
    * `session.subscribe` 之后用它对齐（返回与事件 payload 同形）
    */
   "session.pendingInputs": { params: SessionParams; result: PendingInputsSnapshot };
+  "shell.tasks": { params: SessionParams; result: ReturnType<RuntimeSession["shellTasks"]> };
+  "shell.output": {
+    params: SessionParams & { taskId: string; offset?: number };
+    result: Awaited<ReturnType<RuntimeSession["shellOutput"]>>;
+  };
+  "shell.kill": { params: SessionParams & { taskId: string }; result: null };
   "session.respondPermission": {
     params: SessionParams & { requestId: string; reply: PermissionReply };
     result: null;
@@ -986,6 +992,9 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.approvePlan": true,
   "session.cancelPlan": true,
   "session.pendingInputs": true,
+  "shell.tasks": true,
+  "shell.output": true,
+  "shell.kill": true,
   "session.respondPermission": true,
   "session.respondQuestion": true,
   "session.setModel": true,

@@ -4,6 +4,14 @@
  */
 import { z } from "zod";
 import {
+  BackgroundShells,
+  observerOutput,
+  type BackgroundShellTask,
+} from "./tools/background-shell.js";
+import { createShellTool } from "./tools/builtin/shell.js";
+import { shellTaskTools } from "./tools/builtin/shell-tasks.js";
+import {
+  replaySessionView,
   subjectKindSchema,
   type GrantWorkspace,
   type ProjectTrustDescription,
@@ -387,6 +395,7 @@ export interface RuntimeOptions {
    * 用户级开关是权限规则 `subagent * → deny`。
    */
   subagent?: RuntimeSubagentOptions | undefined;
+  shell?: { background: boolean } | undefined;
   /** ADR-0049：外部 agent 连接器；Core 只负责委派、权限和共享并发限制。 */
   externalAgents?: ExternalAgentConnector | undefined;
 }
@@ -484,6 +493,9 @@ export interface SubmitInput {
 export type { ReadAttachmentResult };
 
 export interface RuntimeSession {
+  shellTasks(): BackgroundShellTask[];
+  shellOutput(taskId: string, offset?: number): ReturnType<BackgroundShells["observe"]>;
+  shellKill(taskId: string): Promise<void>;
   listGrants(): Grant[];
   revokeGrant(input: { kind: Grant["kind"]; target: string }): Promise<void>;
   revokeAllGrants(): Promise<void>;
@@ -2233,6 +2245,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       ...(resolved?.providers ?? []),
       ...(options.providerConfigs ?? []),
     ]);
+    const backgroundShells = new BackgroundShells({
+      platform,
+      sessionsDir,
+      sessionId: session.id,
+      deliver: (input) => deliverBackgroundResult(input),
+      updated: (task) => session.emitEphemeral("shell.task_updated", { task }),
+    });
     const execEnv: ExecutionEnvironment = {
       currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
       checkpoint: createCheckpointRecorder(session, platform, sessionsDir),
@@ -2517,6 +2536,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
       const hasExternalAgents = enabledExternalAgents.length > 0;
       // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
+      if (
+        options.shell?.background === true &&
+        meta.parent === undefined &&
+        meta.schedule === undefined
+      ) {
+        tools.unregister("shell");
+        tools.register(createShellTool(backgroundShells));
+        for (const tool of shellTaskTools(backgroundShells)) {
+          tools.unregister(tool.name);
+          tools.register(tool);
+        }
+      }
       const backgroundEnabled =
         options.subagent?.background === true &&
         meta.parent === undefined &&
@@ -2578,7 +2609,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             ? {
                 lifecycle: backgroundSubagents,
                 max: options.subagent?.maxBackground ?? 3,
-                deliver: (input) => deliverSubagentResult(input),
+                deliver: (input) => deliverBackgroundResult(input),
               }
             : undefined,
           checkpoint: execEnv.checkpoint,
@@ -2890,11 +2921,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
      * mode=subagent 的待发输入；空闲且未暂停时立即开新 Turn，运行中留给安全点。
      */
     let subagentDelivery = Promise.resolve();
-    const deliverSubagentResult = (input: PreparedInput): Promise<void> => {
-      subagentDelivery = subagentDelivery.then(() => enqueueSubagentResult(input));
+    const deliverBackgroundResult = (input: PreparedInput): Promise<void> => {
+      subagentDelivery = subagentDelivery.then(() => enqueueBackgroundResult(input));
       return subagentDelivery;
     };
-    const enqueueSubagentResult = async (input: PreparedInput): Promise<void> => {
+    const enqueueBackgroundResult = async (input: PreparedInput): Promise<void> => {
       const block = input.content[0];
       const callId = input.subagent?.callId;
       if (block?.type === "text" && callId !== undefined) {
@@ -2917,7 +2948,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
       }
       if (closing || session.health !== "ok") return;
-      pendingInputStore.add("subagent", input);
+      pendingInputStore.add(input.backgroundShell ? "shell" : "subagent", input);
       // 不等开启的 Turn 结束：后台任务在交付后即收束，不占并发计数
       void pumpQueue().catch(() => {
         pendingInputStore.pauseAll();
@@ -3301,6 +3332,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.files,
             prepared.subagent,
             prepared.workMode,
+            prepared.backgroundShell,
           );
           // ADR-0076 §4.5：用户中断即停止目标，之后的普通对话不被核对说明接管
           if (reason === "aborted" && session.state().goal?.status === "active")
@@ -3399,9 +3431,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
         }
       }
+      recovered.push(
+        ...backgroundShells.recover(session.durableEvents(), meta.forkedFrom?.seq ?? 0),
+      );
       if (recovered.length > 0) {
         pendingInputStore.pauseAll();
-        for (const input of recovered) pendingInputStore.add("subagent", input);
+        for (const input of recovered)
+          pendingInputStore.add(input.backgroundShell ? "shell" : "subagent", input);
       }
     }
     // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
@@ -3578,7 +3614,41 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // 只缓存最近一次 describeContext；键覆盖 seq 与不写事件的 Builder 输入。
     // 返回值和缓存各自深拷贝，避免调用者改到缓存或持久历史。
     let contextCache: { key: string; value: BuiltContext } | undefined;
+    const recoveredAt = new Date().toISOString();
     const runtimeSession: RuntimeSession = {
+      shellTasks() {
+        assertUsable();
+        const tasks = backgroundShells.list();
+        const known = new Set(tasks.map((task) => task.taskId));
+        for (const task of replaySessionView(session.durableEvents()).backgroundShells) {
+          if (!known.has(task.taskId))
+            tasks.push(
+              task.status === "running"
+                ? { ...task, status: "interrupted", endedAt: recoveredAt }
+                : task,
+            );
+        }
+        return tasks;
+      },
+      async shellOutput(taskId, offset) {
+        assertUsable();
+        if (offset !== undefined && (!Number.isInteger(offset) || offset < 0))
+          throw new RuntimeCommandError("invalid_command", "offset must be a non-negative integer");
+        if (backgroundShells.list().some((task) => task.taskId === taskId))
+          return backgroundShells.observe(taskId, offset);
+        const task = runtimeSession.shellTasks().find((item) => item.taskId === taskId);
+        if (!task) throw new RuntimeCommandError("invalid_command", `未知后台任务：${taskId}`);
+        const text = await platform.fs.readTextFile(task.logPath).catch(() => "");
+        return observerOutput(task, text, offset);
+      },
+      async shellKill(taskId) {
+        assertUsable();
+        try {
+          await backgroundShells.kill(taskId);
+        } catch (cause) {
+          throw new RuntimeCommandError("invalid_command", String(cause));
+        }
+      },
       describeSkills: () => ({
         skills: catalog.skills,
         budget: catalog.budget,
@@ -3649,6 +3719,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               if (event.seq < targetSeq && event.type === "tool.started")
                 kept.add(event.payload.callId);
             await backgroundSubagents.discard(session.id, kept);
+            await backgroundShells.discard(kept);
             pendingInputStore.dropSubagents(kept);
           }
           // ADR-0076 §2：回退到设定目标、进入计划的那条消息之前（含它本身），模式随之撤回
@@ -3679,7 +3750,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
       },
       state: () => session.state(),
-      subscribe: (listener) => session.subscribe(listener),
+      subscribe: (listener) => {
+        const unsub = session.subscribe(listener);
+        for (const task of runtimeSession.shellTasks()) {
+          listener({
+            type: "shell.task_updated",
+            sessionId: session.id,
+            runId: session.runId,
+            eseq: 0,
+            afterSeq: session.state().lastSeq,
+            time: recoveredAt,
+            payload: { task },
+          });
+        }
+        return unsub;
+      },
       async readInputHistory() {
         try {
           await historyWrite;
@@ -4205,9 +4290,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         gate.cancelAll?.();
         questions.cancelAll();
         await backgroundSubagents.discard(session.id);
+        await backgroundShells.discard();
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
         // 父工具可能正在创建 child；等父 Turn 退出后再收束这期间登记的后台任务。
         await backgroundSubagents.discard(session.id);
+        await backgroundShells.discard();
         await worktreeChain;
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {

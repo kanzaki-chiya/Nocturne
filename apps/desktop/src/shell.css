@@ -1,0 +1,91 @@
+.shell-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  color: var(--a-text);
+  background: var(--a-panel);
+}
+.shell-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--a-border);
+  font-size: var(--fs-2);
+}
+.shell-head .shell-name {
+  flex: 1;
+}
+.shell-time {
+  color: var(--a-muted);
+  font: var(--fs-1) var(--mono);
+  white-space: nowrap;
+}
+.shell-command-name {
+  font-family: var(--mono);
+}
+.shell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  white-space: nowrap;
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+}
+.shell-status.err {
+  color: var(--a-error);
+}
+.shell-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  font: var(--fs-2)/1.7 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.ovpop-shell-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--radius-2);
+}
+.ovpop-shell-open {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.shell-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ovpop-shell-row.done .shell-name,
+.ovpop-shell-row.done .sp-glyph {
+  color: var(--a-faint);
+}
+.ovpop-shell-row .shell-stop {
+  display: none;
+}
+.ovpop-shell-row:has(.shell-stop):hover,
+.ovpop-shell-row:has(.shell-stop):focus-within {
+  background: var(--a-raised);
+}
+.ovpop-shell-row:has(.shell-stop):hover .ovpop-time,
+.ovpop-shell-row:has(.shell-stop):focus-within .ovpop-time {
+  display: none;
+}
+.ovpop-shell-row:hover .shell-stop,
+.ovpop-shell-row:focus-within .shell-stop {
+  display: inline-flex;
+}

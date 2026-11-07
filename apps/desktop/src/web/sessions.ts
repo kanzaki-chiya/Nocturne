@@ -17,6 +17,7 @@ import {
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
 import { conversationStatus } from "../conversations";
+import { syncShellSnapshot } from "../shell-snapshot";
 import { forkDraftText } from "../fork-session";
 import type { SessionSummary, SessionStatus } from "../session-tree";
 
@@ -349,6 +350,13 @@ export class PhoneSessions {
     );
     subscribed = true;
     entry.replaying = false;
+    void syncShellSnapshot(session, view)
+      .then(() => {
+        if (entry.dead) return;
+        for (const listener of entry.listeners) listener();
+        this.changed();
+      })
+      .catch(() => undefined);
     // 订阅后取当前快照；请求在途期间若收到 input.pending，则事件优先。
     const requestedRevision = pendingRevision;
     void Promise.resolve()

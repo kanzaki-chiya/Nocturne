@@ -168,6 +168,8 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 
 `shell` 的约定（Phase 2 定案）：
 
+[ADR-0083](../decisions/ADR-0083-background-shell.md)：宿主开启 `RuntimeOptions.shell.background` 时，顶层非定时会话另有 `background` 与 `name` 输入，以及 `shell_output({ id?, since?: "start" })`、`shell_kill({ id })`。后台启动立即结算一次工具调用，输出 `{ taskId, logPath, background: true }`；不绑定 Turn 中断，不设默认超时，显式 `timeoutMs` 才计时。已解码的 stdout/stderr 追加到 `<sessionsDir>/<sessionId>.tasks/<taskId>.log`，不再发 `tool.progress`。输出工具按游标读新内容，`since: "start"` 从头读，无 id 列出全部；超预算提供日志路径。停止工具声明 mutates、无权限主体，只停止本会话任务。结束结果经通用待发输入送达，正文只含尚未读取的尾部；关闭与回退到启动前终止且不交付，恢复补 interrupted 暂停条目，分叉不继承任务。子会话及关闭开关时沿用同步工具定义，不注册输出/停止工具。
+
 - **shell 选择**（[ADR-0022](../decisions/ADR-0022-shell-selection.md)）：支持五种 shell——`pwsh`（PowerShell 7+，Windows/POSIX）、`powershell`（Windows PowerShell 5.1，只探测不自动入选）、`bash`（Windows 为 Git Bash，POSIX 为 bash）、`cmd`、`sh`（POSIX）。每种由 `platform/shells.ts` 的 `ShellDescriptor` 描述调用形态与随主体透传的元数据（分页器名单 `pagers`/`flagPagers`、高风险命令表 `risk`——纯数据，匹配判定在权限层，见 [permissions.md](permissions.md) 第 6 节）：PowerShell 系用 `-NoLogo -NoProfile -NonInteractive -EncodedCommand <UTF-16LE Base64>` 执行包装脚本——前奏把 `[Console]::OutputEncoding`/`$OutputEncoding` 置为 UTF-8 无 BOM 并静默 `$ProgressPreference`，退出码语义为末句是原生命令（AST 判定，`&`/`.` 调用运算符解引用）取 `$LASTEXITCODE`、非原生命令成功 0 / 出错 1；`bash`/`sh` 用 `-c`；`cmd` 用 `/d /s /c`（仅 cmd 走 Windows verbatim 传参，其余走 Node 常规参数转义）。探测只做文件存在性判断、结果进程内缓存：Git Bash 由 PATH 上的 `git.exe` 推导 `..\bin\bash.exe`，其次常见安装目录，刻意不取 PATH 上的裸 `bash`（`C:\Windows\System32\bash.exe` 是 WSL 入口）；pwsh 查 PATH 与 `%ProgramFiles%\PowerShell\7`。生效选择经通用配置链合并：程序设置 < 用户配置 < 已信任项目配置 < 环境变量；保持原有 shell 声明边界（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）。未声明时自动选择（Windows：pwsh → Git Bash → cmd；POSIX：sh）（[config.md](config.md) 第 2、5 节）；非法 `NOCTURNE_SHELL` 在装配时警告一次（收入 `runtime.warnings` 便于 CLI/TUI 启动时展示）并回退自动，显式选择但可执行文件不存在时该次调用以 `error` 结算并列出已探测到的可选项。选择是**会话级可变**的：`session.setShell` 在写 `settings.json` 前先校验目标可执行——未安装（或 `auto` 无可解析结果）以 `invalid_command` 拒绝并列出可选项、不产生事件；校验通过后写入 `settings.json`，从**下一次** shell 调用生效——执行环境在每次工具调用时逐次解析，不在 Turn 开始快照，已执行的命令不受影响。工具 `description` 保持中性稳定（"种类与语法见环境信息"），模型看到的语法说明由环境信息 Shell 行与会话内切换说明承担（[context.md](context.md) 第 3 节）。
 - **shell 子进程环境**（v0.2）：继承进程环境，但剥离全部已解析服务商的 `apiKeyEnv` 变量名以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY`，避免模型通过命令读到密钥（[provider-setup.md](provider-setup.md) 第 4 节）。所有 shell 默认补入 `PYTHONUNBUFFERED=1`，让 Python 在输出接到管道时及时写出；父进程已设置该变量时保留原值，包括空字符串，不修改父进程环境。
 - **宿主注入的变量不进子进程**：`nctrn` 入口为让 Ink 使用生产版渲染器，在未设置 `NODE_ENV` 时写入 `production`，并把变量名登记到进程私有变量 `NOCTURNE_HOST_INJECTED_ENV`（逗号分隔，`apps/cli/src/host-env.ts`）。`ProcessRunner` 构造子进程环境时（`spawn`、`spawnShell`、`spawnPipe` 的继承基线）剔除登记的变量和登记变量本身，所以 shell 工具、Hook、MCP 与外部 agent 启动的子进程里看不到这个 `NODE_ENV`，其中的测试与构建不会按生产环境运行；用户启动 `nctrn` 之前自己设置的变量不登记，原样继承。调用方显式传入的 `env` 仍然优先。
@@ -198,7 +200,7 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 
 ## 7. 暂不设计
 
-工具别名、Provider 原生工具（如服务端网页搜索）、后台运行的 shell。工具结果图片已有落地通道（`ToolResult.attachments` → `AttachmentStore` → 按 `imageInput` 投影，ADR-0023）；MCP 返回的图片目前仍按占位符处理（见 [mcp.md](mcp.md) 第 6 节），接入时转换为 `ToolResult.attachments`，不修改执行管线的步骤。
+工具别名、Provider 原生工具（如服务端网页搜索）。工具结果图片已有落地通道（`ToolResult.attachments` → `AttachmentStore` → 按 `imageInput` 投影，ADR-0023）；MCP 返回的图片目前仍按占位符处理（见 [mcp.md](mcp.md) 第 6 节），接入时转换为 `ToolResult.attachments`，不修改执行管线的步骤。
 
 ## 文件检查点
 

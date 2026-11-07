@@ -125,6 +125,7 @@ import {
   type ProviderToggleBridge,
 } from "./components/provider-page.js";
 import { Subagents } from "./components/subagents.js";
+import { Tasks } from "./components/tasks.js";
 import { StatusBar, type EffortSegment, type StatusHighlight } from "./components/status-bar.js";
 import { ThemePage } from "./components/theme-page.js";
 import { SettingsPage } from "./components/settings-page.js";
@@ -905,6 +906,7 @@ function SessionApp({
   const [historyDraft, setHistoryDraft] = useState("");
   const [overlay, setOverlay] = useState<OverlayName | undefined>(undefined);
   const [backgroundCount, setBackgroundCount] = useState(0);
+  const [shellOutputs, setShellOutputs] = useState<ReadonlyMap<string, string>>(new Map());
   useEffect(() => {
     let active = true;
     const refresh = () => {
@@ -948,6 +950,26 @@ function SessionApp({
   reasoningExpandedRef.current = reasoningExpanded;
   const transcriptClicks = useRef(createClickTracker());
   const [diffExpanded, setDiffExpanded] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      const output = new Map<string, string>();
+      for (const task of session.shellTasks()) {
+        if (!diffExpanded.has(`t:${task.callId}`)) continue;
+        const result = await session.shellOutput(task.taskId);
+        output.set(task.callId, result.text);
+      }
+      if (active) setShellOutputs(output);
+    };
+    void refresh().catch(() => undefined);
+    const timer = setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, 1000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [session, diffExpanded]);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
   const recordTotal = useRef<number | undefined>(undefined);
@@ -2339,7 +2361,7 @@ function SessionApp({
       const queued = pendingInputsRef.current;
       const picked = queued.items[Math.min(pendingIndexRef.current, queued.items.length - 1)];
       if (ch === "e" || ch === "E") {
-        if (picked === undefined || picked.mode === "subagent") return;
+        if (picked === undefined || picked.mode === "subagent" || picked.mode === "shell") return;
         editingPendingRef.current = picked.id;
         setEditingPending(picked.id);
         updateInput(picked.text, picked.text.length);
@@ -2353,7 +2375,7 @@ function SessionApp({
         return;
       }
       if (ch === "t" || ch === "T") {
-        if (picked === undefined || picked.mode === "subagent") return;
+        if (picked === undefined || picked.mode === "subagent" || picked.mode === "shell") return;
         void session
           .updateInput(picked.id, { mode: picked.mode === "steer" ? "queue" : "steer" })
           .catch((e: unknown) => {
@@ -3126,6 +3148,7 @@ function SessionApp({
     entries: view.entries,
     hide: hideNotice,
     live: view,
+    shellOutputs,
     clientLines,
     ascii: env.ascii,
     reasoning,
@@ -3281,6 +3304,8 @@ function SessionApp({
         (entry) => [
           layoutEntry(entry, width, env.ascii, reasoning, reasoningNow, false, false, theme, {
             entries: view.entries,
+            backgroundShells: view.backgroundShells,
+            shellOutputs,
           }),
         ],
         clientRows,
@@ -3328,6 +3353,14 @@ function SessionApp({
         }}
         onEscape={escapePrompt}
         width={width}
+      />
+    ) : overlay === "tasks" ? (
+      <Tasks
+        session={session}
+        width={width}
+        onClose={() => {
+          setOverlay(undefined);
+        }}
       />
     ) : overlay === "subagents" ? (
       <Subagents
@@ -3695,6 +3728,8 @@ function SessionApp({
     <TuiEnvContext.Provider value={env}>
       {fullscreen ? null : (
         <Transcript
+          backgroundShells={view.backgroundShells}
+          allEntries={view.entries}
           entries={staticQueue.current}
           width={width}
           reasoning={reasoning}
