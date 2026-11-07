@@ -5,7 +5,7 @@ import { createPrefsStore } from "../src/prefs";
 import type { RpcComputer } from "@nocturne/rpc/client";
 
 afterEach(cleanup);
-function mount() {
+function mount(packaged = false) {
   let description = {
     available: true,
     state: {
@@ -17,9 +17,9 @@ function mount() {
     rules: [
       {
         kind: "app" as const,
-        pattern: "excel.exe",
+        pattern: packaged ? "Microsoft.WindowsNotepad_8wekyb3d8bbwe" : "excel.exe",
         action: "allow" as const,
-        app: { name: "Excel" },
+        app: { name: packaged ? "Windows 记事本" : "Excel" },
       },
     ],
   };
@@ -51,6 +51,14 @@ function mount() {
   render(<ComputerSettingsPage computer={api} prefs={prefs} version={1} />);
   return { api, prefs };
 }
+it("设置页打包软件不显示包族名，普通程序保留 exe 名", async () => {
+  mount(true);
+  await screen.findByText("Windows 记事本");
+  expect(screen.queryByText("Microsoft.WindowsNotepad_8wekyb3d8bbwe")).toBeNull();
+  cleanup();
+  mount();
+  await screen.findByText("excel.exe");
+});
 it("总开关先同行确认，取消不启动；确认后当场生效并写本机 prefs", async () => {
   const { api, prefs } = mount();
   await screen.findByText("cua-driver 0.40.2");

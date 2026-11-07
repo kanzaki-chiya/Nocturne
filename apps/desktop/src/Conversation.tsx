@@ -1639,7 +1639,8 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
       // 字符串入参，如搜索 query、抓取 url），拿不到就留空，不再显示一遍名字。
       if (name.startsWith("mcp__computer__")) {
         const action = name.slice("mcp__computer__".length);
-        const target = entry.subjects.find((subject) => subject.kind === "app")?.target;
+        const subject = entry.subjects.find((subject) => subject.kind === "app");
+        const target = subject?.app?.name ?? subject?.target;
         return plain(target === undefined ? action : `${action} · ${target}`);
       }
       if (mcpToolLabel(name, entry.subjects) !== undefined) {
@@ -3016,7 +3017,9 @@ export function PermissionCard({
                   {icon ? <img src={`data:image/png;base64,${icon}`} alt="" /> : (name[0] ?? "A")}
                 </span>
                 <span className="app-name">{name}</span>
-                {subject.target !== name && <span className="exe">{subject.target}</span>}
+                {!subject.app?.packageFamilyName && subject.target !== name && (
+                  <span className="exe">{subject.target}</span>
+                )}
                 {title !== undefined && title !== "" && <span className="title">{title}</span>}
               </li>
             );

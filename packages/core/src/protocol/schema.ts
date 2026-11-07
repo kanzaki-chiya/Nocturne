@@ -74,6 +74,7 @@ const permissionSubjectSchema = z.object({
       title: z.string().optional(),
       icon: z.string().optional(),
       identity: z.string().optional(),
+      packageFamilyName: z.string().optional(),
     })
     .optional(),
   appUnresolved: z.boolean().optional(),

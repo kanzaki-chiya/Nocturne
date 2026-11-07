@@ -35,6 +35,37 @@ function makeEvent(overrides: Partial<DurableEvent> = {}): DurableEvent {
 }
 
 describe("decodeDurableEvent", () => {
+  it("软件主体的 packageFamilyName 在确认与工具事件恢复后保留", () => {
+    const subject = {
+      kind: "app" as const,
+      target: "Test.Package_family",
+      app: { name: "测试软件", packageFamilyName: "Test.Package_family" },
+    };
+    for (const event of [
+      makeEvent({
+        type: "tool.started",
+        payload: {
+          callId: "c",
+          name: "mcp__computer__get_window_state",
+          input: {},
+          subjects: [subject],
+          permission: { action: "allow", source: "rule" },
+        },
+      }),
+      makeEvent({
+        type: "permission.requested",
+        payload: {
+          requestId: "r",
+          callId: "c",
+          subjects: [subject],
+          reason: "测试",
+          options: ["allow_session", "allow_always", "deny"],
+        },
+      }),
+    ]) {
+      expect(decodeDurableEvent(encodeDurableEvent(event))).toEqual(event);
+    }
+  });
   it.each(["allow", "block", "unsure"] as const)("permission.reviewed %s 往返", (verdict) => {
     const event = makeEvent({
       type: "permission.reviewed",

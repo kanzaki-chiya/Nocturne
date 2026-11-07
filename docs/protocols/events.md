@@ -113,7 +113,9 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 授权命中的可选 `grant` 元数据由 `RuleHit.grant` 原样传入上述两个事件；`scope` 为 `session` / `project`，`createdAt` 为授权记录时间。旧日志没有该字段时仍可按 `source: "grant"` 显示「已授权」，不解析 `rule` 文案推断范围（[ADR-0068](../decisions/ADR-0068-grants-management.md)）。
 
-ADR-0082：`app` 主体表示软件身份，可带仅供显示与解析的 `app: { pid?, windowId?, name?, title?, icon?, identity? }` 以及 `appUnresolved?: boolean`；未解析标记使权限层保守询问，图标等元数据不参与授权匹配。`permission.requested.options` 在全体主体都是 app 时固定为 `allow_session`、`allow_always`、`deny`，混合主体不含 `allow_always`。`PermissionReply.remember` 和 `permission.resolved.remember` 新增 `"always"`，表示写入用户层精确软件规则，`grant` 不因该值而增加新 scope；写入失败降级为 `"session"` 并发 `runtime.warning(code: "app_permission_save_failed")`。规则与选项校验仍由权限层完成，见 [permissions.md](../architecture/permissions.md) 5.6。
+ADR-0082：`app` 主体表示软件身份，可带仅供显示与解析的 `app: { pid?, windowId?, name?, title?, icon?, identity?, packageFamilyName? }` 以及 `appUnresolved?: boolean`；未解析标记使权限层保守询问，图标等元数据不参与授权匹配。可选的 `packageFamilyName` 在持久化与恢复时保留，客户端据此隐藏包族名灰字。确认选项与回复校验由权限层完成，见 [permissions.md](../architecture/permissions.md) 5.6。
+
+`PermissionReply.remember` 和 `permission.resolved.remember` 的 `"always"` 表示写入用户层精确软件规则，`grant` 不因该值增加新 scope；写入失败降级为 `"session"` 并发 `runtime.warning(code: "app_permission_save_failed")`。
 
 `permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）；Hook 直接结算的调用（`source: "hook"`——`PreToolUse` 的 deny/allow 与 `PermissionRequest` 的 allow/deny，`rule` 字段记 Hook 条目的人读描述，见 [hooks.md](../architecture/hooks.md)）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。审查 allow/block 也结算为 `permission.resolved(source: "reviewer")`，执行时 `tool.started.permission` 沿用该来源。
 

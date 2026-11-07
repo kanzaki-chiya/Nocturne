@@ -314,6 +314,7 @@ export interface ApplicationTarget {
   title?: string | undefined;
   icon?: string | undefined;
   identity?: string | undefined;
+  packageFamilyName?: string | undefined;
 }
 
 export interface SubjectRequest {

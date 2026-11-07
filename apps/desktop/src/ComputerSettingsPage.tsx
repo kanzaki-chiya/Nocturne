@@ -217,7 +217,9 @@ export function ComputerSettingsPage({
                           )}
                         </span>
                         <span className="app-name">{name}</span>
-                        <span className="exe in-row">{rule.pattern}</span>
+                        {/\.exe$/iu.test(rule.pattern) && (
+                          <span className="exe in-row">{rule.pattern}</span>
+                        )}
                       </span>
                     }
                   >
@@ -313,7 +315,9 @@ export function ComputerSettingsPage({
                             )}
                           </span>
                           <span>{name}</span>
-                          <span className="exe">{identity}</span>
+                          {!app.packageFamilyName && /\.exe$/iu.test(identity) && (
+                            <span className="exe">{identity}</span>
+                          )}
                         </button>
                       );
                     })}
