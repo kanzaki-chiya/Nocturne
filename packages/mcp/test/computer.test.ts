@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import release from "../src/computer-release.json" with { type: "json" };
@@ -117,15 +118,19 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
     const expectedFiles = ["LICENSE", "THIRD_PARTY_NOTICES.md", "cua-driver.exe"];
     expect(Object.keys(release.files).sort()).toEqual(expectedFiles);
     const rootDir = join(fileURLToPath(new URL("../../..", import.meta.url)));
-    const destDir = join(rootDir, "apps/desktop/src-tauri/resources/computer");
-    writeFileSync(join(destDir, "stale-unused.dll"), "stale");
+    const destDir = mkdtempSync(join(tmpdir(), "nocturne-computer-"));
+    for (const name of [...expectedFiles, "stale-unused.dll", "cua_driver_sdk.dll"])
+      writeFileSync(join(destDir, name), "x");
     const proc = platform.process.spawnPipe(process.execPath, [
       join(rootDir, "scripts/fetch-computer.mjs"),
+      "--prune-only",
+      destDir,
     ]);
     proc.stdin.end();
     const exit = await proc.wait();
     expect(exit.code).toBe(0);
     expect(readdirSync(destDir).sort()).toEqual(expectedFiles);
+    rmSync(destDir, { recursive: true, force: true });
   });
   it("两会话共享一个 stdio 进程；单会话关闭不停止；关闭开关后边界移除，重新开启恢复", async () => {
     const { source, open } = make();

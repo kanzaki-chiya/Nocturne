@@ -21,6 +21,13 @@ const destination = join(root, "apps/desktop/src-tauri/resources/computer");
 const hash = (file) => createHash("sha256").update(readFileSync(file)).digest("hex").toUpperCase();
 const ps = (text) => `'${text.replaceAll("'", "''")}'`;
 
+/** 删除目标目录里清单以外的旧文件，免得本地残留被打进安装包 */
+function prune(dir) {
+  const allowed = new Set(Object.keys(spec.files));
+  for (const existing of readdirSync(dir))
+    if (!allowed.has(existing)) rmSync(join(dir, existing), { recursive: true, force: true });
+}
+
 async function main() {
   if (process.platform !== "win32") throw new Error("电脑操控驱动目前仅打包 Windows x64");
   mkdirSync(cache, { recursive: true });
@@ -65,12 +72,7 @@ async function main() {
       { cwd: root },
     );
     mkdirSync(destination, { recursive: true });
-    const allowed = new Set(Object.keys(spec.files));
-    for (const existing of readdirSync(destination)) {
-      if (!allowed.has(existing)) {
-        rmSync(join(destination, existing), { recursive: true, force: true });
-      }
-    }
+    prune(destination);
     for (const name of Object.keys(spec.files))
       copyFileSync(join(packageDir, name), join(destination, name));
     console.log(
@@ -80,7 +82,9 @@ async function main() {
     rmSync(work, { recursive: true, force: true });
   }
 }
-main().catch((error) => {
+// 测试入口：只清理指定目录，不下载
+const run$ = process.argv[2] === "--prune-only" ? async () => prune(process.argv[3]) : main;
+run$().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });
