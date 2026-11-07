@@ -316,7 +316,7 @@ export function createComputerSource(options: ComputerOptions) {
   }
   async function resolveCached(
     app: ApplicationTarget,
-  ): Promise<{ evidence?: ApplicationEvidence; identity?: string }> {
+  ): Promise<{ evidence?: ApplicationEvidence | undefined; identity?: string | undefined }> {
     if (app.pid !== undefined) {
       const creationTime = (await getProcessCreationTime(app.pid).catch(() => undefined)) ?? "0";
       const pidKey = `${app.pid}:${creationTime}`;

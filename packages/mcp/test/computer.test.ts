@@ -204,7 +204,11 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
       [20, "1000"],
       [30, "2000"],
     ]);
-    const calls: Array<{ pid?: number; windowId?: number; includeIcon?: boolean }> = [];
+    const calls: {
+      pid?: number | undefined;
+      windowId?: number | undefined;
+      includeIcon?: boolean | undefined;
+    }[] = [];
     const source = createComputerSource({
       platform,
       cwd,

@@ -334,7 +334,11 @@ export function createWindowsAppHelper(platform: Platform): WindowsAppHelper {
           .exited()
           .then(() => true)
           .catch(() => true),
-        new Promise<boolean>((r) => setTimeout(() => r(false), 300)),
+        new Promise<boolean>((r) => {
+          setTimeout(() => {
+            r(false);
+          }, 300);
+        }),
       ]);
       if (!exited) {
         await proc.kill().catch(() => undefined);

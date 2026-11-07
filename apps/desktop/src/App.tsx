@@ -2455,14 +2455,10 @@ function SessionPane({
         onViewChanges={onViewChanges}
         subagentLinks={subagentLinks}
         fileLinks={fileLinks}
-        resolveAppIcon={
-          client
-            ? async (target) => {
-                const apps = await client.computer.runningApps().catch(() => []);
-                return apps.find((a) => a.identity === target)?.icon;
-              }
-            : undefined
-        }
+        resolveAppIcon={async (target) => {
+          const apps = await client.computer.runningApps().catch(() => []);
+          return apps.find((a) => a.identity === target)?.icon;
+        }}
       />
       {view.pendingQuestion ? (
         <div className="question-dock">
