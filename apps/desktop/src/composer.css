@@ -140,6 +140,8 @@
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+  /* 两层都预留滚动条宽度：textarea 超高出滚动条时文字区不变窄，折行与镜像层一致，光标不错位 */
+  scrollbar-gutter: stable;
 }
 
 .composer .composer-mirror {
