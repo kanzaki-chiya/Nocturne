@@ -241,6 +241,9 @@ export const REMOTE_METHODS = [
   "session.approvePlan",
   "session.cancelPlan",
   "session.pendingInputs",
+  "shell.tasks",
+  "shell.output",
+  "shell.kill",
   "session.interrupt",
   "session.abort",
   "session.respondPermission",
@@ -2269,6 +2272,16 @@ class Connection implements HubPeer {
       "session.cancelPlan": async (p) => {
         const { session } = this.session(p);
         await this.hub.operate(session, () => session.cancelPlan());
+        return null;
+      },
+      "shell.tasks": (p) => this.session(p).session.shellTasks(),
+      "shell.output": (p) => {
+        const since = optString(p, "since");
+        if (since !== undefined && since !== "start") throw new InvalidParamsError("since");
+        return this.session(p).session.shellOutput(reqString(p, "taskId"), since);
+      },
+      "shell.kill": async (p) => {
+        await this.session(p).session.shellKill(reqString(p, "taskId"));
         return null;
       },
       "session.pendingInputs": (p) => this.session(p).session.pendingInputs(),

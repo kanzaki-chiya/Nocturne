@@ -3,18 +3,8 @@ import type { Platform, ShellSpawnOptions, SpawnedProcess } from "../platform/in
 import { truncateModelContent } from "./budget.js";
 import { effectiveEvents, type DurableEvent, type PreparedInput, type BackgroundShellResult } from "../protocol/index.js";
 
-export interface BackgroundShellTask {
-  taskId: string;
-  callId: string;
-  name: string;
-  command: string;
-  logPath: string;
-  status: "running" | "exited" | "timeout" | "killed" | "interrupted";
-  startedAt: string;
-  endedAt?: string;
-  exitCode?: number;
-  signal?: string;
-}
+import type { BackgroundShellTask } from "../protocol/background-shell.js";
+export type { BackgroundShellTask } from "../protocol/background-shell.js";
 export function shellResultInput(meta: BackgroundShellResult, text: string): PreparedInput {
   return {
     backgroundShell: meta,
@@ -49,6 +39,7 @@ export class BackgroundShells {
     sessionsDir: string;
     sessionId: string;
     deliver?: (input: PreparedInput) => Promise<void>;
+    updated?: (task: BackgroundShellTask) => void;
   }) {}
 
   async start(input: ShellStart): Promise<{ taskId: string; logPath: string; background: true }> {
@@ -75,6 +66,7 @@ export class BackgroundShells {
     };
     const job: Job = { task, process: proc, cursor: 0, writes: Promise.resolve(), settled: Promise.resolve(), discard: false };
     this.jobs.set(taskId, job);
+    this.options.updated?.({ ...task });
     const pump = async (stream: AsyncIterable<string>) => {
       for await (const chunk of stream) {
         job.writes = job.writes.then(() => platform.fs.appendFile(logPath, chunk));
@@ -103,6 +95,7 @@ export class BackgroundShells {
         task.status = "interrupted";
       }
       task.endedAt = new Date().toISOString();
+      if (!job.discard) this.options.updated?.({ ...task });
       if (!job.discard && this.options.deliver) {
         const text = await this.options.platform.fs.readTextFile(task.logPath);
         const unread = text.slice(job.cursor);

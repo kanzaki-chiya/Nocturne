@@ -2243,6 +2243,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const backgroundShells = new BackgroundShells({
       platform, sessionsDir, sessionId: session.id,
       deliver: (input) => deliverBackgroundResult(input),
+      updated: (task) => session.emitEphemeral("shell.task_updated", { task }),
     });
     const execEnv: ExecutionEnvironment = {
       currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),

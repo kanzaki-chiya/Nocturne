@@ -119,7 +119,11 @@ ADR-0082：`app` 主体表示软件身份，可带仅供显示与解析的 `app:
 
 `permission.resolved` 在以下情况发出：经过用户确认的请求（有 `requestId`）；被规则直接拒绝的调用；由会话或项目授权放行原本需要确认的调用（`source: "grant"`）；Hook 直接结算的调用（`source: "hook"`——`PreToolUse` 的 deny/allow 与 `PermissionRequest` 的 allow/deny，`rule` 字段记 Hook 条目的人读描述，见 [hooks.md](../architecture/hooks.md)）。规则直接允许的调用不单独发事件，其决定记录在 `tool.started.permission` 中。审查 allow/block 也结算为 `permission.resolved(source: "reviewer")`，执行时 `tool.started.permission` 沿用该来源。
 
+ADR-0083：`message.user.backgroundShell?: { taskId, callId, status: "exited" | "timeout" | "killed" | "interrupted", exitCode?, signal? }` 标记后台命令结果。正文以 `<shell-result id="…" status="…" exit="…">` 包裹尚未被输出工具读取的尾部，经通用待发输入进入历史；不是一次新的工具完成事件。`input.pending` 增加 Runtime 专用的 `mode: "shell"`，可撤回不可编辑。
+
 ### 3.2 临时事件
+
+ADR-0083：`shell.task_updated` 携带 `{ task: BackgroundShellTask }`，任务字段见 [view.md](view.md)。它不写日志、不占用持久 seq；订阅后以 `shell.tasks` 对齐当前内存快照。
 
 | 类型 | turnId | payload |
 |---|---|---|

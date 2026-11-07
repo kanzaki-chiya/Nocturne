@@ -60,6 +60,7 @@ interface SessionView {
   entries: ViewEntry[];
   /** 当前任务清单；全部完成后由下一条非插话的持久化 message.user 归档（ADR-0070） */
   todos: TodoItem[];
+  backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
   /** 在途实体：只由临时事件创建，对应持久事件到达时转入 entries（§4） */
   live: {
     assistants: LiveAssistant[];
@@ -212,7 +213,11 @@ interface SessionNotice {
 
 顺序约束：视图**不要求**事件全序——`resolved` 可在 `requested` 前（规则拒绝直接产生 `resolved`）、`completed` 可在 `started` 前、`requested` 可在 `input.delta` 前（Provider 不流式参数时）。所有关联都通过 `callId`/`messageId`/`requestId` 键查找。
 
+后台命令（ADR-0083）：`BackgroundShellTask` 为 `{ taskId, callId, name, command, logPath, status, startedAt, endedAt?, exitCode?, signal? }`。`tool.completed.output.background === true` 结合启动输入建立运行中任务；`message.user.backgroundShell` 更新状态与结束时间。`UserEntry.backgroundShell` 保留结果元数据。条目不会因时间经过从视图删除；客户端按结束五分钟后过滤。关闭与重启之间尚未送达的结束结果按 interrupted 暂停条目恢复。
+
 ## 4. 临时事件归约
+
+`shell.task_updated` 用任务 id 更新 `backgroundShells`，不追加对话条目。它与其他临时事件一样不可重放；持久结果送达后收敛到持久归约。
 
 临时事件只写瞬态字段（`status`/`retry`/`live`/`notices`/`mcpServers`/`liveOutput`），**不创建 `entries` 条目**——这是重放等价（§6）成立的前提：
 

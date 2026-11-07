@@ -105,6 +105,10 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 `runtime.readFile`（第 3.1 节）对应 `Runtime.readFile(path)`，客户端 `RpcRuntime.readFile(path)` 把图片的 base64 解码为 `Uint8Array`；取代原来的 `session.readFile`，不保留兼容。`path` 只收绝对路径，不限工作区，任何本机普通文件都能读（实现在 Core `session/local-file.ts`）。Core 先做词法检查：空串、控制字符、相对路径、`..` 段、设备命名空间、Windows 备用数据流与设备名一律拒绝；Windows 网络路径（`\\server\share`、`//server/share`、`\\?\UNC\...`）直接拒绝且不去访问——路径来自模型回答，访问网络位置会让系统发起 SMB 连接并带上 Windows 凭据。随后逐级 `lstat` / `readlink` 解析链接得到真实路径（不用 `realpath`，它会跟着 junction 打开网络位置），链接目标是网络路径的同样拒绝。映射的网络驱动器盘符（如 `Z:`、`Q:`）按本地路径处理，照常读取。整个读取（`lstat` / `readlink` 逐级解析、`stat`、读内容）有 `READ_FILE_TIMEOUT_MS`（5 秒）总时限：映射盘的主机离线时系统调用可能挂几十秒，超时返回 `file_read_timeout`（可重试；底层调用无法取消，迟到的结果丢弃）。只读普通文件，上限 `READ_FILE_MAX_BYTES`（2 MiB），超过时整份拒绝、不截断；扩展名是常见图片格式的按图片返回，其余按 BOM（UTF-16）或严格 UTF-8 解码，前 8 KiB 含 NUL 或解码失败视为二进制。错误以 `SessionError`（`-32002`）返回：`invalid_file_path`、`file_network_path`、`file_not_found`、`file_not_regular`、`file_too_large`、`file_binary`、`file_read_timeout`（超过总时限）、`file_read_failed`（其他 I/O 错误，含链接层数过多）。
 
+### 3.2.1 `shell.*`（ADR-0083）
+
+`shell.tasks({ sessionId }) → BackgroundShellTask[]`、`shell.output({ sessionId, taskId, since?: "start" }) → { taskId, logPath, text }`、`shell.kill({ sessionId, taskId }) → null`。只能访问指定已打开会话自身的登记任务；未知 id 返回 `invalid_command`。输出与停止复用 Core 会话 API，参数形状错误返回 `invalid_params`。`input.pending` 增加 `mode: "shell"`，可撤回不可编辑。客户端可通过会话订阅接收临时 `shell.task_updated`，并以 `shell.tasks` 对齐内存快照。任务视图保留已结束条目，由客户端按结束五分钟后过滤。
+
 ### 3.3 `provider.*`
 
 服务商配置（[provider-setup.md](../architecture/provider-setup.md) 第 6 节）。方法名与 Core 数据接口一致；`prepareProvider` 的 `credential` 是判别联合（`{kind:"apiKey",key}` / `{kind:"env",name}` / `{kind:"login",loginId}` / `{kind:"external-file"}`），其余形状校验与配置判断全部在 Core，RPC 层不复制。

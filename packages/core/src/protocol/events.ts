@@ -400,6 +400,7 @@ export interface DurablePayloadMap {
 }
 
 export interface EphemeralPayloadMap {
+  "shell.task_updated": { task: import("./background-shell.js").BackgroundShellTask };
   "message.assistant.delta": AssistantDeltaPayload;
   "tool.input.delta": ToolInputDeltaPayload;
   "tool.progress": ToolProgressPayload;
@@ -491,6 +492,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "mcp.server",
   "question.requested",
   "input.pending",
+  "shell.task_updated",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

@@ -102,6 +102,9 @@ export const SESSION_METHODS: Record<
   Exclude<keyof RuntimeSession, keyof typeof SESSION_NOT_MAPPED>,
   RpcMethodName
 > = {
+  shellTasks: "shell.tasks",
+  shellOutput: "shell.output",
+  shellKill: "shell.kill",
   listGrants: "session.listGrants",
   revokeGrant: "session.revokeGrant",
   revokeAllGrants: "session.revokeAllGrants",

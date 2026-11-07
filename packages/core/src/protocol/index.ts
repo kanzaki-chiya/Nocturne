@@ -29,3 +29,4 @@ export * from "./subagent-observation.js";
 export * from "./subagent-result.js";
 export * from "./work-modes.js";
 export * from "./workspace-branches.js";
+export * from "./background-shell.js";
