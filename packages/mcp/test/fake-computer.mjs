@@ -46,6 +46,23 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     } else if (name === "clipboard_write") {
       clipboard = args.text;
       structuredContent = { written_type: "text" };
+    } else if (name === "get_window_state" && args.fixture) {
+      const header = "window_id=78711444 pid=86512 elements=107 snapshot_id=s00000001";
+      const text = `${header}\nelement_token for row [N] = s00000001:N (row [1] is "s00000001:1")\n[88] Button "New"\n${"x".repeat(110_000)}`;
+      send(request.id, {
+        content: [{ type: "text", text }],
+        ...(args.fixture === "text"
+          ? {}
+          : {
+              structuredContent: {
+                snapshot_id: "s00000002",
+                pid: 20,
+                window_id: 100,
+                tree_markdown: text,
+              },
+            }),
+      });
+      continue;
     } else if (name === "get_window_state")
       structuredContent = {
         effect: "unverifiable",

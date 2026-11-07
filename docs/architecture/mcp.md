@@ -182,6 +182,8 @@ Windows 桌面外壳将随附驱动路径经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` �
 
 来源严格按 `COMPUTER_TOOLS` 白名单包装工具，未知工具与 browser、更新、扩展、脚本、批处理、录制/回放不进入模型工具列表。无目标列举、桌面状态、剪贴板、光标控制不声明 app 主体；针对软件的请求声明 app，并由执行器在资源解析阶段调用声明式 `resolveSubject`。身份规则见 [permissions.md](permissions.md) 5.6。仅有未解析 PID/窗口/token 时仍询问，不能用通配 allow 或历史 Grant 跳过。
 
+来源在执行器裁剪输出前保存成功结果的 `snapshot_id → {pid, windowId}`，元素句柄 `<snapshot_id>:<row>` 按快照归属解析软件；优先结构化元数据，缺少时解析文本首行 `window_id=… pid=… elements=… snapshot_id=…`，并兼容逐元素 `element_token` 字段。停止驱动时清空映射。未知快照仍保留未解析 app 主体，有显式 PID/窗口时显示其数字，否则 target 为空、沿用确认卡现有标题；不把句柄当软件名，也不借用其他快照的软件身份。
+
 首次剪贴板写入先备份文本，通用 `ToolDefinition.finishTurn` 在所有 Turn 出口运行；当前剪贴板仍等于该 Turn 最后写入值时才恢复。共享连接序列化驱动调用，所有调用结果（包括无法核对的结果）只返回一次，工具说明要求先观察再决定下一步。图片沿通用附件管线返回。
 
 ## 8. 与 Core 的接线

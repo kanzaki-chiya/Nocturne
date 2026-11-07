@@ -183,6 +183,7 @@ export function createComputerSource(options: ComputerOptions) {
   const scopes = new Set<McpOpenScope>();
   const wrappers = new WeakMap<ToolDefinition, ToolDefinition>();
   const tokens = new Map<string, ApplicationTarget>();
+  const snapshots = new Map<string, ApplicationTarget>();
   const clipboards = new Map<string, { before: string; last: string; ctx: ToolContext }>();
   const listeners = new Set<() => void>();
   const emit = () => {
@@ -266,8 +267,11 @@ export function createComputerSource(options: ComputerOptions) {
     input: Record<string, unknown>,
     launching = false,
   ): ApplicationTarget | undefined {
+    const elementToken = typeof input.element_token === "string" ? input.element_token : undefined;
+    const snapshotId = elementToken?.match(/^(s[0-9a-f]{8}):[0-9]+$/u)?.[1];
     const token =
-      typeof input.element_token === "string" ? tokens.get(input.element_token) : undefined;
+      (snapshotId === undefined ? undefined : snapshots.get(snapshotId)) ??
+      (elementToken === undefined ? undefined : tokens.get(elementToken));
     const pid = typeof input.pid === "number" ? input.pid : token?.pid;
     const windowId = typeof input.window_id === "number" ? input.window_id : token?.windowId;
     const identity = launching
@@ -301,11 +305,7 @@ export function createComputerSource(options: ComputerOptions) {
           kind: "app",
           target:
             app.identity ??
-            (app.pid === undefined
-              ? typeof object.element_token === "string"
-                ? object.element_token
-                : String(app.windowId ?? "")
-              : `PID ${app.pid}`),
+            (app.pid === undefined ? String(app.windowId ?? "") : `PID ${app.pid}`),
           app,
         });
       for (const nested of Object.values(object))
@@ -379,10 +379,9 @@ export function createComputerSource(options: ComputerOptions) {
       detail: evidence?.title,
     };
   }
-  function rememberTokens(value: unknown, app?: ApplicationTarget) {
+  function rememberTokens(value: unknown, app?: ApplicationTarget): boolean {
     if (Array.isArray(value)) {
-      for (const item of value) rememberTokens(item, app);
-      return;
+      return value.map((item) => rememberTokens(item, app)).some(Boolean);
     }
     const object = record(value);
     const bound = {
@@ -392,8 +391,26 @@ export function createComputerSource(options: ComputerOptions) {
     };
     if (typeof object.element_token === "string" && bound.pid !== undefined)
       tokens.set(object.element_token, bound);
+    let remembered = false;
+    if (
+      typeof object.snapshot_id === "string" &&
+      /^s[0-9a-f]{8}$/u.test(object.snapshot_id) &&
+      bound.pid !== undefined &&
+      bound.windowId !== undefined
+    ) {
+      snapshots.set(object.snapshot_id, bound);
+      remembered = true;
+    }
     for (const [key, nested] of Object.entries(object))
-      if (key !== "element_token") rememberTokens(nested, bound);
+      if (key !== "element_token") remembered = rememberTokens(nested, bound) || remembered;
+    return remembered;
+  }
+  function rememberResult(result: ToolResult, app?: ApplicationTarget) {
+    if (result.status !== "ok" || rememberTokens(data(result), app)) return;
+    const header = result.modelContent.split(/\r?\n/u, 1)[0] ?? "";
+    const match = /^window_id=(\d+) pid=(\d+) elements=\d+ snapshot_id=(s[0-9a-f]{8})$/u.exec(header);
+    if (match)
+      rememberTokens({ window_id: Number(match[1]), pid: Number(match[2]), snapshot_id: match[3] });
   }
   function wrap(tool: ToolDefinition): ToolDefinition {
     const existing = wrappers.get(tool);
@@ -454,7 +471,7 @@ export function createComputerSource(options: ComputerOptions) {
                 else clipboards.delete(key);
               }
             }
-            rememberTokens(data(result), target(args));
+            rememberResult(result, target(args));
             return result;
           } finally {
             if (foreground) {
@@ -563,6 +580,7 @@ export function createComputerSource(options: ComputerOptions) {
     await previous?.close();
     await helper.close();
     tokens.clear();
+    snapshots.clear();
     appCache.clear();
     frameHostPids.clear();
     state = { ...state, state: "stopped", active: undefined };

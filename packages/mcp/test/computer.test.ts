@@ -41,7 +41,9 @@ function make() {
         ? { packageFamilyName: "Microsoft.Calculator_8wekyb3d8bbwe", name: "计算器" }
         : target.pid === 20
           ? { exePath: "C:/Office/EXCEL.EXE", name: "Excel" }
-          : undefined,
+          : target.pid === 86512
+            ? { packageFamilyName: "Microsoft.WindowsNotepad_8wekyb3d8bbwe", name: "Notepad" }
+            : undefined,
   });
   sources.push(source);
   const connector = createMcpConnector({ runtimeServers: [source] });
@@ -198,6 +200,44 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
     });
     for (const name of ["list_windows", "list_apps", "clipboard_read"])
       expect(tool(session, name).permissionSubjects({}, scope)).toEqual([]);
+  });
+  it.each(["text", "structured"])(
+    "%s 快照不带逐元素 token，后续句柄仍解析到快照所属软件",
+    async (fixture) => {
+      const { source, open } = make();
+      await source.setEnabled(true);
+      const session = await open("a");
+      const result = await tool(session, "get_window_state").execute({ fixture }, ctx());
+      expect(result.modelContent.length).toBeGreaterThan(100_000);
+      const click = tool(session, "click");
+      const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+      const token = fixture === "text" ? "s00000001:88" : "s00000002:88";
+      const request = click.permissionSubjects({ element_token: token }, scope)[0];
+      if (!request || !click.resolveSubject) throw new Error("缺少解析器");
+      expect(await click.resolveSubject(request, scope)).toMatchObject({
+        target: fixture === "text" ? "Microsoft.WindowsNotepad_8wekyb3d8bbwe" : "excel.exe",
+        appUnresolved: false,
+        app: {
+          pid: fixture === "text" ? 86512 : 20,
+          windowId: fixture === "text" ? 78711444 : 100,
+        },
+      });
+    },
+  );
+  it("未知快照保留未解析主体，确认主体不包含句柄，也不借用最近软件", async () => {
+    const { source, open } = make();
+    await source.setEnabled(true);
+    const session = await open("a");
+    await tool(session, "get_window_state").execute({ fixture: "text" }, ctx());
+    const click = tool(session, "click");
+    const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+    const request = click.permissionSubjects({ element_token: "sffffffff:88" }, scope)[0];
+    if (!request || !click.resolveSubject) throw new Error("缺少解析器");
+    const subject = await click.resolveSubject(request, scope);
+    expect(subject.appUnresolved).toBe(true);
+    expect(subject.target).toBe("");
+    expect(JSON.stringify(subject)).not.toContain("sffffffff:88");
+    expect(subject.app?.pid).toBeUndefined();
   });
   it("同一 PID 第二次解析命中缓存不再调底层；创建时间变化时重新解析；同一 ApplicationFrameHost 不同窗口分别解析；解析时不取图标", async () => {
     const creationTimes = new Map<number, string>([
