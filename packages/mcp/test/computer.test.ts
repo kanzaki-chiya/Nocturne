@@ -124,25 +124,31 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
       expect(names).not.toContain(`mcp__computer__${name}`);
     expect(names).toContain("mcp__computer__get_window_state");
   });
-  it("驱动环境关闭遥测并隔离全部 home 路径", async () => {
+  it("驱动环境保留系统用户目录变量，CUA_* 目录在 Nocturne 用户数据目录下且关闭遥测", async () => {
     const { source, open } = make();
     await source.setEnabled(true);
     const session = await open("a");
     const env = structured(await tool(session, "list_windows").execute({}, ctx())).env as Record<
       string,
-      string
+      string | undefined
     >;
     expect(env.DO_NOT_TRACK).toBe("1");
     expect(env.CUA_DRIVER_RS_TELEMETRY_ENABLED).toBe("false");
+    expect(env.CUA_TELEMETRY_ENABLED).toBe("false");
+    expect(env.CUA_TELEMETRY_DISABLED).toBe("1");
     expect(env.CUA_TELEMETRY).toBe("false");
+    expect(env.CUA_DRIVER_RS_UPDATE_CHECK).toBe("0");
     for (const key of [
+      "CUA_HOME",
+      "CUA_DRIVER_HOME",
+      "CUA_DRIVER_LOCAL_HOME",
       "CUA_DRIVER_RS_HOME",
       "CUA_DRIVER_TELEMETRY_HOME",
-      "HOME",
-      "USERPROFILE",
-      "LOCALAPPDATA",
+      "CUA_DRIVER_CURSOR_THEME_DIR",
     ])
       expect(env[key]?.replaceAll("\\", "/")).toContain("dist/test-computer/computer/");
+    for (const key of ["HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA"] as const)
+      expect(env[key]).toBe(process.env[key]);
   });
   it("exe 小写、打包应用包族名；未知 PID 保留且不能当作无主体", async () => {
     expect(applicationIdentity({ exePath: "C:/Office/EXCEL.EXE" })).toBe("excel.exe");

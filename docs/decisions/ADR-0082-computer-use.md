@@ -24,7 +24,7 @@
 - 走 `packages/mcp` 已有的运行时服务器来源（与 [desktop-browser.md](../protocols/desktop-browser.md) 第 1 节同一机制），服务器 id 为 `computer`，模型看到的工具名是 `mcp__computer__<tool>`。不写 `mcp.json`，不新增 Core 工具，Agent Loop 不按工具名分支。
 - 外壳在 spawn 后台时通过进程专属环境变量交出驱动路径；后台入口在加载配置前读出并删除该变量。没有该变量就完全不装配。
 - 传输是 stdio：`cua-driver mcp`。**整个后台只起一个驱动进程**，所有会话共用；焦点和剪贴板是全机唯一的，多个驱动进程会互相打架。
-- 启动驱动时：关闭遥测（cua 默认开启并上报 PostHog）；配置和数据目录放进 Nocturne 自己的用户数据目录，不与用户另装的 cua-driver 共用。具体环境变量名以锁定版本的源码为准。
+- 启动驱动时：关闭遥测与启动更新检查（cua 默认开启并上报 PostHog）；驱动自己的目录变量（`CUA_DRIVER_RS_HOME`、`CUA_DRIVER_HOME`、`CUA_DRIVER_LOCAL_HOME`、`CUA_DRIVER_CURSOR_THEME_DIR`、`CUA_DRIVER_TELEMETRY_HOME`、`CUA_HOME`）都指向 Nocturne 用户数据目录，不修改 `HOME`、`USERPROFILE`、`LOCALAPPDATA`、`APPDATA`，被驱动通过 `launch_app` 启动的软件使用用户本来的环境。`cua-driver` 启动时仍按只读方式尝试读取 `~/.cua-driver/config.json`，但在 `mcp --direct` 与白名单工具下不会向用户目录写入文件。具体环境变量名以锁定版本的源码为准。
 - 用户另外在 `mcp.json` 登记的 cua-driver 照常工作，与内置来源互不相干。
 
 ### 3. 工具范围

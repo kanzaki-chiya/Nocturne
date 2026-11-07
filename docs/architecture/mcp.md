@@ -178,7 +178,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 Windows 桌面外壳将随附驱动路径经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` 传给后台，入口读取即删除。CLI/TUI 自行启动不装配来源。来源在后台装配层持有唯一 `mcp --direct` stdio 连接；`RuntimeMcpSource.open(scope)` 可返回 `connection: McpSession` 租约，connector 聚合其工具、启动、准备、变更、状态与收尾。每个租约维护已应用工具集合，关闭会话只退订；总开关关闭和后台退出关闭 owner。普通 MCP 仍保持每会话连接。
 
-版本与全部文件哈希见 `packages/mcp/src/computer-release.json`；构建和本地开发经 `scripts/fetch-computer.mjs` 下载校验官方签名包，启动来源前再次逐文件校验。驱动子进程关闭遥测，并把 HOME、USERPROFILE、LOCALAPPDATA、APPDATA、临时目录及 Cua 自有目录变量都隔离到 Nocturne 用户数据目录下的 `computer/`。不读取或改写用户独立安装的 Cua 配置。
+版本与全部文件哈希见 `packages/mcp/src/computer-release.json`；构建和本地开发经 `scripts/fetch-computer.mjs` 下载校验官方签名包，启动来源前再次逐文件校验。驱动子进程关闭遥测与启动更新检查，并把驱动自有目录变量（`CUA_DRIVER_RS_HOME`、`CUA_DRIVER_HOME`、`CUA_DRIVER_LOCAL_HOME`、`CUA_DRIVER_CURSOR_THEME_DIR`、`CUA_DRIVER_TELEMETRY_HOME`、`CUA_HOME`）指向 Nocturne 用户数据目录下的 `computer/`；保留系统原本的 `HOME`、`USERPROFILE`、`LOCALAPPDATA`、`APPDATA`，确保 `launch_app` 启动的软件使用用户真实环境（`mcp --direct` 仅在启动时只读尝试 `~/.cua-driver/config.json`，不向用户目录写入文件）。
 
 来源严格按 `COMPUTER_TOOLS` 白名单包装工具，未知工具与 browser、更新、扩展、脚本、批处理、录制/回放不进入模型工具列表。无目标列举、桌面状态、剪贴板、光标控制不声明 app 主体；针对软件的请求声明 app，并由执行器在资源解析阶段调用声明式 `resolveSubject`。身份规则见 [permissions.md](permissions.md) 5.6。仅有未解析 PID/窗口/token 时仍询问，不能用通配 allow 或历史 Grant 跳过。
 

@@ -128,18 +128,16 @@ export function computerEnvironment(platform: Platform, home: string): Record<st
     DO_NOT_TRACK: "1",
     CUA_TELEMETRY: "false",
     CUA_TELEMETRY_ENABLED: "false",
+    CUA_TELEMETRY_DISABLED: "1",
     CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
+    CUA_DRIVER_RS_UPDATE_CHECK: "0",
+    CUA_DRIVER_EMBEDDED: "1",
     CUA_HOME: platform.paths.join(root, "cua"),
     CUA_DRIVER_HOME: platform.paths.join(root, "driver"),
     CUA_DRIVER_LOCAL_HOME: platform.paths.join(root, "local"),
     CUA_DRIVER_RS_HOME: platform.paths.join(root, "runtime"),
     CUA_DRIVER_TELEMETRY_HOME: platform.paths.join(root, "telemetry"),
-    HOME: platform.paths.join(root, "home"),
-    USERPROFILE: platform.paths.join(root, "home"),
-    LOCALAPPDATA: platform.paths.join(root, "localappdata"),
-    APPDATA: platform.paths.join(root, "appdata"),
-    TEMP: platform.paths.join(root, "tmp"),
-    TMP: platform.paths.join(root, "tmp"),
+    CUA_DRIVER_CURSOR_THEME_DIR: platform.paths.join(root, "cursor-themes"),
   };
 }
 function record(value: unknown): Record<string, unknown> {
@@ -408,7 +406,14 @@ export function createComputerSource(options: ComputerOptions) {
     starting = (async () => {
       await (options.verifyPackage?.() ?? validateComputerPackage(platform, options.executable));
       const env = computerEnvironment(platform, options.home);
-      for (const key of ["HOME", "LOCALAPPDATA", "APPDATA", "TEMP"]) {
+      for (const key of [
+        "CUA_HOME",
+        "CUA_DRIVER_HOME",
+        "CUA_DRIVER_LOCAL_HOME",
+        "CUA_DRIVER_RS_HOME",
+        "CUA_DRIVER_TELEMETRY_HOME",
+        "CUA_DRIVER_CURSOR_THEME_DIR",
+      ]) {
         const dir = env[key];
         if (dir) await platform.fs.mkdir(dir);
       }
