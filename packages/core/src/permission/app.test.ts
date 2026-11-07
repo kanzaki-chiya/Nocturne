@@ -118,6 +118,35 @@ describe("ADR-0082 app 权限", () => {
     s.cancelAll();
     await second;
   });
+  it.each([
+    [{ kind: "app", target: "PID 99", appUnresolved: true }],
+    [app(), { kind: "app", target: "", appUnresolved: true }],
+    [
+      { kind: "mcp", target: "server/tool" },
+      { kind: "app", target: "", appUnresolved: true },
+    ],
+  ] satisfies PermissionSubject[][])(
+    "含未解析软件只给会话允许和拒绝，伪造始终允许被拒绝：%j",
+    async (...subjects) => {
+      const s = setup();
+      const pending = s.check(subjects);
+      try {
+        const request = await s.request();
+        expect(request.options).toEqual(["allow_session", "deny"]);
+        expect(await s.respond(request.requestId, { decision: "allow", remember: "always" })).toBe(
+          false,
+        );
+        expect(s.save).not.toHaveBeenCalled();
+        expect(await s.respond(request.requestId, { decision: "allow", remember: "session" })).toBe(
+          true,
+        );
+        expect((await pending).decision.action).toBe("allow");
+      } finally {
+        s.cancelAll();
+        await pending;
+      }
+    },
+  );
   it("混合主体没有 allow_always，伪造回复被拒绝", async () => {
     const s = setup();
     const pending = s.check([app(), { kind: "mcp", target: "server/tool" }]);

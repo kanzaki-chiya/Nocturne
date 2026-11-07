@@ -182,7 +182,7 @@ Windows 桌面外壳将随附驱动路径经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` �
 
 来源严格按 `COMPUTER_TOOLS` 白名单包装工具，未知工具与 browser、更新、扩展、脚本、批处理、录制/回放不进入模型工具列表。无目标列举、桌面状态、剪贴板、光标控制不声明 app 主体；针对软件的请求声明 app，并由执行器在资源解析阶段调用声明式 `resolveSubject`。身份规则见 [permissions.md](permissions.md) 5.6。仅有未解析 PID/窗口/token 时仍询问，不能用通配 allow 或历史 Grant 跳过。
 
-来源在执行器裁剪输出前保存成功结果的 `snapshot_id → {pid, windowId}`，元素句柄 `<snapshot_id>:<row>` 按快照归属解析软件；优先结构化元数据，缺少时解析文本首行 `window_id=… pid=… elements=… snapshot_id=…`，并兼容逐元素 `element_token` 字段。停止驱动时清空映射。未知快照仍保留未解析 app 主体，有显式 PID/窗口时显示其数字，否则 target 为空、沿用确认卡现有标题；不把句柄当软件名，也不借用其他快照的软件身份。
+来源在执行器裁剪输出前保存成功结果的 `snapshot_id → {pid, windowId}`，元素句柄 `<snapshot_id>:<row>` 按快照归属解析软件；优先结构化元数据，缺少时解析文本首行 `window_id=… pid=… elements=… snapshot_id=…`，并兼容逐元素 `element_token` 字段。停止驱动时清空映射。未知快照仍保留未解析 app 主体；确认卡名字行有 PID 时显示 `PID n`，没有 PID 时复用现有标题「操作软件」，不显示身份灰字。不把窗口句柄或元素 token 当软件名，也不借用其他快照的软件身份。
 
 启动主体按驱动的 `launch_path`、`path`、`aumid`、含 `!` 的 `bundle_id`、`name`、普通 `bundle_id` 优先级取目标。异步解析时只读查询 `list_apps`：名称去 `.exe` 后按不区分大小写的精确/最短前缀匹配安装索引，打包结果从 AUMID 提取包族名；显式 AppsFolder 路径按完整值匹配。已解析到 Windows/System32 的 notepad、calc、mspaint 转发 stub，且索引含对应已安装包时，也统一到包族名。自定义路径不套系统 stub 规则，普通 exe 保持小写文件名；不改实际启动入参，不缓存安装索引。索引不可用或未知第三方转发器仍可能无法在启动前获得最终身份。此过程只解析主体，是否询问由权限层判定。
 

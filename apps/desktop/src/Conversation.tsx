@@ -3008,7 +3008,13 @@ export function PermissionCard({
       <ul className="ask-subjects">
         {pending.subjects.map((subject, index) => {
           if (subject.kind === "app") {
-            const name = subject.app?.name ?? subject.target;
+            const name = subject.appUnresolved
+              ? subject.app?.pid !== undefined
+                ? `PID ${subject.app.pid}`
+                : /^PID \d+$/u.test(subject.target)
+                  ? subject.target
+                  : "操作软件"
+              : (subject.app?.name ?? subject.target);
             const title = subject.app?.title ?? subject.detail;
             const icon = subject.app?.icon ?? icons.get(subject.target);
             return (
@@ -3017,9 +3023,9 @@ export function PermissionCard({
                   {icon ? <img src={`data:image/png;base64,${icon}`} alt="" /> : (name[0] ?? "A")}
                 </span>
                 <span className="app-name">{name}</span>
-                {!subject.app?.packageFamilyName && subject.target !== name && (
-                  <span className="exe">{subject.target}</span>
-                )}
+                {!subject.appUnresolved &&
+                  !subject.app?.packageFamilyName &&
+                  subject.target !== name && <span className="exe">{subject.target}</span>}
                 {title !== undefined && title !== "" && <span className="title">{title}</span>}
               </li>
             );

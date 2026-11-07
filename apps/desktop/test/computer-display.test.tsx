@@ -40,3 +40,28 @@ it("打包应用确认卡只显示名字，不出现包族名", () => {
   expect(screen.getByText("Windows 记事本")).toBeTruthy();
   expect(view.container.textContent).not.toContain(family);
 });
+it.each([
+  [{ pid: 99 }, "", "PID 99"],
+  [{}, "PID 42", "PID 42"],
+  [{}, "", "操作软件"],
+  [{ windowId: 123 }, "123", "操作软件"],
+] as const)("未解析确认卡名字行非空并隐藏句柄：%j", (app, target, expected) => {
+  const pending: PendingPermission = {
+    requestId: "unresolved",
+    callId: "unresolved",
+    toolName: "mcp__computer__get_window_state",
+    subjects: [{ kind: "app", target, app, appUnresolved: true }],
+    reason: "按权限规则需要确认",
+    options: ["allow_session", "deny"],
+  };
+  const view = render(
+    <PermissionCard
+      pending={pending}
+      session={{ respondPermission: vi.fn() } as unknown as RpcSession}
+      cwd="Z:/project"
+    />,
+  );
+  expect(view.container.querySelector(".ask-app .app-name")?.textContent).toBe(expected);
+  expect(view.container.querySelector(".ask-app .exe")).toBeNull();
+  expect(screen.getAllByRole("button")).toHaveLength(2);
+});

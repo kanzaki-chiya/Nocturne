@@ -187,6 +187,7 @@ export function createPolicyGate(
   }
 
   function confirmationOptions(subjects: PermissionSubject[]): PermissionOption[] {
+    if (subjects.some((subject) => subject.appUnresolved)) return ["allow_session", "deny"];
     if (subjects.length > 0 && subjects.every((subject) => subject.kind === "app")) {
       return ["allow_session", "allow_always", "deny"];
     }
