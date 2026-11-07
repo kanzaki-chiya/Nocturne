@@ -27,9 +27,26 @@ export function ShellPane({ taskId, name, command, task, session, visible }: She
     <section className="shell-pane" aria-label={name || command}>
       <header className="shell-head">
         <Icon name="terminal" size={ICON_SM} />
-        <span className="shell-name" title={name || command}>
-          {name || command.split(/\r?\n/)[0]}
+        <span className="shell-name shell-command-name" title={command}>
+          {command}
         </span>
+        {current && (
+          <span
+            className={`shell-status${current.exitCode !== undefined && current.exitCode !== 0 ? " err" : ""}`}
+            role="status"
+          >
+            {current.status === "running" ? (
+              <>
+                <span className="tool-spin" aria-hidden="true" />
+                运行中
+              </>
+            ) : typeof current.exitCode === "number" ? (
+              `退出码 ${current.exitCode}`
+            ) : (
+              "停止"
+            )}
+          </span>
+        )}
         {current && (
           <span className="shell-time">
             {elapsedText(
@@ -47,13 +64,9 @@ export function ShellPane({ taskId, name, command, task, session, visible }: She
           </Button>
         )}
       </header>
-      <pre className="shell-command">$ {command}</pre>
       <pre ref={scroll} className="shell-output" data-testid="shell-output">
         {output.text}
       </pre>
-      {current?.status !== "running" && typeof current?.exitCode === "number" && (
-        <footer className="shell-foot">退出码 {current.exitCode}</footer>
-      )}
     </section>
   );
 }

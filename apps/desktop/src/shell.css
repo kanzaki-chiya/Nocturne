@@ -25,17 +25,20 @@
   font: var(--fs-1) var(--mono);
   white-space: nowrap;
 }
-.shell-command {
+.shell-command-name {
+  font-family: var(--mono);
+}
+.shell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   flex: none;
-  max-height: 30%;
-  margin: 0;
-  padding: 10px 14px;
-  overflow: auto;
-  border-bottom: 1px solid var(--a-border);
+  white-space: nowrap;
   color: var(--a-muted);
-  font: var(--fs-2) var(--mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  font-size: var(--fs-1);
+}
+.shell-status.err {
+  color: var(--a-error);
 }
 .shell-output {
   flex: 1;
@@ -47,12 +50,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
-}
-.shell-foot {
-  padding: 8px 14px;
-  border-top: 1px solid var(--a-border);
-  color: var(--a-muted);
-  font: var(--fs-1) var(--mono);
 }
 .ovpop-shell-row {
   display: flex;

@@ -12,8 +12,8 @@ export function useShellOutput(
   enabled: boolean,
 ) {
   const [output, setOutput] = useState<{ text: string; task?: BackgroundShellTask }>({ text: "" });
-  const request = useRef<(target: string) => void>(() => undefined);
-  const target = `${task?.outputChars ?? 0}:${task?.status ?? ""}`;
+  const request = useRef<(target: number) => void>(() => undefined);
+  const target = task?.outputChars ?? 0;
   const latest = useRef(target);
   latest.current = target;
   useEffect(() => {
@@ -23,7 +23,7 @@ export function useShellOutput(
     let busy = false;
     let dirty = false;
     let end: number | undefined;
-    let previous: string | undefined;
+    let previous: number | undefined;
     let text = "";
     const read = async () => {
       if (busy) return;
@@ -46,7 +46,7 @@ export function useShellOutput(
       }
     };
     request.current = (next) => {
-      if (next === previous) return;
+      if (next === previous || (end !== undefined && next <= end)) return;
       previous = next;
       dirty = true;
       void read();

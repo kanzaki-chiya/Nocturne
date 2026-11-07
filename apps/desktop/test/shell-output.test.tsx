@@ -14,6 +14,23 @@ const task: BackgroundShellTask = {
   startedAt: new Date().toISOString(),
 };
 afterEach(cleanup);
+it("output header stops only running tasks, marks nonzero exit and tolerates missing tasks", () => {
+  const props = { taskId: task.taskId, name: task.name, command: task.command, visible: false };
+  const view = render(<ShellPane {...props} task={task} />);
+  expect(screen.getByRole("status").textContent).toBe("运行中");
+  expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  view.rerender(
+    <ShellPane
+      {...props}
+      task={{ ...task, status: "exited", exitCode: 1, endedAt: new Date().toISOString() }}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("退出码 1");
+  expect(screen.getByRole("status").classList.contains("err")).toBe(true);
+  view.rerender(<ShellPane {...props} />);
+  expect(screen.getByTestId("shell-output").textContent).toBe("");
+});
 it("output opens full, appends by offset and retains output on disconnect", async () => {
   const shellOutput = vi.fn(async (_taskId: string, offset?: number) => ({
     task,
