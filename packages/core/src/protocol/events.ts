@@ -109,7 +109,16 @@ export interface SubagentResult {
   changes?: SubagentChanges | undefined;
 }
 
+export interface BackgroundShellResult {
+  taskId: string;
+  callId: string;
+  status: "exited" | "timeout" | "killed" | "interrupted";
+  exitCode?: number | undefined;
+  signal?: string | undefined;
+}
+
 export interface MessageUserPayload {
+  backgroundShell?: BackgroundShellResult | undefined;
   subagent?: SubagentResult | undefined;
   messageId: string;
   content: ContentBlock[];

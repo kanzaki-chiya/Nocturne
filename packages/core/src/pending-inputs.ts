@@ -70,7 +70,7 @@ export class PendingInputs {
       id: this.newId(),
       mode,
       input,
-      paused: mode === "subagent" && this.paused,
+      paused: (mode === "subagent" || mode === "shell") && this.paused,
       createdAt: new Date().toISOString(),
     };
     this.entries.push(entry);
@@ -89,7 +89,7 @@ export class PendingInputs {
    */
   takeSteers(): PreparedInput[] {
     const taken = this.entries.filter(
-      (entry) => (entry.mode === "steer" || entry.mode === "subagent") && !entry.paused,
+      (entry) => (entry.mode === "steer" || entry.mode === "subagent" || entry.mode === "shell") && !entry.paused,
     );
     if (taken.length === 0) return [];
     for (const entry of taken) this.remove(entry);
@@ -103,7 +103,7 @@ export class PendingInputs {
     if (head === undefined) return undefined;
     // 已错过当前 Turn 的插话全部转排队，避免被接续 Turn 的安全点抢先消费。
     for (const entry of this.entries) {
-      if (!entry.paused && entry.mode !== "subagent") entry.mode = "queue";
+      if (!entry.paused && entry.mode !== "subagent" && entry.mode !== "shell") entry.mode = "queue";
     }
     this.remove(head);
     this.publish();
@@ -113,7 +113,7 @@ export class PendingInputs {
   update(id: string, patch: PendingInputPatch): PendingInputOutcome {
     const entry = this.entries.find((candidate) => candidate.id === id);
     if (entry === undefined) return "consumed";
-    if (entry.mode === "subagent") return "readonly";
+    if (entry.mode === "subagent" || entry.mode === "shell") return "readonly";
     // ADR-0076 §1：带执行方式的条目只能排队，不能转成插话
     if (patch.mode === "steer" && entry.input.workMode !== undefined) return "work_mode";
     if (entry.input.workMode !== undefined && patch.input?.text?.trim() === "") return "empty_task";
@@ -142,7 +142,7 @@ export class PendingInputs {
     this.paused = true;
     if (this.entries.length === 0) return;
     for (const entry of this.entries) {
-      if (entry.mode !== "subagent") entry.mode = "queue";
+      if (entry.mode !== "subagent" && entry.mode !== "shell") entry.mode = "queue";
       entry.paused = true;
     }
     this.publish();
@@ -152,9 +152,10 @@ export class PendingInputs {
   dropSubagents(keep: ReadonlySet<string>): void {
     const dropped = this.entries.filter(
       (entry) =>
-        entry.mode === "subagent" &&
-        entry.input.subagent !== undefined &&
-        !keep.has(entry.input.subagent.callId),
+        ((entry.mode === "subagent" && entry.input.subagent !== undefined &&
+          !keep.has(entry.input.subagent.callId)) ||
+         (entry.mode === "shell" && entry.input.backgroundShell !== undefined &&
+          !keep.has(entry.input.backgroundShell.callId))),
     );
     if (dropped.length === 0) return;
     for (const entry of dropped) this.remove(entry);

@@ -100,6 +100,8 @@ deliverContinuation() -> bool:
 
 后台子代理的结果（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §3）也是待发输入（`mode: "subagent"`）：Turn 运行中按插话在安全点写入 `message.user(steer: true, subagent)`；空闲时立即开新 Turn；处于暂停时追加为暂停条目、不唤起。一个 Turn 以 `done` 结束，或开始新一轮且待发列表中没有暂停条目时，即解除这种暂停追加。多个同时收束按收束顺序在同一安全点取出。Agent Loop 不认识它，差异只在 `message.user.subagent` 字段。
 
+后台命令结果（[ADR-0083](../decisions/ADR-0083-background-shell.md)）复用同一待发路径，以 `mode: "shell"` 暂存，消费后写 `message.user.backgroundShell`。运行中安全点送达、空闲开新 Turn、暂停只追加，均与后台子代理一致；结果条目可撤回不可编辑。目标续跑仍只等待后台子代理，后台命令不进入该计数。Turn 中断不停止命令，会话关闭终止且不交付。
+
 未暂停的残留插话在没有进行中的 Turn 时也按排队消费，顺序与其他待发输入一致；运行循环完成清理并释放忙状态后立即复查列表，空闲时编辑和恢复也触发消费，详见 ADR-0070 §3。
 
 Runtime 通过 `TurnDeps.deferIdle` 接管 Turn 结束后的 `idle` 发布：先完成技能/MCP 等会话级收尾、释放提交锁，再检查待发队列；没有后续 Turn 时才发布 `runtime.status(idle)`。`turn.completed` 表示日志中的 Turn 已完成，不能单独用作立即提交的就绪信号。未注入此回调的独立 `runTurn` 仍在自身收尾后发布 idle。

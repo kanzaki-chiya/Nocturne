@@ -359,6 +359,7 @@ async function main(): Promise<number> {
     config: runtimeConfig,
     interactive: !args.print,
     subagent: { background: !args.print },
+    shell: { background: !args.print },
     permissions: { autoApproveAsk: args.yes },
     mcp: createMcpConnector(),
     externalAgents: createAcpConnector(platform),

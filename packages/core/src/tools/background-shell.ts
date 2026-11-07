@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Platform, ShellSpawnOptions, SpawnedProcess } from "../platform/index.js";
 import { truncateModelContent } from "./budget.js";
+import { effectiveEvents, type DurableEvent, type PreparedInput, type BackgroundShellResult } from "../protocol/index.js";
 
 export interface BackgroundShellTask {
   taskId: string;
@@ -14,6 +15,14 @@ export interface BackgroundShellTask {
   exitCode?: number;
   signal?: string;
 }
+export function shellResultInput(meta: BackgroundShellResult, text: string): PreparedInput {
+  return {
+    backgroundShell: meta,
+    content: [{ type: "text", text: `<shell-result id="${meta.taskId}" status="${meta.status}" exit="${meta.exitCode ?? ""}">\n${text}\n</shell-result>` }],
+    appended: [],
+  };
+}
+
 interface Job {
   task: BackgroundShellTask;
   process: SpawnedProcess;
@@ -39,6 +48,7 @@ export class BackgroundShells {
     platform: Platform;
     sessionsDir: string;
     sessionId: string;
+    deliver?: (input: PreparedInput) => Promise<void>;
   }) {}
 
   async start(input: ShellStart): Promise<{ taskId: string; logPath: string; background: true }> {
@@ -93,7 +103,19 @@ export class BackgroundShells {
         task.status = "interrupted";
       }
       task.endedAt = new Date().toISOString();
+      if (!job.discard && this.options.deliver) {
+        const text = await this.options.platform.fs.readTextFile(task.logPath);
+        const unread = text.slice(job.cursor);
+        job.cursor = text.length;
+        const tail = unread.length > 28000 ? `${unread.slice(-28000)}\n${task.logPath}` : unread;
+        if (!job.discard) await this.options.deliver(shellResultInput({
+          taskId: task.taskId, callId: task.callId, status: task.status,
+          ...(task.exitCode !== undefined ? { exitCode: task.exitCode } : {}),
+          ...(task.signal !== undefined ? { signal: task.signal } : {}),
+        }, tail));
+      }
     })();
+    void job.settled.catch(() => undefined);
     return { taskId, logPath, background: true };
   }
 
@@ -134,6 +156,19 @@ export class BackgroundShells {
 
   async settled(): Promise<void> {
     await Promise.all([...this.jobs.values()].map((job) => job.settled));
+  }
+
+  recover(log: readonly DurableEvent[], afterSeq = 0): PreparedInput[] {
+    const events = effectiveEvents(log);
+    const delivered = new Set(events.flatMap((event) =>
+      event.type === "message.user" && event.payload.backgroundShell ? [event.payload.backgroundShell.callId] : []));
+    return events.flatMap((event) => {
+      if (event.seq <= afterSeq || event.type !== "tool.completed" || event.payload.name !== "shell" || delivered.has(event.payload.callId)) return [];
+      const output = event.payload.output as { background?: unknown; taskId?: unknown; logPath?: unknown } | undefined;
+      if (output?.background !== true || typeof output.taskId !== "string") return [];
+      return [shellResultInput({ taskId: output.taskId, callId: event.payload.callId, status: "interrupted" },
+        typeof output.logPath === "string" ? output.logPath : "")];
+    });
   }
 
   private require(id: string): Job {

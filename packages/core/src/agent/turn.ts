@@ -5,7 +5,7 @@
  * - 每个 message.assistant.toolCalls 中的 callId 恰好一个 tool.completed
  * - 持久化失败（session_failed）：立即停止，不再尝试写入（3.6）
  */
-import type { SubagentResult } from "../protocol/events.js";
+import type { BackgroundShellResult, SubagentResult } from "../protocol/events.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -109,6 +109,7 @@ export async function runTurn(
   files?: FileAttachment[],
   subagent?: SubagentResult,
   workMode?: WorkModeSnapshot,
+  backgroundShell?: BackgroundShellResult,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -173,6 +174,7 @@ export async function runTurn(
         ...(item.skill !== undefined ? { skill: item.skill } : {}),
         ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
         ...(item.subagent !== undefined ? { subagent: item.subagent } : {}),
+        ...(item.backgroundShell !== undefined ? { backgroundShell: item.backgroundShell } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
         steer: true,
       },
@@ -391,6 +393,7 @@ export async function runTurn(
         ...(attachments?.length ? { attachments } : {}),
         ...(files?.length ? { files } : {}),
         ...(subagent !== undefined ? { subagent } : {}),
+        ...(backgroundShell !== undefined ? { backgroundShell } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),

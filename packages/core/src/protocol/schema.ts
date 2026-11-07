@@ -261,6 +261,11 @@ const payloadSchemas = {
     files: z.array(fileAttachmentSchema).optional(),
     fileRefs: z.array(fileRefSchema).optional(),
     skill: z.object({ name: z.string(), body: z.string() }).optional(),
+    backgroundShell: z.object({
+      taskId: z.string(), callId: z.string(),
+      status: z.enum(["exited", "timeout", "killed", "interrupted"]),
+      exitCode: z.number().int().optional(), signal: z.string().optional(),
+    }).optional(),
     subagent: z
       .object({
         childSessionId: z.string(),
