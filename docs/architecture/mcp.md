@@ -186,6 +186,8 @@ Windows 桌面外壳将随附驱动路径经 `NOCTURNE_COMPUTER_USE_BOOTSTRAP` �
 
 启动主体按驱动的 `launch_path`、`path`、`aumid`、含 `!` 的 `bundle_id`、`name`、普通 `bundle_id` 优先级取目标。异步解析时只读查询 `list_apps`：名称去 `.exe` 后按不区分大小写的精确/最短前缀匹配安装索引，打包结果从 AUMID 提取包族名；显式 AppsFolder 路径按完整值匹配。已解析到 Windows/System32 的 notepad、calc、mspaint 转发 stub，且索引含对应已安装包时，也统一到包族名。自定义路径不套系统 stub 规则，普通 exe 保持小写文件名；不改实际启动入参，不缓存安装索引。索引不可用或未知第三方转发器仍可能无法在启动前获得最终身份。此过程只解析主体，是否询问由权限层判定。
 
+打包应用的显示名在常驻 PowerShell 辅助进程中按包族名读取 `Get-AppxPackageManifest` 的 `Properties.DisplayName`，`ms-resource:` 用包完整名与资源 URI 经 `SHLoadIndirectString` 解析本地化字符串；启动、直接 PID 与 ApplicationFrameHost 子进程解析共用此函数，不使用 exe 的英文 FileDescription 或安装索引名称覆盖。资源不可用时不缓存失败名称，保留身份供显示回退。普通程序使用 `FileDescription`，为空时取去掉 `.exe` 的文件名。名称缓存按身份（不区分大小写）保存一份，PID/创建时间/窗口缓存不重复保存名称。
+
 首次剪贴板写入先备份文本，通用 `ToolDefinition.finishTurn` 在所有 Turn 出口运行；当前剪贴板仍等于该 Turn 最后写入值时才恢复。共享连接序列化驱动调用，所有调用结果（包括无法核对的结果）只返回一次，工具说明要求先观察再决定下一步。图片沿通用附件管线返回。
 
 ## 8. 与 Core 的接线

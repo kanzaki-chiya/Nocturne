@@ -200,6 +200,7 @@ export function createComputerSource(options: ComputerOptions) {
   const resolveApplication =
     options.resolveApplication ?? ((target, opts) => helper.resolve(target, opts));
   const appCache = new Map<string, { evidence: ApplicationEvidence; identity: string }>();
+  const appNames = new Map<string, string>();
   const frameHostPids = new Set<string>();
   const iconCache = new Map<string, string>();
   const serialized = <T>(work: () => Promise<T>): Promise<T> => {
@@ -345,24 +346,51 @@ export function createComputerSource(options: ComputerOptions) {
         : `pid:${pidKey}`;
       if (cacheKey !== undefined) {
         const hit = appCache.get(cacheKey);
-        if (hit) return hit;
+        if (hit)
+          return {
+            ...hit,
+            evidence: { ...hit.evidence, name: appNames.get(hit.identity.toLowerCase()) },
+          };
       }
       const evidence = await resolveApplication(app, { includeIcon: false }).catch(() => undefined);
       const identity = evidence === undefined ? undefined : applicationIdentity(evidence);
+      const { name, ...cachedEvidence } = evidence ?? {};
+      if (identity !== undefined && name && !appNames.has(identity.toLowerCase()))
+        appNames.set(identity.toLowerCase(), name);
       const exeName = evidence?.exePath?.replaceAll("\\", "/").split("/").at(-1)?.toLowerCase();
       if (exeName === "applicationframehost.exe") {
         frameHostPids.add(pidKey);
         if (app.windowId !== undefined && evidence !== undefined && identity !== undefined) {
-          appCache.set(`window:${pidKey}:${app.windowId}`, { evidence, identity });
+          appCache.set(`window:${pidKey}:${app.windowId}`, { evidence: cachedEvidence, identity });
         }
       } else if (evidence !== undefined && identity !== undefined) {
-        appCache.set(`pid:${pidKey}`, { evidence, identity });
+        appCache.set(`pid:${pidKey}`, { evidence: cachedEvidence, identity });
       }
-      return { evidence, identity };
+      return {
+        evidence:
+          evidence === undefined
+            ? undefined
+            : {
+                ...evidence,
+                name: identity === undefined ? name : appNames.get(identity.toLowerCase()),
+              },
+        identity,
+      };
     }
     const evidence = await resolveApplication(app, { includeIcon: false }).catch(() => undefined);
     const identity = evidence === undefined ? undefined : applicationIdentity(evidence);
-    return { evidence, identity };
+    if (identity !== undefined && evidence?.name && !appNames.has(identity.toLowerCase()))
+      appNames.set(identity.toLowerCase(), evidence.name);
+    return {
+      evidence:
+        evidence === undefined
+          ? undefined
+          : {
+              ...evidence,
+              name: identity === undefined ? evidence.name : appNames.get(identity.toLowerCase()),
+            },
+      identity,
+    };
   }
   async function resolveIcon(
     app: ApplicationTarget,
@@ -449,11 +477,12 @@ export function createComputerSource(options: ComputerOptions) {
     );
     const packageFamilyName = matched === undefined ? undefined : family(matched);
     if (packageFamilyName === undefined) return resolved;
+    const packaged = await resolveCached({ identity: String(matched?.launch_path) });
     return {
       evidence: {
         ...resolved.evidence,
         packageFamilyName,
-        ...(typeof matched?.name === "string" ? { name: matched.name } : {}),
+        name: packaged.evidence?.name,
       },
       identity: packageFamilyName,
     };
@@ -683,6 +712,7 @@ export function createComputerSource(options: ComputerOptions) {
     tokens.clear();
     snapshots.clear();
     appCache.clear();
+    appNames.clear();
     frameHostPids.clear();
     state = { ...state, state: "stopped", active: undefined };
     emitStatus();

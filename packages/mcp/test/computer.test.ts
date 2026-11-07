@@ -43,15 +43,21 @@ function make() {
           ? { exePath: "C:/Office/EXCEL.EXE", name: "Excel" }
           : target.pid === 86512
             ? { packageFamilyName: "Microsoft.WindowsNotepad_8wekyb3d8bbwe", name: "Notepad" }
-            : target.identity?.toLowerCase() === "notepad.exe"
-              ? { exePath: "C:/Windows/System32/notepad.exe", name: "notepad" }
-              : target.identity?.toLowerCase() === "calc.exe"
-                ? { exePath: "C:/Windows/System32/calc.exe", name: "calc" }
-                : target.identity?.toLowerCase() === "mspaint.exe"
-                  ? { exePath: "C:/Windows/System32/mspaint.exe", name: "mspaint" }
-                  : target.identity !== undefined && /^[a-z]:[\\/].*\.exe$/iu.test(target.identity)
-                    ? { exePath: target.identity }
-                    : undefined,
+            : target.identity?.startsWith("shell:appsFolder\\Microsoft.WindowsNotepad_")
+              ? {
+                  packageFamilyName: "Microsoft.WindowsNotepad_8wekyb3d8bbwe",
+                  name: "Windows 记事本",
+                }
+              : target.identity?.toLowerCase() === "notepad.exe"
+                ? { exePath: "C:/Windows/System32/notepad.exe", name: "notepad" }
+                : target.identity?.toLowerCase() === "calc.exe"
+                  ? { exePath: "C:/Windows/System32/calc.exe", name: "calc" }
+                  : target.identity?.toLowerCase() === "mspaint.exe"
+                    ? { exePath: "C:/Windows/System32/mspaint.exe", name: "mspaint" }
+                    : target.identity !== undefined &&
+                        /^[a-z]:[\\/].*\.exe$/iu.test(target.identity)
+                      ? { exePath: target.identity }
+                      : undefined,
   });
   sources.push(source);
   const connector = createMcpConnector({ runtimeServers: [source] });
@@ -267,6 +273,23 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
     const ordinary = launch.permissionSubjects({ name: "C:/Office/EXCEL.EXE" }, scope)[0];
     if (!ordinary) throw new Error("缺少主体");
     expect((await launch.resolveSubject(ordinary, scope)).target).toBe("excel.exe");
+  });
+  it("同一包族名在启动和窗口两条路径使用同一份本地化显示名", async () => {
+    const { source, open } = make();
+    await source.setEnabled(true);
+    const session = await open("localized");
+    const scope = { cwd, workspaceRoot: cwd, paths: platform.paths };
+    const launch = tool(session, "launch_app");
+    const window = tool(session, "get_window_state");
+    const launchRequest = launch.permissionSubjects({ name: "notepad.exe" }, scope)[0];
+    const windowRequest = window.permissionSubjects({ pid: 86512, window_id: 78711444 }, scope)[0];
+    if (!launchRequest || !windowRequest || !launch.resolveSubject || !window.resolveSubject)
+      throw new Error("缺少解析器");
+    const before = await launch.resolveSubject(launchRequest, scope);
+    const after = await window.resolveSubject(windowRequest, scope);
+    expect(before.app?.name).toBe("Windows 记事本");
+    expect(after.app?.name).toBe(before.app?.name);
+    expect((await launch.resolveSubject(launchRequest, scope)).app?.name).toBe(after.app?.name);
   });
   it.each([
     [{ name: "calc.exe" }, "Microsoft.WindowsCalculator_8wekyb3d8bbwe"],

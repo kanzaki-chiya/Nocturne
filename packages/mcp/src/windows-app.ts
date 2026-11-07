@@ -25,6 +25,11 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class NocturneApplicationQuery {
   [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("shlwapi.dll", CharSet=CharSet.Unicode)] static extern int SHLoadIndirectString(string source, StringBuilder output, uint size, IntPtr reserved);
+  public static string Localize(string source) {
+    var output = new StringBuilder(4096);
+    return SHLoadIndirectString(source, output, (uint)output.Capacity, IntPtr.Zero) == 0 ? output.ToString() : null;
+  }
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder value, ref int size);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackageFamilyName(IntPtr h, ref uint size, StringBuilder value);
@@ -66,6 +71,40 @@ public static class NocturneApplicationQuery {
 }
 '@
 $iconCache = @{}
+$nameCache = @{}
+function Get-ApplicationName([string]$exePath, [string]$family) {
+  $key = if ($family) { $family.ToLowerInvariant() } else { [IO.Path]::GetFileName($exePath).ToLowerInvariant() }
+  if ($nameCache.ContainsKey($key)) { return $nameCache[$key] }
+  $displayName = $null
+  if ($family) {
+    try {
+      $package = Get-AppxPackage | Where-Object { $_.PackageFamilyName -eq $family } | Select-Object -First 1
+      if ($package) {
+        $manifest = Get-AppxPackageManifest -Package $package
+        $displayName = [string]$manifest.Package.Properties.DisplayName
+        if ($displayName -like 'ms-resource:*') {
+          $resource = $displayName.Substring(12)
+          $packageName = [string]$manifest.Package.Identity.Name
+          $uris = if ($resource.StartsWith('//')) { @('ms-resource:' + $resource) }
+            elseif ($resource.StartsWith('/')) { @('ms-resource://' + $packageName + $resource) }
+            else { @(('ms-resource://' + $packageName + '/resources/' + $resource), ('ms-resource://' + $packageName + '/' + $resource)) }
+          $displayName = $null
+          foreach ($uri in $uris) {
+            $displayName = [NocturneApplicationQuery]::Localize('@{' + $package.PackageFullName + '?' + $uri + '}')
+            if ($displayName) { break }
+          }
+        }
+      }
+    } catch {}
+    if (-not $displayName) { return $null }
+  } else {
+    try { $displayName = [Diagnostics.FileVersionInfo]::GetVersionInfo($exePath).FileDescription } catch {}
+    if (-not $displayName) { $displayName = [IO.Path]::GetFileNameWithoutExtension($exePath) }
+    if ($displayName -match '\.exe$') { $displayName = $displayName.Substring(0, $displayName.Length - 4) }
+  }
+  $nameCache[$key] = $displayName
+  return $displayName
+}
 $drawingLoaded = $false
 function Get-IconBase64([string]$exePath) {
   if (-not $exePath) { return $null }
@@ -125,13 +164,13 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
       if ($identity -like 'shell:appsFolder\*') {
         $family = ($identity -replace '^shell:appsFolder\\','').Split('!')[0]
         $package = Get-AppxPackage | Where-Object { $_.PackageFamilyName -eq $family } | Select-Object -First 1
-        if ($package) { Send-Json @{ id = $reqId; packageFamilyName = $family; name = $package.Name } }
+        if ($package) { Send-Json @{ id = $reqId; packageFamilyName = $family; name = (Get-ApplicationName '' $family) } }
         else { Send-Json @{ id = $reqId } }
         continue
       }
       $command = Get-Command -Name $identity -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
       if ($command) {
-        $res = @{ id = $reqId; exePath = $command.Source; name = [IO.Path]::GetFileNameWithoutExtension($command.Source) }
+        $res = @{ id = $reqId; exePath = $command.Source; name = (Get-ApplicationName $command.Source '') }
         if ($query.includeIcon -eq $true) { $res.icon = Get-IconBase64 $command.Source }
         Send-Json $res
       } else {
@@ -163,17 +202,13 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
       }
       $packageFamily = $candidates[0][1]
       $childExe = $candidates[0][0]
-      $displayName = [Diagnostics.FileVersionInfo]::GetVersionInfo($childExe).FileDescription
-      if (-not $displayName) { $displayName = [IO.Path]::GetFileNameWithoutExtension($childExe) }
-      if ($displayName -match '\.exe$') { $displayName = $displayName.Substring(0, $displayName.Length - 4) }
+      $displayName = Get-ApplicationName $childExe $packageFamily
       $res = @{ id = $reqId; exePath = $exePath; packageFamilyName = $packageFamily; name = $displayName; creationTime = $hostCreationTime }
       if ($query.includeIcon -eq $true) { $res.icon = Get-IconBase64 $childExe }
       Send-Json $res
       continue
     }
-    $displayName = [Diagnostics.FileVersionInfo]::GetVersionInfo($exePath).FileDescription
-    if (-not $displayName) { $displayName = [IO.Path]::GetFileNameWithoutExtension($exePath) }
-    if ($displayName -match '\.exe$') { $displayName = $displayName.Substring(0, $displayName.Length - 4) }
+    $displayName = Get-ApplicationName $exePath $packageFamily
     $res = @{ id = $reqId; exePath = $exePath; packageFamilyName = $packageFamily; name = $displayName; creationTime = $hostCreationTime }
     if ($query.includeIcon -eq $true) { $res.icon = Get-IconBase64 $exePath }
     Send-Json $res
