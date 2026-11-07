@@ -512,6 +512,7 @@ export interface RpcComputer {
   setCursor(cursor: boolean): Promise<ComputerDescription>;
   restart(): Promise<ComputerDescription>;
   runningApps(): Promise<RpcResult<"computer.runningApps">>;
+  appIcon(app: RpcParams<"computer.appIcon">): Promise<RpcResult<"computer.appIcon">>;
   setPermission(input: RpcParams<"computer.setPermission">): Promise<ComputerDescription>;
   onChanged(handler: (description: ComputerDescription) => void): () => void;
 }
@@ -1185,6 +1186,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       setCursor: (cursor) => call("computer.setCursor", { cursor }),
       restart: () => call("computer.restart", {}),
       runningApps: () => call("computer.runningApps", {}),
+      appIcon: (app) => call("computer.appIcon", app),
       setPermission: (input) => call("computer.setPermission", input),
       onChanged: (handler) => {
         const listeners =

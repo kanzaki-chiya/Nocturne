@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { PendingPermission } from "@nocturne/core/protocol";
-import type { RpcSession } from "@nocturne/rpc/client";
+import type { RpcComputer, RpcSession } from "@nocturne/rpc/client";
+import { appIconResolver } from "../src/app-icon";
 import { PermissionCard } from "../src/Conversation";
 
 afterEach(cleanup);
@@ -53,4 +54,56 @@ it.each([
   fireEvent.keyDown(window, { key });
   await waitFor(() => expect(send).toHaveBeenCalledWith("app-request", reply));
   expect(screen.queryByRole("textbox")).toBeNull();
+});
+function mountWithComputer(identity: string, icon: string | null) {
+  const computer = {
+    appIcon: vi.fn<RpcComputer["appIcon"]>().mockResolvedValue(icon),
+    runningApps: vi.fn<RpcComputer["runningApps"]>().mockResolvedValue([]),
+  };
+  const pending: PendingPermission = {
+    requestId: `icon-${identity}`,
+    callId: `icon-${identity}`,
+    toolName: "mcp__computer__get_window_state",
+    subjects: [
+      {
+        kind: "app",
+        target: identity,
+        app: { name: "Visio", pid: 42, windowId: 4200, identity },
+      },
+    ],
+    reason: "按权限规则需要确认",
+    options: ["allow_session", "allow_always", "deny"],
+  };
+  const view = render(
+    <PermissionCard
+      pending={pending}
+      session={{ respondPermission: vi.fn() } as unknown as RpcSession}
+      cwd="Z:/project"
+      resolveAppIcon={appIconResolver(computer)}
+    />,
+  );
+  return { computer, view };
+}
+it("确认卡用主体自己的 app 调 computer.appIcon，参数带 pid 和 windowId，不列运行中软件", async () => {
+  const { computer, view } = mountWithComputer("visio.exe", "VklTSU8=");
+  await waitFor(() =>
+    expect(computer.appIcon).toHaveBeenCalledWith({
+      pid: 42,
+      windowId: 4200,
+      identity: "visio.exe",
+    }),
+  );
+  expect(computer.runningApps).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(view.container.querySelector(".app-ic img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,VklTSU8=",
+    ),
+  );
+});
+it("取不到图标时确认卡仍显示首字母", async () => {
+  const { computer, view } = mountWithComputer("visio-noicon.exe", null);
+  await waitFor(() => expect(computer.appIcon).toHaveBeenCalled());
+  expect(computer.runningApps).not.toHaveBeenCalled();
+  expect(view.container.querySelector(".app-ic img")).toBeNull();
+  expect(view.container.querySelector(".app-ic")?.textContent).toBe("V");
 });

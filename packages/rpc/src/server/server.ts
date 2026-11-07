@@ -27,6 +27,7 @@ import {
   startProviderLogin,
   updateSetupProvider,
   type AddProviderInput,
+  type ApplicationTarget,
   type ContentBlock,
   type CreateSessionOptions,
   type JevEndpoint,
@@ -2049,6 +2050,21 @@ class Connection implements HubPeer {
       "computer.runningApps": () => {
         this.runtime();
         return this.hub.computer()?.runningApps() ?? Promise.resolve([]);
+      },
+      "computer.appIcon": async (p) => {
+        this.runtime();
+        const pid = optInt(p, "pid");
+        const windowId = optInt(p, "windowId");
+        const identity = optString(p, "identity");
+        const computer = this.hub.computer();
+        const state = computer?.getState();
+        if (computer === undefined || !state?.enabled || state.state !== "running") return null;
+        const app: ApplicationTarget = {
+          ...(pid !== undefined ? { pid } : {}),
+          ...(windowId !== undefined ? { windowId } : {}),
+          ...(identity !== undefined ? { identity } : {}),
+        };
+        return (await computer.resolveIcon(app, identity).catch(() => undefined)) ?? null;
       },
       "computer.setPermission": async (p) => {
         this.runtime();

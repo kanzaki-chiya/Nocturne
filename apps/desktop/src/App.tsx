@@ -23,6 +23,7 @@ import type {
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
 import { applyAppearance, applyTheme } from "./appearance";
+import { appIconResolver } from "./app-icon";
 import { ArchivePage } from "./ArchivePage";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
 import { replyLinkOpener } from "./external-url";
@@ -2413,6 +2414,7 @@ function SessionPane({
       }),
     [client, session.id],
   );
+  const resolveAppIcon = useMemo(() => appIconResolver(client.computer), [client]);
   const isPlain = plainKey !== null && projectKey(workspace) === plainKey;
   const currentCwd = view.currentCwd ?? workspace;
   const head = abbreviateHome(workspace, home);
@@ -2455,10 +2457,7 @@ function SessionPane({
         onViewChanges={onViewChanges}
         subagentLinks={subagentLinks}
         fileLinks={fileLinks}
-        resolveAppIcon={async (target) => {
-          const apps = await client.computer.runningApps().catch(() => []);
-          return apps.find((a) => a.identity === target)?.icon;
-        }}
+        resolveAppIcon={resolveAppIcon}
       />
       {view.pendingQuestion ? (
         <div className="question-dock">

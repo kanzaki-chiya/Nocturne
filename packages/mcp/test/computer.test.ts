@@ -286,6 +286,29 @@ describe("ADR-0082 内置电脑来源（假 MCP）", () => {
     expect(uwp2.target).toBe("Microsoft.WindowsStore_8wekyb3d8bbwe");
     expect(calls).toHaveLength(4);
   });
+  it("确认卡取图标：同一 identity 第二次取图标不再调用底层解析", async () => {
+    const calls: { pid?: number | undefined; includeIcon?: boolean | undefined }[] = [];
+    const source = createComputerSource({
+      platform,
+      cwd,
+      verifyPackage: async () => undefined,
+      home: platform.paths.join(cwd, "dist/test-computer"),
+      executable: process.execPath,
+      args: [fileURLToPath(new URL("./fake-computer.mjs", import.meta.url))],
+      resolveApplication: async (target, opts) => {
+        calls.push({ pid: target.pid, includeIcon: opts?.includeIcon });
+        return { exePath: "C:/Office/EXCEL.EXE", name: "Excel", icon: "RVhDRUw=" };
+      },
+    });
+    sources.push(source);
+    const app = { pid: 20, windowId: 100, identity: "excel.exe" };
+    expect(await source.resolveIcon(app, app.identity)).toBe("RVhDRUw=");
+    expect(calls).toEqual([{ pid: 20, includeIcon: true }]);
+    expect(await source.resolveIcon({ pid: 21, identity: "excel.exe" }, "excel.exe")).toBe(
+      "RVhDRUw=",
+    );
+    expect(calls).toHaveLength(1);
+  });
   it("剪贴板首次写入前备份，Turn 结束恢复；外部修改后不恢复", async () => {
     const { source, open } = make();
     await source.setEnabled(true);

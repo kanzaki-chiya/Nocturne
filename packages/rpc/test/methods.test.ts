@@ -620,6 +620,7 @@ describe("公开 API 与 RPC 方法集合一致", () => {
       "computer.setCursor",
       "computer.restart",
       "computer.runningApps",
+      "computer.appIcon",
       "computer.setPermission",
       "runtime.initialize",
       "runtime.shutdown",

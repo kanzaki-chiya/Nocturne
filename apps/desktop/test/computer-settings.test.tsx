@@ -43,6 +43,7 @@ function mount() {
         { identity: "notepad.exe", name: "记事本", pid: 30 },
       ]),
     ),
+    appIcon: vi.fn(() => Promise.resolve(null)),
     setPermission: vi.fn(() => Promise.resolve(description)),
     onChanged: vi.fn(() => () => undefined),
   } satisfies RpcComputer;

@@ -282,6 +282,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `computer.setCursor` | `{ cursor: boolean }` → `ComputerDescription` |
 | `computer.restart` | `{}` → `ComputerDescription` |
 | `computer.runningApps` | `{}` → `ApplicationTarget[]` |
+| `computer.appIcon` | `{ pid?: number, windowId?: number, identity?: string }` → `string \| null`（单个软件的 base64 PNG 图标，权限确认卡按 `app` 主体自身的 pid / windowId / identity 取，按 identity 缓存；电脑操控关闭、驱动未运行或取不到时为 `null`，不报错） |
 | `computer.setPermission` | `{ identity: string, action: PermissionAction \| null, app?: { name?, icon? } }` → `ComputerDescription` |
 | `computer.changed`（服务端→客户端） | `ComputerDescription` |
 

@@ -91,6 +91,7 @@ import {
   type TurnChanges,
   type TurnChangeDiff,
   type Grant,
+  type ApplicationTarget,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
@@ -208,7 +209,7 @@ export interface ConversationProps {
         preface?: string | undefined;
       }
     | undefined;
-  resolveAppIcon?: ((target: string) => Promise<string | undefined>) | undefined;
+  resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -2904,7 +2905,7 @@ export function PermissionCard({
   cwd: string;
   shellKind?: string | undefined;
   hidePersistentPermissions?: boolean;
-  resolveAppIcon?: ((target: string) => Promise<string | undefined>) | undefined;
+  resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
 }) {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [icons, setIcons] = useState<ReadonlyMap<string, string>>(() => new Map(appIconCache));
@@ -2916,8 +2917,8 @@ export function PermissionCard({
         appIconCache.set(s.target, s.app.icon);
         continue;
       }
-      if (appIconCache.has(s.target) || !resolveAppIcon) continue;
-      void resolveAppIcon(s.target).then((icon) => {
+      if (appIconCache.has(s.target) || !resolveAppIcon || !s.app) continue;
+      void resolveAppIcon(s.app).then((icon) => {
         if (!alive || !icon) return;
         appIconCache.set(s.target, icon);
         setIcons(new Map(appIconCache));

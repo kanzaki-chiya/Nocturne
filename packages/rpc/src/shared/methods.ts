@@ -301,6 +301,15 @@ export interface RpcMethods {
   "computer.setCursor": { params: { cursor: boolean }; result: ComputerDescription };
   "computer.restart": { params: Record<string, never>; result: ComputerDescription };
   "computer.runningApps": { params: Record<string, never>; result: ApplicationTarget[] };
+  /** 确认卡取单个软件图标：base64 PNG；电脑操控关闭、驱动未运行或取不到时为 null */
+  "computer.appIcon": {
+    params: {
+      pid?: number | undefined;
+      windowId?: number | undefined;
+      identity?: string | undefined;
+    };
+    result: string | null;
+  };
   "computer.setPermission": {
     params: {
       identity: string;
@@ -851,6 +860,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "computer.setCursor": true,
   "computer.restart": true,
   "computer.runningApps": true,
+  "computer.appIcon": true,
   "computer.setPermission": true,
   "grants.workspaces": true,
   "grants.list": true,

@@ -29,6 +29,7 @@ export interface RpcRuntimeHandle {
         setCursor(cursor: boolean): Promise<void>;
         restart(): Promise<void>;
         runningApps(): Promise<ApplicationTarget[]>;
+        resolveIcon(app: ApplicationTarget, identity?: string): Promise<string | undefined>;
         subscribe(listener: () => void): () => void;
       }
     | undefined;

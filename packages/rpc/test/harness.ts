@@ -27,7 +27,12 @@ import {
   type RpcClient,
   type LineTransport,
 } from "@nocturne/rpc/client";
-import { createRpcServer, type RpcDiagnostic, type RpcServer } from "@nocturne/rpc/server";
+import {
+  createRpcServer,
+  type RpcDiagnostic,
+  type RpcRuntimeHandle,
+  type RpcServer,
+} from "@nocturne/rpc/server";
 
 const roots: string[] = [];
 
@@ -95,6 +100,8 @@ export interface HarnessOptions {
   /** 远程单条报文上限（测试缩小以触发 response_too_large） */
   remoteMessageLimit?: number;
   subagent?: RuntimeOptions["subagent"];
+  /** 注入假的电脑操控来源（computer.* 测试用） */
+  computer?: RpcRuntimeHandle["computer"];
 }
 
 /** 内存管道连接 server 与 client；不 initialize 时由测试自己握手 */
@@ -139,6 +146,7 @@ export async function connect(options: HarnessOptions = {}): Promise<Harness> {
       return {
         runtime: observed,
         sessionsDir,
+        ...(options.computer !== undefined ? { computer: options.computer } : {}),
         dispose: () => {
           disposed = true;
         },
