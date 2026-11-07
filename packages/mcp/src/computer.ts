@@ -57,6 +57,12 @@ const UNTARGETED = new Set([
   "get_agent_cursor_state",
   "set_agent_cursor_theme",
 ]);
+const INTERNAL_APPS = new Set([
+  "cua-driver.exe",
+  "cua-driver-uia.exe",
+  "cua-cursor-theme.exe",
+  "conhost.exe",
+]);
 const PREFIX = "mcp__computer__";
 export interface ComputerState {
   enabled: boolean;
@@ -577,25 +583,41 @@ export function createComputerSource(options: ComputerOptions) {
         subjects: [],
       } as unknown as ToolContext;
       const result = await serialized(() => call("list_windows", {}, ctx));
-      const windows = data(result).windows;
-      if (!Array.isArray(windows)) return [];
+      const windows = Array.isArray(data(result).windows)
+        ? (data(result).windows as unknown[])
+        : [];
+      const candidates = [...windows];
+      if (candidates.length < 2) {
+        const listed = await serialized(() => call("list_apps", {}, ctx));
+        const running = Array.isArray(data(listed).apps) ? (data(listed).apps as unknown[]) : [];
+        candidates.push(...running.slice(0, 8));
+      }
       const apps = new Map<string, ApplicationTarget>();
-      for (const value of windows) {
+      for (const value of candidates) {
         const item = record(value);
-        const pid = typeof item.pid === "number" ? item.pid : undefined;
+        const pid =
+          typeof item.pid === "number"
+            ? item.pid
+            : Array.isArray(item.pids) && typeof item.pids[0] === "number"
+              ? item.pids[0]
+              : undefined;
         const windowId = typeof item.window_id === "number" ? item.window_id : undefined;
         if (pid === undefined) continue;
         const info = await resolveApplication({ pid, windowId });
         if (!info) continue;
         const identity = applicationIdentity(info);
-        if (!identity || apps.has(identity)) continue;
+        if (!identity || INTERNAL_APPS.has(identity) || apps.has(identity)) continue;
+        const rawName =
+          typeof item.app_name === "string"
+            ? item.app_name
+            : typeof item.name === "string"
+              ? item.name
+              : identity;
         apps.set(identity, {
           ...info,
           pid,
           windowId,
-          name:
-            info.name ??
-            (typeof item.app_name === "string" ? item.app_name.replace(/\.exe$/iu, "") : identity),
+          name: info.name ?? rawName.replace(/\.exe$/iu, ""),
           identity,
         });
       }
