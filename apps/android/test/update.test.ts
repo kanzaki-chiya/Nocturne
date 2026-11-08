@@ -53,7 +53,11 @@ function fixture() {
   const defaultImpl = fetch.getMockImplementation();
   const wrappedFetch = ((url: unknown, init?: RequestInit) => {
     const m = typeof url === "string" ? /\/tags\/v(.+)$/.exec(url) : null;
-    if (m?.[1] && fetch.getMockImplementation() === defaultImpl && fetch.mock.results.length === calls) {
+    if (
+      m?.[1] &&
+      fetch.getMockImplementation() === defaultImpl &&
+      fetch.mock.results.length === calls
+    ) {
       return {
         ok: true,
         status: 200,
@@ -71,7 +75,12 @@ function fixture() {
     calls = fetch.mock.calls.length + 1;
     return fetch(url, init);
   }) as typeof globalThis.fetch;
-  const update = new AndroidUpdate({ version: "1.0.0", fetch: wrappedFetch, now: () => time, storage });
+  const update = new AndroidUpdate({
+    version: "1.0.0",
+    fetch: wrappedFetch,
+    now: () => time,
+    storage,
+  });
   return {
     update,
     fetch,
@@ -238,23 +247,26 @@ it.each([
       }),
     },
   ],
-] as const)("电脑版本确认不存在（%s）：不采用电脑版本，回退到比 App 新的 github 版本", async (_label, tagResponse) => {
-  const { update, fetch } = fixture();
-  await update.check(true);
-  expect(update.version).toBe("1.2.0");
-  fetch.mockResolvedValueOnce(tagResponse);
-  update.computer("2.0.0");
-  expect(update.version).toBe("1.2.0");
-  await new Promise((done) => setTimeout(done, 10));
-  expect(update.version).toBe("1.2.0");
-  const updateNoGithub = new AndroidUpdate({
-    version: "1.0.0",
-    fetch: vi.fn().mockResolvedValue(tagResponse),
-  });
-  updateNoGithub.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 10));
-  expect(updateNoGithub.version).toBeUndefined();
-});
+] as const)(
+  "电脑版本确认不存在（%s）：不采用电脑版本，回退到比 App 新的 github 版本",
+  async (_label, tagResponse) => {
+    const { update, fetch } = fixture();
+    await update.check(true);
+    expect(update.version).toBe("1.2.0");
+    fetch.mockResolvedValueOnce(tagResponse);
+    update.computer("2.0.0");
+    expect(update.version).toBe("1.2.0");
+    await new Promise((done) => setTimeout(done, 10));
+    expect(update.version).toBe("1.2.0");
+    const updateNoGithub = new AndroidUpdate({
+      version: "1.0.0",
+      fetch: vi.fn().mockResolvedValue(tagResponse),
+    });
+    updateNoGithub.computer("2.0.0");
+    await new Promise((done) => setTimeout(done, 10));
+    expect(updateNoGithub.version).toBeUndefined();
+  },
+);
 
 it.each([
   ["网络错误", () => Promise.reject(new Error("network"))],
@@ -269,20 +281,23 @@ it.each([
         json: () => Promise.reject(new SyntaxError("bad json")),
       }),
   ],
-] as const)("电脑版本无法确认（%s）：仍采用电脑版本，且下次 computer() 重新请求", async (_label, impl) => {
-  const fetch = vi.fn().mockImplementation(impl);
-  const update = new AndroidUpdate({ version: "1.0.0", fetch });
-  update.computer("2.0.0");
-  await vi.waitFor(() => {
-    expect(update.version).toBe("2.0.0");
-  });
-  expect(fetch).toHaveBeenCalledTimes(1);
-  update.computer("2.0.0");
-  await vi.waitFor(() => {
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(update.version).toBe("2.0.0");
-  });
-});
+] as const)(
+  "电脑版本无法确认（%s）：仍采用电脑版本，且下次 computer() 重新请求",
+  async (_label, impl) => {
+    const fetch = vi.fn().mockImplementation(impl);
+    const update = new AndroidUpdate({ version: "1.0.0", fetch });
+    update.computer("2.0.0");
+    await vi.waitFor(() => {
+      expect(update.version).toBe("2.0.0");
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    update.computer("2.0.0");
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(update.version).toBe("2.0.0");
+    });
+  },
+);
 
 it("电脑版本不比 App 新或不比已知 github 新时不发标签请求", async () => {
   const { update, fetch } = fixture();
