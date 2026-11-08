@@ -27,12 +27,22 @@ const mount = async (node: React.ReactNode) => {
 
 it("关于五种状态及系统下载", async () => {
   let resolve: (value: unknown) => void = () => undefined;
-  const fetch = vi.fn().mockImplementation(
-    () =>
-      new Promise((done) => {
-        resolve = done;
-      }),
-  );
+  const fetch = vi.fn().mockImplementation((url: unknown) => {
+    const m = typeof url === "string" ? /\/tags\/v(.+)$/.exec(url) : null;
+    if (m?.[1]) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          tag_name: `v${m[1]}`,
+          assets: [{ name: `nocturne-${m[1]}.apk` }],
+        }),
+      });
+    }
+    return new Promise((done) => {
+      resolve = done;
+    });
+  });
   const update = new AndroidUpdate({ version: "1.0.0", fetch });
   const openUrl = vi.fn().mockResolvedValue(undefined);
   await mount(<UpdateAbout update={update} version="1.0.0" host={{ ...shellHost, openUrl }} />);
@@ -65,7 +75,12 @@ it("关于五种状态及系统下载", async () => {
 });
 
 it("提示条关闭后更高版本重现，不兼容时没有版本不显示下载", async () => {
-  const update = new AndroidUpdate({ version: "1.0.0" });
+  const update = new AndroidUpdate({
+    version: "1.0.0",
+    fetch: (() => {
+      throw new Error("offline");
+    }) as unknown as typeof globalThis.fetch,
+  });
   update.computer("2.0.0");
   await mount(<UpdateNotice update={update} host={shellHost} />);
   expect(container.querySelector(".phone-status")?.textContent).toContain("新版本 2.0.0");

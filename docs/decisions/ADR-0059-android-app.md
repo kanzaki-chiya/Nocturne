@@ -55,7 +55,7 @@
 
 - Release 附带签名的 `nocturne-<version>.apk`，第一版不上架应用商店。
 - 签名密钥与桌面更新密钥一样由维护者离线保管，CI 通过 secrets 注入，不进仓库。
-- 不做 App 内安装；App 在设置页显示版本，启动与回前台自动检查 GitHub 最新 Release，成功后 24 小时内不重复检查，手动检查不受节流限制。另在每次连接时比较 `initialize.nocturneVersion`，取两个来源中比 App 新的最大正式三段版本；GitHub 来源必须有匹配的 APK 资产。首页提示可按版本关闭，下载交给系统浏览器。电脑与 App 的版本兼容沿用 RPC `protocolVersion` 检查；电脑协议较新时 App 提示「App 版本过旧」，已知新版本时附下载入口。
+- 不做 App 内安装；App 在设置页显示版本，启动与回前台自动检查 GitHub 最新 Release，成功后 24 小时内不重复检查，手动检查不受节流限制。另在每次连接时比较 `initialize.nocturneVersion`，取两个来源中比 App 新的最大正式三段版本；GitHub 来源必须有匹配的 APK 资产，电脑版本高于已知 GitHub 版本时也会按标签确认对应 Release 存在 APK（确认不存在则不提供下载，GitHub 不通等无法确认时仍可依据电脑版本下载）。首页提示可按版本关闭，下载交给系统浏览器。电脑与 App 的版本兼容沿用 RPC `protocolVersion` 检查；电脑协议较新时 App 提示「App 版本过旧」，已知新版本时附下载入口。
 
 ## 后果
 
@@ -82,7 +82,7 @@
 
 扫码改用 `com.journeyapps:zxing-android-embedded:4.3.0`（Apache-2.0），默认依赖 ZXing Core 3.4.1，默认支持 API 24+，本工程 minSdk 为 26；AAR 与 Core JAR 不含 `.so`。官方 Tauri barcode-scanner 插件依赖 `play-services-mlkit-barcode-scanning:18.1.0`，要求 Google Play 服务，与国内无谷歌服务的目标设备不符，因此不用该插件。独立竖屏 ScanActivity 只解 QR，无文字、音效或震动，结果经 AppHost 与 PhonePlatform 进入既有配对确认页。
 
-版本来源增加当前电脑的 `initialize.nocturneVersion`，不新增 RPC 字段或网络请求。GitHub 不通时仍可依据已连上电脑的版本下载；连接进入 `connecting` 时会先清空上一台电脑的版本，而真实 RPC 在协议不兼容时直接抛 `protocol_version_mismatch` 不返回 `InitializeResult`，此时下载按钮仅来自 GitHub 结果（没有 GitHub 结果则不显示按钮）。版本检查、节流、关闭记录和 UI 在 App 模块内，网页只保留可选挂载点，入口依赖图不引入 App。
+版本来源增加当前电脑的 `initialize.nocturneVersion`，不新增 RPC 字段。电脑版本比 App 与已知 GitHub 版本都新时，会请求 `releases/tags/v<version>` 确认对应 Release 有 APK（确认不存在时不提供下载；GitHub 不通、无法确认时仍可依据已连上电脑的版本下载）。连接进入 `connecting` 时会先清空上一台电脑的版本，而真实 RPC 在协议不兼容时直接抛 `protocol_version_mismatch` 不返回 `InitializeResult`，此时下载按钮仅来自 GitHub 结果（没有 GitHub 结果则不显示按钮）。版本检查、节流、关闭记录和 UI 在 App 模块内，网页只保留可选挂载点，入口依赖图不引入 App。
 
 拍照早已由 `PhoneComposer` 的 `capture="environment"` 与 Tauri 生成的 `RustWebChromeClient` 实现。本轮增加 CAMERA 声明并回归其未授权、授权和拒绝路径，不新增拍照功能。实测发现首次授权后原处理器缓存了授权前状态，且相机 Intent 缺少可见性查询；通过 App 的 WebChromeClient 委托层在授权完成后调用原处理器，并补充 IMAGE_CAPTURE 的 queries，修复首次授权后的拍照入口，不修改生成文件。验收范围与限制记录在交付报告中。
 
