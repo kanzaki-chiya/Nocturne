@@ -1,8 +1,8 @@
 # 安卓 App
 
-> 状态：外壳、后台保持连接、会话列表更新与第 2 轮本地通知已实现｜决策：[ADR-0059](../decisions/ADR-0059-android-app.md)｜实现：`apps/android`
+> 状态：外壳、后台保持连接、本地通知、扫码与版本检查已实现｜决策：[ADR-0059](../decisions/ADR-0059-android-app.md)｜实现：`apps/android`
 
-`apps/android` 是 Tauri 2 的安卓工程，把[手机网页](desktop.md#8-手机网页)随 APK 安装：WebView 只加载打包进 APK 的页面，页面代码不再由中继下发。界面、加密通道、RPC 客户端与会话视图全部复用 `apps/desktop/src/web`，App 只补平台差异。本轮含会话本地通知；仍不含扫码、拍照、正式签名与自动更新（第 3 轮）。
+`apps/android` 是 Tauri 2 的安卓工程，把[手机网页](desktop.md#8-手机网页)随 APK 安装：WebView 只加载打包进 APK 的页面，页面代码不再由中继下发。界面、加密通道、RPC 客户端与会话视图全部复用 `apps/desktop/src/web`，App 只补平台差异。App 含会话本地通知、原生扫码配对、版本检查与浏览器下载；拍照发送沿用网页文件输入。Release 流水线已有正式签名与 APK 附件，App 不自动安装更新。
 
 文件附件与自由回答附件复用网页实现（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：选择任意文件、粘贴／拖入文件、32 KiB 大段粘贴转卡片；发送前检查远程合计原始字节上限，超限保留草稿。对话文件卡片经 `readAttachment` 下载；WebView 下载受宿主沙箱限制时仍可查看名称与大小。
 
@@ -16,6 +16,8 @@
 | `src/main.tsx` | 入口：把 `PhoneApp` 与 `appPlatform(tauriHost)` 接起来，启动探针 |
 | `src/host.ts` | `AppHost`：与网页的 `WebHost` 并列的宿主接口，及经 Tauri 调 Kotlin 插件的实现 |
 | `src/platform.tsx` | `PhonePlatform` 实现：中继地址取自配对链接、信任说明、「后台保持连接」设置区块、「后台探针」页 |
+| `src/update.ts`、`src/update-ui.tsx` | 可注入 fetch、时钟与存储的双来源版本检查，以及关于行、首页提示条与不兼容下载入口 |
+| `src-tauri/gen/android/app/src/main/java/.../remote/ScanActivity.kt`、`DownloadUrls.kt`、`CameraPermissionClient.kt` | 无 Play 服务依赖的 QR 预览、浏览器下载地址白名单，以及拍照授权后重新进入原文件选择处理器 |
 | `src/background.ts` | 后台控制器：开关、前台服务启停、常驻通知文案、把连接状态交给探针 |
 | `src/probe.ts` | 探针日志与摘要、纯文本导出 |
 | `src-tauri/src/lib.rs` | Rust 外壳：窗口与导航锁 |
@@ -41,7 +43,9 @@ pnpm android:build:emulator   # 模拟器 debug APK（x86_64）
 pnpm android:dev              # 连着设备或模拟器的开发模式（Vite 热更新）
 ```
 
-Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`；本轮只做 debug 签名。
+Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`。模拟器命令为 `pnpm android:build:emulator` 与 `pnpm android:build:release:emulator`。
+
+本地验收可在单条命令的进程环境中设置 `ORG_GRADLE_PROJECT_nocturneVerification=true`：构建跳过正式签名配置的读取，application ID 附加 `.verification`，与已安装 App 的数据隔离；release 产物未签名，需用 SDK 的 debug keystore 和 apksigner 自签后安装，仅用于 R8 验收。该开关不用于发布，也不写入用户或系统环境。
 
 正式包：`pnpm android:build:release`，产物在 `.../apk/universal/release/app-universal-release.apk`。签名读 `src-tauri/gen/android/keystore.properties`（已被 gitignore，字段 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`）；没有这个文件时构建未签名包。发布时 `release.yml` 的 `android` 任务从 secrets 写入该文件，把 `nocturne-<version>.apk` 附到草稿，见 [workflow.md](../development/workflow.md#81-常规发布顺序)。
 
@@ -62,10 +66,22 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 手机身份 | WebView IndexedDB 里不可导出的 `CryptoKey` | 同左，在 App 私有数据里，不经 Kotlin |
 | 推送 | service worker + Web Push | 会话事件本地通知，不依赖 Web Push |
 | 后台 | 页面隐藏后连接被系统挂起，回前台再连 | 「后台保持连接」打开时由前台服务保活，WebView 继续持有通道与订阅 |
-| 外链 | 新标签打开 | 不打开：`on_navigation` 只允许 `http://tauri.localhost`（调试构建另允许开发服务器） |
+| 配对 | 打开或粘贴配对链接 | 扫码或粘贴，均经链接校验并进入确认页；拒绝相机权限后可打开系统设置 |
+| 版本检查 | 由中继下发网页 | GitHub 与当前电脑双来源，设置页手动检查，首页可关闭的新版本提示 |
+| 外链 | 新标签打开 | `on_navigation` 仍只允许 App 源；仅 APK 下载经 `open_url` 交给系统浏览器，原生只接受本仓库 Release 下载前缀下匹配版本的 HTTPS APK |
 | 能力边界 | 白名单 | 不变，App 不改 RPC 白名单 |
 
 共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件）、`onForeground`（回到前台）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。
+
+### 扫码、相机权限与更新
+
+扫码使用 ZXing Android Embedded 4.3.0（Apache-2.0，默认 API 24+；工程 minSdk 26），不依赖 Google Play 服务，不带原生 `.so`。`ScanActivity` 是竖屏全屏相机预览，只显示取景框与返回图标，只识别 QR，成功立即返回；取消静默，拒绝权限显示「没有相机权限」与「打开系统设置」。Manifest 声明 CAMERA 与 required=false 的 camera feature，按使用时申请。拍照继续由 `PhoneComposer` 文件输入和生成的 `RustWebChromeClient` 处理；App 的 `CameraPermissionClient` 在调用原处理器前完成 capture 授权，防止首次授权后仍用授权前的状态回退到选图页，拒绝时取消文件回调。Manifest 的 `queries` 声明 IMAGE_CAPTURE，供原处理器解析系统相机。生成文件保持原样。
+
+`update.ts` 只认正式 `x.y.z`；GitHub 标签可带 `v`，必须有 `nocturne-<version>.apk` 资产。每次成功 initialize 比较电脑的 `nocturneVersion`，无需额外请求；两个来源取比 APP_VERSION 新的较大值。启动与原生回前台检查 GitHub，成功结果与时间存手机本地，24 小时内不重复；失败静默且不记时间。手动检查绕过节流，设置 › 关于显示检查中、已是最新、下载或重试。首页提示按关闭版本记住，更高版本再显示；关于与不兼容状态的下载不受关闭影响。
+
+电脑协议较新时显示「App 版本过旧」，有已知正式新版本时提供下载；协议不匹配错误拿不到 initialize 结果时回退 GitHub 缓存。下载地址固定为 `https://github.com/kanzaki-chiya/Nocturne/releases/download/v<version>/nocturne-<version>.apk`，原生验证后用 ACTION_VIEW 交系统浏览器；不放宽 WebView 导航，不申请 REQUEST_INSTALL_PACKAGES。
+
+共享扩展点新增 `scanPairing`、`openAppSettings`、`initialized`、`versionMessage` 及更新 UI 挂载点；App 通过 `updateLifecycle` 管理启动、前台检查与退订，网页版入口不注入这些字段。
 
 ## 4. 后台保持连接
 

@@ -22,6 +22,8 @@
     "desktop:build": "pnpm build && node scripts/bundle-nctrn.mjs && node scripts/fetch-node.mjs && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && pnpm --dir apps/desktop exec tauri build",
     "android:dev": "pnpm --filter @nocturne/android android:dev",
     "android:build": "pnpm --filter @nocturne/android android:build",
+    "android:build:emulator": "pnpm --filter @nocturne/android android:build:emulator",
+    "android:build:release:emulator": "pnpm --filter @nocturne/android android:build:release:emulator",
     "android:build:release": "pnpm --filter @nocturne/android android:build:release",
     "release:build": "node scripts/release-build.mjs"
   },

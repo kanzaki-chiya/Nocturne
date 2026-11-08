@@ -168,6 +168,7 @@ export function PhoneApp({
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cameraDenied, setCameraDenied] = useState(false);
   const [installHint, setInstallHint] = useState(false);
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
@@ -298,6 +299,10 @@ export function PhoneApp({
           identity,
           host: target,
           changed,
+          ...(platform.initialized ? { initialized: platform.initialized.bind(platform) } : {}),
+          ...(platform.versionMessage
+            ? { versionMessage: platform.versionMessage.bind(platform) }
+            : {}),
           connected: async (client, relay) => {
             await sessions.connected(client);
             await storage.putHost({ ...target, lastConnectedAt: Date.now() });
@@ -498,43 +503,92 @@ export function PhoneApp({
   );
 
   const pairForm = (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        try {
-          if (platform.relay === "page") {
-            setOffer(parsePairingLink(link, location.origin));
-            setOfferOrigin(location.origin);
-          } else {
-            const target = parsePairingTarget(link);
-            setOffer(target.offer);
-            setOfferOrigin(target.origin);
+    <>
+      {platform.scanPairing && (
+        <>
+          <button
+            className="phone-primary phone-pair-button"
+            disabled={busy}
+            onClick={() => {
+              void operation(async () => {
+                const result = await platform.scanPairing?.();
+                if (!result) return;
+                setCameraDenied("denied" in result);
+                if ("denied" in result) {
+                  setError("没有相机权限");
+                  return;
+                }
+                if ("cancelled" in result) return;
+                try {
+                  const target = parsePairingTarget(result.text);
+                  setOffer(target.offer);
+                  setOfferOrigin(target.origin);
+                  setLink("");
+                } catch (cause) {
+                  setError(pairingError(cause));
+                }
+              });
+            }}
+          >
+            扫码
+          </button>
+          {cameraDenied && (
+            <button
+              className="phone-list-action"
+              onClick={() => {
+                void operation(async () => {
+                  await platform.openAppSettings?.();
+                });
+              }}
+            >
+              打开系统设置
+            </button>
+          )}
+        </>
+      )}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          try {
+            if (platform.relay === "page") {
+              setOffer(parsePairingLink(link, location.origin));
+              setOfferOrigin(location.origin);
+            } else {
+              const target = parsePairingTarget(link);
+              setOffer(target.offer);
+              setOfferOrigin(target.origin);
+            }
+            setLink("");
+            setError("");
+          } catch (cause) {
+            setError(pairingError(cause));
           }
-          setLink("");
-          setError("");
-        } catch (cause) {
-          setError(pairingError(cause));
-        }
-      }}
-    >
-      <label>
-        粘贴配对链接
-        <input
-          autoComplete="off"
-          spellCheck={false}
-          value={link}
-          onChange={(e) => {
-            setLink(e.target.value);
-          }}
-          placeholder={
-            platform.relay === "page" ? "https://…/#pair=… 或 pair=…" : "https://…/#pair=…"
+        }}
+      >
+        <label>
+          粘贴配对链接
+          <input
+            autoComplete="off"
+            spellCheck={false}
+            value={link}
+            onChange={(e) => {
+              setLink(e.target.value);
+            }}
+            placeholder={
+              platform.relay === "page" ? "https://…/#pair=… 或 pair=…" : "https://…/#pair=…"
+            }
+          />
+        </label>
+        <button
+          className={
+            platform.scanPairing ? "phone-pair-button phone-pair-secondary" : "phone-primary"
           }
-        />
-      </label>
-      <button className="phone-primary" disabled={!link.trim()}>
-        继续配对
-      </button>
-    </form>
+          disabled={!link.trim()}
+        >
+          继续配对
+        </button>
+      </form>
+    </>
   );
 
   const title = (() => {
@@ -917,7 +971,10 @@ export function PhoneApp({
           ))}
           {addingHost ? (
             <>
-              <p>在电脑的「设置 › 远程」选择「配对新手机」，扫码或复制链接粘贴到这里。</p>
+              <p>
+                {platform.pairHint ??
+                  "在电脑的「设置 › 远程」选择「配对新手机」，扫码或复制链接粘贴到这里。"}
+              </p>
               {pairForm}
             </>
           ) : (
@@ -1029,6 +1086,7 @@ export function PhoneApp({
         )}
         <section className="phone-section" aria-label="关于">
           <h3>关于</h3>
+          {platform.updateAbout?.()}
           <p>{platform.trustText ?? TRUST_TEXT}</p>
         </section>
       </section>
@@ -1043,6 +1101,7 @@ export function PhoneApp({
       : undefined;
   return (
     <main className="phone">
+      {platform.updateLifecycle?.()}
       <header
         className={`phone-header${homeHeader ? " home" : ""}${sessionHeader ? " session" : ""}`}
       >
@@ -1120,9 +1179,14 @@ export function PhoneApp({
       )}
       {connection && connection.state !== "online" && page.kind !== "settings" && (
         <aside className="phone-status" role="status">
-          {connection.message || "正在建立加密连接…"}
+          {connection.state === "incompatible" &&
+          connection.message === "App 版本过旧" &&
+          platform.incompatibleUpdate
+            ? platform.incompatibleUpdate()
+            : connection.message || "正在建立加密连接…"}
         </aside>
       )}
+      {homeHeader && connection?.state !== "incompatible" && platform.updateNotice?.()}
       {installHint && (
         <aside className="phone-status">
           请在 Safari

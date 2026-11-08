@@ -48,6 +48,15 @@ export interface PhonePlatform {
    * 中继地址只能从配对链接取得并随电脑保存。
    */
   relay: "page" | "link";
+  scanPairing?(): Promise<{ text: string } | { cancelled: true } | { denied: true }>;
+  openAppSettings?(): Promise<void>;
+  initialized?(version: string): void;
+  versionMessage?(protocolVersion: number): string;
+  /** App 更新界面与生命周期；网页入口不注入。 */
+  updateLifecycle?(): ReactNode;
+  updateAbout?(): ReactNode;
+  updateNotice?(): ReactNode;
+  incompatibleUpdate?(): ReactNode;
   /** 页面不可见（App 在后台）时是否继续保持连接 */
   keepConnected?: boolean;
   observer?: PhoneObserver;

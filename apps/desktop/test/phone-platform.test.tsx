@@ -59,6 +59,61 @@ async function mount(ui: React.ReactElement): Promise<HTMLElement> {
   return container;
 }
 
+it("网页没有扫码按钮", async () => {
+  const container = await mount(<PhoneApp storage={memoryStorage()} />);
+  expect([...container.querySelectorAll("button")].some((b) => b.textContent === "扫码")).toBe(
+    false,
+  );
+});
+
+it.each(["text", "invalid", "cancelled", "denied"] as const)("App 扫码 %s", async (result) => {
+  const identity = await generateIdentity({ extractable: true });
+  const offer = await createPairingOffer(identity, "AAAAAAAAAAAAAAAAAAAAAA");
+  const scanPairing = vi
+    .fn()
+    .mockResolvedValue(
+      result === "text"
+        ? { text: `https://relay.example/#${offer.fragment}` }
+        : result === "invalid"
+          ? { text: "invalid" }
+          : { [result]: true },
+    );
+  const openAppSettings = vi.fn();
+  const container = await mount(
+    <PhoneApp
+      storage={memoryStorage()}
+      platform={{ relay: "link", scanPairing, openAppSettings }}
+    />,
+  );
+  const scan = [...container.querySelectorAll("button")].find((b) => b.textContent === "扫码");
+  expect(scan).toBeDefined();
+  await act(async () => {
+    scan?.click();
+  });
+  expect(scanPairing).toHaveBeenCalledOnce();
+  if (result === "text") expect(container.textContent).toContain("确认这台手机的名称");
+  if (result === "invalid")
+    expect(container.querySelector('[role="alert"]')?.textContent).toBeTruthy();
+  if (result === "cancelled") expect(container.querySelector('[role="alert"]')).toBeNull();
+  if (result === "denied") {
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("没有相机权限");
+    const settings = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "打开系统设置",
+    );
+    expect(settings).toBeDefined();
+    await act(async () => {
+      settings?.click();
+    });
+    expect(openAppSettings).toHaveBeenCalledOnce();
+    scanPairing.mockResolvedValue({ cancelled: true });
+    await act(async () => {
+      scan?.click();
+    });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).not.toContain("打开系统设置");
+  }
+});
+
 it("App 配对链接必须带中继地址，只接受 https 与本机 http://127.0.0.1", async () => {
   const host = await generateIdentity({ extractable: true });
   const offer = await createPairingOffer(host, "AAAAAAAAAAAAAAAAAAAAAA");
@@ -124,6 +179,43 @@ it("App 平台：用电脑记录里的中继地址连接，没有推送区块，
   expect(container.textContent).toContain("后台区块");
   expect(container.textContent).toContain("安装包信任说明");
   expect(container.querySelector('[role="switch"][aria-label="推送通知"]')).toBeNull();
+});
+
+it("更新提示只挂首页，关于行挂设置，添加电脑也提供扫码", async () => {
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "computer",
+    hostPub: "pub",
+    name: "电脑",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  const container = await mount(
+    <PhoneApp
+      storage={storage}
+      platform={{
+        relay: "link",
+        scanPairing: async () => ({ cancelled: true }),
+        updateNotice: () => <span>新版本 2.0.0</span>,
+        updateAbout: () => <span>版本 1.0.0</span>,
+      }}
+    />,
+  );
+  expect(container.textContent).toContain("新版本 2.0.0");
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('[aria-label="设置"]')?.click();
+  });
+  expect(container.textContent).not.toContain("新版本 2.0.0");
+  expect(container.querySelector('[aria-label="关于"]')?.textContent).toContain("版本 1.0.0");
+  const add = [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === "添加电脑",
+  );
+  await act(async () => {
+    add?.click();
+  });
+  expect(
+    [...container.querySelectorAll("button")].some((button) => button.textContent === "扫码"),
+  ).toBe(true);
 });
 
 it("网页平台仍用页面源连接，推送区块照常", async () => {

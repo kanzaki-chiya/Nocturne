@@ -706,7 +706,11 @@ it("切换电脑（clear 后连新电脑）后才返回的旧 listSessions 不�
   second.client.close();
 });
 
-it.each([0, 2])("RPC initialize 版本 %i 不兼容停止且正确提示", async (version) => {
+it.each([
+  [0, false],
+  [2, false],
+  [2, true],
+] as const)("RPC initialize 版本 %i App=%s 不兼容停止且正确提示", async (version, app) => {
   const identity = await generateIdentity({ extractable: false });
   const [transport] = createMemoryFramePair();
   const [server, client] = createMemoryTransportPair();
@@ -744,10 +748,11 @@ it.each([0, 2])("RPC initialize 版本 %i 不兼容停止且正确提示", async
     connect: () => Promise.resolve(relay),
     channel: () =>
       Promise.resolve({ ...client, closeReason: undefined, flush: () => Promise.resolve() }),
+    ...(app ? { versionMessage: () => "App 版本过旧" } : {}),
   });
   c.start();
   await vi.waitFor(() => expect(c.state).toBe("incompatible"));
-  expect(c.message).toBe(versionMessage(version));
+  expect(c.message).toBe(app ? "App 版本过旧" : versionMessage(version));
   c.stop();
   server.close();
 });

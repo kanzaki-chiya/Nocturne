@@ -24,6 +24,11 @@ class TextArgs {
 }
 
 @InvokeArg
+class UrlArgs {
+  var url: String = ""
+}
+
+@InvokeArg
 class SettingsArgs {
   var target: String = "app"
 }
@@ -151,6 +156,31 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
   fun move_to_back(invoke: Invoke) {
     activity.moveTaskToBack(true)
     invoke.resolve(JSObject())
+  }
+
+  @Command
+  fun scan_qr(invoke: Invoke) {
+    activity.runOnUiThread {
+      val main = activity as? MainActivity
+      if (main == null) { invoke.reject("scan_qr unavailable"); return@runOnUiThread }
+      main.scanQr { text, denied ->
+        invoke.resolve(when {
+          denied -> JSObject().put("denied", true)
+          text != null -> JSObject().put("text", text)
+          else -> JSObject().put("cancelled", true)
+        })
+      }
+    }
+  }
+
+  @Command
+  fun open_url(invoke: Invoke) {
+    val url = invoke.parseArgs(UrlArgs::class.java).url
+    if (!DownloadUrls.allowed(url)) { invoke.reject("Invalid download URL"); return }
+    try {
+      activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+      invoke.resolve(JSObject())
+    } catch (_: Exception) { invoke.reject("Unable to open download") }
   }
 
   private fun appDetails() =

@@ -2,7 +2,7 @@
 
 手机远程功能允许你通过手机浏览器查看和操控电脑上正在运行的 Nocturne 桌面端会话，包括发消息、插话与排队、切换模型与权限预设，以及审批桌面端等待确认的工具调用。
 
-安卓手机可以改用 App：在 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 `nocturne-{{version}}.apk`，配对步骤相同，配对时粘贴配对链接。
+安卓手机可以改用 App：在 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 `nocturne-{{version}}.apk`，配对时扫描电脑上的二维码或粘贴配对链接，再确认这台手机的名称。设置 › 关于可检查更新，新版本会在首页提示，下载由系统浏览器打开维护者的 Release APK。
 
 ## 登记中继服务器
 

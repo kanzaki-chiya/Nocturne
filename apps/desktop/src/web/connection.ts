@@ -47,6 +47,8 @@ export class PhoneConnection {
       disconnected: (reason: string) => void;
       connect?: typeof connectDeviceRelay;
       channel?: typeof connectChannel;
+      initialized?: (version: string) => void;
+      versionMessage?: (protocolVersion: number) => string;
     },
   ) {}
   start(): void {
@@ -148,10 +150,15 @@ export class PhoneConnection {
       const client = createRpcClient(channel, { clientName: "nocturne-phone", interactive: true });
       this.client = client;
       const initialized = await client.initialize();
+      if (generation !== this.generation) return;
       this.sessionsDir = initialized.sessionsDir;
+      this.options.initialized?.(initialized.nocturneVersion);
       if (initialized.protocolVersion !== RPC_PROTOCOL_VERSION) {
         this.stop();
-        this.set("incompatible", versionMessage(initialized.protocolVersion));
+        this.set(
+          "incompatible",
+          (this.options.versionMessage ?? versionMessage)(initialized.protocolVersion),
+        );
         return;
       }
       await this.options.connected(client, relay);
@@ -168,7 +175,12 @@ export class PhoneConnection {
         // 当前 RPC 错误只给中文 message，不含结构化服务端版本；不更改协议。
         const version = /服务端\s+(\d+)/.exec(error.message)?.[1];
         this.stop();
-        this.set("incompatible", versionMessage(Number(version ?? RPC_PROTOCOL_VERSION + 1)));
+        this.set(
+          "incompatible",
+          (this.options.versionMessage ?? versionMessage)(
+            Number(version ?? RPC_PROTOCOL_VERSION + 1),
+          ),
+        );
       } else {
         this.retry(
           undefined,

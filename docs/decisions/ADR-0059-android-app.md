@@ -41,7 +41,7 @@
 
 ### 4. 配对与中继
 
-- App 内扫码（Tauri barcode-scanner 插件）或粘贴配对链接；中继地址从链接取得，同一个 App 可以连任何中继，**发布版不内置中继地址**（ADR-0052 第 5 节不变）。
+- App 内用 ZXing Android Embedded 原生扫码或粘贴配对链接；扫码结果经过与粘贴相同的链接校验并进入确认页，不跳过确认。中继地址从链接取得，同一个 App 可以连任何中继，**发布版不内置中继地址**（ADR-0052 第 5 节不变）。
 - WebView 的源是固定的 App 源（如 `http://tauri.localhost`）。中继的 WebSocket 入口当前拒绝 `Origin` 不等于 `publicOrigin` 的升级请求，需要放行这个固定的 App 源；签名转录里的 `origin` 仍用中继的 `publicOrigin`（客户端签名用所连中继，与页面源无关）。
 - 手机身份密钥仍是 WebView IndexedDB 中不可导出的 `CryptoKey`，保存在 App 私有数据里；卸载 App 即作废，需要在电脑上移除设备。
 
@@ -49,13 +49,13 @@
 
 - 远程能力边界不变：仍由电脑后台的方法白名单限制（ADR-0052 第 3 节及 2026-10-15 修订）。
 - 页面代码随 App 签名安装，中继无法替换，**消除了 ADR-0052 第 4 节「网页被篡改」这个信任点**；对 App 用户，信任边界只剩「App 安装包来自维护者的 Release」。
-- App 不申请位置、通讯录等无关权限；需要的权限：网络、前台服务、通知、相机（扫码与拍照）。
+- App 不申请位置、通讯录等无关权限；需要的权限：网络、前台服务、通知、相机（扫码与已有的拍照输入）。相机按使用时申请，硬件声明为可选；拒绝扫码后提供系统应用设置入口。不申请安装包权限，下载交给系统浏览器。
 
 ### 6. 分发
 
 - Release 附带签名的 `nocturne-<version>.apk`，第一版不上架应用商店。
 - 签名密钥与桌面更新密钥一样由维护者离线保管，CI 通过 secrets 注入，不进仓库。
-- 第一版不做 App 内自动更新；App 在设置页显示版本，并可检查 GitHub 最新 Release 提示下载。电脑与 App 的版本兼容沿用 RPC `protocolVersion` 检查。
+- 不做 App 内安装；App 在设置页显示版本，启动与回前台自动检查 GitHub 最新 Release，成功后 24 小时内不重复检查，手动检查不受节流限制。另在每次连接时比较 `initialize.nocturneVersion`，取两个来源中比 App 新的最大正式三段版本；GitHub 来源必须有匹配的 APK 资产。首页提示可按版本关闭，下载交给系统浏览器。电脑与 App 的版本兼容沿用 RPC `protocolVersion` 检查；电脑协议较新时 App 提示「App 版本过旧」，已知新版本时附下载入口。
 
 ## 后果
 
@@ -76,11 +76,19 @@
 
 1. **探针与骨架**：Tauri 2 安卓工程跑起现有手机网页（App 源放行、配对、会话可用）；前台服务加常驻通知；真机测量后台 30/60 分钟的事件到达、重连与耗电，并写进本 ADR 修订。探针结论决定后续是否沿用第 2 节。
 2. **通知与「在看」**：`AppHost` 本地通知、复用 `notify.ts`、点通知进入会话、后台连接开关、电池优化与自启动引导。
-3. **扫码、拍照与分发**：扫码配对、相机拍照发送；APK 签名、Release 附 APK、版本检查；用户文档。
+3. **扫码、拍照回归与分发**：ZXing 原生扫码配对；拍照发送沿用已有文件输入与 WebChromeClient，只回归相机授权；APK 签名与 Release 附 APK 已提前实现，剩余为 GitHub / 当前电脑双来源版本检查、系统浏览器下载与用户文档。
+
+## 修订：2026-11-08 第 3 轮扫码与版本检查
+
+扫码改用 `com.journeyapps:zxing-android-embedded:4.3.0`（Apache-2.0），默认依赖 ZXing Core 3.4.1，默认支持 API 24+，本工程 minSdk 为 26；AAR 与 Core JAR 不含 `.so`。官方 Tauri barcode-scanner 插件依赖 `play-services-mlkit-barcode-scanning:18.1.0`，要求 Google Play 服务，与国内无谷歌服务的目标设备不符，因此不用该插件。独立竖屏 ScanActivity 只解 QR，无文字、音效或震动，结果经 AppHost 与 PhonePlatform 进入既有配对确认页。
+
+版本来源增加当前电脑的 `initialize.nocturneVersion`，不新增 RPC 字段或网络请求。GitHub 不通时仍可依据电脑版本下载；协议不兼容且 initialize 没有成功返回时使用已缓存的 GitHub 结果。版本检查、节流、关闭记录和 UI 在 App 模块内，网页只保留可选挂载点，入口依赖图不引入 App。
+
+拍照早已由 `PhoneComposer` 的 `capture="environment"` 与 Tauri 生成的 `RustWebChromeClient` 实现。本轮增加 CAMERA 声明并回归其未授权、授权和拒绝路径，不新增拍照功能。实测发现首次授权后原处理器缓存了授权前状态，且相机 Intent 缺少可见性查询；通过 App 的 WebChromeClient 委托层在授权完成后调用原处理器，并补充 IMAGE_CAPTURE 的 queries，修复首次授权后的拍照入口，不修改生成文件。验收范围与限制记录在交付报告中。
 
 ## 修订：2026-11-08 Release 附 APK
 
-只有本机手动构建时，手机包落后后台近 10 个版本，碰到新增的权限选项整页白屏。第 3 轮的分发部分提前做：`release.yml` 新增 `android` 任务，用 secrets 里的密钥签名，把 `nocturne-<version>.apk` 附到草稿；密钥未配置时跳过并写进说明。扫码、拍照与版本检查仍按第 3 轮。debug 包与正式包签名不同，从 debug 包换到正式包要先卸载，需要重新配对。
+只有本机手动构建时，手机包落后后台近 10 个版本，碰到新增的权限选项整页白屏。第 3 轮的分发部分提前做：`release.yml` 新增 `android` 任务，用 secrets 里的密钥签名，把 `nocturne-<version>.apk` 附到草稿；密钥未配置时跳过并写进说明。扫码、已有拍照的权限回归与版本检查仍按第 3 轮。debug 包与正式包签名不同，从 debug 包换到正式包要先卸载，需要重新配对。
 
 ## 修订：第 8 轮补丁（会话列表保持最新）
 

@@ -9,7 +9,9 @@ use tauri::{
 };
 
 /// Kotlin `BackgroundPlugin` 暴露的命令；其他名字一律拒绝。
-const COMMANDS: [&str; 13] = [
+const COMMANDS: [&str; 15] = [
+    "scan_qr",
+    "open_url",
     "start",
     "update",
     "stop",

@@ -32,6 +32,8 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@xterm/addon-fit` | 0.11.0 | MIT |
 | `@xterm/addon-unicode11` | 0.9.0 | MIT |
 
+安卓原生扫码使用 [ZXing Android Embedded](https://github.com/journeyapps/zxing-android-embedded/tree/v4.3.0) 4.3.0 与 ZXing Core 3.4.1，均为 Apache-2.0。库的版权与许可证保留在各自发行包中；实现使用公开 API，不复制库源码。该路径不依赖 Google Play 服务，AAR / JAR 不含原生 `.so`。
+
 桌面端第 2 步复用 `marked` **18.0.7**（MIT；2026-07-21 发布，采用时已满 7 天）解析 Markdown token，由 React 元素渲染；不使用其 HTML 输出，不渲染原始 HTML。
 
 桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载。`@codemirror/language-data` 6.5.2 及它引入的 `@codemirror/lang-*`、`@codemirror/legacy-modes`、对应 `@lezer/*` 解析器均为 MIT，与 GPL-3.0-only 兼容；语言包通过目录的 `load()` 按需加载。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。

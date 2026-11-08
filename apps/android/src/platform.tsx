@@ -6,13 +6,16 @@ import { BACK_EVENT, PAUSE_EVENT, TARGET_EVENT } from "./host";
 import { LocalNotifications, DONE_THRESHOLD_CHOICES, saveNotifyPrefs } from "./notifications";
 import { parseNativeLog, ProbeLog, summarize } from "./probe";
 import { version } from "../package.json";
+import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
+import { versionMessage } from "../../desktop/src/web/connection";
+import { AndroidUpdate } from "./update";
+import { UpdateAbout, UpdateLifecycle, UpdateNotice } from "./update-ui";
 
 /** 信任边界：页面随安装包，不再由中继下发（ADR-0059 第 5 节） */
 export const APP_TRUST_TEXT =
   "中继只转发密文，看不到会话内容。App 的页面代码随安装包签名，中继无法替换；你需要信任的是安装包来自维护者的 Release。远程访问相当于在手机上执行代码，请妥善保管手机并及时在电脑上移除丢失的设备。";
 
-export const APP_PAIR_HINT =
-  "在电脑的「设置 › 远程」选择「配对新手机」，复制配对链接，粘贴到下面。链接里带着中继地址，同一个 App 可以连任何中继。";
+export const APP_PAIR_HINT = "在电脑的「设置 › 远程」选择「配对新手机」";
 
 export const APP_VERSION = version;
 
@@ -320,6 +323,7 @@ export function appPlatform(
   changed: () => void = () => undefined,
 ): AppPlatform {
   const controller = new Background(host, probe, changed);
+  const update = new AndroidUpdate({ version: APP_VERSION });
   const notifications = new LocalNotifications(host);
   let foreground = false;
   let lifecycleRevision = 0;
@@ -345,11 +349,26 @@ export function appPlatform(
   };
   return {
     relay: "link",
+    scanPairing: () => host.scanQr(),
+    openAppSettings: () => host.openSettings("app"),
+    initialized: (version) => {
+      update.computer(version);
+    },
+    versionMessage: (protocol) =>
+      protocol > RPC_PROTOCOL_VERSION ? "App 版本过旧" : versionMessage(protocol),
+    updateLifecycle: () => <UpdateLifecycle update={update} />,
+    updateAbout: () => <UpdateAbout update={update} host={host} version={APP_VERSION} />,
+    updateNotice: () => <UpdateNotice update={update} host={host} />,
+    incompatibleUpdate: () => <UpdateNotice update={update} host={host} incompatible />,
     get keepConnected() {
       return controller.enabled;
     },
     observer: {
       ...controller.observer,
+      state: (host, state, message) => {
+        if (state === "connecting") update.computer(undefined);
+        controller.observer.state?.(host, state, message);
+      },
       sessionEvent: (hostId, sessionId, event, live, session, watching, turnStartedAt) => {
         notifications.event(hostId, sessionId, event, live, session, watching, turnStartedAt);
       },

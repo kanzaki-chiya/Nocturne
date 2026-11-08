@@ -11,6 +11,37 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
 
 class MainActivity : TauriActivity() {
+  private var scanResult: ((String?, Boolean) -> Unit)? = null
+  private val scanLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+    val callback = scanResult
+    scanResult = null
+    callback?.invoke(if (result.resultCode == RESULT_OK) result.data?.getStringExtra("text") else null, false)
+  }
+  private val cameraPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
+    if (granted) launchScanner()
+    else {
+      val callback = scanResult
+      scanResult = null
+      callback?.invoke(null, true)
+    }
+  }
+
+  fun scanQr(callback: (String?, Boolean) -> Unit) {
+    if (scanResult != null) { callback(null, false); return }
+    scanResult = callback
+    if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) launchScanner()
+    else cameraPermission.launch(android.Manifest.permission.CAMERA)
+  }
+
+  private fun launchScanner() {
+    try { scanLauncher.launch(Intent(this, ScanActivity::class.java)) }
+    catch (_: Exception) {
+      val callback = scanResult
+      scanResult = null
+      callback?.invoke(null, false)
+    }
+  }
+
   private var pendingTarget: Pair<String, String>? = null
   private var foreground = false
   fun isActivityForeground(): Boolean = foreground
@@ -71,6 +102,7 @@ class MainActivity : TauriActivity() {
     // wry 在 setWebView 之后才 setWebViewClient；排到主线程队列后面再包装，才能包住它的 client
     webView.post {
       webView.webViewClient = GuardedWebViewClient(webView.webViewClient, ::rendererGone)
+      webView.webChromeClient?.let { webView.webChromeClient = CameraPermissionClient(this, it) }
     }
   }
 

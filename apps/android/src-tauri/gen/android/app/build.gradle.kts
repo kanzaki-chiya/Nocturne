@@ -7,6 +7,9 @@ plugins {
     id("rust")
 }
 
+// 本地 R8 验收只产出未签名包，随后使用 SDK debug keystore 自签。
+val verificationBuild = providers.gradleProperty("nocturneVerification").orNull == "true"
+
 val tauriProperties = Properties().apply {
     val propFile = file("tauri.properties")
     if (propFile.exists()) {
@@ -20,6 +23,7 @@ android {
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "io.github.kanzaki_chiya.nocturne.remote"
+        if (verificationBuild) applicationIdSuffix = ".verification"
         minSdk = 26
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
@@ -28,7 +32,7 @@ android {
     signingConfigs {
         create("release") {
             val keystorePropertiesFile = rootProject.file("keystore.properties")
-            if (keystorePropertiesFile.exists()) {
+            if (!verificationBuild && keystorePropertiesFile.exists()) {
                 val keystoreProperties = Properties().apply {
                     keystorePropertiesFile.inputStream().use { load(it) }
                 }
@@ -53,7 +57,7 @@ android {
             }
         }
         getByName("release") {
-            if (rootProject.file("keystore.properties").exists()) {
+            if (!verificationBuild && rootProject.file("keystore.properties").exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
             optimization {
@@ -87,6 +91,7 @@ rust {
 }
 
 dependencies {
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

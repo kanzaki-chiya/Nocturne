@@ -24,6 +24,8 @@ export interface AppHost {
   updateService(text: string): Promise<void>;
   stopService(): Promise<void>;
   openSettings(target: SettingsTarget): Promise<void>;
+  scanQr(): Promise<{ text: string } | { cancelled: true } | { denied: true }>;
+  openUrl(url: string): Promise<void>;
   /** 原生一侧的探针记录（前台服务启停、Activity 前后台、渲染进程回收），每行 `毫秒时间戳\t事件` */
   nativeLog(): Promise<string>;
   clearNativeLog(): Promise<void>;
@@ -57,6 +59,8 @@ export const shellHost: AppHost = {
   updateService: () => Promise.resolve(),
   stopService: () => Promise.resolve(),
   openSettings: () => Promise.reject(new Error("此版本不能打开系统设置")),
+  scanQr: () => Promise.reject(new Error("scan_qr unavailable")),
+  openUrl: () => Promise.reject(new Error("open_url unavailable")),
   nativeLog: () => Promise.resolve(""),
   clearNativeLog: () => Promise.resolve(),
   notificationStatus: () => Promise.resolve({ enabled: false }),
@@ -73,6 +77,10 @@ function call<T>(command: string, payload?: Record<string, unknown>): Promise<T>
 }
 
 export const tauriHost: AppHost = {
+  scanQr: () => call("scan_qr"),
+  openUrl: async (url) => {
+    await call("open_url", { url });
+  },
   backgroundStatus: async () => {
     const state = await call<{ running: boolean; ignoringBatteryOptimizations: boolean }>("status");
     return { supported: true, ...state };
