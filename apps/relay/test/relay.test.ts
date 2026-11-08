@@ -323,8 +323,9 @@ describe("relay", () => {
     await new Promise((done) => setTimeout(done, 30));
     const bad = new WebSocket(`${f.origin.replace("http", "ws")}/v1/pair?slot=${expired.slot}`);
     expect(await closeCode(bad)).toBe(4008);
-    const fresh = await f.host.openPairingSlot();
-    const ws = new WebSocket(`${f.origin.replace("http", "ws")}/v1/pair?slot=${fresh.slot}`);
+    const live = await hostFixture({ pairLifetimeMs: 30 });
+    const fresh = await live.host.openPairingSlot();
+    const ws = new WebSocket(`${live.origin.replace("http", "ws")}/v1/pair?slot=${fresh.slot}`);
     expect(await closeCode(ws)).toBe(1000);
   });
   it("配对超过 4 KiB 被关闭", async () => {
