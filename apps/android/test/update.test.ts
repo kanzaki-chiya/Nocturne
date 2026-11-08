@@ -32,49 +32,23 @@ function fixture() {
       data.set(key, value);
     },
   };
-  let calls = 0;
-  const fetch = vi.fn().mockImplementation((url: unknown) => {
-    const m = typeof url === "string" ? /\/tags\/v(.+)$/.exec(url) : null;
-    if (m?.[1]) {
-      return {
-        ok: true,
-        status: 200,
-        json: () => ({
-          tag_name: `v${m[1]}`,
-          assets: [{ name: `nocturne-${m[1]}.apk` }],
-        }),
-      };
-    }
-    return Promise.resolve({
-      ok: true,
-      json: async () => ({ tag_name: "v1.2.0", assets: [{ name: "nocturne-1.2.0.apk" }] }),
-    });
+  const fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ tag_name: "v1.2.0", assets: [{ name: "nocturne-1.2.0.apk" }] }),
   });
-  const defaultImpl = fetch.getMockImplementation();
-  const wrappedFetch = ((url: unknown, init?: RequestInit) => {
-    const m = typeof url === "string" ? /\/tags\/v(.+)$/.exec(url) : null;
-    if (
-      m?.[1] &&
-      fetch.getMockImplementation() === defaultImpl &&
-      fetch.mock.results.length === calls
-    ) {
-      return {
-        ok: true,
-        status: 200,
-        json: () => ({
-          tag_name: `v${m[1]}`,
-          assets: [{ name: `nocturne-${m[1]}.apk` }],
-        }),
-      } as unknown as Promise<Response>;
-    }
-    if (m?.[1] && fetch.getMockImplementation() !== defaultImpl && fetch.mock.calls.length === 3) {
-      calls = fetch.mock.calls.length + 1;
-      fetch(url, init);
-      throw new Error("offline");
-    }
-    calls = fetch.mock.calls.length + 1;
-    return fetch(url, init);
-  }) as typeof globalThis.fetch;
+  const tagFetch = vi.fn().mockImplementation(async (url: string) => {
+    const version = url.slice(url.lastIndexOf("/v") + 2);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        tag_name: `v${version}`,
+        assets: [{ name: `nocturne-${version}.apk` }],
+      }),
+    };
+  });
+  const wrappedFetch: typeof globalThis.fetch = async (url, init) =>
+    String(url).includes("/tags/") ? tagFetch(String(url), init) : fetch(url, init);
   const update = new AndroidUpdate({
     version: "1.0.0",
     fetch: wrappedFetch,
@@ -84,6 +58,8 @@ function fixture() {
   return {
     update,
     fetch,
+    tagFetch,
+    wrappedFetch,
     storage,
     advance: () => {
       time += 86400000;
@@ -91,16 +67,18 @@ function fixture() {
   };
 }
 
-it("两个来源均需更新，取较大的版本，电脑比较无需网络", async () => {
+it("两个来源均需更新，电脑版本确认 APK 后取较大的版本", async () => {
   const { update, fetch } = fixture();
   update.computer("0.9.0");
   expect(update.version).toBeUndefined();
   update.computer("1.1.0");
+  await new Promise((done) => setTimeout(done, 0));
   expect(update.version).toBe("1.1.0");
   expect(fetch).not.toHaveBeenCalled();
   await update.check(true);
   expect(update.version).toBe("1.2.0");
   update.computer("2.0.0");
+  await new Promise((done) => setTimeout(done, 0));
   expect(update.version).toBe("2.0.0");
   update.computer("1.0.0");
   expect(update.version).toBe("1.2.0");
@@ -165,18 +143,20 @@ it("失败不记时间，自动失败静默，电脑来源仍有效", async () =
   await update.check();
   expect(fetch).toHaveBeenCalledTimes(3);
   update.computer("2.0.0");
+  await new Promise((done) => setTimeout(done, 0));
   expect(update.version).toBe("2.0.0");
 });
 
 it("关闭按版本记住，更高版本恢复提示", async () => {
-  const { update, fetch, storage } = fixture();
+  const { update, wrappedFetch, storage } = fixture();
   await update.check(true);
   expect(update.notice).toBe("1.2.0");
   update.dismiss();
   expect(update.notice).toBeUndefined();
-  const restored = new AndroidUpdate({ version: "1.0.0", fetch, storage });
+  const restored = new AndroidUpdate({ version: "1.0.0", fetch: wrappedFetch, storage });
   expect(restored.notice).toBeUndefined();
   restored.computer("1.3.0");
+  await new Promise((done) => setTimeout(done, 0));
   expect(restored.notice).toBe("1.3.0");
   expect(restored.url("1.3.0")).toBe(
     "https://github.com/kanzaki-chiya/Nocturne/releases/download/v1.3.0/nocturne-1.3.0.apk",
@@ -250,10 +230,10 @@ it.each([
 ] as const)(
   "电脑版本确认不存在（%s）：不采用电脑版本，回退到比 App 新的 github 版本",
   async (_label, tagResponse) => {
-    const { update, fetch } = fixture();
+    const { update, tagFetch } = fixture();
     await update.check(true);
     expect(update.version).toBe("1.2.0");
-    fetch.mockResolvedValueOnce(tagResponse);
+    tagFetch.mockResolvedValueOnce(tagResponse);
     update.computer("2.0.0");
     expect(update.version).toBe("1.2.0");
     await new Promise((done) => setTimeout(done, 10));
@@ -361,6 +341,101 @@ it("确认存在后不再请求；确认不存在后 1h 内不请求、1h 后重
   });
   expect(fetch).toHaveBeenCalledTimes(3);
   expect(data.size).toBe(0);
+});
+
+it("missing 记录过期后连续 computer() 只发一个标签请求", async () => {
+  let time = 1000;
+  let resolveTag: (value: unknown) => void = () => undefined;
+  const fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 });
+  const update = new AndroidUpdate({ version: "1.0.0", fetch, now: () => time });
+  update.computer("2.0.0");
+  await new Promise((done) => setTimeout(done, 10));
+  expect(update.version).toBeUndefined();
+  time += 3600000;
+  fetch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveTag = resolve;
+      }),
+  );
+  update.computer("2.0.0");
+  update.computer("2.0.0");
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(update.version).toBeUndefined();
+  resolveTag({
+    ok: true,
+    status: 200,
+    json: async () => ({ tag_name: "v2.0.0", assets: [{ name: "nocturne-2.0.0.apk" }] }),
+  });
+  await vi.waitFor(() => expect(update.version).toBe("2.0.0"));
+});
+
+it("missing 记录手动重新确认时连续 check(true) 只发一个标签请求", async () => {
+  let resolveTag: (value: unknown) => void = () => undefined;
+  const tagFetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 });
+  const latestFetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ tag_name: "v1.0.0", assets: [] }) });
+  const fetch = vi.fn((url: unknown) =>
+    String(url).endsWith("/latest") ? latestFetch() : tagFetch(),
+  );
+  const update = new AndroidUpdate({ version: "1.0.0", fetch });
+  update.computer("2.0.0");
+  await new Promise((done) => setTimeout(done, 10));
+  expect(update.version).toBeUndefined();
+  tagFetch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveTag = resolve;
+      }),
+  );
+  const first = update.check(true);
+  const second = update.check(true);
+  expect(tagFetch).toHaveBeenCalledTimes(2);
+  expect(update.version).toBeUndefined();
+  expect(update.state).toBe("checking");
+  resolveTag({
+    ok: true,
+    status: 200,
+    json: async () => ({ tag_name: "v2.0.0", assets: [{ name: "nocturne-2.0.0.apk" }] }),
+  });
+  await Promise.all([first, second]);
+  expect(update.version).toBe("2.0.0");
+  expect(update.state).toBe("latest");
+});
+
+it("present 记录手动重新确认期间不参与版本比较，并复用标签请求", async () => {
+  let resolveTag: (value: unknown) => void = () => undefined;
+  const tagFetch = vi.fn().mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    json: async () => ({ tag_name: "v2.0.0", assets: [{ name: "nocturne-2.0.0.apk" }] }),
+  });
+  const fetch = vi.fn((url: unknown) =>
+    String(url).endsWith("/latest")
+      ? Promise.resolve({ ok: true, json: async () => ({ tag_name: "v1.0.0", assets: [] }) })
+      : tagFetch(),
+  );
+  const update = new AndroidUpdate({ version: "1.0.0", fetch });
+  update.computer("2.0.0");
+  await vi.waitFor(() => expect(update.version).toBe("2.0.0"));
+  tagFetch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveTag = resolve;
+      }),
+  );
+  const first = update.check(true);
+  const second = update.check(true);
+  expect(tagFetch).toHaveBeenCalledTimes(2);
+  expect(update.version).toBeUndefined();
+  resolveTag({
+    ok: true,
+    status: 200,
+    json: async () => ({ tag_name: "v2.0.0", assets: [{ name: "nocturne-2.0.0.apk" }] }),
+  });
+  await Promise.all([first, second]);
+  expect(update.version).toBe("2.0.0");
 });
 
 it("同一电脑版本并发只发一个请求", async () => {

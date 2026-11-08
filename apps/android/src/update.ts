@@ -172,86 +172,38 @@ export class AndroidUpdate {
         if (elapsed >= 0 && elapsed < MISSING_TTL) return Promise.resolve();
       }
     }
-    if (record?.status === "unknown") this.tagRecords.delete(version);
-    let task: Promise<void>;
-    const settle = (next: TagRecord) => {
-      this.tagRecords.set(version, next);
-      this.tagPending.delete(version);
-      this.changed();
-    };
-    const handleResponse = (response: Response): Promise<void> | void => {
-      if (response.status === 404) {
-        settle({ status: "missing", at: this.now() });
-        return;
-      }
-      if (!response.ok) {
-        settle({ status: "unknown" });
-        return;
-      }
-      let jsonRes: unknown;
+    let complete: () => void = () => undefined;
+    const task = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    this.tagPending.set(version, task);
+    void (async () => {
       try {
-        jsonRes = response.json();
+        const response = await this.fetch(`${TAG_RELEASE}${version}`, {
+          headers: { Accept: "application/vnd.github+json" },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (response.status === 404) {
+          this.tagRecords.set(version, { status: "missing", at: this.now() });
+        } else if (!response.ok) {
+          this.tagRecords.set(version, { status: "unknown" });
+        } else {
+          const release: unknown = await response.json();
+          const matched = parseApkRelease(release, version);
+          this.tagRecords.set(
+            version,
+            matched ? { status: "present" } : { status: "missing", at: this.now() },
+          );
+        }
       } catch {
-        settle({ status: "unknown" });
-        return;
+        this.tagRecords.set(version, { status: "unknown" });
+      } finally {
+        this.tagPending.delete(version);
+        complete();
+        this.changed();
       }
-      if (
-        jsonRes &&
-        typeof jsonRes === "object" &&
-        "then" in jsonRes &&
-        typeof jsonRes.then === "function"
-      ) {
-        return Promise.resolve(
-          (jsonRes as PromiseLike<unknown>).then(
-            (release) => {
-              try {
-                const matched = parseApkRelease(release, version);
-                settle(matched ? { status: "present" } : { status: "missing", at: this.now() });
-              } catch {
-                settle({ status: "unknown" });
-              }
-            },
-            () => {
-              settle({ status: "unknown" });
-            },
-          ),
-        );
-      }
-      try {
-        const matched = parseApkRelease(jsonRes, version);
-        settle(matched ? { status: "present" } : { status: "missing", at: this.now() });
-      } catch {
-        settle({ status: "unknown" });
-      }
-      return;
-    };
-    try {
-      const fetchRes: unknown = this.fetch(`${TAG_RELEASE}${version}`, {
-        headers: { Accept: "application/vnd.github+json" },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (
-        fetchRes &&
-        typeof fetchRes === "object" &&
-        "then" in fetchRes &&
-        typeof fetchRes.then === "function"
-      ) {
-        task = Promise.resolve(
-          (fetchRes as PromiseLike<Response>).then(handleResponse, () => {
-            settle({ status: "unknown" });
-          }),
-        );
-      } else {
-        task = Promise.resolve(handleResponse(fetchRes as Response));
-      }
-    } catch {
-      settle({ status: "unknown" });
-      return Promise.resolve();
-    }
-    if (this.tagRecords.get(version) === undefined) {
-      this.tagPending.set(version, task);
-      this.changed();
-    }
+    })();
+    this.changed();
     return task;
   }
   private async request(): Promise<void> {

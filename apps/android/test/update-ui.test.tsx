@@ -77,9 +77,9 @@ it("关于五种状态及系统下载", async () => {
 it("提示条关闭后更高版本重现，不兼容时没有版本不显示下载", async () => {
   const update = new AndroidUpdate({
     version: "1.0.0",
-    fetch: (() => {
+    fetch: async () => {
       throw new Error("offline");
-    }) as unknown as typeof globalThis.fetch,
+    },
   });
   update.computer("2.0.0");
   await mount(<UpdateNotice update={update} host={shellHost} />);
