@@ -245,6 +245,8 @@ export function PhoneApp({
       const next = (e.state as Page | null) ?? { kind: "welcome" };
       sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
       setPage(next);
+      setAddingHost(false);
+      setCameraDenied(false);
       setError("");
       setMenu(null);
     };

@@ -154,11 +154,14 @@ it("设置页添加电脑拒绝相机权限后离开页面再进入不残留打�
   expect(container.querySelector('[role="alert"]')?.textContent).toBe("没有相机权限");
   expect(container.textContent).toContain("打开系统设置");
   await act(async () => {
-    [...container.querySelectorAll("button")].find((b) => b.textContent === "打开")?.click();
+    container.querySelector<HTMLButtonElement>('button[aria-label="返回"]')?.click();
+    await new Promise((done) => setTimeout(done, 50));
   });
+  expect(container.querySelector("h1")?.textContent).toBe("电脑");
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
+  expect(container.textContent).toContain("添加电脑");
   await act(async () => {
     [...container.querySelectorAll("button")].find((b) => b.textContent === "添加电脑")?.click();
   });
