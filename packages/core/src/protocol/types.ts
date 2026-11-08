@@ -685,6 +685,7 @@ export type PendingInputMode = "steer" | "queue" | "subagent" | "shell";
  * 客户端看到的是同一份。
  */
 export interface PendingInputItem {
+  shellName?: string | undefined;
   /** Runtime 分配的条目 id（会话内唯一） */
   id: string;
   mode: PendingInputMode;

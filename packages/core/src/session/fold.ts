@@ -57,6 +57,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     permissionPreset: "",
   };
   const history: HistoryEntry[] = [];
+  const stoppedTasks: { taskId: string; callId: string }[] = [];
   let todos: TodoItem[] = [];
   const mcpAvailability: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
   const usage = { ...ZERO_USAGE };
@@ -161,9 +162,35 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         }
         break;
       }
+      case "shell.task_stopped": {
+        if (event.payload.source === "user" && event.seq > (meta?.forkedFrom?.seq ?? 0))
+          stoppedTasks.push(event.payload);
+        break;
+      }
       case "turn.started": {
         if (turnId !== undefined) {
           openTurn = { turnId, turnIndex: event.payload.turnIndex };
+          if (stoppedTasks.length > 0) {
+            const text = stoppedTasks
+              .splice(0)
+              .map((task) => {
+                const started = events.find(
+                  (item) => item.type === "tool.started" && item.payload.callId === task.callId,
+                );
+                const input =
+                  started?.type === "tool.started"
+                    ? (started.payload.input as { name?: string; command?: string })
+                    : undefined;
+                const name = (
+                  input?.name?.length
+                    ? input.name
+                    : (input?.command?.split(/\r?\n/)[0] ?? task.taskId)
+                ).slice(0, 200);
+                return `[Background command] Stopped by the user: ${name} (taskId: ${task.taskId}).`;
+              })
+              .join("\n");
+            history.push({ kind: "note", seq: event.seq, turnId, text });
+          }
         }
         break;
       }

@@ -95,6 +95,24 @@ describe("ADR-0083 background shell", () => {
     expect(output.modelContent.length).toBeLessThan(31000);
     expect((output.output as { text: string }).text).toContain(started.logPath);
   });
+  it("shell_kill returns the unread tail without delivery and advances the model cursor", async () => {
+    const { manager, dir } = setup();
+    const deliver = vi.fn(async () => undefined);
+    const tasks = new BackgroundShells({ platform, sessionsDir: dir, sessionId: "kill", deliver });
+    managers.push(tasks);
+    const started = await launch(tasks, dir, 'console.log("ready"); setInterval(()=>{},1000);');
+    await vi.waitFor(async () =>
+      expect(await platform.fs.readTextFile(started.logPath)).toContain("ready"),
+    );
+    const kill = shellTaskTools(tasks)[1];
+    if (!kill) throw new Error("missing tool");
+    const result = await kill.execute({ id: started.taskId }, {} as ToolContext);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(result.modelContent).toContain('status="killed"');
+    expect(result.modelContent).toContain("ready");
+    expect((await tasks.output(started.taskId)).text).toBe("");
+    expect(manager.list()).toHaveLength(0);
+  }, 20000);
   it("explicit timeout terminates the command", async () => {
     const { manager, dir } = setup();
     const file = path.join(dir, "timeout.cjs");

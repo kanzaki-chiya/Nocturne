@@ -403,7 +403,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
           taskId: output.taskId,
           callId: event.payload.callId,
           command: input?.command ?? "",
-          name: input?.name ?? input?.command?.split(/\r?\n/)[0] ?? "",
+          name: input?.name?.length ? input.name : (input?.command?.split(/\r?\n/)[0] ?? ""),
           logPath: output.logPath,
           outputChars: 0,
           startedAt: started?.time ?? event.time,
@@ -411,10 +411,20 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         });
     }
   }
-  if (event.type === "message.user" && event.payload.backgroundShell) {
-    const result = event.payload.backgroundShell;
+  if (
+    event.type === "shell.result_discarded" ||
+    event.type === "shell.task_stopped" ||
+    (event.type === "message.user" && event.payload.backgroundShell)
+  ) {
+    const result = event.type === "message.user" ? event.payload.backgroundShell : event.payload;
+    if (!result) return;
     const task = view.backgroundShells.find((item) => item.taskId === result.taskId);
-    if (task) Object.assign(task, result, { endedAt: event.time });
+    if (task) {
+      task.status = result.status;
+      task.endedAt = event.time;
+      if (result.exitCode !== undefined) task.exitCode = result.exitCode;
+      if (result.signal !== undefined) task.signal = result.signal;
+    }
   }
   switch (event.type) {
     case "session.rewound": {

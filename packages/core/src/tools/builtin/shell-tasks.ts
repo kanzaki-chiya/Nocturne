@@ -38,7 +38,7 @@ export function shellTaskTools(tasks: BackgroundShells): ToolDefinition[] {
   };
   const kill: ToolDefinition<{ id: string }> = {
     name: "shell_kill",
-    description: "停止本会话的后台命令进程树，结束结果另行送达。",
+    description: "停止本会话的后台命令进程树，等待结束并返回最终状态和未读输出尾部。",
     inputSchema: {
       type: "object",
       required: ["id"],
@@ -49,10 +49,13 @@ export function shellTaskTools(tasks: BackgroundShells): ToolDefinition[] {
     permissionSubjects: () => [],
     async execute(input) {
       try {
-        await tasks.kill(input.id);
+        const result = await tasks.kill(input.id, "model");
         return {
           status: "ok",
-          modelContent: JSON.stringify(tasks.list().find((task) => task.taskId === input.id)),
+          modelContent: result.content
+            .flatMap((block) => (block.type === "text" ? [block.text] : []))
+            .join("\n"),
+          output: result.backgroundShell,
         };
       } catch (cause) {
         const message = String(cause);

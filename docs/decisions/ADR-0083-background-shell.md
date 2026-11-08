@@ -4,6 +4,9 @@
 - 日期：2026-11-07
 - 修订：[tools.md](../architecture/tools.md)（shell 一节与「暂不做」列表）、[agent-loop.md](../architecture/agent-loop.md)、[events.md](../protocols/events.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md)、[roadmap.md](../roadmap/roadmap.md)（「之后」里的后台任务）
 
+- 修订：2026-11-08：用户停止说明只追加一次，作为普通 note 保留在历史；回合结束不删除，避免改写已发送历史和破坏缓存前缀。
+- 修订：2026-11-08：停止的任务不再作为待发输入送达；`shell_kill` 直接返回结果，用户停止的在下一回合附上下文；原因是用户停止后还要处理待发条目不符合直觉，模型自己停止的再送一遍是重复。
+- 修订：2026-11-08：撤回后台结果时持久记录 `shell.result_discarded`，避免恢复会话后把已撤回结果误补为 interrupted 暂停条目。
 - 修订：2026-11-08：RPC 观察者按偏移读取、运行中节流推送 `shell.task_updated`；客户端需要首读全量和增量追加，不能共用模型游标。
 
 ## 背景
@@ -41,18 +44,21 @@ Background command started (id: <taskId>). Its exit status and last output will 
   - 带 `id`：返回该任务的状态（运行中 / 已结束及退出码）、已运行时长，以及上次读取之后的新输出；`since: "start"` 从头读。超过 `maxModelChars` 时按 shell 现有规则截断，并给出日志路径供 `read`/`grep`。
   - 不带 `id`：列出本会话所有后台命令（id、命令首行、状态、时长）。
   - 不声明 `mutates`，不产生权限主体。
-- 新增工具 `shell_kill({ id })`：终止该任务的进程树，按结束交付（`status: "killed"`）。只能停本会话自己启动的任务，不产生权限主体；声明 `mutates`（未追踪调用计数照 shell）。
+- 新增工具 `shell_kill({ id })`：终止该任务的进程树，等待结束后在工具结果里直接返回最终状态（`status: "killed"`）和未读输出尾部，沿用结束交付的 28000 字符尾部截断规则，附日志路径并推进模型游标；不生成待发输入。只能停本会话自己启动的任务，不产生权限主体；声明 `mutates`（未追踪调用计数照 shell）。
 
 ### 3. 交付：结束时作为待发输入
 
-命令结束（自己退出、超时、被 `shell_kill` 或用户停止）时，Runtime 把结果作为待发输入加入会话，消费路径与 [ADR-0073 §3](ADR-0073-background-subagents.md#3-交付子代理结果是一种待发输入) 完全相同：运行中按插话在安全点送达，空闲时开启新 Turn，暂停时追加为暂停条目。
+命令自然退出（`exited`）、超时（`timeout`）或进程异常（`interrupted`）时，Runtime 把结果作为待发输入加入会话，消费路径与 [ADR-0073 §3](ADR-0073-background-subagents.md#3-交付子代理结果是一种待发输入) 完全相同：运行中按插话在安全点送达，空闲时开启新 Turn，暂停时追加为暂停条目。
 
-写入的事件是 `message.user`，新增可选字段：
+停止由持久事件 `shell.task_stopped` 记录（`taskId`、`callId`、`status: "killed"`、`source: "user" | "model"`、可选退出码和信号）；不生成结果消息、待发条目或新回合。用户通过 RPC `shell.kill` 停止的任务，在随后第一个 `turn.started` 折叠为现有 `note`，追加一次后和其他 note 一样留在历史，按现有规则投影、修剪和压缩，不显示在对话中；任务名（缺省命令首行，至多 200 字符）和 taskId 写为 `[Background command] Stopped by the user: <name> (taskId: <taskId>).`。回合结束不删除已发送的说明，后续请求保留消息前缀；事件顺序使恢复后仍只追加一次，不新增第二条。模型停止只从工具结果获知。新增持久事件不提升 formatVersion，旧 Runtime 会按未知事件拒绝恢复，旧只读客户端忽略。
+
+自然结束或异常送达写入的事件是 `message.user`，新增可选字段：
 
 ```ts
 backgroundShell?: {
   taskId: string
   callId: string          // 启动它的那次 shell 调用
+  name?: string          // 任务名，缺省取命令首行
   status: "exited" | "timeout" | "killed" | "interrupted"
   exitCode?: number
   signal?: string
@@ -69,7 +75,7 @@ backgroundShell?: {
 
 - 用户中断 Turn（Esc、停止按钮、`Ctrl+Alt+Esc`）**不**停后台命令。
 - **会话关闭、删除、Runtime 退出**：终止该会话所有后台命令的进程树，结果不交付。桌面端关窗口等同 Runtime 退出。
-- **重启**：不复活。会话加载时，对「启动过后台命令、日志里却没有对应 `backgroundShell` 消息」的调用，各补一条 `status: "interrupted"` 的暂停待发条目，随用户下一次提交送达，不自动唤起。依据是会话日志里 `shell` 结果的 `output.background` 与 `message.user.backgroundShell.callId`。
+- **重启**：不复活。会话加载时，对「启动过后台命令、日志里却没有对应 `backgroundShell` 消息」的调用，各补一条 `status: "interrupted"` 的暂停待发条目，随用户下一次提交送达，不自动唤起。依据是会话日志里 `shell` 结果的 `output.background` 与 `message.user.backgroundShell.callId`；已通过 `shell.result_discarded` 撤回的结果、已有 `shell.task_stopped` 的停止任务不补送。
 - **回退**到启动调用之前：终止该任务，不交付；已交付的结果随回退移除。**分叉**不继承运行中的任务。
 - **子会话**：子代理里 `background` 不可用（字段不出现在子会话的 `shell` 描述里），避免子会话结束留下孤儿。
 - 进程树终止沿用 `ProcessRunner.kill()`，已知遗留（脱离进程树的孙进程）同 tools.md「孤儿进程遗留」。
@@ -88,14 +94,14 @@ backgroundShell?: {
 - **桌面端**：会话概览浮层（右上角，desktop.md「会话概览」）在有后台任务时增加「后台任务」分组，位置在「子代理」之后。每行只有三样：终端图标、任务名、已运行时长（结束后定格为总时长，图标和名字转淡色）。运行中在前；已结束的任务在结束 5 分钟后从列表移除（结果消息仍在对话里）。运行中的行悬停或获得焦点时，时长换成「停止」按钮。点一行在面板里打开输出标签：只读、实时追加、可复制，标签头也有停止按钮。输出标签和工具行各持有独立观察者偏移，首读尾部、收到任务更新后请求增量，不通过轮询更新时间；仅显示时读取。输出在底部才跟随追加，用户上滚时保持位置；断线保留已读内容，切换任务后旧响应无效。
 - **手机网页**：概览里同样的分组，点开看输出、可停止。
 - **TUI**：状态栏显示运行中任务数；新增 `/tasks` 列出本会话后台任务，选中可看输出尾部或停止。
-- 待发区的条目显示为「后台任务 · 等待送达」，可撤回。
+- 自然结束或异常结果的待发条目显示为「后台任务 · <任务名> · 等待送达」，无名字时取命令首行，过长按原有单行省略，可撤回。用户停止不新增任何条目。
 - 新增 RPC：`shell.tasks({ sessionId })`、`shell.output({ sessionId, taskId, offset?: number }) → { task, text, start, end, durationMs }`、`shell.kill({ sessionId, taskId })`。观察者按独立字符偏移读末尾最多 200000 字符，不共用模型游标或预算；无偏移首读尾部，后续以 `end` 读取，`start` 等于本地 `end` 时追加，否则替换。`BackgroundShellTask.outputChars` 为当前日志字符数；运行中输出增长以同任务最多每 500ms 一次的临时 `shell.task_updated` 推送，启动和结束各发送一次。`SessionView.backgroundShells` 由持久工具与结果事件派生，并由临时事件更新；`outputChars` 不落盘，不参与重放等价。精确契约见 [rpc.md](../protocols/rpc.md#321-shelladr-0083)。
 
 ### 7. 权限与上下文不变
 
 - 权限只在启动时求值，主体是命令文本，与同步 shell 相同；预设、规则、智能审查都照旧。`shell_output` 只读本会话自己的任务；`shell_kill` 只能停本会话自己的任务，都不需要确认。
 - 检查点：后台命令计入「未追踪调用」，同同步 shell。
-- Builder 不改：结果就是一条用户消息。
+- Builder 不改：自然结束或异常结果是一条用户消息；用户停止说明沿用现有 note 投影，生命周期见第 3 节及 [context.md](../architecture/context.md)。
 
 ## 不做
 

@@ -139,7 +139,7 @@ export function PendingInputs({
         const isSubagent = item.mode === "subagent";
         const isShell = item.mode === "shell";
         const rowText = isShell
-          ? "后台任务 · 等待送达"
+          ? `后台任务 · ${item.shellName ?? ""} · 等待送达`
           : isSubagent
             ? "子代理结果"
             : item.workMode !== undefined

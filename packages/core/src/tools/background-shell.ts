@@ -30,6 +30,7 @@ interface Job {
   writes: Promise<void>;
   settled: Promise<void>;
   discard: boolean;
+  stopSource?: "user" | "model";
   updateTimer?: ReturnType<typeof setTimeout>;
   updatedAt: number;
 }
@@ -70,6 +71,9 @@ export class BackgroundShells {
       sessionId: string;
       deliver?: (input: PreparedInput) => Promise<void>;
       updated?: (task: BackgroundShellTask) => void;
+      stopped?: (
+        result: BackgroundShellResult & { status: "killed"; source: "user" | "model" },
+      ) => Promise<void>;
     },
   ) {}
 
@@ -95,7 +99,7 @@ export class BackgroundShells {
     const task: BackgroundShellTask = {
       taskId,
       callId: input.callId,
-      name: input.name ?? input.command.split(/\r?\n/)[0] ?? input.command,
+      name: input.name?.length ? input.name : (input.command.split(/\r?\n/)[0] ?? input.command),
       command: input.command,
       logPath,
       status: "running",
@@ -159,7 +163,13 @@ export class BackgroundShells {
           if (timer) clearTimeout(timer);
         }
         await pumps;
-        task.status = exit.timedOut ? "timeout" : exit.killed ? "killed" : "exited";
+        task.status = job.stopSource
+          ? "killed"
+          : exit.timedOut
+            ? "timeout"
+            : exit.killed
+              ? "interrupted"
+              : "exited";
         if (exit.code !== null) task.exitCode = exit.code;
         if (exit.signal !== null) task.signal = exit.signal;
       } catch {
@@ -169,24 +179,19 @@ export class BackgroundShells {
       if (job.updateTimer) clearTimeout(job.updateTimer);
       delete job.updateTimer;
       task.endedAt = new Date().toISOString();
-      if (!job.discard) this.options.updated?.({ ...task });
-      if (!job.discard && this.options.deliver) {
-        const text = await this.options.platform.fs.readTextFile(task.logPath);
-        const unread = text.slice(job.cursor);
-        job.cursor = text.length;
-        const tail = unread.length > 28000 ? `${unread.slice(-28000)}\n${task.logPath}` : unread;
-        await this.options.deliver(
-          shellResultInput(
-            {
-              taskId: task.taskId,
-              callId: task.callId,
-              status: task.status,
-              ...(task.exitCode !== undefined ? { exitCode: task.exitCode } : {}),
-              ...(task.signal !== undefined ? { signal: task.signal } : {}),
-            },
-            tail,
-          ),
-        );
+      if (job.discard) return;
+      if (job.stopSource && task.status === "killed") {
+        await this.options.stopped?.({
+          ...this.result(task),
+          status: "killed",
+          source: job.stopSource,
+        });
+        this.options.updated?.({ ...task });
+        return;
+      }
+      this.options.updated?.({ ...task });
+      if (this.options.deliver) {
+        await this.options.deliver(shellResultInput(this.result(task), await this.unreadTail(job)));
       }
     })();
     void job.settled.catch(() => undefined);
@@ -225,11 +230,17 @@ export class BackgroundShells {
     return observerOutput(job.task, text, offset);
   }
 
-  async kill(id: string): Promise<void> {
+  async kill(id: string, source: "user" | "model" = "model"): Promise<PreparedInput> {
     const job = this.require(id);
-    if (job.task.status !== "running") throw new Error("Background command is not running");
+    if (job.task.status !== "running" || job.stopSource)
+      throw new Error("Background command is not running");
+    job.stopSource = source;
     await job.process.kill();
     await job.settled;
+    return shellResultInput(
+      this.result(job.task),
+      source === "model" ? await this.unreadTail(job) : "",
+    );
   }
 
   async discard(keep?: ReadonlySet<string>): Promise<void> {
@@ -253,9 +264,11 @@ export class BackgroundShells {
     const events = effectiveEvents(log);
     const delivered = new Set(
       events.flatMap((event) =>
-        event.type === "message.user" && event.payload.backgroundShell
-          ? [event.payload.backgroundShell.callId]
-          : [],
+        event.type === "shell.result_discarded" || event.type === "shell.task_stopped"
+          ? [event.payload.callId]
+          : event.type === "message.user" && event.payload.backgroundShell
+            ? [event.payload.backgroundShell.callId]
+            : [],
       ),
     );
     return events.flatMap((event) => {
@@ -271,11 +284,47 @@ export class BackgroundShells {
       if (output?.background !== true || typeof output.taskId !== "string") return [];
       return [
         shellResultInput(
-          { taskId: output.taskId, callId: event.payload.callId, status: "interrupted" },
+          {
+            taskId: output.taskId,
+            callId: event.payload.callId,
+            status: "interrupted",
+            name: (() => {
+              const started = events.find(
+                (item) =>
+                  item.type === "tool.started" && item.payload.callId === event.payload.callId,
+              );
+              const input =
+                started?.type === "tool.started"
+                  ? (started.payload.input as { name?: string; command?: string })
+                  : undefined;
+              return input?.name?.length
+                ? input.name
+                : (input?.command?.split(/\r?\n/)[0] ?? output.taskId);
+            })(),
+          },
           typeof output.logPath === "string" ? output.logPath : "",
         ),
       ];
     });
+  }
+
+  private result(task: BackgroundShellTask): BackgroundShellResult {
+    if (task.status === "running") throw new Error("Background command is still running");
+    return {
+      taskId: task.taskId,
+      callId: task.callId,
+      name: task.name,
+      status: task.status,
+      ...(task.exitCode !== undefined ? { exitCode: task.exitCode } : {}),
+      ...(task.signal !== undefined ? { signal: task.signal } : {}),
+    };
+  }
+
+  private async unreadTail(job: Job): Promise<string> {
+    const text = await this.options.platform.fs.readTextFile(job.task.logPath);
+    const unread = text.slice(job.cursor);
+    job.cursor = text.length;
+    return unread.length > 28000 ? `${unread.slice(-28000)}\n${job.task.logPath}` : unread;
   }
 
   private require(id: string): Job {

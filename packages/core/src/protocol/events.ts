@@ -111,6 +111,7 @@ export interface SubagentResult {
 
 import type { BackgroundShellTask } from "./background-shell.js";
 export interface BackgroundShellResult {
+  name?: string | undefined;
   taskId: string;
   callId: string;
   status: "exited" | "timeout" | "killed" | "interrupted";
@@ -382,6 +383,8 @@ export type CheckpointFilePayload = {
 } & ({ phase: "before"; before: CheckpointBefore } | { phase: "after"; sha256: string | null });
 
 export interface DurablePayloadMap {
+  "shell.task_stopped": BackgroundShellResult & { status: "killed"; source: "user" | "model" };
+  "shell.result_discarded": BackgroundShellResult;
   "session.rewound": SessionRewoundPayload;
   "checkpoint.file": CheckpointFilePayload;
   "session.created": SessionCreatedPayload;
@@ -458,6 +461,8 @@ export type EphemeralEvent<T extends EphemeralType = EphemeralType> = T extends 
 export type RuntimeEvent = DurableEvent | EphemeralEvent;
 
 export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
+  "shell.task_stopped",
+  "shell.result_discarded",
   "session.rewound",
   "checkpoint.file",
   "session.created",

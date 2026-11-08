@@ -2251,6 +2251,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       sessionId: session.id,
       deliver: (input) => deliverBackgroundResult(input),
       updated: (task) => session.emitEphemeral("shell.task_updated", { task }),
+      stopped: async (result) => {
+        await session.emit("shell.task_stopped", result);
+      },
     });
     const execEnv: ExecutionEnvironment = {
       currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
@@ -3644,7 +3647,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       async shellKill(taskId) {
         assertUsable();
         try {
-          await backgroundShells.kill(taskId);
+          await backgroundShells.kill(taskId, "user");
         } catch (cause) {
           throw new RuntimeCommandError("invalid_command", String(cause));
         }
@@ -3907,11 +3910,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           await pumpQueue();
         }),
       cancelInput: (id) =>
-        Promise.resolve().then(() => {
+        Promise.resolve().then(async () => {
           assertUsable();
           assertMainSession();
+          const result = pendingInputStore.shellResult(id);
           if (pendingInputStore.cancel(id) === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
+          if (result) await session.emit("shell.result_discarded", result);
         }),
       async resumeInputs() {
         assertUsable();
