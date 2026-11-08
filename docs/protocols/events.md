@@ -123,7 +123,7 @@ ADR-0083：`message.user.backgroundShell?: { taskId, callId, status: "exited" | 
 
 ADR-0083 修订（2026-11-08）：撤回后台结果时写入会话级持久事件 `shell.result_discarded`，payload 与 `message.user.backgroundShell` 相同。该事件表示用户已丢弃结果，不投影对话消息；恢复不再补送 interrupted，视图据此保留最终状态。不提升 formatVersion；旧 Runtime 遇到此未知持久事件将拒绝恢复（session_log_newer），旧只读客户端忽略。待发输入本身仍不持久化。
 
-ADR-0083 停止修订（2026-11-08）：新增会话级持久事件 `shell.task_stopped`（无 turnId），payload 为 `{ taskId, callId, status: "killed", source: "user" | "model", exitCode?, signal? }`，时间为结束时间。停止不再产生待发输入；恢复不补 interrupted。用户停止在其后第一个 `turn.started` 折叠为该回合专用的 note，复用现有上下文投影，不创建对话条目；回合结束后不再投影，恢复按持久事件顺序保证每个任务只附一次。模型停止直接返回工具结果。不提升 formatVersion；旧 Runtime 拒绝恢复含此未知持久事件的日志，旧只读客户端忽略。旧 `message.user.backgroundShell.status: "killed"` 仍可读，但新停止不再写它。`message.user.backgroundShell.name?` 与 `input.pending.items[].shellName?` 传递任务名（无名取启动命令首行），待发显示「后台任务 · <任务名> · 等待送达」。
+ADR-0083 停止修订（2026-11-08）：新增会话级持久事件 `shell.task_stopped`（无 turnId），payload 为 `{ taskId, callId, status: "killed", source: "user" | "model", exitCode?, signal? }`，时间为结束时间。停止不再产生待发输入；恢复不补 interrupted。用户停止在其后第一个 `turn.started` 折叠为普通 note，复用现有上下文投影，不创建对话条目；追加后留在历史，按现有规则投影、修剪和压缩，不因回合结束而删除。恢复按持久事件顺序保证每个任务只追加一次，不新增第二条。模型停止直接返回工具结果。不提升 formatVersion；旧 Runtime 拒绝恢复含此未知持久事件的日志，旧只读客户端忽略。旧 `message.user.backgroundShell.status: "killed"` 仍可读，但新停止不再写它。`message.user.backgroundShell.name?` 与 `input.pending.items[].shellName?` 传递任务名（无名取启动命令首行），待发显示「后台任务 · <任务名> · 等待送达」。
 
 ### 3.2 临时事件
 

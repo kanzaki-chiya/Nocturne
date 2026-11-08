@@ -86,7 +86,7 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 
 `session/fold.ts` 从有效 `shell.task_stopped(source: "user")` 收集尚未进入回合的停止任务，在随后第一个 `turn.started` 折叠为现有 `note`，使用原有 user 角色投影和工具结果邻接规则。每个任务一句：`[Background command] Stopped by the user: <name> (taskId: <taskId>).`，name 取启动名字或命令首行，至多 200 字符。它不生成 message.user、待发输入或客户端对话条目，不主动开回合。
 
-此 note 仅在接收它的回合进行中参与上下文（含该回合内后续请求），回合结束后不再投影；后续 turn.started 不再收集已经进入回合的任务。日志中的停止事件与 Turn 边界保证恢复后仍只附一次，停止发生在回合进行中时等待下一回合；分叉不继承来源前缀里的待说明任务。模型停止只从 shell_kill 工具结果获取，不附此 note。
+此 note 在首次追加后和其他 note 一样留在历史，按现有规则投影、修剪和压缩，不因回合结束而删除；除压缩边界外，后续请求保留已发送的消息前缀。后续 turn.started 不再为同一任务新增第二条说明，日志中的停止事件与 Turn 边界保证恢复后仍只追加一次。停止发生在回合进行中时等待下一回合；分叉不继承来源前缀里的待说明任务。模型停止只从 shell_kill 工具结果获取，不附此 note。
 
 ## 4. 基本原则
 

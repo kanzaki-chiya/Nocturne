@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { FakeProvider } from "@nocturne/core";
+import { FakeProvider, type ModelRequest } from "@nocturne/core";
+import { replaySessionView } from "@nocturne/core/protocol";
 import { cleanupTmp, connect, MODEL, textScript, VISION_MODELS } from "./harness.js";
 
 afterEach(cleanupTmp);
@@ -66,16 +67,16 @@ it("shell observer RPC preserves offset zero and reads the full tail after compl
     await h.served;
   }
 });
-it("RPC shell.kill stays silent and adds the user-stop note to only the next turn", async () => {
+it("RPC shell.kill stays silent and preserves one hidden user-stop note across turns and recovery", async () => {
   let command = "";
   let calls = 0;
-  const contexts: string[] = [];
+  const contexts: ModelRequest["messages"][] = [];
   const h = await connect({
     shell: { background: true },
     provider: new FakeProvider({
       models: VISION_MODELS,
       handler: async (request) => {
-        contexts.push(JSON.stringify(request));
+        contexts.push(structuredClone(request.messages));
         return calls++ === 0
           ? [
               {
@@ -115,10 +116,22 @@ it("RPC shell.kill stays silent and adds the user-stop note to only the next tur
     expect(() => process.kill(pid, 0)).toThrow();
     await session.submit({ text: "next" });
     const note = `[Background command] Stopped by the user: infinite (taskId: ${task.taskId}).`;
-    expect(contexts.at(-1)).toContain(note);
+    const first = contexts.at(-1) ?? [];
+    expect(JSON.stringify(first).split(note).length - 1).toBe(1);
     await session.submit({ text: "again" });
-    expect(contexts.at(-1)).not.toContain(note);
+    const second = contexts.at(-1) ?? [];
+    expect(JSON.stringify(second).split(note).length - 1).toBe(1);
+    expect(second.slice(0, first.length)).toEqual(first);
+    expect(JSON.stringify(replaySessionView(h.durable(session.id)).entries)).not.toContain(note);
+    const id = session.id;
     await session.close();
+    const { session: resumed } = await h.client.runtime.resumeSession(id);
+    await resumed.submit({ text: "recovered" });
+    const recovered = contexts.at(-1) ?? [];
+    expect(JSON.stringify(recovered).split(note).length - 1).toBe(1);
+    expect(recovered.slice(0, second.length)).toEqual(second);
+    expect(JSON.stringify(replaySessionView(h.durable(id)).entries)).not.toContain(note);
+    await resumed.close();
   } finally {
     h.client.close();
     await h.served;

@@ -4,6 +4,7 @@
 - 日期：2026-11-07
 - 修订：[tools.md](../architecture/tools.md)（shell 一节与「暂不做」列表）、[agent-loop.md](../architecture/agent-loop.md)、[events.md](../protocols/events.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md)、[roadmap.md](../roadmap/roadmap.md)（「之后」里的后台任务）
 
+- 修订：2026-11-08：用户停止说明只追加一次，作为普通 note 保留在历史；回合结束不删除，避免改写已发送历史和破坏缓存前缀。
 - 修订：2026-11-08：停止的任务不再作为待发输入送达；`shell_kill` 直接返回结果，用户停止的在下一回合附上下文；原因是用户停止后还要处理待发条目不符合直觉，模型自己停止的再送一遍是重复。
 - 修订：2026-11-08：撤回后台结果时持久记录 `shell.result_discarded`，避免恢复会话后把已撤回结果误补为 interrupted 暂停条目。
 - 修订：2026-11-08：RPC 观察者按偏移读取、运行中节流推送 `shell.task_updated`；客户端需要首读全量和增量追加，不能共用模型游标。
@@ -49,7 +50,7 @@ Background command started (id: <taskId>). Its exit status and last output will 
 
 命令自然退出（`exited`）、超时（`timeout`）或进程异常（`interrupted`）时，Runtime 把结果作为待发输入加入会话，消费路径与 [ADR-0073 §3](ADR-0073-background-subagents.md#3-交付子代理结果是一种待发输入) 完全相同：运行中按插话在安全点送达，空闲时开启新 Turn，暂停时追加为暂停条目。
 
-停止由持久事件 `shell.task_stopped` 记录（`taskId`、`callId`、`status: "killed"`、`source: "user" | "model"`、可选退出码和信号）；不生成结果消息、待发条目或新回合。用户通过 RPC `shell.kill` 停止的任务，在随后第一个 `turn.started` 折叠为现有 `note`，仅投影到该回合的模型上下文，不显示在对话中；任务名（缺省命令首行，至多 200 字符）和 taskId 写为 `[Background command] Stopped by the user: <name> (taskId: <taskId>).`。该回合结束后不再投影；事件顺序使恢复后仍只附一次。模型停止只从工具结果获知。新增持久事件不提升 formatVersion，旧 Runtime 会按未知事件拒绝恢复，旧只读客户端忽略。
+停止由持久事件 `shell.task_stopped` 记录（`taskId`、`callId`、`status: "killed"`、`source: "user" | "model"`、可选退出码和信号）；不生成结果消息、待发条目或新回合。用户通过 RPC `shell.kill` 停止的任务，在随后第一个 `turn.started` 折叠为现有 `note`，追加一次后和其他 note 一样留在历史，按现有规则投影、修剪和压缩，不显示在对话中；任务名（缺省命令首行，至多 200 字符）和 taskId 写为 `[Background command] Stopped by the user: <name> (taskId: <taskId>).`。回合结束不删除已发送的说明，后续请求保留消息前缀；事件顺序使恢复后仍只追加一次，不新增第二条。模型停止只从工具结果获知。新增持久事件不提升 formatVersion，旧 Runtime 会按未知事件拒绝恢复，旧只读客户端忽略。
 
 自然结束或异常送达写入的事件是 `message.user`，新增可选字段：
 

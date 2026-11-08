@@ -189,7 +189,7 @@ describe("ADR-0083 Runtime", () => {
     );
   });
   it.each([false, true])(
-    "user stop stays silent; note appears once after recovery (paused=%s)",
+    "user stop stays silent; note persists once with a stable message prefix across turns and recovery (paused=%s)",
     async (pause) => {
       const { session, options, requests } = await setup({ pause });
       await session.submit({ text: "go" });
@@ -208,7 +208,12 @@ describe("ADR-0083 Runtime", () => {
       expect(resumed.shellTasks()[0]?.status).toBe("killed");
       await resumed.submit({ text: "next" });
       const note = `[Background command] Stopped by the user: fixture (taskId: ${task.taskId}).`;
-      expect(JSON.stringify(must(requests.at(-1)))).toContain(note);
+      const first = must(requests.at(-1)).messages;
+      expect(JSON.stringify(first).split(note).length - 1).toBe(1);
+      await resumed.submit({ text: "next again" });
+      const second = must(requests.at(-1)).messages;
+      expect(JSON.stringify(second).split(note).length - 1).toBe(1);
+      expect(second.slice(0, first.length)).toEqual(first);
       expect(JSON.stringify(replaySessionView(resumed.durableEvents()).entries)).not.toContain(
         note,
       );
@@ -216,12 +221,15 @@ describe("ADR-0083 Runtime", () => {
       const again = await (await createRuntime(options)).resumeSession(id);
       sessions.push(again);
       await again.submit({ text: "again" });
-      expect(JSON.stringify(must(requests.at(-1)))).not.toContain(note);
+      const recovered = must(requests.at(-1)).messages;
+      expect(JSON.stringify(recovered).split(note).length - 1).toBe(1);
+      expect(recovered.slice(0, second.length)).toEqual(second);
+      expect(JSON.stringify(replaySessionView(again.durableEvents()).entries)).not.toContain(note);
     },
     20000,
   );
-  it("user stop during a turn waits for the next queued-input turn and is not a conversation entry", async () => {
-    const { session, requests } = await setup({ longTurn: true });
+  it("user stop during a turn appends one persistent hidden note at the next queued-input turn", async () => {
+    const { session, requests, options } = await setup({ longTurn: true });
     const running = session.submit({ text: "go" });
     await vi.waitFor(() => expect(requests).toHaveLength(2));
     const task = must(session.shellTasks()[0]);
@@ -233,9 +241,21 @@ describe("ADR-0083 Runtime", () => {
     expect(session.pendingInputs()).toEqual({ items: [], paused: false });
     await session.enqueueInput("queue", { text: "queued" });
     await vi.waitFor(() => expect(requests).toHaveLength(3));
-    expect(JSON.stringify(must(requests.at(-1)))).toContain(note);
+    const first = must(requests.at(-1)).messages;
+    expect(JSON.stringify(first).split(note).length - 1).toBe(1);
     await session.submit({ text: "again" });
-    expect(JSON.stringify(must(requests.at(-1)))).not.toContain(note);
+    const second = must(requests.at(-1)).messages;
+    expect(JSON.stringify(second).split(note).length - 1).toBe(1);
+    expect(second.slice(0, first.length)).toEqual(first);
+    const id = session.id;
+    await session.close();
+    const resumed = await (await createRuntime(options)).resumeSession(id);
+    sessions.push(resumed);
+    await resumed.submit({ text: "recovered" });
+    const recovered = must(requests.at(-1)).messages;
+    expect(JSON.stringify(recovered).split(note).length - 1).toBe(1);
+    expect(recovered.slice(0, second.length)).toEqual(second);
+    expect(JSON.stringify(replaySessionView(resumed.durableEvents()).entries)).not.toContain(note);
   }, 20000);
   it("paused result is readonly and retractable, retraction prevents delivery", async () => {
     const { session } = await setup({

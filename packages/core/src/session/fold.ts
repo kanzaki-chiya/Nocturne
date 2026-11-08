@@ -58,7 +58,6 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   };
   const history: HistoryEntry[] = [];
   const stoppedTasks: { taskId: string; callId: string }[] = [];
-  const stopNoteSeqs = new Set<number>();
   let todos: TodoItem[] = [];
   const mcpAvailability: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
   const usage = { ...ZERO_USAGE };
@@ -191,7 +190,6 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
               })
               .join("\n");
             history.push({ kind: "note", seq: event.seq, turnId, text });
-            stopNoteSeqs.add(event.seq);
           }
         }
         break;
@@ -341,9 +339,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   return {
     meta,
     config,
-    history: history.filter(
-      (entry) => !stopNoteSeqs.has(entry.seq) || entry.turnId === openTurn?.turnId,
-    ),
+    history,
     ...(Object.keys(mcpAvailability).length > 0 ? { mcpAvailability } : {}),
     ...(goal !== undefined ? { goal } : {}),
     ...(plan !== undefined ? { plan } : {}),
