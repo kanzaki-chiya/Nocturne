@@ -3,6 +3,7 @@ import { RpcError } from "@nocturne/rpc/client";
 import type { ParsedOffer } from "@nocturne/remote";
 import { createAttachmentImageSource, type AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
+import { PaneErrorBoundary } from "../ErrorBoundary";
 import { projectKey } from "../session-tree";
 import { UsagePage } from "../UsagePage";
 import { SchedulePage } from "../SchedulePage";
@@ -1128,7 +1129,7 @@ export function PhoneApp({
           分享菜单选择「添加到主屏幕」。添加后需在主屏幕应用里再配对一次，用电脑上的「复制链接」粘贴即可。
         </aside>
       )}
-      {body}
+      <PaneErrorBoundary key={JSON.stringify(page)}>{body}</PaneErrorBoundary>
       {menu === "hosts" && (
         <Popover
           anchor={hostTrigger.current}

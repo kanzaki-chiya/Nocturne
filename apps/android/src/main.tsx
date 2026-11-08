@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { PaneErrorBoundary } from "../../desktop/src/ErrorBoundary";
 import { PhoneApp } from "../../desktop/src/web/App";
 import { indexedStorage } from "../../desktop/src/web/storage";
 import type { WebHost } from "../../desktop/src/web/host";
@@ -27,4 +28,8 @@ document.addEventListener("visibilitychange", () => {
 });
 const root = document.getElementById("root");
 if (root)
-  createRoot(root).render(<PhoneApp storage={indexedStorage()} host={host} platform={platform} />);
+  createRoot(root).render(
+    <PaneErrorBoundary>
+      <PhoneApp storage={indexedStorage()} host={host} platform={platform} />
+    </PaneErrorBoundary>,
+  );
