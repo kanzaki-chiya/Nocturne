@@ -43,6 +43,10 @@ pnpm android:dev              # 连着设备或模拟器的开发模式（Vite �
 
 Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`；本轮只做 debug 签名。
 
+正式包：`pnpm android:build:release`，产物在 `.../apk/universal/release/app-universal-release.apk`。签名读 `src-tauri/gen/android/keystore.properties`（已被 gitignore，字段 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`）；没有这个文件时构建未签名包。发布时 `release.yml` 的 `android` 任务从 secrets 写入该文件，把 `nocturne-<version>.apk` 附到草稿，见 [workflow.md](../development/workflow.md#81-常规发布顺序)。
+
+手机端页面有错误边界：渲染抛错时保留顶栏并显示错误。App 可能比电脑上的后台旧，确认卡片跳过不认识的选项。
+
 - `tauri.conf.json` 的 `frontendDist` 是 `../dist`；`Cargo.toml` 的 `custom-protocol` feature 必须存在，`tauri build` 才会让 WebView 用打包的页面而不是 `devUrl`。
 - Android 15+ 的 16 KB 页面设备要求原生库按 16 KB 对齐，`build.rs` 对安卓目标加 `-Wl,-z,max-page-size=16384`（NDK 27 默认 4 KB，设备会弹「不兼容 16 KB」警告）。
 - `minSdk` 为 26：包装 wry 的 WebViewClient 需要 `WebView.getWebViewClient()`（API 26）。
