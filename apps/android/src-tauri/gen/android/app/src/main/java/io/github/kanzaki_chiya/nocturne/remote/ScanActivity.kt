@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
 import android.view.View
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.widget.FrameLayout
@@ -58,9 +59,23 @@ class ScanActivity : AppCompatActivity() {
         canvas.drawLine(26*d, 13*d, 17*d, 22*d, paint)
         canvas.drawLine(17*d, 22*d, 26*d, 31*d, paint)
       }
+    }.apply {
+      contentDescription = "返回"
     }
     val density = resources.displayMetrics.density
-    root.addView(back, FrameLayout.LayoutParams((44*density).toInt(), (44*density).toInt()).apply { leftMargin = (8*density).toInt(); topMargin = (8*density).toInt() })
+    val baseMargin = (8 * density).toInt()
+    val backParams = FrameLayout.LayoutParams((44*density).toInt(), (44*density).toInt()).apply {
+      leftMargin = baseMargin
+      topMargin = baseMargin
+    }
+    root.addView(back, backParams)
+    ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+      val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+      backParams.leftMargin = baseMargin + cutout.left
+      backParams.topMargin = baseMargin + cutout.top
+      back.layoutParams = backParams
+      insets
+    }
     back.setOnClickListener { finish() }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() { finish() }

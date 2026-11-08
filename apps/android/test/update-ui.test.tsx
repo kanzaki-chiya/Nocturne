@@ -78,6 +78,7 @@ it("提示条关闭后更高版本重现，不兼容时没有版本不显示下�
   });
   expect(container.textContent).toContain("新版本 3.0.0");
   await mount(<UpdateNotice update={update} host={shellHost} incompatible />);
+  expect(container.querySelector(".phone-status")).toBeNull();
   expect(container.textContent).toBe("App 版本过旧下载 3.0.0");
   await act(async () => {
     update.computer(undefined);

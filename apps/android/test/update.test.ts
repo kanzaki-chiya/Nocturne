@@ -56,6 +56,8 @@ it("两个来源均需更新，取较大的版本，电脑比较无需网络", a
   expect(update.version).toBe("2.0.0");
   update.computer("1.0.0");
   expect(update.version).toBe("1.2.0");
+  update.computer(undefined);
+  expect(update.version).toBe("1.2.0");
 });
 
 it.each(["v1.3.0-rc.1", "1.3.0+build", "1.3", "junk1.3.0", "01.3.0"])(

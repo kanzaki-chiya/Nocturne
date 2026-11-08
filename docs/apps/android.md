@@ -75,11 +75,11 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 ### 扫码、相机权限与更新
 
-扫码使用 ZXing Android Embedded 4.3.0（Apache-2.0，默认 API 24+；工程 minSdk 26），不依赖 Google Play 服务，不带原生 `.so`。`ScanActivity` 是竖屏全屏相机预览，只显示取景框与返回图标，只识别 QR，成功立即返回；取消静默，拒绝权限显示「没有相机权限」与「打开系统设置」。Manifest 声明 CAMERA 与 required=false 的 camera feature，按使用时申请。拍照继续由 `PhoneComposer` 文件输入和生成的 `RustWebChromeClient` 处理；App 的 `CameraPermissionClient` 在调用原处理器前完成 capture 授权，防止首次授权后仍用授权前的状态回退到选图页，拒绝时取消文件回调。Manifest 的 `queries` 声明 IMAGE_CAPTURE，供原处理器解析系统相机。生成文件保持原样。
+扫码使用 ZXing Android Embedded 4.3.0（Apache-2.0，默认 API 24+；工程 minSdk 26），不依赖 Google Play 服务，不带原生 `.so`。`ScanActivity` 是竖屏全屏相机预览，只显示取景框与返回图标（`contentDescription = "返回"`，并通过 `ViewCompat.setOnApplyWindowInsetsListener` 叠加 `displayCutout` 的左、上安全边距），只识别 QR，成功立即返回；取消静默，拒绝权限显示「没有相机权限」与「打开系统设置」（点按打开系统设置不清掉错误，仅在再次扫码成功或取消、或离开配对页时清除）。Manifest 声明 CAMERA 与 required=false 的 camera feature，按使用时申请。拍照继续由 `PhoneComposer` 文件输入和生成的 `RustWebChromeClient` 处理；App 的 `CameraPermissionClient` 在调用原处理器前完成 capture 授权，防止首次授权后仍用授权前的状态回退到选图页，拒绝时取消文件回调。Manifest 的 `queries` 声明 IMAGE_CAPTURE，供原处理器解析系统相机。生成文件保持原样。
 
 `update.ts` 只认正式 `x.y.z`；GitHub 标签可带 `v`，必须有 `nocturne-<version>.apk` 资产。每次成功 initialize 比较电脑的 `nocturneVersion`，无需额外请求；两个来源取比 APP_VERSION 新的较大值。启动与原生回前台检查 GitHub，成功结果与时间存手机本地，24 小时内不重复；失败静默且不记时间。手动检查绕过节流，设置 › 关于显示检查中、已是最新、下载或重试。首页提示按关闭版本记住，更高版本再显示；关于与不兼容状态的下载不受关闭影响。
 
-电脑协议较新时显示「App 版本过旧」，有已知正式新版本时提供下载；协议不匹配错误拿不到 initialize 结果时回退 GitHub 缓存。下载地址固定为 `https://github.com/kanzaki-chiya/Nocturne/releases/download/v<version>/nocturne-<version>.apk`，原生验证后用 ACTION_VIEW 交系统浏览器；不放宽 WebView 导航，不申请 REQUEST_INSTALL_PACKAGES。
+电脑协议较新时显示「App 版本过旧」，有已知正式新版本时提供下载。连接进入 `connecting` 时 `appPlatform` 会先 `update.computer(undefined)` 清空上一台电脑的版本；而真实 RPC 客户端在 `result.protocolVersion !== RPC_PROTOCOL_VERSION` 时直接抛 `protocol_version_mismatch`，不会把 `InitializeResult` 返回给 `PhoneConnection`，因此真实 RPC 走不兼容分支时电脑版本已被清空且拿不到当次握手版本，下载按钮只能来自 GitHub 检查结果（无 GitHub 结果则不显示下载按钮）。下载地址固定为 `https://github.com/kanzaki-chiya/Nocturne/releases/download/v<version>/nocturne-<version>.apk`，原生验证后用 ACTION_VIEW 交系统浏览器；不放宽 WebView 导航，不申请 REQUEST_INSTALL_PACKAGES。
 
 共享扩展点新增 `scanPairing`、`openAppSettings`、`initialized`、`versionMessage` 及更新 UI 挂载点；App 通过 `updateLifecycle` 管理启动、前台检查与退订，网页版入口不注入这些字段。
 

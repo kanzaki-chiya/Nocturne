@@ -197,6 +197,8 @@ export function PhoneApp({
     );
     sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
     setPage(next);
+    setAddingHost(false);
+    setCameraDenied(false);
     setError("");
     setMenu(null);
   };
@@ -536,8 +538,8 @@ export function PhoneApp({
             <button
               className="phone-list-action"
               onClick={() => {
-                void operation(async () => {
-                  await platform.openAppSettings?.();
+                void Promise.resolve(platform.openAppSettings?.()).catch((e: unknown) => {
+                  setError(e instanceof Error ? e.message : "操作失败，请重试");
                 });
               }}
             >
@@ -651,6 +653,7 @@ export function PhoneApp({
                 );
                 setOffer(undefined);
                 setAddingHost(false);
+                setCameraDenied(false);
                 setHosts(await storage.hosts());
                 setInstallHint(platform.relay === "page" && iosBrowser() && !standalone());
                 navigate({ kind: "home", hostId: paired.hostId }, true);
@@ -1178,7 +1181,16 @@ export function PhoneApp({
         </p>
       )}
       {connection && connection.state !== "online" && page.kind !== "settings" && (
-        <aside className="phone-status" role="status">
+        <aside
+          className={`phone-status${
+            connection.state === "incompatible" &&
+            connection.message === "App 版本过旧" &&
+            platform.incompatibleUpdate
+              ? " phone-update-content"
+              : ""
+          }`}
+          role="status"
+        >
           {connection.state === "incompatible" &&
           connection.message === "App 版本过旧" &&
           platform.incompatibleUpdate

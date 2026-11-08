@@ -15,10 +15,11 @@ import type { PhonePlatform } from "../src/web/platform";
 
 const connections: { origin: string; hostId: string }[] = [];
 const visibilities: boolean[] = [];
+let connectionState = { state: "offline", message: "电脑已离线" };
 vi.mock("../src/web/connection", () => ({
   PhoneConnection: class {
-    state = "offline";
-    message = "电脑已离线";
+    state = connectionState.state;
+    message = connectionState.message;
     constructor(options: { origin: string; host: { hostId: string } }) {
       connections.push({ origin: options.origin, hostId: options.host.hostId });
     }
@@ -31,6 +32,7 @@ let root: Root | undefined;
 beforeEach(() => {
   connections.length = 0;
   visibilities.length = 0;
+  connectionState = { state: "offline", message: "电脑已离线" };
   vi.stubGlobal("crypto", webcrypto);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("matchMedia", () => ({
@@ -78,7 +80,7 @@ it.each(["text", "invalid", "cancelled", "denied"] as const)("App 扫码 %s", as
           ? { text: "invalid" }
           : { [result]: true },
     );
-  const openAppSettings = vi.fn();
+  const openAppSettings = vi.fn().mockResolvedValue(undefined);
   const container = await mount(
     <PhoneApp
       storage={memoryStorage()}
@@ -105,6 +107,13 @@ it.each(["text", "invalid", "cancelled", "denied"] as const)("App 扫码 %s", as
       settings?.click();
     });
     expect(openAppSettings).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("没有相机权限");
+    expect(container.textContent).toContain("打开系统设置");
+    openAppSettings.mockRejectedValueOnce(new Error("无法打开系统设置"));
+    await act(async () => {
+      settings?.click();
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("无法打开系统设置");
     scanPairing.mockResolvedValue({ cancelled: true });
     await act(async () => {
       scan?.click();
@@ -112,6 +121,49 @@ it.each(["text", "invalid", "cancelled", "denied"] as const)("App 扫码 %s", as
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.textContent).not.toContain("打开系统设置");
   }
+});
+
+it("设置页添加电脑拒绝相机权限后离开页面再进入不残留打开系统设置", async () => {
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "computer",
+    hostPub: "pub",
+    name: "电脑",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  const container = await mount(
+    <PhoneApp
+      storage={storage}
+      platform={{
+        relay: "link",
+        scanPairing: async () => ({ denied: true }),
+        openAppSettings: async () => undefined,
+      }}
+    />,
+  );
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "添加电脑")?.click();
+  });
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "扫码")?.click();
+  });
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe("没有相机权限");
+  expect(container.textContent).toContain("打开系统设置");
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "打开")?.click();
+  });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "添加电脑")?.click();
+  });
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(container.textContent).not.toContain("打开系统设置");
 });
 
 it("App 配对链接必须带中继地址，只接受 https 与本机 http://127.0.0.1", async () => {
@@ -277,4 +329,42 @@ it("平台的 onForeground 在页面挂载时登记、卸载时退订；没有�
   root = undefined;
   expect(unsubscribe).toHaveBeenCalledOnce();
   await mount(<PhoneApp storage={storage} platform={{ relay: "link" }} />);
+});
+
+it("版本不兼容状态条：App 外层加 phone-update-content，网页版保持原 phone-status", async () => {
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "computer",
+    hostPub: "pub",
+    name: "电脑 1",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  connectionState = { state: "incompatible", message: "App 版本过旧" };
+  const appContainer = await mount(
+    <PhoneApp
+      storage={storage}
+      platform={{
+        relay: "link",
+        incompatibleUpdate: () => (
+          <>
+            <span>App 版本过旧</span>
+            <span className="phone-update-actions">
+              <button className="phone-update-link">下载 2.0.0</button>
+            </span>
+          </>
+        ),
+      }}
+    />,
+  );
+  const appStatus = appContainer.querySelector("aside.phone-status");
+  expect(appStatus?.className).toBe("phone-status phone-update-content");
+  expect(appStatus?.textContent).toBe("App 版本过旧下载 2.0.0");
+  await act(() => root?.unmount());
+  root = undefined;
+  connectionState = { state: "incompatible", message: "此手机界面需要更新的电脑端，请升级电脑上的 Nocturne" };
+  const webContainer = await mount(<PhoneApp storage={storage} />);
+  const webStatus = webContainer.querySelector("aside.phone-status");
+  expect(webStatus?.className).toBe("phone-status");
+  expect(webStatus?.textContent).toBe("此手机界面需要更新的电脑端，请升级电脑上的 Nocturne");
 });

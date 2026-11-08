@@ -112,7 +112,7 @@ export function UpdateNotice({
     </>
   );
   return incompatible ? (
-    <span className="phone-update-content">{content}</span>
+    content
   ) : (
     <aside className="phone-status phone-update-content" role="status">
       {content}
