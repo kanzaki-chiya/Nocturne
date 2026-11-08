@@ -253,9 +253,11 @@ export class BackgroundShells {
     const events = effectiveEvents(log);
     const delivered = new Set(
       events.flatMap((event) =>
-        event.type === "message.user" && event.payload.backgroundShell
-          ? [event.payload.backgroundShell.callId]
-          : [],
+        event.type === "shell.result_discarded"
+          ? [event.payload.callId]
+          : event.type === "message.user" && event.payload.backgroundShell
+            ? [event.payload.backgroundShell.callId]
+            : [],
       ),
     );
     return events.flatMap((event) => {

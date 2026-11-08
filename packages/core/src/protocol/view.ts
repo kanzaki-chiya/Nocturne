@@ -411,8 +411,13 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         });
     }
   }
-  if (event.type === "message.user" && event.payload.backgroundShell) {
-    const result = event.payload.backgroundShell;
+  if (
+    event.type === "shell.result_discarded" ||
+    (event.type === "message.user" && event.payload.backgroundShell)
+  ) {
+    const result =
+      event.type === "shell.result_discarded" ? event.payload : event.payload.backgroundShell;
+    if (!result) return;
     const task = view.backgroundShells.find((item) => item.taskId === result.taskId);
     if (task) Object.assign(task, result, { endedAt: event.time });
   }

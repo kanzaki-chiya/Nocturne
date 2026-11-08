@@ -121,6 +121,8 @@ ADR-0082：`app` 主体表示软件身份，可带仅供显示与解析的 `app:
 
 ADR-0083：`message.user.backgroundShell?: { taskId, callId, status: "exited" | "timeout" | "killed" | "interrupted", exitCode?, signal? }` 标记后台命令结果。正文以 `<shell-result id="…" status="…" exit="…">` 包裹尚未被输出工具读取的尾部，经通用待发输入进入历史；不是一次新的工具完成事件。`input.pending` 增加 Runtime 专用的 `mode: "shell"`，可撤回不可编辑。
 
+ADR-0083 修订（2026-11-08）：撤回后台结果时写入会话级持久事件 `shell.result_discarded`，payload 与 `message.user.backgroundShell` 相同。该事件表示用户已丢弃结果，不投影对话消息；恢复不再补送 interrupted，视图据此保留最终状态。不提升 formatVersion；旧 Runtime 遇到此未知持久事件将拒绝恢复（session_log_newer），旧只读客户端忽略。待发输入本身仍不持久化。
+
 ### 3.2 临时事件
 
 ADR-0083：`shell.task_updated` 携带 `{ task: BackgroundShellTask }`，任务字段见 [view.md](view.md)。启动和结束时发送；运行中日志写入增长后按同一任务最多每 500ms 一次发送，`task.outputChars` 为已写日志的字符数，结束时发送最终状态并清除未触发的节流定时器。它不写日志、不占用持久 seq；订阅后以 `shell.tasks` 对齐当前内存快照。

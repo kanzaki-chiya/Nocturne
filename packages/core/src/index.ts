@@ -3907,11 +3907,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           await pumpQueue();
         }),
       cancelInput: (id) =>
-        Promise.resolve().then(() => {
+        Promise.resolve().then(async () => {
           assertUsable();
           assertMainSession();
+          const result = pendingInputStore.shellResult(id);
           if (pendingInputStore.cancel(id) === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
+          if (result) await session.emit("shell.result_discarded", result);
         }),
       async resumeInputs() {
         assertUsable();

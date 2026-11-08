@@ -132,6 +132,10 @@ export class PendingInputs {
     return "ok";
   }
 
+  shellResult(id: string) {
+    return this.entries.find((entry) => entry.id === id)?.input.backgroundShell;
+  }
+
   cancel(id: string): PendingInputOutcome {
     const entry = this.entries.find((candidate) => candidate.id === id);
     if (entry === undefined) return "consumed";

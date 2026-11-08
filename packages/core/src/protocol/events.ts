@@ -382,6 +382,7 @@ export type CheckpointFilePayload = {
 } & ({ phase: "before"; before: CheckpointBefore } | { phase: "after"; sha256: string | null });
 
 export interface DurablePayloadMap {
+  "shell.result_discarded": BackgroundShellResult;
   "session.rewound": SessionRewoundPayload;
   "checkpoint.file": CheckpointFilePayload;
   "session.created": SessionCreatedPayload;
@@ -458,6 +459,7 @@ export type EphemeralEvent<T extends EphemeralType = EphemeralType> = T extends 
 export type RuntimeEvent = DurableEvent | EphemeralEvent;
 
 export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
+  "shell.result_discarded",
   "session.rewound",
   "checkpoint.file",
   "session.created",

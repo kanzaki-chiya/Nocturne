@@ -4,6 +4,7 @@
 - 日期：2026-11-07
 - 修订：[tools.md](../architecture/tools.md)（shell 一节与「暂不做」列表）、[agent-loop.md](../architecture/agent-loop.md)、[events.md](../protocols/events.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md)、[roadmap.md](../roadmap/roadmap.md)（「之后」里的后台任务）
 
+- 修订：2026-11-08：撤回后台结果时持久记录 `shell.result_discarded`，避免恢复会话后把已撤回结果误补为 interrupted 暂停条目。
 - 修订：2026-11-08：RPC 观察者按偏移读取、运行中节流推送 `shell.task_updated`；客户端需要首读全量和增量追加，不能共用模型游标。
 
 ## 背景
@@ -69,7 +70,7 @@ backgroundShell?: {
 
 - 用户中断 Turn（Esc、停止按钮、`Ctrl+Alt+Esc`）**不**停后台命令。
 - **会话关闭、删除、Runtime 退出**：终止该会话所有后台命令的进程树，结果不交付。桌面端关窗口等同 Runtime 退出。
-- **重启**：不复活。会话加载时，对「启动过后台命令、日志里却没有对应 `backgroundShell` 消息」的调用，各补一条 `status: "interrupted"` 的暂停待发条目，随用户下一次提交送达，不自动唤起。依据是会话日志里 `shell` 结果的 `output.background` 与 `message.user.backgroundShell.callId`。
+- **重启**：不复活。会话加载时，对「启动过后台命令、日志里却没有对应 `backgroundShell` 消息」的调用，各补一条 `status: "interrupted"` 的暂停待发条目，随用户下一次提交送达，不自动唤起。依据是会话日志里 `shell` 结果的 `output.background` 与 `message.user.backgroundShell.callId`；已通过 `shell.result_discarded` 撤回的结果不补送。
 - **回退**到启动调用之前：终止该任务，不交付；已交付的结果随回退移除。**分叉**不继承运行中的任务。
 - **子会话**：子代理里 `background` 不可用（字段不出现在子会话的 `shell` 描述里），避免子会话结束留下孤儿。
 - 进程树终止沿用 `ProcessRunner.kill()`，已知遗留（脱离进程树的孙进程）同 tools.md「孤儿进程遗留」。
