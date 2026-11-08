@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { PaneErrorBoundary } from "../ErrorBoundary";
 import { PhoneApp } from "./App";
 import { indexedStorage } from "./storage";
 import { takePairingFragment } from "./pairing";
@@ -12,5 +13,7 @@ void registerWorker().catch(() => undefined);
 const root = document.getElementById("root");
 if (root)
   createRoot(root).render(
-    <PhoneApp storage={indexedStorage()} initialFragment={fragment} push={browserPush} />,
+    <PaneErrorBoundary>
+      <PhoneApp storage={indexedStorage()} initialFragment={fragment} push={browserPush} />
+    </PaneErrorBoundary>,
   );

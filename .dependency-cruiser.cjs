@@ -436,8 +436,8 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: "node_modules" },
-    // 桌面端的前端构建产物（vite 打包的 dist、dist-web）不参与依赖方向检查
-    exclude: { path: "(^|/)src-tauri/|^apps/desktop/dist(?:-web)?/" },
+    // 桌面端与安卓的前端构建产物（vite 打包的 dist、dist-web）不参与依赖方向检查
+    exclude: { path: "(^|/)src-tauri/|^apps/desktop/dist(?:-web)?/|^apps/android/dist/" },
     tsConfig: { fileName: "tsconfig.base.json" },
     enhancedResolveOptions: {
       exportsFields: ["exports"],

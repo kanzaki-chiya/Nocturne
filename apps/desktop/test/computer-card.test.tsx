@@ -31,6 +31,28 @@ function mount() {
   );
   return respondPermission;
 }
+it("后台发来不认识的选项时跳过，手机端不因此抛错", () => {
+  const pending = {
+    requestId: "future",
+    callId: "future-call",
+    toolName: "mcp__computer__get_window_state",
+    subjects: [{ kind: "app", target: "excel.exe", app: { name: "Excel", pid: 20 } }],
+    reason: "按权限规则需要确认",
+    options: ["allow_session", "allow_forever", "allow_always", "deny"],
+  } as unknown as PendingPermission;
+  render(
+    <PermissionCard
+      pending={pending}
+      session={{} as unknown as RpcSession}
+      cwd="Z:/project"
+      hidePersistentPermissions
+    />,
+  );
+  expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+    expect.stringContaining("本会话允许"),
+    expect.stringContaining("拒绝"),
+  ]);
+});
 it("软件确认显示软件、进程与窗口，只有三按钮，首项主按钮", () => {
   mount();
   expect(screen.getByText("操作软件")).toBeTruthy();

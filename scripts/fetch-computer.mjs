@@ -28,14 +28,28 @@ function prune(dir) {
     if (!allowed.has(existing)) rmSync(join(dir, existing), { recursive: true, force: true });
 }
 
+/** 网络抖动不该让整次发布重来：超时、断连和非 2xx 都重试，校验失败不走这里 */
+async function download(attempts = 4) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await fetch(spec.url, { signal: AbortSignal.timeout(180_000) });
+      if (!response.ok) throw new Error(`computer download HTTP ${response.status}`);
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`computer download attempt ${attempt} failed: ${message}`);
+      await new Promise((done) => setTimeout(done, attempt * 5_000));
+    }
+  }
+}
+
 async function main() {
   if (process.platform !== "win32") throw new Error("电脑操控驱动目前仅打包 Windows x64");
   mkdirSync(cache, { recursive: true });
   const archive = join(cache, "package.zip");
   if (!existsSync(archive)) {
-    const response = await fetch(spec.url, { signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) throw new Error(`computer download HTTP ${response.status}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = await download();
     if (createHash("sha256").update(bytes).digest("hex").toUpperCase() !== spec.sha256)
       throw new Error("computer archive SHA-256 mismatch");
     writeFileSync(archive, bytes);

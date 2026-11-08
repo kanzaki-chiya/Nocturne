@@ -2960,8 +2960,10 @@ export function PermissionCard({
   const { reply, busy, error } = useReply((value: PermissionReply) =>
     session.respondPermission(pending.requestId, value),
   );
+  // 客户端可能比后台旧：不认识的选项跳过，不能让整张卡片抛错
+  const known = pending.options.filter((option) => Object.hasOwn(permissionReplies, option));
   const options: PermissionOption[] = (
-    pending.options.length ? pending.options : (["allow_once", "deny"] as PermissionOption[])
+    known.length ? known : (["allow_once", "deny"] as PermissionOption[])
   ).filter(
     (option) =>
       !hidePersistentPermissions ||

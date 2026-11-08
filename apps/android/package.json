@@ -12,6 +12,8 @@
     "android:dev": "tauri android dev",
     "android:build": "tauri android build --debug --apk --target aarch64",
     "android:build:emulator": "tauri android build --debug --apk --target x86_64",
+    "android:build:release": "tauri android build --apk --target aarch64",
+    "android:build:release:emulator": "tauri android build --apk --target x86_64",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },

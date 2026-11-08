@@ -1,9 +1,12 @@
 # 发布流水线（ADR-0050 第 4 节）：推送 v* 标签触发。
 # 主任务在 windows-latest 上跑完整检查与 pnpm release:build，
 # 产物（setup.exe、.sig、latest.json、nctrn tgz、中继 nocturne-relay tgz）经 gh release create 上传为草稿；
+# android 任务构建签名 APK 并追加到同一草稿（ADR-0059）；
 # ubuntu/macos 任务只对 tgz 做安装冒烟，结果追加进草稿说明。
 # 用到的 secrets：GITHUB_TOKEN（内置）、TAURI_SIGNING_PRIVATE_KEY、
-# TAURI_SIGNING_PRIVATE_KEY_PASSWORD（更新包签名私钥，维护者配置）。
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD（更新包签名私钥，维护者配置）、
+# ANDROID_KEYSTORE_BASE64、ANDROID_KEYSTORE_PASSWORD、ANDROID_KEY_ALIAS、
+# ANDROID_KEY_PASSWORD（安卓签名密钥，维护者配置）。
 name: release
 
 on:
@@ -147,4 +150,103 @@ jobs:
           printf '\n- %s tgz 安装冒烟：%s\n' "$RUNNER_OS" "$mark" >> "$RUNNER_TEMP/notes.md"
           if [ "$RELAY_OUTCOME" = "success" ]; then relay_mark="通过"; else relay_mark="失败"; fi
           printf '\n- %s 中继 tgz 冒烟：%s\n' "$RUNNER_OS" "$relay_mark" >> "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+
+  # 安卓 APK：等冒烟结束再追加草稿说明，避免互相覆盖；失败不影响已建成的草稿。
+  # 没配置签名密钥时不附 APK，并在说明里写明。
+  android:
+    name: 安卓 APK
+    needs: [windows, smoke]
+    if: ${{ !cancelled() && needs.windows.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 上传 APK + 把结果追加进草稿说明
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - name: 检出
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 是否配置了签名密钥
+        id: signing
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: pnpm
+        if: steps.signing.outputs.ready == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Node.js
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: 安装依赖
+        if: steps.signing.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: 工具链
+        if: steps.signing.outputs.ready == 'true'
+        run: |
+          rustup target add aarch64-linux-android
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          JAVA_HOME="$JAVA_HOME_21_X64" "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: 写入签名配置
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > apps/android/src-tauri/gen/android/keystore.properties
+
+      - name: 构建工作区包
+        if: steps.signing.outputs.ready == 'true'
+        run: pnpm build
+
+      - name: 构建 APK
+        if: steps.signing.outputs.ready == 'true'
+        run: pnpm android:build:release
+
+      - name: 校验签名并上传
+        id: upload
+        if: steps.signing.outputs.ready == 'true'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APK="$RUNNER_TEMP/nocturne-$VERSION.apk"
+          cp apps/android/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk "$APK"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          "$BUILD_TOOLS/apksigner" verify "$APK"
+          gh release upload "$GITHUB_REF_NAME" "$APK"
+
+      - name: 把结果追加进草稿说明
+        if: ${{ !cancelled() }}
+        env:
+          READY: ${{ steps.signing.outputs.ready }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          if [ "$READY" != "true" ]; then
+            printf '\n- 安卓 APK：未配置签名密钥，未附带\n' >> "$RUNNER_TEMP/notes.md"
+          elif [ "$UPLOAD" = "success" ]; then
+            printf '\n- 安卓 APK：已构建并通过签名校验\n' >> "$RUNNER_TEMP/notes.md"
+          else
+            printf '\n- 安卓 APK：构建失败\n' >> "$RUNNER_TEMP/notes.md"
+          fi
           gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
