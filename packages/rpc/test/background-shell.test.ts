@@ -66,6 +66,64 @@ it("shell observer RPC preserves offset zero and reads the full tail after compl
     await h.served;
   }
 });
+it("RPC shell.kill stays silent and adds the user-stop note to only the next turn", async () => {
+  let command = "";
+  let calls = 0;
+  const contexts: string[] = [];
+  const h = await connect({
+    shell: { background: true },
+    provider: new FakeProvider({
+      models: VISION_MODELS,
+      handler: async (request) => {
+        contexts.push(JSON.stringify(request));
+        return calls++ === 0
+          ? [
+              {
+                type: "tool_call",
+                toolCallId: "launch",
+                name: "shell",
+                input: { command, background: true, name: "infinite" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ]
+          : textScript("done");
+      },
+    }),
+  });
+  const file = path.join(h.ws, "stop-fixture.cjs");
+  const pidFile = path.join(h.ws, "stop-pid.json");
+  writeFileSync(
+    file,
+    `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify(process.pid)); console.log("ready"); setInterval(()=>{},500);`,
+  );
+  command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${file}"`;
+  try {
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    await session.setPermissionPreset("bypass");
+    await session.submit({ text: "go" });
+    const task = (await session.shellTasks())[0];
+    if (!task) throw new Error("missing task");
+    await vi.waitFor(
+      async () => expect((await session.shellOutput(task.taskId)).text).toContain("ready"),
+      { timeout: 5000 },
+    );
+    const count = contexts.length;
+    await session.shellKill(task.taskId);
+    expect(await session.pendingInputs()).toEqual({ items: [], paused: false });
+    expect(contexts).toHaveLength(count);
+    const pid = JSON.parse(readFileSync(pidFile, "utf8")) as number;
+    expect(() => process.kill(pid, 0)).toThrow();
+    await session.submit({ text: "next" });
+    const note = `[Background command] Stopped by the user: infinite (taskId: ${task.taskId}).`;
+    expect(contexts.at(-1)).toContain(note);
+    await session.submit({ text: "again" });
+    expect(contexts.at(-1)).not.toContain(note);
+    await session.close();
+  } finally {
+    h.client.close();
+    await h.served;
+  }
+}, 20000);
 it("shell RPC tasks/output/kill map to the current session and validate arguments", async () => {
   const h = await connect();
   try {

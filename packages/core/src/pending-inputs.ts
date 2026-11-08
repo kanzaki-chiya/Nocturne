@@ -49,6 +49,9 @@ export class PendingInputs {
     const items: PendingInputItem[] = this.entries.map((entry) => ({
       id: entry.id,
       mode: entry.mode,
+      ...(entry.input.backgroundShell?.name !== undefined
+        ? { shellName: entry.input.backgroundShell.name }
+        : {}),
       text: entry.input.content
         .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
         .map((block) => block.text)

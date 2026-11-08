@@ -47,6 +47,26 @@ const events: DurableEvent[] = [
   result,
 ];
 describe("backgroundShells projection", () => {
+  it.each(["user", "model"] as const)(
+    "replays %s stop as killed without conversation entries",
+    (source) => {
+      const stopped: DurableEvent = {
+        ...base,
+        seq: 3,
+        time: end,
+        type: "shell.task_stopped",
+        payload: { taskId: "task", callId: "call", status: "killed", source, exitCode: 1 },
+      };
+      const before = replaySessionView(events.slice(0, 2));
+      const view = replaySessionView([...events.slice(0, 2), stopped]);
+      expect(view.entries).toEqual(before.entries);
+      expect(view.backgroundShells[0]).toMatchObject({
+        status: "killed",
+        exitCode: 1,
+        endedAt: end,
+      });
+    },
+  );
   it("outputChars updates the live task without entering durable replay or conversation entries", () => {
     const live = replaySessionView(events.slice(0, 2));
     const task = live.backgroundShells[0];

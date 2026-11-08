@@ -49,7 +49,7 @@ export function PendingInputsPanel({
     const active = i === selected;
     const label =
       item.mode === "shell"
-        ? "后台任务 · 等待送达"
+        ? `后台任务 · ${truncateLine(item.shellName ?? "", Math.max(1, width - 30), "…")} · 等待送达`
         : item.mode === "subagent"
           ? "子代理结果 · 等待送达"
           : item.mode === "steer"

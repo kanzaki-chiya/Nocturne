@@ -168,34 +168,40 @@ it("shell card falls back to launch command and delivered exit code without task
   expect(container.querySelector(".tool-res")?.textContent).toBe("退出码 1");
 });
 
-it("shell pending input can be withdrawn and has no edit or send entry", async () => {
-  const cancel = vi.fn(async () => undefined);
-  const update = vi.fn(async () => undefined);
-  const { container } = render(
-    <PendingInputs
-      snapshot={{
-        paused: false,
-        items: [
-          {
-            id: "pending-1",
-            mode: "shell",
-            text: "<shell-result>hidden</shell-result>",
-            attachments: 0,
-            createdAt: task.endedAt ?? "",
-            paused: false,
-          },
-        ],
-      }}
-      onUpdate={update}
-      onCancel={cancel}
-      onResume={vi.fn(async () => undefined)}
-    />,
-  );
-  expect(container.querySelector(".pi-text")?.textContent).toBe("后台任务 · 等待送达");
-  expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
-  expect(container.textContent).not.toContain("shell-result");
-  fireEvent.click(screen.getByRole("button", { name: "取消" }));
-  await waitFor(() => expect(cancel).toHaveBeenCalledWith("pending-1"));
-  expect(update).not.toHaveBeenCalled();
-});
+it.each(["check", "node fixture"])(
+  "shell pending input names %s and only offers withdrawal",
+  async (shellName) => {
+    const cancel = vi.fn(async () => undefined);
+    const update = vi.fn(async () => undefined);
+    const { container } = render(
+      <PendingInputs
+        snapshot={{
+          paused: false,
+          items: [
+            {
+              id: "pending-1",
+              mode: "shell",
+              shellName,
+              text: "<shell-result>hidden</shell-result>",
+              attachments: 0,
+              createdAt: task.endedAt ?? "",
+              paused: false,
+            },
+          ],
+        }}
+        onUpdate={update}
+        onCancel={cancel}
+        onResume={vi.fn(async () => undefined)}
+      />,
+    );
+    expect(container.querySelector(".pi-text")?.textContent).toBe(
+      `后台任务 · ${shellName} · 等待送达`,
+    );
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
+    expect(container.textContent).not.toContain("shell-result");
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith("pending-1"));
+    expect(update).not.toHaveBeenCalled();
+  },
+);

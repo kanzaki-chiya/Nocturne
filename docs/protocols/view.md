@@ -213,7 +213,7 @@ interface SessionNotice {
 
 顺序约束：视图**不要求**事件全序——`resolved` 可在 `requested` 前（规则拒绝直接产生 `resolved`）、`completed` 可在 `started` 前、`requested` 可在 `input.delta` 前（Provider 不流式参数时）。所有关联都通过 `callId`/`messageId`/`requestId` 键查找。
 
-后台命令（ADR-0083）：`BackgroundShellTask` 为 `{ taskId, callId, name, command, logPath, outputChars, status, startedAt, endedAt?, exitCode?, signal? }`。`tool.completed.output.background === true` 结合启动输入建立运行中任务；`message.user.backgroundShell` 更新状态与结束时间；撤回结果的 `shell.result_discarded` 同样更新最终状态，但不追加对话条目。`UserEntry.backgroundShell` 保留结果元数据。条目不会因时间经过从视图删除；客户端按结束五分钟后过滤。关闭与重启之间尚未送达的结束结果按 interrupted 暂停条目恢复。
+后台命令（ADR-0083）：`BackgroundShellTask` 为 `{ taskId, callId, name, command, logPath, outputChars, status, startedAt, endedAt?, exitCode?, signal? }`。`tool.completed.output.background === true` 结合启动输入建立运行中任务；`message.user.backgroundShell` 更新状态与结束时间；撤回结果的 `shell.result_discarded`、停止的 `shell.task_stopped` 同样更新最终状态，但不追加对话条目。停止状态为 killed，恢复不补 interrupted；用户停止说明仅进入下一回合模型上下文，不进入视图。`UserEntry.backgroundShell` 保留结果元数据。条目不会因时间经过从视图删除；客户端按结束五分钟后过滤。关闭与重启之间尚未送达的结束结果按 interrupted 暂停条目恢复。
 
 ## 4. 临时事件归约
 

@@ -253,6 +253,14 @@ const payloadSchemas = {
       )
       .optional(),
   }),
+  "shell.task_stopped": z.object({
+    taskId: z.string(),
+    callId: z.string(),
+    status: z.literal("killed"),
+    source: z.enum(["user", "model"]),
+    exitCode: z.number().int().optional(),
+    signal: z.string().optional(),
+  }),
   "shell.result_discarded": z.object({
     taskId: z.string(),
     callId: z.string(),
@@ -270,6 +278,7 @@ const payloadSchemas = {
     skill: z.object({ name: z.string(), body: z.string() }).optional(),
     backgroundShell: z
       .object({
+        name: z.string().optional(),
         taskId: z.string(),
         callId: z.string(),
         status: z.enum(["exited", "timeout", "killed", "interrupted"]),
@@ -420,6 +429,7 @@ function envelope<T extends DurableType>(type: T, payload: (typeof payloadSchema
 }
 
 export const durableEventSchema = z.discriminatedUnion("type", [
+  envelope("shell.task_stopped", payloadSchemas["shell.task_stopped"]),
   envelope("shell.result_discarded", payloadSchemas["shell.result_discarded"]),
   envelope("session.rewound", payloadSchemas["session.rewound"]),
   envelope("checkpoint.file", payloadSchemas["checkpoint.file"]),

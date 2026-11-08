@@ -78,28 +78,56 @@ describe("TUI background shell", () => {
     expect(ui.lastFrame()).toContain("后台任务 1");
     ui.unmount();
   });
-  it("pending result only offers retraction and hides payload", () => {
+  it.each(["fixture", "node fixture"])(
+    "pending result names %s and only offers retraction",
+    (shellName) => {
+      const ui = render(
+        <PendingInputsPanel
+          items={[
+            {
+              id: "p",
+              mode: "shell",
+              shellName,
+              text: "<shell-result>",
+              attachments: 0,
+              paused: true,
+              createdAt: "now",
+            },
+          ]}
+          paused
+          selected={0}
+          width={100}
+          height={4}
+        />,
+      );
+      expect(ui.lastFrame()).toContain(`后台任务 · ${shellName} · 等待送达`);
+      expect(ui.lastFrame()).not.toContain("shell-result");
+      expect(ui.lastFrame()).not.toContain("Alt+E");
+      ui.unmount();
+    },
+  );
+  it("long pending task name is ellipsized while keeping the waiting suffix", () => {
     const ui = render(
       <PendingInputsPanel
         items={[
           {
-            id: "p",
+            id: "long",
             mode: "shell",
-            text: "<shell-result>",
+            shellName: "长命令".repeat(50),
+            text: "",
             attachments: 0,
-            paused: true,
+            paused: false,
             createdAt: "now",
           },
         ]}
-        paused
+        paused={false}
         selected={0}
-        width={100}
+        width={40}
         height={4}
       />,
     );
-    expect(ui.lastFrame()).toContain("后台任务 · 等待送达");
-    expect(ui.lastFrame()).not.toContain("shell-result");
-    expect(ui.lastFrame()).not.toContain("Alt+E");
+    expect(ui.lastFrame()).toContain("… · 等待送达");
+    expect(ui.lastFrame()).not.toContain("长命令".repeat(50));
     ui.unmount();
   });
   it("/tasks lists, opens tail, stops selected task and hides tasks older than five minutes", async () => {
