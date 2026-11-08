@@ -123,7 +123,7 @@ it.each(["text", "invalid", "cancelled", "denied"] as const)("App 扫码 %s", as
   }
 });
 
-it("设置页添加电脑拒绝相机权限后离开页面再进入不残留打开系统设置", async () => {
+it("设置页添加电脑拒绝相机权限后点返回离开（popstate）再进入不残留打开系统设置", async () => {
   const storage = memoryStorage();
   await storage.putHost({
     hostId: "computer",
@@ -162,6 +162,49 @@ it("设置页添加电脑拒绝相机权限后离开页面再进入不残留打�
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
   expect(container.textContent).toContain("添加电脑");
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "添加电脑")?.click();
+  });
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(container.textContent).not.toContain("打开系统设置");
+});
+
+it("设置页添加电脑拒绝相机权限后点打开离开（navigate）再进入不残留打开系统设置", async () => {
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "computer",
+    hostPub: "pub",
+    name: "电脑",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  const container = await mount(
+    <PhoneApp
+      storage={storage}
+      platform={{
+        relay: "link",
+        scanPairing: async () => ({ denied: true }),
+        openAppSettings: async () => undefined,
+      }}
+    />,
+  );
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "添加电脑")?.click();
+  });
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "扫码")?.click();
+  });
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe("没有相机权限");
+  expect(container.textContent).toContain("打开系统设置");
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "打开")?.click();
+  });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
   await act(async () => {
     [...container.querySelectorAll("button")].find((b) => b.textContent === "添加电脑")?.click();
   });
