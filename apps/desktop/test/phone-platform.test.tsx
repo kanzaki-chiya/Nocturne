@@ -362,7 +362,10 @@ it("版本不兼容状态条：App 外层加 phone-update-content，网页版保
   expect(appStatus?.textContent).toBe("App 版本过旧下载 2.0.0");
   await act(() => root?.unmount());
   root = undefined;
-  connectionState = { state: "incompatible", message: "此手机界面需要更新的电脑端，请升级电脑上的 Nocturne" };
+  connectionState = {
+    state: "incompatible",
+    message: "此手机界面需要更新的电脑端，请升级电脑上的 Nocturne",
+  };
   const webContainer = await mount(<PhoneApp storage={storage} />);
   const webStatus = webContainer.querySelector("aside.phone-status");
   expect(webStatus?.className).toBe("phone-status");
