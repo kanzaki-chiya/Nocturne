@@ -272,7 +272,7 @@ launch(request, ctx)
 
 **权限语义不扩展**：当前内置子会话及 ACP 都是非交互 gate，剩余 ask 直接 non_interactive deny，不产生等待用户确认。父 task 启动前的确认留在主对话，此时还没有 child，不提供可用的子标签入口。若读取旧日志发现未决 permission.requested，只读视图不渲染确认提示、无应答按钮；历史未收束请求不声称当前仍在等待。未来若做权限冒泡，另行设计，不能在这轮为了造一个等待状态而改变第 7 节。
 
-只读观察不启动会话、不授予交互句柄，不进入工具权限管线、不新增 Grant。已有 resumeSession 仍是显式打开；不得借观察对象调用 submit、respondPermission、respondQuestion 或 interrupt。新 RPC 仅本机开放，远程由服务端白名单拒绝，ADR-0052 的通道与手机现有能力保持不变。
+只读观察不启动会话、不授予交互句柄，不进入工具权限管线、不新增 Grant。已有 resumeSession 仍是显式打开；不得借观察对象调用 submit、respondPermission、respondQuestion 或 interrupt。远程仅按 [ADR-0084](../decisions/ADR-0084-phone-side-panel.md) 开放 list / subscribe / unsubscribe，并限本连接已打开父会话的直接子会话；readAttachment 与工作树操作保持本机边界，具体规则见 [rpc.md 第 7 节](../protocols/rpc.md#7-远程连接adr-0052)。
 
 ## 13. 诊断与关联（含 traceId 决定）
 

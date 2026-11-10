@@ -64,9 +64,17 @@ export function toRpcError(error: unknown): RpcErrorObject {
     typeof (error as { code?: unknown }).code === "string"
       ? (error as { code: string }).code
       : undefined;
+  const bytes =
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as { bytes?: unknown }).bytes === "number" &&
+    Number.isFinite((error as { bytes: number }).bytes)
+      ? (error as { bytes: number }).bytes
+      : undefined;
   const data = {
     ...(stringCode !== undefined ? { code: stringCode } : {}),
     ...(name !== undefined ? { name } : {}),
+    ...(bytes !== undefined ? { bytes } : {}),
   };
   if (error instanceof RuntimeCommandError) {
     // detail（ADR-0054）：invalid_model 的 disabled + 模型引用随 error.data 返回

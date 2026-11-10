@@ -361,6 +361,17 @@ describe("session.* 方法映射", () => {
       rpcCode: -32002,
       code: "invalid_file_path",
     });
+    // 会话级读文件（ADR-0084）：只收相对工作区且在 fileIndex 可见范围内的文本文件
+    expect(await session.readFile("a.txt")).toEqual({
+      kind: "text",
+      path: "a.txt",
+      text: "x",
+      bytes: 1,
+    });
+    await expect(session.readFile(path.join(h.ws, "a.txt"))).rejects.toMatchObject({
+      rpcCode: -32002,
+      code: "invalid_file_path",
+    });
 
     expect(await session.readInputHistory()).toEqual([]);
     await session.recordInputHistory("第一条");
@@ -626,6 +637,7 @@ describe("公开 API 与 RPC 方法集合一致", () => {
       "runtime.shutdown",
       "session.open",
       "session.abort",
+      "session.readFile",
     ]);
     for (const method of server.methods) {
       if (method === "initialize" || method === "shutdown") continue;

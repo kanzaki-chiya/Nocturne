@@ -44,11 +44,24 @@ function provider(): FakeProvider {
 }
 
 describe("subagent.cancel", () => {
-  it("覆盖表与远程白名单：cancel 开放，观察类方法仍只限本机", () => {
+  it("覆盖表与远程白名单：cancel 与只读观察开放，readAttachment/diff/worktrees/deleteWorktree 仍只限本机", () => {
     expect(RUNTIME_METHODS.cancelSubagent).toBe("subagent.cancel");
-    expect(REMOTE_METHODS as readonly string[]).toContain("subagent.cancel");
-    for (const method of ["subagent.list", "subagent.subscribe", "subagent.readAttachment"])
+    for (const method of [
+      "subagent.cancel",
+      "subagent.list",
+      "subagent.subscribe",
+      "subagent.unsubscribe",
+    ]) {
+      expect(REMOTE_METHODS as readonly string[]).toContain(method);
+    }
+    for (const method of [
+      "subagent.readAttachment",
+      "subagent.diff",
+      "subagent.worktrees",
+      "subagent.deleteWorktree",
+    ]) {
       expect(REMOTE_METHODS as readonly string[]).not.toContain(method);
+    }
   });
 
   it("list 带 background；远程取消后交付 cancelled；再取消报 invalid_command", async () => {

@@ -20,7 +20,7 @@ export {
   type Subscription,
 } from "./client.js";
 export { createMemoryTransportPair, type LineTransport } from "../shared/transport.js";
-export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
+export { RPC_ERROR, RPC_PROTOCOL_VERSION, type RpcErrorData } from "../shared/jsonrpc.js";
 export type {
   AgentDevice,
   AgentPairingRequest,
@@ -45,6 +45,7 @@ export type {
   RpcMethods,
   RpcParams,
   RpcResult,
+  SessionFileContent,
   SessionOpened,
   SessionStateSummary,
   WireAttachment,

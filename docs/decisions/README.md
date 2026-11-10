@@ -57,7 +57,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0049](ADR-0049-external-agent-subagent.md) | 外部 agent 子代理：经 ACP 调用 omp、Codex 等命令行工具，task 新增 agent 字段，执行期请求进权限层 | 已接受 |
 | [ADR-0050](ADR-0050-distribution.md) | 分发：npm 单文件包、桌面端随附 Node 与自动更新、草稿发布流水线 | 已接受 |
 | [ADR-0051](ADR-0051-desktop-single-backend.md) | 桌面端改为单后台：一个 nctrn 后台服务所有项目，工作区随会话；切换会话立即生效 | 已接受 |
-| [ADR-0052](ADR-0052-remote-web-client.md) | 远程网页客户端：自建中继、邀请制、端到端加密，同一后台服务多个客户端，复用桌面前端的手机网页 | 已接受（第 2 版） |
+| [ADR-0052](ADR-0052-remote-web-client.md) | 远程网页客户端：自建中继、邀请制、端到端加密，同一后台服务多个客户端，复用桌面前端的手机网页 | 已接受（第 2 版）；远程只读观察与会话内受限读文件见 ADR-0084 |
 | [ADR-0053](ADR-0053-usage-and-cost.md) | 用量统计与费用估算：pricing 增加缓存读写与分档、models.dev 取价、Runtime.usageStats、桌面用量页与 /cost | 已接受 |
 | [ADR-0054](ADR-0054-provider-model-toggle.md) | 服务商与模型启停：停用即不可用、记在 settings.json、注册表盖不可用标记、桌面开关与 TUI 命令 | 已接受 |
 | [ADR-0055](ADR-0055-retry-after-partial-stream.md) | 流式输出中途失败时丢弃部分输出并重发 | 已接受 |
@@ -65,7 +65,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0057](ADR-0057-reviewer-v2.md) | 安全审查第二版：smart 扩大送审范围、是非题、直接交人 | 已接受 |
 | [ADR-0058](ADR-0058-subagent-profiles.md) | 子代理档位：按任务选择模型、强度和工具集上限 | 已接受 |
 | [ADR-0059](ADR-0059-android-app.md) | 安卓 App：Tauri 套壳、后台常驻连接、本地通知 | 已接受 |
-| [ADR-0060](ADR-0060-desktop-side-panel.md) | 桌面端右侧面板：变更、文件、终端、内置浏览器、子代理，标题栏会话概览 | 已接受 |
+| [ADR-0060](ADR-0060-desktop-side-panel.md) | 桌面端右侧面板：变更、文件、终端、内置浏览器、子代理，标题栏会话概览 | 已接受；手机侧边栏见 ADR-0084 |
 | [ADR-0061](ADR-0061-gemini-protocol.md) | Gemini 协议、思考签名回传与按模型的接口地址 | 已接受 |
 | [ADR-0062](ADR-0062-magpie-agent-plugin.md) | Magpie Agent 插件与只读接入层 `magpie.json`（单文件写入、`external-file` 网关 key、完整模型 id） | 已接受 |
 | [ADR-0063](ADR-0063-loop-guard.md) | 重复调用保护与修剪不足时升级摘要 | 已接受 |
@@ -91,6 +91,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0081](ADR-0081-session-worktree-switch.md) | 会话切换工作树 | 已接受 |
 | [ADR-0082](ADR-0082-computer-use.md) | 电脑操控 | 已接受 |
 | [ADR-0083](ADR-0083-background-shell.md) | 后台命令 | 已接受 |
+| [ADR-0084](ADR-0084-phone-side-panel.md) | 手机侧边栏：右抽屉总览、只读子视图与远程只读方法 | 已接受 |
 | [ADR-0085](ADR-0085-new-session-branch-picker.md) | 新会话页选择分支与工作树 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。

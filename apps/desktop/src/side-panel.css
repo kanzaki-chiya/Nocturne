@@ -464,11 +464,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.side-panel .diff-add,
+:is(.side-panel, .phone-side-panel) .diff-add,
 .ovpop .diff-add {
   color: var(--a-success);
 }
-.side-panel .diff-del,
+:is(.side-panel, .phone-side-panel) .diff-del,
 .ovpop .diff-del {
   color: var(--a-error);
 }
@@ -536,7 +536,7 @@
 }
 
 /* DiffBody 的行样式与对话里的改动卡片一致 */
-.side-panel .diff-row {
+:is(.side-panel, .phone-side-panel) .diff-row {
   display: flex;
   align-items: baseline;
   width: max-content;
@@ -544,12 +544,12 @@
   white-space: pre;
   color: var(--a-text);
 }
-.side-panel .diff-row code {
+:is(.side-panel, .phone-side-panel) .diff-row code {
   padding-right: 12px;
   font: inherit;
   color: inherit;
 }
-.side-panel .diff-num {
+:is(.side-panel, .phone-side-panel) .diff-num {
   display: inline-block;
   flex: 0 0 4em;
   padding-right: 10px;
@@ -557,24 +557,24 @@
   text-align: right;
   user-select: none;
 }
-.side-panel .diff-mark {
+:is(.side-panel, .phone-side-panel) .diff-mark {
   flex: 0 0 1em;
   color: var(--a-muted);
   user-select: none;
 }
-.side-panel .diff-row-add {
+:is(.side-panel, .phone-side-panel) .diff-row-add {
   background: var(--a-success-bg);
 }
-.side-panel .diff-row-delete {
+:is(.side-panel, .phone-side-panel) .diff-row-delete {
   background: var(--a-error-bg);
 }
-.side-panel .diff-row-add .diff-mark {
+:is(.side-panel, .phone-side-panel) .diff-row-add .diff-mark {
   color: var(--a-success);
 }
-.side-panel .diff-row-delete .diff-mark {
+:is(.side-panel, .phone-side-panel) .diff-row-delete .diff-mark {
   color: var(--a-error);
 }
-.side-panel .diff-sep {
+:is(.side-panel, .phone-side-panel) .diff-sep {
   padding: 2px 0 2px calc(4em + 1em);
   color: var(--a-faint);
   letter-spacing: 2px;
@@ -611,11 +611,11 @@
   background: linear-gradient(var(--a-error-bg), var(--a-error-bg)), var(--a-panel);
 }
 /* 换行：代码列占满剩余宽度、可在任意位置断（中英文、长 URL），续行缩进到代码起点 */
-.side-panel .diff-wrap .diff-row {
+:is(.side-panel, .phone-side-panel) .diff-wrap .diff-row {
   width: auto;
   white-space: pre-wrap;
 }
-.side-panel .diff-wrap .diff-row code {
+:is(.side-panel, .phone-side-panel) .diff-wrap .diff-row code {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;

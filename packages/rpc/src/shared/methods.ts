@@ -180,6 +180,20 @@ export type WireLocalFile =
   | Extract<LocalFileContent, { kind: "text" }>
   | (Omit<Extract<LocalFileContent, { kind: "image" }>, "data"> & { data: string });
 
+/**
+ * `session.readFile` 的返回结构：仅返回会话工作区内、且在 `session.fileIndex` 可见范围内的只读文本文件。
+ * 二进制文件（`file_binary`）与超过上限的文件（`file_too_large`）均以错误拒绝，不返回内容、不截断。
+ */
+export interface SessionFileContent {
+  kind: "text";
+  /** 归一化后的相对工作区路径（"/" 分隔，与 `FileIndexEntry.path` 一致） */
+  path: string;
+  /** UTF-8 / UTF-16 BOM 解码后的完整文本内容 */
+  text: string;
+  /** 原始文件字节大小 */
+  bytes: number;
+}
+
 export interface SessionParams {
   sessionId: string;
 }
@@ -787,6 +801,10 @@ export interface RpcMethods {
   "session.visionInfo": { params: SessionParams; result: Ret<"visionInfo"> };
   "session.mcpServers": { params: SessionParams; result: Ret<"mcpServers"> };
   "session.fileIndex": { params: SessionParams; result: FileIndexEntry[] };
+  "session.readFile": {
+    params: SessionParams & { path: string };
+    result: SessionFileContent;
+  };
   /**
    * 回答内文件引用存在性检查（U-09，方案 A）：只读，按工作区解析路径；
    * 越界路径照常返回绝对路径与 exists，由客户端决定入口。
@@ -1014,6 +1032,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.visionInfo": true,
   "session.mcpServers": true,
   "session.fileIndex": true,
+  "session.readFile": true,
   "session.resolveFiles": true,
   "session.readInputHistory": true,
   "session.recordInputHistory": true,

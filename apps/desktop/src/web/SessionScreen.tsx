@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
   goalStatusLines,
   visibleGoal,
   parseWorkModeSlash,
-  pendingBackgroundSubagents,
   type ExternalAgentOverview,
   type SkillOverview,
 } from "@nocturne/core/protocol";
@@ -17,10 +16,10 @@ import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
 import { PhoneComposer } from "./PhoneComposer";
-import { PhoneTasks } from "./PhoneTasks";
+import { PhoneSidePanel, type PhonePanelPage } from "./PhoneSidePanel";
+import { Icon } from "../ui";
 import { SessionHeaderTools, sessionInputHistory } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
-import { Button } from "../ui";
 import { GoalRow, useGoalExpansion } from "../GoalRow";
 import {
   submitAccepted,
@@ -46,7 +45,7 @@ export function mcpText(
 }
 
 /**
- * 会话页：消息流 + 输入框 + 工具栏 + 权限/提问面板，顶栏右侧的上下文圆环与会话菜单
+ * 会话页：消息流 + 输入框 + 工具栏 + 权限/提问面板，顶栏右侧的会话菜单与侧边栏按钮
  * 经 portal 放进外壳给的 headerSlot。模型、档位、预设与桌面状态栏共用
  * useSessionControls；手机不写桌面的 lastEffort 偏好。
  */
@@ -63,14 +62,22 @@ export function SessionScreen({
   onManageGrants,
   headerSlot,
   onRename,
+  panel,
+  onPanel,
+  onPanelBack,
+  onPanelClose,
 }: {
+  panel?: PhonePanelPage | undefined;
+  onPanel?: ((panel: PhonePanelPage) => void) | undefined;
+  onPanelBack?: (() => void) | undefined;
+  onPanelClose?: (() => void) | undefined;
   entry: PhoneSession;
   /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
   sessions: PhoneSessions;
   /** 分叉出的新会话已打开，跳过去 */
   onForked: (sessionId: string) => void;
   onManageGrants?: (() => void) | undefined;
-  /** 顶栏右侧的位置：上下文圆环与会话菜单渲染在这里 */
+  /** 顶栏右侧的位置：会话菜单与侧边栏按钮渲染在这里 */
   headerSlot?: HTMLElement | null;
   /** 会话菜单「重命名」：弹框在外壳里 */
   onRename?: (() => void) | undefined;
@@ -99,8 +106,6 @@ export function SessionScreen({
   );
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
-  // 远程不开放 subagent.list：运行中的后台子代理从视图推导（ADR-0073 §6）
-  const backgrounds = useMemo(() => pendingBackgroundSubagents(view.entries), [view.entries]);
   const [busy, setBusy] = useState(false);
   const [goalExpanded, setGoalExpanded] = useGoalExpansion(shownGoal);
   const [dismissed, setDismissed] = useState("");
@@ -266,18 +271,7 @@ export function SessionScreen({
       {headerSlot &&
         createPortal(
           <>
-            <PhoneTasks
-              key={session.id}
-              tasks={view.backgroundShells}
-              session={session}
-              connected={connected && !entry.dead}
-            />
             <SessionHeaderTools
-              context={{
-                load: loadContext,
-                replaying: entry.replaying === true,
-                key: `${view.entries.length}:${view.status}`,
-              }}
               connected={connected && !entry.dead}
               running={view.currentTurn !== undefined}
               shell={{
@@ -299,6 +293,19 @@ export function SessionScreen({
                 setFill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
               }}
             />
+            <button
+              type="button"
+              className={`phone-icon-button${panel ? " on" : ""}`}
+              aria-label="侧边栏"
+              aria-expanded={panel !== undefined}
+              aria-controls="phone-side-panel"
+              onClick={() => {
+                if (panel) onPanelClose?.();
+                else onPanel?.({ kind: "overview" });
+              }}
+            >
+              <Icon name="layout_right" size={22} />
+            </button>
           </>,
           headerSlot,
         )}
@@ -340,33 +347,24 @@ export function SessionScreen({
         }}
         loadChangeDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
       />
-      {backgrounds.length > 0 && (
-        <div className="pi-list" aria-label="后台子代理">
-          {backgrounds.map((item) => (
-            <div className="pi-item" key={item.childSessionId}>
-              <span>
-                {[item.profile, item.model, item.effort, "后台"].filter(Boolean).join(" · ")}
-              </span>
-              <span className="pi-text">{item.task}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  void entry.client.runtime
-                    .cancelSubagent({
-                      parentSessionId: session.id,
-                      childSessionId: item.childSessionId,
-                    })
-                    .catch((cause: unknown) => {
-                      onError(errorText(cause));
-                    });
-                }}
-              >
-                取消
-              </Button>
-            </div>
-          ))}
-        </div>
+      {panel && (
+        <PhoneSidePanel
+          entry={entry}
+          page={panel}
+          connected={connected && !entry.dead}
+          context={{
+            load: loadContext,
+            replaying: entry.replaying === true,
+            key: `${view.entries.length}:${view.status}`,
+          }}
+          images={images}
+          openUrl={openUrl}
+          onNavigate={(next) => onPanel?.(next)}
+          onBack={() => onPanelBack?.()}
+          onClose={() => onPanelClose?.()}
+          onError={onError}
+          loadDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
+        />
       )}
       {shownGoal && (
         <GoalRow

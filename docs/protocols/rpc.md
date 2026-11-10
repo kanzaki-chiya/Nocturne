@@ -86,6 +86,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `state` | → `SessionState` 去掉 `history` 与 `unsettledCalls`（历史由持久事件折叠得到；后者是进程内 Map） |
 | `describeContext` | → `BuiltContext` 去掉发给模型的整份 `request`，只留报告与判定 |
 | `reasoningEffortInfo` / `shellInfo` / `listShells` / `visionInfo` / `mcpServers` / `fileIndex` | 只读查询，结果同进程内 |
+| `readFile` | `{ path: string }` → `SessionFileContent`：`{ kind: "text", path, text, bytes }`，path 为 `fileIndex` 中的相对文件路径；只读、完整返回或明确报错，安全边界见下文（ADR-0084） |
 | `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, relativePath?, exists, isDirectory }`，`relativePath` 只在工作区内给出）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端按「打开文件用」决定入口（U-09）。Windows 网络路径（`\\server\share`、`\\?\UNC\...`）不去访问，直接按 `exists: false` 返回；逐级解析链接时 junction / 符号链接指向网络位置的同样不访问。每个路径的解析与 `stat` 有 `RESOLVE_FILE_TIMEOUT_MS`（2 秒）时限，超时按 `exists: false` 返回（映射盘主机离线时不拖慢回答渲染，也不给它加链接），同一批里其余路径照常返回 |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
 | `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
@@ -103,7 +104,11 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 附件错误以 `SessionError`（`-32002`）返回：`invalid_attachment_file`（非法文件名或链接路径）、`attachment_not_found`（本会话未登记）、`attachment_missing`（文件缺失）、`attachment_corrupt`（大小或 sha256 不符）、`attachment_read_failed`（其他文件读取 I/O 错误，如访问被拒绝）。
 
-`runtime.readFile`（第 3.1 节）对应 `Runtime.readFile(path)`，客户端 `RpcRuntime.readFile(path)` 把图片的 base64 解码为 `Uint8Array`；取代原来的 `session.readFile`，不保留兼容。`path` 只收绝对路径，不限工作区，任何本机普通文件都能读（实现在 Core `session/local-file.ts`）。Core 先做词法检查：空串、控制字符、相对路径、`..` 段、设备命名空间、Windows 备用数据流与设备名一律拒绝；Windows 网络路径（`\\server\share`、`//server/share`、`\\?\UNC\...`）直接拒绝且不去访问——路径来自模型回答，访问网络位置会让系统发起 SMB 连接并带上 Windows 凭据。随后逐级 `lstat` / `readlink` 解析链接得到真实路径（不用 `realpath`，它会跟着 junction 打开网络位置），链接目标是网络路径的同样拒绝。映射的网络驱动器盘符（如 `Z:`、`Q:`）按本地路径处理，照常读取。整个读取（`lstat` / `readlink` 逐级解析、`stat`、读内容）有 `READ_FILE_TIMEOUT_MS`（5 秒）总时限：映射盘的主机离线时系统调用可能挂几十秒，超时返回 `file_read_timeout`（可重试；底层调用无法取消，迟到的结果丢弃）。只读普通文件，上限 `READ_FILE_MAX_BYTES`（2 MiB），超过时整份拒绝、不截断；扩展名是常见图片格式的按图片返回，其余按 BOM（UTF-16）或严格 UTF-8 解码，前 8 KiB 含 NUL 或解码失败视为二进制。错误以 `SessionError`（`-32002`）返回：`invalid_file_path`、`file_network_path`、`file_not_found`、`file_not_regular`、`file_too_large`、`file_binary`、`file_read_timeout`（超过总时限）、`file_read_failed`（其他 I/O 错误，含链接层数过多）。
+`runtime.readFile`（第 3.1 节）对应 `Runtime.readFile(path)`，客户端 `RpcRuntime.readFile(path)` 把图片的 base64 解码为 `Uint8Array`；它服务本机任意绝对路径查看，与 ADR-0084 新增的会话受限 `session.readFile` 各自独立。`path` 只收绝对路径，不限工作区，任何本机普通文件都能读（实现在 Core `session/local-file.ts`）。Core 先做词法检查：空串、控制字符、相对路径、`..` 段、设备命名空间、Windows 备用数据流与设备名一律拒绝；Windows 网络路径（`\\server\share`、`//server/share`、`\\?\UNC\...`）直接拒绝且不去访问——路径来自模型回答，访问网络位置会让系统发起 SMB 连接并带上 Windows 凭据。随后逐级 `lstat` / `readlink` 解析链接得到真实路径（不用 `realpath`，它会跟着 junction 打开网络位置），链接目标是网络路径的同样拒绝。映射的网络驱动器盘符（如 `Z:`、`Q:`）按本地路径处理，照常读取。整个读取（`lstat` / `readlink` 逐级解析、`stat`、读内容）有 `READ_FILE_TIMEOUT_MS`（5 秒）总时限：映射盘的主机离线时系统调用可能挂几十秒，超时返回 `file_read_timeout`（可重试；底层调用无法取消，迟到的结果丢弃）。只读普通文件，上限 `READ_FILE_MAX_BYTES`（2 MiB），超过时整份拒绝、不截断；扩展名是常见图片格式的按图片返回，其余按 BOM（UTF-16）或严格 UTF-8 解码，前 8 KiB 含 NUL 或解码失败视为二进制。错误以 `SessionError`（`-32002`）返回：`invalid_file_path`、`file_network_path`、`file_not_found`、`file_not_regular`、`file_too_large`、`file_binary`、`file_read_timeout`（超过总时限）、`file_read_failed`（其他 I/O 错误，含链接层数过多）。
+
+`session.readFile`（[ADR-0084](../decisions/ADR-0084-phone-side-panel.md)）仅在本连接已打开会话上读取文本，由 `RpcSession.readFile(path)` 封装；不新增 Core 的任意路径能力。path 必须为工作区相对路径，允许 `/` 或 `\` 分隔，拒绝空串、控制字符、绝对/盘符/网络路径、空段、`.` / `..`、Windows 设备名与备用数据流。逐级 `lstat` 拒绝全部符号链接/junction，再解析工作区与目标真实路径，确认目标仍在工作区内，并要求每次调用的 `session.fileIndex()` 中存在同路径的普通文件；隐藏项、忽略项、链接与索引未列出的文件一律 `invalid_file_path`。不存在报 `file_not_found`，目录报 `file_not_regular`。
+
+只读普通文件，UTF-8 或带 BOM 的 UTF-16 文本完整返回；二进制扩展名、NUL 或解码失败报 `-32002 / file_binary`，不返回内容。原始文件超过 2 MiB 或远程通道允许大小，以及原始字节未超限但完整 JSON-RPC 编码后超限，均报 `-32002 / file_too_large`，不截断、不返回内容。两种拒绝均通过 `error.data.bytes` 携带原始大小，客户端可读 `RpcError.bytes` / `RpcError.data?.bytes`，手机只显示文件名与大小。读取总时限为 5 秒（`file_read_timeout`），其他 I/O 错误为 `file_read_failed`。`runtime.readFile` 继续仅本机开放；此接口不开放命令执行或终端。
 
 ### 3.2.1 `shell.*`（ADR-0083）
 
@@ -372,7 +377,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `subagent.list` | `{ parentSessionId }` → `SubagentSummary[]`；不要求 `resumeSession` 或打开父会话 |
+| `subagent.list` | `{ parentSessionId }` → `SubagentSummary[]`；本机不要求打开父会话，远程必须持有父会话引用（ADR-0084） |
 | `subagent.cancel` | `{ parentSessionId, childSessionId }` → `null`；映射 `Runtime.cancelSubagent`（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §4）。只对本父会话运行中的后台子代理有效，否则 `invalid_command`；结果随后以 `message.user.subagent(status: "cancelled")` 交付父会话。与观察方法不同，它是会话内操作，远程允许（第 7 节） |
 | `subagent.readAttachment` | `{ parentSessionId, childSessionId, file }` → `{ data: base64, mimeType, bytes }`；只读子日志登记的图片附件，同 3.2 的文件名、真实路径、字节数和 sha256 校验，不借父目录兜底、不打开 child |
 | `subagent.subscribe` | `{ parentSessionId, childSessionId, subscriptionId, afterSeq? }` → `{ lastSeq, summary, mode }`；衔接完成后响应 |
@@ -398,7 +403,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 #### 只读边界、错误与清理
 
 - Core 对两个 session id 验证为安全的单文件名标识（非空、至多 128 个 ASCII 字母/数字/下划线/连字符），不接受路径；RPC 对字符串、subscriptionId（非空、至多 128 字符）及 afterSeq 做形状校验，重复的在用 subscriptionId 报 invalid_params。文件不存在为 `SessionError / session_not_found`，父子关系不匹配（包括把顶层会话当 child）为新增 `SessionError / subagent_parent_mismatch`，非法 Core id 为 `SessionError / invalid_session_id`；日志错误沿用 session_log_corrupt / session_log_newer，I/O 读取失败为新增 session_read_failed。均按第 5 节映射 -32002；RPC 形状错误为 -32602。list 单个不可读候选可按既有列表规则跳过，指定 child 的 subscribe 必须明确报错。
-- 观察方法（list / subscribe / unsubscribe / readAttachment）**均不进远程白名单**（`subagent.cancel` 例外，见第 7 节），按 ADR-0060 第 6 节，远程在 Core 调用前报 remote_not_allowed；ADR-0052 的配对、加密与既有 session 方法规则不变。新通知只发给持有观察的本机连接，不广播。以后手机要使用须另审白名单，不因「只读」自动开放。
+- [ADR-0084](../decisions/ADR-0084-phone-side-panel.md) 放开远程 `subagent.list` / `subagent.subscribe` / `subagent.unsubscribe`，仅能观察本连接已打开父会话的直接子会话；不创建 child 的交互句柄，不允许跨父会话观察。`readAttachment` 和工作树操作保持远程拒绝。通知只发给持有对应观察的连接，不广播；配对与加密规则不变。
 - readAttachment 同样先校验父子关系与安全 id；file 必须为字符串，否则 invalid_params；附件层错误沿用第 3.2 节。该补充只读方法用于保持主对话的图片输出渲染，不使用 runtime.readFile 绕过附件引用校验。只读观察的 DTO 放 protocol，行为与观察源放 Core，RPC 客户端仍仅运行时依赖 protocol。
 - 观察不在 Hub.sessions / Connection.sessions 登记可交互句柄，不增持有子锁的引用，不提供 submit/respondPermission/respondQuestion/interrupt/close 子会话的方法。未显式打开的 child 对既有 session 命令仍为 unknown_session；已有显式 resume 的行为不在本接口中改变。它不是 agent 工具，不经权限求值，也不创建 Grant。
 - 连接持有观察表（含还在建立的观察）；unsubscribe、替换、父 `session.close`、连接断开和 shutdown 都撤监听、取消回放并丢缓冲。未完成的异步读取返回时检查取消代数并立即退订，不得复活。自然 closed 后释放表项；客户端缓存视图不影响服务器清理。观察退出不触碰 launcher、并发槽或 child.close。本机整条连接断开导致 Turn 中断是第 6 节既有宿主行为，不是观察的副作用。
@@ -458,7 +463,8 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
 | `session.stopGoal` / `session.cancelGoal` / `session.resumeGoal` / `session.approvePlan` / `session.cancelPlan` | 允许；属于会话内操作（ADR-0076 §7 及修订） |
 | `session.interrupt` | 请求与通知均允许 |
-| `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作。手机不能用 `subagent.list`，运行中的后台子代理从会话视图推导（`pendingBackgroundSubagents`） |
+| `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作；手机只在后台子代理子视图提供取消 |
+| `subagent.list`、`subagent.subscribe`、`subagent.unsubscribe` | 允许（ADR-0084）：只读、限本连接已打开父会话的直接子会话。总览据 list 区分同步与后台运行项，subscribe / unsubscribe 复用连接内观察和清理机制，不开放子会话交互或工作树操作 |
 | `session.respondPermission` | `reply.remember === "project"` 或 `"always"` 拒绝并保持待处理；`"session"` 或省略允许 |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
@@ -470,7 +476,8 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `grants.setTrusted`、`grants.describeProject` | 拒绝且不调用 Core；信任会放宽，项目命令无需发送手机 |
 | `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
 | `runtime.archiveSession`、`runtime.unarchiveSession` | 拒绝且不调用 Core（ADR-0080）；手机与安卓没有归档或恢复入口 |
-| `runtime.readFile`、`runtime.searchSessions` | 拒绝：`readFile` 只服务本机右侧面板（ADR-0060），`searchSessions` 只服务桌面端跨会话搜索（ADR-0077），手机没有这两个入口 |
+| `session.readFile` | 允许（ADR-0084）：限本连接已打开会话的工作区与 fileIndex 可见普通文件；真实路径校验、拒绝链接与越界，二进制不返回内容，超限 `file_too_large` 带原始字节数，见第 3.2 节 |
+| `runtime.readFile`、`runtime.searchSessions` | 拒绝：任意绝对路径 `readFile` 仅本机（ADR-0060），手机文件入口使用上面的受限会话方法；`searchSessions` 仅桌面端跨会话搜索（ADR-0077） |
 | 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：

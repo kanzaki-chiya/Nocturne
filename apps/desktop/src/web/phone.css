@@ -121,6 +121,11 @@
   opacity: 0.45;
   cursor: default;
 }
+.phone .conversation button,
+.phone .phone-tools button {
+  min-width: 44px;
+  min-height: 44px;
+}
 .phone button:focus-visible,
 .phone input:focus-visible,
 .phone textarea:focus-visible,
@@ -178,7 +183,7 @@
 .phone .phone-icon-button.on {
   background: var(--a-sel);
 }
-/* 会话页：右侧是上下文圆环与会话菜单，左右两栏等宽，标题与项目名相对整屏居中 */
+/* 会话页：右侧是会话菜单与侧边栏按钮，左右两栏等宽，标题与项目名相对整屏居中 */
 .phone-header.session {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr) 88px;

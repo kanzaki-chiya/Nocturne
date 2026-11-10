@@ -44,7 +44,7 @@ const PHONE_HINTS: Record<string, string> = {
   "/effort": "在输入框下方切换思考档位",
   "/preset": "在输入框下方切换权限预设",
   "/shell": "Shell 只能在电脑上切换",
-  "/context": "点右上角的上下文圆环查看占比",
+  "/context": "在侧边栏打开上下文",
   "/provider": "服务商只能在电脑上管理",
   "/agents": "子代理只能在电脑上管理",
   "/skills": "技能只能在电脑上管理",

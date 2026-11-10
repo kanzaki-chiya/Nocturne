@@ -13,9 +13,19 @@ export interface ShellPaneProps {
   task?: BackgroundShellTask | undefined;
   session?: ShellSession | undefined;
   visible: boolean;
+  /** 手机抽屉使用外层的返回、计时与停止栏。 */
+  hideHeader?: boolean;
 }
 
-export function ShellPane({ taskId, name, command, task, session, visible }: ShellPaneProps) {
+export function ShellPane({
+  taskId,
+  name,
+  command,
+  task,
+  session,
+  visible,
+  hideHeader = false,
+}: ShellPaneProps) {
   const output = useShellOutput(session, taskId, task, visible);
   const current = output.task;
   const now = useNow(visible && current?.status === "running");
@@ -25,45 +35,52 @@ export function ShellPane({ taskId, name, command, task, session, visible }: She
   };
   return (
     <section className="shell-pane" aria-label={name || command}>
-      <header className="shell-head">
-        <Icon name="terminal" size={ICON_SM} />
-        <span className="shell-name shell-command-name" title={command}>
+      {!hideHeader && (
+        <header className="shell-head">
+          <Icon name="terminal" size={ICON_SM} />
+          <span className="shell-name shell-command-name" title={command}>
+            {command}
+          </span>
+          {current && (
+            <span
+              className={`shell-status${current.exitCode !== undefined && current.exitCode !== 0 ? " err" : ""}`}
+              role="status"
+            >
+              {current.status === "running" ? (
+                <>
+                  <span className="tool-spin" aria-hidden="true" />
+                  运行中
+                </>
+              ) : typeof current.exitCode === "number" ? (
+                `退出码 ${current.exitCode}`
+              ) : (
+                "停止"
+              )}
+            </span>
+          )}
+          {current && (
+            <span className="shell-time">
+              {elapsedText(
+                Math.max(
+                  0,
+                  (current.endedAt ? Date.parse(current.endedAt) : now) -
+                    Date.parse(current.startedAt),
+                ),
+              )}
+            </span>
+          )}
+          {current?.status === "running" && (
+            <Button variant="ghost-danger" size="sm" disabled={!session} onClick={stop}>
+              停止
+            </Button>
+          )}
+        </header>
+      )}
+      {hideHeader && (
+        <pre className="phone-panel-command" title={command}>
           {command}
-        </span>
-        {current && (
-          <span
-            className={`shell-status${current.exitCode !== undefined && current.exitCode !== 0 ? " err" : ""}`}
-            role="status"
-          >
-            {current.status === "running" ? (
-              <>
-                <span className="tool-spin" aria-hidden="true" />
-                运行中
-              </>
-            ) : typeof current.exitCode === "number" ? (
-              `退出码 ${current.exitCode}`
-            ) : (
-              "停止"
-            )}
-          </span>
-        )}
-        {current && (
-          <span className="shell-time">
-            {elapsedText(
-              Math.max(
-                0,
-                (current.endedAt ? Date.parse(current.endedAt) : now) -
-                  Date.parse(current.startedAt),
-              ),
-            )}
-          </span>
-        )}
-        {current?.status === "running" && (
-          <Button variant="ghost-danger" size="sm" disabled={!session} onClick={stop}>
-            停止
-          </Button>
-        )}
-      </header>
+        </pre>
+      )}
       <pre ref={scroll} className="shell-output" data-testid="shell-output">
         {output.text}
       </pre>

@@ -45,6 +45,7 @@ import {
 import { Popover, PopoverOption } from "./Popover";
 import { DraftComposer, SessionScreen } from "./SessionScreen";
 import { Switch } from "../ui";
+import type { PhonePanelPage } from "./PhoneSidePanel";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
@@ -64,7 +65,7 @@ type Page =
   | { kind: "welcome" }
   | { kind: "home"; hostId: string }
   | { kind: "project"; hostId: string; path: string }
-  | { kind: "session"; hostId: string; sessionId: string }
+  | { kind: "session"; hostId: string; sessionId: string; panel?: PhonePanelPage }
   | { kind: "settings"; hostId?: string }
   | { kind: "usage"; hostId: string }
   | { kind: "schedules"; hostId: string }
@@ -173,7 +174,7 @@ export function PhoneApp({
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
   const [menu, setMenu] = useState<"hosts" | null>(null);
-  /** 会话页顶栏右侧的位置：SessionScreen 把上下文圆环与会话菜单放进来 */
+  /** 会话页顶栏右侧的位置：SessionScreen 放入会话菜单与侧边栏按钮 */
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   const [renameDraft, setRenameDraft] = useState<string>();
   const [renameError, setRenameError] = useState("");
@@ -864,6 +865,16 @@ export function PhoneApp({
         }}
         sessions={sessions}
         headerSlot={headerSlot}
+        panel={page.panel}
+        onPanel={(panel) => {
+          navigate({ ...page, panel });
+        }}
+        onPanelBack={() => {
+          history.back();
+        }}
+        onPanelClose={() => {
+          history.go(page.panel?.kind === "overview" ? -1 : -2);
+        }}
         onRename={() => {
           setRenameError("");
           setRenameDraft(title);
@@ -1207,7 +1218,11 @@ export function PhoneApp({
           分享菜单选择「添加到主屏幕」。添加后需在主屏幕应用里再配对一次，用电脑上的「复制链接」粘贴即可。
         </aside>
       )}
-      <PaneErrorBoundary key={JSON.stringify(page)}>{body}</PaneErrorBoundary>
+      <PaneErrorBoundary
+        key={JSON.stringify(page.kind === "session" ? { ...page, panel: undefined } : page)}
+      >
+        {body}
+      </PaneErrorBoundary>
       {menu === "hosts" && (
         <Popover
           anchor={hostTrigger.current}

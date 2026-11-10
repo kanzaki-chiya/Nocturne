@@ -41,6 +41,8 @@ export interface RpcErrorData {
    * 客户端一键重新启用需同时恢复两者
    */
   providerDisabled?: boolean | undefined;
+  /** 文件过大（file_too_large）或二进制（file_binary）时的原始文件字节数，供客户端展示大小 */
+  bytes?: number | undefined;
 }
 
 export interface RpcErrorObject {

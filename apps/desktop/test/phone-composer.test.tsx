@@ -6,6 +6,7 @@ import type { ComposerSubmit } from "../src/Composer";
 import type { ContextSummary } from "@nocturne/rpc/client";
 import { PhoneComposer } from "../src/web/PhoneComposer";
 import { SessionHeaderTools, sessionInputHistory } from "../src/web/SessionHeaderTools";
+import { PanelHarness, panelFixture } from "./phone-panel-fixtures";
 import {
   estimateSubmitBytes,
   IMAGE_MAX_BYTES,
@@ -46,11 +47,7 @@ const codec = (width: number, height: number, sizes: number[] = []) => {
   return { fake, encoded };
 };
 
-const headerTools = (
-  props: Partial<Parameters<typeof SessionHeaderTools>[0]> & {
-    context: Parameters<typeof SessionHeaderTools>[0]["context"];
-  },
-) => (
+const headerTools = (props: Partial<Parameters<typeof SessionHeaderTools>[0]>) => (
   <SessionHeaderTools
     connected
     running={false}
@@ -64,12 +61,14 @@ const headerTools = (
   />
 );
 
-it("顶栏上下文圆环回放时不查，完成只查一次，实时变化合并补拉", async () => {
+it("侧边栏上下文回放时不查，完成只查一次，实时变化合并补拉", async () => {
   // 与桌面状态栏同一 single-flight：回放不查，结束后一次，飞行中的变化只补一次。
   const pending: ((value: ContextSummary) => void)[] = [];
   const load = vi.fn(() => new Promise<ContextSummary>((resolve) => pending.push(resolve)));
-  const ui = (replaying: boolean, key: string) =>
-    headerTools({ context: { load, key, replaying } });
+  const fixture = panelFixture();
+  const ui = (replaying: boolean, key: string) => (
+    <PanelHarness fixture={fixture} context={{ load, key, replaying }} />
+  );
   for (let i = 0; i < 4; i++) await act(() => root?.render(ui(true, String(i))));
   expect(load).not.toHaveBeenCalled();
   await act(() => root?.render(ui(false, "ready")));
@@ -255,7 +254,6 @@ it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历�
   await act(async () => {
     root?.render(
       headerTools({
-        context: { load: () => new Promise<ContextSummary>(() => undefined), key: "0" },
         inputHistory: () => ["旧的一条", "最近一条", "旧的一条"],
         onPickHistory,
       }),
@@ -263,7 +261,7 @@ it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历�
   });
   expect(
     [...container.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")),
-  ).toEqual(["上下文用量", "会话菜单"]);
+  ).toEqual(["会话菜单"]);
   await act(() => button("会话菜单").click());
   const options = [...container.querySelectorAll(".phone-option")].map((o) => o.textContent);
   expect(options).toEqual(["重命名", "压缩上下文", "MCP 状态", "输入历史", "Shellpwsh"]);
@@ -283,12 +281,11 @@ it("会话菜单合并输入历史与 Shell，无重复项；选中的输入历�
   expect(container.querySelector(".phone-history-row")).toBeNull();
 });
 
-it("探测 Shell 中只置灰，不写说明，打开菜单时触发探测；上下文浮层没有可见标题", async () => {
+it("探测 Shell 中只置灰，不写说明，打开菜单时触发探测；上下文明细不重复标题", async () => {
   const load = vi.fn();
   await act(async () => {
     root?.render(
       headerTools({
-        context: { load: () => new Promise<ContextSummary>(() => undefined), key: "0" },
         shell: { label: "—", probing: true, load },
       }),
     );
@@ -299,8 +296,9 @@ it("探测 Shell 中只置灰，不写说明，打开菜单时触发探测；上
   expect(shell?.textContent).toBe("Shell—");
   expect(shell?.classList.contains("readout")).toBe(false);
   expect(container.textContent).not.toContain("探测");
-  await act(() => button("上下文用量").click());
-  const panel = container.querySelector('[role="dialog"][aria-label="上下文用量"]');
+  await act(() => root?.render(<PanelHarness fixture={panelFixture()} />));
+  await act(() => button("上下文").click());
+  const panel = container.querySelector(".phone-panel-context-detail");
   expect(panel).not.toBeNull();
   expect(panel?.querySelector(".phone-popover-h")).toBeNull();
   expect(panel?.textContent).not.toContain("上下文用量");
@@ -350,7 +348,7 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
   expect(container.querySelector("textarea")?.value).toBe("看 @src/main.ts ");
   expect(container.querySelector('[aria-label="文件引用补全"]')).toBeNull();
 
-  // 工具行不再有「更多」和上下文圆环：两者在会话页顶栏
+  // 工具行没有「更多」和上下文圆环；菜单在顶栏，上下文在侧边栏
   expect(container.querySelector('[aria-label="更多"]')).toBeNull();
   expect(container.querySelector('[aria-label^="上下文用量"]')).toBeNull();
   extra.fill = { text: "最近一条", seq: 1 };

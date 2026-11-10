@@ -6,7 +6,7 @@
 
 文件附件与自由回答附件复用网页实现（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：选择任意文件、粘贴／拖入文件、32 KiB 大段粘贴转卡片；发送前检查远程合计原始字节上限，超限保留草稿。对话文件卡片经 `readAttachment` 下载；WebView 下载受宿主沙箱限制时仍可查看名称与大小。
 
-后台子代理（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §6）沿用手机网页的最小界面：输入框上方显示尚未送达的后台项与「取消」按钮（`subagent.cancel`）；结果在对话里是可折叠卡片（档位、状态、耗时），不显示 `<subagent-result>` 外壳；待发结果只可撤回、不可编辑。没有桌面子会话面板，观察方法仍不开放远程，见 [rpc.md](../protocols/rpc.md) §4.1、§7。
+会话页复用手机网页的[右侧侧边栏](../decisions/ADR-0084-phone-side-panel.md)：同步与后台子代理都可只读观察，后台子代理只在子视图取消，Android 返回先回总览再关闭侧边栏。结果卡片与待发结果行为沿用 [ADR-0073](../decisions/ADR-0073-background-subagents.md) §6；远程接口边界见 [rpc.md](../protocols/rpc.md) §4.1、§7。
 
 ## 1. 工程结构
 

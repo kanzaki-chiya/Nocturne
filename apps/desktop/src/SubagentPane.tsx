@@ -35,6 +35,8 @@ export interface SubagentPaneProps {
   workspace: string;
   images: AttachmentImageSource;
   openUrl: (url: string) => void;
+  /** 手机抽屉已有标题栏，不重复显示状态、徽标或空状态文案。 */
+  compact?: boolean;
 }
 
 /** 每秒刷新的本地时钟：运行中的秒数靠它，不靠查询 */
@@ -75,6 +77,7 @@ export function SubagentPane({
   workspace,
   images,
   openUrl,
+  compact = false,
 }: SubagentPaneProps) {
   const child = tab.childSessionId;
   useSyncExternalStore(watcher.subscribe, watcher.getVersion);
@@ -173,38 +176,40 @@ export function SubagentPane({
     .join(" · ");
   return (
     <div className="sp-sub">
-      <header className="sp-sub-head">
-        {tab.profile && tab.profile !== "default" && (
-          <Badge className="subagent-badge">{tab.profile}</Badge>
-        )}
-        {overridden && selectionText && <Badge className="subagent-badge">{selectionText}</Badge>}
-        <span className="sp-sub-summary" title={tab.taskSummary}>
-          {tab.taskSummary}
-        </span>
-        <span className={`sp-sub-status ${status.phase}`} role="status">
-          {status.animated && <span className="tool-spin" aria-hidden="true" />}
-          {status.label}
-        </span>
-        {timeLabel !== undefined && <span className="sp-sub-time">{timeLabel}</span>}
-        <Badge className="sp-badge">只读</Badge>
-      </header>
-      {status.error !== undefined && (
+      {!compact && (
+        <header className="sp-sub-head">
+          {tab.profile && tab.profile !== "default" && (
+            <Badge className="subagent-badge">{tab.profile}</Badge>
+          )}
+          {overridden && selectionText && <Badge className="subagent-badge">{selectionText}</Badge>}
+          <span className="sp-sub-summary" title={tab.taskSummary}>
+            {tab.taskSummary}
+          </span>
+          <span className={`sp-sub-status ${status.phase}`} role="status">
+            {status.animated && <span className="tool-spin" aria-hidden="true" />}
+            {status.label}
+          </span>
+          {timeLabel !== undefined && <span className="sp-sub-time">{timeLabel}</span>}
+          <Badge className="sp-badge">只读</Badge>
+        </header>
+      )}
+      {!compact && status.error !== undefined && (
         <p className="sp-sub-note err" role="note">
           {status.error}
         </p>
       )}
-      {failed && hasContent && (
+      {!compact && failed && hasContent && (
         <p className="sp-sub-note err" role="alert">
           读取中断：{errorText(watch.error?.code, watch.error?.message ?? "")} {retry}
         </p>
       )}
-      {watch?.end?.tailIgnored === true && (
+      {!compact && watch?.end?.tailIgnored === true && (
         <p className="sp-sub-note" role="note">
           日志末尾不完整，已忽略最后一行。
         </p>
       )}
       <div className="sp-sub-body">
-        {placeholder ??
+        {(compact ? (hasContent ? undefined : null) : placeholder) ??
           (view !== undefined && (
             <Conversation
               key={child}
@@ -215,7 +220,7 @@ export function SubagentPane({
                 frozen,
                 footer: result !== undefined && (
                   <section className="sp-sub-result" aria-label="最终结果">
-                    <h3>最终结果</h3>
+                    {!compact && <h3>最终结果</h3>}
                     {result.kind === "text" ? (
                       <Markdown text={result.text} openUrl={openUrl} />
                     ) : (

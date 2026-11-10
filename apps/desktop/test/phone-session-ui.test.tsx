@@ -13,6 +13,7 @@ import type { RuntimeEvent, PendingPermission } from "@nocturne/core/protocol";
 import { PhoneApp } from "../src/web/App";
 import { memoryStorage } from "../src/web/storage";
 import { PhonePush } from "../src/web/push";
+import { panelContext } from "./phone-panel-fixtures";
 
 const shared = vi.hoisted(() => ({
   connect: undefined as ((client: unknown, relay: unknown) => Promise<void>) | undefined,
@@ -55,11 +56,13 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
   await storage.identity();
   let receive: ((e: RuntimeEvent) => void) | undefined;
+  let androidBack: (() => void) | undefined;
   const submit = vi.fn(() => Promise.resolve("done"));
   const interrupt = vi.fn();
   const respondPermission = vi.fn(() => Promise.resolve());
   const session = fakeSession({
     id: "s",
+    describeContext: async () => panelContext,
     submit,
     interrupt,
     respondPermission,
@@ -95,7 +98,21 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<PhoneApp storage={storage} push={push} />);
+    root?.render(
+      <PhoneApp
+        storage={storage}
+        push={push}
+        platform={{
+          relay: "page",
+          onAndroidBack: (handler) => {
+            androidBack = handler;
+            return () => {
+              androidBack = undefined;
+            };
+          },
+        }}
+      />,
+    );
   });
   await act(async () => {
     await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
@@ -114,17 +131,46 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   const row = container.querySelector<HTMLButtonElement>(".phone-row.session");
   expect(row?.textContent).toContain("测试会话");
   await act(() => row?.click());
-  // 会话页顶栏：返回、标题与项目名、上下文圆环、会话菜单；工具行不再有这两个入口
+  // 会话页顶栏：返回、标题与项目名、会话菜单、侧边栏；观察入口集中在抽屉
   const header = container.querySelector(".phone-header");
   expect(header?.querySelector(".phone-header-project")?.textContent).toBe("work");
   expect(
     [...(header?.querySelectorAll(".phone-header-tools button") ?? [])].map((b) =>
       b.getAttribute("aria-label")?.replace(/ \d+%$/, ""),
     ),
-  ).toEqual(["上下文用量", "会话菜单"]);
+  ).toEqual(["会话菜单", "侧边栏"]);
+  expect(header?.querySelector('[aria-label^="上下文用量"]')).toBeNull();
+  expect(header?.querySelector('[aria-label="后台任务"]')).toBeNull();
+  expect(container.querySelector(".pi-list, .pi-item")).toBeNull();
   expect(container.querySelectorAll('[aria-label="会话菜单"]')).toHaveLength(1);
   expect(container.querySelector('.phone-composer [aria-label="更多"]')).toBeNull();
   expect(container.querySelector('.phone-composer [aria-label^="上下文用量"]')).toBeNull();
+  vi.spyOn(client.runtime, "listSubagents").mockResolvedValue([]);
+  const composerBeforePanel = container.querySelector("textarea");
+  await act(() => container.querySelector<HTMLButtonElement>('[aria-label="侧边栏"]')?.click());
+  expect(history.state.panel).toEqual({ kind: "overview" });
+  expect(container.querySelector(".phone-panel-overview")).not.toBeNull();
+  await act(() => container.querySelector<HTMLButtonElement>(".phone-panel-context")?.click());
+  expect(history.state.panel).toEqual({ kind: "context" });
+  await act(async () => {
+    androidBack?.();
+    await new Promise((done) => setTimeout(done, 30));
+  });
+  expect(container.querySelector(".phone-panel-overview")).not.toBeNull();
+  expect(history.state.kind).toBe("session");
+  await act(async () => {
+    androidBack?.();
+    await new Promise((done) => setTimeout(done, 30));
+  });
+  expect(container.querySelector(".phone-side-panel")).toBeNull();
+  expect(history.state.kind).toBe("session");
+  expect(container.querySelector("textarea")).toBe(composerBeforePanel);
+  await act(() => container.querySelector<HTMLButtonElement>('[aria-label="侧边栏"]')?.click());
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('[aria-label="侧边栏"]')?.click();
+    await new Promise((done) => setTimeout(done, 30));
+  });
+  expect(container.querySelector(".phone-side-panel")).toBeNull();
   const rename = vi
     .spyOn(client.runtime, "renameSession")
     .mockRejectedValueOnce(new RpcError("session_locked", "锁冲突"));

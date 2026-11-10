@@ -22,6 +22,7 @@ import {
   prepareProvider,
   probeSetupProviderModels,
   ProviderLoginError,
+  READ_FILE_MAX_BYTES,
   SessionError,
   startDraftProviderLogin,
   startProviderLogin,
@@ -73,6 +74,7 @@ import {
   type RpcMethodName,
   type RpcMethods,
   type RpcResult,
+  type SessionFileContent,
   type SessionOpened,
   type WireAttachment,
 } from "../shared/methods.js";
@@ -87,6 +89,7 @@ import {
 import { MethodNotFoundError, RpcProtocolError, toRpcError } from "./errors.js";
 import { Hub, type HubPeer, type ProviderState, type RpcRuntimeHandle } from "./hub.js";
 import { RemoteHost, type RemoteHostOptions } from "./remote/host.js";
+import { readSessionFile, sessionErrorWithBytes } from "./session-file.js";
 import { MAX_MESSAGE } from "@nocturne/remote";
 import {
   asParams,
@@ -198,8 +201,11 @@ export interface RpcServer {
  * `session.setShell` 会写 settings.json（与 `runtime.setShellSetting` 同一处），不放开。
  */
 export const REMOTE_METHODS = [
-  // ADR-0073 §6：取消后台子代理是会话内操作；观察类 subagent.* 仍只限本机
+  // ADR-0073 §6、ADR-0084：取消后台子代理与本连接已打开父会话下的子会话只读观察允许远程
   "subagent.cancel",
+  "subagent.list",
+  "subagent.subscribe",
+  "subagent.unsubscribe",
   "grants.workspaces",
   "grants.list",
   "grants.revoke",
@@ -265,6 +271,7 @@ export const REMOTE_METHODS = [
   "session.reasoningEffortInfo",
   "session.visionInfo",
   "session.fileIndex",
+  "session.readFile",
   "session.resolveFiles",
   "session.readAttachment",
   "session.readInputHistory",
@@ -619,7 +626,7 @@ class Connection implements HubPeer {
         result = await this.dispatch(method, params);
       }
       const line = encodeMessage({ jsonrpc: "2.0", id, result: result ?? null });
-      this.checkRemoteSize(method, line);
+      this.checkRemoteSize(method, line, result);
       this.diagnose({ kind: "response", id, ok: true });
       this.sendLine(line);
       // login.completed 绝不先于对应 start 响应到达（rpc.md 3.4）
@@ -738,8 +745,12 @@ class Connection implements HubPeer {
   }
 
   /** 远程连接的结果超过通道上限时改报错误，避免整条加密通道被关闭 */
-  private checkRemoteSize(method: string, line: string): void {
+  private checkRemoteSize(method: string, line: string, result?: unknown): void {
     if (this.origin !== "remote" || Buffer.byteLength(line, "utf8") <= this.remoteLimit) return;
+    if (method === "session.readFile") {
+      const bytes = (result as SessionFileContent | null | undefined)?.bytes;
+      throw sessionErrorWithBytes("file_too_large", "文件过大，无法经远程连接传输", bytes);
+    }
     throw new RpcProtocolError(
       "response_too_large",
       `${method} 的结果过大，无法经远程连接传输，请在电脑上查看`,
@@ -1043,6 +1054,12 @@ class Connection implements HubPeer {
     }
   }
 
+  private requireRemoteParentSession(parentSessionId: string): void {
+    if (this.origin === "remote" && !this.sessions.has(parentSessionId)) {
+      throw new RpcProtocolError("unknown_session", `没有打开的会话：${parentSessionId}`);
+    }
+  }
+
   private async subscribeSubagent(p: Params): Promise<RpcMethods["subagent.subscribe"]["result"]> {
     const parentSessionId = reqString(p, "parentSessionId");
     const childSessionId = reqString(p, "childSessionId");
@@ -1060,6 +1077,7 @@ class Connection implements HubPeer {
     if (this.shuttingDown || this.closed) {
       throw new RpcProtocolError("shutting_down", "服务端正在关闭");
     }
+    this.requireRemoteParentSession(parentSessionId);
     // 同一 (parent, child) 再订阅替换旧观察；其他 child 与其他连接互不影响
     const pair = subagentPairKey(parentSessionId, childSessionId);
     const previous = this.subagentPairs.get(pair);
@@ -2130,8 +2148,11 @@ class Connection implements HubPeer {
         });
         return null;
       },
-      "subagent.list": (p) =>
-        this.runtime().listSubagents({ parentSessionId: reqString(p, "parentSessionId") }),
+      "subagent.list": (p) => {
+        const parentSessionId = reqString(p, "parentSessionId");
+        this.requireRemoteParentSession(parentSessionId);
+        return this.runtime().listSubagents({ parentSessionId });
+      },
       "subagent.readAttachment": async (p) => {
         const attachment = await this.runtime().readSubagentAttachment({
           parentSessionId: reqString(p, "parentSessionId"),
@@ -2415,6 +2436,15 @@ class Connection implements HubPeer {
       "session.visionInfo": (p) => this.session(p).session.visionInfo(),
       "session.mcpServers": (p) => this.session(p).session.mcpServers(),
       "session.fileIndex": (p) => this.session(p).session.fileIndex(),
+      "session.readFile": async (p) => {
+        const { session } = this.session(p);
+        const path = reqString(p, "path");
+        const maxBytes =
+          this.origin === "remote"
+            ? Math.min(READ_FILE_MAX_BYTES, this.remoteLimit)
+            : READ_FILE_MAX_BYTES;
+        return await readSessionFile(session, path, { maxBytes });
+      },
       "session.resolveFiles": (p) => {
         const paths: unknown = p.paths;
         if (!Array.isArray(paths) || paths.some((item: unknown) => typeof item !== "string")) {

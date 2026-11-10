@@ -51,7 +51,7 @@ export {
 } from "./coverage.js";
 export { createMemoryTransportPair } from "../shared/transport.js";
 export type { LineTransport } from "../shared/transport.js";
-export { RPC_ERROR, RPC_PROTOCOL_VERSION } from "../shared/jsonrpc.js";
+export { RPC_ERROR, RPC_PROTOCOL_VERSION, type RpcErrorData } from "../shared/jsonrpc.js";
 export type {
   AgentDevice,
   AgentPairingRequest,
@@ -63,4 +63,5 @@ export type {
   AgentStatus,
   RpcMethodName,
   RpcMethods,
+  SessionFileContent,
 } from "../shared/methods.js";

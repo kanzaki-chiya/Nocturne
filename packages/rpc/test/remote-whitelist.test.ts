@@ -1,7 +1,8 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { READ_FILE_MAX_BYTES } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { REMOTE_METHODS, remoteAttachmentLimit } from "@nocturne/rpc/server";
 import { RPC_METHOD_NAMES } from "../src/shared/methods.js";
@@ -60,6 +61,10 @@ const STILL_LOCAL = [
   "runtime.defaultReviewer",
   "session.setShell",
   "runtime.readFile",
+  "subagent.diff",
+  "subagent.worktrees",
+  "subagent.deleteWorktree",
+  "subagent.readAttachment",
   "skills.importSkills",
   "skills.setSkillEnabled",
   "schedule.save",
@@ -77,10 +82,19 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     for (const name of RPC_METHOD_NAMES) {
       if (/^(provider|login|remote|mcp|agents)\./.test(name)) expect(denied).toContain(name);
     }
-    // 会话方法只有写 settings.json 的 setShell 留在本机
+    // 会话方法只有写 settings.json 的 setShell 留在本机；session.readFile 与子会话观察已开放
     expect(denied.filter((name) => name.startsWith("session.")).sort()).toEqual([
       "session.setShell",
     ]);
+    for (const allowed of [
+      "subagent.cancel",
+      "subagent.list",
+      "subagent.subscribe",
+      "subagent.unsubscribe",
+      "session.readFile",
+    ]) {
+      expect(REMOTE_METHODS as readonly string[]).toContain(allowed);
+    }
   });
 
   it("新放开的会话方法都能经远程到达 Core", async () => {
@@ -146,12 +160,18 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     await b.visionInfo();
     await reaches(b.fileIndex());
     expect(await b.resolveFiles(["out.txt"])).toHaveLength(1);
-    // 面板读文件只给电脑（ADR-0060 第 3 节）：远程被拒，本机可读
+    // 面板读文件只给电脑（ADR-0060 第 3 节）：远程被拒，本机可读；会话受限读文件（session.readFile）对远程开放
     const out = path.join(h.ws, "out.txt");
     await expect(remote.client.runtime.readFile(out)).rejects.toMatchObject({
       code: "remote_not_allowed",
     });
     expect(await h.client.runtime.readFile(out)).toMatchObject({ kind: "text", text: "ok" });
+    expect(await b.readFile("out.txt")).toEqual({
+      kind: "text",
+      path: "out.txt",
+      text: "ok",
+      bytes: 2,
+    });
     await b.recordInputHistory("手机输入");
     expect(await b.readInputHistory()).toContain("手机输入");
     await reaches(b.compact());
@@ -361,6 +381,207 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
         branch: { name: "main" },
       }),
     );
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
+  it("session.readFile 边界：只读 fileIndex 内的工作区文本，拒绝 ..、外路径、符号链接逃逸、隐藏/忽略文件与二进制", async () => {
+    const h = await connectMany();
+    const outside = tmpDir("nct-rpc-outside-");
+    writeFileSync(path.join(outside, "secret.txt"), "top-secret");
+
+    mkdirSync(path.join(h.ws, "src"), { recursive: true });
+    mkdirSync(path.join(h.ws, "dist"), { recursive: true });
+    mkdirSync(path.join(h.ws, ".git"), { recursive: true });
+    mkdirSync(path.join(h.ws, ".nocturne"), { recursive: true });
+    mkdirSync(path.join(h.ws, ".hidden"), { recursive: true });
+    writeFileSync(path.join(h.ws, ".gitignore"), "ignored.txt\ndist/\n");
+    writeFileSync(path.join(h.ws, "src", "hello.ts"), "export const a = 1;\n中文\n");
+    writeFileSync(path.join(h.ws, "ignored.txt"), "ignored");
+    writeFileSync(path.join(h.ws, "dist", "bundle.js"), "bundle");
+    writeFileSync(path.join(h.ws, ".env"), "SECRET=1");
+    writeFileSync(path.join(h.ws, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(path.join(h.ws, ".nocturne", "config.json"), "{}");
+    writeFileSync(path.join(h.ws, ".hidden", "note.txt"), "hidden");
+    writeFileSync(path.join(h.ws, "blob.bin"), Uint8Array.from([1, 0, 2, 0, 3]));
+    writeFileSync(path.join(h.ws, "raw-nul.txt"), Uint8Array.from([0x61, 0x00, 0x62]));
+    writeFileSync(path.join(h.ws, "bad-utf8.txt"), Uint8Array.from([0x80, 0x81, 0xfe]));
+    writeFileSync(path.join(h.ws, "logo.png"), PNG_2x3);
+    symlinkSync(
+      outside,
+      path.join(h.ws, "linked-outside"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    symlinkSync(
+      path.join(h.ws, "src"),
+      path.join(h.ws, "linked-inside"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    let hasFileSymlink = false;
+    try {
+      symlinkSync(path.join(outside, "secret.txt"), path.join(h.ws, "escape-file.txt"), "file");
+      hasFileSymlink = true;
+    } catch {
+      hasFileSymlink = false;
+    }
+
+    const { session: local } = await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    const remote = await h.add();
+    const { session: phone } = await remote.client.runtime.resumeSession(local.id);
+
+    // 正常文本读取
+    const expectedBytes = Buffer.byteLength("export const a = 1;\n中文\n", "utf8");
+    expect(await phone.readFile("src/hello.ts")).toEqual({
+      kind: "text",
+      path: "src/hello.ts",
+      text: "export const a = 1;\n中文\n",
+      bytes: expectedBytes,
+    });
+
+    // 拒绝 .. 段、. 段、空路径、前导/尾随斜杠、绝对路径、工作区外路径、UNC
+    for (const badPath of [
+      "",
+      "   ",
+      ".",
+      "..",
+      "./src/hello.ts",
+      "../secret.txt",
+      "src/../src/hello.ts",
+      "src/../../secret.txt",
+      "/src/hello.ts",
+      "\\src\\hello.ts",
+      "src/hello.ts/",
+      path.join(h.ws, "src", "hello.ts"),
+      path.join(outside, "secret.txt"),
+      "\\\\127.0.0.1\\share\\a.txt",
+      "src/hello.ts\u0000",
+    ]) {
+      await expect(phone.readFile(badPath), badPath).rejects.toMatchObject({
+        code: "invalid_file_path",
+        rpcCode: -32002,
+      });
+    }
+
+    // 拒绝符号链接 / junction（逃逸到工作区外或指向工作区内）
+    for (const linkPath of [
+      "linked-outside/secret.txt",
+      "linked-inside/hello.ts",
+      ...(hasFileSymlink ? ["escape-file.txt"] : []),
+    ]) {
+      await expect(phone.readFile(linkPath), linkPath).rejects.toMatchObject({
+        code: "invalid_file_path",
+        rpcCode: -32002,
+      });
+    }
+
+    // 拒绝不在 session.fileIndex() 中的工作区文件（.gitignore、隐藏文件、.git、.nocturne）
+    const indexPaths = (await phone.fileIndex()).map((entry) => entry.path);
+    expect(indexPaths).toContain("src/hello.ts");
+    for (const hiddenOrIgnored of [
+      "ignored.txt",
+      "dist/bundle.js",
+      ".env",
+      ".git/HEAD",
+      ".nocturne/config.json",
+      ".hidden/note.txt",
+    ]) {
+      expect(indexPaths).not.toContain(hiddenOrIgnored);
+      await expect(phone.readFile(hiddenOrIgnored), hiddenOrIgnored).rejects.toMatchObject({
+        code: "invalid_file_path",
+        rpcCode: -32002,
+      });
+    }
+
+    // 目录与不存在的文件
+    await expect(phone.readFile("src")).rejects.toMatchObject({
+      code: "file_not_regular",
+      rpcCode: -32002,
+    });
+    await expect(phone.readFile("src/missing.ts")).rejects.toMatchObject({
+      code: "file_not_found",
+      rpcCode: -32002,
+    });
+
+    // 二进制文件（含图片、NUL 字节、非法 UTF-8）不返回内容，报 file_binary 并附带 bytes
+    for (const [binPath, size] of [
+      ["blob.bin", 5],
+      ["raw-nul.txt", 3],
+      ["bad-utf8.txt", 3],
+      ["logo.png", PNG_2x3.byteLength],
+    ] as const) {
+      const err = await phone.readFile(binPath).catch((e: unknown) => e);
+      expect(err).toMatchObject({
+        code: "file_binary",
+        rpcCode: -32002,
+        bytes: size,
+        data: { code: "file_binary", bytes: size },
+      });
+      expect(err).not.toHaveProperty("text");
+    }
+
+    // 参数校验
+    await expect(
+      remote.client.call("session.readFile", { sessionId: phone.id, path: 123 as never }),
+    ).rejects.toMatchObject({ code: "invalid_params", rpcCode: -32602 });
+
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
+  it("session.readFile 超过远程通道上限或 READ_FILE_MAX_BYTES 时报 file_too_large 且 error.data 带 bytes，不截断", async () => {
+    const limit = 4096;
+    const h = await connectMany({ remoteMessageLimit: limit });
+    const overChannelText = "x".repeat(limit + 200);
+    const overChannelBytes = Buffer.byteLength(overChannelText, "utf8");
+    // 原始字节 < limit，但因 JSON 转义 + 报文封装超过 limit
+    const expandText = '"\n'.repeat(1800);
+    const expandBytes = Buffer.byteLength(expandText, "utf8");
+    expect(expandBytes).toBeLessThan(limit);
+    const overMaxBytes = READ_FILE_MAX_BYTES + 10;
+
+    writeFileSync(path.join(h.ws, "over-channel.txt"), overChannelText);
+    writeFileSync(path.join(h.ws, "expand-json.txt"), expandText);
+    writeFileSync(path.join(h.ws, "over-max.txt"), "a".repeat(overMaxBytes));
+
+    const { session: local } = await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    const remote = await h.add();
+    const { session: phone } = await remote.client.runtime.resumeSession(local.id);
+
+    // 1. 超过远程通道上限：远程报 file_too_large 并带精确 bytes，本机完整读出不截断
+    const remoteErr1 = await phone.readFile("over-channel.txt").catch((e: unknown) => e);
+    expect(remoteErr1).toMatchObject({
+      code: "file_too_large",
+      rpcCode: -32002,
+      bytes: overChannelBytes,
+      data: { code: "file_too_large", bytes: overChannelBytes },
+    });
+    const localRead1 = await local.readFile("over-channel.txt");
+    expect(localRead1.bytes).toBe(overChannelBytes);
+    expect(localRead1.text).toBe(overChannelText);
+
+    // 2. 原始大小未超 limit、但 JSON-RPC 编码后超 limit：同样明确报 file_too_large + bytes，不报 response_too_large 也不截断
+    const remoteErr2 = await phone.readFile("expand-json.txt").catch((e: unknown) => e);
+    expect(remoteErr2).toMatchObject({
+      code: "file_too_large",
+      rpcCode: -32002,
+      bytes: expandBytes,
+      data: { code: "file_too_large", bytes: expandBytes },
+    });
+    const localRead2 = await local.readFile("expand-json.txt");
+    expect(localRead2.bytes).toBe(expandBytes);
+    expect(localRead2.text).toBe(expandText);
+
+    // 3. 超过 READ_FILE_MAX_BYTES（2 MiB）：本机与远程均报 file_too_large + bytes
+    for (const reader of [local, phone]) {
+      const err = await reader.readFile("over-max.txt").catch((e: unknown) => e);
+      expect(err).toMatchObject({
+        code: "file_too_large",
+        rpcCode: -32002,
+        bytes: overMaxBytes,
+        data: { code: "file_too_large", bytes: overMaxBytes },
+      });
+    }
+
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
   });

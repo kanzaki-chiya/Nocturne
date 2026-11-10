@@ -118,6 +118,8 @@ MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-00
 
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
 
+手机侧边栏（顶栏只留会话菜单与侧边栏按钮、88% 右抽屉总览与只读子视图、远程只读子代理观察与会话内受限读文件）见 [ADR-0084](decisions/ADR-0084-phone-side-panel.md)，用户行为见 [apps/desktop.md](apps/desktop.md#8-手机网页)。
+
 桌面端新会话页选择分支与自动工作树（`<repo>-wt/<branch>`）见 [ADR-0085](decisions/ADR-0085-new-session-branch-picker.md)。
 
 ## Roadmap

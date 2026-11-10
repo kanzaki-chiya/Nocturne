@@ -1,6 +1,6 @@
 /**
  * 子会话只读观察的 RPC 映射（rpc.md 4.1）：subagent.list/subscribe/unsubscribe/readAttachment
- * 与 subagent.event/closed 通知；参数与错误、替换与取消清理、远程拒绝。
+ * 与 subagent.event/closed 通知；参数与错误、替换与取消清理、远程只读边界。
  * 日志用手写 JSONL 构造（不依赖 FakeProvider 时序），运行中的 child 用真实 Runtime + 门闩。
  */
 import { createHash } from "node:crypto";
@@ -925,49 +925,182 @@ describe("建订阅中的取消（观察由测试控制完成时机）", () => {
   });
 });
 
-describe("远程连接：新方法不进白名单", () => {
-  it("四个方法与两个通知都不对远程开放，Core 零调用", async () => {
+describe("远程连接：只读观察需本连接已打开父会话，断线与关会话清理，附件与工作树方法仍禁止", () => {
+  it("白名单只开放 list/subscribe/unsubscribe/cancel；未在本连接打开父会话时拒绝且 Core 零调用", async () => {
     for (const method of [
+      "subagent.cancel",
       "subagent.list",
-      "subagent.readAttachment",
       "subagent.subscribe",
       "subagent.unsubscribe",
     ]) {
+      expect((REMOTE_METHODS as readonly string[]).includes(method)).toBe(true);
+    }
+    for (const method of [
+      "subagent.readAttachment",
+      "subagent.diff",
+      "subagent.worktrees",
+      "subagent.deleteWorktree",
+    ]) {
       expect((REMOTE_METHODS as readonly string[]).includes(method)).toBe(false);
     }
+
     const made = handMade(3);
+    writeLog(made.sessionsDir, "20261021-otherp01", [created("20261021-otherp01")]);
+    writeLog(made.sessionsDir, "20261021-otherc01", [
+      created("20261021-otherc01", { sessionId: "20261021-otherp01", callId: "call-other" }),
+    ]);
     const h = await start({ sessionsDir: made.sessionsDir });
     const [serverEnd, remoteEnd] = createMemoryTransportPair();
     const servedRemote = h.server.serve(serverEnd, { origin: "remote" });
     const remote = createRpcClient(remoteEnd, { clientName: "phone" });
     await remote.initialize();
+
     const params = {
       parentSessionId: made.parentId,
       childSessionId: made.childId,
       subscriptionId: "r-1",
       file: "img-1.png",
     };
-    const denied = async (promise: Promise<unknown>) =>
-      expect(await promise.catch((e: unknown) => e)).toMatchObject({
+    // readAttachment / diff / worktrees / deleteWorktree 仍报 remote_not_allowed
+    for (const deniedCall of [
+      remote.call("subagent.readAttachment", params),
+      remote.call("subagent.diff", {
+        parentSessionId: made.parentId,
+        childSessionId: made.childId,
+        file: "a.ts",
+      }),
+      remote.call("subagent.worktrees", { parentSessionId: made.parentId }),
+      remote.call("subagent.deleteWorktree", {
+        parentSessionId: made.parentId,
+        childSessionId: made.childId,
+      }),
+    ]) {
+      await expect(deniedCall).rejects.toMatchObject({
         code: "remote_not_allowed",
         rpcCode: -32004,
       });
-    await denied(remote.call("subagent.list", { parentSessionId: made.parentId }));
-    await denied(remote.call("subagent.subscribe", params));
-    await denied(remote.call("subagent.unsubscribe", { subscriptionId: "r-1" }));
-    await denied(remote.call("subagent.readAttachment", params));
-    await denied(remote.runtime.listSubagents(made.parentId));
-    await denied(
+    }
+
+    // 即使本机已打开父会话，远程连接自己未打开父会话时也拒绝（unknown_session，Core 零调用）
+    const { session: localParent } = await h.client.runtime.resumeSession(made.parentId);
+    await expect(remote.runtime.listSubagents(made.parentId)).rejects.toMatchObject({
+      code: "unknown_session",
+      rpcCode: -32004,
+    });
+    await expect(
       remote.runtime.observeSubagent(
         { parentSessionId: made.parentId, childSessionId: made.childId },
         collect().observer,
       ),
-    );
+    ).rejects.toMatchObject({
+      code: "unknown_session",
+      rpcCode: -32004,
+    });
     expect(h.calls).toEqual([]);
-    // 本机连接不受影响
-    expect(await h.client.runtime.listSubagents(made.parentId)).toHaveLength(1);
+
+    // 远程打开父会话后可列出并观察其直接子会话；跨父会话或顶层会话被 Core 拒绝
+    const { session: remoteParent } = await remote.runtime.resumeSession(made.parentId);
+    const list = await remote.runtime.listSubagents(made.parentId);
+    expect(list).toHaveLength(1);
+    expect(list[0]?.childSessionId).toBe(made.childId);
+
+    const got = collect();
+    const obs = await remote.runtime.observeSubagent(
+      { parentSessionId: made.parentId, childSessionId: made.childId },
+      got.observer,
+    );
+    expect(obs.mode).toBe("snapshot");
+    expect(got.events).toHaveLength(made.childEvents);
+    expect(got.ends).toHaveLength(1);
+    // 远程退订在连接内幂等；未知 id 也成功，不影响其他连接。
+    expect(
+      await remote.call("subagent.unsubscribe", { subscriptionId: "already-ended" }),
+    ).toBeNull();
+
+    await expect(
+      remote.runtime.observeSubagent(
+        { parentSessionId: made.parentId, childSessionId: "20261021-otherc01" },
+        collect().observer,
+      ),
+    ).rejects.toMatchObject({
+      code: "subagent_parent_mismatch",
+      rpcCode: -32002,
+    });
+    await expect(
+      remote.runtime.observeSubagent(
+        { parentSessionId: made.parentId, childSessionId: "20261021-otherp01" },
+        collect().observer,
+      ),
+    ).rejects.toMatchObject({
+      code: "subagent_parent_mismatch",
+      rpcCode: -32002,
+    });
+
+    // 关闭远程父会话后，再次 list/subscribe 立即以 unknown_session 拒绝
+    await remoteParent.close();
+    await expect(remote.runtime.listSubagents(made.parentId)).rejects.toMatchObject({
+      code: "unknown_session",
+      rpcCode: -32004,
+    });
+    await localParent.close();
     remote.close();
     await servedRemote;
+    h.client.close();
+    await h.served;
+  });
+
+  it("远程观察建立中或已建立时断线：立即取消并退订本连接观察，不影响本机观察", async () => {
+    const h = await start({ manual: true });
+    const { opened, session: localParent } = await h.client.runtime.createSession({
+      model: "fake/fake-1",
+    });
+    const childA = "20261021-child001";
+    const childB = "20261021-child002";
+
+    // 本机先建立一路观察
+    const localPending = h.client.runtime.observeSubagent(
+      { parentSessionId: opened.sessionId, childSessionId: childA },
+      collect().observer,
+    );
+    await until(() => h.calls.length === 1, "本机建立开始");
+    h.calls[0]?.finish(fakeObservation(opened.sessionId, childA, h.calls[0]));
+    await localPending;
+
+    // 远程连接打开同一父会话，建立一路已完成观察 + 一路在建观察
+    const [serverEnd, remoteEnd] = createMemoryTransportPair();
+    const servedRemote = h.server.serve(serverEnd, { origin: "remote" });
+    const remote = createRpcClient(remoteEnd, { clientName: "phone" });
+    await remote.initialize();
+    await remote.runtime.resumeSession(opened.sessionId);
+
+    const remoteLive = remote.runtime.observeSubagent(
+      { parentSessionId: opened.sessionId, childSessionId: childA },
+      collect().observer,
+    );
+    await until(() => h.calls.length === 2, "远程第一路建立开始");
+    h.calls[1]?.finish(fakeObservation(opened.sessionId, childA, h.calls[1]));
+    await remoteLive;
+
+    const remoteInFlight = remote.runtime.observeSubagent(
+      { parentSessionId: opened.sessionId, childSessionId: childB },
+      collect().observer,
+    );
+    remoteInFlight.catch(() => undefined);
+    await until(() => h.calls.length === 3, "远程第二路建立开始");
+
+    // 远程断线：已建立的立即 unsubscribe，在建的立即 abort 且迟到结果被退订；本机观察完好
+    remote.close();
+    await until(() => h.calls[2]?.input.signal?.aborted === true, "远程在建观察被 abort");
+    expect(h.calls[1]?.unsubscribed).toBe(1);
+    expect(h.calls[0]?.unsubscribed).toBe(0);
+    h.calls[2]?.finish(fakeObservation(opened.sessionId, childB, h.calls[2]));
+    await servedRemote;
+    await until(() => h.calls[2]?.unsubscribed === 1, "迟到观察退订");
+    expect(h.calls[2]?.unsubscribed).toBe(1);
+    expect(h.calls[0]?.unsubscribed).toBe(0);
+
+    await localParent.close();
+    expect(h.calls[0]?.unsubscribed).toBe(1);
     h.client.close();
     await h.served;
   });

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import type { BackgroundShellTask } from "@nocturne/core/protocol";
-import { PhoneTasks } from "../src/web/PhoneTasks";
+import { PanelHarness, panelFixture } from "./phone-panel-fixtures";
 
 const task: BackgroundShellTask = {
   taskId: "task",
@@ -15,16 +15,9 @@ const task: BackgroundShellTask = {
 };
 afterEach(cleanup);
 it("phone overview opens a read-only output page and stops the selected task", async () => {
-  const session = {
-    shellOutput: vi.fn(async () => ({ task, text: "output", start: 0, end: 6, durationMs: 0 })),
-    shellKill: vi.fn(async () => undefined),
-  };
-  render(
-    <div className="phone">
-      <PhoneTasks tasks={[task]} session={session} connected />
-    </div>,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "后台任务" }));
+  const fixture = panelFixture({ shells: [task] });
+  const { session } = fixture;
+  render(<PanelHarness fixture={fixture} />);
   const row = screen.getByRole("button", { name: new RegExp(task.name) });
   expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
   fireEvent.click(row);
@@ -34,6 +27,7 @@ it("phone overview opens a read-only output page and stops the selected task", a
   expect(screen.getByTitle(task.command).textContent).toBe(task.command);
 });
 it("phone overview hides with no tasks", () => {
-  render(<PhoneTasks tasks={[]} connected={false} />);
+  render(<PanelHarness fixture={panelFixture()} />);
+  expect(screen.queryByRole("heading", { name: "后台任务" })).toBeNull();
   expect(screen.queryByRole("button", { name: "后台任务" })).toBeNull();
 });

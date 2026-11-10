@@ -81,6 +81,7 @@ import {
   parseLine,
   RPC_CODE_NAMES,
   RPC_PROTOCOL_VERSION,
+  type RpcErrorData,
   type RpcErrorObject,
   type RpcId,
 } from "../shared/jsonrpc.js";
@@ -97,6 +98,7 @@ import type {
   RpcParams,
   RpcResult,
   RpcServerNotifications,
+  SessionFileContent,
   SessionOpened,
   SessionStateSummary,
 } from "../shared/methods.js";
@@ -123,6 +125,10 @@ export class RpcError extends Error {
    * 也被停用时为 true；一键重新启用需同时恢复服务商与模型
    */
   readonly providerDisabled: boolean | undefined;
+  /** 文件过大（file_too_large）或二进制（file_binary）时的原始文件字节大小（data.bytes） */
+  readonly bytes: number | undefined;
+  /** 原始 error.data 载荷 */
+  readonly data: RpcErrorData | undefined;
 
   constructor(
     code: string,
@@ -133,6 +139,8 @@ export class RpcError extends Error {
     disabled?: "provider" | "model",
     model?: ModelRef,
     providerDisabled?: boolean,
+    bytes?: number,
+    data?: RpcErrorData,
   ) {
     super(message);
     this.name = "RpcError";
@@ -143,6 +151,8 @@ export class RpcError extends Error {
     this.disabled = disabled;
     this.model = model;
     this.providerDisabled = providerDisabled;
+    this.bytes = bytes;
+    this.data = data;
   }
 
   static fromObject(error: RpcErrorObject): RpcError {
@@ -155,6 +165,8 @@ export class RpcError extends Error {
       error.data?.disabled,
       error.data?.model,
       error.data?.providerDisabled,
+      error.data?.bytes,
+      error.data,
     );
   }
 }
@@ -247,6 +259,8 @@ export interface RpcSession {
   visionInfo(): Promise<RpcResult<"session.visionInfo">>;
   mcpServers(): Promise<RpcResult<"session.mcpServers">>;
   fileIndex(): Promise<FileIndexEntry[]>;
+  /** 只读读取本会话工作区内、且在 `fileIndex` 可见范围内的文本文件 */
+  readFile(path: string): Promise<SessionFileContent>;
   /**
    * 回答内文件引用存在性检查（U-09，方案 A）：只读，按工作区解析路径。
    * 越界路径照常返回绝对路径与 exists，由客户端决定入口。
@@ -888,6 +902,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       describeSkills: () => call("session.describeSkills", p),
       describeExternalAgents: () => call("session.describeExternalAgents", p),
       fileIndex: () => call("session.fileIndex", p),
+      readFile: (path) => call("session.readFile", { ...p, path }),
       resolveFiles: (paths) => call("session.resolveFiles", { ...p, paths }),
       readInputHistory: () => call("session.readInputHistory", p),
       recordInputHistory: async (text) => {
