@@ -34,6 +34,7 @@ export interface AppHost {
   openSettings(target: SettingsTarget): Promise<void>;
   scanQr(): Promise<{ text: string } | { cancelled: true } | { denied: true }>;
   downloadApk(url: string): Promise<void>;
+  setSystemBars(light: boolean): Promise<void>;
   /** 原生一侧的探针记录（前台服务启停、Activity 前后台、渲染进程回收），每行 `毫秒时间戳\t事件` */
   nativeLog(): Promise<string>;
   clearNativeLog(): Promise<void>;
@@ -69,6 +70,7 @@ export const shellHost: AppHost = {
   openSettings: () => Promise.reject(new Error("此版本不能打开系统设置")),
   scanQr: () => Promise.reject(new Error("scan_qr unavailable")),
   downloadApk: () => Promise.reject(new Error("download_apk unavailable")),
+  setSystemBars: () => Promise.resolve(),
   nativeLog: () => Promise.resolve(""),
   clearNativeLog: () => Promise.resolve(),
   notificationStatus: () => Promise.resolve({ enabled: false }),
@@ -99,6 +101,9 @@ export const tauriHost: AppHost = {
   scanQr: () => call("scan_qr"),
   downloadApk: async (url) => {
     await call("download_apk", { url });
+  },
+  setSystemBars: async (light) => {
+    await call("set_system_bars", { light });
   },
   backgroundStatus: async () => {
     const state = await call<{ running: boolean; ignoringBatteryOptimizations: boolean }>("status");

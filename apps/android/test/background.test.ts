@@ -583,6 +583,10 @@ describe("tauriHost 经白名单命令调用插件", () => {
     await tauriHost.updateService({ title: "b", promoted: false });
     await tauriHost.stopService();
     await tauriHost.openSettings("autostart");
+    await tauriHost.downloadApk(
+      "https://github.com/kanzaki-chiya/Nocturne/releases/download/v1.0.0/nocturne-1.0.0.apk",
+    );
+    await tauriHost.setSystemBars(true);
     expect(await tauriHost.backgroundStatus()).toEqual({
       supported: true,
       running: true,
@@ -595,6 +599,8 @@ describe("tauriHost 经白名单命令调用插件", () => {
       ["plugin:background|call", "update"],
       ["plugin:background|call", "stop"],
       ["plugin:background|call", "open_settings"],
+      ["plugin:background|call", "download_apk"],
+      ["plugin:background|call", "set_system_bars"],
       ["plugin:background|call", "status"],
       ["plugin:background|call", "log"],
       ["plugin:background|call", "clear_log"],

@@ -417,3 +417,49 @@ it("版本不兼容状态条：App 外层加 phone-update-content，网页版保
   expect(webStatus?.className).toBe("phone-status");
   expect(webStatus?.textContent).toBe("此手机界面需要更新的电脑端，请升级电脑上的 Nocturne");
 });
+
+it("observer.theme 报告启动、切换及跟随系统时系统深浅色变化", async () => {
+  localStorage.clear();
+  let systemLight = false;
+  let changeListener: (() => void) | undefined;
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return query === "(prefers-color-scheme: light)" ? systemLight : false;
+    },
+    addEventListener: (_event: string, listener: () => void) => {
+      if (query === "(prefers-color-scheme: light)") changeListener = listener;
+    },
+    removeEventListener: (_event: string, listener: () => void) => {
+      if (query === "(prefers-color-scheme: light)" && changeListener === listener)
+        changeListener = undefined;
+    },
+  }));
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "computer",
+    hostPub: "pub",
+    name: "电脑 1",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  const theme = vi.fn();
+  const container = await mount(
+    <PhoneApp storage={storage} platform={{ relay: "link", observer: { theme } }} />,
+  );
+  expect(theme).toHaveBeenLastCalledWith("dark");
+  systemLight = true;
+  await act(async () => {
+    changeListener?.();
+  });
+  expect(theme).toHaveBeenLastCalledWith("light");
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  await act(async () => {
+    [...container.querySelectorAll<HTMLButtonElement>('button[role="radio"]')]
+      .find((b) => b.textContent === "月之暗面")
+      ?.click();
+  });
+  expect(theme).toHaveBeenLastCalledWith("dark");
+  expect(changeListener).toBeUndefined();
+});

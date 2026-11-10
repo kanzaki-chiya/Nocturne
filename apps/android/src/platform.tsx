@@ -357,6 +357,9 @@ export function appPlatform(
     },
     observer: {
       ...controller.observer,
+      theme: (resolved) => {
+        void host.setSystemBars(resolved === "light").catch(() => undefined);
+      },
       state: (host, state, message) => {
         if (state === "connecting") update.computer(undefined);
         controller.observer.state?.(host, state, message);

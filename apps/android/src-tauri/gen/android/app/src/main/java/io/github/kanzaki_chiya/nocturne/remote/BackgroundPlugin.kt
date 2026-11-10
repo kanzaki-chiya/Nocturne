@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.webkit.WebView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -42,6 +43,11 @@ class ServiceArgs {
 @InvokeArg
 class UrlArgs {
   var url: String = ""
+}
+
+@InvokeArg
+class SystemBarsArgs {
+  var light: Boolean = false
 }
 
 @InvokeArg
@@ -226,6 +232,17 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
       activity.startActivity(Intent(Intent.ACTION_VIEW, uri))
       invoke.resolve(JSObject())
     } catch (_: Exception) { invoke.reject("Unable to open download") }
+  }
+
+  @Command
+  fun set_system_bars(invoke: Invoke) {
+    val light = invoke.parseArgs(SystemBarsArgs::class.java).light
+    activity.runOnUiThread {
+      val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+      controller.isAppearanceLightStatusBars = light
+      controller.isAppearanceLightNavigationBars = light
+      invoke.resolve(JSObject())
+    }
   }
 
   private fun appDetails() =

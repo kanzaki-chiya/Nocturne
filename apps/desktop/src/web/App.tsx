@@ -217,6 +217,19 @@ export function PhoneApp({
   };
   useEffect(() => {
     applyTheme(theme);
+    const media =
+      theme === "system" && typeof window.matchMedia === "function"
+        ? (window.matchMedia("(prefers-color-scheme: light)") as Partial<MediaQueryList>)
+        : undefined;
+    const report = () => {
+      const resolved = theme === "system" ? (media?.matches === true ? "light" : "dark") : theme;
+      platformRef.current.observer?.theme?.(resolved);
+    };
+    report();
+    media?.addEventListener?.("change", report);
+    return () => {
+      media?.removeEventListener?.("change", report);
+    };
   }, [theme]);
   useEffect(() => {
     void push?.refresh();

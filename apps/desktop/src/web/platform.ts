@@ -37,6 +37,11 @@ export interface PhoneObserver {
    * 否则为 undefined）。App 据此在打开会话或回到前台时清除未看标记；网页不实现此钩子。
    */
   viewing?(target: { hostId: string; sessionId: string } | undefined): void;
+  /**
+   * 页面当前实际生效的主题变化（启动、手动切换、或选「跟随系统」时系统深浅色切换）。
+   * App 据此同步状态栏与导航栏图标深浅；网页不实现此钩子。
+   */
+  theme?(resolved: "light" | "dark"): void;
 }
 export interface PhoneExtensionApi {
   /** 打开 `pages` 里登记的页面 */
