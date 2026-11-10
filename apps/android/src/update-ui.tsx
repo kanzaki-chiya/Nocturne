@@ -50,7 +50,7 @@ export function UpdateAbout({
         <button
           className="phone-update-link"
           onClick={() => {
-            void host.openUrl(update.url(next)).catch(() => undefined);
+            void host.downloadApk(update.url(next)).catch(() => undefined);
           }}
         >
           下载 {next}
@@ -91,7 +91,7 @@ export function UpdateNotice({
           <button
             className="phone-update-link"
             onClick={() => {
-              void host.openUrl(update.url(version)).catch(() => undefined);
+              void host.downloadApk(update.url(version)).catch(() => undefined);
             }}
           >
             下载{incompatible ? ` ${version}` : ""}

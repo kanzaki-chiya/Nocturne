@@ -44,8 +44,8 @@ it("关于五种状态及系统下载", async () => {
     });
   });
   const update = new AndroidUpdate({ version: "1.0.0", fetch });
-  const openUrl = vi.fn().mockResolvedValue(undefined);
-  await mount(<UpdateAbout update={update} version="1.0.0" host={{ ...shellHost, openUrl }} />);
+  const downloadApk = vi.fn().mockResolvedValue(undefined);
+  await mount(<UpdateAbout update={update} version="1.0.0" host={{ ...shellHost, downloadApk }} />);
   expect(container.textContent).toBe("版本 1.0.0检查更新");
   await act(async () => {
     container.querySelector("button")?.click();
@@ -63,7 +63,7 @@ it("关于五种状态及系统下载", async () => {
   await act(async () => {
     container.querySelector("button")?.click();
   });
-  expect(openUrl).toHaveBeenCalledWith(
+  expect(downloadApk).toHaveBeenCalledWith(
     "https://github.com/kanzaki-chiya/Nocturne/releases/download/v2.0.0/nocturne-2.0.0.apk",
   );
   fetch.mockRejectedValue(new Error("offline"));

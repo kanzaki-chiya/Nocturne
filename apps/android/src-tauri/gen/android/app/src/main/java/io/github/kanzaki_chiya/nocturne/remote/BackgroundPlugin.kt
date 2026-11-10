@@ -2,10 +2,12 @@ package io.github.kanzaki_chiya.nocturne.remote
 
 import android.Manifest
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.WebView
@@ -188,11 +190,40 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Command
-  fun open_url(invoke: Invoke) {
+  fun download_apk(invoke: Invoke) {
     val url = invoke.parseArgs(UrlArgs::class.java).url
-    if (!DownloadUrls.allowed(url)) { invoke.reject("Invalid download URL"); return }
+    val fileName = DownloadUrls.fileName(url)
+    if (!DownloadUrls.allowed(url) || fileName == null) { invoke.reject("Invalid download URL"); return }
+    val uri = Uri.parse(url)
     try {
-      activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+      val manager = activity.getSystemService(DownloadManager::class.java) ?: throw IllegalStateException("DownloadManager unavailable")
+      val query = DownloadManager.Query().setFilterByStatus(
+        DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or DownloadManager.STATUS_PAUSED,
+      )
+      val entries = mutableListOf<Pair<String?, Int>>()
+      manager.query(query)?.use { cursor ->
+        val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
+        val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+        while (cursor.moveToNext()) {
+          entries.add((if (uriIdx >= 0) cursor.getString(uriIdx) else null) to (if (statusIdx >= 0) cursor.getInt(statusIdx) else 0))
+        }
+      }
+      if (!DownloadUrls.isActiveDownload(url, entries)) {
+        manager.enqueue(
+          DownloadManager.Request(uri)
+            .setMimeType("application/vnd.android.package-archive")
+            .setTitle(fileName)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName),
+        )
+      }
+      invoke.resolve(JSObject())
+      return
+    } catch (_: Exception) {
+      // 下载管理器不可用时回退到系统浏览器打开
+    }
+    try {
+      activity.startActivity(Intent(Intent.ACTION_VIEW, uri))
       invoke.resolve(JSObject())
     } catch (_: Exception) { invoke.reject("Unable to open download") }
   }
