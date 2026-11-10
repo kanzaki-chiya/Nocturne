@@ -772,6 +772,8 @@ export class LanPhoneConnection implements PhoneConnectionLike {
       } catch {
         /* ignore */
       }
+      // 直连胜出后不再持有这条已关闭的中继连接
+      if (state.relayRef !== undefined && this.relay === state.relayRef) this.relay = undefined;
     };
     this.activeRelayAttemptAbort = abortRelay;
 
