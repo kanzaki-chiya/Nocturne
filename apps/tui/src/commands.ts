@@ -23,6 +23,7 @@ export type OverlayName =
   | "context"
   | "help"
   | "resume"
+  | "search"
   | "preset"
   | "effort"
   | "shell"
@@ -37,7 +38,7 @@ export type ProviderWizardStart =
   { kind: "add"; presetId?: string | undefined } | { kind: "key" | "login"; providerId: string };
 
 export type SlashResult =
-  | { kind: "overlay"; name: OverlayName }
+  | { kind: "overlay"; name: OverlayName; query?: string | undefined }
   /** /model 打开全屏模型选择页（tui.md §7） */
   | { kind: "picker"; focus: "left" | "right" }
   /**
@@ -350,6 +351,12 @@ export async function runSlash(
     case "/resume":
       // 无参：列表选择器；带 id：直接切换（App 侧执行注入的 switchSession）
       return arg === "" ? { kind: "overlay", name: "resume" } : { kind: "switch", id: arg };
+    case "/search": {
+      const query = line.trim().slice(cmd.length).trim();
+      return query === ""
+        ? { kind: "overlay", name: "search" }
+        : { kind: "overlay", name: "search", query };
+    }
     default:
       return { kind: "message", text: `未知命令 ${cmd}；/help 列出可用命令` };
   }

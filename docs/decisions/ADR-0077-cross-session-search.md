@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-11-03
-- 修订：[sessions.md](../architecture/sessions.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[desktop.md](../apps/desktop.md)、[roadmap.md](../roadmap/roadmap.md)
+- 修订：[sessions.md](../architecture/sessions.md)、[view.md](../protocols/view.md)、[rpc.md](../protocols/rpc.md)、[desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md)、[roadmap.md](../roadmap/roadmap.md)
 
 ## 背景
 
@@ -75,3 +75,7 @@
 
 - **在 `SessionStore` 维护 SQLite FTS 索引**：查询更快，但需要处理增量写入、回退删除、分叉复制与索引损坏重建；当前规模下直接流式扫描已满足交互要求，按路线图约定先不建索引。
 - **搜索 `tool.completed.output` 的 JSON 序列化文本**：会把内部字段名（如 `exitCode`、`spillPath`、`structuredPatch`）搜出来，产生界面上看不到的幽灵命中，故只搜界面实际展示的 `modelContent`。
+
+## 修订
+
+- **2026-11-11（TUI 搜索入口）**：TUI 新增斜杠命令 `/search`（及预填词 `/search <词>`）打开对话区会话搜索浮层，REPL（`--cli`）不设此命令。与桌面端弹窗相比，TUI 只检索会话，不设项目、设计、定时任务分栏与全局快捷键，直接调用本地 `runtime.searchSessions`；浮层交互、行格式、跨会话切换与 `seq` 定位规则以 [tui.md §6](../apps/tui.md#6-会话切换与恢复) 为准。

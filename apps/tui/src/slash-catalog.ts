@@ -64,6 +64,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     task: true,
   },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
+  { name: "/search", summary: "搜索会话", tuiOnly: true },
   { name: "/rename", summary: "修改会话标题", cli: "<标题> 修改当前会话标题；无参数清空" },
   { name: "/rewind", summary: "回退对话或还原文件" },
   { name: "/fork", summary: "从当前位置分叉新会话" },

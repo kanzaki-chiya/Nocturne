@@ -39,6 +39,7 @@ import {
 import type { spawn } from "node:child_process";
 
 import {
+  replaySessionView,
   type RewindMode,
   type RewindTarget,
   type SessionView,
@@ -118,6 +119,7 @@ import { ModelPicker, type PickerScope } from "./components/model-picker.js";
 import { Panel } from "./components/panel.js";
 import { PermissionDialog, permissionDialogRows } from "./components/permission-dialog.js";
 import { PickList, type PickItem } from "./components/pick-list.js";
+import { SessionSearch } from "./components/session-search.js";
 import { QuestionDialog, questionDialogRows } from "./components/question-dialog.js";
 import {
   ProviderPage,
@@ -156,6 +158,62 @@ const EMPTY_WINDOW: VisibleWindow = {
   sliceStart: 0,
   exhausted: true,
 };
+
+interface SeqJump {
+  seq?: number | undefined;
+  query?: string | undefined;
+}
+
+function findEntryBySeq(entries: readonly ViewEntry[], seq: number): ViewEntry | undefined {
+  return entries.find((e) => e.seq === seq || (e.kind === "tool" && e.completedSeq === seq));
+}
+
+function computeEntryScroll(
+  blocks: readonly LineBlock[],
+  entryKey: string,
+  query: string | undefined,
+  width: number,
+  conversationHeight: number,
+  cache: Map<string, LaidLine[]>,
+): ScrollState {
+  let total = 0;
+  let blockStart = -1;
+  let blockLines: LaidLine[] = [];
+  for (const b of blocks) {
+    const lines = layoutCached(b, width, cache);
+    if (b.key === entryKey) {
+      blockStart = total;
+      blockLines = lines;
+    }
+    total += lines.length;
+  }
+  if (blockStart < 0) return scrollToBottom();
+  const blockLen = blockLines.length;
+  const bottomRows = Math.max(0, conversationHeight);
+  if (total - blockStart <= bottomRows) {
+    return scrollToBottom();
+  }
+  const viewport = Math.max(1, conversationHeight - 1);
+  let topRow: number;
+  if (blockLen <= viewport) {
+    const lead = Math.floor((viewport - blockLen) / 2);
+    topRow = Math.max(0, Math.min(blockStart - lead, total - viewport));
+  } else {
+    const needle = query?.trim().toLowerCase() ?? "";
+    const hitOffset =
+      needle !== "" ? blockLines.findIndex((line) => line.text.toLowerCase().includes(needle)) : -1;
+    if (hitOffset >= viewport) {
+      topRow = Math.max(
+        0,
+        Math.min(blockStart + hitOffset - Math.floor(viewport / 2), total - viewport),
+      );
+    } else {
+      topRow = Math.max(0, Math.min(blockStart, total - viewport));
+    }
+  }
+  const fromBottom = Math.max(0, total - (topRow + viewport));
+  return fromBottom === 0 ? scrollToBottom() : { follow: false, fromBottom, newContent: false };
+}
 
 /** 未完成工具及其后的条目留在活动区；前缀可写入 <Static>。 */
 export function splitCompletedPrefix(entries: readonly ViewEntry[]): {
@@ -1017,8 +1075,19 @@ function SessionApp({
   }, [session, fullscreen]);
   /** /resume 弹层的会话清单（打开弹层时拉取） */
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
-  /** /resume 跨目录确认（foreign → 用户确认后带 allowForeign 重试） */
-  const [foreign, setForeign] = useState<{ id: string; root: string } | undefined>(undefined);
+  /** /search 弹层的挂载纪元与预填查询词 */
+  const [searchInit, setSearchInit] = useState<{ key: number; query: string }>({
+    key: 0,
+    query: "",
+  });
+  /** 跨会话打开搜索结果后待执行的条目定位 */
+  const pendingJumpRef = useRef<
+    { sessionId: string; entryKey: string; query?: string | undefined } | undefined
+  >(undefined);
+  /** /resume 与 /search 跨目录确认（foreign → 用户确认后带 allowForeign 重试） */
+  const [foreign, setForeign] = useState<
+    { id: string; root: string; jump?: SeqJump | undefined } | undefined
+  >(undefined);
   // 模型选择页 / 服务商页临时进出备用屏；输入文字留在父状态。
   const [picker, setPicker] = useState<
     { focus: "left" | "right"; scope?: PickerScope | undefined } | undefined
@@ -1456,6 +1525,24 @@ function SessionApp({
     };
   }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll, width]);
 
+  // 跨会话或本会话搜索命中条目定位：在新会话块表与展开态提交后一次算出滚动位置
+  useLayoutEffect(() => {
+    const pendingJump = pendingJumpRef.current;
+    if (pendingJump?.sessionId !== session.id) return;
+    pendingJumpRef.current = undefined;
+    if (!fullscreen) return;
+    const nextScroll = computeEntryScroll(
+      blocks,
+      pendingJump.entryKey,
+      pendingJump.query,
+      width,
+      conversationHeight,
+      lineCache.current,
+    );
+    laidTotal.current = undefined;
+    setScroll(nextScroll);
+  });
+
   // 在同一次提交中维护滚动；延后的被动 effect 会把旧 scroll 与新几何混用，
   // 将展开增加的行重复补偿，或用旧帧的夹紧结果覆盖刚到达的滚轮。
   useLayoutEffect(() => {
@@ -1549,9 +1636,29 @@ function SessionApp({
     );
   }, [session, flash]);
 
+  const jumpToCurrentSeq = useCallback(
+    (seq: number, query?: string): void => {
+      const entry = findEntryBySeq(entriesRef.current, seq);
+      if (entry === undefined) return;
+      if (entry.kind === "tool" && !diffExpandedRef.current.has(entry.key)) {
+        const updated = new Set(diffExpandedRef.current);
+        updated.add(entry.key);
+        diffExpandedRef.current = updated;
+        setDiffExpanded(updated);
+      }
+      pendingJumpRef.current = { sessionId: session.id, entryKey: entry.key, query };
+    },
+    [session.id],
+  );
+
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
-    async (id: string, allowForeign = false, draft?: RewindTarget): Promise<void> => {
+    async (
+      id: string,
+      allowForeign = false,
+      draft?: RewindTarget,
+      jump?: SeqJump,
+    ): Promise<void> => {
       if (submitting.current || busy) {
         pushLine("! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换");
         return;
@@ -1598,6 +1705,23 @@ function SessionApp({
             staticWritten.current.clear();
             staticAttempts.current.clear();
           }
+          if (jump?.seq !== undefined) {
+            const replayed = replaySessionView(res.session.durableEvents());
+            const hit = findEntryBySeq(replayed.entries, jump.seq);
+            if (hit !== undefined) {
+              if (hit.kind === "tool" && !diffExpandedRef.current.has(hit.key)) {
+                const updated = new Set(diffExpandedRef.current);
+                updated.add(hit.key);
+                diffExpandedRef.current = updated;
+                setDiffExpanded(updated);
+              }
+              pendingJumpRef.current = {
+                sessionId: res.session.id,
+                entryKey: hit.key,
+                query: jump.query,
+              };
+            }
+          }
           switched = true;
           pastes.reset(inputRef.current);
           setSession(res.session);
@@ -1613,7 +1737,7 @@ function SessionApp({
           return;
         }
         if (res.kind === "foreign") {
-          setForeign({ id, root: res.workspaceRoot });
+          setForeign({ id, root: res.workspaceRoot, ...(jump !== undefined ? { jump } : {}) });
           return;
         }
         pushLine(
@@ -2465,7 +2589,7 @@ function SessionApp({
         const text = selected.insert;
         updateInput("", 0);
         setCompletionOn(true);
-        if (fullscreen) setScroll(scrollToBottom());
+        if (fullscreen && text !== "/search") setScroll(scrollToBottom());
         void runSlash(text, session, provider, { runtime, view })
           .then((r) => {
             const opens = r.kind === "overlay" || r.kind === "picker" || r.kind === "provider-page";
@@ -2487,7 +2611,12 @@ function SessionApp({
                   setOverlay(r.name);
                   await waitCommit(settingsCommitted, true);
                 });
-              else setOverlay(r.name);
+              else {
+                if (r.name === "search") {
+                  setSearchInit((prev) => ({ key: prev.key + 1, query: r.query ?? "" }));
+                }
+                setOverlay(r.name);
+              }
             } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
             else if (r.kind === "switch") void doSwitch(r.id);
@@ -2754,7 +2883,12 @@ function SessionApp({
                   setOverlay(r.name);
                   await waitCommit(settingsCommitted, true);
                 });
-              else setOverlay(r.name);
+              else {
+                if (r.name === "search") {
+                  setSearchInit((prev) => ({ key: prev.key + 1, query: r.query ?? "" }));
+                }
+                setOverlay(r.name);
+              }
             } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
             else if (r.kind === "switch") void doSwitch(r.id);
@@ -3420,6 +3554,33 @@ function SessionApp({
           setOverlay(undefined);
         }}
       />
+    ) : overlay === "search" ? (
+      <SessionSearch
+        key={searchInit.key}
+        runtime={runtime}
+        currentCwd={session.state().meta.cwd}
+        initialQuery={searchInit.query}
+        width={width}
+        maxRows={budget.conversation}
+        cursorY={-budget.frameHeight + 1}
+        active
+        onOpen={(target) => {
+          setOverlay(undefined);
+          if (target.sessionId === session.id) {
+            if (target.seq !== undefined) {
+              jumpToCurrentSeq(target.seq, target.query);
+            }
+            return;
+          }
+          void doSwitch(target.sessionId, false, undefined, {
+            seq: target.seq,
+            query: target.query,
+          });
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
+      />
     ) : overlay === "preset" ? (
       <PickList
         title="选择权限预设"
@@ -3526,7 +3687,7 @@ function SessionApp({
         onConfirm={() => {
           const f = foreign;
           setForeign(undefined);
-          void doSwitch(f.id, true);
+          void doSwitch(f.id, true, undefined, f.jump);
         }}
         onCancel={() => {
           setForeign(undefined);

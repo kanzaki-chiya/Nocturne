@@ -431,6 +431,23 @@ describe("TUI /context 面板（ADR-0046 第 5 节）", () => {
 });
 
 describe("内置命令名单", () => {
+  it("/search 仅出现在 TUI 命令表与补全中，支持无参或预填查询词", async () => {
+    const session = fakeSession({});
+    expect(await runSlash("/search", session)).toEqual({ kind: "overlay", name: "search" });
+    expect(await runSlash("/search  跨会话  词 ", session)).toEqual({
+      kind: "overlay",
+      name: "search",
+      query: "跨会话  词",
+    });
+    expect(helpLines().join("\n")).toContain("/search");
+    expect(cliHelpText()).not.toContain("/search");
+    expect(
+      completeSlash("/sea", { effortLevels: [], providerIds: [] }).some(
+        (c) => c.insert === "/search",
+      ),
+    ).toBe(true);
+  });
+
   it("TUI 每个斜杠命令都在 Core 的 BUILTIN_SLASH_COMMANDS 里", () => {
     // 技能与命令重名时禁止斜杠调用（skills.md 第 6 节）；新增命令要同步名单
     const builtin = new Set(BUILTIN_SLASH_COMMANDS);

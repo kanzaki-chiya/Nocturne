@@ -91,6 +91,7 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 | `/tasks` | 列出本会话后台任务，选中查看输出尾部或停止（仅 TUI） |
 | `/agents` | 查看已配置的外部 Agent 与状态 |
 | `/resume` | 列出历史会话或按 ID 切换会话 |
+| `/search` | 搜索历史会话并跳到命中位置（仅 TUI） |
 | `/rename` | 修改当前会话标题（不带参数清空显式标题） |
 | `/rewind` | 选择历史用户消息回退对话或还原文件 |
 | `/fork` | 从当前位置分叉出新会话 |

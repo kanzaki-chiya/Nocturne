@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "@nocturne/core";
 
-import { resumeLabel } from "../src/resume-label.js";
+import { resumeLabel, searchSessionLabel } from "../src/resume-label.js";
 
 const now = Date.parse("2026-09-27T12:00:00Z");
 const sample: SessionSummary = {
@@ -44,5 +44,28 @@ describe("/resume 摘要行", () => {
       now,
     );
     expect(label).toMatch(/^⇄ 修复窗口/);
+  });
+
+  it("/search 行：同目录只显示标题与相对时间，异目录在行尾显示路径并按宽度截断", () => {
+    const same = searchSessionLabel(sample, "C:/repo", 120, now);
+    expect(same).toMatch(/^修复窗口.*7 分钟前$/);
+    expect(same).not.toContain("C:/repo");
+    expect(same).not.toContain("session-123");
+
+    const foreign = searchSessionLabel(
+      { ...sample, cwd: "D:/other-project", workspaceRoot: "D:/other-project" },
+      "C:/repo",
+      120,
+      now,
+    );
+    expect(foreign).toMatch(/^修复窗口.*7 分钟前  D:\/other-project$/);
+    expect(
+      searchSessionLabel(
+        { ...sample, cwd: "D:/other-project", workspaceRoot: "D:/other-project" },
+        "C:/repo",
+        25,
+        now,
+      ),
+    ).toContain("…");
   });
 });
