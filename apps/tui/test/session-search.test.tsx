@@ -588,6 +588,8 @@ describe("TUI /search 跨会话搜索", () => {
       });
 
       // 按 Tab 将焦点切到 [确认]，等到帧里 [确认] 带上焦点 SGR 且 [取消] 失去焦点 SGR 后再按回车
+      // 帧先于 useInput 的 effect 提交：让出一个宏任务，等确认框的按键监听挂上再发键
+      await new Promise<void>((resolve) => setImmediate(resolve));
       screen.stdin.write("\t");
       await vi.waitFor(() => {
         const raw = screen.lastFrame() ?? "";
