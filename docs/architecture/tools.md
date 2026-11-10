@@ -32,7 +32,7 @@ execute(call, ctx):
   1. 查找      registry.get(call.name)
                不存在 → 结果 error(code="unknown_tool")，列出可用工具名，交给模型自我修正
                若工具声明 traits.dispatch(input)（ADR-0067 §2）：先校验代理工具顶层输入，再解析为目标工具与目标输入
-               （目标不在本会话工具池 → error(code="unknown_tool")，附可用服务器列表）；后续步骤 2–8 全部按目标工具执行
+               （支持异步与中断信号；目标不在本会话工具池 → error(code="unknown_tool")，附可用服务器列表）；后续步骤 2–8 全部按目标工具执行
   2. 校验      按 inputSchema 校验并规范化输入（方言按根 $schema：2020-12、2019-09，
                其余按 draft-07，未识别的 $schema 忽略后按 draft-07 编译）
                失败 → error(code="invalid_input")，附带校验信息（代理调用时附带目标工具 inputSchema）

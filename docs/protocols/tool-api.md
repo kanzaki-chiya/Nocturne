@@ -68,7 +68,7 @@ interface ToolTraits {
   /** 代理调用分派（ADR-0067 §2）：执行管线第 1 步（查找）之后将调用解析为目标工具与目标输入，
       之后的 schema 校验、Hook、权限主体、调用、超时、结果预算全部按目标工具进行；
       tool.started 记录 target: { name, input } */
-  dispatch?: (input: unknown) => ToolDispatchResult
+  dispatch?: (input: unknown, signal?: AbortSignal) => ToolDispatchResult | Promise<ToolDispatchResult>
 }
 ```
 

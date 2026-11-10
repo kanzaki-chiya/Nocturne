@@ -115,9 +115,11 @@ export interface ToolTraits {
   /**
    * 代理调用分派（ADR-0067 §2）：管线第 1 步（查找）之后将调用解析为目标工具与目标输入，
    * 之后的 schema 校验、Hook、权限主体、调用、超时、结果预算全部按目标工具进行；
-   * tool.started 额外记录 target: { name, input }。
+   * tool.started 额外记录 target: { name, input }。可异步准备目标，signal 中止只停止等待。
    */
-  dispatch?: ((input: unknown) => ToolDispatchResult) | undefined;
+  dispatch?:
+    | ((input: unknown, signal?: AbortSignal) => ToolDispatchResult | Promise<ToolDispatchResult>)
+    | undefined;
 }
 
 /**
@@ -356,6 +358,8 @@ export interface McpServerStatus {
   restarts: number;
   /** 无需用户操作，Runtime 后续仍会自行重连：HTTP 恒为 true；stdio 须保留工具且未达重连上限。 */
   autoRetry?: boolean | undefined;
+  /** HTTP 重连剩余冷却时间；仅查询时计算，不写入可用性环境说明。 */
+  retryAfterMs?: number | undefined;
 }
 
 /** open() 的运行环境：由 index.ts（Runtime 装配处）构造 */
@@ -397,6 +401,8 @@ export interface McpSession {
    * 空闲 `reconcile` 不调用它。未实现时行为与本钩子不存在时一致。
    */
   prepareTurn?(signal?: AbortSignal): Promise<void>;
+  /** 仅按需模式：复用 HTTP 恢复策略，最多等 3 秒；返回恢复工具供私有池更新，不消费边界暂存。 */
+  recoverTools?(server?: string, signal?: AbortSignal): Promise<McpToolDiff>;
   finishTurn?(sessionId: string): Promise<void>;
   reconcile(servers: readonly McpServerConfig[]): Promise<void>;
   tools(): readonly ToolDefinition[];

@@ -274,11 +274,11 @@ it("回退掉不可用说明后仍失败，下一 Turn 重新记录", async () =
   }
 });
 
-it("按需工具名服务器段规范化后指出不可用与原因，仍列可用服务器", () => {
+it("按需工具名服务器段规范化后指出不可用与原因，仍列可用服务器", async () => {
   const pair = createMcpOnDemandTools([], ["healthy"], () => [
     { name: "Browser-OS", state: "failed", toolCount: 0, restarts: 0, error: "connection refused" },
   ]);
-  const result = pair.callTool.traits.dispatch?.({ tool: "mcp__browser_os__open" });
+  const result = await pair.callTool.traits.dispatch?.({ tool: "mcp__browser_os__open" });
   expect(result).toMatchObject({ code: "unknown_tool" });
   expect(JSON.stringify(result)).toContain("当前不可用（connection refused）");
   expect(JSON.stringify(result)).toContain("healthy");

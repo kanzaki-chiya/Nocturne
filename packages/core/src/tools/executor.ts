@@ -287,7 +287,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       if (entryTool.traits.dispatch !== undefined) {
         let dispatched;
         try {
-          dispatched = entryTool.traits.dispatch(entryInput);
+          dispatched = await entryTool.traits.dispatch(entryInput, scope.signal);
         } catch (e) {
           return finish(
             "error",
@@ -296,6 +296,9 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
               `工具 "${call.name}" 分派失败：${e instanceof Error ? e.message : String(e)}`,
             ),
           );
+        }
+        if (aborted(scope.signal)) {
+          return finish("cancelled", errorResult("cancelled", "调用已被中断"));
         }
         if ("error" in dispatched) {
           return finish("error", errorResult(dispatched.code ?? "unknown_tool", dispatched.error));

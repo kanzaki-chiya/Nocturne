@@ -2087,7 +2087,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         resolved?.mcpToolSearch ??
         options.mcpToolSearch ??
         "auto";
-      mcpOnDemand = shouldEnableMcpToolSearch(currentMcpTools, mode);
+      mcpOnDemand =
+        shouldEnableMcpToolSearch(currentMcpTools, mode) ||
+        (mode === "always" && (mcpSession?.status().length ?? 0) > 0);
       if (mcpOnDemand) {
         omittedMcpToolCount = currentMcpTools.length;
         const readyServers = (mcpSession?.status() ?? [])
@@ -2097,6 +2099,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           currentMcpTools,
           readyServers,
           () => mcpSession?.status() ?? [],
+          async (server, signal) => {
+            const diff = (await mcpSession?.recoverTools?.(server, signal)) ?? {
+              add: [],
+              remove: [],
+            };
+            if (!signal?.aborted) {
+              for (const name of diff.remove) activeMcpTools.delete(name);
+              for (const tool of diff.add) activeMcpTools.set(tool.name, tool);
+              omittedMcpToolCount = activeMcpTools.size;
+            }
+            return diff;
+          },
         );
         tools.register(pair.searchTool);
         tools.register(pair.callTool);

@@ -95,6 +95,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
   - 上述崩溃与 3 次上限仅适用于 **stdio**。HTTP 的 `failed` 服务器在下一次调用时惰性重连：新建传输、不带旧 session id、重新 initialize 与 tools/list。并发调用共用一个重连 promise；次数按连续连接失败计，成功清零，不设永久上限。连接失败后冷却 **30 秒**，冷却内立即返回 `mcp_unavailable` 并说明剩余时间；冷却结束后的下一次调用再尝试。
   - 本次调用内只对带 session id 的 HTTP 404，或明确请求尚未发出的连接阶段错误（Node fetch 错误链中的 `ECONNREFUSED`、`ENOTFOUND`、`EAI_AGAIN`、`EHOSTUNREACH`、`ENETUNREACH`）立即重连并重试一次。多地址 AggregateError 只有所有子错误均为连接阶段错误才安全重试。请求发出后超时、reset、HTTP 500 等不重试，记 `failed`，下次调用重连，避免重复副作用。
   - 每个主 Turn 开始、`applyPendingTools()` 之前，`McpSession.prepareTurn(signal)` 对过冷却的失败 HTTP 服务器并行重连，最多等 **3 秒**；及时成功的工具本 Turn 生效，超时则后台继续、下一个 Turn 边界生效。首 Turn 的初始启动等待不变；stdio 不受影响；子会话与压缩不触发恢复等待。
+  - **按需模式的 Turn 内恢复**：`mcp_search` 无匹配时，经 `McpSession.recoverTools(server?, signal)` 复用上述 HTTP 恢复范围、30 秒冷却、连续失败计数、并发共享 promise 与 3 秒等待上限；指定 `server` 只恢复该服务器，否则恢复全部符合条件的服务器。`mcp_call` 的目标属于失败服务器时也先恢复再分派。超时按未找到返回，后台继续连接；成功的恢复快照可由后续搜索或调用读取。冷却内不重连，未找到结果附不可用原因和剩余秒数（`status().retryAfterMs`，仅查询时计算，不写入环境说明）。恢复快照只更新按需私有池，不消费 `applyPendingTools()` 的暂存，不重建入口定义或切换模式。子会话仍持快照，不装配此恢复入口；全量模式行为不变。
 - **Turn 边界记录可用性变化**：主 Turn 在 MCP 准备与 `applyPendingTools()` 完成后、首次请求前追加持久环境说明，每次读取回退后的有效日志折叠状态，只记录变化；中断、子会话与后台请求不写。`status().autoRetry` 表示无需用户操作，Runtime 后续仍会自行重连，条件、措辞及新增服务器语义见 [ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)。
 - **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。**已知限制（Windows、POSIX 均适用）**：Nocturne 主进程被强杀时，无法执行主动清理；MCP 服务器的 stdin 管道会关闭。若服务器响应 EOF 自行退出，就不会残留；若服务器忽略 EOF 并继续运行，就可能成为孤儿进程。Windows 当前没有用 Job Object 绑定生命周期；POSIX 虽用独立进程组，但主进程强杀后也不会自动向该组发信号。手动清理前先核对服务器命令行及 PID：Windows 使用 `taskkill /PID <PID> /T /F`；POSIX 使用 `kill -TERM <PID>`，必要时逐一清理其子进程。真实 `nctrn` 进程与假 MCP 服务器的强杀验收见 `apps/cli/test/mcp-parent-kill.accept.mjs`；后续方案见 [roadmap](../roadmap/roadmap.md)。
 - **子会话复用（Phase 6）**：Subagent 子会话的工具集直接取父会话 `mcpSession.tools()` 的快照——同一连接、同一批服务器进程，**不为子会话启动新的 MCP 服务器**，也不做第二次 initialize（[subagent.md](subagent.md) 第 10 节）。
@@ -130,9 +131,9 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 3. 规范化后撞名（不同原始名映射到同一名字）：先注册者保留，后到的工具跳过并记警告——不静默覆盖（注册表既有约定）。
 4. `server` id 在配置层校验：`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`，不合规的条目拒绝该层（用户配置报错 / 项目配置忽略并警告）。
 
-工具集合随会话注册表存在：本会话的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个 Turn 开始时一次性切换**——保证单个 Turn 内 `specs()` 稳定（模型看到的工具集不中途变化，请求前缀不变）。会话关闭后 MCP 工具随注册表一起消失。
+工具集合随会话注册表存在：全量模式的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个 Turn 开始时一次性切换**——保证单个 Turn 内 `specs()` 稳定（模型看到的工具集不中途变化，请求前缀不变）。按需模式是 HTTP 重连恢复的例外：注册表中只有固定的 `mcp_search` / `mcp_call` 入口，搜索与分派持有独立的私有 `toolMap`；Turn 内恢复只更新池子，入口说明中的名单与 schema 保持不变，因此请求工具定义不变。普通 `tools/list_changed` 仍等边界，入口名单和模式也只在边界刷新（[ADR-0067 修订](../decisions/ADR-0067-mcp-tool-search.md#修订2026-11-10按需模式的-turn-内重连)）。会话关闭后 MCP 工具随注册表一起消失。
 
-按需模式 `mcp_call` 的目标不存在或不在本会话工具池时，由工具的 dispatch 返回 unknown_tool，列可用服务器并提示先用 mcp_search；目标工具名的服务器段属于当前不可用服务器时，说明该服务器不可用及原因（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）；不列注册表里的内置工具名。它在通用执行器的目标查找之前结算，不为 MCP 在执行器增加名字分支（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）。
+按需模式 `mcp_call` 先按第 4 节尝试恢复目标所属的失败 HTTP 服务器；目标仍不存在或不在本会话工具池时，由工具的 dispatch 返回 unknown_tool，列可用服务器并提示先用 mcp_search；目标工具名的服务器段属于当前不可用服务器时，说明该服务器不可用及原因（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）；不列注册表里的内置工具名。它在通用执行器的目标查找之前结算，不为 MCP 在执行器增加名字分支（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）。
 
 ## 6. 调用与结果映射
 
@@ -199,7 +200,7 @@ apps/cli:  createPlatform() → createMcpConnector(platform)（@nocturne/mcp）
            → createRuntime({ ..., mcp: connector })
 core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支持热添加）
            → connector.open({ servers, cwd, workspaceRoot, sessionId, events, diagnostics })
-           → McpSession { startup(), prepareTurn?(), tools(), status(), reconcile(), applyPendingTools(), close() }
+           → McpSession { startup(), prepareTurn?(), recoverTools?(), tools(), status(), reconcile(), applyPendingTools(), close() }
            → 会话注册表 = 内置 ∪ mcpSession.tools()
            → session.mcpServers() 查询；close() 时连接全部关闭
 ```

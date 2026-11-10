@@ -222,6 +222,125 @@ describe("ADR-0067 单元测试：mcp_search / mcp_call 与阈值判定", () => 
 });
 
 describe("ADR-0067 集成测试：按需加载全流程、前缀缓存稳定、权限、Hook 与子会话", () => {
+  it.each(["search", "call"] as const)(
+    "%s 恢复初始为空的按需池，同 Turn 可调用且请求定义不变，下一 Turn 只记录一次恢复",
+    async (entry) => {
+      const root = await mkdtemp(path.join(tmpdir(), "nct-mcp-recovery-"));
+      roots.push(root);
+      const recovered = makeMcpTool({
+        server: "browseros_neo",
+        tool: "open",
+        description: "Open browser",
+      });
+      let ready = false;
+      let applied = false;
+      const recoveryServers: (string | undefined)[] = [];
+      const provider = new FakeProvider({
+        scripts: [
+          [
+            {
+              type: "tool_call",
+              toolCallId: "recover",
+              name: entry === "search" ? "mcp_search" : "mcp_call",
+              input:
+                entry === "search"
+                  ? { query: "open", server: "browseros-neo" }
+                  : { tool: recovered.name },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ],
+          [
+            {
+              type: "tool_call",
+              toolCallId: "call",
+              name: "mcp_call",
+              input: { tool: recovered.name },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ],
+          [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ],
+          [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ],
+          [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ],
+        ],
+      });
+      const runtime = await createRuntime({
+        cwd: root,
+        sessionsDir: path.join(root, "sessions"),
+        providers: [provider],
+        mcpToolSearch: "always",
+        mcp: {
+          probe: async () => ({ ok: true, durationMs: 0, tools: [] }),
+          open: async () => ({
+            startup: async () => undefined,
+            tools: () => (applied ? [recovered] : []),
+            status: () => [
+              {
+                name: "browseros-neo",
+                state: ready ? "ready" : "failed",
+                restarts: 0,
+                toolCount: ready ? 1 : 0,
+                error: "connection refused",
+                autoRetry: true,
+              },
+            ],
+            recoverTools: async (server) => {
+              recoveryServers.push(server);
+              ready = true;
+              return { add: [recovered], remove: [] };
+            },
+            applyPendingTools: () => {
+              const add = ready && !applied ? [recovered] : [];
+              applied ||= ready;
+              return { add, remove: [] };
+            },
+            reconcile: async () => undefined,
+            close: async () => undefined,
+          }),
+        },
+      });
+      const session = await runtime.createSession({
+        model: "fake/fake-1",
+        permissionPreset: "bypass",
+      });
+      const events: RuntimeEvent[] = [];
+      session.subscribe((e) => events.push(e));
+      const notes = () =>
+        events.filter((e) => e.type === "session.config_changed" && e.payload.mcp !== undefined);
+      try {
+        await session.submit({ text: "recover" });
+        expect(recoveryServers).toEqual(["browseros-neo"]);
+        const results = events.filter((e) => e.type === "tool.completed");
+        expect(results).toHaveLength(2);
+        expect(results.every((e) => e.payload.status === "ok")).toBe(true);
+        expect(results[0]?.payload.modelContent).toContain(recovered.name);
+        const specs = provider.requests.slice(0, 3).map((r) => JSON.stringify(r.tools));
+        expect(new Set(specs).size).toBe(1);
+        expect(provider.requests[0]?.tools.map((t) => t.name)).toEqual(
+          expect.arrayContaining(["mcp_search", "mcp_call"]),
+        );
+        expect(provider.requests[0]?.tools.some((t) => t.name.startsWith("mcp__"))).toBe(false);
+        expect(notes()).toHaveLength(1);
+        expect(notes()[0]?.payload).toMatchObject({ mcp: [{ available: false }] });
+        await session.submit({ text: "next" });
+        await session.submit({ text: "stable" });
+        expect(notes()).toHaveLength(2);
+        expect(notes()[1]?.payload).toMatchObject({
+          mcp: [{ server: "browseros-neo", available: true }],
+        });
+      } finally {
+        await session.close();
+      }
+    },
+  );
   it("mcp_call 未知目标列服务器并引导 mcp_search，不列 registry 可见工具", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "nct-mcp-unknown-"));
     roots.push(root);

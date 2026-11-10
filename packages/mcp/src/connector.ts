@@ -97,6 +97,9 @@ interface Server {
   tools: Map<string, ToolDefinition>;
   /** Turn 边界待应用的工具集（list_changed / 重连刷新的暂存） */
   staged?: Map<string, ToolDefinition> | undefined;
+  /** HTTP 重连恢复的快照；按需池可在 Turn 内读取，普通 list_changed 仍只走 staged。 */
+  recovered?: Map<string, ToolDefinition> | undefined;
+  recoveredNames?: Set<string> | undefined;
   refreshing?: Promise<void> | undefined;
   restarting?: Promise<boolean> | undefined;
   closed: boolean;
@@ -228,6 +231,8 @@ async function closeRuntime(st: Server, runtime: ServerRuntime): Promise<void> {
 
 async function stopServer(st: Server): Promise<void> {
   st.closed = true;
+  st.recovered = undefined;
+  st.recoveredNames = undefined;
   st.run += 1;
   st.controller?.abort();
   const runtime = st.runtime;
@@ -703,6 +708,12 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
         // 连续重连失败计数成功清零，冷却解除
         st.restarts = 0;
         st.retryAt = undefined;
+        st.recoveredNames = new Set([
+          ...(st.recoveredNames ?? []),
+          ...st.tools.keys(),
+          ...(st.staged?.keys() ?? []),
+        ]);
+        st.recovered = st.staged;
       }
       const toolCount = st.staged?.size ?? st.tools.size;
       scope.emitServer({ name: st.cfg.name, state: "ready", toolCount });
@@ -1200,6 +1211,47 @@ function wrapTool(
   };
 }
 
+/** Turn 准备与按需发现共用恢复范围、并发 promise、冷却和等待上限。 */
+async function recoverHttpServers(
+  scope: McpOpenScope,
+  servers: readonly Server[],
+  signal?: AbortSignal,
+  server?: string,
+): Promise<void> {
+  if (signal?.aborted) return;
+  const now = Date.now();
+  const targets = servers.filter(
+    (st) =>
+      st.cfg.type === "http" &&
+      (server === undefined || st.cfg.name.toLowerCase() === server.toLowerCase()) &&
+      !st.closed &&
+      (st.restarting !== undefined ||
+        (st.state === "failed" && (st.retryAt === undefined || st.retryAt <= now))),
+  );
+  if (targets.length === 0) return;
+  const attempts = Promise.all(
+    targets.map((st) => ensureClient(scope, st).catch(() => undefined)),
+  ).then(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, TURN_RECONNECT_WAIT_MS);
+    timer.unref();
+  });
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<void>((resolve) => {
+    if (signal === undefined) return;
+    onAbort = resolve;
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([attempts, waited, aborted]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 function statusOf(st: Server): McpServerStatus {
   return {
     name: st.cfg.name,
@@ -1208,6 +1260,9 @@ function statusOf(st: Server): McpServerStatus {
     error: st.error,
     restarts: st.restarts,
     autoRetry: st.cfg.type === "http" || (st.tools.size > 0 && st.restarts < MAX_RESTARTS),
+    ...(st.cfg.type === "http" && st.retryAt !== undefined
+      ? { retryAfterMs: Math.max(0, st.retryAt - Date.now()) }
+      : {}),
   };
 }
 
@@ -1538,40 +1593,29 @@ export function createMcpConnector(options?: {
               await connection.prepareTurn?.(signal);
             }),
           );
-          const now = Date.now();
-          const targets = servers.filter(
-            (st) =>
-              st.cfg.type === "http" &&
-              st.state === "failed" &&
-              !st.closed &&
-              (st.retryAt === undefined || st.retryAt <= now),
-          );
-          if (targets.length === 0) return;
-          // 并发共享同一次尝试（st.restarting）；失败已由 ensureClient 记 failed/冷却
-          const attempts = Promise.all(
-            targets.map((st) => ensureClient(effectiveScope, st).catch(() => undefined)),
-          ).then(() => undefined);
-          void attempts.catch(() => undefined);
-          let timer: NodeJS.Timeout | undefined;
-          const waited = new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, TURN_RECONNECT_WAIT_MS);
-            timer.unref();
-          });
-          let onAbort: (() => void) | undefined;
-          const aborted = new Promise<void>((resolve) => {
-            if (signal === undefined) return;
-            onAbort = () => {
-              resolve();
-            };
-            if (signal.aborted) resolve();
-            else signal.addEventListener("abort", onAbort, { once: true });
-          });
-          try {
-            await Promise.race([attempts, waited, aborted]);
-          } finally {
-            clearTimeout(timer);
-            if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+          await recoverHttpServers(effectiveScope, servers, signal);
+        },
+        async recoverTools(server, signal) {
+          const [runtimeDiffs] = await Promise.all([
+            Promise.all(
+              runtimeConnections.map(async (connection) =>
+                connection.recoverTools?.(server, signal),
+              ),
+            ),
+            recoverHttpServers(effectiveScope, servers, signal, server),
+          ]);
+          const diff: McpToolDiff = {
+            add: runtimeDiffs.flatMap((change) => change?.add ?? []),
+            remove: runtimeDiffs.flatMap((change) => change?.remove ?? []),
+          };
+          for (const st of servers) {
+            if (st.closed || st.state !== "ready" || st.recovered === undefined) continue;
+            if (server !== undefined && st.cfg.name.toLowerCase() !== server.toLowerCase())
+              continue;
+            diff.remove.push(...(st.recoveredNames ?? []));
+            diff.add.push(...st.recovered.values());
           }
+          return diff;
         },
         status() {
           return [
@@ -1590,8 +1634,11 @@ export function createMcpConnector(options?: {
           for (const st of servers) {
             if (st.staged === undefined) continue;
             const staged = st.staged;
+            const previousNames = new Set([...st.tools.keys(), ...(st.recoveredNames ?? [])]);
             st.staged = undefined;
-            for (const name of st.tools.keys()) {
+            st.recovered = undefined;
+            st.recoveredNames = undefined;
+            for (const name of previousNames) {
               if (!staged.has(name)) diff.remove.push(name);
             }
             for (const [name, def] of staged) {

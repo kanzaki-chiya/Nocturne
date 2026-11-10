@@ -1,6 +1,11 @@
 import { createServer } from "node:http";
 import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createPlatform, type McpSession, type ToolContext } from "@nocturne/core";
+import {
+  createMcpOnDemandTools,
+  createPlatform,
+  type McpSession,
+  type ToolContext,
+} from "@nocturne/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMcpConnector, httpFailureReason, shouldRetryHttpCall } from "../src/connector.js";
 
@@ -172,6 +177,133 @@ const call = (session: McpSession) => {
 };
 
 describe("HTTP 自动重连", () => {
+  const context = () =>
+    ({ signal: new AbortController().signal, callId: "on-demand" }) as ToolContext;
+  const pairFor = (session: McpSession) =>
+    createMcpOnDemandTools(
+      session.tools(),
+      [],
+      () => session.status(),
+      async (server, signal) => {
+        if (session.recoverTools === undefined) throw new Error("missing recovery entry");
+        return session.recoverTools(server, signal);
+      },
+    );
+
+  it.each(["scoped search", "all search", "call"])(
+    "%s：启动连接拒绝、冷却内不重连，过冷却后本 Turn 可搜索调用，并发共用重连",
+    async (entry) => {
+      const f = await fixture();
+      await f.stop();
+      const { session, warnings } = await open(f.url);
+      const pair = pairFor(session);
+      await f.start();
+      const searchInput = {
+        query: "echo",
+        ...(entry === "scoped search" ? { server: "http" } : {}),
+      };
+      const cold = await pair.searchTool.execute(searchInput, context());
+      expect(cold.modelContent).toContain("冷却中");
+      expect(cold.modelContent).toContain("30 秒");
+      expect(await pair.callTool.traits.dispatch?.({ tool: "mcp__http__echo" })).toMatchObject({
+        code: "unknown_tool",
+      });
+      expect(f.initializations).toBe(0);
+      const now = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(now + 30_001);
+      // 指定别的服务器不能触发 http 的恢复。
+      await pair.searchTool.execute({ query: "echo", server: "other" }, context());
+      expect(f.initializations).toBe(0);
+      const discover = async () =>
+        entry === "call"
+          ? pair.callTool.traits.dispatch?.({ tool: "mcp__http__echo" })
+          : pair.searchTool.execute(searchInput, context());
+      const results = await Promise.all([discover(), discover()]);
+      expect(JSON.stringify(results)).toContain("mcp__http__echo");
+      expect(f.initializations).toBe(1);
+      expect(session.tools()).toEqual([]);
+      const found = await pair.searchTool.execute({ query: "echo" }, context());
+      expect(found.output?.matches.map((t) => t.name)).toEqual(["mcp__http__echo"]);
+      const dispatched = await pair.callTool.traits.dispatch?.({ tool: "mcp__http__echo" });
+      if (dispatched === undefined || "error" in dispatched || typeof dispatched.tool === "string")
+        throw new Error("missing recovered target");
+      expect((await dispatched.tool.execute(dispatched.input, context())).status).toBe("ok");
+      expect(session.status()[0]).toMatchObject({ restarts: 0, state: "ready" });
+      expect(warnings).toEqual(["mcp_server_failed"]);
+      expect(session.applyPendingTools().add).toHaveLength(1);
+    },
+  );
+
+  it("按需恢复失败沿用连续失败计数与冷却；成功清零，命中结果不触发恢复", async () => {
+    const f = await fixture();
+    await f.stop();
+    const { session, warnings } = await open(f.url);
+    const pair = pairFor(session);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 30_001);
+    await pair.searchTool.execute({ query: "echo" }, context());
+    expect(session.status()[0]).toMatchObject({ state: "failed", restarts: 2 });
+    expect(warnings).toEqual(["mcp_server_failed", "mcp_server_failed"]);
+    expect((await pair.searchTool.execute({ query: "echo" }, context())).modelContent).toContain(
+      "30 秒",
+    );
+    expect(session.status()[0]?.restarts).toBe(2);
+    await f.start();
+    clock.mockReturnValue(now + 60_002);
+    await pair.searchTool.execute({ query: "echo" }, context());
+    expect(session.status()[0]).toMatchObject({ state: "ready", restarts: 0 });
+    await f.stop();
+    // 池内已有命中，不探测服务器或重新 initialize。
+    expect(
+      (await pair.searchTool.execute({ query: "echo" }, context())).output?.matches,
+    ).toHaveLength(1);
+    expect(f.initializations).toBe(1);
+  });
+
+  it.each(["search", "call", "known call"] as const)(
+    "按需 %s 恢复最多等 3 秒，后台成功后同一入口可搜到；请求工具定义不变",
+    async (entry) => {
+      const f = await fixture();
+      if (entry !== "known call") await f.stop();
+      const { session, ready } = await open(f.url);
+      if (entry === "known call") {
+        await f.stop();
+        expect((await call(session)).status).toBe("error");
+      }
+      const pair = pairFor(session);
+      const definition = JSON.stringify(pair.searchTool);
+      await f.start();
+      const now = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(now + 30_001);
+      let release!: () => void;
+      f.gate(
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      );
+      const started = performance.now();
+      if (entry === "search") {
+        const result = await pair.searchTool.execute({ query: "echo" }, context());
+        expect(result.output?.matches).toEqual([]);
+        expect(result.modelContent).toContain("未找到");
+      } else {
+        expect(await pair.callTool.traits.dispatch?.({ tool: "mcp__http__echo" })).toMatchObject({
+          code: "unknown_tool",
+        });
+      }
+      expect(performance.now() - started).toBeGreaterThanOrEqual(2900);
+      expect(performance.now() - started).toBeLessThan(4500);
+      const completed = ready();
+      release();
+      await completed;
+      const recovered = await pair.searchTool.execute({ query: "echo" }, context());
+      expect(recovered.output?.matches).toHaveLength(1);
+      expect(JSON.stringify(pair.searchTool)).toBe(definition);
+      expect(session.tools()).toHaveLength(entry === "known call" ? 1 : 0);
+    },
+    10_000,
+  );
+
   it("旧会话 404 后静默重连，只执行一次，新 initialize 不带 session id；多次成功不受上限限制", async () => {
     const f = await fixture();
     const { session, events, warnings, records } = await open(f.url);

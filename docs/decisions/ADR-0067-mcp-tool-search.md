@@ -80,3 +80,11 @@ MCP 工具进入「按需」模式时，它们不再各自出现在工具列表�
 - **`mcp_search` / `mcp_call` 与按需模式切换**：`packages/core/src/tools/mcp-on-demand.ts` 实现关键词检索（匹配工具名、说明、参数名，不区分大小写，CJK 按单字拆分，支持 `server` 限定与完整工具名精确命中，最多 5 条；`mcp_search` 说明按服务器列出全部工具名）与 `mcp_call` 分派；配置 `mcp.toolSearch: "auto" | "always" | "never"`（默认 `"auto"`，阈值 10,000 token）在会话打开与每个 Turn 边界（`applyMcp`）判定，Turn 内不切换，保证请求 `tools` 前缀逐字节不变；子会话沿用父会话模式，受限池（如 `explore`）只搜得到、调得到池内工具；`/context` 的 `tools` 段在按需模式下注明「MCP 按需，N 个工具未列出」。
 - **客户端显示**：桌面端与手机网页（`apps/desktop/src/Conversation.tsx`、`context-panel.tsx`）、TUI（`apps/tui/src/lines.ts`、`format.ts`）与 CLI（`apps/cli/src/render.ts`）在存在 `target` 时按目标工具显示名称、参数与权限确认卡片，`mcp_search` 显示为「搜索 MCP 工具：<query>」，无 `target` 的旧日志照原样显示。
 
+## 修订（2026-11-10）：按需模式的 Turn 内重连
+
+用户在运行中启动此前连接失败的 HTTP 服务器，并通过插话要求重试时，没有新的主 Turn，因而不会运行 `prepareTurn`。按需搜索不能只查询启动时的静态池。重连策略与精确边界统一见 [mcp.md 第 4、5 节](../architecture/mcp.md#4-服务器生命周期)。
+
+允许主会话的按需工具在搜索无结果或调用失败服务器的目标时，经 `McpSession.recoverTools` 复用既有 HTTP 恢复流程，并在本 Turn 更新私有池。`ToolRegistry.specs()` 只导出入口的名称、说明与 schema，`toolMap` 不进入请求；恢复不替换入口对象、不刷新说明中的名单，也不切换按需/全量模式，因此请求的工具定义与前缀保持不变。`always` 在已配置服务器全部失败、池子为空时也保留两个入口；`auto` 的阈值判定仍只在边界发生。
+
+全量模式、普通 `tools/list_changed`、配置重载和子会话快照保持原有边界。重连恢复不消费边界暂存；Turn 边界仍照常更新工具定义。可用性环境说明仍只由下一主 Turn 比较有效日志后记录变化，不因池子恢复即时追加或更改历史（ADR-0071）。代理工具的通用 `dispatch` 支持异步与中断信号，执行器等待后仍按目标工具校验、执行 Hook 与权限管线，Agent Loop 不按工具名分支。
+
