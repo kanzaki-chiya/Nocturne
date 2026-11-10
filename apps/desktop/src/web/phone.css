@@ -102,7 +102,10 @@
   font-size: var(--fs-4);
 }
 /* 触控目标不小于 44px（DESIGN.md 第 2 节）：保持高优先级，按钮类写的更小 min-height 不生效 */
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref):not(.phone-item),
+.phone
+  button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref):not(.phone-item):not(
+    .usage-cell
+  ),
 .phone input:not(.check input),
 .phone select,
 .phone textarea,
@@ -1145,6 +1148,10 @@
 }
 .phone-usage .usage-body {
   padding: 12px 16px 24px;
+}
+.phone-usage .usage-cell {
+  padding: 0;
+  border-radius: var(--radius-1);
 }
 
 /* 待发输入列表：图标按钮放大到 44px 触控区，不放大图标 */
