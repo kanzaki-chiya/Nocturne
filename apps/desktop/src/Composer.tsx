@@ -25,7 +25,7 @@ import {
   type WorkspaceBranch,
 } from "@nocturne/core/protocol";
 
-import { isValidGitBranchName } from "./BranchMenu";
+import { isValidGitBranchName, useBranchMenu } from "./BranchMenu";
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
 import {
   completeFileRefs,
@@ -263,9 +263,6 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [enterHint, setEnterHint] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuKind | null>(null);
-  const [branchQuery, setBranchQuery] = useState("");
-  const [branchActive, setBranchActive] = useState(-1);
-  const branchSearchRef = useRef<HTMLInputElement>(null);
   const wasHidden = useRef(hidden);
   useEffect(() => {
     if (hidden) {
@@ -333,6 +330,35 @@ export function Composer({
     if (openMenu === "dir") requestDirOpen(false);
     else setMenu(null);
   }, [openMenu, requestDirOpen]);
+  const branchIsGit = branch?.current != null;
+  const branchControl = useBranchMenu({
+    label: branch?.selected?.name ?? branch?.current ?? "-",
+    branches: branch?.branches ?? [],
+    checked:
+      branch?.selected?.create === true
+        ? undefined
+        : (branch?.selected?.name ?? branch?.current ?? undefined),
+    open: branchIsGit && openMenu === "branch",
+    onOpen: () => {
+      setMenuExclusive("branch");
+      branch?.onOpen?.();
+    },
+    onClose: closeMenu,
+    onChoose: (name, create) => {
+      branch?.onSelect(name, create);
+      closeMenu();
+      return true;
+    },
+    triggerClassName: `chip${openMenu === "branch" ? " on" : ""}`,
+    hasMenu: branchIsGit,
+    disabled: !branchIsGit || disabled,
+    occupiedSelectable: true,
+    canCreate: (name) => branch?.canCreate === true && isValidGitBranchName(name),
+    align: "left",
+    caret: branchIsGit,
+    ariaLabel: "选择分支",
+  });
+  const branchMenu = branch === undefined ? undefined : branchControl;
 
   // ── 文件索引：首次用到时拉取，fileRefs.key 变化时失效 ──
   const ensureFileIndex = useCallback(() => {
@@ -1302,39 +1328,7 @@ export function Composer({
                 <Icon name="down_small" size={ICON_SM} className="caret" />
               </>,
             )}
-            {branch !== undefined &&
-              (() => {
-                const isGit = branch.current !== null;
-                const branchLabel = branch.selected?.name ?? branch.current ?? "-";
-                return (
-                  <button
-                    type="button"
-                    ref={(node) => {
-                      triggers.current.branch = node;
-                    }}
-                    className={`chip${openMenu === "branch" ? " on" : ""}`}
-                    disabled={!isGit || disabled}
-                    aria-label="选择分支"
-                    aria-haspopup={isGit ? "menu" : undefined}
-                    aria-expanded={isGit ? openMenu === "branch" : undefined}
-                    onClick={() => {
-                      if (!isGit) return;
-                      if (openMenu === "branch") {
-                        closeMenu();
-                      } else {
-                        setBranchQuery("");
-                        setBranchActive(-1);
-                        setMenuExclusive("branch");
-                        branch.onOpen?.();
-                      }
-                    }}
-                  >
-                    <Icon name="git_branch" size={ICON_SM} />
-                    <b>{branchLabel}</b>
-                    {isGit && <Icon name="down_small" size={ICON_SM} className="caret" />}
-                  </button>
-                );
-              })()}
+            {branchMenu?.trigger}
             {hint !== null && <span className="hint">{hint}</span>}
           </div>
         )}
@@ -1404,125 +1398,7 @@ export function Composer({
           />
         </Menu>
       )}
-      {branch !== undefined &&
-        branch.current !== null &&
-        openMenu === "branch" &&
-        (() => {
-          const selectedBranchName = branch.selected?.name ?? branch.current;
-          const selectedIsCreate = branch.selected?.create === true;
-          const filtered = branch.branches.filter((item) =>
-            item.name.toLowerCase().includes(branchQuery.toLowerCase()),
-          );
-          const canCreateNew =
-            branch.canCreate &&
-            branchQuery.length > 0 &&
-            !branch.branches.some((item) => item.name === branchQuery) &&
-            isValidGitBranchName(branchQuery);
-          const options = [
-            ...filtered.map((item) => ({ ...item, create: false })),
-            ...(canCreateNew ? [{ name: branchQuery, create: true, worktree: undefined }] : []),
-          ];
-          const activeIdx =
-            branchActive < 0 ? -1 : Math.min(branchActive, Math.max(0, options.length - 1));
-          const chooseBranch = (name: string, create: boolean, returnFocus: boolean) => {
-            branch.onSelect(name, create);
-            closeMenu();
-            if (returnFocus) {
-              requestAnimationFrame(() => {
-                triggers.current.branch?.focus();
-              });
-            }
-          };
-          const onBranchKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-            if (["Home", "End"].includes(event.key) && event.target === branchSearchRef.current)
-              return;
-            if (event.key === "Enter") {
-              if (event.target instanceof HTMLButtonElement) return;
-              event.preventDefault();
-              const option = options[activeIdx >= 0 ? activeIdx : 0];
-              if (option !== undefined) chooseBranch(option.name, option.create, true);
-            } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-              event.preventDefault();
-              if (options.length === 0) return;
-              const next =
-                event.key === "Home"
-                  ? 0
-                  : event.key === "End"
-                    ? options.length - 1
-                    : activeIdx < 0
-                      ? event.key === "ArrowUp"
-                        ? options.length - 1
-                        : 0
-                      : (activeIdx + (event.key === "ArrowUp" ? -1 : 1) + options.length) %
-                        options.length;
-              setBranchActive(Math.max(0, next));
-              branchSearchRef.current?.focus();
-              const optionEl = event.currentTarget.querySelectorAll<HTMLElement>(
-                '[data-branch-enabled="true"]',
-              )[next];
-              if (optionEl && "scrollIntoView" in optionEl)
-                optionEl.scrollIntoView({ block: "nearest" });
-            }
-          };
-          return (
-            <Menu
-              anchor={triggers.current.branch ?? null}
-              align="left"
-              className="branch-menu"
-              onClose={closeMenu}
-              onKeyDown={onBranchKeyDown}
-            >
-              <label className="branch-search">
-                <Icon name="search" size={ICON_SM} />
-                <input
-                  ref={branchSearchRef}
-                  className="menu-search"
-                  value={branchQuery}
-                  onChange={(event) => {
-                    setBranchQuery(event.target.value);
-                    setBranchActive(-1);
-                  }}
-                />
-              </label>
-              <div className="branch-list">
-                {options.map((option, idx) => {
-                  const isChecked =
-                    !option.create && !selectedIsCreate && option.name === selectedBranchName;
-                  return (
-                    <div
-                      key={`${option.create ? "new:" : ""}${option.name}`}
-                      className="branch-row"
-                      title={option.worktree}
-                    >
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={isChecked}
-                        data-branch-enabled={true}
-                        className={`branch-option${activeIdx === idx ? " act" : ""}${option.create ? " branch-create" : ""}`}
-                        onMouseEnter={() => {
-                          setBranchActive(idx);
-                        }}
-                        onClick={() => {
-                          chooseBranch(option.name, option.create, false);
-                        }}
-                      >
-                        <span className="branch-check">
-                          {option.create ? (
-                            <Icon name="add" size={ICON_SM} />
-                          ) : (
-                            isChecked && <Icon name="check" size={ICON_SM} />
-                          )}
-                        </span>
-                        <span>{option.create ? `新建分支 ${option.name}` : option.name}</span>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </Menu>
-          );
-        })()}
+      {branchMenu?.menu}
       {shownError !== null && (
         <div className="composer-error" role="alert">
           {shownError}
