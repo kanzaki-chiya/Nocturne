@@ -4,8 +4,10 @@
  * Esc 保留输入框文字、`没有结果` 空状态与零多余文案。
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
 import { render } from "ink-testing-library";
@@ -21,12 +23,31 @@ import {
 } from "@nocturne/core";
 
 import { App } from "../src/app.js";
+import { palettes } from "../src/theme.js";
 import type { SwitchSessionFn } from "../src/types.js";
 import { internalSession } from "./internal-session.js";
 
+const inkChalkPromise = (async (): Promise<{ level: 0 | 1 | 2 | 3 }> => {
+  const inkEntry = import.meta.resolve("ink");
+  const req = createRequire(inkEntry);
+  const chalkPath = req.resolve("chalk");
+  const mod = (await import(pathToFileURL(chalkPath).href)) as {
+    default: { level: 0 | 1 | 2 | 3 };
+  };
+  return mod.default;
+})();
+
 const tmpRoots: string[] = [];
-beforeEach(() => vi.stubEnv("NOCTURNE_HOME", makeTmp("nct-tui-search-home-")));
-afterEach(() => {
+let savedChalkLevel: 0 | 1 | 2 | 3 = 0;
+beforeEach(async () => {
+  const chalk = await inkChalkPromise;
+  savedChalkLevel = chalk.level;
+  chalk.level = 3;
+  vi.stubEnv("NOCTURNE_HOME", makeTmp("nct-tui-search-home-"));
+});
+afterEach(async () => {
+  const chalk = await inkChalkPromise;
+  chalk.level = savedChalkLevel;
   vi.useRealTimers();
   vi.unstubAllEnvs();
   for (const r of tmpRoots.splice(0)) rmSync(r, { recursive: true, force: true });
@@ -43,6 +64,22 @@ const ENV = { ascii: false, animated: false };
 function plainFrame(raw: string | undefined): string {
   return stripVTControlCharacters(raw ?? "");
 }
+
+function fgSgr(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `\x1b[38;2;${(n >> 16) & 255};${(n >> 8) & 255};${n & 255}m`;
+}
+
+function bgSgr(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `\x1b[48;2;${(n >> 16) & 255};${(n >> 8) & 255};${n & 255}m`;
+}
+
+/**
+ * ConfirmBox（confirm-box.tsx §70-85）以 `{ color: theme.selected, backgroundColor: theme.selectionBg }`
+ * 渲染当前焦点按钮（`[取消]` 或 `[确认]`），非焦点按钮仅用 `{ color: theme.text }`。
+ */
+const CONFIRM_FOCUSED_SGR = `${bgSgr(palettes.dark.selectionBg)}${fgSgr(palettes.dark.selected)}`;
 
 function maybeDumpFrame(fileName: string, raw: string | undefined): void {
   const dumpDir = process.env["NOCTURNE_DUMP_FRAMES_DIR"];
@@ -145,11 +182,12 @@ describe("TUI /search 跨会话搜索", () => {
     try {
       await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("当前目录主会话"));
       screen.stdin.write("/search");
+      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("/search"));
       screen.stdin.write("\r");
 
       await vi.waitFor(() => {
         const frame = plainFrame(screen.lastFrame());
-        expect(frame).toContain("异目录部署脚本重构");
+        expect(frame).toContain("› 异目录部署脚本重构");
         expect(frame).toContain(cwdB);
       });
 
@@ -177,7 +215,6 @@ describe("TUI /search 跨会话搜索", () => {
   });
 
   it("输入后 150ms 防抖、第一批前保留旧列表、增量追加不跳选中、输入变化回到首行", async () => {
-    vi.useFakeTimers();
     const cwd = makeTmp("ws-debounce-");
     const sessionsDir = makeTmp("sd-debounce-");
     const runtime = await createRuntime({
@@ -232,31 +269,45 @@ describe("TUI /search 跨会话搜索", () => {
 
     const screen = render(createElement(App, { session: current, runtime, env: ENV }));
     try {
-      await vi.advanceTimersByTimeAsync(20);
       await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("主控台会话"));
 
       screen.stdin.write("/search");
+      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("/search"));
       screen.stdin.write("\r");
-      await vi.advanceTimersByTimeAsync(20);
-      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("一号会话鉴权模块"));
+      await vi.waitFor(() => {
+        const f = plainFrame(screen.lastFrame());
+        expect(f).toContain("› 主控台会话");
+        expect(f).toContain("一号会话鉴权模块");
+      });
+
+      // 启用假时钟精确校验 150ms 防抖合同
+      vi.useFakeTimers();
 
       // 连续输入 g -> a -> t，每次间隔 80ms（< 150ms），防抖期间不触发 searchSessions，且保留最近列表
       screen.stdin.write("g");
       await vi.advanceTimersByTimeAsync(80);
+      expect(plainFrame(screen.lastFrame())).toContain("› g");
       expect(searchCalls).toHaveLength(0);
+
       screen.stdin.write("a");
       await vi.advanceTimersByTimeAsync(80);
+      expect(plainFrame(screen.lastFrame())).toContain("› ga");
       expect(searchCalls).toHaveLength(0);
+
       screen.stdin.write("t");
       await vi.advanceTimersByTimeAsync(140);
+      expect(plainFrame(screen.lastFrame())).toContain("› gat");
       expect(searchCalls).toHaveLength(0);
-      expect(plainFrame(screen.lastFrame())).toContain("主控台会话");
+      expect(plainFrame(screen.lastFrame())).toContain("一号会话鉴权模块");
 
       // 满 150ms：发起查询 "gat"，第一批尚未到达前仍保留最近列表
       await vi.advanceTimersByTimeAsync(20);
       expect(searchCalls).toHaveLength(1);
       expect(searchCalls[0]?.query).toBe("gat");
-      expect(plainFrame(screen.lastFrame())).toContain("主控台会话");
+      expect(plainFrame(screen.lastFrame())).toContain("一号会话鉴权模块");
+
+      // 恢复真实时钟，后续全以 vi.waitFor 等待具体帧内容
+      vi.useRealTimers();
 
       // 第一批到达（s1、s2）：替换最近列表
       const batch1: SessionSearchResult[] = [
@@ -276,9 +327,9 @@ describe("TUI /search 跨会话搜索", () => {
         },
       ];
       pushBatch(batch1);
-      await vi.advanceTimersByTimeAsync(10);
       await vi.waitFor(() => {
         const f = plainFrame(screen.lastFrame());
+        expect(f).toContain("› 一号会话鉴权模块");
         expect(f).toContain("鉴权里的 gat 令牌校验");
         expect(f).toContain("支付网关 gat 路由规则");
         expect(f).not.toContain("主控台会话  刚刚");
@@ -286,7 +337,6 @@ describe("TUI /search 跨会话搜索", () => {
 
       // 按 ↓ 选中第 2 项（二号会话支付网关）
       screen.stdin.write("\x1b[B");
-      await vi.advanceTimersByTimeAsync(10);
       await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toMatch(/› 二号会话支付网关/));
 
       // 第二批追加（s3）：选中项仍按 sessionId 停留在「二号会话支付网关」，不跳回第一行
@@ -301,7 +351,6 @@ describe("TUI /search 跨会话搜索", () => {
       ];
       pushBatch(batch2);
       finishFirst([...batch1, ...batch2]);
-      await vi.advanceTimersByTimeAsync(10);
       await vi.waitFor(() => {
         const f = plainFrame(screen.lastFrame());
         expect(f).toContain("网关重试 gat 退避时间");
@@ -311,9 +360,9 @@ describe("TUI /search 跨会话搜索", () => {
 
       // 继续输入字符改变查询：选中回到第一行
       screen.stdin.write("e");
-      await vi.advanceTimersByTimeAsync(160);
       await vi.waitFor(() => {
         const f = plainFrame(screen.lastFrame());
+        expect(f).toContain("› gate");
         expect(f).toContain("命中新词 alpha 重试策略");
         expect(f).toMatch(/› 三号会话网关重试/);
       });
@@ -324,7 +373,6 @@ describe("TUI /search 跨会话搜索", () => {
   });
 
   it("新输入立即取消上一次进行中的查询，旧结果不会覆盖新列表", async () => {
-    vi.useFakeTimers();
     const cwd = makeTmp("ws-abort-");
     const sessionsDir = makeTmp("sd-abort-");
     const runtime = await createRuntime({
@@ -370,21 +418,26 @@ describe("TUI /search 跨会话搜索", () => {
 
     const screen = render(createElement(App, { session: current, runtime, env: ENV }));
     try {
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("当前工作会话"));
       screen.stdin.write("/search old");
+      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("/search old"));
       screen.stdin.write("\r");
-      await vi.advanceTimersByTimeAsync(10);
-      await vi.waitFor(() => expect(signals).toHaveLength(1));
+
+      await vi.waitFor(() => {
+        expect(plainFrame(screen.lastFrame())).toContain("│› old");
+        expect(signals).toHaveLength(1);
+      });
       expect(signals[0]?.aborted).toBe(false);
 
       // 追加输入 'x' -> 查询变为 "oldx"，旧查询立即 abort
       screen.stdin.write("x");
-      await vi.advanceTimersByTimeAsync(10);
-      expect(signals[0]?.aborted).toBe(true);
+      await vi.waitFor(() => {
+        expect(plainFrame(screen.lastFrame())).toContain("│› oldx");
+        expect(signals[0]?.aborted).toBe(true);
+      });
 
       // 即使旧查询迟到回调触发，也不会污染界面
       staleProgress([{ sessionId: sOld.id, mtimeMs: 100 }]);
-      await vi.advanceTimersByTimeAsync(160);
 
       await vi.waitFor(() => {
         const f = plainFrame(screen.lastFrame());
@@ -436,11 +489,14 @@ describe("TUI /search 跨会话搜索", () => {
 
       // 用 /search <词> 打开，预填并立即搜索到默认被折叠隐藏的第 1 行工具输出
       screen.stdin.write("/search UNIQUE_FOLDED_NEEDLE_LINE_1");
+      await vi.waitFor(() =>
+        expect(plainFrame(screen.lastFrame())).toContain("/search UNIQUE_FOLDED_NEEDLE_LINE_1"),
+      );
       screen.stdin.write("\r");
 
       await vi.waitFor(() => {
         const f = plainFrame(screen.lastFrame());
-        expect(f).toContain("排查线上日志超时问题");
+        expect(f).toMatch(/› 排查线上日志超时问题/);
         expect(f).toContain("UNIQUE_FOLDED_NEEDLE_LINE_1");
       });
 
@@ -514,17 +570,30 @@ describe("TUI /search 跨会话搜索", () => {
 
       // 1. 打开跨目录结果 → 先弹确认框 → 选确认 → 切换并展开工具行定位到 seq
       screen.stdin.write("/search FOREIGN_TOOL_EXPAND_LINE_1");
+      await vi.waitFor(() =>
+        expect(plainFrame(screen.lastFrame())).toContain("/search FOREIGN_TOOL_EXPAND_LINE_1"),
+      );
       screen.stdin.write("\r");
       await vi.waitFor(() =>
-        expect(plainFrame(screen.lastFrame())).toContain("排查线上日志超时问题"),
+        expect(plainFrame(screen.lastFrame())).toMatch(/› 排查线上日志超时问题/),
       );
       screen.stdin.write("\r");
 
-      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("与当前目录不同"));
-      // ConfirmBox 默认焦点在取消，按 Tab 切到确认（等重渲染提交）后回车
+      // 等待 ConfirmBox 渲染：默认焦点在 [取消]
+      await vi.waitFor(() => {
+        const raw = screen.lastFrame() ?? "";
+        expect(plainFrame(raw)).toContain("与当前目录不同");
+        expect(raw).toContain(`${CONFIRM_FOCUSED_SGR}[取消]`);
+        expect(raw).not.toContain(`${CONFIRM_FOCUSED_SGR}[确认]`);
+      });
+
+      // 按 Tab 将焦点切到 [确认]，等到帧里 [确认] 带上焦点 SGR 且 [取消] 失去焦点 SGR 后再按回车
       screen.stdin.write("\t");
-      await vi.waitFor(() => expect(screen.lastFrame()).not.toBeUndefined());
-      await new Promise((r) => setImmediate(r));
+      await vi.waitFor(() => {
+        const raw = screen.lastFrame() ?? "";
+        expect(raw).toContain(`${CONFIRM_FOCUSED_SGR}[确认]`);
+        expect(raw).not.toContain(`${CONFIRM_FOCUSED_SGR}[取消]`);
+      });
       screen.stdin.write("\r");
 
       await vi.waitFor(() => {
@@ -534,12 +603,15 @@ describe("TUI /search 跨会话搜索", () => {
       });
 
       // 2. 打开只命中标题的结果（无 seq）：按正常底部位置打开，显示最后一轮 #16
-      // 先清空输入框再发新命令
       screen.stdin.write("\x15");
+      await vi.waitFor(() =>
+        expect(plainFrame(screen.lastFrame())).not.toContain("/search FOREIGN_TOOL_EXPAND_LINE_1"),
+      );
       screen.stdin.write("/search ONLYTITLE");
+      await vi.waitFor(() => expect(plainFrame(screen.lastFrame())).toContain("/search ONLYTITLE"));
       screen.stdin.write("\r");
       await vi.waitFor(() =>
-        expect(plainFrame(screen.lastFrame())).toContain("专属标题命中词ONLYTITLE"),
+        expect(plainFrame(screen.lastFrame())).toMatch(/› 专属标题命中词ONLYTITLE/),
       );
       screen.stdin.write("\r");
 
@@ -586,10 +658,13 @@ describe("TUI /search 跨会话搜索", () => {
       expect(plainFrame(screen.lastFrame())).not.toContain("SAME_SESSION_HIDDEN_HEAD_LINE");
 
       screen.stdin.write("/search SAME_SESSION_HIDDEN_HEAD_LINE");
+      await vi.waitFor(() =>
+        expect(plainFrame(screen.lastFrame())).toContain("/search SAME_SESSION_HIDDEN_HEAD_LINE"),
+      );
       screen.stdin.write("\r");
 
       await vi.waitFor(() =>
-        expect(plainFrame(screen.lastFrame())).toContain("排查线上日志超时问题"),
+        expect(plainFrame(screen.lastFrame())).toMatch(/› 排查线上日志超时问题/),
       );
 
       // 按 Enter：不切换会话，直接在当前会话定位并展开工具行
@@ -637,10 +712,16 @@ describe("TUI /search 跨会话搜索", () => {
       );
 
       screen.stdin.write("/search 绝不存在的词xyz");
+      await vi.waitFor(() =>
+        expect(plainFrame(screen.lastFrame())).toContain("/search 绝不存在的词xyz"),
+      );
       screen.stdin.write("\r");
 
-      // 扫描进行中：不显示「没有结果」、不显示「搜索中」或任何占位/快捷键文字
-      await vi.waitFor(() => expect(runtime.searchSessions).toHaveBeenCalledTimes(1));
+      // 扫描进行中：查询行已渲染，但不显示「没有结果」、「搜索中」或任何占位/快捷键文字
+      await vi.waitFor(() => {
+        expect(plainFrame(screen.lastFrame())).toContain("│› 绝不存在的词xyz");
+        expect(runtime.searchSessions).toHaveBeenCalledTimes(1);
+      });
       const scanningFrame = plainFrame(screen.lastFrame());
       expect(scanningFrame).not.toContain("没有结果");
       expect(scanningFrame).not.toContain("搜索中");
