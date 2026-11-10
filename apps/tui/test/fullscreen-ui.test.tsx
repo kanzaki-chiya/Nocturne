@@ -827,18 +827,22 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await waitFor(() => (lastFrame() ?? "").includes("idle"));
     stdin.write("看：");
     stdin.write("\x1b[200~第一行\r\r* 第二行\x1b[201~");
-    await pause(60);
+    // 慢机器上帧刷新晚于固定等待：等到占位真正出现再断言
+    await waitFor(() => (lastFrame() ?? "").includes("› 看：[Paste #1, +2 lines]"));
     expect(lastFrame()).toContain("› 看：[Paste #1, +2 lines]");
     expect(lastFrame()).toContain("idle");
     stdin.write("\x7f");
-    await pause(40);
+    await waitFor(() => {
+      const frame = lastFrame() ?? "";
+      return frame.includes("› 看：") && !frame.includes("[Paste");
+    });
     expect(lastFrame()).toContain("› 看：");
     expect(lastFrame()).not.toContain("[Paste");
     stdin.write("\x1b[200~甲\r乙\x1b[201~");
-    await pause(40);
+    await waitFor(() => (lastFrame() ?? "").includes("› 看：[Paste #2, +1 lines]"));
     expect(lastFrame()).toContain("› 看：[Paste #2, +1 lines]");
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("完毕"));
