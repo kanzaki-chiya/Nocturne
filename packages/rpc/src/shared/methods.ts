@@ -267,6 +267,8 @@ export interface RemoteStatus {
   registered: boolean;
   relay?: { origin: string; hostId: string };
   enabled: boolean;
+  /** 是否开启局域网直连监听（ADR-0087） */
+  lanDirect?: boolean | undefined;
   connection: "off" | "connecting" | "online" | "offline" | "revoked" | "replaced";
   devices: {
     id: string;
@@ -351,6 +353,8 @@ export interface RpcMethods {
   "remote.register": { params: { invite: string }; result: RemoteStatus };
   "remote.unregister": { params: Record<string, never>; result: RemoteStatus };
   "remote.setEnabled": { params: { enabled: boolean }; result: RemoteStatus };
+  "remote.setLanDirect": { params: { enabled: boolean }; result: RemoteStatus };
+  "remote.lanEndpoints": { params: Record<string, never>; result: { endpoints: string[] } };
   "remote.startPairing": {
     params: Record<string, never>;
     result: { url: string; expiresAt: number };
@@ -835,6 +839,7 @@ export interface RpcClientNotifications {
 export interface RpcServerNotifications {
   "computer.changed": ComputerDescription;
   "remote.statusChanged": { status: RemoteStatus };
+  "remote.lanEndpointsChanged": { endpoints: string[] };
   "remote.paired": { device: { id: string; name: string } };
   "remote.pairingFailed": { code: string };
   "agent.pairingRequested": AgentPairingRequest;
@@ -899,6 +904,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "remote.register": true,
   "remote.unregister": true,
   "remote.setEnabled": true,
+  "remote.setLanDirect": true,
+  "remote.lanEndpoints": true,
   "remote.startPairing": true,
   "remote.cancelPairing": true,
   "remote.removeDevice": true,

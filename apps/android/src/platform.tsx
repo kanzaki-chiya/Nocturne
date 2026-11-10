@@ -8,6 +8,7 @@ import { parseNativeLog, ProbeLog, summarize } from "./probe";
 import { version } from "../package.json";
 import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import { versionMessage } from "../../desktop/src/web/connection";
+import { LanPhoneConnection } from "./lan";
 import { AndroidUpdate } from "./update";
 import { UpdateAbout, UpdateLifecycle, UpdateNotice } from "./update-ui";
 import { Switch } from "../../desktop/src/ui";
@@ -339,8 +340,14 @@ export function appPlatform(
     const value = await host.consumeNotificationTarget();
     return value?.hostId && value.sessionId ? value : null;
   };
+  const connectLan = host.connectLan?.bind(host);
   return {
     relay: "link",
+    createConnection: (connectionOptions) =>
+      new LanPhoneConnection({
+        ...connectionOptions,
+        ...(connectLan ? { connectLan: (url) => connectLan(url) } : {}),
+      }),
     scanPairing: () => host.scanQr(),
     openAppSettings: () => host.openSettings("app"),
     initialized: (version) => {

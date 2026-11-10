@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ConnectionState } from "./connection";
+import type { ConnectionState, PhoneConnectionLike, PhoneConnectionOptions } from "./connection";
 import type { PairedHost } from "./storage";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 
@@ -58,6 +58,7 @@ export interface PhonePlatform {
    * 中继地址只能从配对链接取得并随电脑保存。
    */
   relay: "page" | "link";
+  createConnection?(options: PhoneConnectionOptions): PhoneConnectionLike;
   scanPairing?(): Promise<{ text: string } | { cancelled: true } | { denied: true }>;
   openAppSettings?(): Promise<void>;
   initialized?(version: string): void;

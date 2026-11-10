@@ -6,12 +6,19 @@ fn main() {
     }
     // 后台服务插件（src/background.rs）是应用内的内联插件：只有一个 `call` 命令，权限 background:default
     tauri_build::try_build(
-        tauri_build::Attributes::new().plugin(
-            "background",
-            tauri_build::InlinedPlugin::new()
-                .commands(&["call"])
-                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
-        ),
+        tauri_build::Attributes::new()
+            .plugin(
+                "background",
+                tauri_build::InlinedPlugin::new()
+                    .commands(&["call"])
+                    .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+            )
+            .plugin(
+                "lan-tcp",
+                tauri_build::InlinedPlugin::new()
+                    .commands(&["connect", "send", "close"])
+                    .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+            ),
     )
     .expect("failed to run tauri-build");
 }

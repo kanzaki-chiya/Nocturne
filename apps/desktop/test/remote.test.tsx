@@ -100,9 +100,31 @@ it("已登记显示中继、开关、设备状态和推送订阅", async () => {
   const h = harness(online);
   render(<RemotePage client={h.client} />);
   expect(await screen.findByText("relay.example")).toBeTruthy();
-  expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByRole("switch", { name: "允许远程访问" }).getAttribute("aria-checked")).toBe(
+    "true",
+  );
+  expect(screen.getByRole("switch", { name: "局域网直连" }).getAttribute("aria-checked")).toBe(
+    "false",
+  );
   expect(screen.getByText("测试手机")).toBeTruthy();
   expect(screen.getByText(/已订阅推送/)).toBeTruthy();
+});
+it("中继分组显示『局域网直连』开关（无说明、无端口与地址）并调用 remote.setLanDirect", async () => {
+  const h = harness({ ...online, lanDirect: false });
+  const { container } = render(<RemotePage client={h.client} />);
+  const lanSwitch = await screen.findByRole("switch", { name: "局域网直连" });
+  expect(lanSwitch.getAttribute("aria-checked")).toBe("false");
+  const row = screen.getByRole("group", { name: "局域网直连" });
+  expect(row.classList.contains("srow")).toBe(true);
+  expect(row.querySelector(".desc")).toBeNull();
+  expect(row.textContent?.trim()).toBe("局域网直连");
+  expect(container.textContent).not.toMatch(/ws:\/\/\d/);
+  fireEvent.click(lanSwitch);
+  await waitFor(() => {
+    expect(h.calls).toContainEqual(
+      expect.objectContaining({ method: "remote.setLanDirect", params: { enabled: true } }),
+    );
+  });
 });
 it.each(["移除", "退出登记"])("%s 先在页内确认，确认前不发写请求", async (label) => {
   const h = harness(online);

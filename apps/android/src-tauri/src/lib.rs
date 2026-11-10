@@ -1,4 +1,5 @@
 mod background;
+mod lan_tcp;
 
 use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 
@@ -22,6 +23,7 @@ fn navigation_allowed(url: &Url, dev: Option<&Url>) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(background::plugin())
+        .plugin(lan_tcp::plugin())
         .setup(|app| {
             let dev = app.config().build.dev_url.clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

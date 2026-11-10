@@ -165,3 +165,11 @@ acceptChannel(transport: FrameTransport, options: AcceptChannelOptions): Promise
 | closed | 握手底层关闭或 counter 已达上限 |
 
 固定离线测试向量在 `packages/remote/test/vectors.json`；测试用 Node crypto 独立交叉校验转录、ECDH、HKDF、HMAC 和完整数据帧，运行实现只使用标准 Web API。
+
+## 8. 局域网直连传输约定
+
+安卓 App 与电脑端在同一局域网直连时（[ADR-0087](../decisions/ADR-0087-lan-direct.md)），底层使用原生 TCP 流加 4 字节大端无符号长度前缀承载 `FrameTransport`，第 3、4、5、7 节的帧格式、握手转录、加密算法与错误码均保持不变，无中继路由头，也没有 HTTP 升级、掩码、分片或额外控制帧：
+
+- **帧与 TCP 字节流映射**：每一帧 `FrameTransport` 报文（以 1 字节 `type` 开头，见第 3 节）在线上编码为 `[len: u32be][frame: len bytes]`，其中 `len` 合法范围为 `1..MAX_FRAME`（1 MiB）。接收端读满 4 字节长度头即立即判定：长度为 `0` 或超过 `MAX_FRAME` 时当场关闭 TCP 连接，不等待后续负载字节，也不为超限负载分配内存。关闭传输即关闭底层 TCP 连接。
+- **未认证阶段的限制**：电脑端监听 `0.0.0.0`，只接受来源地址属于私有或本地网段（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、`fc00::/7`、`fe80::/10` 及回环地址）的连接。从 TCP 接入（`connection` 事件）起计入未完成加密握手的并发上限 16，超出直接销毁；握手超时沿用 10 秒。首帧必须是 `hs.init` 且不超过 4096 字节，电脑端发出 `hs.resp` 前不接受第二帧；客户端发出 `hs.fin` 后紧随到达的 `data` 帧在电脑端完成 `hs.fin` 验签前按字节总量上限（不超过 `2 * MAX_FRAME`）暂存，验签通过前绝不交给上层处理（非 `data` 帧或超出字节上限立即断开）。手机端同样在完成 `connectChannel`（含校验电脑 `hostPublicKey` 签名）前不得发送任何 `data` 帧。错误响应仅使用第 7 节既有错误帧，不额外区分设备未知与签名错误之外的状态。
+

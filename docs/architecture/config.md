@@ -29,7 +29,7 @@
 
 机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存；另有只读的 Magpie 接入文件 `magpie.json`，由 Magpie 写）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。定时任务同样是程序维护的 `<NOCTURNE_HOME>/schedules.json` 和 `schedules/`，不参与上面的分层合并，见 [schedule.md](schedule.md)。
 
-远程登记单独保存在 `<NOCTURNE_HOME>/remote.json`，只属于用户层，不参与分层合并，项目配置不能覆盖或引用。原子写入，POSIX 权限 0600；只存中继地址、电脑 id、启停与配对设备公钥，私钥存凭据后端。损坏时保留文件、按未登记并警告。精确格式与主机生命周期见 [RPC 远程主机](../protocols/rpc.md#11-远程主机)。
+远程登记单独保存在 `<NOCTURNE_HOME>/remote.json`，只属于用户层，不参与分层合并，项目配置不能覆盖或引用。原子写入，POSIX 权限 0600；只存中继地址、电脑 id、远程总开关 `enabled`、局域网直连开关 `lanDirect`（布尔值，缺省 `false`，见 [ADR-0087](../decisions/ADR-0087-lan-direct.md)）及首次开启后固定的监听端口 `lanPort`（`1..65535`，占用时重新分配并写回）、以及配对设备公钥，私钥存凭据后端。损坏时保留文件、按未登记并警告。精确格式与主机生命周期见 [RPC 远程主机](../protocols/rpc.md#11-远程主机)。
 
 交互输入历史由 Core 的 `RuntimeSession.readInputHistory()` / `recordInputHistory(text)` 管理，保存在 `<NOCTURNE_HOME>/history.jsonl`，**明文保存输入原文**，文件创建权限 `0600`（POSIX）；每行是 `{text, workspaceRoot, time}`。历史按会话绑定的工作区过滤，连续重复输入只记录一次，超过 1000 条保留最近 1000 条。TUI 提交前展开粘贴占位，读取后在输入框重新收起多行原文。读写故障发 `runtime.warning`，不阻断输入；CLI 与 TUI 都不直接读写此文件。
 

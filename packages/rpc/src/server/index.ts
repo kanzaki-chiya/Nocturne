@@ -38,6 +38,18 @@ export {
   type WindowsPipeAclRule,
 } from "./agent/pipe.js";
 export { classifyAgentPipeError } from "./agent/host.js";
+export {
+  DEFAULT_MAX_HANDSHAKING,
+  encodeLengthPrefixedFrame,
+  formatLanEndpoints,
+  isPrivateLanIPv4,
+  isPrivateRemoteAddress,
+  listenLanDirect,
+  listPrivateIPv4Addresses,
+  type LanDirectListener,
+  type LanInboundConnection,
+  type ListenLanDirectOptions,
+} from "./remote/lan.js";
 export { createStdioTransport } from "./stdio.js";
 export {
   CONFIG_METHODS,

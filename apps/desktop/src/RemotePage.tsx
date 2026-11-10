@@ -437,6 +437,20 @@ export function RemotePage({ client }: { client: RpcClient | undefined }) {
                       }}
                     />
                   </SettingsRow>
+                  <SettingsRow label="局域网直连">
+                    <Switch
+                      aria-label="局域网直连"
+                      checked={status.lanDirect === true}
+                      disabled={busy || !client}
+                      onChange={(next) => {
+                        void operation(
+                          () =>
+                            client?.call("remote.setLanDirect", { enabled: next }) ??
+                            Promise.resolve(),
+                        );
+                      }}
+                    />
+                  </SettingsRow>
                 </SettingsGroup>
                 <SettingsGroup
                   title="已配对设备"
