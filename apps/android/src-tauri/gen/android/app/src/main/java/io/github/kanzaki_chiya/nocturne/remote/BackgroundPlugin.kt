@@ -215,13 +215,14 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
         }
       }
       if (!DownloadUrls.isActiveDownload(url, entries)) {
-        manager.enqueue(
-          DownloadManager.Request(uri)
-            .setMimeType("application/vnd.android.package-archive")
-            .setTitle(fileName)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName),
-        )
+        val request = DownloadManager.Request(uri)
+          .setMimeType("application/vnd.android.package-archive")
+          .setTitle(fileName)
+          .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        if (Build.VERSION.SDK_INT >= 29) {
+          request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+        }
+        manager.enqueue(request)
       }
       invoke.resolve(JSObject())
       return
