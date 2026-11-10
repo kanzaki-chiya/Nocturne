@@ -262,11 +262,27 @@ export function PhoneApp({
   const shouldConnect = () =>
     platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
   const hostId = "hostId" in page ? page.hostId : undefined;
+  const viewingSessionId =
+    !offer && page.kind === "session" && platform.isForeground?.() === true
+      ? page.sessionId
+      : undefined;
   currentRef.current = {
     hostId,
     sessionId: page.kind === "session" ? page.sessionId : undefined,
     covered: !!offer,
   };
+  const reportedViewing =
+    hostId !== undefined && viewingSessionId !== undefined ? `${hostId}|${viewingSessionId}` : "";
+  const lastViewing = useRef("");
+  useEffect(() => {
+    if (lastViewing.current === reportedViewing) return;
+    lastViewing.current = reportedViewing;
+    platformRef.current.observer?.viewing?.(
+      hostId !== undefined && viewingSessionId !== undefined
+        ? { hostId, sessionId: viewingSessionId }
+        : undefined,
+    );
+  });
   useEffect(() => {
     if (page.kind === "session") platform.dismissNotification?.(page.hostId, page.sessionId);
   }, [page, platform]);
@@ -435,10 +451,11 @@ export function PhoneApp({
       connection?.message ?? "",
     );
   });
-  // App 回到前台：补刷一次会话列表（别的进程新建的会话没有通知）
+  // App 回到前台：补刷一次会话列表（别的进程新建的会话没有通知），并重新同步在看状态
   useEffect(
     () =>
       platformRef.current.onForeground?.(() => {
+        changed();
         void sessions.refresh().catch(() => undefined);
       }),
     [sessions],

@@ -202,6 +202,7 @@ it("通知目标冷启动与暖启动切到指定电脑/会话；只在原生前
   let back: (() => void) | undefined;
   let foreground = true;
   const observer = vi.fn();
+  const viewing = vi.fn();
   const dismiss = vi.fn();
   const moveTaskToBack = vi.fn();
   const platform: PhonePlatform = {
@@ -222,7 +223,7 @@ it("通知目标冷启动与暖启动切到指定电脑/会话；只在原生前
     moveTaskToBack,
     dismissNotification: dismiss,
     isForeground: () => foreground,
-    observer: { sessionEvent: observer },
+    observer: { sessionEvent: observer, viewing },
   };
   const container = document.createElement("div");
   document.body.append(container);
@@ -235,6 +236,7 @@ it("通知目标冷启动与暖启动切到指定电脑/会话；只在原生前
     await shared.connect?.(client, {});
   });
   await vi.waitFor(() => expect(dismiss).toHaveBeenCalledWith("b", "sb"));
+  expect(viewing).toHaveBeenLastCalledWith({ hostId: "b", sessionId: "sb" });
   expect(container.textContent).toContain("消息 sb");
   const emit = async (id: string) => {
     await act(() => callbacks.get(id)?.(started(id, 1, new Date().toISOString())));
@@ -252,6 +254,7 @@ it("通知目标冷启动与暖启动切到指定电脑/会话；只在原生前
   foreground = false;
   await emit("sa");
   expect(observer.mock.lastCall?.[5]).toBe(false);
+  expect(viewing).toHaveBeenLastCalledWith(undefined);
   foreground = true;
   await act(() =>
     window.dispatchEvent(
@@ -260,6 +263,7 @@ it("通知目标冷启动与暖启动切到指定电脑/会话；只在原生前
   );
   await emit("sb");
   expect(observer.mock.lastCall?.[5]).toBe(false);
+  expect(viewing).toHaveBeenLastCalledWith(undefined);
   const historyBack = vi
     .spyOn(history, "back")
     .mockImplementation(() =>

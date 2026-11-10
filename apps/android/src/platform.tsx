@@ -317,17 +317,22 @@ export function appPlatform(
   void host
     .activityForeground()
     .then((value) => {
-      if (lifecycleRevision === 0) foreground = value;
+      if (lifecycleRevision === 0) {
+        foreground = value;
+        changed();
+      }
     })
     .catch(() => undefined);
   window.addEventListener(RESUME_EVENT, () => {
     lifecycleRevision++;
     foreground = true;
+    changed();
   });
   window.addEventListener(PAUSE_EVENT, () => {
     lifecycleRevision++;
     foreground = false;
     probe.flush();
+    changed();
   });
   probe.setVisible(() => foreground);
   const target = async () => {
@@ -358,6 +363,15 @@ export function appPlatform(
       },
       sessionEvent: (hostId, sessionId, event, live, session, watching, turnStartedAt) => {
         notifications.event(hostId, sessionId, event, live, session, watching, turnStartedAt);
+        controller.observer.sessionEvent?.(
+          hostId,
+          sessionId,
+          event,
+          live,
+          session,
+          watching,
+          turnStartedAt,
+        );
       },
     },
     isForeground: () => foreground,

@@ -19,8 +19,22 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
 @InvokeArg
-class TextArgs {
-  var text: String = ""
+class ServiceArgs {
+  var title: String = ""
+  var body: String = ""
+  var shortCriticalText: String = ""
+  var promoted: Boolean = false
+  var hostId: String = ""
+  var sessionId: String = ""
+
+  fun toNotice() = ServiceNotice(
+    title = title,
+    body = body,
+    shortCriticalText = shortCriticalText,
+    promoted = promoted,
+    hostId = hostId,
+    sessionId = sessionId,
+  )
 }
 
 @InvokeArg
@@ -51,7 +65,7 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun start(invoke: Invoke) {
-    val args = invoke.parseArgs(TextArgs::class.java)
+    val args = invoke.parseArgs(ServiceArgs::class.java)
     if (Build.VERSION.SDK_INT >= 33 &&
       ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) !=
       PackageManager.PERMISSION_GRANTED
@@ -59,14 +73,14 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
       // 没有通知权限时前台服务照常运行，只是常驻通知不显示；这里请求一次
       ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
     }
-    KeepAliveService.start(activity, args.text)
+    KeepAliveService.start(activity, args.toNotice())
     invoke.resolve(state())
   }
 
   @Command
   fun update(invoke: Invoke) {
-    val args = invoke.parseArgs(TextArgs::class.java)
-    KeepAliveService.update(activity, args.text)
+    val args = invoke.parseArgs(ServiceArgs::class.java)
+    KeepAliveService.update(activity, args.toNotice())
     invoke.resolve(state())
   }
 

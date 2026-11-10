@@ -22,7 +22,7 @@ export interface PhoneObserver {
     live: boolean,
     eventTime?: string,
   ): void;
-  /** App 本地通知消费完整事件；网页不实现此钩子。 */
+  /** App 本地通知与常驻通知状态汇总消费完整事件；网页不实现此钩子。 */
   sessionEvent?(
     hostId: string,
     sessionId: string,
@@ -32,6 +32,11 @@ export interface PhoneObserver {
     watching: boolean,
     turnStartedAt?: number,
   ): void;
+  /**
+   * 当前正在看的会话（原生 Activity 在前台且当前会话页未被遮盖时给出 hostId/sessionId，
+   * 否则为 undefined）。App 据此在打开会话或回到前台时清除未看标记；网页不实现此钩子。
+   */
+  viewing?(target: { hostId: string; sessionId: string } | undefined): void;
 }
 export interface PhoneExtensionApi {
   /** 打开 `pages` 里登记的页面 */

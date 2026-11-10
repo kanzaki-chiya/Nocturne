@@ -179,7 +179,7 @@ class MainActivity : TauriActivity() {
     NativeLog.add("renderer_gone crashed=$crashed foreground=$foreground")
     rendererLost = true
     if (foreground) restart()
-    else KeepAliveService.update(this, "Nocturne 远程：连接已中断，点按重新打开")
+    else KeepAliveService.update(this, ServiceNotice(title = "Nocturne 远程：连接已中断，点按重新打开"))
   }
 
   private fun restart() {

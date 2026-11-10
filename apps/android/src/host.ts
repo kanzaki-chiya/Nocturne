@@ -17,11 +17,19 @@ export interface BackgroundStatus {
   ignoringBatteryOptimizations?: boolean;
 }
 
+export interface ServiceNotification {
+  title: string;
+  body?: string | undefined;
+  shortCriticalText?: string | undefined;
+  promoted: boolean;
+  target?: { hostId: string; sessionId: string } | undefined;
+}
+
 export interface AppHost {
   backgroundStatus(): Promise<BackgroundStatus>;
-  /** 启动前台服务，`text` 是常驻通知文案；已在运行时只更新文案 */
-  startService(text: string): Promise<void>;
-  updateService(text: string): Promise<void>;
+  /** 启动前台服务，已在运行时只更新常驻通知 */
+  startService(notice: ServiceNotification): Promise<void>;
+  updateService(notice: ServiceNotification): Promise<void>;
   stopService(): Promise<void>;
   openSettings(target: SettingsTarget): Promise<void>;
   scanQr(): Promise<{ text: string } | { cancelled: true } | { denied: true }>;
@@ -76,6 +84,17 @@ function call<T>(command: string, payload?: Record<string, unknown>): Promise<T>
   return invoke<T>("plugin:background|call", { command, payload: payload ?? null });
 }
 
+function servicePayload(notice: ServiceNotification): Record<string, unknown> {
+  return {
+    title: notice.title,
+    body: notice.body ?? "",
+    shortCriticalText: notice.shortCriticalText ?? "",
+    promoted: notice.promoted,
+    hostId: notice.target?.hostId ?? "",
+    sessionId: notice.target?.sessionId ?? "",
+  };
+}
+
 export const tauriHost: AppHost = {
   scanQr: () => call("scan_qr"),
   openUrl: async (url) => {
@@ -85,11 +104,11 @@ export const tauriHost: AppHost = {
     const state = await call<{ running: boolean; ignoringBatteryOptimizations: boolean }>("status");
     return { supported: true, ...state };
   },
-  startService: async (text) => {
-    await call("start", { text });
+  startService: async (notice) => {
+    await call("start", servicePayload(notice));
   },
-  updateService: async (text) => {
-    await call("update", { text });
+  updateService: async (notice) => {
+    await call("update", servicePayload(notice));
   },
   stopService: async () => {
     await call("stop");

@@ -88,7 +88,20 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 **前台服务**（`KeepAliveService`）只负责让进程不被回收；连接、加密与订阅仍在 WebView 里，服务本身不联网、不持有密钥。
 
 - 启动条件：已配对至少一台电脑且「后台保持连接」打开（设置页，默认开）。关闭或移除最后一台电脑则停止，行为回到网页版。用户划掉 App 时（Activity 结束）服务随之停止，避免通知谎称「已连接」。
-- 常驻通知文案：`Nocturne 远程：已连接 <电脑名>`，未连上为 `Nocturne 远程：正在连接…`，渲染进程丢失且 App 在后台时为 `Nocturne 远程：连接已中断，点按重新打开`。通知渠道「后台保持连接」为低优先级，点按回到 App。
+- 常驻通知文案：标题保持 `Nocturne 远程：已连接 <电脑名>`，未连上为 `Nocturne 远程：正在连接…`，渲染进程丢失且 App 在后台时为 `Nocturne 远程：连接已中断，点按重新打开`；命中具体会话时正文设为会话名（与本地通知 `sessionTitle` 一致）并采用 `BigTextStyle`。通知渠道「后台保持连接」为低优先级，有目标会话时点按直接打开该会话（复用 `notificationTarget`），否则回到 App 首页；同一内容去抖不重复 `notify`。
+- **Android 16 Live Updates（小米超级岛）**：清单声明 `POST_PROMOTED_NOTIFICATIONS`，SDK ≥ 36 时按状态在 `Notification.Builder` 上调用 `setRequestPromotedOngoing(true/false)` 与 `setShortCriticalText`（依据：ChatGPT 安卓版 1.2026.307 的 `CodexRemoteSessionForegroundService` 在 HyperOS 3.0 上仅靠 `POST_PROMOTED_NOTIFICATIONS`、`IMPORTANCE_LOW` 常驻通知与这两个标准 API 即能上超级岛，无私有字段、未用 `CallStyle`）。按优先级取当前连接电脑上最高的一项：
+
+| 情况 | `shortCriticalText` | 请求上岛 |
+|---|---|---|
+| 有会话等待确认（权限或提问） | 待确认 | 是 |
+| 有会话出错停止且用户还没看 | 出错 | 是 |
+| 有会话完成且用户还没看 | 已完成 | 是 |
+| 有会话正在运行 | 运行中 | 是 |
+| 连接状态 `connecting` | 正在连接 | 是 |
+| 连接状态 `offline` | 电脑离线 | 是 |
+| 已连接且以上都没有 | 不设置 | 否（`setRequestPromotedOngoing(false)`） |
+
+  「出错 / 已完成」的未看语义与桌面侧栏 `rowTag` 一致：没在看该会话时实时结束才记，打开会话或新一轮实时开始时清除。
 - `START_NOT_STICKY`：进程被回收后不自动拉起，WebView 不在，服务会谎称已连接。
 - 首页 Android 返回将任务退到后台（不 finish），内页按页面历史返回；从最近任务划掉时服务 `onTaskRemoved` 停止。原生主题改为 AppCompat DayNight，不再依赖 Material3 Gradle 包。
 - Android 13+ 需要 `POST_NOTIFICATIONS` 才会显示通知，启动服务时请求一次；授权后立即重新发布被丢弃的常驻通知。前台服务本身不依赖这个权限。
