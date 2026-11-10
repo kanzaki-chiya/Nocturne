@@ -107,7 +107,9 @@ class KeepAliveService : Service() {
         builder.setStyle(Notification.BigTextStyle().bigText(notice.body))
       }
       if (Build.VERSION.SDK_INT >= 36) {
-        builder.setRequestPromotedOngoing(notice.promoted)
+        // setRequestPromotedOngoing 是 API 36.1 才有的方法，36.0 上调用会 NoSuchMethodError；
+        // 与 NotificationCompat 相同，直接写它设置的 extra，36.0 与 36.1+ 都认
+        builder.extras.putBoolean("android.requestPromotedOngoing", notice.promoted)
         if (notice.promoted && notice.shortCriticalText.isNotEmpty()) {
           builder.setShortCriticalText(notice.shortCriticalText)
         }
