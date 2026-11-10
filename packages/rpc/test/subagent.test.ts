@@ -49,6 +49,8 @@ const PNG_2x3 = new Uint8Array([
 
 // ── 手写日志 ────────────────────────────────────────────────
 
+// 远程打开会话会解析 cwd，必须是真实存在的目录（CI 没有 Z: 盘）
+const LOG_CWD = mkdtempSync(path.join(tmpdir(), "nct-rpc-subagent-repo-"));
 const iso = (seq: number): string => new Date(Date.UTC(2026, 9, 21, 8, 0, seq)).toISOString();
 const created = (id: string, parent?: { sessionId: string; callId: string }) => ({
   type: "session.created",
@@ -58,8 +60,8 @@ const created = (id: string, parent?: { sessionId: string; callId: string }) => 
   payload: {
     formatVersion: 1,
     nocturneVersion: "0.0.0",
-    cwd: "Z:\\repo",
-    workspaceRoot: "Z:\\repo",
+    cwd: LOG_CWD,
+    workspaceRoot: LOG_CWD,
     model: { provider: "fake", model: "fake-1" },
     permissionPreset: "default",
     ...(parent !== undefined ? { parent } : {}),
