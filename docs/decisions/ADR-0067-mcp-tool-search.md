@@ -1,6 +1,6 @@
 # ADR-0067：MCP 工具按需加载
 
-- 状态：已接受（维护者 2026-10-26 确认：搜索 + 代理调用；切换阈值 1 万 token，每次搜索最多 5 个结果）
+- 状态：已接受（维护者 2026-10-26 确认：搜索 + 代理调用；切换阈值 1 万 token，每次搜索最多 5 个结果）。全量模式「只在 Turn 开始切换」被 [ADR-0086](ADR-0086-mcp-steer-boundary.md) 修订：用户插话后也可以切换
 - 日期：2026-10-25
 - 修订：[mcp.md](../architecture/mcp.md) 第 5–8 节、[tools.md](../architecture/tools.md) 执行管线第 1 步、[tool-api.md](../protocols/tool-api.md) `ToolTraits`、[events.md](../protocols/events.md) `tool.started`
 

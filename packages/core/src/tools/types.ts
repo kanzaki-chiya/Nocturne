@@ -394,11 +394,12 @@ export interface McpSession {
   /** 等待初始启动结束；中止只停止等待，不取消后台连接。 */
   startup(signal?: AbortSignal): Promise<void>;
   /**
-   * Turn 边界准备（可选）：Runtime 在每个 Turn 开始、`applyPendingTools()` 之前
-   * 调用一次，用于对"失败且已过冷却"的服务器发起一次恢复尝试（HTTP 惰性重连）。
-   * 实现最多等待一段固定时间（3 秒），超时后转入后台；工具集仍只在
-   * `applyPendingTools()` 时切换，Turn 内 `specs()` 保持稳定（mcp.md 第 4、5 节）。
-   * 空闲 `reconcile` 不调用它。未实现时行为与本钩子不存在时一致。
+   * 边界准备（可选）：Runtime 在每个主 Turn 开始，以及用户插话写入后、下一次
+   * 模型请求前，于 `applyPendingTools()` 之前调用。用于对失败且已过冷却的
+   * HTTP 服务器发起一次恢复尝试。实现最多等待 3 秒，超时后转入后台；工具集
+   * 仍只在 `applyPendingTools()` 时切换。工具集合与模式都没变时，随后请求的
+   * `specs()` 保持逐字节稳定（ADR-0086）。空闲 `reconcile` 不调用它。
+   * 未实现时行为与本钩子不存在时一致。
    */
   prepareTurn?(signal?: AbortSignal): Promise<void>;
   /** 仅按需模式：复用 HTTP 恢复策略，最多等 3 秒；返回恢复工具供私有池更新，不消费边界暂存。 */

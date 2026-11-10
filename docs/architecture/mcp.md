@@ -81,8 +81,9 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
   │   → 复用 applyMcp / applyPendingTools，将暂存工具并入注册表
   │   → Turn 边界记录可用性变化为 session.config_changed.mcp，折叠成模型环境说明（ADR-0071）
   ├── tools/call 经执行管线（第 5、6 节）
-  ├── tools/list_changed 通知 → 重新 tools/list 并**暂存**，下一个 Turn 边界才切换
-  │   注册表（Turn 内工具集与上下文前缀保持稳定，不打断进行中的请求，也保住
+  ├── tools/list_changed 通知 → 重新 tools/list 并**暂存**，下一个边界才切换
+  │   （主 Turn 开始，或用户插话写入后、下次请求前；见 [ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）
+  │   注册表（单次模型请求内工具集与上下文前缀保持稳定，不打断进行中的请求，也保住
   │   Provider 侧提示缓存命中）；崩溃重连后重新拉到的工具列表同样按此规则
   └── 进程退出/传输错误 → crashed；在途调用以 mcp_unavailable 结算
 会话关闭（session.close，含 failed 路径）
@@ -90,13 +91,13 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 ```
 
 - **作用域是会话**：服务器集合由会话的 `workspaceRoot` 与信任状态决定（不同会话的项目配置可以不同），进程随会话关闭终止。同一 Runtime 下两个会话各自持有自己的服务器进程，不共享。
-- **并行启动、不阻塞打开**：McpSession.startup(signal?: AbortSignal): Promise<void> 等待所有初始启动结束，每台从开始启动算起限时 startupTimeoutMs，不从调用等待算起；中止仅停止等待，后台继续。成功工具走 staged / applyPendingTools 暂存切换路径；超时服务器记 failed、不注册工具，mcp.server 与 runtime.warning 照常发出，/mcp 可见。主 Turn 持久化用户消息后、首次请求前等待与切换；子代理与压缩不等待。关闭取消仍在启动的连接并沿用进程树清理，不等待后台启动超时。重配（`reconcile`）的等待同样可中断：Turn 开始前对 `applyMcp` 的等待（含 `prepareTools`）收到中断即放弃，Turn 以 `aborted` 结束；后台 reconcile 继续跑完，结果在下一次 Turn 边界照常应用。
+- **并行启动、不阻塞打开**：McpSession.startup(signal?: AbortSignal): Promise<void> 等待所有初始启动结束，每台从开始启动算起限时 startupTimeoutMs，不从调用等待算起；中止仅停止等待，后台继续。成功工具走 staged / applyPendingTools 暂存切换路径；超时服务器记 failed、不注册工具，mcp.server 与 runtime.warning 照常发出，/mcp 可见。主 Turn 持久化用户消息后、首次请求前等待与切换；子代理与压缩不等待。关闭取消仍在启动的连接并沿用进程树清理，不等待后台启动超时。重配（`reconcile`）的等待同样可中断：Turn 开始前对 `applyMcp` 的等待（含 `prepareTools`）收到中断即放弃，Turn 以 `aborted` 结束；后台 reconcile 继续跑完，结果在下一个边界照常应用（含用户插话，见 [ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）。
 - **崩溃与重连**：进程在会话中途退出 → 状态 `crashed`，发 `mcp.server` + `runtime.warning(code="mcp_server_crashed")`；在途 `tools/call` 以 `mcp_unavailable` 失败。只有已 `ready` 的服务器断开才算崩溃：连接阶段（含重连）的关闭不算崩溃，只报一次启动失败（`failed` + `mcp_server_failed`）。**惰性重连**：对崩溃服务器的下一次调用触发一次重连尝试（重新 spawn + initialize + tools/list），成功后恢复；每个会话每台服务器至多重连 3 次，超过后记 `failed` 不再尝试——避免反复拉起一个必崩的进程。
   - 上述崩溃与 3 次上限仅适用于 **stdio**。HTTP 的 `failed` 服务器在下一次调用时惰性重连：新建传输、不带旧 session id、重新 initialize 与 tools/list。并发调用共用一个重连 promise；次数按连续连接失败计，成功清零，不设永久上限。连接失败后冷却 **30 秒**，冷却内立即返回 `mcp_unavailable` 并说明剩余时间；冷却结束后的下一次调用再尝试。
   - 本次调用内只对带 session id 的 HTTP 404，或明确请求尚未发出的连接阶段错误（Node fetch 错误链中的 `ECONNREFUSED`、`ENOTFOUND`、`EAI_AGAIN`、`EHOSTUNREACH`、`ENETUNREACH`）立即重连并重试一次。多地址 AggregateError 只有所有子错误均为连接阶段错误才安全重试。请求发出后超时、reset、HTTP 500 等不重试，记 `failed`，下次调用重连，避免重复副作用。
-  - 每个主 Turn 开始、`applyPendingTools()` 之前，`McpSession.prepareTurn(signal)` 对过冷却的失败 HTTP 服务器并行重连，最多等 **3 秒**；及时成功的工具本 Turn 生效，超时则后台继续、下一个 Turn 边界生效。首 Turn 的初始启动等待不变；stdio 不受影响；子会话与压缩不触发恢复等待。
-  - **按需模式的 Turn 内恢复**：`mcp_search` 无匹配时，经 `McpSession.recoverTools(server?, signal)` 复用上述 HTTP 恢复范围、30 秒冷却、连续失败计数、并发共享 promise 与 3 秒等待上限；指定 `server` 只恢复该服务器，否则恢复全部符合条件的服务器。`mcp_call` 的目标属于失败服务器时也先恢复再分派。超时按未找到返回，后台继续连接；成功的恢复快照可由后续搜索或调用读取。冷却内不重连，未找到结果附不可用原因和剩余秒数（`status().retryAfterMs`，仅查询时计算，不写入环境说明）。恢复快照只更新按需私有池，不消费 `applyPendingTools()` 的暂存，不重建入口定义或切换模式。子会话仍持快照，不装配此恢复入口；全量模式行为不变。
-- **Turn 边界记录可用性变化**：主 Turn 在 MCP 准备与 `applyPendingTools()` 完成后、首次请求前追加持久环境说明，每次读取回退后的有效日志折叠状态，只记录变化；中断、子会话与后台请求不写。`status().autoRetry` 表示无需用户操作，Runtime 后续仍会自行重连，条件、措辞及新增服务器语义见 [ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)。
+  - 每个主 Turn 开始，以及用户插话（`message.user(steer: true)`，仅用户输入；不含后台子代理结果、后台命令结果与 `continueTurn`）写入之后、下一次模型请求之前，`applyPendingTools()` 之前，`McpSession.prepareTurn(signal)` 对过冷却的失败 HTTP 服务器并行重连，最多等 **3 秒**；及时成功的工具在这次边界生效，超时则后台继续、下一个边界生效。首 Turn 的初始启动等待不变；stdio 不受影响；子会话、压缩与后台请求不触发。没有变化时不写环境说明，请求工具定义与前缀逐字节不变。见 [ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)。
+  - **按需模式的 Turn 内恢复**：`mcp_search` 无匹配时，经 `McpSession.recoverTools(server?, signal)` 复用上述 HTTP 恢复范围、30 秒冷却、连续失败计数、并发共享 promise 与 3 秒等待上限；指定 `server` 只恢复该服务器，否则恢复全部符合条件的服务器。`mcp_call` 的目标属于失败服务器时也先恢复再分派。超时按未找到返回，后台继续连接；成功的恢复快照可由后续搜索或调用读取。冷却内不重连，未找到结果附不可用原因和剩余秒数（`status().retryAfterMs`，仅查询时计算，不写入环境说明）。恢复快照只更新按需私有池，不消费 `applyPendingTools()` 的暂存，不重建入口定义或切换模式。子会话仍持快照，不装配此恢复入口；全量模式不走这条 Turn 内私有池恢复，用户插话仍按 [ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md) 在边界切换。
+- **Turn 开始与用户插话后记录可用性变化**：主 Turn 在 MCP 准备与 `applyPendingTools()` 完成后、首次请求前，以及用户插话后的同一次准备里，追加持久环境说明，每次读取回退后的有效日志折叠状态，只记录变化；中断、子会话、`continueTurn` 与后台请求不写。`status().autoRetry` 表示无需用户操作，Runtime 后续仍会自行重连，条件、措辞及新增服务器语义见 [ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)，插话边界见 [ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)。
 - **Runtime 关闭清理**：`session.close()` 关闭本会话全部 MCP 连接（含 `failed`/`crashed` 状态的残留进程）。**已知限制（Windows、POSIX 均适用）**：Nocturne 主进程被强杀时，无法执行主动清理；MCP 服务器的 stdin 管道会关闭。若服务器响应 EOF 自行退出，就不会残留；若服务器忽略 EOF 并继续运行，就可能成为孤儿进程。Windows 当前没有用 Job Object 绑定生命周期；POSIX 虽用独立进程组，但主进程强杀后也不会自动向该组发信号。手动清理前先核对服务器命令行及 PID：Windows 使用 `taskkill /PID <PID> /T /F`；POSIX 使用 `kill -TERM <PID>`，必要时逐一清理其子进程。真实 `nctrn` 进程与假 MCP 服务器的强杀验收见 `apps/cli/test/mcp-parent-kill.accept.mjs`；后续方案见 [roadmap](../roadmap/roadmap.md)。
 - **子会话复用（Phase 6）**：Subagent 子会话的工具集直接取父会话 `mcpSession.tools()` 的快照——同一连接、同一批服务器进程，**不为子会话启动新的 MCP 服务器**，也不做第二次 initialize（[subagent.md](subagent.md) 第 10 节）。
 - 服务器主动发来的请求（`sampling/createMessage`、`elicitation/create`、`roots/list` 等）：我们不声明对应 capability，一律回 JSON-RPC `method_not_found`；`ping` 由 SDK 自动应答。
@@ -131,7 +132,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 3. 规范化后撞名（不同原始名映射到同一名字）：先注册者保留，后到的工具跳过并记警告——不静默覆盖（注册表既有约定）。
 4. `server` id 在配置层校验：`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`，不合规的条目拒绝该层（用户配置报错 / 项目配置忽略并警告）。
 
-工具集合随会话注册表存在：全量模式的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个 Turn 开始时一次性切换**——保证单个 Turn 内 `specs()` 稳定（模型看到的工具集不中途变化，请求前缀不变）。按需模式是 HTTP 重连恢复的例外：注册表中只有固定的 `mcp_search` / `mcp_call` 入口，搜索与分派持有独立的私有 `toolMap`；Turn 内恢复只更新池子，入口说明中的名单与 schema 保持不变，因此请求工具定义不变。普通 `tools/list_changed` 仍等边界，入口名单和模式也只在边界刷新（[ADR-0067 修订](../decisions/ADR-0067-mcp-tool-search.md#修订2026-11-10按需模式的-turn-内重连)）。会话关闭后 MCP 工具随注册表一起消失。
+工具集合随会话注册表存在：全量模式的 `ToolRegistry` = 内置工具 ∪ 本会话 MCP 工具（`specs()` 进入 `buildContext` 与 `/context` 的口径不变）。`tools/list_changed` 与崩溃重连重新拉到的工具列表都**先暂存、在下一个边界一次性切换**。边界是主 Turn 开始，以及用户插话写入之后、下一次模型请求之前（[ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）。没有变化时不写环境说明，请求工具定义与前缀逐字节不变；有变化时只影响这次插话之后的请求。按需模式另有 HTTP 重连恢复的例外：注册表中只有固定的 `mcp_search` / `mcp_call` 入口，搜索与分派持有独立的私有 `toolMap`；Turn 内恢复只更新池子，入口说明中的名单与 schema 保持不变，因此请求工具定义不变。普通 `tools/list_changed` 仍等边界，入口名单和模式也只在边界刷新（[ADR-0067 修订](../decisions/ADR-0067-mcp-tool-search.md#修订2026-11-10按需模式的-turn-内重连)）。会话关闭后 MCP 工具随注册表一起消失。
 
 按需模式 `mcp_call` 先按第 4 节尝试恢复目标所属的失败 HTTP 服务器；目标仍不存在或不在本会话工具池时，由工具的 dispatch 返回 unknown_tool，列可用服务器并提示先用 mcp_search；目标工具名的服务器段属于当前不可用服务器时，说明该服务器不可用及原因（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）；不列注册表里的内置工具名。它在通用执行器的目标查找之前结算，不为 MCP 在执行器增加名字分支（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）。
 
@@ -211,7 +212,7 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 - Core 侧的公开导出：`ToolDefinition`、`ToolResult`、`ToolContext`、`ToolScope`、`ToolTraits`、`McpConnector` 等类型经 `@nocturne/core` 导出（纯类型，兼容变更；platform 的 `FileSystem`/`ProcessRunner`/`PathOps` 等类型同理）。
 - 外部 agent 的 ACP 接入沿用同类 connector 注入与 `spawnPipe` 进程树清理，但作为 `task` 委派而不是 MCP 工具集合；见 [subagent.md](subagent.md#17-外部-agentacp)。
 - `PipeProcess.exited()` 可提前检测根进程退出；`detachOutput()` 可结束被后代占用的本地管道，原 `wait()` 仍等待 close 以保留完整协议尾部。Windows `.cmd`/`.bat` 由平台按 PATH/PATHEXT 解析并引用参数，不按具体命令名称分支；不带扩展名的命令只试 PATHEXT 扩展名（空项忽略、不区分大小写），不命中同名无扩展名文件。不带路径的裸命令**只查 PATH，不搜 cwd**：MCP、Hooks、外部 agent 的 cwd 可能是用户打开的工作区，仓库根目录里的同名 `npx.cmd` 不能冒充用户层配置的命令（项目信任挡不住这一条，因为配置来自用户层）。PATH 里找不到时不把裸命令交给 spawn（libuv 在 Windows 上同样会先搜 cwd），而是模拟一次 spawn ENOENT：`pid` 为 -1，`wait()`/`exited()` 以 `code: null` 结算，各调用方沿用原有的启动失败路径与文案。要用工作区里的脚本，请写显式路径（`.\tool.cmd`、`./tool`、`sub\tool.exe` 或绝对路径），显式路径仍按 cwd 解析；此前依赖 cwd 搜索的裸命令配置需要改成显式路径。POSIX 不受影响（`execvp` 本来就不搜 cwd）。
-- **MCP 工具按需加载**（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）：配置 `mcp.toolSearch: "auto" | "always" | "never"`（默认 `"auto"`）。`auto` 在本会话 MCP 工具定义估算超过 10,000 token 时启用按需模式（判定在会话打开与每个 Turn 边界的 `applyMcp`，Turn 内不切换以保持提示缓存前缀逐字节稳定）：请求中的工具列表不放那 N 个 `mcp__<server>__<tool>`，换成 `mcp_search({ query, server? })`（说明按服务器列出全部工具名；按关键词匹配名称、说明和参数名，不区分大小写，CJK 按单字拆分，支持完整工具名精确命中，最多返回 5 条）与 `mcp_call({ tool, arguments })`（通过 `ToolTraits.dispatch` 将调用分派给目标工具，参数校验、Hook、权限主体 `mcp <server>/<tool>`、超时与输出预算均按目标工具执行，`tool.started` 写 `target: { name, input }`）。子会话复用父会话 MCP 工具快照并沿用父会话的按需/全量模式，受限池（如 `explore` 只读池）只搜得到、调得到池内工具。`/context` 的 `tools` 段在按需模式下注明「MCP 按需，N 个工具未列出」。
+- **MCP 工具按需加载**（[ADR-0067](../decisions/ADR-0067-mcp-tool-search.md)）：配置 `mcp.toolSearch: "auto" | "always" | "never"`（默认 `"auto"`）。`auto` 在本会话 MCP 工具定义估算超过 10,000 token 时启用按需模式（判定在会话打开与每个 MCP 边界的 `applyMcp`；边界含用户插话，见 [ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)。同一次请求内不切换，无变化时提示缓存前缀逐字节稳定）：请求中的工具列表不放那 N 个 `mcp__<server>__<tool>`，换成 `mcp_search({ query, server? })`（说明按服务器列出全部工具名；按关键词匹配名称、说明和参数名，不区分大小写，CJK 按单字拆分，支持完整工具名精确命中，最多返回 5 条）与 `mcp_call({ tool, arguments })`（通过 `ToolTraits.dispatch` 将调用分派给目标工具，参数校验、Hook、权限主体 `mcp <server>/<tool>`、超时与输出预算均按目标工具执行，`tool.started` 写 `target: { name, input }`）。子会话复用父会话 MCP 工具快照并沿用父会话的按需/全量模式，受限池（如 `explore` 只读池）只搜得到、调得到池内工具。`/context` 的 `tools` 段在按需模式下注明「MCP 按需，N 个工具未列出」。
 
 ## 9. 暂不设计
 

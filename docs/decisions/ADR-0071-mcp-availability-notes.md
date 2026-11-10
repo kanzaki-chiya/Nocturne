@@ -1,6 +1,6 @@
 # ADR-0071：MCP 服务器不可用时告诉模型
 
-- 状态：已接受
+- 状态：已接受（记录时机被 [ADR-0086](ADR-0086-mcp-steer-boundary.md) 扩展到用户插话写入之后、下一次请求之前）
 - 日期：2026-10-29
 - 修订：[mcp.md](../architecture/mcp.md)、[context.md](../architecture/context.md)、[events.md](../protocols/events.md)、[sessions.md](../architecture/sessions.md)
 

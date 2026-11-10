@@ -144,12 +144,15 @@ export async function runTurn(
   /**
    * 安全点取走插话（ADR-0070 §2）：`takeSteers` 同步移除条目并发布快照，
    * 这里按提交顺序逐条写 `message.user(steer)`。中断信号已触发时不消费。
+   * 写完后、返回前调用 `afterSteers`（ADR-0086）：下一次请求之前的通用边界，
+   * 不区分插话来源。`continueTurn` 不走这里。
    * 返回是否写入了插话（安全点 2 据此决定是否继续下一个 Step）。
    */
   async function deliverSteers(): Promise<boolean> {
     if (deps.takeSteers === undefined || aborted(signal)) return false;
     const taken = deps.takeSteers();
     for (const item of taken) await writeSteer(item);
+    if (taken.length > 0) await deps.afterSteers?.(signal);
     return taken.length > 0;
   }
 

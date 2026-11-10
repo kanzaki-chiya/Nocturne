@@ -1919,7 +1919,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const questions = createQuestionBroker({ interactive: sessionInteractive });
     // 会话级工具注册表：内置工具 ∪ MCP 工具（mcp.md 第 4、5 节）。
     // MCP 服务器在会话打开时并行启动；list_changed / 重连带来的工具集变化
-    // 先暂存，在 submit() 的 Turn 边界经 applyPendingTools() 应用。
+    // 先暂存，在主 Turn 开始或用户插话写入后经 applyPendingTools() 应用（ADR-0086）。
     const tools: ToolRegistry = createToolRegistry();
     // ADR-0064 第 7 节：定时任务发起的会话不提供改写定时任务的工具（按特性，不按名字）
     for (const tool of builtinTools()) {
@@ -2067,6 +2067,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     let pendingMcp = false;
     let mcpUpdate: Promise<void> = Promise.resolve();
+    /** 本批 takeSteers 是否含用户插话（不含子代理结果与后台命令）。 */
+    let userSteerBoundary = false;
     let mcpOnDemand = false;
     let omittedMcpToolCount = 0;
     const activeMcpTools = new Map<string, ReturnType<McpSession["tools"]>[number]>();
@@ -2233,6 +2235,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           },
         );
       });
+    };
+    /**
+     * 主 Turn 开始与用户插话后共用的 MCP 边界（ADR-0086）：
+     * prepareTurn → applyMcp（applyPendingTools + 模式判定）→ 可用性说明。
+     * 中止只放弃等待。没有变化时 recordMcpAvailability 不写事件。
+     */
+    const prepareMcpBoundary = async (signal: AbortSignal): Promise<void> => {
+      // 每次等待后再读 signal：await 期间可能中止，不能把 aborted 收窄后当成常量。
+      if (!signal.aborted) await mcpSession?.prepareTurn?.(signal);
+      if (!signal.aborted) await awaitMcpIdle(signal);
+      if (!signal.aborted) await recordMcpAvailability(signal);
     };
 
     // shell 子进程环境剥离的凭据变量（provider-setup.md 第 4 节第 2 条）：
@@ -3324,16 +3337,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                   aborted: signal.aborted,
                 });
               }
-              // Turn 边界恢复尝试（mcp.md 第 4 节）：对 failed 且已过冷却的 HTTP
-              // 服务器并行重连一次，最多等 3 秒，超时后台继续；工具仍由随后的
-              // awaitMcpIdle → applyPendingTools 在本次边界统一切换。
-              if (!signal.aborted) await mcpSession?.prepareTurn?.(signal);
-              if (!signal.aborted) await awaitMcpIdle(signal);
-              // 暂存工具已切入本轮注册表后再记录，说明与首次请求的工具集一致。
-              if (!signal.aborted) await recordMcpAvailability(signal);
+              // 与用户插话后同一条边界（ADR-0086）：prepareTurn、暂存切换、可用性说明。
+              await prepareMcpBoundary(signal);
             },
-            // ADR-0070 §2：安全点取走插话；取走即从列表移除并广播快照
-            takeSteers: () => pendingInputStore.takeSteers(),
+            // ADR-0070 §2：安全点取走插话；取走即从列表移除并广播快照。
+            // 用户插话（mode steer）置位，供 afterSteers 复用上面的 MCP 边界；
+            // 子代理结果与后台命令不是用户输入，不置位。
+            takeSteers: () => {
+              userSteerBoundary = pendingInputStore
+                .snapshot()
+                .items.some((item) => item.mode === "steer" && !item.paused);
+              return pendingInputStore.takeSteers();
+            },
+            afterSteers: async (signal) => {
+              const refresh = userSteerBoundary;
+              userSteerBoundary = false;
+              if (!refresh || meta.parent !== undefined) return;
+              await prepareMcpBoundary(signal);
+            },
             // ADR-0076 §4.3：目标模式在 Turn 想结束时决定是否续跑
             ...(meta.parent === undefined ? { continueTurn: continueGoal } : {}),
             skills: catalog,

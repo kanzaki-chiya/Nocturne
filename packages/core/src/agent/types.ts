@@ -54,6 +54,12 @@ export interface TurnDeps {
    */
   takeSteers?: (() => readonly PreparedInput[]) | undefined;
   /**
+   * 插话写入后、下一次模型请求前（ADR-0086）。只在 `takeSteers` 确实写出插话
+   * 之后调用；`continueTurn` 不经过这里。Agent Loop 不区分插话来源，也不认识
+   * MCP。缺省则写完插话直接进入下一次请求。
+   */
+  afterSteers?: ((signal: AbortSignal) => Promise<void>) | undefined;
+  /**
    * agent-loop.md §3.10：只在安全点 2（模型 stop、无工具调用、无待消费插话、
    * 本来要 done）调用。返回内容时按插话写入 `message.user(steer)` 并继续下一个
    * Step；返回 undefined 照常 done。Agent Loop 不知道它来自哪个模块。

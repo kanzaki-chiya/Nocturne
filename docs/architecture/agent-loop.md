@@ -81,6 +81,7 @@ deliverSteers() -> bool:
   taken = deps.takeSteers?.() ?? []                      # 同步取出并立刻从待发列表移除、发 input.pending 快照
   for item in taken:                                     # 按提交顺序逐条写
     emit message.user(item, steer = true)                # 此后不可再编辑或撤回（input_consumed）
+  if taken 非空: afterSteers?(signal)                    # 写入后、下次请求前；continueTurn 不经过这里（ADR-0086）
   return taken 非空
 
 # 注入点（ADR-0076 §4.3）：只在安全点 2 调用；子会话不注入
@@ -210,7 +211,8 @@ Context Builder 是纯计算，不调用 Provider。需要压缩时它返回压�
 | `basePrompt?: string` | 覆盖基础系统提示段（context.md 第 3 节第 1 项）；子会话用它换成子代理提示 |
 | `shouldFinish?(state): boolean` | 每个工具调用结算后检查；返回 true 即 `finish("done")`。谓词由调用方注入，Agent Loop 不读工具名 |
 | `toolChoice?: { name: string }` | 设置时进入本 Turn 每个 `ModelRequest`（强制调用某工具，见 provider-api.md 第 3 节）；仅 Subagent 的催促兜底轮使用 |
-| `continueTurn?(signal): Promise<PreparedInput \| undefined>` | 与 `takeSteers` 同形，只在安全点 2（模型 `stop`、没有工具调用、没有待消费插话、本来要 `done`）调用；返回内容时写成 `message.user(steer: true)` 并继续下一个 Step，`maxSteps` 照常计数；返回空照常 `done`。目标模式用它在 Turn 想结束时拦下核对（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.3）；Agent Loop 不知道内容来自哪个模块 |
+| `afterSteers?(signal): Promise<void>` | `takeSteers` 的插话全部写入之后、下一次模型请求之前调用。`continueTurn` 不经过这里。Agent Loop 不区分插话来源，也不认识 MCP。Runtime 用它在用户插话后复用 Turn 开始的 MCP 准备（[ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）；中断信号在等待中生效 |
+| `continueTurn?(signal): Promise<PreparedInput \| undefined>` | 与 `takeSteers` 同形，只在安全点 2（模型 `stop`、没有工具调用、没有待消费插话、本来要 `done`）调用；返回内容时写成 `message.user(steer: true)` 并继续下一个 Step，`maxSteps` 照常计数；返回空照常 `done`。目标模式用它在 Turn 想结束时拦下核对（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.3）；Agent Loop 不知道内容来自哪个模块。这条路径不调用 `afterSteers` |
 
 子会话由 `SubagentLauncher` 用同一 `runTurn` 驱动另一条会话日志（[subagent.md](subagent.md)）——没有"子会话模式"的 Agent Loop 分支。
 
