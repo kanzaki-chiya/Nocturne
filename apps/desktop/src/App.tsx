@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   RpcError,
   type ComputerDescription,
@@ -19,6 +20,7 @@ import type {
   TurnChanges,
   TurnChangeDiff,
   WorkModeName,
+  WorkspaceBranches,
 } from "@nocturne/core/protocol";
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
@@ -33,7 +35,12 @@ import {
   SHELL_LOG_ID,
   type BackendLogTarget,
 } from "./BackendLogsPage";
-import { Composer, type ComposerSubmit, type WorkspaceChoice } from "./Composer";
+import {
+  Composer,
+  type ComposerSubmit,
+  type DraftBranchChoice,
+  type WorkspaceChoice,
+} from "./Composer";
 import {
   Conversation,
   QuestionCard,
@@ -2618,6 +2625,97 @@ function DraftPane({
     };
   }, [runtime, workspace, providersVersion]);
   const isPlain = workspace === null || (plainKey !== null && projectKey(workspace) === plainKey);
+  const [branchInfo, setBranchInfo] = useState<{
+    workspace: string;
+    value: WorkspaceBranches;
+  } | null>(null);
+  const [pickedBranch, setPickedBranch] = useState<{
+    workspace: string;
+    name: string;
+    create: boolean;
+  } | null>(null);
+  const refreshBranches = useCallback(() => {
+    if (!runtime || isPlain) {
+      setBranchInfo(null);
+      return;
+    }
+    const target = workspace;
+    void runtime
+      .workspaceBranches({ workspace: target })
+      .then((value) => {
+        setBranchInfo((prev) =>
+          prev?.workspace === target &&
+          prev.value.current === value.current &&
+          prev.value.defaultBranch === value.defaultBranch &&
+          prev.value.branches.length === value.branches.length &&
+          prev.value.branches.every((b, i) => {
+            const other = value.branches.at(i);
+            return other?.name === b.name && other.worktree === b.worktree;
+          })
+            ? prev
+            : { workspace: target, value },
+        );
+      })
+      .catch(() => {
+        setBranchInfo(null);
+      });
+  }, [runtime, isPlain, workspace]);
+  useEffect(() => {
+    refreshBranches();
+  }, [refreshBranches]);
+  useEffect(() => {
+    if (isPlain) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const focus = () => {
+      refreshBranches();
+    };
+    window.addEventListener("focus", focus);
+    try {
+      void Promise.resolve(listen("tauri://focus", focus))
+        .then((off) => {
+          if (disposed) off();
+          else unlisten = off;
+        })
+        .catch(() => undefined);
+    } catch {
+      // Non-Tauri test environments rely on window focus.
+    }
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", focus);
+      unlisten?.();
+    };
+  }, [isPlain, refreshBranches]);
+
+  const currentBranchData =
+    !isPlain && branchInfo?.workspace === workspace ? branchInfo.value : undefined;
+  const activePickedBranch =
+    !isPlain && pickedBranch?.workspace === workspace ? pickedBranch : undefined;
+  const branchChoice: DraftBranchChoice = {
+    current: currentBranchData?.current ?? null,
+    branches: currentBranchData?.branches ?? [],
+    ...(activePickedBranch !== undefined
+      ? {
+          selected: {
+            name: activePickedBranch.name,
+            ...(activePickedBranch.create ? { create: true } : {}),
+          },
+        }
+      : {}),
+    canCreate: currentBranchData?.defaultBranch !== null && currentBranchData?.current !== null,
+    onSelect: (name, create) => {
+      if (workspace === null) return;
+      if (!create && name === currentBranchData?.current) {
+        setPickedBranch(null);
+      } else {
+        setPickedBranch({ workspace, name, create });
+      }
+    },
+    onOpen: () => {
+      refreshBranches();
+    },
+  };
   const workspaceChoice: WorkspaceChoice = {
     label: isPlain ? "普通对话" : projectName(workspace),
     kind: isPlain ? "plain" : "project",
@@ -2661,11 +2759,26 @@ function DraftPane({
           externalAgents={externalAgents}
           running={false}
           disabled={disabled}
-          onSubmit={(input, mode) => onSubmit(input, mode, draft.createOptions())}
+          onSubmit={(input, mode) => {
+            const base = draft.createOptions();
+            const branchOpt =
+              activePickedBranch !== undefined &&
+              (activePickedBranch.create || activePickedBranch.name !== currentBranchData?.current)
+                ? {
+                    name: activePickedBranch.name,
+                    ...(activePickedBranch.create ? { create: true } : {}),
+                  }
+                : undefined;
+            return onSubmit(input, mode, {
+              ...base,
+              ...(branchOpt !== undefined ? { branch: branchOpt } : {}),
+            });
+          }}
           onInterrupt={() => undefined}
           historyKey={historyKey}
           controls={draft.controls}
           workspace={workspaceChoice}
+          branch={branchChoice}
           fileRefs={null}
           fileRefsUnavailable={isPlain ? "普通对话没有项目文件" : "发送第一条消息后可搜索项目文件"}
           pickImages={pickImages}

@@ -118,6 +118,8 @@ MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-00
 
 安全审查第二版（smart 的送审范围、只读白名单、直接交人、七道是非题与纯函数判定、追加规则、样例集）见 [ADR-0057](decisions/ADR-0057-reviewer-v2.md)。
 
+桌面端新会话页选择分支与自动工作树（`<repo>-wt/<branch>`）见 [ADR-0085](decisions/ADR-0085-new-session-branch-picker.md)。
+
 ## Roadmap
 子代理档位（按任务选择执行者）见 [ADR-0058](decisions/ADR-0058-subagent-profiles.md)，主文档是 [subagent.md](architecture/subagent.md)。
 

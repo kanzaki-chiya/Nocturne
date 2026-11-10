@@ -300,6 +300,7 @@ export interface DraftCreateOptions {
   model: ModelRef | undefined;
   reasoningEffort?: string;
   permissionPreset?: string;
+  branch?: { name: string; create?: boolean };
 }
 
 export interface DraftControls {

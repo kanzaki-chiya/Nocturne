@@ -343,4 +343,25 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
   });
+
+  it("远程连接带 branch 调用 runtime.createSession 被拒绝（ADR-0085），本机连接允许", async () => {
+    const h = await connectMany({ scripts: [textScript("ok")] });
+    const remote = await h.add();
+    await expect(
+      remote.client.runtime.createSession({
+        model: MODEL,
+        cwd: h.ws,
+        branch: { name: "main" },
+      }),
+    ).rejects.toMatchObject({ code: "remote_not_allowed" });
+    await reaches(
+      h.client.runtime.createSession({
+        model: MODEL,
+        cwd: h.ws,
+        branch: { name: "main" },
+      }),
+    );
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
 });

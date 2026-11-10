@@ -686,8 +686,13 @@ class Connection implements HubPeer {
     ) {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
     }
-    if (method === "runtime.createSession" && this.initialized && this.hub.available) {
-      await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
+    if (method === "runtime.createSession") {
+      if (p.branch !== undefined && p.branch !== null) {
+        deny("远程连接不允许指定分支创建会话");
+      }
+      if (this.initialized && this.hub.available) {
+        await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
+      }
     }
   }
 
@@ -1390,6 +1395,24 @@ class Connection implements HubPeer {
             // 会话级工作区（ADR-0051）：单后台模式下客户端按会话传 cwd
             if (sessionCwd !== undefined) options.cwd = sessionCwd;
             if (sessionRoot !== undefined) options.workspaceRoot = sessionRoot;
+            if (p.branch !== undefined && p.branch !== null) {
+              if (this.origin !== "local") {
+                throw new RpcProtocolError(
+                  this.origin === "remote" ? "remote_not_allowed" : "agent_not_allowed",
+                  "非本机连接不允许指定分支创建会话",
+                );
+              }
+              const branchObj = reqObject(p, "branch");
+              const branchName = reqString(branchObj, "name").trim();
+              if (branchName === "") {
+                throw new InvalidParamsError("branch.name 不能为空");
+              }
+              const createBranch = optBool(branchObj, "create");
+              options.branch = {
+                name: branchName,
+                ...(createBranch !== undefined ? { create: createBranch } : {}),
+              };
+            }
 
             if (this.origin === "agent" && this.agentContext !== undefined) {
               const agentDevice = this.agentHost.getRegisteredAgent(this.agentContext.agentId);

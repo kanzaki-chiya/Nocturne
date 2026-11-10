@@ -552,6 +552,24 @@ function replayHost(
             warnings: [],
           };
           break;
+        case "workspace.branches": {
+          const targetWs = String(request.params.workspace ?? "");
+          if (targetWs === "" || targetWs === "Z:/plain") {
+            result = { current: null, branches: [], busy: false, defaultBranch: null };
+          } else {
+            result = {
+              current: "main",
+              branches: [
+                { name: "main" },
+                { name: "fix/style" },
+                { name: "feat/auth", worktree: "Z:/other/auth" },
+              ],
+              busy: true,
+              defaultBranch: "main",
+            };
+          }
+          break;
+        }
         case "schedule.runNow":
           sessions.push({
             id: "sched-run-1",
@@ -2176,4 +2194,64 @@ it("设置 › 浏览器「重启应用」与关闭窗口共用待发输入提�
   fireEvent.click(restartBtn);
   await waitFor(() => expect(restartApp).toHaveBeenCalledTimes(2));
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("新会话页分支选择：普通对话显示 - 且禁用，项目默认显示当前分支，同目录 busy 时仍可选，发送首条消息传 branch，失败时保留草稿并显示错误（ADR-0085）", async () => {
+  let failCreate = false;
+  const host = replayHost([], undefined, undefined, (req) => {
+    if (req.method === "runtime.createSession" && failCreate) {
+      return { code: "invalid_command", message: "目标工作树目录已存在：Z:/qa-alpha-wt/conflict" };
+    }
+    return undefined;
+  });
+
+  render(<App host={host} />);
+  // 初始是普通对话草稿：分支按钮显示 - 且禁用
+  const plainBranchBtn = await screen.findByRole("button", { name: "选择分支" });
+  expect((plainBranchBtn as HTMLButtonElement).disabled).toBe(true);
+  expect(plainBranchBtn.textContent).toBe("-");
+
+  // 切换到项目 qa-alpha 草稿
+  fireEvent.click(screen.getByRole("button", { name: "切换目录" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /qa-alpha/ }));
+
+  const projBranchBtn = await screen.findByRole("button", { name: "选择分支" });
+  await waitFor(() => expect(projBranchBtn.textContent).toBe("main"));
+  expect((projBranchBtn as HTMLButtonElement).disabled).toBe(false);
+
+  // 打开分支菜单，选定新建分支但尚未发消息时不会调 createSession
+  fireEvent.click(projBranchBtn);
+  const menu = await screen.findByRole("menu");
+  // 即使有工作树占用项，也未被禁用
+  const occupiedOpt = within(menu).getByRole("menuitemradio", { name: "feat/auth" });
+  expect((occupiedOpt as HTMLButtonElement).disabled).toBe(false);
+
+  const searchInput = within(menu).getByRole("textbox");
+  fireEvent.change(searchInput, { target: { value: "r1110e/new-feature" } });
+  fireEvent.click(within(menu).getByRole("menuitemradio", { name: "新建分支 r1110e/new-feature" }));
+  expect(projBranchBtn.textContent).toBe("r1110e/new-feature");
+  expect(host.calls.some((c) => c.method === "runtime.createSession")).toBe(false);
+
+  // 模拟创建失败：输入草稿并发送，会话不创建，草稿保留，错误显示在 composer-error
+  failCreate = true;
+  const textarea = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
+  fireEvent.change(textarea, { target: { value: "我的首条草稿消息" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("目标工作树目录已存在");
+  expect(textarea.value).toBe("我的首条草稿消息");
+
+  // 恢复成功后再发：createSession 收到 branch: { name: "r1110e/new-feature", create: true }
+  failCreate = false;
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  await waitFor(() =>
+    expect(
+      host.calls.filter((c) => c.method === "runtime.createSession").at(-1)?.params,
+    ).toMatchObject({
+      cwd: "Z:/qa-alpha",
+      workspaceRoot: "Z:/qa-alpha",
+      branch: { name: "r1110e/new-feature", create: true },
+    }),
+  );
 });

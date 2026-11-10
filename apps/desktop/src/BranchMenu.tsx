@@ -7,6 +7,37 @@ import { Icon, ICON_SM } from "./ui";
 import { useSessionRefresh } from "./use-session-refresh";
 import "./branch-menu.css";
 
+export function isValidGitBranchName(raw: string): boolean {
+  const name = raw.trim();
+  if (
+    name === "" ||
+    name !== raw ||
+    name === "@" ||
+    name.startsWith("-") ||
+    name.startsWith(".") ||
+    name.startsWith("/") ||
+    name.endsWith("/") ||
+    name.endsWith(".") ||
+    name.endsWith(".lock") ||
+    name.includes("..") ||
+    name.includes("//") ||
+    name.includes("@{") ||
+    name.includes("\\")
+  ) {
+    return false;
+  }
+  for (let i = 0; i < name.length; i += 1) {
+    const code = name.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f) return false;
+    const ch = name.charAt(i);
+    if ("~^:?*[".includes(ch)) return false;
+  }
+  for (const part of name.split("/")) {
+    if (part === "" || part.startsWith(".") || part.endsWith(".lock")) return false;
+  }
+  return true;
+}
+
 export function BranchMenu({
   client,
   session,

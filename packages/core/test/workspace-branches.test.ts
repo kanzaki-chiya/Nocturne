@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -579,4 +587,179 @@ it("pumps inputs queued while a branch switch is running after the switch finish
   expect(session.pendingInputs().items).toHaveLength(0);
   expect(delivered("bg-2")).toBe(true);
   await session.close();
+});
+
+it("createSession with branch reuses or creates <repo>-wt/<branch> worktree without changing project directory HEAD or files (ADR-0085)", async () => {
+  const base = realpathSync.native(temp());
+  const root = path.join(base, "myrepo");
+  mkdirSync(path.join(root, "sub"), { recursive: true });
+  git(root, "init", "-q", "-b", "main");
+  git(root, "config", "user.email", "test@example.invalid");
+  git(root, "config", "user.name", "Test");
+  writeFileSync(path.join(root, "file.txt"), "main-v1\n");
+  writeFileSync(path.join(root, "sub", "nested.txt"), "nested-main\n");
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "initial main");
+  const mainCommit1 = git(root, "rev-parse", "HEAD");
+
+  // 建立已有分支 feat/occupied（已检出在其他工作树）和 fix/unoccupied（未检出）
+  git(root, "branch", "feat/occupied");
+  git(root, "branch", "fix/unoccupied");
+  const occupiedWt = path.join(base, "occupied-wt");
+  git(root, "worktree", "add", "-q", occupiedWt, "feat/occupied");
+
+  // 在 main 上再提交一次，使 main 的 HEAD 与旧分支不同，并在工作区留未提交改动
+  writeFileSync(path.join(root, "file.txt"), "main-v2\n");
+  git(root, "add", "file.txt");
+  git(root, "commit", "-qm", "second main");
+  const mainCommit2 = git(root, "rev-parse", "HEAD");
+  expect(mainCommit2).not.toBe(mainCommit1);
+  writeFileSync(path.join(root, "file.txt"), "main-dirty-working-tree\n");
+
+  const rt = await runtime(root);
+
+  // 1. 选当前分支：不建工作树，没有 worktree 记录
+  const sCurrent = await rt.createSession({
+    model: "fake/fake-1",
+    cwd: root,
+    workspaceRoot: root,
+    branch: { name: "main" },
+  });
+  expect(sCurrent.state().config.worktree).toBeUndefined();
+  expect(
+    internalSession(sCurrent)
+      .durableEvents()
+      .some((e) => e.type === "session.config_changed" && e.payload.worktree !== undefined),
+  ).toBe(false);
+  await sCurrent.close();
+
+  // 2. 选已在工作树检出的分支（且项目目录是子目录 sub）：映射到该工作树对应的子目录
+  const sOccupied = await rt.createSession({
+    model: "fake/fake-1",
+    cwd: path.join(root, "sub"),
+    workspaceRoot: root,
+    branch: { name: "feat/occupied" },
+  });
+  expect(sOccupied.state().meta.cwd.toLowerCase()).toBe(path.join(root, "sub").toLowerCase());
+  expect(sOccupied.state().meta.workspaceRoot.toLowerCase()).toBe(root.toLowerCase());
+  expect(sOccupied.state().config.worktree?.current.toLowerCase()).toBe(
+    path.join(occupiedWt, "sub").toLowerCase(),
+  );
+  expect(sOccupied.state().config.branch).toBe("feat/occupied");
+  await sOccupied.close();
+
+  // 3. 选已有未检出分支：在 <repo>-wt/<branch（/ 换 -）> 建出工作树
+  const expectedUnoccupiedWt = path.join(base, "myrepo-wt", "fix-unoccupied");
+  const sUnoccupied = await rt.createSession({
+    model: "fake/fake-1",
+    cwd: root,
+    workspaceRoot: root,
+    branch: { name: "fix/unoccupied" },
+  });
+  expect(sUnoccupied.state().config.worktree?.current.toLowerCase()).toBe(
+    expectedUnoccupiedWt.toLowerCase(),
+  );
+  expect(git(expectedUnoccupiedWt, "branch", "--show-current")).toBe("fix/unoccupied");
+  expect(git(expectedUnoccupiedWt, "rev-parse", "HEAD")).toBe(mainCommit1);
+  await sUnoccupied.close();
+
+  // 4. 新建分支：基准是 main 的提交；/ 换成 -
+  // 先把主目录切到 fix/other（先临时建工作树不能占 main，所以在主目录直接检出新分支再测 main 基准）
+  git(root, "checkout", "-qb", "working-branch");
+  writeFileSync(path.join(root, "working.txt"), "on-working\n");
+  git(root, "add", "working.txt");
+  git(root, "commit", "-qm", "working commit");
+  const workingCommit = git(root, "rev-parse", "HEAD");
+  expect(workingCommit).not.toBe(mainCommit2);
+  writeFileSync(path.join(root, "file.txt"), "still-dirty\n");
+
+  const expectedCreatedWt = path.join(base, "myrepo-wt", "feat-new-branch");
+  const sCreated = await rt.createSession({
+    model: "fake/fake-1",
+    cwd: root,
+    workspaceRoot: root,
+    branch: { name: "feat/new-branch", create: true },
+  });
+  expect(sCreated.state().config.worktree?.current.toLowerCase()).toBe(
+    expectedCreatedWt.toLowerCase(),
+  );
+  expect(git(expectedCreatedWt, "branch", "--show-current")).toBe("feat/new-branch");
+  // 新建分支基准是 main（mainCommit2），而不是当前 working-branch（workingCommit）
+  expect(git(expectedCreatedWt, "rev-parse", "HEAD")).toBe(mainCommit2);
+  await sCreated.close();
+
+  // 5. 目标目录已存在且不是该分支的工作树：报错，目录原样保留
+  git(root, "branch", "feat/conflict");
+  const conflictDir = path.join(base, "myrepo-wt", "feat-conflict");
+  mkdirSync(conflictDir, { recursive: true });
+  writeFileSync(path.join(conflictDir, "keep.txt"), "do-not-touch\n");
+  await expect(
+    rt.createSession({
+      model: "fake/fake-1",
+      cwd: root,
+      workspaceRoot: root,
+      branch: { name: "feat/conflict" },
+    }),
+  ).rejects.toThrow(/已存在/);
+  expect(readFileSync(path.join(conflictDir, "keep.txt"), "utf8")).toBe("do-not-touch\n");
+
+  // 全程项目目录的 HEAD 和工作区文件不变
+  expect(git(root, "branch", "--show-current")).toBe("working-branch");
+  expect(git(root, "rev-parse", "HEAD")).toBe(workingCommit);
+  expect(readFileSync(path.join(root, "file.txt"), "utf8")).toBe("still-dirty\n");
+});
+
+it("createSession branch creation resolves base ref via origin/HEAD or master when main is absent, and rejects when none exists (ADR-0085)", async () => {
+  const base = realpathSync.native(temp());
+  const root = path.join(base, "nomain");
+  mkdirSync(root, { recursive: true });
+  git(root, "init", "-q", "-b", "trunk");
+  git(root, "config", "user.email", "test@example.invalid");
+  git(root, "config", "user.name", "Test");
+  writeFileSync(path.join(root, "a.txt"), "trunk\n");
+  git(root, "add", "a.txt");
+  git(root, "commit", "-qm", "trunk commit");
+  const trunkCommit = git(root, "rev-parse", "HEAD");
+
+  const rt = await runtime(root);
+  // 既无 main、又无 origin/HEAD、也无 master：defaultBranch 为 null，拒绝新建
+  expect((await rt.workspaceBranches({ workspace: root })).defaultBranch).toBeNull();
+  await expect(
+    rt.createSession({
+      model: "fake/fake-1",
+      cwd: root,
+      workspaceRoot: root,
+      branch: { name: "feat/no-base", create: true },
+    }),
+  ).rejects.toThrow(/基准分支/);
+
+  // 设置 refs/remotes/origin/HEAD -> refs/remotes/origin/trunk：按 origin/HEAD 解析到 trunk
+  git(root, "update-ref", "refs/remotes/origin/trunk", trunkCommit);
+  git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+  expect((await rt.workspaceBranches({ workspace: root })).defaultBranch).toBe("trunk");
+  const sOrigin = await rt.createSession({
+    model: "fake/fake-1",
+    cwd: root,
+    workspaceRoot: root,
+    branch: { name: "feat/from-origin-head", create: true },
+  });
+  expect(git(path.join(base, "nomain-wt", "feat-from-origin-head"), "rev-parse", "HEAD")).toBe(
+    trunkCommit,
+  );
+  await sOrigin.close();
+
+  // 移除 origin/HEAD，但存在本地 master 分支：回退到 master
+  git(root, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+  git(root, "branch", "master", trunkCommit);
+  expect((await rt.workspaceBranches({ workspace: root })).defaultBranch).toBe("master");
+  const sMaster = await rt.createSession({
+    model: "fake/fake-1",
+    cwd: root,
+    workspaceRoot: root,
+    branch: { name: "feat/from-master", create: true },
+  });
+  expect(git(path.join(base, "nomain-wt", "feat-from-master"), "rev-parse", "HEAD")).toBe(
+    trunkCommit,
+  );
+  await sMaster.close();
 });

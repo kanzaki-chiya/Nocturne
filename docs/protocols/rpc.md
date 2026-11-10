@@ -35,7 +35,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 |---|---|
 | `listSessions` | `{ cwd?, includeSubagents?, includeArchived? }`（归档默认排除，本机可显式包含并返回 `archivedAt`；非本机强制排除，ADR-0080） → `(SessionSummary & { openHere?: boolean })[]`；`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
 | `searchSessions` | `{ query: string, searchId?: string, includeArchived?: boolean }`（默认不搜归档，本机可显式包含） → 完整 `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串。`searchId` 由客户端为每次查询生成，提供时经 `runtime.sessionSearchProgress` 交付有序增量，省略时不发进度通知。同一连接发起新查询或断线时立即中止上一次扫描、丢弃待发批次（被取代的旧查询返回 `[]`）；最终响应始终为完整结果 |
-| `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；恢复会话沿用日志记录的工作区，不带参数 |
+| `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；[ADR-0085](../decisions/ADR-0085-new-session-branch-picker.md) 新增可选 `branch: { name: string, create?: boolean }`（仅本机连接允许，远程连接携带时报 `remote_not_allowed`），在不切换项目目录分支的前提下将新会话定位或建工作树到 `<repo>-wt/<branch>` 并写 `session.config_changed.worktree`；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
 | `forkSession` | `{ sessionId, targetSeq? }` → `{ sessionId }`（新会话未打开，用 `resumeSession` 打开） |
 | `renameSession` | `{ sessionId, title }` → `null`；调用 Core 的 `Runtime.renameSession`，成功后通知会话列表变化；参数必须为字符串，标题内容的校验由 Core 负责 |
@@ -274,7 +274,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `workspace.branches` | `{ workspace: string }` → `{ current: string \| null, branches: { name: string, worktree?: string }[], busy: boolean }` |
+| `workspace.branches` | `{ workspace: string }` → `{ current: string \| null, branches: { name: string, worktree?: string }[], busy: boolean, defaultBranch?: string \| null }` |
 | `workspace.switchBranch` | `{ workspace: string, branch: string, create?: boolean }` → `null` |
 
 `current` 是分支名，游离 HEAD 时为提交号前 8 位。非仓库或读取失败返回 `current: null` 与空列表，不报读取错误。`worktree` 仅标注其他工作树占用分支的路径。`busy` 表示目录下存在活动；Core 切换时重新判定所有会话，忙时返回 `session_busy`，不能依赖界面禁用。活动与目录隔离规则见 [sessions.md](../architecture/sessions.md)。
@@ -450,7 +450,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `initialize` | 仅连接握手，不创建 Runtime |
 | `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件，远程即使传 `includeArchived: true` 仍强制排除归档 |
 | `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限 |
-| `runtime.createSession` | 允许全部选项。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
+| `runtime.createSession` | 允许除 `branch` 外的选项（携带 `branch` 报 `remote_not_allowed`，ADR-0085）。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
 | `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`、`workMode`） |

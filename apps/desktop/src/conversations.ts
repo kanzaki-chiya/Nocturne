@@ -88,6 +88,8 @@ export interface CreateSessionChoice {
   model?: ModelRef | string | undefined;
   reasoningEffort?: string;
   permissionPreset?: string;
+  /** 新会话目标分支（ADR-0085） */
+  branch?: { name: string; create?: boolean } | undefined;
 }
 
 /**
@@ -441,6 +443,7 @@ export class Conversations {
             ...(create?.permissionPreset !== undefined
               ? { permissionPreset: create.permissionPreset }
               : {}),
+            ...(create?.branch !== undefined ? { branch: create.branch } : {}),
           }),
         );
       }

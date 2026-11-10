@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Composer, type ComposerProps } from "../src/Composer";
 import { effortOption, presetOptions } from "../src/choice-info";
@@ -823,5 +823,77 @@ describe("Composer @ 引用", () => {
     field.setSelectionRange(14, 14);
     expect(fireEvent.keyDown(field, { key: "Backspace", isComposing: true })).toBe(true);
     expect(field.value).toBe("看 @src/main.ts 谢谢");
+  });
+});
+
+describe("Composer 新会话页分支选择（ADR-0085）", () => {
+  it("普通对话或非仓库显示 - 且禁用、无下拉箭头；项目默认显示当前分支，所有选项（含其他工作树占用）均可选，搜索不匹配时出现新建分支", async () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(
+      <Composer
+        {...props({
+          branch: {
+            current: null,
+            branches: [],
+            canCreate: false,
+            onSelect,
+          },
+        })}
+      />,
+    );
+    const plainBtn = screen.getByRole("button", { name: "选择分支" });
+    expect((plainBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(plainBtn.textContent).toBe("-");
+    expect(plainBtn.querySelector(".caret")).toBeNull();
+
+    rerender(
+      <Composer
+        {...props({
+          workspace: {
+            label: "nocturne",
+            kind: "project",
+            readOnly: false,
+            currentKey: "z:/nocturne",
+            projects: [{ key: "z:/nocturne", path: "Z:/nocturne", name: "nocturne" }],
+            onSelectPlain: vi.fn(),
+            onSelectProject: vi.fn(),
+            onOpenOther: vi.fn(),
+          },
+          branch: {
+            current: "main",
+            branches: [
+              { name: "main" },
+              { name: "fix/style" },
+              { name: "feat/occupied", worktree: "Z:/nocturne-wt/occupied" },
+            ],
+            canCreate: true,
+            onSelect,
+          },
+        })}
+      />,
+    );
+    const branchBtn = screen.getByRole("button", { name: "选择分支" });
+    expect((branchBtn as HTMLButtonElement).disabled).toBe(false);
+    expect(branchBtn.textContent).toBe("main");
+    expect(branchBtn.querySelector(".caret")).not.toBeNull();
+
+    fireEvent.click(branchBtn);
+    const menu = await screen.findByRole("menu");
+    const searchInput = within(menu).getByRole("textbox");
+    expect(document.activeElement).toBe(searchInput);
+
+    // 占用项在工作树检出：新会话页不禁用，仅在父行 title 显示工作树路径
+    const occupiedItem = screen.getByRole("menuitemradio", { name: "feat/occupied" });
+    expect((occupiedItem as HTMLButtonElement).disabled).toBe(false);
+    expect(occupiedItem.parentElement?.getAttribute("title")).toBe("Z:/nocturne-wt/occupied");
+
+    // 搜索不匹配且合法分支名时出现「新建分支 …」
+    fireEvent.change(searchInput, { target: { value: "r1110e/branch-picker" } });
+    const createItem = screen.getByRole("menuitemradio", {
+      name: "新建分支 r1110e/branch-picker",
+    });
+    fireEvent.click(createItem);
+    expect(onSelect).toHaveBeenCalledWith("r1110e/branch-picker", true);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

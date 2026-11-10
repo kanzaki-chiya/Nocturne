@@ -8,4 +8,6 @@ export interface WorkspaceBranches {
   current: string | null;
   branches: WorkspaceBranch[];
   busy: boolean;
+  /** 新建分支基准（ADR-0085）：依次取 main、origin/HEAD、master，取不到时为 null */
+  defaultBranch?: string | null | undefined;
 }

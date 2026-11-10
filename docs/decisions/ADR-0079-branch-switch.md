@@ -77,3 +77,4 @@ git 直接以参数数组调用，不经过 shell。分支名由用户输入，�
 ## 修订
 
 - 2026-11-04（[ADR-0081](ADR-0081-session-worktree-switch.md)）：会话切换工作树后，Turn 前分支检查、`workspaceBranches` / `switchBranch` 的忙判定与桌面状态栏分支跟随当前执行目录 `currentCwd`；切换事件在同一 `session.config_changed` 中写入 `branch`，避免下一轮重复产生分支变化说明。
+- 2026-11-10（[ADR-0085](ADR-0085-new-session-branch-picker.md)）：桌面端新会话页新增分支选择框，发出第一条消息创建会话时按所选分支复用已有工作树或在 `<repo>-wt/<branch>` 创建工作树并切入，项目主目录保持原分支不变；已有会话的状态栏分支菜单行为不变。

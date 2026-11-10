@@ -147,6 +147,7 @@ import {
   gitWorkspaceBranches,
   gitWorktrees,
   gitSwitchBranch,
+  prepareSessionBranchWorktree,
 } from "./platform/index.js";
 import {
   clampReasoningEffort,
@@ -462,6 +463,8 @@ export interface CreateSessionOptions {
   schedule?: SessionSchedule | undefined;
   /** 外部 agent 来源（ADR-0074 §5）：写入 `session.created.client`，只由 RPC 服务端在 `agent` 连接上填入 */
   client?: SessionClient | undefined;
+  /** 新会话目标分支（ADR-0085）：定位已有工作树或在 `<repo>-wt/<branch>` 创建工作树并切入 */
+  branch?: { name: string; create?: boolean | undefined } | undefined;
 }
 
 import {
@@ -5177,6 +5180,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           `未知思考档位：${initialEffort}（可选：${REASONING_EFFORT_ORDER.join(" | ")}）`,
         );
       }
+      const preparedWorktree =
+        opts.branch !== undefined
+          ? await prepareSessionBranchWorktree({
+              projectCwd: sessionCwd,
+              branch: opts.branch.name,
+              create: opts.branch.create === true,
+            })
+          : undefined;
       const session = await store.create({
         cwd: sessionCwd,
         workspaceRoot: sessionRoot,
@@ -5189,6 +5200,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(opts.client !== undefined ? { client: opts.client } : {}),
       });
       try {
+        if (preparedWorktree !== undefined) {
+          const previous = await platform.resolveReal(sessionCwd);
+          await session.emit("session.config_changed", {
+            worktree: {
+              current: preparedWorktree.targetCwd,
+              previous,
+              branch: preparedWorktree.branch,
+            },
+            branch: {
+              current: preparedWorktree.branch,
+            },
+          });
+        }
         const wrapped = await wrapSession(session, undefined, opts.interactive === false);
         // recent-models.json：新建会话记录初始模型（provider-setup.md 第 6 节）
         void config?.recordRecentModel(session.state().config.model).catch((e: unknown) => {
