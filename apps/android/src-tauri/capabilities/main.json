@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "App 主窗口：只允许调用后台服务插件",
   "windows": ["main"],
-  "permissions": ["background:default"]
+  "permissions": ["background:default", "lan-ws:default"]
 }

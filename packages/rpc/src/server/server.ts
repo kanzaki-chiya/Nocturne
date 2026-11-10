@@ -215,6 +215,7 @@ export const REMOTE_METHODS = [
   "session.revokeGrant",
   "session.revokeAllGrants",
   "initialize",
+  "remote.lanEndpoints",
   "runtime.listSessions",
   "runtime.usageStats",
   "runtime.createSession",
@@ -365,6 +366,9 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           hub.notifyLocal(message);
         },
         (transport) => server.serve(transport, { origin: "remote" }),
+        (message) => {
+          hub.notifyRemotes(message);
+        },
       )
     : undefined;
   const agentHost = new AgentHost({
@@ -1259,6 +1263,12 @@ class Connection implements HubPeer {
         if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
         return this.attachAgentsToStatus(await remote().setEnabled(enabled));
       },
+      "remote.setLanDirect": async (p) => {
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+        return this.attachAgentsToStatus(await remote().setLanDirect(enabled));
+      },
+      "remote.lanEndpoints": () => remote().lanEndpoints(),
       "remote.startPairing": () => remote().startPairing(),
       "remote.cancelPairing": () => remote().cancelPairing(),
       "remote.removeDevice": async (p) =>

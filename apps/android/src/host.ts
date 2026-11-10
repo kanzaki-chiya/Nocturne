@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type { FrameTransport } from "@nocturne/remote";
 
 /**
  * App 专属的宿主能力，与网页的 `WebHost` 并列（apps/desktop/src/web/host.ts）。
@@ -50,6 +51,8 @@ export interface AppHost {
   consumeNotificationTarget(): Promise<{ hostId: string; sessionId: string } | null>;
   moveTaskToBack(): Promise<void>;
   activityForeground(): Promise<boolean>;
+  /** 经 Rust 侧向局域网私有网段地址发起二进制 WebSocket 连接（ADR-0087） */
+  connectLanSocket?(url: string): Promise<FrameTransport>;
 }
 
 /**
@@ -138,4 +141,87 @@ export const tauriHost: AppHost = {
   },
   activityForeground: async () =>
     (await call<{ foreground: boolean }>("activity_state")).foreground,
+  connectLanSocket: async (url: string): Promise<FrameTransport> => {
+    let frameHandler: ((frame: Uint8Array) => void) | undefined;
+    let closeHandler: (() => void) | undefined;
+    let closed = false;
+    const buffered: Uint8Array[] = [];
+
+    const notifyClose = () => {
+      if (closed) return;
+      closed = true;
+      closeHandler?.();
+    };
+
+    const onEvent = new Channel<string | null>((payload) => {
+      if (closed) return;
+      if (payload === null) {
+        notifyClose();
+        return;
+      }
+      const bytes = decodeBase64(payload);
+      if (frameHandler) frameHandler(bytes);
+      else buffered.push(bytes);
+    });
+
+    const id = await invoke<number>("plugin:lan-ws|connect", { url, onEvent });
+    let sendChain = Promise.resolve();
+    let closingSent = false;
+
+    return {
+      send(frame) {
+        if (closed || closingSent) return;
+        const encoded = encodeBase64(frame);
+        sendChain = sendChain
+          .then(async () => {
+            if (closed) return;
+            await invoke("plugin:lan-ws|send", { id, data: encoded });
+          })
+          .catch(() => {
+            notifyClose();
+          });
+      },
+      onFrame(handler) {
+        frameHandler = handler;
+        while (buffered.length > 0) {
+          const next = buffered.shift();
+          if (next) handler(next);
+        }
+      },
+      onClose(handler) {
+        closeHandler = handler;
+        if (closed) queueMicrotask(handler);
+      },
+      close() {
+        if (closingSent) return;
+        closingSent = true;
+        void sendChain
+          .catch(() => undefined)
+          .then(() => invoke("plugin:lan-ws|close", { id }))
+          .catch(() => undefined)
+          .finally(() => {
+            notifyClose();
+          });
+      },
+    };
+  },
 };
+
+function encodeBase64(bytes: Uint8Array): string {
+  const chunkSize = 8192;
+  let binary = "";
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    const slice = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength));
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+function decodeBase64(encoded: string): Uint8Array {
+  const binary = atob(encoded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
+}

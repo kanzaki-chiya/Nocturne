@@ -165,3 +165,11 @@ acceptChannel(transport: FrameTransport, options: AcceptChannelOptions): Promise
 | closed | 握手底层关闭或 counter 已达上限 |
 
 固定离线测试向量在 `packages/remote/test/vectors.json`；测试用 Node crypto 独立交叉校验转录、ECDH、HKDF、HMAC 和完整数据帧，运行实现只使用标准 Web API。
+
+## 8. 局域网直连传输约定
+
+安卓 App 与电脑端在同一局域网直连时（[ADR-0087](../decisions/ADR-0087-lan-direct.md)），底层使用 RFC 6455 WebSocket 承载 `FrameTransport`，第 3、4、5、7 节的帧格式、握手转录、加密算法与错误码均保持不变，无中继路由头：
+
+- **帧与 WebSocket 消息映射**：每一帧 `FrameTransport` 报文（以 1 字节 `type` 开头，见第 3 节）对应一条完整的 WebSocket **二进制消息**（opcode `0x2`，允许标准 RFC 6455 分片并在交付 `FrameTransport` 前重组）；不接受文本消息（opcode `0x1`）。客户端发往电脑端的帧按 RFC 6455 必须带掩码，电脑端发往客户端的帧不带掩码。
+- **未认证阶段的限制**：电脑端监听 `0.0.0.0`，只接受来源地址属于私有或本地网段（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、`fc00::/7`、`fe80::/10` 及回环地址）的连接；非 WebSocket Upgrade 请求直接断开。同时处于未完成握手阶段的连接数上限为 16，超出直接拒绝；升级与握手超时沿用 10 秒。单帧或分片重组长度超过 `MAX_FRAME`（1 MiB）立即关闭连接。在电脑端发出 `hs.resp` 前只接受一帧 `hs.init`（不超过 4096 字节），在 `hs.fin` 验签通过前不接受任何 `data` 数据帧；手机端同样在完成 `connectChannel`（含校验电脑 `hostPublicKey` 签名）前不得发送任何 `data` 帧。错误响应仅使用第 7 节既有错误帧，不额外区分设备未知与签名错误之外的状态。
+

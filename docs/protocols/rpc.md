@@ -477,8 +477,9 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `schedule.save`、`schedule.delete` | 拒绝：改的是持久配置，启停与编辑也走 `save`，手机页面里这些控件禁用并提示「请在电脑上操作」 |
 | `runtime.archiveSession`、`runtime.unarchiveSession` | 拒绝且不调用 Core（ADR-0080）；手机与安卓没有归档或恢复入口 |
 | `session.readFile` | 允许（ADR-0084）：限本连接已打开会话的工作区与 fileIndex 可见普通文件；真实路径校验、拒绝链接与越界，二进制不返回内容，超限 `file_too_large` 带原始字节数，见第 3.2 节 |
+| `remote.lanEndpoints` | 允许（ADR-0087）：只读返回本机局域网直连监听地址列表 `{endpoints}`（未开启时为空数组），仅经已建立的端到端加密通道下发 |
 | `runtime.readFile`、`runtime.searchSessions` | 拒绝：任意绝对路径 `readFile` 仅本机（ADR-0060），手机文件入口使用上面的受限会话方法；`searchSessions` 仅桌面端跨会话搜索（ADR-0077） |
-| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、`remote.*`、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入与 `describeSettings`、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
@@ -489,7 +490,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
   - **本机管理方法（`agent.*`）**：`agent.describe`（别名 `agent.list`，含 `pipe` 管道状态）、`agent.respondPairing`、`agent.setScope`（别名 `agent.update`）、`agent.revoke` 仅开放给本机连接（`origin === "local"`），通知 `agent.pairingRequested` 与 `agent.statusChanged` 仅发给本机连接。本机管道是附加能力，初始化时若因管道已被另一后台占用（`address_in_use`）、Windows SID 不可用（`sid_unavailable`）、ACL 收紧失败（`acl_failed`）或其他原因（`other`）未能启动，服务端关闭半成品句柄并记 stderr 日志，`initialize` 照常成功，失败状态与原因经 `agent.describe` 的 `pipe` 及 `remote.describe` 的 `agentPipe` 返回。
 
 - **报文上限**：加密通道单条消息超过 `MAX_MESSAGE`（16 MiB）会整条关闭。远程连接的成功结果编码后超过 `REMOTE_MESSAGE_LIMIT`（`MAX_MESSAGE` 减 64 KiB 余量）时改报 `-32004 / response_too_large`；`readAttachment` 先按原始字节预检（base64 后不超上限，`remoteAttachmentLimit`），超限报 `attachment_too_large`，文案「附件过大，请在电脑上查看」。请求方向由手机网页发送前估算，服务端不再放宽。
-- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.sessionSearchProgress` 只发发起搜索的连接（`runtime.searchSessions` 仍不在 `REMOTE_METHODS`，远程收不到搜索内容），`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
+- 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.lanEndpointsChanged` 只发给已握手的远程连接（经加密通道传递直连地址变更），其余 `remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.sessionSearchProgress` 只发发起搜索的连接（`runtime.searchSessions` 仍不在 `REMOTE_METHODS`，远程收不到搜索内容），`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
@@ -517,7 +518,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 
 `createRpcServer` 可注入 `remote: { home, credentials, connect? }`；不注入时全部远程管理方法报 `-32004 / remote_unavailable`，没有网络行为。CLI 使用同一 RuntimeConfig 的用户 home 与凭据存储。本机握手成功、有登记且 enabled 才连接中继；本机断开或 shutdown 先关中继、再关全部手机连接。网络请求复用进程入口的代理 dispatcher。
 
-登记文件是用户级 `remote.json`：`{version:1,origin,hostId,enabled,devices:[{id,name,pub,createdAt,lastSeenAt?}]}`，pub 是配对得到的 raw 公钥 b64u，唯一设备鉴权来源。中继列表不能新增/覆盖可信公钥；只同步名称、时间、在线和推送状态，删除已不存在设备；未知设备只显示、不允许握手。
+登记文件是用户级 `remote.json`：`{version:1,origin,hostId,enabled,lanDirect?,lanPort?,devices:[{id,name,pub,createdAt,lastSeenAt?}]}`，pub 是配对得到的 raw 公钥 b64u，唯一设备鉴权来源；`lanDirect` 为局域网直连监听开关（默认关闭），`lanPort` 为首次开启后记录的监听端口（占用时重新分配并更新，见 [ADR-0087](../decisions/ADR-0087-lan-direct.md)）。中继列表不能新增/覆盖可信公钥；只同步名称、时间、在线和推送状态，删除已不存在设备；未知设备只显示、不允许握手。
 设备轮询逐字段比较登记内容，无变化不写盘；损坏文件按未登记处理并保留，重新登记写入前改名为 `remote.json.corrupt-<时间戳>-<随机后缀>`，警告显示备份文件名。
 
 手机登记和外部 agent（ADR-0074）共用此文件，格式不变；未登记中继时允许仅含 `{version:1,devices:[agent记录]}`。同一进程按规范化 home 路径串行执行完整读改写（包括保存两类登记、退出登记和损坏文件备份），各次保存先快照调用方数据，再在队列内读取并保留另一类设备；不同 home 独立，失败不阻塞后续操作。这不是跨进程锁。写入使用同目录唯一临时文件后 rename 替换，结束时清理临时文件；Windows 的 EPERM/EACCES/EBUSY 最多尝试 6 次，等待按 50ms 递增，总重试时间预算 1 秒（不含操作系统 I/O 本身耗时），最终仍失败才抛错，其他错误直接抛出。
@@ -529,15 +530,17 @@ agent 连接登记和 initialize 更新名称、lastSeenAt 时，后台持久化
 | `remote.describe` | `{}` → `RemoteStatus`；仅缓存，不联网 |
 | `remote.register` | `{invite}` → `RemoteStatus`；先登记中继，再存凭据与原子写文件，重复登记报 `remote_already_registered` |
 | `remote.unregister` | `{}` → `RemoteStatus`；在线等待 unregistered，离线也可清理本地但附管理员吊销警告 |
-| `remote.setEnabled` | `{enabled}` → `RemoteStatus`；关闭即断开中继及全部设备连接 |
+| `remote.setEnabled` | `{enabled}` → `RemoteStatus`；关闭即断开中继、停止局域网直连监听及断开全部设备连接 |
+| `remote.setLanDirect` | `{enabled}` → `RemoteStatus`；仅本机可调，开启时在 `0.0.0.0` 监听局域网 WebSocket 端口并写回 `lanPort`，关闭时停止监听并断开全部直连 |
+| `remote.lanEndpoints` | `{}` → `{endpoints:string[]}`；返回本机私有网段 IPv4 直连地址（如 `ws://192.168.1.5:41234`），未开启时为空数组 |
 | `remote.startPairing` | `{}` → `{url,expiresAt}`；需要在线，新配对作废旧配对 |
 | `remote.cancelPairing` | `{}` → `null` |
-| `remote.removeDevice` | `{id}` → `RemoteStatus`；需要在线，删除中继记录及对应连接 |
-| `remote.disconnectDevice` | `{id}` → `null`；只断开当前连接，允许重连 |
+| `remote.removeDevice` | `{id}` → `RemoteStatus`；需要在线，删除中继记录并同时断开中继与局域网直连连接 |
+| `remote.disconnectDevice` | `{id}` → `null`；同时断开该设备当前的中继与局域网直连连接，允许重连 |
 | `remote.push` | `{}` → `{sent}`；离线返回零 |
 
-`RemoteStatus`：`{registered,relay?:{origin,hostId},enabled,connection,devices,connections,pairing?:{expiresAt},warnings:string[]}`。connection 为 off/connecting/online/offline/revoked/replaced；devices 为 `{id,name,createdAt,lastSeenAt?,online,push}[]`，connections 为 `{deviceId,name,since}[]`。不含私钥、公钥或配对秘密。
+`RemoteStatus`：`{registered,relay?:{origin,hostId},enabled,lanDirect?,connection,devices,connections,pairing?:{expiresAt},warnings:string[]}`。connection 为 off/connecting/online/offline/revoked/replaced；devices 为 `{id,name,createdAt,lastSeenAt?,online,push}[]`，connections 为 `{deviceId,name,since}[]`。不含私钥、公钥或配对秘密。
 
-只给本机已握手连接发送 `remote.statusChanged {status}`、`remote.paired {device:{id,name}}`、`remote.pairingFailed {code}`。客户端用类型化 `call` 调用方法，`onNotification(method,handler)` 监听通知（返回退订函数）。配对帧等待 60 秒；错误沿用 RemoteChannelError 或 limit/revoked/timeout。
+只给本机已握手连接发送 `remote.statusChanged {status}`、`remote.paired {device:{id,name}}`、`remote.pairingFailed {code}`；只给远程已握手加密连接发送 `remote.lanEndpointsChanged {endpoints}`。客户端用类型化 `call` 调用方法，`onNotification(method,handler)` 监听通知（返回退订函数）。配对帧等待 60 秒；错误沿用 RemoteChannelError 或 limit/revoked/timeout。
 
 断线以 1 秒起、翻倍、60 秒上限、±20% 抖动重连，成功后清零；4003/4004 记 revoked，4001 记 replaced，停止重连。诊断只记录连接状态，不含邀请、秘密或帧。状态错误属于 -32004，包括 remote_unavailable/remote_already_registered/remote_not_registered/remote_offline/remote_storage_failed/credential_missing/credential_backend_unavailable；中继 403/409/429 保留 invalid_invite/already_registered/rate_limited。

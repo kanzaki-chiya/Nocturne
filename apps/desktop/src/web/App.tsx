@@ -8,7 +8,11 @@ import { projectKey } from "../session-tree";
 import { UsagePage } from "../UsagePage";
 import { SchedulePage } from "../SchedulePage";
 import { GrantsPage } from "../GrantsPage";
-import { PhoneConnection } from "./connection";
+import {
+  PhoneConnection,
+  type PhoneConnectionLike,
+  type PhoneConnectionOptions,
+} from "./connection";
 import { pairPhone, pairingError, parsePairingLink, parsePairingTarget } from "./pairing";
 import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
 import type { PairedHost, PhoneStorage } from "./storage";
@@ -154,7 +158,7 @@ export function PhoneApp({
   const [push] = useState(() =>
     typeof injectedPush === "function" ? injectedPush(changed) : injectedPush,
   );
-  const [connection, setConnection] = useState<PhoneConnection>();
+  const [connection, setConnection] = useState<PhoneConnectionLike>();
   const [hosts, setHosts] = useState<PairedHost[]>([]);
   const [page, setPage] = useState<Page>({ kind: "welcome" });
   const [offer, setOffer] = useState<ParsedOffer>();
@@ -318,7 +322,7 @@ export function PhoneApp({
     const target = hosts.find((h) => h.hostId === hostId);
     if (!target) return;
     let active = true;
-    let channel: PhoneConnection | undefined;
+    let channel: PhoneConnectionLike | undefined;
     sessions.clear();
     void storage
       .identity()
@@ -329,7 +333,7 @@ export function PhoneApp({
           setError("这台电脑的配对记录缺少中继地址，请移除后重新配对");
           return;
         }
-        channel = new PhoneConnection({
+        const connectionOptions: PhoneConnectionOptions = {
           origin,
           identity,
           host: target,
@@ -341,7 +345,7 @@ export function PhoneApp({
           connected: async (client, relay) => {
             await sessions.connected(client);
             await storage.putHost({ ...target, lastConnectedAt: Date.now() });
-            await push?.attach(target.hostId, relay).catch(() => undefined);
+            if (relay) await push?.attach(target.hostId, relay).catch(() => undefined);
           },
           disconnected: (reason) => {
             recordDisconnect(target.name, reason);
@@ -349,7 +353,10 @@ export function PhoneApp({
             sessions.disconnected();
             push?.detach(target.hostId);
           },
-        });
+        };
+        channel = platform.createConnection
+          ? platform.createConnection(connectionOptions)
+          : new PhoneConnection(connectionOptions);
         setConnection(channel);
         channel.visibility(shouldConnect());
         channel.start();

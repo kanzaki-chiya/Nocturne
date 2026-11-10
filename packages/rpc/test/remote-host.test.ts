@@ -166,7 +166,7 @@ async function phoneConnection(
   return client;
 }
 
-it("未提供 remote 时全部方法报 remote_unavailable，且 remote.* 不在远程白名单", async () => {
+it("未提供 remote 时全部方法报 remote_unavailable，且除 remote.lanEndpoints 外均不在远程白名单", async () => {
   const h = await harness({ remote: false });
   for (const method of h.server.methods.filter((name) => name.startsWith("remote."))) {
     await expect(
@@ -174,14 +174,18 @@ it("未提供 remote 时全部方法报 remote_unavailable，且 remote.* 不在
         method,
         method === "remote.register"
           ? { invite }
-          : method === "remote.setEnabled"
+          : method === "remote.setEnabled" || method === "remote.setLanDirect"
             ? { enabled: true }
             : method.endsWith("Device")
               ? { id: "id" }
               : {},
       ),
     ).rejects.toMatchObject({ code: "remote_unavailable", rpcCode: -32004 });
-    expect(REMOTE_METHODS as readonly string[]).not.toContain(method);
+    if (method === "remote.lanEndpoints") {
+      expect(REMOTE_METHODS as readonly string[]).toContain(method);
+    } else {
+      expect(REMOTE_METHODS as readonly string[]).not.toContain(method);
+    }
   }
   expect(h.connect).not.toHaveBeenCalled();
 });

@@ -71,6 +71,7 @@ const STILL_LOCAL = [
   "schedule.delete",
   "provider.refreshModelsDev",
   "provider.refreshUpstreamLimits",
+  "remote.setLanDirect",
 ] as const;
 
 describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
@@ -80,8 +81,11 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     );
     for (const name of STILL_LOCAL) expect(denied).toContain(name);
     for (const name of RPC_METHOD_NAMES) {
-      if (/^(provider|login|remote|mcp|agents)\./.test(name)) expect(denied).toContain(name);
+      if (/^(provider|login|remote|mcp|agents)\./.test(name) && name !== "remote.lanEndpoints") {
+        expect(denied).toContain(name);
+      }
     }
+    expect(REMOTE_METHODS as readonly string[]).toContain("remote.lanEndpoints");
     // 会话方法只有写 settings.json 的 setShell 留在本机；session.readFile 与子会话观察已开放
     expect(denied.filter((name) => name.startsWith("session.")).sort()).toEqual([
       "session.setShell",

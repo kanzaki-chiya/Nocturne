@@ -23,7 +23,28 @@ export function versionMessage(version: number): string {
 export function retryDelay(attempt: number, random = Math.random): number {
   return Math.min(30000, 1000 * 2 ** Math.min(attempt, 5)) * (0.8 + random() * 0.4);
 }
-export class PhoneConnection {
+export interface PhoneConnectionOptions {
+  origin: string;
+  identity: Identity;
+  host: PairedHost;
+  changed: () => void;
+  connected: (client: RpcClient, relay?: DeviceRelay) => Promise<void>;
+  /** reason：断线原因（中文），供手机本地的连接诊断记录 */
+  disconnected: (reason: string) => void;
+  connect?: typeof connectDeviceRelay;
+  channel?: typeof connectChannel;
+  initialized?: (version: string) => void;
+  versionMessage?: (protocolVersion: number) => string;
+}
+export interface PhoneConnectionLike {
+  readonly state: ConnectionState;
+  readonly message: string;
+  readonly sessionsDir: string | undefined;
+  start(): void;
+  stop(): void;
+  visibility(visible: boolean): void;
+}
+export class PhoneConnection implements PhoneConnectionLike {
   client: RpcClient | undefined;
   relay: DeviceRelay | undefined;
   state: ConnectionState = "offline";
@@ -36,21 +57,7 @@ export class PhoneConnection {
   private stopped = true;
   private visible = true;
   private connecting = false;
-  constructor(
-    private readonly options: {
-      origin: string;
-      identity: Identity;
-      host: PairedHost;
-      changed: () => void;
-      connected: (client: RpcClient, relay: DeviceRelay) => Promise<void>;
-      /** reason：断线原因（中文），供手机本地的连接诊断记录 */
-      disconnected: (reason: string) => void;
-      connect?: typeof connectDeviceRelay;
-      channel?: typeof connectChannel;
-      initialized?: (version: string) => void;
-      versionMessage?: (protocolVersion: number) => string;
-    },
-  ) {}
+  constructor(private readonly options: PhoneConnectionOptions) {}
   start(): void {
     this.stopped = false;
     void this.connect();

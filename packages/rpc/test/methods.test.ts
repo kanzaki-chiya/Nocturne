@@ -615,6 +615,8 @@ describe("公开 API 与 RPC 方法集合一致", () => {
       "remote.register",
       "remote.unregister",
       "remote.setEnabled",
+      "remote.setLanDirect",
+      "remote.lanEndpoints",
       "remote.startPairing",
       "remote.cancelPairing",
       "remote.removeDevice",

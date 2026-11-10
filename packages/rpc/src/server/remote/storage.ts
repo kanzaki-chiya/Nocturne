@@ -41,6 +41,8 @@ export interface RemoteRegistration {
   origin: string;
   hostId: string;
   enabled: boolean;
+  lanDirect?: boolean | undefined;
+  lanPort?: number | undefined;
   devices: StoredPhoneDevice[];
 }
 
@@ -146,6 +148,9 @@ export async function loadRegistration(
       (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "127.0.0.1")) ||
       !/^[A-Za-z0-9_-]{22}$/.test(r.hostId) ||
       typeof r.enabled !== "boolean" ||
+      (r.lanDirect !== undefined && typeof r.lanDirect !== "boolean") ||
+      (r.lanPort !== undefined &&
+        (!Number.isSafeInteger(r.lanPort) || r.lanPort < 1 || r.lanPort > 65535)) ||
       !Array.isArray(r.devices)
     )
       throw new Error("invalid");

@@ -105,6 +105,13 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
         diagnostics: (state) => {
           io.stderr.write(`[remote] ${state}\n`);
         },
+        lan: {
+          onAccepted: ({ deviceId, remoteAddress, port }) => {
+            io.stderr.write(
+              `[remote] lan_connected device=${deviceId} from=${remoteAddress} port=${port}\n`,
+            );
+          },
+        },
       },
       createRuntime: async ({ interactive }) => {
         const runtime = await createRuntime({
