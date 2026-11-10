@@ -14,7 +14,7 @@ fn main() {
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             )
             .plugin(
-                "lan-ws",
+                "lan-tcp",
                 tauri_build::InlinedPlugin::new()
                     .commands(&["connect", "send", "close"])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),

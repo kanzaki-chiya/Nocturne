@@ -1,14 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
-import { createServer, type IncomingMessage, type Server } from "node:http";
-import { connect as connectTcp, isIPv6, type Socket } from "node:net";
+import { createServer, isIPv6, type Server, type Socket } from "node:net";
 import { networkInterfaces } from "node:os";
-import type { Duplex } from "node:stream";
 import { FRAME_TYPES, MAX_FRAME, type FrameTransport } from "@nocturne/remote";
 
-const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const HANDSHAKE_FRAME_LIMIT = 4096;
 const MAX_SLOW_BUFFER = 8 * 1024 * 1024;
-const MAX_POST_FIN_QUEUE = 4;
+const MAX_POST_FIN_BYTES = 2 * MAX_FRAME;
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 
 export const DEFAULT_MAX_HANDSHAKING = 16;
 
@@ -124,62 +121,34 @@ export function formatLanEndpoints(addresses: readonly string[], port: number): 
   for (const addr of addresses) {
     if (!isPrivateLanIPv4(addr) || seen.has(addr)) continue;
     seen.add(addr);
-    endpoints.push(`ws://${addr}:${port}`);
+    endpoints.push(`tcp://${addr}:${port}`);
   }
   return endpoints;
 }
 
-function encodeWsFrame(opcode: number, payload: Uint8Array, mask: boolean): Buffer {
-  const len = payload.byteLength;
-  const maskBit = mask ? 0x80 : 0;
-  let headerLen = 2;
-  if (len >= 126 && len <= 0xffff) headerLen += 2;
-  else if (len > 0xffff) headerLen += 8;
-  const maskKey = mask ? randomBytes(4) : undefined;
-  const out = Buffer.allocUnsafe(headerLen + (maskKey ? 4 : 0) + len);
-  out[0] = 0x80 | (opcode & 0x0f);
-  let offset = 2;
-  if (len < 126) {
-    out[1] = maskBit | len;
-  } else if (len <= 0xffff) {
-    out[1] = maskBit | 126;
-    out.writeUInt16BE(len, 2);
-    offset = 4;
-  } else {
-    out[1] = maskBit | 127;
-    out.writeBigUInt64BE(BigInt(len), 2);
-    offset = 10;
+/** 编码带 4 字节大端无符号长度前缀的传输报文（1..MAX_FRAME） */
+export function encodeLengthPrefixedFrame(frame: Uint8Array): Buffer {
+  const len = frame.byteLength;
+  if (len === 0 || len > MAX_FRAME) {
+    throw new Error(`局域网直连帧长度越界：${len}`);
   }
-  if (maskKey) {
-    maskKey.copy(out, offset);
-    offset += 4;
-    for (let i = 0; i < len; i++) {
-      out[offset + i] = (payload[i] ?? 0) ^ (maskKey[i & 3] ?? 0);
-    }
-  } else {
-    Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength).copy(out, offset);
-  }
+  const out = Buffer.allocUnsafe(4 + len);
+  out.writeUInt32BE(len, 0);
+  out.set(frame, 4);
   return out;
 }
 
-interface WsSessionCallbacks {
-  expectMasked: boolean;
-  maxPayload: number;
-  onBinaryMessage: (frame: Uint8Array) => void;
-  onClose: () => void;
-}
-
-class WsSocketDriver {
+class LengthPrefixedDriver {
   private buffer = Buffer.alloc(0) as Buffer;
-  private fragments: Buffer[] = [];
-  private fragmentBytes = 0;
   private closed = false;
   private closeNotified = false;
 
   constructor(
-    private readonly socket: Duplex,
-    private readonly callbacks: WsSessionCallbacks,
-    initialBuffer?: Buffer,
+    private readonly socket: Socket,
+    private readonly callbacks: {
+      onFrame: (frame: Uint8Array) => void;
+      onClose: () => void;
+    },
   ) {
     socket.on("data", (chunk: Buffer) => {
       this.feed(chunk);
@@ -187,26 +156,20 @@ class WsSocketDriver {
     socket.on("error", () => {
       this.destroy();
     });
+    socket.on("end", () => {
+      this.close();
+    });
     socket.on("close", () => {
       this.closed = true;
-      this.fragments = [];
       this.buffer = Buffer.alloc(0);
       this.notifyClose();
     });
-    socket.on("end", () => {
-      this.destroy();
-    });
-    if (initialBuffer && initialBuffer.byteLength > 0) {
-      queueMicrotask(() => {
-        if (!this.closed) this.feed(initialBuffer);
-      });
-    }
   }
 
-  sendBinary(frame: Uint8Array): void {
+  send(frame: Uint8Array): void {
     if (this.closed) return;
-    if (frame.byteLength > this.callbacks.maxPayload) {
-      this.closeWithCode(1009);
+    if (frame.byteLength === 0 || frame.byteLength > MAX_FRAME) {
+      this.destroy();
       return;
     }
     if (this.socket.writableLength > MAX_SLOW_BUFFER) {
@@ -214,43 +177,17 @@ class WsSocketDriver {
       return;
     }
     try {
-      this.socket.write(encodeWsFrame(0x2, frame, this.callbacks.expectMasked ? false : true));
+      this.socket.write(encodeLengthPrefixedFrame(frame));
     } catch {
       this.destroy();
     }
   }
 
-  close(code = 1000): void {
-    this.closeWithCode(code);
-  }
-
-  destroy(): void {
-    if (!this.closed) {
-      this.closed = true;
-      this.fragments = [];
-      this.buffer = Buffer.alloc(0);
-      try {
-        this.socket.destroy();
-      } catch {
-        /* 套接字已销毁 */
-      }
-    }
-    this.notifyClose();
-  }
-
-  private closeWithCode(code: number): void {
-    if (this.closed) {
-      this.notifyClose();
-      return;
-    }
+  close(): void {
+    if (this.closed) return;
     this.closed = true;
-    this.fragments = [];
-    this.buffer = Buffer.alloc(0);
-    const body = Buffer.allocUnsafe(2);
-    body.writeUInt16BE(code, 0);
     try {
-      const masked = !this.callbacks.expectMasked;
-      this.socket.end(encodeWsFrame(0x8, body, masked));
+      this.socket.end();
       setTimeout(() => {
         try {
           this.socket.destroy();
@@ -259,11 +196,18 @@ class WsSocketDriver {
         }
       }, 250).unref();
     } catch {
-      try {
-        this.socket.destroy();
-      } catch {
-        /* 已销毁 */
-      }
+      this.destroy();
+    }
+    this.notifyClose();
+  }
+
+  destroy(): void {
+    this.closed = true;
+    this.buffer = Buffer.alloc(0);
+    try {
+      this.socket.destroy();
+    } catch {
+      /* 已销毁 */
     }
     this.notifyClose();
   }
@@ -279,116 +223,20 @@ class WsSocketDriver {
   }
 
   private feed(chunk: Buffer): void {
-    if (this.isClosed()) return;
+    if (this.isClosed() || chunk.length === 0) return;
     this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
-    while (!this.isClosed() && this.buffer.length >= 2) {
-      const b0 = this.buffer[0] ?? 0;
-      const b1 = this.buffer[1] ?? 0;
-      const fin = (b0 & 0x80) !== 0;
-      const rsv = b0 & 0x70;
-      const opcode = b0 & 0x0f;
-      const masked = (b1 & 0x80) !== 0;
-      if (rsv !== 0 || masked !== this.callbacks.expectMasked) {
+    while (!this.isClosed() && this.buffer.length >= 4) {
+      const frameLen = this.buffer.readUInt32BE(0);
+      // 读到 4 字节长度头立即判定，长度为 0 或超过 MAX_FRAME 当场断开，不等负载、不分配超限内存
+      if (frameLen === 0 || frameLen > MAX_FRAME) {
         this.destroy();
         return;
       }
-      let payloadLen = b1 & 0x7f;
-      let offset = 2;
-      if (payloadLen === 126) {
-        if (this.buffer.length < 4) return;
-        payloadLen = this.buffer.readUInt16BE(2);
-        offset = 4;
-      } else if (payloadLen === 127) {
-        if (this.buffer.length < 10) return;
-        const big = this.buffer.readBigUInt64BE(2);
-        if (big > BigInt(this.callbacks.maxPayload)) {
-          this.closeWithCode(1009);
-          this.destroy();
-          return;
-        }
-        payloadLen = Number(big);
-        offset = 10;
-      }
-
-      const isControl = (opcode & 0x08) !== 0;
-      if (isControl) {
-        if (!fin || payloadLen > 125) {
-          this.destroy();
-          return;
-        }
-      } else if (
-        payloadLen > this.callbacks.maxPayload ||
-        this.fragmentBytes + payloadLen > this.callbacks.maxPayload
-      ) {
-        this.closeWithCode(1009);
-        this.destroy();
-        return;
-      }
-
-      const maskLen = masked ? 4 : 0;
-      const totalFrameLen = offset + maskLen + payloadLen;
-      if (this.buffer.length < totalFrameLen) return;
-
-      const payload = Buffer.from(
-        this.buffer.subarray(offset + maskLen, offset + maskLen + payloadLen),
-      );
-      if (masked) {
-        const m0 = this.buffer[offset] ?? 0;
-        const m1 = this.buffer[offset + 1] ?? 0;
-        const m2 = this.buffer[offset + 2] ?? 0;
-        const m3 = this.buffer[offset + 3] ?? 0;
-        const maskBytes = [m0, m1, m2, m3];
-        for (let i = 0; i < payload.length; i++) {
-          payload[i] = (payload[i] ?? 0) ^ (maskBytes[i & 3] ?? 0);
-        }
-      }
-      this.buffer = this.buffer.subarray(totalFrameLen);
-
-      if (opcode === 0x8) {
-        this.closeWithCode(1000);
-        return;
-      }
-      if (opcode === 0x9) {
-        if (!this.isClosed()) {
-          try {
-            this.socket.write(encodeWsFrame(0xa, payload, !this.callbacks.expectMasked));
-          } catch {
-            this.destroy();
-          }
-        }
-        continue;
-      }
-      if (opcode === 0xa) continue;
-
-      if (opcode === 0x2) {
-        if (this.fragments.length > 0) {
-          this.destroy();
-          return;
-        }
-        if (fin) {
-          this.callbacks.onBinaryMessage(new Uint8Array(payload));
-        } else {
-          this.fragments.push(payload);
-          this.fragmentBytes = payload.length;
-        }
-      } else if (opcode === 0x0) {
-        if (this.fragments.length === 0) {
-          this.destroy();
-          return;
-        }
-        this.fragments.push(payload);
-        this.fragmentBytes += payload.length;
-        if (fin) {
-          const joined = Buffer.concat(this.fragments, this.fragmentBytes);
-          this.fragments = [];
-          this.fragmentBytes = 0;
-          this.callbacks.onBinaryMessage(new Uint8Array(joined));
-        }
-      } else {
-        // 拒绝文本帧（0x1）与未知 opcode
-        this.destroy();
-        return;
-      }
+      const totalLen = 4 + frameLen;
+      if (this.buffer.length < totalLen) return;
+      const frame = new Uint8Array(this.buffer.subarray(4, totalLen));
+      this.buffer = this.buffer.subarray(totalLen);
+      this.callbacks.onFrame(frame);
     }
   }
 }
@@ -406,8 +254,8 @@ export interface ListenLanDirectOptions {
   host?: string | undefined;
   preferredPort?: number | undefined;
   maxHandshaking?: number | undefined;
-  resolveRemoteAddress?:
-    ((socket: Socket, req?: IncomingMessage) => string | undefined) | undefined;
+  handshakeTimeoutMs?: number | undefined;
+  resolveRemoteAddress?: ((socket: Socket) => string | undefined) | undefined;
   onConnection: (connection: LanInboundConnection) => void;
 }
 
@@ -417,7 +265,7 @@ export interface LanDirectListener {
   close(): Promise<void>;
 }
 
-function bindHttpServer(server: Server, host: string, port: number): Promise<number> {
+function bindTcpServer(server: Server, host: string, port: number): Promise<number> {
   return new Promise((resolve, reject) => {
     const onError = (error: Error) => {
       server.off("listening", onListening);
@@ -441,86 +289,31 @@ function bindHttpServer(server: Server, host: string, port: number): Promise<num
 export async function listenLanDirect(options: ListenLanDirectOptions): Promise<LanDirectListener> {
   const host = options.host ?? "0.0.0.0";
   const maxHandshaking = options.maxHandshaking ?? DEFAULT_MAX_HANDSHAKING;
+  const handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
   const resolveAddress = options.resolveRemoteAddress ?? ((socket: Socket) => socket.remoteAddress);
 
-  const sockets = new Set<Duplex>();
-  const handshaking = new Set<Duplex>();
+  const sockets = new Set<Socket>();
+  const handshaking = new Set<Socket>();
   let closing = false;
 
-  const createHttp = () => {
-    const httpServer = createServer((_req, res) => {
-      res.socket?.destroy();
-    });
-    httpServer.headersTimeout = 10_000;
-    httpServer.requestTimeout = 10_000;
-
-    httpServer.on("connection", (socket: Socket) => {
-      if (closing || !isPrivateRemoteAddress(resolveAddress(socket))) {
-        socket.destroy();
-        return;
-      }
-      socket.setNoDelay(true);
-      const upgradeTimer = setTimeout(() => {
-        socket.destroy();
-      }, 10_000);
-      upgradeTimer.unref();
-      (socket as Socket & { __lanUpgradeTimer?: ReturnType<typeof setTimeout> }).__lanUpgradeTimer =
-        upgradeTimer;
-      sockets.add(socket);
-      socket.once("close", () => {
-        clearTimeout(upgradeTimer);
-        sockets.delete(socket);
-        handshaking.delete(socket);
-      });
-    });
-
-    httpServer.on("upgrade", (req, socket, head) => {
-      const netSocket = socket as Socket & { __lanUpgradeTimer?: ReturnType<typeof setTimeout> };
-      clearTimeout(netSocket.__lanUpgradeTimer);
-      const remoteAddress = resolveAddress(netSocket, req) ?? "";
+  const createTcp = () => {
+    const tcpServer = createServer((socket: Socket) => {
+      const remoteAddress = resolveAddress(socket) ?? "";
+      // 从 TCP 接入起计入未完成加密握手并发上限，非私有网段或超出上限直接销毁
       if (closing || !isPrivateRemoteAddress(remoteAddress) || handshaking.size >= maxHandshaking) {
         socket.destroy();
         return;
       }
 
-      const upgrade = req.headers.upgrade;
-      const version = req.headers["sec-websocket-version"];
-      const key = req.headers["sec-websocket-key"];
-      if (
-        req.method !== "GET" ||
-        typeof upgrade !== "string" ||
-        upgrade.toLowerCase() !== "websocket" ||
-        version !== "13" ||
-        typeof key !== "string"
-      ) {
-        socket.destroy();
-        return;
-      }
-      const decodedKey = Buffer.from(key.trim(), "base64");
-      if (decodedKey.byteLength !== 16 || decodedKey.toString("base64") !== key.trim()) {
-        socket.destroy();
-        return;
-      }
-
+      socket.setNoDelay(true);
       sockets.add(socket);
       handshaking.add(socket);
-      socket.once("close", () => {
-        sockets.delete(socket);
-        handshaking.delete(socket);
-      });
 
-      const accept = createHash("sha1")
-        .update(key.trim() + WS_GUID)
-        .digest("base64");
-      try {
-        socket.write(
-          `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
-        );
-      } catch {
+      const authTimer = setTimeout(() => {
         handshaking.delete(socket);
         socket.destroy();
-        return;
-      }
+      }, handshakeTimeoutMs);
+      authTimer.unref();
 
       let phase: "await_init" | "await_resp" | "await_fin" | "verifying_fin" | "ready" =
         "await_init";
@@ -529,80 +322,90 @@ export async function listenLanDirect(options: ListenLanDirectOptions): Promise<
       let closeFired = false;
       const bufferedForHandler: Uint8Array[] = [];
       const postFinQueue: Uint8Array[] = [];
+      let postFinBytes = 0;
 
       const deliver = (frame: Uint8Array) => {
         if (frameHandler) frameHandler(frame);
         else bufferedForHandler.push(frame);
       };
 
-      const driver = new WsSocketDriver(
-        socket,
-        {
-          expectMasked: true,
-          maxPayload: MAX_FRAME,
-          onBinaryMessage: (frame) => {
-            if (frame.byteLength === 0 || frame.byteLength > MAX_FRAME) {
+      const cleanupHandshakeState = () => {
+        clearTimeout(authTimer);
+        handshaking.delete(socket);
+      };
+
+      socket.once("close", () => {
+        cleanupHandshakeState();
+        sockets.delete(socket);
+      });
+
+      const driver = new LengthPrefixedDriver(socket, {
+        onFrame: (frame) => {
+          if (frame.byteLength === 0 || frame.byteLength > MAX_FRAME) {
+            driver.destroy();
+            return;
+          }
+          if (phase === "ready") {
+            deliver(frame);
+            return;
+          }
+          if (phase === "await_init") {
+            // 握手完成前首帧只能是 hs.init，发数据帧或其它帧立即关闭
+            if (frame.byteLength > HANDSHAKE_FRAME_LIMIT || frame[0] !== FRAME_TYPES.init) {
               driver.destroy();
               return;
             }
-            if (phase === "ready") {
-              deliver(frame);
-              return;
-            }
-            if (phase === "await_init") {
-              // 握手完成前首帧只能是 hs.init，发数据帧或其它帧立即关闭
-              if (frame.byteLength > HANDSHAKE_FRAME_LIMIT || frame[0] !== FRAME_TYPES.init) {
-                driver.destroy();
-                return;
-              }
-              phase = "await_resp";
-              deliver(frame);
-              return;
-            }
-            if (phase === "await_resp") {
-              // 服务端尚未回 hs.resp 前不接受任何后续帧
+            phase = "await_resp";
+            deliver(frame);
+            return;
+          }
+          if (phase === "await_resp") {
+            // 服务端尚未回 hs.resp 前不接受任何后续帧
+            driver.destroy();
+            return;
+          }
+          if (phase === "await_fin") {
+            const type = frame[0];
+            if (
+              frame.byteLength > HANDSHAKE_FRAME_LIMIT ||
+              (type !== FRAME_TYPES.finish && type !== FRAME_TYPES.error)
+            ) {
               driver.destroy();
               return;
             }
-            if (phase === "await_fin") {
-              const type = frame[0];
-              if (
-                frame.byteLength > HANDSHAKE_FRAME_LIMIT ||
-                (type !== FRAME_TYPES.finish && type !== FRAME_TYPES.error)
-              ) {
-                driver.destroy();
-                return;
-              }
-              phase = "verifying_fin";
-              deliver(frame);
-              return;
-            }
-            // verifying_fin：客户端在发出 hs.fin 后可能同包背靠背发出首条加密数据帧，
-            // 仅在验签落定前有限缓冲，绝不在验签完成前交给上层处理
-            if (postFinQueue.length >= MAX_POST_FIN_QUEUE || frame[0] !== FRAME_TYPES.data) {
-              driver.destroy();
-              return;
-            }
-            postFinQueue.push(frame);
-          },
-          onClose: () => {
-            handshaking.delete(socket);
-            postFinQueue.length = 0;
-            if (!closeFired) {
-              closeFired = true;
-              closeHandler?.();
-            }
-          },
+            phase = "verifying_fin";
+            deliver(frame);
+            return;
+          }
+          // verifying_fin：客户端发出 hs.fin 后可能紧跟多条加密数据帧，
+          // 按字节总量限制（不超过 2 * MAX_FRAME），只收 data 帧，验签通过前不交给上层
+          if (
+            frame[0] !== FRAME_TYPES.data ||
+            postFinBytes + frame.byteLength > MAX_POST_FIN_BYTES
+          ) {
+            driver.destroy();
+            return;
+          }
+          postFinBytes += frame.byteLength;
+          postFinQueue.push(frame);
         },
-        head.byteLength > 0 ? Buffer.from(head) : undefined,
-      );
+        onClose: () => {
+          cleanupHandshakeState();
+          postFinQueue.length = 0;
+          postFinBytes = 0;
+          if (!closeFired) {
+            closeFired = true;
+            closeHandler?.();
+          }
+        },
+      });
 
       const transport: FrameTransport = {
         send(frame) {
           if (phase === "await_resp" && frame[0] === FRAME_TYPES.response) {
             phase = "await_fin";
           }
-          driver.sendBinary(frame);
+          driver.send(frame);
         },
         onFrame(handler) {
           frameHandler = handler;
@@ -616,7 +419,7 @@ export async function listenLanDirect(options: ListenLanDirectOptions): Promise<
           if (closeFired) queueMicrotask(handler);
         },
         close() {
-          handshaking.delete(socket);
+          cleanupHandshakeState();
           driver.close();
         },
       };
@@ -625,9 +428,10 @@ export async function listenLanDirect(options: ListenLanDirectOptions): Promise<
         transport,
         remoteAddress,
         markAuthenticated() {
-          handshaking.delete(socket);
+          cleanupHandshakeState();
           if (phase !== "ready") {
             phase = "ready";
+            postFinBytes = 0;
             while (postFinQueue.length > 0) {
               const queued = postFinQueue.shift();
               if (queued) deliver(queued);
@@ -635,29 +439,29 @@ export async function listenLanDirect(options: ListenLanDirectOptions): Promise<
           }
         },
         close() {
-          handshaking.delete(socket);
+          cleanupHandshakeState();
           driver.destroy();
         },
       });
     });
 
-    return httpServer;
+    return tcpServer;
   };
 
-  let server = createHttp();
+  let server = createTcp();
   let boundPort: number;
   const preferred = options.preferredPort;
   if (preferred !== undefined && preferred > 0) {
     try {
-      boundPort = await bindHttpServer(server, host, preferred);
+      boundPort = await bindTcpServer(server, host, preferred);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "EADDRINUSE" && code !== "EACCES") throw error;
-      server = createHttp();
-      boundPort = await bindHttpServer(server, host, 0);
+      server = createTcp();
+      boundPort = await bindTcpServer(server, host, 0);
     }
   } else {
-    boundPort = await bindHttpServer(server, host, 0);
+    boundPort = await bindTcpServer(server, host, 0);
   }
 
   return {
@@ -682,142 +486,4 @@ export async function listenLanDirect(options: ListenLanDirectOptions): Promise<
       });
     },
   };
-}
-
-/**
- * 标准 RFC 6455 二进制帧客户端（供 Node 侧测试及直连回环验证使用）。
- */
-export function connectLanWebSocket(
-  endpoint: string,
-  options: { timeoutMs?: number; maxPayload?: number } = {},
-): Promise<FrameTransport> {
-  const url = new URL(endpoint);
-  if (url.protocol !== "ws:") {
-    return Promise.reject(new Error(`仅支持 ws:// 直连地址：${endpoint}`));
-  }
-  const port = url.port ? Number(url.port) : 80;
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  const path = `${url.pathname || "/"}${url.search}`;
-  const timeoutMs = options.timeoutMs ?? 5_000;
-  const maxPayload = options.maxPayload ?? MAX_FRAME;
-
-  return new Promise<FrameTransport>((resolve, reject) => {
-    let settled = false;
-    const key = randomBytes(16).toString("base64");
-    const expectedAccept = createHash("sha1")
-      .update(key + WS_GUID)
-      .digest("base64");
-
-    const socket = connectTcp({ host, port });
-    socket.setNoDelay(true);
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        socket.destroy();
-        reject(new Error("WebSocket 连接超时"));
-      }
-    }, timeoutMs);
-
-    const failConnect = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      reject(err);
-    };
-
-    socket.once("error", failConnect);
-    socket.once("close", () => {
-      failConnect(new Error("WebSocket 升级前连接已关闭"));
-    });
-
-    let headerBuf = Buffer.alloc(0) as Buffer;
-    const onUpgradeData = (chunk: Buffer) => {
-      headerBuf = headerBuf.length === 0 ? chunk : Buffer.concat([headerBuf, chunk]);
-      if (headerBuf.length > 16_384) {
-        failConnect(new Error("WebSocket 响应头过大"));
-        return;
-      }
-      const boundary = headerBuf.indexOf("\r\n\r\n");
-      if (boundary === -1) return;
-      socket.off("data", onUpgradeData);
-      clearTimeout(timer);
-
-      const headerText = headerBuf.subarray(0, boundary).toString("latin1");
-      const rest = headerBuf.subarray(boundary + 4);
-      const lines = headerText.split("\r\n");
-      const statusLine = lines[0] ?? "";
-      if (!/^HTTP\/1\.1 101\b/.test(statusLine)) {
-        failConnect(new Error(`WebSocket 升级被拒绝：${statusLine}`));
-        return;
-      }
-      const headers = new Map<string, string>();
-      for (const line of lines.slice(1)) {
-        const idx = line.indexOf(":");
-        if (idx !== -1) {
-          headers.set(line.slice(0, idx).trim().toLowerCase(), line.slice(idx + 1).trim());
-        }
-      }
-      if (
-        headers.get("upgrade")?.toLowerCase() !== "websocket" ||
-        headers.get("sec-websocket-accept") !== expectedAccept
-      ) {
-        failConnect(new Error("WebSocket 升级校验失败"));
-        return;
-      }
-
-      settled = true;
-      let frameHandler: ((frame: Uint8Array) => void) | undefined;
-      let closeHandler: (() => void) | undefined;
-      let closed = false;
-      const buffered: Uint8Array[] = [];
-
-      const driver = new WsSocketDriver(
-        socket,
-        {
-          expectMasked: false,
-          maxPayload,
-          onBinaryMessage: (frame) => {
-            if (frameHandler) frameHandler(frame);
-            else buffered.push(frame);
-          },
-          onClose: () => {
-            if (!closed) {
-              closed = true;
-              closeHandler?.();
-            }
-          },
-        },
-        rest.byteLength > 0 ? Buffer.from(rest) : undefined,
-      );
-
-      resolve({
-        send(frame) {
-          driver.sendBinary(frame);
-        },
-        onFrame(handler) {
-          frameHandler = handler;
-          while (buffered.length > 0) {
-            const next = buffered.shift();
-            if (next) handler(next);
-          }
-        },
-        onClose(handler) {
-          closeHandler = handler;
-          if (closed) queueMicrotask(handler);
-        },
-        close() {
-          driver.close();
-        },
-      });
-    };
-
-    socket.on("data", onUpgradeData);
-    socket.once("connect", () => {
-      const hostHeader = host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
-      socket.write(
-        `GET ${path} HTTP/1.1\r\nHost: ${hostHeader}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
-      );
-    });
-  });
 }

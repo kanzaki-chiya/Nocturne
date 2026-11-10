@@ -1,19 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
-import { createServer as createTcpServer, connect as connectRawTcp } from "node:net";
+import { createServer as createTcpServer, type Socket } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCredentialStore, createPlatform, createRuntime, FakeProvider } from "@nocturne/core";
-import {
-  connectLanWebSocket,
-  createMemoryTransportPair,
-  createRpcServer,
-  isPrivateLanIPv4,
-  isPrivateRemoteAddress,
-  type ListenLanDirectOptions,
-} from "@nocturne/rpc/server";
-import { createRpcClient } from "@nocturne/rpc/client";
 import {
   connectChannel,
   createMemoryFramePair,
@@ -23,23 +13,30 @@ import {
   generateIdentity,
   MAX_FRAME,
   parsePairingFragment,
+  type FrameTransport,
   type HostRelay,
   type RelayConnection,
   type RelayDevice,
 } from "@nocturne/remote";
+import { createRpcClient } from "../src/client/index.js";
+import {
+  createMemoryTransportPair,
+  createRpcServer,
+  encodeLengthPrefixedFrame,
+  isPrivateLanIPv4,
+  isPrivateRemoteAddress,
+  listenLanDirect,
+} from "../src/server/index.js";
 import { loadRegistration } from "../src/server/remote/storage.js";
-import { until } from "./harness.js";
+import { connectLanTcpClient, openRawLanTcp } from "./helpers/lan-tcp-client.js";
 
-const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const invite = "nocturne-invite:relay.example/AAAAAAAAAAAAAAAAAAAAAAAA";
-const homes: string[] = [];
-const cleanups: (() => Promise<void>)[] = [];
+const INVITE = "nocturne-invite:relay.example/AAAAAAAAAAAAAAAAAAAAAAAA";
+const cleanups: (() => Promise<void> | void)[] = [];
 
 afterEach(async () => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
+  while (cleanups.length > 0) {
+    await cleanups.pop()?.();
+  }
 });
 
 async function createHostHarness(
@@ -51,76 +48,55 @@ async function createHostHarness(
     addressPollMs?: number;
     lanHandshakeTimeoutMs?: number;
     maxHandshaking?: number;
-    maxConnections?: number;
-    resolveRemoteAddress?: ListenLanDirectOptions["resolveRemoteAddress"];
+    resolveRemoteAddress?: (socket: Socket) => string | undefined;
   } = {},
 ) {
-  const home = options.home ?? (await mkdtemp(join(tmpdir(), "remote-lan-")));
-  if (!options.home) homes.push(home);
+  const home = options.home ?? (await mkdtemp(join(tmpdir(), "nocturne-lan-")));
+  if (!options.home) {
+    cleanups.push(() => rm(home, { recursive: true, force: true }));
+  }
   const credentials =
     options.credentials ??
     (await createCredentialStore(createPlatform(), home, { backend: "memory" })).store;
 
-  let connectionHandler: ((c: RelayConnection) => void) | undefined;
-  let devices: RelayDevice[] = [...(options.initialDevices ?? [])];
+  const devices: RelayDevice[] = [...(options.initialDevices ?? [])];
+  let routeHandler: ((conn: RelayConnection) => void) | undefined;
   const acceptedLan: { deviceId: string; remoteAddress: string; port: number }[] = [];
 
   const relay: HostRelay = {
-    onConnection: (fn) => {
-      connectionHandler = fn;
-    },
-    onClose: () => undefined,
-    close: vi.fn(),
-    openPairingSlot: vi.fn(() =>
-      Promise.resolve({ slot: "AAAAAAAAAAAAAAAAAAAAAA", expiresAt: Date.now() + 300_000 }),
-    ),
-    allowDevice: vi.fn((d) => {
-      devices.push({
-        id: d.id,
-        name: d.name,
-        createdAt: Date.now(),
+    openPairingSlot: vi.fn(async () => ({
+      slot: "AAAAAAAAAAAAAAAAAAAAAA",
+      expiresAt: Date.now() + 60_000,
+    })),
+    allowDevice: vi.fn(async ({ id, name }) => {
+      const idx = devices.findIndex((d) => d.id === id);
+      const next: RelayDevice = {
+        id,
+        name,
+        createdAt: 1,
         lastSeenAt: null,
         online: false,
         push: false,
-      });
-      return Promise.resolve();
+      };
+      if (idx === -1) devices.push(next);
+      else devices[idx] = next;
     }),
-    removeDevice: vi.fn((id) => {
-      devices = devices.filter((d) => d.id !== id);
-      return Promise.resolve();
+    removeDevice: vi.fn(async (id) => {
+      const idx = devices.findIndex((d) => d.id === id);
+      if (idx !== -1) devices.splice(idx, 1);
     }),
-    listDevices: vi.fn(() => Promise.resolve(devices)),
-    push: vi.fn(() => Promise.resolve(0)),
-    unregister: vi.fn(() => Promise.resolve()),
+    listDevices: vi.fn(async () => [...devices]),
+    push: vi.fn(async () => 0),
+    unregister: vi.fn(async () => undefined),
+    onConnection: (fn) => {
+      routeHandler = fn;
+    },
+    onClose: () => undefined,
+    close: vi.fn(),
   };
-
-  const connectRelay = vi.fn(() => Promise.resolve(relay));
-  const register = vi.fn(({ identity }: { identity: { id: string } }) =>
-    Promise.resolve({ hostId: identity.id }),
-  );
 
   const server = createRpcServer({
     nocturneVersion: "0.39.1",
-    remote: {
-      home,
-      credentials,
-      connect: { connectHostRelay: connectRelay, registerHost: register },
-      ...(options.maxConnections !== undefined ? { maxConnections: options.maxConnections } : {}),
-      lan: {
-        // 测试绑定 127.0.0.1 避免触发宿主机防火墙弹窗；0.0.0.0 默认行为另行覆盖
-        host: "127.0.0.1",
-        listAddresses: options.addresses ?? (() => ["192.168.1.5", "10.0.0.8"]),
-        addressPollMs: options.addressPollMs ?? 0,
-        ...(options.lanHandshakeTimeoutMs !== undefined
-          ? { handshakeTimeoutMs: options.lanHandshakeTimeoutMs }
-          : {}),
-        ...(options.maxHandshaking !== undefined ? { maxHandshaking: options.maxHandshaking } : {}),
-        ...(options.resolveRemoteAddress !== undefined
-          ? { resolveRemoteAddress: options.resolveRemoteAddress }
-          : {}),
-        onAccepted: (info) => acceptedLan.push(info),
-      },
-    },
     createRuntime: async () => ({
       runtime: await createRuntime({
         cwd: home,
@@ -128,134 +104,83 @@ async function createHostHarness(
         providers: [new FakeProvider({ scripts: [] })],
       }),
     }),
+    remote: {
+      home,
+      credentials,
+      connect: {
+        registerHost: vi.fn(async ({ identity }) => ({ hostId: identity.id })),
+        connectHostRelay: vi.fn(async () => relay),
+      },
+      lan: {
+        host: "127.0.0.1",
+        listAddresses: options.addresses ?? (() => ["192.168.1.5", "10.0.0.8"]),
+        addressPollMs: options.addressPollMs ?? 0,
+        handshakeTimeoutMs: options.lanHandshakeTimeoutMs,
+        maxHandshaking: options.maxHandshaking,
+        resolveRemoteAddress: options.resolveRemoteAddress,
+        onAccepted: (info) => {
+          acceptedLan.push(info);
+        },
+      },
+    },
   });
 
-  const [serverSide, clientSide] = createMemoryTransportPair();
+  const [clientSide, serverSide] = createMemoryTransportPair();
   const served = server.serve(serverSide);
-  const client = createRpcClient(clientSide, { clientName: "local" });
+  const client = createRpcClient(clientSide, { clientName: "desktop-test", interactive: true });
+  await client.initialize();
+
   const stop = async () => {
+    try {
+      await client.shutdown();
+    } catch {
+      /* 已关闭 */
+    }
     client.close();
     await served;
   };
   cleanups.push(stop);
-  await client.initialize();
 
   return {
     home,
     credentials,
-    server,
     client,
     relay,
-    connectRelay,
+    devices,
     acceptedLan,
+    openRelayRoute: (conn: RelayConnection) => routeHandler?.(conn),
     stop,
-    setDevices: (next: RelayDevice[]) => {
-      devices = next;
-    },
-    openRelayRoute: (route: RelayConnection) => {
-      connectionHandler?.(route);
-    },
   };
 }
 
 async function registerAndPair(h: Awaited<ReturnType<typeof createHostHarness>>) {
-  await h.client.call("remote.register", { invite });
-  await until(() => h.connectRelay.mock.calls.length > 0);
+  await h.client.call("remote.register", { invite: INVITE });
   await vi.waitFor(async () =>
     expect((await h.client.call("remote.describe", {})).connection).toBe("online"),
   );
-  const offer = await h.client.call("remote.startPairing", {});
+  const pairing = await h.client.call("remote.startPairing", {});
+  const parsed = parsePairingFragment(new URL(pairing.url).hash);
   const phone = await generateIdentity({ extractable: false });
-  const parsed = parsePairingFragment(new URL(offer.url).hash);
   const hello = await createPairingHello(phone, parsed, "安卓测试机");
-  const [phonePair, hostPair] = createMemoryFramePair();
-  const replyPromise = new Promise<Uint8Array>((resolve) => phonePair.onFrame(resolve));
-  h.openRelayRoute({ conn: 1, kind: "pair", slot: parsed.slot, transport: hostPair });
-  phonePair.send(hello.message);
-  const paired = await finishPairing(hello.state, await replyPromise);
+  const [phoneSide, hostSide] = createMemoryFramePair();
+  const replyPromise = new Promise<Uint8Array>((resolve) => phoneSide.onFrame(resolve));
+  h.openRelayRoute({ conn: 1, kind: "pair", slot: parsed.slot, transport: hostSide });
+  phoneSide.send(hello.message);
+  const finished = await finishPairing(hello.state, await replyPromise);
   await vi.waitFor(async () =>
     expect((await h.client.call("remote.describe", {})).pairing).toBeUndefined(),
   );
-  return { phone, hostPublicKey: paired.hostPublicKey, hostId: paired.hostId };
+  return { phone, hostPublicKey: finished.hostPublicKey };
 }
 
 function extractPort(endpoint: string | undefined): number {
   if (!endpoint) throw new Error("expected endpoint");
-  return Number(new URL(endpoint).port);
-}
-
-/** 建立原始 WebSocket TCP 连接，供构造超大帧或非法顺序帧测试服务端防御 */
-function openRawWebSocket(port: number): Promise<{
-  sendRawFrame: (headerAndBody: Buffer) => void;
-  sendMaskedBinary: (payload: Uint8Array) => void;
-  waitClosed: () => Promise<void>;
-  close: () => void;
-}> {
-  return new Promise((resolve, reject) => {
-    const socket = connectRawTcp({ host: "127.0.0.1", port });
-    const key = randomBytes(16).toString("base64");
-    const expected = createHash("sha1")
-      .update(key + WS_GUID)
-      .digest("base64");
-    let closed = false;
-    let resolveClosed!: () => void;
-    const closedPromise = new Promise<void>((r) => {
-      resolveClosed = r;
-    });
-    socket.once("close", () => {
-      closed = true;
-      resolveClosed();
-    });
-    socket.once("error", (err) => {
-      if (!closed) reject(err);
-    });
-    let header = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
-      header = Buffer.concat([header, chunk]);
-      const idx = header.indexOf("\r\n\r\n");
-      if (idx === -1) return;
-      socket.off("data", onData);
-      // 持续排空后续收到的数据以便底层连接关闭事件及时到达
-      socket.on("data", () => undefined);
-      const text = header.subarray(0, idx).toString("latin1");
-      if (!text.startsWith("HTTP/1.1 101") || !text.includes(expected)) {
-        socket.destroy();
-        reject(new Error(`升级失败: ${text}`));
-        return;
-      }
-      resolve({
-        sendRawFrame: (buf) => {
-          if (!closed) socket.write(buf);
-        },
-        sendMaskedBinary: (payload) => {
-          if (closed) return;
-          const mask = randomBytes(4);
-          const len = payload.byteLength;
-          const head =
-            len < 126
-              ? Buffer.from([0x82, 0x80 | len])
-              : Buffer.from([0x82, 0x80 | 126, (len >> 8) & 0xff, len & 0xff]);
-          const body = Buffer.allocUnsafe(len);
-          for (let i = 0; i < len; i++) body[i] = (payload[i] ?? 0) ^ (mask[i & 3] ?? 0);
-          socket.write(Buffer.concat([head, mask, body]));
-        },
-        waitClosed: () => closedPromise,
-        close: () => {
-          socket.destroy();
-        },
-      });
-    };
-    socket.on("data", onData);
-    socket.once("connect", () => {
-      socket.write(
-        `GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
-      );
-    });
-  });
+  const colon = endpoint.lastIndexOf(":");
+  return Number(endpoint.slice(colon + 1));
 }
 
 describe("电脑端局域网直连（ADR-0087）", () => {
-  it("1. 电脑端监听 + 手机端直连，握手成功后完成 RPC 往返且受相同远程权限约束", async () => {
+  it("1. 电脑端监听 + 手机端 TCP 长度前缀直连，握手成功后完成 RPC 往返且受相同远程权限约束", async () => {
     const h = await createHostHarness();
     const { phone, hostPublicKey } = await registerAndPair(h);
 
@@ -265,11 +190,11 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     const { endpoints } = await h.client.call("remote.lanEndpoints", {});
     expect(endpoints).toHaveLength(2);
     const port = extractPort(endpoints[0]);
-    expect(endpoints).toEqual([`ws://192.168.1.5:${port}`, `ws://10.0.0.8:${port}`]);
+    expect(endpoints).toEqual([`tcp://192.168.1.5:${port}`, `tcp://10.0.0.8:${port}`]);
 
-    const wsTransport = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
-    cleanups.push(async () => wsTransport.close());
-    const secure = await connectChannel(wsTransport, {
+    const tcpTransport = await connectLanTcpClient(`tcp://127.0.0.1:${port}`);
+    cleanups.push(async () => tcpTransport.close());
+    const secure = await connectChannel(tcpTransport, {
       identity: phone,
       hostPublicKey,
     });
@@ -295,17 +220,17 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     expect(h.acceptedLan[0]?.deviceId).toBe(phone.id);
   });
 
-  it("2. 未知设备、已移除设备连入被拒；移除或断开设备时直连与中继两种连接一并断开；超设备连接上限被拒", async () => {
-    const h = await createHostHarness({ maxConnections: 2 });
+  it("2. 未知设备、已移除设备连入被拒；移除或断开设备时直连与中继两种连接一并断开", async () => {
+    const h = await createHostHarness();
     const { phone, hostPublicKey } = await registerAndPair(h);
     await h.client.call("remote.setLanDirect", { enabled: true });
     const port = extractPort((await h.client.call("remote.lanEndpoints", {})).endpoints[0]);
 
     // 未知设备连入被 unknown_device 拒绝
     const stranger = await generateIdentity({ extractable: false });
-    const strangerWs = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
+    const strangerTcp = await connectLanTcpClient(`tcp://127.0.0.1:${port}`);
     await expect(
-      connectChannel(strangerWs, { identity: stranger, hostPublicKey }),
+      connectChannel(strangerTcp, { identity: stranger, hostPublicKey }),
     ).rejects.toMatchObject({ code: "unknown_device" });
 
     // 同一设备同时建立一条中继连接和一条局域网直连
@@ -318,20 +243,13 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     });
     await relayClient.initialize();
 
-    const lanWs = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
-    const lanChannel = await connectChannel(lanWs, { identity: phone, hostPublicKey });
+    const lanTcp = await connectLanTcpClient(`tcp://127.0.0.1:${port}`);
+    const lanChannel = await connectChannel(lanTcp, { identity: phone, hostPublicKey });
     const lanClient = createRpcClient(lanChannel, {
       clientName: "nocturne-phone",
       interactive: true,
     });
     await lanClient.initialize();
-
-    // 已达 maxConnections=2，第三条连接握手后立即被关闭
-    const extraWs = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
-    const extraClosed = new Promise<void>((resolve) => extraWs.onClose(resolve));
-    const extraChannel = await connectChannel(extraWs, { identity: phone, hostPublicKey });
-    const extraChannelClosed = new Promise<void>((resolve) => extraChannel.onClose(resolve));
-    await Promise.race([extraClosed, extraChannelClosed]);
 
     // disconnectDevice 同时断开中继与直连
     await h.client.call("remote.disconnectDevice", { id: phone.id });
@@ -346,9 +264,9 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     );
     await relayClient2.initialize();
 
-    const lanWs2 = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
+    const lanTcp2 = await connectLanTcpClient(`tcp://127.0.0.1:${port}`);
     const lanClient2 = createRpcClient(
-      await connectChannel(lanWs2, { identity: phone, hostPublicKey }),
+      await connectChannel(lanTcp2, { identity: phone, hostPublicKey }),
       { clientName: "nocturne-phone", interactive: true },
     );
     await lanClient2.initialize();
@@ -357,14 +275,14 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     await Promise.all([relayClient2.closed, lanClient2.closed]);
 
     // 已移除设备再次直连被拒
-    const afterRemoveWs = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
+    const afterRemoveTcp = await connectLanTcpClient(`tcp://127.0.0.1:${port}`);
     await expect(
-      connectChannel(afterRemoveWs, { identity: phone, hostPublicKey }),
+      connectChannel(afterRemoveTcp, { identity: phone, hostPublicKey }),
     ).rejects.toMatchObject({ code: "unknown_device" });
   });
 
-  it("3. 未认证防护：握手前数据帧、超大帧、握手超时、16 并发握手上限、非私有网段来源各自被关闭", async () => {
-    // 先验证私有网段判定规则全集
+  it("3. 未认证防护：握手前数据帧、长度为 0、长度超 MAX_FRAME、先发 HTTP 文本、16 并发空 TCP 连接上限与超时归零、非私有网段来源各自被断开", async () => {
+    // 验证私有网段判定规则全集
     for (const allowed of [
       "10.0.0.1",
       "10.255.255.254",
@@ -410,77 +328,182 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     await h.client.call("remote.setLanDirect", { enabled: true });
     const port = extractPort((await h.client.call("remote.lanEndpoints", {})).endpoints[0]);
 
-    // (a) 握手前直接发送数据帧 -> 立即被关闭
+    // (a) 握手前直接发送数据帧 -> 立即断开
     {
-      const raw = await openRawWebSocket(port);
-      raw.sendMaskedBinary(new Uint8Array([FRAME_TYPES.data, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
+      const raw = await openRawLanTcp(port);
+      raw.writeFrame(new Uint8Array([FRAME_TYPES.data, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
       await raw.waitClosed();
     }
 
-    // (b) 握手前连发两帧（未等 hs.resp） -> 立即被关闭
+    // (b) 握手前连发两帧（未等 hs.resp） -> 立即断开
     {
-      const raw = await openRawWebSocket(port);
+      const raw = await openRawLanTcp(port);
       const fakeInit = Buffer.concat([
         Buffer.from([FRAME_TYPES.init]),
         Buffer.from(JSON.stringify({ v: 1, id: phone.id, e: "x", n: "y" }), "utf8"),
       ]);
-      raw.sendMaskedBinary(fakeInit);
-      raw.sendMaskedBinary(fakeInit);
+      raw.writeFrame(fakeInit);
+      raw.writeFrame(fakeInit);
       await raw.waitClosed();
     }
 
-    // (c) 超大帧（帧头声明 MAX_FRAME + 1 字节） -> 在读完负载前即被关闭
+    // (c) 长度前缀为 0 -> 读到 4 字节头立即断开
     {
-      const raw = await openRawWebSocket(port);
-      const header = Buffer.alloc(14);
-      header[0] = 0x82; // FIN + binary
-      header[1] = 0x80 | 127; // masked + 64-bit length
-      header.writeBigUInt64BE(BigInt(MAX_FRAME + 1), 2);
-      raw.sendRawFrame(header);
+      const raw = await openRawLanTcp(port);
+      raw.writeBytes(new Uint8Array([0, 0, 0, 0]));
       await raw.waitClosed();
     }
 
-    // (d) 握手超时 -> 连接升级后不发 hs.init，超时自动关闭
+    // (d) 长度前缀超过 MAX_FRAME（只写 4 字节头，不发后续负载） -> 读到长度头立即断开
     {
-      const raw = await openRawWebSocket(port);
+      const raw = await openRawLanTcp(port);
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(MAX_FRAME + 1, 0);
+      raw.writeBytes(header);
       await raw.waitClosed();
     }
 
-    // (e) 握手阶段并发上限 16：占满 16 条未完成握手的连接后，第 17 条立即被拒绝
+    // (e) 先发一段 HTTP 请求文本 -> 立即被断开
     {
-      const slow = await createHostHarness({ lanHandshakeTimeoutMs: 5_000 });
-      await registerAndPair(slow);
-      await slow.client.call("remote.setLanDirect", { enabled: true });
-      const slowPort = extractPort(
-        (await slow.client.call("remote.lanEndpoints", {})).endpoints[0],
-      );
-      const occupied = await Promise.all(
-        Array.from({ length: 16 }, () => openRawWebSocket(slowPort)),
-      );
-      cleanups.push(async () => {
-        for (const item of occupied) item.close();
+      const raw = await openRawLanTcp(port);
+      raw.writeBytes(Buffer.from("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "utf8"));
+      await raw.waitClosed();
+    }
+
+    // (f) 从 TCP 接入起计入 16 并发未认证上限：只建 TCP 不发任何数据占满 16 个名额，第 17 条立即被拒，超时后 handshakingCount 回到 0
+    {
+      const listener = await listenLanDirect({
+        host: "127.0.0.1",
+        handshakeTimeoutMs: 180,
+        onConnection: () => undefined,
       });
-      await expect(connectLanWebSocket(`ws://127.0.0.1:${slowPort}`)).rejects.toThrow();
-      const firstOccupied = occupied[0];
-      if (!firstOccupied) throw new Error("expected occupied[0]");
-      firstOccupied.close();
-      await firstOccupied.waitClosed();
-      // 释放一个槽位后可再次接入
-      const recovered = await openRawWebSocket(slowPort);
-      recovered.close();
-      for (const item of occupied) item.close();
+      cleanups.push(() => listener.close());
+
+      const idleConns = await Promise.all(
+        Array.from({ length: 16 }, () => openRawLanTcp(listener.port)),
+      );
+      cleanups.push(() => {
+        for (const c of idleConns) c.close();
+      });
+
+      await vi.waitFor(() => expect(listener.handshakingCount()).toBe(16));
+
+      // 第 17 条只建 TCP 也会被立即销毁关闭
+      const seventeenth = await openRawLanTcp(listener.port);
+      await seventeenth.waitClosed();
+      expect(listener.handshakingCount()).toBe(16);
+
+      // 等待握手超时：全部只建 TCP 不发数据的连接被销毁，handshakingCount 回到 0
+      await Promise.all(idleConns.map((c) => c.waitClosed()));
+      expect(listener.handshakingCount()).toBe(0);
     }
 
-    // (f) 非私有网段来源 -> 直接拒绝关闭
+    // (g) 非私有网段来源 -> 直接拒绝关闭
     simulatedAddress = "8.8.8.8";
-    await expect(connectLanWebSocket(`ws://127.0.0.1:${port}`)).rejects.toThrow();
+    const publicConn = await openRawLanTcp(port);
+    await publicConn.waitClosed();
 
     // 切回私有网段后正常握手成功
     simulatedAddress = "192.168.1.50";
-    const okWs = await connectLanWebSocket(`ws://127.0.0.1:${port}`);
-    const okChannel = await connectChannel(okWs, { identity: phone, hostPublicKey });
+    const okTcp = await connectLanTcpClient(`tcp://127.0.0.1:${port}`);
+    const okChannel = await connectChannel(okTcp, { identity: phone, hostPublicKey });
     okChannel.close();
-    okWs.close();
+    okTcp.close();
+  });
+
+  it("3b. hs.fin 之后紧跟 20 条数据帧一次写入 TCP，握手通过后 20 条按序全部送达", async () => {
+    const h = await createHostHarness();
+    const { phone, hostPublicKey } = await registerAndPair(h);
+    await h.client.call("remote.setLanDirect", { enabled: true });
+    const port = extractPort((await h.client.call("remote.lanEndpoints", {})).endpoints[0]);
+
+    const raw = await openRawLanTcp(port);
+    cleanups.push(() => raw.close());
+
+    // 在客户端侧拦截 hs.fin 及随后发出的 20 条加密数据帧，合并为单次 socket.write 一次性写入服务端
+    let inboundHandler: ((frame: Uint8Array) => void) | undefined;
+    let closeHandler: (() => void) | undefined;
+    let batchHold = false;
+    const heldFrames: Buffer[] = [];
+
+    let readBuf = Buffer.alloc(0) as Buffer;
+    raw.socket.on("data", (chunk: Buffer) => {
+      readBuf = readBuf.length === 0 ? chunk : Buffer.concat([readBuf, chunk]);
+      while (readBuf.length >= 4) {
+        const len = readBuf.readUInt32BE(0);
+        if (readBuf.length < 4 + len) return;
+        const body = new Uint8Array(readBuf.subarray(4, 4 + len));
+        readBuf = readBuf.subarray(4 + len);
+        inboundHandler?.(body);
+      }
+    });
+    raw.socket.once("close", () => closeHandler?.());
+
+    const customTransport: FrameTransport = {
+      send(frame) {
+        if (frame[0] === FRAME_TYPES.finish) {
+          batchHold = true;
+        }
+        if (batchHold) {
+          heldFrames.push(encodeLengthPrefixedFrame(frame));
+        } else {
+          raw.writeFrame(frame);
+        }
+      },
+      onFrame(fn) {
+        inboundHandler = fn;
+      },
+      onClose(fn) {
+        closeHandler = fn;
+      },
+      close() {
+        raw.close();
+      },
+    };
+
+    const secure = await connectChannel(customTransport, { identity: phone, hostPublicKey });
+    // 第 1 条加密数据帧：initialize（id = 1），紧接着第 2..20 条：19 次顺序请求（id = 2..20），共 20 条 data 帧
+    const receivedIds: number[] = [];
+    let allTwentyResolved!: () => void;
+    const allTwentyDone = new Promise<void>((resolve) => {
+      allTwentyResolved = resolve;
+    });
+    secure.onLine((line) => {
+      const msg = JSON.parse(line) as { id?: number };
+      if (typeof msg.id === "number") {
+        receivedIds.push(msg.id);
+        if (receivedIds.length === 20) allTwentyResolved();
+      }
+    });
+
+    secure.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: 1, clientName: "burst-test", interactive: true },
+      }),
+    );
+    for (let id = 2; id <= 20; id++) {
+      secure.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "runtime.listSessions",
+          params: {},
+        }),
+      );
+    }
+
+    // 等待客户端 WebCrypto 异步加密把 hs.fin + 20 条 data 帧全部压入 heldFrames（共计 21 帧）
+    await vi.waitFor(() => expect(heldFrames).toHaveLength(21));
+    batchHold = false;
+    // 单次 write 把 hs.fin 与紧随其后的 20 条数据帧一次性写入 TCP 连接
+    raw.writeBytes(Buffer.concat(heldFrames));
+
+    await allTwentyDone;
+    expect(receivedIds).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    secure.close();
   });
 
   it("4. 默认关闭不监听；打开后端口写入设置并在重启后沿用、占用时重新分配；网卡变化经加密通道发通知", async () => {
@@ -538,15 +561,17 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     const loadedAfterOpen = await loadRegistration(h1.home);
     expect(loadedAfterOpen.registration?.lanDirect).toBe(true);
     expect(loadedAfterOpen.registration?.lanPort).toBe(firstPort);
-    await vi.waitFor(() => expect(remoteNotices).toContainEqual([`ws://192.168.1.5:${firstPort}`]));
+    await vi.waitFor(() =>
+      expect(remoteNotices).toContainEqual([`tcp://192.168.1.5:${firstPort}`]),
+    );
     expect(localNotices).toEqual([]);
 
     // 网卡地址变化时自动向加密通道发通知
     currentAddresses = ["192.168.1.5", "172.16.0.9"];
     await vi.waitFor(() =>
       expect(remoteNotices).toContainEqual([
-        `ws://192.168.1.5:${firstPort}`,
-        `ws://172.16.0.9:${firstPort}`,
+        `tcp://192.168.1.5:${firstPort}`,
+        `tcp://172.16.0.9:${firstPort}`,
       ]),
     );
     currentAddresses = ["192.168.1.5"];
@@ -554,7 +579,7 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     // 关闭开关时停止监听，返回空数组并通知加密通道
     await h1.client.call("remote.setLanDirect", { enabled: false });
     expect(await h1.client.call("remote.lanEndpoints", {})).toEqual({ endpoints: [] });
-    await expect(connectLanWebSocket(`ws://127.0.0.1:${firstPort}`)).rejects.toThrow();
+    await expect(connectLanTcpClient(`tcp://127.0.0.1:${firstPort}`)).rejects.toThrow();
 
     // 再次打开沿用已记录的端口
     await h1.client.call("remote.setLanDirect", { enabled: true });
@@ -573,7 +598,7 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     });
     await vi.waitFor(async () =>
       expect((await h2.client.call("remote.lanEndpoints", {})).endpoints).toEqual([
-        `ws://192.168.1.5:${firstPort}`,
+        `tcp://192.168.1.5:${firstPort}`,
       ]),
     );
     await h2.stop();
@@ -605,9 +630,9 @@ describe("电脑端局域网直连（ADR-0087）", () => {
     expect((await loadRegistration(h1.home)).registration?.lanPort).toBe(reassignedPort);
 
     // 关闭「允许远程访问」时停止监听并断开直连
-    const directWs = await connectLanWebSocket(`ws://127.0.0.1:${reassignedPort}`);
+    const directTcp = await connectLanTcpClient(`tcp://127.0.0.1:${reassignedPort}`);
     const directClient = createRpcClient(
-      await connectChannel(directWs, { identity: phone, hostPublicKey }),
+      await connectChannel(directTcp, { identity: phone, hostPublicKey }),
       { clientName: "nocturne-phone", interactive: true },
     );
     await directClient.initialize();

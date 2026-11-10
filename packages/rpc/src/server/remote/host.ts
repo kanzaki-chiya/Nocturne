@@ -1,4 +1,3 @@
-import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { CredentialStore } from "@nocturne/core";
 import {
@@ -40,7 +39,6 @@ import {
 } from "./storage.js";
 
 const CREDENTIAL = "remote/host-identity";
-const DEFAULT_MAX_CONNECTIONS = 10;
 const DEFAULT_LAN_POLL_MS = 5_000;
 
 export interface RemoteHostLanOptions {
@@ -49,8 +47,7 @@ export interface RemoteHostLanOptions {
   addressPollMs?: number | undefined;
   handshakeTimeoutMs?: number | undefined;
   maxHandshaking?: number | undefined;
-  resolveRemoteAddress?:
-    ((socket: Socket, req?: IncomingMessage) => string | undefined) | undefined;
+  resolveRemoteAddress?: ((socket: Socket) => string | undefined) | undefined;
   onAccepted?:
     ((info: { deviceId: string; remoteAddress: string; port: number }) => void) | undefined;
 }
@@ -60,7 +57,6 @@ export interface RemoteHostOptions {
   credentials: CredentialStore;
   connect?: { connectHostRelay?: typeof connectHostRelay; registerHost?: typeof registerHost };
   diagnostics?: (state: RemoteStatus["connection"]) => void;
-  maxConnections?: number | undefined;
   lan?: RemoteHostLanOptions | undefined;
 }
 
@@ -132,6 +128,10 @@ export class RemoteHost {
 
   get listeningLanPort(): number | undefined {
     return this.lanListener?.port;
+  }
+
+  get lanHandshakingCount(): number {
+    return this.lanListener?.handshakingCount() ?? 0;
   }
 
   async describe(): Promise<RemoteStatus> {
@@ -297,6 +297,7 @@ export class RemoteHost {
         host: this.options.lan?.host ?? "0.0.0.0",
         preferredPort: r.lanPort,
         maxHandshaking: this.options.lan?.maxHandshaking,
+        handshakeTimeoutMs: this.options.lan?.handshakeTimeoutMs,
         resolveRemoteAddress: this.options.lan?.resolveRemoteAddress,
         onConnection: (inbound) => {
           void this.acceptLan(inbound, identity, lanGen);
@@ -382,21 +383,6 @@ export class RemoteHost {
     if (!this.active || !this.registration?.enabled) return Promise.resolve(undefined);
     const d = this.registration.devices.find((entry) => entry.id === id);
     return Promise.resolve(d ? Buffer.from(d.pub, "base64url") : undefined);
-  }
-
-  private canAcceptDeviceConnection(deviceId: string, viaLan: boolean): boolean {
-    const limit = this.options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
-    const total = this.connections.size + this.lanConnections.size;
-    if (total < limit) return true;
-    // 允许已在中继在线的同一台设备建立直连完成切换（随后会关闭其中继连接）
-    if (
-      viaLan &&
-      [...this.connections.values()].some((c) => c.deviceId === deviceId) &&
-      ![...this.lanConnections].some((c) => c.deviceId === deviceId)
-    ) {
-      return true;
-    }
-    return false;
   }
 
   private connect(): void {
@@ -535,8 +521,7 @@ export class RemoteHost {
       });
       if (
         generation !== this.generation ||
-        !this.registration?.devices.some((d) => d.id === accepted.deviceId) ||
-        !this.canAcceptDeviceConnection(accepted.deviceId, false)
+        !this.registration?.devices.some((d) => d.id === accepted.deviceId)
       ) {
         accepted.channel.close();
         return;
@@ -586,8 +571,7 @@ export class RemoteHost {
       if (
         lanGen !== this.lanGeneration ||
         !this.shouldListenLan() ||
-        !this.registration?.devices.some((d) => d.id === accepted.deviceId) ||
-        !this.canAcceptDeviceConnection(accepted.deviceId, true)
+        !this.registration?.devices.some((d) => d.id === accepted.deviceId)
       ) {
         accepted.channel.close();
         inbound.close();

@@ -51,8 +51,8 @@ export interface AppHost {
   consumeNotificationTarget(): Promise<{ hostId: string; sessionId: string } | null>;
   moveTaskToBack(): Promise<void>;
   activityForeground(): Promise<boolean>;
-  /** 经 Rust 侧向局域网私有网段地址发起二进制 WebSocket 连接（ADR-0087） */
-  connectLanSocket?(url: string): Promise<FrameTransport>;
+  /** 经 Rust 侧向局域网私有网段地址发起带长度前缀的 TCP 直连（ADR-0087） */
+  connectLan?(url: string): Promise<FrameTransport>;
 }
 
 /**
@@ -141,7 +141,7 @@ export const tauriHost: AppHost = {
   },
   activityForeground: async () =>
     (await call<{ foreground: boolean }>("activity_state")).foreground,
-  connectLanSocket: async (url: string): Promise<FrameTransport> => {
+  connectLan: async (url: string): Promise<FrameTransport> => {
     let frameHandler: ((frame: Uint8Array) => void) | undefined;
     let closeHandler: (() => void) | undefined;
     let closed = false;
@@ -164,9 +164,15 @@ export const tauriHost: AppHost = {
       else buffered.push(bytes);
     });
 
-    const id = await invoke<number>("plugin:lan-ws|connect", { url, onEvent });
+    const id = await invoke<number>("plugin:lan-tcp|connect", { url, onEvent });
     let sendChain = Promise.resolve();
     let closingSent = false;
+
+    const closeNative = () => {
+      if (closingSent) return;
+      closingSent = true;
+      void invoke("plugin:lan-tcp|close", { id }).catch(() => undefined);
+    };
 
     return {
       send(frame) {
@@ -174,10 +180,11 @@ export const tauriHost: AppHost = {
         const encoded = encodeBase64(frame);
         sendChain = sendChain
           .then(async () => {
-            if (closed) return;
-            await invoke("plugin:lan-ws|send", { id, data: encoded });
+            if (closed || closingSent) return;
+            await invoke("plugin:lan-tcp|send", { id, data: encoded });
           })
           .catch(() => {
+            closeNative();
             notifyClose();
           });
       },
@@ -197,7 +204,7 @@ export const tauriHost: AppHost = {
         closingSent = true;
         void sendChain
           .catch(() => undefined)
-          .then(() => invoke("plugin:lan-ws|close", { id }))
+          .then(() => invoke("plugin:lan-tcp|close", { id }))
           .catch(() => undefined)
           .finally(() => {
             notifyClose();

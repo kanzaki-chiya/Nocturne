@@ -340,7 +340,7 @@ export function appPlatform(
     const value = await host.consumeNotificationTarget();
     return value?.hostId && value.sessionId ? value : null;
   };
-  const connectLan = host.connectLanSocket?.bind(host);
+  const connectLan = host.connectLan?.bind(host);
   return {
     relay: "link",
     createConnection: (connectionOptions) =>

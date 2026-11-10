@@ -531,8 +531,8 @@ agent 连接登记和 initialize 更新名称、lastSeenAt 时，后台持久化
 | `remote.register` | `{invite}` → `RemoteStatus`；先登记中继，再存凭据与原子写文件，重复登记报 `remote_already_registered` |
 | `remote.unregister` | `{}` → `RemoteStatus`；在线等待 unregistered，离线也可清理本地但附管理员吊销警告 |
 | `remote.setEnabled` | `{enabled}` → `RemoteStatus`；关闭即断开中继、停止局域网直连监听及断开全部设备连接 |
-| `remote.setLanDirect` | `{enabled}` → `RemoteStatus`；仅本机可调，开启时在 `0.0.0.0` 监听局域网 WebSocket 端口并写回 `lanPort`，关闭时停止监听并断开全部直连 |
-| `remote.lanEndpoints` | `{}` → `{endpoints:string[]}`；返回本机私有网段 IPv4 直连地址（如 `ws://192.168.1.5:41234`），未开启时为空数组 |
+| `remote.setLanDirect` | `{enabled}` → `RemoteStatus`；仅本机可调，开启时在 `0.0.0.0` 监听局域网 TCP 端口并写回 `lanPort`，关闭时停止监听并断开全部直连 |
+| `remote.lanEndpoints` | `{}` → `{endpoints:string[]}`；返回本机私有网段 IPv4 直连地址（如 `tcp://192.168.1.5:41234`），未开启时为空数组 |
 | `remote.startPairing` | `{}` → `{url,expiresAt}`；需要在线，新配对作废旧配对 |
 | `remote.cancelPairing` | `{}` → `null` |
 | `remote.removeDevice` | `{id}` → `RemoteStatus`；需要在线，删除中继记录并同时断开中继与局域网直连连接 |

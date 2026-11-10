@@ -39,8 +39,8 @@ export {
 } from "./agent/pipe.js";
 export { classifyAgentPipeError } from "./agent/host.js";
 export {
-  connectLanWebSocket,
   DEFAULT_MAX_HANDSHAKING,
+  encodeLengthPrefixedFrame,
   formatLanEndpoints,
   isPrivateLanIPv4,
   isPrivateRemoteAddress,
