@@ -899,15 +899,24 @@
   background: color-mix(in srgb, var(--a-error) 8%, transparent);
   color: var(--a-error);
 }
+/* 「回到最新消息」浮在滚动区底边之上：行高为 0，出现和消失都不改变滚动区高度 */
 .conversation-jump-row {
+  position: relative;
+  z-index: 3;
   display: flex;
   justify-content: center;
   flex-shrink: 0;
-  padding: 4px 24px 10px;
+  height: 0;
+  pointer-events: none;
 }
 .conversation .conversation-jump {
+  position: absolute;
+  bottom: 12px;
   margin: 0;
+  border-radius: var(--radius-2);
   background: var(--a-raised);
+  box-shadow: var(--shadow-popover);
+  pointer-events: auto;
 }
 
 /* ── 权限卡片 ── */
