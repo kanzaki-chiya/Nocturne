@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { PermissionPresetName } from "@nocturne/core";
 import { PERMISSION_PRESET_NAMES } from "@nocturne/core";
 import {
@@ -76,6 +77,46 @@ function isAgentsOnlyFile(value: unknown): value is { version: 1; devices: Store
   );
 }
 
+const writes = new Map<string, Promise<void>>();
+const RENAME_MAX_ATTEMPTS = 6;
+const RENAME_RETRY_DELAY_MS = 50;
+const RENAME_RETRY_BUDGET_MS = 1_000;
+const TRANSIENT_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+function updateRemoteJson(home: string, update: () => Promise<void>): Promise<void> {
+  const absolute = resolve(home);
+  const key = process.platform === "win32" ? absolute.toLowerCase() : absolute;
+  const previous = writes.get(key) ?? Promise.resolve();
+  const current = previous.then(update);
+  const settled = current.catch(() => undefined);
+  writes.set(key, settled);
+  void settled.then(() => {
+    if (writes.get(key) === settled) writes.delete(key);
+  });
+  return current;
+}
+
+async function replaceRemoteJson(temporary: string, path: string): Promise<void> {
+  const started = performance.now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(temporary, path);
+      return;
+    } catch (error) {
+      const waitMs = RENAME_RETRY_DELAY_MS * attempt;
+      if (
+        process.platform !== "win32" ||
+        !TRANSIENT_RENAME_CODES.has((error as NodeJS.ErrnoException).code ?? "") ||
+        attempt >= RENAME_MAX_ATTEMPTS ||
+        performance.now() - started + waitMs > RENAME_RETRY_BUDGET_MS
+      ) {
+        throw error;
+      }
+      await delay(waitMs);
+    }
+  }
+}
+
 async function writeRemoteJson(home: string, payload: unknown): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const path = join(home, "remote.json"),
@@ -83,7 +124,7 @@ async function writeRemoteJson(home: string, payload: unknown): Promise<void> {
   try {
     await writeFile(temporary, JSON.stringify(payload), { mode: 0o600, flag: "wx" });
     if (process.platform !== "win32") await chmod(temporary, 0o600);
-    await rename(temporary, path);
+    await replaceRemoteJson(temporary, path);
   } finally {
     await rm(temporary, { force: true });
   }
@@ -155,28 +196,37 @@ export async function saveRegistration(
   home: string,
   registration: RemoteRegistration,
 ): Promise<void> {
-  const agents = await loadAgents(home).catch(() => [] as StoredAgentDevice[]);
-  await writeRemoteJson(home, {
-    ...registration,
-    devices: [...registration.devices, ...agents],
+  const snapshot = structuredClone(registration);
+  await updateRemoteJson(home, async () => {
+    const agents = await loadAgents(home);
+    await writeRemoteJson(home, {
+      ...snapshot,
+      devices: [...snapshot.devices, ...agents],
+    });
   });
 }
 
 export async function preserveCorruptRegistration(home: string): Promise<string | undefined> {
-  const loaded = await loadRegistration(home);
-  if (!loaded.warning) return undefined;
-  const name = `remote.json.corrupt-${Date.now()}-${randomUUID()}`;
-  await rename(join(home, "remote.json"), join(home, name));
-  return `损坏的远程登记文件已备份为 ${name}`;
+  let warning: string | undefined;
+  await updateRemoteJson(home, async () => {
+    const loaded = await loadRegistration(home);
+    if (!loaded.warning) return;
+    const name = `remote.json.corrupt-${Date.now()}-${randomUUID()}`;
+    await replaceRemoteJson(join(home, "remote.json"), join(home, name));
+    warning = `损坏的远程登记文件已备份为 ${name}`;
+  });
+  return warning;
 }
 
 export async function deleteRegistration(home: string): Promise<void> {
-  const agents = await loadAgents(home).catch(() => [] as StoredAgentDevice[]);
-  if (agents.length > 0) {
-    await writeRemoteJson(home, { version: 1, devices: agents });
-    return;
-  }
-  await rm(join(home, "remote.json"), { force: true });
+  await updateRemoteJson(home, async () => {
+    const agents = await loadAgents(home);
+    if (agents.length > 0) {
+      await writeRemoteJson(home, { version: 1, devices: agents });
+      return;
+    }
+    await rm(join(home, "remote.json"), { force: true });
+  });
 }
 
 export async function loadAgents(home: string): Promise<StoredAgentDevice[]> {
@@ -192,21 +242,24 @@ export async function loadAgents(home: string): Promise<StoredAgentDevice[]> {
 }
 
 export async function saveAgents(home: string, agents: StoredAgentDevice[]): Promise<void> {
-  const loaded = await loadRegistration(home);
-  if (loaded.registration !== undefined) {
-    await writeRemoteJson(home, {
-      ...loaded.registration,
-      devices: [...loaded.registration.devices, ...agents],
-    });
-    return;
-  }
-  if (agents.length === 0) {
-    if (!loaded.warning) {
-      await rm(join(home, "remote.json"), { force: true });
+  const snapshot = structuredClone(agents);
+  await updateRemoteJson(home, async () => {
+    const loaded = await loadRegistration(home);
+    if (loaded.registration !== undefined) {
+      await writeRemoteJson(home, {
+        ...loaded.registration,
+        devices: [...loaded.registration.devices, ...snapshot],
+      });
+      return;
     }
-    return;
-  }
-  await writeRemoteJson(home, { version: 1, devices: agents });
+    if (snapshot.length === 0) {
+      if (!loaded.warning) {
+        await rm(join(home, "remote.json"), { force: true });
+      }
+      return;
+    }
+    await writeRemoteJson(home, { version: 1, devices: snapshot });
+  });
 }
 
 export async function ensureHostIdentity(

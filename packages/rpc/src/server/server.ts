@@ -164,6 +164,7 @@ export interface RpcServerOptions {
 export type RpcDiagnostic =
   | { kind: "connection"; state: "open" | "closed"; origin: "local" | "remote" | "agent" }
   | { kind: "request"; id: RpcId; method: string }
+  | { kind: "agent.persistence_failed"; code: string }
   | { kind: "notification"; method: string }
   | { kind: "response"; id: RpcId | null; ok: boolean; errorCode?: string };
 
@@ -371,6 +372,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
     credentials: options.remote?.credentials,
     pipe: options.agentPipe,
     pairingTimeoutMs: options.agentPairingTimeoutMs,
+    onPersistenceError: (code) => options.diagnostics?.({ kind: "agent.persistence_failed", code }),
     serve: (transport, ctx) => server.serve(transport, { origin: "agent", _agentContext: ctx }),
     notify: (method, params) => {
       hub.notifyLocal({ jsonrpc: "2.0", method, params });

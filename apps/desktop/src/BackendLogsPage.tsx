@@ -3,7 +3,7 @@
  * （ADR-0051 后只有一个 nctrn 后台，另有「外壳」「按键诊断」）。
  * 只在打开页面、切换条目或点「刷新」时经 backend_stderr/shell_log/key_diag_log 拉取，
  * 不轮询；缓冲只在内存里保留（最近 500 行、每行不超过 64 KiB），不写盘。
- * 已退出后台的缓冲随进程回收，其尾部日志由崩溃横幅里的 closed.stderr 携带。
+ * 已退出后台的缓冲随进程回收，日志页使用前端保留的 closed.stderr 快照。
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -13,6 +13,7 @@ import { Button, EmptyState, PageHeader } from "./ui";
 /** 「外壳」日志项的伪 backendId（不存在这样的后台，调用方按此值改走 shell_log） */
 export const SHELL_LOG_ID = -1;
 export const KEY_DIAG_ID = -2;
+export const EXIT_LOG_ID = -3;
 
 /** 日志页的一个可选后台 */
 export interface BackendLogTarget {

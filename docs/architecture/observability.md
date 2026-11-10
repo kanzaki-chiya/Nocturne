@@ -55,6 +55,7 @@
 | `tool.attachment_failed` | tools/executor | 工具结果图片附件落盘失败：callId、name、error；成功的图片照常引用，该次调用仍恰好一个 `tool.completed`（ADR-0023） |
 | `hook.run` / `hook.done` | hooks | 点位、command、退出码、耗时、效果摘要（deny/allow/feedback 长度等）、stderr 尾部 |
 | `mcp.event` | mcp | server、state、toolCount、脱敏原始 error、httpStatus（HTTP）；编译工具 `outputSchema` 时 Ajv 的警告（如非标准 format `uint64`）记为 server、warning，不经 console |
+| `agent.persistence_failed` | rpc（RPC diagnostics 回调） | agent 后台登记保存失败，仅记录错误码；处理与输出位置见 [rpc.md 第 11 节](../protocols/rpc.md#11-远程主机) |
 | `mcp.call` | mcp | server、tool、耗时、isError、结果大小；失败附脱敏原始 error 与 httpStatus（HTTP），重试失败附 retried |
 | `subagent.launch` / `subagent.attempt` / `subagent.done` | agent（subagent） | Phase 6：子 sessionId、`parentSessionId`/`parentCallId`、preset/tools、depth、turnIndex、status、usage、耗时（[subagent.md](subagent.md) 第 13 节） |
 | `external_agent.transcript_failed` | acp | 外部审计文件初始化或追加失败；每次调用最多一次。调用继续，结果携带 `transcriptError: true`，详细语义见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp) |

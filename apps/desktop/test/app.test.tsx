@@ -1085,7 +1085,10 @@ it("后台日志页的空态与已退出后台的回收", async () => {
   await act(async () => {
     host.close(backend, 0);
   });
-  // 后台退出后页面选择器回落到剩下的「外壳」条目
+  // 后台退出后保留 closed.stderr 快照；即使为空也不切换日志来源。
+  await within(page).findByText(/暂无 stderr 输出/);
+  fireEvent.click(within(page).getByRole("combobox", { name: "后台" }));
+  fireEvent.click(screen.getByRole("option", { name: /外壳/ }));
   await within(page).findByText(/外壳暂无诊断输出/);
   fireEvent.click(within(page).getByRole("combobox", { name: "后台" }));
   fireEvent.click(screen.getByRole("option", { name: /按键诊断/ }));
@@ -1117,10 +1120,16 @@ it("后台退出显示 stderr 尾部与「重启后台」；重启按 afterSeq �
   fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: /展开全部/ }));
   expect(within(crash as HTMLElement).getByText(/e1/)).toBeTruthy();
 
-  // 「查看日志」跳到后台日志页；退出后台的缓冲已回收，选择器只剩「外壳」
+  // 「查看日志」使用 closed.stderr 快照，不再向已回收的后台拉取。
+  const readsBefore = host.stderrReads.length;
   fireEvent.click(within(crash as HTMLElement).getByRole("button", { name: "查看日志" }));
   const logsPage = await screen.findByTestId("logs-page");
-  expect(within(logsPage).getByRole("combobox", { name: "后台" }).textContent).toContain("外壳");
+  expect(within(logsPage).getByRole("combobox", { name: "后台" }).textContent).toContain("后台");
+  await waitFor(() =>
+    expect(logsPage.querySelector("pre")?.textContent).toBe("e1\ne2\ne3\ne4\ne5\ne6\ne7"),
+  );
+  fireEvent.click(within(logsPage).getByRole("button", { name: "刷新" }));
+  expect(host.stderrReads).toHaveLength(readsBefore);
   fireEvent.keyDown(window, { key: "Escape" });
 
   // 重启后台：新进程 resumeSession + subscribe { afterSeq: 崩溃前 lastSeq }

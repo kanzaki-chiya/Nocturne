@@ -31,6 +31,7 @@ import { createAttachmentImageSource, type AttachmentImageSource } from "./attac
 import { replyLinkOpener } from "./external-url";
 import {
   BackendLogsPage,
+  EXIT_LOG_ID,
   KEY_DIAG_ID,
   SHELL_LOG_ID,
   type BackendLogTarget,
@@ -1505,6 +1506,15 @@ export function App({ host }: { host: DesktopHost }) {
   // 「后台日志」页的选择器（ADR-0051）：单后台与两个独立的外壳内存缓冲
   const currentBackend = pool.current();
   const logTargets: BackendLogTarget[] = [
+    ...(backendExit !== null
+      ? [
+          {
+            backendId: EXIT_LOG_ID,
+            label: "后台",
+            detail: abbreviateHome(backendExit.workspace, home),
+          },
+        ]
+      : []),
     ...(currentBackend !== undefined
       ? [
           {
@@ -1838,11 +1848,13 @@ export function App({ host }: { host: DesktopHost }) {
                     backends={logTargets}
                     version={settingsVersion}
                     fetchStderr={(backendId) =>
-                      backendId === KEY_DIAG_ID
-                        ? (host.invoke("key_diag_log") as Promise<string[]>)
-                        : backendId === SHELL_LOG_ID
-                          ? (host.invoke("shell_log") as Promise<string[]>)
-                          : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
+                      backendId === EXIT_LOG_ID
+                        ? Promise.resolve(backendExit?.stderr ?? [])
+                        : backendId === KEY_DIAG_ID
+                          ? (host.invoke("key_diag_log") as Promise<string[]>)
+                          : backendId === SHELL_LOG_ID
+                            ? (host.invoke("shell_log") as Promise<string[]>)
+                            : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
                     }
                   />
                 </PaneErrorBoundary>

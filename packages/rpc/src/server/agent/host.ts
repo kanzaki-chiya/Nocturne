@@ -128,6 +128,7 @@ export interface AgentHostOptions {
     params: RpcServerNotifications[N],
   ) => void;
   onStatusChanged?: (() => void) | undefined;
+  onPersistenceError?: ((code: string) => void) | undefined;
 }
 
 export function classifyAgentPipeError(error: unknown): {
@@ -174,6 +175,7 @@ export class AgentHost {
   private readonly serve: AgentHostOptions["serve"];
   private readonly notify: AgentHostOptions["notify"];
   private readonly onStatusChanged: (() => void) | undefined;
+  private readonly onPersistenceError: AgentHostOptions["onPersistenceError"];
 
   private identity: Identity | undefined;
   private listener: AgentPipeListener | undefined;
@@ -191,6 +193,7 @@ export class AgentHost {
     this.serve = options.serve;
     this.notify = options.notify;
     this.onStatusChanged = options.onStatusChanged;
+    this.onPersistenceError = options.onPersistenceError;
   }
 
   get pipeAddress(): string | undefined {
@@ -286,7 +289,7 @@ export class AgentHost {
     const existing = this.agents.find((a) => a.id === ctx.agentId);
     if (existing !== undefined) {
       existing.lastSeenAt = Date.now();
-      void this.persist();
+      this.persistInBackground();
     }
     this.emitStatus();
   }
@@ -317,7 +320,7 @@ export class AgentHost {
       if (info.clientName !== undefined && info.clientName.trim() !== "") {
         existing.name = info.clientName.trim();
       }
-      void this.persist();
+      this.persistInBackground();
       this.emitStatus();
       return;
     }
@@ -567,6 +570,19 @@ export class AgentHost {
       requestedAt: entry.requestedAt,
       expiresAt: entry.expiresAt,
     };
+  }
+
+  private persistInBackground(): void {
+    void this.persist().catch((error: unknown) => {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      try {
+        this.onPersistenceError?.(
+          typeof code === "string" && /^E[A-Z0-9_]+$/.test(code) ? code : "unknown",
+        );
+      } catch {
+        // 诊断失败不影响内存登记或连接。
+      }
+    });
   }
 
   private async persist(): Promise<void> {

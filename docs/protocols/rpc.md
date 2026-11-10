@@ -493,7 +493,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
-- 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
+- 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码）、agent 后台持久化失败的错误码（见第 11 节），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
 - **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
 
 ## 8. 与公开 API 保持一致
@@ -519,6 +519,10 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 
 登记文件是用户级 `remote.json`：`{version:1,origin,hostId,enabled,devices:[{id,name,pub,createdAt,lastSeenAt?}]}`，pub 是配对得到的 raw 公钥 b64u，唯一设备鉴权来源。中继列表不能新增/覆盖可信公钥；只同步名称、时间、在线和推送状态，删除已不存在设备；未知设备只显示、不允许握手。
 设备轮询逐字段比较登记内容，无变化不写盘；损坏文件按未登记处理并保留，重新登记写入前改名为 `remote.json.corrupt-<时间戳>-<随机后缀>`，警告显示备份文件名。
+
+手机登记和外部 agent（ADR-0074）共用此文件，格式不变；未登记中继时允许仅含 `{version:1,devices:[agent记录]}`。同一进程按规范化 home 路径串行执行完整读改写（包括保存两类登记、退出登记和损坏文件备份），各次保存先快照调用方数据，再在队列内读取并保留另一类设备；不同 home 独立，失败不阻塞后续操作。这不是跨进程锁。写入使用同目录唯一临时文件后 rename 替换，结束时清理临时文件；Windows 的 EPERM/EACCES/EBUSY 最多尝试 6 次，等待按 50ms 递增，总重试时间预算 1 秒（不含操作系统 I/O 本身耗时），最终仍失败才抛错，其他错误直接抛出。
+
+agent 连接登记和 initialize 更新名称、lastSeenAt 时，后台持久化失败保留内存状态并消费 rejection，仅经 RPC diagnostics 记录 `agent.persistence_failed {code}`，不关闭后台或连接；错误码只保留 `E[A-Z0-9_]+`，否则为 `unknown`，不记录设备数据、路径或原始错误消息。诊断回调自身失败同样忽略；CLI 仅在启用 debug 时把 RPC 诊断写 stderr。用户主动配对、修改范围和吊销的持久化仍由请求等待，失败沿原有 RPC 错误路径返回。
 
 | 方法 | 参数 → 结果 |
 |---|---|
