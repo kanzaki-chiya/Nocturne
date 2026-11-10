@@ -995,7 +995,8 @@
 }
 .phone .phone-text-button {
   flex: none;
-  padding: 8px 4px;
+  /* 右侧不留内边距：文字右缘与下面各行的开关、› 对齐 */
+  padding: 8px 0 8px 8px;
   color: var(--a-accent);
 }
 .phone .phone-item select {
