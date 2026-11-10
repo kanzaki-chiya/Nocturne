@@ -377,6 +377,7 @@ explore 档位不能请求 general，显式 tools 必须是只读池子集；gen
 - **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 拒绝外部 agent，以及显式 `"none"` 的可写工具集。launcher 根据最终选定工具集，在省略 isolation 时为含写操作的后台任务创建工作树，只读任务不检查 git、不建工作树。非 git、无 HEAD 提交、裸仓库在创建子会话前准确拒绝并建议只读子代理或主代理完成；其他创建失败保留 git 错误，不回退共享目录。外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。
 - **启动**：子会话建好即返回 `output: { childSessionId, childLogPath, model, background: true }`，不发 `tool.progress`。子 Turn 的中止信号不含父 Turn 的 signal；超时沿用 `timeoutMs`。占用 `maxConcurrent` 槽直到收束；另有每父会话 `maxBackground`（缺省 3）。
 - **交付与生命周期**：`BackgroundSubagents` 集中收束、取消（`Runtime.cancelSubagent`）、丢弃（父会话关闭、回退到启动调用之前）与重启补报（按父日志补 `interrupted` 暂停条目，分叉继承的前缀不补）。结果以 `message.user.subagent` 交付，作为 `mode: "subagent"` 的待发输入（[agent-loop.md](agent-loop.md) §2、[view.md](../protocols/view.md)）。
+- **远程离开**：远程客户端离开不算父会话关闭；宿主保留后台子代理与后台命令，待结果交付及其接续 Turn 收尾后再按引用数关闭，其间重连复用原实例。本机断开、宿主退出、删除与回退的丢弃规则不变；生命周期接口见 [rpc.md §6.1](../protocols/rpc.md#61-core-进程内空闲接口)。
 - **观察**：`listSubagents` 的 `SubagentSummary.background` 标出后台项；运行状态以登记簿为准，父 `task` 已结算不代表子代理结束。
 - **展示**：桌面、手机与 TUI 收起的准入失败工具行只显示「未启动」；模型仍接收完整错误，桌面/手机和 TUI 全屏展开可看原因，inline 不额外输出原始错误。工具行、后台结果、运行登记与历史观察共用 `subagentProfile`：优先显式 preset，其次非 default 的 profile，无标识时省略 default。
 - **路径**：工作树子模型系统说明包含绝对路径和主仓库到副本的映射；权限层的 WORKTREE_DENY 带实际工作树路径，具体规则见 ADR-0075 §3。

@@ -75,6 +75,20 @@ function resultText(outcome: SubagentOutcome): string {
 /** 生命周期接缝（ADR-0073 §4、§8）：收束、取消、丢弃与重启补报 */
 export class BackgroundSubagents {
   private readonly jobs = new Map<string, Job>();
+  private readonly listeners = new Map<string, Set<() => void>>();
+
+  onSettled(parentSessionId: string, listener: () => void): () => void {
+    let listeners = this.listeners.get(parentSessionId);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.listeners.set(parentSessionId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(parentSessionId);
+    };
+  }
 
   count(parentSessionId: string): number {
     let n = 0;
@@ -126,6 +140,7 @@ export class BackgroundSubagents {
       .catch(() => undefined)
       .finally(() => {
         this.jobs.delete(job.childSessionId);
+        for (const listener of this.listeners.get(job.parentSessionId) ?? []) listener();
       });
   }
 

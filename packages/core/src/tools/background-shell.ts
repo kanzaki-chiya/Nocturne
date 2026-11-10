@@ -64,6 +64,11 @@ export interface ShellStart {
 export class BackgroundShells {
   private readonly jobs = new Map<string, Job>();
   private closed = false;
+  private readonly unsettled = new Set<string>();
+
+  count(): number {
+    return this.unsettled.size;
+  }
   constructor(
     private readonly options: {
       platform: Platform;
@@ -71,6 +76,7 @@ export class BackgroundShells {
       sessionId: string;
       deliver?: (input: PreparedInput) => Promise<void>;
       updated?: (task: BackgroundShellTask) => void;
+      settled?: () => void;
       stopped?: (
         result: BackgroundShellResult & { status: "killed"; source: "user" | "model" },
       ) => Promise<void>;
@@ -116,6 +122,7 @@ export class BackgroundShells {
       updatedAt: Date.now(),
     };
     this.jobs.set(taskId, job);
+    this.unsettled.add(taskId);
     this.options.updated?.({ ...task });
     const notifyOutput = () => {
       if (job.discard || task.status !== "running" || job.updateTimer) return;
@@ -193,7 +200,10 @@ export class BackgroundShells {
       if (this.options.deliver) {
         await this.options.deliver(shellResultInput(this.result(task), await this.unreadTail(job)));
       }
-    })();
+    })().finally(() => {
+      this.unsettled.delete(taskId);
+      this.options.settled?.();
+    });
     void job.settled.catch(() => undefined);
     return { taskId, logPath, background: true };
   }

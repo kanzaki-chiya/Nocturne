@@ -655,6 +655,10 @@ export interface RuntimeSession {
   readonly warnings: readonly string[];
   /** 打开时执行的恢复修复汇总（sessions.md 第 6 节）；无修复则 undefined */
   readonly recovery?: SessionRecovery | undefined;
+  /** 没有执行中（含准备、收尾）的 Turn，也没有尚未完成交付的后台工作。 */
+  isIdle(): boolean;
+  /** 进入上述空闲状态时通知；不立即回调，返回取消订阅函数。 */
+  onIdle(listener: () => void): () => void;
   close(): Promise<void>;
 }
 
@@ -2250,6 +2254,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       sessionsDir,
       sessionId: session.id,
       deliver: (input) => deliverBackgroundResult(input),
+      settled: () => {
+        notifyIdle();
+      },
       updated: (task) => session.emitEphemeral("shell.task_updated", { task }),
       stopped: async (result) => {
         await session.emit("shell.task_stopped", result);
@@ -2848,6 +2855,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     const busy = () => controller !== undefined || rewinding || archiving;
     const compacting = () => compactController !== undefined;
+    const idleListeners = new Set<() => void>();
+    const isIdle = () =>
+      controller === undefined &&
+      backgroundSubagents.count(session.id) === 0 &&
+      backgroundShells.count() === 0;
+    const notifyIdle = () => {
+      if (closing || !isIdle()) return;
+      for (const listener of idleListeners) {
+        try {
+          listener();
+        } catch {
+          // 宿主监听失败不影响任务收束。
+        }
+      }
+    };
     const assertBranchNotSwitching = () => {
       if (switching(branchWatchPath()))
         throw new RuntimeCommandError("session_busy", "工作目录正在切换分支");
@@ -3386,6 +3408,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           idleTurnId !== undefined
         )
           session.emitEphemeral("runtime.status", { status: "idle" }, { turnId: idleTurnId });
+        notifyIdle();
       }
     };
     /** 空闲时未暂停的插话也按排队发出；忙时留给安全点或 Turn 结束 */
@@ -4285,7 +4308,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mcpServers() {
         return mcpSession?.status() ?? [];
       },
+      isIdle,
+      onIdle(listener) {
+        idleListeners.add(listener);
+        return () => idleListeners.delete(listener);
+      },
       async close() {
+        idleListeners.clear();
         detach();
         closing = true;
         unsubscribeTitle();
@@ -4310,6 +4339,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.close();
       },
     };
+    teardown.push(backgroundSubagents.onSettled(session.id, notifyIdle));
     // 内部 Session 句柄只留给各包测试：非导出 Symbol 键，不在 RuntimeSession 类型里
     Object.defineProperty(runtimeSession, INTERNAL_SESSION, { value: session });
     return runtimeSession;

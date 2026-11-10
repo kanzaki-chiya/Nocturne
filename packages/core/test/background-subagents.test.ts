@@ -50,6 +50,53 @@ const bg = (id: string, extra: Record<string, unknown> = {}) =>
   call(id, "task", { task: `research ${id}`, background: true, preset: "explore", ...extra });
 const isChild = (request: ModelRequest) => request.tools.some((tool) => tool.name === "finish");
 
+it("宿主空闲接口覆盖后台交付与接续轮次，撤销监听后不再通知", async () => {
+  const { session } = await setup({
+    childWait: () => 200,
+    parent: [
+      [bg("idle-child"), { type: "finish", reason: "tool_calls" }],
+      done,
+      [{ type: "wait", ms: 200 }, ...done],
+    ],
+  });
+  const idle = vi.fn();
+  const stop = session.onIdle(idle);
+  session.onIdle(() => {
+    throw new Error("host listener failed");
+  });
+  try {
+    expect(session.isIdle()).toBe(true);
+    expect(idle).not.toHaveBeenCalled();
+    await session.submit({ text: "start" });
+    expect(session.isIdle()).toBe(false);
+    expect(idle).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(
+        session
+          .durableEvents()
+          .some(
+            (event) => event.type === "message.user" && event.payload.subagent?.status === "ok",
+          ),
+      ).toBe(true);
+    });
+    expect(session.isIdle()).toBe(false);
+    expect(idle).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(idle).toHaveBeenCalledTimes(1));
+    expect(session.isIdle()).toBe(true);
+    expect(
+      session
+        .durableEvents()
+        .filter((event) => event.type === "turn.completed")
+        .map((event) => event.payload.reason),
+    ).toEqual(["done", "done"]);
+    stop();
+    await session.submit({ text: "next" });
+    expect(idle).toHaveBeenCalledTimes(1);
+  } finally {
+    await session.close();
+  }
+});
+
 interface Setup {
   /** 父会话第 n 次请求（从 0 起）的脚本；超出后回 done */
   parent?: FakeScript[];

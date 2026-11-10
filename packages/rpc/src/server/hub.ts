@@ -184,7 +184,13 @@ export class Hub {
         this.notifySessionsChanged();
       }
     });
-    this.watchers.set(session.id, unsubscribe);
+    const unsubscribeIdle = session.onIdle(() => {
+      void this.closeUnused(session.id).catch(() => undefined);
+    });
+    this.watchers.set(session.id, () => {
+      unsubscribe();
+      unsubscribeIdle();
+    });
   }
 
   private unwatch(sessionId: string): void {
@@ -370,7 +376,7 @@ export class Hub {
   private async closeUnused(sessionId: string): Promise<void> {
     if ((this.references.get(sessionId) ?? 0) > 0 || (this.active.get(sessionId) ?? 0) > 0) return;
     const session = this.sessions.get(sessionId);
-    if (session === undefined) return;
+    if (!session?.isIdle()) return;
     this.sessions.delete(sessionId);
     this.references.delete(sessionId);
     this.unwatch(sessionId);

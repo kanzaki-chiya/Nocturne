@@ -92,6 +92,8 @@ export const RUNTIME_METHODS: Record<
 };
 
 export const SESSION_NOT_MAPPED = {
+  isIdle: "进程内生命周期：Hub 查询 Turn 与后台工作是否全部收束",
+  onIdle: "进程内生命周期：Hub 在结果交付与接续 Turn 收尾后复查会话引用",
   id: "会话 id 是方法参数 sessionId，打开会话时在 SessionOpened 里返回",
   warnings: "打开时的警告随 SessionOpened 返回",
   recovery: "打开时的恢复修复汇总随 SessionOpened 返回",

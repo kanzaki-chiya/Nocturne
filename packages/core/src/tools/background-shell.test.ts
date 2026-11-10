@@ -32,6 +32,36 @@ async function launch(manager: BackgroundShells, dir: string, script: string) {
   return manager.start({ command: `"${process.execPath}" "${file}"`, cwd: dir, callId: "call" });
 }
 describe("ADR-0083 background shell", () => {
+  it("keeps exited commands active until result delivery settles", async () => {
+    const { dir } = setup();
+    let release!: () => void;
+    const delivery = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const deliver = vi.fn(() => delivery);
+    const settled = vi.fn();
+    const manager = new BackgroundShells({
+      platform,
+      sessionsDir: dir,
+      sessionId: "delivery",
+      deliver,
+      settled,
+    });
+    managers.push(manager);
+    try {
+      await launch(manager, dir, 'console.log("result");');
+      await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+      expect(manager.list()[0]?.status).toBe("exited");
+      expect(manager.count()).toBe(1);
+      expect(settled).not.toHaveBeenCalled();
+      release();
+      await manager.settled();
+      expect(manager.count()).toBe(0);
+      expect(settled).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+    }
+  });
   it("returns immediately, keeps running and writes decoded output to the log", async () => {
     const { manager, dir } = setup();
     const started = await launch(
