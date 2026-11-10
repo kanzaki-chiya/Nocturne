@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { PhoneApp, TRUST_TEXT } from "../src/web/App";
 import { memoryStorage } from "../src/web/storage";
 import { PhonePush } from "../src/web/push";
+import { recordDisconnect } from "../src/web/local";
 
 vi.mock("../src/web/connection", () => ({
   PhoneConnection: class {
@@ -84,6 +85,53 @@ it("配对页不显示信任说明，完整说明在设置「关于」", async (
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
   const about = container.querySelector('section[aria-label="关于"]');
-  expect(about?.textContent).toContain(TRUST_TEXT);
+  expect(about?.querySelector("details > summary")?.textContent).toBe("安全说明");
+  expect(about?.querySelector("details > p")?.textContent).toBe(TRUST_TEXT);
   expect(about?.textContent).not.toContain("手机能做会话里的一切");
+});
+
+it("设置页按电脑分组；连接诊断子页列出断线记录并可清除，首页不出现断线列表", async () => {
+  recordDisconnect("电脑 1", "网络中断", new Date(2026, 10, 10, 12, 40, 8).getTime());
+  const storage = memoryStorage();
+  await storage.putHost({ hostId: "computer", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(<PhoneApp storage={storage} />);
+  });
+  await act(async () => {
+    await new Promise((done) => setTimeout(done, 50));
+  });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  const group = container.querySelector('section[aria-label="电脑 1"]');
+  expect(group?.querySelector("h3")?.textContent).toBe("电脑 1");
+  expect(
+    [...(group?.querySelectorAll(".phone-item-label") ?? [])].map((item) => item.textContent),
+  ).toEqual(["连接诊断", "授权", "用量"]);
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  expect(container.textContent).not.toContain("网络中断");
+  expect(container.textContent).not.toContain("清除记录");
+  expect([...container.querySelectorAll('[role="radio"]')].map((item) => item.textContent)).toEqual(
+    ["跟随系统", "月之亮面", "月之暗面"],
+  );
+  await act(async () => {
+    [...(group?.querySelectorAll("button") ?? [])]
+      .find((b) => b.textContent?.startsWith("连接诊断"))
+      ?.click();
+  });
+  expect(container.querySelector("h1")?.textContent).toBe("连接诊断");
+  const log = container.querySelector('section[aria-label="断线记录"]');
+  expect(log?.querySelector("h3")?.textContent).toBe("断线记录");
+  const row = log?.querySelector("li");
+  expect(row?.querySelector("time")?.textContent).toBe("11/10 12:40:08");
+  expect(row?.querySelector("span")?.textContent).toBe("网络中断");
+  await act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "清除记录")?.click();
+  });
+  expect(container.querySelector('section[aria-label="断线记录"]')).toBeNull();
+  expect(container.textContent).not.toContain("清除记录");
+  expect(container.textContent).not.toContain("断线记录");
 });

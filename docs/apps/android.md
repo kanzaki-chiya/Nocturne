@@ -15,7 +15,7 @@
 | `index.html`、`vite.config.ts` | App 专属的网页入口，构建到 `dist/`。不带网页版的 service worker、manifest 与 `public-web` |
 | `src/main.tsx` | 入口：把 `PhoneApp` 与 `appPlatform(tauriHost)` 接起来，启动探针 |
 | `src/host.ts` | `AppHost`：与网页的 `WebHost` 并列的宿主接口，及经 Tauri 调 Kotlin 插件的实现 |
-| `src/platform.tsx` | `PhonePlatform` 实现：中继地址取自配对链接、信任说明、「后台保持连接」设置区块、「后台探针」页 |
+| `src/platform.tsx` | `PhonePlatform` 实现：中继地址取自配对链接、信任说明、「后台保持连接」与「通知」设置区块、「后台探针」页 |
 | `src/update.ts`、`src/update-ui.tsx` | 可注入 fetch、时钟与存储的双来源版本检查，以及关于行、首页提示条与不兼容下载入口 |
 | `src-tauri/gen/android/app/src/main/java/.../remote/ScanActivity.kt`、`DownloadUrls.kt`、`CameraPermissionClient.kt` | 无 Play 服务依赖的 QR 预览、浏览器下载地址白名单，以及拍照授权后重新进入原文件选择处理器 |
 | `src/background.ts` | 后台控制器：开关、前台服务启停、常驻通知文案、把连接状态交给探针 |
@@ -122,7 +122,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 ## 6. 后台探针
 
-设置页「连接诊断」里的「后台探针」，数据只在手机本地（`localStorage` 与 App 私有目录里的原生日志），不上传、不含会话内容：
+设置页「连接诊断」子页底部的「后台探针」，数据只在手机本地（`localStorage` 与 App 私有目录里的原生日志），不上传、不含会话内容：
 
 - 每条收到的会话事件：到达时间、`event.time` 发送时间（均含 epoch）、类型、会话 id、序号（流式增量没有序号，记 `-`），以及当时原生 Activity 在前台还是后台、是实时事件还是重连后的回放；
 - 每次断线（原因）与连上（电脑名）、连接状态变化；
@@ -134,8 +134,8 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 到达延迟依赖电脑和手机时钟同步，负值保留用于发现时钟偏差，不能直接当成网络耗时；导出也带此提示。
 
-## 7. 本地会话提醒
+## 7. 本地通知
 
-设置页「会话提醒」只存在手机本地 `localStorage`，总开关、attention/error/done 与完成阈值缺省直接复用桌面 `NOTIFY_DEFAULTS`，档位复用 `DONE_THRESHOLD_CHOICES`；不改电脑设置。已订阅的持锁会话和主动打开的会话均由 `PhoneSessions` 接收事件，`runtime.sessionsChanged` 带来的新持锁会话订阅后同样覆盖；手机同一时间只连接一台电脑，其他已配对电脑的会话不提醒。`live` 判断沿用桌面 `conversations.ts`：订阅响应前 durable 事件按 `event.time >= subscribeStart` 区分回放窗口期新事件，ephemeral 天然实时；Turn 开始的 epoch 缓存在每会话 Map，完成用时由 `decideNotification` 判定。Activity 在前台且当前显示该会话才算在看（设置覆盖不算），启动时查询原生状态、之后用 pause/resume 更新，不默认前台；在看、回放、恢复补写与中断均不提醒。
+设置页「通知」（文案与电脑端设置页相同：总开关「通知」，下面「需要确认（权限、提问）」「出错停止」「完成」与「提醒触发时长」，总开关关闭时子项禁用）只存在手机本地 `localStorage`，总开关、attention/error/done 与提醒触发时长缺省直接复用桌面 `NOTIFY_DEFAULTS`，档位复用 `DONE_THRESHOLD_CHOICES`；不改电脑设置。已订阅的持锁会话和主动打开的会话均由 `PhoneSessions` 接收事件，`runtime.sessionsChanged` 带来的新持锁会话订阅后同样覆盖；手机同一时间只连接一台电脑，其他已配对电脑的会话不提醒。`live` 判断沿用桌面 `conversations.ts`：订阅响应前 durable 事件按 `event.time >= subscribeStart` 区分回放窗口期新事件，ephemeral 天然实时；Turn 开始的 epoch 缓存在每会话 Map，完成用时由 `decideNotification` 判定。Activity 在前台且当前显示该会话才算在看（设置覆盖不算），启动时查询原生状态、之后用 pause/resume 更新，不默认前台；在看、回放、恢复补写与中断均不提醒。
 
-Kotlin `SessionNotifications` 使用独立于保活服务的「会话提醒」渠道（`nocturne_sessions_v2`，`IMPORTANCE_HIGH`，因此以悬浮通知从屏幕顶部弹出；渠道级别创建后无法调高，所以换过一次 id，升级后首次发提醒创建新渠道时删除旧的 `nocturne_sessions`）；`NotificationManagerCompat` 用 hostId/sessionId 稳定 tag 与 `sessionId.hashCode()` 派生的 id 替换同一会话通知（tag 保证不同电脑或哈希碰撞的会话不互相覆盖），点击 Intent 的唯一 data URI 与 extras 携带两个 id，暖启动或进程死后冷启动从配对记录切到该电脑、等会话列表加载后打开会话并撤通知。`VISIBILITY_PRIVATE` 的 publicVersion 仅为固定 Nocturne + 类别，不出现会话标题、权限目标或内容；私有正文与桌面同款、只在本地生成。系统通知权限/渠道关闭时不抛错误，不自动为提醒索权；设置页提供系统应用设置入口。网页版 service worker/Web Push 不变。进程被系统杀掉后无法生成新通知，已发出的通知仍可点开。
+Kotlin `SessionNotifications` 使用独立于保活服务的「会话提醒」渠道（`nocturne_sessions_v2`，`IMPORTANCE_HIGH`，因此以悬浮通知从屏幕顶部弹出；渠道级别创建后无法调高，所以换过一次 id，升级后首次发提醒创建新渠道时删除旧的 `nocturne_sessions`）；`NotificationManagerCompat` 用 hostId/sessionId 稳定 tag 与 `sessionId.hashCode()` 派生的 id 替换同一会话通知（tag 保证不同电脑或哈希碰撞的会话不互相覆盖），点击 Intent 的唯一 data URI 与 extras 携带两个 id，暖启动或进程死后冷启动从配对记录切到该电脑、等会话列表加载后打开会话并撤通知。`VISIBILITY_PRIVATE` 的 publicVersion 仅为固定 Nocturne + 类别，不出现会话标题、权限目标或内容；私有正文与桌面同款、只在本地生成。系统通知权限/渠道关闭时不抛错误，不自动为提醒索权；系统通知被关闭时，设置页「通知」一节出现「系统通知已关闭」一行与「打开系统应用设置」入口。网页版 service worker/Web Push 不变。进程被系统杀掉后无法生成新通知，已发出的通知仍可点开。

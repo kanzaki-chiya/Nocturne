@@ -22,7 +22,7 @@
   padding-block: 0;
 }
 .phone-update-version {
-  min-height: 44px;
+  min-height: 48px;
 }
 .phone .phone-update-link {
   color: var(--a-accent);
@@ -102,7 +102,7 @@
   font-size: var(--fs-4);
 }
 /* 触控目标不小于 44px（DESIGN.md 第 2 节）：保持高优先级，按钮类写的更小 min-height 不生效 */
-.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref),
+.phone button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.mode-ref):not(.phone-item),
 .phone input:not(.check input),
 .phone select,
 .phone textarea,
@@ -951,66 +951,114 @@
   font-weight: 500;
   color: var(--a-muted);
 }
-.phone-host {
-  padding: 8px 0;
-}
-.phone-host-line {
+/* 设置行：名字在左，控件在右，一行一项 */
+.phone .phone-item {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.phone .phone-host-line input {
-  margin: 0;
+  min-height: 48px;
   font-size: var(--fs-4);
 }
-.phone-host-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-top: 4px;
+.phone-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.phone-item.sub .phone-item-label {
+  padding-left: 16px;
+  color: var(--a-secondary);
+}
+.phone .phone-nav {
+  width: 100%;
+  padding: 0;
+  border-radius: 0;
+  text-align: left;
+  color: var(--a-text);
+}
+.phone-chevron {
+  flex: none;
+  color: var(--a-muted);
+}
+.phone-host-line .phone-icon {
+  color: var(--a-secondary);
+}
+.phone .phone-host-line input.phone-host-name {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-4);
+}
+.phone .phone-text-button {
+  flex: none;
+  padding: 8px 4px;
+  color: var(--a-accent);
+}
+.phone .phone-item select {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--a-secondary);
+  font-size: var(--fs-3);
 }
 .phone .danger {
   color: var(--a-error);
 }
-.phone .phone-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 8px 0;
-  font-size: var(--fs-4);
-}
-.phone-facts {
-  margin: 0 0 8px;
-}
-.phone-facts div {
-  display: flex;
-  gap: 12px;
-}
-.phone-facts dt {
-  flex: none;
-  color: var(--a-muted);
-}
-.phone-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 .phone-log {
-  margin: 0 0 4px;
+  margin: 0;
   padding: 0;
   list-style: none;
   font-size: var(--fs-3);
 }
 .phone-log li {
   display: flex;
-  flex-direction: column;
-  padding: 6px 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
   border-top: 1px solid var(--a-border);
 }
+.phone-log span {
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 .phone-log time {
+  flex: none;
   font-family: var(--mono);
   font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
   color: var(--a-muted);
+}
+.phone-trust summary {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+.phone-trust summary::-webkit-details-marker {
+  display: none;
+}
+.phone-trust summary::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--a-muted);
+  transition: transform var(--dur);
+}
+.phone-trust[open] summary::after {
+  transform: rotate(90deg);
+}
+.phone-trust p {
+  margin: 4px 0 8px;
+  font-size: var(--fs-3);
 }
 .phone-segment {
   display: flex;

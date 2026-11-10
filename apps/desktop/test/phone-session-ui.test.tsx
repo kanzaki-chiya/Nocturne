@@ -515,7 +515,7 @@ it("其他目录：输入路径进入项目页，后台拒绝时在输入框下�
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
   await act(async () => {
-    byText("用量统计").click();
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "用量›")?.click();
     await new Promise((done) => setTimeout(done, 0));
   });
   expect(container.querySelector("h1")?.textContent).toBe("用量");

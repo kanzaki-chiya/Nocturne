@@ -70,6 +70,7 @@ type Page =
   | { kind: "usage"; hostId: string }
   | { kind: "schedules"; hostId: string }
   | { kind: "grants"; hostId: string }
+  | { kind: "diagnostics"; hostId: string }
   | { kind: "ext"; page: string; hostId?: string };
 
 const STATE_TEXT: Record<string, string> = {
@@ -490,8 +491,10 @@ export function PhoneApp({
             <p>通知权限已被拒绝，请在系统设置或浏览器的网站设置中允许 Nocturne 通知。</p>
           )}
           {push.message && <p role="status">{push.message}</p>}
-          <div className="phone-switch">
-            <span>{push.state === "working" ? "正在设置推送…" : "需要处理时提醒我"}</span>
+          <div className="phone-item">
+            <span className="phone-item-label">
+              {push.state === "working" ? "正在设置推送…" : "需要处理时提醒我"}
+            </span>
             <Switch
               aria-label="推送通知"
               checked={push.state === "enabled"}
@@ -607,6 +610,8 @@ export function PhoneApp({
         return "用量";
       case "grants":
         return "授权";
+      case "diagnostics":
+        return "连接诊断";
       case "schedules":
         return "定时任务";
       case "ext":
@@ -937,52 +942,100 @@ export function PhoneApp({
         <UsagePage client={connected ? sessions.client : undefined} />
       </section>
     );
-  } else {
+  } else if (page.kind === "diagnostics") {
     const disconnects = loadDisconnects();
+    body = (
+      <section className="phone-body phone-settings">
+        <section className="phone-section" aria-label="连接诊断">
+          <div className="phone-item">
+            <span className="phone-item-label">{computer?.name ?? "电脑"}</span>
+            <span className="muted-value">
+              {STATE_TEXT[connection?.state ?? "offline"] ?? connection?.state}
+              {connection?.message ? `（${connection.message}）` : ""}
+            </span>
+          </div>
+        </section>
+        {disconnects.length > 0 && (
+          <section className="phone-section" aria-label="断线记录">
+            <h3>断线记录</h3>
+            <ul className="phone-log">
+              {disconnects.map((item) => (
+                <li key={`${item.at}:${item.reason}`}>
+                  <time>
+                    {new Date(item.at).toLocaleString("zh-CN", {
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                      hour12: false,
+                    })}
+                  </time>
+                  <span>
+                    {item.host === computer?.name ? item.reason : `${item.host}：${item.reason}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button
+              className="phone-list-action"
+              onClick={() => {
+                clearDisconnects();
+                changed();
+              }}
+            >
+              清除记录
+            </button>
+          </section>
+        )}
+        {platform.diagnostics && (
+          <section className="phone-section">{platform.diagnostics(extension)}</section>
+        )}
+      </section>
+    );
+  } else {
     body = (
       <section className="phone-body phone-settings">
         <section className="phone-section" aria-label="已配对的电脑">
           <h3>已配对的电脑</h3>
           {hosts.map((item) => (
-            <div className="phone-host" key={item.hostId}>
-              <div className="phone-host-line">
-                <IconComputer />
-                <input
-                  aria-label={`重命名 ${item.name}`}
-                  defaultValue={item.name}
-                  onBlur={(e) => {
-                    const name = e.target.value.trim();
-                    if (name && name !== item.name)
-                      void operation(async () => {
-                        await storage.putHost({ ...item, name });
-                        setHosts(await storage.hosts());
-                      });
-                  }}
-                />
-              </div>
-              <div className="phone-host-actions">
-                <button
-                  onClick={() => {
-                    navigate({ kind: "home", hostId: item.hostId });
-                  }}
-                >
-                  打开
-                </button>
-                <button
-                  className="danger"
-                  onClick={() => {
+            <div className="phone-item phone-host-line" key={item.hostId}>
+              <IconComputer />
+              <input
+                className="phone-host-name"
+                aria-label={`重命名 ${item.name}`}
+                defaultValue={item.name}
+                onBlur={(e) => {
+                  const name = e.target.value.trim();
+                  if (name && name !== item.name)
                     void operation(async () => {
-                      await storage.removeHost(item.hostId);
-                      const rest = await storage.hosts();
-                      setHosts(rest);
-                      setError("已从手机移除。电脑上的设备记录请在电脑的『设置 › 远程』里移除");
-                      if (item.hostId === page.hostId) navigate({ kind: "settings" }, true);
+                      await storage.putHost({ ...item, name });
+                      setHosts(await storage.hosts());
                     });
-                  }}
-                >
-                  移除
-                </button>
-              </div>
+                }}
+              />
+              <button
+                className="phone-text-button"
+                onClick={() => {
+                  navigate({ kind: "home", hostId: item.hostId });
+                }}
+              >
+                打开
+              </button>
+              <button
+                className="phone-text-button danger"
+                onClick={() => {
+                  void operation(async () => {
+                    await storage.removeHost(item.hostId);
+                    const rest = await storage.hosts();
+                    setHosts(rest);
+                    setError("已从手机移除。电脑上的设备记录请在电脑的『设置 › 远程』里移除");
+                    if (item.hostId === page.hostId) navigate({ kind: "settings" }, true);
+                  });
+                }}
+              >
+                移除
+              </button>
             </div>
           ))}
           {addingHost ? (
@@ -1006,61 +1059,14 @@ export function PhoneApp({
         </section>
         {platform.background?.(extension)}
         {pushSection}
-        <section className="phone-section" aria-label="连接诊断">
-          <h3>连接诊断</h3>
-          <dl className="phone-facts">
-            <div>
-              <dt>当前</dt>
-              <dd>
-                {page.hostId === undefined || connection === undefined ? (
-                  "未连接任何电脑"
-                ) : (
-                  <>
-                    {computer?.name ?? "电脑"}
-                    <span className="muted-value">
-                      {STATE_TEXT[connection.state] ?? connection.state}
-                      {connection.message ? `（${connection.message}）` : ""}
-                    </span>
-                  </>
-                )}
-              </dd>
-            </div>
-          </dl>
-          {disconnects.length === 0 ? (
-            <small>最近没有断线记录</small>
-          ) : (
-            <>
-              <ul className="phone-log" aria-label="最近断线">
-                {disconnects.map((item) => (
-                  <li key={`${item.at}:${item.reason}`}>
-                    <time>{new Date(item.at).toLocaleString("zh-CN", { hour12: false })}</time>
-                    <span>
-                      {item.host}：{item.reason}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <button
-                className="phone-list-action"
-                onClick={() => {
-                  clearDisconnects();
-                  changed();
-                }}
-              >
-                清除记录
-              </button>
-            </>
-          )}
-          {platform.diagnostics?.(extension)}
-        </section>
         <section className="phone-section" aria-label="主题">
           <h3>主题</h3>
           <div className="phone-segment" role="radiogroup" aria-label="主题">
             {(
               [
                 ["system", "跟随系统"],
-                ["light", "亮色"],
-                ["dark", "暗色"],
+                ["light", "月之亮面"],
+                ["dark", "月之暗面"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -1079,31 +1085,53 @@ export function PhoneApp({
           </div>
         </section>
         {page.hostId !== undefined && (
-          <section className="phone-section" aria-label="用量">
-            <h3>授权</h3>
+          <section className="phone-section" aria-label={computer?.name ?? "电脑"}>
+            <h3>{computer?.name ?? "电脑"}</h3>
             <button
-              className="phone-list-action"
+              className="phone-item phone-nav"
+              onClick={() => {
+                if (page.hostId) navigate({ kind: "diagnostics", hostId: page.hostId });
+              }}
+            >
+              <span className="phone-item-label">连接诊断</span>
+              <span className="muted-value">
+                {STATE_TEXT[connection?.state ?? "offline"] ?? connection?.state}
+              </span>
+              <span className="phone-chevron" aria-hidden="true">
+                ›
+              </span>
+            </button>
+            <button
+              className="phone-item phone-nav"
               onClick={() => {
                 if (page.hostId) navigate({ kind: "grants", hostId: page.hostId });
               }}
             >
-              管理项目授权
+              <span className="phone-item-label">授权</span>
+              <span className="phone-chevron" aria-hidden="true">
+                ›
+              </span>
             </button>
-            <h3>用量</h3>
             <button
-              className="phone-list-action"
+              className="phone-item phone-nav"
               onClick={() => {
-                if (page.hostId !== undefined) navigate({ kind: "usage", hostId: page.hostId });
+                if (page.hostId) navigate({ kind: "usage", hostId: page.hostId });
               }}
             >
-              查看 {computer?.name ?? "电脑"} 的用量统计
+              <span className="phone-item-label">用量</span>
+              <span className="phone-chevron" aria-hidden="true">
+                ›
+              </span>
             </button>
           </section>
         )}
         <section className="phone-section" aria-label="关于">
           <h3>关于</h3>
           {platform.updateAbout?.()}
-          <p>{platform.trustText ?? TRUST_TEXT}</p>
+          <details className="phone-trust">
+            <summary>安全说明</summary>
+            <p>{platform.trustText ?? TRUST_TEXT}</p>
+          </details>
         </section>
       </section>
     );
@@ -1171,6 +1199,7 @@ export function PhoneApp({
         {sessionHeader ? (
           <div className="phone-header-tools" ref={setHeaderSlot} />
         ) : page.kind === "settings" ||
+          page.kind === "diagnostics" ||
           page.kind === "usage" ||
           page.kind === "schedules" ||
           page.kind === "ext" ||
@@ -1193,24 +1222,27 @@ export function PhoneApp({
           {error}
         </p>
       )}
-      {connection && connection.state !== "online" && page.kind !== "settings" && (
-        <aside
-          className={`phone-status${
-            connection.state === "incompatible" &&
+      {connection &&
+        connection.state !== "online" &&
+        page.kind !== "settings" &&
+        page.kind !== "diagnostics" && (
+          <aside
+            className={`phone-status${
+              connection.state === "incompatible" &&
+              connection.message === "App 版本过旧" &&
+              platform.incompatibleUpdate
+                ? " phone-update-content"
+                : ""
+            }`}
+            role="status"
+          >
+            {connection.state === "incompatible" &&
             connection.message === "App 版本过旧" &&
             platform.incompatibleUpdate
-              ? " phone-update-content"
-              : ""
-          }`}
-          role="status"
-        >
-          {connection.state === "incompatible" &&
-          connection.message === "App 版本过旧" &&
-          platform.incompatibleUpdate
-            ? platform.incompatibleUpdate()
-            : connection.message || "正在建立加密连接…"}
-        </aside>
-      )}
+              ? platform.incompatibleUpdate()
+              : connection.message || "正在建立加密连接…"}
+          </aside>
+        )}
       {homeHeader && connection?.state !== "incompatible" && platform.updateNotice?.()}
       {installHint && (
         <aside className="phone-status">

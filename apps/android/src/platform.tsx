@@ -10,6 +10,7 @@ import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import { versionMessage } from "../../desktop/src/web/connection";
 import { AndroidUpdate } from "./update";
 import { UpdateAbout, UpdateLifecycle, UpdateNotice } from "./update-ui";
+import { Switch } from "../../desktop/src/ui";
 
 /** 信任边界：页面随安装包，不再由中继下发（ADR-0059 第 5 节） */
 export const APP_TRUST_TEXT =
@@ -53,65 +54,50 @@ function BackgroundSection({
       setError(cause instanceof Error ? cause.message : "无法打开系统设置");
     });
   };
+  if (status?.supported === false) return null;
   return (
     <section className="phone-section" aria-label="后台保持连接">
       <h3>后台保持连接</h3>
-      <label className="phone-switch">
-        <span>
-          切到后台后继续保持连接
-          <small>回到 App 时内容已是最新；会在通知栏显示常驻通知</small>
-        </span>
-        <input
-          type="checkbox"
-          role="switch"
+      <div className="phone-item">
+        <span className="phone-item-label">后台保持连接</span>
+        <Switch
           aria-label="后台保持连接"
           checked={background.enabled}
-          onChange={(event) => {
-            background.enabled = event.target.checked;
+          onChange={(next) => {
+            background.enabled = next;
             api.refresh();
           }}
         />
-      </label>
-      <p role="status">
-        {status === undefined
-          ? "正在读取…"
-          : !status.supported
-            ? "此版本没有后台服务，切到后台后连接会和网页一样被系统挂起。"
-            : status.running
-              ? "后台服务运行中，通知栏有常驻通知。"
-              : background.enabled
-                ? "后台服务未运行（没有已配对的电脑时不会启动）。"
-                : "已关闭，行为与网页版一致。"}
-      </p>
+      </div>
+      {status?.supported && !status.ignoringBatteryOptimizations && (
+        <NavRow
+          label="电池优化设置"
+          onClick={() => {
+            open("battery");
+          }}
+        />
+      )}
       {status?.supported && (
-        <>
-          <p>
-            {status.ignoringBatteryOptimizations
-              ? "系统已不限制本应用的电池优化。"
-              : "系统的电池优化可能在息屏后冻结网络，建议放行；小米手机还需要开启自启动。"}
-          </p>
-          <div className="phone-actions">
-            <button
-              className="phone-list-action"
-              onClick={() => {
-                open("battery");
-              }}
-            >
-              电池优化设置
-            </button>
-            <button
-              className="phone-list-action"
-              onClick={() => {
-                open("autostart");
-              }}
-            >
-              自启动设置
-            </button>
-          </div>
-        </>
+        <NavRow
+          label="自启动设置"
+          onClick={() => {
+            open("autostart");
+          }}
+        />
       )}
       {error && <p role="alert">{error}</p>}
     </section>
+  );
+}
+
+function NavRow({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button className="phone-item phone-nav" onClick={onClick}>
+      <span className="phone-item-label">{label}</span>
+      <span className="phone-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
   );
 }
 
@@ -150,44 +136,41 @@ function NotificationSection({
     setPrefs(next);
   };
   return (
-    <section className="phone-section" aria-label="会话提醒">
-      <h3>会话提醒</h3>
-      <label className="phone-switch">
-        <span>提醒我需要处理的会话</span>
-        <input
-          type="checkbox"
-          role="switch"
-          aria-label="会话提醒"
+    <section className="phone-section" aria-label="通知">
+      <h3>通知</h3>
+      <div className="phone-item">
+        <span className="phone-item-label">通知</span>
+        <Switch
+          aria-label="通知"
           checked={prefs.enabled}
-          onChange={(e) => {
-            update({ enabled: e.target.checked });
+          onChange={(next) => {
+            update({ enabled: next });
           }}
         />
-      </label>
+      </div>
       {(
         [
-          ["attention", "需要确认"],
-          ["error", "出错停止"],
-          ["done", "长任务完成"],
+          ["attention", "需要确认", "需要确认（权限、提问）"],
+          ["error", "出错停止", "出错停止"],
+          ["done", "完成", "完成"],
         ] as const
-      ).map(([key, label]) => (
-        <label className="phone-switch" key={key}>
-          <span>{label}</span>
-          <input
-            type="checkbox"
-            aria-label={label}
+      ).map(([key, name, label]) => (
+        <div className="phone-item sub" key={key}>
+          <span className="phone-item-label">{label}</span>
+          <Switch
+            aria-label={name}
             disabled={!prefs.enabled}
             checked={prefs[key]}
-            onChange={(e) => {
-              update({ [key]: e.target.checked });
+            onChange={(next) => {
+              update({ [key]: next });
             }}
           />
-        </label>
+        </div>
       ))}
-      <label>
-        完成阈值{" "}
+      <div className="phone-item sub">
+        <span className="phone-item-label">提醒触发时长</span>
         <select
-          aria-label="完成阈值"
+          aria-label="提醒触发时长"
           disabled={!prefs.enabled || !prefs.done}
           value={prefs.doneAfterSeconds}
           onChange={(e) => {
@@ -203,16 +186,20 @@ function NotificationSection({
             </option>
           ))}
         </select>
-      </label>
-      {!enabled && <p role="status">系统通知已关闭，请到系统 › 应用 › Nocturne › 通知中开启。</p>}
-      <button
-        className="phone-list-action"
-        onClick={() => {
-          void host.openSettings("app").catch(() => undefined);
-        }}
-      >
-        打开系统应用设置
-      </button>
+      </div>
+      {!enabled && (
+        <div className="phone-item">
+          <span className="phone-item-label">系统通知已关闭</span>
+          <button
+            className="phone-text-button"
+            onClick={() => {
+              void host.openSettings("app").catch(() => undefined);
+            }}
+          >
+            打开系统应用设置
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -415,14 +402,12 @@ export function appPlatform(
       </>
     ),
     diagnostics: (api) => (
-      <button
-        className="phone-list-action"
+      <NavRow
+        label="后台探针"
         onClick={() => {
           api.open("probe");
         }}
-      >
-        后台探针 ›
-      </button>
+      />
     ),
     pages: {
       probe: { title: "后台探针", render: () => <ProbePage host={host} probe={probe} /> },

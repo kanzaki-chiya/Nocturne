@@ -59,11 +59,12 @@ it("App 平台：中继来自配对链接，信任说明不再说页面由中继
   expect(APP_TRUST_TEXT).not.toContain("手机网页");
 });
 
-it("没有原生插件的外壳：没有后台服务", async () => {
+it("没有原生插件的外壳：不显示后台保持连接，通知照常", async () => {
   const platform = appPlatform(shellHost);
   const container = await mount(platform.background(api()));
-  expect(container.textContent).toContain("此版本没有后台服务");
-  expect(container.textContent).toContain("会话提醒");
+  expect(container.querySelector('section[aria-label="后台保持连接"]')).toBeNull();
+  expect(container.querySelector('section[aria-label="通知"] h3')?.textContent).toBe("通知");
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
 });
 
 it("后台服务状态与开关：默认开，关掉后 keepConnected 随之变化并通知页面刷新", async () => {
@@ -72,9 +73,11 @@ it("后台服务状态与开关：默认开，关掉后 keepConnected 随之变�
   expect(platform.keepConnected).toBe(true);
   const refresh = vi.fn();
   const container = await mount(platform.background(api({ refresh })));
-  expect(container.textContent).toContain("后台服务运行中");
-  const toggle = container.querySelector<HTMLInputElement>('input[aria-label="后台保持连接"]');
-  expect(toggle?.checked).toBe(true);
+  expect(container.textContent).not.toContain("后台服务运行中");
+  const toggle = container.querySelector<HTMLButtonElement>(
+    '[role="switch"][aria-label="后台保持连接"]',
+  );
+  expect(toggle?.getAttribute("aria-checked")).toBe("true");
   await act(async () => {
     toggle?.click();
   });
@@ -83,7 +86,7 @@ it("后台服务状态与开关：默认开，关掉后 keepConnected 随之变�
   expect(probe.all().some((entry) => entry[2] === "keepConnected=off")).toBe(true);
 });
 
-it("电池优化与自启动按钮打开对应系统设置，失败时提示", async () => {
+it("电池优化与自启动行打开对应系统设置，失败时提示；已放行电池优化时不显示该行", async () => {
   const openSettings = vi
     .fn<AppHost["openSettings"]>()
     .mockResolvedValueOnce(undefined)
@@ -92,9 +95,12 @@ it("电池优化与自启动按钮打开对应系统设置，失败时提示", a
   const platform = appPlatform(withBackground(false, { openSettings }));
   const container = await mount(platform.background(api()));
   const buttons = [
-    ...container.querySelectorAll<HTMLButtonElement>('section[aria-label="后台保持连接"] button'),
+    ...container.querySelectorAll<HTMLButtonElement>(
+      'section[aria-label="后台保持连接"] button:not([role="switch"])',
+    ),
   ];
-  expect(buttons.map((button) => button.textContent)).toEqual(["电池优化设置", "自启动设置"]);
+  expect(buttons.map((button) => button.textContent)).toEqual(["电池优化设置›", "自启动设置›"]);
+  expect(container.querySelector('section[aria-label="后台保持连接"] p')).toBeNull();
   await act(async () => {
     buttons[0]?.click();
     buttons[1]?.click();
@@ -103,9 +109,23 @@ it("电池优化与自启动按钮打开对应系统设置，失败时提示", a
   await act(async () => {
     buttons[0]?.click();
   });
-  expect(container.textContent).toContain("无法打开系统设置");
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe("无法打开系统设置");
+  await act(async () => root?.unmount());
+  root = undefined;
+  document.body.innerHTML = "";
+  const allowed = appPlatform({
+    ...shellHost,
+    backgroundStatus: () =>
+      Promise.resolve({ supported: true, running: true, ignoringBatteryOptimizations: true }),
+  });
+  const after = await mount(allowed.background(api()));
+  const rows = [
+    ...after.querySelectorAll<HTMLButtonElement>(
+      'section[aria-label="后台保持连接"] button:not([role="switch"])',
+    ),
+  ];
+  expect(rows.map((button) => button.textContent)).toEqual(["自启动设置›"]);
 });
-
 it("连接诊断里有后台探针入口，探针页能复制与清除记录", async () => {
   const probe = new ProbeLog(() => true);
   probe.event("session-1", "message.delta", 1, true);
@@ -225,41 +245,68 @@ it("原生 Activity 初始状态查询决定在看，晚到的查询不能覆盖
   expect(again.isForeground?.()).toBe(true);
 });
 
-it("会话提醒设置：子项、阈值持久化，禁用主开关时子项不可编辑", async () => {
+it("通知设置：开关不是原生复选框，子项与时长持久化，关闭总开关时子项与时长禁用", async () => {
   const platform = appPlatform(
     withBackground(false, { notificationStatus: () => Promise.resolve({ enabled: true }) }),
   );
   const container = await mount(platform.background(api()));
-  const attention = container.querySelector<HTMLInputElement>('input[aria-label="需要确认"]');
-  const enabled = container.querySelector<HTMLInputElement>('input[aria-label="会话提醒"]');
-  const threshold = container.querySelector<HTMLSelectElement>('select[aria-label="完成阈值"]');
-  expect(attention?.checked).toBe(true);
-  await act(() => attention?.click());
-  expect(attention?.checked).toBe(false);
+  const section = container.querySelector('section[aria-label="通知"]');
+  expect(section?.querySelector("h3")?.textContent).toBe("通知");
+  expect(section?.querySelector('input[type="checkbox"]')).toBeNull();
+  expect(
+    [...(section?.querySelectorAll(".phone-item-label") ?? [])].map((item) => item.textContent),
+  ).toEqual(["通知", "需要确认（权限、提问）", "出错停止", "完成", "提醒触发时长"]);
+  expect(section?.textContent).not.toContain("打开系统应用设置");
+  const sw = (label: string) =>
+    container.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`);
+  const threshold = container.querySelector<HTMLSelectElement>('select[aria-label="提醒触发时长"]');
+  expect(sw("需要确认")?.getAttribute("aria-checked")).toBe("true");
+  await act(() => sw("需要确认")?.click());
+  expect(sw("需要确认")?.getAttribute("aria-checked")).toBe("false");
   await act(() => {
     if (!threshold) return;
     threshold.value = "300";
     threshold.dispatchEvent(new Event("change", { bubbles: true }));
   });
   expect(threshold?.value).toBe("300");
-  await act(() => enabled?.click());
-  expect(attention?.disabled).toBe(true);
+  await act(() => sw("通知")?.click());
+  expect(sw("需要确认")?.disabled).toBe(true);
+  expect(sw("出错停止")?.disabled).toBe(true);
+  expect(sw("完成")?.disabled).toBe(true);
   expect(threshold?.disabled).toBe(true);
   await act(async () => root?.unmount());
   root = undefined;
   document.body.innerHTML = "";
   const reloaded = await mount(platform.background(api()));
-  expect(reloaded.querySelector<HTMLInputElement>('input[aria-label="会话提醒"]')?.checked).toBe(
-    false,
-  );
-  expect(reloaded.querySelector<HTMLInputElement>('input[aria-label="需要确认"]')?.checked).toBe(
-    false,
-  );
-  expect(reloaded.querySelector<HTMLSelectElement>('select[aria-label="完成阈值"]')?.value).toBe(
-    "300",
-  );
+  const again = (label: string) =>
+    reloaded.querySelector(`[role="switch"][aria-label="${label}"]`)?.getAttribute("aria-checked");
+  expect(again("通知")).toBe("false");
+  expect(again("需要确认")).toBe("false");
+  expect(
+    reloaded.querySelector<HTMLSelectElement>('select[aria-label="提醒触发时长"]')?.value,
+  ).toBe("300");
 });
 
+it("系统通知被关闭时才出现打开系统应用设置", async () => {
+  const openSettings = vi.fn<AppHost["openSettings"]>().mockResolvedValue(undefined);
+  const platform = appPlatform(
+    withBackground(false, {
+      notificationStatus: () => Promise.resolve({ enabled: false }),
+      openSettings,
+    }),
+  );
+  const container = await mount(platform.background(api()));
+  const section = container.querySelector('section[aria-label="通知"]');
+  expect(section?.textContent).toContain("系统通知已关闭");
+  expect(section?.textContent).not.toContain("请到系统");
+  const button = [...(section?.querySelectorAll("button") ?? [])].find(
+    (item) => item.textContent === "打开系统应用设置",
+  );
+  await act(async () => {
+    button?.click();
+  });
+  expect(openSettings).toHaveBeenCalledWith("app");
+});
 it("通知目标经原生一次性读取，暖启动事件送到当前页面", async () => {
   const target = { hostId: "computer", sessionId: "s" };
   const consumeNotificationTarget = vi
