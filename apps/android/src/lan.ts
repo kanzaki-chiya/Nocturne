@@ -2,25 +2,25 @@ import {
   connectChannel,
   connectDeviceRelay,
   FRAME_TYPES,
-  RelayError,
   RemoteChannelError,
   type DeviceRelay,
   type FrameTransport,
   type SecureLineTransport,
 } from "@nocturne/remote";
+import { createRpcClient, RPC_PROTOCOL_VERSION, type RpcClient } from "@nocturne/rpc/client";
 import {
-  createRpcClient,
-  RPC_PROTOCOL_VERSION,
-  RpcError,
-  type RpcClient,
-} from "@nocturne/rpc/client";
-import {
-  retryDelay,
+  CHANNEL_CLOSED_REASON,
+  closeOutcome,
+  handshakeFailure,
+  HOST_OFFLINE_MESSAGE,
+  nextRetryDelay,
+  relayConnectFailure,
   versionMessage,
   type ConnectionState,
   type PhoneConnectionLike,
   type PhoneConnectionOptions,
 } from "../../desktop/src/web/connection";
+import { closeReason } from "../../desktop/src/web/local";
 import { decode } from "../../desktop/src/web/storage";
 
 export const LAN_STORAGE_KEY = "nocturne.lan.endpoints.v1";
@@ -130,11 +130,11 @@ export function localStorageLanStore(key = LAN_STORAGE_KEY): LanEndpointStore {
     }
   };
 
-  const writeAll = (data: Record<string, string[]>) => {
+  const writeAll = (all: Record<string, string[]>): void => {
     try {
-      globalThis.localStorage.setItem(key, JSON.stringify(data));
+      globalThis.localStorage.setItem(key, JSON.stringify(all));
     } catch {
-      /* 存储受限时退化为仅当次会话生效 */
+      /* 存储受限时静默退化为当次运行态 */
     }
   };
 
@@ -148,46 +148,48 @@ export function localStorageLanStore(key = LAN_STORAGE_KEY): LanEndpointStore {
       const normalized = normalizeLanEndpoints(endpoints);
       const changed = !sameList(previous, normalized);
       if (normalized.length === 0) {
-        const next: Record<string, string[]> = {};
-        for (const [k, v] of Object.entries(all)) {
-          if (k !== hostId) next[k] = v;
-        }
-        writeAll(next);
-      } else {
-        all[hostId] = normalized;
-        writeAll(all);
+        const rest = Object.fromEntries(Object.entries(all).filter(([k]) => k !== hostId));
+        writeAll(rest);
+        return changed;
       }
+      all[hostId] = normalized;
+      writeAll(all);
       return changed;
     },
   };
 }
 
+export interface GuardedHandshakeTransport {
+  readonly transport: FrameTransport;
+  readonly sentFrameTypes: readonly number[];
+  allowDataFrames(): void;
+}
+
 /**
  * 传输层守卫：在 `allowDataFrames()` 被调用（即 `connectChannel` 完成电脑公钥验签）前，
- * 只允许发送握手控制帧（init / finish / error），任何情况下禁止发送业务数据帧。
+ * 严禁发送任何 `FRAME_TYPES.data` 数据帧；若出现非握手控制帧，立即关闭连接并抛错。
  */
-export function guardPreHandshakeTransport(raw: FrameTransport): {
-  transport: FrameTransport;
-  allowDataFrames(): void;
-} {
-  let handshakeVerified = false;
+export function guardPreHandshakeTransport(raw: FrameTransport): GuardedHandshakeTransport {
+  let unlocked = false;
+  const sentTypes: number[] = [];
   return {
+    sentFrameTypes: sentTypes,
     allowDataFrames() {
-      handshakeVerified = true;
+      unlocked = true;
     },
     transport: {
       send(frame) {
-        if (!handshakeVerified) {
-          const type = frame[0];
+        const type = frame[0];
+        if (!unlocked) {
           if (
-            type !== FRAME_TYPES.init &&
-            type !== FRAME_TYPES.finish &&
-            type !== FRAME_TYPES.error
+            type === undefined ||
+            (type !== FRAME_TYPES.init && type !== FRAME_TYPES.finish && type !== FRAME_TYPES.error)
           ) {
             raw.close();
             throw new RemoteChannelError("protocol_error");
           }
         }
+        if (type !== undefined) sentTypes.push(type);
         raw.send(frame);
       },
       onFrame(handler) {
@@ -203,29 +205,43 @@ export function guardPreHandshakeTransport(raw: FrameTransport): {
   };
 }
 
+export interface LanPhoneConnectionOptions extends PhoneConnectionOptions {
+  connectLan?: ((url: string) => Promise<FrameTransport>) | undefined;
+  endpointStore?: LanEndpointStore | undefined;
+  clock?: LanClock | undefined;
+  random?: (() => number) | undefined;
+}
+
 interface ListenerRegistration {
   attach(client: RpcClient): () => void;
   detach: (() => void) | undefined;
 }
 
-interface InflightBucket {
+interface ClientInflight {
   count: number;
   waiters: Set<() => void>;
 }
 
+/**
+ * 可平滑切换底层 `RpcClient` 的代理门面：
+ * - 跨底层连接切换时自动重绑全部通知监听器；
+ * - 在 `beginCutover()` 到 `completeCutover()` 窗口期内，外部新发起的 RPC 调用排队挂起，
+ *   待直连通道初始化与会话恢复完成后精确转发一次到新通道；
+ * - 记录经本门面发往各底层客户端尚未落定的在途调用数，切换后等旧客户端在途调用落定再关。
+ */
 class SwitchingRpcFacade {
   private current: RpcClient;
   private readonly registrations = new Set<ListenerRegistration>();
-  private readonly inflightByClient = new Map<RpcClient, InflightBucket>();
+  private readonly inflightByClient = new Map<RpcClient, ClientInflight>();
   private cutoverPromise: Promise<void> | undefined;
   private releaseCutover: (() => void) | undefined;
-  private resolveClosed!: () => void;
-  readonly closedPromise: Promise<void>;
   private closedFlag = false;
+  private readonly closedDeferred: Promise<void>;
+  private resolveClosed!: () => void;
 
   constructor(initial: RpcClient) {
     this.current = initial;
-    this.closedPromise = new Promise<void>((resolve) => {
+    this.closedDeferred = new Promise<void>((resolve) => {
       this.resolveClosed = resolve;
     });
   }
@@ -375,21 +391,26 @@ class SwitchingRpcFacade {
     };
 
     return {
-      computer: computerProxy,
-      runtime: runtimeProxy,
-      provider: providerProxy,
-      login: loginProxy,
+      closed: this.closedDeferred,
+      initialize: () => waitReady().then((c) => this.trackCall(c, () => c.initialize())),
+      shutdown: () => waitReady().then((c) => this.trackCall(c, () => c.shutdown())),
+      close: () => {
+        this.markClosed();
+      },
+      call: (method, params) =>
+        waitReady().then((c) => this.trackCall(c, () => c.call(method, params))),
       onNotification: (method, handler) => register((c) => c.onNotification(method, handler)),
       onEvent: (handler) => register((c) => c.onEvent(handler)),
       onProvidersChanged: (handler) => register((c) => c.onProvidersChanged(handler)),
       onLoginCompleted: (handler) => register((c) => c.onLoginCompleted(handler)),
-      initialize: () => waitReady().then((c) => this.trackCall(c, () => c.initialize())),
-      call: (method, params) =>
-        waitReady().then((c) => this.trackCall(c, () => c.call(method, params))),
+      runtime: runtimeProxy,
+      provider: providerProxy,
+      login: loginProxy,
+      computer: computerProxy,
       session: (sessionId: string) => {
         type SessionHandle = ReturnType<RpcClient["session"]>;
-        const base = wrapMethodObject<SessionHandle>((c) => c.session(sessionId));
-        return new Proxy(base, {
+        const sessionBase = wrapMethodObject<SessionHandle>((c) => c.session(sessionId));
+        return new Proxy(sessionBase, {
           get: (target, prop): unknown => {
             if (prop === "id") return sessionId;
             if (prop === "subscribe") {
@@ -407,20 +428,8 @@ class SwitchingRpcFacade {
           },
         });
       },
-      shutdown: () => waitReady().then((c) => this.trackCall(c, () => c.shutdown())),
-      close: () => {
-        this.markClosed();
-      },
-      closed: this.closedPromise,
     };
   }
-}
-
-export interface LanPhoneConnectionOptions extends PhoneConnectionOptions {
-  connectLan?: ((url: string) => Promise<FrameTransport>) | undefined;
-  endpointStore?: LanEndpointStore | undefined;
-  clock?: LanClock | undefined;
-  random?: (() => number) | undefined;
 }
 
 interface LanHandshakeSuccess {
@@ -484,7 +493,7 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     try {
       this.activeRawTransport?.close();
     } catch {
-      /* 已关闭 */
+      /* ignore */
     }
     this.activeRawTransport = undefined;
     this.relay?.transport.close();
@@ -498,8 +507,9 @@ export class LanPhoneConnection implements PhoneConnectionLike {
 
   visibility(visible: boolean): void {
     this.visible = visible;
-    if (visible && !this.stopped && this.state === "offline") {
-      this.attempt = 0;
+    if (!visible) {
+      this.cancelTimer();
+    } else if (!this.stopped && !this.relay && this.transportKind === "none" && !this.connecting) {
       this.cancelTimer();
       void this.connect();
     }
@@ -518,17 +528,9 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     }
   }
 
-  private schedule(): void {
-    if (this.stopped || !this.visible || this.timer !== undefined) return;
-    const delay = retryDelay(this.attempt++, this.options.random);
-    this.timer = this.clock.setTimeout(() => {
-      this.timer = undefined;
-      void this.connect();
-    }, delay);
-  }
-
-  private retry(code: number | undefined, reason: string): void {
-    this.connecting = false;
+  private retry(code?: number, reason = closeReason(code)): void {
+    if (this.stopped) return;
+    this.generation++;
     this.activeRaceCleanup?.();
     this.activeRaceCleanup = undefined;
     this.activeRelayAttemptAbort?.();
@@ -539,32 +541,37 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     try {
       this.activeRawTransport?.close();
     } catch {
-      /* 已关闭 */
+      /* ignore */
     }
     this.activeRawTransport = undefined;
+    this.relay?.transport.close();
     this.relay = undefined;
     this.transportKind = "none";
+    this.connecting = false;
 
-    if (code === 4003) {
-      this.options.disconnected("此手机的远程访问已被移除");
-      this.set("revoked", "此手机的远程访问已被移除，重新扫码才能连接");
-      return;
-    }
-    if (code === 4004) {
-      this.options.disconnected("电脑已退出远程登记");
-      this.set("revoked", "电脑已退出远程登记");
-      return;
-    }
     this.options.disconnected(reason);
-    this.set("offline", reason);
-    this.schedule();
+    const outcome = closeOutcome(code);
+    if (outcome.stop) {
+      this.stopped = true;
+      this.set(outcome.state, outcome.message);
+      return;
+    }
+    this.set(outcome.state, outcome.message);
+    if (!this.visible) return;
+    const { delay, nextAttempt } = nextRetryDelay(code, this.attempt, this.options.random);
+    this.attempt = nextAttempt;
+    this.timer = this.clock.setTimeout(() => {
+      this.timer = undefined;
+      void this.connect();
+    }, delay);
   }
 
   private handleProtocolIncompatible(serverProtocolVersion: number): void {
-    this.connecting = false;
-    const message = (this.options.versionMessage ?? versionMessage)(serverProtocolVersion);
-    this.options.disconnected(message);
-    this.set("incompatible", message);
+    this.stop();
+    this.set(
+      "incompatible",
+      (this.options.versionMessage ?? versionMessage)(serverProtocolVersion),
+    );
   }
 
   private candidateEndpoints(): string[] {
@@ -636,7 +643,7 @@ export class LanPhoneConnection implements PhoneConnectionLike {
             try {
               t.close();
             } catch {
-              /* 忽略关闭异常 */
+              /* ignore */
             }
           }
         }
@@ -688,7 +695,7 @@ export class LanPhoneConnection implements PhoneConnectionLike {
               try {
                 raw.close();
               } catch {
-                /* 忽略关闭异常 */
+                /* ignore */
               }
             }
             if (
@@ -709,7 +716,7 @@ export class LanPhoneConnection implements PhoneConnectionLike {
   }
 
   private async connect(): Promise<void> {
-    if (this.stopped || this.connecting) return;
+    if (this.stopped || !this.visible || this.connecting) return;
     this.connecting = true;
     this.cancelTimer();
     const generation = ++this.generation;
@@ -729,39 +736,49 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     candidates: readonly string[],
     generation: number,
   ): Promise<void> {
-    const choice: { winner: "none" | "lan" | "relay"; relayAborted: boolean } = {
+    const state: {
+      winner: "none" | "lan" | "relay";
+      relayAborted: boolean;
+      lanFinished: boolean;
+      hostOnlineStarted: boolean;
+      relayRef: DeviceRelay | undefined;
+      relayFailure: { code: number | undefined; reason: string } | undefined;
+    } = {
       winner: "none",
       relayAborted: false,
+      lanFinished: false,
+      hostOnlineStarted: false,
+      relayRef: undefined,
+      relayFailure: undefined,
     };
-    const getWinner = () => choice.winner;
-    const isRelayAborted = () => choice.relayAborted;
-    let relayRef: DeviceRelay | undefined;
+    const getWinner = () => state.winner;
+    const isRelayAborted = () => state.relayAborted;
+    const isLanFinished = () => state.lanFinished;
+    const isHostOnlineStarted = () => state.hostOnlineStarted;
     let relayChannelRef: SecureLineTransport | undefined;
     let relayReadyPromise: Promise<boolean> | undefined;
-    let relayFailure: { code: number | undefined; reason: string } | undefined;
-    let lanFinished = false;
 
     const abortRelay = () => {
-      if (choice.relayAborted) return;
-      choice.relayAborted = true;
+      if (state.relayAborted) return;
+      state.relayAborted = true;
       this.activeRelayAttemptAbort = undefined;
       try {
         relayChannelRef?.close();
       } catch {
-        /* 忽略 */
+        /* ignore */
       }
       try {
-        relayRef?.transport.close();
+        state.relayRef?.transport.close();
       } catch {
-        /* 忽略 */
+        /* ignore */
       }
     };
     this.activeRelayAttemptAbort = abortRelay;
 
-    const handleRelayEarlyFailure = (code: number | undefined, reason: string) => {
+    const handleRelayEarlyFailure = (code?: number, reason = closeReason(code)) => {
       if (isRelayAborted() || !this.isCurrent(generation) || getWinner() === "lan") return;
-      relayFailure = { code, reason };
-      if (lanFinished && getWinner() === "none") {
+      state.relayFailure = { code, reason };
+      if (closeOutcome(code).stop || (isLanFinished() && getWinner() === "none")) {
         this.retry(code, reason);
       }
     };
@@ -769,22 +786,27 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     // 1. 启动直连竞速分支
     const lanFlow = (async () => {
       const direct = await this.runSingleLanRace(candidates, generation);
-      lanFinished = true;
+      state.lanFinished = true;
       if (!this.isCurrent(generation)) {
         direct?.channel.close();
         direct?.raw.close();
         return;
       }
       if (!direct) {
-        if (getWinner() === "none" && relayFailure) {
-          this.retry(relayFailure.code, relayFailure.reason);
+        if (getWinner() === "none") {
+          if (state.relayFailure) {
+            this.retry(state.relayFailure.code, state.relayFailure.reason);
+          } else if (state.relayRef && !isHostOnlineStarted()) {
+            // 直连竞速失败且中继已连上但电脑不在线：切回 offline，避免一直卡在 connecting
+            this.set("offline", HOST_OFFLINE_MESSAGE);
+          }
         }
         return;
       }
 
       if (getWinner() === "none") {
         // 直连先完成加密握手：采用直连，立即关闭这次的中继连接且不触发断线回调或重试
-        choice.winner = "lan";
+        state.winner = "lan";
         abortRelay();
         await this.activateDirectInitial(direct, generation);
         return;
@@ -816,28 +838,32 @@ export class LanPhoneConnection implements PhoneConnectionLike {
         });
       } catch (error) {
         if (isRelayAborted() || !this.isCurrent(generation) || getWinner() === "lan") return;
-        const code = error instanceof RelayError ? error.closeCode : undefined;
-        const reason = error instanceof Error ? error.message : String(error);
-        handleRelayEarlyFailure(code, reason);
+        const failure = relayConnectFailure(error);
+        handleRelayEarlyFailure(failure.code, failure.reason);
         return;
       }
 
-      relayRef = relay;
       if (isRelayAborted() || !this.isCurrent(generation) || getWinner() === "lan") {
         relay.transport.close();
         return;
       }
+      state.relayRef = relay;
+      this.relay = relay;
 
       relay.onClose((code) => {
         if (isRelayAborted() || !this.isCurrent(generation) || getWinner() === "lan") return;
         if (getWinner() === "none") {
-          handleRelayEarlyFailure(code, "中继连接已断开");
+          handleRelayEarlyFailure(code);
           return;
         }
         if (this.relay === relay) {
-          this.retry(code, "中继连接已断开");
+          this.retry(code);
         }
       });
+
+      if (!relay.online && isLanFinished() && getWinner() === "none") {
+        this.set("offline", HOST_OFFLINE_MESSAGE);
+      }
 
       const startRelayHandshake = () => {
         if (isRelayAborted() || !this.isCurrent(generation) || getWinner() !== "none") return;
@@ -855,111 +881,97 @@ export class LanPhoneConnection implements PhoneConnectionLike {
               return;
             }
             guarded.allowDataFrames();
-            choice.winner = "relay";
+            state.winner = "relay";
             this.activeRelayAttemptAbort = undefined;
             this.relay = relay;
             relayReadyPromise = this.activateRelayInitial(relay, channel, generation);
             await relayReadyPromise;
           } catch (error) {
             if (isRelayAborted() || !this.isCurrent(generation) || getWinner() === "lan") return;
-            relay.transport.close();
-            handleRelayEarlyFailure(
-              undefined,
-              `握手失败：${error instanceof Error ? error.message : String(error)}`,
-            );
+            const outcome = handshakeFailure(error, this.options.versionMessage ?? versionMessage);
+            if (outcome.kind === "incompatible") {
+              this.stop();
+              this.set("incompatible", outcome.message);
+            } else {
+              relay.transport.close();
+              handleRelayEarlyFailure(undefined, outcome.reason);
+            }
           }
         })();
       };
 
-      if (!relay.online && !this.lanAttemptRunning) {
-        this.set("offline", "电脑已离线，等它上线会自动连接");
-      }
-      const hsState = { started: false };
       relay.onHostOnline(() => {
         if (
-          hsState.started ||
+          isHostOnlineStarted() ||
           isRelayAborted() ||
           !this.isCurrent(generation) ||
           getWinner() !== "none"
         ) {
           return;
         }
-        hsState.started = true;
-        this.set("connecting");
+        state.hostOnlineStarted = true;
         startRelayHandshake();
       });
-      if (relay.online && !hsState.started) {
-        hsState.started = true;
-        startRelayHandshake();
-      }
     })();
 
     await Promise.all([lanFlow, relayFlow]);
   }
 
   private async connectRelayOnly(generation: number): Promise<void> {
-    let relay: DeviceRelay;
     try {
-      relay = await (this.options.connect ?? connectDeviceRelay)({
+      const relay = await (this.options.connect ?? connectDeviceRelay)({
         origin: this.options.origin,
         hostId: this.options.host.hostId,
         identity: this.options.identity,
       });
-    } catch (error) {
-      if (!this.isCurrent(generation)) return;
-      const code = error instanceof RelayError ? error.closeCode : undefined;
-      this.retry(code, error instanceof Error ? error.message : String(error));
-      return;
-    }
-    if (!this.isCurrent(generation)) {
-      relay.transport.close();
-      return;
-    }
-    this.relay = relay;
-    relay.onClose((code) => {
-      if (!this.isCurrent(generation) || this.relay !== relay) return;
-      this.retry(code, "中继连接已断开");
-    });
-
-    const startRelayHandshake = () => {
-      if (!this.isCurrent(generation) || this.relay !== relay) return;
-      void (async () => {
-        const guarded = guardPreHandshakeTransport(relay.transport);
-        try {
-          const channel = await (this.options.channel ?? connectChannel)(guarded.transport, {
-            identity: this.options.identity,
-            hostPublicKey: decode(this.options.host.hostPub),
-          });
-          if (!this.isCurrent(generation) || this.relay !== relay) {
-            channel.close();
-            return;
-          }
-          guarded.allowDataFrames();
-          await this.activateRelayInitial(relay, channel, generation);
-        } catch (error) {
-          if (!this.isCurrent(generation) || this.relay !== relay) return;
-          relay.transport.close();
-          this.retry(
-            undefined,
-            `握手失败：${error instanceof Error ? error.message : String(error)}`,
-          );
+      if (!this.isCurrent(generation)) {
+        relay.transport.close();
+        return;
+      }
+      this.relay = relay;
+      relay.onClose((code) => {
+        if (this.isCurrent(generation) && this.relay === relay) {
+          this.retry(code);
         }
-      })();
-    };
-
-    if (!relay.online) {
-      this.set("offline", "电脑已离线，等它上线会自动连接");
+      });
+      if (!relay.online) this.set("offline", HOST_OFFLINE_MESSAGE);
+      let started = false;
+      relay.onHostOnline(() => {
+        if (started || !this.isCurrent(generation) || this.relay !== relay) return;
+        started = true;
+        void this.handshakeRelayOnly(relay, generation);
+      });
+    } catch (error) {
+      if (this.isCurrent(generation)) {
+        const failure = relayConnectFailure(error);
+        this.retry(failure.code, failure.reason);
+      }
     }
-    const hsState = { started: false };
-    relay.onHostOnline(() => {
-      if (hsState.started || !this.isCurrent(generation) || this.relay !== relay) return;
-      hsState.started = true;
-      this.set("connecting");
-      startRelayHandshake();
-    });
-    if (relay.online && !hsState.started) {
-      hsState.started = true;
-      startRelayHandshake();
+  }
+
+  private async handshakeRelayOnly(relay: DeviceRelay, generation: number): Promise<void> {
+    const guarded = guardPreHandshakeTransport(relay.transport);
+    try {
+      const channel = await (this.options.channel ?? connectChannel)(guarded.transport, {
+        identity: this.options.identity,
+        hostPublicKey: decode(this.options.host.hostPub),
+      });
+      if (!this.isCurrent(generation) || this.relay !== relay) {
+        channel.close();
+        return;
+      }
+      guarded.allowDataFrames();
+      await this.activateRelayInitial(relay, channel, generation);
+    } catch (error) {
+      if (!this.isCurrent(generation) || this.relay !== relay) return;
+      const outcome = handshakeFailure(error, this.options.versionMessage ?? versionMessage);
+      if (outcome.kind === "incompatible") {
+        this.stop();
+        this.set("incompatible", outcome.message);
+      } else {
+        this.retry(undefined, outcome.reason);
+        relay.transport.close();
+      }
     }
   }
 
@@ -1005,19 +1017,20 @@ export class LanPhoneConnection implements PhoneConnectionLike {
       this.set("online");
       void rawClient.closed.then(() => {
         if (this.isCurrent(generation) && this.facade?.active === rawClient) {
-          this.retry(undefined, "加密连接关闭");
+          this.retry(undefined, CHANNEL_CLOSED_REASON);
         }
       });
     } catch (error) {
       rawClient.close();
       direct.raw.close();
       if (!this.isCurrent(generation)) return;
-      if (error instanceof RpcError && error.code === "protocol_version_mismatch") {
-        const version = /服务端\s+(\d+)/.exec(error.message)?.[1];
-        this.handleProtocolIncompatible(Number(version ?? RPC_PROTOCOL_VERSION + 1));
-        return;
+      const outcome = handshakeFailure(error, this.options.versionMessage ?? versionMessage);
+      if (outcome.kind === "incompatible") {
+        this.stop();
+        this.set("incompatible", outcome.message);
+      } else {
+        this.retry(undefined, outcome.reason);
       }
-      this.retry(undefined, `握手失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1060,7 +1073,7 @@ export class LanPhoneConnection implements PhoneConnectionLike {
       this.set("online");
       void relayClient.closed.then(() => {
         if (this.isCurrent(generation) && this.facade?.active === relayClient) {
-          this.retry(undefined, "加密连接关闭");
+          this.retry(undefined, CHANNEL_CLOSED_REASON);
         }
       });
 
@@ -1070,14 +1083,12 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     } catch (error) {
       relayClient.close();
       if (!this.isCurrent(generation)) return false;
-      if (error instanceof RpcError && error.code === "protocol_version_mismatch") {
-        const version = /服务端\s+(\d+)/.exec(error.message)?.[1];
-        this.handleProtocolIncompatible(Number(version ?? RPC_PROTOCOL_VERSION + 1));
+      const outcome = handshakeFailure(error, this.options.versionMessage ?? versionMessage);
+      if (outcome.kind === "incompatible") {
+        this.stop();
+        this.set("incompatible", outcome.message);
       } else {
-        this.retry(
-          undefined,
-          `握手失败：${error instanceof Error ? error.message : String(error)}`,
-        );
+        this.retry(undefined, outcome.reason);
         relay.transport.close();
       }
       return false;
@@ -1192,7 +1203,7 @@ export class LanPhoneConnection implements PhoneConnectionLike {
 
         void directClient.closed.then(() => {
           if (this.isCurrent(generation) && this.facade?.active === directClient) {
-            this.retry(undefined, "加密连接关闭");
+            this.retry(undefined, CHANNEL_CLOSED_REASON);
           }
         });
 
@@ -1224,12 +1235,12 @@ export class LanPhoneConnection implements PhoneConnectionLike {
       try {
         oldRelayClient.close();
       } catch {
-        /* 已关闭 */
+        /* ignore */
       }
       try {
         oldRelay?.transport.close();
       } catch {
-        /* 已关闭 */
+        /* ignore */
       }
     };
     this.drainingCleanups.add(closeNow);

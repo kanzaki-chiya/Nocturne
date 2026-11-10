@@ -145,7 +145,26 @@ export const tauriHost: AppHost = {
     let frameHandler: ((frame: Uint8Array) => void) | undefined;
     let closeHandler: (() => void) | undefined;
     let closed = false;
+    const native: {
+      id: number | undefined;
+      closePending: boolean;
+      closingSent: boolean;
+    } = {
+      id: undefined,
+      closePending: false,
+      closingSent: false,
+    };
     const buffered: Uint8Array[] = [];
+
+    const closeNative = () => {
+      if (native.closingSent) return;
+      if (native.id === undefined) {
+        native.closePending = true;
+        return;
+      }
+      native.closingSent = true;
+      void invoke("plugin:lan-tcp|close", { id: native.id }).catch(() => undefined);
+    };
 
     const notifyClose = () => {
       if (closed) return;
@@ -156,6 +175,7 @@ export const tauriHost: AppHost = {
     const onEvent = new Channel<string | null>((payload) => {
       if (closed) return;
       if (payload === null) {
+        closeNative();
         notifyClose();
         return;
       }
@@ -165,22 +185,19 @@ export const tauriHost: AppHost = {
     });
 
     const id = await invoke<number>("plugin:lan-tcp|connect", { url, onEvent });
+    native.id = id;
+    if (native.closePending) {
+      closeNative();
+    }
     let sendChain = Promise.resolve();
-    let closingSent = false;
-
-    const closeNative = () => {
-      if (closingSent) return;
-      closingSent = true;
-      void invoke("plugin:lan-tcp|close", { id }).catch(() => undefined);
-    };
 
     return {
       send(frame) {
-        if (closed || closingSent) return;
+        if (closed || native.closingSent) return;
         const encoded = encodeBase64(frame);
         sendChain = sendChain
           .then(async () => {
-            if (closed || closingSent) return;
+            if (closed || native.closingSent) return;
             await invoke("plugin:lan-tcp|send", { id, data: encoded });
           })
           .catch(() => {
@@ -200,8 +217,8 @@ export const tauriHost: AppHost = {
         if (closed) queueMicrotask(handler);
       },
       close() {
-        if (closingSent) return;
-        closingSent = true;
+        if (native.closingSent) return;
+        native.closingSent = true;
         void sendChain
           .catch(() => undefined)
           .then(() => invoke("plugin:lan-tcp|close", { id }))

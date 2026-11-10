@@ -258,8 +258,11 @@ fn send(state: State<'_, LanTcpRegistry>, id: u64, data: String) -> Result<(), S
     };
     match tx {
         Some(sender) => sender
-            .send(Outbound::Frame(bytes))
-            .map_err(|_| "局域网直连已关闭".into()),
+            .try_send(Outbound::Frame(bytes))
+            .map_err(|e| match e {
+                mpsc::TrySendError::Full(_) => "局域网直连发送缓冲已满".into(),
+                mpsc::TrySendError::Disconnected(_) => "局域网直连已关闭".into(),
+            }),
         None => Err("局域网直连不存在或已关闭".into()),
     }
 }
@@ -354,5 +357,20 @@ mod tests {
             let decoded = base64_decode(&encoded).unwrap();
             assert_eq!(decoded, src);
         }
+    }
+
+    #[test]
+    fn outbound_channel_try_send_does_not_block_when_full() {
+        let (tx, rx) = mpsc::sync_channel::<Outbound>(1);
+        assert!(tx.try_send(Outbound::Frame(vec![1, 2, 3])).is_ok());
+        assert!(matches!(
+            tx.try_send(Outbound::Frame(vec![4, 5, 6])),
+            Err(mpsc::TrySendError::Full(_))
+        ));
+        drop(rx);
+        assert!(matches!(
+            tx.try_send(Outbound::Frame(vec![7])),
+            Err(mpsc::TrySendError::Disconnected(_))
+        ));
     }
 }

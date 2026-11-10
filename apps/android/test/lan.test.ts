@@ -11,8 +11,16 @@ import {
   type FrameTransport,
   type Identity,
 } from "@nocturne/remote";
-import { RPC_PROTOCOL_VERSION, type RpcClient } from "@nocturne/rpc/client";
-import { PhoneConnection } from "../../desktop/src/web/connection";
+import {
+  createMemoryTransportPair,
+  RPC_PROTOCOL_VERSION,
+  type RpcClient,
+} from "@nocturne/rpc/client";
+import {
+  PhoneConnection,
+  type PhoneConnectionLike,
+  type PhoneConnectionOptions,
+} from "../../desktop/src/web/connection";
 import { webPlatform } from "../../desktop/src/web/platform";
 import { encode, type PairedHost } from "../../desktop/src/web/storage";
 import { tauriHost } from "../src/host";
@@ -895,5 +903,548 @@ describe("安卓端局域网直连（ADR-0087）", () => {
     await vi.waitFor(() => expect(webConn.state).toBe("online"));
     expect(connectRelay).toHaveBeenCalledTimes(1);
     webConn.stop();
+  });
+
+  describe.each([
+    [
+      "PhoneConnection",
+      (opts: PhoneConnectionOptions): PhoneConnectionLike => new PhoneConnection(opts),
+    ],
+    [
+      "LanPhoneConnection（无直连地址）",
+      (opts: PhoneConnectionOptions): PhoneConnectionLike =>
+        new LanPhoneConnection({
+          ...opts,
+          endpointStore: memoryLanStore(),
+        }),
+    ],
+  ] as const)("与 PhoneConnection 行为一致性：%s", (_label, createConn) => {
+    it("中继以 4002、4003、4004、1006 关闭时的状态、文字、断线原因与重连延迟完全一致", async () => {
+      const hostIdentity = await generateIdentity({ extractable: true });
+      const phoneIdentity = await generateIdentity({ extractable: false });
+
+      // --- 4002（立即重连，延迟 0）与 1006（退避重连，延迟 1000ms @ random=0.5） ---
+      let closeRelay: ((code: number) => void) | undefined;
+      const makeIdleRelay = (): DeviceRelay => {
+        const [transport] = createMemoryFramePair();
+        return {
+          online: false,
+          transport,
+          onHostOnline: vi.fn(),
+          subscribePush: vi.fn(),
+          unsubscribePush: vi.fn(),
+          onClose: (fn) => {
+            closeRelay = fn;
+          },
+        };
+      };
+      const connect = vi.fn(async () => makeIdleRelay());
+      const disconnected = vi.fn();
+      const conn = createConn({
+        origin: "https://relay.example",
+        identity: phoneIdentity,
+        host: makePairedHost(hostIdentity),
+        connect,
+        changed: () => undefined,
+        connected: async () => undefined,
+        disconnected,
+      });
+
+      conn.start();
+      await vi.waitFor(() => expect(conn.state).toBe("offline"));
+      expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+      expect(connect).toHaveBeenCalledTimes(1);
+
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+      // 4002：offline + 固定文案，disconnected 收到 "电脑离线"，延迟 0ms 立即重连
+      closeRelay?.(4002);
+      expect(conn.state).toBe("offline");
+      expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+      expect(disconnected).toHaveBeenLastCalledWith("电脑离线");
+      expect(connect).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(2);
+
+      // 1006：offline + 固定文案，disconnected 收到 "网络中断"，延迟 1000ms 后重连
+      closeRelay?.(1006);
+      expect(conn.state).toBe("offline");
+      expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+      expect(disconnected).toHaveBeenLastCalledWith("网络中断");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connect).toHaveBeenCalledTimes(3);
+      conn.stop();
+
+      // --- 4003 与 4004：revoked + "这台手机已被移除或吊销"，停止且不再安排重连 ---
+      for (const code of [4003, 4004] as const) {
+        vi.useRealTimers();
+        let closeOne: ((c: number) => void) | undefined;
+        const connectRevoke = vi.fn(async (): Promise<DeviceRelay> => {
+          const [transport] = createMemoryFramePair();
+          return {
+            online: false,
+            transport,
+            onHostOnline: vi.fn(),
+            subscribePush: vi.fn(),
+            unsubscribePush: vi.fn(),
+            onClose: (fn) => {
+              closeOne = fn;
+            },
+          };
+        });
+        const discRevoke = vi.fn();
+        const revokedConn = createConn({
+          origin: "https://relay.example",
+          identity: phoneIdentity,
+          host: makePairedHost(hostIdentity),
+          connect: connectRevoke,
+          changed: () => undefined,
+          connected: async () => undefined,
+          disconnected: discRevoke,
+        });
+        revokedConn.start();
+        await vi.waitFor(() => expect(revokedConn.state).toBe("offline"));
+
+        vi.useFakeTimers();
+        closeOne?.(code);
+        expect(revokedConn.state).toBe("revoked");
+        expect(revokedConn.message).toBe("这台手机已被移除或吊销");
+        expect(discRevoke).toHaveBeenCalledTimes(1);
+        expect(discRevoke).toHaveBeenLastCalledWith("这台手机已被移除或吊销");
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(connectRevoke).toHaveBeenCalledTimes(1);
+        revokedConn.stop();
+      }
+    });
+
+    it("中继连接抛出非 RelayError 时状态与断线原因一致且按退避延迟重连", async () => {
+      const hostIdentity = await generateIdentity({ extractable: true });
+      const phoneIdentity = await generateIdentity({ extractable: false });
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+      const connect = vi.fn(async (): Promise<DeviceRelay> => {
+        throw new Error("internal socket ECONNRESET details");
+      });
+      const disconnected = vi.fn();
+      const conn = createConn({
+        origin: "https://relay.example",
+        identity: phoneIdentity,
+        host: makePairedHost(hostIdentity),
+        connect,
+        changed: () => undefined,
+        connected: async () => undefined,
+        disconnected,
+      });
+
+      conn.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(conn.state).toBe("offline");
+      expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+      expect(disconnected).toHaveBeenCalledTimes(1);
+      expect(disconnected).toHaveBeenLastCalledWith("无法连接中继");
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(connect).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connect).toHaveBeenCalledTimes(2);
+      conn.stop();
+    });
+
+    it("握手失败时状态、文字、断线原因与单次退避重连完全一致", async () => {
+      const hostIdentity = await generateIdentity({ extractable: true });
+      const phoneIdentity = await generateIdentity({ extractable: false });
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+      const connect = vi.fn(async (): Promise<DeviceRelay> => {
+        const [transport] = createMemoryFramePair();
+        let closeCb: ((code: number) => void) | undefined;
+        vi.spyOn(transport, "close").mockImplementation(() => {
+          closeCb?.(1006);
+        });
+        return {
+          online: true,
+          transport,
+          onHostOnline: (fn) => {
+            queueMicrotask(fn);
+          },
+          subscribePush: vi.fn(),
+          unsubscribePush: vi.fn(),
+          onClose: (fn) => {
+            closeCb = fn;
+          },
+        };
+      });
+      const disconnected = vi.fn();
+      const conn = createConn({
+        origin: "https://relay.example",
+        identity: phoneIdentity,
+        host: makePairedHost(hostIdentity),
+        connect,
+        channel: () => Promise.reject(new Error("签名损坏")),
+        changed: () => undefined,
+        connected: async () => undefined,
+        disconnected,
+      });
+
+      conn.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(conn.state).toBe("offline");
+      expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+      expect(disconnected).toHaveBeenCalledTimes(1);
+      expect(disconnected).toHaveBeenLastCalledWith("握手失败：签名损坏");
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(connect).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connect).toHaveBeenCalledTimes(2);
+      conn.stop();
+    });
+
+    it("转入后台取消已排定重连且断开后不重连，回到前台立即恢复重连", async () => {
+      const hostIdentity = await generateIdentity({ extractable: true });
+      const phoneIdentity = await generateIdentity({ extractable: false });
+      let closeRelay: ((code: number) => void) | undefined;
+      const connect = vi.fn(async (): Promise<DeviceRelay> => {
+        const [transport] = createMemoryFramePair();
+        return {
+          online: false,
+          transport,
+          onHostOnline: vi.fn(),
+          subscribePush: vi.fn(),
+          unsubscribePush: vi.fn(),
+          onClose: (fn) => {
+            closeRelay = fn;
+          },
+        };
+      });
+      const disconnected = vi.fn();
+      const conn = createConn({
+        origin: "https://relay.example",
+        identity: phoneIdentity,
+        host: makePairedHost(hostIdentity),
+        connect,
+        changed: () => undefined,
+        connected: async () => undefined,
+        disconnected,
+      });
+
+      conn.start();
+      await vi.waitFor(() => expect(conn.state).toBe("offline"));
+      expect(connect).toHaveBeenCalledTimes(1);
+
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+      // 先排定一次 1000ms 重连，随即转入后台应取消该重连定时器
+      closeRelay?.(1006);
+      expect(disconnected).toHaveBeenLastCalledWith("网络中断");
+      conn.visibility(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(connect).toHaveBeenCalledTimes(1);
+
+      // 回到前台立即发起第 2 次连接
+      conn.visibility(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(2);
+
+      // 在线/等待期间转入后台，随后中继断开：更新为 offline 但不安排重连
+      conn.visibility(false);
+      closeRelay?.(1006);
+      expect(conn.state).toBe("offline");
+      expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(connect).toHaveBeenCalledTimes(2);
+
+      // 再次回到前台立即发起第 3 次连接
+      conn.visibility(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(3);
+      conn.stop();
+    });
+
+    it("stop() 之后迟到的中继 onClose 不改变状态也不触发断线回调", async () => {
+      const hostIdentity = await generateIdentity({ extractable: true });
+      const phoneIdentity = await generateIdentity({ extractable: false });
+      let closeRelay: ((code: number) => void) | undefined;
+      const connect = vi.fn(async (): Promise<DeviceRelay> => {
+        const [phoneSide, serverSide] = createMemoryFramePair();
+        serveEncryptedPeer(serverSide, hostIdentity, phoneIdentity);
+        return {
+          online: true,
+          transport: phoneSide,
+          onHostOnline: (fn) => fn(),
+          subscribePush: vi.fn(),
+          unsubscribePush: vi.fn(),
+          onClose: (fn) => {
+            closeRelay = fn;
+          },
+        };
+      });
+      const disconnected = vi.fn();
+      const conn = createConn({
+        origin: "https://relay.example",
+        identity: phoneIdentity,
+        host: makePairedHost(hostIdentity),
+        connect,
+        changed: () => undefined,
+        connected: async () => undefined,
+        disconnected,
+      });
+
+      conn.start();
+      await vi.waitFor(() => expect(conn.state).toBe("online"));
+      expect(conn.message).toBe("");
+
+      vi.useFakeTimers();
+      conn.stop();
+      const stateAfterStop = conn.state;
+      const messageAfterStop = conn.message;
+
+      // 迟到的 4003 与 1006 回调均不得改变状态或调用 disconnected
+      closeRelay?.(4003);
+      closeRelay?.(1006);
+      expect(conn.state).toBe(stateAfterStop);
+      expect(conn.message).toBe(messageAfterStop);
+      expect(disconnected).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(connect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("8. 存有直连地址、直连不可达且中继已连上但电脑不在线时置为 offline，随后电脑上线正常握手进入 online", async () => {
+    const hostIdentity = await generateIdentity({ extractable: true });
+    const phoneIdentity = await generateIdentity({ extractable: false });
+    const store = memoryLanStore({
+      [hostIdentity.id]: ["tcp://192.168.1.99:45000"],
+    });
+
+    let rejectLan!: (reason?: unknown) => void;
+    const lanAttempt = new Promise<never>((_resolve, reject) => {
+      rejectLan = reject;
+    });
+
+    const [relayPhoneSide, relayServerSide] = createMemoryFramePair();
+    serveEncryptedPeer(relayServerSide, hostIdentity, phoneIdentity, {
+      lanEndpoints: () => [],
+    });
+    let triggerHostOnline: (() => void) | undefined;
+    const relay: DeviceRelay = {
+      online: false,
+      transport: relayPhoneSide,
+      onHostOnline: (fn) => {
+        triggerHostOnline = fn;
+      },
+      subscribePush: vi.fn(),
+      unsubscribePush: vi.fn(),
+      onClose: () => undefined,
+    };
+
+    const conn = new LanPhoneConnection({
+      origin: "https://relay.example",
+      identity: phoneIdentity,
+      host: makePairedHost(hostIdentity),
+      endpointStore: store,
+      connect: async () => relay,
+      connectLan: () => lanAttempt,
+      changed: () => undefined,
+      connected: async () => undefined,
+      disconnected: () => undefined,
+    });
+
+    conn.start();
+    await vi.waitFor(() => expect(triggerHostOnline).toBeTypeOf("function"));
+    // 直连尚未结束时仍在尝试连接
+    expect(conn.state).toBe("connecting");
+
+    // 直连失败：中继已连上但电脑不在线，状态必须置为 offline 且文案正确（不卡在 connecting）
+    rejectLan(new Error("ETIMEDOUT"));
+    await vi.waitFor(() => expect(conn.state).toBe("offline"));
+    expect(conn.message).toBe("电脑已离线，等它上线会自动连接");
+
+    // 随后电脑上线：正常经中继完成握手并进入 online
+    triggerHostOnline?.();
+    await vi.waitFor(() => expect(conn.state).toBe("online"));
+    expect(conn.message).toBe("");
+    expect(conn.transportKind).toBe("relay");
+    conn.stop();
+  });
+
+  it("9. 重试之后，上一代的直连握手迟到完成时被立即关闭且不影响当前状态", async () => {
+    const hostIdentity = await generateIdentity({ extractable: true });
+    const phoneIdentity = await generateIdentity({ extractable: false });
+    const store = memoryLanStore({
+      [hostIdentity.id]: ["tcp://192.168.1.50:45000"],
+    });
+
+    const [staleDirectPhone] = createMemoryFramePair();
+    const staleRawCloseSpy = vi.spyOn(staleDirectPhone, "close");
+    const [staleChannelSide] = createMemoryTransportPair();
+    const staleChannelCloseSpy = vi.spyOn(staleChannelSide, "close");
+
+    let resolveStaleChannel!: (ch: typeof staleChannelSide & { closeReason?: string }) => void;
+    const staleChannelPromise = new Promise<typeof staleChannelSide>((resolve) => {
+      resolveStaleChannel = resolve;
+    });
+
+    let closeFirstRelay: ((code: number) => void) | undefined;
+    let lanCallCount = 0;
+    const clock = new ManualClock();
+
+    const conn = new LanPhoneConnection({
+      origin: "https://relay.example",
+      identity: phoneIdentity,
+      host: makePairedHost(hostIdentity),
+      endpointStore: store,
+      clock,
+      random: () => 0.5,
+      connect: async () => {
+        const [transport] = createMemoryFramePair();
+        return {
+          online: false,
+          transport,
+          onHostOnline: vi.fn(),
+          subscribePush: vi.fn(),
+          unsubscribePush: vi.fn(),
+          onClose: (fn) => {
+            closeFirstRelay = fn;
+          },
+        };
+      },
+      connectLan: async () => {
+        lanCallCount++;
+        if (lanCallCount === 1) return staleDirectPhone;
+        return new Promise<never>(() => undefined);
+      },
+      channel: async () => staleChannelPromise as never,
+      changed: () => undefined,
+      connected: async () => undefined,
+      disconnected: () => undefined,
+    });
+
+    conn.start();
+    await vi.waitFor(() => expect(closeFirstRelay).toBeTypeOf("function"));
+    await vi.waitFor(() => expect(lanCallCount).toBe(1));
+
+    // 中继以 4003 关闭，触发 retry(4003)：generation 递增，状态变为 revoked
+    closeFirstRelay?.(4003);
+    expect(conn.state).toBe("revoked");
+    expect(conn.message).toBe("这台手机已被移除或吊销");
+
+    // 此时第 1 代的直连 channel 握手迟到完成：必须被立即关闭，不得改变 revoked 状态
+    resolveStaleChannel(staleChannelSide);
+    await vi.waitFor(() => expect(staleChannelCloseSpy).toHaveBeenCalled());
+    expect(staleRawCloseSpy).toHaveBeenCalled();
+    expect(conn.state).toBe("revoked");
+    expect(conn.message).toBe("这台手机已被移除或吊销");
+    expect(conn.client).toBeUndefined();
+    conn.stop();
+
+    // 再测普通断线触发 retry(1006)（未 stopped、等待重连中）时，上一代的直连握手迟到完成同样被关闭且不影响当前 offline 状态
+    const [gen1Raw] = createMemoryFramePair();
+    const gen1RawClose = vi.spyOn(gen1Raw, "close");
+    const [gen1Chan] = createMemoryTransportPair();
+    const gen1ChanClose = vi.spyOn(gen1Chan, "close");
+    let resolveGen1Chan!: (ch: typeof gen1Chan) => void;
+    const gen1ChanPromise = new Promise<typeof gen1Chan>((resolve) => {
+      resolveGen1Chan = resolve;
+    });
+    let closeRelay2: ((code: number) => void) | undefined;
+    let lanAttemptCount = 0;
+    let channelCalls = 0;
+    const conn2 = new LanPhoneConnection({
+      origin: "https://relay.example",
+      identity: phoneIdentity,
+      host: makePairedHost(hostIdentity),
+      endpointStore: store,
+      clock,
+      random: () => 0.5,
+      connect: async () => {
+        const [phoneSide, serverSide] = createMemoryFramePair();
+        serveEncryptedPeer(serverSide, hostIdentity, phoneIdentity);
+        return {
+          online: true,
+          transport: phoneSide,
+          onHostOnline: (fn) => fn(),
+          subscribePush: vi.fn(),
+          unsubscribePush: vi.fn(),
+          onClose: (fn) => {
+            closeRelay2 = fn;
+          },
+        };
+      },
+      connectLan: async () => {
+        lanAttemptCount++;
+        if (lanAttemptCount === 1) return gen1Raw;
+        return new Promise<never>(() => undefined);
+      },
+      channel: async (transport, opts) => {
+        channelCalls++;
+        // 第 1 次 channel 调用是直连尝试（因 connectLan 先启动），令其挂起；第 2 次是中继走真实握手
+        if (channelCalls === 1) {
+          return gen1ChanPromise as never;
+        }
+        const { connectChannel: realConnect } = await import("@nocturne/remote");
+        return realConnect(transport, opts);
+      },
+      changed: () => undefined,
+      connected: async () => undefined,
+      disconnected: () => undefined,
+    });
+    conn2.start();
+    await vi.waitFor(() => expect(conn2.state).toBe("online"));
+    expect(conn2.transportKind).toBe("relay");
+
+    // 中继以 1006 断开触发 retry(1006)：此时 stopped === false，state === "offline"，generation 已递增
+    closeRelay2?.(1006);
+    expect(conn2.state).toBe("offline");
+    expect(conn2.message).toBe("电脑已离线，等它上线会自动连接");
+
+    // 第 1 代迟到的直连握手此刻完成：因 generation 已变，必须立即关闭且不得把状态改成 online
+    resolveGen1Chan(gen1Chan);
+    await vi.waitFor(() => expect(gen1ChanClose).toHaveBeenCalled());
+    expect(gen1RawClose).toHaveBeenCalled();
+    expect(conn2.state).toBe("offline");
+    expect(conn2.client).toBeUndefined();
+    conn2.stop();
+  });
+
+  it("10. connectLan 收到 null 事件后调用 plugin:lan-tcp|close 释放 Rust 侧连接", async () => {
+    const ipcCalls: { cmd: string; args: unknown }[] = [];
+    let channelCallback: ((packet: { index: number; message: string | null }) => void) | undefined;
+
+    vi.stubGlobal("__TAURI_INTERNALS__", {
+      transformCallback: (cb: (packet: { index: number; message: string | null }) => void) => {
+        channelCallback = cb;
+        return 1;
+      },
+      unregisterCallback: () => undefined,
+      invoke: async (cmd: string, args: unknown) => {
+        ipcCalls.push({ cmd, args });
+        if (cmd === "plugin:lan-tcp|connect") return 88;
+        return null;
+      },
+    });
+
+    const transport = await tauriHost.connectLan?.("tcp://192.168.1.5:44000");
+    if (!transport) throw new Error("expected tauriHost.connectLan");
+    let closedNotified = false;
+    transport.onClose(() => {
+      closedNotified = true;
+    });
+
+    expect(channelCallback).toBeTypeOf("function");
+    // 模拟对端断开：Rust 读循环经 Channel 发送 null
+    channelCallback?.({ index: 0, message: null });
+
+    expect(closedNotified).toBe(true);
+    await vi.waitFor(() =>
+      expect(ipcCalls.some((c) => c.cmd === "plugin:lan-tcp|close")).toBe(true),
+    );
+    expect(ipcCalls.find((c) => c.cmd === "plugin:lan-tcp|close")?.args).toEqual({ id: 88 });
   });
 });

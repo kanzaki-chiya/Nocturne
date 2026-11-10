@@ -15,6 +15,11 @@ import { closeReason } from "./local";
 import { decode, type PairedHost } from "./storage";
 
 export type ConnectionState = "connecting" | "offline" | "online" | "revoked" | "incompatible";
+export const HOST_OFFLINE_MESSAGE = "电脑已离线，等它上线会自动连接";
+export const DEVICE_REVOKED_MESSAGE = "这台手机已被移除或吊销";
+export const RELAY_CONNECT_FAILED_REASON = "无法连接中继";
+export const CHANNEL_CLOSED_REASON = "加密连接关闭";
+
 export function versionMessage(version: number): string {
   return version > RPC_PROTOCOL_VERSION
     ? "手机网页版本过旧，请联系中继管理员更新"
@@ -22,6 +27,51 @@ export function versionMessage(version: number): string {
 }
 export function retryDelay(attempt: number, random = Math.random): number {
   return Math.min(30000, 1000 * 2 ** Math.min(attempt, 5)) * (0.8 + random() * 0.4);
+}
+export function closeOutcome(code?: number): {
+  state: "revoked" | "offline";
+  message: string;
+  stop: boolean;
+} {
+  if (code === 4003 || code === 4004) {
+    return { state: "revoked", message: DEVICE_REVOKED_MESSAGE, stop: true };
+  }
+  return { state: "offline", message: HOST_OFFLINE_MESSAGE, stop: false };
+}
+export function nextRetryDelay(
+  code: number | undefined,
+  attempt: number,
+  random = Math.random,
+): { delay: number; nextAttempt: number } {
+  if (code === 4002) return { delay: 0, nextAttempt: attempt };
+  return { delay: retryDelay(attempt, random), nextAttempt: attempt + 1 };
+}
+export function relayConnectFailure(error: unknown): {
+  code: number | undefined;
+  reason: string;
+} {
+  return {
+    code: error instanceof RelayError ? error.closeCode : undefined,
+    reason:
+      error instanceof RelayError ? closeReason(error.closeCode) : RELAY_CONNECT_FAILED_REASON,
+  };
+}
+export function handshakeFailure(
+  error: unknown,
+  formatVersion: (protocolVersion: number) => string = versionMessage,
+): { kind: "incompatible"; message: string } | { kind: "retry"; reason: string } {
+  if (error instanceof RpcError && error.code === "protocol_version_mismatch") {
+    // 当前 RPC 错误只给中文 message，不含结构化服务端版本；不更改协议。
+    const version = /服务端\s+(\d+)/.exec(error.message)?.[1];
+    return {
+      kind: "incompatible",
+      message: formatVersion(Number(version ?? RPC_PROTOCOL_VERSION + 1)),
+    };
+  }
+  return {
+    kind: "retry",
+    reason: `握手失败：${error instanceof Error ? error.message : String(error)}`,
+  };
 }
 export interface PhoneConnectionOptions {
   origin: string;
@@ -97,14 +147,16 @@ export class PhoneConnection implements PhoneConnectionLike {
     this.relay = undefined;
     this.connecting = false;
     this.options.disconnected(reason);
-    if (code === 4003 || code === 4004) {
+    const outcome = closeOutcome(code);
+    if (outcome.stop) {
       this.stopped = true;
-      this.set("revoked", "这台手机已被移除或吊销");
+      this.set(outcome.state, outcome.message);
       return;
     }
-    this.set("offline", "电脑已离线，等它上线会自动连接");
+    this.set(outcome.state, outcome.message);
     if (!this.visible) return;
-    const delay = code === 4002 ? 0 : retryDelay(this.attempt++);
+    const { delay, nextAttempt } = nextRetryDelay(code, this.attempt);
+    this.attempt = nextAttempt;
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.connect();
@@ -129,7 +181,7 @@ export class PhoneConnection implements PhoneConnectionLike {
       relay.onClose((code) => {
         if (generation === this.generation) this.retry(code);
       });
-      if (!relay.online) this.set("offline", "电脑已离线，等它上线会自动连接");
+      if (!relay.online) this.set("offline", HOST_OFFLINE_MESSAGE);
       let started = false;
       relay.onHostOnline(() => {
         if (started || generation !== this.generation) return;
@@ -137,11 +189,10 @@ export class PhoneConnection implements PhoneConnectionLike {
         void this.handshake(relay, generation);
       });
     } catch (error) {
-      if (generation === this.generation)
-        this.retry(
-          error instanceof RelayError ? error.closeCode : undefined,
-          error instanceof RelayError ? closeReason(error.closeCode) : "无法连接中继",
-        );
+      if (generation === this.generation) {
+        const failure = relayConnectFailure(error);
+        this.retry(failure.code, failure.reason);
+      }
     }
   }
   private async handshake(relay: DeviceRelay, generation: number): Promise<void> {
@@ -174,25 +225,16 @@ export class PhoneConnection implements PhoneConnectionLike {
       this.attempt = 0;
       this.set("online");
       void client.closed.then(() => {
-        if (generation === this.generation) this.retry(undefined, "加密连接关闭");
+        if (generation === this.generation) this.retry(undefined, CHANNEL_CLOSED_REASON);
       });
     } catch (error) {
       if (generation !== this.generation) return;
-      if (error instanceof RpcError && error.code === "protocol_version_mismatch") {
-        // 当前 RPC 错误只给中文 message，不含结构化服务端版本；不更改协议。
-        const version = /服务端\s+(\d+)/.exec(error.message)?.[1];
+      const outcome = handshakeFailure(error, this.options.versionMessage ?? versionMessage);
+      if (outcome.kind === "incompatible") {
         this.stop();
-        this.set(
-          "incompatible",
-          (this.options.versionMessage ?? versionMessage)(
-            Number(version ?? RPC_PROTOCOL_VERSION + 1),
-          ),
-        );
+        this.set("incompatible", outcome.message);
       } else {
-        this.retry(
-          undefined,
-          `握手失败：${error instanceof Error ? error.message : String(error)}`,
-        );
+        this.retry(undefined, outcome.reason);
         relay.transport.close();
       }
     }
