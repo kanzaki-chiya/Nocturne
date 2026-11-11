@@ -143,7 +143,7 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "在对话中内嵌渲染一份自包含的单文件 HTML 页面。仅在图表、对比表、示意图、界面草图或轻量交互明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown 回复。页面在断网沙箱中运行：允许内联脚本与内联样式，完全不能联网（远程脚本、样式、图片、字体、fetch、WebSocket 均不可用，图片与字体须用内联 SVG 或 data:），链接跳转、表单提交、弹窗与下载均无效。要显示本地图片文件时，把路径列进 images，并在 html 的属性值或 CSS url() 中写同一字符串，保存时会自动内联。容器桌面宽约 720px、手机宽约 360px，需响应式自适应，高于 420px 自动折叠并可展开或全屏。页面直接显示在对话中，回复正文不要复述页面内容。显示时自动注入主题 CSS 变量（随深浅色实时切换）：--bg（页面底色）、--raised（凸起面）、--text（文字）、--secondary（次要文字）、--muted（弱文字）、--border（边线）、--accent（强调色）、--ok（成功色）、--warn（警告色）、--bad（危险色）、--sans（正文字体）、--mono（等宽字体）。",
+    "在对话中内嵌渲染一份自包含的单文件 HTML 页面。仅在图表、对比表、示意图、界面草图或轻量交互明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown 回复。页面在断网沙箱中运行：允许内联脚本与内联样式，完全不能联网（远程脚本、样式、图片、字体、fetch、WebSocket 均不可用，图片与字体须用内联 SVG 或 data:），链接跳转、表单提交、弹窗与下载均无效。要显示本地图片文件时，把路径列进 images，并在 html 的属性值或 CSS url() 中写同一字符串，保存时会自动内联。容器桌面宽约 720px、手机宽约 360px，需响应式自适应，高于 420px 自动折叠并可展开或全屏。页面直接显示在对话中，回复正文不要复述页面里的数据、结论或说明。显示时自动注入主题 CSS 变量（随深浅色实时切换）：--bg（页面底色）、--raised（凸起面）、--text（文字）、--secondary（次要文字）、--muted（弱文字）、--border（边线）、--accent（强调色）、--ok（成功色）、--warn（警告色）、--bad（危险色）、--sans（正文字体）、--mono（等宽字体）。",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -232,7 +232,7 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
       });
       return {
         status: "ok",
-        modelContent: `已渲染内嵌页面「${title}」（${saved.file}，${saved.bytes} B）。`,
+        modelContent: `内嵌页面「${title}」已显示给用户（${saved.file}，${saved.bytes} B）。回复中不要复述页面里的数据、结论或说明。`,
         output: { title, file: saved.file, bytes: saved.bytes },
         files: [saved],
       };

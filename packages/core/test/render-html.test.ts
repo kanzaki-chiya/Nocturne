@@ -115,6 +115,9 @@ describe("render_html 工具与内嵌页面标记", () => {
       );
       expect(completed).toBeDefined();
       expect(completed?.payload.status).toBe("ok");
+      expect(completed?.payload.modelContent).toMatch(
+        /^内嵌页面「季度对比: Q1\/Q2」已显示给用户（file-1\.html，\d+ B）。回复中不要复述页面里的数据、结论或说明。$/,
+      );
       expect(JSON.stringify(completed?.payload)).not.toContain("unique-secret-marker");
       expect(completed?.payload.files).toHaveLength(1);
       const att = completed?.payload.files?.[0];

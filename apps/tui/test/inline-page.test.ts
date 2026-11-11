@@ -30,7 +30,8 @@ function makeInlineToolEntry(status: "running" | "ok" | "error" = "ok"): ToolEnt
         : status === "ok"
           ? {
               status: "ok",
-              modelContent: "已渲染内嵌页面「各包测试耗时」（file-1.html，56 B）。",
+              modelContent:
+                "内嵌页面「各包测试耗时」已显示给用户（file-1.html，56 B）。回复中不要复述页面里的数据、结论或说明。",
               output: { title: "各包测试耗时", file: "file-1.html", bytes: 56 },
               error: undefined,
               truncated: false,

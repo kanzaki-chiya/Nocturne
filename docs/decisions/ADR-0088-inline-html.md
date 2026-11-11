@@ -121,3 +121,7 @@
   与空壳页响应头的策略相同，去掉 `<meta>` 不支持的 `frame-ancestors` 与 `sandbox`，另加 `form-action 'none'; base-uri 'none'`。外壳自身没有脚本；页面放在铺满窗口的 `<iframe sandbox="allow-scripts" srcdoc="…">` 中，`srcdoc` 文档继承外壳的策略，因此页面的任何脚本都不会早于策略生效。
 - **主题**：在页面 `<!doctype>` 之后（无 doctype 时放在最前）注入一个 `<style>`：12 个主题变量与 `color-scheme`，取桌面端默认主题 `tokens.css` 的 `:root`（深色）与 `@media (prefers-color-scheme: light)`（浅色）两组值，按 `prefers-color-scheme` 切换；另加 `sandbox.html` 那组零特异度默认样式（不含内嵌框专用的高度与滚动规则）。TUI 不依赖 `apps/desktop`，取值写成常量，由测试读取 `tokens.css` 与 `InlinePage.tsx` 的映射比对。
 - **实测**（Edge 157 无头模式，`file:` 打开外壳，浅色、深色各一次，结果存 `nocturne-mockups/impl/r1112b/tui-browser/result.json`）：内联脚本与样式运行，主题变量随配色切换，带 doctype 的页面 `document.compatMode` 为 `CSS1Compat`，`window.origin` 为 `"null"`；`fetch`、远程 `<img>`/`<script>`/样式表、`WebSocket` 均被 CSP 拦截，回环探针收到 `0` 次请求；读取 `parent.document`、`localStorage`、`document.cookie` 与赋值 `top.location` 均抛 `SecurityError`；`window.open` 返回 `null`，`target=_blank` 被拦（缺 `allow-popups`），`<a download>` 未触发下载，没有新开页面；用 `file:` 读同目录文件时 `fetch` 与 XHR 被 `connect-src` 拦、`<img>` 报 `Not allowed to load local resource`。
+
+### 3. 回复正文不复述页面
+
+成功时的 `modelContent` 改为「内嵌页面「<标题>」已显示给用户（<文件>，<字节数> B）。回复中不要复述页面里的数据、结论或说明。」，工具说明中的对应句改为「回复正文不要复述页面里的数据、结论或说明」。
