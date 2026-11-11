@@ -24,17 +24,15 @@ export interface LoginClientOptions {
   showUnstoredKey?: (key: string, envName: string) => Promise<void>;
 }
 
-/** 系统打开失败只返回 false，不输出命令、URL 或上游错误。 */
-export async function openLoginBrowser(
-  url: string,
-  platform: NodeJS.Platform = process.platform,
-): Promise<boolean> {
-  if (!/^https?:\/\//.test(url) || /["\r\n]/.test(url)) return false;
-  // Windows 不经 cmd：Node 给 cmd 参数加的反斜杠转义 cmd 不认，地址里的 & 会被当成命令分隔符。
+/** 打开浏览器失败时的提示原词（登录向导与内嵌页面共用） */
+export const BROWSER_OPEN_FAILED = "未能打开浏览器";
+
+/** 用系统默认程序打开；Windows 不经 cmd：Node 给 cmd 参数加的反斜杠转义 cmd 不认，& 会被当成命令分隔符。 */
+function openWithSystem(target: string, platform: NodeJS.Platform): Promise<boolean> {
   const command =
     platform === "win32" ? "rundll32.exe" : platform === "darwin" ? "open" : "xdg-open";
-  const args = platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
-  return await new Promise<boolean>((resolve) => {
+  const args = platform === "win32" ? ["url.dll,FileProtocolHandler", target] : [target];
+  return new Promise<boolean>((resolve) => {
     execFile(
       command,
       args,
@@ -47,6 +45,25 @@ export async function openLoginBrowser(
       },
     );
   });
+}
+
+/** 系统打开失败只返回 false，不输出命令、URL 或上游错误。 */
+export async function openLoginBrowser(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  if (!/^https?:\/\//.test(url) || /["\r\n]/.test(url)) return false;
+  return await openWithSystem(url, platform);
+}
+
+/** 用默认浏览器打开本地文件（只接受绝对路径）；失败只返回 false。 */
+export async function openLocalFile(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  const absolute = platform === "win32" ? /^[A-Za-z]:[\\/]/.test(file) : file.startsWith("/");
+  if (!absolute || /["\r\n\u0000]/.test(file)) return false;
+  return await openWithSystem(file, platform);
 }
 
 export function unstoredKeyCommands(key: string, envName: string): string {

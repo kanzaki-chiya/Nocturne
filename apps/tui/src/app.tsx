@@ -65,6 +65,9 @@ import { createFileStore } from "./files.js";
 import { renderAssistant, splitMarkdownBlocks, takeMarkdownBlocks } from "./markdown.js";
 import type { FocusSource, MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
+import { inlinePageTitle } from "./attachment-line.js";
+import { writeInlinePageShell } from "./inline-page-open.js";
+import { BROWSER_OPEN_FAILED, openLocalFile } from "./provider-login.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
@@ -315,6 +318,8 @@ export interface AppProps {
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   /** 复制用的 spawn（测试注入 mock；缺省 node:child_process.spawn） */
   copySpawn?: typeof spawn | undefined;
+  /** 用系统浏览器打开本地文件（测试注入；缺省 openLocalFile） */
+  openFile?: ((file: string) => Promise<boolean>) | undefined;
   clipboard?: Clipboard | undefined;
   clipboardPlatform?: NodeJS.Platform | undefined;
   /** 全屏退出前把对话铺成行写回主屏（runTui 注入容器，App 填实现） */
@@ -774,6 +779,7 @@ export function App({
   writeOob,
   onOutputLayout,
   copySpawn,
+  openFile,
   clipboard,
   clipboardPlatform,
   transcriptOut,
@@ -830,6 +836,7 @@ export function App({
       writeOob={writeOob}
       onOutputLayout={onOutputLayout}
       copySpawn={copySpawn}
+      openFile={openFile}
       clipboard={clipboard}
       clipboardPlatform={clipboardPlatform}
       transcriptOut={transcriptOut}
@@ -853,6 +860,7 @@ function SessionApp({
   writeOob,
   onOutputLayout,
   copySpawn,
+  openFile,
   clipboard,
   clipboardPlatform,
   transcriptOut,
@@ -873,6 +881,7 @@ function SessionApp({
   writeOob?: ((data: string) => boolean) | undefined;
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   copySpawn?: typeof spawn | undefined;
+  openFile?: ((file: string) => Promise<boolean>) | undefined;
   clipboard?: Clipboard | undefined;
   clipboardPlatform?: NodeJS.Platform | undefined;
   transcriptOut?: { current?: (() => string[]) | undefined } | undefined;
@@ -1357,6 +1366,29 @@ function SessionApp({
     }
   }, []);
 
+  /** 单击内嵌页面行：写外壳文件后交给系统浏览器（ADR-0088 第二版第 2 节） */
+  const openInlinePage = useCallback(
+    (file: string): void => {
+      const target = session;
+      const att = target
+        .durableEvents()
+        .flatMap((e) => (e.type === "tool.completed" ? (e.payload.files ?? []) : []))
+        .find((f) => f.file === file && f.inline !== undefined);
+      if (att === undefined) return;
+      void (async () => {
+        const read = await target.readAttachment(file);
+        const html = new TextDecoder().decode(read.data);
+        const shell = await writeInlinePageShell(target.id, file, html, inlinePageTitle(att));
+        return await (openFile ?? openLocalFile)(shell);
+      })()
+        .catch(() => false)
+        .then((ok) => {
+          if (!ok) flashNote(`! ${BROWSER_OPEN_FAILED}`);
+        });
+    },
+    [session, openFile, flashNote],
+  );
+
   /**
    * 复制选区：渲染后的可见文字（折行续行拼回、行尾空白去掉），
    * 系统剪贴板与 OSC 52 并行，任一成功即算成功。
@@ -1466,6 +1498,10 @@ function SessionApp({
         if (s === undefined) return;
         if (clicked !== undefined) {
           setSel(undefined);
+          if (clicked.startsWith("page:")) {
+            openInlinePage(clicked.slice("page:".length));
+            return;
+          }
           const toggle = g.visible.lines.find((line) => line.toggle?.id === clicked)?.toggle;
           const source = sourceRef.current;
           if (toggle === undefined || source === undefined) return;
@@ -1523,7 +1559,16 @@ function SessionApp({
         dragRef.current.timer = undefined;
       }
     };
-  }, [fullscreen, mouse, absStartOf, copySelection, stopEdgeScroll, moveScroll, width]);
+  }, [
+    fullscreen,
+    mouse,
+    absStartOf,
+    copySelection,
+    stopEdgeScroll,
+    moveScroll,
+    width,
+    openInlinePage,
+  ]);
 
   // 跨会话或本会话搜索命中条目定位：在新会话块表与展开态提交后一次算出滚动位置
   useLayoutEffect(() => {

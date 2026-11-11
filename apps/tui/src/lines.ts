@@ -423,9 +423,10 @@ function layoutEntryBody(
         const inlineLines: LaidLine[] = inlineFiles.map((file, i) => {
           const title = truncateLine(inlinePageTitle(file), maxTitleCols, ascii ? "..." : "...");
           const segments = [{ text: prefix, color: theme.secondary }, { text: title }];
+          const key = `${entry.key}:inline:${i}`;
           return {
-            key: `${entry.key}:inline:${i}`,
-            ...(i === 0 ? { toggle } : {}),
+            key,
+            ...(options.fullscreen ? { toggle: { id: `page:${file.file}`, anchor: key } } : {}),
             text: `${prefix}${title}`,
             segments,
           };

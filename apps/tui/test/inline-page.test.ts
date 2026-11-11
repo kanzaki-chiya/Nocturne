@@ -80,6 +80,15 @@ describe("TUI 回复内嵌页面显示", () => {
     ink.unmount();
   });
 
+  it("全屏时页面行带打开入口，--inline 不加入口", () => {
+    const completed = makeInlineToolEntry("ok");
+    const full = layoutEntry(completed, 100, false, new Map(), 0, false, false, undefined, {
+      fullscreen: true,
+    });
+    expect(full[0]?.toggle).toEqual({ id: "page:file-1.html", anchor: "t:rh-1:inline:0" });
+    expect(layoutEntry(completed, 100, false)[0]?.toggle).toBeUndefined();
+  });
+
   it("运行中与失败时 summarizeToolInput 仅取 title，不铺出 html 正文", () => {
     expect(
       summarizeToolInput("render_html", {

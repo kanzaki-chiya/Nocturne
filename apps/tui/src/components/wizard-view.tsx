@@ -6,7 +6,7 @@ import { boxSafe, truncateLine } from "../format.js";
 import { useTheme } from "../theme.js";
 import type { WizardState } from "../wizard-io.js";
 import { copyText } from "../clipboard.js";
-import { unstoredKeyCommands } from "../provider-login.js";
+import { BROWSER_OPEN_FAILED, unstoredKeyCommands } from "../provider-login.js";
 import { Buttons } from "./dialog/buttons.js";
 import { ConfirmDiscard } from "./dialog/confirm-discard.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
@@ -302,7 +302,7 @@ export function WizardView({
                     {copyNote ??
                       (state.login.browserOpened
                         ? "已在浏览器打开；没有打开时选「复制地址」"
-                        : "未能打开浏览器，选「复制地址」后粘贴到浏览器")}
+                        : `${BROWSER_OPEN_FAILED}，选「复制地址」后粘贴到浏览器`)}
                   </Text>
                 </>
               ) : null}

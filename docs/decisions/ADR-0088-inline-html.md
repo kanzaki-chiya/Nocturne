@@ -95,7 +95,7 @@
 
 - 按本地工作区路径引用图片：第二版已实现（见下文「第二版」第 1 节）；其他本地静态资源（字体、样式表、脚本）仍未纳入；
 - 读取或注入被编辑项目自身的设计系统 token；
-- TUI 内一键在外部浏览器打开该页面的快捷键或提示文案；
+- TUI 内在外部浏览器打开该页面：第二版已实现单击打开（见下文「第二版」第 2 节），仍不加快捷键或提示文案；
 - 通过额外独立域名或独立原生子 WebView 隔离同步死循环脚本的 CPU 占用。
 
 ## 第二版（2026-11-12）
@@ -109,3 +109,15 @@
 - **匹配规则**：只做五种精确的字符串替换，不解析 HTML，不改其他文字：属性值 `="路径"`、`='路径'`，CSS `url(路径)`、`url("路径")`、`url('路径')`。`images` 里有、HTML 中一处都没匹配到的路径使整次调用失败并点名。
 - **上限与依据**：`html` 参数仍 ≤ `256 KiB`；替换后存下的整份 HTML ≤ `8 MiB`（`MAX_INLINE_HTML_SAVED_BYTES`），超出则整次调用失败。依据是手机网页经远程通道读取附件的原始字节上限 `remoteAttachmentLimit()` = `floor((16 MiB − 64 KiB) × 3 / 4) − 1024` = `12,532,736` B（约 `11.95 MiB`）。Core 不能依赖 `packages/rpc`，因此单独定常量并留出余量，保证内联后的页面在手机端也能读取。
 - **事件**：工具调用参数、`tool.started` 与 `tool.completed` 只含路径，不含图片内容；`modelContent` 与 `output.bytes` 为替换后的大小。
+
+### 2. TUI 单击页面行在浏览器打开
+
+- **入口**：全屏模式下单击内嵌页面那一行（`▣ <标题>`），鼠标判定沿用 [tui.md](../apps/tui.md) 第 11 节「对话折叠块」的规则；不加提示文字、按键或说明。`--inline` 不提供入口。
+- **外壳文件**：内容经 `RuntimeSession.readAttachment` 读取，写为 `os.tmpdir()/nocturne-pages/<会话 id>-<附件文件名>`（只保留 `[A-Za-z0-9._-]`，同名覆盖），再用系统默认程序打开（Windows 用 `rundll32.exe url.dll,FileProtocolHandler`，不经 `cmd`）。打开失败时复用登录向导的原词，在状态栏短暂显示「! 未能打开浏览器」。
+- **外壳结构**：`<head>` 第一个元素是
+  ```html
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">
+  ```
+  与空壳页响应头的策略相同，去掉 `<meta>` 不支持的 `frame-ancestors` 与 `sandbox`，另加 `form-action 'none'; base-uri 'none'`。外壳自身没有脚本；页面放在铺满窗口的 `<iframe sandbox="allow-scripts" srcdoc="…">` 中，`srcdoc` 文档继承外壳的策略，因此页面的任何脚本都不会早于策略生效。
+- **主题**：在页面 `<!doctype>` 之后（无 doctype 时放在最前）注入一个 `<style>`：12 个主题变量与 `color-scheme`，取桌面端默认主题 `tokens.css` 的 `:root`（深色）与 `@media (prefers-color-scheme: light)`（浅色）两组值，按 `prefers-color-scheme` 切换；另加 `sandbox.html` 那组零特异度默认样式（不含内嵌框专用的高度与滚动规则）。TUI 不依赖 `apps/desktop`，取值写成常量，由测试读取 `tokens.css` 与 `InlinePage.tsx` 的映射比对。
+- **实测**（Edge 157 无头模式，`file:` 打开外壳，浅色、深色各一次，结果存 `nocturne-mockups/impl/r1112b/tui-browser/result.json`）：内联脚本与样式运行，主题变量随配色切换，带 doctype 的页面 `document.compatMode` 为 `CSS1Compat`，`window.origin` 为 `"null"`；`fetch`、远程 `<img>`/`<script>`/样式表、`WebSocket` 均被 CSP 拦截，回环探针收到 `0` 次请求；读取 `parent.document`、`localStorage`、`document.cookie` 与赋值 `top.location` 均抛 `SecurityError`；`window.open` 返回 `null`，`target=_blank` 被拦（缺 `allow-popups`），`<a download>` 未触发下载，没有新开页面；用 `file:` 读同目录文件时 `fetch` 与 XHR 被 `connect-src` 拦、`<img>` 报 `Not allowed to load local resource`。
