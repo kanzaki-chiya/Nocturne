@@ -76,6 +76,21 @@
   display: block;
 }
 
+.composer .thumb2 .thumb2-open {
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.composer .thumb2 .thumb2-open:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
 .composer .thumb2 .ficon {
   width: 28px;
   height: 28px;

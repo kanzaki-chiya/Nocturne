@@ -22,6 +22,7 @@ import { AgentBrowserPane } from "./AgentBrowserPane";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody, diffCounts } from "./Conversation";
+import { ImageViewerBoundary, useImageViewer } from "./ImageViewer";
 import type { CodeViewer } from "./code-viewer";
 import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
@@ -947,7 +948,7 @@ function ChangesView({
 type FileState =
   | { kind: "loading" }
   | { kind: "text"; text: string; bytes: number }
-  | { kind: "image"; url: string; bytes: number }
+  | { kind: "image"; url: string; blob: Blob; bytes: number; broken?: boolean }
   | { kind: "error"; code: string | undefined; message: string };
 
 function fileErrorText(code: string | undefined, message: string): string {
@@ -1022,6 +1023,7 @@ function FileView({
   readerKey: string;
   actions: PanelFileActions;
 }) {
+  const openViewer = useImageViewer();
   const [state, setState] = useState<FileState>({ kind: "loading" });
   const [reload, setReload] = useState(0);
   const [actionError, setActionError] = useState<string>();
@@ -1038,8 +1040,9 @@ function FileView({
         if (file.kind === "text") {
           setState({ kind: "text", text: file.text, bytes: file.bytes });
         } else {
-          url = URL.createObjectURL(new Blob([file.data as BlobPart], { type: file.mimeType }));
-          setState({ kind: "image", url, bytes: file.bytes });
+          const blob = new Blob([file.data as BlobPart], { type: file.mimeType });
+          url = URL.createObjectURL(blob);
+          setState({ kind: "image", url, blob, bytes: file.bytes });
         }
       })
       .catch((e: unknown) => {
@@ -1124,7 +1127,36 @@ function FileView({
           <CodeArea tab={tab} text={state.text} />
         ) : state.kind === "image" ? (
           <div className="sp-image">
-            <img src={state.url} alt={rel} />
+            {state.broken === true ? (
+              <img src={state.url} alt={rel} />
+            ) : (
+              <button
+                type="button"
+                className="sp-image-open"
+                aria-label={rel}
+                onClick={(event) => {
+                  const last = tab.absolutePath.split(/[\\/]/).pop();
+                  const filename = last !== undefined && last !== "" ? last : rel;
+                  openViewer(
+                    [{ src: state.url, filename, alt: rel, blob: state.blob }],
+                    0,
+                    event.currentTarget,
+                  );
+                }}
+              >
+                <img
+                  src={state.url}
+                  alt={rel}
+                  onError={() => {
+                    setState((prev) =>
+                      prev.kind === "image" && prev.url === state.url
+                        ? { ...prev, broken: true }
+                        : prev,
+                    );
+                  }}
+                />
+              </button>
+            )}
           </div>
         ) : (
           <div className="sp-empty sp-file-missing">
@@ -1243,151 +1275,153 @@ export function SidePanel(props: SidePanelProps) {
     event.preventDefault();
   };
   return (
-    <div
-      className={`sp-rail${overlay ? " overlay" : ""}${props.motion ? ` sp-${props.motion}` : ""}`}
-      style={{ width }}
-      hidden={hidden}
-      onAnimationEnd={(event) => {
-        if (event.target === event.currentTarget) props.onMotionEnd?.();
-      }}
-    >
-      <aside
-        className="side-panel thin-scroll"
+    <ImageViewerBoundary>
+      <div
+        className={`sp-rail${overlay ? " overlay" : ""}${props.motion ? ` sp-${props.motion}` : ""}`}
         style={{ width }}
-        aria-label="右侧面板"
         hidden={hidden}
-        inert={props.motion === "closing"}
-        aria-hidden={props.motion === "closing" || undefined}
+        onAnimationEnd={(event) => {
+          if (event.target === event.currentTarget) props.onMotionEnd?.();
+        }}
       >
-        <div
-          className="sp-splitter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整面板宽度"
-          aria-valuenow={width}
-          tabIndex={0}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onKeyDown={onSplitterKey}
-        />
-        <TabBar {...props} />
-        <div className="sp-content">
-          {panes.map((tab) => (
-            <div
-              key={tab.id}
-              className="sp-pane"
-              role="tabpanel"
-              hidden={tab.id !== activeId || !current.has(tab.id)}
-            >
-              {tab.kind === "new" ? (
-                <NewTabPage
-                  onOpenChanges={props.onOpenChanges}
-                  onQuickOpen={props.onQuickOpen}
-                  onOpenTerminal={props.onOpenTerminal}
-                  onAddress={props.onAddress}
-                  canOpenFiles={props.canOpenFiles}
-                  hasSession={changes !== undefined}
-                  hasTerminal={props.terminals !== undefined}
-                />
-              ) : tab.kind === "changes" ? (
-                <ChangesView
-                  tab={tab}
-                  source={changes}
-                  treeWidth={props.treeWidth ?? CHANGE_TREE_DEFAULT_WIDTH}
-                  onTreeWidth={(next) => props.onTreeWidth?.(next)}
-                  wrap={props.wrap !== false}
-                  onWrap={(next) => props.onWrap?.(next)}
-                />
-              ) : tab.kind === "terminal" ? (
-                props.terminals === undefined ? (
-                  <div className="sp-empty">这个环境没有终端</div>
-                ) : (
-                  <TerminalPane
-                    tab={tab}
-                    moving={props.motion !== undefined}
-                    host={props.terminals}
-                    loadShells={props.loadShells}
-                    visible={!hidden && tab.id === activeId && current.has(tab.id)}
-                    onShellChange={props.onShellChange}
+        <aside
+          className="side-panel thin-scroll"
+          style={{ width }}
+          aria-label="右侧面板"
+          hidden={hidden}
+          inert={props.motion === "closing"}
+          aria-hidden={props.motion === "closing" || undefined}
+        >
+          <div
+            className="sp-splitter"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整面板宽度"
+            aria-valuenow={width}
+            tabIndex={0}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onKeyDown={onSplitterKey}
+          />
+          <TabBar {...props} />
+          <div className="sp-content">
+            {panes.map((tab) => (
+              <div
+                key={tab.id}
+                className="sp-pane"
+                role="tabpanel"
+                hidden={tab.id !== activeId || !current.has(tab.id)}
+              >
+                {tab.kind === "new" ? (
+                  <NewTabPage
+                    onOpenChanges={props.onOpenChanges}
+                    onQuickOpen={props.onQuickOpen}
+                    onOpenTerminal={props.onOpenTerminal}
+                    onAddress={props.onAddress}
+                    canOpenFiles={props.canOpenFiles}
+                    hasSession={changes !== undefined}
+                    hasTerminal={props.terminals !== undefined}
                   />
-                )
-              ) : tab.kind === "browser" ? (
-                tab.agent !== undefined ? (
-                  props.agents === undefined ? (
-                    <div className="sp-empty">这个环境不能查看 agent 标签</div>
+                ) : tab.kind === "changes" ? (
+                  <ChangesView
+                    tab={tab}
+                    source={changes}
+                    treeWidth={props.treeWidth ?? CHANGE_TREE_DEFAULT_WIDTH}
+                    onTreeWidth={(next) => props.onTreeWidth?.(next)}
+                    wrap={props.wrap !== false}
+                    onWrap={(next) => props.onWrap?.(next)}
+                  />
+                ) : tab.kind === "terminal" ? (
+                  props.terminals === undefined ? (
+                    <div className="sp-empty">这个环境没有终端</div>
                   ) : (
-                    <AgentBrowserPane
-                      info={props.agents.tabs.get(tab.agent.tabId) ?? tab.agent}
+                    <TerminalPane
+                      tab={tab}
+                      moving={props.motion !== undefined}
+                      host={props.terminals}
+                      loadShells={props.loadShells}
                       visible={!hidden && tab.id === activeId && current.has(tab.id)}
-                      onSlot={props.agents.onSlot}
-                      onControl={props.agents.onControl}
-                      onDialog={props.agents.onDialog}
-                      onClose={props.agents.onClose}
+                      onShellChange={props.onShellChange}
                     />
                   )
-                ) : props.browsers === undefined ? (
-                  <div className="sp-empty">这个环境没有内置浏览器</div>
-                ) : (
-                  <BrowserPane
-                    tab={tab}
-                    pool={props.browsers}
+                ) : tab.kind === "browser" ? (
+                  tab.agent !== undefined ? (
+                    props.agents === undefined ? (
+                      <div className="sp-empty">这个环境不能查看 agent 标签</div>
+                    ) : (
+                      <AgentBrowserPane
+                        info={props.agents.tabs.get(tab.agent.tabId) ?? tab.agent}
+                        visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                        onSlot={props.agents.onSlot}
+                        onControl={props.agents.onControl}
+                        onDialog={props.agents.onDialog}
+                        onClose={props.agents.onClose}
+                      />
+                    )
+                  ) : props.browsers === undefined ? (
+                    <div className="sp-empty">这个环境没有内置浏览器</div>
+                  ) : (
+                    <BrowserPane
+                      tab={tab}
+                      pool={props.browsers}
+                      visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                      moving={props.motion !== undefined}
+                      snapshot={
+                        props.browserSnapshot?.tabId === tab.id
+                          ? props.browserSnapshot.url
+                          : undefined
+                      }
+                      workspace={props.workspace}
+                      openExternal={props.openExternalUrl ?? (() => Promise.resolve())}
+                    />
+                  )
+                ) : tab.kind === "subagent" ? (
+                  props.subagents === undefined ? (
+                    <div className="sp-empty">这个环境不能查看子代理</div>
+                  ) : (
+                    <SubagentPane
+                      tab={tab}
+                      parentSessionId={props.subagents.parentSessionId}
+                      visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                      watcher={props.subagents.watcher}
+                      runtime={props.subagents.runtime}
+                      summary={props.subagents.summaryFor(tab.childSessionId)}
+                      parentEntry={props.subagents.parentEntryFor(tab.parentCallId)}
+                      workspace={props.workspace ?? ""}
+                      images={props.subagents.images}
+                      openUrl={props.subagents.openUrl}
+                    />
+                  )
+                ) : tab.kind === "shell" ? (
+                  <ShellPane
+                    taskId={tab.taskId}
+                    name={tab.name}
+                    command={tab.command}
+                    task={props.shells?.tasks.find((task) => task.taskId === tab.taskId)}
+                    session={props.shells?.session}
                     visible={!hidden && tab.id === activeId && current.has(tab.id)}
-                    moving={props.motion !== undefined}
-                    snapshot={
-                      props.browserSnapshot?.tabId === tab.id
-                        ? props.browserSnapshot.url
-                        : undefined
-                    }
-                    workspace={props.workspace}
-                    openExternal={props.openExternalUrl ?? (() => Promise.resolve())}
                   />
-                )
-              ) : tab.kind === "subagent" ? (
-                props.subagents === undefined ? (
-                  <div className="sp-empty">这个环境不能查看子代理</div>
+                ) : tab.diffText !== undefined ? (
+                  <FileDiffView
+                    tab={{ ...tab, diffText: tab.diffText }}
+                    wrap={props.wrap !== false}
+                    onWrap={(next) => props.onWrap?.(next)}
+                  />
                 ) : (
-                  <SubagentPane
+                  <FileView
                     tab={tab}
-                    parentSessionId={props.subagents.parentSessionId}
-                    visible={!hidden && tab.id === activeId && current.has(tab.id)}
-                    watcher={props.subagents.watcher}
-                    runtime={props.subagents.runtime}
-                    summary={props.subagents.summaryFor(tab.childSessionId)}
-                    parentEntry={props.subagents.parentEntryFor(tab.parentCallId)}
-                    workspace={props.workspace ?? ""}
-                    images={props.subagents.images}
-                    openUrl={props.subagents.openUrl}
+                    readFile={props.readFile}
+                    readerKey={props.readerKey}
+                    actions={props.fileActions}
                   />
-                )
-              ) : tab.kind === "shell" ? (
-                <ShellPane
-                  taskId={tab.taskId}
-                  name={tab.name}
-                  command={tab.command}
-                  task={props.shells?.tasks.find((task) => task.taskId === tab.taskId)}
-                  session={props.shells?.session}
-                  visible={!hidden && tab.id === activeId && current.has(tab.id)}
-                />
-              ) : tab.diffText !== undefined ? (
-                <FileDiffView
-                  tab={{ ...tab, diffText: tab.diffText }}
-                  wrap={props.wrap !== false}
-                  onWrap={(next) => props.onWrap?.(next)}
-                />
-              ) : (
-                <FileView
-                  tab={tab}
-                  readFile={props.readFile}
-                  readerKey={props.readerKey}
-                  actions={props.fileActions}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      </aside>
-    </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+    </ImageViewerBoundary>
   );
 }

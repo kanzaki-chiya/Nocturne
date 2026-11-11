@@ -32,6 +32,7 @@ import {
   type PhoneImage,
 } from "./phone-images";
 import { Popover, PopoverOption } from "./Popover";
+import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "../ImageViewer";
 import { Icon } from "../ui";
 
 /** 桌面提示里指向左栏、设置页的命令，在手机上换成手机的去处 */
@@ -555,32 +556,13 @@ export function PhoneComposer({
         }}
       >
         {(attachments.length > 0 || processing > 0) && (
-          <div className="phone-attachments" aria-label="图片附件">
-            {attachments.map((attachment, at) => (
-              <span className="phone-attachment" key={attachment.url}>
-                {attachment.mimeType.startsWith("image/") ? (
-                  <img src={attachment.url} alt={attachment.name} />
-                ) : (
-                  <span>▤ {attachment.name}</span>
-                )}
-                <button
-                  type="button"
-                  aria-label={`移除 ${attachment.name}`}
-                  onClick={() => {
-                    removeAttachment(at);
-                  }}
-                >
-                  <Icon name="close" size={14} />
-                </button>
-                <small>{formatBytes(attachment.data.length)}</small>
-              </span>
-            ))}
-            {processing > 0 && (
-              <span className="phone-attachment busy" role="status" aria-label="正在处理图片">
-                …
-              </span>
-            )}
-          </div>
+          <ImageViewerBoundary>
+            <PhoneAttachments
+              attachments={attachments}
+              processing={processing}
+              onRemove={removeAttachment}
+            />
+          </ImageViewerBoundary>
         )}
         <textarea
           ref={field}
@@ -758,6 +740,90 @@ export function PhoneComposer({
           <div className="phone-popover-h">{output.title}</div>
           <pre className="phone-output">{output.text}</pre>
         </Popover>
+      )}
+    </div>
+  );
+}
+
+function PhoneAttachments({
+  attachments,
+  processing,
+  onRemove,
+}: {
+  attachments: readonly PhoneAttachment[];
+  processing: number;
+  onRemove: (index: number) => void;
+}) {
+  const openViewer = useImageViewer();
+  const [brokenUrls, setBrokenUrls] = useState<Set<string>>(() => new Set());
+  const openAt = (targetUrl: string, opener: HTMLElement) => {
+    const items: ViewerImageItem[] = [];
+    let initialIndex = 0;
+    for (const att of attachments) {
+      if (!att.mimeType.startsWith("image/") || brokenUrls.has(att.url)) continue;
+      if (att.url === targetUrl) initialIndex = items.length;
+      items.push({
+        src: att.url,
+        filename: att.name,
+        alt: att.name,
+        blob: new Blob([att.data as BlobPart], { type: att.mimeType }),
+      });
+    }
+    openViewer(items, initialIndex, opener);
+  };
+  return (
+    <div className="phone-attachments" aria-label="图片附件">
+      {attachments.map((attachment, at) => {
+        const isImg = attachment.mimeType.startsWith("image/");
+        const broken = brokenUrls.has(attachment.url);
+        return (
+          <span className="phone-attachment" key={attachment.url}>
+            {isImg ? (
+              broken ? (
+                <img src={attachment.url} alt={attachment.name} />
+              ) : (
+                <button
+                  type="button"
+                  className="phone-attachment-open"
+                  aria-label={attachment.name}
+                  onClick={(event) => {
+                    openAt(attachment.url, event.currentTarget);
+                  }}
+                >
+                  <img
+                    src={attachment.url}
+                    alt={attachment.name}
+                    onError={() => {
+                      setBrokenUrls((prev) => {
+                        const next = new Set(prev);
+                        next.add(attachment.url);
+                        return next;
+                      });
+                    }}
+                  />
+                </button>
+              )
+            ) : (
+              <span>▤ {attachment.name}</span>
+            )}
+            <button
+              type="button"
+              className="phone-attachment-remove"
+              aria-label={`移除 ${attachment.name}`}
+              onClick={() => {
+                onRemove(at);
+              }}
+            >
+              <Icon name="close" size={14} />
+            </button>
+            <small>{formatBytes(attachment.data.length)}</small>
+          </span>
+        );
+      })}
+      {processing > 0 && (
+        <span className="phone-attachment busy" role="status" aria-label="正在处理图片">
+          …
+        </span>
       )}
     </div>
   );

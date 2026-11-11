@@ -48,6 +48,7 @@ import {
 } from "./icons";
 import { Popover, PopoverOption } from "./Popover";
 import { DraftComposer, SessionScreen } from "./SessionScreen";
+import { ImageViewerProvider, type ImageViewerControl } from "../ImageViewer";
 import { Switch } from "../ui";
 import type { PhonePanelPage } from "./PhoneSidePanel";
 
@@ -195,7 +196,27 @@ export function PhoneApp({
     hostId: string;
     sessionId: string;
   } | null>(null);
+  const viewerControl = useRef<ImageViewerControl | null>(null);
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const closingViewerFromPop = useRef(false);
+  const handleViewerOpenChange = (open: boolean) => {
+    if (open) {
+      const raw = history.state as (Page & { __viewer?: boolean }) | null;
+      const base: Page = raw ? (({ __viewer: _, ...rest }) => rest)(raw) : pageRef.current;
+      history.pushState({ ...base, __viewer: true }, "", location.pathname);
+    } else if (!closingViewerFromPop.current) {
+      if ((history.state as { __viewer?: boolean } | null)?.__viewer === true) {
+        history.back();
+      }
+    }
+    closingViewerFromPop.current = false;
+  };
   const navigate = (next: Page, replace = false) => {
+    if (viewerControl.current?.isOpen === true) {
+      closingViewerFromPop.current = true;
+      viewerControl.current.close();
+    }
     (replace ? history.replaceState.bind(history) : history.pushState.bind(history))(
       next,
       "",
@@ -261,7 +282,18 @@ export function PhoneApp({
         setError("无法读取手机存储，请允许网站保存数据后重试");
       });
     const pop = (e: PopStateEvent) => {
-      const next = (e.state as Page | null) ?? { kind: "welcome" };
+      const raw = e.state as (Page & { __viewer?: boolean }) | null;
+      if (viewerControl.current?.isOpen === true && raw?.__viewer !== true) {
+        closingViewerFromPop.current = true;
+        viewerControl.current.close();
+      }
+      const next: Page = raw ? (({ __viewer: _, ...rest }) => rest)(raw) : { kind: "welcome" };
+      if (
+        next.kind === pageRef.current.kind &&
+        JSON.stringify(next) === JSON.stringify(pageRef.current)
+      ) {
+        return;
+      }
       sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
       setPage(next);
       setAddingHost(false);
@@ -307,6 +339,10 @@ export function PhoneApp({
   useEffect(
     () =>
       platform.onAndroidBack?.(() => {
+        if (viewerControl.current?.isOpen === true) {
+          history.back();
+          return;
+        }
         if (page.kind === "welcome" || page.kind === "home") platform.moveTaskToBack?.();
         else history.back();
       }),
@@ -1181,230 +1217,236 @@ export function PhoneApp({
       ? (entry?.workspace ?? sessions.list.find((item) => item.id === page.sessionId)?.cwd)
       : undefined;
   return (
-    <main className="phone">
-      {platform.updateLifecycle?.()}
-      <header
-        className={`phone-header${homeHeader ? " home" : ""}${sessionHeader ? " session" : ""}`}
-      >
-        {homeHeader ? (
-          <span className="phone-header-side" />
-        ) : (
-          <button
-            className="phone-icon-button"
-            aria-label="返回"
-            disabled={(page.kind === "welcome" && !offer) || (!offer && history.length <= 1)}
-            onClick={() => {
-              if (offer) setOffer(undefined);
-              else history.back();
-            }}
-          >
-            <IconBack />
-          </button>
-        )}
-        {homeHeader ? (
-          <button
-            ref={hostTrigger}
-            className="phone-host-switch"
-            aria-label="切换电脑"
-            aria-haspopup="dialog"
-            aria-expanded={menu === "hosts"}
-            onClick={() => {
-              setMenu(menu === "hosts" ? null : "hosts");
-            }}
-          >
-            <IconComputer />
+    <ImageViewerProvider
+      capabilities={platform.imageViewer}
+      controlRef={viewerControl}
+      onOpenChange={handleViewerOpenChange}
+    >
+      <main className="phone">
+        {platform.updateLifecycle?.()}
+        <header
+          className={`phone-header${homeHeader ? " home" : ""}${sessionHeader ? " session" : ""}`}
+        >
+          {homeHeader ? (
+            <span className="phone-header-side" />
+          ) : (
+            <button
+              className="phone-icon-button"
+              aria-label="返回"
+              disabled={(page.kind === "welcome" && !offer) || (!offer && history.length <= 1)}
+              onClick={() => {
+                if (offer) setOffer(undefined);
+                else history.back();
+              }}
+            >
+              <IconBack />
+            </button>
+          )}
+          {homeHeader ? (
+            <button
+              ref={hostTrigger}
+              className="phone-host-switch"
+              aria-label="切换电脑"
+              aria-haspopup="dialog"
+              aria-expanded={menu === "hosts"}
+              onClick={() => {
+                setMenu(menu === "hosts" ? null : "hosts");
+              }}
+            >
+              <IconComputer />
+              <h1>{title}</h1>
+              <i
+                className={`phone-dot ${connection?.state ?? "offline"}`}
+                aria-label={STATE_TEXT[connection?.state ?? "offline"]}
+                role="img"
+              />
+              <IconChevron />
+            </button>
+          ) : sessionHeader ? (
+            <div className="phone-header-title">
+              <h1>{title}</h1>
+              {sessionPath !== undefined && (
+                <p className="phone-header-project">
+                  {phoneProjectName(sessionPath, plainWorkspace)}
+                </p>
+              )}
+            </div>
+          ) : (
             <h1>{title}</h1>
-            <i
-              className={`phone-dot ${connection?.state ?? "offline"}`}
-              aria-label={STATE_TEXT[connection?.state ?? "offline"]}
-              role="img"
-            />
-            <IconChevron />
-          </button>
-        ) : sessionHeader ? (
-          <div className="phone-header-title">
-            <h1>{title}</h1>
-            {sessionPath !== undefined && (
-              <p className="phone-header-project">
-                {phoneProjectName(sessionPath, plainWorkspace)}
-              </p>
-            )}
-          </div>
-        ) : (
-          <h1>{title}</h1>
+          )}
+          {sessionHeader ? (
+            <div className="phone-header-tools" ref={setHeaderSlot} />
+          ) : page.kind === "settings" ||
+            page.kind === "diagnostics" ||
+            page.kind === "usage" ||
+            page.kind === "schedules" ||
+            page.kind === "ext" ||
+            offer ? (
+            <span className="phone-header-side" />
+          ) : (
+            <button
+              className="phone-icon-button"
+              aria-label="设置"
+              onClick={() => {
+                navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
+              }}
+            >
+              <IconSettings />
+            </button>
+          )}
+        </header>
+        {error && (
+          <p className="phone-error" role="alert">
+            {error}
+          </p>
         )}
-        {sessionHeader ? (
-          <div className="phone-header-tools" ref={setHeaderSlot} />
-        ) : page.kind === "settings" ||
-          page.kind === "diagnostics" ||
-          page.kind === "usage" ||
-          page.kind === "schedules" ||
-          page.kind === "ext" ||
-          offer ? (
-          <span className="phone-header-side" />
-        ) : (
-          <button
-            className="phone-icon-button"
-            aria-label="设置"
-            onClick={() => {
-              navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
-            }}
-          >
-            <IconSettings />
-          </button>
-        )}
-      </header>
-      {error && (
-        <p className="phone-error" role="alert">
-          {error}
-        </p>
-      )}
-      {connection &&
-        connection.state !== "online" &&
-        page.kind !== "settings" &&
-        page.kind !== "diagnostics" && (
-          <aside
-            className={`phone-status${
-              connection.state === "incompatible" &&
+        {connection &&
+          connection.state !== "online" &&
+          page.kind !== "settings" &&
+          page.kind !== "diagnostics" && (
+            <aside
+              className={`phone-status${
+                connection.state === "incompatible" &&
+                connection.message === "App 版本过旧" &&
+                platform.incompatibleUpdate
+                  ? " phone-update-content"
+                  : ""
+              }`}
+              role="status"
+            >
+              {connection.state === "incompatible" &&
               connection.message === "App 版本过旧" &&
               platform.incompatibleUpdate
-                ? " phone-update-content"
-                : ""
-            }`}
-            role="status"
-          >
-            {connection.state === "incompatible" &&
-            connection.message === "App 版本过旧" &&
-            platform.incompatibleUpdate
-              ? platform.incompatibleUpdate()
-              : connection.message || "正在建立加密连接…"}
+                ? platform.incompatibleUpdate()
+                : connection.message || "正在建立加密连接…"}
+            </aside>
+          )}
+        {homeHeader && connection?.state !== "incompatible" && platform.updateNotice?.()}
+        {installHint && (
+          <aside className="phone-status">
+            请在 Safari
+            分享菜单选择「添加到主屏幕」。添加后需在主屏幕应用里再配对一次，用电脑上的「复制链接」粘贴即可。
           </aside>
         )}
-      {homeHeader && connection?.state !== "incompatible" && platform.updateNotice?.()}
-      {installHint && (
-        <aside className="phone-status">
-          请在 Safari
-          分享菜单选择「添加到主屏幕」。添加后需在主屏幕应用里再配对一次，用电脑上的「复制链接」粘贴即可。
-        </aside>
-      )}
-      <PaneErrorBoundary
-        key={JSON.stringify(page.kind === "session" ? { ...page, panel: undefined } : page)}
-      >
-        {body}
-      </PaneErrorBoundary>
-      {menu === "hosts" && (
-        <Popover
-          anchor={hostTrigger.current}
-          label="切换电脑"
-          onClose={() => {
-            setMenu(null);
-          }}
+        <PaneErrorBoundary
+          key={JSON.stringify(page.kind === "session" ? { ...page, panel: undefined } : page)}
         >
-          <div className="phone-popover-h">电脑</div>
-          {hosts.map((item) => (
-            <PopoverOption
-              key={item.hostId}
-              icon={<IconComputer />}
-              label={item.name}
-              detail={
-                item.hostId === hostId
-                  ? STATE_TEXT[connection?.state ?? "offline"]
-                  : item.lastConnectedAt
-                    ? `上次连接 ${shortDate(item.lastConnectedAt)}`
-                    : "尚未连接"
-              }
-              checked={item.hostId === hostId}
-              onSelect={() => {
-                setMenu(null);
-                if (item.hostId !== hostId) navigate({ kind: "home", hostId: item.hostId }, true);
-              }}
-            />
-          ))}
-          <PopoverOption
-            label="管理电脑与配对…"
-            onSelect={() => {
-              navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
-            }}
-          />
-        </Popover>
-      )}
-      {renameDraft !== undefined && page.kind === "session" && (
-        <div className="phone-rename-backdrop">
-          <form
-            className="phone-rename-dialog"
-            role="dialog"
-            aria-label="重命名会话"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const next = renameDraft;
-              if (next === title) {
-                setRenameDraft(undefined);
-                return;
-              }
-              setBusy(true);
-              void (async () => {
-                try {
-                  if (!sessions.client) throw new Error("电脑尚未连接");
-                  await sessions.client.runtime.renameSession(page.sessionId, next);
-                  await sessions.refresh();
-                  setRenameDraft(undefined);
-                } catch (reason) {
-                  setRenameError(
-                    reason instanceof RpcError && reason.code === "session_locked"
-                      ? "这个会话正在别处打开，关掉后再改名"
-                      : reason instanceof Error
-                        ? reason.message
-                        : "操作失败，请重试",
-                  );
-                } finally {
-                  setBusy(false);
-                }
-              })();
+          {body}
+        </PaneErrorBoundary>
+        {menu === "hosts" && (
+          <Popover
+            anchor={hostTrigger.current}
+            label="切换电脑"
+            onClose={() => {
+              setMenu(null);
             }}
           >
-            <h2>重命名会话</h2>
-            <input
-              aria-label="会话名称"
-              autoFocus
-              value={renameDraft}
-              onChange={(e) => {
-                setRenameDraft(e.target.value);
+            <div className="phone-popover-h">电脑</div>
+            {hosts.map((item) => (
+              <PopoverOption
+                key={item.hostId}
+                icon={<IconComputer />}
+                label={item.name}
+                detail={
+                  item.hostId === hostId
+                    ? STATE_TEXT[connection?.state ?? "offline"]
+                    : item.lastConnectedAt
+                      ? `上次连接 ${shortDate(item.lastConnectedAt)}`
+                      : "尚未连接"
+                }
+                checked={item.hostId === hostId}
+                onSelect={() => {
+                  setMenu(null);
+                  if (item.hostId !== hostId) navigate({ kind: "home", hostId: item.hostId }, true);
+                }}
+              />
+            ))}
+            <PopoverOption
+              label="管理电脑与配对…"
+              onSelect={() => {
+                navigate({ kind: "settings", ...(hostId ? { hostId } : {}) });
               }}
             />
-            {renameError && <p role="alert">{renameError}</p>}
-            <div className="phone-rename-actions">
-              <button
-                type="button"
-                onClick={() => {
+          </Popover>
+        )}
+        {renameDraft !== undefined && page.kind === "session" && (
+          <div className="phone-rename-backdrop">
+            <form
+              className="phone-rename-dialog"
+              role="dialog"
+              aria-label="重命名会话"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const next = renameDraft;
+                if (next === title) {
                   setRenameDraft(undefined);
+                  return;
+                }
+                setBusy(true);
+                void (async () => {
+                  try {
+                    if (!sessions.client) throw new Error("电脑尚未连接");
+                    await sessions.client.runtime.renameSession(page.sessionId, next);
+                    await sessions.refresh();
+                    setRenameDraft(undefined);
+                  } catch (reason) {
+                    setRenameError(
+                      reason instanceof RpcError && reason.code === "session_locked"
+                        ? "这个会话正在别处打开，关掉后再改名"
+                        : reason instanceof Error
+                          ? reason.message
+                          : "操作失败，请重试",
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+            >
+              <h2>重命名会话</h2>
+              <input
+                aria-label="会话名称"
+                autoFocus
+                value={renameDraft}
+                onChange={(e) => {
+                  setRenameDraft(e.target.value);
                 }}
-              >
-                取消
-              </button>
-              <button type="submit" disabled={busy}>
-                保存
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-      {connection?.state === "revoked" && hostId && (
-        <button
-          className="phone-remove"
-          onClick={() => {
-            void operation(async () => {
-              await storage.removeHost(hostId);
-              const rest = await storage.hosts();
-              setHosts(rest);
-              const next = lastHost(rest);
-              navigate(next ? { kind: "home", hostId: next.hostId } : { kind: "welcome" }, true);
-              setError("电脑上的设备记录请在电脑的『设置 › 远程』里移除");
-            });
-          }}
-        >
-          移除这台电脑
-        </button>
-      )}
-    </main>
+              />
+              {renameError && <p role="alert">{renameError}</p>}
+              <div className="phone-rename-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenameDraft(undefined);
+                  }}
+                >
+                  取消
+                </button>
+                <button type="submit" disabled={busy}>
+                  保存
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+        {connection?.state === "revoked" && hostId && (
+          <button
+            className="phone-remove"
+            onClick={() => {
+              void operation(async () => {
+                await storage.removeHost(hostId);
+                const rest = await storage.hosts();
+                setHosts(rest);
+                const next = lastHost(rest);
+                navigate(next ? { kind: "home", hostId: next.hostId } : { kind: "welcome" }, true);
+                setError("电脑上的设备记录请在电脑的『设置 › 远程』里移除");
+              });
+            }}
+          >
+            移除这台电脑
+          </button>
+        )}
+      </main>
+    </ImageViewerProvider>
   );
 }

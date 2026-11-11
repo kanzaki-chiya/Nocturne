@@ -1,0 +1,149 @@
+/* 窗口级图片查看器：桌面端、手机网页、安卓共用（对照 nocturne-mockups/image-viewer/viewer.html） */
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  /* stylelint-disable-next-line function-disallowed-list -- 图片查看器遮罩固定深色，深浅主题共用，不用 --a-overlay */
+  background: rgb(10 10 14 / 0.88);
+  /* stylelint-disable-next-line color-no-hex -- 图片查看器深色遮罩上的浅色图标与计数文字 */
+  color: #f2f2f6;
+  touch-action: none;
+  user-select: none;
+  overflow: hidden;
+  outline: none;
+}
+
+.image-viewer:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .image-viewer {
+    animation: nct-enter-backdrop var(--dur-dialog) var(--ease-out);
+  }
+}
+
+.image-viewer .iv-stage {
+  position: absolute;
+  inset: 0;
+  cursor: zoom-in;
+}
+
+.image-viewer .iv-stage.zoomed {
+  cursor: grab;
+}
+
+.image-viewer .iv-stage.dragging {
+  cursor: grabbing;
+}
+
+.image-viewer .iv-stage img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  max-height: none;
+  transform-origin: center;
+  will-change: transform;
+  -webkit-user-drag: none;
+  box-shadow: var(--shadow-dialog);
+}
+
+.image-viewer :is(.iv-top, .iv-nav, .iv-count) {
+  /* stylelint-disable-next-line function-disallowed-list -- 图片查看器按钮栏、切换箭头与计数的深色半透明底 */
+  background: rgb(20 20 26 / 0.72);
+}
+
+.image-viewer .iv-btn {
+  width: var(--ctl-h-lg);
+  height: var(--ctl-h-lg);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: inherit;
+}
+
+.image-viewer .iv-btn:hover:not(:disabled) {
+  /* stylelint-disable-next-line function-disallowed-list -- 图片查看器深色控件上的浅色半透明悬停底 */
+  background: rgb(242 242 246 / 0.14);
+  color: inherit;
+}
+
+.image-viewer .iv-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.image-viewer .iv-top {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  gap: var(--space-0-5);
+  padding: var(--space-1);
+  border-radius: var(--radius-3);
+}
+
+.image-viewer .iv-nav {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  border-radius: 50%;
+}
+
+.image-viewer .iv-nav.prev {
+  left: var(--space-4);
+}
+
+.image-viewer .iv-nav.next {
+  right: var(--space-4);
+}
+
+.image-viewer .iv-nav .iv-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.image-viewer .iv-count {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  translate: -50% 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-2);
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+@media (max-width: 600px) {
+  .image-viewer {
+    /* stylelint-disable-next-line color-no-hex -- 手机图片查看器全屏纯黑底 */
+    background: #000;
+  }
+
+  .image-viewer .iv-stage img {
+    box-shadow: none;
+  }
+
+  .image-viewer .iv-top {
+    top: calc(var(--space-2) + env(safe-area-inset-top, 0px));
+    right: var(--space-2);
+  }
+
+  .image-viewer .iv-btn {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+
+  .image-viewer .iv-nav {
+    display: none;
+  }
+
+  .image-viewer .iv-count {
+    bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+  }
+}

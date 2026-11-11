@@ -202,6 +202,17 @@
      不设上限时原图固有宽度会把 fit-content 撑到气泡宽，图片只占 160px，右侧留白 */
   max-width: 168px;
 }
+.conversation button.u-img-frame {
+  cursor: zoom-in;
+}
+.conversation button.u-img-frame:hover {
+  border-color: var(--a-border-strong);
+}
+.conversation button.u-img-frame:focus-visible {
+  outline: none;
+  border-color: var(--a-accent);
+  box-shadow: var(--shadow-focus);
+}
 .conversation .u-img {
   display: block;
   width: auto;

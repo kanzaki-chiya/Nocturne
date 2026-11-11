@@ -702,9 +702,22 @@
   background: repeating-conic-gradient(var(--a-raised) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
 }
 .sp-image img {
+  display: block;
   max-width: 100%;
   height: auto;
   image-rendering: auto;
+}
+.sp-image-open {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+.sp-image-open:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .sp-file-actions {
   display: flex;

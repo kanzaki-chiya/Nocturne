@@ -10,6 +10,7 @@ export interface AttachmentImageSource {
    */
   showErrors?: boolean;
   url: (attachment: ImageAttachment) => string | undefined;
+  blob?: (attachment: ImageAttachment) => Blob | undefined;
   /** sha256（小写 hex）→ object URL，重复登记返回同一 URL */
   register: (data: Uint8Array, mimeType: string) => Promise<string>;
   load: (
@@ -26,6 +27,7 @@ function hex(buffer: ArrayBuffer): string {
 
 export function createAttachmentImageSource(): AttachmentImageSource {
   const urls = new Map<string, string>();
+  const blobs = new Map<string, Blob>();
   const pending = new Map<string, Promise<string>>();
   let generation = 0;
   const register = async (data: Uint8Array, mimeType: string): Promise<string> => {
@@ -34,13 +36,16 @@ export function createAttachmentImageSource(): AttachmentImageSource {
     if (current !== generation) throw new Error("图片缓存已释放");
     let url = urls.get(key);
     if (url === undefined) {
-      url = URL.createObjectURL(new Blob([data as BlobPart], { type: mimeType }));
+      const blob = new Blob([data as BlobPart], { type: mimeType });
+      url = URL.createObjectURL(blob);
       urls.set(key, url);
+      blobs.set(key, blob);
     }
     return url;
   };
   return {
     url: (attachment) => urls.get(attachment.sha256),
+    blob: (attachment) => blobs.get(attachment.sha256),
     register,
     load(attachment, session) {
       const cached = urls.get(attachment.sha256);
@@ -62,6 +67,7 @@ export function createAttachmentImageSource(): AttachmentImageSource {
       generation++;
       for (const url of urls.values()) URL.revokeObjectURL(url);
       urls.clear();
+      blobs.clear();
       pending.clear();
     },
   };

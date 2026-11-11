@@ -87,6 +87,8 @@ export interface PhonePlatform {
   onAndroidBack?(listener: () => void): () => void;
   moveTaskToBack?(): void;
   dismissNotification?(hostId: string, sessionId: string): void;
+  /** 图片查看器在当前平台可用的操作；缺省按浏览器标准能力启用 */
+  imageViewer?: { copy?: boolean; download?: boolean };
   /** 取代网页版信任边界说明（网页由中继下发，App 的页面随安装包）；不传用网页版文字 */
   trustText?: string;
   /** 配对说明里描述「怎么拿到配对链接」的一句话 */

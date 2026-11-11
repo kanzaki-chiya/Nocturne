@@ -11,6 +11,7 @@ import {
 } from "react";
 import { marked, type Token, type Tokens } from "marked";
 import { Badge, Button, Checkbox, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
+import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "./ImageViewer";
 import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
@@ -927,13 +928,19 @@ function ImageIcon() {
  * 和用户消息里的图片共用窗口级缓存；只在这里显示缩略图，不重复进上下文。
  */
 function ToolImage({
+  index,
   attachment,
   images,
   session,
+  slots,
+  onOpen,
 }: {
+  index: number;
   attachment: ImageAttachment;
   images: AttachmentImageSource;
   session: Pick<RpcSession, "readAttachment">;
+  slots: Map<number, string>;
+  onOpen: (index: number, opener: HTMLElement) => void;
 }) {
   const [url, setUrl] = useState<string | undefined>(() => images.url(attachment));
   const [error, setError] = useState<string>();
@@ -953,6 +960,17 @@ function ToolImage({
       active = false;
     };
   }, [attachment, images, session, url]);
+  useEffect(
+    () => () => {
+      slots.delete(index);
+    },
+    [index, slots],
+  );
+  if (!images.placeholder && error === undefined && url !== undefined) {
+    slots.set(index, url);
+  } else {
+    slots.delete(index);
+  }
   if (images.placeholder) {
     return (
       <span className="u-img-chip" title={attachment.file}>
@@ -970,17 +988,25 @@ function ToolImage({
     );
   }
   if (url !== undefined) {
+    const alt = attachment.label ?? attachment.file;
     return (
-      <span className="u-img-frame tool-shot">
+      <button
+        type="button"
+        className="u-img-frame tool-shot"
+        aria-label={alt}
+        onClick={(event) => {
+          onOpen(index, event.currentTarget);
+        }}
+      >
         <img
           className="u-img"
           src={url}
-          alt={attachment.label ?? attachment.file}
+          alt={alt}
           onError={() => {
             setError("图片无法解码或显示");
           }}
         />
-      </span>
+      </button>
     );
   }
   return (
@@ -999,6 +1025,8 @@ function ToolShots({
   images?: AttachmentImageSource | undefined;
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
+  const openViewer = useImageViewer();
+  const slotsRef = useRef<Map<number, string>>(new Map());
   if (attachments.length === 0) return null;
   if (images === undefined || session === undefined) {
     return (
@@ -1012,25 +1040,51 @@ function ToolShots({
       </div>
     );
   }
+  const openAt = (clickedIndex: number, opener: HTMLElement) => {
+    const items: ViewerImageItem[] = [];
+    let initialIndex = 0;
+    attachments.forEach((att, idx) => {
+      const src = slotsRef.current.get(idx);
+      if (src === undefined) return;
+      if (idx === clickedIndex) initialIndex = items.length;
+      const name = att.label ?? att.file;
+      items.push({ src, filename: name, alt: name, blob: images.blob?.(att) });
+    });
+    openViewer(items, initialIndex, opener);
+  };
   return (
     <div className="tool-shots">
       {attachments.map((attachment, index) => (
-        <ToolImage key={index} attachment={attachment} images={images} session={session} />
+        <ToolImage
+          key={index}
+          index={index}
+          attachment={attachment}
+          images={images}
+          session={session}
+          slots={slotsRef.current}
+          onOpen={openAt}
+        />
       ))}
     </div>
   );
 }
 
 function UserImage({
+  index,
   attachment,
   images,
   session,
   visible,
+  slots,
+  onOpen,
 }: {
+  index: number;
   attachment: ImageAttachment;
   images: AttachmentImageSource;
   session: Pick<RpcSession, "readAttachment">;
   visible: boolean;
+  slots: Map<number, string>;
+  onOpen: (index: number, opener: HTMLElement) => void;
 }) {
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState<string>();
@@ -1049,6 +1103,17 @@ function UserImage({
       active = false;
     };
   }, [attachment, images, session, visible]);
+  useEffect(
+    () => () => {
+      slots.delete(index);
+    },
+    [index, slots],
+  );
+  if (!images.placeholder && error === undefined && url !== undefined) {
+    slots.set(index, url);
+  } else {
+    slots.delete(index);
+  }
   if (images.placeholder) return <span className="u-img-chip">{images.placeholder}</span>;
   if (error !== undefined) {
     return (
@@ -1059,17 +1124,25 @@ function UserImage({
     );
   }
   if (url !== undefined) {
+    const alt = attachment.label ?? attachment.file;
     return (
-      <span className="u-img-frame">
+      <button
+        type="button"
+        className="u-img-frame"
+        aria-label={alt}
+        onClick={(event) => {
+          onOpen(index, event.currentTarget);
+        }}
+      >
         <img
           className="u-img"
           src={url}
-          alt={attachment.label ?? attachment.file}
+          alt={alt}
           onError={() => {
             setError("图片无法解码或显示");
           }}
         />
-      </span>
+      </button>
     );
   }
   return (
@@ -1082,6 +1155,50 @@ function UserImage({
     >
       <ImageIcon />
     </span>
+  );
+}
+
+function UserImages({
+  attachments,
+  images,
+  session,
+  visible,
+}: {
+  attachments: readonly ImageAttachment[];
+  images: AttachmentImageSource;
+  session: Pick<RpcSession, "readAttachment">;
+  visible: boolean;
+}) {
+  const openViewer = useImageViewer();
+  const slotsRef = useRef<Map<number, string>>(new Map());
+  if (attachments.length === 0) return null;
+  const openAt = (clickedIndex: number, opener: HTMLElement) => {
+    const items: ViewerImageItem[] = [];
+    let initialIndex = 0;
+    attachments.forEach((att, idx) => {
+      const src = slotsRef.current.get(idx);
+      if (src === undefined) return;
+      if (idx === clickedIndex) initialIndex = items.length;
+      const name = att.label ?? att.file;
+      items.push({ src, filename: name, alt: name, blob: images.blob?.(att) });
+    });
+    openViewer(items, initialIndex, opener);
+  };
+  return (
+    <>
+      {attachments.map((attachment, index) => (
+        <UserImage
+          key={`${attachment.file}:${attachment.sha256}:${index}`}
+          index={index}
+          attachment={attachment}
+          images={images}
+          session={session}
+          visible={visible}
+          slots={slotsRef.current}
+          onOpen={openAt}
+        />
+      ))}
+    </>
   );
 }
 
@@ -1342,15 +1459,12 @@ function UserMessage({
               {entry.steer === true && entry.workMode === undefined && (
                 <Badge className="u-steer">插话</Badge>
               )}
-              {(entry.attachments ?? []).map((attachment, index) => (
-                <UserImage
-                  key={`${attachment.file}:${attachment.sha256}:${index}`}
-                  attachment={attachment}
-                  images={images}
-                  session={session}
-                  visible={visible}
-                />
-              ))}
+              <UserImages
+                attachments={entry.attachments ?? []}
+                images={images}
+                session={session}
+                visible={visible}
+              />
               {(entry.files ?? []).map((file) => (
                 <button
                   type="button"
@@ -4173,18 +4287,20 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   const readOnly = "readOnly" in props ? props.readOnly : undefined;
   const links = "subagentLinks" in props ? props.subagentLinks : undefined;
   return (
-    <FrozenContext.Provider value={readOnly?.frozen === true}>
-      <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
-        <BackgroundViewContext.Provider value={props.view}>
-          <ShellSessionContext.Provider
-            value={
-              readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
-            }
-          >
-            <ConversationContent key={props.session.id} {...props} />
-          </ShellSessionContext.Provider>
-        </BackgroundViewContext.Provider>
-      </SubagentLinksContext.Provider>
-    </FrozenContext.Provider>
+    <ImageViewerBoundary>
+      <FrozenContext.Provider value={readOnly?.frozen === true}>
+        <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
+          <BackgroundViewContext.Provider value={props.view}>
+            <ShellSessionContext.Provider
+              value={
+                readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
+              }
+            >
+              <ConversationContent key={props.session.id} {...props} />
+            </ShellSessionContext.Provider>
+          </BackgroundViewContext.Provider>
+        </SubagentLinksContext.Provider>
+      </FrozenContext.Provider>
+    </ImageViewerBoundary>
   );
 }

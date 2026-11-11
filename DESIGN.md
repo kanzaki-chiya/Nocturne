@@ -136,6 +136,8 @@
 
 **手机顶栏与侧边栏**（[ADR-0084](docs/decisions/ADR-0084-phone-side-panel.md)）：顶栏右侧只有「…」会话菜单与侧边栏按钮两个图标；侧边栏是右侧抽屉，宽 88%，从顶栏下沿开始、不盖顶栏，顶栏以下的其余界面压暗；点遮罩、再点侧边栏按钮或安卓返回关闭，子视图返回先回总览。总览自上而下为上下文百分比、累计 tokens 与构成，运行中的子代理（同步与后台同列，不加标记、无行内取消），后台命令（运行中与刚结束的，无行内停止），底部「变更」「文件」「终端」；没有条目的分组不显示。子视图只读：子代理过程用对话同款渲染，变更为按轮 diff，文件为文件索引加只读、自动换行的代码查看器；取消后台子代理与停止后台命令只在详情出现。终端是虚线边框、淡色的 `aria-disabled` 静态行，不动作、不写说明。
 
+**图片查看器**（`ImageViewer.tsx`、`image-viewer.css`，桌面、手机网页、安卓共用）：经 portal 挂在 `document.body` 盖住整个窗口，不被对话区、子代理面板、右侧面板或手机抽屉裁剪。遮罩不用 `--a-overlay`，桌面深浅主题统一为固定深色 `rgb(10 10 14 / 0.88)`，窄于 `600px` 的手机为全屏纯黑 `#000`。右上角图标栏依次为「复制」「下载」「关闭」三个 `IconButton`（平台不支持的操作直接隐藏），同组多张时左右两侧显示圆形「上一张」「下一张」按钮（`<= 600px` 隐藏，顶栏按钮触控区升为 `--ctl-h-touch` 44px）并在底部居中显示等宽数字计数 `2 / 4`，单张时不渲染箭头与计数；控件底色统一为 `rgb(20 20 26 / 0.72)` 深色半透明底配 `#f2f2f6` 浅色图标与文字。初始按适应窗口显示且不放大超过原始像素，缩放范围为适应窗口至 8 倍：桌面支持以光标为中心的滚轮缩放、双击在适应窗口与原始大小间切换、放大后在边界内拖动平移、方向键或箭头循环切换；手机支持双指缩放、双触切换适应与放大、放大后单指拖动、未放大时左右滑动切换，安卓返回键先关闭查看器。打开时焦点移入查看器并困在内部，Esc、点图片外空白或点关闭按钮均直接消失（仅在 `prefers-reduced-motion: no-preference` 下入场淡入 `--dur-dialog`）并将焦点归还原缩略图。查看器内除计数外不显示任何文字、文件名、尺寸、百分比或成功提示，复制失败仅将错误原文写入复制按钮 `title`。
+
 ---
 
 ## 7. 响应式断点
@@ -190,6 +192,11 @@
 | `conversation.css` | `.conversation-notice-error` | `function-disallowed-list` | `color-mix(in srgb, var(--a-error) 8%, transparent)` | 对话内错误提示条用 8% `--a-error` 半透明底 |
 | `conversation.css` | `.conversation .ask` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 55%, var(--a-border))` | 权限确认卡用 55% `--a-warning` 混入 `--a-border` 的警告描边 |
 | `conversation.css` | `.qcard .opt[aria-checked="true"]` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 45%, transparent)` | 提问卡选中项用 45% `--a-accent` 半透明描边 |
+| `image-viewer.css` | `.image-viewer`（`background`） | `function-disallowed-list` | `rgb(10 10 14 / 0.88)` | 图片查看器遮罩固定深色，深浅主题共用，不用 `--a-overlay` |
+| `image-viewer.css` | `.image-viewer`（`color`） | `color-no-hex` | `#f2f2f6` | 图片查看器深色遮罩上的浅色图标与计数文字 |
+| `image-viewer.css` | `.image-viewer .iv-btn:hover:not(:disabled)` | `function-disallowed-list` | `rgb(242 242 246 / 0.14)` | 图片查看器深色控件上的浅色半透明悬停底 |
+| `image-viewer.css` | `.image-viewer :is(.iv-top, .iv-nav, .iv-count)` | `function-disallowed-list` | `rgb(20 20 26 / 0.72)` | 图片查看器按钮栏、切换箭头与计数的深色半透明底 |
+| `image-viewer.css` | `@media (max-width: 600px) .image-viewer` | `color-no-hex` | `#000` | 手机图片查看器全屏纯黑底 |
 | `pages.css` | `.page3 .wait.warnb` | `function-disallowed-list` | `color-mix(in srgb, var(--a-warning) 40%, var(--a-border))` | 登录等待警告态用 40% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .pbanner` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 服务商提示横幅用 45% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .keybox` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 密钥提示框用 45% `--a-warning` 混入 `--a-border` 的描边 |
@@ -222,8 +229,8 @@
 | `usage.css` | `.usage-level-3` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 70%, var(--a-panel))` | 热力图 3 级用 70% `--a-accent` 混入 `--a-panel` |
 | `usage.css` | `.usage-kind-input` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 60%, var(--a-panel))` | 用量构成条「输入」段用 60% `--a-accent` 混入 `--a-panel` |
 | `usage.css` | `.usage-kind-output` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accentAlt) 55%, var(--a-panel))` | 用量构成条「输出」段用 55% `--a-accentAlt` 混入 `--a-panel` |
-| `web/phone.css` | `.phone .phone-attachment button`（`background`） | `function-disallowed-list` | `rgb(0 0 0 / 0.6)` | 缩略图移除按钮深色半透明遮罩，与 `--a-overlay` 不同 |
-| `web/phone.css` | `.phone .phone-attachment button`（`color`） | `color-no-hex` | `#fff` | 深色图片遮罩上的固定白字 |
+| `web/phone.css` | `.phone .phone-attachment .phone-attachment-remove`（`background`） | `function-disallowed-list` | `rgb(0 0 0 / 0.6)` | 缩略图移除按钮深色半透明遮罩，与 `--a-overlay` 不同 |
+| `web/phone.css` | `.phone .phone-attachment .phone-attachment-remove`（`color`） | `color-no-hex` | `#fff` | 深色图片遮罩上的固定白字 |
 | `web/phone.css` | `.phone-attachment small`（`background`） | `function-disallowed-list` | `rgb(0 0 0 / 0.5)` | 缩略图底部角标深色半透明遮罩，与 `--a-overlay` 不同 |
 | `web/phone.css` | `.phone-attachment small`（`color`） | `color-no-hex` | `#fff` | 深色图片遮罩上的固定白字 |
 | `web/phone.css` | `.phone-popover` | `color-no-hex, declaration-property-value-allowed-list` | `0 12px 40px #0004` | 手机浮层加深阴影，与桌面 `--shadow-popover` 不同 |

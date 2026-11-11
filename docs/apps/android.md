@@ -6,7 +6,7 @@
 
 文件附件与自由回答附件复用网页实现（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：选择任意文件、粘贴／拖入文件、32 KiB 大段粘贴转卡片；发送前检查远程合计原始字节上限，超限保留草稿。对话文件卡片经 `readAttachment` 下载；WebView 下载受宿主沙箱限制时仍可查看名称与大小。
 
-会话页复用手机网页的[右侧侧边栏](../decisions/ADR-0084-phone-side-panel.md)：同步与后台子代理都可只读观察，后台子代理只在子视图取消，Android 返回先回总览再关闭侧边栏。结果卡片与待发结果行为沿用 [ADR-0073](../decisions/ADR-0073-background-subagents.md) §6；远程接口边界见 [rpc.md](../protocols/rpc.md) §4.1、§7。
+会话页复用手机网页的[右侧侧边栏](../decisions/ADR-0084-phone-side-panel.md)与图片查看器：同步与后台子代理都可只读观察，后台子代理只在子视图取消；图片查看器打开时 Android 返回键先关闭查看器，侧边栏打开时返回先回总览再关闭侧边栏。因 Android System WebView 未注册 Chromium `ImageFileProvider` 且不支持无原生桥接的 `blob:` 下载，App 通过 `PhonePlatform.imageViewer` 隐藏图片查看器的「复制」与「下载」按钮。结果卡片与待发结果行为沿用 [ADR-0073](../decisions/ADR-0073-background-subagents.md) §6；远程接口边界见 [rpc.md](../protocols/rpc.md) §4.1、§7。
 
 ## 1. 工程结构
 
@@ -71,7 +71,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 外链 | 新标签打开 | `on_navigation` 仍只允许 App 源；仅 APK 下载经 `download_apk` 交给系统 `DownloadManager`（不可用时回退 `ACTION_VIEW`），原生只接受本仓库 Release 下载前缀下匹配版本的 HTTPS APK |
 | 能力边界 | 白名单 | 不变，App 不改 RPC 白名单 |
 
-共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme` 的实际生效主题调 `set_system_bars` 同步状态栏与导航栏图标深浅。
+共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`imageViewer`（图片查看器可用操作，App 设为 `{ copy: false, download: false }`）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme` 的实际生效主题调 `set_system_bars` 同步状态栏与导航栏图标深浅。
 
 ### 扫码、相机权限与更新
 
