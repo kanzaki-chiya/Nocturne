@@ -58,6 +58,8 @@ interface ToolTraits {
   needsUser?: boolean
   /** 会新建、修改或删除定时任务（ADR-0064）：定时会话与子代理按此特性排除 */
   mutatesSchedule?: boolean
+  /** 仅对顶层交互主会话开放（ADR-0088）：子代理与非交互定时会话按此特性排除 */
+  mainSessionOnly?: boolean
   /** 编辑工具族标记（ADR-0035）：edit/write 声明 "edit"，apply_patch 声明
       "apply_patch"；未声明的工具不参与该筛选。携带模型的
       capabilities.editTool 时注册表只暴露同值成员 */
@@ -134,6 +136,14 @@ interface ToolContext extends ToolScope {
       返回的 Promise 拒绝，由执行器统一结算为 cancelled / timeout。
       缺省 = 运行环境未提供提问通道，工具按 not_interactive 结算 */
   askUser?(request: AskUserRequest): Promise<AskUserReply>
+  /** 将工具产出的内容经会话 AttachmentStore 落盘为 file-<n>.<ext>（ADR-0088），
+      返回 FileAttachment 引用；缺省表示当前环境未挂载附件存储 */
+  saveFileAttachment?(input: {
+    data: Uint8Array
+    mimeType?: string
+    label: string
+    inline?: { title: string }
+  }): Promise<FileAttachment>
 }
 
 /** askUser 的入参与返回（ADR-0032 §3）；QuestionItem / QuestionAnswer
@@ -156,8 +166,8 @@ type AskUserReply =
 
 ```ts
 type ToolResult<Output = unknown> =
-  | { status: "ok";    modelContent: string; output?: Output; attachments?: RawImageAttachment[] }
-  | { status: "error"; modelContent: string; output?: Output; attachments?: RawImageAttachment[]; error: { code: string; message: string } }
+  | { status: "ok";    modelContent: string; output?: Output; attachments?: RawImageAttachment[]; files?: FileAttachment[] }
+  | { status: "error"; modelContent: string; output?: Output; attachments?: RawImageAttachment[]; files?: FileAttachment[]; error: { code: string; message: string } }
 
 /** 工具结果携带的图片字节（ADR-0023）；执行器负责落盘，
     事件里只出现 ImageAttachment 引用（events.md 第 4 节） */
@@ -174,6 +184,7 @@ type RawImageAttachment = {
 - `edit` 的 `old` 未命中返回 `no_match`，提示写入 `error.message` / `modelContent`；只基于通过路径、权限及先读状态检查的目标文本生成有界建议，不改变文件。`not_unique`、`not_read`、`resource_changed` 等语义保持不变。`stale_file` 在有旧文本且 diff 不超过 4000 字符时于 `modelContent` 附带读取时到当前的 diff 并已刷新记录，可直接重试；无旧文本或 diff 过长时需重新 `read`。
 - `apply_patch`（[ADR-0035](../decisions/ADR-0035-apply-patch.md)）的输入仅 `{ input: string }`（补丁原文；语法见 [tools.md](../architecture/tools.md) 第 6 节）。成功的 `output` 为 `{ files: [{ path, op, movedTo?, diff? }] }`——按补丁操作顺序逐文件给出 `op`（`add`/`update`/`delete`/`move`）、改名时的 `movedTo` 与该文件的行级 `diff`（格式同上）；`modelContent` 为逐文件摘要。`permissionSubjects` 为每个涉及路径各产出一个 `edit` 主体（Move 含源与目标）。解析错误、目标冲突或先读检查失败时**不写任何文件**，返回 `error`（`invalid_input`/`not_read`/`stale_file` 等）；写盘中途失败回滚已写文件后同样以 `error` 结算。
 - `attachments`：图片字节；执行器经会话的 `AttachmentStore` 逐张落盘（tools.md 第 4 节），成功的写入 `tool.completed.attachments` 引用，`source` 取 `origin === "mcp" ? "mcp" : "read"`。某张保存失败不影响其余：成功的照常引用，失败的在 `modelContent` 末尾追加 `[图片附件保存失败：<原因>]` 并记 `tool.attachment_failed` 诊断；无论成败都恰好一个 `tool.completed`。`read` 的图片相关错误码为 `image_too_large`（超 5 MB 或任一边超 8000 px）与 `image_corrupt`（文件头损坏/截断）。
+- `files`：已落盘的文件附件引用（[ADR-0072](../decisions/ADR-0072-file-attachments.md)、[ADR-0088](../decisions/ADR-0088-inline-html.md)），原样写入 `tool.completed.files`。`render_html` 成功时产出 `output: { title, file, bytes }`（不含 HTML 原文）与 `files: [FileAttachment]`（带 `inline: { title }`），附件存储缺失或写盘失败时分别以 `attachment_unavailable`、`io_error` 结算。
 - 可预期的失败（文件不存在、`old` 字符串不唯一、先读检查失败）返回 `status: "error"` 与工具自定义的 `code`；非预期异常直接抛出，由执行器转换为 `tool_failed`。
 - `denied`、`cancelled`、`interrupted` 等状态只由执行器或恢复逻辑产生，工具不会返回它们。
 

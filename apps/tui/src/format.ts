@@ -137,6 +137,7 @@ export function summarizeToolInput(
 ): string {
   if (name === "task") return inputString(input, "task") ?? "";
   if (name === "mcp_search") return inputString(input, "query") ?? "";
+  if (name === "render_html") return inputString(input, "title") ?? "";
   if (name === "switch_worktree") {
     const source = inputString(output, "current") ?? inputString(input, "path") ?? "";
     return (

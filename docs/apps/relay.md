@@ -47,7 +47,7 @@ expires 支持正整数 h/d，默认 7 天。invite create 输出明文邀请一
 
 有 Origin 的 upgrade 必须等于 publicOrigin 或在 [App 源允许表](../protocols/relay.md#origin-允许表)内（仅手机入口），否则 HTTP 403；无 Origin 放行。每 30 秒 ping，下一周期未 pong terminate。转发前目标 bufferedAmount 超 8 MiB，4007 关闭目标。
 
-GET/HEAD 静态路径需位于 webRoot 内（也检查 realpath，拒绝穿越/外部符号链接）。按扩展名 Content-Type；index no-cache，其余 max-age=300。统一 CSP、nosniff、no-referrer，精确 CSP 见源码与线上协议。
+GET/HEAD 静态路径需位于 webRoot 内（也检查 realpath，拒绝穿越/外部符号链接）。按扩展名 Content-Type；`index.html` 与 `sandbox.html` 为 `no-cache`，其余 `max-age=300`。`sandbox.html`（随 `dist-web` 打包进 `public/`）返回独立严格的沙箱 CSP 头（`SANDBOX_CSP`）供手机网页渲染回复内嵌页面，其余路径统一返回 `staticCsp`（含 `frame-src 'self'`）、`nosniff`、`no-referrer`，见 [ADR-0088](../decisions/ADR-0088-inline-html.md)。
 connect-src 根据 publicOrigin 显式允许对应 WebSocket 源；worker 与 manifest 仅同源，不开放内联脚本/样式或 eval，精确主表在 [relay 协议第 2 节](../protocols/relay.md#2-邀请与-http)。
 
 stdout JSON 行只含 time、event(connect/auth_ok/auth_failed/close/register/revoke/push)、role、id、code、received/sent 字节数、source。**不记帧内容、邀请码、签名、推送 endpoint**；邀请码只由管理命令返回。

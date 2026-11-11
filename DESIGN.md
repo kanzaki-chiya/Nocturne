@@ -198,6 +198,8 @@
 | `image-viewer.css` | `.image-viewer .iv-btn:hover:not(:disabled)` | `function-disallowed-list` | `rgb(242 242 246 / 0.14)` | 图片查看器深色控件上的浅色半透明悬停底 |
 | `image-viewer.css` | `.image-viewer :is(.iv-top, .iv-nav, .iv-count)` | `function-disallowed-list` | `rgb(20 20 26 / 0.72)` | 图片查看器按钮栏、切换箭头与计数的深色半透明底 |
 | `image-viewer.css` | `@media (max-width: 600px) .image-viewer` | `color-no-hex` | `#000` | 手机图片查看器全屏纯黑底 |
+| `inline-page.css` | `.inline-page-tools, .inline-page-fullscreen-tools` | `function-disallowed-list` | `color-mix(in srgb, var(--a-panel) 84%, transparent)` | 回复内嵌页面悬浮工具栏用 84% `--a-panel` 毛玻璃半透明底 |
+| `inline-page.css` | `.inline-page-more` | `function-disallowed-list` | `color-mix(in srgb, var(--a-panel) 84%, transparent)` | 回复内嵌页面底部展开/收起按钮用 84% `--a-panel` 毛玻璃半透明底 |
 | `pages.css` | `.page3 .wait.warnb` | `function-disallowed-list` | `color-mix(in srgb, var(--a-warning) 40%, var(--a-border))` | 登录等待警告态用 40% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .pbanner` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 服务商提示横幅用 45% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .keybox` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 密钥提示框用 45% `--a-warning` 混入 `--a-border` 的描边 |

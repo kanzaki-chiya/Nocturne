@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 
 import { questionToolLines } from "../question-format.js";
 import { webFetchSummary } from "../web-fetch.js";
-import { attachmentLine } from "../attachment-line.js";
+import { attachmentLine, fileAttachmentLine, inlinePageTitle } from "../attachment-line.js";
 import { diffSummary, parseDiff, toolFileDiffs, type ToolFileDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import {
@@ -26,6 +26,7 @@ import { SegmentText, TodoRows } from "./todo-panel.js";
 
 import type { LiveTool, ToolEntry, ViewEntry } from "@nocturne/core/protocol";
 import {
+  inlineFilesOfTool,
   todoItemsFromCompletion,
   subagentRowInfo,
   subagentApplyLine,
@@ -153,6 +154,21 @@ export function ToolRow({
       </Box>
     );
   }
+  const inlineFiles = inlineFilesOfTool(entry);
+  if (inlineFiles.length > 0) {
+    const prefix = env.ascii ? "[] " : "▣ ";
+    return (
+      <Box flexDirection="column">
+        {review}
+        {inlineFiles.map((file, i) => (
+          <Text key={`${file.file}:${i}`} wrap="truncate">
+            <Text color={theme.secondary}>{prefix}</Text>
+            <Text>{truncateLine(inlinePageTitle(file), Math.max(4, width - 4), g.ellipsis)}</Text>
+          </Text>
+        ))}
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column">
       {review}
@@ -181,6 +197,13 @@ export function ToolRow({
           {`  ${attachmentLine(att, i, env.ascii)}`}
         </Text>
       ))}
+      {(entry.result?.files ?? [])
+        .filter((file) => file.inline === undefined)
+        .map((file, i) => (
+          <Text key={`${file.file}:f:${i}`} color={theme.accent} wrap="truncate">
+            {`  ${fileAttachmentLine(file, env.ascii)}`}
+          </Text>
+        ))}
     </Box>
   );
 }

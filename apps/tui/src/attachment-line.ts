@@ -4,7 +4,7 @@ import type {
   AttachmentDescribedPayload,
 } from "@nocturne/core/protocol";
 
-import { boxSafe } from "./format.js";
+import { boxSafe, stripControls } from "./format.js";
 
 export function descriptionLine(
   description: AttachmentDescribedPayload,
@@ -36,4 +36,13 @@ export function fileAttachmentLine(att: FileAttachment, ascii: boolean): string 
   const name = boxSafe(att.label);
   const size = att.bytes < 1024 ? `${att.bytes} B` : `${Math.ceil(att.bytes / 1024)} KB`;
   return ascii ? `[File | ${name} | ${size}]` : `[附带文件 ${name}（${size}）]`;
+}
+
+export function inlinePageTitle(att: FileAttachment): string {
+  const raw = att.inline?.title ?? att.label.replace(/\.html?$/i, "");
+  return boxSafe(
+    stripControls(raw)
+      .replace(/[\r\n\t]+/g, " ")
+      .trim(),
+  );
 }

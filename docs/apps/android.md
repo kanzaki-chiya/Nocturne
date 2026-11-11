@@ -72,7 +72,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 外链 | 新标签打开 | `on_navigation` 仍只允许 App 源；仅 APK 下载经 `download_apk` 交给系统 `DownloadManager`（不可用时回退 `ACTION_VIEW`），原生只接受本仓库 Release 下载前缀下匹配版本的 HTTPS APK |
 | 能力边界 | 白名单 | 不变，App 不改 RPC 白名单 |
 
-共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`imageViewer`（图片查看器可用操作，App 设为 `{ copy: false, download: true }`）、`saveFile`（App 经系统 `ACTION_CREATE_DOCUMENT` 接管图片查看器与文件附件卡片的保存，网页版不传则保持 `<a download>`）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme` 的实际生效主题调 `set_system_bars` 同步状态栏与导航栏图标深浅。
+共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`imageViewer`（图片查看器可用操作，App 设为 `{ copy: false, download: true }`）、`saveFile`（App 经系统 `ACTION_CREATE_DOCUMENT` 接管图片查看器、回复内嵌页面全屏下载与文件附件卡片的保存，网页版不传则保持 `<a download>`）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme` 的实际生效主题调 `set_system_bars` 同步状态栏与导航栏图标深浅。回复内嵌页面在 App 内经 `nct-sandbox` 自定义协议加载空壳页并经 `Builder::invoke_system` 阻断子框架的 Tauri IPC，全屏时系统返回键先关闭全屏（[ADR-0088](../decisions/ADR-0088-inline-html.md)）。
 
 ### 扫码、相机权限与更新
 

@@ -122,10 +122,13 @@ interface ToolEntry {
   descriptions?: AttachmentDescribedPayload[]; // 图片描述，按 attachmentRef 关联
   /** tool.progress 累计（临时数据）；completed 时清空，收敛点上必为空 */
   liveOutput: string;
+  /** 成功完成后带 inline 标记的页面附件（ADR-0088，纯函数 inlineFilesOfTool 读取）；图形端据此隐藏原工具行并内嵌显示页面 */
+  inlineFiles?: FileAttachment[];
   result:
     | { status: ToolCallStatus; modelContent: string; output: unknown;
         error: { code: string; message: string } | undefined; truncated: boolean;
-        spillPath: string | undefined; durationMs: number | undefined }
+        spillPath: string | undefined; attachments?: ImageAttachment[];
+        files?: FileAttachment[]; durationMs: number | undefined }
     | undefined;
 }
 

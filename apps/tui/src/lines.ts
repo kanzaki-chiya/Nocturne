@@ -8,6 +8,7 @@ import { shellToolStatus, shellResultLine, shellResultText } from "./background-
 
 import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
 import {
+  inlineFilesOfTool,
   todoItemsFromCompletion,
   subagentRowInfo,
   subagentResultLine,
@@ -20,7 +21,12 @@ import {
 
 import { questionToolLines } from "./question-format.js";
 import { webFetchSummary } from "./web-fetch.js";
-import { attachmentLine, descriptionLine, fileAttachmentLine } from "./attachment-line.js";
+import {
+  attachmentLine,
+  descriptionLine,
+  fileAttachmentLine,
+  inlinePageTitle,
+} from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff, toolFileDiffs } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
@@ -410,6 +416,22 @@ function layoutEntryBody(
         }
         return lines;
       }
+      const inlineFiles = inlineFilesOfTool(entry);
+      if (inlineFiles.length > 0 && !diffExpanded) {
+        const prefix = ascii ? "[] " : "▣ ";
+        const maxTitleCols = Math.max(4, budget(width) - 4);
+        const inlineLines: LaidLine[] = inlineFiles.map((file, i) => {
+          const title = truncateLine(inlinePageTitle(file), maxTitleCols, ascii ? "..." : "...");
+          const segments = [{ text: prefix, color: theme.secondary }, { text: title }];
+          return {
+            key: `${entry.key}:inline:${i}`,
+            ...(i === 0 ? { toggle } : {}),
+            text: `${prefix}${title}`,
+            segments,
+          };
+        });
+        return [...review, ...inlineLines];
+      }
       const shownName = entry.target?.name ?? entry.name;
       const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
       const summary = summarizeToolInput(shownName, shownInput, entry.result?.output);
@@ -450,11 +472,20 @@ function layoutEntryBody(
       const reason = subagentRowInfo(entry).reason;
       if (reason !== undefined)
         lines.push(...rows(`${entry.key}:reason`, `  选择理由：${reason}`, width, { dim: true }));
-      const attachmentRows = (entry.result?.attachments ?? []).flatMap((att, i) =>
-        rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
-          color: theme.accent,
-        }),
-      );
+      const attachmentRows = [
+        ...(entry.result?.attachments ?? []).flatMap((att, i) =>
+          rows(`${entry.key}:image:${i}`, `  ${attachmentLine(att, i, ascii)}`, width, {
+            color: theme.accent,
+          }),
+        ),
+        ...(entry.result?.files ?? [])
+          .filter((file) => file.inline === undefined)
+          .flatMap((file, i) =>
+            rows(`${entry.key}:file:${i}`, `  ${fileAttachmentLine(file, ascii)}`, width, {
+              color: theme.accent,
+            }),
+          ),
+      ];
       if (entry.liveOutput !== "") {
         for (const [i, line] of tailLines(entry.liveOutput, 3).entries()) {
           lines.push({

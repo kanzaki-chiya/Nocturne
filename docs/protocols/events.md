@@ -84,7 +84,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（权限层给出的选项子集：通常五项，高风险命令、编码命令或工作区外 edit 只有 `allow_once`、`deny`、`deny_stop`） |
 | `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook" \| "reviewer"`、`rule?`、`grant?: { scope: "session" \| "project", createdAt }`、`remember?`、`feedback?` |
 | `permission.reviewed` | ✓ | `callId`、`requestId?`、`backend`、`model?: ModelRef`、`verdict: "allow" \| "block" \| "unsure"`、`reason`、`durationMs`、`cached`、`usage?: Usage`（审查来源用量；缓存不重复收费） |
-| `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`durationMs?` |
+| `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`files?: FileAttachment[]`（工具结果文件附件引用，[ADR-0072](../decisions/ADR-0072-file-attachments.md)、[ADR-0088](../decisions/ADR-0088-inline-html.md)）、`durationMs?` |
 
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`、`usage?: Usage`、`model?: ModelRef`（摘要请求成功时记录用量与模型；prune 不写，旧日志兼容；规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
@@ -215,6 +215,7 @@ type FileAttachment = {
   mimeType?: string
   text?: { lines: number }
   source: "paste" | "upload" | "answer"
+  inline?: { title: string } // 仅在 tool.completed.files 上有效（ADR-0088）；用户提交入口与解码器在 message.user.files 上丢弃该字段，兼容扩展不升 formatVersion
 }
 
 type ImageAttachment = {
