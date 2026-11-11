@@ -95,6 +95,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0085](ADR-0085-new-session-branch-picker.md) | 新会话页选择分支与工作树 | 已接受 |
 | [ADR-0086](ADR-0086-mcp-steer-boundary.md) | 用户插话作为 MCP 边界 | 已接受 |
 | [ADR-0087](ADR-0087-lan-direct.md) | 远程访问的局域网直连（安卓 App） | 已接受 |
+| [ADR-0088](ADR-0088-inline-html.md) | 回复内嵌页面（`render_html` 与隔离空壳沙箱） | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
