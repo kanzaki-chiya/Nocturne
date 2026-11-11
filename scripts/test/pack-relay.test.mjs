@@ -35,6 +35,7 @@ beforeEach(() => {
   writeFileSync(join(webDir, "index.html"), "<title>Nocturne</title>");
   writeFileSync(join(webDir, "manifest.webmanifest"), "{}");
   writeFileSync(join(webDir, "sw.js"), "// worker");
+  writeFileSync(join(webDir, "sandbox.html"), "<title>sandbox</title>");
   writeFileSync(join(webDir, "assets", "app.js"), "// asset");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -65,6 +66,7 @@ it("打包 relay 构建全目录和手机网页，清除 workspace 依赖", () =
     "public/index.html",
     "public/manifest.webmanifest",
     "public/sw.js",
+    "public/sandbox.html",
     "public/assets/app.js",
     "README.md",
     "LICENSE",
@@ -76,11 +78,16 @@ it("打包 relay 构建全目录和手机网页，清除 workspace 依赖", () =
   expect(JSON.parse(files.get("package/package.json"))).toEqual(manifest);
 });
 
-it.each(["index.html", "manifest.webmanifest", "sw.js"])("缺少 %s 时提示构建并给出路径", (name) => {
-  rmSync(join(webDir, name));
-  expect(() => packRelay({ out: join(dir, "out"), distDir, webDir })).toThrow(join(webDir, name));
-  expect(() => packRelay({ out: join(dir, "out"), distDir, webDir })).toThrow("先运行 pnpm build");
-});
+it.each(["index.html", "manifest.webmanifest", "sw.js", "sandbox.html"])(
+  "缺少 %s 时提示构建并给出路径",
+  (name) => {
+    rmSync(join(webDir, name));
+    expect(() => packRelay({ out: join(dir, "out"), distDir, webDir })).toThrow(join(webDir, name));
+    expect(() => packRelay({ out: join(dir, "out"), distDir, webDir })).toThrow(
+      "先运行 pnpm build",
+    );
+  },
+);
 
 it("缺 relay 主入口提示先构建", () => {
   rmSync(join(distDir, "main.mjs"));
