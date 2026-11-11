@@ -114,6 +114,8 @@ pub struct BrowserState {
     download_prefs: Mutex<Option<DownloadPrefs>>,
     /// 直接保存、还没结束的下载（地址, 路径）：同时下两个同名文件时不撞同一个路径
     pending_saves: Mutex<Vec<(String, std::path::PathBuf)>>,
+    /// 当前尚未收到 `DownloadEvent::Finished` 的下载数（为 0 时可安全清理本进程暂存目录中的孤儿 UUID `.tmp`）
+    active_downloads: AtomicU32,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -172,6 +174,33 @@ impl BrowserState {
     pub fn live_count(&self) -> usize {
         lock(&self.browsers).len()
     }
+
+    /// 应用私有的 WebView2 下载暂存根目录（`<应用本地数据>/download-staging`，隔离环境在
+    /// `WEBVIEW2_USER_DATA_FOLDER/download-staging`），与用户「下载」文件夹及浏览数据统计目录分离。
+    pub fn staging_root(&self, app: &AppHandle) -> Option<std::path::PathBuf> {
+        let base = match self.data_override.as_deref() {
+            Some(dir) => Some(dir.to_path_buf()),
+            None => app.path().app_local_data_dir().ok(),
+        }
+        .or_else(|| Some(std::env::temp_dir().join("nocturne")))?;
+        Some(base.join("download-staging"))
+    }
+
+    /// 本进程专属的下载暂存子目录（`<staging_root>/pid-<pid>`）。
+    pub fn staging_dir(&self, app: &AppHandle) -> Option<std::path::PathBuf> {
+        Some(
+            self.staging_root(app)?
+                .join(format!("pid-{}", std::process::id())),
+        )
+    }
+
+    /// 应用退出时清理本进程的下载暂存子目录（仅删除 WebView2 UUID `.tmp`，目录为空再删目录）。
+    pub fn cleanup_own_staging(&self, app: &AppHandle) {
+        if let Some(dir) = self.staging_dir(app) {
+            clean_webview_tmps_in_dir(&dir);
+            let _ = std::fs::remove_dir(&dir);
+        }
+    }
 }
 
 /// 关掉一个浏览器 webview：不在调用方的线程上关，换一个线程发起。
@@ -228,11 +257,109 @@ fn native_error(error: impl std::fmt::Display) -> CommandError {
     CommandError::new("browser_failed", format!("浏览器操作失败：{error}"))
 }
 
+/// 判定文件名是否为 WebView2 在 `DefaultDownloadFolderPath` 预创建的 `<UUID>.tmp`（8-4-4-4-12 十六进制）。
+fn is_webview_download_tmp_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".tmp") else {
+        return false;
+    };
+    if stem.len() != 36 {
+        return false;
+    }
+    for (idx, b) in stem.bytes().enumerate() {
+        match idx {
+            8 | 13 | 18 | 23 => {
+                if b != b'-' {
+                    return false;
+                }
+            }
+            _ => {
+                if !b.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// 仅删除给定暂存目录内符合 `<UUID>.tmp` 格式的普通文件；其他文件（含非 UUID `.tmp`）一律保留。
+fn clean_webview_tmps_in_dir(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        if !ft.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        if let Some(name_str) = name.to_str() {
+            if is_webview_download_tmp_name(name_str) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
+/// 回收 `staging_root` 下已退出的旧进程 `pid-<u32>` 暂存目录；存活进程目录与非 `pid-*` 条目一律不碰。
+fn prune_staging_root(
+    staging_root: &std::path::Path,
+    current_pid: u32,
+    is_pid_alive: impl Fn(u32) -> bool,
+) {
+    let Ok(entries) = std::fs::read_dir(staging_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        if !ft.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(pid_str) = name.to_str().and_then(|s| s.strip_prefix("pid-")) else {
+            continue;
+        };
+        let Ok(pid) = pid_str.parse::<u32>() else {
+            continue;
+        };
+        if pid == current_pid || is_pid_alive(pid) {
+            continue;
+        }
+        let path = entry.path();
+        clean_webview_tmps_in_dir(&path);
+        let _ = std::fs::remove_dir(&path);
+    }
+}
+
+#[cfg(windows)]
+fn is_process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: OpenProcess / GetExitCodeProcess / CloseHandle 为只读查询内核句柄状态
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE as u32
+    }
+}
+
 /// 为一次下载请求决定保存路径并维护 `pending_saves`（主窗口与面板浏览器共用）。
 /// 返回 `Some(path)` 表示允许下载并写入该路径，`None` 表示用户取消「另存为」。
 fn resolve_download_destination(
     state: &BrowserState,
     default_dir: Option<&std::path::Path>,
+    staging_dir: Option<&std::path::Path>,
     url: &str,
     initial_destination: &std::path::Path,
     writable_dir: impl Fn(&std::path::Path) -> bool,
@@ -260,7 +387,7 @@ fn resolve_download_destination(
                 .or_else(|| {
                     initial_destination
                         .parent()
-                        .filter(|d| !d.as_os_str().is_empty())
+                        .filter(|d| !d.as_os_str().is_empty() && staging_dir != Some(*d))
                         .map(std::path::Path::to_path_buf)
                 });
             prompt(dir.as_deref(), &name)
@@ -268,6 +395,25 @@ fn resolve_download_destination(
         DownloadPlan::Save(path) => {
             lock(&state.pending_saves).push((url.to_string(), path.clone()));
             Some(path)
+        }
+    }
+}
+
+/// 下载结束时移除在途记录；若当前无其他进行中的下载，顺带清理本进程暂存目录内可能残留的 `<UUID>.tmp`。
+fn finish_download(state: &BrowserState, staging_dir: Option<&std::path::Path>, url: &str) {
+    finish_pending_save(state, url);
+    let prev = state.active_downloads.load(Ordering::SeqCst);
+    let remaining = if prev > 0 {
+        state
+            .active_downloads
+            .fetch_sub(1, Ordering::SeqCst)
+            .saturating_sub(1)
+    } else {
+        0
+    };
+    if remaining == 0 {
+        if let Some(dir) = staging_dir {
+            clean_webview_tmps_in_dir(dir);
         }
     }
 }
@@ -280,13 +426,37 @@ fn finish_pending_save(state: &BrowserState, url: &str) {
     }
 }
 
-/// 主窗口挂载 WebView2 多次下载权限放行（对话附件卡片异步 `readAttachment` 后触发 `link.click()`，
-/// 或同一会话连续下载多张图片/附件时，不弹浏览器多文件下载权限提示、不静默拦截）。
+/// 初始化本进程下载暂存目录并回收已退出旧进程的遗留暂存目录。
+#[cfg(windows)]
+fn ensure_staging_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let state = app.try_state::<Arc<BrowserState>>()?;
+    if let Some(root) = state.staging_root(app) {
+        prune_staging_root(&root, std::process::id(), is_process_alive);
+    }
+    let dir = state.staging_dir(app)?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir)
+}
+
+/// 主窗口挂载 WebView2 多次下载权限放行，并将 WebView2 默认下载暂存目录指向应用私有目录。
 pub fn configure_main_webview(window: &tauri::WebviewWindow) {
     #[cfg(windows)]
-    let _ = native::allow_multiple_downloads(window);
+    {
+        let staging = ensure_staging_dir(window.app_handle());
+        let _ = native::configure_main(window, staging);
+    }
     #[cfg(not(windows))]
     let _ = window;
+}
+
+/// 将任意子 WebView（如 Agent 浏览器）的 WebView2 默认下载目录指向应用私有暂存目录。
+pub fn configure_webview_download_staging(webview: &tauri::Webview) {
+    #[cfg(windows)]
+    if let Some(staging) = ensure_staging_dir(webview.app_handle()) {
+        let _ = native::set_webview_staging(webview, staging);
+    }
+    #[cfg(not(windows))]
+    let _ = webview;
 }
 
 /// 主窗口下载（图片查看器、对话文件附件卡片等 `<a download>`）：
@@ -295,10 +465,13 @@ pub fn on_main_download(app: &AppHandle, event: DownloadEvent<'_>) -> bool {
     match event {
         DownloadEvent::Requested { url, destination } => {
             let state = app.state::<Arc<BrowserState>>();
+            state.active_downloads.fetch_add(1, Ordering::SeqCst);
             let default_dir = default_download_dir(app);
+            let staging_dir = state.staging_dir(app);
             match resolve_download_destination(
                 state.inner(),
                 default_dir.as_deref(),
+                staging_dir.as_deref(),
                 url.as_str(),
                 destination,
                 browser_policy::dir_writable,
@@ -312,7 +485,9 @@ pub fn on_main_download(app: &AppHandle, event: DownloadEvent<'_>) -> bool {
             }
         }
         DownloadEvent::Finished { url, .. } => {
-            finish_pending_save(app.state::<Arc<BrowserState>>().inner(), url.as_str());
+            let state = app.state::<Arc<BrowserState>>();
+            let staging_dir = state.staging_dir(app);
+            finish_download(state.inner(), staging_dir.as_deref(), url.as_str());
             true
         }
         _ => true,
@@ -330,10 +505,13 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "download".into());
             let state = app.state::<Arc<BrowserState>>();
+            state.active_downloads.fetch_add(1, Ordering::SeqCst);
             let default_dir = default_download_dir(app);
+            let staging_dir = state.staging_dir(app);
             let target = resolve_download_destination(
                 state.inner(),
                 default_dir.as_deref(),
+                staging_dir.as_deref(),
                 url.as_str(),
                 destination,
                 browser_policy::dir_writable,
@@ -360,7 +538,9 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
             }
         }
         DownloadEvent::Finished { url, path, success } => {
-            finish_pending_save(app.state::<Arc<BrowserState>>().inner(), url.as_str());
+            let state = app.state::<Arc<BrowserState>>();
+            let staging_dir = state.staging_dir(app);
+            finish_download(state.inner(), staging_dir.as_deref(), url.as_str());
             let file_name = path
                 .as_ref()
                 .and_then(|p| p.file_name())
@@ -878,13 +1058,34 @@ mod native {
         }
     }
 
-    /// 主窗口壳页面放行 `MULTIPLE_AUTOMATIC_DOWNLOADS`，避免连续下载图片或异步拉取附件后被 WebView2 拦截。
-    pub fn allow_multiple_downloads(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-        window.with_webview(|platform| {
+    /// 将 WebView2 Profile 的默认下载文件夹设为应用私有暂存目录（主窗口与面板浏览器共用）：
+    /// WebView2 在触发 `DownloadStarting` 前就会往 `DefaultDownloadFolderPath` 预写 `<UUID>.tmp`，
+    /// 重定向后用户「下载」文件夹与保存位置不会出现任何 `.tmp` 残留。
+    unsafe fn set_profile_download_staging_dir(
+        core: &ICoreWebView2,
+        staging_dir: &std::path::Path,
+    ) {
+        if let Ok(core13) = core.cast::<ICoreWebView2_13>() {
+            if let Ok(profile) = core13.Profile() {
+                let path = HSTRING::from(staging_dir.as_os_str());
+                let _ = profile.SetDefaultDownloadFolderPath(&path);
+            }
+        }
+    }
+
+    /// 主窗口壳页面：绑定下载暂存目录并放行 `MULTIPLE_AUTOMATIC_DOWNLOADS`。
+    pub fn configure_main(
+        window: &tauri::WebviewWindow,
+        staging_dir: Option<std::path::PathBuf>,
+    ) -> tauri::Result<()> {
+        window.with_webview(move |platform| {
             let mut token = Default::default();
             // SAFETY: 主线程、有效的 WebView2 控制器
             let _ = unsafe {
                 platform.controller().CoreWebView2().and_then(|core| {
+                    if let Some(dir) = staging_dir.as_deref() {
+                        set_profile_download_staging_dir(&core, dir);
+                    }
                     core.add_PermissionRequested(
                         &PermissionRequestedEventHandler::create(Box::new(|_, args| {
                             let Some(args) = args else { return Ok(()) };
@@ -902,6 +1103,20 @@ mod native {
         })
     }
 
+    pub fn set_webview_staging(
+        webview: &tauri::Webview,
+        staging_dir: std::path::PathBuf,
+    ) -> tauri::Result<()> {
+        webview.with_webview(move |platform| {
+            // SAFETY: 主线程、有效的 WebView2 控制器
+            unsafe {
+                if let Ok(core) = platform.controller().CoreWebView2() {
+                    set_profile_download_staging_dir(&core, &staging_dir);
+                }
+            }
+        })
+    }
+
     /// 挂原生事件，然后导航到第一个地址。
     pub fn attach(
         webview: &tauri::Webview,
@@ -910,9 +1125,16 @@ mod native {
         main: Option<tauri::Webview>,
     ) -> tauri::Result<()> {
         let app = webview.app_handle().clone();
+        let staging_dir = super::ensure_staging_dir(&app);
         webview.with_webview(move |platform| {
-            if let Err(error) = attach_inner(&platform.controller(), &browser, &initial, main, app)
-            {
+            if let Err(error) = attach_inner(
+                &platform.controller(),
+                &browser,
+                &initial,
+                main,
+                app,
+                staging_dir.as_deref(),
+            ) {
                 browser.send(BrowserMessage::Blocked {
                     url: initial.to_string(),
                     reason: "failed",
@@ -928,11 +1150,15 @@ mod native {
         initial: &Url,
         main: Option<tauri::Webview>,
         app: tauri::AppHandle,
+        staging_dir: Option<&std::path::Path>,
     ) -> WinResult {
         let mut token = Default::default();
         // SAFETY: 所有调用都在主线程、对有效的 WebView2 对象；回调闭包持有 Arc，不借用栈上数据
         unsafe {
             let core = controller.CoreWebView2()?;
+            if let Some(dir) = staging_dir {
+                set_profile_download_staging_dir(&core, dir);
+            }
             // 「开发者工具」按钮：Tauri 只在调试构建或开 `devtools` 特性时打开开发者工具，
             // 正式包里 `WebviewBuilder::devtools(true)` 不生效；只给浏览器 webview 打开，
             // 主界面照旧关着
@@ -1208,6 +1434,7 @@ mod tests {
         let cancelled = resolve_download_destination(
             &state,
             Some(&default_dir),
+            None,
             "blob:http://tauri.localhost/1",
             &initial,
             |_| true,
@@ -1234,6 +1461,7 @@ mod tests {
         let saved = resolve_download_destination(
             &state,
             Some(&default_dir),
+            None,
             "blob:http://tauri.localhost/2",
             &initial,
             |_| true,
@@ -1257,6 +1485,7 @@ mod tests {
         let _ = resolve_download_destination(
             &state,
             Some(&default_dir),
+            None,
             "blob:http://tauri.localhost/3",
             &initial,
             |_| true,
@@ -1296,6 +1525,7 @@ mod tests {
         let first = resolve_download_destination(
             &state,
             Some(&temp),
+            None,
             "blob:1",
             &initial,
             |_| true,
@@ -1307,6 +1537,7 @@ mod tests {
         let second = resolve_download_destination(
             &state,
             Some(&temp),
+            None,
             "blob:2",
             &initial,
             |_| true,
@@ -1324,6 +1555,7 @@ mod tests {
         let third = resolve_download_destination(
             &state,
             Some(&temp),
+            None,
             "blob:3",
             &initial,
             |_| true,
@@ -1332,5 +1564,116 @@ mod tests {
         assert_eq!(third, Some(temp.join("report (2).pdf")));
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn is_webview_download_tmp_name_matches_only_uuid_tmps() {
+        use super::is_webview_download_tmp_name;
+
+        assert!(is_webview_download_tmp_name(
+            "0d42944e-ef71-4336-bc32-b93c6ff7e52c.tmp"
+        ));
+        assert!(is_webview_download_tmp_name(
+            "BA9602F4-19B3-4957-93F5-72EBA5F3C90D.tmp"
+        ));
+        assert!(!is_webview_download_tmp_name("notes.tmp"));
+        assert!(!is_webview_download_tmp_name("draft-2026.tmp"));
+        assert!(!is_webview_download_tmp_name(
+            "0d42944e-ef71-4336-bc32-b93c6ff7e52c.png"
+        ));
+        assert!(!is_webview_download_tmp_name(
+            "0d42944eef714336bc32b93c6ff7e52c.tmp"
+        ));
+        assert!(!is_webview_download_tmp_name(
+            "0d42944e-ef71-4336-bc32-b93c6ff7e52z.tmp"
+        ));
+    }
+
+    #[test]
+    fn prune_staging_root_removes_only_dead_pid_uuid_tmps_and_preserves_other_files() {
+        use super::{clean_webview_tmps_in_dir, prune_staging_root};
+
+        let root = std::env::temp_dir().join(format!(
+            "nocturne-staging-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let alive_dir = root.join("pid-200");
+        let dead_only_uuid = root.join("pid-300");
+        let dead_with_other = root.join("pid-400");
+        let current_dir = root.join("pid-100");
+        for d in [&alive_dir, &dead_only_uuid, &dead_with_other, &current_dir] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+
+        // 根级无关 .tmp 文件与存活/当前进程目录均不得被触碰
+        let root_unrelated = root.join("user-unrelated.tmp");
+        let alive_uuid = alive_dir.join("0d42944e-ef71-4336-bc32-b93c6ff7e52c.tmp");
+        let current_uuid = current_dir.join("11111111-2222-3333-4444-555555555555.tmp");
+        let current_other = current_dir.join("keep-note.tmp");
+        let dead1_uuid = dead_only_uuid.join("ba9602f4-19b3-4957-93f5-72eba5f3c90d.tmp");
+        let dead2_uuid = dead_with_other.join("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.tmp");
+        let dead2_other = dead_with_other.join("important.tmp");
+
+        for f in [
+            &root_unrelated,
+            &alive_uuid,
+            &current_uuid,
+            &current_other,
+            &dead1_uuid,
+            &dead2_uuid,
+            &dead2_other,
+        ] {
+            std::fs::write(f, b"x").unwrap();
+        }
+
+        prune_staging_root(&root, 100, |pid| pid == 200);
+
+        // 已退出且仅含 WebView2 UUID .tmp 的目录被连同文件清除
+        assert!(!dead1_uuid.exists());
+        assert!(!dead_only_uuid.exists());
+        // 已退出但含有其他 .tmp 的目录：仅删 WebView2 UUID .tmp，保留其他 .tmp 与目录
+        assert!(!dead2_uuid.exists());
+        assert!(dead2_other.exists());
+        // 存活进程、当前进程与根级其他 .tmp 一律不动
+        assert!(root_unrelated.exists());
+        assert!(alive_uuid.exists());
+        assert!(current_uuid.exists());
+        assert!(current_other.exists());
+
+        // 单目录清理同样只删 UUID .tmp，不碰同目录其他 .tmp
+        clean_webview_tmps_in_dir(&current_dir);
+        assert!(!current_uuid.exists());
+        assert!(current_other.exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_download_destination_never_exposes_staging_dir_as_prompt_fallback() {
+        use super::{resolve_download_destination, BrowserState};
+        use std::path::{Path, PathBuf};
+
+        let state = BrowserState::default();
+        let staging = PathBuf::from(r"C:\AppLocal\download-staging\pid-999");
+        let staged_initial = staging.join("photo.png");
+
+        let mut prompted_when_staged: Option<Option<PathBuf>> = None;
+        let _ = resolve_download_destination(
+            &state,
+            None,
+            Some(&staging),
+            "blob:1",
+            &staged_initial,
+            |_| true,
+            |dir, _| {
+                prompted_when_staged = Some(dir.map(Path::to_path_buf));
+                None
+            },
+        );
+        assert_eq!(prompted_when_staged, Some(None));
     }
 }

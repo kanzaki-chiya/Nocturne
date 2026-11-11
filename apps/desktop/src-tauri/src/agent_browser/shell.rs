@@ -188,6 +188,7 @@ impl AgentPlatform for ShellPlatform {
             )
             .map_err(|error| format!("创建浏览器失败：{error}"))?;
         lock(&self.webviews).insert(tab.id.clone(), webview.clone());
+        crate::browser::configure_webview_download_staging(&webview);
         if let Some(state) = self.state() {
             native::attach(&webview, Arc::clone(tab), state);
         }

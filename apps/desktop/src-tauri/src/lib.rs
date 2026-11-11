@@ -311,6 +311,11 @@ pub fn run() {
         .build(context)
         .expect("error while building tauri application")
         .run(move |app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(browsers) = app.try_state::<Arc<browser::BrowserState>>() {
+                    browsers.cleanup_own_staging(app);
+                }
+            }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 // 「重启应用」（host.relaunch）：tauri 放行退出后用本进程的环境再起一个。
                 // 启动时删掉的数据目录要交还，否则新进程落到默认目录（隔离环境下就是
