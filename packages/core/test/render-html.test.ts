@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,8 +15,12 @@ import {
 } from "../src/protocol/index.js";
 import {
   MAX_INLINE_HTML_BYTES,
+  MAX_INLINE_HTML_IMAGES,
+  MAX_INLINE_HTML_SAVED_BYTES,
   MAX_INLINE_HTML_TITLE_CHARS,
+  isSvgImage,
   renderHtmlTool,
+  replaceImageReferences,
   sanitizeInlineHtmlLabel,
 } from "../src/tools/index.js";
 
@@ -194,6 +198,223 @@ describe("render_html 工具与内嵌页面标记", () => {
     } finally {
       await session.close();
     }
+  });
+
+  describe("images：本地图片内联", () => {
+    const PNG = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+      0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    ]);
+    const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
+
+    async function runCall(
+      input: Record<string, unknown>,
+      opts: { preset?: string; plan?: boolean; files?: Record<string, Uint8Array | string> } = {},
+    ) {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-render-html-img-"));
+      roots.push(root);
+      const ws = path.join(root, "ws");
+      mkdirSync(ws);
+      for (const [name, content] of Object.entries(opts.files ?? {})) {
+        const full = path.join(root, name);
+        mkdirSync(path.dirname(full), { recursive: true });
+        writeFileSync(full, content);
+      }
+      let step = 0;
+      const provider = new FakeProvider({
+        handler: () =>
+          step++ === 0
+            ? [
+                { type: "tool_call", toolCallId: "rh-img", name: "render_html", input },
+                { type: "finish", reason: "tool_calls" },
+              ]
+            : [
+                { type: "text_delta", text: "ok" },
+                { type: "finish", reason: "stop" },
+              ],
+      });
+      const runtime = await createRuntime({
+        cwd: ws,
+        sessionsDir: path.join(root, "sessions"),
+        providers: [provider],
+        interactive: true,
+      });
+      const session = await runtime.createSession({
+        model: "fake/fake-model",
+        ...(opts.preset !== undefined ? { permissionPreset: opts.preset } : {}),
+      });
+      const captured: RuntimeEvent[] = [];
+      session.subscribe((ev) => {
+        captured.push(ev);
+        if (ev.type === "permission.requested") {
+          void session.respondPermission(ev.payload.requestId, { decision: "allow" });
+        }
+      });
+      try {
+        await session.submit({ text: "画", ...(opts.plan ? { workMode: "plan" as const } : {}) });
+        const completed = captured.find(
+          (e): e is DurableEvent<"tool.completed"> => e.type === "tool.completed",
+        );
+        const started = captured.find(
+          (e): e is DurableEvent<"tool.started"> => e.type === "tool.started",
+        );
+        const saved =
+          completed?.payload.status === "ok"
+            ? new TextDecoder().decode((await session.readAttachment("file-1.html")).data)
+            : undefined;
+        return { root, ws, captured, completed, started, saved, durable: session.durableEvents() };
+      } finally {
+        await session.close();
+      }
+    }
+
+    it("四种引用写法（双引号、单引号属性值与 url() 三种）被替换为 data:，其余文字不变", () => {
+      const html = [
+        '<img src="a.png" alt="a.png">',
+        "<img src='a.png'>",
+        '<div style="background:url(a.png)"></div>',
+        "<style>.x{background:url(\"a.png\")} .y{background:url('a.png')}</style>",
+        "<p>a.png 原样 src=a.png ./a.png</p>",
+        '<img src="./a.png"><img src="ba.png">',
+      ].join("\n");
+      const { html: out, count } = replaceImageReferences(
+        html,
+        "a.png",
+        "data:image/png;base64,QQ==",
+      );
+      expect(count).toBe(6);
+      expect(out).toBe(
+        [
+          '<img src="data:image/png;base64,QQ==" alt="data:image/png;base64,QQ==">',
+          "<img src='data:image/png;base64,QQ=='>",
+          '<div style="background:url(data:image/png;base64,QQ==)"></div>',
+          "<style>.x{background:url(\"data:image/png;base64,QQ==\")} .y{background:url('data:image/png;base64,QQ==')}</style>",
+          "<p>a.png 原样 src=a.png ./a.png</p>",
+          '<img src="./a.png"><img src="ba.png">',
+        ].join("\n"),
+      );
+      // 替换串里的 $ 不被当作替换模式
+      expect(replaceImageReferences('="$&.png"', "$&.png", "D$1").html).toBe('="D$1"');
+    });
+
+    it("SVG 按扩展名加内容开头识别（BOM 与前导空白去掉后以 <svg 或 <?xml 开头）", () => {
+      const enc = (s: string) => new TextEncoder().encode(s);
+      expect(isSvgImage("a.svg", enc("<svg xmlns='x'/>"))).toBe(true);
+      expect(isSvgImage("A.SVG", enc("\uFEFF \n\t<?xml version='1.0'?><svg/>"))).toBe(true);
+      expect(isSvgImage("a.svg", enc("<html></html>"))).toBe(false);
+      expect(isSvgImage("a.txt", enc("<svg/>"))).toBe(false);
+    });
+
+    it("成功：工作区内图片在 read-only 与计划模式下不确认，读取主体逐项列出，存档已内联、事件只含路径", async () => {
+      const svg = "\uFEFF  <svg xmlns='http://www.w3.org/2000/svg'/>";
+      const r = await runCall(
+        {
+          title: "图",
+          html: '<img src="img/a.png"><div style="background:url(\'b.svg\')"></div>',
+          images: ["img/a.png", "b.svg"],
+        },
+        { preset: "read-only", plan: true, files: { "ws/img/a.png": PNG, "ws/b.svg": svg } },
+      );
+      expect(r.captured.some((e) => e.type === "permission.requested")).toBe(false);
+      expect(r.completed?.payload.status).toBe("ok");
+      expect(r.started?.payload.subjects.map((s) => [s.kind, s.target])).toEqual([
+        ["read", path.join(r.ws, "img", "a.png")],
+        ["read", path.join(r.ws, "b.svg")],
+      ]);
+      const svgB64 = b64(new TextEncoder().encode(svg));
+      expect(r.saved).toBe(
+        `<img src="data:image/png;base64,${b64(PNG)}"><div style="background:url('data:image/svg+xml;base64,${svgB64}')"></div>`,
+      );
+      const savedBytes = Buffer.byteLength(r.saved ?? "", "utf8");
+      expect(r.completed?.payload.modelContent).toContain(`${savedBytes} B`);
+      const durable = JSON.stringify(r.durable);
+      expect(durable).not.toContain(b64(PNG));
+      expect(durable).not.toContain(svgB64);
+      expect(durable).not.toContain("base64,");
+    });
+
+    it("permissionSubjects 为每个路径返回一条 read 主体（相对 cwd 解析）", () => {
+      const scope = {
+        cwd: "/w",
+        workspaceRoot: "/w",
+        paths: { resolve: (cwd: string, p: string) => path.posix.resolve(cwd, p) },
+      } as unknown as Parameters<NonNullable<typeof renderHtmlTool.permissionSubjects>>[1];
+      expect(
+        renderHtmlTool.permissionSubjects(
+          { title: "t", html: "x", images: ["a.png", "/abs/b.gif"] },
+          scope,
+        ),
+      ).toEqual([
+        { kind: "read", target: "/w/a.png" },
+        { kind: "read", target: "/abs/b.gif" },
+      ]);
+      expect(renderHtmlTool.permissionSubjects({ title: "t", html: "x" }, scope)).toEqual([]);
+    });
+
+    it("工作区外的图片走读取确认", async () => {
+      const outside = "outside.png";
+      const r = await runCall(
+        { title: "图", html: '<img src="../outside.png">', images: [`../${outside}`] },
+        { files: { [outside]: PNG } },
+      );
+      const asked = r.captured.filter((e) => e.type === "permission.requested");
+      expect(asked).toHaveLength(1);
+      expect(r.completed?.payload.status).toBe("ok");
+    });
+
+    it.each([
+      ["不存在", { "ws/x.txt": "x" }, "missing.png", "file_not_found", "missing.png"],
+      ["是目录", { "ws/dir/x.txt": "x" }, "dir", "is_directory", "dir"],
+      ["不是图片", { "ws/note.png": "plain text" }, "note.png", "unsupported_image", "note.png"],
+      ["内容不是 SVG", { "ws/fake.svg": "<html/>" }, "fake.svg", "unsupported_image", "fake.svg"],
+    ])("路径%s时整次调用失败并点名", async (_label, files, ref, code, named) => {
+      const r = await runCall(
+        { title: "图", html: `<img src="${ref}">`, images: [ref] },
+        { files },
+      );
+      expect(r.completed?.payload.status).toBe("error");
+      expect(r.completed?.payload.error?.code).toBe(code);
+      expect(r.completed?.payload.modelContent).toContain(named);
+      expect(r.completed?.payload.files ?? []).toEqual([]);
+    });
+
+    it("images 中有但 html 未引用的路径整次调用失败并点名", async () => {
+      const r = await runCall(
+        { title: "图", html: '<img src="a.png"><p>b.png</p>', images: ["a.png", "b.png"] },
+        { files: { "ws/a.png": PNG, "ws/b.png": PNG } },
+      );
+      expect(r.completed?.payload.error?.code).toBe("image_unreferenced");
+      expect(r.completed?.payload.modelContent).toContain("b.png");
+      expect(r.completed?.payload.modelContent).not.toContain("a.png 在");
+    });
+
+    it("超过 20 项被拒绝，恰好 20 项可通过校验", async () => {
+      const twenty = Array.from({ length: MAX_INLINE_HTML_IMAGES }, (_, i) => `${i}.png`);
+      expect(MAX_INLINE_HTML_IMAGES).toBe(20);
+      expect(
+        renderHtmlTool.validateInput?.({ title: "t", html: "x", images: twenty }),
+      ).toBeUndefined();
+      expect(
+        renderHtmlTool.validateInput?.({ title: "t", html: "x", images: [...twenty, "20.png"] }),
+      ).toContain("20");
+      const r = await runCall({ title: "图", html: "x", images: [...twenty, "20.png"] });
+      expect(r.completed?.payload.error?.code).toBe("invalid_input");
+      expect(r.captured.some((e) => e.type === "tool.started")).toBe(false);
+    });
+
+    it("替换后超过 8 MiB 整次调用失败", async () => {
+      expect(MAX_INLINE_HTML_SAVED_BYTES).toBe(8 * 1024 * 1024);
+      // 6.5 MiB 原图 base64 后约 8.67 MiB：原图本身未超限，替换后超限
+      const big = new Uint8Array(6.5 * 1024 * 1024);
+      big.set(PNG);
+      const r = await runCall(
+        { title: "图", html: '<img src="big.png">', images: ["big.png"] },
+        { files: { "ws/big.png": big } },
+      );
+      expect(r.completed?.payload.status).toBe("error");
+      expect(r.completed?.payload.error?.code).toBe("html_too_large");
+      expect(r.completed?.payload.modelContent).toContain("8 MiB");
+    });
   });
 
   it("子代理（general 与 explore）工具集中不包含 render_html，显式点名也被拒绝", async () => {

@@ -32,7 +32,11 @@ export { todoWriteTool } from "./builtin/todo-write.js";
 export {
   renderHtmlTool,
   MAX_INLINE_HTML_BYTES,
+  MAX_INLINE_HTML_IMAGES,
+  MAX_INLINE_HTML_SAVED_BYTES,
   MAX_INLINE_HTML_TITLE_CHARS,
+  isSvgImage,
+  replaceImageReferences,
   sanitizeInlineHtmlLabel,
   type RenderHtmlInput,
   type RenderHtmlOutput,

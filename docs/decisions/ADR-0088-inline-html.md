@@ -19,7 +19,7 @@
 2. **完全断网**：页面内禁止任何网络请求；远程脚本、样式表、图片、字体、`fetch`、`XMLHttpRequest`、`WebSocket` 一律拦截，资源只能内联（允许 `data:` 图片/字体/媒体与页内生成的 `blob:` 图片/媒体）。第一版不做按本地工作区路径引用图片。
 3. **禁用外跳与副作用**：页面内的链接跳转、表单提交、`window.open` 弹窗、`<a download>` 下载、原生模态框（`alert`/`confirm`/`prompt`）与顶层页面导航一律无效。
 4. **自适应高度、折叠与全屏**：页面框无标题栏、无说明文字；高度随内容自适应并夹紧在 `48px`–`4096px` 之间；内容高于 `420px` 时默认折叠至 `420px`，底部渐隐并居中放置展开/收起箭头按钮；桌面悬停或聚焦（手机窄于 `600px` 常显，`44px` 触控区）在右上角显示全屏按钮；全屏遮罩挂在窗口根部，仅提供下载（保存为 `.html`）与关闭两个图标按钮。
-5. **仅主会话可用、免确认**：内置工具 `render_html` 只对主会话开放；因其 `permissionSubjects` 为空且 `traits.mutates` 为 `false`，在 `read-only` 权限预设与计划模式（`/plan`）下均直接可用且不产生权限确认；通过工具特性 `traits.mainSessionOnly: true` 从子代理工具池中排除（显式传入 `tools: ["render_html"]` 亦被过滤）。
+5. **仅主会话可用、免确认**：内置工具 `render_html` 只对主会话开放；因其 `permissionSubjects` 为空（第二版起带 `images` 时为每个路径一条 `read` 主体，见文末）且 `traits.mutates` 为 `false`，在 `read-only` 权限预设与计划模式（`/plan`）下均直接可用且不产生权限确认；通过工具特性 `traits.mainSessionOnly: true` 从子代理工具池中排除（显式传入 `tools: ["render_html"]` 亦被过滤）。
 6. **完成后再显示**：参数流式到达期间（`tool.input.delta`）及工具执行中仅显示动词为 `页面` 的普通工具行，不在流式阶段渲染半成品 HTML；工具成功完成后隐藏该次调用的工具行，直接原地渲染内嵌页面（运行失败时保留工具行报错）。
 7. **显示时动态注入主题**：落盘保存的 HTML 原文不写入当前主题色值；客户端在显示时读取宿主计算样式，向空壳页动态注入一组稳定的主题 CSS 变量与 `color-scheme`。切换深浅色或外观字体字号时通过 `postMessage` 热更新空壳页样式，不重新加载页面、不丢失页面内脚本与交互状态。不涉及被编辑项目自身的设计系统。
 
@@ -93,7 +93,19 @@
 
 ## 未纳入第一版的事项
 
-- 按本地工作区路径引用图片或其他本地静态资源；
+- 按本地工作区路径引用图片：第二版已实现（见下文「第二版」第 1 节）；其他本地静态资源（字体、样式表、脚本）仍未纳入；
 - 读取或注入被编辑项目自身的设计系统 token；
 - TUI 内一键在外部浏览器打开该页面的快捷键或提示文案；
 - 通过额外独立域名或独立原生子 WebView 隔离同步死循环脚本的 CPU 占用。
+
+## 第二版（2026-11-12）
+
+### 1. 页面引用本地图片
+
+- **做法**：Core 在保存时把图片转成 `data:` 内联进存下的 HTML，客户端与沙箱策略都不改动。
+- **参数**：`render_html` 新增可选 `images: string[]`（至多 `20` 项，每项是相对 cwd 或绝对路径，不得重复）。模型在 HTML 里用与数组项完全相同的字符串引用图片。
+- **权限**：`permissionSubjects` 为每个路径返回一条 `{ kind: "read", target: paths.resolve(cwd, 路径) }`（与 `read` 工具相同写法），工具内不判断是否需要确认。工作区内路径在 `read-only` 预设下由宽规则 `read ** where=workspace → allow` 放行；计划模式（ADR-0076）进入时把会话预设切为 `read-only`，因此同样放行；工作区外路径在这两种情况下都是 `ask`（[permissions.md](../architecture/permissions.md) 第 6 节预设表）。不带 `images` 时主体仍为空，第一版第 5 条的免确认行为不变。
+- **格式识别**：PNG、JPEG、GIF、WebP 按 `sniffImageMime` 的魔数识别；SVG 另判：扩展名为 `.svg`，且内容去掉 BOM 与前导空白后以 `<svg` 或 `<?xml` 开头，MIME 为 `image/svg+xml`。不存在、是目录、识别不了的路径使整次调用失败，`modelContent` 写明路径与原因。
+- **匹配规则**：只做五种精确的字符串替换，不解析 HTML，不改其他文字：属性值 `="路径"`、`='路径'`，CSS `url(路径)`、`url("路径")`、`url('路径')`。`images` 里有、HTML 中一处都没匹配到的路径使整次调用失败并点名。
+- **上限与依据**：`html` 参数仍 ≤ `256 KiB`；替换后存下的整份 HTML ≤ `8 MiB`（`MAX_INLINE_HTML_SAVED_BYTES`），超出则整次调用失败。依据是手机网页经远程通道读取附件的原始字节上限 `remoteAttachmentLimit()` = `floor((16 MiB − 64 KiB) × 3 / 4) − 1024` = `12,532,736` B（约 `11.95 MiB`）。Core 不能依赖 `packages/rpc`，因此单独定常量并留出余量，保证内联后的页面在手机端也能读取。
+- **事件**：工具调用参数、`tool.started` 与 `tool.completed` 只含路径，不含图片内容；`modelContent` 与 `output.bytes` 为替换后的大小。
