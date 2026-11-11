@@ -2451,7 +2451,9 @@ function FileAttachmentCard({
   initialError?: string | undefined;
 }) {
   const saveFile = useSaveFile();
-  const [error, setError] = useState<string | undefined>(initialError || undefined);
+  const [error, setError] = useState<string | undefined>(
+    initialError !== undefined && initialError !== "" ? initialError : undefined,
+  );
 
   return (
     <button

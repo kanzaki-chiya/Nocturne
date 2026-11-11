@@ -161,9 +161,9 @@ function useSandboxedHtmlFrame(opts: {
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      const iframe = iframeRef.current;
-      if (iframe === null || iframe.contentWindow === null) return;
-      if (event.source !== iframe.contentWindow) return;
+      const targetWindow = iframeRef.current?.contentWindow ?? null;
+      if (targetWindow === null) return;
+      if (event.source !== targetWindow) return;
       if (isReadyMessage(event.data)) {
         postRender();
         return;
@@ -433,6 +433,7 @@ export function InlinePage({
           <iframe
             ref={iframeRef}
             className="inline-page-frame"
+            style={{ height: `${contentHeight ?? INLINE_PAGE_INITIAL_HEIGHT}px` }}
             sandbox="allow-scripts"
             src={sandboxSrc}
             title={title}

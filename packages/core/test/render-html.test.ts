@@ -173,12 +173,17 @@ describe("render_html 工具与内嵌页面标记", () => {
       expect(userEvent?.payload.files).toHaveLength(1);
       expect(userEvent?.payload.files?.[0]?.inline).toBeUndefined();
 
+      if (!userEvent || !userEvent.payload.files?.[0]) {
+        throw new Error("missing userEvent");
+      }
       // 即使外部手工构造含 inline 的 message.user 日志行，schema 解码与视图归约也会剥离
-      const forgedRaw = JSON.parse(encodeDurableEvent(userEvent!)) as {
+      const forgedRaw = JSON.parse(encodeDurableEvent(userEvent)) as {
         payload: { files: FileAttachment[] };
       };
+      const baseFile = forgedRaw.payload.files[0];
+      if (!baseFile) throw new Error("missing baseFile");
       forgedRaw.payload.files[0] = {
-        ...forgedRaw.payload.files[0]!,
+        ...baseFile,
         inline: { title: "日志注入" },
       };
       const decoded = decodeDurableEvent(JSON.stringify(forgedRaw));

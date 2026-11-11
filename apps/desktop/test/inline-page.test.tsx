@@ -148,8 +148,8 @@ describe("InlinePage 回复内嵌页面", () => {
 
     const iframe = await waitFor(() => {
       const el = container.querySelector<HTMLIFrameElement>(".inline-page iframe");
-      expect(el).not.toBeNull();
-      return el!;
+      if (!el) throw new Error("missing iframe");
+      return el;
     });
     expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
     expect(iframe.getAttribute("title")).toBe("各包测试耗时");
@@ -157,7 +157,8 @@ describe("InlinePage 回复内嵌页面", () => {
     expect(container.querySelector(".tool")).toBeNull();
     expect(container.querySelector(".fcard")).toBeNull();
 
-    const pageBox = container.querySelector(".inline-page")!;
+    const pageBox = container.querySelector(".inline-page");
+    if (!pageBox) throw new Error("missing .inline-page");
     expect(collectVisibleTextNodes(pageBox)).toEqual([]);
   });
 
@@ -204,10 +205,11 @@ describe("InlinePage 回复内嵌页面", () => {
 
     const iframe = await waitFor(() => {
       const el = container.querySelector<HTMLIFrameElement>(".inline-page iframe");
-      expect(el).not.toBeNull();
-      return el!;
+      if (!el) throw new Error("missing iframe");
+      return el;
     });
-    const body = container.querySelector<HTMLDivElement>(".inline-page-body")!;
+    const body = container.querySelector<HTMLDivElement>(".inline-page-body");
+    if (!body) throw new Error("missing .inline-page-body");
     const initialHeight = body.style.height;
 
     // 1. 伪造来源（source !== iframe.contentWindow）不改变高度
@@ -273,7 +275,9 @@ describe("InlinePage 回复内嵌页面", () => {
     const collapseBtn = screen.getByRole("button", { name: "收起" });
     expect(collapseBtn).toBeDefined();
     // 即使在出现展开/收起按钮后，页面框内依然没有任何可见文本节点
-    expect(collectVisibleTextNodes(container.querySelector(".inline-page")!)).toEqual([]);
+    const pageEl = container.querySelector(".inline-page");
+    if (!pageEl) throw new Error("missing .inline-page");
+    expect(collectVisibleTextNodes(pageEl)).toEqual([]);
 
     fireEvent.click(collapseBtn);
     expect(body.style.height).toBe(`${INLINE_PAGE_COLLAPSE_HEIGHT}px`);
@@ -298,10 +302,11 @@ describe("InlinePage 回复内嵌页面", () => {
 
     const inlineIframe = await waitFor(() => {
       const el = container.querySelector<HTMLIFrameElement>(".inline-page iframe");
-      expect(el).not.toBeNull();
-      return el!;
+      if (!el) throw new Error("missing iframe");
+      return el;
     });
-    const postSpy = vi.spyOn(inlineIframe.contentWindow!, "postMessage");
+    if (!inlineIframe.contentWindow) throw new Error("missing contentWindow");
+    const postSpy = vi.spyOn(inlineIframe.contentWindow, "postMessage");
 
     // 切换主题时推送 nocturne:inline-html:theme 且不卸载原 iframe
     act(() => {
@@ -379,8 +384,8 @@ describe("InlinePage 回复内嵌页面", () => {
 
     const fallbackCard = await waitFor(() => {
       const el = container.querySelector<HTMLButtonElement>(".fcard");
-      expect(el).not.toBeNull();
-      return el!;
+      if (!el) throw new Error("missing .fcard");
+      return el;
     });
     expect(container.querySelector(".inline-page")).toBeNull();
     expect(fallbackCard.textContent).toContain("失败回退.html");

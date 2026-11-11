@@ -201,16 +201,19 @@
 
   .inline-page-fullscreen {
     padding: 0;
+    background: var(--a-panel);
   }
 
   .inline-page-sheet {
+    position: absolute;
+    inset: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) 0;
     border: 0;
     border-radius: 0;
     box-shadow: none;
   }
 
   .inline-page-full-tools {
-    top: calc(var(--space-2) + env(safe-area-inset-top, 0px));
+    top: var(--space-2);
     right: var(--space-2);
     padding: 0;
     border-radius: var(--radius-3);

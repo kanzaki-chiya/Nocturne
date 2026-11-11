@@ -534,6 +534,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       // ADR-0032：提问通道注入（与 gate 同手法）——工具只见 askUser 能力；
       // 缺省该字段时声明 needsUser 的工具按 not_interactive 结算
       const questionBroker = scope.askUser;
+      const attachmentStore = scope.attachments;
       const toolCtx = {
         cwd: scope.cwd,
         workspaceRoot: scope.workspaceRoot,
@@ -581,7 +582,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             }
           : {}),
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
-        ...(scope.attachments !== undefined
+        ...(attachmentStore !== undefined
           ? {
               saveFileAttachment: (input: {
                 data: Uint8Array;
@@ -589,7 +590,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
                 label: string;
                 inline?: { title: string } | undefined;
               }) =>
-                scope.attachments!.saveFile({
+                attachmentStore.saveFile({
                   data: input.data,
                   mimeType: input.mimeType,
                   label: input.label,
