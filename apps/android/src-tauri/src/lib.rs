@@ -1,5 +1,6 @@
 mod background;
 mod lan_tcp;
+mod save_file;
 
 use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 
@@ -24,6 +25,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(background::plugin())
         .plugin(lan_tcp::plugin())
+        .plugin(save_file::plugin())
         .setup(|app| {
             let dev = app.config().build.dev_url.clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

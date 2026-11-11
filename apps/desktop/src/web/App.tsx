@@ -1219,6 +1219,7 @@ export function PhoneApp({
   return (
     <ImageViewerProvider
       capabilities={platform.imageViewer}
+      saveFile={platform.saveFile}
       controlRef={viewerControl}
       onOpenChange={handleViewerOpenChange}
     >

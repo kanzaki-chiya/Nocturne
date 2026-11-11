@@ -525,7 +525,7 @@ describe("ImageViewer", () => {
     phone.unmount();
   });
 
-  it("侧栏文件查看器图片点击按单张打开，复制失败仅写入按钮 title，安卓平台隐藏复制与下载", async () => {
+  it("opens side-panel image as single item, records copy error in title, and hides only copy on Android", async () => {
     const tab: FileTab = {
       id: "img-tab",
       kind: "file",
@@ -626,7 +626,7 @@ describe("ImageViewer", () => {
     expect(downloadedName).toBe("diagram.png");
     side.unmount();
 
-    // 验证安卓平台能力配置隐藏复制与下载按钮
+    // 验证安卓平台能力配置隐藏复制按钮并保留下载按钮
     const androidPlatform = appPlatform(shellHost);
     render(
       <ImageViewer
@@ -637,7 +637,7 @@ describe("ImageViewer", () => {
     );
     const androidDialog = screen.getByRole("dialog");
     expect(within(androidDialog).queryByRole("button", { name: "复制" })).toBeNull();
-    expect(within(androidDialog).queryByRole("button", { name: "下载" })).toBeNull();
+    expect(within(androidDialog).getByRole("button", { name: "下载" })).toBeTruthy();
     expect(within(androidDialog).getByRole("button", { name: "关闭" })).toBeTruthy();
   });
 

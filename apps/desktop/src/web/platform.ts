@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { ImageViewerCapabilities, SaveFileFn } from "../ImageViewer";
 import type { ConnectionState, PhoneConnectionLike, PhoneConnectionOptions } from "./connection";
 import type { PairedHost } from "./storage";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
@@ -88,7 +89,9 @@ export interface PhonePlatform {
   moveTaskToBack?(): void;
   dismissNotification?(hostId: string, sessionId: string): void;
   /** 图片查看器在当前平台可用的操作；缺省按浏览器标准能力启用 */
-  imageViewer?: { copy?: boolean; download?: boolean };
+  imageViewer?: ImageViewerCapabilities;
+  /** 平台接管文件保存（安卓 App 调系统 ACTION_CREATE_DOCUMENT）；缺省走 `<a download>` */
+  saveFile?: SaveFileFn;
   /** 取代网页版信任边界说明（网页由中继下发，App 的页面随安装包）；不传用网页版文字 */
   trustText?: string;
   /** 配对说明里描述「怎么拿到配对链接」的一句话 */

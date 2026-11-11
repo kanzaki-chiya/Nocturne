@@ -415,9 +415,12 @@ export function appPlatform(
         window.removeEventListener(RESUME_EVENT, listener);
       };
     },
-    // Android WebView 未配置 Chromium ImageFileProvider 无法向系统剪贴板写位图，
-    // 也未注册 DownloadListener / blob: 下载处理，故隐藏复制与下载按钮
-    imageViewer: { copy: false, download: false },
+    // Android WebView 未配置 Chromium ImageFileProvider 无法向系统剪贴板写位图（隐藏复制）；
+    // 下载走原生 ACTION_CREATE_DOCUMENT，保留可用
+    imageViewer: { copy: false, download: true },
+    saveFile: async ({ filename, mimeType, bytes }) => {
+      await host.saveFile({ name: filename, mimeType, bytes });
+    },
     pairHint: APP_PAIR_HINT,
     trustText: APP_TRUST_TEXT,
     probe,

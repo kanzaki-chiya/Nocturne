@@ -11,7 +11,13 @@ import {
 } from "react";
 import { marked, type Token, type Tokens } from "marked";
 import { Badge, Button, Checkbox, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
-import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "./ImageViewer";
+import {
+  ImageViewerBoundary,
+  useImageViewer,
+  useSaveFile,
+  type SaveFileFn,
+  type ViewerImageItem,
+} from "./ImageViewer";
 import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
@@ -214,6 +220,8 @@ export interface ConversationProps {
       }
     | undefined;
   resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
+  /** 平台接管文件保存（安卓 App）；未传时沿用外层 ImageViewerProvider 或 `<a download>` */
+  saveFile?: SaveFileFn | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -1240,8 +1248,10 @@ function UserMessage({
   const [target, setTarget] = useState<RewindTarget | undefined>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [fileSaveErrors, setFileSaveErrors] = useState<Record<string, string | undefined>>({});
   const [confirmFork, setConfirmFork] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const saveFile = useSaveFile();
   const { copy, copied } = useCopyText(setError);
   const hasImages = (entry.attachments?.length ?? 0) > 0;
   useEffect(() => {
@@ -1470,6 +1480,7 @@ function UserMessage({
                   type="button"
                   className="fcard"
                   key={file.file}
+                  title={fileSaveErrors[file.file]}
                   onClick={() => {
                     if (fileLinks) {
                       const escaped = file.file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1495,6 +1506,25 @@ function UserMessage({
                         });
                         return;
                       }
+                    }
+                    if (saveFile !== undefined) {
+                      setFileSaveErrors((prev) =>
+                        prev[file.file] === undefined ? prev : { ...prev, [file.file]: undefined },
+                      );
+                      void (async () => {
+                        try {
+                          const result = await session.readAttachment(file.file);
+                          await saveFile({
+                            filename: file.label,
+                            mimeType: result.mimeType,
+                            bytes: result.data,
+                          });
+                        } catch (reason: unknown) {
+                          const msg = reason instanceof Error ? reason.message : String(reason);
+                          setFileSaveErrors((prev) => ({ ...prev, [file.file]: msg }));
+                        }
+                      })();
+                      return;
                     }
                     void session.readAttachment(file.file).then(
                       (result) => {
@@ -4287,7 +4317,7 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   const readOnly = "readOnly" in props ? props.readOnly : undefined;
   const links = "subagentLinks" in props ? props.subagentLinks : undefined;
   return (
-    <ImageViewerBoundary>
+    <ImageViewerBoundary saveFile={props.saveFile}>
       <FrozenContext.Provider value={readOnly?.frozen === true}>
         <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
           <BackgroundViewContext.Provider value={props.view}>

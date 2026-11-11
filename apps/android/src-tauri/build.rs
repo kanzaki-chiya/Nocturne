@@ -18,6 +18,12 @@ fn main() {
                 tauri_build::InlinedPlugin::new()
                     .commands(&["connect", "send", "close"])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+            )
+            .plugin(
+                "save-file",
+                tauri_build::InlinedPlugin::new()
+                    .commands(&["save_file"])
+                    .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             ),
     )
     .expect("failed to run tauri-build");

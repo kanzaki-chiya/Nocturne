@@ -42,6 +42,37 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  private var saveDocCallback: ((Int, android.net.Uri?) -> Unit)? = null
+  private val saveDocLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+    val callback = saveDocCallback
+    saveDocCallback = null
+    callback?.invoke(result.resultCode, result.data?.data)
+  }
+
+  fun createDocument(
+    fileName: String,
+    mimeType: String,
+    callback: (Int, android.net.Uri?) -> Unit,
+    onLaunchError: (Exception) -> Unit,
+  ) {
+    if (saveDocCallback != null) {
+      onLaunchError(IllegalStateException("Save already in progress"))
+      return
+    }
+    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = mimeType
+      putExtra(Intent.EXTRA_TITLE, fileName)
+    }
+    saveDocCallback = callback
+    try {
+      saveDocLauncher.launch(intent)
+    } catch (e: Exception) {
+      saveDocCallback = null
+      onLaunchError(e)
+    }
+  }
+
   private var pendingTarget: Pair<String, String>? = null
   private var foreground = false
   fun isActivityForeground(): Boolean = foreground

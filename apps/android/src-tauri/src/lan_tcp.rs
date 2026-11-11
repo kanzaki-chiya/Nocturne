@@ -30,7 +30,7 @@ struct LanTcpRegistry {
     sockets: Mutex<HashMap<u64, ActiveSocket>>,
 }
 
-fn base64_encode(input: &[u8]) -> String {
+pub(crate) fn base64_encode(input: &[u8]) -> String {
     let mut out = String::with_capacity(((input.len() + 2) / 3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
@@ -64,7 +64,7 @@ fn base64_val(b: u8) -> Option<u8> {
     }
 }
 
-fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     let clean: Vec<u8> = input
         .bytes()
         .filter(|b| !b.is_ascii_whitespace() && *b != b'=')

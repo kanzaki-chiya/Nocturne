@@ -29,6 +29,12 @@ export interface ImageViewerCapabilities {
   download?: boolean | undefined;
 }
 
+export type SaveFileFn = (file: {
+  filename: string;
+  mimeType: string;
+  bytes: Uint8Array;
+}) => Promise<void>;
+
 export type OpenImageViewer = (
   items: readonly ViewerImageItem[],
   initialIndex: number,
@@ -42,6 +48,7 @@ interface ActiveViewerState {
 }
 
 const ImageViewerContext = createContext<OpenImageViewer | null>(null);
+const SaveFileContext = createContext<SaveFileFn | undefined>(undefined);
 
 export interface ImageViewerControl {
   readonly isOpen: boolean;
@@ -51,11 +58,13 @@ export interface ImageViewerControl {
 export function ImageViewerProvider({
   children,
   capabilities,
+  saveFile,
   controlRef,
   onOpenChange,
 }: {
   children: ReactNode;
   capabilities?: ImageViewerCapabilities | undefined;
+  saveFile?: SaveFileFn | undefined;
   controlRef?: RefObject<ImageViewerControl | null> | undefined;
   onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
@@ -103,39 +112,92 @@ export function ImageViewerProvider({
   }, [isOpen]);
 
   return (
-    <ImageViewerContext.Provider value={open}>
-      {children}
-      {active !== null &&
-        createPortal(
-          <ImageViewer
-            items={active.items}
-            initialIndex={active.initialIndex}
-            opener={active.opener}
-            capabilities={capabilities}
-            onClose={close}
-          />,
-          document.body,
-        )}
-    </ImageViewerContext.Provider>
+    <SaveFileContext.Provider value={saveFile}>
+      <ImageViewerContext.Provider value={open}>
+        {children}
+        {active !== null &&
+          createPortal(
+            <ImageViewer
+              items={active.items}
+              initialIndex={active.initialIndex}
+              opener={active.opener}
+              capabilities={capabilities}
+              saveFile={saveFile}
+              onClose={close}
+            />,
+            document.body,
+          )}
+      </ImageViewerContext.Provider>
+    </SaveFileContext.Provider>
   );
 }
 
 export function ImageViewerBoundary({
   children,
   capabilities,
+  saveFile,
 }: {
   children: ReactNode;
   capabilities?: ImageViewerCapabilities | undefined;
+  saveFile?: SaveFileFn | undefined;
 }) {
   const existing = useContext(ImageViewerContext);
   if (existing !== null) return <>{children}</>;
-  return <ImageViewerProvider capabilities={capabilities}>{children}</ImageViewerProvider>;
+  return (
+    <ImageViewerProvider capabilities={capabilities} saveFile={saveFile}>
+      {children}
+    </ImageViewerProvider>
+  );
 }
 
 export function useImageViewer(): OpenImageViewer {
   const open = useContext(ImageViewerContext);
   const noop = useMemo<OpenImageViewer>(() => () => undefined, []);
   return open ?? noop;
+}
+
+export function useSaveFile(): SaveFileFn | undefined {
+  return useContext(SaveFileContext);
+}
+
+async function readBlobBytes(blob: Blob): Promise<Uint8Array> {
+  if (typeof blob.arrayBuffer === "function") {
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  return new Uint8Array(await new Response(blob).arrayBuffer());
+}
+
+async function readItemBytes(
+  item: ViewerImageItem,
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  if (item.blob !== undefined) {
+    return {
+      bytes: await readBlobBytes(item.blob),
+      mimeType: item.blob.type || "application/octet-stream",
+    };
+  }
+  if (item.src.startsWith("data:")) {
+    const comma = item.src.indexOf(",");
+    if (comma < 0) throw new Error("Invalid data URL");
+    const header = item.src.slice(5, comma);
+    const body = item.src.slice(comma + 1);
+    const parts = header.split(";");
+    const mimeType = parts[0] && parts[0] !== "" ? parts[0] : "application/octet-stream";
+    if (parts.includes("base64")) {
+      const bin = atob(body);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return { bytes, mimeType };
+    }
+    return { bytes: new TextEncoder().encode(decodeURIComponent(body)), mimeType };
+  }
+  const response = await fetch(item.src);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const blob = await response.blob();
+  return {
+    bytes: await readBlobBytes(blob),
+    mimeType: blob.type || "application/octet-stream",
+  };
 }
 
 function clipboardSupported(): boolean {
@@ -200,18 +262,21 @@ export function ImageViewer({
   initialIndex = 0,
   opener = null,
   capabilities,
+  saveFile,
   onClose,
 }: {
   items: readonly ViewerImageItem[];
   initialIndex?: number | undefined;
   opener?: HTMLElement | null | undefined;
   capabilities?: ImageViewerCapabilities | undefined;
+  saveFile?: SaveFileFn | undefined;
   onClose: () => void;
 }) {
   const [index, setIndex] = useState(() => Math.max(0, Math.min(items.length - 1, initialIndex)));
   const [zoomed, setZoomed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [copyError, setCopyError] = useState<string>();
+  const [downloadError, setDownloadError] = useState<string>();
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -304,6 +369,7 @@ export function ImageViewer({
     const len = itemsRef.current.length;
     if (len <= 1) return;
     setCopyError(undefined);
+    setDownloadError(undefined);
     setIndex(((nextIndex % len) + len) % len);
   }, []);
 
@@ -559,6 +625,18 @@ export function ImageViewer({
   };
 
   const handleDownload = () => {
+    setDownloadError(undefined);
+    if (saveFile !== undefined) {
+      void (async () => {
+        try {
+          const { bytes, mimeType } = await readItemBytes(current);
+          await saveFile({ filename: current.filename, mimeType, bytes });
+        } catch (reason: unknown) {
+          setDownloadError(reason instanceof Error ? reason.message : String(reason));
+        }
+      })();
+      return;
+    }
     let href = current.src;
     let revoke = false;
     if (!href.startsWith("blob:") && current.blob !== undefined) {
@@ -655,7 +733,12 @@ export function ImageViewer({
           </IconButton>
         )}
         {canDownload && (
-          <IconButton className="iv-btn" aria-label="下载" title="下载" onClick={handleDownload}>
+          <IconButton
+            className="iv-btn"
+            aria-label="下载"
+            title={downloadError ?? "下载"}
+            onClick={handleDownload}
+          >
             <Icon name="download_2" size={ICON_LG} />
           </IconButton>
         )}

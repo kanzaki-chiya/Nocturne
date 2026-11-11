@@ -51,6 +51,12 @@ export interface AppHost {
   consumeNotificationTarget(): Promise<{ hostId: string; sessionId: string } | null>;
   moveTaskToBack(): Promise<void>;
   activityForeground(): Promise<boolean>;
+  /** 经系统存储访问框架 `ACTION_CREATE_DOCUMENT` 保存文件；用户取消时返回 `{ cancelled: true }` */
+  saveFile(input: {
+    name: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }): Promise<{ saved: true } | { cancelled: true }>;
   /** 经 Rust 侧向局域网私有网段地址发起带长度前缀的 TCP 直连（ADR-0087） */
   connectLan?(url: string): Promise<FrameTransport>;
 }
@@ -82,6 +88,7 @@ export const shellHost: AppHost = {
   consumeNotificationTarget: () => Promise.resolve(null),
   moveTaskToBack: () => Promise.resolve(),
   activityForeground: () => Promise.resolve(true),
+  saveFile: () => Promise.reject(new Error("save_file unavailable")),
 };
 
 /** 经 Rust 侧 `background` 插件（只转发白名单命令）调用 Kotlin 的 BackgroundPlugin */
@@ -141,6 +148,17 @@ export const tauriHost: AppHost = {
   },
   activityForeground: async () =>
     (await call<{ foreground: boolean }>("activity_state")).foreground,
+  saveFile: async ({ name, mimeType, bytes }) => {
+    const result = await invoke<{ saved?: boolean; cancelled?: boolean }>(
+      "plugin:save-file|save_file",
+      {
+        name,
+        mimeType,
+        data: encodeBase64(bytes),
+      },
+    );
+    return result.saved ? { saved: true } : { cancelled: true };
+  },
   connectLan: async (url: string): Promise<FrameTransport> => {
     let frameHandler: ((frame: Uint8Array) => void) | undefined;
     let closeHandler: (() => void) | undefined;

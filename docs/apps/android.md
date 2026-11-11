@@ -4,9 +4,9 @@
 
 `apps/android` 是 Tauri 2 的安卓工程，把[手机网页](desktop.md#8-手机网页)随 APK 安装：WebView 只加载打包进 APK 的页面，页面代码不再由中继下发。界面、加密通道、RPC 客户端与会话视图全部复用 `apps/desktop/src/web`，App 只补平台差异。App 含会话本地通知、原生扫码配对、版本检查与系统下载管理器下载；拍照发送沿用网页文件输入。Release 流水线已有正式签名与 APK 附件，App 不自动安装更新。
 
-文件附件与自由回答附件复用网页实现（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：选择任意文件、粘贴／拖入文件、32 KiB 大段粘贴转卡片；发送前检查远程合计原始字节上限，超限保留草稿。对话文件卡片经 `readAttachment` 下载；WebView 下载受宿主沙箱限制时仍可查看名称与大小。
+文件附件与自由回答附件复用网页实现（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：选择任意文件、粘贴／拖入文件、32 KiB 大段粘贴转卡片；发送前检查远程合计原始字节上限，超限保留草稿。对话文件卡片点击经 `readAttachment` 拉取字节后交 `PhonePlatform.saveFile`，与图片查看器的「下载」走同一条原生保存路径。
 
-会话页复用手机网页的[右侧侧边栏](../decisions/ADR-0084-phone-side-panel.md)与图片查看器：同步与后台子代理都可只读观察，后台子代理只在子视图取消；图片查看器打开时 Android 返回键先关闭查看器，侧边栏打开时返回先回总览再关闭侧边栏。因 Android System WebView 未注册 Chromium `ImageFileProvider` 且不支持无原生桥接的 `blob:` 下载，App 通过 `PhonePlatform.imageViewer` 隐藏图片查看器的「复制」与「下载」按钮。结果卡片与待发结果行为沿用 [ADR-0073](../decisions/ADR-0073-background-subagents.md) §6；远程接口边界见 [rpc.md](../protocols/rpc.md) §4.1、§7。
+会话页复用手机网页的[右侧侧边栏](../decisions/ADR-0084-phone-side-panel.md)与图片查看器：同步与后台子代理都可只读观察，后台子代理只在子视图取消；图片查看器打开时 Android 返回键先关闭查看器，侧边栏打开时返回先回总览再关闭侧边栏。因 Android System WebView 未注册 Chromium `ImageFileProvider`，App 通过 `PhonePlatform.imageViewer` 隐藏图片查看器的「复制」按钮，保留「下载」按钮；图片查看器「下载」与对话内文件附件卡片下载均经 `PhonePlatform.saveFile` 调用内联插件 `plugin:save-file|save_file`（前端传文件名、MIME 类型与 base64 字符串，Rust 校验参数、解码 base64、限制单文件原始字节上限 16 MiB 并落入应用私有 `cacheDir` 临时文件，`SaveFilePlugin` 拉起系统存储访问框架 `ACTION_CREATE_DOCUMENT` 预填文件名与类型，用户选好位置后写入返回的 `Uri` 并清理临时文件；用户取消则不保存、不报错，失败不弹提示条、只把错误原文写入对应按钮的 `title`，不申请任何存储权限）。结果卡片与待发结果行为沿用 [ADR-0073](../decisions/ADR-0073-background-subagents.md) §6；远程接口边界见 [rpc.md](../protocols/rpc.md) §4.1、§7。
 
 ## 1. 工程结构
 
@@ -22,7 +22,8 @@
 | `src/probe.ts` | 探针日志与摘要、纯文本导出 |
 | `src-tauri/src/lib.rs` | Rust 外壳：窗口与导航锁 |
 | `src-tauri/src/background.rs` | 内联插件 `background`：只有一个 `call` 命令，按白名单转发给 Kotlin |
-| `src-tauri/gen/android/` | `tauri android init` 生成并提交的 Gradle 工程；`app/src/main/java/.../remote/` 下的 `MainActivity`、`BackgroundPlugin`、`KeepAliveService`、`GuardedWebViewClient`、`NativeLog` 是我们自己的 Kotlin，`generated/` 由 Tauri 生成、不提交 |
+| `src-tauri/src/save_file.rs` | 内联插件 `save-file`：`save_file` 校验文件名/MIME、解码 base64、限制 16 MiB 上限并经 `SaveFilePlugin` 调 `ACTION_CREATE_DOCUMENT` 保存 |
+| `src-tauri/gen/android/` | `tauri android init` 生成并提交的 Gradle 工程；`app/src/main/java/.../remote/` 下的 `MainActivity`、`BackgroundPlugin`、`SaveFilePlugin`、`KeepAliveService`、`GuardedWebViewClient`、`NativeLog` 是我们自己的 Kotlin，`generated/` 由 Tauri 生成、不提交 |
 
 网页入口的依赖图里没有任何 App 代码，App 入口的依赖图里没有 service worker、Web Push 与桌面外壳；由 depcheck 的 `android-*` 规则与 `desktop-no-other-workspace` 强制（[模块边界](../architecture/modules.md)）。网页专属的 `browser-push.ts` 只被网页入口 `main.tsx` 引用，`PhoneApp` 的 `push` 由入口注入，App 不传则没有推送区块。
 
@@ -71,7 +72,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 外链 | 新标签打开 | `on_navigation` 仍只允许 App 源；仅 APK 下载经 `download_apk` 交给系统 `DownloadManager`（不可用时回退 `ACTION_VIEW`），原生只接受本仓库 Release 下载前缀下匹配版本的 HTTPS APK |
 | 能力边界 | 白名单 | 不变，App 不改 RPC 白名单 |
 
-共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`imageViewer`（图片查看器可用操作，App 设为 `{ copy: false, download: false }`）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme` 的实际生效主题调 `set_system_bars` 同步状态栏与导航栏图标深浅。
+共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`imageViewer`（图片查看器可用操作，App 设为 `{ copy: false, download: true }`）、`saveFile`（App 经系统 `ACTION_CREATE_DOCUMENT` 接管图片查看器与文件附件卡片的保存，网页版不传则保持 `<a download>`）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme` 的实际生效主题调 `set_system_bars` 同步状态栏与导航栏图标深浅。
 
 ### 扫码、相机权限与更新
 
