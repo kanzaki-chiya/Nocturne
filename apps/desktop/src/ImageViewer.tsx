@@ -41,13 +41,29 @@ export type OpenImageViewer = (
   opener?: HTMLElement | null,
 ) => void;
 
-interface ActiveViewerState {
-  items: readonly ViewerImageItem[];
-  initialIndex: number;
-  opener: HTMLElement | null;
-}
+export type OpenCustomOverlay = (
+  render: (onClose: () => void) => ReactNode,
+  opener?: HTMLElement | null,
+) => void;
+
+type ActiveModalState =
+  | {
+      kind: "image";
+      items: readonly ViewerImageItem[];
+      initialIndex: number;
+      opener: HTMLElement | null;
+    }
+  | {
+      kind: "custom";
+      render: (onClose: () => void) => ReactNode;
+      opener: HTMLElement | null;
+    };
 
 const ImageViewerContext = createContext<OpenImageViewer | null>(null);
+const CustomOverlayContext = createContext<{
+  open: OpenCustomOverlay;
+  opener: HTMLElement | null;
+} | null>(null);
 const SaveFileContext = createContext<SaveFileFn | undefined>(undefined);
 
 export interface ImageViewerControl {
@@ -68,7 +84,7 @@ export function ImageViewerProvider({
   controlRef?: RefObject<ImageViewerControl | null> | undefined;
   onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
-  const [active, setActive] = useState<ActiveViewerState | null>(null);
+  const [active, setActive] = useState<ActiveModalState | null>(null);
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
 
@@ -79,16 +95,21 @@ export function ImageViewerProvider({
     });
   }, []);
 
+  const resolveOpener = (opener?: HTMLElement | null): HTMLElement | null =>
+    opener !== undefined
+      ? opener
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
   const open = useCallback<OpenImageViewer>((items, initialIndex, opener) => {
     if (items.length === 0) return;
     const clamped = Math.max(0, Math.min(items.length - 1, initialIndex));
-    const fallbackOpener =
-      opener !== undefined
-        ? opener
-        : document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null;
-    setActive({ items, initialIndex: clamped, opener: fallbackOpener });
+    setActive({ kind: "image", items, initialIndex: clamped, opener: resolveOpener(opener) });
+  }, []);
+
+  const openCustom = useCallback<OpenCustomOverlay>((render, opener) => {
+    setActive({ kind: "custom", render, opener: resolveOpener(opener) });
   }, []);
 
   const isOpen = active !== null;
@@ -111,23 +132,37 @@ export function ImageViewerProvider({
     }
   }, [isOpen]);
 
+  const customCtx = useMemo(
+    () => ({
+      open: openCustom,
+      opener: active?.kind === "custom" ? active.opener : null,
+    }),
+    [active, openCustom],
+  );
+
   return (
     <SaveFileContext.Provider value={saveFile}>
-      <ImageViewerContext.Provider value={open}>
-        {children}
-        {active !== null &&
-          createPortal(
-            <ImageViewer
-              items={active.items}
-              initialIndex={active.initialIndex}
-              opener={active.opener}
-              capabilities={capabilities}
-              saveFile={saveFile}
-              onClose={close}
-            />,
-            document.body,
-          )}
-      </ImageViewerContext.Provider>
+      <CustomOverlayContext.Provider value={customCtx}>
+        <ImageViewerContext.Provider value={open}>
+          {children}
+          {active !== null &&
+            createPortal(
+              active.kind === "image" ? (
+                <ImageViewer
+                  items={active.items}
+                  initialIndex={active.initialIndex}
+                  opener={active.opener}
+                  capabilities={capabilities}
+                  saveFile={saveFile}
+                  onClose={close}
+                />
+              ) : (
+                active.render(close)
+              ),
+              document.body,
+            )}
+        </ImageViewerContext.Provider>
+      </CustomOverlayContext.Provider>
     </SaveFileContext.Provider>
   );
 }
@@ -158,6 +193,113 @@ export function useImageViewer(): OpenImageViewer {
 
 export function useSaveFile(): SaveFileFn | undefined {
   return useContext(SaveFileContext);
+}
+
+export function useCustomOverlay(): {
+  open: OpenCustomOverlay;
+  opener: HTMLElement | null;
+} {
+  const ctx = useContext(CustomOverlayContext);
+  const noop = useMemo(() => ({ open: (() => undefined) as OpenCustomOverlay, opener: null }), []);
+  return ctx ?? noop;
+}
+
+/** 窗口级全屏浮层（ImageViewer 与 InlinePage 全屏共用）的焦点圈定、Tab 循环、Esc 关闭与焦点归还 */
+export function useFullscreenDialogTrap(opts: {
+  rootRef: RefObject<HTMLElement | null>;
+  opener?: HTMLElement | null | undefined;
+  onClose: () => void;
+  onKeyDownExtra?: ((event: KeyboardEvent) => boolean) | undefined;
+}): void {
+  const { rootRef, opener = null, onClose, onKeyDownExtra } = opts;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const extraRef = useRef(onKeyDownExtra);
+  extraRef.current = onKeyDownExtra;
+
+  useLayoutEffect(() => {
+    const saved =
+      opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    rootRef.current?.focus();
+    const onFocusIn = (event: FocusEvent) => {
+      const root = rootRef.current;
+      if (root === null) return;
+      if (event.target instanceof Node && !root.contains(event.target)) {
+        root.focus();
+      }
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      if (saved?.isConnected === true) {
+        saved.focus();
+      }
+    };
+  }, [opener, rootRef]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (extraRef.current?.(event) === true) {
+        return;
+      }
+      if (event.key === "Tab") {
+        const root = rootRef.current;
+        const btns = visibleButtons(root);
+        if (btns.length === 0) {
+          event.preventDefault();
+          root?.focus();
+          return;
+        }
+        const active = document.activeElement;
+        const at = active instanceof HTMLButtonElement ? btns.indexOf(active) : -1;
+        if (event.shiftKey) {
+          if (at <= 0) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            btns[btns.length - 1]?.focus();
+          }
+        } else if (at === -1 || at === btns.length - 1) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          btns[0]?.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
+    };
+  }, [rootRef]);
+}
+
+export function triggerBytesDownload(file: {
+  filename: string;
+  mimeType: string;
+  bytes: Uint8Array;
+  saveFile?: SaveFileFn | undefined;
+  onError?: ((message: string) => void) | undefined;
+}): void {
+  const { filename, mimeType, bytes, saveFile, onError } = file;
+  if (saveFile !== undefined) {
+    void saveFile({ filename, mimeType, bytes }).catch((reason: unknown) => {
+      onError?.(reason instanceof Error ? reason.message : String(reason));
+    });
+    return;
+  }
+  const href = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mimeType }));
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  link.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(href);
+  }, 1000);
 }
 
 async function readBlobBytes(blob: Blob): Promise<Uint8Array> {
@@ -288,8 +430,6 @@ export function ImageViewer({
   indexRef.current = index;
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   const current = items[index] ?? items[0];
   const many = items.length > 1;
@@ -377,91 +517,51 @@ export function ImageViewer({
     resetToFit();
   }, [index, current?.src, resetToFit]);
 
-  useLayoutEffect(() => {
-    const saved =
-      opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    rootRef.current?.focus();
-    const onFocusIn = (event: FocusEvent) => {
-      const root = rootRef.current;
-      if (root === null) return;
-      if (event.target instanceof Node && !root.contains(event.target)) {
-        root.focus();
-      }
-    };
-    document.addEventListener("focusin", onFocusIn, true);
-    return () => {
-      document.removeEventListener("focusin", onFocusIn, true);
-      if (saved?.isConnected === true) {
-        saved.focus();
-      }
-    };
-  }, [opener]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (
-        event.key === "ArrowLeft" &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        itemsRef.current.length > 1
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        showIndex(indexRef.current - 1);
-        return;
-      }
-      if (
-        event.key === "ArrowRight" &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        itemsRef.current.length > 1
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        showIndex(indexRef.current + 1);
-        return;
-      }
-      if (event.key === "Tab") {
-        const root = rootRef.current;
-        const btns = visibleButtons(root);
-        if (btns.length === 0) {
-          event.preventDefault();
-          root?.focus();
-          return;
-        }
-        const active = document.activeElement;
-        const at = active instanceof HTMLButtonElement ? btns.indexOf(active) : -1;
-        if (event.shiftKey) {
-          if (at <= 0) {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            btns[btns.length - 1]?.focus();
-          }
-        } else if (at === -1 || at === btns.length - 1) {
+  useFullscreenDialogTrap({
+    rootRef,
+    opener,
+    onClose,
+    onKeyDownExtra: useCallback(
+      (event: KeyboardEvent) => {
+        if (
+          event.key === "ArrowLeft" &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          itemsRef.current.length > 1
+        ) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          btns[0]?.focus();
+          showIndex(indexRef.current - 1);
+          return true;
         }
-      }
-    };
+        if (
+          event.key === "ArrowRight" &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          itemsRef.current.length > 1
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          showIndex(indexRef.current + 1);
+          return true;
+        }
+        return false;
+      },
+      [showIndex],
+    ),
+  });
+
+  useEffect(() => {
     const onResize = () => {
       resetToFit();
     };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
     window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("keydown", onKeyDown, { capture: true });
       window.removeEventListener("resize", onResize);
     };
-  }, [resetToFit, showIndex]);
+  }, [resetToFit]);
 
   useEffect(() => {
     const stage = stageRef.current;

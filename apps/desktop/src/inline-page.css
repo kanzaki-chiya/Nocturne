@@ -1,0 +1,223 @@
+/* 回复内嵌页面：桌面端、手机网页、安卓共用（对照 nocturne-mockups/inline-html/inline.html 与 ADR-0088） */
+
+.inline-page {
+  position: relative;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
+  overflow: hidden;
+  margin: var(--space-1) 0;
+}
+
+.inline-page.search-hit {
+  box-shadow: var(--shadow-focus);
+}
+
+.inline-page-body {
+  width: 100%;
+  overflow: hidden;
+}
+
+.inline-page-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.inline-page.is-collapsed .inline-page-frame {
+  pointer-events: auto;
+}
+
+.inline-page-fade {
+  position: absolute;
+  inset: auto 0 0;
+  height: 96px;
+  background: linear-gradient(transparent, var(--a-panel));
+  pointer-events: none;
+}
+
+.inline-page-tools {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  display: flex;
+  gap: var(--space-0-5);
+  padding: var(--space-0-5);
+  border-radius: var(--radius-2);
+  /* stylelint-disable-next-line function-disallowed-list -- 内嵌页面浮动工具栏用 84% --a-panel 毛玻璃半透明底 */
+  background: color-mix(in srgb, var(--a-panel) 84%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--a-border);
+  opacity: 0;
+}
+
+.inline-page:hover .inline-page-tools,
+.inline-page-tools:focus-within {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .inline-page-tools {
+    transition: opacity var(--dur-menu) var(--ease-out);
+  }
+}
+
+.inline-page .inline-page-tool-btn {
+  width: var(--ctl-h-sm);
+  height: var(--ctl-h-sm);
+  border-radius: var(--radius-2);
+  color: var(--a-secondary);
+}
+
+.inline-page .inline-page-tool-btn:hover:not(:disabled) {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+
+.inline-page-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0 0 var(--space-2);
+}
+
+.inline-page.is-collapsed .inline-page-more-wrap {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-2);
+  translate: -50% 0;
+  z-index: 2;
+  padding: 0;
+}
+
+.inline-page .inline-page-more {
+  width: var(--ctl-h-sm);
+  height: var(--ctl-h-sm);
+  border-radius: var(--radius-pill);
+  /* stylelint-disable-next-line function-disallowed-list -- 内嵌页面展开按钮用 84% --a-panel 毛玻璃半透明底 */
+  background: color-mix(in srgb, var(--a-panel) 84%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--a-border);
+  color: var(--a-secondary);
+}
+
+.inline-page .inline-page-more:hover:not(:disabled) {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+
+.inline-page.is-expanded .inline-page-chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .inline-page-chevron {
+    transition: transform var(--dur-fold) var(--ease-both);
+  }
+}
+
+/* 窗口级全屏模态框 */
+.inline-page-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--a-overlay);
+  padding: var(--space-8);
+  display: grid;
+  outline: none;
+}
+
+.inline-page-fullscreen:focus {
+  outline: none;
+}
+
+.inline-page-sheet {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+  display: grid;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .inline-page-fullscreen {
+    animation: nct-enter-backdrop var(--dur-dialog) var(--ease-out);
+  }
+
+  .inline-page-sheet {
+    animation: nct-enter-dialog var(--dur-dialog) var(--ease-out);
+  }
+}
+
+.inline-page-full-tools {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 2;
+  display: flex;
+  gap: var(--space-0-5);
+  padding: var(--space-0-5);
+  border-radius: var(--radius-2);
+  /* stylelint-disable-next-line function-disallowed-list -- 内嵌页面全屏工具栏用 84% --a-panel 毛玻璃半透明底 */
+  background: color-mix(in srgb, var(--a-panel) 84%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--a-border);
+}
+
+.inline-page-fullscreen .inline-page-btn {
+  width: var(--ctl-h-lg);
+  height: var(--ctl-h-lg);
+  border-radius: var(--radius-2);
+  color: var(--a-secondary);
+}
+
+.inline-page-fullscreen .inline-page-btn:hover:not(:disabled) {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+
+@media (max-width: 600px) {
+  .inline-page-tools {
+    opacity: 1;
+    padding: 0;
+    border-radius: var(--radius-3);
+  }
+
+  .inline-page .inline-page-tool-btn {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+
+  .inline-page .inline-page-more {
+    width: var(--ctl-h-lg);
+    height: var(--ctl-h-lg);
+  }
+
+  .inline-page-fullscreen {
+    padding: 0;
+  }
+
+  .inline-page-sheet {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .inline-page-full-tools {
+    top: calc(var(--space-2) + env(safe-area-inset-top, 0px));
+    right: var(--space-2);
+    padding: 0;
+    border-radius: var(--radius-3);
+  }
+
+  .inline-page-fullscreen .inline-page-btn {
+    width: var(--ctl-h-touch);
+    height: var(--ctl-h-touch);
+  }
+}

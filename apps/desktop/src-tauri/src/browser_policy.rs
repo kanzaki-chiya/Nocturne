@@ -9,10 +9,15 @@ use tauri::Url;
 
 /// Tauri 自定义协议在 Windows 上映射成的地址（`http(s)://<scheme>.localhost`）：
 /// 浏览器 webview 也注册了这些协议，能读到应用自己的资源，一律不让进。
-const APP_HOSTS: &[&str] = &["tauri.localhost", "ipc.localhost", "asset.localhost"];
+const APP_HOSTS: &[&str] = &[
+    "tauri.localhost",
+    "ipc.localhost",
+    "asset.localhost",
+    "nct-sandbox.localhost",
+];
 
 /// 应用内部用的协议：拦下时说「应用内部地址」，不说「外部程序」。
-const INTERNAL_SCHEMES: &[&str] = &["tauri", "ipc", "asset"];
+const INTERNAL_SCHEMES: &[&str] = &["tauri", "ipc", "asset", "nct-sandbox"];
 
 /// 浏览器自己认得、但不在白名单里的协议：拦下时说「不支持」，不说「外部程序」。
 const BROWSER_SCHEMES: &[&str] = &[

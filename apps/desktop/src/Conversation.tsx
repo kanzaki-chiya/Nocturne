@@ -13,11 +13,13 @@ import { marked, type Token, type Tokens } from "marked";
 import { Badge, Button, Checkbox, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 import {
   ImageViewerBoundary,
+  triggerBytesDownload,
   useImageViewer,
   useSaveFile,
   type SaveFileFn,
   type ViewerImageItem,
 } from "./ImageViewer";
+import { InlinePage } from "./InlinePage";
 import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
@@ -68,6 +70,7 @@ export function GrantedTag({
   );
 }
 import {
+  inlineFilesOfTool,
   parseFileRefs,
   untrackedCallsText,
   todoItemsFromCompletion,
@@ -79,6 +82,7 @@ import {
   splitCodeRef,
   isRuntimeWorkMode,
   userWorkMode,
+  type FileAttachment,
   type WorkModeName,
   type PendingPermission,
   type ImageAttachment,
@@ -1679,6 +1683,7 @@ function UserMessage({
 
 const TOOL_META: Record<string, string> = {
   todo_write: "任务清单",
+  render_html: "页面",
   skill: "技能",
   read: "读取",
   grep: "搜索",
@@ -1736,6 +1741,8 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
   switch (name) {
     case "skill":
       return plain(input === undefined ? "" : text(input.name));
+    case "render_html":
+      return plain(input === undefined ? "" : text(input.title));
     case "task":
       return plain(input === undefined ? "" : text(input.task));
     case "read":
@@ -2395,6 +2402,15 @@ function ToolDetails({
       {(result?.attachments ?? []).length > 0 && (
         <ToolShots attachments={result?.attachments ?? []} images={images} session={session} />
       )}
+      {(result?.files ?? []).filter((f) => f.inline === undefined).length > 0 && (
+        <div className="tool-files">
+          {(result?.files ?? [])
+            .filter((f) => f.inline === undefined)
+            .map((file) => (
+              <FileAttachmentCard key={file.file} file={file} session={session} />
+            ))}
+        </div>
+      )}
       {entry.descriptions?.map((description, index) =>
         description.text ? (
           <p key={index} className="conversation-review">
@@ -2425,6 +2441,79 @@ function displayResultPaths(value: string, cwd: string): string {
   );
 }
 
+function FileAttachmentCard({
+  file,
+  session,
+  initialError,
+}: {
+  file: FileAttachment;
+  session: Pick<RpcSession, "readAttachment"> | undefined;
+  initialError?: string | undefined;
+}) {
+  const saveFile = useSaveFile();
+  const [error, setError] = useState<string | undefined>(initialError || undefined);
+
+  return (
+    <button
+      type="button"
+      className="fcard"
+      title={error}
+      onClick={() => {
+        if (!session) return;
+        setError(undefined);
+        void session.readAttachment(file.file).then(
+          (result) => {
+            triggerBytesDownload({
+              filename: file.label,
+              mimeType: result.mimeType,
+              bytes: result.data,
+              saveFile,
+              onError: setError,
+            });
+          },
+          (reason: unknown) => {
+            setError(reason instanceof Error ? reason.message : String(reason));
+          },
+        );
+      }}
+    >
+      <span className="ficon" aria-hidden="true">
+        {fileIconText(file.label)}
+      </span>
+      <span className="fname">{file.label}</span>
+      <span className="fsize">{formatBytes(file.bytes)}</span>
+    </button>
+  );
+}
+
+const DETAIL_STRING_FOLD_CHARS = 400;
+
+function FoldedDetailString({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const lines = text.split("\n");
+  if (lines.length > SUBJECT_DETAIL_FOLD_LINES) {
+    return <FoldedPlainText text={text} />;
+  }
+  if (text.length <= DETAIL_STRING_FOLD_CHARS) {
+    return <>{text}</>;
+  }
+  return (
+    <div className="subject-detail">
+      <pre>{open ? text : `${text.slice(0, DETAIL_STRING_FOLD_CHARS)}…`}</pre>
+      <button
+        type="button"
+        className="subject-detail-toggle"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((current) => !current);
+        }}
+      >
+        {open ? "收起" : "展开"}
+      </button>
+    </div>
+  );
+}
+
 function DetailGroup({ label, value, cwd }: { label: string; value: unknown; cwd: string }) {
   const rows = detailRows(value);
   if (rows.length === 0) return null;
@@ -2436,11 +2525,15 @@ function DetailGroup({ label, value, cwd }: { label: string; value: unknown; cwd
           <div key={key}>
             <dt>{key}</dt>
             <dd>
-              {typeof item === "string"
-                ? /^(?:[A-Za-z]:[\\/]|\/|\\\\|\.\/)/.test(item)
-                  ? displayPath(item, cwd)
-                  : item
-                : JSON.stringify(item, null, 2)}
+              {typeof item === "string" ? (
+                /^(?:[A-Za-z]:[\\/]|\/|\\\\|\.\/)/.test(item) ? (
+                  displayPath(item, cwd)
+                ) : (
+                  <FoldedDetailString text={item} />
+                )
+              ) : (
+                JSON.stringify(item, null, 2)
+              )}
             </dd>
           </div>
         ))}
@@ -2734,6 +2827,7 @@ function ToolEntryView({
   images?: AttachmentImageSource | undefined;
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
+  const thinkScroll = useContext(ThinkScrollContext);
   if (entry.status === "denied") {
     const shownName = effectiveToolName(entry);
     return (
@@ -2744,6 +2838,29 @@ function ToolEntryView({
       >
         {deniedLine(entry, cwd)}
       </div>
+    );
+  }
+  const inlineFiles = !preparing ? inlineFilesOfTool(entry) : [];
+  if (inlineFiles.length > 0) {
+    return (
+      <>
+        {inlineFiles.map((file, idx) => (
+          <InlinePage
+            key={file.file}
+            file={file}
+            session={session}
+            searchHit={searchHit && idx === 0}
+            sessionSeq={idx === 0 ? entry.seq : undefined}
+            completedSeq={idx === 0 ? entry.completedSeq : undefined}
+            onCollapseAboveViewport={(el) => {
+              thinkScroll.collapsed(el);
+            }}
+            renderFallback={(err) => (
+              <FileAttachmentCard file={file} session={session} initialError={err} />
+            )}
+          />
+        ))}
+      </>
     );
   }
   return (

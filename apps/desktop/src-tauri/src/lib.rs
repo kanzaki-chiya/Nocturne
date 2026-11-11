@@ -19,6 +19,7 @@ mod lines;
 mod node;
 mod notify;
 mod plugin_script;
+mod sandbox;
 mod terminal;
 mod workspace;
 
@@ -188,6 +189,10 @@ pub fn run() {
         computer::computer_set_hotkey,
     ];
     tauri::Builder::default()
+        .invoke_system(sandbox::main_frame_only_invoke_script())
+        .register_uri_scheme_protocol(sandbox::SANDBOX_SCHEME, |_ctx, request| {
+            sandbox::handle_request(&request)
+        })
         // 不要插件往每个 webview 注入的 alert / confirm 改写（plugin_script.rs）：网页和主界面都用
         // WebView2 自带的脚本对话框
         .plugin(plugin_script::WithoutScript(tauri_plugin_dialog::init()))
@@ -248,6 +253,19 @@ pub fn run() {
                     });
                 if let Some(dir) = &webview_data {
                     builder = builder.data_directory(dir.clone());
+                }
+                #[cfg(debug_assertions)]
+                {
+                    if std::env::var_os("NOCTURNE_OFFSCREEN").is_some() {
+                        builder = builder.focused(false).position(-3200.0, -3200.0);
+                    }
+                    if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+                        if !extra.trim().is_empty() {
+                            builder = builder.additional_browser_args(&format!(
+                                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection {extra}"
+                            ));
+                        }
+                    }
                 }
                 let window = builder.build()?;
                 browser::configure_main_webview(&window);
