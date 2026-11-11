@@ -15,7 +15,7 @@ import {
 import { APP_ORIGINS, config, type ConfigInput, type RelayConfig } from "./config.js";
 import { Store, hash, type HostRecord, type DeviceRecord } from "./store.js";
 import { PushService } from "./push.js";
-import { staticCsp } from "./csp.js";
+import { SANDBOX_CSP, staticCsp } from "./csp.js";
 
 /** 由 scripts/release-version.mjs 与各包版本一起改写 */
 export const RELAY_VERSION = "0.41.0";
@@ -284,9 +284,15 @@ export class RelayServer {
         ".ico": "image/x-icon",
         ".webmanifest": "application/manifest+json",
       };
+      if (rel === "sandbox.html") {
+        res.setHeader("Content-Security-Policy", SANDBOX_CSP);
+      }
       res.setHeader("Content-Type", types[extname(file)] ?? "application/octet-stream");
       res.setHeader("Content-Length", content.length);
-      res.setHeader("Cache-Control", rel === "index.html" ? "no-cache" : "public, max-age=300");
+      res.setHeader(
+        "Cache-Control",
+        rel === "index.html" || rel === "sandbox.html" ? "no-cache" : "public, max-age=300",
+      );
       res.end(req.method === "HEAD" ? undefined : content);
     } catch {
       res.writeHead(404);

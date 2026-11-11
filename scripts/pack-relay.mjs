@@ -45,7 +45,7 @@ export function packRelay({
     if (!existsSync(join(distDir, file)))
       throw new Error(`缺少 relay 构建产物 ${join(distDir, file)}；先运行 pnpm build`);
   }
-  for (const file of ["index.html", "manifest.webmanifest", "sw.js"]) {
+  for (const file of ["index.html", "manifest.webmanifest", "sw.js", "sandbox.html"]) {
     if (!existsSync(join(webDir, file)))
       throw new Error(`缺少手机网页 ${join(webDir, file)}；先运行 pnpm build`);
   }

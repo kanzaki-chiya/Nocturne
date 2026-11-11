@@ -17,7 +17,7 @@ import {
 } from "@nocturne/remote";
 import { RelayServer, type RelayLog } from "../src/server.js";
 import { startAdmin, requestAdmin } from "../src/admin.js";
-import { staticCsp } from "../src/csp.js";
+import { SANDBOX_CSP, staticCsp } from "../src/csp.js";
 import { fetchSafeListen, listenFetchSafe } from "../../../scripts/test/ports.mjs";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -430,6 +430,27 @@ describe("relay", () => {
     }
     expect(await (await fetch(`${f.origin}/healthz`)).text()).toBe("ok");
     expect(await (await fetch(`${f.origin}/v1/info`)).json()).toMatchObject({ protocol: 1 });
+  });
+  it("空壳页 /sandbox.html 返回独立沙箱 CSP 头，其余路径保持 staticCsp", async () => {
+    const f = await fixture();
+    const sandboxRes = await fetch(`${f.origin}/sandbox.html`);
+    expect(sandboxRes.status).toBe(200);
+    expect(sandboxRes.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(sandboxRes.headers.get("cache-control")).toBe("no-cache");
+    expect(sandboxRes.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(sandboxRes.headers.get("content-security-policy")).not.toBe(staticCsp(f.origin));
+    expect(await sandboxRes.text()).toContain("nocturne:inline-html:ready");
+
+    const desktopSandbox = await readFile(
+      join(process.cwd(), "../desktop/public-web/sandbox.html"),
+      "utf8",
+    );
+    const relaySandbox = await readFile(join(process.cwd(), "public/sandbox.html"), "utf8");
+    expect(relaySandbox).toBe(desktopSandbox);
+
+    const indexRes = await fetch(f.origin);
+    expect(indexRes.headers.get("content-security-policy")).toBe(staticCsp(f.origin));
+    expect(indexRes.headers.get("content-security-policy")).toContain("frame-src 'self'");
   });
   it("错误 Origin 的 upgrade 返回 403", async () => {
     const f = await fixture();

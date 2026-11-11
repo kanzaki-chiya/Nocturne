@@ -1,0 +1,219 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style id="__nct_theme__"></style>
+    <style id="__nct_base__">
+      :where(:root) {
+        box-sizing: border-box;
+        height: auto;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: var(--nct-fs, 14px);
+        line-height: 1.5;
+      }
+      :where(*, *::before, *::after) {
+        box-sizing: border-box;
+      }
+      :where(body) {
+        margin: 0;
+        padding: 20px;
+        height: auto;
+        display: flow-root;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+      @media (max-width: 560px) {
+        :where(body) {
+          padding: 14px;
+        }
+      }
+      :where(code, pre, kbd, samp) {
+        font-family: var(--mono);
+      }
+      :root[data-nct-fullscreen="true"],
+      :root[data-nct-fullscreen="true"] :where(body) {
+        min-height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <script id="__nct_bridge__">
+      (() => {
+        if (window.parent === window) return;
+        const themeEl = document.getElementById("__nct_theme__");
+        const baseEl = document.getElementById("__nct_base__");
+        const bridgeEl = document.getElementById("__nct_bridge__");
+        if (bridgeEl) bridgeEl.remove();
+
+        const SAFE_KEY = /^--[a-zA-Z0-9-]+$/;
+        const UNSAFE_VAL = /[{}<>;\r\n]/;
+
+        let instanceId = "";
+        let rendered = false;
+        let fullscreen = false;
+        let lastHeight = 0;
+        let rafId = 0;
+
+        function applyTheme(theme, colorScheme, fontSize) {
+          if (!themeEl) return;
+          const decls = [];
+          const scheme = colorScheme === "light" ? "light" : "dark";
+          decls.push(`color-scheme: ${scheme}`);
+          if (
+            typeof fontSize === "string" &&
+            !UNSAFE_VAL.test(fontSize) &&
+            fontSize.trim() !== ""
+          ) {
+            decls.push(`--nct-fs: ${fontSize.trim()}`);
+          }
+          if (theme && typeof theme === "object") {
+            for (const [k, v] of Object.entries(theme)) {
+              if (SAFE_KEY.test(k) && typeof v === "string" && !UNSAFE_VAL.test(v)) {
+                decls.push(`${k}: ${v.trim()}`);
+              }
+            }
+          }
+          themeEl.textContent = `:root { ${decls.join("; ")}; }`;
+        }
+
+        function measureAndReport() {
+          rafId = 0;
+          if (!rendered || fullscreen) return;
+          const docEl = document.documentElement;
+          const body = document.body;
+          if (!docEl) return;
+          const docRect = docEl.getBoundingClientRect();
+          const bodyRect = body ? body.getBoundingClientRect() : { height: 0, top: 0 };
+          const natural = Math.ceil(Math.max(docRect.height, bodyRect.bottom - docRect.top));
+          if (natural > 0 && Math.abs(natural - lastHeight) >= 1) {
+            lastHeight = natural;
+            window.parent.postMessage(
+              { type: "nocturne:inline-html:resize", id: instanceId, height: natural },
+              "*",
+            );
+          }
+        }
+
+        function scheduleMeasure() {
+          if (!rendered || fullscreen || rafId !== 0) return;
+          rafId = requestAnimationFrame(measureAndReport);
+        }
+
+        function cloneAndRunScripts(root) {
+          const scripts = Array.from(root.querySelectorAll("script"));
+          for (const oldScript of scripts) {
+            const next = document.createElement("script");
+            for (const attr of Array.from(oldScript.attributes)) {
+              next.setAttribute(attr.name, attr.value);
+            }
+            next.textContent = oldScript.textContent;
+            oldScript.replaceWith(next);
+          }
+        }
+
+        function renderHtml(payload) {
+          if (rendered) return;
+          rendered = true;
+          instanceId = typeof payload.id === "string" ? payload.id : "";
+          fullscreen = payload.fullscreen === true;
+          if (fullscreen) {
+            document.documentElement.setAttribute("data-nct-fullscreen", "true");
+          }
+          applyTheme(payload.theme, payload.colorScheme, payload.fontSize);
+
+          const raw = typeof payload.html === "string" ? payload.html : "";
+          const parsed = new DOMParser().parseFromString(raw, "text/html");
+
+          for (const attr of Array.from(parsed.documentElement.attributes)) {
+            if (attr.name !== "data-nct-fullscreen") {
+              document.documentElement.setAttribute(attr.name, attr.value);
+            }
+          }
+          for (const attr of Array.from(parsed.body.attributes)) {
+            document.body.setAttribute(attr.name, attr.value);
+          }
+
+          const headNodes = Array.from(parsed.head.childNodes);
+          for (const node of headNodes) {
+            if (
+              node.nodeType === Node.ELEMENT_NODE &&
+              node.nodeName === "META" &&
+              (node.getAttribute("charset") !== null ||
+                (node.getAttribute("name") || "").toLowerCase() === "viewport")
+            ) {
+              continue;
+            }
+            document.head.appendChild(document.adoptNode(node));
+          }
+
+          document.body.replaceChildren();
+          for (const node of Array.from(parsed.body.childNodes)) {
+            document.body.appendChild(document.adoptNode(node));
+          }
+
+          if (themeEl && themeEl.parentNode !== document.head) {
+            document.head.prepend(themeEl);
+          }
+          if (baseEl && baseEl.parentNode !== document.head) {
+            themeEl?.after(baseEl);
+          }
+
+          cloneAndRunScripts(document.head);
+          cloneAndRunScripts(document.body);
+
+          try {
+            document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+            window.dispatchEvent(new Event("load"));
+          } catch {
+            // ignore user listener errors
+          }
+
+          if (!fullscreen) {
+            if (typeof ResizeObserver !== "undefined") {
+              const ro = new ResizeObserver(scheduleMeasure);
+              ro.observe(document.documentElement);
+              if (document.body) ro.observe(document.body);
+            }
+            if (typeof MutationObserver !== "undefined") {
+              const mo = new MutationObserver(scheduleMeasure);
+              mo.observe(document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true,
+              });
+            }
+            document.addEventListener("load", scheduleMeasure, true);
+            window.addEventListener("resize", scheduleMeasure);
+            measureAndReport();
+            scheduleMeasure();
+          }
+        }
+
+        window.addEventListener("message", (event) => {
+          if (event.source !== window.parent) return;
+          const data = event.data;
+          if (!data || typeof data !== "object") return;
+          if (data.type === "nocturne:inline-html:render") {
+            renderHtml(data);
+          } else if (data.type === "nocturne:inline-html:theme") {
+            applyTheme(data.theme, data.colorScheme, data.fontSize);
+            scheduleMeasure();
+          }
+        });
+
+        window.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            window.parent.postMessage({ type: "nocturne:inline-html:escape", id: instanceId }, "*");
+          }
+        });
+
+        window.parent.postMessage({ type: "nocturne:inline-html:ready" }, "*");
+      })();
+    </script>
+  </body>
+</html>

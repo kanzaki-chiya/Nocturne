@@ -125,9 +125,25 @@ export async function smokeRelay(tgz) {
     );
     check(
       response.headers.get("content-security-policy") &&
+        response.headers.get("content-security-policy").includes("frame-src 'self'") &&
         response.headers.get("x-content-type-options") === "nosniff" &&
         response.headers.get("cache-control") === "no-cache",
       "首页安全/缓存响应头不正确",
+    );
+    const sandboxRes = await fetch(`${origin}/sandbox.html`);
+    const sandboxHtml = await sandboxRes.text();
+    const sandboxCsp = sandboxRes.headers.get("content-security-policy") ?? "";
+    check(
+      sandboxRes.status === 200 &&
+        sandboxRes.headers.get("content-type")?.includes("text/html") &&
+        sandboxRes.headers.get("cache-control") === "no-cache" &&
+        sandboxCsp.includes("default-src 'none'") &&
+        sandboxCsp.includes("script-src 'unsafe-inline'") &&
+        sandboxCsp.includes("frame-ancestors 'self'") &&
+        sandboxCsp.includes("sandbox allow-scripts") &&
+        !sandboxCsp.includes("allow-same-origin") &&
+        sandboxHtml.includes("nocturne:inline-html:ready"),
+      "空壳页 /sandbox.html 响应或策略头不正确",
     );
     const infoResponse = await fetch(`${origin}/v1/info`);
     const info = await infoResponse.json();
