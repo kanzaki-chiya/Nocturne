@@ -46,6 +46,8 @@ import {
   FONT_SIZE_MIN,
   isFileOpener,
   type FileOpener,
+  type Prefs,
+  type PrefsStore,
 } from "./prefs";
 import { LAYER_TEXT, settingOverrideTitle } from "./setting-source";
 import {
@@ -145,6 +147,94 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 同步给外壳的下载设置：询问缺省开；dir 为 null = 系统「下载」文件夹 */
+export function downloadSettings(prefs: Prefs): { ask: boolean; dir: string | null } {
+  return { ask: prefs.downloadAsk !== false, dir: prefs.downloadDir ?? null };
+}
+
+/** 下载设置同步给外壳、选目录；没有下载外壳能力的宿主不给 */
+export interface DownloadsHost {
+  set: (ask: boolean, dir: string | null) => Promise<{ defaultDir: string | null }>;
+  pickFolder: () => Promise<string | null>;
+}
+
+/**
+ * 「每次询问保存位置」「保存位置」：写 prefs（缺省值不写），再同步给外壳。
+ * 没设保存位置时显示系统「下载」文件夹（外壳给的路径）。
+ */
+function DownloadRows({ host, prefs }: { host: DownloadsHost; prefs: PrefsStore }) {
+  const [settings, setSettings] = useState(() => downloadSettings(prefs.get()));
+  const [defaultDir, setDefaultDir] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const sync = async (next: { ask: boolean; dir: string | null }) => {
+    setError(null);
+    try {
+      const result = await host.set(next.ask, next.dir);
+      setDefaultDir(result.defaultDir);
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+  // 进入页面时取系统「下载」文件夹（同步一次当前设置）
+  useEffect(() => {
+    let live = true;
+    const { ask, dir } = downloadSettings(prefs.get());
+    host.set(ask, dir).then(
+      (result) => {
+        if (live) setDefaultDir(result.defaultDir);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [host, prefs]);
+
+  const apply = (next: { ask: boolean; dir: string | null }) => {
+    prefs.update({
+      downloadAsk: next.ask ? undefined : false,
+      downloadDir: next.dir ?? undefined,
+    });
+    setSettings(next);
+    void sync(next);
+  };
+  const shown = settings.dir ?? defaultDir ?? "";
+  return (
+    <>
+      <SettingsRow label="每次询问保存位置">
+        <Switch
+          aria-label="每次询问保存位置"
+          checked={settings.ask}
+          onChange={(ask) => {
+            apply({ ...settings, ask });
+          }}
+        />
+      </SettingsRow>
+      <SettingsRow label="保存位置" error={error ?? undefined}>
+        <span className="val mono" title={shown}>
+          {shown}
+        </span>
+        <Button
+          size="sm"
+          onClick={() => {
+            void host.pickFolder().then(
+              (dir) => {
+                if (dir !== null) apply({ ...settings, dir });
+              },
+              (e: unknown) => {
+                setError(errText(e));
+              },
+            );
+          }}
+        >
+          更改…
+        </Button>
+      </SettingsRow>
+    </>
+  );
+}
+
 /** 通知一节的键（ADR-0056）：「通知内容」三项在界面里同处一行 */
 const NOTIFY_EVENT_KEYS = [
   "notifications.events.attention",
@@ -210,6 +300,8 @@ export function SettingsPage({
   workspace,
   defaultWorkspace,
   workspaceOverridden,
+  downloads,
+  prefs,
   update,
   onThemeChange,
   onFileOpenerChange,
@@ -234,6 +326,9 @@ export function SettingsPage({
   defaultWorkspace: string | null;
   /** prefs 里存了自选位置（显示「恢复默认」） */
   workspaceOverridden: boolean;
+  /** 没有下载外壳能力时不显示「下载」 */
+  downloads?: DownloadsHost | undefined;
+  prefs?: PrefsStore | undefined;
   /** 自动更新设置（ADR-0050）；桌面端总有 */
   update?: {
     /** 自动检查更新开关（默认开） */
@@ -725,6 +820,11 @@ export function SettingsPage({
                     }}
                   />
                 </SettingsRow>
+              </SettingsGroup>
+            )}
+            {section === "general" && downloads !== undefined && prefs !== undefined && (
+              <SettingsGroup title="下载">
+                <DownloadRows host={downloads} prefs={prefs} />
               </SettingsGroup>
             )}
             {section === "general" && update !== undefined && (

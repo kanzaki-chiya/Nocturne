@@ -194,6 +194,7 @@
 | `conversation.css` | `.qcard .opt[aria-checked="true"]` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 45%, transparent)` | 提问卡选中项用 45% `--a-accent` 半透明描边 |
 | `image-viewer.css` | `.image-viewer`（`background`） | `function-disallowed-list` | `rgb(10 10 14 / 0.88)` | 图片查看器遮罩固定深色，深浅主题共用，不用 `--a-overlay` |
 | `image-viewer.css` | `.image-viewer`（`color`） | `color-no-hex` | `#f2f2f6` | 图片查看器深色遮罩上的浅色图标与计数文字 |
+| `image-viewer.css` | `.image-viewer .iv-stage img` | `color-no-hex` | `#fff` | 图片查看器大图固定白底以垫托透明 PNG，深浅主题共用 |
 | `image-viewer.css` | `.image-viewer .iv-btn:hover:not(:disabled)` | `function-disallowed-list` | `rgb(242 242 246 / 0.14)` | 图片查看器深色控件上的浅色半透明悬停底 |
 | `image-viewer.css` | `.image-viewer :is(.iv-top, .iv-nav, .iv-count)` | `function-disallowed-list` | `rgb(20 20 26 / 0.72)` | 图片查看器按钮栏、切换箭头与计数的深色半透明底 |
 | `image-viewer.css` | `@media (max-width: 600px) .image-viewer` | `color-no-hex` | `#000` | 手机图片查看器全屏纯黑底 |

@@ -70,14 +70,9 @@ import { desktopWarningText } from "./open-warnings";
 import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
 import { SkillsPage } from "./SkillsPage";
-import { SettingsPage } from "./SettingsPage";
+import { SettingsPage, downloadSettings, type DownloadsHost } from "./SettingsPage";
 import { ComputerSettingsPage } from "./ComputerSettingsPage";
-import {
-  BrowserSettingsPage,
-  downloadSettings,
-  type BrowsingDataHost,
-  type DownloadsHost,
-} from "./BrowserSettingsPage";
+import { BrowserSettingsPage, type BrowsingDataHost } from "./BrowserSettingsPage";
 import { SettingsDeck } from "./SettingsDeck";
 import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
@@ -1794,7 +1789,6 @@ export function App({ host }: { host: DesktopHost }) {
                       prefs={prefs}
                       agentBrowser={host.agentBrowser}
                       browsingData={browsingData}
-                      downloads={browserDownloads}
                       relaunch={requestRestart}
                       version={settingsVersion}
                     />
@@ -1876,6 +1870,8 @@ export function App({ host }: { host: DesktopHost }) {
                       workspace={effectiveWorkspace}
                       defaultWorkspace={defaultWorkspace}
                       workspaceOverridden={p.plainWorkspace !== undefined}
+                      downloads={browserDownloads}
+                      prefs={prefs}
                       update={{
                         autoUpdate: p.autoUpdate !== false,
                         onAutoUpdateChange: (enabled) => {

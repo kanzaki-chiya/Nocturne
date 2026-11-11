@@ -47,6 +47,8 @@
   transform-origin: center;
   will-change: transform;
   -webkit-user-drag: none;
+  /* stylelint-disable-next-line color-no-hex -- 图片查看器大图固定白底以垫托透明 PNG，深浅主题共用 */
+  background: #fff;
   box-shadow: var(--shadow-dialog);
 }
 

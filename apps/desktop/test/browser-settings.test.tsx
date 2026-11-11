@@ -4,12 +4,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  BrowserSettingsPage,
-  formatSize,
-  type BrowsingDataHost,
-  type DownloadsHost,
-} from "../src/BrowserSettingsPage";
+import { BrowserSettingsPage, formatSize, type BrowsingDataHost } from "../src/BrowserSettingsPage";
 import type { AgentBrowserHost, AgentBrowserStatus } from "../src/host";
 import { createPrefsStore, PREFS_KEY } from "../src/prefs";
 
@@ -54,18 +49,10 @@ function agentHost(
   };
 }
 
-function mount(host: AgentBrowserHost | undefined, storage = memory(), downloads?: DownloadsHost) {
+function mount(host: AgentBrowserHost | undefined, storage = memory()) {
   const prefs = createPrefsStore(storage);
   const relaunch = vi.fn(async () => undefined);
-  render(
-    <BrowserSettingsPage
-      prefs={prefs}
-      agentBrowser={host}
-      downloads={downloads}
-      relaunch={relaunch}
-      version={1}
-    />,
-  );
+  render(<BrowserSettingsPage prefs={prefs} agentBrowser={host} relaunch={relaunch} version={1} />);
   return { prefs, storage, relaunch };
 }
 
@@ -298,104 +285,21 @@ describe("浏览数据", () => {
 });
 
 describe("分组顺序与文字", () => {
-  it("按效果图：Agent 浏览器、打开方式、浏览数据、下载；没有网站权限", () => {
+  it("groups in Browser page exclude Download", () => {
     const prefs = createPrefsStore(memory());
     render(
       <BrowserSettingsPage
         prefs={prefs}
         agentBrowser={agentHost()}
         browsingData={{ sizes: async () => ({ user: 0, agent: 0 }), clear: async () => 0 }}
-        downloads={{ set: async () => ({ defaultDir: null }), pickFolder: async () => null }}
         relaunch={async () => undefined}
         version={1}
       />,
     );
     const titles = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
-    expect(titles).toEqual(["浏览器", "Agent 浏览器", "打开方式", "浏览数据", "下载"]);
+    expect(titles).toEqual(["浏览器", "Agent 浏览器", "打开方式", "浏览数据"]);
+    expect(screen.queryByRole("region", { name: "下载" })).toBeNull();
     expect(document.querySelector(".desc")).toBeNull();
     expect(screen.queryByText(/网站权限|允许|拒绝/)).toBeNull();
-  });
-});
-
-describe("下载", () => {
-  function downloadsHost(picked: string | null = "D:\\dl") {
-    const sets: [boolean, string | null][] = [];
-    const host: DownloadsHost = {
-      set: vi.fn(async (ask: boolean, dir: string | null) => {
-        sets.push([ask, dir]);
-        return { defaultDir: "C:\\Users\\me\\Downloads" };
-      }),
-      pickFolder: vi.fn(async () => picked),
-    };
-    return { host, sets };
-  }
-
-  it("缺省每次询问、显示系统「下载」文件夹，不写 prefs；进入页面同步一次", async () => {
-    const { host, sets } = downloadsHost();
-    const { storage } = mount(undefined, memory(), host);
-    const group = screen.getByRole("region", { name: "下载" });
-    const ask = within(group).getByRole("switch", { name: "每次询问保存位置" });
-    expect(ask.getAttribute("aria-checked")).toBe("true");
-    expect(await within(group).findByText("C:\\Users\\me\\Downloads")).toBeTruthy();
-    expect(sets).toEqual([[true, null]]);
-    expect(storage.getItem(PREFS_KEY) ?? "").not.toMatch(/download/);
-    expect(group.querySelector(".desc")).toBeNull();
-  });
-
-  it("关掉询问、更改保存位置：写 prefs 并同步外壳；打开询问时清掉字段", async () => {
-    const { host, sets } = downloadsHost();
-    const { prefs } = mount(undefined, memory(), host);
-    const ask = screen.getByRole("switch", { name: "每次询问保存位置" });
-    fireEvent.click(ask);
-    expect(prefs.get().downloadAsk).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "更改…" }));
-    expect(await screen.findByText("D:\\dl")).toBeTruthy();
-    expect(prefs.get().downloadDir).toBe("D:\\dl");
-    fireEvent.click(ask);
-    expect(prefs.get().downloadAsk).toBeUndefined();
-    await waitFor(() => {
-      expect(sets).toEqual([
-        [true, null],
-        [false, null],
-        [false, "D:\\dl"],
-        [true, "D:\\dl"],
-      ]);
-    });
-  });
-
-  it("选目录时取消不改；外壳报错写在行内", async () => {
-    const { host } = downloadsHost(null);
-    const { prefs } = mount(undefined, memory(), host);
-    fireEvent.click(screen.getByRole("button", { name: "更改…" }));
-    await waitFor(() => {
-      expect(host.pickFolder).toHaveBeenCalled();
-    });
-    expect(prefs.get().downloadDir).toBeUndefined();
-    cleanup();
-    host.set = vi.fn(async () => {
-      throw new Error("同步失败");
-    });
-    mount(undefined, memory(), host);
-    fireEvent.click(screen.getByRole("switch", { name: "每次询问保存位置" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("同步失败");
-  });
-
-  it("没有内置浏览器时不显示这一组", () => {
-    mount(undefined);
-    expect(screen.queryByRole("region", { name: "下载" })).toBeNull();
-  });
-
-  it("存过的设置重新进入页面时还原", async () => {
-    const storage = memory();
-    storage.setItem(PREFS_KEY, JSON.stringify({ downloadAsk: false, downloadDir: "E:\\x" }));
-    const { host, sets } = downloadsHost();
-    mount(undefined, storage, host);
-    expect(
-      screen.getByRole("switch", { name: "每次询问保存位置" }).getAttribute("aria-checked"),
-    ).toBe("false");
-    expect(screen.getByText("E:\\x")).toBeTruthy();
-    await waitFor(() => {
-      expect(sets).toEqual([[false, "E:\\x"]]);
-    });
   });
 });

@@ -7,9 +7,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 
-import { SettingsPage, type SettingsPageSection, type ThemePref } from "../src/SettingsPage";
+import {
+  SettingsPage,
+  type DownloadsHost,
+  type SettingsPageSection,
+  type ThemePref,
+} from "../src/SettingsPage";
 import type { SettingItem } from "../src/rpc-types";
-import { type FileOpener } from "../src/prefs";
+import { createPrefsStore, PREFS_KEY, type FileOpener, type PrefsStore } from "../src/prefs";
 import type { CheckResult } from "../src/updater";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
@@ -135,6 +140,8 @@ function props(
     notifications?: {
       sendTest: () => Promise<{ shown: boolean; reason?: "disabled" | "unsupported" | "error" }>;
     };
+    downloads?: DownloadsHost;
+    prefs?: PrefsStore;
     update?: {
       autoUpdate: boolean;
       onAutoUpdateChange: (enabled: boolean) => boolean;
@@ -149,6 +156,8 @@ function props(
     workspace: "C:\\Users\\me\\Nocturne",
     defaultWorkspace: "C:\\Users\\me\\Nocturne",
     workspaceOverridden: false,
+    ...(overrides?.downloads !== undefined ? { downloads: overrides.downloads } : {}),
+    ...(overrides?.prefs !== undefined ? { prefs: overrides.prefs } : {}),
     ...(overrides?.update !== undefined ? { update: overrides.update } : {}),
     onThemeChange: overrides?.onThemeChange ?? (() => true),
     fileOpener: overrides?.fileOpener ?? ("panel" as const),
@@ -1140,4 +1149,133 @@ it("常规 › 执行不再有 Agent 浏览器的开关（移到「浏览器」�
   expect(screen.queryByRole("group", { name: "模型操作网页" })).toBeNull();
   expect(screen.queryAllByRole("switch", { name: /面板浏览器|模型操作网页/ })).toHaveLength(0);
   server.close();
+});
+
+describe("General > Download", () => {
+  function memory(): Storage {
+    const data = new Map<string, string>();
+    return {
+      get length() {
+        return data.size;
+      },
+      clear: () => data.clear(),
+      getItem: (key) => data.get(key) ?? null,
+      key: (index) => [...data.keys()][index] ?? null,
+      removeItem: (key) => {
+        data.delete(key);
+      },
+      setItem: (key, value) => {
+        data.set(key, value);
+      },
+    };
+  }
+
+  function downloadsHost(picked: string | null = "D:\\dl") {
+    const sets: [boolean, string | null][] = [];
+    const host: DownloadsHost = {
+      set: vi.fn(async (ask: boolean, dir: string | null) => {
+        sets.push([ask, dir]);
+        return { defaultDir: "C:\\Users\\me\\Downloads" };
+      }),
+      pickFolder: vi.fn(async () => picked),
+    };
+    return { host, sets };
+  }
+
+  function mountGeneral(downloads?: DownloadsHost, storage = memory()) {
+    const prefs = createPrefsStore(storage);
+    render(
+      <SettingsPage
+        {...props(undefined as unknown as RpcClient, {
+          ...(downloads !== undefined ? { downloads } : {}),
+          prefs,
+          update: {
+            autoUpdate: true,
+            onAutoUpdateChange: () => true,
+            onCheck: async () => ({ kind: "latest" }),
+          },
+        })}
+      />,
+    );
+    return { prefs, storage };
+  }
+
+  it("缺省每次询问、显示系统「下载」文件夹，不写 prefs；进入页面同步一次", async () => {
+    const { host, sets } = downloadsHost();
+    const { storage } = mountGeneral(host);
+    const regions = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
+    const plainIdx = regions.indexOf("普通对话");
+    const dlIdx = regions.indexOf("下载");
+    const updIdx = regions.indexOf("更新");
+    expect(plainIdx).toBeGreaterThanOrEqual(0);
+    expect(dlIdx).toBeGreaterThan(plainIdx);
+    expect(updIdx).toBeGreaterThan(dlIdx);
+
+    const group = screen.getByRole("region", { name: "下载" });
+    const ask = within(group).getByRole("switch", { name: "每次询问保存位置" });
+    expect(ask.getAttribute("aria-checked")).toBe("true");
+    expect(await within(group).findByText("C:\\Users\\me\\Downloads")).toBeTruthy();
+    expect(sets).toEqual([[true, null]]);
+    expect(storage.getItem(PREFS_KEY) ?? "").not.toMatch(/download/);
+    expect(group.querySelector(".desc")).toBeNull();
+  });
+
+  it("关掉询问、更改保存位置：写 prefs 并同步外壳；打开询问时清掉字段", async () => {
+    const { host, sets } = downloadsHost();
+    const { prefs } = mountGeneral(host);
+    const group = screen.getByRole("region", { name: "下载" });
+    const ask = within(group).getByRole("switch", { name: "每次询问保存位置" });
+    fireEvent.click(ask);
+    expect(prefs.get().downloadAsk).toBe(false);
+    fireEvent.click(within(group).getByRole("button", { name: "更改…" }));
+    expect(await within(group).findByText("D:\\dl")).toBeTruthy();
+    expect(prefs.get().downloadDir).toBe("D:\\dl");
+    fireEvent.click(ask);
+    expect(prefs.get().downloadAsk).toBeUndefined();
+    await waitFor(() => {
+      expect(sets).toEqual([
+        [true, null],
+        [false, null],
+        [false, "D:\\dl"],
+        [true, "D:\\dl"],
+      ]);
+    });
+  });
+
+  it("选目录时取消不改；外壳报错写在行内", async () => {
+    const { host } = downloadsHost(null);
+    const { prefs } = mountGeneral(host);
+    const group = screen.getByRole("region", { name: "下载" });
+    fireEvent.click(within(group).getByRole("button", { name: "更改…" }));
+    await waitFor(() => {
+      expect(host.pickFolder).toHaveBeenCalled();
+    });
+    expect(prefs.get().downloadDir).toBeUndefined();
+    cleanup();
+    host.set = vi.fn(async () => {
+      throw new Error("同步失败");
+    });
+    mountGeneral(host);
+    fireEvent.click(screen.getByRole("switch", { name: "每次询问保存位置" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("同步失败");
+  });
+
+  it("没有内置浏览器时不显示这一组", () => {
+    mountGeneral(undefined);
+    expect(screen.queryByRole("region", { name: "下载" })).toBeNull();
+  });
+
+  it("存过的设置重新进入页面时还原", async () => {
+    const storage = memory();
+    storage.setItem(PREFS_KEY, JSON.stringify({ downloadAsk: false, downloadDir: "E:\\x" }));
+    const { host, sets } = downloadsHost();
+    mountGeneral(host, storage);
+    expect(
+      screen.getByRole("switch", { name: "每次询问保存位置" }).getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(screen.getByText("E:\\x")).toBeTruthy();
+    await waitFor(() => {
+      expect(sets).toEqual([[false, "E:\\x"]]);
+    });
+  });
 });

@@ -171,7 +171,7 @@ schema 均 `additionalProperties: false`。所有网页工具显式 tabId；动�
 
 - 代码实际名为 `browser_policy::allow_navigation` / `check_target` / `parse_user_url`，并没有 `check_navigation`。agent 的打开/导航、新窗口、页面重定向与历史跳转须复用同一核心检查，并额外拒绝 **所有 file:**；不能把 agent 操作写入现有 `user_target` 来冒充用户主动打开文件。只允许 http/https/about:blank；应用协议/映射主机/devUrl、自定义协议、data/blob/javascript 等外壳打开一律拒绝。document 内网页 JS 链接照修订（四），不是外壳任意 JS 通道。
 - 本机 http 开发服务允许，但应用 devUrl 同源仍拒绝；禁入启动端口的 bootstrap/MCP 路径，Origin/鉴权仍是独立防线。不宣称这是网络沙箱，页面的子资源可连接网络。
-- agent 标签的下载在 Requested 直接取消，返回/提示 `download_blocked`，**不弹另存为、不自动存盘**，也不读「设置 › 浏览器 › 下载」（那组设置只管用户标签，见 [desktop.md](../apps/desktop.md) 5.10）。用户要下载必须先接管，用普通浏览器流程；不因一次 click 的批准隐式取得本机写文件权。
+- agent 标签的下载在 Requested 直接取消，返回/提示 `download_blocked`，**不弹另存为、不自动存盘**，也不读「设置 › 常规 › 下载」（那组设置只管主界面与面板浏览器用户标签，见 [desktop.md](../apps/desktop.md) 5.10）。用户要下载必须先接管，用普通浏览器流程；不因一次 click 的批准隐式取得本机写文件权。
 - `window.open`/target=_blank 沿现有 Deny 原生弹窗路径：仅在来源调用仍有效、可归属该 actor 时建同根/同 actor 的 agent 标签，校验 URL/容量后纳入列表并报告 opener/newTabId；不切换用户当前标签，不继承为用户标签。about:blank 后脚本写入依赖 opener 的复杂弹窗第一版不支持，说明被拦；拒绝迟到/无法归属的 popup。重定向/历史仍逐次校验。
 - JS alert/confirm/prompt（以及 beforeunload）既不自动接受也不自动取消：agent 标签关闭默认脚本对话框，外壳订阅 ScriptDialogOpening 并取 deferral 挂起它，网页脚本停在对话框上；类型、站点来源、文字（prompt 另带默认值）进 `AgentBrowserTab.dialog`，面板在该标签的工具栏下方显示横幅，「确定」/「取消」（prompt 带输入框）由用户答复，经 `agent_browser_dialog` 完成 deferral。agent 控制和用户接管时一样挂起，接管不会替用户点确定。触发对话框的动作（CDP 要等对话框关掉才回复，外壳看到对话框就不再等）、加载中弹出对话框的 open/navigate，以及挂起期间这个标签的其他网页动作，都返回 `dialog_open`，`structuredContent` 带 `{ tabId, dialog: { kind, message, uri, defaultText? } }`，text 写明类型和文字；`list_tabs` 标出 `dialog`。用户答复后横幅消失，agent 重新 read 后继续；关闭标签先取消挂起的对话框。不能让隐藏网页原生 modal 卡住 UI/HTTP 线程。登录、验证码、权限弹窗同样交人，不自动批准。
 

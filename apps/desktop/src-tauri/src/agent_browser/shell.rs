@@ -597,8 +597,8 @@ mod tests {
         assert_eq!(rect.width, OFFSCREEN_SIZE.0);
     }
 
-    /// agent 标签的下载一律取消（desktop-browser.md 第 5 节）：「设置 › 浏览器 › 下载」只管
-    /// 用户标签，不能接到这里。没法在单测里建 webview，只检查下载回调的源码：请求一律
+    /// agent 标签的下载一律取消（desktop-browser.md 第 5 节）：「设置 › 常规 › 下载」只管
+    /// 主界面与用户标签，不能接到这里。没法在单测里建 webview，只检查下载回调的源码：请求一律
     /// 返回 false，不弹另存为、不读下载设置、不直接存盘。
     #[test]
     fn agent_downloads_stay_cancelled() {

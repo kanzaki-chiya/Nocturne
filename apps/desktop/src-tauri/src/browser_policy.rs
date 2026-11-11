@@ -319,7 +319,7 @@ impl Downloads {
     }
 }
 
-/// 设置 › 浏览器 › 下载（ADR-0078），由前端经 `browser_downloads_set` 同步给外壳。
+/// 设置 › 常规 › 下载（ADR-0078），由前端经 `browser_downloads_set` 同步给外壳。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadPrefs {
     /// 每次询问保存位置（缺省开）

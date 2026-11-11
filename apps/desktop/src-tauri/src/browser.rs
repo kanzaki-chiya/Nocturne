@@ -110,7 +110,7 @@ pub struct BrowserState {
     data_override: Option<std::path::PathBuf>,
     /// 网页全屏前主窗口是最大化的：退出全屏后重新最大化（见 [`window_fullscreen`]）
     restore_maximized: AtomicBool,
-    /// 设置 › 浏览器 › 下载（前端启动时和改动时同步）；还没同步时按询问处理
+    /// 设置 › 常规 › 下载（前端启动时和改动时同步）；还没同步时按询问处理
     download_prefs: Mutex<Option<DownloadPrefs>>,
     /// 直接保存、还没结束的下载（地址, 路径）：同时下两个同名文件时不撞同一个路径
     pending_saves: Mutex<Vec<(String, std::path::PathBuf)>>,
@@ -228,45 +228,123 @@ fn native_error(error: impl std::fmt::Display) -> CommandError {
     CommandError::new("browser_failed", format!("浏览器操作失败：{error}"))
 }
 
-/// 下载：按「设置 › 浏览器 › 下载」弹「另存为」或直接存到保存位置
+/// 为一次下载请求决定保存路径并维护 `pending_saves`（主窗口与面板浏览器共用）。
+/// 返回 `Some(path)` 表示允许下载并写入该路径，`None` 表示用户取消「另存为」。
+fn resolve_download_destination(
+    state: &BrowserState,
+    default_dir: Option<&std::path::Path>,
+    url: &str,
+    initial_destination: &std::path::Path,
+    writable_dir: impl Fn(&std::path::Path) -> bool,
+    prompt: impl FnOnce(Option<&std::path::Path>, &str) -> Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    let name = initial_destination
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "download".into());
+    let prefs = lock(&state.download_prefs).clone();
+    let plan = {
+        let pending = lock(&state.pending_saves);
+        browser_policy::plan_download(
+            prefs.as_ref(),
+            default_dir,
+            &name,
+            writable_dir,
+            |path| path.exists() || pending.iter().any(|(_, p)| p == path),
+        )
+    };
+    match plan {
+        DownloadPlan::Ask { dir } => {
+            let dir = dir
+                .or_else(|| default_dir.map(std::path::Path::to_path_buf))
+                .or_else(|| {
+                    initial_destination
+                        .parent()
+                        .filter(|d| !d.as_os_str().is_empty())
+                        .map(std::path::Path::to_path_buf)
+                });
+            prompt(dir.as_deref(), &name)
+        }
+        DownloadPlan::Save(path) => {
+            lock(&state.pending_saves).push((url.to_string(), path.clone()));
+            Some(path)
+        }
+    }
+}
+
+/// 下载结束时从 `pending_saves` 移除对应的在途保存记录。
+fn finish_pending_save(state: &BrowserState, url: &str) {
+    let mut pending = lock(&state.pending_saves);
+    if let Some(index) = pending.iter().position(|(u, _)| u == url) {
+        pending.remove(index);
+    }
+}
+
+/// 主窗口挂载 WebView2 多次下载权限放行（对话附件卡片异步 `readAttachment` 后触发 `link.click()`，
+/// 或同一会话连续下载多张图片/附件时，不弹浏览器多文件下载权限提示、不静默拦截）。
+pub fn configure_main_webview(window: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    let _ = native::allow_multiple_downloads(window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
+/// 主窗口下载（图片查看器、对话文件附件卡片等 `<a download>`）：
+/// 按「设置 › 常规 › 下载」弹「另存为」或直接存到保存位置；不发面板浏览器通知。
+pub fn on_main_download(app: &AppHandle, event: DownloadEvent<'_>) -> bool {
+    match event {
+        DownloadEvent::Requested { url, destination } => {
+            let state = app.state::<Arc<BrowserState>>();
+            let default_dir = default_download_dir(app);
+            match resolve_download_destination(
+                state.inner(),
+                default_dir.as_deref(),
+                url.as_str(),
+                destination,
+                browser_policy::dir_writable,
+                |dir, name| save_as(app, dir, name),
+            ) {
+                Some(path) => {
+                    *destination = path;
+                    true
+                }
+                None => false,
+            }
+        }
+        DownloadEvent::Finished { url, .. } => {
+            finish_pending_save(app.state::<Arc<BrowserState>>().inner(), url.as_str());
+            true
+        }
+        _ => true,
+    }
+}
+
+/// 面板浏览器下载：按「设置 › 常规 › 下载」弹「另存为」或直接存到保存位置
 /// （[`browser_policy::plan_download`]）；另存为里取消就不下载。结果配对见
 /// [`browser_policy::Downloads`]。
 fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> bool {
     match event {
         DownloadEvent::Requested { url, destination } => {
-            let name = destination
+            let fallback_name = destination
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "download".into());
             let state = app.state::<Arc<BrowserState>>();
-            let prefs = lock(&state.download_prefs).clone();
             let default_dir = default_download_dir(app);
-            let plan = {
-                let pending = lock(&state.pending_saves);
-                browser_policy::plan_download(
-                    prefs.as_ref(),
-                    default_dir.as_deref(),
-                    &name,
-                    browser_policy::dir_writable,
-                    |path| path.exists() || pending.iter().any(|(_, p)| p == path),
-                )
-            };
-            let target = match plan {
-                DownloadPlan::Ask { dir } => {
-                    let dir = dir.or_else(|| destination.parent().map(|d| d.to_path_buf()));
-                    save_as(app, dir.as_deref(), &name)
-                }
-                DownloadPlan::Save(path) => {
-                    lock(&state.pending_saves).push((url.to_string(), path.clone()));
-                    Some(path)
-                }
-            };
+            let target = resolve_download_destination(
+                state.inner(),
+                default_dir.as_deref(),
+                url.as_str(),
+                destination,
+                browser_policy::dir_writable,
+                |dir, name| save_as(app, dir, name),
+            );
             match target {
                 Some(path) => {
                     let chosen = path
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or(name);
+                        .unwrap_or(fallback_name);
                     *destination = path;
                     lock(&browser.downloads).chosen(url.as_str(), chosen.clone());
                     browser.send(BrowserMessage::Download {
@@ -282,13 +360,7 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
             }
         }
         DownloadEvent::Finished { url, path, success } => {
-            {
-                let state = app.state::<Arc<BrowserState>>();
-                let mut pending = lock(&state.pending_saves);
-                if let Some(index) = pending.iter().position(|(u, _)| u == url.as_str()) {
-                    pending.remove(index);
-                }
-            }
+            finish_pending_save(app.state::<Arc<BrowserState>>().inner(), url.as_str());
             let file_name = path
                 .as_ref()
                 .and_then(|p| p.file_name())
@@ -348,7 +420,7 @@ pub struct DownloadSettings {
     default_dir: Option<String>,
 }
 
-/// 设置 › 浏览器 › 下载：前端启动时和改动时同步过来。`dir` 为空 = 系统「下载」文件夹。
+/// 设置 › 常规 › 下载：前端启动时和改动时同步过来。`dir` 为空 = 系统「下载」文件夹。
 #[tauri::command]
 pub fn browser_downloads_set(
     app: AppHandle,
@@ -729,7 +801,7 @@ mod native {
         ContainsFullScreenElementChangedEventHandler, ExecuteScriptCompletedHandler,
         FaviconChangedEventHandler, FocusChangedEventHandler, GetFaviconCompletedHandler,
         HistoryChangedEventHandler, LaunchingExternalUriSchemeEventHandler,
-        SourceChangedEventHandler,
+        PermissionRequestedEventHandler, SourceChangedEventHandler,
     };
     use windows::core::{Interface, HSTRING, PWSTR};
     use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
@@ -804,6 +876,30 @@ mod native {
                 })),
             )
         }
+    }
+
+    /// 主窗口壳页面放行 `MULTIPLE_AUTOMATIC_DOWNLOADS`，避免连续下载图片或异步拉取附件后被 WebView2 拦截。
+    pub fn allow_multiple_downloads(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+        window.with_webview(|platform| {
+            let mut token = Default::default();
+            // SAFETY: 主线程、有效的 WebView2 控制器
+            let _ = unsafe {
+                platform.controller().CoreWebView2().and_then(|core| {
+                    core.add_PermissionRequested(
+                        &PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                            let Some(args) = args else { return Ok(()) };
+                            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+                            args.PermissionKind(&mut kind)?;
+                            if kind == COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS {
+                                args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                            }
+                            Ok(())
+                        })),
+                        &mut token,
+                    )
+                })
+            };
+        })
     }
 
     /// 挂原生事件，然后导航到第一个地址。
@@ -1096,5 +1192,145 @@ mod tests {
             .filter(|line| !line.trim_start().starts_with("//") && line.contains(&close))
             .collect();
         assert_eq!(calls, ["        let _ = webview.close();"]);
+    }
+
+    #[test]
+    fn resolve_download_destination_asks_when_enabled_or_unsynced_and_handles_cancel() {
+        use super::{lock, resolve_download_destination, BrowserState, DownloadPrefs};
+        use std::path::{Path, PathBuf};
+
+        let state = BrowserState::default();
+        let default_dir = PathBuf::from(r"C:\Users\me\Downloads");
+        let initial = PathBuf::from(r"C:\Users\me\Downloads\shot.png");
+
+        // 1) download_prefs 尚未同步（None）：按询问处理，初始目录回退系统下载目录，取消返回 None
+        let mut prompted: Option<(Option<PathBuf>, String)> = None;
+        let cancelled = resolve_download_destination(
+            &state,
+            Some(&default_dir),
+            "blob:http://tauri.localhost/1",
+            &initial,
+            |_| true,
+            |dir, name| {
+                prompted = Some((dir.map(Path::to_path_buf), name.to_string()));
+                None
+            },
+        );
+        assert_eq!(cancelled, None);
+        assert_eq!(
+            prompted,
+            Some((Some(default_dir.clone()), "shot.png".into()))
+        );
+        assert!(lock(&state.pending_saves).is_empty());
+
+        // 2) ask = true 且配置了自定义目录：初始目录为配置的保存位置，确认后返回所选路径
+        let custom_dir = PathBuf::from(r"D:\Saved");
+        *lock(&state.download_prefs) = Some(DownloadPrefs {
+            ask: true,
+            dir: Some(custom_dir.clone()),
+        });
+        let chosen_path = custom_dir.join("renamed.png");
+        let mut prompted_custom: Option<(Option<PathBuf>, String)> = None;
+        let saved = resolve_download_destination(
+            &state,
+            Some(&default_dir),
+            "blob:http://tauri.localhost/2",
+            &initial,
+            |_| true,
+            |dir, name| {
+                prompted_custom = Some((dir.map(Path::to_path_buf), name.to_string()));
+                Some(chosen_path.clone())
+            },
+        );
+        assert_eq!(saved, Some(chosen_path));
+        assert_eq!(
+            prompted_custom,
+            Some((Some(custom_dir), "shot.png".into()))
+        );
+
+        // 3) ask = true 且未设置保存位置（dir = None）：初始目录使用系统下载目录
+        *lock(&state.download_prefs) = Some(DownloadPrefs {
+            ask: true,
+            dir: None,
+        });
+        let mut prompted_default: Option<Option<PathBuf>> = None;
+        let _ = resolve_download_destination(
+            &state,
+            Some(&default_dir),
+            "blob:http://tauri.localhost/3",
+            &initial,
+            |_| true,
+            |dir, _| {
+                prompted_default = Some(dir.map(Path::to_path_buf));
+                None
+            },
+        );
+        assert_eq!(prompted_default, Some(Some(default_dir)));
+    }
+
+    #[test]
+    fn resolve_download_destination_saves_directly_and_deduplicates_names() {
+        use super::{
+            finish_pending_save, lock, resolve_download_destination, BrowserState, DownloadPrefs,
+        };
+
+        let temp = std::env::temp_dir().join(format!(
+            "nocturne-dl-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let state = BrowserState::default();
+        // 未设置自定义 dir 时（dir = None），直接存到系统默认下载目录（此处传入 temp）
+        *lock(&state.download_prefs) = Some(DownloadPrefs {
+            ask: false,
+            dir: None,
+        });
+        let initial = temp.join("report.pdf");
+
+        // 第一次：report.pdf（记录在 pending_saves 中，尚未落盘）
+        let first = resolve_download_destination(
+            &state,
+            Some(&temp),
+            "blob:1",
+            &initial,
+            |_| true,
+            |_, _| panic!("should not prompt"),
+        );
+        assert_eq!(first, Some(temp.join("report.pdf")));
+
+        // 第二次（第一次尚未结束，在 pending_saves 中占用）：自动变成 report (1).pdf
+        let second = resolve_download_destination(
+            &state,
+            Some(&temp),
+            "blob:2",
+            &initial,
+            |_| true,
+            |_, _| panic!("should not prompt"),
+        );
+        assert_eq!(second, Some(temp.join("report (1).pdf")));
+
+        // 模拟落盘并结束在途记录后，磁盘上已存在 report.pdf 与 report (1).pdf，第三次应得 report (2).pdf
+        std::fs::write(temp.join("report.pdf"), b"a").unwrap();
+        std::fs::write(temp.join("report (1).pdf"), b"b").unwrap();
+        finish_pending_save(&state, "blob:1");
+        finish_pending_save(&state, "blob:2");
+        assert!(lock(&state.pending_saves).is_empty());
+
+        let third = resolve_download_destination(
+            &state,
+            Some(&temp),
+            "blob:3",
+            &initial,
+            |_| true,
+            |_, _| panic!("should not prompt"),
+        );
+        assert_eq!(third, Some(temp.join("report (2).pdf")));
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }

@@ -116,7 +116,7 @@ export interface Prefs {
   agentBrowserRiskAccepted?: boolean | undefined;
   computerEnabled?: boolean | undefined;
   computerCursor?: boolean | undefined;
-  /** 设置 › 浏览器 › 下载：每次询问保存位置；缺省开，只存 false */
+  /** 设置 › 常规 › 下载：每次询问保存位置；缺省开，只存 false */
   downloadAsk?: false | undefined;
   /** 下载保存位置；缺省系统「下载」文件夹 */
   downloadDir?: string | undefined;

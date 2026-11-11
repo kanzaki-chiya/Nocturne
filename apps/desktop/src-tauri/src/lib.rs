@@ -134,12 +134,14 @@ pub fn run() {
     let webview_data = browser_policy::take_user_data_override();
     let restart_data = webview_data.clone();
     let mut context = tauri::generate_context!();
-    let main_window = webview_data.as_ref().and_then(|_| {
+    // 主窗口统一在 setup 里用 WebviewWindowBuilder 创建，以挂载 on_download（及可选的独立数据目录）。
+    let main_window = {
         let windows = &mut context.config_mut().app.windows;
-        let main = windows.iter_mut().find(|w| w.label == "main")?;
-        main.create = false;
-        Some(main.clone())
-    });
+        windows.iter_mut().find(|w| w.label == "main").map(|main| {
+            main.create = false;
+            main.clone()
+        })
+    };
     let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         backend::app_note,
         backend::backend_send,
@@ -238,10 +240,17 @@ pub fn run() {
                 platform.bind(Arc::downgrade(&agents));
                 app.manage(agents);
             }
-            if let (Some(config), Some(dir)) = (&main_window, &webview_data) {
-                tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
-                    .data_directory(dir.clone())
-                    .build()?;
+            if let Some(config) = &main_window {
+                let download_app = app.handle().clone();
+                let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+                    .on_download(move |_webview, event| {
+                        browser::on_main_download(&download_app, event)
+                    });
+                if let Some(dir) = &webview_data {
+                    builder = builder.data_directory(dir.clone());
+                }
+                let window = builder.build()?;
+                browser::configure_main_webview(&window);
             }
             Ok(())
         })
