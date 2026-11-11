@@ -294,6 +294,118 @@ describe("Android native file & image download", () => {
     expect(unhandled).toHaveLength(0);
   });
 
+  it("saves inline HTML page from fullscreen dialog via plugin:save-file|save_file and uses nct-sandbox protocol", async () => {
+    const htmlBytes = new TextEncoder().encode(
+      "<!doctype html><html><body><h1>报表</h1></body></html>",
+    );
+    const mock = installTauriMock(async (cmd) => {
+      if (cmd === "plugin:save-file|save_file") {
+        return { saved: true };
+      }
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36",
+    );
+
+    const readAttachment = vi.fn(async () => ({
+      data: htmlBytes,
+      mimeType: "text/html",
+      bytes: htmlBytes.byteLength,
+    }));
+    const session = {
+      id: "sess-inline",
+      readAttachment,
+    } as unknown as RpcSession;
+
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "tool",
+        key: "t:inline-1",
+        turnId: "t1",
+        callId: "inline-1",
+        name: "render_html",
+        seq: 2,
+        completedSeq: 3,
+        status: "ok",
+        input: { title: "报表", html: "<h1>报表</h1>" },
+        subjects: [],
+        permission: undefined,
+        resolution: undefined,
+        liveOutput: "",
+        result: {
+          status: "ok",
+          modelContent: "ok",
+          output: { title: "报表", file: "file-1.html", bytes: htmlBytes.byteLength },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          files: [
+            {
+              type: "file",
+              file: "file-1.html",
+              label: "报表.html",
+              mimeType: "text/html",
+              bytes: htmlBytes.byteLength,
+              sha256: "b".repeat(64),
+              source: "upload",
+              inline: { title: "报表" },
+            },
+          ],
+          durationMs: 5,
+        },
+      },
+    ];
+
+    const platform = appPlatform(tauriHost);
+    const container = await mount(
+      <ImageViewerProvider capabilities={platform.imageViewer} saveFile={platform.saveFile}>
+        <Conversation
+          session={session}
+          view={view}
+          openUrl={() => undefined}
+          cwd="Z:\\repo"
+          subscribeEvents={() => () => undefined}
+          images={dummyImages}
+          busy={false}
+        />
+      </ImageViewerProvider>,
+    );
+
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 20));
+    });
+    const iframe = container.querySelector<HTMLIFrameElement>(".inline-page iframe");
+    if (!iframe) throw new Error("missing inline iframe");
+    expect(iframe.getAttribute("src")).toBe("http://nct-sandbox.localhost/sandbox.html");
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
+
+    const fullBtn = container.querySelector<HTMLButtonElement>('button[aria-label="全屏"]');
+    if (!fullBtn) throw new Error("missing fullscreen button");
+    await act(async () => {
+      fullBtn.click();
+    });
+
+    const downloadBtn = document.body.querySelector<HTMLButtonElement>(
+      '.inline-page-fullscreen button[aria-label="下载"]',
+    );
+    if (!downloadBtn) throw new Error("missing fullscreen download button");
+    await act(async () => {
+      downloadBtn.click();
+      await new Promise((done) => setTimeout(done, 30));
+    });
+
+    const saveCalls = mock.invoke.mock.calls.filter(
+      ([cmd]) => cmd === "plugin:save-file|save_file",
+    );
+    expect(saveCalls).toHaveLength(1);
+    const payload = saveCalls[0]?.[1] as { name: string; mimeType: string; data: string };
+    expect(payload.name).toBe("报表.html");
+    expect(payload.mimeType).toContain("text/html");
+    expect(Array.from(decodeBase64(payload.data))).toEqual(Array.from(htmlBytes));
+  });
+
   it("keeps web bundle free of Android save-file native invoke", async () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const desktopDir = path.resolve(here, "../../desktop");

@@ -1,5 +1,6 @@
 mod background;
 mod lan_tcp;
+mod sandbox;
 mod save_file;
 
 use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
@@ -17,12 +18,25 @@ fn navigation_allowed(url: &Url, dev: Option<&Url>) -> bool {
     if url.scheme() == "http" && url.host_str() == Some(APP_HOST) && url.port().is_none() {
         return true;
     }
+    if url.scheme() == "http"
+        && url.host_str() == Some(sandbox::SANDBOX_HOST)
+        && url.port().is_none()
+        && url.path() == "/sandbox.html"
+        && url.query().is_none()
+        && url.fragment().is_none()
+    {
+        return true;
+    }
     cfg!(debug_assertions) && dev.is_some_and(|dev| url.origin() == dev.origin())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_system(sandbox::main_frame_only_invoke_script())
+        .register_uri_scheme_protocol(sandbox::SANDBOX_SCHEME, |_ctx, request| {
+            sandbox::handle_request(&request)
+        })
         .plugin(background::plugin())
         .plugin(lan_tcp::plugin())
         .plugin(save_file::plugin())
@@ -49,6 +63,10 @@ mod tests {
     fn app_pages_are_allowed() {
         assert!(navigation_allowed(&url("http://tauri.localhost/"), None));
         assert!(navigation_allowed(&url("http://tauri.localhost/index.html#x"), None));
+        assert!(navigation_allowed(
+            &url("http://nct-sandbox.localhost/sandbox.html"),
+            None
+        ));
         assert!(navigation_allowed(&url("about:blank"), None));
     }
 
@@ -58,6 +76,8 @@ mod tests {
             "https://tauri.localhost/",
             "http://tauri.localhost:8787/",
             "http://tauri.localhost.evil.example/",
+            "http://nct-sandbox.localhost/",
+            "http://nct-sandbox.localhost/sandbox.html?x=1",
             "https://relay.example/",
             "http://127.0.0.1:8787/",
             "file:///data/data/x/index.html",
