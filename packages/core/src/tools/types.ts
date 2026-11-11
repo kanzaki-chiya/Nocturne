@@ -106,6 +106,10 @@ export interface ToolTraits {
    */
   mutatesSchedule?: boolean | undefined;
   /**
+   * 仅对顶层交互主会话开放（ADR-0088）：子代理与非交互定时任务会话按此特性排除，不按名字判断。
+   */
+  mainSessionOnly?: boolean | undefined;
+  /**
    * 编辑工具归属（ADR-0035 §5）：声明后仅当模型的
    * capabilities.editTool 等于该值时对模型可见（specs 不列出、
    * 执行按 unknown_tool 结算）；未声明始终可见。子代理按子会话
@@ -218,6 +222,16 @@ export interface ToolContext extends ToolScope {
    * schedule_unavailable 结算。
    */
   schedule?: ScheduleAccess;
+  /**
+   * 将工具产出的内容保存为会话文件附件（ADR-0088）：经 AttachmentStore.saveFile
+   * 落盘为 `file-<n>.<ext>`，返回 FileAttachment 引用。缺省 = 当前环境未挂载附件存储。
+   */
+  saveFileAttachment?(input: {
+    data: Uint8Array;
+    mimeType?: string | undefined;
+    label: string;
+    inline?: { title: string } | undefined;
+  }): Promise<FileAttachment>;
 }
 
 export interface ToolDefinition<Input = unknown, Output = unknown> {

@@ -581,6 +581,23 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             }
           : {}),
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
+        ...(scope.attachments !== undefined
+          ? {
+              saveFileAttachment: (input: {
+                data: Uint8Array;
+                mimeType?: string | undefined;
+                label: string;
+                inline?: { title: string } | undefined;
+              }) =>
+                scope.attachments!.saveFile({
+                  data: input.data,
+                  mimeType: input.mimeType,
+                  label: input.label,
+                  source: "upload",
+                  ...(input.inline !== undefined ? { inline: input.inline } : {}),
+                }),
+            }
+          : {}),
         ...(scope.shellEnvStrip !== undefined ? { shellEnvStrip: scope.shellEnvStrip } : {}),
         shell: scope.shell,
         progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {

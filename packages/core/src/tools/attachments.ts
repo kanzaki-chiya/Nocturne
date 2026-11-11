@@ -34,6 +34,7 @@ export interface AttachmentStore {
     mimeType?: string | undefined;
     label: string;
     source: FileAttachment["source"];
+    inline?: { title: string } | undefined;
   }): Promise<FileAttachment>;
   /** 按引用取回字节；文件缺失或 sha256 不符返回 undefined。运行期按 sha256 缓存 */
   load(att: ImageAttachment | FileAttachment): Promise<Uint8Array | undefined>;
@@ -166,6 +167,7 @@ export function createAttachmentStore(opts: {
               ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
               ...(text ? { text } : {}),
               source: input.source,
+              ...(input.inline !== undefined ? { inline: input.inline } : {}),
             };
           } catch (error) {
             if (fsErrorCode(error) !== "EEXIST") throw error;

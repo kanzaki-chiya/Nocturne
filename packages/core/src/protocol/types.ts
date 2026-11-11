@@ -238,6 +238,8 @@ export interface FileAttachment {
   mimeType?: string | undefined;
   text?: { lines: number } | undefined;
   source: "paste" | "upload" | "answer";
+  /** 回复内嵌页面标记（ADR-0088）：仅在 tool.completed.files 上有效，用户消息入口丢弃 */
+  inline?: { title: string } | undefined;
 }
 
 /** 一次工具调用的引用。callId 由 Runtime 分配、会话内唯一 */

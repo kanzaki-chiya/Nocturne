@@ -504,6 +504,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           (t) =>
             t.traits.needsUser !== true &&
             t.traits.mutatesSchedule !== true &&
+            t.traits.mainSessionOnly !== true &&
             (t.traits.editTool === undefined || t.traits.editTool === childEditTool),
         );
         if (deps.depth + 1 < deps.limits.maxDepth) {

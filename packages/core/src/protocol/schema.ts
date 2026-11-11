@@ -130,6 +130,10 @@ const fileAttachmentSchema = z.object({
   source: z.enum(["paste", "upload", "answer"]),
 });
 
+const toolResultFileAttachmentSchema = fileAttachmentSchema.extend({
+  inline: z.object({ title: z.string() }).optional(),
+});
+
 const fileRefSchema = z.object({
   path: z.string(),
   kind: z.enum(["file", "directory", "image"]),
@@ -396,7 +400,7 @@ const payloadSchemas = {
     truncated: z.boolean().optional(),
     spillPath: z.string().optional(),
     attachments: z.array(imageAttachmentSchema).optional(),
-    files: z.array(fileAttachmentSchema).optional(),
+    files: z.array(toolResultFileAttachmentSchema).optional(),
     durationMs: z.number().optional(),
   }),
   "context.compacted": z.object({

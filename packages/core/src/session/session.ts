@@ -4,6 +4,7 @@
 import { randomBytes } from "node:crypto";
 import {
   encodeDurableEvent,
+  stripInlineFromFiles,
   type DurableEvent,
   type DurablePayload,
   type DurableType,
@@ -133,11 +134,19 @@ export class SessionImpl implements Session {
 
   private async appendEvent<T extends DurableType>(
     type: T,
-    payload: DurablePayload<T>,
+    rawPayload: DurablePayload<T>,
     options: EmitOptions,
   ): Promise<DurableEvent<T>> {
     if (this.healthState !== "ok")
       throw new SessionError("session_failed", "会话已失败，不再写入日志");
+    const payload =
+      type === "message.user" &&
+      (rawPayload as DurablePayload<"message.user">).files?.some((f) => f.inline !== undefined)
+        ? ({
+            ...(rawPayload as DurablePayload<"message.user">),
+            files: stripInlineFromFiles((rawPayload as DurablePayload<"message.user">).files),
+          } as DurablePayload<T>)
+        : rawPayload;
     const event = {
       type,
       sessionId: this.id,

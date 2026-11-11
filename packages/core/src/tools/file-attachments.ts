@@ -46,7 +46,8 @@ export async function saveInputAttachments(
     } else {
       files.push(
         await store.saveFile({
-          ...input,
+          data: input.data,
+          mimeType: input.mimeType,
           label: input.label ?? "attachment",
           source: answer ? "answer" : (input.source ?? "upload"),
         }),

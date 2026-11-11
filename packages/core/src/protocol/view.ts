@@ -175,6 +175,31 @@ export function userEntryText(
     .join("");
 }
 
+export function stripInlineFromFiles(
+  files: readonly FileAttachment[] | undefined,
+): FileAttachment[] | undefined {
+  if (files === undefined) return undefined;
+  return files.map(({ inline: _inline, ...rest }) => rest);
+}
+
+function filterInlineFiles(files: readonly FileAttachment[] | undefined): FileAttachment[] {
+  if (files === undefined || files.length === 0) return [];
+  return files.filter((f) => typeof f.inline?.title === "string" && f.inline.title.trim() !== "");
+}
+
+/**
+ * 共享派生规则（ADR-0088、view.md）：仅当工具成功完成且结果 files 中带有效 inline 标记时，
+ * 返回需作为内嵌页面展示的文件列表；不凭工具名判断。
+ */
+export function inlineFilesOfTool(
+  entry: Pick<ToolEntry, "status" | "result" | "inlineFiles">,
+): FileAttachment[] {
+  if (entry.status !== "ok") return [];
+  if (entry.inlineFiles !== undefined) return entry.inlineFiles;
+  if (entry.result?.status !== "ok") return [];
+  return filterInlineFiles(entry.result.files);
+}
+
 export interface AssistantEntry {
   kind: "assistant";
   key: string;
@@ -221,6 +246,8 @@ export interface ToolEntry {
   review?: PermissionReviewedPayload | undefined;
   /** tool.progress 累计；completed 时清空，收敛点上必为空 */
   liveOutput: string;
+  /** 成功完成后带内嵌标记的页面文件（ADR-0088）；存在时图形界面隐藏原工具行直接渲染内嵌页面 */
+  inlineFiles?: FileAttachment[] | undefined;
   result:
     | {
         status: ToolCallStatus;
@@ -515,13 +542,14 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       if (view.firstTitle === undefined && !view.entries.some((entry) => entry.kind === "user"))
         view.firstTitle = firstUserText(event.payload);
       view.title = visibleTitle(view);
+      const userFiles = stripInlineFromFiles(event.payload.files);
       view.entries.push({
         kind: "user",
         key: `u:${event.payload.messageId}`,
         seq: event.seq,
         turnId: turnId ?? "",
         content: event.payload.content,
-        ...(event.payload.files !== undefined ? { files: event.payload.files } : {}),
+        ...(userFiles !== undefined ? { files: userFiles } : {}),
         ...(event.payload.fileRefs !== undefined ? { fileRefs: event.payload.fileRefs } : {}),
         ...(event.payload.skill !== undefined ? { skill: event.payload.skill } : {}),
         ...(event.payload.delegate !== undefined ? { delegate: event.payload.delegate } : {}),
@@ -683,6 +711,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(p.files !== undefined ? { files: p.files } : {}),
         durationMs: p.durationMs,
       };
+      const inlineFiles = p.status === "ok" ? filterInlineFiles(p.files) : [];
+      if (inlineFiles.length > 0) entry.inlineFiles = inlineFiles;
+      else delete entry.inlineFiles;
       b.attachments.set(event.seq, entry);
       // ADR-0032 §3：待回答的提问随对应调用的结算清除
       if (view.pendingQuestion?.callId === p.callId) view.pendingQuestion = undefined;

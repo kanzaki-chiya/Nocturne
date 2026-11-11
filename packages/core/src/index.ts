@@ -1924,6 +1924,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // ADR-0064 第 7 节：定时任务发起的会话不提供改写定时任务的工具（按特性，不按名字）
     for (const tool of builtinTools()) {
       if (meta.schedule !== undefined && tool.traits.mutatesSchedule === true) continue;
+      if (
+        (meta.parent !== undefined || meta.schedule !== undefined) &&
+        tool.traits.mainSessionOnly === true
+      )
+        continue;
       tools.register(tool);
     }
     if (meta.parent === undefined) {

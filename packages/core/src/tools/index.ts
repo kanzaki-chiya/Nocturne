@@ -29,6 +29,14 @@ export { editTool } from "./builtin/edit.js";
 export { applyPatchTool, parsePatch } from "./builtin/apply-patch.js";
 export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
+export {
+  renderHtmlTool,
+  MAX_INLINE_HTML_BYTES,
+  MAX_INLINE_HTML_TITLE_CHARS,
+  sanitizeInlineHtmlLabel,
+  type RenderHtmlInput,
+  type RenderHtmlOutput,
+} from "./builtin/render-html.js";
 export { askUserTool } from "./builtin/ask-user.js";
 export { scheduleTool, scheduleSubjectDetail, type ScheduleToolInput } from "./builtin/schedule.js";
 export { webFetchTool } from "./builtin/web-fetch.js";
@@ -62,6 +70,7 @@ import { editTool } from "./builtin/edit.js";
 import { applyPatchTool } from "./builtin/apply-patch.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
+import { renderHtmlTool } from "./builtin/render-html.js";
 import { askUserTool } from "./builtin/ask-user.js";
 import { scheduleTool } from "./builtin/schedule.js";
 import { webFetchTool } from "./builtin/web-fetch.js";
@@ -79,6 +88,7 @@ export function builtinTools(): ToolDefinition[] {
     applyPatchTool,
     shellTool,
     todoWriteTool,
+    renderHtmlTool,
     askUserTool,
     scheduleTool,
     webFetchTool,
