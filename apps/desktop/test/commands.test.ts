@@ -97,6 +97,42 @@ describe("parseSlash", () => {
     });
   });
 
+  it("/swarm：board|end 交给 onSlash，其余文字是任务，无参数给用法", () => {
+    expect(parseSlash("/swarm")).toEqual({
+      kind: "unknown",
+      name: "/swarm",
+      hint: "用法：/swarm 任务",
+    });
+    for (const line of ["/swarm board", " /swarm end "])
+      expect(parseSlash(line)).toEqual({ kind: "command", name: "/swarm", raw: line });
+    expect(parseSlash("/swarm board 改一下")).toEqual({
+      kind: "work",
+      workMode: "swarm",
+      text: "board 改一下",
+    });
+  });
+
+  it("/swarm 的子命令在草稿页只给提示（还没有会话可操作）", () => {
+    // 无参数仍是用法提示：与在会话内一致
+    expect(parseSlash("/swarm", "draft")).toEqual({
+      kind: "unknown",
+      name: "/swarm",
+      hint: "用法：/swarm 任务",
+    });
+    for (const line of ["/swarm board", " /swarm end "])
+      expect(parseSlash(line, "draft")).toEqual({
+        kind: "unknown",
+        name: "/swarm",
+        hint: "用法：/swarm 任务",
+      });
+    // 带任务仍是可提交的 Swarm 会话
+    expect(parseSlash("/swarm board 改一下", "draft")).toEqual({
+      kind: "work",
+      workMode: "swarm",
+      text: "board 改一下",
+    });
+  });
+
   it("未知命令给出查看提示", () => {
     expect(parseSlash("/unknown hello")).toEqual({
       kind: "unknown",
@@ -119,6 +155,8 @@ describe("completeSlash", () => {
       "/goal",
       "/plan",
       "/boost",
+      // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 起含 /swarm）
+      "/swarm",
     ]);
   });
 

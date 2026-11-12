@@ -88,6 +88,7 @@ import type { DesktopHost } from "./host";
 import { NodeHelp } from "./NodeHelp";
 import {
   decideNotification,
+  decideSwarmMemberNotification,
   NOTIFY_DEFAULTS,
   notifyPrefsFrom,
   sessionMarkFor,
@@ -409,6 +410,8 @@ export function App({ host }: { host: DesktopHost }) {
     /** 会话标题来源（treeSessions：会话标题 ?? 首条用户消息首行） */
     sessions: [] as SessionSummary[],
     turnStarts: new Map<string, number>(),
+    swarmSeenRequests: new Map<string, Set<string>>(),
+    swarmNotifyMember: new Map<string, string>(),
   });
   notifyState.current.selectedId = selectedId;
   notifyState.current.page = page;
@@ -519,18 +522,45 @@ export function App({ host }: { host: DesktopHost }) {
         }
       }
       const summary = state.sessions.find((s) => s.id === sessionId);
+      const notifySession = {
+        title: conversations.opened.get(sessionId)?.view.title,
+        firstText: summary?.firstText,
+      };
+      let seenRequests = state.swarmSeenRequests.get(sessionId);
+      if (seenRequests === undefined) {
+        seenRequests = new Set<string>();
+        state.swarmSeenRequests.set(sessionId, seenRequests);
+      }
+      const swarmDecision = decideSwarmMemberNotification({
+        event,
+        prefs: state.prefs,
+        live,
+        watching,
+        session: notifySession,
+        seenRequestIds: seenRequests,
+      });
+      if (swarmDecision !== null) {
+        state.swarmNotifyMember.set(sessionId, swarmDecision.memberName);
+        void host.notify({
+          sessionId,
+          title: swarmDecision.title,
+          body: swarmDecision.body,
+          sound: state.prefs.sound,
+        });
+        void host.requestAttention();
+        void pushRemoteNotification(pool.get(), remoteRef.current, host.note);
+        return;
+      }
       const decision = decideNotification({
         event,
         prefs: state.prefs,
         live,
         watching,
-        session: {
-          title: conversations.opened.get(sessionId)?.view.title,
-          firstText: summary?.firstText,
-        },
+        session: notifySession,
         turnStartedAt: state.turnStarts.get(sessionId),
       });
       if (decision === null) return;
+      state.swarmNotifyMember.delete(sessionId);
       void host.notify({
         sessionId,
         title: decision.title,
@@ -963,16 +993,30 @@ export function App({ host }: { host: DesktopHost }) {
     }
   };
 
-  // 外壳在通知被点击（toast 激活）时调用：把窗口带到前台后切到对应会话
+  // 外壳在通知被点击（toast 激活）时调用：把窗口带到前台后切到对应会话；
+  // 若最近一条通知来自 Swarm 成员待确认，再一并打开该成员的会话标签。
   useEffect(
     () =>
       host.onNotificationActivated((sessionId) => {
         const summary = sessionsRef.current.find((s) => s.id === sessionId);
         if (summary === undefined) return;
+        const memberName = notifyState.current.swarmNotifyMember.get(sessionId);
+        notifyState.current.swarmNotifyMember.delete(sessionId);
         setPage(null);
-        void selectSessionRef.current?.(summary.id, summary.cwd);
+        void Promise.resolve(selectSessionRef.current?.(summary.id, summary.cwd)).then(() => {
+          if (memberName === undefined) return;
+          const member = conversations.opened
+            .get(sessionId)
+            ?.view.swarm?.members.find((item) => item.name === memberName);
+          if (member !== undefined) {
+            panelRef.current?.openSwarmMember(
+              { name: member.name, childSessionId: member.childSessionId },
+              sessionId,
+            );
+          }
+        });
       }),
-    [host],
+    [host, conversations],
   );
 
   // 窗口焦点是「在看」的一半（ADR-0056）：失焦才提醒；重新获得焦点时把当前
@@ -1155,6 +1199,20 @@ export function App({ host }: { host: DesktopHost }) {
     }
     const active = conversations.selected;
     if (active === undefined) throw new Error("请先打开会话");
+    if (parsed.name === "/swarm") {
+      const action = parseWorkModeSlash(line);
+      if (action?.kind !== "action") return false;
+      if (active.view.swarm === undefined) {
+        setCommandOutput("用法：/swarm 任务");
+        return true;
+      }
+      if (action.action === "swarm-board") {
+        panelRef.current?.openSwarm();
+        return true;
+      }
+      await active.session.endSwarm();
+      return true;
+    }
     if (parsed.name === "/goal" || parsed.name === "/plan") {
       // ADR-0076 §7：/goal 与 /plan 的无任务子命令
       const action = parseWorkModeSlash(line);
@@ -1304,6 +1362,7 @@ export function App({ host }: { host: DesktopHost }) {
     client: pool.get(),
     ensureClient: () => pool.ensure(),
     images,
+    fileLinks,
   });
   panelRef.current = sidePanel;
   // 有活着的 agent 标签的会话不随空闲关闭；标签都关了再按原规则关

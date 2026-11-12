@@ -527,6 +527,29 @@ describe("desktop conversation lifecycle", () => {
     expect(f.failures).toEqual([]);
   });
 
+  it("活动 Swarm 的协调者切走且空闲也不关；Swarm 结束后照常按空闲规则释放", async () => {
+    const f = fixture();
+    await f.controller.open("coord", "project");
+    f.event("coord", "swarm.created", { title: "登录页改造" });
+    await vi.waitFor(() =>
+      expect(f.controller.opened.get("coord")?.view.swarm?.status).toBe("active"),
+    );
+    // 用户切到别的会话：协调者空闲但 Swarm 还在跑，不能收掉（成员会话依赖它）
+    await f.controller.open("other", "project");
+    expect(f.controller.selectedId).toBe("other");
+    expect(f.opened.has("coord")).toBe(true);
+    expect(
+      f.calls.some((c) => c.method === "session.close" && c.params.sessionId === "coord"),
+    ).toBe(false);
+    // Swarm 结束：空闲且没被选中，照常关闭
+    f.event("coord", "swarm.ended", { reason: "user" });
+    await vi.waitFor(() => expect(f.opened.has("coord")).toBe(false));
+    expect(
+      f.calls.filter((c) => c.method === "session.close" && c.params.sessionId === "coord"),
+    ).toHaveLength(1);
+    expect(f.failures).toEqual([]);
+  });
+
   it("锁定目标打开失败：选中留在目标会话并显示错误，显式 force 才能接管", async () => {
     const f = fixture("locked");
     await f.controller.open("old", "plain");

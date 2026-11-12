@@ -15,9 +15,12 @@ import {
 } from "react";
 import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
 import type { SubagentSummary, ToolEntry } from "@nocturne/core/protocol";
+import type { RpcClient } from "@nocturne/rpc/client";
 import { RpcError } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
+import type { DesktopHost } from "./host";
+import type { PrefsStore } from "./prefs";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
@@ -54,6 +57,7 @@ import type { ShellSession } from "./use-shell-output";
 import type { BackgroundShellTask, SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
 import type { SubagentWatcher } from "./subagent-watch";
 import { SwarmPane, type SwarmSession } from "./SwarmPane";
+import { SwarmMemberPane } from "./SwarmMemberPane";
 import { swarmStatusDot } from "./swarm-ui";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
@@ -162,6 +166,10 @@ export interface SidePanelProps {
 export interface PanelSwarm {
   swarm: SwarmView | undefined;
   session: SwarmSession | undefined;
+  ensureClient?: (() => Promise<RpcClient>) | undefined;
+  images?: AttachmentImageSource | undefined;
+  prefs?: PrefsStore | undefined;
+  pickImages?: DesktopHost["pickImages"] | undefined;
   fileLinks?: FileLinkHooks | undefined;
   openUrl: (url: string) => void;
   onOpenMember: (member: SwarmMemberView) => void;
@@ -213,6 +221,10 @@ function tabTitle(
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
   if (tab.kind === "swarm") {
     const name = swarmTitle !== undefined && swarmTitle !== "" ? swarmTitle : "Swarm";
+    return { name, title: name };
+  }
+  if (tab.kind === "swarm_member") {
+    const name = `@${tab.memberName}`;
     return { name, title: name };
   }
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
@@ -361,7 +373,7 @@ function TabBar(props: SidePanelProps) {
                   kind={
                     tab.kind === "new" || tab.kind === "browser"
                       ? "globe"
-                      : tab.kind === "subagent"
+                      : tab.kind === "subagent" || tab.kind === "swarm_member"
                         ? "agent"
                         : tab.kind === "shell"
                           ? "terminal"
@@ -1445,6 +1457,30 @@ export function SidePanel(props: SidePanelProps) {
                     />
                   ) : (
                     <div className="swarm-pane" />
+                  )
+                ) : tab.kind === "swarm_member" ? (
+                  props.swarm?.ensureClient !== undefined &&
+                  props.swarm.images !== undefined &&
+                  props.swarm.pickImages !== undefined ? (
+                    <SwarmMemberPane
+                      childSessionId={tab.childSessionId}
+                      memberName={tab.memberName}
+                      memberStatus={
+                        props.swarm.swarm?.members.find(
+                          (item) => item.childSessionId === tab.childSessionId,
+                        )?.status
+                      }
+                      swarmStatus={props.swarm.swarm?.status}
+                      workspace={props.workspace ?? ""}
+                      ensureClient={props.swarm.ensureClient}
+                      images={props.swarm.images}
+                      openUrl={props.swarm.openUrl}
+                      fileLinks={props.swarm.fileLinks}
+                      prefs={props.swarm.prefs}
+                      pickImages={props.swarm.pickImages}
+                    />
+                  ) : (
+                    <div className="sp-swarm-member" />
                   )
                 ) : tab.diffText !== undefined ? (
                   <FileDiffView

@@ -8,6 +8,7 @@ import type { PermissionSubject, QuestionItem, RuntimeEvent } from "@nocturne/co
 
 import {
   decideNotification,
+  decideSwarmMemberNotification,
   ellipsize,
   formatDuration,
   NOTIFY_DEFAULTS,
@@ -18,6 +19,7 @@ import {
   thresholdLabel,
   type NotifyInput,
   type NotifyPrefs,
+  type SwarmPermissionNotifyInput,
 } from "../src/notify";
 import type { SettingItem } from "../src/rpc-types";
 
@@ -348,5 +350,176 @@ describe("notifyPrefsFrom", () => {
   it("阈值不是合法数字时回到缺省 60", () => {
     const prefs = notifyPrefsFrom([item("notifications.doneAfterSeconds", "abc")]);
     expect(prefs.doneAfterSeconds).toBe(60);
+  });
+});
+
+/** 成员的权限请求（协调者会话上的临时事件 swarm.member_updated） */
+function memberPending(
+  name: string,
+  pending: { requestId: string; kind?: PermissionSubject["kind"]; target?: string }[],
+  eseq = 1,
+): RuntimeEvent {
+  return {
+    type: "swarm.member_updated",
+    sessionId: "s1",
+    runId: "run-1",
+    eseq,
+    afterSeq: 7,
+    time: "2026-10-12T10:00:05.000Z",
+    payload: {
+      name,
+      status: "working",
+      pendingPermissions: pending.map((item) => ({
+        requestId: item.requestId,
+        callId: `call-${item.requestId}`,
+        reason: "",
+        subjects: [{ kind: item.kind ?? "shell", target: item.target ?? "pnpm test" }],
+        options: [],
+      })),
+    },
+  };
+}
+
+function swarmInput(
+  overrides: Partial<SwarmPermissionNotifyInput> & { event: RuntimeEvent },
+): SwarmPermissionNotifyInput {
+  return {
+    prefs: NOTIFY_DEFAULTS,
+    live: true,
+    watching: false,
+    session: { title: "登录页改造" },
+    seenRequestIds: new Set<string>(),
+    ...overrides,
+  };
+}
+
+describe("decideSwarmMemberNotification · 成员权限", () => {
+  it("订阅起始快照只登记不提醒；同一 requestId 的实时刷新也不补报", () => {
+    const seenRequestIds = new Set<string>();
+    // 订阅时服务端立即推的活动快照（eseq 0 / live false）：绝不提醒
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: memberPending("alpha", [{ requestId: "r1" }], 0),
+          live: false,
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    expect([...seenRequestIds]).toEqual(["r1"]);
+    // 回放的事件同样只登记（含之前没登记过的 r2）
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: memberPending("alpha", [{ requestId: "r1" }, { requestId: "r2" }], 1),
+          live: false,
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    expect([...seenRequestIds].sort()).toEqual(["r1", "r2"]);
+    // 已经登记的请求随实时状态刷新再次出现：不提醒
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: memberPending("alpha", [{ requestId: "r1" }, { requestId: "r2" }], 2),
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("实时出现新请求：标题用协调者会话，正文与 permission.requested 同款", () => {
+    const seenRequestIds = new Set<string>();
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: memberPending("alpha", [{ requestId: "r1", kind: "edit", target: "src/app.ts" }]),
+          seenRequestIds,
+        }),
+      ),
+    ).toEqual({
+      kind: "attention",
+      title: "登录页改造",
+      body: "需要确认：修改文件 src/app.ts",
+      memberName: "alpha",
+      requestId: "r1",
+    });
+    expect([...seenRequestIds]).toEqual(["r1"]);
+    // 没有 subject 时与权限卡片同款，只写操作文字
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: {
+            type: "swarm.member_updated",
+            sessionId: "s1",
+            runId: "run-1",
+            eseq: 2,
+            afterSeq: 7,
+            time: "2026-10-12T10:00:06.000Z",
+            payload: {
+              name: "alpha",
+              status: "working",
+              pendingPermissions: [
+                { requestId: "r2", callId: "c-2", reason: "ask", subjects: [], options: [] },
+              ],
+            },
+          },
+          seenRequestIds,
+        }),
+      )?.body,
+    ).toBe("需要确认：操作");
+  });
+
+  it("在看或 attention 关闭时不提醒但记为见过；下一个新请求照常提醒", () => {
+    const seenRequestIds = new Set<string>();
+    const first = memberPending("beta", [{ requestId: "r1" }]);
+    expect(
+      decideSwarmMemberNotification(swarmInput({ event: first, watching: true, seenRequestIds })),
+    ).toBeNull();
+    expect([...seenRequestIds]).toEqual(["r1"]);
+    // 同一请求的状态刷新不会补提醒
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({ event: memberPending("beta", [{ requestId: "r1" }], 2), seenRequestIds }),
+      ),
+    ).toBeNull();
+    // 第二个新请求到达：正常提醒
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: memberPending("beta", [{ requestId: "r1" }, { requestId: "r2" }], 3),
+          seenRequestIds,
+        }),
+      )?.requestId,
+    ).toBe("r2");
+    // attention 未勾选：不提醒，但照样记录
+    const off = new Set<string>();
+    expect(
+      decideSwarmMemberNotification(
+        swarmInput({
+          event: first,
+          prefs: { ...NOTIFY_DEFAULTS, attention: false },
+          seenRequestIds: off,
+        }),
+      ),
+    ).toBeNull();
+    expect([...off]).toEqual(["r1"]);
+  });
+
+  it("swarm.ended 清空已见集合；非成员事件不提醒", () => {
+    const seenRequestIds = new Set<string>(["r1"]);
+    const ended: RuntimeEvent = {
+      type: "swarm.ended",
+      sessionId: "s1",
+      seq: 8,
+      time: "2026-10-12T10:00:07.000Z",
+      payload: { reason: "user" },
+    };
+    expect(decideSwarmMemberNotification(swarmInput({ event: ended, seenRequestIds }))).toBeNull();
+    expect(seenRequestIds.size).toBe(0);
+    expect(
+      decideSwarmMemberNotification(swarmInput({ event: permission(), seenRequestIds })),
+    ).toBeNull();
   });
 });

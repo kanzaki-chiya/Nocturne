@@ -33,7 +33,7 @@ import {
   withoutAgentTabs,
 } from "./agent-browser";
 import { BrowserPool } from "./browser-pool";
-import type { SubagentLinks } from "./Conversation";
+import type { FileLinkHooks, SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
 import type { BrowserBounds, DesktopHost } from "./host";
 import { keyDiag, panelKeyReason, shouldRecordKey } from "./key-diag";
@@ -139,6 +139,11 @@ export interface SidePanelController {
   viewChanges: (seq: number) => void;
   /** 打开或切换到当前会话的 Swarm 标签 */
   openSwarm: () => void;
+  /** 打开或切换到指定会话（缺省当前会话）里某名 Swarm 成员的会话标签 */
+  openSwarmMember: (
+    member: { name: string; childSessionId: string },
+    targetSessionId?: string,
+  ) => void;
   /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
   subagentLinks: SubagentLinks | undefined;
   bodyClass: string;
@@ -168,6 +173,7 @@ export function useSidePanel({
   client,
   ensureClient,
   images,
+  fileLinks,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
@@ -193,6 +199,7 @@ export function useSidePanel({
   ensureClient: () => Promise<RpcClient>;
   /** 窗口级图片缓存（子代理视图的图片按 sha256 共用）；缺省时面板自己建一份 */
   images?: AttachmentImageSource | undefined;
+  fileLinks?: FileLinkHooks | undefined;
 }): SidePanelController {
   const [width, setWidth] = useState(() => prefs.get().panelWidth ?? PANEL_DEFAULT_WIDTH);
   const [overview, setOverview] = useState(() => prefs.get().overviewOpen === true);
@@ -888,6 +895,32 @@ export function useSidePanel({
       });
     });
   }, [hideBrowserThen, update]);
+  const openSwarmMember = useCallback(
+    (member: { name: string; childSessionId: string }, targetSessionId?: string) => {
+      const target = targetSessionId ?? sessionId;
+      if (target === null) return;
+      const applyTo = (panel: SessionPanel): SessionPanel => {
+        const found = panel.tabs.find(
+          (tab) => tab.kind === "swarm_member" && tab.childSessionId === member.childSessionId,
+        );
+        if (found) return { ...panel, open: true, activeId: found.id };
+        return withTab(panel, {
+          id: newTabId(),
+          kind: "swarm_member",
+          childSessionId: member.childSessionId,
+          memberName: member.name,
+        });
+      };
+      if (target === sessionId) {
+        hideBrowserThen(() => {
+          update(applyTo);
+        });
+      } else {
+        setPanels((map) => new Map(map).set(target, applyTo(panelFor(target, map))));
+      }
+    },
+    [sessionId, hideBrowserThen, update, panelFor],
+  );
   const openSubagentById = useCallback(
     (childSessionId: string) => {
       const summary = directory.summaries.find((s) => s.childSessionId === childSessionId);
@@ -1475,10 +1508,17 @@ export function useSidePanel({
           ? {
               swarm: active.view.swarm,
               session: active.session,
+              ensureClient,
+              images: imageSource,
+              prefs,
+              pickImages: () => host.pickImages(),
+              fileLinks,
               openUrl: (url) => {
                 if (!openUrl(url)) void host.openUrl(url);
               },
-              onOpenMember: () => undefined,
+              onOpenMember: (member) => {
+                openSwarmMember({ name: member.name, childSessionId: member.childSessionId });
+              },
               onSelectCoordinator: () => {
                 document.querySelector<HTMLTextAreaElement>(".mainpane .composer textarea")?.focus();
               },
@@ -1606,6 +1646,7 @@ export function useSidePanel({
     openUrl,
     viewChanges: openChanges,
     openSwarm,
+    openSwarmMember,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewVisible && !shown ? " ov-open" : "",

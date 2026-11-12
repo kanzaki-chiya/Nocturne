@@ -101,6 +101,17 @@ export interface SwarmTab {
   kind: "swarm";
 }
 
+/**
+ * Swarm 成员会话标签（ADR-0089 §8）：每名成员最多一个标签，标题 `@memberName`，
+ * 经 `session.open` 打开 `childSessionId`。
+ */
+export interface SwarmMemberTab {
+  id: string;
+  kind: "swarm_member";
+  childSessionId: string;
+  memberName: string;
+}
+
 export type PanelTab =
   | NewTab
   | ChangesTab
@@ -109,13 +120,15 @@ export type PanelTab =
   | BrowserTab
   | SubagentTab
   | ShellTab
-  | SwarmTab;
+  | SwarmTab
+  | SwarmMemberTab;
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Swarm」（新标签页、终端不恢复） */
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Swarm」「成员会话」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
   | { id: string; kind: "swarm" }
+  | { id: string; kind: "swarm_member"; childSessionId: string; memberName: string }
   | {
       id: string;
       kind: "subagent";
@@ -323,6 +336,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const tabs: StoredPanelTab[] = [];
   const ids = new Set<string>();
   const subagentChildren = new Set<string>();
+  const swarmMembers = new Set<string>();
   const shellTasks = new Set<string>();
   let changes = false;
   let swarm = false;
@@ -338,6 +352,20 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       swarm = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "swarm" });
+    } else if (
+      raw.kind === "swarm_member" &&
+      str(raw.childSessionId) &&
+      str(raw.memberName) &&
+      !swarmMembers.has(raw.childSessionId)
+    ) {
+      swarmMembers.add(raw.childSessionId);
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "swarm_member",
+        childSessionId: raw.childSessionId,
+        memberName: raw.memberName,
+      });
     } else if (
       raw.kind === "subagent" &&
       str(raw.childSessionId) &&
@@ -401,6 +429,16 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
     if (tab.kind === "swarm") return [{ id: tab.id, kind: "swarm" }];
+    if (tab.kind === "swarm_member") {
+      return [
+        {
+          id: tab.id,
+          kind: "swarm_member",
+          childSessionId: tab.childSessionId,
+          memberName: tab.memberName,
+        },
+      ];
+    }
     if (tab.kind === "shell")
       return [
         { id: tab.id, kind: "shell", taskId: tab.taskId, name: tab.name, command: tab.command },

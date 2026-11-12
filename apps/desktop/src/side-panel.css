@@ -1308,6 +1308,20 @@
 .sp-swarm-dot.warn {
   background: var(--a-warning);
 }
+.sp-swarm-member {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.sp-swarm-member > .conversation {
+  flex: 1;
+  min-height: 0;
+}
+.sp-swarm-member > .composer {
+  padding: 0 var(--space-3) var(--space-3);
+}
 @keyframes sp-agent-pulse {
   50% {
     opacity: 0.3;
