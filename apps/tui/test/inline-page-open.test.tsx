@@ -23,7 +23,11 @@ function temp() {
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", temp()));
 afterEach(() => {
   vi.unstubAllEnvs();
-  roots.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true }));
+  roots
+    .splice(0)
+    .forEach((dir) =>
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    );
 });
 
 /** 从 tokens.css 取一个规则块里的自定义属性 */
@@ -90,10 +94,9 @@ describe("内嵌页面外壳文件", () => {
     const desktop = path.join(process.cwd(), "../desktop/src");
     const css = readFileSync(path.join(desktop, "tokens.css"), "utf8");
     const page = readFileSync(path.join(desktop, "InlinePage.tsx"), "utf8");
-    const mapping = [...page.matchAll(/\["(--[\w-]+)", "(--[\w-]+)"\]/g)].map((m) => [
-      m[1] ?? "",
-      m[2] ?? "",
-    ]);
+    const mapping = [...page.matchAll(/\["(--[\w-]+)", "(--[\w-]+)"\]/g)].map(
+      (m): [string, string] => [m[1] ?? "", m[2] ?? ""],
+    );
     expect(mapping).toHaveLength(12);
     const dark = cssBlock(css, ":root {");
     const light = {
