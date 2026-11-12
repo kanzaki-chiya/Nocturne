@@ -176,9 +176,15 @@
 
 ### work-modes（`src/work-modes/`）
 
-- **负责**：执行方式（[ADR-0076](../decisions/ADR-0076-work-modes.md)）的说明块正文与 `<work-mode>` 文本块拼装；由 `core/index` 在提交准备阶段接入。斜杠解析与显示文本是纯函数，放在 `protocol/work-modes.ts`，客户端共用。
+- **负责**：执行方式（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-swarm.md)）的说明块正文与 `<work-mode>` 文本块拼装；由 `core/index` 在提交准备阶段接入。斜杠解析与显示文本是纯函数，放在 `protocol/work-modes.ts`，客户端共用。
 - **不负责**：Turn 编排（不进 Agent Loop）、权限判定。
 - **依赖**：仅 `protocol`（dependency-cruiser 规则 `work-modes-deps` 固化）。
+
+### swarm（`src/swarm/`）
+
+- **负责**：Swarm 执行方式（[ADR-0089](../decisions/ADR-0089-swarm.md)）的会话级控制器、留言板提及解析与投递、常驻成员生命周期与安静提醒、模型/档位校验以及六个协调者工具与成员发帖/检出工具定义。工作树操作与常驻子会话打开由 `core/index` 注入。
+- **不负责**：Turn 编排与安全点（Agent Loop 不感知 Swarm）、权限判定（走成员自身 `PermissionGate`）、视图纯函数归约（在 `protocol`）。
+- **依赖**：`protocol`、`tools`、`provider`（类型）、`session`（类型）；仅由 `core/index` 引用（dependency-cruiser 规则 `swarm-deps` 与 `only-index-imports-swarm` 固化）。
 
 ### core/index（公开 API）
 

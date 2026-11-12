@@ -185,6 +185,8 @@ launch(request, ctx)
 
 **结论：本阶段采用 (b) + (c)**。理由：(b) 是现有语义的直接复用且安全保证可证明；(c) 的预设让"天然不需要确认"的只读子代理不受影响；`--yes`、规则、`PermissionRequest` Hook 与项目 Grant 覆盖了无人值守场景下的大部分放行需求；交互式 `default` 预设下子代理做不了的写/执行操作，子代理在结果里说明需求、父代理自己执行即可——比"批准 task 调用即授权整个子任务"（oh-my-pi 的 yolo 做法，明确不采用）更符合逐项把关的权限哲学。(a) 留作以后扩展：在 `PermissionGate` 增加可选的 `forwardAsk` 委托即可接入，不推翻本设计。
 
+**修订（[ADR-0089](../decisions/ADR-0089-swarm.md) §8：Swarm 常驻成员权限确认）**：一次性 `task` 子代理与外部 ACP agent 保持上述非交互收敛不变；但在 `/swarm` 执行方式中，协调者没有改文件工具，全部代码修改与验证命令均由常驻成员子会话执行，若沿用非交互直接拒绝，默认 `default` 预设下 Swarm 无法正常工作。因此在交互式宿主下，Swarm 成员子会话使用交互式 `PermissionGate`，其 `ask` 请求等待用户确认而不再按 `non_interactive` 直接拒绝。请求原样挂在成员自己的子会话上（走成员会话既有的 `permission.requested` 与 `respondPermission` 通道），协调者派生视图汇总等待确认的成员名单供客户端提示与跳转；`smart` 预设照常先经安全审查器，其他预设与授权规则不变。
+
 ### 7.2 子会话的有效策略
 
 子会话的 `PermissionPolicy` 由 `makePolicy(childSessionId)` 用**与父会话相同的输入**重建：
@@ -316,13 +318,13 @@ launch(request, ctx)
 
 ## 16. 本阶段不做
 
-- **Swarm / 编排**：没有多代理协作、调度器或拓扑概念；
+- **Swarm / 编排**：Phase 6 的 `task` 子代理不做编排；常驻成员与留言板协作的 `/swarm` 执行方式见 [ADR-0089](../decisions/ADR-0089-swarm.md)；
 - **角色系统 / 自定义 agent 定义文件**：第 14 节；
-- **Agent 间消息总线**：父子间唯一通道是 `task` 输入与 `finish` 结果；
+- **Agent 间消息总线**：一次性 `task` 子代理之间无直接通道；Swarm 成员间共享留言板与 `@` 提及见 [ADR-0089](../decisions/ADR-0089-swarm.md)；
 - **分布式执行**：子会话在同一进程内运行；
-- **子代理常驻与唤醒**：`finish` 后子会话关闭，不存在再次唤起的入口；
+- **子代理常驻与唤醒**：`task` 在 `finish` 后即关闭；Swarm 常驻成员与 `@` 唤醒见 [ADR-0089](../decisions/ADR-0089-swarm.md)；
 - **同步隔离工作区**：同步子代理与父会话共享工作区；后台工作树见第 20 节；
-- **子会话权限冒泡**：见 7.1；
+- **子会话权限冒泡**：一次性 `task` 见 7.1；Swarm 成员权限确认见 [ADR-0089](../decisions/ADR-0089-swarm.md) §8；
 - **并行 task 数组**：一次调用一个子会话；批量并行等并行调度存在后再评估；
 
 - **配置文件 `subagent` 段**：默认值已覆盖本阶段；开关走 `RuntimeOptions.subagent.enabled` 或权限规则 `subagent * → deny`。

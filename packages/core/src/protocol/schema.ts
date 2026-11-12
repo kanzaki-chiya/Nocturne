@@ -318,6 +318,14 @@ const payloadSchemas = {
       })
       .optional(),
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
+    // ADR-0089：Swarm 留言板投递标记；旧版本按普通用户消息读取
+    swarm: z
+      .object({
+        postNumber: z.number().int().positive(),
+        from: z.string(),
+        fromKind: z.enum(["coordinator", "member", "user", "runtime"]),
+      })
+      .optional(),
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
     steer: z.literal(true).optional(),
     // ADR-0076：执行方式说明块快照；未知名字的旧/新日志照常读取
@@ -417,6 +425,73 @@ const payloadSchemas = {
     error: errorInfoSchema.optional(),
     recovered: z.boolean().optional(),
   }),
+  "swarm.created": z.object({
+    title: z.string(),
+  }),
+  "swarm.member_added": z.object({
+    name: z.string(),
+    childSessionId: z.string(),
+    charter: z.object({
+      owns: z.string(),
+      handsOff: z.string(),
+      doneWhen: z.string(),
+    }),
+    model: modelRefSchema,
+    reasoningEffort: reasoningEffortSchema.optional(),
+    profile: z.string().optional(),
+    preset: z.enum(["general", "explore"]),
+    isolated: z.boolean(),
+    worktree: z
+      .object({
+        path: z.string(),
+        branch: z.string(),
+        base: z.string(),
+      })
+      .optional(),
+  }),
+  "swarm.posted": z.object({
+    number: z.number().int().positive(),
+    from: z.string(),
+    fromKind: z.enum(["coordinator", "member", "user", "runtime"]),
+    text: z.string(),
+    mentions: z.array(z.string()),
+    recipients: z.array(z.string()),
+    charterOf: z.string().optional(),
+  }),
+  "swarm.member_model_changed": z.object({
+    name: z.string(),
+    model: modelRefSchema,
+    reasoningEffort: reasoningEffortSchema.optional(),
+    profile: z.string().optional(),
+  }),
+  "swarm.member_removed": z.object({
+    name: z.string(),
+    reason: z.string().optional(),
+  }),
+  "swarm.ended": z.object({
+    reason: z.enum(["coordinator", "user", "rewound"]),
+    summary: z.string().optional(),
+    unmerged: z
+      .array(
+        z.object({
+          name: z.string(),
+          childSessionId: z.string(),
+          branch: z.string(),
+          base: z.string(),
+          head: z.string(),
+          worktree: z.string(),
+          files: z.array(
+            z.object({
+              path: z.string(),
+              status: z.enum(["added", "modified", "deleted"]),
+              additions: z.number().optional(),
+              deletions: z.number().optional(),
+            }),
+          ),
+        }),
+      )
+      .optional(),
+  }),
 } satisfies Record<DurableType, z.ZodType>;
 
 // ── 事件信封 schema ────────────────────────────────────────
@@ -451,6 +526,12 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("attachment.described", payloadSchemas["attachment.described"]),
   envelope("context.compacted", payloadSchemas["context.compacted"]),
   envelope("turn.completed", payloadSchemas["turn.completed"]),
+  envelope("swarm.created", payloadSchemas["swarm.created"]),
+  envelope("swarm.member_added", payloadSchemas["swarm.member_added"]),
+  envelope("swarm.posted", payloadSchemas["swarm.posted"]),
+  envelope("swarm.member_model_changed", payloadSchemas["swarm.member_model_changed"]),
+  envelope("swarm.member_removed", payloadSchemas["swarm.member_removed"]),
+  envelope("swarm.ended", payloadSchemas["swarm.ended"]),
 ]);
 
 // ── 解析错误 ───────────────────────────────────────────────

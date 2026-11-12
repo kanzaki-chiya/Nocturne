@@ -57,6 +57,33 @@ function formatProfilePricing(pricing: ModelPricing | undefined): string {
   return `，$${pricing.input}/$${pricing.output}`;
 }
 
+function formatModelPricingEn(pricing: ModelPricing | undefined): string {
+  if (pricing?.input === undefined || pricing.output === undefined) return "";
+  return ` ($${pricing.input}/$${pricing.output} per 1M input/output tokens)`;
+}
+
+/**
+ * Swarm 工具说明中的已启用模型列表（ADR-0089 §3）：与 `subagentSelectionTable` 同源价格格式，
+ * 供协调者按用户在 `/swarm` 中点名的模型精确匹配。
+ */
+export function swarmEnabledModelsTable(
+  models: readonly { provider: string; model: string; name?: string | undefined }[],
+  pricing?: (modelKey: string) => ModelPricing | undefined,
+): string {
+  if (models.length === 0) return "Enabled models: (none)";
+  return [
+    "Enabled models (`model` parameter accepts `provider/model` or a uniquely matching `model` id):",
+    ...models.map((item) => {
+      const key = `${item.provider}/${item.model}`;
+      const label =
+        item.name !== undefined && item.name !== "" && item.name !== item.model
+          ? ` — ${item.name}`
+          : "";
+      return `  - ${key}${label}${formatModelPricingEn(pricing?.(key))}`;
+    }),
+  ].join("\n");
+}
+
 /** Core 与客户端共用的模型可见选择表；不负责解析模型或权限。 */
 export function subagentSelectionTable(
   profiles: readonly (SubagentProfileConfig & {

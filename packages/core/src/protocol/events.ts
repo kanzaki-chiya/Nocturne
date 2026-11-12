@@ -3,6 +3,16 @@
  * 持久化事件构成会话日志的唯一事实来源；临时事件只发布不写日志。
  */
 import type { SkillSnapshot } from "./skills.js";
+import type {
+  SwarmCreatedPayload,
+  SwarmEndedPayload,
+  SwarmMemberAddedPayload,
+  SwarmMemberModelChangedPayload,
+  SwarmMemberRemovedPayload,
+  SwarmMemberUpdatedPayload,
+  SwarmPostDelivery,
+  SwarmPostedPayload,
+} from "./swarm.js";
 import type { GoalConfig, PlanConfig, WorkModeSnapshot } from "./work-modes.js";
 import type {
   AgentDelegation,
@@ -122,6 +132,8 @@ export interface BackgroundShellResult {
 export interface MessageUserPayload {
   backgroundShell?: BackgroundShellResult | undefined;
   subagent?: SubagentResult | undefined;
+  /** Swarm 留言板帖子投递标记（ADR-0089 §7）；旧版本忽略未知字段，不提升 formatVersion */
+  swarm?: SwarmPostDelivery | undefined;
   messageId: string;
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
@@ -401,10 +413,17 @@ export interface DurablePayloadMap {
   "tool.completed": ToolCompletedPayload;
   "context.compacted": ContextCompactedPayload;
   "turn.completed": TurnCompletedPayload;
+  "swarm.created": SwarmCreatedPayload;
+  "swarm.member_added": SwarmMemberAddedPayload;
+  "swarm.posted": SwarmPostedPayload;
+  "swarm.member_model_changed": SwarmMemberModelChangedPayload;
+  "swarm.member_removed": SwarmMemberRemovedPayload;
+  "swarm.ended": SwarmEndedPayload;
 }
 
 export interface EphemeralPayloadMap {
   "shell.task_updated": { task: BackgroundShellTask };
+  "swarm.member_updated": SwarmMemberUpdatedPayload;
   "message.assistant.delta": AssistantDeltaPayload;
   "tool.input.delta": ToolInputDeltaPayload;
   "tool.progress": ToolProgressPayload;
@@ -479,6 +498,12 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "tool.completed",
   "context.compacted",
   "turn.completed",
+  "swarm.created",
+  "swarm.member_added",
+  "swarm.posted",
+  "swarm.member_model_changed",
+  "swarm.member_removed",
+  "swarm.ended",
 ];
 
 const DURABLE_TYPE_SET: ReadonlySet<string> = new Set(DURABLE_EVENT_TYPES);
@@ -499,6 +524,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "question.requested",
   "input.pending",
   "shell.task_updated",
+  "swarm.member_updated",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

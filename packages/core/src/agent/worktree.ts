@@ -159,7 +159,7 @@ export async function removeWorktree(
   if (removeBranch) {
     if (!record.branch.startsWith("nocturne/"))
       throw new Error("Refusing to delete an unregistered branch namespace");
-    await worktreeGit(record.repository, ["branch", "-D", record.branch]);
+    await worktreeGit(record.repository, ["branch", "-D", record.branch]).catch(() => undefined);
     await rm(`${record.worktree}.json`, { force: true });
   }
 }
@@ -173,6 +173,10 @@ export async function createWorktree(input: {
   workspaceRoot: string;
   task: string;
   trusted: boolean;
+  /** 可选起始提交（缺省 "HEAD"） */
+  commit?: string | undefined;
+  /** true 时以分离头指针创建工作树（用于审查指定提交，不拷贝主工作区未提交脏文件） */
+  detach?: boolean | undefined;
 }): Promise<WorktreeRecord> {
   if (!/^[A-Za-z0-9_-]+$/.test(input.childSessionId)) throw new Error("Invalid child session ID");
   const repositoryReal = await realpath(input.repository);
@@ -182,6 +186,7 @@ export async function createWorktree(input: {
   safeWorktreePath(input.repository, workspaceRelative);
   const worktree = path.join(input.sessionsDir, "worktrees", input.childSessionId);
   const branch = `nocturne/${input.childSessionId}`;
+  const startRef = input.commit ?? "HEAD";
   const record: WorktreeRecord = {
     childSessionId: input.childSessionId,
     parentSessionId: input.parentSessionId,
@@ -198,15 +203,12 @@ export async function createWorktree(input: {
   let created = false;
   try {
     await mkdir(path.dirname(worktree), { recursive: true });
-    await worktreeGit(input.repository, ["worktree", "add", "-b", branch, worktree, "HEAD"]);
+    if (input.detach === true) {
+      await worktreeGit(input.repository, ["worktree", "add", "--detach", worktree, startRef]);
+    } else {
+      await worktreeGit(input.repository, ["worktree", "add", "-b", branch, worktree, startRef]);
+    }
     created = true;
-    const patch = await worktreeGit(input.repository, ["diff", "--binary", "HEAD"]);
-    if (patch) await worktreeGit(worktree, ["apply", "--binary", "-"], patch);
-    const untracked = (
-      await worktreeGit(input.repository, ["ls-files", "--others", "--exclude-standard", "-z"])
-    )
-      .split("\0")
-      .filter(Boolean);
     const skippedSymlinks: string[] = [];
     const copy = async (file: string) => {
       const source = safeWorktreePath(input.repository, file);
@@ -218,11 +220,20 @@ export async function createWorktree(input: {
       await mkdir(path.dirname(target), { recursive: true });
       await copyFile(source, target);
     };
-    for (const file of untracked) await copy(file);
-    await worktreeGit(worktree, ["add", "-A"]);
-    if ((await worktreeGit(worktree, ["diff", "--cached", "--name-only"])).trim()) {
-      await commit(worktree, "Nocturne workspace snapshot");
-      record.snapshot = true;
+    if (input.detach !== true && input.commit === undefined) {
+      const patch = await worktreeGit(input.repository, ["diff", "--binary", "HEAD"]);
+      if (patch) await worktreeGit(worktree, ["apply", "--binary", "-"], patch);
+      const untracked = (
+        await worktreeGit(input.repository, ["ls-files", "--others", "--exclude-standard", "-z"])
+      )
+        .split("\0")
+        .filter(Boolean);
+      for (const file of untracked) await copy(file);
+      await worktreeGit(worktree, ["add", "-A"]);
+      if ((await worktreeGit(worktree, ["diff", "--cached", "--name-only"])).trim()) {
+        await commit(worktree, "Nocturne workspace snapshot");
+        record.snapshot = true;
+      }
     }
     record.base = (await worktreeGit(worktree, ["rev-parse", "HEAD"])).trim();
     const include = await readFile(path.join(input.repository, ".worktreeinclude"), "utf8").catch(
@@ -260,22 +271,10 @@ export async function createWorktree(input: {
   }
 }
 
-export async function settleWorktree(record: WorktreeRecord): Promise<SubagentChanges | undefined> {
-  await worktreeGit(record.worktree, ["add", "-A"]);
-  if ((await worktreeGit(record.worktree, ["diff", "--cached", "--name-only"])).trim()) {
-    const firstLine = (record.task.split(/\r?\n/)[0] ?? "").trim();
-    await commit(
-      record.worktree,
-      Array.from(firstLine === "" ? "Subagent changes" : firstLine)
-        .slice(0, 72)
-        .join(""),
-    );
-  }
-  const head = (await worktreeGit(record.worktree, ["rev-parse", "HEAD"])).trim();
-  if (head === record.base) {
-    await removeWorktree(record, true);
-    return undefined;
-  }
+async function computeWorktreeChanges(
+  record: WorktreeRecord,
+  head: string,
+): Promise<SubagentChanges> {
   const statuses = new Map(
     (
       await worktreeGit(record.worktree, [
@@ -305,7 +304,7 @@ export async function settleWorktree(record: WorktreeRecord): Promise<SubagentCh
   )
     .split("\0")
     .filter(Boolean);
-  const changes: SubagentChanges = {
+  return {
     branch: record.branch,
     base: record.base,
     head,
@@ -329,16 +328,104 @@ export async function settleWorktree(record: WorktreeRecord): Promise<SubagentCh
       };
     }),
   };
+}
+
+export async function settleWorktree(record: WorktreeRecord): Promise<SubagentChanges | undefined> {
+  await worktreeGit(record.worktree, ["add", "-A"]);
+  if ((await worktreeGit(record.worktree, ["diff", "--cached", "--name-only"])).trim()) {
+    const firstLine = (record.task.split(/\r?\n/)[0] ?? "").trim();
+    await commit(
+      record.worktree,
+      Array.from(firstLine === "" ? "Subagent changes" : firstLine)
+        .slice(0, 72)
+        .join(""),
+    );
+  }
+  const head = (await worktreeGit(record.worktree, ["rev-parse", "HEAD"])).trim();
+  if (head === record.base) {
+    await removeWorktree(record, true);
+    return undefined;
+  }
+  const changes = await computeWorktreeChanges(record, head);
   record.changes = changes;
   await writeFile(`${record.worktree}.json`, JSON.stringify(record), "utf8");
   return changes;
 }
 
+/**
+ * 常驻 Swarm 成员的工作树增量检查点（ADR-0089 §4）：
+ * 若有未提交改动则在自身分支上提交一次并刷新 `.json` 记录；无改动时保留工作树不删除。
+ */
+export async function checkpointWorktreeTurn(
+  record: WorktreeRecord,
+  commitMessage?: string,
+): Promise<SubagentChanges | undefined> {
+  const headRef = (
+    await worktreeGit(record.worktree, ["symbolic-ref", "-q", "HEAD"]).catch(() => "")
+  ).trim();
+  // 分离头指针状态（例如验证成员检出了别人的提交）不在成员分支上自动提交
+  if (headRef !== "") {
+    await worktreeGit(record.worktree, ["add", "-A"]);
+    if ((await worktreeGit(record.worktree, ["diff", "--cached", "--name-only"])).trim()) {
+      const firstLine = ((commitMessage ?? record.task).split(/\r?\n/)[0] ?? "").trim();
+      await commit(
+        record.worktree,
+        Array.from(firstLine === "" ? "Swarm member changes" : firstLine)
+          .slice(0, 72)
+          .join(""),
+      );
+      record.applied = false;
+    }
+  }
+  const head = (await worktreeGit(record.worktree, ["rev-parse", "HEAD"])).trim();
+  if (head === record.base || headRef === "") {
+    return undefined;
+  }
+  const changes = await computeWorktreeChanges(record, head);
+  record.changes = changes;
+  await writeFile(`${record.worktree}.json`, JSON.stringify(record), "utf8");
+  return changes;
+}
+
+/**
+ * 将验证成员的工作树清干净并分离头指针检出指定提交（ADR-0089 §4）。
+ */
+export async function resetWorktreeToCommit(worktree: string, commitRef: string): Promise<string> {
+  await worktreeGit(worktree, ["reset", "--hard"]);
+  await worktreeGit(worktree, ["clean", "-fdx"]);
+  await worktreeGit(worktree, ["checkout", "--detach", commitRef]);
+  await worktreeGit(worktree, ["clean", "-fdx"]);
+  return (await worktreeGit(worktree, ["rev-parse", "HEAD"])).trim();
+}
+
+export async function markWorktreeApplied(
+  record: WorktreeRecord,
+  appliedHead: string,
+): Promise<void> {
+  record.base = appliedHead;
+  record.applied = true;
+  delete record.changes;
+  await writeFile(`${record.worktree}.json`, JSON.stringify(record), "utf8");
+}
+
+export async function worktreeCurrentHead(worktree: string): Promise<string> {
+  return (await worktreeGit(worktree, ["rev-parse", "HEAD"])).trim();
+}
+
+export async function isWorktreeOnBranch(record: WorktreeRecord): Promise<boolean> {
+  const ref = (
+    await worktreeGit(record.worktree, ["symbolic-ref", "-q", "HEAD"]).catch(() => "")
+  ).trim();
+  return ref === `refs/heads/${record.branch}`;
+}
+
 export async function cleanupMergedWorktrees(
   sessionsDir: string,
   parentSessionId: string,
+  preserveChildIds?: ReadonlySet<string>,
 ): Promise<void> {
   for (const record of await listWorktreeRecords(sessionsDir, parentSessionId)) {
+    if (preserveChildIds?.has(record.childSessionId)) continue;
     if (!record.changes) continue;
     let merged = false;
     try {

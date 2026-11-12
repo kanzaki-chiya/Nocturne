@@ -202,7 +202,7 @@ interface Grant {
 
 Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。`kind` 直接复用权限主体的全部类别（含 `subagent`，如 `external:omp`），不再维护第二份枚举，以后新增主体类型不会漏。授权键：路径类取 `resolved`（缺失时取规范化 `target`），shell 取完整命令字符串，`network` / `mcp` / `subagent` / `schedule` 取 `target` 原值。`schedule` 的 target 含动作，所以「本会话允许」只覆盖同一任务的同一动作，不看指令内容；因此确认选项不提供「在此项目中始终允许」（见第 7 节）。"允许整个目录 / 某类命令"这类粗粒度授权不在确认选项中提供——需要时由用户显式写规则（配置文件的 `permissions.rules`），而不是在确认框里随手放权。
 
-- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。其作用域是**会话树**：子会话（[subagent.md](subagent.md) 第 7 节）以只读方式继承父会话的会话 Grant（同一授权集），子会话自身不产生新的授权。
+- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。其作用域是**会话树**：一次性子会话（[subagent.md](subagent.md) 第 7 节）以只读方式继承父会话的会话 Grant（同一授权集），子会话自身不产生新的授权；Swarm 常驻成员（[ADR-0089](../decisions/ADR-0089-swarm.md) §8）共享同一会话树内存授权集，用户在成员会话上确认 `allow_session` 生成的会话 Grant 在整个 Swarm 会话树内生效。
 - **项目 Grant**：写入 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（见 [config.md](config.md) 第 4 节），按会话的 `workspaceRoot` 归属；策略每次判定时实时读取存储（传 store 或 getter，不传快照），同一会话内新增的项目授权下一次同目标调用直接放行；写盘失败时降级为会话 Grant 并发出 `runtime.warning`。
 - 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
 - **坏条目与损坏文件**：加载时逐条校验，跳过无效条目并发一次警告，其余照常生效；只有 JSON 解析失败、版本不符或 `workspaceRoot` 不符时才把整份文件按空处理。这种情况下第一次 `add` 之前先把原文件改名备份为 `<原名>.corrupt-<时间戳>.json`，不得直接覆盖。
@@ -278,9 +278,11 @@ PermissionGate.check(subjects, signal)
 
 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 
+Swarm 常驻成员（[ADR-0089](../decisions/ADR-0089-swarm.md) §8）：交互式宿主下，Swarm 成员子会话使用交互式 `PermissionGate`，其剩余 `ask`（`smart` 下先经审查器且结果为 `unsure`）在成员自己的子会话上发出 `permission.requested` 并等待 `respondPermission`，不走 `non_interactive` 拒绝；等待期间成员仍算 `working` 并占并发槽，协调者派生视图列出等待确认的成员名。
+
 ## 8. 与其他模块的关系
 
 - Tool Executor 负责解析资源并调用 `PermissionGate`，见 [tools.md](tools.md) 第 3 节。
 - Hooks 在权限求值前后给出建议：`PreToolUse` 的建议在第 5 步前合并，`PermissionRequest` 在 `ask` 分支内优先回答；`allow` 不能越过 `deny`，且仅可信来源能放宽 `ask`（5.5、[hooks.md](hooks.md)）。
 - 规则的配置格式与加载由 `config` 负责；本模块只接收已合并、已标注来源与信任状态的规则列表。
-- **子会话（Phase 6）**：子代理会话的有效策略用与父会话相同的输入重建（同一预设、合并规则、项目 Grant、共享的会话 Grant、`autoApproveAsk` 与审查器实例），但 gate 恒为非交互——剩余 `ask` 一律 `deny(source: "non_interactive")`，`smart` 的审查 allow 可执行。子会话不能向用户弹确认；完整论证与机制行为表见 [subagent.md](subagent.md) 第 7 节。
+- **子会话（Phase 6 与 Swarm）**：一次性 `task` 子会话的有效策略用与父会话相同的输入重建，gate 恒为非交互——剩余 `ask` 一律 `deny(source: "non_interactive")`；Swarm 常驻成员子会话在交互式宿主下使用交互式 gate，详见 [subagent.md](subagent.md) 第 7 节与 [ADR-0089](../decisions/ADR-0089-swarm.md) §8。

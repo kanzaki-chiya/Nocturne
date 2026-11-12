@@ -248,6 +248,9 @@ export const REMOTE_METHODS = [
   "session.resumeGoal",
   "session.approvePlan",
   "session.cancelPlan",
+  "session.postToSwarm",
+  "session.removeSwarmMember",
+  "session.endSwarm",
   "session.pendingInputs",
   "shell.tasks",
   "shell.output",
@@ -2329,6 +2332,21 @@ class Connection implements HubPeer {
         const { session } = this.session(p);
         await this.hub.operate(session, () => session.cancelPlan());
         return null;
+      },
+      "session.postToSwarm": async (p) => {
+        const { session } = this.session(p);
+        const text = reqString(p, "text");
+        return await this.hub.operate(session, () => session.postToSwarm({ text }));
+      },
+      "session.removeSwarmMember": async (p) => {
+        const { session } = this.session(p);
+        const name = reqString(p, "name");
+        await this.hub.operate(session, () => session.removeSwarmMember({ name }));
+        return null;
+      },
+      "session.endSwarm": async (p) => {
+        const { session } = this.session(p);
+        return await this.hub.operate(session, () => session.endSwarm());
       },
       "shell.tasks": (p) => this.session(p).session.shellTasks(),
       "shell.output": (p) => {

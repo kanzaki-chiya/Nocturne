@@ -61,6 +61,8 @@ interface SessionView {
   /** 当前任务清单；全部完成后由下一条非插话的持久化 message.user 归档（ADR-0070） */
   todos: TodoItem[];
   backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
+  /** Swarm 派生视图（ADR-0089）：持久骨架由 swarm.* 事件归约，成员运行态由临时事件 swarm.member_updated 更新 */
+  swarm?: SwarmView;
   /** 在途实体：只由临时事件创建，对应持久事件到达时转入 entries（§4） */
   live: {
     assistants: LiveAssistant[];
@@ -250,6 +252,8 @@ interface McpServerViewState {
 `mcpServers` 与 `notices` 同类：本次打开的运行态，不进持久日志，重放得到空对象。失败与崩溃另经 `runtime.warning` 进入 `notices`，供 TUI/CLI 输出；客户端按 `mcpServers` 展示当前状态（桌面端状态栏，见 [desktop.md](../apps/desktop.md) 5.4）。
 
 Phase 6 的 Subagent **不需要视图扩展**：`task` 在父会话是普通工具条目，子会话内部进度经 `tool.progress`（`stream:"info"`）一行式进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的事件写在子日志，不进父会话的事件流，V1 重放等价不受影响。
+
+Swarm（[ADR-0089](../decisions/ADR-0089-swarm.md)）：`SessionView.swarm` 由协调者日志中的 `swarm.created` / `member_added` / `posted` / `member_model_changed` / `member_removed` / `ended` 持久事件建立成员清单（含每名成员的 `model`、`lastPostNumber`、最近帖子首行 `activity`）与留言板帖子列表；持久重放时未移除成员的状态均为 `"waiting"`、`pendingPermissions` 为空。运行中成员的实时状态（`working` / `waiting` / `paused`、当前工具行摘要、暂停错误及等待用户确认的权限请求）经临时事件 `swarm.member_updated` 更新，并汇总出 `awaitingPermissionMembers`（成员在等确认时客户端据此提示并跳转到成员会话）。分叉（`session.created.forkedFrom`）不继承分叉点及之前的 Swarm；对话回退到 `swarm.created` 之前时 Runtime 追加 `swarm.ended(reason: "rewound")`。成员实时运行态字段（如 `paused` 与 `toolActivity`）与 `mcpServers`、`backgroundShells[].outputChars` 同属运行期瞬态投影。
 
 ## 5. 权限请求生命周期
 

@@ -213,6 +213,24 @@ module.exports = {
       to: { path: "^packages/core/src/(?!work-modes/|protocol/)" },
     },
     {
+      name: "swarm-deps",
+      severity: "error",
+      comment:
+        "swarm（Swarm 执行方式，ADR-0089）只能依赖 protocol/tools/provider/session；工作树与会话托管由 core/index 注入",
+      from: { path: "^packages/core/src/swarm/" },
+      to: { path: "^packages/core/src/(?!swarm/|protocol/|tools/|provider/|session/)" },
+    },
+    {
+      name: "only-index-imports-swarm",
+      severity: "error",
+      comment: "除 core/index（src/index.ts）外，任何模块不能 import swarm",
+      from: {
+        path: "^packages/core/src",
+        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/swarm/"],
+      },
+      to: { path: "^packages/core/src/swarm/" },
+    },
+    {
       name: "input-history-deps",
       severity: "error",
       comment: "input-history 只能依赖 platform（modules.md：单文件业务模块）",

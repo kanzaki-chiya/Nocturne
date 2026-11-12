@@ -1,5 +1,6 @@
 import type { BackgroundShellResult, SubagentResult } from "./events.js";
 import type { SkillSnapshot } from "./skills.js";
+import type { SwarmPostDelivery } from "./swarm.js";
 /**
  * 公共数据类型（docs/protocols/events.md 第 4 节）。
  * 只包含类型，不包含任何行为或 I/O。
@@ -513,6 +514,7 @@ export type HistoryEntry =
       steer?: true | undefined;
       subagent?: SubagentResult | undefined;
       backgroundShell?: BackgroundShellResult | undefined;
+      swarm?: SwarmPostDelivery | undefined;
     }
   | {
       kind: "assistant";
@@ -679,7 +681,7 @@ export type McpToolSearchMode = "auto" | "always" | "never";
 // ── 待发输入（ADR-0070）──────────────────────────────────
 
 /** 待发输入的两种方式（ADR-0070 §1）：插话并入当前 Turn，排队在 done 后开新 Turn */
-export type PendingInputMode = "steer" | "queue" | "subagent" | "shell";
+export type PendingInputMode = "steer" | "queue" | "subagent" | "shell" | "swarm";
 
 /**
  * 一条待发输入的展示快照（ADR-0070 §6）：待发输入是 Runtime 内存中的会话状态，

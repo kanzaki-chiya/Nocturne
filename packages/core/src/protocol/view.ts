@@ -1,5 +1,11 @@
 import type { SkillSnapshot } from "./skills.js";
 import {
+  applySwarmMemberUpdated,
+  reduceSwarmDurable,
+  type SwarmPostDelivery,
+  type SwarmView,
+} from "./swarm.js";
+import {
   reduceGoal,
   reducePlan,
   type GoalState,
@@ -92,6 +98,8 @@ export interface SessionView {
   goal?: GoalState | undefined;
   /** 计划模式（ADR-0076 §5）；不在计划模式时缺省 */
   plan?: PlanConfig | undefined;
+  /** Swarm 派生视图（ADR-0089 §5）；从未建立或分叉不继承时缺省 */
+  swarm?: SwarmView | undefined;
   pendingPermission: PendingPermission | undefined;
   /**
    * 待回答的提问（ADR-0032 §3）：只由临时事件 question.requested 产生；
@@ -145,6 +153,7 @@ export interface UserEntry {
   steer?: true | undefined;
   subagent?: SubagentResult | undefined;
   backgroundShell?: BackgroundShellResult | undefined;
+  swarm?: SwarmPostDelivery | undefined;
   /** 执行方式快照（ADR-0076）：界面在正文旁显示命令名 */
   workMode?: WorkModeSnapshot | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
@@ -383,6 +392,14 @@ export function reduceSessionView(view: SessionView, event: RuntimeEvent): void 
       const plan = reducePlan(view.plan, event);
       if (plan !== view.plan) view.plan = plan;
       reduceDurable(view, event);
+      const createdEv = book(view).events[0];
+      const forkSeq =
+        createdEv?.type === "session.created" ? (createdEv.payload.forkedFrom?.seq ?? 0) : 0;
+      const swarm = reduceSwarmDurable(view.swarm, event, {
+        forkSeq,
+        coordinatorModel: view.config.model,
+      });
+      if (swarm !== view.swarm) view.swarm = swarm;
     }
   } else if (isEphemeralEventType(event.type)) {
     reduceEphemeral(view, event);
@@ -558,6 +575,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.backgroundShell !== undefined
           ? { backgroundShell: event.payload.backgroundShell }
           : {}),
+        ...(event.payload.swarm !== undefined ? { swarm: event.payload.swarm } : {}),
         ...(event.payload.workMode !== undefined ? { workMode: event.payload.workMode } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
@@ -880,6 +898,10 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
       task.startedAt = view.backgroundShells[index]?.startedAt ?? task.startedAt;
       view.backgroundShells[index] = task;
     }
+    return;
+  }
+  if (event.type === "swarm.member_updated") {
+    applySwarmMemberUpdated(view.swarm, event.payload);
     return;
   }
   switch (event.type) {

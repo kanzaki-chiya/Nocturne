@@ -86,23 +86,60 @@ export interface SubagentLimits {
   timeoutMs?: number | undefined;
 }
 
-/** Runtime 级并发信号量（fail-fast：满即 subagent_concurrency，不排队） */
+/** Runtime 级并发信号量：一次性 task 用 tryAcquire（满即 subagent_concurrency），Swarm 成员用 acquire 排队等待（ADR-0089 §6） */
 export interface SubagentLimiter {
   /** 取得槽位返回 true；已满返回 false */
   tryAcquire(): boolean;
+  /** 异步排队取得槽位；等待期间 signal 中止则移出队列并返回 false */
+  acquire(signal?: AbortSignal): Promise<boolean>;
   release(): void;
 }
 
 export function createSubagentLimiter(max: number): SubagentLimiter {
   let held = 0;
+  const waiters: {
+    resolve: (ok: boolean) => void;
+    cleanup: () => void;
+  }[] = [];
   return {
     tryAcquire() {
-      if (held >= max) return false;
+      if (held >= max || waiters.length > 0) return false;
       held += 1;
       return true;
     },
+    acquire(signal?: AbortSignal) {
+      if (signal?.aborted) return Promise.resolve(false);
+      if (held < max && waiters.length === 0) {
+        held += 1;
+        return Promise.resolve(true);
+      }
+      return new Promise<boolean>((resolve) => {
+        const entry = {
+          resolve,
+          cleanup: () => {
+            signal?.removeEventListener("abort", onAbort);
+          },
+        };
+        const onAbort = () => {
+          const idx = waiters.indexOf(entry);
+          if (idx >= 0) {
+            waiters.splice(idx, 1);
+            entry.cleanup();
+            resolve(false);
+          }
+        };
+        if (signal !== undefined) signal.addEventListener("abort", onAbort, { once: true });
+        waiters.push(entry);
+      });
+    },
     release() {
-      held -= 1;
+      const next = waiters.shift();
+      if (next !== undefined) {
+        next.cleanup();
+        next.resolve(true);
+        return;
+      }
+      held = Math.max(0, held - 1);
     },
   };
 }

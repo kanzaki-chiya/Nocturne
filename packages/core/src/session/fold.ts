@@ -215,6 +215,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.steer === true ? { steer: true as const } : {}),
           ...(p.subagent !== undefined ? { subagent: p.subagent } : {}),
           ...(p.backgroundShell !== undefined ? { backgroundShell: p.backgroundShell } : {}),
+          ...(p.swarm !== undefined ? { swarm: p.swarm } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
           ...(p.files !== undefined ? { files: p.files } : {}),

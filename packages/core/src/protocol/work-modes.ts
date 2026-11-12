@@ -4,7 +4,7 @@
  */
 import type { DurableEvent } from "./events.js";
 
-export const WORK_MODE_NAMES = ["grill-me", "goal", "plan", "boost"] as const;
+export const WORK_MODE_NAMES = ["grill-me", "goal", "plan", "boost", "swarm"] as const;
 
 export type WorkModeName = (typeof WORK_MODE_NAMES)[number];
 
@@ -215,17 +215,22 @@ export function reducePlan(
 export function workModeOrigins(events: readonly DurableEvent[]): {
   goal?: number | undefined;
   plan?: number | undefined;
+  swarm?: number | undefined;
 } {
   let goal: number | undefined;
   let plan: number | undefined;
+  let swarm: number | undefined;
   for (const event of events) {
     if (event.type === "session.config_changed" && event.payload.plan === null) plan = undefined;
+    if (event.type === "swarm.ended") swarm = undefined;
+    if (event.type === "swarm.created") swarm ??= event.seq;
     if (event.type !== "message.user") continue;
     const name = userWorkMode(event.payload.workMode);
     if (name === "goal") goal = event.seq;
     if (name === "plan") plan ??= event.seq;
+    if (name === "swarm") swarm ??= event.seq;
   }
-  return { goal, plan };
+  return { goal, plan, swarm };
 }
 
 // ── 客户端斜杠解析 ─────────────────────────────────────────
@@ -245,6 +250,7 @@ const USAGE: Record<WorkModeName, string> = {
   goal: "用法：/goal 目标",
   plan: "用法：/plan 任务",
   boost: "用法：/boost 任务",
+  swarm: "用法：/swarm 任务",
 };
 
 /** 子命令：整行恰好是命令名（+ 一个单词）时才算，其余文字都当任务 */
@@ -280,4 +286,5 @@ export const WORK_MODE_COMMANDS: readonly { name: `/${WorkModeName}`; summary: s
   { name: "/goal", summary: "目标模式" },
   { name: "/plan", summary: "计划模式" },
   { name: "/boost", summary: "多代理攻坚" },
+  { name: "/swarm", summary: "Swarm 协作" },
 ];

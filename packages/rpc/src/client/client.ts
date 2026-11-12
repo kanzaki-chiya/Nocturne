@@ -71,6 +71,7 @@ import type {
   SettingItem,
   SettingsPatch,
   SubmitInput,
+  SwarmUnmergedWorktree,
   ToggleImpact,
   TurnEndReason,
 } from "@nocturne/core";
@@ -233,6 +234,12 @@ export interface RpcSession {
   approvePlan(): Promise<void>;
   /** 放弃计划（ADR-0076） */
   cancelPlan(): Promise<void>;
+  /** 在活动 Swarm 留言板发帖（ADR-0089） */
+  postToSwarm(input: { text: string }): Promise<{ number: number; recipients: string[] }>;
+  /** 移除活动 Swarm 成员（ADR-0089） */
+  removeSwarmMember(input: string | { name: string }): Promise<void>;
+  /** 结束活动 Swarm（ADR-0089） */
+  endSwarm(): Promise<{ unmerged: SwarmUnmergedWorktree[] }>;
   /** 待发输入快照（`input.pending` 是临时事件，订阅后用它对齐） */
   pendingInputs(): Promise<PendingInputsSnapshot>;
   shellTasks(): Promise<RpcResult<"shell.tasks">>;
@@ -838,6 +845,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       cancelPlan: async () => {
         await call("session.cancelPlan", p);
       },
+      postToSwarm: (input) => call("session.postToSwarm", { ...p, text: input.text }),
+      removeSwarmMember: async (input) => {
+        const name = typeof input === "string" ? input : input.name;
+        await call("session.removeSwarmMember", { ...p, name });
+      },
+      endSwarm: () => call("session.endSwarm", p),
       pendingInputs: () => call("session.pendingInputs", p),
       shellTasks: () => call("shell.tasks", p),
       shellOutput: (taskId, offset) =>

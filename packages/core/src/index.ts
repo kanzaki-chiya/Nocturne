@@ -201,6 +201,7 @@ import type {
   SubagentObservation,
   SubagentObserver,
   SubagentSummary,
+  SwarmUnmergedWorktree,
   TurnEndReason,
   TurnChanges,
   TurnChangeDiff,
@@ -222,14 +223,27 @@ import { resolveSubagentProfile } from "./config/subagent-profiles.js";
 import { BackgroundSubagents, backgroundAdmission } from "./agent/background-subagents.js";
 import {
   applyWorktreeChanges,
+  checkpointWorktreeTurn,
+  createWorktree,
+  isWorktreeOnBranch,
+  markWorktreeApplied,
   readWorktreeDiff,
+  resetWorktreeToCommit,
   inspectWorktreeRepository,
   listWorktreeRecords,
   cleanupMergedWorktrees,
   removeWorktree,
   settleWorktree,
+  worktreeCurrentHead,
   type WorktreeRecord,
 } from "./agent/worktree.js";
+import {
+  createSwarmController,
+  SWARM_COORDINATOR_TOOL_NAMES,
+  type ManagedMemberSession,
+  type SwarmController,
+  type SwarmMemberOpenSpec,
+} from "./swarm/index.js";
 import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-changes.js";
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
@@ -254,6 +268,7 @@ import {
   createSessionStore,
   createSubagentObservation,
   createSubagentRegistry,
+  newSessionId,
   searchSessions,
   readLocalFile,
   readSessionAttachment,
@@ -296,6 +311,7 @@ import {
   type McpSession,
   type PermissionGate,
   type ScheduleAccess,
+  type ToolDefinition,
   type ToolRegistry,
 } from "./tools/index.js";
 import { NOCTURNE_VERSION } from "./protocol/version.js";
@@ -573,6 +589,12 @@ export interface RuntimeSession {
   approvePlan(): Promise<void>;
   /** 放弃计划（ADR-0076 §5）：恢复进入前的预设并退出计划模式，不开 Turn */
   cancelPlan(): Promise<void>;
+  /** 在当前活动 Swarm 的共享留言板发帖（ADR-0089 §10）；不 @ 任何人时默认 @协调者 */
+  postToSwarm(input: { text: string }): Promise<{ number: number; recipients: string[] }>;
+  /** 移除当前活动 Swarm 中的指定成员（ADR-0089 §4、§10）；有未并回提交时拒绝 */
+  removeSwarmMember(input: string | { name: string }): Promise<void>;
+  /** 结束当前活动 Swarm（ADR-0089 §1、§11）：停止全部成员，返回未并回的独立工作树分支列表 */
+  endSwarm(): Promise<{ unmerged: SwarmUnmergedWorktree[] }>;
   /**
    * 待发输入的当前快照。待发输入是临时状态、不写日志，`input.pending` 不回放，
    * 新附加的客户端用它在订阅后对齐（view.md 第 6 节）。
@@ -1232,6 +1254,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     /** 已打开会话的恢复：只校验根会话并删除旁路，不判断忙（ADR-0080） */
     unarchive(): Promise<void>;
     durableEvents(): readonly DurableEvent[];
+    /** 若 childSessionId 属于本会话活动 Swarm 的未移除成员，返回其共享托管会话句柄（ADR-0089 §8、§10） */
+    swarmMember?(childSessionId: string): Promise<RuntimeSession | undefined>;
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
   }
@@ -1407,10 +1431,36 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     });
   }
 
+  interface SwarmMemberAssemblyOptions {
+    coordinatorSessionId: string;
+    rootSessionId: string;
+    name: string;
+    preset: "general" | "explore";
+    worktreePath?: string | undefined;
+    extraTools: ToolDefinition[];
+    basePrompt(): string;
+    parentGrants: Grant[];
+    isActive(): boolean;
+    onTurnLifecycle: SwarmMemberOpenSpec["onTurnLifecycle"];
+  }
+
+  interface SwarmMemberInternalControls {
+    isBusy(): boolean;
+    hasActivePendingInputs(): boolean;
+    deliverSwarmPost(input: PreparedInput, forcePaused?: boolean): Promise<void>;
+    resumeFromModelChange(modelKey: string): Promise<void>;
+    setModelAndEffort(modelRef: ModelRef, effort?: ReasoningEffort): Promise<void>;
+    interruptAndWait(): Promise<void>;
+    clearPendingSwarmInputs(): void;
+  }
+
+  const SWARM_MEMBER_CONTROLS = Symbol("nocturne.swarmMemberControls");
+
   async function wrapSession(
     session: Session,
     resume?: { modelOverride?: string | ModelRef | undefined },
     unattended = false,
+    swarmMember?: SwarmMemberAssemblyOptions,
   ): Promise<RuntimeSession> {
     // 打开途中取得的 Runtime 级登记与外部资源（MCP 连接）按序登记撤销步骤；
     // 打开失败在此逆序撤销，close 复用同一份。会话锁由调用方 session.close() 释放。
@@ -1419,7 +1469,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       for (const step of teardown.splice(0).reverse()) await step();
     };
     try {
-      return await assembleSession(session, resume, teardown, runTeardown, unattended);
+      return await assembleSession(session, resume, teardown, runTeardown, unattended, swarmMember);
     } catch (e) {
       await runTeardown().catch(() => undefined);
       throw e;
@@ -1432,6 +1482,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     teardown: (() => Promise<void> | void)[],
     runTeardown: () => Promise<void>,
     unattendedOption: boolean,
+    swarmMember?: SwarmMemberAssemblyOptions,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
     const projectCwd = await platform.resolveReal(meta.cwd);
@@ -1608,9 +1659,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       grantRootId = grantParent;
       grantParent = subagentRegistry.liveSession(grantParent)?.state().meta.parent?.sessionId;
     }
-    const sessionGrants: Grant[] = grantLists.get(grantRootId) ?? [];
+    const sessionGrants: Grant[] = swarmMember?.parentGrants ?? grantLists.get(grantRootId) ?? [];
     grantLists.set(grantRootId, sessionGrants);
-    if (grantRootId === session.id)
+    if (grantRootId === session.id && swarmMember === undefined)
       teardown.push(() => {
         grantLists.delete(grantRootId);
       });
@@ -1675,7 +1726,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         },
         autoApproveAsk,
       });
-    let policy = buildPolicy(session.state().config.permissionPreset);
+    const memberWorktreePolicy =
+      swarmMember?.worktreePath !== undefined
+        ? { root: swarmMember.worktreePath, cwd: meta.cwd }
+        : undefined;
+    let policy = buildPolicy(
+      session.state().config.permissionPreset,
+      session.id,
+      swarmMember?.worktreePath !== undefined ? meta.workspaceRoot : undefined,
+      memberWorktreePolicy,
+    );
     if (!isPermissionPresetName(session.state().config.permissionPreset)) {
       warnings.push(
         `会话记录的权限预设 "${session.state().config.permissionPreset}" 未知，已回退 default`,
@@ -1879,7 +1939,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const gate: PermissionGate = createPolicyGate(
       {
         evaluate: (subjects, evaluationOptions) => {
-          policy = buildPolicy(session.state().config.permissionPreset);
+          policy = buildPolicy(
+            session.state().config.permissionPreset,
+            session.id,
+            swarmMember?.worktreePath !== undefined ? meta.workspaceRoot : undefined,
+            memberWorktreePolicy,
+          );
           return policy.evaluate(subjects, evaluationOptions);
         },
       },
@@ -1924,12 +1989,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // ADR-0064 第 7 节：定时任务发起的会话不提供改写定时任务的工具（按特性，不按名字）
     for (const tool of builtinTools()) {
       if (meta.schedule !== undefined && tool.traits.mutatesSchedule === true) continue;
+      if (swarmMember?.preset === "explore" && tool.traits.mutates) continue;
       if (
         (meta.parent !== undefined || meta.schedule !== undefined) &&
         tool.traits.mainSessionOnly === true
       )
         continue;
       tools.register(tool);
+    }
+    if (swarmMember !== undefined) {
+      for (const extra of swarmMember.extraTools) {
+        tools.unregister(extra.name);
+        tools.register(extra);
+      }
     }
     if (meta.parent === undefined) {
       tools.register(
@@ -2088,7 +2160,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       tools.unregister(MCP_SEARCH_TOOL_NAME);
       tools.unregister(MCP_CALL_TOOL_NAME);
 
-      const currentMcpTools = [...activeMcpTools.values()];
+      const currentMcpTools = [...activeMcpTools.values()].filter(
+        (tool) => !(swarmMember?.preset === "explore" && tool.traits.mutates),
+      );
       const mode =
         config?.resolvedSettings(meta.workspaceRoot).mcpToolSearch ??
         resolved?.mcpToolSearch ??
@@ -2510,11 +2584,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       );
       return next;
     }
+    let swarmController: SwarmController | undefined;
+    let swarmTurnStarting = false;
+    const isSwarmCoordinatorActive = (): boolean =>
+      Boolean(swarmController?.isActive()) || swarmTurnStarting;
+
     const scheduleWorktreeCleanup = (): void => {
       if (closing) return;
       void runWorktreeTask(async () => {
         if (closing) return;
-        await cleanupMergedWorktrees(sessionsDir, session.id);
+        await cleanupMergedWorktrees(
+          sessionsDir,
+          session.id,
+          swarmController?.activeIsolatedChildIds(),
+        );
       }).catch((cause: unknown) => {
         if (closing) return;
         session.emitEphemeral("runtime.warning", {
@@ -2610,42 +2693,59 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 : [],
             )
             .at(-1);
-          if (!changes) return undefined;
-          const applied = events.some(
-            (event) =>
-              event.type === "tool.completed" &&
-              event.payload.name === "apply_subagent_changes" &&
-              event.payload.status === "ok" &&
-              (event.payload.output as { id?: string } | undefined)?.id === id,
-          );
-          return { changes, repository: currentWorkspaceRoot(), applied };
+          if (changes) {
+            const applied = events.some(
+              (event) =>
+                event.type === "tool.completed" &&
+                event.payload.name === "apply_subagent_changes" &&
+                event.payload.status === "ok" &&
+                (event.payload.output as { id?: string } | undefined)?.id === id,
+            );
+            return { changes, repository: currentWorkspaceRoot(), applied, fromSwarm: false };
+          }
+          const swarmFound = swarmController?.lookupMemberWorktreeSync(id);
+          if (swarmFound !== undefined) {
+            return { ...swarmFound, fromSwarm: true };
+          }
+          return undefined;
         };
         tools.register(
           createApplySubagentChangesTool({
             lookup,
             async apply(id, mode) {
-              return await runWorktreeTask(async () => {
+              const { applied, fromSwarm, head } = await runWorktreeTask(async () => {
                 const result = lookup(id);
                 if (!result || result.applied)
                   throw new Error("No unapplied isolated changes found");
                 const repository = await inspectWorktreeRepository(currentWorkspaceRoot());
-                const applied = await applyWorktreeChanges(repository, result.changes, mode);
-                await removeWorktree(
-                  { repository, worktree: result.changes.worktree, branch: result.changes.branch },
-                  false,
-                ).catch((cause: unknown) =>
-                  session.emitEphemeral("runtime.warning", {
-                    code: "worktree_cleanup_failed",
-                    message: String(cause),
-                  }),
-                );
-                return applied;
+                const out = await applyWorktreeChanges(repository, result.changes, mode);
+                if (!result.fromSwarm) {
+                  await removeWorktree(
+                    {
+                      repository,
+                      worktree: result.changes.worktree,
+                      branch: result.changes.branch,
+                    },
+                    false,
+                  ).catch((cause: unknown) =>
+                    session.emitEphemeral("runtime.warning", {
+                      code: "worktree_cleanup_failed",
+                      message: String(cause),
+                    }),
+                  );
+                }
+                return { applied: out, fromSwarm: result.fromSwarm, head: result.changes.head };
               });
+              if (fromSwarm) {
+                await swarmController?.onMemberWorktreeApplied(id, head);
+              }
+              return applied;
             },
           }),
         );
       }
       tools.unregister("task");
+      if (swarmMember !== undefined || isSwarmCoordinatorActive()) return;
       if (!subagentEnabled && !hasExternalAgents) return;
       let launcher: SubagentLauncher | undefined;
       if (subagentEnabled)
@@ -2894,7 +2994,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const isIdle = () =>
       controller === undefined &&
       backgroundSubagents.count(session.id) === 0 &&
-      backgroundShells.count() === 0;
+      backgroundShells.count() === 0 &&
+      !(swarmController?.hasRunningWork() ?? false);
     const notifyIdle = () => {
       if (closing || !isIdle()) return;
       for (const listener of idleListeners) {
@@ -2934,10 +3035,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const pendingInputStore = new PendingInputs((snapshot) =>
       session.emitEphemeral("input.pending", snapshot),
     );
-    /** 子会话不参与待发输入（ADR-0070 §5） */
+    /** 子会话不参与待发输入（ADR-0070 §5）；活动 Swarm 常驻成员除外（ADR-0089 §6、§10） */
     const assertMainSession = () => {
       if (meta.parent !== undefined)
         throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
+    };
+    const assertSubmittableSession = () => {
+      if (meta.parent?.callId.startsWith("swarm:") && !swarmMember?.isActive()) {
+        throw new RuntimeCommandError("invalid_command", "Swarm 成员已移除或 Swarm 已结束");
+      }
+    };
+    const assertInputQueueAllowed = () => {
+      assertSubmittableSession();
+      if (meta.parent !== undefined && !swarmMember?.isActive()) {
+        throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
+      }
     };
     /**
      * 已打开会话的归档写入（ADR-0080）。复用 Turn/压缩/回退/关闭/后台子代理/待发输入
@@ -3046,6 +3158,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           (!subagentEnabled || options.subagent?.background !== true || meta.schedule !== undefined)
         )
           throw new RuntimeCommandError("invalid_command", "当前环境不支持后台子代理");
+        // ADR-0089 §1：/swarm 依赖后台子代理、子代理启用且非无人值守/定时任务，同时至多一个活动 Swarm
+        if (input.workMode === "swarm") {
+          if (
+            !subagentEnabled ||
+            options.subagent?.background !== true ||
+            meta.schedule !== undefined ||
+            unattendedOption
+          ) {
+            throw new RuntimeCommandError("invalid_command", "当前环境不支持 Swarm");
+          }
+          if (swarmController?.isActive()) {
+            throw new RuntimeCommandError(
+              "invalid_command",
+              "当前会话已有进行中的 Swarm，请先结束当前 Swarm",
+            );
+          }
+        }
         const task = (input.content ?? [{ type: "text", text: input.text ?? "" }])
           .map((block) => (block.type === "text" ? block.text : ""))
           .join("")
@@ -3163,7 +3292,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       let workMode: WorkModeSnapshot | undefined;
       if (input.workMode !== undefined) {
         const gitRepository =
-          input.workMode === "boost"
+          input.workMode === "boost" || input.workMode === "swarm"
             ? await inspectWorktreeRepository(currentWorkspaceRoot()).then(
                 () => true,
                 () => false,
@@ -3259,6 +3388,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           },
         });
       }
+      if (started === "swarm") {
+        swarmTurnStarting = true;
+        syncSwarmTools();
+      }
       installGoalTool();
     };
     /** 安全点 2 的续跑判断（§4.3）；子会话不接 */
@@ -3281,6 +3414,285 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return goalInput(next.body);
     };
     /**
+     * Swarm 期间协调者工具集收窄与恢复（ADR-0089 §2）：
+     * 按工具声明的 `tool.traits.editTool` 特性卸载/恢复改文件工具（write/edit/apply_patch），
+     * 不在 Agent Loop 中按工具名写分支；同时装卸协调者的 Swarm 工具。
+     */
+    const syncSwarmTools = (): void => {
+      if (meta.parent !== undefined) return;
+      for (const name of SWARM_COORDINATOR_TOOL_NAMES) {
+        tools.unregister(name);
+      }
+      if (isSwarmCoordinatorActive()) {
+        for (const tool of builtinTools()) {
+          if (tool.traits.editTool !== undefined) {
+            tools.unregister(tool.name);
+          }
+        }
+        tools.unregister("task");
+        if (swarmController !== undefined) {
+          for (const tool of swarmController.coordinatorTools()) {
+            tools.register(tool);
+          }
+        }
+      } else {
+        for (const tool of builtinTools()) {
+          if (tool.traits.editTool !== undefined) {
+            tools.unregister(tool.name);
+            tools.register(tool);
+          }
+        }
+        installTask();
+      }
+    };
+
+    const memberProxies = new Map<string, RuntimeSession>();
+
+    if (meta.parent === undefined && meta.schedule === undefined) {
+      const deliverSwarmToCoordinator = (
+        input: PreparedInput,
+        forcePaused = false,
+      ): Promise<void> => {
+        if (closing || session.health !== "ok") return Promise.resolve();
+        pendingInputStore.add("swarm", input, forcePaused);
+        if (forcePaused) return Promise.resolve();
+        void pumpQueue().catch(() => {
+          pendingInputStore.pauseAll();
+        });
+        return Promise.resolve();
+      };
+
+      const memberRegistrations = new Map<string, { end(): void }>();
+
+      swarmController = createSwarmController({
+        coordinatorSessionId: session.id,
+        newChildSessionId: () => newSessionId(),
+        isClosing: () => closing,
+        currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
+        coordinatorModel: () => model,
+        coordinatorEffort: () => session.state().config.reasoningEffort,
+        enabledModels: () => {
+          const disabled = disabledSet();
+          return sessionRegistry
+            .providers()
+            .flatMap((p) => p.models())
+            .map((m) => applyDisabled(m, disabled))
+            .filter((m) => m.disabled === undefined && m.unavailable === undefined)
+            .map((m) => ({
+              provider: m.ref.provider,
+              model: m.ref.model,
+              ...(m.displayName !== undefined ? { name: m.displayName } : {}),
+            }));
+        },
+        availableProfiles: () => {
+          const configured =
+            config?.resolvedSettings(session.state().meta.workspaceRoot).subagentProfiles ?? {};
+          return Object.entries(configured).flatMap(([name, profile]) => {
+            if (!profile.enabled) return [];
+            if (
+              profile.model !== undefined &&
+              resolveModelRole(sessionRegistry, profile.model, "task") === undefined
+            ) {
+              return [];
+            }
+            return [{ ...profile, name }];
+          });
+        },
+        externalAgentNames: () => {
+          const names = new Set<string>();
+          for (const a of config?.base.externalAgents ?? []) {
+            names.add(a.name);
+          }
+          return names;
+        },
+        resolveEnabledModel: (ref) => {
+          try {
+            const resolvedModel = sessionRegistry.resolve(ref);
+            const disabled = applyDisabled(resolvedModel.model, disabledSet());
+            if (disabled.disabled !== undefined || disabled.unavailable !== undefined) {
+              return undefined;
+            }
+            return resolvedModel;
+          } catch {
+            return undefined;
+          }
+        },
+        pricing: (modelKey) => {
+          let ref: ModelRef;
+          if (modelKey !== undefined) {
+            try {
+              ref = parseModelRef(modelKey);
+            } catch {
+              return undefined;
+            }
+          } else {
+            ref = model.model.ref;
+          }
+          return resolvePricing(sessionRegistry, ref)?.pricing;
+        },
+        durableEvents: () => session.durableEvents(),
+        readChildDurableEvents: async (childSessionId) => {
+          const logFile = paths.join(sessionsDir, `${childSessionId}.jsonl`);
+          const { events } = await readLogReadonly(fs, logFile, childSessionId);
+          return events;
+        },
+        emitDurable: (type, payload) => session.emit(type, payload),
+        emitEphemeral: (type, payload) => session.emitEphemeral(type, payload),
+        deliverToCoordinator: deliverSwarmToCoordinator,
+        clearCoordinatorSwarmInputs: () => {
+          pendingInputStore.dropMode("swarm");
+        },
+        isCoordinatorBusy: () => busy() || compacting(),
+        hasCoordinatorPendingActive: () =>
+          pendingInputStore.snapshot().items.some((item) => !item.paused),
+        syncCoordinatorTools: syncSwarmTools,
+        notifyCoordinatorIdle: notifyIdle,
+        openMemberSession: async (spec): Promise<ManagedMemberSession> => {
+          let childRaw: Session;
+          if (spec.create) {
+            childRaw = await store.create({
+              id: spec.childSessionId,
+              cwd: spec.cwd,
+              workspaceRoot: spec.workspaceRoot,
+              model: spec.model,
+              permissionPreset: session.state().config.permissionPreset,
+              nocturneVersion: options.version ?? NOCTURNE_VERSION,
+              ...(spec.reasoningEffort !== undefined
+                ? { reasoningEffort: spec.reasoningEffort }
+                : {}),
+              parent: { sessionId: session.id, callId: `swarm:${spec.name}` },
+            });
+          } else {
+            childRaw = await store.load(spec.childSessionId);
+          }
+          let memberActive = true;
+          let wrappedMember: RuntimeSession;
+          try {
+            wrappedMember = await wrapSession(
+              childRaw,
+              { modelOverride: spec.model },
+              unattendedOption,
+              {
+                coordinatorSessionId: session.id,
+                rootSessionId: grantRootId,
+                name: spec.name,
+                preset: spec.preset,
+                worktreePath: spec.worktreePath,
+                extraTools: spec.extraTools,
+                basePrompt: () => spec.basePrompt(),
+                parentGrants: sessionGrants,
+                isActive: () => memberActive && Boolean(swarmController?.isActive()),
+                onTurnLifecycle: spec.onTurnLifecycle,
+              },
+            );
+          } catch (e) {
+            await childRaw.close().catch(() => undefined);
+            throw e;
+          }
+          const controls = (
+            wrappedMember as unknown as Record<symbol, SwarmMemberInternalControls | undefined>
+          )[SWARM_MEMBER_CONTROLS];
+          if (controls === undefined) {
+            await wrappedMember.close().catch(() => undefined);
+            throw new Error("Missing SwarmMemberInternalControls");
+          }
+
+          // 创建不关闭底层会话的共享外部代理句柄（供 runtime.resumeSession / RPC 使用）
+          const proxy: RuntimeSession = {
+            ...wrappedMember,
+            close: () => Promise.resolve(),
+          };
+          Object.defineProperty(proxy, INTERNAL_SESSION, { value: childRaw });
+          memberProxies.set(spec.childSessionId, proxy);
+
+          return {
+            id: spec.childSessionId,
+            isBusy: () => controls.isBusy(),
+            hasActivePendingInputs: () => controls.hasActivePendingInputs(),
+            deliverSwarmPost: (input, forcePaused) => controls.deliverSwarmPost(input, forcePaused),
+            resumeFromModelChange: (modelKey) => controls.resumeFromModelChange(modelKey),
+            setModelAndEffort: (modelRef, effort) => controls.setModelAndEffort(modelRef, effort),
+            interruptAndWait: () => controls.interruptAndWait(),
+            clearPendingSwarmInputs: () => {
+              controls.clearPendingSwarmInputs();
+            },
+            subscribe: (listener) => wrappedMember.subscribe(listener),
+            closeUnderlying: async () => {
+              memberActive = false;
+              memberProxies.delete(spec.childSessionId);
+              await wrappedMember.close();
+            },
+          };
+        },
+        registerActiveSubagent: (childSessionId, _onCancel) => {
+          const proxy = memberProxies.get(childSessionId);
+          const inner = proxy
+            ? ((proxy as unknown as Record<symbol, Session | undefined>)[INTERNAL_SESSION] ??
+              undefined)
+            : undefined;
+          if (inner !== undefined) {
+            const metaInfo = inner.state().meta;
+            const reg = subagentRegistry.register({
+              child: inner,
+              parentSessionId: session.id,
+              callId: metaInfo.parent?.callId ?? `swarm:${childSessionId}`,
+              profile: "default",
+              model: `${inner.state().config.model.provider}/${inner.state().config.model.model}`,
+              effort: inner.state().config.reasoningEffort,
+              taskSummary: `Swarm member`,
+              background: true,
+            });
+            memberRegistrations.set(childSessionId, reg);
+          }
+        },
+        unregisterActiveSubagent: (childSessionId) => {
+          const reg = memberRegistrations.get(childSessionId);
+          if (reg !== undefined) {
+            memberRegistrations.delete(childSessionId);
+            reg.end();
+          }
+        },
+        worktrees: {
+          inspectRepository: (dir) => inspectWorktreeRepository(dir),
+          create: (input) =>
+            runWorktreeTask(() =>
+              createWorktree({
+                childSessionId: input.childSessionId,
+                parentSessionId: session.id,
+                repository: input.repository,
+                sessionsDir,
+                cwd: input.cwd,
+                workspaceRoot: input.workspaceRoot,
+                task: input.task,
+                trusted: ws?.projectConfig.trusted === true,
+              }),
+            ),
+          loadRecord: async (childSessionId) => {
+            const list = await listWorktreeRecords(sessionsDir, session.id);
+            return list.find((r) => r.childSessionId === childSessionId);
+          },
+          listParentRecords: () => listWorktreeRecords(sessionsDir, session.id),
+          checkpoint: (record, msg) => runWorktreeTask(() => checkpointWorktreeTurn(record, msg)),
+          currentHead: (wtPath) => worktreeCurrentHead(wtPath),
+          isOnMemberBranch: (record) => isWorktreeOnBranch(record),
+          resetToCommit: (wtPath, sha) => runWorktreeTask(() => resetWorktreeToCommit(wtPath, sha)),
+          markApplied: (record, appliedHead) => markWorktreeApplied(record, appliedHead),
+          remove: (record, removeBranch) =>
+            runWorktreeTask(() => removeWorktree(record, removeBranch)),
+          cleanupMerged: () =>
+            runWorktreeTask(() =>
+              cleanupMergedWorktrees(
+                sessionsDir,
+                session.id,
+                swarmController?.activeIsolatedChildIds(),
+              ),
+            ),
+        },
+        commandError: (code, message) => new RuntimeCommandError(code, message),
+      });
+    }
+
+    /**
      * 设置 Turn 控制器并跑一个或连续多个 Turn（ADR-0070 §3：`done` 结束后取队首
      * 一条排队输入作为新 Turn；其他结束原因把剩余条目全部转排队并暂停）。
      */
@@ -3296,9 +3708,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         settleTurn = resolve;
       });
       let idleTurnId: string | undefined;
+      let heldSubagentSlot = false;
       // 空闲边界：controller 先置位（busy 语义立即生效），再重建
       // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
       try {
+        if (swarmMember !== undefined) {
+          swarmMember.onTurnLifecycle.onSlotWaitStart();
+          heldSubagentSlot = await subagentLimiter.acquire(ac.signal);
+          if (!heldSubagentSlot) {
+            pendingInputStore.pauseAll();
+            return "aborted";
+          }
+        }
         let prepare: (() => Promise<PreparedInput>) | undefined = first;
         let reason: TurnEndReason | "failed" = "done";
         while (prepare !== undefined) {
@@ -3362,6 +3783,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             },
             // ADR-0076 §4.3：目标模式在 Turn 想结束时决定是否续跑
             ...(meta.parent === undefined ? { continueTurn: continueGoal } : {}),
+            ...(swarmMember !== undefined
+              ? {
+                  basePrompt: swarmMember.basePrompt(),
+                  rootSessionId: swarmMember.rootSessionId,
+                }
+              : {}),
             skills: catalog,
             visionModel: () =>
               resolveModelRole(
@@ -3401,7 +3828,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.subagent,
             prepared.workMode,
             prepared.backgroundShell,
+            prepared.swarm,
           );
+          if (swarmTurnStarting) {
+            swarmTurnStarting = false;
+            syncSwarmTools();
+          }
           // ADR-0076 §4.5：用户中断即停止目标，之后的普通对话不被核对说明接管
           if (reason === "aborted" && session.state().goal?.status === "active")
             await writeGoal("stopped", "interrupted");
@@ -3410,6 +3842,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
           }
+          if (swarmMember !== undefined) {
+            const lastCompleted = session
+              .durableEvents()
+              .findLast((ev) => ev.type === "turn.completed");
+            const lastErr =
+              lastCompleted?.type === "turn.completed" ? lastCompleted.payload.error : undefined;
+            await swarmMember.onTurnLifecycle.onTurnCompleted(
+              reason,
+              lastErr !== undefined ? { code: lastErr.code, message: lastErr.message } : undefined,
+            );
+          }
           if (reason !== "done") break;
           pendingInputStore.turnDone();
           const head = pendingInputStore.takeQueueHead();
@@ -3417,6 +3860,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         return reason;
       } finally {
+        if (heldSubagentSlot) {
+          subagentLimiter.release();
+        }
+        if (swarmTurnStarting) {
+          swarmTurnStarting = false;
+          syncSwarmTools();
+        }
         await applySkills().catch((error: unknown) =>
           session.emitEphemeral("runtime.warning", {
             code: "skills_reload_failed",
@@ -3451,6 +3901,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           idleTurnId !== undefined
         )
           session.emitEphemeral("runtime.status", { status: "idle" }, { turnId: idleTurnId });
+        if (!pumped && !busy() && compactController === undefined && session.health === "ok") {
+          swarmController?.onCoordinatorTurnSettled();
+        }
         notifyIdle();
       }
     };
@@ -3471,10 +3924,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return true;
     };
 
-    // ADR-0073 §4：重启不复活后台子代理，按父日志补 interrupted 暂停条目、不唤起；
-    // 分叉继承的前缀（forkedFrom.seq 之前）不补
+    // ADR-0073 §4 & ADR-0089 §7：重启不复活后台子代理，恢复 Swarm 骨架与缺失提及（暂停待发，不自动唤醒）
     if (resume !== undefined && meta.parent === undefined) {
-      await cleanupMergedWorktrees(sessionsDir, session.id).catch((cause: unknown) =>
+      if (swarmController !== undefined) {
+        await swarmController.initializeFromLog();
+        syncSwarmTools();
+      }
+      await cleanupMergedWorktrees(
+        sessionsDir,
+        session.id,
+        swarmController?.activeIsolatedChildIds(),
+      ).catch((cause: unknown) =>
         session.emitEphemeral("runtime.warning", {
           code: "worktree_cleanup_failed",
           message: String(cause),
@@ -3655,6 +4115,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       archive: setArchived,
       unarchive: unarchiveOpen,
       durableEvents: () => session.durableEvents(),
+      swarmMember: async (childSessionId) => {
+        if (!swarmController?.isActive()) return undefined;
+        const opened = await swarmController.openOrGetMemberBySessionId(childSessionId);
+        if (!opened?.active) return undefined;
+        return memberProxies.get(childSessionId);
+      },
       rename: async (title) => {
         assertUsable();
         if (meta.parent !== undefined)
@@ -3806,6 +4272,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const plan = session.state().plan;
             if (plan !== undefined && origins.plan !== undefined && targetSeq <= origins.plan)
               await writePlanPreset(plan.restorePreset, null);
+            if (swarmController?.isActive()) {
+              const swarmSeq = swarmController.createdSeq();
+              const swarmOrigin = origins.swarm;
+              if (
+                (swarmSeq !== undefined && targetSeq <= swarmSeq) ||
+                (swarmOrigin !== undefined && targetSeq <= swarmOrigin)
+              ) {
+                await swarmController.endOnRewind();
+              }
+            }
             installGoalTool();
           }
           if (mode !== "files") loadedSkills.clear();
@@ -3830,6 +4306,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             afterSeq: session.state().lastSeq,
             time: recoveredAt,
             payload: { task },
+          });
+        }
+        for (const memberSnap of swarmController?.memberSnapshots() ?? []) {
+          listener({
+            type: "swarm.member_updated",
+            sessionId: session.id,
+            runId: session.runId,
+            eseq: 0,
+            afterSeq: session.state().lastSeq,
+            time: new Date().toISOString(),
+            payload: memberSnap,
           });
         }
         return unsub;
@@ -3898,8 +4385,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async submit(input) {
         assertUsable();
+        assertSubmittableSession();
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
+        }
+        // ADR-0089 §5、§10：用户直接向暂停中的 Swarm 成员发消息时恢复运行
+        if (swarmMember !== undefined && pendingInputStore.snapshot().paused) {
+          const prepared = await prepareInput(input, new AbortController().signal);
+          pendingInputStore.add("queue", prepared);
+          pendingInputStore.resume();
+          const head = pendingInputStore.takeQueueHead();
+          if (head === undefined) return "done";
+          const ac = new AbortController();
+          return await startTurns(ac, () => Promise.resolve(head));
         }
         // controller 必须同步置位：之后的 interrupt 一定落在这一轮上。
         const ac = new AbortController();
@@ -3907,7 +4405,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       async enqueueInput(mode, input) {
         assertUsable();
-        assertMainSession();
+        assertInputQueueAllowed();
         if (!isPendingInputMode(mode))
           throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
         // ADR-0076 §1：插话并入当前 Turn，不能中途换执行方式
@@ -3961,7 +4459,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       updateInput: (id, patch) =>
         Promise.resolve().then(async () => {
           assertUsable();
-          assertMainSession();
+          assertInputQueueAllowed();
           if (patch.mode !== undefined && !isPendingInputMode(patch.mode))
             throw new RuntimeCommandError("invalid_command", "mode 只能是 steer 或 queue");
           const outcome = pendingInputStore.update(id, patch);
@@ -3978,7 +4476,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       cancelInput: (id) =>
         Promise.resolve().then(async () => {
           assertUsable();
-          assertMainSession();
+          assertInputQueueAllowed();
           const result = pendingInputStore.shellResult(id);
           if (pendingInputStore.cancel(id) === "consumed")
             throw new RuntimeCommandError("input_consumed", "这条待发输入已经发出");
@@ -3986,7 +4484,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }),
       async resumeInputs() {
         assertUsable();
-        assertMainSession();
+        assertInputQueueAllowed();
         pendingInputStore.resume();
         // 空闲时立即发出队首；Turn 进行中留给它的结束边界（ADR-0070 §3）
         await pumpQueue();
@@ -4047,6 +4545,31 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const plan = requirePlan();
         await writePlanPreset(plan.restorePreset, null);
       },
+      async postToSwarm(input) {
+        assertUsable();
+        assertMainSession();
+        if (swarmController === undefined) {
+          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的 Swarm");
+        }
+        return await swarmController.postFromUser(input);
+      },
+      async removeSwarmMember(input) {
+        assertUsable();
+        assertMainSession();
+        if (swarmController === undefined) {
+          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的 Swarm");
+        }
+        const name = typeof input === "string" ? input : input.name;
+        await swarmController.removeMemberFromUser(name);
+      },
+      async endSwarm() {
+        assertUsable();
+        assertMainSession();
+        if (swarmController === undefined) {
+          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的 Swarm");
+        }
+        return await swarmController.endFromUser();
+      },
       pendingInputs: () => pendingInputStore.snapshot(),
       async setModel(input) {
         assertUsable();
@@ -4086,6 +4609,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         installSkills();
         // default 档位跟随当前模型时，选择表里的价格要换成新模型的
         installTask();
+        syncSwarmTools();
         warnIfCapabilitiesDefaulted(resolved.model);
         warnIfEffortClamped(resolved.model);
         // recent-models.json（provider-setup.md 第 6 节）：写入失败不阻塞切换
@@ -4317,6 +4841,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const resolved = config?.resolvedSettings(environment.workspaceRoot);
         const compactionThreshold = resolved?.compactionThreshold;
         const compactionPruneLimit = resolved?.compactionPruneLimit;
+        const memberBasePrompt = swarmMember?.basePrompt();
         const key = JSON.stringify({
           seq: events.at(-1)?.seq,
           model: model.model,
@@ -4328,6 +4853,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           compactionThreshold,
           compactionPruneLimit,
           loopGuard: turnConfig.loopGuard ?? DEFAULT_LOOP_GUARD,
+          basePrompt: memberBasePrompt,
         });
         if (contextCache?.key === key) return structuredClone(contextCache.value);
         const state = session.state();
@@ -4344,6 +4870,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           instructions,
           environment,
           events,
+          ...(memberBasePrompt !== undefined ? { basePrompt: memberBasePrompt } : {}),
         });
         contextCache = { key, value: structuredClone(value) };
         return structuredClone(contextCache.value);
@@ -4368,10 +4895,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         questions.cancelAll();
         await backgroundSubagents.discard(session.id);
         await backgroundShells.discard();
+        await swarmController?.dispose();
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
         // 父工具可能正在创建 child；等父 Turn 退出后再收束这期间登记的后台任务。
         await backgroundSubagents.discard(session.id);
         await backgroundShells.discard();
+        await swarmController?.dispose();
         await worktreeChain;
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
@@ -4383,6 +4912,67 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
     };
     teardown.push(backgroundSubagents.onSettled(session.id, notifyIdle));
+    if (swarmMember !== undefined) {
+      const controls: SwarmMemberInternalControls = {
+        isBusy: () => busy() || compacting(),
+        hasActivePendingInputs: () =>
+          pendingInputStore.snapshot().items.some((item) => !item.paused),
+        deliverSwarmPost: (input, forcePaused = false) => {
+          if (closing || session.health !== "ok") return Promise.resolve();
+          if (!forcePaused) {
+            pendingInputStore.resume();
+          }
+          pendingInputStore.add("swarm", input, forcePaused);
+          if (forcePaused) return Promise.resolve();
+          void pumpQueue().catch(() => {
+            pendingInputStore.pauseAll();
+          });
+          return Promise.resolve();
+        },
+        resumeFromModelChange: (modelKey) => {
+          if (closing || session.health !== "ok") return Promise.resolve();
+          pendingInputStore.resume();
+          if (pendingInputStore.snapshot().items.some((item) => !item.paused)) {
+            void pumpQueue().catch(() => {
+              pendingInputStore.pauseAll();
+            });
+            return Promise.resolve();
+          }
+          if (!busy() && !compacting()) {
+            const resumePrompt = `[Swarm] Your model was switched to ${modelKey} after the previous turn failed. Continue your task from where you left off.`;
+            pendingInputStore.add("swarm", {
+              content: [{ type: "text", text: resumePrompt }],
+              appended: [],
+            });
+            void pumpQueue().catch(() => {
+              pendingInputStore.pauseAll();
+            });
+          }
+          return Promise.resolve();
+        },
+        setModelAndEffort: async (modelRef, effort) => {
+          await rebuildProviders();
+          const resolvedNext = resolveSessionModel(modelRef);
+          await session.emit("session.config_changed", {
+            model: modelRef,
+            ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+          });
+          model = resolvedNext;
+          installSkills();
+        },
+        interruptAndWait: async () => {
+          controller?.abort();
+          compactController?.abort();
+          gate.cancelAll?.();
+          questions.cancelAll();
+          await Promise.all([turnSettled, compactSettled]);
+        },
+        clearPendingSwarmInputs: () => {
+          pendingInputStore.dropMode("swarm");
+        },
+      };
+      Object.defineProperty(runtimeSession, SWARM_MEMBER_CONTROLS, { value: controls });
+    }
     // 内部 Session 句柄只留给各包测试：非导出 Symbol 键，不在 RuntimeSession 类型里
     Object.defineProperty(runtimeSession, INTERNAL_SESSION, { value: session });
     return runtimeSession;
@@ -5267,6 +5857,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     async resumeSession(id, resumeOpts) {
+      for (const hooks of openSessions.values()) {
+        const sharedMember = await hooks.swarmMember?.(id);
+        if (sharedMember !== undefined) return sharedMember;
+      }
       const session = await store.load(id, { force: resumeOpts?.force });
       try {
         return await wrapSession(session, { modelOverride: resumeOpts?.model });

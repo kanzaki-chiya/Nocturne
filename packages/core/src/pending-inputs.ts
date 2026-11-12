@@ -68,14 +68,17 @@ export class PendingInputs {
   }
 
   /** 追加一条到队尾；调用方决定空闲时是否改走普通提交 */
-  add(mode: PendingInputMode, input: PreparedInput): string {
+  add(mode: PendingInputMode, input: PreparedInput, forcePaused = false): string {
     const entry: Entry = {
       id: this.newId(),
       mode,
       input,
-      paused: (mode === "subagent" || mode === "shell") && this.paused,
+      paused:
+        forcePaused ||
+        ((mode === "subagent" || mode === "shell" || mode === "swarm") && this.paused),
       createdAt: new Date().toISOString(),
     };
+    if (forcePaused) this.paused = true;
     this.entries.push(entry);
     this.publish();
     return entry.id;
@@ -93,7 +96,10 @@ export class PendingInputs {
   takeSteers(): PreparedInput[] {
     const taken = this.entries.filter(
       (entry) =>
-        (entry.mode === "steer" || entry.mode === "subagent" || entry.mode === "shell") &&
+        (entry.mode === "steer" ||
+          entry.mode === "subagent" ||
+          entry.mode === "shell" ||
+          entry.mode === "swarm") &&
         !entry.paused,
     );
     if (taken.length === 0) return [];
@@ -108,7 +114,12 @@ export class PendingInputs {
     if (head === undefined) return undefined;
     // 已错过当前 Turn 的插话全部转排队，避免被接续 Turn 的安全点抢先消费。
     for (const entry of this.entries) {
-      if (!entry.paused && entry.mode !== "subagent" && entry.mode !== "shell")
+      if (
+        !entry.paused &&
+        entry.mode !== "subagent" &&
+        entry.mode !== "shell" &&
+        entry.mode !== "swarm"
+      )
         entry.mode = "queue";
     }
     this.remove(head);
@@ -119,7 +130,8 @@ export class PendingInputs {
   update(id: string, patch: PendingInputPatch): PendingInputOutcome {
     const entry = this.entries.find((candidate) => candidate.id === id);
     if (entry === undefined) return "consumed";
-    if (entry.mode === "subagent" || entry.mode === "shell") return "readonly";
+    if (entry.mode === "subagent" || entry.mode === "shell" || entry.mode === "swarm")
+      return "readonly";
     // ADR-0076 §1：带执行方式的条目只能排队，不能转成插话
     if (patch.mode === "steer" && entry.input.workMode !== undefined) return "work_mode";
     if (entry.input.workMode !== undefined && patch.input?.text?.trim() === "") return "empty_task";
@@ -152,9 +164,18 @@ export class PendingInputs {
     this.paused = true;
     if (this.entries.length === 0) return;
     for (const entry of this.entries) {
-      if (entry.mode !== "subagent" && entry.mode !== "shell") entry.mode = "queue";
+      if (entry.mode !== "subagent" && entry.mode !== "shell" && entry.mode !== "swarm")
+        entry.mode = "queue";
       entry.paused = true;
     }
+    this.publish();
+  }
+
+  /** 清空指定模式的条目（例如停止 Swarm 时移除未送达帖子） */
+  dropMode(mode: PendingInputMode): void {
+    const dropped = this.entries.filter((entry) => entry.mode === mode);
+    if (dropped.length === 0) return;
+    for (const entry of dropped) this.remove(entry);
     this.publish();
   }
 
