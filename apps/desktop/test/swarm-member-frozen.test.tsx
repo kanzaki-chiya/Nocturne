@@ -23,16 +23,16 @@ import type { SwarmSession } from "../src/SwarmPane";
 
 if (!("ResizeObserver" in globalThis)) {
   globalThis.ResizeObserver = class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
   } as unknown as typeof ResizeObserver;
 }
 if (!("IntersectionObserver" in globalThis)) {
   globalThis.IntersectionObserver = class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
     takeRecords() {
       return [];
     }
