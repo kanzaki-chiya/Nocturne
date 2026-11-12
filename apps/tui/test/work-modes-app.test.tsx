@@ -139,14 +139,18 @@ it("/swarm board 只提示用法；/swarm end 无未合并分支时不输出，�
         {
           name: "orders",
           branch: "nocturne/orders-wt",
-          worktreePath: "/tmp/wt1",
-          childSessionId: "child-orders",
+          base: "aaaa",
+          head: "bbbb",
+          worktree: "/tmp/wt1",
+          files: 1,
         },
         {
           name: "users",
           branch: "nocturne/users-wt",
-          worktreePath: "/tmp/wt2",
-          childSessionId: "child-users",
+          base: "aaaa",
+          head: "cccc",
+          worktree: "/tmp/wt2",
+          files: 2,
         },
       ],
     });
