@@ -159,3 +159,4 @@
 
 - 活动摘要改为结构化：`SessionView.swarm` 中协调者与成员的 `activity` 改为 `SwarmActivity`（`tool` / `permission` / `paused` / `post` / `charter` / `removed`），`swarm.member_updated.toolActivity` 与成员视图的 `toolActivity` 改为 `{ tool, detail? }`，协议层不再产出英文句子，文字由客户端组成（字段见 [view.md](../protocols/view.md) §4）；`swarm.member_updated` 是临时事件，不涉及日志兼容，不提升 `formatVersion`。
 - 客户端斜杠解析增加 `/swarm board`（打开留言板）与 `/swarm end`（结束 Swarm）两个子命令，规则同 `/goal stop`：整行恰好是子命令才算，其余文字仍作为任务提交。
+- `swarm` 加入 `BUILTIN_SLASH_COMMANDS`，同名技能按既有规则标 `commandConflict`。

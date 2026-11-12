@@ -160,6 +160,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "goal",
   "plan",
   "boost",
+  "swarm",
 ];
 
 export function parseSkillSlash(
