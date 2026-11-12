@@ -804,6 +804,112 @@ describe("App 里的 Swarm", () => {
       await session.close();
     }
   }, 30_000);
+
+  it("respondPermission 失败时权限框回来，并能再次回答", async () => {
+    const { runtime, session } = await swarmRuntime();
+    const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
+    const frame = () => strip(ui.lastFrame() ?? "");
+    currentFrame = frame;
+    const enter = async (value: string) => {
+      ui.stdin.write(value);
+      await pause(100);
+      ui.stdin.write("\r");
+    };
+    let member: RuntimeSession | undefined;
+    try {
+      await settle(() => frame().includes("fake-1"));
+      await enter("/swarm 校验订单");
+      await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
+      await enter("/swarm board");
+      await settle(() => frame().includes("全部"));
+      await keys(ui, "\x1b[Z", "\x1b[B", "\r");
+      await settle(() => frame().includes("协调者 → @orders · #3"));
+      await vi.waitFor(() => expect(frame()).toContain("需要确认"), { timeout: 8000 });
+      const child =
+        replaySessionView(session.durableEvents()).swarm?.members.find((m) => m.name === "orders")
+          ?.childSessionId ?? "";
+      member = await runtime.resumeSession(child);
+      const respond = vi
+        .spyOn(member, "respondPermission")
+        .mockRejectedValueOnce(new Error("权限回复失败"));
+      await press(ui, "a");
+      await vi.waitFor(() => expect(frame()).toContain("! 权限回复失败"), { timeout: 3000 });
+      expect(frame()).toContain("需要确认");
+      respond.mockRestore();
+      await press(ui, "a");
+      await vi.waitFor(() => expect(frame()).not.toContain("需要确认"), { timeout: 8000 });
+    } finally {
+      ui.unmount();
+      await session.endSwarm().catch(() => undefined);
+      await session.close();
+    }
+  }, 30_000);
+
+  it("一次 Enter 只调用一次 enqueueInput，Turn 结束后也只有一条插话", async () => {
+    let release: (script: FakeScript) => void = () => undefined;
+    const gate = new Promise<FakeScript>((resolve) => {
+      release = resolve;
+    });
+    const { runtime, session } = await swarmRuntime(gate);
+    const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
+    const frame = () => strip(ui.lastFrame() ?? "");
+    currentFrame = frame;
+    const enter = async (value: string) => {
+      ui.stdin.write(value);
+      await pause(100);
+      ui.stdin.write("\r");
+    };
+    const text = "只发一次的私信";
+    try {
+      await settle(() => frame().includes("fake-1"));
+      await enter("/swarm 校验订单");
+      await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
+      await enter("/swarm board");
+      await settle(() => frame().includes("全部"));
+      await keys(ui, "\x1b[Z", "\x1b[B", "\r");
+      await settle(() => frame().includes("协调者 → @orders · #3"));
+      await vi.waitFor(() => expect(frame()).toContain("需要确认"), { timeout: 8000 });
+      const child =
+        replaySessionView(session.durableEvents()).swarm?.members.find((m) => m.name === "orders")
+          ?.childSessionId ?? "";
+      const member = await runtime.resumeSession(child);
+      const enqueue = vi.spyOn(member, "enqueueInput");
+      await press(ui, "a");
+      await press(ui, text);
+      await press(ui, "\r");
+      await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      await pause(200);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      release(stopText("orders 完成"));
+      await vi.waitFor(
+        () => {
+          const n = member
+            .durableEvents()
+            .filter(
+              (e) => e.type === "message.user" && JSON.stringify(e.payload).includes(text),
+            ).length;
+          expect(n).toBe(1);
+        },
+        { timeout: 8000 },
+      );
+      await vi.waitFor(
+        () => expect(member.durableEvents().some((e) => e.type === "turn.completed")).toBe(true),
+        { timeout: 8000 },
+      );
+      const n = member
+        .durableEvents()
+        .filter(
+          (e) => e.type === "message.user" && JSON.stringify(e.payload).includes(text),
+        ).length;
+      expect(n).toBe(1);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+    } finally {
+      release(stopText("orders 完成"));
+      ui.unmount();
+      await session.endSwarm().catch(() => undefined);
+      await session.close();
+    }
+  }, 30_000);
 });
 
 describe("帖子送达块在完整对话块表里", () => {

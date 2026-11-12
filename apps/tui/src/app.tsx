@@ -1229,8 +1229,7 @@ function SessionApp({
       memberView.live.assistants.length > 0 ||
       memberView.pendingPermission !== undefined);
   const busy = view.status !== "idle" || submitPending || memberLiveBusy;
-  // 权限回复后立即本地结算：不等 `permission.resolved` 事件往返（成员视图的订阅可能
-  // 滞后到 turn.completed 才收到，期间输入框会被权限框独占、按键全丢）。
+  // 回复发出到事件回来之间有异步间隔，本地先结算，这段时间的按键才不会被权限框吞掉。
   const [settledPermission, setSettledPermission] = useState<string | undefined>(undefined);
   const pending =
     view.pendingPermission !== undefined && view.pendingPermission.requestId !== settledPermission
@@ -1367,9 +1366,11 @@ function SessionApp({
   const replyPermission = useCallback(
     (reply: PermissionReply) => {
       if (pending === undefined) return;
+      const requestId = pending.requestId;
       // 先让输入框/权限框立即退出独占态，命令本身异步结算
-      setSettledPermission(pending.requestId);
-      session.respondPermission(pending.requestId, reply).catch((e: unknown) => {
+      setSettledPermission(requestId);
+      session.respondPermission(requestId, reply).catch((e: unknown) => {
+        setSettledPermission((current) => (current === requestId ? undefined : current));
         pushLine(`! ${errText(e)}`);
       });
     },
