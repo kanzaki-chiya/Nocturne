@@ -1,5 +1,7 @@
 .composer {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 8px;
   padding: 10px 16px 14px;
   background: var(--a-bg);
@@ -11,6 +13,7 @@
 
 .composer .cw {
   position: relative;
+  min-width: 0;
 }
 
 /* 会话内输入框与消息列同宽居中（mockup C：.composer.v2 .cw） */
