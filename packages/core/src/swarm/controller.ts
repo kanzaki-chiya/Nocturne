@@ -248,6 +248,13 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
   let quietTimer: ReturnType<typeof setImmediate> | undefined;
   let disposed = false;
 
+  const warnWorktreeCleanupFailed = (cause: unknown): void => {
+    deps.emitEphemeral("runtime.warning", {
+      code: "worktree_cleanup_failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    });
+  };
+
   const catalogSnapshot = (): SwarmModelCatalogSnapshot => {
     const coordRef = deps.coordinatorModel().model.ref;
     const defaultKey = `${coordRef.provider}/${coordRef.model}`;
@@ -1009,7 +1016,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     if (member.isolated) {
       const wt = await ensureWorktreeRecord(member);
       if (wt !== undefined) {
-        await deps.worktrees.remove(wt, true);
+        await deps.worktrees.remove(wt, true).catch(warnWorktreeCleanupFailed);
       }
     }
 
@@ -1076,10 +1083,10 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           files: changes.files,
         });
       } else {
-        await deps.worktrees.remove(wt, true).catch(() => undefined);
+        await deps.worktrees.remove(wt, true).catch(warnWorktreeCleanupFailed);
       }
     }
-    await deps.worktrees.cleanupMerged().catch(() => undefined);
+    await deps.worktrees.cleanupMerged().catch(warnWorktreeCleanupFailed);
 
     // 若 cleanupMerged 因分支在主仓库 HEAD 已合并而删掉了工作树，从 unmerged 中剔除已合并项
     const remainingUnmerged: SwarmUnmergedWorktree[] = [];
@@ -1684,7 +1691,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           if (active && m.status !== "removed") {
             await deps.worktrees.markApplied(wt, appliedHead);
           } else {
-            await deps.worktrees.remove(wt, true);
+            await deps.worktrees.remove(wt, true).catch(warnWorktreeCleanupFailed);
           }
           return;
         }

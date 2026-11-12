@@ -1689,4 +1689,140 @@ describe("Swarm 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
 
     await session.endSwarm();
   }, 30_000);
+
+  it("工作树清理容错：移除成员或并回清理时删工作树/分支失败发 runtime.warning(worktree_cleanup_failed)，swarm.member_removed 照样写进日志", async () => {
+    const ws = makeTempDir();
+    await initGitRepo(ws);
+    const wtSessionsDir = makeTempDir("nocturne-cleanup-warn-");
+
+    let coordSetup = false;
+    const provider = createRoutedProvider("fake", [{ id: "m1" }], (req) => {
+      const role = requestRole(req);
+      const toolMsgs = req.messages.filter((m) => m.role === "tool");
+      const countTool = (name: string) =>
+        toolMsgs.filter((m) => "name" in m && m.name === name).length;
+
+      if (role === "coordinator") {
+        if (!coordSetup) {
+          coordSetup = true;
+          return [
+            callTool("i", "swarm_init", { title: "Cleanup Warning" }),
+            callTool("a1", "swarm_add_member", {
+              name: "iso-remove",
+              charter: VALID_CHARTER,
+              isolated: true,
+            }),
+            callTool("a2", "swarm_add_member", {
+              name: "iso-apply",
+              charter: VALID_CHARTER,
+              isolated: true,
+            }),
+            callTool("p1", "swarm_post", { text: "@iso-apply write file" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (
+          JSON.stringify(req.messages).includes("apply post-end") &&
+          countTool("apply_subagent_changes") === 0
+        ) {
+          return [
+            callTool("ap", "apply_subagent_changes", { id: "iso-apply", mode: "clean" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("coord ok");
+      }
+
+      if (role === "member:iso-apply") {
+        if (countTool("write") === 0) {
+          return [
+            callTool("w", "write", { path: "applied-after.txt", content: "ok\n" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("done");
+      }
+
+      return stopText("ok");
+    });
+
+    const rt = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: wtSessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const session = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+    openRuntimes.push({ sessions: [session] });
+
+    const warnings: { code: string; message: string }[] = [];
+    session.subscribe((ev) => {
+      if (ev.type === "runtime.warning") warnings.push(ev.payload);
+    });
+
+    await session.submit({ text: "setup members", workMode: "swarm" });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 15_000 },
+    );
+
+    const view = replaySessionView(session.durableEvents());
+    const isoRemove = must(must(view.swarm).members.find((m) => m.name === "iso-remove"));
+    const isoApply = must(must(view.swarm).members.find((m) => m.name === "iso-apply"));
+    const wtRemove = must(isoRemove.worktree);
+    const wtApply = must(isoApply.worktree);
+
+    // 制造 removeWorktree 中 branch -D 失败：让原工作树切到分离头指针（目录仍在），再用辅助工作树占用其分支
+    const holderRemove = path.join(wtSessionsDir, "holder-remove");
+    await worktreeGit(wtRemove.path, ["checkout", "--detach"]);
+    await worktreeGit(ws, ["worktree", "add", holderRemove, wtRemove.branch]);
+
+    try {
+      // 1. 移除成员：删分支失败不应抛错，swarm.member_removed 必须写进持久日志，且发出 worktree_cleanup_failed 警告
+      await expect(session.removeSwarmMember("iso-remove")).resolves.toBeUndefined();
+      expect(
+        session
+          .durableEvents()
+          .some((e) => e.type === "swarm.member_removed" && e.payload.name === "iso-remove"),
+      ).toBe(true);
+      expect(warnings.some((w) => w.code === "worktree_cleanup_failed")).toBe(true);
+
+      // 2. 结束 Swarm 后对保留下来的 iso-apply 并回，同样占用分支使并回后的清理失败：apply_subagent_changes 仍成功并发出警告
+      await session.endSwarm();
+      const holderApply = path.join(wtSessionsDir, "holder-apply");
+      await worktreeGit(wtApply.path, ["checkout", "--detach"]);
+      await worktreeGit(ws, ["worktree", "add", holderApply, wtApply.branch]);
+      const warnCountBeforeApply = warnings.filter(
+        (w) => w.code === "worktree_cleanup_failed",
+      ).length;
+      try {
+        await session.submit({ text: "apply post-end" });
+        expect(readFileSync(path.join(ws, "applied-after.txt"), "utf8")).toBe("ok\n");
+        expect(warnings.filter((w) => w.code === "worktree_cleanup_failed").length).toBeGreaterThan(
+          warnCountBeforeApply,
+        );
+      } finally {
+        await worktreeGit(ws, ["worktree", "remove", "--force", holderApply]).catch(
+          () => undefined,
+        );
+      }
+
+      // 3. 重启恢复验证：iso-remove 在持久日志中确为 removed，不会复活为 waiting
+      const sessionId = session.id;
+      await session.close();
+      const resumed = await rt.resumeSession(sessionId);
+      openRuntimes[0]?.sessions.push(resumed);
+      expect(
+        replaySessionView(resumed.durableEvents()).swarm?.members.find(
+          (m) => m.name === "iso-remove",
+        )?.status,
+      ).toBe("removed");
+    } finally {
+      await worktreeGit(ws, ["worktree", "remove", "--force", holderRemove]).catch(() => undefined);
+    }
+  }, 30_000);
 });

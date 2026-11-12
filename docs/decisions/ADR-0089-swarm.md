@@ -66,7 +66,7 @@
 - **独立工作树**：多成员改动交叉或构建/测试互相干扰时，协调者可指定 `isolated: true`，复用 [ADR-0075](ADR-0075-worktree-isolation.md) 的 `createWorktree`、路径映射提示与权限层 `WORKTREE_DENY`。
 - **增量提交**：有独立工作树的成员在调用 `swarm_post` 发送消息前以及每轮 Turn 收尾时，若工作树存在未提交改动，自动在自身分支上提交一次（`checkpointWorktreeTurn`，复用 `settleWorktree` 的提交身份 `Nocturne <nocturne@localhost>`、`--no-verify` 与变更统计，但无改动时不删除常驻工作树）。
 - **验证成员分离头指针审查**：`agent/worktree.ts` 新增从指定提交创建工作树（`createWorktree` 的可选 `commit` / `detach`）以及将现有工作树干净重置并分离头指针检出指定提交的 `resetWorktreeToCommit(worktree, commit)`（执行 `git reset --hard`、两次 `git clean -fd` 清除未跟踪且未被忽略的残留文件，再 `git checkout --detach <commit>`；不带 `-x`，因为按 [ADR-0075](ADR-0075-worktree-isolation.md) 依赖由成员在副本里自行安装，`.worktreeinclude` 复制进来的环境文件如 `.env.local` 也属于被忽略文件，若带 `-x` 会使验证成员每次审查都丢掉依赖与环境文件）。当独立工作树作者发帖 `@` 具有独立工作树的验证成员且该成员自身分支无未并回改动时，Runtime 在开轮前自动将其工作树重置到作者最新提交；独立工作树成员也可显式调用 `swarm_checkout({ member })` 切换到任意独立工作树成员的最新提交审查（调用前先对调用者做一次检查点，若调用者自身分支已有未并回改动则以 `invalid_input` 拒绝，防止丢弃改动或进入分离头指针后漏提交）。
-- **并回与移除保护**：协调者的 `apply_subagent_changes` 支持按成员 `childSessionId` 或成员 `name` 查找并应用独立工作树成员相对当前基准 `base` 的增量改动，应用成功后推进成员记录的 `base = head`。移除有独立工作树的成员会删除其工作树与分支，因此移除前若检测到仍有未并回提交（`head !== base` 或有未提交改动），拒绝移除并返回错误提示协调者先用 `apply_subagent_changes` 并回。
+- **并回与移除保护**：协调者的 `apply_subagent_changes` 支持按成员 `childSessionId` 或成员 `name` 查找并应用独立工作树成员相对当前基准 `base` 的增量改动，应用成功后推进成员记录的 `base = head`。移除有独立工作树的成员会删除其工作树与分支，因此移除前若检测到仍有未并回提交（`head !== base` 或有未提交改动），拒绝移除并返回错误提示协调者先用 `apply_subagent_changes` 并回；当允许移除或并回后清理工作树/分支失败时，沿用 ADR-0075 发出 `runtime.warning`（`worktree_cleanup_failed`），不阻断 `swarm.member_removed` 写入或 `apply_subagent_changes` 成功结果。
 
 ### 5. 成员状态与共享派生视图
 
