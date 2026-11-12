@@ -1319,8 +1319,13 @@
   flex: 1;
   min-height: 0;
 }
-.sp-swarm-member > .composer {
-  padding: 0 var(--space-3) var(--space-3);
+.sp-swarm-member > .composer,
+.sp-swarm-member > .composer.session {
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+.sp-swarm-member > .composer > .cw {
+  min-width: 0;
 }
 @keyframes sp-agent-pulse {
   50% {

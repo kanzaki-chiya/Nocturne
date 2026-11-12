@@ -138,4 +138,22 @@ describe("待发列表", () => {
     fireEvent.click(screen.getByRole("button", { name: "立即发送" }));
     expect((await screen.findByRole("alert")).textContent).toContain("这条待发输入已经发出");
   });
+
+  it("Swarm 留言板排队消息解包标签且不显示人工草稿的立即发送、编辑、取消按钮", () => {
+    setup({
+      items: [
+        item({
+          id: "sw1",
+          mode: "queue",
+          text: '<swarm-post n="7" from="orders">\n`orders.ts` 已加上非空数组校验\n</swarm-post>',
+        }),
+      ],
+      paused: false,
+    });
+    expect(screen.getByText("`orders.ts` 已加上非空数组校验")).toBeTruthy();
+    expect(screen.queryByText(/swarm-post/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+  });
 });

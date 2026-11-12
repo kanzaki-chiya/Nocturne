@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
+  unwrapSwarmPostText,
   workModeDisplayText,
   type PendingInputItem,
   type PendingInputsSnapshot,
@@ -138,15 +139,19 @@ export function PendingInputs({
         const isEditing = editing === item.id;
         const isSubagent = item.mode === "subagent";
         const isShell = item.mode === "shell";
+        const unwrappedSwarm = unwrapSwarmPostText(item.text);
+        const isSwarmPost = unwrappedSwarm !== item.text;
         const rowText = isShell
           ? `后台任务 · ${item.shellName ?? ""} · 等待送达`
           : isSubagent
             ? "子代理结果"
-            : item.workMode !== undefined
-              ? workModeDisplayText(item.text, { name: item.workMode })
-              : item.text === ""
-                ? "（仅图片）"
-                : item.text;
+            : isSwarmPost
+              ? unwrappedSwarm
+              : item.workMode !== undefined
+                ? workModeDisplayText(item.text, { name: item.workMode })
+                : item.text === ""
+                  ? "（仅图片）"
+                  : item.text;
         return (
           <div key={item.id} className={`pi-row pi-${item.mode}`}>
             <span className="pi-lead" aria-hidden="true">
@@ -204,22 +209,25 @@ export function PendingInputs({
                 </>
               ) : (
                 <>
-                  {running && item.mode === "queue" && item.workMode === undefined && (
-                    <IconButton
-                      className="send"
-                      disabled={disabled || busy}
-                      title="立即发送"
-                      aria-label="立即发送"
-                      onClick={() => {
-                        void run(async () => {
-                          await onUpdate(item.id, { mode: "steer" });
-                        });
-                      }}
-                    >
-                      <IconSendNow />
-                    </IconButton>
-                  )}
-                  {!isSubagent && !isShell && (
+                  {running &&
+                    item.mode === "queue" &&
+                    item.workMode === undefined &&
+                    !isSwarmPost && (
+                      <IconButton
+                        className="send"
+                        disabled={disabled || busy}
+                        title="立即发送"
+                        aria-label="立即发送"
+                        onClick={() => {
+                          void run(async () => {
+                            await onUpdate(item.id, { mode: "steer" });
+                          });
+                        }}
+                      >
+                        <IconSendNow />
+                      </IconButton>
+                    )}
+                  {!isSubagent && !isShell && !isSwarmPost && (
                     <IconButton
                       disabled={disabled || busy}
                       title="编辑"
@@ -231,19 +239,21 @@ export function PendingInputs({
                       <IconEdit />
                     </IconButton>
                   )}
-                  <IconButton
-                    className="del"
-                    disabled={disabled || busy}
-                    title="取消"
-                    aria-label="取消"
-                    onClick={() => {
-                      void run(async () => {
-                        await onCancel(item.id);
-                      });
-                    }}
-                  >
-                    <IconCancel />
-                  </IconButton>
+                  {!isSwarmPost && (
+                    <IconButton
+                      className="del"
+                      disabled={disabled || busy}
+                      title="取消"
+                      aria-label="取消"
+                      onClick={() => {
+                        void run(async () => {
+                          await onCancel(item.id);
+                        });
+                      }}
+                    >
+                      <IconCancel />
+                    </IconButton>
+                  )}
                 </>
               )}
             </span>
