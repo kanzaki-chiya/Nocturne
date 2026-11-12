@@ -575,7 +575,9 @@ const stopText = (text: string): FakeScript => [
 ];
 
 /** 按系统提示区分协调者与成员；成员 orders 第一轮停在一个需要确认的 shell 调用上 */
-async function swarmRuntime(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
+async function swarmRuntime(
+  blockSecondTurn?: Promise<FakeScript>,
+): Promise<{ runtime: Runtime; session: RuntimeSession }> {
   let coordStarted = false;
   const provider = new FakeProvider({
     roleHandler: () => stopText("标题"),
@@ -600,6 +602,8 @@ async function swarmRuntime(): Promise<{ runtime: Runtime; session: RuntimeSessi
           callTool("w", "shell", { command: "echo ok > approved.txt" }),
           { type: "finish", reason: "tool_calls" },
         ];
+      // 成员第二轮用外部 gate 卡住：断言期间成员 Turn 一定还在进行
+      if (who === "orders" && blockSecondTurn !== undefined) return blockSecondTurn;
       return stopText(`${who} 完成`);
     },
   });
@@ -729,6 +733,73 @@ describe("App 里的 Swarm", () => {
       expect(frame()).not.toContain("协调者 → @orders · #3");
     } finally {
       ui.unmount();
+      await session.endSwarm().catch(() => undefined);
+      await session.close();
+    }
+  }, 30_000);
+
+  it("成员 Turn 进行中：确认权限后立刻能输入，Enter 插话/排队，Esc 只中断成员", async () => {
+    let release: (script: FakeScript) => void = () => undefined;
+    const gate = new Promise<FakeScript>((resolve) => {
+      release = resolve;
+    });
+    const { runtime, session } = await swarmRuntime(gate);
+    const coordInterrupt = vi.spyOn(session, "interrupt");
+    const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
+    const frame = () => strip(ui.lastFrame() ?? "");
+    currentFrame = frame;
+    const enter = async (value: string) => {
+      ui.stdin.write(value);
+      await pause(100);
+      ui.stdin.write("\r");
+    };
+    let member: RuntimeSession | undefined;
+    try {
+      await settle(() => frame().includes("fake-1"));
+      await enter("/swarm 校验订单");
+      await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
+      await enter("/swarm board");
+      await settle(() => frame().includes("全部"));
+      await keys(ui, "\x1b[Z", "\x1b[B", "\r");
+      await settle(() => frame().includes("协调者 → @orders · #3"));
+      await vi.waitFor(() => expect(frame()).toContain("需要确认"), { timeout: 8000 });
+      const child =
+        replaySessionView(session.durableEvents()).swarm?.members.find((m) => m.name === "orders")
+          ?.childSessionId ?? "";
+      member = await runtime.resumeSession(child);
+      const memberInterrupt = vi.spyOn(member, "interrupt");
+
+      await press(ui, "a");
+      // 成员第二轮被 gate 卡住：这一轮还没结束，输入框必须收得到字
+      await press(ui, "私信：成员轮次进行中");
+      await vi.waitFor(() => expect(frame()).toContain("私信：成员轮次进行中"), {
+        timeout: 3000,
+      });
+      await press(ui, "\r");
+      await vi.waitFor(
+        async () => {
+          const pending = await member?.pendingInputs();
+          const logged = member
+            ?.durableEvents()
+            .some(
+              (e) =>
+                e.type === "message.user" &&
+                JSON.stringify(e.payload).includes("私信：成员轮次进行中"),
+            );
+          expect(
+            pending?.items.some((i) => i.text.includes("私信：成员轮次进行中")) || logged,
+          ).toBe(true);
+        },
+        { timeout: 5000 },
+      );
+      // 成员 Turn 仍在跑（gate 未放行），Esc 必须中断成员而不是协调者
+      await press(ui, "\x1b");
+      await vi.waitFor(() => expect(memberInterrupt).toHaveBeenCalled(), { timeout: 3000 });
+      expect(coordInterrupt).not.toHaveBeenCalled();
+    } finally {
+      release(stopText("orders 完成"));
+      ui.unmount();
+      coordInterrupt.mockRestore();
       await session.endSwarm().catch(() => undefined);
       await session.close();
     }

@@ -1219,8 +1219,23 @@ function SessionApp({
   /** /provider remove 确认 */
   const [providerRemove, setProviderRemove] = useState<string | undefined>(undefined);
 
-  const busy = view.status !== "idle" || submitPending;
-  const pending = view.pendingPermission;
+  // 成员视图是中途订阅的：`runtime.status` 是临时事件、不落盘，起始快照也没补发，
+  // 所以成员 Turn 进行中切进来时 view.status 仍是 idle。用 live 状态补齐忙闲，
+  // 插话/排队与 Esc/Ctrl+C 中断才和协调者一致。
+  const memberLiveBusy =
+    memberView !== undefined &&
+    (memberView.currentTurn !== undefined ||
+      memberView.live.tools.length > 0 ||
+      memberView.live.assistants.length > 0 ||
+      memberView.pendingPermission !== undefined);
+  const busy = view.status !== "idle" || submitPending || memberLiveBusy;
+  // 权限回复后立即本地结算：不等 `permission.resolved` 事件往返（成员视图的订阅可能
+  // 滞后到 turn.completed 才收到，期间输入框会被权限框独占、按键全丢）。
+  const [settledPermission, setSettledPermission] = useState<string | undefined>(undefined);
+  const pending =
+    view.pendingPermission !== undefined && view.pendingPermission.requestId !== settledPermission
+      ? view.pendingPermission
+      : undefined;
   // 待回答的提问与权限确认同级独占焦点。
   const pendingQ = view.pendingQuestion;
   // 面板页码按 requestId 记录并在渲染时派生：新提问自动回到第 1 题。
@@ -1352,6 +1367,8 @@ function SessionApp({
   const replyPermission = useCallback(
     (reply: PermissionReply) => {
       if (pending === undefined) return;
+      // 先让输入框/权限框立即退出独占态，命令本身异步结算
+      setSettledPermission(pending.requestId);
       session.respondPermission(pending.requestId, reply).catch((e: unknown) => {
         pushLine(`! ${errText(e)}`);
       });
