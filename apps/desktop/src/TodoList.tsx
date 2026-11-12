@@ -54,25 +54,53 @@ export function TodoList({ items }: { items: readonly TodoItem[] }) {
   );
 }
 
+/** 手机会话页自己的折叠状态：默认收起、单独存本机，桌面 prefs 不受影响。 */
+export interface TodoPanelMobile {
+  collapsed: boolean;
+  onChange: (collapsed: boolean) => void;
+}
+
 export function TodoPanel({
   items,
   prefs,
   goal,
   goalActions,
   onGoalError = () => undefined,
+  mobile,
 }: {
   items: readonly TodoItem[];
   prefs?: PrefsStore | undefined;
   goal?: GoalState | undefined;
   goalActions?: GoalActions | undefined;
   onGoalError?: ((error: unknown) => void) | undefined;
+  mobile?: TodoPanelMobile | undefined;
 }) {
-  const [collapsed, setCollapsed] = useState(() => prefs?.get().todosCollapsed ?? false);
+  const [innerCollapsed, setInnerCollapsed] = useState(() => prefs?.get().todosCollapsed ?? false);
+  const collapsed = mobile?.collapsed ?? innerCollapsed;
+  const setCollapsed = (next: boolean) => {
+    if (mobile) {
+      mobile.onChange(next);
+      return;
+    }
+    setInnerCollapsed(next);
+    prefs?.update({ todosCollapsed: next ? true : undefined });
+  };
   const shownGoal = visibleGoal(goal);
   const [goalExpanded, setGoalExpanded] = useGoalExpansion(shownGoal);
   const { done, complete } = todoSummary(items);
   const current = items.find((item) => item.status === "in_progress");
   if (items.length === 0 && shownGoal === undefined) return null;
+  const body =
+    !collapsed && goalExpanded && shownGoal ? (
+      <div className="goal-content-grid">
+        <div aria-hidden="true">
+          <TodoList items={items} />
+        </div>
+        <GoalDetail goal={shownGoal} />
+      </div>
+    ) : (
+      <TodoList items={items} />
+    );
   return (
     <section className="todo-panel" aria-label="当前任务清单">
       {shownGoal && goalActions && (
@@ -85,17 +113,14 @@ export function TodoPanel({
           {...goalActions}
         />
       )}
+      {/* 手机保留清单 DOM，让 CSS 能做展开/收起过渡；桌面照旧按状态挂载 */}
       {items.length > 0 &&
-        !collapsed &&
-        (goalExpanded && shownGoal ? (
-          <div className="goal-content-grid">
-            <div aria-hidden="true">
-              <TodoList items={items} />
-            </div>
-            <GoalDetail goal={shownGoal} />
+        (mobile ? (
+          <div className="todo-panel-body" data-expanded={!collapsed} aria-hidden={collapsed}>
+            {body}
           </div>
         ) : (
-          <TodoList items={items} />
+          !collapsed && body
         ))}
       {items.length > 0 && (
         <button
@@ -105,14 +130,10 @@ export function TodoPanel({
           onClick={() => {
             if (goalExpanded) {
               setGoalExpanded(false);
-              if (collapsed) {
-                setCollapsed(false);
-                prefs?.update({ todosCollapsed: undefined });
-              }
+              if (collapsed) setCollapsed(false);
               return;
             }
             setCollapsed(!collapsed);
-            prefs?.update({ todosCollapsed: !collapsed ? true : undefined });
           }}
         >
           <Icon

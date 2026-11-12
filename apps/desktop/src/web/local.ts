@@ -6,6 +6,7 @@
 export type PhoneTheme = "system" | "light" | "dark";
 
 const THEME_KEY = "nocturne.phone.theme";
+const TODOS_KEY = "nocturne.phone.todosCollapsed";
 const DIAGNOSTICS_KEY = "nocturne.phone.diagnostics";
 const DIAGNOSTICS_LIMIT = 8;
 
@@ -45,6 +46,15 @@ export function applyTheme(theme: PhoneTheme): void {
 export function saveTheme(theme: PhoneTheme): void {
   write(THEME_KEY, theme);
   applyTheme(theme);
+}
+
+/** 会话页任务清单默认收起；手机自己的状态，不读写桌面 prefs 的 todosCollapsed。 */
+export function loadTodosCollapsed(): boolean {
+  return read(TODOS_KEY) !== "false";
+}
+
+export function saveTodosCollapsed(collapsed: boolean): void {
+  write(TODOS_KEY, collapsed ? "true" : "false");
 }
 
 export function loadDisconnects(): DisconnectRecord[] {

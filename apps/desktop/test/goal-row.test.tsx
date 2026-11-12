@@ -119,7 +119,7 @@ it("运行秒表只更新子组件，不导致父面板随秒重渲染；无 tur
   spy.mockRestore();
 });
 
-it("手机复用目标行，无任务清单；展开、暂停与取消保持触控按钮", () => {
+it("目标行组件本身不含清单；展开、暂停与取消保持触控按钮", () => {
   function Mobile() {
     const [expanded, setExpanded] = useState(false);
     return (

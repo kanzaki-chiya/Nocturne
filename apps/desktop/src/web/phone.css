@@ -400,6 +400,82 @@
   min-height: 0;
   flex: 1;
 }
+/* 任务清单：复用桌面 TodoPanel，收起时只剩紧贴输入框的一行开关条 */
+.phone .todo-panel {
+  flex: none;
+  margin: 0 var(--space-3);
+  max-height: min(
+    calc(var(--phone-height, 100dvh) * 0.4),
+    calc(var(--phone-height, 100dvh) - 320px)
+  );
+}
+.phone .todo-panel .goal-row {
+  flex: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.phone .todo-panel-toggle {
+  border-radius: 0;
+}
+.phone .todo-panel-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 1;
+}
+.phone .todo-panel-body > * {
+  min-height: 0;
+  overflow: hidden;
+}
+.phone .todo-panel-body[data-expanded="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+}
+.phone .todo-panel-body[data-expanded="true"] .todo-list {
+  max-height: none;
+  overflow-y: auto;
+}
+.phone .todo-panel-body[data-expanded="false"] .todo-list {
+  padding-block: 0;
+}
+/* 手机保留清单 DOM，桌面的 :has() 分隔线按展开状态补上 */
+.phone .todo-panel:has(.todo-list) .todo-panel-toggle {
+  border-top: 0;
+}
+.phone .todo-panel-body[data-expanded="true"] {
+  border-bottom: 1px dashed var(--a-border-strong);
+}
+.phone .todo-panel:has(.goal-row) .todo-panel-body[data-expanded="true"] {
+  border-top: 1px dashed var(--a-border-strong);
+}
+.phone .todo-panel:has(.goal-row) .todo-panel-body[data-expanded="false"] + .todo-panel-toggle {
+  border-top: 1px dashed var(--a-border-strong);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .phone .todo-panel-body {
+    transition:
+      grid-template-rows var(--dur-fold) var(--ease-both),
+      opacity var(--dur-fold) var(--ease-both);
+  }
+  .phone .todo-panel-body[data-expanded="false"] {
+    transition:
+      grid-template-rows var(--dur-fold) var(--ease-both),
+      opacity var(--dur-fold) var(--ease-both),
+      visibility 0s var(--dur-fold);
+  }
+  .phone .todo-panel-toggle .fold-arrow {
+    transition: transform var(--dur-fold) var(--ease-both);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .phone .todo-panel-toggle .fold-arrow {
+    transition: none;
+  }
+}
 .phone .conversation-stream {
   padding: 16px;
   min-width: 0;
