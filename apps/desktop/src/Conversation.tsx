@@ -4163,9 +4163,9 @@ function ConversationContent({
   const users = view.entries.filter((e) => e.kind === "user");
   const lastSeq = users.at(-1)?.seq;
   const firstUserSeq = users[0]?.seq;
-  /** 只读视图里的用户消息是任务/催促，不是可编辑的气泡 */
+  /** 只读视图里的用户消息是任务/催促，不是可编辑的气泡；Swarm 成员会话里的私信保留用户消息气泡 */
   const roleOf = (entry: ViewEntry): "task" | "nudge" | undefined =>
-    readOnly === undefined || entry.kind !== "user"
+    readOnly === undefined || swarmRecipientLabel !== undefined || entry.kind !== "user"
       ? undefined
       : entry.seq === firstUserSeq
         ? "task"

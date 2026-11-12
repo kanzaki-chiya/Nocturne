@@ -1052,7 +1052,8 @@ export function PhoneApp({
     const memberStatus = swarm?.members.find(
       (item) => item.childSessionId === page.childSessionId,
     )?.status;
-    const frozen = swarm === undefined || swarm.status === "ended" || memberStatus === "removed";
+    const frozen =
+      swarm?.status !== "active" || memberStatus === undefined || memberStatus === "removed";
     body = entry ? (
       <SessionScreen
         key={entry.session.id}

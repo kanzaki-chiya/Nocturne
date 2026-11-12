@@ -48,7 +48,8 @@ export function SwarmMemberPane({
     fallbackCwd: workspace,
   });
   const [submitError, setSubmitError] = useState<string>();
-  const frozen = swarmStatus === undefined || swarmStatus === "ended" || memberStatus === "removed";
+  const frozen =
+    swarmStatus !== "active" || memberStatus === undefined || memberStatus === "removed";
   const recipientLabel = `@${memberName}`;
 
   const readySession = state.status === "ready" ? state.session : undefined;
