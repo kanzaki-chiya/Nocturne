@@ -20,6 +20,7 @@ import {
   truncateLine,
 } from "../format.js";
 import { useTheme, type ThemePalette } from "../theme.js";
+import { toolDisplayName } from "../text-format-swarm.js";
 import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
 import { SegmentText, TodoRows } from "./todo-panel.js";
@@ -125,7 +126,7 @@ export function ToolRow({
       ? ` ${subagentApplyLine(entry.result.output)}`
       : name === "switch_worktree"
         ? ` 切换工作树 · ${summary}`
-        : ` ${name}${subagentModel(entry)} ${summary}`;
+        : ` ${toolDisplayName(name)}${subagentModel(entry)} ${summary}`;
   const duration = entry.result?.durationMs;
   const suffix = subagentStartRejected(entry)
     ? "未启动"
@@ -293,7 +294,7 @@ export function LiveToolRow({ tool, width }: { tool: LiveTool; width: number }):
   return (
     <Text wrap="truncate">
       <Text color={theme.accent}>{spinner}</Text>
-      <Text> {tool.name}</Text>
+      <Text> {toolDisplayName(tool.name)}</Text>
       <Text dimColor>
         {" "}
         {truncateLine(tool.inputText, Math.max(8, width - tool.name.length - 16), g.ellipsis)}

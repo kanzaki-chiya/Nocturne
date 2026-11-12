@@ -31,6 +31,30 @@ export function useSessionView(session: RuntimeSession): SessionView {
 }
 
 /**
+ * 可选会话的视图（Swarm 成员会话，tui.md §6）：没有会话时返回 undefined，
+ * 不订阅任何东西；会话变化时重放新日志。
+ */
+export function useOptionalSessionView(
+  session: RuntimeSession | undefined,
+): SessionView | undefined {
+  const ref = useRef<{ session: RuntimeSession; view: SessionView } | undefined>(undefined);
+  if (session === undefined) ref.current = undefined;
+  else if (ref.current?.session !== session) {
+    ref.current = { session, view: replaySessionView(session.durableEvents()) };
+  }
+  const [, bump] = useReducer((c: number) => c + 1, 0);
+  useEffect(() => {
+    const current = ref.current;
+    if (session === undefined || current === undefined) return;
+    return session.subscribe((event) => {
+      reduceSessionView(current.view, event);
+      bump();
+    });
+  }, [session]);
+  return ref.current?.view;
+}
+
+/**
  * 待发输入快照（ADR-0070 §6）：临时状态不写日志、`input.pending` 不回放，
  * 所以切换会话时先取一次当前快照，之后随事件整份覆盖。
  */

@@ -137,15 +137,17 @@ import { SettingsPage } from "./components/settings-page.js";
 import { GrantsPage } from "./components/grants-page.js";
 import { RewindPage } from "./components/rewind-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
+import { SwarmBoard } from "./components/swarm-board.js";
+import { SwarmStrip, swarmStripRows } from "./components/swarm-strip.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
 import { TuiEnvContext, glyphs, type TuiEnv } from "./env.js";
-import { useSessionView, usePendingInputs } from "./session-view.js";
+import { useOptionalSessionView, useSessionView, usePendingInputs } from "./session-view.js";
 import { useGenerationSpeed } from "./speed.js";
 import stringWidth from "string-width";
 import { useReasoning } from "./reasoning.js";
-import { useNotifyBell } from "./notify.js";
+import { useNotifyBell, useSwarmMemberBell } from "./notify.js";
 import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import type { ConsoleLines } from "./console-capture.js";
@@ -909,8 +911,19 @@ function SessionApp({
   }, [stdout]);
 
   // /resume 切换：session 变为新会话（useSessionView 自动重放新日志）
-  const [session, setSession] = useState(initialSession);
-  const view = useSessionView(session);
+  // Swarm 成员会话（tui.md §6）：协调者会话 `coordinator` 始终打开，成员只是叠在上面的显示视图；
+  // 下文的 `session` / `view` 指当前显示的会话，状态块与留言板读协调者
+  const [coordinator, setSession] = useState(initialSession);
+  const [memberSession, setMemberSession] = useState<
+    { session: RuntimeSession; name: string } | undefined
+  >(undefined);
+  const memberRef = useRef(memberSession);
+  memberRef.current = memberSession;
+  const session = memberSession?.session ?? coordinator;
+  const coordView = useSessionView(coordinator);
+  const memberView = useOptionalSessionView(memberSession?.session);
+  const view = memberView ?? coordView;
+  const coordSwarm = coordView.swarm;
   // 待发输入（ADR-0070）：运行中插话/排队，临时状态按整份快照覆盖
   const pendingInputs = usePendingInputs(session);
   const [pendingIndex, setPendingIndex] = useState(0);
@@ -942,12 +955,22 @@ function SessionApp({
   }, [editingPending]);
   // 通知响铃（ADR-0056 §3）：终端没在看时三类事件各响一次 BEL（帧外写出）
   useNotifyBell({ session, runtime, focus, writeOob });
+  // 成员的新待确认请求（实时到达）同样响铃；正在看的成员由上面那条覆盖
+  useSwarmMemberBell({
+    session: coordinator,
+    runtime,
+    focus,
+    writeOob,
+    viewing: memberSession?.name,
+  });
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
   const speed = useGenerationSpeed(session);
-  const title = view.title;
+  // 成员会话的第一条消息是 Swarm 帖子送达：标题行不露出 `<swarm-post>` 标签
+  const title =
+    view.title !== undefined && /^<swarm-post[^>]*>/u.test(view.title) ? undefined : view.title;
   useEffect(() => {
-    onSessionId?.(session.id);
-  }, [session, onSessionId]);
+    onSessionId?.(coordinator.id);
+  }, [coordinator, onSessionId]);
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0);
   const [rewindImageHint, setRewindImageHint] = useState<string>();
@@ -1038,6 +1061,17 @@ function SessionApp({
     };
   }, [session, diffExpanded]);
   const [recordOpen, setRecordOpen] = useState(false);
+  /** `/swarm board` 全屏留言板（仅全屏，tui.md §2） */
+  const [boardOpen, setBoardOpen] = useState(false);
+  // 当前会话出现权限确认或提问时让出整帧，确认框照常显示
+  useEffect(() => {
+    if (view.pendingPermission !== undefined || view.pendingQuestion !== undefined)
+      setBoardOpen(false);
+  }, [view.pendingPermission, view.pendingQuestion]);
+  // Swarm 不存在时没有留言板
+  useEffect(() => {
+    if (coordSwarm === undefined) setBoardOpen(false);
+  }, [coordSwarm]);
   const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
   const recordTotal = useRef<number | undefined>(undefined);
   const recordCommitted = useRef(false);
@@ -1696,6 +1730,68 @@ function SessionApp({
     [session.id],
   );
 
+  /**
+   * Swarm 成员会话（tui.md §6）：换绑显示视图，不经 switchSession——协调者始终打开，
+   * 成员句柄是 Runtime 托管的共享代理（close 为空操作），进出都不 close、不 interrupt。
+   * 视口与 /resume 一样整体换成目标会话，旧内容冻结（全屏）或留在回滚区（--inline）。
+   */
+  const showSession = useCallback(
+    (next: { session: RuntimeSession; name: string } | undefined): void => {
+      const target = next?.session ?? coordinator;
+      if (target === session) return;
+      const epoch = sessionEpoch.current++;
+      const sep: TranscriptItem = {
+        kind: "separator",
+        key: `sw-${epoch}`,
+        text: `已切换到会话 ${target.id}`,
+      };
+      if (fullscreen) {
+        const frozenItems = interleaveClient<ViewEntry, TranscriptItem>(
+          entriesRef.current,
+          0,
+          clientLinesRef.current,
+          (e) => [{ ...e, key: `z${epoch}:${e.key}` }],
+          (line) => ({
+            kind: "header",
+            key: `z${epoch}:c${line.id}`,
+            lines: [{ key: `z${epoch}:c${line.id}`, text: line.text, dim: true }],
+          }),
+        );
+        setFrozen((prev) => [...prev, ...frozenItems, sep]);
+        setClientLines([]);
+        setSel(undefined);
+        setScroll(scrollToBottom());
+      } else {
+        staticQueue.current.push(sep);
+        staticWritten.current.clear();
+        staticAttempts.current.clear();
+      }
+      pastes.reset(inputRef.current);
+      setMemberSession(next);
+    },
+    [coordinator, session, fullscreen, pastes],
+  );
+  const openMember = useCallback(
+    async (childSessionId: string): Promise<boolean> => {
+      const member = coordSwarm?.members.find((m) => m.childSessionId === childSessionId);
+      if (member === undefined) return false;
+      if (memberRef.current?.session.id === childSessionId) return true;
+      try {
+        // rpc.md 3.2：Swarm 存续期间按 id 打开成员拿到的是 Runtime 托管的同一常驻实例
+        const opened = await runtime.resumeSession(childSessionId);
+        showSession({ session: opened, name: member.name });
+        return true;
+      } catch (e) {
+        pushLine(`! ${errText(e)}`);
+        return false;
+      }
+    },
+    [coordSwarm, runtime, showSession, pushLine],
+  );
+  const backToCoordinator = useCallback((): void => {
+    showSession(undefined);
+  }, [showSession]);
+
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
     async (
@@ -1704,7 +1800,11 @@ function SessionApp({
       draft?: RewindTarget,
       jump?: SeqJump,
     ): Promise<void> => {
-      if (submitting.current || busy) {
+      // 成员视图下切换会话：先回到协调者视图，再走原来的 switchSession（tui.md §6）；
+      // 这时的 busy 是成员的，忙闲以 switchSession 对协调者的判定为准
+      const fromMember = memberRef.current !== undefined;
+      if (fromMember) setMemberSession(undefined);
+      if (submitting.current || (busy && !fromMember)) {
         pushLine("! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换");
         return;
       }
@@ -1868,7 +1968,9 @@ function SessionApp({
   );
 
   const doNew = useCallback(async (): Promise<void> => {
-    if (submitting.current || busy) {
+    const fromMember = memberRef.current !== undefined;
+    if (fromMember) setMemberSession(undefined);
+    if (submitting.current || (busy && !fromMember)) {
       pushLine("! 会话忙（本轮进行中）；先中断再新建");
       return;
     }
@@ -2096,6 +2198,7 @@ function SessionApp({
     pickerOpen ||
     providerPageOpen ||
     recordOpen ||
+    boardOpen ||
     overlay === "settings" ||
     overlay === "grants" ||
     rewindTargets !== undefined;
@@ -2458,6 +2561,7 @@ function SessionApp({
       }
     }
     if (key.ctrl && ch === "o") {
+      if (boardOpen) return;
       toggleReasoning();
       return;
     }
@@ -2858,12 +2962,18 @@ function SessionApp({
         } else if (work.action === "plan-cancel") {
           void session.cancelPlan().catch(fail);
         } else if (work.action === "swarm-board") {
-          // TUI 的留言板页面尚未实现：先只给出用法，不占提交位
-          pushLine("用法：/swarm 任务");
+          // 留言板只在全屏提供；本会话没有 Swarm 或 --inline 时给出用法
+          if (coordSwarm === undefined || !fullscreen) pushLine("用法：/swarm 任务");
+          else {
+            setSel(undefined);
+            setBoardOpen(true);
+          }
         } else if (work.action === "swarm-end") {
-          void session.endSwarm().then(({ unmerged }) => {
-            for (const item of unmerged) pushLine(`@${item.name} ${item.branch}`);
-          }, fail);
+          if (coordSwarm === undefined) pushLine("用法：/swarm 任务");
+          else
+            void coordinator.endSwarm().then(({ unmerged }) => {
+              for (const item of unmerged) pushLine(`@${item.name} ${item.branch}`);
+            }, fail);
         } else {
           // 空闲时继续目标、批准计划都会开新 Turn：与普通提交一样占住提交位
           const idle = !busy;
@@ -3139,6 +3249,8 @@ function SessionApp({
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length, view.goal) : 0,
     // 待发输入列表（ADR-0070）：全屏才画，行数随条目数（最多 3 条 + 提示）
     fullscreen ? pendingPanelRows(pendingInputs.items.length, pendingInputs.paused) : 0,
+    // Swarm 状态块（tui.md §2）：全屏与 --inline 都画，始终读协调者
+    boardOpen ? 0 : swarmStripRows(coordSwarm),
   );
   const promptOverlay = pending !== undefined || pendingQ !== undefined;
   const popupHeight = Math.min(
@@ -3164,7 +3276,30 @@ function SessionApp({
 
   // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
   const pageBody =
-    rewindTargets !== undefined ? (
+    boardOpen && coordSwarm !== undefined ? (
+      <SwarmBoard
+        swarm={coordSwarm}
+        width={width}
+        height={budget.frameHeight}
+        active={!dialogOpen}
+        onClose={() => {
+          setBoardOpen(false);
+        }}
+        onPost={async (text) => {
+          await coordinator.postToSwarm({ text });
+        }}
+        onOpenMember={(childSessionId) => {
+          void openMember(childSessionId).then((ok) => {
+            if (ok) setBoardOpen(false);
+          });
+        }}
+        onOpenCoordinator={() => {
+          backToCoordinator();
+          setBoardOpen(false);
+        }}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+      />
+    ) : rewindTargets !== undefined ? (
       <RewindPage
         targets={rewindTargets}
         cwd={session.state().meta.cwd}
@@ -3344,6 +3479,7 @@ function SessionApp({
     reasoningExpanded,
     fullscreen,
     theme,
+    swarmRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
   };
   sourceRef.current = transcriptSource;
   const exportBlocks: LineBlock[] =
@@ -3492,6 +3628,7 @@ function SessionApp({
             entries: view.entries,
             backgroundShells: view.backgroundShells,
             shellOutputs,
+            swarmRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
           }),
         ],
         clientRows,
@@ -3505,7 +3642,7 @@ function SessionApp({
   const shownActivity = conversationHeight > 0 ? activityLines.slice(-conversationHeight) : [];
   const activityHeight = shownActivity.length;
   const prompt = `${g.prompt} `;
-  const inputY = -(budget.input + budget.completion + budget.status);
+  const inputY = -(budget.input + budget.completion + budget.swarm + budget.status);
 
   const groupCount = new Set(candidates.map((item) => item.group).filter(Boolean)).size;
   const groupRows = budget.completion > groupCount ? groupCount : 0;
@@ -3906,6 +4043,9 @@ function SessionApp({
             </Text>,
           ])
         : null}
+      {budget.swarm > 0 && coordSwarm !== undefined ? (
+        <SwarmStrip swarm={coordSwarm} width={width} height={budget.swarm} />
+      ) : null}
       {budget.status > 0 ? (
         <StatusBar
           view={view}
@@ -3926,15 +4066,17 @@ function SessionApp({
     pageBody !== null || recordBody !== null || overlayBody !== null ? 0 : budget.conversation,
     rewindTargets !== undefined
       ? "rewind"
-      : pickerOpen
-        ? "model"
-        : providerPageOpen
-          ? "provider"
-          : recordOpen
-            ? "record"
-            : overlayBody !== null
-              ? "overlay"
-              : "conversation",
+      : boardOpen
+        ? "swarm-board"
+        : pickerOpen
+          ? "model"
+          : providerPageOpen
+            ? "provider"
+            : recordOpen
+              ? "record"
+              : overlayBody !== null
+                ? "overlay"
+                : "conversation",
   );
 
   return (
@@ -3947,6 +4089,7 @@ function SessionApp({
           width={width}
           reasoning={reasoning}
           now={reasoningNow}
+          swarmRecipient={memberSession !== undefined ? `@${memberSession.name}` : undefined}
         />
       )}
       {pageBody ??

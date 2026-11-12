@@ -12,7 +12,7 @@
  * 按日志里未闭合的 `turn.started` 计时。`notifications.sound` 不影响 TUI
  * （铃声由终端 bellStyle 决定）；不做 OSC 9 与系统通知。
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import type { Runtime, RuntimeEvent, RuntimeSession } from "@nocturne/core";
 
@@ -142,6 +142,67 @@ export function useNotifyBell({
       );
       if (event.type === "turn.completed" && event.turnId !== undefined) open.delete(event.turnId);
       if (category !== undefined) writeOob?.(BELL);
+    });
+  }, [session, runtime, focus, writeOob]);
+}
+
+/**
+ * 成员待确认响铃判定（ADR-0089 §8）：协调者会话的 `swarm.member_updated` 带成员的
+ * `pendingPermissions`；订阅起始快照（`eseq === 0`）里已有的请求只登记，之后真正新出现的
+ * requestId 才按「需要确认」一类判定一次。`viewing` 是正在显示的成员：它自己的
+ * `permission.requested` 已由 useNotifyBell 判定，这里不重复响。
+ */
+export function swarmMemberRing(
+  event: RuntimeEvent,
+  seen: Set<string>,
+  context: { focused: boolean; viewing?: string | undefined },
+  settings: NotifySettings,
+): boolean {
+  if (event.type === "swarm.ended") {
+    seen.clear();
+    return false;
+  }
+  if (event.type !== "swarm.member_updated") return false;
+  const pending = event.payload.pendingPermissions ?? [];
+  if (event.eseq === 0) {
+    for (const p of pending) seen.add(p.requestId);
+    return false;
+  }
+  const fresh = pending.filter((p) => !seen.has(p.requestId));
+  for (const p of fresh) seen.add(p.requestId);
+  if (fresh.length === 0 || event.payload.name === context.viewing) return false;
+  // 与 permission.requested 同属「需要确认」一类
+  return settings.enabled && settings.attention && !context.focused;
+}
+
+/** 挂上成员待确认响铃：订阅协调者会话，规则见 swarmMemberRing */
+export function useSwarmMemberBell({
+  session,
+  runtime,
+  focus,
+  writeOob,
+  viewing,
+}: {
+  session: RuntimeSession;
+  runtime: Runtime;
+  focus?: FocusSource | undefined;
+  writeOob?: ((data: string) => boolean) | undefined;
+  viewing?: string | undefined;
+}): void {
+  const viewingRef = useRef(viewing);
+  viewingRef.current = viewing;
+  useEffect(() => {
+    const seen = new Set<string>();
+    return session.subscribe((event) => {
+      if (
+        swarmMemberRing(
+          event,
+          seen,
+          { focused: focus?.focused() === true, viewing: viewingRef.current },
+          readNotifySettings(runtime),
+        )
+      )
+        writeOob?.(BELL);
     });
   }, [session, runtime, focus, writeOob]);
 }

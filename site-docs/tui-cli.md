@@ -84,6 +84,7 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 | `/goal` | 目标模式：带目标时做到核对通过为止；不带参数查看当前目标状态；支持 `stop`、`resume` |
 | `/plan` | 计划模式：切到 `read-only` 产出实施计划；支持 `approve`、`cancel` |
 | `/boost` | 多代理攻坚：拆解任务并用后台子代理并行调查与实现 |
+| `/swarm` | Swarm 协作：带任务时建立常驻成员与共享留言板；`/swarm board` 打开留言板，`/swarm end` 结束 |
 | `/grants` | 查看会话与项目授权，或用 `/grants revoke` 撤销 |
 | `/mcp` | 查看 MCP 服务器连接状态与工具数 |
 | `/skills` | 查看当前会话已加载的技能、来源与目录预算 |
@@ -97,6 +98,8 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 | `/fork` | 从当前位置分叉出新会话 |
 | `/new`、`/clear` | 新建并切换到空会话 |
 | `/exit`、`/quit` | 退出程序 |
+
+全屏 TUI 在输入框下方显示 Swarm 状态块，`/swarm board` 打开全屏留言板；`--inline` 只显示状态块，不提供留言板。
 
 ## 后台任务
 

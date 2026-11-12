@@ -16,6 +16,7 @@ import {
   subagentResultText,
   backgroundToolStatus,
   subagentStartRejected,
+  unwrapSwarmPostText,
   workModeDisplayText,
 } from "@nocturne/core/protocol";
 
@@ -42,6 +43,7 @@ import {
 } from "./format.js";
 import { renderAssistant } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
+import { swarmAuthorLabel, toolDisplayName } from "./text-format-swarm.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
 import type { TranscriptItem } from "./components/transcript.js";
@@ -172,6 +174,8 @@ interface LayoutOptions {
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   continued?: boolean;
   written?: ReadonlyMap<string, number>;
+  /** 帖子送达头部的接收者：协调者会话为「协调者」，成员会话为 `@name` */
+  swarmRecipient?: string | undefined;
 }
 
 export function layoutEntry(
@@ -261,6 +265,23 @@ function layoutEntryBody(
               )
             : []),
         ];
+      }
+      if (entry.swarm !== undefined) {
+        const bar = ascii ? "| " : "│ ";
+        const head = `${swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind)} → ${options.swarmRecipient ?? "协调者"} · #${entry.swarm.postNumber}`;
+        const body = stripControls(unwrapSwarmPostText(userText(entry)));
+        const barred = (key: string, text: string, extra: Partial<LaidLine>): LaidLine[] =>
+          wrap(text, Math.max(1, budget(width) - 2)).map((line, i) => ({
+            key: `${key}:${i}`,
+            text: `${bar}${line.text}`,
+            continued: line.continued,
+            copyIndent: bar.length,
+            segments: [
+              { text: bar, color: theme.accent },
+              { text: line.text, ...(extra.dim === true ? { dim: true } : {}) },
+            ],
+          }));
+        return [...barred(`${entry.key}:h`, head, { dim: true }), ...barred(entry.key, body, {})];
       }
       const text = workModeDisplayText(userText(entry), entry.workMode);
       const fullText = stripControls(`${prompt} ${text}`.replace(/\r\n?/g, "\n"));
@@ -449,7 +470,7 @@ function layoutEntryBody(
             ? `${mark} 切换工作树 · ${summary} ${status}`
             : shownName === "mcp_search"
               ? `${mark} 搜索 MCP 工具：${summary} ${status}`
-              : `${mark} ${shownName ?? "?"}${subagentModel(entry)} ${summary} ${status}`;
+              : `${mark} ${shownName === undefined ? "?" : toolDisplayName(shownName)}${subagentModel(entry)} ${summary} ${status}`;
       const lines = [
         ...review,
         ...rows(
@@ -585,7 +606,9 @@ export function layoutLive(
     lines.push({
       key: `live:${tool.callId}`,
       text: paint(
-        tool.name === "ask_user" ? "? 提问" : `${ascii ? "*" : "•"} ${tool.name} ${label}`,
+        tool.name === "ask_user"
+          ? "? 提问"
+          : `${ascii ? "*" : "•"} ${toolDisplayName(tool.name)} ${label}`,
         width,
       ),
       color: theme.accent,
@@ -702,6 +725,7 @@ interface TranscriptSource {
   diffExpanded?: ReadonlySet<string>;
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   theme?: ThemePalette;
+  swarmRecipient?: string | undefined;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -722,6 +746,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     entries: src.entries,
     backgroundShells: src.live.backgroundShells,
     ...(src.shellOutputs ? { shellOutputs: src.shellOutputs } : {}),
+    ...(src.swarmRecipient !== undefined ? { swarmRecipient: src.swarmRecipient } : {}),
   };
   const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
   const blocks: LineBlock[] = [

@@ -17,10 +17,12 @@ import { ToolRow } from "./tool-row.js";
 
 import {
   subagentResultLine,
+  unwrapSwarmPostText,
   workModeDisplayText,
   type BackgroundShellTask,
   type ViewEntry,
 } from "@nocturne/core/protocol";
+import { swarmAuthorLabel } from "../text-format-swarm.js";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
@@ -33,10 +35,12 @@ function UserRow({
   entry,
   entries,
   backgroundShells,
+  swarmRecipient,
 }: {
   entry: Extract<ViewEntry, { kind: "user" }>;
   entries: readonly ViewEntry[];
   backgroundShells: BackgroundShellTask[];
+  swarmRecipient?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -53,6 +57,25 @@ function UserRow({
         <Text color={theme.secondary}>{`子代理结果 · ${subagentResultLine(entry.subagent)}`}</Text>
       </Box>
     );
+  if (entry.swarm !== undefined) {
+    const bar = env.ascii ? "|" : "│";
+    const head = `${swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind)} → ${swarmRecipient ?? "协调者"} · #${entry.swarm.postNumber}`;
+    const body = unwrapSwarmPostText(userText(entry)).split(/\r?\n/u);
+    return (
+      <Box marginTop={1} flexDirection="column">
+        <Text>
+          <Text color={theme.accent}>{bar} </Text>
+          <Text dimColor>{head}</Text>
+        </Text>
+        {body.map((line, i) => (
+          <Text key={i}>
+            <Text color={theme.accent}>{bar} </Text>
+            {line}
+          </Text>
+        ))}
+      </Box>
+    );
+  }
   const text = workModeDisplayText(userText(entry), entry.workMode);
   return (
     <Box marginTop={1} flexDirection="column">
@@ -188,7 +211,9 @@ export function EntryRow({
   now,
   entries = [],
   backgroundShells = [],
+  swarmRecipient,
 }: {
+  swarmRecipient?: string | undefined;
   backgroundShells?: BackgroundShellTask[];
   entries?: readonly ViewEntry[];
   entry: TranscriptItem;
@@ -198,7 +223,14 @@ export function EntryRow({
 }): React.JSX.Element {
   switch (entry.kind) {
     case "user":
-      return <UserRow entry={entry} entries={entries} backgroundShells={backgroundShells} />;
+      return (
+        <UserRow
+          entry={entry}
+          entries={entries}
+          backgroundShells={backgroundShells}
+          swarmRecipient={swarmRecipient}
+        />
+      );
     case "assistant":
       return <AssistantRow entry={entry} width={width} reasoning={reasoning} now={now} />;
     case "tool":
@@ -263,7 +295,9 @@ export function Transcript({
   width,
   reasoning,
   now,
+  swarmRecipient,
 }: {
+  swarmRecipient?: string | undefined;
   entries: readonly TranscriptItem[];
   backgroundShells?: BackgroundShellTask[];
   allEntries?: readonly ViewEntry[];
@@ -282,6 +316,7 @@ export function Transcript({
           now={now}
           entries={allEntries}
           backgroundShells={backgroundShells}
+          swarmRecipient={swarmRecipient}
         />
       )}
     </Static>

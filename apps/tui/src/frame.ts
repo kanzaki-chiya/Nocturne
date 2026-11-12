@@ -13,6 +13,8 @@ export interface FrameBudget {
   todo: number;
   /** 待发输入列表（ADR-0070 §6） */
   pending: number;
+  /** Swarm 状态块（tui.md §2）：在对话区之前分配，太矮时压对话区 */
+  swarm: number;
   status: number;
 }
 
@@ -20,6 +22,7 @@ export interface FrameBudget {
  * @param rows 终端行数
  * @param completionWanted 希望显示的候选行数（已截到 0–8 之外也会被截断）
  * @param pendingWanted 待发输入列表希望占的行数（ADR-0070）
+ * @param swarmWanted Swarm 状态块希望占的行数；至少给对话留 1 行
  */
 export function frameBudget(
   rows: number,
@@ -27,6 +30,7 @@ export function frameBudget(
   inputWanted = 1,
   todoWanted = 0,
   pendingWanted = 0,
+  swarmWanted = 0,
 ): FrameBudget {
   const frameHeight = Math.max(0, rows - 1);
   const status = frameHeight >= 1 ? 1 : 0;
@@ -34,7 +38,9 @@ export function frameBudget(
   // 分隔线是输入框的一部分。帧高只够状态+输入时不画线，把行留给对话。
   const afterChrome = frameHeight - status - input;
   const inputRule = afterChrome >= 2 ? 1 : 0;
-  const remaining = frameHeight - status - input - inputRule;
+  const beforeSwarm = frameHeight - status - input - inputRule;
+  const swarm = Math.min(Math.max(0, swarmWanted), Math.max(0, beforeSwarm - 1));
+  const remaining = beforeSwarm - swarm;
   const wanted = Math.min(8, Math.max(0, Math.floor(completionWanted)));
   let conversation = 0;
   let completion = 0;
@@ -50,5 +56,5 @@ export function frameBudget(
   // 待发输入给对话至少留 2 行；太矮时列表先消失（状态仍由状态栏与提示行表达）
   const pending = Math.min(Math.max(0, pendingWanted), Math.max(0, conversation - 2));
   conversation -= pending;
-  return { frameHeight, conversation, inputRule, input, completion, todo, pending, status };
+  return { frameHeight, conversation, inputRule, input, completion, todo, pending, swarm, status };
 }

@@ -63,6 +63,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     cli: "<任务> 拆解任务、并行后台子代理实现与调查、汇总回归",
     task: true,
   },
+  {
+    name: "/swarm",
+    summary: "Swarm 协作",
+    cli: "<任务> 建立常驻成员与留言板协作；/swarm end 结束",
+    task: true,
+  },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
   { name: "/search", summary: "搜索会话", tuiOnly: true },
   { name: "/rename", summary: "修改会话标题", cli: "<标题> 修改当前会话标题；无参数清空" },

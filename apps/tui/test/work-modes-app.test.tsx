@@ -79,7 +79,7 @@ it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到�
   }
 });
 
-it("/swarm board 只提示用法；/swarm end 无未合并分支时不输出，有未合并分支时逐行显示 @name 分支名", async () => {
+it("/swarm board 与 /swarm end：没有 Swarm 时给用法；/swarm end 结束后有未合并分支时逐行显示 @name 分支名", async () => {
   const provider = new FakeProvider({
     scripts: [
       [
@@ -116,14 +116,15 @@ it("/swarm board 只提示用法；/swarm end 无未合并分支时不输出，�
   const swarmStatus = () => replaySessionView(session.durableEvents()).swarm?.status;
   try {
     await settleOn("fake-1");
-    // /swarm board 没有 TUI 页面：只提示用法，不能落到 resumeGoal 报「没有目标」
+    // 本会话没有 Swarm：两个子命令都只给用法，不能落到 resumeGoal 报「没有目标」
     await enter("/swarm board");
     await settleOn("用法：/swarm 任务");
     expect(frame()).not.toContain("! 没有目标");
-    // 无 Swarm 时 /swarm end 走 endSwarm 报错路径
+    const endSpy = vi.spyOn(session, "endSwarm");
     await enter("/swarm end");
-    await settleOn("! 当前会话没有进行中的 Swarm");
-    expect(frame()).not.toContain("! 没有目标");
+    await settle(() => frame().split("用法：/swarm 任务").length - 1 === 2);
+    expect(endSpy).not.toHaveBeenCalled();
+    endSpy.mockRestore();
     expect(swarmStatus()).toBeUndefined();
     // 用协调者的 swarm_init 建立活动 Swarm
     await enter("/swarm 测试协作");

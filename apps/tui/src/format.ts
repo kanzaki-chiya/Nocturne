@@ -7,6 +7,8 @@ import stringWidth from "string-width";
 import type { PermissionReviewedPayload, ToolEntry, Usage } from "@nocturne/core/protocol";
 import { subagentRowInfo } from "@nocturne/core/protocol";
 
+import { swarmToolSummary } from "./text-format-swarm.js";
+
 export function subagentModel(entry: ToolEntry): string {
   const info = subagentRowInfo(entry);
   const selection = [info.model, info.effort].filter(Boolean).join(" · ");
@@ -135,6 +137,8 @@ export function summarizeToolInput(
   input: unknown,
   output?: unknown,
 ): string {
+  const swarm = name === undefined ? undefined : swarmToolSummary(name, input);
+  if (swarm !== undefined) return swarm;
   if (name === "task") return inputString(input, "task") ?? "";
   if (name === "mcp_search") return inputString(input, "query") ?? "";
   if (name === "render_html") return inputString(input, "title") ?? "";
