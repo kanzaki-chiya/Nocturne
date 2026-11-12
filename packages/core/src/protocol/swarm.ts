@@ -172,6 +172,8 @@ export interface SwarmPostView {
 
 export interface SwarmView {
   createdSeq: number;
+  /** `swarm.ended` 事件自身的 seq；活动期间为 undefined，新 `swarm.created` 时重置 */
+  endedSeq?: number | undefined;
   title: string;
   status: "active" | "ended";
   endedReason?: SwarmEndReason | undefined;
@@ -579,6 +581,7 @@ export function reduceSwarmDurable(
     case "swarm.ended": {
       if (swarm === undefined) return undefined;
       swarm.status = "ended";
+      swarm.endedSeq = event.seq;
       swarm.endedReason = event.payload.reason;
       if (event.payload.summary !== undefined) swarm.summary = event.payload.summary;
       if (event.payload.unmerged !== undefined) swarm.unmerged = event.payload.unmerged;

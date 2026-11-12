@@ -67,6 +67,27 @@ describe("Swarm 结构化活动摘要", () => {
     expect(member(swarm).activity).toEqual({ kind: "charter", line: "src/api" });
   });
 
+  it("endedSeq：活动期间为 undefined，swarm.ended 记录事件 seq，新 swarm.created 重置", () => {
+    const events = base();
+    const active = build(events);
+    expect(active.status).toBe("active");
+    expect(active.endedSeq).toBeUndefined();
+
+    seq = 41;
+    const endedEvent = ev("swarm.ended", { reason: "user" });
+    expect(endedEvent.seq).toBe(42);
+    const ended = build([...events, endedEvent]);
+    expect(ended.status).toBe("ended");
+    expect(ended.endedSeq).toBe(42);
+
+    seq = 49;
+    const recreatedEvent = ev("swarm.created", { title: "T2" });
+    expect(recreatedEvent.seq).toBe(50);
+    const restarted = build([...events, endedEvent, recreatedEvent]);
+    expect(restarted.createdSeq).toBe(50);
+    expect(restarted.endedSeq).toBeUndefined();
+  });
+
   it("posted 之后为 post（成员）；协调者帖子写入协调者 activity", () => {
     const events = base();
     events.push(
