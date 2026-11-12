@@ -2857,6 +2857,17 @@ function SessionApp({
           }, fail);
         } else if (work.action === "plan-cancel") {
           void session.cancelPlan().catch(fail);
+        } else if (work.action === "swarm-board") {
+          // TUI 的留言板页面尚未实现：先只给出用法，不占提交位
+          pushLine("用法：/swarm 任务");
+        } else if (work.action === "swarm-end") {
+          void session.endSwarm().then(({ unmerged }) => {
+            pushLine(
+              unmerged.length === 0
+                ? "Swarm 已结束"
+                : `Swarm 已结束（未合并工作树：${unmerged.map((u) => u.branch).join("、")}）`,
+            );
+          }, fail);
         } else {
           // 空闲时继续目标、批准计划都会开新 Turn：与普通提交一样占住提交位
           const idle = !busy;

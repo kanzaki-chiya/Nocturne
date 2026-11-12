@@ -7,7 +7,7 @@ import path from "node:path";
 import { createElement } from "react";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createRuntime, FakeProvider, type FakeScript } from "@nocturne/core";
+import { createRuntime, FakeProvider, replaySessionView, type FakeScript } from "@nocturne/core";
 import { App } from "../src/app.js";
 import { settle } from "./provider-test-utils.js";
 
@@ -28,6 +28,12 @@ const text = (value: string): FakeScript => [
   { type: "text_delta", text: value },
   { type: "finish", reason: "stop" },
 ];
+const callTool = (id: string, name: string, input: unknown): FakeScript[number] => ({
+  type: "tool_call",
+  toolCallId: id,
+  name,
+  input,
+});
 
 it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到进行中，/goal stop 停止", async () => {
   const provider = new FakeProvider({ scripts: [text("计划初稿"), text("交付清单已列出")] });
@@ -67,6 +73,65 @@ it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到�
     await enter("/goal cancel");
     await settleOn("目标已取消");
     expect(session.state().goal).toBeUndefined();
+  } finally {
+    ui.unmount();
+    await session.close();
+  }
+});
+
+it("/swarm board 只提示用法；/swarm end 无 Swarm 时报错，活动 Swarm 中结束并提示", async () => {
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        callTool("init", "swarm_init", { title: "测试协作" }),
+        { type: "finish", reason: "tool_calls" },
+      ],
+      text("协作已建立"),
+    ],
+  });
+  const runtime = await createRuntime({
+    cwd: temp(),
+    sessionsDir: temp(),
+    providers: [provider],
+    interactive: true,
+    subagent: { background: true },
+  });
+  const session = await runtime.createSession({ model: "fake/fake-1" });
+  const ui = render(
+    createElement(App, { session, runtime, env: { ascii: false, animated: false } }),
+  );
+  const frame = () => ui.lastFrame() ?? "";
+  const settleOn = async (want: string) => {
+    try {
+      await settle(() => frame().includes(want));
+    } catch {
+      throw new Error(`等待「${want}」超时，当前帧：\n${frame()}`);
+    }
+  };
+  const enter = async (value: string) => {
+    ui.stdin.write(value);
+    await pause();
+    ui.stdin.write("\r");
+  };
+  const swarmStatus = () => replaySessionView(session.durableEvents()).swarm?.status;
+  try {
+    await settleOn("fake-1");
+    // /swarm board 没有 TUI 页面：只提示用法，不能落到 resumeGoal 报「没有目标」
+    await enter("/swarm board");
+    await settleOn("用法：/swarm 任务");
+    expect(frame()).not.toContain("! 没有目标");
+    // 无 Swarm 时 /swarm end 走 endSwarm 报错路径
+    await enter("/swarm end");
+    await settleOn("! 当前会话没有进行中的 Swarm");
+    expect(frame()).not.toContain("! 没有目标");
+    expect(swarmStatus()).toBeUndefined();
+    // 用协调者的 swarm_init 建立活动 Swarm
+    await enter("/swarm 测试协作");
+    await settleOn("协作已建立");
+    await settle(() => swarmStatus() === "active");
+    await enter("/swarm end");
+    await settleOn("Swarm 已结束");
+    await settle(() => swarmStatus() === "ended");
   } finally {
     ui.unmount();
     await session.close();
