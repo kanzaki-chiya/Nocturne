@@ -1966,6 +1966,7 @@ export function App({ host }: { host: DesktopHost }) {
                   onRewindFiles={(seq) => conversations.rewindFiles(seq)}
                   loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
                   onViewChanges={sidePanel.viewChanges}
+                  onOpenSwarm={sidePanel.openSwarm}
                   subagentLinks={sidePanel.subagentLinks}
                   onSubmit={(input, mode) => submitInput(input, mode)}
                   onInterrupt={() => {
@@ -2289,6 +2290,8 @@ interface SessionPaneProps {
   loadChangeDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
   /** 改动卡片「查看变更」→ 右侧面板（ADR-0060） */
   onViewChanges: (seq: number) => void;
+  /** 对话内 Swarm 入口行 → 打开或切到 Swarm 面板标签 */
+  onOpenSwarm?: (() => void) | undefined;
   /** task 行的「在面板中查看」（右侧面板打开子代理标签）；没连着后台时没有 */
   subagentLinks: SubagentLinks | undefined;
   onSubmit: (input: ComposerSubmit, mode?: "steer" | "queue") => Promise<boolean>;
@@ -2360,6 +2363,7 @@ function SessionPane({
   onRewindFiles,
   loadChangeDiff,
   onViewChanges,
+  onOpenSwarm,
   subagentLinks,
   onSubmit,
   onInterrupt,
@@ -2473,6 +2477,7 @@ function SessionPane({
         onRewindFiles={onRewindFiles}
         loadChangeDiff={loadChangeDiff}
         onViewChanges={onViewChanges}
+        onOpenSwarm={onOpenSwarm}
         subagentLinks={subagentLinks}
         fileLinks={fileLinks}
         resolveAppIcon={resolveAppIcon}

@@ -93,13 +93,29 @@ export interface ShellTab {
   command: string;
 }
 
-export type PanelTab =
-  NewTab | ChangesTab | FileTab | TerminalTab | BrowserTab | SubagentTab | ShellTab;
+/**
+ * Swarm 面板标签（ADR-0089）：每个会话最多一个；本机偏好里只存「有这个标签」，不存帖子。
+ */
+export interface SwarmTab {
+  id: string;
+  kind: "swarm";
+}
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」（新标签页、终端不恢复） */
+export type PanelTab =
+  | NewTab
+  | ChangesTab
+  | FileTab
+  | TerminalTab
+  | BrowserTab
+  | SubagentTab
+  | ShellTab
+  | SwarmTab;
+
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Swarm」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
+  | { id: string; kind: "swarm" }
   | {
       id: string;
       kind: "subagent";
@@ -309,6 +325,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const subagentChildren = new Set<string>();
   const shellTasks = new Set<string>();
   let changes = false;
+  let swarm = false;
   for (const item of value) {
     if (typeof item !== "object" || item === null) continue;
     const raw = item as Record<string, unknown>;
@@ -317,6 +334,10 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       changes = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "changes" });
+    } else if (raw.kind === "swarm" && !swarm) {
+      swarm = true;
+      ids.add(raw.id);
+      tabs.push({ id: raw.id, kind: "swarm" });
     } else if (
       raw.kind === "subagent" &&
       str(raw.childSessionId) &&
@@ -379,6 +400,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
 export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
+    if (tab.kind === "swarm") return [{ id: tab.id, kind: "swarm" }];
     if (tab.kind === "shell")
       return [
         { id: tab.id, kind: "shell", taskId: tab.taskId, name: tab.name, command: tab.command },

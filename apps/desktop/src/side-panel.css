@@ -1298,6 +1298,16 @@
 .sp-agent-dot.taken {
   background: var(--a-warning);
 }
+.sp-swarm-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--a-success);
+}
+.sp-swarm-dot.warn {
+  background: var(--a-warning);
+}
 @keyframes sp-agent-pulse {
   50% {
     opacity: 0.3;

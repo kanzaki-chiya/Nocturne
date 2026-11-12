@@ -137,6 +137,8 @@ export interface SidePanelController {
   openUrl: (url: string) => boolean;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
+  /** 打开或切换到当前会话的 Swarm 标签 */
+  openSwarm: () => void;
   /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
   subagentLinks: SubagentLinks | undefined;
   bodyClass: string;
@@ -877,6 +879,15 @@ export function useSidePanel({
       });
     });
   };
+  const openSwarm = useCallback(() => {
+    hideBrowserThen(() => {
+      update((panel) => {
+        const found = panel.tabs.find((tab) => tab.kind === "swarm");
+        if (found) return { ...panel, open: true, activeId: found.id };
+        return withTab(panel, { id: newTabId(), kind: "swarm" });
+      });
+    });
+  }, [hideBrowserThen, update]);
   const openSubagentById = useCallback(
     (childSessionId: string) => {
       const summary = directory.summaries.find((s) => s.childSessionId === childSessionId);
@@ -1459,6 +1470,21 @@ export function useSidePanel({
       workspace={workspace}
       openExternalUrl={openExternalUrl}
       shells={active ? { session: active.session, tasks: active.view.backgroundShells } : undefined}
+      swarm={
+        active
+          ? {
+              swarm: active.view.swarm,
+              session: active.session,
+              openUrl: (url) => {
+                if (!openUrl(url)) void host.openUrl(url);
+              },
+              onOpenMember: () => undefined,
+              onSelectCoordinator: () => {
+                document.querySelector<HTMLTextAreaElement>(".mainpane .composer textarea")?.focus();
+              },
+            }
+          : undefined
+      }
       subagents={
         sessionId === null
           ? undefined
@@ -1579,6 +1605,7 @@ export function useSidePanel({
     viewSource,
     openUrl,
     viewChanges: openChanges,
+    openSwarm,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewVisible && !shown ? " ov-open" : "",

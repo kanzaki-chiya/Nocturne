@@ -21,7 +21,7 @@ import type { AttachmentImageSource } from "./attachment-images";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
-import { DiffBody, diffCounts } from "./Conversation";
+import { DiffBody, diffCounts, type FileLinkHooks } from "./Conversation";
 import { ImageViewerBoundary, useImageViewer } from "./ImageViewer";
 import type { CodeViewer } from "./code-viewer";
 import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
@@ -51,8 +51,10 @@ import {
 import { SubagentPane, type SubagentRuntime } from "./SubagentPane";
 import { ShellPane } from "./ShellPane";
 import type { ShellSession } from "./use-shell-output";
-import type { BackgroundShellTask } from "@nocturne/core/protocol";
+import type { BackgroundShellTask, SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
 import type { SubagentWatcher } from "./subagent-watch";
+import { SwarmPane, type SwarmSession } from "./SwarmPane";
+import { swarmStatusDot } from "./swarm-ui";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
 import "./side-panel.css";
@@ -149,9 +151,21 @@ export interface SidePanelProps {
   /** 子代理标签；没有时子代理标签显示说明 */
   subagents?: PanelSubagents | undefined;
   shells?:
-    { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] } | undefined;
+    | { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] }
+    | undefined;
+  /** Swarm 面板标签的数据与动作 */
+  swarm?: PanelSwarm | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
   agents?: PanelAgents | undefined;
+}
+
+export interface PanelSwarm {
+  swarm: SwarmView | undefined;
+  session: SwarmSession | undefined;
+  fileLinks?: FileLinkHooks | undefined;
+  openUrl: (url: string) => void;
+  onOpenMember: (member: SwarmMemberView) => void;
+  onSelectCoordinator?: (() => void) | undefined;
 }
 
 /** agent 标签的显示与操作；标签信息来自外壳的 watch 快照 */
@@ -174,7 +188,7 @@ const AGENT_TAB_STATE: Record<AgentTabInfo["state"], string> = {
 function Glyph({
   kind,
 }: {
-  kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent";
+  kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent" | "swarm";
 }) {
   const names: Record<typeof kind, IconName> = {
     changes: "git_commit",
@@ -182,6 +196,7 @@ function Glyph({
     terminal: "terminal",
     globe: "earth",
     agent: "robot",
+    swarm: "group",
     plus: "add",
     close: "close",
   };
@@ -190,9 +205,16 @@ function Glyph({
   );
 }
 
-function tabTitle(tab: PanelTab): { name: string; project?: string; title: string } {
+function tabTitle(
+  tab: PanelTab,
+  swarmTitle?: string,
+): { name: string; project?: string; title: string } {
   if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
+  if (tab.kind === "swarm") {
+    const name = swarmTitle !== undefined && swarmTitle !== "" ? swarmTitle : "Swarm";
+    return { name, title: name };
+  }
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
   if (tab.kind === "browser") {
     if (tab.agent !== undefined) {
@@ -274,8 +296,9 @@ function TabBar(props: SidePanelProps) {
     <div className="sp-tabbar">
       <div className="sp-tabs" role="tablist" aria-label="面板标签" ref={bar}>
         {tabs.map((tab) => {
-          const { name, project, title } = tabTitle(tab);
+          const { name, project, title } = tabTitle(tab, props.swarm?.swarm?.title);
           const active = tab.id === activeId;
+          const swarmDot = tab.kind === "swarm" ? swarmStatusDot(props.swarm?.swarm) : undefined;
           return (
             <div
               key={tab.id}
@@ -323,7 +346,13 @@ function TabBar(props: SidePanelProps) {
                 }
               }}
             >
-              {tab.kind === "browser" && tab.agent !== undefined ? (
+              {tab.kind === "swarm" ? (
+                swarmDot !== undefined ? (
+                  <span className={`sp-swarm-dot ${swarmDot}`} aria-hidden="true" />
+                ) : (
+                  <Glyph kind="swarm" />
+                )
+              ) : tab.kind === "browser" && tab.agent !== undefined ? (
                 <Glyph kind="agent" />
               ) : tab.kind === "browser" && props.browsers !== undefined ? (
                 <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
@@ -1403,6 +1432,20 @@ export function SidePanel(props: SidePanelProps) {
                     session={props.shells?.session}
                     visible={!hidden && tab.id === activeId && current.has(tab.id)}
                   />
+                ) : tab.kind === "swarm" ? (
+                  props.swarm?.swarm !== undefined && props.swarm.session !== undefined ? (
+                    <SwarmPane
+                      swarm={props.swarm.swarm}
+                      session={props.swarm.session}
+                      fileLinks={props.swarm.fileLinks}
+                      openUrl={props.swarm.openUrl}
+                      onOpenMember={props.swarm.onOpenMember}
+                      onSelectCoordinator={props.swarm.onSelectCoordinator}
+                      visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                    />
+                  ) : (
+                    <div className="swarm-pane" />
+                  )
                 ) : tab.diffText !== undefined ? (
                   <FileDiffView
                     tab={{ ...tab, diffText: tab.diffText }}

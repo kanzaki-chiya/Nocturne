@@ -520,4 +520,16 @@ describe("按会话的面板", () => {
     expect(nativeSeparators("a/b", true)).toBe("a\\b");
     expect(nativeSeparators("a/b", false)).toBe("a/b");
   });
+  it("Swarm 标签持久化只存打开标记且每个会话最多一个", () => {
+    const stored = storedTabs([
+      { id: "sw1", kind: "swarm" },
+      { id: "n1", kind: "new" },
+    ]);
+    expect(stored).toEqual([{ id: "sw1", kind: "swarm" }]);
+    const parsed = parseStoredTabs([
+      { id: "sw1", kind: "swarm", posts: ["不该保留"] },
+      { id: "sw2", kind: "swarm" },
+    ]);
+    expect(parsed).toEqual([{ id: "sw1", kind: "swarm" }]);
+  });
 });
