@@ -82,6 +82,7 @@ import {
   splitCodeRef,
   isRuntimeWorkMode,
   userWorkMode,
+  unwrapSwarmPostText,
   type FileAttachment,
   type WorkModeName,
   type PendingPermission,
@@ -96,6 +97,7 @@ import {
   type RewindTarget,
   type RuntimeEvent,
   type SessionView,
+  type SwarmView,
   type ToolEntry,
   type TurnEndReason,
   type UserEntry,
@@ -117,6 +119,14 @@ import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
 import { elapsedText, type SubagentLink } from "./subagent-panel";
+import {
+  splitSwarmMentions,
+  swarmAuthorLabel,
+  swarmEntryCounts,
+  swarmStatusDot,
+  swarmToolSummary,
+} from "./swarm-ui";
+import { mcpToolLabel, toolMeta } from "./tool-meta";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
@@ -128,6 +138,8 @@ import type { ShellSession } from "./use-shell-output";
 import { useCopyText } from "./useCopyText";
 import { KeyHint } from "./KeyHint";
 import "./conversation.css";
+
+export { toolMeta };
 
 /**
  * 只读观察（ADR-0060 第 4 轮）：子代理视图只有身份和读图能力，没有任何命令入口。
@@ -226,6 +238,10 @@ export interface ConversationProps {
   resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
   /** 平台接管文件保存（安卓 App）；未传时沿用外层 ImageViewerProvider 或 `<a download>` */
   saveFile?: SaveFileFn | undefined;
+  /** 点击对话内 Swarm 入口行时打开或切换到 Swarm 面板（手机进入全屏 Swarm 页） */
+  onOpenSwarm?: (() => void) | undefined;
+  /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：协调者会话默认「协调者」，成员会话传 `@name` */
+  swarmRecipientLabel?: string | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -277,6 +293,7 @@ export type ReadOnlyConversationProps = Omit<
   | "onRewindFiles"
   | "loadChangeDiff"
   | "onViewChanges"
+  | "onOpenSwarm"
   | "subagentLinks"
   | "hideRequests"
   | "hidePersistentPermissions"
@@ -376,8 +393,30 @@ function isShortTableCell(source: string): boolean {
   return true;
 }
 
+function renderSwarmTextNode(
+  text: string,
+  mentions: readonly string[] | undefined,
+): ReactNode {
+  if (mentions === undefined || mentions.length === 0) return text;
+  const parts = splitSwarmMentions(text, mentions);
+  if (parts.length === 1 && parts[0]?.kind === "text") return text;
+  return parts.map((part, index) =>
+    part.kind === "mention" ? (
+      <span key={index} className="swarm-at">
+        {part.value}
+      </span>
+    ) : (
+      <Fragment key={index}>{part.value}</Fragment>
+    ),
+  );
+}
+
 /** Only lexer tokens become React elements. Raw HTML and remote images stay inert text. */
-function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] {
+function markdownNodes(
+  tokens: readonly Token[],
+  openUrl: OpenUrl,
+  mentions?: readonly string[] | undefined,
+): ReactNode[] {
   return tokens.map((token, index) => {
     const key = index;
     switch (token.type) {
@@ -388,7 +427,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
         return <Fragment key={key}>{token.raw}</Fragment>;
       case "heading": {
         const heading = token as Tokens.Heading;
-        const content = markdownNodes(heading.tokens, openUrl);
+        const content = markdownNodes(heading.tokens, openUrl, mentions);
         switch (heading.depth) {
           case 1:
             return <h1 key={key}>{content}</h1>;
@@ -405,23 +444,33 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
         }
       }
       case "paragraph":
-        return <p key={key}>{markdownNodes((token as Tokens.Paragraph).tokens, openUrl)}</p>;
+        return (
+          <p key={key}>{markdownNodes((token as Tokens.Paragraph).tokens, openUrl, mentions)}</p>
+        );
       case "text": {
         const node = token as Tokens.Text;
         return (
           <Fragment key={key}>
-            {node.tokens ? markdownNodes(node.tokens, openUrl) : node.text}
+            {node.tokens
+              ? markdownNodes(node.tokens, openUrl, mentions)
+              : renderSwarmTextNode(node.text, mentions)}
           </Fragment>
         );
       }
       case "escape":
         return <Fragment key={key}>{(token as Tokens.Escape).text}</Fragment>;
       case "strong":
-        return <strong key={key}>{markdownNodes((token as Tokens.Strong).tokens, openUrl)}</strong>;
+        return (
+          <strong key={key}>
+            {markdownNodes((token as Tokens.Strong).tokens, openUrl, mentions)}
+          </strong>
+        );
       case "em":
-        return <em key={key}>{markdownNodes((token as Tokens.Em).tokens, openUrl)}</em>;
+        return <em key={key}>{markdownNodes((token as Tokens.Em).tokens, openUrl, mentions)}</em>;
       case "del":
-        return <del key={key}>{markdownNodes((token as Tokens.Del).tokens, openUrl)}</del>;
+        return (
+          <del key={key}>{markdownNodes((token as Tokens.Del).tokens, openUrl, mentions)}</del>
+        );
       case "codespan":
         return <CodeRef key={key} text={(token as Tokens.Codespan).text} />;
       case "code": {
@@ -441,7 +490,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
       case "blockquote":
         return (
           <blockquote key={key}>
-            {markdownNodes((token as Tokens.Blockquote).tokens, openUrl)}
+            {markdownNodes((token as Tokens.Blockquote).tokens, openUrl, mentions)}
           </blockquote>
         );
       case "hr":
@@ -450,7 +499,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
         return <br key={key} />;
       case "link": {
         const link = token as Tokens.Link;
-        const content = markdownNodes(link.tokens, openUrl);
+        const content = markdownNodes(link.tokens, openUrl, mentions);
         return isAllowedExternalUrl(link.href) ? (
           <a
             key={key}
@@ -487,7 +536,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
                 onChange={() => undefined}
               />
             ) : null}
-            {markdownNodes(item.tokens, openUrl)}
+            {markdownNodes(item.tokens, openUrl, mentions)}
           </li>
         ));
         return list.ordered ? (
@@ -512,7 +561,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
                       className={cell.align === "right" ? "r" : undefined}
                       style={{ textAlign: cell.align ?? "left" }}
                     >
-                      {markdownNodes(cell.tokens, openUrl)}
+                      {markdownNodes(cell.tokens, openUrl, mentions)}
                     </th>
                   ))}
                 </tr>
@@ -533,7 +582,7 @@ function markdownNodes(tokens: readonly Token[], openUrl: OpenUrl): ReactNode[] 
                         }
                         style={cell.align ? { textAlign: cell.align } : undefined}
                       >
-                        {markdownNodes(cell.tokens, openUrl)}
+                        {markdownNodes(cell.tokens, openUrl, mentions)}
                       </td>
                     ))}
                   </tr>
@@ -554,11 +603,13 @@ export function Markdown({
   openUrl,
   session,
   fileLinks,
+  mentions,
 }: {
   text: string;
   openUrl: OpenUrl;
   session?: RpcSession | undefined;
   fileLinks?: FileLinkHooks | undefined;
+  mentions?: readonly string[] | undefined;
 }) {
   const [refs, setRefs] = useState<Map<string, ResolvedCodeRef> | null>(null);
   useEffect(() => {
@@ -647,7 +698,7 @@ export function Markdown({
   return (
     <div className="conversation-markdown">
       <FileLinksContext.Provider value={lookup}>
-        {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl)}
+        {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl, mentions)}
       </FileLinksContext.Provider>
     </div>
   );
@@ -1681,54 +1732,6 @@ function UserMessage({
 
 // ── 工具行 ──
 
-const TOOL_META: Record<string, string> = {
-  todo_write: "任务清单",
-  render_html: "页面",
-  skill: "技能",
-  read: "读取",
-  grep: "搜索",
-  glob: "查找文件",
-  edit: "编辑",
-  write: "写入",
-  apply_patch: "应用补丁",
-  apply_subagent_changes: "并回子代理改动",
-  switch_worktree: "切换工作树",
-  shell: "命令",
-  web_fetch: "读取网页",
-  web_search: "网页搜索",
-  subagent: "子代理",
-  task: "子代理",
-  ask_user: "提问",
-  schedule: "定时任务",
-  mcp_search: "搜索 MCP 工具",
-};
-
-const MCP_NAME_PREFIX = "mcp__";
-
-/**
- * MCP 工具的展示名：与权限主体、设置页一致的 `server/tool`。
- * 结构化来源优先——subjects 里 kind 为 "mcp" 的主体 target 就是 `server/tool`；
- * 没有 subjects（如实时工具行）时从注册名 `mcp__<server>__<tool>` 解析，去掉前缀。
- */
-function mcpToolLabel(name: string, subjects?: ToolEntry["subjects"]): string | undefined {
-  if (name.startsWith("mcp__computer__")) return "电脑操控";
-  const subject = subjects?.find((entry) => entry.kind === "mcp");
-  if (subject !== undefined) return subject.target;
-  if (!name.startsWith(MCP_NAME_PREFIX)) return undefined;
-  const rest = name.slice(MCP_NAME_PREFIX.length);
-  const sep = rest.indexOf("__");
-  if (sep > 0) return `${rest.slice(0, sep)}/${rest.slice(sep + 2)}`;
-  return rest === "" ? undefined : rest;
-}
-
-export function toolMeta(name: string, subjects?: ToolEntry["subjects"]): { label: string } {
-  const known = TOOL_META[name];
-  if (known !== undefined) return { label: known };
-  const mcp = mcpToolLabel(name, subjects);
-  if (mcp !== undefined) return { label: mcp };
-  return { label: name };
-}
-
 export function toolArgument(entry: ToolEntry, cwd: string): string {
   return toolArgumentValue(entry, cwd).text;
 }
@@ -1738,6 +1741,8 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
   const plain = (value: string) => ({ text: value, path: false });
   const input = inputOf(entry);
   const name = effectiveToolName(entry);
+  const swarmArg = swarmToolSummary(name, input);
+  if (swarmArg !== undefined) return plain(swarmArg);
   switch (name) {
     case "skill":
       return plain(input === undefined ? "" : text(input.name));
@@ -2918,6 +2923,7 @@ function EntryView({
   waitingCallId,
   userRole,
   scheduleSource,
+  swarmRecipientLabel,
 }: {
   entry: ViewEntry;
   searchHit?: boolean;
@@ -2944,11 +2950,35 @@ function EntryView({
   /** 只读视图里用户消息的角色：第一条是任务，之后是催促；缺省 = 普通用户气泡 */
   userRole?: "task" | "nudge" | undefined;
   scheduleSource?: ConversationProps["scheduleSource"];
+  swarmRecipientLabel?: string | undefined;
 }) {
   const subagentLinks = useContext(SubagentLinksContext);
   const backgroundView = useContext(BackgroundViewContext);
   switch (entry.kind) {
     case "user":
+      if (entry.swarm !== undefined) {
+        const author = swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind);
+        const recipient = swarmRecipientLabel ?? "协调者";
+        return (
+          <div
+            className={`post-in${searchHit ? " search-hit" : ""}`}
+            data-session-seq={entry.seq}
+          >
+            <div className="post-in-head">
+              <span className={entry.swarm.fromKind === "member" ? "swarm-who" : undefined}>
+                {author}
+              </span>
+              {` → ${recipient} · #${entry.swarm.postNumber}`}
+            </div>
+            <Markdown
+              text={unwrapSwarmPostText(userText(entry))}
+              openUrl={openUrl}
+              session={isLiveSession(session) ? session : undefined}
+              fileLinks={fileLinks}
+            />
+          </div>
+        );
+      }
       if (entry.backgroundShell !== undefined) {
         return (
           <details className="ro-user shell-result" aria-label="后台任务">
@@ -4051,6 +4081,63 @@ export function QuestionCard({
   );
 }
 
+function SwarmEntryRow({
+  swarm,
+  onOpen,
+}: {
+  swarm: SwarmView;
+  onOpen?: (() => void) | undefined;
+}) {
+  const dot = swarmStatusDot(swarm);
+  return (
+    <button
+      type="button"
+      className="swarmrow"
+      onClick={() => {
+        onOpen?.();
+      }}
+    >
+      {dot !== undefined ? <span className={`swarm-live ${dot}`} aria-hidden="true" /> : null}
+      <Icon name="group" size={ICON_MD} />
+      <b>{swarm.title}</b>
+      <span className="swarmrow-count">{swarmEntryCounts(swarm)}</span>
+    </button>
+  );
+}
+
+function SwarmEndedRow({ swarm }: { swarm: SwarmView }) {
+  const [open, setOpen] = useState(false);
+  const unmerged = swarm.unmerged ?? [];
+  const hasUnmerged = unmerged.length > 0;
+  return (
+    <article className="tool swarm-ended-row" data-session-seq={swarm.endedSeq}>
+      <details className="tool-details" open={open}>
+        <ToolLine
+          open={open}
+          disabled={!hasUnmerged}
+          label="结束"
+          arg={{ name: swarm.title, dir: "", title: swarm.title }}
+          status={null}
+          onToggle={() => {
+            setOpen((current) => !current);
+          }}
+        />
+        {hasUnmerged && open ? (
+          <div className="tool-body">
+            <ul className="swarm-unmerged-list">
+              {unmerged.map((item) => (
+                <li key={item.name}>
+                  <span className="swarm-who">{`@${item.name}`}</span> <code>{item.branch}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </details>
+    </article>
+  );
+}
+
 function ConversationContent({
   session,
   view,
@@ -4068,6 +4155,8 @@ function ConversationContent({
   onRewindFiles,
   loadChangeDiff,
   onViewChanges,
+  onOpenSwarm,
+  swarmRecipientLabel,
   hidePersistentPermissions,
   hideRequests = false,
   openWarnings,
@@ -4298,9 +4387,60 @@ function ConversationContent({
                   {notice.message}
                 </div>
               );
+              const swarm = view.swarm;
+              // 入口行位于建立当前 Swarm 那一轮的末尾（下一条 user 消息之前；若仍在建立轮则跟在流式回复之后）
+              const swarmNextUserIdx =
+                swarm === undefined
+                  ? -1
+                  : view.entries.findIndex(
+                      (item) => item.kind === "user" && item.seq > swarm.createdSeq,
+                    );
+              const swarmEntryAfterIdx =
+                swarm === undefined
+                  ? undefined
+                  : swarmNextUserIdx > 0
+                    ? swarmNextUserIdx - 1
+                    : swarmNextUserIdx === 0
+                      ? -1
+                      : undefined;
+              const swarmEntryTrailing = swarm !== undefined && swarmNextUserIdx === -1;
+
+              // 结束行按 endedSeq 定位在对应条目之后（无条目早于 endedSeq 时放在最前，缺省 endedSeq 时放在末尾）
+              const swarmEnded = swarm?.status === "ended" ? swarm : undefined;
+              let swarmEndedAfterIdx: number | undefined;
+              let swarmEndedTrailing = false;
+              if (swarmEnded !== undefined) {
+                if (swarmEnded.endedSeq === undefined) {
+                  swarmEndedTrailing = true;
+                } else {
+                  let idx = -1;
+                  for (let i = 0; i < view.entries.length; i += 1) {
+                    if (view.entries[i]!.seq <= swarmEnded.endedSeq) idx = i;
+                  }
+                  if (swarmEntryTrailing && idx === view.entries.length - 1) {
+                    swarmEndedTrailing = true;
+                  } else {
+                    swarmEndedAfterIdx = idx;
+                  }
+                }
+              }
+
               return (
                 <>
                   {(byAfterEntry.get(0) ?? []).map(renderNotice)}
+                  {swarm !== undefined && swarmEntryAfterIdx === -1 ? (
+                    <SwarmEntryRow
+                      key={`swarm-entry:${swarm.createdSeq}`}
+                      swarm={swarm}
+                      onOpen={onOpenSwarm}
+                    />
+                  ) : null}
+                  {swarmEnded !== undefined && swarmEndedAfterIdx === -1 ? (
+                    <SwarmEndedRow
+                      key={`swarm-ended:${swarmEnded.createdSeq}`}
+                      swarm={swarmEnded}
+                    />
+                  ) : null}
                   {[
                     ...view.entries.map((entry, entryIndex) => (
                       <Fragment key={entry.key}>
@@ -4326,6 +4466,7 @@ function ConversationContent({
                               ? scheduleSource
                               : undefined
                           }
+                          swarmRecipientLabel={swarmRecipientLabel}
                           onResubmit={onResubmit}
                           onFork={onFork}
                           fileLinks={fileLinks}
@@ -4343,6 +4484,19 @@ function ConversationContent({
                         />
                         {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
                         {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
+                        {swarm !== undefined && swarmEntryAfterIdx === entryIndex ? (
+                          <SwarmEntryRow
+                            key={`swarm-entry:${swarm.createdSeq}`}
+                            swarm={swarm}
+                            onOpen={onOpenSwarm}
+                          />
+                        ) : null}
+                        {swarmEnded !== undefined && swarmEndedAfterIdx === entryIndex ? (
+                          <SwarmEndedRow
+                            key={`swarm-ended:${swarmEnded.createdSeq}`}
+                            swarm={swarmEnded}
+                          />
+                        ) : null}
                       </Fragment>
                     )),
                     ...view.live.assistants.map((assistant) => (
@@ -4390,6 +4544,19 @@ function ConversationContent({
                         );
                       }),
                   ]}
+                  {swarmEntryTrailing && swarm !== undefined ? (
+                    <SwarmEntryRow
+                      key={`swarm-entry:${swarm.createdSeq}`}
+                      swarm={swarm}
+                      onOpen={onOpenSwarm}
+                    />
+                  ) : null}
+                  {swarmEndedTrailing && swarmEnded !== undefined ? (
+                    <SwarmEndedRow
+                      key={`swarm-ended:${swarmEnded.createdSeq}`}
+                      swarm={swarmEnded}
+                    />
+                  ) : null}
                   {trailing.map(renderNotice)}
                 </>
               );
