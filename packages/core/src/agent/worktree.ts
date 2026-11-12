@@ -159,7 +159,18 @@ export async function removeWorktree(
   if (removeBranch) {
     if (!record.branch.startsWith("nocturne/"))
       throw new Error("Refusing to delete an unregistered branch namespace");
-    await worktreeGit(record.repository, ["branch", "-D", record.branch]).catch(() => undefined);
+    try {
+      await worktreeGit(record.repository, ["branch", "-D", record.branch]);
+    } catch (cause) {
+      const refOut = await worktreeGit(record.repository, [
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/heads/${record.branch}`,
+      ]).catch(() => {
+        throw cause;
+      });
+      if (refOut.trim() !== "") throw cause;
+    }
     await rm(`${record.worktree}.json`, { force: true });
   }
 }
@@ -392,9 +403,9 @@ export async function checkpointWorktreeTurn(
  */
 export async function resetWorktreeToCommit(worktree: string, commitRef: string): Promise<string> {
   await worktreeGit(worktree, ["reset", "--hard"]);
-  await worktreeGit(worktree, ["clean", "-fdx"]);
+  await worktreeGit(worktree, ["clean", "-fd"]);
   await worktreeGit(worktree, ["checkout", "--detach", commitRef]);
-  await worktreeGit(worktree, ["clean", "-fdx"]);
+  await worktreeGit(worktree, ["clean", "-fd"]);
   return (await worktreeGit(worktree, ["rev-parse", "HEAD"])).trim();
 }
 

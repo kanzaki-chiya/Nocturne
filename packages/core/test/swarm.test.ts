@@ -1510,4 +1510,183 @@ describe("Swarm 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     expect(afterRewindView.swarm?.endedReason).toBe("rewound");
     expect(coordResumed.describeContext().request.tools.map((t) => t.name)).toContain("write");
   });
+
+  it("swarm_checkout 保护与重置忽略规则：有未并回提交的实现成员调用 swarm_checkout 被拒且工作树与分支不变，验证成员重置保留被忽略文件", async () => {
+    const ws = makeTempDir();
+    await initGitRepo(ws);
+    writeFileSync(path.join(ws, ".gitignore"), ".env.local\nnode_modules/\n", "utf8");
+    await worktreeGit(ws, ["add", ".gitignore"]);
+    await worktreeGit(ws, ["commit", "-m", "chore: gitignore"]);
+
+    const wtSessionsDir = makeTempDir("nocturne-checkout-guard-");
+    let coordDone = false;
+    const provider = createRoutedProvider("fake", [{ id: "m1" }], (req) => {
+      const role = requestRole(req);
+      const toolMsgs = req.messages.filter((m) => m.role === "tool");
+      const countTool = (name: string) =>
+        toolMsgs.filter((m) => "name" in m && m.name === name).length;
+
+      if (role === "coordinator") {
+        if (!coordDone) {
+          coordDone = true;
+          return [
+            callTool("i", "swarm_init", { title: "Checkout Guard" }),
+            callTool("a1", "swarm_add_member", {
+              name: "author-a",
+              charter: VALID_CHARTER,
+              isolated: true,
+            }),
+            callTool("a2", "swarm_add_member", {
+              name: "author-b",
+              charter: VALID_CHARTER,
+              isolated: true,
+            }),
+            callTool("a3", "swarm_add_member", {
+              name: "verifier",
+              charter: VALID_CHARTER,
+              isolated: true,
+            }),
+            callTool("p1", "swarm_post", { text: "@author-a @author-b implement your files" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("coord idle");
+      }
+
+      if (role === "member:author-b") {
+        if (countTool("write") === 0) {
+          return [
+            callTool("wb", "write", { path: "b.txt", content: "author-b-code\n" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("b done");
+      }
+
+      if (role === "member:author-a") {
+        if (countTool("write") === 0) {
+          return [
+            callTool("wa", "write", { path: "a.txt", content: "author-a-unmerged\n" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (countTool("swarm_checkout") === 0) {
+          // author-a 自身分支已有未并回改动，试图调用 swarm_checkout 切去 author-b 必须被拒！
+          return [
+            callTool("chk-bad", "swarm_checkout", { member: "author-b" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("a saw rejection");
+      }
+
+      if (role === "member:verifier") {
+        const msgText = JSON.stringify(req.messages);
+        const expectedCheckouts = msgText.includes("second review") ? 2 : 1;
+        if (countTool("swarm_checkout") < expectedCheckouts) {
+          return [
+            callTool("chk-ok", "swarm_checkout", { member: "author-b" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("verifier checked out b");
+      }
+
+      return stopText("ok");
+    });
+
+    const rt = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: wtSessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const session = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+    openRuntimes.push({ sessions: [session] });
+
+    await session.submit({ text: "test checkout protection", workMode: "swarm" });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 15_000 },
+    );
+
+    const view = replaySessionView(session.durableEvents());
+    const memberA = must(must(view.swarm).members.find((m) => m.name === "author-a"));
+    const memberVer = must(must(view.swarm).members.find((m) => m.name === "verifier"));
+    const wtA = must(memberA.worktree);
+    const wtVer = must(memberVer.worktree);
+
+    // 1. 检查 author-a 子会话日志：swarm_checkout 以 invalid_input 被拒绝
+    const sessionA = await rt.resumeSession(memberA.childSessionId);
+    const checkoutCompletedA = must(
+      sessionA
+        .durableEvents()
+        .find(
+          (e): e is Extract<DurableEvent, { type: "tool.completed" }> =>
+            e.type === "tool.completed" && e.payload.name === "swarm_checkout",
+        ),
+    );
+    expect(checkoutCompletedA.payload.status).toBe("error");
+    expect(checkoutCompletedA.payload.error?.code).toBe("invalid_input");
+    expect(checkoutCompletedA.payload.modelContent).toContain("unapplied changes");
+
+    // 2. author-a 的工作树文件与分支均保持不变（仍在自己的分支上，a.txt 完好且已提交，没有切到 author-b）
+    const symRefA = (await worktreeGit(wtA.path, ["symbolic-ref", "-q", "HEAD"])).trim();
+    expect(symRefA).toBe(`refs/heads/${wtA.branch}`);
+    expect(readFileSync(path.join(wtA.path, "a.txt"), "utf8")).toBe("author-a-unmerged\n");
+    expect(existsSync(path.join(wtA.path, "b.txt"))).toBe(false);
+    const headA = (await worktreeGit(wtA.path, ["rev-parse", "HEAD"])).trim();
+    expect(headA).not.toBe(wtA.base);
+    // 移除未并回的 author-a 依然被未并回检查拦截！
+    await expect(session.removeSwarmMember("author-a")).rejects.toMatchObject({
+      code: "invalid_command",
+    });
+
+    // 3. 先让干净的 verifier 执行第 1 次 swarm_checkout 进入分离头指针审查态，然后写入被忽略文件 .env.local 与未跟踪非忽略文件 untracked-residue.txt，第 2 次审查重置后验证被忽略文件仍在、非忽略文件被清掉
+    const sessionVer = await rt.resumeSession(memberVer.childSessionId);
+    await session.postToSwarm({ text: "@verifier first review author-b" });
+    await vi.waitFor(
+      () => {
+        expect(
+          sessionVer
+            .durableEvents()
+            .filter(
+              (e): e is Extract<DurableEvent, { type: "tool.completed" }> =>
+                e.type === "tool.completed" && e.payload.name === "swarm_checkout",
+            ),
+        ).toHaveLength(1);
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 15_000 },
+    );
+
+    writeFileSync(path.join(wtVer.path, ".env.local"), "SECRET=keep-me\n", "utf8");
+    writeFileSync(path.join(wtVer.path, "untracked-residue.txt"), "remove-me\n", "utf8");
+    await session.postToSwarm({ text: "@verifier second review author-b" });
+    await vi.waitFor(
+      () => {
+        expect(
+          sessionVer
+            .durableEvents()
+            .filter(
+              (e): e is Extract<DurableEvent, { type: "tool.completed" }> =>
+                e.type === "tool.completed" &&
+                e.payload.name === "swarm_checkout" &&
+                e.payload.status === "ok",
+            ),
+        ).toHaveLength(2);
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 15_000 },
+    );
+    expect(readFileSync(path.join(wtVer.path, ".env.local"), "utf8")).toBe("SECRET=keep-me\n");
+    expect(existsSync(path.join(wtVer.path, "untracked-residue.txt"))).toBe(false);
+    expect(readFileSync(path.join(wtVer.path, "b.txt"), "utf8")).toBe("author-b-code\n");
+
+    await session.endSwarm();
+  }, 30_000);
 });

@@ -541,10 +541,26 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         message: `Member "${authorName}" shares the main workspace and does not have an isolated worktree.`,
       };
     }
+    // ADR-0089 §4：保护调用者自身的工作树与分支——先对调用者做一次检查点，
+    // 只要调用者自身分支上有未并回的改动就拒绝检出，防止丢弃未提交改动或切到分离头指针后漏提交
+    const viewerOnBranch = await deps.worktrees.isOnMemberBranch(viewerRecord);
+    const viewerOwnChanges = viewerOnBranch
+      ? await deps.worktrees.checkpoint(viewerRecord, `Swarm @${viewer.name} snapshot`)
+      : viewerRecord.changes;
+    if (viewerOwnChanges !== undefined) {
+      return {
+        ok: false,
+        code: "invalid_input",
+        message: `Cannot check out @${target.name}'s commit because your own branch "${viewerRecord.branch}" has unapplied changes (${viewerOwnChanges.files.length} file(s)). Only members without unapplied branch changes (such as verifiers) may run \`swarm_checkout\`; ask \`@coordinator\` to apply your changes first.`,
+      };
+    }
     // 先把目标作者未提交的改动提交一次（若在自身分支上）
-    await deps.worktrees
-      .checkpoint(targetRecord, `Swarm @${target.name} snapshot`)
-      .catch(() => undefined);
+    const targetOnBranch = await deps.worktrees.isOnMemberBranch(targetRecord);
+    if (targetOnBranch) {
+      await deps.worktrees
+        .checkpoint(targetRecord, `Swarm @${target.name} snapshot`)
+        .catch(() => undefined);
+    }
     const targetHead = await deps.worktrees.currentHead(targetRecord.worktree);
     const checkedOut = await deps.worktrees.resetToCommit(viewerRecord.worktree, targetHead);
     return {
@@ -993,7 +1009,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     if (member.isolated) {
       const wt = await ensureWorktreeRecord(member);
       if (wt !== undefined) {
-        await deps.worktrees.remove(wt, true).catch(() => undefined);
+        await deps.worktrees.remove(wt, true);
       }
     }
 
@@ -1668,7 +1684,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           if (active && m.status !== "removed") {
             await deps.worktrees.markApplied(wt, appliedHead);
           } else {
-            await deps.worktrees.remove(wt, true).catch(() => undefined);
+            await deps.worktrees.remove(wt, true);
           }
           return;
         }
