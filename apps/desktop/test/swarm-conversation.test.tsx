@@ -24,11 +24,7 @@ function fakeSession(id = "s-main"): RpcSession {
   } as unknown as RpcSession;
 }
 
-function makeToolEntry(
-  seq: number,
-  name: string,
-  input: unknown,
-): ToolEntry {
+function makeToolEntry(seq: number, name: string, input: unknown): ToolEntry {
   return {
     kind: "tool",
     key: `t:${seq}`,
@@ -268,7 +264,8 @@ describe("Swarm 对话内渲染", () => {
     expect(rowIdx).toBeGreaterThan(0);
     expect(rowIdx).toBeLessThan(postInIdx);
 
-    fireEvent.click(row!);
+    if (!row) throw new Error("missing swarmrow");
+    fireEvent.click(row);
     expect(onOpenSwarm).toHaveBeenCalledTimes(1);
 
     // 成员等确认时入口行状态点变为 warn
@@ -323,7 +320,9 @@ describe("Swarm 对话内渲染", () => {
     expect(endedRow?.querySelector(".tool-name")?.textContent).toBe("结束");
     expect(endedRow?.querySelector(".tool-arg")?.textContent).toBe("API 输入校验");
 
-    fireEvent.click(endedRow!.querySelector(".tool-line")!);
+    const toolLine = endedRow?.querySelector(".tool-line");
+    if (!toolLine) throw new Error("missing tool-line");
+    fireEvent.click(toolLine);
     expect(screen.getByText("@orders")).not.toBeNull();
     expect(screen.getByText("nocturne/swarm-orders")).not.toBeNull();
   });

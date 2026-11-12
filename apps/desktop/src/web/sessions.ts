@@ -538,7 +538,8 @@ export class PhoneSessions {
         }))
       : await client.runtime.resumeSession(id);
     if (generation !== this.generation) throw new Error("电脑连接已切换");
-    const cwd = result.opened.meta?.cwd ? result.opened.meta.cwd : workspace;
+    const metaCwd = (result.opened as Partial<SessionOpened>).meta?.cwd;
+    const cwd = metaCwd !== undefined && metaCwd !== "" ? metaCwd : workspace;
     return this.attach(client, result, cwd, view, member);
   }
   /**

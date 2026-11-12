@@ -1520,7 +1520,9 @@ export function useSidePanel({
                 openSwarmMember({ name: member.name, childSessionId: member.childSessionId });
               },
               onSelectCoordinator: () => {
-                document.querySelector<HTMLTextAreaElement>(".mainpane .composer textarea")?.focus();
+                document
+                  .querySelector<HTMLTextAreaElement>(".mainpane .composer textarea")
+                  ?.focus();
               },
             }
           : undefined

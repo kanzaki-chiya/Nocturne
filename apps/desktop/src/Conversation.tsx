@@ -393,10 +393,7 @@ function isShortTableCell(source: string): boolean {
   return true;
 }
 
-function renderSwarmTextNode(
-  text: string,
-  mentions: readonly string[] | undefined,
-): ReactNode {
+function renderSwarmTextNode(text: string, mentions: readonly string[] | undefined): ReactNode {
   if (mentions === undefined || mentions.length === 0) return text;
   const parts = splitSwarmMentions(text, mentions);
   if (parts.length === 1 && parts[0]?.kind === "text") return text;
@@ -415,7 +412,7 @@ function renderSwarmTextNode(
 function markdownNodes(
   tokens: readonly Token[],
   openUrl: OpenUrl,
-  mentions?: readonly string[] | undefined,
+  mentions?: readonly string[],
 ): ReactNode[] {
   return tokens.map((token, index) => {
     const key = index;
@@ -2960,10 +2957,7 @@ function EntryView({
         const author = swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind);
         const recipient = swarmRecipientLabel ?? "协调者";
         return (
-          <div
-            className={`post-in${searchHit ? " search-hit" : ""}`}
-            data-session-seq={entry.seq}
-          >
+          <div className={`post-in${searchHit ? " search-hit" : ""}`} data-session-seq={entry.seq}>
             <div className="post-in-head">
               <span className={entry.swarm.fromKind === "member" ? "swarm-who" : undefined}>
                 {author}
@@ -4081,13 +4075,7 @@ export function QuestionCard({
   );
 }
 
-function SwarmEntryRow({
-  swarm,
-  onOpen,
-}: {
-  swarm: SwarmView;
-  onOpen?: (() => void) | undefined;
-}) {
+function SwarmEntryRow({ swarm, onOpen }: { swarm: SwarmView; onOpen?: (() => void) | undefined }) {
   const dot = swarmStatusDot(swarm);
   return (
     <button
@@ -4414,8 +4402,8 @@ function ConversationContent({
                   swarmEndedTrailing = true;
                 } else {
                   let idx = -1;
-                  for (let i = 0; i < view.entries.length; i += 1) {
-                    if (view.entries[i]!.seq <= swarmEnded.endedSeq) idx = i;
+                  for (const [i, item] of view.entries.entries()) {
+                    if (item.seq <= swarmEnded.endedSeq) idx = i;
                   }
                   if (swarmEntryTrailing && idx === view.entries.length - 1) {
                     swarmEndedTrailing = true;
@@ -4544,7 +4532,7 @@ function ConversationContent({
                         );
                       }),
                   ]}
-                  {swarmEntryTrailing && swarm !== undefined ? (
+                  {swarm !== undefined && swarmNextUserIdx === -1 ? (
                     <SwarmEntryRow
                       key={`swarm-entry:${swarm.createdSeq}`}
                       swarm={swarm}

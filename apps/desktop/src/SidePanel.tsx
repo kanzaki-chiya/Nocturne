@@ -155,8 +155,7 @@ export interface SidePanelProps {
   /** 子代理标签；没有时子代理标签显示说明 */
   subagents?: PanelSubagents | undefined;
   shells?:
-    | { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] }
-    | undefined;
+    { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] } | undefined;
   /** Swarm 面板标签的数据与动作 */
   swarm?: PanelSwarm | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */

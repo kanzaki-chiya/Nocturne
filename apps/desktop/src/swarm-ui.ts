@@ -215,7 +215,11 @@ export function filterSwarmPosts<
         charter !== undefined
           ? `${charter.owns}\n${charter.handsOff}\n${charter.doneWhen}`.toLowerCase()
           : post.text.toLowerCase();
-      if (!authorLabel.includes(needle) && !fromRaw.includes(needle) && !bodyText.includes(needle)) {
+      if (
+        !authorLabel.includes(needle) &&
+        !fromRaw.includes(needle) &&
+        !bodyText.includes(needle)
+      ) {
         return false;
       }
     }

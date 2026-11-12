@@ -69,7 +69,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   await storage.identity();
 
   let coordReceive: ((e: RuntimeEvent) => void) | undefined;
-  let memberReceive: ((e: RuntimeEvent) => void) | undefined;
+  let _memberReceive: ((e: RuntimeEvent) => void) | undefined;
   let androidBack: (() => void) | undefined;
 
   const postToSwarm = vi.fn(async () => ({ number: 2, recipients: ["coordinator"] }));
@@ -161,8 +161,8 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
     respondPermission: memberRespondPermission,
     recordInputHistory: async () => undefined,
     close: memberClose,
-    subscribe: async (fn: typeof memberReceive) => {
-      memberReceive = fn;
+    subscribe: async (fn: typeof _memberReceive) => {
+      _memberReceive = fn;
       fn?.({
         type: "permission.requested",
         sessionId: "child-orders",

@@ -18,10 +18,7 @@ import {
 } from "../src/swarm-ui";
 import { mcpToolLabel, toolMeta } from "../src/tool-meta";
 
-function makeMember(
-  name: string,
-  overrides: Partial<SwarmMemberView> = {},
-): SwarmMemberView {
+function makeMember(name: string, overrides: Partial<SwarmMemberView> = {}): SwarmMemberView {
   return {
     name,
     childSessionId: `child-${name}`,
@@ -35,10 +32,7 @@ function makeMember(
   };
 }
 
-function makePost(
-  number: number,
-  overrides: Partial<SwarmPostView> = {},
-): SwarmPostView {
+function makePost(number: number, overrides: Partial<SwarmPostView> = {}): SwarmPostView {
   return {
     seq: number,
     time: "2026-11-12T13:31:00.000Z",
@@ -70,7 +64,9 @@ describe("toolMeta Swarm 工具标签与参数", () => {
   });
 
   it("swarmToolSummary 提取单行参数摘要", () => {
-    expect(swarmToolSummary("swarm_init", { title: "  API 输入校验\n次行  " })).toBe("API 输入校验");
+    expect(swarmToolSummary("swarm_init", { title: "  API 输入校验\n次行  " })).toBe(
+      "API 输入校验",
+    );
     expect(swarmToolSummary("swarm_add_member", { name: "users", preset: "general" })).toBe(
       "@users",
     );
@@ -99,7 +95,11 @@ describe("SwarmActivity 活动摘要组词", () => {
     );
     expect(swarmActivitySummary({ kind: "permission" })).toBe("等待确认");
     expect(
-      swarmActivitySummary({ kind: "paused", code: "rate_limit", message: "429 Too Many Requests" }),
+      swarmActivitySummary({
+        kind: "paused",
+        code: "rate_limit",
+        message: "429 Too Many Requests",
+      }),
     ).toBe("429 Too Many Requests");
     expect(
       swarmActivitySummary({
@@ -108,9 +108,9 @@ describe("SwarmActivity 活动摘要组词", () => {
         message: "Session not found",
       }),
     ).toBe("找不到这个子代理的日志，可能已被删除");
-    expect(swarmActivitySummary({ kind: "post", number: 11, line: "已改：数量为 0 时返回 400" })).toBe(
-      "已改：数量为 0 时返回 400",
-    );
+    expect(
+      swarmActivitySummary({ kind: "post", number: 11, line: "已改：数量为 0 时返回 400" }),
+    ).toBe("已改：数量为 0 时返回 400");
     expect(swarmActivitySummary({ kind: "charter", line: "src/routes/users.ts" })).toBe(
       "src/routes/users.ts",
     );
@@ -165,33 +165,32 @@ describe("作者、提及、筛选、搜索与分组", () => {
   });
 
   it("成员分组与状态圆点：进行中区分 work / ask / pause / wait / retired，结束后统一为 wait", () => {
-    const members = [
-      makeMember("verifier", { status: "working" }),
-      makeMember("products", {
-        status: "working",
-        pendingPermissions: [
-          { requestId: "r1", callId: "c1", reason: "cmd", subjects: [], options: [] },
-        ],
-      }),
-      makeMember("broken", { status: "paused" }),
-      makeMember("orders", { status: "waiting" }),
-      makeMember("schema", { status: "removed" }),
-    ];
+    const mWorking = makeMember("verifier", { status: "working" });
+    const mAsk = makeMember("products", {
+      status: "working",
+      pendingPermissions: [
+        { requestId: "r1", callId: "c1", reason: "cmd", subjects: [], options: [] },
+      ],
+    });
+    const mPaused = makeMember("broken", { status: "paused" });
+    const mWaiting = makeMember("orders", { status: "waiting" });
+    const mRemoved = makeMember("schema", { status: "removed" });
+    const members = [mWorking, mAsk, mPaused, mWaiting, mRemoved];
     const groups = groupSwarmMembers(members);
     expect(groups.working.map((m) => m.name)).toEqual(["verifier", "products"]);
     expect(groups.paused.map((m) => m.name)).toEqual(["broken"]);
     expect(groups.waiting.map((m) => m.name)).toEqual(["orders"]);
     expect(groups.removed.map((m) => m.name)).toEqual(["schema"]);
 
-    expect(swarmMemberDot(members[0]!, "active")).toBe("work");
-    expect(swarmMemberDot(members[1]!, "active")).toBe("ask");
-    expect(swarmMemberDot(members[2]!, "active")).toBe("pause");
-    expect(swarmMemberDot(members[3]!, "active")).toBe("wait");
-    expect(swarmMemberDot(members[4]!, "active")).toBe("retired");
+    expect(swarmMemberDot(mWorking, "active")).toBe("work");
+    expect(swarmMemberDot(mAsk, "active")).toBe("ask");
+    expect(swarmMemberDot(mPaused, "active")).toBe("pause");
+    expect(swarmMemberDot(mWaiting, "active")).toBe("wait");
+    expect(swarmMemberDot(mRemoved, "active")).toBe("retired");
 
-    expect(swarmMemberDot(members[0]!, "ended")).toBe("wait");
-    expect(swarmMemberDot(members[1]!, "ended")).toBe("wait");
-    expect(swarmMemberDot(members[4]!, "ended")).toBe("retired");
+    expect(swarmMemberDot(mWorking, "ended")).toBe("wait");
+    expect(swarmMemberDot(mAsk, "ended")).toBe("wait");
+    expect(swarmMemberDot(mRemoved, "ended")).toBe("retired");
   });
 
   it("入口行计数只计未移除成员，状态点区分 ok / warn / 已结束无点", () => {
@@ -229,10 +228,10 @@ describe("作者、提及、筛选、搜索与分组", () => {
 
   it("splitSwarmMentions 只强调出现在 mentions 里的 @token，忽略不在 mentions 里的词和半截词", () => {
     expect(
-      splitSwarmMentions(
-        "请 @users 处理，@unknown 装饰器与 @users-extra 不动，回贴找 @协调者",
-        ["users", "coordinator"],
-      ),
+      splitSwarmMentions("请 @users 处理，@unknown 装饰器与 @users-extra 不动，回贴找 @协调者", [
+        "users",
+        "coordinator",
+      ]),
     ).toEqual([
       { kind: "text", value: "请 " },
       { kind: "mention", value: "@users" },
