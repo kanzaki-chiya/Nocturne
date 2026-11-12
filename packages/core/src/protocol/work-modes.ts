@@ -237,7 +237,14 @@ export function workModeOrigins(events: readonly DurableEvent[]): {
 
 /** 不开新任务的子命令（ADR-0076 §7） */
 export type WorkModeAction =
-  "goal-status" | "goal-stop" | "goal-resume" | "goal-cancel" | "plan-approve" | "plan-cancel";
+  | "goal-status"
+  | "goal-stop"
+  | "goal-resume"
+  | "goal-cancel"
+  | "plan-approve"
+  | "plan-cancel"
+  | "swarm-board"
+  | "swarm-end";
 
 /** 斜杠解析结果：带任务的提交、整行只是命令名时的用法提示，或会话操作 */
 export type WorkModeSlash =
@@ -257,6 +264,7 @@ const USAGE: Record<WorkModeName, string> = {
 const ACTIONS: Partial<Record<WorkModeName, Record<string, WorkModeAction>>> = {
   goal: { "": "goal-status", stop: "goal-stop", resume: "goal-resume", cancel: "goal-cancel" },
   plan: { approve: "plan-approve", cancel: "plan-cancel" },
+  swarm: { board: "swarm-board", end: "swarm-end" },
 };
 
 /**

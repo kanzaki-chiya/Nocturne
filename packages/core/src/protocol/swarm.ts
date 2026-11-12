@@ -96,10 +96,33 @@ export interface SwarmMemberPermission {
   options: PermissionOption[];
 }
 
+/** 成员当前工具行摘要：工具名与可选的主要参数（命令首行、路径、标题等） */
+export interface SwarmToolActivity {
+  tool: string;
+  detail?: string | undefined;
+}
+
+/**
+ * 最近活动摘要（结构化，客户端自行组成文字；协议层不产出给人看的句子）：
+ * - `tool`：正在执行的工具
+ * - `permission`：等待用户确认，`target` 为首个确认对象（或原因）
+ * - `paused`：上一轮以错误结束
+ * - `post`：最近一条帖子首行
+ * - `charter`：任务书「负责」段首行（尚未发帖时）
+ * - `removed`：已移除，`reason` 为移除原因
+ */
+export type SwarmActivity =
+  | { kind: "tool"; tool: string; detail?: string | undefined }
+  | { kind: "permission"; target?: string | undefined }
+  | { kind: "paused"; code: string; message: string }
+  | { kind: "post"; number: number; line: string }
+  | { kind: "charter"; line: string }
+  | { kind: "removed"; reason?: string | undefined };
+
 export interface SwarmMemberUpdatedPayload {
   name: string;
   status: "working" | "waiting" | "paused";
-  toolActivity?: string | undefined;
+  toolActivity?: SwarmToolActivity | undefined;
   pauseError?: { code: string; message: string } | undefined;
   pendingPermissions?: SwarmMemberPermission[] | undefined;
 }
@@ -110,7 +133,7 @@ export interface SwarmCoordinatorView {
   model: ModelRef | undefined;
   status: "working" | "waiting";
   lastPostNumber?: number | undefined;
-  activity?: string | undefined;
+  activity?: SwarmActivity | undefined;
   awaitingPermission: boolean;
 }
 
@@ -126,11 +149,11 @@ export interface SwarmMemberView {
   worktree?: SwarmWorktreeRef | undefined;
   status: SwarmMemberStatus;
   lastPostNumber?: number | undefined;
-  /** 最近在做什么：工具行摘要、等待确认摘要、暂停原因或最近帖子首行 */
-  activity?: string | undefined;
+  /** 最近在做什么：工具行摘要、等待确认、暂停原因、最近帖子首行或任务书首行 */
+  activity?: SwarmActivity | undefined;
   /** 最近一条由该成员发出的帖子首行（工作结束回到 waiting 时回退显示） */
   lastPostLine?: string | undefined;
-  toolActivity?: string | undefined;
+  toolActivity?: SwarmToolActivity | undefined;
   pauseError?: { code: string; message: string } | undefined;
   pendingPermissions: SwarmMemberPermission[];
 }
@@ -388,11 +411,11 @@ export function firstNonEmptyLine(text: string): string | undefined {
   return undefined;
 }
 
-export function summarizeSwarmToolCall(name: string, input: unknown): string {
+export function summarizeSwarmToolCall(name: string, input: unknown): SwarmToolActivity {
   const rec =
     input !== null && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
   const command = typeof rec?.command === "string" ? firstNonEmptyLine(rec.command) : undefined;
-  if (command !== undefined) return `${name}: ${command}`;
+  if (command !== undefined) return { tool: name, detail: command };
   const path =
     typeof rec?.path === "string"
       ? rec.path
@@ -406,25 +429,34 @@ export function summarizeSwarmToolCall(name: string, input: unknown): string {
               ? `@${rec.member}`
               : undefined;
   if (path !== undefined && path !== "") {
-    return `${name}: ${path.length > 80 ? `${path.slice(0, 77)}…` : path}`;
+    return { tool: name, detail: path.length > 80 ? `${path.slice(0, 77)}…` : path };
   }
-  return name;
+  return { tool: name };
 }
 
-function computeMemberActivity(member: SwarmMemberView): string | undefined {
+function computeMemberActivity(member: SwarmMemberView): SwarmActivity | undefined {
   if (member.status === "removed") return member.activity;
   const firstPerm = member.pendingPermissions[0];
   if (firstPerm !== undefined) {
     const target = firstPerm.subjects[0]?.target ?? firstPerm.reason;
-    return target ? `Waiting permission: ${target}` : "Waiting permission";
+    return target ? { kind: "permission", target } : { kind: "permission" };
   }
   if (member.status === "paused") {
-    return member.pauseError?.message ?? "Paused on error";
+    const err = member.pauseError ?? { code: "unknown", message: "" };
+    return { kind: "paused", code: err.code, message: err.message };
   }
   if (member.status === "working" && member.toolActivity !== undefined) {
-    return member.toolActivity;
+    return { kind: "tool", ...member.toolActivity };
   }
-  return member.lastPostLine ?? firstNonEmptyLine(member.charter.owns);
+  if (member.lastPostLine !== undefined && member.lastPostNumber !== undefined) {
+    return { kind: "post", number: member.lastPostNumber, line: member.lastPostLine };
+  }
+  return charterActivity(member.charter);
+}
+
+function charterActivity(charter: SwarmCharter): SwarmActivity | undefined {
+  const line = firstNonEmptyLine(charter.owns);
+  return line !== undefined ? { kind: "charter", line } : undefined;
 }
 
 function recomputeAwaitingPermissionMembers(swarm: SwarmView): void {
@@ -482,7 +514,7 @@ export function reduceSwarmDurable(
         isolated: p.isolated,
         ...(p.worktree !== undefined ? { worktree: p.worktree } : {}),
         status: "waiting",
-        activity: firstNonEmptyLine(p.charter.owns),
+        activity: charterActivity(p.charter),
         pendingPermissions: [],
       };
       if (existingIdx >= 0) swarm.members[existingIdx] = member;
@@ -506,7 +538,8 @@ export function reduceSwarmDurable(
       const line = firstNonEmptyLine(p.text);
       if (p.fromKind === "coordinator" && p.charterOf === undefined) {
         swarm.coordinator.lastPostNumber = p.number;
-        if (line !== undefined) swarm.coordinator.activity = line;
+        if (line !== undefined)
+          swarm.coordinator.activity = { kind: "post", number: p.number, line };
       } else if (p.fromKind === "member") {
         const m = swarm.members.find((item) => item.name === p.from);
         if (m !== undefined) {
@@ -537,7 +570,8 @@ export function reduceSwarmDurable(
         m.toolActivity = undefined;
         m.pauseError = undefined;
         m.pendingPermissions = [];
-        m.activity = p.reason ?? m.lastPostLine ?? "Removed";
+        m.activity =
+          p.reason !== undefined ? { kind: "removed", reason: p.reason } : { kind: "removed" };
         recomputeAwaitingPermissionMembers(swarm);
       }
       return swarm;
@@ -575,10 +609,10 @@ export function reduceSwarmDurable(
     }
     case "tool.started": {
       if (swarm?.status === "active") {
-        swarm.coordinator.activity = summarizeSwarmToolCall(
-          event.payload.name,
-          event.payload.input,
-        );
+        swarm.coordinator.activity = {
+          kind: "tool",
+          ...summarizeSwarmToolCall(event.payload.name, event.payload.input),
+        };
       }
       return swarm;
     }

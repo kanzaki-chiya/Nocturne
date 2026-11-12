@@ -253,7 +253,9 @@ interface McpServerViewState {
 
 Phase 6 的 Subagent **不需要视图扩展**：`task` 在父会话是普通工具条目，子会话内部进度经 `tool.progress`（`stream:"info"`）一行式进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的事件写在子日志，不进父会话的事件流，V1 重放等价不受影响。
 
-Swarm（[ADR-0089](../decisions/ADR-0089-swarm.md)）：`SessionView.swarm` 由协调者日志中的 `swarm.created` / `member_added` / `posted` / `member_model_changed` / `member_removed` / `ended` 持久事件建立成员清单（含每名成员的 `model`、`lastPostNumber`、最近帖子首行 `activity`）与留言板帖子列表；持久重放时未移除成员的状态均为 `"waiting"`、`pendingPermissions` 为空。运行中成员的实时状态（`working` / `waiting` / `paused`、当前工具行摘要、暂停错误及等待用户确认的权限请求）经临时事件 `swarm.member_updated` 更新，并汇总出 `awaitingPermissionMembers`（成员在等确认时客户端据此提示并跳转到成员会话）。分叉（`session.created.forkedFrom`）不继承分叉点及之前的 Swarm；对话回退到 `swarm.created` 之前时 Runtime 追加 `swarm.ended(reason: "rewound")`。成员实时运行态字段（如 `paused` 与 `toolActivity`）与 `mcpServers`、`backgroundShells[].outputChars` 同属运行期瞬态投影。
+Swarm（[ADR-0089](../decisions/ADR-0089-swarm.md)）：`SessionView.swarm` 由协调者日志中的 `swarm.created` / `member_added` / `posted` / `member_model_changed` / `member_removed` / `ended` 持久事件建立成员清单（含每名成员的 `model`、`lastPostNumber`、最近活动 `activity`）与留言板帖子列表；持久重放时未移除成员的状态均为 `"waiting"`、`pendingPermissions` 为空。运行中成员的实时状态（`working` / `waiting` / `paused`、当前工具行摘要、暂停错误及等待用户确认的权限请求）经临时事件 `swarm.member_updated` 更新，并汇总出 `awaitingPermissionMembers`（成员在等确认时客户端据此提示并跳转到成员会话）。分叉（`session.created.forkedFrom`）不继承分叉点及之前的 Swarm；对话回退到 `swarm.created` 之前时 Runtime 追加 `swarm.ended(reason: "rewound")`。成员实时运行态字段（如 `paused` 与 `toolActivity`）与 `mcpServers`、`backgroundShells[].outputChars` 同属运行期瞬态投影。
+
+协调者与成员的 `activity` 是结构化的 `SwarmActivity`，协议层不产出给人看的句子，由客户端按 `kind` 组成文字：`{ kind: "tool", tool, detail? }`（正在执行的工具及主要参数）、`{ kind: "permission", target? }`（等待用户确认，`target` 为首个确认对象或原因）、`{ kind: "paused", code, message }`（上一轮以错误结束）、`{ kind: "post", number, line }`（最近帖子首行）、`{ kind: "charter", line }`（尚未发帖时取任务书「负责」段首行）、`{ kind: "removed", reason? }`。成员的 `toolActivity` 为 `{ tool, detail? }`。
 
 ## 5. 权限请求生命周期
 

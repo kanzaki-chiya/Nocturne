@@ -30,6 +30,7 @@ import {
   type SwarmMemberPermission,
   type SwarmMemberUpdatedPayload,
   type SwarmPostedPayload,
+  type SwarmToolActivity,
   type SwarmUnmergedWorktree,
   type SwarmView,
   type TurnEndReason,
@@ -169,7 +170,7 @@ interface MemberRuntimeState {
   worktreeRef?: { path: string; branch: string; base: string } | undefined;
   worktreeRecord?: SwarmWorktreeHandle | undefined;
   status: "working" | "waiting" | "paused" | "removed";
-  toolActivity?: string | undefined;
+  toolActivity?: SwarmToolActivity | undefined;
   pauseError?: { code: string; message: string } | undefined;
   pendingPermissions: SwarmMemberPermission[];
   session?: ManagedMemberSession | undefined;

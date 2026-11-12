@@ -669,10 +669,16 @@ export async function runRepl(
             prompt();
             return;
           }
+          // CLI 没有留言板界面：/swarm board 只打印用法
+          if (work.action === "swarm-board") {
+            out.line("stdout", "用法：/swarm 任务");
+            prompt();
+            return;
+          }
           const opensTurn = work.action === "goal-resume" || work.action === "plan-approve";
           const goalBefore = session.state().goal?.status;
           busy = opensTurn;
-          const op =
+          const op: Promise<unknown> =
             work.action === "goal-stop"
               ? session.stopGoal()
               : work.action === "goal-cancel"
@@ -681,7 +687,9 @@ export async function runRepl(
                   ? session.resumeGoal()
                   : work.action === "plan-approve"
                     ? session.approvePlan()
-                    : session.cancelPlan();
+                    : work.action === "swarm-end"
+                      ? session.endSwarm()
+                      : session.cancelPlan();
           activeTurn = op
             .then(() => {
               if (work.action === "goal-stop") out.line("stdout", goalStopText(goalBefore));

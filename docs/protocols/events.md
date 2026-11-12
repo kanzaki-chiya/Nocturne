@@ -149,7 +149,7 @@ ADR-0083：`shell.task_updated` 携带 `{ task: BackgroundShellTask }`，任务�
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
 | `mcp.server` | — | `name`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节；归约进 `SessionView.mcpServers`，见 [view.md](view.md) §4） |
 | `input.pending` | — | `items: PendingInputItem[]`（每条 `{ id, mode: "steer" \| "queue" \| "subagent" \| "shell" \| "swarm", text, attachments, createdAt, paused, workMode? }`，`workMode` 为执行方式名，见 ADR-0076）、`paused`（ADR-0070；待发输入的**完整快照**，每次变化整份下发，会话语义见 [agent-loop.md](../architecture/agent-loop.md) §2.1）。临时状态、不写日志，不回放：新附加的客户端在订阅后另调 `session.pendingInputs`（`rpc.md` 第 3.6 节）对齐 |
-| `swarm.member_updated` | — | `name`、`status: "working" \| "waiting" \| "paused"`、`toolActivity?`、`pauseError?: { code, message }`、`pendingPermissions?: { requestId, callId, reason, subjects, options }[]`（[ADR-0089](../decisions/ADR-0089-swarm.md) §5、§8：协调者会话上的临时运行态同步，订阅协调者时立即推送活动快照） |
+| `swarm.member_updated` | — | `name`、`status: "working" \| "waiting" \| "paused"`、`toolActivity?: { tool, detail? }`、`pauseError?: { code, message }`、`pendingPermissions?: { requestId, callId, reason, subjects, options }[]`（[ADR-0089](../decisions/ADR-0089-swarm.md) §5、§8：协调者会话上的临时运行态同步，订阅协调者时立即推送活动快照） |
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
 
