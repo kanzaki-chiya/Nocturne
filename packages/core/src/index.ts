@@ -3436,9 +3436,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
         }
       } else {
+        // 已注册的不重新注册：工具顺序影响请求前缀（恢复会话时也会走到这里）
         for (const tool of builtinTools()) {
-          if (tool.traits.editTool !== undefined) {
-            tools.unregister(tool.name);
+          if (tool.traits.editTool !== undefined && tools.get(tool.name) === undefined) {
             tools.register(tool);
           }
         }
