@@ -79,7 +79,7 @@ it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到�
   }
 });
 
-it("/swarm board 只提示用法；/swarm end 无 Swarm 时报错，活动 Swarm 中结束并提示", async () => {
+it("/swarm board 只提示用法；/swarm end 无未合并分支时不输出，有未合并分支时逐行显示 @name 分支名", async () => {
   const provider = new FakeProvider({
     scripts: [
       [
@@ -130,8 +130,34 @@ it("/swarm board 只提示用法；/swarm end 无 Swarm 时报错，活动 Swarm
     await settleOn("协作已建立");
     await settle(() => swarmStatus() === "active");
     await enter("/swarm end");
-    await settleOn("Swarm 已结束");
     await settle(() => swarmStatus() === "ended");
+    expect(frame()).not.toContain("Swarm 已结束");
+    // 有未合并工作树时逐行输出 `@name 分支名`
+    const originalEnd = session.endSwarm.bind(session);
+    session.endSwarm = async () => ({
+      unmerged: [
+        {
+          name: "orders",
+          branch: "nocturne/orders-wt",
+          worktreePath: "/tmp/wt1",
+          childSessionId: "child-orders",
+        },
+        {
+          name: "users",
+          branch: "nocturne/users-wt",
+          worktreePath: "/tmp/wt2",
+          childSessionId: "child-users",
+        },
+      ],
+    });
+    try {
+      await enter("/swarm end");
+      await settleOn("@orders nocturne/orders-wt");
+      await settleOn("@users nocturne/users-wt");
+      expect(frame()).not.toContain("Swarm 已结束");
+    } finally {
+      session.endSwarm = originalEnd;
+    }
   } finally {
     ui.unmount();
     await session.close();

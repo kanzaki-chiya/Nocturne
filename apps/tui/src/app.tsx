@@ -2862,11 +2862,7 @@ function SessionApp({
           pushLine("用法：/swarm 任务");
         } else if (work.action === "swarm-end") {
           void session.endSwarm().then(({ unmerged }) => {
-            pushLine(
-              unmerged.length === 0
-                ? "Swarm 已结束"
-                : `Swarm 已结束（未合并工作树：${unmerged.map((u) => u.branch).join("、")}）`,
-            );
+            for (const item of unmerged) pushLine(`@${item.name} ${item.branch}`);
           }, fail);
         } else {
           // 空闲时继续目标、批准计划都会开新 Turn：与普通提交一样占住提交位
