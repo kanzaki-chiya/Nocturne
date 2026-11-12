@@ -177,3 +177,35 @@ it("关闭进行中重新打开会等待关闭完成再 resume", async () => {
   expect(h.sessions.opened.get("s")).toBe(reopened);
   h.client.close();
 });
+
+it("活动 Swarm 的协调者会话在切走且空闲时不随 closeIfIdle 关闭，结束后照常关闭", async () => {
+  const h = harness();
+  await h.sessions.connected(h.client);
+  const entry = await h.sessions.open("coord");
+  h.listeners.get("coord")?.({
+    type: "swarm.created",
+    sessionId: "coord",
+    seq: 1,
+    time: new Date().toISOString(),
+    payload: { title: "API 输入校验" },
+  } as RuntimeEvent);
+  expect(entry.view.swarm?.status).toBe("active");
+
+  h.sessions.setSelected(undefined);
+  await Promise.resolve();
+  expect(h.closes.get("coord")).not.toHaveBeenCalled();
+  expect(h.sessions.opened.has("coord")).toBe(true);
+
+  h.listeners.get("coord")?.({
+    type: "swarm.ended",
+    sessionId: "coord",
+    seq: 2,
+    time: new Date().toISOString(),
+    payload: { reason: "user" },
+  } as RuntimeEvent);
+  await vi.waitFor(() => {
+    expect(h.closes.get("coord")).toHaveBeenCalledOnce();
+    expect(h.sessions.opened.has("coord")).toBe(false);
+  });
+  h.client.close();
+});

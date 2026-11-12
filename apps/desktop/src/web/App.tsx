@@ -51,6 +51,8 @@ import { DraftComposer, SessionScreen } from "./SessionScreen";
 import { ImageViewerProvider, type ImageViewerControl } from "../ImageViewer";
 import { Switch } from "../ui";
 import type { PhonePanelPage } from "./PhoneSidePanel";
+import { SwarmPane } from "../SwarmPane";
+import { swarmStatusDot } from "../swarm-ui";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
@@ -71,6 +73,14 @@ type Page =
   | { kind: "home"; hostId: string }
   | { kind: "project"; hostId: string; path: string }
   | { kind: "session"; hostId: string; sessionId: string; panel?: PhonePanelPage }
+  | { kind: "swarm"; hostId: string; sessionId: string }
+  | {
+      kind: "swarm-member";
+      hostId: string;
+      sessionId: string;
+      childSessionId: string;
+      memberName: string;
+    }
   | { kind: "settings"; hostId?: string }
   | { kind: "usage"; hostId: string }
   | { kind: "schedules"; hostId: string }
@@ -212,6 +222,15 @@ export function PhoneApp({
     }
     closingViewerFromPop.current = false;
   };
+  const syncSelection = (target: Page) => {
+    if (target.kind === "session" || target.kind === "swarm") {
+      sessions.setSelected(target.sessionId);
+    } else if (target.kind === "swarm-member") {
+      sessions.setSelected(target.childSessionId, target.sessionId);
+    } else {
+      sessions.setSelected(undefined);
+    }
+  };
   const navigate = (next: Page, replace = false) => {
     if (viewerControl.current?.isOpen === true) {
       closingViewerFromPop.current = true;
@@ -222,7 +241,7 @@ export function PhoneApp({
       "",
       location.pathname,
     );
-    sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
+    syncSelection(next);
     setPage(next);
     setAddingHost(false);
     setCameraDenied(false);
@@ -294,7 +313,7 @@ export function PhoneApp({
       ) {
         return;
       }
-      sessions.setSelected(next.kind === "session" ? next.sessionId : undefined);
+      syncSelection(next);
       setPage(next);
       setAddingHost(false);
       setCameraDenied(false);
@@ -311,13 +330,17 @@ export function PhoneApp({
   const shouldConnect = () =>
     platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
   const hostId = "hostId" in page ? page.hostId : undefined;
-  const viewingSessionId =
-    !offer && page.kind === "session" && platform.isForeground?.() === true
+  const activeSessionId =
+    page.kind === "session" || page.kind === "swarm" || page.kind === "swarm-member"
       ? page.sessionId
+      : undefined;
+  const viewingSessionId =
+    !offer && activeSessionId !== undefined && platform.isForeground?.() === true
+      ? activeSessionId
       : undefined;
   currentRef.current = {
     hostId,
-    sessionId: page.kind === "session" ? page.sessionId : undefined,
+    sessionId: activeSessionId,
     covered: !!offer,
   };
   const reportedViewing =
@@ -482,7 +505,23 @@ export function PhoneApp({
     navigate({ kind: "session", hostId, sessionId });
     openSession(sessionId);
   }, [notificationTarget, ready, hosts, hostId, online, loaded]);
-  const entry = page.kind === "session" ? sessions.opened.get(page.sessionId) : undefined;
+  const coordinatorEntry = activeSessionId ? sessions.opened.get(activeSessionId) : undefined;
+  const entry =
+    page.kind === "session"
+      ? coordinatorEntry
+      : page.kind === "swarm-member"
+        ? sessions.opened.get(page.childSessionId)
+        : undefined;
+  useEffect(() => {
+    if (!online) return;
+    if (page.kind === "swarm" && !coordinatorEntry) {
+      void sessions.open(page.sessionId).catch(() => undefined);
+    } else if (page.kind === "swarm-member" && !entry) {
+      void sessions
+        .openMember(page.childSessionId, coordinatorEntry?.workspace ?? "", page.sessionId)
+        .catch(() => undefined);
+    }
+  }, [online, page, coordinatorEntry, entry, sessions]);
   const connected = online;
   const extension: PhoneExtensionApi = {
     open: (name) => {
@@ -697,6 +736,10 @@ export function PhoneApp({
           sessions.list.find((item) => item.id === page.sessionId)?.firstText ??
           "会话"
         );
+      case "swarm":
+        return coordinatorEntry?.view.swarm?.title ?? "Swarm";
+      case "swarm-member":
+        return `@${page.memberName}`;
       default:
         return computer?.name ?? "电脑";
     }
@@ -953,6 +996,9 @@ export function PhoneApp({
         onPanelClose={() => {
           history.go(page.panel?.kind === "overview" ? -1 : -2);
         }}
+        onOpenSwarm={() => {
+          navigate({ kind: "swarm", hostId: page.hostId, sessionId: page.sessionId });
+        }}
         onRename={() => {
           setRenameError("");
           setRenameDraft(title);
@@ -963,6 +1009,69 @@ export function PhoneApp({
         onForked={(id) => {
           navigate({ kind: "session", hostId: page.hostId, sessionId: id });
         }}
+      />
+    ) : (
+      <section className="phone-body">{connected && <p role="status">正在打开会话…</p>}</section>
+    );
+  } else if (page.kind === "swarm") {
+    const swarm = coordinatorEntry?.view.swarm;
+    body =
+      coordinatorEntry && swarm ? (
+        <section className="phone-swarm">
+          <SwarmPane
+            swarm={swarm}
+            session={coordinatorEntry.session}
+            openUrl={(url) => {
+              host.openUrl(url);
+            }}
+            onSelectCoordinator={() => {
+              history.back();
+            }}
+            onOpenMember={(member) => {
+              const parentId = page.sessionId;
+              const workspace = coordinatorEntry.workspace;
+              navigate({
+                kind: "swarm-member",
+                hostId: page.hostId,
+                sessionId: parentId,
+                childSessionId: member.childSessionId,
+                memberName: member.name,
+              });
+              void operation(async () => {
+                await sessions.openMember(member.childSessionId, workspace, parentId);
+              });
+            }}
+            visible
+          />
+        </section>
+      ) : (
+        <section className="phone-swarm" />
+      );
+  } else if (page.kind === "swarm-member") {
+    const swarm = coordinatorEntry?.view.swarm;
+    const memberStatus = swarm?.members.find(
+      (item) => item.childSessionId === page.childSessionId,
+    )?.status;
+    const frozen = swarm === undefined || swarm.status === "ended" || memberStatus === "removed";
+    body = entry ? (
+      <SessionScreen
+        key={entry.session.id}
+        entry={entry}
+        connected={connected}
+        images={images}
+        plain={
+          plainWorkspace !== undefined && projectKey(entry.workspace) === projectKey(plainWorkspace)
+        }
+        openUrl={(url) => {
+          host.openUrl(url);
+        }}
+        onError={setError}
+        onChanged={() => {
+          void sessions.refresh().catch(() => undefined);
+        }}
+        sessions={sessions}
+        onForked={() => undefined}
+        swarmMember={{ name: page.memberName, frozen }}
       />
     ) : (
       <section className="phone-body">{connected && <p role="status">正在打开会话…</p>}</section>
@@ -1212,6 +1321,8 @@ export function PhoneApp({
 
   const homeHeader = page.kind === "home" && !offer;
   const sessionHeader = page.kind === "session" && !offer;
+  const swarmHeaderDot =
+    page.kind === "swarm" && !offer ? swarmStatusDot(coordinatorEntry?.view.swarm) : undefined;
   const sessionPath =
     page.kind === "session"
       ? (entry?.workspace ?? sessions.list.find((item) => item.id === page.sessionId)?.cwd)
@@ -1272,12 +1383,21 @@ export function PhoneApp({
                 </p>
               )}
             </div>
+          ) : page.kind === "swarm" && !offer ? (
+            <div className="phone-swarm-head-title">
+              {swarmHeaderDot !== undefined && (
+                <span className={`sp-swarm-dot ${swarmHeaderDot}`} aria-hidden="true" />
+              )}
+              <h1>{title}</h1>
+            </div>
           ) : (
             <h1>{title}</h1>
           )}
           {sessionHeader ? (
             <div className="phone-header-tools" ref={setHeaderSlot} />
-          ) : page.kind === "settings" ||
+          ) : page.kind === "swarm" ||
+            page.kind === "swarm-member" ||
+            page.kind === "settings" ||
             page.kind === "diagnostics" ||
             page.kind === "usage" ||
             page.kind === "schedules" ||

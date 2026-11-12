@@ -66,11 +66,17 @@ export function SessionScreen({
   onPanel,
   onPanelBack,
   onPanelClose,
+  onOpenSwarm,
+  swarmMember,
 }: {
   panel?: PhonePanelPage | undefined;
   onPanel?: ((panel: PhonePanelPage) => void) | undefined;
   onPanelBack?: (() => void) | undefined;
   onPanelClose?: (() => void) | undefined;
+  /** 点击对话内 Swarm 入口行或输入 `/swarm board` 时进入全屏 Swarm 页 */
+  onOpenSwarm?: (() => void) | undefined;
+  /** 成员会话模式：标题 `@name`，移除或结束后只读冻结 */
+  swarmMember?: { name: string; frozen: boolean } | undefined;
   entry: PhoneSession;
   /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
   sessions: PhoneSessions;
@@ -207,9 +213,18 @@ export function SessionScreen({
   };
   const slash = async (line: string): Promise<string | boolean> => {
     void session.recordInputHistory(line).catch(() => undefined);
-    // ADR-0076 §7：/goal 与 /plan 的无任务子命令
+    // ADR-0076 §7 / ADR-0089 §10：无任务子命令
     const work = parseWorkModeSlash(line);
     if (work?.kind === "action") {
+      if (work.action === "swarm-board" || work.action === "swarm-end") {
+        if (view.swarm === undefined) return "用法：/swarm 任务";
+        if (work.action === "swarm-board") {
+          onOpenSwarm?.();
+          return true;
+        }
+        await session.endSwarm();
+        return true;
+      }
       if (work.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
       if (work.action === "goal-cancel") {
         await session.cancelGoal();
@@ -265,9 +280,34 @@ export function SessionScreen({
     },
   };
 
+  if (swarmMember?.frozen === true) {
+    return (
+      <Conversation
+        session={{
+          id: session.id,
+          readOnly: true,
+          readAttachment: (file) => session.readAttachment(file),
+        }}
+        readOnly={{ frozen: true }}
+        view={view}
+        openWarnings={entry.warnings.map(phoneWarningText)}
+        openUrl={openUrl}
+        cwd={entry.workspace}
+        shellKind={controls.shell?.effective?.kind}
+        images={images}
+        busy={false}
+        hidePersistentPermissions
+        hideRequests
+        subscribeEvents={subscribeEvents}
+        swarmRecipientLabel={`@${swarmMember.name}`}
+      />
+    );
+  }
+
   return (
     <>
       {headerSlot &&
+        swarmMember === undefined &&
         createPortal(
           <>
             <SessionHeaderTools
@@ -320,31 +360,37 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
-        onResubmit={async (targetSeq, text, mode, workMode) => {
-          // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
-          setBusy(true);
-          try {
-            await sessions.rewind(entry, targetSeq, mode);
-          } finally {
-            setBusy(false);
-          }
-          await submit({ text, attachments: [], ...(workMode ? { workMode } : {}) });
-        }}
-        onApprovePlan={approvePlan}
-        onFork={async (targetSeq) => {
-          const forked = await sessions.fork(entry, targetSeq);
-          onForked(forked.session.id);
-        }}
-        turnChanges={entry.turnChanges}
-        onRewindFiles={async (seq) => {
-          setBusy(true);
-          try {
-            await sessions.rewind(entry, seq, "files");
-          } finally {
-            setBusy(false);
-          }
-        }}
-        loadChangeDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
+        onOpenSwarm={onOpenSwarm}
+        swarmRecipientLabel={swarmMember ? `@${swarmMember.name}` : undefined}
+        {...(swarmMember === undefined
+          ? {
+              onResubmit: async (targetSeq, text, mode, workMode) => {
+                // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
+                setBusy(true);
+                try {
+                  await sessions.rewind(entry, targetSeq, mode);
+                } finally {
+                  setBusy(false);
+                }
+                await submit({ text, attachments: [], ...(workMode ? { workMode } : {}) });
+              },
+              onApprovePlan: approvePlan,
+              onFork: async (targetSeq) => {
+                const forked = await sessions.fork(entry, targetSeq);
+                onForked(forked.session.id);
+              },
+              turnChanges: entry.turnChanges,
+              onRewindFiles: async (seq) => {
+                setBusy(true);
+                try {
+                  await sessions.rewind(entry, seq, "files");
+                } finally {
+                  setBusy(false);
+                }
+              },
+              loadChangeDiff: (seq, path) => sessions.turnChangeDiff(entry, seq, path),
+            }
+          : {})}
       />
       {panel && (
         <PhoneSidePanel

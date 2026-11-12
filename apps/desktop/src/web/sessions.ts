@@ -39,6 +39,8 @@ export interface PhoneSession {
   changeDiffs: Map<string, Promise<TurnChangeDiff>>;
   /** 待发输入快照（ADR-0070）：运行中插话与排队，临时状态不写日志 */
   pendingInputs: PendingInputsSnapshot;
+  /** Swarm 成员子会话句柄（经 `session.open` 打开，退出成员页即 `session.close` 释放，不中断成员） */
+  member?: boolean;
 }
 export interface PhoneCreateOptions {
   model?: ModelRef | undefined;
@@ -95,10 +97,12 @@ export class PhoneSessions {
   private readonly opening = new Map<string, Promise<PhoneSession>>();
   private readonly turnStarts = new Map<string, number>();
   private selectedId: string | undefined;
+  private pinnedId: string | undefined;
   private readonly closing = new Map<string, Promise<void>>();
 
-  setSelected(id: string | undefined): void {
+  setSelected(id: string | undefined, pinnedId?: string): void {
     this.selectedId = id;
+    this.pinnedId = pinnedId;
     for (const entry of this.opened.values()) {
       void this.closeIfIdle(entry).catch(() => undefined);
     }
@@ -106,13 +110,19 @@ export class PhoneSessions {
 
   private async closeIfIdle(entry: PhoneSession): Promise<void> {
     const id = entry.session.id;
-    if (
+    if (entry.member === true) {
+      if (id === this.selectedId || entry.dead || entry.replaying || this.opened.get(id) !== entry)
+        return;
+    } else if (
       id === this.selectedId ||
+      id === this.pinnedId ||
       entry.dead ||
       entry.replaying ||
       phoneStatus(entry) !== "idle" ||
       // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
       entry.pendingInputs.items.length > 0 ||
+      // ADR-0089：活动 Swarm 的协调者会话切走时不能关，否则整个 Swarm 会被收掉
+      entry.view.swarm?.status === "active" ||
       this.opened.get(id) !== entry
     )
       return;
@@ -168,7 +178,14 @@ export class PhoneSessions {
     // 遍历活 Map 会把它们再 resume 一次（后台报 session_already_open）
     for (const [id, entry] of [...this.opened]) {
       if (generation !== this.generation) return;
-      if (id !== this.selectedId && phoneStatus(entry) === "idle") {
+      if (
+        id !== this.selectedId &&
+        id !== this.pinnedId &&
+        (entry.member === true ||
+          (phoneStatus(entry) === "idle" &&
+            entry.pendingInputs.items.length === 0 &&
+            entry.view.swarm?.status !== "active"))
+      ) {
         this.opened.delete(id);
         continue;
       }
@@ -179,7 +196,14 @@ export class PhoneSessions {
         continue;
       }
       if (this.opened.get(id) !== entry) continue;
-      const run = this.resume(client, id, entry.workspace, entry.view, generation);
+      const run = this.resume(
+        client,
+        id,
+        entry.workspace,
+        entry.view,
+        generation,
+        entry.member === true,
+      );
       this.opening.set(id, run);
       try {
         const restored = await run;
@@ -207,6 +231,7 @@ export class PhoneSessions {
     this.generation++;
     this.turnStarts.clear();
     this.selectedId = undefined;
+    this.pinnedId = undefined;
     this.closing.clear();
     this.stopListening();
     this.loaded = false;
@@ -271,7 +296,13 @@ export class PhoneSessions {
     const pending = this.list.find((item) => {
       const entry = this.opened.get(item.id);
       return (
-        !!entry && !entry.dead && !!(entry.view.pendingPermission ?? entry.view.pendingQuestion)
+        !!entry &&
+        !entry.dead &&
+        !!(
+          entry.view.pendingPermission ??
+          entry.view.pendingQuestion ??
+          (entry.view.swarm?.awaitingPermissionMembers.length ? true : undefined)
+        )
       );
     });
     return (pending ?? this.list[0])?.id;
@@ -295,6 +326,7 @@ export class PhoneSessions {
     result: { session: RpcSession; opened: SessionOpened },
     workspace: string,
     view = createSessionView(),
+    member = false,
   ): Promise<PhoneSession> {
     const { session } = result;
     const previous = this.opened.get(session.id);
@@ -311,6 +343,7 @@ export class PhoneSessions {
       turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
       changeDiffs: new Map(),
       pendingInputs: { items: [], paused: false },
+      ...(member ? { member: true } : {}),
     };
     this.opened.set(session.id, entry);
     // 与桌面 conversations.ts 一致：订阅窗口期间的新持久事件按 event.time 判断。
@@ -447,11 +480,42 @@ export class PhoneSessions {
       if (attempt >= 1) return entry;
     }
   }
-  private async beginOpen(id: string): Promise<PhoneSession> {
+  async openMember(
+    childSessionId: string,
+    workspace: string,
+    parentSessionId?: string,
+  ): Promise<PhoneSession> {
+    this.setSelected(childSessionId, parentSessionId);
+    for (let attempt = 0; ; attempt += 1) {
+      await this.closing.get(childSessionId);
+      const old = this.opened.get(childSessionId);
+      if (old && !old.dead) return old;
+      const entry = await (this.opening.get(childSessionId) ??
+        this.beginOpen(childSessionId, true, workspace));
+      await this.closing.get(childSessionId);
+      if (!entry.dead && this.opened.get(childSessionId) === entry) {
+        await this.closeIfIdle(entry);
+        return entry;
+      }
+      if (attempt >= 1) return entry;
+    }
+  }
+  private async beginOpen(
+    id: string,
+    member = false,
+    fallbackWorkspace?: string,
+  ): Promise<PhoneSession> {
     const client = this.requireClient();
     const generation = this.generation;
     const item = this.list.find((s) => s.id === id);
-    const run = this.resume(client, id, item?.cwd ?? "", this.opened.get(id)?.view, generation);
+    const run = this.resume(
+      client,
+      id,
+      item?.cwd ?? fallbackWorkspace ?? "",
+      this.opened.get(id)?.view,
+      generation,
+      member,
+    );
     this.opening.set(id, run);
     try {
       return await run;
@@ -465,10 +529,17 @@ export class PhoneSessions {
     workspace: string,
     view: SessionView | undefined,
     generation: number,
+    member = false,
   ): Promise<PhoneSession> {
-    const result = await client.runtime.resumeSession(id);
+    const result = member
+      ? await client.call("session.open", { sessionId: id }).then((opened) => ({
+          opened,
+          session: client.session(opened.sessionId),
+        }))
+      : await client.runtime.resumeSession(id);
     if (generation !== this.generation) throw new Error("电脑连接已切换");
-    return this.attach(client, result, workspace, view);
+    const cwd = result.opened.meta?.cwd ? result.opened.meta.cwd : workspace;
+    return this.attach(client, result, cwd, view, member);
   }
   /**
    * 在 workspace 新建会话（与桌面草稿相同：未选过的档位与预设省略，由 Core 解析
