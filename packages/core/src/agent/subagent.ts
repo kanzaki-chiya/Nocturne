@@ -48,6 +48,7 @@ import {
   type ExecutionEnvironment,
   type GateGrantSink,
   type HookRunner,
+  type ImageProcessor,
   type SubagentLauncher,
   type SubagentOutcome,
   type SubagentRequest,
@@ -164,6 +165,7 @@ export interface SubagentDeps {
   checkpoint?: ExecutionEnvironment["checkpoint"];
   store: SessionStore;
   sessionsDir: string;
+  imageProcessor?: ImageProcessor | undefined;
   /** 子会话执行环境的共享部分（ExecutionEnvironment 同名成员） */
   platform: ExecutionEnvironment["platform"];
   diagnostics?: Diagnostics | undefined;
@@ -692,6 +694,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             paths: deps.platform.paths,
             attachmentsDir: deps.platform.paths.join(deps.sessionsDir, "attachments"),
             sessionId: child.id,
+            ...(deps.imageProcessor !== undefined ? { processor: deps.imageProcessor } : {}),
           }),
           ...(childRunner !== undefined ? { hooks: childRunner } : {}),
           ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),

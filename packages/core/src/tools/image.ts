@@ -1,16 +1,60 @@
 /**
- * 图片文件头识别（ADR-0023 第 2 节）：纯函数、无依赖。
- * 只看魔数与头部固定字段，不解码图像数据；截断/损坏一律返回
- * undefined，由调用方决定降级文案。
+ * 图片文件头识别与自动缩小/切段规划（ADR-0023 第 2 节、ADR-0090）：纯函数、无依赖。
+ * 魔数与头部解析不解码图像数据；截断/损坏一律返回 undefined，由调用方决定降级文案。
  */
-import type { ImageMimeType } from "../protocol/index.js";
+import {
+  IMAGE_MAX_BYTES,
+  IMAGE_MAX_PIXELS,
+  type ImageMimeType,
+  type ImageRegion,
+} from "../protocol/index.js";
 
-/** 单张图片原始文件上限：5 MB（read 工具拒绝超限） */
-export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-/** 图片单边像素上限 */
-export const IMAGE_MAX_EDGE = 8000;
+export { IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS };
+
+/** 触发自动压缩的单张体积阈值及处理后单张目标上限：3.5 MB（base64 后约 4.7 MB） */
+export const IMAGE_TARGET_MAX_BYTES = 3.5 * 1024 * 1024;
+/** 触发自动压缩的单边像素阈值（满足任一处理条件时整张或分段控制） */
+export const IMAGE_PROCESS_MAX_EDGE = 8000;
+/** 处理后单张（或单段）长边上限：2576 px */
+export const IMAGE_TARGET_MAX_EDGE = 2576;
+/** 切段触发的短边基准：长边缩到 2576 px 后短边小于 768 px 则切段 */
+export const IMAGE_TILE_MIN_SHORT_EDGE = 768;
+/** 相邻两段重叠像素：64 px */
+export const IMAGE_TILE_OVERLAP = 64;
+/** 单张图片最多切段数：8 段 */
+export const IMAGE_MAX_TILES = 8;
+/** 8 段（长边 ≤ 2576、重叠 64）可覆盖的最大长边：20160 px */
+export const IMAGE_MAX_TILED_LONG_EDGE =
+  IMAGE_MAX_TILES * IMAGE_TARGET_MAX_EDGE - (IMAGE_MAX_TILES - 1) * IMAGE_TILE_OVERLAP;
+/** 编码 JPEG 时的逐级降质档位 */
+export const IMAGE_JPEG_QUALITIES = [85, 75, 60] as const;
+
 /** 人读的支持格式列表（错误说明共用口径） */
 export const SUPPORTED_IMAGE_FORMATS = "PNG、JPEG、GIF、WebP";
+
+/** 统一硬上限说明文案 */
+export const IMAGE_LIMIT_TEXT =
+  "单张图片原始文件不超过 50 MB（50×1024×1024 字节）、总像素不超过 64,000,000";
+
+/** GIF 不支持自动压缩/切段时的说明文案 */
+export const IMAGE_GIF_LIMIT_TEXT =
+  "GIF 图片不支持自动缩小或切段（单张不超过 3.5 MB、每边不超过 8000 px、长宽比符合单张范围）";
+
+export class ImageTooLargeError extends Error {
+  readonly code = "image_too_large" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "ImageTooLargeError";
+  }
+}
+
+export class ImageCorruptError extends Error {
+  readonly code = "image_corrupt" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "ImageCorruptError";
+  }
+}
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -128,4 +172,155 @@ export function parseImageSize(
           : parseWebp(bytes);
   if (size === undefined || size.width === 0 || size.height === 0) return undefined;
   return size;
+}
+
+/** 判断是否超出输入硬上限（50 MB 或 64,000,000 像素） */
+export function exceedsImageHardLimit(input: {
+  width?: number | undefined;
+  height?: number | undefined;
+  bytes: number;
+}): "bytes" | "pixels" | undefined {
+  if (input.bytes > IMAGE_MAX_BYTES) return "bytes";
+  if (
+    input.width !== undefined &&
+    input.height !== undefined &&
+    input.width * input.height > IMAGE_MAX_PIXELS
+  )
+    return "pixels";
+  return undefined;
+}
+
+/** 条件 (c)：长边 > 2576 且长宽比 > 2576/768（整张缩到 2576 后短边会小于 768） */
+export function shouldTileImage(width: number, height: number): boolean {
+  const longEdge = Math.max(width, height);
+  const shortEdge = Math.min(width, height);
+  return (
+    longEdge > IMAGE_TARGET_MAX_EDGE &&
+    longEdge * IMAGE_TILE_MIN_SHORT_EDGE > shortEdge * IMAGE_TARGET_MAX_EDGE
+  );
+}
+
+/** 是否满足处理条件 (a)/(b)/(c) 之一 */
+export function needsImageProcessing(input: {
+  width: number;
+  height: number;
+  bytes: number;
+}): boolean {
+  if (input.bytes > IMAGE_TARGET_MAX_BYTES) return true;
+  if (Math.max(input.width, input.height) > IMAGE_PROCESS_MAX_EDGE) return true;
+  return shouldTileImage(input.width, input.height);
+}
+
+export interface PlannedTile {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  region: ImageRegion;
+}
+
+export type ImageProcessingPlan =
+  | { kind: "none" }
+  | { kind: "downscale"; targetWidth: number; targetHeight: number; region: ImageRegion }
+  | { kind: "tile"; scaledWidth: number; scaledHeight: number; tiles: PlannedTile[] };
+
+/** 计算整张缩小或长图切段规划（纯计算，ADR-0090） */
+export function planImageProcessing(input: {
+  width: number;
+  height: number;
+  bytes: number;
+}): ImageProcessingPlan {
+  const { width, height, bytes } = input;
+  if (!needsImageProcessing({ width, height, bytes })) return { kind: "none" };
+
+  if (!shouldTileImage(width, height)) {
+    const longEdge = Math.max(width, height);
+    if (longEdge <= IMAGE_TARGET_MAX_EDGE) {
+      return {
+        kind: "downscale",
+        targetWidth: width,
+        targetHeight: height,
+        region: { x: 0, y: 0, width, height },
+      };
+    }
+    const scale = IMAGE_TARGET_MAX_EDGE / longEdge;
+    const targetWidth =
+      width >= height ? IMAGE_TARGET_MAX_EDGE : Math.max(1, Math.round(width * scale));
+    const targetHeight =
+      height > width ? IMAGE_TARGET_MAX_EDGE : Math.max(1, Math.round(height * scale));
+    return {
+      kind: "downscale",
+      targetWidth,
+      targetHeight,
+      region: { x: 0, y: 0, width, height },
+    };
+  }
+
+  const isVertical = height >= width;
+  const shortEdge = isVertical ? width : height;
+  const longEdge = isVertical ? height : width;
+
+  let scale = 1;
+  if (shortEdge > IMAGE_TARGET_MAX_EDGE) {
+    scale = IMAGE_TARGET_MAX_EDGE / shortEdge;
+  }
+  if (Math.round(longEdge * scale) > IMAGE_MAX_TILED_LONG_EDGE) {
+    scale = IMAGE_MAX_TILED_LONG_EDGE / longEdge;
+  }
+
+  const scaledShort =
+    scale < 1
+      ? Math.min(IMAGE_TARGET_MAX_EDGE, Math.max(1, Math.round(shortEdge * scale)))
+      : shortEdge;
+  const scaledLong =
+    scale < 1
+      ? Math.min(IMAGE_MAX_TILED_LONG_EDGE, Math.max(1, Math.round(longEdge * scale)))
+      : longEdge;
+  const scaledWidth = isVertical ? scaledShort : scaledLong;
+  const scaledHeight = isVertical ? scaledLong : scaledShort;
+
+  const stride = IMAGE_TARGET_MAX_EDGE - IMAGE_TILE_OVERLAP;
+  const tiles: PlannedTile[] = [];
+  let offset = 0;
+  while (offset < scaledLong) {
+    const len = Math.min(IMAGE_TARGET_MAX_EDGE, scaledLong - offset);
+    const tx = isVertical ? 0 : offset;
+    const ty = isVertical ? offset : 0;
+    const tw = isVertical ? scaledWidth : len;
+    const th = isVertical ? len : scaledHeight;
+    let region: ImageRegion;
+    if (scaledWidth === width && scaledHeight === height) {
+      region = { x: tx, y: ty, width: tw, height: th };
+    } else {
+      const rx = Math.min(width - 1, Math.floor((tx / scaledWidth) * width));
+      const ry = Math.min(height - 1, Math.floor((ty / scaledHeight) * height));
+      const rx2 = Math.min(width, Math.round(((tx + tw) / scaledWidth) * width));
+      const ry2 = Math.min(height, Math.round(((ty + th) / scaledHeight) * height));
+      region = {
+        x: rx,
+        y: ry,
+        width: Math.max(1, rx2 - rx),
+        height: Math.max(1, ry2 - ry),
+      };
+    }
+    tiles.push({ x: tx, y: ty, width: tw, height: th, region });
+    if (offset + len >= scaledLong) break;
+    offset += stride;
+  }
+
+  return { kind: "tile", scaledWidth, scaledHeight, tiles };
+}
+
+/** 降质到 q60 后仍超 3.5 MB 时计算下一次等比缩小的目标尺寸 */
+export function nextShrinkDimensions(
+  width: number,
+  height: number,
+  encodedBytes: number,
+  targetMaxBytes = IMAGE_TARGET_MAX_BYTES,
+): { width: number; height: number } {
+  const ratio = Math.min(0.85, Math.max(0.25, Math.sqrt(targetMaxBytes / encodedBytes) * 0.9));
+  return {
+    width: width === 1 ? 1 : Math.max(1, Math.min(width - 1, Math.round(width * ratio))),
+    height: height === 1 ? 1 : Math.max(1, Math.min(height - 1, Math.round(height * ratio))),
+  };
 }

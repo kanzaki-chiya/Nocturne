@@ -1,15 +1,28 @@
 /**
- * 图片附件存储（ADR-0023 第 2 节）：字节统一落在
- * <attachmentsDir>/<sessionId>/img-<n>.<ext>（与超预算落盘同一目录），
- * 事件与历史里只放 ImageAttachment 引用；n 在会话内递增，恢复后
- * 从目录里已有文件续编号，不覆盖旧文件。
+ * 图片附件存储（ADR-0023 第 2 节、ADR-0090）：原图与处理结果统一落在
+ * <attachmentsDir>/<sessionId>/ 下（原图 img-<n>.<ext>，处理结果为
+ * img-<n>-<k>.jpg），事件与历史里只放 ImageAttachment 引用；n 在会话内递增，
+ * 恢复后从目录里已有文件续编号，不覆盖旧文件。
  */
 import { createHash } from "node:crypto";
 
 import type { FileSystem, PathOps } from "../platform/index.js";
 import { fsErrorCode } from "../platform/index.js";
-import type { FileAttachment, ImageAttachment, ImageMimeType } from "../protocol/index.js";
-import { parseImageSize } from "./image.js";
+import type {
+  FileAttachment,
+  ImageAttachment,
+  ImageMimeType,
+  ProcessedImage,
+} from "../protocol/index.js";
+import {
+  IMAGE_GIF_LIMIT_TEXT,
+  IMAGE_LIMIT_TEXT,
+  ImageTooLargeError,
+  exceedsImageHardLimit,
+  parseImageSize,
+  planImageProcessing,
+} from "./image.js";
+import { getDefaultImageProcessor, type ImageProcessor } from "./image-processor.js";
 
 const EXT: Record<ImageMimeType, string> = {
   "image/png": "png",
@@ -18,16 +31,25 @@ const EXT: Record<ImageMimeType, string> = {
   "image/webp": "webp",
 };
 
-const IMG_NAME = /^img-(\d+)\./;
+const IMG_NAME = /^img-(\d+)(?:-\d+)?\./;
 const CACHE_LIMIT = 64 * 1024 * 1024;
 
+function abortError(signal?: AbortSignal): Error {
+  const reason: unknown = signal?.reason;
+  if (reason instanceof Error) return reason;
+  const err = new Error(typeof reason === "string" ? reason : "图片保存已取消");
+  err.name = "AbortError";
+  return err;
+}
+
 export interface AttachmentStore {
-  /** 保存字节为 img-<n>.<ext>，返回引用（含 sha256、宽高） */
+  /** 保存原图为 img-<n>.<ext>（非 mcp 且超预算时同时在 worker 中缩小或切段），返回引用 */
   save(input: {
     data: Uint8Array;
     mimeType: ImageMimeType;
     label?: string | undefined;
     source: ImageAttachment["source"];
+    signal?: AbortSignal | undefined;
   }): Promise<ImageAttachment>;
   saveFile(input: {
     data: Uint8Array;
@@ -37,7 +59,9 @@ export interface AttachmentStore {
     inline?: { title: string } | undefined;
   }): Promise<FileAttachment>;
   /** 按引用取回字节；文件缺失或 sha256 不符返回 undefined。运行期按 sha256 缓存 */
-  load(att: ImageAttachment | FileAttachment): Promise<Uint8Array | undefined>;
+  load(
+    att: Pick<ImageAttachment | FileAttachment | ProcessedImage, "file" | "sha256">,
+  ): Promise<Uint8Array | undefined>;
 }
 
 export function createAttachmentStore(opts: {
@@ -45,8 +69,10 @@ export function createAttachmentStore(opts: {
   paths: PathOps;
   attachmentsDir: string;
   sessionId: string;
+  processor?: ImageProcessor | undefined;
 }): AttachmentStore {
   const { fs, paths, sessionId } = opts;
+  const processor = opts.processor ?? getDefaultImageProcessor();
   const dir = paths.join(opts.attachmentsDir, sessionId);
   /** sha256 → 字节，Map 插入顺序即 LRU 顺序 */
   const cache = new Map<string, Uint8Array>();
@@ -83,34 +109,19 @@ export function createAttachmentStore(opts: {
     return next;
   }
 
-  async function doSave(input: {
-    data: Uint8Array;
-    mimeType: ImageMimeType;
-    label?: string | undefined;
-    source: ImageAttachment["source"];
-  }): Promise<ImageAttachment> {
-    const { data, mimeType } = input;
-    const ext = EXT[mimeType];
+  async function allocateOriginal(
+    data: Uint8Array,
+    ext: string,
+  ): Promise<{ n: number; file: string; fullPath: string }> {
     let n = await initNext();
     // 排他创建兜底并发/恢复冲突：撞名就让号重试
     for (;;) {
       const file = `img-${n}.${ext}`;
+      const fullPath = paths.join(dir, file);
       try {
-        await fs.createExclusive(paths.join(dir, file), data);
+        await fs.createExclusive(fullPath, data);
         next = n + 1;
-        const sha256 = createHash("sha256").update(data).digest("hex");
-        const size = parseImageSize(data, mimeType);
-        remember(sha256, data);
-        return {
-          type: "image",
-          file,
-          mimeType,
-          bytes: data.length,
-          sha256,
-          ...(size !== undefined ? { width: size.width, height: size.height } : {}),
-          ...(input.label !== undefined ? { label: input.label } : {}),
-          source: input.source,
-        };
+        return { n, file, fullPath };
       } catch (e) {
         if (fsErrorCode(e) === "EEXIST") {
           n += 1;
@@ -121,8 +132,103 @@ export function createAttachmentStore(opts: {
     }
   }
 
+  async function doSave(input: {
+    data: Uint8Array;
+    mimeType: ImageMimeType;
+    label?: string | undefined;
+    source: ImageAttachment["source"];
+    signal?: AbortSignal | undefined;
+  }): Promise<ImageAttachment> {
+    if (input.signal?.aborted) throw abortError(input.signal);
+    const { data, mimeType } = input;
+    const size = parseImageSize(data, mimeType);
+    if (input.source !== "mcp") {
+      const limit = exceedsImageHardLimit({
+        width: size?.width,
+        height: size?.height,
+        bytes: data.byteLength,
+      });
+      if (limit === "bytes") {
+        throw new ImageTooLargeError(`图片超出大小限制（${IMAGE_LIMIT_TEXT}）`);
+      }
+      if (limit === "pixels" && size !== undefined) {
+        throw new ImageTooLargeError(
+          `图片超出大小限制（${IMAGE_LIMIT_TEXT}）：实际 ${size.width}×${size.height}`,
+        );
+      }
+    }
+
+    const plan =
+      input.source !== "mcp" && size !== undefined
+        ? planImageProcessing({ width: size.width, height: size.height, bytes: data.byteLength })
+        : ({ kind: "none" } as const);
+
+    if (plan.kind !== "none" && mimeType === "image/gif") {
+      throw new ImageTooLargeError(IMAGE_GIF_LIMIT_TEXT);
+    }
+
+    const ext = EXT[mimeType];
+    const { n, file, fullPath } = await allocateOriginal(data, ext);
+    const createdPaths = [fullPath];
+
+    try {
+      if (input.signal?.aborted) throw abortError(input.signal);
+
+      let processed: ProcessedImage[] | undefined;
+      if (plan.kind !== "none" && mimeType !== "image/gif") {
+        const items: ProcessedImage[] = [];
+        await processor.process(
+          { data, mimeType, plan },
+          {
+            signal: input.signal,
+            onTile: async (tile) => {
+              if (input.signal?.aborted) throw abortError(input.signal);
+              const tileFile = `img-${n}-${tile.index + 1}.jpg`;
+              const tilePath = paths.join(dir, tileFile);
+              await fs.createExclusive(tilePath, tile.data);
+              createdPaths.push(tilePath);
+              const tileSha = createHash("sha256").update(tile.data).digest("hex");
+              remember(tileSha, tile.data);
+              items.push({
+                file: tileFile,
+                mimeType: "image/jpeg",
+                bytes: tile.data.byteLength,
+                sha256: tileSha,
+                width: tile.width,
+                height: tile.height,
+                region: tile.region,
+              });
+            },
+          },
+        );
+        if (input.signal?.aborted) throw abortError(input.signal);
+        processed = items;
+      }
+
+      const sha256 = createHash("sha256").update(data).digest("hex");
+      remember(sha256, data);
+      return {
+        type: "image",
+        file,
+        mimeType,
+        bytes: data.byteLength,
+        sha256,
+        ...(size !== undefined ? { width: size.width, height: size.height } : {}),
+        ...(input.label !== undefined ? { label: input.label } : {}),
+        source: input.source,
+        ...(processed !== undefined && processed.length > 0 ? { processed } : {}),
+      };
+    } catch (err) {
+      for (const p of createdPaths) {
+        await fs.unlink(p).catch(() => undefined);
+      }
+      throw err;
+    }
+  }
+
   return {
     save(input) {
+      if (input.signal?.aborted) return Promise.reject(abortError(input.signal));
       const p = queue.then(() => doSave(input));
       queue = p.then(
         () => undefined,

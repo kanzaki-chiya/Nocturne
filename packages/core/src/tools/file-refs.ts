@@ -8,7 +8,15 @@ import {
 } from "../protocol/index.js";
 import type { AttachmentStore } from "./attachments.js";
 import { GitignoreChain } from "./builtin/gitignore.js";
-import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./image.js";
+import {
+  IMAGE_GIF_LIMIT_TEXT,
+  ImageCorruptError,
+  ImageTooLargeError,
+  exceedsImageHardLimit,
+  needsImageProcessing,
+  parseImageSize,
+  sniffImageMime,
+} from "./image.js";
 import { hashText } from "./readstate.js";
 import type { ReadStateStore } from "./types.js";
 import { isBinary } from "./text.js";
@@ -162,26 +170,42 @@ export async function resolveFileRefs(
         const size = parseImageSize(bytes, mimeType);
         if (
           size === undefined ||
-          bytes.length > IMAGE_MAX_BYTES ||
-          size.width > IMAGE_MAX_EDGE ||
-          size.height > IMAGE_MAX_EDGE
+          exceedsImageHardLimit({ width: size.width, height: size.height, bytes: bytes.length }) !==
+            undefined
         ) {
-          warning("图片格式或尺寸不符合要求（至多 5 MB、每边 8000 px），仅保留路径");
+          warning("图片格式或尺寸不符合要求（至多 50 MB、总像素 64,000,000），仅保留路径");
+          continue;
+        }
+        if (
+          mimeType === "image/gif" &&
+          needsImageProcessing({ width: size.width, height: size.height, bytes: bytes.length })
+        ) {
+          warning(`${IMAGE_GIF_LIMIT_TEXT}，仅保留路径`);
           continue;
         }
         if (options.attachments === undefined) {
           warning("附件存储不可用，仅保留路径");
           continue;
         }
-        attachments.push(
-          await options.attachments.save({
-            data: bytes,
-            mimeType,
-            label: display,
-            source: "paste",
-          }),
-        );
-        fileRefs.push({ path: display, kind: "image", chars: 0, truncated: false });
+        try {
+          attachments.push(
+            await options.attachments.save({
+              data: bytes,
+              mimeType,
+              label: display,
+              source: "paste",
+              signal: options.signal,
+            }),
+          );
+          fileRefs.push({ path: display, kind: "image", chars: 0, truncated: false });
+        } catch (err) {
+          if (options.signal.aborted) throw err;
+          if (err instanceof ImageTooLargeError || err instanceof ImageCorruptError) {
+            warning(`${err.message}，仅保留路径`);
+            continue;
+          }
+          throw err;
+        }
         continue;
       }
       if (isBinary(bytes)) {

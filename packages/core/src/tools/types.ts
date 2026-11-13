@@ -232,6 +232,16 @@ export interface ToolContext extends ToolScope {
     label: string;
     inline?: { title: string } | undefined;
   }): Promise<FileAttachment>;
+  /**
+   * 保存工具读取/抓取的图片为会话图片附件（ADR-0023、ADR-0090）：
+   * 经 AttachmentStore.save 落盘（超预算时在 worker 中自动缩小或切段）。
+   */
+  saveImageAttachment?(input: {
+    data: Uint8Array;
+    mimeType: ImageMimeType;
+    label?: string | undefined;
+    signal?: AbortSignal | undefined;
+  }): Promise<ImageAttachment>;
 }
 
 export interface ToolDefinition<Input = unknown, Output = unknown> {

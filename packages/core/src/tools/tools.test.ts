@@ -886,24 +886,35 @@ describe("read 图片（ADR-0023 第 2 节）", () => {
     expect(r.result.modelContent).toContain("1|not a real image");
   });
 
-  it("超过 5 MB 的图片 → image_too_large", async () => {
+  it("超过 50 MB 的图片 → image_too_large", async () => {
     const ws = tmpWorkspace();
-    const big = new Uint8Array(5 * 1024 * 1024 + 1);
+    const big = new Uint8Array(50 * 1024 * 1024 + 1);
     big.set(PNG(1, 1));
     await writeBin(ws, "big.png", big);
     const h = await makeHarness(ws);
     const r = await h.executor.execute(call("read", { path: "big.png" }), h.scope);
     expect(r.result.status === "error" && r.result.error.code).toBe("image_too_large");
-    expect(r.result.modelContent).toContain("5 MB");
+    expect(r.result.modelContent).toContain("50 MB");
   });
 
-  it("边长超过 8000 → image_too_large", async () => {
+  it("总像素超过 64,000,000 → image_too_large", async () => {
     const ws = tmpWorkspace();
-    await writeBin(ws, "tall.png", PNG(8001, 1));
+    await writeBin(ws, "huge.png", PNG(8001, 8001));
     const h = await makeHarness(ws);
-    const r = await h.executor.execute(call("read", { path: "tall.png" }), h.scope);
+    const r = await h.executor.execute(call("read", { path: "huge.png" }), h.scope);
     expect(r.result.status === "error" && r.result.error.code).toBe("image_too_large");
-    expect(r.result.modelContent).toContain("8001×1");
+    expect(r.result.modelContent).toContain("8001×8001");
+  });
+
+  it("GIF 触发处理条件 → image_too_large 且说明不支持自动缩小", async () => {
+    const ws = tmpWorkspace();
+    const gif = u8([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 100, 0, 0xa0, 0x0f, 0xf0, 0, 0]); // 100x4000
+    await writeBin(ws, "tall.gif", gif);
+    const h = await makeHarness(ws);
+    const r = await h.executor.execute(call("read", { path: "tall.gif" }), h.scope);
+    expect(r.result.status === "error" && r.result.error.code).toBe("image_too_large");
+    expect(r.result.modelContent).toContain("GIF");
+    expect(r.result.modelContent).toContain("不支持自动缩小");
   });
 
   it("SVG 走文本路径；BMP → binary_file 且说明列出支持格式", async () => {

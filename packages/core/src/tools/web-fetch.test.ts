@@ -190,7 +190,7 @@ describe("web_fetch", () => {
     expect(webFetchTool.traits).toEqual({
       mutates: false,
       concurrencySafe: true,
-      timeoutMs: 30_000,
+      timeoutMs: 60_000,
       maxModelChars: 30_000,
     });
   });
@@ -502,7 +502,7 @@ describe("web_fetch", () => {
   });
 
   it.each([
-    [new Uint8Array(5 * 1024 * 1024 + 1), "image_too_large"],
+    [new Uint8Array(50 * 1024 * 1024 + 1), "image_too_large"],
     [new Uint8Array([1, 2, 3]), "image_corrupt"],
   ])("图片大小/损坏错误", async (bytes, code) => {
     respond(bytes, "image/png");

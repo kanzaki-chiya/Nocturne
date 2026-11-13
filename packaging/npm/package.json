@@ -12,6 +12,8 @@
   },
   "files": [
     "nctrn.mjs",
+    "image-worker.mjs",
+    "wasm/",
     "THIRD-PARTY-NOTICES.md"
   ],
   "repository": {

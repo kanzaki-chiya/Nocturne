@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { IMAGE_WASM_FILES } from "../lib/image-wasm.mjs";
 import { createProcessCleanup, removeTempDirs } from "./process-cleanup.mjs";
 
 const processes = createProcessCleanup();
@@ -36,6 +37,10 @@ describe("bundle-nctrn --out-dir", () => {
     });
     const file = join(out, "nctrn.mjs");
     expect(existsSync(file)).toBe(true);
+    expect(existsSync(join(out, "image-worker.mjs"))).toBe(true);
+    for (const [wasmFile] of IMAGE_WASM_FILES) {
+      expect(existsSync(join(out, "wasm", wasmFile)), wasmFile).toBe(true);
+    }
     expect(readFileSync(file, "utf8").startsWith("#!")).toBe(true);
     // 单文件自包含：无 node_modules 的临时目录里也能跑
     const version = await run(process.execPath, [file, "--version"], {

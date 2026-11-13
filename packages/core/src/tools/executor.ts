@@ -9,6 +9,7 @@ import type { ValidateFunction } from "ajv";
 
 import type {
   ImageAttachment,
+  ImageMimeType,
   PermissionSubject,
   SubjectRequest,
   ToolCallRef,
@@ -200,6 +201,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
                   data: att.data,
                   mimeType: att.mimeType,
                   source,
+                  signal: scope.signal,
                   ...(att.label !== undefined ? { label: att.label } : {}),
                 }),
               );
@@ -568,6 +570,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
                       scope.attachments,
                       answer.attachments,
                       true,
+                      combined,
                     );
                     answer.files = saved.files;
                     answer.images = saved.attachments;
@@ -596,6 +599,19 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
                   label: input.label,
                   source: "upload",
                   ...(input.inline !== undefined ? { inline: input.inline } : {}),
+                }),
+              saveImageAttachment: (input: {
+                data: Uint8Array;
+                mimeType: ImageMimeType;
+                label?: string | undefined;
+                signal?: AbortSignal | undefined;
+              }) =>
+                attachmentStore.save({
+                  data: input.data,
+                  mimeType: input.mimeType,
+                  source: attachmentSource,
+                  signal: input.signal ?? combined,
+                  ...(input.label !== undefined ? { label: input.label } : {}),
                 }),
             }
           : {}),

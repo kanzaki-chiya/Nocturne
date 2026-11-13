@@ -286,8 +286,11 @@ import {
 import {
   builtinTools,
   createAttachmentStore,
+  createImageProcessor,
   createMcpOnDemandTools,
   createPolicyGate,
+  ImageCorruptError,
+  ImageTooLargeError,
   createQuestionBroker,
   createReadStateStore,
   createTaskTool,
@@ -1362,6 +1365,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   const detectedShells = await detectShells(platform);
   const skillCache = createSkillDiscoveryCache(platform);
+  const imageProcessor = createImageProcessor();
 
   type ShellResolution = ReturnType<ReturnType<typeof createShellResolver>["current"]>;
   const shellSwitched = (before: ShellResolution, after: ShellResolution): boolean =>
@@ -2371,6 +2375,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.emit("shell.task_stopped", result);
       },
     });
+    const sessionCloseController = new AbortController();
     const execEnv: ExecutionEnvironment = {
       currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
       checkpoint: createCheckpointRecorder(session, platform, sessionsDir),
@@ -2385,6 +2390,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         paths,
         attachmentsDir: paths.join(sessionsDir, "attachments"),
         sessionId: session.id,
+        processor: imageProcessor,
       }),
       hooks: hookRunner,
       diagnostics,
@@ -2760,6 +2766,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           checkpoint: execEnv.checkpoint,
           store,
           sessionsDir,
+          imageProcessor,
           platform,
           diagnostics,
           instructions,
@@ -3216,9 +3223,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (attachmentError) throw new RuntimeCommandError("invalid_command", attachmentError);
       if (input.attachments?.length && !execEnv.attachments)
         throw new RuntimeCommandError("invalid_command", "附件存储不可用");
-      const { attachments, files } = execEnv.attachments
-        ? await saveInputAttachments(execEnv.attachments, input.attachments ?? [])
-        : { attachments: [], files: [] };
+      const saveAttachments = async () => {
+        if (!execEnv.attachments) return { attachments: [], files: [] };
+        try {
+          return await saveInputAttachments(
+            execEnv.attachments,
+            input.attachments ?? [],
+            false,
+            effectiveSignal,
+          );
+        } catch (err) {
+          if (effectiveSignal.aborted) throw err;
+          if (err instanceof ImageTooLargeError || err instanceof ImageCorruptError) {
+            throw new RuntimeCommandError("invalid_command", err.message);
+          }
+          throw err;
+        }
+      };
+      const effectiveSignal = AbortSignal.any([signal, sessionCloseController.signal]);
+      const { attachments, files } = await saveAttachments();
       const refs = await resolveFileRefs(content, {
         fs: platform.fs,
         paths: platform.paths,
@@ -3233,7 +3256,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.vision,
             "vision",
           ) !== undefined,
-        signal,
+        signal: effectiveSignal,
       });
       for (const message of refs.warnings) {
         session.emitEphemeral("runtime.warning", { code: "file_reference", message });
@@ -4887,6 +4910,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         idleListeners.clear();
         detach();
         closing = true;
+        sessionCloseController.abort();
         unsubscribeTitle();
         titleController.abort();
         controller?.abort();
@@ -6217,7 +6241,12 @@ export {
   type Platform,
   type ShellKind,
 } from "./platform/index.js";
-export { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./tools/image.js";
+export {
+  IMAGE_MAX_BYTES,
+  IMAGE_MAX_PIXELS,
+  parseImageSize,
+  sniffImageMime,
+} from "./tools/image.js";
 export { completeFileRefs, type FileCompletion, type FileIndexEntry } from "./tools/file-index.js";
 export {
   READ_FILE_MAX_BYTES,

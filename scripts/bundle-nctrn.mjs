@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * 把 apps/cli 打成单个 ESM 文件 nctrn.mjs。默认输出到
- * apps/desktop/src-tauri/resources/nctrn.mjs，供桌面版 release 构建
- * 作为后台进程脚本（不打包 Node 本体）；`--out-dir <dir>` 可指定别的
- * 输出目录（npm 包组装复用同一份产物）。
+ * 把 apps/cli 打成单个 ESM 文件 nctrn.mjs，并在同目录输出自包含的
+ * image-worker.mjs 与 wasm/*.wasm。默认输出到
+ * apps/desktop/src-tauri/resources/，供桌面版 release 构建作为后台进程脚本
+ * （不打包 Node 本体）；`--out-dir <dir>` 可指定别的输出目录（npm 包组装复用同一份产物）。
  *
  * 所有运行时依赖（含 workspace 包和 npm 依赖，以及 @nocturne/tui 的动态
  * import）全部内联；产物自包含，可在没有 node_modules 的目录里直接
@@ -15,9 +15,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { build } from "tsdown";
+import { copyImageWasmToDir } from "./lib/image-wasm.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliDir = join(root, "apps", "cli");
+const coreDir = join(root, "packages", "core");
 
 const outDirIndex = process.argv.indexOf("--out-dir");
 const targetDir =
@@ -29,6 +31,7 @@ if (outDirIndex >= 0 && process.argv[outDirIndex + 1] === undefined) {
   process.exit(1);
 }
 const outFile = join(targetDir, "nctrn.mjs");
+const workerOutFile = join(targetDir, "image-worker.mjs");
 
 /**
  * 运行时走不到、但静态打包必须能解析的可选依赖：
@@ -77,6 +80,25 @@ try {
     logLevel: "warn",
   });
 
+  await build({
+    cwd: coreDir,
+    config: false,
+    name: "nctrn-image-worker",
+    entry: { "image-worker": "src/tools/image-worker.ts" },
+    format: "esm",
+    platform: "node",
+    target: "node24",
+    outDir,
+    sourcemap: false,
+    dts: false,
+    clean: false,
+    hash: false,
+    deps: { alwaysBundle: () => true },
+    outExtensions: () => ({ js: ".mjs" }),
+    outputOptions: { codeSplitting: false },
+    logLevel: "warn",
+  });
+
   const built = join(outDir, "nctrn.mjs");
   // 保留 bin 入口语义：确保首行是 shebang（构建器可能剥离）
   const code = readFileSync(built, "utf8");
@@ -84,6 +106,8 @@ try {
 
   mkdirSync(targetDir, { recursive: true });
   writeFileSync(outFile, withShebang);
+  writeFileSync(workerOutFile, readFileSync(join(outDir, "image-worker.mjs")));
+  copyImageWasmToDir(join(coreDir, "package.json"), join(targetDir, "wasm"));
   const mib = (statSync(outFile).size / 1024 / 1024).toFixed(2);
   console.log(`nctrn.mjs: ${outFile} (${mib} MiB)`);
 } finally {

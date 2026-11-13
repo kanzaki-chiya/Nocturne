@@ -88,7 +88,7 @@ execute(call, ctx):
   - `tool.completed` 增加可选字段 `spillPath`（落盘文件的绝对路径，兼容新增）；客户端据此显示"输出已截断，完整内容在 \<path\>"，模型可见的 `modelContent` 中同样注明路径与预览。
   - 权限协同：所有预设都内置 `read <sessionsDir>/attachments/<sessionId>/** → allow`（[permissions.md](permissions.md) 第 6 节），**只放行当前会话**的落盘目录——读其他会话的附件仍走正常权限求值。
 - **文件附件**（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）：`AttachmentStore.saveFile` 在同一会话目录保存 `file-<n>.<ext>`，独立编号、串行保存、冲突让号；扩展名取 label 最后一段，只保留小写 `[a-z0-9]` 至多 10 字符。原名仅存于引用。严格 UTF-8 且不含 NUL 的文件记录行数，空文件为 0 行、末尾换行不另计一行；其余无 `text`。文件读回沿用字节数与 sha256 校验。事件只保存 `FileAttachment`，正文仅追加引用说明，不内联字节。入口统一校验单个 20 MiB、每条最多 10 个附件（图片文件合计）。
-- **图片附件**（ADR-0023）：`ToolResult.attachments` 携带的图片字节由执行器经 `AttachmentStore` 落盘到**同一目录** `<sessionsDir>/attachments/<sessionId>/`，用户提交的 `attachments` 也由 Core 落盘（`source: "paste"`）。文件名 `img-<n>.<ext>`（`n` 从该目录已有文件的最大编号续起，并发保存串行化、撞名让号）；事件与历史只写 `ImageAttachment` 引用（events.md 第 4 节），字节绝不进事件。读回时校验 sha256，文件缺失或不符按缺失处理。会话级字节缓存以 sha256 为键，按总字节数做 64 MB LRU；淘汰后再次读取文件并重新校验。附件存储按会话独立：子会话使用自己的 `sessionId` 目录与实例（index.ts / subagent.ts 各建一份，挂在 `ExecutionEnvironment.attachments` 上）。保存失败的语义见 [tool-api.md](../protocols/tool-api.md) 第 3 节；字节如何进入模型请求见 [context.md](context.md) 第 3 节。
+- **图片附件**（[ADR-0023](../decisions/ADR-0023-image-input.md)、[ADR-0090](../decisions/ADR-0090-image-downscale-tiles.md)）：`ToolResult.attachments` 携带的图片字节由执行器经 `AttachmentStore` 落盘到**同一目录** `<sessionsDir>/attachments/<sessionId>/`，用户提交的 `attachments` 也由 Core 落盘（`source: "paste"`）。原图文件名 `img-<n>.<ext>`（`n` 从该目录已有文件的最大编号续起，并发保存串行化、撞名让号）。非 `mcp` 来源且满足处理条件（大于 3.5 MB、任一边超 8000 px、或长边超 2576 px 且长短比超过 2576/768）的 PNG/JPEG/WebP 在 `node:worker_threads` 中经 `@jsquash` WebAssembly 解码、铺白底并缩小或切段（最多 8 段、重叠 64 px）编码为 JPEG `img-<n>-<k>.jpg`（单段不超 3.5 MB），记录在原图 `ImageAttachment.processed` 中；worker 单工串行、空闲 10 秒自动退出，中止或异常时终止 worker 并删除全部半成品；`mcp` 来源跳过处理以保留像素坐标。事件与历史只写 `ImageAttachment` 引用（events.md 第 4 节），字节绝不进事件。读回时校验 sha256，文件缺失或不符按缺失处理。会话级字节缓存以 sha256 为键，按总字节数做 64 MB LRU；淘汰后再次读取文件并重新校验。附件存储按会话独立：子会话使用自己的 `sessionId` 目录与实例（index.ts / subagent.ts 各建一份，挂在 `ExecutionEnvironment.attachments` 上）。保存失败的语义见 [tool-api.md](../protocols/tool-api.md) 第 3 节；字节如何进入模型请求见 [context.md](context.md) 第 3 节。
 
 ## 5. 超时、中断与并发
 
@@ -142,14 +142,14 @@ execute(call, ctx):
 `read` 的图片约定（ADR-0023）：
 
 - **识别方式**：读出字节后先做魔数嗅探（PNG `89 50 4E 47…`、JPEG `FF D8 FF`、GIF `GIF87a/89a`、WebP `RIFF…WEBP`），命中则从文件头解析宽高（`tools/image.ts` 纯函数）；识别在二进制判定之前，因此扩展名与内容不一致时按内容为准——`.png` 扩展名的文本文件仍按文本读取，SVG（纯文本格式）走文本路径，BMP 等未识别二进制仍报 `binary_file`（其说明中列出支持的图片格式）。
-- **限制**：单张原始文件不超过 5 MB、每边不超过 8000 px（`IMAGE_MAX_BYTES`/`IMAGE_MAX_EDGE`），超限报 `image_too_large`；文件头损坏或截断到无法解析尺寸报 `image_corrupt`。
-- **结果**：成功时忽略 `offset`/`limit`、**不写 readState**（图片不解除"先读后写"）；`modelContent` 为一行 `Image file: <path> (<mime>, <宽>×<高>, <大小>)`；字节作为 `attachments` 交给执行器落盘（第 4 节），经 Context Builder 按当前模型 `imageInput` 投影进请求（[context.md](context.md) 第 3 节）——工具本身不判断模型能力。
+- **限制**：单张原始文件不超过 50 MB、总像素不超过 64,000,000（`IMAGE_MAX_BYTES`/`IMAGE_MAX_PIXELS`，[ADR-0090](../decisions/ADR-0090-image-downscale-tiles.md)），超限报 `image_too_large`；满足处理条件的 GIF 同样报 `image_too_large` 并说明不支持自动缩小；文件头损坏或截断到无法解析尺寸报 `image_corrupt`。
+- **结果**：成功时忽略 `offset`/`limit`、**不写 readState**（图片不解除"先读后写"）；未处理时 `modelContent` 为一行 `Image file: <path> (<mime>, <宽>×<高>, <大小>)`，已处理时写明原图尺寸大小及缩小后尺寸或分段数量、各段尺寸与从上到下/从左到右顺序；经 `ctx.saveImageAttachment` / 执行器落盘（第 4 节），由 Context Builder 按当前模型 `imageInput` 投影进请求（[context.md](context.md) 第 3 节）——工具本身不判断模型能力。
 
 ### `web_fetch`
 
 契约见 [ADR-0033 §1](../decisions/ADR-0033-web-fetch-file-refs.md)。输入仅 `{ url: string }`，拒绝未知字段、非 HTTP(S) 协议、超过 2000 字符的 URL 和用户名密码段。只发 GET，User-Agent 使用共享版本基值 `nocturne/<version>`，Accept 为 `text/html, text/markdown, text/plain, application/json, */*;q=0.5`，沿用进程级 `configureEnvProxy`，不登录、不带 Cookie、不执行脚本，也没有搜索能力。
 
-声明 `mutates: false`、`concurrencySafe: true`、`timeoutMs: 30_000`、`maxModelChars: 30_000`。超时和中断由执行器结算，响应体读取同时监听取消信号。响应体超过 5 MB 时取消流，只处理前 5 MB 并注明截断；长结果走第 4 节的预算与完整输出落盘。重定向手动处理，至多跟随 5 次，每个目标重新校验协议、长度与凭据。授权主机相同才跟随：默认端口不写入主机，允许默认端口 HTTP → HTTPS 升级；非默认端口变化视作跨主机。跨主机以 `ok` 返回新地址，要求模型再次调用，由权限层批准新的主机。
+声明 `mutates: false`、`concurrencySafe: true`、`timeoutMs: 60_000`、`maxModelChars: 30_000`。超时和中断由执行器结算，响应体读取同时监听取消信号。文本/HTML 响应体超过 5 MB 时取消流并注明截断，图片响应体读取上限放宽至 `IMAGE_MAX_BYTES`（50 MB）；长结果走第 4 节的预算与完整输出落盘。重定向手动处理，至多跟随 5 次，每个目标重新校验协议、长度与凭据。授权主机相同才跟随：默认端口不写入主机，允许默认端口 HTTP → HTTPS 升级；非默认端口变化视作跨主机。跨主机以 `ok` 返回新地址，要求模型再次调用，由权限层批准新的主机。
 
 HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form`，优先取 `main`，其次 `article`，否则取页面内容；提取 `<title>`，用 `node-html-markdown` 转 Markdown。`text/*`、JSON、XML 与 `+json`/`+xml` 原文返回。字符集优先取响应头 charset，HTML 未声明时查看前 1024 字节的 meta charset，未知编码回退 UTF-8；仅使用 WHATWG TextDecoder。PNG/JPEG/GIF/WebP 复用 `read` 的魔数、尺寸与大小校验，经附件通道落盘（`source: "read"`），由上下文按模型能力投影，不写 readState。其他内容返回 `unsupported_content` 并说明类型与已读取大小。
 
@@ -163,7 +163,7 @@ HTML/XHTML 删除 `script/style/noscript/svg/iframe/nav/header/footer/aside/form
 
 文本复用 `read` 的 UTF-8 解码、前 8192 字节 NUL 二进制嗅探和行号规则。2000 行与 50,000 字符取较宽上限，只有同时超过才截断，并选择前 2000 行或 50,000 字符以内整行中内容更多的结果。一条消息的附加文本硬上限为 150,000 字符，包括标签、行号和提示；保持整行，预算不够容纳一行时仅保留路径并告警，达到总上限后的引用不再附加。成功附带的文本写入 `readState`。
 
-目录列出一层，复用 walk 的隐藏项、符号链接与 `.gitignore` 过滤规则，包含祖先和当前目录的规则，至多 200 项，子目录以 `/` 结尾。图片复用 `read` 的格式、5 MB 与 8000 px 限制，保存为 `source: "paste"` 附件；当前模型不支持图片时保留普通文字并告警。其他二进制文件同样只保留路径并告警。
+目录列出一层，复用 walk 的隐藏项、符号链接与 `.gitignore` 过滤规则，包含祖先和当前目录的规则，至多 200 项，子目录以 `/` 结尾。图片复用 `read` 的格式、50 MB 与 64,000,000 像素硬上限以及自动缩小/切段规则，保存为 `source: "paste"` 附件；当前模型不支持图片时保留普通文字并告警。其他二进制文件同样只保留路径并告警。
 
 文件与目录内容提交时写入消息，不因后续文件修改而变化；元数据契约见 [events.md](../protocols/events.md)，上下文处理见 [context.md](context.md)。`RuntimeSession.fileIndex()` 延迟建立工作区索引，复用 walk，最多 20,000 项，每个 Turn 结束后失效；公开纯函数 `completeFileRefs` 供客户端排序候选和生成补全文本。
 

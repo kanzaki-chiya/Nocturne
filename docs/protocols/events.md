@@ -227,6 +227,23 @@ type FileAttachment = {
   inline?: { title: string } // 仅在 tool.completed.files 上有效（ADR-0088）；用户提交入口与解码器在 message.user.files 上丢弃该字段，兼容扩展不升 formatVersion
 }
 
+type ImageRegion = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+type ProcessedImage = {
+  file: string              // 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3-1.jpg"
+  mimeType: ImageMimeType
+  bytes: number
+  sha256: string
+  width: number
+  height: number
+  region: ImageRegion       // 对应原图上的像素区域
+}
+
 type ImageAttachment = {
   type: "image"
   file: string              // 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3.png"
@@ -237,6 +254,7 @@ type ImageAttachment = {
   height?: number
   label?: string            // 人读名（如原始文件名）
   source: "paste" | "read" | "mcp"   // 附件来源
+  processed?: ProcessedImage[]       // 可选（ADR-0090）：自动缩小或长图切段结果；旧日志缺省，不提升 formatVersion
 }
 
 /** ask_user 提问条目（ADR-0032 §1）；字段边界与校验规则

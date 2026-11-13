@@ -1,16 +1,21 @@
 /**
  * read 工具（tools.md 第 6 节）：读取文本文件，带行号输出。
  * 检测二进制文件；记录"已读状态"（路径、修改时间）。
- * PNG/JPEG/GIF/WebP 图片按 ADR-0023 第 2 节作为图片附件返回。
+ * PNG/JPEG/GIF/WebP 图片按 ADR-0023 第 2 节与 ADR-0090 作为图片附件返回。
  */
-import type { ImageMimeType, SubjectRequest } from "../../protocol/index.js";
+import type { ImageAttachment, ImageMimeType, SubjectRequest } from "../../protocol/index.js";
 import { isBinary } from "../text.js";
 import { hashText } from "../readstate.js";
 import {
-  IMAGE_MAX_BYTES,
-  IMAGE_MAX_EDGE,
-  parseImageSize,
+  IMAGE_GIF_LIMIT_TEXT,
+  IMAGE_LIMIT_TEXT,
+  ImageCorruptError,
+  ImageTooLargeError,
   SUPPORTED_IMAGE_FORMATS,
+  exceedsImageHardLimit,
+  needsImageProcessing,
+  parseImageSize,
+  shouldTileImage,
   sniffImageMime,
 } from "../image.js";
 import type { ToolContext, ToolDefinition, ToolScope } from "../types.js";
@@ -49,7 +54,29 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const IMAGE_LIMIT_TEXT = `单张图片原始文件不超过 5 MB（5×1024×1024 字节）、每边不超过 ${IMAGE_MAX_EDGE} px`;
+function formatImageModelContent(
+  inputPath: string,
+  mime: ImageMimeType,
+  size: { width: number; height: number },
+  bytes: number,
+  saved?: ImageAttachment,
+): string {
+  const base = `${mime}, ${size.width}×${size.height}, ${formatBytes(bytes)}`;
+  if (saved?.processed === undefined || saved.processed.length === 0) {
+    return `Image file: ${inputPath} (${base})`;
+  }
+  const tiled = shouldTileImage(size.width, size.height) || saved.processed.length > 1;
+  if (!tiled) {
+    const p = saved.processed[0];
+    if (p === undefined) return `Image file: ${inputPath} (${base})`;
+    return `Image file: ${inputPath} (${mime}, original ${size.width}×${size.height}, ${formatBytes(bytes)}; downscaled to ${p.mimeType}, ${p.width}×${p.height}, ${formatBytes(p.bytes)})`;
+  }
+  const order = size.height >= size.width ? "ordered top to bottom" : "ordered left to right";
+  const parts = saved.processed
+    .map((p, i) => `#${i + 1} ${p.width}×${p.height} (${formatBytes(p.bytes)})`)
+    .join(", ");
+  return `Image file: ${inputPath} (${mime}, original ${size.width}×${size.height}, ${formatBytes(bytes)}; split into ${saved.processed.length} JPEG tiles ${order}: ${parts})`;
+}
 
 export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
   name: "read",
@@ -65,7 +92,7 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
     },
     additionalProperties: false,
   },
-  traits: { mutates: false, concurrencySafe: true, timeoutMs: 10_000 },
+  traits: { mutates: false, concurrencySafe: true, timeoutMs: 60_000 },
 
   permissionSubjects(input: ReadInput, scope: ToolScope): SubjectRequest[] {
     return [
@@ -105,11 +132,12 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
       };
     }
 
-    // 图片（ADR-0023 第 2 节）：魔数识别后走附件路径——不写 readState、
+    // 图片（ADR-0023 第 2 节、ADR-0090）：魔数识别后走附件路径——不写 readState、
     // 忽略 offset/limit；是否投影给模型由上层按模型能力决定，工具不判断
     const mime = sniffImageMime(bytes);
     if (mime !== undefined) {
-      if (bytes.length > IMAGE_MAX_BYTES) {
+      const byteLimit = exceedsImageHardLimit({ bytes: bytes.length });
+      if (byteLimit === "bytes") {
         const message = `图片超出大小限制（${IMAGE_LIMIT_TEXT}）：实际 ${formatBytes(bytes.length)}`;
         return {
           status: "error",
@@ -126,7 +154,10 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
           error: { code: "image_corrupt", message },
         };
       }
-      if (size.width > IMAGE_MAX_EDGE || size.height > IMAGE_MAX_EDGE) {
+      if (
+        exceedsImageHardLimit({ width: size.width, height: size.height, bytes: bytes.length }) ===
+        "pixels"
+      ) {
         const message = `图片超出大小限制（${IMAGE_LIMIT_TEXT}）：实际 ${size.width}×${size.height}`;
         return {
           status: "error",
@@ -134,17 +165,69 @@ export const readTool: ToolDefinition<ReadInput, ReadOutput> = {
           error: { code: "image_too_large", message },
         };
       }
+      if (
+        mime === "image/gif" &&
+        needsImageProcessing({ width: size.width, height: size.height, bytes: bytes.length })
+      ) {
+        const message = `${IMAGE_GIF_LIMIT_TEXT}：实际 ${size.width}×${size.height}、${formatBytes(bytes.length)}`;
+        return {
+          status: "error",
+          modelContent: `${target}：${message}`,
+          error: { code: "image_too_large", message },
+        };
+      }
+
+      const label = ctx.paths.basename(target);
+      const output: ReadOutput = {
+        path: target,
+        mimeType: mime,
+        width: size.width,
+        height: size.height,
+        bytes: bytes.length,
+      };
+      if (ctx.saveImageAttachment !== undefined) {
+        try {
+          const saved = await ctx.saveImageAttachment({
+            mimeType: mime,
+            data: bytes,
+            label,
+            signal: ctx.signal,
+          });
+          return {
+            status: "ok",
+            modelContent: formatImageModelContent(input.path, mime, size, bytes.length, saved),
+            output,
+            savedImages: [saved],
+          };
+        } catch (err) {
+          if (ctx.signal.aborted) throw err;
+          if (err instanceof ImageTooLargeError) {
+            return {
+              status: "error",
+              modelContent: `${target}：${err.message}`,
+              error: { code: "image_too_large", message: err.message },
+            };
+          }
+          if (err instanceof ImageCorruptError) {
+            return {
+              status: "error",
+              modelContent: `${target}：${err.message}`,
+              error: { code: "image_corrupt", message: err.message },
+            };
+          }
+          const why = err instanceof Error ? err.message : String(err);
+          return {
+            status: "ok",
+            modelContent: `${formatImageModelContent(input.path, mime, size, bytes.length)}\n\n[图片附件保存失败：${why}]`,
+            output,
+          };
+        }
+      }
       return {
         status: "ok",
-        modelContent: `Image file: ${input.path} (${mime}, ${size.width}×${size.height}, ${formatBytes(bytes.length)})`,
-        output: {
-          path: target,
-          mimeType: mime,
-          width: size.width,
-          height: size.height,
-          bytes: bytes.length,
-        },
-        attachments: [{ mimeType: mime, data: bytes, label: ctx.paths.basename(target) }],
+        modelContent: formatImageModelContent(input.path, mime, size, bytes.length),
+        output,
+        attachments: [{ mimeType: mime, data: bytes, label }],
       };
     }
 

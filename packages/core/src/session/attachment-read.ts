@@ -4,7 +4,12 @@
  */
 import { createHash } from "node:crypto";
 
-import type { DurableEvent, ImageAttachment, FileAttachment } from "../protocol/index.js";
+import type {
+  DurableEvent,
+  FileAttachment,
+  ImageAttachment,
+  ProcessedImage,
+} from "../protocol/index.js";
 import { fsErrorCode, type Platform } from "../platform/index.js";
 import { SessionError } from "./errors.js";
 
@@ -38,13 +43,23 @@ export async function readSessionAttachment(
   ) {
     throw new SessionError("invalid_attachment_file", "附件必须是单个安全文件名");
   }
-  // 原始持久日志是授权来源，包含已被回退或压缩隐藏的图片；不沿 parent 回溯。
-  let attachment: ImageAttachment | FileAttachment | undefined;
+  // 原始持久日志是授权来源，包含已被回退或压缩隐藏的图片（含处理后分段）；不沿 parent 回溯。
+  let attachment: ImageAttachment | FileAttachment | ProcessedImage | undefined;
   for (const event of events) {
     if (event.type !== "message.user" && event.type !== "tool.completed") continue;
-    attachment = [...(event.payload.attachments ?? []), ...(event.payload.files ?? [])].find(
-      (ref) => ref.file === file,
-    );
+    for (const img of event.payload.attachments ?? []) {
+      if (img.file === file) {
+        attachment = img;
+        break;
+      }
+      const variant = img.processed?.find((p) => p.file === file);
+      if (variant !== undefined) {
+        attachment = variant;
+        break;
+      }
+    }
+    if (attachment !== undefined) break;
+    attachment = (event.payload.files ?? []).find((ref) => ref.file === file);
     if (attachment !== undefined) break;
   }
   if (attachment === undefined) {

@@ -72,10 +72,10 @@ describe("AttachmentStore", () => {
       data[data.length - 1] = tail;
       return data;
     };
-    const a = await store.save({ data: payload(1), mimeType: "image/png", source: "read" });
-    const b = await store.save({ data: payload(2), mimeType: "image/png", source: "read" });
+    const a = await store.save({ data: payload(1), mimeType: "image/png", source: "mcp" });
+    const b = await store.save({ data: payload(2), mimeType: "image/png", source: "mcp" });
     expect(await store.load(a)).toBeDefined(); // a 最近使用
-    await store.save({ data: payload(3), mimeType: "image/png", source: "read" });
+    await store.save({ data: payload(3), mimeType: "image/png", source: "mcp" });
     expect(await store.load(a)).toBeDefined();
     expect(reads).toBe(0);
     await platform.fs.writeFile(path.join(dir, "s", b.file), new Uint8Array([9]));

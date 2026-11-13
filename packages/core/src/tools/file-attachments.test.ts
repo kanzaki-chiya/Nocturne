@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createPlatform } from "../platform/index.js";
 import { createAttachmentStore } from "./attachments.js";
+import { IMAGE_MAX_BYTES } from "./image.js";
 import {
   attachmentReferences,
   FILE_MAX_BYTES,
@@ -60,12 +61,18 @@ describe("文件附件", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-  it("20 MiB 与十个附件边界", () => {
+  it("20 MiB 与十个附件边界；图片附件允许到 50 MB 硬上限", () => {
     const input = { data: new Uint8Array(FILE_MAX_BYTES), mimeType: "x" };
     expect(validateAttachmentInputs([input])).toBeUndefined();
     expect(
       validateAttachmentInputs([{ ...input, data: new Uint8Array(FILE_MAX_BYTES + 1) }]),
     ).toContain("20 MB");
+    const midPng = new Uint8Array(25 * 1024 * 1024);
+    midPng.set(png);
+    expect(validateAttachmentInputs([{ data: midPng, mimeType: "image/png" }])).toBeUndefined();
+    const hugePng = new Uint8Array(IMAGE_MAX_BYTES + 1);
+    hugePng.set(png);
+    expect(validateAttachmentInputs([{ data: hugePng, mimeType: "image/png" }])).toContain("50 MB");
     expect(validateAttachmentInputs(Array.from({ length: 10 }, () => input))).toBeUndefined();
     expect(validateAttachmentInputs(Array.from({ length: 11 }, () => input))).toContain("10");
   });

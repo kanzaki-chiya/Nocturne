@@ -9,9 +9,8 @@ import { SessionHeaderTools, sessionInputHistory } from "../src/web/SessionHeade
 import { PanelHarness, panelFixture } from "./phone-panel-fixtures";
 import {
   estimateSubmitBytes,
-  IMAGE_MAX_BYTES,
+  IMAGE_MAX_PIXELS,
   preparePhoneImage,
-  REENCODE_MAX_EDGE,
   SUBMIT_MESSAGE_LIMIT,
   type ImageCodec,
 } from "../src/web/phone-images";
@@ -86,40 +85,61 @@ it("侧边栏上下文回放时不查，完成只查一次，实时变化合并�
   expect(load).toHaveBeenCalledTimes(2);
 });
 
-it("图片在上限内原样发送；超限或类型不支持时缩放转码并逐级降质", async () => {
-  const small = new File([new Uint8Array(2000)], "a.png", { type: "image/png" });
-  const plain = codec(800, 600);
-  const kept = await preparePhoneImage(small, plain.fake);
-  expect(kept).toMatchObject({ name: "a.png", mimeType: "image/png", width: 800 });
-  expect(kept.data.length).toBe(2000);
+it("图片在硬上限与单条报文上限内原样发送；超限或类型不支持时先保尺寸转 JPEG，仍超再缩尺寸", async () => {
+  // 9.5 MB 长截图（< 50 MB、30.2M 像素 < 64M、base64 < SUBMIT_MESSAGE_LIMIT）：原样发送，不缩图
+  const longShot = new File([new Uint8Array(Math.floor(9.5 * 1024 * 1024))], "long.png", {
+    type: "image/png",
+  });
+  const plain = codec(1849, 16348);
+  const kept = await preparePhoneImage(longShot, plain.fake);
+  expect(kept).toMatchObject({
+    name: "long.png",
+    mimeType: "image/png",
+    width: 1849,
+    height: 16348,
+  });
+  expect(kept.data.length).toBe(longShot.size);
   expect(plain.encoded).toEqual([]);
 
-  // HEIC 等不支持的类型：转 JPEG
+  // 超过 8000 px 但像素总数 <= 64M 的 JPEG：不再因 8000 px 缩图
+  const wide = new File([new Uint8Array(100)], "pano.jpg", { type: "image/jpeg" });
+  const pano = codec(9000, 1000);
+  const keptPano = await preparePhoneImage(wide, pano.fake);
+  expect(keptPano).toMatchObject({ name: "pano.jpg", mimeType: "image/jpeg", width: 9000 });
+  expect(pano.encoded).toEqual([]);
+
+  // HEIC 等不支持的类型：保持原尺寸转 JPEG
   const heic = new File([new Uint8Array(10)], "IMG_1.HEIC", { type: "image/heic" });
   const photo = codec(4032, 3024);
   const converted = await preparePhoneImage(heic, photo.fake);
   expect(converted).toMatchObject({ name: "IMG_1.jpg", mimeType: "image/jpeg" });
   expect(photo.encoded[0]).toMatchObject({ width: 4032, height: 3024, mimeType: "image/jpeg" });
 
-  // 过大的 PNG：先试 PNG，超限再转 JPEG 降质
-  const big = new File([new Uint8Array(IMAGE_MAX_BYTES + 1)], "shot.png", { type: "image/png" });
-  const heavy = codec(2000, 1000, [IMAGE_MAX_BYTES + 10, IMAGE_MAX_BYTES + 5, 4000]);
-  const shrunk = await preparePhoneImage(big, heavy.fake);
-  expect(heavy.encoded.map((e) => [e.mimeType, e.quality])).toEqual([
-    ["image/png", 1],
-    ["image/jpeg", 0.9],
-    ["image/jpeg", 0.8],
+  // 超过 SUBMIT_MESSAGE_LIMIT 的 PNG：先保持尺寸转 JPEG 降质，仍超再缩尺寸
+  const tooLargeForWs = new File([new Uint8Array(13 * 1024 * 1024)], "shot.png", {
+    type: "image/png",
+  });
+  const oversized = 13 * 1024 * 1024;
+  const heavy = codec(2000, 1000, [oversized, oversized, oversized, oversized, 4000]);
+  const shrunk = await preparePhoneImage(tooLargeForWs, heavy.fake);
+  expect(heavy.encoded.map((e) => [e.width, e.height, e.mimeType, e.quality])).toEqual([
+    [2000, 1000, "image/jpeg", 0.9],
+    [2000, 1000, "image/jpeg", 0.8],
+    [2000, 1000, "image/jpeg", 0.65],
+    [2000, 1000, "image/jpeg", 0.5],
+    [1000, 500, "image/jpeg", 0.9],
   ]);
-  expect(shrunk.mimeType).toBe("image/jpeg");
+  expect(shrunk).toMatchObject({ mimeType: "image/jpeg", width: 1000, height: 500 });
 
-  // 超过边长上限的 JPEG 也要缩
-  const wide = new File([new Uint8Array(100)], "pano.jpg", { type: "image/jpeg" });
-  const pano = codec(9000, 1000);
-  await preparePhoneImage(wide, pano.fake);
-  expect(pano.encoded[0]?.width).toBe(REENCODE_MAX_EDGE);
+  // 超过 64M 像素硬上限的图：按像素上限等比缩入后再转 JPEG
+  const huge = new File([new Uint8Array(1000)], "huge.png", { type: "image/png" });
+  const ultra = codec(10000, 7000);
+  const fit = await preparePhoneImage(huge, ultra.fake);
+  expect(fit.width * fit.height).toBeLessThanOrEqual(IMAGE_MAX_PIXELS);
+  expect(fit.mimeType).toBe("image/jpeg");
 
   const broken: ImageCodec = { ...plain.fake, decode: () => Promise.reject(new Error("x")) };
-  await expect(preparePhoneImage(small, broken)).rejects.toThrow("无法读取图片");
+  await expect(preparePhoneImage(longShot, broken)).rejects.toThrow("无法读取图片");
 });
 
 it("报文估算按 base64 计附件", () => {

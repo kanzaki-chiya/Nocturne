@@ -1,13 +1,6 @@
 /** 输入框图片占位：只在本次运行的内存保存字节。 */
-import {
-  IMAGE_MAX_BYTES,
-  IMAGE_MAX_EDGE,
-  parseImageSize,
-  sniffImageMime,
-  type Platform,
-} from "@nocturne/core";
-
-import type { ImageMimeType } from "@nocturne/core/protocol";
+import { parseImageSize, sniffImageMime, type Platform } from "@nocturne/core";
+import { IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, type ImageMimeType } from "@nocturne/core/protocol";
 
 export interface PendingImage {
   data: Uint8Array;
@@ -46,8 +39,7 @@ export function checkImage(
   if (
     data.byteLength > IMAGE_MAX_BYTES ||
     size === undefined ||
-    size.width > IMAGE_MAX_EDGE ||
-    size.height > IMAGE_MAX_EDGE
+    size.width * size.height > IMAGE_MAX_PIXELS
   )
     return { kind: "too_large" };
   return { kind: "ok", mimeType };

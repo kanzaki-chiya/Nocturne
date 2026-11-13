@@ -6,11 +6,25 @@ export { createExecutionScope } from "./scope.js";
 export { createAttachmentStore, type AttachmentStore } from "./attachments.js";
 export {
   IMAGE_MAX_BYTES,
-  IMAGE_MAX_EDGE,
+  IMAGE_MAX_PIXELS,
+  IMAGE_TARGET_MAX_BYTES,
   SUPPORTED_IMAGE_FORMATS,
+  ImageCorruptError,
+  ImageTooLargeError,
+  exceedsImageHardLimit,
+  needsImageProcessing,
   parseImageSize,
+  planImageProcessing,
+  shouldTileImage,
   sniffImageMime,
 } from "./image.js";
+export {
+  DEFAULT_IMAGE_WORKER_IDLE_MS,
+  createImageProcessor,
+  type EncodedImageTile,
+  type ImageProcessor,
+  type ProcessImageInput,
+} from "./image-processor.js";
 export { createPolicyGate } from "./gate.js";
 export { createQuestionBroker, type QuestionBrokerOptions } from "./question.js";
 export { createReadStateStore } from "./readstate.js";

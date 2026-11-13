@@ -106,7 +106,24 @@ const reasoningEffortSchema = z.enum(["off", "minimal", "low", "medium", "high",
 
 const errorInfoSchema = z.object({ code: z.string(), message: z.string() });
 
-/** ImageAttachment（ADR-0023 第 2 节）：事件里只有引用，字节在附件目录 */
+const imageRegionSchema = z.object({
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+
+const processedImageSchema = z.object({
+  file: z.string(),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+  bytes: z.number().int().nonnegative(),
+  sha256: z.string(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  region: imageRegionSchema,
+});
+
+/** ImageAttachment（ADR-0023 第 2 节、ADR-0090）：事件里只有引用，字节在附件目录 */
 const imageAttachmentSchema = z.object({
   type: z.literal("image"),
   file: z.string(),
@@ -117,6 +134,7 @@ const imageAttachmentSchema = z.object({
   height: z.number().int().positive().optional(),
   label: z.string().optional(),
   source: z.enum(["paste", "read", "mcp"]),
+  processed: z.array(processedImageSchema).min(1).optional(),
 });
 
 const fileAttachmentSchema = z.object({

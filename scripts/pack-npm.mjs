@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { run } from "./lib/proc.mjs";
+import { copyImageAssetsFromDir } from "./lib/image-wasm.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateDir = join(root, "packaging", "npm");
@@ -38,6 +39,7 @@ export function packNpm({ bundleFile, out }) {
   const staging = mkdtempSync(join(tmpdir(), "nctrn-npm-"));
   try {
     copyFileSync(bundleFile, join(staging, "nctrn.mjs"));
+    copyImageAssetsFromDir(dirname(bundleFile), staging);
     copyFileSync(join(templateDir, "package.json"), join(staging, "package.json"));
     copyFileSync(join(templateDir, "README.md"), join(staging, "README.md"));
     copyFileSync(join(root, "LICENSE"), join(staging, "LICENSE"));

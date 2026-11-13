@@ -356,9 +356,10 @@ describe("TUI 图片输入", () => {
     const huge = path.join(dir, "huge.png");
     writeFileSync(good, png);
     writeFileSync(bad, "hello");
-    const large = new Uint8Array(5 * 1024 * 1024 + 1);
-    large.set(png);
-    writeFileSync(huge, large);
+    const hugePng = Buffer.from(png);
+    hugePng.writeUInt32BE(8001, 16);
+    hugePng.writeUInt32BE(8001, 20);
+    writeFileSync(huge, hugePng);
     const p = createPlatform();
     expect(await droppedImage(` "${good}" `, p)).toMatchObject({
       kind: "ok",
@@ -384,9 +385,10 @@ describe("TUI 图片输入", () => {
     const bad = path.join(dir, "note.txt");
     const huge = path.join(dir, "large.png");
     writeFileSync(bad, "plain text");
-    const large = new Uint8Array(5 * 1024 * 1024 + 1);
-    large.set(png);
-    writeFileSync(huge, large);
+    const hugePng = Buffer.from(png);
+    hugePng.writeUInt32BE(8001, 16);
+    hugePng.writeUInt32BE(8001, 20);
+    writeFileSync(huge, hugePng);
     for (const [imageInput, file, hint] of [
       [true, bad, undefined],
       [true, path.join(dir, "missing.png"), undefined],

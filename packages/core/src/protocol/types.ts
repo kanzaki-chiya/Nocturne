@@ -189,9 +189,14 @@ export type ContentBlock =
       providerData?: unknown;
     };
 
-// ── 图片附件（ADR-0023 第 2 节）─────────────────────────────
+// ── 图片附件（ADR-0023 第 2 节、ADR-0090）──────────────────
 
 export type ImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+/** 单张图片原始文件硬上限：50 MB（ADR-0090） */
+export const IMAGE_MAX_BYTES = 50 * 1024 * 1024;
+/** 单张图片总像素硬上限：64,000,000（宽×高，ADR-0090） */
+export const IMAGE_MAX_PIXELS = 64_000_000;
 
 /** 已附带的 @ 引用快照元数据（ADR-0033）。 */
 export interface FileRef {
@@ -203,11 +208,38 @@ export interface FileRef {
   truncated: boolean;
 }
 
+/** 处理后结果对应在原图上的像素区域（ADR-0090） */
+export interface ImageRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 原图经自动缩小或长图切段后的派生附件（ADR-0090）。
+ * 字节同样存入 <attachmentsDir>/<sessionId>/，供模型请求使用。
+ */
+export interface ProcessedImage {
+  /** 相对 <attachmentsDir>/<sessionId>/ 的文件名，如 "img-3-1.jpg" */
+  file: string;
+  mimeType: ImageMimeType;
+  bytes: number;
+  /** 小写 hex */
+  sha256: string;
+  width: number;
+  height: number;
+  /** 对应原图上的像素区域 */
+  region: ImageRegion;
+}
+
 /**
  * 图片附件的引用：字节不落进事件与历史，统一存到
  * <attachmentsDir>/<sessionId>/ 下，事件里只有这份元数据。
  * `source` 标记来源：paste（用户粘贴/拖入）、read（内置工具读图）、
  * mcp（MCP 工具结果）。
+ * 超出发送预算时由 Core 自动缩小或切段，`processed` 列出实际发给模型的结果；
+ * 缺省表示原图直接发送（旧日志不带该字段，不提升日志版本）。
  */
 export interface ImageAttachment {
   type: "image";
@@ -221,6 +253,7 @@ export interface ImageAttachment {
   height?: number | undefined;
   label?: string | undefined;
   source: "paste" | "read" | "mcp";
+  processed?: ProcessedImage[] | undefined;
 }
 
 export interface AttachmentInput {

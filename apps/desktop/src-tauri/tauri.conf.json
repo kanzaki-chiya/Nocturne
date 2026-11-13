@@ -34,6 +34,12 @@
     "createUpdaterArtifacts": true,
     "resources": {
       "resources/nctrn.mjs": "nctrn.mjs",
+      "resources/image-worker.mjs": "image-worker.mjs",
+      "resources/wasm/squoosh_png_bg.wasm": "wasm/squoosh_png_bg.wasm",
+      "resources/wasm/mozjpeg_dec.wasm": "wasm/mozjpeg_dec.wasm",
+      "resources/wasm/mozjpeg_enc.wasm": "wasm/mozjpeg_enc.wasm",
+      "resources/wasm/webp_dec.wasm": "wasm/webp_dec.wasm",
+      "resources/wasm/squoosh_resize_bg.wasm": "wasm/squoosh_resize_bg.wasm",
       "resources/node/node.exe": "node/node.exe",
       "resources/node/LICENSE": "node/LICENSE",
       "resources/computer/": "computer/"

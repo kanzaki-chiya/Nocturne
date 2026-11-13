@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { parseImageSize, sniffImageMime } from "./image.js";
+import {
+  IMAGE_MAX_BYTES,
+  IMAGE_MAX_PIXELS,
+  IMAGE_TARGET_MAX_BYTES,
+  IMAGE_TARGET_MAX_EDGE,
+  exceedsImageHardLimit,
+  needsImageProcessing,
+  nextShrinkDimensions,
+  parseImageSize,
+  planImageProcessing,
+  shouldTileImage,
+  sniffImageMime,
+} from "./image.js";
 
 const u8 = (arr: number[]): Uint8Array => new Uint8Array(arr);
 const u16be = (n: number) => [(n >> 8) & 0xff, n & 0xff];
@@ -184,5 +196,126 @@ describe("parseImageSize", () => {
     badSig[20] = 0x00; // VP8L 签名必须 0x2F
     expect(parseImageSize(badSig, "image/webp")).toBeUndefined();
     expect(parseImageSize(webpHeader("XTRA", [1, 2, 3]), "image/webp")).toBeUndefined();
+  });
+});
+
+describe("image processing math & planning (ADR-0090)", () => {
+  it("硬上限：50 MB 与 64,000,000 像素边界", () => {
+    expect(
+      exceedsImageHardLimit({ width: 8000, height: 8000, bytes: IMAGE_MAX_BYTES }),
+    ).toBeUndefined();
+    expect(exceedsImageHardLimit({ width: 8000, height: 8000, bytes: IMAGE_MAX_BYTES + 1 })).toBe(
+      "bytes",
+    );
+    expect(exceedsImageHardLimit({ width: 8001, height: 8001, bytes: 1000 })).toBe("pixels");
+    expect(exceedsImageHardLimit({ width: 1849, height: 16348, bytes: 9_900_000 })).toBeUndefined();
+    expect(1849 * 16348).toBeLessThanOrEqual(IMAGE_MAX_PIXELS);
+  });
+
+  it("三种处理条件边界：(a) >3.5 MB、(b) >8000 px、(c) 长边 >2576 且长短比 >2576/768", () => {
+    expect(needsImageProcessing({ width: 1920, height: 1080, bytes: IMAGE_TARGET_MAX_BYTES })).toBe(
+      false,
+    );
+    expect(needsImageProcessing({ width: 8000, height: 8000, bytes: IMAGE_TARGET_MAX_BYTES })).toBe(
+      false,
+    );
+    expect(needsImageProcessing({ width: 768, height: 2576, bytes: 100_000 })).toBe(false);
+    expect(needsImageProcessing({ width: 1000, height: 3354, bytes: 100_000 })).toBe(false);
+    expect(shouldTileImage(1000, 3354)).toBe(false);
+
+    expect(
+      needsImageProcessing({ width: 1920, height: 1080, bytes: IMAGE_TARGET_MAX_BYTES + 1 }),
+    ).toBe(true);
+    expect(needsImageProcessing({ width: 8001, height: 4000, bytes: 100_000 })).toBe(true);
+    expect(shouldTileImage(8001, 4000)).toBe(false);
+    expect(shouldTileImage(768, 2577)).toBe(true);
+    expect(shouldTileImage(1000, 3355)).toBe(true);
+    expect(needsImageProcessing({ width: 1000, height: 3355, bytes: 100_000 })).toBe(true);
+  });
+
+  it("整张缩小：长边<=2576 保持尺寸只转码；长边>2576 缩到长边 2576", () => {
+    expect(planImageProcessing({ width: 1000, height: 1000, bytes: 100_000 })).toEqual({
+      kind: "none",
+    });
+    expect(
+      planImageProcessing({ width: 1000, height: 1000, bytes: IMAGE_TARGET_MAX_BYTES + 1 }),
+    ).toEqual({
+      kind: "downscale",
+      targetWidth: 1000,
+      targetHeight: 1000,
+      region: { x: 0, y: 0, width: 1000, height: 1000 },
+    });
+    expect(planImageProcessing({ width: 8001, height: 4000, bytes: 100_000 })).toEqual({
+      kind: "downscale",
+      targetWidth: 2576,
+      targetHeight: 1288,
+      region: { x: 0, y: 0, width: 8001, height: 4000 },
+    });
+  });
+
+  it("切段计算：1849×16348 切成 7 段，重叠 64 px，短边<=2576 不先缩", () => {
+    const plan = planImageProcessing({ width: 1849, height: 16348, bytes: 9_900_000 });
+    expect(plan.kind).toBe("tile");
+    if (plan.kind !== "tile") return;
+    expect(plan.scaledWidth).toBe(1849);
+    expect(plan.scaledHeight).toBe(16348);
+    expect(plan.tiles).toHaveLength(7);
+    for (let i = 0; i < plan.tiles.length; i++) {
+      const tile = plan.tiles[i];
+      if (!tile) throw new Error("missing tile");
+      expect(tile.width).toBe(1849);
+      expect(tile.height).toBeLessThanOrEqual(IMAGE_TARGET_MAX_EDGE);
+      expect(tile.region).toEqual({ x: tile.x, y: tile.y, width: tile.width, height: tile.height });
+      if (i > 0) {
+        const prev = plan.tiles[i - 1];
+        if (!prev) throw new Error("missing prev tile");
+        expect(prev.y + prev.height - tile.y).toBe(64);
+      }
+    }
+    const last = plan.tiles.at(-1);
+    expect(last?.y).toBeDefined();
+    expect((last?.y ?? 0) + (last?.height ?? 0)).toBe(16348);
+  });
+
+  it("切段：短边超过 2576 px 先等比缩到 2576；横向宽图沿 X 轴切", () => {
+    const tall = planImageProcessing({ width: 3000, height: 12000, bytes: 1_000_000 });
+    expect(tall.kind).toBe("tile");
+    if (tall.kind === "tile") {
+      expect(tall.scaledWidth).toBe(2576);
+      expect(tall.scaledHeight).toBe(Math.round((12000 * 2576) / 3000));
+      expect(tall.tiles.length).toBeLessThanOrEqual(8);
+    }
+
+    const wide = planImageProcessing({ width: 10000, height: 1000, bytes: 500_000 });
+    expect(wide.kind).toBe("tile");
+    if (wide.kind === "tile") {
+      expect(wide.scaledWidth).toBe(10000);
+      expect(wide.scaledHeight).toBe(1000);
+      expect(wide.tiles).toHaveLength(4);
+      const t0 = wide.tiles[0];
+      const t1 = wide.tiles[1];
+      expect(t1?.x).toBe(2512);
+      expect((t0?.x ?? 0) + (t0?.width ?? 0) - (t1?.x ?? 0)).toBe(64);
+    }
+  });
+
+  it("切段上限：最多 8 段，超长图先等比缩到 8 段能放下的尺寸", () => {
+    const plan = planImageProcessing({ width: 1000, height: 30_000, bytes: 1_000_000 });
+    expect(plan.kind).toBe("tile");
+    if (plan.kind !== "tile") return;
+    expect(plan.tiles).toHaveLength(8);
+    expect(plan.scaledHeight).toBe(8 * 2576 - 7 * 64);
+    expect(plan.scaledWidth).toBe(Math.round((1000 * plan.scaledHeight) / 30_000));
+    expect(plan.tiles[0]?.region.y).toBe(0);
+    const last = plan.tiles.at(-1);
+    expect((last?.region.y ?? 0) + (last?.region.height ?? 0)).toBe(30_000);
+  });
+
+  it("降质后仍超 3.5 MB 时等比缩小尺寸严格递减", () => {
+    const next = nextShrinkDimensions(2576, 2576, 6 * 1024 * 1024, IMAGE_TARGET_MAX_BYTES);
+    expect(next.width).toBeLessThan(2576);
+    expect(next.height).toBeLessThan(2576);
+    expect(next.width).toBeGreaterThan(0);
+    expect(nextShrinkDimensions(1, 1, 10_000_000, 1000)).toEqual({ width: 1, height: 1 });
   });
 });

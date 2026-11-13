@@ -3,7 +3,7 @@
 - 状态：已接受（维护者 2026-09-28 确认：单图 5 MB / 8000 px 不缩放、Alt+V、拖入路径转占位、分三步实现）；第 1 节的声明入口（`/provider image`、`userCapabilities`）被 [ADR-0024](ADR-0024-model-settings-editor.md) 取代
 - 日期：2026-09-28
 
-> 被 [ADR-0072](ADR-0072-file-attachments.md) 扩展。
+> 被 [ADR-0072](ADR-0072-file-attachments.md) 扩展；第 3 节「5 MB / 8000 px 不缩放」已被 [ADR-0090](ADR-0090-image-downscale-tiles.md) 修订。
 
 ## 背景
 
@@ -53,7 +53,7 @@ v0.5 要让模型能「看图」：先让 `read` 工具能读图片，再支持�
 ### 3. `read` 工具读图片
 
 - **按文件头识别格式**，不看扩展名：PNG、JPEG、GIF、WebP。这一步在二进制检查之前做。SVG 是文本，仍按文本读取。其他二进制格式（BMP、HEIC 等）照旧返回 `binary_file`，说明中列出支持的格式。
-- **限制**：单张原始文件不超过 5 MB，每边不超过 8000 px，超出返回 `image_too_large` 并说明限制。尺寸从文件头解析（纯函数，不引入原生依赖）。第一版**不缩放**：缩放要引入 sharp 之类的原生依赖，这个代价以后单独评估。
+- **限制**：单张原始文件不超过 5 MB，每边不超过 8000 px，超出返回 `image_too_large` 并说明限制。尺寸从文件头解析（纯函数，不引入原生依赖）。第一版**不缩放**：缩放要引入 sharp 之类的原生依赖，这个代价以后单独评估。（**2026-11-13 修订，见 [ADR-0090](ADR-0090-image-downscale-tiles.md)**：硬上限调整为 50 MB / 64,000,000 像素，超 3.5 MB、超 8000 px 或需清晰展示的长图在 `node:worker_threads` 内自动缩小或切段为 JPEG，不再因原生依赖放弃缩放。）
 - 图片读取忽略 `offset`/`limit`，也不写入 `readState`，因为图片不能被 `edit`/`write` 按文本修改。
 - 工具**不知道当前模型能不能看图**，照常返回图片。`modelContent` 是一行说明，例如 `Image file: docs/shot.png (image/png, 1920×1080, 245 KB)`。图片最终是否发给模型由第 4 节决定，这样中途切换模型时，同一条历史能正确投影。
 - `ToolResult` 增加可选字段 `attachments?: { mimeType; data: Uint8Array; label? }[]`，由执行器落盘并写入 `tool.completed.attachments`。这是 [tool-api.md](../protocols/tool-api.md) 第 6 节所说的「修改 ToolResult 形状」，由本 ADR 记录。

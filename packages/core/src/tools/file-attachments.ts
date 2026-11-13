@@ -1,6 +1,6 @@
 import type { AttachmentInput, FileAttachment, ImageAttachment } from "../protocol/index.js";
 import type { AttachmentStore } from "./attachments.js";
-import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "./image.js";
+import { IMAGE_MAX_BYTES, ImageCorruptError, parseImageSize, sniffImageMime } from "./image.js";
 
 export const FILE_MAX_BYTES = 20 * 1024 * 1024;
 export const ATTACHMENT_MAX_COUNT = 10;
@@ -19,7 +19,15 @@ export function validateAttachmentInputs(inputs: AttachmentInput[]): string | un
       (input.source !== undefined && !["paste", "upload", "answer"].includes(input.source))
     )
       return "附件参数无效";
-    if (input.data.byteLength > FILE_MAX_BYTES) return "单个附件不能超过 20 MB";
+    const sniffed = sniffImageMime(input.data);
+    const isImage =
+      sniffed !== undefined &&
+      (input.mimeType === sniffed || input.mimeType === "application/octet-stream");
+    if (isImage) {
+      if (input.data.byteLength > IMAGE_MAX_BYTES) return "单个图片附件不能超过 50 MB";
+    } else if (input.data.byteLength > FILE_MAX_BYTES) {
+      return "单个附件不能超过 20 MB";
+    }
   }
   return undefined;
 }
@@ -28,31 +36,39 @@ export async function saveInputAttachments(
   store: AttachmentStore,
   inputs: AttachmentInput[],
   answer = false,
+  signal?: AbortSignal,
 ): Promise<{ attachments: ImageAttachment[]; files: FileAttachment[] }> {
   const attachments: ImageAttachment[] = [];
   const files: FileAttachment[] = [];
   for (const input of inputs) {
+    signal?.throwIfAborted();
     const mimeType = sniffImageMime(input.data);
     const size = mimeType ? parseImageSize(input.data, mimeType) : undefined;
-    if (
-      mimeType &&
-      mimeType === input.mimeType &&
-      size &&
-      input.data.byteLength <= IMAGE_MAX_BYTES &&
-      size.width <= IMAGE_MAX_EDGE &&
-      size.height <= IMAGE_MAX_EDGE
-    ) {
-      attachments.push(await store.save({ ...input, mimeType, source: "paste" }));
-    } else {
-      files.push(
-        await store.saveFile({
-          data: input.data,
-          mimeType: input.mimeType,
-          label: input.label ?? "attachment",
-          source: answer ? "answer" : (input.source ?? "upload"),
-        }),
-      );
+    const mimeMatches =
+      mimeType !== undefined &&
+      (input.mimeType === mimeType || input.mimeType === "application/octet-stream");
+    if (mimeMatches && size !== undefined) {
+      try {
+        attachments.push(await store.save({ ...input, mimeType, source: "paste", signal }));
+        continue;
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        if (!(err instanceof ImageCorruptError) || input.data.byteLength > FILE_MAX_BYTES) {
+          throw err;
+        }
+      }
     }
+    if (input.data.byteLength > FILE_MAX_BYTES) {
+      throw new Error("单个附件不能超过 20 MB");
+    }
+    files.push(
+      await store.saveFile({
+        data: input.data,
+        mimeType: input.mimeType,
+        label: input.label ?? "attachment",
+        source: answer ? "answer" : (input.source ?? "upload"),
+      }),
+    );
   }
   return { attachments, files };
 }

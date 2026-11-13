@@ -1,20 +1,15 @@
 /**
- * 手机附件图片：相册或拍照得到的 File 在发送前就地处理成 Core 接受的图片。
- * 类型与桌面 picked-images.ts 的 IMAGE_TYPES 一致；尺寸上限照抄 Core
- * （packages/core/src/tools/image.ts 的 IMAGE_MAX_BYTES、IMAGE_MAX_EDGE，
- * protocol 不导出，这里硬编码）。超限或类型不支持时用 canvas 缩放转码。
+ * 手机附件图片：相册或拍照得到的 File 在发送前只检查是否超过 Core 硬上限与远程报文上限。
+ * 类型受支持且不超限时原样发送，其余交给 Core 后台自动缩小或切段；
+ * 必须处理时先保持尺寸转成 JPEG，仍然太大再缩尺寸。
  */
-import type { ImageMimeType } from "@nocturne/core/protocol";
+import { IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, type ImageMimeType } from "@nocturne/core/protocol";
 import { MAX_MESSAGE } from "@nocturne/remote";
 
 import { IMAGE_TYPES } from "../picked-images";
 
-/** Core 单张图片字节上限（packages/core/src/tools/image.ts） */
-export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-/** Core 单边像素上限（同上） */
-export const IMAGE_MAX_EDGE = 8000;
-/** 转码时的长边上限：兼顾手机 canvas 内存与清晰度 */
-export const REENCODE_MAX_EDGE = 4096;
+export { IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS };
+
 /**
  * 一次 session.submit 报文的上限：与后台 REMOTE_MESSAGE_LIMIT 相同口径，
  * 给加密与 JSON 包装留 64 KiB。超过 MAX_MESSAGE 整条加密通道会断开。
@@ -85,11 +80,32 @@ export const browserCodec: ImageCodec = {
 const supported = (type: string): type is ImageMimeType =>
   (IMAGE_TYPES as readonly string[]).includes(type);
 
-function fitWithin(width: number, height: number, edge: number) {
-  const scale = Math.min(1, edge / Math.max(width, height));
+const base64Length = (bytes: number) => 4 * Math.ceil(bytes / 3);
+
+function estimateSingleAttachmentSubmitBytes(byteLength: number, label: string): number {
+  const encoder = new TextEncoder();
+  return (
+    4096 +
+    encoder.encode(JSON.stringify("")).length +
+    256 +
+    base64Length(byteLength) +
+    encoder.encode(JSON.stringify(label)).length
+  );
+}
+
+function fitWithinPixels(width: number, height: number, maxPixels: number) {
+  if (width * height <= maxPixels) return { width, height };
+  const scale = Math.sqrt(maxPixels / (width * height));
   return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
+  };
+}
+
+function fitHalf(width: number, height: number) {
+  return {
+    width: Math.max(1, Math.round(width / 2)),
+    height: Math.max(1, Math.round(height / 2)),
   };
 }
 
@@ -99,9 +115,9 @@ function rename(name: string, mimeType: ImageMimeType): string {
 }
 
 /**
- * 处理一张图片：类型受支持、不超字节与边长上限时原样发送（保留 GIF 动画与
- * 原始画质）；否则长边缩到 REENCODE_MAX_EDGE 以内，PNG 源先试 PNG，仍超限
- * 或其他类型转 JPEG，并逐级降低质量直到不超过 IMAGE_MAX_BYTES。
+ * 处理一张图片：类型受支持、不超 Core 硬上限（50 MB / 64,000,000 像素）且
+ * 单条消息不超 SUBMIT_MESSAGE_LIMIT 时原样发送（保留原尺寸与 GIF 动画，缩小/切段
+ * 由 Core 统一完成）；必须处理时先保持尺寸转成 JPEG，仍然太大再逐步缩小尺寸。
  */
 export async function preparePhoneImage(
   file: File,
@@ -114,7 +130,8 @@ export async function preparePhoneImage(
   if (
     supported(file.type) &&
     file.size <= IMAGE_MAX_BYTES &&
-    Math.max(decoded.width, decoded.height) <= IMAGE_MAX_EDGE
+    decoded.width * decoded.height <= IMAGE_MAX_PIXELS &&
+    estimateSingleAttachmentSubmitBytes(file.size, name) <= SUBMIT_MESSAGE_LIMIT
   ) {
     return {
       name,
@@ -124,39 +141,37 @@ export async function preparePhoneImage(
       height: decoded.height,
     };
   }
-  const size = fitWithin(decoded.width, decoded.height, REENCODE_MAX_EDGE);
-  const attempts: ["image/jpeg" | "image/png", number][] = [
-    ...(file.type === "image/png" ? [["image/png", 1] as ["image/png", number]] : []),
-    ["image/jpeg", 0.9],
-    ["image/jpeg", 0.8],
-    ["image/jpeg", 0.65],
-    ["image/jpeg", 0.5],
-  ];
-  let shrink = size;
-  for (let round = 0; round < 3; round++) {
-    for (const [mimeType, quality] of attempts) {
+  const qualities = [0.9, 0.8, 0.65, 0.5] as const;
+  const jpegName = rename(name, "image/jpeg");
+  let target = fitWithinPixels(decoded.width, decoded.height, IMAGE_MAX_PIXELS);
+  for (let round = 0; round < 5; round++) {
+    for (const quality of qualities) {
       const blob = await codec.encode(
         decoded.source,
-        shrink.width,
-        shrink.height,
-        mimeType,
+        target.width,
+        target.height,
+        "image/jpeg",
         quality,
       );
-      if (blob.size <= IMAGE_MAX_BYTES)
+      if (
+        blob.size <= IMAGE_MAX_BYTES &&
+        estimateSingleAttachmentSubmitBytes(blob.size, jpegName) <= SUBMIT_MESSAGE_LIMIT
+      ) {
         return {
-          name: rename(name, mimeType),
+          name: jpegName,
           data: new Uint8Array(await blob.arrayBuffer()),
-          mimeType,
-          width: shrink.width,
-          height: shrink.height,
+          mimeType: "image/jpeg",
+          width: target.width,
+          height: target.height,
         };
+      }
     }
-    shrink = fitWithin(shrink.width, shrink.height, Math.max(shrink.width, shrink.height) / 2);
+    const next = fitHalf(target.width, target.height);
+    if (next.width === target.width && next.height === target.height) break;
+    target = next;
   }
-  throw new Error(`图片过大，无法压缩到 5 MB 以内：${name}`);
+  throw new Error(`图片过大，无法压缩到传输上限以内：${name}`);
 }
-
-const base64Length = (bytes: number) => 4 * Math.ceil(bytes / 3);
 
 /**
  * 估算一次 session.submit 的报文字节数：附件按 base64 计，文字与标签按 JSON

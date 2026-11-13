@@ -1,6 +1,15 @@
 import { NodeHtmlMarkdown } from "node-html-markdown";
 import { NOCTURNE_VERSION } from "../../protocol/version.js";
-import { IMAGE_MAX_BYTES, IMAGE_MAX_EDGE, parseImageSize, sniffImageMime } from "../image.js";
+import {
+  IMAGE_GIF_LIMIT_TEXT,
+  IMAGE_MAX_BYTES,
+  ImageCorruptError,
+  ImageTooLargeError,
+  exceedsImageHardLimit,
+  needsImageProcessing,
+  parseImageSize,
+  sniffImageMime,
+} from "../image.js";
 import type { ToolDefinition, ToolResult } from "../types.js";
 
 interface WebFetchInput {
@@ -37,6 +46,7 @@ function hostTarget(url: URL): string {
 async function readBody(
   response: Response,
   signal: AbortSignal,
+  maxBytes = MAX_BYTES,
 ): Promise<{ bytes: Uint8Array; truncated: boolean }> {
   if (response.body === null) return { bytes: new Uint8Array(), truncated: false };
   const reader = (response.body as ReadableStream<Uint8Array>).getReader();
@@ -53,7 +63,7 @@ async function readBody(
       const next = await reader.read();
       signal.throwIfAborted();
       if (next.done) break;
-      const remaining = MAX_BYTES - length;
+      const remaining = maxBytes - length;
       chunks.push(next.value.subarray(0, remaining));
       length += Math.min(next.value.length, remaining);
       if (next.value.length > remaining) {
@@ -138,7 +148,7 @@ export const webFetchTool: ToolDefinition<WebFetchInput, WebFetchOutput> = {
     properties: { url: { type: "string", minLength: 1, maxLength: 2000 } },
     additionalProperties: false,
   },
-  traits: { mutates: false, concurrencySafe: true, timeoutMs: 30_000, maxModelChars: 30_000 },
+  traits: { mutates: false, concurrencySafe: true, timeoutMs: 60_000, maxModelChars: 30_000 },
   validateInput: (input) => validateUrl(input.url),
   permissionSubjects(input) {
     return [{ kind: "network", target: hostTarget(new URL(input.url)), detail: input.url }];
@@ -188,24 +198,75 @@ export const webFetchTool: ToolDefinition<WebFetchInput, WebFetchOutput> = {
           url = next;
           continue;
         }
-        const { bytes, truncated } = await readBody(response, ctx.signal);
-        if (truncated) output.truncatedBytes = true;
         const mime = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+        const isImageMime = ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime);
+        const { bytes, truncated } = await readBody(
+          response,
+          ctx.signal,
+          isImageMime ? IMAGE_MAX_BYTES : MAX_BYTES,
+        );
+        if (truncated) output.truncatedBytes = true;
         const isHtml = mime === "text/html" || mime === "application/xhtml+xml";
         if (!response.ok) {
           const message = `HTTP ${response.status} ${response.statusText}\n\n${decode(bytes, contentType, isHtml).slice(0, 2000)}`;
           return error("http_error", message, { ...output, chars: message.length });
         }
         const notice = truncated ? "\n\n页面过大，只处理了前 5 MB" : "";
-        if (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime)) {
+        if (isImageMime) {
           if (truncated || bytes.length > IMAGE_MAX_BYTES)
-            return error("image_too_large", "图片超过 5 MB 上限", output);
+            return error("image_too_large", "图片超过 50 MB 上限", output);
           const imageMime = sniffImageMime(bytes);
           const size = imageMime === undefined ? undefined : parseImageSize(bytes, imageMime);
           if (size === undefined || imageMime === undefined)
             return error("image_corrupt", "图片文件头损坏或被截断，无法解析尺寸", output);
-          if (size.width > IMAGE_MAX_EDGE || size.height > IMAGE_MAX_EDGE)
-            return error("image_too_large", "图片每边不得超过 8000 px", output);
+          if (
+            exceedsImageHardLimit({
+              width: size.width,
+              height: size.height,
+              bytes: bytes.length,
+            }) === "pixels"
+          )
+            return error("image_too_large", "图片总像素不得超过 64,000,000", output);
+          if (
+            imageMime === "image/gif" &&
+            needsImageProcessing({ width: size.width, height: size.height, bytes: bytes.length })
+          ) {
+            return error("image_too_large", IMAGE_GIF_LIMIT_TEXT, output);
+          }
+          if (ctx.saveImageAttachment !== undefined) {
+            try {
+              const saved = await ctx.saveImageAttachment({
+                mimeType: imageMime,
+                data: bytes,
+                label: url.href,
+                signal: ctx.signal,
+              });
+              const detail =
+                saved.processed !== undefined && saved.processed.length > 0
+                  ? `; processed into ${saved.processed.length} JPEG image(s)`
+                  : "";
+              const modelContent = `URL: ${url.href}\n\nImage: ${imageMime}, ${size.width}×${size.height}, ${bytes.length} bytes${detail}`;
+              return {
+                status: "ok",
+                modelContent,
+                output: { ...output, chars: modelContent.length },
+                savedImages: [saved],
+              };
+            } catch (err) {
+              if (ctx.signal.aborted) throw err;
+              if (err instanceof ImageTooLargeError)
+                return error("image_too_large", err.message, output);
+              if (err instanceof ImageCorruptError)
+                return error("image_corrupt", err.message, output);
+              const why = err instanceof Error ? err.message : String(err);
+              const modelContent = `URL: ${url.href}\n\nImage: ${imageMime}, ${size.width}×${size.height}, ${bytes.length} bytes\n\n[图片附件保存失败：${why}]`;
+              return {
+                status: "ok",
+                modelContent,
+                output: { ...output, chars: modelContent.length },
+              };
+            }
+          }
           const modelContent = `URL: ${url.href}\n\nImage: ${imageMime}, ${size.width}×${size.height}, ${bytes.length} bytes`;
           return {
             status: "ok",

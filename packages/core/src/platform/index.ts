@@ -8,3 +8,4 @@ export * from "./shells.js";
 export * from "./platform.js";
 export * from "./proxy.js";
 export * from "./workspace-branches.js";
+export * from "./image-wasm.js";

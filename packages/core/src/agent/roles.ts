@@ -71,8 +71,13 @@ export async function describeImages(deps: TurnDeps, turnId: string): Promise<vo
     const modelName = `${model.model.ref.provider}/${model.model.ref.model}`;
     let result: { text: string; usage?: Usage | undefined };
     try {
-      const bytes = await deps.execEnv.attachments?.load(att);
-      if (bytes === undefined) throw new Error("图片附件缺失");
+      const items = att.processed !== undefined && att.processed.length > 0 ? att.processed : [att];
+      const images = [];
+      for (const item of items) {
+        const bytes = await deps.execEnv.attachments?.load(item);
+        if (bytes === undefined) throw new Error("图片附件缺失");
+        images.push({ mimeType: item.mimeType, data: Buffer.from(bytes).toString("base64") });
+      }
       const context =
         owner.kind === "user"
           ? owner.content
@@ -95,7 +100,7 @@ export async function describeImages(deps: TurnDeps, turnId: string): Promise<vo
             {
               role: "user",
               content: [{ type: "text", text: context }],
-              images: [{ mimeType: att.mimeType, data: Buffer.from(bytes).toString("base64") }],
+              images,
             },
           ],
           tools: [],

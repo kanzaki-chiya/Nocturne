@@ -6,6 +6,10 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 |---|---:|---|
 | `@ai-sdk/anthropic` | 4.0.58 | Apache-2.0 |
 | `@ai-sdk/openai-compatible` | 3.0.49 | Apache-2.0 |
+| `@jsquash/jpeg` | 1.6.0 | Apache-2.0 |
+| `@jsquash/png` | 3.1.1 | Apache-2.0 |
+| `@jsquash/resize` | 2.1.1 | Apache-2.0 |
+| `@jsquash/webp` | 1.5.0 | Apache-2.0 |
 | `ai` | 7.0.102 | Apache-2.0 |
 | `ajv` | 8.20.0 | MIT |
 | `zod` | 4.6.5 | MIT |

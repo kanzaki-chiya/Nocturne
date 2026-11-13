@@ -9,6 +9,7 @@ import type {
   HistoryEntry,
   ImageAttachment,
   ModelProtocol,
+  ProcessedImage,
 } from "../protocol/index.js";
 import {
   DEFAULT_PRUNE_LIMIT,
@@ -128,7 +129,8 @@ export function projectedTokens(
   events?: readonly DurableEvent[],
   tokenCache?: Map<string, number>,
 ): number {
-  const virtual = new Map<ModelMessage, number>();
+  const virtualGroups = new Map<ModelMessage, number[]>();
+  const imageGroups = new Map<ModelMessage, number[]>();
   const projected = historyToMessages(
     history,
     model.ref.provider,
@@ -137,13 +139,14 @@ export function projectedTokens(
       mode: data === undefined ? "estimate" : "project",
       supported: model.capabilities.imageInput,
       data,
-      virtual,
+      virtualGroups,
+      imageGroups,
       ...(data !== undefined ? { inCap: new Set(imageRefsInCap(history, events)) } : {}),
     },
     events,
   );
   projected.messages.push(...projected.deferred);
-  const cap = enforceImageCap(projected.messages, virtual);
+  const cap = enforceImageCap(projected.messages, virtualGroups, imageGroups);
   return (
     projected.messages.reduce(
       (total, message) =>
@@ -452,8 +455,10 @@ interface ImageProjectionOpts {
   supported: boolean;
   data?: ReadonlyMap<string, string> | undefined;
   missing?: ImageAttachment[] | undefined;
-  /** estimate 模式下每条消息"将发送"的引用数（参与 20 张上限与 token 估算） */
-  virtual?: Map<ModelMessage, number> | undefined;
+  /** estimate 模式下每条消息各原图对应将发送的张数分组（参与 20 张上限与 token 估算） */
+  virtualGroups?: Map<ModelMessage, number[]> | undefined;
+  /** project 模式下每条消息各原图对应实际发送的张数分组（按组整留整弃） */
+  imageGroups?: Map<ModelMessage, number[]> | undefined;
   /**
    * project 模式：落在最新 20 张之内的引用（对象身份，与 attachmentsToLoad
    * 同源）。不在其中的直接换上限占位——Loop 只加载这 20 张，更早的本来
@@ -462,11 +467,15 @@ interface ImageProjectionOpts {
   inCap?: ReadonlySet<ImageAttachment> | undefined;
 }
 
-/** 单条附件的解析结果：图片数据、占位/标记文本，或估算计数 */
+function expandedImageItems(att: ImageAttachment): readonly (ImageAttachment | ProcessedImage)[] {
+  return att.processed !== undefined && att.processed.length > 0 ? att.processed : [att];
+}
+
+/** 单条附件的解析结果：图片数据列表、占位/标记文本，或估算计数 */
 function resolveAttachment(
   att: ImageAttachment,
   opts: ImageProjectionOpts,
-): { image?: string; text?: string; virtual?: boolean } {
+): { images?: ModelImage[]; text?: string; virtualCount?: number } {
   if (opts.mode === "transcript") return { text: `[image: ${att.label ?? att.file}]` };
   if (!opts.supported) {
     const description = opts.descriptions?.get(att);
@@ -477,33 +486,44 @@ function resolveAttachment(
         : IMAGE_PLACEHOLDER_UNSUPPORTED,
     };
   }
-  if (opts.mode === "estimate") return { virtual: true };
+  const items = expandedImageItems(att);
+  if (opts.mode === "estimate") return { virtualCount: items.length };
   if (opts.inCap !== undefined && !opts.inCap.has(att)) return { text: IMAGE_PLACEHOLDER_LIMIT };
-  const data = opts.data?.get(att.sha256);
-  if (data === undefined) {
-    opts.missing?.push(att);
-    return { text: IMAGE_PLACEHOLDER_MISSING };
+  const resolved: ModelImage[] = [];
+  for (const item of items) {
+    const data = opts.data?.get(item.sha256);
+    if (data === undefined) {
+      opts.missing?.push(att);
+      return { text: IMAGE_PLACEHOLDER_MISSING };
+    }
+    resolved.push({ mimeType: item.mimeType, data });
   }
-  return { image: data };
+  return { images: resolved };
 }
 
 interface ResolvedAttachments {
   images: ModelImage[];
   /** 占位/标记文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content） */
   texts: string[];
-  virtual: number;
+  imageGroups: number[];
+  virtualGroups: number[];
 }
 
 function resolveAttachments(
   atts: readonly ImageAttachment[] | undefined,
   opts: ImageProjectionOpts,
 ): ResolvedAttachments {
-  const out: ResolvedAttachments = { images: [], texts: [], virtual: 0 };
+  const out: ResolvedAttachments = { images: [], texts: [], imageGroups: [], virtualGroups: [] };
   for (const att of atts ?? []) {
     const r = resolveAttachment(att, opts);
-    if (r.image !== undefined) out.images.push({ mimeType: att.mimeType, data: r.image });
-    else if (r.text !== undefined) out.texts.push(r.text);
-    else out.virtual += 1;
+    if (r.images !== undefined) {
+      out.images.push(...r.images);
+      out.imageGroups.push(r.images.length);
+    } else if (r.text !== undefined) {
+      out.texts.push(r.text);
+    } else if (r.virtualCount !== undefined) {
+      out.virtualGroups.push(r.virtualCount);
+    }
   }
   return out;
 }
@@ -514,6 +534,8 @@ function resolveAttachments(
  * 条目、跳过 L1 修剪覆盖的 tool 条目；open Turn 被摘要覆盖而重新注入的
  * user 条目排在最后。attachmentsToLoad 与 buildContext 的上限判定都用它，
  * 保证"加载了哪些"与"哪些以图片发出"一致。
+ * 有处理结果的图按其实际发出张数计入 20 张上限，同一张原图的各段要么全部保留、
+ * 要么全部丢弃。
  */
 export function imageRefsInCap(
   history: readonly HistoryEntry[],
@@ -538,37 +560,51 @@ export function imageRefsInCap(
       if (covered.attachments !== undefined) refs.push(...covered.attachments);
     }
   }
-  return refs.slice(-MAX_IMAGES_PER_REQUEST);
+  let remaining = MAX_IMAGES_PER_REQUEST;
+  const kept: ImageAttachment[] = [];
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i];
+    if (ref === undefined) continue;
+    const count = expandedImageItems(ref).length;
+    if (count > remaining) break;
+    remaining -= count;
+    kept.push(ref);
+  }
+  return kept.reverse();
 }
 
 /**
- * 按投影规则会作为图片进入请求的附件引用（最新 20 张，按 sha256 去重）。
- * Agent Loop 用它决定要从 AttachmentStore 读哪些字节。
+ * 按投影规则会作为图片进入请求的附件引用（最新 20 张，按 sha256 去重；
+ * 有处理结果时返回处理后的各段）。Agent Loop 用它决定要从 AttachmentStore 读哪些字节。
  */
 export function attachmentsToLoad(
   history: readonly HistoryEntry[],
   model: Pick<ModelInfo, "capabilities">,
   events?: readonly DurableEvent[],
-): ImageAttachment[] {
+): (ImageAttachment | ProcessedImage)[] {
   if (!model.capabilities.imageInput) return [];
   const seen = new Set<string>();
-  const out: ImageAttachment[] = [];
+  const out: (ImageAttachment | ProcessedImage)[] = [];
   for (const r of imageRefsInCap(history, events)) {
-    if (seen.has(r.sha256)) continue;
-    seen.add(r.sha256);
-    out.push(r);
+    for (const item of expandedImageItems(r)) {
+      if (seen.has(item.sha256)) continue;
+      seen.add(item.sha256);
+      out.push(item);
+    }
   }
   return out;
 }
 
 /**
- * 20 张上限后处理（ADR-0023）：从消息尾部往前保留最新 MAX_IMAGES_PER_REQUEST
- * 张图片，更早的从 images 中移除并按落位规则换上限占位。返回最终发出的图片数
- * 与新增占位文本的字符数（按所在消息角色细分）。估算模式的 virtual 计数同样受限（不产生占位）。
+ * 20 张上限后处理（ADR-0023、ADR-0090）：从消息尾部往前保留最新 MAX_IMAGES_PER_REQUEST
+ * 张图片，同一张原图（含多段）整组保留或整组丢弃；更早的从 images 中移除并按落位规则
+ * 换上限占位。返回最终发出的图片数与新增占位文本的字符数（按所在消息角色细分）。
+ * 估算模式的 virtual 计数同样受限（不产生占位）。
  */
 function enforceImageCap(
   messages: ModelMessage[],
-  virtual: Map<ModelMessage, number>,
+  virtualGroups: Map<ModelMessage, number[]>,
+  imageGroups: Map<ModelMessage, number[]>,
 ): { count: number; addedByRole: { user: number; tool: number } } {
   let remaining = MAX_IMAGES_PER_REQUEST;
   let count = 0;
@@ -577,44 +613,58 @@ function enforceImageCap(
     const m = messages[i];
     if (m === undefined || m.role === "assistant") continue;
     const real = m.images?.length ?? 0;
-    const virt = virtual.get(m) ?? 0;
-    const total = real + virt;
-    if (total === 0) continue;
-    if (total <= remaining) {
-      count += total;
-      remaining -= total;
+    const vGroups = virtualGroups.get(m);
+    if (real > 0 && m.images !== undefined) {
+      const groups = imageGroups.get(m) ?? Array.from({ length: real }, () => 1);
+      let keptImages = 0;
+      let droppedGroups = 0;
+      for (let g = groups.length - 1; g >= 0; g--) {
+        const groupSize = groups[g] ?? 1;
+        if (groupSize <= remaining) {
+          count += groupSize;
+          remaining -= groupSize;
+          keptImages += groupSize;
+        } else {
+          remaining = 0;
+          droppedGroups += 1;
+        }
+      }
+      if (droppedGroups > 0) {
+        const kept = keptImages > 0 ? m.images.slice(m.images.length - keptImages) : [];
+        if (m.role === "user") addedByRole.user += droppedGroups * IMAGE_PLACEHOLDER_LIMIT.length;
+        else addedByRole.tool += droppedGroups * IMAGE_PLACEHOLDER_LIMIT.length;
+        messages[i] =
+          m.role === "user"
+            ? {
+                ...m,
+                content: [
+                  ...m.content,
+                  ...Array.from({ length: droppedGroups }, () => ({
+                    type: "text" as const,
+                    text: IMAGE_PLACEHOLDER_LIMIT,
+                  })),
+                ],
+                images: kept.length > 0 ? kept : undefined,
+              }
+            : {
+                ...m,
+                content: m.content + "\n".concat(IMAGE_PLACEHOLDER_LIMIT).repeat(droppedGroups),
+                images: kept.length > 0 ? kept : undefined,
+              };
+      }
       continue;
     }
-    count += remaining;
-    let drop = total - remaining;
-    remaining = 0;
-    if (real > 0 && m.images !== undefined) {
-      const dropped = Math.min(drop, real);
-      drop -= dropped;
-      const kept = m.images.slice(dropped);
-      // 占位文本计入所在消息的一类（history 细分，ADR-0046 §5）
-      if (m.role === "user") addedByRole.user += dropped * IMAGE_PLACEHOLDER_LIMIT.length;
-      else addedByRole.tool += dropped * IMAGE_PLACEHOLDER_LIMIT.length;
-      messages[i] =
-        m.role === "user"
-          ? {
-              ...m,
-              content: [
-                ...m.content,
-                ...Array.from({ length: dropped }, () => ({
-                  type: "text" as const,
-                  text: IMAGE_PLACEHOLDER_LIMIT,
-                })),
-              ],
-              images: kept.length > 0 ? kept : undefined,
-            }
-          : {
-              ...m,
-              content: m.content + "\n".concat(IMAGE_PLACEHOLDER_LIMIT).repeat(dropped),
-              images: kept.length > 0 ? kept : undefined,
-            };
+    if (vGroups !== undefined && vGroups.length > 0) {
+      for (let g = vGroups.length - 1; g >= 0; g--) {
+        const groupSize = vGroups[g] ?? 1;
+        if (groupSize <= remaining) {
+          count += groupSize;
+          remaining -= groupSize;
+        } else {
+          remaining = 0;
+        }
+      }
     }
-    if (drop > 0 && virt > 0) virtual.set(m, virt - drop);
   }
   return { count, addedByRole };
 }
@@ -721,7 +771,8 @@ function historyToMessages(
           content: blocks,
           ...(atts.images.length > 0 ? { images: atts.images } : {}),
         };
-        if (atts.virtual > 0) imgOpts.virtual?.set(msg, atts.virtual);
+        if (atts.imageGroups.length > 0) imgOpts.imageGroups?.set(msg, atts.imageGroups);
+        if (atts.virtualGroups.length > 0) imgOpts.virtualGroups?.set(msg, atts.virtualGroups);
         messages.push(msg);
         break;
       }
@@ -777,7 +828,7 @@ function historyToMessages(
         // L1 修剪覆盖的工具结果：占位说明原样，附件随正文省略（不加图片占位）
         let content = pruned ? prunedPlaceholder(entry) : entry.modelContent;
         const atts = pruned
-          ? { images: [], texts: [], virtual: 0 }
+          ? { images: [], texts: [], imageGroups: [], virtualGroups: [] }
           : resolveAttachments(entry.attachments, imgOpts);
         for (const text of atts.texts) content += `\n${text}`;
         // ADR-0063 + ADR-0028：第 warnAt 次连续相同结果的循环说明与清单久未更新提醒
@@ -796,7 +847,8 @@ function historyToMessages(
           isError: entry.status !== "ok",
           ...(atts.images.length > 0 ? { images: atts.images } : {}),
         };
-        if (atts.virtual > 0) imgOpts.virtual?.set(msg, atts.virtual);
+        if (atts.imageGroups.length > 0) imgOpts.imageGroups?.set(msg, atts.imageGroups);
+        if (atts.virtualGroups.length > 0) imgOpts.virtualGroups?.set(msg, atts.virtualGroups);
         messages.push(msg);
         if (unsettled.delete(entry.callId) && unsettled.size === 0) {
           messages.push(...deferred.splice(0));
@@ -1016,15 +1068,17 @@ function anchoredEstimate(input: BuildContextInput): number | undefined {
     )
   )
     return undefined;
-  const virtual = new Map<ModelMessage, number>();
+  const virtualGroups = new Map<ModelMessage, number[]>();
+  const imageGroups = new Map<ModelMessage, number[]>();
   const projection = historyToMessages(tail, ref.provider, input.model.protocol, {
     mode: input.attachmentData === undefined ? "estimate" : "project",
     supported: input.model.capabilities.imageInput,
     data: input.attachmentData,
-    virtual,
+    virtualGroups,
+    imageGroups,
   });
   projection.messages.push(...projection.deferred, ...(input.pendingMessages ?? []));
-  const cap = enforceImageCap(projection.messages, virtual);
+  const cap = enforceImageCap(projection.messages, virtualGroups, imageGroups);
   const textTokens = projection.messages.reduce(
     (total, message) =>
       total +
@@ -1126,7 +1180,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       ? { inCap: new Set(imageRefsInCap(input.history, input.events)) }
       : {}),
     missing: [],
-    virtual: new Map(),
+    virtualGroups: new Map(),
+    imageGroups: new Map(),
   };
   const {
     messages,
@@ -1178,7 +1233,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
         content: blocks,
         ...(atts.images.length > 0 ? { images: atts.images } : {}),
       };
-      if (atts.virtual > 0) imageOpts.virtual?.set(msg, atts.virtual);
+      if (atts.imageGroups.length > 0) imageOpts.imageGroups?.set(msg, atts.imageGroups);
+      if (atts.virtualGroups.length > 0) imageOpts.virtualGroups?.set(msg, atts.virtualGroups);
       // 紧跟摘要（清单注入随后插在两者之间）、排在保留区之前：它在时间上先于保留区里的
       // 一切进展；放在末尾会让模型把最新一条 user 消息当成新请求而从头重做
       messages.splice(
@@ -1206,7 +1262,11 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   }
   // ADR-0023：单次请求最多 20 张图片；从最新往前保留，更早的换上限占位。
   // 估算模式（virtual）同样受限。图片字节/base64 长度不计入字符估算。
-  const imageCap = enforceImageCap(messages, imageOpts.virtual ?? new Map<ModelMessage, number>());
+  const imageCap = enforceImageCap(
+    messages,
+    imageOpts.virtualGroups ?? new Map<ModelMessage, number[]>(),
+    imageOpts.imageGroups ?? new Map<ModelMessage, number[]>(),
+  );
   byChars.user += imageCap.addedByRole.user;
   byChars.tool += imageCap.addedByRole.tool;
   // ADR-0028 2026-10-11 修订：只追加、不回改。投影历史里已含当前清单文本

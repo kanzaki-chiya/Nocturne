@@ -1,9 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { IMAGE_WASM_FILES } from "../lib/image-wasm.mjs";
 import { packNpm } from "../pack-npm.mjs";
 
 /** 最小 tar 读取（tgz 只有普通文件；返回 name → 文本） */
@@ -36,6 +37,11 @@ describe("pack-npm", () => {
   it("打出 nctrn-<version>.tgz，内容与模板一致", () => {
     const bundle = join(dir, "nctrn.mjs");
     writeFileSync(bundle, "#!/usr/bin/env node\nconsole.log('fake');\n");
+    writeFileSync(join(dir, "image-worker.mjs"), "console.log('worker');\n");
+    mkdirSync(join(dir, "wasm"), { recursive: true });
+    for (const [wasmFile] of IMAGE_WASM_FILES) {
+      writeFileSync(join(dir, "wasm", wasmFile), "wasm");
+    }
     const out = join(dir, "out");
 
     const tgz = packNpm({ bundleFile: bundle, out });
@@ -43,7 +49,15 @@ describe("pack-npm", () => {
     expect(tgz).toMatch(/nctrn-\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\.tgz$/);
 
     const files = untar(tgz);
-    const entries = ["package.json", "README.md", "nctrn.mjs", "LICENSE", "THIRD-PARTY-NOTICES.md"];
+    const entries = [
+      "package.json",
+      "README.md",
+      "nctrn.mjs",
+      "image-worker.mjs",
+      ...IMAGE_WASM_FILES.map(([f]) => `wasm/${f}`),
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.md",
+    ];
     for (const name of entries) {
       expect(files.has(`package/${name}`), name).toBe(true);
     }

@@ -143,7 +143,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 | MCP 结果 | 映射 |
 |---|---|
 | `content[].type = "text"` | 文本按序拼接进 `modelContent` |
-| `content[].type = "image"` | 通用、受预算地解码并映射到 `ToolResult.attachments`（origin=mcp，不按工具名特殊处理）：单张原始文件不超过 5MB、每边不超过 8000px、每次最多4张且合计8MB；验证 MIME/文件头与 base64，拒绝畸形/过量数据。`modelContent` 保留简短占位（含 mime、尺寸、字节数），`output.content` 只保留元数据。后续沿现有附件通道落盘、进模型能力分支与客户端展示 |
+| `content[].type = "image"` | 通用、受预算地解码并映射到 `ToolResult.attachments`（origin=mcp，不按工具名特殊处理）：单张原始文件不超过 5MB、每边不超过 8000px、每次最多4张且合计8MB；验证 MIME/文件头与 base64，拒绝畸形/过量数据。为保持电脑操控与浏览器截图的像素坐标对齐，MCP 图片仍按原规则处理，不做 [ADR-0090](../decisions/ADR-0090-image-downscale-tiles.md) 的自动缩小与切段。`modelContent` 保留简短占位（含 mime、尺寸、字节数），`output.content` 只保留元数据。后续沿现有附件通道落盘、进模型能力分支与客户端展示 |
 | `content[].type = "resource"` | 带 `text` 的按文本拼接（前缀标注 `[resource <uri>]`）；带 `blob` 的记占位 `[resource <uri> (<mimeType>, <N> bytes)]` |
 | `content[].type = "audio"` | 占位 `[audio <mimeType>, <N> bytes]` |
 | `structuredContent` | 进 `ToolResult.output.structured`（受 `output` 独立上限约束）；SDK 按工具 `outputSchema` 校验，校验器选项与 SDK 默认一致，非标准 format 只记诊断日志（`mcp.event` 的 warning），不打印到终端 |

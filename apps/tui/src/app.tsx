@@ -39,6 +39,7 @@ import {
 import type { spawn } from "node:child_process";
 
 import {
+  IMAGE_MAX_BYTES,
   replaySessionView,
   type RewindMode,
   type RewindTarget,
@@ -2315,7 +2316,7 @@ function SessionApp({
     const found = await droppedImage(text, imagePlatform);
     if (found.kind === "none") return false;
     if (found.kind === "too_large") {
-      pushLine("! 图片超过 5 MB / 8000 px 限制");
+      pushLine("! 图片超过 50 MB / 64,000,000 像素限制");
       return false;
     }
     const model = imageModel();
@@ -2347,8 +2348,8 @@ function SessionApp({
           }
           for (const path of paths) {
             const stat = await imagePlatform.fs.stat(path).catch(() => undefined);
-            if (stat?.type !== "file" || stat.size > 20 * 1024 * 1024) {
-              pushLine(`! 文件不可读取或超过 20 MB：${path}`);
+            if (stat?.type !== "file" || stat.size > IMAGE_MAX_BYTES) {
+              pushLine(`! 文件不可读取或超过 50 MB：${path}`);
               continue;
             }
             const data = await imagePlatform.fs.readFile(path).catch(() => undefined);
@@ -2357,6 +2358,14 @@ function SessionApp({
               continue;
             }
             const checked = checkImage(data);
+            if (checked.kind !== "ok" && stat.size > 20 * 1024 * 1024) {
+              pushLine(
+                checked.kind === "too_large"
+                  ? `! 图片超过 50 MB / 64,000,000 像素限制：${path}`
+                  : `! 文件不可读取或超过 20 MB：${path}`,
+              );
+              continue;
+            }
             const token =
               checked.kind === "ok" && imageModel().supported
                 ? images.add({
@@ -2390,7 +2399,7 @@ function SessionApp({
             }
             const checked = checkImage(result.data);
             if (checked.kind !== "ok") {
-              pushLine("! 图片超过 5 MB / 8000 px 限制");
+              pushLine("! 图片超过 50 MB / 64,000,000 像素限制");
               return;
             }
             const current = imageModel();
@@ -2404,7 +2413,7 @@ function SessionApp({
             // base64 输出超过读取缓冲（约 6 MB 原图）时 execFile 报 maxBuffer
             pushLine(
               /maxBuffer/i.test(errText(e))
-                ? "! 图片超过 5 MB / 8000 px 限制"
+                ? "! 图片超过 50 MB / 64,000,000 像素限制"
                 : `! 读取剪贴板失败：${errText(e)}`,
             );
           });

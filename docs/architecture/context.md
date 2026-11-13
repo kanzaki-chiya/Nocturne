@@ -49,14 +49,14 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 
 用户的 `@文件` 引用在 Core `submit` 时读取并固定为消息快照：原文之后追加 `<file>` 或 `<directory>` 文本块，图片使用既有 `attachments` 通道；读取与截断规则见 [tools.md](tools.md#用户文件引用)。`fileRefs` 只供客户端显示摘要，Builder 不据此读取文件或区别处理内容，文件块照常参与上下文预算与压缩，恢复时使用日志中的内容。
 
-图片附件（ADR-0023）：历史条目上的 `attachments` 只是引用（events.md 第 4 节）。每个 Step 构建前，Agent Loop 先调 `attachmentsToLoad(history, model)`——与构建共用同一套 6.4 压缩边界——得到本次会作为图片发出的引用集（模型 `imageInput` 为 false 时为空；跳过摘要/修剪覆盖的条目；含进行中 Turn 被摘要覆盖而重注入的 `message.user`；按 `sha256` 去重、只取最新 20 个引用），再经会话的 `AttachmentStore` 读字节、转 base64 放进 `attachmentData` 传给 Builder。当前模型不能看图且 vision 可用时，Loop 在构建前逐个描述同一投影窗口内最新 20 个图片附件（用户与工具结果均适用），复用 Provider 图片适配器；固定指令附同条用户文字或工具名和路径，最大输出 1000 token，不带工具定义或 reasoningEffort。成功或失败均写 `attachment.described`，每个附件只尝试一次；失败警告后继续，Esc 同时取消正在进行的请求。Builder 只读这些事件，不做 I/O。投影规则：
+图片附件（[ADR-0023](../decisions/ADR-0023-image-input.md)、[ADR-0090](../decisions/ADR-0090-image-downscale-tiles.md)）：历史条目上的 `attachments` 只是引用（events.md 第 4 节）。若 `ImageAttachment.processed` 非空，投影与估算按顺序展开为这组处理结果，否则发送原图。每个 Step 构建前，Agent Loop 先调 `attachmentsToLoad(history, model)`——与构建共用同一套 6.4 压缩边界——得到本次实际会作为图片发出的文件引用集（模型 `imageInput` 为 false 时为空；跳过摘要/修剪覆盖的条目；含进行中 Turn 被摘要覆盖而重注入的 `message.user`；按最新 20 张实际输出图片整组截断——同一原图的分段要么全部保留要么全部丢弃——再按 `sha256` 去重），再经会话的 `AttachmentStore` 读字节、转 base64 放进 `attachmentData` 传给 Builder。当前模型不能看图且 vision 可用时，Loop 在构建前逐个描述同一投影窗口内最新 20 张上限下的图片附件（用户与工具结果均适用，有 `processed` 时优先发处理结果），复用 Provider 图片适配器；固定指令附同条用户文字或工具名和路径，最大输出 1000 token，不带工具定义或 reasoningEffort。成功或失败均写 `attachment.described`，每个附件只尝试一次；失败警告后继续，Esc 同时取消正在进行的请求。Builder 只读这些事件，不做 I/O。投影规则：
 
-- `imageInput` 为 true 且 `attachmentData` 命中该 sha256 → 消息带 `images`（`ModelImage`，provider-api.md 第 3 节）；user 消息的图片走消息级 `images` 字段，tool 消息同理。
+- `imageInput` 为 true 且 `attachmentData` 命中该附件全部待发项（原图或全部 `processed` 分段）的 sha256 → 消息按顺序带上 `images`（`ModelImage`，provider-api.md 第 3 节）；user 消息的图片走消息级 `images` 字段，tool 消息同理。
 - `imageInput` 为 false → 有 `attachment.described` 描述的附件投影为 `[图片 #n 描述（由 <模型> 生成）]\n<描述>`；没有描述或描述失败时保留占位文字 `[image omitted: current model does not support image input]`。
-- 数据缺失 → `[image unavailable: attachment file missing]`，引用记入 `missingAttachments`；Builder 不记诊断，由 Agent Loop 逐条记 `context.attachment_missing`。
+- 任一段或原图数据缺失 → `[image unavailable: attachment file missing]`，整组丢弃不发半截，引用记入 `missingAttachments`；Builder 不记诊断，由 Agent Loop 逐条记 `context.attachment_missing`。
 - 占位文字的落位：user 消息追加一个 text 块；tool 消息在 `content` 末尾每个占位前加 `\n` 追加。L1 修剪覆盖的 tool 条目保持原占位说明，不附加任何图片占位或图片。
-- `attachmentData` 缺省（`undefined`）是**估算模式**——`describeContext`（`/context` 报告）走这条路：支持看图的模型按将发送的引用数估算，不产生 `images` 也不算缺失。
-- 全部消息组装完（含 `pendingMessages`）做一次上限后处理：从最新往前保留 20 张图片，更早的从 `images` 移除并按同一落位规则换成 `[image omitted: exceeds the per-request limit of 20 images]`。
+- `attachmentData` 缺省（`undefined`）是**估算模式**——`describeContext`（`/context` 报告）走这条路：支持看图的模型按实际将发出的图片张数（含分段）和每张 1600 token 估算，不产生 `images` 也不算缺失。
+- 全部消息组装完（含 `pendingMessages`）做一次上限后处理：从最新往前按整组保留最多 20 张输出图片（同一原图的全部处理结果要么全留要么全舍），更早的从 `images` 移除并按同一落位规则换成 `[image omitted: exceeds the per-request limit of 20 images]`。
 
 ## 3. 组装顺序（稳定的放前面）
 
