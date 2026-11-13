@@ -128,7 +128,7 @@ function trackView(session: RuntimeSession): () => SessionView {
 
 function requestRole(req: ModelRequest): string {
   const sys = req.system.map((b) => b.text).join("\n");
-  const match = /persistent swarm member `@([a-z0-9-]+)`/.exec(sys);
+  const match = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys);
   if (match?.[1]) return `member:${match[1]}`;
   return "coordinator";
 }
@@ -149,7 +149,7 @@ describe("Swarm 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
           (m) =>
             m.role === "tool" &&
             typeof m.content === "string" &&
-            m.content.includes("Initialized swarm"),
+            m.content.includes("Initialized ensemble"),
         );
         if (!hasInit) {
           return [
@@ -366,7 +366,7 @@ describe("Swarm 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
         if (role === "coordinator") {
           const allText = JSON.stringify(req.messages);
           const hasInited = req.messages.some(
-            (m) => m.role === "tool" && m.content.includes("Initialized swarm"),
+            (m) => m.role === "tool" && m.content.includes("Initialized ensemble"),
           );
           if (!hasInited) {
             return [

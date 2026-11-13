@@ -27,7 +27,7 @@ const stopText = (text: string): FakeScript => [
 
 function role(req: ModelRequest): string {
   const sys = req.system.map((b) => b.text).join("\n");
-  const match = /persistent swarm member `@([a-z0-9-]+)`/.exec(sys);
+  const match = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys);
   return match?.[1] !== undefined ? `member:${match[1]}` : "coordinator";
 }
 

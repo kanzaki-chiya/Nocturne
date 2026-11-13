@@ -64,9 +64,9 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     task: true,
   },
   {
-    name: "/swarm",
-    summary: "Swarm 协作",
-    cli: "<任务> 建立常驻成员与留言板协作；/swarm end 结束",
+    name: "/ensemble",
+    summary: "合奏协作",
+    cli: "<任务> 建立常驻成员与留言板协作；/ensemble end 结束",
     task: true,
   },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },

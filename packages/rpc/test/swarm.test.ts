@@ -26,7 +26,7 @@ describe("Swarm RPC 方法与成员子会话通道", { timeout: 20_000 }, () => 
       roleHandler: () => textScript("Title"),
       handler: (req) => {
         const sys = req.system.map((s) => s.text).join("\n");
-        const memberMatch = /persistent swarm member `@([a-z0-9-]+)`/.exec(sys);
+        const memberMatch = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys);
         if (memberMatch?.[1] === "writer") {
           if (!req.messages.some((m) => m.role === "tool")) {
             return [

@@ -10,6 +10,7 @@ import {
   compactedNoticeText,
   todoItemsFromCompletion,
   todoSnapshotLines,
+  workModeCommandName,
 } from "@nocturne/core/protocol";
 import type {
   QuestionAnswer,
@@ -164,7 +165,9 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
           ? [aux(`  技能 ${ev.payload.skill.name} · 已附加正文 ${ev.payload.skill.body.length} 字`)]
           : []),
         // ADR-0076：Runtime 写入的执行方式消息（如目标核对）不是用户敲的，打一行命令名
-        ...(ev.payload.workMode && ev.payload.steer ? [aux(`/${ev.payload.workMode.name}`)] : []),
+        ...(ev.payload.workMode && ev.payload.steer
+          ? [aux(`/${workModeCommandName(ev.payload.workMode.name)}`)]
+          : []),
       ];
     case "message.assistant.delta": {
       const p = ev.payload;

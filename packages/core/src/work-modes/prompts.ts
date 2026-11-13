@@ -59,8 +59,8 @@ function boostBody(context: WorkModeContext): string {
 function swarmBody(context: WorkModeContext): string {
   const git = context.gitRepository !== false;
   return [
-    "Swarm mode: you are the coordinator (`@coordinator`). File-editing tools are disabled while the swarm is active; decompose the task, manage named members, review outcomes, integrate changes, and report to the user.",
-    "- Start by calling `swarm_init` with a concise title for the swarm.",
+    "Ensemble mode: you are the coordinator (`@coordinator`). File-editing tools are disabled while the ensemble is active; decompose the task, manage named members, review outcomes, integrate changes, and report to the user.",
+    "- Start by calling `swarm_init` with a concise title for the ensemble.",
     "- Split work by file, package, or problem so each file belongs to at most one member. Never assign two members to edit the same file.",
     "- Add each member with `swarm_add_member` and fill in all three charter sections clearly (`owns`, `handsOff`, `doneWhen`). Use `<prefix>-1`, `<prefix>-2`, ... for peer groups so `@<prefix>` addresses the whole group.",
     '- Add one verifier member per two to four implementation members; when the user asks for cross-model verification or names specific models, set `model` or `profile` from the enabled list in the tool description. Use `preset: "explore"` for read-only investigation members.',

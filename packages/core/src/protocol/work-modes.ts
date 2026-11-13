@@ -257,7 +257,7 @@ const USAGE: Record<WorkModeName, string> = {
   goal: "用法：/goal 目标",
   plan: "用法：/plan 任务",
   boost: "用法：/boost 任务",
-  swarm: "用法：/swarm 任务",
+  swarm: "用法：/ensemble 任务",
 };
 
 /** 子命令：整行恰好是命令名（+ 一个单词）时才算，其余文字都当任务 */
@@ -268,12 +268,20 @@ const ACTIONS: Partial<Record<WorkModeName, Record<string, WorkModeAction>>> = {
 };
 
 /**
+ * 执行方式对外显示的命令名：内部 `"swarm"` 保留兼容，对外显示 `/ensemble`（ADR-0089 修订）。
+ */
+export function workModeCommandName(name: string): string {
+  return name === "swarm" ? "ensemble" : name;
+}
+
+/**
  * 解析 `/<模式> …`；不是执行方式命令时返回 undefined。命令名与子命令不区分
- * 大小写，任务可以包含换行。
+ * 大小写，任务可以包含换行；`/ensemble` 与兼容别名 `/swarm` 均映射为 `swarm`。
  */
 export function parseWorkModeSlash(line: string): WorkModeSlash | undefined {
   const match = /^\s*\/(\S+)(?:\s+([\s\S]*))?$/.exec(line);
-  const name = match?.[1]?.toLowerCase();
+  const rawName = match?.[1]?.toLowerCase();
+  const name = rawName === "ensemble" ? "swarm" : rawName;
   if (!isWorkModeName(name)) return undefined;
   const text = (match?.[2] ?? "").trim();
   const action = ACTIONS[name]?.[text.toLowerCase()];
@@ -285,14 +293,15 @@ export function parseWorkModeSlash(line: string): WorkModeSlash | undefined {
 /** 用户消息的显示文本：执行方式消息在正文前加命令名（核对说明只有命令名） */
 export function workModeDisplayText(text: string, workMode: { name: string } | undefined): string {
   if (workMode === undefined) return text;
-  return text === "" ? `/${workMode.name}` : `/${workMode.name} ${text}`;
+  const cmd = workModeCommandName(workMode.name);
+  return text === "" ? `/${cmd}` : `/${cmd} ${text}`;
 }
 
-/** 客户端补全用的命令表（名称、一行摘要） */
-export const WORK_MODE_COMMANDS: readonly { name: `/${WorkModeName}`; summary: string }[] = [
+/** 客户端补全用的命令表（名称、一行摘要；不列兼容别名 `/swarm`） */
+export const WORK_MODE_COMMANDS: readonly { name: string; summary: string }[] = [
   { name: "/grill-me", summary: "追问需求" },
   { name: "/goal", summary: "目标模式" },
   { name: "/plan", summary: "计划模式" },
   { name: "/boost", summary: "多代理攻坚" },
-  { name: "/swarm", summary: "Swarm 协作" },
+  { name: "/ensemble", summary: "合奏协作" },
 ];

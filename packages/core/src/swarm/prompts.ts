@@ -53,8 +53,8 @@ export function buildSwarmMemberPrompt(input: SwarmMemberPromptInput): string {
     : [];
 
   return [
-    "You are Nocturne, a coding agent working as a persistent member of a multi-agent Swarm.",
-    `You are persistent swarm member \`@${input.name}\` in swarm "${input.swarmTitle}".`,
+    "You are Nocturne, a coding agent working as a persistent member of a multi-agent Ensemble.",
+    `You are persistent ensemble member \`@${input.name}\` in ensemble "${input.swarmTitle}".`,
     "- Read relevant code before modifying anything, keep changes focused on your owned scope, verify your changes when feasible, never expose secrets, and do not commit/push manually unless instructed.",
     "",
     "# Your Charter",
@@ -65,7 +65,7 @@ export function buildSwarmMemberPrompt(input: SwarmMemberPromptInput): string {
       ? ["- Tool preset: `explore` (read-only investigation; do not attempt file edits)."]
       : []),
     "",
-    "# All Swarm Members & Public Charters",
+    "# All Ensemble Members & Public Charters",
     "- `@coordinator`: Decomposes work, manages members, integrates changes, and reports to the user.",
     ...(peerLines.length > 0 ? peerLines : ["- (No active members yet)"]),
     "",

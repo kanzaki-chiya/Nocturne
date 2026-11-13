@@ -122,13 +122,13 @@ export function createSwarmCoordinatorTools(
   const initTool: ToolDefinition<{ title: string }> = {
     name: "swarm_init",
     description:
-      "Initialize the swarm message board for this session with a short descriptive title. Call this once before adding members.",
+      "Initialize the ensemble message board for this session with a short descriptive title. Call this once before adding members.",
     inputSchema: {
       type: "object",
       properties: {
         title: {
           type: "string",
-          description: "Short title describing the swarm objective.",
+          description: "Short title describing the ensemble objective.",
         },
       },
       required: ["title"],
@@ -153,10 +153,10 @@ export function createSwarmCoordinatorTools(
   }> = {
     name: "swarm_add_member",
     description: [
-      "Add a persistent named member to the active swarm and publish its public charter on the message board.",
-      "- `name` must match `[a-z0-9-]+` and be unique in this swarm (`coordinator`, `all`, `user`, `runtime` are reserved). Use `<group>-1`, `<group>-2`, ... for peer groups addressable via `@<group>`.",
+      "Add a persistent named member to the active ensemble and publish its public charter on the message board.",
+      "- `name` must match `[a-z0-9-]+` and be unique in this ensemble (`coordinator`, `all`, `user`, `runtime` are reserved). Use `<group>-1`, `<group>-2`, ... for peer groups addressable via `@<group>`.",
       "- `charter` requires all three non-empty sections: `owns`, `handsOff`, and `doneWhen`.",
-      "- `model` and `profile` are mutually exclusive; omit both to use the coordinator's current model. External ACP agents cannot be swarm members.",
+      "- `model` and `profile` are mutually exclusive; omit both to use the coordinator's current model. External ACP agents cannot be ensemble members.",
       '- `preset`: `"explore"` for read-only investigation, `"general"` (default) for implementation or test-running verification.',
       "- `isolated`: `false` (default) shares the main workspace; `true` creates an isolated git worktree.",
       "",
@@ -204,7 +204,7 @@ export function createSwarmCoordinatorTools(
         },
         agent: {
           type: "string",
-          description: "Unsupported: external ACP agents cannot be swarm members.",
+          description: "Unsupported: external ACP agents cannot be ensemble members.",
         },
       },
       required: ["name", "charter"],
@@ -228,7 +228,7 @@ export function createSwarmCoordinatorTools(
   }> = {
     name: "swarm_change_model",
     description: [
-      "Switch an existing swarm member's model or profile while preserving its conversation history. If the member was paused due to a previous turn error, switching its model resumes it.",
+      "Switch an existing ensemble member's model or profile while preserving its conversation history. If the member was paused due to a previous turn error, switching its model resumes it.",
       "`model` and `profile` are mutually exclusive; specify exactly one.",
       "",
       selectionAppendix,
@@ -253,7 +253,7 @@ export function createSwarmCoordinatorTools(
         },
         agent: {
           type: "string",
-          description: "Unsupported: external ACP agents cannot be swarm members.",
+          description: "Unsupported: external ACP agents cannot be ensemble members.",
         },
       },
       required: ["name"],
@@ -269,7 +269,7 @@ export function createSwarmCoordinatorTools(
   const removeMemberTool: ToolDefinition<{ name: string; reason?: string }> = {
     name: "swarm_remove_member",
     description:
-      "Remove a member from the swarm and stop its session. Removing an isolated-worktree member deletes its worktree, so it is rejected if the member has unapplied commits—call `apply_subagent_changes` first.",
+      "Remove a member from the ensemble and stop its session. Removing an isolated-worktree member deletes its worktree, so it is rejected if the member has unapplied commits—call `apply_subagent_changes` first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -289,7 +289,7 @@ export function createSwarmCoordinatorTools(
   const endTool: ToolDefinition<{ summary?: string }> = {
     name: "swarm_end",
     description:
-      "End the active swarm, stop all members, clean up merged worktrees, retain any unmerged worktrees/branches, and restore normal coordinator editing tools.",
+      "End the active ensemble, stop all members, clean up merged worktrees, retain any unmerged worktrees/branches, and restore normal coordinator editing tools.",
     inputSchema: {
       type: "object",
       properties: {
@@ -315,7 +315,7 @@ export function createSwarmPostTool(
   return {
     name: "swarm_post",
     description:
-      "Post a message to the shared swarm message board. Mention `@name`, `@group`, `@coordinator`, or `@all` in `text` to wake those recipients.",
+      "Post a message to the shared ensemble message board. Mention `@name`, `@group`, `@coordinator`, or `@all` in `text` to wake those recipients.",
     inputSchema: {
       type: "object",
       properties: {
@@ -341,13 +341,13 @@ export function createSwarmCheckoutTool(
   return {
     name: "swarm_checkout",
     description:
-      "Clean this isolated worktree and check out another isolated swarm member's latest commit at detached HEAD for verification review.",
+      "Clean this isolated worktree and check out another isolated ensemble member's latest commit at detached HEAD for verification review.",
     inputSchema: {
       type: "object",
       properties: {
         member: {
           type: "string",
-          description: "Name of the isolated swarm member whose latest commit to inspect.",
+          description: "Name of the isolated ensemble member whose latest commit to inspect.",
         },
       },
       required: ["member"],

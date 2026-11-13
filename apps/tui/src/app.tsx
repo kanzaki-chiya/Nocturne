@@ -3058,14 +3058,14 @@ function SessionApp({
         } else if (work.action === "plan-cancel") {
           void session.cancelPlan().catch(fail);
         } else if (work.action === "swarm-board") {
-          // 留言板只在全屏提供；本会话没有 Swarm 或 --inline 时给出用法
-          if (coordSwarm === undefined || !fullscreen) pushLine("用法：/swarm 任务");
+          // 留言板只在全屏提供；本会话没有合奏或 --inline 时给出用法
+          if (coordSwarm === undefined || !fullscreen) pushLine("用法：/ensemble 任务");
           else {
             setSel(undefined);
             setBoardOpen(true);
           }
         } else if (work.action === "swarm-end") {
-          if (coordSwarm === undefined) pushLine("用法：/swarm 任务");
+          if (coordSwarm === undefined) pushLine("用法：/ensemble 任务");
           else
             void coordinator.endSwarm().then(({ unmerged }) => {
               for (const item of unmerged) pushLine(`@${item.name} ${item.branch}`);

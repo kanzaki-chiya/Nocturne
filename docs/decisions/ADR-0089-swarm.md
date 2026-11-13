@@ -166,3 +166,19 @@
 - **Swarm 成员不再登记为「运行中的子代理」**：成员的状态与展示全部归属 `SessionView.swarm` 及成员会话标签，不再调用 `subagentRegistry.register`，`listSubagents`、`observeSubagent`、`readSubagentAttachment` 与活动态 `listSubagentWorktrees` 均排除 Swarm 成员（不论处于 `working`、`waiting`、`paused`、已移除、已结束或重启后均不出现在任何「子代理」列表中）。
   - 原因：原实现把常驻成员按默认后台子代理登记进 `subagentRegistry`（且写死了 `profile: "default"` 与 `"Swarm member"`），导致成员完成工作进入 `waiting` 后仍被客户端子代理概览/侧栏显示为「运行中的后台子代理」并持续计时、出现取消按钮。
   - 原先依赖登记表承担的保护已改由协调者与会话目录直接承接：非隔离成员所在工作区的分支切换保护由 `branchBusy` 检查 `SwarmController.hasWorkspaceMembers()` 维持；父会话与成员的授权共享与 `sessionGrantRoot` 查找继续通过 `subagentRegistry.trackSession`（`liveSession`）沿 `session.created.parent` 解析；活动隔离成员的工作树删除保护由 `deleteSubagentWorktree` 检查活动 Swarm 成员集合（仍报 `子代理仍在运行`）维持；`session.open` 成员会话标签、权限确认与关闭/重启收尾不受影响。
+
+## 修订（2026-11-14）：对外改名「合奏」（Ensemble）与界面一轮
+
+- **对外名称**：用户可见界面（桌面、手机、TUI 面板标签、页标题、命令菜单、工具行、错误提示等）与给模型看的说明文字统一改称「合奏」（英文 `Ensemble`）；原因：避免与借鉴对象同名，同时呼应 Nocturne 作为夜曲的名称——合奏指各声部分工合成一首。
+- **命令与别名**：斜杠命令改为 `/ensemble <任务>`、`/ensemble board`、`/ensemble end`，用法提示为「用法：/ensemble 任务」；历史兼容保留 `/swarm` 作为不显示的别名（正常解析，但不出现在命令菜单、补全或用户文档中）。`BUILTIN_SLASH_COMMANDS` 同时包含 `"ensemble"` 与 `"swarm"`。
+- **内部标识保留不变**（保证已落盘日志、prefs 与 RPC 协议向后兼容）：
+
+| 类别 | 内部标识（不变） | 对外显示 / 提示（新名称） |
+|---|---|---|
+| 执行方式名 | `WORK_MODE_NAMES` / `workMode.name = "swarm"` | `/ensemble`（`workModeDisplayText` / `workModeCommandName`） |
+| 持久 / 临时事件 | `swarm.created` / `member_added` / `posted` / `member_model_changed` / `member_removed` / `ended` / `member_updated` | 合奏 |
+| 编排与协作工具 | `swarm_init` / `swarm_add_member` / `swarm_post` / `swarm_change_model` / `swarm_remove_member` / `swarm_end` / `swarm_checkout` | `swarm_init` 标签「合奏」，工具说明称 `Ensemble` / `ensemble` |
+| 派生视图与 RPC 方法 | `SessionView.swarm`、`postToSwarm` / `removeSwarmMember` / `endSwarm` | 合奏留言板、成员页 |
+| 文件、类型与 prefs | `SwarmView`、`SwarmPane`、`panelSessions` 中的 `swarm` 标记 | — |
+- **入口迁移与留言板调整**：桌面端与手机端对话流不再渲染入口行与无单位「成员数 · 帖子数」，改在桌面会话概览浮层与手机侧边栏展示「合奏」分组；留言板新增作者头像列（`swarmAuthorColor` 按加入顺序轮转 `--a-cat1..5`）、帖子头剔除作者自身并区分正文样式，桌面/手机/TUI 发帖框支持 `@` 补全。详情见 [desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md) 与 [ADR-0084 §2 修订](ADR-0084-phone-side-panel.md)。
+

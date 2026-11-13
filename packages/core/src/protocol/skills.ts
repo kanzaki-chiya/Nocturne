@@ -155,11 +155,12 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "provider",
   "exit",
   "quit",
-  // ADR-0076 执行方式
+  // ADR-0076 / ADR-0089 执行方式
   "grill-me",
   "goal",
   "plan",
   "boost",
+  "ensemble",
   "swarm",
 ];
 

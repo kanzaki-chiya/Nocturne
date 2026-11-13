@@ -24,7 +24,7 @@ export const TOOL_META: Record<string, string> = {
   ask_user: "提问",
   schedule: "定时任务",
   mcp_search: "搜索 MCP 工具",
-  swarm_init: "Swarm",
+  swarm_init: "合奏",
   swarm_add_member: "添加",
   swarm_post: "发帖",
   swarm_change_model: "换模型",

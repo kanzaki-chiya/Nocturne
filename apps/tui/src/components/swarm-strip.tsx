@@ -47,7 +47,7 @@ export function SwarmStrip({
   const hidden = members.length - shown.length;
 
   const mark = env.ascii ? "*" : "◆";
-  const title = truncateLine(swarm.title, Math.max(4, Math.floor(inner / 3)), g.ellipsis);
+  const title = truncateLine(swarm.title || "合奏", Math.max(4, Math.floor(inner / 3)), g.ellipsis);
   const count = `${swarm.posts.length} 条`;
   const last = swarm.posts.at(-1);
   const head = `${mark} ${title}`;

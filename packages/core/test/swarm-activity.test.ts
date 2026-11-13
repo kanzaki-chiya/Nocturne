@@ -4,10 +4,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  WORK_MODE_COMMANDS,
   applySwarmMemberUpdated,
   parseWorkModeSlash,
   reduceSwarmDurable,
   summarizeSwarmToolCall,
+  workModeDisplayText,
   type DurableEvent,
   type DurablePayloadMap,
   type DurableType,
@@ -202,6 +204,21 @@ describe("Swarm 结构化活动摘要", () => {
 
 describe("/swarm 子命令解析", () => {
   it("整行恰好是 /swarm board、/swarm end 才算子命令", () => {
+    expect(parseWorkModeSlash("/ensemble board")).toEqual({
+      kind: "action",
+      action: "swarm-board",
+    });
+    expect(parseWorkModeSlash(" /Ensemble END ")).toEqual({ kind: "action", action: "swarm-end" });
+    expect(parseWorkModeSlash("/ensemble 做个登录页")).toEqual({
+      kind: "submit",
+      workMode: "swarm",
+      text: "做个登录页",
+    });
+    expect(parseWorkModeSlash("/ensemble")).toEqual({
+      kind: "usage",
+      name: "swarm",
+      hint: "用法：/ensemble 任务",
+    });
     expect(parseWorkModeSlash("/swarm board")).toEqual({ kind: "action", action: "swarm-board" });
     expect(parseWorkModeSlash(" /Swarm END ")).toEqual({ kind: "action", action: "swarm-end" });
     expect(parseWorkModeSlash("/swarm board 改一下")).toEqual({
@@ -212,7 +229,11 @@ describe("/swarm 子命令解析", () => {
     expect(parseWorkModeSlash("/swarm")).toEqual({
       kind: "usage",
       name: "swarm",
-      hint: "用法：/swarm 任务",
+      hint: "用法：/ensemble 任务",
     });
+    expect(workModeDisplayText("做个任务", { name: "swarm" })).toBe("/ensemble 做个任务");
+    expect(WORK_MODE_COMMANDS.map((c) => c.name)).toContain("/ensemble");
+    expect(WORK_MODE_COMMANDS.map((c) => c.name)).not.toContain("/swarm");
+    expect(WORK_MODE_COMMANDS.find((c) => c.name === "/ensemble")?.summary).toBe("合奏协作");
   });
 });

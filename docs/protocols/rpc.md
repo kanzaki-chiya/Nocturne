@@ -76,9 +76,9 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `resumeGoal` | → `null`；继续目标，空闲时开新 Turn，**请求挂到该 Turn 结束**；没有目标报 `invalid_command` |
 | `approvePlan` | → `null`；批准计划（[ADR-0076](../decisions/ADR-0076-work-modes.md) §5），恢复进入前的预设（原本只读时改用 `default`）并开新 Turn，**请求挂到该 Turn 结束**；忙时报 `session_busy`，不在计划模式报 `invalid_command` |
 | `cancelPlan` | → `null`；放弃计划，恢复预设且不开 Turn；不在计划模式报 `invalid_command` |
-| `postToSwarm` | `{ text: string }` → `{ number: number, recipients: string[] }`；在活动 Swarm 留言板发帖（[ADR-0089](../decisions/ADR-0089-swarm.md) §10），解析正文 `@` 提及，无提及默认 `@coordinator`；本机与远程均可用 |
+| `postToSwarm` | `{ text: string }` → `{ number: number, recipients: string[] }`；在活动合奏（内部标识 `swarm`）留言板发帖（[ADR-0089](../decisions/ADR-0089-swarm.md) §10），解析正文 `@` 提及，无提及默认 `@coordinator`；本机与远程均可用 |
 | `removeSwarmMember` | `{ name: string }` → `null`；移除成员，独立工作树有未并回提交时报 `invalid_command`；本机与远程均可用 |
-| `endSwarm` | → `{ unmerged: SwarmUnmergedWorktree[] }`；结束活动 Swarm，停止成员、清理已并回工作树并返回保留的未并回分支列表；本机与远程均可用 |
+| `endSwarm` | → `{ unmerged: SwarmUnmergedWorktree[] }`；结束活动合奏，停止成员、清理已并回工作树并返回保留的未并回分支列表；本机与远程均可用 |
 | `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |
@@ -101,7 +101,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
-`submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-swarm.md)，含 `"swarm"`），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动 Swarm）在 Core，报 `invalid_command`。Swarm 存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上协调者留言板，成员被移除或 Swarm 结束后拒绝新的提交）。
+`submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-swarm.md)，含 `"swarm"`），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动合奏）在 Core，报 `invalid_command`。合奏存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上协调者留言板，成员被移除或合奏结束后拒绝新的提交）。
 
 `readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` / `files` 或 `tool.completed.attachments` / `files`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 

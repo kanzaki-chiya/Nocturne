@@ -98,9 +98,15 @@ describe("执行方式命令（ADR-0076）", () => {
     expect(completeSlash("/goa", ctx).map((item) => item.insert)).toEqual(["/goal "]);
     expect(completeSlash("/pla", ctx).map((item) => item.insert)).toEqual(["/plan "]);
     expect(completeSlash("/boo", ctx).map((item) => item.insert)).toEqual(["/boost "]);
+    expect(completeSlash("/ens", ctx).map((item) => item.insert)).toEqual(["/ensemble "]);
+    expect(completeSlash("/swa", ctx)).toEqual([]);
     expect(cliHelpText()).toContain("/goal");
     expect(cliHelpText()).toContain("/plan");
     expect(cliHelpText()).toContain("/boost");
+    expect(cliHelpText()).toContain("/ensemble");
+    expect(cliHelpText()).not.toContain("/swarm");
+    expect(helpLines().join("\n")).toContain("/ensemble");
+    expect(helpLines().join("\n")).not.toContain("/swarm");
   });
 });
 

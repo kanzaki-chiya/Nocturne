@@ -317,9 +317,9 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 | `resumeGoal()` | 同上；目标已是 active 时无操作 | `session.config_changed`（`goal.status = "active"`）；会话空闲时随即开新 Turn（`message.user.workMode` 为 `name = "goal"`、`source = "runtime"`），Turn 或压缩进行中只改状态 | ADR-0076 §4.5 |
 | `approvePlan()` | 子会话返回 `invalid_command`；不在计划模式返回 `invalid_command`；会话非空闲返回 `session_busy` | `session.config_changed`（`permissionPreset` 取 `restorePreset`，原本只读时改用 `default`；`plan = null`），随即开新 Turn（用户正文「批准」、`workMode` 为 `name = "plan"`、`source = "runtime"`）并等它结束 | ADR-0076 §5 |
 | `cancelPlan()` | 子会话或不在计划模式返回 `invalid_command` | `session.config_changed`（`permissionPreset = restorePreset`、`plan = null`），不开 Turn | ADR-0076 §5 |
-| `postToSwarm({ text })` | 无活动 Swarm 或文本空白或提及已移除成员返回 `invalid_command` | `swarm.posted`（`fromKind: "user"`；未 `@` 任何人时默认 `@coordinator`），向提及目标投递 `swarm` 待发输入 | ADR-0089 §10 |
-| `removeSwarmMember({ name })` | 无活动 Swarm、成员不存在/已移除或独立工作树有未并回提交返回 `invalid_command` | 中断并关闭成员子会话、清理工作树，写 `swarm.member_removed` | ADR-0089 §4、§10 |
-| `endSwarm()` | 无活动 Swarm 返回 `invalid_command` | 停止全部成员、清理已并回工作树、保留未并回分支，写 `swarm.ended(reason: "user")` 并恢复协调者工具集 | ADR-0089 §10、§11 |
+| `postToSwarm({ text })` | 无活动合奏（内部标识 `swarm`）或文本空白或提及已移除成员返回 `invalid_command` | `swarm.posted`（`fromKind: "user"`；未 `@` 任何人时默认 `@coordinator`），向提及目标投递 `swarm` 待发输入 | ADR-0089 §10 |
+| `removeSwarmMember({ name })` | 无活动合奏、成员不存在/已移除或独立工作树有未并回提交返回 `invalid_command` | 中断并关闭成员子会话、清理工作树，写 `swarm.member_removed` | ADR-0089 §4、§10 |
+| `endSwarm()` | 无活动合奏返回 `invalid_command` | 停止全部成员、清理已并回工作树、保留未并回分支，写 `swarm.ended(reason: "user")` 并恢复协调者工具集 | ADR-0089 §10、§11 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |

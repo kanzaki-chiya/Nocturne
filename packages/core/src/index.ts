@@ -249,6 +249,7 @@ import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
   effectiveEvents,
   isWorkModeName,
+  workModeCommandName,
   workModeOrigins,
   type GoalStatus,
   type PlanConfig,
@@ -3053,7 +3054,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     const assertSubmittableSession = () => {
       if (meta.parent?.callId.startsWith("swarm:") && !swarmMember?.isActive()) {
-        throw new RuntimeCommandError("invalid_command", "Swarm 成员已移除或 Swarm 已结束");
+        throw new RuntimeCommandError("invalid_command", "合奏成员已移除或合奏已结束");
       }
     };
     const assertInputQueueAllowed = () => {
@@ -3177,12 +3178,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             meta.schedule !== undefined ||
             unattendedOption
           ) {
-            throw new RuntimeCommandError("invalid_command", "当前环境不支持 Swarm");
+            throw new RuntimeCommandError("invalid_command", "当前环境不支持合奏");
           }
           if (swarmController?.isActive()) {
             throw new RuntimeCommandError(
               "invalid_command",
-              "当前会话已有进行中的 Swarm，请先结束当前 Swarm",
+              "当前会话已有进行中的合奏，请先结束当前合奏",
             );
           }
         }
@@ -3191,7 +3192,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           .join("")
           .trim();
         if (task === "")
-          throw new RuntimeCommandError("invalid_command", `/${input.workMode} 需要写明任务`);
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `/${workModeCommandName(input.workMode)} 需要写明任务`,
+          );
       }
       if (input.delegate !== undefined && !delegateSchema.safeParse(input.delegate).success)
         throw new RuntimeCommandError(
@@ -4548,7 +4552,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         assertUsable();
         assertMainSession();
         if (swarmController === undefined) {
-          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的 Swarm");
+          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的合奏");
         }
         return await swarmController.postFromUser(input);
       },
@@ -4556,7 +4560,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         assertUsable();
         assertMainSession();
         if (swarmController === undefined) {
-          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的 Swarm");
+          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的合奏");
         }
         const name = typeof input === "string" ? input : input.name;
         await swarmController.removeMemberFromUser(name);
@@ -4565,7 +4569,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         assertUsable();
         assertMainSession();
         if (swarmController === undefined) {
-          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的 Swarm");
+          throw new RuntimeCommandError("invalid_command", "当前会话没有进行中的合奏");
         }
         return await swarmController.endFromUser();
       },
@@ -4939,7 +4943,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             return Promise.resolve();
           }
           if (!busy() && !compacting()) {
-            const resumePrompt = `[Swarm] Your model was switched to ${modelKey} after the previous turn failed. Continue your task from where you left off.`;
+            const resumePrompt = `[Ensemble] Your model was switched to ${modelKey} after the previous turn failed. Continue your task from where you left off.`;
             pendingInputStore.add("swarm", {
               content: [{ type: "text", text: resumePrompt }],
               appended: [],

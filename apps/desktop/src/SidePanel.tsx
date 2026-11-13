@@ -219,7 +219,7 @@ function tabTitle(
   if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
   if (tab.kind === "swarm") {
-    const name = swarmTitle !== undefined && swarmTitle !== "" ? swarmTitle : "Swarm";
+    const name = swarmTitle !== undefined && swarmTitle !== "" ? swarmTitle : "合奏";
     return { name, title: name };
   }
   if (tab.kind === "swarm_member") {

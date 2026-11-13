@@ -60,10 +60,10 @@ export type ParsedSlash =
   | { kind: "work"; workMode: WorkModeName; text: string }
   | { kind: "agent"; delegate: { agent: string; task: string } }
   /**
-   * `/goal`、`/plan` 与 `/swarm` 的无任务子命令（ADR-0076 §7、ADR-0089 §10）
+   * `/goal`、`/plan` 与 `/ensemble` 的无任务子命令（ADR-0076 §7、ADR-0089 §10）
    * 也走 command，由 onSlash 再解析
    */
-  | { kind: "command"; name: SlashCommandName | "/goal" | "/plan" | "/swarm"; raw: string }
+  | { kind: "command"; name: SlashCommandName | "/goal" | "/plan" | "/ensemble"; raw: string }
   | { kind: "redirect"; name: string; hint: string }
   | { kind: "unknown"; name: string; hint: string };
 
@@ -91,16 +91,16 @@ export function parseSlash(
     return { kind: "redirect", name, hint: typeof hint === "string" ? hint : hint[context] };
   const work = parseWorkModeSlash(line);
   if (work?.kind === "action") {
-    // 草稿页还没有会话：Swarm 子命令（board / end）与无 Swarm 会话一样只显示用法提示
+    // 草稿页还没有会话：合奏子命令（board / end）与无合奏会话一样只显示用法提示
     if (context === "draft" && work.action.startsWith("swarm"))
-      return { kind: "unknown", name, hint: "用法：/swarm 任务" };
+      return { kind: "unknown", name, hint: "用法：/ensemble 任务" };
     return {
       kind: "command",
       name: work.action.startsWith("goal")
         ? "/goal"
         : work.action.startsWith("plan")
           ? "/plan"
-          : "/swarm",
+          : "/ensemble",
       raw: line,
     };
   }

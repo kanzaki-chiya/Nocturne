@@ -669,9 +669,9 @@ export async function runRepl(
             prompt();
             return;
           }
-          // CLI 没有留言板界面：/swarm board 只打印用法
+          // CLI 没有留言板界面：/ensemble board 只打印用法
           if (work.action === "swarm-board") {
-            out.line("stdout", "用法：/swarm 任务");
+            out.line("stdout", "用法：/ensemble 任务");
             prompt();
             return;
           }

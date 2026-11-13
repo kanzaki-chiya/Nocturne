@@ -302,7 +302,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     if (input.agent !== undefined && input.agent.trim() !== "") {
       return {
         ok: false,
-        message: `External ACP agent "${input.agent}" cannot be a swarm member. Only built-in subagent sessions are supported.`,
+        message: `External ACP agent "${input.agent}" cannot be an ensemble member. Only built-in subagent sessions are supported.`,
       };
     }
     const rawModel = input.model?.trim() ? input.model.trim() : undefined;
@@ -325,13 +325,13 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     if (rawModel !== undefined && externalNames.has(rawModel)) {
       return {
         ok: false,
-        message: `"${rawModel}" is an external ACP agent and cannot be a swarm member. ${availableOptionsSummary()}`,
+        message: `"${rawModel}" is an external ACP agent and cannot be an ensemble member. ${availableOptionsSummary()}`,
       };
     }
     if (rawProfile !== undefined && externalNames.has(rawProfile)) {
       return {
         ok: false,
-        message: `"${rawProfile}" is an external ACP agent and cannot be a swarm member. ${availableOptionsSummary()}`,
+        message: `"${rawProfile}" is an external ACP agent and cannot be an ensemble member. ${availableOptionsSummary()}`,
       };
     }
 
@@ -538,7 +538,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       return {
         ok: false,
         code: "invalid_input",
-        message: `Swarm member "${authorName}" does not exist or has been removed.`,
+        message: `Ensemble member "${authorName}" does not exist or has been removed.`,
       };
     }
     const targetRecord = await ensureWorktreeRecord(target);
@@ -767,7 +767,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     quietReminderSent = true;
     const text =
-      "@coordinator All swarm members are waiting or paused and there are no pending deliveries. Review the board and member statuses, dispatch next steps, or call `swarm_end` if the work is complete.";
+      "@coordinator All ensemble members are waiting or paused and there are no pending deliveries. Review the board and member statuses, dispatch next steps, or call `swarm_end` if the work is complete.";
     const number = nextPostNumber++;
     await deps.emitDurable("swarm.posted", {
       number,
@@ -802,7 +802,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       return {
         ok: false,
         code: "invalid_input",
-        message: "No active swarm in this session. Call `swarm_init` first.",
+        message: "No active ensemble in this session. Call `swarm_init` first.",
       };
     }
     const trimmed = options.text.trim();
@@ -1114,14 +1114,14 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         return {
           ok: false,
           code: "invalid_input",
-          message: "Swarm title must not be empty.",
+          message: "Ensemble title must not be empty.",
         };
       }
       if (active) {
         return {
           ok: false,
           code: "invalid_input",
-          message: "A swarm is already active in this session.",
+          message: "An ensemble is already active in this session.",
         };
       }
       title = trimmed;
@@ -1135,7 +1135,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       deps.syncCoordinatorTools();
       return {
         ok: true,
-        text: `Initialized swarm "${trimmed}". Add members with \`swarm_add_member\` and dispatch tasks with \`swarm_post\`.`,
+        text: `Initialized ensemble "${trimmed}". Add members with \`swarm_add_member\` and dispatch tasks with \`swarm_post\`.`,
         output: { title: trimmed },
       };
     },
@@ -1154,7 +1154,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         return {
           ok: false,
           code: "invalid_input",
-          message: "Swarm is not initialized yet. Call `swarm_init` with a title first.",
+          message: "Ensemble is not initialized yet. Call `swarm_init` with a title first.",
         };
       }
       const nameError = validateSwarmMemberName(input.name, members.keys());
@@ -1298,7 +1298,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         return {
           ok: false,
           code: "invalid_input",
-          message: "No active swarm in this session.",
+          message: "No active ensemble in this session.",
         };
       }
       const member = members.get(input.name);
@@ -1367,7 +1367,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         return {
           ok: false,
           code: "invalid_input",
-          message: "No active swarm in this session.",
+          message: "No active ensemble in this session.",
         };
       }
       const res = await removeMemberCore(input.name, input.reason);
@@ -1392,7 +1392,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         return {
           ok: false,
           code: "invalid_input",
-          message: "No active swarm in this session.",
+          message: "No active ensemble in this session.",
         };
       }
       const unmerged = await terminateSwarm("coordinator", input.summary);
@@ -1402,7 +1402,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           : " All merged member worktrees were cleaned up.";
       return {
         ok: true,
-        text: `Swarm "${title}" ended.${unmergedSummary}`,
+        text: `Ensemble "${title}" ended.${unmergedSummary}`,
         output: { unmerged },
       };
     },
@@ -1600,11 +1600,11 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     async postFromUser(input: { text: string }) {
       if (!active) {
-        throw deps.commandError("invalid_command", "当前会话没有进行中的 Swarm");
+        throw deps.commandError("invalid_command", "当前会话没有进行中的合奏");
       }
       const trimmed = input.text.trim();
       if (trimmed === "") {
-        throw deps.commandError("invalid_command", "Swarm 帖子内容不能为空");
+        throw deps.commandError("invalid_command", "合奏帖子内容不能为空");
       }
       const res = await publishAndDeliverPost({
         text: trimmed,
@@ -1623,7 +1623,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     async removeMemberFromUser(name: string) {
       if (!active) {
-        throw deps.commandError("invalid_command", "当前会话没有进行中的 Swarm");
+        throw deps.commandError("invalid_command", "当前会话没有进行中的合奏");
       }
       const trimmed = name.trim();
       if (trimmed === "") {
@@ -1637,7 +1637,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     async endFromUser() {
       if (!active) {
-        throw deps.commandError("invalid_command", "当前会话没有进行中的 Swarm");
+        throw deps.commandError("invalid_command", "当前会话没有进行中的合奏");
       }
       const unmerged = await terminateSwarm("user");
       return { unmerged };
