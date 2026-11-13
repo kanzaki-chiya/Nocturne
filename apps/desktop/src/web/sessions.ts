@@ -16,7 +16,20 @@ import {
   type SessionOpened,
   type SessionViewTracker,
 } from "@nocturne/rpc/client";
+import type { ComposerSubmit } from "../Composer";
 import { conversationStatus } from "../conversations";
+import {
+  draftTextOf,
+  dropOutgoing,
+  emptyOutgoing,
+  nextLocalId,
+  pushOutgoing,
+  reconcileOutgoing,
+  retargetOutgoing,
+  userSeqs,
+  type LocalOutgoing,
+  type OutgoingBook,
+} from "../outgoing";
 import { syncShellSnapshot } from "../shell-snapshot";
 import { forkDraftText } from "../fork-session";
 import type { SessionSummary, SessionStatus } from "../session-tree";
@@ -39,6 +52,10 @@ export interface PhoneSession {
   changeDiffs: Map<string, Promise<TurnChangeDiff>>;
   /** 待发输入快照（ADR-0070）：运行中插话与排队，临时状态不写日志 */
   pendingInputs: PendingInputsSnapshot;
+  /** 点发送后、正式条目到达前的本地消息 */
+  outgoing: OutgoingBook;
+  /** 本地发送尚未被 Core 接受 */
+  busy: boolean;
   /** Swarm 成员子会话句柄（经 `session.open` 打开，退出成员页即 `session.close` 释放，不中断成员） */
   member?: boolean;
 }
@@ -48,12 +65,53 @@ export interface PhoneCreateOptions {
   permissionPreset?: string;
 }
 export function phoneStatus(entry: PhoneSession): SessionStatus {
-  return conversationStatus({ view: entry.view, busy: false });
+  return conversationStatus({ view: entry.view, busy: entry.busy });
 }
+
+export function trackPhoneOutgoing(
+  entry: PhoneSession,
+  input: ComposerSubmit,
+  place: "turn" | "pending",
+  mode: "steer" | "queue",
+): LocalOutgoing {
+  const local: LocalOutgoing = {
+    id: nextLocalId(),
+    place,
+    mode,
+    draftText: draftTextOf(input),
+    input,
+    sentAt: new Date().toISOString(),
+    excludeUserSeqs: userSeqs(entry.view.entries),
+    excludePendingIds: entry.pendingInputs.items.map((item) => item.id),
+  };
+  entry.outgoing = reconcileOutgoing(
+    pushOutgoing(entry.outgoing, local),
+    entry.view.entries,
+    entry.pendingInputs,
+  );
+  return local;
+}
+
+export function failPhoneOutgoing(entry: PhoneSession, id: string): void {
+  entry.outgoing = dropOutgoing(entry.outgoing, id);
+}
+
+export function retargetPhoneOutgoing(entry: PhoneSession, id: string): void {
+  entry.outgoing = reconcileOutgoing(
+    retargetOutgoing(entry.outgoing, id, "turn"),
+    entry.view.entries,
+    entry.pendingInputs,
+  );
+}
+
+function syncPhoneOutgoing(entry: PhoneSession): void {
+  entry.outgoing = reconcileOutgoing(entry.outgoing, entry.view.entries, entry.pendingInputs);
+}
+
 /**
- * 发送一条消息：返回时 Turn 已被后台接受（视图出现新 Turn 或新用户条目，或 submit
- * 已结束），与桌面 Conversations.send 的接受判定相同；接受前被拒绝则抛出，
- * 输入框保留草稿。Turn 本身在后台继续，结束时调用 finished。
+ * 发送一条消息：返回时 Turn 已被后台接受。接受前被拒绝则抛出。
+ * 监听在注册后再查一次，避免更新落在检查和注册之间时永远等不到。
+ * 接受之后 Turn 自己的失败交给 finished，不算拒收。
  */
 export async function submitAccepted(
   entry: PhoneSession,
@@ -64,15 +122,31 @@ export async function submitAccepted(
   const isAccepted = () =>
     entry.view.currentTurn !== undefined || entry.view.entries.length > baseline;
   let listener: (() => void) | undefined;
+  let settled = false;
   const accepted = new Promise<void>((resolve) => {
-    listener = () => {
-      if (isAccepted()) resolve();
+    const finish = () => {
+      if (settled || !isAccepted()) return;
+      settled = true;
+      resolve();
     };
-    entry.listeners.add(listener);
+    listener = finish;
+    entry.listeners.add(finish);
+    finish();
   });
   const submission = entry.session.submit(input);
   try {
-    await Promise.race([accepted, submission]);
+    await new Promise<void>((resolve, reject) => {
+      void accepted.then(resolve);
+      submission.then(
+        () => {
+          resolve();
+        },
+        (error: unknown) => {
+          if (isAccepted() || settled) resolve();
+          else reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
   } finally {
     if (listener) entry.listeners.delete(listener);
   }
@@ -121,6 +195,7 @@ export class PhoneSessions {
       phoneStatus(entry) !== "idle" ||
       // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
       entry.pendingInputs.items.length > 0 ||
+      entry.outgoing.items.some((item) => item.place === "pending") ||
       // ADR-0089：活动 Swarm 的协调者会话切走时不能关，否则整个 Swarm 会被收掉
       entry.view.swarm?.status === "active" ||
       this.opened.get(id) !== entry
@@ -343,6 +418,8 @@ export class PhoneSessions {
       turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
       changeDiffs: new Map(),
       pendingInputs: { items: [], paused: false },
+      outgoing: emptyOutgoing(),
+      busy: false,
       ...(member ? { member: true } : {}),
     };
     this.opened.set(session.id, entry);
@@ -358,6 +435,7 @@ export class PhoneSessions {
           pendingRevision += 1;
           entry.pendingInputs = event.payload;
         }
+        syncPhoneOutgoing(entry);
         const at = Date.parse(event.time);
         const live = subscribed || !("seq" in event) || (!Number.isNaN(at) && at >= subscribeStart);
         if (event.type === "turn.started" && !Number.isNaN(at)) this.turnStarts.set(session.id, at);
@@ -398,6 +476,7 @@ export class PhoneSessions {
         if (entry.dead || pendingRevision !== requestedRevision) return;
         if (JSON.stringify(entry.pendingInputs) === JSON.stringify(snapshot)) return;
         entry.pendingInputs = snapshot;
+        syncPhoneOutgoing(entry);
         for (const listener of entry.listeners) listener();
         this.changed();
       })

@@ -93,9 +93,26 @@ export interface PhoneComposerProps {
   getVisionHint?: (() => Promise<string | undefined>) | undefined;
   /** 测试注入：图片处理 */
   prepareImage?: (file: File) => Promise<PhoneImage>;
+  /** 挂载时放回的草稿（新会话被拒） */
+  initialDraft?: string | undefined;
+  initialAttachments?: ComposerSubmit["attachments"] | undefined;
+  initialError?: string | undefined;
+  onInitialUsed?: (() => void) | undefined;
 }
 
 type PopoverKind = "attach" | "preset" | "model" | "effort" | "output";
+
+function phoneAttachment(attachment: ComposerSubmit["attachments"][number]): PhoneAttachment {
+  return {
+    name: attachment.label,
+    data: attachment.data,
+    mimeType: attachment.mimeType,
+    source: attachment.source ?? "upload",
+    url: URL.createObjectURL(
+      new Blob([attachment.data as BlobPart], { type: attachment.mimeType }),
+    ),
+  };
+}
 
 interface PhoneAttachment {
   name: string;
@@ -127,11 +144,16 @@ export function PhoneComposer({
   fill,
   getVisionHint,
   prepareImage: _prepareImage = preparePhoneImage,
+  initialDraft,
+  initialAttachments,
+  initialError,
+  onInitialUsed,
 }: PhoneComposerProps) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft ?? "");
+  const draftRef = useRef(initialDraft ?? "");
   const [open, setOpen] = useState<PopoverKind | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string }>();
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<string | undefined>(initialError);
   const [hint, setHint] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -139,7 +161,9 @@ export function PhoneComposer({
   const card = useRef<HTMLDivElement>(null);
   const triggers = useRef<Partial<Record<PopoverKind, HTMLButtonElement | null>>>({});
   const mounted = useRef(true);
-  const [attachments, setAttachments] = useState<PhoneAttachment[]>([]);
+  const [attachments, setAttachments] = useState<PhoneAttachment[]>(() =>
+    (initialAttachments ?? []).map(phoneAttachment),
+  );
   const attachmentsRef = useRef<PhoneAttachment[]>([]);
   attachmentsRef.current = attachments;
   const [processing, setProcessing] = useState(0);
@@ -161,6 +185,9 @@ export function PhoneComposer({
     },
     [],
   );
+  useEffect(() => {
+    onInitialUsed?.();
+  }, [onInitialUsed]);
 
   // 首张图片加入时问一次视觉能力（模型不支持图片时提示）
   useEffect(() => {
@@ -229,7 +256,10 @@ export function PhoneComposer({
   );
   const redirect = parsed?.kind === "redirect" ? phoneSlashHint(parsed) : undefined;
 
+  const revision = useRef(0);
   const update = (text: string, nextCaret = text.length) => {
+    revision.current += 1;
+    draftRef.current = text;
     setDraft(text);
     setCaret(nextCaret);
     setDismissed(false);
@@ -324,7 +354,7 @@ export function PhoneComposer({
   };
 
   const submit = async () => {
-    const text = draft;
+    const text = draftRef.current;
     if (disabled !== undefined || submitting || processing > 0) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     if (tooLarge) return;
@@ -346,24 +376,50 @@ export function PhoneComposer({
         if (mounted.current) update("");
         return;
       }
+      const task = slash?.kind === "work" ? slash.text : text;
+      const snapshot = attachmentsRef.current.slice();
       const payload = {
-        text: slash?.kind === "work" ? slash.text : text,
+        text: task,
+        ...(task !== text ? { draftText: text } : {}),
         ...(slash?.kind === "work" ? { workMode: slash.workMode } : {}),
         ...(slash?.kind === "skill" ? { skill: slash.invocation } : {}),
         ...(slash?.kind === "agent" ? { delegate: slash.delegate } : {}),
-        attachments: attachmentsRef.current.map((attachment) => ({
+        attachments: snapshot.map((attachment) => ({
           data: attachment.data,
           mimeType: attachment.mimeType,
           label: attachment.name,
           source: attachment.source,
         })),
       };
-      const accepted = running ? await onSubmit(payload, "queue") : await onSubmit(payload);
-      if (accepted && mounted.current) {
-        update("");
-        for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
-        setAttachments([]);
+      update("");
+      attachmentsRef.current = [];
+      setAttachments([]);
+      const mark = revision.current;
+      setSubmitting(false);
+      const dropSnapshot = () => {
+        for (const attachment of snapshot) URL.revokeObjectURL(attachment.url);
+      };
+      const restore = () => {
+        if (!mounted.current || revision.current !== mark || attachmentsRef.current.length > 0) {
+          dropSnapshot();
+          return;
+        }
+        attachmentsRef.current = snapshot;
+        setAttachments(snapshot);
+        update(text);
+      };
+      try {
+        const accepted = running ? await onSubmit(payload, "queue") : await onSubmit(payload);
+        if (!accepted) {
+          restore();
+          return;
+        }
+        dropSnapshot();
+      } catch (reason) {
+        restore();
+        if (mounted.current) setError(errorText(reason));
       }
+      return;
     } catch (reason) {
       if (mounted.current) setError(errorText(reason));
     } finally {

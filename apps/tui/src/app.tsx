@@ -73,6 +73,7 @@ import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { PendingInputsPanel, pendingPanelRows } from "./components/pending-inputs.js";
+import { localPendingItems, localUserEntry, reconcileLocals, type TuiLocal } from "./outgoing.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import {
@@ -931,6 +932,17 @@ function SessionApp({
   const [editingPending, setEditingPending] = useState<string | undefined>(undefined);
   const pendingInputsRef = useRef(pendingInputs);
   pendingInputsRef.current = pendingInputs;
+  const [locals, setLocals] = useState<TuiLocal[]>([]);
+  const shownLocals = useMemo(
+    () => reconcileLocals(locals, view.entries, pendingInputs),
+    [locals, view.entries, pendingInputs],
+  );
+  useEffect(() => {
+    setLocals((list) => {
+      const next = reconcileLocals(list, view.entries, pendingInputs);
+      return next.length === list.length ? list : next;
+    });
+  }, [view.entries, pendingInputs]);
   const pendingIndexRef = useRef(0);
   const editingPendingRef = useRef<string | undefined>(undefined);
   /** 早于 pushLine 定义的效果里要用它提示原因 */
@@ -2953,6 +2965,50 @@ function SessionApp({
         pushLine("! 附件超过数量或 20 MB 单文件限制");
         return;
       }
+      const holdLocal = (
+        place: "turn" | "pending",
+        sentMode: "steer" | "queue",
+        sentText: string,
+        workMode?: TuiLocal["workMode"],
+      ) => {
+        const savedImages = images.in(text).map((image) => ({ ...image }));
+        const savedFiles = files.in(text).map((file) => ({ ...file }));
+        const id = `tui-${Date.now().toString(36)}-${savedImages.length}-${savedFiles.length}`;
+        const item: TuiLocal = {
+          id,
+          place,
+          mode: sentMode,
+          text: sentText,
+          workMode,
+          images: savedImages,
+          files: savedFiles,
+          sentAt: new Date().toISOString(),
+          excludeUserSeqs: view.entries.flatMap((entry) =>
+            entry.kind === "user" &&
+            entry.subagent === undefined &&
+            entry.backgroundShell === undefined &&
+            entry.swarm === undefined
+              ? [entry.seq]
+              : [],
+          ),
+          excludePendingIds: pendingInputsRef.current.items.map((row) => row.id),
+        };
+        setLocals((list) => [...list, item]);
+        const fail = (error: unknown) => {
+          setLocals((list) => list.filter((row) => row.id !== id));
+          pushLine(`! ${modelErrorText(error)}`);
+          if (inputRef.current !== "") return;
+          let next = text;
+          for (const image of savedImages) {
+            next = next.replace(/\[Image #\d+\]/, images.add(image));
+          }
+          for (const file of savedFiles) {
+            next = next.replace(/\[File #\d+ [^\]\r\n]*\]/, files.add(file));
+          }
+          updateInput(next, next.length);
+        };
+        return { id, fail };
+      };
       const skills = session.describeSkills().skills;
       const skill = parseSkillSlash(expanded, skills);
       const catalogReady = externalAgentCatalog?.session === session;
@@ -3020,8 +3076,9 @@ function SessionApp({
         return;
       }
       if (work?.kind === "submit") {
-        if (!busy && !pendingInputsRef.current.paused && submitting.current) return;
         const attachments = allAttachments;
+        const queued = busy || pendingInputsRef.current.paused || submitting.current;
+        const held = holdLocal(queued ? "pending" : "turn", "queue", work.text, work.workMode);
         clearInput();
         images.clear();
         files.clear();
@@ -3031,19 +3088,21 @@ function SessionApp({
           workMode: work.workMode,
           ...(attachments.length > 0 ? { attachments } : {}),
         };
-        if (busy || pendingInputsRef.current.paused) {
-          void session.enqueueInput("queue", input).catch((e: unknown) => {
-            pushLine(`! ${modelErrorText(e)}`);
-          });
+        if (queued) {
+          void session.enqueueInput("queue", input).then((result) => {
+            if (!result.queued) {
+              setLocals((list) =>
+                list.map((row) => (row.id === held.id ? { ...row, place: "turn" } : row)),
+              );
+            }
+          }, held.fail);
           return;
         }
         submitting.current = true;
         setSubmitPending(true);
         void session
           .submit(input)
-          .catch((e: unknown) => {
-            pushLine(`! ${modelErrorText(e)}`);
-          })
+          .catch(held.fail)
           .finally(() => {
             submitting.current = false;
             setSubmitPending(false);
@@ -3138,8 +3197,9 @@ function SessionApp({
       }
       // ADR-0070：运行中 Enter 插话、Tab 排队——插话在安全点并入当前 Turn，
       // 排队在 done 之后开新 Turn。斜杠命令（/preset 等）在上面已分发
-      if (busy || pendingInputsRef.current.paused) {
+      if (busy || pendingInputsRef.current.paused || submitting.current) {
         const attachments = allAttachments;
+        const held = holdLocal("pending", mode, expanded);
         clearInput();
         images.clear();
         files.clear();
@@ -3150,20 +3210,22 @@ function SessionApp({
             ...(delegate !== undefined ? { delegate } : {}),
             ...(attachments.length > 0 ? { attachments } : {}),
           })
-          .then(() => {
+          .then((result) => {
+            if (!result.queued) {
+              setLocals((list) =>
+                list.map((row) => (row.id === held.id ? { ...row, place: "turn" } : row)),
+              );
+            }
             if (fullscreen) setScroll(scrollToBottom());
-          })
-          .catch((e: unknown) => {
-            pushLine(`! ${modelErrorText(e)}`);
-          });
+          }, held.fail);
         return;
       }
       if (delegate !== undefined) {
         submitExpanded(delegate);
         return;
       }
-      if (submitting.current) return;
       const attachments = allAttachments;
+      const held = holdLocal("turn", "steer", expanded);
       clearInput();
       images.clear();
       files.clear();
@@ -3177,9 +3239,7 @@ function SessionApp({
           ...(skill ? { skill } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
         })
-        .catch((e: unknown) => {
-          pushLine(`! ${modelErrorText(e)}`);
-        })
+        .catch(held.fail)
         .finally(() => {
           submitting.current = false;
           setSubmitPending(false);
@@ -3493,7 +3553,10 @@ function SessionApp({
     welcome,
     notices: bootNotes,
     frozen,
-    entries: view.entries,
+    entries: [
+      ...view.entries,
+      ...shownLocals.filter((item) => item.place === "turn").map(localUserEntry),
+    ],
     hide: hideNotice,
     live: view,
     shellOutputs,
@@ -3664,6 +3727,26 @@ function SessionApp({
         written: staticWritten.current,
       }),
       ...pendingLines.filter((line) => line.after >= view.entries.length).flatMap(clientRows),
+      ...shownLocals
+        .filter((item) => item.place === "turn")
+        .flatMap((item) =>
+          layoutEntry(
+            localUserEntry(item),
+            width,
+            env.ascii,
+            reasoning,
+            reasoningNow,
+            false,
+            false,
+            theme,
+            {
+              entries: view.entries,
+              backgroundShells: view.backgroundShells,
+              shellOutputs,
+              swarmRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
+            },
+          ),
+        ),
     );
   }
   const shownActivity = conversationHeight > 0 ? activityLines.slice(-conversationHeight) : [];
@@ -3999,7 +4082,7 @@ function SessionApp({
       ) : null}
       {fullscreen && budget.pending > 0 ? (
         <PendingInputsPanel
-          items={pendingInputs.items}
+          items={[...pendingInputs.items, ...localPendingItems(shownLocals)]}
           paused={pendingInputs.paused}
           selected={pendingIndex}
           editing={editingPending}

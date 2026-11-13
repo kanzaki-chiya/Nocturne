@@ -20,6 +20,19 @@ import {
 } from "@nocturne/rpc/client";
 
 import type { ComposerSubmit } from "./Composer";
+import {
+  draftTextOf,
+  dropOutgoing,
+  emptyOutgoing,
+  nextLocalId,
+  pushOutgoing,
+  reconcileOutgoing,
+  retargetOutgoing,
+  submitBody,
+  userSeqs,
+  type LocalOutgoing,
+  type OutgoingBook,
+} from "./outgoing";
 import { syncShellSnapshot } from "./shell-snapshot";
 import type { SessionStatus } from "./session-tree";
 
@@ -48,6 +61,12 @@ export interface OpenConversation {
    * 订阅后单独取一次 `session.pendingInputs()` 对齐，之后随 `input.pending` 更新。
    */
   pendingInputs: PendingInputsSnapshot;
+  /** 点发送后、正式条目到达前的本地消息与待发行 */
+  outgoing: OutgoingBook;
+  /** 本地待发行在 Core 返回 id 之前被撤回 */
+  outgoingCancels: Set<string>;
+  /** 本地待发行在快照到达前被改过的文本 */
+  outgoingPatches: Map<string, { mode?: "steer" | "queue"; text?: string }>;
   tracker?: SessionViewTracker;
   /**
    * 所在后台已退出（崩溃或被强杀）：会话保留在 opened 里等「重启后台」恢复，
@@ -78,7 +97,10 @@ export function activeConversationCount(entries: Iterable<OpenConversation>): nu
 /** 全部打开会话里还没发出的待发输入条数（退出前的提醒用，ADR-0070 §6） */
 export function pendingInputCount(entries: Iterable<OpenConversation>): number {
   let count = 0;
-  for (const entry of entries) count += entry.pendingInputs.items.length;
+  for (const entry of entries) {
+    count += entry.pendingInputs.items.length;
+    count += entry.outgoing.items.filter((item) => item.place === "pending").length;
+  }
   return count;
 }
 
@@ -113,6 +135,43 @@ export interface OpenError {
   providerDisabled?: boolean;
 }
 
+/**
+ * 等到这条提交被接受，或在接受前失败。
+ * 监听在注册后再查一次，避免视图更新落在检查和注册之间再也等不到。
+ * 接受之后 Turn 自己的失败不算拒收，不把草稿放回去。
+ */
+function waitAccepted(
+  entry: OpenConversation,
+  baseline: number,
+  submission: Promise<unknown>,
+): Promise<void> {
+  const accepted = () =>
+    entry.view.currentTurn !== undefined || entry.view.entries.length > baseline;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      entry.listeners.delete(listener);
+      if (error !== undefined && !accepted()) reject(error);
+      else resolve();
+    };
+    const listener = () => {
+      if (accepted()) finish();
+    };
+    entry.listeners.add(listener);
+    if (accepted()) finish();
+    submission.then(
+      () => {
+        finish();
+      },
+      (error: unknown) => {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 function openError(error: unknown, workspace: string, model?: ModelRef | string): OpenError {
   return {
     message: error instanceof Error ? error.message : String(error),
@@ -145,6 +204,15 @@ export class Conversations {
    * 按错误码显示「换模型」卡片或错误与「重试」，不退回上一个会话。
    */
   readonly openErrors = new Map<string, OpenError>();
+  /**
+   * 新会话在 Core 接受前被拒：界面回到草稿页时取走，把文字和附件放回输入框。
+   * 已有会话的拒收由仍挂着的输入框自己恢复。
+   */
+  rejectedDraft: {
+    text: string;
+    attachments: ComposerSubmit["attachments"];
+    error: string;
+  } | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   /** 每次 open 递增；被更新的点击取代的打开在串行队列里直接跳过 */
   private openToken = 0;
@@ -202,6 +270,9 @@ export class Conversations {
       turnChanges: new Map(),
       changeDiffs: new Map(),
       pendingInputs: { items: [], paused: false },
+      outgoing: emptyOutgoing(),
+      outgoingCancels: new Set(),
+      outgoingPatches: new Map(),
       listeners: new Set(),
     };
     this.opened.set(entry.session.id, entry);
@@ -233,6 +304,7 @@ export class Conversations {
             pendingRevision += 1;
             entry.pendingInputs = event.payload;
           }
+          this.syncOutgoing(entry);
           if (entry.replaying !== true) {
             for (const listener of entry.listeners) listener();
             this.changed();
@@ -252,6 +324,7 @@ export class Conversations {
       void syncShellSnapshot(entry.session, entry.view)
         .then(() => {
           if (entry.dead === true) return;
+          this.syncOutgoing(entry);
           for (const listener of entry.listeners) listener();
           this.changed();
         })
@@ -266,6 +339,7 @@ export class Conversations {
           if (entry.dead === true || pendingRevision !== requestedRevision) return;
           if (JSON.stringify(entry.pendingInputs) === JSON.stringify(snapshot)) return;
           entry.pendingInputs = snapshot;
+          this.syncOutgoing(entry);
           for (const listener of entry.listeners) listener();
           this.changed();
         })
@@ -408,94 +482,125 @@ export class Conversations {
   }
 
   /**
-   * 发一条消息（可带图片附件）。仅第一条消息才创建会话日志；先标 busy，
-   * 避免 submit 准备阶段被切换关掉。返回时 Turn 已被后台接受：持久视图
-   * 出现新 Turn 或新用户条目、或 submit 响应到达，三者先到为准；
-   * submit 在接受前拒绝则抛出（输入框保留草稿与附件）。草稿选项里只有
-   * 显式选过的字段写进 createSession，其余交给 Core 解析项目默认。
+   * 发一条消息（可带图片附件）。仅第一条消息才创建会话日志。
+   * `createSession` 一返回就选中会话并挂上本地用户消息，不等 Core 接受；
+   * 图片处理仍在后台的 `submit` 里进行。接受前拒绝则抛出，并撤掉本地消息
+   * （新会话回到草稿页）。草稿选项里只有显式选过的字段写进 createSession。
    */
   async send(input: ComposerSubmit, create?: CreateSessionChoice): Promise<void> {
-    const entry = await this.serial(async () => {
-      let selected = this.selected;
-      if (selected === undefined) {
-        // 选中会话打开失败时不要把消息落到新建的草稿会话上
-        const failedOpen =
-          this.selectedId !== null ? this.openErrors.get(this.selectedId) : undefined;
-        if (failedOpen !== undefined) throw new Error(failedOpen.message);
-        const workspace = this.draftWorkspace ?? this.plainWorkspace();
-        if (workspace === null) throw new Error("普通对话工作区尚未就绪");
-        const client = await this.pool.ensure();
-        const model =
-          create?.model ?? (await client.runtime.defaultModel({ workspaceRoot: workspace }));
-        if (model === undefined) throw new Error("尚未配置默认模型，请先用 nctrn setup 配置服务商");
-        selected = await this.attach(
-          client,
-          workspace,
-          await client.runtime.createSession({
-            // 会话的工作区随会话走（ADR-0051）：后台只有一个，项目会话
-            // 用自己的目录做 cwd 与工作区根
-            cwd: workspace,
-            workspaceRoot: workspace,
-            model,
-            ...(create?.reasoningEffort !== undefined
-              ? { reasoningEffort: create.reasoningEffort as ReasoningEffort }
-              : {}),
-            ...(create?.permissionPreset !== undefined
-              ? { permissionPreset: create.permissionPreset }
-              : {}),
-            ...(create?.branch !== undefined ? { branch: create.branch } : {}),
-          }),
-        );
-      }
-      if (selected.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
-      if (conversationStatus(selected) !== "idle") throw new Error("会话正在运行");
-      if (input.text !== "") await selected.session.recordInputHistory(input.text);
-      selected.busy = true;
-      this.changed();
-      return selected;
-    });
+    const prepared = await this.serial(() => this.prepareTurn(input, create));
+    await prepared();
+  }
 
-    const baseline = entry.view.entries.length;
-    const isAccepted = () =>
-      entry.view.currentTurn !== undefined || entry.view.entries.length > baseline;
-    const accepted = new Promise<"accepted">((resolve) => {
-      if (isAccepted()) {
-        resolve("accepted");
-        return;
-      }
-      const listener = () => {
-        if (isAccepted()) {
-          entry.listeners.delete(listener);
-          resolve("accepted");
-        }
-      };
-      entry.listeners.add(listener);
+  /**
+   * 发送一条输入（ADR-0070）：空闲时走普通 `send`，Turn 进行中则入列。
+   * 空闲还是入列在串行队列里判定，连发时第二条一定排在第一条置忙之后。
+   * 输入框不等这个 Promise：它在调用前就清空。拒绝时抛出，输入框据此把草稿放回。
+   */
+  async submitInput(
+    input: ComposerSubmit,
+    mode: "steer" | "queue" = "steer",
+    create?: CreateSessionChoice,
+  ): Promise<boolean> {
+    const prepared = await this.serial(async () => {
+      const entry = this.selected;
+      const queue =
+        entry !== undefined &&
+        entry.dead !== true &&
+        (conversationStatus(entry) !== "idle" || entry.pendingInputs.paused);
+      if (!queue) return this.prepareTurn(input, create);
+      const local = this.trackOutgoing(entry, input, "pending", mode);
+      this.changed();
+      return () => this.finishEnqueue(entry, input, mode, local);
     });
-    const submission = entry.session.submit({
-      text: input.text,
-      ...(input.skill ? { skill: input.skill } : {}),
-      ...(input.delegate ? { delegate: input.delegate } : {}),
-      ...(input.workMode ? { workMode: input.workMode } : {}),
-      attachments: input.attachments,
-    });
+    await prepared();
+    return true;
+  }
+
+  private async prepareTurn(
+    input: ComposerSubmit,
+    create?: CreateSessionChoice,
+  ): Promise<() => Promise<void>> {
+    let selected = this.selected;
+    let created = false;
+    const previousDraft = this.draftWorkspace;
+    if (selected === undefined) {
+      // 选中会话打开失败时不要把消息落到新建的草稿会话上
+      const failedOpen =
+        this.selectedId !== null ? this.openErrors.get(this.selectedId) : undefined;
+      if (failedOpen !== undefined) throw new Error(failedOpen.message);
+      const workspace = this.draftWorkspace ?? this.plainWorkspace();
+      if (workspace === null) throw new Error("普通对话工作区尚未就绪");
+      const client = await this.pool.ensure();
+      const model =
+        create?.model ?? (await client.runtime.defaultModel({ workspaceRoot: workspace }));
+      if (model === undefined) throw new Error("尚未配置默认模型，请先用 nctrn setup 配置服务商");
+      selected = await this.attach(
+        client,
+        workspace,
+        await client.runtime.createSession({
+          // 会话的工作区随会话走（ADR-0051）：后台只有一个，项目会话
+          // 用自己的目录做 cwd 与工作区根
+          cwd: workspace,
+          workspaceRoot: workspace,
+          model,
+          ...(create?.reasoningEffort !== undefined
+            ? { reasoningEffort: create.reasoningEffort as ReasoningEffort }
+            : {}),
+          ...(create?.permissionPreset !== undefined
+            ? { permissionPreset: create.permissionPreset }
+            : {}),
+          ...(create?.branch !== undefined ? { branch: create.branch } : {}),
+        }),
+      );
+      created = true;
+    }
+    if (selected.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
+    if (conversationStatus(selected) !== "idle") throw new Error("会话正在运行");
+    const local = this.trackOutgoing(selected, input, "turn", "steer");
+    selected.busy = true;
+    if (created) {
+      this.selectedId = selected.session.id;
+      this.draftWorkspace = null;
+    }
+    this.changed();
+    const baseline = selected.view.entries.length;
+    return () => this.finishTurn(selected, input, local, baseline, created, previousDraft);
+  }
+
+  private async finishTurn(
+    entry: OpenConversation,
+    input: ComposerSubmit,
+    local: LocalOutgoing,
+    baseline: number,
+    created: boolean,
+    previousDraft: string | null,
+  ): Promise<void> {
+    if (input.text !== "") void entry.session.recordInputHistory(input.text).catch(() => undefined);
+    const submission = entry.session.submit(submitBody(input));
     try {
-      await Promise.race([accepted, submission.then(() => "finished" as const)]);
+      await waitAccepted(entry, baseline, submission);
     } catch (error) {
-      // submit 在接受前拒绝（如附件校验失败）：会话保持空闲，普通关闭路径清理
+      // submit 在接受前拒绝（如附件校验失败）：撤掉本地消息，普通关闭路径清理
+      entry.outgoing = dropOutgoing(entry.outgoing, local.id);
       entry.busy = false;
-      // 会话模型被停用（ADR-0054 §4）：提交前即被拒，记进 openErrors 让主区显示「换模型」卡片
-      if (error instanceof RpcError && error.code === "invalid_model") {
+      if (created && !entry.view.entries.some((item) => item.kind === "user")) {
+        this.selectedId = null;
+        this.draftWorkspace = previousDraft ?? entry.workspace;
+        this.rejectedDraft = {
+          text: draftTextOf(input),
+          attachments: input.attachments,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      } else if (error instanceof RpcError && error.code === "invalid_model") {
+        // 会话模型被停用（ADR-0054 §4）：提交前即被拒，记进 openErrors 让主区显示「换模型」卡片
         this.openErrors.set(entry.session.id, openError(error, entry.workspace));
       }
       this.changed();
       void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
       throw error;
     }
-    // 接受后才选中并清空草稿工作区
-    this.selectedId = entry.session.id;
-    this.draftWorkspace = null;
-    this.changed();
-    // 接受后归还输入框控制；Turn 完成由订阅更新，切换不会等整轮输出。
+    // 接受后归还忙状态由 Turn 结束收尾；切换不会等整轮输出。
     void submission
       .catch((error: unknown) => {
         // 运行中模型的停用（如压缩路径）同样给「换模型」卡片，不落全局错误条
@@ -513,35 +618,82 @@ export class Conversations {
       });
   }
 
-  /**
-   * 发送一条输入（ADR-0070）：空闲时走普通 `send`，Turn 进行中则入列——插话在
-   * 安全点并入当前 Turn，排队在 done 之后开新 Turn。接受后返回 true，输入框
-   * 据此清空草稿；拒绝时抛出（草稿保留）。
-   */
-  async submitInput(
+  private async finishEnqueue(
+    entry: OpenConversation,
     input: ComposerSubmit,
-    mode: "steer" | "queue" = "steer",
-    create?: CreateSessionChoice,
-  ): Promise<boolean> {
-    const entry = this.selected;
-    if (
-      entry === undefined ||
-      entry.dead === true ||
-      (conversationStatus(entry) === "idle" && !entry.pendingInputs.paused)
-    ) {
-      await this.send(input, create);
-      return true;
+    mode: "steer" | "queue",
+    local: LocalOutgoing,
+  ): Promise<void> {
+    if (input.text !== "") void entry.session.recordInputHistory(input.text).catch(() => undefined);
+    try {
+      // ADR-0076：执行方式只能排队，不能作为插话
+      const result = await entry.session.enqueueInput(
+        input.workMode ? "queue" : mode,
+        submitBody(input),
+      );
+      const patch = entry.outgoingPatches.get(local.id);
+      entry.outgoingPatches.delete(local.id);
+      if (entry.outgoingCancels.delete(local.id)) {
+        if (result.queued) await entry.session.cancelInput(result.id).catch(() => undefined);
+        entry.outgoing = dropOutgoing(entry.outgoing, local.id);
+        this.changed();
+        return;
+      }
+      if (!result.queued) {
+        entry.outgoing = retargetOutgoing(entry.outgoing, local.id, "turn");
+        this.syncOutgoing(entry);
+        this.changed();
+      } else if (patch !== undefined) {
+        await entry.session.updateInput(result.id, {
+          ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+          ...(patch.text !== undefined ? { input: { text: patch.text } } : {}),
+        });
+      }
+    } catch (error) {
+      entry.outgoing = dropOutgoing(entry.outgoing, local.id);
+      entry.outgoingCancels.delete(local.id);
+      entry.outgoingPatches.delete(local.id);
+      this.changed();
+      throw error;
     }
-    if (input.text !== "") await entry.session.recordInputHistory(input.text);
-    // ADR-0076：执行方式只能排队，不能作为插话
-    await entry.session.enqueueInput(input.workMode ? "queue" : mode, {
-      text: input.text,
-      ...(input.skill ? { skill: input.skill } : {}),
-      ...(input.delegate ? { delegate: input.delegate } : {}),
-      ...(input.workMode ? { workMode: input.workMode } : {}),
-      attachments: input.attachments,
-    });
-    return true;
+  }
+
+  private trackOutgoing(
+    entry: OpenConversation,
+    input: ComposerSubmit,
+    place: "turn" | "pending",
+    mode: "steer" | "queue",
+  ): LocalOutgoing {
+    const local: LocalOutgoing = {
+      id: nextLocalId(),
+      place,
+      mode,
+      draftText: draftTextOf(input),
+      input,
+      sentAt: new Date().toISOString(),
+      excludeUserSeqs: userSeqs(entry.view.entries),
+      excludePendingIds: entry.pendingInputs.items.map((item) => item.id),
+    };
+    entry.outgoing = reconcileOutgoing(
+      pushOutgoing(entry.outgoing, local),
+      entry.view.entries,
+      entry.pendingInputs,
+    );
+    return local;
+  }
+
+  private syncOutgoing(entry: OpenConversation): void {
+    entry.outgoing = reconcileOutgoing(entry.outgoing, entry.view.entries, entry.pendingInputs);
+  }
+
+  takeRejectedDraft(): {
+    text: string;
+    attachments: ComposerSubmit["attachments"];
+    error: string;
+  } | null {
+    const draft = this.rejectedDraft;
+    this.rejectedDraft = null;
+    return draft;
   }
 
   private startModeTurn(call: (session: RpcSession) => Promise<void>): void {
@@ -578,6 +730,24 @@ export class Conversations {
   ): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
+    const local = entry.outgoing.items.find((item) => item.id === id);
+    if (local !== undefined) {
+      entry.outgoingPatches.set(id, { ...entry.outgoingPatches.get(id), ...patch });
+      entry.outgoing = {
+        items: entry.outgoing.items.map((item) =>
+          item.id !== id
+            ? item
+            : {
+                ...item,
+                ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+                ...(patch.text !== undefined ? { input: { ...item.input, text: patch.text } } : {}),
+              },
+        ),
+        keys: entry.outgoing.keys,
+      };
+      this.changed();
+      return;
+    }
     const input = patch.text !== undefined ? { text: patch.text } : undefined;
     try {
       await entry.session.updateInput(id, {
@@ -595,6 +765,12 @@ export class Conversations {
   async cancelPendingInput(id: string): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
+    if (entry.outgoing.items.some((item) => item.id === id)) {
+      entry.outgoingCancels.add(id);
+      entry.outgoing = dropOutgoing(entry.outgoing, id);
+      this.changed();
+      return;
+    }
     try {
       await entry.session.cancelInput(id);
     } catch (error) {
@@ -769,6 +945,7 @@ export class Conversations {
       conversationStatus(entry) !== "idle" ||
       // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
       entry.pendingInputs.items.length > 0 ||
+      entry.outgoing.items.some((item) => item.place === "pending") ||
       // ADR-0089：活动 Swarm 的协调者不随切走关掉，否则成员会话与整个 Swarm 一起被收掉；
       // 结束（status === "ended"）后照常按空闲规则关闭
       entry.view.swarm?.status === "active" ||

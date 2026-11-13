@@ -28,6 +28,7 @@ import { applyAppearance, applyTheme } from "./appearance";
 import { appIconResolver } from "./app-icon";
 import { ArchivePage } from "./ArchivePage";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
+import { localTurnEntries, mergePending, type OutgoingBook } from "./outgoing";
 import { replyLinkOpener } from "./external-url";
 import {
   BackendLogsPage,
@@ -300,6 +301,19 @@ export function App({ host }: { host: DesktopHost }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   /** 分叉出的新会话首次挂载输入框时填入的原消息；取用后清掉，不随恢复或重开再填 */
   const [forkDraft, setForkDraft] = useState<{ id: string; text: string } | null>(null);
+  /** 新会话被拒后放回草稿页的输入 */
+  const [draftRestore, setDraftRestore] = useState<{
+    text: string;
+    attachments: ComposerSubmit["attachments"];
+    error: string;
+  } | null>(null);
+  /** 已有会话在换模型卡片盖住输入框时被拒，卡片关掉后放回 */
+  const [sessionRestore, setSessionRestore] = useState<{
+    id: string;
+    text: string;
+    attachments: ComposerSubmit["attachments"];
+    error: string;
+  } | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [chatsExpanded, setChatsExpanded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1132,21 +1146,36 @@ export function App({ host }: { host: DesktopHost }) {
     [pool, prefs, bumpPrefs, refresh, defaultWorkspace],
   );
 
-  // 发送消息：接受成功后登记附件缩略图源（以 sha256 命中消息流里的图片）
+  // 发送消息：输入框在调用前已清空。缩略图由本地预览登记，不在这里等哈希。
   const submitInput = async (
     input: ComposerSubmit,
     mode?: "steer" | "queue",
     create?: CreateSessionChoice,
   ): Promise<boolean> => {
-    // 先登记附件字节：发送被拒也只是缓存里多一条，而接受后首帧用户气泡就有缩略图
-    await Promise.all(
-      input.attachments.map((attachment) => images.register(attachment.data, attachment.mimeType)),
-    );
-    // ADR-0070：Turn 运行中 Enter 排队、Alt+Enter 插话；空闲时都是普通发送
-    await conversations.submitInput(input, mode ?? "steer", create);
-    setSelectedId(conversations.selectedId);
-    await refresh();
-    return true;
+    try {
+      // ADR-0070：Turn 运行中 Enter 排队、Alt+Enter 插话；空闲时都是普通发送
+      await conversations.submitInput(input, mode ?? "steer", create);
+      setSelectedId(conversations.selectedId);
+      await refresh();
+      return true;
+    } catch (error) {
+      setSelectedId(conversations.selectedId);
+      const rejected = conversations.takeRejectedDraft();
+      if (rejected !== null) {
+        setDraftRestore(rejected);
+      } else if (
+        conversations.selectedId !== null &&
+        conversations.openErrors.has(conversations.selectedId)
+      ) {
+        setSessionRestore({
+          id: conversations.selectedId,
+          text: input.draftText ?? input.text,
+          attachments: input.attachments,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
   };
 
   const updatePending = async (
@@ -2014,9 +2043,26 @@ export function App({ host }: { host: DesktopHost }) {
                   }
                   onResubmit={resubmit}
                   onFork={forkAt}
-                  initialDraft={forkDraft?.id === active.session.id ? forkDraft.text : undefined}
+                  initialDraft={
+                    sessionRestore?.id === active.session.id
+                      ? sessionRestore.text
+                      : forkDraft?.id === active.session.id
+                        ? forkDraft.text
+                        : undefined
+                  }
+                  initialAttachments={
+                    sessionRestore?.id === active.session.id
+                      ? sessionRestore.attachments
+                      : undefined
+                  }
+                  initialError={
+                    sessionRestore?.id === active.session.id
+                      ? `发送失败：${sessionRestore.error}`
+                      : undefined
+                  }
                   onInitialDraftUsed={() => {
                     setForkDraft(null);
+                    if (sessionRestore?.id === active.session.id) setSessionRestore(null);
                   }}
                   onApprovePlan={() => {
                     conversations.approvePlan();
@@ -2031,7 +2077,8 @@ export function App({ host }: { host: DesktopHost }) {
                   onInterrupt={() => {
                     conversations.interrupt();
                   }}
-                  pendingInputs={active.pendingInputs}
+                  pendingInputs={mergePending(active.pendingInputs, active.outgoing)}
+                  outgoing={active.outgoing}
                   onUpdatePending={updatePending}
                   onCancelPending={cancelPending}
                   onResumePending={resumePending}
@@ -2132,6 +2179,10 @@ export function App({ host }: { host: DesktopHost }) {
                   onDirMenuOpenChange={setDirMenuOpen}
                   onManageProviders={() => {
                     setPage("providers");
+                  }}
+                  restoreDraft={draftRestore}
+                  onRestoreDraftUsed={() => {
+                    setDraftRestore(null);
                   }}
                 />
               </PaneErrorBoundary>
@@ -2340,9 +2391,12 @@ interface SessionPaneProps {
     workMode?: WorkModeName,
   ) => Promise<void>;
   onFork: (targetSeq: number) => Promise<void>;
-  /** 分叉后填进输入框的原消息（Composer 首次挂载时取用） */
+  /** 分叉后填进输入框的原消息，或拒收后放回的草稿（Composer 首次挂载时取用） */
   initialDraft: string | undefined;
+  initialAttachments?: ComposerSubmit["attachments"] | undefined;
+  initialError?: string | undefined;
   onInitialDraftUsed: () => void;
+  outgoing: OutgoingBook;
   onApprovePlan: () => void;
   turnChanges: ReadonlyMap<number, TurnChanges>;
   onRewindFiles: (seq: number) => Promise<void>;
@@ -2416,7 +2470,10 @@ function SessionPane({
   onResubmit,
   onFork,
   initialDraft,
+  initialAttachments,
+  initialError,
   onInitialDraftUsed,
+  outgoing,
   onApprovePlan,
   turnChanges,
   onRewindFiles,
@@ -2540,6 +2597,10 @@ function SessionPane({
         subagentLinks={subagentLinks}
         fileLinks={fileLinks}
         resolveAppIcon={resolveAppIcon}
+        localEntries={localTurnEntries(outgoing, (key, data, mimeType) => {
+          images.preview(key, data, mimeType);
+        })}
+        entryKey={(key) => outgoing.keys.get(key) ?? key}
       />
       {view.pendingQuestion ? (
         <div className="question-dock">
@@ -2579,6 +2640,8 @@ function SessionPane({
         onResumePending={onResumePending}
         historyKey={session.id}
         initialDraft={initialDraft}
+        initialAttachments={initialAttachments}
+        initialError={initialError}
         onInitialDraftUsed={onInitialDraftUsed}
         readInputHistory={() => session.readInputHistory()}
         fileRefs={
@@ -2645,6 +2708,9 @@ interface DraftPaneProps {
   providersVersion: number;
   /** 模型菜单底部「管理服务商…」 */
   onManageProviders: () => void;
+  /** 新会话被拒后放回的草稿；只在这次挂载取用 */
+  restoreDraft?: { text: string; attachments: ComposerSubmit["attachments"]; error: string } | null;
+  onRestoreDraftUsed?: () => void;
 }
 
 function DraftPane({
@@ -2665,6 +2731,8 @@ function DraftPane({
   onDirMenuOpenChange,
   providersVersion,
   onManageProviders,
+  restoreDraft,
+  onRestoreDraftUsed,
 }: DraftPaneProps) {
   const draft = useDraftControls(runtime, prefs, providersVersion, workspace);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
@@ -2851,6 +2919,10 @@ function DraftPane({
           }}
           onInterrupt={() => undefined}
           historyKey={historyKey}
+          initialDraft={restoreDraft?.text}
+          initialAttachments={restoreDraft?.attachments}
+          initialError={restoreDraft ? `发送失败：${restoreDraft.error}` : undefined}
+          onInitialDraftUsed={onRestoreDraftUsed}
           controls={draft.controls}
           workspace={workspaceChoice}
           branch={branchChoice}

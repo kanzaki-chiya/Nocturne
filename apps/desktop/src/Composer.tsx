@@ -119,6 +119,11 @@ export interface ComposerSubmit {
   delegate?: { agent: string; task: string };
   /** 执行方式（ADR-0076）；此时 text 是去掉命令名后的任务 */
   workMode?: WorkModeName;
+  /**
+   * 输入框原文。执行方式会把 text 改成去掉命令名的任务，拒收放回草稿时用这个。
+   * 与 text 相同时可以不传。
+   */
+  draftText?: string;
   attachments: { data: Uint8Array; mimeType: string; label: string; source?: "paste" | "upload" }[];
 }
 
@@ -134,7 +139,8 @@ export interface ComposerProps {
   running: boolean;
   disabled?: boolean;
   /**
-   * false 表示未接收；resolve 表示已接收（草稿与附件才可清空）。
+   * 调用前输入框已经清空。resolve true 表示已接受；false 或抛错表示未接受，
+   * 输入框把这次的文字和附件放回去（期间用户又输入过则不覆盖）。
    * mode：Turn 运行中提交时为 steer（插话）或 queue（排队），空闲时为 undefined。
    */
   onSubmit: (input: ComposerSubmit, mode?: "steer" | "queue") => boolean | Promise<boolean>;
@@ -154,8 +160,12 @@ export interface ComposerProps {
    */
   variant?: "draft" | "session";
   historyKey?: string | null;
-  /** 挂载时填入的文字（分叉后的原消息），光标放在末尾；只在首次挂载取用 */
+  /** 挂载时填入的文字（分叉后的原消息，或新会话拒收后放回的草稿），光标放在末尾 */
   initialDraft?: string | undefined;
+  /** 挂载时放回的附件（新会话拒收）。只在首次挂载取用 */
+  initialAttachments?: ComposerSubmit["attachments"] | undefined;
+  /** 挂载时显示的发送失败 */
+  initialError?: string | undefined;
   onInitialDraftUsed?: (() => void) | undefined;
   readInputHistory?: () => Promise<string[]>;
   /** 父层从当前会话引用记录，因而首次输入创建会话后也能写入历史。 */
@@ -189,6 +199,18 @@ interface Attachment {
   mimeType: string;
   url: string;
   source?: "paste" | "upload";
+}
+
+function materializeAttachment(attachment: ComposerSubmit["attachments"][number]): Attachment {
+  return {
+    name: attachment.label,
+    data: attachment.data,
+    mimeType: attachment.mimeType,
+    url: URL.createObjectURL(
+      new Blob([attachment.data as BlobPart], { type: attachment.mimeType }),
+    ),
+    ...(attachment.source ? { source: attachment.source } : {}),
+  };
 }
 
 type MenuKind = "plus" | "model" | "effort" | "preset" | "dir" | "branch";
@@ -227,6 +249,8 @@ export function Composer({
   variant = "draft",
   historyKey,
   initialDraft,
+  initialAttachments,
+  initialError,
   onInitialDraftUsed,
   readInputHistory,
   recordInputHistory,
@@ -253,15 +277,16 @@ export function Composer({
 }: ComposerProps) {
   const isSession = variant === "session";
   const [draft, setDraft] = useState(initialDraft ?? "");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>(() =>
+    (initialAttachments ?? []).map(materializeAttachment),
+  );
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(0);
   const [composing, setComposing] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [selected, setSelected] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [enterHint, setEnterHint] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuKind | null>(null);
   const wasHidden = useRef(hidden);
@@ -280,7 +305,6 @@ export function Composer({
   const mirror = useRef<HTMLDivElement>(null);
   const triggers = useRef<Partial<Record<MenuKind, HTMLButtonElement | null>>>({});
   const composingRef = useRef(false);
-  const submittingRef = useRef(false);
   const interruptingRef = useRef(false);
   const draftRef = useRef(draft);
   const attachmentsRef = useRef<Attachment[]>([]);
@@ -395,7 +419,11 @@ export function Composer({
       mounted.current = false;
     };
   }, []);
-  const initialDraftUsed = useRef(initialDraft === undefined ? undefined : onInitialDraftUsed);
+  const initialDraftUsed = useRef(
+    initialDraft === undefined && initialAttachments === undefined && initialError === undefined
+      ? undefined
+      : onInitialDraftUsed,
+  );
   useEffect(() => {
     const text = draftRef.current;
     if (text !== "") {
@@ -608,60 +636,82 @@ export function Composer({
   };
 
   // ── 发送 / 命令 ──
-  const submit = async (mode?: "steer" | "queue") => {
+  const submit = (mode?: "steer" | "queue") => {
     const text = draftRef.current;
     // Turn 运行中也允许发送（ADR-0070）：mode 由 Enter / Alt+Enter 决定
-    if (disabled || submittingRef.current || composingRef.current) return;
+    if (disabled || composingRef.current) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
-    const submittedRevision = revision.current;
     const parsed = parseSlash(text, variant, skills, externalAgents);
     if (parsed?.kind === "unknown" || parsed?.kind === "redirect") {
       setEnterHint(parsed.hint);
       return;
     }
     if (parsed?.kind === "command") {
-      await runSlash(text);
+      void runSlash(text);
       return;
     }
+    const task = parsed?.kind === "work" ? parsed.text : text;
+    const snapshot = attachmentsRef.current.slice();
     const payload: ComposerSubmit = {
-      text: parsed?.kind === "work" ? parsed.text : text,
+      text: task,
+      ...(task !== text ? { draftText: text } : {}),
       ...(parsed?.kind === "work" ? { workMode: parsed.workMode } : {}),
       ...(parsed?.kind === "skill" ? { skill: parsed.invocation } : {}),
       ...(parsed?.kind === "agent" ? { delegate: parsed.delegate } : {}),
-      attachments: attachmentsRef.current.map((attachment) => ({
+      attachments: snapshot.map((attachment) => ({
         data: attachment.data,
         mimeType: attachment.mimeType,
         label: attachment.name,
         ...(attachment.source ? { source: attachment.source } : {}),
       })),
     };
-    submittingRef.current = true;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const accepted = mode === undefined ? await onSubmit(payload) : await onSubmit(payload, mode);
-      if (!accepted) return;
-      historyIndex.current = null;
-      for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
-      setAttachments([]);
-      if (mounted.current && revision.current === submittedRevision) updateDraft("");
-      if (text !== "" && recordInputHistory !== undefined) {
-        try {
-          await recordInputHistory(text);
-        } catch (reason) {
-          if (mounted.current) setError(`消息已接收，但保存输入历史失败：${errorText(reason)}`);
+    // 同一轮事件里清空。不等 Core 接受；拒收再放回。连发时第二次读到的是空草稿。
+    historyIndex.current = null;
+    updateDraft("");
+    attachmentsRef.current = [];
+    setAttachments([]);
+    const clearedRevision = revision.current;
+    const untouched = () =>
+      mounted.current &&
+      revision.current === clearedRevision &&
+      attachmentsRef.current.length === 0;
+    const dropSnapshot = () => {
+      for (const attachment of snapshot) URL.revokeObjectURL(attachment.url);
+    };
+    const restore = () => {
+      if (!untouched()) {
+        dropSnapshot();
+        return;
+      }
+      attachmentsRef.current = snapshot;
+      setAttachments(snapshot);
+      updateDraft(text);
+    };
+    void (async () => {
+      try {
+        const accepted =
+          mode === undefined ? await onSubmit(payload) : await onSubmit(payload, mode);
+        if (!accepted) {
+          restore();
+          return;
         }
+        dropSnapshot();
+        if (text !== "" && recordInputHistory !== undefined) {
+          try {
+            await recordInputHistory(text);
+          } catch (reason) {
+            if (mounted.current) setError(`消息已接收，但保存输入历史失败：${errorText(reason)}`);
+          }
+        }
+        if (text !== "") {
+          history.current = appendHistory(history.current, text);
+          historySinceRead.current = appendHistory(historySinceRead.current, text);
+        }
+      } catch (reason) {
+        restore();
+        if (mounted.current) setError(`发送失败：${errorText(reason)}`);
       }
-      if (text !== "") {
-        history.current = appendHistory(history.current, text);
-        historySinceRead.current = appendHistory(historySinceRead.current, text);
-      }
-    } catch (reason) {
-      if (mounted.current) setError(`发送失败：${errorText(reason)}`);
-    } finally {
-      submittingRef.current = false;
-      if (mounted.current) setSubmitting(false);
-    }
+    })();
   };
 
   const runSlash = async (line: string) => {
@@ -787,7 +837,7 @@ export function Composer({
         return;
       }
       event.preventDefault();
-      void submit(running ? "steer" : undefined);
+      submit(running ? "steer" : undefined);
       return;
     }
     if (event.key === "Enter" && plain) {
@@ -799,7 +849,7 @@ export function Composer({
         return;
       }
       if (parsed?.kind === "skill" || parsed?.kind === "agent" || parsed?.kind === "work") {
-        void submit(running ? "queue" : undefined);
+        submit(running ? "queue" : undefined);
         return;
       }
       if (popup !== null && flatRows.length > 0) {
@@ -812,7 +862,7 @@ export function Composer({
         setEnterHint(parsed.hint);
         return;
       }
-      void submit(running ? "queue" : undefined);
+      submit(running ? "queue" : undefined);
       return;
     }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -1048,11 +1098,11 @@ export function Composer({
         <button
           type="button"
           className={`send${canSend ? "" : " off"}`}
-          disabled={disabled || submitting || composing || !canSend}
+          disabled={disabled || composing || !canSend}
           aria-label="发送"
           title={running ? "发送" : "发送（Enter）"}
           onClick={() => {
-            void submit(running ? "queue" : undefined);
+            submit(running ? "queue" : undefined);
           }}
         >
           <Icon name="arrow_up" size={ICON_MD} />

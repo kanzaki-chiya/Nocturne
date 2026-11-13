@@ -70,6 +70,7 @@ function ViewerLauncher({ item }: { item: ViewerImageItem }) {
 const dummyImages: AttachmentImageSource = {
   url: () => undefined,
   register: async () => "",
+  preview: () => undefined,
   load: async () => "",
   dispose: () => undefined,
 };

@@ -3,7 +3,7 @@
  * `QuestionCard` 与 `Composer` 实现私信、权限确认、回答提问与中断。
  * 成员被移除或 Swarm 结束后转为只读冻结展示，隐藏输入区；关闭标签只释放句柄。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SwarmMemberStatus, SwarmView } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
@@ -13,6 +13,20 @@ import { Composer, type ComposerSubmit, type FileRefSource } from "./Composer";
 import { Conversation, QuestionCard, type FileLinkHooks } from "./Conversation";
 import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
+import {
+  dropOutgoing,
+  emptyOutgoing,
+  localTurnEntries,
+  mergePending,
+  nextLocalId,
+  pushOutgoing,
+  reconcileOutgoing,
+  retargetOutgoing,
+  submitBody,
+  userSeqs,
+  draftTextOf,
+  type LocalOutgoing,
+} from "./outgoing";
 import { useSwarmMemberSession } from "./swarm-member-session";
 
 export interface SwarmMemberPaneProps {
@@ -48,6 +62,15 @@ export function SwarmMemberPane({
     fallbackCwd: workspace,
   });
   const [submitError, setSubmitError] = useState<string>();
+  const [outgoing, setOutgoing] = useState(emptyOutgoing);
+  const outgoingRef = useRef(outgoing);
+  outgoingRef.current = outgoing;
+  const readyView = state.status === "ready" ? state.view : undefined;
+  const readyPending = state.status === "ready" ? state.pendingInputs : undefined;
+  useEffect(() => {
+    if (readyView === undefined || readyPending === undefined) return;
+    setOutgoing((book) => reconcileOutgoing(book, readyView.entries, readyPending));
+  }, [readyView, readyPending]);
   const frozen =
     swarmStatus !== "active" || memberStatus === undefined || memberStatus === "removed";
   const recipientLabel = `@${memberName}`;
@@ -104,53 +127,84 @@ export function SwarmMemberPane({
     );
   }
 
+  const hasLocalTurn = outgoing.items.some((item) => item.place === "turn");
+  const showRunning = running || hasLocalTurn;
+
+  const track = (input: ComposerSubmit, place: "turn" | "pending", mode: "steer" | "queue") => {
+    const local: LocalOutgoing = {
+      id: nextLocalId(),
+      place,
+      mode,
+      draftText: draftTextOf(input),
+      input,
+      sentAt: new Date().toISOString(),
+      excludeUserSeqs: userSeqs(view.entries),
+      excludePendingIds: pendingInputs.items.map((item) => item.id),
+    };
+    setOutgoing((book) =>
+      reconcileOutgoing(pushOutgoing(book, local), view.entries, pendingInputs),
+    );
+    return local;
+  };
+
   const handleSubmit = async (
     input: ComposerSubmit,
     mode?: "steer" | "queue",
   ): Promise<boolean> => {
     setSubmitError(undefined);
-    await Promise.all(
-      input.attachments.map((attachment) => images.register(attachment.data, attachment.mimeType)),
-    );
+    const queued = running || hasLocalTurn || pendingInputs.paused;
+    const local = track(input, queued ? "pending" : "turn", mode ?? "steer");
     try {
-      if (running || pendingInputs.paused) {
-        if (input.text !== "") await session.recordInputHistory(input.text);
-        await session.enqueueInput(input.workMode ? "queue" : (mode ?? "steer"), {
-          text: input.text,
-          ...(input.skill ? { skill: input.skill } : {}),
-          ...(input.delegate ? { delegate: input.delegate } : {}),
-          ...(input.workMode ? { workMode: input.workMode } : {}),
-          attachments: input.attachments,
-        });
+      if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
+      if (queued) {
+        const result = await session.enqueueInput(
+          input.workMode ? "queue" : (mode ?? "steer"),
+          submitBody(input),
+        );
+        if (!result.queued) {
+          setOutgoing((book) =>
+            reconcileOutgoing(
+              retargetOutgoing(book, local.id, "turn"),
+              view.entries,
+              pendingInputs,
+            ),
+          );
+        }
         return true;
       }
       const baseline = view.entries.length;
       const isAccepted = () => view.currentTurn !== undefined || view.entries.length > baseline;
-      const accepted = new Promise<"accepted">((resolve) => {
-        if (isAccepted()) {
-          resolve("accepted");
-          return;
-        }
-        const stop = state.subscribeEvents(() => {
-          if (isAccepted()) {
-            stop();
-            resolve("accepted");
-          }
+      const accepted = new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let stop: () => void = () => undefined;
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          stop();
+          if (error !== undefined && !isAccepted()) reject(error);
+          else resolve();
+        };
+        stop = state.subscribeEvents(() => {
+          if (isAccepted()) finish();
+        });
+        if (isAccepted()) finish();
+        const submission = session.submit(submitBody(input));
+        submission.then(
+          () => {
+            finish();
+          },
+          (error: unknown) => {
+            finish(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
+        void submission.catch((cause: unknown) => {
+          if (isAccepted()) setSubmitError(cause instanceof Error ? cause.message : String(cause));
         });
       });
-      const submission = session.submit({
-        text: input.text,
-        ...(input.skill ? { skill: input.skill } : {}),
-        ...(input.delegate ? { delegate: input.delegate } : {}),
-        ...(input.workMode ? { workMode: input.workMode } : {}),
-        attachments: input.attachments,
-      });
-      await Promise.race([accepted, submission.then(() => "finished" as const)]);
-      void submission.catch((cause: unknown) => {
-        setSubmitError(cause instanceof Error ? cause.message : String(cause));
-      });
+      await accepted;
       return true;
     } catch (cause) {
+      setOutgoing((book) => dropOutgoing(book, local.id));
       setSubmitError(cause instanceof Error ? cause.message : String(cause));
       throw cause;
     }
@@ -176,9 +230,13 @@ export function SwarmMemberPane({
         shellKind={shellKind}
         subscribeEvents={state.subscribeEvents}
         images={images}
-        busy={running}
+        busy={showRunning}
         fileLinks={fileLinks}
         swarmRecipientLabel={recipientLabel}
+        localEntries={localTurnEntries(outgoing, (key, data, mimeType) => {
+          images.preview(key, data, mimeType);
+        })}
+        entryKey={(key) => outgoing.keys.get(key) ?? key}
       />
       {submitError !== undefined ? (
         <p className="conversation-error" role="alert">
@@ -202,14 +260,39 @@ export function SwarmMemberPane({
         skills={skills}
         externalAgents={externalAgents}
         todos={view.todos}
-        running={running}
+        running={showRunning}
         onSubmit={handleSubmit}
         onInterrupt={() => {
           session.interrupt();
         }}
-        pendingInputs={pendingInputs}
-        onUpdatePending={(id, patch) => session.updateInput(id, patch)}
-        onCancelPending={(id) => session.cancelInput(id)}
+        pendingInputs={mergePending(pendingInputs, outgoing)}
+        onUpdatePending={async (id, patch) => {
+          if (outgoingRef.current.items.some((item) => item.id === id)) {
+            setOutgoing((book) => ({
+              items: book.items.map((item) =>
+                item.id !== id
+                  ? item
+                  : {
+                      ...item,
+                      ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+                      ...(patch.text !== undefined
+                        ? { input: { ...item.input, text: patch.text } }
+                        : {}),
+                    },
+              ),
+              keys: book.keys,
+            }));
+            return;
+          }
+          await session.updateInput(id, patch);
+        }}
+        onCancelPending={async (id) => {
+          if (outgoingRef.current.items.some((item) => item.id === id)) {
+            setOutgoing((book) => dropOutgoing(book, id));
+            return;
+          }
+          await session.cancelInput(id);
+        }}
         onResumePending={() => session.resumeInputs()}
         historyKey={cwd}
         readInputHistory={() => session.readInputHistory()}

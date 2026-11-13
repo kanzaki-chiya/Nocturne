@@ -223,6 +223,10 @@ export interface ConversationProps {
   fileLinks?: FileLinkHooks | undefined;
   /** 会话打开时的警告（`SessionOpened.warnings`），显示在消息流顶部；缺省不显示 */
   openWarnings?: readonly string[] | undefined;
+  /** Core 接受前显示在对话末尾的本地用户消息，外观与正式条目相同 */
+  localEntries?: readonly UserEntry[] | undefined;
+  /** 正式条目 key → 被它替换的本地 id，替换时 React key 保持不变 */
+  entryKey?: ((key: string) => string) | undefined;
   /**
    * 定时任务发起的会话：标在第一条用户消息上（ADR-0064）。
    * preface 只在补跑时有，写在气泡正文前面。
@@ -1146,9 +1150,16 @@ function UserImage({
   slots: Map<number, string>;
   onOpen: (index: number, opener: HTMLElement) => void;
 }) {
-  const [url, setUrl] = useState<string>();
+  const known = images.url(attachment);
+  const [url, setUrl] = useState<string | undefined>(known);
   const [error, setError] = useState<string>();
   useEffect(() => {
+    const immediate = images.url(attachment);
+    if (immediate !== undefined) {
+      setUrl(immediate);
+      setError(undefined);
+      return;
+    }
     if (!visible || images.placeholder) return;
     let active = true;
     void images.load(attachment, session).then(
@@ -1534,6 +1545,8 @@ function UserMessage({
                   key={file.file}
                   title={fileSaveErrors[file.file]}
                   onClick={() => {
+                    // 本地消息的文件还没写进会话，点了没有可打开的副本
+                    if (file.sha256.startsWith("local:")) return;
                     if (fileLinks) {
                       const escaped = file.file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                       const reference = entry.content
@@ -4152,6 +4165,8 @@ function ConversationContent({
   scheduleSource,
   searchTarget,
   resolveAppIcon,
+  localEntries = [],
+  entryKey,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -4431,7 +4446,7 @@ function ConversationContent({
                   ) : null}
                   {[
                     ...view.entries.map((entry, entryIndex) => (
-                      <Fragment key={entry.key}>
+                      <Fragment key={entryKey?.(entry.key) ?? entry.key}>
                         <EntryView
                           entry={entry}
                           searchHit={matchesSearchSeq(entry, highlightedSeq)}
@@ -4485,6 +4500,27 @@ function ConversationContent({
                             swarm={swarmEnded}
                           />
                         ) : null}
+                      </Fragment>
+                    )),
+                    ...localEntries.map((entry) => (
+                      <Fragment key={entry.key}>
+                        <EntryView
+                          entry={entry}
+                          openUrl={openUrl}
+                          cwd={cwd}
+                          parts={parts}
+                          now={now}
+                          images={images}
+                          session={session}
+                          busy={busy}
+                          userRole={roleOf(entry)}
+                          repliesAfter={0}
+                          onResubmit={undefined}
+                          onFork={undefined}
+                          fileLinks={fileLinks}
+                          showReplyActions={false}
+                          changesCard={null}
+                        />
                       </Fragment>
                     )),
                     ...view.live.assistants.map((assistant) => (

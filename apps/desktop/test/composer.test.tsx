@@ -260,6 +260,25 @@ describe("Composer 文本与历史", () => {
     });
   });
 
+  it("点发送后立即清空，未接收或失败再把草稿和附件放回", async () => {
+    let accept!: (value: boolean) => void;
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          accept = resolve;
+        }),
+    );
+    render(<Composer {...props({ onSubmit })} />);
+    const field = input("先清空");
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(field.value).toBe("");
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      accept(false);
+    });
+    expect(field.value).toBe("先清空");
+  });
+
   it("未接收或发送失败不清空输入与附件，也不记录输入历史", async () => {
     const onSubmit = vi
       .fn()
@@ -506,6 +525,7 @@ describe("Composer 执行方式（ADR-0076）", () => {
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
         text: "做个登录页",
+        draftText: "/grill-me 做个登录页",
         workMode: "grill-me",
         attachments: [],
       }),
@@ -515,7 +535,7 @@ describe("Composer 执行方式（ADR-0076）", () => {
     fireEvent.keyDown(field, { key: "Enter" });
     await waitFor(() =>
       expect(onSubmit).toHaveBeenLastCalledWith(
-        { text: "第二件", workMode: "grill-me", attachments: [] },
+        { text: "第二件", draftText: "/grill-me 第二件", workMode: "grill-me", attachments: [] },
         "queue",
       ),
     );

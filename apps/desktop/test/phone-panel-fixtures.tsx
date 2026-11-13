@@ -73,6 +73,8 @@ export function panelFixture({
     turnChanges: new Map(),
     changeDiffs: new Map(),
     pendingInputs: { items: [], paused: false },
+    outgoing: { items: [], keys: new Map() },
+    busy: false,
   };
   const onError = vi.fn();
   const onClose = vi.fn();

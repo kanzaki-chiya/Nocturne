@@ -11,6 +11,7 @@ import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
+import { localTurnEntries, mergePending, submitBody } from "../outgoing";
 import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
@@ -22,7 +23,10 @@ import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { TodoPanel } from "../TodoList";
 import { loadTodosCollapsed, saveTodosCollapsed } from "./local";
 import {
+  failPhoneOutgoing,
+  retargetPhoneOutgoing,
   submitAccepted,
+  trackPhoneOutgoing,
   type PhoneCreateOptions,
   type PhoneSession,
   type PhoneSessions,
@@ -145,7 +149,8 @@ export function SessionScreen({
     };
   }, [session, view.turnCount]);
 
-  const running = busy || view.currentTurn !== undefined || view.status === "compacting";
+  const running =
+    busy || entry.busy || view.currentTurn !== undefined || view.status === "compacting";
   /**
    * 发送（ADR-0070 修订 2026-11-01）：Turn 运行中入列为排队，在 done 之后开新 Turn
    * （待发列表的「立即发送」再将其转为插话并入当前 Turn）；空闲时与普通发送相同。
@@ -156,39 +161,41 @@ export function SessionScreen({
   ): Promise<boolean> => {
     if (entry.dead) throw new Error("电脑尚未连接");
     if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
-    if (running || entry.pendingInputs.paused) {
-      // ADR-0076：执行方式只能排队
-      await session.enqueueInput(input.workMode ? "queue" : mode, {
-        text: input.text,
-        ...(input.skill ? { skill: input.skill } : {}),
-        ...(input.delegate ? { delegate: input.delegate } : {}),
-        ...(input.workMode ? { workMode: input.workMode } : {}),
-        ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
-      });
-      if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
-      onChanged();
-      return true;
+    const queued =
+      running ||
+      entry.pendingInputs.paused ||
+      entry.outgoing.items.some((item) => item.place === "turn");
+    const local = trackPhoneOutgoing(entry, input, queued ? "pending" : "turn", mode);
+    if (!queued) {
+      entry.busy = true;
+      setBusy(true);
     }
-    setBusy(true);
+    onChanged();
     try {
-      await submitAccepted(
-        entry,
-        {
-          text: input.text,
-          ...(input.skill ? { skill: input.skill } : {}),
-          ...(input.delegate ? { delegate: input.delegate } : {}),
-          ...(input.workMode ? { workMode: input.workMode } : {}),
-          ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
-        },
-        (error) => {
-          if (
-            error !== undefined &&
-            !(error instanceof RpcError && error.code === "connection_closed")
-          )
-            onError(errorText(error));
-          onChanged();
-        },
-      );
+      if (queued) {
+        const result = await session.enqueueInput(
+          input.workMode ? "queue" : mode,
+          submitBody(input),
+        );
+        if (!result.queued) retargetPhoneOutgoing(entry, local.id);
+        if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
+        onChanged();
+        return true;
+      }
+      await submitAccepted(entry, submitBody(input), (error) => {
+        entry.busy = false;
+        if (
+          error !== undefined &&
+          !(error instanceof RpcError && error.code === "connection_closed")
+        )
+          onError(errorText(error));
+        onChanged();
+      });
+    } catch (error) {
+      failPhoneOutgoing(entry, local.id);
+      entry.busy = false;
+      onChanged();
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -357,6 +364,10 @@ export function SessionScreen({
         shellKind={controls.shell?.effective?.kind}
         images={images}
         busy={running}
+        localEntries={localTurnEntries(entry.outgoing, (key, data, mimeType) => {
+          images.preview(key, data, mimeType);
+        })}
+        entryKey={(key) => entry.outgoing.keys.get(key) ?? key}
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
@@ -443,7 +454,7 @@ export function SessionScreen({
         onInterrupt={() => {
           session.interrupt();
         }}
-        pendingInputs={entry.pendingInputs}
+        pendingInputs={mergePending(entry.pendingInputs, entry.outgoing)}
         onUpdatePending={async (id, patch) => {
           try {
             await session.updateInput(id, {
@@ -516,11 +527,15 @@ export function DraftComposer({
   workspace,
   connected,
   onCreate,
+  restore,
+  onRestoreUsed,
 }: {
   runtime: RpcRuntime | undefined;
   workspace: string;
   connected: boolean;
   onCreate: (input: ComposerSubmit, options: PhoneCreateOptions) => Promise<void>;
+  restore?: { text: string; attachments: ComposerSubmit["attachments"]; error: string } | undefined;
+  onRestoreUsed?: () => void;
 }) {
   const draft = useDraftControls(runtime, undefined, 0, workspace, false);
   return (
@@ -530,6 +545,10 @@ export function DraftComposer({
       running={false}
       disabled={!connected ? "电脑尚未连接" : draft.loading ? "正在读取电脑上的模型…" : undefined}
       placeholder="输入消息"
+      initialDraft={restore?.text}
+      initialAttachments={restore?.attachments}
+      initialError={restore ? `发送失败：${restore.error}` : undefined}
+      onInitialUsed={onRestoreUsed}
       onSubmit={async (input) => {
         await onCreate(input, draft.createOptions());
         return true;

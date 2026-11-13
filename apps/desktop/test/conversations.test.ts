@@ -42,6 +42,8 @@ function fixture(
   const stalled = new Map<string, { id: unknown }>();
   /** 被扣住的 session.subscribe 响应（releaseSubscribe 放行） */
   const stalledSub = new Map<string, { id: unknown }>();
+  const heldSubmits = new Map<string, { id: unknown; text: string }>();
+  let holdUserMessage = false;
   let changes: TurnChanges[] = [];
   let changesError = false;
   /** crash 后为 true：failResume 只在重建的新后台生效 */
@@ -156,6 +158,13 @@ function fixture(
         )
           result = null;
         if (request.method === "session.submit") {
+          if (holdUserMessage) {
+            heldSubmits.set(id, {
+              id: request.id,
+              text: String(request.params.text ?? ""),
+            });
+            return;
+          }
           if (rejectSubmit) {
             serverEnd.send(
               JSON.stringify({
@@ -185,7 +194,9 @@ function fixture(
                   seq,
                   time: "2026-01-01T00:00:00Z",
                   type: "message.user",
-                  payload: { content: [{ type: "text", text: "hi" }] },
+                  payload: {
+                    content: [{ type: "text", text: String(request.params.text ?? "hi") }],
+                  },
                 },
               },
             }),
@@ -303,9 +314,37 @@ function fixture(
     stalledSub.delete(id);
     server.send(JSON.stringify({ jsonrpc: "2.0", id: pending.id, result: { lastSeq: 0 } }));
   }
+  function holdSubmit() {
+    holdUserMessage = true;
+  }
+  function releaseUserMessage(id: string) {
+    const pending = heldSubmits.get(id);
+    if (pending === undefined || server === undefined) throw new Error("没有卡住的提交");
+    heldSubmits.delete(id);
+    const seq = (seqs.get(id) ?? 0) + 1;
+    seqs.set(id, seq);
+    server.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "event",
+        params: {
+          sessionId: id,
+          event: {
+            sessionId: id,
+            seq,
+            time: "2026-01-01T00:00:00Z",
+            type: "message.user",
+            payload: { content: [{ type: "text", text: pending.text }] },
+          },
+        },
+      }),
+    );
+  }
   return {
     changed,
     controller,
+    holdSubmit,
+    releaseUserMessage,
     pool,
     calls,
     opened,
@@ -745,8 +784,65 @@ describe("send 接受语义与创建选项", () => {
       "图片格式或尺寸不符合要求",
     );
     expect(f.controller.selectedId).toBeNull();
+    expect(f.controller.rejectedDraft).toMatchObject({ text: "hi" });
     await vi.waitFor(() => expect(f.opened.size).toBe(0));
     expect(f.calls.some((c) => c.method === "session.close")).toBe(true);
+  });
+
+  it("createSession 返回后立即进入会话并挂上本地消息，正式条目到达后不重复", async () => {
+    const f = fixture();
+    f.holdSubmit();
+    await f.controller.newConversation("plain");
+    const pending = f.controller.send({ text: "你好", attachments: [] });
+    await vi.waitFor(() => expect(f.controller.selectedId).not.toBeNull());
+    const id = f.controller.selectedId ?? "";
+    const entry = f.controller.opened.get(id);
+    expect(entry?.outgoing.items.map((item) => item.input.text)).toEqual(["你好"]);
+    expect(entry?.busy).toBe(true);
+    expect(entry?.view.entries.filter((item) => item.kind === "user")).toHaveLength(0);
+    f.releaseUserMessage(id);
+    await pending;
+    expect(entry?.outgoing.items).toEqual([]);
+    expect(entry?.view.entries.filter((item) => item.kind === "user")).toHaveLength(1);
+    expect(f.controller.selectedId).toBe(id);
+  });
+
+  it("上一条还在准备时连发，第二条进本地待发，快照到达后替换", async () => {
+    const f = fixture();
+    f.holdSubmit();
+    await f.controller.open("a", "project");
+    const first = f.controller.submitInput({ text: "先", attachments: [] });
+    await vi.waitFor(() => expect(f.controller.opened.get("a")?.outgoing.items).toHaveLength(1));
+    const second = f.controller.submitInput({ text: "后", attachments: [] }, "steer");
+    await vi.waitFor(() =>
+      expect(
+        f.controller.opened.get("a")?.outgoing.items.map((item) => [item.place, item.input.text]),
+      ).toEqual([
+        ["turn", "先"],
+        ["pending", "后"],
+      ]),
+    );
+    f.releaseUserMessage("a");
+    await first;
+    await second;
+    expect(f.controller.opened.get("a")?.outgoing.items.map((item) => item.place)).toEqual([
+      "pending",
+    ]);
+    f.event("a", "input.pending", {
+      paused: false,
+      items: [
+        {
+          id: "pi-1",
+          mode: "steer",
+          text: "后",
+          attachments: 0,
+          createdAt: new Date().toISOString(),
+          paused: false,
+        },
+      ],
+    });
+    await vi.waitFor(() => expect(f.controller.opened.get("a")?.outgoing.items).toEqual([]));
+    expect(f.calls.filter((call) => call.method === "session.enqueueInput")).toHaveLength(1);
   });
 
   it("已打开的会话提交被 invalid_model 拒绝：记入 openErrors 供换模型卡片（ADR-0054）", async () => {

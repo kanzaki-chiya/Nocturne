@@ -13,6 +13,11 @@ export interface AttachmentImageSource {
   blob?: (attachment: ImageAttachment) => Blob | undefined;
   /** sha256（小写 hex）→ object URL，重复登记返回同一 URL */
   register: (data: Uint8Array, mimeType: string) => Promise<string>;
+  /**
+   * 同步登记一块本地预览（键由调用方给，通常是 `local:` 前缀）。
+   * 哈希完成后把同一条 URL 也记到 sha256 上，正式消息换上真实 sha256 时图不重载。
+   */
+  preview: (key: string, data: Uint8Array, mimeType: string) => void;
   load: (
     attachment: ImageAttachment,
     session: Pick<RpcSession, "readAttachment">,
@@ -47,6 +52,22 @@ export function createAttachmentImageSource(): AttachmentImageSource {
     url: (attachment) => urls.get(attachment.sha256),
     blob: (attachment) => blobs.get(attachment.sha256),
     register,
+    preview(key, data, mimeType) {
+      if (urls.has(key)) return;
+      const current = generation;
+      const blob = new Blob([data as BlobPart], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      urls.set(key, url);
+      blobs.set(key, blob);
+      void crypto.subtle.digest("SHA-256", data as BufferSource).then((buffer) => {
+        if (current !== generation) return;
+        const sha = hex(buffer);
+        if (!urls.has(sha)) {
+          urls.set(sha, url);
+          blobs.set(sha, blob);
+        }
+      });
+    },
     load(attachment, session) {
       const cached = urls.get(attachment.sha256);
       if (cached !== undefined) return Promise.resolve(cached);

@@ -14,7 +14,15 @@ import {
   type PhoneConnectionOptions,
 } from "./connection";
 import { pairPhone, pairingError, parsePairingLink, parsePairingTarget } from "./pairing";
-import { PhoneSessions, phoneStatus, submitAccepted, type PhoneCreateOptions } from "./sessions";
+import { submitBody } from "../outgoing";
+import {
+  failPhoneOutgoing,
+  phoneStatus,
+  PhoneSessions,
+  submitAccepted,
+  trackPhoneOutgoing,
+  type PhoneCreateOptions,
+} from "./sessions";
 import type { PairedHost, PhoneStorage } from "./storage";
 import { webHost, type WebHost } from "./host";
 import { pushAvailable, type PhonePush } from "./push";
@@ -184,6 +192,12 @@ export function PhoneApp({
         : "手机",
   );
   const [error, setError] = useState("");
+  const [draftRestore, setDraftRestore] = useState<{
+    path: string;
+    text: string;
+    attachments: ComposerSubmit["attachments"];
+    error: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
   const [installHint, setInstallHint] = useState(false);
@@ -566,25 +580,32 @@ export function PhoneApp({
   const createIn = async (path: string, input: ComposerSubmit, options: PhoneCreateOptions) => {
     if (!hostId) throw new Error("电脑尚未连接");
     const target = await sessions.create(path, options);
+    const local = trackPhoneOutgoing(target, input, "turn", "steer");
+    target.busy = true;
     navigate({ kind: "session", hostId, sessionId: target.session.id });
-    await submitAccepted(
-      target,
-      {
-        text: input.text,
-        ...(input.skill ? { skill: input.skill } : {}),
-        ...(input.delegate ? { delegate: input.delegate } : {}),
-        ...(input.workMode ? { workMode: input.workMode } : {}),
-        ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
-      },
-      (failure) => {
+    try {
+      await submitAccepted(target, submitBody(input), (failure) => {
+        target.busy = false;
         if (
           failure !== undefined &&
           !(failure instanceof RpcError && failure.code === "connection_closed")
         )
           setError(failure instanceof Error ? failure.message : "发送失败");
         void sessions.refresh().catch(() => undefined);
-      },
-    );
+      });
+    } catch (failure) {
+      failPhoneOutgoing(target, local.id);
+      target.busy = false;
+      sessions.setSelected(undefined);
+      setDraftRestore({
+        path,
+        text: input.draftText ?? input.text,
+        attachments: input.attachments,
+        error: failure instanceof Error ? failure.message : "发送失败",
+      });
+      navigate({ kind: "project", hostId, path });
+      throw failure;
+    }
     // 与桌面相同：被接收后才记入输入历史，失败不影响发送
     if (input.text !== "")
       void target.session.recordInputHistory(input.text).catch(() => undefined);
@@ -963,6 +984,10 @@ export function PhoneApp({
           runtime={connected ? sessions.client?.runtime : undefined}
           workspace={page.path}
           connected={connected}
+          restore={draftRestore?.path === page.path ? draftRestore : undefined}
+          onRestoreUsed={() => {
+            setDraftRestore(null);
+          }}
           onCreate={(input, options) => createIn(page.path, input, options)}
         />
       </>
