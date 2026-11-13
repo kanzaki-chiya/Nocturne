@@ -6,7 +6,7 @@ import {
   parseWorkModeSlash,
   type ExternalAgentOverview,
   type SkillOverview,
-  type SwarmMemberView,
+  type EnsembleMemberView,
 } from "@nocturne/core/protocol";
 import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
@@ -73,20 +73,20 @@ export function SessionScreen({
   onPanel,
   onPanelBack,
   onPanelClose,
-  onOpenSwarm,
-  onOpenSwarmMember,
-  swarmMember,
+  onOpenEnsemble,
+  onOpenEnsembleMember,
+  ensembleMember,
 }: {
   panel?: PhonePanelPage | undefined;
   onPanel?: ((panel: PhonePanelPage) => void) | undefined;
   onPanelBack?: (() => void) | undefined;
   onPanelClose?: (() => void) | undefined;
   /** 侧边栏合奏组头或 `/ensemble board` 进入全屏合奏页 */
-  onOpenSwarm?: (() => void) | undefined;
+  onOpenEnsemble?: (() => void) | undefined;
   /** 侧边栏合奏成员行进入该成员会话页 */
-  onOpenSwarmMember?: ((member: SwarmMemberView) => void) | undefined;
+  onOpenEnsembleMember?: ((member: EnsembleMemberView) => void) | undefined;
   /** 成员会话模式：标题 `@name`，移除或结束后只读冻结 */
-  swarmMember?: { name: string; frozen: boolean } | undefined;
+  ensembleMember?: { name: string; frozen: boolean } | undefined;
   entry: PhoneSession;
   /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
   sessions: PhoneSessions;
@@ -240,13 +240,13 @@ export function SessionScreen({
     // ADR-0076 §7 / ADR-0089 §10：无任务子命令
     const work = parseWorkModeSlash(line);
     if (work?.kind === "action") {
-      if (work.action === "swarm-board" || work.action === "swarm-end") {
-        if (view.swarm === undefined) return "用法：/ensemble 任务";
-        if (work.action === "swarm-board") {
-          onOpenSwarm?.();
+      if (work.action === "ensemble-board" || work.action === "ensemble-end") {
+        if (view.ensemble === undefined) return "用法：/ensemble 任务";
+        if (work.action === "ensemble-board") {
+          onOpenEnsemble?.();
           return true;
         }
-        await session.endSwarm();
+        await session.endEnsemble();
         return true;
       }
       if (work.action === "goal-status") return goalStatusLines(view.goal, Date.now()).join("\n");
@@ -304,7 +304,7 @@ export function SessionScreen({
     },
   };
 
-  if (swarmMember?.frozen === true) {
+  if (ensembleMember?.frozen === true) {
     return (
       <Conversation
         session={{
@@ -323,7 +323,7 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
-        swarmRecipientLabel={`@${swarmMember.name}`}
+        ensembleRecipientLabel={`@${ensembleMember.name}`}
       />
     );
   }
@@ -331,7 +331,7 @@ export function SessionScreen({
   return (
     <>
       {headerSlot &&
-        swarmMember === undefined &&
+        ensembleMember === undefined &&
         createPortal(
           <>
             <SessionHeaderTools
@@ -388,8 +388,8 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
-        swarmRecipientLabel={swarmMember ? `@${swarmMember.name}` : undefined}
-        {...(swarmMember === undefined
+        ensembleRecipientLabel={ensembleMember ? `@${ensembleMember.name}` : undefined}
+        {...(ensembleMember === undefined
           ? {
               onResubmit: async (targetSeq, text, mode, workMode) => {
                 // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
@@ -434,8 +434,8 @@ export function SessionScreen({
           onNavigate={(next) => onPanel?.(next)}
           onBack={() => onPanelBack?.()}
           onClose={() => onPanelClose?.()}
-          onOpenSwarm={onOpenSwarm}
-          onOpenSwarmMember={onOpenSwarmMember}
+          onOpenEnsemble={onOpenEnsemble}
+          onOpenEnsembleMember={onOpenEnsembleMember}
           onError={onError}
           loadDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
         />

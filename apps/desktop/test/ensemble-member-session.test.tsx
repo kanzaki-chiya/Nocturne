@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 成员会话标签（src/swarm-member-session.ts）：挂载时经幂等的 session.open
+ * 成员会话标签（src/ensemble-member-session.ts）：挂载时经幂等的 session.open
  * 打开成员子会话并折叠事件，可直接对成员发私信、确认权限；关闭标签只释放
  * 本连接的引用（session.close），绝不中断仍在工作的成员。
  */
@@ -9,7 +9,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { createMemoryTransportPair, createRpcClient } from "@nocturne/rpc/client";
 
-import { useSwarmMemberSession, type SwarmMemberSessionReady } from "../src/swarm-member-session";
+import {
+  useEnsembleMemberSession,
+  type EnsembleMemberSessionReady,
+} from "../src/ensemble-member-session";
 
 afterEach(cleanup);
 
@@ -97,14 +100,14 @@ function harness() {
 it("经 session.open 打开成员子会话：折叠事件、发私信、确认权限", async () => {
   const server = harness();
   const hook = renderHook(() =>
-    useSwarmMemberSession({
+    useEnsembleMemberSession({
       ensureClient: server.ensureClient,
       childSessionId: CHILD,
-      fallbackCwd: "Z:/coordinator",
+      fallbackCwd: "Z:/maestro",
     }),
   );
   await vi.waitFor(() => expect(hook.result.current.status).toBe("ready"));
-  const ready = () => hook.result.current as SwarmMemberSessionReady;
+  const ready = () => hook.result.current as EnsembleMemberSessionReady;
 
   // 打开走 session.open（幂等），cwd 取会话元数据而不是回退值
   expect(server.calls("session.open").map((call) => call.params)).toEqual([{ sessionId: CHILD }]);
@@ -169,7 +172,7 @@ it("经 session.open 打开成员子会话：折叠事件、发私信、确认�
     { sessionId: CHILD, requestId: "req-1", reply: { decision: "allow" } },
   ]);
 
-  // 私信：直接对成员会话 submit，不经过协调者
+  // 私信：直接对成员会话 submit，不经过指挥
   await act(async () => {
     await ready().session.submit({ text: "把校验补上" });
   });
@@ -199,10 +202,10 @@ it("经 session.open 打开成员子会话：折叠事件、发私信、确认�
 it("关闭成员标签只退订并 session.close，不中断成员", async () => {
   const server = harness();
   const hook = renderHook(() =>
-    useSwarmMemberSession({
+    useEnsembleMemberSession({
       ensureClient: server.ensureClient,
       childSessionId: CHILD,
-      fallbackCwd: "Z:/coordinator",
+      fallbackCwd: "Z:/maestro",
     }),
   );
   await vi.waitFor(() => expect(hook.result.current.status).toBe("ready"));

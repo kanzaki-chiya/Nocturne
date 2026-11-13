@@ -178,18 +178,18 @@ it("关闭进行中重新打开会等待关闭完成再 resume", async () => {
   h.client.close();
 });
 
-it("活动 Swarm 的协调者会话在切走且空闲时不随 closeIfIdle 关闭，结束后照常关闭", async () => {
+it("活动 Ensemble 的指挥会话在切走且空闲时不随 closeIfIdle 关闭，结束后照常关闭", async () => {
   const h = harness();
   await h.sessions.connected(h.client);
   const entry = await h.sessions.open("coord");
   h.listeners.get("coord")?.({
-    type: "swarm.created",
+    type: "ensemble.created",
     sessionId: "coord",
     seq: 1,
     time: new Date().toISOString(),
     payload: { title: "API 输入校验" },
   } as RuntimeEvent);
-  expect(entry.view.swarm?.status).toBe("active");
+  expect(entry.view.ensemble?.status).toBe("active");
 
   h.sessions.setSelected(undefined);
   await Promise.resolve();
@@ -197,7 +197,7 @@ it("活动 Swarm 的协调者会话在切走且空闲时不随 closeIfIdle 关�
   expect(h.sessions.opened.has("coord")).toBe(true);
 
   h.listeners.get("coord")?.({
-    type: "swarm.ended",
+    type: "ensemble.ended",
     sessionId: "coord",
     seq: 2,
     time: new Date().toISOString(),

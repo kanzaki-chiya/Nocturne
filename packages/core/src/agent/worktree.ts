@@ -364,7 +364,7 @@ export async function settleWorktree(record: WorktreeRecord): Promise<SubagentCh
 }
 
 /**
- * 常驻 Swarm 成员的工作树增量检查点（ADR-0089 §4）：
+ * 常驻 Ensemble 成员的工作树增量检查点（ADR-0089 §4）：
  * 若有未提交改动则在自身分支上提交一次并刷新 `.json` 记录；无改动时保留工作树不删除。
  */
 export async function checkpointWorktreeTurn(

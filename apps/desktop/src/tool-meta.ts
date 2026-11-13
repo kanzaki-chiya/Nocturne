@@ -1,5 +1,5 @@
 /**
- * 工具行的展示名（DESIGN.md §8「工具行用中文名称」）：内置工具、Swarm 工具与 MCP 工具
+ * 工具行的展示名（DESIGN.md §8「工具行用中文名称」）：内置工具、Ensemble 工具与 MCP 工具
  * 显示给用户的名称。桌面端、手机网页与子代理面板共用；只含纯数据与纯函数，不依赖 React。
  */
 import type { ToolEntry } from "@nocturne/core/protocol";
@@ -24,13 +24,13 @@ export const TOOL_META: Record<string, string> = {
   ask_user: "提问",
   schedule: "定时任务",
   mcp_search: "搜索 MCP 工具",
-  swarm_init: "合奏",
-  swarm_add_member: "添加",
-  swarm_post: "发帖",
-  swarm_change_model: "换模型",
-  swarm_remove_member: "移除",
-  swarm_end: "结束",
-  swarm_checkout: "检出",
+  ensemble_init: "合奏",
+  ensemble_add_member: "添加",
+  ensemble_post: "发帖",
+  ensemble_change_model: "换模型",
+  ensemble_remove_member: "移除",
+  ensemble_end: "结束",
+  ensemble_checkout: "检出",
 };
 
 const MCP_NAME_PREFIX = "mcp__";

@@ -94,20 +94,20 @@ export interface ShellTab {
 }
 
 /**
- * Swarm 面板标签（ADR-0089）：每个会话最多一个；本机偏好里只存「有这个标签」，不存帖子。
+ * Ensemble 面板标签（ADR-0089）：每个会话最多一个；本机偏好里只存「有这个标签」，不存帖子。
  */
-export interface SwarmTab {
+export interface EnsembleTab {
   id: string;
-  kind: "swarm";
+  kind: "ensemble";
 }
 
 /**
- * Swarm 成员会话标签（ADR-0089 §8）：每名成员最多一个标签，标题 `@memberName`，
+ * Ensemble 成员会话标签（ADR-0089 §8）：每名成员最多一个标签，标题 `@memberName`，
  * 经 `session.open` 打开 `childSessionId`。
  */
-export interface SwarmMemberTab {
+export interface EnsembleMemberTab {
   id: string;
-  kind: "swarm_member";
+  kind: "ensemble_member";
   childSessionId: string;
   memberName: string;
 }
@@ -120,15 +120,15 @@ export type PanelTab =
   | BrowserTab
   | SubagentTab
   | ShellTab
-  | SwarmTab
-  | SwarmMemberTab;
+  | EnsembleTab
+  | EnsembleMemberTab;
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Swarm」「成员会话」（新标签页、终端不恢复） */
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
-  | { id: string; kind: "swarm" }
-  | { id: string; kind: "swarm_member"; childSessionId: string; memberName: string }
+  | { id: string; kind: "ensemble" }
+  | { id: string; kind: "ensemble_member"; childSessionId: string; memberName: string }
   | {
       id: string;
       kind: "subagent";
@@ -336,10 +336,10 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const tabs: StoredPanelTab[] = [];
   const ids = new Set<string>();
   const subagentChildren = new Set<string>();
-  const swarmMembers = new Set<string>();
+  const ensembleMembers = new Set<string>();
   const shellTasks = new Set<string>();
   let changes = false;
-  let swarm = false;
+  let ensemble = false;
   for (const item of value) {
     if (typeof item !== "object" || item === null) continue;
     const raw = item as Record<string, unknown>;
@@ -348,21 +348,21 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       changes = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "changes" });
-    } else if (raw.kind === "swarm" && !swarm) {
-      swarm = true;
+    } else if (raw.kind === "ensemble" && !ensemble) {
+      ensemble = true;
       ids.add(raw.id);
-      tabs.push({ id: raw.id, kind: "swarm" });
+      tabs.push({ id: raw.id, kind: "ensemble" });
     } else if (
-      raw.kind === "swarm_member" &&
+      raw.kind === "ensemble_member" &&
       str(raw.childSessionId) &&
       str(raw.memberName) &&
-      !swarmMembers.has(raw.childSessionId)
+      !ensembleMembers.has(raw.childSessionId)
     ) {
-      swarmMembers.add(raw.childSessionId);
+      ensembleMembers.add(raw.childSessionId);
       ids.add(raw.id);
       tabs.push({
         id: raw.id,
-        kind: "swarm_member",
+        kind: "ensemble_member",
         childSessionId: raw.childSessionId,
         memberName: raw.memberName,
       });
@@ -428,12 +428,12 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
 export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
-    if (tab.kind === "swarm") return [{ id: tab.id, kind: "swarm" }];
-    if (tab.kind === "swarm_member") {
+    if (tab.kind === "ensemble") return [{ id: tab.id, kind: "ensemble" }];
+    if (tab.kind === "ensemble_member") {
       return [
         {
           id: tab.id,
-          kind: "swarm_member",
+          kind: "ensemble_member",
           childSessionId: tab.childSessionId,
           memberName: tab.memberName,
         },

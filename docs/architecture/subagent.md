@@ -185,7 +185,7 @@ launch(request, ctx)
 
 **结论：本阶段采用 (b) + (c)**。理由：(b) 是现有语义的直接复用且安全保证可证明；(c) 的预设让"天然不需要确认"的只读子代理不受影响；`--yes`、规则、`PermissionRequest` Hook 与项目 Grant 覆盖了无人值守场景下的大部分放行需求；交互式 `default` 预设下子代理做不了的写/执行操作，子代理在结果里说明需求、父代理自己执行即可——比"批准 task 调用即授权整个子任务"（oh-my-pi 的 yolo 做法，明确不采用）更符合逐项把关的权限哲学。(a) 留作以后扩展：在 `PermissionGate` 增加可选的 `forwardAsk` 委托即可接入，不推翻本设计。
 
-**修订（[ADR-0089](../decisions/ADR-0089-swarm.md) §8：Swarm 常驻成员权限确认）**：一次性 `task` 子代理与外部 ACP agent 保持上述非交互收敛不变；但在 `/swarm` 执行方式中，协调者没有改文件工具，全部代码修改与验证命令均由常驻成员子会话执行，若沿用非交互直接拒绝，默认 `default` 预设下 Swarm 无法正常工作。因此在交互式宿主下，Swarm 成员子会话使用交互式 `PermissionGate`，其 `ask` 请求等待用户确认而不再按 `non_interactive` 直接拒绝。请求原样挂在成员自己的子会话上（走成员会话既有的 `permission.requested` 与 `respondPermission` 通道），协调者派生视图汇总等待确认的成员名单供客户端提示与跳转；`smart` 预设照常先经安全审查器，其他预设与授权规则不变。
+**修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8：Ensemble 常驻成员权限确认）**：一次性 `task` 子代理与外部 ACP agent 保持上述非交互收敛不变；但在 `/ensemble` 执行方式中，指挥（Maestro，`@maestro`）没有改文件工具，全部代码修改与验证命令均由常驻成员子会话执行，若沿用非交互直接拒绝，默认 `default` 预设下 Ensemble 无法正常工作。因此在交互式宿主下，Ensemble 成员子会话使用交互式 `PermissionGate`，其 `ask` 请求等待用户确认而不再按 `non_interactive` 直接拒绝。请求原样挂在成员自己的子会话上（走成员会话既有的 `permission.requested` 与 `respondPermission` 通道），指挥派生视图汇总等待确认的成员名单供客户端提示与跳转；`smart` 预设照常先经安全审查器，其他预设与授权规则不变。
 
 ### 7.2 子会话的有效策略
 
@@ -257,8 +257,8 @@ launch(request, ctx)
 
 精确类型、RPC 方法、回放算法、错误与清理契约以 [rpc.md 第 4.1 节](../protocols/rpc.md#41-子会话只读观察adr-0060-第-4-轮) 为主文档。实现位于 `session/subagent-registry.ts`、`session/subagent-observe.ts` 与 `session/readonly-log.ts`，由 Runtime 装配并向 launcher 注入共享登记簿。
 
-- **发现不靠解析进度文本**：新增 `Runtime.listSubagents({parentSessionId})`，返回直接内置子会话（不含 Swarm 常驻成员，见 [ADR-0089](../decisions/ADR-0089-swarm.md)）的 child id、父 callId、启动档位/任务摘要、起止时间与可证明的状态。`session.created.parent` 是持久映射；运行中无需等父 `tool.completed.output`。可复用只读日志头索引查历史映射，不新增事件或事件字段，也不把当前档位配置用于解释历史。
-- **Runtime 级观察登记簿**：与运行级 limiter 同寿命，注入所有 launcher（递归共享），不是 Hub 的 sessions 表。子创建事件提交后、执行和进度转发前登记 child Session（Swarm 常驻成员不进入活动子代理登记簿，其生命期、状态与界面入口归 `SessionView.swarm` 与 `session.open`，仅通过 `trackSession` 参与会话树授权 root 解析）；登记时可捕获 request 的档位与摘要，父日志仍保留原始任务。索引以 `(parentSessionId, callId, childSessionId)` 关联；同一父调用意外出现多个 child 时保留各自 id，不任取一个覆盖。launcher 在 finally 中处理 SessionEnd、等写入与 close 后才发内存终止信号并移除活动项；异常和失败也必须走这条清理路径。观察者抛错或退出不得影响运行、锁、并发槽或结果返回。
+- **发现不靠解析进度文本**：新增 `Runtime.listSubagents({parentSessionId})`，返回直接内置子会话（不含 Ensemble 常驻成员，见 [ADR-0089](../decisions/ADR-0089-ensemble.md)）的 child id、父 callId、启动档位/任务摘要、起止时间与可证明的状态。`session.created.parent` 是持久映射；运行中无需等父 `tool.completed.output`。可复用只读日志头索引查历史映射，不新增事件或事件字段，也不把当前档位配置用于解释历史。
+- **Runtime 级观察登记簿**：与运行级 limiter 同寿命，注入所有 launcher（递归共享），不是 Hub 的 sessions 表。子创建事件提交后、执行和进度转发前登记 child Session（Ensemble 常驻成员不进入活动子代理登记簿，其生命期、状态与界面入口归 `SessionView.ensemble` 与 `session.open`，仅通过 `trackSession` 参与会话树授权 root 解析）；登记时可捕获 request 的档位与摘要，父日志仍保留原始任务。索引以 `(parentSessionId, callId, childSessionId)` 关联；同一父调用意外出现多个 child 时保留各自 id，不任取一个覆盖。launcher 在 finally 中处理 SessionEnd、等写入与 close 后才发内存终止信号并移除活动项；异常和失败也必须走这条清理路径。观察者抛错或退出不得影响运行、锁、并发槽或结果返回。
 - **结束和重启**：活动登记簿不落盘；结束后无需永久保留 Session 引用，按子日志 parent 重建映射，父工具输入补展示元数据。重启不复活子代理，不把旧的 running 工具行当作活动登记；只读日志前缀决定可显示内容。已结束、未收束和来自别的进程的日志都能看，但后两者不能被伪装成本后台实时运行或成功。子会话被删除后保留的面板标签显示不可用，不自动派生或恢复运行。
 - **无缝接流与自然结束**：新增 `Runtime.observeSubagent` 返回观察对象，不返回 `RuntimeSession`。活动 child 直接接已有 Session 的已提交事件，回放先监听后取快照、按 seq 去重；终止信号与事件一起衔接。不能在一个 `turn.completed(done)` 后就退订，因为 launcher 可能继续催促。无活动项走独立只读 reader，不经 load/repair；不完整尾行仅在内存略过，不取锁、不写任何文件。EOF 是读取完成，不是子代理成功。
 - **嵌套**：观察 API 以直接父子关系校验，能看任意深度的内置 child；先 list 当前 child 的直接子级，再携带该 child 作为 parent 观察孙级。本轮桌面不做嵌套跳转入口，不展开递归树；顶层概览只列直接子代理。
@@ -318,13 +318,13 @@ launch(request, ctx)
 
 ## 16. 本阶段不做
 
-- **Swarm / 编排**：Phase 6 的 `task` 子代理不做编排；常驻成员与留言板协作的 `/swarm` 执行方式见 [ADR-0089](../decisions/ADR-0089-swarm.md)；
+- **Ensemble / 编排**：Phase 6 的 `task` 子代理不做编排；常驻成员与留言板协作的 `/ensemble` 执行方式见 [ADR-0089](../decisions/ADR-0089-ensemble.md)；
 - **角色系统 / 自定义 agent 定义文件**：第 14 节；
-- **Agent 间消息总线**：一次性 `task` 子代理之间无直接通道；Swarm 成员间共享留言板与 `@` 提及见 [ADR-0089](../decisions/ADR-0089-swarm.md)；
+- **Agent 间消息总线**：一次性 `task` 子代理之间无直接通道；Ensemble 成员间共享留言板与 `@` 提及见 [ADR-0089](../decisions/ADR-0089-ensemble.md)；
 - **分布式执行**：子会话在同一进程内运行；
-- **子代理常驻与唤醒**：`task` 在 `finish` 后即关闭；Swarm 常驻成员与 `@` 唤醒见 [ADR-0089](../decisions/ADR-0089-swarm.md)；
+- **子代理常驻与唤醒**：`task` 在 `finish` 后即关闭；Ensemble 常驻成员与 `@` 唤醒见 [ADR-0089](../decisions/ADR-0089-ensemble.md)；
 - **同步隔离工作区**：同步子代理与父会话共享工作区；后台工作树见第 20 节；
-- **子会话权限冒泡**：一次性 `task` 见 7.1；Swarm 成员权限确认见 [ADR-0089](../decisions/ADR-0089-swarm.md) §8；
+- **子会话权限冒泡**：一次性 `task` 见 7.1；Ensemble 成员权限确认见 [ADR-0089](../decisions/ADR-0089-ensemble.md) §8；
 - **并行 task 数组**：一次调用一个子会话；批量并行等并行调度存在后再评估；
 
 - **配置文件 `subagent` 段**：默认值已覆盖本阶段；开关走 `RuntimeOptions.subagent.enabled` 或权限规则 `subagent * → deny`。

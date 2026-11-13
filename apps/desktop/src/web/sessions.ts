@@ -59,7 +59,7 @@ export interface PhoneSession {
   outgoing: OutgoingBook;
   /** 本地发送尚未被 Core 接受 */
   busy: boolean;
-  /** Swarm 成员子会话句柄（经 `session.open` 打开，退出成员页即 `session.close` 释放，不中断成员） */
+  /** Ensemble 成员子会话句柄（经 `session.open` 打开，退出成员页即 `session.close` 释放，不中断成员） */
   member?: boolean;
 }
 export interface PhoneCreateOptions {
@@ -227,8 +227,8 @@ export class PhoneSessions {
       // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
       entry.pendingInputs.items.length > 0 ||
       entry.outgoing.items.some((item) => item.place === "pending") ||
-      // ADR-0089：活动 Swarm 的协调者会话切走时不能关，否则整个 Swarm 会被收掉
-      entry.view.swarm?.status === "active" ||
+      // ADR-0089：活动 Ensemble 的指挥会话切走时不能关，否则整个 Ensemble 会被收掉
+      entry.view.ensemble?.status === "active" ||
       this.opened.get(id) !== entry
     )
       return;
@@ -290,7 +290,7 @@ export class PhoneSessions {
         (entry.member === true ||
           (phoneStatus(entry) === "idle" &&
             entry.pendingInputs.items.length === 0 &&
-            entry.view.swarm?.status !== "active"))
+            entry.view.ensemble?.status !== "active"))
       ) {
         this.opened.delete(id);
         continue;
@@ -407,7 +407,7 @@ export class PhoneSessions {
         !!(
           entry.view.pendingPermission ??
           entry.view.pendingQuestion ??
-          (entry.view.swarm?.awaitingPermissionMembers.length ? true : undefined)
+          (entry.view.ensemble?.awaitingPermissionMembers.length ? true : undefined)
         )
       );
     });

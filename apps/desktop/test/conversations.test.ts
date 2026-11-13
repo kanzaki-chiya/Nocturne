@@ -593,22 +593,22 @@ describe("desktop conversation lifecycle", () => {
     expect(f.failures).toEqual([]);
   });
 
-  it("活动 Swarm 的协调者切走且空闲也不关；Swarm 结束后照常按空闲规则释放", async () => {
+  it("活动 Ensemble 的指挥切走且空闲也不关；Ensemble 结束后照常按空闲规则释放", async () => {
     const f = fixture();
     await f.controller.open("coord", "project");
-    f.event("coord", "swarm.created", { title: "登录页改造" });
+    f.event("coord", "ensemble.created", { title: "登录页改造" });
     await vi.waitFor(() =>
-      expect(f.controller.opened.get("coord")?.view.swarm?.status).toBe("active"),
+      expect(f.controller.opened.get("coord")?.view.ensemble?.status).toBe("active"),
     );
-    // 用户切到别的会话：协调者空闲但 Swarm 还在跑，不能收掉（成员会话依赖它）
+    // 用户切到别的会话：指挥空闲但 Ensemble 还在跑，不能收掉（成员会话依赖它）
     await f.controller.open("other", "project");
     expect(f.controller.selectedId).toBe("other");
     expect(f.opened.has("coord")).toBe(true);
     expect(
       f.calls.some((c) => c.method === "session.close" && c.params.sessionId === "coord"),
     ).toBe(false);
-    // Swarm 结束：空闲且没被选中，照常关闭
-    f.event("coord", "swarm.ended", { reason: "user" });
+    // Ensemble 结束：空闲且没被选中，照常关闭
+    f.event("coord", "ensemble.ended", { reason: "user" });
     await vi.waitFor(() => expect(f.opened.has("coord")).toBe(false));
     expect(
       f.calls.filter((c) => c.method === "session.close" && c.params.sessionId === "coord"),

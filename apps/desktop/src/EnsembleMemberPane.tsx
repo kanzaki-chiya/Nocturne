@@ -1,10 +1,10 @@
 /**
  * 成员会话标签（ADR-0089 §8）：经 `session.open` 打开常驻成员子会话，复用 `Conversation`、
  * `QuestionCard` 与 `Composer` 实现私信、权限确认、回答提问与中断。
- * 成员被移除或 Swarm 结束后转为只读冻结展示，隐藏输入区；关闭标签只释放句柄。
+ * 成员被移除或 Ensemble 结束后转为只读冻结展示，隐藏输入区；关闭标签只释放句柄。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SwarmMemberStatus, SwarmView } from "@nocturne/core/protocol";
+import type { EnsembleMemberStatus, EnsembleView } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
@@ -28,13 +28,13 @@ import {
   draftTextOf,
   type LocalOutgoing,
 } from "./outgoing";
-import { useSwarmMemberSession } from "./swarm-member-session";
+import { useEnsembleMemberSession } from "./ensemble-member-session";
 
-export interface SwarmMemberPaneProps {
+export interface EnsembleMemberPaneProps {
   childSessionId: string;
   memberName: string;
-  memberStatus: SwarmMemberStatus | undefined;
-  swarmStatus: SwarmView["status"] | undefined;
+  memberStatus: EnsembleMemberStatus | undefined;
+  ensembleStatus: EnsembleView["status"] | undefined;
   workspace: string;
   ensureClient: () => Promise<RpcClient>;
   images: AttachmentImageSource;
@@ -44,11 +44,11 @@ export interface SwarmMemberPaneProps {
   pickImages: DesktopHost["pickImages"];
 }
 
-export function SwarmMemberPane({
+export function EnsembleMemberPane({
   childSessionId,
   memberName,
   memberStatus,
-  swarmStatus,
+  ensembleStatus,
   workspace,
   ensureClient,
   images,
@@ -56,8 +56,8 @@ export function SwarmMemberPane({
   fileLinks,
   prefs,
   pickImages,
-}: SwarmMemberPaneProps) {
-  const state = useSwarmMemberSession({
+}: EnsembleMemberPaneProps) {
+  const state = useEnsembleMemberSession({
     ensureClient,
     childSessionId,
     fallbackCwd: workspace,
@@ -75,7 +75,7 @@ export function SwarmMemberPane({
     setOutgoing((book) => reconcileOutgoing(book, readyView.entries, readyPending));
   }, [readyView, readyPending, readyVersion]);
   const frozen =
-    swarmStatus !== "active" || memberStatus === undefined || memberStatus === "removed";
+    ensembleStatus !== "active" || memberStatus === undefined || memberStatus === "removed";
   const recipientLabel = `@${memberName}`;
 
   const readySession = state.status === "ready" ? state.session : undefined;
@@ -92,11 +92,11 @@ export function SwarmMemberPane({
   );
 
   if (state.status === "loading") {
-    return <div className="sp-swarm-member" />;
+    return <div className="sp-ensemble-member" />;
   }
   if (state.status === "error") {
     return (
-      <div className="sp-swarm-member">
+      <div className="sp-ensemble-member">
         <p className="conversation-error" role="alert">
           {state.message}
         </p>
@@ -108,7 +108,7 @@ export function SwarmMemberPane({
 
   if (frozen) {
     return (
-      <div className="sp-swarm-member">
+      <div className="sp-ensemble-member">
         <Conversation
           session={{
             id: session.id,
@@ -124,7 +124,7 @@ export function SwarmMemberPane({
           images={images}
           busy={false}
           fileLinks={fileLinks}
-          swarmRecipientLabel={recipientLabel}
+          ensembleRecipientLabel={recipientLabel}
         />
       </div>
     );
@@ -230,7 +230,7 @@ export function SwarmMemberPane({
   };
 
   return (
-    <div className="sp-swarm-member">
+    <div className="sp-ensemble-member">
       <Conversation
         session={session}
         view={view}
@@ -241,7 +241,7 @@ export function SwarmMemberPane({
         images={images}
         busy={showRunning}
         fileLinks={fileLinks}
-        swarmRecipientLabel={recipientLabel}
+        ensembleRecipientLabel={recipientLabel}
         localEntries={localTurnEntries(outgoing, (key, data, mimeType) => {
           images.preview(key, data, mimeType);
         })}

@@ -4,7 +4,7 @@
  */
 import type { DurableEvent } from "./events.js";
 
-export const WORK_MODE_NAMES = ["grill-me", "goal", "plan", "boost", "swarm"] as const;
+export const WORK_MODE_NAMES = ["grill-me", "goal", "plan", "boost", "ensemble"] as const;
 
 export type WorkModeName = (typeof WORK_MODE_NAMES)[number];
 
@@ -215,22 +215,22 @@ export function reducePlan(
 export function workModeOrigins(events: readonly DurableEvent[]): {
   goal?: number | undefined;
   plan?: number | undefined;
-  swarm?: number | undefined;
+  ensemble?: number | undefined;
 } {
   let goal: number | undefined;
   let plan: number | undefined;
-  let swarm: number | undefined;
+  let ensemble: number | undefined;
   for (const event of events) {
     if (event.type === "session.config_changed" && event.payload.plan === null) plan = undefined;
-    if (event.type === "swarm.ended") swarm = undefined;
-    if (event.type === "swarm.created") swarm ??= event.seq;
+    if (event.type === "ensemble.ended") ensemble = undefined;
+    if (event.type === "ensemble.created") ensemble ??= event.seq;
     if (event.type !== "message.user") continue;
     const name = userWorkMode(event.payload.workMode);
     if (name === "goal") goal = event.seq;
     if (name === "plan") plan ??= event.seq;
-    if (name === "swarm") swarm ??= event.seq;
+    if (name === "ensemble") ensemble ??= event.seq;
   }
-  return { goal, plan, swarm };
+  return { goal, plan, ensemble };
 }
 
 // ── 客户端斜杠解析 ─────────────────────────────────────────
@@ -243,8 +243,8 @@ export type WorkModeAction =
   | "goal-cancel"
   | "plan-approve"
   | "plan-cancel"
-  | "swarm-board"
-  | "swarm-end";
+  | "ensemble-board"
+  | "ensemble-end";
 
 /** 斜杠解析结果：带任务的提交、整行只是命令名时的用法提示，或会话操作 */
 export type WorkModeSlash =
@@ -257,31 +257,28 @@ const USAGE: Record<WorkModeName, string> = {
   goal: "用法：/goal 目标",
   plan: "用法：/plan 任务",
   boost: "用法：/boost 任务",
-  swarm: "用法：/ensemble 任务",
+  ensemble: "用法：/ensemble 任务",
 };
 
 /** 子命令：整行恰好是命令名（+ 一个单词）时才算，其余文字都当任务 */
 const ACTIONS: Partial<Record<WorkModeName, Record<string, WorkModeAction>>> = {
   goal: { "": "goal-status", stop: "goal-stop", resume: "goal-resume", cancel: "goal-cancel" },
   plan: { approve: "plan-approve", cancel: "plan-cancel" },
-  swarm: { board: "swarm-board", end: "swarm-end" },
+  ensemble: { board: "ensemble-board", end: "ensemble-end" },
 };
 
-/**
- * 执行方式对外显示的命令名：内部 `"swarm"` 保留兼容，对外显示 `/ensemble`（ADR-0089 修订）。
- */
+/** 执行方式对外显示的命令名，与内部名一致。 */
 export function workModeCommandName(name: string): string {
-  return name === "swarm" ? "ensemble" : name;
+  return name;
 }
 
 /**
  * 解析 `/<模式> …`；不是执行方式命令时返回 undefined。命令名与子命令不区分
- * 大小写，任务可以包含换行；`/ensemble` 与兼容别名 `/swarm` 均映射为 `swarm`。
+ * 大小写，任务可以包含换行。
  */
 export function parseWorkModeSlash(line: string): WorkModeSlash | undefined {
   const match = /^\s*\/(\S+)(?:\s+([\s\S]*))?$/.exec(line);
-  const rawName = match?.[1]?.toLowerCase();
-  const name = rawName === "ensemble" ? "swarm" : rawName;
+  const name = match?.[1]?.toLowerCase();
   if (!isWorkModeName(name)) return undefined;
   const text = (match?.[2] ?? "").trim();
   const action = ACTIONS[name]?.[text.toLowerCase()];
@@ -297,7 +294,7 @@ export function workModeDisplayText(text: string, workMode: { name: string } | u
   return text === "" ? `/${cmd}` : `/${cmd} ${text}`;
 }
 
-/** 客户端补全用的命令表（名称、一行摘要；不列兼容别名 `/swarm`） */
+/** 客户端补全用的命令表（名称、一行摘要） */
 export const WORK_MODE_COMMANDS: readonly { name: string; summary: string }[] = [
   { name: "/grill-me", summary: "追问需求" },
   { name: "/goal", summary: "目标模式" },

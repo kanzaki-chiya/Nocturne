@@ -1,45 +1,45 @@
 /**
- * Swarm 状态块（tui.md §2）：输入框下方、状态栏上方。首行 `◆ 标题  #n 作者: 首行  N 条`，
+ * Ensemble 状态块（tui.md §2）：输入框下方、状态栏上方。首行 `◆ 标题  #n 作者: 首行  N 条`，
  * 其下每行一名 working / paused / 待确认成员：状态点、对齐的名字、淡色模型名、活动摘要。
- * Swarm 不存在或已结束时不渲染。
+ * Ensemble 不存在或已结束时不渲染。
  */
 import { Text } from "ink";
 import stringWidth from "string-width";
 
-import type { SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
+import type { EnsembleMemberView, EnsembleView } from "@nocturne/core/protocol";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { padToWidth, truncateLine } from "../format.js";
 import {
   firstLine,
   shortModelName,
-  swarmActivityText,
-  swarmAuthorLabel,
-  swarmStripMembers,
-} from "../text-format-swarm.js";
+  ensembleActivityText,
+  ensembleAuthorLabel,
+  ensembleStripMembers,
+} from "../text-format-ensemble.js";
 import { useTheme } from "../theme.js";
 
-/** 状态块希望占的行数：首行 + 每名列出的成员；Swarm 不活动时为 0 */
-export function swarmStripRows(swarm: SwarmView | undefined): number {
-  if (swarm?.status !== "active") return 0;
-  return 1 + swarmStripMembers(swarm).length;
+/** 状态块希望占的行数：首行 + 每名列出的成员；Ensemble 不活动时为 0 */
+export function ensembleStripRows(ensemble: EnsembleView | undefined): number {
+  if (ensemble?.status !== "active") return 0;
+  return 1 + ensembleStripMembers(ensemble).length;
 }
 
-export function SwarmStrip({
-  swarm,
+export function EnsembleStrip({
+  ensemble,
   width,
   height,
 }: {
-  swarm: SwarmView;
+  ensemble: EnsembleView;
   width: number;
   height: number;
 }): React.JSX.Element | null {
   const env = useTuiEnv();
   const theme = useTheme();
   const g = glyphs(env);
-  if (swarm.status !== "active" || height <= 0) return null;
+  if (ensemble.status !== "active" || height <= 0) return null;
   const inner = Math.max(1, width - 1);
-  const members = swarmStripMembers(swarm);
+  const members = ensembleStripMembers(ensemble);
   const room = height - 1;
   // 放不下全部成员时最后一行写 `+N`
   const overflow = members.length > room;
@@ -47,16 +47,20 @@ export function SwarmStrip({
   const hidden = members.length - shown.length;
 
   const mark = env.ascii ? "*" : "◆";
-  const title = truncateLine(swarm.title || "合奏", Math.max(4, Math.floor(inner / 3)), g.ellipsis);
-  const count = `${swarm.posts.length} 条`;
-  const last = swarm.posts.at(-1);
+  const title = truncateLine(
+    ensemble.title || "合奏",
+    Math.max(4, Math.floor(inner / 3)),
+    g.ellipsis,
+  );
+  const count = `${ensemble.posts.length} 条`;
+  const last = ensemble.posts.at(-1);
   const head = `${mark} ${title}`;
   const fixed = stringWidth(head) + 2 + stringWidth(count) + 2;
   const latest =
     last === undefined
       ? ""
       : truncateLine(
-          `#${last.number} ${swarmAuthorLabel(last.from, last.fromKind)}: ${firstLine(last.text)}`,
+          `#${last.number} ${ensembleAuthorLabel(last.from, last.fromKind)}: ${firstLine(last.text)}`,
           Math.max(0, inner - fixed),
           g.ellipsis,
         );
@@ -64,11 +68,11 @@ export function SwarmStrip({
 
   const nameW = Math.max(0, ...members.map((m) => stringWidth(m.name)));
   const modelW = Math.max(0, ...members.map((m) => stringWidth(shortModelName(m.model))));
-  const row = (m: SwarmMemberView): React.JSX.Element => {
+  const row = (m: EnsembleMemberView): React.JSX.Element => {
     const attention = m.status === "paused" || m.pendingPermissions.length > 0;
     const prefix = `  ${g.dot} ${padToWidth(m.name, nameW)}  ${padToWidth(shortModelName(m.model), modelW)}  `;
     const activity = truncateLine(
-      swarmActivityText(m.activity),
+      ensembleActivityText(m.activity),
       Math.max(0, inner - stringWidth(prefix)),
       g.ellipsis,
     );

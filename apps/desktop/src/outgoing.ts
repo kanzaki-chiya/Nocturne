@@ -70,7 +70,7 @@ function humanUser(entry: ViewEntry): entry is UserEntry {
     entry.kind === "user" &&
     entry.subagent === undefined &&
     entry.backgroundShell === undefined &&
-    entry.swarm === undefined
+    entry.ensemble === undefined
   );
 }
 

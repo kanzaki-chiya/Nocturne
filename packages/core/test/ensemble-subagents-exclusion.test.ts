@@ -1,5 +1,5 @@
 /**
- * r1114c：Swarm 成员不再进入子代理目录（`subagentRegistry` / `listSubagents`），
+ * r1114c：Ensemble 成员不再进入子代理目录（`subagentRegistry` / `listSubagents`），
  * 同时验证分支切换保护、会话树授权、工作树删除保护、成员会话标签、关闭/重启恢复及普通 `task` 子代理不受影响。
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -69,7 +69,7 @@ const stopText = (text = "ok"): FakeScript => [
 function requestRole(req: ModelRequest): string {
   const sys = req.system.map((b) => b.text).join("\n");
   const match = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys);
-  return match?.[1] ? `member:${match[1]}` : "coordinator";
+  return match?.[1] ? `member:${match[1]}` : "maestro";
 }
 
 function makeProvider(
@@ -140,8 +140,8 @@ function makeConfig(): RuntimeConfig {
   } as unknown as RuntimeConfig;
 }
 
-describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）", { timeout: 45_000 }, () => {
-  it("Swarm 成员在 working、waiting、paused、移除后与结束后均不出现在 listSubagents 中", async () => {
+describe("Ensemble 成员不再算作运行中或已结束的子代理（r1114c）", { timeout: 45_000 }, () => {
+  it("Ensemble 成员在 working、waiting、paused、移除后与结束后均不出现在 listSubagents 中", async () => {
     const ws = makeTempDir();
     const sessionsDir = makeTempDir("nocturne-r1114c-sessions-");
 
@@ -159,22 +159,22 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     let workerStep = 0;
 
     const provider = makeProvider(async (req, who) => {
-      if (who === "coordinator") {
+      if (who === "maestro") {
         coordStep++;
         if (coordStep === 1) {
           return [
-            callTool("i1", "swarm_init", { title: "Exclusion Test" }),
-            callTool("a1", "swarm_add_member", {
+            callTool("i1", "ensemble_init", { title: "Exclusion Test" }),
+            callTool("a1", "ensemble_add_member", {
               name: "cli-1",
               profile: "gemini",
               charter: { owns: "cli", handsOff: "data", doneWhen: "done" },
             }),
-            callTool("a2", "swarm_add_member", {
+            callTool("a2", "ensemble_add_member", {
               name: "data-1",
               profile: "gemini",
               charter: { owns: "data", handsOff: "cli", doneWhen: "done" },
             }),
-            callTool("p1", "swarm_post", { text: "@cli-1 please work" }),
+            callTool("p1", "ensemble_post", { text: "@cli-1 please work" }),
             { type: "finish", reason: "tool_calls" },
           ];
         }
@@ -187,7 +187,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
           notifyInWorking?.();
           await workingGate;
           return [
-            callTool("mp1", "swarm_post", { text: "@coordinator finished" }),
+            callTool("mp1", "ensemble_post", { text: "@maestro finished" }),
             { type: "finish", reason: "tool_calls" },
           ];
         }
@@ -218,12 +218,12 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
 
     const memberStates = new Map<string, string>();
     coord.subscribe((ev: RuntimeEvent) => {
-      if (ev.type === "swarm.member_updated") {
+      if (ev.type === "ensemble.member_updated") {
         memberStates.set(ev.payload.name, ev.payload.status);
       }
     });
 
-    await coord.submit({ text: "start swarm", workMode: "swarm" });
+    await coord.submit({ text: "start ensemble", workMode: "ensemble" });
     await enteredWorking;
     expect(inWorking).toBe(true);
 
@@ -240,7 +240,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     expect(await rt.listSubagents({ parentSessionId: coord.id })).toEqual([]);
 
     // 确认 observeSubagent 也拒绝把成员当子代理观察
-    const members = replaySessionView(coord.durableEvents()).swarm?.members ?? [];
+    const members = replaySessionView(coord.durableEvents()).ensemble?.members ?? [];
     const cliChildId = must(members.find((m) => m.name === "cli-1")).childSessionId;
     await expect(
       rt.observeSubagent(
@@ -250,7 +250,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     ).rejects.toMatchObject({ code: "subagent_parent_mismatch" });
 
     // 3. paused 状态：触发 provider 错误进入 paused，仍不在 listSubagents 中
-    await coord.postToSwarm({ text: "@cli-1 trigger error" });
+    await coord.postToEnsemble({ text: "@cli-1 trigger error" });
     await vi.waitFor(() => {
       expect(memberStates.get("cli-1")).toBe("paused");
       expect(coord.isIdle()).toBe(true);
@@ -258,13 +258,13 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     expect(await rt.listSubagents({ parentSessionId: coord.id })).toEqual([]);
 
     // 4. 移除成员后：不在已结束子代理列表里
-    await coord.removeSwarmMember({ name: "cli-1" });
+    await coord.removeEnsembleMember({ name: "cli-1" });
     expect(await rt.listSubagents({ parentSessionId: coord.id })).toEqual([]);
 
-    // 5. Swarm 结束后：全部成员均不出现在已结束子代理列表里
-    await coord.endSwarm();
+    // 5. Ensemble 结束后：全部成员均不出现在已结束子代理列表里
+    await coord.endEnsemble();
     expect(await rt.listSubagents({ parentSessionId: coord.id })).toEqual([]);
-    expect(replaySessionView(coord.durableEvents()).swarm?.status).toBe("ended");
+    expect(replaySessionView(coord.durableEvents()).ensemble?.status).toBe("ended");
   });
 
   it("分支切换保护：非隔离成员在工作区中（working/waiting/paused）时挡住切分支，移除或结束后放行；仅隔离成员不挡主仓库", async () => {
@@ -277,12 +277,12 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     let addedShared = false;
     let workerCalls = 0;
     const provider = makeProvider((_req, who) => {
-      if (who === "coordinator") {
+      if (who === "maestro") {
         if (!addedIso) {
           addedIso = true;
           return [
-            callTool("i1", "swarm_init", { title: "Branch Protection" }),
-            callTool("a1", "swarm_add_member", {
+            callTool("i1", "ensemble_init", { title: "Branch Protection" }),
+            callTool("a1", "ensemble_add_member", {
               name: "iso-only",
               isolated: true,
               charter: { owns: "iso", handsOff: "main", doneWhen: "done" },
@@ -293,11 +293,11 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
         if (allowAddShared && !addedShared) {
           addedShared = true;
           return [
-            callTool("a2", "swarm_add_member", {
+            callTool("a2", "ensemble_add_member", {
               name: "shared-1",
               charter: { owns: "shared", handsOff: "other", doneWhen: "done" },
             }),
-            callTool("p1", "swarm_post", { text: "@shared-1 check" }),
+            callTool("p1", "ensemble_post", { text: "@shared-1 check" }),
             { type: "finish", reason: "tool_calls" },
           ];
         }
@@ -328,13 +328,13 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
 
     const memberStates = new Map<string, string>();
     coord.subscribe((ev: RuntimeEvent) => {
-      if (ev.type === "swarm.member_updated") {
+      if (ev.type === "ensemble.member_updated") {
         memberStates.set(ev.payload.name, ev.payload.status);
       }
     });
 
     // 只有隔离成员时：不挡主仓库切分支
-    await coord.submit({ text: "add isolated", workMode: "swarm" });
+    await coord.submit({ text: "add isolated", workMode: "ensemble" });
     await vi.waitFor(() => {
       expect(coord.isIdle()).toBe(true);
     });
@@ -352,7 +352,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     ).rejects.toMatchObject({ code: "session_busy" });
 
     // 非隔离成员进入 paused 状态：仍挡住切分支
-    await coord.postToSwarm({ text: "@shared-1 pause" });
+    await coord.postToEnsemble({ text: "@shared-1 pause" });
     await vi.waitFor(() => {
       expect(memberStates.get("shared-1")).toBe("paused");
       expect(coord.isIdle()).toBe(true);
@@ -363,11 +363,11 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     ).rejects.toMatchObject({ code: "session_busy" });
 
     // 移除非隔离成员后（只剩隔离成员）：不再挡住主仓库切分支
-    await coord.removeSwarmMember({ name: "shared-1" });
+    await coord.removeEnsembleMember({ name: "shared-1" });
     expect((await rt.workspaceBranches({ workspace: ws })).busy).toBe(false);
     await rt.switchBranch({ workspace: ws, branch: "feat-ok", create: true });
 
-    await coord.endSwarm();
+    await coord.endEnsemble();
   });
 
   it("成员共享父会话授权、sessionGrantRoot 沿父链解析、且成员会话标签权限确认与私信正常", async () => {
@@ -382,16 +382,16 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     const memberMessages: string[] = [];
 
     const provider = makeProvider((req, who) => {
-      if (who === "coordinator") {
+      if (who === "maestro") {
         coordStep++;
         if (coordStep === 1) {
           return [
-            callTool("i1", "swarm_init", { title: "Grants & Tab" }),
-            callTool("a1", "swarm_add_member", {
+            callTool("i1", "ensemble_init", { title: "Grants & Tab" }),
+            callTool("a1", "ensemble_add_member", {
               name: "reader",
               charter: { owns: "read", handsOff: "write", doneWhen: "done" },
             }),
-            callTool("p1", "swarm_post", { text: "@reader read outside" }),
+            callTool("p1", "ensemble_post", { text: "@reader read outside" }),
             { type: "finish", reason: "tool_calls" },
           ];
         }
@@ -433,20 +433,23 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
 
     const awaitingIds: string[] = [];
     coord.subscribe((ev: RuntimeEvent) => {
-      if (ev.type === "swarm.member_updated" && (ev.payload.pendingPermissions?.length ?? 0) > 0) {
+      if (
+        ev.type === "ensemble.member_updated" &&
+        (ev.payload.pendingPermissions?.length ?? 0) > 0
+      ) {
         for (const p of ev.payload.pendingPermissions ?? []) {
           awaitingIds.push(p.requestId);
         }
       }
     });
 
-    await coord.submit({ text: "start", workMode: "swarm" });
+    await coord.submit({ text: "start", workMode: "ensemble" });
     await vi.waitFor(() => {
       expect(awaitingIds.length).toBeGreaterThan(0);
     });
 
     const childSessionId = must(
-      replaySessionView(coord.durableEvents()).swarm?.members[0]?.childSessionId,
+      replaySessionView(coord.durableEvents()).ensemble?.members[0]?.childSessionId,
     );
 
     // 通过 session.open (resumeSession) 打开成员会话标签并确认权限（带 remember: "session"）
@@ -459,7 +462,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
       expect(memberStep).toBe(2);
     });
 
-    // 成员与协调者共享同一份 sessionGrants，且 runtime.listSessionGrants(memberId) 解析到协调者根
+    // 成员与指挥共享同一份 sessionGrants，且 runtime.listSessionGrants(memberId) 解析到指挥根
     const grantsFromCoord = coord.listGrants();
     const grantsFromMemberRuntime = rt.listSessionGrants({ sessionId: childSessionId });
     expect(grantsFromCoord.length).toBeGreaterThan(0);
@@ -477,22 +480,22 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     });
     expect(secondPromptCount).toBe(0);
     expect(memberMessages.some((m) => m.includes("PRIVATE-DM-CHECK"))).toBe(true);
-    // 私信不上协调者留言板
+    // 私信不上指挥留言板
     expect(
-      replaySessionView(coord.durableEvents()).swarm?.posts.some((p) =>
+      replaySessionView(coord.durableEvents()).ensemble?.posts.some((p) =>
         p.text.includes("PRIVATE-DM-CHECK"),
       ),
     ).toBe(false);
 
-    // 从成员句柄撤销全部会话授权，协调者侧同步失效
+    // 从成员句柄撤销全部会话授权，指挥侧同步失效
     await rt.revokeAllSessionGrants({ sessionId: childSessionId });
     expect(coord.listGrants()).toEqual([]);
 
     await memberHandle.close();
-    await coord.endSwarm();
+    await coord.endEnsemble();
   });
 
-  it("工作树删除保护：活动隔离成员不在 listSubagentWorktrees 中且 deleteSubagentWorktree 报「子代理仍在运行」；Swarm 结束后未并回工作树可清理", async () => {
+  it("工作树删除保护：活动隔离成员不在 listSubagentWorktrees 中且 deleteSubagentWorktree 报「子代理仍在运行」；Ensemble 结束后未并回工作树可清理", async () => {
     const ws = makeTempDir();
     await initGitRepo(ws);
     const sessionsDir = makeTempDir("nocturne-r1114c-sessions-");
@@ -500,17 +503,17 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     let coordStep = 0;
     let isoStep = 0;
     const provider = makeProvider((_req, who) => {
-      if (who === "coordinator") {
+      if (who === "maestro") {
         coordStep++;
         if (coordStep === 1) {
           return [
-            callTool("i1", "swarm_init", { title: "Worktree Guard" }),
-            callTool("a1", "swarm_add_member", {
+            callTool("i1", "ensemble_init", { title: "Worktree Guard" }),
+            callTool("a1", "ensemble_add_member", {
               name: "iso-1",
               isolated: true,
               charter: { owns: "feature.txt", handsOff: "README.md", doneWhen: "committed" },
             }),
-            callTool("p1", "swarm_post", { text: "@iso-1 create feature.txt" }),
+            callTool("p1", "ensemble_post", { text: "@iso-1 create feature.txt" }),
             { type: "finish", reason: "tool_calls" },
           ];
         }
@@ -525,7 +528,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
       }
       if (isoStep === 2) {
         return [
-          callTool("mp1", "swarm_post", { text: "@coordinator feature.txt ready" }),
+          callTool("mp1", "ensemble_post", { text: "@maestro feature.txt ready" }),
           { type: "finish", reason: "tool_calls" },
         ];
       }
@@ -543,7 +546,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     const coord = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
     sessions.push(coord);
 
-    await coord.submit({ text: "start", workMode: "swarm" });
+    await coord.submit({ text: "start", workMode: "ensemble" });
     await vi.waitFor(
       () => {
         expect(coord.isIdle()).toBe(true);
@@ -552,11 +555,11 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
       { timeout: 10_000 },
     );
 
-    const member = must(replaySessionView(coord.durableEvents()).swarm?.members[0]);
+    const member = must(replaySessionView(coord.durableEvents()).ensemble?.members[0]);
     const wtPath = must(member.worktree).path;
     expect(existsSync(path.join(wtPath, "feature.txt"))).toBe(true);
 
-    // Swarm 仍在进行（成员进入 waiting）：listSubagentWorktrees 不列出活动成员工作树，deleteSubagentWorktree 拒绝删除
+    // Ensemble 仍在进行（成员进入 waiting）：listSubagentWorktrees 不列出活动成员工作树，deleteSubagentWorktree 拒绝删除
     expect(await rt.listSubagentWorktrees({ parentSessionId: coord.id })).toEqual([]);
     await expect(
       rt.deleteSubagentWorktree({
@@ -565,8 +568,8 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
       }),
     ).rejects.toMatchObject({ code: "invalid_command", message: "子代理仍在运行" });
 
-    // 结束 Swarm（保留未并回的工作树）后：不再报运行中，可列出并清理
-    const ended = await coord.endSwarm();
+    // 结束 Ensemble（保留未并回的工作树）后：不再报运行中，可列出并清理
+    const ended = await coord.endEnsemble();
     expect(ended.unmerged).toHaveLength(1);
     const retained = await rt.listSubagentWorktrees({ parentSessionId: coord.id });
     expect(retained).toHaveLength(1);
@@ -577,7 +580,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     expect(await rt.listSubagentWorktrees({ parentSessionId: coord.id })).toEqual([]);
   });
 
-  it("关闭与重启恢复：coordinator.close() 收尾成员，重启后不复活、不在 listSubagents，且仍保留分支与工作树删除保护", async () => {
+  it("关闭与重启恢复：maestro.close() 收尾成员，重启后不复活、不在 listSubagents，且仍保留分支与工作树删除保护", async () => {
     const ws = makeTempDir();
     await initGitRepo(ws);
     const sessionsDir = makeTempDir("nocturne-r1114c-sessions-");
@@ -585,21 +588,21 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     let coordStep = 0;
     let isoStep = 0;
     const provider1 = makeProvider((_req, who) => {
-      if (who === "coordinator") {
+      if (who === "maestro") {
         coordStep++;
         if (coordStep === 1) {
           return [
-            callTool("i1", "swarm_init", { title: "Restart Recovery" }),
-            callTool("a1", "swarm_add_member", {
+            callTool("i1", "ensemble_init", { title: "Restart Recovery" }),
+            callTool("a1", "ensemble_add_member", {
               name: "shared-m",
               charter: { owns: "shared", handsOff: "iso", doneWhen: "done" },
             }),
-            callTool("a2", "swarm_add_member", {
+            callTool("a2", "ensemble_add_member", {
               name: "iso-m",
               isolated: true,
               charter: { owns: "iso", handsOff: "shared", doneWhen: "done" },
             }),
-            callTool("p1", "swarm_post", { text: "@iso-m write iso.txt" }),
+            callTool("p1", "ensemble_post", { text: "@iso-m write iso.txt" }),
             { type: "finish", reason: "tool_calls" },
           ];
         }
@@ -627,16 +630,16 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
     });
     const coord1 = await rt1.createSession({ model: "fake/m1", permissionPreset: "bypass" });
     sessions.push(coord1);
-    await coord1.submit({ text: "run", workMode: "swarm" });
+    await coord1.submit({ text: "run", workMode: "ensemble" });
     await vi.waitFor(() => {
       expect(coord1.isIdle()).toBe(true);
     });
     const coordId = coord1.id;
     const isoId = must(
-      replaySessionView(coord1.durableEvents()).swarm?.members.find((m) => m.name === "iso-m"),
+      replaySessionView(coord1.durableEvents()).ensemble?.members.find((m) => m.name === "iso-m"),
     ).childSessionId;
 
-    // 关闭协调者：收尾全部成员，之后主仓库不再被已关闭会话锁住
+    // 关闭指挥：收尾全部成员，之后主仓库不再被已关闭会话锁住
     await coord1.close();
     sessions.pop();
     expect((await rt1.workspaceBranches({ workspace: ws })).busy).toBe(false);
@@ -672,7 +675,7 @@ describe("Swarm 成员不再算作运行中或已结束的子代理（r1114c）"
       rt2.deleteSubagentWorktree({ parentSessionId: coordId, childSessionId: isoId }),
     ).rejects.toMatchObject({ code: "invalid_command", message: "子代理仍在运行" });
 
-    await coord2.endSwarm();
+    await coord2.endEnsemble();
     expect((await rt2.workspaceBranches({ workspace: ws })).busy).toBe(false);
     expect(await rt2.listSubagents({ parentSessionId: coordId })).toEqual([]);
   });

@@ -3,10 +3,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSessionView,
-  formatSwarmPostForModel,
-  type SwarmMemberView,
-  type SwarmPostView,
-  type SwarmView,
+  formatEnsemblePostForModel,
+  type EnsembleMemberView,
+  type EnsemblePostView,
+  type EnsembleView,
   type ToolEntry,
 } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
@@ -50,7 +50,7 @@ function makeToolEntry(seq: number, name: string, input: unknown): ToolEntry {
   };
 }
 
-function makeMember(name: string, overrides: Partial<SwarmMemberView> = {}): SwarmMemberView {
+function makeMember(name: string, overrides: Partial<EnsembleMemberView> = {}): EnsembleMemberView {
   return {
     name,
     childSessionId: `child-${name}`,
@@ -64,13 +64,13 @@ function makeMember(name: string, overrides: Partial<SwarmMemberView> = {}): Swa
   };
 }
 
-function makePost(number: number, overrides: Partial<SwarmPostView> = {}): SwarmPostView {
+function makePost(number: number, overrides: Partial<EnsemblePostView> = {}): EnsemblePostView {
   return {
     seq: number,
     time: "2026-11-12T13:31:00.000Z",
     number,
-    from: "coordinator",
-    fromKind: "coordinator",
+    from: "maestro",
+    fromKind: "maestro",
     text: "测试",
     mentions: [],
     recipients: [],
@@ -78,17 +78,17 @@ function makePost(number: number, overrides: Partial<SwarmPostView> = {}): Swarm
   };
 }
 
-describe("Swarm 对话内渲染", () => {
-  it("七种 Swarm 工具行使用规定标签与单行参数", () => {
+describe("Ensemble 对话内渲染", () => {
+  it("七种 Ensemble 工具行使用规定标签与单行参数", () => {
     const view = createSessionView();
     view.entries = [
-      makeToolEntry(1, "swarm_init", { title: "API 输入校验" }),
-      makeToolEntry(2, "swarm_add_member", { name: "users", preset: "general" }),
-      makeToolEntry(3, "swarm_post", { text: "请 @users 先建校验模块\n补充说明" }),
-      makeToolEntry(4, "swarm_change_model", { name: "verifier", model: "openai/gpt-6.1-sol" }),
-      makeToolEntry(5, "swarm_remove_member", { name: "schema" }),
-      makeToolEntry(6, "swarm_checkout", { member: "users" }),
-      makeToolEntry(7, "swarm_end", { summary: "全部并回\n次行" }),
+      makeToolEntry(1, "ensemble_init", { title: "API 输入校验" }),
+      makeToolEntry(2, "ensemble_add_member", { name: "users", preset: "general" }),
+      makeToolEntry(3, "ensemble_post", { text: "请 @users 先建校验模块\n补充说明" }),
+      makeToolEntry(4, "ensemble_change_model", { name: "verifier", model: "openai/gpt-6.1-sol" }),
+      makeToolEntry(5, "ensemble_remove_member", { name: "schema" }),
+      makeToolEntry(6, "ensemble_checkout", { member: "users" }),
+      makeToolEntry(7, "ensemble_end", { summary: "全部并回\n次行" }),
     ];
 
     const { container } = render(
@@ -120,7 +120,7 @@ describe("Swarm 对话内渲染", () => {
     ]);
   });
 
-  it("帖子送达渲染为 .post-in，解包 <swarm-post>，不显示编辑/重发/分叉或插话标记", () => {
+  it("帖子送达渲染为 .post-in，解包 <ensemble-post>，不显示编辑/重发/分叉或插话标记", () => {
     const view = createSessionView();
     view.entries = [
       {
@@ -131,7 +131,7 @@ describe("Swarm 对话内渲染", () => {
         content: [
           {
             type: "text",
-            text: formatSwarmPostForModel({
+            text: formatEnsemblePostForModel({
               number: 14,
               from: "verifier",
               text: "三处测试全部通过，`pnpm test` 112 项通过。",
@@ -140,7 +140,7 @@ describe("Swarm 对话内渲染", () => {
           },
         ],
         steer: true,
-        swarm: { postNumber: 14, from: "verifier", fromKind: "member" },
+        ensemble: { postNumber: 14, from: "verifier", fromKind: "member" },
       },
     ];
 
@@ -161,9 +161,9 @@ describe("Swarm 对话内渲染", () => {
     expect(container.querySelector(".u")).toBeNull();
     const postIn = container.querySelector(".post-in");
     expect(postIn).not.toBeNull();
-    expect(postIn?.querySelector(".post-in-head")?.textContent).toBe("@verifier → 协调者 · #14");
+    expect(postIn?.querySelector(".post-in-head")?.textContent).toBe("@verifier → 指挥 · #14");
     expect(postIn?.textContent).toContain("三处测试全部通过");
-    expect(postIn?.textContent).not.toContain("<swarm-post");
+    expect(postIn?.textContent).not.toContain("<ensemble-post");
     expect(postIn?.textContent).not.toContain("[Worktree]");
     expect(container.querySelector("[aria-label='编辑重发']")).toBeNull();
     expect(container.querySelector("[aria-label='分叉会话']")).toBeNull();
@@ -177,13 +177,13 @@ describe("Swarm 对话内渲染", () => {
         subscribeEvents={() => () => undefined}
         images={createAttachmentImageSource()}
         busy={false}
-        swarmRecipientLabel="@orders"
+        ensembleRecipientLabel="@orders"
       />,
     );
     expect(container.querySelector(".post-in-head")?.textContent).toBe("@verifier → @orders · #14");
   });
 
-  it("对话区不再渲染入口行，workMode.name=swarm 显示 /ensemble，结束行仍按 endedSeq 定位并可展开未合并分支", () => {
+  it("对话区不再渲染入口行，workMode.name=ensemble 显示 /ensemble，结束行仍按 endedSeq 定位并可展开未合并分支", () => {
     const view = createSessionView();
     view.entries = [
       {
@@ -192,7 +192,7 @@ describe("Swarm 对话内渲染", () => {
         seq: 1,
         turnId: "turn-1",
         content: [{ type: "text", text: "加校验" }],
-        workMode: { name: "swarm", body: "Ensemble mode" },
+        workMode: { name: "ensemble", body: "Ensemble mode" },
       },
       {
         kind: "assistant",
@@ -213,15 +213,17 @@ describe("Swarm 对话内渲染", () => {
         key: "u:10",
         seq: 10,
         turnId: "turn-2",
-        content: [{ type: "text", text: '<swarm-post n="2" from="users">\n好了\n</swarm-post>' }],
-        swarm: { postNumber: 2, from: "users", fromKind: "member" },
+        content: [
+          { type: "text", text: '<ensemble-post n="2" from="users">\n好了\n</ensemble-post>' },
+        ],
+        ensemble: { postNumber: 2, from: "users", fromKind: "member" },
       },
     ];
-    const swarm: SwarmView = {
+    const ensemble: EnsembleView = {
       createdSeq: 3,
       title: "API 输入校验",
       status: "active",
-      coordinator: {
+      maestro: {
         model: { provider: "anthropic", model: "claude-opus-5.5" },
         status: "waiting",
         awaitingPermission: false,
@@ -234,7 +236,7 @@ describe("Swarm 对话内渲染", () => {
       awaitingPermissionMembers: [],
       posts: [makePost(1), makePost(2)],
     };
-    view.swarm = swarm;
+    view.ensemble = ensemble;
 
     const { container, rerender } = render(
       <Conversation
@@ -248,13 +250,13 @@ describe("Swarm 对话内渲染", () => {
       />,
     );
 
-    expect(container.querySelector(".swarmrow")).toBeNull();
-    expect(container.querySelector(".swarmrow-count")).toBeNull();
+    expect(container.querySelector(".ensemblerow")).toBeNull();
+    expect(container.querySelector(".ensemblerow-count")).toBeNull();
     expect(container.querySelector(".mode-ref")?.textContent).toBe("/ensemble");
 
     // 结束后仍不出现入口行，结束行出现在 endedSeq 位置并展开 unmerged
-    view.swarm = {
-      ...swarm,
+    view.ensemble = {
+      ...ensemble,
       status: "ended",
       endedSeq: 12,
       endedReason: "user",
@@ -262,7 +264,7 @@ describe("Swarm 对话内渲染", () => {
         {
           name: "orders",
           childSessionId: "child-orders",
-          branch: "nocturne/swarm-orders",
+          branch: "nocturne/ensemble-orders",
           base: "abc",
           head: "def",
           worktree: "/tmp/wt",
@@ -281,8 +283,8 @@ describe("Swarm 对话内渲染", () => {
         busy={false}
       />,
     );
-    expect(container.querySelector(".swarmrow")).toBeNull();
-    const endedRow = container.querySelector(".swarm-ended-row");
+    expect(container.querySelector(".ensemblerow")).toBeNull();
+    const endedRow = container.querySelector(".ensemble-ended-row");
     expect(endedRow).not.toBeNull();
     expect(endedRow?.querySelector(".tool-name")?.textContent).toBe("结束");
     expect(endedRow?.querySelector(".tool-arg")?.textContent).toBe("API 输入校验");
@@ -291,21 +293,21 @@ describe("Swarm 对话内渲染", () => {
     if (!toolLine) throw new Error("missing tool-line");
     fireEvent.click(toolLine);
     expect(screen.getByText("@orders")).not.toBeNull();
-    expect(screen.getByText("nocturne/swarm-orders")).not.toBeNull();
+    expect(screen.getByText("nocturne/ensemble-orders")).not.toBeNull();
   });
 
   it("Markdown 传入 mentions 时只强调出现在 mentions 里的文本节点，不碰代码块", () => {
     const { container } = render(
       <Markdown
-        text="请 @users 配合 `@users` 检查，@other 不高亮，回帖找 @coordinator。"
+        text="请 @users 配合 `@users` 检查，@other 不高亮，回帖找 @maestro。"
         openUrl={vi.fn()}
-        mentions={["users", "coordinator"]}
+        mentions={["users", "maestro"]}
       />,
     );
-    const highlighted = Array.from(container.querySelectorAll(".swarm-at")).map(
+    const highlighted = Array.from(container.querySelectorAll(".ensemble-at")).map(
       (el) => el.textContent,
     );
-    expect(highlighted).toEqual(["@users", "@coordinator"]);
-    expect(container.querySelector("code .swarm-at")).toBeNull();
+    expect(highlighted).toEqual(["@users", "@maestro"]);
+    expect(container.querySelector("code .ensemble-at")).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { SwarmMemberView, ToolEntry, TurnChangeDiff } from "@nocturne/core/protocol";
+import type { EnsembleMemberView, ToolEntry, TurnChangeDiff } from "@nocturne/core/protocol";
 import { RpcError, type ContextSummary, type RpcSession } from "@nocturne/rpc/client";
 import type { AttachmentImageSource } from "../attachment-images";
 import { DiffBody } from "../Conversation";
@@ -11,13 +11,13 @@ import { SubagentDirectory } from "../subagent-directory";
 import { elapsedText, runningBuiltin, runningMs, unsettledBuiltinTasks } from "../subagent-panel";
 import { SubagentPane } from "../SubagentPane";
 import { SubagentWatcher } from "../subagent-watch";
-import { SwarmAvatar } from "../SwarmAvatar";
+import { EnsembleAvatar } from "../EnsembleAvatar";
 import {
-  swarmActivitySummary,
-  swarmAuthorColor,
-  swarmMemberMetaLabel,
-  swarmStatusDot,
-} from "../swarm-ui";
+  ensembleActivitySummary,
+  ensembleAuthorColor,
+  ensembleMemberMetaLabel,
+  ensembleStatusDot,
+} from "../ensemble-ui";
 import { Button, Icon, IconButton } from "../ui";
 import { useNow } from "../use-now";
 import { useSessionRefresh } from "../use-session-refresh";
@@ -43,8 +43,8 @@ interface Props {
   onNavigate: (page: PhonePanelPage) => void;
   onBack: () => void;
   onClose: () => void;
-  onOpenSwarm?: (() => void) | undefined;
-  onOpenSwarmMember?: ((member: SwarmMemberView) => void) | undefined;
+  onOpenEnsemble?: (() => void) | undefined;
+  onOpenEnsembleMember?: ((member: EnsembleMemberView) => void) | undefined;
   onError: (message: string) => void;
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
 }
@@ -224,8 +224,8 @@ export function PhoneSidePanel({
   onNavigate,
   onBack,
   onClose,
-  onOpenSwarm,
-  onOpenSwarmMember,
+  onOpenEnsemble,
+  onOpenEnsembleMember,
   onError,
   loadDiff,
 }: Props) {
@@ -311,11 +311,11 @@ export function PhoneSidePanel({
   }, []);
 
   const agents = runningBuiltin(directory.summaries);
-  const activeSwarm = view.swarm?.status === "active" ? view.swarm : undefined;
-  const activeSwarmMembers = activeSwarm
-    ? activeSwarm.members.filter((member) => member.status !== "removed")
+  const activeEnsemble = view.ensemble?.status === "active" ? view.ensemble : undefined;
+  const activeEnsembleMembers = activeEnsemble
+    ? activeEnsemble.members.filter((member) => member.status !== "removed")
     : [];
-  const swarmDot = activeSwarm ? swarmStatusDot(activeSwarm) : undefined;
+  const ensembleDot = activeEnsemble ? ensembleStatusDot(activeEnsemble) : undefined;
   const shells = view.backgroundShells.filter(
     (task) => !task.endedAt || now - Date.parse(task.endedAt) < 300_000,
   );
@@ -400,58 +400,58 @@ export function PhoneSidePanel({
                 <Icon name="right_small" size={16} />
               </button>
             </section>
-            {activeSwarm !== undefined && (
+            {activeEnsemble !== undefined && (
               <section className="phone-panel-section" aria-label="合奏">
                 <h2>合奏</h2>
                 <button
                   type="button"
-                  className="phone-panel-row phone-swarm-head"
+                  className="phone-panel-row phone-ensemble-head"
                   onClick={() => {
-                    onOpenSwarm?.();
+                    onOpenEnsemble?.();
                   }}
                 >
-                  {swarmDot !== undefined && (
-                    <span className={`sp-swarm-dot ${swarmDot}`} aria-hidden="true" />
+                  {ensembleDot !== undefined && (
+                    <span className={`sp-ensemble-dot ${ensembleDot}`} aria-hidden="true" />
                   )}
                   <span className="phone-panel-item phone-panel-name">
-                    {activeSwarm.title || "合奏"}
+                    {activeEnsemble.title || "合奏"}
                   </span>
                   <Icon name="right_small" size={16} />
                 </button>
-                {activeSwarmMembers.map((member) => {
+                {activeEnsembleMembers.map((member) => {
                   const pending = member.pendingPermissions.length > 0;
-                  const modelLabel = swarmMemberMetaLabel(member);
-                  const summaryText = swarmActivitySummary(member.activity);
+                  const modelLabel = ensembleMemberMetaLabel(member);
+                  const summaryText = ensembleActivitySummary(member.activity);
                   return (
                     <button
                       type="button"
                       className="phone-panel-row"
                       key={member.name}
                       onClick={() => {
-                        onOpenSwarmMember?.(member);
+                        onOpenEnsembleMember?.(member);
                       }}
                     >
-                      <SwarmAvatar
+                      <EnsembleAvatar
                         kind="member"
-                        color={swarmAuthorColor(activeSwarm.members, member.name, "member")}
+                        color={ensembleAuthorColor(activeEnsemble.members, member.name, "member")}
                         size="sm"
                         warn={pending}
                       />
                       <span className="phone-panel-item">
-                        <span className="phone-swarm-line1">
-                          <span className="phone-swarm-name">{member.name}</span>
+                        <span className="phone-ensemble-line1">
+                          <span className="phone-ensemble-name">{member.name}</span>
                           {modelLabel !== "" && (
-                            <span className="phone-swarm-meta">{modelLabel}</span>
+                            <span className="phone-ensemble-meta">{modelLabel}</span>
                           )}
                           {member.isolated && (
-                            <span className="phone-swarm-tag">
+                            <span className="phone-ensemble-tag">
                               {modelLabel !== "" ? " · 独立工作树" : "独立工作树"}
                             </span>
                           )}
                         </span>
                         {summaryText !== "" && (
                           <span
-                            className={`phone-panel-summary phone-swarm-summary${pending ? " warn" : ""}`}
+                            className={`phone-panel-summary phone-ensemble-summary${pending ? " warn" : ""}`}
                           >
                             {summaryText}
                           </span>

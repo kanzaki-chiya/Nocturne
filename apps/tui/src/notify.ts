@@ -147,22 +147,22 @@ export function useNotifyBell({
 }
 
 /**
- * 成员待确认响铃判定（ADR-0089 §8）：协调者会话的 `swarm.member_updated` 带成员的
+ * 成员待确认响铃判定（ADR-0089 §8）：指挥会话的 `ensemble.member_updated` 带成员的
  * `pendingPermissions`；订阅起始快照（`eseq === 0`）里已有的请求只登记，之后真正新出现的
  * requestId 才按「需要确认」一类判定一次。`viewing` 是正在显示的成员：它自己的
  * `permission.requested` 已由 useNotifyBell 判定，这里不重复响。
  */
-export function swarmMemberRing(
+export function ensembleMemberRing(
   event: RuntimeEvent,
   seen: Set<string>,
   context: { focused: boolean; viewing?: string | undefined },
   settings: NotifySettings,
 ): boolean {
-  if (event.type === "swarm.ended") {
+  if (event.type === "ensemble.ended") {
     seen.clear();
     return false;
   }
-  if (event.type !== "swarm.member_updated") return false;
+  if (event.type !== "ensemble.member_updated") return false;
   const pending = event.payload.pendingPermissions ?? [];
   if (event.eseq === 0) {
     for (const p of pending) seen.add(p.requestId);
@@ -175,8 +175,8 @@ export function swarmMemberRing(
   return settings.enabled && settings.attention && !context.focused;
 }
 
-/** 挂上成员待确认响铃：订阅协调者会话，规则见 swarmMemberRing */
-export function useSwarmMemberBell({
+/** 挂上成员待确认响铃：订阅指挥会话，规则见 ensembleMemberRing */
+export function useEnsembleMemberBell({
   session,
   runtime,
   focus,
@@ -195,7 +195,7 @@ export function useSwarmMemberBell({
     const seen = new Set<string>();
     return session.subscribe((event) => {
       if (
-        swarmMemberRing(
+        ensembleMemberRing(
           event,
           seen,
           { focused: focus?.focused() === true, viewing: viewingRef.current },

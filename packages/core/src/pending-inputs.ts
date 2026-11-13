@@ -75,7 +75,7 @@ export class PendingInputs {
       input,
       paused:
         forcePaused ||
-        ((mode === "subagent" || mode === "shell" || mode === "swarm") && this.paused),
+        ((mode === "subagent" || mode === "shell" || mode === "ensemble") && this.paused),
       createdAt: new Date().toISOString(),
     };
     if (forcePaused) this.paused = true;
@@ -99,7 +99,7 @@ export class PendingInputs {
         (entry.mode === "steer" ||
           entry.mode === "subagent" ||
           entry.mode === "shell" ||
-          entry.mode === "swarm") &&
+          entry.mode === "ensemble") &&
         !entry.paused,
     );
     if (taken.length === 0) return [];
@@ -118,7 +118,7 @@ export class PendingInputs {
         !entry.paused &&
         entry.mode !== "subagent" &&
         entry.mode !== "shell" &&
-        entry.mode !== "swarm"
+        entry.mode !== "ensemble"
       )
         entry.mode = "queue";
     }
@@ -130,7 +130,7 @@ export class PendingInputs {
   update(id: string, patch: PendingInputPatch): PendingInputOutcome {
     const entry = this.entries.find((candidate) => candidate.id === id);
     if (entry === undefined) return "consumed";
-    if (entry.mode === "subagent" || entry.mode === "shell" || entry.mode === "swarm")
+    if (entry.mode === "subagent" || entry.mode === "shell" || entry.mode === "ensemble")
       return "readonly";
     // ADR-0076 §1：带执行方式的条目只能排队，不能转成插话
     if (patch.mode === "steer" && entry.input.workMode !== undefined) return "work_mode";
@@ -164,14 +164,14 @@ export class PendingInputs {
     this.paused = true;
     if (this.entries.length === 0) return;
     for (const entry of this.entries) {
-      if (entry.mode !== "subagent" && entry.mode !== "shell" && entry.mode !== "swarm")
+      if (entry.mode !== "subagent" && entry.mode !== "shell" && entry.mode !== "ensemble")
         entry.mode = "queue";
       entry.paused = true;
     }
     this.publish();
   }
 
-  /** 清空指定模式的条目（例如停止 Swarm 时移除未送达帖子） */
+  /** 清空指定模式的条目（例如停止 Ensemble 时移除未送达帖子） */
   dropMode(mode: PendingInputMode): void {
     const dropped = this.entries.filter((entry) => entry.mode === mode);
     if (dropped.length === 0) return;

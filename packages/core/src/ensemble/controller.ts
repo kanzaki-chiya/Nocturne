@@ -1,5 +1,5 @@
 /**
- * Swarm 会话级控制器（ADR-0089）：
+ * Ensemble 会话级控制器（ADR-0089）：
  * 管理留言板持久事件、常驻成员生命周期、唤醒投递、工作树增量提交与审查检出、
  * 未并回移除保护、状态广播、Runtime 安静提醒、重启补送与回退/结束收尾。
  */
@@ -7,12 +7,12 @@ import { clampReasoningEffort, type ResolvedModel } from "../provider/index.js";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   formatCharterPostText,
-  formatSwarmPostForModel,
-  reduceSwarmDurable,
-  resolveSwarmMentions,
-  summarizeSwarmToolCall,
-  validateSwarmCharter,
-  validateSwarmMemberName,
+  formatEnsemblePostForModel,
+  reduceEnsembleDurable,
+  resolveEnsembleMentions,
+  summarizeEnsembleToolCall,
+  validateEnsembleCharter,
+  validateEnsembleMemberName,
   type DurableEvent,
   type DurablePayloadMap,
   type DurableType,
@@ -25,27 +25,27 @@ import {
   type RuntimeEvent,
   type SubagentChanges,
   type SubagentProfileConfig,
-  type SwarmAuthorKind,
-  type SwarmCharter,
-  type SwarmMemberPermission,
-  type SwarmMemberUpdatedPayload,
-  type SwarmPostedPayload,
-  type SwarmToolActivity,
-  type SwarmUnmergedWorktree,
-  type SwarmView,
+  type EnsembleAuthorKind,
+  type EnsembleCharter,
+  type EnsembleMemberPermission,
+  type EnsembleMemberUpdatedPayload,
+  type EnsemblePostedPayload,
+  type EnsembleToolActivity,
+  type EnsembleUnmergedWorktree,
+  type EnsembleView,
   type TurnEndReason,
 } from "../protocol/index.js";
 import type { ToolDefinition } from "../tools/index.js";
-import { buildSwarmMemberPrompt } from "./prompts.js";
+import { buildEnsembleMemberPrompt } from "./prompts.js";
 import {
-  createSwarmCheckoutTool,
-  createSwarmCoordinatorTools,
-  createSwarmPostTool,
-  type SwarmModelCatalogSnapshot,
-  type SwarmToolActionResult,
+  createEnsembleCheckoutTool,
+  createEnsembleMaestroTools,
+  createEnsemblePostTool,
+  type EnsembleModelCatalogSnapshot,
+  type EnsembleToolActionResult,
 } from "./tools.js";
 
-export interface SwarmWorktreeHandle {
+export interface EnsembleWorktreeHandle {
   childSessionId: string;
   parentSessionId: string;
   repository: string;
@@ -66,16 +66,16 @@ export interface ManagedMemberSession {
   readonly id: string;
   isBusy(): boolean;
   hasActivePendingInputs(): boolean;
-  deliverSwarmPost(input: PreparedInput, forcePaused?: boolean): Promise<void>;
+  deliverEnsemblePost(input: PreparedInput, forcePaused?: boolean): Promise<void>;
   resumeFromModelChange(modelKey: string): Promise<void>;
   setModelAndEffort(model: ModelRef, effort?: ReasoningEffort): Promise<void>;
   interruptAndWait(): Promise<void>;
-  clearPendingSwarmInputs(): void;
+  clearPendingEnsembleInputs(): void;
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
   closeUnderlying(): Promise<void>;
 }
 
-export interface SwarmMemberOpenSpec {
+export interface EnsembleMemberOpenSpec {
   childSessionId: string;
   name: string;
   create: boolean;
@@ -96,7 +96,7 @@ export interface SwarmMemberOpenSpec {
   };
 }
 
-export interface SwarmWorktreeOps {
+export interface EnsembleWorktreeOps {
   inspectRepository(cwd: string): Promise<string>;
   create(input: {
     childSessionId: string;
@@ -104,40 +104,40 @@ export interface SwarmWorktreeOps {
     cwd: string;
     workspaceRoot: string;
     task: string;
-  }): Promise<SwarmWorktreeHandle>;
-  loadRecord(childSessionId: string): Promise<SwarmWorktreeHandle | undefined>;
-  listParentRecords(): Promise<SwarmWorktreeHandle[]>;
+  }): Promise<EnsembleWorktreeHandle>;
+  loadRecord(childSessionId: string): Promise<EnsembleWorktreeHandle | undefined>;
+  listParentRecords(): Promise<EnsembleWorktreeHandle[]>;
   checkpoint(
-    record: SwarmWorktreeHandle,
+    record: EnsembleWorktreeHandle,
     commitMessage?: string,
   ): Promise<SubagentChanges | undefined>;
   currentHead(worktreePath: string): Promise<string>;
-  isOnMemberBranch(record: SwarmWorktreeHandle): Promise<boolean>;
+  isOnMemberBranch(record: EnsembleWorktreeHandle): Promise<boolean>;
   resetToCommit(worktreePath: string, commitSha: string): Promise<string>;
-  markApplied(record: SwarmWorktreeHandle, appliedHead: string): Promise<void>;
-  remove(record: SwarmWorktreeHandle, removeBranch: boolean): Promise<void>;
+  markApplied(record: EnsembleWorktreeHandle, appliedHead: string): Promise<void>;
+  remove(record: EnsembleWorktreeHandle, removeBranch: boolean): Promise<void>;
   cleanupMerged(): Promise<void>;
 }
 
-export interface SwarmEnabledModelEntry {
+export interface EnsembleEnabledModelEntry {
   provider: string;
   model: string;
   name?: string | undefined;
 }
 
-export type SwarmAvailableProfileEntry = SubagentProfileConfig & {
+export type EnsembleAvailableProfileEntry = SubagentProfileConfig & {
   name: string;
 };
 
-export interface SwarmControllerDeps {
-  coordinatorSessionId: string;
+export interface EnsembleControllerDeps {
+  maestroSessionId: string;
   newChildSessionId(): string;
   isClosing(): boolean;
   currentDirectory(): { cwd: string; workspaceRoot: string };
-  coordinatorModel(): ResolvedModel;
-  coordinatorEffort(): ReasoningEffort | undefined;
-  enabledModels(): SwarmEnabledModelEntry[];
-  availableProfiles(): SwarmAvailableProfileEntry[];
+  maestroModel(): ResolvedModel;
+  maestroEffort(): ReasoningEffort | undefined;
+  enabledModels(): EnsembleEnabledModelEntry[];
+  availableProfiles(): EnsembleAvailableProfileEntry[];
   externalAgentNames(): ReadonlySet<string>;
   resolveEnabledModel(ref: ModelRef): ResolvedModel | undefined;
   pricing(modelKey: string | undefined): ModelPricing | undefined;
@@ -145,61 +145,61 @@ export interface SwarmControllerDeps {
   readChildDurableEvents(childSessionId: string): Promise<readonly DurableEvent[]>;
   emitDurable<T extends DurableType>(type: T, payload: DurablePayloadMap[T]): Promise<DurableEvent>;
   emitEphemeral<T extends EphemeralType>(type: T, payload: EphemeralPayloadMap[T]): void;
-  deliverToCoordinator(input: PreparedInput, forcePaused?: boolean): Promise<void>;
-  clearCoordinatorSwarmInputs(): void;
-  isCoordinatorBusy(): boolean;
-  hasCoordinatorPendingActive(): boolean;
-  syncCoordinatorTools(): void;
-  notifyCoordinatorIdle(): void;
-  openMemberSession(spec: SwarmMemberOpenSpec): Promise<ManagedMemberSession>;
-  worktrees: SwarmWorktreeOps;
+  deliverToMaestro(input: PreparedInput, forcePaused?: boolean): Promise<void>;
+  clearMaestroEnsembleInputs(): void;
+  isMaestroBusy(): boolean;
+  hasMaestroPendingActive(): boolean;
+  syncMaestroTools(): void;
+  notifyMaestroIdle(): void;
+  openMemberSession(spec: EnsembleMemberOpenSpec): Promise<ManagedMemberSession>;
+  worktrees: EnsembleWorktreeOps;
   commandError(code: "invalid_command" | "session_busy", message: string): Error;
 }
 
 interface MemberRuntimeState {
   name: string;
   childSessionId: string;
-  charter: SwarmCharter;
+  charter: EnsembleCharter;
   model: ModelRef;
   reasoningEffort?: ReasoningEffort | undefined;
   profile?: string | undefined;
   preset: "general" | "explore";
   isolated: boolean;
   worktreeRef?: { path: string; branch: string; base: string } | undefined;
-  worktreeRecord?: SwarmWorktreeHandle | undefined;
+  worktreeRecord?: EnsembleWorktreeHandle | undefined;
   status: "working" | "waiting" | "paused" | "removed";
-  toolActivity?: SwarmToolActivity | undefined;
+  toolActivity?: EnsembleToolActivity | undefined;
   pauseError?: { code: string; message: string } | undefined;
-  pendingPermissions: SwarmMemberPermission[];
+  pendingPermissions: EnsembleMemberPermission[];
   session?: ManagedMemberSession | undefined;
   unsubscribe?: (() => void) | undefined;
   opening?: Promise<ManagedMemberSession> | undefined;
-  missedPosts: SwarmPostedPayload[];
+  missedPosts: EnsemblePostedPayload[];
   pendingCheckoutCommit?: string | undefined;
 }
 
-export interface SwarmController {
-  /** 从协调者持久事件初始化（含重启未送达提及检测，不自动唤醒） */
+export interface EnsembleController {
+  /** 从指挥持久事件初始化（含重启未送达提及检测，不自动唤醒） */
   initializeFromLog(): Promise<void>;
-  /** 当前是否存在未结束的持久 Swarm */
+  /** 当前是否存在未结束的持久 Ensemble */
   isActive(): boolean;
-  /** Swarm 建立事件的 seq（用于回退判定） */
+  /** Ensemble 建立事件的 seq（用于回退判定） */
   createdSeq(): number | undefined;
-  /** 当前仍在活动 Swarm 中且未移除的独立工作树成员 childSessionId 集合（防后台清理误删） */
+  /** 当前仍在活动 Ensemble 中且未移除的独立工作树成员 childSessionId 集合（防后台清理误删） */
   activeIsolatedChildIds(): ReadonlySet<string>;
-  /** 当前活动 Swarm 是否存在共享主工作区（非独立工作树）的未移除成员（供分支切换保护） */
+  /** 当前活动 Ensemble 是否存在共享主工作区（非独立工作树）的未移除成员（供分支切换保护） */
   hasWorkspaceMembers(): boolean;
-  /** 协调者 Swarm 工具列表 */
-  coordinatorTools(): ToolDefinition[];
-  /** 向新订阅协调者的监听器补发当前非默认成员运行态快照 */
+  /** 指挥 Ensemble 工具列表 */
+  maestroTools(): ToolDefinition[];
+  /** 向新订阅指挥的监听器补发当前非默认成员运行态快照 */
   publishMemberSnapshots(
     listener: (event: RuntimeEvent) => void,
-  ): EphemeralPayloadMap["swarm.member_updated"][];
+  ): EphemeralPayloadMap["ensemble.member_updated"][];
   /** 当前成员运行态快照列表 */
-  memberSnapshots(): SwarmMemberUpdatedPayload[];
-  /** 是否有任何成员正在运行或投递中（供协调者 isIdle 判断） */
+  memberSnapshots(): EnsembleMemberUpdatedPayload[];
+  /** 是否有任何成员正在运行或投递中（供指挥 isIdle 判断） */
   hasRunningWork(): boolean;
-  /** 按 childSessionId 查找本 Swarm 的成员（供 runtime.resumeSession 复用或懒打开托管会话） */
+  /** 按 childSessionId 查找本 Ensemble 的成员（供 runtime.resumeSession 复用或懒打开托管会话） */
   openOrGetMemberBySessionId(childSessionId: string): Promise<
     | {
         session: ManagedMemberSession;
@@ -207,16 +207,16 @@ export interface SwarmController {
       }
     | undefined
   >;
-  /** 用户在留言板发帖（RuntimeSession.postToSwarm） */
+  /** 用户在留言板发帖（RuntimeSession.postToEnsemble） */
   postFromUser(input: { text: string }): Promise<{ number: number; recipients: string[] }>;
-  /** 用户移除成员（RuntimeSession.removeSwarmMember） */
+  /** 用户移除成员（RuntimeSession.removeEnsembleMember） */
   removeMemberFromUser(name: string): Promise<void>;
-  /** 用户结束 Swarm（RuntimeSession.endSwarm） */
-  endFromUser(): Promise<{ unmerged: SwarmUnmergedWorktree[] }>;
-  /** 对话回退到建立之前时结束 Swarm 并停止全部成员 */
+  /** 用户结束 Ensemble（RuntimeSession.endEnsemble） */
+  endFromUser(): Promise<{ unmerged: EnsembleUnmergedWorktree[] }>;
+  /** 对话回退到建立之前时结束 Ensemble 并停止全部成员 */
   endOnRewind(): Promise<void>;
-  /** 协调者一轮 Turn 结束归于空闲时触发（检查安静提醒） */
-  onCoordinatorTurnSettled(): void;
+  /** 指挥一轮 Turn 结束归于空闲时触发（检查安静提醒） */
+  onMaestroTurnSettled(): void;
   /** 供 apply_subagent_changes 同步按成员 id 或成员名查找已提交未并回的改动 */
   lookupMemberWorktreeSync(
     idOrName: string,
@@ -225,7 +225,7 @@ export interface SwarmController {
   lookupMemberWorktreeChanges(idOrName: string): Promise<
     | {
         memberName: string;
-        record: SwarmWorktreeHandle;
+        record: EnsembleWorktreeHandle;
         changes: SubagentChanges;
         stillActive: boolean;
       }
@@ -233,11 +233,11 @@ export interface SwarmController {
   >;
   /** apply_subagent_changes 应用成功后推进基准或清理工作树 */
   onMemberWorktreeApplied(idOrName: string, appliedHead: string): Promise<void>;
-  /** 会话关闭时停止并释放所有常驻成员句柄（不写结束事件，保留 Swarm 供下次恢复） */
+  /** 会话关闭时停止并释放所有常驻成员句柄（不写结束事件，保留 Ensemble 供下次恢复） */
   dispose(): Promise<void>;
 }
 
-export function createSwarmController(deps: SwarmControllerDeps): SwarmController {
+export function createEnsembleController(deps: EnsembleControllerDeps): EnsembleController {
   let title = "";
   let active = false;
   let initSeq: number | undefined;
@@ -256,8 +256,8 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     });
   };
 
-  const catalogSnapshot = (): SwarmModelCatalogSnapshot => {
-    const coordRef = deps.coordinatorModel().model.ref;
+  const catalogSnapshot = (): EnsembleModelCatalogSnapshot => {
+    const coordRef = deps.maestroModel().model.ref;
     const defaultKey = `${coordRef.provider}/${coordRef.model}`;
     const enabled = deps.enabledModels().map((m) => ({
       provider: m.provider,
@@ -340,7 +340,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     const matchEnabledModel = (
       spec: string,
     ): { ok: true; resolved: ResolvedModel } | { ok: false; message: string } => {
-      let candidates: SwarmEnabledModelEntry[];
+      let candidates: EnsembleEnabledModelEntry[];
       if (spec.includes("/")) {
         const slash = spec.indexOf("/");
         const prov = spec.slice(0, slash);
@@ -384,9 +384,9 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     if (rawProfile !== undefined) {
       if (rawProfile === DEFAULT_SUBAGENT_PROFILE) {
-        const resolved = deps.coordinatorModel();
+        const resolved = deps.maestroModel();
         const effort = clampReasoningEffort(
-          input.effort ?? deps.coordinatorEffort(),
+          input.effort ?? deps.maestroEffort(),
           resolved.model.capabilities.reasoningEffort,
         );
         return {
@@ -417,10 +417,10 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         if (!matched.ok) return matched;
         resolved = matched.resolved;
       } else {
-        resolved = deps.coordinatorModel();
+        resolved = deps.maestroModel();
       }
       const effort = clampReasoningEffort(
-        input.effort ?? found.effort ?? deps.coordinatorEffort(),
+        input.effort ?? found.effort ?? deps.maestroEffort(),
         resolved.model.capabilities.reasoningEffort,
       );
       return {
@@ -436,7 +436,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const matched = matchEnabledModel(rawModel);
       if (!matched.ok) return matched;
       const effort = clampReasoningEffort(
-        input.effort ?? deps.coordinatorEffort(),
+        input.effort ?? deps.maestroEffort(),
         matched.resolved.model.capabilities.reasoningEffort,
       );
       return {
@@ -448,9 +448,9 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       };
     }
 
-    const resolved = deps.coordinatorModel();
+    const resolved = deps.maestroModel();
     const effort = clampReasoningEffort(
-      input.effort ?? deps.coordinatorEffort(),
+      input.effort ?? deps.maestroEffort(),
       resolved.model.capabilities.reasoningEffort,
     );
     return {
@@ -462,7 +462,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     };
   }
 
-  function snapshotPayload(m: MemberRuntimeState): SwarmMemberUpdatedPayload | undefined {
+  function snapshotPayload(m: MemberRuntimeState): EnsembleMemberUpdatedPayload | undefined {
     if (m.status === "removed") return undefined;
     return {
       name: m.name,
@@ -477,7 +477,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     if (disposed || !active || m.status === "removed") return;
     const payload = snapshotPayload(m);
     if (payload !== undefined) {
-      deps.emitEphemeral("swarm.member_updated", payload);
+      deps.emitEphemeral("ensemble.member_updated", payload);
     }
   }
 
@@ -488,8 +488,8 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       status: m.status,
       isolated: m.isolated,
     }));
-    return buildSwarmMemberPrompt({
-      swarmTitle: title,
+    return buildEnsembleMemberPrompt({
+      ensembleTitle: title,
       name: member.name,
       charter: member.charter,
       preset: member.preset,
@@ -510,7 +510,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
   async function ensureWorktreeRecord(
     member: MemberRuntimeState,
-  ): Promise<SwarmWorktreeHandle | undefined> {
+  ): Promise<EnsembleWorktreeHandle | undefined> {
     if (!member.isolated) return undefined;
     if (member.worktreeRecord !== undefined) return member.worktreeRecord;
     const loaded = await deps.worktrees.loadRecord(member.childSessionId);
@@ -524,7 +524,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
   async function checkoutIsolatedAuthorInto(
     viewer: MemberRuntimeState,
     authorName: string,
-  ): Promise<SwarmToolActionResult<{ commit: string }>> {
+  ): Promise<EnsembleToolActionResult<{ commit: string }>> {
     const viewerRecord = await ensureWorktreeRecord(viewer);
     if (viewerRecord === undefined) {
       return {
@@ -559,7 +559,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       return {
         ok: false,
         code: "invalid_input",
-        message: `Cannot check out @${target.name}'s commit because your own branch "${viewerRecord.branch}" has unapplied changes (${viewerOwnChanges.files.length} file(s)). Only members without unapplied branch changes (such as verifiers) may run \`swarm_checkout\`; ask \`@coordinator\` to apply your changes first.`,
+        message: `Cannot check out @${target.name}'s commit because your own branch "${viewerRecord.branch}" has unapplied changes (${viewerOwnChanges.files.length} file(s)). Only members without unapplied branch changes (such as verifiers) may run \`ensemble_checkout\`; ask \`@maestro\` to apply your changes first.`,
       };
     }
     // 先把目标作者未提交的改动提交一次（若在自身分支上）
@@ -592,7 +592,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const workspaceRoot = record?.workspaceRoot ?? mainDir.workspaceRoot;
 
       const extraTools: ToolDefinition[] = [
-        createSwarmPostTool((input) =>
+        createEnsemblePostTool((input) =>
           publishAndDeliverPost({
             text: input.text,
             from: member.name,
@@ -602,7 +602,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       ];
       if (member.isolated) {
         extraTools.push(
-          createSwarmCheckoutTool((input) => checkoutIsolatedAuthorInto(member, input.member)),
+          createEnsembleCheckoutTool((input) => checkoutIsolatedAuthorInto(member, input.member)),
         );
       }
 
@@ -659,7 +659,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
               member.pauseError = error ?? { code: reason, message: `Turn ended with ${reason}` };
             }
             emitMemberUpdate(member);
-            deps.notifyCoordinatorIdle();
+            deps.notifyMaestroIdle();
             scheduleQuietCheck();
           },
         },
@@ -673,7 +673,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           member.pauseError = undefined;
           emitMemberUpdate(member);
         } else if (event.type === "tool.started") {
-          member.toolActivity = summarizeSwarmToolCall(event.payload.name, event.payload.input);
+          member.toolActivity = summarizeEnsembleToolCall(event.payload.name, event.payload.input);
           emitMemberUpdate(member);
         } else if (event.type === "permission.requested") {
           const p = event.payload;
@@ -709,7 +709,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         const missed = member.missedPosts.splice(0);
         for (const post of missed) {
           const prepared: PreparedInput = {
-            swarm: {
+            ensemble: {
               postNumber: post.number,
               from: post.from,
               fromKind: post.fromKind,
@@ -717,7 +717,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
             content: [
               {
                 type: "text",
-                text: formatSwarmPostForModel({
+                text: formatEnsemblePostForModel({
                   number: post.number,
                   from: post.from,
                   text: post.text,
@@ -726,7 +726,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
             ],
             appended: [],
           };
-          await handle.deliverSwarmPost(prepared, true);
+          await handle.deliverEnsemblePost(prepared, true);
         }
       }
 
@@ -755,7 +755,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     await Promise.resolve();
     if (disposed || deps.isClosing() || !active || !armed || quietReminderSent) return;
     if (deliveringCount > 0) return;
-    if (deps.isCoordinatorBusy() || deps.hasCoordinatorPendingActive()) return;
+    if (deps.isMaestroBusy() || deps.hasMaestroPendingActive()) return;
     if (members.size === 0 && nextPostNumber === 1) return;
 
     for (const m of members.values()) {
@@ -767,42 +767,42 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     quietReminderSent = true;
     const text =
-      "@coordinator All ensemble members are waiting or paused and there are no pending deliveries. Review the board and member statuses, dispatch next steps, or call `swarm_end` if the work is complete.";
+      "@maestro All ensemble members are waiting or paused and there are no pending deliveries. Review the board and member statuses, dispatch next steps, or call `ensemble_end` if the work is complete.";
     const number = nextPostNumber++;
-    await deps.emitDurable("swarm.posted", {
+    await deps.emitDurable("ensemble.posted", {
       number,
       from: "Runtime",
       fromKind: "runtime",
       text,
-      mentions: ["coordinator"],
-      recipients: ["coordinator"],
+      mentions: ["maestro"],
+      recipients: ["maestro"],
     });
     const prepared: PreparedInput = {
-      swarm: { postNumber: number, from: "Runtime", fromKind: "runtime" },
+      ensemble: { postNumber: number, from: "Runtime", fromKind: "runtime" },
       content: [
         {
           type: "text",
-          text: formatSwarmPostForModel({ number, from: "Runtime", text }),
+          text: formatEnsemblePostForModel({ number, from: "Runtime", text }),
         },
       ],
       appended: [],
     };
-    await deps.deliverToCoordinator(prepared, false);
+    await deps.deliverToMaestro(prepared, false);
   }
 
   async function publishAndDeliverPost(options: {
     text: string;
     from: string;
-    fromKind: SwarmAuthorKind;
-    defaultToCoordinator?: boolean | undefined;
+    fromKind: EnsembleAuthorKind;
+    defaultToMaestro?: boolean | undefined;
     charterOf?: string | undefined;
     skipDelivery?: boolean | undefined;
-  }): Promise<SwarmToolActionResult<{ number: number; recipients: string[] }>> {
+  }): Promise<EnsembleToolActionResult<{ number: number; recipients: string[] }>> {
     if (!active) {
       return {
         ok: false,
         code: "invalid_input",
-        message: "No active ensemble in this session. Call `swarm_init` first.",
+        message: "No active ensemble in this session. Call `ensemble_init` first.",
       };
     }
     const trimmed = options.text.trim();
@@ -829,7 +829,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     const resolved = options.skipDelivery
       ? { ok: true as const, mentions: [] as string[], recipients: [] as string[] }
-      : resolveSwarmMentions({
+      : resolveEnsembleMentions({
           text: trimmed,
           author: options.from,
           authorKind: options.fromKind,
@@ -837,7 +837,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
             name: m.name,
             removed: m.status === "removed",
           })),
-          defaultToCoordinator: options.defaultToCoordinator,
+          defaultToMaestro: options.defaultToMaestro,
         });
 
     if (!resolved.ok) {
@@ -855,7 +855,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     }
 
     const number = nextPostNumber++;
-    await deps.emitDurable("swarm.posted", {
+    await deps.emitDurable("ensemble.posted", {
       number,
       from: options.from,
       fromKind: options.fromKind,
@@ -869,18 +869,18 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       deliveringCount += 1;
       try {
         for (const target of resolved.recipients) {
-          if (target === "coordinator") {
+          if (target === "maestro") {
             const prepared: PreparedInput = {
-              swarm: { postNumber: number, from: options.from, fromKind: options.fromKind },
+              ensemble: { postNumber: number, from: options.from, fromKind: options.fromKind },
               content: [
                 {
                   type: "text",
-                  text: formatSwarmPostForModel({ number, from: options.from, text: trimmed }),
+                  text: formatEnsemblePostForModel({ number, from: options.from, text: trimmed }),
                 },
               ],
               appended: [],
             };
-            await deps.deliverToCoordinator(prepared, false);
+            await deps.deliverToMaestro(prepared, false);
             continue;
           }
           const member = members.get(target);
@@ -918,11 +918,11 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           }
 
           const prepared: PreparedInput = {
-            swarm: { postNumber: number, from: options.from, fromKind: options.fromKind },
+            ensemble: { postNumber: number, from: options.from, fromKind: options.fromKind },
             content: [
               {
                 type: "text",
-                text: formatSwarmPostForModel({
+                text: formatEnsemblePostForModel({
                   number,
                   from: options.from,
                   text: trimmed,
@@ -932,7 +932,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
             ],
             appended: [],
           };
-          await handle.deliverSwarmPost(prepared, false);
+          await handle.deliverEnsemblePost(prepared, false);
         }
       } finally {
         deliveringCount -= 1;
@@ -1006,7 +1006,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       member.unsubscribe = undefined;
     }
     if (member.session !== undefined) {
-      member.session.clearPendingSwarmInputs();
+      member.session.clearPendingEnsembleInputs();
       await member.session.closeUnderlying().catch(() => undefined);
       member.session = undefined;
     }
@@ -1017,25 +1017,25 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       }
     }
 
-    await deps.emitDurable("swarm.member_removed", {
+    await deps.emitDurable("ensemble.member_removed", {
       name,
       ...(reason !== undefined && reason.trim() !== "" ? { reason: reason.trim() } : {}),
     });
-    deps.notifyCoordinatorIdle();
+    deps.notifyMaestroIdle();
     scheduleQuietCheck();
     return { ok: true };
   }
 
-  async function terminateSwarm(
-    reason: "coordinator" | "user" | "rewound",
+  async function terminateEnsemble(
+    reason: "maestro" | "user" | "rewound",
     summary?: string,
-  ): Promise<SwarmUnmergedWorktree[]> {
+  ): Promise<EnsembleUnmergedWorktree[]> {
     if (quietTimer !== undefined) {
       clearImmediate(quietTimer);
       quietTimer = undefined;
     }
     active = false;
-    deps.clearCoordinatorSwarmInputs();
+    deps.clearMaestroEnsembleInputs();
 
     // 1. 中断并关闭所有仍在运行或打开的常驻成员会话
     for (const member of members.values()) {
@@ -1044,7 +1044,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         member.unsubscribe = undefined;
       }
       if (member.session !== undefined) {
-        member.session.clearPendingSwarmInputs();
+        member.session.clearPendingEnsembleInputs();
         await member.session.interruptAndWait().catch(() => undefined);
         await member.session.closeUnderlying().catch(() => undefined);
         member.session = undefined;
@@ -1057,7 +1057,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     }
 
     // 2. 结算独立工作树：收集未并回工作树，已并回的通过 cleanupMerged 清理
-    const unmerged: SwarmUnmergedWorktree[] = [];
+    const unmerged: EnsembleUnmergedWorktree[] = [];
     for (const member of members.values()) {
       if (member.status === "removed" || !member.isolated) continue;
       const wt = await ensureWorktreeRecord(member);
@@ -1085,7 +1085,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     await deps.worktrees.cleanupMerged().catch(warnWorktreeCleanupFailed);
 
     // 若 cleanupMerged 因分支在主仓库 HEAD 已合并而删掉了工作树，从 unmerged 中剔除已合并项
-    const remainingUnmerged: SwarmUnmergedWorktree[] = [];
+    const remainingUnmerged: EnsembleUnmergedWorktree[] = [];
     for (const item of unmerged) {
       const stillExists = await deps.worktrees.loadRecord(item.childSessionId);
       if (stillExists !== undefined) {
@@ -1093,22 +1093,22 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       }
     }
 
-    await deps.emitDurable("swarm.ended", {
+    await deps.emitDurable("ensemble.ended", {
       reason,
       ...(summary !== undefined && summary.trim() !== "" ? { summary: summary.trim() } : {}),
       ...(remainingUnmerged.length > 0 ? { unmerged: remainingUnmerged } : {}),
     });
 
-    deps.syncCoordinatorTools();
-    deps.notifyCoordinatorIdle();
+    deps.syncMaestroTools();
+    deps.notifyMaestroIdle();
     return remainingUnmerged;
   }
 
-  // ── 协调者工具处理器 ────────────────────────────────────────
+  // ── 指挥工具处理器 ────────────────────────────────────────
 
   const toolHandlers = {
     catalog: catalogSnapshot,
-    async init(input: { title: string }): Promise<SwarmToolActionResult<{ title: string }>> {
+    async init(input: { title: string }): Promise<EnsembleToolActionResult<{ title: string }>> {
       const trimmed = typeof input.title === "string" ? input.title.trim() : "";
       if (trimmed === "") {
         return {
@@ -1130,38 +1130,38 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       quietReminderSent = false;
       nextPostNumber = 1;
       members.clear();
-      const ev = await deps.emitDurable("swarm.created", { title: trimmed });
+      const ev = await deps.emitDurable("ensemble.created", { title: trimmed });
       initSeq = ev.seq;
-      deps.syncCoordinatorTools();
+      deps.syncMaestroTools();
       return {
         ok: true,
-        text: `Initialized ensemble "${trimmed}". Add members with \`swarm_add_member\` and dispatch tasks with \`swarm_post\`.`,
+        text: `Initialized ensemble "${trimmed}". Add members with \`ensemble_add_member\` and dispatch tasks with \`ensemble_post\`.`,
         output: { title: trimmed },
       };
     },
 
     async addMember(input: {
       name: string;
-      charter?: Partial<SwarmCharter> | undefined;
+      charter?: Partial<EnsembleCharter> | undefined;
       model?: string | undefined;
       profile?: string | undefined;
       effort?: ReasoningEffort | undefined;
       preset?: "general" | "explore" | undefined;
       isolated?: boolean | undefined;
       agent?: string | undefined;
-    }): Promise<SwarmToolActionResult> {
+    }): Promise<EnsembleToolActionResult> {
       if (!active) {
         return {
           ok: false,
           code: "invalid_input",
-          message: "Ensemble is not initialized yet. Call `swarm_init` with a title first.",
+          message: "Ensemble is not initialized yet. Call `ensemble_init` with a title first.",
         };
       }
-      const nameError = validateSwarmMemberName(input.name, members.keys());
+      const nameError = validateEnsembleMemberName(input.name, members.keys());
       if (nameError !== undefined) {
         return { ok: false, code: "invalid_input", message: nameError };
       }
-      const charterValidated = validateSwarmCharter(input.charter);
+      const charterValidated = validateEnsembleCharter(input.charter);
       if (!charterValidated.ok) {
         return { ok: false, code: "invalid_input", message: charterValidated.error };
       }
@@ -1179,7 +1179,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
       const isolated = input.isolated === true;
       const childSessionId = deps.newChildSessionId();
-      let worktreeRecord: SwarmWorktreeHandle | undefined;
+      let worktreeRecord: EnsembleWorktreeHandle | undefined;
       if (isolated) {
         const dir = deps.currentDirectory();
         let repository: string;
@@ -1236,12 +1236,12 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         }
         return {
           ok: false,
-          code: "swarm_error",
+          code: "ensemble_error",
           message: `Failed to create member session: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
 
-      await deps.emitDurable("swarm.member_added", {
+      await deps.emitDurable("ensemble.member_added", {
         name: member.name,
         childSessionId: member.childSessionId,
         charter: member.charter,
@@ -1259,8 +1259,8 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const charterText = formatCharterPostText(member.name, member.charter);
       await publishAndDeliverPost({
         text: charterText,
-        from: "coordinator",
-        fromKind: "coordinator",
+        from: "maestro",
+        fromKind: "maestro",
         charterOf: member.name,
         skipDelivery: true,
       });
@@ -1282,8 +1282,8 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     post(input: { text: string }) {
       return publishAndDeliverPost({
         text: input.text,
-        from: "coordinator",
-        fromKind: "coordinator",
+        from: "maestro",
+        fromKind: "maestro",
       });
     },
 
@@ -1293,7 +1293,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       profile?: string | undefined;
       effort?: ReasoningEffort | undefined;
       agent?: string | undefined;
-    }): Promise<SwarmToolActionResult> {
+    }): Promise<EnsembleToolActionResult> {
       if (!active) {
         return {
           ok: false,
@@ -1329,7 +1329,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       member.reasoningEffort = selected.effort;
       member.profile = selected.profile;
 
-      await deps.emitDurable("swarm.member_model_changed", {
+      await deps.emitDurable("ensemble.member_model_changed", {
         name: member.name,
         model: member.model,
         ...(member.reasoningEffort !== undefined
@@ -1362,7 +1362,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     async removeMember(input: {
       name: string;
       reason?: string | undefined;
-    }): Promise<SwarmToolActionResult> {
+    }): Promise<EnsembleToolActionResult> {
       if (!active) {
         return {
           ok: false,
@@ -1387,7 +1387,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     async end(input: {
       summary?: string | undefined;
-    }): Promise<SwarmToolActionResult<{ unmerged: SwarmUnmergedWorktree[] }>> {
+    }): Promise<EnsembleToolActionResult<{ unmerged: EnsembleUnmergedWorktree[] }>> {
       if (!active) {
         return {
           ok: false,
@@ -1395,7 +1395,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           message: "No active ensemble in this session.",
         };
       }
-      const unmerged = await terminateSwarm("coordinator", input.summary);
+      const unmerged = await terminateEnsemble("maestro", input.summary);
       const unmergedSummary =
         unmerged.length > 0
           ? ` Retained ${unmerged.length} unmerged worktree branch(es): ${unmerged.map((u) => `@${u.name} (${u.branch})`).join(", ")}.`
@@ -1416,11 +1416,11 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const first = events[0];
       const forkSeq = first?.type === "session.created" ? (first.payload.forkedFrom?.seq ?? 0) : 0;
 
-      let view: SwarmView | undefined;
+      let view: EnsembleView | undefined;
       for (const ev of events) {
-        view = reduceSwarmDurable(view, ev, {
+        view = reduceEnsembleDurable(view, ev, {
           forkSeq,
-          coordinatorModel: deps.coordinatorModel().model.ref,
+          maestroModel: deps.maestroModel().model.ref,
         });
       }
 
@@ -1468,8 +1468,8 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const coordDelivered = new Set<number>();
       for (const ev of events) {
         if (ev.seq <= view.createdSeq) continue;
-        if (ev.type === "message.user" && ev.payload.swarm !== undefined) {
-          coordDelivered.add(ev.payload.swarm.postNumber);
+        if (ev.type === "message.user" && ev.payload.ensemble !== undefined) {
+          coordDelivered.add(ev.payload.ensemble.postNumber);
         }
       }
 
@@ -1480,8 +1480,8 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         const set = new Set<number>();
         const childEvents = await deps.readChildDurableEvents(childSessionId).catch(() => []);
         for (const ev of childEvents) {
-          if (ev.type === "message.user" && ev.payload.swarm !== undefined) {
-            set.add(ev.payload.swarm.postNumber);
+          if (ev.type === "message.user" && ev.payload.ensemble !== undefined) {
+            set.add(ev.payload.ensemble.postNumber);
           }
         }
         childDeliveredCache.set(childSessionId, set);
@@ -1490,10 +1490,10 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
       for (const post of view.posts) {
         for (const recipient of post.recipients) {
-          if (recipient === "coordinator") {
+          if (recipient === "maestro") {
             if (!coordDelivered.has(post.number)) {
               const prepared: PreparedInput = {
-                swarm: {
+                ensemble: {
                   postNumber: post.number,
                   from: post.from,
                   fromKind: post.fromKind,
@@ -1501,7 +1501,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
                 content: [
                   {
                     type: "text",
-                    text: formatSwarmPostForModel({
+                    text: formatEnsemblePostForModel({
                       number: post.number,
                       from: post.from,
                       text: post.text,
@@ -1510,7 +1510,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
                 ],
                 appended: [],
               };
-              await deps.deliverToCoordinator(prepared, true);
+              await deps.deliverToMaestro(prepared, true);
             }
             continue;
           }
@@ -1553,7 +1553,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       return false;
     },
 
-    coordinatorTools: () => createSwarmCoordinatorTools(toolHandlers),
+    maestroTools: () => createEnsembleMaestroTools(toolHandlers),
 
     publishMemberSnapshots(_listener) {
       return this.memberSnapshots();
@@ -1561,7 +1561,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
     memberSnapshots() {
       if (!active) return [];
-      const out: SwarmMemberUpdatedPayload[] = [];
+      const out: EnsembleMemberUpdatedPayload[] = [];
       for (const m of members.values()) {
         const snap = snapshotPayload(m);
         if (
@@ -1610,7 +1610,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         text: trimmed,
         from: "user",
         fromKind: "user",
-        defaultToCoordinator: true,
+        defaultToMaestro: true,
       });
       if (!res.ok || res.output === undefined) {
         throw deps.commandError(
@@ -1639,16 +1639,16 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       if (!active) {
         throw deps.commandError("invalid_command", "当前会话没有进行中的合奏");
       }
-      const unmerged = await terminateSwarm("user");
+      const unmerged = await terminateEnsemble("user");
       return { unmerged };
     },
 
     async endOnRewind() {
       if (!active) return;
-      await terminateSwarm("rewound");
+      await terminateEnsemble("rewound");
     },
 
-    onCoordinatorTurnSettled() {
+    onMaestroTurnSettled() {
       if (!active) return;
       armed = true;
       scheduleQuietCheck();

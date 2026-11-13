@@ -161,7 +161,6 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "plan",
   "boost",
   "ensemble",
-  "swarm",
 ];
 
 export function parseSkillSlash(

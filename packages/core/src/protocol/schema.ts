@@ -336,12 +336,12 @@ const payloadSchemas = {
       })
       .optional(),
     delegate: z.object({ agent: z.string(), task: z.string() }).optional(),
-    // ADR-0089：Swarm 留言板投递标记；旧版本按普通用户消息读取
-    swarm: z
+    // ADR-0089：Ensemble 留言板投递标记；旧版本按普通用户消息读取
+    ensemble: z
       .object({
         postNumber: z.number().int().positive(),
         from: z.string(),
-        fromKind: z.enum(["coordinator", "member", "user", "runtime"]),
+        fromKind: z.enum(["maestro", "member", "user", "runtime"]),
       })
       .optional(),
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
@@ -443,10 +443,10 @@ const payloadSchemas = {
     error: errorInfoSchema.optional(),
     recovered: z.boolean().optional(),
   }),
-  "swarm.created": z.object({
+  "ensemble.created": z.object({
     title: z.string(),
   }),
-  "swarm.member_added": z.object({
+  "ensemble.member_added": z.object({
     name: z.string(),
     childSessionId: z.string(),
     charter: z.object({
@@ -467,27 +467,27 @@ const payloadSchemas = {
       })
       .optional(),
   }),
-  "swarm.posted": z.object({
+  "ensemble.posted": z.object({
     number: z.number().int().positive(),
     from: z.string(),
-    fromKind: z.enum(["coordinator", "member", "user", "runtime"]),
+    fromKind: z.enum(["maestro", "member", "user", "runtime"]),
     text: z.string(),
     mentions: z.array(z.string()),
     recipients: z.array(z.string()),
     charterOf: z.string().optional(),
   }),
-  "swarm.member_model_changed": z.object({
+  "ensemble.member_model_changed": z.object({
     name: z.string(),
     model: modelRefSchema,
     reasoningEffort: reasoningEffortSchema.optional(),
     profile: z.string().optional(),
   }),
-  "swarm.member_removed": z.object({
+  "ensemble.member_removed": z.object({
     name: z.string(),
     reason: z.string().optional(),
   }),
-  "swarm.ended": z.object({
-    reason: z.enum(["coordinator", "user", "rewound"]),
+  "ensemble.ended": z.object({
+    reason: z.enum(["maestro", "user", "rewound"]),
     summary: z.string().optional(),
     unmerged: z
       .array(
@@ -544,12 +544,12 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("attachment.described", payloadSchemas["attachment.described"]),
   envelope("context.compacted", payloadSchemas["context.compacted"]),
   envelope("turn.completed", payloadSchemas["turn.completed"]),
-  envelope("swarm.created", payloadSchemas["swarm.created"]),
-  envelope("swarm.member_added", payloadSchemas["swarm.member_added"]),
-  envelope("swarm.posted", payloadSchemas["swarm.posted"]),
-  envelope("swarm.member_model_changed", payloadSchemas["swarm.member_model_changed"]),
-  envelope("swarm.member_removed", payloadSchemas["swarm.member_removed"]),
-  envelope("swarm.ended", payloadSchemas["swarm.ended"]),
+  envelope("ensemble.created", payloadSchemas["ensemble.created"]),
+  envelope("ensemble.member_added", payloadSchemas["ensemble.member_added"]),
+  envelope("ensemble.posted", payloadSchemas["ensemble.posted"]),
+  envelope("ensemble.member_model_changed", payloadSchemas["ensemble.member_model_changed"]),
+  envelope("ensemble.member_removed", payloadSchemas["ensemble.member_removed"]),
+  envelope("ensemble.ended", payloadSchemas["ensemble.ended"]),
 ]);
 
 // ── 解析错误 ───────────────────────────────────────────────

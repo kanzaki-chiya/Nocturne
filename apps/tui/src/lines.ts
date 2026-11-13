@@ -16,7 +16,7 @@ import {
   subagentResultText,
   backgroundToolStatus,
   subagentStartRejected,
-  unwrapSwarmPostText,
+  unwrapEnsemblePostText,
   workModeDisplayText,
 } from "@nocturne/core/protocol";
 
@@ -43,7 +43,7 @@ import {
 } from "./format.js";
 import { renderAssistant } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
-import { swarmAuthorLabel, toolDisplayName } from "./text-format-swarm.js";
+import { ensembleAuthorLabel, toolDisplayName } from "./text-format-ensemble.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
 import type { TranscriptItem } from "./components/transcript.js";
@@ -174,8 +174,8 @@ interface LayoutOptions {
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   continued?: boolean;
   written?: ReadonlyMap<string, number>;
-  /** 帖子送达头部的接收者：协调者会话为「协调者」，成员会话为 `@name` */
-  swarmRecipient?: string | undefined;
+  /** 帖子送达头部的接收者：指挥会话为「指挥」，成员会话为 `@name` */
+  ensembleRecipient?: string | undefined;
 }
 
 export function layoutEntry(
@@ -266,10 +266,10 @@ function layoutEntryBody(
             : []),
         ];
       }
-      if (entry.swarm !== undefined) {
+      if (entry.ensemble !== undefined) {
         const bar = ascii ? "| " : "│ ";
-        const head = `${swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind)} → ${options.swarmRecipient ?? "协调者"} · #${entry.swarm.postNumber}`;
-        const body = stripControls(unwrapSwarmPostText(userText(entry)));
+        const head = `${ensembleAuthorLabel(entry.ensemble.from, entry.ensemble.fromKind)} → ${options.ensembleRecipient ?? "指挥"} · #${entry.ensemble.postNumber}`;
+        const body = stripControls(unwrapEnsemblePostText(userText(entry)));
         const barred = (key: string, text: string, extra: Partial<LaidLine>): LaidLine[] =>
           wrap(text, Math.max(1, budget(width) - 2)).map((line, i) => ({
             key: `${key}:${i}`,
@@ -725,7 +725,7 @@ interface TranscriptSource {
   diffExpanded?: ReadonlySet<string>;
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   theme?: ThemePalette;
-  swarmRecipient?: string | undefined;
+  ensembleRecipient?: string | undefined;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -746,7 +746,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     entries: src.entries,
     backgroundShells: src.live.backgroundShells,
     ...(src.shellOutputs ? { shellOutputs: src.shellOutputs } : {}),
-    ...(src.swarmRecipient !== undefined ? { swarmRecipient: src.swarmRecipient } : {}),
+    ...(src.ensembleRecipient !== undefined ? { ensembleRecipient: src.ensembleRecipient } : {}),
   };
   const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
   const blocks: LineBlock[] = [

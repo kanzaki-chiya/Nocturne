@@ -1,6 +1,6 @@
-/* Swarm 面板主体（ADR-0089）：桌面右侧面板与手机全屏页共用；颜色只用主题变量 */
+/* Ensemble 面板主体（ADR-0089）：桌面右侧面板与手机全屏页共用；颜色只用主题变量 */
 
-.swarm-pane {
+.ensemble-pane {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -11,7 +11,7 @@
 }
 
 /* ── 子栏：留言板/成员分段 + 搜索、跟随、溢出 ── */
-.swarm-subbar {
+.ensemble-subbar {
   flex: none;
   display: flex;
   align-items: center;
@@ -20,7 +20,7 @@
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--a-border);
 }
-.swarm-seg {
+.ensemble-seg {
   display: inline-flex;
   align-items: center;
   gap: var(--space-0-5);
@@ -29,7 +29,7 @@
   border-radius: var(--radius-2);
   background: var(--a-input);
 }
-.swarm-seg button {
+.ensemble-seg button {
   min-height: calc(var(--ctl-h-md) - 2 * var(--space-0-5) - 2px);
   padding: var(--space-0-5) var(--space-2);
   border: 0;
@@ -40,21 +40,21 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.swarm-seg button:hover {
+.ensemble-seg button:hover {
   color: var(--a-text);
 }
-.swarm-seg button.on,
-.swarm-seg button[aria-selected="true"] {
+.ensemble-seg button.on,
+.ensemble-seg button[aria-selected="true"] {
   background: var(--a-sel-strong);
   color: var(--a-text);
   font-weight: var(--fw-medium);
 }
-.swarm-tools {
+.ensemble-tools {
   display: flex;
   align-items: center;
   gap: var(--space-1);
 }
-.swarm-ib {
+.ensemble-ib {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -67,16 +67,16 @@
   color: var(--a-muted);
   cursor: pointer;
 }
-.swarm-ib:hover {
+.ensemble-ib:hover {
   background: var(--a-raised);
   color: var(--a-text);
 }
-.swarm-ib.on {
+.ensemble-ib.on {
   border-color: var(--a-accent-border);
   background: var(--a-accent-subtle);
   color: var(--a-accent);
 }
-.swarm-pane > .swarm-error {
+.ensemble-pane > .ensemble-error {
   flex: none;
   padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--a-border);
@@ -84,12 +84,12 @@
 }
 
 /* ── 搜索栏（不写 placeholder，聚焦即提示） ── */
-.swarm-search {
+.ensemble-search {
   flex: none;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--a-border);
 }
-.swarm-search input {
+.ensemble-search input {
   width: 100%;
   box-sizing: border-box;
   padding: var(--space-1) var(--space-2);
@@ -99,12 +99,12 @@
   color: var(--a-text);
   font: inherit;
 }
-.swarm-search input:focus {
+.ensemble-search input:focus {
   border-color: var(--a-accent-border);
 }
 
 /* ── 筛选条：全部 + 每名成员 ── */
-.swarm-filters {
+.ensemble-filters {
   flex: none;
   display: flex;
   flex-wrap: wrap;
@@ -113,7 +113,7 @@
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--a-border);
 }
-.swarm-chip {
+.ensemble-chip {
   min-height: calc(var(--chip-h) + var(--space-1));
   padding: 0 var(--space-2);
   border: 1px solid var(--a-border);
@@ -124,17 +124,17 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.swarm-chip:hover {
+.ensemble-chip:hover {
   color: var(--a-text);
 }
-.swarm-chip.on {
+.ensemble-chip.on {
   border-color: var(--a-accent-border);
   background: var(--a-sel);
   color: var(--a-text);
 }
 
 /* ── 留言板帖子 ── */
-.swarm-body {
+.ensemble-body {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -144,7 +144,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.swarm-av {
+.ensemble-av {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -155,93 +155,93 @@
   background: var(--a-raised);
   color: var(--a-secondary);
 }
-.swarm-av.sm {
+.ensemble-av.sm {
   width: var(--space-5);
   height: var(--space-5);
 }
-.swarm-av.tinted {
+.ensemble-av.tinted {
   /* stylelint-disable-next-line function-disallowed-list -- 成员头像底色用 14% 淡化 */
-  background: color-mix(in srgb, var(--swarm-av-color) 14%, transparent);
-  color: var(--swarm-av-color);
+  background: color-mix(in srgb, var(--ensemble-av-color) 14%, transparent);
+  color: var(--ensemble-av-color);
 }
-.swarm-av.warn {
+.ensemble-av.warn {
   outline: 1.5px solid var(--a-warning);
 }
-.swarm-post {
+.ensemble-post {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
   gap: var(--space-2);
 }
-.swarm-post-col {
+.ensemble-post-col {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-.swarm-post-head {
+.ensemble-post-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-2);
 }
-.swarm-post-head-main {
+.ensemble-post-head-main {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-1);
   min-width: 0;
 }
-.swarm-post-from {
+.ensemble-post-from {
   min-width: 0;
   color: var(--a-text);
   font-size: var(--fs-2);
   font-weight: var(--fw-semibold);
   overflow-wrap: anywhere;
 }
-.swarm-post-to {
+.ensemble-post-to {
   color: var(--a-muted);
   font-size: var(--fs-1);
   font-weight: var(--fw-regular);
   overflow-wrap: anywhere;
 }
-.swarm-post-meta {
+.ensemble-post-meta {
   flex: none;
   margin-left: auto;
   color: var(--a-faint);
   font: var(--fs-1)/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
-.swarm-post-txt {
+.ensemble-post-txt {
   color: var(--a-text);
   overflow-wrap: anywhere;
 }
-.swarm-post-txt .conversation-markdown > :first-child {
+.ensemble-post-txt .conversation-markdown > :first-child {
   margin-top: 0;
 }
-.swarm-post-txt .conversation-markdown > :last-child {
+.ensemble-post-txt .conversation-markdown > :last-child {
   margin-bottom: 0;
 }
-.swarm-sys-text {
+.ensemble-sys-text {
   color: var(--a-muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.swarm-charter-row {
+.ensemble-charter-row {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
   color: var(--a-secondary);
 }
-.swarm-charter-tag {
+.ensemble-charter-tag {
   flex: none;
   color: var(--a-muted);
   font-size: var(--fs-1);
 }
 
 /* ── 底部留言板输入与 @ 补全 ── */
-.swarm-boardin {
+.ensemble-boardin {
   position: relative;
   flex: none;
   display: flex;
@@ -250,7 +250,7 @@
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--a-border);
 }
-.swarm-ac {
+.ensemble-ac {
   position: absolute;
   z-index: 40;
   bottom: calc(100% + var(--space-1));
@@ -264,7 +264,7 @@
   background: var(--a-panel);
   box-shadow: var(--shadow-popover);
 }
-.swarm-ac-row {
+.ensemble-ac-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -272,11 +272,11 @@
   border-radius: var(--radius-2);
   cursor: pointer;
 }
-.swarm-ac-row.is-active,
-.swarm-ac-row:hover {
+.ensemble-ac-row.is-active,
+.ensemble-ac-row:hover {
   background: var(--a-sel);
 }
-.swarm-ac-name {
+.ensemble-ac-name {
   min-width: 0;
   overflow: hidden;
   color: var(--a-text);
@@ -285,14 +285,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.swarm-ac-meta {
+.ensemble-ac-meta {
   margin-left: auto;
   color: var(--a-faint);
   font-family: var(--mono);
   font-size: var(--fs-1);
   white-space: nowrap;
 }
-.swarm-boardin textarea {
+.ensemble-boardin textarea {
   width: 100%;
   box-sizing: border-box;
   min-height: var(--composer-min-h);
@@ -307,12 +307,12 @@
   resize: none;
   overflow-y: auto;
 }
-.swarm-boardin textarea:focus {
+.ensemble-boardin textarea:focus {
   border-color: var(--a-accent-border);
 }
 
 /* ── 成员页 ── */
-.swarm-mems {
+.ensemble-mems {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -320,23 +320,23 @@
   padding: var(--space-2) var(--space-3) var(--space-3);
   overflow-y: auto;
 }
-.swarm-mem {
+.ensemble-mem {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   border-radius: var(--radius-2);
 }
-.swarm-mem:hover {
+.ensemble-mem:hover {
   background: var(--a-raised);
 }
-.swarm-mem.coord {
+.ensemble-mem.coord {
   border-bottom: 1px dashed var(--a-border-strong);
   border-radius: 0;
 }
-.swarm-mem.retired {
+.ensemble-mem.retired {
   opacity: var(--disabled-opacity);
 }
-.swarm-mem-main {
+.ensemble-mem-main {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -351,20 +351,20 @@
   text-align: left;
   cursor: pointer;
 }
-.swarm-mem-col {
+.ensemble-mem-col {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-0-5);
 }
-.swarm-mem-top {
+.ensemble-mem-top {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-.swarm-mem-name {
+.ensemble-mem-name {
   min-width: 0;
   overflow: hidden;
   color: var(--a-text);
@@ -372,20 +372,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.swarm-mem-name i {
+.ensemble-mem-name i {
   margin-left: var(--space-2);
   color: var(--a-muted);
   font-family: var(--mono);
   font-size: var(--fs-1);
   font-style: normal;
 }
-.swarm-mem-no {
+.ensemble-mem-no {
   margin-left: auto;
   color: var(--a-faint);
   font: var(--fs-1)/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
-.swarm-mem-last {
+.ensemble-mem-last {
   min-width: 0;
   overflow: hidden;
   color: var(--a-muted);
@@ -393,22 +393,22 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.swarm-mem-menu {
+.ensemble-mem-menu {
   flex: none;
   opacity: 0;
 }
-.swarm-mem:hover .swarm-mem-menu,
-.swarm-mem:focus-within .swarm-mem-menu {
+.ensemble-mem:hover .ensemble-mem-menu,
+.ensemble-mem:focus-within .ensemble-mem-menu {
   opacity: 1;
 }
-.swarm-grp {
+.ensemble-grp {
   display: flex;
   align-items: center;
   padding: var(--space-2) var(--space-2) var(--space-1);
   color: var(--a-faint);
   font-size: var(--fs-1);
 }
-.swarm-retired-toggle {
+.ensemble-retired-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -419,83 +419,83 @@
   font-size: var(--fs-1);
   cursor: pointer;
 }
-.swarm-retired-toggle:hover {
+.ensemble-retired-toggle:hover {
   color: var(--a-text);
 }
-.swarm-retired-toggle .fold-arrow {
+.ensemble-retired-toggle .fold-arrow {
   transition: transform var(--dur) var(--ease-out);
 }
-.swarm-retired-toggle .fold-arrow.down {
+.ensemble-retired-toggle .fold-arrow.down {
   transform: rotate(90deg);
 }
 
 /* ── 状态圆点：运行/等确认带光圈，其余纯色 ── */
-.swarm-dot {
+.ensemble-dot {
   flex: none;
   width: var(--dot);
   height: var(--dot);
   border-radius: 50%;
   background: var(--a-border-strong);
 }
-.swarm-dot.work {
+.ensemble-dot.work {
   background: var(--a-accent);
   /* stylelint-disable-next-line function-disallowed-list -- 运行中成员用 22% --a-accent 光圈 */
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 22%, transparent);
 }
-.swarm-dot.ask {
+.ensemble-dot.ask {
   background: var(--a-warning);
   /* stylelint-disable-next-line function-disallowed-list -- 等待确认的成员用 25% --a-warning 光圈 */
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-warning) 25%, transparent);
 }
-.swarm-dot.pause {
+.ensemble-dot.pause {
   background: var(--a-warning);
 }
-.swarm-dot.wait {
+.ensemble-dot.wait {
   background: var(--a-border-strong);
 }
-.swarm-dot.retired {
+.ensemble-dot.retired {
   background: var(--a-faint);
 }
 
 /* ── 手机全屏页：触控尺寸更大，成员菜单不靠悬停 ── */
-.phone .swarm-subbar {
+.phone .ensemble-subbar {
   padding: var(--space-2) var(--space-3);
 }
-.phone .swarm-ib {
+.phone .ensemble-ib {
   width: var(--ctl-h-touch);
   height: var(--ctl-h-touch);
   padding: 0;
 }
-.phone .swarm-seg button {
+.phone .ensemble-seg button {
   min-height: var(--ctl-h-touch);
   padding: var(--space-1) var(--space-3);
   font-size: var(--fs-3);
 }
-.phone .swarm-chip {
+.phone .ensemble-chip {
   min-height: var(--ctl-h-touch);
   padding: 0 var(--space-3);
   border-radius: var(--radius-pill);
   font-size: var(--fs-2);
 }
-.phone .swarm-body {
+.phone .ensemble-body {
   gap: var(--space-4);
 }
-.phone .swarm-post > .swarm-av {
+.phone .ensemble-post > .ensemble-av {
   width: var(--space-5);
   height: var(--space-5);
 }
-.phone .swarm-post-txt {
+.phone .ensemble-post-txt {
   font-size: var(--fs-3);
 }
-.phone .swarm-mem-main {
+.phone .ensemble-mem-main {
   padding: var(--space-2) var(--space-3);
 }
-.phone .swarm-mem-menu {
+.phone .ensemble-mem-menu {
   opacity: 1;
 }
-.phone .swarm-boardin textarea {
+.phone .ensemble-boardin textarea {
   font-size: var(--fs-4);
 }
-.phone .swarm-ac-row {
+.phone .ensemble-ac-row {
   min-height: var(--ctl-h-touch);
 }

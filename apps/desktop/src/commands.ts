@@ -92,7 +92,7 @@ export function parseSlash(
   const work = parseWorkModeSlash(line);
   if (work?.kind === "action") {
     // 草稿页还没有会话：合奏子命令（board / end）与无合奏会话一样只显示用法提示
-    if (context === "draft" && work.action.startsWith("swarm"))
+    if (context === "draft" && work.action.startsWith("ensemble"))
       return { kind: "unknown", name, hint: "用法：/ensemble 任务" };
     return {
       kind: "command",

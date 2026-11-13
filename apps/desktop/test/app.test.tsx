@@ -2349,3 +2349,40 @@ it("新会话发送后侧栏立即出现并选中、状态栏显示思考中；�
     expect(document.querySelector("aside")?.textContent).not.toContain("新会话首条");
   });
 });
+
+const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+
+it("旧格式会话留在列表里，打开只显示 Runtime 原文，归档后其它会话仍可打开", async () => {
+  const host = replayHost([], undefined, undefined, (request) =>
+    request.method === "runtime.resumeSession" && request.params.sessionId === "legacy"
+      ? { code: "session_log_newer", message: LEGACY_OPEN_ERROR }
+      : undefined,
+  );
+  host.sessions.splice(
+    0,
+    host.sessions.length,
+    fakeSession("legacy", "Z:/shared", "旧合奏要改订单页", 300),
+    fakeSession("alive", "Z:/shared", "可搜索的好会话", 200),
+  );
+  render(<App host={host} />);
+  await screen.findByText("旧合奏要改订单页");
+  expect(screen.getByText("可搜索的好会话")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^旧合奏要改订单页/ }));
+  expect((await screen.findByRole("heading", { name: "打开会话失败" })).textContent).toBe(
+    "打开会话失败",
+  );
+  expect(screen.getByText(LEGACY_OPEN_ERROR).className).toContain("lead");
+  expect(document.querySelector(".nodecard")?.textContent).not.toContain("旧格式");
+  expect(document.querySelector(".nodecard")?.textContent).not.toContain("迁移");
+  expect(screen.getByText("可搜索的好会话")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^可搜索的好会话/ }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("alive 正文");
+
+  archiveSessionRow("旧合奏要改订单页");
+  await waitFor(() =>
+    expect(document.querySelector("aside")?.textContent ?? "").not.toContain("旧合奏要改订单页"),
+  );
+  expect(document.querySelector("aside")?.textContent).toContain("alive 正文");
+});

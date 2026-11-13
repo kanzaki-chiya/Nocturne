@@ -89,12 +89,12 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`、`usage?: Usage`、`model?: ModelRef`（摘要请求成功时记录用量与模型；prune 不写，旧日志兼容；规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
 | `attachment.described` | ✓ | `attachmentRef: { seq, index }`（`message.user` 或 `tool.completed` 的 seq、从 0 开始的附件序号）、`model: string`（provider/model）、`text`、`usage?` |
-| `swarm.created` | — | `title: string`（建立 Swarm 留言板，[ADR-0089](../decisions/ADR-0089-swarm.md) §7） |
-| `swarm.member_added` | — | `name`、`childSessionId`、`charter: { owns, handsOff, doneWhen }`、`model: ModelRef`、`reasoningEffort?`、`profile?`、`preset: "general" \| "explore"`、`isolated: boolean`、`worktree?: { path, branch, base }` |
-| `swarm.posted` | — | `number`（从 1 起连续递增）、`from`、`fromKind: "coordinator" \| "member" \| "user" \| "runtime"`、`text`、`mentions: string[]`、`recipients: string[]`、`charterOf?: string` |
-| `swarm.member_model_changed` | — | `name`、`model: ModelRef`、`reasoningEffort?`、`profile?` |
-| `swarm.member_removed` | — | `name`、`reason?` |
-| `swarm.ended` | — | `reason: "coordinator" \| "user" \| "rewound"`、`summary?`、`unmerged?: { name, childSessionId, branch, base, head, worktree, files }[]` |
+| `ensemble.created` | — | `title: string`（建立 Ensemble 留言板，[ADR-0089](../decisions/ADR-0089-ensemble.md) §7） |
+| `ensemble.member_added` | — | `name`、`childSessionId`、`charter: { owns, handsOff, doneWhen }`、`model: ModelRef`、`reasoningEffort?`、`profile?`、`preset: "general" \| "explore"`、`isolated: boolean`、`worktree?: { path, branch, base }` |
+| `ensemble.posted` | — | `number`（从 1 起连续递增）、`from`、`fromKind: "maestro" \| "member" \| "user" \| "runtime"`、`text`、`mentions: string[]`、`recipients: string[]`、`charterOf?: string` |
+| `ensemble.member_model_changed` | — | `name`、`model: ModelRef`、`reasoningEffort?`、`profile?` |
+| `ensemble.member_removed` | — | `name`、`reason?` |
+| `ensemble.ended` | — | `reason: "maestro" \| "user" \| "rewound"`、`summary?`、`unmerged?: { name, childSessionId, branch, base, head, worktree, files }[]` |
 
 `attachment.described` 与 `session.titled` 是 ADR-0040 的兼容扩展，不提升 `formatVersion`。成功描述供投影与界面复用；描述失败时写空 `text`，记录已尝试，恢复后也不重试，界面不显示空描述。标题后台写入，与 Turn 共用会话写入队列，保持连续 seq、先落盘后发布；生命周期见 [sessions.md](../architecture/sessions.md)。角色用量只保存在各自事件，不加入 `turn.completed.usage`、主对话缓存命中率或速度。
 
@@ -131,7 +131,7 @@ ADR-0083 修订（2026-11-08）：撤回后台结果时写入会话级持久事�
 
 ADR-0083 停止修订（2026-11-08）：新增会话级持久事件 `shell.task_stopped`（无 turnId），payload 为 `{ taskId, callId, status: "killed", source: "user" | "model", exitCode?, signal? }`，时间为结束时间。停止不再产生待发输入；恢复不补 interrupted。用户停止在其后第一个 `turn.started` 折叠为普通 note，复用现有上下文投影，不创建对话条目；追加后留在历史，按现有规则投影、修剪和压缩，不因回合结束而删除。恢复按持久事件顺序保证每个任务只追加一次，不新增第二条。模型停止直接返回工具结果。不提升 formatVersion；旧 Runtime 拒绝恢复含此未知持久事件的日志，旧只读客户端忽略。旧 `message.user.backgroundShell.status: "killed"` 仍可读，但新停止不再写它。`message.user.backgroundShell.name?` 与 `input.pending.items[].shellName?` 传递任务名（无名取启动命令首行），待发显示「后台任务 · <任务名> · 等待送达」。
 
-ADR-0089：Swarm 留言板在协调者会话日志中记录六个会话级持久事件（`swarm.created`、`swarm.member_added`、`swarm.posted`、`swarm.member_model_changed`、`swarm.member_removed`、`swarm.ended`），不提升 `formatVersion`（旧 Runtime 拒绝恢复含未知持久事件的协调者日志，只读端忽略）。送达给成员或协调者的帖子在目标会话日志中写为普通 `message.user`，附可选字段 `swarm?: { postNumber: number; from: string; fromKind: "coordinator" | "member" | "user" | "runtime" }`，正文以 `<swarm-post n="…" from="…">…</swarm-post>` 包裹；旧版本读取成员日志时按非严格 schema 忽略未知字段 `swarm`，作为普通用户消息读取。
+ADR-0089：Ensemble 留言板在指挥（Maestro，`@maestro`）会话日志中记录六个会话级持久事件（`ensemble.created`、`ensemble.member_added`、`ensemble.posted`、`ensemble.member_model_changed`、`ensemble.member_removed`、`ensemble.ended`），不提升 `formatVersion`（旧 Runtime 拒绝恢复含未知持久事件的指挥日志，只读端忽略）。送达给成员或指挥的帖子在目标会话日志中写为普通 `message.user`，附可选字段 `ensemble?: { postNumber: number; from: string; fromKind: "maestro" | "member" | "user" | "runtime" }`，正文以 `<ensemble-post n="…" from="…">…</ensemble-post>` 包裹；旧版本读取成员日志时按非严格 schema 忽略未知字段 `ensemble`，作为普通用户消息读取。
 
 ### 3.2 临时事件
 
@@ -148,8 +148,8 @@ ADR-0083：`shell.task_updated` 携带 `{ task: BackgroundShellTask }`，任务�
 | `runtime.warning` | ✓ 或 — | `code`、`message`（Phase 5 增补的 `code`：`project_config_untrusted`（含被忽略的 `mcp`/`hooks` 段）、`mcp_server_failed`、`mcp_server_crashed`、`mcp_tool_conflict`、`mcp_env_missing`、`hook_failed`、`debug_sink_failed`、`grant_persist_failed` 等；v0.2 增补 `model_capabilities_defaulted`、`provider_setup_invalid`，见 [provider-setup.md](../architecture/provider-setup.md)；ADR-0022 增补 `shell_env_invalid`（非法 `NOCTURNE_SHELL` 回退自动）、`shell_overridden`（settings 层的 shell 选择被 env/config 覆盖）；ADR-0025 增补 `provider_thinking_levels_ignored`（旧向导配置的服务商级 `thinking.levels` 已忽略，需逐模型设置）；`config_apply_failed`（配置已保存，但未能应用到该会话，见 [mcp.md](../architecture/mcp.md) 第 4 节）；ADR-0064 增补 `schedule_locked`（另一个 Nocturne 正在调度，本进程不启动调度循环）、`schedule_start_failed`、`schedule_config`（`schedules.json` 里被忽略的条目）、`schedule_check_failed`、`schedule_history_failed`，见 [schedule.md](../architecture/schedule.md)；ADR-0075 增补 `worktree_include_skipped`（项目不可信且存在 `.worktreeinclude` 时忽略）、`worktree_symlink_skipped`（创建工作树副本时跳过未跟踪的符号链接）、`worktree_cleanup_failed`（工作树或分支清理失败），见 [ADR-0075](../decisions/ADR-0075-worktree-isolation.md)） |
 | `runtime.error` | ✓ 或 — | `code`、`message`（例如日志写入失败导致会话进入 `failed` 状态） |
 | `mcp.server` | — | `name`、`state: "starting" \| "ready" \| "failed" \| "crashed" \| "stopped"`、`toolCount?`、`error?`（Phase 5，MCP 服务器生命周期状态转移，见 [mcp.md](../architecture/mcp.md) 第 7 节；归约进 `SessionView.mcpServers`，见 [view.md](view.md) §4） |
-| `input.pending` | — | `items: PendingInputItem[]`（每条 `{ id, mode: "steer" \| "queue" \| "subagent" \| "shell" \| "swarm", text, attachments, createdAt, paused, workMode? }`，`workMode` 为执行方式名，见 ADR-0076）、`paused`（ADR-0070；待发输入的**完整快照**，每次变化整份下发，会话语义见 [agent-loop.md](../architecture/agent-loop.md) §2.1）。临时状态、不写日志，不回放：新附加的客户端在订阅后另调 `session.pendingInputs`（`rpc.md` 第 3.6 节）对齐 |
-| `swarm.member_updated` | — | `name`、`status: "working" \| "waiting" \| "paused"`、`toolActivity?: { tool, detail? }`、`pauseError?: { code, message }`、`pendingPermissions?: { requestId, callId, reason, subjects, options }[]`（[ADR-0089](../decisions/ADR-0089-swarm.md) §5、§8：协调者会话上的临时运行态同步，订阅协调者时立即推送活动快照） |
+| `input.pending` | — | `items: PendingInputItem[]`（每条 `{ id, mode: "steer" \| "queue" \| "subagent" \| "shell" \| "ensemble", text, attachments, createdAt, paused, workMode? }`，`workMode` 为执行方式名，见 ADR-0076）、`paused`（ADR-0070；待发输入的**完整快照**，每次变化整份下发，会话语义见 [agent-loop.md](../architecture/agent-loop.md) §2.1）。临时状态、不写日志，不回放：新附加的客户端在订阅后另调 `session.pendingInputs`（`rpc.md` 第 3.6 节）对齐 |
+| `ensemble.member_updated` | — | `name`、`status: "working" \| "waiting" \| "paused"`、`toolActivity?: { tool, detail? }`、`pauseError?: { code, message }`、`pendingPermissions?: { requestId, callId, reason, subjects, options }[]`（[ADR-0089](../decisions/ADR-0089-ensemble.md) §5、§8：指挥会话上的临时运行态同步，订阅指挥时立即推送活动快照） |
 
 临时事件的信息要么包含在随后的持久化事件中（增量 → 完整消息），要么是可丢弃的状态提示。客户端丢失临时事件不影响正确性。
 
@@ -317,9 +317,9 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 | `resumeGoal()` | 同上；目标已是 active 时无操作 | `session.config_changed`（`goal.status = "active"`）；会话空闲时随即开新 Turn（`message.user.workMode` 为 `name = "goal"`、`source = "runtime"`），Turn 或压缩进行中只改状态 | ADR-0076 §4.5 |
 | `approvePlan()` | 子会话返回 `invalid_command`；不在计划模式返回 `invalid_command`；会话非空闲返回 `session_busy` | `session.config_changed`（`permissionPreset` 取 `restorePreset`，原本只读时改用 `default`；`plan = null`），随即开新 Turn（用户正文「批准」、`workMode` 为 `name = "plan"`、`source = "runtime"`）并等它结束 | ADR-0076 §5 |
 | `cancelPlan()` | 子会话或不在计划模式返回 `invalid_command` | `session.config_changed`（`permissionPreset = restorePreset`、`plan = null`），不开 Turn | ADR-0076 §5 |
-| `postToSwarm({ text })` | 无活动合奏（内部标识 `swarm`）或文本空白或提及已移除成员返回 `invalid_command` | `swarm.posted`（`fromKind: "user"`；未 `@` 任何人时默认 `@coordinator`），向提及目标投递 `swarm` 待发输入 | ADR-0089 §10 |
-| `removeSwarmMember({ name })` | 无活动合奏、成员不存在/已移除或独立工作树有未并回提交返回 `invalid_command` | 中断并关闭成员子会话、清理工作树，写 `swarm.member_removed` | ADR-0089 §4、§10 |
-| `endSwarm()` | 无活动合奏返回 `invalid_command` | 停止全部成员、清理已并回工作树、保留未并回分支，写 `swarm.ended(reason: "user")` 并恢复协调者工具集 | ADR-0089 §10、§11 |
+| `postToEnsemble({ text })` | 无活动合奏（内部标识 `ensemble`）或文本空白或提及已移除成员返回 `invalid_command` | `ensemble.posted`（`fromKind: "user"`；未 `@` 任何人时默认 `@maestro`），向提及目标投递 `ensemble` 待发输入 | ADR-0089 §10 |
+| `removeEnsembleMember({ name })` | 无活动合奏、成员不存在/已移除或独立工作树有未并回提交返回 `invalid_command` | 中断并关闭成员子会话、清理工作树，写 `ensemble.member_removed` | ADR-0089 §4、§10 |
+| `endEnsemble()` | 无活动合奏返回 `invalid_command` | 停止全部成员、清理已并回工作树、保留未并回分支，写 `ensemble.ended(reason: "user")` 并恢复指挥工具集 | ADR-0089 §10、§11 |
 | `interrupt()` | 有运行中的 Turn，否则无操作 | `turn.completed(reason="aborted")` | Phase 1 |
 | `fileIndex()` | 会话可用；首次请求建立工作区索引，每个 Turn 后失效 | 无事件，返回至多 20,000 个文件与目录候选；规则见 [tools.md](../architecture/tools.md) | ADR-0033 |
 | `respondPermission(requestId, reply)` | 请求处于等待中，否则返回 `unknown_request` | `permission.resolved` | Phase 2 起 ask 流程生效；Phase 3 起 `reply.remember` 生效，生成对应范围的 Grant（[permissions.md](../architecture/permissions.md) 5.4） |
@@ -351,7 +351,7 @@ ADR-0072：`message.user.files?` 和 `tool.completed.files?` 是 `FileAttachment
 - `session.config_changed.mcp`（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）是已知事件的可选环境状态字段：不提升 `formatVersion`，旧版本忽略，旧日志折叠不变。
 - `session.config_changed.goal`（含取消时的 `null`）、`session.config_changed.plan` 与 `message.user.workMode`（[ADR-0076](../decisions/ADR-0076-work-modes.md)）不提升 `formatVersion`。尚不认识 goal 的旧版本会忽略该字段；已实现最初版 ADR-0076、要求 maxMinutes/maxRounds 且不接受 null 的中间版本不能读取新的目标写入，需升级 Runtime 与客户端。新版本可读取旧字段、旧 limit 和旧日志，并以 null 清除目标；不能把这一方向的兼容误述为所有旧版本均可读取新日志。
 - 新增持久化事件类型：旧版本 Runtime 将无法恢复包含它的会话（见上表）。这是有意的保守选择；变更说明中需写明。
-- 删除字段、改变字段含义：不兼容变更，提升 `formatVersion`，提供旧格式日志的读取迁移，并新增 ADR。
+- 删除字段、改变字段含义：不兼容变更，提升 `formatVersion`，提供旧格式日志的读取迁移，并新增 ADR。本次合奏内部标识改名（事件 `swarm.*` 改为 `ensemble.*`、作者 `coordinator` 改为 `maestro`）是例外：不提升 `formatVersion`、不提供迁移，原因是只有测试会话。见 [ADR-0089 修订（2026-11-14：内部标识改名）](../decisions/ADR-0089-ensemble.md#修订2026-11-14内部标识改名)。
 
 重复调用保护（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）不新增事件类型或字段：说明由既有 `message.assistant.toolCalls` 与 `tool.completed` 确定性重建，`loop_detected` 只出现在 `turn.completed.error.code`（该字段本就承载错误码）。因此旧日志在新版本下照常恢复，并按新规则重建上下文；反过来，新日志里的 `loop_detected` 在旧版本中就是普通的 `error`。
 

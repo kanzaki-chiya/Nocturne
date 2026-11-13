@@ -213,22 +213,22 @@ module.exports = {
       to: { path: "^packages/core/src/(?!work-modes/|protocol/)" },
     },
     {
-      name: "swarm-deps",
+      name: "ensemble-deps",
       severity: "error",
       comment:
-        "swarm（Swarm 执行方式，ADR-0089）只能依赖 protocol/tools/provider/session；工作树与会话托管由 core/index 注入",
-      from: { path: "^packages/core/src/swarm/" },
-      to: { path: "^packages/core/src/(?!swarm/|protocol/|tools/|provider/|session/)" },
+        "ensemble（Ensemble 执行方式，ADR-0089）只能依赖 protocol/tools/provider/session；工作树与会话托管由 core/index 注入",
+      from: { path: "^packages/core/src/ensemble/" },
+      to: { path: "^packages/core/src/(?!ensemble/|protocol/|tools/|provider/|session/)" },
     },
     {
-      name: "only-index-imports-swarm",
+      name: "only-index-imports-ensemble",
       severity: "error",
-      comment: "除 core/index（src/index.ts）外，任何模块不能 import swarm",
+      comment: "除 core/index（src/index.ts）外，任何模块不能 import ensemble",
       from: {
         path: "^packages/core/src",
-        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/swarm/"],
+        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/ensemble/"],
       },
-      to: { path: "^packages/core/src/swarm/" },
+      to: { path: "^packages/core/src/ensemble/" },
     },
     {
       name: "input-history-deps",

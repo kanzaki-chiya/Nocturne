@@ -97,44 +97,44 @@ describe("parseSlash", () => {
     });
   });
 
-  it("/ensemble 与 /swarm 别名：board|end 交给 onSlash，其余文字是任务，无参数给用法", () => {
+  it("/ensemble 与 /ensemble 别名：board|end 交给 onSlash，其余文字是任务，无参数给用法", () => {
     expect(parseSlash("/ensemble")).toEqual({
       kind: "unknown",
       name: "/ensemble",
       hint: "用法：/ensemble 任务",
     });
-    expect(parseSlash("/swarm")).toEqual({
+    expect(parseSlash("/ensemble")).toEqual({
       kind: "unknown",
-      name: "/swarm",
+      name: "/ensemble",
       hint: "用法：/ensemble 任务",
     });
-    for (const line of ["/ensemble board", " /ensemble end ", "/swarm board", " /swarm end "])
+    for (const line of ["/ensemble board", " /ensemble end ", "/ensemble board", " /ensemble end "])
       expect(parseSlash(line)).toEqual({ kind: "command", name: "/ensemble", raw: line });
     expect(parseSlash("/ensemble board 改一下")).toEqual({
       kind: "work",
-      workMode: "swarm",
+      workMode: "ensemble",
       text: "board 改一下",
     });
-    expect(parseSlash("/swarm board 改一下")).toEqual({
+    expect(parseSlash("/ensemble board 改一下")).toEqual({
       kind: "work",
-      workMode: "swarm",
+      workMode: "ensemble",
       text: "board 改一下",
     });
   });
 
-  it("/ensemble 与 /swarm 的子命令在草稿页只给提示（还没有会话可操作）", () => {
+  it("/ensemble 与 /ensemble 的子命令在草稿页只给提示（还没有会话可操作）", () => {
     // 无参数仍是用法提示：与在会话内一致
     expect(parseSlash("/ensemble", "draft")).toEqual({
       kind: "unknown",
       name: "/ensemble",
       hint: "用法：/ensemble 任务",
     });
-    expect(parseSlash("/swarm", "draft")).toEqual({
+    expect(parseSlash("/ensemble", "draft")).toEqual({
       kind: "unknown",
-      name: "/swarm",
+      name: "/ensemble",
       hint: "用法：/ensemble 任务",
     });
-    for (const line of ["/ensemble board", " /ensemble end ", "/swarm board", " /swarm end "])
+    for (const line of ["/ensemble board", " /ensemble end ", "/ensemble board", " /ensemble end "])
       expect(parseSlash(line, "draft")).toEqual({
         kind: "unknown",
         name: line.trim().split(/\s+/u)[0],
@@ -143,7 +143,7 @@ describe("parseSlash", () => {
     // 带任务仍是可提交的合奏会话
     expect(parseSlash("/ensemble board 改一下", "draft")).toEqual({
       kind: "work",
-      workMode: "swarm",
+      workMode: "ensemble",
       text: "board 改一下",
     });
   });

@@ -974,9 +974,9 @@ export class Conversations {
       // ADR-0070 §6：有待发输入的会话不随切走关掉，否则这些输入会无声丢失
       entry.pendingInputs.items.length > 0 ||
       entry.outgoing.items.some((item) => item.place === "pending") ||
-      // ADR-0089：活动 Swarm 的协调者不随切走关掉，否则成员会话与整个 Swarm 一起被收掉；
+      // ADR-0089：活动 Ensemble 的指挥不随切走关掉，否则成员会话与整个 Ensemble 一起被收掉；
       // 结束（status === "ended"）后照常按空闲规则关闭
-      entry.view.swarm?.status === "active" ||
+      entry.view.ensemble?.status === "active" ||
       this.opened.get(entry.session.id) !== entry
     )
       return;

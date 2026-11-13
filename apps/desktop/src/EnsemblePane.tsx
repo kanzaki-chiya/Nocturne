@@ -1,9 +1,9 @@
 /**
- * Swarm 面板主体（ADR-0089）：留言板与成员页。桌面右侧面板与手机全屏页共用这一份结构，
+ * Ensemble 面板主体（ADR-0089）：留言板与成员页。桌面右侧面板与手机全屏页共用这一份结构，
  * 尺寸差异只由外层 `.phone` 的少量 CSS 覆盖提供。
  *
- * 数据来自 `SessionView.swarm`（协议层已归约），写操作全部走 RpcSession：
- * 发帖 `postToSwarm`、移除成员 `removeSwarmMember`、结束 `endSwarm`。
+ * 数据来自 `SessionView.ensemble`（协议层已归约），写操作全部走 RpcSession：
+ * 发帖 `postToEnsemble`、移除成员 `removeEnsembleMember`、结束 `endEnsemble`。
  */
 import {
   Fragment,
@@ -15,75 +15,78 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
-import type { SwarmMemberView, SwarmPostView, SwarmView } from "@nocturne/core/protocol";
+import type { EnsembleMemberView, EnsemblePostView, EnsembleView } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import { Markdown, type FileLinkHooks } from "./Conversation";
 import { Menu, MenuItem } from "./Menu";
-import { SwarmAvatar } from "./SwarmAvatar";
+import { EnsembleAvatar } from "./EnsembleAvatar";
 import {
-  filterSwarmPosts,
-  formatSwarmTime,
-  groupSwarmMembers,
+  filterEnsemblePosts,
+  formatEnsembleTime,
+  groupEnsembleMembers,
   shortModelName,
-  swarmActivitySummary,
-  swarmAuthorColor,
-  swarmAuthorLabel,
-  swarmCoordinatorDot,
-  swarmMemberDot,
-  swarmMemberMetaLabel,
-  swarmMentionCandidates,
-  swarmMentionLabel,
-  swarmMentionToken,
-  swarmPostRecipients,
-  type SwarmMentionCandidate,
-} from "./swarm-ui";
+  ensembleActivitySummary,
+  ensembleAuthorColor,
+  ensembleAuthorLabel,
+  ensembleMaestroDot,
+  ensembleMemberDot,
+  ensembleMemberMetaLabel,
+  ensembleMentionCandidates,
+  ensembleMentionLabel,
+  ensembleMentionToken,
+  ensemblePostRecipients,
+  type EnsembleMentionCandidate,
+} from "./ensemble-ui";
 import { ICON_MD, ICON_SM, Icon } from "./ui";
-import "./swarm-panel.css";
+import "./ensemble-panel.css";
 
 /** 留言板输入框最大高度：约 6 行之后改为内滚 */
 const BOARD_INPUT_MAX_HEIGHT = 132;
 /** 距底部不超过该距离仍算「在底部」，避免像素级抖动把跟随关掉 */
 const FOLLOW_SLACK = 4;
 
-/** Swarm 面板用到的会话能力（手机网页与桌面端传的都是当前协调者会话） */
-export type SwarmSession = Pick<RpcSession, "postToSwarm" | "removeSwarmMember" | "endSwarm"> &
+/** Ensemble 面板用到的会话能力（手机网页与桌面端传的都是当前指挥会话） */
+export type EnsembleSession = Pick<
+  RpcSession,
+  "postToEnsemble" | "removeEnsembleMember" | "endEnsemble"
+> &
   Partial<Pick<RpcSession, "resolveFiles">>;
 
-export interface SwarmPaneProps {
-  swarm: SwarmView;
-  session: SwarmSession;
+export interface EnsemblePaneProps {
+  ensemble: EnsembleView;
+  session: EnsembleSession;
   openUrl: (url: string) => void;
   fileLinks?: FileLinkHooks | undefined;
   /** 点击某个成员行时打开该成员会话 */
-  onOpenMember: (member: SwarmMemberView) => void;
-  /** 点击顶部协调者行时回调（桌面聚焦主输入框，手机返回主会话） */
-  onSelectCoordinator?: (() => void) | undefined;
+  onOpenMember: (member: EnsembleMemberView) => void;
+  /** 点击顶部指挥行时回调（桌面聚焦主输入框，手机返回主会话） */
+  onSelectMaestro?: (() => void) | undefined;
   /** 面板当前是否可见（可见或切换回留言板且跟随开启时滚到底） */
   visible?: boolean | undefined;
 }
 
-type SwarmTab = "board" | "members";
+type EnsembleTab = "board" | "members";
 
 /** 当前展开的溢出菜单：子栏「结束」或某一行成员的「移除」 */
 type OpenMenu =
   | { kind: "bar"; anchor: HTMLElement }
-  | { kind: "member"; anchor: HTMLElement; member: SwarmMemberView };
+  | { kind: "member"; anchor: HTMLElement; member: EnsembleMemberView };
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-export function SwarmPane({
-  swarm,
+export function EnsemblePane({
+  ensemble,
   session,
   openUrl,
   fileLinks,
   onOpenMember,
-  onSelectCoordinator,
+  onSelectMaestro,
   visible,
-}: SwarmPaneProps) {
-  const [tab, setTab] = useState<SwarmTab>("board");
+}: EnsemblePaneProps) {
+  const [tab, setTab] = useState<EnsembleTab>("board");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedMember, setSelectedMember] = useState("");
@@ -108,14 +111,14 @@ export function SwarmPane({
   const mentionListId = useId();
 
   const shown = visible !== false;
-  const postCount = swarm.posts.length;
-  const active = swarm.status === "active";
+  const postCount = ensemble.posts.length;
+  const active = ensemble.status === "active";
 
   const mentionToken =
-    !composingState && active && tab === "board" ? swarmMentionToken(draft, caret) : null;
+    !composingState && active && tab === "board" ? ensembleMentionToken(draft, caret) : null;
   const mentionCandidates =
     mentionToken !== null && dismissedAt !== mentionToken.start
-      ? swarmMentionCandidates(swarm, mentionToken.query)
+      ? ensembleMentionCandidates(ensemble, mentionToken.query)
       : [];
   const mentionOpen = mentionCandidates.length > 0;
   const activeMentionIndex = Math.min(mentionIndex, Math.max(0, mentionCandidates.length - 1));
@@ -165,7 +168,7 @@ export function SwarmPane({
     if (draft.trim() === "" || sending.current) return;
     sending.current = true;
     setBoardError(null);
-    void session.postToSwarm({ text: draft }).then(
+    void session.postToEnsemble({ text: draft }).then(
       () => {
         sending.current = false;
         setDraft("");
@@ -179,7 +182,7 @@ export function SwarmPane({
     );
   };
 
-  const applyMention = (candidate: SwarmMentionCandidate) => {
+  const applyMention = (candidate: EnsembleMentionCandidate) => {
     if (mentionToken === null) return;
     const inserted = `@${candidate.insert} `;
     const next = draft.slice(0, mentionToken.start) + inserted + draft.slice(mentionToken.end);
@@ -192,15 +195,15 @@ export function SwarmPane({
   const end = () => {
     setMenu(null);
     setActionError(null);
-    void session.endSwarm().catch((cause: unknown) => {
+    void session.endEnsemble().catch((cause: unknown) => {
       setActionError(errorText(cause));
     });
   };
 
-  const remove = (member: SwarmMemberView) => {
+  const remove = (member: EnsembleMemberView) => {
     setMenu(null);
     setActionError(null);
-    void session.removeSwarmMember(member.name).catch((cause: unknown) => {
+    void session.removeEnsembleMember(member.name).catch((cause: unknown) => {
       setActionError(errorText(cause));
     });
   };
@@ -253,24 +256,24 @@ export function SwarmPane({
     send();
   };
 
-  const posts = filterSwarmPosts(swarm.posts, {
+  const posts = filterEnsemblePosts(ensemble.posts, {
     member: selectedMember,
     query,
-    members: swarm.members,
+    members: ensemble.members,
   });
-  const groups = groupSwarmMembers(swarm.members);
-  const coordinatorModel = shortModelName(swarm.coordinator.model);
-  const coordinatorSummary = swarmActivitySummary(swarm.coordinator.activity);
+  const groups = groupEnsembleMembers(ensemble.members);
+  const maestroModel = shortModelName(ensemble.maestro.model);
+  const maestroSummary = ensembleActivitySummary(ensemble.maestro.activity);
 
-  const memberRow = (member: SwarmMemberView) => {
-    const summary = swarmActivitySummary(member.activity);
+  const memberRow = (member: EnsembleMemberView) => {
+    const summary = ensembleActivitySummary(member.activity);
     const retired = member.status === "removed";
     const removable = active && !retired;
-    const color = swarmAuthorColor(swarm.members, member.name, "member");
+    const color = ensembleAuthorColor(ensemble.members, member.name, "member");
     return (
       <div
         key={member.name}
-        className={retired ? "swarm-mem retired" : "swarm-mem"}
+        className={retired ? "ensemble-mem retired" : "ensemble-mem"}
         onContextMenu={(event) => {
           if (!removable) return;
           event.preventDefault();
@@ -280,35 +283,35 @@ export function SwarmPane({
       >
         <button
           type="button"
-          className="swarm-mem-main"
+          className="ensemble-mem-main"
           onClick={() => {
             onOpenMember(member);
           }}
         >
-          <SwarmAvatar kind="member" color={color} size="sm" />
-          <span className="swarm-mem-col">
-            <span className="swarm-mem-top">
+          <EnsembleAvatar kind="member" color={color} size="sm" />
+          <span className="ensemble-mem-col">
+            <span className="ensemble-mem-top">
               <span
-                className={`swarm-dot ${swarmMemberDot(member, swarm.status)}`}
+                className={`ensemble-dot ${ensembleMemberDot(member, ensemble.status)}`}
                 aria-hidden="true"
               />
-              <span className="swarm-mem-name">
+              <span className="ensemble-mem-name">
                 {member.name}
-                <i>{swarmMemberMetaLabel(member)}</i>
+                <i>{ensembleMemberMetaLabel(member)}</i>
               </span>
               {member.lastPostNumber !== undefined ? (
-                <span className="swarm-mem-no">{`#${member.lastPostNumber}`}</span>
+                <span className="ensemble-mem-no">{`#${member.lastPostNumber}`}</span>
               ) : (
-                <span className="swarm-mem-no" />
+                <span className="ensemble-mem-no" />
               )}
             </span>
-            {summary !== "" && <span className="swarm-mem-last">{summary}</span>}
+            {summary !== "" && <span className="ensemble-mem-last">{summary}</span>}
           </span>
         </button>
         {removable && (
           <button
             type="button"
-            className="swarm-ib swarm-mem-menu"
+            className="ensemble-ib ensemble-mem-menu"
             aria-label="更多操作"
             aria-expanded={
               menu !== null && menu.kind === "member" && menu.member.name === member.name
@@ -326,58 +329,60 @@ export function SwarmPane({
     );
   };
 
-  const post = (item: SwarmPostView) => {
-    const time = formatSwarmTime(item.time);
-    const recipients = swarmPostRecipients(item);
+  const post = (item: EnsemblePostView) => {
+    const time = formatEnsembleTime(item.time);
+    const recipients = ensemblePostRecipients(item);
     const charter =
       item.charterOf !== undefined
-        ? swarm.members.find((member) => member.name === item.charterOf)?.charter
+        ? ensemble.members.find((member) => member.name === item.charterOf)?.charter
         : undefined;
-    const className = `swarm-post${item.fromKind === "user" ? " user" : ""}${
+    const className = `ensemble-post${item.fromKind === "user" ? " user" : ""}${
       item.fromKind === "runtime" && item.charterOf === undefined ? " sys" : ""
     }`;
-    const avatarColor = swarmAuthorColor(swarm.members, item.from, item.fromKind);
+    const avatarColor = ensembleAuthorColor(ensemble.members, item.from, item.fromKind);
     return (
       <article key={item.seq} className={className}>
-        <SwarmAvatar kind={item.fromKind} color={avatarColor} />
-        <div className="swarm-post-col">
-          <div className="swarm-post-head">
-            <span className="swarm-post-head-main">
-              <span className="swarm-post-from">{swarmAuthorLabel(item.from, item.fromKind)}</span>
+        <EnsembleAvatar kind={item.fromKind} color={avatarColor} />
+        <div className="ensemble-post-col">
+          <div className="ensemble-post-head">
+            <span className="ensemble-post-head-main">
+              <span className="ensemble-post-from">
+                {ensembleAuthorLabel(item.from, item.fromKind)}
+              </span>
               {recipients.length > 0 && (
-                <span className="swarm-post-to">
+                <span className="ensemble-post-to">
                   {" → "}
                   {recipients.map((mention, index) => (
                     <Fragment key={mention}>
                       {index > 0 ? " " : null}
-                      <span>{swarmMentionLabel(mention)}</span>
+                      <span>{ensembleMentionLabel(mention)}</span>
                     </Fragment>
                   ))}
                 </span>
               )}
             </span>
-            <span className="swarm-post-meta">{`#${item.number}${
+            <span className="ensemble-post-meta">{`#${item.number}${
               time !== "" ? ` · ${time}` : ""
             }`}</span>
           </div>
-          <div className="swarm-post-txt">
+          <div className="ensemble-post-txt">
             {charter !== undefined ? (
               <>
-                <div className="swarm-charter-row">
-                  <span className="swarm-charter-tag">负责</span>
+                <div className="ensemble-charter-row">
+                  <span className="ensemble-charter-tag">负责</span>
                   <span>{charter.owns}</span>
                 </div>
-                <div className="swarm-charter-row">
-                  <span className="swarm-charter-tag">不碰</span>
+                <div className="ensemble-charter-row">
+                  <span className="ensemble-charter-tag">不碰</span>
                   <span>{charter.handsOff}</span>
                 </div>
-                <div className="swarm-charter-row">
-                  <span className="swarm-charter-tag">完成</span>
+                <div className="ensemble-charter-row">
+                  <span className="ensemble-charter-tag">完成</span>
                   <span>{charter.doneWhen}</span>
                 </div>
               </>
             ) : item.fromKind === "runtime" ? (
-              <div className="swarm-sys-text">{item.text}</div>
+              <div className="ensemble-sys-text">{item.text}</div>
             ) : (
               <Markdown
                 text={item.text}
@@ -396,9 +401,9 @@ export function SwarmPane({
   };
 
   return (
-    <div className="swarm-pane">
-      <div className="swarm-subbar">
-        <div className="swarm-seg" role="tablist">
+    <div className="ensemble-pane">
+      <div className="ensemble-subbar">
+        <div className="ensemble-seg" role="tablist">
           <button
             type="button"
             role="tab"
@@ -422,12 +427,12 @@ export function SwarmPane({
             成员
           </button>
         </div>
-        <div className="swarm-tools">
+        <div className="ensemble-tools">
           {tab === "board" && (
             <>
               <button
                 type="button"
-                className={searchOpen ? "swarm-ib on" : "swarm-ib"}
+                className={searchOpen ? "ensemble-ib on" : "ensemble-ib"}
                 aria-label="搜索"
                 aria-pressed={searchOpen}
                 onClick={() => {
@@ -443,7 +448,7 @@ export function SwarmPane({
               </button>
               <button
                 type="button"
-                className={follow ? "swarm-ib on" : "swarm-ib"}
+                className={follow ? "ensemble-ib on" : "ensemble-ib"}
                 aria-label="跟随最新"
                 aria-pressed={follow}
                 onClick={() => {
@@ -466,7 +471,7 @@ export function SwarmPane({
           {active && (
             <button
               type="button"
-              className="swarm-ib"
+              className="ensemble-ib"
               aria-label="更多操作"
               aria-expanded={menu !== null && menu.kind === "bar"}
               onClick={(event) => {
@@ -480,14 +485,14 @@ export function SwarmPane({
         </div>
       </div>
       {actionError !== null && (
-        <p className="conversation-error swarm-error" role="alert">
+        <p className="conversation-error ensemble-error" role="alert">
           {actionError}
         </p>
       )}
       {tab === "board" ? (
         <>
           {searchOpen && (
-            <div className="swarm-search">
+            <div className="ensemble-search">
               <input
                 ref={searchField}
                 type="text"
@@ -506,21 +511,21 @@ export function SwarmPane({
               />
             </div>
           )}
-          <div className="swarm-filters">
+          <div className="ensemble-filters">
             <button
               type="button"
-              className={selectedMember === "" ? "swarm-chip on" : "swarm-chip"}
+              className={selectedMember === "" ? "ensemble-chip on" : "ensemble-chip"}
               onClick={() => {
                 setSelectedMember("");
               }}
             >
               全部
             </button>
-            {swarm.members.map((member) => (
+            {ensemble.members.map((member) => (
               <button
                 key={member.name}
                 type="button"
-                className={selectedMember === member.name ? "swarm-chip on" : "swarm-chip"}
+                className={selectedMember === member.name ? "ensemble-chip on" : "ensemble-chip"}
                 onClick={() => {
                   setSelectedMember(member.name);
                 }}
@@ -529,20 +534,25 @@ export function SwarmPane({
               </button>
             ))}
           </div>
-          <div className="swarm-body" ref={body} onScroll={onBodyScroll} onWheel={onBodyWheel}>
+          <div className="ensemble-body" ref={body} onScroll={onBodyScroll} onWheel={onBodyWheel}>
             {posts.map(post)}
           </div>
           {active && (
-            <div className="swarm-boardin">
+            <div className="ensemble-boardin">
               {mentionOpen && (
-                <div className="swarm-ac" role="listbox" aria-label="提及补全" id={mentionListId}>
+                <div
+                  className="ensemble-ac"
+                  role="listbox"
+                  aria-label="提及补全"
+                  id={mentionListId}
+                >
                   {mentionCandidates.map((candidate, index) => (
                     <div
                       key={`${candidate.kind}:${candidate.insert}`}
                       id={`${mentionListId}-${index}`}
                       role="option"
                       aria-selected={index === activeMentionIndex}
-                      className={`swarm-ac-row${index === activeMentionIndex ? " is-active" : ""}`}
+                      className={`ensemble-ac-row${index === activeMentionIndex ? " is-active" : ""}`}
                       onMouseDown={(event) => {
                         event.preventDefault();
                       }}
@@ -550,10 +560,10 @@ export function SwarmPane({
                         applyMention(candidate);
                       }}
                     >
-                      <SwarmAvatar kind={candidate.kind} color={candidate.color} size="sm" />
-                      <span className="swarm-ac-name">{candidate.label}</span>
+                      <EnsembleAvatar kind={candidate.kind} color={candidate.color} size="sm" />
+                      <span className="ensemble-ac-name">{candidate.label}</span>
                       {candidate.meta !== undefined && (
-                        <span className="swarm-ac-meta">{candidate.meta}</span>
+                        <span className="ensemble-ac-meta">{candidate.meta}</span>
                       )}
                     </div>
                   ))}
@@ -598,59 +608,62 @@ export function SwarmPane({
           )}
         </>
       ) : (
-        <div className="swarm-mems">
-          <div className="swarm-mem coord">
+        <div className="ensemble-mems">
+          <div className="ensemble-mem coord">
             <button
               type="button"
-              className="swarm-mem-main"
+              className="ensemble-mem-main"
               onClick={() => {
-                onSelectCoordinator?.();
+                onSelectMaestro?.();
               }}
             >
-              <SwarmAvatar kind="coordinator" size="sm" />
-              <span className="swarm-mem-col">
-                <span className="swarm-mem-top">
-                  <span className={`swarm-dot ${swarmCoordinatorDot(swarm)}`} aria-hidden="true" />
-                  <span className="swarm-mem-name">
-                    协调者
-                    {coordinatorModel !== "" ? <i>{coordinatorModel}</i> : null}
+              <EnsembleAvatar kind="maestro" size="sm" />
+              <span className="ensemble-mem-col">
+                <span className="ensemble-mem-top">
+                  <span
+                    className={`ensemble-dot ${ensembleMaestroDot(ensemble)}`}
+                    aria-hidden="true"
+                  />
+                  <span className="ensemble-mem-name">
+                    指挥
+                    {maestroModel !== "" ? <i>{maestroModel}</i> : null}
                   </span>
-                  {swarm.coordinator.lastPostNumber !== undefined ? (
-                    <span className="swarm-mem-no">{`#${swarm.coordinator.lastPostNumber}`}</span>
+                  {ensemble.maestro.lastPostNumber !== undefined ? (
+                    <span className="ensemble-mem-no">{`#${ensemble.maestro.lastPostNumber}`}</span>
                   ) : (
-                    <span className="swarm-mem-no" />
+                    <span className="ensemble-mem-no" />
                   )}
                 </span>
-                {coordinatorSummary !== "" && (
-                  <span className="swarm-mem-last">{coordinatorSummary}</span>
+                {maestroSummary !== "" && (
+                  <span className="ensemble-mem-last">{maestroSummary}</span>
                 )}
               </span>
             </button>
           </div>
           {groups.working.length > 0 && (
             <>
-              <div className="swarm-grp">工作中</div>
+              <div className="ensemble-grp">工作中</div>
               {groups.working.map(memberRow)}
             </>
           )}
           {groups.paused.length > 0 && (
             <>
-              <div className="swarm-grp">已暂停</div>
+              <div className="ensemble-grp">已暂停</div>
               {groups.paused.map(memberRow)}
             </>
           )}
           {groups.waiting.length > 0 && (
             <>
-              <div className="swarm-grp">等待</div>
+              <div className="ensemble-grp">等待</div>
               {groups.waiting.map(memberRow)}
             </>
           )}
           {groups.removed.length > 0 && (
             <>
-              <div className="swarm-grp">
+              <div className="ensemble-grp">
                 <button
                   type="button"
-                  className="swarm-retired-toggle"
+                  className="ensemble-retired-toggle"
                   aria-expanded={retiredOpen}
                   onClick={() => {
                     setRetiredOpen((value) => !value);

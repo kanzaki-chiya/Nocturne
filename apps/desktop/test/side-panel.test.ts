@@ -520,25 +520,25 @@ describe("按会话的面板", () => {
     expect(nativeSeparators("a/b", true)).toBe("a\\b");
     expect(nativeSeparators("a/b", false)).toBe("a/b");
   });
-  it("Swarm 标签与成员会话标签持久化只存标识且去重", () => {
+  it("Ensemble 标签与成员会话标签持久化只存标识且去重", () => {
     const stored = storedTabs([
-      { id: "sw1", kind: "swarm" },
-      { id: "m1", kind: "swarm_member", childSessionId: "child-1", memberName: "users" },
+      { id: "sw1", kind: "ensemble" },
+      { id: "m1", kind: "ensemble_member", childSessionId: "child-1", memberName: "users" },
       { id: "n1", kind: "new" },
     ]);
     expect(stored).toEqual([
-      { id: "sw1", kind: "swarm" },
-      { id: "m1", kind: "swarm_member", childSessionId: "child-1", memberName: "users" },
+      { id: "sw1", kind: "ensemble" },
+      { id: "m1", kind: "ensemble_member", childSessionId: "child-1", memberName: "users" },
     ]);
     const parsed = parseStoredTabs([
-      { id: "sw1", kind: "swarm", posts: ["不该保留"] },
-      { id: "sw2", kind: "swarm" },
-      { id: "m1", kind: "swarm_member", childSessionId: "child-1", memberName: "users" },
-      { id: "m2", kind: "swarm_member", childSessionId: "child-1", memberName: "users" },
+      { id: "sw1", kind: "ensemble", posts: ["不该保留"] },
+      { id: "sw2", kind: "ensemble" },
+      { id: "m1", kind: "ensemble_member", childSessionId: "child-1", memberName: "users" },
+      { id: "m2", kind: "ensemble_member", childSessionId: "child-1", memberName: "users" },
     ]);
     expect(parsed).toEqual([
-      { id: "sw1", kind: "swarm" },
-      { id: "m1", kind: "swarm_member", childSessionId: "child-1", memberName: "users" },
+      { id: "sw1", kind: "ensemble" },
+      { id: "m1", kind: "ensemble_member", childSessionId: "child-1", memberName: "users" },
     ]);
   });
 });

@@ -89,7 +89,7 @@ import type { DesktopHost } from "./host";
 import { NodeHelp } from "./NodeHelp";
 import {
   decideNotification,
-  decideSwarmMemberNotification,
+  decideEnsembleMemberNotification,
   NOTIFY_DEFAULTS,
   notifyPrefsFrom,
   sessionMarkFor,
@@ -424,8 +424,8 @@ export function App({ host }: { host: DesktopHost }) {
     /** 会话标题来源（treeSessions：会话标题 ?? 首条用户消息首行） */
     sessions: [] as SessionSummary[],
     turnStarts: new Map<string, number>(),
-    swarmSeenRequests: new Map<string, Set<string>>(),
-    swarmNotifyMember: new Map<string, string>(),
+    ensembleSeenRequests: new Map<string, Set<string>>(),
+    ensembleNotifyMember: new Map<string, string>(),
   });
   notifyState.current.selectedId = selectedId;
   notifyState.current.page = page;
@@ -540,12 +540,12 @@ export function App({ host }: { host: DesktopHost }) {
         title: conversations.opened.get(sessionId)?.view.title,
         firstText: summary?.firstText,
       };
-      let seenRequests = state.swarmSeenRequests.get(sessionId);
+      let seenRequests = state.ensembleSeenRequests.get(sessionId);
       if (seenRequests === undefined) {
         seenRequests = new Set<string>();
-        state.swarmSeenRequests.set(sessionId, seenRequests);
+        state.ensembleSeenRequests.set(sessionId, seenRequests);
       }
-      const swarmDecision = decideSwarmMemberNotification({
+      const ensembleDecision = decideEnsembleMemberNotification({
         event,
         prefs: state.prefs,
         live,
@@ -553,12 +553,12 @@ export function App({ host }: { host: DesktopHost }) {
         session: notifySession,
         seenRequestIds: seenRequests,
       });
-      if (swarmDecision !== null) {
-        state.swarmNotifyMember.set(sessionId, swarmDecision.memberName);
+      if (ensembleDecision !== null) {
+        state.ensembleNotifyMember.set(sessionId, ensembleDecision.memberName);
         void host.notify({
           sessionId,
-          title: swarmDecision.title,
-          body: swarmDecision.body,
+          title: ensembleDecision.title,
+          body: ensembleDecision.body,
           sound: state.prefs.sound,
         });
         void host.requestAttention();
@@ -574,7 +574,7 @@ export function App({ host }: { host: DesktopHost }) {
         turnStartedAt: state.turnStarts.get(sessionId),
       });
       if (decision === null) return;
-      state.swarmNotifyMember.delete(sessionId);
+      state.ensembleNotifyMember.delete(sessionId);
       void host.notify({
         sessionId,
         title: decision.title,
@@ -1008,22 +1008,22 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   // 外壳在通知被点击（toast 激活）时调用：把窗口带到前台后切到对应会话；
-  // 若最近一条通知来自 Swarm 成员待确认，再一并打开该成员的会话标签。
+  // 若最近一条通知来自 Ensemble 成员待确认，再一并打开该成员的会话标签。
   useEffect(
     () =>
       host.onNotificationActivated((sessionId) => {
         const summary = sessionsRef.current.find((s) => s.id === sessionId);
         if (summary === undefined) return;
-        const memberName = notifyState.current.swarmNotifyMember.get(sessionId);
-        notifyState.current.swarmNotifyMember.delete(sessionId);
+        const memberName = notifyState.current.ensembleNotifyMember.get(sessionId);
+        notifyState.current.ensembleNotifyMember.delete(sessionId);
         setPage(null);
         void Promise.resolve(selectSessionRef.current?.(summary.id, summary.cwd)).then(() => {
           if (memberName === undefined) return;
           const member = conversations.opened
             .get(sessionId)
-            ?.view.swarm?.members.find((item) => item.name === memberName);
+            ?.view.ensemble?.members.find((item) => item.name === memberName);
           if (member !== undefined) {
-            panelRef.current?.openSwarmMember(
+            panelRef.current?.openEnsembleMember(
               { name: member.name, childSessionId: member.childSessionId },
               sessionId,
             );
@@ -1234,15 +1234,15 @@ export function App({ host }: { host: DesktopHost }) {
     if (parsed.name === "/ensemble") {
       const action = parseWorkModeSlash(line);
       if (action?.kind !== "action") return false;
-      if (active.view.swarm === undefined) {
+      if (active.view.ensemble === undefined) {
         setCommandOutput("用法：/ensemble 任务");
         return true;
       }
-      if (action.action === "swarm-board") {
-        panelRef.current?.openSwarm();
+      if (action.action === "ensemble-board") {
+        panelRef.current?.openEnsemble();
         return true;
       }
-      await active.session.endSwarm();
+      await active.session.endEnsemble();
       return true;
     }
     if (parsed.name === "/goal" || parsed.name === "/plan") {

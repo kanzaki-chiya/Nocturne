@@ -82,7 +82,7 @@ import {
   splitCodeRef,
   isRuntimeWorkMode,
   userWorkMode,
-  unwrapSwarmPostText,
+  unwrapEnsemblePostText,
   workModeCommandName,
   type FileAttachment,
   type WorkModeName,
@@ -98,7 +98,7 @@ import {
   type RewindTarget,
   type RuntimeEvent,
   type SessionView,
-  type SwarmView,
+  type EnsembleView,
   type ToolEntry,
   type TurnEndReason,
   type UserEntry,
@@ -120,7 +120,7 @@ import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
 import { elapsedText, type SubagentLink } from "./subagent-panel";
-import { splitSwarmMentions, swarmAuthorLabel, swarmToolSummary } from "./swarm-ui";
+import { splitEnsembleMentions, ensembleAuthorLabel, ensembleToolSummary } from "./ensemble-ui";
 import { mcpToolLabel, toolMeta } from "./tool-meta";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
@@ -237,8 +237,8 @@ export interface ConversationProps {
   resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
   /** 平台接管文件保存（安卓 App）；未传时沿用外层 ImageViewerProvider 或 `<a download>` */
   saveFile?: SaveFileFn | undefined;
-  /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：协调者会话默认「协调者」，成员会话传 `@name` */
-  swarmRecipientLabel?: string | undefined;
+  /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：指挥会话默认「指挥」，成员会话传 `@name` */
+  ensembleRecipientLabel?: string | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -389,13 +389,13 @@ function isShortTableCell(source: string): boolean {
   return true;
 }
 
-function renderSwarmTextNode(text: string, mentions: readonly string[] | undefined): ReactNode {
+function renderEnsembleTextNode(text: string, mentions: readonly string[] | undefined): ReactNode {
   if (mentions === undefined || mentions.length === 0) return text;
-  const parts = splitSwarmMentions(text, mentions);
+  const parts = splitEnsembleMentions(text, mentions);
   if (parts.length === 1 && parts[0]?.kind === "text") return text;
   return parts.map((part, index) =>
     part.kind === "mention" ? (
-      <span key={index} className="swarm-at">
+      <span key={index} className="ensemble-at">
         {part.value}
       </span>
     ) : (
@@ -446,7 +446,7 @@ function markdownNodes(
           <Fragment key={key}>
             {node.tokens
               ? markdownNodes(node.tokens, openUrl, mentions)
-              : renderSwarmTextNode(node.text, mentions)}
+              : renderEnsembleTextNode(node.text, mentions)}
           </Fragment>
         );
       }
@@ -1749,8 +1749,8 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
   const plain = (value: string) => ({ text: value, path: false });
   const input = inputOf(entry);
   const name = effectiveToolName(entry);
-  const swarmArg = swarmToolSummary(name, input);
-  if (swarmArg !== undefined) return plain(swarmArg);
+  const ensembleArg = ensembleToolSummary(name, input);
+  if (ensembleArg !== undefined) return plain(ensembleArg);
   switch (name) {
     case "skill":
       return plain(input === undefined ? "" : text(input.name));
@@ -2931,7 +2931,7 @@ function EntryView({
   waitingCallId,
   userRole,
   scheduleSource,
-  swarmRecipientLabel,
+  ensembleRecipientLabel,
 }: {
   entry: ViewEntry;
   searchHit?: boolean;
@@ -2958,25 +2958,25 @@ function EntryView({
   /** 只读视图里用户消息的角色：第一条是任务，之后是催促；缺省 = 普通用户气泡 */
   userRole?: "task" | "nudge" | undefined;
   scheduleSource?: ConversationProps["scheduleSource"];
-  swarmRecipientLabel?: string | undefined;
+  ensembleRecipientLabel?: string | undefined;
 }) {
   const subagentLinks = useContext(SubagentLinksContext);
   const backgroundView = useContext(BackgroundViewContext);
   switch (entry.kind) {
     case "user":
-      if (entry.swarm !== undefined) {
-        const author = swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind);
-        const recipient = swarmRecipientLabel ?? "协调者";
+      if (entry.ensemble !== undefined) {
+        const author = ensembleAuthorLabel(entry.ensemble.from, entry.ensemble.fromKind);
+        const recipient = ensembleRecipientLabel ?? "指挥";
         return (
           <div className={`post-in${searchHit ? " search-hit" : ""}`} data-session-seq={entry.seq}>
             <div className="post-in-head">
-              <span className={entry.swarm.fromKind === "member" ? "swarm-who" : undefined}>
+              <span className={entry.ensemble.fromKind === "member" ? "ensemble-who" : undefined}>
                 {author}
               </span>
-              {` → ${recipient} · #${entry.swarm.postNumber}`}
+              {` → ${recipient} · #${entry.ensemble.postNumber}`}
             </div>
             <Markdown
-              text={unwrapSwarmPostText(userText(entry))}
+              text={unwrapEnsemblePostText(userText(entry))}
               openUrl={openUrl}
               session={isLiveSession(session) ? session : undefined}
               fileLinks={fileLinks}
@@ -4086,18 +4086,18 @@ export function QuestionCard({
   );
 }
 
-function SwarmEndedRow({ swarm }: { swarm: SwarmView }) {
+function EnsembleEndedRow({ ensemble }: { ensemble: EnsembleView }) {
   const [open, setOpen] = useState(false);
-  const unmerged = swarm.unmerged ?? [];
+  const unmerged = ensemble.unmerged ?? [];
   const hasUnmerged = unmerged.length > 0;
   return (
-    <article className="tool swarm-ended-row" data-session-seq={swarm.endedSeq}>
+    <article className="tool ensemble-ended-row" data-session-seq={ensemble.endedSeq}>
       <details className="tool-details" open={open}>
         <ToolLine
           open={open}
           disabled={!hasUnmerged}
           label="结束"
-          arg={{ name: swarm.title, dir: "", title: swarm.title }}
+          arg={{ name: ensemble.title, dir: "", title: ensemble.title }}
           status={null}
           onToggle={() => {
             setOpen((current) => !current);
@@ -4105,10 +4105,10 @@ function SwarmEndedRow({ swarm }: { swarm: SwarmView }) {
         />
         {hasUnmerged && open ? (
           <div className="tool-body">
-            <ul className="swarm-unmerged-list">
+            <ul className="ensemble-unmerged-list">
               {unmerged.map((item) => (
                 <li key={item.name}>
-                  <span className="swarm-who">{`@${item.name}`}</span> <code>{item.branch}</code>
+                  <span className="ensemble-who">{`@${item.name}`}</span> <code>{item.branch}</code>
                 </li>
               ))}
             </ul>
@@ -4136,7 +4136,7 @@ function ConversationContent({
   onRewindFiles,
   loadChangeDiff,
   onViewChanges,
-  swarmRecipientLabel,
+  ensembleRecipientLabel,
   hidePersistentPermissions,
   hideRequests = false,
   openWarnings,
@@ -4157,9 +4157,9 @@ function ConversationContent({
   const users = view.entries.filter((e) => e.kind === "user");
   const lastSeq = users.at(-1)?.seq;
   const firstUserSeq = users[0]?.seq;
-  /** 只读视图里的用户消息是任务/催促，不是可编辑的气泡；Swarm 成员会话里的私信保留用户消息气泡 */
+  /** 只读视图里的用户消息是任务/催促，不是可编辑的气泡；Ensemble 成员会话里的私信保留用户消息气泡 */
   const roleOf = (entry: ViewEntry): "task" | "nudge" | undefined =>
-    readOnly === undefined || swarmRecipientLabel !== undefined || entry.kind !== "user"
+    readOnly === undefined || ensembleRecipientLabel !== undefined || entry.kind !== "user"
       ? undefined
       : entry.seq === firstUserSeq
         ? "task"
@@ -4369,23 +4369,23 @@ function ConversationContent({
                   {notice.message}
                 </div>
               );
-              const swarm = view.swarm;
+              const ensemble = view.ensemble;
               // 结束行按 endedSeq 定位在对应条目之后（无条目早于 endedSeq 时放在最前，缺省 endedSeq 时放在末尾）
-              const swarmEnded = swarm?.status === "ended" ? swarm : undefined;
-              let swarmEndedAfterIdx: number | undefined;
-              let swarmEndedTrailing = false;
-              if (swarmEnded !== undefined) {
-                if (swarmEnded.endedSeq === undefined) {
-                  swarmEndedTrailing = true;
+              const ensembleEnded = ensemble?.status === "ended" ? ensemble : undefined;
+              let ensembleEndedAfterIdx: number | undefined;
+              let ensembleEndedTrailing = false;
+              if (ensembleEnded !== undefined) {
+                if (ensembleEnded.endedSeq === undefined) {
+                  ensembleEndedTrailing = true;
                 } else {
                   let idx = -1;
                   for (const [i, item] of view.entries.entries()) {
-                    if (item.seq <= swarmEnded.endedSeq) idx = i;
+                    if (item.seq <= ensembleEnded.endedSeq) idx = i;
                   }
                   if (idx === view.entries.length - 1) {
-                    swarmEndedTrailing = true;
+                    ensembleEndedTrailing = true;
                   } else {
-                    swarmEndedAfterIdx = idx;
+                    ensembleEndedAfterIdx = idx;
                   }
                 }
               }
@@ -4393,10 +4393,10 @@ function ConversationContent({
               return (
                 <>
                   {(byAfterEntry.get(0) ?? []).map(renderNotice)}
-                  {swarmEnded !== undefined && swarmEndedAfterIdx === -1 ? (
-                    <SwarmEndedRow
-                      key={`swarm-ended:${swarmEnded.createdSeq}`}
-                      swarm={swarmEnded}
+                  {ensembleEnded !== undefined && ensembleEndedAfterIdx === -1 ? (
+                    <EnsembleEndedRow
+                      key={`ensemble-ended:${ensembleEnded.createdSeq}`}
+                      ensemble={ensembleEnded}
                     />
                   ) : null}
                   {[
@@ -4424,7 +4424,7 @@ function ConversationContent({
                               ? scheduleSource
                               : undefined
                           }
-                          swarmRecipientLabel={swarmRecipientLabel}
+                          ensembleRecipientLabel={ensembleRecipientLabel}
                           onResubmit={onResubmit}
                           onFork={onFork}
                           fileLinks={fileLinks}
@@ -4442,10 +4442,10 @@ function ConversationContent({
                         />
                         {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
                         {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
-                        {swarmEnded !== undefined && swarmEndedAfterIdx === entryIndex ? (
-                          <SwarmEndedRow
-                            key={`swarm-ended:${swarmEnded.createdSeq}`}
-                            swarm={swarmEnded}
+                        {ensembleEnded !== undefined && ensembleEndedAfterIdx === entryIndex ? (
+                          <EnsembleEndedRow
+                            key={`ensemble-ended:${ensembleEnded.createdSeq}`}
+                            ensemble={ensembleEnded}
                           />
                         ) : null}
                       </Fragment>
@@ -4516,10 +4516,10 @@ function ConversationContent({
                         );
                       }),
                   ]}
-                  {swarmEndedTrailing && swarmEnded !== undefined ? (
-                    <SwarmEndedRow
-                      key={`swarm-ended:${swarmEnded.createdSeq}`}
-                      swarm={swarmEnded}
+                  {ensembleEndedTrailing && ensembleEnded !== undefined ? (
+                    <EnsembleEndedRow
+                      key={`ensemble-ended:${ensembleEnded.createdSeq}`}
+                      ensemble={ensembleEnded}
                     />
                   ) : null}
                   {trailing.map(renderNotice)}

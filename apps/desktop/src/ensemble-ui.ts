@@ -1,27 +1,27 @@
 /**
- * Swarm 界面的纯逻辑（ADR-0089）：工具行参数、活动摘要组词、状态圆点、作者与提及文案、
+ * Ensemble 界面的纯逻辑（ADR-0089）：工具行参数、活动摘要组词、状态圆点、作者与提及文案、
  * 留言板筛选与搜索、成员分组、入口行计数，以及正文按 `mentions` 切分高亮。
  * 桌面端与手机网页共用；只依赖 `@nocturne/core/protocol` 与 `./tool-meta`，不依赖 React。
  */
 import type {
   ModelRef,
-  SwarmActivity,
-  SwarmAuthorKind,
-  SwarmMemberView,
-  SwarmPostView,
-  SwarmView,
+  EnsembleActivity,
+  EnsembleAuthorKind,
+  EnsembleMemberView,
+  EnsemblePostView,
+  EnsembleView,
 } from "@nocturne/core/protocol";
 
 import { toolMeta } from "./tool-meta";
 
 /** 状态圆点色调：work 在跑、ask 等确认、pause 暂停、wait 等待、retired 已移除 */
-export type SwarmDotTone = "work" | "ask" | "pause" | "wait" | "retired";
+export type EnsembleDotTone = "work" | "ask" | "pause" | "wait" | "retired";
 
-/** Swarm 标签页与入口行的状态点：活动中 ok，有成员待确认 warn，已结束无点 */
-export type SwarmStatusDot = "ok" | "warn" | undefined;
+/** Ensemble 标签页与入口行的状态点：活动中 ok，有成员待确认 warn，已结束无点 */
+export type EnsembleStatusDot = "ok" | "warn" | undefined;
 
 /** 正文片段：mention 供强调色 + 等宽渲染，text 原样保留 */
-export interface SwarmTextFragment {
+export interface EnsembleTextFragment {
   kind: "text" | "mention";
   value: string;
 }
@@ -35,7 +35,7 @@ function stringOf(value: unknown): string {
 }
 
 /** 取多行文本首个非空行（去掉首尾空白）；为空或非字符串时返回 "" */
-export function firstSwarmLine(value: unknown): string {
+export function firstEnsembleLine(value: unknown): string {
   if (typeof value !== "string") return "";
   for (const line of value.split(/\r?\n/u)) {
     const trimmed = line.trim();
@@ -54,32 +54,32 @@ export function shortModelName(model: ModelRef | string | undefined): string {
 }
 
 /**
- * Swarm 工具行的参数位摘要；非 Swarm 工具返回 `undefined`，交给通用工具参数逻辑处理。
+ * Ensemble 工具行的参数位摘要；非 Ensemble 工具返回 `undefined`，交给通用工具参数逻辑处理。
  */
-export function swarmToolSummary(name: string, input: unknown): string | undefined {
+export function ensembleToolSummary(name: string, input: unknown): string | undefined {
   const rec = recordOf(input);
   switch (name) {
-    case "swarm_init":
-      return firstSwarmLine(rec.title);
-    case "swarm_add_member": {
+    case "ensemble_init":
+      return firstEnsembleLine(rec.title);
+    case "ensemble_add_member": {
       const member = stringOf(rec.name);
       return member === "" ? "" : `@${member}`;
     }
-    case "swarm_post":
-      return firstSwarmLine(rec.text);
-    case "swarm_change_model": {
+    case "ensemble_post":
+      return firstEnsembleLine(rec.text);
+    case "ensemble_change_model": {
       const member = stringOf(rec.name) || stringOf(rec.member);
       const target = shortModelName(stringOf(rec.model) || stringOf(rec.profile));
       if (member === "") return target;
       return target === "" ? `@${member}` : `@${member} ${target}`;
     }
-    case "swarm_remove_member": {
+    case "ensemble_remove_member": {
       const member = stringOf(rec.name) || stringOf(rec.member);
       return member === "" ? "" : `@${member}`;
     }
-    case "swarm_end":
-      return firstSwarmLine(rec.summary);
-    case "swarm_checkout": {
+    case "ensemble_end":
+      return firstEnsembleLine(rec.summary);
+    case "ensemble_checkout": {
       const member = stringOf(rec.member) || stringOf(rec.name);
       return member === "" ? "" : `@${member}`;
     }
@@ -89,23 +89,23 @@ export function swarmToolSummary(name: string, input: unknown): string | undefin
 }
 
 /** 暂停错误文案：复用桌面端已有的错误码映射，未命中时取 message 首行 */
-export function swarmPausedErrorText(code: string, message: string): string {
+export function ensemblePausedErrorText(code: string, message: string): string {
   switch (code) {
     case "session_not_found":
       return "找不到这个子代理的日志，可能已被删除";
     case "subagent_parent_mismatch":
       return "这个子会话不属于当前会话，无法查看";
     default: {
-      const line = firstSwarmLine(message);
+      const line = firstEnsembleLine(message);
       return line !== "" ? line : code;
     }
   }
 }
 
 /**
- * 将结构化 `SwarmActivity` 组装成成员页第二行文字；没有可显示内容（如无原因移除）时返回 `""`。
+ * 将结构化 `EnsembleActivity` 组装成成员页第二行文字；没有可显示内容（如无原因移除）时返回 `""`。
  */
-export function swarmActivitySummary(activity: SwarmActivity | undefined): string {
+export function ensembleActivitySummary(activity: EnsembleActivity | undefined): string {
   if (activity === undefined) return "";
   switch (activity.kind) {
     case "tool": {
@@ -119,50 +119,50 @@ export function swarmActivitySummary(activity: SwarmActivity | undefined): strin
         ? `等待确认：${activity.target}`
         : "等待确认";
     case "paused":
-      return swarmPausedErrorText(activity.code, activity.message);
+      return ensemblePausedErrorText(activity.code, activity.message);
     case "post":
     case "charter":
       return activity.line;
     case "removed":
-      return activity.reason !== undefined ? firstSwarmLine(activity.reason) : "";
+      return activity.reason !== undefined ? firstEnsembleLine(activity.reason) : "";
   }
 }
 
-/** Swarm 标签与对话入口行的状态圆点 */
-export function swarmStatusDot(
-  swarm: Pick<SwarmView, "status" | "awaitingPermissionMembers"> | undefined,
-): SwarmStatusDot {
-  if (swarm === undefined || swarm.status === "ended") return undefined;
-  return swarm.awaitingPermissionMembers.length > 0 ? "warn" : "ok";
+/** Ensemble 标签与对话入口行的状态圆点 */
+export function ensembleStatusDot(
+  ensemble: Pick<EnsembleView, "status" | "awaitingPermissionMembers"> | undefined,
+): EnsembleStatusDot {
+  if (ensemble === undefined || ensemble.status === "ended") return undefined;
+  return ensemble.awaitingPermissionMembers.length > 0 ? "warn" : "ok";
 }
 
-/** 协调者行的状态圆点（已结束时统一变成 wait） */
-export function swarmCoordinatorDot(
-  swarm: Pick<SwarmView, "status" | "coordinator">,
-): Exclude<SwarmDotTone, "retired"> {
-  if (swarm.status === "ended") return "wait";
-  if (swarm.coordinator.awaitingPermission) return "ask";
-  return swarm.coordinator.status === "working" ? "work" : "wait";
+/** 指挥行的状态圆点（已结束时统一变成 wait） */
+export function ensembleMaestroDot(
+  ensemble: Pick<EnsembleView, "status" | "maestro">,
+): Exclude<EnsembleDotTone, "retired"> {
+  if (ensemble.status === "ended") return "wait";
+  if (ensemble.maestro.awaitingPermission) return "ask";
+  return ensemble.maestro.status === "working" ? "work" : "wait";
 }
 
 /** 成员行的状态圆点（已结束时未移除成员统一变成 wait，已移除保持 retired） */
-export function swarmMemberDot(
-  member: Pick<SwarmMemberView, "status" | "pendingPermissions">,
-  swarmStatus: "active" | "ended" = "active",
-): SwarmDotTone {
+export function ensembleMemberDot(
+  member: Pick<EnsembleMemberView, "status" | "pendingPermissions">,
+  ensembleStatus: "active" | "ended" = "active",
+): EnsembleDotTone {
   if (member.status === "removed") return "retired";
-  if (swarmStatus === "ended") return "wait";
+  if (ensembleStatus === "ended") return "wait";
   if (member.pendingPermissions.length > 0) return "ask";
   if (member.status === "working") return "work";
   if (member.status === "paused") return "pause";
   return "wait";
 }
 
-/** 作者显示规则（全文通用）：协调者 / 你 / Runtime / @name */
-export function swarmAuthorLabel(from: string, fromKind: SwarmAuthorKind): string {
+/** 作者显示规则（全文通用）：指挥 / 你 / Runtime / @name */
+export function ensembleAuthorLabel(from: string, fromKind: EnsembleAuthorKind): string {
   switch (fromKind) {
-    case "coordinator":
-      return "协调者";
+    case "maestro":
+      return "指挥";
     case "user":
       return "你";
     case "runtime":
@@ -172,15 +172,15 @@ export function swarmAuthorLabel(from: string, fromKind: SwarmAuthorKind): strin
   }
 }
 
-/** 帖子头部 `mentions` 单项显示：coordinator → 协调者，all → @all，组前缀和成员名 → @x */
-export function swarmMentionLabel(mention: string): string {
-  if (mention === "coordinator") return "协调者";
+/** 帖子头部 `mentions` 单项显示：maestro → 指挥，all → @all，组前缀和成员名 → @x */
+export function ensembleMentionLabel(mention: string): string {
+  if (mention === "maestro") return "指挥";
   if (mention === "all") return "@all";
   return `@${mention}`;
 }
 
-/** 成员头像调色板（按加入顺序轮流取用，与协调者/用户/Runtime 错开） */
-export const SWARM_AUTHOR_PALETTE = [
+/** 成员头像调色板（按加入顺序轮流取用，与指挥/用户/Runtime 错开） */
+export const ENSEMBLE_AUTHOR_PALETTE = [
   "var(--a-cat1)",
   "var(--a-cat2)",
   "var(--a-cat3)",
@@ -190,44 +190,46 @@ export const SWARM_AUTHOR_PALETTE = [
 
 /**
  * 作者头像颜色：成员按在 `members`（加入顺序，含已移除成员）中的位置轮流取
- * `--a-cat1`..`--a-cat5`，同一名成员颜色固定；协调者、用户、Runtime 返回 `undefined`（不上色）。
+ * `--a-cat1`..`--a-cat5`，同一名成员颜色固定；指挥、用户、Runtime 返回 `undefined`（不上色）。
  */
-export function swarmAuthorColor(
-  members: readonly Pick<SwarmMemberView, "name">[],
+export function ensembleAuthorColor(
+  members: readonly Pick<EnsembleMemberView, "name">[],
   author: string,
-  fromKind: SwarmAuthorKind = "member",
+  fromKind: EnsembleAuthorKind = "member",
 ): string | undefined {
   if (fromKind !== "member") return undefined;
   const index = members.findIndex((member) => member.name === author);
   if (index < 0) return undefined;
-  return SWARM_AUTHOR_PALETTE[index % SWARM_AUTHOR_PALETTE.length];
+  return ENSEMBLE_AUTHOR_PALETTE[index % ENSEMBLE_AUTHOR_PALETTE.length];
 }
 
 /** 成员的模型或档位显示（优先档位名，否则去前缀后的模型名） */
-export function swarmMemberMetaLabel(member: Pick<SwarmMemberView, "model" | "profile">): string {
+export function ensembleMemberMetaLabel(
+  member: Pick<EnsembleMemberView, "model" | "profile">,
+): string {
   const profile = member.profile?.trim();
   return profile !== undefined && profile !== "" ? profile : shortModelName(member.model);
 }
 
 /**
  * 帖子头显示的收件人列表：从 `mentions` 中去掉作者自身
- * （成员作者去掉 `post.from`，协调者作者去掉 `"coordinator"`）。
+ * （成员作者去掉 `post.from`，指挥作者去掉 `"maestro"`）。
  */
-export function swarmPostRecipients(
-  post: Pick<SwarmPostView, "from" | "fromKind" | "mentions">,
+export function ensemblePostRecipients(
+  post: Pick<EnsemblePostView, "from" | "fromKind" | "mentions">,
 ): string[] {
-  const self = post.fromKind === "coordinator" ? "coordinator" : post.from;
+  const self = post.fromKind === "maestro" ? "maestro" : post.from;
   return post.mentions.filter((mention) => mention !== self);
 }
 
-export interface SwarmMentionToken {
+export interface EnsembleMentionToken {
   start: number;
   end: number;
   query: string;
 }
 
-export interface SwarmMentionCandidate {
-  kind: "coordinator" | "member" | "group" | "all";
+export interface EnsembleMentionCandidate {
+  kind: "maestro" | "member" | "group" | "all";
   /** 填入 `@<insert> ` 的名字 */
   insert: string;
   /** 列表主显示文字 */
@@ -242,7 +244,7 @@ export interface SwarmMentionCandidate {
  * 识别发帖框光标前的 `@` 补全词：光标前是 `@` 加零个或多个名字字符时返回起止位置与已输前缀，
  * 若 `@` 紧跟在英文/数字/路径字符后（如邮箱）则返回 `null`。
  */
-export function swarmMentionToken(value: string, cursor: number): SwarmMentionToken | null {
+export function ensembleMentionToken(value: string, cursor: number): EnsembleMentionToken | null {
   const clamped = Math.max(0, Math.min(cursor, value.length));
   const before = value.slice(0, clamped);
   const at = before.lastIndexOf("@");
@@ -254,26 +256,26 @@ export function swarmMentionToken(value: string, cursor: number): SwarmMentionTo
 }
 
 /**
- * 生成 `@` 补全候选（依次：协调者、未移除成员、同前缀组、`all`），按输入前缀不区分大小写过滤。
+ * 生成 `@` 补全候选（依次：指挥、未移除成员、同前缀组、`all`），按输入前缀不区分大小写过滤。
  */
-export function swarmMentionCandidates(
-  swarm: Pick<SwarmView, "coordinator" | "members">,
+export function ensembleMentionCandidates(
+  ensemble: Pick<EnsembleView, "maestro" | "members">,
   query: string,
-): SwarmMentionCandidate[] {
+): EnsembleMentionCandidate[] {
   const needle = query.trim().toLowerCase();
-  const out: SwarmMentionCandidate[] = [];
+  const out: EnsembleMentionCandidate[] = [];
 
-  const coordModel = shortModelName(swarm.coordinator.model);
-  if (needle === "" || "coordinator".startsWith(needle) || "协调者".startsWith(needle)) {
+  const coordModel = shortModelName(ensemble.maestro.model);
+  if (needle === "" || "maestro".startsWith(needle) || "指挥".startsWith(needle)) {
     out.push({
-      kind: "coordinator",
-      insert: "coordinator",
-      label: "协调者",
+      kind: "maestro",
+      insert: "maestro",
+      label: "指挥",
       ...(coordModel !== "" ? { meta: coordModel } : {}),
     });
   }
 
-  const activeMembers = swarm.members.filter((member) => member.status !== "removed");
+  const activeMembers = ensemble.members.filter((member) => member.status !== "removed");
   const activeNames = new Set(activeMembers.map((member) => member.name));
   const groupCounts = new Map<string, number>();
 
@@ -284,8 +286,8 @@ export function swarmMentionCandidates(
       if (prefix !== "") groupCounts.set(prefix, (groupCounts.get(prefix) ?? 0) + 1);
     }
     if (needle === "" || member.name.toLowerCase().startsWith(needle)) {
-      const meta = swarmMemberMetaLabel(member);
-      const color = swarmAuthorColor(swarm.members, member.name, "member");
+      const meta = ensembleMemberMetaLabel(member);
+      const color = ensembleAuthorColor(ensemble.members, member.name, "member");
       out.push({
         kind: "member",
         insert: member.name,
@@ -319,14 +321,14 @@ export function swarmMentionCandidates(
 }
 
 /** 留言板按成员筛选（`from` 或 `recipients`）与正文/作者不区分大小写子串搜索 */
-export function filterSwarmPosts<
-  T extends Pick<SwarmPostView, "from" | "fromKind" | "text" | "recipients" | "charterOf">,
+export function filterEnsemblePosts<
+  T extends Pick<EnsemblePostView, "from" | "fromKind" | "text" | "recipients" | "charterOf">,
 >(
   posts: readonly T[],
   options: {
     member?: string | undefined;
     query?: string | undefined;
-    members?: readonly Pick<SwarmMemberView, "name" | "charter">[] | undefined;
+    members?: readonly Pick<EnsembleMemberView, "name" | "charter">[] | undefined;
   } = {},
 ): T[] {
   const selected = options.member?.trim() ?? "";
@@ -341,7 +343,7 @@ export function filterSwarmPosts<
       if (!isAuthor && !post.recipients.includes(selected)) return false;
     }
     if (needle !== "") {
-      const authorLabel = swarmAuthorLabel(post.from, post.fromKind).toLowerCase();
+      const authorLabel = ensembleAuthorLabel(post.from, post.fromKind).toLowerCase();
       const fromRaw = post.from.toLowerCase();
       const charter = post.charterOf !== undefined ? charters?.get(post.charterOf) : undefined;
       const bodyText =
@@ -361,7 +363,7 @@ export function filterSwarmPosts<
 }
 
 /** 成员页分组：工作中（working）、已暂停（paused）、等待（waiting）、已移除（removed） */
-export function groupSwarmMembers<T extends Pick<SwarmMemberView, "status">>(
+export function groupEnsembleMembers<T extends Pick<EnsembleMemberView, "status">>(
   members: readonly T[],
 ): {
   working: T[];
@@ -393,7 +395,7 @@ export function groupSwarmMembers<T extends Pick<SwarmMemberView, "status">>(
 }
 
 /** 本地时间 `HH:MM` */
-export function formatSwarmTime(iso: string): string {
+export function formatEnsembleTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   const hours = String(date.getHours()).padStart(2, "0");
@@ -412,28 +414,28 @@ function isTokenBoundaryChar(ch: string | undefined): boolean {
 
 /**
  * 在 Markdown 文本节点内切分 `@token`：不另写提及正则，只匹配出现在 `mentions` 里的词
- * （`"coordinator"` 同时对应 `@coordinator` 与 `@协调者`）。
+ * （`"maestro"` 同时对应 `@maestro` 与 `@指挥`）。
  */
-export function splitSwarmMentions(
+export function splitEnsembleMentions(
   text: string,
   mentions: readonly string[] | undefined,
-): SwarmTextFragment[] {
+): EnsembleTextFragment[] {
   if (text === "" || mentions === undefined || mentions.length === 0) {
     return text === "" ? [] : [{ kind: "text", value: text }];
   }
   const tokenSet = new Set<string>();
   for (const mention of mentions) {
     if (mention === "") continue;
-    if (mention === "coordinator") {
-      tokenSet.add("@coordinator");
-      tokenSet.add("@协调者");
+    if (mention === "maestro") {
+      tokenSet.add("@maestro");
+      tokenSet.add("@指挥");
     } else {
       tokenSet.add(`@${mention}`);
     }
   }
   if (tokenSet.size === 0) return [{ kind: "text", value: text }];
   const candidates = [...tokenSet].sort((a, b) => b.length - a.length);
-  const out: SwarmTextFragment[] = [];
+  const out: EnsembleTextFragment[] = [];
   let plainStart = 0;
   let index = 0;
   while (index < text.length) {

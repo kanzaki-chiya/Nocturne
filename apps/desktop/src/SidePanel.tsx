@@ -54,11 +54,15 @@ import {
 import { SubagentPane, type SubagentRuntime } from "./SubagentPane";
 import { ShellPane } from "./ShellPane";
 import type { ShellSession } from "./use-shell-output";
-import type { BackgroundShellTask, SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
+import type {
+  BackgroundShellTask,
+  EnsembleMemberView,
+  EnsembleView,
+} from "@nocturne/core/protocol";
 import type { SubagentWatcher } from "./subagent-watch";
-import { SwarmPane, type SwarmSession } from "./SwarmPane";
-import { SwarmMemberPane } from "./SwarmMemberPane";
-import { swarmStatusDot } from "./swarm-ui";
+import { EnsemblePane, type EnsembleSession } from "./EnsemblePane";
+import { EnsembleMemberPane } from "./EnsembleMemberPane";
+import { ensembleStatusDot } from "./ensemble-ui";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
 import "./side-panel.css";
@@ -156,23 +160,23 @@ export interface SidePanelProps {
   subagents?: PanelSubagents | undefined;
   shells?:
     { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] } | undefined;
-  /** Swarm 面板标签的数据与动作 */
-  swarm?: PanelSwarm | undefined;
+  /** Ensemble 面板标签的数据与动作 */
+  ensemble?: PanelEnsemble | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
   agents?: PanelAgents | undefined;
 }
 
-export interface PanelSwarm {
-  swarm: SwarmView | undefined;
-  session: SwarmSession | undefined;
+export interface PanelEnsemble {
+  ensemble: EnsembleView | undefined;
+  session: EnsembleSession | undefined;
   ensureClient?: (() => Promise<RpcClient>) | undefined;
   images?: AttachmentImageSource | undefined;
   prefs?: PrefsStore | undefined;
   pickImages?: DesktopHost["pickImages"] | undefined;
   fileLinks?: FileLinkHooks | undefined;
   openUrl: (url: string) => void;
-  onOpenMember: (member: SwarmMemberView) => void;
-  onSelectCoordinator?: (() => void) | undefined;
+  onOpenMember: (member: EnsembleMemberView) => void;
+  onSelectMaestro?: (() => void) | undefined;
 }
 
 /** agent 标签的显示与操作；标签信息来自外壳的 watch 快照 */
@@ -195,7 +199,7 @@ const AGENT_TAB_STATE: Record<AgentTabInfo["state"], string> = {
 function Glyph({
   kind,
 }: {
-  kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent" | "swarm";
+  kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent" | "ensemble";
 }) {
   const names: Record<typeof kind, IconName> = {
     changes: "git_commit",
@@ -203,7 +207,7 @@ function Glyph({
     terminal: "terminal",
     globe: "earth",
     agent: "robot",
-    swarm: "group",
+    ensemble: "group",
     plus: "add",
     close: "close",
   };
@@ -214,15 +218,15 @@ function Glyph({
 
 function tabTitle(
   tab: PanelTab,
-  swarmTitle?: string,
+  ensembleTitle?: string,
 ): { name: string; project?: string; title: string } {
   if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
-  if (tab.kind === "swarm") {
-    const name = swarmTitle !== undefined && swarmTitle !== "" ? swarmTitle : "合奏";
+  if (tab.kind === "ensemble") {
+    const name = ensembleTitle !== undefined && ensembleTitle !== "" ? ensembleTitle : "合奏";
     return { name, title: name };
   }
-  if (tab.kind === "swarm_member") {
+  if (tab.kind === "ensemble_member") {
     const name = `@${tab.memberName}`;
     return { name, title: name };
   }
@@ -307,9 +311,10 @@ function TabBar(props: SidePanelProps) {
     <div className="sp-tabbar">
       <div className="sp-tabs" role="tablist" aria-label="面板标签" ref={bar}>
         {tabs.map((tab) => {
-          const { name, project, title } = tabTitle(tab, props.swarm?.swarm?.title);
+          const { name, project, title } = tabTitle(tab, props.ensemble?.ensemble?.title);
           const active = tab.id === activeId;
-          const swarmDot = tab.kind === "swarm" ? swarmStatusDot(props.swarm?.swarm) : undefined;
+          const ensembleDot =
+            tab.kind === "ensemble" ? ensembleStatusDot(props.ensemble?.ensemble) : undefined;
           return (
             <div
               key={tab.id}
@@ -357,11 +362,11 @@ function TabBar(props: SidePanelProps) {
                 }
               }}
             >
-              {tab.kind === "swarm" ? (
-                swarmDot !== undefined ? (
-                  <span className={`sp-swarm-dot ${swarmDot}`} aria-hidden="true" />
+              {tab.kind === "ensemble" ? (
+                ensembleDot !== undefined ? (
+                  <span className={`sp-ensemble-dot ${ensembleDot}`} aria-hidden="true" />
                 ) : (
-                  <Glyph kind="swarm" />
+                  <Glyph kind="ensemble" />
                 )
               ) : tab.kind === "browser" && tab.agent !== undefined ? (
                 <Glyph kind="agent" />
@@ -372,7 +377,7 @@ function TabBar(props: SidePanelProps) {
                   kind={
                     tab.kind === "new" || tab.kind === "browser"
                       ? "globe"
-                      : tab.kind === "subagent" || tab.kind === "swarm_member"
+                      : tab.kind === "subagent" || tab.kind === "ensemble_member"
                         ? "agent"
                         : tab.kind === "shell"
                           ? "terminal"
@@ -1443,43 +1448,43 @@ export function SidePanel(props: SidePanelProps) {
                     session={props.shells?.session}
                     visible={!hidden && tab.id === activeId && current.has(tab.id)}
                   />
-                ) : tab.kind === "swarm" ? (
-                  props.swarm?.swarm !== undefined && props.swarm.session !== undefined ? (
-                    <SwarmPane
-                      swarm={props.swarm.swarm}
-                      session={props.swarm.session}
-                      fileLinks={props.swarm.fileLinks}
-                      openUrl={props.swarm.openUrl}
-                      onOpenMember={props.swarm.onOpenMember}
-                      onSelectCoordinator={props.swarm.onSelectCoordinator}
+                ) : tab.kind === "ensemble" ? (
+                  props.ensemble?.ensemble !== undefined && props.ensemble.session !== undefined ? (
+                    <EnsemblePane
+                      ensemble={props.ensemble.ensemble}
+                      session={props.ensemble.session}
+                      fileLinks={props.ensemble.fileLinks}
+                      openUrl={props.ensemble.openUrl}
+                      onOpenMember={props.ensemble.onOpenMember}
+                      onSelectMaestro={props.ensemble.onSelectMaestro}
                       visible={!hidden && tab.id === activeId && current.has(tab.id)}
                     />
                   ) : (
-                    <div className="swarm-pane" />
+                    <div className="ensemble-pane" />
                   )
-                ) : tab.kind === "swarm_member" ? (
-                  props.swarm?.ensureClient !== undefined &&
-                  props.swarm.images !== undefined &&
-                  props.swarm.pickImages !== undefined ? (
-                    <SwarmMemberPane
+                ) : tab.kind === "ensemble_member" ? (
+                  props.ensemble?.ensureClient !== undefined &&
+                  props.ensemble.images !== undefined &&
+                  props.ensemble.pickImages !== undefined ? (
+                    <EnsembleMemberPane
                       childSessionId={tab.childSessionId}
                       memberName={tab.memberName}
                       memberStatus={
-                        props.swarm.swarm?.members.find(
+                        props.ensemble.ensemble?.members.find(
                           (item) => item.childSessionId === tab.childSessionId,
                         )?.status
                       }
-                      swarmStatus={props.swarm.swarm?.status}
+                      ensembleStatus={props.ensemble.ensemble?.status}
                       workspace={props.workspace ?? ""}
-                      ensureClient={props.swarm.ensureClient}
-                      images={props.swarm.images}
-                      openUrl={props.swarm.openUrl}
-                      fileLinks={props.swarm.fileLinks}
-                      prefs={props.swarm.prefs}
-                      pickImages={props.swarm.pickImages}
+                      ensureClient={props.ensemble.ensureClient}
+                      images={props.ensemble.images}
+                      openUrl={props.ensemble.openUrl}
+                      fileLinks={props.ensemble.fileLinks}
+                      prefs={props.ensemble.prefs}
+                      pickImages={props.ensemble.pickImages}
                     />
                   ) : (
-                    <div className="sp-swarm-member" />
+                    <div className="sp-ensemble-member" />
                   )
                 ) : tab.diffText !== undefined ? (
                   <FileDiffView

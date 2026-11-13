@@ -20,7 +20,7 @@ import {
   truncateLine,
 } from "../format.js";
 import { useTheme, type ThemePalette } from "../theme.js";
-import { toolDisplayName } from "../text-format-swarm.js";
+import { toolDisplayName } from "../text-format-ensemble.js";
 import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
 import { SegmentText, TodoRows } from "./todo-panel.js";

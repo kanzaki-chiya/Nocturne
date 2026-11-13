@@ -63,10 +63,10 @@ function formatModelPricingEn(pricing: ModelPricing | undefined): string {
 }
 
 /**
- * Swarm 工具说明中的已启用模型列表（ADR-0089 §3）：与 `subagentSelectionTable` 同源价格格式，
- * 供协调者按用户在 `/swarm` 中点名的模型精确匹配。
+ * Ensemble 工具说明中的已启用模型列表（ADR-0089 §3）：与 `subagentSelectionTable` 同源价格格式，
+ * 供指挥按用户在 `/ensemble` 中点名的模型精确匹配。
  */
-export function swarmEnabledModelsTable(
+export function ensembleEnabledModelsTable(
   models: readonly { provider: string; model: string; name?: string | undefined }[],
   pricing?: (modelKey: string) => ModelPricing | undefined,
 ): string {

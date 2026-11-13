@@ -56,20 +56,20 @@ function boostBody(context: WorkModeContext): string {
   ].join("\n");
 }
 
-function swarmBody(context: WorkModeContext): string {
+function ensembleBody(context: WorkModeContext): string {
   const git = context.gitRepository !== false;
   return [
-    "Ensemble mode: you are the coordinator (`@coordinator`). File-editing tools are disabled while the ensemble is active; decompose the task, manage named members, review outcomes, integrate changes, and report to the user.",
-    "- Start by calling `swarm_init` with a concise title for the ensemble.",
+    "Ensemble mode: you are Maestro (`@maestro`). File-editing tools are disabled while the ensemble is active; decompose the task, manage named members, review outcomes, integrate changes, and report to the user.",
+    "- Start by calling `ensemble_init` with a concise title for the ensemble.",
     "- Split work by file, package, or problem so each file belongs to at most one member. Never assign two members to edit the same file.",
-    "- Add each member with `swarm_add_member` and fill in all three charter sections clearly (`owns`, `handsOff`, `doneWhen`). Use `<prefix>-1`, `<prefix>-2`, ... for peer groups so `@<prefix>` addresses the whole group.",
+    "- Add each member with `ensemble_add_member` and fill in all three charter sections clearly (`owns`, `handsOff`, `doneWhen`). Use `<prefix>-1`, `<prefix>-2`, ... for peer groups so `@<prefix>` addresses the whole group.",
     '- Add one verifier member per two to four implementation members; when the user asks for cross-model verification or names specific models, set `model` or `profile` from the enabled list in the tool description. Use `preset: "explore"` for read-only investigation members.',
     git
       ? "- Members share the main workspace by default; set `isolated: true` when parallel edits or builds would interfere (give the verifier `isolated: true` too when reviewing isolated authors)."
       : "- This workspace is not a git repository with a commit, so `isolated: true` worktrees are unavailable; keep members on disjoint files in the main workspace.",
-    "- Dispatch tasks on the board with `swarm_post` using `@name`, `@group`, or `@all`, then end your turn without polling or sleeping; replies arrive as `<swarm-post>` messages.",
+    "- Dispatch tasks on the board with `ensemble_post` using `@name`, `@group`, or `@all`, then end your turn without polling or sleeping; replies arrive as `<ensemble-post>` messages.",
     "- When a member is waiting for user permission approval, tell the user which member needs confirmation so they can approve it.",
-    "- After verifiers pass all slices, apply isolated members' commits with `apply_subagent_changes`, run the project's checks in the main workspace via `shell`, call `swarm_end`, and report results by member along with any unmerged branches.",
+    "- After verifiers pass all slices, apply isolated members' commits with `apply_subagent_changes`, run the project's checks in the main workspace via `shell`, call `ensemble_end`, and report results by member along with any unmerged branches.",
   ].join("\n");
 }
 
@@ -78,7 +78,7 @@ const BODIES: Record<WorkModeName, (context: WorkModeContext) => string> = {
   goal: () => GOAL,
   plan: () => PLAN,
   boost: boostBody,
-  swarm: swarmBody,
+  ensemble: ensembleBody,
 };
 
 /** 用户批准计划后开新 Turn 的说明（ADR-0076 §5） */

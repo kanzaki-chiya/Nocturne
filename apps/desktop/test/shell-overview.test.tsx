@@ -1,6 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { BackgroundShellTask, SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
+import type {
+  BackgroundShellTask,
+  EnsembleMemberView,
+  EnsembleView,
+} from "@nocturne/core/protocol";
 import { SessionOverview } from "../src/PanelChrome";
 import { parseStoredTabs, restoreTabs, storedTabs } from "../src/side-panel";
 
@@ -88,7 +92,10 @@ it("shell overview shares a clock for ticking and expiry at five minutes", () =>
   expect(screen.getByText("5 分 5 秒")).toBeTruthy();
 });
 
-function makeSwarmMember(name: string, overrides: Partial<SwarmMemberView> = {}): SwarmMemberView {
+function makeEnsembleMember(
+  name: string,
+  overrides: Partial<EnsembleMemberView> = {},
+): EnsembleMemberView {
   return {
     name,
     childSessionId: `child-${name}`,
@@ -103,23 +110,23 @@ function makeSwarmMember(name: string, overrides: Partial<SwarmMemberView> = {})
 }
 
 it("合奏概览分组：进行中显示在变更之后子代理之前、结束后隐藏、待确认警告色、点击打开面板与成员", () => {
-  const apiMember = makeSwarmMember("api-1", {
+  const apiMember = makeEnsembleMember("api-1", {
     isolated: true,
     activity: { kind: "tool", tool: "edit", detail: "src/api.ts" },
   });
-  const uiMember = makeSwarmMember("ui-1", {
+  const uiMember = makeEnsembleMember("ui-1", {
     profile: "deep",
     pendingPermissions: [
       { requestId: "r1", callId: "c1", reason: "cmd", subjects: [], options: [] },
     ],
     activity: { kind: "permission", target: "pnpm test" },
   });
-  const removedMember = makeSwarmMember("old-1", { status: "removed" });
-  const activeSwarm: SwarmView = {
+  const removedMember = makeEnsembleMember("old-1", { status: "removed" });
+  const activeEnsemble: EnsembleView = {
     createdSeq: 1,
     title: "登录页改造与接口联调",
     status: "active",
-    coordinator: {
+    maestro: {
       model: { provider: "anthropic", model: "claude-opus-4.6" },
       status: "working",
       awaitingPermission: false,
@@ -137,7 +144,7 @@ it("合奏概览分组：进行中显示在变更之后子代理之前、结束�
       totals={{ added: 0, removed: 0, files: 0 }}
       rightOffset={0}
       onOpenChanges={vi.fn()}
-      swarm={{ swarm: activeSwarm, onOpenBoard, onOpenMember }}
+      ensemble={{ ensemble: activeEnsemble, onOpenBoard, onOpenMember }}
       subagents={{
         running: [
           {
@@ -160,22 +167,22 @@ it("合奏概览分组：进行中显示在变更之后子代理之前、结束�
   // 分组顺序：变更按钮 -> 合奏分组 -> 子代理分组
   const children = Array.from(container.querySelector(".ovpop")?.children ?? []);
   const changesIdx = children.findIndex((el) => el.textContent?.includes("变更"));
-  const swarmIdx = children.findIndex((el) => el.getAttribute("aria-label") === "合奏");
+  const ensembleIdx = children.findIndex((el) => el.getAttribute("aria-label") === "合奏");
   const subIdx = children.findIndex((el) => el.getAttribute("aria-label") === "子代理");
-  expect(swarmIdx).toBeGreaterThan(changesIdx);
-  expect(subIdx).toBeGreaterThan(swarmIdx);
+  expect(ensembleIdx).toBeGreaterThan(changesIdx);
+  expect(subIdx).toBeGreaterThan(ensembleIdx);
 
-  const swarmGroup = screen.getByRole("group", { name: "合奏" });
-  expect(swarmGroup.querySelector(".sp-swarm-dot.warn")).not.toBeNull();
+  const ensembleGroup = screen.getByRole("group", { name: "合奏" });
+  expect(ensembleGroup.querySelector(".sp-ensemble-dot.warn")).not.toBeNull();
   expect(screen.queryByText("old-1")).toBeNull();
-  expect(swarmGroup.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
-  expect(swarmGroup.textContent).toContain("deep");
+  expect(ensembleGroup.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
+  expect(ensembleGroup.textContent).toContain("deep");
 
   // 待确认成员：头像 warn 描边与摘要 warn 类
-  const memberButtons = swarmGroup.querySelectorAll<HTMLButtonElement>(".ovpop-swarm-member");
+  const memberButtons = ensembleGroup.querySelectorAll<HTMLButtonElement>(".ovpop-ensemble-member");
   expect(memberButtons).toHaveLength(2);
-  expect(memberButtons[0]?.querySelector(".swarm-av.warn")).toBeNull();
-  expect(memberButtons[1]?.querySelector(".swarm-av.warn")).not.toBeNull();
+  expect(memberButtons[0]?.querySelector(".ensemble-av.warn")).toBeNull();
+  expect(memberButtons[1]?.querySelector(".ensemble-av.warn")).not.toBeNull();
   expect(memberButtons[1]?.querySelector(".ovpop-agent-summary.warn")?.textContent).toBe(
     "等待确认：pnpm test",
   );
@@ -195,7 +202,7 @@ it("合奏概览分组：进行中显示在变更之后子代理之前、结束�
       totals={{ added: 0, removed: 0, files: 0 }}
       rightOffset={0}
       onOpenChanges={vi.fn()}
-      swarm={{ swarm: { ...activeSwarm, status: "ended" }, onOpenBoard, onOpenMember }}
+      ensemble={{ ensemble: { ...activeEnsemble, status: "ended" }, onOpenBoard, onOpenMember }}
     />,
   );
   expect(screen.queryByRole("group", { name: "合奏" })).toBeNull();

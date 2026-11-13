@@ -104,9 +104,7 @@ describe("执行方式命令（ADR-0076）", () => {
     expect(cliHelpText()).toContain("/plan");
     expect(cliHelpText()).toContain("/boost");
     expect(cliHelpText()).toContain("/ensemble");
-    expect(cliHelpText()).not.toContain("/swarm");
     expect(helpLines().join("\n")).toContain("/ensemble");
-    expect(helpLines().join("\n")).not.toContain("/swarm");
   });
 });
 

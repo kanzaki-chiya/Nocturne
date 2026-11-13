@@ -145,8 +145,8 @@ import { SettingsPage } from "./components/settings-page.js";
 import { GrantsPage } from "./components/grants-page.js";
 import { RewindPage } from "./components/rewind-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
-import { SwarmBoard } from "./components/swarm-board.js";
-import { SwarmStrip, swarmStripRows } from "./components/swarm-strip.js";
+import { EnsembleBoard } from "./components/ensemble-board.js";
+import { EnsembleStrip, ensembleStripRows } from "./components/ensemble-strip.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
@@ -155,7 +155,7 @@ import { useOptionalSessionView, useSessionView, usePendingInputs } from "./sess
 import { useGenerationSpeed } from "./speed.js";
 import stringWidth from "string-width";
 import { useReasoning } from "./reasoning.js";
-import { useNotifyBell, useSwarmMemberBell } from "./notify.js";
+import { useNotifyBell, useEnsembleMemberBell } from "./notify.js";
 import { useTheme, type ThemeId } from "./theme.js";
 import type { NewSessionFn, SwitchSessionFn } from "./types.js";
 import type { ConsoleLines } from "./console-capture.js";
@@ -919,19 +919,19 @@ function SessionApp({
   }, [stdout]);
 
   // /resume 切换：session 变为新会话（useSessionView 自动重放新日志）
-  // Swarm 成员会话（tui.md §6）：协调者会话 `coordinator` 始终打开，成员只是叠在上面的显示视图；
-  // 下文的 `session` / `view` 指当前显示的会话，状态块与留言板读协调者
-  const [coordinator, setSession] = useState(initialSession);
+  // Ensemble 成员会话（tui.md §6）：指挥会话 `maestro` 始终打开，成员只是叠在上面的显示视图；
+  // 下文的 `session` / `view` 指当前显示的会话，状态块与留言板读指挥
+  const [maestro, setSession] = useState(initialSession);
   const [memberSession, setMemberSession] = useState<
     { session: RuntimeSession; name: string } | undefined
   >(undefined);
   const memberRef = useRef(memberSession);
   memberRef.current = memberSession;
-  const session = memberSession?.session ?? coordinator;
-  const coordView = useSessionView(coordinator);
+  const session = memberSession?.session ?? maestro;
+  const coordView = useSessionView(maestro);
   const memberView = useOptionalSessionView(memberSession?.session);
   const view = memberView ?? coordView;
-  const coordSwarm = coordView.swarm;
+  const coordEnsemble = coordView.ensemble;
   // 待发输入（ADR-0070）：运行中插话/排队，临时状态按整份快照覆盖
   const pendingInputs = usePendingInputs(session);
   const [pendingIndex, setPendingIndex] = useState(0);
@@ -977,8 +977,8 @@ function SessionApp({
   // 通知响铃（ADR-0056 §3）：终端没在看时三类事件各响一次 BEL（帧外写出）
   useNotifyBell({ session, runtime, focus, writeOob });
   // 成员的新待确认请求（实时到达）同样响铃；正在看的成员由上面那条覆盖
-  useSwarmMemberBell({
-    session: coordinator,
+  useEnsembleMemberBell({
+    session: maestro,
     runtime,
     focus,
     writeOob,
@@ -986,12 +986,12 @@ function SessionApp({
   });
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
   const speed = useGenerationSpeed(session);
-  // 成员会话的第一条消息是 Swarm 帖子送达：标题行不露出 `<swarm-post>` 标签
+  // 成员会话的第一条消息是 Ensemble 帖子送达：标题行不露出 `<ensemble-post>` 标签
   const title =
-    view.title !== undefined && /^<swarm-post[^>]*>/u.test(view.title) ? undefined : view.title;
+    view.title !== undefined && /^<ensemble-post[^>]*>/u.test(view.title) ? undefined : view.title;
   useEffect(() => {
-    onSessionId?.(coordinator.id);
-  }, [coordinator, onSessionId]);
+    onSessionId?.(maestro.id);
+  }, [maestro, onSessionId]);
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0);
   const [rewindImageHint, setRewindImageHint] = useState<string>();
@@ -1082,17 +1082,17 @@ function SessionApp({
     };
   }, [session, diffExpanded]);
   const [recordOpen, setRecordOpen] = useState(false);
-  /** `/swarm board` 全屏留言板（仅全屏，tui.md §2） */
+  /** `/ensemble board` 全屏留言板（仅全屏，tui.md §2） */
   const [boardOpen, setBoardOpen] = useState(false);
   // 当前会话出现权限确认或提问时让出整帧，确认框照常显示
   useEffect(() => {
     if (view.pendingPermission !== undefined || view.pendingQuestion !== undefined)
       setBoardOpen(false);
   }, [view.pendingPermission, view.pendingQuestion]);
-  // Swarm 不存在时没有留言板
+  // Ensemble 不存在时没有留言板
   useEffect(() => {
-    if (coordSwarm === undefined) setBoardOpen(false);
-  }, [coordSwarm]);
+    if (coordEnsemble === undefined) setBoardOpen(false);
+  }, [coordEnsemble]);
   const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
   const recordTotal = useRef<number | undefined>(undefined);
   const recordCommitted = useRef(false);
@@ -1242,7 +1242,7 @@ function SessionApp({
 
   // 成员视图是中途订阅的：`runtime.status` 是临时事件、不落盘，起始快照也没补发，
   // 所以成员 Turn 进行中切进来时 view.status 仍是 idle。用 live 状态补齐忙闲，
-  // 插话/排队与 Esc/Ctrl+C 中断才和协调者一致。
+  // 插话/排队与 Esc/Ctrl+C 中断才和指挥一致。
   const memberLiveBusy =
     memberView !== undefined &&
     (memberView.currentTurn !== undefined ||
@@ -1770,13 +1770,13 @@ function SessionApp({
   );
 
   /**
-   * Swarm 成员会话（tui.md §6）：换绑显示视图，不经 switchSession——协调者始终打开，
+   * Ensemble 成员会话（tui.md §6）：换绑显示视图，不经 switchSession——指挥始终打开，
    * 成员句柄是 Runtime 托管的共享代理（close 为空操作），进出都不 close、不 interrupt。
    * 视口与 /resume 一样整体换成目标会话，旧内容冻结（全屏）或留在回滚区（--inline）。
    */
   const showSession = useCallback(
     (next: { session: RuntimeSession; name: string } | undefined): void => {
-      const target = next?.session ?? coordinator;
+      const target = next?.session ?? maestro;
       if (target === session) return;
       const epoch = sessionEpoch.current++;
       const sep: TranscriptItem = {
@@ -1808,15 +1808,15 @@ function SessionApp({
       pastes.reset(inputRef.current);
       setMemberSession(next);
     },
-    [coordinator, session, fullscreen, pastes],
+    [maestro, session, fullscreen, pastes],
   );
   const openMember = useCallback(
     async (childSessionId: string): Promise<boolean> => {
-      const member = coordSwarm?.members.find((m) => m.childSessionId === childSessionId);
+      const member = coordEnsemble?.members.find((m) => m.childSessionId === childSessionId);
       if (member === undefined) return false;
       if (memberRef.current?.session.id === childSessionId) return true;
       try {
-        // rpc.md 3.2：Swarm 存续期间按 id 打开成员拿到的是 Runtime 托管的同一常驻实例
+        // rpc.md 3.2：Ensemble 存续期间按 id 打开成员拿到的是 Runtime 托管的同一常驻实例
         const opened = await runtime.resumeSession(childSessionId);
         showSession({ session: opened, name: member.name });
         return true;
@@ -1825,9 +1825,9 @@ function SessionApp({
         return false;
       }
     },
-    [coordSwarm, runtime, showSession, pushLine],
+    [coordEnsemble, runtime, showSession, pushLine],
   );
-  const backToCoordinator = useCallback((): void => {
+  const backToMaestro = useCallback((): void => {
     showSession(undefined);
   }, [showSession]);
 
@@ -1839,8 +1839,8 @@ function SessionApp({
       draft?: RewindTarget,
       jump?: SeqJump,
     ): Promise<void> => {
-      // 成员视图下切换会话：先回到协调者视图，再走原来的 switchSession（tui.md §6）；
-      // 这时的 busy 是成员的，忙闲以 switchSession 对协调者的判定为准
+      // 成员视图下切换会话：先回到指挥视图，再走原来的 switchSession（tui.md §6）；
+      // 这时的 busy 是成员的，忙闲以 switchSession 对指挥的判定为准
       const fromMember = memberRef.current !== undefined;
       if (fromMember) setMemberSession(undefined);
       if (submitting.current || (busy && !fromMember)) {
@@ -2996,7 +2996,7 @@ function SessionApp({
             entry.kind === "user" &&
             entry.subagent === undefined &&
             entry.backgroundShell === undefined &&
-            entry.swarm === undefined
+            entry.ensemble === undefined
               ? [entry.seq]
               : [],
           ),
@@ -3057,17 +3057,17 @@ function SessionApp({
           }, fail);
         } else if (work.action === "plan-cancel") {
           void session.cancelPlan().catch(fail);
-        } else if (work.action === "swarm-board") {
+        } else if (work.action === "ensemble-board") {
           // 留言板只在全屏提供；本会话没有合奏或 --inline 时给出用法
-          if (coordSwarm === undefined || !fullscreen) pushLine("用法：/ensemble 任务");
+          if (coordEnsemble === undefined || !fullscreen) pushLine("用法：/ensemble 任务");
           else {
             setSel(undefined);
             setBoardOpen(true);
           }
-        } else if (work.action === "swarm-end") {
-          if (coordSwarm === undefined) pushLine("用法：/ensemble 任务");
+        } else if (work.action === "ensemble-end") {
+          if (coordEnsemble === undefined) pushLine("用法：/ensemble 任务");
           else
-            void coordinator.endSwarm().then(({ unmerged }) => {
+            void maestro.endEnsemble().then(({ unmerged }) => {
               for (const item of unmerged) pushLine(`@${item.name} ${item.branch}`);
             }, fail);
         } else {
@@ -3345,8 +3345,8 @@ function SessionApp({
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length, view.goal) : 0,
     // 待发输入列表（ADR-0070）：全屏才画，行数随条目数（最多 3 条 + 提示）
     fullscreen ? pendingPanelRows(pendingInputs.items.length, pendingInputs.paused) : 0,
-    // Swarm 状态块（tui.md §2）：全屏与 --inline 都画，始终读协调者
-    boardOpen ? 0 : swarmStripRows(coordSwarm),
+    // Ensemble 状态块（tui.md §2）：全屏与 --inline 都画，始终读指挥
+    boardOpen ? 0 : ensembleStripRows(coordEnsemble),
   );
   const promptOverlay = pending !== undefined || pendingQ !== undefined;
   const popupHeight = Math.min(
@@ -3372,9 +3372,9 @@ function SessionApp({
 
   // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
   const pageBody =
-    boardOpen && coordSwarm !== undefined ? (
-      <SwarmBoard
-        swarm={coordSwarm}
+    boardOpen && coordEnsemble !== undefined ? (
+      <EnsembleBoard
+        ensemble={coordEnsemble}
         width={width}
         height={budget.frameHeight}
         active={!dialogOpen}
@@ -3382,15 +3382,15 @@ function SessionApp({
           setBoardOpen(false);
         }}
         onPost={async (text) => {
-          await coordinator.postToSwarm({ text });
+          await maestro.postToEnsemble({ text });
         }}
         onOpenMember={(childSessionId) => {
           void openMember(childSessionId).then((ok) => {
             if (ok) setBoardOpen(false);
           });
         }}
-        onOpenCoordinator={() => {
-          backToCoordinator();
+        onOpenMaestro={() => {
+          backToMaestro();
           setBoardOpen(false);
         }}
         onMouseFrame={fullscreen ? reportDialogMouse : undefined}
@@ -3578,7 +3578,7 @@ function SessionApp({
     reasoningExpanded,
     fullscreen,
     theme,
-    swarmRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
+    ensembleRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
   };
   sourceRef.current = transcriptSource;
   const exportBlocks: LineBlock[] =
@@ -3727,7 +3727,7 @@ function SessionApp({
             entries: view.entries,
             backgroundShells: view.backgroundShells,
             shellOutputs,
-            swarmRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
+            ensembleRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
           }),
         ],
         clientRows,
@@ -3752,7 +3752,7 @@ function SessionApp({
               entries: view.entries,
               backgroundShells: view.backgroundShells,
               shellOutputs,
-              swarmRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
+              ensembleRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
             },
           ),
         ),
@@ -3761,7 +3761,7 @@ function SessionApp({
   const shownActivity = conversationHeight > 0 ? activityLines.slice(-conversationHeight) : [];
   const activityHeight = shownActivity.length;
   const prompt = `${g.prompt} `;
-  const inputY = -(budget.input + budget.completion + budget.swarm + budget.status);
+  const inputY = -(budget.input + budget.completion + budget.ensemble + budget.status);
 
   const groupCount = new Set(candidates.map((item) => item.group).filter(Boolean)).size;
   const groupRows = budget.completion > groupCount ? groupCount : 0;
@@ -4162,8 +4162,8 @@ function SessionApp({
             </Text>,
           ])
         : null}
-      {budget.swarm > 0 && coordSwarm !== undefined ? (
-        <SwarmStrip swarm={coordSwarm} width={width} height={budget.swarm} />
+      {budget.ensemble > 0 && coordEnsemble !== undefined ? (
+        <EnsembleStrip ensemble={coordEnsemble} width={width} height={budget.ensemble} />
       ) : null}
       {budget.status > 0 ? (
         <StatusBar
@@ -4186,7 +4186,7 @@ function SessionApp({
     rewindTargets !== undefined
       ? "rewind"
       : boardOpen
-        ? "swarm-board"
+        ? "ensemble-board"
         : pickerOpen
           ? "model"
           : providerPageOpen
@@ -4208,7 +4208,7 @@ function SessionApp({
           width={width}
           reasoning={reasoning}
           now={reasoningNow}
-          swarmRecipient={memberSession !== undefined ? `@${memberSession.name}` : undefined}
+          ensembleRecipient={memberSession !== undefined ? `@${memberSession.name}` : undefined}
         />
       )}
       {pageBody ??

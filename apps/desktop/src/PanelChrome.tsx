@@ -13,20 +13,20 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { SubagentSummary, SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
+import type { SubagentSummary, EnsembleMemberView, EnsembleView } from "@nocturne/core/protocol";
 
 import type { FileIndexEntry } from "./file-refs";
 import { useNow } from "./use-now";
 import { ShellRows, type OverviewShells } from "./ShellRows";
 import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
-import { SwarmAvatar } from "./SwarmAvatar";
+import { EnsembleAvatar } from "./EnsembleAvatar";
 import {
-  swarmActivitySummary,
-  swarmAuthorColor,
-  swarmMemberMetaLabel,
-  swarmStatusDot,
-} from "./swarm-ui";
+  ensembleActivitySummary,
+  ensembleAuthorColor,
+  ensembleMemberMetaLabel,
+  ensembleStatusDot,
+} from "./ensemble-ui";
 import { KeyHint } from "./KeyHint";
 import { keyDiag } from "./key-diag";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
@@ -373,48 +373,50 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
 }
 
 /** 概览「合奏」分组的内容 */
-export interface OverviewSwarm {
-  swarm: SwarmView;
+export interface OverviewEnsemble {
+  ensemble: EnsembleView;
   onOpenBoard: () => void;
-  onOpenMember: (member: SwarmMemberView) => void;
+  onOpenMember: (member: EnsembleMemberView) => void;
 }
 
-function SwarmOverviewRows({ ensemble }: { ensemble: OverviewSwarm }) {
-  const { swarm, onOpenBoard, onOpenMember } = ensemble;
-  const dot = swarmStatusDot(swarm);
-  const members = swarm.members.filter((member) => member.status !== "removed");
+function EnsembleOverviewRows({ ensemble: group }: { ensemble: OverviewEnsemble }) {
+  const { ensemble, onOpenBoard, onOpenMember } = group;
+  const dot = ensembleStatusDot(ensemble);
+  const members = ensemble.members.filter((member) => member.status !== "removed");
   return (
     <div className="ovpop-group thin-scroll" role="group" aria-label="合奏">
-      <button type="button" className="ovpop-swarm-head" onClick={onOpenBoard}>
-        {dot !== undefined ? <span className={`sp-swarm-dot ${dot}`} aria-hidden="true" /> : null}
-        <span className="ovpop-swarm-title">{swarm.title || "合奏"}</span>
-        <Icon name="right_small" size={ICON_SM} className="ovpop-swarm-chevron" />
+      <button type="button" className="ovpop-ensemble-head" onClick={onOpenBoard}>
+        {dot !== undefined ? (
+          <span className={`sp-ensemble-dot ${dot}`} aria-hidden="true" />
+        ) : null}
+        <span className="ovpop-ensemble-title">{ensemble.title || "合奏"}</span>
+        <Icon name="right_small" size={ICON_SM} className="ovpop-ensemble-chevron" />
       </button>
       {members.map((member) => {
         const pending = member.pendingPermissions.length > 0;
-        const modelLabel = swarmMemberMetaLabel(member);
-        const summary = swarmActivitySummary(member.activity);
+        const modelLabel = ensembleMemberMetaLabel(member);
+        const summary = ensembleActivitySummary(member.activity);
         return (
           <button
             key={member.name}
             type="button"
-            className="ovpop-agent ovpop-swarm-member"
+            className="ovpop-agent ovpop-ensemble-member"
             onClick={() => {
               onOpenMember(member);
             }}
           >
-            <SwarmAvatar
+            <EnsembleAvatar
               kind="member"
-              color={swarmAuthorColor(swarm.members, member.name, "member")}
+              color={ensembleAuthorColor(ensemble.members, member.name, "member")}
               size="sm"
               warn={pending}
             />
             <span className="ovpop-agent-text">
-              <span className="ovpop-swarm-line1">
-                <span className="ovpop-swarm-name">{member.name}</span>
-                {modelLabel !== "" && <span className="ovpop-swarm-meta">{modelLabel}</span>}
+              <span className="ovpop-ensemble-line1">
+                <span className="ovpop-ensemble-name">{member.name}</span>
+                {modelLabel !== "" && <span className="ovpop-ensemble-meta">{modelLabel}</span>}
                 {member.isolated && (
-                  <span className="ovpop-swarm-tag">
+                  <span className="ovpop-ensemble-tag">
                     {modelLabel !== "" ? " · 独立工作树" : "独立工作树"}
                   </span>
                 )}
@@ -440,7 +442,7 @@ export function SessionOverview({
   totals,
   rightOffset,
   onOpenChanges,
-  swarm,
+  ensemble,
   subagents,
   shells,
 }: {
@@ -451,7 +453,7 @@ export function SessionOverview({
   rightOffset: number;
   onOpenChanges: () => void;
   /** 进行中的合奏分组；结束或无合奏时隐藏 */
-  swarm?: OverviewSwarm | undefined;
+  ensemble?: OverviewEnsemble | undefined;
   /** 子代理分组；没有运行项（或不传）时整组隐藏 */
   subagents?: OverviewSubagents | undefined;
   shells?: OverviewShells | undefined;
@@ -492,7 +494,7 @@ export function SessionOverview({
           )}
         </span>
       </button>
-      {swarm?.swarm.status === "active" && <SwarmOverviewRows ensemble={swarm} />}
+      {ensemble?.ensemble.status === "active" && <EnsembleOverviewRows ensemble={ensemble} />}
       {subagents !== undefined &&
         subagents.running.length + subagents.external.length + (subagents.retained?.length ?? 0) >
           0 && <SubagentRows subagents={subagents} />}

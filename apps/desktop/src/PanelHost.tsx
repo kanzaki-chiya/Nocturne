@@ -137,10 +137,10 @@ export interface SidePanelController {
   openUrl: (url: string) => boolean;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
-  /** 打开或切换到当前会话的 Swarm 标签 */
-  openSwarm: () => void;
-  /** 打开或切换到指定会话（缺省当前会话）里某名 Swarm 成员的会话标签 */
-  openSwarmMember: (
+  /** 打开或切换到当前会话的 Ensemble 标签 */
+  openEnsemble: () => void;
+  /** 打开或切换到指定会话（缺省当前会话）里某名 Ensemble 成员的会话标签 */
+  openEnsembleMember: (
     member: { name: string; childSessionId: string },
     targetSessionId?: string,
   ) => void;
@@ -886,27 +886,27 @@ export function useSidePanel({
       });
     });
   };
-  const openSwarm = useCallback(() => {
+  const openEnsemble = useCallback(() => {
     hideBrowserThen(() => {
       update((panel) => {
-        const found = panel.tabs.find((tab) => tab.kind === "swarm");
+        const found = panel.tabs.find((tab) => tab.kind === "ensemble");
         if (found) return { ...panel, open: true, activeId: found.id };
-        return withTab(panel, { id: newTabId(), kind: "swarm" });
+        return withTab(panel, { id: newTabId(), kind: "ensemble" });
       });
     });
   }, [hideBrowserThen, update]);
-  const openSwarmMember = useCallback(
+  const openEnsembleMember = useCallback(
     (member: { name: string; childSessionId: string }, targetSessionId?: string) => {
       const target = targetSessionId ?? sessionId;
       if (target === null) return;
       const applyTo = (panel: SessionPanel): SessionPanel => {
         const found = panel.tabs.find(
-          (tab) => tab.kind === "swarm_member" && tab.childSessionId === member.childSessionId,
+          (tab) => tab.kind === "ensemble_member" && tab.childSessionId === member.childSessionId,
         );
         if (found) return { ...panel, open: true, activeId: found.id };
         return withTab(panel, {
           id: newTabId(),
-          kind: "swarm_member",
+          kind: "ensemble_member",
           childSessionId: member.childSessionId,
           memberName: member.name,
         });
@@ -1503,10 +1503,10 @@ export function useSidePanel({
       workspace={workspace}
       openExternalUrl={openExternalUrl}
       shells={active ? { session: active.session, tasks: active.view.backgroundShells } : undefined}
-      swarm={
+      ensemble={
         active
           ? {
-              swarm: active.view.swarm,
+              ensemble: active.view.ensemble,
               session: active.session,
               ensureClient,
               images: imageSource,
@@ -1517,9 +1517,9 @@ export function useSidePanel({
                 if (!openUrl(url)) void host.openUrl(url);
               },
               onOpenMember: (member) => {
-                openSwarmMember({ name: member.name, childSessionId: member.childSessionId });
+                openEnsembleMember({ name: member.name, childSessionId: member.childSessionId });
               },
-              onSelectCoordinator: () => {
+              onSelectMaestro: () => {
                 document
                   .querySelector<HTMLTextAreaElement>(".mainpane .composer textarea")
                   ?.focus();
@@ -1583,13 +1583,16 @@ export function useSidePanel({
           onOpenChanges={() => {
             openChanges();
           }}
-          swarm={
-            active.view.swarm?.status === "active"
+          ensemble={
+            active.view.ensemble?.status === "active"
               ? {
-                  swarm: active.view.swarm,
-                  onOpenBoard: openSwarm,
+                  ensemble: active.view.ensemble,
+                  onOpenBoard: openEnsemble,
                   onOpenMember: (member) => {
-                    openSwarmMember({ name: member.name, childSessionId: member.childSessionId });
+                    openEnsembleMember({
+                      name: member.name,
+                      childSessionId: member.childSessionId,
+                    });
                   },
                 }
               : undefined
@@ -1658,8 +1661,8 @@ export function useSidePanel({
     viewSource,
     openUrl,
     viewChanges: openChanges,
-    openSwarm,
-    openSwarmMember,
+    openEnsemble,
+    openEnsembleMember,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewVisible && !shown ? " ov-open" : "",

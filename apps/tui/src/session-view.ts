@@ -31,7 +31,7 @@ export function useSessionView(session: RuntimeSession): SessionView {
 }
 
 /**
- * 可选会话的视图（Swarm 成员会话，tui.md §6）：没有会话时返回 undefined，
+ * 可选会话的视图（Ensemble 成员会话，tui.md §6）：没有会话时返回 undefined，
  * 不订阅任何东西；会话变化时重放新日志。
  */
 export function useOptionalSessionView(

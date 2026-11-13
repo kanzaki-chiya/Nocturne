@@ -103,8 +103,8 @@
 }
 /* 触控目标不小于 44px（DESIGN.md 第 2 节）：保持高优先级，按钮类写的更小 min-height 不生效 */
 .phone
-  button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.swarm-seg button):not(
-    .swarm-chip
+  button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.ensemble-seg button):not(
+    .ensemble-chip
   ):not(.mode-ref):not(.phone-item):not(.usage-cell),
 .phone input:not(.check input),
 .phone select,
@@ -212,7 +212,7 @@
   display: flex;
   justify-content: flex-end;
 }
-.phone-swarm-head-title {
+.phone-ensemble-head-title {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -220,20 +220,20 @@
   justify-content: center;
   gap: var(--space-2);
 }
-.phone-swarm-head-title h1 {
+.phone-ensemble-head-title h1 {
   flex: 0 1 auto;
 }
-.phone .sp-swarm-dot {
+.phone .sp-ensemble-dot {
   flex: none;
   width: var(--dot);
   height: var(--dot);
   border-radius: var(--radius-pill);
   background: var(--a-success);
 }
-.phone .sp-swarm-dot.warn {
+.phone .sp-ensemble-dot.warn {
   background: var(--a-warning);
 }
-.phone-swarm {
+.phone-ensemble {
   flex: 1;
   min-height: 0;
   display: flex;

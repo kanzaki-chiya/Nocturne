@@ -1,5 +1,5 @@
 /**
- * 成员会话标签的会话句柄（ADR-0089 §8）：Swarm 存续期间用幂等的 `session.open`
+ * 成员会话标签的会话句柄（ADR-0089 §8）：Ensemble 存续期间用幂等的 `session.open`
  * 打开成员的子会话（rpc.md 第 3.2 节），折叠自己的 `SessionView`，并向
  * `Conversation` / `Composer` 提供与普通会话一致的属性。
  *
@@ -25,16 +25,16 @@ export type SkillSummary = SkillOverview;
 /** 成员会话可斜杠点名/委派的外部 agent（与 Composer 的 externalAgents 入参同形） */
 export type ExternalAgentSummary = ExternalAgentOverview;
 
-export interface SwarmMemberSessionOptions {
-  /** 桌面端后台池：与协调者会话共用同一个后台（ADR-0051） */
+export interface EnsembleMemberSessionOptions {
+  /** 桌面端后台池：与指挥会话共用同一个后台（ADR-0051） */
   ensureClient: () => Promise<RpcClient>;
-  /** 成员的子会话 id（`SessionView.swarm.members[].childSessionId`） */
+  /** 成员的子会话 id（`SessionView.ensemble.members[].childSessionId`） */
   childSessionId: string;
-  /** 打开结果缺少 cwd 时的回退（协调者会话的工作区） */
+  /** 打开结果缺少 cwd 时的回退（指挥会话的工作区） */
   fallbackCwd: string;
 }
 
-export interface SwarmMemberSessionReady {
+export interface EnsembleMemberSessionReady {
   status: "ready";
   session: RpcSession;
   cwd: string;
@@ -53,26 +53,28 @@ export interface SwarmMemberSessionReady {
   subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void;
 }
 
-export type SwarmMemberSessionState =
+export type EnsembleMemberSessionState =
   | { status: "loading" }
   | { status: "error"; message: string; retry: () => void }
-  | SwarmMemberSessionReady;
+  | EnsembleMemberSessionReady;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * 打开并管理一名活动 Swarm 成员的子会话。
+ * 打开并管理一名活动 Ensemble 成员的子会话。
  *
  * 回放期间只折叠、不逐条渲染；`session.subscribe` 返回后统一刷新一次。
  * `pendingInputs` / 技能 / 外部 agent / shell 是临时或运行期状态，订阅后
  * 各取一次对齐（失败静默降级，界面按缺省处理）。
  */
-export function useSwarmMemberSession(options: SwarmMemberSessionOptions): SwarmMemberSessionState {
+export function useEnsembleMemberSession(
+  options: EnsembleMemberSessionOptions,
+): EnsembleMemberSessionState {
   const { ensureClient, childSessionId, fallbackCwd } = options;
   const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<SwarmMemberSessionState>({ status: "loading" });
+  const [state, setState] = useState<EnsembleMemberSessionState>({ status: "loading" });
   const listeners = useRef(new Set<(event: RuntimeEvent) => void>());
   const retry = useCallback(() => {
     setAttempt((value) => value + 1);

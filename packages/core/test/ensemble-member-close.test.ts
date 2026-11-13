@@ -28,12 +28,12 @@ const stopText = (text: string): FakeScript => [
 function role(req: ModelRequest): string {
   const sys = req.system.map((b) => b.text).join("\n");
   const match = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys);
-  return match?.[1] !== undefined ? `member:${match[1]}` : "coordinator";
+  return match?.[1] !== undefined ? `member:${match[1]}` : "maestro";
 }
 
-describe("Swarm 成员会话句柄", { timeout: 30_000 }, () => {
+describe("Ensemble 成员会话句柄", { timeout: 30_000 }, () => {
   it("关闭成员会话句柄不中断、不移除成员，之后仍能被 @ 唤醒", async () => {
-    const ws = mkdtempSync(path.join(tmpdir(), "nocturne-swarm-close-"));
+    const ws = mkdtempSync(path.join(tmpdir(), "nocturne-ensemble-close-"));
     roots.push(ws);
     let setup = false;
     const memberTurns: string[] = [];
@@ -58,15 +58,15 @@ describe("Swarm 成员会话句柄", { timeout: 30_000 }, () => {
       roleHandler: () => stopText("Title"),
       handler: (req) => {
         const who = role(req);
-        if (who === "coordinator") {
+        if (who === "maestro") {
           if (!setup) {
             setup = true;
             return [
-              { type: "tool_call", toolCallId: "i", name: "swarm_init", input: { title: "T" } },
+              { type: "tool_call", toolCallId: "i", name: "ensemble_init", input: { title: "T" } },
               {
                 type: "tool_call",
                 toolCallId: "a",
-                name: "swarm_add_member",
+                name: "ensemble_add_member",
                 input: {
                   name: "worker",
                   charter: { owns: "a.ts", handsOff: "b.ts", doneWhen: "tests pass" },
@@ -91,12 +91,13 @@ describe("Swarm 成员会话句柄", { timeout: 30_000 }, () => {
     });
     const coord = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
     sessions.push(coord);
-    await coord.submit({ text: "go", workMode: "swarm" });
+    await coord.submit({ text: "go", workMode: "ensemble" });
     await vi.waitFor(() => {
-      expect(replaySessionView(coord.durableEvents()).swarm?.members).toHaveLength(1);
+      expect(replaySessionView(coord.durableEvents()).ensemble?.members).toHaveLength(1);
       expect(coord.isIdle()).toBe(true);
     });
-    const child = replaySessionView(coord.durableEvents()).swarm?.members[0]?.childSessionId ?? "";
+    const child =
+      replaySessionView(coord.durableEvents()).ensemble?.members[0]?.childSessionId ?? "";
 
     // 打开成员句柄并私信一轮
     const handle = await rt.resumeSession(child);
@@ -106,14 +107,14 @@ describe("Swarm 成员会话句柄", { timeout: 30_000 }, () => {
       expect(coord.isIdle()).toBe(true);
     });
 
-    // 关闭句柄：成员仍在 Swarm 里、未被移除，Swarm 仍是活动状态
+    // 关闭句柄：成员仍在 Ensemble 里、未被移除，Ensemble 仍是活动状态
     await handle.close();
-    const view = replaySessionView(coord.durableEvents()).swarm;
+    const view = replaySessionView(coord.durableEvents()).ensemble;
     expect(view?.status).toBe("active");
     expect(view?.members[0]?.status).not.toBe("removed");
 
     // 之后仍能被留言板 @ 唤醒，且能重新打开句柄
-    await coord.postToSwarm({ text: "@worker AFTER-CLOSE" });
+    await coord.postToEnsemble({ text: "@worker AFTER-CLOSE" });
     await vi.waitFor(() => {
       expect(memberTurns.some((m) => m.includes("AFTER-CLOSE"))).toBe(true);
     });

@@ -17,12 +17,12 @@ import { ToolRow } from "./tool-row.js";
 
 import {
   subagentResultLine,
-  unwrapSwarmPostText,
+  unwrapEnsemblePostText,
   workModeDisplayText,
   type BackgroundShellTask,
   type ViewEntry,
 } from "@nocturne/core/protocol";
-import { swarmAuthorLabel } from "../text-format-swarm.js";
+import { ensembleAuthorLabel } from "../text-format-ensemble.js";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
@@ -35,12 +35,12 @@ function UserRow({
   entry,
   entries,
   backgroundShells,
-  swarmRecipient,
+  ensembleRecipient,
 }: {
   entry: Extract<ViewEntry, { kind: "user" }>;
   entries: readonly ViewEntry[];
   backgroundShells: BackgroundShellTask[];
-  swarmRecipient?: string | undefined;
+  ensembleRecipient?: string | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -57,10 +57,10 @@ function UserRow({
         <Text color={theme.secondary}>{`子代理结果 · ${subagentResultLine(entry.subagent)}`}</Text>
       </Box>
     );
-  if (entry.swarm !== undefined) {
+  if (entry.ensemble !== undefined) {
     const bar = env.ascii ? "|" : "│";
-    const head = `${swarmAuthorLabel(entry.swarm.from, entry.swarm.fromKind)} → ${swarmRecipient ?? "协调者"} · #${entry.swarm.postNumber}`;
-    const body = unwrapSwarmPostText(userText(entry)).split(/\r?\n/u);
+    const head = `${ensembleAuthorLabel(entry.ensemble.from, entry.ensemble.fromKind)} → ${ensembleRecipient ?? "指挥"} · #${entry.ensemble.postNumber}`;
+    const body = unwrapEnsemblePostText(userText(entry)).split(/\r?\n/u);
     return (
       <Box marginTop={1} flexDirection="column">
         <Text>
@@ -211,9 +211,9 @@ export function EntryRow({
   now,
   entries = [],
   backgroundShells = [],
-  swarmRecipient,
+  ensembleRecipient,
 }: {
-  swarmRecipient?: string | undefined;
+  ensembleRecipient?: string | undefined;
   backgroundShells?: BackgroundShellTask[];
   entries?: readonly ViewEntry[];
   entry: TranscriptItem;
@@ -228,7 +228,7 @@ export function EntryRow({
           entry={entry}
           entries={entries}
           backgroundShells={backgroundShells}
-          swarmRecipient={swarmRecipient}
+          ensembleRecipient={ensembleRecipient}
         />
       );
     case "assistant":
@@ -295,9 +295,9 @@ export function Transcript({
   width,
   reasoning,
   now,
-  swarmRecipient,
+  ensembleRecipient,
 }: {
-  swarmRecipient?: string | undefined;
+  ensembleRecipient?: string | undefined;
   entries: readonly TranscriptItem[];
   backgroundShells?: BackgroundShellTask[];
   allEntries?: readonly ViewEntry[];
@@ -316,7 +316,7 @@ export function Transcript({
           now={now}
           entries={allEntries}
           backgroundShells={backgroundShells}
-          swarmRecipient={swarmRecipient}
+          ensembleRecipient={ensembleRecipient}
         />
       )}
     </Static>

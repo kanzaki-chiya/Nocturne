@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
-  unwrapSwarmPostText,
+  unwrapEnsemblePostText,
   workModeDisplayText,
   type PendingInputItem,
   type PendingInputsSnapshot,
@@ -139,14 +139,14 @@ export function PendingInputs({
         const isEditing = editing === item.id;
         const isSubagent = item.mode === "subagent";
         const isShell = item.mode === "shell";
-        const unwrappedSwarm = unwrapSwarmPostText(item.text);
-        const isSwarmPost = unwrappedSwarm !== item.text;
+        const unwrappedEnsemble = unwrapEnsemblePostText(item.text);
+        const isEnsemblePost = unwrappedEnsemble !== item.text;
         const rowText = isShell
           ? `后台任务 · ${item.shellName ?? ""} · 等待送达`
           : isSubagent
             ? "子代理结果"
-            : isSwarmPost
-              ? unwrappedSwarm
+            : isEnsemblePost
+              ? unwrappedEnsemble
               : item.workMode !== undefined
                 ? workModeDisplayText(item.text, { name: item.workMode })
                 : item.text === ""
@@ -212,7 +212,7 @@ export function PendingInputs({
                   {running &&
                     item.mode === "queue" &&
                     item.workMode === undefined &&
-                    !isSwarmPost && (
+                    !isEnsemblePost && (
                       <IconButton
                         className="send"
                         disabled={disabled || busy}
@@ -227,7 +227,7 @@ export function PendingInputs({
                         <IconSendNow />
                       </IconButton>
                     )}
-                  {!isSubagent && !isShell && !isSwarmPost && (
+                  {!isSubagent && !isShell && !isEnsemblePost && (
                     <IconButton
                       disabled={disabled || busy}
                       title="编辑"
@@ -239,7 +239,7 @@ export function PendingInputs({
                       <IconEdit />
                     </IconButton>
                   )}
-                  {!isSwarmPost && (
+                  {!isEnsemblePost && (
                     <IconButton
                       className="del"
                       disabled={disabled || busy}

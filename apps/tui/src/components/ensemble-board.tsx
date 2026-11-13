@@ -1,31 +1,31 @@
 /**
- * `/swarm board` 全屏留言板（tui.md §2「Swarm 留言板」）：头部标题与帖子数，左列成员、右列帖子，
+ * `/ensemble board` 全屏留言板（tui.md §2「Ensemble 留言板」）：头部标题与帖子数，左列成员、右列帖子，
  * 底部选中帖子详情与一行发帖输入框。复用 PageShell 的布局函数与配色（ADR-0045），
- * 焦点在成员、帖子、输入框三处之间切换；已结束的 Swarm 只读、没有输入框。
+ * 焦点在成员、帖子、输入框三处之间切换；已结束的 Ensemble 只读、没有输入框。
  */
 import { Box, Text, useInput, usePaste, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
 
-import type { SwarmPostView, SwarmView } from "@nocturne/core/protocol";
+import type { EnsemblePostView, EnsembleView } from "@nocturne/core/protocol";
 
 import { glyphs, useTuiEnv } from "../env.js";
 import { wrap } from "../lines.js";
 import {
-  filterSwarmPosts,
-  formatSwarmTime,
-  swarmAuthorLabel,
-  swarmCoordinatorDot,
-  swarmMemberDot,
-  swarmMentionCandidates,
-  swarmMentionLabel,
-  swarmMentionToken,
-  swarmPostHead,
-  swarmPostRecipients,
-  splitSwarmMentions,
-  type SwarmDot,
-  type SwarmMentionCandidate,
-} from "../text-format-swarm.js";
+  filterEnsemblePosts,
+  formatEnsembleTime,
+  ensembleAuthorLabel,
+  ensembleMaestroDot,
+  ensembleMemberDot,
+  ensembleMentionCandidates,
+  ensembleMentionLabel,
+  ensembleMentionToken,
+  ensemblePostHead,
+  ensemblePostRecipients,
+  splitEnsembleMentions,
+  type EnsembleDot,
+  type EnsembleMentionCandidate,
+} from "../text-format-ensemble.js";
 import { useTheme } from "../theme.js";
 import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
 import { InputCursor } from "./input-cursor.js";
@@ -44,8 +44,8 @@ import {
 
 export type BoardFocus = "members" | "posts" | "input";
 
-export interface SwarmBoardProps {
-  swarm: SwarmView;
+export interface EnsembleBoardProps {
+  ensemble: EnsembleView;
   width: number;
   height: number;
   active: boolean;
@@ -54,13 +54,13 @@ export interface SwarmBoardProps {
   onPost: (text: string) => Promise<void>;
   /** 成员行 Enter：进入该成员会话 */
   onOpenMember: (childSessionId: string) => void;
-  /** 「协调者」行 Enter：回到协调者会话 */
-  onOpenCoordinator: () => void;
+  /** 「指挥」行 Enter：回到指挥会话 */
+  onOpenMaestro: () => void;
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
 }
 
 interface SideEntry extends ShellSideItem {
-  /** 成员会话 id；「全部」「协调者」没有 */
+  /** 成员会话 id；「全部」「指挥」没有 */
   childSessionId?: string | undefined;
 }
 
@@ -83,7 +83,7 @@ function Line({ spans }: { spans: readonly RenderSpan[] }): React.JSX.Element {
   );
 }
 
-function dotOf(dot: SwarmDot, ascii: boolean): ShellSideItem["dot"] {
+function dotOf(dot: EnsembleDot, ascii: boolean): ShellSideItem["dot"] {
   const solid = ascii ? "*" : "●";
   const hollow = ascii ? "o" : "○";
   switch (dot) {
@@ -98,16 +98,16 @@ function dotOf(dot: SwarmDot, ascii: boolean): ShellSideItem["dot"] {
   }
 }
 
-/** 左列：全部、各成员（已移除的淡色排在成员末尾）、协调者 */
-export function boardSideItems(swarm: SwarmView, ascii: boolean): SideEntry[] {
-  const present = swarm.members.filter((m) => m.status !== "removed");
-  const removed = swarm.members.filter((m) => m.status === "removed");
+/** 左列：全部、各成员（已移除的淡色排在成员末尾）、指挥 */
+export function boardSideItems(ensemble: EnsembleView, ascii: boolean): SideEntry[] {
+  const present = ensemble.members.filter((m) => m.status !== "removed");
+  const removed = ensemble.members.filter((m) => m.status === "removed");
   return [
     { id: "all", label: "全部" },
     ...present.map((m) => ({
       id: m.name,
       label: m.name,
-      dot: dotOf(swarmMemberDot(m, swarm.status), ascii),
+      dot: dotOf(ensembleMemberDot(m, ensemble.status), ascii),
       childSessionId: m.childSessionId,
     })),
     ...removed.map((m) => ({
@@ -117,17 +117,17 @@ export function boardSideItems(swarm: SwarmView, ascii: boolean): SideEntry[] {
       dot: dotOf("removed", ascii),
       childSessionId: m.childSessionId,
     })),
-    { id: "coordinator", label: "协调者", dot: dotOf(swarmCoordinatorDot(swarm), ascii) },
+    { id: "maestro", label: "指挥", dot: dotOf(ensembleMaestroDot(ensemble), ascii) },
   ];
 }
 
-export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
-  const { swarm, width, height, active } = props;
+export function EnsembleBoard(props: EnsembleBoardProps): React.JSX.Element {
+  const { ensemble, width, height, active } = props;
   const env = useTuiEnv();
   const palette = useTheme();
   const g = glyphs(env);
   const glyph = { ascii: env.ascii };
-  const ended = swarm.status !== "active";
+  const ended = ensemble.status !== "active";
 
   const [focus, setFocus] = useState<BoardFocus>("posts");
   const [sideIndex, setSideIndex] = useState(0);
@@ -141,18 +141,19 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   const sideTop = useRef(0);
   const postTop = useRef(0);
 
-  const sideItems = boardSideItems(swarm, env.ascii);
+  const sideItems = boardSideItems(ensemble, env.ascii);
   const side = Math.min(sideIndex, sideItems.length - 1);
   const target = sideItems[side]?.id ?? "all";
-  const posts = filterSwarmPosts(swarm.posts, target);
+  const posts = filterEnsemblePosts(ensemble.posts, target);
   const pickedIndex = picked === undefined ? -1 : posts.findIndex((p) => p.number === picked);
   const postIndex = following || pickedIndex < 0 ? posts.length - 1 : pickedIndex;
-  const selected: SwarmPostView | undefined = posts[postIndex];
+  const selected: EnsemblePostView | undefined = posts[postIndex];
 
-  const mentionToken = !ended && focus === "input" ? swarmMentionToken(draft, draft.length) : null;
+  const mentionToken =
+    !ended && focus === "input" ? ensembleMentionToken(draft, draft.length) : null;
   const mentionCandidates =
     mentionToken !== null && dismissedAt !== mentionToken.start
-      ? swarmMentionCandidates(swarm, mentionToken.query)
+      ? ensembleMentionCandidates(ensemble, mentionToken.query)
       : [];
   const mentionOpen = mentionCandidates.length > 0;
   const activeMentionIndex = Math.min(mentionIndex, Math.max(0, mentionCandidates.length - 1));
@@ -225,7 +226,7 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   const enterSide = (): void => {
     const item = live.current.sideItems[live.current.side];
     if (item === undefined) return;
-    if (item.id === "coordinator") latest.current.onOpenCoordinator();
+    if (item.id === "maestro") latest.current.onOpenMaestro();
     else if (item.childSessionId !== undefined) latest.current.onOpenMember(item.childSessionId);
   };
   const submit = (): void => {
@@ -247,7 +248,7 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
       });
   };
 
-  const applyMention = (candidate: SwarmMentionCandidate): void => {
+  const applyMention = (candidate: EnsembleMentionCandidate): void => {
     const token = live.current.mentionToken;
     if (token === null) return;
     const inserted = `@${candidate.insert} `;
@@ -360,7 +361,7 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
       return { row: r.row, colStart: r.col, colEnd: r.col + r.width - 1 };
     };
     report({
-      layer: "swarm-board",
+      layer: "ensemble-board",
       boxes: [
         ...[...sideBoxes.current].map(([id, node]) => ({ id: `side:${id}`, ...hit(node) })),
         ...[...postBoxes.current].map(([n, node]) => ({ id: `post:${n}`, ...hit(node) })),
@@ -390,9 +391,9 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   });
 
   // 头部
-  const countText = `  ${swarm.posts.length} 条${following ? " · 跟随" : ""}`;
+  const countText = `  ${ensemble.posts.length} 条${following ? " · 跟随" : ""}`;
   const header: RenderSpan[] = [
-    { text: swarm.title || "合奏", color: palette.accent, bold: true },
+    { text: ensemble.title || "合奏", color: palette.accent, bold: true },
     { text: countText, color: palette.muted },
   ];
   const rule = (junction: boolean): RenderSpan[] => {
@@ -450,7 +451,7 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
     id: String(p.number),
     cells: [
       { text: `#${p.number}`, tone: "muted" },
-      { text: swarmPostHead(p).slice(`#${p.number} `.length) },
+      { text: ensemblePostHead(p).slice(`#${p.number} `.length) },
     ],
   }));
   const plan = planColumns(rows, paneW - 4, env.ascii);
@@ -496,24 +497,24 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   // 详情
   const detail: RenderSpan[][] = [];
   if (selected !== undefined) {
-    const recipients = swarmPostRecipients(selected);
+    const recipients = ensemblePostRecipients(selected);
     detail.push([
       { text: `#${selected.number} `, color: palette.muted },
-      { text: swarmAuthorLabel(selected.from, selected.fromKind), color: palette.accent },
+      { text: ensembleAuthorLabel(selected.from, selected.fromKind), color: palette.accent },
       ...(recipients.length > 0
-        ? [{ text: ` → ${recipients.map(swarmMentionLabel).join(" ")}` }]
+        ? [{ text: ` → ${recipients.map(ensembleMentionLabel).join(" ")}` }]
         : []),
-      { text: `  ${formatSwarmTime(selected.time)}`, color: palette.muted },
+      { text: `  ${formatEnsembleTime(selected.time)}`, color: palette.muted },
     ]);
     const charter =
       selected.charterOf !== undefined
-        ? swarm.members.find((m) => m.name === selected.charterOf)?.charter
+        ? ensemble.members.find((m) => m.name === selected.charterOf)?.charter
         : undefined;
     const textW = Math.max(1, width - 1);
     const bodyLines = (text: string, indent: string): RenderSpan[][] =>
       wrap(text, textW - stringWidth(indent) + 4).map((line) => [
         ...(indent !== "" ? [{ text: indent }] : []),
-        ...splitSwarmMentions(line.text, selected.mentions).map((f) =>
+        ...splitEnsembleMentions(line.text, selected.mentions).map((f) =>
           f.mention ? { text: f.text, color: palette.accent } : { text: f.text },
         ),
       ]);

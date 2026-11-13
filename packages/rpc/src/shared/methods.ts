@@ -74,7 +74,7 @@ import type {
   PermissionAction,
   PermissionRule,
   SubagentSummary,
-  SwarmUnmergedWorktree,
+  EnsembleUnmergedWorktree,
   SettingsPatch,
   ToggleImpact,
   TurnEndReason,
@@ -762,17 +762,17 @@ export interface RpcMethods {
   "session.approvePlan": { params: SessionParams; result: null };
   /** 放弃计划（ADR-0076 §5）：恢复预设，不开 Turn */
   "session.cancelPlan": { params: SessionParams; result: null };
-  /** 在活动 Swarm 留言板发帖（ADR-0089 §10）；未 @ 任何人时默认 @coordinator */
-  "session.postToSwarm": {
+  /** 在活动 Ensemble 留言板发帖（ADR-0089 §10）；未 @ 任何人时默认 @maestro */
+  "session.postToEnsemble": {
     params: SessionParams & { text: string };
     result: { number: number; recipients: string[] };
   };
-  /** 移除活动 Swarm 成员（ADR-0089 §4、§10）；独立工作树有未并回提交时拒绝 */
-  "session.removeSwarmMember": { params: SessionParams & { name: string }; result: null };
-  /** 结束活动 Swarm（ADR-0089 §10、§11），返回保留的未并回工作树列表 */
-  "session.endSwarm": {
+  /** 移除活动 Ensemble 成员（ADR-0089 §4、§10）；独立工作树有未并回提交时拒绝 */
+  "session.removeEnsembleMember": { params: SessionParams & { name: string }; result: null };
+  /** 结束活动 Ensemble（ADR-0089 §10、§11），返回保留的未并回工作树列表 */
+  "session.endEnsemble": {
     params: SessionParams;
-    result: { unmerged: SwarmUnmergedWorktree[] };
+    result: { unmerged: EnsembleUnmergedWorktree[] };
   };
   /**
    * 待发输入的当前快照：`input.pending` 是临时事件、不回放，新附加的客户端在
@@ -1029,9 +1029,9 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.resumeGoal": true,
   "session.approvePlan": true,
   "session.cancelPlan": true,
-  "session.postToSwarm": true,
-  "session.removeSwarmMember": true,
-  "session.endSwarm": true,
+  "session.postToEnsemble": true,
+  "session.removeEnsembleMember": true,
+  "session.endEnsemble": true,
   "session.pendingInputs": true,
   "shell.tasks": true,
   "shell.output": true,

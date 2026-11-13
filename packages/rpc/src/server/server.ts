@@ -248,9 +248,9 @@ export const REMOTE_METHODS = [
   "session.resumeGoal",
   "session.approvePlan",
   "session.cancelPlan",
-  "session.postToSwarm",
-  "session.removeSwarmMember",
-  "session.endSwarm",
+  "session.postToEnsemble",
+  "session.removeEnsembleMember",
+  "session.endEnsemble",
   "session.pendingInputs",
   "shell.tasks",
   "shell.output",
@@ -2333,20 +2333,20 @@ class Connection implements HubPeer {
         await this.hub.operate(session, () => session.cancelPlan());
         return null;
       },
-      "session.postToSwarm": async (p) => {
+      "session.postToEnsemble": async (p) => {
         const { session } = this.session(p);
         const text = reqString(p, "text");
-        return await this.hub.operate(session, () => session.postToSwarm({ text }));
+        return await this.hub.operate(session, () => session.postToEnsemble({ text }));
       },
-      "session.removeSwarmMember": async (p) => {
+      "session.removeEnsembleMember": async (p) => {
         const { session } = this.session(p);
         const name = reqString(p, "name");
-        await this.hub.operate(session, () => session.removeSwarmMember({ name }));
+        await this.hub.operate(session, () => session.removeEnsembleMember({ name }));
         return null;
       },
-      "session.endSwarm": async (p) => {
+      "session.endEnsemble": async (p) => {
         const { session } = this.session(p);
-        return await this.hub.operate(session, () => session.endSwarm());
+        return await this.hub.operate(session, () => session.endEnsemble());
       },
       "shell.tasks": (p) => this.session(p).session.shellTasks(),
       "shell.output": (p) => {

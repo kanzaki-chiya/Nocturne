@@ -1231,11 +1231,11 @@
 .ovpop-agent-summary.warn {
   color: var(--a-warning);
 }
-.ovpop .ovpop-swarm-head {
+.ovpop .ovpop-ensemble-head {
   align-items: center;
   gap: 8px;
 }
-.ovpop-swarm-title {
+.ovpop-ensemble-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1244,28 +1244,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ovpop-swarm-chevron {
+.ovpop-ensemble-chevron {
   flex: none;
   margin-left: auto;
   color: var(--a-faint);
 }
-.ovpop .ovpop-swarm-member {
+.ovpop .ovpop-ensemble-member {
   align-items: flex-start;
   gap: 9px;
 }
-.ovpop-swarm-line1 {
+.ovpop-ensemble-line1 {
   display: flex;
   align-items: baseline;
   gap: 6px;
   min-width: 0;
 }
-.ovpop-swarm-name {
+.ovpop-ensemble-name {
   flex: none;
   color: var(--a-text);
   font-size: var(--fs-2);
   font-weight: var(--fw-medium);
 }
-.ovpop-swarm-meta {
+.ovpop-ensemble-meta {
   min-width: 0;
   overflow: hidden;
   color: var(--a-muted);
@@ -1273,7 +1273,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ovpop-swarm-tag {
+.ovpop-ensemble-tag {
   flex: none;
   color: var(--a-muted);
   font: var(--fs-1) var(--mono);
@@ -1349,33 +1349,33 @@
 .sp-agent-dot.taken {
   background: var(--a-warning);
 }
-.sp-swarm-dot {
+.sp-ensemble-dot {
   flex: none;
   width: 6px;
   height: 6px;
   border-radius: var(--radius-pill);
   background: var(--a-success);
 }
-.sp-swarm-dot.warn {
+.sp-ensemble-dot.warn {
   background: var(--a-warning);
 }
-.sp-swarm-member {
+.sp-ensemble-member {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
-.sp-swarm-member > .conversation {
+.sp-ensemble-member > .conversation {
   flex: 1;
   min-height: 0;
 }
-.sp-swarm-member > .composer,
-.sp-swarm-member > .composer.session {
+.sp-ensemble-member > .composer,
+.sp-ensemble-member > .composer.session {
   grid-template-columns: minmax(0, 1fr);
   padding: var(--space-1) var(--space-3) var(--space-3);
 }
-.sp-swarm-member > .composer > .cw {
+.sp-ensemble-member > .composer > .cw {
   min-width: 0;
 }
 @keyframes sp-agent-pulse {

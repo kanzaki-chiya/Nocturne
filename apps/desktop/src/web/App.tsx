@@ -59,8 +59,8 @@ import { DraftComposer, SessionScreen } from "./SessionScreen";
 import { ImageViewerProvider, type ImageViewerControl } from "../ImageViewer";
 import { Switch } from "../ui";
 import type { PhonePanelPage } from "./PhoneSidePanel";
-import { SwarmPane } from "../SwarmPane";
-import { swarmStatusDot } from "../swarm-ui";
+import { EnsemblePane } from "../EnsemblePane";
+import { ensembleStatusDot } from "../ensemble-ui";
 
 export const TRUST_TEXT =
   "中继只转发密文，看不到会话内容。你仍需信任中继维护者及服务器不会篡改下发的手机网页；端到端加密防不住被篡改的网页。远程访问相当于在手机上执行代码，请妥善保管手机并及时移除丢失设备。";
@@ -81,9 +81,9 @@ type Page =
   | { kind: "home"; hostId: string }
   | { kind: "project"; hostId: string; path: string }
   | { kind: "session"; hostId: string; sessionId: string; panel?: PhonePanelPage }
-  | { kind: "swarm"; hostId: string; sessionId: string }
+  | { kind: "ensemble"; hostId: string; sessionId: string }
   | {
-      kind: "swarm-member";
+      kind: "ensemble-member";
       hostId: string;
       sessionId: string;
       childSessionId: string;
@@ -237,9 +237,9 @@ export function PhoneApp({
     closingViewerFromPop.current = false;
   };
   const syncSelection = (target: Page) => {
-    if (target.kind === "session" || target.kind === "swarm") {
+    if (target.kind === "session" || target.kind === "ensemble") {
       sessions.setSelected(target.sessionId);
-    } else if (target.kind === "swarm-member") {
+    } else if (target.kind === "ensemble-member") {
       sessions.setSelected(target.childSessionId, target.sessionId);
     } else {
       sessions.setSelected(undefined);
@@ -345,7 +345,7 @@ export function PhoneApp({
     platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
   const hostId = "hostId" in page ? page.hostId : undefined;
   const activeSessionId =
-    page.kind === "session" || page.kind === "swarm" || page.kind === "swarm-member"
+    page.kind === "session" || page.kind === "ensemble" || page.kind === "ensemble-member"
       ? page.sessionId
       : undefined;
   const viewingSessionId =
@@ -519,23 +519,23 @@ export function PhoneApp({
     navigate({ kind: "session", hostId, sessionId });
     openSession(sessionId);
   }, [notificationTarget, ready, hosts, hostId, online, loaded]);
-  const coordinatorEntry = activeSessionId ? sessions.opened.get(activeSessionId) : undefined;
+  const maestroEntry = activeSessionId ? sessions.opened.get(activeSessionId) : undefined;
   const entry =
     page.kind === "session"
-      ? coordinatorEntry
-      : page.kind === "swarm-member"
+      ? maestroEntry
+      : page.kind === "ensemble-member"
         ? sessions.opened.get(page.childSessionId)
         : undefined;
   useEffect(() => {
     if (!online) return;
-    if (page.kind === "swarm" && !coordinatorEntry) {
+    if (page.kind === "ensemble" && !maestroEntry) {
       void sessions.open(page.sessionId).catch(() => undefined);
-    } else if (page.kind === "swarm-member" && !entry) {
+    } else if (page.kind === "ensemble-member" && !entry) {
       void sessions
-        .openMember(page.childSessionId, coordinatorEntry?.workspace ?? "", page.sessionId)
+        .openMember(page.childSessionId, maestroEntry?.workspace ?? "", page.sessionId)
         .catch(() => undefined);
     }
-  }, [online, page, coordinatorEntry, entry, sessions]);
+  }, [online, page, maestroEntry, entry, sessions]);
   const connected = online;
   const extension: PhoneExtensionApi = {
     open: (name) => {
@@ -764,9 +764,9 @@ export function PhoneApp({
           sessions.list.find((item) => item.id === page.sessionId)?.firstText ??
           "会话"
         );
-      case "swarm":
-        return coordinatorEntry?.view.swarm?.title ?? "合奏";
-      case "swarm-member":
+      case "ensemble":
+        return maestroEntry?.view.ensemble?.title ?? "合奏";
+      case "ensemble-member":
         return `@${page.memberName}`;
       default:
         return computer?.name ?? "电脑";
@@ -1028,14 +1028,14 @@ export function PhoneApp({
         onPanelClose={() => {
           history.go(page.panel?.kind === "overview" ? -1 : -2);
         }}
-        onOpenSwarm={() => {
-          navigate({ kind: "swarm", hostId: page.hostId, sessionId: page.sessionId });
+        onOpenEnsemble={() => {
+          navigate({ kind: "ensemble", hostId: page.hostId, sessionId: page.sessionId });
         }}
-        onOpenSwarmMember={(member) => {
+        onOpenEnsembleMember={(member) => {
           const parentId = page.sessionId;
           const workspace = entry.workspace;
           navigate({
-            kind: "swarm-member",
+            kind: "ensemble-member",
             hostId: page.hostId,
             sessionId: parentId,
             childSessionId: member.childSessionId,
@@ -1059,25 +1059,25 @@ export function PhoneApp({
     ) : (
       <section className="phone-body">{connected && <p role="status">正在打开会话…</p>}</section>
     );
-  } else if (page.kind === "swarm") {
-    const swarm = coordinatorEntry?.view.swarm;
+  } else if (page.kind === "ensemble") {
+    const ensemble = maestroEntry?.view.ensemble;
     body =
-      coordinatorEntry && swarm ? (
-        <section className="phone-swarm">
-          <SwarmPane
-            swarm={swarm}
-            session={coordinatorEntry.session}
+      maestroEntry && ensemble ? (
+        <section className="phone-ensemble">
+          <EnsemblePane
+            ensemble={ensemble}
+            session={maestroEntry.session}
             openUrl={(url) => {
               host.openUrl(url);
             }}
-            onSelectCoordinator={() => {
+            onSelectMaestro={() => {
               history.back();
             }}
             onOpenMember={(member) => {
               const parentId = page.sessionId;
-              const workspace = coordinatorEntry.workspace;
+              const workspace = maestroEntry.workspace;
               navigate({
-                kind: "swarm-member",
+                kind: "ensemble-member",
                 hostId: page.hostId,
                 sessionId: parentId,
                 childSessionId: member.childSessionId,
@@ -1091,15 +1091,15 @@ export function PhoneApp({
           />
         </section>
       ) : (
-        <section className="phone-swarm" />
+        <section className="phone-ensemble" />
       );
-  } else if (page.kind === "swarm-member") {
-    const swarm = coordinatorEntry?.view.swarm;
-    const memberStatus = swarm?.members.find(
+  } else if (page.kind === "ensemble-member") {
+    const ensemble = maestroEntry?.view.ensemble;
+    const memberStatus = ensemble?.members.find(
       (item) => item.childSessionId === page.childSessionId,
     )?.status;
     const frozen =
-      swarm?.status !== "active" || memberStatus === undefined || memberStatus === "removed";
+      ensemble?.status !== "active" || memberStatus === undefined || memberStatus === "removed";
     body = entry ? (
       <SessionScreen
         key={entry.session.id}
@@ -1118,7 +1118,7 @@ export function PhoneApp({
         }}
         sessions={sessions}
         onForked={() => undefined}
-        swarmMember={{ name: page.memberName, frozen }}
+        ensembleMember={{ name: page.memberName, frozen }}
       />
     ) : (
       <section className="phone-body">{connected && <p role="status">正在打开会话…</p>}</section>
@@ -1368,8 +1368,8 @@ export function PhoneApp({
 
   const homeHeader = page.kind === "home" && !offer;
   const sessionHeader = page.kind === "session" && !offer;
-  const swarmHeaderDot =
-    page.kind === "swarm" && !offer ? swarmStatusDot(coordinatorEntry?.view.swarm) : undefined;
+  const ensembleHeaderDot =
+    page.kind === "ensemble" && !offer ? ensembleStatusDot(maestroEntry?.view.ensemble) : undefined;
   const sessionPath =
     page.kind === "session"
       ? (entry?.workspace ?? sessions.list.find((item) => item.id === page.sessionId)?.cwd)
@@ -1430,10 +1430,10 @@ export function PhoneApp({
                 </p>
               )}
             </div>
-          ) : page.kind === "swarm" && !offer ? (
-            <div className="phone-swarm-head-title">
-              {swarmHeaderDot !== undefined && (
-                <span className={`sp-swarm-dot ${swarmHeaderDot}`} aria-hidden="true" />
+          ) : page.kind === "ensemble" && !offer ? (
+            <div className="phone-ensemble-head-title">
+              {ensembleHeaderDot !== undefined && (
+                <span className={`sp-ensemble-dot ${ensembleHeaderDot}`} aria-hidden="true" />
               )}
               <h1>{title}</h1>
             </div>
@@ -1442,8 +1442,8 @@ export function PhoneApp({
           )}
           {sessionHeader ? (
             <div className="phone-header-tools" ref={setHeaderSlot} />
-          ) : page.kind === "swarm" ||
-            page.kind === "swarm-member" ||
+          ) : page.kind === "ensemble" ||
+            page.kind === "ensemble-member" ||
             page.kind === "settings" ||
             page.kind === "diagnostics" ||
             page.kind === "usage" ||

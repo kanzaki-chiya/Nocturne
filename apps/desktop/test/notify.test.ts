@@ -8,7 +8,7 @@ import type { PermissionSubject, QuestionItem, RuntimeEvent } from "@nocturne/co
 
 import {
   decideNotification,
-  decideSwarmMemberNotification,
+  decideEnsembleMemberNotification,
   ellipsize,
   formatDuration,
   NOTIFY_DEFAULTS,
@@ -19,7 +19,7 @@ import {
   thresholdLabel,
   type NotifyInput,
   type NotifyPrefs,
-  type SwarmPermissionNotifyInput,
+  type EnsemblePermissionNotifyInput,
 } from "../src/notify";
 import type { SettingItem } from "../src/rpc-types";
 
@@ -353,14 +353,14 @@ describe("notifyPrefsFrom", () => {
   });
 });
 
-/** 成员的权限请求（协调者会话上的临时事件 swarm.member_updated） */
+/** 成员的权限请求（指挥会话上的临时事件 ensemble.member_updated） */
 function memberPending(
   name: string,
   pending: { requestId: string; kind?: PermissionSubject["kind"]; target?: string }[],
   eseq = 1,
 ): RuntimeEvent {
   return {
-    type: "swarm.member_updated",
+    type: "ensemble.member_updated",
     sessionId: "s1",
     runId: "run-1",
     eseq,
@@ -380,9 +380,9 @@ function memberPending(
   };
 }
 
-function swarmInput(
-  overrides: Partial<SwarmPermissionNotifyInput> & { event: RuntimeEvent },
-): SwarmPermissionNotifyInput {
+function ensembleInput(
+  overrides: Partial<EnsemblePermissionNotifyInput> & { event: RuntimeEvent },
+): EnsemblePermissionNotifyInput {
   return {
     prefs: NOTIFY_DEFAULTS,
     live: true,
@@ -393,13 +393,13 @@ function swarmInput(
   };
 }
 
-describe("decideSwarmMemberNotification · 成员权限", () => {
+describe("decideEnsembleMemberNotification · 成员权限", () => {
   it("订阅起始快照只登记不提醒；同一 requestId 的实时刷新也不补报", () => {
     const seenRequestIds = new Set<string>();
     // 订阅时服务端立即推的活动快照（eseq 0 / live false）：绝不提醒
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: memberPending("alpha", [{ requestId: "r1" }], 0),
           live: false,
           seenRequestIds,
@@ -409,8 +409,8 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     expect([...seenRequestIds]).toEqual(["r1"]);
     // 回放的事件同样只登记（含之前没登记过的 r2）
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: memberPending("alpha", [{ requestId: "r1" }, { requestId: "r2" }], 1),
           live: false,
           seenRequestIds,
@@ -420,8 +420,8 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     expect([...seenRequestIds].sort()).toEqual(["r1", "r2"]);
     // 已经登记的请求随实时状态刷新再次出现：不提醒
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: memberPending("alpha", [{ requestId: "r1" }, { requestId: "r2" }], 2),
           seenRequestIds,
         }),
@@ -429,11 +429,11 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     ).toBeNull();
   });
 
-  it("实时出现新请求：标题用协调者会话，正文与 permission.requested 同款", () => {
+  it("实时出现新请求：标题用指挥会话，正文与 permission.requested 同款", () => {
     const seenRequestIds = new Set<string>();
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: memberPending("alpha", [{ requestId: "r1", kind: "edit", target: "src/app.ts" }]),
           seenRequestIds,
         }),
@@ -448,10 +448,10 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     expect([...seenRequestIds]).toEqual(["r1"]);
     // 没有 subject 时与权限卡片同款，只写操作文字
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: {
-            type: "swarm.member_updated",
+            type: "ensemble.member_updated",
             sessionId: "s1",
             runId: "run-1",
             eseq: 2,
@@ -475,19 +475,21 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     const seenRequestIds = new Set<string>();
     const first = memberPending("beta", [{ requestId: "r1" }]);
     expect(
-      decideSwarmMemberNotification(swarmInput({ event: first, watching: true, seenRequestIds })),
+      decideEnsembleMemberNotification(
+        ensembleInput({ event: first, watching: true, seenRequestIds }),
+      ),
     ).toBeNull();
     expect([...seenRequestIds]).toEqual(["r1"]);
     // 同一请求的状态刷新不会补提醒
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({ event: memberPending("beta", [{ requestId: "r1" }], 2), seenRequestIds }),
+      decideEnsembleMemberNotification(
+        ensembleInput({ event: memberPending("beta", [{ requestId: "r1" }], 2), seenRequestIds }),
       ),
     ).toBeNull();
     // 第二个新请求到达：正常提醒
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: memberPending("beta", [{ requestId: "r1" }, { requestId: "r2" }], 3),
           seenRequestIds,
         }),
@@ -496,8 +498,8 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     // attention 未勾选：不提醒，但照样记录
     const off = new Set<string>();
     expect(
-      decideSwarmMemberNotification(
-        swarmInput({
+      decideEnsembleMemberNotification(
+        ensembleInput({
           event: first,
           prefs: { ...NOTIFY_DEFAULTS, attention: false },
           seenRequestIds: off,
@@ -507,19 +509,21 @@ describe("decideSwarmMemberNotification · 成员权限", () => {
     expect([...off]).toEqual(["r1"]);
   });
 
-  it("swarm.ended 清空已见集合；非成员事件不提醒", () => {
+  it("ensemble.ended 清空已见集合；非成员事件不提醒", () => {
     const seenRequestIds = new Set<string>(["r1"]);
     const ended: RuntimeEvent = {
-      type: "swarm.ended",
+      type: "ensemble.ended",
       sessionId: "s1",
       seq: 8,
       time: "2026-10-12T10:00:07.000Z",
       payload: { reason: "user" },
     };
-    expect(decideSwarmMemberNotification(swarmInput({ event: ended, seenRequestIds }))).toBeNull();
+    expect(
+      decideEnsembleMemberNotification(ensembleInput({ event: ended, seenRequestIds })),
+    ).toBeNull();
     expect(seenRequestIds.size).toBe(0);
     expect(
-      decideSwarmMemberNotification(swarmInput({ event: permission(), seenRequestIds })),
+      decideEnsembleMemberNotification(ensembleInput({ event: permission(), seenRequestIds })),
     ).toBeNull();
   });
 });

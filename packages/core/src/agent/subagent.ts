@@ -87,7 +87,7 @@ export interface SubagentLimits {
   timeoutMs?: number | undefined;
 }
 
-/** Runtime 级并发信号量：一次性 task 用 tryAcquire（满即 subagent_concurrency），Swarm 成员用 acquire 排队等待（ADR-0089 §6） */
+/** Runtime 级并发信号量：一次性 task 用 tryAcquire（满即 subagent_concurrency），Ensemble 成员用 acquire 排队等待（ADR-0089 §6） */
 export interface SubagentLimiter {
   /** 取得槽位返回 true；已满返回 false */
   tryAcquire(): boolean;

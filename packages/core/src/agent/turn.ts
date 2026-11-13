@@ -6,7 +6,7 @@
  * - 持久化失败（session_failed）：立即停止，不再尝试写入（3.6）
  */
 import type { BackgroundShellResult, SubagentResult } from "../protocol/events.js";
-import type { SwarmPostDelivery } from "../protocol/swarm.js";
+import type { EnsemblePostDelivery } from "../protocol/ensemble.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -111,7 +111,7 @@ export async function runTurn(
   subagent?: SubagentResult,
   workMode?: WorkModeSnapshot,
   backgroundShell?: BackgroundShellResult,
-  swarm?: SwarmPostDelivery,
+  ensemble?: EnsemblePostDelivery,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -180,7 +180,7 @@ export async function runTurn(
         ...(item.delegate !== undefined ? { delegate: item.delegate } : {}),
         ...(item.subagent !== undefined ? { subagent: item.subagent } : {}),
         ...(item.backgroundShell !== undefined ? { backgroundShell: item.backgroundShell } : {}),
-        ...(item.swarm !== undefined ? { swarm: item.swarm } : {}),
+        ...(item.ensemble !== undefined ? { ensemble: item.ensemble } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
         steer: true,
       },
@@ -400,7 +400,7 @@ export async function runTurn(
         ...(files?.length ? { files } : {}),
         ...(subagent !== undefined ? { subagent } : {}),
         ...(backgroundShell !== undefined ? { backgroundShell } : {}),
-        ...(swarm !== undefined ? { swarm } : {}),
+        ...(ensemble !== undefined ? { ensemble } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),

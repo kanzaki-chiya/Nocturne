@@ -174,11 +174,11 @@ it("手机侧边栏合奏分组：在上下文之后子代理之前显示，结�
     activity: { kind: "permission" as const, target: "pnpm test" },
   };
   const fixture = panelFixture({ agents: [summary({ taskSummary: "子代理任务" })] });
-  fixture.entry.view.swarm = {
+  fixture.entry.view.ensemble = {
     createdSeq: 1,
     title: "登录页联调",
     status: "active",
-    coordinator: {
+    maestro: {
       model: { provider: "anthropic", model: "claude-opus-4.6" },
       status: "working",
       awaitingPermission: false,
@@ -187,13 +187,13 @@ it("手机侧边栏合奏分组：在上下文之后子代理之前显示，结�
     awaitingPermissionMembers: ["ui-1"],
     posts: [],
   };
-  const onOpenSwarm = vi.fn();
-  const onOpenSwarmMember = vi.fn();
+  const onOpenEnsemble = vi.fn();
+  const onOpenEnsembleMember = vi.fn();
   const { container, rerender } = render(
     <PanelHarness
       fixture={fixture}
-      onOpenSwarm={onOpenSwarm}
-      onOpenSwarmMember={onOpenSwarmMember}
+      onOpenEnsemble={onOpenEnsemble}
+      onOpenEnsembleMember={onOpenEnsembleMember}
     />,
   );
   await screen.findByText("子代理任务");
@@ -202,29 +202,29 @@ it("手机侧边栏合奏分组：在上下文之后子代理之前显示，结�
   );
   expect(headings).toEqual(["上下文", "合奏", "子代理"]);
 
-  const swarmSection = screen.getByLabelText("合奏");
-  expect(swarmSection.querySelector(".sp-swarm-dot.warn")).not.toBeNull();
-  expect(swarmSection.textContent).not.toContain("gone");
-  expect(swarmSection.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
-  const rows = swarmSection.querySelectorAll(".phone-panel-row");
-  expect(rows[2]?.querySelector(".swarm-av.warn")).not.toBeNull();
-  expect(rows[2]?.querySelector(".phone-swarm-summary.warn")?.textContent).toBe(
+  const ensembleSection = screen.getByLabelText("合奏");
+  expect(ensembleSection.querySelector(".sp-ensemble-dot.warn")).not.toBeNull();
+  expect(ensembleSection.textContent).not.toContain("gone");
+  expect(ensembleSection.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
+  const rows = ensembleSection.querySelectorAll(".phone-panel-row");
+  expect(rows[2]?.querySelector(".ensemble-av.warn")).not.toBeNull();
+  expect(rows[2]?.querySelector(".phone-ensemble-summary.warn")?.textContent).toBe(
     "等待确认：pnpm test",
   );
 
-  const swarmView = fixture.entry.view.swarm;
-  if (!rows[0] || !rows[1] || !swarmView) throw new Error("missing swarm rows");
+  const ensembleView = fixture.entry.view.ensemble;
+  if (!rows[0] || !rows[1] || !ensembleView) throw new Error("missing ensemble rows");
   fireEvent.click(rows[0]);
-  expect(onOpenSwarm).toHaveBeenCalledTimes(1);
+  expect(onOpenEnsemble).toHaveBeenCalledTimes(1);
   fireEvent.click(rows[1]);
-  expect(onOpenSwarmMember).toHaveBeenCalledWith(apiMember);
+  expect(onOpenEnsembleMember).toHaveBeenCalledWith(apiMember);
 
-  fixture.entry.view.swarm = { ...swarmView, status: "ended" };
+  fixture.entry.view.ensemble = { ...ensembleView, status: "ended" };
   rerender(
     <PanelHarness
       fixture={fixture}
-      onOpenSwarm={onOpenSwarm}
-      onOpenSwarmMember={onOpenSwarmMember}
+      onOpenEnsemble={onOpenEnsemble}
+      onOpenEnsembleMember={onOpenEnsembleMember}
     />,
   );
   expect(screen.queryByLabelText("合奏")).toBeNull();

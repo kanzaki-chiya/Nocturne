@@ -670,7 +670,7 @@ export async function runRepl(
             return;
           }
           // CLI 没有留言板界面：/ensemble board 只打印用法
-          if (work.action === "swarm-board") {
+          if (work.action === "ensemble-board") {
             out.line("stdout", "用法：/ensemble 任务");
             prompt();
             return;
@@ -687,8 +687,8 @@ export async function runRepl(
                   ? session.resumeGoal()
                   : work.action === "plan-approve"
                     ? session.approvePlan()
-                    : work.action === "swarm-end"
-                      ? session.endSwarm()
+                    : work.action === "ensemble-end"
+                      ? session.endEnsemble()
                       : session.cancelPlan();
           activeTurn = op
             .then(() => {

@@ -79,11 +79,11 @@ it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到�
   }
 });
 
-it("/swarm board 与 /swarm end：没有 Swarm 时给用法；/swarm end 结束后有未合并分支时逐行显示 @name 分支名", async () => {
+it("/ensemble board 与 /ensemble end：没有 Ensemble 时给用法；/ensemble end 结束后有未合并分支时逐行显示 @name 分支名", async () => {
   const provider = new FakeProvider({
     scripts: [
       [
-        callTool("init", "swarm_init", { title: "测试协作" }),
+        callTool("init", "ensemble_init", { title: "测试协作" }),
         { type: "finish", reason: "tool_calls" },
       ],
       text("协作已建立"),
@@ -113,29 +113,29 @@ it("/swarm board 与 /swarm end：没有 Swarm 时给用法；/swarm end 结束�
     await pause();
     ui.stdin.write("\r");
   };
-  const swarmStatus = () => replaySessionView(session.durableEvents()).swarm?.status;
+  const ensembleStatus = () => replaySessionView(session.durableEvents()).ensemble?.status;
   try {
     await settleOn("fake-1");
-    // 本会话没有 Swarm：两个子命令都只给用法，不能落到 resumeGoal 报「没有目标」
-    await enter("/swarm board");
-    await settleOn("用法：/swarm 任务");
+    // 本会话没有 Ensemble：两个子命令都只给用法，不能落到 resumeGoal 报「没有目标」
+    await enter("/ensemble board");
+    await settleOn("用法：/ensemble 任务");
     expect(frame()).not.toContain("! 没有目标");
-    const endSpy = vi.spyOn(session, "endSwarm");
-    await enter("/swarm end");
-    await settle(() => frame().split("用法：/swarm 任务").length - 1 === 2);
+    const endSpy = vi.spyOn(session, "endEnsemble");
+    await enter("/ensemble end");
+    await settle(() => frame().split("用法：/ensemble 任务").length - 1 === 2);
     expect(endSpy).not.toHaveBeenCalled();
     endSpy.mockRestore();
-    expect(swarmStatus()).toBeUndefined();
-    // 用协调者的 swarm_init 建立活动 Swarm
-    await enter("/swarm 测试协作");
+    expect(ensembleStatus()).toBeUndefined();
+    // 用指挥的 ensemble_init 建立活动 Ensemble
+    await enter("/ensemble 测试协作");
     await settleOn("协作已建立");
-    await settle(() => swarmStatus() === "active");
-    await enter("/swarm end");
-    await settle(() => swarmStatus() === "ended");
-    expect(frame()).not.toContain("Swarm 已结束");
+    await settle(() => ensembleStatus() === "active");
+    await enter("/ensemble end");
+    await settle(() => ensembleStatus() === "ended");
+    expect(frame()).not.toContain("Ensemble 已结束");
     // 有未合并工作树时逐行输出 `@name 分支名`
-    const originalEnd = session.endSwarm.bind(session);
-    session.endSwarm = async () => ({
+    const originalEnd = session.endEnsemble.bind(session);
+    session.endEnsemble = async () => ({
       unmerged: [
         {
           name: "orders",
@@ -158,12 +158,12 @@ it("/swarm board 与 /swarm end：没有 Swarm 时给用法；/swarm end 结束�
       ],
     });
     try {
-      await enter("/swarm end");
+      await enter("/ensemble end");
       await settleOn("@orders nocturne/orders-wt");
       await settleOn("@users nocturne/users-wt");
-      expect(frame()).not.toContain("Swarm 已结束");
+      expect(frame()).not.toContain("Ensemble 已结束");
     } finally {
-      session.endSwarm = originalEnd;
+      session.endEnsemble = originalEnd;
     }
   } finally {
     ui.unmount();

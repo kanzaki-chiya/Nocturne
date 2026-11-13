@@ -12,8 +12,8 @@
  * 恢复与打开历史会话读到的事件（`live: false`）永不提醒；「在看」（窗口有
  * 焦点且正显示该会话）时不提醒。
  *
- * 活动 Swarm 的成员权限请求不写在协调者日志里，由 `decideSwarmMemberNotification`
- * 按 `swarm.member_updated` 的实时差量单独判定（ADR-0089 §8）。
+ * 活动 Ensemble 的成员权限请求不写在指挥日志里，由 `decideEnsembleMemberNotification`
+ * 按 `ensemble.member_updated` 的实时差量单独判定（ADR-0089 §8）。
  */
 import type {
   PermissionSubject,
@@ -258,23 +258,23 @@ export function decideNotification(input: NotifyInput): NotifyDecision | null {
 }
 
 /**
- * 成员权限提醒的状态跟踪器（ADR-0089 §8）：成员在等确认时，协调者会话的
- * `swarm.member_updated` 带上它的 `pendingPermissions`。订阅起始快照
+ * 成员权限提醒的状态跟踪器（ADR-0089 §8）：成员在等确认时，指挥会话的
+ * `ensemble.member_updated` 带上它的 `pendingPermissions`。订阅起始快照
  * （`live: false` 或 `eseq: 0`）里已有的请求只登记、不提醒；之后同一
  * requestId 随状态刷新再次出现也不会补提醒，只对真正新出现的请求提醒一次。
  */
-export interface SwarmPermissionNotifyDecision extends NotifyDecision {
+export interface EnsemblePermissionNotifyDecision extends NotifyDecision {
   memberName: string;
   requestId: string;
 }
 
-export interface SwarmPermissionNotifyInput {
+export interface EnsemblePermissionNotifyInput {
   event: RuntimeEvent;
   prefs: NotifyPrefs;
   live: boolean;
-  /** 在看 = 窗口有焦点且正显示这个协调者会话 */
+  /** 在看 = 窗口有焦点且正显示这个指挥会话 */
   watching: boolean;
-  /** 协调者会话（通知标题来源） */
+  /** 指挥会话（通知标题来源） */
   session: NotifySession;
   /** 已见过的成员权限 requestId；由调用方跨事件保存 */
   seenRequestIds: Set<string>;
@@ -282,18 +282,18 @@ export interface SwarmPermissionNotifyInput {
 
 /**
  * 判定成员的权限请求要不要提醒：只认实时到达且此前没见过的 requestId，
- * 标题用协调者会话，正文与 `permission.requested` 同一格式。
+ * 标题用指挥会话，正文与 `permission.requested` 同一格式。
  */
-export function decideSwarmMemberNotification(
-  input: SwarmPermissionNotifyInput,
-): SwarmPermissionNotifyDecision | null {
+export function decideEnsembleMemberNotification(
+  input: EnsemblePermissionNotifyInput,
+): EnsemblePermissionNotifyDecision | null {
   const { event, prefs } = input;
-  if (event.type === "swarm.ended") {
-    // Swarm 已结束：成员不会再确认，清空记录，下一轮 Swarm 从头算
+  if (event.type === "ensemble.ended") {
+    // Ensemble 已结束：成员不会再确认，清空记录，下一轮 Ensemble 从头算
     input.seenRequestIds.clear();
     return null;
   }
-  if (event.type !== "swarm.member_updated") return null;
+  if (event.type !== "ensemble.member_updated") return null;
   const pending = event.payload.pendingPermissions ?? [];
   // 订阅起始快照与回放只登记：绝不提醒，后续同一 requestId 的实时刷新也不再补报
   if (!input.live || event.eseq === 0) {

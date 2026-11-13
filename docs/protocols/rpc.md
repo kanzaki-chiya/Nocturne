@@ -76,9 +76,9 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `resumeGoal` | → `null`；继续目标，空闲时开新 Turn，**请求挂到该 Turn 结束**；没有目标报 `invalid_command` |
 | `approvePlan` | → `null`；批准计划（[ADR-0076](../decisions/ADR-0076-work-modes.md) §5），恢复进入前的预设（原本只读时改用 `default`）并开新 Turn，**请求挂到该 Turn 结束**；忙时报 `session_busy`，不在计划模式报 `invalid_command` |
 | `cancelPlan` | → `null`；放弃计划，恢复预设且不开 Turn；不在计划模式报 `invalid_command` |
-| `postToSwarm` | `{ text: string }` → `{ number: number, recipients: string[] }`；在活动合奏（内部标识 `swarm`）留言板发帖（[ADR-0089](../decisions/ADR-0089-swarm.md) §10），解析正文 `@` 提及，无提及默认 `@coordinator`；本机与远程均可用 |
-| `removeSwarmMember` | `{ name: string }` → `null`；移除成员，独立工作树有未并回提交时报 `invalid_command`；本机与远程均可用 |
-| `endSwarm` | → `{ unmerged: SwarmUnmergedWorktree[] }`；结束活动合奏，停止成员、清理已并回工作树并返回保留的未并回分支列表；本机与远程均可用 |
+| `postToEnsemble` | `{ text: string }` → `{ number: number, recipients: string[] }`；在活动合奏（内部标识 `ensemble`）留言板发帖（[ADR-0089](../decisions/ADR-0089-ensemble.md) §10），解析正文 `@` 提及，无提及默认 `@maestro`；本机与远程均可用 |
+| `removeEnsembleMember` | `{ name: string }` → `null`；移除成员，独立工作树有未并回提交时报 `invalid_command`；本机与远程均可用 |
+| `endEnsemble` | → `{ unmerged: EnsembleUnmergedWorktree[] }`；结束活动合奏，停止成员、清理已并回工作树并返回保留的未并回分支列表；本机与远程均可用 |
 | `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |
@@ -101,7 +101,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
-`submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-swarm.md)，含 `"swarm"`），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动合奏）在 Core，报 `invalid_command`。合奏存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上协调者留言板，成员被移除或合奏结束后拒绝新的提交）。
+`submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-ensemble.md)，含 `"ensemble"`），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动合奏）在 Core，报 `invalid_command`。合奏存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上指挥（Maestro，`@maestro`）留言板，成员被移除或合奏结束后拒绝新的提交）。
 
 `readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` / `files` 或 `tool.completed.attachments` / `files`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 
@@ -368,9 +368,9 @@ interface SubagentObservation {
 
 `ToolCallStatus` 沿用 protocol。summary 是查询投影，不是新的会话状态或事件；最终结果正文仍从父 `task.completed.modelContent` 或子 `finish` 的已持久化输入读取，不复制进 summary。`outcome` 只来自父调用已持久化的结算，没有时省略；`endedAt` 优先取父结算时间，否则取可判定终止的最后一个子 `turn.completed.time`。缺父耗时的时间差是近似耗时，客户端须标注；没有结束事实时不提供最终耗时。
 
-`listSubagents` 返回该父会话的**直接内置子会话**（含已结束，排除 `session.created.parent.callId` 以 `"swarm:"` 开头的 Swarm 常驻成员；`observeSubagent` 与 `readSubagentAttachment` 同样排除 Swarm 成员），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补标识和摘要；标识由共享 `subagentProfile` 优先取 preset，其次非 default 的 profile/agent，缺省为空。旧日志缺启动参数时摘要回退首条子 `message.user`，再缺则「子代理」（常量 `SUBAGENT_TASK_FALLBACK`，由 `@nocturne/core/protocol` 导出，Core 与桌面端共用）。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
+`listSubagents` 返回该父会话的**直接内置子会话**（含已结束，排除 `session.created.parent.callId` 以 `"ensemble:"` 开头的 Ensemble 常驻成员；`observeSubagent` 与 `readSubagentAttachment` 同样排除 Ensemble 成员），按 `startedAt`、`childSessionId` 升序。父日志必须存在；已有父 Session 时读其已提交事件，否则只读父日志。映射以子 `session.created.parent` 为准，父日志 `tool.started.input` 补标识和摘要；标识由共享 `subagentProfile` 优先取 preset，其次非 default 的 profile/agent，缺省为空。旧日志缺启动参数时摘要回退首条子 `message.user`，再缺则「子代理」（常量 `SUBAGENT_TASK_FALLBACK`，由 `@nocturne/core/protocol` 导出，Core 与桌面端共用）。不能根据当前档位配置判断历史调用属于内置还是外部。`task.output.childSessionId` 仅为定位提示，使用前仍校验 child 的 parent。外部 ACP 不返回伪造的 child id（桌面处理见 ADR 修订（五））。
 
-工作树隔离的保留项（[ADR-0075](../decisions/ADR-0075-worktree-isolation.md) §6）：`subagent.worktrees({ parentSessionId })` 返回该父会话登记的副本与分支（含已收束的 `changes`，排除活动 Swarm 中未移除成员的在用工作树）；`subagent.deleteWorktree({ parentSessionId, childSessionId })` 删除副本与 `nocturne/` 分支，子代理或对应 Swarm 隔离成员仍在活动时报 `invalid_command`；`subagent.diff({ parentSessionId, childSessionId, file })` 返回该文件 `base..head` 的差异文本，文件必须在结果清单内。
+工作树隔离的保留项（[ADR-0075](../decisions/ADR-0075-worktree-isolation.md) §6）：`subagent.worktrees({ parentSessionId })` 返回该父会话登记的副本与分支（含已收束的 `changes`，排除活动 Ensemble 中未移除成员的在用工作树）；`subagent.deleteWorktree({ parentSessionId, childSessionId })` 删除副本与 `nocturne/` 分支，子代理或对应 Ensemble 隔离成员仍在活动时报 `invalid_command`；`subagent.diff({ parentSessionId, childSessionId, file })` 返回该文件 `base..head` 的差异文本，文件必须在结果清单内。
 
 查询可复用 `listSessions({ includeSubagents: true })` 的只读日志头扫描建立候选索引，但不能把 `locked` 当作运行状态，也不能只靠该列表的容错跳过逻辑校验指定 child。运行态来自 Runtime 共享的 launcher 登记簿；缓存失效可重扫日志，不能把缓存作为持久事实源。
 

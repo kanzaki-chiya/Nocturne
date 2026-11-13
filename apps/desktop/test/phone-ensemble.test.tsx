@@ -47,7 +47,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私信与权限确认、退出只 close 不 interrupt、结束后只读", async () => {
+it("手机 Ensemble 全屏页与成员会话页：入口进入、返回导航、私信与权限确认、退出只 close 不 interrupt、结束后只读", async () => {
   vi.stubGlobal("crypto", webcrypto);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("matchMedia", () => ({
@@ -72,8 +72,8 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   let _memberReceive: ((e: RuntimeEvent) => void) | undefined;
   let androidBack: (() => void) | undefined;
 
-  const postToSwarm = vi.fn(async () => ({ number: 2, recipients: ["coordinator"] }));
-  const endSwarm = vi.fn(async () => ({ unmerged: [] }));
+  const postToEnsemble = vi.fn(async () => ({ number: 2, recipients: ["maestro"] }));
+  const endEnsemble = vi.fn(async () => ({ unmerged: [] }));
   const coordClose = vi.fn(async () => undefined);
   const coordSession = fakeSession({
     id: "coord",
@@ -84,8 +84,8 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
     visionInfo: async () => ({ imageInput: false, available: true, model: "fake-1" }),
     pendingInputs: async () => ({ items: [], paused: false }),
     turnChanges: async () => [],
-    postToSwarm,
-    endSwarm,
+    postToEnsemble,
+    endEnsemble,
     close: coordClose,
     subscribe: async (fn: typeof coordReceive) => {
       coordReceive = fn;
@@ -97,18 +97,18 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
         time: "2026-11-12T13:30:00.000Z",
         payload: {
           messageId: "m1",
-          content: [{ type: "text", text: "/swarm 加输入校验" }],
+          content: [{ type: "text", text: "/ensemble 加输入校验" }],
         },
       } as RuntimeEvent);
       fn?.({
-        type: "swarm.created",
+        type: "ensemble.created",
         sessionId: "coord",
         seq: 2,
         time: "2026-11-12T13:30:01.000Z",
         payload: { title: "API 输入校验" },
       } as RuntimeEvent);
       fn?.({
-        type: "swarm.member_added",
+        type: "ensemble.member_added",
         sessionId: "coord",
         seq: 3,
         time: "2026-11-12T13:30:02.000Z",
@@ -126,14 +126,14 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
         },
       } as RuntimeEvent);
       fn?.({
-        type: "swarm.posted",
+        type: "ensemble.posted",
         sessionId: "coord",
         seq: 4,
         time: "2026-11-12T13:31:00.000Z",
         payload: {
           number: 1,
-          from: "coordinator",
-          fromKind: "coordinator",
+          from: "maestro",
+          fromKind: "maestro",
           text: "@orders 开始实现",
           mentions: ["orders"],
           recipients: ["orders"],
@@ -246,7 +246,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
     await shared.connect?.(client, undefined);
   });
 
-  // 进项目页 → 打开协调者会话
+  // 进项目页 → 打开指挥会话
   await act(async () => {
     const projectBtn = [...container.querySelectorAll<HTMLButtonElement>(".phone-row")].find((b) =>
       b.textContent?.includes("work"),
@@ -260,7 +260,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   await vi.waitFor(() => {
     expect(container.querySelector(".conversation-transcript")).not.toBeNull();
   });
-  expect(container.querySelector(".swarmrow")).toBeNull();
+  expect(container.querySelector(".ensemblerow")).toBeNull();
   expect(container.textContent).not.toContain("1 · 1");
 
   // 打开侧边栏：看到「合奏」分组，点成员行进成员会话页，安卓返回回到侧边栏
@@ -289,11 +289,13 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   // 从侧边栏点合奏组头进入全屏合奏页
   await act(async () => {
     container
-      .querySelector<HTMLButtonElement>('#phone-side-panel [aria-label="合奏"] .phone-swarm-head')
+      .querySelector<HTMLButtonElement>(
+        '#phone-side-panel [aria-label="合奏"] .phone-ensemble-head',
+      )
       ?.click();
   });
   expect(container.querySelector(".phone-header h1")?.textContent).toBe("API 输入校验");
-  expect(container.querySelector(".swarm-pane")).not.toBeNull();
+  expect(container.querySelector(".ensemble-pane")).not.toBeNull();
 
   // 切到成员页，点 orders 进入成员会话页
   const memberTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
@@ -302,8 +304,8 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   await act(async () => {
     memberTab?.click();
   });
-  const memberBtn = [...container.querySelectorAll<HTMLButtonElement>(".swarm-mem-main")].find(
-    (b) => b.querySelector(".swarm-mem-name")?.firstChild?.textContent === "orders",
+  const memberBtn = [...container.querySelectorAll<HTMLButtonElement>(".ensemble-mem-main")].find(
+    (b) => b.querySelector(".ensemble-mem-name")?.firstChild?.textContent === "orders",
   );
   expect(memberBtn).toBeDefined();
   await act(async () => {
@@ -323,7 +325,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   });
   expect(memberRespondPermission).toHaveBeenCalledOnce();
 
-  // 安卓返回键退回 Swarm 页，只调 session.close，不调 interrupt
+  // 安卓返回键退回 Ensemble 页，只调 session.close，不调 interrupt
   await act(async () => {
     androidBack?.();
   });
@@ -335,10 +337,10 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   });
   expect(memberInterrupt).not.toHaveBeenCalled();
 
-  // Swarm 结束后再进入成员页：只读展示，没有输入框
+  // Ensemble 结束后再进入成员页：只读展示，没有输入框
   await act(async () => {
     coordReceive?.({
-      type: "swarm.ended",
+      type: "ensemble.ended",
       sessionId: "coord",
       seq: 5,
       time: "2026-11-12T13:40:00.000Z",
@@ -351,9 +353,9 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   await act(async () => {
     memberTabAgain?.click();
   });
-  const memberBtnAgain = [...container.querySelectorAll<HTMLButtonElement>(".swarm-mem-main")].find(
-    (b) => b.querySelector(".swarm-mem-name")?.firstChild?.textContent === "orders",
-  );
+  const memberBtnAgain = [
+    ...container.querySelectorAll<HTMLButtonElement>(".ensemble-mem-main"),
+  ].find((b) => b.querySelector(".ensemble-mem-name")?.firstChild?.textContent === "orders");
   await act(async () => {
     memberBtnAgain?.click();
   });
@@ -367,7 +369,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
     androidBack?.();
   });
   await vi.waitFor(() => {
-    expect(container.querySelector(".swarm-pane")).not.toBeNull();
+    expect(container.querySelector(".ensemble-pane")).not.toBeNull();
   });
   await act(async () => {
     androidBack?.();

@@ -1588,13 +1588,13 @@ button.fcard:hover {
   color: var(--a-muted);
   font-size: var(--fs-1);
 }
-.swarm-who,
-.swarm-at {
+.ensemble-who,
+.ensemble-at {
   color: var(--a-accent);
   font-family: var(--mono);
 }
 
-.conversation .swarm-unmerged-list {
+.conversation .ensemble-unmerged-list {
   margin: var(--space-1) 0 0;
   padding: 0;
   list-style: none;

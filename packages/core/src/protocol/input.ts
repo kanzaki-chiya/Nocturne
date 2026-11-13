@@ -4,7 +4,7 @@
  * 认识待发列表或 Provider 细节。
  */
 import type { BackgroundShellResult, SubagentResult } from "./events.js";
-import type { SwarmPostDelivery } from "./swarm.js";
+import type { EnsemblePostDelivery } from "./ensemble.js";
 import type {
   AgentDelegation,
   ContentBlock,
@@ -18,7 +18,7 @@ import type { WorkModeSnapshot } from "./work-modes.js";
 export interface PreparedInput {
   subagent?: SubagentResult | undefined;
   backgroundShell?: BackgroundShellResult | undefined;
-  swarm?: SwarmPostDelivery | undefined;
+  ensemble?: EnsemblePostDelivery | undefined;
   /** 用户输入的正文块；编辑待发输入时只替换这里 */
   content: ContentBlock[];
   /** Core 追加给模型看的快照块（`@` 引用、技能正文、委派指令），编辑文本时原样保留 */

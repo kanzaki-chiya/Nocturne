@@ -3,7 +3,7 @@
  * 覆盖：成功、锁冲突/目标不存在留在原会话、Turn 进行中拒绝、
  * 跨目录确认与重试、切换后可重放。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -14,6 +14,7 @@ import {
   createRuntime,
   FakeProvider,
   loadConfig,
+  SessionError,
   type Runtime,
   type RuntimeSession,
 } from "@nocturne/core";
@@ -334,6 +335,48 @@ describe("REPL /resume 与切换器组合", () => {
     // 新会话重放：durableEvents 含 session.created
     expect(res.session.durableEvents().map((e) => e.type)).toContain("session.created");
     await res.session.close();
+  });
+
+  it("旧 swarm 日志：/resume 返回 Runtime 原文，不附加说明", async () => {
+    const cwd = await tmp("nct-sw-legacy-");
+    const sessionsDir = await tmp("nct-sw-legacy-sd-");
+    const runtime = await makeRuntime(cwd, sessionsDir);
+    const current = await runtime.createSession({ model: "fake/fake-1" });
+    const meta = current.state().meta;
+    const id = "20261114-clilegacy";
+    const message = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+    writeFileSync(
+      path.join(sessionsDir, `${id}.jsonl`),
+      [
+        JSON.stringify({
+          type: "session.created",
+          sessionId: id,
+          seq: 1,
+          time: "2026-11-14T00:00:00.000Z",
+          payload: {
+            formatVersion: 1,
+            nocturneVersion: "0.0.0",
+            cwd: meta.cwd,
+            workspaceRoot: meta.workspaceRoot,
+            model: { provider: "fake", model: "fake-1" },
+            permissionPreset: "default",
+          },
+        }),
+        JSON.stringify({
+          type: "swarm.created",
+          sessionId: id,
+          seq: 2,
+          time: "2026-11-14T00:00:01.000Z",
+          payload: { title: "旧合奏" },
+        }),
+      ].join("\n") + "\n",
+    );
+    expect((await runtime.listSessions({ cwd: meta.cwd })).map((item) => item.id)).toContain(id);
+    const { holder, switcher } = makeSwitcher(runtime, meta.cwd, current);
+    const result = await switcher(id);
+    expect(result).toEqual({ kind: "error", message });
+    expect(resumeFailureHint(new SessionError("session_log_newer", message), true)).toBeUndefined();
+    expect(holder.current.id).toBe(current.id);
   });
 });
 
