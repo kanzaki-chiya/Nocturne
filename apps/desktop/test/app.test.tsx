@@ -1859,6 +1859,30 @@ it("定时任务页：立即运行先刷新会话列表再打开新会话；历�
   expect(await within(stream).findByText("sched-run-1 正文")).toBeTruthy();
 });
 
+it("定时任务页：会话概览与右侧面板按钮置灰，回到会话后恢复", async () => {
+  const host = replayHost();
+  render(
+    <WindowFrame host={host}>
+      <App host={host} />
+    </WindowFrame>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await screen.findByRole("region", { name: "会话消息" });
+  const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+  await waitFor(() => expect(button("右侧面板").disabled).toBe(false));
+  expect(button("会话概览").disabled).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: /^定时任务/ }));
+  await screen.findByRole("region", { name: "定时任务" });
+  expect(button("右侧面板").disabled).toBe(true);
+  expect(button("会话概览").disabled).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  await waitFor(() => expect(screen.queryByRole("region", { name: "定时任务" })).toBeNull());
+  expect(button("右侧面板").disabled).toBe(false);
+  expect(button("会话概览").disabled).toBe(false);
+});
+
 function archiveSessionRow(title: string) {
   const row = [...document.querySelectorAll<HTMLElement>(".irow")].find((element) =>
     (element.textContent ?? "").startsWith(title),

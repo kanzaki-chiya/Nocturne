@@ -1357,7 +1357,7 @@ export function App({ host }: { host: DesktopHost }) {
     openIds: new Set(conversations.opened.keys()),
     loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
     editors,
-    settingsOpen: page !== null,
+    settingsOpen: page !== null || schedulesOpen,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
     client: pool.get(),
     ensureClient: () => pool.ensure(),
