@@ -19,7 +19,8 @@ import { createSessionStore } from "../src/session/index.js";
 import { buildContext, attachmentsToLoad, projectedTokens } from "../src/context/index.js";
 import { IMAGE_TARGET_MAX_BYTES, parseImageSize } from "../src/tools/image.js";
 
-const FIXTURE_PATH = "Z:\\nocturne-mockups\\impl\\r1113a\\fixtures\\long-screenshot-1849x16348.png";
+// 可选：真实 1849×16348 长截图；未设置时用同尺寸的生成图
+const FIXTURE_PATH = process.env.NOCTURNE_TEST_LONG_SCREENSHOT ?? "";
 
 const platform = createPlatform();
 const tmpRoots: string[] = [];
