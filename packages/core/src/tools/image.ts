@@ -279,11 +279,16 @@ export function planImageProcessing(input: {
   const scaledWidth = isVertical ? scaledShort : scaledLong;
   const scaledHeight = isVertical ? scaledLong : scaledShort;
 
-  const stride = IMAGE_TARGET_MAX_EDGE - IMAGE_TILE_OVERLAP;
+  const n = Math.max(
+    1,
+    Math.ceil((scaledLong - IMAGE_TILE_OVERLAP) / (IMAGE_TARGET_MAX_EDGE - IMAGE_TILE_OVERLAP)),
+  );
+  const tileLen = Math.ceil((scaledLong + (n - 1) * IMAGE_TILE_OVERLAP) / n);
+  const stride = tileLen - IMAGE_TILE_OVERLAP;
   const tiles: PlannedTile[] = [];
-  let offset = 0;
-  while (offset < scaledLong) {
-    const len = Math.min(IMAGE_TARGET_MAX_EDGE, scaledLong - offset);
+  for (let i = 0; i < n; i++) {
+    const offset = i * stride;
+    const len = i === n - 1 ? scaledLong - offset : tileLen;
     const tx = isVertical ? 0 : offset;
     const ty = isVertical ? offset : 0;
     const tw = isVertical ? scaledWidth : len;
@@ -304,8 +309,6 @@ export function planImageProcessing(input: {
       };
     }
     tiles.push({ x: tx, y: ty, width: tw, height: th, region });
-    if (offset + len >= scaledLong) break;
-    offset += stride;
   }
 
   return { kind: "tile", scaledWidth, scaledHeight, tiles };

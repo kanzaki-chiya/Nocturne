@@ -150,14 +150,14 @@ describe("image worker & AttachmentStore processing (ADR-0090)", () => {
       expect(p0).toMatchObject({
         mimeType: "image/jpeg",
         width: 100,
-        height: 2576,
-        region: { x: 0, y: 0, width: 100, height: 2576 },
+        height: 1832,
+        region: { x: 0, y: 0, width: 100, height: 1832 },
       });
       expect(p1).toMatchObject({
         mimeType: "image/jpeg",
         width: 100,
-        height: 1088,
-        region: { x: 0, y: 2512, width: 100, height: 1088 },
+        height: 1832,
+        region: { x: 0, y: 1768, width: 100, height: 1832 },
       });
       // 第一段顶部原为完全透明，铺白底后应接近 (255,255,255)
       const tile0Bytes = await store.load(p0);

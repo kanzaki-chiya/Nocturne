@@ -743,6 +743,8 @@ export interface Runtime {
   onScheduleChanged(listener: (payload: ScheduleChangedPayload) => void): () => void;
   /** 停止调度器：中止运行中的任务、释放锁文件；后台退出前调用 */
   stopScheduler(): Promise<void>;
+  /** 关闭 Runtime 持有的后台资源（调度器与图片处理 worker，ADR-0090） */
+  close(): Promise<void>;
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   /**
@@ -5274,6 +5276,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       };
     },
     stopScheduler: () => scheduler.stop(),
+    close: async () => {
+      await Promise.all([scheduler.stop(), imageProcessor.close()]);
+    },
     describeMcpServers: (input = {}) =>
       requireMcpConfig().describeMcpServers(
         mcpInput(z.object({ workspaceRoot: workspaceField }), input),

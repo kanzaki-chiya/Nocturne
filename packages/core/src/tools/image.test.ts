@@ -253,13 +253,14 @@ describe("image processing math & planning (ADR-0090)", () => {
     });
   });
 
-  it("切段计算：1849×16348 切成 7 段，重叠 64 px，短边<=2576 不先缩", () => {
+  it("切段计算：1849×16348 均分切成 7 段，重叠 64 px，短边<=2576 不先缩", () => {
     const plan = planImageProcessing({ width: 1849, height: 16348, bytes: 9_900_000 });
     expect(plan.kind).toBe("tile");
     if (plan.kind !== "tile") return;
     expect(plan.scaledWidth).toBe(1849);
     expect(plan.scaledHeight).toBe(16348);
     expect(plan.tiles).toHaveLength(7);
+    expect(plan.tiles.map((t) => t.height)).toEqual([2391, 2391, 2391, 2391, 2391, 2391, 2386]);
     for (let i = 0; i < plan.tiles.length; i++) {
       const tile = plan.tiles[i];
       if (!tile) throw new Error("missing tile");
@@ -277,7 +278,29 @@ describe("image processing math & planning (ADR-0090)", () => {
     expect((last?.y ?? 0) + (last?.height ?? 0)).toBe(16348);
   });
 
-  it("切段：短边超过 2576 px 先等比缩到 2576；横向宽图沿 X 轴切", () => {
+  it("切段边界：长边 2577 px 均分为两段（1321 + 1320），不切出极短末段", () => {
+    const plan = planImageProcessing({ width: 400, height: 2577, bytes: 200_000 });
+    expect(plan.kind).toBe("tile");
+    if (plan.kind !== "tile") return;
+    expect(plan.tiles).toEqual([
+      {
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 1321,
+        region: { x: 0, y: 0, width: 400, height: 1321 },
+      },
+      {
+        x: 0,
+        y: 1257,
+        width: 400,
+        height: 1320,
+        region: { x: 0, y: 1257, width: 400, height: 1320 },
+      },
+    ]);
+  });
+
+  it("切段：短边超过 2576 px 先等比缩到 2576；横向宽图沿 X 轴均分切段", () => {
     const tall = planImageProcessing({ width: 3000, height: 12000, bytes: 1_000_000 });
     expect(tall.kind).toBe("tile");
     if (tall.kind === "tile") {
@@ -292,9 +315,10 @@ describe("image processing math & planning (ADR-0090)", () => {
       expect(wide.scaledWidth).toBe(10000);
       expect(wide.scaledHeight).toBe(1000);
       expect(wide.tiles).toHaveLength(4);
+      expect(wide.tiles.map((t) => t.width)).toEqual([2548, 2548, 2548, 2548]);
       const t0 = wide.tiles[0];
       const t1 = wide.tiles[1];
-      expect(t1?.x).toBe(2512);
+      expect(t1?.x).toBe(2484);
       expect((t0?.x ?? 0) + (t0?.width ?? 0) - (t1?.x ?? 0)).toBe(64);
     }
   });

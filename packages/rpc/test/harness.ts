@@ -315,7 +315,7 @@ export async function connectWithConfig(
         sessionsDir: config.sessionsDir,
         dispose: async () => {
           disposed = true;
-          await runtime.stopScheduler();
+          await runtime.close();
         },
         ...(options.noProviderConfig === true
           ? {}

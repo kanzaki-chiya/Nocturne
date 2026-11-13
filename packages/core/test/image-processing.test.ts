@@ -2,8 +2,9 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import { deflateSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime } from "../src/index.js";
 import { createPlatform } from "../src/platform/index.js";
@@ -392,15 +393,128 @@ describe("image auto-downscale & tiling integration (ADR-0090)", () => {
     expect(estimated.report.images).toEqual({ count: 14, estimatedTokens: 14 * 1600 });
     expect(projectedTokens(history, model)).toBeGreaterThanOrEqual(14 * 1600);
 
-    // 验证消息顺序与占位
+    // 验证消息顺序、切段说明文本块的内容与位置（紧邻图片前）及占位逻辑
+    const expectedTileNote =
+      "Image (original 1849×16000, split into 7 JPEG tiles ordered top to bottom, 64 px overlap)";
     const userMsgs = built.request.messages.filter((m) => m.role === "user");
     expect(userMsgs[0]?.role === "user" && userMsgs[0].images).toBeUndefined();
+    expect(userMsgs[0]?.role === "user" && userMsgs[0].content).toEqual([
+      { type: "text", text: "1" },
+      { type: "text", text: "[image omitted: exceeds the per-request limit of 20 images]" },
+    ]);
+    expect(userMsgs[1]?.role === "user" && userMsgs[1].content).toEqual([
+      { type: "text", text: "2" },
+      { type: "text", text: expectedTileNote },
+    ]);
     expect(userMsgs[1]?.role === "user" && userMsgs[1].images?.map((x) => x.data)).toEqual(
       Array.from({ length: 7 }, (_, i) => `b64-tile-2-${i + 1}`),
     );
+    expect(userMsgs[2]?.role === "user" && userMsgs[2].content).toEqual([
+      { type: "text", text: "3" },
+      { type: "text", text: expectedTileNote },
+    ]);
     expect(userMsgs[2]?.role === "user" && userMsgs[2].images?.map((x) => x.data)).toEqual(
       Array.from({ length: 7 }, (_, i) => `b64-tile-3-${i + 1}`),
     );
+    // 估算模式的 history 字符/token 应与投影模式完全一致（含保留的切段说明与丢弃后的上限占位）
+    expect(estimated.report.sections.find((s) => s.name === "history")).toEqual(
+      built.report.sections.find((s) => s.name === "history"),
+    );
+    expect(estimated.report.estimatedTokens).toBe(built.report.estimatedTokens);
+
+    // 横向切段使用 ordered left to right；只缩小未切段（processed.length === 1）不加说明块
+    const wideAtt: ImageAttachment = {
+      type: "image",
+      file: "img-4.png",
+      mimeType: "image/png",
+      bytes: 4_000_000,
+      sha256: "orig-4",
+      width: 6000,
+      height: 1000,
+      source: "paste",
+      processed: [
+        {
+          file: "img-4-1.jpg",
+          mimeType: "image/jpeg",
+          bytes: 200_000,
+          sha256: "wide-1",
+          width: 3032,
+          height: 1000,
+          region: { x: 0, y: 0, width: 3032, height: 1000 },
+        },
+        {
+          file: "img-4-2.jpg",
+          mimeType: "image/jpeg",
+          bytes: 200_000,
+          sha256: "wide-2",
+          width: 3032,
+          height: 1000,
+          region: { x: 2968, y: 0, width: 3032, height: 1000 },
+        },
+      ],
+    };
+    const singleDownscaleAtt: ImageAttachment = {
+      type: "image",
+      file: "img-5.png",
+      mimeType: "image/png",
+      bytes: 4_000_000,
+      sha256: "orig-5",
+      width: 4000,
+      height: 3000,
+      source: "paste",
+      processed: [
+        {
+          file: "img-5-1.jpg",
+          mimeType: "image/jpeg",
+          bytes: 300_000,
+          sha256: "single-1",
+          width: 2576,
+          height: 1932,
+          region: { x: 0, y: 0, width: 4000, height: 3000 },
+        },
+      ],
+    };
+    const mixedBuilt = buildContext({
+      history: [
+        {
+          kind: "user",
+          seq: 1,
+          turnId: "t1",
+          messageId: "m1",
+          content: [{ type: "text", text: "wide" }],
+          attachments: [wideAtt],
+        },
+        {
+          kind: "user",
+          seq: 2,
+          turnId: "t2",
+          messageId: "m2",
+          content: [{ type: "text", text: "single" }],
+          attachments: [singleDownscaleAtt],
+        },
+      ],
+      model,
+      basePrompt: "sys",
+      instructions: { project: [] },
+      environment: { cwd: "/", workspaceRoot: "/", os: "linux", sessionDate: "2026-11-13" },
+      tools: [],
+      attachmentData: new Map([
+        ["wide-1", "b1"],
+        ["wide-2", "b2"],
+        ["single-1", "b3"],
+      ]),
+    });
+    const mixedUsers = mixedBuilt.request.messages.filter((m) => m.role === "user");
+    expect(mixedUsers[0]?.role === "user" && mixedUsers[0].content).toEqual([
+      { type: "text", text: "wide" },
+      {
+        type: "text",
+        text: "Image (original 6000×1000, split into 2 JPEG tiles ordered left to right, 64 px overlap)",
+      },
+    ]);
+    expect(mixedUsers[1]?.role === "user" && mixedUsers[1].content).toEqual([
+      { type: "text", text: "single" },
+    ]);
   });
 
   it("会话：分叉复制处理结果、回退后 readAttachment 仍可读处理结果、旧日志重放不变", async () => {
@@ -553,11 +667,21 @@ describe("image auto-downscale & tiling integration (ADR-0090)", () => {
     });
     expect(orig?.processed).toHaveLength(7);
 
-    // 模型收到的 images：7 段 JPEG，每段宽 1849、高 <= 2576、<= 3.5 MB
+    // 模型收到的 user 消息：原文本后、7 段图片之前紧跟切段说明文本块；图片宽 1849、均分高 <= 2576、<= 3.5 MB
     const userMsg = provider.requests[0]?.messages.find((m) => m.role === "user");
     expect(userMsg?.role).toBe("user");
+    if (userMsg?.role === "user") {
+      expect(userMsg.content).toEqual([
+        { type: "text", text: "请看这张长截图" },
+        {
+          type: "text",
+          text: "Image (original 1849×16348, split into 7 JPEG tiles ordered top to bottom, 64 px overlap)",
+        },
+      ]);
+    }
     const images = userMsg?.role === "user" ? (userMsg.images ?? []) : [];
     expect(images).toHaveLength(7);
+    const heights: number[] = [];
     for (const img of images) {
       expect(img.mimeType).toBe("image/jpeg");
       const raw = Buffer.from(img.data, "base64");
@@ -566,9 +690,42 @@ describe("image auto-downscale & tiling integration (ADR-0090)", () => {
       expect(size).toBeDefined();
       expect(size?.width).toBe(1849);
       expect(size?.height).toBeLessThanOrEqual(2576);
+      if (size) heights.push(size.height);
     }
+    expect(heights).toEqual([2391, 2391, 2391, 2391, 2391, 2391, 2386]);
     await session.close();
+    await runtime.close();
   }, 30_000);
+
+  it("Runtime 关闭：调用 runtime.close() 立即关闭 imageProcessor 持有的 worker 线程", async () => {
+    const ws = tmpDir("nct-close-ws-");
+    const sessionsDir = tmpDir("nct-close-sess-");
+    const tallPng = encodeSolidPng(400, 4000);
+    const provider = visionModelProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+    try {
+      const runtime = await createRuntime({ cwd: ws, sessionsDir, providers: [provider] });
+      const session = await runtime.createSession({ model: "fake/fake-vision" });
+      await session.submit({
+        text: "check worker close",
+        attachments: [{ data: tallPng, mimeType: "image/png", source: "paste" }],
+      });
+      // 处理完成后 worker 处于 10s 空闲等待期，尚未被终止
+      expect(terminateSpy).not.toHaveBeenCalled();
+
+      await session.close();
+      await runtime.close();
+      // runtime.close() 应立即调用 imageProcessor.close() 终止 worker，不必等 10s 空闲超时
+      expect(terminateSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      terminateSpy.mockRestore();
+    }
+  });
 
   it("主线程不阻塞：处理 1849×16348 长图期间，同一 Runtime 内另一会话事件与事件循环心跳照常送达", async () => {
     const ws = tmpDir("nct-nb-ws-");
@@ -641,5 +798,6 @@ describe("image auto-downscale & tiling integration (ADR-0090)", () => {
 
     await sessionA.close();
     await sessionB.close();
+    await runtime.close();
   }, 30_000);
 });

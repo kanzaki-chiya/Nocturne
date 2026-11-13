@@ -14,6 +14,7 @@ export const RUNTIME_NOT_MAPPED = {
   onSessionsChanged: "事件订阅：Hub 广播 runtime.sessionsChanged，含发送时自动恢复归档",
   onScheduleChanged: "事件订阅：Hub 订阅后以 schedule.changed 通知广播给所有已握手的连接",
   stopScheduler: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
+  close: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
 } as const satisfies Partial<Record<keyof Runtime, string>>;
 
 export const RUNTIME_METHODS: Record<

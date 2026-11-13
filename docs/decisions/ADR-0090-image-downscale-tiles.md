@@ -34,7 +34,7 @@
   - `(b)` 任一边 `> 8000 px`；
   - `(c)` 长边 `> 2576 px` 且 `longEdge / shortEdge > 2576 / 768`（即整张缩到长边 2576 px 后短边会小于 768 px）。
 - **处理方式**：
-  - 满足 `(c)` 时**切段**：沿长边方向切割；短边超过 2576 px 时先等比缩到 2576 px；每段长边不超过 2576 px，相邻两段重叠 64 px；单张原图最多 8 段，超过 8 段先等比缩小到 8 段能放下的尺寸（最大覆盖 `8 * 2576 - 7 * 64 = 20160 px`）。
+  - 满足 `(c)` 时**切段**：沿长边方向切割；短边超过 2576 px 时先等比缩到 2576 px；先计算段数 `n = ceil((L − 64) / (2576 − 64))` 再均分切段（每段长度 `ceil((L + (n - 1) * 64) / n)`，最后一段允许少几个像素，保证每段长边不超过 2576 px、相邻两段重叠 64 px，避免出现极短末段）；单张原图最多 8 段，超过 8 段先等比缩小到 8 段能放下的尺寸（最大覆盖 `8 * 2576 - 7 * 64 = 20160 px`）。
   - 仅满足 `(a)` 或 `(b)` 时**整张缩小**：长边超过 2576 px 时等比缩到长边 2576 px（不超过 2576 px 时保持尺寸转码）。
   - 全部处理结果铺白底消除透明通道后编码为 JPEG q85；超过 3.5 MB 依次降为 q75、q60，仍超则继续等比缩小直至符合 3.5 MB。
 - **GIF**：`@jsquash` 无 GIF 编解码。不满足处理条件的 GIF 原样保留；满足处理条件的 GIF 报 `image_too_large`，错误文案说明 GIF 不支持自动缩小或切段。
@@ -51,6 +51,7 @@
 
 ### 4. 发给模型与工具文本
 
+- Context Builder 投影 `user` 消息的切段图片（`processed.length > 1`）时，会在其对应图片之前附加一条 `text` 块，写明原图尺寸、段数、排列方向（`ordered top to bottom` 或 `ordered left to right`）与 `64 px overlap`（只缩小未切段的不加；`tool` 消息沿用 `read` 的 `modelContent` 不重复添加）；`token` 估算与 20 张上限占位逻辑（整组丢弃时同时移除该说明并替换为上限占位）一并计入这段文字。
 - Context Builder 投影图片时，若存在 `processed` 则按顺序发出各处理结果，否则发原图；`describeImages` 视觉代描述角色同样优先取 `processed`。
 - `MAX_IMAGES_PER_REQUEST = 20` 与每张 1600 token 的估算均按实际发出的张数计算；**同一张原图的各段采用整组原子保留/丢弃**，不允许只发其中几段。
 - `read` 的 `modelContent` 沿用 `Image file: …` 英文格式，在图片被处理时写明原图尺寸与大小，以及缩小后尺寸或分段总数、各段尺寸与从上到下 / 从左到右顺序。
@@ -58,8 +59,8 @@
 ### 5. Worker 线程与产物分发
 
 - 解码、铺白底、缩放与编码在 `node:worker_threads`（`image-worker`）内执行，不阻塞 Runtime 主线程；同一 Runtime 内串行队列，同一时间只处理一张图。
-- WASM 线性内存只增不减，worker 在空闲 **10 秒（10,000 ms）** 后自动退出归还系统内存（定时器使用 `.unref()` 不阻塞进程退出）；`runtime` 内发生任务中断（工具取消或会话关闭）时立即终止 worker，并删除已落盘的原图与半成品分段文件。
-- 构建与打包时随产物复制 5 个运行时 WASM 文件（`squoosh_png_bg.wasm`、`mozjpeg_dec.wasm`、`mozjpeg_enc.wasm`、`webp_dec.wasm`、`squoosh_resize_bg.wasm`）与 `image-worker.mjs` 至 `packages/core/dist/`、`apps/cli/dist/`、`apps/desktop/src-tauri/resources/` 与 `nctrn` npm tarball，运行时不联网下载。
+- WASM 线性内存只增不减，worker 在空闲 **10 秒（10,000 ms）** 后自动退出归还系统内存（定时器使用 `.unref()` 不阻塞进程退出）；`runtime` 内发生任务中断（工具取消或会话关闭）时立即终止 worker 并删除已落盘的原图与半成品分段文件；`runtime.close()` 关闭时一并调用 `imageProcessor.close()` 立即释放 worker。
+- 构建与打包时随产物复制 5 个运行时 WASM 文件（`squoosh_png_bg.wasm`、`mozjpeg_dec.wasm`、`mozjpeg_enc.wasm`、`webp_dec.wasm`、`squoosh_resize_bg.wasm`）与 `image-worker.mjs` 至 `packages/core/dist/`、`apps/desktop/src-tauri/resources/` 与 `nctrn` npm tarball（`apps/cli/dist/main.js` 外部引用 `@nocturne/core`，运行时直接使用 `packages/core/dist/` 内的 worker 与 WASM，不再在 `apps/cli/dist` 重复放置无法解析 `@jsquash/*` 裸导入的副本），运行时不联网下载。
 
 ### 6. 覆盖入口与暂不做的项
 

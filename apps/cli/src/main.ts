@@ -188,19 +188,23 @@ async function main(): Promise<number> {
         },
       });
       const { runTui } = await import("@nocturne/tui");
-      return await runTui({ setup: {} }, runtime, {
-        stdin: process.stdin,
-        stdout: process.stdout,
-        stderr: process.stderr,
-        provider: {
-          config: collected.config.runtime,
-          reloadConfig: makeConfigLoader(args, platform),
-          updateProviders: async (rc) => {
-            await runtime.updateProviders(rc);
+      try {
+        return await runTui({ setup: {} }, runtime, {
+          stdin: process.stdin,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          provider: {
+            config: collected.config.runtime,
+            reloadConfig: makeConfigLoader(args, platform),
+            updateProviders: async (rc) => {
+              await runtime.updateProviders(rc);
+            },
+            workspaceRoot: cwd,
           },
-          workspaceRoot: cwd,
-        },
-      });
+        });
+      } finally {
+        await runtime.close();
+      }
     }
     try {
       await runProviderSetupWizard(
@@ -306,39 +310,43 @@ async function main(): Promise<number> {
       const holder: SessionHolder = { current: undefined as unknown as RuntimeSession };
       let created: RuntimeSession | undefined;
       const { runTui } = await import("@nocturne/tui");
-      const code = await runTui(
-        {
-          setup: {
-            step: setupStep as 1 | 2,
-            openSession: async (ref: string) => {
-              created = await runtime.createSession({
-                model: ref,
-                ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
-              });
-              holder.current = created;
-              return created;
+      try {
+        const code = await runTui(
+          {
+            setup: {
+              step: setupStep as 1 | 2,
+              openSession: async (ref: string) => {
+                created = await runtime.createSession({
+                  model: ref,
+                  ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
+                });
+                holder.current = created;
+                return created;
+              },
             },
           },
-        },
-        runtime,
-        {
-          stdin: process.stdin,
-          stdout: process.stdout,
-          stderr: process.stderr,
-          inline: args.inline,
-          provider: {
-            config: runtimeConfig,
-            reloadConfig: makeConfigLoader(args, platform),
-            updateProviders: async (rc) => {
-              await runtime.updateProviders(rc);
+          runtime,
+          {
+            stdin: process.stdin,
+            stdout: process.stdout,
+            stderr: process.stderr,
+            inline: args.inline,
+            provider: {
+              config: runtimeConfig,
+              reloadConfig: makeConfigLoader(args, platform),
+              updateProviders: async (rc) => {
+                await runtime.updateProviders(rc);
+              },
+              workspaceRoot: cwd,
             },
-            workspaceRoot: cwd,
+            switchSession: createSessionSwitcher({ runtime, platform, cwd, holder }),
           },
-          switchSession: createSessionSwitcher({ runtime, platform, cwd, holder }),
-        },
-      );
-      await created?.close();
-      return code;
+        );
+        await created?.close();
+        return code;
+      } finally {
+        await runtime.close();
+      }
     }
     // cli.md 第 2 节：交互终端提示 nctrn setup；非 TTY 输出保持脚本可解析
     process.stderr.write(
@@ -369,51 +377,62 @@ async function main(): Promise<number> {
     },
   });
 
-  // --sessions：只读列表（cli.md 第 2 节）
-  if (args.sessions) {
-    const list = await runtime.listSessions();
-    const rows = [...list].sort((a, b) => b.mtimeMs - a.mtimeMs);
-    if (rows.length === 0) {
-      process.stdout.write("（没有会话）\n");
+  try {
+    // --sessions：只读列表（cli.md 第 2 节）
+    if (args.sessions) {
+      const list = await runtime.listSessions();
+      const rows = [...list].sort((a, b) => b.mtimeMs - a.mtimeMs);
+      if (rows.length === 0) {
+        process.stdout.write("（没有会话）\n");
+        return 0;
+      }
+      for (const s of rows) {
+        const locked = s.locked === true ? "  [locked]" : "";
+        process.stdout.write(
+          `${s.id}  ${s.createdAt}  ${s.model.provider}/${s.model.model}  ${s.workspaceRoot}${locked}\n`,
+        );
+      }
       return 0;
     }
-    for (const s of rows) {
-      const locked = s.locked === true ? "  [locked]" : "";
-      process.stdout.write(
-        `${s.id}  ${s.createdAt}  ${s.model.provider}/${s.model.model}  ${s.workspaceRoot}${locked}\n`,
-      );
+
+    // ── 会话选择：新建 / --resume / --continue ──
+    // --preset 只对新建会话生效（cli.md 第 2 节）：恢复会话时预设以日志为准
+    const continueCandidates = args.continueSession ? await runtime.listSessions({ cwd }) : [];
+    const resumeTarget = args.resume !== undefined || continueCandidates.length > 0;
+    if (resumeTarget && args.preset !== undefined) {
+      process.stderr.write("! --preset 仅对新建会话生效；恢复会话请用 /preset 切换\n");
+      return 2;
     }
-    return 0;
-  }
 
-  // ── 会话选择：新建 / --resume / --continue ──
-  // --preset 只对新建会话生效（cli.md 第 2 节）：恢复会话时预设以日志为准
-  const continueCandidates = args.continueSession ? await runtime.listSessions({ cwd }) : [];
-  const resumeTarget = args.resume !== undefined || continueCandidates.length > 0;
-  if (resumeTarget && args.preset !== undefined) {
-    process.stderr.write("! --preset 仅对新建会话生效；恢复会话请用 /preset 切换\n");
-    return 2;
-  }
-
-  let session: RuntimeSession;
-  try {
-    if (args.resume !== undefined) {
-      const override =
-        args.model !== undefined
-          ? normalizeModelRef(args.model, effectiveProviderId(args))
-          : undefined;
-      if (override !== undefined && !override.ok) {
-        process.stderr.write(`! ${override.problem}\n`);
-        return 2;
-      }
-      session = await runtime.resumeSession(args.resume, {
-        force: args.forceUnlock,
-        ...(override?.ok === true ? { model: override.ref } : {}),
-      });
-    } else if (args.continueSession) {
-      const latest = continueCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
-      if (latest !== undefined) {
-        session = await runtime.resumeSession(latest.id, { force: args.forceUnlock });
+    let session: RuntimeSession;
+    try {
+      if (args.resume !== undefined) {
+        const override =
+          args.model !== undefined
+            ? normalizeModelRef(args.model, effectiveProviderId(args))
+            : undefined;
+        if (override !== undefined && !override.ok) {
+          process.stderr.write(`! ${override.problem}\n`);
+          return 2;
+        }
+        session = await runtime.resumeSession(args.resume, {
+          force: args.forceUnlock,
+          ...(override?.ok === true ? { model: override.ref } : {}),
+        });
+      } else if (args.continueSession) {
+        const latest = continueCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+        if (latest !== undefined) {
+          session = await runtime.resumeSession(latest.id, { force: args.forceUnlock });
+        } else {
+          if (model === undefined) {
+            process.stderr.write("! 缺少模型：--model <id> / NOCTURNE_MODEL / 配置文件 model\n");
+            return 2;
+          }
+          session = await runtime.createSession({
+            model,
+            ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
+          });
+        }
       } else {
         if (model === undefined) {
           process.stderr.write("! 缺少模型：--model <id> / NOCTURNE_MODEL / 配置文件 model\n");
@@ -424,147 +443,140 @@ async function main(): Promise<number> {
           ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
         });
       }
-    } else {
-      if (model === undefined) {
-        process.stderr.write("! 缺少模型：--model <id> / NOCTURNE_MODEL / 配置文件 model\n");
+    } catch (e) {
+      process.stderr.write(`! ${errorText(e)}\n`);
+      // 恢复路径的 invalid_model：Core 只给中性说明，用法提示由客户端补充
+      const hint = resumeFailureHint(e, resumeTarget);
+      if (hint !== undefined) process.stderr.write(`! ${hint}\n`);
+      return 2;
+    }
+
+    // 跨目录恢复：交互模式确认（默认拒绝），非交互直接报错（cli.md 第 2 节）
+    const sessionRoot = session.state().meta.workspaceRoot;
+    if (!platform.paths.equals(sessionRoot, cwd)) {
+      if (args.print) {
+        process.stderr.write(
+          `! 会话绑定到 ${sessionRoot}，与当前目录 ${cwd} 不同；非交互模式拒绝跨目录恢复\n`,
+        );
+        await session.close();
         return 2;
       }
-      session = await runtime.createSession({
-        model,
-        ...(args.preset !== undefined ? { permissionPreset: args.preset } : {}),
-      });
+      const ok = await confirmForeignWorkspace(sessionRoot);
+      if (!ok) {
+        process.stderr.write("! 已取消恢复\n");
+        await session.close();
+        return 2;
+      }
     }
-  } catch (e) {
-    process.stderr.write(`! ${errorText(e)}\n`);
-    // 恢复路径的 invalid_model：Core 只给中性说明，用法提示由客户端补充
-    const hint = resumeFailureHint(e, resumeTarget);
-    if (hint !== undefined) process.stderr.write(`! ${hint}\n`);
-    return 2;
-  }
 
-  // 跨目录恢复：交互模式确认（默认拒绝），非交互直接报错（cli.md 第 2 节）
-  const sessionRoot = session.state().meta.workspaceRoot;
-  if (!platform.paths.equals(sessionRoot, cwd)) {
-    if (args.print) {
-      process.stderr.write(
-        `! 会话绑定到 ${sessionRoot}，与当前目录 ${cwd} 不同；非交互模式拒绝跨目录恢复\n`,
-      );
+    // TTY 默认 TUI（--cli 或非 TTY 走行式；--tui 为兼容参数）。
+    // TUI 下打开提示由欢迎框下的通知块呈现（ADR-0019），此处不预打印
+    const useTui = uiMode === "tui";
+    if (!useTui) printSessionNotes(session);
+
+    // /resume 会话切换：打开逻辑只有这一份，REPL 与 TUI 注入同一个 switcher；
+    // holder 跟踪当前会话，退出时关闭的是切换后的那个
+    const holder: SessionHolder = { current: session };
+    const switchSession = createSessionSwitcher({ runtime, platform, cwd, holder });
+    const newSession = createNewSession({ runtime, holder });
+
+    let prompt: string | undefined = args.prompt;
+    if (args.print && prompt === "") {
+      process.stderr.write("prompt 为空\n");
       await session.close();
       return 2;
     }
-    const ok = await confirmForeignWorkspace(sessionRoot);
-    if (!ok) {
-      process.stderr.write("! 已取消恢复\n");
-      await session.close();
-      return 2;
+    if (args.print && prompt === undefined) {
+      if (process.stdin.isTTY) {
+        process.stderr.write('非交互模式需要 prompt：nctrn -p "<prompt>" 或经 stdin 传入\n');
+        await session.close();
+        return 2;
+      }
+      prompt = await readStdin(process.stdin);
+      if (prompt === "") {
+        process.stderr.write("stdin 为空\n");
+        await session.close();
+        return 2;
+      }
     }
-  }
 
-  // TTY 默认 TUI（--cli 或非 TTY 走行式；--tui 为兼容参数）。
-  // TUI 下打开提示由欢迎框下的通知块呈现（ADR-0019），此处不预打印
-  const useTui = uiMode === "tui";
-  if (!useTui) printSessionNotes(session);
-
-  // /resume 会话切换：打开逻辑只有这一份，REPL 与 TUI 注入同一个 switcher；
-  // holder 跟踪当前会话，退出时关闭的是切换后的那个
-  const holder: SessionHolder = { current: session };
-  const switchSession = createSessionSwitcher({ runtime, platform, cwd, holder });
-  const newSession = createNewSession({ runtime, holder });
-
-  let prompt: string | undefined = args.prompt;
-  if (args.print && prompt === "") {
-    process.stderr.write("prompt 为空\n");
-    await session.close();
-    return 2;
-  }
-  if (args.print && prompt === undefined) {
-    if (process.stdin.isTTY) {
-      process.stderr.write('非交互模式需要 prompt：nctrn -p "<prompt>" 或经 stdin 传入\n');
-      await session.close();
-      return 2;
-    }
-    prompt = await readStdin(process.stdin);
-    if (prompt === "") {
-      process.stderr.write("stdin 为空\n");
-      await session.close();
-      return 2;
-    }
-  }
-
-  if (!args.print) {
-    if (useTui) {
-      // 惰性加载 TUI：cli 的日常路径不支付 ink/react 的启动开销（ADR-0010）
-      const { runTui } = await import("@nocturne/tui");
-      const code = await runTui({ session }, runtime, {
-        stdin: process.stdin,
-        stdout: process.stdout,
-        stderr: process.stderr,
-        inline: args.inline,
-        switchSession,
-        newSession,
-        provider: {
-          config: runtimeConfig,
-          reloadConfig: makeConfigLoader(args, platform),
-          updateProviders: async (rc) => {
-            await runtime.updateProviders(rc);
+    if (!args.print) {
+      if (useTui) {
+        // 惰性加载 TUI：cli 的日常路径不支付 ink/react 的启动开销（ADR-0010）
+        const { runTui } = await import("@nocturne/tui");
+        const code = await runTui({ session }, runtime, {
+          stdin: process.stdin,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          inline: args.inline,
+          switchSession,
+          newSession,
+          provider: {
+            config: runtimeConfig,
+            reloadConfig: makeConfigLoader(args, platform),
+            updateProviders: async (rc) => {
+              await runtime.updateProviders(rc);
+            },
+            workspaceRoot: cwd,
           },
-          workspaceRoot: cwd,
-        },
+        });
+        await holder.current.close();
+        return code;
+      }
+      process.on("SIGINT", () => {
+        /* REPL 自己处理 SIGINT（rl "SIGINT" 事件）；这里兜底防意外退出 */
       });
+      const code = await runRepl(
+        session,
+        runtime,
+        {
+          stdout: process.stdout,
+          stderr: process.stderr,
+          stdin: process.stdin,
+        },
+        {
+          switchSession,
+          newSession,
+          provider: {
+            config: runtimeConfig,
+            reloadConfig: makeConfigLoader(args, platform),
+            workspaceRoot: cwd,
+          },
+        },
+      );
+      process.stdout.write(`会话 ${holder.current.id} 已保存，nctrn -c 继续\n`);
       await holder.current.close();
       return code;
     }
-    process.on("SIGINT", () => {
-      /* REPL 自己处理 SIGINT（rl "SIGINT" 事件）；这里兜底防意外退出 */
+
+    // 非交互模式：模型文本 → stdout，其余 → stderr（render.ts 输出分流）
+    const onSigint = () => {
+      session.interrupt();
+    };
+    process.on("SIGINT", onSigint);
+    const out = createEventWriter((channel, text) => {
+      (channel === "stdout" ? process.stdout : process.stderr).write(text);
     });
-    const code = await runRepl(
-      session,
-      runtime,
-      {
-        stdout: process.stdout,
-        stderr: process.stderr,
-        stdin: process.stdin,
-      },
-      {
-        switchSession,
-        newSession,
-        provider: {
-          config: runtimeConfig,
-          reloadConfig: makeConfigLoader(args, platform),
-          workspaceRoot: cwd,
-        },
-      },
-    );
-    process.stdout.write(`会话 ${holder.current.id} 已保存，nctrn -c 继续\n`);
-    await holder.current.close();
+    const unsubscribe = session.subscribe((ev) => {
+      out.write(renderEvent(ev, "print"));
+    });
+
+    let code = 0;
+    try {
+      const reason = await session.submit({ text: prompt });
+      code = exitCodeFor(reason);
+    } catch (e) {
+      process.stderr.write(`! ${e instanceof Error ? e.message : String(e)}\n`);
+      code = 1;
+    } finally {
+      process.off("SIGINT", onSigint);
+      unsubscribe();
+      await session.close();
+    }
     return code;
-  }
-
-  // 非交互模式：模型文本 → stdout，其余 → stderr（render.ts 输出分流）
-  const onSigint = () => {
-    session.interrupt();
-  };
-  process.on("SIGINT", onSigint);
-  const out = createEventWriter((channel, text) => {
-    (channel === "stdout" ? process.stdout : process.stderr).write(text);
-  });
-  const unsubscribe = session.subscribe((ev) => {
-    out.write(renderEvent(ev, "print"));
-  });
-
-  let code = 0;
-  try {
-    const reason = await session.submit({ text: prompt });
-    code = exitCodeFor(reason);
-  } catch (e) {
-    process.stderr.write(`! ${e instanceof Error ? e.message : String(e)}\n`);
-    code = 1;
   } finally {
-    process.off("SIGINT", onSigint);
-    unsubscribe();
-    await session.close();
+    await runtime.close();
   }
-  return code;
 }
 
 main()

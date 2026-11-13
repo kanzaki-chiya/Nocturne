@@ -133,8 +133,8 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           runtime,
           computer,
           sessionsDir,
-          // 后台退出前停调度器：中止运行中的定时任务、释放锁文件
-          dispose: () => runtime.stopScheduler(),
+          // 后台退出前关闭 Runtime：停调度器、释放锁文件并终止图片处理 worker
+          dispose: () => runtime.close(),
           // 服务商配置经 RPC 开放（rpc.md 3.3）：变更方法后服务端串行重载，
           // 等价 CLI 的 updateProviders(await reloadConfig())
           providerConfig: {

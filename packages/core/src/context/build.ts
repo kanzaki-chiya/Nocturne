@@ -129,8 +129,8 @@ export function projectedTokens(
   events?: readonly DurableEvent[],
   tokenCache?: Map<string, number>,
 ): number {
-  const virtualGroups = new Map<ModelMessage, number[]>();
-  const imageGroups = new Map<ModelMessage, number[]>();
+  const virtualGroups = new Map<ModelMessage, ImageGroupInfo[]>();
+  const imageGroups = new Map<ModelMessage, ImageGroupInfo[]>();
   const projected = historyToMessages(
     history,
     model.ref.provider,
@@ -448,6 +448,11 @@ export function attachmentDescriptions(
   return out;
 }
 
+interface ImageGroupInfo {
+  count: number;
+  noteText?: string | undefined;
+}
+
 interface ImageProjectionOpts {
   descriptions?:
     ReadonlyMap<ImageAttachment, { model: string; text: string; index: number }> | undefined;
@@ -456,9 +461,9 @@ interface ImageProjectionOpts {
   data?: ReadonlyMap<string, string> | undefined;
   missing?: ImageAttachment[] | undefined;
   /** estimate 模式下每条消息各原图对应将发送的张数分组（参与 20 张上限与 token 估算） */
-  virtualGroups?: Map<ModelMessage, number[]> | undefined;
+  virtualGroups?: Map<ModelMessage, ImageGroupInfo[]> | undefined;
   /** project 模式下每条消息各原图对应实际发送的张数分组（按组整留整弃） */
-  imageGroups?: Map<ModelMessage, number[]> | undefined;
+  imageGroups?: Map<ModelMessage, ImageGroupInfo[]> | undefined;
   /**
    * project 模式：落在最新 20 张之内的引用（对象身份，与 attachmentsToLoad
    * 同源）。不在其中的直接换上限占位——Loop 只加载这 20 张，更早的本来
@@ -469,6 +474,29 @@ interface ImageProjectionOpts {
 
 function expandedImageItems(att: ImageAttachment): readonly (ImageAttachment | ProcessedImage)[] {
   return att.processed !== undefined && att.processed.length > 0 ? att.processed : [att];
+}
+
+function formatTiledUserImageNote(
+  att: ImageAttachment,
+  index: number,
+  total: number,
+): string | undefined {
+  const tiles = att.processed;
+  if (tiles === undefined || tiles.length <= 1) return undefined;
+  let order: string;
+  let dims = "";
+  if (att.width !== undefined && att.height !== undefined) {
+    order = att.height >= att.width ? "ordered top to bottom" : "ordered left to right";
+    dims = `original ${att.width}×${att.height}, `;
+  } else {
+    const first = tiles[0];
+    const second = tiles[1];
+    const vertical =
+      first !== undefined && second !== undefined ? second.region.y > first.region.y : true;
+    order = vertical ? "ordered top to bottom" : "ordered left to right";
+  }
+  const prefix = total > 1 ? `Image #${index + 1}` : "Image";
+  return `${prefix} (${dims}split into ${tiles.length} JPEG tiles ${order}, 64 px overlap)`;
 }
 
 /** 单条附件的解析结果：图片数据列表、占位/标记文本，或估算计数 */
@@ -503,26 +531,39 @@ function resolveAttachment(
 
 interface ResolvedAttachments {
   images: ModelImage[];
-  /** 占位/标记文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content） */
+  /** 占位/标记或分段说明文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content） */
   texts: string[];
-  imageGroups: number[];
-  virtualGroups: number[];
+  imageGroups: ImageGroupInfo[];
+  virtualGroups: ImageGroupInfo[];
 }
 
 function resolveAttachments(
   atts: readonly ImageAttachment[] | undefined,
   opts: ImageProjectionOpts,
+  role: "user" | "tool",
 ): ResolvedAttachments {
   const out: ResolvedAttachments = { images: [], texts: [], imageGroups: [], virtualGroups: [] };
-  for (const att of atts ?? []) {
+  const list = atts ?? [];
+  for (let i = 0; i < list.length; i++) {
+    const att = list[i];
+    if (att === undefined) continue;
     const r = resolveAttachment(att, opts);
+    const noteText = role === "user" ? formatTiledUserImageNote(att, i, list.length) : undefined;
     if (r.images !== undefined) {
+      if (noteText !== undefined) out.texts.push(noteText);
       out.images.push(...r.images);
-      out.imageGroups.push(r.images.length);
+      out.imageGroups.push({
+        count: r.images.length,
+        ...(noteText !== undefined ? { noteText } : {}),
+      });
     } else if (r.text !== undefined) {
       out.texts.push(r.text);
     } else if (r.virtualCount !== undefined) {
-      out.virtualGroups.push(r.virtualCount);
+      if (noteText !== undefined) out.texts.push(noteText);
+      out.virtualGroups.push({
+        count: r.virtualCount,
+        ...(noteText !== undefined ? { noteText } : {}),
+      });
     }
   }
   return out;
@@ -601,10 +642,32 @@ export function attachmentsToLoad(
  * 换上限占位。返回最终发出的图片数与新增占位文本的字符数（按所在消息角色细分）。
  * 估算模式的 virtual 计数同样受限（不产生占位）。
  */
+function stripDroppedNotes(
+  content: readonly ContentBlock[],
+  droppedNotes: readonly string[],
+): { content: ContentBlock[]; removedChars: number } {
+  if (droppedNotes.length === 0) return { content: [...content], removedChars: 0 };
+  const pending = [...droppedNotes];
+  const next: ContentBlock[] = [];
+  let removedChars = 0;
+  for (const block of content) {
+    if (block.type === "text") {
+      const idx = pending.indexOf(block.text);
+      if (idx >= 0) {
+        pending.splice(idx, 1);
+        removedChars += block.text.length;
+        continue;
+      }
+    }
+    next.push(block);
+  }
+  return { content: next, removedChars };
+}
+
 function enforceImageCap(
   messages: ModelMessage[],
-  virtualGroups: Map<ModelMessage, number[]>,
-  imageGroups: Map<ModelMessage, number[]>,
+  virtualGroups: Map<ModelMessage, ImageGroupInfo[]>,
+  imageGroups: Map<ModelMessage, ImageGroupInfo[]>,
 ): { count: number; addedByRole: { user: number; tool: number } } {
   let remaining = MAX_IMAGES_PER_REQUEST;
   let count = 0;
@@ -615,54 +678,77 @@ function enforceImageCap(
     const real = m.images?.length ?? 0;
     const vGroups = virtualGroups.get(m);
     if (real > 0 && m.images !== undefined) {
-      const groups = imageGroups.get(m) ?? Array.from({ length: real }, () => 1);
+      const groups: ImageGroupInfo[] =
+        imageGroups.get(m) ?? Array.from({ length: real }, () => ({ count: 1 }));
       let keptImages = 0;
       let droppedGroups = 0;
+      const droppedNotes: string[] = [];
       for (let g = groups.length - 1; g >= 0; g--) {
-        const groupSize = groups[g] ?? 1;
-        if (groupSize <= remaining) {
-          count += groupSize;
-          remaining -= groupSize;
-          keptImages += groupSize;
+        const group = groups[g] ?? { count: 1 };
+        if (group.count <= remaining) {
+          count += group.count;
+          remaining -= group.count;
+          keptImages += group.count;
         } else {
           remaining = 0;
           droppedGroups += 1;
+          if (group.noteText !== undefined) droppedNotes.push(group.noteText);
         }
       }
       if (droppedGroups > 0) {
         const kept = keptImages > 0 ? m.images.slice(m.images.length - keptImages) : [];
-        if (m.role === "user") addedByRole.user += droppedGroups * IMAGE_PLACEHOLDER_LIMIT.length;
-        else addedByRole.tool += droppedGroups * IMAGE_PLACEHOLDER_LIMIT.length;
-        messages[i] =
-          m.role === "user"
-            ? {
-                ...m,
-                content: [
-                  ...m.content,
-                  ...Array.from({ length: droppedGroups }, () => ({
-                    type: "text" as const,
-                    text: IMAGE_PLACEHOLDER_LIMIT,
-                  })),
-                ],
-                images: kept.length > 0 ? kept : undefined,
-              }
-            : {
-                ...m,
-                content: m.content + "\n".concat(IMAGE_PLACEHOLDER_LIMIT).repeat(droppedGroups),
-                images: kept.length > 0 ? kept : undefined,
-              };
+        if (m.role === "user") {
+          const stripped = stripDroppedNotes(m.content, droppedNotes);
+          addedByRole.user +=
+            droppedGroups * IMAGE_PLACEHOLDER_LIMIT.length - stripped.removedChars;
+          messages[i] = {
+            ...m,
+            content: [
+              ...stripped.content,
+              ...Array.from({ length: droppedGroups }, () => ({
+                type: "text" as const,
+                text: IMAGE_PLACEHOLDER_LIMIT,
+              })),
+            ],
+            images: kept.length > 0 ? kept : undefined,
+          };
+        } else {
+          addedByRole.tool += droppedGroups * IMAGE_PLACEHOLDER_LIMIT.length;
+          messages[i] = {
+            ...m,
+            content: m.content + "\n".concat(IMAGE_PLACEHOLDER_LIMIT).repeat(droppedGroups),
+            images: kept.length > 0 ? kept : undefined,
+          };
+        }
       }
       continue;
     }
     if (vGroups !== undefined && vGroups.length > 0) {
+      const droppedNotes: string[] = [];
       for (let g = vGroups.length - 1; g >= 0; g--) {
-        const groupSize = vGroups[g] ?? 1;
-        if (groupSize <= remaining) {
-          count += groupSize;
-          remaining -= groupSize;
+        const group = vGroups[g] ?? { count: 1 };
+        if (group.count <= remaining) {
+          count += group.count;
+          remaining -= group.count;
         } else {
           remaining = 0;
+          if (group.noteText !== undefined) droppedNotes.push(group.noteText);
         }
+      }
+      if (droppedNotes.length > 0 && m.role === "user") {
+        const stripped = stripDroppedNotes(m.content, droppedNotes);
+        addedByRole.user +=
+          droppedNotes.length * IMAGE_PLACEHOLDER_LIMIT.length - stripped.removedChars;
+        messages[i] = {
+          ...m,
+          content: [
+            ...stripped.content,
+            ...Array.from({ length: droppedNotes.length }, () => ({
+              type: "text" as const,
+              text: IMAGE_PLACEHOLDER_LIMIT,
+            })),
+          ],
+        };
       }
     }
   }
@@ -760,7 +846,7 @@ function historyToMessages(
     switch (entry.kind) {
       case "user": {
         // ADR-0023：附件按能力投影——images / 占位 text 块 / 估算计数
-        const atts = resolveAttachments(entry.attachments, imgOpts);
+        const atts = resolveAttachments(entry.attachments, imgOpts, "user");
         const blocks: ContentBlock[] = [
           ...entry.content,
           ...atts.texts.map((text) => ({ type: "text" as const, text })),
@@ -829,7 +915,7 @@ function historyToMessages(
         let content = pruned ? prunedPlaceholder(entry) : entry.modelContent;
         const atts = pruned
           ? { images: [], texts: [], imageGroups: [], virtualGroups: [] }
-          : resolveAttachments(entry.attachments, imgOpts);
+          : resolveAttachments(entry.attachments, imgOpts, "tool");
         for (const text of atts.texts) content += `\n${text}`;
         // ADR-0063 + ADR-0028：第 warnAt 次连续相同结果的循环说明与清单久未更新提醒
         // （均不写事件，由持久事件重建；位置固定在这条工具结果末尾，修剪后同样保留；
@@ -1068,8 +1154,8 @@ function anchoredEstimate(input: BuildContextInput): number | undefined {
     )
   )
     return undefined;
-  const virtualGroups = new Map<ModelMessage, number[]>();
-  const imageGroups = new Map<ModelMessage, number[]>();
+  const virtualGroups = new Map<ModelMessage, ImageGroupInfo[]>();
+  const imageGroups = new Map<ModelMessage, ImageGroupInfo[]>();
   const projection = historyToMessages(tail, ref.provider, input.model.protocol, {
     mode: input.attachmentData === undefined ? "estimate" : "project",
     supported: input.model.capabilities.imageInput,
@@ -1221,6 +1307,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       const atts = resolveAttachments(
         coveredUsers.flatMap((e) => (e.kind === "user" ? (e.attachments ?? []) : [])),
         imageOpts,
+        "user",
       );
       const blocks: ContentBlock[] = [
         { type: "text", text: REINJECTED_TASK_MARK },
@@ -1264,8 +1351,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   // 估算模式（virtual）同样受限。图片字节/base64 长度不计入字符估算。
   const imageCap = enforceImageCap(
     messages,
-    imageOpts.virtualGroups ?? new Map<ModelMessage, number[]>(),
-    imageOpts.imageGroups ?? new Map<ModelMessage, number[]>(),
+    imageOpts.virtualGroups ?? new Map<ModelMessage, ImageGroupInfo[]>(),
+    imageOpts.imageGroups ?? new Map<ModelMessage, ImageGroupInfo[]>(),
   );
   byChars.user += imageCap.addedByRole.user;
   byChars.tool += imageCap.addedByRole.tool;
