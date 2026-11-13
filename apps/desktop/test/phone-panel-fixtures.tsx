@@ -5,6 +5,7 @@ import {
   type BackgroundShellTask,
   type SubagentSummary,
   type SubagentObserver,
+  type SwarmMemberView,
 } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcClient, RpcSession } from "@nocturne/rpc/client";
 import { createAttachmentImageSource } from "../src/attachment-images";
@@ -86,10 +87,14 @@ export function PanelHarness({
   fixture,
   context,
   initial = { kind: "overview" },
+  onOpenSwarm,
+  onOpenSwarmMember,
 }: {
   fixture: ReturnType<typeof panelFixture>;
   initial?: PhonePanelPage;
   context?: PhoneContextSource;
+  onOpenSwarm?: () => void;
+  onOpenSwarmMember?: (member: SwarmMemberView) => void;
 }) {
   const [page, setPage] = useState<PhonePanelPage>(initial);
   return (
@@ -104,6 +109,8 @@ export function PanelHarness({
         onNavigate={setPage}
         onBack={() => setPage({ kind: "overview" })}
         onClose={fixture.onClose}
+        onOpenSwarm={onOpenSwarm}
+        onOpenSwarmMember={onOpenSwarmMember}
         onError={fixture.onError}
         loadDiff={fixture.loadDiff}
       />

@@ -179,10 +179,143 @@ export function swarmMentionLabel(mention: string): string {
   return `@${mention}`;
 }
 
-/** 对话入口行计数：`未移除成员数 · 帖子数` */
-export function swarmEntryCounts(swarm: Pick<SwarmView, "members" | "posts">): string {
-  const activeMembers = swarm.members.filter((m) => m.status !== "removed").length;
-  return `${activeMembers} · ${swarm.posts.length}`;
+/** 成员头像调色板（按加入顺序轮流取用，与协调者/用户/Runtime 错开） */
+export const SWARM_AUTHOR_PALETTE = [
+  "var(--a-cat1)",
+  "var(--a-cat2)",
+  "var(--a-cat3)",
+  "var(--a-cat4)",
+  "var(--a-cat5)",
+] as const;
+
+/**
+ * 作者头像颜色：成员按在 `members`（加入顺序，含已移除成员）中的位置轮流取
+ * `--a-cat1`..`--a-cat5`，同一名成员颜色固定；协调者、用户、Runtime 返回 `undefined`（不上色）。
+ */
+export function swarmAuthorColor(
+  members: readonly Pick<SwarmMemberView, "name">[],
+  author: string,
+  fromKind: SwarmAuthorKind = "member",
+): string | undefined {
+  if (fromKind !== "member") return undefined;
+  const index = members.findIndex((member) => member.name === author);
+  if (index < 0) return undefined;
+  return SWARM_AUTHOR_PALETTE[index % SWARM_AUTHOR_PALETTE.length];
+}
+
+/** 成员的模型或档位显示（优先档位名，否则去前缀后的模型名） */
+export function swarmMemberMetaLabel(member: Pick<SwarmMemberView, "model" | "profile">): string {
+  const profile = member.profile?.trim();
+  return profile !== undefined && profile !== "" ? profile : shortModelName(member.model);
+}
+
+/**
+ * 帖子头显示的收件人列表：从 `mentions` 中去掉作者自身
+ * （成员作者去掉 `post.from`，协调者作者去掉 `"coordinator"`）。
+ */
+export function swarmPostRecipients(
+  post: Pick<SwarmPostView, "from" | "fromKind" | "mentions">,
+): string[] {
+  const self = post.fromKind === "coordinator" ? "coordinator" : post.from;
+  return post.mentions.filter((mention) => mention !== self);
+}
+
+export interface SwarmMentionToken {
+  start: number;
+  end: number;
+  query: string;
+}
+
+export interface SwarmMentionCandidate {
+  kind: "coordinator" | "member" | "group" | "all";
+  /** 填入 `@<insert> ` 的名字 */
+  insert: string;
+  /** 列表主显示文字 */
+  label: string;
+  /** 淡色后缀（模型或档位） */
+  meta?: string | undefined;
+  /** 成员头像颜色 token */
+  color?: string | undefined;
+}
+
+/**
+ * 识别发帖框光标前的 `@` 补全词：光标前是 `@` 加零个或多个名字字符时返回起止位置与已输前缀，
+ * 若 `@` 紧跟在英文/数字/路径字符后（如邮箱）则返回 `null`。
+ */
+export function swarmMentionToken(value: string, cursor: number): SwarmMentionToken | null {
+  const clamped = Math.max(0, Math.min(cursor, value.length));
+  const before = value.slice(0, clamped);
+  const at = before.lastIndexOf("@");
+  if (at < 0) return null;
+  if (at > 0 && /[A-Za-z0-9_./-]/.test(before[at - 1] ?? "")) return null;
+  const query = before.slice(at + 1);
+  if (!/^[A-Za-z0-9\u4e00-\u9fa5-]*$/u.test(query)) return null;
+  return { start: at, end: clamped, query };
+}
+
+/**
+ * 生成 `@` 补全候选（依次：协调者、未移除成员、同前缀组、`all`），按输入前缀不区分大小写过滤。
+ */
+export function swarmMentionCandidates(
+  swarm: Pick<SwarmView, "coordinator" | "members">,
+  query: string,
+): SwarmMentionCandidate[] {
+  const needle = query.trim().toLowerCase();
+  const out: SwarmMentionCandidate[] = [];
+
+  const coordModel = shortModelName(swarm.coordinator.model);
+  if (needle === "" || "coordinator".startsWith(needle) || "协调者".startsWith(needle)) {
+    out.push({
+      kind: "coordinator",
+      insert: "coordinator",
+      label: "协调者",
+      ...(coordModel !== "" ? { meta: coordModel } : {}),
+    });
+  }
+
+  const activeMembers = swarm.members.filter((member) => member.status !== "removed");
+  const activeNames = new Set(activeMembers.map((member) => member.name));
+  const groupCounts = new Map<string, number>();
+
+  for (const member of activeMembers) {
+    const match = /^(.+)-(\d+)$/.exec(member.name);
+    if (match !== null) {
+      const prefix = match[1] ?? "";
+      if (prefix !== "") groupCounts.set(prefix, (groupCounts.get(prefix) ?? 0) + 1);
+    }
+    if (needle === "" || member.name.toLowerCase().startsWith(needle)) {
+      const meta = swarmMemberMetaLabel(member);
+      const color = swarmAuthorColor(swarm.members, member.name, "member");
+      out.push({
+        kind: "member",
+        insert: member.name,
+        label: member.name,
+        ...(meta !== "" ? { meta } : {}),
+        ...(color !== undefined ? { color } : {}),
+      });
+    }
+  }
+
+  for (const [prefix, count] of groupCounts) {
+    if (count < 2 || activeNames.has(prefix)) continue;
+    if (needle === "" || prefix.toLowerCase().startsWith(needle)) {
+      out.push({
+        kind: "group",
+        insert: prefix,
+        label: `@${prefix}`,
+      });
+    }
+  }
+
+  if (needle === "" || "all".startsWith(needle)) {
+    out.push({
+      kind: "all",
+      insert: "all",
+      label: "all",
+    });
+  }
+
+  return out;
 }
 
 /** 留言板按成员筛选（`from` 或 `recipients`）与正文/作者不区分大小写子串搜索 */

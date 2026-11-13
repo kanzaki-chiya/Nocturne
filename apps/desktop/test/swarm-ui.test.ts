@@ -8,11 +8,14 @@ import {
   shortModelName,
   splitSwarmMentions,
   swarmActivitySummary,
+  swarmAuthorColor,
   swarmAuthorLabel,
   swarmCoordinatorDot,
-  swarmEntryCounts,
   swarmMemberDot,
+  swarmMentionCandidates,
   swarmMentionLabel,
+  swarmMentionToken,
+  swarmPostRecipients,
   swarmStatusDot,
   swarmToolSummary,
 } from "../src/swarm-ui";
@@ -48,7 +51,7 @@ function makePost(number: number, overrides: Partial<SwarmPostView> = {}): Swarm
 
 describe("toolMeta Swarm 工具标签与参数", () => {
   it("七个 Swarm 工具显示规定的标签", () => {
-    expect(toolMeta("swarm_init").label).toBe("Swarm");
+    expect(toolMeta("swarm_init").label).toBe("合奏");
     expect(toolMeta("swarm_add_member").label).toBe("添加");
     expect(toolMeta("swarm_post").label).toBe("发帖");
     expect(toolMeta("swarm_change_model").label).toBe("换模型");
@@ -193,7 +196,7 @@ describe("作者、提及、筛选、搜索与分组", () => {
     expect(swarmMemberDot(mRemoved, "ended")).toBe("retired");
   });
 
-  it("入口行计数只计未移除成员，状态点区分 ok / warn / 已结束无点", () => {
+  it("状态点区分 ok / warn / 已结束无点", () => {
     const swarm: SwarmView = {
       createdSeq: 2,
       title: "API 输入校验",
@@ -211,7 +214,6 @@ describe("作者、提及、筛选、搜索与分组", () => {
       awaitingPermissionMembers: [],
       posts: [makePost(1), makePost(2), makePost(3)],
     };
-    expect(swarmEntryCounts(swarm)).toBe("2 · 3");
     expect(swarmStatusDot(swarm)).toBe("ok");
     expect(swarmStatusDot({ ...swarm, awaitingPermissionMembers: ["orders"] })).toBe("warn");
     expect(
@@ -245,5 +247,99 @@ describe("作者、提及、筛选、搜索与分组", () => {
     expect(shortModelName("anthropic/claude-opus-5.5")).toBe("claude-opus-5.5");
     expect(formatSwarmTime("invalid")).toBe("");
     expect(formatSwarmTime("2026-11-12T13:05:00.000Z")).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it("swarmAuthorColor 按加入顺序轮转 --a-cat1..5，移除后颜色不变，协调者/用户/Runtime 返回 undefined", () => {
+    const members = [
+      makeMember("m1"),
+      makeMember("m2", { status: "removed" }),
+      makeMember("m3"),
+      makeMember("m4"),
+      makeMember("m5"),
+      makeMember("m6"),
+    ];
+    expect(swarmAuthorColor(members, "m1", "member")).toBe("var(--a-cat1)");
+    expect(swarmAuthorColor(members, "m2", "member")).toBe("var(--a-cat2)");
+    expect(swarmAuthorColor(members, "m3", "member")).toBe("var(--a-cat3)");
+    expect(swarmAuthorColor(members, "m4", "member")).toBe("var(--a-cat4)");
+    expect(swarmAuthorColor(members, "m5", "member")).toBe("var(--a-cat5)");
+    expect(swarmAuthorColor(members, "m6", "member")).toBe("var(--a-cat1)");
+    expect(swarmAuthorColor(members, "coordinator", "coordinator")).toBeUndefined();
+    expect(swarmAuthorColor(members, "user", "user")).toBeUndefined();
+    expect(swarmAuthorColor(members, "runtime", "runtime")).toBeUndefined();
+  });
+
+  it("swarmPostRecipients 去掉作者自己，协调者去掉 coordinator", () => {
+    expect(
+      swarmPostRecipients({
+        from: "cli-1",
+        fromKind: "member",
+        mentions: ["coordinator", "data-1", "cli-1"],
+      }),
+    ).toEqual(["coordinator", "data-1"]);
+    expect(
+      swarmPostRecipients({
+        from: "coordinator",
+        fromKind: "coordinator",
+        mentions: ["coordinator", "api-1"],
+      }),
+    ).toEqual(["api-1"]);
+    expect(
+      swarmPostRecipients({
+        from: "coordinator",
+        fromKind: "coordinator",
+        mentions: ["coordinator"],
+      }),
+    ).toEqual([]);
+  });
+
+  it("swarmMentionToken 与 swarmMentionCandidates：顺序、组提及阈值、移除过滤与前缀匹配", () => {
+    expect(swarmMentionToken("@", 1)).toEqual({ start: 0, end: 1, query: "" });
+    expect(swarmMentionToken("请 @d", 4)).toEqual({ start: 2, end: 4, query: "d" });
+    expect(swarmMentionToken("a@b", 3)).toBeNull();
+    expect(swarmMentionToken("@api ", 5)).toBeNull();
+
+    const swarm: SwarmView = {
+      createdSeq: 1,
+      title: "联调",
+      status: "active",
+      coordinator: {
+        model: { provider: "anthropic", model: "claude-opus-5.5" },
+        status: "waiting",
+        awaitingPermission: false,
+      },
+      members: [
+        makeMember("api-1", { profile: "deep" }),
+        makeMember("api-2"),
+        makeMember("ui-1"),
+        makeMember("ui-2", { status: "removed" }),
+        makeMember("data-1"),
+      ],
+      awaitingPermissionMembers: [],
+      posts: [],
+    };
+    const all = swarmMentionCandidates(swarm, "");
+    expect(all.map((c) => c.insert)).toEqual([
+      "coordinator",
+      "api-1",
+      "api-2",
+      "ui-1",
+      "data-1",
+      "api",
+      "all",
+    ]);
+    expect(all[0]).toMatchObject({ label: "协调者", meta: "claude-opus-5.5" });
+    expect(all[1]).toMatchObject({ label: "api-1", meta: "deep" });
+    expect(all.find((c) => c.insert === "api")).toMatchObject({ kind: "group", label: "@api" });
+    expect(all.find((c) => c.insert === "ui")).toBeUndefined();
+
+    expect(swarmMentionCandidates(swarm, "D").map((c) => c.insert)).toEqual(["data-1"]);
+    expect(swarmMentionCandidates(swarm, "A").map((c) => c.insert)).toEqual([
+      "api-1",
+      "api-2",
+      "api",
+      "all",
+    ]);
+    expect(swarmMentionCandidates(swarm, "zzz")).toEqual([]);
   });
 });

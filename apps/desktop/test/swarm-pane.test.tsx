@@ -147,12 +147,15 @@ function openMembers() {
 }
 
 describe("Swarm 面板留言板", () => {
-  it("帖子头部显示作者、箭头与 mentions（协调者、你、Runtime、@member、@all）", () => {
+  it("帖子头部显示头像、作者、箭头与剔除作者后的收件人，无收件人不显示箭头", () => {
     const page = renderPane({
       swarm: makeSwarm({
         members: [makeMember("users"), makeMember("orders")],
         posts: [
-          makePost(1, { mentions: ["users", "all"], text: "请 @users 与 @all 看这里" }),
+          makePost(1, {
+            mentions: ["coordinator", "users", "all"],
+            text: "请 @users 与 @all 看这里 @coordinator",
+          }),
           makePost(2, { from: "user", fromKind: "user", mentions: [], text: "我来补充" }),
           makePost(3, {
             from: "runtime",
@@ -160,23 +163,35 @@ describe("Swarm 面板留言板", () => {
             mentions: ["coordinator"],
             text: "Quiet reminder: @coordinator 没有新帖\n请继续",
           }),
-          makePost(4, { from: "users", fromKind: "member", mentions: [] }),
+          makePost(4, { from: "users", fromKind: "member", mentions: ["users"] }),
+          makePost(5, {
+            from: "orders",
+            fromKind: "member",
+            mentions: ["coordinator", "users", "orders"],
+          }),
         ],
       }),
     });
 
+    expect(nodes(page.container, ".swarm-post > .swarm-av")).toHaveLength(5);
     expect(texts(page.container, ".swarm-post-from")).toEqual([
-      "协调者 → @users @all",
+      "协调者",
       "你",
-      "Runtime → 协调者",
+      "Runtime",
       "@users",
+      "@orders",
     ]);
-    expect(texts(page.container, ".swarm-post-to b")).toEqual(["@users", "@all", "协调者"]);
+    expect(texts(page.container, ".swarm-post-to")).toEqual([
+      " → @users @all",
+      " → 协调者",
+      " → 协调者 @users",
+    ]);
     expect(texts(page.container, ".swarm-post-meta")).toEqual([
       `#1 · ${TIME_LABEL}`,
       `#2 · ${TIME_LABEL}`,
       `#3 · ${TIME_LABEL}`,
       `#4 · ${TIME_LABEL}`,
+      `#5 · ${TIME_LABEL}`,
     ]);
     // Runtime 帖正文原样纯文本，不做 Markdown
     expect(page.container.querySelector(".swarm-post.sys .swarm-sys-text")?.textContent).toBe(
@@ -391,6 +406,70 @@ describe("Swarm 面板留言板", () => {
     expect(alert.textContent).toBe("swarm 已结束，无法发帖");
     expect(page.container.querySelector(".swarm-boardin")?.firstElementChild).toBe(alert);
     expect(field.value).toBe("要不要并回");
+  });
+
+  it("发帖框 @ 补全：候选顺序、前缀筛选、组提及、已移除成员排除、键盘填入带空格且不发帖、组字期间不弹", () => {
+    const session = makeSession();
+    const page = renderPane({
+      swarm: makeSwarm({
+        members: [
+          makeMember("api-1", { profile: "deep" }),
+          makeMember("api-2"),
+          makeMember("data-1"),
+          makeMember("old-1", { status: "removed" }),
+        ],
+      }),
+      session,
+    });
+    const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
+
+    // 组字期间不弹
+    fireEvent.compositionStart(field);
+    fireEvent.change(field, { target: { value: "@", selectionStart: 1 } });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.compositionEnd(field, { target: { selectionStart: 1 } });
+
+    const list = screen.getByRole("listbox", { name: "提及补全" });
+    const optionNames = Array.from(list.querySelectorAll(".swarm-ac-name")).map(
+      (el) => el.textContent,
+    );
+    expect(optionNames).toEqual(["协调者", "api-1", "api-2", "data-1", "@api", "all"]);
+    expect(list.textContent).not.toContain("old-1");
+    expect(list.textContent).toContain("deep");
+
+    // 向下选 api-1 后 Enter 填入，不发帖且末尾带空格
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(session.postToSwarm).not.toHaveBeenCalled();
+    expect(field.value).toBe("@api-1 ");
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    // 输入 @d 前缀筛选，Tab 填入
+    fireEvent.change(field, { target: { value: "@api-1 请问 @d", selectionStart: 12 } });
+    const filtered = screen.getByRole("listbox", { name: "提及补全" });
+    expect(
+      Array.from(filtered.querySelectorAll(".swarm-ac-name")).map((e) => e.textContent),
+    ).toEqual(["data-1"]);
+    fireEvent.keyDown(field, { key: "Tab" });
+    expect(field.value).toBe("@api-1 请问 @data-1 ");
+
+    // 无匹配时不弹
+    fireEvent.change(field, { target: { value: "@zzz", selectionStart: 4 } });
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    // Esc 关闭弹层，点击填入
+    fireEvent.change(field, { target: { value: "@a", selectionStart: 2 } });
+    expect(screen.getByRole("listbox")).not.toBeNull();
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.change(field, { target: { value: "找 @", selectionStart: 3 } });
+    const options = screen.getAllByRole("option");
+    const firstOption = options[0];
+    if (!firstOption) throw new Error("missing option");
+    fireEvent.click(firstOption);
+    expect(field.value).toBe("找 @coordinator ");
+    expect(page.container.querySelectorAll(".swarm-ac")).toHaveLength(0);
   });
 });
 

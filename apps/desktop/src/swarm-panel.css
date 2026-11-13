@@ -139,23 +139,46 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-5);
   padding: var(--space-3);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.swarm-av {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  color: var(--a-secondary);
+}
+.swarm-av.sm {
+  width: var(--space-5);
+  height: var(--space-5);
+}
+.swarm-av.tinted {
+  /* stylelint-disable-next-line function-disallowed-list -- 成员头像底色用 14% 淡化 */
+  background: color-mix(in srgb, var(--swarm-av-color) 14%, transparent);
+  color: var(--swarm-av-color);
+}
+.swarm-av.warn {
+  outline: 1.5px solid var(--a-warning);
+}
 .swarm-post {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.swarm-post-col {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: 0 0 0 var(--space-3);
-  border-left: 2px solid var(--a-border-strong);
-}
-.swarm-post.user {
-  border-left-color: var(--a-accentAlt);
-}
-.swarm-post.sys {
-  border-left-color: var(--a-warning);
 }
 .swarm-post-head {
   display: flex;
@@ -163,28 +186,35 @@
   justify-content: space-between;
   gap: var(--space-2);
 }
+.swarm-post-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
 .swarm-post-from {
   min-width: 0;
-  color: var(--a-accent);
-  font-family: var(--mono);
-  font-size: var(--fs-1);
+  color: var(--a-text);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-semibold);
   overflow-wrap: anywhere;
 }
 .swarm-post-to {
   color: var(--a-muted);
-}
-.swarm-post-to b {
-  color: var(--a-accent);
-  font-weight: var(--fw-medium);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-regular);
+  overflow-wrap: anywhere;
 }
 .swarm-post-meta {
   flex: none;
+  margin-left: auto;
   color: var(--a-faint);
   font: var(--fs-1)/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .swarm-post-txt {
-  color: var(--a-secondary);
+  color: var(--a-text);
   overflow-wrap: anywhere;
 }
 .swarm-post-txt .conversation-markdown > :first-child {
@@ -210,14 +240,57 @@
   font-size: var(--fs-1);
 }
 
-/* ── 底部留言板输入 ── */
+/* ── 底部留言板输入与 @ 补全 ── */
 .swarm-boardin {
+  position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--a-border);
+}
+.swarm-ac {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + var(--space-1));
+  left: var(--space-3);
+  right: var(--space-3);
+  max-height: 224px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
+  box-shadow: var(--shadow-popover);
+}
+.swarm-ac-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+.swarm-ac-row.is-active,
+.swarm-ac-row:hover {
+  background: var(--a-sel);
+}
+.swarm-ac-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-text);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.swarm-ac-meta {
+  margin-left: auto;
+  color: var(--a-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  white-space: nowrap;
 }
 .swarm-boardin textarea {
   width: 100%;
@@ -266,10 +339,9 @@
 .swarm-mem-main {
   flex: 1;
   min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-0-5) var(--space-2);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
   padding: var(--space-2);
   border: 0;
   border-radius: var(--radius-2);
@@ -278,6 +350,19 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+.swarm-mem-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+.swarm-mem-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 .swarm-mem-name {
   min-width: 0;
@@ -295,12 +380,12 @@
   font-style: normal;
 }
 .swarm-mem-no {
+  margin-left: auto;
   color: var(--a-faint);
   font: var(--fs-1)/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .swarm-mem-last {
-  grid-column: 2 / -1;
   min-width: 0;
   overflow: hidden;
   color: var(--a-muted);
@@ -393,7 +478,11 @@
   font-size: var(--fs-2);
 }
 .phone .swarm-body {
-  gap: var(--space-3);
+  gap: var(--space-4);
+}
+.phone .swarm-post > .swarm-av {
+  width: var(--space-5);
+  height: var(--space-5);
 }
 .phone .swarm-post-txt {
   font-size: var(--fs-3);
@@ -406,4 +495,7 @@
 }
 .phone .swarm-boardin textarea {
   font-size: var(--fs-4);
+}
+.phone .swarm-ac-row {
+  min-height: var(--ctl-h-touch);
 }

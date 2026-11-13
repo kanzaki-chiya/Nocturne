@@ -121,6 +121,41 @@
 .phone-panel-summary {
   font-size: var(--fs-2);
 }
+.phone-swarm-summary {
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+}
+.phone-swarm-summary.warn {
+  color: var(--a-warning);
+}
+.phone-swarm-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.phone-swarm-name {
+  flex: none;
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
+}
+.phone-swarm-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-muted);
+  font: var(--fs-1) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone-swarm-tag {
+  flex: none;
+  color: var(--a-muted);
+  font: var(--fs-1) var(--mono);
+  white-space: nowrap;
+}
+.phone .phone-panel-row.phone-swarm-head {
+  min-height: 40px;
+}
 .phone-panel-name {
   display: block;
   font-size: var(--fs-3);

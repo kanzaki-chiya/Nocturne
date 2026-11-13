@@ -7,6 +7,8 @@
  */
 import {
   Fragment,
+  useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -18,16 +20,23 @@ import type { RpcSession } from "@nocturne/rpc/client";
 
 import { Markdown, type FileLinkHooks } from "./Conversation";
 import { Menu, MenuItem } from "./Menu";
+import { SwarmAvatar } from "./SwarmAvatar";
 import {
   filterSwarmPosts,
   formatSwarmTime,
   groupSwarmMembers,
   shortModelName,
   swarmActivitySummary,
+  swarmAuthorColor,
   swarmAuthorLabel,
   swarmCoordinatorDot,
   swarmMemberDot,
+  swarmMemberMetaLabel,
+  swarmMentionCandidates,
   swarmMentionLabel,
+  swarmMentionToken,
+  swarmPostRecipients,
+  type SwarmMentionCandidate,
 } from "./swarm-ui";
 import { ICON_MD, ICON_SM, Icon } from "./ui";
 import "./swarm-panel.css";
@@ -81,6 +90,10 @@ export function SwarmPane({
   const [follow, setFollow] = useState(true);
   const [retiredOpen, setRetiredOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [caret, setCaret] = useState(0);
+  const [composingState, setComposingState] = useState(false);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -89,11 +102,42 @@ export function SwarmPane({
   const previousScrollTop = useRef(0);
   const searchField = useRef<HTMLInputElement>(null);
   const boardField = useRef<HTMLTextAreaElement>(null);
+  const pendingCaret = useRef<number | null>(null);
   const composing = useRef(false);
   const sending = useRef(false);
+  const mentionListId = useId();
 
   const shown = visible !== false;
   const postCount = swarm.posts.length;
+  const active = swarm.status === "active";
+
+  const mentionToken =
+    !composingState && active && tab === "board" ? swarmMentionToken(draft, caret) : null;
+  const mentionCandidates =
+    mentionToken !== null && dismissedAt !== mentionToken.start
+      ? swarmMentionCandidates(swarm, mentionToken.query)
+      : [];
+  const mentionOpen = mentionCandidates.length > 0;
+  const activeMentionIndex = Math.min(mentionIndex, Math.max(0, mentionCandidates.length - 1));
+  const mentionQueryKey = mentionToken?.query ?? "";
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionQueryKey, mentionToken?.start]);
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const node = document.getElementById(`${mentionListId}-${activeMentionIndex}`);
+    if (node && "scrollIntoView" in node) node.scrollIntoView({ block: "nearest" });
+  }, [mentionOpen, activeMentionIndex, mentionListId]);
+
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null) return;
+    const pos = pendingCaret.current;
+    pendingCaret.current = null;
+    boardField.current?.setSelectionRange(pos, pos);
+    setCaret(pos);
+  }, [draft]);
 
   // 跟随最新：新帖、首次挂载、面板回到可见、切回留言板或换了筛选/搜索词时贴底
   useLayoutEffect(() => {
@@ -125,12 +169,24 @@ export function SwarmPane({
       () => {
         sending.current = false;
         setDraft("");
+        setCaret(0);
+        setDismissedAt(null);
       },
       (cause: unknown) => {
         sending.current = false;
         setBoardError(errorText(cause));
       },
     );
+  };
+
+  const applyMention = (candidate: SwarmMentionCandidate) => {
+    if (mentionToken === null) return;
+    const inserted = `@${candidate.insert} `;
+    const next = draft.slice(0, mentionToken.start) + inserted + draft.slice(mentionToken.end);
+    pendingCaret.current = mentionToken.start + inserted.length;
+    setDismissedAt(null);
+    setDraft(next);
+    boardField.current?.focus();
   };
 
   const end = () => {
@@ -162,14 +218,41 @@ export function SwarmPane({
   };
 
   const onBoardKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (composing.current || event.nativeEvent.isComposing) return;
+    if (mentionOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setMentionIndex((index) => (index + 1) % mentionCandidates.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setMentionIndex(
+          (index) => (index - 1 + mentionCandidates.length) % mentionCandidates.length,
+        );
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        const picked = mentionCandidates[activeMentionIndex];
+        if (picked !== undefined) {
+          event.preventDefault();
+          applyMention(picked);
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (mentionToken !== null) setDismissedAt(mentionToken.start);
+        return;
+      }
+    }
     if (event.key !== "Enter") return;
     if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
-    if (composing.current || event.nativeEvent.isComposing) return;
     event.preventDefault();
     send();
   };
 
-  const active = swarm.status === "active";
   const posts = filterSwarmPosts(swarm.posts, {
     member: selectedMember,
     query,
@@ -183,6 +266,7 @@ export function SwarmPane({
     const summary = swarmActivitySummary(member.activity);
     const retired = member.status === "removed";
     const removable = active && !retired;
+    const color = swarmAuthorColor(swarm.members, member.name, "member");
     return (
       <div
         key={member.name}
@@ -201,20 +285,25 @@ export function SwarmPane({
             onOpenMember(member);
           }}
         >
-          <span
-            className={`swarm-dot ${swarmMemberDot(member, swarm.status)}`}
-            aria-hidden="true"
-          />
-          <span className="swarm-mem-name">
-            {member.name}
-            <i>{shortModelName(member.model)}</i>
+          <SwarmAvatar kind="member" color={color} size="sm" />
+          <span className="swarm-mem-col">
+            <span className="swarm-mem-top">
+              <span
+                className={`swarm-dot ${swarmMemberDot(member, swarm.status)}`}
+                aria-hidden="true"
+              />
+              <span className="swarm-mem-name">
+                {member.name}
+                <i>{swarmMemberMetaLabel(member)}</i>
+              </span>
+              {member.lastPostNumber !== undefined ? (
+                <span className="swarm-mem-no">{`#${member.lastPostNumber}`}</span>
+              ) : (
+                <span className="swarm-mem-no" />
+              )}
+            </span>
+            {summary !== "" && <span className="swarm-mem-last">{summary}</span>}
           </span>
-          {member.lastPostNumber !== undefined ? (
-            <span className="swarm-mem-no">{`#${member.lastPostNumber}`}</span>
-          ) : (
-            <span className="swarm-mem-no" />
-          )}
-          {summary !== "" && <span className="swarm-mem-last">{summary}</span>}
         </button>
         {removable && (
           <button
@@ -239,6 +328,7 @@ export function SwarmPane({
 
   const post = (item: SwarmPostView) => {
     const time = formatSwarmTime(item.time);
+    const recipients = swarmPostRecipients(item);
     const charter =
       item.charterOf !== undefined
         ? swarm.members.find((member) => member.name === item.charterOf)?.charter
@@ -246,56 +336,60 @@ export function SwarmPane({
     const className = `swarm-post${item.fromKind === "user" ? " user" : ""}${
       item.fromKind === "runtime" && item.charterOf === undefined ? " sys" : ""
     }`;
+    const avatarColor = swarmAuthorColor(swarm.members, item.from, item.fromKind);
     return (
       <article key={item.seq} className={className}>
-        <div className="swarm-post-head">
-          <span className="swarm-post-from">
-            {swarmAuthorLabel(item.from, item.fromKind)}
-            {item.mentions.length > 0 && (
-              <span className="swarm-post-to">
-                {" → "}
-                {item.mentions.map((mention, index) => (
-                  <Fragment key={mention}>
-                    {index > 0 ? " " : null}
-                    <b>{swarmMentionLabel(mention)}</b>
-                  </Fragment>
-                ))}
-              </span>
+        <SwarmAvatar kind={item.fromKind} color={avatarColor} />
+        <div className="swarm-post-col">
+          <div className="swarm-post-head">
+            <span className="swarm-post-head-main">
+              <span className="swarm-post-from">{swarmAuthorLabel(item.from, item.fromKind)}</span>
+              {recipients.length > 0 && (
+                <span className="swarm-post-to">
+                  {" → "}
+                  {recipients.map((mention, index) => (
+                    <Fragment key={mention}>
+                      {index > 0 ? " " : null}
+                      <span>{swarmMentionLabel(mention)}</span>
+                    </Fragment>
+                  ))}
+                </span>
+              )}
+            </span>
+            <span className="swarm-post-meta">{`#${item.number}${
+              time !== "" ? ` · ${time}` : ""
+            }`}</span>
+          </div>
+          <div className="swarm-post-txt">
+            {charter !== undefined ? (
+              <>
+                <div className="swarm-charter-row">
+                  <span className="swarm-charter-tag">负责</span>
+                  <span>{charter.owns}</span>
+                </div>
+                <div className="swarm-charter-row">
+                  <span className="swarm-charter-tag">不碰</span>
+                  <span>{charter.handsOff}</span>
+                </div>
+                <div className="swarm-charter-row">
+                  <span className="swarm-charter-tag">完成</span>
+                  <span>{charter.doneWhen}</span>
+                </div>
+              </>
+            ) : item.fromKind === "runtime" ? (
+              <div className="swarm-sys-text">{item.text}</div>
+            ) : (
+              <Markdown
+                text={item.text}
+                openUrl={openUrl}
+                mentions={item.mentions}
+                session={
+                  typeof session.resolveFiles === "function" ? (session as RpcSession) : undefined
+                }
+                fileLinks={fileLinks}
+              />
             )}
-          </span>
-          <span className="swarm-post-meta">{`#${item.number}${
-            time !== "" ? ` · ${time}` : ""
-          }`}</span>
-        </div>
-        <div className="swarm-post-txt">
-          {charter !== undefined ? (
-            <>
-              <div className="swarm-charter-row">
-                <span className="swarm-charter-tag">负责</span>
-                <span>{charter.owns}</span>
-              </div>
-              <div className="swarm-charter-row">
-                <span className="swarm-charter-tag">不碰</span>
-                <span>{charter.handsOff}</span>
-              </div>
-              <div className="swarm-charter-row">
-                <span className="swarm-charter-tag">完成</span>
-                <span>{charter.doneWhen}</span>
-              </div>
-            </>
-          ) : item.fromKind === "runtime" ? (
-            <div className="swarm-sys-text">{item.text}</div>
-          ) : (
-            <Markdown
-              text={item.text}
-              openUrl={openUrl}
-              mentions={item.mentions}
-              session={
-                typeof session.resolveFiles === "function" ? (session as RpcSession) : undefined
-              }
-              fileLinks={fileLinks}
-            />
-          )}
+          </div>
         </div>
       </article>
     );
@@ -440,6 +534,31 @@ export function SwarmPane({
           </div>
           {active && (
             <div className="swarm-boardin">
+              {mentionOpen && (
+                <div className="swarm-ac" role="listbox" aria-label="提及补全" id={mentionListId}>
+                  {mentionCandidates.map((candidate, index) => (
+                    <div
+                      key={`${candidate.kind}:${candidate.insert}`}
+                      id={`${mentionListId}-${index}`}
+                      role="option"
+                      aria-selected={index === activeMentionIndex}
+                      className={`swarm-ac-row${index === activeMentionIndex ? " is-active" : ""}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                      }}
+                      onClick={() => {
+                        applyMention(candidate);
+                      }}
+                    >
+                      <SwarmAvatar kind={candidate.kind} color={candidate.color} size="sm" />
+                      <span className="swarm-ac-name">{candidate.label}</span>
+                      {candidate.meta !== undefined && (
+                        <span className="swarm-ac-meta">{candidate.meta}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               {boardError !== null && (
                 <p className="conversation-error" role="alert">
                   {boardError}
@@ -448,16 +567,30 @@ export function SwarmPane({
               <textarea
                 ref={boardField}
                 aria-label="留言板"
+                aria-autocomplete="list"
+                aria-expanded={mentionOpen}
+                aria-controls={mentionOpen ? mentionListId : undefined}
+                aria-activedescendant={
+                  mentionOpen ? `${mentionListId}-${activeMentionIndex}` : undefined
+                }
                 rows={1}
                 value={draft}
+                onSelect={(event) => {
+                  setCaret(event.currentTarget.selectionStart);
+                }}
                 onChange={(event) => {
+                  setDismissedAt(null);
+                  setCaret(event.currentTarget.selectionStart);
                   setDraft(event.target.value);
                 }}
                 onCompositionStart={() => {
                   composing.current = true;
+                  setComposingState(true);
                 }}
-                onCompositionEnd={() => {
+                onCompositionEnd={(event) => {
                   composing.current = false;
+                  setComposingState(false);
+                  setCaret(event.currentTarget.selectionStart);
                 }}
                 onKeyDown={onBoardKeyDown}
               />
@@ -474,19 +607,24 @@ export function SwarmPane({
                 onSelectCoordinator?.();
               }}
             >
-              <span className={`swarm-dot ${swarmCoordinatorDot(swarm)}`} aria-hidden="true" />
-              <span className="swarm-mem-name">
-                协调者
-                {coordinatorModel !== "" ? <i>{coordinatorModel}</i> : null}
+              <SwarmAvatar kind="coordinator" size="sm" />
+              <span className="swarm-mem-col">
+                <span className="swarm-mem-top">
+                  <span className={`swarm-dot ${swarmCoordinatorDot(swarm)}`} aria-hidden="true" />
+                  <span className="swarm-mem-name">
+                    协调者
+                    {coordinatorModel !== "" ? <i>{coordinatorModel}</i> : null}
+                  </span>
+                  {swarm.coordinator.lastPostNumber !== undefined ? (
+                    <span className="swarm-mem-no">{`#${swarm.coordinator.lastPostNumber}`}</span>
+                  ) : (
+                    <span className="swarm-mem-no" />
+                  )}
+                </span>
+                {coordinatorSummary !== "" && (
+                  <span className="swarm-mem-last">{coordinatorSummary}</span>
+                )}
               </span>
-              {swarm.coordinator.lastPostNumber !== undefined ? (
-                <span className="swarm-mem-no">{`#${swarm.coordinator.lastPostNumber}`}</span>
-              ) : (
-                <span className="swarm-mem-no" />
-              )}
-              {coordinatorSummary !== "" && (
-                <span className="swarm-mem-last">{coordinatorSummary}</span>
-              )}
             </button>
           </div>
           {groups.working.length > 0 && (

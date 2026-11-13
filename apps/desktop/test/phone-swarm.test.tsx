@@ -256,15 +256,41 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   await act(async () => {
     container.querySelector<HTMLButtonElement>(".phone-row")?.click();
   });
+  // 对话区没有入口行和「成员数 · 帖子数」计数
   await vi.waitFor(() => {
-    expect(container.querySelector(".swarmrow")).not.toBeNull();
+    expect(container.querySelector(".conversation-transcript")).not.toBeNull();
   });
-  expect(container.querySelector(".swarmrow")?.textContent).toContain("API 输入校验");
-  expect(container.querySelector(".swarmrow")?.textContent).toContain("1 · 1");
+  expect(container.querySelector(".swarmrow")).toBeNull();
+  expect(container.textContent).not.toContain("1 · 1");
 
-  // 点入口行推入全屏 Swarm 页
+  // 打开侧边栏：看到「合奏」分组，点成员行进成员会话页，安卓返回回到侧边栏
   await act(async () => {
-    container.querySelector<HTMLButtonElement>(".swarmrow")?.click();
+    container.querySelector<HTMLButtonElement>('[aria-label="侧边栏"]')?.click();
+  });
+  await vi.waitFor(() => {
+    expect(container.querySelector('#phone-side-panel [aria-label="合奏"]')).not.toBeNull();
+  });
+  const sideRows = container.querySelectorAll<HTMLButtonElement>(
+    '#phone-side-panel [aria-label="合奏"] .phone-panel-row',
+  );
+  await act(async () => {
+    sideRows[1]?.click();
+  });
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-header h1")?.textContent).toBe("@orders");
+  });
+  await act(async () => {
+    androidBack?.();
+  });
+  await vi.waitFor(() => {
+    expect(container.querySelector('#phone-side-panel [aria-label="合奏"]')).not.toBeNull();
+  });
+
+  // 从侧边栏点合奏组头进入全屏合奏页
+  await act(async () => {
+    container
+      .querySelector<HTMLButtonElement>('#phone-side-panel [aria-label="合奏"] .phone-swarm-head')
+      ?.click();
   });
   expect(container.querySelector(".phone-header h1")?.textContent).toBe("API 输入校验");
   expect(container.querySelector(".swarm-pane")).not.toBeNull();
@@ -305,7 +331,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
     expect(container.querySelector(".phone-header h1")?.textContent).toBe("API 输入校验");
   });
   await vi.waitFor(() => {
-    expect(memberClose).toHaveBeenCalledOnce();
+    expect(memberClose).toHaveBeenCalledTimes(2);
   });
   expect(memberInterrupt).not.toHaveBeenCalled();
 
@@ -336,7 +362,7 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
   });
   expect(container.querySelector(".phone-composer")).toBeNull();
 
-  // 连续两次返回：Swarm 成员页 → Swarm 页 → 协调者会话页
+  // 连续两次返回：合奏成员页 → 合奏页 → 侧边栏（合奏已结束故隐藏）
   await act(async () => {
     androidBack?.();
   });
@@ -347,8 +373,9 @@ it("手机 Swarm 全屏页与成员会话页：入口进入、返回导航、私
     androidBack?.();
   });
   await vi.waitFor(() => {
-    expect(container.querySelector(".swarmrow")).not.toBeNull();
+    expect(container.querySelector("#phone-side-panel")).not.toBeNull();
   });
+  expect(container.querySelector('#phone-side-panel [aria-label="合奏"]')).toBeNull();
 
   client.close();
 });

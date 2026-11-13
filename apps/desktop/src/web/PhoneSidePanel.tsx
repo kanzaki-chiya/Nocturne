@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { ToolEntry, TurnChangeDiff } from "@nocturne/core/protocol";
+import type { SwarmMemberView, ToolEntry, TurnChangeDiff } from "@nocturne/core/protocol";
 import { RpcError, type ContextSummary, type RpcSession } from "@nocturne/rpc/client";
 import type { AttachmentImageSource } from "../attachment-images";
 import { DiffBody } from "../Conversation";
@@ -11,6 +11,13 @@ import { SubagentDirectory } from "../subagent-directory";
 import { elapsedText, runningBuiltin, runningMs, unsettledBuiltinTasks } from "../subagent-panel";
 import { SubagentPane } from "../SubagentPane";
 import { SubagentWatcher } from "../subagent-watch";
+import { SwarmAvatar } from "../SwarmAvatar";
+import {
+  swarmActivitySummary,
+  swarmAuthorColor,
+  swarmMemberMetaLabel,
+  swarmStatusDot,
+} from "../swarm-ui";
 import { Button, Icon, IconButton } from "../ui";
 import { useNow } from "../use-now";
 import { useSessionRefresh } from "../use-session-refresh";
@@ -36,6 +43,8 @@ interface Props {
   onNavigate: (page: PhonePanelPage) => void;
   onBack: () => void;
   onClose: () => void;
+  onOpenSwarm?: (() => void) | undefined;
+  onOpenSwarmMember?: ((member: SwarmMemberView) => void) | undefined;
   onError: (message: string) => void;
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
 }
@@ -215,6 +224,8 @@ export function PhoneSidePanel({
   onNavigate,
   onBack,
   onClose,
+  onOpenSwarm,
+  onOpenSwarmMember,
   onError,
   loadDiff,
 }: Props) {
@@ -300,6 +311,11 @@ export function PhoneSidePanel({
   }, []);
 
   const agents = runningBuiltin(directory.summaries);
+  const activeSwarm = view.swarm?.status === "active" ? view.swarm : undefined;
+  const activeSwarmMembers = activeSwarm
+    ? activeSwarm.members.filter((member) => member.status !== "removed")
+    : [];
+  const swarmDot = activeSwarm ? swarmStatusDot(activeSwarm) : undefined;
   const shells = view.backgroundShells.filter(
     (task) => !task.endedAt || now - Date.parse(task.endedAt) < 300_000,
   );
@@ -384,6 +400,68 @@ export function PhoneSidePanel({
                 <Icon name="right_small" size={16} />
               </button>
             </section>
+            {activeSwarm !== undefined && (
+              <section className="phone-panel-section" aria-label="合奏">
+                <h2>合奏</h2>
+                <button
+                  type="button"
+                  className="phone-panel-row phone-swarm-head"
+                  onClick={() => {
+                    onOpenSwarm?.();
+                  }}
+                >
+                  {swarmDot !== undefined && (
+                    <span className={`sp-swarm-dot ${swarmDot}`} aria-hidden="true" />
+                  )}
+                  <span className="phone-panel-item phone-panel-name">
+                    {activeSwarm.title || "合奏"}
+                  </span>
+                  <Icon name="right_small" size={16} />
+                </button>
+                {activeSwarmMembers.map((member) => {
+                  const pending = member.pendingPermissions.length > 0;
+                  const modelLabel = swarmMemberMetaLabel(member);
+                  const summaryText = swarmActivitySummary(member.activity);
+                  return (
+                    <button
+                      type="button"
+                      className="phone-panel-row"
+                      key={member.name}
+                      onClick={() => {
+                        onOpenSwarmMember?.(member);
+                      }}
+                    >
+                      <SwarmAvatar
+                        kind="member"
+                        color={swarmAuthorColor(activeSwarm.members, member.name, "member")}
+                        size="sm"
+                        warn={pending}
+                      />
+                      <span className="phone-panel-item">
+                        <span className="phone-swarm-line1">
+                          <span className="phone-swarm-name">{member.name}</span>
+                          {modelLabel !== "" && (
+                            <span className="phone-swarm-meta">{modelLabel}</span>
+                          )}
+                          {member.isolated && (
+                            <span className="phone-swarm-tag">
+                              {modelLabel !== "" ? " · 独立工作树" : "独立工作树"}
+                            </span>
+                          )}
+                        </span>
+                        {summaryText !== "" && (
+                          <span
+                            className={`phone-panel-summary phone-swarm-summary${pending ? " warn" : ""}`}
+                          >
+                            {summaryText}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </section>
+            )}
             {agents.length > 0 && (
               <section className="phone-panel-section">
                 <h2>子代理</h2>

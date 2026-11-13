@@ -236,9 +236,9 @@ interface NodeProbe {
 | `/plan <任务>`                  | 计划模式（ADR-0076 §5），提交方式同上                                                                                                                 |
 | `/plan approve`、`/plan cancel` | `session.approvePlan()`（空闲时先标忙、不等整轮结束；忙时提示「会话正忙，不能批准计划」）；`session.cancelPlan()`。不在计划模式时提示「不在计划模式」 |
 | `/boost <任务>`                 | 多代理攻坚（ADR-0076 §6），提交方式同 `/grill-me`                                                                                                     |
-| `/swarm <任务>`                 | Swarm 协作（[ADR-0089](../decisions/ADR-0089-swarm.md)），提交方式同 `/grill-me`                                                                      |
-| `/swarm board`                  | 当前会话有 Swarm 时打开或切到右侧面板的 Swarm 标签；没有时提示「用法：/swarm 任务」                                                                   |
-| `/swarm end`                    | `session.endSwarm()` 结束进行中的 Swarm；没有时提示「用法：/swarm 任务」                                                                              |
+| `/ensemble <任务>` | 合奏协作（[ADR-0089](../decisions/ADR-0089-swarm.md)，内部标识 `swarm`；`/swarm` 保留为不显示的兼容别名），提交方式同 `/grill-me` |
+| `/ensemble board` | 当前会话有合奏时打开或切到右侧面板的合奏标签；没有时提示「用法：/ensemble 任务」 |
+| `/ensemble end` | `session.endSwarm()` 结束进行中的合奏；没有时提示「用法：/ensemble 任务」 |
 
 | 已移除命令                   | 提示的界面操作                                                         |
 | ---------------------------- | ---------------------------------------------------------------------- |
@@ -444,13 +444,13 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 判定全在客户端（`src/notify.ts` 纯函数 `decideNotification`，不碰 DOM、不调外壳）：输入事件、会话标题、Turn 开始时间、是否在看、生效设置，输出「不提醒」或 `{ title, body, kind }`。只对本次运行实时到达的事件判定——`Conversations` 以「订阅起始时间」定时间边界：订阅响应返回前后到达的持久事件按 `event.time` 与订阅起始区分，起始时刻及之后（含同 ms，`>=`）是回放窗口期内新产生的 `permission.requested`/`turn.completed`（`live=true`），之前的是旧回放（`live=false`）；恢复补写的 `turn.completed`（`recovered:true`）时间也是新的，按 `live=true` 透出，另由 `recovered` 在 `decideNotification`/`sessionMarkFor` 挡掉（不提醒不留痕）；易失事件（`runtime.status`/`question.requested`）从不回放，订阅期间到达即实时（`time` 缺失或非法按回放处理，不误报）——重放、打开历史会话读到的旧事件不提醒。桌面端「在看」= 窗口有焦点（`focus`/`blur` 维护，初始 `document.hasFocus()`）且设置区没盖住（`page === null`）且定时任务页没盖住且该会话是当前显示的会话；设置页或定时任务页获焦不算在看。新 `turn.started`（实时）清掉该会话旧留痕，`Sidebar` 运行中（`running`/`pending`）也不显示旧标签。权限操作文字（`operationForSubjectKind`）权限卡片与通知真的共用同一函数。三类事件：需要确认（`permission.requested`/`question.requested`，含子代理经父会话 `task` 工具冒泡的请求，天然按父会话判断、标题用父会话名）、出错停止（`turn.completed` 且 `reason === "error"`，不看用时）、完成（其他非中断结束，用时 ≥ `doneAfterSeconds`…
 
-**Swarm 成员权限确认**：协调者会话实时收到 `swarm.member_updated`（订阅时的初始快照不算）且某名成员的 `pendingPermissions` 出现新的 `requestId` 时，按会话收到 `permission.requested` 的同一开关与正文规则发出通知，标题用协调者会话标题；点击通知切到协调者会话并打开该成员的会话标签（5.10）。
+**合奏成员权限确认**：协调者会话实时收到 `swarm.member_updated`（订阅时的初始快照不算）且某名成员的 `pendingPermissions` 出现新的 `requestId` 时，按会话收到 `permission.requested` 的同一开关与正文规则发出通知，标题用协调者会话标题；点击通知切到协调者会话并打开该成员的会话标签（5.10）。
 
 提醒动作：`host.notify`（`notify_show`）+ `host.requestAttention()`（任务栏 `Informational` 闪烁，窗口获焦即停）。外壳（`src-tauri/src/notify.rs`）不用 `tauri-plugin-notification`（桌面端无点击回调），直接用 `windows` crate 的 WinRT 绑定（`UI_Notifications`）：toast 的 tag/group 都是会话 id（64 字符上限），同一会话新通知替换旧的；`Activated` 回调里外壳先 `unminimize` + `set_focus` 再 emit `notify-activated`（带 sessionId），前端切到对应会话；toast 对象持有在 `NotifyState`（drop 即撤回调），切到该会话或窗口重新获焦时 `notify_dismiss` 先 Hide 原 toast 再按 tag/group 清通知中心历史并放掉对象。AUMID：安装版（release）直接用 bundle identifier（与 NSIS 快捷方式一致）；只有开发构建才探测注册表 `HKCU\Software\Classes\AppUserModelId\<bundle identifier>`，未登记退回 PowerShell 默认 AUMID（通知照常显示、署名不对），不崩溃。非 Windows 命令照常存在，调用返回 `unsupported` 静默不发。测试通知走同一个 `notify_show`（`sessionId: "test"`）。
 
 ### 5.10 右侧面板（ADR-0060）
 
-决定与范围见 [ADR-0060](../decisions/ADR-0060-desktop-side-panel.md)；本节记录实现。标签有「变更」「文件」「终端」「浏览器」「子代理」「Swarm」「成员会话」七种和新标签页。
+决定与范围见 [ADR-0060](../decisions/ADR-0060-desktop-side-panel.md)；本节记录实现。标签有「变更」「文件」「终端」「浏览器」「子代理」「合奏」「成员会话」七种和新标签页。
 
 **框架**（`src/PanelHost.tsx` 的 `useSidePanel` 管状态，`src/SidePanel.tsx` 渲染，纯函数在 `src/side-panel.ts`）：标题栏在最小化按钮左边放「会话概览」和「右侧面板」两个按钮（`PanelChrome.tsx` 经 `TitlebarSlot` portal 放进 `WindowFrame`），Ctrl+B 开关面板。面板左缘是分隔条（拖动或方向键），宽度夹在 320–960 px，上限给对话区留够 480 px：缩小窗口时面板跟着变窄，存下来的宽度不变，窗口放大后恢复；连 480 + 320 都放不下时，面板取 320 px 盖在对话区上（带阴影，标题栏层级更高，不被盖住）。
 
@@ -464,9 +464,9 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 发现、只读回放/实时衔接、附件校验和远程边界见 [RPC 第 4.1 节](../protocols/rpc.md#41-子会话只读观察adr-0060-第-4-轮)；不会 resume child、取锁或修复日志。仅当前显示的子标签订阅，切走、关面板、设置页和关闭标签时退订；视图缓存按最后持久 seq 补读，重启首次显示从 0 重放。`panelSessions` 额外保存子标签描述（childSessionId、parentCallId、档位、摘要），不保存事件或任务全文；日志丢失/父子关系不符则保留错误页供重试。子标签是主 webview 的 DOM，不用浏览器截图占位或 LRU；从浏览器切来仍先 hideShown 再切，概览仍参加遮挡检测。
 
-**Swarm**（[ADR-0089](../decisions/ADR-0089-swarm.md)）：每个会话至多一个标签，由对话内的 Swarm 入口行、`/swarm board` 或成员权限通知点击打开或切到该标签，不自动弹出。标题前的圆点在活动时为成功色、有成员等待确认时为警告色，结束后不显示。标签内分「留言板」与「成员」两页：留言板按编号列出帖子（作者、提及与正文），支持按成员筛选与搜索正文、跟随最新（上翻后暂停跟随）；底部发帖框调用 `postToSwarm`，`@成员名` 只唤醒该成员、`@all` 通知全体、不写 `@` 默认发给协调者。成员页按状态分组列出每名成员与最近活动（工具行、等待确认、暂停原因或最近帖子首行），点击进入该成员的会话标签。页头的「结束」菜单调用 `endSwarm()`。`panelSessions` 只存这个标签的打开标记，不存帖子——留言板与成员状态都来自 `SessionView.swarm`，回放与重启后照常恢复。
+**合奏**（[ADR-0089](../decisions/ADR-0089-swarm.md)）：每个会话至多一个标签，由会话概览浮层的合奏分组、`/ensemble board` 或成员权限通知点击打开或切到该标签，不自动弹出（对话内不渲染入口行，也不再显示「成员数 · 帖子数」）。标题前的圆点在活动时为成功色、有成员等待确认时为警告色，结束后不显示。标签内分「留言板」与「成员」两页：留言板每条帖子左侧为作者头像列（`swarmAuthorColor` 按加入顺序轮转 `--a-cat1..5`，协调者/用户/Runtime 为中性底色），右侧依次为帖子头（作者 `--a-text` 粗体、`→` 与剔除作者自身后的收件人 `--a-muted`，无收件人不显示箭头，右对齐等宽 `#编号 · 时间`）与正文（`--a-text`，保留 `@成员名` 强调色，长帖不折叠），支持按成员筛选与搜索正文、跟随最新（上翻后暂停跟随）；底部发帖框无占位提示，输入 `@` 且非输入法组字期间弹出 `listbox`/`option` `@` 补全（依次为协调者、未移除成员、2 名以上同前缀成员的 `@前缀` 组、`all`，附小头像与模型/档位，支持前缀筛选、↑↓/Enter/Tab 填入 `@名字 ` 且列表打开时 Enter 不发帖、Esc 关闭），发送调用 `postToSwarm`。成员页在成员行左侧显示同一套小头像并列出最近活动，点击进入该成员的会话标签。页头的「结束」菜单调用 `endSwarm()`。`panelSessions` 只存这个标签的打开标记，不存帖子——留言板与成员状态都来自 `SessionView.swarm`，回放与重启后照常恢复。
 
-**成员会话**：每名成员至多一个标签，标题为 `@name`，记录里只存成员的 `childSessionId`、`memberName` 与打开标记。标签经 `session.open` 打开该 `childSessionId`（复用 Runtime 托管的同一常驻子会话，不另取锁），复用 `Conversation`、`PermissionCard`、`QuestionCard` 与 `Composer`：可以直接私信该成员（`submit` 与 `enqueueInput`）、确认权限、回答提问与中断；发给成员的消息只进入它自己的会话，不上留言板。关闭标签只释放界面句柄（`session.close`），成员照常运行或等待，再打开回到原对话。成员被移除或 Swarm 结束后标签转为只读冻结展示，保留最后的对话与工具行，不再提供输入与确认。
+**成员会话**：每名成员至多一个标签，标题为 `@name`，记录里只存成员的 `childSessionId`、`memberName` 与打开标记。标签经 `session.open` 打开该 `childSessionId`（复用 Runtime 托管的同一常驻子会话，不另取锁），复用 `Conversation`、`PermissionCard`、`QuestionCard` 与 `Composer`：可以直接私信该成员（`submit` 与 `enqueueInput`）、确认权限、回答提问与中断；发给成员的消息只进入它自己的会话，不上留言板。关闭标签只释放界面句柄（`session.close`），成员照常运行或等待，再打开回到原对话。成员被移除或合奏结束后标签转为只读冻结展示，保留最后的对话与工具行，不再提供输入与确认。
 
 **变更**：数据来自所属会话的 `turnChanges` 与按需 `turnChangeDiff`，diff 正文复用 `DiffBody`，只读。左边按轮次倒序列出每个文件的 diff（进入视口才加载），右边是可折叠的目录树和筛选框：同一文件跨轮只占一行，+/− 为各轮之和并标「N 轮」，展开后逐轮列出，点某一轮滚到并高亮该轮的 diff（重复点同一轮会再滚一次）；头部的文件数按去重后的文件计。增减行数与对话里的改动卡片同一写法：总写 +N，有删除行才写 −M，不出现「−0」（目录树、diff 卡片头、概览浮层都是）。本轮更改卡片上的「查看变更」打开这个标签并滚到该轮。
 
@@ -490,7 +490,9 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 **菜单焦点**：弹出菜单（`Menu.tsx`，「＋」、文件引用右键、状态栏的模型与思考等）和下拉（`Dropdown.tsx`，权限、Shell 等）同一套样式：当前选中只打强调色的 ✓，焦点项是 `--a-sel` 底色加正文色，同一时刻只有一项高亮。菜单打开就把焦点放在选中项（没有就第一项）并立刻高亮，鼠标打开和键盘打开一样（用 `:focus`，不用 `:focus-visible`：鼠标点开后程序聚焦不算 focus-visible）；悬停把焦点移到该项，和方向键移动的是同一个高亮。快速打开和输入框补全的当前行也是 `--a-sel`。
 
-**会话概览**：标题栏按钮或 Esc 开关，打开状态是全局的、存 prefs（`overviewOpen`），只在有打开会话时显示，没有时按钮置灰、Esc 也不打开。Esc 的优先级：已被别处处理（`preventDefault`）的不算——权限卡片拒绝、提问卡片、下拉与菜单、状态栏提示、输入框的补全弹层（先关弹层）和正在运行时的中断、终端里的 Esc（交给进程）；焦点在面板浏览器的网页里时 Esc 根本不到主界面；快速打开和设置页开着时也不算；其余情况包括焦点在空闲的输入框里（有没有草稿都一样，输入框没有 Esc 清空草稿的行为）都开关浮层。浮层有项目（名称与工作区路径）、「变更」（本会话累计 +/−，点开变更标签），以及有运行项时出现的「子代理」分组。浮层始终盖在对话区上，对话列、输入框和提问卡片不让位；宽窗口里它正好落在对话列右边的空白处。面板关闭时标题栏右侧留出浮层的宽度，路径不被盖住；面板打开时浮层放在面板左边，面板盖在对话区上时压在面板上，不盖侧边栏。
+**会话概览**：标题栏按钮或 Esc 开关，打开状态是全局的、存 prefs（`overviewOpen`），只在有打开会话时显示，没有时按钮置灰、Esc 也不打开。Esc 的优先级：已被别处处理（`preventDefault`）的不算——权限卡片拒绝、提问卡片、下拉与菜单、状态栏提示、输入框的补全弹层（先关弹层）和正在运行时的中断、终端里的 Esc（交给进程）；焦点在面板浏览器的网页里时 Esc 根本不到主界面；快速打开和设置页开着时也不算；其余情况包括焦点在空闲的输入框里（有没有草稿都一样，输入框没有 Esc 清空草稿的行为）都开关浮层。浮层有项目（名称与工作区路径）、「变更」（本会话累计 +/−，点开变更标签）、进行中时出现的「合奏」分组，以及有运行项时出现的「子代理」分组。浮层始终盖在对话区上，对话列、输入框和提问卡片不让位；宽窗口里它正好落在对话列右边的空白处。面板关闭时标题栏右侧留出浮层的宽度，路径不被盖住；面板打开时浮层放在面板左边，面板盖在对话区上时压在面板上，不盖侧边栏。
+
+概览在「变更」之后、「子代理」之前显示「合奏」分组（仅当前会话有进行中的合奏时显示，结束后整组隐藏）：组头显示状态圆点与任务标题，点击打开或切到右侧面板合奏标签；其下每名未移除成员一行，左侧为作者小头像，第一行为成员名与模型/档位（独立工作树另加「独立工作树」），第二行为最近活动摘要，待确认成员的头像加警告色描边且活动摘要用警告色，点击以同一函数打开成员会话标签。
 
 **滚动条**：所有元素的滚动区（包括技能列表、描述框、diff、目录树、「文件」的 CodeMirror、终端框）共用 `styles.css` 全局规则，不依赖 `.thin-scroll`：10 px、轨道透明、滑块取 `--a-scroll`，悬停换 `--a-scrollThumbHover` 并变粗，深浅主题各一组令牌。只写 `::-webkit-scrollbar`，不写 `scrollbar-width` / `scrollbar-color`（Chromium 设了这两个标准属性就忽略前者，又露出箭头按钮），隐藏滚动条的 `scrollbar-width: none` 保留。例外是触屏上的手机网页与安卓 App：`phone.css` 在 `(hover: none) and (pointer: coarse)` 下给 `.phone` 设 `scrollbar-color`，改用系统的叠加式滚动条，不占布局宽度，列表左右留白相等；桌面端与桌面浏览器打开的手机网页仍走上面的全局规则。xterm 6 的滚动条是自绘的，宽度与颜色经终端选项给。
 
@@ -559,7 +561,7 @@ Windows 桌面随附官方签名 `cua-driver`（`scripts/fetch-computer.mjs` 校
 - `PhoneConnection` 同时只连接一台电脑，离线等待 host online，在线建立加密通道再 initialize(interactive:true)。不兼容停止；当前 RPC mismatch 错误没有结构化版本，仅从既有文案取服务端版本，不更改协议。4003/4004 停止重连；4002 返回等待；其他断线从 1 秒翻倍至 30 秒并 ±20% 抖动。后台不主动断开、不重连，回前台若已断即重连。
 - `PhoneSessions` 保存仍需跟踪的会话视图；切换页面或 Turn 结束后，不是当前查看且空闲（无进行中 Turn、无待确认或待回答、无待发输入）的会话关闭并从 opened 移除，订阅回放后已空闲的后台跟踪会话也立即释放。当前查看、运行中和等待请求的会话保留；安卓 App 常驻连接同样执行这套释放规则。重连只恢复当前查看或仍在运行、等待请求的会话，逐个 resume 并按 lastSeq 订阅；不恢复历史空闲会话，不清空当前显示内容。恢复期间通知带来或用户点开的会话由 `open` 打开，与恢复共用 `opening` 去重，同一会话在一条连接上只 resume 一次（后台对重复 resume 报 `session_already_open`）。状态使用相同 conversationStatus 判定与 session-tree 路径/状态类型。拿到列表即算连上，后台只订阅 `openHere` 的会话判定状态（旧后台缺省该字段时退回 `locked`），其余会话点开时再订阅（避免会话多时迟迟连不上）。**列表保持最新**：连接期间监听 `runtime.sessionsChanged`（电脑或手机创建、分叉会话，首条消息与标题出现时由后台推送，[rpc.md §3.8](../protocols/rpc.md)），收到就重拉列表并订阅新出现的本后台打开会话；刷新中再来的通知合并成一次补拉，断线与切换电脑时退订。通知不覆盖别的进程（如 CLI）新开的会话：网页版回前台会重连，重连即重拉；App 因后台保持连接而不重连，由 `PhonePlatform.onForeground`（Activity 恢复）触发一次刷新。旧电脑没有这条通知时退化为只在回前台刷新。新建会话可在任意已有目录（未选的模型/档位/预设与桌面草稿一样交给 Core 解析）；目录不存在报 `workspace_not_found`，项目配置未信任报 `workspace_untrusted`，界面原样显示，手机不代为信任。另提供本轮改动（`turnChanges`/`turnChangeDiff`）、回退（`rewind`）与分叉（`forkSession` 后打开新会话）。
 - 页面层级：首页（项目列表）→ 项目页 → 会话页，另有设置页、用量页与定时任务页，导航使用浏览器 history，返回手势逐级回退；从推送进入会话时先压入所在项目页。会话页的侧边栏总览与子视图也压在同一条 history 上：返回先从子视图回到总览，再关闭侧边栏；安卓返回键与返回手势走同一路径。首页按 `session-tree.ts` 的纯函数分组排序：第一项是普通对话工作区（由 initialize 的 `sessionsDir` 推导 `<NOCTURNE_HOME>/workspace`；桌面自定义的普通对话目录与置顶保存在桌面本地，手机看不到），其后各项目显示会话数与最近活动，末尾「其他目录…」手动输入电脑上的完整路径。定时任务发起的会话不进这些项目（与桌面同一棵树）。首页在项目列表前有「定时任务」入口，打开只读的同一张 `SchedulePage`：新建、编辑、删除和启停禁用并提示「请在电脑上操作」，「立即运行」可用（`schedule.list` / `history` / `runNow` 在远程白名单，`save` / `delete` 只在本机）。历史里「打开会话」回到会话页。项目页底部常驻输入框，直接输入即在该项目新建会话（模型列表读到之前不能发送）。
-- **Swarm**：点对话内的 Swarm 入口行或在输入框输入 `/swarm board`，先压入一条 history 再进入全屏 Swarm 页，复用桌面同一套留言板与成员组件；返回手势与安卓返回键退回会话页。在「成员」页点某名成员进入复用 `SessionScreen` 的成员会话页：经远程 `session.open` 打开 `childSessionId`，标题 `@name`，可私信、确认权限与回答提问，返回退回 Swarm 页；成员被移除或 Swarm 结束后只读。
+- **合奏**：在侧边栏「合奏」分组点击任务组头或输入框输入 `/ensemble board`，先压入一条 history 再进入全屏合奏页，复用桌面同一套留言板与成员组件；在侧边栏「合奏」分组直接点击某名成员（或在全屏合奏「成员」页点某名成员），压入 history 并经远程 `session.open` 打开 `childSessionId`，进入复用 `SessionScreen` 的成员会话页，标题 `@name`，可私信、确认权限与回答提问；从侧边栏进入全屏合奏页或成员会话页后，返回手势与安卓返回键回到侧边栏；成员被移除或合奏结束后只读。
 - 手机按钮基线（`phone.css` 开头）：44px 最小高度保持高优先级；padding、圆角、禁用与悬停写在 `:where()` 里，优先级只有 (0,1,1)，各按钮类自己的 `.phone .xxx` 规则（列表行 `14px 0`、图标按钮 `0` 等）能覆盖它，不用 `!important`。
 - 手机会话页在输入框上方复用桌面的 `TodoPanel` 渲染 `SessionView.todos`（目标行在上、清单在下，草稿与空清单不渲染，归档规则与电脑相同），默认收起为一行开关条，点按向上展开，展开后不超过会话页可用高度约 40% 且内部滚动。收起状态只存手机本机偏好 `nocturne.phone.todosCollapsed`（`src/web/local.ts`），不与桌面 `todosCollapsed` 共用；安卓 App 共用此页面，目标与开关触控区 44px。
 - 手机工具行允许折行：参数保留至少 12em（极窄屏不超过整行），不再受实时输出的 35% 上限挤压；子代理模型与强度独占后续一行，进度、秒数与结果随后排布。长路径、模型名和错误摘要可断行，读取范围、等待回答与改动计数不撑宽页面。仅由 `phone.css` 覆盖，App 共用；桌面仍保持单行省略。

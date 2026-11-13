@@ -83,6 +83,7 @@ import {
   isRuntimeWorkMode,
   userWorkMode,
   unwrapSwarmPostText,
+  workModeCommandName,
   type FileAttachment,
   type WorkModeName,
   type PendingPermission,
@@ -119,13 +120,7 @@ import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
 import { elapsedText, type SubagentLink } from "./subagent-panel";
-import {
-  splitSwarmMentions,
-  swarmAuthorLabel,
-  swarmEntryCounts,
-  swarmStatusDot,
-  swarmToolSummary,
-} from "./swarm-ui";
+import { splitSwarmMentions, swarmAuthorLabel, swarmToolSummary } from "./swarm-ui";
 import { mcpToolLabel, toolMeta } from "./tool-meta";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
@@ -242,8 +237,6 @@ export interface ConversationProps {
   resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
   /** 平台接管文件保存（安卓 App）；未传时沿用外层 ImageViewerProvider 或 `<a download>` */
   saveFile?: SaveFileFn | undefined;
-  /** 点击对话内 Swarm 入口行时打开或切换到 Swarm 面板（手机进入全屏 Swarm 页） */
-  onOpenSwarm?: (() => void) | undefined;
   /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：协调者会话默认「协调者」，成员会话传 `@name` */
   swarmRecipientLabel?: string | undefined;
 }
@@ -297,7 +290,6 @@ export type ReadOnlyConversationProps = Omit<
   | "onRewindFiles"
   | "loadChangeDiff"
   | "onViewChanges"
-  | "onOpenSwarm"
   | "subagentLinks"
   | "hideRequests"
   | "hidePersistentPermissions"
@@ -1373,7 +1365,7 @@ function UserMessage({
           setModeOpen((open) => !open);
         }}
       >
-        {`/${entry.workMode.name}`}
+        {`/${workModeCommandName(entry.workMode.name)}`}
       </button>,
     );
     if (body !== "") segments.push(" ");
@@ -4094,24 +4086,6 @@ export function QuestionCard({
   );
 }
 
-function SwarmEntryRow({ swarm, onOpen }: { swarm: SwarmView; onOpen?: (() => void) | undefined }) {
-  const dot = swarmStatusDot(swarm);
-  return (
-    <button
-      type="button"
-      className="swarmrow"
-      onClick={() => {
-        onOpen?.();
-      }}
-    >
-      {dot !== undefined ? <span className={`swarm-live ${dot}`} aria-hidden="true" /> : null}
-      <Icon name="group" size={ICON_MD} />
-      <b>{swarm.title}</b>
-      <span className="swarmrow-count">{swarmEntryCounts(swarm)}</span>
-    </button>
-  );
-}
-
 function SwarmEndedRow({ swarm }: { swarm: SwarmView }) {
   const [open, setOpen] = useState(false);
   const unmerged = swarm.unmerged ?? [];
@@ -4162,7 +4136,6 @@ function ConversationContent({
   onRewindFiles,
   loadChangeDiff,
   onViewChanges,
-  onOpenSwarm,
   swarmRecipientLabel,
   hidePersistentPermissions,
   hideRequests = false,
@@ -4397,23 +4370,6 @@ function ConversationContent({
                 </div>
               );
               const swarm = view.swarm;
-              // 入口行位于建立当前 Swarm 那一轮的末尾（下一条 user 消息之前；若仍在建立轮则跟在流式回复之后）
-              const swarmNextUserIdx =
-                swarm === undefined
-                  ? -1
-                  : view.entries.findIndex(
-                      (item) => item.kind === "user" && item.seq > swarm.createdSeq,
-                    );
-              const swarmEntryAfterIdx =
-                swarm === undefined
-                  ? undefined
-                  : swarmNextUserIdx > 0
-                    ? swarmNextUserIdx - 1
-                    : swarmNextUserIdx === 0
-                      ? -1
-                      : undefined;
-              const swarmEntryTrailing = swarm !== undefined && swarmNextUserIdx === -1;
-
               // 结束行按 endedSeq 定位在对应条目之后（无条目早于 endedSeq 时放在最前，缺省 endedSeq 时放在末尾）
               const swarmEnded = swarm?.status === "ended" ? swarm : undefined;
               let swarmEndedAfterIdx: number | undefined;
@@ -4426,7 +4382,7 @@ function ConversationContent({
                   for (const [i, item] of view.entries.entries()) {
                     if (item.seq <= swarmEnded.endedSeq) idx = i;
                   }
-                  if (swarmEntryTrailing && idx === view.entries.length - 1) {
+                  if (idx === view.entries.length - 1) {
                     swarmEndedTrailing = true;
                   } else {
                     swarmEndedAfterIdx = idx;
@@ -4437,13 +4393,6 @@ function ConversationContent({
               return (
                 <>
                   {(byAfterEntry.get(0) ?? []).map(renderNotice)}
-                  {swarm !== undefined && swarmEntryAfterIdx === -1 ? (
-                    <SwarmEntryRow
-                      key={`swarm-entry:${swarm.createdSeq}`}
-                      swarm={swarm}
-                      onOpen={onOpenSwarm}
-                    />
-                  ) : null}
                   {swarmEnded !== undefined && swarmEndedAfterIdx === -1 ? (
                     <SwarmEndedRow
                       key={`swarm-ended:${swarmEnded.createdSeq}`}
@@ -4493,13 +4442,6 @@ function ConversationContent({
                         />
                         {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
                         {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
-                        {swarm !== undefined && swarmEntryAfterIdx === entryIndex ? (
-                          <SwarmEntryRow
-                            key={`swarm-entry:${swarm.createdSeq}`}
-                            swarm={swarm}
-                            onOpen={onOpenSwarm}
-                          />
-                        ) : null}
                         {swarmEnded !== undefined && swarmEndedAfterIdx === entryIndex ? (
                           <SwarmEndedRow
                             key={`swarm-ended:${swarmEnded.createdSeq}`}
@@ -4574,13 +4516,6 @@ function ConversationContent({
                         );
                       }),
                   ]}
-                  {swarm !== undefined && swarmNextUserIdx === -1 ? (
-                    <SwarmEntryRow
-                      key={`swarm-entry:${swarm.createdSeq}`}
-                      swarm={swarm}
-                      onOpen={onOpenSwarm}
-                    />
-                  ) : null}
                   {swarmEndedTrailing && swarmEnded !== undefined ? (
                     <SwarmEndedRow
                       key={`swarm-ended:${swarmEnded.createdSeq}`}

@@ -6,6 +6,7 @@ import {
   parseWorkModeSlash,
   type ExternalAgentOverview,
   type SkillOverview,
+  type SwarmMemberView,
 } from "@nocturne/core/protocol";
 import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
@@ -73,14 +74,17 @@ export function SessionScreen({
   onPanelBack,
   onPanelClose,
   onOpenSwarm,
+  onOpenSwarmMember,
   swarmMember,
 }: {
   panel?: PhonePanelPage | undefined;
   onPanel?: ((panel: PhonePanelPage) => void) | undefined;
   onPanelBack?: (() => void) | undefined;
   onPanelClose?: (() => void) | undefined;
-  /** 点击对话内 Swarm 入口行或输入 `/swarm board` 时进入全屏 Swarm 页 */
+  /** 侧边栏合奏组头或 `/ensemble board` 进入全屏合奏页 */
   onOpenSwarm?: (() => void) | undefined;
+  /** 侧边栏合奏成员行进入该成员会话页 */
+  onOpenSwarmMember?: ((member: SwarmMemberView) => void) | undefined;
   /** 成员会话模式：标题 `@name`，移除或结束后只读冻结 */
   swarmMember?: { name: string; frozen: boolean } | undefined;
   entry: PhoneSession;
@@ -237,7 +241,7 @@ export function SessionScreen({
     const work = parseWorkModeSlash(line);
     if (work?.kind === "action") {
       if (work.action === "swarm-board" || work.action === "swarm-end") {
-        if (view.swarm === undefined) return "用法：/swarm 任务";
+        if (view.swarm === undefined) return "用法：/ensemble 任务";
         if (work.action === "swarm-board") {
           onOpenSwarm?.();
           return true;
@@ -384,7 +388,6 @@ export function SessionScreen({
         hidePersistentPermissions
         hideRequests
         subscribeEvents={subscribeEvents}
-        onOpenSwarm={onOpenSwarm}
         swarmRecipientLabel={swarmMember ? `@${swarmMember.name}` : undefined}
         {...(swarmMember === undefined
           ? {
@@ -431,6 +434,8 @@ export function SessionScreen({
           onNavigate={(next) => onPanel?.(next)}
           onBack={() => onPanelBack?.()}
           onClose={() => onPanelClose?.()}
+          onOpenSwarm={onOpenSwarm}
+          onOpenSwarmMember={onOpenSwarmMember}
           onError={onError}
           loadDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
         />

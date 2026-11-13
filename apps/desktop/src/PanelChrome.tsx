@@ -13,13 +13,20 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { SubagentSummary } from "@nocturne/core/protocol";
+import type { SubagentSummary, SwarmMemberView, SwarmView } from "@nocturne/core/protocol";
 
 import type { FileIndexEntry } from "./file-refs";
 import { useNow } from "./use-now";
 import { ShellRows, type OverviewShells } from "./ShellRows";
 import { rankQuickOpen, SUBAGENT_SUMMARY_MAX } from "./side-panel";
 import { elapsedText, runningMs } from "./subagent-panel";
+import { SwarmAvatar } from "./SwarmAvatar";
+import {
+  swarmActivitySummary,
+  swarmAuthorColor,
+  swarmMemberMetaLabel,
+  swarmStatusDot,
+} from "./swarm-ui";
 import { KeyHint } from "./KeyHint";
 import { keyDiag } from "./key-diag";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
@@ -365,8 +372,66 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
   );
 }
 
+/** 概览「合奏」分组的内容 */
+export interface OverviewSwarm {
+  swarm: SwarmView;
+  onOpenBoard: () => void;
+  onOpenMember: (member: SwarmMemberView) => void;
+}
+
+function SwarmOverviewRows({ ensemble }: { ensemble: OverviewSwarm }) {
+  const { swarm, onOpenBoard, onOpenMember } = ensemble;
+  const dot = swarmStatusDot(swarm);
+  const members = swarm.members.filter((member) => member.status !== "removed");
+  return (
+    <div className="ovpop-group thin-scroll" role="group" aria-label="合奏">
+      <button type="button" className="ovpop-swarm-head" onClick={onOpenBoard}>
+        {dot !== undefined ? <span className={`sp-swarm-dot ${dot}`} aria-hidden="true" /> : null}
+        <span className="ovpop-swarm-title">{swarm.title || "合奏"}</span>
+        <Icon name="right_small" size={ICON_SM} className="ovpop-swarm-chevron" />
+      </button>
+      {members.map((member) => {
+        const pending = member.pendingPermissions.length > 0;
+        const modelLabel = swarmMemberMetaLabel(member);
+        const summary = swarmActivitySummary(member.activity);
+        return (
+          <button
+            key={member.name}
+            type="button"
+            className="ovpop-agent ovpop-swarm-member"
+            onClick={() => {
+              onOpenMember(member);
+            }}
+          >
+            <SwarmAvatar
+              kind="member"
+              color={swarmAuthorColor(swarm.members, member.name, "member")}
+              size="sm"
+              warn={pending}
+            />
+            <span className="ovpop-agent-text">
+              <span className="ovpop-swarm-line1">
+                <span className="ovpop-swarm-name">{member.name}</span>
+                {modelLabel !== "" && <span className="ovpop-swarm-meta">{modelLabel}</span>}
+                {member.isolated && (
+                  <span className="ovpop-swarm-tag">
+                    {modelLabel !== "" ? " · 独立工作树" : "独立工作树"}
+                  </span>
+                )}
+              </span>
+              {summary !== "" && (
+                <span className={`ovpop-agent-summary${pending ? " warn" : ""}`}>{summary}</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
- * 会话概览浮层（ADR-0060 第 2 节）：项目行、「变更」行和「子代理」分组（没有运行项时隐藏）。
+ * 会话概览浮层（ADR-0060 第 2 节）：项目行、「变更」行、「合奏」分组（进行中时显示）和「子代理」分组（没有运行项时隐藏）。
  * 开关只经标题栏按钮与 Esc，点「变更」不关浮层。始终盖在对话区上，对话列不让位。
  */
 export function SessionOverview({
@@ -375,6 +440,7 @@ export function SessionOverview({
   totals,
   rightOffset,
   onOpenChanges,
+  swarm,
   subagents,
   shells,
 }: {
@@ -384,6 +450,8 @@ export function SessionOverview({
   /** 面板盖在对话区上时浮层让到面板左边；对话区放不下时压在面板上，不盖侧边栏 */
   rightOffset: number;
   onOpenChanges: () => void;
+  /** 进行中的合奏分组；结束或无合奏时隐藏 */
+  swarm?: OverviewSwarm | undefined;
   /** 子代理分组；没有运行项（或不传）时整组隐藏 */
   subagents?: OverviewSubagents | undefined;
   shells?: OverviewShells | undefined;
@@ -424,6 +492,7 @@ export function SessionOverview({
           )}
         </span>
       </button>
+      {swarm?.swarm.status === "active" && <SwarmOverviewRows ensemble={swarm} />}
       {subagents !== undefined &&
         subagents.running.length + subagents.external.length + (subagents.retained?.length ?? 0) >
           0 && <SubagentRows subagents={subagents} />}

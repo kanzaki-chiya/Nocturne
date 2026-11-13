@@ -1583,6 +1583,17 @@ export function useSidePanel({
           onOpenChanges={() => {
             openChanges();
           }}
+          swarm={
+            active.view.swarm?.status === "active"
+              ? {
+                  swarm: active.view.swarm,
+                  onOpenBoard: openSwarm,
+                  onOpenMember: (member) => {
+                    openSwarmMember({ name: member.name, childSessionId: member.childSessionId });
+                  },
+                }
+              : undefined
+          }
           subagents={overviewSubagents}
           shells={{
             tasks: active.view.backgroundShells,

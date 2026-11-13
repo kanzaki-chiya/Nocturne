@@ -1228,6 +1228,57 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ovpop-agent-summary.warn {
+  color: var(--a-warning);
+}
+.ovpop .ovpop-swarm-head {
+  align-items: center;
+  gap: 8px;
+}
+.ovpop-swarm-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ovpop-swarm-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--a-faint);
+}
+.ovpop .ovpop-swarm-member {
+  align-items: flex-start;
+  gap: 9px;
+}
+.ovpop-swarm-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.ovpop-swarm-name {
+  flex: none;
+  color: var(--a-text);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-medium);
+}
+.ovpop-swarm-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-muted);
+  font: var(--fs-1) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ovpop-swarm-tag {
+  flex: none;
+  color: var(--a-muted);
+  font: var(--fs-1) var(--mono);
+  white-space: nowrap;
+}
 .ovpop-agent-note {
   color: var(--a-faint);
   font-size: var(--fs-1);

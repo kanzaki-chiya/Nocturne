@@ -164,7 +164,7 @@ describe("工具行与文案", () => {
         "swarm_end",
         "swarm_checkout",
       ].map(toolDisplayName),
-    ).toEqual(["Swarm", "添加", "发帖", "换模型", "移除", "结束", "检出"]);
+    ).toEqual(["合奏", "添加", "发帖", "换模型", "移除", "结束", "检出"]);
     expect(toolDisplayName("shell")).toBe("shell");
     expect(swarmToolSummary("swarm_add_member", { name: "orders" })).toBe("@orders");
     expect(swarmToolSummary("swarm_change_model", { name: "orders", model: "p/m-2" })).toBe(
@@ -559,6 +559,63 @@ describe("/swarm board", () => {
     expect(mocks.onPost).not.toHaveBeenCalled();
     ui.unmount();
   });
+
+  it("帖子头剔除作者自身；发帖框支持 @ 补全（顺序、筛选、组提及、键盘填入不发帖、Esc 收起）", async () => {
+    const onPost = vi.fn(async () => undefined);
+    const swarm = boardSwarm({
+      members: [
+        member("api-1", { profile: "deep" }),
+        member("api-2"),
+        member("old", { status: "removed" }),
+      ],
+      posts: [
+        post(1, {
+          from: "api-1",
+          fromKind: "member",
+          mentions: ["coordinator", "api-1", "api-2"],
+          recipients: ["coordinator", "api-2"],
+          text: "@coordinator @api-1 @api-2 完成",
+        }),
+        post(2, {
+          from: "coordinator",
+          fromKind: "coordinator",
+          mentions: ["coordinator"],
+          recipients: [],
+          text: "仅记一条 @coordinator",
+        }),
+      ],
+    });
+    const { ui, frame, mocks } = renderBoard(swarm, { onPost });
+    expect(frame()).toContain("#2 协调者  ");
+    expect(frame()).not.toContain("#2 协调者 →");
+
+    // 切到输入框输入 @ 显示候选（不含已移除 old，含 @api 组）
+    await press(ui, "\t");
+    await press(ui, "@");
+    await settle(() => frame().includes("model-api-2"));
+    expect(frame()).not.toContain("model-old");
+
+    // Esc 关闭弹层而不关闭留言板（等 Ink 50ms ESC 计时器 settle 后再输入）
+    await press(ui, "\x1b");
+    await pause(80);
+    await settle(() => !frame().includes("model-api-2"));
+    expect(mocks.onClose).not.toHaveBeenCalled();
+
+    // 删除 @ 后重新输入 @a 筛选，向下选 api-2 后 Enter 填入：不发帖且末尾带空格
+    await keys(ui, "\x7f", "@", "a");
+    await settle(() => frame().includes("model-api-2"));
+    await press(ui, "\x1b[B");
+    await press(ui, "\r");
+    await settle(() => frame().includes("@api-2 "));
+    expect(onPost).not.toHaveBeenCalled();
+
+    // 继续输入文本后 Enter 发帖
+    await press(ui, "请看");
+    await press(ui, "\r");
+    await settle(() => onPost.mock.calls.length === 1);
+    expect(onPost).toHaveBeenCalledWith("@api-2 请看");
+    ui.unmount();
+  });
 });
 
 // ── 完整 App：真实 Runtime 里的 Swarm ─────────────────────
@@ -583,7 +640,7 @@ async function swarmRuntime(
     roleHandler: () => stopText("标题"),
     handler: (req) => {
       const sys = req.system.map((b) => b.text).join("\n");
-      const who = /persistent swarm member `@([a-z0-9-]+)`/.exec(sys)?.[1];
+      const who = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys)?.[1];
       if (who === undefined) {
         if (!coordStarted) {
           coordStarted = true;
@@ -650,7 +707,7 @@ describe("App 里的 Swarm", () => {
       );
       expect(frame()).not.toMatch(/● users/);
       // 对话里的工具行标签
-      expect(frame()).toContain("Swarm 订单校验");
+      expect(frame()).toContain("合奏 订单校验");
       expect(frame()).toContain("添加 @orders");
       expect(frame()).toContain("发帖 @orders 开始");
 

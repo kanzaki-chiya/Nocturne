@@ -765,7 +765,7 @@ export function PhoneApp({
           "会话"
         );
       case "swarm":
-        return coordinatorEntry?.view.swarm?.title ?? "Swarm";
+        return coordinatorEntry?.view.swarm?.title ?? "合奏";
       case "swarm-member":
         return `@${page.memberName}`;
       default:
@@ -1030,6 +1030,20 @@ export function PhoneApp({
         }}
         onOpenSwarm={() => {
           navigate({ kind: "swarm", hostId: page.hostId, sessionId: page.sessionId });
+        }}
+        onOpenSwarmMember={(member) => {
+          const parentId = page.sessionId;
+          const workspace = entry.workspace;
+          navigate({
+            kind: "swarm-member",
+            hostId: page.hostId,
+            sessionId: parentId,
+            childSessionId: member.childSessionId,
+            memberName: member.name,
+          });
+          void operation(async () => {
+            await sessions.openMember(member.childSessionId, workspace, parentId);
+          });
         }}
         onRename={() => {
           setRenameError("");

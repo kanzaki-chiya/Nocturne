@@ -104,7 +104,7 @@ describe("Swarm 对话内渲染", () => {
     );
 
     const names = Array.from(container.querySelectorAll(".tool-name")).map((el) => el.textContent);
-    expect(names).toEqual(["Swarm", "添加", "发帖", "换模型", "移除", "检出", "结束"]);
+    expect(names).toEqual(["合奏", "添加", "发帖", "换模型", "移除", "检出", "结束"]);
 
     const args = Array.from(container.querySelectorAll(".tool-arg")).map((el) =>
       el.textContent?.trim(),
@@ -183,7 +183,7 @@ describe("Swarm 对话内渲染", () => {
     expect(container.querySelector(".post-in-head")?.textContent).toBe("@verifier → @orders · #14");
   });
 
-  it("入口行定位在建群轮末尾、统计未移除成员与帖子数、状态点随权限与结束变化，结束行按 endedSeq 定位并可展开未合并分支", () => {
+  it("对话区不再渲染入口行，workMode.name=swarm 显示 /ensemble，结束行仍按 endedSeq 定位并可展开未合并分支", () => {
     const view = createSessionView();
     view.entries = [
       {
@@ -191,7 +191,8 @@ describe("Swarm 对话内渲染", () => {
         key: "u:1",
         seq: 1,
         turnId: "turn-1",
-        content: [{ type: "text", text: "/swarm 加校验" }],
+        content: [{ type: "text", text: "加校验" }],
+        workMode: { name: "swarm", body: "Ensemble mode" },
       },
       {
         kind: "assistant",
@@ -235,7 +236,6 @@ describe("Swarm 对话内渲染", () => {
     };
     view.swarm = swarm;
 
-    const onOpenSwarm = vi.fn();
     const { container, rerender } = render(
       <Conversation
         session={fakeSession()}
@@ -245,46 +245,14 @@ describe("Swarm 对话内渲染", () => {
         subscribeEvents={() => () => undefined}
         images={createAttachmentImageSource()}
         busy={false}
-        onOpenSwarm={onOpenSwarm}
       />,
     );
 
-    const row = container.querySelector(".swarmrow") as HTMLButtonElement | null;
-    expect(row).not.toBeNull();
-    expect(row?.textContent).toContain("API 输入校验");
-    expect(row?.querySelector(".swarmrow-count")?.textContent).toBe("2 · 2");
-    expect(row?.querySelector(".swarm-live.ok")).not.toBeNull();
+    expect(container.querySelector(".swarmrow")).toBeNull();
+    expect(container.querySelector(".swarmrow-count")).toBeNull();
+    expect(container.querySelector(".mode-ref")?.textContent).toBe("/ensemble");
 
-    // 入口行位于 a:5 之后、post-in(seq=10) 之前
-    const transcriptChildren = Array.from(
-      container.querySelector(".conversation-transcript")?.children ?? [],
-    );
-    const rowIdx = transcriptChildren.findIndex((el) => el.classList.contains("swarmrow"));
-    const postInIdx = transcriptChildren.findIndex((el) => el.classList.contains("post-in"));
-    expect(rowIdx).toBeGreaterThan(0);
-    expect(rowIdx).toBeLessThan(postInIdx);
-
-    if (!row) throw new Error("missing swarmrow");
-    fireEvent.click(row);
-    expect(onOpenSwarm).toHaveBeenCalledTimes(1);
-
-    // 成员等确认时入口行状态点变为 warn
-    view.swarm = { ...swarm, awaitingPermissionMembers: ["orders"] };
-    rerender(
-      <Conversation
-        session={fakeSession()}
-        view={{ ...view }}
-        openUrl={vi.fn()}
-        cwd="/repo"
-        subscribeEvents={() => () => undefined}
-        images={createAttachmentImageSource()}
-        busy={false}
-        onOpenSwarm={onOpenSwarm}
-      />,
-    );
-    expect(container.querySelector(".swarmrow .swarm-live.warn")).not.toBeNull();
-
-    // 已结束：入口行状态点消失，结束行出现在 endedSeq 位置并展开 unmerged
+    // 结束后仍不出现入口行，结束行出现在 endedSeq 位置并展开 unmerged
     view.swarm = {
       ...swarm,
       status: "ended",
@@ -311,10 +279,9 @@ describe("Swarm 对话内渲染", () => {
         subscribeEvents={() => () => undefined}
         images={createAttachmentImageSource()}
         busy={false}
-        onOpenSwarm={onOpenSwarm}
       />,
     );
-    expect(container.querySelector(".swarmrow .swarm-live")).toBeNull();
+    expect(container.querySelector(".swarmrow")).toBeNull();
     const endedRow = container.querySelector(".swarm-ended-row");
     expect(endedRow).not.toBeNull();
     expect(endedRow?.querySelector(".tool-name")?.textContent).toBe("结束");

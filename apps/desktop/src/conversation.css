@@ -1575,48 +1575,7 @@ button.fcard:hover {
   color: var(--a-error);
 }
 
-/* ── Swarm（ADR-0089）：入口行、帖子送达、结束行与提及强调 ── */
-.conversation .swarmrow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: fit-content;
-  max-width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-panel);
-  color: var(--a-text);
-  font-size: var(--fs-3);
-  text-align: left;
-  cursor: pointer;
-}
-.conversation .swarmrow:hover {
-  border-color: var(--a-border-strong);
-}
-.conversation .swarmrow b {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: var(--fw-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.conversation .swarmrow-count {
-  flex: none;
-  color: var(--a-muted);
-  font-size: var(--fs-2);
-  font-variant-numeric: tabular-nums;
-}
-.swarm-live {
-  width: var(--dot);
-  height: var(--dot);
-  flex: none;
-  border-radius: var(--radius-pill);
-  background: var(--a-success);
-}
-.swarm-live.warn {
-  background: var(--a-warning);
-}
+/* ── 合奏（ADR-0089）：帖子送达、结束行与提及强调 ── */
 
 .conversation .post-in {
   min-width: 0;

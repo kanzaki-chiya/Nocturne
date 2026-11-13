@@ -147,3 +147,85 @@ it.each(["file_too_large", "file_binary"])(
     expect(fixture.onError).not.toHaveBeenCalled();
   },
 );
+
+it("手机侧边栏合奏分组：在上下文之后子代理之前显示，结束后隐藏，支持警告色与跳转回调", async () => {
+  const apiMember = {
+    name: "api-1",
+    childSessionId: "c-api",
+    charter: { owns: "api", handsOff: "ui", doneWhen: "ok" },
+    model: { provider: "anthropic", model: "claude-sonnet-4.5" },
+    preset: "general" as const,
+    isolated: true,
+    status: "working" as const,
+    pendingPermissions: [],
+    activity: { kind: "tool" as const, tool: "read", detail: "src/api.ts" },
+  };
+  const uiMember = {
+    name: "ui-1",
+    childSessionId: "c-ui",
+    charter: { owns: "ui", handsOff: "api", doneWhen: "ok" },
+    model: { provider: "anthropic", model: "claude-sonnet-4.5" },
+    preset: "general" as const,
+    isolated: false,
+    status: "working" as const,
+    pendingPermissions: [
+      { requestId: "r1", callId: "c1", reason: "run", subjects: [], options: [] },
+    ],
+    activity: { kind: "permission" as const, target: "pnpm test" },
+  };
+  const fixture = panelFixture({ agents: [summary({ taskSummary: "子代理任务" })] });
+  fixture.entry.view.swarm = {
+    createdSeq: 1,
+    title: "登录页联调",
+    status: "active",
+    coordinator: {
+      model: { provider: "anthropic", model: "claude-opus-4.6" },
+      status: "working",
+      awaitingPermission: false,
+    },
+    members: [apiMember, uiMember, { ...apiMember, name: "gone", status: "removed" }],
+    awaitingPermissionMembers: ["ui-1"],
+    posts: [],
+  };
+  const onOpenSwarm = vi.fn();
+  const onOpenSwarmMember = vi.fn();
+  const { container, rerender } = render(
+    <PanelHarness
+      fixture={fixture}
+      onOpenSwarm={onOpenSwarm}
+      onOpenSwarmMember={onOpenSwarmMember}
+    />,
+  );
+  await screen.findByText("子代理任务");
+  const headings = Array.from(container.querySelectorAll(".phone-panel-section h2")).map(
+    (h) => h.textContent,
+  );
+  expect(headings).toEqual(["上下文", "合奏", "子代理"]);
+
+  const swarmSection = screen.getByLabelText("合奏");
+  expect(swarmSection.querySelector(".sp-swarm-dot.warn")).not.toBeNull();
+  expect(swarmSection.textContent).not.toContain("gone");
+  expect(swarmSection.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
+  const rows = swarmSection.querySelectorAll(".phone-panel-row");
+  expect(rows[2]?.querySelector(".swarm-av.warn")).not.toBeNull();
+  expect(rows[2]?.querySelector(".phone-swarm-summary.warn")?.textContent).toBe(
+    "等待确认：pnpm test",
+  );
+
+  const swarmView = fixture.entry.view.swarm;
+  if (!rows[0] || !rows[1] || !swarmView) throw new Error("missing swarm rows");
+  fireEvent.click(rows[0]);
+  expect(onOpenSwarm).toHaveBeenCalledTimes(1);
+  fireEvent.click(rows[1]);
+  expect(onOpenSwarmMember).toHaveBeenCalledWith(apiMember);
+
+  fixture.entry.view.swarm = { ...swarmView, status: "ended" };
+  rerender(
+    <PanelHarness
+      fixture={fixture}
+      onOpenSwarm={onOpenSwarm}
+      onOpenSwarmMember={onOpenSwarmMember}
+    />,
+  );
+  expect(screen.queryByLabelText("合奏")).toBeNull();
+});

@@ -17,10 +17,14 @@ import {
   swarmAuthorLabel,
   swarmCoordinatorDot,
   swarmMemberDot,
+  swarmMentionCandidates,
   swarmMentionLabel,
+  swarmMentionToken,
   swarmPostHead,
+  swarmPostRecipients,
   splitSwarmMentions,
   type SwarmDot,
+  type SwarmMentionCandidate,
 } from "../text-format-swarm.js";
 import { useTheme } from "../theme.js";
 import { screenRect, type DialogMouseFrame } from "./dialog/mouse.js";
@@ -130,6 +134,8 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   const [following, setFollowing] = useState(true);
   const [picked, setPicked] = useState<number | undefined>(undefined);
   const [draft, setDraft] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const [posting, setPosting] = useState(false);
   const sideTop = useRef(0);
@@ -143,14 +149,53 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   const postIndex = following || pickedIndex < 0 ? posts.length - 1 : pickedIndex;
   const selected: SwarmPostView | undefined = posts[postIndex];
 
+  const mentionToken = !ended && focus === "input" ? swarmMentionToken(draft, draft.length) : null;
+  const mentionCandidates =
+    mentionToken !== null && dismissedAt !== mentionToken.start
+      ? swarmMentionCandidates(swarm, mentionToken.query)
+      : [];
+  const mentionOpen = mentionCandidates.length > 0;
+  const activeMentionIndex = Math.min(mentionIndex, Math.max(0, mentionCandidates.length - 1));
+  const mentionQueryKey = mentionToken?.query ?? "";
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionQueryKey, mentionToken?.start]);
+
   // 已结束：输入框撤去，焦点不能停在那里
   useEffect(() => {
     if (ended && focus === "input") setFocus("posts");
   }, [ended, focus]);
 
   // 最新状态给按键与鼠标回调读（一次 data 突发里的多个按键可能在提交前到达）
-  const live = useRef({ sideItems, posts, postIndex, side, focus, draft, posting, ended });
-  live.current = { sideItems, posts, postIndex, side, focus, draft, posting, ended };
+  const live = useRef({
+    sideItems,
+    posts,
+    postIndex,
+    side,
+    focus,
+    draft,
+    posting,
+    ended,
+    mentionToken,
+    mentionCandidates,
+    mentionOpen,
+    activeMentionIndex,
+  });
+  live.current = {
+    sideItems,
+    posts,
+    postIndex,
+    side,
+    focus,
+    draft,
+    posting,
+    ended,
+    mentionToken,
+    mentionCandidates,
+    mentionOpen,
+    activeMentionIndex,
+  };
   const latest = useRef(props);
   latest.current = props;
 
@@ -172,8 +217,10 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
     const order: BoardFocus[] = live.current.ended
       ? ["members", "posts"]
       : ["members", "posts", "input"];
-    const at = Math.max(0, order.indexOf(live.current.focus));
-    setFocus(order[(at + dir + order.length) % order.length] ?? "posts");
+    setFocus((prev) => {
+      const at = Math.max(0, order.indexOf(prev));
+      return order[(at + dir + order.length) % order.length] ?? "posts";
+    });
   };
   const enterSide = (): void => {
     const item = live.current.sideItems[live.current.side];
@@ -200,9 +247,39 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
       });
   };
 
+  const applyMention = (candidate: SwarmMentionCandidate): void => {
+    const token = live.current.mentionToken;
+    if (token === null) return;
+    const inserted = `@${candidate.insert} `;
+    setDraft((d) => d.slice(0, token.start) + inserted + d.slice(token.end));
+    setDismissedAt(null);
+    setMentionIndex(0);
+  };
+
   useInput(
     (input, key) => {
       const now = live.current;
+      if (now.focus === "input" && now.mentionOpen) {
+        if (key.escape) {
+          if (now.mentionToken !== null) setDismissedAt(now.mentionToken.start);
+          return;
+        }
+        if (key.upArrow) {
+          setMentionIndex(
+            (i) => (i - 1 + now.mentionCandidates.length) % now.mentionCandidates.length,
+          );
+          return;
+        }
+        if (key.downArrow) {
+          setMentionIndex((i) => (i + 1) % now.mentionCandidates.length);
+          return;
+        }
+        if (key.return || key.tab) {
+          const pickedCandidate = now.mentionCandidates[now.activeMentionIndex];
+          if (pickedCandidate !== undefined) applyMention(pickedCandidate);
+          return;
+        }
+      }
       if (key.escape) {
         latest.current.onClose();
         return;
@@ -236,11 +313,13 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
       }
       if (key.backspace || key.delete) {
         setDraft((d) => d.replace(/.$/u, ""));
+        setDismissedAt(null);
         setError(undefined);
         return;
       }
       if (input !== "" && !key.ctrl && !key.meta && !/[\x00-\x1f\x7f]/u.test(input)) {
         setDraft((d) => d + input);
+        setDismissedAt(null);
         setError(undefined);
       }
     },
@@ -250,15 +329,20 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
     (pasted) => {
       if (live.current.focus !== "input") return;
       const clean = pasted.replace(/[\r\n\t]+/gu, " ").replace(/[\x00-\x1f\x7f]/gu, "");
-      if (clean !== "") setDraft((d) => d + clean);
+      if (clean !== "") {
+        setDraft((d) => d + clean);
+        setDismissedAt(null);
+      }
     },
     { isActive: active && focus === "input" },
   );
 
-  // 垂直预算：头部、细线、列表区、细线、详情、（错误行）、（细线 + 输入框）
+  // 垂直预算：头部、细线、列表区、细线、详情、（错误行）、（补全列表）、（细线 + 输入框）
   const inputRows = ended ? 0 : 2;
   const errorRows = error !== undefined ? 1 : 0;
-  const avail = Math.max(2, height - 3 - inputRows - errorRows);
+  const completionMaxRows = 6;
+  const completionRows = mentionOpen ? Math.min(mentionCandidates.length, completionMaxRows) : 0;
+  const avail = Math.max(2, height - 3 - inputRows - errorRows - completionRows);
   const listH = Math.max(1, Math.ceil(avail / 2));
   const detailH = Math.max(1, avail - listH);
   const paneW = Math.max(10, width - LEFT_W);
@@ -308,7 +392,7 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   // 头部
   const countText = `  ${swarm.posts.length} 条${following ? " · 跟随" : ""}`;
   const header: RenderSpan[] = [
-    { text: swarm.title, color: palette.accent, bold: true },
+    { text: swarm.title || "合奏", color: palette.accent, bold: true },
     { text: countText, color: palette.muted },
   ];
   const rule = (junction: boolean): RenderSpan[] => {
@@ -412,11 +496,12 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   // 详情
   const detail: RenderSpan[][] = [];
   if (selected !== undefined) {
+    const recipients = swarmPostRecipients(selected);
     detail.push([
       { text: `#${selected.number} `, color: palette.muted },
       { text: swarmAuthorLabel(selected.from, selected.fromKind), color: palette.accent },
-      ...(selected.mentions.length > 0
-        ? [{ text: ` → ${selected.mentions.map(swarmMentionLabel).join(" ")}` }]
+      ...(recipients.length > 0
+        ? [{ text: ` → ${recipients.map(swarmMentionLabel).join(" ")}` }]
         : []),
       { text: `  ${formatSwarmTime(selected.time)}`, color: palette.muted },
     ]);
@@ -449,6 +534,20 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
   const prompt = `${g.prompt} `;
   const draftShown = clipSpans([{ text: draft }], Math.max(1, width - 1 - stringWidth(prompt)));
   const inputY = -1;
+  const completionStart =
+    completionRows === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            activeMentionIndex - Math.floor(completionRows / 2),
+            mentionCandidates.length - completionRows,
+          ),
+        );
+  const shownCompletions = mentionCandidates.slice(
+    completionStart,
+    completionStart + completionRows,
+  );
 
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
@@ -482,6 +581,29 @@ export function SwarmBoard(props: SwarmBoardProps): React.JSX.Element {
       ) : null}
       {!ended ? (
         <>
+          {shownCompletions.length > 0 ? (
+            <Box flexDirection="column" flexShrink={0}>
+              {shownCompletions.map((candidate, index) => {
+                const actualIndex = completionStart + index;
+                const isSelected = actualIndex === activeMentionIndex;
+                const rowText =
+                  candidate.meta !== undefined
+                    ? ` ${candidate.label}  ${candidate.meta}`
+                    : ` ${candidate.label}`;
+                return (
+                  <Text
+                    key={`${candidate.kind}:${candidate.insert}`}
+                    wrap="truncate"
+                    {...(isSelected
+                      ? { color: palette.selected, backgroundColor: palette.selectionBg }
+                      : {})}
+                  >
+                    {rowText}
+                  </Text>
+                );
+              })}
+            </Box>
+          ) : null}
           <Line spans={rule(false)} />
           <Box
             ref={(node) => {
