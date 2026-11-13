@@ -4,6 +4,7 @@ import {
   acceptOutgoing,
   bindPending,
   emptyOutgoing,
+  localTurnEntries,
   nextLocalId,
   pushOutgoing,
   reconcileOutgoing,
@@ -119,4 +120,17 @@ describe("本地发送与正式条目对上", () => {
       second.id,
     ]);
   });
+});
+
+it("本地图片带文件名：解码失败时显示文件名而不是内部键", () => {
+  const item = local({
+    place: "turn",
+    text: "看图",
+    input: {
+      text: "看图",
+      attachments: [{ data: new Uint8Array([1, 2]), mimeType: "image/png", label: "shot.png" }],
+    },
+  });
+  const [entry] = localTurnEntries(pushOutgoing(emptyOutgoing(), item), () => undefined);
+  expect(entry?.attachments?.[0]?.label).toBe("shot.png");
 });

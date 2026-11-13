@@ -1394,7 +1394,8 @@ export function App({ host }: { host: DesktopHost }) {
     [activeSession],
   );
   const liveMcpRevision = JSON.stringify(active?.view.mcpServers);
-  const selected = sessions.find((s) => s.id === selectedId);
+  // 含刚建好、列表还没刷新到的会话（标题取本地消息首行）
+  const selected = treeSessions.find((s) => s.id === selectedId);
   /** 当前选中会话的打开失败（占位区显示错误与「重试」，不退回上一个会话） */
   const selectedOpenError =
     selectedId === null ? undefined : conversations.openErrors.get(selectedId);

@@ -231,6 +231,7 @@ function toUserEntry(
         mimeType: attachment.mimeType,
         bytes: attachment.data.byteLength,
         sha256: key,
+        label: attachment.label,
         source: "paste",
       });
       return;

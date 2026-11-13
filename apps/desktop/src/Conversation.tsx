@@ -1192,7 +1192,11 @@ function UserImage({
     return (
       <span className="u-img-chip" title={`图片加载失败：${error}`}>
         <ImageIcon />
-        {images.showErrors ? error : attachment.file}
+        {images.showErrors
+          ? error
+          : attachment.sha256.startsWith("local:")
+            ? (attachment.label ?? attachment.file)
+            : attachment.file}
       </span>
     );
   }
