@@ -381,7 +381,7 @@ export async function checkpointWorktreeTurn(
       const firstLine = ((commitMessage ?? record.task).split(/\r?\n/)[0] ?? "").trim();
       await commit(
         record.worktree,
-        Array.from(firstLine === "" ? "Swarm member changes" : firstLine)
+        Array.from(firstLine === "" ? "Ensemble member changes" : firstLine)
           .slice(0, 72)
           .join(""),
       );

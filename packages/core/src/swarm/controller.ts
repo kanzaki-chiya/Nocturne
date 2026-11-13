@@ -553,7 +553,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     // 只要调用者自身分支上有未并回的改动就拒绝检出，防止丢弃未提交改动或切到分离头指针后漏提交
     const viewerOnBranch = await deps.worktrees.isOnMemberBranch(viewerRecord);
     const viewerOwnChanges = viewerOnBranch
-      ? await deps.worktrees.checkpoint(viewerRecord, `Swarm @${viewer.name} snapshot`)
+      ? await deps.worktrees.checkpoint(viewerRecord, `Ensemble @${viewer.name} snapshot`)
       : viewerRecord.changes;
     if (viewerOwnChanges !== undefined) {
       return {
@@ -566,7 +566,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     const targetOnBranch = await deps.worktrees.isOnMemberBranch(targetRecord);
     if (targetOnBranch) {
       await deps.worktrees
-        .checkpoint(targetRecord, `Swarm @${target.name} snapshot`)
+        .checkpoint(targetRecord, `Ensemble @${target.name} snapshot`)
         .catch(() => undefined);
     }
     const targetHead = await deps.worktrees.currentHead(targetRecord.worktree);
@@ -634,7 +634,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
                 const onBranch = await deps.worktrees.isOnMemberBranch(wt).catch(() => false);
                 if (onBranch) {
                   await deps.worktrees
-                    .checkpoint(wt, `Swarm @${member.name} changes`)
+                    .checkpoint(wt, `Ensemble @${member.name} changes`)
                     .catch(() => undefined);
                 }
                 if (member.pendingCheckoutCommit !== undefined) {
@@ -821,7 +821,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const wt = await ensureWorktreeRecord(authorMember);
       if (wt !== undefined) {
         await deps.worktrees
-          .checkpoint(wt, `Swarm @${authorMember.name} post`)
+          .checkpoint(wt, `Ensemble @${authorMember.name} post`)
           .catch(() => undefined);
         authorLatestCommit = await deps.worktrees.currentHead(wt.worktree).catch(() => undefined);
       }
@@ -896,7 +896,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
               if (targetWt !== undefined) {
                 const onBranch = await deps.worktrees.isOnMemberBranch(targetWt);
                 const ownChanges = onBranch
-                  ? await deps.worktrees.checkpoint(targetWt, `Swarm @${member.name} snapshot`)
+                  ? await deps.worktrees.checkpoint(targetWt, `Ensemble @${member.name} snapshot`)
                   : undefined;
                 if (ownChanges === undefined) {
                   const sha = await deps.worktrees.resetToCommit(
@@ -958,7 +958,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
     if (!member.isolated) return undefined;
     const wt = await ensureWorktreeRecord(member);
     if (wt === undefined) return undefined;
-    return await deps.worktrees.checkpoint(wt, `Swarm @${member.name} snapshot`);
+    return await deps.worktrees.checkpoint(wt, `Ensemble @${member.name} snapshot`);
   }
 
   async function removeMemberCore(
@@ -1065,7 +1065,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       const onBranch = await deps.worktrees.isOnMemberBranch(wt).catch(() => false);
       const changes = onBranch
         ? await deps.worktrees
-            .checkpoint(wt, `Swarm @${member.name} final snapshot`)
+            .checkpoint(wt, `Ensemble @${member.name} final snapshot`)
             .catch(() => undefined)
         : undefined;
       if (changes !== undefined) {
@@ -1190,7 +1190,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
             repository,
             cwd: dir.cwd,
             workspaceRoot: dir.workspaceRoot,
-            task: `Swarm @${input.name}: ${charterValidated.charter.owns}`,
+            task: `Ensemble @${input.name}: ${charterValidated.charter.owns}`,
           });
         } catch (err) {
           return {
@@ -1674,7 +1674,7 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         if ((m.childSessionId === idOrName || m.name === idOrName) && m.isolated) {
           const wt = await ensureWorktreeRecord(m);
           if (wt === undefined) return undefined;
-          const changes = await deps.worktrees.checkpoint(wt, `Swarm @${m.name} snapshot`);
+          const changes = await deps.worktrees.checkpoint(wt, `Ensemble @${m.name} snapshot`);
           if (changes === undefined) return undefined;
           return {
             memberName: m.name,

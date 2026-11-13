@@ -68,7 +68,7 @@ const stopText = (text = "ok"): FakeScript => [
 
 function requestRole(req: ModelRequest): string {
   const sys = req.system.map((b) => b.text).join("\n");
-  const match = /persistent swarm member `@([a-z0-9-]+)`/.exec(sys);
+  const match = /persistent ensemble member `@([a-z0-9-]+)`/.exec(sys);
   return match?.[1] ? `member:${match[1]}` : "coordinator";
 }
 
