@@ -257,8 +257,8 @@ launch(request, ctx)
 
 精确类型、RPC 方法、回放算法、错误与清理契约以 [rpc.md 第 4.1 节](../protocols/rpc.md#41-子会话只读观察adr-0060-第-4-轮) 为主文档。实现位于 `session/subagent-registry.ts`、`session/subagent-observe.ts` 与 `session/readonly-log.ts`，由 Runtime 装配并向 launcher 注入共享登记簿。
 
-- **发现不靠解析进度文本**：新增 `Runtime.listSubagents({parentSessionId})`，返回直接内置子会话的 child id、父 callId、启动档位/任务摘要、起止时间与可证明的状态。`session.created.parent` 是持久映射；运行中无需等父 `tool.completed.output`。可复用只读日志头索引查历史映射，不新增事件或事件字段，也不把当前档位配置用于解释历史。
-- **Runtime 级观察登记簿**：与运行级 limiter 同寿命，注入所有 launcher（递归共享），不是 Hub 的 sessions 表。子创建事件提交后、执行和进度转发前登记 child Session；登记时可捕获 request 的档位与摘要，父日志仍保留原始任务。索引以 `(parentSessionId, callId, childSessionId)` 关联；同一父调用意外出现多个 child 时保留各自 id，不任取一个覆盖。launcher 在 finally 中处理 SessionEnd、等写入与 close 后才发内存终止信号并移除活动项；异常和失败也必须走这条清理路径。观察者抛错或退出不得影响运行、锁、并发槽或结果返回。
+- **发现不靠解析进度文本**：新增 `Runtime.listSubagents({parentSessionId})`，返回直接内置子会话（不含 Swarm 常驻成员，见 [ADR-0089](../decisions/ADR-0089-swarm.md)）的 child id、父 callId、启动档位/任务摘要、起止时间与可证明的状态。`session.created.parent` 是持久映射；运行中无需等父 `tool.completed.output`。可复用只读日志头索引查历史映射，不新增事件或事件字段，也不把当前档位配置用于解释历史。
+- **Runtime 级观察登记簿**：与运行级 limiter 同寿命，注入所有 launcher（递归共享），不是 Hub 的 sessions 表。子创建事件提交后、执行和进度转发前登记 child Session（Swarm 常驻成员不进入活动子代理登记簿，其生命期、状态与界面入口归 `SessionView.swarm` 与 `session.open`，仅通过 `trackSession` 参与会话树授权 root 解析）；登记时可捕获 request 的档位与摘要，父日志仍保留原始任务。索引以 `(parentSessionId, callId, childSessionId)` 关联；同一父调用意外出现多个 child 时保留各自 id，不任取一个覆盖。launcher 在 finally 中处理 SessionEnd、等写入与 close 后才发内存终止信号并移除活动项；异常和失败也必须走这条清理路径。观察者抛错或退出不得影响运行、锁、并发槽或结果返回。
 - **结束和重启**：活动登记簿不落盘；结束后无需永久保留 Session 引用，按子日志 parent 重建映射，父工具输入补展示元数据。重启不复活子代理，不把旧的 running 工具行当作活动登记；只读日志前缀决定可显示内容。已结束、未收束和来自别的进程的日志都能看，但后两者不能被伪装成本后台实时运行或成功。子会话被删除后保留的面板标签显示不可用，不自动派生或恢复运行。
 - **无缝接流与自然结束**：新增 `Runtime.observeSubagent` 返回观察对象，不返回 `RuntimeSession`。活动 child 直接接已有 Session 的已提交事件，回放先监听后取快照、按 seq 去重；终止信号与事件一起衔接。不能在一个 `turn.completed(done)` 后就退订，因为 launcher 可能继续催促。无活动项走独立只读 reader，不经 load/repair；不完整尾行仅在内存略过，不取锁、不写任何文件。EOF 是读取完成，不是子代理成功。
 - **嵌套**：观察 API 以直接父子关系校验，能看任意深度的内置 child；先 list 当前 child 的直接子级，再携带该 child 作为 parent 观察孙级。本轮桌面不做嵌套跳转入口，不展开递归树；顶层概览只列直接子代理。

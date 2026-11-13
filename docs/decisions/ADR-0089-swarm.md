@@ -133,7 +133,7 @@
 ### 11. 结束与工作树清理
 
 - 协调者调用 `swarm_end` 或用户调用 `endSwarm()` 时：
-  1. 中断并关闭全部仍在运行或常驻打开的成员会话，清空未消费待发输入，从活动子代理登记簿注销；
+  1. 中断并关闭全部仍在运行或常驻打开的成员会话，清空未消费待发输入；
   2. 对有独立工作树的成员先完成工作树快照结算：已并回（`head === base` 或已合并入主仓库 `HEAD`，调用 `cleanupMergedWorktrees`）的工作树与 `nocturne/` 分支自动清理；仍有未并回提交的工作树与分支完整保留，写入 `swarm.ended.unmerged` 并在返回值/工具输出中逐项列出；
   3. 立即恢复协调者的文件编辑工具与 `task` 工具。
 
@@ -160,3 +160,9 @@
 - 活动摘要改为结构化：`SessionView.swarm` 中协调者与成员的 `activity` 改为 `SwarmActivity`（`tool` / `permission` / `paused` / `post` / `charter` / `removed`），`swarm.member_updated.toolActivity` 与成员视图的 `toolActivity` 改为 `{ tool, detail? }`，协议层不再产出英文句子，文字由客户端组成（字段见 [view.md](../protocols/view.md) §4）；`swarm.member_updated` 是临时事件，不涉及日志兼容，不提升 `formatVersion`。
 - 客户端斜杠解析增加 `/swarm board`（打开留言板）与 `/swarm end`（结束 Swarm）两个子命令，规则同 `/goal stop`：整行恰好是子命令才算，其余文字仍作为任务提交。
 - `swarm` 加入 `BUILTIN_SLASH_COMMANDS`，同名技能按既有规则标 `commandConflict`。
+
+## 修订（2026-11-14）
+
+- **Swarm 成员不再登记为「运行中的子代理」**：成员的状态与展示全部归属 `SessionView.swarm` 及成员会话标签，不再调用 `subagentRegistry.register`，`listSubagents`、`observeSubagent`、`readSubagentAttachment` 与活动态 `listSubagentWorktrees` 均排除 Swarm 成员（不论处于 `working`、`waiting`、`paused`、已移除、已结束或重启后均不出现在任何「子代理」列表中）。
+  - 原因：原实现把常驻成员按默认后台子代理登记进 `subagentRegistry`（且写死了 `profile: "default"` 与 `"Swarm member"`），导致成员完成工作进入 `waiting` 后仍被客户端子代理概览/侧栏显示为「运行中的后台子代理」并持续计时、出现取消按钮。
+  - 原先依赖登记表承担的保护已改由协调者与会话目录直接承接：非隔离成员所在工作区的分支切换保护由 `branchBusy` 检查 `SwarmController.hasWorkspaceMembers()` 维持；父会话与成员的授权共享与 `sessionGrantRoot` 查找继续通过 `subagentRegistry.trackSession`（`liveSession`）沿 `session.created.parent` 解析；活动隔离成员的工作树删除保护由 `deleteSubagentWorktree` 检查活动 Swarm 成员集合（仍报 `子代理仍在运行`）维持；`session.open` 成员会话标签、权限确认与关闭/重启收尾不受影响。

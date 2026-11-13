@@ -1261,6 +1261,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     durableEvents(): readonly DurableEvent[];
     /** 若 childSessionId 属于本会话活动 Swarm 的未移除成员，返回其共享托管会话句柄（ADR-0089 §8、§10） */
     swarmMember?(childSessionId: string): Promise<RuntimeSession | undefined>;
+    /** 当前活动 Swarm 中未移除的独立工作树成员 childSessionId 集合 */
+    swarmActiveIsolatedChildIds?(): ReadonlySet<string>;
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
   }
@@ -3487,8 +3489,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return Promise.resolve();
       };
 
-      const memberRegistrations = new Map<string, { end(): void }>();
-
       swarmController = createSwarmController({
         coordinatorSessionId: session.id,
         newChildSessionId: () => newSessionId(),
@@ -3648,34 +3648,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               await wrappedMember.close();
             },
           };
-        },
-        registerActiveSubagent: (childSessionId, _onCancel) => {
-          const proxy = memberProxies.get(childSessionId);
-          const inner = proxy
-            ? ((proxy as unknown as Record<symbol, Session | undefined>)[INTERNAL_SESSION] ??
-              undefined)
-            : undefined;
-          if (inner !== undefined) {
-            const metaInfo = inner.state().meta;
-            const reg = subagentRegistry.register({
-              child: inner,
-              parentSessionId: session.id,
-              callId: metaInfo.parent?.callId ?? `swarm:${childSessionId}`,
-              profile: "default",
-              model: `${inner.state().config.model.provider}/${inner.state().config.model.model}`,
-              effort: inner.state().config.reasoningEffort,
-              taskSummary: `Swarm member`,
-              background: true,
-            });
-            memberRegistrations.set(childSessionId, reg);
-          }
-        },
-        unregisterActiveSubagent: (childSessionId) => {
-          const reg = memberRegistrations.get(childSessionId);
-          if (reg !== undefined) {
-            memberRegistrations.delete(childSessionId);
-            reg.end();
-          }
         },
         worktrees: {
           inspectRepository: (dir) => inspectWorktreeRepository(dir),
@@ -4108,7 +4080,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return branchWatchPath();
       },
       repositoryFor,
-      branchBusy: () => busy() || compacting() || closing,
+      branchBusy: () =>
+        busy() || compacting() || closing || (swarmController?.hasWorkspaceMembers() ?? false),
       pumpPending: () => {
         void pumpQueue().catch(() => {
           pendingInputStore.pauseAll();
@@ -4146,6 +4119,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (!opened?.active) return undefined;
         return memberProxies.get(childSessionId);
       },
+      swarmActiveIsolatedChildIds: () => swarmController?.activeIsolatedChildIds() ?? new Set(),
       rename: async (title) => {
         assertUsable();
         if (meta.parent !== undefined)
@@ -5961,6 +5935,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         )
           .then((log) => log.events)
           .catch(() => []));
+      const activeSwarmIds = new Set(
+        openSessions.get(input.parentSessionId)?.swarmActiveIsolatedChildIds?.() ?? [],
+      );
+      const swarmView = replaySessionView(events).swarm;
+      if (swarmView?.status === "active") {
+        for (const member of swarmView.members) {
+          if (member.status !== "removed" && member.isolated) {
+            activeSwarmIds.add(member.childSessionId);
+          }
+        }
+      }
+      const visible = records.filter((record) => !activeSwarmIds.has(record.childSessionId));
+      if (visible.length === 0) return visible;
       const appliedIds = new Set(
         effectiveEvents(events).flatMap((event) =>
           event.type === "tool.completed" &&
@@ -5971,7 +5958,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             : [],
         ),
       );
-      return records.map((record) =>
+      return visible.map((record) =>
         record.applied || appliedIds.has(record.childSessionId)
           ? { ...record, applied: true }
           : record,
@@ -5982,7 +5969,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         (record) => record.childSessionId === input.childSessionId,
       );
       if (!record) throw new RuntimeCommandError("invalid_command", "没有保留的工作树");
-      if (subagentRegistry.find(input.childSessionId))
+      const swarmActive =
+        openSessions
+          .get(input.parentSessionId)
+          ?.swarmActiveIsolatedChildIds?.()
+          .has(input.childSessionId) === true;
+      if (subagentRegistry.find(input.childSessionId) || swarmActive)
         throw new RuntimeCommandError("invalid_command", "子代理仍在运行");
       await removeWorktree(record, true);
     },

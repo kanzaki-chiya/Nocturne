@@ -152,8 +152,6 @@ export interface SwarmControllerDeps {
   syncCoordinatorTools(): void;
   notifyCoordinatorIdle(): void;
   openMemberSession(spec: SwarmMemberOpenSpec): Promise<ManagedMemberSession>;
-  registerActiveSubagent(childSessionId: string, onCancel: () => void): void;
-  unregisterActiveSubagent(childSessionId: string): void;
   worktrees: SwarmWorktreeOps;
   commandError(code: "invalid_command" | "session_busy", message: string): Error;
 }
@@ -189,6 +187,8 @@ export interface SwarmController {
   createdSeq(): number | undefined;
   /** 当前仍在活动 Swarm 中且未移除的独立工作树成员 childSessionId 集合（防后台清理误删） */
   activeIsolatedChildIds(): ReadonlySet<string>;
+  /** 当前活动 Swarm 是否存在共享主工作区（非独立工作树）的未移除成员（供分支切换保护） */
+  hasWorkspaceMembers(): boolean;
   /** 协调者 Swarm 工具列表 */
   coordinatorTools(): ToolDefinition[];
   /** 向新订阅协调者的监听器补发当前非默认成员运行态快照 */
@@ -703,9 +703,6 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
 
       member.session = handle;
       member.unsubscribe = unsub;
-      deps.registerActiveSubagent(member.childSessionId, () => {
-        void handle.interruptAndWait();
-      });
 
       // 重启恢复时积压的未送达提及：补为已暂停的待发输入，不自动唤醒
       if (member.missedPosts.length > 0) {
@@ -1008,7 +1005,6 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       member.unsubscribe();
       member.unsubscribe = undefined;
     }
-    deps.unregisterActiveSubagent(member.childSessionId);
     if (member.session !== undefined) {
       member.session.clearPendingSwarmInputs();
       await member.session.closeUnderlying().catch(() => undefined);
@@ -1047,7 +1043,6 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
         member.unsubscribe();
         member.unsubscribe = undefined;
       }
-      deps.unregisterActiveSubagent(member.childSessionId);
       if (member.session !== undefined) {
         member.session.clearPendingSwarmInputs();
         await member.session.interruptAndWait().catch(() => undefined);
@@ -1550,6 +1545,14 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
       return ids;
     },
 
+    hasWorkspaceMembers() {
+      if (!active) return false;
+      for (const m of members.values()) {
+        if (m.status !== "removed" && !m.isolated) return true;
+      }
+      return false;
+    },
+
     coordinatorTools: () => createSwarmCoordinatorTools(toolHandlers),
 
     publishMemberSnapshots(_listener) {
@@ -1710,7 +1713,6 @@ export function createSwarmController(deps: SwarmControllerDeps): SwarmControlle
           m.unsubscribe();
           m.unsubscribe = undefined;
         }
-        deps.unregisterActiveSubagent(m.childSessionId);
         if (m.session !== undefined) {
           await m.session.interruptAndWait().catch(() => undefined);
           await m.session.closeUnderlying().catch(() => undefined);

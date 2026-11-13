@@ -341,7 +341,11 @@ export function createSubagentObservation(
     return decodeDurableEvent(new TextDecoder().decode(bytes.subarray(0, end)));
   }
 
-  /** 日志头索引：parentSessionId 的全部直接子会话（含已结束） */
+  const isSwarmMemberParent = (
+    parent: { sessionId: string; callId: string } | null | undefined,
+  ): boolean => parent?.callId.startsWith("swarm:") ?? false;
+
+  /** 日志头索引：parentSessionId 的全部直接子会话（含已结束，排除 Swarm 常驻成员） */
   async function childrenOf(parentSessionId: string): Promise<string[]> {
     let entries;
     try {
@@ -369,7 +373,10 @@ export function createSubagentObservation(
         }),
       );
     }
-    return ids.filter((id) => heads.get(id)?.sessionId === parentSessionId);
+    return ids.filter((id) => {
+      const parent = heads.get(id);
+      return parent?.sessionId === parentSessionId && !isSwarmMemberParent(parent);
+    });
   }
 
   /** 子日志的只读分析（按文件指纹缓存）；不可读、损坏时抛错，由调用方决定跳过或上报 */
@@ -422,8 +429,9 @@ export function createSubagentObservation(
   ): Promise<{ events: DurableEvent[]; tailIgnored: boolean }> {
     const log = await readLogReadonly(fs, logPath(childSessionId), childSessionId);
     const created = log.events[0];
+    const parent = created?.type === "session.created" ? created.payload.parent : undefined;
     assertParent(
-      created?.type === "session.created" ? created.payload.parent?.sessionId : undefined,
+      parent !== undefined && !isSwarmMemberParent(parent) ? parent.sessionId : undefined,
       parentSessionId,
     );
     return { events: log.events, tailIgnored: log.tailIgnored };
