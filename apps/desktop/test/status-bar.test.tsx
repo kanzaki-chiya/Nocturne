@@ -852,4 +852,11 @@ describe("状态栏速度段", () => {
     );
     expect(screen.getByRole("button", { name: /停止/u }).getAttribute("title")).toBe("停止");
   });
+
+  it("running=true 且视图仍为 idle 时立即显示「思考中」而不是「空闲」", () => {
+    const state = fixture();
+    render(<StatusBar {...state} running />);
+    expect(screen.queryByText("空闲")).toBeNull();
+    expect(screen.getByText("思考中")).not.toBeNull();
+  });
 });

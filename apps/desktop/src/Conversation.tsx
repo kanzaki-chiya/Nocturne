@@ -1150,11 +1150,13 @@ function UserImage({
   slots: Map<number, string>;
   onOpen: (index: number, opener: HTMLElement) => void;
 }) {
-  const known = images.url(attachment);
+  // 本地消息的预览图立即显示；历史图片照旧进入可视区才取（命中缓存也一样）
+  const eager = visible || attachment.sha256.startsWith("local:");
+  const known = eager ? images.url(attachment) : undefined;
   const [url, setUrl] = useState<string | undefined>(known);
   const [error, setError] = useState<string>();
   useEffect(() => {
-    const immediate = images.url(attachment);
+    const immediate = eager ? images.url(attachment) : undefined;
     if (immediate !== undefined) {
       setUrl(immediate);
       setError(undefined);
@@ -1173,7 +1175,7 @@ function UserImage({
     return () => {
       active = false;
     };
-  }, [attachment, images, session, visible]);
+  }, [attachment, eager, images, session, visible]);
   useEffect(
     () => () => {
       slots.delete(index);

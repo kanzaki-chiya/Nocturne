@@ -37,6 +37,11 @@ export interface StatusBarProps {
   onManageRemote?: () => void;
   session: RpcSession;
   view: SessionView;
+  /**
+   * 会话已在运行（含点发送后、Core 发出第一条运行状态前）。视图还是 idle 时
+   * 按 Turn 开始后的「思考中」显示，避免发送后左下仍显示「空闲」。
+   */
+  running?: boolean;
   branch?: ReactNode;
   /** 历史回放期间为 true：不按条目数刷新上下文，结束后刷新一次 */
   replaying?: boolean;
@@ -297,6 +302,7 @@ function SpeedBadge({ speed }: { speed: SpeedDisplay | undefined }) {
 export function StatusBar({
   session,
   view,
+  running = false,
   branch,
   replaying = false,
   panel,
@@ -407,7 +413,8 @@ export function StatusBar({
     cacheUsage.cacheReadTokens === undefined || cacheUsage.inputTokens <= 0
       ? null
       : Math.round((cacheUsage.cacheReadTokens / cacheUsage.inputTokens) * 100);
-  const busy = view.status !== "idle" && view.status !== "failed";
+  const status = view.status === "idle" && running ? "thinking" : view.status;
+  const busy = status !== "idle" && status !== "failed";
   const readyMcpCount = Object.values(view.mcpServers).filter((s) => s.state === "ready").length;
 
   const trigger = (name: StatusPanel, label: string, content: ReactNode) => (
@@ -435,7 +442,7 @@ export function StatusBar({
       <div className="status-left status-group">
         <span className={`status-item status-turn${busy ? " status-turn-busy" : ""}`}>
           <span className={`dot${busy ? " warn" : " ok"}`} aria-hidden="true" />
-          <span>{STATUS_TEXT[view.status]}</span>
+          <span>{STATUS_TEXT[status]}</span>
           {view.currentTurn && (
             <span className="muted-value">第 {view.currentTurn.turnIndex} 轮</span>
           )}

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PendingInputsSnapshot, UserEntry, ViewEntry } from "@nocturne/core/protocol";
 import {
+  acceptOutgoing,
+  bindPending,
   emptyOutgoing,
   nextLocalId,
   pushOutgoing,
@@ -80,5 +82,41 @@ describe("本地发送与正式条目对上", () => {
       ],
     };
     expect(reconcileOutgoing(book, [], pending).items).toEqual([]);
+  });
+
+  it("接受后正文与本地不同（如首尾空白规整）仍能按位置替换", () => {
+    resetLocalIds();
+    const first = local({ place: "turn", text: "  先发送  \r\n", excludeUserSeqs: [1] });
+    const book = acceptOutgoing(pushOutgoing(emptyOutgoing(), first), first.id);
+    const entries: ViewEntry[] = [user(1, "旧消息"), user(2, "先发送")];
+    const next = reconcileOutgoing(book, entries, emptyPending);
+    expect(next.items).toEqual([]);
+    expect(next.keys.get("u-2")).toBe(first.id);
+  });
+
+  it("enqueueInput 绑定 id 后，即使快照从未出现该 id 本地行也消失，且不误伤下一条", () => {
+    resetLocalIds();
+    const first = local({ place: "pending", text: "插话", excludePendingIds: [] });
+    const second = local({ place: "pending", text: "插话", excludePendingIds: [] });
+    let book = pushOutgoing(pushOutgoing(emptyOutgoing(), first), second);
+    book = bindPending(book, first.id, "pi-gone");
+    expect(book.items.map((item) => item.id)).toEqual([second.id]);
+    const staleSnapshot: PendingInputsSnapshot = {
+      paused: false,
+      items: [
+        {
+          id: "pi-gone",
+          mode: "steer",
+          text: "插话",
+          attachments: 0,
+          createdAt: "2026-11-13T00:00:05.000Z",
+          paused: false,
+        },
+      ],
+    };
+    // 下一条还没拿到自己的 id，不会被上一条的 id 错配消掉
+    expect(reconcileOutgoing(book, [], staleSnapshot).items.map((item) => item.id)).toEqual([
+      second.id,
+    ]);
   });
 });

@@ -73,7 +73,13 @@ import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
 import { PendingInputsPanel, pendingPanelRows } from "./components/pending-inputs.js";
-import { localPendingItems, localUserEntry, reconcileLocals, type TuiLocal } from "./outgoing.js";
+import {
+  bindLocalPending,
+  localPendingItems,
+  localUserEntry,
+  reconcileLocals,
+  type TuiLocal,
+} from "./outgoing.js";
 import { frameBudget } from "./frame.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import {
@@ -933,16 +939,18 @@ function SessionApp({
   const pendingInputsRef = useRef(pendingInputs);
   pendingInputsRef.current = pendingInputs;
   const [locals, setLocals] = useState<TuiLocal[]>([]);
+  const localSeqRef = useRef(0);
+  // 视图原地更新：用 revision 驱动重算，entries 的引用不变
   const shownLocals = useMemo(
-    () => reconcileLocals(locals, view.entries, pendingInputs),
-    [locals, view.entries, pendingInputs],
+    () => reconcileLocals(locals, view.entries, pendingInputs, view.turnCount),
+    [locals, view.entries, pendingInputs, view.revision, view.turnCount],
   );
   useEffect(() => {
     setLocals((list) => {
-      const next = reconcileLocals(list, view.entries, pendingInputs);
+      const next = reconcileLocals(list, view.entries, pendingInputs, view.turnCount);
       return next.length === list.length ? list : next;
     });
-  }, [view.entries, pendingInputs]);
+  }, [view.entries, pendingInputs, view.revision, view.turnCount]);
   const pendingIndexRef = useRef(0);
   const editingPendingRef = useRef<string | undefined>(undefined);
   /** 早于 pushLine 定义的效果里要用它提示原因 */
@@ -2973,7 +2981,8 @@ function SessionApp({
       ) => {
         const savedImages = images.in(text).map((image) => ({ ...image }));
         const savedFiles = files.in(text).map((file) => ({ ...file }));
-        const id = `tui-${Date.now().toString(36)}-${savedImages.length}-${savedFiles.length}`;
+        localSeqRef.current += 1;
+        const id = `tui-${localSeqRef.current}`;
         const item: TuiLocal = {
           id,
           place,
@@ -2992,10 +3001,14 @@ function SessionApp({
               : [],
           ),
           excludePendingIds: pendingInputsRef.current.items.map((row) => row.id),
+          turnCount: view.turnCount,
         };
         setLocals((list) => [...list, item]);
-        const fail = (error: unknown) => {
+        const drop = () => {
           setLocals((list) => list.filter((row) => row.id !== id));
+        };
+        const fail = (error: unknown) => {
+          drop();
           pushLine(`! ${modelErrorText(error)}`);
           if (inputRef.current !== "") return;
           let next = text;
@@ -3007,7 +3020,7 @@ function SessionApp({
           }
           updateInput(next, next.length);
         };
-        return { id, fail };
+        return { id, drop, fail };
       };
       const skills = session.describeSkills().skills;
       const skill = parseSkillSlash(expanded, skills);
@@ -3090,11 +3103,8 @@ function SessionApp({
         };
         if (queued) {
           void session.enqueueInput("queue", input).then((result) => {
-            if (!result.queued) {
-              setLocals((list) =>
-                list.map((row) => (row.id === held.id ? { ...row, place: "turn" } : row)),
-              );
-            }
+            if (!result.queued) held.drop();
+            else setLocals((list) => bindLocalPending(list, held.id, result.id));
           }, held.fail);
           return;
         }
@@ -3104,6 +3114,7 @@ function SessionApp({
           .submit(input)
           .catch(held.fail)
           .finally(() => {
+            held.drop();
             submitting.current = false;
             setSubmitPending(false);
           });
@@ -3211,11 +3222,8 @@ function SessionApp({
             ...(attachments.length > 0 ? { attachments } : {}),
           })
           .then((result) => {
-            if (!result.queued) {
-              setLocals((list) =>
-                list.map((row) => (row.id === held.id ? { ...row, place: "turn" } : row)),
-              );
-            }
+            if (!result.queued) held.drop();
+            else setLocals((list) => bindLocalPending(list, held.id, result.id));
             if (fullscreen) setScroll(scrollToBottom());
           }, held.fail);
         return;
@@ -3241,6 +3249,7 @@ function SessionApp({
         })
         .catch(held.fail)
         .finally(() => {
+          held.drop();
           submitting.current = false;
           setSubmitPending(false);
         });

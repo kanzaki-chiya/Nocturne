@@ -14,6 +14,8 @@ import { Conversation, QuestionCard, type FileLinkHooks } from "./Conversation";
 import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
 import {
+  acceptOutgoing,
+  bindPending,
   dropOutgoing,
   emptyOutgoing,
   localTurnEntries,
@@ -21,7 +23,6 @@ import {
   nextLocalId,
   pushOutgoing,
   reconcileOutgoing,
-  retargetOutgoing,
   submitBody,
   userSeqs,
   draftTextOf,
@@ -67,10 +68,12 @@ export function SwarmMemberPane({
   outgoingRef.current = outgoing;
   const readyView = state.status === "ready" ? state.view : undefined;
   const readyPending = state.status === "ready" ? state.pendingInputs : undefined;
+  // 视图对象原地更新：用 version 驱动重新对齐，否则新条目到达时不会重算
+  const readyVersion = state.status === "ready" ? state.version : 0;
   useEffect(() => {
     if (readyView === undefined || readyPending === undefined) return;
     setOutgoing((book) => reconcileOutgoing(book, readyView.entries, readyPending));
-  }, [readyView, readyPending]);
+  }, [readyView, readyPending, readyVersion]);
   const frozen =
     swarmStatus !== "active" || memberStatus === undefined || memberStatus === "removed";
   const recipientLabel = `@${memberName}`;
@@ -162,13 +165,10 @@ export function SwarmMemberPane({
           submitBody(input),
         );
         if (!result.queued) {
-          setOutgoing((book) =>
-            reconcileOutgoing(
-              retargetOutgoing(book, local.id, "turn"),
-              view.entries,
-              pendingInputs,
-            ),
-          );
+          // 直接开了新 Turn：enqueueInput 在 Turn 结束后才返回，正式消息早已到达
+          setOutgoing((book) => dropOutgoing(book, local.id));
+        } else {
+          setOutgoing((book) => bindPending(book, local.id, result.id));
         }
         return true;
       }
@@ -200,8 +200,17 @@ export function SwarmMemberPane({
         void submission.catch((cause: unknown) => {
           if (isAccepted()) setSubmitError(cause instanceof Error ? cause.message : String(cause));
         });
+        // submit 落定时本地消息一律收掉，对不上正式条目也不会一直留着
+        void submission
+          .catch(() => undefined)
+          .finally(() => {
+            setOutgoing((book) => dropOutgoing(book, local.id));
+          });
       });
       await accepted;
+      setOutgoing((book) =>
+        reconcileOutgoing(acceptOutgoing(book, local.id), view.entries, pendingInputs),
+      );
       return true;
     } catch (cause) {
       setOutgoing((book) => dropOutgoing(book, local.id));

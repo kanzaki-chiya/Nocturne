@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PendingInputsSnapshot, ViewEntry } from "@nocturne/core/protocol";
 import {
+  bindLocalPending,
   localPendingItems,
   localUserEntry,
   reconcileLocals,
@@ -56,5 +57,43 @@ describe("TUI 本地发送", () => {
       ],
     };
     expect(reconcileLocals([local], [], pending)).toEqual([]);
+  });
+
+  it("新 Turn 开始后正文不同也能替换本地行", () => {
+    const local: TuiLocal = {
+      ...row({ place: "turn", text: "  第一行\r\n" }),
+      turnCount: 0,
+    };
+    const entries: ViewEntry[] = [
+      {
+        kind: "user",
+        key: "u1",
+        seq: 1,
+        turnId: "t1",
+        content: [{ type: "text", text: "第一行" }],
+      },
+    ];
+    expect(reconcileLocals([local], entries, { items: [], paused: false }, 1)).toEqual([]);
+  });
+
+  it("enqueueInput 绑定 id 后即使快照从未出现该 id 也会撤掉，且不误伤下一条", () => {
+    const first = row({ id: "t1", place: "pending", text: "插话" });
+    const second = row({ id: "t2", place: "pending", text: "插话" });
+    const bound = bindLocalPending([first, second], "t1", "pi-gone");
+    expect(bound.map((item) => item.id)).toEqual(["t2"]);
+    const pending: PendingInputsSnapshot = {
+      paused: false,
+      items: [
+        {
+          id: "pi-gone",
+          mode: "steer",
+          text: "插话",
+          attachments: 0,
+          createdAt: "2026-11-13T00:00:01.000Z",
+          paused: false,
+        },
+      ],
+    };
+    expect(reconcileLocals(bound, [], pending).map((item) => item.id)).toEqual(["t2"]);
   });
 });

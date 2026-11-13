@@ -19,6 +19,8 @@ import {
 import type { ComposerSubmit } from "../Composer";
 import { conversationStatus } from "../conversations";
 import {
+  acceptOutgoing,
+  bindPending,
   draftTextOf,
   dropOutgoing,
   emptyOutgoing,
@@ -26,6 +28,7 @@ import {
   pushOutgoing,
   reconcileOutgoing,
   retargetOutgoing,
+  submitBody,
   userSeqs,
   type LocalOutgoing,
   type OutgoingBook,
@@ -96,6 +99,26 @@ export function failPhoneOutgoing(entry: PhoneSession, id: string): void {
   entry.outgoing = dropOutgoing(entry.outgoing, id);
 }
 
+/** 交给 Core 的手机输入：没有附件时不带 attachments 字段（与改动前的线上形状一致） */
+export function phoneSubmitBody(input: ComposerSubmit): Parameters<RpcSession["submit"]>[0] {
+  const { attachments, ...rest } = submitBody(input);
+  return attachments.length > 0 ? { ...rest, attachments } : rest;
+}
+
+/** Core 已接受：之后新出现的第一条用户条目就归这次发送，不再比正文 */
+export function acceptPhoneOutgoing(entry: PhoneSession, id: string): void {
+  entry.outgoing = reconcileOutgoing(
+    acceptOutgoing(entry.outgoing, id),
+    entry.view.entries,
+    entry.pendingInputs,
+  );
+}
+
+/** `enqueueInput` 返回了 id：本地行交给快照（或已被取走），不再按正文去找 */
+export function bindPhoneOutgoing(entry: PhoneSession, id: string, pendingId: string): void {
+  entry.outgoing = bindPending(entry.outgoing, id, pendingId);
+}
+
 export function retargetPhoneOutgoing(entry: PhoneSession, id: string): void {
   entry.outgoing = reconcileOutgoing(
     retargetOutgoing(entry.outgoing, id, "turn"),
@@ -117,6 +140,8 @@ export async function submitAccepted(
   entry: PhoneSession,
   input: Parameters<RpcSession["submit"]>[0],
   finished: (error: unknown) => void,
+  /** 这次发送的本地消息：接受后按位置对上正式条目，submit 落定时一律收掉 */
+  localId?: string,
 ): Promise<void> {
   const baseline = entry.view.entries.length;
   const isAccepted = () =>
@@ -150,11 +175,17 @@ export async function submitAccepted(
   } finally {
     if (listener) entry.listeners.delete(listener);
   }
+  if (localId !== undefined) acceptPhoneOutgoing(entry, localId);
+  const settle = () => {
+    if (localId !== undefined) failPhoneOutgoing(entry, localId);
+  };
   submission.then(
     () => {
+      settle();
       finished(undefined);
     },
     (error: unknown) => {
+      settle();
       finished(error);
     },
   );

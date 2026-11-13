@@ -27,12 +27,15 @@ function replayHost(
   }) => { code: string; message: string; data?: Record<string, unknown> | undefined } | undefined,
   /** 订阅回放时追加的持久事件（默认没有；用来验证重放不提醒，ADR-0056） */
   seedReplay?: (sessionId: string) => object[],
+  /** 新建会话在 subscribe 时不发假回放（更贴近真实 Core） */
+  emptyNewSession = false,
 ) {
   const channels = new Map<number, (message: BackendMessage) => void>();
-  /** 被 deferRpc 扣下的请求：respond 把结果发回客户端 */
+  /** 被 deferRpc 扣下的请求：respond 把结果发回客户端，reject 模拟拒收 */
   const deferred: {
     request: { id: number; method: string };
     respond: (result: unknown) => void;
+    reject: (code: string, message: string) => void;
   }[] = [];
   /** 每个后台的内存 stderr 缓冲（backend_stderr 读取；后台关闭后随之回收） */
   const stderr = new Map<number, string[]>();
@@ -231,6 +234,22 @@ function replayHost(
               lines: [JSON.stringify({ jsonrpc: "2.0", id: request.id, result: r })],
             });
           },
+          reject: (code, message) => {
+            channel({
+              kind: "lines",
+              lines: [
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: request.id,
+                  error: {
+                    code: -32001,
+                    message,
+                    data: { code, name: "RuntimeCommandError" },
+                  },
+                }),
+              ],
+            });
+          },
         });
         return;
       }
@@ -338,38 +357,44 @@ function replayHost(
           };
           break;
         case "session.subscribe": {
-          const events = [
-            {
-              type: "message.user",
-              payload: { messageId: `user-${id}`, content: [{ type: "text", text: `${id} 正文` }] },
-            },
-            ...(id === "alpha" || id === "beta" || id === "draft-1" || id === "sched-run-1"
-              ? [
-                  { type: "turn.started", payload: { turnIndex: 1 } },
+          const events =
+            emptyNewSession && id === "draft-1"
+              ? []
+              : [
                   {
-                    type: "tool.started",
+                    type: "message.user",
                     payload: {
-                      callId: `call-${id}`,
-                      name: "write",
-                      input: { path: `${id}.txt`, content: id },
-                      subjects: [{ kind: "edit", target: `${id}.txt` }],
-                      permission: { action: "ask", source: "preset" },
+                      messageId: `user-${id}`,
+                      content: [{ type: "text", text: `${id} 正文` }],
                     },
                   },
-                  {
-                    type: "permission.requested",
-                    payload: {
-                      requestId: `permission-${id}`,
-                      callId: `call-${id}`,
-                      subjects: [{ kind: "edit", target: `${id}.txt` }],
-                      reason: "等待用户确认",
-                      options: ["allow_once", "deny"],
-                    },
-                  },
-                ]
-              : []),
-            ...(id === undefined ? [] : (seedReplay?.(id) ?? [])),
-          ];
+                  ...(id === "alpha" || id === "beta" || id === "draft-1" || id === "sched-run-1"
+                    ? [
+                        { type: "turn.started", payload: { turnIndex: 1 } },
+                        {
+                          type: "tool.started",
+                          payload: {
+                            callId: `call-${id}`,
+                            name: "write",
+                            input: { path: `${id}.txt`, content: id },
+                            subjects: [{ kind: "edit", target: `${id}.txt` }],
+                            permission: { action: "ask", source: "preset" },
+                          },
+                        },
+                        {
+                          type: "permission.requested",
+                          payload: {
+                            requestId: `permission-${id}`,
+                            callId: `call-${id}`,
+                            subjects: [{ kind: "edit", target: `${id}.txt` }],
+                            reason: "等待用户确认",
+                            options: ["allow_once", "deny"],
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(id === undefined ? [] : (seedReplay?.(id) ?? [])),
+                ];
           events.forEach((event, index) =>
             channel({
               kind: "lines",
@@ -2287,4 +2312,40 @@ it("新会话页分支选择：普通对话显示 - 且禁用，项目默认显�
       branch: { name: "r1110e/new-feature", create: true },
     }),
   );
+});
+
+it("新会话发送后侧栏立即出现并选中、状态栏显示思考中；拒收回到新会话页后侧栏不留", async () => {
+  const host = replayHost(
+    [],
+    undefined,
+    (req) => req.method === "session.submit",
+    undefined,
+    undefined,
+    true,
+  );
+  render(<App host={host} />);
+  const field = await screen.findByLabelText<HTMLTextAreaElement>("消息输入");
+  fireEvent.change(field, { target: { value: "新会话首条" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+  // createSession 返回后、session.submit 尚未返回：侧栏立即出现且选中，状态栏显示思考中
+  await waitFor(() => {
+    const sidebar = document.querySelector("aside");
+    expect(sidebar?.textContent).toContain("新会话首条");
+    expect(sidebar?.querySelector(".item.on")?.textContent).toContain("新会话首条");
+    expect(document.querySelector(".status-turn")?.textContent).toContain("思考中");
+    expect(document.querySelector(".status-turn")?.textContent).not.toContain("空闲");
+  });
+
+  // 拒收：回到新会话页并恢复草稿，侧栏不再留下该会话
+  const held = host.deferred.find((item) => item.request.method === "session.submit");
+  if (held === undefined) throw new Error("缺少卡住的 submit");
+  act(() => {
+    held.reject("invalid_command", "图片超过 6400 万像素");
+  });
+  await waitFor(() => {
+    expect(screen.getByLabelText<HTMLTextAreaElement>("消息输入").value).toBe("新会话首条");
+    expect(screen.getByRole("alert").textContent).toContain("图片超过 6400 万像素");
+    expect(document.querySelector("aside")?.textContent).not.toContain("新会话首条");
+  });
 });

@@ -11,7 +11,7 @@ import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
-import { localTurnEntries, mergePending, submitBody } from "../outgoing";
+import { localTurnEntries, mergePending } from "../outgoing";
 import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
 import { useDraftControls, useSessionControls } from "../session-controls";
@@ -23,7 +23,9 @@ import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { TodoPanel } from "../TodoList";
 import { loadTodosCollapsed, saveTodosCollapsed } from "./local";
 import {
+  bindPhoneOutgoing,
   failPhoneOutgoing,
+  phoneSubmitBody,
   retargetPhoneOutgoing,
   submitAccepted,
   trackPhoneOutgoing,
@@ -175,22 +177,33 @@ export function SessionScreen({
       if (queued) {
         const result = await session.enqueueInput(
           input.workMode ? "queue" : mode,
-          submitBody(input),
+          phoneSubmitBody(input),
         );
-        if (!result.queued) retargetPhoneOutgoing(entry, local.id);
+        if (!result.queued) {
+          // 直接开了新 Turn：enqueueInput 在 Turn 结束后才返回，正式消息早已到达
+          retargetPhoneOutgoing(entry, local.id);
+          failPhoneOutgoing(entry, local.id);
+        } else {
+          bindPhoneOutgoing(entry, local.id, result.id);
+        }
         if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
         onChanged();
         return true;
       }
-      await submitAccepted(entry, submitBody(input), (error) => {
-        entry.busy = false;
-        if (
-          error !== undefined &&
-          !(error instanceof RpcError && error.code === "connection_closed")
-        )
-          onError(errorText(error));
-        onChanged();
-      });
+      await submitAccepted(
+        entry,
+        phoneSubmitBody(input),
+        (error) => {
+          entry.busy = false;
+          if (
+            error !== undefined &&
+            !(error instanceof RpcError && error.code === "connection_closed")
+          )
+            onError(errorText(error));
+          onChanged();
+        },
+        local.id,
+      );
     } catch (error) {
       failPhoneOutgoing(entry, local.id);
       entry.busy = false;

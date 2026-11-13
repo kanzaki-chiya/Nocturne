@@ -43,7 +43,9 @@ function fixture(
   /** 被扣住的 session.subscribe 响应（releaseSubscribe 放行） */
   const stalledSub = new Map<string, { id: unknown }>();
   const heldSubmits = new Map<string, { id: unknown; text: string }>();
+  const heldEnqueues = new Map<string, { id: unknown }>();
   let holdUserMessage = false;
+  let holdEnqueueFlag = false;
   let changes: TurnChanges[] = [];
   let changesError = false;
   /** crash 后为 true：failResume 只在重建的新后台生效 */
@@ -150,7 +152,13 @@ function fixture(
         if (request.method === "session.close") opened.delete(id);
         // ADR-0070：待发输入
         if (request.method === "session.pendingInputs") result = { items: [], paused: false };
-        if (request.method === "session.enqueueInput") result = { id: "pi-1", queued: true };
+        if (request.method === "session.enqueueInput") {
+          if (holdEnqueueFlag) {
+            heldEnqueues.set(id, { id: request.id });
+            return;
+          }
+          result = { id: "pi-1", queued: true };
+        }
         if (
           request.method === "session.updateInput" ||
           request.method === "session.cancelInput" ||
@@ -317,10 +325,20 @@ function fixture(
   function holdSubmit() {
     holdUserMessage = true;
   }
-  function releaseUserMessage(id: string) {
+  function holdEnqueue() {
+    holdEnqueueFlag = true;
+  }
+  function releaseEnqueue(id: string, result: { id: string; queued: boolean }) {
+    const pending = heldEnqueues.get(id);
+    if (pending === undefined || server === undefined) throw new Error("没有卡住的排队");
+    heldEnqueues.delete(id);
+    server.send(JSON.stringify({ jsonrpc: "2.0", id: pending.id, result }));
+  }
+  function releaseUserMessage(id: string, textOverride?: string) {
     const pending = heldSubmits.get(id);
     if (pending === undefined || server === undefined) throw new Error("没有卡住的提交");
     heldSubmits.delete(id);
+    turns.set(id, pending.id);
     const seq = (seqs.get(id) ?? 0) + 1;
     seqs.set(id, seq);
     server.send(
@@ -334,17 +352,26 @@ function fixture(
             seq,
             time: "2026-01-01T00:00:00Z",
             type: "message.user",
-            payload: { content: [{ type: "text", text: pending.text }] },
+            payload: { content: [{ type: "text", text: textOverride ?? pending.text }] },
           },
         },
       }),
     );
   }
+  function resolveHeldSubmit(id: string) {
+    const pending = heldSubmits.get(id);
+    if (pending === undefined || server === undefined) throw new Error("没有卡住的提交");
+    heldSubmits.delete(id);
+    server.send(JSON.stringify({ jsonrpc: "2.0", id: pending.id, result: "done" }));
+  }
   return {
     changed,
     controller,
     holdSubmit,
+    holdEnqueue,
+    releaseEnqueue,
     releaseUserMessage,
+    resolveHeldSubmit,
     pool,
     calls,
     opened,
@@ -807,9 +834,10 @@ describe("send 接受语义与创建选项", () => {
     expect(f.controller.selectedId).toBe(id);
   });
 
-  it("上一条还在准备时连发，第二条进本地待发，快照到达后替换", async () => {
+  it("上一条还在准备时连发，第二条在 enqueueInput 返回前留在本地待发，返回后即使快照未含该 id 也消失", async () => {
     const f = fixture();
     f.holdSubmit();
+    f.holdEnqueue();
     await f.controller.open("a", "project");
     const first = f.controller.submitInput({ text: "先", attachments: [] });
     await vi.waitFor(() => expect(f.controller.opened.get("a")?.outgoing.items).toHaveLength(1));
@@ -824,25 +852,34 @@ describe("send 接受语义与创建选项", () => {
     );
     f.releaseUserMessage("a");
     await first;
+    // enqueueInput 返回时该条已被取走，快照里从未出现过 pi-1，本地行仍消失
+    f.releaseEnqueue("a", { id: "pi-1", queued: true });
     await second;
-    expect(f.controller.opened.get("a")?.outgoing.items.map((item) => item.place)).toEqual([
-      "pending",
-    ]);
-    f.event("a", "input.pending", {
-      paused: false,
-      items: [
-        {
-          id: "pi-1",
-          mode: "steer",
-          text: "后",
-          attachments: 0,
-          createdAt: new Date().toISOString(),
-          paused: false,
-        },
-      ],
-    });
-    await vi.waitFor(() => expect(f.controller.opened.get("a")?.outgoing.items).toEqual([]));
+    expect(f.controller.opened.get("a")?.outgoing.items).toEqual([]);
     expect(f.calls.filter((call) => call.method === "session.enqueueInput")).toHaveLength(1);
+  });
+
+  it("接受后正文与本地不同仍能替换；submission 落定后不留本地条目", async () => {
+    const f = fixture();
+    f.holdSubmit();
+    await f.controller.open("a", "project");
+    const entry = f.controller.opened.get("a");
+    if (entry === undefined) throw new Error("缺少会话");
+    const pending = f.controller.send({ text: "  规整前  \r\n", attachments: [] });
+    await vi.waitFor(() => expect(entry.outgoing.items).toHaveLength(1));
+    f.event("a", "turn.started", { turnIndex: 1 });
+    f.releaseUserMessage("a", "规整前");
+    await pending;
+    expect(entry.outgoing.items).toEqual([]);
+    expect(entry.view.entries.filter((item) => item.kind === "user")).toHaveLength(1);
+    f.complete("a");
+
+    // 即使没有对应的用户消息到达，submission 落定后也会清掉本地条目
+    const orphan = f.controller.send({ text: "无正式条目", attachments: [] });
+    await vi.waitFor(() => expect(entry.outgoing.items).toHaveLength(1));
+    f.resolveHeldSubmit("a");
+    await orphan;
+    await vi.waitFor(() => expect(entry.outgoing.items).toEqual([]));
   });
 
   it("已打开的会话提交被 invalid_model 拒绝：记入 openErrors 供换模型卡片（ADR-0054）", async () => {

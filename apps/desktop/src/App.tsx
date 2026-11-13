@@ -28,7 +28,7 @@ import { applyAppearance, applyTheme } from "./appearance";
 import { appIconResolver } from "./app-icon";
 import { ArchivePage } from "./ArchivePage";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
-import { localTurnEntries, mergePending, type OutgoingBook } from "./outgoing";
+import { localTurnEntries, mergePending, outgoingTitle, type OutgoingBook } from "./outgoing";
 import { replyLinkOpener } from "./external-url";
 import {
   BackendLogsPage,
@@ -1154,7 +1154,10 @@ export function App({ host }: { host: DesktopHost }) {
   ): Promise<boolean> => {
     try {
       // ADR-0070：Turn 运行中 Enter 排队、Alt+Enter 插话；空闲时都是普通发送
-      await conversations.submitInput(input, mode ?? "steer", create);
+      // 新会话 createSession 一返回就选中，侧栏随即出现（treeSessions 合入本地会话）
+      await conversations.submitInput(input, mode ?? "steer", create, () => {
+        setSelectedId(conversations.selectedId);
+      });
       setSelectedId(conversations.selectedId);
       await refresh();
       return true;
@@ -1282,16 +1285,39 @@ export function App({ host }: { host: DesktopHost }) {
     return true;
   };
 
-  const treeSessions = useMemo(
-    () =>
-      sessions.map((summary) => {
-        const entry = conversations.opened.get(summary.id);
-        return entry === undefined
-          ? summary
-          : { ...summary, locked: false, firstText: entry.view.title ?? summary.firstText };
-      }),
-    [sessions, conversationVersion],
-  );
+  const treeSessions = useMemo(() => {
+    const known = new Set(sessions.map((summary) => summary.id));
+    const merged: SessionSummary[] = sessions.map((summary) => {
+      const entry = conversations.opened.get(summary.id);
+      return entry === undefined
+        ? summary
+        : {
+            ...summary,
+            locked: false,
+            firstText: entry.view.title ?? summary.firstText ?? outgoingTitle(entry.outgoing),
+          };
+    });
+    // 刚建好、列表还没刷新到的会话：用本地消息的首行先进侧栏。拒收撤掉本地消息后
+    // 没有标题，不显示，侧栏不留空会话。
+    const now = Date.now();
+    for (const [id, entry] of conversations.opened) {
+      if (known.has(id) || entry.dead === true) continue;
+      const firstText = entry.view.title ?? outgoingTitle(entry.outgoing);
+      if (firstText === undefined) continue;
+      const cwd = entry.view.meta?.cwd ?? entry.workspace;
+      merged.push({
+        id,
+        createdAt: new Date(now).toISOString(),
+        cwd,
+        workspaceRoot: entry.view.meta?.workspaceRoot ?? cwd,
+        model: entry.view.config.model ?? { provider: "", model: "" },
+        mtimeMs: now,
+        locked: false,
+        firstText,
+      });
+    }
+    return merged;
+  }, [sessions, conversationVersion]);
   const tree = useMemo(
     () =>
       buildSessionTree(treeSessions, p, {
@@ -2657,6 +2683,7 @@ function SessionPane({
       <StatusBar
         session={session}
         view={view}
+        running={running}
         branch={
           <BranchMenu
             client={client.runtime}

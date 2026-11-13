@@ -14,10 +14,10 @@ import {
   type PhoneConnectionOptions,
 } from "./connection";
 import { pairPhone, pairingError, parsePairingLink, parsePairingTarget } from "./pairing";
-import { submitBody } from "../outgoing";
 import {
   failPhoneOutgoing,
   phoneStatus,
+  phoneSubmitBody,
   PhoneSessions,
   submitAccepted,
   trackPhoneOutgoing,
@@ -584,15 +584,22 @@ export function PhoneApp({
     target.busy = true;
     navigate({ kind: "session", hostId, sessionId: target.session.id });
     try {
-      await submitAccepted(target, submitBody(input), (failure) => {
-        target.busy = false;
-        if (
-          failure !== undefined &&
-          !(failure instanceof RpcError && failure.code === "connection_closed")
-        )
-          setError(failure instanceof Error ? failure.message : "发送失败");
-        void sessions.refresh().catch(() => undefined);
-      });
+      await submitAccepted(
+        target,
+        phoneSubmitBody(input),
+        (failure) => {
+          target.busy = false;
+          if (
+            failure !== undefined &&
+            !(failure instanceof RpcError && failure.code === "connection_closed")
+          )
+            setError(failure instanceof Error ? failure.message : "发送失败");
+          changed();
+          void sessions.refresh().catch(() => undefined);
+        },
+        local.id,
+      );
+      changed();
     } catch (failure) {
       failPhoneOutgoing(target, local.id);
       target.busy = false;

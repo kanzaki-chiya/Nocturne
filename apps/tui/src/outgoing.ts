@@ -26,6 +26,12 @@ export interface TuiLocal {
   sentAt: string;
   excludeUserSeqs: readonly number[];
   excludePendingIds: readonly string[];
+  /**
+   * 发送瞬间视图的 Turn 数。之后有新 Turn 开始就说明 Core 已接受这次发送
+   * （空闲发送时 Core 串行处理，下一个 Turn 一定是它），此后新出现的第一条
+   * 用户条目就归它，不再要求正文相同。
+   */
+  turnCount?: number | undefined;
 }
 
 function human(entry: ViewEntry): entry is UserEntry {
@@ -37,10 +43,20 @@ function human(entry: ViewEntry): entry is UserEntry {
   );
 }
 
+function sameTurn(local: TuiLocal, entry: UserEntry, turnCount: number | undefined): boolean {
+  const accepted =
+    local.turnCount !== undefined && turnCount !== undefined && turnCount > local.turnCount;
+  if (accepted) return entry.steer !== true;
+  return (
+    userEntryText(entry) === local.text && (entry.workMode?.name ?? undefined) === local.workMode
+  );
+}
+
 export function reconcileLocals(
   items: readonly TuiLocal[],
   entries: readonly ViewEntry[],
   pending: PendingInputsSnapshot,
+  turnCount?: number,
 ): TuiLocal[] {
   const users = entries.filter(human);
   const kept: TuiLocal[] = [];
@@ -54,8 +70,7 @@ export function reconcileLocals(
         const candidate = users[cursor];
         cursor += 1;
         if (candidate === undefined || local.excludeUserSeqs.includes(candidate.seq)) continue;
-        if (userEntryText(candidate) !== local.text) continue;
-        if ((candidate.workMode?.name ?? undefined) !== local.workMode) continue;
+        if (!sameTurn(local, candidate, turnCount)) continue;
         matched = true;
         break;
       }
@@ -72,6 +87,24 @@ export function reconcileLocals(
   return kept.length === items.length && kept.every((item, index) => item === items[index])
     ? (items as TuiLocal[])
     : kept;
+}
+
+/**
+ * `enqueueInput` 返回了 id：去掉本地行（快照里有就由快照显示，没有就是已被取走），
+ * 其余本地行不再拿这个 id 按正文去对。
+ */
+export function bindLocalPending(
+  items: readonly TuiLocal[],
+  id: string,
+  pendingId: string,
+): TuiLocal[] {
+  return items
+    .filter((item) => item.id !== id)
+    .map((item) =>
+      item.place !== "pending" || item.excludePendingIds.includes(pendingId)
+        ? item
+        : { ...item, excludePendingIds: [...item.excludePendingIds, pendingId] },
+    );
 }
 
 function samePending(local: TuiLocal, item: PendingInputItem): boolean {

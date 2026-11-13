@@ -32,6 +32,11 @@ export interface LocalOutgoing {
   excludeUserSeqs: readonly number[];
   /** 发送瞬间待发快照里已有的 id */
   excludePendingIds: readonly string[];
+  /**
+   * Core 已接受这次发送（Turn 已开始）。之后新出现的第一条用户条目就是它，
+   * 不再要求正文相同：Core 可能规整过首尾空白或换行。
+   */
+  accepted?: boolean;
 }
 
 export interface OutgoingBook {
@@ -70,6 +75,8 @@ function humanUser(entry: ViewEntry): entry is UserEntry {
 }
 
 function sameTurn(local: LocalOutgoing, entry: UserEntry): boolean {
+  // 接受后新出现的第一条非插话用户条目就是这次发送（Core 对同一会话串行处理）
+  if (local.accepted === true) return entry.steer !== true;
   return (
     userEntryText(entry) === local.input.text &&
     (entry.workMode?.name ?? undefined) === local.input.workMode &&
@@ -116,6 +123,7 @@ export function reconcileOutgoing(
         const candidate = users[userCursor];
         userCursor += 1;
         if (candidate === undefined || claimedSeq.has(candidate.seq)) continue;
+        if (keys.has(candidate.key)) continue;
         if (local.excludeUserSeqs.includes(candidate.seq)) continue;
         if (!sameTurn(local, candidate)) continue;
         claimedSeq.add(candidate.seq);
@@ -152,6 +160,22 @@ export function dropOutgoing(book: OutgoingBook, id: string): OutgoingBook {
   return { items, keys: book.keys };
 }
 
+/**
+ * `enqueueInput` 返回了这条待发输入的 id：去掉本地行。快照里有这个 id 就由快照显示；
+ * 没有（已在安全点取走或已投递）也不再等。其余本地行不再拿这个 id 按正文去对。
+ */
+export function bindPending(book: OutgoingBook, id: string, pendingId: string): OutgoingBook {
+  const items = book.items
+    .filter((item) => item.id !== id)
+    .map((item) =>
+      item.place !== "pending" || item.excludePendingIds.includes(pendingId)
+        ? item
+        : { ...item, excludePendingIds: [...item.excludePendingIds, pendingId] },
+    );
+  return { items, keys: book.keys };
+}
+
+/** 待发本地行被 Core 直接开成了新 Turn（`queued: false`）：转为对话里的本地消息。 */
 export function retargetOutgoing(
   book: OutgoingBook,
   id: string,
@@ -159,6 +183,15 @@ export function retargetOutgoing(
 ): OutgoingBook {
   const items = book.items.map((item) =>
     item.id !== id || item.place === place ? item : { ...item, place },
+  );
+  if (items.every((item, index) => item === book.items[index])) return book;
+  return { items, keys: book.keys };
+}
+
+/** Core 已接受这次发送：此后按位置而不是正文对上正式条目。 */
+export function acceptOutgoing(book: OutgoingBook, id: string): OutgoingBook {
+  const items = book.items.map((item) =>
+    item.id !== id || item.accepted === true ? item : { ...item, accepted: true },
   );
   if (items.every((item, index) => item === book.items[index])) return book;
   return { items, keys: book.keys };
@@ -269,4 +302,15 @@ export function submitBody(input: ComposerSubmit): ComposerSubmit {
   if (input.draftText === undefined) return input;
   const { draftText: _draft, ...rest } = input;
   return rest;
+}
+
+/** 本地消息的首行，作为侧栏标题（规则同 Core 的 firstUserText：第一个非空行） */
+export function outgoingTitle(book: OutgoingBook): string | undefined {
+  const first = book.items.find((item) => item.place === "turn");
+  if (first === undefined) return undefined;
+  for (const raw of first.input.text.split("\n")) {
+    const line = raw.trim();
+    if (line !== "") return line;
+  }
+  return undefined;
 }

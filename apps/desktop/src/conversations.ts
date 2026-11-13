@@ -21,6 +21,8 @@ import {
 
 import type { ComposerSubmit } from "./Composer";
 import {
+  acceptOutgoing,
+  bindPending,
   draftTextOf,
   dropOutgoing,
   emptyOutgoing,
@@ -501,6 +503,8 @@ export class Conversations {
     input: ComposerSubmit,
     mode: "steer" | "queue" = "steer",
     create?: CreateSessionChoice,
+    /** 本地消息已挂上、会话已选中（新会话已建好）时回调，不等 Core 接受 */
+    onStarted?: () => void,
   ): Promise<boolean> {
     const prepared = await this.serial(async () => {
       const entry = this.selected;
@@ -513,6 +517,7 @@ export class Conversations {
       this.changed();
       return () => this.finishEnqueue(entry, input, mode, local);
     });
+    onStarted?.();
     await prepared();
     return true;
   }
@@ -578,6 +583,12 @@ export class Conversations {
   ): Promise<void> {
     if (input.text !== "") void entry.session.recordInputHistory(input.text).catch(() => undefined);
     const submission = entry.session.submit(submitBody(input));
+    // submission 落定（含接受前拒收）时本地消息一律收掉：不能因为对不上正式条目而一直留着
+    const settle = () => {
+      if (!entry.outgoing.items.some((item) => item.id === local.id)) return;
+      entry.outgoing = dropOutgoing(entry.outgoing, local.id);
+      this.changed();
+    };
     try {
       await waitAccepted(entry, baseline, submission);
     } catch (error) {
@@ -601,6 +612,9 @@ export class Conversations {
       throw error;
     }
     // 接受后归还忙状态由 Turn 结束收尾；切换不会等整轮输出。
+    entry.outgoing = acceptOutgoing(entry.outgoing, local.id);
+    this.syncOutgoing(entry);
+    this.changed();
     void submission
       .catch((error: unknown) => {
         // 运行中模型的停用（如压缩路径）同样给「换模型」卡片，不落全局错误条
@@ -612,6 +626,7 @@ export class Conversations {
         this.failed(error);
       })
       .finally(() => {
+        settle();
         entry.busy = false;
         this.changed();
         void this.serial(() => this.closeIfIdle(entry)).catch(this.failed);
@@ -640,14 +655,27 @@ export class Conversations {
         return;
       }
       if (!result.queued) {
-        entry.outgoing = retargetOutgoing(entry.outgoing, local.id, "turn");
+        entry.outgoing = acceptOutgoing(
+          retargetOutgoing(entry.outgoing, local.id, "turn"),
+          local.id,
+        );
         this.syncOutgoing(entry);
         this.changed();
-      } else if (patch !== undefined) {
-        await entry.session.updateInput(result.id, {
-          ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
-          ...(patch.text !== undefined ? { input: { text: patch.text } } : {}),
-        });
+        // 直接开了新 Turn：enqueueInput 在 Turn 结束后才返回，到这里正式消息早已到达
+        if (entry.outgoing.items.some((item) => item.id === local.id)) {
+          entry.outgoing = dropOutgoing(entry.outgoing, local.id);
+          this.changed();
+        }
+      } else {
+        // 用 Core 返回的 id 绑定：快照里有就由快照显示，没有（已被取走或已投递）也不再挂着
+        entry.outgoing = bindPending(entry.outgoing, local.id, result.id);
+        this.changed();
+        if (patch !== undefined) {
+          await entry.session.updateInput(result.id, {
+            ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
+            ...(patch.text !== undefined ? { input: { text: patch.text } } : {}),
+          });
+        }
       }
     } catch (error) {
       entry.outgoing = dropOutgoing(entry.outgoing, local.id);
