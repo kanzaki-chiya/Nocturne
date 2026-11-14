@@ -599,6 +599,39 @@ describe("Composer 控件与附件", () => {
     expect(presetTrigger.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("模型 chip 单独带 chip-model 收缩类并保留完整 title，禁用时显示禁用原因；预设/档位/目录不收缩", () => {
+    const longLabel = "dealignai/Qwen3.8-Flash-Next-CYBERSECURITY-NVFP4 · qwen3.8-colab";
+    const baseControls = props().controls;
+    if (baseControls === undefined) throw new Error("fixture 缺少 controls");
+    const controls = {
+      ...baseControls,
+      model: { ...baseControls.model, label: longLabel },
+    };
+    const { rerender } = render(<Composer {...props({ variant: "session", controls })} />);
+    const model = screen.getByRole("button", { name: "切换模型" });
+    const preset = screen.getByRole("button", { name: "切换权限预设" });
+    const effort = screen.getByRole("button", { name: "切换思考档位" });
+    expect(model.classList.contains("chip")).toBe(true);
+    expect(model.classList.contains("chip-model")).toBe(true);
+    expect(model.querySelector(".pd")).not.toBeNull();
+    expect(model.querySelector(".t")?.textContent).toBe(longLabel);
+    expect(model.querySelector(".caret")).not.toBeNull();
+    expect(model.getAttribute("title")).toBe(longLabel);
+    expect(preset.classList.contains("chip-model")).toBe(false);
+    expect(effort.classList.contains("chip-model")).toBe(false);
+
+    const disabledControls = {
+      ...controls,
+      model: { ...controls.model, disabled: "运行中暂不可切换模型" },
+    };
+    rerender(<Composer {...props({ controls: disabledControls })} />);
+    const dir = screen.getByRole("button", { name: "切换目录" });
+    const draftModel = screen.getByRole("button", { name: "切换模型" });
+    expect(draftModel.getAttribute("title")).toBe("运行中暂不可切换模型");
+    expect((draftModel as HTMLButtonElement).disabled).toBe(true);
+    expect(dir.classList.contains("chip-model")).toBe(false);
+  });
+
   it("目录菜单列出普通对话与项目，选择走回调", async () => {
     const workspace = props().workspace;
     if (workspace === undefined) throw new Error("fixture 缺少 workspace");

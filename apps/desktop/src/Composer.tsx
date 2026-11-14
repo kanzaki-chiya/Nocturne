@@ -1026,7 +1026,7 @@ export function Composer({
       ref={(node) => {
         triggers.current[kind] = node;
       }}
-      className={`chip${openMenu === kind ? " on" : ""}`}
+      className={`chip${kind === "model" ? " chip-model" : ""}${openMenu === kind ? " on" : ""}`}
       disabled={control.disabled !== undefined || disabled}
       title={control.disabled ?? tip}
       aria-label={CHIP_LABELS[kind]}

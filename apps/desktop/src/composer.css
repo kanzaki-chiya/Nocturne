@@ -244,8 +244,8 @@
   border-radius: var(--radius-2);
   padding: 3px 8px;
   cursor: pointer;
-  max-width: 320px;
-  min-width: 0;
+  flex: none;
+  white-space: nowrap;
 }
 
 .composer .chip:hover,
@@ -279,17 +279,24 @@
 .composer .chip b {
   font-weight: var(--fw-semibold);
   color: var(--a-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 模型名与档位：单行省略，字重与颜色沿用 .chip */
+/* 档位等文本保留单行不省略，只有模型按钮在空间不足时收缩并单行省略 */
 .composer .chip .t {
+  white-space: nowrap;
+}
+
+.composer .chip-model {
+  flex: 0 1 auto;
+  min-width: 68px;
+  max-width: 320px;
+}
+
+.composer .chip-model .t {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .composer .send {
