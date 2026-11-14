@@ -284,6 +284,14 @@
   white-space: nowrap;
 }
 
+/* 模型名与档位：单行省略，字重与颜色沿用 .chip */
+.composer .chip .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer .send {
   width: 26px;
   height: 26px;

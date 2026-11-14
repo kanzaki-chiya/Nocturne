@@ -1019,6 +1019,7 @@ export function Composer({
     kind: "model" | "effort" | "preset" | "dir",
     control: { label: string; disabled?: string },
     content: ReactNode,
+    tip?: string,
   ) => (
     <button
       type="button"
@@ -1027,7 +1028,7 @@ export function Composer({
       }}
       className={`chip${openMenu === kind ? " on" : ""}`}
       disabled={control.disabled !== undefined || disabled}
-      title={control.disabled}
+      title={control.disabled ?? tip}
       aria-label={CHIP_LABELS[kind]}
       aria-haspopup="menu"
       aria-expanded={openMenu === kind}
@@ -1307,18 +1308,20 @@ export function Composer({
                 controls.model,
                 <>
                   <span className="pd" aria-hidden="true" />
-                  {controls.model.label}
+                  <span className="t">{controls.model.label}</span>
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
+                controls.model.label,
               )}
             {controls !== undefined &&
               chip(
                 "effort",
                 controls.effort,
                 <>
-                  {controls.effort.label}
+                  <span className="t">{controls.effort.label}</span>
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
+                controls.effort.label,
               )}
             {sendButton}
           </div>
