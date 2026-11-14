@@ -106,6 +106,9 @@ describe("父会话转发确认卡与桌面 UI 集成", () => {
     const card = screen.getByRole("region", { name: "权限确认" });
     const header = card.querySelector(".ask-t");
     expect(header?.textContent).toContain("explore · 检查依赖方向");
+    expect(header?.querySelector(".ask-source")?.getAttribute("title")).toBe(
+      "explore · 检查依赖方向",
+    );
     // 不增加新徽标或多余说明文字
     expect(card.querySelector(".badge, .subagent-badge")).toBeNull();
     expect(screen.getByRole("button", { name: /允许一次/ })).toBeTruthy();
@@ -954,6 +957,9 @@ describe("手机端会话确认卡、侧栏子行警告色与通知目标", () =
 
     const dialog = screen.getByRole("dialog", { name: "权限面板" });
     expect(dialog.textContent).toContain("explore · 第一条子请求");
+    expect(dialog.querySelector(".ask-t .ask-source")?.getAttribute("title")).toBe(
+      "explore · 第一条子请求",
+    );
     expect(within(dialog).queryByRole("button", { name: /本项目允许/ })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: /允许一次/ }));
     await waitFor(() => {

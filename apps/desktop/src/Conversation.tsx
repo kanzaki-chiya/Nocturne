@@ -2655,7 +2655,10 @@ function ToolRow({
         <span className="tool-spin" aria-hidden="true" />
       )}
       {(subagent.model !== undefined || subagent.effort !== undefined) && (
-        <span className="tool-range">
+        <span
+          className="tool-range"
+          title={[subagent.model, subagent.effort].filter(Boolean).join(" ") || undefined}
+        >
           {subagent.model}
           {subagent.effort !== undefined && <span className="muted-value">{subagent.effort}</span>}
         </span>
@@ -3374,7 +3377,7 @@ export function PermissionCard({
       <div className="ask-t" title={hover}>
         需要确认<span className="muted-value">{operation}</span>
         {sourceText !== "" && (
-          <span className="muted-value" title={sourceText}>
+          <span className="muted-value ask-source" title={sourceText}>
             {sourceText}
           </span>
         )}

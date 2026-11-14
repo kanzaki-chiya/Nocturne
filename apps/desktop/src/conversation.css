@@ -650,7 +650,10 @@
   gap: 6px;
 }
 .conversation .tool-range {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--mono);
   font-size: var(--fs-1);
   color: var(--a-faint);
@@ -684,6 +687,9 @@
 }
 .conversation .tool-line:has(.tool-live) .tool-arg {
   flex: 0 1 35%;
+}
+.conversation .tool-line:has(.subagent-badge):has(.tool-live) .tool-arg {
+  flex: 1 1 0%;
 }
 .conversation .tool-secs {
   flex: none;
@@ -964,9 +970,24 @@
   margin-top: 12px;
 }
 .conversation .ask-t {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  white-space: nowrap;
   font-size: var(--fs-1);
   font-weight: var(--fw-semibold);
   color: var(--a-warning);
+}
+.conversation .ask-t > .muted-value:not(.ask-source),
+.conversation .ask-why {
+  flex: none;
+}
+.conversation .ask-source {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .conversation .ask-why {
   margin-left: 10px;
@@ -1454,6 +1475,7 @@
 /* 只读视图里的任务原文与催促：折叠展示，不当作可编辑的用户气泡 */
 .conversation .ro-user {
   min-width: 0;
+  overflow-wrap: anywhere;
   padding: 0 10px;
   border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
@@ -1586,6 +1608,8 @@ button.fcard:hover {
 
 .conversation .post-in {
   min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: var(--space-0-5) 0 var(--space-0-5) var(--space-3);
   border-left: 2px solid var(--a-accent);
   color: var(--a-secondary);

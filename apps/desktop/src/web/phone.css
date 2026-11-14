@@ -514,7 +514,9 @@
 }
 .phone .a,
 .phone .u,
-.phone .tool {
+.phone .tool,
+.phone .post-in,
+.phone .ro-user {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -1042,6 +1044,9 @@
   padding: 0;
   border: 0;
 }
+.phone-sheet .ask:focus {
+  outline: none;
+}
 .phone-sheet .ask-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1050,8 +1055,25 @@
 .phone-sheet .ask-kbd {
   display: none;
 }
+.phone-sheet .ask-t {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  min-width: 0;
+}
+.phone-sheet .ask-t > .muted-value:not(.ask-source) {
+  flex: none;
+}
+.phone-sheet .ask-source {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .phone-sheet .ask-why {
-  display: block;
+  flex: 0 0 100%;
+  margin-left: 0;
   color: var(--a-muted);
   font-size: var(--fs-2);
   margin-top: 4px;

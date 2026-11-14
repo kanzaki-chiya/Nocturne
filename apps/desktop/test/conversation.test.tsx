@@ -2420,6 +2420,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(line?.querySelector(".tool-arg")?.textContent).toBe("找出调用点");
     expect(line?.querySelector(".tool-range .muted-value")?.textContent).toBe("low");
     expect(line?.querySelector(".tool-range")?.textContent).toBe("p/cheaplow");
+    expect(line?.querySelector(".tool-range")?.getAttribute("title")).toBe("p/cheap low");
     expect(old?.querySelector(".subagent-badge")).toBeNull();
     expect(old?.textContent).toContain("p/strong");
     expect(screen.queryByText("选择理由")).toBeNull();
