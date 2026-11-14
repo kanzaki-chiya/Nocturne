@@ -53,6 +53,8 @@ interface SessionView {
   usage: Usage;
   /** 等待用户回复的权限请求（至多一个：执行管线串行） */
   pendingPermission: PendingPermission | undefined;
+  /** 活动转发池中等待用户确认的子代理权限请求（只由临时事件 subagent.permissions 整份替换；持久重放恒为 []，ADR-0091） */
+  pendingSubagentPermissions: SubagentPendingPermission[];
   /** 待回答的提问（ADR-0032；只由临时事件 question.requested 产生，
       至多一个；对应 callId 的 tool.completed 或 turn.completed 到达时清除） */
   pendingQuestion: PendingQuestion | undefined;
@@ -169,7 +171,7 @@ interface LiveTool {
 
 `live` 是**纯瞬态**区：内容由 `message.assistant.delta` / `tool.input.delta` 创建；`live.assistants` 在对应的 `message.assistant` 到达时**转入 `entries`**，而 `live.tools` 在包含该 `callId` 的 `message.assistant` 到达时仅置 `queued = true`（参数已完整、尚未开始执行），等到对应的 `permission.reviewed` / `permission.requested` / `tool.started` / `tool.completed` 到达时才**转入 `entries`**（`inputText`、`queued` 等流式/瞬态字段随之丢弃——它们本来就不该出现在可重放视图里）。`live` 中的实体不保证有持久落点：流被中断、参数没发完的调用可能永远没有 `tool.started`，这类孤儿在 `turn.completed` 时随 `live` 整体清空（不按 `turnId` 筛选——`LiveTool.turnId` 可为空，且串行管线同一时刻至多一个 Turn）。
 
-`PendingPermission`：
+`PendingPermission` 与 `SubagentPendingPermission`：
 
 ```ts
 interface PendingPermission {
@@ -180,6 +182,16 @@ interface PendingPermission {
   subjects: PermissionSubject[];
   reason: string;
   options: PermissionOption[];
+  seq?: number;                 // reduceSessionView 归约持久 permission.requested 时填入 event.seq，供与子请求按到达顺序混排
+}
+
+interface SubagentPendingPermission extends PendingPermission {
+  childSessionId: string;       // 目标子会话 ID（respondSubagentPermission 入参）
+  parentCallId: string;         // 父会话中发起该子代理链路最外层 task 的 callId
+  profile: string;              // 与 SubagentSummary.profile 同口径（preset 优先，其次非 default 的 profile；缺省 ""）
+  taskSummary: string;          // 与 SubagentSummary.taskSummary 同口径（单行最多 120 码点）
+  afterSeq: number;             // 请求到达父转发池时父会话的 lastSeq
+  order: number;                // 父会话单调递增到达序号，从 1 起
 }
 ```
 
@@ -238,6 +250,7 @@ interface SessionNotice {
 | `tool.input.delta` | 按 `callId` 查找/新建 `live.tools` 项；`inputText += payload.delta`；填 `name`/`turnId` |
 | `tool.progress` | `callId` 的 entries 条目存在时，`stdout`/`stderr` 原样拼接到 `liveOutput`，允许半行；`info` 作为独立一行拼接并在视图中补换行；无条目则忽略——`progress` 不建占位，避免无支撑的幽灵工具行 |
 | `question.requested` | `pendingQuestion = { requestId, callId, questions }`（ADR-0032）；不建 entries/live 条目 |
+| `subagent.permissions` | `pendingSubagentPermissions = [...payload.pending]`（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)；整份替换当前活动转发池快照，不建 entries/live 条目，持久重放恒为 `[]`） |
 
 | `mcp.server` | `state === "stopped"`（服务器被移除、停用或会话关闭）时删除 `mcpServers[name]`；否则 `mcpServers[name] = { state, toolCount?, error? }`，整体覆盖，同名以最新事件为准（恢复 `ready` 不残留旧 `error`） |
 
@@ -251,7 +264,7 @@ interface McpServerViewState {
 
 `mcpServers` 与 `notices` 同类：本次打开的运行态，不进持久日志，重放得到空对象。失败与崩溃另经 `runtime.warning` 进入 `notices`，供 TUI/CLI 输出；客户端按 `mcpServers` 展示当前状态（桌面端状态栏，见 [desktop.md](../apps/desktop.md) 5.4）。
 
-Phase 6 的 Subagent **不需要视图扩展**：`task` 在父会话是普通工具条目，子会话内部进度经 `tool.progress`（`stream:"info"`）一行式进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的事件写在子日志，不进父会话的事件流，V1 重放等价不受影响。
+Phase 6 的基础进度仍只经 `tool.progress`（`stream:"info"`）进入 `liveOutput`（[subagent.md](../architecture/subagent.md) 第 12 节）；子会话自身的持久事件（含 `permission.requested` / `permission.resolved`）只写入子日志，不进父会话日志，V1 重放等价不受影响。交互父会话下正在等待的子代理权限请求由临时事件 `subagent.permissions` 整体刷新 `pendingSubagentPermissions`（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)），父会话持久化重放时该字段始终为 `[]`，重启后旧未决不再展示实时等待。
 
 合奏（内部标识 `ensemble`，[ADR-0089](../decisions/ADR-0089-ensemble.md)）：`SessionView.ensemble` 由指挥（Maestro，`@maestro`）日志中的 `ensemble.created` / `member_added` / `posted` / `member_model_changed` / `member_removed` / `ended` 持久事件建立成员清单（含每名成员的 `model`、`lastPostNumber`、最近活动 `activity`）与留言板帖子列表；持久重放时未移除成员的状态均为 `"waiting"`、`pendingPermissions` 为空。视图顶层记录两个事件坐标：`createdSeq`（建群事件自身的 `seq`）与其后紧凑排列的 `endedSeq?`（`ensemble.ended` 事件自身的 `seq`）——活动期间 `endedSeq` 为 `undefined`；同一会话再次 `ensemble.created` 时整个视图重建，`createdSeq` 换新值，`endedSeq` 回到 `undefined`。运行中成员的实时状态（`working` / `waiting` / `paused`、当前工具行摘要、暂停错误及等待用户确认的权限请求）经临时事件 `ensemble.member_updated` 更新，并汇总出 `awaitingPermissionMembers`（成员在等确认时客户端据此提示并跳转到成员会话）。分叉（`session.created.forkedFrom`）不继承分叉点及之前的合奏；对话回退到 `ensemble.created` 之前时 Runtime 追加 `ensemble.ended(reason: "rewound")`，折叠时记录该事件的 `endedSeq`。成员实时运行态字段（如 `paused` 与 `toolActivity`）与 `mcpServers`、`backgroundShells[].outputChars` 同属运行期瞬态投影。
 
@@ -287,13 +300,13 @@ ask 判定
 
 **收敛点**：`currentTurn === undefined && pendingPermission === undefined && pendingQuestion === undefined && live` 为空。
 
-> **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars` 外的全部字段相等。
+> **不变量 V1（重放等价）**：对任意合法事件序列 E（持久事件 + 任意交织的临时事件），在收敛点上，`reduce(E)` 与 `reduce(E.durable)` 在除 `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars`、`pendingSubagentPermissions` 外的全部字段相等。
 
 支撑 V1 的三条构造规则：
 
 1. `entries` 条目只能由持久事件创建/更新（§3）——`permission.reviewed`/`requested`/`resolved`/`tool.started`/`completed` 都是持久事件，两条路径产生**相同顺序相同内容**的条目；
-2. 临时事件只写瞬态区（§4），且每个瞬态字段都有归零/晋升规则：`live` 条目在持久落点到达时转入 entries（流式字段丢弃），`liveOutput` 在 `completed` 时清空，`retry` 离开 `retrying` 时清空，`status` 在 `turn.completed` 归 `idle`；
-3. `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars` 被显式排除（日志字符数只在运行时取得，重放为 0）：`revision` 随临时事件计数，两路径必然不同；`notices` 与 `mcpServers` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志）。
+2. 临时事件只写瞬态区（§4），且每个瞬态字段都有归零/晋升规则：`live` 条目在持久落点到达时转入 entries（流式字段丢弃），`liveOutput` 在 `completed` 时清空，`retry` 离开 `retrying` 时清空，`status` 在 `turn.completed` 归 `idle`，`pendingSubagentPermissions` 随 `subagent.permissions` 整份替换并在取消/结算/关闭时清空；
+3. `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars`、`pendingSubagentPermissions` 被显式排除（日志字符数与实时转发队列只在运行时取得，重放分别为 `0` 与 `[]`）：`revision` 随临时事件计数，两路径必然不同；`notices`、`mcpServers` 与 `pendingSubagentPermissions` 只由临时事件产生，重放缺失是设计行为（CLI 的对应输出同样不进日志，重启也不应恢复已断开的实时等待）。
 
 重放等价允许客户端用**同一 reducer** 处理两条路径：
 
@@ -306,7 +319,7 @@ ask 判定
 
 | # | 不变量 | 验证方式 |
 |---|---|---|
-| V1 | 收敛点重放等价（§6；排除 `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
+| V1 | 收敛点重放等价（§6；排除 `revision`、`notices`、`mcpServers`、`backgroundShells[].outputChars`、`pendingSubagentPermissions`） | 场景矩阵 × {live 序列, 仅持久序列} 深比较 |
 | V2 | 每个 `toolCalls[].callId` 恰有一条 `tool` 条目；`tool.completed` 落定且只落定一次 | 场景断言 |
 | V3 | `pendingPermission` 至多一个，且其 `requestId` 未被 `resolved`；`pendingQuestion` 至多一个，且其 `callId` 无对应 `tool.completed` | 场景断言 |
 | V4 | `entries` 顺序 = 首个支撑持久事件的 `seq` 升序；条目 `seq` 单调不降 | 场景断言 |
@@ -325,7 +338,12 @@ function reduceSessionView(view: SessionView, event: RuntimeEvent): void;
 function replaySessionView(events: readonly DurableEvent[]): SessionView; // ≡ fold
 function sessionUsageSoFar(view: SessionView): Usage;
 function userEntryText(entry: UserEntry): string;   // 用户正文，去掉末尾快照块（见第 2 节）
+function allPendingPermissions(
+  view: Pick<SessionView, "pendingPermission" | "pendingSubagentPermissions">,
+): AggregatedPendingPermission[];
 ```
+
+`allPendingPermissions(view)` 将父会话自身的 `pendingPermission`（归并键 `(pendingPermission.seq ?? 0, 0)`）与活动转发池的 `pendingSubagentPermissions`（归并键 `(p.afterSeq, p.order)`，`order >= 1`）按升序混排输出，供所有客户端统一按到达顺序展示父对话确认卡或终端交互队列（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）。
 
 `sessionUsageSoFar` 给状态栏的累计用量：`view.usage` 加上进行中 Turn 已写入的 assistant 消息用量，每步结束即更新，不等 `turn.completed`；无进行中 Turn 时就是 `view.usage`。TUI 与桌面端的缓存命中率都用它。
 

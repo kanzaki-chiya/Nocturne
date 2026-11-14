@@ -258,6 +258,7 @@ export const REMOTE_METHODS = [
   "session.interrupt",
   "session.abort",
   "session.respondPermission",
+  "session.respondSubagentPermission",
   "session.respondQuestion",
   "session.setModel",
   "session.setReasoningEffort",
@@ -697,7 +698,7 @@ class Connection implements HubPeer {
       await this.initPromise.catch(() => undefined);
     // 持久授权（写入项目 Grant）只能在电脑上选；会话级与单次批准照常
     if (
-      method === "session.respondPermission" &&
+      (method === "session.respondPermission" || method === "session.respondSubagentPermission") &&
       ["project", "always"].includes(String(reqObject(p, "reply").remember))
     ) {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
@@ -2366,6 +2367,14 @@ class Connection implements HubPeer {
       "session.pendingInputs": (p) => this.session(p).session.pendingInputs(),
       "session.respondPermission": async (p) => {
         await this.session(p).session.respondPermission(
+          reqString(p, "requestId"),
+          reqObject(p, "reply") as unknown as PermissionReply,
+        );
+        return null;
+      },
+      "session.respondSubagentPermission": async (p) => {
+        await this.session(p).session.respondSubagentPermission(
+          reqString(p, "childSessionId"),
           reqString(p, "requestId"),
           reqObject(p, "reply") as unknown as PermissionReply,
         );

@@ -163,7 +163,7 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 **靠你授权换来的放行不缓存**：内置后端只有 Q2–Q7 全否的放行可缓存（`ReviewResult.cacheable: true`）；有风险题为是、依赖 Q1 授权的放行设为 `cacheable: false`，同一 Turn 或下一 Turn 的同样调用都重新送审，避免后来追加的限制被旧缓存绕过。自定义审查器省略该字段时视为 `true`，保持原行为；该字段不写入 `permission.reviewed` 事件。
 
-未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话使用父会话的同一审查器实例，仍为非交互。模型后端不带工具，不传思考参数，思考档位沿用模型默认，`maxOutputTokens=8192`。主流模型默认思考且多数关不掉，思考和回答共用这一个输出上限，因此预留充足预算、审查质量优先，不为审查专门降低思考档位；20 秒超时不变。
+未配置审查器时，原本要送审的调用直接询问用户（非交互拒绝；白名单与 `readOnlyHint` 的放行不受影响），每个会话提示一次。子会话沿用父会话的同一审查器实例与审查来源；在交互式父会话下，内置 `task` 子会话的 `unsure` 或 `userOnly` 主体经父会话转发等待用户确认，在非交互宿主或外部 ACP 下仍直接拒绝。模型后端不带工具，不传思考参数，思考档位沿用模型默认，`maxOutputTokens=8192`。主流模型默认思考且多数关不掉，思考和回答共用这一个输出上限，因此预留充足预算、审查质量优先，不为审查专门降低思考档位；20 秒超时不变。
 
 **七道是非题与纯函数判定**（ADR-0057 §6）：审查器不给结论，只回答七道题——Q1 `requested`（用户的话是否点名要求了这个动作且目标一致；用户说过且没有撤回的限制命中时答否）、Q2 `destroys`、Q3 `credentials`、Q4 `exfiltrates`、Q5 `weakens`、Q6 `crosses`、Q7 `opaque`。题干与判断依据在共享模块 `permission/reviewer-questions.ts`，模型后端与 Jev 后端共用，环境段（工作目录、可信 remote、数据目录）运行时填入。**结论由权限层的纯函数 `decideFromAnswers(answers)` 计算**：Q2–Q7 全否放行；有任一为是，只有 Q1 为是时才放行；其余交人。交人的理由列出答「是」的题和模型给的 `reason`。用户追加规则（`permission.reviewerRules`，见 [config.md](config.md)）以「用户追加：以下情况交人」「用户追加：以下情况放行」两段原样拼进提示词，单段最多 1000 字。
 
@@ -202,7 +202,7 @@ interface Grant {
 
 Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。`kind` 直接复用权限主体的全部类别（含 `subagent`，如 `external:omp`），不再维护第二份枚举，以后新增主体类型不会漏。授权键：路径类取 `resolved`（缺失时取规范化 `target`），shell 取完整命令字符串，`network` / `mcp` / `subagent` / `schedule` 取 `target` 原值。`schedule` 的 target 含动作，所以「本会话允许」只覆盖同一任务的同一动作，不看指令内容；因此确认选项不提供「在此项目中始终允许」（见第 7 节）。"允许整个目录 / 某类命令"这类粗粒度授权不在确认选项中提供——需要时由用户显式写规则（配置文件的 `permissions.rules`），而不是在确认框里随手放权。
 
-- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。其作用域是**会话树**：一次性子会话（[subagent.md](subagent.md) 第 7 节）以只读方式继承父会话的会话 Grant（同一授权集），子会话自身不产生新的授权；Ensemble 常驻成员（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8）共享同一会话树内存授权集，用户在成员会话上确认 `allow_session` 生成的会话 Grant 在整个 Ensemble 会话树内生效。
+- **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。其作用域是**会话树**：交互式父会话下的一次性 `task` 子会话（[subagent.md](subagent.md) 第 7 节、[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）与 Ensemble 常驻成员（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8）均共享同一会话树 `sessionGrants` 集合——用户在父会话、转发确认或成员会话上确认 `allow_session` 生成的会话 Grant，在同一会话树的父会话与所有子会话（含后续或嵌套子代理）内生效。非交互宿主下的一次性子会话与外部 ACP 子会话仍以只读方式继承父会话 `sessionGrants`，不产生新授权。
 - **项目 Grant**：写入 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（见 [config.md](config.md) 第 4 节），按会话的 `workspaceRoot` 归属；策略每次判定时实时读取存储（传 store 或 getter，不传快照），同一会话内新增的项目授权下一次同目标调用直接放行；写盘失败时降级为会话 Grant 并发出 `runtime.warning`。
 - 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
 - **坏条目与损坏文件**：加载时逐条校验，跳过无效条目并发一次警告，其余照常生效；只有 JSON 解析失败、版本不符或 `workspaceRoot` 不符时才把整份文件按空处理。这种情况下第一次 `add` 之前先把原文件改名备份为 `<原名>.corrupt-<时间戳>.json`，不得直接覆盖。
@@ -274,15 +274,17 @@ PermissionGate.check(subjects, signal)
 
 选项集由权限层计算：任一主体命中高风险命令表、`-EncodedCommand` 或工作区外 edit 时，只给 `allow_once`、`deny`、`deny_stop`；任一主体为 `schedule` 时不提供 `allow_project`（Grant 只按 `动作:任务名` 精确匹配、不看指令，项目级授权会放行以后同名任务的不同指令），其余为 `allow_once`、`allow_session`、`deny`、`deny_stop`；其他请求给出上表五项。客户端照 `permission.requested.options` 渲染，权限层也拒绝回复里不在选项集中的长期授权；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
 
-两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`，或定时会话还没被接手——见 [schedule.md](schedule.md) 第 4 节：`message.user` 少于 2 条），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行，交给你确认（`unsure`）走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——子会话用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
+两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`，或定时会话还没被接手——见 [schedule.md](schedule.md) 第 4 节：`message.user` 少于 2 条），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行，交给你确认（`unsure`）走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——非交互宿主下的子会话或外部 ACP 用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
 
 等待回复期间 `signal` 中止：记 `permission.resolved(action="deny", source="cancelled")`，该调用按 `cancelled` 结算。
 
 Ensemble 常驻成员（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8）：交互式宿主下，Ensemble 成员子会话使用交互式 `PermissionGate`，其剩余 `ask`（`smart` 下先经审查器且结果为 `unsure`）在成员自己的子会话上发出 `permission.requested` 并等待 `respondPermission`，不走 `non_interactive` 拒绝；等待期间成员仍算 `working` 并占并发槽，指挥（Maestro，`@maestro`）派生视图列出等待确认的成员名。
+
+一次性内置 `task` 子代理（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）：交互式父会话下，内置 `task` 子会话通过注入的 `SubagentPermissionsDeps` 打开 `interactive` 闸门并将剩余 `ask` 登记到最外层交互父会话的活动转发池与 `SessionView.pendingSubagentPermissions`，`permission.requested` / `permission.resolved` 仍只写入子会话自身日志，用户可在父会话直接通过 `respondSubagentPermission` 回应并写入树共享 `sessionGrants` / 项目 Grant；等待确认不设超时且通过 `pauseTimeouts` 暂停各层显式运行时限。非交互宿主（`interactive: false`、定时任务、`nctrn -p`）与外部 ACP 仍维持 `non_interactive` 拒绝不变。
 
 ## 8. 与其他模块的关系
 
 - Tool Executor 负责解析资源并调用 `PermissionGate`，见 [tools.md](tools.md) 第 3 节。
 - Hooks 在权限求值前后给出建议：`PreToolUse` 的建议在第 5 步前合并，`PermissionRequest` 在 `ask` 分支内优先回答；`allow` 不能越过 `deny`，且仅可信来源能放宽 `ask`（5.5、[hooks.md](hooks.md)）。
 - 规则的配置格式与加载由 `config` 负责；本模块只接收已合并、已标注来源与信任状态的规则列表。
-- **子会话（Phase 6 与 Ensemble）**：一次性 `task` 子会话的有效策略用与父会话相同的输入重建，gate 恒为非交互——剩余 `ask` 一律 `deny(source: "non_interactive")`；Ensemble 常驻成员子会话在交互式宿主下使用交互式 gate，详见 [subagent.md](subagent.md) 第 7 节与 [ADR-0089](../decisions/ADR-0089-ensemble.md) §8。
+- **子会话（Phase 6、Ensemble 与 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）**：子会话的有效策略用与父会话相同的输入重建，有效权限不宽于父会话；交互式父会话下一次性内置 `task` 经 `SubagentPermissionsDeps` 接入父会话活动转发池并共享会话树 Grant，非交互宿主与外部 ACP 保持 `non_interactive` 拒绝；Ensemble 常驻成员使用交互式 gate，详见 [subagent.md](subagent.md) 第 7 节与 [ADR-0089](../decisions/ADR-0089-ensemble.md) §8。

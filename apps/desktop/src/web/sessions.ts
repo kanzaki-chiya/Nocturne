@@ -407,6 +407,7 @@ export class PhoneSessions {
         !!(
           entry.view.pendingPermission ??
           entry.view.pendingQuestion ??
+          (entry.view.pendingSubagentPermissions.length ? true : undefined) ??
           (entry.view.ensemble?.awaitingPermissionMembers.length ? true : undefined)
         )
       );

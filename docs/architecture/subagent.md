@@ -1,6 +1,6 @@
 # Subagent（子代理会话）
 
-> 状态：已接受 v0.1（Phase 6 已验收）｜ 前置阅读：[tools.md](tools.md)、[sessions.md](sessions.md)、[permissions.md](permissions.md)、[agent-loop.md](agent-loop.md)、[mcp.md](mcp.md)、[hooks.md](hooks.md) ｜ 决策：[ADR-0013](../decisions/ADR-0013-subagent.md)
+> 状态：已接受 v0.2（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md) 更新交互父会话内置 `task` 权限转发）｜ 前置阅读：[tools.md](tools.md)、[sessions.md](sessions.md)、[permissions.md](permissions.md)、[agent-loop.md](agent-loop.md)、[mcp.md](mcp.md)、[hooks.md](hooks.md) ｜ 决策：[ADR-0013](../decisions/ADR-0013-subagent.md)、[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)
 
 Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调用内置 `task` 工具，工具经注入的 `SubagentLauncher` 创建一条独立的会话日志并运行受控 Turn（受限工具集、独立上下文、继承或收紧的权限），子代理用 `finish` 工具交回结果，`task` 把结果作为普通工具结果返回父会话。
 
@@ -42,11 +42,11 @@ Subagent 是"一个工具启动一个受控子会话"：父会话中的模型调
 | `outputSchema` | `JsonSchema`（object） | 要求子代理按此 schema 提交结构化结果；无法编译 → `invalid_input` |
 | `timeoutMs` | `integer` | 可选的本次超时，正整数生效，不设固定封顶；省略时依次采用 profile、Runtime 的显式值，否则不超时（读取规则见 tool-api.md 第 1 节） |
 
-`traits`：`{ mutates: true, concurrencySafe: false, inputTimeoutMs: true, maxModelChars: 30_000 }`，不声明默认 `timeoutMs` 或 `maxTimeoutMs`。显式输入由执行器兜底；profile 与 Runtime 的显式值由 launcher 计时，避免较短的工具默认值截断较长的 profile 时限。优先级为显式输入 > profile > Runtime，均缺省时不启动计时器。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 保留同步调用串行契约，后台隔离见第 20 节。
+`traits`：`{ mutates: true, concurrencySafe: false, inputTimeoutMs: true, maxModelChars: 30_000 }`，不声明默认 `timeoutMs` 或 `maxTimeoutMs`。显式输入由执行器兜底；profile 与 Runtime 的显式值由 launcher 计时，避免较短的工具默认值截断较长的 profile 时限。优先级为显式输入 > profile > Runtime，均缺省时不启动计时器。存在关联子代理权限等待用户确认时，执行器（`inputTimeoutMs`）、launcher/profile 与嵌套祖先各层的显式超时计时器通过 `createPausableTimeout` 同步暂停、扣除等待时间，确认等待本身不设超时。`mutates: true` 如实声明（`general` 子代理可能写文件）；`concurrencySafe: false` 保留同步调用串行契约，后台隔离见第 20 节。
 
 `permissionSubjects` 返回 `[{ kind: "subagent", target }]`：`target` 为预设名（`general`/`explore`）或 `"custom"`（`tools` 白名单）。新增的 `subagent` 主体类别让用户能在规则层把"派生子代理"本身当作受控动作（如 `subagent * → deny` 即为本特性的用户级开关），各预设的默认值见 [permissions.md](permissions.md) 第 6 节（`default`/`auto-edit` 下 `explore` 默认放行、`general`/`custom` 需确认）。
 
-工具描述向父模型如实说明权限收敛：子会话非交互，需要确认的操作在子会话内会被拒（第 7 节）——只读/探索任务优先用 `explore`，被拒绝的操作由子代理说明、父代理自己执行；是否被拒按当前权限判定，`guarded`、`smart`、`bypass` 或规则/Grant/`--yes` 放行时子代理可以写入和执行。避免父模型派出注定失败的写操作子代理浪费步数。
+工具描述如实说明权限边界：在交互式父会话中，需要确认的操作会向父会话请求用户确认（第 7 节）；只读/探索任务仍优先用 `explore`。在非交互宿主（定时任务、`nctrn -p` 等）下子会话无交互，需要确认的操作会被拒绝、由子代理在结果中说明或由父代理处理。
 
 **ToolResult**：
 
@@ -134,11 +134,11 @@ launch(request, ctx)
   → 返回 SubagentOutcome
 ```
 
-**中断传播**：子 Turn 的 signal 是 `AbortSignal.any([ctx.signal, launcher 超时计时器, 父会话 failedSignal, 子会话 failedSignal])`——父会话中断/本次调用超时/任一侧持久化失败都会取消子会话。launcher 等到子 Turn 实际收束（子日志写下 `turn.completed(reason="aborted")`）后才返回，保证子日志自洽。
+**中断传播**：前台子 Turn 的 signal 是 `AbortSignal.any([ctx.signal, launcher 超时计时器, 父会话 failedSignal, 子会话 failedSignal])`——父会话中断/本次调用超时/任一侧持久化失败都会取消子会话；后台子代理（第 20 节）不绑定父 Turn `ctx.signal`，但若父会话中断时该后台子代理正处于转发权限等待状态，父中断会结算其未决请求并经其专属等待中止控制器（含嵌套后代沿用的根后台等待控制器）中止该等待中的子代理（无等待的后台子代理仍不被中断，见 [ADR-0073](../decisions/ADR-0073-background-subagents.md) 与 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）。launcher 等到子 Turn 实际收束（子日志写下 `turn.completed(reason="aborted")`）后才返回，保证子日志自洽。
 
-**恰好一个 `tool.completed`**：`launch` 只被 `task.execute` 调用一次、只返回一次；无论子会话内部经历了多少轮/多少工具，父日志中这次调用的事件序列与普通工具完全一致（`tool.started` → `tool.completed`；期间的子会话进度以 `tool.progress` 临时事件呈现，见第 12 节）。子会话的所有事实都写在子日志里，父日志不记录子会话内部事件。
+**恰好一个 `tool.completed`**：`launch` 只被 `task.execute` 调用一次、只返回一次；无论子会话内部经历了多少轮/多少工具，父日志中这次调用的事件序列与普通工具完全一致（`tool.started` → `tool.completed`；期间的子会话进度以 `tool.progress` 临时事件呈现，见第 12 节）。子会话的所有事实（含 `permission.requested` / `permission.resolved`）都写在子日志里，父日志绝不记录子会话内部事件或外来 `callId`。
 
-**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`）→ `timeout` 并附显式时限及检查工作区改动的提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed`、`subagent_no_result` 一样附子会话已有的产出（`partialOutputOf`）和 `statsOf`（子会话路径、已完成步数）：已完成工具调用的清单（最近 15 条：工具名、参数摘要、状态、结果首行至多 120 字）加最后一段助手文本；`task` 工具把它以「子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）」交给模型。超时常落在写报告的最后一步，那一步的文字不会落盘，前面的调研靠这份清单留给父模型。父会话中断时执行器按既有规则把整个调用归一为 `cancelled`（Turn 随之结束），产出只留在子会话日志里，不进入父模型的上下文。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
+**出错、超时、超步数**：子 Turn 的 `turn.completed` reason 映射为结果——`done` 且有 `finish` → `ok`；`done` 无 `finish` → 进入催促；`error`/`max_steps`/`truncated`/`refused` → `subagent_turn_failed`；`aborted` 按中止信号来源结算：父会话中断（`ctx.signal` 非超时中止）→ `cancelled`，本次 task 超时（launcher 自己的计时器，或经 `ctx.signal` 传入的执行器超时信号，reason 为 `TimeoutError`；各层计时器在权限等待用户确认期间均已暂停扣除）→ `timeout` 并附显式时限及检查工作区改动的提示，父/子日志 `failedSignal` 中止 → `subagent_turn_failed`。`timeout`/`cancelled` 与 `subagent_turn_failed`、`subagent_no_result` 一样附子会话已有的产出（`partialOutputOf`）和 `statsOf`（子会话路径、已完成步数）：已完成工具调用的清单（最近 15 条：工具名、参数摘要、状态、结果首行至多 120 字）加最后一段助手文本；`task` 工具把它以「子会话没有提交结果，以下是它已有的产出（未完成，可能不完整，请自行核对）」交给模型。超时常落在写报告的最后一步，那一步的文字不会落盘，前面的调研靠这份清单留给父模型。父会话中断时执行器按既有规则把整个调用归一为 `cancelled`（Turn 随之结束），产出只留在子会话日志里，不进入父模型的上下文。子会话创建失败、`close` 抛错等内部异常 → `tool_failed`（执行器既有兜底）。
 
 **重复调用保护**（[ADR-0063](../decisions/ADR-0063-loop-guard.md)）：`turnConfig` 原样传给子 Turn（只额外压 `maxSteps`），所以 `turn.loopGuard` 在子会话同样生效。子模型在自己的 Turn 里连续重复同一调用到 `stopAt` 时，子 Turn 以 `error(code = "loop_detected")` 收束，按上面的规则映射为 `subagent_turn_failed`（message 为「子会话 Turn 以 error 结束」），父模型拿到普通错误结果、附已有的产出清单。触发第 `warnAt` 次的说明由子会话的 Builder 用同一份实现重建，因此子日志里同样没有额外事件。
 
@@ -154,9 +154,9 @@ launch(request, ctx)
 
 ## 6. 受限工具集与递归
 
-父会话存在技能目录时，可选池包含非 mutating 的 `skill`，general 与 explore 默认可用。子会话使用启动时父目录与正文快照，加载记录和摘要后重载属于子会话；技能支持文件的读取仍走父权限策略的只读继承。详见 [skills.md](skills.md) 第 3 节。
+父会话存在技能目录时，可选池包含非 mutating 的 `skill`，general 与 explore 默认可用。子会话使用启动时父目录与正文快照，加载记录和摘要后重载属于子会话；技能支持文件的读取沿用父会话权限策略与树共享 Grant（交互父会话下可转发 `ask`）。详见 [skills.md](skills.md) 第 3 节。
 
-**可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅子会话自身 `depth < maxDepth` 时），再按特性排除 `traits.needsUser === true` 的工具——子会话非交互，`ask_user`（ADR-0032）永远不在池内；同样排除 `traits.mutatesSchedule === true` 的工具——子代理不能创建或改写定时任务（ADR-0064）。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
+**可选池** = 内置工具 ∪ 父会话 MCP 工具（`mcpSession.tools()` 快照）∪ `task`（仅子会话自身 `depth < maxDepth` 时），再按特性排除 `traits.needsUser === true` 的工具——子会话不支持自由提问，`ask_user`（ADR-0032）永远不在池内；同样排除 `traits.mutatesSchedule === true` 的工具——子代理不能创建或改写定时任务（ADR-0064）。子注册表 = 池 ∩ 选择 + `finish`（恒在，不可被 `tools` 列出也不可被排除）。
 
 | 选择方式 | 语义 |
 |---|---|
@@ -167,7 +167,7 @@ launch(request, ctx)
 
 工具名空间不变（子会话里仍是 `read`、`mcp__x__y`）；模型在子会话中调用池外/不存在工具 → `unknown_tool` 正常结算。
 
-`web_fetch` 自动进入 explore 工具集，但子会话非交互，未获规则或 Grant 放行的主机仍被拒绝。父会话「本会话允许」过的主机按第 7.2 节只读继承，可以直接读取其他页面；被拒访问应写入 finish 结果，由父代理处理。网页抓取契约见 [tools.md](tools.md) 第 6 节。
+`web_fetch` 自动进入 explore 工具集，但未获规则或 Grant 放行的主机在非交互宿主下仍被拒绝（交互式父会话下经父会话转发确认或继承父「本会话允许」后的主机可直接放行）。父会话「本会话允许」过的主机按第 7.2 节共享会话 Grant，可以直接读取其他页面；非交互被拒访问应写入 finish 结果，由父代理处理。网页抓取契约见 [tools.md](tools.md) 第 6 节。
 
 **递归上限**：`maxDepth`（默认 1）是会话深度上限——`depth` 为祖先进会话数（顶层 0）。`depth == maxDepth` 的会话注册表里没有 `task`，模型硬调会得到 `unknown_tool`；这靠**不注册**实现，不靠运行时分支。
 
@@ -175,45 +175,47 @@ launch(request, ctx)
 
 硬约束：**子会话的有效权限不得宽于父会话；权限判定仍只发生在权限层。**
 
-### 7.1 方案比较
+### 7.1 方案演进与交互转发（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）
 
-| 方案 | 子会话 ask 的处理 | 能力 | 成本 |
+| 方案 | 子会话 ask 的处理 | 能力 | 适用范围 |
 |---|---|---|---|
-| (a) 冒泡到父会话客户端 | 转发为父会话的确认请求 | 完整（子代理可以获批写/执行） | 需要跨会话的请求路由（`respondPermission` 按会话路由，子请求要注册进父 gate 的 pending map）、父日志出现外来 `callId` 的 `permission.requested`（或新事件类型 + reducer 扩展）、双向中断传播——一组新的持久语义与失败模式 |
-| (b) 非交互子会话 | `ask` 一律 `deny`（`source: "non_interactive"` 既有路径） | 收窄：父会话里需要人确认的操作，子会话做不了 | **零新机制**：`createPolicyGate(..., { interactive: false })` 是现成路径；全部权限事实留在子日志 |
-| (c) 按工具集预设 | 不是 ask 的处理方式，是正交能力裁剪：`explore` 只含只读工具，**在默认规则下**工作区内的只读操作不会产生 ask | 只读场景在默认规则下完整 | 与 (a)/(b) 都兼容；不是"任何规则下都放行"——工作区外读取、`mcp` 主体等在 `default` 下仍是 ask，在子会话里照常被拒 |
+| (a) 冒泡到交互父会话（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)） | 经 `SubagentPermissionsDeps` 登记到最外层交互父会话的活动转发池与 `SessionView.pendingSubagentPermissions`，在父会话直接回应；`permission.requested` / `resolved` 仅落子会话日志 | 完整（子代理在 `default`/`smart` 等预设下可获批写/执行，会话 Grant 树共享） | **交互父会话（`interactive: true`）下的全部内置 `task` 子代理**（前/后台、`general`/`explore`、隔离与否、直接及 `maxDepth > 1` 嵌套后代） |
+| (b) 非交互拒绝 | `ask` 一律 `deny`（`source: "non_interactive"` 既有路径） | 仅规则、Grant、`--yes`、Hook 或 smart 审查放行的操作可执行 | **非交互宿主**（`interactive: false`、定时任务、`nctrn -p`）以及 **外部 ACP agent**（`task({ agent })`） |
+| (c) 按工具集预设 | 正交能力裁剪：`explore` 只含只读工具 | 只读场景在默认规则下自动放行 | 与 (a)/(b) 均兼容；工作区外读取、`mcp` 等仍按规则进入 ask/转发或非交互拒绝 |
 
-**结论：本阶段采用 (b) + (c)**。理由：(b) 是现有语义的直接复用且安全保证可证明；(c) 的预设让"天然不需要确认"的只读子代理不受影响；`--yes`、规则、`PermissionRequest` Hook 与项目 Grant 覆盖了无人值守场景下的大部分放行需求；交互式 `default` 预设下子代理做不了的写/执行操作，子代理在结果里说明需求、父代理自己执行即可——比"批准 task 调用即授权整个子任务"（oh-my-pi 的 yolo 做法，明确不采用）更符合逐项把关的权限哲学。(a) 留作以后扩展：在 `PermissionGate` 增加可选的 `forwardAsk` 委托即可接入，不推翻本设计。
+**当前契约（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）**：
 
-**修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8：Ensemble 常驻成员权限确认）**：一次性 `task` 子代理与外部 ACP agent 保持上述非交互收敛不变；但在 `/ensemble` 执行方式中，指挥（Maestro，`@maestro`）没有改文件工具，全部代码修改与验证命令均由常驻成员子会话执行，若沿用非交互直接拒绝，默认 `default` 预设下 Ensemble 无法正常工作。因此在交互式宿主下，Ensemble 成员子会话使用交互式 `PermissionGate`，其 `ask` 请求等待用户确认而不再按 `non_interactive` 直接拒绝。请求原样挂在成员自己的子会话上（走成员会话既有的 `permission.requested` 与 `respondPermission` 通道），指挥派生视图汇总等待确认的成员名单供客户端提示与跳转；`smart` 预设照常先经安全审查器，其他预设与授权规则不变。
+- 交互父会话派生的内置 `task` 子代理不再以 `non_interactive` 直接拒批，而是通过注入的 `SubagentPermissionsDeps` 打开子会话 `PermissionGate` 的交互开关（`interactive: true`）并将待决请求登记到最外层交互父会话的活动转发池（`smart` 预设仍先经过 `PermissionRequest` Hook 与安全审查，仅 `unsure` 或 `userOnly` 主体进入等待确认）。
+- 非交互宿主（`interactive: false`、定时任务、`nctrn -p`）与外部 ACP agent（[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）保持原非交互语义不变；`ask_user` 工具（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）仍不向子代理暴露、也不参与转发。
+- **修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8：Ensemble 常驻成员权限确认）**：Ensemble 常驻成员仍使用成员自己会话的交互式 `PermissionGate`，请求原样挂在成员自身 `SessionView.pendingPermission` 上并通过 `ensemble.member_updated` 汇报给指挥。
 
 ### 7.2 子会话的有效策略
 
 子会话的 `PermissionPolicy` 由 `makePolicy(childSessionId)` 用**与父会话相同的输入**重建：
 
-- 同一 `workspaceRoot`、同一预设名、同一批已合并的可信规则与不可信收紧规则（含受保护路径、高风险命令）；
+- 同一 `workspaceRoot`、同一预设名、同一批已合并的可信规则与不可信收紧规则（含受保护路径、高风险命令）；工作树隔离额外携带隔离根目录与 cwd 限制；
 - 同一 `project` Grant 集合（工作区级，本就按目录归属）；
-- **会话 Grant 共享**：父会话的 `sessionGrants` 数组以只读方式传给子策略——"本会话内允许"的语义扩展为**会话树内允许**（子会话是这次会话工作的委派部分）。子会话的非交互 gate 没有 `respond` 路径，永远写不进新授权；
+- **会话 Grant 树共享**：父会话的 `sessionGrants` 集合与整个会话树共享——在交互父会话下，无论是父会话自身还是子代理（含嵌套后代）通过确认生成的 `remember: "session"` Grant，都写入同一棵树的 `sessionGrants`，父会话与同树其他/后续子代理对同一精确目标立即免问。非交互宿主与外部 ACP 仍以只读方式继承父会话 `sessionGrants`，不产生新授权；
 - 同一 `autoApproveAsk`：`--yes` 是运行级操作者决定，子会话继承它（提升范围与父会话逐点一致，不覆盖 deny、不绕过 Hook 强制的 ask）；
 - `presetContext.sessionId` 换为**子会话** id（附件目录规则绑定自己的落盘目录）。
 
-子会话 gate：`createPolicyGate(childPolicy, { interactive: false, hooks: childHookRunner, caseSensitive, preset, reviewer, ...reviewSources }（`reviewSources` 是父会话的审查输入来源：用户消息、项目说明、可信 remote、补充事实与追加规则）)`，审查器 getter 沿用父会话实例。
+子会话 gate：`createPolicyGate(childPolicy, { interactive, pauseTimeouts?, onPendingSettled?, saveAppPermissions?, hooks: childHookRunner, caseSensitive, preset, reviewer, ...reviewSources })`（`reviewSources` 是父会话的审查输入来源：用户消息、项目说明、可信 remote、补充事实与追加规则；审查器 getter 沿用父会话实例）。交互父会话下注入 `SubagentPermissionsDeps` 后，子会话的 `interactive()` 为 `true`、`gate.respond` 与 `gate.cancelAll` 完整工作，并可通过父会话 `respondSubagentPermission(childSessionId, requestId, reply)` 在活动转发池内精确路由回该子会话（支持 `maxDepth > 1` 嵌套后代直接冒泡到当前父会话；未匹配、已结束或跨会话树调用抛出 `RuntimeCommandError("unknown_request")`）。
 
-**不宽于父会话的论证**：对每个主体，子会话的求值输入（规则、Grant、autoApproveAsk、Hook 建议）与父会话完全相同，唯一差异是 ask 分支——smart 的剩余 ask 都先经同一审查器，allow/block 直接结算；仍需确认时父会话等人回答，子会话 `deny(source: "non_interactive")`。因此子会话的任何 `allow` 都是父会话同一求值下也会得到的 `allow`；差异方向只有"更严"。
+**不宽于父会话的论证**：对每个主体，子会话的求值输入（规则、Grant、`autoApproveAsk`、Hook 建议、审查器与审查来源）与父会话完全一致（隔离工作树额外收紧路径边界）。差异仅在于非交互宿主下剩余 `ask` 被 `deny(source: "non_interactive")`，而交互宿主下剩余 `ask` 经父转发池由同一用户确认（且选项集合、远程禁止持久授权边界与父会话完全相同）。因此子会话的任何 `allow` 都不可能宽于父会话。
 
 ### 7.3 各机制在子会话中的行为
 
 | 机制 | 子会话行为 |
 |---|---|
 | 规则 deny（含不可信项目收紧、受保护路径） | 照常 deny——没有任何子会话机制能越过 |
-| 规则 ask | 先按父策略经 Hook 与 smart 审查；剩余 ask 为 `non_interactive` deny（smart 下白名单外的 shell、network、未声明只读的 MCP 都会送审，审查交给你确认或直接交人的命令在子会话里就是被拒——ADR-0057，子会话可用的命令比以前少）（不发 `permission.requested`）。拒绝消息由子会话 gate 的 `nonInteractiveDenyHint` 注入指引文案：**"子代理无法请求用户确认；需要写入或执行的操作请在 `finish` 结果中说明，由父代理执行"**——让子模型把受阻操作转化为结果内容，而不是反复重试浪费步数 |
-| 会话 Grant | 继承父会话的授权集（只读共享），精确匹配照常 `allow(source:"grant")` |
-| 项目 Grant | 同一 workspaceRoot，照常生效 |
+| 规则 ask | 先按父策略经 `PermissionRequest` Hook 与 `smart` 审查（`allow`/`block` 直接结算）；交互父会话下剩余 `ask` 转发给父会话，触发子会话日志写入 `permission.requested`，父会话推送临时事件 `subagent.permissions` 并挂入 `SessionView.pendingSubagentPermissions`（不设等待超时，且暂停任务/档位/运行级显式超时计时器），等待用户经父 `respondSubagentPermission` 回应后在子会话日志落盘 `permission.resolved`（父日志绝不写外来 `callId`）。非交互宿主与外部 ACP 仍直接 `non_interactive` deny，拒绝消息由 `nonInteractiveDenyHint` 注入提示文案 |
+| 会话 Grant | 共享同一会话树的 `sessionGrants`：父或任一子代理确认 `allow_session` 后，同树父会话及兄弟/后续子代理精确匹配直接 `allow(source:"grant")` |
+| 项目 / 软件持久化 Grant | 同一 `workspaceRoot` 照常生效；交互转发回应 `remember: "project" \| "always"` 时按父会话同口径写入项目 Grant 或 `saveAppPermissions`（远程连接拦截 `project`/`always`） |
 | `--yes` / `autoApproveAsk` | 继承：规则判定的 ask 提升为 allow；**仍不覆盖 deny，也不提升 Hook 强制的 ask** |
-| `PreToolUse` Hook | 照常触发（deny/ask/updatedInput 语义不变）；强制的 ask 在子会话走"PermissionRequest Hook → 无回答则 non_interactive deny" |
-| `PermissionRequest` Hook | 照常触发：可信 Hook 的 `allow`/`deny` 直接结算——这是团队自动化的既有委托点，也是子会话内 ask 唯一可能的放行来源 |
+| `PreToolUse` Hook | 照常触发（deny/ask/updatedInput 语义不变）；强制的 ask 经 `PermissionRequest` Hook 后在交互父会话下转发确认（非交互则 `non_interactive` deny） |
+| `PermissionRequest` Hook | 照常触发：可信 Hook 的 `allow`/`deny` 直接结算，无回答时交由 `smart` 审查或转发确认 |
 | `PostToolUse` Hook | 照常触发（feedback 追加进子会话的工具结果） |
-| `task` 调用本身 | 在**父会话**走正常权限管线：`subagent <preset|custom>` 主体；`default`/`auto-edit` 预设下 `explore` 默认 `allow`（只读子代理能做的事父会话本就会自动放行，多出的只是 token 成本），`general`/`custom` 保持 `ask`；`deny_stop` 等选项语义不变 |
+| `task` 调用本身 | 在**父会话**走正常权限管线：`subagent <preset|custom>` 主体；`default`/`auto-edit` 预设下 `explore` 默认 `allow`，`general`/`custom` 保持 `ask`；`deny_stop` 等选项语义不变 |
 
 ## 8. 上下文
 
@@ -272,9 +274,9 @@ launch(request, ctx)
 
 观察完成状态放在视图外的只读来源元数据中，不给 reducer 注入虚假的 turn.completed；未收束日志可以仍有 currentTurn / pendingPermission，但界面停止转圈并提示「日志未收束／运行状态未知」。实时订阅前丢失的思考增量不能补造；持久 message.assistant 到达后按完整内容收敛，思考时长只展示已知值。
 
-**权限语义不扩展**：当前内置子会话及 ACP 都是非交互 gate，剩余 ask 直接 non_interactive deny，不产生等待用户确认。父 task 启动前的确认留在主对话，此时还没有 child，不提供可用的子标签入口。若读取旧日志发现未决 permission.requested，只读视图不渲染确认提示、无应答按钮；历史未收束请求不声称当前仍在等待。未来若做权限冒泡，另行设计，不能在这轮为了造一个等待状态而改变第 7 节。
+**权限语义与直接回应边界（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）**：交互父会话下的内置子会话通过 `SubagentPermissionsDeps` 将剩余 `ask` 转发给最外层父会话的活动转发池，由父会话 `SessionView.pendingSubagentPermissions` 实时聚合展示。在桌面端右侧子代理标签中，当该子会话存在来自活动转发池的待决请求（按 `childSessionId` 匹配）时，面板复用同一张确认卡片并通过父会话 `respondSubagentPermission` 直接回应；无活动转发请求，或读取已结束、重启后遗留、未收束的只读日志（即便日志中存在历史未闭合 `permission.requested`）时，子标签不展示确认提示也无应答按钮，避免对过期历史请求提供伪实时操作。父 `task` 启动前的确认仍在主对话，此时尚未创建 child。外部 ACP 与非交互宿主的子代理维持原有非交互 deny 边界。
 
-只读观察不启动会话、不授予交互句柄，不进入工具权限管线、不新增 Grant。已有 resumeSession 仍是显式打开；不得借观察对象调用 submit、respondPermission、respondQuestion 或 interrupt。远程仅按 [ADR-0084](../decisions/ADR-0084-phone-side-panel.md) 开放 list / subscribe / unsubscribe，并限本连接已打开父会话的直接子会话；readAttachment 与工作树操作保持本机边界，具体规则见 [rpc.md 第 7 节](../protocols/rpc.md#7-远程连接adr-0052)。
+只读观察本身不启动会话、不授予交互句柄，不进入工具权限管线、不新增 Grant。已有 `resumeSession` 仍是显式打开；不得借只读观察对象调用 `submit`、`respondPermission`、`respondQuestion` 或 `interrupt`。远程仅按 [ADR-0084](../decisions/ADR-0084-phone-side-panel.md) 开放 `list` / `subscribe` / `unsubscribe`，并限本连接已打开父会话的直接子会话；转发权限回应经父会话 `session.respondSubagentPermission`（纳入远程白名单且与 `session.respondPermission` 同口径拦截持久授权）；`readAttachment` 与工作树操作保持本机边界，具体规则见 [rpc.md 第 7 节](../protocols/rpc.md#7-安全与日志)。
 
 ## 13. 诊断与关联（含 traceId 决定）
 
@@ -314,7 +316,7 @@ launch(request, ctx)
 | `RuntimeOptions.subagent` | modules.md 3.3 | 可选，缺省启用默认值 |
 | 诊断 `subagent.*` | observability.md 2 | 诊断通道新增记录种类 |
 
-**不改**：事件类型集合（无新持久/临时事件）、`ToolResult` 形状、执行管线步序、视图 reducer、锁与日志格式版本。
+**权限转发补充（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）**：`PendingPermission` 新增可选 `seq?: number`、新增 `SubagentPendingPermission`、`SessionView.pendingSubagentPermissions`、`allPendingPermissions(view)` 与临时事件 `subagent.permissions`（详情见 [events.md](../protocols/events.md) 与 [view.md](../protocols/view.md)）；`RuntimeSession` 新增 `respondSubagentPermission(childSessionId, requestId, reply)`。父日志仍绝不落盘子会话 `permission.requested` / `permission.resolved` 或外来 `callId`，重放等价不变量不受影响。
 
 ## 16. 本阶段不做
 
@@ -324,12 +326,12 @@ launch(request, ctx)
 - **分布式执行**：子会话在同一进程内运行；
 - **子代理常驻与唤醒**：`task` 在 `finish` 后即关闭；Ensemble 常驻成员与 `@` 唤醒见 [ADR-0089](../decisions/ADR-0089-ensemble.md)；
 - **同步隔离工作区**：同步子代理与父会话共享工作区；后台工作树见第 20 节；
-- **子会话权限冒泡**：一次性 `task` 见 7.1；Ensemble 成员权限确认见 [ADR-0089](../decisions/ADR-0089-ensemble.md) §8；
+- **外部 ACP 与子代理提问转发**：交互父会话内置 `task` 的权限转发已由 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md) 实现；外部 ACP agent 保持非交互拒绝，且子代理仍不挂载 `ask_user`；
 - **并行 task 数组**：一次调用一个子会话；批量并行等并行调度存在后再评估；
 
 - **配置文件 `subagent` 段**：默认值已覆盖本阶段；开关走 `RuntimeOptions.subagent.enabled` 或权限规则 `subagent * → deny`。
 
-ADR-0036 第一轮：子会话沿用父会话的审查器实例与最近用户意图，smart 的剩余 ask 可先经审查放行或拦截；unsure 仍按非交互 deny 处理，不向用户发确认。只由用户确认的集合沿用父策略，审查用量随子会话汇总。见 [permissions.md](permissions.md) 5.3、7。
+[ADR-0036](../decisions/ADR-0036-smart-permissions.md) / [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)：子会话沿用父会话的审查器实例与最近用户意图，smart 的剩余 ask 先经审查放行；`unsure` 或 `userOnly` 主体在交互父会话下经 `SubagentPermissionsDeps` 登记到父会话活动转发池等待用户确认（在非交互宿主与外部 ACP 下仍按 `non_interactive` deny 处理）。审查用量随子会话汇总，详见 [permissions.md](permissions.md) 第 5.3、7 节。
 
 ## 17. 外部 agent（ACP）
 
@@ -377,11 +379,11 @@ explore 档位不能请求 general，显式 tools 必须是只读池子集；gen
 
 - **开关**：`RuntimeOptions.subagent.background`（缺省关闭）。TUI、逐行 CLI、桌面端后台、`nctrn rpc` 开启；`nctrn -p` 与定时任务会话关闭。只有顶层、非定时任务会话的 `task` 才在 schema 与描述里出现 `background`，子会话里没有。多代理攻坚（`/boost`，[ADR-0076](../decisions/ADR-0076-work-modes.md) §6）依赖这一开关，未开启或子代理停用时在提交准备阶段拒绝 `invalid_command`。
 - **准入**：`agent/background-subagents.ts` 的 `backgroundAdmission({ tools, isolation, external })` 拒绝外部 agent，以及显式 `"none"` 的可写工具集。launcher 根据最终选定工具集，在省略 isolation 时为含写操作的后台任务创建工作树，只读任务不检查 git、不建工作树。非 git、无 HEAD 提交、裸仓库在创建子会话前准确拒绝并建议只读子代理或主代理完成；其他创建失败保留 git 错误，不回退共享目录。外部 agent 由 `task` 的 `validateInput` 经注入的同一函数拒绝。
-- **启动**：子会话建好即返回 `output: { childSessionId, childLogPath, model, background: true }`，不发 `tool.progress`。子 Turn 的中止信号不含父 Turn 的 signal；超时沿用 `timeoutMs`。占用 `maxConcurrent` 槽直到收束；另有每父会话 `maxBackground`（缺省 3）。
-- **交付与生命周期**：`BackgroundSubagents` 集中收束、取消（`Runtime.cancelSubagent`）、丢弃（父会话关闭、回退到启动调用之前）与重启补报（按父日志补 `interrupted` 暂停条目，分叉继承的前缀不补）。结果以 `message.user.subagent` 交付，作为 `mode: "subagent"` 的待发输入（[agent-loop.md](agent-loop.md) §2、[view.md](../protocols/view.md)）。
+- **启动**：子会话建好即返回 `output: { childSessionId, childLogPath, model, background: true }`，不发 `tool.progress`。子 Turn 的中止信号不绑定父 Turn 的 `ctx.signal`，而绑定该后台子代理专属的等待中止控制器（在父会话 `interrupt` 时仅当其正在等待转发权限确认才中止该子代理；无等待的后台子代理继续运行）；显式 `timeoutMs` 在其自身或后代存在转发权限等待期间暂停计时。占用 `maxConcurrent` 槽直到收束；另有每父会话 `maxBackground`（缺省 3）。
+- **交付与生命周期**：`BackgroundSubagents` 集中收束、取消（`Runtime.cancelSubagent`，同时结算该子树在父会话的转发待决权限）、丢弃（父会话关闭、回退到启动调用之前）与重启补报（按父日志补 `interrupted` 暂停条目，分叉继承的前缀不补）。结果以 `message.user.subagent` 交付，作为 `mode: "subagent"` 的待发输入（[agent-loop.md](agent-loop.md) §2、[view.md](../protocols/view.md)）。
 - **远程离开**：远程客户端离开不算父会话关闭；宿主保留后台子代理与后台命令，待结果交付及其接续 Turn 收尾后再按引用数关闭，其间重连复用原实例。本机断开、宿主退出、删除与回退的丢弃规则不变；生命周期接口见 [rpc.md §6.1](../protocols/rpc.md#61-core-进程内空闲接口)。
 - **观察**：`listSubagents` 的 `SubagentSummary.background` 标出后台项；运行状态以登记簿为准，父 `task` 已结算不代表子代理结束。
-- **展示**：桌面、手机与 TUI 收起的准入失败工具行只显示「未启动」；模型仍接收完整错误，桌面/手机和 TUI 全屏展开可看原因，inline 不额外输出原始错误。工具行、后台结果、运行登记与历史观察共用 `subagentProfile`：优先显式 preset，其次非 default 的 profile，无标识时省略 default。
+- **展示**：桌面、手机与 TUI 收起的准入失败工具行只显示「未启动」；模型仍接收完整错误，桌面/手机和 TUI 全屏展开可看原因，inline 不额外输出原始错误。工具行、后台结果、运行登记与历史观察共用 `subagentProfile`：优先显式 preset，其次非 default 的 profile，无标识时省略 default。当存在等待确认的转发请求（按 `parentCallId` 匹配）时，桌面端父 `task` 行、概览子代理行与右侧子代理标签（标签图标与文字）以及手机端侧栏子代理行均显示警告色，桌面窗口失焦时通过 `subagent.permissions` 触发与合奏成员同款的确认通知。
 - **路径**：工作树子模型系统说明包含绝对路径和主仓库到副本的映射；权限层的 WORKTREE_DENY 带实际工作树路径，具体规则见 ADR-0075 §3。
 
 

@@ -1133,6 +1133,7 @@ describe("activeConversationCount", () => {
     patch: Partial<Pick<OpenConversation, "busy">> & {
       turn?: boolean;
       permission?: boolean;
+      subagentPermission?: boolean;
     },
   ): OpenConversation => {
     const view = createSessionView();
@@ -1140,19 +1141,25 @@ describe("activeConversationCount", () => {
     if (patch.permission === true) {
       view.pendingPermission = {} as NonNullable<typeof view.pendingPermission>;
     }
+    if (patch.subagentPermission === true) {
+      view.pendingSubagentPermissions = [
+        {} as NonNullable<(typeof view.pendingSubagentPermissions)[number]>,
+      ];
+    }
     return { view, busy: patch.busy ?? false } as unknown as OpenConversation;
   };
 
-  it("运行中的 Turn、等待确认、发送中都计入；空闲不计", () => {
+  it("运行中的 Turn、等待确认、子代理待确认、发送中都计入；空闲不计", () => {
     expect(activeConversationCount([])).toBe(0);
     expect(activeConversationCount([entry({}), entry({})])).toBe(0);
     expect(
       activeConversationCount([
         entry({ turn: true }),
         entry({ permission: true }),
+        entry({ subagentPermission: true }),
         entry({ busy: true }),
         entry({}),
       ]),
-    ).toBe(3);
+    ).toBe(4);
   });
 });

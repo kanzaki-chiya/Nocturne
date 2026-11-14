@@ -9,6 +9,7 @@ import type { PermissionSubject, QuestionItem, RuntimeEvent } from "@nocturne/co
 import {
   decideNotification,
   decideEnsembleMemberNotification,
+  decideSubagentPermissionNotification,
   ellipsize,
   formatDuration,
   NOTIFY_DEFAULTS,
@@ -525,5 +526,128 @@ describe("decideEnsembleMemberNotification · 成员权限", () => {
     expect(
       decideEnsembleMemberNotification(ensembleInput({ event: permission(), seenRequestIds })),
     ).toBeNull();
+  });
+});
+
+describe("decideSubagentPermissionNotification（子代理转发权限提醒）", () => {
+  const subagentPermissionsEvent = (
+    items: { requestId: string; kind?: PermissionSubject["kind"]; target?: string }[],
+    eseq = 1,
+  ): RuntimeEvent => ({
+    type: "subagent.permissions",
+    sessionId: "s1",
+    runId: "run-1",
+    eseq,
+    afterSeq: 5,
+    time: "2026-10-12T10:00:05.000Z",
+    payload: {
+      pending: items.map((item, idx) => ({
+        requestId: item.requestId,
+        callId: `c-${item.requestId}`,
+        toolName: "shell",
+        childSessionId: "child-1",
+        parentCallId: "task-1",
+        profile: "explore",
+        taskSummary: "检查依赖",
+        afterSeq: 5,
+        order: idx + 1,
+        reason: "ask",
+        subjects: [{ kind: item.kind ?? "shell", target: item.target ?? "pnpm test" }],
+        options: ["allow_once", "allow_session", "deny"],
+      })),
+    },
+  });
+
+  const subagentInput = (
+    overrides: Partial<EnsemblePermissionNotifyInput> & { event: RuntimeEvent },
+  ): EnsemblePermissionNotifyInput => ({
+    prefs: { ...NOTIFY_DEFAULTS },
+    live: true,
+    watching: false,
+    session: { title: "登录页改造", firstText: "改一下登录页" },
+    seenRequestIds: new Set<string>(),
+    ...overrides,
+  });
+
+  it("eseq=0 订阅补发与 live=false 回放只记 seenRequestIds 不提醒，后续新请求才提醒", () => {
+    const seenRequestIds = new Set<string>();
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent([{ requestId: "r1" }], 0),
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent([{ requestId: "r2" }], 1),
+          live: false,
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    expect([...seenRequestIds].sort()).toEqual(["r1", "r2"]);
+    // 同 requestId 刷新不重复提醒
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent([{ requestId: "r1" }], 2),
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    // 结算清空后再次出现新 requestId：失焦正常提醒
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent([], 3),
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent(
+            [{ requestId: "r3", kind: "edit", target: "src/a.ts" }],
+            4,
+          ),
+          seenRequestIds,
+        }),
+      ),
+    ).toEqual({
+      kind: "attention",
+      title: "登录页改造",
+      body: "需要确认：修改文件 src/a.ts",
+      childSessionId: "child-1",
+      requestId: "r3",
+    });
+  });
+
+  it("在看或关闭 attention 时不提醒但登记 seenRequestIds", () => {
+    const seenRequestIds = new Set<string>();
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent([{ requestId: "r1" }], 1),
+          watching: true,
+          seenRequestIds,
+        }),
+      ),
+    ).toBeNull();
+    expect([...seenRequestIds]).toEqual(["r1"]);
+    const off = new Set<string>();
+    expect(
+      decideSubagentPermissionNotification(
+        subagentInput({
+          event: subagentPermissionsEvent([{ requestId: "r2" }], 1),
+          prefs: { ...NOTIFY_DEFAULTS, attention: false },
+          seenRequestIds: off,
+        }),
+      ),
+    ).toBeNull();
+    expect([...off]).toEqual(["r2"]);
   });
 });

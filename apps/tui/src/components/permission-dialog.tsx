@@ -17,7 +17,11 @@ import {
 } from "../format.js";
 import { useTheme } from "../theme.js";
 
-import type { PendingPermission, PermissionOption } from "@nocturne/core/protocol";
+import {
+  SUBAGENT_TASK_FALLBACK,
+  type PendingPermission,
+  type PermissionOption,
+} from "@nocturne/core/protocol";
 import type { PermissionReply } from "@nocturne/core";
 
 interface Option {
@@ -130,14 +134,27 @@ export function scheduleDetailRows(
   };
 }
 
-/** 固定单行标题、主体、可选原因、选项、提示与边框，无渲染后测量。 */
+export interface SubagentPermissionSource {
+  profile: string;
+  taskSummary: string;
+}
+
+function sourceLine(source: SubagentPermissionSource): string {
+  const tag = source.profile !== "" ? ` [${source.profile}]` : "";
+  const task = source.taskSummary !== "" ? source.taskSummary : SUBAGENT_TASK_FALLBACK;
+  return `子代理${tag} • ${task}`;
+}
+
+/** 固定单行标题、可选子代理来源、主体、可选原因、选项、提示与边框，无渲染后测量。 */
 export function permissionDialogRows(
   pending: PendingPermission,
   width: number,
   expanded = false,
+  hasSource = false,
 ): number {
   return (
     6 +
+    (hasSource ? 1 : 0) +
     pending.subjects.filter((s) => s.detail !== undefined && s.kind !== "schedule").length +
     scheduleDetailRows(pending, width, expanded).rows.length +
     (pending.reason !== "" && width >= 40 ? 1 : 0) +
@@ -147,6 +164,7 @@ export function permissionDialogRows(
 
 export function PermissionDialog({
   pending,
+  source,
   active,
   onReply,
   width,
@@ -156,6 +174,7 @@ export function PermissionDialog({
   onToggleExpanded,
 }: {
   pending: PendingPermission;
+  source?: SubagentPermissionSource | undefined;
   active: boolean;
   onReply: (reply: PermissionReply) => void;
   width: number;
@@ -239,6 +258,7 @@ export function PermissionDialog({
   const narrow = width < 40;
   const headRows = [
     `${g.wait} 需要确认`,
+    ...(source !== undefined ? [sourceLine(source)] : []),
     subjectText(pending),
     ...pending.subjects.flatMap((s) =>
       s.detail === undefined || s.kind === "schedule"
@@ -332,6 +352,11 @@ export function PermissionDialog({
       <Text bold color={theme.warning}>
         {g.wait} 需要确认
       </Text>
+      {source !== undefined ? (
+        <Text dimColor wrap="truncate">
+          {truncateLine(boxSafe(sourceLine(source)), Math.max(1, width - 8), g.ellipsis)}
+        </Text>
+      ) : null}
       <Text wrap="truncate">
         {truncateLine(boxSafe(subjectText(pending)), width - 8, g.ellipsis)}
       </Text>

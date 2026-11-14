@@ -8,4 +8,5 @@ export {
   type SubagentDeps,
   type SubagentLimiter,
   type SubagentLimits,
+  type SubagentPermissionsDeps,
 } from "./subagent.js";

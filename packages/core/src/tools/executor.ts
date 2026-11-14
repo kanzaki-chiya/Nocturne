@@ -16,6 +16,7 @@ import type {
 } from "../protocol/index.js";
 import { attachmentReferences, saveInputAttachments } from "./file-attachments.js";
 import { applyBudget, truncationNote } from "./budget.js";
+import { createPausableTimeout } from "./pausable-timeout.js";
 import { createSchemaCompiler } from "./schema.js";
 import { writeSpill } from "./spill.js";
 import type {
@@ -526,13 +527,25 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       // 生效超时：可由输入覆盖时取输入值（封顶 maxTimeoutMs），否则取声明默认值；
       // 兜底计时器在生效值外加余量，让工具自带的超时先触发。
       const timeoutMs = timeoutMsOverrideOf(tool, input) ?? tool.traits.timeoutMs;
-      const timeoutSignal =
+      const execTimeout =
         timeoutMs === undefined
           ? undefined
-          : AbortSignal.timeout(timeoutMs + EXECUTOR_TIMEOUT_GRACE_MS);
+          : createPausableTimeout(timeoutMs + EXECUTOR_TIMEOUT_GRACE_MS);
+      const timeoutSignal = execTimeout?.signal;
       const combined = timeoutSignal
         ? AbortSignal.any([scope.signal, timeoutSignal])
         : scope.signal;
+      const pauseTimeouts = (): (() => void) => {
+        execTimeout?.pause();
+        const resumeParent = scope.pauseTimeouts?.();
+        let resumed = false;
+        return () => {
+          if (resumed) return;
+          resumed = true;
+          resumeParent?.();
+          execTimeout?.resume();
+        };
+      };
       // ADR-0032：提问通道注入（与 gate 同手法）——工具只见 askUser 能力；
       // 缺省该字段时声明 needsUser 的工具按 not_interactive 结算
       const questionBroker = scope.askUser;
@@ -585,6 +598,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
             }
           : {}),
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
+        pauseTimeouts,
         ...(attachmentStore !== undefined
           ? {
               saveFileAttachment: (input: {
@@ -653,6 +667,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
           );
         }
       } finally {
+        execTimeout?.dispose();
         await scope.checkpoint?.("after", call.callId, outcome.subjects, scope.sessionId);
       }
       if (executionStatus !== undefined) return finish(executionStatus, result);

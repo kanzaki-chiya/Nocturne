@@ -19,10 +19,12 @@ import type {
   SessionView,
 } from "../src/protocol/index.js";
 import {
+  allPendingPermissions,
   createSessionView,
   reduceSessionView,
   replaySessionView,
   sessionUsageSoFar,
+  type SubagentPendingPermission,
   type ToolEntry,
 } from "../src/protocol/index.js";
 import { internalSession } from "./internal-session.js";
@@ -1179,4 +1181,104 @@ it("ADR-0070：插话条目带 steer 标记，任务清单归档只由非插话�
     payload: { messageId: "u3", content: [{ type: "text", text: "新请求" }] },
   });
   expect(view.todos).toEqual([]);
+});
+
+it("subagent.permissions 是临时快照：持久重放不复活，并与父 pendingPermission 按到达顺序混排", () => {
+  const sub = (
+    requestId: string,
+    childSessionId: string,
+    afterSeq: number,
+    order: number,
+  ): SubagentPendingPermission => ({
+    childSessionId,
+    parentCallId: "parent-task-1",
+    profile: "general",
+    taskSummary: "改文件",
+    afterSeq,
+    order,
+    requestId,
+    callId: `c-${requestId}`,
+    toolName: "edit",
+    subjects: [{ kind: "edit", target: "/a.txt", where: "workspace" }],
+    reason: "需要确认",
+    options: ["allow_once", "allow_session", "deny", "deny_stop"],
+  });
+
+  const childBeforeParent = sub("req-c1", "child-1", 1, 1);
+  const childAfterParent = sub("req-c2", "child-2", 2, 2);
+
+  const durable: DurableEvent[] = [
+    {
+      type: "message.user",
+      sessionId: "s",
+      seq: 1,
+      time: "t",
+      turnId: "t1",
+      payload: { messageId: "u1", content: [{ type: "text", text: "go" }] },
+    },
+    {
+      type: "permission.requested",
+      sessionId: "s",
+      seq: 2,
+      time: "t",
+      turnId: "t1",
+      payload: {
+        requestId: "req-p",
+        callId: "c-parent",
+        subjects: [{ kind: "shell", target: "echo hi" }],
+        reason: "需要确认",
+        options: ["allow_once", "deny", "deny_stop"],
+      },
+    },
+  ];
+
+  // 1) 实时流：child-1 在 seq=1 后到达，parent 在 seq=2 到达，child-2 在 seq=2 后到达
+  const live = createSessionView();
+  if (durable[0] !== undefined) reduceSessionView(live, durable[0]);
+  reduceSessionView(live, {
+    type: "subagent.permissions",
+    sessionId: "s",
+    runId: "r",
+    eseq: 1,
+    afterSeq: 1,
+    time: "t",
+    payload: { pending: [childBeforeParent] },
+  });
+  if (durable[1] !== undefined) reduceSessionView(live, durable[1]);
+  reduceSessionView(live, {
+    type: "subagent.permissions",
+    sessionId: "s",
+    runId: "r",
+    eseq: 2,
+    afterSeq: 2,
+    time: "t",
+    payload: { pending: [childBeforeParent, childAfterParent] },
+  });
+
+  expect(allPendingPermissions(live).map((item) => item.permission.requestId)).toEqual([
+    "req-c1",
+    "req-p",
+    "req-c2",
+  ]);
+
+  // 2) 晚订阅重放 durable 后收到 eseq=0 全量快照，顺序完全一致
+  const late = replaySessionView(durable);
+  expect(late.pendingSubagentPermissions).toEqual([]);
+  reduceSessionView(late, {
+    type: "subagent.permissions",
+    sessionId: "s",
+    runId: "r",
+    eseq: 0,
+    afterSeq: 2,
+    time: "t",
+    payload: { pending: [childBeforeParent, childAfterParent] },
+  });
+  expect(allPendingPermissions(late).map((item) => item.permission.requestId)).toEqual([
+    "req-c1",
+    "req-p",
+    "req-c2",
+  ]);
+
+  // 3) 仅持久重放（重启恢复）不展示旧未决子代理请求
+  expect(replaySessionView(durable).pendingSubagentPermissions).toEqual([]);
 });

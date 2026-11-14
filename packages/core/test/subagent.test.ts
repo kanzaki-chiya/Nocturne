@@ -1408,7 +1408,9 @@ describe("subagent：递归与并发上限", () => {
 });
 
 describe("subagent：权限", () => {
-  it("default 预设 general 子代理尝试 edit：非交互拒绝带指引，仍能 finish", async () => {
+  it("非交互会话下 default 预设 general 子代理尝试 edit：non_interactive 拒绝带指引，仍能 finish", async () => {
+    const ws = makeTmp("nct-sa-ni-");
+    const sessionsDir = makeTmp("nct-sa-ni-s-");
     const provider = new FakeProvider({
       handler: (req) => {
         if (isChildRequest(req)) {
@@ -1448,19 +1450,21 @@ describe("subagent：权限", () => {
             ];
       },
     });
-    const { runtime, ws } = await makeRuntime(undefined, {
-      provider,
-      interactive: true,
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir,
+      providers: [provider],
+      interactive: false,
+      policy: createRulePolicy({
+        workspaceRoot: ws,
+        caseSensitive: true,
+        preset: "default",
+        rules: [{ rule: { kind: "subagent", pattern: "*", action: "allow" }, origin: "user" }],
+      }),
     });
     writeFileSync(path.join(ws, "a.txt"), "x");
     const session = await makeSession(runtime);
     const events = collect(session);
-    // 父侧 subagent general → ask → 允许
-    session.subscribe((e) => {
-      if (e.type === "permission.requested") {
-        void session.respondPermission(e.payload.requestId, { decision: "allow" });
-      }
-    });
     await session.submit({ text: "go" });
 
     const completed = taskCompleted(events);

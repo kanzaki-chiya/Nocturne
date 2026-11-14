@@ -81,7 +81,11 @@ export interface OpenConversation {
 }
 
 export function conversationStatus(entry: Pick<OpenConversation, "view" | "busy">): SessionStatus {
-  if (entry.view.pendingPermission !== undefined || entry.view.pendingQuestion !== undefined) {
+  if (
+    entry.view.pendingPermission !== undefined ||
+    entry.view.pendingSubagentPermissions.length > 0 ||
+    entry.view.pendingQuestion !== undefined
+  ) {
     return "pending";
   }
   return entry.busy || entry.view.currentTurn !== undefined || entry.view.status !== "idle"

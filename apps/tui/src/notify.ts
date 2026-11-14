@@ -106,6 +106,36 @@ export function openTurnStarts(events: readonly RuntimeEvent[]): Map<string, num
 }
 
 /**
+ * 子代理待确认响铃判定：父会话的 `subagent.permissions` 推当前待决快照；
+ * 订阅起始快照（`eseq === 0`）里已有的请求只登记，之后真正新出现的请求才按
+ * 「需要确认」一类判定一次。
+ */
+export function subagentPermissionRing(
+  event: RuntimeEvent,
+  seen: Set<string>,
+  context: { focused: boolean },
+  settings: NotifySettings,
+): boolean {
+  if (event.type !== "subagent.permissions") return false;
+  const pending = event.payload.pending;
+  if (event.eseq === 0) {
+    for (const p of pending) seen.add(`${p.childSessionId}:${p.requestId}`);
+    return false;
+  }
+  const active = new Set<string>();
+  let hasFresh = false;
+  for (const p of pending) {
+    const key = `${p.childSessionId}:${p.requestId}`;
+    active.add(key);
+    if (!seen.has(key)) hasFresh = true;
+  }
+  seen.clear();
+  for (const key of active) seen.add(key);
+  if (!hasFresh) return false;
+  return settings.enabled && settings.attention && !context.focused;
+}
+
+/**
  * 挂上响铃：会话实时事件 → 判定 → 帧外写出 BEL。会话切换（/resume、/new）
  * 时重建；焦点源缺省（测试未注入）时按没在看处理。
  */
@@ -122,9 +152,23 @@ export function useNotifyBell({
 }): void {
   useEffect(() => {
     const open = openTurnStarts(session.durableEvents());
+    const seenSubagent = new Set<string>();
     return session.subscribe((event) => {
       if (event.type === "turn.started") {
         if (event.turnId !== undefined) open.set(event.turnId, Date.parse(event.time));
+        return;
+      }
+      if (event.type === "subagent.permissions") {
+        if (
+          subagentPermissionRing(
+            event,
+            seenSubagent,
+            { focused: focus?.focused() === true },
+            readNotifySettings(runtime),
+          )
+        ) {
+          writeOob?.(BELL);
+        }
         return;
       }
       if (

@@ -1,4 +1,5 @@
 export * from "./types.js";
+export { createPausableTimeout, type PausableTimeout } from "./pausable-timeout.js";
 export { createSkillTool } from "./builtin/skill.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolExecutor, resolveSubjects } from "./executor.js";

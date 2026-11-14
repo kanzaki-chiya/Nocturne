@@ -244,7 +244,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 **内容**：
 
 - **自定义斜杠命令**：项目 `.nocturne/commands/*.md` 注册为命令；**项目级自定义 agent**：复用 `trust.json` 的项目信任机制，设计定义文件的加载、权限收敛与提示词边界。
-- **子会话 ask 冒泡**：按 [subagent.md](../architecture/subagent.md) 第 7.1 节方案 (a)，把子会话的确认请求路由到父客户端；**可展开的子代理进度**：结构化进度替代单行摘要。
+- **子会话 ask 冒泡**（已实现，2026-11-14，见 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）：交互父会话下一次性内置 `task` 子代理的权限确认请求路由到父会话并实时聚合，支持直接回应与树共享授权；**可展开的子代理进度**：结构化进度替代单行摘要。
 - **MCP 服务器管理**（已随 0.6.0 发布，2026-10-07）：桌面端「MCP」设置页添加、编辑、启停服务器，支持 JSON 导入与 HTTP 传输，已打开的会话在 Turn 边界热重载，见 [ADR-0047](../decisions/ADR-0047-mcp-settings.md)；MCP 工具返回图片走附件通道已于 2026-10-22 实现。
 - **技能**（已随 0.6.0 发布，2026-10-07）：兼容 Agent Skills，自动发现用户级与项目内技能目录，`/技能名` 调用，桌面端「技能」页管理，见 [ADR-0048](../decisions/ADR-0048-skills.md)。
 - **外部 agent 子代理**（已随 0.7.0 发布，2026-10-07，见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）：经 ACP 把子任务交给 omp、Codex 等外部 agent；桌面端「外部 agent」设置页、`/agents` 与 `/<名称> 任务` 点名委派。

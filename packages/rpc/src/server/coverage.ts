@@ -138,6 +138,7 @@ export const SESSION_METHODS: Record<
   endEnsemble: "session.endEnsemble",
   pendingInputs: "session.pendingInputs",
   respondPermission: "session.respondPermission",
+  respondSubagentPermission: "session.respondSubagentPermission",
   respondQuestion: "session.respondQuestion",
   setModel: "session.setModel",
   setPermissionPreset: "session.setPermissionPreset",

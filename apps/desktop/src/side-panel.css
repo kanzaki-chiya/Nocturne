@@ -141,6 +141,11 @@
   color: var(--a-text);
   box-shadow: inset 0 0 0 1px var(--a-border);
 }
+.sp-tab.warn,
+.sp-tab.on.warn,
+.sp-tab.warn .sp-glyph {
+  color: var(--a-warning);
+}
 .sp-tab:hover {
   background: var(--a-raised);
 }
@@ -1130,6 +1135,9 @@
 .sp-sub-status.running {
   color: var(--a-accent);
 }
+.sp-sub-status.warn {
+  color: var(--a-warning);
+}
 .sp-sub-status.error,
 .sp-sub-status.denied {
   color: var(--a-error);
@@ -1195,6 +1203,9 @@
   --conversation-scroll-top: 12px;
   padding: var(--conversation-scroll-top);
 }
+.sp-sub-requests {
+  flex: none;
+}
 
 /* 概览浮层的「子代理」分组 */
 .ovpop-group {
@@ -1228,7 +1239,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ovpop-agent-summary.warn {
+.ovpop-agent-summary.warn,
+.ovpop-agent.warn .sp-glyph {
   color: var(--a-warning);
 }
 .ovpop .ovpop-ensemble-head {

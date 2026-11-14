@@ -222,6 +222,8 @@ export interface ToolContext extends ToolScope {
    * schedule_unavailable 结算。
    */
   schedule?: ScheduleAccess;
+  /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
+  pauseTimeouts?: (() => () => void) | undefined;
   /**
    * 将工具产出的内容保存为会话文件附件（ADR-0088）：经 AttachmentStore.saveFile
    * 落盘为 `file-<n>.<ext>`，返回 FileAttachment 引用。缺省 = 当前环境未挂载附件存储。
@@ -470,6 +472,8 @@ export interface ExecutionScope extends ToolScope {
   askUser?: QuestionBroker | undefined;
   /** 定时任务读写（ADR-0064）：缺省时声明 mutatesSchedule 的工具按 schedule_unavailable 结算 */
   schedule?: ScheduleAccess | undefined;
+  /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
+  pauseTimeouts?: (() => () => void) | undefined;
   /**
    * 当前会话模型的编辑工具能力（ADR-0035 §5）：Agent Loop 每次调用
    * 按当时模型取值，模型切换后下一次调用即生效；缺省不筛选。
@@ -517,6 +521,8 @@ export interface ExecutionEnvironment {
   askUser?: QuestionBroker | undefined;
   /** 定时任务读写（ADR-0064）；缺省时 schedule 工具按 schedule_unavailable 结算 */
   schedule?: ScheduleAccess | undefined;
+  /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
+  pauseTimeouts?: (() => () => void) | undefined;
 }
 export interface TurnCallScope {
   cwd: string;

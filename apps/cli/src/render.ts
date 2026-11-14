@@ -7,6 +7,7 @@ import { styleText } from "node:util";
 import { truncateMiddle } from "@nocturne/tui/text-format";
 
 import {
+  SUBAGENT_TASK_FALLBACK,
   compactedNoticeText,
   todoItemsFromCompletion,
   todoSnapshotLines,
@@ -403,7 +404,7 @@ function permissionSubjectLines(
   return [head, `  ${truncateMiddle(s.detail, limit)}`];
 }
 
-/** 权限确认提示块（cli.md 第 6 节）：主体、命中原因与完整选项 */
+/** 权限确认提示块（cli.md 第 6 节）：主体、命中原因与完整选项；可选注明来源子代理 */
 export function renderPermissionPrompt(
   subjects: {
     kind: string;
@@ -414,7 +415,16 @@ export function renderPermissionPrompt(
   reason: string,
   options?: readonly string[],
   width = 80,
+  source?: { profile: string; taskSummary: string },
 ): string {
+  const sourceLines =
+    source === undefined
+      ? []
+      : [
+          `  子代理${source.profile !== "" ? ` [${source.profile}]` : ""} · ${
+            source.taskSummary !== "" ? source.taskSummary : SUBAGENT_TASK_FALLBACK
+          }`,
+        ];
   const lines = subjects.flatMap((s) => permissionSubjectLines(s, width));
   const opts = options !== undefined && options.length > 0 ? options : ["allow_once", "deny"];
   const rendered = opts
@@ -430,7 +440,13 @@ export function renderPermissionPrompt(
         }`,
     )
     .join("  ");
-  return [style("yellow", "? 操作需要确认"), ...lines, `  ${reason}`, `  ${rendered}`].join("\n");
+  return [
+    style("yellow", "? 操作需要确认"),
+    ...sourceLines,
+    ...lines,
+    `  ${reason}`,
+    `  ${rendered}`,
+  ].join("\n");
 }
 
 /** 逐行 CLI 的单题提示（ADR-0032 §6）：编号选项 + 输入规则说明 */

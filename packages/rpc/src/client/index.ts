@@ -51,4 +51,12 @@ export type {
   WireAttachment,
 } from "../shared/methods.js";
 // 视图折叠用的 reducer 就是 protocol 里的同一份
-export { createSessionView, reduceSessionView, replaySessionView } from "@nocturne/core/protocol";
+export {
+  allPendingPermissions,
+  createSessionView,
+  reduceSessionView,
+  replaySessionView,
+  type AggregatedPendingPermission,
+  type SubagentPendingPermission,
+  type SubagentPermissionsPayload,
+} from "@nocturne/core/protocol";

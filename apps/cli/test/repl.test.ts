@@ -343,6 +343,132 @@ describe("REPL 生命周期", () => {
     stdin.end();
     expect(await done).toBe(0);
   });
+
+  it("子代理权限请求：按到达顺序与父请求混排、标明来源并路由到 respondSubagentPermission", async () => {
+    const { io, stdin, stdoutChunks } = makeIo();
+    let listener: ((ev: RuntimeEvent) => void) | undefined;
+    const parentReplies: { requestId: string; reply: unknown }[] = [];
+    const subReplies: { childSessionId: string; requestId: string; reply: unknown }[] = [];
+    const session = {
+      describeSkills: () => ({ skills: [] }),
+      describeExternalAgents: async () => ({ agents: [], warnings: [] }),
+      id: "s1",
+      subscribe: (fn: (ev: RuntimeEvent) => void) => {
+        listener = fn;
+        return () => undefined;
+      },
+      submit: () => new Promise<TurnEndReason>(() => undefined),
+      interrupt: () => undefined,
+      respondPermission: (requestId: string, reply: unknown) => {
+        parentReplies.push({ requestId, reply });
+        return Promise.resolve();
+      },
+      respondSubagentPermission: (childSessionId: string, requestId: string, reply: unknown) => {
+        subReplies.push({ childSessionId, requestId, reply });
+        return Promise.resolve();
+      },
+      state: () =>
+        ({
+          config: { model: { provider: "p", model: "m1" } },
+          openTurn: undefined,
+          meta: { cwd: "/ws" },
+        }) as unknown as ReturnType<RuntimeSession["state"]>,
+      warnings: [],
+    } as unknown as RuntimeSession;
+
+    const done = runRepl(session, fakeRuntime, io);
+    await tick();
+
+    const childReq1 = {
+      childSessionId: "c1",
+      parentCallId: "call-1",
+      profile: "explore",
+      taskSummary: "检查日志",
+      afterSeq: 5,
+      order: 1,
+      requestId: "r-c1",
+      callId: "sc1",
+      toolName: "shell",
+      subjects: [{ kind: "shell" as const, target: "git status" }],
+      reason: "需确认",
+      options: [
+        "allow_once" as const,
+        "allow_session" as const,
+        "deny" as const,
+        "deny_stop" as const,
+      ],
+    };
+    const childReq2 = {
+      childSessionId: "c2",
+      parentCallId: "call-2",
+      profile: "",
+      taskSummary: "写回测试",
+      afterSeq: 7,
+      order: 2,
+      requestId: "r-c2",
+      callId: "sc2",
+      toolName: "edit",
+      subjects: [{ kind: "edit" as const, target: "/x/b.ts" }],
+      reason: "工作区外",
+      options: ["allow_once" as const, "deny" as const],
+    };
+
+    // 先到 child1，再收到父自身请求（seq: 6 夹在 c1 afterSeq=5 与 c2 afterSeq=7 之间）
+    listener?.({
+      type: "subagent.permissions",
+      sessionId: "s1",
+      runId: "run-1",
+      eseq: 1,
+      afterSeq: 7,
+      time: "t",
+      payload: { pending: [childReq1, childReq2] },
+    });
+    listener?.({
+      type: "permission.requested",
+      sessionId: "s1",
+      seq: 6,
+      time: "t",
+      payload: {
+        requestId: "r-parent",
+        callId: "pc1",
+        subjects: [{ kind: "edit", target: "/x/parent.ts" }],
+        reason: "父请求",
+        options: ["allow_once", "deny"],
+      },
+    } as RuntimeEvent);
+    await tick();
+
+    // 首先提示 child1（afterSeq=5 < seq=6）
+    expect(stdoutChunks.join("")).toContain("子代理 [explore] · 检查日志");
+    stdin.write("s\n");
+    await tick();
+    expect(subReplies).toEqual([
+      {
+        childSessionId: "c1",
+        requestId: "r-c1",
+        reply: { decision: "allow", remember: "session" },
+      },
+    ]);
+
+    // 紧接着按顺序提示父请求（seq=6 < afterSeq=7）
+    expect(stdoutChunks.join("")).toContain("/x/parent.ts");
+    stdin.write("a\n");
+    await tick();
+    expect(parentReplies).toEqual([{ requestId: "r-parent", reply: { decision: "allow" } }]);
+
+    // 最后提示 child2（afterSeq=7）
+    expect(stdoutChunks.join("")).toContain("子代理 · 写回测试");
+    stdin.write("d 换只读方案\n");
+    await tick();
+    expect(subReplies.at(-1)).toEqual({
+      childSessionId: "c2",
+      requestId: "r-c2",
+      reply: { decision: "deny", feedback: "换只读方案" },
+    });
+
+    stdin.end();
+    expect(await done).toBe(0);
+  });
 });
 
 describe("REPL /resume 会话切换", () => {

@@ -39,8 +39,10 @@ import {
 import type { spawn } from "node:child_process";
 
 import {
+  allPendingPermissions,
   IMAGE_MAX_BYTES,
   replaySessionView,
+  type AggregatedPendingPermission,
   type RewindMode,
   type RewindTarget,
   type SessionView,
@@ -1086,9 +1088,13 @@ function SessionApp({
   const [boardOpen, setBoardOpen] = useState(false);
   // 当前会话出现权限确认或提问时让出整帧，确认框照常显示
   useEffect(() => {
-    if (view.pendingPermission !== undefined || view.pendingQuestion !== undefined)
+    if (
+      view.pendingPermission !== undefined ||
+      view.pendingSubagentPermissions.length > 0 ||
+      view.pendingQuestion !== undefined
+    )
       setBoardOpen(false);
-  }, [view.pendingPermission, view.pendingQuestion]);
+  }, [view.pendingPermission, view.pendingSubagentPermissions.length, view.pendingQuestion]);
   // Ensemble 不存在时没有留言板
   useEffect(() => {
     if (coordEnsemble === undefined) setBoardOpen(false);
@@ -1248,13 +1254,48 @@ function SessionApp({
     (memberView.currentTurn !== undefined ||
       memberView.live.tools.length > 0 ||
       memberView.live.assistants.length > 0 ||
-      memberView.pendingPermission !== undefined);
+      allPendingPermissions(memberView).length > 0);
   const busy = view.status !== "idle" || submitPending || memberLiveBusy;
   // 回复发出到事件回来之间有异步间隔，本地先结算，这段时间的按键才不会被权限框吞掉。
-  const [settledPermission, setSettledPermission] = useState<string | undefined>(undefined);
-  const pending =
-    view.pendingPermission !== undefined && view.pendingPermission.requestId !== settledPermission
-      ? view.pendingPermission
+  const [settledPermissions, setSettledPermissions] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  useEffect(() => {
+    setSettledPermissions(new Set());
+  }, [session]);
+  const pendingPermissionKey = (item: AggregatedPendingPermission): string =>
+    item.kind === "subagent"
+      ? `subagent:${item.permission.childSessionId}:${item.permission.requestId}`
+      : `session:${item.permission.requestId}`;
+  const pendingItems = allPendingPermissions(view);
+  const activePendingKeys = pendingItems.map(pendingPermissionKey).join("\n");
+  useEffect(() => {
+    setSettledPermissions((prev) => {
+      if (prev.size === 0) return prev;
+      const active = new Set(activePendingKeys === "" ? [] : activePendingKeys.split("\n"));
+      let changed = false;
+      for (const k of prev) {
+        if (!active.has(k)) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return prev;
+      const next = new Set<string>();
+      for (const k of prev) {
+        if (active.has(k)) next.add(k);
+      }
+      return next;
+    });
+  }, [activePendingKeys]);
+  const pendingItem = pendingItems.find(
+    (item) => !settledPermissions.has(pendingPermissionKey(item)),
+  );
+  const pending = pendingItem?.permission;
+  const pendingKey = pendingItem === undefined ? undefined : pendingPermissionKey(pendingItem);
+  const pendingSource =
+    pendingItem?.kind === "subagent"
+      ? { profile: pendingItem.permission.profile, taskSummary: pendingItem.permission.taskSummary }
       : undefined;
   // 待回答的提问与权限确认同级独占焦点。
   const pendingQ = view.pendingQuestion;
@@ -1272,9 +1313,9 @@ function SessionApp({
       : { index: 0, confirm: false, answers: [] };
   // schedule 权限详情（ADR-0064）的展开状态按 requestId 记录并在渲染时派生：新请求默认折叠
   const [expandedPermission, setExpandedPermission] = useState<string | undefined>(undefined);
-  const permissionExpanded = pending !== undefined && expandedPermission === pending.requestId;
+  const permissionExpanded = pendingKey !== undefined && expandedPermission === pendingKey;
   const interruptible = useRef(false);
-  interruptible.current = busy;
+  interruptible.current = busy || pending !== undefined;
   // 80ms 定时器到期后不立刻中断：Node 先跑 timers 再读 stdin。字母如果已经在
   // I/O 队列里，要等这次 poll 先把它吞掉，再在 check 阶段决定要不要中断。
   const escapeImmediate = useRef<ReturnType<typeof setImmediate> | undefined>(undefined);
@@ -1370,7 +1411,7 @@ function SessionApp({
     [],
   );
 
-  /** 退出：进行中先中断，等 Turn 收敛后再退（与 REPL close 路径同语义） */
+  /** 退出：进行中先中断，等 Turn 与待决权限收敛后再退（与 REPL close 路径同语义） */
   const requestExit = useCallback(() => {
     if (busy || submitting.current || pending !== undefined) {
       session.interrupt();
@@ -1386,16 +1427,29 @@ function SessionApp({
 
   const replyPermission = useCallback(
     (reply: PermissionReply) => {
-      if (pending === undefined) return;
-      const requestId = pending.requestId;
+      if (pendingItem === undefined || pendingKey === undefined) return;
+      const key = pendingKey;
       // 先让输入框/权限框立即退出独占态，命令本身异步结算
-      setSettledPermission(requestId);
-      session.respondPermission(requestId, reply).catch((e: unknown) => {
-        setSettledPermission((current) => (current === requestId ? undefined : current));
+      setSettledPermissions((prev) => new Set([...prev, key]));
+      const promise =
+        pendingItem.kind === "subagent"
+          ? session.respondSubagentPermission(
+              pendingItem.permission.childSessionId,
+              pendingItem.permission.requestId,
+              reply,
+            )
+          : session.respondPermission(pendingItem.permission.requestId, reply);
+      promise.catch((e: unknown) => {
+        setSettledPermissions((prev) => {
+          if (!prev.has(key)) return prev;
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
         pushLine(`! ${errText(e)}`);
       });
     },
-    [pending, session, pushLine],
+    [pendingItem, pendingKey, session, pushLine],
   );
 
   // 回复只结算工具；对话摘要由持久工具事件显示。
@@ -3352,7 +3406,7 @@ function SessionApp({
   const popupHeight = Math.min(
     budget.conversation,
     pending !== undefined
-      ? permissionDialogRows(pending, width, permissionExpanded)
+      ? permissionDialogRows(pending, width, permissionExpanded, pendingSource !== undefined)
       : pendingQ !== undefined
         ? questionDialogRows(
             pendingQ,
@@ -3769,10 +3823,11 @@ function SessionApp({
   const candidateStart = Math.max(0, completionIndex - candidateRows + 1);
   const shownCandidates = candidates.slice(candidateStart, candidateStart + candidateRows);
   const overlayBody =
-    pending !== undefined ? (
+    pending !== undefined && pendingKey !== undefined ? (
       <PermissionDialog
-        key={pending.requestId}
+        key={pendingKey}
         pending={pending}
+        source={pendingSource}
         active={!dialogOpen}
         onReply={replyPermission}
         height={popupHeight}
@@ -3780,7 +3835,7 @@ function SessionApp({
         width={width}
         expanded={permissionExpanded}
         onToggleExpanded={() => {
-          setExpandedPermission(permissionExpanded ? undefined : pending.requestId);
+          setExpandedPermission(permissionExpanded ? undefined : pendingKey);
         }}
       />
     ) : pendingQ !== undefined ? (

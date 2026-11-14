@@ -552,6 +552,15 @@ describe("外部 agent 配对、范围、白名单、权限上限与会话来源
         },
       ],
       [
+        "session.respondSubagentPermission",
+        {
+          sessionId: hostSession.sessionId,
+          childSessionId: "c1",
+          requestId: "r1",
+          reply: { decision: "allow" },
+        },
+      ],
+      [
         "session.respondQuestion",
         {
           sessionId: hostSession.sessionId,

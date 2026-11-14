@@ -14,7 +14,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/core/protocol";
-import type { SubagentSummary, ToolEntry } from "@nocturne/core/protocol";
+import type {
+  ApplicationTarget,
+  PermissionReply,
+  SubagentPendingPermission,
+  SubagentSummary,
+  ToolEntry,
+} from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 import { RpcError } from "@nocturne/rpc/client";
 
@@ -101,6 +107,12 @@ export interface PanelSubagents {
   parentEntryFor: (callId: string) => ToolEntry | undefined;
   images: AttachmentImageSource;
   openUrl: (url: string) => void;
+  pendingPermissions?: readonly SubagentPendingPermission[] | undefined;
+  respondPermission?:
+    | ((childSessionId: string, requestId: string, reply: PermissionReply) => Promise<void>)
+    | undefined;
+  shellKind?: string | undefined;
+  resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
 }
 
 export interface SidePanelProps {
@@ -315,11 +327,17 @@ function TabBar(props: SidePanelProps) {
           const active = tab.id === activeId;
           const ensembleDot =
             tab.kind === "ensemble" ? ensembleStatusDot(props.ensemble?.ensemble) : undefined;
+          const subagentWarn =
+            tab.kind === "subagent" &&
+            (props.subagents?.pendingPermissions?.some(
+              (p) => p.childSessionId === tab.childSessionId || p.parentCallId === tab.parentCallId,
+            ) ??
+              false);
           return (
             <div
               key={tab.id}
               data-tab-id={tab.id}
-              className={`sp-tab${active ? " on" : ""}${tab.kind === "browser" && tab.agent !== undefined ? " agent" : ""}${tab.kind === "browser" && tab.agent?.state === "busy" ? " busy" : ""}${dragging === tab.id ? " dragging" : ""}`}
+              className={`sp-tab${active ? " on" : ""}${subagentWarn ? " warn" : ""}${tab.kind === "browser" && tab.agent !== undefined ? " agent" : ""}${tab.kind === "browser" && tab.agent?.state === "busy" ? " busy" : ""}${dragging === tab.id ? " dragging" : ""}`}
               role="tab"
               aria-selected={active}
               tabIndex={active ? 0 : -1}
@@ -1437,6 +1455,14 @@ export function SidePanel(props: SidePanelProps) {
                       workspace={props.workspace ?? ""}
                       images={props.subagents.images}
                       openUrl={props.subagents.openUrl}
+                      pendingPermissions={props.subagents.pendingPermissions?.filter(
+                        (p) =>
+                          p.childSessionId === tab.childSessionId ||
+                          p.parentCallId === tab.parentCallId,
+                      )}
+                      onRespondPermission={props.subagents.respondPermission}
+                      shellKind={props.subagents.shellKind}
+                      resolveAppIcon={props.subagents.resolveAppIcon}
                     />
                   )
                 ) : tab.kind === "shell" ? (

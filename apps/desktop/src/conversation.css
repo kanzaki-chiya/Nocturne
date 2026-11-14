@@ -1388,6 +1388,13 @@
   border-radius: var(--radius-pill);
   background: var(--a-accent);
 }
+.conversation .tool-res.warn,
+.tool-res.tool-wait.warn {
+  color: var(--a-warning);
+}
+.tool-wait.warn > span {
+  background: var(--a-warning);
+}
 @media (max-width: 639px) {
   .question-dock {
     padding-inline: 12px;

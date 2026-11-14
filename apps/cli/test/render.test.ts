@@ -482,4 +482,23 @@ describe("智能权限审查行", () => {
     expect(text).not.toContain("本会话内允许");
     expect(text).not.toContain("始终允许");
   });
+  it("子代理来源时在确认提示中标明档位与任务摘要", () => {
+    const withProfile = renderPermissionPrompt(
+      [{ kind: "shell", target: "git status" }],
+      "命中规则：shell",
+      ["allow_once", "allow_session", "deny"],
+      80,
+      { profile: "explore", taskSummary: "检查仓库状态" },
+    );
+    expect(withProfile).toContain("子代理 [explore] · 检查仓库状态");
+
+    const withoutProfile = renderPermissionPrompt(
+      [{ kind: "edit", target: "/outside/a" }],
+      "工作区外编辑",
+      ["allow_once", "deny"],
+      80,
+      { profile: "", taskSummary: "修复配置" },
+    );
+    expect(withoutProfile).toContain("子代理 · 修复配置");
+  });
 });

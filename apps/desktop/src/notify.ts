@@ -280,6 +280,24 @@ export interface EnsemblePermissionNotifyInput {
   seenRequestIds: Set<string>;
 }
 
+function pickFreshPendingPermission<
+  T extends { requestId: string; subjects: readonly PermissionSubject[] },
+>(
+  pending: readonly T[],
+  live: boolean,
+  eseq: number | undefined,
+  seenRequestIds: Set<string>,
+): T | undefined {
+  // 订阅起始快照与回放只登记：绝不提醒，后续同一 requestId 的实时刷新也不再补报
+  if (!live || eseq === 0) {
+    for (const permission of pending) seenRequestIds.add(permission.requestId);
+    return undefined;
+  }
+  const fresh = pending.filter((permission) => !seenRequestIds.has(permission.requestId));
+  for (const permission of fresh) seenRequestIds.add(permission.requestId);
+  return fresh[0];
+}
+
 /**
  * 判定成员的权限请求要不要提醒：只认实时到达且此前没见过的 requestId，
  * 标题用指挥会话，正文与 `permission.requested` 同一格式。
@@ -294,15 +312,12 @@ export function decideEnsembleMemberNotification(
     return null;
   }
   if (event.type !== "ensemble.member_updated") return null;
-  const pending = event.payload.pendingPermissions ?? [];
-  // 订阅起始快照与回放只登记：绝不提醒，后续同一 requestId 的实时刷新也不再补报
-  if (!input.live || event.eseq === 0) {
-    for (const permission of pending) input.seenRequestIds.add(permission.requestId);
-    return null;
-  }
-  const fresh = pending.filter((permission) => !input.seenRequestIds.has(permission.requestId));
-  for (const permission of fresh) input.seenRequestIds.add(permission.requestId);
-  const firstNew = fresh[0];
+  const firstNew = pickFreshPendingPermission(
+    event.payload.pendingPermissions ?? [],
+    input.live,
+    event.eseq,
+    input.seenRequestIds,
+  );
   if (firstNew === undefined) return null;
   if (!prefs.enabled || !prefs.attention || input.watching) return null;
   return {
@@ -310,6 +325,37 @@ export function decideEnsembleMemberNotification(
     title: sessionTitle(input.session),
     body: permissionBody(firstNew.subjects),
     memberName: event.payload.name,
+    requestId: firstNew.requestId,
+  };
+}
+
+export interface SubagentPermissionNotifyDecision extends NotifyDecision {
+  childSessionId: string;
+  requestId: string;
+}
+
+/**
+ * 子代理权限转发提醒：复用成员通知的快照去重判定（`!live || eseq === 0` 只登记
+ * `seenRequestIds` 不提醒），对实时新出现的子请求发出与父会话同格式的提醒。
+ */
+export function decideSubagentPermissionNotification(
+  input: EnsemblePermissionNotifyInput,
+): SubagentPermissionNotifyDecision | null {
+  const { event, prefs } = input;
+  if (event.type !== "subagent.permissions") return null;
+  const firstNew = pickFreshPendingPermission(
+    event.payload.pending,
+    input.live,
+    event.eseq,
+    input.seenRequestIds,
+  );
+  if (firstNew === undefined) return null;
+  if (!prefs.enabled || !prefs.attention || input.watching) return null;
+  return {
+    kind: "attention",
+    title: sessionTitle(input.session),
+    body: permissionBody(firstNew.subjects),
+    childSessionId: firstNew.childSessionId,
     requestId: firstNew.requestId,
   };
 }

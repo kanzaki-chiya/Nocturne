@@ -70,6 +70,7 @@ export function GrantedTag({
   );
 }
 import {
+  allPendingPermissions,
   inlineFilesOfTool,
   parseFileRefs,
   untrackedCallsText,
@@ -155,6 +156,8 @@ export interface ReadOnlyMode {
   frozen: boolean;
   /** 接在时间线末尾、随对话一起滚动的内容（子代理的最终结果）；只读视图只有这一个滚动区 */
   footer?: ReactNode;
+  /** 父会话转发的实时待决权限卡片（由 SubagentPane 从父视图传入） */
+  requests?: ReactNode;
 }
 
 /** 父对话 task 行的「在面板中查看」（ADR-0060 第 6 节）；手机不传，只读视图里嵌套的 task 也不传 */
@@ -871,9 +874,12 @@ const ThinkScrollContext = createContext<ThinkScroll>({
 /** 只读且日志未收束：工具行停止转圈与计时（ReadOnlyMode.frozen） */
 const FrozenContext = createContext(false);
 const ShellSessionContext = createContext<ShellSession | undefined>(undefined);
-const BackgroundViewContext = createContext<Pick<SessionView, "entries" | "backgroundShells">>({
+const BackgroundViewContext = createContext<
+  Pick<SessionView, "entries" | "backgroundShells" | "pendingSubagentPermissions">
+>({
   entries: [],
   backgroundShells: [],
+  pendingSubagentPermissions: [],
 });
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
 
@@ -2619,7 +2625,6 @@ function ToolRow({
   // 只读且日志未收束：保留 running 的事实，但不转圈、不计时
   const frozen = useContext(FrozenContext) && running;
   const animating = running && !frozen;
-  const seconds = useRunningSeconds(animating && !waiting);
   const links = useContext(SubagentLinksContext);
   const subagentLink = links !== null && !preparing ? links.link(entry) : undefined;
   const result = toolResultText(entry);
@@ -2628,6 +2633,13 @@ function ToolRow({
   const shellTask = backgroundView.backgroundShells.find((task) => task.callId === entry.callId);
   const backgroundStatus =
     shellToolStatus(entry, backgroundView) ?? backgroundToolStatus(entry, backgroundView.entries);
+  const childAwaitingPermission =
+    !frozen &&
+    entry.name === "task" &&
+    backgroundView.pendingSubagentPermissions.some((p) => p.parentCallId === entry.callId);
+  const selfAwaitingPermission =
+    !frozen && entry.name === "task" && entry.status === "awaiting_permission";
+  const seconds = useRunningSeconds(animating && !waiting && !childAwaitingPermission);
   const error = entry.result?.error;
   const preview = running ? lastOutputLine(entry.liveOutput) : "";
   const notStarted = subagentStartRejected(entry);
@@ -2639,7 +2651,9 @@ function ToolRow({
     <span className="tool-res">{queued ? "排队中" : "接收参数中"}</span>
   ) : (
     <>
-      {animating && !asked && <span className="tool-spin" aria-hidden="true" />}
+      {animating && !asked && !childAwaitingPermission && (
+        <span className="tool-spin" aria-hidden="true" />
+      )}
       {(subagent.model !== undefined || subagent.effort !== undefined) && (
         <span className="tool-range">
           {subagent.model}
@@ -2652,15 +2666,25 @@ function ToolRow({
           等待你回答
         </span>
       )}
-      {seconds !== undefined && !asked && <span className="tool-secs">{seconds} 秒</span>}
-      {(!running || frozen) && todos === undefined && (
+      {childAwaitingPermission && (
+        <span className="tool-res tool-wait warn">
+          <span aria-hidden="true" />
+          等待确认
+        </span>
+      )}
+      {seconds !== undefined && !asked && !childAwaitingPermission && (
+        <span className="tool-secs">{seconds} 秒</span>
+      )}
+      {(!running || frozen) && todos === undefined && !childAwaitingPermission && (
         <span
           className={`tool-res${
             error !== undefined && !notStarted
               ? isRecoverableToolErrorCode(error.code)
                 ? " recoverable"
                 : " err"
-              : ""
+              : selfAwaitingPermission
+                ? " warn"
+                : ""
           }`}
         >
           {notStarted
@@ -2716,7 +2740,7 @@ function ToolRow({
   return (
     <article
       ref={rowElement}
-      className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}${searchHit ? " search-hit" : ""}`}
+      className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}${searchHit ? " search-hit" : ""}${childAwaitingPermission || selfAwaitingPermission ? " warn" : ""}`}
       data-session-seq={entry.seq}
       data-completed-seq={entry.completedSeq}
       aria-label={`工具 ${shownName || entry.callId}`}
@@ -3222,13 +3246,19 @@ const appIconCache = new Map<string, string>();
 export function PermissionCard({
   pending,
   session,
+  onRespond,
+  source,
+  primaryShortcut = true,
   cwd,
   shellKind,
   hidePersistentPermissions = false,
   resolveAppIcon,
 }: {
   pending: PendingPermission;
-  session: RpcSession;
+  session?: Pick<RpcSession, "respondPermission"> | undefined;
+  onRespond?: ((value: PermissionReply) => Promise<void>) | undefined;
+  source?: { profile?: string | undefined; taskSummary?: string | undefined } | undefined;
+  primaryShortcut?: boolean | undefined;
   cwd: string;
   shellKind?: string | undefined;
   hidePersistentPermissions?: boolean;
@@ -3255,9 +3285,11 @@ export function PermissionCard({
       alive = false;
     };
   }, [pending.subjects, resolveAppIcon]);
-  const { reply, busy, error } = useReply((value: PermissionReply) =>
-    session.respondPermission(pending.requestId, value),
-  );
+  const { reply, busy, error } = useReply((value: PermissionReply) => {
+    if (onRespond !== undefined) return onRespond(value);
+    if (session === undefined) return Promise.reject(new Error("会话未连接"));
+    return session.respondPermission(pending.requestId, value);
+  });
   // 客户端可能比后台旧：不认识的选项跳过，不能让整张卡片抛错
   const known = pending.options.filter((option) => Object.hasOwn(permissionReplies, option));
   const options: PermissionOption[] = (
@@ -3273,10 +3305,14 @@ export function PermissionCard({
   replyRef.current = reply;
   const setFeedbackRef = useRef(setFeedback);
   setFeedbackRef.current = setFeedback;
+  const primaryShortcutRef = useRef(primaryShortcut);
+  primaryShortcutRef.current = primaryShortcut;
   const cardRef = useRef<HTMLElement>(null);
 
-  // 卡片挂载即拿走焦点：数字键/Esc 立刻可用（卡片本身不算可编辑目标）
+  // 卡片挂载即拿走焦点：数字键/Esc 立刻可用（多卡并发时不抢已聚焦卡）
   useEffect(() => {
+    if (!primaryShortcutRef.current) return;
+    if (document.activeElement?.closest(".ask") != null) return;
     cardRef.current?.focus();
   }, []);
 
@@ -3296,6 +3332,9 @@ export function PermissionCard({
       if (event.isComposing) return;
       // 设置区盖住会话时（会话区 inert）快捷键属于设置区
       if (cardRef.current?.closest("[inert]") != null) return;
+      const activeAsk = document.activeElement?.closest(".ask") ?? null;
+      if (activeAsk !== null && activeAsk !== cardRef.current) return;
+      if (activeAsk === null && !primaryShortcutRef.current) return;
       if (event.key === "Escape") {
         if (insideCard(event.target)) return;
         if (document.querySelector('[role="menu"], .composer-popup') !== null) return;
@@ -3325,12 +3364,20 @@ export function PermissionCard({
 
   const operation = permissionOperation(pending);
   const why = permissionWhy(pending);
+  const sourceText = [source?.profile, source?.taskSummary]
+    .filter((part): part is string => part !== undefined && part !== "")
+    .join(" · ");
   const hover = [pending.reason, pending.review?.reason].filter(Boolean).join("；");
   const networks = pending.subjects.filter((subject) => subject.kind === "network");
   return (
     <section className="ask v2" aria-label="权限确认" aria-busy={busy} tabIndex={-1} ref={cardRef}>
       <div className="ask-t" title={hover}>
         需要确认<span className="muted-value">{operation}</span>
+        {sourceText !== "" && (
+          <span className="muted-value" title={sourceText}>
+            {sourceText}
+          </span>
+        )}
         <span className="ask-why">{why}</span>
       </div>
       <ul className="ask-subjects">
@@ -4544,22 +4591,59 @@ function ConversationContent({
           </Button>
         </div>
       ) : null}
-      {readOnly === undefined &&
-      !hideRequests &&
-      view.pendingPermission &&
-      isLiveSession(session) ? (
-        <div className="conversation-requests">
-          <PermissionCard
-            key={`permission:${view.pendingPermission.requestId}`}
-            pending={view.pendingPermission}
-            session={session}
-            cwd={cwd}
-            {...(hidePersistentPermissions !== undefined ? { hidePersistentPermissions } : {})}
-            {...(shellKind !== undefined ? { shellKind } : {})}
-            {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
-          />
-        </div>
-      ) : null}
+      {(() => {
+        if (readOnly !== undefined) {
+          return readOnly.requests !== undefined ? (
+            <div className="conversation-requests">{readOnly.requests}</div>
+          ) : null;
+        }
+        if (hideRequests || !isLiveSession(session)) return null;
+        const pendingPermissions = allPendingPermissions(view);
+        if (pendingPermissions.length === 0) return null;
+        return (
+          <div className="conversation-requests">
+            {pendingPermissions.map((item, index) =>
+              item.kind === "session" ? (
+                <PermissionCard
+                  key={`permission:${item.permission.requestId}`}
+                  pending={item.permission}
+                  session={session}
+                  cwd={cwd}
+                  primaryShortcut={index === 0}
+                  {...(hidePersistentPermissions !== undefined
+                    ? { hidePersistentPermissions }
+                    : {})}
+                  {...(shellKind !== undefined ? { shellKind } : {})}
+                  {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
+                />
+              ) : (
+                <PermissionCard
+                  key={`subagent-permission:${item.permission.childSessionId}:${item.permission.requestId}`}
+                  pending={item.permission}
+                  onRespond={(value) =>
+                    session.respondSubagentPermission(
+                      item.permission.childSessionId,
+                      item.permission.requestId,
+                      value,
+                    )
+                  }
+                  source={{
+                    profile: item.permission.profile,
+                    taskSummary: item.permission.taskSummary,
+                  }}
+                  cwd={cwd}
+                  primaryShortcut={index === 0}
+                  {...(hidePersistentPermissions !== undefined
+                    ? { hidePersistentPermissions }
+                    : {})}
+                  {...(shellKind !== undefined ? { shellKind } : {})}
+                  {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
+                />
+              ),
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

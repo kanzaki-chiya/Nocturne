@@ -421,9 +421,36 @@ export interface DurablePayloadMap {
   "ensemble.ended": EnsembleEndedPayload;
 }
 
+export interface SubagentPendingPermission {
+  /** 子会话 ID（调用 respondSubagentPermission 时作为 childSessionId 传入） */
+  childSessionId: string;
+  /** 根父会话中发起该子代理链路最外层 task 的 callId */
+  parentCallId: string;
+  /** 子代理档位名（与 SubagentSummary.profile 同口径；缺省为空串） */
+  profile: string;
+  /** 子代理任务摘要（与 SubagentSummary.taskSummary 同口径） */
+  taskSummary: string;
+  /** 请求到达父转发池时父会话的最后持久 seq */
+  afterSeq: number;
+  /** 单调递增到达序号（从 1 开始） */
+  order: number;
+  requestId: string;
+  callId: string;
+  toolName: string | undefined;
+  subjects: PermissionSubject[];
+  reason: string;
+  options: PermissionOption[];
+  review?: PermissionReviewedPayload | undefined;
+}
+
+export interface SubagentPermissionsPayload {
+  pending: SubagentPendingPermission[];
+}
+
 export interface EphemeralPayloadMap {
   "shell.task_updated": { task: BackgroundShellTask };
   "ensemble.member_updated": EnsembleMemberUpdatedPayload;
+  "subagent.permissions": SubagentPermissionsPayload;
   "message.assistant.delta": AssistantDeltaPayload;
   "tool.input.delta": ToolInputDeltaPayload;
   "tool.progress": ToolProgressPayload;
@@ -525,6 +552,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "input.pending",
   "shell.task_updated",
   "ensemble.member_updated",
+  "subagent.permissions",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

@@ -172,6 +172,8 @@ export interface PermissionGate {
    * 异步：remember="project" 时要先完成 Grant 落盘（失败降级为会话授权）。
    */
   respond?(requestId: string, reply: PermissionReply): Promise<boolean>;
+  /** 查询指定 requestId 当前是否仍在等待用户确认 */
+  hasPending?(requestId: string): boolean;
   /** 会话关闭时把全部等待中的请求结算为 cancelled */
   cancelAll?(): void;
 }

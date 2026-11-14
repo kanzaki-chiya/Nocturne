@@ -98,6 +98,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0088](ADR-0088-inline-html.md) | 回复内嵌页面（`render_html` 与隔离空壳沙箱） | 已接受 |
 | [ADR-0089](ADR-0089-ensemble.md) | Ensemble 执行方式：指挥（Maestro，`@maestro`）、常驻成员与共享留言板 | 已接受 |
 | [ADR-0090](ADR-0090-image-downscale-tiles.md) | 图片自动缩小与长图切段 | 已接受 |
+| [ADR-0091](ADR-0091-subagent-permission-forward.md) | 一次性内置子代理权限确认向父会话转发 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

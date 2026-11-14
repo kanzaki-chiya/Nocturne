@@ -30,6 +30,7 @@ import type {
   ProviderRetryPayload,
   RuntimeEvent,
   RuntimeStatus,
+  SubagentPendingPermission,
   TurnEndReason,
 } from "./events.js";
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
@@ -101,6 +102,8 @@ export interface SessionView {
   /** Ensemble 派生视图（ADR-0089 §5）；从未建立或分叉不继承时缺省 */
   ensemble?: EnsembleView | undefined;
   pendingPermission: PendingPermission | undefined;
+  /** 子代理转发到当前父会话的待决权限快照（只由临时事件 subagent.permissions 产生，不写日志） */
+  pendingSubagentPermissions: SubagentPendingPermission[];
   /**
    * 待回答的提问（ADR-0032 §3）：只由临时事件 question.requested 产生；
    * 对应 callId 的 tool.completed 或 turn.completed 到达时清除。
@@ -309,6 +312,37 @@ export interface PendingPermission {
   reason: string;
   options: PermissionOption[];
   review?: PermissionReviewedPayload | undefined;
+  /** 持久 permission.requested 的 seq，用于与子代理待决请求按到达顺序混排 */
+  seq?: number | undefined;
+}
+
+export type { SubagentPendingPermission };
+
+export type AggregatedPendingPermission =
+  | { kind: "session"; permission: PendingPermission }
+  | { kind: "subagent"; permission: SubagentPendingPermission };
+
+/** 将父会话自身待决权限与子代理转发的待决权限按全局到达顺序合并。 */
+export function allPendingPermissions(
+  view: Pick<SessionView, "pendingPermission" | "pendingSubagentPermissions">,
+): AggregatedPendingPermission[] {
+  const items: { primary: number; secondary: number; entry: AggregatedPendingPermission }[] = [];
+  if (view.pendingPermission !== undefined) {
+    items.push({
+      primary: view.pendingPermission.seq ?? 0,
+      secondary: 0,
+      entry: { kind: "session", permission: view.pendingPermission },
+    });
+  }
+  for (const sub of view.pendingSubagentPermissions) {
+    items.push({
+      primary: sub.afterSeq,
+      secondary: sub.order,
+      entry: { kind: "subagent", permission: sub },
+    });
+  }
+  items.sort((a, b) => a.primary - b.primary || a.secondary - b.secondary);
+  return items.map((item) => item.entry);
 }
 
 /** 待回答的提问（ADR-0032）：客户端据此渲染提问面板并 respondQuestion */
@@ -371,6 +405,7 @@ export function createSessionView(): SessionView {
     turnCount: 0,
     usage: { inputTokens: 0, outputTokens: 0 },
     pendingPermission: undefined,
+    pendingSubagentPermissions: [],
     pendingQuestion: undefined,
     entries: [],
     live: { assistants: [], tools: [] },
@@ -487,6 +522,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         view.lastTurn = rebuilt.lastTurn;
         view.currentTurn = undefined;
         view.pendingPermission = undefined;
+        view.pendingSubagentPermissions = [];
         view.pendingQuestion = undefined;
         view.live = { assistants: [], tools: [] };
         view.status = "idle";
@@ -658,6 +694,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         reason: p.reason,
         options: p.options,
         review: entry.review,
+        seq: event.seq,
       };
       break;
     }
@@ -902,6 +939,10 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
   }
   if (event.type === "ensemble.member_updated") {
     applyEnsembleMemberUpdated(view.ensemble, event.payload);
+    return;
+  }
+  if (event.type === "subagent.permissions") {
+    view.pendingSubagentPermissions = event.payload.pending.map((item) => ({ ...item }));
     return;
   }
   switch (event.type) {

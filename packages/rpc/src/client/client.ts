@@ -248,6 +248,11 @@ export interface RpcSession {
   /** 中断运行中的 Turn（通知，无应答）；submit 随后以 aborted 返回 */
   interrupt(): void;
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
+  respondSubagentPermission(
+    childSessionId: string,
+    requestId: string,
+    reply: PermissionReply,
+  ): Promise<void>;
   respondQuestion(requestId: string, reply: QuestionReply): Promise<void>;
   setModel(model: string | ModelRef): Promise<void>;
   setPermissionPreset(name: string): Promise<void>;
@@ -863,6 +868,14 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       respondPermission: async (requestId, reply) => {
         await call("session.respondPermission", { ...p, requestId, reply });
+      },
+      respondSubagentPermission: async (childSessionId, requestId, reply) => {
+        await call("session.respondSubagentPermission", {
+          ...p,
+          childSessionId,
+          requestId,
+          reply,
+        });
       },
       respondQuestion: async (requestId, reply) => {
         await call("session.respondQuestion", {

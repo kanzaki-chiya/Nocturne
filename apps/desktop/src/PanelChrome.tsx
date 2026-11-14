@@ -13,7 +13,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { SubagentSummary, EnsembleMemberView, EnsembleView } from "@nocturne/core/protocol";
+import type {
+  SubagentPendingPermission,
+  SubagentSummary,
+  EnsembleMemberView,
+  EnsembleView,
+} from "@nocturne/core/protocol";
 
 import type { FileIndexEntry } from "./file-refs";
 import { useNow } from "./use-now";
@@ -274,6 +279,7 @@ export interface OverviewSubagents {
   }[];
   onDelete?: (id: string) => void;
   isolated?: ReadonlySet<string>;
+  pendingPermissions?: readonly SubagentPendingPermission[] | undefined;
 }
 
 function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
@@ -285,11 +291,15 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
       {subagents.cancelError !== undefined && <div role="alert">{subagents.cancelError}</div>}
       {running.map((agent) => {
         const ms = runningMs(agent.startedAt, now);
+        const awaitingPermission =
+          subagents.pendingPermissions?.some(
+            (p) => p.childSessionId === agent.childSessionId || p.parentCallId === agent.callId,
+          ) ?? false;
         const open = (
           <button
             key={agent.childSessionId}
             type="button"
-            className="ovpop-agent"
+            className={`ovpop-agent${awaitingPermission ? " warn" : ""}`}
             title={agent.taskSummary}
             onClick={() => {
               onOpen(agent);
@@ -305,7 +315,7 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
                   </Badge>
                 )}
               </span>
-              <span className="ovpop-agent-summary">
+              <span className={`ovpop-agent-summary${awaitingPermission ? " warn" : ""}`}>
                 {Array.from(agent.taskSummary).slice(0, SUBAGENT_SUMMARY_MAX).join("")}
               </span>
             </span>

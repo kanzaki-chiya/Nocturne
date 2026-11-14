@@ -141,7 +141,7 @@ function error(code: string, message: string, output?: WebFetchOutput): ToolResu
 export const webFetchTool: ToolDefinition<WebFetchInput, WebFetchOutput> = {
   name: "web_fetch",
   description:
-    "读取用户给出的链接、官方文档和公开网页，HTML 转 Markdown；不能登录、不带 Cookie、不执行脚本，脚本渲染页面可能没有正文。没有搜索能力，搜索需配置搜索类 MCP。explore 子代理可使用，但非交互子会话不能确认访问：仅规则放行或父会话已授权的主机可访问，受阻访问写入 finish 结果。",
+    "读取用户给出的链接、官方文档和公开网页，HTML 转 Markdown；不能登录、不带 Cookie、不执行脚本，脚本渲染页面可能没有正文。没有搜索能力，搜索需配置搜索类 MCP。explore 子代理可使用：规则放行或父会话已授权的主机可直接访问，交互父会话下需要确认的主机将经父会话向用户请求确认，非交互子会话下会被拒绝并将受阻原因写入 finish 结果。",
   inputSchema: {
     type: "object",
     required: ["url"],

@@ -16,6 +16,8 @@ import {
   type GrantWorkspace,
   type ProjectTrustDescription,
   type GrantsChangedPayload,
+  type PendingPermission,
+  type SubagentPendingPermission,
 } from "./protocol/index.js";
 import { McpSettingsError, validateMcpEntry } from "./config/mcp.js";
 import type {
@@ -612,6 +614,15 @@ export interface RuntimeSession {
    * 对应范围的 Grant（permissions.md 5.4）。
    */
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
+  /**
+   * 回复当前父会话下等待中的子代理权限请求（由 subagent.permissions 聚合到父会话）。
+   * 仅校验本父会话活动转发池中对应 childSessionId 与 requestId，不匹配以 unknown_request 拒绝。
+   */
+  respondSubagentPermission(
+    childSessionId: string,
+    requestId: string,
+    reply: PermissionReply,
+  ): Promise<void>;
   /**
    * 回复 question.requested（events.md 第 7 节，ADR-0032）。
    * 没有匹配的等待中请求时以 unknown_request 拒绝；回复与问题不匹配
@@ -1952,6 +1963,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       session.state().config.worktree !== undefined && knownWorktreeRoots.length > 0
         ? { current: currentCwd(), roots: knownWorktreeRoots }
         : undefined;
+    const saveAppPermissions = async (subjects: PermissionSubject[]) => {
+      const store = config?.appPermissions;
+      if (store === undefined || subjects.some((subject) => subject.appUnresolved === true))
+        throw new Error("用户规则存储不可用");
+      for (const subject of subjects)
+        await store.set(
+          subject.target,
+          "allow",
+          subject.app === undefined
+            ? undefined
+            : { name: subject.app.name, icon: subject.app.icon },
+        );
+    };
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
     const gate: PermissionGate = createPolicyGate(
       {
@@ -1979,19 +2003,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...reviewSources,
         caseSensitive: platform.caseSensitivePaths,
         grants: { session: sessionGrants, project: ws?.grants },
-        saveAppPermissions: async (subjects) => {
-          const store = config?.appPermissions;
-          if (store === undefined || subjects.some((subject) => subject.appUnresolved === true))
-            throw new Error("用户规则存储不可用");
-          for (const subject of subjects)
-            await store.set(
-              subject.target,
-              "allow",
-              subject.app === undefined
-                ? undefined
-                : { name: subject.app.name, icon: subject.app.icon },
-            );
-        },
+        saveAppPermissions,
         hooks: hookRunner,
         worktrees: activeWorktrees,
       },
@@ -2626,6 +2638,92 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     };
 
+    interface ForwardedPermissionEntry {
+      snapshot: SubagentPendingPermission;
+      respond: (reply: PermissionReply) => Promise<boolean>;
+      cancel: () => void;
+    }
+    const forwardedByRequestId = new Map<string, ForwardedPermissionEntry>();
+    let forwardedOrderSeq = 0;
+    const emitSubagentPermissions = () => {
+      if (session.health !== "ok") return;
+      const pending = [...forwardedByRequestId.values()]
+        .map((entry) => ({ ...entry.snapshot }))
+        .sort((a, b) => a.order - b.order);
+      session.emitEphemeral("subagent.permissions", { pending });
+    };
+    const forwardedPermissions = {
+      register(input: {
+        childSessionId: string;
+        parentCallId: string;
+        profile: string;
+        taskSummary: string;
+        request: Omit<PendingPermission, "seq">;
+        respond: (reply: PermissionReply) => Promise<boolean>;
+        cancel: () => void;
+      }): () => void {
+        const order = ++forwardedOrderSeq;
+        const afterSeq = session.state().lastSeq;
+        const snapshot: SubagentPendingPermission = {
+          ...input.request,
+          childSessionId: input.childSessionId,
+          parentCallId: input.parentCallId,
+          profile: input.profile,
+          taskSummary: input.taskSummary,
+          afterSeq,
+          order,
+        };
+        forwardedByRequestId.set(input.request.requestId, {
+          snapshot,
+          respond: input.respond,
+          cancel: input.cancel,
+        });
+        emitSubagentPermissions();
+        let removed = false;
+        return () => {
+          if (removed) return;
+          removed = true;
+          if (forwardedByRequestId.delete(input.request.requestId)) {
+            emitSubagentPermissions();
+          }
+        };
+      },
+      clearChild(childSessionId: string) {
+        let changed = false;
+        for (const [reqId, entry] of [...forwardedByRequestId.entries()]) {
+          if (entry.snapshot.childSessionId === childSessionId) {
+            forwardedByRequestId.delete(reqId);
+            changed = true;
+          }
+        }
+        if (changed) emitSubagentPermissions();
+      },
+      cancelWaiting(): boolean {
+        const entries = [...forwardedByRequestId.values()];
+        if (entries.length === 0) return false;
+        for (const entry of entries) {
+          entry.cancel();
+        }
+        return true;
+      },
+      snapshots(): SubagentPendingPermission[] {
+        return [...forwardedByRequestId.values()]
+          .map((entry) => ({ ...entry.snapshot }))
+          .sort((a, b) => a.order - b.order);
+      },
+      async respond(
+        childSessionId: string,
+        requestId: string,
+        reply: PermissionReply,
+      ): Promise<boolean> {
+        const entry = forwardedByRequestId.get(requestId);
+        if (entry?.snapshot.childSessionId !== childSessionId) {
+          return false;
+        }
+        return await entry.respond(reply);
+      },
+    };
+
     const installTask = (): void => {
       enabledExternalAgents =
         externalConnector === undefined
@@ -2877,6 +2975,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           limits: subagentLimits,
           limiter: subagentLimiter,
           registry: subagentRegistry,
+          permissions: {
+            interactive: sessionInteractive,
+            saveAppPermissions,
+            register: (input) => forwardedPermissions.register(input),
+            clearChild: (childSessionId) => {
+              forwardedPermissions.clearChild(childSessionId);
+            },
+            onGrantChanged: (remember) => {
+              grantsChanged(
+                remember === "project"
+                  ? { workspace: meta.workspaceRoot }
+                  : { sessionId: grantRootId },
+              );
+            },
+          },
         });
       const externalRunner =
         hasExternalAgents && externalConnector !== undefined
@@ -4277,6 +4390,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           // ADR-0076 §2：回退到设定目标、进入计划的那条消息之前（含它本身），模式随之撤回
           const origins = mode === "files" ? undefined : workModeOrigins(session.durableEvents());
           await session.emit("session.rewound", { targetSeq, mode, files });
+          if (mode !== "files" && forwardedByRequestId.size > 0) emitSubagentPermissions();
           if (origins !== undefined) {
             const goal = session.state().goal;
             if (
@@ -4336,6 +4450,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             payload: memberSnap,
           });
         }
+        const subagentPermsSnap = forwardedPermissions.snapshots();
+        if (subagentPermsSnap.length > 0) {
+          listener({
+            type: "subagent.permissions",
+            sessionId: session.id,
+            runId: session.runId,
+            eseq: 0,
+            afterSeq: session.state().lastSeq,
+            time: new Date().toISOString(),
+            payload: { pending: subagentPermsSnap },
+          });
+        }
         return unsub;
       },
       async readInputHistory() {
@@ -4379,9 +4505,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return Promise.all(inputs.map((input) => resolveFileRef(fs, paths, root, input)));
       },
       interrupt() {
+        const wasBusy = busy();
         controller?.abort();
         // 压缩是 Turn 之外的会话级活动，interrupt 同样中止它
         compactController?.abort();
+        const hadWaitingSubagent = forwardedPermissions.cancelWaiting();
+        if (!wasBusy && hadWaitingSubagent) {
+          pendingInputStore.pauseAll();
+        }
       },
       listGrants: () => runtime.listSessionGrants({ sessionId: session.id }),
       revokeGrant: (input) => runtime.revokeSessionGrant({ sessionId: session.id, ...input }),
@@ -4391,6 +4522,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return;
         }
         throw new RuntimeCommandError("unknown_request", "没有等待中的权限请求");
+      },
+      async respondSubagentPermission(childSessionId, requestId, reply) {
+        if (await forwardedPermissions.respond(childSessionId, requestId, reply)) {
+          return;
+        }
+        throw new RuntimeCommandError("unknown_request", "没有等待中的子代理权限请求");
       },
       respondQuestion(requestId, reply) {
         const outcome = questions.respond(requestId, reply);
@@ -4910,6 +5047,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         controller?.abort();
         compactController?.abort();
         gate.cancelAll?.();
+        forwardedPermissions.cancelWaiting();
         questions.cancelAll();
         await backgroundSubagents.discard(session.id);
         await backgroundShells.discard();

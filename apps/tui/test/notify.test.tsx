@@ -30,6 +30,7 @@ import {
   openTurnStarts,
   readNotifySettings,
   shouldRing,
+  subagentPermissionRing,
   type NotifySettings,
 } from "../src/notify.js";
 import { APP_VERSION } from "../src/version.js";
@@ -247,6 +248,88 @@ describe("设置读取（Runtime.describeSettings）", () => {
       done: false,
       doneAfterSeconds: 5,
     });
+  });
+
+  it("subagentPermissionRing：eseq=0 起始快照只登记不响；新增请求失焦响一次且去重", () => {
+    const seen = new Set<string>();
+    const mkItem = (childSessionId: string, requestId: string) => ({
+      childSessionId,
+      parentCallId: "parent-call",
+      profile: "explore",
+      taskSummary: "检查仓库",
+      afterSeq: 2,
+      order: 1,
+      requestId,
+      callId: "c1",
+      toolName: "shell",
+      subjects: [{ kind: "shell" as const, target: "git status" }],
+      reason: "需要确认",
+      options: ["allow_once" as const, "deny" as const],
+    });
+    const ev = (eseq: number, pending: ReturnType<typeof mkItem>[]): RuntimeEvent => ({
+      type: "subagent.permissions",
+      sessionId: "p1",
+      runId: "run-1",
+      eseq,
+      afterSeq: 2,
+      time: "2026-11-14T00:00:00.000Z",
+      payload: { pending },
+    });
+
+    // 订阅起始快照（eseq=0）：只登记不响
+    expect(
+      subagentPermissionRing(
+        ev(0, [mkItem("c1", "r1")]),
+        seen,
+        { focused: false },
+        NOTIFY_DEFAULTS,
+      ),
+    ).toBe(false);
+    // 聚焦时不响（但登记 r2）
+    expect(
+      subagentPermissionRing(
+        ev(1, [mkItem("c1", "r1"), mkItem("c2", "r2")]),
+        seen,
+        { focused: true },
+        NOTIFY_DEFAULTS,
+      ),
+    ).toBe(false);
+    // 同批快照更新（r1 已处理，仅剩已见过的 r2）：不重复响
+    expect(
+      subagentPermissionRing(
+        ev(2, [mkItem("c2", "r2")]),
+        seen,
+        { focused: false },
+        NOTIFY_DEFAULTS,
+      ),
+    ).toBe(false);
+    // 新请求 r3 到达且失焦：响一次
+    expect(
+      subagentPermissionRing(
+        ev(3, [mkItem("c2", "r2"), mkItem("c3", "r3")]),
+        seen,
+        { focused: false },
+        NOTIFY_DEFAULTS,
+      ),
+    ).toBe(true);
+    // 再次重复推送同样快照：不响
+    expect(
+      subagentPermissionRing(
+        ev(4, [mkItem("c2", "r2"), mkItem("c3", "r3")]),
+        seen,
+        { focused: false },
+        NOTIFY_DEFAULTS,
+      ),
+    ).toBe(false);
+    // 关闭 attention 时不响
+    expect(
+      subagentPermissionRing(
+        ev(5, [mkItem("c4", "r4")]),
+        seen,
+        { focused: false },
+        { ...NOTIFY_DEFAULTS, attention: false },
+      ),
+    ).toBe(false);
   });
 });
 

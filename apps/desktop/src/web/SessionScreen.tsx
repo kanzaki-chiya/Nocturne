@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
+  allPendingPermissions,
   goalStatusLines,
   parseWorkModeSlash,
   type ExternalAgentOverview,
@@ -166,7 +167,9 @@ export function SessionScreen({
     mode: "steer" | "queue" = "queue",
   ): Promise<boolean> => {
     if (entry.dead) throw new Error("电脑尚未连接");
-    if (view.pendingPermission ?? view.pendingQuestion) throw new Error("请先处理待确认的请求");
+    if (allPendingPermissions(view).length > 0 || view.pendingQuestion !== undefined) {
+      throw new Error("请先处理待确认的请求");
+    }
     const queued =
       running ||
       entry.pendingInputs.paused ||
@@ -283,7 +286,14 @@ export function SessionScreen({
     [entry.client, session.id],
   );
 
-  const pendingKey = view.pendingPermission?.requestId ?? view.pendingQuestion?.requestId;
+  const pendingPermissions = allPendingPermissions(view);
+  const firstPermission = pendingPermissions[0];
+  const pendingKey =
+    firstPermission !== undefined
+      ? firstPermission.kind === "subagent"
+        ? `subagent:${firstPermission.permission.childSessionId}:${firstPermission.permission.requestId}`
+        : firstPermission.permission.requestId
+      : view.pendingQuestion?.requestId;
   const reply = {
     ...session,
     respondPermission: async (...args: Parameters<typeof session.respondPermission>) => {
@@ -293,6 +303,16 @@ export function SessionScreen({
         if (!(e instanceof RpcError && e.code === "unknown_request")) throw e;
       }
       setDismissed(args[0]);
+    },
+    respondSubagentPermission: async (
+      ...args: Parameters<typeof session.respondSubagentPermission>
+    ) => {
+      try {
+        await session.respondSubagentPermission(...args);
+      } catch (e) {
+        if (!(e instanceof RpcError && e.code === "unknown_request")) throw e;
+      }
+      setDismissed(`subagent:${args[0]}:${args[1]}`);
     },
     respondQuestion: async (...args: Parameters<typeof session.respondQuestion>) => {
       try {
@@ -438,6 +458,7 @@ export function SessionScreen({
           onOpenEnsembleMember={onOpenEnsembleMember}
           onError={onError}
           loadDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
+          shellKind={controls.shell?.effective?.kind}
         />
       )}
       <TodoPanel
@@ -507,21 +528,45 @@ export function SessionScreen({
       {pendingKey !== undefined &&
         pendingKey !== dismissed &&
         connected &&
-        (view.pendingPermission ?? view.pendingQuestion) && (
+        (firstPermission !== undefined || view.pendingQuestion !== undefined) && (
           <div
             className="phone-sheet"
             role="dialog"
             aria-modal="true"
-            aria-label={view.pendingPermission ? "权限面板" : "提问面板"}
+            aria-label={firstPermission !== undefined ? "权限面板" : "提问面板"}
           >
-            {view.pendingPermission ? (
-              <PermissionCard
-                key={pendingKey}
-                pending={view.pendingPermission}
-                session={reply}
-                cwd={entry.workspace}
-                hidePersistentPermissions
-              />
+            {firstPermission !== undefined ? (
+              firstPermission.kind === "subagent" ? (
+                <PermissionCard
+                  key={pendingKey}
+                  pending={firstPermission.permission}
+                  onRespond={(value) =>
+                    reply.respondSubagentPermission(
+                      firstPermission.permission.childSessionId,
+                      firstPermission.permission.requestId,
+                      value,
+                    )
+                  }
+                  source={{
+                    profile: firstPermission.permission.profile,
+                    taskSummary: firstPermission.permission.taskSummary,
+                  }}
+                  primaryShortcut={panel === undefined}
+                  cwd={entry.workspace}
+                  shellKind={controls.shell?.effective?.kind}
+                  hidePersistentPermissions
+                />
+              ) : (
+                <PermissionCard
+                  key={pendingKey}
+                  pending={firstPermission.permission}
+                  session={reply}
+                  primaryShortcut={panel === undefined}
+                  cwd={entry.workspace}
+                  shellKind={controls.shell?.effective?.kind}
+                  hidePersistentPermissions
+                />
+              )
             ) : view.pendingQuestion ? (
               <QuestionCard
                 key={pendingKey}

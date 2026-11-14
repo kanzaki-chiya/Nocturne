@@ -122,7 +122,7 @@ function conversation(id: string, entries: ToolEntry[]): OpenConversation {
   return {
     session: { id, fileIndex: async () => [] },
     workspace: `Z:\\${id}`,
-    view: { entries, revision: entries.length },
+    view: { entries, revision: entries.length, pendingSubagentPermissions: [] },
     turnChanges: new Map(),
   } as unknown as OpenConversation;
 }

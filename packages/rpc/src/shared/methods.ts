@@ -789,6 +789,10 @@ export interface RpcMethods {
     params: SessionParams & { requestId: string; reply: PermissionReply };
     result: null;
   };
+  "session.respondSubagentPermission": {
+    params: SessionParams & { childSessionId: string; requestId: string; reply: PermissionReply };
+    result: null;
+  };
   "session.respondQuestion": {
     params: SessionParams & {
       requestId: string;
@@ -1037,6 +1041,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "shell.output": true,
   "shell.kill": true,
   "session.respondPermission": true,
+  "session.respondSubagentPermission": true,
   "session.respondQuestion": true,
   "session.setModel": true,
   "session.setPermissionPreset": true,

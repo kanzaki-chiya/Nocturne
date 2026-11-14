@@ -30,7 +30,7 @@
 | [config.md](architecture/config.md) | 分层配置、程序设置与 Runtime 设置接口、配置文件格式、项目信任模型、Grant 持久化、外部 agent 程序管理 |
 | [mcp.md](architecture/mcp.md) | MCP 客户端：stdio / Streamable HTTP、设置管理与探测、热更新、工具包装与结果映射、`mcp` 权限类别 |
 | [hooks.md](architecture/hooks.md) | Hooks：事件点、外部命令契约、与权限的关系、项目信任 |
-| [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、子会话权限收敛、ACP 外部 agent 的管理、探测、斜杠点名与审计边界 |
+| [subagent.md](architecture/subagent.md) | Subagent（子代理）：`task` 工具契约、Launcher 注入、交互权限转发与收敛、ACP 外部 agent 的管理、探测、斜杠点名与审计边界 |
 | [schedule.md](architecture/schedule.md) | 定时任务：计划、存储、调度与补跑、无人值守会话（ADR-0064） |
 | [observability.md](architecture/observability.md) | 诊断日志：开关与输出位置、记录种类、脱敏规则 |
 | [providers.md](architecture/providers.md) | Provider 抽象、模型能力、流式与错误归一化 |
@@ -112,7 +112,7 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 外部 agent 经 MCP 驱动 Nocturne 会话（`nctrn mcp` 桥、本机管道、配对与范围）见 [ADR-0074](decisions/ADR-0074-mcp-server-for-outside-agents.md)。
 
-后台子代理（只读准入、启动即返回、结果作为待发输入交付、生命周期）见 [ADR-0073](decisions/ADR-0073-background-subagents.md)，主文档是 [subagent.md](architecture/subagent.md) §20。
+后台子代理（准入、启动即返回、结果作为待发输入交付、生命周期）见 [ADR-0073](decisions/ADR-0073-background-subagents.md)，一次性内置子代理权限确认向父会话转发（实时聚合、直接回应、树共享授权与等待暂停超时）见 [ADR-0091](decisions/ADR-0091-subagent-permission-forward.md)，主文档是 [subagent.md](architecture/subagent.md)。
 
 MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-0071-mcp-availability-notes.md)。用户插话后刷新 MCP 工具（全量模式与启动时全部失败的会话）见 [ADR-0086](decisions/ADR-0086-mcp-steer-boundary.md)。
 

@@ -121,6 +121,10 @@
 .phone-panel-summary {
   font-size: var(--fs-2);
 }
+.phone-panel-summary.warn,
+.phone-panel-row.warn .phone-panel-glyph {
+  color: var(--a-warning);
+}
 .phone-ensemble-summary {
   color: var(--a-muted);
   font-size: var(--fs-1);
@@ -237,6 +241,12 @@
 }
 .phone-side-panel .sp-sub .conversation {
   font-size: var(--fs-2);
+}
+.phone-side-panel .sp-sub .ask-actions {
+  flex-wrap: wrap;
+}
+.phone-side-panel .sp-sub .ask-kbd {
+  display: none;
 }
 .phone-side-panel .shell-pane {
   flex: 1;

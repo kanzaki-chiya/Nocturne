@@ -5,11 +5,18 @@
  * 只在标签显示时观察，切走即退订（保留视图，回看按 seq 补读）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { subagentRowInfo, type SubagentSummary, type ToolEntry } from "@nocturne/core/protocol";
+import {
+  subagentRowInfo,
+  type ApplicationTarget,
+  type PermissionReply,
+  type SubagentPendingPermission,
+  type SubagentSummary,
+  type ToolEntry,
+} from "@nocturne/core/protocol";
 import type { RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
-import { Conversation, Markdown, type ReadOnlySessionRef } from "./Conversation";
+import { Conversation, Markdown, PermissionCard, type ReadOnlySessionRef } from "./Conversation";
 import type { SubagentTab } from "./side-panel";
 import { elapsedText, finalResult, runningMs, subagentStatus } from "./subagent-panel";
 import type { SubagentWatcher } from "./subagent-watch";
@@ -37,6 +44,15 @@ export interface SubagentPaneProps {
   openUrl: (url: string) => void;
   /** 手机抽屉已有标题栏，不重复显示状态、徽标或空状态文案。 */
   compact?: boolean;
+  /** 父会话转发给该子代理（或嵌套后代）的实时待决权限 */
+  pendingPermissions?: readonly SubagentPendingPermission[] | undefined;
+  /** 经父会话回应子代理权限 */
+  onRespondPermission?:
+    | ((childSessionId: string, requestId: string, reply: PermissionReply) => Promise<void>)
+    | undefined;
+  hidePersistentPermissions?: boolean | undefined;
+  shellKind?: string | undefined;
+  resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
 }
 
 /** 每秒刷新的本地时钟：运行中的秒数靠它，不靠查询 */
@@ -78,6 +94,11 @@ export function SubagentPane({
   images,
   openUrl,
   compact = false,
+  pendingPermissions,
+  onRespondPermission,
+  hidePersistentPermissions = false,
+  shellKind,
+  resolveAppIcon,
 }: SubagentPaneProps) {
   const child = tab.childSessionId;
   useSyncExternalStore(watcher.subscribe, watcher.getVersion);
@@ -174,6 +195,29 @@ export function SubagentPane({
   const selectionText = [summary?.model ?? selection.model, summary?.effort ?? selection.effort]
     .filter(Boolean)
     .join(" · ");
+  const hasPendingPermission = (pendingPermissions?.length ?? 0) > 0;
+  const requestsNode =
+    hasPendingPermission && onRespondPermission !== undefined ? (
+      <>
+        {pendingPermissions?.map((item) => (
+          <PermissionCard
+            key={`subagent-permission:${item.childSessionId}:${item.requestId}`}
+            pending={item}
+            onRespond={(value) => onRespondPermission(item.childSessionId, item.requestId, value)}
+            {...(item.childSessionId !== child
+              ? { source: { profile: item.profile, taskSummary: item.taskSummary } }
+              : {})}
+            primaryShortcut={false}
+            cwd={workspace}
+            hidePersistentPermissions={hidePersistentPermissions}
+            {...(shellKind !== undefined ? { shellKind } : {})}
+            {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
+          />
+        ))}
+      </>
+    ) : undefined;
+  // 只在真正挂载 Conversation 时把 requests 放进对话区，否则占位（加载中/读取失败/空）会替代 Conversation
+  const rendersConversation = view !== undefined && hasContent;
   return (
     <div className="sp-sub">
       {!compact && (
@@ -185,9 +229,14 @@ export function SubagentPane({
           <span className="sp-sub-summary" title={tab.taskSummary}>
             {tab.taskSummary}
           </span>
-          <span className={`sp-sub-status ${status.phase}`} role="status">
-            {status.animated && <span className="tool-spin" aria-hidden="true" />}
-            {status.label}
+          <span
+            className={`sp-sub-status ${hasPendingPermission && status.phase === "running" ? "warn" : status.phase}`}
+            role="status"
+          >
+            {status.animated && !hasPendingPermission && (
+              <span className="tool-spin" aria-hidden="true" />
+            )}
+            {hasPendingPermission && status.phase === "running" ? "等待确认" : status.label}
           </span>
           {timeLabel !== undefined && <span className="sp-sub-time">{timeLabel}</span>}
           <Badge className="sp-badge">只读</Badge>
@@ -228,6 +277,9 @@ export function SubagentPane({
                     )}
                   </section>
                 ),
+                ...(rendersConversation && requestsNode !== undefined
+                  ? { requests: requestsNode }
+                  : {}),
               }}
               openUrl={openUrl}
               cwd={workspace}
@@ -237,6 +289,11 @@ export function SubagentPane({
             />
           ))}
       </div>
+      {!rendersConversation && requestsNode !== undefined && (
+        <div className="conversation sp-sub-requests">
+          <div className="conversation-requests">{requestsNode}</div>
+        </div>
+      )}
     </div>
   );
 }

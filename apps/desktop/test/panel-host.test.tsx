@@ -133,7 +133,7 @@ function conversation(id: string, workspace: string): OpenConversation {
   return {
     session: { id, fileIndex: async () => [] },
     workspace,
-    view: { entries: [] },
+    view: { entries: [], pendingSubagentPermissions: [] },
     turnChanges: new Map(),
   } as unknown as OpenConversation;
 }

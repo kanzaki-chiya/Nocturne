@@ -87,6 +87,10 @@ export interface PolicyGateOptions extends ReviewInputSources {
    */
   nonInteractiveDenyHint?: string | undefined;
   worktrees?: (() => { current: string; roots: readonly string[] } | undefined) | undefined;
+  /** 进入 ask 等待时调用，返回成对恢复函数（在 settle 时触发）；用于等待期间暂停显式超时 */
+  pauseTimeouts?: (() => () => void) | undefined;
+  /** 请求从等待池移除（respond 结算、cancelAll 或信号中止）时的同步通知 */
+  onPendingSettled?: ((requestId: string) => void) | undefined;
 }
 
 /** 完整的确认选项集（permissions.md 第 7 节） */
@@ -106,6 +110,7 @@ interface PendingRequest {
   /** 命中规则的人读说明（写入 permission.resolved.rule） */
   ruleDesc: string;
   turn: GateTurnContext;
+  responding?: boolean | undefined;
   resolve(outcome: GateOutcome): void;
   /** 中断监听器的清理（respond 正常结算后移除，避免悬挂引用） */
   cleanup(): void;
@@ -182,6 +187,7 @@ export function createPolicyGate(
     if (p === undefined) return undefined;
     pending.delete(requestId);
     p.cleanup();
+    options.onPendingSettled?.(requestId);
     p.resolve(outcome);
     return p;
   }
@@ -527,6 +533,8 @@ export function createPolicyGate(
         cancelled: true,
       });
     };
+    const resumeTimeouts = options.pauseTimeouts?.();
+    let cleaned = false;
     pending.set(requestId, {
       callId,
       options: confirmationOptions(evaluation.subjects),
@@ -536,7 +544,10 @@ export function createPolicyGate(
       turn,
       resolve: resolveWait,
       cleanup: () => {
+        if (cleaned) return;
+        cleaned = true;
         signal.removeEventListener("abort", onAbort);
+        resumeTimeouts?.();
       },
     });
     if (isAborted()) onAbort();
@@ -613,7 +624,7 @@ export function createPolicyGate(
 
     async respond(requestId, reply) {
       const p = pending.get(requestId);
-      if (p === undefined) return false;
+      if (p === undefined || p.responding) return false;
       const selected: PermissionOption =
         reply.decision === "allow"
           ? reply.remember === "always"
@@ -627,81 +638,98 @@ export function createPolicyGate(
             ? "deny_stop"
             : "deny";
       if (!p.options.includes(selected)) return false;
-      let remember: "session" | "project" | "always" | undefined;
-      if (reply.decision === "allow" && reply.remember !== undefined) {
-        const grants = p.subjects.map((s) => grantFromSubject(s, caseSensitive));
-        const sink = options.grants;
-        if (reply.remember === "always") {
-          try {
-            if (options.saveAppPermissions === undefined) throw new Error("用户规则存储不可用");
-            await options.saveAppPermissions(p.subjects);
-            remember = "always";
-          } catch (e) {
+      p.responding = true;
+      try {
+        let remember: "session" | "project" | "always" | undefined;
+        if (reply.decision === "allow" && reply.remember !== undefined) {
+          const grants = p.subjects.map((s) => grantFromSubject(s, caseSensitive));
+          const sink = options.grants;
+          if (reply.remember === "always") {
+            try {
+              if (options.saveAppPermissions === undefined) throw new Error("用户规则存储不可用");
+              await options.saveAppPermissions(p.subjects);
+              if (pending.get(requestId) !== p) return false;
+              remember = "always";
+            } catch (e) {
+              if (pending.get(requestId) !== p) return false;
+              sink?.session.push(...grants);
+              remember = "session";
+              p.turn.events.emitEphemeral(
+                "runtime.warning",
+                {
+                  code: "app_permission_save_failed",
+                  message: `软件授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+                },
+                { turnId: p.turn.turnId },
+              );
+            }
+          } else if (reply.remember === "project" && sink?.project !== undefined) {
+            try {
+              for (const g of grants) {
+                if (pending.get(requestId) !== p) return false;
+                await sink.project.add(g);
+              }
+              if (pending.get(requestId) !== p) return false;
+              remember = "project";
+            } catch (e) {
+              if (pending.get(requestId) !== p) return false;
+              // 写盘失败降级为会话 Grant（permissions.md 5.4）
+              sink.session.push(...grants);
+              remember = "session";
+              p.turn.events.emitEphemeral(
+                "runtime.warning",
+                {
+                  code: "grant_persist_failed",
+                  message: `项目授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+                },
+                { turnId: p.turn.turnId },
+              );
+            }
+          } else {
+            // remember === "session"，或无项目存储时的降级
             sink?.session.push(...grants);
             remember = "session";
-            p.turn.events.emitEphemeral(
-              "runtime.warning",
-              {
-                code: "app_permission_save_failed",
-                message: `软件授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
-              },
-              { turnId: p.turn.turnId },
-            );
           }
-        } else if (reply.remember === "project" && sink?.project !== undefined) {
-          try {
-            for (const g of grants) await sink.project.add(g);
-            remember = "project";
-          } catch (e) {
-            // 写盘失败降级为会话 Grant（permissions.md 5.4）
-            sink.session.push(...grants);
-            remember = "session";
-            p.turn.events.emitEphemeral(
-              "runtime.warning",
-              {
-                code: "grant_persist_failed",
-                message: `项目授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
-              },
-              { turnId: p.turn.turnId },
-            );
-          }
-        } else {
-          // remember === "session"，或无项目存储时的降级
-          sink?.session.push(...grants);
-          remember = "session";
         }
+        if (pending.get(requestId) !== p) return false;
+        if (reply.decision === "deny") recordDenied(p.turn.turnId, p.subjects);
+        const decision: PermissionDecision =
+          reply.decision === "allow"
+            ? {
+                action: "allow",
+                source: "user",
+                reason:
+                  remember === "always"
+                    ? "用户允许：始终允许（已写入用户规则）"
+                    : remember === "project"
+                      ? "用户允许：本项目始终允许（已写入授权）"
+                      : remember === "session"
+                        ? "用户允许：本会话内允许"
+                        : "用户允许一次",
+              }
+            : {
+                action: "deny",
+                source: "user",
+                reason:
+                  reply.feedback !== undefined && reply.feedback.length > 0
+                    ? `用户拒绝：${reply.feedback}`
+                    : "用户拒绝",
+              };
+        settle(requestId, {
+          subjects: p.subjects,
+          decision,
+          stopTurn: reply.decision === "deny" && reply.stop === true,
+          feedback: reply.feedback,
+          remember,
+        });
+        return true;
+      } finally {
+        if (pending.get(requestId) === p) p.responding = false;
       }
-      if (reply.decision === "deny") recordDenied(p.turn.turnId, p.subjects);
-      const decision: PermissionDecision =
-        reply.decision === "allow"
-          ? {
-              action: "allow",
-              source: "user",
-              reason:
-                remember === "always"
-                  ? "用户允许：始终允许（已写入用户规则）"
-                  : remember === "project"
-                    ? "用户允许：本项目始终允许（已写入授权）"
-                    : remember === "session"
-                      ? "用户允许：本会话内允许"
-                      : "用户允许一次",
-            }
-          : {
-              action: "deny",
-              source: "user",
-              reason:
-                reply.feedback !== undefined && reply.feedback.length > 0
-                  ? `用户拒绝：${reply.feedback}`
-                  : "用户拒绝",
-            };
-      settle(requestId, {
-        subjects: p.subjects,
-        decision,
-        stopTurn: reply.decision === "deny" && reply.stop === true,
-        feedback: reply.feedback,
-        remember,
-      });
-      return true;
+    },
+
+    hasPending(requestId) {
+      return pending.has(requestId);
     },
 
     cancelAll() {

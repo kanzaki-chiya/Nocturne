@@ -90,6 +90,7 @@ import { NodeHelp } from "./NodeHelp";
 import {
   decideNotification,
   decideEnsembleMemberNotification,
+  decideSubagentPermissionNotification,
   NOTIFY_DEFAULTS,
   notifyPrefsFrom,
   sessionMarkFor,
@@ -425,6 +426,7 @@ export function App({ host }: { host: DesktopHost }) {
     sessions: [] as SessionSummary[],
     turnStarts: new Map<string, number>(),
     ensembleSeenRequests: new Map<string, Set<string>>(),
+    subagentSeenRequests: new Map<string, Set<string>>(),
     ensembleNotifyMember: new Map<string, string>(),
   });
   notifyState.current.selectedId = selectedId;
@@ -559,6 +561,31 @@ export function App({ host }: { host: DesktopHost }) {
           sessionId,
           title: ensembleDecision.title,
           body: ensembleDecision.body,
+          sound: state.prefs.sound,
+        });
+        void host.requestAttention();
+        void pushRemoteNotification(pool.get(), remoteRef.current, host.note);
+        return;
+      }
+      let subagentSeen = state.subagentSeenRequests.get(sessionId);
+      if (subagentSeen === undefined) {
+        subagentSeen = new Set<string>();
+        state.subagentSeenRequests.set(sessionId, subagentSeen);
+      }
+      const subagentDecision = decideSubagentPermissionNotification({
+        event,
+        prefs: state.prefs,
+        live,
+        watching,
+        session: notifySession,
+        seenRequestIds: subagentSeen,
+      });
+      if (subagentDecision !== null) {
+        state.ensembleNotifyMember.delete(sessionId);
+        void host.notify({
+          sessionId,
+          title: subagentDecision.title,
+          body: subagentDecision.body,
           sound: state.prefs.sound,
         });
         void host.requestAttention();
@@ -1399,6 +1426,22 @@ export function App({ host }: { host: DesktopHost }) {
   /** 当前选中会话的打开失败（占位区显示错误与「重试」，不退回上一个会话） */
   const selectedOpenError =
     selectedId === null ? undefined : conversations.openErrors.get(selectedId);
+  const panelClient = pool.get();
+  const panelResolveAppIcon = useMemo(
+    () => (panelClient === undefined ? undefined : appIconResolver(panelClient.computer)),
+    [panelClient],
+  );
+  const [panelShell, setPanelShell] = useState<{
+    sessionId: string;
+    kind: string | undefined;
+  } | null>(null);
+  const onShellKindChange = useCallback((sessionId: string, kind: string | undefined) => {
+    setPanelShell((prev) =>
+      prev !== null && prev.sessionId === sessionId && prev.kind === kind
+        ? prev
+        : { sessionId, kind },
+    );
+  }, []);
   const sidePanel = useSidePanel({
     prefs,
     host,
@@ -1415,10 +1458,15 @@ export function App({ host }: { host: DesktopHost }) {
     editors,
     settingsOpen: page !== null || schedulesOpen,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
-    client: pool.get(),
+    client: panelClient,
     ensureClient: () => pool.ensure(),
     images,
     fileLinks,
+    shellKind:
+      active !== undefined && panelShell?.sessionId === active.session.id
+        ? panelShell.kind
+        : undefined,
+    resolveAppIcon: panelResolveAppIcon,
   });
   panelRef.current = sidePanel;
   // 有活着的 agent 标签的会话不随空闲关闭；标签都关了再按原规则关
@@ -2131,6 +2179,7 @@ export function App({ host }: { host: DesktopHost }) {
                   onManageRemote={() => {
                     setPage("remote");
                   }}
+                  onShellKindChange={onShellKindChange}
                 />
               </PaneErrorBoundary>
             ) : selectedId !== null ? (
@@ -2459,6 +2508,7 @@ interface SessionPaneProps {
   providersVersion: number;
   scheduleSource?: ConversationProps["scheduleSource"];
   searchTarget?: { sessionId: string; seq?: number | undefined; nonce: number } | undefined;
+  onShellKindChange?: ((sessionId: string, kind: string | undefined) => void) | undefined;
 }
 
 function scheduleSourceFor(
@@ -2526,6 +2576,7 @@ function SessionPane({
   computerHotkeyBound,
   scheduleSource,
   searchTarget,
+  onShellKindChange,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(
@@ -2537,6 +2588,10 @@ function SessionPane({
     workspace,
     replaying,
   );
+  const effectiveShellKind = controls.shell?.effective?.kind;
+  useEffect(() => {
+    onShellKindChange?.(session.id, effectiveShellKind);
+  }, [onShellKindChange, session.id, effectiveShellKind]);
   const { grants } = useSessionGrants(session, client);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [externalAgents, setExternalAgents] = useState<ExternalAgentOverview[]>([]);

@@ -47,6 +47,7 @@ interface Props {
   onOpenEnsembleMember?: ((member: EnsembleMemberView) => void) | undefined;
   onError: (message: string) => void;
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
+  shellKind?: string | undefined;
 }
 
 const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
@@ -228,6 +229,7 @@ export function PhoneSidePanel({
   onOpenEnsembleMember,
   onError,
   loadDiff,
+  shellKind,
 }: Props) {
   const { session, view } = entry;
   const [summary, setSummary] = useState<ContextSummary>();
@@ -268,7 +270,7 @@ export function PhoneSidePanel({
       sessionId: session.id,
       visible,
       settingsOpen: false,
-      pollNeeded: unsettledBuiltinTasks(view) > 0,
+      pollNeeded: unsettledBuiltinTasks(view) > 0 || view.pendingSubagentPermissions.length > 0,
     });
   });
   useEffect(
@@ -278,7 +280,8 @@ export function PhoneSidePanel({
           id === session.id &&
           (event.type === "tool.started" ||
             event.type === "tool.progress" ||
-            event.type === "tool.completed")
+            event.type === "tool.completed" ||
+            (event.type === "subagent.permissions" && event.payload.pending.length > 0))
         )
           directory.trigger();
       }),
@@ -465,29 +468,37 @@ export function PhoneSidePanel({
             {agents.length > 0 && (
               <section className="phone-panel-section">
                 <h2>子代理</h2>
-                {agents.map((item) => (
-                  <button
-                    type="button"
-                    className="phone-panel-row"
-                    key={item.childSessionId}
-                    onClick={() => {
-                      onNavigate({ kind: "subagent", childSessionId: item.childSessionId });
-                    }}
-                  >
-                    <span className="phone-panel-glyph">
-                      <Icon name="robot" size={16} />
-                    </span>
-                    <span className="phone-panel-item">
-                      <span className="phone-panel-profile">
-                        {[item.profile, item.model, item.effort].filter(Boolean).join(" · ")}
+                {agents.map((item) => {
+                  const awaitingPermission = view.pendingSubagentPermissions.some(
+                    (p) =>
+                      p.childSessionId === item.childSessionId || p.parentCallId === item.callId,
+                  );
+                  return (
+                    <button
+                      type="button"
+                      className={`phone-panel-row${awaitingPermission ? " warn" : ""}`}
+                      key={item.childSessionId}
+                      onClick={() => {
+                        onNavigate({ kind: "subagent", childSessionId: item.childSessionId });
+                      }}
+                    >
+                      <span className="phone-panel-glyph">
+                        <Icon name="robot" size={16} />
                       </span>
-                      <span className="phone-panel-summary">{item.taskSummary}</span>
-                    </span>
-                    <span className="phone-panel-time">
-                      {elapsedText(runningMs(item.startedAt, now) ?? 0)}
-                    </span>
-                  </button>
-                ))}
+                      <span className="phone-panel-item">
+                        <span className="phone-panel-profile">
+                          {[item.profile, item.model, item.effort].filter(Boolean).join(" · ")}
+                        </span>
+                        <span className={`phone-panel-summary${awaitingPermission ? " warn" : ""}`}>
+                          {item.taskSummary}
+                        </span>
+                      </span>
+                      <span className="phone-panel-time">
+                        {elapsedText(runningMs(item.startedAt, now) ?? 0)}
+                      </span>
+                    </button>
+                  );
+                })}
               </section>
             )}
             {shells.length > 0 && (
@@ -620,6 +631,19 @@ export function PhoneSidePanel({
                 workspace={entry.workspace}
                 images={images}
                 openUrl={openUrl}
+                pendingPermissions={view.pendingSubagentPermissions.filter(
+                  (p) =>
+                    p.childSessionId === page.childSessionId ||
+                    p.parentCallId === selectedAgent?.callId,
+                )}
+                onRespondPermission={
+                  connected
+                    ? (childSessionId, requestId, reply) =>
+                        session.respondSubagentPermission(childSessionId, requestId, reply)
+                    : undefined
+                }
+                hidePersistentPermissions
+                shellKind={shellKind}
               />
             )}
             {page.kind === "shell" && selectedShell && (

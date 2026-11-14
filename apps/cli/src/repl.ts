@@ -19,8 +19,13 @@ import {
   type SessionSummary,
 } from "@nocturne/core";
 import {
+  allPendingPermissions,
+  createSessionView,
+  reduceSessionView,
   rewindNotification,
   untrackedCallsText,
+  type AggregatedPendingPermission,
+  type PermissionOption,
   type RewindMode,
   type RewindTarget,
   type QuestionAnswer,
@@ -88,8 +93,22 @@ export async function runRepl(
   let activeTurn: Promise<unknown> | undefined;
   /** readline 已关闭：此后任何异步回调不得再 rl.prompt() */
   let closed = false;
-  /** 等待用户回答的权限请求（permission.requested 优先于普通输入） */
-  let pendingPermission: { requestId: string; options: readonly string[] } | undefined;
+  /** 等待用户回答的权限请求队列（按全局到达顺序混排父会话与子代理请求） */
+  let permView = createSessionView();
+  const settledPermKeys = new Set<string>();
+  let promptedPermKey: string | undefined;
+  const permissionKey = (item: AggregatedPendingPermission): string =>
+    item.kind === "subagent"
+      ? `subagent:${item.permission.childSessionId}:${item.permission.requestId}`
+      : `session:${item.permission.requestId}`;
+  const currentPending = (): AggregatedPendingPermission | undefined =>
+    allPendingPermissions(permView).find((item) => !settledPermKeys.has(permissionKey(item)));
+  const pruneSettledPermKeys = (): void => {
+    const active = new Set(allPendingPermissions(permView).map(permissionKey));
+    for (const key of settledPermKeys) {
+      if (!active.has(key)) settledPermKeys.delete(key);
+    }
+  };
   /** 等待用户回答的提问（ADR-0032 §6 逐行交互；与权限确认同级优先） */
   let pendingQuestion:
     | {
@@ -108,6 +127,36 @@ export async function runRepl(
   const out = createEventWriter((channel, text) => {
     write(io, channel, text);
   });
+
+  const showPendingIfNeeded = (): void => {
+    const item = currentPending();
+    const key = item === undefined ? undefined : permissionKey(item);
+    if (item === undefined || key === undefined) {
+      promptedPermKey = undefined;
+      return;
+    }
+    if (key === promptedPermKey) return;
+    promptedPermKey = key;
+    out.line(
+      "stdout",
+      renderPermissionPrompt(
+        item.permission.subjects,
+        item.permission.reason,
+        item.permission.options,
+        io.stdout.columns ?? 80,
+        item.kind === "subagent"
+          ? { profile: item.permission.profile, taskSummary: item.permission.taskSummary }
+          : undefined,
+      ),
+    );
+  };
+
+  const resetPendingState = (): void => {
+    permView = createSessionView();
+    settledPermKeys.clear();
+    promptedPermKey = undefined;
+    pendingQuestion = undefined;
+  };
 
   /** 打印当前待答题目的逐行提示（ADR-0032 §6） */
   const printQuestion = (): void => {
@@ -142,17 +191,22 @@ export async function runRepl(
       pendingQuestion = undefined;
     }
     if (ev.type === "permission.requested") {
-      pendingPermission = { requestId: ev.payload.requestId, options: ev.payload.options };
-      out.line(
-        "stdout",
-        renderPermissionPrompt(
-          ev.payload.subjects,
-          ev.payload.reason,
-          ev.payload.options,
-          io.stdout.columns ?? 80,
-        ),
-      );
+      settledPermKeys.delete(`session:${ev.payload.requestId}`);
+      reduceSessionView(permView, ev);
+      pruneSettledPermKeys();
+      showPendingIfNeeded();
       return;
+    }
+    if (ev.type === "subagent.permissions") {
+      reduceSessionView(permView, ev);
+      pruneSettledPermKeys();
+      showPendingIfNeeded();
+      return;
+    }
+    if (ev.type === "permission.resolved" || ev.type === "turn.completed") {
+      reduceSessionView(permView, ev);
+      pruneSettledPermKeys();
+      showPendingIfNeeded();
     }
     out.write(renderEvent(ev, "interactive"));
     // 提示符前回到行首（交互模式的 turn.completed 总带用量行，这里是兜底）
@@ -266,6 +320,7 @@ export async function runRepl(
     if (res.kind === "ok") {
       session = res.session;
       unsubscribe();
+      resetPendingState();
       unsubscribe = session.subscribe(onEvent);
       await reloadHistory();
       out.line("stdout", `── 已切换到会话 ${session.id} ──`);
@@ -375,8 +430,10 @@ export async function runRepl(
 
         // 权限确认优先（cli.md 第 6 节）：a/s/p/d/x；
         // "d <文本>" 把其余内容作为给模型的反馈
-        if (pendingPermission !== undefined) {
-          const { requestId, options } = pendingPermission;
+        const pendingPerm = currentPending();
+        if (pendingPerm !== undefined) {
+          const itemKey = permissionKey(pendingPerm);
+          const { options } = pendingPerm.permission;
           const key = line === "" ? "d" : (line.split(/\s+/, 1)[0] ?? "d").toLowerCase();
           const selected = (
             {
@@ -391,7 +448,7 @@ export async function runRepl(
               d: "deny",
               deny: "deny",
               x: "deny_stop",
-            } as Record<string, string>
+            } as Record<string, PermissionOption>
           )[key];
           if (selected === undefined || !options.includes(selected)) {
             write(io, "stdout", "  请输入当前确认框中的选项\n");
@@ -400,8 +457,22 @@ export async function runRepl(
           }
           const feedback = line.length > key.length ? line.slice(key.length).trim() : undefined;
           const reply = (r: Parameters<typeof session.respondPermission>[1]) => {
-            pendingPermission = undefined;
-            void session.respondPermission(requestId, r);
+            settledPermKeys.add(itemKey);
+            promptedPermKey = undefined;
+            const p =
+              pendingPerm.kind === "subagent"
+                ? session.respondSubagentPermission(
+                    pendingPerm.permission.childSessionId,
+                    pendingPerm.permission.requestId,
+                    r,
+                  )
+                : session.respondPermission(pendingPerm.permission.requestId, r);
+            void p.catch((e: unknown) => {
+              settledPermKeys.delete(itemKey);
+              out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
+              showPendingIfNeeded();
+            });
+            showPendingIfNeeded();
           };
           if (key === "a" || key === "allow") {
             reply({ decision: "allow" });
@@ -631,6 +702,7 @@ export async function runRepl(
             if (res.kind === "ok") {
               session = res.session;
               unsubscribe();
+              resetPendingState();
               unsubscribe = session.subscribe(onEvent);
               await reloadHistory();
               out.line("stdout", `── 新会话 ${session.id} ──`);
@@ -823,10 +895,9 @@ export async function runRepl(
           prompt();
           return;
         }
-        if (busy || pendingPermission !== undefined || pendingQuestion !== undefined) {
+        if (busy || currentPending() !== undefined || pendingQuestion !== undefined) {
           session.interrupt();
-          pendingPermission = undefined;
-          pendingQuestion = undefined;
+          resetPendingState();
           busy = false;
           out.line("stdout", "! 已中断");
           prompt();

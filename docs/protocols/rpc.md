@@ -81,6 +81,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `endEnsemble` | → `{ unmerged: EnsembleUnmergedWorktree[] }`；结束活动合奏，停止成员、清理已并回工作树并返回保留的未并回分支列表；本机与远程均可用 |
 | `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
+| `respondSubagentPermission` | `{ childSessionId, requestId, reply }` → `null`；仅路由当前父会话活动转发池中的子代理确认请求（支持嵌套后代冒泡，不打开 child 交互句柄；不匹配、已结束或跨会话树报 `unknown_request`，选项/回复校验失败报 `invalid_reply` 且不清除 pending，见 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)） |
 | `setModel` / `setPermissionPreset` / `setReasoningEffort` / `setShell` | `{ model }` / `{ name }` / `{ level }` / `{ kind }` → `null` |
 | `compact` | → `null` |
 | `rewindTargets` / `rewind` | → `RewindTarget[]`；`rewind { targetSeq, mode }` → 文件回退汇总 |
@@ -408,7 +409,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 - Core 对两个 session id 验证为安全的单文件名标识（非空、至多 128 个 ASCII 字母/数字/下划线/连字符），不接受路径；RPC 对字符串、subscriptionId（非空、至多 128 字符）及 afterSeq 做形状校验，重复的在用 subscriptionId 报 invalid_params。文件不存在为 `SessionError / session_not_found`，父子关系不匹配（包括把顶层会话当 child）为新增 `SessionError / subagent_parent_mismatch`，非法 Core id 为 `SessionError / invalid_session_id`；日志错误沿用 session_log_corrupt / session_log_newer，I/O 读取失败为新增 session_read_failed。均按第 5 节映射 -32002；RPC 形状错误为 -32602。list 单个不可读候选可按既有列表规则跳过，指定 child 的 subscribe 必须明确报错。
 - [ADR-0084](../decisions/ADR-0084-phone-side-panel.md) 放开远程 `subagent.list` / `subagent.subscribe` / `subagent.unsubscribe`，仅能观察本连接已打开父会话的直接子会话；不创建 child 的交互句柄，不允许跨父会话观察。`readAttachment` 和工作树操作保持远程拒绝。通知只发给持有对应观察的连接，不广播；配对与加密规则不变。
 - readAttachment 同样先校验父子关系与安全 id；file 必须为字符串，否则 invalid_params；附件层错误沿用第 3.2 节。该补充只读方法用于保持主对话的图片输出渲染，不使用 runtime.readFile 绕过附件引用校验。只读观察的 DTO 放 protocol，行为与观察源放 Core，RPC 客户端仍仅运行时依赖 protocol。
-- 观察不在 Hub.sessions / Connection.sessions 登记可交互句柄，不增持有子锁的引用，不提供 submit/respondPermission/respondQuestion/interrupt/close 子会话的方法。未显式打开的 child 对既有 session 命令仍为 unknown_session；已有显式 resume 的行为不在本接口中改变。它不是 agent 工具，不经权限求值，也不创建 Grant。
+- 观察不在 Hub.sessions / Connection.sessions 登记可交互句柄，不增持有子锁的引用，不提供经子会话通道直接调用 `submit` / `respondPermission` / `respondQuestion` / `interrupt` / `close` 的方法。未显式打开的 child 对既有 `session.*` 命令仍为 `unknown_session`；当交互式内置 `task` 子代理存在正在等待用户确认的请求时，客户端在父会话右侧子标签中复用的确认卡同样通过**父会话的 `session.respondSubagentPermission`** 回应（不打开子会话交互句柄，只读历史/已结束视图不渲染确认按钮，[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）。它不是 agent 工具，不经权限求值，也不创建 Grant。
 - 连接持有观察表（含还在建立的观察）；unsubscribe、替换、父 `session.close`、连接断开和 shutdown 都撤监听、取消回放并丢缓冲。未完成的异步读取返回时检查取消代数并立即退订，不得复活。自然 closed 后释放表项；客户端缓存视图不影响服务器清理。观察退出不触碰 launcher、并发槽或 child.close。本机整条连接断开导致 Turn 中断是第 6 节既有宿主行为，不是观察的副作用。
 - `resumeSession` 保留原来的交互式打开/锁/修复语义，**不能描述为只读**；`listSessions({includeSubagents})` 保留原语义，既不建立事件订阅也不授予操作能力。本接口是新增方法，不是给这两者添加一个含糊的 readonly 开关。
 
@@ -468,7 +469,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.interrupt` | 请求与通知均允许 |
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作；手机只在后台子代理子视图提供取消 |
 | `subagent.list`、`subagent.subscribe`、`subagent.unsubscribe` | 允许（ADR-0084）：只读、限本连接已打开父会话的直接子会话。总览据 list 区分同步与后台运行项，subscribe / unsubscribe 复用连接内观察和清理机制，不开放子会话交互或工作树操作 |
-| `session.respondPermission` | `reply.remember === "project"` 或 `"always"` 拒绝并保持待处理；`"session"` 或省略允许 |
+| `session.respondPermission`、`session.respondSubagentPermission` | `reply.remember === "project"` 或 `"always"` 拒绝（`-32004 / remote_not_allowed`）并保持待处理；`"session"` 或省略允许（其中 `respondSubagentPermission` 的 `"session"` 写入树共享 `sessionGrants`） |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
 | `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |
@@ -488,7 +489,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
   - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`session.submit`、`session.enqueueInput`、`session.interrupt`（含别名 `session.abort`）。
   - `runtime.listSessions` 在 agent 连接中强制排除已归档会话，忽略 `includeArchived: true`；按已知 ID 打开不改既有规则。
-  - **一律拒绝**：`runtime.archiveSession`、`runtime.unarchiveSession`、`session.respondPermission`、`session.respondQuestion`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
+  - **一律拒绝**：`runtime.archiveSession`、`runtime.unarchiveSession`、`session.respondPermission`、`session.respondSubagentPermission`、`session.respondQuestion`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
   - **新建会话约束**：`runtime.createSession` 的 `permissionPreset` 不得高于该 agent 登记的权限上限（超出报 `-32602 / invalid_params`），不传时取「权限上限」与「用户默认预设」中较低者；工作区信任规则同远程（`workspace_untrusted`）；服务端自动填入 `session.created.client`，忽略客户端同名参数。
   - **本机管理方法（`agent.*`）**：`agent.describe`（别名 `agent.list`，含 `pipe` 管道状态）、`agent.respondPairing`、`agent.setScope`（别名 `agent.update`）、`agent.revoke` 仅开放给本机连接（`origin === "local"`），通知 `agent.pairingRequested` 与 `agent.statusChanged` 仅发给本机连接。本机管道是附加能力，初始化时若因管道已被另一后台占用（`address_in_use`）、Windows SID 不可用（`sid_unavailable`）、ACL 收紧失败（`acl_failed`）或其他原因（`other`）未能启动，服务端关闭半成品句柄并记 stderr 日志，`initialize` 照常成功，失败状态与原因经 `agent.describe` 的 `pipe` 及 `remote.describe` 的 `agentPipe` 返回。
 
@@ -496,7 +497,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 - 远程连接对服务端→客户端通知没有白名单，通知由发送方决定发给谁：`event` 只发给订阅了该会话的连接，`remote.lanEndpointsChanged` 只发给已握手的远程连接（经加密通道传递直连地址变更），其余 `remote.*` 只发本机连接，`login.completed` 只发发起登录的连接，`runtime.sessionSearchProgress` 只发发起搜索的连接（`runtime.searchSessions` 仍不在 `REMOTE_METHODS`，远程收不到搜索内容），`runtime.providersChanged`、`runtime.sessionsChanged`、`schedule.changed` 与 `grants.changed` 广播给所有已握手连接（含远程）。`runtime.sessionsChanged` 不带内容，手机收到后调用的 `runtime.listSessions` 本来就在上面的白名单里，远程能力边界不变。
 - `runtime.providersChanged` 广播给所有已握手连接；`login.completed` 只发给发起登录的连接。Runtime 句柄、实际会话、配置对象与变更队列在 Hub 共享；订阅、请求、握手、草稿和登录属于单连接。
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
-- 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` 事件与 `respondPermission` 回复，不判断"要不要确认"。
+- 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` / `subagent.permissions` 事件与 `respondPermission` / `respondSubagentPermission` 回复，不判断"要不要确认"。
 - 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码）、agent 后台持久化失败的错误码（见第 11 节），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
 - **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
 
@@ -508,6 +509,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 |---|---|---|
 | `RuntimeSession.readAttachment(file)` | `session.readAttachment({ sessionId, file })` | `{ data: Uint8Array, mimeType, bytes }`（线上 `data` 为 base64） |
 | `Runtime.cancelSubagent({ parentSessionId, childSessionId })` | `subagent.cancel` | `void` |
+| `RuntimeSession.respondSubagentPermission(childSessionId, requestId, reply)` | `session.respondSubagentPermission({ sessionId, childSessionId, requestId, reply })` | `void` |
 
 ## 9. 服务端进程
 

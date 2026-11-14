@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  ApplicationTarget,
   BackgroundShellTask,
   LocalFileContent,
   SubagentSummary,
@@ -174,6 +175,8 @@ export function useSidePanel({
   ensureClient,
   images,
   fileLinks,
+  shellKind,
+  resolveAppIcon,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
@@ -200,6 +203,8 @@ export function useSidePanel({
   /** 窗口级图片缓存（子代理视图的图片按 sha256 共用）；缺省时面板自己建一份 */
   images?: AttachmentImageSource | undefined;
   fileLinks?: FileLinkHooks | undefined;
+  shellKind?: string | undefined;
+  resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
 }): SidePanelController {
   const [width, setWidth] = useState(() => prefs.get().panelWidth ?? PANEL_DEFAULT_WIDTH);
   const [overview, setOverview] = useState(() => prefs.get().overviewOpen === true);
@@ -813,7 +818,9 @@ export function useSidePanel({
     };
   }, []);
   const view = active?.view;
-  const pollNeeded = view !== undefined && unsettledBuiltinTasks(view) > 0;
+  const pollNeeded =
+    view !== undefined &&
+    (unsettledBuiltinTasks(view) > 0 || view.pendingSubagentPermissions.length > 0);
   // 目录只在「当前会话、窗口可见、不在设置里、连着后台」时查询，其余一概停止并丢弃在途响应
   useEffect(() => {
     directory.setContext({
@@ -840,6 +847,8 @@ export function useSidePanel({
         taskCalls.delete(event.payload.callId);
         directory.trigger();
       } else if (event.type === "tool.progress" && taskCalls.has(event.payload.callId)) {
+        directory.trigger();
+      } else if (event.type === "subagent.permissions" && event.payload.pending.length > 0) {
         directory.trigger();
       }
     });
@@ -1382,6 +1391,7 @@ export function useSidePanel({
     onOpen: openSubagent,
     cancelError: subagentCancelError,
     isolated: new Set(retainedWorktrees.map((record) => record.childSessionId)),
+    pendingPermissions: view?.pendingSubagentPermissions ?? [],
     retained: retainedWorktrees
       .filter((record) => record.changes)
       .map((record) => ({
@@ -1542,6 +1552,15 @@ export function useSidePanel({
               openUrl: (url) => {
                 void host.openUrl(url);
               },
+              pendingPermissions: view?.pendingSubagentPermissions ?? [],
+              ...(active !== undefined
+                ? {
+                    respondPermission: (childSessionId, requestId, reply) =>
+                      active.session.respondSubagentPermission(childSessionId, requestId, reply),
+                  }
+                : {}),
+              shellKind,
+              resolveAppIcon,
             }
       }
       agents={

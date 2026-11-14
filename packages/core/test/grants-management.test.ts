@@ -333,6 +333,14 @@ it("活动子会话查询和撤销作用于根，后续子调用失去授权", a
         decision: "allow",
         remember: "session",
       });
+    else if (event.type === "subagent.permissions" && event.payload.pending.length > 0) {
+      const req = event.payload.pending[0];
+      if (req !== undefined) {
+        void session.respondSubagentPermission(req.childSessionId, req.requestId, {
+          decision: "deny",
+        });
+      }
+    }
   });
   try {
     await session.submit({ text: "go" });
@@ -366,7 +374,7 @@ it("活动子会话查询和撤销作用于根，后续子调用失去授权", a
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "permission.resolved",
-        payload: expect.objectContaining({ source: "non_interactive" }),
+        payload: expect.objectContaining({ action: "deny", source: "user" }),
       }),
     );
   } finally {

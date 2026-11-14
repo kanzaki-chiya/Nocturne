@@ -193,7 +193,7 @@ nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端
 
 ## 6. 权限确认
 
-预设与规则由配置决定（第 8 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。ask 走协议流程：`permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`。
+预设与规则由配置决定（第 8 节、permissions.md 第 6 节），`--preset` 或 `/preset` 切换会话预设。父会话自身 ask 走 `permission.requested` → `session.respondPermission(requestId, reply)` → `permission.resolved`；交互模式下一并按全局到达顺序（`allPendingPermissions`）处理内置 `task` 子代理冒泡上来的确认请求（临时事件 `subagent.permissions`），在提示块中注明来源子代理（`子代理 [档位] · 任务摘要`），回复经 `session.respondSubagentPermission(childSessionId, requestId, reply)` 路由给对应子会话。
 
 smart 审查交给你确认时，确认提示的原因包含审查理由；权限回复只接受事件给出的选项，隐藏的 s/p 不会授予长期权限。`full-access` 在 --preset、/preset 与 /settings preset 输入时兼容为 guarded，但不在补全中显示。
 
@@ -209,8 +209,8 @@ smart 审查交给你确认时，确认提示的原因包含审查理由；权�
   | `d` | 拒绝（可附一句反馈给模型） | `{ decision: "deny", feedback? }` |
   | `x` | 拒绝并停止本轮 | `{ decision: "deny", stop: true }` |
 
-  回复经 `respondPermission` 送回；回复到达前 Turn 挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
-- **非交互模式**：不产生等待——smart 审查 allow 执行、block 拒绝，审查后的剩余 `ask` 拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
+  回复经 `respondPermission`（或子代理请求走 `respondSubagentPermission`）送回；回复到达前相应操作挂起（Ctrl+C 可中断，该请求记 `cancelled`）。
+- **非交互模式**：不产生等待（内置 `task` 子代理在此模式下也不向父会话转发 `ask`）——smart 审查 allow 执行、block 拒绝，审查后的剩余 `ask` 拒绝，`permission.resolved` 记 `source: "non_interactive"`。CLI 以 `RuntimeOptions.interactive` 告知 Runtime 是否有回复能力（交互 `true`，非交互 `false`，默认 `false`）。
 - **`-y, --yes`**：只把**最终判定为 `ask`** 的调用提升为 `allow`（`source: "rule"`，理由注明来自命令行参数）；不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、路径限制或工具边界，转换在权限层完成（permissions.md 第 5.3 节）。是用户主动选择的自动批准能力（非交互批处理等场景），默认不开启；程序化的测试也可以注入限定范围的 `policy`，不必依赖它。
 - `deny` 后模型会收到带理由的工具结果并可自我修正。
 
