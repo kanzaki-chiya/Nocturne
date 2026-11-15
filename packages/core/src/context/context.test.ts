@@ -1131,6 +1131,69 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
       pure(history, { events }),
     );
   });
+  it("跳过 inputTokens 为 0 的用量：回退到前一条有效锚点或纯估算", () => {
+    const zeroUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    const zeroTail = (seq: number, tokens: number): Extract<HistoryEntry, { kind: "assistant" }> => ({
+      ...assistant(seq, tokens),
+      usage: zeroUsage,
+    });
+    const history: HistoryEntry[] = [
+      assistant(1, 20, 12_000),
+      tool(3, 100),
+      {
+        kind: "user",
+        seq: 5,
+        turnId: "t",
+        messageId: "u",
+        content: [{ type: "text", text: "abcd中文" }],
+      },
+      zeroTail(7, 5),
+    ];
+    // 锚点取 seq 1（12000 + 100），其后 tool(100) + user(3) + 全零 assistant(文本 5 + 空 toolCalls "[]" 1) 按字符估算
+    expect(buildContext(input(history)).report.estimatedTokens).toBe(12_209);
+
+    // 有效锚点与全零 assistant 之间发生压缩或切换模型，锚点仍失效
+    const compacted: HistoryEntry[] = [
+      ...history,
+      {
+        kind: "compaction",
+        seq: 8,
+        turnId: undefined,
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+      zeroTail(9, 4),
+    ];
+    const pure = (entries: HistoryEntry[], over: Partial<BuildContextInput> = {}) =>
+      buildContext(
+        input(
+          entries.map((entry) =>
+            entry.kind === "assistant" ? { ...entry, usage: undefined } : entry,
+          ),
+          over,
+        ),
+      ).report.estimatedTokens;
+    expect(buildContext(input(compacted)).report.estimatedTokens).toBe(pure(compacted));
+
+    const other = { ...small, ref: { provider: "other", model: "m1" } };
+    const switchedEvents = [
+      ev(4, "session.config_changed", { model: other.ref }),
+      ev(6, "session.config_changed", { model: small.ref }),
+    ];
+    expect(buildContext(input(history, { events: switchedEvents })).report.estimatedTokens).toBe(
+      pure(history, { events: switchedEvents }),
+    );
+
+    // 所有用量都是全零：退回纯估算
+    const allZero: HistoryEntry[] = [zeroTail(1, 20), tool(3, 100), zeroTail(7, 5)];
+    expect(buildContext(input(allZero)).report.estimatedTokens).toBe(pure(allZero));
+  });
   it("锚点高于明细时报告差额，低于时不缩放各项", () => {
     const high = buildContext(input([assistant(1, 1, 50_000)]));
     const accounted = (built: ReturnType<typeof buildContext>) =>
