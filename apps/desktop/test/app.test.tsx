@@ -667,6 +667,38 @@ it("缓存首帧即显示；只有缓存时不迁移项目或刷新通知，真�
   expect(readCachedIds()).toEqual(["alpha", "beta", "gamma"]);
 });
 
+it.each(["对话", "项目内", "项目最近活动"])(
+  "%s：缓存首帧按 lastUserMs 而非相反的 mtimeMs 排序，真实列表接管后 sameNodes 与 sameOrder 不变",
+  async (section) => {
+    const host = replayHost([], undefined, (request) => request.method === "runtime.listSessions");
+    host.sessions = host.sessions.map((session, index) => ({
+      ...session,
+      cwd: section === "对话" ? "Z:/plain" : section === "项目内" ? "Z:/qa-alpha" : session.cwd,
+      mtimeMs: (index + 1) * 100,
+      lastUserMs: (3 - index) * 100,
+    }));
+    const cachedHost = { ...host, sessionPaths: cachePaths };
+    writeSessionsCache(() => localStorage, cachedHost, host.sessions);
+    localStorage.setItem(
+      "nocturne.desktop.prefs.v1",
+      JSON.stringify({ projectSort: "activity", projectOrder: [] }),
+    );
+    render(<App host={cachedHost} />);
+    const rows = () => [...document.querySelectorAll(".side .irow")];
+    const order = () => rows().map((row) => row.querySelector(".t")?.textContent);
+    const firstNodes = rows();
+    const firstOrder = order();
+    expect(firstOrder).toEqual(["alpha 会话", "beta 会话", "gamma 会话"]);
+    await waitFor(() => expect(host.deferred).toHaveLength(1));
+    await act(async () => host.deferred[0]?.respond([...host.sessions]));
+    const sameNodes = rows().every((node, index) => node === firstNodes[index]);
+    const sameOrder = JSON.stringify(order()) === JSON.stringify(firstOrder);
+    expect(rows()).toHaveLength(firstNodes.length);
+    expect(sameNodes).toBe(true);
+    expect(sameOrder).toBe(true);
+  },
+);
+
 function readCachedIds(): string[] {
   const cached = JSON.parse(localStorage.getItem(SESSIONS_CACHE_KEY) ?? "{}") as {
     sessions: { id: string }[];

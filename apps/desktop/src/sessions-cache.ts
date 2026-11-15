@@ -25,6 +25,8 @@ function summary(value: unknown): CachedSession | undefined {
     typeof v.cwd !== "string" ||
     typeof v.mtimeMs !== "number" ||
     !Number.isFinite(v.mtimeMs) ||
+    (v.lastUserMs !== undefined &&
+      (typeof v.lastUserMs !== "number" || !Number.isFinite(v.lastUserMs) || v.lastUserMs < 0)) ||
     (v.firstText !== undefined && typeof v.firstText !== "string") ||
     (v.archivedAt !== undefined &&
       (typeof v.archivedAt !== "string" || !Number.isFinite(Date.parse(v.archivedAt))))
@@ -35,6 +37,7 @@ function summary(value: unknown): CachedSession | undefined {
     createdAt: v.createdAt,
     cwd: v.cwd,
     mtimeMs: v.mtimeMs,
+    ...(typeof v.lastUserMs === "number" ? { lastUserMs: v.lastUserMs } : {}),
     ...(typeof v.firstText === "string" ? { firstText: v.firstText } : {}),
     ...(typeof v.archivedAt === "string" ? { archivedAt: v.archivedAt } : {}),
   };
