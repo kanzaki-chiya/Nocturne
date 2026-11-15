@@ -204,11 +204,10 @@
 .composer .tb {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px 10px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-2);
 }
 
-.composer .ib,
 .qfoot .ib {
   width: 26px;
   height: 26px;
@@ -221,11 +220,34 @@
   flex: none;
 }
 
-.composer .ib:hover,
-.composer .ib.on,
 .qfoot .ib:hover {
   color: var(--a-accent);
   border-color: var(--a-accent);
+}
+
+.composer .tb .ib {
+  color: var(--a-secondary);
+}
+
+.composer .tb .ib:hover,
+.composer .tb .ib.on {
+  color: var(--a-text);
+}
+
+.composer .plus-btn {
+  position: relative;
+}
+
+.composer .plus-btn .mcp-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  box-sizing: content-box;
+  border-radius: var(--radius-pill);
+  background: var(--a-error);
+  border: 2px solid var(--a-bg);
 }
 
 .composer .sp {
@@ -235,14 +257,15 @@
 .composer .chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
+  height: var(--ctl-h-md);
   font: inherit;
   font-size: var(--fs-1);
   color: var(--a-secondary);
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   border-radius: var(--radius-2);
-  padding: 3px 8px;
+  padding: 0 var(--space-2);
   cursor: pointer;
   flex: none;
   white-space: nowrap;
@@ -250,8 +273,8 @@
 
 .composer .chip:hover,
 .composer .chip.on {
-  background: var(--a-side);
-  border-color: var(--a-border);
+  background: var(--a-raised);
+  color: var(--a-text);
 }
 
 .composer .chip:disabled {
@@ -287,6 +310,58 @@
   white-space: nowrap;
 }
 
+.composer .tb-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--a-border);
+  margin: 0 var(--space-1);
+  flex: none;
+}
+
+.composer .work-mode-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ctl-h-md);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-2);
+  background: var(--a-raised);
+  color: var(--a-text);
+  font: inherit;
+  font-size: var(--fs-1);
+  cursor: pointer;
+  flex: none;
+  white-space: nowrap;
+}
+
+.composer .work-mode-tag:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.composer .work-mode-icon,
+.composer .work-mode-close {
+  display: inline-flex;
+  align-items: center;
+  color: var(--a-secondary);
+}
+
+.composer .work-mode-close {
+  display: none;
+}
+
+.composer .work-mode-tag:hover:not(:disabled) .work-mode-icon,
+.composer .work-mode-tag:focus-visible:not(:disabled) .work-mode-icon {
+  display: none;
+}
+
+.composer .work-mode-tag:hover:not(:disabled) .work-mode-close,
+.composer .work-mode-tag:focus-visible:not(:disabled) .work-mode-close {
+  display: inline-flex;
+  color: var(--a-text);
+}
+
 .composer .chip-model,
 .composer .chip-dir {
   flex: 0 1 auto;
@@ -309,15 +384,15 @@
 }
 
 .composer .send {
-  width: 26px;
-  height: 26px;
+  width: var(--ctl-h-md);
+  height: var(--ctl-h-md);
   display: inline-grid;
   place-items: center;
   padding: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-send);
   border: none;
-  background: var(--a-accent);
-  color: var(--a-on-accent);
+  background: var(--a-btn);
+  color: var(--a-on-btn);
   font-size: var(--fs-2);
   line-height: var(--lh-tight);
   cursor: pointer;
@@ -325,39 +400,18 @@
 }
 
 .composer .send.off {
-  background: var(--a-side);
+  background: var(--a-raised);
   color: var(--a-muted);
 }
 
 .composer .send.stop {
   background: var(--a-error);
+  color: var(--a-on-accent);
 }
 
 .composer .send:disabled {
   opacity: 0.55;
   cursor: default;
-}
-
-/* ── 托盘（卡片下沿的目录与预设） ── */
-.composer .tray {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin: -10px 10px 0;
-  padding: 14px 6px 4px;
-  border: 1px solid var(--a-border);
-  border-top: none;
-  border-radius: 0 0 var(--radius-3) var(--radius-3);
-  background: var(--a-side);
-}
-
-.composer .tray .hint {
-  margin-left: auto;
-  font-size: var(--fs-1);
-  color: var(--a-faint);
-  white-space: nowrap;
 }
 
 /* ── 弹出菜单 ── */
@@ -420,6 +474,23 @@
   color: var(--a-text);
 }
 
+.menu .menu-search-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  margin-bottom: var(--space-1);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-muted);
+}
+
+.menu .menu-search-box:focus-within {
+  border-color: var(--a-accent);
+  box-shadow: var(--shadow-focus);
+}
+
 .menu .menu-search {
   width: 100%;
   box-sizing: border-box;
@@ -437,6 +508,21 @@
   outline: none;
   border-color: var(--a-accent);
   box-shadow: var(--shadow-focus);
+}
+
+.menu .menu-search-box .menu-search {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-1) 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.menu .menu-search-box .menu-search:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .menu .menu-item:disabled {
@@ -477,6 +563,9 @@
 }
 
 .menu .menu-r {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   margin-left: auto;
   color: var(--a-faint);
   font-size: var(--fs-1);
@@ -492,6 +581,45 @@
   font-size: var(--fs-1);
   color: var(--a-muted);
   white-space: normal;
+}
+
+.menu.composer-plus-menu {
+  width: var(--w-field-md);
+  min-width: var(--w-field-md);
+}
+
+.menu.composer-submenu {
+  width: var(--w-menu);
+  min-width: var(--w-menu);
+}
+
+.menu .mcp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--a-error);
+  flex: none;
+}
+
+.menu .mcp-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--a-muted);
+  flex: none;
+}
+
+.menu .mcp-state-dot.is-ready {
+  background: var(--a-success);
+}
+
+.menu .mcp-state-dot.is-failed,
+.menu .mcp-state-dot.is-crashed {
+  background: var(--a-error);
+}
+
+.menu .mcp-state-dot.is-starting {
+  background: var(--a-warning);
 }
 
 /* ── 补全弹出（/ 命令与 @ 引用） ── */

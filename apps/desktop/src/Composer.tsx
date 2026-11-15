@@ -14,8 +14,10 @@ import {
 
 import {
   parseFileRefs,
+  parseWorkModeSlash,
   type ImageMimeType,
   type ExternalAgentOverview,
+  type McpServerViewState,
   type PendingInputsSnapshot,
   type SkillOverview,
   type SkillInvocation,
@@ -34,14 +36,14 @@ import {
   type FileIndexEntry,
   type FileRefCandidate,
 } from "./file-refs";
-import { ChoiceMenu, Menu, MenuHeading, MenuItem, MenuSeparator } from "./Menu";
+import { ChoiceMenu, Menu, MenuHeading, MenuItem, MenuSeparator, MenuSubmenu } from "./Menu";
 import { IMAGE_TYPES, mimeTypeForImageName, type PickedImage } from "./picked-images";
 import "./composer.css";
 import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
 import type { GoalActions } from "./GoalRow";
-import { ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
+import { ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
 import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "./ImageViewer";
 import { fileIconText, formatBytes } from "./web/phone-images";
 
@@ -155,8 +157,8 @@ export interface ComposerProps {
   /** 解除暂停：「继续发送」 */
   onResumePending?: (() => Promise<void>) | undefined;
   /**
-   * draft（空状态）：卡片 + 下方 tray（目录/预设/提示）；模型/档位 chip 在卡内工具栏。
-   * session：同一卡片，文字区在上、工具行左 ＋ 右发送/中断；无 tray、无 chip，切换都在底部状态栏。
+   * draft（空状态）：卡片底部工具行含工作区/预设/分支，上方 hero。
+   * session：同一卡片，工具行含权限预设、上下文圆环、模型、思考档位与发送/中断。
    */
   variant?: "draft" | "session";
   historyKey?: string | null;
@@ -164,6 +166,8 @@ export interface ComposerProps {
   initialDraft?: string | undefined;
   /** 挂载时放回的附件（新会话拒收）。只在首次挂载取用 */
   initialAttachments?: ComposerSubmit["attachments"] | undefined;
+  /** 挂载时恢复的执行方式（新会话/重建输入框拒收）。只在首次挂载取用 */
+  initialWorkMode?: WorkModeName | undefined;
   /** 挂载时显示的发送失败 */
   initialError?: string | undefined;
   onInitialDraftUsed?: (() => void) | undefined;
@@ -175,6 +179,10 @@ export interface ComposerProps {
   /** 权限预设菜单底部附加内容（如本会话已允许的授权列表） */
   presetFooter?: ReactNode;
   contextUsage?: ReactNode;
+  /** 会话 MCP 服务状态（用于在「+」按钮和 MCP 子菜单显示可用性圆点） */
+  mcpServers?: Readonly<Record<string, McpServerViewState>> | undefined;
+  /** 被禁用的执行方式（值即悬停说明原因） */
+  workModeDisabled?: Partial<Record<WorkModeName, string>> | undefined;
   /** draft 必需；session 变体忽略 */
   workspace?: WorkspaceChoice | undefined;
   /** 新会话页分支选择（ADR-0085） */
@@ -182,7 +190,7 @@ export interface ComposerProps {
   /** null 表示本目录无项目文件索引（普通对话、或尚未建会话） */
   fileRefs: FileRefSource | null;
   fileRefsUnavailable?: string;
-  /** 首张图片加入时调用一次；draft 显示在托盘，session 显示在卡片上方 */
+  /** 首张图片加入时调用一次；显示在卡片上方气泡 */
   getVisionHint?: () => Promise<string | undefined>;
   pickImages: () => Promise<PickedImage[]>;
   dirMenuOpen?: boolean;
@@ -191,6 +199,10 @@ export interface ComposerProps {
   onSlash: (line: string) => boolean | Promise<boolean>;
   /** 模型菜单底部「管理服务商…」（进入设置 › 服务商）；不传则不显示 */
   onManageProviders?: () => void;
+  /** 「+」->「MCP」子菜单底部「管理 MCP」（进入设置 › MCP） */
+  onManageMcp?: () => void;
+  /** 「+」->「技能」子菜单底部「管理技能」（进入设置 › 技能） */
+  onManageSkills?: () => void;
   placeholder?: string;
 }
 
@@ -218,6 +230,18 @@ type MenuKind = "plus" | "model" | "effort" | "preset" | "dir" | "branch";
 type PopupKind = "slash" | "refs";
 
 const MAX_TEXTAREA_HEIGHT = 280;
+
+const WORK_MODE_ITEMS: readonly {
+  name: WorkModeName;
+  label: string;
+  icon: IconName;
+}[] = [
+  { name: "grill-me", label: "追问需求", icon: "question" },
+  { name: "goal", label: "目标", icon: "target" },
+  { name: "plan", label: "计划", icon: "list_check" },
+  { name: "boost", label: "多代理攻坚", icon: "robot" },
+  { name: "ensemble", label: "合奏", icon: "group" },
+];
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -251,6 +275,7 @@ export function Composer({
   historyKey,
   initialDraft,
   initialAttachments,
+  initialWorkMode,
   initialError,
   onInitialDraftUsed,
   readInputHistory,
@@ -258,16 +283,19 @@ export function Composer({
   controls,
   presetFooter,
   contextUsage,
+  mcpServers,
+  workModeDisabled,
   workspace,
   branch,
   fileRefs,
-  fileRefsUnavailable = "无项目文件索引",
   getVisionHint,
   pickImages,
   dirMenuOpen,
   onDirMenuOpenChange,
   onSlash,
   onManageProviders,
+  onManageMcp,
+  onManageSkills,
   placeholder,
   skills = [],
   externalAgents = [],
@@ -279,6 +307,8 @@ export function Composer({
 }: ComposerProps) {
   const isSession = variant === "session";
   const [draft, setDraft] = useState(initialDraft ?? "");
+  const [workMode, setWorkMode] = useState<WorkModeName | null>(initialWorkMode ?? null);
+  const [skillQuery, setSkillQuery] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>(() =>
     (initialAttachments ?? []).map(materializeAttachment),
   );
@@ -309,6 +339,8 @@ export function Composer({
   const composingRef = useRef(false);
   const interruptingRef = useRef(false);
   const draftRef = useRef(draft);
+  const workModeRef = useRef<WorkModeName | null>(workMode);
+  workModeRef.current = workMode;
   const attachmentsRef = useRef<Attachment[]>([]);
   const revision = useRef(0);
   const pendingCaret = useRef<number | null>(null);
@@ -357,6 +389,9 @@ export function Composer({
     if (openMenu === "dir") requestDirOpen(false);
     else setMenu(null);
   }, [openMenu, requestDirOpen]);
+  useEffect(() => {
+    if (openMenu !== "plus") setSkillQuery("");
+  }, [openMenu]);
   const branchIsGit = branch?.current != null;
   const branchControl = useBranchMenu({
     label: branch?.selected?.name ?? branch?.current ?? "-",
@@ -422,7 +457,10 @@ export function Composer({
     };
   }, []);
   const initialDraftUsed = useRef(
-    initialDraft === undefined && initialAttachments === undefined && initialError === undefined
+    initialDraft === undefined &&
+      initialAttachments === undefined &&
+      initialWorkMode === undefined &&
+      initialError === undefined
       ? undefined
       : onInitialDraftUsed,
   );
@@ -466,6 +504,14 @@ export function Composer({
     setError(null);
     setEnterHint(null);
     if (!fromHistory) historyIndex.current = null;
+  };
+
+  const updateWorkMode = (next: WorkModeName | null) => {
+    revision.current += 1;
+    workModeRef.current = next;
+    setWorkMode(next);
+    setError(null);
+    setEnterHint(null);
   };
 
   const interrupt = useCallback(async () => {
@@ -554,18 +600,18 @@ export function Composer({
     textarea.current?.focus();
   };
 
-  const insertRefToken = () => {
+  const insertSkillToken = (name: string) => {
     const field = textarea.current;
     const text = draftRef.current;
     const pos = field?.selectionStart ?? text.length;
     const before = text.slice(0, pos);
     const after = text.slice(field?.selectionEnd ?? pos);
     const prefix = before === "" || /\s$/.test(before) ? "" : " ";
-    const next = `${before}${prefix}@${after}`;
-    pendingCaret.current = before.length + prefix.length + 1;
+    const token = `/${name} `;
+    const next = `${before}${prefix}${token}${after}`;
+    pendingCaret.current = before.length + prefix.length + token.length;
     updateDraft(next);
     field?.focus();
-    ensureFileIndex();
   };
 
   // ── 附件 ──
@@ -642,7 +688,15 @@ export function Composer({
     const text = draftRef.current;
     // Turn 运行中也允许发送（ADR-0070）：mode 由 Enter / Alt+Enter 决定
     if (disabled || composingRef.current) return;
-    if (text.trim() === "" && attachmentsRef.current.length === 0) return;
+    const selectedMode = workModeRef.current;
+    if (text.trim() === "") {
+      if (selectedMode !== null) {
+        const usage = parseWorkModeSlash(`/${selectedMode}`);
+        setEnterHint(usage?.kind === "usage" ? usage.hint : `用法：/${selectedMode} 任务`);
+        return;
+      }
+      if (attachmentsRef.current.length === 0) return;
+    }
     const parsed = parseSlash(text, variant, skills, externalAgents);
     if (parsed?.kind === "unknown" || parsed?.kind === "redirect") {
       setEnterHint(parsed.hint);
@@ -652,12 +706,18 @@ export function Composer({
       void runSlash(text);
       return;
     }
+    const effectiveWorkMode =
+      parsed?.kind === "work"
+        ? parsed.workMode
+        : parsed === null
+          ? (selectedMode ?? undefined)
+          : undefined;
     const task = parsed?.kind === "work" ? parsed.text : text;
     const snapshot = attachmentsRef.current.slice();
     const payload: ComposerSubmit = {
       text: task,
       ...(task !== text ? { draftText: text } : {}),
-      ...(parsed?.kind === "work" ? { workMode: parsed.workMode } : {}),
+      ...(effectiveWorkMode !== undefined ? { workMode: effectiveWorkMode } : {}),
       ...(parsed?.kind === "skill" ? { skill: parsed.invocation } : {}),
       ...(parsed?.kind === "agent" ? { delegate: parsed.delegate } : {}),
       attachments: snapshot.map((attachment) => ({
@@ -670,12 +730,14 @@ export function Composer({
     // 同一轮事件里清空。不等 Core 接受；拒收再放回。连发时第二次读到的是空草稿。
     historyIndex.current = null;
     updateDraft("");
+    updateWorkMode(null);
     attachmentsRef.current = [];
     setAttachments([]);
     const clearedRevision = revision.current;
     const untouched = () =>
       mounted.current &&
       revision.current === clearedRevision &&
+      workModeRef.current === null &&
       attachmentsRef.current.length === 0;
     const dropSnapshot = () => {
       for (const attachment of snapshot) URL.revokeObjectURL(attachment.url);
@@ -688,6 +750,7 @@ export function Composer({
       attachmentsRef.current = snapshot;
       setAttachments(snapshot);
       updateDraft(text);
+      updateWorkMode(selectedMode);
     };
     void (async () => {
       try {
@@ -1011,11 +1074,32 @@ export function Composer({
     [composing, draft, variant, skills, externalAgents],
   );
   const slashHint = parsedSlash?.kind === "redirect" ? parsedSlash.hint : enterHint;
-  const canSend = draft.trim() !== "" || attachments.length > 0;
-  // draft：能力提示落在 tray；session：无 tray，显示在卡片上方气泡。
-  // 不再常驻 Enter/Shift+Enter 按键说明（聊天输入框的惯例）
-  const hint = isSession ? null : (vision ?? null);
+  const canSend =
+    workMode !== null ? draft.trim() !== "" : draft.trim() !== "" || attachments.length > 0;
   const shownError = error ?? controls?.error ?? null;
+  const selectedWorkMode = WORK_MODE_ITEMS.find((item) => item.name === workMode);
+  const mcpEntries = Object.entries(mcpServers ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const hasUnavailableMcp = mcpEntries.some(
+    ([, server]) => server.state === "failed" || server.state === "crashed",
+  );
+  const skillFilter = skillQuery.trim().toLowerCase();
+  const invocableSkills = skills
+    .filter(
+      (skill) =>
+        skill.enabled &&
+        skill.shadowedBy === undefined &&
+        (skill.invocation === "both" || skill.invocation === "user") &&
+        !skill.commandConflict,
+    )
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  const filteredSkills =
+    skillFilter === ""
+      ? invocableSkills
+      : invocableSkills.filter(
+          (skill) =>
+            skill.name.toLowerCase().includes(skillFilter) ||
+            skill.description.toLowerCase().includes(skillFilter),
+        );
 
   const chip = (
     kind: "model" | "effort" | "preset" | "dir",
@@ -1068,8 +1152,9 @@ export function Composer({
       ref={(node) => {
         triggers.current.plus = node;
       }}
+      className="plus-btn"
       active={openMenu === "plus"}
-      aria-label="添加图片或引用文件"
+      aria-label="添加"
       aria-haspopup="menu"
       aria-expanded={openMenu === "plus"}
       onClick={() => {
@@ -1077,6 +1162,13 @@ export function Composer({
       }}
     >
       <Icon name="add" size={ICON_MD} />
+      {hasUnavailableMcp && <span className="mcp-dot" aria-hidden="true" />}
+    </IconButton>
+  );
+
+  const paperclipButton = (
+    <IconButton disabled={disabled} aria-label="添加文件" onClick={openPicker}>
+      <Icon name="attachment" size={ICON_MD} />
     </IconButton>
   );
 
@@ -1171,7 +1263,7 @@ export function Composer({
             {slashHint}
           </div>
         )}
-        {isSession && vision !== undefined && (
+        {vision !== undefined && (
           <div className="composer-redirect" role="status">
             {vision}
           </div>
@@ -1292,8 +1384,33 @@ export function Composer({
           {txtBlock}
           <div className="tb">
             {plusButton}
-            {isSession &&
-              controls !== undefined &&
+            {paperclipButton}
+            {!isSession && workspace !== undefined && controls !== undefined && (
+              <button
+                type="button"
+                ref={(node) => {
+                  triggers.current.dir = node;
+                }}
+                className={`chip chip-dir${openMenu === "dir" ? " on" : ""}${workspace.readOnly ? " ro" : ""}`}
+                disabled={workspace.readOnly || disabled}
+                title={workspace.title}
+                aria-label="切换目录"
+                aria-haspopup={workspace.readOnly ? undefined : "menu"}
+                aria-expanded={!workspace.readOnly && openMenu === "dir"}
+                onClick={() => {
+                  if (!workspace.readOnly) requestDirOpen(!dirOpen);
+                }}
+              >
+                {workspace.kind === "plain" ? (
+                  <Icon name="chat_1" size={ICON_SM} />
+                ) : (
+                  <Icon name="folder" size={ICON_SM} />
+                )}
+                <b>{workspace.label}</b>
+                {!workspace.readOnly && <Icon name="down_small" size={ICON_SM} className="caret" />}
+              </button>
+            )}
+            {controls !== undefined &&
               chip(
                 "preset",
                 controls.preset,
@@ -1303,6 +1420,30 @@ export function Composer({
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
+            {!isSession && branchMenu?.trigger}
+            {selectedWorkMode !== undefined && (
+              <>
+                <span className="tb-sep" aria-hidden="true" />
+                <button
+                  type="button"
+                  className="work-mode-tag"
+                  disabled={disabled}
+                  aria-label={`取消${selectedWorkMode.label}`}
+                  onClick={() => {
+                    updateWorkMode(null);
+                    textarea.current?.focus();
+                  }}
+                >
+                  <span className="work-mode-icon" aria-hidden="true">
+                    <Icon name={selectedWorkMode.icon} size={ICON_SM} />
+                  </span>
+                  <span className="work-mode-close" aria-hidden="true">
+                    <Icon name="close_circle" size={ICON_SM} />
+                  </span>
+                  <span>{selectedWorkMode.label}</span>
+                </button>
+              </>
+            )}
             <span className="sp" />
             {isSession && contextUsage}
             {controls !== undefined &&
@@ -1329,63 +1470,112 @@ export function Composer({
             {sendButton}
           </div>
         </div>
-        {!isSession && workspace !== undefined && controls !== undefined && (
-          <div className="tray">
-            <button
-              type="button"
-              ref={(node) => {
-                triggers.current.dir = node;
-              }}
-              className={`chip chip-dir${openMenu === "dir" ? " on" : ""}${workspace.readOnly ? " ro" : ""}`}
-              disabled={workspace.readOnly || disabled}
-              title={workspace.title}
-              aria-label="切换目录"
-              aria-haspopup={workspace.readOnly ? undefined : "menu"}
-              aria-expanded={!workspace.readOnly && openMenu === "dir"}
-              onClick={() => {
-                if (!workspace.readOnly) requestDirOpen(!dirOpen);
-              }}
-            >
-              {workspace.kind === "plain" ? (
-                <Icon name="chat_1" size={ICON_SM} />
-              ) : (
-                <Icon name="folder" size={ICON_SM} />
-              )}
-              <b>{workspace.label}</b>
-              {!workspace.readOnly && <Icon name="down_small" size={ICON_SM} className="caret" />}
-            </button>
-            {chip(
-              "preset",
-              controls.preset,
-              <>
-                <Icon name="shield" size={ICON_SM} />
-                <b>{controls.preset.label}</b>
-                <Icon name="down_small" size={ICON_SM} className="caret" />
-              </>,
-            )}
-            {branchMenu?.trigger}
-            {hint !== null && <span className="hint">{hint}</span>}
-          </div>
-        )}
       </div>
       {openMenu === "plus" && (
-        <Menu anchor={triggers.current.plus ?? null} label="添加" onClose={closeMenu}>
-          <MenuItem
-            icon={<Icon name="pic" size={ICON_SM} />}
-            label="添加文件…"
-            right="也可粘贴、拖入"
-            onSelect={openPicker}
-          />
-          <MenuItem
-            icon={<Icon name="at" size={ICON_SM} />}
-            label="引用文件…"
-            right={<span className="mono">@</span>}
-            {...(fileRefs === null ? { disabled: fileRefsUnavailable } : {})}
-            onSelect={() => {
-              closeMenu();
-              insertRefToken();
-            }}
-          />
+        <Menu
+          anchor={triggers.current.plus ?? null}
+          align="left"
+          placement="above"
+          className="composer-plus-menu"
+          label="添加"
+          onClose={closeMenu}
+        >
+          {WORK_MODE_ITEMS.map((item) => {
+            const disabledReason = workModeDisabled?.[item.name];
+            return (
+              <MenuItem
+                key={item.name}
+                icon={<Icon name={item.icon} size={ICON_SM} />}
+                label={item.label}
+                checked={workMode === item.name}
+                {...(disabledReason !== undefined ? { disabled: disabledReason } : {})}
+                onSelect={() => {
+                  closeMenu();
+                  updateWorkMode(item.name);
+                  textarea.current?.focus();
+                }}
+              />
+            );
+          })}
+          <MenuSeparator />
+          <MenuSubmenu
+            icon={<Icon name="file" size={ICON_SM} />}
+            label="技能"
+            right={<Icon name="right_small" size={ICON_SM} />}
+          >
+            <div className="menu-search-box">
+              <Icon name="search" size={ICON_SM} />
+              <input
+                className="menu-search"
+                type="search"
+                aria-label="搜索技能"
+                value={skillQuery}
+                onChange={(event) => {
+                  setSkillQuery(event.target.value);
+                }}
+              />
+            </div>
+            {filteredSkills.length === 0 ? (
+              <div className="menu-note">没有匹配的技能</div>
+            ) : (
+              filteredSkills.map((skill) => (
+                <MenuItem
+                  key={skill.name}
+                  label={skill.name}
+                  onSelect={() => {
+                    closeMenu();
+                    insertSkillToken(skill.name);
+                  }}
+                />
+              ))
+            )}
+            <MenuSeparator />
+            <MenuItem
+              icon={<Icon name="settings_1" size={ICON_SM} />}
+              label="管理技能"
+              onSelect={() => {
+                closeMenu();
+                onManageSkills?.();
+              }}
+            />
+          </MenuSubmenu>
+          <MenuSubmenu
+            icon={<Icon name="server" size={ICON_SM} />}
+            label="MCP"
+            right={
+              <>
+                {hasUnavailableMcp && <span className="mcp-dot" aria-hidden="true" />}
+                <Icon name="right_small" size={ICON_SM} />
+              </>
+            }
+          >
+            {mcpEntries.length > 0 && (
+              <>
+                {mcpEntries.map(([name, server]) => (
+                  <MenuItem
+                    key={name}
+                    icon={
+                      <span className={`mcp-state-dot is-${server.state}`} aria-hidden="true" />
+                    }
+                    label={name}
+                    onSelect={() => {
+                      closeMenu();
+                      onManageMcp?.();
+                    }}
+                  />
+                ))}
+                <MenuSeparator />
+              </>
+            )}
+            <MenuItem
+              icon={<Icon name="settings_1" size={ICON_SM} />}
+              label="管理 MCP"
+              onSelect={() => {
+                closeMenu();
+                onManageMcp?.();
+              }}
+            />
+          </MenuSubmenu>
         </Menu>
       )}
       {controls !== undefined && openMenu === "model" && controlMenu("model", controls.model)}

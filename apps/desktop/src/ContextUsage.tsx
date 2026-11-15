@@ -73,7 +73,9 @@ export function ContextUsage({
       if (event.target instanceof Node && !root.current?.contains(event.target)) close();
     };
     document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+    };
   }, [open, refresh, close]);
   const used = context
     ? percent(context.report.estimatedTokens, context.report.budgetTokens)
@@ -92,7 +94,10 @@ export function ContextUsage({
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? id : undefined}
-        onClick={() => (open ? close() : change("context"))}
+        onClick={() => {
+          if (open) close();
+          else change("context");
+        }}
       >
         <ContextRing percent={used} />
       </IconButton>

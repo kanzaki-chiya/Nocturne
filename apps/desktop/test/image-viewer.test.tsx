@@ -471,8 +471,7 @@ describe("ImageViewer", () => {
         ])}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件" }));
     const openFirst = await screen.findByRole("button", { name: "first.png" });
     fireEvent.click(openFirst);
     const dlg = screen.getByRole("dialog");

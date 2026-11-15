@@ -6,7 +6,7 @@
   max-width: 180px;
   min-width: 0;
   height: var(--ctl-h-sm);
-  padding: 0;
+  padding: 0 var(--space-1);
   border-radius: var(--radius-2);
   font: var(--fs-1)/var(--lh-tight) var(--mono);
   color: var(--a-muted);

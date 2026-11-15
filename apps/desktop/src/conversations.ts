@@ -217,6 +217,7 @@ export class Conversations {
   rejectedDraft: {
     text: string;
     attachments: ComposerSubmit["attachments"];
+    workMode?: WorkModeName | undefined;
     error: string;
   } | null = null;
   private queue: Promise<unknown> = Promise.resolve();
@@ -605,6 +606,9 @@ export class Conversations {
         this.rejectedDraft = {
           text: draftTextOf(input),
           attachments: input.attachments,
+          ...(input.draftText === undefined && input.workMode !== undefined
+            ? { workMode: input.workMode }
+            : {}),
           error: error instanceof Error ? error.message : String(error),
         };
       } else if (error instanceof RpcError && error.code === "invalid_model") {

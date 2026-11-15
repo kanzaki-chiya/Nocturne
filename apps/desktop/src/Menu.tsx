@@ -1,18 +1,30 @@
 import {
+  createContext,
   Fragment,
+  useContext,
   useEffect,
+  useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
 
+interface SubmenuCoord {
+  activeId: string | null;
+  setActiveId: (id: string | null) => void;
+}
+
+const SubmenuCoordContext = createContext<SubmenuCoord | null>(null);
+
 export interface MenuProps {
   /** 触发元素；菜单靠它的上/下边缘弹出，关闭时焦点还给它 */
   anchor: HTMLElement | null;
   /** 与触发元素左缘或右缘对齐 */
   align?: "left" | "right";
+  placement?: "auto" | "above" | "submenu";
   className?: string;
   label?: string;
   onClose: () => void;
@@ -34,6 +46,7 @@ const MENU_MARGIN = 8;
 export function Menu({
   anchor,
   align = "left",
+  placement = "auto",
   className,
   label,
   onClose,
@@ -42,14 +55,21 @@ export function Menu({
 }: MenuProps) {
   const root = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
+  const [activeSubmenuId, setActiveSubmenuId] = useState<string | null>(null);
+  const coord = useMemo<SubmenuCoord>(
+    () => ({ activeId: activeSubmenuId, setActiveId: setActiveSubmenuId }),
+    [activeSubmenuId],
+  );
 
   useLayoutEffect(() => {
     const bounds = anchor?.getBoundingClientRect();
+    const rawWidth = root.current?.offsetWidth ?? 0;
+    const menuWidth = rawWidth > 0 ? rawWidth : MENU_WIDTH;
     const horizontal =
       align === "right"
         ? { right: `${Math.max(MENU_MARGIN, window.innerWidth - (bounds?.right ?? 0))}px` }
         : {
-            left: `${Math.max(MENU_MARGIN, Math.min(bounds?.left ?? 0, window.innerWidth - MENU_WIDTH - MENU_MARGIN))}px`,
+            left: `${Math.max(MENU_MARGIN, Math.min(bounds?.left ?? 0, window.innerWidth - menuWidth - MENU_MARGIN))}px`,
           };
     const height = root.current?.offsetHeight ?? 0;
     const below =
@@ -58,7 +78,12 @@ export function Menu({
     // 优先向下开（hero 居中时目录/＋/档位菜单要在 tray 下方）；下方连 ~5 行都放不下才向上
     const BELOW_MIN = 190;
     let vertical: CSSProperties;
-    if (below >= Math.min(height, BELOW_MIN)) {
+    if (placement === "above") {
+      vertical = {
+        bottom: `${window.innerHeight - (bounds?.top ?? 0) + MENU_GAP}px`,
+        ...(height > above ? { maxHeight: `${Math.max(96, above)}px` } : {}),
+      };
+    } else if (below >= Math.min(height, BELOW_MIN)) {
       vertical = {
         top: `${(bounds?.bottom ?? 0) + MENU_GAP}px`,
         ...(height > below ? { maxHeight: `${Math.max(96, below)}px` } : {}),
@@ -69,7 +94,23 @@ export function Menu({
         ...(height > above ? { maxHeight: `${Math.max(96, above)}px` } : {}),
       };
     }
-    setStyle({ ...horizontal, ...vertical, visibility: "visible" });
+    if (placement === "submenu") {
+      const width = rawWidth > 0 ? rawWidth : MENU_WIDTH;
+      const rightX = (bounds?.right ?? 0) + 8;
+      const left =
+        rightX + width <= window.innerWidth - MENU_MARGIN
+          ? rightX
+          : Math.max(MENU_MARGIN, (bounds?.left ?? 0) - width - 8);
+      const bottomOffset = Math.max(MENU_MARGIN, window.innerHeight - (bounds?.bottom ?? 0));
+      setStyle({
+        left: `${left}px`,
+        bottom: `${bottomOffset}px`,
+        maxHeight: `${Math.max(96, (bounds?.bottom ?? window.innerHeight) - MENU_MARGIN)}px`,
+        visibility: "visible",
+      });
+    } else {
+      setStyle({ ...horizontal, ...vertical, visibility: "visible" });
+    }
     // state 要等重渲染才提交，此刻 DOM 仍是 visibility: hidden，focus() 会静默失败；
     // 先同步写 DOM 让菜单可见再聚焦（与随后提交的 style 一致）
     if (root.current !== null) root.current.style.visibility = "visible";
@@ -83,7 +124,7 @@ export function Menu({
     );
     const checked = root.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]');
     (checked ?? items?.[0])?.focus();
-  }, [anchor, align]);
+  }, [anchor, align, placement]);
 
   useEffect(() => {
     const outside = (event: PointerEvent) => {
@@ -113,13 +154,23 @@ export function Menu({
       return;
     }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    if (event.target instanceof HTMLInputElement && ["Home", "End"].includes(event.key)) return;
+    event.stopPropagation();
     const items = Array.from(
       root.current?.querySelectorAll<HTMLButtonElement>(
         '[role="menuitemradio"]:not(:disabled), [role="menuitem"]:not(:disabled)',
       ) ?? [],
-    );
+    ).filter((item) => item.closest('[role="menu"]') === root.current);
     if (items.length === 0) return;
+    const search = Array.from(
+      root.current?.querySelectorAll<HTMLInputElement>("input.menu-search") ?? [],
+    ).find((input) => input.closest('[role="menu"]') === root.current);
     const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "ArrowUp" && at === 0 && search !== undefined) {
+      event.preventDefault();
+      search.focus();
+      return;
+    }
     const next =
       event.key === "Home"
         ? 0
@@ -139,7 +190,7 @@ export function Menu({
       onKeyDown={keyboard}
       style={style}
     >
-      {children}
+      <SubmenuCoordContext.Provider value={coord}>{children}</SubmenuCoordContext.Provider>
     </div>
   );
 }
@@ -400,7 +451,122 @@ export function ChoiceMenu({
   );
 }
 
+export interface MenuSubmenuProps {
+  label: string;
+  icon?: ReactNode;
+  right?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}
+
+/** 二级子菜单触发项：悬停与 → 展开，← 与 Esc 退回触发项，移出延迟收起避免斜向移动闪退。 */
+export function MenuSubmenu({ label, icon, right, className, children }: MenuSubmenuProps) {
+  const id = useId();
+  const coord = useContext(SubmenuCoordContext);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = coord !== null ? coord.activeId === id : localOpen;
+  const trigger = useRef<HTMLButtonElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelClose = () => {
+    clearTimeout(timer.current);
+  };
+  useEffect(() => {
+    return () => {
+      clearTimeout(timer.current);
+    };
+  }, []);
+  const setOpenState = (next: boolean) => {
+    if (coord !== null) {
+      if (next) coord.setActiveId(id);
+      else if (coord.activeId === id) coord.setActiveId(null);
+    } else {
+      setLocalOpen(next);
+    }
+  };
+  const close = () => {
+    cancelClose();
+    setOpenState(false);
+  };
+  return (
+    <div
+      className="menu-submenu-entry"
+      onPointerEnter={cancelClose}
+      onPointerLeave={() => {
+        cancelClose();
+        timer.current = setTimeout(() => {
+          setOpenState(false);
+        }, 220);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowRight" && event.target === trigger.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          cancelClose();
+          setOpenState(true);
+        }
+      }}
+    >
+      <MenuItem
+        ref={trigger}
+        label={label}
+        icon={icon}
+        right={right}
+        active={open}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onHover={() => {
+          cancelClose();
+          if (!open) {
+            trigger.current?.focus();
+            setOpenState(true);
+          }
+        }}
+        onSelect={() => {
+          cancelClose();
+          setOpenState(!open);
+        }}
+      />
+      {open && (
+        <Menu
+          anchor={trigger.current}
+          placement="submenu"
+          className={className ? `composer-submenu ${className}` : "composer-submenu"}
+          label={label}
+          onClose={close}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+              trigger.current?.focus();
+              return;
+            }
+            if (event.key === "ArrowLeft") {
+              if (
+                event.target instanceof HTMLInputElement &&
+                event.target.value !== "" &&
+                (event.target.selectionStart ?? 0) > 0
+              ) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+              trigger.current?.focus();
+            }
+          }}
+        >
+          {children}
+        </Menu>
+      )}
+    </div>
+  );
+}
+
 export interface MenuItemProps {
+  ref?: React.Ref<HTMLButtonElement>;
+  "aria-haspopup"?: React.AriaAttributes["aria-haspopup"];
+  "aria-expanded"?: boolean;
   checked?: boolean;
   active?: boolean;
   danger?: boolean;
@@ -415,6 +581,9 @@ export interface MenuItemProps {
 }
 
 export function MenuItem({
+  ref,
+  "aria-haspopup": ariaHaspopup,
+  "aria-expanded": ariaExpanded,
   checked,
   active,
   danger,
@@ -430,7 +599,10 @@ export function MenuItem({
   return (
     <button
       type="button"
+      ref={ref}
       role={checked === undefined ? "menuitem" : "menuitemradio"}
+      aria-haspopup={ariaHaspopup}
+      aria-expanded={ariaExpanded}
       aria-checked={checked}
       className={`menu-item${active === true ? " act" : ""}${danger === true ? " danger" : ""}`}
       data-active={active === true ? "true" : undefined}

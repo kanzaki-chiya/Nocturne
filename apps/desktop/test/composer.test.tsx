@@ -1,9 +1,34 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { SkillOverview } from "@nocturne/core/protocol";
 import { Composer, type ComposerProps } from "../src/Composer";
 import { effortOption, presetOptions } from "../src/choice-info";
 import type { FileIndexEntry } from "../src/file-refs";
 import type { PickedImage } from "../src/picked-images";
+
+const testSkill = (overrides: Partial<SkillOverview> = {}): SkillOverview => ({
+  name: "alpha",
+  layer: "user",
+  source: ".agents",
+  entryPath: "C:/home/alpha",
+  realPath: "C:/actual/alpha",
+  otherEntries: [],
+  description: "技能说明",
+  displayedDescriptionLength: 4,
+  invocation: "both",
+  catalogStatus: "full",
+  enabled: true,
+  commandConflict: false,
+  missingDescription: false,
+  fields: { name: "alpha" },
+  unknownFields: {},
+  ignored: [],
+  bodyLines: 3,
+  bodyPreview: "body",
+  files: [{ name: "SKILL.md", directory: false }],
+  size: 256,
+  ...overrides,
+});
 
 const INDEX: FileIndexEntry[] = [
   { path: "src/main.ts", kind: "file" },
@@ -123,8 +148,7 @@ describe("Composer 文本与历史", () => {
     const rendered = render(<Composer {...properties} />);
     await act(async () => undefined);
     const field = input("提问前草稿");
-    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件" }));
     await screen.findByText("draft.png");
     const image = rendered.container.querySelector(".thumb2 img");
     rendered.rerender(<Composer {...properties} hidden />);
@@ -290,8 +314,7 @@ describe("Composer 文本与历史", () => {
     ]);
     render(<Composer {...props({ onSubmit, recordInputHistory, pickImages })} />);
     const field = input("保留这条消息");
-    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件" }));
     expect(await screen.findByText("a.png")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => {
@@ -663,8 +686,7 @@ describe("Composer 控件与附件", () => {
     const onSubmit = vi.fn(async () => true);
     render(<Composer {...props({ pickImages, onSubmit })} />);
     const field = input("看图");
-    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /添加文件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "添加文件" }));
     expect(await screen.findByText("picked.png")).toBeTruthy();
     fireEvent.paste(field, {
       clipboardData: {
@@ -715,7 +737,8 @@ describe("Composer 控件与附件", () => {
     const card = container.querySelector(".composer.session .cbox");
     const text = card?.querySelector(".txt");
     const toolbar = card?.querySelector(".tb");
-    const plus = screen.getByRole("button", { name: "添加图片或引用文件" });
+    const plus = screen.getByRole("button", { name: "添加" });
+    const paperclip = screen.getByRole("button", { name: "添加文件" });
     const send = screen.getByRole("button", { name: "发送" });
     expect(card).not.toBeNull();
     expect(Array.from(card?.children ?? [])).toEqual([text, toolbar]);
@@ -724,9 +747,11 @@ describe("Composer 控件与附件", () => {
     expect(text?.querySelector("button")).toBeNull();
     expect(toolbar?.parentElement).toBe(card);
     expect(plus.parentElement).toBe(toolbar);
+    expect(paperclip.parentElement).toBe(toolbar);
     expect(send.parentElement).toBe(toolbar);
     expect(Array.from(toolbar?.children ?? [])).toEqual([
       plus,
+      paperclip,
       preset,
       toolbar?.querySelector(".sp"),
       model,
@@ -757,7 +782,8 @@ describe("Composer 控件与附件", () => {
     const card = container.querySelector(".composer.session .cbox");
     const text = card?.querySelector(".txt");
     const toolbar = card?.querySelector(".tb");
-    const plus = screen.getByRole("button", { name: "添加图片或引用文件" });
+    const plus = screen.getByRole("button", { name: "添加" });
+    const paperclip = screen.getByRole("button", { name: "添加文件" });
     const preset = screen.getByRole("button", { name: "切换权限预设" });
     const model = screen.getByRole("button", { name: "切换模型" });
     const effort = screen.getByRole("button", { name: "切换思考档位" });
@@ -772,6 +798,7 @@ describe("Composer 控件与附件", () => {
     // ADR-0070：运行中输入非空时 ■ 与发送键并存
     expect(Array.from(toolbar?.children ?? [])).toEqual([
       plus,
+      paperclip,
       preset,
       toolbar?.querySelector(".sp"),
       model,
@@ -833,28 +860,15 @@ describe("Composer @ 引用", () => {
     ).toBeTruthy();
   });
 
-  it("fileRefs 为 null 时 @ 不弹层，＋ 菜单的引用文件禁用并带原因", async () => {
+  it("fileRefs 为 null 时 @ 不弹层，且 ＋ 菜单不再列出引用文件", async () => {
     render(<Composer {...props({ fileRefs: null })} />);
     input("看 @ma");
     await act(async () => {
       await Promise.resolve();
     });
     expect(screen.queryByRole("listbox")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    const item = screen.getByRole("menuitem", { name: /引用文件/ });
-    expect((item as HTMLButtonElement).disabled).toBe(true);
-    expect(item.getAttribute("title")).toBe("普通对话没有项目文件");
-  });
-
-  it("＋→引用文件 在光标处插入 @ 并打开弹层", async () => {
-    const fileRefs = { load: vi.fn(async () => INDEX), key: 0 };
-    render(<Composer {...props({ fileRefs })} />);
-    const field = input("hi");
-    field.setSelectionRange(2, 2);
-    fireEvent.click(screen.getByRole("button", { name: "添加图片或引用文件" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /引用文件/ }));
-    expect(field.value).toBe("hi @");
-    expect(await screen.findByRole("listbox", { name: "文件引用补全" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    expect(screen.queryByRole("menuitem", { name: /引用文件/ })).toBeNull();
   });
 
   it("U-05：Backspace 整删光标前的完整 @引用，键入中的词逐字删", () => {
@@ -964,5 +978,171 @@ describe("Composer 新会话页分支选择（ADR-0085）", () => {
     fireEvent.click(createItem);
     expect(onSelect).toHaveBeenCalledWith("r1110e/branch-picker", true);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
+  it("选执行方式显示标签并随发送带上 workMode，发送后标签清空；失败时保留标签", async () => {
+    const onSubmit = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { container } = render(<Composer {...props({ variant: "session", onSubmit })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    const plusMenu = await screen.findByRole("menu", { name: "添加" });
+    expect(plusMenu.textContent).toContain("追问需求");
+    expect(plusMenu.textContent).toContain("目标");
+    expect(plusMenu.textContent).toContain("计划");
+    expect(plusMenu.textContent).toContain("多代理攻坚");
+    expect(plusMenu.textContent).toContain("合奏");
+
+    fireEvent.click(within(plusMenu).getByRole("menuitemradio", { name: "目标" }));
+    expect(container.querySelector(".tb .tb-sep")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy();
+
+    // 选了执行方式但输入为空：发送按钮禁用，按 Enter 给用法提示而不发送
+    const sendBtn = screen.getByRole<HTMLButtonElement>("button", { name: "发送" });
+    expect(sendBtn.disabled).toBe(true);
+    const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("用法：/goal 任务");
+
+    // 填写任务但发送被拒绝：标签保留
+    fireEvent.change(field, { target: { value: "把测试跑绿" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenLastCalledWith({
+      text: "把测试跑绿",
+      workMode: "goal",
+      attachments: [],
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy());
+
+    // 再次发送成功：标签清空
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "取消目标" })).toBeNull());
+    expect(container.querySelector(".tb .tb-sep")).toBeNull();
+  });
+
+  it("取消执行方式标签后发送不再带 workMode", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(<Composer {...props({ onSubmit })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "计划" }));
+    const tag = screen.getByRole("button", { name: "取消计划" });
+    fireEvent.click(tag);
+    expect(screen.queryByRole("button", { name: "取消计划" })).toBeNull();
+
+    const field = input("只做普通提问");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenLastCalledWith({
+      text: "只做普通提问",
+      attachments: [],
+    });
+  });
+
+  it("被禁用的执行方式禁用并带悬停说明原因", async () => {
+    render(
+      <Composer
+        {...props({
+          variant: "session",
+          workModeDisabled: {
+            ensemble: "当前会话已有进行中的合奏，请先结束当前合奏",
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    const ensembleItem = (await screen.findByRole("menuitemradio", {
+      name: "合奏",
+    })) as HTMLButtonElement;
+    expect(ensembleItem.disabled).toBe(true);
+    expect(ensembleItem.getAttribute("title")).toBe("当前会话已有进行中的合奏，请先结束当前合奏");
+  });
+
+  it("技能子菜单支持无占位符搜索过滤、插入 /技能名 并保留管理技能入口", async () => {
+    const onManageSkills = vi.fn();
+    render(
+      <Composer
+        {...props({
+          skills: [
+            testSkill({ name: "plan-check", description: "检查计划步骤" }),
+            testSkill({ name: "deploy", description: "发布构建产物" }),
+          ],
+          onManageSkills,
+        })}
+      />,
+    );
+    const field = input("先");
+    field.setSelectionRange(1, 1);
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "技能" }));
+    const submenu = await screen.findByRole("menu", { name: "技能" });
+    const search = within(submenu).getByRole("searchbox", { name: "搜索技能" });
+    expect(search.getAttribute("placeholder")).toBeNull();
+
+    fireEvent.change(search, { target: { value: "deploy" } });
+    expect(within(submenu).queryByRole("menuitem", { name: "plan-check" })).toBeNull();
+    fireEvent.click(within(submenu).getByRole("menuitem", { name: "deploy" }));
+    expect(field.value).toBe("先 /deploy ");
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "技能" }));
+    const submenu2 = await screen.findByRole("menu", { name: "技能" });
+    fireEvent.click(within(submenu2).getByRole("menuitem", { name: "管理技能" }));
+    expect(onManageSkills).toHaveBeenCalledTimes(1);
+  });
+
+  it("MCP 不可用时 ＋ 按钮与 MCP 子菜单项显示红点，恢复后消失；点管理 MCP 走回调", async () => {
+    const onManageMcp = vi.fn();
+    const { rerender } = render(
+      <Composer
+        {...props({
+          variant: "session",
+          mcpServers: {
+            broken: { state: "failed", toolCount: 0, error: "连接失败" },
+            docs: { state: "ready", toolCount: 2 },
+          },
+          onManageMcp,
+        })}
+      />,
+    );
+    const plusBtn = screen.getByRole("button", { name: "添加" });
+    expect(plusBtn.querySelector(".mcp-dot")).not.toBeNull();
+
+    fireEvent.click(plusBtn);
+    const mcpTrigger = await screen.findByRole("menuitem", { name: "MCP" });
+    expect(mcpTrigger.querySelector(".mcp-dot")).not.toBeNull();
+    fireEvent.click(mcpTrigger);
+
+    const mcpSubmenu = await screen.findByRole("menu", { name: "MCP" });
+    expect(mcpSubmenu.textContent).toContain("broken");
+    expect(mcpSubmenu.textContent).toContain("docs");
+    expect(mcpSubmenu.querySelector(".mcp-state-dot.is-failed")).not.toBeNull();
+    expect(mcpSubmenu.querySelector(".mcp-state-dot.is-ready")).not.toBeNull();
+
+    fireEvent.click(within(mcpSubmenu).getByRole("menuitem", { name: "管理 MCP" }));
+    expect(onManageMcp).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Composer
+        {...props({
+          variant: "session",
+          mcpServers: {
+            broken: { state: "ready", toolCount: 1 },
+            docs: { state: "ready", toolCount: 2 },
+          },
+          onManageMcp,
+        })}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "添加" }).querySelector(".mcp-dot")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    expect(
+      (await screen.findByRole("menuitem", { name: "MCP" })).querySelector(".mcp-dot"),
+    ).toBeNull();
   });
 });

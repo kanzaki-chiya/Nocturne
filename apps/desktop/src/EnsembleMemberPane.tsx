@@ -268,6 +268,13 @@ export function EnsembleMemberPane({
         {...(prefs !== undefined ? { prefs } : {})}
         skills={skills}
         externalAgents={externalAgents}
+        workModeDisabled={{
+          "grill-me": "子会话不能使用执行方式",
+          goal: "子会话不能使用执行方式",
+          plan: "子会话不能使用执行方式",
+          boost: "子会话不能使用执行方式",
+          ensemble: "子会话不能使用执行方式",
+        }}
         todos={view.todos}
         running={showRunning}
         onSubmit={handleSubmit}

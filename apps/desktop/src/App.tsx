@@ -82,7 +82,7 @@ import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
 import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
 import { catchupPreface } from "./schedule-format";
-import { Button, ICON_SM, Icon, MoonMark } from "./ui";
+import { Button, MoonMark } from "./ui";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -319,6 +319,7 @@ export function App({ host }: { host: DesktopHost }) {
   const [draftRestore, setDraftRestore] = useState<{
     text: string;
     attachments: ComposerSubmit["attachments"];
+    workMode?: WorkModeName | undefined;
     error: string;
   } | null>(null);
   /** 已有会话在换模型卡片盖住输入框时被拒，卡片关掉后放回 */
@@ -326,6 +327,7 @@ export function App({ host }: { host: DesktopHost }) {
     id: string;
     text: string;
     attachments: ComposerSubmit["attachments"];
+    workMode?: WorkModeName | undefined;
     error: string;
   } | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -1241,6 +1243,9 @@ export function App({ host }: { host: DesktopHost }) {
           id: conversations.selectedId,
           text: input.draftText ?? input.text,
           attachments: input.attachments,
+          ...(input.draftText === undefined && input.workMode !== undefined
+            ? { workMode: input.workMode }
+            : {}),
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -2175,6 +2180,9 @@ export function App({ host }: { host: DesktopHost }) {
                       ? sessionRestore.attachments
                       : undefined
                   }
+                  initialWorkMode={
+                    sessionRestore?.id === active.session.id ? sessionRestore.workMode : undefined
+                  }
                   initialError={
                     sessionRestore?.id === active.session.id
                       ? `发送失败：${sessionRestore.error}`
@@ -2218,6 +2226,9 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                   onManageMcp={() => {
                     setPage("mcp");
+                  }}
+                  onManageSkills={() => {
+                    setPage("skills");
                   }}
                   onShellKindChange={onShellKindChange}
                 />
@@ -2294,6 +2305,12 @@ export function App({ host }: { host: DesktopHost }) {
                   onDirMenuOpenChange={setDirMenuOpen}
                   onManageProviders={() => {
                     setPage("providers");
+                  }}
+                  onManageMcp={() => {
+                    setPage("mcp");
+                  }}
+                  onManageSkills={() => {
+                    setPage("skills");
                   }}
                   restoreDraft={draftRestore}
                   onRestoreDraftUsed={() => {
@@ -2509,6 +2526,7 @@ interface SessionPaneProps {
   /** 分叉后填进输入框的原消息，或拒收后放回的草稿（Composer 首次挂载时取用） */
   initialDraft: string | undefined;
   initialAttachments?: ComposerSubmit["attachments"] | undefined;
+  initialWorkMode?: WorkModeName | undefined;
   initialError?: string | undefined;
   onInitialDraftUsed: () => void;
   outgoing: OutgoingBook;
@@ -2536,8 +2554,10 @@ interface SessionPaneProps {
   panel: StatusPanel | null;
   onPanelChange: (panel: StatusPanel | null) => void;
   onManageProviders: () => void;
-  /** 状态栏「MCP 未连接」标记：进入设置 › MCP */
+  /** 「+」->「MCP」子菜单与红点：进入设置 › MCP */
   onManageMcp: () => void;
+  /** 「+」->「技能」子菜单：进入设置 › 技能 */
+  onManageSkills: () => void;
   onManageGrants: () => void;
   computerActive?: ApplicationTarget | undefined;
   onStopComputer?: (() => void) | undefined;
@@ -2582,6 +2602,7 @@ function SessionPane({
   onFork,
   initialDraft,
   initialAttachments,
+  initialWorkMode,
   initialError,
   onInitialDraftUsed,
   outgoing,
@@ -2604,6 +2625,8 @@ function SessionPane({
   onPanelChange,
   providersVersion,
   onManageProviders,
+  onManageMcp,
+  onManageSkills,
   onManageGrants,
   computerActive,
   onStopComputer,
@@ -2738,6 +2761,21 @@ function SessionPane({
         }
         controls={controls.controls}
         onManageProviders={onManageProviders}
+        mcpServers={view.mcpServers}
+        onManageMcp={onManageMcp}
+        onManageSkills={onManageSkills}
+        workModeDisabled={
+          view.ensemble?.status === "active" || scheduleSource !== undefined
+            ? {
+                ...(scheduleSource !== undefined ? { boost: "当前环境不支持后台子代理" } : {}),
+                ...(view.ensemble?.status === "active"
+                  ? { ensemble: "当前会话已有进行中的合奏，请先结束当前合奏" }
+                  : scheduleSource !== undefined
+                    ? { ensemble: "当前环境不支持合奏" }
+                    : {}),
+              }
+            : undefined
+        }
         presetFooter={<SessionGrants grants={grants} session={session} onManage={onManageGrants} />}
         todos={view.todos}
         goal={view.goal}
@@ -2760,6 +2798,7 @@ function SessionPane({
         historyKey={session.id}
         initialDraft={initialDraft}
         initialAttachments={initialAttachments}
+        initialWorkMode={initialWorkMode}
         initialError={initialError}
         onInitialDraftUsed={onInitialDraftUsed}
         readInputHistory={() => session.readInputHistory()}
@@ -2803,8 +2842,17 @@ interface DraftPaneProps {
   providersVersion: number;
   /** 模型菜单底部「管理服务商…」 */
   onManageProviders: () => void;
+  /** 「+」->「MCP」子菜单底部「管理 MCP」 */
+  onManageMcp: () => void;
+  /** 「+」->「技能」子菜单底部「管理技能」 */
+  onManageSkills: () => void;
   /** 新会话被拒后放回的草稿；只在这次挂载取用 */
-  restoreDraft?: { text: string; attachments: ComposerSubmit["attachments"]; error: string } | null;
+  restoreDraft?: {
+    text: string;
+    attachments: ComposerSubmit["attachments"];
+    workMode?: WorkModeName | undefined;
+    error: string;
+  } | null;
   onRestoreDraftUsed?: () => void;
 }
 
@@ -2826,6 +2874,8 @@ function DraftPane({
   onDirMenuOpenChange,
   providersVersion,
   onManageProviders,
+  onManageMcp,
+  onManageSkills,
   restoreDraft,
   onRestoreDraftUsed,
 }: DraftPaneProps) {
@@ -3014,6 +3064,7 @@ function DraftPane({
           historyKey={historyKey}
           initialDraft={restoreDraft?.text}
           initialAttachments={restoreDraft?.attachments}
+          initialWorkMode={restoreDraft?.workMode}
           initialError={restoreDraft ? `发送失败：${restoreDraft.error}` : undefined}
           onInitialDraftUsed={onRestoreDraftUsed}
           controls={draft.controls}
@@ -3026,6 +3077,8 @@ function DraftPane({
           onDirMenuOpenChange={onDirMenuOpenChange}
           onSlash={onSlash}
           onManageProviders={onManageProviders}
+          onManageMcp={onManageMcp}
+          onManageSkills={onManageSkills}
         />
       </div>
     </div>
