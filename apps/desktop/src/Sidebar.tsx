@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { PinnedRow, ProjectNode, ProjectSort, SessionRow, SessionTree } from "./session-tree";
+import {
+  DEFAULT_LIMIT,
+  type PinnedRow,
+  type ProjectNode,
+  type ProjectSort,
+  type SessionRow,
+  type SessionTree,
+} from "./session-tree";
 import { ICON_MD, ICON_SM, Icon } from "./ui";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
@@ -25,25 +32,24 @@ export interface SidebarProps {
   pinnedIds: ReadonlySet<string>;
   selectedId: string | null;
   collapsed: ReadonlySet<string>;
-  expanded: ReadonlySet<string>;
-  chatsExpanded: boolean;
-  /** 「定时任务」分组已展开 */
-  scheduledExpanded?: boolean;
   /** 启用中的定时任务数；还没读到时不显示 */
   enabledScheduleCount?: number | undefined;
   /** 主区正在显示定时任务页 */
   schedulesOpen?: boolean;
   onOpenSchedules?: () => void;
   onSearch?: () => void;
-  onToggleScheduled?: () => void;
+  onExpandScheduled?: () => void;
+  onCollapseScheduled?: () => void;
   /** 项目排序（菜单「排序」选择）；只有 manual 能拖动、上移下移 */
   projectSort: ProjectSort;
   /** 已移除（隐藏）的项目路径，菜单里逐个恢复 */
   hiddenProjects: readonly { path: string; name: string }[];
   onSelectSession: (id: string) => void;
   onToggleCollapse: (key: string) => void;
-  onToggleExpand: (key: string) => void;
-  onToggleChats: () => void;
+  onExpandProject: (key: string) => void;
+  onCollapseProject: (key: string) => void;
+  onExpandChats: () => void;
+  onCollapseChats: () => void;
   onSetSort: (sort: ProjectSort) => void;
   /** 手动模式调整顺序：把 key 移到可见列表的插入位置 toIndex（移动前的下标，0..n） */
   onMoveProject: (key: string, toIndex: number) => void;
@@ -444,7 +450,6 @@ export function Sidebar(props: SidebarProps) {
 
   const renderProject = (project: ProjectNode, index: number) => {
     const collapsed = props.collapsed.has(project.key);
-    const expanded = props.expanded.has(project.key);
     let cls = "grp";
     if (dragKey === project.key) cls += " dragging";
     if (effectiveDrop === index) cls += " drop-before";
@@ -544,17 +549,17 @@ export function Sidebar(props: SidebarProps) {
               <button
                 className="item more"
                 onClick={() => {
-                  props.onToggleExpand(project.key);
+                  props.onExpandProject(project.key);
                 }}
               >
                 展开显示（还有 {project.moreCount} 个）
               </button>
             )}
-            {expanded && project.count > 0 && (
+            {project.sessions.length > DEFAULT_LIMIT && (
               <button
                 className="item more"
                 onClick={() => {
-                  props.onToggleExpand(project.key);
+                  props.onCollapseProject(project.key);
                 }}
               >
                 收起
@@ -613,17 +618,17 @@ export function Sidebar(props: SidebarProps) {
                 <button
                   className="item more flat"
                   onClick={() => {
-                    props.onToggleChats();
+                    props.onExpandChats();
                   }}
                 >
                   展开显示（还有 {props.tree.chats.moreCount} 个）
                 </button>
               )}
-              {props.chatsExpanded && (
+              {props.tree.chats.rows.length > DEFAULT_LIMIT && (
                 <button
                   className="item more flat"
                   onClick={() => {
-                    props.onToggleChats();
+                    props.onCollapseChats();
                   }}
                 >
                   收起
@@ -641,17 +646,17 @@ export function Sidebar(props: SidebarProps) {
                 <button
                   className="item more flat"
                   onClick={() => {
-                    props.onToggleScheduled?.();
+                    props.onExpandScheduled?.();
                   }}
                 >
                   展开显示（还有 {props.tree.scheduled.moreCount} 个）
                 </button>
               )}
-              {props.scheduledExpanded === true && (
+              {props.tree.scheduled.rows.length > DEFAULT_LIMIT && (
                 <button
                   className="item more flat"
                   onClick={() => {
-                    props.onToggleScheduled?.();
+                    props.onCollapseScheduled?.();
                   }}
                 >
                   收起

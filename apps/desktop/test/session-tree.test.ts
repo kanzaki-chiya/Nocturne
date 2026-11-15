@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   activityMs,
   buildSessionTree,
+  DEFAULT_LIMIT,
+  EXPAND_STEP,
   formatRelative,
   moveProjectKey,
   projectKey,
@@ -33,13 +35,19 @@ const noPrefs = { pinned: [] as string[], projects: [] as string[], hidden: [] a
 const WS = "C:\\Users\\A\\.nocturne\\workspace";
 const opts = (o?: {
   plainWorkspace?: string | null;
+  chatsLimit?: number;
+  scheduledLimit?: number;
+  projectLimits?: Record<string, number>;
   chatsExpanded?: boolean;
   expanded?: string[];
   collapsed?: string[];
 }) => ({
   plainWorkspace: o?.plainWorkspace ?? null,
-  chatsExpanded: o?.chatsExpanded ?? false,
-  expanded: new Set(o?.expanded ?? []),
+  ...(o?.chatsLimit !== undefined ? { chatsLimit: o.chatsLimit } : {}),
+  ...(o?.scheduledLimit !== undefined ? { scheduledLimit: o.scheduledLimit } : {}),
+  ...(o?.projectLimits !== undefined ? { projectLimits: new Map(Object.entries(o.projectLimits)) } : {}),
+  ...(o?.chatsExpanded !== undefined ? { chatsExpanded: o.chatsExpanded } : {}),
+  ...(o?.expanded !== undefined ? { expanded: new Set(o.expanded) } : {}),
   collapsed: new Set(o?.collapsed ?? []),
   now: NOW,
 });
@@ -519,5 +527,62 @@ describe("activityMs 排序", () => {
       opts(),
     );
     expect(tree.projects.map((p) => p.key)).toEqual(["z:\\b", "z:\\c", "z:\\a"]);
+  });
+});
+
+describe("分批条数截取", () => {
+  it("对话、项目、定时任务均按条数截取，moreCount 为剩余数量，剩余不足 20 时全部显示", () => {
+    const chats = Array.from({ length: 35 }, (_, i) => session(`c${i}`, WS, NOW - i * 1000));
+    const proj = Array.from({ length: 32 }, (_, i) => session(`p${i}`, "Z:\\repo", NOW - i * 1000));
+    const sched = Array.from({ length: 28 }, (_, i) =>
+      session(`s${i}`, "Z:\\repo", NOW - i * 1000, {
+        schedule: { taskId: "t1", scheduledAt: "2026-10-04T11:00:00Z", trigger: "schedule" },
+      }),
+    );
+    const all = [...chats, ...proj, ...sched];
+
+    const page1 = buildSessionTree(all, noPrefs, opts({ plainWorkspace: WS }));
+    expect(page1.chats.rows).toHaveLength(DEFAULT_LIMIT);
+    expect(page1.chats.moreCount).toBe(30);
+    expect(page1.projects[0]?.sessions).toHaveLength(DEFAULT_LIMIT);
+    expect(page1.projects[0]?.moreCount).toBe(27);
+    expect(page1.scheduled.rows).toHaveLength(DEFAULT_LIMIT);
+    expect(page1.scheduled.moreCount).toBe(23);
+
+    const step1 = DEFAULT_LIMIT + EXPAND_STEP; // 25
+    const page2 = buildSessionTree(
+      all,
+      noPrefs,
+      opts({
+        plainWorkspace: WS,
+        chatsLimit: step1,
+        projectLimits: { "z:\\repo": step1 },
+        scheduledLimit: step1,
+      }),
+    );
+    expect(page2.chats.rows).toHaveLength(25);
+    expect(page2.chats.moreCount).toBe(10);
+    expect(page2.projects[0]?.sessions).toHaveLength(25);
+    expect(page2.projects[0]?.moreCount).toBe(7);
+    expect(page2.scheduled.rows).toHaveLength(25);
+    expect(page2.scheduled.moreCount).toBe(3);
+
+    const step2 = step1 + EXPAND_STEP; // 45，剩余均不足 20
+    const page3 = buildSessionTree(
+      all,
+      noPrefs,
+      opts({
+        plainWorkspace: WS,
+        chatsLimit: step2,
+        projectLimits: { "z:\\repo": step2 },
+        scheduledLimit: step2,
+      }),
+    );
+    expect(page3.chats.rows).toHaveLength(35);
+    expect(page3.chats.moreCount).toBe(0);
+    expect(page3.projects[0]?.sessions).toHaveLength(32);
+    expect(page3.projects[0]?.moreCount).toBe(0);
+    expect(page3.scheduled.rows).toHaveLength(28);
+    expect(page3.scheduled.moreCount).toBe(0);
   });
 });

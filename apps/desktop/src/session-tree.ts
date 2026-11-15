@@ -145,11 +145,17 @@ export interface TreeOptions {
   plainWorkspace: string | null;
   /** 用过的全部普通对话工作区：cwd 命中任意一个的会话归入「对话」区 */
   plainWorkspaces?: readonly string[];
-  /** 「展开显示」已展开的项目 key */
-  expanded: ReadonlySet<string>;
-  /** 「对话」区已展开（显示全部，不再限 limit 条） */
+  /** 每个项目当前显示的条数（缺省按 limit） */
+  projectLimits?: ReadonlyMap<string, number>;
+  /** 「对话」区当前显示的条数（缺省按 limit） */
+  chatsLimit?: number;
+  /** 「定时任务」区当前显示的条数（缺省按 limit） */
+  scheduledLimit?: number;
+  /** @deprecated 兼容手机网页全量展开；新调用方请传 projectLimits */
+  expanded?: ReadonlySet<string>;
+  /** @deprecated 兼容手机网页全量展开；新调用方请传 chatsLimit */
   chatsExpanded?: boolean;
-  /** 「定时任务」区已展开 */
+  /** @deprecated 兼容手机网页全量展开；新调用方请传 scheduledLimit */
   scheduledExpanded?: boolean;
   /** 已折叠的项目 key */
   collapsed: ReadonlySet<string>;
@@ -161,7 +167,17 @@ export interface TreeOptions {
   marks?: Readonly<Record<string, SessionMark>>;
 }
 
-const DEFAULT_LIMIT = 5;
+export const DEFAULT_LIMIT = 5;
+export const EXPAND_STEP = 20;
+
+function resolveLimit(
+  explicit: number | undefined,
+  legacyExpanded: boolean | undefined,
+  defaultLimit: number,
+): number {
+  if (explicit !== undefined) return Math.max(0, explicit);
+  return legacyExpanded === true ? Number.POSITIVE_INFINITY : defaultLimit;
+}
 
 /** 空会话（无用户消息且未锁定）不显示（ADR-0046 修订第 4 条）；外部 agent 新建会话显示 */
 function isVisible(session: TreeSessionSummary): boolean {
@@ -226,23 +242,27 @@ export function buildSessionTree(
   const chatRows = chatSessions
     .filter((s) => !pinnedIds.has(s.id))
     .sort((a, b) => activityMs(b) - activityMs(a));
-  const chatsShown = options.chatsExpanded ? chatRows : chatRows.slice(0, limit);
+  const chatsLimit = resolveLimit(options.chatsLimit, options.chatsExpanded, limit);
+  const chatsShown = Number.isFinite(chatsLimit) ? chatRows.slice(0, chatsLimit) : chatRows;
   const chats: ChatsSection = {
     rows: chatsShown.map((s) =>
       toRow(s, now, options.statuses?.[s.id] ?? "idle", options.marks?.[s.id]),
     ),
-    moreCount: options.chatsExpanded ? 0 : chatRows.length - chatsShown.length,
+    moreCount: chatRows.length - chatsShown.length,
   };
 
   const scheduledRows = visible
     .filter((s) => scheduledIds.has(s.id) && !pinnedIds.has(s.id))
     .sort((a, b) => activityMs(b) - activityMs(a));
-  const scheduledShown = options.scheduledExpanded ? scheduledRows : scheduledRows.slice(0, limit);
+  const scheduledLimit = resolveLimit(options.scheduledLimit, options.scheduledExpanded, limit);
+  const scheduledShown = Number.isFinite(scheduledLimit)
+    ? scheduledRows.slice(0, scheduledLimit)
+    : scheduledRows;
   const scheduled: ChatsSection = {
     rows: scheduledShown.map((s) =>
       toRow(s, now, options.statuses?.[s.id] ?? "idle", options.marks?.[s.id]),
     ),
-    moreCount: options.scheduledExpanded ? 0 : scheduledRows.length - scheduledShown.length,
+    moreCount: scheduledRows.length - scheduledShown.length,
   };
 
   // 项目分组（对话会话、定时任务会话与对话工作区本身不进 projects）
@@ -356,8 +376,12 @@ export function buildSessionTree(
     const unpinned = group.sessions
       .filter((s) => !pinnedIds.has(s.id))
       .sort((a, b) => activityMs(b) - activityMs(a));
-    const expanded = options.expanded.has(key);
-    const shown = expanded ? unpinned : unpinned.slice(0, limit);
+    const projectLimit = resolveLimit(
+      options.projectLimits?.get(key),
+      options.expanded?.has(key),
+      limit,
+    );
+    const shown = Number.isFinite(projectLimit) ? unpinned.slice(0, projectLimit) : unpinned;
     projects.push({
       key,
       name: projectName(group.path),
@@ -366,7 +390,7 @@ export function buildSessionTree(
       sessions: shown.map((s) =>
         toRow(s, now, options.statuses?.[s.id] ?? "idle", options.marks?.[s.id]),
       ),
-      moreCount: expanded ? 0 : unpinned.length - shown.length,
+      moreCount: unpinned.length - shown.length,
       manual: manualOrder.includes(key),
     });
   }

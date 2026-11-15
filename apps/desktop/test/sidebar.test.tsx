@@ -1,8 +1,15 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Sidebar, type SidebarProps } from "../src/Sidebar";
-import type { SessionTree } from "../src/session-tree";
+import {
+  buildSessionTree,
+  DEFAULT_LIMIT,
+  EXPAND_STEP,
+  type SessionSummary,
+  type SessionTree,
+} from "../src/session-tree";
 
 const noop = () => undefined;
 
@@ -20,12 +27,12 @@ function props(overrides?: Partial<SidebarProps>): SidebarProps {
     pinnedIds: new Set(),
     selectedId: null,
     collapsed: new Set(),
-    expanded: new Set(),
-    chatsExpanded: false,
     onSelectSession: noop,
     onToggleCollapse: noop,
-    onToggleExpand: noop,
-    onToggleChats: noop,
+    onExpandProject: noop,
+    onCollapseProject: noop,
+    onExpandChats: noop,
+    onCollapseChats: noop,
     projectSort: "activity",
     hiddenProjects: [],
     onSetSort: noop,
@@ -556,5 +563,137 @@ describe("Sidebar", () => {
     const idleRow = screen.getByText("空闲会话").closest(".irow");
     expect(idleRow?.querySelector(".row-spin")).toBeNull();
     expect(idleRow?.querySelector(".tag")).toBeNull();
+  });
+
+  it("分批展开：点一次多 20 个，不足 20 时全部显示且按钮消失，「收起」回到 5 个", () => {
+    const WS = "Z:\\plain";
+    const NOW = new Date("2026-10-04T12:00:00").getTime();
+    const mk = (id: string, cwd: string, i: number, sched = false): SessionSummary => ({
+      id,
+      createdAt: "2026-10-01T00:00:00Z",
+      cwd,
+      workspaceRoot: cwd,
+      model: { provider: "p", model: "m" },
+      mtimeMs: NOW - i * 1000,
+      firstText: `会话-${id}`,
+      ...(sched
+        ? {
+            schedule: {
+              taskId: "t1",
+              scheduledAt: "2026-10-04T11:00:00Z",
+              trigger: "schedule" as const,
+            },
+          }
+        : {}),
+    });
+    const sessions: SessionSummary[] = [
+      ...Array.from({ length: 30 }, (_, i) => mk(`c${i}`, WS, i)),
+      ...Array.from({ length: 30 }, (_, i) => mk(`p${i}`, "Z:\\repo", i)),
+      ...Array.from({ length: 30 }, (_, i) => mk(`s${i}`, "Z:\\repo", i, true)),
+    ];
+
+    function PagedHarness() {
+      const [chatsLimit, setChatsLimit] = useState(DEFAULT_LIMIT);
+      const [scheduledLimit, setScheduledLimit] = useState(DEFAULT_LIMIT);
+      const [projectLimits, setProjectLimits] = useState<ReadonlyMap<string, number>>(
+        () => new Map(),
+      );
+      const tree = buildSessionTree(
+        sessions,
+        { pinned: [], projects: [], hidden: [] },
+        {
+          plainWorkspace: WS,
+          chatsLimit,
+          scheduledLimit,
+          projectLimits,
+          collapsed: new Set(),
+          now: NOW,
+        },
+      );
+      return (
+        <Sidebar
+          {...props({
+            tree,
+            onExpandChats: () => {
+              setChatsLimit((n) => n + EXPAND_STEP);
+            },
+            onCollapseChats: () => {
+              setChatsLimit(DEFAULT_LIMIT);
+            },
+            onExpandScheduled: () => {
+              setScheduledLimit((n) => n + EXPAND_STEP);
+            },
+            onCollapseScheduled: () => {
+              setScheduledLimit(DEFAULT_LIMIT);
+            },
+            onExpandProject: (key) => {
+              setProjectLimits((map) => {
+                const next = new Map(map);
+                next.set(key, (next.get(key) ?? DEFAULT_LIMIT) + EXPAND_STEP);
+                return next;
+              });
+            },
+            onCollapseProject: (key) => {
+              setProjectLimits((map) => {
+                const next = new Map(map);
+                next.delete(key);
+                return next;
+              });
+            },
+          })}
+        />
+      );
+    }
+
+    const { container } = render(<PagedHarness />);
+    const chatsNav = container.querySelector(".tree > .nav") as HTMLElement;
+    const schedNav = screen.getByRole("navigation", { name: "定时任务会话" });
+    const projNav = container.querySelector(".grp .nav.sub") as HTMLElement;
+
+    // 初始各 5 条，无「收起」
+    expect(chatsNav.querySelectorAll(".irow")).toHaveLength(5);
+    expect(within(chatsNav).getByText("展开显示（还有 25 个）")).toBeTruthy();
+    expect(within(chatsNav).queryByText("收起")).toBeNull();
+
+    expect(schedNav.querySelectorAll(".irow")).toHaveLength(5);
+    expect(within(schedNav).getByText("展开显示（还有 25 个）")).toBeTruthy();
+    expect(within(schedNav).queryByText("收起")).toBeNull();
+
+    expect(projNav.querySelectorAll(".irow")).toHaveLength(5);
+    expect(within(projNav).getByText("展开显示（还有 25 个）")).toBeTruthy();
+    expect(within(projNav).queryByText("收起")).toBeNull();
+
+    // 对话、定时任务、项目各自点一次：变成 25 条，显示「还有 5 个」和「收起」
+    fireEvent.click(within(chatsNav).getByText("展开显示（还有 25 个）"));
+    expect(chatsNav.querySelectorAll(".irow")).toHaveLength(25);
+    expect(within(chatsNav).getByText("展开显示（还有 5 个）")).toBeTruthy();
+    expect(within(chatsNav).getByText("收起")).toBeTruthy();
+
+    fireEvent.click(within(schedNav).getByText("展开显示（还有 25 个）"));
+    expect(schedNav.querySelectorAll(".irow")).toHaveLength(25);
+    expect(within(schedNav).getByText("展开显示（还有 5 个）")).toBeTruthy();
+    expect(within(schedNav).getByText("收起")).toBeTruthy();
+
+    fireEvent.click(within(projNav).getByText("展开显示（还有 25 个）"));
+    expect(projNav.querySelectorAll(".irow")).toHaveLength(25);
+    expect(within(projNav).getByText("展开显示（还有 5 个）")).toBeTruthy();
+    expect(within(projNav).getByText("收起")).toBeTruthy();
+
+    // 再点一次：剩余 5 个不足 20，全部显示且「展开显示」消失
+    fireEvent.click(within(projNav).getByText("展开显示（还有 5 个）"));
+    expect(projNav.querySelectorAll(".irow")).toHaveLength(30);
+    expect(within(projNav).queryByText(/展开显示/)).toBeNull();
+    expect(within(projNav).getByText("收起")).toBeTruthy();
+
+    // 点「收起」回到 5 个
+    fireEvent.click(within(projNav).getByText("收起"));
+    expect(projNav.querySelectorAll(".irow")).toHaveLength(5);
+    expect(within(projNav).getByText("展开显示（还有 25 个）")).toBeTruthy();
+    expect(within(projNav).queryByText("收起")).toBeNull();
+
+    fireEvent.click(within(chatsNav).getByText("收起"));
+    expect(chatsNav.querySelectorAll(".irow")).toHaveLength(5);
+    fireEvent.click(within(schedNav).getByText("收起"));
+    expect(schedNav.querySelectorAll(".irow")).toHaveLength(5);
   });
 });

@@ -109,6 +109,8 @@ import { useDraftControls, useSessionControls } from "./session-controls";
 import {
   activityMs,
   buildSessionTree,
+  DEFAULT_LIMIT,
+  EXPAND_STEP,
   moveProjectKey,
   projectKey,
   projectName,
@@ -330,8 +332,8 @@ export function App({ host }: { host: DesktopHost }) {
     workMode?: WorkModeName | undefined;
     error: string;
   } | null>(null);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const [chatsExpanded, setChatsExpanded] = useState(false);
+  const [projectLimits, setProjectLimits] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const [chatsLimit, setChatsLimit] = useState(DEFAULT_LIMIT);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<StartupError | null>(null);
   /**
@@ -393,7 +395,7 @@ export function App({ host }: { host: DesktopHost }) {
     searchOpenRef.current = open;
     setSearchOpenState(open);
   }, []);
-  const [scheduledExpanded, setScheduledExpanded] = useState(false);
+  const [scheduledLimit, setScheduledLimit] = useState(DEFAULT_LIMIT);
   const [enabledScheduleCount, setEnabledScheduleCount] = useState<number | undefined>();
   const [scheduleNames, setScheduleNames] = useState<ReadonlyMap<string, string>>(() => new Map());
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -1397,9 +1399,9 @@ export function App({ host }: { host: DesktopHost }) {
       buildSessionTree(displayedSessions, p, {
         plainWorkspace: effectiveWorkspace,
         plainWorkspaces: p.plainWorkspaces,
-        chatsExpanded,
-        scheduledExpanded,
-        expanded,
+        chatsLimit,
+        scheduledLimit,
+        projectLimits,
         collapsed,
         statuses: listed
           ? Object.fromEntries(
@@ -1414,9 +1416,9 @@ export function App({ host }: { host: DesktopHost }) {
       listed,
       prefsVersion,
       effectiveWorkspace,
-      chatsExpanded,
-      scheduledExpanded,
-      expanded,
+      chatsLimit,
+      scheduledLimit,
+      projectLimits,
       collapsed,
       conversationVersion,
       sessionMarks,
@@ -1755,9 +1757,6 @@ export function App({ host }: { host: DesktopHost }) {
           pinnedIds={pinnedIds}
           selectedId={selectedId}
           collapsed={collapsed}
-          expanded={expanded}
-          chatsExpanded={chatsExpanded}
-          scheduledExpanded={scheduledExpanded}
           enabledScheduleCount={enabledScheduleCount}
           schedulesOpen={schedulesOpen}
           onSearch={() => {
@@ -1767,8 +1766,11 @@ export function App({ host }: { host: DesktopHost }) {
             setPage(null);
             setSchedulesOpen(true);
           }}
-          onToggleScheduled={() => {
-            setScheduledExpanded((open) => !open);
+          onExpandScheduled={() => {
+            setScheduledLimit((n) => n + EXPAND_STEP);
+          }}
+          onCollapseScheduled={() => {
+            setScheduledLimit(DEFAULT_LIMIT);
           }}
           onSelectSession={(id) => {
             const summary = displayedSessions.find((s) => s.id === id);
@@ -1781,11 +1783,25 @@ export function App({ host }: { host: DesktopHost }) {
           onToggleCollapse={(key) => {
             setCollapsed((s) => toggleIn(s, key));
           }}
-          onToggleExpand={(key) => {
-            setExpanded((s) => toggleIn(s, key));
+          onExpandProject={(key) => {
+            setProjectLimits((map) => {
+              const next = new Map(map);
+              next.set(key, (next.get(key) ?? DEFAULT_LIMIT) + EXPAND_STEP);
+              return next;
+            });
           }}
-          onToggleChats={() => {
-            setChatsExpanded((v) => !v);
+          onCollapseProject={(key) => {
+            setProjectLimits((map) => {
+              const next = new Map(map);
+              next.delete(key);
+              return next;
+            });
+          }}
+          onExpandChats={() => {
+            setChatsLimit((n) => n + EXPAND_STEP);
+          }}
+          onCollapseChats={() => {
+            setChatsLimit(DEFAULT_LIMIT);
           }}
           projectSort={p.projectSort}
           hiddenProjects={p.hidden.map((path) => ({ path, name: projectName(path) }))}
