@@ -8,6 +8,7 @@ import { installKeyDiag } from "./key-diag";
 import { installMotion } from "./motion";
 import { createTauriHost } from "./tauri-host";
 import { WindowFrame } from "./WindowFrame";
+import "./fonts.css";
 import "./styles.css";
 
 // RPC 连接持有外部进程与会话锁，不能随 React Fast Refresh 丢弃所有权。

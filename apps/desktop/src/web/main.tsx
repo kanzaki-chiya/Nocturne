@@ -4,6 +4,7 @@ import { PhoneApp } from "./App";
 import { indexedStorage } from "./storage";
 import { takePairingFragment } from "./pairing";
 import { browserPush, registerWorker } from "./browser-push";
+import "../fonts.css";
 import "../styles.css";
 import "./phone.css";
 
