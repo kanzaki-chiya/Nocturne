@@ -547,9 +547,11 @@
 .phone .conversation-code pre {
   overflow: auto;
 }
-/* 与桌面端一致：各段单行省略；放不下的段整体折到下一行，参数不被挤成竖排 */
+/* 与桌面端一致：各段单行省略；放不下的段整体折到下一行，参数不被挤成竖排；
+   summary 维持 44px 触控高度，多行容器禁用默认 stretch 以免单行被拉高、折叠箭头掉出中线 */
 .phone .tool-line {
   flex-wrap: wrap;
+  align-content: center;
 }
 .phone .tool-arg,
 .phone .tool-line:has(.tool-live) .tool-arg {
