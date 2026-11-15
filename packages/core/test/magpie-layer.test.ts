@@ -47,7 +47,11 @@ const MODELS = [
   // 经网关翻译、没有直通接口的模型：回落到条目类型 Chat Completions
   { id: "group/auto" },
 ];
-function magpieFile(baseURL: string, model = "magpie/deepseek/pro", models = MODELS) {
+function magpieFile(
+  baseURL: string,
+  model = "magpie/deepseek/pro",
+  models: readonly Record<string, unknown>[] = MODELS,
+) {
   return { model, magpie: { baseURL, key: KEY, models } };
 }
 const load = (home: string, env: Record<string, string> = {}) =>
@@ -489,13 +493,18 @@ describe("agy-cli 模型默认不修剪（ADR-0066 修订）", () => {
       { id: "workbuddy/deepseek-v4.1-flash", context: 128000 },
     ];
     write(path.join(home, "config.json"), { modelsDev: false });
-    write(path.join(home, "magpie.json"), magpieFile("http://127.0.0.1:3425/v1", "magpie/agy-cli/gemini-4-hydrogen", models));
+    write(
+      path.join(home, "magpie.json"),
+      magpieFile("http://127.0.0.1:3425/v1", "magpie/agy-cli/gemini-4-hydrogen", models),
+    );
 
     const config = await load(home);
     const entry = magpieEntry(config.base.providers);
     expect(entry?.models?.["agy-cli/gemini-4-hydrogen"]?.capabilities?.historyPrune).toBe(false);
     expect(entry?.models?.["agy-cli/claude-sonnet"]?.capabilities?.historyPrune).toBe(false);
-    expect(entry?.models?.["workbuddy/deepseek-v4.1-flash"]?.capabilities?.historyPrune).toBeUndefined();
+    expect(
+      entry?.models?.["workbuddy/deepseek-v4.1-flash"]?.capabilities?.historyPrune,
+    ).toBeUndefined();
     expect(entry?.models?.["deepseek/pro"]?.capabilities?.historyPrune).toBeUndefined();
 
     const runtime = await createRuntime({ cwd: ws, sessionsDir: temp(), config });

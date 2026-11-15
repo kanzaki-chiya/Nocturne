@@ -968,7 +968,9 @@ describe("capabilities.historyPrune schema 与传递（ADR-0066）", () => {
     });
     const rc = await load();
     expect(rc.base.providers[0]?.models?.["no-prune"]?.capabilities?.historyPrune).toBe(false);
-    expect(rc.base.providers[0]?.models?.["default-prune"]?.capabilities?.historyPrune).toBeUndefined();
+    expect(
+      rc.base.providers[0]?.models?.["default-prune"]?.capabilities?.historyPrune,
+    ).toBeUndefined();
 
     const { createRuntime } = await import("../src/index.js");
     const ws = path.join(root, "ws-history-prune");
@@ -981,7 +983,9 @@ describe("capabilities.historyPrune schema 与传递（ADR-0066）", () => {
     });
     const models = runtime.listModels();
     expect(models.find((m) => m.ref.model === "no-prune")?.capabilities.historyPrune).toBe(false);
-    expect(models.find((m) => m.ref.model === "default-prune")?.capabilities.historyPrune).toBe(true);
+    expect(models.find((m) => m.ref.model === "default-prune")?.capabilities.historyPrune).toBe(
+      true,
+    );
     const views = await rc.listModelSettings("p1");
     for (const v of views) {
       expect(Object.keys(v.fields)).not.toContain("historyPrune");
@@ -1011,9 +1015,9 @@ describe("capabilities.historyPrune schema 与传递（ADR-0066）", () => {
       ],
     });
     const rc = await load();
-    expect(rc.base.providers.find((p) => p.id === "p1")?.models?.m1?.capabilities?.historyPrune).toBe(
-      true,
-    );
+    expect(
+      rc.base.providers.find((p) => p.id === "p1")?.models?.m1?.capabilities?.historyPrune,
+    ).toBe(true);
     await fs.unlink(path.join(home, "providers.json"));
     await fs.unlink(path.join(home, "config.json"));
   });
@@ -1034,4 +1038,3 @@ describe("capabilities.historyPrune schema 与传递（ADR-0066）", () => {
     await fs.unlink(path.join(home, "config.json"));
   });
 });
-
