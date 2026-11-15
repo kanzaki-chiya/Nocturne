@@ -350,6 +350,10 @@ button {
   background: var(--a-multi-sel);
   color: var(--a-text);
 }
+.nav .item.on.msel,
+.irow:hover .item.on.msel {
+  background: var(--a-multi-sel-strong);
+}
 
 /* 会话行「…」菜单按钮：.irow 是容器（按钮不能嵌套），默认隐藏、
    行悬停/focus-within 时显示；右侧 meta/项目标签同时让位，

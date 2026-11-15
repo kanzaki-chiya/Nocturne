@@ -26,7 +26,7 @@
   - 表面层次：`--a-bg`（主画布）、`--a-side`（标题栏、侧栏与设置导航）、`--a-panel`（浮层、菜单、对话框、输入框）、`--a-raised`（悬停底、次级块、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg` / `--a-qr-fg`（二维码底与前景）。
   - 文字层次：`--a-text`（正文与标题）、`--a-secondary`（次要正文、未选中导航、按钮文字）、`--a-muted`（分组标题、辅助标签）、`--a-faint`（占位符、装饰分隔、禁用灰字）。深浅色都不使用纯黑或纯白作大面积底或字。
 - **强调与状态**：
-  - 强调色：`--a-accent`、`--a-accent-hover`、`--a-accentAlt`、`--a-on-accent`、`--a-accent-subtle`、`--a-accent-border`、`--a-focus-ring`；选中态：`--a-sel`、`--a-sel-strong`、`--a-multi-sel`。
+  - 强调色：`--a-accent`、`--a-accent-hover`、`--a-accentAlt`、`--a-on-accent`、`--a-accent-subtle`、`--a-accent-border`、`--a-focus-ring`；选中态：`--a-sel`、`--a-sel-strong`、`--a-multi-sel`、`--a-multi-sel-strong`。
   - 实心主按钮（发送）：`--a-btn`（指向 `--a-text`）与 `--a-on-btn`（指向 `--a-bg`），组件不直接引用 `--a-text`。
   - 边框与控件：`--a-border`、`--a-border-strong`、`--a-switch-off`、`--a-switch-knob`、`--a-scroll`、`--a-scrollThumbHover`。
   - 语义色：`--a-success` / `--a-success-bg`、`--a-warning` / `--a-warning-bg` / `--a-warning-border`、`--a-error` / `--a-error-bg` / `--a-error-border`。
