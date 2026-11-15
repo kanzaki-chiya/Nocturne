@@ -35,7 +35,7 @@ import {
 } from "../outgoing";
 import { syncShellSnapshot } from "../shell-snapshot";
 import { forkDraftText } from "../fork-session";
-import type { SessionSummary, SessionStatus } from "../session-tree";
+import { activityMs, type SessionSummary, type SessionStatus } from "../session-tree";
 
 export interface PhoneSession {
   session: RpcSession;
@@ -384,7 +384,7 @@ export class PhoneSessions {
     if (!client) return;
     const list = await client.runtime.listSessions();
     if (generation !== this.generation) return;
-    this.list = list.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    this.list = list.sort((a, b) => activityMs(b) - activityMs(a));
     this.loaded = true;
     this.changed();
     const previous = this.tracked;

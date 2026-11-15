@@ -8,6 +8,11 @@ import type { RpcRuntime } from "@nocturne/rpc/client";
 
 export type SessionSummary = Awaited<ReturnType<RpcRuntime["listSessions"]>>[number];
 
+/** 侧栏与项目「最近活动」排序键：优先最后一条用户发言时间，缺省退回日志 mtimeMs */
+export function activityMs(session: SessionSummary): number {
+  return session.lastUserMs ?? session.mtimeMs;
+}
+
 /** 归并键：去掉末尾分隔符；像 Windows 路径就统一 `\` 并小写 */
 export function projectKey(path: string): string {
   let p = path;
@@ -175,7 +180,7 @@ function toRow(
  * - 归档会话只用来保留项目节点，其余计算只用未归档会话（ADR-0080）；
  * - projects = 其余会话 cwd 的 key ∪ 手动项目 − hidden；
  *   排序：manual（缺省）按 projectOrder，不在其中的新项目排最上面（无会话的在前，
- *   其余按最早会话 createdAt 降序）；activity 有会话的按最新 mtimeMs 降序，其后是
+ *   其余按最早会话 createdAt 降序）；activity 有会话的按最新 activityMs 降序，其后是
  *   无会话的手动项目按添加顺序；name 按名称（大小写不敏感、数字按数值比）。
  */
 export function buildSessionTree(
@@ -204,7 +209,7 @@ export function buildSessionTree(
   );
   const chatRows = chatSessions
     .filter((s) => !pinnedIds.has(s.id))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    .sort((a, b) => activityMs(b) - activityMs(a));
   const chatsShown = options.chatsExpanded ? chatRows : chatRows.slice(0, limit);
   const chats: ChatsSection = {
     rows: chatsShown.map((s) =>
@@ -215,7 +220,7 @@ export function buildSessionTree(
 
   const scheduledRows = visible
     .filter((s) => scheduledIds.has(s.id) && !pinnedIds.has(s.id))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    .sort((a, b) => activityMs(b) - activityMs(a));
   const scheduledShown = options.scheduledExpanded ? scheduledRows : scheduledRows.slice(0, limit);
   const scheduled: ChatsSection = {
     rows: scheduledShown.map((s) =>
@@ -313,7 +318,7 @@ export function buildSessionTree(
         manualEmpty.push(key);
         continue;
       }
-      withSessions.push({ key, latest: Math.max(...group.sessions.map((s) => s.mtimeMs)) });
+      withSessions.push({ key, latest: Math.max(...group.sessions.map(activityMs)) });
     }
     withSessions.sort((a, b) => b.latest - a.latest);
     manualEmpty.sort((a, b) => manualOrder.indexOf(a) - manualOrder.indexOf(b));
@@ -331,7 +336,7 @@ export function buildSessionTree(
     if (group === undefined) continue;
     const unpinned = group.sessions
       .filter((s) => !pinnedIds.has(s.id))
-      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+      .sort((a, b) => activityMs(b) - activityMs(a));
     const expanded = options.expanded.has(key);
     const shown = expanded ? unpinned : unpinned.slice(0, limit);
     projects.push({

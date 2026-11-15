@@ -107,6 +107,7 @@ import {
 } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
 import {
+  activityMs,
   buildSessionTree,
   moveProjectKey,
   projectKey,
@@ -165,7 +166,7 @@ function nextSidebarSession(
           const sessionKey = projectKey(session.cwd);
           return plainKeys.has(key) ? plainKeys.has(sessionKey) : sessionKey === key;
         })
-        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .sort((a, b) => activityMs(b) - activityMs(a))
     : [];
   const index = sameProject.findIndex((session) => session.id === id);
   const sameTarget =
@@ -1339,6 +1340,7 @@ export function App({ host }: { host: DesktopHost }) {
         workspaceRoot: entry.view.meta?.workspaceRoot ?? cwd,
         model: entry.view.config.model ?? { provider: "", model: "" },
         mtimeMs: now,
+        lastUserMs: now,
         locked: false,
         firstText,
       });

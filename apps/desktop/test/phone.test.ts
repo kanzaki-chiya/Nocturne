@@ -913,3 +913,18 @@ it("改动摘要在订阅后与 Turn 结束时刷新；回退后刷新；分叉�
   expect(sessions.opened.get("f")?.workspace).toBe(entry.workspace);
   client.close();
 });
+
+it("PhoneSessions 列表按 activityMs 排序：lastUserMs 优先于 mtimeMs，缺省退回 mtimeMs", async () => {
+  const [transport] = createMemoryTransportPair();
+  const { createRpcClient } = await import("@nocturne/rpc/client");
+  const client = createRpcClient(transport, { clientName: "test" });
+  vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+    { ...listedSession("running", 900, false), lastUserMs: 100 },
+    listedSession("legacy", 200, false),
+    { ...listedSession("newer", 50, false), lastUserMs: 300 },
+  ]);
+  const sessions = new PhoneSessions(vi.fn());
+  await sessions.connected(client);
+  expect(sessions.list.map((s) => s.id)).toEqual(["newer", "legacy", "running"]);
+  client.close();
+});

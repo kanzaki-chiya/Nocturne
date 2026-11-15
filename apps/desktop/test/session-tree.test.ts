@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activityMs,
   buildSessionTree,
   formatRelative,
   moveProjectKey,
@@ -464,5 +465,59 @@ describe("moveProjectKey", () => {
 
   it("尚未写回的可见键先补到最前面", () => {
     expect(moveProjectKey(["a", "b"], ["n", "a", "b"], "a", 3)).toEqual(["n", "b", "a"]);
+  });
+});
+
+describe("activityMs 排序", () => {
+  it("mtimeMs 更新但 lastUserMs 更旧的会话不会排到前面（对话、定时任务、项目内均生效，相对时间不变）", () => {
+    const tree = buildSessionTree(
+      [
+        // running 会话一直在写日志（mtimeMs 很新），但用户最后发言更早
+        session("c-running", WS, NOW - 100, { lastUserMs: NOW - 10 * 60_000 }),
+        session("c-idle", WS, NOW - 5 * 60_000, { lastUserMs: NOW - 2 * 60_000 }),
+        session("s-running", "Z:\\repo", NOW - 100, {
+          lastUserMs: NOW - 10 * 60_000,
+          schedule: { taskId: "t1", scheduledAt: "2026-10-04T11:50:00Z", trigger: "schedule" },
+        }),
+        session("s-newer", "Z:\\repo", NOW - 5 * 60_000, {
+          lastUserMs: NOW - 2 * 60_000,
+          schedule: { taskId: "t2", scheduledAt: "2026-10-04T11:55:00Z", trigger: "schedule" },
+        }),
+        session("p-running", "Z:\\repo", NOW - 100, { lastUserMs: NOW - 10 * 60_000 }),
+        session("p-newer", "Z:\\repo", NOW - 5 * 60_000, { lastUserMs: NOW - 2 * 60_000 }),
+      ],
+      noPrefs,
+      opts({ plainWorkspace: WS }),
+    );
+    expect(tree.chats.rows.map((r) => r.id)).toEqual(["c-idle", "c-running"]);
+    expect(tree.scheduled.rows.map((r) => r.id)).toEqual(["s-newer", "s-running"]);
+    const repo = tree.projects.find((p) => p.key === "z:\\repo");
+    expect(repo?.sessions.map((r) => r.id)).toEqual(["p-newer", "p-running"]);
+    // 侧栏行里显示的相对时间仍读 mtimeMs，不改用 lastUserMs
+    expect(repo?.sessions.find((r) => r.id === "p-running")?.meta).toBe("现在");
+  });
+
+  it("缺 lastUserMs 的旧会话退回 mtimeMs", () => {
+    const legacy = session("legacy", WS, NOW - 3000);
+    const newer = session("newer", WS, NOW - 100, { lastUserMs: NOW - 2000 });
+    const older = session("older", WS, NOW - 100, { lastUserMs: NOW - 4000 });
+    expect(activityMs(legacy)).toBe(NOW - 3000);
+    expect(activityMs(newer)).toBe(NOW - 2000);
+
+    const tree = buildSessionTree([older, legacy, newer], noPrefs, opts({ plainWorkspace: WS }));
+    expect(tree.chats.rows.map((r) => r.id)).toEqual(["newer", "legacy", "older"]);
+  });
+
+  it("「最近活动」项目排序使用 activityMs", () => {
+    const tree = buildSessionTree(
+      [
+        session("a1", "Z:\\a", NOW - 50, { lastUserMs: NOW - 9000 }),
+        session("b1", "Z:\\b", NOW - 5000, { lastUserMs: NOW - 2000 }),
+        session("c1", "Z:\\c", NOW - 4000), // 缺 lastUserMs，退回 mtimeMs = NOW - 4000
+      ],
+      { ...noPrefs, projectSort: "activity" },
+      opts(),
+    );
+    expect(tree.projects.map((p) => p.key)).toEqual(["z:\\b", "z:\\c", "z:\\a"]);
   });
 });
