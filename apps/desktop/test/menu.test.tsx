@@ -295,4 +295,25 @@ describe("Menu", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     anchor.remove();
   });
+
+  it("仅在传入 checked 时渲染 .menu-ck 勾选列，普通菜单图标贴左", () => {
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    const { container, rerender } = render(
+      <Menu anchor={anchor} label="操作" onClose={vi.fn()}>
+        <MenuItem label="新建" onSelect={vi.fn()} />
+        <MenuItem label="打开" onSelect={vi.fn()} />
+      </Menu>,
+    );
+    expect(container.querySelectorAll(".menu-ck")).toHaveLength(0);
+
+    rerender(
+      <Menu anchor={anchor} label="模式" onClose={vi.fn()}>
+        <MenuItem label="默认" checked={true} onSelect={vi.fn()} />
+        <MenuItem label="计划" checked={false} onSelect={vi.fn()} />
+      </Menu>,
+    );
+    expect(container.querySelectorAll(".menu-ck")).toHaveLength(2);
+    anchor.remove();
+  });
 });

@@ -308,7 +308,7 @@
   max-height: calc(100% - 48px);
   overflow-y: auto;
   background: var(--a-panel);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-dialog);
   display: grid;

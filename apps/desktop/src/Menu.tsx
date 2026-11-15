@@ -626,9 +626,11 @@ export function MenuItem({
         }
       }}
     >
-      <span className="menu-ck" aria-hidden="true">
-        {checked === true ? "✓" : ""}
-      </span>
+      {checked !== undefined && (
+        <span className="menu-ck" aria-hidden="true">
+          {checked === true ? "✓" : ""}
+        </span>
+      )}
       {icon}
       <span className="menu-label">
         {label}

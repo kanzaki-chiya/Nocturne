@@ -124,8 +124,8 @@
   min-width: 280px;
   padding: 18px;
   border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-raised);
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
   color: var(--a-text);
   z-index: 25;
 }
@@ -147,7 +147,7 @@
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   background: var(--a-panel);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-dialog);
   display: grid;

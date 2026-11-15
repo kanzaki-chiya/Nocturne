@@ -484,16 +484,18 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: var(--item-h);
   font: inherit;
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
   color: var(--a-secondary);
   text-align: left;
   background: none;
   border: none;
   border-radius: var(--radius-2);
-  padding: 6px 8px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 /* 焦点项一打开就亮（鼠标打开时程序聚焦不算 :focus-visible）；悬停把焦点移过去，
@@ -689,11 +691,13 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 5px 8px;
+  min-height: var(--item-h);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-2);
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
   cursor: pointer;
   color: var(--a-secondary);
+  box-sizing: border-box;
 }
 
 .composer-popup-row.is-active {

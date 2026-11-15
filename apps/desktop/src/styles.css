@@ -910,21 +910,24 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
   z-index: 10;
   min-width: 140px;
   background: var(--a-panel);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   padding: 4px;
   box-shadow: var(--shadow-popover);
 }
 .ctxmenu button {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
+  min-height: var(--item-h);
   text-align: left;
-  padding: 6px 12px;
-  border-radius: var(--radius-1);
+  padding: var(--space-1) var(--ctl-px-md);
+  border-radius: var(--radius-2);
   color: var(--a-secondary);
   font-size: var(--fs-2);
 }
-.ctxmenu button:hover {
+.ctxmenu button:hover,
+.ctxmenu button:focus-visible {
   background: var(--a-sel);
   color: var(--a-text);
 }
@@ -940,8 +943,9 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px;
-  border-radius: var(--radius-1);
+  min-height: var(--item-h);
+  padding: var(--space-1) var(--ctl-px-md);
+  border-radius: var(--radius-2);
   color: var(--a-secondary);
   font-size: var(--fs-2);
   cursor: default;
@@ -1031,7 +1035,7 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
 }
 .desktop-dialog {
   background: var(--a-panel);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   padding: 20px;
   width: min(520px, 90%);

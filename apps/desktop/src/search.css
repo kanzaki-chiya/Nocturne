@@ -18,7 +18,7 @@
   overflow: hidden;
   color: var(--a-text);
   background: var(--a-panel);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-dialog);
 }

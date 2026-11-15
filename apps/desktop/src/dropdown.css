@@ -79,7 +79,7 @@
   z-index: 60;
   font-family: var(--sans);
   background: var(--a-panel);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   padding: 5px;
   box-shadow: var(--shadow-popover);
@@ -110,10 +110,12 @@
   grid-template-columns: 16px minmax(0, 1fr) auto;
   column-gap: 8px;
   align-items: baseline;
-  padding: 7px 10px 7px 8px;
+  min-height: var(--item-h);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-2);
   color: var(--a-text);
   cursor: pointer;
+  box-sizing: border-box;
 }
 .ddm .ddo.sep {
   margin-top: 9px;
