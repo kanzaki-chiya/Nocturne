@@ -5,6 +5,7 @@ import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 
 import { App } from "../src/App";
 import { WindowFrame } from "../src/WindowFrame";
+import { SESSIONS_CACHE_KEY, writeSessionsCache } from "../src/sessions-cache";
 import type { DesktopHost } from "../src/host";
 import type { SessionSummary } from "../src/session-tree";
 import type { BackendMessage } from "../src/types";
@@ -637,6 +638,115 @@ function replayHost(
 
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
+
+const cachePaths = { sessionsDir: "Z:/isolated/sessions", plainWorkspace: "Z:/plain" };
+
+it("缓存首帧即显示；只有缓存时不迁移项目或刷新通知，真实列表整体替换并保留同行 DOM", async () => {
+  const host = replayHost([], undefined, (request) => request.method === "runtime.listSessions");
+  const cachedHost = { ...host, sessionPaths: cachePaths };
+  const first = host.sessions[0];
+  if (first === undefined) throw new Error("缺少测试会话");
+  const ghost = { ...first, id: "deleted", firstText: "已删除的会话" };
+  writeSessionsCache(() => localStorage, cachedHost, [...host.sessions, ghost]);
+  localStorage.setItem("nocturne.desktop.prefs.v1", JSON.stringify({ projectSort: "activity" }));
+  render(<App host={cachedHost} />);
+  const alpha = screen.getByRole("button", { name: /^alpha 会话/ });
+  expect(screen.getByRole("button", { name: /^已删除的会话/ })).toBeTruthy();
+  await waitFor(() => expect(host.deferred).toHaveLength(1));
+  expect(storedPrefs().projectOrder).toBeUndefined();
+  expect(storedPrefs().projectSort).toBe("activity");
+  expect(
+    host.calls.some(
+      (c) => c.method === "runtime.describeSettings" && c.params.workspaceRoot === undefined,
+    ),
+  ).toBe(false);
+  await act(async () => host.deferred[0]?.respond(host.sessions));
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^已删除的会话/ })).toBeNull());
+  expect(screen.getByRole("button", { name: /^alpha 会话/ })).toBe(alpha);
+  await waitFor(() => expect(storedPrefs().projectOrder).toHaveLength(3));
+  expect(readCachedIds()).toEqual(["alpha", "beta", "gamma"]);
+});
+
+function readCachedIds(): string[] {
+  const cached = JSON.parse(localStorage.getItem(SESSIONS_CACHE_KEY) ?? "{}") as {
+    sessions: { id: string }[];
+  };
+  return cached.sessions.map((s) => s.id);
+}
+
+it("后台未就绪时保留最后一次缓存点击，连上并取得真实列表后自动打开", async () => {
+  const host = replayHost();
+  let releaseProbe: (value: unknown) => void = () => undefined;
+  const probe = new Promise<unknown>((resolve) => {
+    releaseProbe = resolve;
+  });
+  const invoke = host.invoke;
+  host.invoke = (command, args) => (command === "node_probe" ? probe : invoke(command, args));
+  const cachedHost = { ...host, sessionPaths: cachePaths };
+  writeSessionsCache(
+    () => localStorage,
+    cachedHost,
+    host.sessions.map((s) => ({ ...s, locked: true, openHere: true })),
+  );
+  render(
+    <StrictMode>
+      <App host={cachedHost} />
+    </StrictMode>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^alpha 会话/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^beta 会话/ }));
+  expect(host.calls).toHaveLength(0);
+  expect(screen.queryByText(/打开会话失败|普通对话工作区尚未就绪/)).toBeNull();
+  expect(document.querySelector(".side .session-mark")).toBeNull();
+  await act(async () => releaseProbe({ ok: true }));
+  await within(await screen.findByRole("region", { name: "会话消息" })).findByText("beta 正文");
+  expect(resumeCalls(host, "alpha")).toHaveLength(0);
+  expect(resumeCalls(host, "beta")).toHaveLength(1);
+});
+
+it("缓存中已删除的会话点击后沿用会话不存在错误，真实列表中移除该行", async () => {
+  const host = replayHost(
+    [],
+    undefined,
+    (r) => r.method === "runtime.listSessions",
+    (r) =>
+      r.method === "runtime.resumeSession"
+        ? { code: "session_not_found", message: "会话不存在" }
+        : undefined,
+  );
+  const cachedHost = { ...host, sessionPaths: cachePaths };
+  const first = host.sessions[0];
+  if (first === undefined) throw new Error("缺少测试会话");
+  writeSessionsCache(() => localStorage, cachedHost, [
+    { ...first, id: "gone", firstText: "gone 会话" },
+  ]);
+  render(<App host={cachedHost} />);
+  fireEvent.click(screen.getByRole("button", { name: /^gone 会话/ }));
+  await waitFor(() => expect(host.deferred).toHaveLength(1));
+  await act(async () => host.deferred[0]?.respond(host.sessions));
+  await screen.findByText("会话不存在");
+  expect(screen.queryByRole("button", { name: /^gone 会话/ })).toBeNull();
+});
+
+it.each(["broken", "wrong-scope", "wrong-version"])("%s 缓存首帧忽略，无缓存行为不变", (kind) => {
+  const host = replayHost();
+  host.invoke = () => new Promise(() => undefined);
+  const cachedHost = { ...host, sessionPaths: cachePaths };
+  localStorage.setItem(
+    SESSIONS_CACHE_KEY,
+    kind === "broken"
+      ? "{broken"
+      : JSON.stringify({
+          version: kind === "wrong-version" ? 2 : 1,
+          sessionsDir: "Z:/other/sessions",
+          sessions: host.sessions,
+        }),
+  );
+  render(<App host={cachedHost} />);
+  expect(screen.queryByRole("button", { name: /^alpha 会话/ })).toBeNull();
+  expect(document.querySelector(".side")).toBeNull();
+  expect(host.shellLog).toContain("[sessions-cache] 忽略不可用的会话列表缓存");
+});
 
 it("反复切换待确认会话时只显示当前消息流和当前权限卡片，不残留旧会话", async () => {
   render(<App host={replayHost()} />);

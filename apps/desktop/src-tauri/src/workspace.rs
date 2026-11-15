@@ -62,6 +62,31 @@ pub fn resolve_nocturne_home(
     home.map(|h| h.join(".nocturne"))
 }
 
+/// 在主页面脚本之前提供缓存归属和默认分组目录，不创建目录或读取用户文件。
+/// 相对 NOCTURNE_HOME 在外壳与后台 cwd 下含义不同，无法确认时禁用缓存。
+pub fn session_paths_script(env: Option<OsString>, home: Option<PathBuf>) -> String {
+    let paths = resolve_nocturne_home(env, home, Path::new("."))
+        .filter(|path| {
+            path.is_absolute()
+                && !path.components().any(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::ParentDir | std::path::Component::CurDir
+                    )
+                })
+        })
+        .map(|home| {
+            serde_json::json!({
+                "sessionsDir": home.join("sessions"),
+                "plainWorkspace": plain_workspace_path(&home),
+            })
+        });
+    format!(
+        "if (window === window.top) {{ Object.defineProperty(window, '__NOCTURNE_SESSION_PATHS__', {{ value: Object.freeze({}), writable: false }}); }}",
+        serde_json::to_string(&paths).unwrap_or_else(|_| "null".into())
+    )
+}
+
 /// `<nocturne_home>/workspace`。
 pub fn plain_workspace_path(nocturne_home: &Path) -> PathBuf {
     nocturne_home.join("workspace")
@@ -144,6 +169,36 @@ mod tests {
     #[test]
     fn no_home_returns_none() {
         assert_eq!(resolve_nocturne_home(None, None, Path::new(".")), None);
+    }
+
+    #[test]
+    fn session_paths_are_available_before_page_scripts_only_in_main_frame() {
+        let home = PathBuf::from(if cfg!(windows) { "C:\\data" } else { "/data" });
+        let script = session_paths_script(Some(home.clone().into_os_string()), None);
+        assert!(script.contains("window === window.top"));
+        assert!(script.contains(&serde_json::to_string(&home.join("sessions")).unwrap()));
+        assert!(script.contains(&serde_json::to_string(&home.join("workspace")).unwrap()));
+        assert!(script.contains("writable: false"));
+    }
+
+    #[test]
+    fn session_paths_disable_cache_when_home_is_ambiguous() {
+        assert!(session_paths_script(os("relative"), None).contains("Object.freeze(null)"));
+        let parent = if cfg!(windows) {
+            "C:\\data\\..\\other"
+        } else {
+            "/data/../other"
+        };
+        assert!(session_paths_script(os(parent), None).contains("Object.freeze(null)"));
+        assert!(session_paths_script(None, None).contains("Object.freeze(null)"));
+    }
+
+    #[test]
+    fn session_paths_default_to_user_home() {
+        let home = PathBuf::from(if cfg!(windows) { "C:\\user" } else { "/user" });
+        let script = session_paths_script(None, Some(home.clone()));
+        assert!(script
+            .contains(&serde_json::to_string(&home.join(".nocturne").join("sessions")).unwrap()));
     }
 
     #[test]

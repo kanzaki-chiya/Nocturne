@@ -8,8 +8,24 @@ import type { RpcRuntime } from "@nocturne/rpc/client";
 
 export type SessionSummary = Awaited<ReturnType<RpcRuntime["listSessions"]>>[number];
 
+/** 会话树只消费展示字段；启动缓存不提供运行时探测值。 */
+export type TreeSessionSummary = Pick<
+  SessionSummary,
+  | "id"
+  | "createdAt"
+  | "cwd"
+  | "mtimeMs"
+  | "lastUserMs"
+  | "firstText"
+  | "archivedAt"
+  | "schedule"
+  | "client"
+  | "locked"
+  | "openHere"
+>;
+
 /** 侧栏与项目「最近活动」排序键：优先最后一条用户发言时间，缺省退回日志 mtimeMs */
-export function activityMs(session: SessionSummary): number {
+export function activityMs(session: TreeSessionSummary): number {
   return session.lastUserMs ?? session.mtimeMs;
 }
 
@@ -148,13 +164,13 @@ export interface TreeOptions {
 const DEFAULT_LIMIT = 5;
 
 /** 空会话（无用户消息且未锁定）不显示（ADR-0046 修订第 4 条）；外部 agent 新建会话显示 */
-function isVisible(session: SessionSummary): boolean {
+function isVisible(session: TreeSessionSummary): boolean {
   const hasText = session.firstText !== undefined && session.firstText.trim() !== "";
   return hasText || session.locked === true || session.client !== undefined;
 }
 
 function toRow(
-  session: SessionSummary,
+  session: TreeSessionSummary,
   now: number,
   status: SessionStatus,
   mark?: SessionMark,
@@ -184,7 +200,7 @@ function toRow(
  *   无会话的手动项目按添加顺序；name 按名称（大小写不敏感、数字按数值比）。
  */
 export function buildSessionTree(
-  sessions: SessionSummary[],
+  sessions: TreeSessionSummary[],
   prefs: TreePrefs,
   options: TreeOptions,
 ): SessionTree {
@@ -230,7 +246,10 @@ export function buildSessionTree(
   };
 
   // 项目分组（对话会话、定时任务会话与对话工作区本身不进 projects）
-  const groups = new Map<string, { path: string; sessions: SessionSummary[]; archived: number }>();
+  const groups = new Map<
+    string,
+    { path: string; sessions: TreeSessionSummary[]; archived: number }
+  >();
   for (const session of sessions) {
     if (session.archivedAt !== undefined) {
       // 归档的定时任务会话不建立「定时任务」组；归档的对话会话不建立项目

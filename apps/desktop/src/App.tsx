@@ -117,6 +117,7 @@ import {
   type SessionTree,
 } from "./session-tree";
 import { Sidebar, type SettingsSection } from "./Sidebar";
+import { readSessionsCache, writeSessionsCache } from "./sessions-cache";
 import type { NodeProbe } from "./types";
 import { createUpdateService, describeUpdateError, type UpdateNotice } from "./updater";
 
@@ -206,13 +207,23 @@ export function App({ host }: { host: DesktopHost }) {
   );
 
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
+  const [cachedSessions] = useState(() => readSessionsCache(() => globalThis.localStorage, host));
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  /** 已成功拿到过会话列表：项目顺序的迁移与新键写回都要等它 */
+  /** 首帧缓存只参与渲染；listed 仍只表示已取得真实列表。 */
+  const [sessionsVisible, setSessionsVisible] = useState(cachedSessions !== undefined);
   const [listed, setListed] = useState(false);
+  const pendingSelection = useRef<{
+    id: string;
+    workspace: string;
+    force: boolean;
+    model?: ModelRef | undefined;
+  } | null>(null);
   /** 最近一次渲染的会话树（「打开项目」判断项目是否已可见） */
   const treeRef = useRef<SessionTree | null>(null);
   /** 外壳 plain_workspace 的默认路径（恢复默认用）；生效路径另看 prefs.plainWorkspace */
-  const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(null);
+  const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(
+    cachedSessions === undefined ? null : (host.sessionPaths?.plainWorkspace ?? null),
+  );
   const [home, setHome] = useState<string | null>(null);
   const [prefsVersion, setPrefsVersion] = useState(0);
   /** 已安装的编辑器（设置页"默认打开方式"只列检测到的；失败按都没装） */
@@ -630,13 +641,15 @@ export function App({ host }: { host: DesktopHost }) {
       });
       setSessions(list);
       setListed(true);
+      setSessionsVisible(true);
+      writeSessionsCache(() => globalThis.localStorage, host, list);
       setStartupError(null);
       return list;
     } catch (error) {
       setStartupError({ message: errMessage(error) });
       return [];
     }
-  }, [pool]);
+  }, [pool, host]);
 
   const connect = useCallback(async (): Promise<ConnectResult> => {
     try {
@@ -950,6 +963,11 @@ export function App({ host }: { host: DesktopHost }) {
     setLockedSession(null);
     // 用户看到这个会话了：撤掉它的系统通知与侧栏留痕（ADR-0056）
     markSeen(id);
+    if (!listed) {
+      pendingSelection.current = { id, workspace, force, model };
+      return;
+    }
+    pendingSelection.current = null;
     try {
       await conversations.open(id, workspace, force, model);
       setSelectedId(conversations.selectedId);
@@ -985,6 +1003,12 @@ export function App({ host }: { host: DesktopHost }) {
   sessionsRef.current = sessions;
   const selectSessionRef = useRef<typeof selectSession | null>(null);
   selectSessionRef.current = selectSession;
+  useEffect(() => {
+    const pending = pendingSelection.current;
+    if (!listed || pending === null) return;
+    pendingSelection.current = null;
+    void selectSessionRef.current?.(pending.id, pending.workspace, pending.force, pending.model);
+  }, [listed]);
 
   // 跳转只生效一次：离开目标会话后作废，切回来时回到平常的位置。
   const searchArrived = useRef(false);
@@ -1098,7 +1122,7 @@ export function App({ host }: { host: DesktopHost }) {
     }
   }, [pool]);
   useEffect(() => {
-    void refreshNotifyPrefs();
+    if (listed) void refreshNotifyPrefs();
   }, [refreshNotifyPrefs, listed]);
 
   /**
@@ -1135,6 +1159,7 @@ export function App({ host }: { host: DesktopHost }) {
   };
 
   const newSession = async (workspace?: string) => {
+    pendingSelection.current = null;
     const target = workspace ?? effectiveWorkspace;
     if (target === null) return;
     try {
@@ -1347,23 +1372,27 @@ export function App({ host }: { host: DesktopHost }) {
     }
     return merged;
   }, [sessions, conversationVersion]);
+  const displayedSessions = listed ? treeSessions : (cachedSessions ?? treeSessions);
   const tree = useMemo(
     () =>
-      buildSessionTree(treeSessions, p, {
+      buildSessionTree(displayedSessions, p, {
         plainWorkspace: effectiveWorkspace,
         plainWorkspaces: p.plainWorkspaces,
         chatsExpanded,
         scheduledExpanded,
         expanded,
         collapsed,
-        statuses: Object.fromEntries(
-          [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
-        ),
-        marks: sessionMarks,
+        statuses: listed
+          ? Object.fromEntries(
+              [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
+            )
+          : {},
+        marks: listed ? sessionMarks : {},
       }),
     // prefs 快照经 prefsVersion 驱动重算
     [
-      treeSessions,
+      displayedSessions,
+      listed,
       prefsVersion,
       effectiveWorkspace,
       chatsExpanded,
@@ -1374,7 +1403,7 @@ export function App({ host }: { host: DesktopHost }) {
       sessionMarks,
     ],
   );
-  treeRef.current = tree;
+  treeRef.current = listed ? tree : null;
   notifyState.current.sessions = treeSessions;
   const scheduleWorkspaces: ScheduleWorkspaceOption[] = [
     { path: null, label: "普通对话" },
@@ -1557,7 +1586,7 @@ export function App({ host }: { host: DesktopHost }) {
       .find((line) => line !== "")
       ?.slice(0, 80) ?? null;
 
-  if (phase.kind === "probing") {
+  if (phase.kind === "probing" && !sessionsVisible) {
     return <div className="center" />;
   }
   if (phase.kind === "probe-error") {
@@ -1601,7 +1630,7 @@ export function App({ host }: { host: DesktopHost }) {
   /** 归档（ADR-0080）：不确认；移除置顶；归档当前会话时按树里的顺序切走 */
   const archiveSession = async (id: string): Promise<void> => {
     const client = pool.get();
-    if (client === undefined) return;
+    if (!listed || client === undefined) return;
     const summary = sessions.find((session) => session.id === id);
     const wasSelected = selectedId === id;
     const next =
@@ -1631,7 +1660,7 @@ export function App({ host }: { host: DesktopHost }) {
   /** 恢复（ADR-0080）：取消项目 hidden，且不置顶；留在归档页 */
   const restoreSession = async (id: string): Promise<void> => {
     const client = pool.get();
-    if (client === undefined) return;
+    if (!listed || client === undefined) return;
     try {
       await client.runtime.unarchiveSession(id);
     } catch {
@@ -1723,7 +1752,7 @@ export function App({ host }: { host: DesktopHost }) {
             setScheduledExpanded((open) => !open);
           }}
           onSelectSession={(id) => {
-            const summary = sessions.find((s) => s.id === id);
+            const summary = displayedSessions.find((s) => s.id === id);
             if (summary !== undefined) {
               setPage(null);
               setSchedulesOpen(false);

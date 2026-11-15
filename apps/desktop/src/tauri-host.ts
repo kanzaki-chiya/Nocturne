@@ -23,7 +23,19 @@ import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
 
 export function createTauriHost(): DesktopHost {
+  const paths = (globalThis as typeof globalThis & { __NOCTURNE_SESSION_PATHS__?: unknown })
+    .__NOCTURNE_SESSION_PATHS__;
+  const sessionPaths =
+    typeof paths === "object" &&
+    paths !== null &&
+    "sessionsDir" in paths &&
+    typeof paths.sessionsDir === "string" &&
+    "plainWorkspace" in paths &&
+    typeof paths.plainWorkspace === "string"
+      ? { sessionsDir: paths.sessionsDir, plainWorkspace: paths.plainWorkspace }
+      : undefined;
   return {
+    sessionPaths,
     invoke: (cmd: string, args?: Record<string, unknown>) => invoke<unknown>(cmd, args),
     createChannel(onMessage) {
       const channel = new Channel<BackendMessage>();

@@ -195,6 +195,8 @@ export interface AgentBrowserStatus {
  * 测试用假宿主替换（docs/apps/desktop.md）。
  */
 export interface DesktopHost {
+  /** 外壳在页面脚本前注入；缺省时禁用会话列表缓存。 */
+  readonly sessionPaths?: { sessionsDir: string; plainWorkspace: string } | undefined;
   invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   /** 建一个 Tauri Channel 等价物；返回值原样传进 invoke 参数 */
   createChannel: (onMessage: (m: BackendMessage) => void) => unknown;

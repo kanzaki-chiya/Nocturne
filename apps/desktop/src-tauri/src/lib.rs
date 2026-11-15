@@ -250,7 +250,11 @@ pub fn run() {
                 let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
                     .on_download(move |_webview, event| {
                         browser::on_main_download(&download_app, event)
-                    });
+                    })
+                    .initialization_script(workspace::session_paths_script(
+                        std::env::var_os("NOCTURNE_HOME"),
+                        std::env::home_dir(),
+                    ));
                 if let Some(dir) = &webview_data {
                     builder = builder.data_directory(dir.clone());
                 }
