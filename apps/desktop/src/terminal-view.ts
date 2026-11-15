@@ -50,7 +50,7 @@ function readTheme(): ITheme {
   return {
     background: bg,
     foreground: text,
-    cursor: v("--a-accent", "#a6a4e8"),
+    cursor: v("--a-accent", "#a8a5ec"),
     cursorAccent: bg,
     selectionBackground: v("--a-sel-strong", "#383555"),
     black: light ? text : v("--a-border-strong", "#3a4150"),
@@ -65,7 +65,7 @@ function readTheme(): ITheme {
     brightRed: v("--a-error", "#e58f90"),
     brightGreen: v("--a-success", "#84c49a"),
     brightYellow: v("--a-termYellowBright", "#e5bd77"),
-    brightBlue: v("--a-accent", "#a6a4e8"),
+    brightBlue: v("--a-accent", "#a8a5ec"),
     brightMagenta: v("--a-cat4", "#d99ac9"),
     brightCyan: v("--a-cat2", "#83c4c8"),
     brightWhite: light ? v("--a-secondary", "#454f5c") : text,

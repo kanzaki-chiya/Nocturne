@@ -1,5 +1,5 @@
 import type { NodeProbe, NodeSource } from "./types";
-import { Button } from "./ui";
+import { Button, MoonMark } from "./ui";
 
 export interface NodeHelpProps {
   probe: NodeProbe;
@@ -93,9 +93,7 @@ export function NodeHelp({ probe, checking, onProbe, openUrl }: NodeHelpProps) {
   return (
     <div className="center">
       <div className="nodecard">
-        <svg width="36" height="36" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M10.5 1.5a6.5 6.5 0 1 0 4 11.6A7 7 0 0 1 10.5 1.5z" fill="var(--a-accent)" />
-        </svg>
+        <MoonMark size={36} />
         <h3>需要 Node.js {shortRequired(probe.required)} 或更高版本</h3>
         <div className="lead">{leadText(probe)}</div>
         <dl className="probe" style={{ margin: 0 }}>

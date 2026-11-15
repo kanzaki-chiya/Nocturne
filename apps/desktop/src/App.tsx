@@ -82,7 +82,7 @@ import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
 import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
 import { catchupPreface } from "./schedule-format";
-import { Button, ICON_SM, Icon } from "./ui";
+import { Button, ICON_SM, Icon, MoonMark } from "./ui";
 
 import { BackendPool } from "./backends";
 import type { DesktopHost } from "./host";
@@ -2951,9 +2951,7 @@ function DraftPane({
   return (
     <div className="hero">
       <div className="hero-mark" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width={40} height={40}>
-          <path d="M10.5 1.5a6.5 6.5 0 1 0 4 11.6A7 7 0 0 1 10.5 1.5z" fill="var(--a-accent)" />
-        </svg>
+        <MoonMark size={40} />
       </div>
       <h3>
         {isPlain ? (

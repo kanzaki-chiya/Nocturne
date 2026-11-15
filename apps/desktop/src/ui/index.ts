@@ -32,6 +32,7 @@ export {
   type ListItemProps,
   type MasterDetailProps,
 } from "./MasterDetail";
+export { MoonMark, type MoonMarkProps } from "./MoonMark";
 export { PageHeader, type PageHeaderProps } from "./PageHeader";
 export {
   SegmentedControl,

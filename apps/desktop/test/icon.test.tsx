@@ -2,7 +2,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ICON_DATA, ICON_LG, ICON_MD, ICON_SM, Icon, type IconName } from "../src/ui";
+import { ICON_DATA, ICON_LG, ICON_MD, ICON_SM, Icon, MoonMark, type IconName } from "../src/ui";
 
 afterEach(cleanup);
 
@@ -31,5 +31,33 @@ describe("Icon", () => {
       expect(def.source).toMatch(new RegExp(`^[a-z]+/${name}_line\\.svg$`));
       expect(def.d.length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe("MoonMark", () => {
+  it("渲染 13 条扫描线新月并使用主题 CSS 变量与唯一 id", () => {
+    const { container } = render(
+      <>
+        <MoonMark size={40} />
+        <MoonMark size={36} />
+      </>,
+    );
+    const svgs = container.querySelectorAll("svg");
+    expect(svgs).toHaveLength(2);
+    expect(svgs[0]?.getAttribute("width")).toBe("40");
+    expect(svgs[1]?.getAttribute("width")).toBe("36");
+    for (const svg of svgs) {
+      expect(svg.getAttribute("viewBox")).toBe("143 143 738 738");
+      expect(svg.querySelectorAll("rect")).toHaveLength(13);
+      const stops = svg.querySelectorAll("linearGradient stop");
+      expect(stops).toHaveLength(2);
+      expect(stops[0]?.getAttribute("stop-color")).toBe("var(--a-accent)");
+      expect(stops[1]?.getAttribute("stop-color")).toBe("var(--a-accentAlt)");
+    }
+    const g0 = svgs[0]?.querySelector("linearGradient")?.getAttribute("id");
+    const g1 = svgs[1]?.querySelector("linearGradient")?.getAttribute("id");
+    expect(g0).toBeTruthy();
+    expect(g1).toBeTruthy();
+    expect(g0).not.toBe(g1);
   });
 });
