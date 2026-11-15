@@ -47,7 +47,7 @@
 | 变量 | 桌面端用途 | 手机端用途 |
 |---|---|---|
 | `--fs-1` | 次要信息、徽章、表头、侧栏与设置分组标题、思考过程（12px） | 角标、快捷键、次要标签 |
-| `--fs-2` | 导航项、菜单项、按钮、表单标签、设置行、对话标题、工具行、状态栏全部文字（默认 13px） | 辅助说明、状态栏、胶囊按钮、代码输出 |
+| `--fs-2` | 导航项、菜单项、按钮、表单标签、设置行、对话标题、工具行全部文字（默认 13px） | 辅助说明、输入框底栏、胶囊按钮、代码输出 |
 | `--fs-3` | 对话正文、输入框、卡片标题、Markdown `h4`–`h6`（14px） | 正文、设置行、抽屉项、选项标题 |
 | `--fs-4` | 弹窗标题、Markdown `h3`（16px） | 顶栏标题、对话框标题、发送按钮 |
 | `--fs-5` | 新会话标题、设置页标题、用量大数字、Markdown `h1`/`h2`（20px） | 空状态标题 |
@@ -65,13 +65,13 @@
 文件卡片 28px 方块内的类型标记用 `--fs-file-badge`，方块尺寸固定，所以这档不参与字号缩放。
 
 - **桌面端字体与字号缩放**（`apps/desktop/src/appearance.ts`）：「设置 › 外观」选择的界面字体与代码字体插到 `--sans` / `--mono` 原字体栈最前面（原栈整体留作回退）；字号（12–20，默认 14）在 `<html>` 行内样式上按 `Math.round(原值 × 字号 / 14)` 等比缩放 `--fs-1` 到 `--fs-5`，面板终端一并读取计算后的 `--fs-2` 与 `--mono`。只作用于桌面端，手机端不读取也不应用。
-- **混排基线对齐**：同一行内同时出现无衬线（`--sans`）与等宽（`--mono`）文字时（对话工具行 `.tool-line`、改动卡片文件行 `.diff-h`、会话概览项目行与变更行、状态栏速度浮层行、用量排行行），行容器用 `align-items: baseline` 让两种字体按文字基线对齐；行内的纯图标或进度条用 `align-self: center` 单独居中。
+- **混排基线对齐**：同一行内同时出现无衬线（`--sans`）与等宽（`--mono`）文字时（对话工具行 `.tool-line`、改动卡片文件行 `.diff-h`、会话概览项目行与变更行、用量排行行），行容器用 `align-items: baseline` 让两种字体按文字基线对齐；行内的纯图标或进度条用 `align-self: center` 单独居中。
 - **手机网页**：根字号 16px，正文与输入框沿用根字号（输入框小于 16px 会触发 iOS 聚焦时整页放大）；触控目标不小于 44px；触屏上用系统叠加式滚动条，不占布局宽度。
 - 行内代码与键盘提示在对话和面板内用 `max(var(--fs-1), 0.92em)`（或 `0.85em`），随外层正文缩放且不小于 `--fs-1`。
 - **字重**：`--fw-regular`（正文）、`--fw-medium`（导航选中、按钮、表单标签、小标题）、`--fw-semibold`（页面标题、分组标题、大数字），不使用 `700`。
 - **行高**：`--lh-tight`（标题、单行控件）、`--lh-base`（界面正文、表单说明）、`--lh-code`（代码块、日志、终端）、`--lh-prose`（对话 Markdown 正文）。
 - **数字对齐**：百分比、token 数、金额、时间、计数器统一加 `font-variant-numeric: tabular-nums`，避免跳动与错位。
-- **状态栏**：高 `--h-statusbar`（32px），本体统一 `--fs-2`、`--sans`，数字用 tabular-nums，不用 `.mono`；除状态色外文字统一 `--a-secondary`（含「第 N 轮」），项间距 `16px`，垂直居中并保持文字基线一致。各项无额外水平内边距，点击项保留悬停底色。进度条 `56 × 5px`，状态点 `6px`；浮层排版保持不变。
+- **输入框底栏与对话标题行**：桌面端去掉底部状态栏，改由输入框底栏与对话标题行承担状态与控制。输入框底栏（高 `--ctl-h-md` 28px）使用 `--fs-2`、`--sans`、数字 tabular-nums：左侧「＋」（`240px` 上弹菜单含执行方式单选与 `220px`「技能」「MCP」右展子菜单；MCP 失败或崩溃时右上角亮 `6px` 红点）、回形针「添加文件」、草稿目录与权限预设 chip；右侧依次为 `18px` SVG 上下文圆环（仅会话页，点击上弹面板，底部附累计 tokens 与缓存占比）、模型与思考档位 chip、实心圆角发送/中断按钮（圆角 `--radius-send`、`--a-btn`/`--a-on-btn`）。选中执行方式后，输入区与底栏之间展示单行标签（含关闭图标、无解释文案）。分支菜单与电脑操控中的「停止」置于对话标题行（[docs/apps/desktop.md](docs/apps/desktop.md#54-上下文用量标题栏控制与状态迁移)）。
 
 ---
 
@@ -92,13 +92,14 @@
 | `--radius-0-5` | 极小色块（如上下文构成图例色点，`2px`） |
 | `--radius-1` | 行内代码、键盘提示、小徽章、复选框、分段按钮内项、滚动条滑块（`4px`） |
 | `--radius-2` | 按钮、输入框、下拉框、菜单项、导航行、chip、小卡片、代码块、待发行（`6px`） |
+| `--radius-send` | 桌面端输入框实心发送/中断按钮专用圆角（`7px`） |
 | `--radius-3` | 对话框、弹层、菜单面板、设置分组卡片、提示卡、diff 卡片、手机卡片与抽屉（`8px`） |
 | `--radius-composer` | 输入框外框专用圆角（`10px`） |
 | `--radius-pill` | 胶囊标签、开关轨道、状态圆点、圆形图标按钮 |
 | `--radius-device` | 手机外框容器 |
 
 - **阴影**（定义于 `design/tokens.json` 的 `shadow` 分组）：
-  - `--shadow-popover`：菜单、下拉、状态栏浮层；
+  - `--shadow-popover`：菜单、下拉、上下文面板；
   - `--shadow-dialog`：模态对话框、抽屉；
   - `--shadow-edge`：覆盖式侧面板左缘阴影；
   - `--shadow-device`：设备预览框阴影；
@@ -118,7 +119,7 @@
   - `.btn-danger-solid`：破坏性确认弹窗内的实心红按钮；
   - 尺寸变体：`.btn-sm`（`--ctl-h-sm`）、`.btn-lg`（`--ctl-h-lg`），触控端按钮高度用 `--ctl-h-touch`。
 - **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Icon`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 变体。
-- **图标（`<Icon>`）**：界面图标统一使用 MingCute 线性图标（`mingcute_icon` 2.9.72，`_line.svg` 填充路径），由公共组件 `apps/desktop/src/ui/Icon.tsx`（`<Icon name="..." size={...} />`）渲染，继承 `currentColor`，默认 `aria-hidden`。桌面端三档尺寸定义在 `design/tokens.json` 的 `control` 分组：侧栏导航、设置页导航、工具栏和图标按钮用 `--icon-md`（`ICON_MD`，16px），部分较大场景保留 `--icon-lg`（`ICON_LG`，18px），小字旁边（工具行、标签、状态栏、下拉箭头、折叠箭头）用 `--icon-sm`（`ICON_SM`，14px）；手机网页沿用现有显示尺寸。窗口控制按钮、品牌标记、数据图形及终端和代码查看器内部内容除外。
+- **图标（`<Icon>`）**：界面图标统一使用 MingCute 线性图标（`mingcute_icon` 2.9.72，`_line.svg` 填充路径），由公共组件 `apps/desktop/src/ui/Icon.tsx`（`<Icon name="..." size={...} />`）渲染，继承 `currentColor`，默认 `aria-hidden`。桌面端三档尺寸定义在 `design/tokens.json` 的 `control` 分组：侧栏导航、设置页导航、工具栏和图标按钮用 `--icon-md`（`ICON_MD`，16px），部分较大场景保留 `--icon-lg`（`ICON_LG`，18px），小字旁边（工具行、标签、下拉箭头、折叠箭头）用 `--icon-sm`（`ICON_SM`，14px）；手机网页沿用现有显示尺寸。窗口控制按钮、品牌标记、数据图形及终端和代码查看器内部内容除外。
 - **图标按钮（`.ib`）**：宽高 `--ctl-h-md`（`.ib.sm` 为 `--ctl-h-sm`），圆角 `--radius-2`，激活态加 `.on` 或 `aria-pressed="true"`。图标按钮的 `title` 与 `aria-label` 只写动作名，不写状态或行为解释。
 - **折叠箭头（`.fold-arrow`）**：统一使用 `<Icon name="right_small" size={ICON_SM} className="fold-arrow" />` 配合 CSS `transform: rotate(...)` 过渡（对话流内用户触发的 `<details>` 为 `--dur-fold`），不混用文本三角字符或 `summary::before` 伪元素。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down` 或 `details[open] > summary > .fold-arrow`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器统一使用 `<Icon name="down_small" size={ICON_SM} />`，不算折叠箭头。
 - **待发队列（`.pending-inputs`）**：压在输入框上沿，每条待发输入单行（`.pi-row`）：弱化色箭头、单行省略的正文，右侧图标按钮依次为立即发送（只有运行中的排队条目才有）、编辑、取消；子代理结果条目只有取消。不写模式标签。
@@ -169,7 +170,7 @@
   - `width < 400px`：隐藏「上下文」列（`.model-context`），横幅允许换行。
 - **`.usage-page`（容器查询）**：
   - `max-width: 1080px` 表格隐藏单价列；`920px` 隐藏近期速度列；`900px` 概览改 3 列；`560px` 概览与构成改 2 列；`320px` 概览改单列。
-- **状态栏窄窗口让位顺序**：主区变窄时按「速度 → tokens → 上下文进度条」顺序隐藏，运行状态、上下文百分比和缓存命中始终保留，详见 [docs/apps/desktop.md](docs/apps/desktop.md#54-状态栏与上下文)。
+- **侧栏运行状态与输入框收敛**：侧栏运行中且无「待确认」或留痕标签的会话行末显示 `12px` 环形转圈（悬停/聚焦显示「…」时隐藏）；输入框底栏在窄屏内保持单行，不再保留草稿独立托盘与底部状态栏让位规则，详见 [docs/apps/desktop.md](docs/apps/desktop.md#54-上下文用量标题栏控制与状态迁移)。
 
 ---
 
