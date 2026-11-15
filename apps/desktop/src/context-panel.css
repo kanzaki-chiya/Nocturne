@@ -1,0 +1,86 @@
+.context-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--fs-2);
+}
+.context-total b {
+  color: var(--a-text);
+}
+.context-total span {
+  margin-left: auto;
+  color: var(--a-muted);
+  font: var(--fs-1)/var(--lh-base) var(--mono);
+}
+.context-stack {
+  display: flex;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--a-raised);
+}
+.context-stack i {
+  display: block;
+  flex-shrink: 0;
+}
+.context-details {
+  margin: 0;
+  display: grid;
+  gap: var(--space-0-5);
+}
+.context-details > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-0-5) 0;
+  font-size: var(--fs-1);
+}
+.context-details dt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  color: var(--a-secondary);
+}
+.context-details dt i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: var(--radius-0-5);
+}
+.context-details dt small {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--a-faint);
+  font-size: var(--fs-1);
+}
+.context-details dd {
+  margin: 0 0 0 auto;
+  font: var(--fs-1)/var(--lh-base) var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--a-text);
+}
+.context-details .context-group dt {
+  padding-left: var(--space-4);
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
+}
+.context-details .context-nested {
+  padding-left: var(--space-4);
+}
+.status-note,
+.status-warning {
+  margin: 0;
+  font-size: var(--fs-1);
+  overflow-wrap: anywhere;
+}
+.status-note {
+  color: var(--a-muted);
+}
+.status-warning {
+  color: var(--a-warning);
+}

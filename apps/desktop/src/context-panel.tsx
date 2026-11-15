@@ -1,10 +1,10 @@
 /**
- * 上下文用量面板（桌面状态栏与手机网页共用）：分段明细与来源说明。
+ * 上下文用量面板（桌面输入框与手机网页共用）：分段明细与来源说明。
  */
 import type { ContextSummary } from "@nocturne/rpc/client";
 
 import { abbreviateHome } from "./paths";
-import "./status-bar.css";
+import "./context-panel.css";
 
 type Report = ContextSummary["report"];
 type Section = Report["sections"][number];

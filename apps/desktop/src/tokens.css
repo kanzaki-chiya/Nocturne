@@ -17,7 +17,6 @@
   --page-py: 24px;
   --h-titlebar: 40px;
   --h-page-head: 56px;
-  --h-statusbar: 32px;
   --w-rail: 208px;
   --w-sidebar: 248px;
   --w-settings-nav: 224px;
@@ -188,7 +187,6 @@
   --composer-min-h: 44px;
   --bar-label-w: 96px;
   --bar-value-w: 48px;
-  --status-meter-w: 56px;
   --pv-h: 72px;
   --heat-gap: 3px;
   color-scheme: dark;

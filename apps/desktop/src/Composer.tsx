@@ -174,6 +174,7 @@ export interface ComposerProps {
   controls?: ComposerControls | undefined;
   /** 权限预设菜单底部附加内容（如本会话已允许的授权列表） */
   presetFooter?: ReactNode;
+  contextUsage?: ReactNode;
   /** draft 必需；session 变体忽略 */
   workspace?: WorkspaceChoice | undefined;
   /** 新会话页分支选择（ADR-0085） */
@@ -256,6 +257,7 @@ export function Composer({
   recordInputHistory,
   controls,
   presetFooter,
+  contextUsage,
   workspace,
   branch,
   fileRefs,
@@ -1302,6 +1304,7 @@ export function Composer({
                 </>,
               )}
             <span className="sp" />
+            {isSession && contextUsage}
             {controls !== undefined &&
               chip(
                 "model",

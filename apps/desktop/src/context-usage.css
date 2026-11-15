@@ -1,0 +1,43 @@
+.context-usage {
+  position: relative;
+  flex: none;
+}
+.context-usage .phone-ring {
+  width: var(--ring);
+  height: var(--ring);
+}
+.context-usage-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 8;
+  width: var(--w-ctxpop);
+  max-width: calc(100vw - 32px);
+  max-height: min(560px, 70vh);
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-popover);
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+}
+.context-usage-popover:focus-visible {
+  outline: none;
+}
+.context-usage-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--a-border);
+  color: var(--a-muted);
+}
+.status-error {
+  color: var(--a-error);
+}

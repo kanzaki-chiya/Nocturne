@@ -60,7 +60,7 @@ import {
 } from "./conversations";
 import { parseSlash } from "./commands";
 import { openForkedSession } from "./fork-session";
-import { StatusBar, type StatusPanel } from "./StatusBar";
+import { ContextUsage, type StatusPanel } from "./ContextUsage";
 import { BranchMenu } from "./BranchMenu";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
@@ -2739,6 +2739,16 @@ function SessionPane({
         skills={skills}
         externalAgents={externalAgents}
         variant="session"
+        contextUsage={
+          <ContextUsage
+            session={session}
+            view={view}
+            replaying={replaying}
+            panel={panel}
+            onPanelChange={onPanelChange}
+            home={home}
+          />
+        }
         controls={controls.controls}
         onManageProviders={onManageProviders}
         presetFooter={<SessionGrants grants={grants} session={session} onManage={onManageGrants} />}
@@ -2775,31 +2785,6 @@ function SessionPane({
         getVisionHint={controls.visionHint}
         pickImages={pickImages}
         onSlash={onSlash}
-      />
-      <StatusBar
-        session={session}
-        view={view}
-        running={running}
-        branch={
-          <BranchMenu
-            client={client.runtime}
-            session={session}
-            workspace={currentCwd}
-            view={view}
-            replaying={replaying}
-          />
-        }
-        replaying={replaying}
-        panel={panel}
-        onPanelChange={onPanelChange}
-        home={home}
-        onManageMcp={onManageMcp}
-        remoteStatus={remoteStatus}
-        remoteClient={client}
-        onManageRemote={onManageRemote}
-        computerActive={computerActive}
-        onStopComputer={onStopComputer}
-        computerHotkeyBound={computerHotkeyBound}
       />
     </>
   );
