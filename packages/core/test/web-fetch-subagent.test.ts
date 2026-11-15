@@ -12,7 +12,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-it("explore 实际包含 web_fetch，继承父会话主机 Grant 并拒绝未授权主机", async () => {
+it("explore 实际包含 web_fetch，继承父会话主机 Grant，未授权主机转父会话确认后拒绝", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "nct-web-subagent-"));
   roots.push(root);
   const fetched: string[] = [];
@@ -90,8 +90,21 @@ it("explore 实际包含 web_fetch，继承父会话主机 Grant 并拒绝未授
   });
   const session = await runtime.createSession({ model: "fake/fake-model" });
   const events: RuntimeEvent[] = [];
+  const forwarded: string[] = [];
   session.subscribe((event) => {
     events.push(event);
+    if (event.type === "subagent.permissions") {
+      for (const pending of event.payload.pending) {
+        if (forwarded.includes(pending.requestId)) continue;
+        forwarded.push(pending.requestId);
+        expect(pending.subjects).toEqual([
+          { kind: "network", target: "other.example", detail: "https://other.example/child" },
+        ]);
+        void session.respondSubagentPermission(pending.childSessionId, pending.requestId, {
+          decision: "deny",
+        });
+      }
+    }
     if (event.type === "permission.requested") {
       expect(event.payload.subjects).toEqual([
         { kind: "network", target: "docs.example", detail: "https://docs.example/parent" },
@@ -116,7 +129,8 @@ it("explore 实际包含 web_fetch，继承父会话主机 Grant 并拒绝未授
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as DurableEvent);
-    expect(childEvents.filter((event) => event.type === "permission.requested")).toHaveLength(0);
+    expect(forwarded).toHaveLength(1);
+    expect(childEvents.filter((event) => event.type === "permission.requested")).toHaveLength(1);
     expect(
       childEvents
         .filter((event) => event.type === "tool.completed" && event.payload.name === "web_fetch")

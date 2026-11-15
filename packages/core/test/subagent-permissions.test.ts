@@ -2261,11 +2261,11 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
 
     const parentEntry = intCap.seen.find((p) => !p.isChild);
     const childInt = intCap.seen.find((p) => p.isChild);
-    expect(parentEntry?.taskDesc).toContain("经父会话转发给用户确认");
-    expect(parentEntry?.taskDesc).toContain("非交互会话（如定时任务、-p）下会被直接拒绝");
+    expect(parentEntry?.taskDesc).toContain("在交互会话下转给用户确认");
+    expect(parentEntry?.taskDesc).toContain("在非交互会话（定时任务、-p）下被拒绝");
     expect(parentEntry?.taskDesc).toContain("执行期权限请求经过非交互判定，剩余询问会被拒绝");
     expect(parentEntry?.taskDesc).not.toContain("子会话是非交互的");
-    expect(parentEntry?.wfDesc).toContain("经父会话向用户请求确认");
+    expect(parentEntry?.wfDesc).toContain("在交互会话下转给用户确认");
     expect(parentEntry?.wfDesc).not.toContain("非交互子会话不能确认访问");
     expect(childInt?.systemPrompt).toContain("经父会话转发给用户确认");
     expect(childInt?.systemPrompt).not.toContain("需要确认的操作会被直接拒绝");
