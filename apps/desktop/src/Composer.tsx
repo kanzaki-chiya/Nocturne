@@ -189,7 +189,6 @@ export interface ComposerProps {
   branch?: DraftBranchChoice | undefined;
   /** null 表示本目录无项目文件索引（普通对话、或尚未建会话） */
   fileRefs: FileRefSource | null;
-  fileRefsUnavailable?: string;
   /** 首张图片加入时调用一次；显示在卡片上方气泡 */
   getVisionHint?: () => Promise<string | undefined>;
   pickImages: () => Promise<PickedImage[]>;
@@ -707,12 +706,9 @@ export function Composer({
       void runSlash(text);
       return;
     }
+    const workModeFromTag = parsed === null && selectedMode !== null;
     const effectiveWorkMode =
-      parsed?.kind === "work"
-        ? parsed.workMode
-        : parsed === null
-          ? (selectedMode ?? undefined)
-          : undefined;
+      parsed?.kind === "work" ? parsed.workMode : workModeFromTag ? selectedMode : undefined;
     const task = parsed?.kind === "work" ? parsed.text : text;
     const snapshot = attachmentsRef.current.slice();
     const payload: ComposerSubmit = {
@@ -731,14 +727,15 @@ export function Composer({
     // 同一轮事件里清空。不等 Core 接受；拒收再放回。连发时第二次读到的是空草稿。
     historyIndex.current = null;
     updateDraft("");
-    updateWorkMode(null);
+    if (workModeFromTag) updateWorkMode(null);
     attachmentsRef.current = [];
     setAttachments([]);
     const clearedRevision = revision.current;
+    const expectedWorkMode = workModeFromTag ? null : selectedMode;
     const untouched = () =>
       mounted.current &&
       revision.current === clearedRevision &&
-      workModeRef.current === null &&
+      workModeRef.current === expectedWorkMode &&
       attachmentsRef.current.length === 0;
     const dropSnapshot = () => {
       for (const attachment of snapshot) URL.revokeObjectURL(attachment.url);
@@ -751,7 +748,7 @@ export function Composer({
       attachmentsRef.current = snapshot;
       setAttachments(snapshot);
       updateDraft(text);
-      updateWorkMode(selectedMode);
+      if (workModeFromTag) updateWorkMode(selectedMode);
     };
     void (async () => {
       try {
@@ -1492,7 +1489,6 @@ export function Composer({
                 key={item.name}
                 icon={<Icon name={item.icon} size={ICON_SM} />}
                 label={item.label}
-                checked={workMode === item.name}
                 {...(disabledReason !== undefined ? { disabled: disabledReason } : {})}
                 onSelect={() => {
                   closeMenu();
@@ -1520,20 +1516,16 @@ export function Composer({
                 }}
               />
             </div>
-            {filteredSkills.length === 0 ? (
-              <div className="menu-note">没有匹配的技能</div>
-            ) : (
-              filteredSkills.map((skill) => (
-                <MenuItem
-                  key={skill.name}
-                  label={skill.name}
-                  onSelect={() => {
-                    closeMenu();
-                    insertSkillToken(skill.name);
-                  }}
-                />
-              ))
-            )}
+            {filteredSkills.map((skill) => (
+              <MenuItem
+                key={skill.name}
+                label={skill.name}
+                onSelect={() => {
+                  closeMenu();
+                  insertSkillToken(skill.name);
+                }}
+              />
+            ))}
             <MenuSeparator />
             <MenuItem
               icon={<Icon name="settings_1" size={ICON_SM} />}

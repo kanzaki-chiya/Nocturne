@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 import { ContextPanel, number, percent } from "./context-panel";
@@ -34,7 +42,66 @@ export function ContextUsage({
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const id = useId();
+
+  const updatePosition = useCallback(() => {
+    const trig = trigger.current;
+    if (!trig) return;
+    const trigRect = trig.getBoundingClientRect();
+    const cbox = trig.closest(".cbox");
+    const boxRect = (cbox ?? trig).getBoundingClientRect();
+    if (
+      trigRect.width === 0 &&
+      trigRect.height === 0 &&
+      boxRect.width === 0 &&
+      boxRect.height === 0
+    ) {
+      setPopoverStyle(undefined);
+      return;
+    }
+    const VIEWPORT_GAP = 8;
+    const POPOVER_GAP = 8;
+    const right = Math.max(VIEWPORT_GAP, window.innerWidth - trigRect.right);
+    const bottom = Math.max(VIEWPORT_GAP, window.innerHeight - boxRect.top + POPOVER_GAP);
+    const maxWidth = Math.max(160, Math.floor(window.innerWidth - right - VIEWPORT_GAP));
+    const maxHeight = Math.max(
+      120,
+      Math.min(560, Math.floor(boxRect.top - POPOVER_GAP - VIEWPORT_GAP)),
+    );
+    setPopoverStyle({
+      position: "fixed",
+      left: "auto",
+      top: "auto",
+      right: `${Math.round(right)}px`,
+      bottom: `${Math.round(bottom)}px`,
+      maxWidth: `${maxWidth}px`,
+      maxHeight: `${maxHeight}px`,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopoverStyle(undefined);
+      return;
+    }
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    let observer: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(updatePosition);
+      const trig = trigger.current;
+      const cbox = trig?.closest(".cbox");
+      if (trig) observer.observe(trig);
+      if (cbox) observer.observe(cbox);
+    }
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      observer?.disconnect();
+    };
+  }, [open, updatePosition]);
   const change = useCallback(
     (next: StatusPanel | null) => {
       if (panel === undefined) setLocalPanel(next);
@@ -110,6 +177,7 @@ export function ContextUsage({
           tabIndex={-1}
           aria-busy={loading}
           className="context-usage-popover"
+          style={popoverStyle}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();

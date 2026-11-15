@@ -97,7 +97,6 @@ function props(overrides: Partial<ComposerProps> = {}): ComposerProps {
       onOpenOther: vi.fn(),
     },
     fileRefs: null,
-    fileRefsUnavailable: "普通对话没有项目文件",
     pickImages: vi.fn(async () => []),
     ...overrides,
   };
@@ -1043,8 +1042,9 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     expect(plusMenu.textContent).toContain("计划");
     expect(plusMenu.textContent).toContain("多代理攻坚");
     expect(plusMenu.textContent).toContain("合奏");
+    expect(within(plusMenu).queryByRole("menuitemradio")).toBeNull();
 
-    fireEvent.click(within(plusMenu).getByRole("menuitemradio", { name: "目标" }));
+    fireEvent.click(within(plusMenu).getByRole("menuitem", { name: "目标" }));
     expect(container.querySelector(".tb .tb-sep")).not.toBeNull();
     expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy();
 
@@ -1079,7 +1079,7 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     render(<Composer {...props({ onSubmit })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "计划" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "计划" }));
     const tag = screen.getByRole("button", { name: "取消计划" });
     fireEvent.click(tag);
     expect(screen.queryByRole("button", { name: "取消计划" })).toBeNull();
@@ -1091,6 +1091,48 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
       text: "只做普通提问",
       attachments: [],
     });
+  });
+
+  it("选中执行方式标签后发送斜杠技能命令时不带 workMode 且保留标签；再发普通文本带出并清空标签", async () => {
+    const onSubmit = vi.fn(async (_payload: unknown) => true);
+    render(
+      <Composer
+        {...props({
+          variant: "session",
+          skills: [testSkill({ name: "deploy", description: "发布" })],
+          onSubmit,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "目标" }));
+    expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy();
+
+    // 再次打开「+」菜单：执行方式不带勾选列（仍为普通 menuitem，无 menuitemradio）
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    const reopened = await screen.findByRole("menu", { name: "添加" });
+    expect(within(reopened).queryByRole("menuitemradio")).toBeNull();
+    expect(reopened.querySelector(".menu-check")).toBeNull();
+    fireEvent.keyDown(reopened, { key: "Escape" });
+
+    const field = input("/deploy x");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const skillCall = onSubmit.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(skillCall.workMode).toBeUndefined();
+    expect(skillCall.skill).toBeTruthy();
+    expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy();
+
+    fireEvent.change(field, { target: { value: "完成收尾" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit).toHaveBeenLastCalledWith({
+      text: "完成收尾",
+      workMode: "goal",
+      attachments: [],
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "取消目标" })).toBeNull());
   });
 
   it("被禁用的执行方式禁用并带悬停说明原因", async () => {
@@ -1105,7 +1147,7 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
-    const ensembleItem = (await screen.findByRole("menuitemradio", {
+    const ensembleItem = (await screen.findByRole("menuitem", {
       name: "合奏",
     })) as HTMLButtonElement;
     expect(ensembleItem.disabled).toBe(true);
@@ -1133,6 +1175,12 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     const submenu = await screen.findByRole("menu", { name: "技能" });
     const search = within(submenu).getByRole("searchbox", { name: "搜索技能" });
     expect(search.getAttribute("placeholder")).toBeNull();
+
+    fireEvent.change(search, { target: { value: "not-found" } });
+    expect(submenu.textContent).not.toContain("没有匹配的技能");
+    expect(submenu.querySelector(".menu-note")).toBeNull();
+    expect(submenu.querySelector(".menu-sep")).not.toBeNull();
+    expect(within(submenu).getByRole("menuitem", { name: "管理技能" })).toBeTruthy();
 
     fireEvent.change(search, { target: { value: "deploy" } });
     expect(within(submenu).queryByRole("menuitem", { name: "plan-check" })).toBeNull();

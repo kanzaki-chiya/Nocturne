@@ -2807,7 +2807,6 @@ function SessionPane({
             ? null
             : { load: () => session.fileIndex(), key: `${view.turnCount}:${currentCwd}` }
         }
-        fileRefsUnavailable="普通对话没有项目文件"
         getVisionHint={controls.visionHint}
         pickImages={pickImages}
         onSlash={onSlash}
@@ -3071,7 +3070,6 @@ function DraftPane({
           workspace={workspaceChoice}
           branch={branchChoice}
           fileRefs={null}
-          fileRefsUnavailable={isPlain ? "普通对话没有项目文件" : "发送第一条消息后可搜索项目文件"}
           pickImages={pickImages}
           dirMenuOpen={dirMenuOpen}
           onDirMenuOpenChange={onDirMenuOpenChange}

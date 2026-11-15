@@ -260,7 +260,8 @@
   gap: var(--space-1);
   height: var(--ctl-h-md);
   font: inherit;
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-regular);
   color: var(--a-secondary);
   background: transparent;
   border: none;
@@ -271,7 +272,7 @@
   white-space: nowrap;
 }
 
-.composer .chip:hover,
+.composer .chip:hover:not(:disabled),
 .composer .chip.on {
   background: var(--a-raised);
   color: var(--a-text);
@@ -300,8 +301,8 @@
 }
 
 .composer .chip b {
-  font-weight: var(--fw-semibold);
-  color: var(--a-text);
+  font-weight: var(--fw-regular);
+  color: inherit;
   white-space: nowrap;
 }
 

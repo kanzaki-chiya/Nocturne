@@ -295,4 +295,45 @@ describe("上下文圆环", () => {
     expect(screen.getByText("累计 1,400 tokens")).toBeTruthy();
     expect(screen.getByText("缓存 90%")).toBeTruthy();
   });
+
+  it("上下文面板固定在 .cbox 外框上方 8px、右边对齐圆环，并在窄窗口下限制最大宽度防止超出左侧", async () => {
+    const f = fixture();
+    const origW = window.innerWidth;
+    const origH = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { value: 900, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 700, configurable: true });
+    try {
+      const { container } = render(
+        <div className="cbox">
+          <div className="tb">
+            <ContextUsage session={f.session} view={f.view} />
+          </div>
+        </div>,
+      );
+      const cbox = container.querySelector(".cbox") as HTMLElement;
+      const ring = await screen.findByRole("button", { name: "上下文用量 14%" });
+      cbox.getBoundingClientRect = () =>
+        ({ top: 580, left: 100, right: 860, bottom: 688, width: 760, height: 108 }) as DOMRect;
+      ring.getBoundingClientRect = () =>
+        ({ top: 650, left: 720, right: 748, bottom: 678, width: 28, height: 28 }) as DOMRect;
+
+      fireEvent.click(ring);
+      const dialog = screen.getByRole("dialog", { name: "上下文用量" });
+      expect(dialog.style.position).toBe("fixed");
+      expect(dialog.style.bottom).toBe("128px"); // 700 - (580 - 8)
+      expect(dialog.style.right).toBe("152px"); // 900 - 748
+      expect(dialog.style.maxWidth).toBe("740px"); // 748 - 8，右侧对齐且不超出窗口左边
+
+      // 窄窗口：圆环 right 仅 300px 时，maxWidth 限制为 300 - 8 = 292px
+      Object.defineProperty(window, "innerWidth", { value: 420, configurable: true });
+      ring.getBoundingClientRect = () =>
+        ({ top: 650, left: 272, right: 300, bottom: 678, width: 28, height: 28 }) as DOMRect;
+      fireEvent(window, new Event("resize"));
+      expect(dialog.style.right).toBe("120px"); // 420 - 300
+      expect(dialog.style.maxWidth).toBe("292px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: origW, configurable: true });
+      Object.defineProperty(window, "innerHeight", { value: origH, configurable: true });
+    }
+  });
 });
