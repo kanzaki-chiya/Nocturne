@@ -1333,7 +1333,7 @@ export function Composer({
               ref={(node) => {
                 triggers.current.dir = node;
               }}
-              className={`chip${openMenu === "dir" ? " on" : ""}${workspace.readOnly ? " ro" : ""}`}
+              className={`chip chip-dir${openMenu === "dir" ? " on" : ""}${workspace.readOnly ? " ro" : ""}`}
               disabled={workspace.readOnly || disabled}
               title={workspace.title}
               aria-label="切换目录"

@@ -599,10 +599,14 @@ describe("Composer 控件与附件", () => {
     expect(presetTrigger.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("模型 chip 单独带 chip-model 收缩类并保留完整 title，禁用时显示禁用原因；预设/档位/目录不收缩", () => {
+  it("模型与目录 chip 带各自上限与省略类并保留完整 title，预设与档位不收缩", () => {
     const longLabel = "dealignai/Qwen3.8-Flash-Next-CYBERSECURITY-NVFP4 · qwen3.8-colab";
+    const longDir = "very-long-workspace-folder-name-that-exceeds-the-320px-chip-limit";
     const baseControls = props().controls;
-    if (baseControls === undefined) throw new Error("fixture 缺少 controls");
+    const baseWorkspace = props().workspace;
+    if (baseControls === undefined || baseWorkspace === undefined) {
+      throw new Error("fixture 缺少 controls 或 workspace");
+    }
     const controls = {
       ...baseControls,
       model: { ...baseControls.model, label: longLabel },
@@ -624,12 +628,23 @@ describe("Composer 控件与附件", () => {
       ...controls,
       model: { ...controls.model, disabled: "运行中暂不可切换模型" },
     };
-    rerender(<Composer {...props({ controls: disabledControls })} />);
+    const longWorkspace = {
+      ...baseWorkspace,
+      label: longDir,
+      title: `Z:\\projects\\${longDir}`,
+    };
+    rerender(<Composer {...props({ controls: disabledControls, workspace: longWorkspace })} />);
     const dir = screen.getByRole("button", { name: "切换目录" });
     const draftModel = screen.getByRole("button", { name: "切换模型" });
+    const draftPreset = screen.getByRole("button", { name: "切换权限预设" });
     expect(draftModel.getAttribute("title")).toBe("运行中暂不可切换模型");
     expect((draftModel as HTMLButtonElement).disabled).toBe(true);
-    expect(dir.classList.contains("chip-model")).toBe(false);
+    expect(dir.classList.contains("chip")).toBe(true);
+    expect(dir.classList.contains("chip-dir")).toBe(true);
+    expect(dir.getAttribute("title")).toBe(`Z:\\projects\\${longDir}`);
+    expect(dir.querySelector("b")?.textContent).toBe(longDir);
+    expect(draftPreset.classList.contains("chip-dir")).toBe(false);
+    expect(draftPreset.classList.contains("chip-model")).toBe(false);
   });
 
   it("目录菜单列出普通对话与项目，选择走回调", async () => {

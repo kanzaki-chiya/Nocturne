@@ -282,18 +282,27 @@
   white-space: nowrap;
 }
 
-/* 档位等文本保留单行不省略，只有模型按钮在空间不足时收缩并单行省略 */
+/* 档位与预设保留单行不省略，模型与目录按钮有最大宽度限制并按需单行省略 */
 .composer .chip .t {
   white-space: nowrap;
 }
 
-.composer .chip-model {
+.composer .chip-model,
+.composer .chip-dir {
   flex: 0 1 auto;
-  min-width: 68px;
   max-width: 320px;
 }
 
-.composer .chip-model .t {
+.composer .chip-model {
+  min-width: 68px;
+}
+
+.composer .chip-dir {
+  min-width: 76px;
+}
+
+.composer .chip-model .t,
+.composer .chip-dir b {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
