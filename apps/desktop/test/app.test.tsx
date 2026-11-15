@@ -2486,7 +2486,7 @@ it("新会话页分支选择：普通对话显示 - 且禁用，项目默认显�
   );
 });
 
-it("新会话发送后侧栏立即出现并选中、状态栏显示思考中；拒收回到新会话页后侧栏不留", async () => {
+it("新会话发送后侧栏立即出现并选中、输入框显示中断；拒收回到新会话页后侧栏不留", async () => {
   const host = replayHost(
     [],
     undefined,
@@ -2500,13 +2500,13 @@ it("新会话发送后侧栏立即出现并选中、状态栏显示思考中；�
   fireEvent.change(field, { target: { value: "新会话首条" } });
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-  // createSession 返回后、session.submit 尚未返回：侧栏立即出现且选中，状态栏显示思考中
+  // createSession 返回后、session.submit 尚未返回：侧栏立即出现且选中，输入框可中断
   await waitFor(() => {
     const sidebar = document.querySelector("aside");
     expect(sidebar?.textContent).toContain("新会话首条");
     expect(sidebar?.querySelector(".item.on")?.textContent).toContain("新会话首条");
-    expect(document.querySelector(".status-turn")?.textContent).toContain("思考中");
-    expect(document.querySelector(".status-turn")?.textContent).not.toContain("空闲");
+    expect(screen.getByRole("button", { name: "中断" })).toBeTruthy();
+    expect(document.querySelector(".desktop-status")).toBeNull();
   });
 
   // 拒收：回到新会话页并恢复草稿，侧栏不再留下该会话

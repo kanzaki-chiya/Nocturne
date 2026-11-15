@@ -61,11 +61,10 @@ export function TitlebarButtons({
   onTogglePanel: () => void;
 }) {
   return (
-    <TitlebarPortal>
+    <div className="conversation-header-tools">
       <IconButton
         className="tb-icon"
         aria-label="会话概览"
-        title={overviewDisabled ? "会话概览（先打开一个会话）" : "会话概览"}
         aria-haspopup="dialog"
         aria-expanded={overviewOpen}
         aria-pressed={overviewOpen}
@@ -77,14 +76,13 @@ export function TitlebarButtons({
       <IconButton
         className="tb-icon"
         aria-label="右侧面板"
-        title={panelDisabled ? "右侧面板（先打开一个会话）" : "右侧面板"}
         aria-pressed={panelOpen}
         disabled={panelDisabled}
         onClick={onTogglePanel}
       >
         <Icon name="layout_right" size={ICON_MD} />
       </IconButton>
-    </TitlebarPortal>
+    </div>
   );
 }
 

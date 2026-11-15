@@ -337,7 +337,7 @@ export function BranchMenu({
     },
     onClose: close,
     onChoose: choose,
-    triggerClassName: "status-pill status-branch",
+    triggerClassName: "status-branch",
     disabled: triggerBusy,
     optionsDisabled: optionBusy,
     error,

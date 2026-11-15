@@ -62,6 +62,7 @@ import { parseSlash } from "./commands";
 import { openForkedSession } from "./fork-session";
 import { ContextUsage, type StatusPanel } from "./ContextUsage";
 import { BranchMenu } from "./BranchMenu";
+import { ConversationHeader } from "./ConversationHeader";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
@@ -77,7 +78,6 @@ import { BrowserSettingsPage, type BrowsingDataHost } from "./BrowserSettingsPag
 import { SettingsDeck } from "./SettingsDeck";
 import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
-import type { RemoteStatus } from "@nocturne/rpc/client";
 import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
 import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
@@ -96,7 +96,7 @@ import {
   sessionMarkFor,
   pushRemoteNotification,
 } from "./notify";
-import { abbreviateHome, middleTruncate } from "./paths";
+import { abbreviateHome } from "./paths";
 import { useSidePanel, type SidePanelController } from "./PanelHost";
 import {
   createPrefsStore,
@@ -2210,7 +2210,6 @@ export function App({ host }: { host: DesktopHost }) {
                   scheduleSource={scheduleSourceFor(sessions, scheduleNames, active.session.id)}
                   computerActive={computerActive?.app}
                   onStopComputer={stopActiveComputer}
-                  computerHotkeyBound={computerHotkeyBound}
                   onManageProviders={() => {
                     setPage("providers");
                   }}
@@ -2219,10 +2218,6 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                   onManageMcp={() => {
                     setPage("mcp");
-                  }}
-                  remoteStatus={remoteStatus}
-                  onManageRemote={() => {
-                    setPage("remote");
                   }}
                   onShellKindChange={onShellKindChange}
                 />
@@ -2544,11 +2539,8 @@ interface SessionPaneProps {
   /** 状态栏「MCP 未连接」标记：进入设置 › MCP */
   onManageMcp: () => void;
   onManageGrants: () => void;
-  remoteStatus: RemoteStatus | undefined;
-  onManageRemote: () => void;
   computerActive?: ApplicationTarget | undefined;
   onStopComputer?: (() => void) | undefined;
-  computerHotkeyBound?: boolean | undefined;
   /** 服务商配置变更计数：状态栏的模型/档位/预设数据随之重取 */
   providersVersion: number;
   scheduleSource?: ConversationProps["scheduleSource"];
@@ -2612,13 +2604,9 @@ function SessionPane({
   onPanelChange,
   providersVersion,
   onManageProviders,
-  onManageMcp,
   onManageGrants,
-  remoteStatus,
-  onManageRemote,
   computerActive,
   onStopComputer,
-  computerHotkeyBound,
   scheduleSource,
   searchTarget,
   onShellKindChange,
@@ -2678,24 +2666,23 @@ function SessionPane({
   const resolveAppIcon = useMemo(() => appIconResolver(client.computer), [client]);
   const isPlain = plainKey !== null && projectKey(workspace) === plainKey;
   const currentCwd = view.currentCwd ?? workspace;
-  const head = abbreviateHome(workspace, home);
-  const shown = middleTruncate(head, 56);
   return (
     <>
-      <div className="head">
-        <div className="crumb">
-          {isPlain ? "对话" : projectName(workspace)}
-          <span>
-            <Icon name="right_small" size={ICON_SM} />
-          </span>
-          <em title={view.title ?? selected?.firstText ?? "新会话"}>
-            {view.title ?? selected?.firstText ?? "新会话"}
-          </em>
-        </div>
-        <div className="path" title={workspace}>
-          {shown}
-        </div>
-      </div>
+      <ConversationHeader
+        title={view.title ?? selected?.firstText ?? "新会话"}
+        workspace={workspace}
+        branch={
+          <BranchMenu
+            client={client.runtime}
+            session={session}
+            workspace={currentCwd}
+            view={view}
+            replaying={replaying}
+          />
+        }
+        computerActive={computerActive}
+        onStopComputer={onStopComputer}
+      />
       <Conversation
         key={`conversation:${session.id}`}
         session={session}

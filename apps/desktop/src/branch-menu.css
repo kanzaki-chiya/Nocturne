@@ -1,7 +1,24 @@
 .status-branch {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
   max-width: 180px;
   min-width: 0;
-  font-family: var(--mono);
+  height: var(--ctl-h-sm);
+  padding: 0;
+  border-radius: var(--radius-2);
+  font: var(--fs-1)/var(--lh-tight) var(--mono);
+  color: var(--a-muted);
+}
+.status-branch b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--fw-regular);
+}
+.status-branch:hover {
+  background: var(--a-raised);
 }
 .status-branch > svg {
   flex: none;
@@ -105,14 +122,4 @@
   font: var(--fs-1)/var(--lh-base) var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-@container (max-width: 640px) {
-  .status-branch {
-    max-width: 100px;
-  }
-}
-@container (max-width: 480px) {
-  .status-branch {
-    max-width: 64px;
-  }
 }

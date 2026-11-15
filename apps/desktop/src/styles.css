@@ -594,53 +594,38 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
 }
 .head {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 12px 24px 10px;
+  flex: none;
+  align-items: center;
+  height: var(--h-titlebar);
+  gap: var(--space-3);
+  padding: 0 calc(var(--ctl-h-md) * 2 + var(--space-5)) 0 var(--space-4);
   border-bottom: 1px solid var(--a-border);
   min-width: 0;
 }
-.crumb {
-  font-weight: var(--fw-semibold);
-  color: var(--a-accent);
-  font-size: var(--fs-3);
-  display: flex;
-  align-items: baseline;
-  min-width: 0;
-  flex: 1 1 auto;
-  white-space: nowrap;
-}
-.crumb span {
-  display: inline-flex;
-  align-self: center;
-  color: var(--a-faint);
-  font-weight: var(--fw-regular);
-  margin: 0 6px;
-  flex: none;
-}
-.crumb em {
-  font-style: normal;
-  color: var(--a-text);
+.conversation-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.head .path {
-  color: var(--a-faint);
-  font-size: var(--fs-1);
-  flex: none;
   white-space: nowrap;
+  font-size: var(--fs-2);
+  font-weight: var(--fw-medium);
 }
-/* 空间不够时先隐藏路径，标题继续单行省略（与状态栏同一容器阈值） */
-@container (max-width: 700px) {
-  .head .path {
-    display: none;
-  }
-}
-.head .tools {
-  margin-left: auto;
+.head-computer {
   display: flex;
-  gap: 6px;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
+}
+.conversation-header-tools {
+  position: absolute;
+  top: 0;
+  right: var(--space-2);
+  height: var(--h-titlebar);
+  display: flex;
+  align-items: center;
+  z-index: 3;
 }
 
 .stream {
