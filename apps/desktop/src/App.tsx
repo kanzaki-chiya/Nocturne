@@ -218,8 +218,9 @@ export function App({ host }: { host: DesktopHost }) {
     force: boolean;
     model?: ModelRef | undefined;
   } | null>(null);
-  /** 最近一次渲染的会话树（「打开项目」判断项目是否已可见） */
+  /** 最近一次权威会话树（「打开项目」判断项目是否已可见） */
   const treeRef = useRef<SessionTree | null>(null);
+  const pendingProjects = useRef<string[]>([]);
   /** 外壳 plain_workspace 的默认路径（恢复默认用）；生效路径另看 prefs.plainWorkspace */
   const [defaultWorkspace, setDefaultWorkspace] = useState<string | null>(
     cachedSessions === undefined ? null : (host.sessionPaths?.plainWorkspace ?? null),
@@ -937,24 +938,37 @@ export function App({ host }: { host: DesktopHost }) {
 
   // 「打开项目」只更新 prefs 并刷新列表，不启动后台（项目后台在打开会话时才启动）。
   // 不在列表里或已隐藏的项目移到 projectOrder 最前面；已经可见的不移动。
+  const addProject = useCallback(
+    (dir: string) => {
+      const key = projectKey(dir);
+      const current = prefs.get();
+      const visible = treeRef.current?.projects.some((project) => project.key === key) === true;
+      const order = current.projectOrder;
+      prefs.update({
+        projects: current.projects.includes(dir) ? current.projects : [...current.projects, dir],
+        hidden: current.hidden.filter((k) => projectKey(k) !== key),
+        ...(!visible && order !== undefined
+          ? { projectOrder: [key, ...order.filter((k) => k !== key)] }
+          : {}),
+      });
+      bumpPrefs();
+    },
+    [prefs, bumpPrefs],
+  );
   const openProject = useCallback(async () => {
     const dir = await host.pickFolder();
     if (dir === null) return;
-    const key = projectKey(dir);
-    const current = prefs.get();
-    const visible = treeRef.current?.projects.some((project) => project.key === key) === true;
-    const order = current.projectOrder;
-    prefs.update({
-      projects: current.projects.includes(dir) ? current.projects : [...current.projects, dir],
-      hidden: current.hidden.filter((k) => projectKey(k) !== key),
-      ...(!visible && order !== undefined
-        ? { projectOrder: [key, ...order.filter((k) => k !== key)] }
-        : {}),
-    });
-    bumpPrefs();
+    if (treeRef.current === null) pendingProjects.current.push(dir);
+    else addProject(dir);
     await refresh();
     return dir;
-  }, [host, prefs, refresh, bumpPrefs]);
+  }, [host, addProject, refresh]);
+  useEffect(() => {
+    if (!listed || pendingProjects.current.length === 0) return;
+    const pending = pendingProjects.current;
+    pendingProjects.current = [];
+    for (const dir of pending) addProject(dir);
+  }, [listed, addProject]);
 
   const selectSession = async (id: string, workspace: string, force = false, model?: ModelRef) => {
     // 选中立即生效：会话区先显示「正在打开…」，内容到了再渲染（ADR-0051）

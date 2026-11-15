@@ -728,6 +728,27 @@ it("缓存中已删除的会话点击后沿用会话不存在错误，真实列�
   expect(screen.queryByRole("button", { name: /^gone 会话/ })).toBeNull();
 });
 
+it("缓存期间打开项目等真实列表判断是否已存在，不提前写项目或误移已有项目", async () => {
+  const host = replayHost([], undefined, (request) => request.method === "runtime.listSessions");
+  host.pickFolder = async () => "Z:/qa-alpha";
+  const cachedHost = { ...host, sessionPaths: cachePaths };
+  writeSessionsCache(() => localStorage, cachedHost, host.sessions);
+  const order = ["z:\\qa-beta", "z:\\qa-alpha", "z:\\qa-gamma"];
+  const initialPrefs = JSON.stringify({ projectOrder: order });
+  localStorage.setItem("nocturne.desktop.prefs.v1", initialPrefs);
+  render(<App host={cachedHost} />);
+  await waitFor(() => expect(host.deferred).toHaveLength(1));
+  fireEvent.click(screen.getByTitle("打开项目…"));
+  await waitFor(() => expect(host.deferred).toHaveLength(2));
+  expect(storedPrefs().projects).toEqual([]);
+  expect(storedPrefs().projectOrder).toEqual(order);
+  await act(async () => {
+    for (const request of host.deferred) request.respond(host.sessions);
+  });
+  await waitFor(() => expect(storedPrefs().projects).toEqual(["Z:/qa-alpha"]));
+  expect(storedPrefs().projectOrder).toEqual(order);
+});
+
 it.each(["broken", "wrong-scope", "wrong-version"])("%s 缓存首帧忽略，无缓存行为不变", (kind) => {
   const host = replayHost();
   host.invoke = () => new Promise(() => undefined);
@@ -1670,6 +1691,7 @@ const storedPrefs = () =>
   JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
     projectSort?: string;
     projectOrder?: string[];
+    projects?: string[];
   };
 
 it("「＋」打开新项目后排在项目列表第一位", async () => {
