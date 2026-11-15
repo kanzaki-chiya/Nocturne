@@ -851,6 +851,61 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
     expect(atMid(160_001).compaction?.kind).toBe("prune");
     expect(atMid(165_000, { pruneAttempted: true }).compaction?.kind).toBe("summary");
   });
+
+  it("historyPrune: false 模型跳过 L1 修剪，仅在超 S 或 mustCompact 时直接摘要", () => {
+    const large: ModelInfo = {
+      ...small,
+      contextWindow: 1_000_000 + 1000 + 1024,
+      maxOutputTokens: 1000,
+    };
+    const noPrune: ModelInfo = {
+      ...large,
+      capabilities: { ...large.capabilities, historyPrune: false },
+    };
+    const at = (
+      target: ModelInfo,
+      tokens: number,
+      over: Partial<BuildContextInput> = {},
+      history: HistoryEntry[] = [tool(1, 120_000)],
+    ) =>
+      buildContext(
+        input([...history, assistant(7, 1, tokens - 100)], {
+          model: target,
+          compactionThreshold: 400_000,
+          ...over,
+        }),
+      );
+
+    // 超过 L（200k）但低于 S（400k）：不修剪模型无计划；普通模型给出 prune
+    expect(at(noPrune, 250_000).compaction).toBeUndefined();
+    expect(at(large, 250_000).compaction?.kind).toBe("prune");
+    expect(at(noPrune, 400_000).compaction).toBeUndefined();
+
+    // 超过 S（400k）：直接给出 summary，不给 prune；普通模型仍先给 prune
+    expect(at(noPrune, 400_001).compaction?.kind).toBe("summary");
+    expect(at(large, 400_001).compaction?.kind).toBe("prune");
+
+    // mustCompact（overBudget 与 force）：直接给出 summary；普通模型仍先给 prune
+    expect(at(noPrune, 1_000_001).compaction?.kind).toBe("summary");
+    expect(at(noPrune, 250_000, { compactionState: { force: true } }).compaction?.kind).toBe(
+      "summary",
+    );
+    expect(at(large, 250_000, { compactionState: { force: true } }).compaction?.kind).toBe("prune");
+
+    // 旧会话已写入的 prune 事件照常投影，不被回溯取消
+    const withExistingPrune = at(noPrune, 250_000, {}, [
+      tool(1, 120_000),
+      {
+        kind: "compaction",
+        seq: 2,
+        turnId: "t",
+        compactKind: "prune",
+        throughSeq: 1,
+        summary: undefined,
+      },
+    ]);
+    expect(JSON.stringify(withExistingPrune.request.messages)).toContain("context.compacted 修剪");
+  });
   it("200k 在大预算模型中严格超过 200000 token 才触发", () => {
     const large = { ...small, contextWindow: 1_000_000 };
     const at = (tokens: number) =>

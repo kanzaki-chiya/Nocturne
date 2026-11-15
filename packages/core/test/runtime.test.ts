@@ -1372,6 +1372,94 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.close();
   });
 
+  it("historyPrune: false 模型 context_overflow 时跳过 prune 直接摘要；摘要失败以 compaction_failed 结束", async () => {
+    const ws = makeTmpDir("nct-rt-noprune-");
+    writeFileSync(path.join(ws, "big.txt"), ("y".repeat(200) + "\n").repeat(100));
+    const noPruneModel = {
+      ...tinyModel,
+      ref: { provider: "fake", model: "fake-model" },
+      contextWindow: 40_000,
+      maxOutputTokens: 8192,
+      capabilities: { ...tinyModel.capabilities, historyPrune: false },
+    };
+
+    const providerOk = new FakeProvider({
+      models: [noPruneModel],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "r1", name: "read", input: { path: "big.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "too many tokens" }),
+          },
+        ],
+        [
+          { type: "text_delta", text: "直接摘要：big.txt" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+        [
+          { type: "text_delta", text: "手动摘要完成" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const rtOk = await makeRuntime(undefined, ws, { provider: providerOk });
+    const sOk = await makeSession(rtOk.runtime);
+    const eventsOk = collect(sOk);
+    expect(await sOk.submit({ text: "go" })).toBe("done");
+    const compactedOk = eventsOk.filter((e) => e.type === "context.compacted");
+    expect(compactedOk.map((e) => (e.type === "context.compacted" ? e.payload.kind : ""))).toEqual([
+      "summary",
+    ]);
+    await sOk.compact();
+    const afterManual = eventsOk.filter((e) => e.type === "context.compacted");
+    expect(afterManual.map((e) => (e.type === "context.compacted" ? e.payload.kind : ""))).toEqual([
+      "summary",
+      "summary",
+    ]);
+    await sOk.close();
+
+    // 摘要失败 → 直接以 compaction_failed 结束，不尝试 prune
+    const providerFail = new FakeProvider({
+      models: [noPruneModel],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "r1", name: "read", input: { path: "big.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "context_overflow", message: "too many tokens" }),
+          },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "network", message: "summary boom" }),
+          },
+        ],
+      ],
+    });
+    const rtFail = await makeRuntime(undefined, ws, { provider: providerFail });
+    const sFail = await makeSession(rtFail.runtime);
+    const eventsFail = collect(sFail);
+    expect(await sFail.submit({ text: "go" })).toBe("error");
+    const doneFail = eventsFail.find((e) => e.type === "turn.completed");
+    expect(doneFail?.type === "turn.completed" && doneFail.payload.error?.code).toBe(
+      "compaction_failed",
+    );
+    expect(eventsFail.filter((e) => e.type === "context.compacted")).toHaveLength(0);
+    await sFail.close();
+  });
+
   it("compact() 保留最近报错与改动，文件提示在恢复后相同，摘要工具调用被忽略", async () => {
     const ws = makeTmpDir("nct-rt-retain-");
     writeFileSync(path.join(ws, "old.txt"), "旧".repeat(6000));
