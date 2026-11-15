@@ -1122,8 +1122,10 @@ export function lastOpenTurnId(events: readonly DurableEvent[]): string | undefi
 
 function anchoredEstimate(input: BuildContextInput): number | undefined {
   const ref = input.model.ref;
+  // 跳过 inputTokens <= 0 的无效用量（真实请求必带系统提示，输入不可能为 0）
   const anchor = input.history.findLast(
-    (entry) => entry.kind === "assistant" && entry.usage !== undefined,
+    (entry) =>
+      entry.kind === "assistant" && entry.usage !== undefined && entry.usage.inputTokens > 0,
   );
   if (
     anchor?.kind !== "assistant" ||
