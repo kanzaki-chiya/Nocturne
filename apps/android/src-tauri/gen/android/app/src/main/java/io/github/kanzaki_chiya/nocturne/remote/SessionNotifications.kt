@@ -51,12 +51,12 @@ object SessionNotifications {
       else -> "已完成"
     }
     val publicVersion = NotificationCompat.Builder(context, CHANNEL)
-      .setSmallIcon(android.R.drawable.ic_dialog_info)
+      .setSmallIcon(R.drawable.ic_stat_nocturne)
       .setContentTitle("Nocturne")
       .setContentText(publicBody)
       .build()
     val notice: Notification = NotificationCompat.Builder(context, CHANNEL)
-      .setSmallIcon(android.R.drawable.ic_dialog_info)
+      .setSmallIcon(R.drawable.ic_stat_nocturne)
       .setContentTitle(title).setContentText(body)
       .setStyle(NotificationCompat.BigTextStyle().bigText(body))
       .setPriority(NotificationCompat.PRIORITY_HIGH)

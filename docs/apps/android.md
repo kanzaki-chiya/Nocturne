@@ -90,7 +90,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 - 启动条件：已配对至少一台电脑且「后台保持连接」打开（设置页，默认开）。关闭或移除最后一台电脑则停止，行为回到网页版。用户划掉 App 时（Activity 结束）服务随之停止，避免通知谎称「已连接」。
 - 常驻通知文案：标题保持 `Nocturne 远程：已连接 <电脑名>`，未连上为 `Nocturne 远程：正在连接…`，渲染进程丢失且 App 在后台时为 `Nocturne 远程：连接已中断，点按重新打开`；命中具体会话时正文设为会话名（与本地通知 `sessionTitle` 一致）并采用 `BigTextStyle`。通知渠道「后台保持连接」为低优先级，有目标会话时点按直接打开该会话（复用 `notificationTarget`），否则回到 App 首页；同一内容去抖不重复 `notify`。
-- **Android 16 Live Updates（小米超级岛）**：清单声明 `POST_PROMOTED_NOTIFICATIONS`，SDK ≥ 36 时按状态在 `Notification.Builder` 上调用 `setRequestPromotedOngoing(true/false)` 与 `setShortCriticalText`（依据：ChatGPT 安卓版 1.2026.307 的 `CodexRemoteSessionForegroundService` 在 HyperOS 3.0 上仅靠 `POST_PROMOTED_NOTIFICATIONS`、`IMPORTANCE_LOW` 常驻通知与这两个标准 API 即能上超级岛，无私有字段、未用 `CallStyle`）。按优先级取当前连接电脑上最高的一项：
+- **Android 16 Live Updates（小米超级岛）**：清单声明 `POST_PROMOTED_NOTIFICATIONS`，SDK ≥ 36 时按状态在 `Notification.Builder` 上调用 `setRequestPromotedOngoing(true/false)` 与 `setShortCriticalText`（依据：ChatGPT 安卓版 1.2026.307 的 `CodexRemoteSessionForegroundService` 在 HyperOS 3.0 上仅靠 `POST_PROMOTED_NOTIFICATIONS`、`IMPORTANCE_LOW` 常驻通知与这两个标准 API 即能上超级岛，无私有字段、未用 `CallStyle`）；常驻与会话提醒通知小图标统一使用 `ic_stat_nocturne`，与应用图标同形。按优先级取当前连接电脑上最高的一项：
 
 | 情况 | `shortCriticalText` | 请求上岛 |
 |---|---|---|

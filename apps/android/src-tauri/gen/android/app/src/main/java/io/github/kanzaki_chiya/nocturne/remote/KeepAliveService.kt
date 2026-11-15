@@ -97,7 +97,7 @@ class KeepAliveService : Service() {
     private fun build(context: Context, notice: ServiceNotice): Notification {
       ensureChannel(context)
       val builder = Notification.Builder(context, CHANNEL)
-        .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        .setSmallIcon(R.drawable.ic_stat_nocturne)
         .setContentTitle(notice.title)
         .setOngoing(true)
         .setOnlyAlertOnce(true)

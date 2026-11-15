@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知小图标：与应用图标同一扫描线新月（13 条横条），单色白；几何来自 nocturne-mockups/icon-r1115/geometry.json -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="624"
+    android:viewportHeight="624">
+  <group android:translateX="-200" android:translateY="-200">
+    <clip-path android:pathData="M499.1 212.3A300 300 0 1 0 792.1 619.5A252 252 0 0 1 499.1 212.3Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,210h1024v40.1h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,264.2h1024v37.9h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,317.4h1024v35.8h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,369.6h1024v33.6h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,420.8h1024v31.4h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,471.1h1024v29.3h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,520.4h1024v27.1h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,568.8h1024v24.9h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,616.2h1024v22.7h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,662.6h1024v20.6h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,708h1024v18.4h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,752.5h1024v16.2h-1024z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M0,796h1024v54h-1024z" />
+  </group>
+</vector>
