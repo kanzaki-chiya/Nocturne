@@ -45,7 +45,9 @@ const opts = (o?: {
   plainWorkspace: o?.plainWorkspace ?? null,
   ...(o?.chatsLimit !== undefined ? { chatsLimit: o.chatsLimit } : {}),
   ...(o?.scheduledLimit !== undefined ? { scheduledLimit: o.scheduledLimit } : {}),
-  ...(o?.projectLimits !== undefined ? { projectLimits: new Map(Object.entries(o.projectLimits)) } : {}),
+  ...(o?.projectLimits !== undefined
+    ? { projectLimits: new Map(Object.entries(o.projectLimits)) }
+    : {}),
   ...(o?.chatsExpanded !== undefined ? { chatsExpanded: o.chatsExpanded } : {}),
   ...(o?.expanded !== undefined ? { expanded: new Set(o.expanded) } : {}),
   collapsed: new Set(o?.collapsed ?? []),

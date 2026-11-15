@@ -57,7 +57,7 @@ export interface SidebarProps {
   onUnpin: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void>;
   /** 归档会话（ADR-0080）；运行中/待发输入时菜单项禁用 */
-  onArchive: (id: string) => void;
+  onArchive: (id: string) => void | Promise<void>;
   /** 状态之外还要提前挡住的归档（例如待发输入、正在关闭） */
   archiveBlocked?: ReadonlySet<string>;
   onHideProject: (path: string) => void;
@@ -147,8 +147,21 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
 
 type MenuState =
   | { kind: "session"; x: number; y: number; id: string; pinned: boolean }
+  | { kind: "batch"; x: number; y: number; ids: string[] }
   | { kind: "project"; x: number; y: number; key: string; path: string; index: number }
   | { kind: "projects"; x: number; y: number };
+
+const ARCHIVE_DISABLED_REASON = "运行中、等待确认或别处打开的会话无法归档";
+
+function isEditableElement(node: EventTarget | Element | null): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  if (node.isContentEditable) return true;
+  return (
+    node instanceof HTMLInputElement ||
+    node instanceof HTMLTextAreaElement ||
+    node instanceof HTMLSelectElement
+  );
+}
 
 /**
  * 会话行右侧的短标签（ADR-0056）：待确认来自会话状态（请求被处理即消失），
@@ -168,6 +181,7 @@ function RowButton({
   row,
   pinned,
   selected,
+  multiSelected,
   onSelect,
   onContext,
   onMenu,
@@ -179,7 +193,8 @@ function RowButton({
   row: SessionRow;
   pinned?: { project: string };
   selected: boolean;
-  onSelect: () => void;
+  multiSelected: boolean;
+  onSelect: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onContext: (e: React.MouseEvent) => void;
   /** 「…」按钮点击：在同一行右侧锚点打开右键同款菜单 */
   onMenu: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -232,7 +247,10 @@ function RowButton({
         />
       ) : (
         <button
-          className={`item${selected ? " on" : ""}`}
+          className={`item${selected ? " on" : ""}${multiSelected ? " msel" : ""}`}
+          onMouseDown={(e) => {
+            if (e.shiftKey) e.preventDefault();
+          }}
           onClick={onSelect}
           onContextMenu={onContext}
         >
@@ -285,6 +303,48 @@ export function Sidebar(props: SidebarProps) {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [multiSelected, setMultiSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const anchorRef = useRef<{ groupKey: string; id: string } | null>(null);
+  const batchArchiving = useRef(false);
+  const onArchiveRef = useRef(props.onArchive);
+  onArchiveRef.current = props.onArchive;
+
+  const visibleGroupRows = new Map<string, string[]>();
+  const visibleOrderedIds: string[] = [];
+  const visibleRowById = new Map<string, SessionRow>();
+  const registerGroup = (groupKey: string, rows: readonly SessionRow[]) => {
+    const ids: string[] = [];
+    for (const row of rows) {
+      ids.push(row.id);
+      visibleOrderedIds.push(row.id);
+      visibleRowById.set(row.id, row);
+    }
+    visibleGroupRows.set(groupKey, ids);
+  };
+  registerGroup("pinned", props.tree.pinned);
+  registerGroup("chats", props.tree.chats.rows);
+  registerGroup("scheduled", props.tree.scheduled.rows);
+  for (const project of props.tree.projects) {
+    if (!props.collapsed.has(project.key)) {
+      registerGroup(`project:${project.key}`, project.sessions);
+    }
+  }
+  const effectiveMultiSelected = new Set([...multiSelected].filter((id) => visibleRowById.has(id)));
+  const visibleIdsKey = visibleOrderedIds.join("\0");
+
+  useEffect(() => {
+    const visibleSet = new Set(visibleIdsKey === "" ? [] : visibleIdsKey.split("\0"));
+    setMultiSelected((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visibleSet.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [visibleIdsKey]);
 
   useEffect(() => {
     if (menu === null) return;
@@ -306,6 +366,37 @@ export function Sidebar(props: SidebarProps) {
       window.removeEventListener("mousedown", onDown);
     };
   }, [menu]);
+
+  useEffect(() => {
+    if (
+      menu !== null ||
+      effectiveMultiSelected.size === 0 ||
+      (props.page !== undefined && props.page !== null)
+    ) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.key !== "Escape" ||
+        e.defaultPrevented ||
+        e.isComposing ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        e.shiftKey
+      ) {
+        return;
+      }
+      if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
+      e.preventDefault();
+      anchorRef.current = null;
+      setMultiSelected(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu, effectiveMultiSelected.size, props.page]);
 
   // 设置区：左栏整列换成设置导航，会话树不显示
   if (props.page !== undefined && props.page !== null) {
@@ -343,24 +434,82 @@ export function Sidebar(props: SidebarProps) {
     );
   }
 
-  const sessionMenu = (e: React.MouseEvent, id: string) => {
-    e.preventDefault();
-    setMenu({ kind: "session", x: e.clientX, y: e.clientY, id, pinned: props.pinnedIds.has(id) });
-  };
-
   const manual = props.projectSort === "manual";
   const projects = props.tree.projects;
   /** 归档：运行中/等待确认由行状态挡住；待发输入等提前状态由 App 传入 */
   const archiveDisabled = (id: string): boolean => {
     if (props.archiveBlocked?.has(id) === true) return true;
-    const rows = [
-      ...props.tree.pinned,
-      ...props.tree.chats.rows,
-      ...props.tree.scheduled.rows,
-      ...props.tree.projects.flatMap((project) => project.sessions),
-    ];
-    const row = rows.find((entry) => entry.id === id);
+    const row = visibleRowById.get(id);
     return row === undefined || row.locked || row.status !== "idle";
+  };
+
+  const openRowMenu = (x: number, y: number, id: string) => {
+    setSubOpen(null);
+    if (effectiveMultiSelected.size >= 2 && effectiveMultiSelected.has(id)) {
+      const ids = visibleOrderedIds.filter((entry) => effectiveMultiSelected.has(entry));
+      setMenu({ kind: "batch", x, y, ids });
+      return;
+    }
+    if (multiSelected.size > 0) {
+      setMultiSelected(new Set());
+      anchorRef.current = null;
+    }
+    setMenu({ kind: "session", x, y, id, pinned: props.pinnedIds.has(id) });
+  };
+
+  const runBatchArchive = async (ids: readonly string[]) => {
+    if (batchArchiving.current) return;
+    const archivable = ids.filter((id) => !archiveDisabled(id));
+    setMenu(null);
+    if (archivable.length === 0) return;
+    batchArchiving.current = true;
+    try {
+      for (const id of archivable) {
+        try {
+          await onArchiveRef.current(id);
+        } catch {
+          // 单个失败不影响其余，继续归档并沿用现有错误提示
+        }
+      }
+      anchorRef.current = null;
+      setMultiSelected(new Set());
+    } finally {
+      batchArchiving.current = false;
+    }
+  };
+
+  const handleRowSelect = (e: React.MouseEvent, groupKey: string, id: string) => {
+    if (e.ctrlKey || e.metaKey) {
+      anchorRef.current = { groupKey, id };
+      setMultiSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      return;
+    }
+    if (e.shiftKey) {
+      const anchor = anchorRef.current;
+      const groupRows = visibleGroupRows.get(groupKey);
+      if (anchor !== null && anchor.groupKey === groupKey && groupRows !== undefined) {
+        const from = groupRows.indexOf(anchor.id);
+        const to = groupRows.indexOf(id);
+        if (from >= 0 && to >= 0) {
+          const [start, end] = from <= to ? [from, to] : [to, from];
+          setMultiSelected(new Set(groupRows.slice(start, end + 1)));
+          return;
+        }
+      }
+      anchorRef.current = { groupKey, id };
+      setMultiSelected(new Set([id]));
+      return;
+    }
+    anchorRef.current = { groupKey, id };
+    if (multiSelected.size > 0) {
+      setMultiSelected(new Set());
+    }
+    props.onSelectSession(id);
   };
 
   const projectMenu = (e: React.MouseEvent, project: ProjectNode, index: number) => {
@@ -386,12 +535,13 @@ export function Sidebar(props: SidebarProps) {
       ? dropIndex
       : null;
 
-  const renderRow = (row: SessionRow, pinned?: PinnedRow) => (
+  const renderRow = (row: SessionRow, groupKey: string, pinned?: PinnedRow) => (
     <RowButton
       key={`${row.id}:${renaming === row.id ? "editing" : "view"}`}
       row={row}
       {...(pinned !== undefined ? { pinned: { project: pinned.project } } : {})}
       selected={props.selectedId === row.id}
+      multiSelected={effectiveMultiSelected.has(row.id)}
       editing={renaming === row.id}
       error={renameError?.id === row.id ? renameError.message : undefined}
       onCancel={() => {
@@ -428,22 +578,16 @@ export function Sidebar(props: SidebarProps) {
             renamePending.current = false;
           });
       }}
-      onSelect={() => {
-        props.onSelectSession(row.id);
+      onSelect={(e) => {
+        handleRowSelect(e, groupKey, row.id);
       }}
       onContext={(e) => {
-        sessionMenu(e, row.id);
+        e.preventDefault();
+        openRowMenu(e.clientX, e.clientY, row.id);
       }}
       onMenu={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
-        setSubOpen(null);
-        setMenu({
-          kind: "session",
-          x: rect.left,
-          y: rect.bottom + 4,
-          id: row.id,
-          pinned: props.pinnedIds.has(row.id),
-        });
+        openRowMenu(rect.left, rect.bottom + 4, row.id);
       }}
     />
   );
@@ -544,7 +688,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
         {!collapsed && (
           <nav className="nav sub">
-            {project.sessions.map((row) => renderRow(row))}
+            {project.sessions.map((row) => renderRow(row, `project:${project.key}`))}
             {project.moreCount > 0 && (
               <button
                 className="item more"
@@ -606,14 +750,16 @@ export function Sidebar(props: SidebarProps) {
         {props.tree.pinned.length > 0 && (
           <>
             <h4>置顶</h4>
-            <nav className="nav">{props.tree.pinned.map((row) => renderRow(row, row))}</nav>
+            <nav className="nav">
+              {props.tree.pinned.map((row) => renderRow(row, "pinned", row))}
+            </nav>
           </>
         )}
         {props.tree.chats.rows.length > 0 && (
           <>
             <h4>对话</h4>
             <nav className="nav">
-              {props.tree.chats.rows.map((row) => renderRow(row))}
+              {props.tree.chats.rows.map((row) => renderRow(row, "chats"))}
               {props.tree.chats.moreCount > 0 && (
                 <button
                   className="item more flat"
@@ -641,7 +787,7 @@ export function Sidebar(props: SidebarProps) {
           <>
             <h4>定时任务</h4>
             <nav className="nav" aria-label="定时任务会话">
-              {props.tree.scheduled.rows.map((row) => renderRow(row))}
+              {props.tree.scheduled.rows.map((row) => renderRow(row, "scheduled"))}
               {props.tree.scheduled.moreCount > 0 && (
                 <button
                   className="item more flat"
@@ -717,8 +863,9 @@ export function Sidebar(props: SidebarProps) {
               </button>
               <button
                 disabled={archiveDisabled(menu.id)}
+                title={archiveDisabled(menu.id) ? ARCHIVE_DISABLED_REASON : undefined}
                 onClick={() => {
-                  props.onArchive(menu.id);
+                  void props.onArchive(menu.id);
                   setMenu(null);
                 }}
               >
@@ -726,6 +873,22 @@ export function Sidebar(props: SidebarProps) {
               </button>
             </>
           )}
+          {menu.kind === "batch" &&
+            (() => {
+              const archivableCount = menu.ids.filter((id) => !archiveDisabled(id)).length;
+              return (
+                <button
+                  autoFocus
+                  disabled={archivableCount === 0}
+                  title={archivableCount === 0 ? ARCHIVE_DISABLED_REASON : undefined}
+                  onClick={() => {
+                    void runBatchArchive(menu.ids);
+                  }}
+                >
+                  归档 {archivableCount} 个会话
+                </button>
+              );
+            })()}
           {menu.kind === "project" && (
             <>
               {manual && (

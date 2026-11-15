@@ -239,6 +239,7 @@ button {
   overflow: hidden;
   text-align: left;
   width: 100%;
+  user-select: none;
 }
 .nav .item .t {
   overflow: hidden;
@@ -342,6 +343,11 @@ button {
 .irow:hover .item,
 .gh:hover {
   background: var(--a-sel);
+  color: var(--a-text);
+}
+.nav .item.msel,
+.irow:hover .item.msel {
+  background: var(--a-multi-sel);
   color: var(--a-text);
 }
 

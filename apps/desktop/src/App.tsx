@@ -180,7 +180,11 @@ function nextSidebarSession(
     ...tree.chats.rows,
     ...tree.scheduled.rows,
     ...tree.projects.flatMap((project) => project.sessions),
-  ].find((row) => row.id !== id);
+  ].find((row) => {
+    if (row.id === id) return false;
+    const item = byId.get(row.id);
+    return item !== undefined && item.archivedAt === undefined;
+  });
   return fallback === undefined ? undefined : byId.get(fallback.id);
 }
 
@@ -211,6 +215,8 @@ export function App({ host }: { host: DesktopHost }) {
   const [phase, setPhase] = useState<Phase>({ kind: "probing" });
   const [cachedSessions] = useState(() => readSessionsCache(() => globalThis.localStorage, host));
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const sessionsRef = useRef<SessionSummary[]>(sessions);
+  sessionsRef.current = sessions;
   /** 首帧缓存只参与渲染；listed 仍只表示已取得真实列表。 */
   const [sessionsVisible, setSessionsVisible] = useState(cachedSessions !== undefined);
   const [listed, setListed] = useState(false);
@@ -335,6 +341,8 @@ export function App({ host }: { host: DesktopHost }) {
   const [projectLimits, setProjectLimits] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [chatsLimit, setChatsLimit] = useState(DEFAULT_LIMIT);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(selectedId);
+  selectedIdRef.current = selectedId;
   const [startupError, setStartupError] = useState<StartupError | null>(null);
   /**
    * 最近一次后台退出（单后台只有一个）：workspace 是启动它的工作区（诊断
@@ -644,6 +652,7 @@ export function App({ host }: { host: DesktopHost }) {
       const list = await client.runtime.listSessions({
         includeArchived: true,
       });
+      sessionsRef.current = list;
       setSessions(list);
       setListed(true);
       setSessionsVisible(true);
@@ -976,6 +985,7 @@ export function App({ host }: { host: DesktopHost }) {
 
   const selectSession = async (id: string, workspace: string, force = false, model?: ModelRef) => {
     // 选中立即生效：会话区先显示「正在打开…」，内容到了再渲染（ADR-0051）
+    selectedIdRef.current = id;
     setSelectedId(id);
     setPanel(null);
     setLockedSession(null);
@@ -988,6 +998,7 @@ export function App({ host }: { host: DesktopHost }) {
     pendingSelection.current = null;
     try {
       await conversations.open(id, workspace, force, model);
+      selectedIdRef.current = conversations.selectedId;
       setSelectedId(conversations.selectedId);
       await refresh();
     } catch (error) {
@@ -1017,8 +1028,6 @@ export function App({ host }: { host: DesktopHost }) {
     );
   };
   // 通知被点击时要切到那个会话：经 ref 读最新的列表与选择函数（监听只注册一次）
-  const sessionsRef = useRef<SessionSummary[]>(sessions);
-  sessionsRef.current = sessions;
   const selectSessionRef = useRef<typeof selectSession | null>(null);
   selectSessionRef.current = selectSession;
   useEffect(() => {
@@ -1182,6 +1191,7 @@ export function App({ host }: { host: DesktopHost }) {
     if (target === null) return;
     try {
       await conversations.newConversation(target);
+      selectedIdRef.current = null;
       setSelectedId(null);
       setPanel(null);
       await refresh();
@@ -1227,12 +1237,15 @@ export function App({ host }: { host: DesktopHost }) {
       // ADR-0070：Turn 运行中 Enter 排队、Alt+Enter 插话；空闲时都是普通发送
       // 新会话 createSession 一返回就选中，侧栏随即出现（treeSessions 合入本地会话）
       await conversations.submitInput(input, mode ?? "steer", create, () => {
+        selectedIdRef.current = conversations.selectedId;
         setSelectedId(conversations.selectedId);
       });
+      selectedIdRef.current = conversations.selectedId;
       setSelectedId(conversations.selectedId);
       await refresh();
       return true;
     } catch (error) {
+      selectedIdRef.current = conversations.selectedId;
       setSelectedId(conversations.selectedId);
       const rejected = conversations.takeRejectedDraft();
       if (rejected !== null) {
@@ -1290,6 +1303,7 @@ export function App({ host }: { host: DesktopHost }) {
     workMode?: WorkModeName,
   ): Promise<void> => {
     await conversations.resubmit(targetSeq, text, mode, workMode);
+    selectedIdRef.current = conversations.selectedId;
     setSelectedId(conversations.selectedId);
     await refresh();
   };
@@ -1652,11 +1666,17 @@ export function App({ host }: { host: DesktopHost }) {
   const archiveSession = async (id: string): Promise<void> => {
     const client = pool.get();
     if (!listed || client === undefined) return;
-    const summary = sessions.find((session) => session.id === id);
-    const wasSelected = selectedId === id;
+    const summary = sessionsRef.current.find((session) => session.id === id);
+    const wasSelected = selectedIdRef.current === id;
     const next =
       wasSelected && summary !== undefined
-        ? nextSidebarSession(tree, sessions, id, summary.cwd, archivePlainKeys)
+        ? nextSidebarSession(
+            treeRef.current ?? tree,
+            sessionsRef.current,
+            id,
+            summary.cwd,
+            archivePlainKeys,
+          )
         : undefined;
     try {
       await client.runtime.archiveSession(id);
@@ -1833,9 +1853,7 @@ export function App({ host }: { host: DesktopHost }) {
             await client.runtime.renameSession(id, title);
             await refresh();
           }}
-          onArchive={(id) => {
-            void archiveSession(id);
-          }}
+          onArchive={(id) => archiveSession(id)}
           archiveBlocked={archiveBlocked}
           onHideProject={(path) => {
             const cur = prefs.get();

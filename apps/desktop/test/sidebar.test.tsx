@@ -696,4 +696,212 @@ describe("Sidebar", () => {
     fireEvent.click(within(schedNav).getByText("收起"));
     expect(schedNav.querySelectorAll(".irow")).toHaveLength(5);
   });
+
+  const multiTree = (): SessionTree => ({
+    ...emptyTree,
+    pinned: [
+      { id: "pin-1", title: "置顶一", meta: "", locked: false, status: "idle", project: "alpha" },
+      { id: "pin-2", title: "置顶二", meta: "", locked: false, status: "idle", project: "alpha" },
+    ],
+    chats: {
+      rows: [
+        { id: "chat-1", title: "对话一", meta: "", locked: false, status: "idle" },
+        { id: "chat-2", title: "对话二", meta: "", locked: false, status: "running" },
+        { id: "chat-3", title: "对话三", meta: "", locked: false, status: "pending" },
+        { id: "chat-4", title: "对话四", meta: "", locked: false, status: "idle" },
+      ],
+      moreCount: 0,
+    },
+    projects: [
+      {
+        key: "alpha",
+        name: "alpha",
+        path: "Z:\\alpha",
+        count: 2,
+        sessions: [
+          { id: "proj-1", title: "项目一", meta: "", locked: false, status: "idle" },
+          { id: "proj-2", title: "项目二", meta: "", locked: false, status: "idle" },
+        ],
+        moreCount: 0,
+        manual: false,
+      },
+    ],
+    scheduled: {
+      rows: [
+        { id: "sched-1", title: "定时一", meta: "", locked: false, status: "idle" },
+        { id: "sched-2", title: "定时二", meta: "", locked: false, status: "idle" },
+      ],
+      moreCount: 0,
+    },
+  });
+
+  const rowBtn = (title: string): HTMLButtonElement => {
+    const btn = screen.getByText(title).closest("button");
+    if (!(btn instanceof HTMLButtonElement)) {
+      throw new Error(`Expected button row for "${title}"`);
+    }
+    return btn;
+  };
+
+  it("Ctrl/Cmd 加选与取消、普通单击清空多选并打开会话", () => {
+    const onSelectSession = vi.fn();
+    render(<Sidebar {...props({ tree: multiTree(), selectedId: "chat-1", onSelectSession })} />);
+
+    const pin1 = rowBtn("置顶一");
+    const chat4 = rowBtn("对话四");
+    const proj1 = rowBtn("项目一");
+    const sched1 = rowBtn("定时一");
+
+    fireEvent.click(pin1, { ctrlKey: true });
+    fireEvent.click(chat4, { metaKey: true });
+    fireEvent.click(proj1, { ctrlKey: true });
+    fireEvent.click(sched1, { ctrlKey: true });
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(pin1.classList.contains("msel")).toBe(true);
+    expect(chat4.classList.contains("msel")).toBe(true);
+    expect(proj1.classList.contains("msel")).toBe(true);
+    expect(sched1.classList.contains("msel")).toBe(true);
+
+    // 再 Ctrl 单击取消其中一行
+    fireEvent.click(chat4, { ctrlKey: true });
+    expect(chat4.classList.contains("msel")).toBe(false);
+    expect(pin1.classList.contains("msel")).toBe(true);
+
+    // 普通单击清空多选并打开会话
+    fireEvent.click(sched1);
+    expect(onSelectSession).toHaveBeenCalledTimes(1);
+    expect(onSelectSession).toHaveBeenCalledWith("sched-1");
+    expect(pin1.classList.contains("msel")).toBe(false);
+    expect(proj1.classList.contains("msel")).toBe(false);
+    expect(sched1.classList.contains("msel")).toBe(false);
+  });
+
+  it("Shift 范围选只在同组已显示行内生效，跨组只选被点的行", () => {
+    const onSelectSession = vi.fn();
+    render(<Sidebar {...props({ tree: multiTree(), onSelectSession })} />);
+
+    const chat1 = rowBtn("对话一");
+    const chat2 = rowBtn("对话二");
+    const chat3 = rowBtn("对话三");
+    const chat4 = rowBtn("对话四");
+    const proj1 = rowBtn("项目一");
+    const proj2 = rowBtn("项目二");
+
+    // 先 Ctrl 选中 chat1 作为锚点，再 Shift 选到 chat4
+    fireEvent.click(chat1, { ctrlKey: true });
+    fireEvent.click(chat4, { shiftKey: true });
+    expect(chat1.classList.contains("msel")).toBe(true);
+    expect(chat2.classList.contains("msel")).toBe(true);
+    expect(chat3.classList.contains("msel")).toBe(true);
+    expect(chat4.classList.contains("msel")).toBe(true);
+
+    // 跨组 Shift 点击 proj2：清空之前范围，只选中 proj2
+    fireEvent.click(proj2, { shiftKey: true });
+    expect(chat1.classList.contains("msel")).toBe(false);
+    expect(chat4.classList.contains("msel")).toBe(false);
+    expect(proj1.classList.contains("msel")).toBe(false);
+    expect(proj2.classList.contains("msel")).toBe(true);
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("Esc 清空多选，焦点在输入框里时不处理", () => {
+    render(
+      <div>
+        <input aria-label="草稿输入框" />
+        <Sidebar {...props({ tree: multiTree() })} />
+      </div>,
+    );
+
+    const chat1 = rowBtn("对话一");
+    const chat4 = rowBtn("对话四");
+    fireEvent.click(chat1, { ctrlKey: true });
+    fireEvent.click(chat4, { ctrlKey: true });
+    expect(chat1.classList.contains("msel")).toBe(true);
+    expect(chat4.classList.contains("msel")).toBe(true);
+
+    // 焦点在输入框时不清空
+    const input = screen.getByLabelText("草稿输入框");
+    input.focus();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(chat1.classList.contains("msel")).toBe(true);
+    expect(chat4.classList.contains("msel")).toBe(true);
+
+    // 焦点离开输入框后 Esc 清空
+    input.blur();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(chat1.classList.contains("msel")).toBe(false);
+    expect(chat4.classList.contains("msel")).toBe(false);
+  });
+
+  it("批量菜单统计不含运行中与待确认；N 为 0 时禁用；在未选中行上右键回到单个菜单", () => {
+    const { container } = render(
+      <Sidebar {...props({ tree: multiTree(), archiveBlocked: new Set(["chat-4"]) })} />,
+    );
+
+    const chat1 = rowBtn("对话一");
+    const chat2 = rowBtn("对话二"); // running
+    const chat3 = rowBtn("对话三"); // pending
+    const proj1 = rowBtn("项目一");
+
+    // 选中 running + pending -> N = 0 禁用且有悬停原因
+    fireEvent.click(chat2, { ctrlKey: true });
+    fireEvent.click(chat3, { ctrlKey: true });
+    fireEvent.contextMenu(chat2, { clientX: 20, clientY: 30 });
+    const zeroBtn = screen.getByRole("button", { name: "归档 0 个会话" }) as HTMLButtonElement;
+    expect(zeroBtn.disabled).toBe(true);
+    expect(zeroBtn.getAttribute("title")).toBeTruthy();
+
+    // 关闭菜单，再加选 chat1 与 archiveBlocked 的 chat4 -> N = 1
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(chat1, { ctrlKey: true });
+    const chat4 = rowBtn("对话四");
+    fireEvent.click(chat4, { ctrlKey: true });
+    const chat1MenuBtn = within(chat1.closest(".irow") as HTMLElement).getByRole("button", {
+      name: "会话菜单",
+    });
+    fireEvent.click(chat1MenuBtn);
+    const oneBtn = screen.getByRole("button", { name: "归档 1 个会话" }) as HTMLButtonElement;
+    expect(oneBtn.disabled).toBe(false);
+    expect(container.querySelectorAll(".ctxmenu button")).toHaveLength(1);
+
+    // 在未选中的行上右键：清空多选，弹出单个会话菜单
+    fireEvent.contextMenu(proj1, { clientX: 40, clientY: 50 });
+    expect(chat1.classList.contains("msel")).toBe(false);
+    expect(screen.queryByText(/归档 .* 个会话/)).toBeNull();
+    expect(screen.getByRole("button", { name: "置顶" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重命名" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "归档" })).toBeTruthy();
+  });
+
+  it("批量归档逐个调用并跳过不可归档行，部分失败时其余照常归档并最终清空多选", async () => {
+    const calls: string[] = [];
+    const onArchive = vi.fn(async (id: string) => {
+      calls.push(id);
+      if (id === "pin-1") throw new Error("archive failed");
+    });
+
+    render(<Sidebar {...props({ tree: multiTree(), onArchive })} />);
+
+    const pin1 = rowBtn("置顶一");
+    const chat1 = rowBtn("对话一");
+    const chat2 = rowBtn("对话二"); // running
+    const proj1 = rowBtn("项目一");
+
+    fireEvent.click(pin1, { ctrlKey: true });
+    fireEvent.click(chat1, { ctrlKey: true });
+    fireEvent.click(chat2, { ctrlKey: true });
+    fireEvent.click(proj1, { ctrlKey: true });
+
+    fireEvent.contextMenu(chat1, { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole("button", { name: "归档 3 个会话" }));
+
+    await waitFor(() => {
+      expect(calls).toEqual(["pin-1", "chat-1", "proj-1"]);
+    });
+    expect(pin1.classList.contains("msel")).toBe(false);
+    expect(chat1.classList.contains("msel")).toBe(false);
+    expect(chat2.classList.contains("msel")).toBe(false);
+    expect(proj1.classList.contains("msel")).toBe(false);
+  });
 });

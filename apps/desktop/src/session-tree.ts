@@ -151,11 +151,11 @@ export interface TreeOptions {
   chatsLimit?: number;
   /** 「定时任务」区当前显示的条数（缺省按 limit） */
   scheduledLimit?: number;
-  /** @deprecated 兼容手机网页全量展开；新调用方请传 projectLimits */
+  /** 兼容手机网页全量展开；新调用方请传 projectLimits */
   expanded?: ReadonlySet<string>;
-  /** @deprecated 兼容手机网页全量展开；新调用方请传 chatsLimit */
+  /** 兼容手机网页全量展开；新调用方请传 chatsLimit */
   chatsExpanded?: boolean;
-  /** @deprecated 兼容手机网页全量展开；新调用方请传 scheduledLimit */
+  /** 兼容手机网页全量展开；新调用方请传 scheduledLimit */
   scheduledExpanded?: boolean;
   /** 已折叠的项目 key */
   collapsed: ReadonlySet<string>;
