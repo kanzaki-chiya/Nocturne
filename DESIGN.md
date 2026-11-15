@@ -21,11 +21,13 @@
 ## 1. 颜色
 
 - **定义位置**：`design/tokens.json` 的 `color` 分组，浅色在 `:root`、深色在 `[data-theme="dark"]` 下由 `apps/desktop/src/tokens.css` 导出。
+- **工作台单层平铺与中性灰选中态**（[ADR-0092](docs/decisions/ADR-0092-desktop-redesign-workbench.md)）：保持强调色、语义色、分类色与代码高亮不变；中性色表面与选中态（`--a-sel`、`--a-sel-strong`）转为纯粹中性灰。主区（`--a-bg`）与标题栏/侧栏（`--a-side`）处于同一平面，只靠 `1px` `--a-border` 细线分隔，不再使用浮起卡片包裹主区。
 - **表面与文字**：
-  - 表面层次：`--a-bg`（主画布）、`--a-side`（侧栏与设置导航）、`--a-panel`（卡片、浮层、输入外框）、`--a-raised`（次级块、悬停底、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg` / `--a-qr-fg`（二维码底与前景）。
-  - 文字层次：`--a-text`（正文与标题）、`--a-secondary`（次要正文、按钮文字）、`--a-muted`（辅助标签、次要说明）、`--a-faint`（占位符、装饰分隔、禁用灰字）。深浅色都不使用纯黑或纯白作大面积底或字。
+  - 表面层次：`--a-bg`（主画布）、`--a-side`（标题栏、侧栏与设置导航）、`--a-panel`（浮层、菜单、对话框、输入框）、`--a-raised`（悬停底、次级块、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg` / `--a-qr-fg`（二维码底与前景）。
+  - 文字层次：`--a-text`（正文与标题）、`--a-secondary`（次要正文、未选中导航、按钮文字）、`--a-muted`（分组标题、辅助标签）、`--a-faint`（占位符、装饰分隔、禁用灰字）。深浅色都不使用纯黑或纯白作大面积底或字。
 - **强调与状态**：
   - 强调色：`--a-accent`、`--a-accent-hover`、`--a-accentAlt`、`--a-on-accent`、`--a-accent-subtle`、`--a-accent-border`、`--a-focus-ring`；选中态：`--a-sel`、`--a-sel-strong`。
+  - 实心主按钮（发送）：`--a-btn`（指向 `--a-text`）与 `--a-on-btn`（指向 `--a-bg`），组件不直接引用 `--a-text`。
   - 边框与控件：`--a-border`、`--a-border-strong`、`--a-switch-off`、`--a-switch-knob`、`--a-scroll`、`--a-scrollThumbHover`。
   - 语义色：`--a-success` / `--a-success-bg`、`--a-warning` / `--a-warning-bg` / `--a-warning-border`、`--a-error` / `--a-error-bg` / `--a-error-border`。
   - 分类、热力图与代码高亮：`--a-cat1`..`--a-cat5`、`--a-heat-0`..`--a-heat-4`、`--a-termYellow` / `--a-termYellowBright`、`--a-syn-*`、`--cm-*`。
@@ -37,18 +39,28 @@
 
 ## 2. 字体与字号
 
-- **字体栈**（定义于 `design/tokens.json` 的 `font` 分组）：
-  - `--sans`：界面正文与控件（含中文回退栈 `"Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif`）。
-  - `--mono`：代码、路径、命令、模型 ID、快捷键与技术标识（尾段回退包含中文字体，避免代码注释中的汉字落到点阵宋体）。
-- **字号梯度**（5 档，具体数值见 `design/tokens.json`）：
+- **随包字体与字体栈**（定义于 `design/tokens.json` 的 `font` 分组）：桌面端与手机网页入口各自引入 `@fontsource-variable/inter` 与 `@fontsource-variable/jetbrains-mono`（均仅引入 `latin` 子集，OFL-1.1 登记见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)），中文字符由系统字体回退：
+  - `--sans`：`"Inter Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif`（界面正文、标签、分组标题与数字统计）。
+  - `--mono`：`"JetBrains Mono Variable", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace`（仅用于机器读的值：路径、命令、分支、diff、模型 ID、快捷键与技术标识；尾段保留中文字体避免代码注释汉字落到点阵宋体）。
+- **字号梯度**（5 档，`--fs-5` 调为 `20px`，具体数值见 `design/tokens.json`）：
 
 | 变量 | 桌面端用途 | 手机端用途 |
 |---|---|---|
-| `--fs-1` | 次要信息、徽章、时间戳、表头、分组标题、思考过程 | 角标、快捷键、次要标签 |
-| `--fs-2` | 导航项、按钮、表单标签、设置行、列表项、表格正文、工具行、状态栏全部文字（默认 13px） | 辅助说明、状态栏、胶囊按钮、代码输出 |
-| `--fs-3` | 对话正文、输入框、卡片标题、Markdown `h4`–`h6` | 正文、设置行、抽屉项、选项标题 |
-| `--fs-4` | 页面与弹窗标题、Markdown `h3` | 顶栏标题、对话框标题、发送按钮 |
-| `--fs-5` | 欢迎标题、用量大数字、Markdown `h1`/`h2` | 空状态标题 |
+| `--fs-1` | 次要信息、徽章、表头、侧栏与设置分组标题、思考过程（12px） | 角标、快捷键、次要标签 |
+| `--fs-2` | 导航项、菜单项、按钮、表单标签、设置行、对话标题、工具行、状态栏全部文字（默认 13px） | 辅助说明、状态栏、胶囊按钮、代码输出 |
+| `--fs-3` | 对话正文、输入框、卡片标题、Markdown `h4`–`h6`（14px） | 正文、设置行、抽屉项、选项标题 |
+| `--fs-4` | 弹窗标题、Markdown `h3`（16px） | 顶栏标题、对话框标题、发送按钮 |
+| `--fs-5` | 新会话标题、设置页标题、用量大数字、Markdown `h1`/`h2`（20px） | 空状态标题 |
+
+- **桌面端工作台字号与字重用法**：
+
+| 位置 | 字号 | 字重与样式 |
+|---|---|---|
+| 导航行、菜单项、设置行、输入框底栏、工具行 | `--fs-2` | `--fw-regular`（400；选中导航用 `--fw-medium` 500） |
+| 对话正文、输入框 | `--fs-3` | `--fw-regular`（400） |
+| 侧栏分组标题、设置分组标题 | `--fs-1` | `--fw-medium`（500），`--a-muted`，字距 `0.02em` |
+| 对话标题 | `--fs-2` | `--fw-medium`（500） |
+| 新会话标题「有什么可以帮你？」、设置页标题 | `--fs-5` | `--fw-semibold`（600），字距 `-0.01em` |
 
 文件卡片 28px 方块内的类型标记用 `--fs-file-badge`，方块尺寸固定，所以这档不参与字号缩放。
 
@@ -77,10 +89,11 @@
 
 | 变量 | 用途 |
 |---|---|
-| `--radius-0-5` | 极小色块（如上下文构成图例色点） |
-| `--radius-1` | 行内代码、键盘提示、小徽章、复选框、分段按钮内项、滚动条滑块 |
-| `--radius-2` | 按钮、输入框、下拉框、菜单项、小卡片、代码块、待发行 |
-| `--radius-3` | 对话框、弹层、设置分组卡片、输入外框、提示卡、手机卡片与抽屉 |
+| `--radius-0-5` | 极小色块（如上下文构成图例色点，`2px`） |
+| `--radius-1` | 行内代码、键盘提示、小徽章、复选框、分段按钮内项、滚动条滑块（`4px`） |
+| `--radius-2` | 按钮、输入框、下拉框、菜单项、导航行、chip、小卡片、代码块、待发行（`6px`） |
+| `--radius-3` | 对话框、弹层、菜单面板、设置分组卡片、提示卡、diff 卡片、手机卡片与抽屉（`8px`） |
+| `--radius-composer` | 输入框外框专用圆角（`10px`） |
 | `--radius-pill` | 胶囊标签、开关轨道、状态圆点、圆形图标按钮 |
 | `--radius-device` | 手机外框容器 |
 
@@ -105,7 +118,7 @@
   - `.btn-danger-solid`：破坏性确认弹窗内的实心红按钮；
   - 尺寸变体：`.btn-sm`（`--ctl-h-sm`）、`.btn-lg`（`--ctl-h-lg`），触控端按钮高度用 `--ctl-h-touch`。
 - **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Icon`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 变体。
-- **图标（`<Icon>`）**：界面图标统一使用 MingCute 线性图标（`mingcute_icon` 2.9.72，`_line.svg` 填充路径），由公共组件 `apps/desktop/src/ui/Icon.tsx`（`<Icon name="..." size={...} />`）渲染，继承 `currentColor`，默认 `aria-hidden`。桌面端三档尺寸定义在 `design/tokens.json` 的 `control` 分组：侧栏和设置页导航用 `--icon-lg`（`ICON_LG`），工具栏和图标按钮用 `--icon-md`（`ICON_MD`），小字旁边（工具行、标签、状态栏、下拉箭头、折叠箭头）用 `--icon-sm`（`ICON_SM`）；手机网页沿用现有显示尺寸。窗口控制按钮、品牌标记、数据图形及终端和代码查看器内部内容除外。
+- **图标（`<Icon>`）**：界面图标统一使用 MingCute 线性图标（`mingcute_icon` 2.9.72，`_line.svg` 填充路径），由公共组件 `apps/desktop/src/ui/Icon.tsx`（`<Icon name="..." size={...} />`）渲染，继承 `currentColor`，默认 `aria-hidden`。桌面端三档尺寸定义在 `design/tokens.json` 的 `control` 分组：侧栏导航、设置页导航、工具栏和图标按钮用 `--icon-md`（`ICON_MD`，16px），部分较大场景保留 `--icon-lg`（`ICON_LG`，18px），小字旁边（工具行、标签、状态栏、下拉箭头、折叠箭头）用 `--icon-sm`（`ICON_SM`，14px）；手机网页沿用现有显示尺寸。窗口控制按钮、品牌标记、数据图形及终端和代码查看器内部内容除外。
 - **图标按钮（`.ib`）**：宽高 `--ctl-h-md`（`.ib.sm` 为 `--ctl-h-sm`），圆角 `--radius-2`，激活态加 `.on` 或 `aria-pressed="true"`。图标按钮的 `title` 与 `aria-label` 只写动作名，不写状态或行为解释。
 - **折叠箭头（`.fold-arrow`）**：统一使用 `<Icon name="right_small" size={ICON_SM} className="fold-arrow" />` 配合 CSS `transform: rotate(...)` 过渡（对话流内用户触发的 `<details>` 为 `--dur-fold`），不混用文本三角字符或 `summary::before` 伪元素。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down` 或 `details[open] > summary > .fold-arrow`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器统一使用 `<Icon name="down_small" size={ICON_SM} />`，不算折叠箭头。
 - **待发队列（`.pending-inputs`）**：压在输入框上沿，每条待发输入单行（`.pi-row`）：弱化色箭头、单行省略的正文，右侧图标按钮依次为立即发送（只有运行中的排队条目才有）、编辑、取消；子代理结果条目只有取消。不写模式标签。
@@ -122,8 +135,8 @@
 
 1. **单栏设置页**（常规、模型、远程、外观）：
    - 外层 `.spage` 滚动，内套 `.readable`（`max-width: var(--w-readable)`，水平居中）；
-   - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-4`），正文 `.sbody`（分组间距 `--space-8`）；
-   - 每组 `.group` 含 `.ghead`（标题 `--fs-2` + `--fw-semibold`）和 `.card`（圆角 `--radius-3`），行 `.srow`（最小高 `--row-h`，左 `.lab` 右 `.ctl`）。
+   - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-5`、`--fw-semibold`、`letter-spacing: -0.01em`），正文 `.sbody`（分组间距 `--space-8`）；
+   - 每组 `.group` 含 `.ghead`（标题 `--fs-1`、`--fw-medium`、`letter-spacing: 0.02em`、`--a-muted`）和 `.card`（圆角 `--radius-3`），行 `.srow`（最小高 `--row-h`，左 `.lab` 右 `.ctl`）。
 2. **主从设置页**（服务商、授权、MCP、技能、子代理、定时任务）：
    - 外层 `.spage.flush` 不滚动，顶栏 `.phead` 下接 `.md`（左栏 `.md-list` 宽 `--w-list`（280px）独立滚动，右栏 `.md-detail` 独立滚动，内部 `.inner` 宽 `--w-readable` 居中）；名字单行省略，完整名字放名字的 `title`；MCP 列表只显示状态点与名字；
    - 新增按钮固定在左栏顶部，主操作与删除在右栏详情顶栏 `.dhead .actions`。

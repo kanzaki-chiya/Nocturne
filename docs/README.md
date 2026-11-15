@@ -122,6 +122,8 @@ MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-00
 
 桌面端新会话页选择分支与自动工作树（`<repo>-wt/<branch>`）见 [ADR-0085](decisions/ADR-0085-new-session-branch-picker.md)。
 
+桌面端工作台界面改版（单层平铺、中性灰选中态、随包 Inter / JetBrains Mono 字体、去底部状态栏与输入框「+」菜单规划，分三轮落地）见 [ADR-0092](decisions/ADR-0092-desktop-redesign-workbench.md)。
+
 ## Roadmap
 子代理档位（按任务选择执行者）见 [ADR-0058](decisions/ADR-0058-subagent-profiles.md)，主文档是 [subagent.md](architecture/subagent.md)。
 
