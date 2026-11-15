@@ -41,6 +41,7 @@ function PreviewTool({
           disabled={false}
           label={toolMeta(tool).label}
           arg={arg}
+          argClassName="mono"
           status={status}
           onToggle={noop}
         />

@@ -58,7 +58,7 @@
   color: var(--a-text);
 }
 .goal-detail {
-  border-top: 1px dashed var(--a-border-strong);
+  border-top: 1px solid var(--a-border);
   padding: var(--space-3);
   overflow-y: auto;
   max-height: var(--cpop-max-h);
@@ -85,10 +85,10 @@
 }
 .todo-panel .goal-row + .todo-panel-toggle,
 .todo-panel .goal-row + .todo-list {
-  border-top: 1px dashed var(--a-border-strong);
+  border-top: 1px solid var(--a-border);
 }
 .todo-panel .goal-row + .goal-content-grid {
-  border-top: 1px dashed var(--a-border-strong);
+  border-top: 1px solid var(--a-border);
 }
 .todo-panel .goal-content-grid {
   display: grid;

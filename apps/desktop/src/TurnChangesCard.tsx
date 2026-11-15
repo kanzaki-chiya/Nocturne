@@ -82,6 +82,7 @@ function ChangedFile({
         }}
       >
         <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " down" : ""}`} />
+        <Icon name="edit_2" size={ICON_SM} className="diff-icon" />
         <span className="turn-change-path" title={file.path}>
           <span className="turn-change-directory">{label.slice(0, slash + 1)}</span>
           {label.slice(slash + 1)}

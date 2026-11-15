@@ -86,7 +86,7 @@
   text-align: left;
 }
 .todo-panel:has(.todo-list) .todo-panel-toggle {
-  border-top: 1px dashed var(--a-border-strong);
+  border-top: 1px solid var(--a-border);
 }
 .todo-current {
   min-width: 0;

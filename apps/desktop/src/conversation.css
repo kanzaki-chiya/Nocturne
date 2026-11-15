@@ -7,9 +7,9 @@
   position: relative;
 }
 .subagent-badge {
-  font: var(--fs-1) var(--mono);
+  font: var(--fs-1) var(--sans);
   padding: 1px 7px;
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
   color: var(--a-accent);
   background: var(--a-raised);
@@ -23,11 +23,11 @@
 }
 .conversation-transcript {
   width: 100%;
-  max-width: 820px;
+  max-width: var(--w-thread);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .conversation pre {
   font: var(--fs-1)/1.65 var(--mono);
@@ -63,9 +63,9 @@
   min-width: 0;
 }
 .conversation .u-bubble {
-  background: var(--a-sel);
-  border-radius: var(--radius-3) var(--radius-3) var(--radius-1) var(--radius-3);
-  padding: 8px 12px;
+  background: var(--a-raised);
+  border-radius: var(--radius-3);
+  padding: var(--space-2) var(--ctl-px-md);
   font-size: var(--fs-3);
   line-height: var(--lh-base);
   overflow-wrap: anywhere;
@@ -265,7 +265,7 @@
 .turn-changes {
   margin-top: 10px;
   border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   background: var(--a-side);
   font-size: var(--fs-1);
   min-width: 0;
@@ -293,7 +293,7 @@
   gap: var(--space-1);
   flex: none;
   color: var(--a-muted);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-1);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -538,7 +538,7 @@
 }
 .conversation-markdown hr {
   border: 0;
-  border-top: 1px solid var(--a-border-strong);
+  border-top: 1px solid var(--a-border);
   margin: 18px 0;
 }
 .conversation-code {
@@ -603,8 +603,9 @@
   display: flex;
   align-items: baseline;
   gap: 7px;
+  font-family: var(--sans);
   font-size: var(--fs-2);
-  color: var(--a-muted);
+  color: var(--a-secondary);
   white-space: nowrap;
   min-width: 0;
   padding: 2px 0;
@@ -620,7 +621,7 @@
   display: none;
 }
 .conversation .tool-details > summary.tool-line:hover {
-  color: var(--a-secondary);
+  color: var(--a-text);
 }
 /* 接收参数中：箭头占位但不可点 */
 .conversation .tool-details > summary.tool-line[aria-disabled="true"] {
@@ -639,8 +640,12 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--fs-2);
+}
+.conversation .tool-arg.mono {
+  font-family: var(--mono);
+  color: var(--a-text);
 }
 .conversation .tool-dir {
   color: var(--a-faint);
@@ -726,7 +731,7 @@
 }
 .conversation .tool-diff {
   border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   overflow: hidden;
 }
 .conversation .tool-details > pre,
@@ -739,7 +744,7 @@
 .conversation .tool-shell .tool-command {
   margin: 0;
   padding-bottom: 7px;
-  border-bottom: 1px dashed var(--a-border-strong);
+  border-bottom: 1px dashed var(--a-border);
 }
 .tool-command span {
   color: var(--a-faint);
@@ -772,6 +777,7 @@
   color: var(--a-muted);
   margin: 4px 0;
   font: inherit;
+  font-family: var(--sans);
 }
 .tool-fields dl {
   margin: 0;
@@ -817,19 +823,45 @@
   align-items: baseline;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  background: var(--a-side);
-  font: var(--fs-1) var(--mono);
+  background: var(--a-code-bg);
+  font: var(--fs-1) var(--sans);
+}
+.conversation .tool-diff > .diff-h {
+  cursor: default;
+  padding: var(--space-2) var(--ctl-px-md);
+  border-bottom: 1px solid var(--a-border);
+}
+.conversation .diff-icon {
+  flex: none;
+  color: var(--a-muted);
+  align-self: center;
+}
+.conversation .diff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  color: var(--a-text);
+}
+.conversation .diff-h .diff-h-counts {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
 }
 .conversation .diff-add {
   color: var(--a-success);
   font-family: var(--mono);
   font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .conversation .diff-del {
   color: var(--a-error);
   font-family: var(--mono);
   font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .conversation .diff-h:focus-visible,
@@ -843,7 +875,7 @@
   overflow-y: auto;
   padding: 5px 0;
   background: var(--a-panel);
-  font: var(--fs-1)/1.7 var(--mono);
+  font: var(--fs-diff)/1.65 var(--mono);
 }
 .conversation .diff-row {
   display: flex;
@@ -907,6 +939,7 @@
 .conversation-notice-warning,
 .conversation-notice-error {
   padding: 8px 12px;
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
   background: var(--a-warning-bg);
   color: var(--a-warning);
@@ -945,12 +978,11 @@
   padding: 12px 24px;
 }
 .conversation .ask {
-  max-width: 820px;
+  max-width: var(--w-thread);
   margin: 0 auto;
   padding: 10px 12px;
-  /* 「需要确认」用整张卡的警告色边框与浅底表达，不用左侧色条 */
-  /* stylelint-disable-next-line function-disallowed-list -- 权限确认卡用 55% --a-warning 混入 --a-border 的警告描边 */
-  border: 1px solid color-mix(in srgb, var(--a-warning) 55%, var(--a-border));
+  /* 描边统一用 --a-border，保留警告浅底表达需要确认 */
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   background: linear-gradient(var(--a-warning-bg), var(--a-warning-bg)), var(--a-panel);
   transition:
@@ -1030,9 +1062,12 @@
   font-family: var(--sans);
   color: var(--a-text);
 }
-.ask-app .exe,
-.ask-app .title {
+.ask-app .exe {
   font: var(--fs-1) var(--mono);
+  color: var(--a-secondary);
+}
+.ask-app .title {
+  font: var(--fs-1) var(--sans);
   color: var(--a-secondary);
 }
 .ask-app .title::before {
@@ -1046,7 +1081,7 @@
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: var(--fs-1)/1.55 var(--mono);
+  font: var(--fs-1)/1.55 var(--sans);
   color: var(--a-text);
   background: transparent;
   border: 0;
@@ -1127,7 +1162,7 @@
   padding: 6px 24px 12px;
 }
 .qcard {
-  max-width: 820px;
+  max-width: var(--w-thread);
   margin: 0 auto;
   border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
@@ -1253,7 +1288,7 @@
   width: 20px;
   height: 20px;
   border-radius: var(--radius-1);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   display: grid;
   place-items: center;
   font: 500 var(--fs-1)/1 var(--mono);
@@ -1325,7 +1360,7 @@
   width: 100%;
   padding: 8px 10px;
   border-radius: var(--radius-2);
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   background: var(--a-input);
   resize: none;
   line-height: var(--lh-base);
@@ -1456,7 +1491,7 @@
 .conversation .subagent-view {
   flex: none;
   padding: 0 8px;
-  border: 1px solid var(--a-border-strong);
+  border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
   background: var(--a-panel);
   color: var(--a-secondary);

@@ -1750,24 +1750,31 @@ export function toolArgument(entry: ToolEntry, cwd: string): string {
   return toolArgumentValue(entry, cwd).text;
 }
 
-/** 参数位原文；path 为真时行头按「文件名 + 淡色目录」拆开显示。 */
-function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path: boolean } {
-  const plain = (value: string) => ({ text: value, path: false });
+/** 参数位原文；path 为真时行头按「文件名 + 淡色目录」拆开显示，mono 仅用于代码/路径/命令等机器值。 */
+function toolArgumentValue(
+  entry: ToolEntry,
+  cwd: string,
+): { text: string; path: boolean; mono: boolean } {
+  const plain = (value: string, mono = false) => ({ text: value, path: false, mono });
   const input = inputOf(entry);
   const name = effectiveToolName(entry);
   const ensembleArg = ensembleToolSummary(name, input);
-  if (ensembleArg !== undefined) return plain(ensembleArg);
+  if (ensembleArg !== undefined) return plain(ensembleArg, false);
   switch (name) {
     case "skill":
-      return plain(input === undefined ? "" : text(input.name));
+      return plain(input === undefined ? "" : text(input.name), true);
     case "render_html":
-      return plain(input === undefined ? "" : text(input.title));
+      return plain(input === undefined ? "" : text(input.title), false);
     case "task":
-      return plain(input === undefined ? "" : text(input.task));
+      return plain(input === undefined ? "" : text(input.task), false);
     case "read":
     case "edit":
     case "write":
-      return { text: input === undefined ? "" : displayPath(text(input.path), cwd), path: true };
+      return {
+        text: input === undefined ? "" : displayPath(text(input.path), cwd),
+        path: true,
+        mono: true,
+      };
     case "switch_worktree": {
       const output = entry.result?.output as { current?: unknown } | undefined;
       const target = text(output?.current) || text(input?.path);
@@ -1778,38 +1785,41 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
             .split(/[\\/]/)
             .at(-1) ?? ""
         }`,
+        true,
       );
     }
     case "grep": {
       const path = input === undefined ? "" : text(input.path);
       return plain(
         `"${input === undefined ? "" : text(input.pattern)}"${path === "" ? "" : ` · ${displayPath(path, cwd)}`}`,
+        true,
       );
     }
     case "glob": {
       const path = input === undefined ? "" : text(input.path);
       return plain(
         `${input === undefined ? "" : text(input.pattern)}${path === "" ? "" : ` · ${displayPath(path, cwd)}`}`,
+        true,
       );
     }
     case "shell":
-      return plain(input === undefined ? "" : text(input.command).replace(/\s+/g, " "));
+      return plain(input === undefined ? "" : text(input.command).replace(/\s+/g, " "), true);
     case "web_fetch":
-      return plain(input === undefined ? "" : text(input.url));
+      return plain(input === undefined ? "" : text(input.url), true);
     case "web_search":
-      return plain(input === undefined ? "" : text(input.query));
+      return plain(input === undefined ? "" : text(input.query), false);
     case "apply_subagent_changes": {
       // ADR-0075 §7：行头「并回子代理改动 · N 个文件」，冲突时「有冲突 · N 个文件」
       const output = entry.result?.output as { files?: unknown; conflicts?: unknown } | undefined;
-      if (output === undefined) return plain("");
+      if (output === undefined) return plain("", false);
       const conflicts = Array.isArray(output.conflicts) ? output.conflicts.length : 0;
       const files = Array.isArray(output.files) ? output.files.length : 0;
-      return plain(conflicts > 0 ? `有冲突 · ${conflicts} 个文件` : `${files} 个文件`);
+      return plain(conflicts > 0 ? `有冲突 · ${conflicts} 个文件` : `${files} 个文件`, false);
     }
     case "mcp_search": {
       const q = input === undefined ? "" : text(input.query);
       const srv = input === undefined ? "" : text(input.server);
-      return plain(srv !== "" ? `${q} · ${srv}` : q);
+      return plain(srv !== "" ? `${q} · ${srv}` : q, false);
     }
     default:
       // MCP 工具的名称列已是 server/tool；参数位展示主要输入（第一个非空
@@ -1818,17 +1828,23 @@ function toolArgumentValue(entry: ToolEntry, cwd: string): { text: string; path:
         const action = name.slice("mcp__computer__".length);
         const subject = entry.subjects.find((subject) => subject.kind === "app");
         const target = subject?.app?.name ?? subject?.target;
-        return plain(target === undefined ? action : `${action} · ${target}`);
+        return plain(target === undefined ? action : `${action} · ${target}`, false);
       }
       if (mcpToolLabel(name, entry.subjects) !== undefined) {
-        if (input === undefined) return plain("");
+        if (input === undefined) return plain("", false);
         return plain(
           Object.values(input).find(
             (value): value is string => typeof value === "string" && value !== "",
           ) ?? "",
+          false,
         );
       }
-      return plain(entry.subjects[0]?.target ?? "");
+      return plain(
+        entry.subjects[0]?.target ?? "",
+        entry.subjects[0]?.kind === "path" ||
+          entry.subjects[0]?.kind === "shell" ||
+          entry.subjects[0]?.kind === "network",
+      );
   }
 }
 
@@ -2768,7 +2784,14 @@ function ToolRow({
                   ? arg
                   : pathParts(file.path, file.movedTo === undefined ? "" : ` → ${file.movedTo}`)
               }
-              argClassName={file === undefined && summary?.complete ? "todo-complete" : undefined}
+              argClassName={
+                [
+                  file !== undefined || (summary === undefined && argument.mono) ? "mono" : "",
+                  file === undefined && summary?.complete ? "todo-complete" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
               extras={file === undefined ? extras : null}
               status={file === undefined ? status : <DiffCounts diff={file.diff} />}
               onToggle={() => {
@@ -2789,6 +2812,23 @@ function ToolRow({
                 <div className="tool-body">
                   {file?.diff !== undefined ? (
                     <div className="tool-diff">
+                      <div className="diff-h">
+                        <Icon name="edit_2" size={ICON_SM} className="diff-icon" />
+                        <span className="diff-path" title={file.path}>
+                          {file.label}
+                        </span>
+                        <span className="diff-h-counts">
+                          {(() => {
+                            const counts = diffCounts(file.diff);
+                            return (
+                              <>
+                                <span className="diff-add">+{counts.add}</span>
+                                {counts.del > 0 && <span className="diff-del">−{counts.del}</span>}
+                              </>
+                            );
+                          })()}
+                        </span>
+                      </div>
                       <DiffBody diff={file.diff} path={file.path} />
                     </div>
                   ) : null}
