@@ -37,6 +37,11 @@ export interface ModelCapabilities {
    * "apply_patch" = 只暴露 apply_patch。resolve 后恒有值。
    */
   editTool: EditToolKind;
+  /**
+   * 是否允许 L1 上下文修剪（ADR-0066 修订）：缺省（undefined 或 true）允许；
+   * false 时跳过 L1 修剪并在超过摘要阈值时直接摘要。
+   */
+  historyPrune?: boolean | undefined;
 }
 
 export interface ModelInfo {

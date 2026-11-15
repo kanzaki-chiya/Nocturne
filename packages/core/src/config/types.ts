@@ -71,6 +71,8 @@ export interface ModelOverrideShape {
         promptCache?: boolean | undefined;
         /** 编辑工具选择（ADR-0035 §5）：未声明时按内置默认表取值 */
         editTool?: EditToolKind | undefined;
+        /** 是否允许 L1 上下文修剪（ADR-0066 修订）；缺省 true，false 时跳过 L1 修剪 */
+        historyPrune?: boolean | undefined;
       }
     | undefined;
   /**

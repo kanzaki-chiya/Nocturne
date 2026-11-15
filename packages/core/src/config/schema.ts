@@ -121,6 +121,8 @@ const capabilitiesSchema = z.object({
   promptCache: z.boolean().optional(),
   /** 编辑工具选择（ADR-0035 §5） */
   editTool: z.enum(["edit", "apply_patch"]).optional(),
+  /** 是否允许 L1 上下文修剪（ADR-0066 修订） */
+  historyPrune: z.boolean().optional(),
 });
 
 const tokenPricesSchema = z.object({

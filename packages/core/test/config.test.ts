@@ -950,3 +950,59 @@ describe("思考档位 schema（ADR-0018）", () => {
     await fs.unlink(path.join(home, "config.json"));
   });
 });
+
+describe("capabilities.historyPrune schema 与传递（ADR-0066）", () => {
+  it("接受布尔值并沿配置到 ModelInfo.capabilities 传递，缺省为 true，不进 ModelSettingsView", async () => {
+    await writeJson(path.join(home, "config.json"), {
+      modelsDev: false,
+      providers: [
+        {
+          id: "p1",
+          baseURL: "https://e.test/v1",
+          models: {
+            "no-prune": { capabilities: { historyPrune: false } },
+            "default-prune": {},
+          },
+        },
+      ],
+    });
+    const rc = await load();
+    expect(rc.base.providers[0]?.models?.["no-prune"]?.capabilities?.historyPrune).toBe(false);
+    expect(rc.base.providers[0]?.models?.["default-prune"]?.capabilities?.historyPrune).toBeUndefined();
+
+    const { createRuntime } = await import("../src/index.js");
+    const ws = path.join(root, "ws-history-prune");
+    await fs.mkdir(ws, { recursive: true });
+    const runtime = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: path.join(root, "sessions-history-prune"),
+      config: rc,
+    });
+    const models = runtime.listModels();
+    expect(models.find((m) => m.ref.model === "no-prune")?.capabilities.historyPrune).toBe(false);
+    expect(models.find((m) => m.ref.model === "default-prune")?.capabilities.historyPrune).toBe(true);
+    const views = await rc.listModelSettings("p1");
+    for (const v of views) {
+      expect(Object.keys(v.fields)).not.toContain("historyPrune");
+    }
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
+  it("capabilities.historyPrune 非法值被 schema 拒绝", async () => {
+    for (const bad of ["false", "true", 0, 1, null, {}]) {
+      await writeJson(path.join(home, "config.json"), {
+        providers: [
+          {
+            id: "p1",
+            baseURL: "https://e.test/v1",
+            models: { m1: { capabilities: { historyPrune: bad } } },
+          },
+        ],
+      });
+      await expect(load()).rejects.toMatchObject({ code: "config_invalid" });
+    }
+    await fs.unlink(path.join(home, "config.json"));
+  });
+});
+

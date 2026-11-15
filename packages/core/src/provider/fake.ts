@@ -29,6 +29,7 @@ const DEFAULT_MODEL: ModelInfo = {
     imageInput: false,
     promptCache: false,
     editTool: "edit",
+    historyPrune: true,
   },
 };
 

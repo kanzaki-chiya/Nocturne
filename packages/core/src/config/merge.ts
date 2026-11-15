@@ -124,6 +124,7 @@ const CAP_FIELDS = [
   "imageInput",
   "promptCache",
   "editTool",
+  "historyPrune",
 ] as const;
 
 type ModelCaps = NonNullable<ModelOverrideShape["capabilities"]>;
