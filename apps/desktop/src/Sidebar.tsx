@@ -241,7 +241,11 @@ function RowButton({
           )}
           <span className="t">{row.title}</span>
           {pinned !== undefined && <span className="proj">{pinned.project}</span>}
-          {tag !== null && <span className={`tag ${tag.cls}`}>{tag.text}</span>}
+          {tag !== null ? (
+            <span className={`tag ${tag.cls}`}>{tag.text}</span>
+          ) : (
+            row.status === "running" && <span className="row-spin" role="img" aria-label="运行中" />
+          )}
         </button>
       )}
       <button

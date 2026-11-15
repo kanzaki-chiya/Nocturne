@@ -285,6 +285,21 @@ button {
   border-radius: var(--radius-2);
   flex: none;
 }
+/* 运行中（无留痕与待确认标签时）在末尾位置显示 12px 环形转圈 */
+.nav .item .row-spin {
+  margin-left: auto;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--a-border-strong);
+  border-top-color: var(--a-accent);
+  flex: none;
+  animation: opening-spin 0.9s linear infinite;
+}
+.nav .item .proj + .tag,
+.nav .item .proj + .row-spin {
+  margin-left: 0;
+}
 .nav .item .tag.need {
   color: var(--a-warning);
   /* stylelint-disable-next-line function-disallowed-list -- 会话行待确认标签用 14% --a-warning 半透明底 */
@@ -395,6 +410,8 @@ button {
 .irow:focus-within .meta,
 .irow:hover .tag,
 .irow:focus-within .tag,
+.irow:hover .row-spin,
+.irow:focus-within .row-spin,
 .irow:hover .proj,
 .irow:focus-within .proj {
   visibility: hidden;
@@ -822,7 +839,8 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
     animation: none;
     opacity: 1;
   }
-  .opening .spin {
+  .opening .spin,
+  .nav .item .row-spin {
     animation: none;
   }
 }

@@ -502,4 +502,59 @@ describe("Sidebar", () => {
     expect(screen.queryByText("刚刚")).toBeNull();
     expect(screen.getByText("待确认")).toBeTruthy();
   });
+
+  it("运行中会话行（含选中行与置顶/项目/定时任务组）在末尾显示转圈且不加文字说明；待确认优先于转圈", () => {
+    const tree: SessionTree = {
+      ...emptyTree,
+      pinned: [
+        {
+          id: "p-run",
+          title: "置顶运行",
+          meta: "",
+          locked: false,
+          status: "running",
+          project: "alpha",
+        },
+      ],
+      chats: {
+        rows: [
+          { id: "c-run", title: "当前运行", meta: "", locked: false, status: "running" },
+          { id: "c-pend", title: "等待确认", meta: "", locked: false, status: "pending" },
+          { id: "c-idle", title: "空闲会话", meta: "", locked: false, status: "idle" },
+        ],
+        moreCount: 0,
+      },
+      projects: [
+        {
+          key: "beta",
+          name: "beta",
+          path: "/beta",
+          count: 1,
+          sessions: [
+            { id: "proj-run", title: "项目运行", meta: "", locked: false, status: "running" },
+          ],
+          moreCount: 0,
+          manual: false,
+        },
+      ],
+      scheduled: {
+        rows: [{ id: "s-run", title: "定时运行", meta: "", locked: false, status: "running" }],
+        moreCount: 0,
+      },
+    };
+    const { container } = render(<Sidebar {...props({ tree, selectedId: "c-run" })} />);
+    const spins = container.querySelectorAll(".irow .row-spin");
+    expect(spins).toHaveLength(4);
+    for (const spin of spins) {
+      expect(spin.getAttribute("aria-label")).toBe("运行中");
+      expect(spin.textContent).toBe("");
+      expect(spin.getAttribute("title")).toBeNull();
+    }
+    const pendingRow = screen.getByText("等待确认").closest(".irow");
+    expect(pendingRow?.querySelector(".row-spin")).toBeNull();
+    expect(pendingRow?.textContent).toContain("待确认");
+    const idleRow = screen.getByText("空闲会话").closest(".irow");
+    expect(idleRow?.querySelector(".row-spin")).toBeNull();
+    expect(idleRow?.querySelector(".tag")).toBeNull();
+  });
 });
