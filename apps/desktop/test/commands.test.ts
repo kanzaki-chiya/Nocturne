@@ -42,7 +42,23 @@ describe("parseSlash", () => {
     });
     expect(parseSlash("/preset", "draft")).toMatchObject({
       kind: "redirect",
-      hint: "在输入框下方切换权限预设",
+      hint: "在输入框左下角切换权限预设",
+    });
+    expect(parseSlash("/preset", "session")).toMatchObject({
+      kind: "redirect",
+      hint: "在输入框左下角切换权限预设",
+    });
+    expect(parseSlash("/context", "draft")).toMatchObject({
+      kind: "redirect",
+      hint: "会话内可点输入框右下的上下文用量查看占比",
+    });
+    expect(parseSlash("/context", "session")).toMatchObject({
+      kind: "redirect",
+      hint: "点输入框右下的上下文用量查看占比",
+    });
+    expect(parseSlash("/help", "draft")).toMatchObject({
+      kind: "redirect",
+      hint: "输入 / 查看可用命令；模型与档位在输入框右下、权限预设在左下",
     });
     expect(parseSlash("/shell", "draft")).toMatchObject({
       kind: "redirect",

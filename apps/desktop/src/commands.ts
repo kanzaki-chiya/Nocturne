@@ -21,7 +21,7 @@ export const COMMANDS = [
 
 export type SlashCommandName = (typeof COMMANDS)[number]["name"];
 
-/** 输入框所在场景：空状态的权限预设在托盘里，会话内在输入框工具行。 */
+/** 输入框所在场景：草稿页尚未建立会话，`/context` 等会话内功能只作引导。 */
 export type SlashContext = "draft" | "session";
 
 type RedirectHint = string | Record<SlashContext, string>;
@@ -30,19 +30,16 @@ type RedirectHint = string | Record<SlashContext, string>;
 export const REDIRECTS: Record<string, RedirectHint> = {
   "/model": "在输入框右下角切换模型",
   "/effort": "在输入框右下角切换思考档位",
-  "/preset": { draft: "在输入框下方切换权限预设", session: "在输入框左下角切换权限预设" },
+  "/preset": "在输入框左下角切换权限预设",
   "/shell": "在 设置 › 常规 切换 Shell",
   "/context": {
-    draft: "会话内可点底部状态栏的上下文用量查看占比",
-    session: "点底部状态栏的上下文用量查看占比",
+    draft: "会话内可点输入框右下的上下文用量查看占比",
+    session: "点输入框右下的上下文用量查看占比",
   },
   "/new": "点左栏「＋ 新会话」新建会话",
   "/clear": "点左栏「＋ 新会话」新建会话",
   "/resume": "在左栏选择要继续的会话",
-  "/help": {
-    draft: "输入 / 查看可用命令；模型与档位在输入框右下、权限预设在下方托盘",
-    session: "输入 / 查看可用命令；模型与档位在输入框右下、权限预设在左下",
-  },
+  "/help": "输入 / 查看可用命令；模型与档位在输入框右下、权限预设在左下",
   "/provider": "在 设置 › 服务商 管理；输入框模型菜单的「管理服务商…」也能进入",
   "/agents": "在 设置 › 子代理 查看与管理",
   "/skills": "在 设置 › 技能 查看与管理",
