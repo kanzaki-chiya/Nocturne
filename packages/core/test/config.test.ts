@@ -989,6 +989,35 @@ describe("capabilities.historyPrune schema 与传递（ADR-0066）", () => {
     await fs.unlink(path.join(home, "config.json"));
   });
 
+  it("高层的 config.json 覆盖可将低层的 historyPrune: false 改回 true", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "p1",
+          baseURL: "https://e.test/v1",
+          models: { m1: { capabilities: { historyPrune: false } } },
+        },
+      ],
+    });
+    await writeJson(path.join(home, "config.json"), {
+      modelsDev: false,
+      providers: [
+        {
+          id: "p1",
+          baseURL: "https://e.test/v1",
+          models: { m1: { capabilities: { historyPrune: true } } },
+        },
+      ],
+    });
+    const rc = await load();
+    expect(rc.base.providers.find((p) => p.id === "p1")?.models?.m1?.capabilities?.historyPrune).toBe(
+      true,
+    );
+    await fs.unlink(path.join(home, "providers.json"));
+    await fs.unlink(path.join(home, "config.json"));
+  });
+
   it("capabilities.historyPrune 非法值被 schema 拒绝", async () => {
     for (const bad of ["false", "true", 0, 1, null, {}]) {
       await writeJson(path.join(home, "config.json"), {

@@ -71,6 +71,8 @@ function toModel(raw: z.infer<typeof magpieModelSchema>): ModelOverrideShape {
   const capabilities: NonNullable<ModelOverrideShape["capabilities"]> = {};
   if (raw.images !== undefined) capabilities.imageInput = raw.images;
   if (efforts.length > 0) capabilities.reasoningEffort = efforts;
+  // agy-cli 背后有按历史精确比对复用的会话，L1 修剪改写历史会触发重放并截断到 112 KiB（ADR-0066 修订）
+  if (raw.id.startsWith("agy-cli/")) capabilities.historyPrune = false;
   if (Object.keys(capabilities).length > 0) model.capabilities = capabilities;
   return model;
 }

@@ -477,3 +477,53 @@ describe("经模拟网关的真实请求（真实 Magpie 联调未验证）", ()
     await session.close();
   });
 });
+
+describe("agy-cli 模型默认不修剪（ADR-0066 修订）", () => {
+  it("agy-cli/ 前缀默认 historyPrune: false，其他前缀不受影响且可被上层 config.json 改回 true", async () => {
+    const home = temp();
+    const ws = temp("nct-magpie-ws-");
+    const models = [
+      ...MODELS,
+      { id: "agy-cli/gemini-4-hydrogen", context: 1000000, output: 64000 },
+      { id: "agy-cli/claude-sonnet", context: 200000 },
+      { id: "workbuddy/deepseek-v4.1-flash", context: 128000 },
+    ];
+    write(path.join(home, "config.json"), { modelsDev: false });
+    write(path.join(home, "magpie.json"), magpieFile("http://127.0.0.1:3425/v1", "magpie/agy-cli/gemini-4-hydrogen", models));
+
+    const config = await load(home);
+    const entry = magpieEntry(config.base.providers);
+    expect(entry?.models?.["agy-cli/gemini-4-hydrogen"]?.capabilities?.historyPrune).toBe(false);
+    expect(entry?.models?.["agy-cli/claude-sonnet"]?.capabilities?.historyPrune).toBe(false);
+    expect(entry?.models?.["workbuddy/deepseek-v4.1-flash"]?.capabilities?.historyPrune).toBeUndefined();
+    expect(entry?.models?.["deepseek/pro"]?.capabilities?.historyPrune).toBeUndefined();
+
+    const runtime = await createRuntime({ cwd: ws, sessionsDir: temp(), config });
+    const byModel = Object.fromEntries(
+      runtime
+        .listModels()
+        .filter((m) => m.ref.provider === "magpie")
+        .map((m) => [m.ref.model, m.capabilities.historyPrune]),
+    );
+    expect(byModel["agy-cli/gemini-4-hydrogen"]).toBe(false);
+    expect(byModel["agy-cli/claude-sonnet"]).toBe(false);
+    expect(byModel["workbuddy/deepseek-v4.1-flash"]).toBe(true);
+    expect(byModel["deepseek/pro"]).toBe(true);
+
+    // 上层配置（如可信项目 .nocturne/config.json）可将 historyPrune 显式改回 true
+    write(path.join(ws, ".nocturne", "config.json"), {
+      providers: [
+        {
+          id: "magpie",
+          baseURL: "http://127.0.0.1:3425/v1",
+          models: { "agy-cli/gemini-4-hydrogen": { capabilities: { historyPrune: true } } },
+        },
+      ],
+    });
+    await config.setWorkspaceTrusted(ws, true);
+    const wsConfig = await config.forWorkspace(ws);
+    const wsEntry = magpieEntry(wsConfig.resolved.providers);
+    expect(wsEntry?.models?.["agy-cli/gemini-4-hydrogen"]?.capabilities?.historyPrune).toBe(true);
+    expect(wsEntry?.models?.["agy-cli/claude-sonnet"]?.capabilities?.historyPrune).toBe(false);
+  });
+});
