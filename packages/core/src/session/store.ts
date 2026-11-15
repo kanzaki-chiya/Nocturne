@@ -15,7 +15,7 @@ import { SessionError } from "./errors.js";
 import { acquireSessionLock, lockLooksHeld, type SessionLock } from "./lock.js";
 import { foldEvents } from "./fold.js";
 import { assertLogHead, parseLogBytes } from "./log-parse.js";
-import { SessionImpl } from "./session.js";
+import { isUserActivityMessage, SessionImpl } from "./session.js";
 import type {
   CreateSessionInput,
   LoadSessionOptions,
@@ -100,6 +100,14 @@ export interface SessionStoreDeps {
         error?: string,
       ) => void)
     | undefined;
+  /** 活动时间旁路损坏、写入或删除失败；不参与正常控制流。 */
+  onActivityDiagnostic?:
+    | ((
+        id: string,
+        reason: "invalid_sidecar" | "write_failed" | "delete_failed",
+        error?: string,
+      ) => void)
+    | undefined;
 }
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -176,6 +184,82 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       if (actual?.title !== expected.title || actual.seq !== expected.seq)
         await writeTitle(id, expected.title, expected.seq);
     } else if (await fs.exists(titlePath(id))) await writeTitle(id, "", 0);
+  }
+
+  function activityPath(id: string): string {
+    return paths.join(sessionsDir, `${id}.activity.json`);
+  }
+  async function writeActivity(id: string, at: number, seq: number): Promise<void> {
+    const target = activityPath(id);
+    const temp = `${target}.${randomBytes(6).toString("hex")}.tmp`;
+    try {
+      await fs.writeFile(temp, JSON.stringify({ at, seq }));
+      await fs.rename(temp, target);
+    } catch (error) {
+      deps.onActivityDiagnostic?.(id, "write_failed", errorText(error));
+    } finally {
+      await fs.unlink(temp).catch(() => undefined);
+    }
+  }
+  async function removeActivity(id: string): Promise<void> {
+    try {
+      await fs.unlink(activityPath(id));
+    } catch (error) {
+      if (fsErrorCode(error) === "ENOENT") return;
+      deps.onActivityDiagnostic?.(id, "delete_failed", errorText(error));
+    }
+  }
+  async function readActivity(id: string): Promise<{ at: number; seq: number } | undefined> {
+    const target = activityPath(id);
+    if (!(await fs.exists(target))) return undefined;
+    try {
+      const data: unknown = JSON.parse(await fs.readTextFile(target));
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        "at" in data &&
+        "seq" in data &&
+        typeof data.at === "number" &&
+        Number.isFinite(data.at) &&
+        data.at >= 0 &&
+        typeof data.seq === "number" &&
+        Number.isSafeInteger(data.seq) &&
+        data.seq > 0
+      ) {
+        return { at: data.at, seq: data.seq };
+      }
+    } catch (e) {
+      if (fsErrorCode(e) === "ENOENT") return undefined;
+    }
+    // 旁路只是缓存；忽略损坏内容并记诊断。
+    deps.onActivityDiagnostic?.(id, "invalid_sidecar");
+    return undefined;
+  }
+  async function reconcileActivity(id: string, events: readonly DurableEvent[]): Promise<void> {
+    // 分叉不继承源会话的活动时间：只统计分叉之后在本会话写入的用户消息。
+    let forkBoundarySeq = 0;
+    if (events[0]?.type === "session.created" && events[0].payload.forkedFrom !== undefined) {
+      const forkRewind = events.findLast(
+        (e) => e.type === "session.rewound" && e.payload.fork === true,
+      );
+      forkBoundarySeq = forkRewind?.seq ?? events[0].payload.forkedFrom.seq;
+    }
+    const last = events
+      .filter(
+        (e): e is DurableEvent<"message.user"> =>
+          e.seq > forkBoundarySeq && e.type === "message.user" && isUserActivityMessage(e.payload),
+      )
+      .at(-1);
+    const at = last !== undefined ? Date.parse(last.time) : NaN;
+    const expected = last !== undefined && Number.isFinite(at) ? { at, seq: last.seq } : undefined;
+    const actual = await readActivity(id);
+    if (expected !== undefined) {
+      if (actual?.at !== expected.at || actual.seq !== expected.seq) {
+        await writeActivity(id, expected.at, expected.seq);
+      }
+    } else if (await fs.exists(activityPath(id))) {
+      await removeActivity(id);
+    }
   }
 
   function assertSessionId(id: string): void {
@@ -476,6 +560,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         await fs.unlink(pendingLog).catch(() => undefined);
         await fs.unlink(logPath(id)).catch(() => undefined);
         await fs.unlink(titlePath(id)).catch(() => undefined);
+        await fs.unlink(activityPath(id)).catch(() => undefined);
         for (const file of copied) await fs.unlink(file).catch(() => undefined);
         throw error;
       } finally {
@@ -496,6 +581,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           events: [],
           onClose: () => lock.release(),
           onTitle: (value, seq) => writeTitle(id, value, seq),
+          onActivity: (at, seq) => writeActivity(id, at, seq),
         });
         await session.emit("session.created", {
           formatVersion: LOG_FORMAT_VERSION,
@@ -524,6 +610,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       try {
         const loaded = await loadEvents(id);
         await reconcileTitle(id, loaded.events);
+        await reconcileActivity(id, loaded.events);
         const repaired = await repair(id, loaded.events);
         const recovery: SessionRecovery | undefined =
           repaired.recovery !== undefined || loaded.truncatedTail !== undefined
@@ -543,6 +630,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           ...(recovery !== undefined ? { recovery } : {}),
           onClose: () => lock.release(),
           onTitle: (value, seq) => writeTitle(id, value, seq),
+          onActivity: (at, seq) => writeActivity(id, at, seq),
         });
       } catch (e) {
         await lock.release();
@@ -592,6 +680,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             scan = firstUserTextInLog(text);
           }
           const firstText = (await readTitle(id))?.title ?? scan.firstText;
+          const lastUserMs = SESSION_ID_PATTERN.test(id) ? (await readActivity(id))?.at : undefined;
           summaries.push({
             id: event.sessionId,
             createdAt: event.time,
@@ -599,6 +688,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             workspaceRoot: event.payload.workspaceRoot,
             model: event.payload.model,
             mtimeMs: stat.mtimeMs,
+            ...(lastUserMs !== undefined ? { lastUserMs } : {}),
             ...(archivedAt !== undefined ? { archivedAt } : {}),
             locked: await lockLooksHeld(fs, platform, lockPath(id)),
             ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),

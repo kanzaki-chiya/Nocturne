@@ -1213,6 +1213,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         { sessionId, reason, ...(error !== undefined ? { error } : {}) },
       );
     },
+    onActivityDiagnostic: (sessionId, reason, error) => {
+      diagnostics.record(
+        reason === "invalid_sidecar"
+          ? "session.activity_sidecar_invalid"
+          : reason === "write_failed"
+            ? "session.activity_write_failed"
+            : "session.activity_delete_failed",
+        { sessionId, reason, ...(error !== undefined ? { error } : {}) },
+      );
+    },
   });
   const subagentObservation = createSubagentObservation({
     platform,

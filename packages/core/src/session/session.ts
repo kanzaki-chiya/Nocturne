@@ -29,6 +29,19 @@ export function newRunId(): string {
   return `run-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
 }
 
+/**
+ * 是否由用户发出的消息：排除子代理、后台命令、合奏留言投递与 Runtime 自动续跑/计划批准。
+ * 插话（steer）、排队发送与 MCP 桥外部 agent 消息均算用户发言。
+ */
+export function isUserActivityMessage(payload: DurablePayload<"message.user">): boolean {
+  return (
+    payload.subagent === undefined &&
+    payload.backgroundShell === undefined &&
+    payload.ensemble === undefined &&
+    payload.workMode?.source !== "runtime"
+  );
+}
+
 export class SessionImpl implements Session {
   readonly id: string;
   readonly runId: string;
@@ -42,6 +55,7 @@ export class SessionImpl implements Session {
   private readonly failController = new AbortController();
   private readonly onClose?: (() => Promise<void>) | undefined;
   private readonly onTitle?: ((title: string, seq: number) => Promise<void>) | undefined;
+  private readonly onActivity?: ((at: number, seq: number) => Promise<void>) | undefined;
 
   private writeChain: Promise<void> = Promise.resolve();
   private nextSeq: number;
@@ -59,6 +73,7 @@ export class SessionImpl implements Session {
     /** 关闭时释放的资源（会话锁等） */
     onClose?: (() => Promise<void>) | undefined;
     onTitle?: ((title: string, seq: number) => Promise<void>) | undefined;
+    onActivity?: ((at: number, seq: number) => Promise<void>) | undefined;
   }) {
     this.id = args.id;
     this.logPath = args.logPath;
@@ -68,6 +83,7 @@ export class SessionImpl implements Session {
     this.recovery = args.recovery;
     this.onClose = args.onClose;
     this.onTitle = args.onTitle;
+    this.onActivity = args.onActivity;
     this.nextSeq = (this.events.at(-1)?.seq ?? 0) + 1;
     this.lastPublishedSeq = this.nextSeq - 1;
   }
@@ -169,6 +185,19 @@ export class SessionImpl implements Session {
           await this.onTitle?.((payload as DurablePayload<"session.titled">).title, event.seq);
         } catch {
           /* 日志是事实来源；旁路将在恢复时修复 */
+        }
+      }
+      if (
+        type === "message.user" &&
+        isUserActivityMessage(payload as DurablePayload<"message.user">)
+      ) {
+        const at = Date.parse(event.time);
+        if (Number.isFinite(at)) {
+          try {
+            await this.onActivity?.(at, event.seq);
+          } catch {
+            /* 日志是事实来源；旁路写失败不回滚日志，将在恢复时修复 */
+          }
         }
       }
       this.publish(event);

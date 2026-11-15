@@ -183,6 +183,8 @@ export interface SessionSummary {
   model: ModelRef;
   /** 日志文件修改时间 */
   mtimeMs: number;
+  /** 最后一条由用户发出的消息的时间戳（ms）；旁路缺失或无效时不出现 */
+  lastUserMs?: number | undefined;
   /** 归档时间（ISO）；未归档或缺省（ADR-0080） */
   archivedAt?: string | undefined;
   /** 锁文件存在且持有者看起来存活（只读探测，不取得锁） */
