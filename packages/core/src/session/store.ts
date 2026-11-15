@@ -10,7 +10,7 @@ import {
   firstUserText,
   type DurableEvent,
 } from "../protocol/index.js";
-import { fsErrorCode, type Platform } from "../platform/index.js";
+import { fsErrorCode, type DirEntry, type Platform } from "../platform/index.js";
 import { SessionError } from "./errors.js";
 import { acquireSessionLock, lockLooksHeld, type SessionLock } from "./lock.js";
 import { foldEvents } from "./fold.js";
@@ -67,6 +67,15 @@ function firstUserTextInLog(logText: string): { firstText: string | undefined; s
 
 /** list() 对每份日志先读的字节数：够装首行与绝大多数会话的首条用户消息 */
 const LIST_HEAD_BYTES = 64 * 1024;
+
+/**
+ * list() 的文件级并发上限：每个文件只做独立的 stat、读头与旁路读取，
+ * 串行会随会话数线性拉长启动时间，但不设上限会一次打开过多文件。
+ */
+const LIST_FILE_CONCURRENCY = 8;
+
+/** list() 的过滤条件（与 SessionStore.list 的参数同型） */
+type SessionListFilter = NonNullable<Parameters<SessionStore["list"]>[0]>;
 
 /**
  * 读日志头部（ADR-0051）：最多 LIST_HEAD_BYTES；文件更短即全文。
@@ -444,6 +453,68 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
     };
   }
 
+  /**
+   * list() 的单文件摘要（sessions.md 第 8 节）：只读日志开头（ADR-0051）——
+   * 取首行与第一条用户消息就停；首行被截断（超长首行）或开头里找不到第一条
+   * 用户消息时，再读整份。单个文件的任何异常都在这里吞掉：列表是只读操作，
+   * 一个坏文件不阻塞其他会话。
+   */
+  async function summarizeEntry(
+    entry: DirEntry,
+    filter: SessionListFilter,
+  ): Promise<SessionSummary | undefined> {
+    try {
+      const stat = await fs.stat(entry.path);
+      const head = await readLogHead(fs, entry.path, stat.size);
+      let text = head.text;
+      let event: DurableEvent;
+      try {
+        event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
+      } catch (e) {
+        if (!head.truncated) throw e;
+        text = await fs.readTextFile(entry.path);
+        event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
+      }
+      if (event.type !== "session.created") return undefined;
+      if (event.payload.parent !== undefined && filter.includeSubagents !== true) {
+        return undefined;
+      }
+      if (filter.cwd !== undefined && !paths.equals(event.payload.cwd, filter.cwd)) {
+        return undefined;
+      }
+      const id = entry.name.slice(0, -".jsonl".length);
+      // 归档旁路只按文件名读取；非法文件名不是本应用生成的会话，按未归档处理。
+      const archivedAt = SESSION_ID_PATTERN.test(id) ? await readArchivedAt(id) : undefined;
+      if (filter.includeArchived !== true && archivedAt !== undefined) return undefined;
+      let scan = firstUserTextInLog(text);
+      if (!scan.sawUser && head.truncated && text === head.text) {
+        text = await fs.readTextFile(entry.path);
+        scan = firstUserTextInLog(text);
+      }
+      const firstText = (await readTitle(id))?.title ?? scan.firstText;
+      const lastUserMs = SESSION_ID_PATTERN.test(id) ? (await readActivity(id))?.at : undefined;
+      return {
+        id: event.sessionId,
+        createdAt: event.time,
+        cwd: event.payload.cwd,
+        workspaceRoot: event.payload.workspaceRoot,
+        model: event.payload.model,
+        mtimeMs: stat.mtimeMs,
+        ...(lastUserMs !== undefined ? { lastUserMs } : {}),
+        ...(archivedAt !== undefined ? { archivedAt } : {}),
+        locked: await lockLooksHeld(fs, platform, lockPath(id)),
+        ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
+        ...(event.payload.forkedFrom !== undefined ? { forkedFrom: event.payload.forkedFrom } : {}),
+        ...(event.payload.schedule !== undefined ? { schedule: event.payload.schedule } : {}),
+        ...(event.payload.client !== undefined ? { client: event.payload.client } : {}),
+        ...(firstText !== undefined ? { firstText } : {}),
+      };
+    } catch {
+      // 列表是只读操作：单个损坏文件不阻塞其他会话
+      return undefined;
+    }
+  }
+
   return {
     archivedAt: readArchivedAt,
     async setArchivedAt(id, archivedAt) {
@@ -646,63 +717,25 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         if (fsErrorCode(e) === "ENOENT") return [];
         throw e;
       }
-      const summaries: SessionSummary[] = [];
-      for (const entry of entries) {
-        if (entry.type !== "file" || !entry.name.endsWith(".jsonl")) continue;
-        try {
-          // 只读日志开头（ADR-0051）：取首行与第一条用户消息就停；
-          // 首行被截断（超长首行）或开头里找不到第一条用户消息时，再读整份。
-          const stat = await fs.stat(entry.path);
-          const head = await readLogHead(fs, entry.path, stat.size);
-          let text = head.text;
-          let event: DurableEvent;
-          try {
-            event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
-          } catch (e) {
-            if (!head.truncated) throw e;
-            text = await fs.readTextFile(entry.path);
-            event = decodeDurableEvent(text.split("\n", 1)[0] ?? "");
+      const files = entries.filter(
+        (entry) => entry.type === "file" && entry.name.endsWith(".jsonl"),
+      );
+      // 逐文件独立的只读扫描，最多 LIST_FILE_CONCURRENCY 个并发；结果按 readdir 顺序
+      // 落位，下面的排序又是稳定的，所以 createdAt 相同时的次序与串行遍历一致。
+      const found = new Array<SessionSummary | undefined>(files.length);
+      let next = 0;
+      const workers = Array.from(
+        { length: Math.min(LIST_FILE_CONCURRENCY, files.length) },
+        async () => {
+          while (next < files.length) {
+            const index = next++;
+            const entry = files[index];
+            if (entry !== undefined) found[index] = await summarizeEntry(entry, filter);
           }
-          if (event.type !== "session.created") continue;
-          if (event.payload.parent !== undefined && filter.includeSubagents !== true) {
-            continue;
-          }
-          if (filter.cwd !== undefined && !paths.equals(event.payload.cwd, filter.cwd)) {
-            continue;
-          }
-          const id = entry.name.slice(0, -".jsonl".length);
-          // 归档旁路只按文件名读取；非法文件名不是本应用生成的会话，按未归档处理。
-          const archivedAt = SESSION_ID_PATTERN.test(id) ? await readArchivedAt(id) : undefined;
-          if (filter.includeArchived !== true && archivedAt !== undefined) continue;
-          let scan = firstUserTextInLog(text);
-          if (!scan.sawUser && head.truncated && text === head.text) {
-            text = await fs.readTextFile(entry.path);
-            scan = firstUserTextInLog(text);
-          }
-          const firstText = (await readTitle(id))?.title ?? scan.firstText;
-          const lastUserMs = SESSION_ID_PATTERN.test(id) ? (await readActivity(id))?.at : undefined;
-          summaries.push({
-            id: event.sessionId,
-            createdAt: event.time,
-            cwd: event.payload.cwd,
-            workspaceRoot: event.payload.workspaceRoot,
-            model: event.payload.model,
-            mtimeMs: stat.mtimeMs,
-            ...(lastUserMs !== undefined ? { lastUserMs } : {}),
-            ...(archivedAt !== undefined ? { archivedAt } : {}),
-            locked: await lockLooksHeld(fs, platform, lockPath(id)),
-            ...(event.payload.parent !== undefined ? { parent: event.payload.parent } : {}),
-            ...(event.payload.forkedFrom !== undefined
-              ? { forkedFrom: event.payload.forkedFrom }
-              : {}),
-            ...(event.payload.schedule !== undefined ? { schedule: event.payload.schedule } : {}),
-            ...(event.payload.client !== undefined ? { client: event.payload.client } : {}),
-            ...(firstText !== undefined ? { firstText } : {}),
-          });
-        } catch {
-          // 列表是只读操作：单个损坏文件不阻塞其他会话
-        }
-      }
+        },
+      );
+      await Promise.all(workers);
+      const summaries = found.filter((summary): summary is SessionSummary => summary !== undefined);
       summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       return summaries;
     },
