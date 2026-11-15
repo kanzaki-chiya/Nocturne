@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PinnedRow, ProjectNode, ProjectSort, SessionRow, SessionTree } from "./session-tree";
-import { ICON_LG, ICON_SM, Icon } from "./ui";
+import { ICON_MD, ICON_SM, Icon } from "./ui";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
 export type SettingsSection =
@@ -70,72 +70,72 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
   {
     key: "general",
     label: "常规",
-    icon: <Icon name="settings_6" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="settings_6" size={ICON_MD} className="glyph" />,
   },
   {
     key: "appearance",
     label: "外观",
-    icon: <Icon name="sun" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="sun" size={ICON_MD} className="glyph" />,
   },
   {
     key: "providers",
     label: "服务商",
-    icon: <Icon name="cloud" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="cloud" size={ICON_MD} className="glyph" />,
   },
   {
     key: "models",
     label: "模型",
-    icon: <Icon name="box_3" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="box_3" size={ICON_MD} className="glyph" />,
   },
   {
     key: "agents",
     label: "子代理",
-    icon: <Icon name="robot" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="robot" size={ICON_MD} className="glyph" />,
   },
   {
     key: "skills",
     label: "技能",
-    icon: <Icon name="file" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="file" size={ICON_MD} className="glyph" />,
   },
   {
     key: "mcp",
     label: "MCP",
-    icon: <Icon name="server" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="server" size={ICON_MD} className="glyph" />,
   },
   {
     key: "browser",
     label: "浏览器",
-    icon: <Icon name="earth" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="earth" size={ICON_MD} className="glyph" />,
   },
   {
     key: "computer",
     label: "电脑操控",
-    icon: <Icon name="computer" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="computer" size={ICON_MD} className="glyph" />,
   },
   {
     key: "grants",
     label: "授权",
-    icon: <Icon name="safe_shield" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="safe_shield" size={ICON_MD} className="glyph" />,
   },
   {
     key: "remote",
     label: "远程",
-    icon: <Icon name="cellphone" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="cellphone" size={ICON_MD} className="glyph" />,
   },
   {
     key: "archive",
     label: "已归档的会话",
-    icon: <Icon name="archive" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="archive" size={ICON_MD} className="glyph" />,
   },
   {
     key: "usage",
     label: "用量",
-    icon: <Icon name="chart_bar" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="chart_bar" size={ICON_MD} className="glyph" />,
   },
   {
     key: "logs",
     label: "后台日志",
-    icon: <Icon name="terminal_box" size={ICON_LG} className="glyph" />,
+    icon: <Icon name="terminal_box" size={ICON_MD} className="glyph" />,
   },
 ];
 
@@ -144,20 +144,11 @@ type MenuState =
   | { kind: "project"; x: number; y: number; key: string; path: string; index: number }
   | { kind: "projects"; x: number; y: number };
 
-function dotClass(row: SessionRow): string {
-  if (row.status === "running") return "dot run";
-  if (row.status === "pending") return "dot warn";
-  if (row.mark === "error") return "dot err";
-  if (row.mark === "done") return "dot ok";
-  return "dot";
-}
-
 /**
  * 会话行右侧的短标签（ADR-0056）：待确认来自会话状态（请求被处理即消失），
  * 出错 / 已完成是本次运行里「你没看到就结束了」的留痕，打开会话即清除。
  * 运行中（running/pending）不显示旧留痕：新 Turn 开始时 App 已清掉它，
  * 这里再挡一道——事件竞态下旧标签也不会盖住进行态。
- * 没有标签时按原来的 meta（相对时间）显示。
  */
 function rowTag(row: SessionRow): { text: string; cls: string } | null {
   if (row.status === "pending") return { text: "待确认", cls: "need" };
@@ -239,7 +230,6 @@ function RowButton({
           onClick={onSelect}
           onContextMenu={onContext}
         >
-          <span className={dotClass(row)} />
           {row.client !== undefined && (
             <span
               className="session-client-icon"
@@ -251,11 +241,7 @@ function RowButton({
           )}
           <span className="t">{row.title}</span>
           {pinned !== undefined && <span className="proj">{pinned.project}</span>}
-          {tag !== null ? (
-            <span className={`tag ${tag.cls}`}>{tag.text}</span>
-          ) : (
-            pinned === undefined && <span className="meta">{row.meta}</span>
-          )}
+          {tag !== null && <span className={`tag ${tag.cls}`}>{tag.text}</span>}
         </button>
       )}
       <button
@@ -323,7 +309,7 @@ export function Sidebar(props: SidebarProps) {
             props.onLeaveSettings?.();
           }}
         >
-          <Icon name="arrow_left" size={ICON_LG} />
+          <Icon name="arrow_left" size={ICON_MD} />
           返回<span className="k">Esc</span>
         </button>
         <h4>设置</h4>
@@ -510,7 +496,7 @@ export function Sidebar(props: SidebarProps) {
               size={ICON_SM}
               className={`tw fold-arrow${collapsed ? "" : " down"}`}
             />
-            <Icon name="folder" size={ICON_LG} className="fold" />
+            <Icon name="folder" size={ICON_MD} className="fold" />
             <span className="gname">{project.name}</span>
             <span className="gh-right">
               {collapsed && <span className="meta">{project.count}</span>}
@@ -578,9 +564,6 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <aside className="side">
-      <div className="shead">
-        <span className="brand">Nocturne</span>
-      </div>
       <nav className="nav">
         <button
           className="item add"
@@ -588,11 +571,11 @@ export function Sidebar(props: SidebarProps) {
             props.onNewSession();
           }}
         >
-          <Icon name="add" size={ICON_LG} className="glyph" />
+          <Icon name="add" size={ICON_MD} className="glyph" />
           新会话
         </button>
         <button type="button" className="item" onClick={props.onSearch}>
-          <Icon name="search" size={ICON_LG} className="glyph" />
+          <Icon name="search" size={ICON_MD} className="glyph" />
           <span className="t">搜索</span>
         </button>
         <button
@@ -603,7 +586,7 @@ export function Sidebar(props: SidebarProps) {
             props.onOpenSchedules?.();
           }}
         >
-          <Icon name="time" size={ICON_LG} className="glyph" />
+          <Icon name="time" size={ICON_MD} className="glyph" />
           <span className="t">定时任务</span>
           {props.enabledScheduleCount !== undefined && (
             <span className="meta">{props.enabledScheduleCount}</span>
@@ -859,7 +842,7 @@ export function Sidebar(props: SidebarProps) {
       )}
       <nav className="nav foot" aria-label="页面">
         <button type="button" className="item" onClick={() => props.onOpenPage?.("general")}>
-          <Icon name="settings_1" size={ICON_LG} className="glyph" />
+          <Icon name="settings_1" size={ICON_MD} className="glyph" />
           设置
         </button>
       </nav>

@@ -66,35 +66,23 @@ button {
   border-right: 1px solid var(--a-border);
   display: flex;
   flex-direction: column;
-  padding: 12px 10px 10px;
-  gap: 10px;
+  padding: 8px 12px 10px;
+  gap: 2px;
   min-height: 0;
 }
 .side h4 {
-  margin: 0 0 4px;
-  padding: 0 10px;
+  margin: 0;
+  padding: 16px 10px 4px;
   font-size: var(--fs-1);
-  letter-spacing: 0.1em;
-  color: var(--a-faint);
+  line-height: var(--lh-base);
+  letter-spacing: 0.02em;
+  color: var(--a-muted);
   font-weight: var(--fw-medium);
-}
-.side .shead {
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-}
-.side .brand {
-  font-weight: var(--fw-semibold);
-  color: var(--a-text);
-  font-size: var(--fs-3);
-}
-.side .shead .glyph {
-  margin-left: auto;
 }
 .side .tree {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
   min-height: 0;
   overflow-y: auto;
   flex: 1;
@@ -129,14 +117,14 @@ button {
   border-width: 2px;
 }
 .side .tree h4 {
-  margin-top: 6px;
+  margin-top: 0;
 }
 /* 「项目」标题行：h4 + 悬停/focus-within 才显示的两个小按钮（… 全部折叠/展开，＋ 打开项目） */
 .side .h4row {
   display: flex;
   align-items: center;
-  padding: 0 6px 0 10px;
-  margin: 6px 0 4px;
+  padding: 16px 6px 4px 10px;
+  margin: 0;
 }
 .side .h4row h4 {
   margin: 0;
@@ -188,11 +176,14 @@ button {
 .snav .sback {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 10px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
   border-radius: var(--radius-2);
   color: var(--a-secondary);
-  font-weight: var(--fw-medium);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-regular);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -215,17 +206,14 @@ button {
   padding: 2px 5px;
 }
 .snav h4 {
-  margin-top: 12px;
-}
-.snav .nav .item {
-  padding: 7px 10px;
+  padding-top: 8px;
 }
 .snav .nav .item svg {
-  color: var(--a-muted);
+  color: var(--a-secondary);
   flex: none;
 }
 .snav .nav .item.on svg {
-  color: var(--a-accent);
+  color: var(--a-text);
 }
 
 .nav {
@@ -237,10 +225,14 @@ button {
 .nav .item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
+  gap: 10px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
   border-radius: var(--radius-2);
   color: var(--a-secondary);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-regular);
   text-decoration: none;
   position: relative;
   white-space: nowrap;
@@ -255,25 +247,14 @@ button {
 .nav .item .meta {
   margin-left: auto;
   font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
   color: var(--a-faint);
   flex: none;
 }
 .nav .item.on {
   background: var(--a-sel);
   color: var(--a-text);
-}
-.nav .item.on::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: var(--radius-1);
-  background: var(--a-accent);
-}
-.nav .item.add {
-  color: var(--a-muted);
+  font-weight: var(--fw-medium);
 }
 .nav .item[aria-disabled="true"] {
   color: var(--a-faint);
@@ -320,16 +301,16 @@ button {
   background: color-mix(in srgb, var(--a-success) 14%, transparent);
 }
 .nav.sub .item {
-  padding-left: 26px;
+  padding-left: 46px;
 }
 .nav .item.more {
   color: var(--a-faint);
   font-size: var(--fs-1);
-  padding-left: 41px;
+  padding-left: 46px;
 }
-/* 「对话」平铺区的 .more 与行标题文字对齐（10 内边距 + 7 圆点 + 8 间隙） */
+/* 「对话」平铺区的 .more 与无圆点会话标题左对齐 */
 .nav .item.more.flat {
-  padding-left: 25px;
+  padding-left: 10px;
 }
 .nav .item:focus-visible,
 .gh-toggle:focus-visible,
@@ -346,6 +327,7 @@ button {
 .irow:hover .item,
 .gh:hover {
   background: var(--a-sel);
+  color: var(--a-text);
 }
 
 /* 会话行「…」菜单按钮：.irow 是容器（按钮不能嵌套），默认隐藏、
@@ -450,11 +432,11 @@ button {
 }
 
 .glyph {
-  color: var(--a-muted);
+  color: var(--a-secondary);
   flex: none;
 }
 .nav .item.on .glyph {
-  color: var(--a-accent);
+  color: var(--a-text);
 }
 
 .grp {
@@ -467,8 +449,11 @@ button {
 .gh {
   display: flex;
   align-items: center;
-  padding: 5px 10px 5px 4px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px 0 4px;
   color: var(--a-text);
+  font-size: var(--fs-2);
   font-weight: var(--fw-medium);
   border-radius: var(--radius-2);
   position: relative;
@@ -534,6 +519,7 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
   color: var(--a-faint);
   font-size: var(--fs-1);
   font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
   flex: none;
 }
 .gh .meta.stop {
@@ -601,6 +587,10 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
   min-width: 0;
   position: relative;
   container-type: inline-size;
+  background: var(--a-bg);
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .head {
   display: flex;
@@ -908,7 +898,7 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
   min-width: 140px;
   background: var(--a-panel);
   border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   padding: 4px;
   box-shadow: var(--shadow-popover);
 }
@@ -982,21 +972,23 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 24px;
-  gap: 4px;
+  padding: 32px 24px 60px;
+  gap: 18px;
 }
 .hero-mark {
   color: var(--a-accent);
 }
 .hero-mark svg {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: block;
 }
 .hero h3 {
-  font-size: var(--fs-4);
-  font-weight: var(--fw-medium);
-  margin: 12px 0 20px;
+  font-size: var(--fs-5);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--lh-tight);
+  margin: 0;
   text-align: center;
 }
 .hero .hero-project {

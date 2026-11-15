@@ -976,6 +976,11 @@ it("常规与服务商设置打开时，窗口按钮保持可访问并执行宿�
       <App host={host} />
     </WindowFrame>,
   );
+  const brand = document.querySelector(".window-titlebar .window-brand");
+  expect(brand?.textContent).toBe("Nocturne");
+  const brandMark = brand?.querySelector("svg");
+  expect(brandMark?.getAttribute("width")).toBe("16");
+  expect(brandMark?.getAttribute("height")).toBe("16");
   fireEvent.click(await screen.findByRole("button", { name: "设置" }));
   const nav = await screen.findByRole("navigation", { name: "设置" });
   for (const page of ["常规", "服务商"]) {
@@ -2085,6 +2090,9 @@ it("归档当前会话后依次跳到同项目下一条（含折叠）、同项�
   archiveSessionRow("z1");
   // 5. 整个侧栏没有别的会话：回到新会话页
   expect(await screen.findByText("有什么可以帮你？")).toBeTruthy();
+  const heroMark = document.querySelector(".hero-mark svg");
+  expect(heroMark?.getAttribute("width")).toBe("36");
+  expect(heroMark?.getAttribute("height")).toBe("36");
   await waitFor(() => expect(screen.queryByRole("region", { name: "会话消息" })).toBeNull());
 });
 

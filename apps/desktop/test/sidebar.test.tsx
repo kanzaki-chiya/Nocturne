@@ -59,7 +59,7 @@ describe("Sidebar", () => {
     const { container } = render(
       <Sidebar {...props({ enabledScheduleCount: 3, onOpenSchedules, schedulesOpen: true })} />,
     );
-    const buttons = [...container.querySelectorAll(".shead + .nav .item, .nav .item")];
+    const buttons = [...container.querySelectorAll(".nav .item")];
     const labels = buttons.map((button) => button.textContent ?? "");
     const scheduleAt = labels.findIndex((label) => label.includes("定时任务"));
     const createAt = labels.findIndex((label) => label.includes("新会话"));
@@ -481,5 +481,25 @@ describe("Sidebar", () => {
     const row = container.querySelector(".irow");
     expect(row?.getAttribute("data-client-name")).toBe("Claude Code");
     expect(row?.textContent).not.toContain("Claude Code");
+  });
+
+  it("不渲染侧栏品牌头，会话行不显示状态点与时间，仅保留待确认/出错/已完成标签", () => {
+    const tree: SessionTree = {
+      ...emptyTree,
+      chats: {
+        rows: [
+          { id: "c1", title: "普通会话", meta: "昨天", locked: false, status: "idle" },
+          { id: "c2", title: "待确认会话", meta: "刚刚", locked: false, status: "pending" },
+        ],
+        moreCount: 0,
+      },
+    };
+    const { container } = render(<Sidebar {...props({ tree })} />);
+    expect(container.querySelector(".shead")).toBeNull();
+    expect(container.querySelectorAll(".irow .dot")).toHaveLength(0);
+    expect(container.querySelectorAll(".irow .meta")).toHaveLength(0);
+    expect(screen.queryByText("昨天")).toBeNull();
+    expect(screen.queryByText("刚刚")).toBeNull();
+    expect(screen.getByText("待确认")).toBeTruthy();
   });
 });

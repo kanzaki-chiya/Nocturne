@@ -32,7 +32,7 @@
   position: relative;
   z-index: 2;
   border: 1px solid var(--a-border);
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-composer);
   background: var(--a-panel);
   transition:
     border-color 0.15s,

@@ -370,8 +370,9 @@
 }
 .phead h1 {
   margin: 0 auto 0 0;
-  font-size: var(--fs-4);
+  font-size: var(--fs-5);
   font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
   line-height: var(--lh-tight);
   display: flex;
   align-items: center;
@@ -400,8 +401,10 @@
 }
 .ghead h2 {
   margin: 0 auto 0 0;
-  font-size: var(--fs-2);
-  font-weight: var(--fw-semibold);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.02em;
+  color: var(--a-muted);
   line-height: var(--lh-tight);
 }
 .ghead h2 .count {

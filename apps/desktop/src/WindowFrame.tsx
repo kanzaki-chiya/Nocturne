@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import type { DesktopHost } from "./host";
 import { TitlebarSlot } from "./PanelChrome";
+import { MoonMark } from "./ui";
 import "./window-frame.css";
 
 /** 窗口操作仍走宿主；会话、后台与权限判定不进入标题栏。 */
@@ -45,6 +46,10 @@ export function WindowFrame({ host, children }: { host: DesktopHost; children: R
   return (
     <div className="window-frame">
       <header className="window-titlebar" aria-label="窗口标题栏">
+        <div className="window-brand" data-tauri-drag-region>
+          <MoonMark size={16} />
+          <span>Nocturne</span>
+        </div>
         <div className="window-drag-region" data-tauri-drag-region />
         <div className="window-tools" ref={setSlot} />
         <div className="window-panel-gap" data-tauri-drag-region />

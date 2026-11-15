@@ -2951,7 +2951,7 @@ function DraftPane({
   return (
     <div className="hero">
       <div className="hero-mark" aria-hidden="true">
-        <MoonMark size={40} />
+        <MoonMark size={36} />
       </div>
       <h3>
         {isPlain ? (

@@ -60,7 +60,7 @@
   grid-template-rows: 38px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  padding-top: 32px;
+  padding-top: 0;
   border-left: 1px solid var(--a-border);
   background: var(--a-bg);
   color: var(--a-text);
@@ -744,7 +744,7 @@
 /* ── Ctrl+P ── */
 .qopen-backdrop {
   position: absolute;
-  inset: 32px 0 0;
+  inset: 0;
   z-index: 30;
 }
 .qopen {
@@ -835,7 +835,7 @@
 /* ── 会话概览浮层 ── */
 .ovpop {
   position: absolute;
-  top: 38px;
+  top: 6px;
   right: 12px;
   z-index: 22;
   display: grid;
