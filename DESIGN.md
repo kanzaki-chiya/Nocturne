@@ -56,8 +56,9 @@
 
 | 位置 | 字号 | 字重与样式 |
 |---|---|---|
-| 导航行、菜单项、设置行、输入框底栏、工具行 | `--fs-2` | `--fw-regular`（400；选中导航用 `--fw-medium` 500） |
+| 导航行、菜单项、设置行、输入框底栏、工具行 | `--fs-2` | `--fw-regular`（400；选中导航用 `--fw-medium` 500；工具行动词/计数/状态用 `--sans`，路径/命令/参数用 `--mono`） |
 | 对话正文、输入框 | `--fs-3` | `--fw-regular`（400） |
+| diff 正文 | `--fs-diff` | `--fw-regular`（400，`12.5px`，`--mono`） |
 | 侧栏分组标题、设置分组标题 | `--fs-1` | `--fw-medium`（500），`--a-muted`，字距 `0.02em` |
 | 对话标题 | `--fs-2` | `--fw-medium`（500） |
 | 新会话标题「有什么可以帮你？」、设置页标题 | `--fs-5` | `--fw-semibold`（600），字距 `-0.01em` |
@@ -93,16 +94,14 @@
 | `--radius-1` | 行内代码、键盘提示、小徽章、复选框、分段按钮内项、滚动条滑块（`4px`） |
 | `--radius-2` | 按钮、输入框、下拉框、菜单项、导航行、chip、小卡片、代码块、待发行（`6px`） |
 | `--radius-send` | 桌面端输入框实心发送/中断按钮专用圆角（`7px`） |
-| `--radius-3` | 对话框、弹层、菜单面板、设置分组卡片、提示卡、diff 卡片、手机卡片与抽屉（`8px`） |
+| `--radius-3` | 对话框、弹层、菜单面板、用户气泡、提示卡、diff 卡片、手机卡片与抽屉（`8px`） |
 | `--radius-composer` | 输入框外框专用圆角（`10px`） |
 | `--radius-pill` | 胶囊标签、开关轨道、状态圆点、圆形图标按钮 |
-| `--radius-device` | 手机外框容器 |
 
 - **阴影**（定义于 `design/tokens.json` 的 `shadow` 分组）：
   - `--shadow-popover`：菜单、下拉、上下文面板；
   - `--shadow-dialog`：模态对话框、抽屉；
   - `--shadow-edge`：覆盖式侧面板左缘阴影；
-  - `--shadow-device`：设备预览框阴影；
   - `--shadow-focus`：键盘 `:focus-visible` 与输入框 `:focus` 聚焦环。权限确认卡与提问卡被程序聚焦（`tabIndex={-1}`）时去掉浏览器默认 outline，`:focus-within` 用 `--a-accent` 边框加 `--shadow-focus` 外圈。
 
 ---
@@ -123,9 +122,10 @@
 - **图标按钮（`.ib`）**：宽高 `--ctl-h-md`（`.ib.sm` 为 `--ctl-h-sm`），圆角 `--radius-2`，激活态加 `.on` 或 `aria-pressed="true"`。图标按钮的 `title` 与 `aria-label` 只写动作名，不写状态或行为解释。
 - **折叠箭头（`.fold-arrow`）**：统一使用 `<Icon name="right_small" size={ICON_SM} className="fold-arrow" />` 配合 CSS `transform: rotate(...)` 过渡（对话流内用户触发的 `<details>` 为 `--dur-fold`），不混用文本三角字符或 `summary::before` 伪元素。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down` 或 `details[open] > summary > .fold-arrow`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器统一使用 `<Icon name="down_small" size={ICON_SM} />`，不算折叠箭头。
 - **待发队列（`.pending-inputs`）**：压在输入框上沿，每条待发输入单行（`.pi-row`）：弱化色箭头、单行省略的正文，右侧图标按钮依次为立即发送（只有运行中的排队条目才有）、编辑、取消；子代理结果条目只有取消。不写模式标签。
-- **开关（`.switch`）**：`button[role="switch"][aria-checked]`，尺寸 `--switch-w` × `--switch-h`，圆钮 `--switch-knob`。立即生效的布尔设置用开关；进表单点「保存」才生效的布尔字段用复选框 `.check`。
+- **开关（`.switch`）**：`button[role="switch"][aria-checked]`，尺寸 `--switch-w` × `--switch-h`（`32px × 18px`），打开时轨道用强调色 `--a-accent`，圆钮 `--switch-knob`。立即生效的布尔设置用开关；进表单点「保存」才生效的布尔字段用复选框 `.check`。
 - **分段控件（`.seg`）**：2–4 个互斥短选项，选中项 `[aria-pressed="true"]` / `[aria-selected="true"]` / `[aria-checked="true"]` 用 `--a-sel-strong` 底。
-- **下拉与输入框（`.dd`、`.input`、`.textarea`）**：默认高度 `--ctl-h-md`（`.lg` 为 `--ctl-h-lg`），机器值加 `.mono`，宽度档位 `.sm-w`（`--w-field-sm`）、`.md-w`（`--w-field-md`）。
+- **下拉与输入框（`.dd`、`.input`、`.textarea`）**：默认高度 `--ctl-h-md`（`28px`；`.lg` 为 `--ctl-h-lg`），下拉触发器 `.dd` 采用透明底与 `1px solid var(--a-border)` 描边；机器值加 `.mono`，宽度档位 `.sm-w`（`--w-field-sm`）、`.md-w`（`--w-field-md`）。
+- **菜单、对话框与浮层（`Menu`、`.ddm`、`.dlg`、`.ovpop`、`.qopen`、`.search-dialog`）**：统一使用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边与 `--a-panel` 底色；菜单项与下拉项高 `--item-h`（`30px`），焦点与选中底色 `--a-sel`；`MenuItem` 仅在传入 `checked`（单选模式）时渲染 `.menu-ck` 勾选列，普通菜单图标贴左对齐。
 - **徽标（`.badge`）与覆盖警告**：`.badge` 用于状态标签（`.accent`、`.warn`、`.err`、`.ok`）和「只读」。除覆盖警告和只读徽标外不显示配置来源；被更高层覆盖的设置值用 `--a-warning` 色，现有覆盖警告只放在值的 `title`，不加徽标或可见说明。Shell 行既有的「由…指定」保留。
 
 ---
@@ -134,18 +134,23 @@
 
 页面只有三种模板，布局宽度由 `design/tokens.json` 的 `layout` 分组控制：
 
-1. **单栏设置页**（常规、模型、远程、外观）：
-   - 外层 `.spage` 滚动，内套 `.readable`（`max-width: var(--w-readable)`，水平居中）；
+1. **设置导航与单栏设置页**（常规、模型、远程、外观）：
+   - 设置导航（`.snav`）与侧栏共用一套样式：行高 `--item-h`（`30px`）、图标加名称、选中底 `--a-sel`，顶部为「← 返回」与 `Esc` 键帽提示，底部不放说明文字；
+   - 外层 `.spage` 滚动，内套 `.readable`（`max-width: var(--w-readable)` `680px`，水平居中，顶部留白 `32px` `--space-8`）；
    - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-5`、`--fw-semibold`、`letter-spacing: -0.01em`），正文 `.sbody`（分组间距 `--space-8`）；
-   - 每组 `.group` 含 `.ghead`（标题 `--fs-1`、`--fw-medium`、`letter-spacing: 0.02em`、`--a-muted`）和 `.card`（圆角 `--radius-3`），行 `.srow`（最小高 `--row-h`，左 `.lab` 右 `.ctl`）。
+   - 每组 `.group` 去掉外层卡片框，分组上方（含首组）以 `1px solid var(--a-border)` 分隔，`.ghead` 标题用 `--fs-1`、`--fw-medium`、`letter-spacing: 0.02em`、`--a-muted`；`.card` 仅作内容容器，内部设置行 `.srow` 最小高 `--row-h`（`48px`）、左 `.lab` 右 `.ctl`，行间以 `1px solid var(--a-border)` 分隔。
 2. **主从设置页**（服务商、授权、MCP、技能、子代理、定时任务）：
-   - 外层 `.spage.flush` 不滚动，顶栏 `.phead` 下接 `.md`（左栏 `.md-list` 宽 `--w-list`（280px）独立滚动，右栏 `.md-detail` 独立滚动，内部 `.inner` 宽 `--w-readable` 居中）；名字单行省略，完整名字放名字的 `title`；MCP 列表只显示状态点与名字；
+   - 外层 `.spage.flush` 不滚动，顶栏 `.phead` 下接 `.md`（左栏 `.md-list` 宽 `--w-list`（`280px`）独立滚动，右栏 `.md-detail` 独立滚动，内部 `.inner` 宽 `--w-readable` `680px` 居中，顶部留白 `32px`）；详情分组与列表同样去掉卡片框，行高 `48px`，表格统一表头与 `1px solid var(--a-border)` 行线；名字单行省略，完整名字放名字的 `title`；MCP 列表只显示状态点与名字；
    - 新增按钮固定在左栏顶部，主操作与删除在右栏详情顶栏 `.dhead .actions`。
    - 全部滚动区共用无箭头的细滚动条，隐藏滚动条的区域保留 `scrollbar-width: none`。子代理描述框按内容增高，最少约三行、最高 `240px`，超出才滚动；启用开关位于标题最右侧，不写可见标签，只读与默认档位禁用。
 3. **数据页**（用量、后台日志）：
-   - 不套 `--w-readable` 窄栏限制，铺满可用宽度，表格仅用横线分隔行（`.tbl`）。
+   - 不套 `--w-readable` 窄栏限制，铺满可用宽度，表格统一表头与 `1px solid var(--a-border)` 行线（`.tbl`），用量页图区保持不变。
 4. **对话区与侧面板**：
-   - 对话消息流与输入框最大宽度 `--w-thread`；侧面板默认宽度 `--w-panel`；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）。
+   - 对话消息流与输入框最大宽度 `--w-thread`（`720px`），消息条目间距 `--space-3`（`12px`）；侧面板默认宽度 `--w-panel`；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）；
+   - 用户消息气泡（`.u-bubble`）使用 `--a-raised` 底色与 `--radius-3` 圆角；
+   - 工具行（`.tool-line`）按语义拆分字体：动作动词、计数、状态等中文/阅读文本用 `--sans`，路径、文件名、命令、参数名值用 `--mono`，通过基线对齐；
+   - diff 卡片（`.tool-diff`）与本轮文件改动卡片（`.turn-changes-card`）采用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边，表头 `.diff-h` 底色 `--a-code-bg`、路径用 `--mono`、`+N` 用 `--a-success`、`−N` 用 `--a-error`，diff 正文用 `--fs-diff`（`12.5px`）；
+   - 权限确认卡（`.ask`）、提问卡（`.qcard`）、提示条（`.conversation-notice-*`）、子代理行（`.subagent-view`）、计划/任务清单与目标详卡片（`.todo-panel`、`.goal-detail`）统一使用 `--radius-2` / `--radius-3` 圆角与 `1px solid var(--a-border)` 描边，中文标签与人读内容一律使用 `--sans`。
    - 回答里的 Markdown 表格（`.conversation-markdown .tbl`，桌面、子代理面板与手机共用）：单元格不继承消息的 `overflow-wrap: anywhere`；源文本不超过 10 个半角宽（全角算 2）的短格整格不换行，其余格子至少 5em 宽，长说明在剩余宽度内换行，格内路径、URL 与行内代码仍可任意断开；装不下时只在 `.tbl-wrap` 内横向滚动（`overscroll-behavior-x: contain`），页面不横向滚动，不加滚动提示或遮罩。宽度足够时列宽分配与普通表格相同。
 
 **手机顶栏与侧边栏**（[ADR-0084](docs/decisions/ADR-0084-phone-side-panel.md)）：顶栏右侧只有「…」会话菜单与侧边栏按钮两个图标；侧边栏是右侧抽屉，宽 88%，从顶栏下沿开始、不盖顶栏，顶栏以下的其余界面压暗；点遮罩、再点侧边栏按钮或安卓返回关闭，子视图返回先回总览。总览自上而下为上下文百分比、累计 tokens 与构成，运行中的子代理（同步与后台同列，不加标记、无行内取消），后台命令（运行中与刚结束的，无行内停止），底部「变更」「文件」「终端」；没有条目的分组不显示。子视图只读：子代理过程用对话同款渲染，变更为按轮 diff，文件为文件索引加只读、自动换行的代码查看器；取消后台子代理与停止后台命令只在详情出现。终端是虚线边框、淡色的 `aria-disabled` 静态行，不动作、不写说明。
@@ -204,7 +209,6 @@
 | `conversation.css` | `.conversation .think-end button` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-accent) 35%, var(--a-border))` | 思考收起按钮用 35% `--a-accent` 混入 `--a-border` 的弱强调描边 |
 | `conversation.css` | `.conversation .think-end button:hover` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 10%, transparent)` | 思考收起按钮悬停用 10% `--a-accent` 半透明底 |
 | `conversation.css` | `.conversation-notice-error` | `function-disallowed-list` | `color-mix(in srgb, var(--a-error) 8%, transparent)` | 对话内错误提示条用 8% `--a-error` 半透明底 |
-| `conversation.css` | `.conversation .ask` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 55%, var(--a-border))` | 权限确认卡用 55% `--a-warning` 混入 `--a-border` 的警告描边 |
 | `conversation.css` | `.qcard .opt[aria-checked="true"]` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 45%, transparent)` | 提问卡选中项用 45% `--a-accent` 半透明描边 |
 | `image-viewer.css` | `.image-viewer`（`background`） | `function-disallowed-list` | `rgb(10 10 14 / 0.88)` | 图片查看器遮罩固定深色，深浅主题共用，不用 `--a-overlay` |
 | `image-viewer.css` | `.image-viewer`（`color`） | `color-no-hex` | `#f2f2f6` | 图片查看器深色遮罩上的浅色图标与计数文字 |
