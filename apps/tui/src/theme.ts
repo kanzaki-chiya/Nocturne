@@ -28,9 +28,6 @@ export interface ThemePalette {
   codeBg: string;
   overlayBg: string;
   inputBg: string;
-  moonHighlight: string;
-  moonMain: string;
-  moonShadow: string;
 }
 
 export const palettes: Record<ThemeId, ThemePalette> = {
@@ -39,7 +36,7 @@ export const palettes: Record<ThemeId, ThemePalette> = {
     text: "#D8DCE3",
     secondary: "#B7C0CC",
     muted: "#88919D",
-    accent: "#A6A4E8",
+    accent: "#A8A5EC",
     accentAlt: "#83C4C8",
     selected: "#F4F7F9",
     onStatus: "#17212A",
@@ -54,9 +51,6 @@ export const palettes: Record<ThemeId, ThemePalette> = {
     codeBg: "#1B2730",
     overlayBg: "#18232C",
     inputBg: "#111A21",
-    moonHighlight: "#FFF0A6",
-    moonMain: "#E9BD5A",
-    moonShadow: "#9C692A",
   },
   light: {
     id: "light",
@@ -78,9 +72,6 @@ export const palettes: Record<ThemeId, ThemePalette> = {
     codeBg: "#E8EEF1",
     overlayBg: "#EDF1F3",
     inputBg: "#DDE5EA",
-    moonHighlight: "#8C5A12",
-    moonMain: "#AB741C",
-    moonShadow: "#6D4B26",
   },
 };
 
@@ -126,16 +117,16 @@ export const LOGO_WIDTH = 47;
 
 /**
  * 欢迎区弯月标记（ADR-0020）：9×8 像素，半块字符两像素合一格，占 4 行 9 列。
- * H 高光、Y 月黄、O 阴影，"." 留空。▀ ▄ █ 在 conhost GBK 下实测均为 1 列（tui.md §9）。
- * 服务商页的大号字标仍用 LOGO_ROWS。
+ * "#" 为新月像素，"." 留空，按坐标从 accent 到 accentAlt 做斜向线性渐变。
+ * ▀ ▄ █ 在 conhost GBK 下实测均为 1 列（tui.md §9）。大号字标仍用 LOGO_ROWS。
  */
 export const MOON_PIXELS: readonly string[] = [
-  "...HYY...",
-  "..HY.....",
-  ".HY......",
-  "HYY......",
-  "HYY......",
-  "HYYY.....",
-  ".OYYYYYO.",
-  "..OOOO...",
+  "..##.....",
+  ".##......",
+  "##.......",
+  "##.......",
+  "###......",
+  "###....#.",
+  ".#######.",
+  "..####...",
 ];

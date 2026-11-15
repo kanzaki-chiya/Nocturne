@@ -17,6 +17,7 @@ import {
   formatModelLabel,
 } from "../src/status-format.js";
 import { completeSlash, helpLines, readlineCompleter } from "../src/slash-catalog.js";
+import { palettes } from "../src/theme.js";
 import { moonRows } from "../src/welcome.js";
 import { createPasteStore, pasteTokenAt, pasteTokenBefore } from "../src/paste.js";
 import { layoutLive } from "../src/lines.js";
@@ -254,15 +255,30 @@ describe("退出文案", () => {
 });
 
 describe("欢迎区弯月", () => {
-  it("4 行 9 列，只用宽度确定的字符；ASCII 模式退回 #", () => {
+  it("4 行 9 列，匹配新月牙形状与 sRGB 渐变；ASCII 模式退回 #", () => {
     const rows = moonRows(false).map((r) => r.map((s) => s.text).join(""));
-    expect(rows).toHaveLength(4);
+    expect(rows).toEqual([" ▄▀▀     ", "▀▀       ", "▀▀▀    ▄ ", " ▀▀▀▀▀▀▀ "]);
     for (const row of rows) {
       expect(stringWidth(row)).toBe(9);
       expect(row).toMatch(/^[ ▀▄█]+$/);
     }
-    for (const row of moonRows(true))
-      expect(row.every((s) => s.text === "#" || s.text === " ")).toBe(true);
+    const asciiRows = moonRows(true).map((r) => r.map((s) => s.text).join(""));
+    expect(asciiRows).toEqual([" ###     ", "##       ", "###    # ", " ####### "]);
+    const darkSegs = moonRows(false, palettes.dark);
+    expect(darkSegs[0]?.[2]).toMatchObject({
+      text: "▀",
+      color: "#A5A7E9",
+      backgroundColor: "#A2AAE6",
+    });
+    expect(darkSegs[2]?.[7]).toMatchObject({
+      text: "▄",
+      color: "#8ABECE",
+    });
+    const lightSegs = moonRows(false, palettes.light);
+    expect(lightSegs[2]?.[7]).toMatchObject({
+      text: "▄",
+      color: "#2F6D83",
+    });
   });
 });
 

@@ -67,23 +67,51 @@ function clip(text: string, width: number): string {
   return truncateLine(boxSafe(text), Math.max(1, width), "...");
 }
 
+function parseHexRgb(hex: string): readonly [number, number, number] {
+  const clean = hex.startsWith("#") ? hex.slice(1) : hex;
+  const n = Number.parseInt(clean, 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function lerpHex(from: string, to: string, t: number): string {
+  const [r1, g1, b1] = parseHexRgb(from);
+  const [r2, g2, b2] = parseHexRgb(to);
+  const ch = (a: number, b: number) =>
+    Math.round(a + (b - a) * t)
+      .toString(16)
+      .padStart(2, "0")
+      .toUpperCase();
+  return `#${ch(r1, r2)}${ch(g1, g2)}${ch(b1, b2)}`;
+}
+
+/** 计算弯月像素 (x, y) 的斜向 sRGB 渐变色（theme.accent -> theme.accentAlt）。 */
+function moonPixelColor(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  theme: ThemePalette,
+): string {
+  const raw = ((x + 0.5) / width) * 0.47 + ((y + 0.5) / height) * 0.53;
+  const t = Math.min(1, Math.max(0, (raw - 0.1) / 0.8));
+  return lerpHex(theme.accent, theme.accentAlt, t);
+}
+
 /**
  * 像素网格 → 终端行：上下两像素合一格。上下同色用 █，
  * 只有一半用 ▀/▄，两色用 ▀（前景=上、背景=下）。ASCII 模式有像素即 #。
  */
 export function moonRows(ascii: boolean, theme: ThemePalette = palettes.dark): LineSegment[][] {
-  const moonColors: Record<string, string> = {
-    H: theme.moonHighlight,
-    Y: theme.moonMain,
-    O: theme.moonShadow,
-  };
+  const height = MOON_PIXELS.length;
   const width = Math.max(...MOON_PIXELS.map((r) => r.length));
+  const colorAt = (x: number, y: number): string | undefined =>
+    MOON_PIXELS[y]?.[x] === "#" ? moonPixelColor(x, y, width, height, theme) : undefined;
   const out: LineSegment[][] = [];
-  for (let y = 0; y < MOON_PIXELS.length; y += 2) {
+  for (let y = 0; y < height; y += 2) {
     const row: LineSegment[] = [];
     for (let x = 0; x < width; x++) {
-      const top = moonColors[MOON_PIXELS[y]?.[x] ?? "."];
-      const bot = moonColors[MOON_PIXELS[y + 1]?.[x] ?? "."];
+      const top = colorAt(x, y);
+      const bot = colorAt(x, y + 1);
       if (top === undefined && bot === undefined) row.push({ text: " " });
       else if (ascii) row.push({ text: "#", color: top ?? bot });
       else if (top !== undefined && bot === undefined) row.push({ text: "▀", color: top });
