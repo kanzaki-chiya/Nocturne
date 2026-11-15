@@ -14,7 +14,8 @@
   --ink: #eceef3;
   --body: #b4b9c4;
   --caption: #868c99;
-  --moon: #a6a4e8;
+  --moon: #a8a5ec;
+  --moon-alt: #83c4c8;
   --on-moon: #15141f;
   --serif: "Nocturne Serif", "Songti SC", SimSun, serif;
   --mono: "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
@@ -31,6 +32,7 @@
     --body: #3a404c;
     --caption: #5d6472;
     --moon: #4b3f94;
+    --moon-alt: #24727a;
     --on-moon: #ffffff;
   }
 }
@@ -108,7 +110,6 @@ pre {
 .wordmark svg {
   width: 16px;
   height: 16px;
-  fill: var(--moon);
 }
 .site-nav {
   display: flex;

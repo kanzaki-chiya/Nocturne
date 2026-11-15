@@ -42,8 +42,38 @@
     <header class="masthead">
       <div class="wrap">
         <a class="wordmark" href="./" aria-label="Nocturne 首页">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M10.5 1.5a6.5 6.5 0 1 0 4 11.6A7 7 0 0 1 10.5 1.5z" />
+          <svg viewBox="143 143 738 738" aria-hidden="true">
+            <defs>
+              <linearGradient
+                id="wordmark-moon-g"
+                gradientUnits="userSpaceOnUse"
+                x1="276"
+                y1="232"
+                x2="786"
+                y2="802"
+              >
+                <stop offset=".1" stop-color="var(--moon)" />
+                <stop offset=".9" stop-color="var(--moon-alt)" />
+              </linearGradient>
+              <clipPath id="wordmark-moon-clip">
+                <path d="M499.1 212.3A300 300 0 1 0 792.1 619.5A252 252 0 0 1 499.1 212.3Z" />
+              </clipPath>
+            </defs>
+            <g clip-path="url(#wordmark-moon-clip)">
+              <rect x="0" y="210" width="1024" height="40.1" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="264.2" width="1024" height="37.9" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="317.4" width="1024" height="35.8" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="369.6" width="1024" height="33.6" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="420.8" width="1024" height="31.4" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="471.1" width="1024" height="29.3" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="520.4" width="1024" height="27.1" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="568.8" width="1024" height="24.9" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="616.2" width="1024" height="22.7" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="662.6" width="1024" height="20.6" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="708" width="1024" height="18.4" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="752.5" width="1024" height="16.2" fill="url(#wordmark-moon-g)" />
+              <rect x="0" y="796" width="1024" height="54" fill="url(#wordmark-moon-g)" />
+            </g>
           </svg>
           Nocturne
         </a>
