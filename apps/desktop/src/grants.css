@@ -114,16 +114,10 @@
 .grant-revoke:hover {
   color: var(--a-error);
 }
-.grant-note,
 .grant-empty {
   font-size: var(--fs-2);
   color: var(--a-muted);
   line-height: 1.9;
-}
-.grant-note {
-  margin: 22px 0;
-}
-.grant-empty {
   padding: 36px 0;
 }
 .grant-description {

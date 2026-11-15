@@ -37,31 +37,14 @@
   color: var(--a-error);
 }
 
-.remote-heading,
 .remote-device {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
 }
-.remote-heading h4 {
-  margin-bottom: 4px;
-}
-.remote-state {
-  font-size: var(--fs-1);
-  color: var(--a-secondary);
-}
-.remote-state.online {
-  color: var(--a-success);
-}
-.remote-state.revoked,
-.remote-state.replaced,
 .remote-warning {
   color: var(--a-warning);
-}
-
-.remote-devices {
-  margin: 30px 0;
 }
 .remote-device {
   padding: 14px 0;

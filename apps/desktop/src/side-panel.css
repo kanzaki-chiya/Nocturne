@@ -1014,11 +1014,6 @@
   padding: 5px 8px;
   border-bottom: 1px solid var(--a-border);
 }
-.sp-browser-bar .sp-icon-btn:disabled {
-  background: none;
-  color: var(--a-faint);
-  opacity: 0.6;
-}
 .sp-browser-address {
   flex: 1;
   min-width: 0;

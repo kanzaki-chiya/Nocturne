@@ -274,9 +274,6 @@ button {
   line-height: var(--lh-tight);
   flex: none;
 }
-.nav .item .meta.pend {
-  color: var(--a-warning);
-}
 /* 会话行留痕标签（ADR-0056）：待确认 / 出错 / 已完成；底色用同一主题变量的半透明 */
 .nav .item .tag {
   margin-left: auto;

@@ -255,50 +255,9 @@
 .usage-table-scroll {
   overflow-x: auto;
 }
-.usage-table {
-  width: 100%;
-  border-collapse: collapse;
-  border-top: 1px solid var(--a-border);
-  font-size: var(--fs-1);
-}
-.usage-table thead th {
-  color: var(--a-muted);
-  font-weight: var(--fw-medium);
-  white-space: nowrap;
-}
-.usage-table th,
-.usage-table td {
-  padding: 11px 12px;
-  border-bottom: 1px solid var(--a-border);
-  text-align: right;
-}
-.usage-table th:first-child {
-  padding-left: 0;
-  text-align: left;
-  min-width: 160px;
-  max-width: 260px;
-}
-.usage-table tbody th {
-  font-weight: 400;
-  overflow-wrap: anywhere;
-}
-.usage-table tbody th > span,
-.usage-table small {
-  display: block;
-}
-.usage-table small {
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-}
-.usage-table td {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 .usage-table-note,
 .usage-notice,
-.usage-footer,
-.usage-empty {
+.usage-footer {
   color: var(--a-muted);
   font-size: var(--fs-1);
 }
@@ -552,12 +511,6 @@
     transition: none;
   }
 }
-.usage-table td.dim {
-  color: var(--a-faint);
-}
-.usage-spark-cell {
-  width: 96px;
-}
 .usage-spark {
   display: block;
   margin-left: auto;
@@ -570,13 +523,6 @@
 }
 .usage-spark circle {
   fill: var(--a-accent);
-}
-.usage-table .usage-model-detail > td {
-  padding: 0;
-  background: var(--a-raised);
-  font-family: var(--sans);
-  white-space: normal;
-  text-align: left;
 }
 .usage-detail {
   /* 表格比可视区宽时横向滚动；展开区按可视宽度贴左，不随整张表变宽 */

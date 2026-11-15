@@ -3,25 +3,17 @@
 :root {
   --ovpop-w: 300px;
   --w-dialog-wide: 640px;
-  --w-sheet-col: 360px;
-  --w-indent: 64px;
   --out-max-h: 200px;
-  --w-act: 72px;
   --cpop-max-h: 320px;
-  --site-blk-h: 96px;
-  --w-ovpop: 320px;
   --w-ctxpop: 360px;
-  --qr-cell: 6px;
   --ring: 18px;
   --page-px: 32px;
   --page-py: 24px;
   --h-titlebar: 40px;
   --h-page-head: 56px;
-  --w-rail: 208px;
   --w-sidebar: 248px;
   --w-settings-nav: 224px;
   --w-list: 280px;
-  --w-panel: 460px;
   --w-thread: 720px;
   --w-readable: 680px;
   --w-form: 560px;
@@ -30,13 +22,6 @@
   --w-menu-wide: 300px;
   --w-field-sm: 120px;
   --w-field-md: 240px;
-  --phone-w: 390px;
-  --phone-h: 844px;
-  --spark-w: 64px;
-  --spark-h: 20px;
-  --daily-h: 120px;
-  --w-usage-metrics: 280px;
-  --ph-bar-h: 52px;
   --a-bg: #0b0b0d;
   --a-side: #0f0f12;
   --a-panel: #141417;
@@ -78,7 +63,6 @@
   --cm-search: color-mix(in srgb, var(--a-warning) 28%, transparent);
   --cm-search-current: color-mix(in srgb, var(--a-warning) 55%, transparent);
   --a-qr-bg: #ffffff;
-  --a-qr-fg: #111111;
   --a-overlay: rgba(4, 4, 10, 0.56);
   --a-accent-hover: #bcb9f3;
   --a-on-accent: #17152b;
@@ -89,37 +73,17 @@
   --a-border-strong: #2c2c33;
   --a-success-bg: #17261e;
   --a-warning-bg: #2a2316;
-  --a-warning-border: #5a4824;
   --a-error-bg: #2c1a1e;
   --a-error-border: #5e3038;
   --a-switch-off: #2c2c33;
   --a-switch-knob: #9097a4;
   --a-scroll: rgba(180, 188, 200, 0.2);
   --a-code-bg: #101013;
-  --a-syn-kw: #c3a6f0;
-  --a-syn-str: #8fcca0;
-  --a-syn-fn: #8fb6ea;
-  --a-syn-num: #e3a978;
-  --a-syn-com: #6b7280;
-  --a-heat-0: #1a1a1f;
-  --a-heat-1: #2c2a48;
-  --a-heat-2: #46407a;
-  --a-heat-3: #6f68b8;
-  --a-heat-4: #a8a5ec;
-  --a-pv-light-side: #f1f1f5;
-  --a-pv-light-bg: #f9f9fb;
-  --a-pv-light-line: #dcdde5;
-  --a-pv-light-accent: #5d50b0;
-  --a-pv-dark-side: #0e0f13;
-  --a-pv-dark-bg: #131419;
-  --a-pv-dark-line: #2c2e3a;
-  --a-pv-dark-accent: #a8a5ec;
   --a-win-close: #c42b1c;
   --a-win-close-fg: #ffffff;
   --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.42);
   --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55);
   --shadow-edge: -12px 0 32px rgba(0, 0, 0, 0.32);
-  --shadow-device: 0 30px 80px rgba(0, 0, 0, 0.5);
   --shadow-focus: 0 0 0 3px var(--a-focus-ring);
   --sans:
     "Inter Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
@@ -153,7 +117,6 @@
   --radius-composer: 10px;
   --radius-send: 7px;
   --radius-pill: 9999px;
-  --radius-device: 44px;
   --radius-0-5: 2px;
   --ctl-h-sm: 24px;
   --ctl-h-md: 28px;
@@ -170,8 +133,6 @@
   --switch-knob: 12px;
   --check: 14px;
   --dot: 6px;
-  --meter-h: 4px;
-  --heat-cell: 10px;
   --disabled-opacity: 0.5;
   --dur: 0.12s;
   --dur-menu: 100ms;
@@ -185,14 +146,7 @@
   --bar-w: 3px;
   --icon-lg: 18px;
   --wbtn-w: 46px;
-  --ln-w: 36px;
-  --thumb-w: 44px;
-  --thumb-h: 32px;
   --composer-min-h: 44px;
-  --bar-label-w: 96px;
-  --bar-value-w: 48px;
-  --pv-h: 72px;
-  --heat-gap: 3px;
   color-scheme: dark;
 }
 
@@ -225,7 +179,6 @@
     --a-cat4: #a54d8f;
     --a-cat5: #4f6585;
     --a-qr-bg: #ffffff;
-    --a-qr-fg: #111111;
     --a-overlay: rgba(24, 22, 40, 0.28);
     --a-accent-hover: #4e42a0;
     --a-on-accent: #ffffff;
@@ -236,27 +189,15 @@
     --a-border-strong: #dcdce0;
     --a-success-bg: #e8f4ec;
     --a-warning-bg: #fbf3e2;
-    --a-warning-border: #e9d1a0;
     --a-error-bg: #fcecee;
     --a-error-border: #eebcc2;
     --a-switch-off: #dcdce0;
     --a-switch-knob: #ffffff;
     --a-scroll: rgba(70, 76, 88, 0.24);
     --a-code-bg: #fafafa;
-    --a-syn-kw: #7a3fb0;
-    --a-syn-str: #2a7146;
-    --a-syn-fn: #2a5fa8;
-    --a-syn-num: #a5551b;
-    --a-syn-com: #8a909c;
-    --a-heat-0: #efeff1;
-    --a-heat-1: #d9d4f3;
-    --a-heat-2: #b3a9e6;
-    --a-heat-3: #8678d0;
-    --a-heat-4: #5d50b0;
     --shadow-popover: 0 8px 24px rgba(28, 24, 52, 0.12), 0 1px 2px rgba(28, 24, 52, 0.06);
     --shadow-dialog: 0 20px 48px rgba(28, 24, 52, 0.18);
     --shadow-edge: -12px 0 32px rgba(28, 24, 52, 0.08);
-    --shadow-device: 0 24px 60px rgba(28, 24, 52, 0.16);
     color-scheme: light;
   }
 }
@@ -289,7 +230,6 @@
   --a-cat4: #a54d8f;
   --a-cat5: #4f6585;
   --a-qr-bg: #ffffff;
-  --a-qr-fg: #111111;
   --a-overlay: rgba(24, 22, 40, 0.28);
   --a-accent-hover: #4e42a0;
   --a-on-accent: #ffffff;
@@ -300,27 +240,15 @@
   --a-border-strong: #dcdce0;
   --a-success-bg: #e8f4ec;
   --a-warning-bg: #fbf3e2;
-  --a-warning-border: #e9d1a0;
   --a-error-bg: #fcecee;
   --a-error-border: #eebcc2;
   --a-switch-off: #dcdce0;
   --a-switch-knob: #ffffff;
   --a-scroll: rgba(70, 76, 88, 0.24);
   --a-code-bg: #fafafa;
-  --a-syn-kw: #7a3fb0;
-  --a-syn-str: #2a7146;
-  --a-syn-fn: #2a5fa8;
-  --a-syn-num: #a5551b;
-  --a-syn-com: #8a909c;
-  --a-heat-0: #efeff1;
-  --a-heat-1: #d9d4f3;
-  --a-heat-2: #b3a9e6;
-  --a-heat-3: #8678d0;
-  --a-heat-4: #5d50b0;
   --shadow-popover: 0 8px 24px rgba(28, 24, 52, 0.12), 0 1px 2px rgba(28, 24, 52, 0.06);
   --shadow-dialog: 0 20px 48px rgba(28, 24, 52, 0.18);
   --shadow-edge: -12px 0 32px rgba(28, 24, 52, 0.08);
-  --shadow-device: 0 24px 60px rgba(28, 24, 52, 0.16);
   color-scheme: light;
 }
 
@@ -352,7 +280,6 @@
   --a-cat4: #d99ac9;
   --a-cat5: #8fa6c9;
   --a-qr-bg: #ffffff;
-  --a-qr-fg: #111111;
   --a-overlay: rgba(4, 4, 10, 0.56);
   --a-accent-hover: #bcb9f3;
   --a-on-accent: #17152b;
@@ -363,26 +290,14 @@
   --a-border-strong: #2c2c33;
   --a-success-bg: #17261e;
   --a-warning-bg: #2a2316;
-  --a-warning-border: #5a4824;
   --a-error-bg: #2c1a1e;
   --a-error-border: #5e3038;
   --a-switch-off: #2c2c33;
   --a-switch-knob: #9097a4;
   --a-scroll: rgba(180, 188, 200, 0.2);
   --a-code-bg: #101013;
-  --a-syn-kw: #c3a6f0;
-  --a-syn-str: #8fcca0;
-  --a-syn-fn: #8fb6ea;
-  --a-syn-num: #e3a978;
-  --a-syn-com: #6b7280;
-  --a-heat-0: #1a1a1f;
-  --a-heat-1: #2c2a48;
-  --a-heat-2: #46407a;
-  --a-heat-3: #6f68b8;
-  --a-heat-4: #a8a5ec;
   --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.42);
   --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55);
   --shadow-edge: -12px 0 32px rgba(0, 0, 0, 0.32);
-  --shadow-device: 0 30px 80px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }

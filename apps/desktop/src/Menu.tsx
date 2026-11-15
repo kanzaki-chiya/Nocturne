@@ -628,7 +628,7 @@ export function MenuItem({
     >
       {checked !== undefined && (
         <span className="menu-ck" aria-hidden="true">
-          {checked === true ? "✓" : ""}
+          {checked ? "✓" : ""}
         </span>
       )}
       {icon}

@@ -1841,7 +1841,8 @@ function toolArgumentValue(
       }
       return plain(
         entry.subjects[0]?.target ?? "",
-        entry.subjects[0]?.kind === "path" ||
+        entry.subjects[0]?.kind === "read" ||
+          entry.subjects[0]?.kind === "edit" ||
           entry.subjects[0]?.kind === "shell" ||
           entry.subjects[0]?.kind === "network",
       );
