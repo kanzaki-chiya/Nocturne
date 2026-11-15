@@ -103,3 +103,23 @@ ADR-0063 §2：修剪后估算仍在 `P` 以上，就在同一窗口接着摘要
 
 - 2026-11-01：修剪占位追加固定补救说明，要求需要原文时重新运行或重新读取、不要凭记忆复述或补写；原因是会话 `202610312118-a50132c6` 在 seq 353 修剪检查输出后，模型于 seq 383 凭占位补写了不符仓库的命令输出，见 [context.md §6.5](../architecture/context.md#65-触发)。
 
+## 修订（2026-11-15）：模型级禁用 L1 修剪（`capabilities.historyPrune`）
+
+### 背景
+
+`magpie/agy-cli/*` 模型背后对应一个持续运行的 agy 会话。网关插件在每次请求时比对历史前缀：只要前面已发过的内容发生变化，就关闭旧会话、开新会话并把压平后的历史重放进去，且重放上限仅 112 KiB（`maxInitialPromptBytes`）。Nocturne 的 L1 修剪每次把旧工具结果替换为占位并截短长参数，都会改变历史前缀并触发重开会话，导致 112 KiB 之外的早期上下文和任务清单丢失，模型反复重读文件与重建清单。
+
+### 决定
+
+1. **模型能力声明 `capabilities.historyPrune?: boolean`（缺省 `true`）**：
+   - 在配置 `ModelOverrideShape.capabilities` 与运行时 `ModelCapabilities` 中增加 `historyPrune`。用户可在 `config.json` 的模型覆盖里显式配置（支持布尔值并沿用现有分层合并与 schema 校验；不进入设置页与 `ModelSettingsView` 模型编辑页）。
+   - 该能力从配置一路传递到 `ModelInfo.capabilities`，由 Context Builder 读取，Agent Loop 与 Context 不出现任何服务商或模型名分支。
+2. **Magpie 接入层隐式默认**：
+   - 在 `packages/core/src/config/magpie.ts` 的 `toModel` 中，`id` 以 `agy-cli/` 开头的模型默认声明 `historyPrune: false`，其他前缀不受影响。
+   - 若需覆盖 `magpie` 模型的该字段，按 [ADR-0062](ADR-0062-magpie-agent-plugin.md) §2 的分层顺序（`user < magpie < project`），应在高于 `magpie` 层的配置（如可信项目 `.nocturne/config.json`）中显式改回 `true`。
+3. **Builder 压缩计划与摘要阈值的关系**：
+   - 当 `model.capabilities.historyPrune === false` 时，Context Builder 不给出 `prune` 计划，修剪阈值 `P` 与修剪绝对上限 `L` 对该模型不起作用；不改变摘要阈值 `S`（`compaction.threshold`）的计算，估算超过 `S` 时直接给出 `summary` 计划。
+   - `mustCompact`（超出预算或收到 `context_overflow`）时跳过修剪，直接尝试 `summary`；摘要失败按既有规则以 `compaction_failed` 结束。
+   - 会话历史中已持久化的 `context.compacted(kind: "prune")` 事件照常投影、不回溯取消；手动 `/compact` 路径不受影响；其他模型行为完全不变。
+   - 摘要本身同样会改变历史前缀并触发一次会话重开，这是达到摘要阈值 `S` 时可接受的代价。
+

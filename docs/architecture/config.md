@@ -115,7 +115,7 @@ interface ConfigFile {
 | `hooks.*` | 按事件点追加：用户级条目在前、项目级在后，执行顺序即此顺序（hooks.md 第 2 节） |
 | `externalAgents` | 程序层与用户手写层按不区分大小写的名称合并，手写层整条覆盖；同层重复警告并保留首条，项目段无条件忽略 |
 
-**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。`capabilities.editTool`（`"edit" | "apply_patch"`，ADR-0035 §5）同样经该链生效：手写配置与 `userModels` 都可声明；都未声明时由内置默认表按模型 id 末段匹配（含 `gpt`/`codex`，不区分大小写 → `apply_patch`，否则 `edit`）。
+**`userModels` 合成层**（ADR-0024 第 2 节）：providers.json 条目里的 `userModels`（模型编辑页 / `/provider model` 写入的逐模型用户编辑）不是合并结果的一部分，而是加载时被包成一个独立层——`providers: [{ id, models: userModels }]`——插在向导层（setup）与 `config.json`（user）之间参与 `models` 逐字段合并。因此用户编辑优先于上游声明、低于任何手写层；只由该层引入、其他层都不声明的模型条目在合并后被丢弃。推理为 `none` 时没有可用思考档位；冲突处理见 [providers.md](providers.md) 第 2 节。`capabilities.editTool`（`"edit" | "apply_patch"`，ADR-0035 §5）同样经该链生效：手写配置与 `userModels` 都可声明；都未声明时由内置默认表按模型 id 末段匹配（含 `gpt`/`codex`，不区分大小写 → `apply_patch`，否则 `edit`）。`capabilities.historyPrune`（`boolean`，缺省 `true`，[ADR-0066](../decisions/ADR-0066-prune-limit.md) 修订）仅通过模型条目与 `config.json` 分层合并（不进设置页与 `userModels` / `ModelSettingsView`），用于控制是否允许 L1 上下文修剪；在 `magpie` 接入层映射中，`id` 以 `agy-cli/` 开头的模型默认设为 `false`。
 
 models.dev 数据在启动时从缓存或内置快照读取，启动不联网；添加服务商或刷新模型列表时才 GET 更新，10 秒超时，失败沿用本地数据并提示。`config.json` 的 `modelsDev: false` 关闭联网并只使用内置快照。缓存比快照新时优先使用缓存。匹配规则与字段映射见 [providers.md](providers.md) 第 2 节。
 

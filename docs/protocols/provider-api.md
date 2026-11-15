@@ -75,6 +75,9 @@ interface ModelCapabilities {
       "apply_patch" → 工具表只含 apply_patch（不含 edit/write）。
       子会话按其自身模型的该值筛选 */
   editTool: EditToolKind   // "edit" | "apply_patch"，定义在 protocol
+  /** 是否允许 L1 上下文修剪（ADR-0066 修订）；缺省（undefined 或 true）允许，
+      false 时跳过 L1 修剪并在超过摘要阈值时直接摘要 */
+  historyPrune?: boolean
 }
 ```
 

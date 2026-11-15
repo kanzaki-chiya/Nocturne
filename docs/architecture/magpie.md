@@ -77,6 +77,7 @@ Magpie 是本机网关，持有上游订阅账号与 API 服务商。Magpie 的 
 ```
 
 - 协议按 ADR-0026 推导：`endpoints` 含 `/chat/completions` → Chat，含 `/messages` → Messages，含 `/responses` → Responses；没有声明（路由组、经网关翻译的订阅模型）回落到条目类型 Chat。Core 与 Agent Loop 不出现服务商分支。
+- `id` 以 `agy-cli/` 开头的模型在映射时默认声明 `capabilities.historyPrune: false`（见 [ADR-0066](../decisions/ADR-0066-prune-limit.md) 修订）。
 - 用户级条目：项目配置不能改它的 `baseURL`、`headers`、`auth`（ADR-0042 §2）。
 - 模型字段来源标为「上游」，不可在 Nocturne 内编辑；`/provider` 里该条目只读（`managed: false`、`origin: "magpie"`）。
 - 价格来自 Magpie 里用户设定的有效价格；订阅账号的真实额度与计费以 Magpie 为准，Nocturne 的费用只是估算（[usage.md](usage.md)）。
