@@ -33,7 +33,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `listSessions` | `{ cwd?, includeSubagents?, includeArchived? }`（归档默认排除，本机可显式包含并返回 `archivedAt`；非本机强制排除，ADR-0080） → `(SessionSummary & { openHere?: boolean })[]`；`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
+| `listSessions` | `{ cwd?, includeSubagents?, includeArchived? }`（归档默认排除，本机可显式包含并返回 `archivedAt`；非本机强制排除，ADR-0080） → `(SessionSummary & { openHere?: boolean })[]`；`SessionSummary.lastUserMs` 为最后一条由用户发出的消息时间戳（旁路缺失或无效、或旧后台均缺省，客户端排序退回 `mtimeMs`）。`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
 | `searchSessions` | `{ query: string, searchId?: string, includeArchived?: boolean }`（默认不搜归档，本机可显式包含） → 完整 `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串。`searchId` 由客户端为每次查询生成，提供时经 `runtime.sessionSearchProgress` 交付有序增量，省略时不发进度通知。同一连接发起新查询或断线时立即中止上一次扫描、丢弃待发批次（被取代的旧查询返回 `[]`）；最终响应始终为完整结果 |
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；[ADR-0085](../decisions/ADR-0085-new-session-branch-picker.md) 新增可选 `branch: { name: string, create?: boolean }`（仅本机连接允许，远程连接携带时报 `remote_not_allowed`），在不切换项目目录分支的前提下将新会话定位或建工作树到 `<repo>-wt/<branch>` 并写 `session.config_changed.worktree`；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
