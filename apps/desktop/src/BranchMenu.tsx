@@ -60,6 +60,7 @@ export interface BranchMenuOptions {
   /** 搜索词不匹配已有分支时，是否给出「新建分支」项 */
   canCreate?: (name: string) => boolean;
   align?: "left" | "right";
+  placement?: "auto" | "above" | "below";
   caret?: boolean;
   ariaLabel?: string;
   error?: string | null;
@@ -84,6 +85,7 @@ export function useBranchMenu({
   occupiedSelectable = false,
   canCreate,
   align = "right",
+  placement = "auto",
   caret = false,
   ariaLabel,
   error,
@@ -174,6 +176,7 @@ export function useBranchMenu({
     <Menu
       anchor={trigger.current}
       align={align}
+      placement={placement}
       className="branch-menu"
       onClose={onClose}
       onKeyDown={keyboard}

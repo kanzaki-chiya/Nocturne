@@ -728,11 +728,14 @@ describe("Composer 控件与附件", () => {
 
   it("session 变体：卡片上层文字区、下层工具行含预设/模型/档位 chip，无 tray，提示与附件仍工作", async () => {
     const getVisionHint = vi.fn(async () => "当前模型不支持图片，将由 test/desc 描述后发送");
-    const { container } = render(<Composer {...props({ variant: "session", getVisionHint })} />);
+    const { container, rerender } = render(
+      <Composer {...props({ variant: "session", getVisionHint })} />,
+    );
     const preset = screen.getByRole("button", { name: "切换权限预设" });
     const model = screen.getByRole("button", { name: "切换模型" });
     const effort = screen.getByRole("button", { name: "切换思考档位" });
     expect(screen.queryByRole("button", { name: "切换目录" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "选择分支" })).toBeNull();
     const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
     const card = container.querySelector(".composer.session .cbox");
     const text = card?.querySelector(".txt");
@@ -759,6 +762,49 @@ describe("Composer 控件与附件", () => {
       send,
     ]);
     expect(container.querySelector(".session-row")).toBeNull();
+    expect(container.querySelector(".tray")).toBeNull();
+
+    // 切到 draft（新会话页）时，.tray 出现在 .cbox 下方并容纳工作区与分支 chip；切回 session 则无 .tray
+    rerender(
+      <Composer
+        {...props({
+          variant: "draft",
+          branch: {
+            current: "main",
+            branches: [{ name: "main" }],
+            canCreate: true,
+            onSelect: vi.fn(),
+          },
+        })}
+      />,
+    );
+    const draftCw = container.querySelector(".composer:not(.session) .cw");
+    const draftCard = draftCw?.querySelector(".cbox");
+    const draftTray = draftCw?.querySelector(".tray");
+    const draftToolbar = draftCard?.querySelector(".tb");
+    const draftDir = screen.getByRole("button", { name: "切换目录" });
+    const draftBranch = screen.getByRole("button", { name: "选择分支" });
+    expect(draftTray).not.toBeNull();
+    expect(draftTray?.parentElement).toBe(draftCw);
+    expect(draftTray?.previousElementSibling).toBe(draftCard);
+    expect(Array.from(draftTray?.children ?? [])).toEqual([draftDir, draftBranch]);
+    expect(draftToolbar?.contains(draftDir)).toBe(false);
+    expect(draftToolbar?.contains(draftBranch)).toBe(false);
+
+    rerender(
+      <Composer
+        {...props({
+          variant: "session",
+          branch: {
+            current: "main",
+            branches: [{ name: "main" }],
+            canCreate: true,
+            onSelect: vi.fn(),
+          },
+          getVisionHint,
+        })}
+      />,
+    );
     expect(container.querySelector(".tray")).toBeNull();
     // 附件缩略图在卡内，vision 提示显示在卡片上方气泡（role=status）
     fireEvent.paste(field, {
@@ -909,10 +955,10 @@ describe("Composer @ 引用", () => {
   });
 });
 
-describe("Composer 新会话页分支选择（ADR-0085）", () => {
-  it("普通对话或非仓库显示 - 且禁用、无下拉箭头；项目默认显示当前分支，所有选项（含其他工作树占用）均可选，搜索不匹配时出现新建分支", async () => {
+describe("Composer 新会话页托盘与分支选择（ADR-0085）", () => {
+  it("普通对话或非仓库时托盘仅含工作区而不显示分支 chip；git 仓库托盘内显示工作区与分支，所有选项（含其他工作树占用）均可选，搜索不匹配时出现新建分支", async () => {
     const onSelect = vi.fn();
-    const { rerender } = render(
+    const { container, rerender } = render(
       <Composer
         {...props({
           branch: {
@@ -924,10 +970,14 @@ describe("Composer 新会话页分支选择（ADR-0085）", () => {
         })}
       />,
     );
-    const plainBtn = screen.getByRole("button", { name: "选择分支" });
-    expect((plainBtn as HTMLButtonElement).disabled).toBe(true);
-    expect(plainBtn.textContent).toBe("-");
-    expect(plainBtn.querySelector(".caret")).toBeNull();
+    const plainCw = container.querySelector(".composer:not(.session) .cw");
+    const plainTray = plainCw?.querySelector(".tray");
+    expect(plainTray).not.toBeNull();
+    expect(plainTray?.parentElement).toBe(plainCw);
+    expect(screen.queryByRole("button", { name: "选择分支" })).toBeNull();
+    expect(Array.from(plainTray?.children ?? [])).toEqual([
+      screen.getByRole("button", { name: "切换目录" }),
+    ]);
 
     rerender(
       <Composer

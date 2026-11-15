@@ -362,22 +362,56 @@
   color: var(--a-text);
 }
 
-.composer .chip-model,
-.composer .chip-dir {
+/* ── 新会话托盘：贴在输入框下方，左/右各缩进 12px ── */
+.composer .tray {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  margin: -1px var(--space-3) 0;
+  padding: var(--space-1) 6px;
+  background: var(--a-raised);
+  border: 1px solid var(--a-border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-composer) var(--radius-composer);
+  min-width: 0;
+}
+
+.composer .tray .chip:hover:not(:disabled),
+.composer .tray .chip.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+
+.composer .tray .chip-dir,
+.composer .tray .chip-branch {
   flex: 0 1 auto;
+  min-width: 0;
+}
+
+.composer .tray .chip b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer .tray .chip-dir b {
   max-width: 320px;
 }
 
+.composer .tray .chip-branch b {
+  font-family: var(--mono);
+  max-width: 240px;
+}
+
 .composer .chip-model {
+  flex: 0 1 auto;
   min-width: 68px;
+  max-width: 320px;
 }
 
-.composer .chip-dir {
-  min-width: 76px;
-}
-
-.composer .chip-model .t,
-.composer .chip-dir b {
+.composer .chip-model .t {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

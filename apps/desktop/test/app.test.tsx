@@ -2426,7 +2426,7 @@ it("设置 › 浏览器「重启应用」与关闭窗口共用待发输入提�
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("新会话页分支选择：普通对话显示 - 且禁用，项目默认显示当前分支，同目录 busy 时仍可选，发送首条消息传 branch，失败时保留草稿并显示错误（ADR-0085）", async () => {
+it("新会话页托盘与分支选择：普通对话不显示分支 chip，项目托盘显示当前分支，同目录 busy 时仍可选，发送首条消息传 branch，失败时保留草稿并显示错误（ADR-0085）", async () => {
   let failCreate = false;
   const host = replayHost([], undefined, undefined, (req) => {
     if (req.method === "runtime.createSession" && failCreate) {
@@ -2435,17 +2435,18 @@ it("新会话页分支选择：普通对话显示 - 且禁用，项目默认显�
     return undefined;
   });
 
-  render(<App host={host} />);
-  // 初始是普通对话草稿：分支按钮显示 - 且禁用
-  const plainBranchBtn = await screen.findByRole("button", { name: "选择分支" });
-  expect((plainBranchBtn as HTMLButtonElement).disabled).toBe(true);
-  expect(plainBranchBtn.textContent).toBe("-");
+  const { container } = render(<App host={host} />);
+  // 初始是普通对话草稿：托盘只有工作区，没有分支按钮
+  const dirBtn = await screen.findByRole("button", { name: "切换目录" });
+  expect(container.querySelector(".tray")?.contains(dirBtn)).toBe(true);
+  expect(screen.queryByRole("button", { name: "选择分支" })).toBeNull();
 
   // 切换到项目 qa-alpha 草稿
-  fireEvent.click(screen.getByRole("button", { name: "切换目录" }));
+  fireEvent.click(dirBtn);
   fireEvent.click(await screen.findByRole("menuitemradio", { name: /qa-alpha/ }));
 
   const projBranchBtn = await screen.findByRole("button", { name: "选择分支" });
+  expect(container.querySelector(".tray")?.contains(projBranchBtn)).toBe(true);
   await waitFor(() => expect(projBranchBtn.textContent).toBe("main"));
   expect((projBranchBtn as HTMLButtonElement).disabled).toBe(false);
 

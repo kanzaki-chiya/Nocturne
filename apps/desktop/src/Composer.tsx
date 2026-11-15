@@ -411,12 +411,13 @@ export function Composer({
       closeMenu();
       return true;
     },
-    triggerClassName: `chip${openMenu === "branch" ? " on" : ""}`,
+    triggerClassName: `chip chip-branch${openMenu === "branch" ? " on" : ""}`,
     hasMenu: branchIsGit,
     disabled: !branchIsGit || disabled,
     occupiedSelectable: true,
     canCreate: (name) => branch?.canCreate === true && isValidGitBranchName(name),
     align: "left",
+    placement: "below",
     caret: branchIsGit,
     ariaLabel: "选择分支",
   });
@@ -1385,31 +1386,6 @@ export function Composer({
           <div className="tb">
             {plusButton}
             {paperclipButton}
-            {!isSession && workspace !== undefined && controls !== undefined && (
-              <button
-                type="button"
-                ref={(node) => {
-                  triggers.current.dir = node;
-                }}
-                className={`chip chip-dir${openMenu === "dir" ? " on" : ""}${workspace.readOnly ? " ro" : ""}`}
-                disabled={workspace.readOnly || disabled}
-                title={workspace.title}
-                aria-label="切换目录"
-                aria-haspopup={workspace.readOnly ? undefined : "menu"}
-                aria-expanded={!workspace.readOnly && openMenu === "dir"}
-                onClick={() => {
-                  if (!workspace.readOnly) requestDirOpen(!dirOpen);
-                }}
-              >
-                {workspace.kind === "plain" ? (
-                  <Icon name="chat_1" size={ICON_SM} />
-                ) : (
-                  <Icon name="folder" size={ICON_SM} />
-                )}
-                <b>{workspace.label}</b>
-                {!workspace.readOnly && <Icon name="down_small" size={ICON_SM} className="caret" />}
-              </button>
-            )}
             {controls !== undefined &&
               chip(
                 "preset",
@@ -1420,7 +1396,6 @@ export function Composer({
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
-            {!isSession && branchMenu?.trigger}
             {selectedWorkMode !== undefined && (
               <>
                 <span className="tb-sep" aria-hidden="true" />
@@ -1470,6 +1445,36 @@ export function Composer({
             {sendButton}
           </div>
         </div>
+        {!isSession && ((workspace !== undefined && controls !== undefined) || branchIsGit) && (
+          <div className="tray">
+            {workspace !== undefined && controls !== undefined && (
+              <button
+                type="button"
+                ref={(node) => {
+                  triggers.current.dir = node;
+                }}
+                className={`chip chip-dir${openMenu === "dir" ? " on" : ""}${workspace.readOnly ? " ro" : ""}`}
+                disabled={workspace.readOnly || disabled}
+                title={workspace.title}
+                aria-label="切换目录"
+                aria-haspopup={workspace.readOnly ? undefined : "menu"}
+                aria-expanded={!workspace.readOnly && openMenu === "dir"}
+                onClick={() => {
+                  if (!workspace.readOnly) requestDirOpen(!dirOpen);
+                }}
+              >
+                {workspace.kind === "plain" ? (
+                  <Icon name="chat_1" size={ICON_SM} />
+                ) : (
+                  <Icon name="folder" size={ICON_SM} />
+                )}
+                <b>{workspace.label}</b>
+                {!workspace.readOnly && <Icon name="down_small" size={ICON_SM} className="caret" />}
+              </button>
+            )}
+            {branchIsGit && branchMenu?.trigger}
+          </div>
+        )}
       </div>
       {openMenu === "plus" && (
         <Menu
@@ -1582,7 +1587,13 @@ export function Composer({
       {controls !== undefined && openMenu === "effort" && controlMenu("effort", controls.effort)}
       {controls !== undefined && openMenu === "preset" && controlMenu("preset", controls.preset)}
       {workspace !== undefined && openMenu === "dir" && !workspace.readOnly && (
-        <Menu anchor={triggers.current.dir ?? null} label="工作区" onClose={closeMenu}>
+        <Menu
+          anchor={triggers.current.dir ?? null}
+          align="left"
+          placement="below"
+          label="工作区"
+          onClose={closeMenu}
+        >
           <MenuItem
             icon={<Icon name="chat_1" size={ICON_SM} />}
             checked={workspace.currentKey === null}

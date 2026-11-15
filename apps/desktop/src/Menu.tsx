@@ -24,7 +24,7 @@ export interface MenuProps {
   anchor: HTMLElement | null;
   /** 与触发元素左缘或右缘对齐 */
   align?: "left" | "right";
-  placement?: "auto" | "above" | "submenu";
+  placement?: "auto" | "above" | "below" | "submenu";
   className?: string;
   label?: string;
   onClose: () => void;
@@ -82,6 +82,11 @@ export function Menu({
       vertical = {
         bottom: `${window.innerHeight - (bounds?.top ?? 0) + MENU_GAP}px`,
         ...(height > above ? { maxHeight: `${Math.max(96, above)}px` } : {}),
+      };
+    } else if (placement === "below") {
+      vertical = {
+        top: `${(bounds?.bottom ?? 0) + MENU_GAP}px`,
+        ...(height > below ? { maxHeight: `${Math.max(96, below)}px` } : {}),
       };
     } else if (below >= Math.min(height, BELOW_MIN)) {
       vertical = {
