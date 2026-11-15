@@ -23,14 +23,14 @@
 - **定义位置**：`design/tokens.json` 的 `color` 分组，浅色在 `:root`、深色在 `[data-theme="dark"]` 下由 `apps/desktop/src/tokens.css` 导出。
 - **工作台单层平铺与中性灰选中态**（[ADR-0092](docs/decisions/ADR-0092-desktop-redesign-workbench.md)）：保持强调色、语义色、分类色与代码高亮不变；中性色表面与选中态（`--a-sel`、`--a-sel-strong`）转为纯粹中性灰。主区（`--a-bg`）与标题栏/侧栏（`--a-side`）处于同一平面，只靠 `1px` `--a-border` 细线分隔，不再使用浮起卡片包裹主区。
 - **表面与文字**：
-  - 表面层次：`--a-bg`（主画布）、`--a-side`（标题栏、侧栏与设置导航）、`--a-panel`（浮层、菜单、对话框、输入框）、`--a-raised`（悬停底、次级块、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg` / `--a-qr-fg`（二维码底与前景）。
+  - 表面层次：`--a-bg`（主画布）、`--a-side`（标题栏、侧栏与设置导航）、`--a-panel`（浮层、菜单、对话框、输入框）、`--a-raised`（悬停底、次级块、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg`（二维码底）。
   - 文字层次：`--a-text`（正文与标题）、`--a-secondary`（次要正文、未选中导航、按钮文字）、`--a-muted`（分组标题、辅助标签）、`--a-faint`（占位符、装饰分隔、禁用灰字）。深浅色都不使用纯黑或纯白作大面积底或字。
 - **强调与状态**：
   - 强调色：`--a-accent`、`--a-accent-hover`、`--a-accentAlt`、`--a-on-accent`、`--a-accent-subtle`、`--a-accent-border`、`--a-focus-ring`；选中态：`--a-sel`、`--a-sel-strong`、`--a-multi-sel`、`--a-multi-sel-strong`。
   - 实心主按钮（发送）：`--a-btn`（指向 `--a-text`）与 `--a-on-btn`（指向 `--a-bg`），组件不直接引用 `--a-text`。
   - 边框与控件：`--a-border`、`--a-border-strong`、`--a-switch-off`、`--a-switch-knob`、`--a-scroll`、`--a-scrollThumbHover`。
-  - 语义色：`--a-success` / `--a-success-bg`、`--a-warning` / `--a-warning-bg` / `--a-warning-border`、`--a-error` / `--a-error-bg` / `--a-error-border`。
-  - 分类、热力图与代码高亮：`--a-cat1`..`--a-cat5`、`--a-heat-0`..`--a-heat-4`、`--a-termYellow` / `--a-termYellowBright`、`--a-syn-*`、`--cm-*`。
+  - 语义色：`--a-success` / `--a-success-bg`、`--a-warning` / `--a-warning-bg`、`--a-error` / `--a-error-bg` / `--a-error-border`。
+  - 分类、热力图与代码高亮：`--a-cat1`..`--a-cat5`、`--a-termYellow` / `--a-termYellowBright`、`--cm-*`（CodeMirror 与 `.syntax-*` 代码高亮共用）；热力图五档由 `--a-accent` 与 `--a-panel` 按比例混色。
 - **底色与描边规则**：
   - 状态色作文字或图标时，搭配对应的浅底（`--a-warning-bg`、`--a-error-bg`、`--a-success-bg`、`--a-accent-subtle`）或弱混色底，不用高饱和实心色块铺满整行（主按钮与聚焦态除外）。
   - 对话内提示条、权限确认卡、文件变更增删行统一用浅色底或整圈弱描边表达级别，不用左侧粗色条。
@@ -146,7 +146,7 @@
 3. **数据页**（用量、后台日志）：
    - 不套 `--w-readable` 窄栏限制，铺满可用宽度，表格统一表头与 `1px solid var(--a-border)` 行线（`.tbl`），用量页图区保持不变。
 4. **对话区与侧面板**：
-   - 对话消息流与输入框最大宽度 `--w-thread`（`720px`），消息条目间距 `--space-3`（`12px`）；侧面板默认宽度 `--w-panel`；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）；
+   - 对话消息流与输入框最大宽度 `--w-thread`（`720px`），消息条目间距 `--space-3`（`12px`）；侧面板默认宽度 `520px`（`PANEL_DEFAULT_WIDTH`，可拖拽调宽）；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）；
    - 用户消息气泡（`.u-bubble`）使用 `--a-raised` 底色与 `--radius-3` 圆角；
    - 工具行（`.tool-line`）按语义拆分字体：动作动词、计数、状态等中文/阅读文本用 `--sans`，路径、文件名、命令、参数名值用 `--mono`，通过基线对齐；
    - diff 卡片（`.tool-diff`）与本轮文件改动卡片（`.turn-changes-card`）采用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边，表头 `.diff-h` 底色 `--a-code-bg`、路径用 `--mono`、`+N` 用 `--a-success`、`−N` 用 `--a-error`，diff 正文用 `--fs-diff`（`12.5px`）；
