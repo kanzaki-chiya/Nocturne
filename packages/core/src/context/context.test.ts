@@ -1138,7 +1138,10 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
     };
-    const zeroTail = (seq: number, tokens: number): Extract<HistoryEntry, { kind: "assistant" }> => ({
+    const zeroTail = (
+      seq: number,
+      tokens: number,
+    ): Extract<HistoryEntry, { kind: "assistant" }> => ({
       ...assistant(seq, tokens),
       usage: zeroUsage,
     });
