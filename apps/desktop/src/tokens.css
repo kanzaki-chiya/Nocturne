@@ -22,8 +22,8 @@
   --w-settings-nav: 224px;
   --w-list: 280px;
   --w-panel: 460px;
-  --w-thread: 760px;
-  --w-readable: 880px;
+  --w-thread: 720px;
+  --w-readable: 680px;
   --w-form: 560px;
   --w-dialog: 480px;
   --w-menu: 220px;
@@ -130,6 +130,7 @@
   --fs-4: 16px;
   --fs-5: 20px;
   --fs-file-badge: 10px;
+  --fs-diff: 12.5px;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
@@ -160,12 +161,12 @@
   --ctl-h-touch: 40px;
   --ctl-px-sm: 8px;
   --ctl-px-md: 12px;
-  --row-h: 44px;
-  --item-h: 32px;
+  --row-h: 48px;
+  --item-h: 30px;
   --icon-sm: 14px;
   --icon-md: 16px;
-  --switch-w: 28px;
-  --switch-h: 16px;
+  --switch-w: 32px;
+  --switch-h: 18px;
   --switch-knob: 12px;
   --check: 14px;
   --dot: 6px;
