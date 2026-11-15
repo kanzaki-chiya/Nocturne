@@ -197,17 +197,6 @@ button {
   outline: none;
   box-shadow: var(--shadow-focus);
 }
-.snav .sback .k {
-  margin-left: auto;
-  font: var(--fs-1)/1 var(--mono);
-  color: var(--a-faint);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-1);
-  padding: 2px 5px;
-}
-.snav h4 {
-  padding-top: 8px;
-}
 .snav .nav .item svg {
   color: var(--a-secondary);
   flex: none;

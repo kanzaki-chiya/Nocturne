@@ -411,9 +411,8 @@ export function Sidebar(props: SidebarProps) {
           }}
         >
           <Icon name="arrow_left" size={ICON_MD} />
-          返回<span className="k">Esc</span>
+          返回
         </button>
-        <h4>设置</h4>
         <nav className="nav" aria-label="设置">
           {SETTINGS_NAV.map((item) => (
             <button
