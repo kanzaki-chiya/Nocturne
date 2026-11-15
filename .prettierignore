@@ -6,6 +6,7 @@ coverage
 pnpm-lock.yaml
 *.md
 packages/core/src/config/models-dev-snapshot.ts
+apps/desktop/src/tokens.css
 **/src-tauri/target/
 **/src-tauri/gen/
 .claude/worktrees/

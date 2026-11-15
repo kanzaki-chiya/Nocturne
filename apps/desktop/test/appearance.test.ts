@@ -1,6 +1,6 @@
 /**
  * 设置 › 外观的字体与字号：字号缩放、字体栈拼接、首屏应用、恢复默认。
- * 期望值按需求手算：Math.round(原值 × 字号 / 14)，原值取 tokens.css（12/13/14/16/22）。
+ * 期望值按需求手算：Math.round(原值 × 字号 / 14)，原值取 tokens.css（12/13/14/16/20）。
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -19,8 +19,8 @@ import { PREFS_KEY } from "../src/prefs";
 
 const TOKENS = readFileSync(path.resolve(import.meta.dirname, "../src/tokens.css"), "utf8");
 const SANS =
-  '"Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
-const MONO = '"JetBrains Mono", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace';
+  '"Inter Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
+const MONO = '"JetBrains Mono Variable", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace';
 
 const root = document.documentElement;
 /** jsdom 读回的字体栈会吞掉逗号后的空格（浏览器原样保留），比较前统一 */
@@ -45,23 +45,23 @@ afterEach(() => {
 
 describe("字号缩放", () => {
   it("按 Math.round(原值 × 字号 / 14) 计算", () => {
-    expect([12, 13, 14, 16, 22].map((base) => scaledFontSize(base, 20))).toEqual([
-      17, 19, 20, 23, 31,
+    expect([12, 13, 14, 16, 20].map((base) => scaledFontSize(base, 20))).toEqual([
+      17, 19, 20, 23, 29,
     ]);
-    expect([12, 13, 14, 16, 22].map((base) => scaledFontSize(base, 12))).toEqual([
-      10, 11, 12, 14, 19,
+    expect([12, 13, 14, 16, 20].map((base) => scaledFontSize(base, 12))).toEqual([
+      10, 11, 12, 14, 17,
     ]);
-    expect([12, 13, 14, 16, 22].map((base) => scaledFontSize(base, 14))).toEqual([
-      12, 13, 14, 16, 22,
+    expect([12, 13, 14, 16, 20].map((base) => scaledFontSize(base, 14))).toEqual([
+      12, 13, 14, 16, 20,
     ]);
   });
 
   it("写到根元素的 --fs-1..5，原值来自样式表", () => {
-    expect(sizes()).toEqual(["12px", "13px", "14px", "16px", "22px"]);
+    expect(sizes()).toEqual(["12px", "13px", "14px", "16px", "20px"]);
     applyAppearance(root, { fontSize: 20 });
-    expect(sizes()).toEqual(["17px", "19px", "20px", "23px", "31px"]);
+    expect(sizes()).toEqual(["17px", "19px", "20px", "23px", "29px"]);
     applyAppearance(root, { fontSize: 12 });
-    expect(sizes()).toEqual(["10px", "11px", "12px", "14px", "19px"]);
+    expect(sizes()).toEqual(["10px", "11px", "12px", "14px", "17px"]);
   });
 
   it("重复应用不叠加缩放，回到 14 即清掉覆盖（恢复默认）", () => {
@@ -70,7 +70,7 @@ describe("字号缩放", () => {
     expect(fs(2)).toBe("19px");
     applyAppearance(root, {});
     expect([1, 2, 3, 4, 5].map(fs)).toEqual(["", "", "", "", ""]);
-    expect(sizes()).toEqual(["12px", "13px", "14px", "16px", "22px"]);
+    expect(sizes()).toEqual(["12px", "13px", "14px", "16px", "20px"]);
   });
 });
 
@@ -126,7 +126,7 @@ describe("首屏应用", () => {
     expect(root.dataset.theme).toBe("light");
     expect(stack("--sans")).toBe(`"Inter", ${SANS}`);
     expect(stack("--mono")).toBe(`"Fira Code", ${MONO}`);
-    expect(sizes()).toEqual(["14px", "15px", "16px", "18px", "25px"]);
+    expect(sizes()).toEqual(["14px", "15px", "16px", "18px", "23px"]);
   });
 
   it("越界或类型不对的字号不应用", () => {

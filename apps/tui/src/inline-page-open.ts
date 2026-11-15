@@ -14,18 +14,18 @@ export const INLINE_PAGE_SHELL_CSP =
 
 /** 桌面端默认主题（tokens.css 的 :root 与 prefers-color-scheme: light）对应的 12 个页面变量 */
 const SANS =
-  '"Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
-const MONO = '"JetBrains Mono", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace';
+  '"Inter Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
+const MONO = '"JetBrains Mono Variable", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace';
 export const INLINE_PAGE_THEMES: Readonly<
   Record<"light" | "dark", Readonly<Record<string, string>>>
 > = {
   light: {
     "--bg": "#ffffff",
-    "--raised": "#f2f2f6",
-    "--text": "#20232b",
-    "--secondary": "#464c58",
-    "--muted": "#6b7180",
-    "--border": "#e5e6ec",
+    "--raised": "#f4f4f5",
+    "--text": "#0d0d10",
+    "--secondary": "#55555c",
+    "--muted": "#75757d",
+    "--border": "#ececef",
     "--accent": "#5d50b0",
     "--ok": "#2a7146",
     "--warn": "#8a5c10",
@@ -34,12 +34,12 @@ export const INLINE_PAGE_THEMES: Readonly<
     "--mono": MONO,
   },
   dark: {
-    "--bg": "#1a1c23",
-    "--raised": "#22242d",
-    "--text": "#dcdfe6",
-    "--secondary": "#b3b9c5",
-    "--muted": "#858c99",
-    "--border": "#262833",
+    "--bg": "#141417",
+    "--raised": "#1a1a1f",
+    "--text": "#ededef",
+    "--secondary": "#a0a0a8",
+    "--muted": "#7a7a83",
+    "--border": "#1f1f24",
     "--accent": "#a8a5ec",
     "--ok": "#86c69c",
     "--warn": "#e3bc76",

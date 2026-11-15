@@ -79,7 +79,7 @@ describe("内嵌页面外壳文件", () => {
     expect(srcdoc.startsWith("<!doctype html><style>")).toBe(true);
     expect(srcdoc).toContain(":root { color-scheme: light; --bg: #ffffff;");
     expect(srcdoc).toContain(
-      "@media (prefers-color-scheme: dark) { :root { color-scheme: dark; --bg: #1a1c23;",
+      "@media (prefers-color-scheme: dark) { :root { color-scheme: dark; --bg: #141417;",
     );
     expect(srcdoc).toContain(":where(body) { margin: 0; padding: 20px;");
     expect(srcdoc.endsWith("<p>页</p></body></html>")).toBe(true);
