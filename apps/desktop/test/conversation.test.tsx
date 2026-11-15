@@ -2587,10 +2587,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(screen.getByText(message)).toBeTruthy();
   });
 
-  it.each<["prune" | "summary", string]>([
-    ["prune", "已省略较早的工具输出"],
-    ["summary", "上下文已压缩为摘要"],
-  ])("压缩回执按种类（%s）显示文案，不泄漏种类、序号或 payload", (kind, text) => {
+  it.each(["prune", "summary"] as const)("修剪无回执，摘要显示回执（%s）", (kind) => {
     const view = createSessionView();
     reduceSessionView(view, {
       type: "context.compacted",
@@ -2600,7 +2597,12 @@ describe("Conversation 工具行与拒绝", () => {
       payload: { kind, throughSeq: 41, summary: "不应显示的摘要正文" },
     } as RuntimeEvent);
     const { container } = mount(view);
-    expect(container.querySelector(".note")?.textContent).toBe(text);
+    if (kind === "prune") {
+      expect(container.querySelector(".note")).toBeNull();
+      expect(container.textContent).toBe("");
+    } else {
+      expect(container.querySelector(".note")?.textContent).toBe("上下文已压缩为摘要");
+    }
     expect(container.textContent).not.toMatch(/summary|prune|seq|41|42|不应显示的摘要正文/);
   });
 

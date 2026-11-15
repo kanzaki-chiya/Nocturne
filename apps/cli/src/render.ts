@@ -244,7 +244,8 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       return [aux(`└ 权限：${p.action}（${detail}）${remembered}`)];
     }
     case "context.compacted": {
-      return [aux(`◇ ${compactedNoticeText(ev.payload.kind)}`)];
+      if (ev.payload.kind === "prune") return [];
+      return [aux(`◇ ${compactedNoticeText()}`)];
     }
     case "session.config_changed": {
       const p = ev.payload;

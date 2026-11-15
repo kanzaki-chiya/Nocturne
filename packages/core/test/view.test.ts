@@ -203,23 +203,38 @@ describe("SessionView reducer", () => {
     expect(view.entries[0]).toMatchObject({ kind: "assistant", messageId: "m", text: "new" });
   });
 
-  it.each<["prune" | "summary", string]>([
-    ["prune", "已省略较早的工具输出"],
-    ["summary", "上下文已压缩为摘要"],
-  ])("context.compacted(%s) 回执按种类写文案，payload 原样保留", (kind, text) => {
-    const payload = { kind, throughSeq: 7 };
-    const view = createSessionView();
-    reduceSessionView(view, {
-      type: "context.compacted",
-      sessionId: "s",
-      seq: 8,
-      time: "2026-10-08T01:02:03.000Z",
-      payload,
-    } as DurableEvent);
-    const notice = view.entries.find((entry) => entry.kind === "notice");
-    expect(notice?.kind === "notice" && notice.message).toBe(text);
-    expect(notice?.kind === "notice" && notice.payload).toEqual(payload);
-  });
+  it.each(["prune", "summary"] as const)(
+    "context.compacted(%s)：修剪不产生条目，摘要保留回执与 payload",
+    (kind) => {
+      const payload = { kind, throughSeq: 7 };
+      const event: DurableEvent = {
+        type: "context.compacted",
+        sessionId: "s",
+        seq: 8,
+        time: "2026-10-08T01:02:03.000Z",
+        payload,
+      };
+      const view = createSessionView();
+      reduceSessionView(view, event);
+      expect(view.entries).toEqual(
+        kind === "prune"
+          ? []
+          : [
+              {
+                kind: "notice",
+                key: "n:8",
+                seq: 8,
+                subtype: "compacted",
+                message: "上下文已压缩为摘要",
+                payload,
+              },
+            ],
+      );
+      expect(view.lastSeq).toBe(8);
+      expect(view.revision).toBe(1);
+      expect(replaySessionView([event])).toEqual(view);
+    },
+  );
 
   it("助手条目时间来自持久事件，实时归约与重放确定一致", () => {
     const event: DurableEvent = {

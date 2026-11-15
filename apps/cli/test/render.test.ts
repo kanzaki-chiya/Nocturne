@@ -154,7 +154,30 @@ describe("事件渲染（cli.md 第 5 节）", () => {
     expect(ev.some((r) => r.text.includes("-old") && r.text.includes("+new"))).toBe(true);
   });
 
-  it("permission.resolved / context.compacted / provider.retry / runtime.error", () => {
+  it.each(["interactive", "print"] as const)(
+    "context.compacted(prune) 在 %s 模式不输出任何行",
+    (mode) => {
+      expect(
+        renderEvent(durable("context.compacted", { kind: "prune", throughSeq: 42 }), mode),
+      ).toEqual([]);
+    },
+  );
+
+  it.each(["interactive", "print"] as const)(
+    "context.compacted(summary) 在 %s 模式保留摘要回执与输出分流",
+    (mode) => {
+      expect(
+        renderEvent(durable("context.compacted", { kind: "summary", throughSeq: 42 }), mode),
+      ).toEqual([
+        {
+          channel: mode === "print" ? "stderr" : "stdout",
+          text: "◇ 上下文已压缩为摘要",
+        },
+      ]);
+    },
+  );
+
+  it("permission.resolved / provider.retry / runtime.error", () => {
     const r = renderEvent(
       durable("permission.resolved", {
         callId: "c",
@@ -164,19 +187,6 @@ describe("事件渲染（cli.md 第 5 节）", () => {
       "interactive",
     );
     expect(r[0]?.text).toContain("allow");
-
-    const c = renderEvent(
-      durable("context.compacted", { kind: "summary", throughSeq: 42 }),
-      "interactive",
-    );
-    expect(c[0]?.text).toContain("◇ 上下文已压缩为摘要");
-    expect(c[0]?.text).not.toMatch(/summary|42/);
-    const pruned = renderEvent(
-      durable("context.compacted", { kind: "prune", throughSeq: 42 }),
-      "interactive",
-    );
-    expect(pruned[0]?.text).toContain("◇ 已省略较早的工具输出");
-    expect(pruned[0]?.text).not.toMatch(/prune|42/);
 
     const retry = renderEvent(
       ephemeral("provider.retry", {
