@@ -258,11 +258,12 @@
 .usage-table {
   width: 100%;
   border-collapse: collapse;
+  border-top: 1px solid var(--a-border);
   font-size: var(--fs-1);
 }
 .usage-table thead th {
   color: var(--a-muted);
-  font-weight: 400;
+  font-weight: var(--fw-medium);
   white-space: nowrap;
 }
 .usage-table th,

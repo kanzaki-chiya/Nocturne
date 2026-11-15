@@ -670,7 +670,9 @@ export function SettingsPage({
                       shellItem.source === "user" ||
                       shellItem.source === "project" ? (
                         <>
-                          <span className="val mono">{shellItem.effective ?? "自动"}</span>
+                          <span className={shellItem.effective !== undefined ? "val mono" : "val"}>
+                            {shellItem.effective ?? "自动"}
+                          </span>
                           <span className="val dim">
                             {shellItem.source === "env"
                               ? "由环境变量 NOCTURNE_SHELL 指定"
@@ -769,7 +771,7 @@ export function SettingsPage({
             {section === "general" && (
               <SettingsGroup title="普通对话">
                 <SettingsRow label="工作区" error={errs("workspace")}>
-                  <span className="val mono" title={workspace ?? ""}>
+                  <span className={workspace !== null ? "val mono" : "val"} title={workspace ?? ""}>
                     {workspace ?? "未就绪"}
                   </span>
                   <Button
