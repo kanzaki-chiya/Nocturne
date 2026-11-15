@@ -307,9 +307,9 @@ describe("activity.json 旁路与 lastUserMs", () => {
     const session = await s.runtime.createSession({ model: "fake/fake-1" });
     await session.submit({ text: "用户消息" });
     const userMsg = session.durableEvents().findLast((e) => e.type === "message.user");
-    expect(userMsg).toBeDefined();
-    const expectedAt = Date.parse(userMsg!.time);
-    const expectedSeq = userMsg!.seq;
+    if (userMsg === undefined) throw new Error("缺少用户消息");
+    const expectedAt = Date.parse(userMsg.time);
+    const expectedSeq = userMsg.seq;
     await session.close();
 
     const sidecar = activityPath(s.sessionsDir, session.id);
