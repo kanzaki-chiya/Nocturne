@@ -205,6 +205,11 @@ function toRow(
   };
 }
 
+/** 运行中或待确认的会话固定排在所在分组最前 */
+function isActiveStatus(status: SessionStatus | undefined): boolean {
+  return status === "running" || status === "pending";
+}
+
 /**
  * 构建会话树：
  * - 空会话（firstText 缺省/空白且未锁定）一律过滤；
@@ -224,6 +229,12 @@ export function buildSessionTree(
   const limit = options.limit ?? DEFAULT_LIMIT;
   const hidden = new Set(prefs.hidden.map(projectKey));
   const pinnedIds = new Set(prefs.pinned);
+  const compareGroupSessions = (a: TreeSessionSummary, b: TreeSessionSummary): number => {
+    const activeA = isActiveStatus(options.statuses?.[a.id]);
+    const activeB = isActiveStatus(options.statuses?.[b.id]);
+    if (activeA !== activeB) return activeA ? -1 : 1;
+    return activityMs(b) - activityMs(a);
+  };
   // 当前工作区 + prefs 记下的历史工作区都归「对话」（换位置后旧会话不跑进「项目」）
   const chatKeys = new Set<string>();
   if (options.plainWorkspace !== null) chatKeys.add(projectKey(options.plainWorkspace));
@@ -239,9 +250,7 @@ export function buildSessionTree(
   const chatSessions = visible.filter(
     (s) => chatKeys.has(projectKey(s.cwd)) && !scheduledIds.has(s.id),
   );
-  const chatRows = chatSessions
-    .filter((s) => !pinnedIds.has(s.id))
-    .sort((a, b) => activityMs(b) - activityMs(a));
+  const chatRows = chatSessions.filter((s) => !pinnedIds.has(s.id)).sort(compareGroupSessions);
   const chatsLimit = resolveLimit(options.chatsLimit, options.chatsExpanded, limit);
   const chatsShown = Number.isFinite(chatsLimit) ? chatRows.slice(0, chatsLimit) : chatRows;
   const chats: ChatsSection = {
@@ -253,7 +262,7 @@ export function buildSessionTree(
 
   const scheduledRows = visible
     .filter((s) => scheduledIds.has(s.id) && !pinnedIds.has(s.id))
-    .sort((a, b) => activityMs(b) - activityMs(a));
+    .sort(compareGroupSessions);
   const scheduledLimit = resolveLimit(options.scheduledLimit, options.scheduledExpanded, limit);
   const scheduledShown = Number.isFinite(scheduledLimit)
     ? scheduledRows.slice(0, scheduledLimit)
@@ -373,9 +382,7 @@ export function buildSessionTree(
   for (const key of order) {
     const group = groups.get(key);
     if (group === undefined) continue;
-    const unpinned = group.sessions
-      .filter((s) => !pinnedIds.has(s.id))
-      .sort((a, b) => activityMs(b) - activityMs(a));
+    const unpinned = group.sessions.filter((s) => !pinnedIds.has(s.id)).sort(compareGroupSessions);
     const projectLimit = resolveLimit(
       options.projectLimits?.get(key),
       options.expanded?.has(key),

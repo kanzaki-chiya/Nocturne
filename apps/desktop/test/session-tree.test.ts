@@ -8,6 +8,7 @@ import {
   formatRelative,
   moveProjectKey,
   projectKey,
+  type SessionStatus,
   type SessionSummary,
 } from "../src/session-tree";
 
@@ -41,6 +42,7 @@ const opts = (o?: {
   chatsExpanded?: boolean;
   expanded?: string[];
   collapsed?: string[];
+  statuses?: Readonly<Record<string, SessionStatus>>;
 }) => ({
   plainWorkspace: o?.plainWorkspace ?? null,
   ...(o?.chatsLimit !== undefined ? { chatsLimit: o.chatsLimit } : {}),
@@ -50,6 +52,7 @@ const opts = (o?: {
     : {}),
   ...(o?.chatsExpanded !== undefined ? { chatsExpanded: o.chatsExpanded } : {}),
   ...(o?.expanded !== undefined ? { expanded: new Set(o.expanded) } : {}),
+  ...(o?.statuses !== undefined ? { statuses: o.statuses } : {}),
   collapsed: new Set(o?.collapsed ?? []),
   now: NOW,
 });
@@ -586,5 +589,108 @@ describe("分批条数截取", () => {
     expect(page3.projects[0]?.moreCount).toBe(0);
     expect(page3.scheduled.rows).toHaveLength(28);
     expect(page3.scheduled.moreCount).toBe(0);
+  });
+});
+
+describe("运行中与待确认会话排在最前", () => {
+  it("同一项目里 activityMs 较早但在运行的会话排在较晚但空闲的会话前面，结束后回到原位", () => {
+    const list = [
+      session("idle-newer", "Z:\\repo", NOW - 1000),
+      session("idle-mid", "Z:\\repo", NOW - 5000),
+      session("run-older", "Z:\\repo", NOW - 10_000),
+    ];
+    const runningTree = buildSessionTree(
+      list,
+      noPrefs,
+      opts({ statuses: { "run-older": "running" } }),
+    );
+    expect(runningTree.projects[0]?.sessions.map((r) => r.id)).toEqual([
+      "run-older",
+      "idle-newer",
+      "idle-mid",
+    ]);
+
+    const settledTree = buildSessionTree(
+      list,
+      noPrefs,
+      opts({ statuses: { "run-older": "idle" } }),
+    );
+    expect(settledTree.projects[0]?.sessions.map((r) => r.id)).toEqual([
+      "idle-newer",
+      "idle-mid",
+      "run-older",
+    ]);
+  });
+
+  it("同一项目里 pending 状态的会话同样排在空闲会话前面", () => {
+    const tree = buildSessionTree(
+      [
+        session("idle-newer", "Z:\\repo", NOW - 1000),
+        session("pending-older", "Z:\\repo", NOW - 10_000),
+      ],
+      noPrefs,
+      opts({ statuses: { "pending-older": "pending" } }),
+    );
+    expect(tree.projects[0]?.sessions.map((r) => r.id)).toEqual(["pending-older", "idle-newer"]);
+  });
+
+  it("两个都在运行时按 activityMs 降序（运行中顺序仅由 lastUserMs 决定）", () => {
+    const tree = buildSessionTree(
+      [
+        session("run-older", "Z:\\repo", NOW - 50, { lastUserMs: NOW - 8000 }),
+        session("run-newer", "Z:\\repo", NOW - 5000, { lastUserMs: NOW - 2000 }),
+        session("idle-newest", "Z:\\repo", NOW - 100, { lastUserMs: NOW - 100 }),
+      ],
+      noPrefs,
+      opts({ statuses: { "run-older": "running", "run-newer": "running" } }),
+    );
+    expect(tree.projects[0]?.sessions.map((r) => r.id)).toEqual([
+      "run-newer",
+      "run-older",
+      "idle-newest",
+    ]);
+  });
+
+  it("项目默认显示 5 条时，第 8 新但在运行的会话出现在显示的行里且 moreCount 正确", () => {
+    const list = Array.from({ length: 8 }, (_, i) => session(`p${i}`, "Z:\\repo", NOW - i * 1000));
+    const tree = buildSessionTree(list, noPrefs, opts({ statuses: { p7: "running" } }));
+    const repo = tree.projects[0];
+    expect(repo?.sessions).toHaveLength(DEFAULT_LIMIT);
+    expect(repo?.sessions.map((r) => r.id)).toEqual(["p7", "p0", "p1", "p2", "p3"]);
+    expect(repo?.moreCount).toBe(3);
+  });
+
+  it("「对话」区运行中或待确认排最前、内部按 activityMs 降序，且第 8 新在运行时进前 5 条", () => {
+    const list = Array.from({ length: 8 }, (_, i) => session(`c${i}`, WS, NOW - i * 1000));
+    const tree = buildSessionTree(
+      list,
+      noPrefs,
+      opts({
+        plainWorkspace: WS,
+        statuses: { c7: "running", c5: "pending" },
+      }),
+    );
+    expect(tree.chats.rows).toHaveLength(DEFAULT_LIMIT);
+    expect(tree.chats.rows.map((r) => r.id)).toEqual(["c5", "c7", "c0", "c1", "c2"]);
+    expect(tree.chats.moreCount).toBe(3);
+  });
+
+  it("「定时任务」区运行中或待确认排最前、内部按 activityMs 降序，且第 8 新在运行时进前 5 条", () => {
+    const list = Array.from({ length: 8 }, (_, i) =>
+      session(`s${i}`, "Z:\\repo", NOW - i * 1000, {
+        schedule: { taskId: "t1", scheduledAt: "2026-10-04T11:00:00Z", trigger: "schedule" },
+      }),
+    );
+    const tree = buildSessionTree(
+      list,
+      noPrefs,
+      opts({
+        plainWorkspace: WS,
+        statuses: { s7: "running", s5: "pending" },
+      }),
+    );
+    expect(tree.scheduled.rows).toHaveLength(DEFAULT_LIMIT);
+    expect(tree.scheduled.rows.map((r) => r.id)).toEqual(["s5", "s7", "s0", "s1", "s2"]);
+    expect(tree.scheduled.moreCount).toBe(3);
   });
 });
