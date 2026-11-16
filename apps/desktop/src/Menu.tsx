@@ -12,6 +12,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { BrandIcon } from "./BrandIcon";
+
 interface SubmenuCoord {
   activeId: string | null;
   setActiveId: (id: string | null) => void;
@@ -218,6 +220,7 @@ export interface ChoiceMenuControl {
       value: string;
       label: string;
       detail?: ReactNode;
+      icon?: string;
       tag?: string;
       risk?: boolean;
       title?: string;
@@ -413,6 +416,9 @@ export function ChoiceMenu({
                     {...(option.risk === true ? { danger: true } : {})}
                     {...(option.disabled !== undefined ? { disabled: option.disabled } : {})}
                     {...(option.title !== undefined ? { title: option.title } : {})}
+                    {...(option.icon !== undefined
+                      ? { icon: <BrandIcon iconKey={option.icon} size="md" /> }
+                      : {})}
                     label={option.label}
                     {...(option.detail !== undefined ? { detail: option.detail } : {})}
                     {...(option.tag !== undefined

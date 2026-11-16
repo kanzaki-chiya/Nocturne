@@ -5,6 +5,35 @@
   display: block;
 }
 
+.brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: inherit;
+}
+.brand-icon.is-fallback {
+  color: var(--a-muted);
+}
+.brand-icon-sm {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.brand-icon-md {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.brand-icon-lg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+.brand-icon > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  color: inherit;
+}
+
 /* ---------- 按钮 ---------- */
 .btn {
   display: inline-flex;
@@ -751,6 +780,9 @@
   font-family: var(--mono);
 }
 .nav-item.off .trunc {
+  color: var(--a-faint);
+}
+.nav-item.off .brand-icon {
   color: var(--a-faint);
 }
 .nav-item .badge,

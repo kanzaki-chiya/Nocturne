@@ -199,6 +199,30 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(shrinkRule).toContain("min-width: 0");
   });
 
+  it("ListItem：传入 icon 时 icon 在名字左边、圆点移到最右边；不传保持圆点前置", () => {
+    const { rerender } = render(
+      <ListItem
+        icon={<span data-testid="prov-ic" />}
+        label="openrouter"
+        mono
+        dot="ok"
+        meta="2 个模型"
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /openrouter/ });
+    const children = Array.from(btn.children);
+    expect(children[0]?.getAttribute("data-testid")).toBe("prov-ic");
+    expect(children[1]?.classList.contains("name")).toBe(true);
+    expect(children.at(-1)?.classList.contains("dot")).toBe(true);
+
+    rerender(<ListItem label="openrouter" mono dot="ok" meta="2 个模型" />);
+    const plainBtn = screen.getByRole("button", { name: /openrouter/ });
+    const plainChildren = Array.from(plainBtn.children);
+    expect(plainChildren[0]?.classList.contains("dot")).toBe(true);
+    expect(plainChildren[1]?.classList.contains("name")).toBe(true);
+    expect(plainChildren.at(-1)?.classList.contains("meta")).toBe(true);
+  });
+
   it("DataTable：表头为 columnheader，数字列右对齐", () => {
     render(
       <DataTable

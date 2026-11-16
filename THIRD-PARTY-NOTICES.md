@@ -469,3 +469,10 @@ DEALINGS IN THE FONT SOFTWARE.
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+## 随附的图标资源
+
+桌面端 `apps/desktop/src/brand-icons/` 随附来自 npm 包 `@lobehub/icons-static-svg` **1.101.0** 的部分服务商与模型品牌 SVG 图标（去掉外层固定宽高、`style` 与 `<title>`），原包按 **MIT** 许可分发，许可证全文随附于 [apps/desktop/src/brand-icons/LICENSE](apps/desktop/src/brand-icons/LICENSE)。
+
+图标中的商标归各自所有者，仅用于标识对应的服务商与模型。
+

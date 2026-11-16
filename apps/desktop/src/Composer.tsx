@@ -36,6 +36,7 @@ import {
   type FileIndexEntry,
   type FileRefCandidate,
 } from "./file-refs";
+import { BrandIcon } from "./BrandIcon";
 import { ChoiceMenu, Menu, MenuHeading, MenuItem, MenuSeparator, MenuSubmenu } from "./Menu";
 import { IMAGE_TYPES, mimeTypeForImageName, type PickedImage } from "./picked-images";
 import "./composer.css";
@@ -53,6 +54,8 @@ export interface ChoiceOption {
   detail?: string;
   /** 悬停说明（如模型菜单里的原始模型 id） */
   title?: string;
+  /** 选项图标键（纯字符串，由渲染层解析为品牌或通用图标） */
+  icon?: string;
   /** 自绘下拉（Dropdown）里的中文名与危险标记；中文名统一来自 choice-info.ts */
   tag?: string;
   risk?: boolean;
@@ -69,6 +72,8 @@ export interface ChoiceControl {
   value: string | undefined;
   /** 芯片上的短标签 */
   label: string;
+  /** 芯片上的图标键（如模型芯片的品牌/通用图标） */
+  icon?: string;
   /** 菜单顶部标题 */
   heading?: string;
   groups: ChoiceGroup[];
@@ -1423,7 +1428,7 @@ export function Composer({
                 "model",
                 controls.model,
                 <>
-                  <span className="pd" aria-hidden="true" />
+                  <BrandIcon iconKey={controls.model.icon ?? "box_3"} size="sm" />
                   <span className="t">{controls.model.label}</span>
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,

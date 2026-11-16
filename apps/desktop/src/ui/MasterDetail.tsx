@@ -68,6 +68,8 @@ export function ListGroup({ title, count, children }: ListGroupProps) {
 
 export interface ListItemProps {
   label: ReactNode;
+  /** 可选前置图标（如服务商图标）；传入时圆点移至行尾，不传保持圆点前置 */
+  icon?: ReactNode;
   selected?: boolean | undefined;
   /** 前置圆点状态：ok / warn / err / run / hollow / ""（灰） */
   dot?: "ok" | "warn" | "err" | "run" | "hollow" | "" | undefined;
@@ -84,9 +86,10 @@ export interface ListItemProps {
   onClick?: (() => void) | undefined;
 }
 
-/** 左栏条目（`.nav-item`）：一种写法——圆点 + 名字 + 徽标 + 右侧灰字 */
+/** 左栏条目（`.nav-item`）：默认圆点前置；传入 icon 时 icon 贴左、圆点移至行尾 */
 export function ListItem({
   label,
+  icon,
   selected = false,
   dot,
   mono = false,
@@ -97,6 +100,10 @@ export function ListItem({
   "aria-label": ariaLabel,
   onClick,
 }: ListItemProps) {
+  const dotEl =
+    dot !== undefined ? (
+      <span className={dot === "" ? "dot" : `dot ${dot}`} aria-hidden="true" />
+    ) : null;
   return (
     <button
       type="button"
@@ -106,9 +113,7 @@ export function ListItem({
       title={title}
       onClick={onClick}
     >
-      {dot !== undefined && (
-        <span className={dot === "" ? "dot" : `dot ${dot}`} aria-hidden="true" />
-      )}
+      {icon === undefined ? dotEl : icon}
       <span
         className={`name trunc${mono ? " mono" : ""}`}
         title={typeof label === "string" ? label : undefined}
@@ -117,6 +122,7 @@ export function ListItem({
       </span>
       {badge}
       {meta !== undefined && meta !== null && meta !== "" && <span className="meta">{meta}</span>}
+      {icon !== undefined ? dotEl : null}
     </button>
   );
 }

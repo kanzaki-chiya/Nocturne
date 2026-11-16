@@ -682,7 +682,9 @@ describe("添加服务商", () => {
       "DeepSeek",
       PRESET.label,
     ]);
-    expect(cards.map((c) => c.querySelector(".addcard-ic")?.textContent)).toEqual(["O", "D", "+"]);
+    expect(cards.map((c) => c.querySelector(".addcard-ic")?.textContent)).toEqual(["", "", "+"]);
+    expect(cards[0]?.querySelector(".addcard-ic .brand-icon.brand-icon-lg svg")).not.toBeNull();
+    expect(cards[1]?.querySelector(".addcard-ic .brand-icon.brand-icon-lg svg")).not.toBeNull();
 
     fireEvent.click(button("返回"));
     await screen.findByRole("heading", { level: 2, name: "chatgpt" });
@@ -1179,6 +1181,35 @@ describe("编辑服务商（U-07）", () => {
     const handFilled = await screen.findByText("250K");
     expect(handFilled.classList.contains("implausible")).toBe(false);
     expect(handFilled.getAttribute("title")).toBeNull();
+    server.close();
+  });
+
+  it("左栏列表、详情标题和添加选择页渲染服务商图标，自定义预设保留 +", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [EXPIRED] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET, PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    const list = await screen.findByRole("navigation", { name: "服务商列表" });
+    await waitFor(() => expect(within(list).queryByRole("button")).not.toBeNull());
+    const item = within(list).getByRole("button", { name: /chatgpt/ });
+    const itemChildren = Array.from(item.children);
+    expect(itemChildren[0]?.classList.contains("brand-icon")).toBe(true);
+    expect(itemChildren.at(-1)?.classList.contains("dot")).toBe(true);
+
+    const heading = screen.getByRole("heading", { level: 2, name: "chatgpt" });
+    expect(heading.previousElementSibling?.classList.contains("brand-icon")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "添加服务商" }));
+    const orCard = await screen.findByRole("button", { name: /OpenRouter/ });
+    const customCard = screen.getByRole("button", { name: /自定义 OpenAI 兼容/ });
+    expect(orCard.querySelector(".addcard-ic .brand-icon.brand-icon-lg")).not.toBeNull();
+    expect(customCard.querySelector(".addcard-ic")?.textContent).toBe("+");
     server.close();
   });
 });

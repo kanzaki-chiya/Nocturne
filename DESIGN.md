@@ -72,7 +72,7 @@
 - **字重**：`--fw-regular`（正文）、`--fw-medium`（导航选中、按钮、表单标签、小标题）、`--fw-semibold`（页面标题、分组标题、大数字），不使用 `700`。
 - **行高**：`--lh-tight`（标题、单行控件）、`--lh-base`（界面正文、表单说明）、`--lh-code`（代码块、日志、终端）、`--lh-prose`（对话 Markdown 正文）。
 - **数字对齐**：百分比、token 数、金额、时间、计数器统一加 `font-variant-numeric: tabular-nums`，避免跳动与错位。
-- **输入框底栏与对话标题行**：桌面端去掉底部状态栏，改由输入框底栏与对话标题行承担状态与控制。输入框底栏（高 `--ctl-h-md` 28px）使用 `--fs-2`、`--sans`、常规字重 `--fw-regular`、数字 tabular-nums（chip 默认文字 `--a-secondary`，悬停与展开 `--a-text`）：左侧「＋」（`240px` 上弹菜单含五种执行方式，与 `220px`「技能」「MCP」右展子菜单；MCP 失败或崩溃时右上角亮 `6px` 红点）、回形针「添加文件」、权限预设 chip；右侧依次为 `18px` SVG 上下文圆环（仅会话页，点击在输入框外框上方 `8px`、右缘对齐圆环处弹出面板，窄窗不超出左侧，底部附累计 tokens 与缓存占比）、模型与思考档位 chip、实心圆角发送/中断按钮（圆角 `--radius-send`、`--a-btn`/`--a-on-btn`）。选中执行方式后，输入区与底栏之间展示单行标签（含关闭图标、无解释文案）。新会话页输入卡片下方贴附左右各缩进 `12px` 的 `.tray` 托盘（`--a-raised` 底色、`margin-top: -1px` 压在输入框下边后面、无上边框、下圆角 `--radius-composer`），从左到右放工作区（名称最宽 `320px` 省略）与 Git 分支 chip（等宽字、名称最宽 `240px` 省略；普通对话或非仓库隐藏分支 chip），两菜单向下弹出，悬停底改用 `--a-sel`；会话页无托盘，分支菜单与电脑操控中的「停止」置于对话标题行（[docs/apps/desktop.md](docs/apps/desktop.md#54-上下文用量标题栏控制与状态迁移)）。
+- **输入框底栏与对话标题行**：桌面端去掉底部状态栏，改由输入框底栏与对话标题行承担状态与控制。输入框底栏（高 `--ctl-h-md` 28px）使用 `--fs-2`、`--sans`、常规字重 `--fw-regular`、数字 tabular-nums（chip 默认文字 `--a-secondary`，悬停与展开 `--a-text`）：左侧「＋」（`240px` 上弹菜单含五种执行方式，与 `220px`「技能」「MCP」右展子菜单；MCP 失败或崩溃时右上角亮 `6px` 红点）、回形针「添加文件」、权限预设 chip；右侧依次为 `18px` SVG 上下文圆环（仅会话页，点击在输入框外框上方 `8px`、右缘对齐圆环处弹出面板，窄窗不超出左侧，底部附累计 tokens 与缓存占比）、模型（名字前带 `14px` 品牌图标、间距 `6px`，匹配不上用 `box_3`）与思考档位 chip、实心圆角发送/中断按钮（圆角 `--radius-send`、`--a-btn`/`--a-on-btn`）。选中执行方式后，输入区与底栏之间展示单行标签（含关闭图标、无解释文案）。新会话页输入卡片下方贴附左右各缩进 `12px` 的 `.tray` 托盘（`--a-raised` 底色、`margin-top: -1px` 压在输入框下边后面、无上边框、下圆角 `--radius-composer`），从左到右放工作区（名称最宽 `320px` 省略）与 Git 分支 chip（等宽字、名称最宽 `240px` 省略；普通对话或非仓库隐藏分支 chip），两菜单向下弹出，悬停底改用 `--a-sel`；会话页无托盘，分支菜单与电脑操控中的「停止」置于对话标题行（[docs/apps/desktop.md](docs/apps/desktop.md#54-上下文用量标题栏控制与状态迁移)）。
 
 ---
 
@@ -125,7 +125,7 @@
 - **开关（`.switch`）**：`button[role="switch"][aria-checked]`，尺寸 `--switch-w` × `--switch-h`（`32px × 18px`），打开时轨道用强调色 `--a-accent`，圆钮 `--switch-knob`。立即生效的布尔设置用开关；进表单点「保存」才生效的布尔字段用复选框 `.check`。
 - **分段控件（`.seg`）**：2–4 个互斥短选项，选中项 `[aria-pressed="true"]` / `[aria-selected="true"]` / `[aria-checked="true"]` 用 `--a-sel-strong` 底。
 - **下拉与输入框（`.dd`、`.input`、`.textarea`）**：默认高度 `--ctl-h-md`（`28px`；`.lg` 为 `--ctl-h-lg`），下拉触发器 `.dd` 采用透明底与 `1px solid var(--a-border)` 描边；机器值加 `.mono`，宽度档位 `.sm-w`（`--w-field-sm`）、`.md-w`（`--w-field-md`）。
-- **菜单、对话框与浮层（`Menu`、`.ddm`、`.dlg`、`.ovpop`、`.qopen`、`.search-dialog`）**：统一使用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边与 `--a-panel` 底色；菜单项与下拉项高 `--item-h`（`30px`），焦点与选中底色 `--a-sel`；`MenuItem` 仅在传入 `checked`（单选模式）时渲染 `.menu-ck` 勾选列，普通菜单图标贴左对齐。
+- **菜单、对话框与浮层（`Menu`、`.ddm`、`.dlg`、`.ovpop`、`.qopen`、`.search-dialog`）**：统一使用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边与 `--a-panel` 底色；菜单项与下拉项高 `--item-h`（`30px`），焦点与选中底色 `--a-sel`；`MenuItem` 仅在传入 `checked`（单选模式）时渲染 `.menu-ck` 勾选列，普通菜单图标贴左对齐；模型菜单每项名字前显示 `16px` 品牌或通用图标（`box_3`），思考档位与权限菜单不显示图标。
 - **徽标（`.badge`）与覆盖警告**：`.badge` 用于状态标签（`.accent`、`.warn`、`.err`、`.ok`）和「只读」。除覆盖警告和只读徽标外不显示配置来源；被更高层覆盖的设置值用 `--a-warning` 色，现有覆盖警告只放在值的 `title`，不加徽标或可见说明。Shell 行既有的「由…指定」保留。
 
 ---
@@ -140,7 +140,7 @@
    - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-5`、`--fw-semibold`、`letter-spacing: -0.01em`），正文 `.sbody`（分组间距 `--space-8`）；
    - 每组 `.group` 去掉外层卡片框，分组上方（含首组）以 `1px solid var(--a-border)` 分隔，`.ghead` 标题用 `--fs-1`、`--fw-medium`、`letter-spacing: 0.02em`、`--a-muted`；`.card` 仅作内容容器，内部设置行 `.srow` 最小高 `--row-h`（`48px`）、左 `.lab` 右 `.ctl`，行间以 `1px solid var(--a-border)` 分隔。
 2. **主从设置页**（服务商、子代理、技能、MCP、授权；定时任务除外）：
-   - 上述五个主从设置页采用居中双栏卡片（`.spage` > `.readable` 宽 `880px` > `.phead` > `.md-frame` > `.md.framed`）：卡片带 `1px solid var(--a-border)` 描边、`--radius-3` 圆角与 `--a-panel` 底色，撑满页头以下剩余高度（底部留 `--space-8`）；左栏 `.md-list` 宽 `220px`（内边距 `--space-2`）、右栏 `.md-detail`（内边距 `--space-5` `--space-6` `--space-6`，`.inner` 铺满右栏不限 `680px`），左右各自独立滚动，按卡片宽度（`< 640px`）上下堆叠；定时任务页（`SchedulePage`）仍沿用旧的 `.spage.flush` 铺满式布局（左栏 `--w-list` `280px`，`.inner` 限 `--w-readable`）。详情分组与列表同样去掉外层卡片框，行高 `48px`，表格统一表头与 `1px solid var(--a-border)` 行线；名字单行省略，完整名字放名字的 `title`；MCP 列表只显示状态点与名字；
+   - 上述五个主从设置页采用居中双栏卡片（`.spage` > `.readable` 宽 `880px` > `.phead` > `.md-frame` > `.md.framed`）：卡片带 `1px solid var(--a-border)` 描边、`--radius-3` 圆角与 `--a-panel` 底色，撑满页头以下剩余高度（底部留 `--space-8`）；左栏 `.md-list` 宽 `220px`（内边距 `--space-2`）、右栏 `.md-detail`（内边距 `--space-5` `--space-6` `--space-6`，`.inner` 铺满右栏不限 `680px`），左右各自独立滚动，按卡片宽度（`< 640px`）上下堆叠；定时任务页（`SchedulePage`）仍沿用旧的 `.spage.flush` 铺满式布局（左栏 `--w-list` `280px`，`.inner` 限 `--w-readable`）。详情分组与列表同样去掉外层卡片框，行高 `48px`，表格统一表头与 `1px solid var(--a-border)` 行线；名字单行省略，完整名字放名字的 `title`；服务商左栏行与详情标题前显示 `16px` 品牌或通用图标（`cloud`，行内状态点移至最右），添加选择页 `30px` 方块内居中显示 `18px` 图标（自定义类保留「+」）；MCP 列表只显示状态点与名字；
    - 新增与导入按钮在页头右侧（`.phead` 的 `actions`），主操作与删除在右栏详情顶栏 `.dhead .actions`。
    - 全部滚动区共用无箭头的细滚动条，隐藏滚动条的区域保留 `scrollbar-width: none`。子代理描述框按内容增高，最少约三行、最高 `240px`，超出才滚动；启用开关位于标题最右侧，不写可见标签，只读与默认档位禁用。
 3. **数据页**（用量、后台日志）：

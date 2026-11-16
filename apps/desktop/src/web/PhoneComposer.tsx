@@ -31,6 +31,7 @@ import {
   SUBMIT_MESSAGE_LIMIT,
   type PhoneImage,
 } from "./phone-images";
+import { BrandIcon } from "../BrandIcon";
 import { Popover, PopoverOption } from "./Popover";
 import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "../ImageViewer";
 import { Icon } from "../ui";
@@ -477,7 +478,11 @@ export function PhoneComposer({
           {group.options.map((option) => (
             <PopoverOption
               key={option.value}
-              {...(kind === "preset" ? { icon: <IconShield risk={option.risk === true} /> } : {})}
+              {...(kind === "preset"
+                ? { icon: <IconShield risk={option.risk === true} /> }
+                : kind === "model" && option.icon !== undefined
+                  ? { icon: <BrandIcon iconKey={option.icon} size="md" /> }
+                  : {})}
               label={
                 kind === "model" ? (
                   option.label

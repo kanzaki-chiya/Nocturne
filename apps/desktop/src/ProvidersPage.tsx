@@ -3,6 +3,8 @@
  * 字段由 describeProviderSetup 驱动，不在前端写死某个服务商的字段。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { BrandIcon } from "./BrandIcon";
+import { providerIcon } from "./brand-icons";
 import { LoginWaitCard } from "./LoginWaitCard";
 import { ModelSettingsDialog } from "./ModelSettingsDialog";
 import type { LoginCompleted, LoginStarted, RpcClient, RpcProvider } from "@nocturne/rpc/client";
@@ -403,6 +405,7 @@ export function ProvidersPage({
                     return (
                       <ListItem
                         key={p.id}
+                        icon={<BrandIcon icon={providerIcon(p.id)} size="md" />}
                         label={p.displayName ?? p.id}
                         title={p.displayName !== undefined ? p.id : undefined}
                         mono={p.displayName === undefined}
@@ -488,7 +491,11 @@ export function ProvidersPage({
                           }}
                         >
                           <span className="addcard-ic" aria-hidden="true">
-                            {p.defaultName === "" ? "+" : p.label.slice(0, 1).toUpperCase()}
+                            {p.defaultName === "" ? (
+                              "+"
+                            ) : (
+                              <BrandIcon icon={providerIcon(p.id)} size="lg" />
+                            )}
                           </span>
                           <span className="addcard-label">{p.label}</span>
                           <Icon name="right_small" size={ICON_SM} className="addcard-chev" />
@@ -718,6 +725,7 @@ function ProviderDetail({
   return (
     <>
       <DetailHeader
+        leading={<BrandIcon icon={providerIcon(p.id)} size="md" />}
         title={p.id}
         mono
         extra={

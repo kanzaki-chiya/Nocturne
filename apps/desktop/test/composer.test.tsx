@@ -631,7 +631,7 @@ describe("Composer 控件与附件", () => {
     }
     const controls = {
       ...baseControls,
-      model: { ...baseControls.model, label: longLabel },
+      model: { ...baseControls.model, label: longLabel, icon: "qwen-color" },
     };
     const { rerender } = render(<Composer {...props({ variant: "session", controls })} />);
     const model = screen.getByRole("button", { name: "切换模型" });
@@ -639,7 +639,9 @@ describe("Composer 控件与附件", () => {
     const effort = screen.getByRole("button", { name: "切换思考档位" });
     expect(model.classList.contains("chip")).toBe(true);
     expect(model.classList.contains("chip-model")).toBe(true);
-    expect(model.querySelector(".pd")).not.toBeNull();
+    expect(model.querySelector(".brand-icon.brand-icon-sm")).not.toBeNull();
+    expect(model.querySelector(".brand-icon.is-fallback")).toBeNull();
+    expect(model.querySelector("title")).toBeNull();
     expect(model.querySelector(".t")?.textContent).toBe(longLabel);
     expect(model.querySelector(".caret")).not.toBeNull();
     expect(model.getAttribute("title")).toBe(longLabel);

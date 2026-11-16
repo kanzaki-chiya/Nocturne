@@ -150,6 +150,7 @@ describe("Menu", () => {
             label: "千问旗舰版",
             detail: "magpie",
             title: "mp-route-001",
+            icon: "box_3",
           },
         ],
       },
@@ -161,6 +162,7 @@ describe("Menu", () => {
             label: "gpt-5-mini",
             detail: "openai",
             title: "gpt-5-mini",
+            icon: "openai",
           },
         ],
       },
@@ -315,5 +317,62 @@ describe("Menu", () => {
     );
     expect(container.querySelectorAll(".menu-ck")).toHaveLength(2);
     anchor.remove();
+  });
+
+  it("模型菜单每项均带 16px 图标（未知回退 box_3），其他菜单不显示品牌图标", () => {
+    const capabilities = {
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none" as const,
+      imageInput: false,
+      promptCache: false,
+      editTool: "edit" as const,
+    };
+    const groups = modelGroups(
+      [
+        { ref: { provider: "anthropic", model: "claude-opus-4" }, capabilities },
+        { ref: { provider: "group", model: "never-stuck" }, capabilities },
+      ],
+      [],
+    );
+    const { container, rerender } = render(
+      <ChoiceMenu
+        anchor={null}
+        label="模型"
+        control={{
+          value: "anthropic/claude-opus-4",
+          groups,
+          onSelect: vi.fn(),
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+    const items = screen.getAllByRole("menuitemradio");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.querySelector(".brand-icon.brand-icon-md")).not.toBeNull();
+    expect(items[0]?.querySelector(".brand-icon.is-fallback")).toBeNull();
+    expect(items[1]?.querySelector(".brand-icon.brand-icon-md.is-fallback")).not.toBeNull();
+    expect(container.querySelectorAll(".menu-ck")).toHaveLength(2);
+
+    rerender(
+      <ChoiceMenu
+        anchor={null}
+        label="思考档位"
+        control={{
+          value: "high",
+          groups: [
+            {
+              options: [
+                { value: "off", label: "off" },
+                { value: "high", label: "high" },
+              ],
+            },
+          ],
+          onSelect: vi.fn(),
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(container.querySelectorAll(".brand-icon")).toHaveLength(0);
   });
 });

@@ -60,4 +60,13 @@ describe("modelGroups（U-06）", () => {
   it("refKey 与菜单 value 一致（选择回传可反查模型）", () => {
     expect(refKey({ provider: "p", model: "m" })).toBe("p/m");
   });
+
+  it("modelGroups 为每项填充纯字符串 icon 键（品牌或 box_3 回退）", () => {
+    const groups = modelGroups(
+      [model("kiro", "claude-opus-5.5"), model("group", "never-stuck")],
+      [],
+    );
+    expect(groups[0]?.options[0]?.icon).toBe("claude-color");
+    expect(groups[1]?.options[0]?.icon).toBe("box_3");
+  });
 });

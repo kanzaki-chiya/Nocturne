@@ -288,12 +288,12 @@
   color: var(--a-muted);
 }
 
-.composer .chip .pd {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--a-success);
-  flex: none;
+.composer .chip-model .brand-icon {
+  margin-right: var(--space-0-5);
+}
+
+.composer .chip .brand-icon:not(.is-fallback) svg {
+  color: inherit;
 }
 
 .composer .chip .caret {
@@ -578,6 +578,10 @@
 .menu .menu-item svg {
   flex: none;
   color: var(--a-muted);
+}
+
+.menu .menu-item .brand-icon:not(.is-fallback) svg {
+  color: inherit;
 }
 
 .menu .menu-label {

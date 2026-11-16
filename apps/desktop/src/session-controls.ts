@@ -4,6 +4,7 @@ import type { ModelRef, SessionView } from "@nocturne/core/protocol";
 import type { RpcRuntime, RpcSession } from "@nocturne/rpc/client";
 
 import { effortOption, presetOptions } from "./choice-info";
+import { modelIconKey } from "./brand-icons";
 import type { ChoiceControl, ChoiceGroup, ComposerControls } from "./Composer";
 import type { PrefsStore } from "./prefs";
 import { useSessionRefresh } from "./use-session-refresh";
@@ -44,6 +45,7 @@ function modelOption(info: ModelInfo) {
     label: info.displayName ?? info.ref.model,
     detail: info.ref.provider,
     title: info.ref.model,
+    icon: modelIconKey(info.ref),
     ...(info.unavailable !== undefined ? { disabled: info.unavailable.reason } : {}),
   };
 }
@@ -222,6 +224,7 @@ export function useSessionControls(
   const modelControl: ChoiceControl = {
     value: model === undefined ? undefined : refKey(model),
     label: modelLabel ?? "模型 —",
+    icon: model === undefined ? "box_3" : modelIconKey(model),
     groups: modelGroups(snapshot?.models ?? [], snapshot?.recents ?? []),
     ...(busy ? { disabled: "本轮结束后可切换" } : {}),
     onSelect: (value) =>
@@ -412,11 +415,13 @@ export function useDraftControls(
       ? "该模型未声明可用思考档位"
       : undefined;
 
+  const draftModelRef = model?.ref ?? defaultRef;
   const draftModelLabel = model?.displayName ?? model?.ref.model;
   const controls: ComposerControls = {
     model: {
       value: modelKey,
       label: draftModelLabel ?? "模型 —",
+      icon: draftModelRef === undefined ? "box_3" : modelIconKey(draftModelRef),
       groups: modelGroups(models, data?.recents ?? []),
       onSelect: (value) => {
         setPicked((current) => ({ ...current, model: value }));
