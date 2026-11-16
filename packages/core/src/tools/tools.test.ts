@@ -1184,6 +1184,51 @@ describe("grep / glob 边界与行为", () => {
     const nested = await h.executor.execute(call("glob", { pattern: "sub/*" }), h.scope);
     expect(nested.result.modelContent).toBe("sub/deep.py");
   });
+
+  it("glob 在 lstat 循环中途中止时提前结束，不再继续 stat 剩余匹配", async () => {
+    const ws = tmpWorkspace();
+    const ac = new AbortController();
+    const h = await makeHarness(ws, undefined, ac.signal);
+    const totalMatches = 2_000;
+    const rgOut = Array.from({ length: totalMatches }, (_, i) => `file-${i}.ts`).join("\n") + "\n";
+    let lstatCalls = 0;
+    const scope: ExecutionScope = {
+      ...h.scope,
+      platform: {
+        ...platform,
+        fs: {
+          ...platform.fs,
+          lstat: () => {
+            lstatCalls++;
+            if (lstatCalls === 5) ac.abort();
+            return Promise.resolve({ type: "file", size: 10, mtimeMs: 1_000 });
+          },
+        },
+        process: {
+          ...platform.process,
+          spawn: () => ({
+            pid: 1,
+            stdout: (async function* () {
+              await Promise.resolve();
+              yield rgOut;
+            })(),
+            stderr: {
+              async *[Symbol.asyncIterator]() {
+                await Promise.resolve();
+              },
+            },
+            wait: () => Promise.resolve({ code: 0, signal: null, timedOut: false, killed: false }),
+            kill: () => Promise.resolve(),
+            detachOutput: () => undefined,
+          }),
+        },
+      },
+    };
+    const r = await h.executor.execute(call("glob", { pattern: "**/*" }), scope);
+    expect(r.status).toBe("cancelled");
+    expect(lstatCalls).toBe(5);
+    expect(lstatCalls).toBeLessThan(totalMatches);
+  });
 });
 
 describe("parseRipgrepFiles", () => {

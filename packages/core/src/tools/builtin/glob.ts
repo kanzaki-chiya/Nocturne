@@ -116,6 +116,7 @@ export const globTool: ToolDefinition<GlobInput, GlobOutput> = {
     }
 
     const rg = await globWithRipgrep(root, ctx).catch(() => null);
+    ctx.signal.throwIfAborted();
     let rels: string[];
     let engine: GlobOutput["engine"];
     const mtimes = new Map<string, number>();
@@ -124,19 +125,19 @@ export const globTool: ToolDefinition<GlobInput, GlobOutput> = {
       engine = "ripgrep";
     } else {
       const files = await globInternal(input, root, ctx);
+      ctx.signal.throwIfAborted();
       rels = files.map((f) => f.rel);
       for (const f of files) mtimes.set(f.rel, f.mtimeMs);
       engine = "internal";
     }
 
-    // 模式过滤（两引擎共用同一 glob 语义）
+    // 模式过滤（两引擎共用同一 glob 语义）与逐条权限过滤 + mtime（rg 路径下需补 stat）
     const patternRe = globToRegExp(input.pattern);
-    rels = rels.filter((r) => patternRe.test(r));
-
-    // 逐条权限过滤 + mtime（rg 路径下需补 stat）
     const entries: { path: string; rel: string; mtimeMs: number }[] = [];
     let omittedByPermission = 0;
     for (const rel of rels) {
+      if (ctx.signal.aborted) break;
+      if (!patternRe.test(rel)) continue;
       const abs = ctx.paths.join(root, rel);
       if (ctx.permissions.check({ kind: "read", target: abs }) !== "allow") {
         omittedByPermission++;
@@ -146,6 +147,7 @@ export const globTool: ToolDefinition<GlobInput, GlobOutput> = {
         mtimes.get(rel) ?? (await ctx.fs.lstat(abs).catch(() => undefined))?.mtimeMs ?? 0;
       entries.push({ path: abs, rel, mtimeMs });
     }
+    ctx.signal.throwIfAborted();
 
     entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
     const truncated = entries.length > MAX_ENTRIES;
