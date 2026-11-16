@@ -88,7 +88,7 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 ### 3. 桌面、上下文与用量
 
-在调试页的 `localStorage['nocturne.desktop.prefs.v1']` 中设置 `theme`、`autoUpdate:false`、`projects:[<echo 绝对路径>]`（与会话日志里的路径完全一致，否则侧栏会出现两个 echo），刷新后打开演示会话，点「右侧面板」再点「变更」。隐藏所有以盘符开头的叶子节点文字（标题栏的本地路径）。每张图同时设置 `data-theme` 和 `Emulation.setEmulatedMedia`，截图前读一次 `body` 背景色确认主题生效：
+在调试页的 `localStorage['nocturne.desktop.prefs.v1']` 中设置 `theme`（深浅模式；不写 `themePreset`、`contentWidth`，保持默认「工作台」与「标准」）、`autoUpdate:false`、`projects:[<echo 绝对路径>]`（与会话日志里的路径完全一致，否则侧栏会出现两个 echo），刷新后打开演示会话，点「右侧面板」再点「变更」。隐藏所有以盘符开头的叶子节点文字（标题栏的本地路径）。每张图同时设置 `data-theme` 和 `Emulation.setEmulatedMedia`，截图前读一次 `body` 背景色确认主题生效：
 
 ```text
 Emulation.setDeviceMetricsOverride {"width":1440,"height":900,"deviceScaleFactor":1,"mobile":false}
@@ -96,17 +96,17 @@ Emulation.setEmulatedMedia {"features":[{"name":"prefers-color-scheme","value":"
 Page.captureScreenshot {"format":"png","captureBeyondViewport":false}
 ```
 
-上下文用量：点状态栏 `aria-label="上下文用量"` 的按钮，按浮层位置用 `clip` 裁 720×340（下沿贴窗口底，含状态栏）。用量：进「设置 › 用量」，范围选「全部」；视口 1188×900 时统计行仍是一行五列，把 `.usage-body` 整宽连同上方统计行、下方图例用 `clip` 的 `scale` 缩到 885×418，下沿不要切到下一节标题，数字不能被裁断。
+上下文用量：点输入框旁 `aria-label` 以「上下文用量」开头（后接百分比，如 `上下文用量 20%`）的按钮，等浮层 `.context-usage-popover` 加载完；按 720:340 从浮层上沿上方约 12px 裁到窗口底，用 `clip` 的 `scale` 缩到 720×340。用量：进「设置 › 用量」，范围选「全部」；视口 1188×900 时统计行仍是一行五列，把 `.usage-body` 整宽连同统计行、下方图例用 `clip` 的 `scale` 缩到 885×418，上沿在页头范围切换和「刷新」按钮之下，下沿不要切到下一节标题「Token 构成与费用」，数字不能被裁断。
 
 ### 4. 终端
 
 复制隔离 home 到终端专用副本，按深浅分别写 `settings.json` 的 `theme`；只在副本里把日志中的工作区路径替换为 `N:\echo`，首行 `workspaceRoot` 保留实际路径。先确认 N: 未占用，再 `subst N: <示例根目录>`（映射 echo 的上一级，使 `N:\echo` 存在）。
 
-在桌面 WebView 中注入一个临时 IIFE（Vite lib 构建，入口导入正式 `createTauriHost` 与 `mountTerminal`，不打进主页），清空 body 后挂载终端，设置 `data-theme` 后再挂载以取对应配色。桌面内嵌 xterm 只带 Unicode 6 宽度表，nctrn 任务清单的 emoji 会让框线错位；注入包里用 `term.unicode.register` 注册 Unicode 11 宽度（与 Windows Terminal 一致）后再 `open`。shell 用 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`，cwd `N:/echo`，cols/rows 取 `mountTerminal().size()`，输入 `node <启动器> --resume <会话ID>`（启动器先 `chdir('N:/echo')` 再导入工作树 CLI），等到 `idle` 后截 960×600。拍完用 host API 关闭 PTY，`subst N: /d`。
+在桌面 WebView 中注入一个临时 IIFE（Vite lib 构建，入口导入正式 `createTauriHost` 与 `mountTerminal`，不打进主页），清空 body 后挂载终端，设置 `data-theme` 后再挂载以取对应配色。`mountTerminal` 已加载 Unicode 11 宽度表，注入包不用另外注册；挂载前先用 `document.fonts.load` 加载 `--mono` 的常规与粗体字形，否则字宽按回退字体量，框线会错位。shell 用 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`，cwd `N:/echo`，cols/rows 取 `mountTerminal().size()`，输入 `node <启动器> --resume <会话ID>`（启动器先 `chdir('N:/echo')` 再导入工作树 CLI），等到 `idle` 后截 960×600。拍完用 host API 关闭 PTY，`subst N: /d`。
 
 ### 5. 手机
 
-headless Edge 设置 390×844、`mobile:true`，打开中继页面，把种子里的手机身份和主机记录写入 IndexedDB `nocturne-remote`。手机网页启动时按 `localStorage['nocturne.phone.theme']` 应用主题，缺省 `system` 会删掉 `data-theme` 并跟随浏览器（headless 默认浅色），所以每种主题都先写这个键、再设 `prefers-color-scheme`、再刷新，进入 echo 和演示会话，等完成文本、输入框和字体就绪后截图，并用背景色确认主题。
+headless Edge 设置 390×844、`mobile:true`，打开中继页面，把种子里的手机身份和主机记录写入 IndexedDB `nocturne-remote`。手机网页启动时按 `localStorage['nocturne.phone.theme']` 应用主题，缺省 `system` 会删掉 `data-theme` 并跟随浏览器（headless 默认浅色）；配色预设按 `nocturne.phone.themePresets` / `nocturne.phone.themeHost`，不写即默认「工作台」。每种主题都先写 `nocturne.phone.theme`、再设 `prefers-color-scheme`、再刷新，进入 echo 和演示会话，等完成文本、输入框和字体就绪后截图，并用背景色确认主题。
 
 ### 6. 导出与验收
 
@@ -116,7 +116,7 @@ ffmpeg -i terminal-zh-dark.png -c:v libwebp -quality 88 terminal-zh-dark.webp
 ffmpeg -i phone-zh-dark.png -c:v libwebp -quality 88 phone-zh-dark.webp
 ffmpeg -i context-dark.png -c:v libwebp -quality 90 context-dark.webp
 ffmpeg -i usage-dark.png -c:v libwebp -quality 90 usage-dark.webp
-ffmpeg -i desktop-zh-dark.png -vf 'scale=1008:630,pad=1200:630:96:0:color=0x121419' -c:v libwebp -quality 86 social-zh.webp
+ffmpeg -i desktop-zh-dark.png -vf 'scale=1008:630,pad=1200:630:96:0:color=0x0b0b0d' -c:v libwebp -quality 86 social-zh.webp
 ```
 
 逐张打开检查：没有真实路径/密钥，主题正确，终端无错位，整图无外部窗口，大小达标。
