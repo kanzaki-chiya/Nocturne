@@ -335,6 +335,9 @@ export async function loadConfig(
     const merged = mergedSettings(workspaceRoot, shellEnv);
     const saved = settings.store.fields();
     const savedThemePreset = settings.store.themePreset();
+    const savedCustomThemes = settings.store.customThemes();
+    const serializedCustomThemes =
+      savedCustomThemes === undefined ? undefined : JSON.stringify(savedCustomThemes);
     return (
       [
         [
@@ -457,6 +460,12 @@ export async function loadConfig(
           saved.notifications?.sound === undefined ? undefined : String(saved.notifications.sound),
         ],
         ["appearance.themePreset", "appearance.themePreset", savedThemePreset, savedThemePreset],
+        [
+          "appearance.customThemes",
+          "appearance.customThemes",
+          serializedCustomThemes,
+          serializedCustomThemes,
+        ],
         ...Object.entries(merged.resolved.subagentProfiles ?? {}).map(
           ([name, profile]) =>
             [
@@ -475,9 +484,13 @@ export async function loadConfig(
           ? savedThemePreset !== undefined
             ? "settings"
             : undefined
-          : key === "shell" && merged.resolved.shellPath !== undefined
-            ? merged.origins.shellPath
-            : merged.origins[field];
+          : key === "appearance.customThemes"
+            ? savedCustomThemes !== undefined
+              ? "settings"
+              : undefined
+            : key === "shell" && merged.resolved.shellPath !== undefined
+              ? merged.origins.shellPath
+              : merged.origins[field];
       const source =
         origin === "modelsDev" ||
         origin === "app" ||

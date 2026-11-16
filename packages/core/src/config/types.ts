@@ -32,10 +32,12 @@ import type {
   PermissionPresetName,
   PermissionRule,
   ProviderAuth,
+  CustomTheme,
 } from "../protocol/index.js";
 
 export type { AnnotatedRule };
 export type {
+  CustomTheme,
   ExternalAgentConfig,
   ExternalAgentOverview,
   ExternalAgentProbeInput,
@@ -594,6 +596,7 @@ export interface SettingItem {
     | "notifications.doneAfterSeconds"
     | "notifications.sound"
     | "appearance.themePreset"
+    | "appearance.customThemes"
     /** 子代理档位逐条：effective/saved 为档位 JSON（ADR-0058） */
     | `subagents.profiles.${string}`;
   effective: string | undefined;
@@ -622,6 +625,7 @@ export type SettingsPatch = Partial<{
   "notifications.doneAfterSeconds": number | null;
   "notifications.sound": boolean | null;
   "appearance.themePreset": string | null;
+  "appearance.customThemes": CustomTheme[] | null;
 }> &
   /** 子代理档位逐条补丁：null 删除设置层条目（ADR-0058） */
   Partial<Record<`subagents.profiles.${string}`, SubagentProfileConfig | null>>;

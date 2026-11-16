@@ -655,4 +655,75 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
   });
+
+  it("远程连接可读 appearance.customThemes，拒绝经 updateSettings 修改或删除，不发通知", async () => {
+    const h = await connectManyWithConfig();
+    const remote = await h.add();
+    let settingsChanged = 0;
+    remote.client.onSettingsChanged(() => {
+      settingsChanged += 1;
+    });
+
+    expect(
+      (await remote.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.customThemes",
+      ),
+    ).toEqual({
+      key: "appearance.customThemes",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    const firstTheme = {
+      id: "custom-a1",
+      name: "  Amber  ",
+      bg: "#101214",
+      text: "#e6edf3",
+      accent: "#f59e0b",
+    };
+    await h.client.runtime.updateSettings({ "appearance.customThemes": [firstTheme] });
+    const expectedJson = JSON.stringify([{ ...firstTheme, name: "Amber" }]);
+    expect(settingsChanged).toBe(1);
+    expect(
+      (await remote.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.customThemes",
+      ),
+    ).toMatchObject({
+      key: "appearance.customThemes",
+      effective: expectedJson,
+      saved: expectedJson,
+      source: "settings",
+    });
+
+    for (const patch of [
+      {
+        "appearance.customThemes": [
+          {
+            id: "custom-b2",
+            name: "Remote",
+            bg: "#000000",
+            text: "#ffffff",
+            accent: "#abcdef",
+          },
+        ],
+      },
+      { "appearance.customThemes": null },
+    ]) {
+      await expect(remote.client.runtime.updateSettings(patch)).rejects.toMatchObject({
+        code: "remote_not_allowed",
+        rpcCode: -32004,
+      });
+    }
+    expect(settingsChanged).toBe(1);
+    expect(
+      (await h.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.customThemes",
+      )?.effective,
+    ).toBe(expectedJson);
+
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
 });

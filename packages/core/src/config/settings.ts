@@ -11,8 +11,8 @@ import { enqueueConfigWrite, writeJsonAtomic } from "./files.js";
 import { parseConfigFile } from "./schema.js";
 import type { ConfigFile, SettingsPatch } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
-import type { ReasoningEffort } from "../protocol/index.js";
-import { isValidSubagentProfileName } from "../protocol/index.js";
+import type { CustomTheme, ReasoningEffort } from "../protocol/index.js";
+import { isValidSubagentProfileName, validateCustomThemes } from "../protocol/index.js";
 
 /** settings.json 的原始 JSON 对象（未知字段保留） */
 type SettingsData = Record<string, unknown>;
@@ -29,6 +29,8 @@ export interface SettingsStore {
   clearProviderToggles(provider: string): Promise<void>;
   /** ADR-0093：全局 settings.json 的 appearance.themePreset（不枚举预设、不参与项目合并） */
   themePreset(): string | undefined;
+  /** 全局 settings.json 的 appearance.customThemes（不参与项目合并） */
+  customThemes(): CustomTheme[] | undefined;
   fields(): ConfigFile;
   update(patch: SettingsPatch): Promise<void>;
   setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<void>;
@@ -90,11 +92,12 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "compaction.pruneLimit" &&
         key !== "mcp.toolSearch" &&
         key !== "appearance.themePreset" &&
+        key !== "appearance.customThemes" &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.* 与 appearance.themePreset；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset 与 appearance.customThemes；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -105,6 +108,11 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     (typeof themePreset !== "string" || themePreset.trim() === "")
   ) {
     throw new TypeError("appearance.themePreset 必须是非空字符串或 null");
+  }
+  const customThemes = patch["appearance.customThemes"];
+  if (customThemes !== undefined && customThemes !== null) {
+    const parsed = validateCustomThemes(customThemes);
+    if (!parsed.ok) throw new TypeError(parsed.reason);
   }
   for (const [key, value] of Object.entries(patch)) {
     if (!key.startsWith("subagents.profiles.")) continue;
@@ -358,17 +366,25 @@ function toSpec(fields: {
   return undefined;
 }
 
-function readAppearanceThemePreset(
+function readAppearanceObject(
   data: SettingsData,
   warn?: (message: string) => void,
-): string | undefined {
+): Record<string, unknown> | undefined {
   if (!Object.hasOwn(data, "appearance")) return undefined;
   const appearance = data.appearance;
   if (typeof appearance !== "object" || appearance === null || Array.isArray(appearance)) {
     warn?.("settings.json 的 appearance 无效，已忽略");
     return undefined;
   }
-  const record = appearance as Record<string, unknown>;
+  return appearance as Record<string, unknown>;
+}
+
+function readAppearanceThemePreset(
+  data: SettingsData,
+  warn?: (message: string) => void,
+): string | undefined {
+  const record = readAppearanceObject(data, warn);
+  if (record === undefined) return undefined;
   if (!Object.hasOwn(record, "themePreset") || record.themePreset === undefined) {
     return undefined;
   }
@@ -378,6 +394,23 @@ function readAppearanceThemePreset(
     return undefined;
   }
   return preset;
+}
+
+function readAppearanceCustomThemes(
+  data: SettingsData,
+  warn?: (message: string) => void,
+): CustomTheme[] | undefined {
+  const record = readAppearanceObject(data, warn);
+  if (record === undefined) return undefined;
+  if (!Object.hasOwn(record, "customThemes") || record.customThemes === undefined) {
+    return undefined;
+  }
+  const parsed = validateCustomThemes(record.customThemes);
+  if (!parsed.ok) {
+    warn?.(`settings.json 的 appearance.customThemes 无效（${parsed.reason}），已忽略`);
+    return undefined;
+  }
+  return parsed.themes;
 }
 
 /**
@@ -403,12 +436,14 @@ export async function loadSettingsStore(
       warning = `settings.json 无法解析（${e instanceof Error ? e.message : String(e)}），设置已忽略`;
     }
   }
-  configFields(data, (message) => {
+  const appendWarning = (message: string) => {
     warning = warning ? `${warning}\n${message}` : message;
-  });
-  readAppearanceThemePreset(data, (message) => {
-    warning = warning ? `${warning}\n${message}` : message;
-  });
+  };
+  configFields(data, appendWarning);
+  if (readAppearanceObject(data, appendWarning) !== undefined) {
+    readAppearanceThemePreset(data, appendWarning);
+    readAppearanceCustomThemes(data, appendWarning);
+  }
   const fields = readShellFields(data);
   if (
     fields?.shell !== undefined &&
@@ -513,6 +548,7 @@ export async function loadSettingsStore(
         });
       },
       themePreset: () => readAppearanceThemePreset(data),
+      customThemes: () => readAppearanceCustomThemes(data),
       fields: () => configFields(data),
       async update(patch) {
         validateSettingsPatch(patch);
@@ -661,14 +697,21 @@ export async function loadSettingsStore(
             else delete next.notifications;
           }
           const themePreset = patch["appearance.themePreset"];
-          if (themePreset !== undefined) {
+          const customThemes = patch["appearance.customThemes"];
+          if (themePreset !== undefined || customThemes !== undefined) {
             const raw = next.appearance;
             const appearance: Record<string, unknown> =
               typeof raw === "object" && raw !== null && !Array.isArray(raw)
                 ? { ...(raw as Record<string, unknown>) }
                 : {};
             if (themePreset === null) delete appearance.themePreset;
-            else appearance.themePreset = themePreset;
+            else if (themePreset !== undefined) appearance.themePreset = themePreset;
+            if (customThemes === null) delete appearance.customThemes;
+            else if (customThemes !== undefined) {
+              const parsed = validateCustomThemes(customThemes);
+              if (!parsed.ok) throw new TypeError(parsed.reason);
+              appearance.customThemes = parsed.themes;
+            }
             if (Object.keys(appearance).length > 0) next.appearance = appearance;
             else delete next.appearance;
           }

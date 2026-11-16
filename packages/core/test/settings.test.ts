@@ -8,6 +8,7 @@ import {
   FakeProvider,
   loadConfig,
   loadSettingsStore,
+  type CustomTheme,
   type SettingsPatch,
   type CredentialStore,
 } from "../src/index.js";
@@ -797,6 +798,205 @@ describe("ADR-0034 设置层", () => {
     const badAppearance = await load();
     expect(badAppearance.base.shell).toBe("cmd");
     expect(badAppearance.base.warnings.join("\n")).toContain("appearance");
+  });
+  it("appearance.customThemes：保存读取与 trim、null 删除、无条数上限、原子校验与坏文件忽略告警", async () => {
+    const defaults = await load();
+    expect(
+      defaults.describeSettings().find((item) => item.key === "appearance.customThemes"),
+    ).toEqual({
+      key: "appearance.customThemes",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    // 保存并 trim 名称，describeSettings 返回 JSON 数组字符串，重读持久化生效
+    const emoji24 = "🎨".repeat(24);
+    const firstSaved: CustomTheme = {
+      id: "custom-a1",
+      name: "Amber Dusk",
+      bg: "#101214",
+      text: "#e6edf3",
+      accent: "#f59e0b",
+    };
+    const secondSaved: CustomTheme = {
+      id: "custom-b2",
+      name: emoji24,
+      bg: "#000000",
+      text: "#ffffff",
+      accent: "#abcdef",
+    };
+    const themesInput: CustomTheme[] = [
+      { ...firstSaved, name: "  Amber Dusk  " },
+      { ...secondSaved, name: `  ${emoji24}  ` },
+    ];
+    const expectedSaved: CustomTheme[] = [firstSaved, secondSaved];
+    await defaults.updateSettings({
+      "appearance.customThemes": themesInput,
+      "appearance.themePreset": "custom-a1",
+    });
+    expect(await readSettings()).toEqual({
+      appearance: { customThemes: expectedSaved, themePreset: "custom-a1" },
+    });
+
+    const reloaded = await load();
+    expect(
+      reloaded.describeSettings().find((item) => item.key === "appearance.customThemes"),
+    ).toEqual({
+      key: "appearance.customThemes",
+      effective: JSON.stringify(expectedSaved),
+      saved: JSON.stringify(expectedSaved),
+      source: "settings",
+      overridden: false,
+    });
+    // themePreset 仍是不透明字符串，即使 customThemes 清空也不校验引用
+    await reloaded.updateSettings({ "appearance.customThemes": [] });
+    expect(
+      reloaded.describeSettings().find((item) => item.key === "appearance.customThemes"),
+    ).toEqual({
+      key: "appearance.customThemes",
+      effective: "[]",
+      saved: "[]",
+      source: "settings",
+      overridden: false,
+    });
+    expect(
+      reloaded.describeSettings().find((item) => item.key === "appearance.themePreset")?.effective,
+    ).toBe("custom-a1");
+
+    // 无条数上限：一次性保存 30 条均成功
+    const manyThemes: CustomTheme[] = Array.from({ length: 30 }, (_, index) => ({
+      id: `custom-t${index}`,
+      name: `Theme ${index}`,
+      bg: "#111111",
+      text: "#eeeeee",
+      accent: "#22aa88",
+    }));
+    await reloaded.updateSettings({ "appearance.customThemes": manyThemes });
+    expect(
+      JSON.parse(
+        reloaded.describeSettings().find((item) => item.key === "appearance.customThemes")
+          ?.effective ?? "[]",
+      ),
+    ).toHaveLength(30);
+
+    // 不参与用户 config.json 与可信项目层合并
+    await json("config.json", {
+      appearance: { customThemes: [expectedSaved[0]] },
+    });
+    await mkdir(path.join(workspace, ".nocturne")).catch(() => undefined);
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ appearance: { customThemes: [] } }),
+    );
+    const withProject = await load();
+    await withProject.setWorkspaceTrusted(workspace, true);
+    await withProject.forWorkspace(workspace);
+    expect(
+      JSON.parse(
+        withProject
+          .describeSettings(workspace)
+          .find((item) => item.key === "appearance.customThemes")?.effective ?? "[]",
+      ),
+    ).toHaveLength(30);
+
+    // 整组原子校验：非法 id、重复 id、空名/超 24 码点、非小写 #rrggbb、多余字段、缺失字段、非数组均抛 TypeError 且不改磁盘
+    const snapshotBeforeBad = await readSettings();
+    const baseValid = firstSaved;
+    const invalidCases: [unknown, string | RegExp][] = [
+      ["not-an-array", /数组/],
+      [[123], /对象/],
+      [[{ ...baseValid, id: "custom-" }], /id/],
+      [[{ ...baseValid, id: "Custom-1" }], /id/],
+      [[{ ...baseValid, id: "custom-a-b" }], /id/],
+      [[{ ...baseValid, id: "custom-1\n" }], /id/],
+      [[{ ...baseValid, id: "nocturne" }], /id/],
+      [[baseValid, { ...baseValid, id: "custom-a1", name: "Dup" }], /重复/],
+      [[{ ...baseValid, name: "   " }], /name/],
+      [[{ ...baseValid, name: "" }], /name/],
+      [[{ ...baseValid, name: "🎨".repeat(25) }], /24/],
+      [[{ ...baseValid, name: "𠀀".repeat(25) }], /24/],
+      [[{ ...baseValid, bg: "#ABCDEF" }], /bg/],
+      [[{ ...baseValid, text: "#abc" }], /text/],
+      [[{ ...baseValid, accent: "#12345678" }], /accent/],
+      [[{ ...baseValid, accent: "123456" }], /accent/],
+      [[{ ...baseValid, accent: "#123456\n" }], /accent/],
+      [[{ ...baseValid, extra: true }], /多余字段/],
+      [[{ id: "custom-x1", name: "NoAccent", bg: "#112233", text: "#445566" }], /缺少字段/],
+    ];
+    for (const [badThemes, pattern] of invalidCases) {
+      await expect(
+        withProject.updateSettings({
+          "appearance.customThemes": badThemes as never,
+          "appearance.themePreset": "should-not-write",
+        }),
+      ).rejects.toThrow(TypeError);
+      await expect(
+        withProject.updateSettings({ "appearance.customThemes": badThemes as never }),
+      ).rejects.toThrow(pattern);
+    }
+    expect(await readSettings()).toEqual(snapshotBeforeBad);
+
+    // null 删除：保留 appearance 兄弟字段；全删空时移除 appearance 段
+    await json("settings.json", {
+      appearance: {
+        themePreset: "paper",
+        customThemes: expectedSaved,
+        futureFlag: true,
+      },
+      shell: "cmd",
+    });
+    const withSibling = await load();
+    await withSibling.updateSettings({ "appearance.customThemes": null });
+    expect(await readSettings()).toEqual({
+      appearance: { themePreset: "paper", futureFlag: true },
+      shell: "cmd",
+    });
+    expect(
+      withSibling.describeSettings().find((item) => item.key === "appearance.customThemes"),
+    ).toEqual({
+      key: "appearance.customThemes",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    await json("settings.json", { appearance: { customThemes: expectedSaved } });
+    const onlyCustom = await load();
+    await onlyCustom.updateSettings({ "appearance.customThemes": null });
+    expect(await readSettings()).toEqual({});
+
+    // 坏文件降级：customThemes 任一项非法时整组忽略并告警，不影响 themePreset 与其他设置
+    for (const corruptThemes of [
+      "bad",
+      [baseValid, { ...baseValid, id: "custom-b2", extra: 1 }],
+      [baseValid, { ...baseValid }],
+      [{ ...baseValid, bg: "#AABBCC" }],
+      [{ ...baseValid, name: "🎨".repeat(25) }],
+    ]) {
+      await json("settings.json", {
+        appearance: { themePreset: "nocturne", customThemes: corruptThemes },
+        shell: "cmd",
+      });
+      const loadedBad = await load();
+      expect(loadedBad.base.shell).toBe("cmd");
+      expect(loadedBad.base.warnings.join("\n")).toContain("appearance.customThemes");
+      expect(
+        loadedBad.describeSettings().find((item) => item.key === "appearance.themePreset")
+          ?.effective,
+      ).toBe("nocturne");
+      expect(
+        loadedBad.describeSettings().find((item) => item.key === "appearance.customThemes"),
+      ).toEqual({
+        key: "appearance.customThemes",
+        effective: undefined,
+        saved: undefined,
+        source: "default",
+        overridden: false,
+      });
+    }
   });
   it.each(PERMISSION_PRESET_NAMES)("%s 对 settings edit 至少 ask（read-only deny）", (preset) => {
     const policy = createRulePolicy({

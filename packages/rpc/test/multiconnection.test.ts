@@ -516,4 +516,87 @@ describe("多连接共享后台", () => {
     await h.client.shutdown();
     await Promise.all([h.served, remoteServed, uninitServed]);
   });
+
+  it("appearance.customThemes：本机写成功广播 settingsChanged 到远程，非法与远程写不通知，null 删除同样广播", async () => {
+    const h = await connectWithConfig();
+    const [remoteServerEnd, remoteTransport] = createMemoryTransportPair();
+    const remoteServed = h.server.serve(remoteServerEnd, { origin: "remote" });
+    const remote = createRpcClient(remoteTransport, { clientName: "remote-phone" });
+    await remote.initialize();
+
+    const order: string[] = [];
+    h.client.onSettingsChanged(() => {
+      order.push("local-notified");
+    });
+    let remoteLatestThemes: string | undefined;
+    let remoteCount = 0;
+    remote.onSettingsChanged(() => {
+      remoteCount += 1;
+      order.push("remote-notified");
+      void remote.runtime.describeSettings().then((items) => {
+        remoteLatestThemes = items.find(
+          (item) => item.key === "appearance.customThemes",
+        )?.effective;
+      });
+    });
+
+    const firstTheme = {
+      id: "custom-n1",
+      name: "  Night Owl  ",
+      bg: "#011627",
+      text: "#d6deeb",
+      accent: "#82aaff",
+    };
+    const savedThemes = [{ ...firstTheme, name: "Night Owl" }];
+    const expectedJson = JSON.stringify(savedThemes);
+
+    const updated = await h.client.runtime.updateSettings({
+      "appearance.customThemes": [firstTheme],
+    });
+    order.push("response");
+    expect(order).toEqual(["local-notified", "remote-notified", "response"]);
+    expect(updated.find((item) => item.key === "appearance.customThemes")).toEqual({
+      key: "appearance.customThemes",
+      effective: expectedJson,
+      saved: expectedJson,
+      source: "settings",
+      overridden: false,
+    });
+    await until(() => remoteLatestThemes === expectedJson);
+    expect(JSON.parse(readFileSync(path.join(h.home, "settings.json"), "utf8"))).toEqual({
+      appearance: { customThemes: savedThemes },
+    });
+
+    // 非法写与远程写均不发通知
+    const beforeFail = order.length;
+    await expect(
+      h.client.runtime.updateSettings({
+        "appearance.customThemes": [{ ...firstTheme, accent: "#82AAFF" }],
+      }),
+    ).rejects.toThrow();
+    await expect(
+      remote.runtime.updateSettings({ "appearance.customThemes": [] }),
+    ).rejects.toMatchObject({ code: "remote_not_allowed" });
+    expect(order).toHaveLength(beforeFail);
+    expect(remoteCount).toBe(1);
+
+    // null 删除成功仍广播
+    await h.client.runtime.updateSettings({ "appearance.customThemes": null });
+    expect(remoteCount).toBe(2);
+    await until(() => remoteLatestThemes === undefined);
+    expect(
+      (await remote.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.customThemes",
+      ),
+    ).toEqual({
+      key: "appearance.customThemes",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    await h.client.shutdown();
+    await Promise.all([h.served, remoteServed]);
+  });
 });
