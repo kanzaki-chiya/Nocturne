@@ -34,6 +34,8 @@ import {
   runTurn,
   runRoleCall,
   cleanTitle,
+  TITLE_SYSTEM_PROMPT,
+  formatTitleUserMessage,
   type TurnConfig,
   type TurnDeps,
 } from "./agent/index.js";
@@ -4148,8 +4150,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const text = event.payload.content
         .filter((block) => block.type === "text")
         .map((block) => block.text)
-        .join("\n")
-        .slice(0, 2000);
+        .join("\n");
       const signal = AbortSignal.any([titleController.signal, session.failedSignal]);
       titleSettled = (async () => {
         const result = await runRoleCall(
@@ -4158,8 +4159,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             purpose: "title",
             model: titleModel.model.ref.model,
             protocol: titleModel.model.protocol,
-            system: [{ text: "用与用户相同的语言，生成不超过 20 个字的会话标题，只输出标题。" }],
-            messages: [{ role: "user", content: [{ type: "text", text }] }],
+            system: [{ text: TITLE_SYSTEM_PROMPT }],
+            messages: [
+              { role: "user", content: [{ type: "text", text: formatTitleUserMessage(text) }] },
+            ],
             tools: [],
             maxOutputTokens: 100,
             sessionId: session.id,
