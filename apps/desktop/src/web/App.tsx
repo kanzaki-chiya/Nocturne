@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
 import { watchTheme } from "../appearance";
 import { subscribeThemePreset } from "../theme-sync";
@@ -34,8 +34,12 @@ import {
   clearDisconnects,
   loadDisconnects,
   loadTheme,
+  loadThemeHost,
+  loadThemePreset,
   recordDisconnect,
   saveTheme,
+  saveThemePreset,
+  selectThemeHost,
   type PhoneTheme,
 } from "./local";
 import {
@@ -205,7 +209,13 @@ export function PhoneApp({
   const [installHint, setInstallHint] = useState(false);
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
-  const [themePreset, setThemePreset] = useState<ThemePresetId>("workbench");
+  const hostId = "hostId" in page ? page.hostId : undefined;
+  const [remoteTheme, setRemoteTheme] = useState<{ hostId: string; id: ThemePresetId }>();
+  const themePreset = !ready
+    ? loadThemePreset()
+    : remoteTheme?.hostId === hostId && remoteTheme
+      ? remoteTheme.id
+      : loadThemePreset(hostId ?? "");
   const [menu, setMenu] = useState<"hosts" | null>(null);
   /** 会话页顶栏右侧的位置：SessionScreen 放入会话菜单与侧边栏按钮 */
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
@@ -276,13 +286,16 @@ export function PhoneApp({
       setBusy(false);
     }
   };
-  useEffect(
+  useLayoutEffect(
     () =>
       watchTheme(document.documentElement, theme, themePreset, (resolved, background) => {
         platformRef.current.observer?.theme?.(resolved, background);
       }),
     [theme, themePreset],
   );
+  useLayoutEffect(() => {
+    if (ready) selectThemeHost(hostId);
+  }, [ready, hostId]);
   useEffect(() => {
     void push?.refresh();
     let active = true;
@@ -299,7 +312,7 @@ export function PhoneApp({
             setError(pairingError(e));
           }
         }
-        const recent = lastHost(list);
+        const recent = list.find((host) => host.hostId === loadThemeHost()) ?? lastHost(list);
         if (recent) navigate({ kind: "home", hostId: recent.hostId }, true);
         void platform.notificationTarget?.().then((target) => {
           if (target) setNotificationTarget(target);
@@ -337,7 +350,6 @@ export function PhoneApp({
   /** 页面可见，或 App 开了「后台保持连接」：都要保持连接 */
   const shouldConnect = () =>
     platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
-  const hostId = "hostId" in page ? page.hostId : undefined;
   const activeSessionId =
     page.kind === "session" || page.kind === "ensemble" || page.kind === "ensemble-member"
       ? page.sessionId
@@ -382,7 +394,6 @@ export function PhoneApp({
   const computer = hosts.find((h) => h.hostId === hostId);
   useEffect(() => {
     if (!hostId) {
-      setThemePreset("workbench");
       setConnection(undefined);
       sessions.clear();
       return;
@@ -392,7 +403,6 @@ export function PhoneApp({
     let active = true;
     let channel: PhoneConnectionLike | undefined;
     let stopTheme: (() => void) | undefined;
-    setThemePreset("workbench");
     sessions.clear();
     void storage
       .identity()
@@ -415,7 +425,10 @@ export function PhoneApp({
           connected: async (client, relay) => {
             if (!active) return;
             stopTheme?.();
-            stopTheme = subscribeThemePreset(client, setThemePreset);
+            stopTheme = subscribeThemePreset(client, (id) => {
+              saveThemePreset(target.hostId, id);
+              setRemoteTheme({ hostId: target.hostId, id });
+            });
             await sessions.connected(client);
             await storage.putHost({ ...target, lastConnectedAt: Date.now() });
             if (relay) await push?.attach(target.hostId, relay).catch(() => undefined);

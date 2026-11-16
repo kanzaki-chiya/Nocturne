@@ -56,8 +56,8 @@
   --cm-function: var(--a-accentAlt);
   --cm-type: var(--a-cat4);
   --cm-property: var(--a-cat5);
-  --cm-comment: #55555d;
-  --cm-active-line: color-mix(in srgb, #1a1a1f 70%, transparent);
+  --cm-comment: var(--a-faint);
+  --cm-active-line: color-mix(in srgb, var(--a-raised) 70%, transparent);
   --cm-target-line: color-mix(in srgb, var(--a-accent) 16%, transparent);
   --cm-selection: color-mix(in srgb, var(--a-accent) 28%, transparent);
   --cm-search: color-mix(in srgb, var(--a-warning) 28%, transparent);
@@ -178,8 +178,6 @@
     --a-scrollThumbHover: rgba(69, 79, 92, 0.4);
     --a-cat4: #a54d8f;
     --a-cat5: #4f6585;
-    --cm-comment: #a6a6ad;
-    --cm-active-line: color-mix(in srgb, #f4f4f5 70%, transparent);
     --a-qr-bg: #ffffff;
     --a-overlay: rgba(24, 22, 40, 0.28);
     --a-accent-hover: #4e42a0;
@@ -231,8 +229,6 @@
   --a-scrollThumbHover: rgba(69, 79, 92, 0.4);
   --a-cat4: #a54d8f;
   --a-cat5: #4f6585;
-  --cm-comment: #a6a6ad;
-  --cm-active-line: color-mix(in srgb, #f4f4f5 70%, transparent);
   --a-qr-bg: #ffffff;
   --a-overlay: rgba(24, 22, 40, 0.28);
   --a-accent-hover: #4e42a0;
@@ -283,8 +279,6 @@
   --a-scrollThumbHover: rgba(183, 192, 204, 0.38);
   --a-cat4: #d99ac9;
   --a-cat5: #8fa6c9;
-  --cm-comment: #55555d;
-  --cm-active-line: color-mix(in srgb, #1a1a1f 70%, transparent);
   --a-qr-bg: #ffffff;
   --a-overlay: rgba(4, 4, 10, 0.56);
   --a-accent-hover: #bcb9f3;

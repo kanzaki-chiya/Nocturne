@@ -655,15 +655,18 @@ it("缓存首帧即显示；只有缓存时不迁移项目或刷新通知，真�
   await waitFor(() => expect(host.deferred).toHaveLength(1));
   expect(storedPrefs().projectOrder).toBeUndefined();
   expect(storedPrefs().projectSort).toBe("activity");
-  expect(
-    host.calls.some(
+  const globalSettingsReads = () =>
+    host.calls.filter(
       (c) => c.method === "runtime.describeSettings" && c.params.workspaceRoot === undefined,
-    ),
-  ).toBe(false);
+    );
+  // 连上后台必须立即首读主题；只有缓存时不能再发起通知设置刷新。
+  expect(globalSettingsReads()).toHaveLength(1);
   await act(async () => host.deferred[0]?.respond(host.sessions));
   await waitFor(() => expect(screen.queryByRole("button", { name: /^已删除的会话/ })).toBeNull());
   expect(screen.getByRole("button", { name: /^alpha 会话/ })).toBe(alpha);
   await waitFor(() => expect(storedPrefs().projectOrder).toHaveLength(3));
+  // 真实列表接管后才允许第二次全局读取，刷新通知设置。
+  await waitFor(() => expect(globalSettingsReads()).toHaveLength(2));
   expect(readCachedIds()).toEqual(["alpha", "beta", "gamma"]);
 });
 

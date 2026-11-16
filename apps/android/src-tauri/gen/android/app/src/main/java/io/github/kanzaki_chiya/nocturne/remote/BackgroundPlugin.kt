@@ -6,7 +6,6 @@ import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.graphics.Color
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
@@ -240,21 +239,21 @@ class BackgroundPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun set_system_bars(invoke: Invoke) {
     val args = invoke.parseArgs(SystemBarsArgs::class.java)
-    if (!Regex("^#[0-9a-fA-F]{6}$").matches(args.background)) {
-      invoke.reject("Invalid system bars background")
-      return
-    }
-    val background = Color.parseColor(args.background)
     activity.runOnUiThread {
       val window = activity.window
-      window.decorView.setBackgroundColor(background)
-      @Suppress("DEPRECATION")
-      window.statusBarColor = background
-      @Suppress("DEPRECATION")
-      window.navigationBarColor = background
-      val controller = WindowCompat.getInsetsController(window, window.decorView)
-      controller.isAppearanceLightStatusBars = args.light
-      controller.isAppearanceLightNavigationBars = args.light
+      SystemBarsTheme.apply(args.light, args.background,
+        setLight = { light ->
+          val controller = WindowCompat.getInsetsController(window, window.decorView)
+          controller.isAppearanceLightStatusBars = light
+          controller.isAppearanceLightNavigationBars = light
+        },
+        setBackground = { background ->
+          window.decorView.setBackgroundColor(background)
+          @Suppress("DEPRECATION")
+          window.statusBarColor = background
+          @Suppress("DEPRECATION")
+          window.navigationBarColor = background
+        })
       invoke.resolve(JSObject())
     }
   }

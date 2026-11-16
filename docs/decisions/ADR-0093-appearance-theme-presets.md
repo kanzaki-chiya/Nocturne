@@ -17,7 +17,7 @@
 
 次要文字 `--a-secondary` 与背景的对比度至少 7，弱化文字 `--a-muted` 与背景至少 4.5，`--a-on-accent` 与强调色至少 4.5。文字混色未达标时按效果图的 0.01 步长朝正文色回退；强调色上的文字先沿用效果图选择，未达标再朝正文色回退。界面不显示任何提示。装饰色 `--a-faint` 沿用效果图，不作为弱化正文文字。
 
-不随预设变化的颜色按 light/dark 固定：`--a-success/warning/error` 及其 `-bg`、`-border`、`--a-accentAlt`、`--a-cat2..5`、`--a-overlay`、`--a-qr-bg`，以及 `--cm-*` 中不引用 `--a-accent` 的颜色。固定值沿用效果图 `FIXED` 和现有 token；不把状态背景重新混合成主题背景。其他未由效果图推算的变量也继续由 token 提供。
+不随预设变化的颜色按 light/dark 固定：`--a-success/warning/error` 及其 `-bg`、`-border`、`--a-accentAlt`、`--a-cat2..5`、`--a-overlay`、`--a-qr-bg`。固定值沿用效果图 `FIXED`；不把状态背景重新混合成主题背景。`--cm-*` 保持对语义 token 的引用：注释 `--cm-comment` 跟随 `--a-faint`，当前行 `--cm-active-line` 由 `--a-raised` 混合；引用固定状态色的代码色自然保持固定，不单独冻结代码色。其他未由效果图推算的变量也继续由 token 提供。
 
 ### 应用与本地偏好
 
@@ -31,7 +31,7 @@
 
 RPC 新增易失的 `runtime.settingsChanged` 通知，参数为 `{}`，设置成功写入后、响应之前广播给全部已握手连接（包括远程），不写会话日志、不包含设置内容。客户端订阅后初次读取设置，通知后重读；失败写入不发送通知。重载配置成功后也发送该通知，以便同步外部改动。远程连接可读取预设，不允许通过 `runtime.updateSettings` 修改 `appearance.themePreset`；保留既有其他远程设置能力。
 
-手机连接或切换电脑时清除上一台的预设，从当前连接的 Runtime 读取，忽略旧连接迟到结果；通知触发实时刷新。手机只同步配色 id，模式仍从手机本机读取并独立解析系统偏好，设置页布局不变。安卓继续共享真实手机网页，通过 `PhonePlatform.observer.theme(resolvedMode, background)` 把当前计算后的 `--a-bg` 传到原生系统栏桥；原生按背景色设置状态栏/导航栏，按模式选择图标深浅。本轮不具备安卓真机验收条件。
+手机在现有本机 localStorage 中以 `nocturne.phone.themePresets` 按 hostId 缓存预设，用 `nocturne.phone.themeHost` 保存上次打开的电脑；网页与安卓在打开数据库和首次渲染前同步应用缓存，连接或切换电脑时先应用目标电脑缓存，无缓存才用工作台。连上后从当前 Runtime 读取并覆盖、写回对应缓存，忽略旧连接迟到结果；通知触发实时刷新并更新缓存。手机只同步配色 id，模式仍从手机本机读取并独立解析系统偏好，设置页布局不变。安卓继续共享真实手机网页，通过 `PhonePlatform.observer.theme(resolvedMode, background)` 把当前计算后的 `--a-bg` 传到原生系统栏桥；原生按背景色设置状态栏/导航栏，按模式选择图标深浅。本轮不具备安卓真机验收条件。
 
 ### 第一、二期边界
 

@@ -36,7 +36,10 @@ afterEach(() => {
 });
 
 describe("主题预设", () => {
-  it("非强调色的代码注释与活动行保持工作台原色，切换模式才变化", () => {
+  it.each([
+    ["paper", "light"],
+    ["ink", "dark"],
+  ] as const)("%s %s：代码注释解析为主题 faint，当前行跟随 raised", (id, mode) => {
     const sheet = document.createElement("style");
     sheet.textContent = readFileSync(
       path.resolve(import.meta.dirname, "../src/tokens.css"),
@@ -44,20 +47,20 @@ describe("主题预设", () => {
     );
     document.head.append(sheet);
     try {
-      for (const mode of ["light", "dark"] as const) {
-        root.dataset.theme = mode;
-        for (const preset of PRESETS) {
-          applyThemePreset(root, preset.id, mode);
-          const style = getComputedStyle(root);
-          expect(style.getPropertyValue("--cm-comment").trim()).toBe(
-            mode === "light" ? "#a6a6ad" : "#55555d",
-          );
-          expect(style.getPropertyValue("--cm-active-line").replace(/\s/g, "")).toBe(
-            `color-mix(insrgb,${mode === "light" ? "#f4f4f5" : "#1a1a1f"}70%,transparent)`,
-          );
-          expect(style.getPropertyValue("--cm-keyword").trim()).toBe("var(--a-accent)");
-        }
-      }
+      root.dataset.theme = mode;
+      applyThemePreset(root, id, mode);
+      const style = getComputedStyle(root);
+      const comment = style.getPropertyValue("--cm-comment").trim();
+      expect(comment).toBe("var(--a-faint)");
+      // jsdom 保留自定义属性引用，按浏览器的 var 语义解析后核对实际主题值。
+      const resolved = comment.replace(/var\((--[\w-]+)\)/g, (_match, name: string) =>
+        style.getPropertyValue(name).trim(),
+      );
+      expect(resolved).toBe(style.getPropertyValue("--a-faint").trim());
+      expect(resolved).toBe(id === "paper" ? "#aaa8a5" : "#505050");
+      expect(style.getPropertyValue("--cm-active-line").replace(/\s/g, "")).toBe(
+        "color-mix(insrgb,var(--a-raised)70%,transparent)",
+      );
     } finally {
       sheet.remove();
     }

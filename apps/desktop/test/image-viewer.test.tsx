@@ -748,6 +748,7 @@ describe("ImageViewer", () => {
     };
     const fakeClient = {
       onNotification: () => () => undefined,
+      onSettingsChanged: () => () => undefined,
       describeComputer: async () => ({
         name: "PC",
         homeDir: "Z:/home",

@@ -2,12 +2,15 @@ import { createRoot } from "react-dom/client";
 import { PaneErrorBoundary } from "../../desktop/src/ErrorBoundary";
 import { PhoneApp } from "../../desktop/src/web/App";
 import { indexedStorage } from "../../desktop/src/web/storage";
+import { applyStoredPhoneAppearance } from "../../desktop/src/web/local";
 import type { WebHost } from "../../desktop/src/web/host";
 import "../../desktop/src/styles.css";
 import "../../desktop/src/web/phone.css";
 import "./app.css";
 import { tauriHost } from "./host";
 import { appPlatform } from "./platform";
+
+applyStoredPhoneAppearance(document.documentElement);
 
 // WebView 不允许导航到页面以外的地址（Rust 侧 on_navigation 强制），所以外链在 App 里不打开
 const host: WebHost = {

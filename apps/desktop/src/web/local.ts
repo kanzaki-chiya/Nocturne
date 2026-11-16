@@ -3,9 +3,14 @@
  * 清除网站数据而失败，失败时退回默认值，不影响连接与会话。
  */
 
+import { applyThemePreset, resolvedTheme } from "../appearance";
+import { themePresetId, type ThemePresetId } from "../theme-presets";
+
 export type PhoneTheme = "system" | "light" | "dark";
 
 const THEME_KEY = "nocturne.phone.theme";
+const THEME_PRESETS_KEY = "nocturne.phone.themePresets";
+const THEME_HOST_KEY = "nocturne.phone.themeHost";
 const TODOS_KEY = "nocturne.phone.todosCollapsed";
 const DIAGNOSTICS_KEY = "nocturne.phone.diagnostics";
 const DIAGNOSTICS_LIMIT = 8;
@@ -46,6 +51,43 @@ export function applyTheme(theme: PhoneTheme): void {
 export function saveTheme(theme: PhoneTheme): void {
   write(THEME_KEY, theme);
   applyTheme(theme);
+}
+
+function cachedThemePresets(): Record<string, unknown> {
+  try {
+    const value = JSON.parse(read(THEME_PRESETS_KEY) ?? "{}") as unknown;
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function loadThemeHost(): string | undefined {
+  const hostId = read(THEME_HOST_KEY);
+  return hostId === "" ? undefined : (hostId ?? undefined);
+}
+
+/** 不传 hostId 时读上次打开的电脑，用于数据库与网络就绪前的首帧。 */
+export function loadThemePreset(hostId = loadThemeHost() ?? ""): ThemePresetId {
+  const presets = cachedThemePresets();
+  return themePresetId(Object.hasOwn(presets, hostId) ? presets[hostId] : undefined);
+}
+
+export function selectThemeHost(hostId: string | undefined): void {
+  write(THEME_HOST_KEY, hostId ?? "");
+}
+
+export function saveThemePreset(hostId: string, preset: ThemePresetId): void {
+  write(THEME_PRESETS_KEY, JSON.stringify({ ...cachedThemePresets(), [hostId]: preset }));
+}
+
+export function applyStoredPhoneAppearance(root: HTMLElement): void {
+  const theme = loadTheme();
+  if (theme === "system") delete root.dataset.theme;
+  else root.dataset.theme = theme;
+  applyThemePreset(root, loadThemePreset(), resolvedTheme(theme));
 }
 
 /** 会话页任务清单默认收起；手机自己的状态，不读写桌面 prefs 的 todosCollapsed。 */
