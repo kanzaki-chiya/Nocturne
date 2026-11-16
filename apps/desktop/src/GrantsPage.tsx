@@ -5,16 +5,12 @@ import { ConfirmDialog } from "./ProvidersPage";
 import {
   Badge,
   Button,
-  DataTable,
-  DetailHeader,
   EmptyState,
   ICON_SM,
   Icon,
-  ListGroup,
-  ListItem,
-  MasterDetail,
   PageHeader,
   SettingsGroup,
+  SettingsListRow,
   SettingsRow,
 } from "./ui";
 import "./pages.css";
@@ -35,6 +31,20 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).at(-1) ?? value;
 const samePath = (a: string, b: string | undefined) =>
   a.replaceAll("\\", "/").toLowerCase() === b?.replaceAll("\\", "/").toLowerCase();
+const workspaceTitle = (workspace: string, plainWorkspace: string | undefined) =>
+  samePath(workspace, plainWorkspace) ? "普通对话" : basename(workspace);
+
+function GrantTrustStatus({ item }: { item: GrantWorkspace }) {
+  const tone = !item.hasProjectConfig ? "" : item.trusted ? "ok" : "warn";
+  const label = !item.hasProjectConfig ? "没有项目配置" : item.trusted ? "已信任" : "未信任";
+  return (
+    <span className={tone ? `grant-status ${tone}` : "grant-status"}>
+      <span className={`grant-status-dot${tone ? "" : " hollow"}`} />
+      {label}
+    </span>
+  );
+}
+
 export function GrantTarget({ target }: { target: string }) {
   return target.length > 100 ? (
     <details className="grant-target">
@@ -86,13 +96,18 @@ export function GrantsPage({
             Number(samePath(a.workspace, plainWorkspace)) || a.workspace.localeCompare(b.workspace),
       );
       setWorkspaces(list);
-      setSelected((value) =>
-        list.some((item) => item.workspace === value) ? value : list[0]?.workspace,
-      );
+      setSelected((value) => {
+        if (remote) {
+          return list.some((item) => item.workspace === value) ? value : list[0]?.workspace;
+        }
+        return value !== undefined && list.some((item) => item.workspace === value)
+          ? value
+          : undefined;
+      });
     } catch (reason) {
       setError(message(reason));
     }
-  }, [client, plainWorkspace]);
+  }, [client, plainWorkspace, remote]);
   const refresh = useCallback(async () => {
     if (!client || !selected) return;
     const version = ++generation.current;
@@ -330,60 +345,31 @@ export function GrantsPage({
           </div>
         </>
       ) : (
-        <>
-          <div className="spage">
-            <div className="readable">
-              <PageHeader title="授权" />
-              {error && (
-                <div className="desc err" role="alert">
-                  {error}
-                </div>
-              )}
-              <MasterDetail
-                framed
-                listLabel="工作区"
-                list={
-                  <ListGroup title="工作区" count={workspaces.length}>
-                    {workspaces.map((item) => (
-                      <ListItem
-                        key={item.workspace}
-                        label={
-                          samePath(item.workspace, plainWorkspace)
-                            ? "普通对话"
-                            : basename(item.workspace)
-                        }
-                        dot={item.hasProjectConfig && !item.trusted ? "warn" : undefined}
-                        selected={selected === item.workspace}
-                        meta={item.grantCount > 0 ? String(item.grantCount) : undefined}
-                        onClick={() => {
-                          setSelected(item.workspace);
-                        }}
-                      />
-                    ))}
-                  </ListGroup>
-                }
-              >
-                {current ? (
-                  <>
-                    <DetailHeader
-                      title={
-                        samePath(current.workspace, plainWorkspace)
-                          ? "普通对话"
-                          : basename(current.workspace)
-                      }
-                      extra={<span className="desc mono grant-path">{current.workspace}</span>}
-                    />
-                    <SettingsGroup title="配置">
-                      <SettingsRow label="项目信任">
-                        <span className="val">
-                          {!current.hasProjectConfig
-                            ? "没有项目配置"
-                            : current.trusted
-                              ? "已信任"
-                              : "未信任"}
-                        </span>
+        <div className="spage">
+          <div className="readable">
+            {current ? (
+              <>
+                <PageHeader
+                  title={workspaceTitle(current.workspace, plainWorkspace)}
+                  crumb={{
+                    parent: "授权",
+                    onBack: () => {
+                      setSelected(undefined);
+                    },
+                  }}
+                  extra={<span className="grant-detail-path">{current.workspace}</span>}
+                />
+                {error && (
+                  <div className="desc err" role="alert">
+                    {error}
+                  </div>
+                )}
+                <div className="sbody">
+                  <SettingsGroup title="项目信任" plain>
+                    <SettingsRow label={<GrantTrustStatus item={current} />}>
+                      {current.hasProjectConfig && (
                         <Button
-                          disabled={busy || !client || !current.hasProjectConfig}
+                          disabled={busy || !client}
                           onClick={() => {
                             if (!client) return;
                             if (current.trusted)
@@ -408,100 +394,115 @@ export function GrantsPage({
                         >
                           {current.trusted ? "取消信任" : "信任此项目"}
                         </Button>
-                      </SettingsRow>
-                    </SettingsGroup>
+                      )}
+                    </SettingsRow>
+                  </SettingsGroup>
+                  <SettingsGroup
+                    title="项目授权"
+                    count={grants.length}
+                    plain
+                    action={
+                      grants.length > 0 ? (
+                        <Button
+                          size="sm"
+                          variant={confirmAll ? "danger-solid" : "ghost-danger"}
+                          disabled={busy || !client}
+                          onClick={() => {
+                            if (!confirmAll) {
+                              setConfirmAll(true);
+                              return;
+                            }
+                            if (client)
+                              void mutate(
+                                () =>
+                                  client.runtime.revokeAllGrants({
+                                    workspace: current.workspace,
+                                  }),
+                                "已撤销全部项目授权",
+                              );
+                          }}
+                        >
+                          {confirmAll ? "确认全部撤销" : "全部撤销"}
+                        </Button>
+                      ) : undefined
+                    }
+                  >
                     {grants.length > 0 ? (
-                      <SettingsGroup
-                        title="项目授权"
-                        count={grants.length}
-                        plain
-                        action={
+                      grants.map((g) => (
+                        <div className="grant-item" key={`${g.kind}:${g.target}`}>
+                          <Badge>{grantKind(g.kind)}</Badge>
+                          <code className="grant-item-target" title={g.target}>
+                            {g.target}
+                          </code>
+                          <time className="grant-item-time" dateTime={g.createdAt}>
+                            {new Date(g.createdAt).toLocaleString("zh-CN", { hour12: false })}
+                          </time>
                           <Button
+                            variant="ghost-danger"
                             size="sm"
-                            variant={confirmAll ? "danger-solid" : "ghost-danger"}
                             disabled={busy || !client}
                             onClick={() => {
-                              if (!confirmAll) {
-                                setConfirmAll(true);
-                                return;
-                              }
                               if (client)
                                 void mutate(
                                   () =>
-                                    client.runtime.revokeAllGrants({
+                                    client.runtime.revokeGrant({
                                       workspace: current.workspace,
+                                      kind: g.kind,
+                                      target: g.target,
                                     }),
-                                  "已撤销全部项目授权",
+                                  "已撤销",
                                 );
                             }}
                           >
-                            {confirmAll ? "确认全部撤销" : "全部撤销"}
+                            撤销
                           </Button>
-                        }
-                      >
-                        <DataTable
-                          aria-label="项目授权列表"
-                          rows={grants}
-                          rowKey={(g) => `${g.kind}:${g.target}`}
-                          columns={[
-                            { key: "kind", header: "类别", render: (g) => grantKind(g.kind) },
-                            {
-                              key: "target",
-                              header: "目标",
-                              mono: true,
-                              render: (g) => <GrantTarget target={g.target} />,
-                            },
-                            {
-                              key: "time",
-                              header: "授予时间",
-                              muted: true,
-                              render: (g) => (
-                                <time dateTime={g.createdAt}>
-                                  {new Date(g.createdAt).toLocaleString("zh-CN", { hour12: false })}
-                                </time>
-                              ),
-                            },
-                            {
-                              key: "action",
-                              header: "",
-                              label: "操作",
-                              numeric: true,
-                              render: (g) => (
-                                <Button
-                                  variant="ghost-danger"
-                                  size="sm"
-                                  disabled={busy || !client}
-                                  onClick={() => {
-                                    if (client)
-                                      void mutate(
-                                        () =>
-                                          client.runtime.revokeGrant({
-                                            workspace: current.workspace,
-                                            kind: g.kind,
-                                            target: g.target,
-                                          }),
-                                        "已撤销",
-                                      );
-                                  }}
-                                >
-                                  撤销
-                                </Button>
-                              ),
-                            },
-                          ]}
-                        />
-                      </SettingsGroup>
+                        </div>
+                      ))
                     ) : (
-                      <EmptyState inline>还没有项目授权</EmptyState>
+                      <SettingsRow label={<span className="val dim">—</span>} />
                     )}
-                  </>
-                ) : (
-                  <EmptyState>还没有工作区授权记录。</EmptyState>
+                  </SettingsGroup>
+                </div>
+              </>
+            ) : (
+              <>
+                <PageHeader title="授权" />
+                {error && (
+                  <div className="desc err" role="alert">
+                    {error}
+                  </div>
                 )}
-              </MasterDetail>
-            </div>
+                <div className="sbody">
+                  <SettingsGroup title="工作区" count={workspaces.length} plain>
+                    {workspaces.length > 0 ? (
+                      workspaces.map((item) => (
+                        <SettingsListRow
+                          key={item.workspace}
+                          name={workspaceTitle(item.workspace, plainWorkspace)}
+                          description={item.workspace}
+                          descriptionMono
+                          status={
+                            <span className="grant-row-status">
+                              <GrantTrustStatus item={item} />
+                              {item.grantCount > 0 && (
+                                <span className="grant-count">{item.grantCount} 项</span>
+                              )}
+                            </span>
+                          }
+                          onOpen={() => {
+                            setSelected(item.workspace);
+                          }}
+                        />
+                      ))
+                    ) : (
+                      <SettingsRow label={<span className="val dim">—</span>} />
+                    )}
+                  </SettingsGroup>
+                </div>
+              </>
+            )}
           </div>
-        </>
+        </div>
       )}
       {notice && (
         <div className="toast3" role="status">
