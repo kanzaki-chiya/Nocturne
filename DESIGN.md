@@ -149,7 +149,7 @@
 4. **对话区与侧面板**：
    - 对话消息流与输入框最大宽度 `--w-thread`（`720px`），消息条目间距 `--space-3`（`12px`）；侧面板默认宽度 `520px`（`PANEL_DEFAULT_WIDTH`，可拖拽调宽）；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）；
    - 用户消息气泡（`.u-bubble`）使用 `--a-raised` 底色与 `--radius-3` 圆角；
-   - 工具行（`.tool-line`）按语义拆分字体：动作动词、计数、状态等中文/阅读文本用 `--sans`，路径、文件名、命令、参数名值用 `--mono`，通过基线对齐；
+   - 工具行（`.tool-line`）按语义拆分字体：动作动词、计数、状态等中文/阅读文本用 `--sans`，路径、文件名、命令、参数名值用 `--mono`，通过基线对齐；连续工具行之间、同一调用的多文件行之间都是 6px，工具行与正文、思考块之间 12px；
    - diff 卡片（`.tool-diff`）与本轮文件改动卡片（`.turn-changes-card`）采用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边，表头 `.diff-h` 底色 `--a-code-bg`、路径用 `--mono`、`+N` 用 `--a-success`、`−N` 用 `--a-error`，diff 正文用 `--fs-diff`（`12.5px`）；
    - 权限确认卡（`.ask`）、提问卡（`.qcard`）、提示条（`.conversation-notice-*`）、子代理行（`.subagent-view`）、计划/任务清单与目标详卡片（`.todo-panel`、`.goal-detail`）统一使用 `--radius-2` / `--radius-3` 圆角与 `1px solid var(--a-border)` 描边，中文标签与人读内容一律使用 `--sans`。
    - 回答里的 Markdown 表格（`.conversation-markdown .tbl`，桌面、子代理面板与手机共用）：单元格不继承消息的 `overflow-wrap: anywhere`；源文本不超过 10 个半角宽（全角算 2）的短格整格不换行，其余格子至少 5em 宽，长说明在剩余宽度内换行，格内路径、URL 与行内代码仍可任意断开；装不下时只在 `.tbl-wrap` 内横向滚动（`overscroll-behavior-x: contain`），页面不横向滚动，不加滚动提示或遮罩。宽度足够时列宽分配与普通表格相同。

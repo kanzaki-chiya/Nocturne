@@ -605,6 +605,12 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* 连续工具行（含被拒绝的工具行）间距从 12px 收到 6px；前一行末项展开时保留 12px 以免更挤 */
+.conversation-transcript
+  > :where(.tool:not(:has(> .tool-details[open]:last-child)), .note.deny)
+  + :where(.tool, .note.deny) {
+  margin-top: -6px;
+}
 /* 无衬线的工具名与等宽的参数同处一行：按基线对齐，不按盒子居中 */
 .conversation .tool-line {
   width: 100%;
@@ -731,6 +737,10 @@
 }
 .conversation .tool-details {
   min-width: 0;
+}
+/* 同一工具调用的多文件行之间与连续工具行保持一致的 6px 间距 */
+.conversation .tool > .tool-details + .tool-details {
+  margin-top: 6px;
 }
 /* 展开不改行头：行头不加框、不加内边距，展开内容缩进到图标列下方；
    diff 与命令/参数/结果 payload 各自是带框区域（--a-panel / --a-input） */
