@@ -124,6 +124,8 @@ export function ListItem({
 export interface DetailHeaderProps {
   title: ReactNode;
   mono?: boolean | undefined;
+  /** 标题左侧前置控件（如返回图标按钮） */
+  leading?: ReactNode;
   /** 标题后的徽标、路径等 */
   extra?: ReactNode;
   /** 右侧操作 */
@@ -131,9 +133,10 @@ export interface DetailHeaderProps {
 }
 
 /** 详情区标题行（`.dhead`） */
-export function DetailHeader({ title, mono = false, extra, actions }: DetailHeaderProps) {
+export function DetailHeader({ title, mono = false, leading, extra, actions }: DetailHeaderProps) {
   return (
     <div className="dhead">
+      {leading}
       <h2 className={mono ? "mono" : undefined}>{title}</h2>
       {extra}
       {actions !== undefined && actions !== null && actions !== false && (

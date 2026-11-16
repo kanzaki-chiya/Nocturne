@@ -188,12 +188,11 @@ function pageProps(overrides?: {
 
 /** 打开「添加 自定义 OpenAI 兼容」表单，填名称和密钥 */
 async function openForm(name = "test-provider") {
-  await screen.findByText("可添加");
-  fireEvent.click(
-    within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
-      name: PRESET.label,
-    }),
-  );
+  const addBtn = screen.queryByRole("button", { name: "添加服务商" });
+  if (screen.queryByRole("heading", { level: 2, name: "添加服务商" }) === null && addBtn !== null) {
+    fireEvent.click(addBtn);
+  }
+  fireEvent.click(await screen.findByRole("button", { name: new RegExp(PRESET.label) }));
   await screen.findByText(`添加 ${PRESET.label}`);
   fireEvent.change(screen.getByLabelText("名称"), { target: { value: name } });
   fireEvent.change(screen.getByPlaceholderText("粘贴密钥"), { target: { value: "sk-test" } });
@@ -217,7 +216,7 @@ function called(
 afterEach(cleanup);
 
 describe("ProvidersPage 列表与详情", () => {
-  it("渲染已配置/可添加两组、当前标记、模型数与失效标黄", async () => {
+  it("左栏只渲染已配置分组，展示当前标记、模型数与失效标黄", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER, EXPIRED] },
@@ -240,6 +239,8 @@ describe("ProvidersPage 列表与详情", () => {
     expect(row("openrouter")?.textContent).toContain("当前");
     expect(row("openrouter")?.textContent).toContain("2 个模型");
     const page = screen.getByTestId("providers-page");
+    expect(page.textContent).not.toContain("可添加");
+    expect(screen.getByRole("button", { name: "添加服务商" })).toBeTruthy();
     const heading = within(page).getByRole("heading", { level: 2, name: "openrouter" });
     expect(heading.textContent).toBe("openrouter");
     expect(
@@ -280,9 +281,9 @@ describe("ProvidersPage 列表与详情", () => {
     ).not.toBeNull();
     expect(page.textContent).not.toContain("停用的模型不出现在模型菜单里");
     expect(row("chatgpt")?.textContent).toContain("已失效");
-    // 已配置的 openrouter 不再出现在「可添加」；自定义预设始终可添加
+    // 左栏只列已配置，不列预设
     expect(row("OpenRouter")).toBeUndefined();
-    expect(row(PRESET.label)).toBeDefined();
+    expect(row(PRESET.label)).toBeUndefined();
     // 切到 chatgpt（账号类、已失效）：内联重新登录横幅，无「换密钥」
     const chatgpt = row("chatgpt");
     if (chatgpt === undefined) throw new Error("缺少 chatgpt 行");
@@ -455,10 +456,12 @@ describe("添加服务商", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(PRESET.label) }));
     await screen.findByText(`添加 ${PRESET.label}`);
     expect(button("保存").disabled).toBe(true);
     expect(button("获取模型").disabled).toBe(true);
-    await openForm();
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "test-provider" } });
+    fireEvent.change(screen.getByPlaceholderText("粘贴密钥"), { target: { value: "sk-test" } });
     expect(screen.getByPlaceholderText("粘贴密钥").getAttribute("type")).toBe("password");
     fireEvent.click(button("获取模型"));
     await screen.findByText(/已获取 120 个模型/);
@@ -641,6 +644,92 @@ describe("添加服务商", () => {
     await waitFor(() => {
       expect(called(server, "provider.discardProvider", "draftId", "draft-2")).toBe(true);
     });
+    server.close();
+  });
+
+  it("点「添加服务商」出现选择页，自定义预设排在最后，左栏与按钮无选中态", async () => {
+    const DEEPSEEK_PRESET: ProviderPreset = {
+      id: "deepseek",
+      label: "DeepSeek",
+      type: "openai-compatible",
+      defaultName: "deepseek",
+      baseURL: "https://api.deepseek.com",
+      fetchableModels: true,
+    };
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [EXPIRED] },
+        "provider.listProviderPresets": [PRESET, OPENROUTER_PRESET, DEEPSEEK_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByText(/已配置 ·/);
+
+    const addBtn = button("添加服务商");
+    fireEvent.click(addBtn);
+    await screen.findByRole("heading", { level: 2, name: "添加服务商" });
+    expect(addBtn.getAttribute("aria-pressed")).toBeNull();
+    expect(addBtn.getAttribute("aria-current")).toBeNull();
+    const list = screen.getByRole("navigation", { name: "服务商列表" });
+    expect(within(list).queryByRole("button", { current: true })).toBeNull();
+
+    const cards = Array.from(document.querySelectorAll<HTMLButtonElement>(".addgrid .addcard"));
+    expect(cards.map((c) => c.querySelector(".addcard-label")?.textContent)).toEqual([
+      "OpenRouter",
+      "DeepSeek",
+      PRESET.label,
+    ]);
+    expect(cards.map((c) => c.querySelector(".addcard-ic")?.textContent)).toEqual(["O", "D", "+"]);
+
+    fireEvent.click(button("返回"));
+    await screen.findByRole("heading", { level: 2, name: "chatgpt" });
+    server.close();
+  });
+
+  it("点卡片进入表单，点返回回到选择页并释放草稿", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [PROVIDER] },
+        "provider.listProviderPresets": [PRESET, OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.describeProviderSetup": SETUP,
+        "provider.listModelSettings": MODEL_SETTINGS,
+        "provider.prepareProvider": PREPARED,
+        "provider.discardProvider": null,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByText("Claude Sonnet 4");
+
+    await openForm();
+    fireEvent.click(button("获取模型"));
+    await screen.findByText(/已获取 120 个模型/);
+
+    fireEvent.click(button("返回"));
+    await screen.findByRole("heading", { level: 2, name: "添加服务商" });
+    await waitFor(() => {
+      expect(called(server, "provider.discardProvider", "draftId", "draft-1")).toBe(true);
+    });
+    server.close();
+  });
+
+  it("没有已配置服务商时默认显示选择页", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [] },
+        "provider.listProviderPresets": [PRESET, OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByRole("heading", { level: 2, name: "添加服务商" });
+    expect(screen.getByRole("button", { name: new RegExp(OPENROUTER_PRESET.label) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp(PRESET.label) })).toBeTruthy();
     server.close();
   });
 });

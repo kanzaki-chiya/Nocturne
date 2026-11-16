@@ -1,5 +1,5 @@
 /**
- * 服务商页（desktop-v3.html A–D 屏）：左列「已配置 / 可添加」，右列详情或添加表单。
+ * 服务商页：左列「已配置」，页头「添加服务商」进入选择页与添加表单。
  * 字段由 describeProviderSetup 驱动，不在前端写死某个服务商的字段。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -28,6 +28,7 @@ import {
   EmptyState,
   Field,
   FormFooter,
+  IconButton,
   ListGroup,
   ListItem,
   MasterDetail,
@@ -36,6 +37,7 @@ import {
   SettingsGroup,
   SettingsRow,
   Switch,
+  ICON_MD,
   ICON_SM,
   Icon,
 } from "./ui";
@@ -244,7 +246,8 @@ function FetchedModels({ models, open }: { models: FetchedModel[]; open: boolean
 
 /* ---------------- 页面 ---------------- */
 
-type Sel = { kind: "provider"; id: string } | { kind: "preset"; id: string } | null;
+type Sel =
+  { kind: "provider"; id: string } | { kind: "add" } | { kind: "preset"; id: string } | null;
 
 export function ProvidersPage({
   client,
@@ -277,13 +280,15 @@ export function ProvidersPage({
   const currentProvider = sessionProvider ?? data.defaultProvider;
   const currentRef = useRef(sessionProvider);
   currentRef.current = sessionProvider;
+  const lastProviderRef = useRef<string | undefined>(undefined);
+  if (sel?.kind === "provider") lastProviderRef.current = sel.id;
 
   const generation = useRef(0);
   const refresh = useCallback(async () => {
     if (client === undefined) return;
     const current = ++generation.current;
     try {
-      const [d, presets, def] = await Promise.all([
+      const [d, , def] = await Promise.all([
         client.provider.describeProviders().then((value) => {
           if (current === generation.current)
             setData((old) => ({ ...old, providers: value.providers }));
@@ -305,7 +310,7 @@ export function ProvidersPage({
       ]);
       if (current !== generation.current) return;
       setLoadError(null);
-      // 首次拿到数据时定默认选中（当前服务商 > 第一个已配置 > 第一个可添加）
+      // 首次拿到数据时定默认选中（当前服务商 > 第一个已配置 > 添加选择页）
       setSel((cur) => {
         if (cur !== null) return cur;
         const current = currentRef.current ?? def?.provider;
@@ -314,8 +319,7 @@ export function ProvidersPage({
         }
         const first = d.providers[0];
         if (first !== undefined) return { kind: "provider", id: first.id };
-        const preset = presets[0];
-        return preset !== undefined ? { kind: "preset", id: preset.id } : null;
+        return { kind: "add" };
       });
     } catch (e) {
       if (current === generation.current) setLoadError(errText(e));
@@ -329,99 +333,104 @@ export function ProvidersPage({
   }, [refresh, providersVersion]);
 
   const configured = data.providers;
-  const available = useMemo(
-    () =>
-      data.presets.filter(
-        (p) => p.defaultName === "" || !configured.some((c) => c.id === p.defaultName),
-      ),
-    [data.presets, configured],
-  );
+  const available = useMemo(() => {
+    const filtered = data.presets.filter(
+      (p) => p.defaultName === "" || !configured.some((c) => c.id === p.defaultName),
+    );
+    return [
+      ...filtered.filter((p) => p.defaultName !== ""),
+      ...filtered.filter((p) => p.defaultName === ""),
+    ];
+  }, [data.presets, configured]);
   const selProvider =
     sel?.kind === "provider" ? configured.find((p) => p.id === sel.id) : undefined;
   const selPreset = sel?.kind === "preset" ? available.find((p) => p.id === sel.id) : undefined;
 
-  // 选中项消失（删除后、或预设已被配置）回落到列表第一项
+  // 选中项消失（删除后、或预设已被配置）回落到列表第一项或添加选择页
   useEffect(() => {
-    if (sel === null) return;
+    if (sel === null || sel.kind === "add") return;
     const gone =
       sel.kind === "provider"
         ? !configured.some((p) => p.id === sel.id)
         : !available.some((p) => p.id === sel.id);
     if (!gone) return;
     const first = configured[0];
-    const preset = available[0];
-    setSel(
-      first !== undefined
-        ? { kind: "provider", id: first.id }
-        : preset !== undefined
-          ? { kind: "preset", id: preset.id }
-          : null,
-    );
+    setSel(first !== undefined ? { kind: "provider", id: first.id } : { kind: "add" });
   }, [sel, configured, available]);
+
+  const backToProvider = () => {
+    const target =
+      (lastProviderRef.current !== undefined &&
+      configured.some((p) => p.id === lastProviderRef.current)
+        ? lastProviderRef.current
+        : undefined) ??
+      (currentProvider !== undefined && configured.some((p) => p.id === currentProvider)
+        ? currentProvider
+        : undefined) ??
+      configured[0]?.id;
+    if (target !== undefined) setSel({ kind: "provider", id: target });
+  };
 
   return (
     <section className="page3" data-testid="providers-page" aria-label="服务商">
       <div className="spage">
         <div className="readable">
-          <PageHeader title="服务商" />
+          <PageHeader
+            title="服务商"
+            actions={
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={client === undefined}
+                onClick={() => {
+                  setSel({ kind: "add" });
+                }}
+              >
+                添加服务商
+              </Button>
+            }
+          />
           <MasterDetail
             framed
             listLabel="服务商列表"
             list={
-              <>
-                {configured.length > 0 && (
-                  <ListGroup title="已配置" count={configured.length}>
-                    {configured.map((p) => {
-                      const off = p.enabled === false;
-                      const total = p.modelCount;
-                      const on = p.enabledModelCount ?? total;
-                      return (
-                        <ListItem
-                          key={p.id}
-                          label={p.displayName ?? p.id}
-                          title={p.displayName !== undefined ? p.id : undefined}
-                          mono={p.displayName === undefined}
-                          selected={sel?.kind === "provider" && sel.id === p.id}
-                          dot={off ? "hollow" : statusDot(p)}
-                          off={off}
-                          badge={
-                            p.id === currentProvider ? (
-                              <Badge variant="accent">当前</Badge>
-                            ) : undefined
-                          }
-                          meta={
-                            failed(p)
-                              ? "已失效"
-                              : off
-                                ? "已停用"
-                                : on < total
-                                  ? `${on} / ${total}`
-                                  : `${total} 个模型`
-                          }
-                          onClick={() => {
-                            setSel({ kind: "provider", id: p.id });
-                          }}
-                        />
-                      );
-                    })}
-                  </ListGroup>
-                )}
-                {available.length > 0 && (
-                  <ListGroup title="可添加">
-                    {available.map((p) => (
+              configured.length > 0 ? (
+                <ListGroup title="已配置" count={configured.length}>
+                  {configured.map((p) => {
+                    const off = p.enabled === false;
+                    const total = p.modelCount;
+                    const on = p.enabledModelCount ?? total;
+                    return (
                       <ListItem
                         key={p.id}
-                        label={p.label}
-                        dot="hollow"
-                        selected={sel?.kind === "preset" && sel.id === p.id}
+                        label={p.displayName ?? p.id}
+                        title={p.displayName !== undefined ? p.id : undefined}
+                        mono={p.displayName === undefined}
+                        selected={sel?.kind === "provider" && sel.id === p.id}
+                        dot={off ? "hollow" : statusDot(p)}
+                        off={off}
+                        badge={
+                          p.id === currentProvider ? (
+                            <Badge variant="accent">当前</Badge>
+                          ) : undefined
+                        }
+                        meta={
+                          failed(p)
+                            ? "已失效"
+                            : off
+                              ? "已停用"
+                              : on < total
+                                ? `${on} / ${total}`
+                                : `${total} 个模型`
+                        }
                         onClick={() => {
-                          setSel({ kind: "preset", id: p.id });
+                          setSel({ kind: "provider", id: p.id });
                         }}
                       />
-                    ))}
-                  </ListGroup>
-                )}
-              </>
+                    );
+                  })}
+                </ListGroup>
+              ) : null
             }
           >
             {client === undefined ? (
@@ -456,12 +465,47 @@ export function ProvidersPage({
                     onChanged={() => void refresh()}
                   />
                 )}
+                {sel?.kind === "add" && (
+                  <>
+                    <DetailHeader
+                      leading={
+                        configured.length > 0 ? (
+                          <IconButton aria-label="返回" onClick={backToProvider}>
+                            <Icon name="arrow_left" size={ICON_MD} />
+                          </IconButton>
+                        ) : undefined
+                      }
+                      title="添加服务商"
+                    />
+                    <div className="addgrid">
+                      {available.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="addcard"
+                          onClick={() => {
+                            setSel({ kind: "preset", id: p.id });
+                          }}
+                        >
+                          <span className="addcard-ic" aria-hidden="true">
+                            {p.defaultName === "" ? "+" : p.label.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span className="addcard-label">{p.label}</span>
+                          <Icon name="right_small" size={ICON_SM} className="addcard-chev" />
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
                 {selPreset !== undefined && (
                   <PresetForm
                     key={selPreset.id}
                     client={client}
                     preset={selPreset}
                     openUrl={openUrl}
+                    onBack={() => {
+                      setSel({ kind: "add" });
+                    }}
                     onSaved={(providerId) => {
                       setSel({ kind: "provider", id: providerId });
                       void refresh();
@@ -1684,11 +1728,13 @@ function PresetForm({
   client,
   preset,
   openUrl,
+  onBack,
   onSaved,
 }: {
   client: RpcClient;
   preset: ProviderPreset;
   openUrl: (url: string) => void;
+  onBack: () => void;
   onSaved: (providerId: string) => void;
 }) {
   const [setup, setSetup] = useState<ProviderSetupDescription | null>(null);
@@ -1788,12 +1834,33 @@ function PresetForm({
   if (setupError !== null) {
     return (
       <>
-        <DetailHeader title={`添加 ${preset.label}`} />
+        <DetailHeader
+          leading={
+            <IconButton aria-label="返回" onClick={onBack}>
+              <Icon name="arrow_left" size={ICON_MD} />
+            </IconButton>
+          }
+          title={`添加 ${preset.label}`}
+        />
         <p className="desc err">{setupError}</p>
       </>
     );
   }
-  if (setup === null) return <p className="desc">加载表单…</p>;
+  if (setup === null) {
+    return (
+      <>
+        <DetailHeader
+          leading={
+            <IconButton aria-label="返回" onClick={onBack}>
+              <Icon name="arrow_left" size={ICON_MD} />
+            </IconButton>
+          }
+          title={`添加 ${preset.label}`}
+        />
+        <p className="desc">加载表单…</p>
+      </>
+    );
+  }
 
   const methods = setup.credential.methods;
   const apiKeyMethod = methods.find(
@@ -2007,7 +2074,20 @@ function PresetForm({
 
   return (
     <>
-      <DetailHeader title={`添加 ${setup.label}`} />
+      <DetailHeader
+        leading={
+          <IconButton
+            aria-label="返回"
+            onClick={() => {
+              abandon();
+              onBack();
+            }}
+          >
+            <Icon name="arrow_left" size={ICON_MD} />
+          </IconButton>
+        }
+        title={`添加 ${setup.label}`}
+      />
       <div className="form">
         {fixedFields.length > 0 && (
           <div className="form-grid">
