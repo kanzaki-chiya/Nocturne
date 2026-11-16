@@ -296,7 +296,7 @@ describe("上下文圆环", () => {
     expect(screen.getByText("缓存 90%")).toBeTruthy();
   });
 
-  it("上下文面板固定在 .cbox 外框上方 8px、右边对齐圆环，并在窄窗口下限制最大宽度防止超出左侧", async () => {
+  it("上下文面板固定在圆环上方 8px、右边与圆环对齐，并在窄窗口下限制最大宽度防止超出左侧", async () => {
     const f = fixture();
     const origW = window.innerWidth;
     const origH = window.innerHeight;
@@ -320,7 +320,7 @@ describe("上下文圆环", () => {
       fireEvent.click(ring);
       const dialog = screen.getByRole("dialog", { name: "上下文用量" });
       expect(dialog.style.position).toBe("fixed");
-      expect(dialog.style.bottom).toBe("128px"); // 700 - (580 - 8)
+      expect(dialog.style.bottom).toBe("58px"); // 700 - 650 + 8
       expect(dialog.style.right).toBe("152px"); // 900 - 748
       expect(dialog.style.maxWidth).toBe("740px"); // 748 - 8，右侧对齐且不超出窗口左边
 

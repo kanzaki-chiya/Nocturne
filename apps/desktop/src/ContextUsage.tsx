@@ -49,25 +49,18 @@ export function ContextUsage({
     const trig = trigger.current;
     if (!trig) return;
     const trigRect = trig.getBoundingClientRect();
-    const cbox = trig.closest(".cbox");
-    const boxRect = (cbox ?? trig).getBoundingClientRect();
-    if (
-      trigRect.width === 0 &&
-      trigRect.height === 0 &&
-      boxRect.width === 0 &&
-      boxRect.height === 0
-    ) {
+    if (trigRect.width === 0 && trigRect.height === 0) {
       setPopoverStyle(undefined);
       return;
     }
     const VIEWPORT_GAP = 8;
     const POPOVER_GAP = 8;
     const right = Math.max(VIEWPORT_GAP, window.innerWidth - trigRect.right);
-    const bottom = Math.max(VIEWPORT_GAP, window.innerHeight - boxRect.top + POPOVER_GAP);
+    const bottom = Math.max(VIEWPORT_GAP, window.innerHeight - trigRect.top + POPOVER_GAP);
     const maxWidth = Math.max(160, Math.floor(window.innerWidth - right - VIEWPORT_GAP));
     const maxHeight = Math.max(
       120,
-      Math.min(560, Math.floor(boxRect.top - POPOVER_GAP - VIEWPORT_GAP)),
+      Math.min(560, Math.floor(trigRect.top - POPOVER_GAP - VIEWPORT_GAP)),
     );
     setPopoverStyle({
       position: "fixed",
@@ -92,9 +85,7 @@ export function ContextUsage({
     if (typeof ResizeObserver !== "undefined") {
       observer = new ResizeObserver(updatePosition);
       const trig = trigger.current;
-      const cbox = trig?.closest(".cbox");
       if (trig) observer.observe(trig);
-      if (cbox) observer.observe(cbox);
     }
     return () => {
       window.removeEventListener("resize", updatePosition);
