@@ -359,6 +359,19 @@
 .spage .btn:not(.btn-primary, .btn-danger-solid, .btn-ghost) {
   border-color: var(--a-border);
 }
+.spage:has(> .readable > .md-frame) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: var(--space-8);
+}
+.spage:has(> .readable > .md-frame) > .readable {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .readable {
   max-width: var(--w-readable);
   margin: 0 auto;
@@ -586,11 +599,27 @@
 }
 
 /* ---------- 主从布局 ---------- */
+.md-frame {
+  container: md-frame / inline-size;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-2);
+}
 .md {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: var(--w-list) minmax(0, 1fr);
+}
+.md.framed {
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
+  overflow: hidden;
 }
 .md-list {
   border-right: 1px solid var(--a-border);
@@ -600,6 +629,10 @@
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+  min-height: 0;
+}
+.md.framed > .md-list {
+  padding: var(--space-2);
 }
 .md-list .foot {
   margin-top: auto;
@@ -611,7 +644,12 @@
 .md-detail {
   overflow-y: auto;
   min-width: 0;
+  min-height: 0;
   padding: var(--space-4) var(--page-px) var(--space-12) var(--space-4);
+}
+.md.framed > .md-detail {
+  container: md-detail / inline-size;
+  padding: var(--space-5) var(--space-6) var(--space-6);
 }
 .md-detail > .inner {
   max-width: var(--w-readable);
@@ -619,6 +657,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+}
+.md.framed > .md-detail > .inner {
+  max-width: none;
+  margin: 0;
 }
 .dhead {
   display: flex;
@@ -784,19 +826,31 @@
   color: var(--a-error);
 }
 
-/* ---------- 窄窗口（效果图「窄窗口」） ---------- */
-@container settings-layout (width <= 1060px) {
-  .md {
+@container md-frame (width < 640px) {
+  .md.framed {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
-  .md-list {
+  .md.framed > .md-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--a-border);
+    max-height: 220px;
+  }
+}
+
+/* ---------- 窄窗口（效果图「窄窗口」） ---------- */
+@container settings-layout (width <= 1060px) {
+  .md:not(.framed) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .md:not(.framed) > .md-list {
     border-right: 0;
     border-bottom: 1px solid var(--a-border);
     max-height: 220px;
     padding-left: var(--page-px);
   }
-  .md-detail {
+  .md:not(.framed) > .md-detail {
     padding-left: var(--page-px);
   }
 }

@@ -136,6 +136,38 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
   });
 
+  it("MasterDetail framed 变体：外包 .md-frame，主容器带 .md.framed，不改变导航与详情结构", () => {
+    const { container, rerender } = render(
+      <MasterDetail
+        framed
+        listLabel="服务商列表"
+        list={
+          <ListGroup title="已配置" count={1}>
+            <ListItem label="openrouter" mono selected />
+          </ListGroup>
+        }
+        listFoot={<span>目录预算</span>}
+      >
+        <DetailHeader title="openrouter" mono />
+      </MasterDetail>,
+    );
+    const frame = container.querySelector(".md-frame");
+    expect(frame).not.toBeNull();
+    const md = frame?.querySelector(":scope > .md.framed");
+    expect(md).not.toBeNull();
+    expect(md?.querySelector(":scope > nav.md-list .foot")?.textContent).toBe("目录预算");
+    expect(md?.querySelector(":scope > .md-detail > .inner h2")?.textContent).toBe("openrouter");
+
+    rerender(
+      <MasterDetail listLabel="任务" list={<ListItem label="daily" />}>
+        <DetailHeader title="daily" />
+      </MasterDetail>,
+    );
+    expect(container.querySelector(".md-frame")).toBeNull();
+    expect(container.querySelector(".md.framed")).toBeNull();
+    expect(container.querySelector(".md")).not.toBeNull();
+  });
+
   it("ListItem：长名字单行省略并提供完整 title，名字和右侧内容允许收缩", () => {
     render(
       <ListItem

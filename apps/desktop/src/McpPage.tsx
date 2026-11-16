@@ -209,200 +209,215 @@ export function McpPage({
   };
   const r = current ? results[current.id] : undefined;
   return (
-    <div className="page3 mcp-page spage flush">
-      <PageHeader
-        title="MCP"
-        actions={
-          <>
-            <Button
-              size="sm"
-              onClick={() => {
-                setImporting(true);
-              }}
-            >
-              从 JSON 导入
-            </Button>
-            <Button variant="primary" size="sm" onClick={add} disabled={!client}>
-              <Icon name="add" size={ICON_SM} />
-              添加服务器
-            </Button>
-          </>
-        }
-      />
-      {error && (
-        <div className="errt" role="alert">
-          {error}
-        </div>
-      )}
-      <MasterDetail
-        listLabel="MCP 服务器列表"
-        list={(["app", "readonly"] as const).map((group) => {
-          const count = servers.filter((s) => (s.origin === "app") === (group === "app")).length;
-          return (
-            count > 0 && (
-              <ListGroup key={group} title={group === "app" ? undefined : "只读"} count={count}>
-                {servers
-                  .filter((s) => (s.origin === "app") === (group === "app"))
-                  .map((s) => (
-                    <ListItem
-                      key={s.id}
-                      label={s.id}
-                      mono
-                      selected={selected === s.id && !form}
-                      dot={dotOf(s)}
-                      onClick={() => {
-                        setSelected(s.id);
-                        setForm(undefined);
-                        setQueue([]);
-                      }}
-                    />
-                  ))}
-              </ListGroup>
-            )
-          );
-        })}
-      >
-        {form && client ? (
-          <McpForm
-            key={`${form.replace}-${form.draft.id}`}
-            client={client}
-            draft={form.draft}
-            replace={form.replace}
-            backend={backend}
-            workspaceRoot={workspaceRoot}
-            onCancel={finish}
-            onSaved={async (id) => {
-              await changed(`已保存 ${id}`);
-              setSelected(id);
-              finish();
-            }}
-            onSaveFailed={() => void refresh()}
-          />
-        ) : current ? (
-          <>
-            <DetailHeader
-              title={current.id}
-              mono
-              extra={
-                !current.editable && (
-                  <Badge title={`来自 ${current.path}，请修改该文件`}>只读</Badge>
-                )
-              }
-              actions={
-                <>
-                  <Switch
-                    aria-label="启用"
-                    checked={current.enabled}
-                    disabled={!current.editable || busy}
-                    title={!current.editable ? `来自 ${current.path}，请修改该文件` : undefined}
-                    onChange={(next) => {
-                      if (!client) return;
-                      setBusy(true);
-                      void client.runtime
-                        .setMcpServerEnabled({ id: current.id, enabled: next })
-                        .then(() => changed(current.enabled ? "已停用" : "已启用"))
-                        .catch((e: unknown) => {
-                          setError(message(e));
-                          // 失败时磁盘上的配置可能已改，列表重新拉取
-                          void refresh();
-                        })
-                        .finally(() => {
-                          setBusy(false);
-                        });
-                    }}
-                  />
-                  <Button
-                    disabled={busy || !current.trusted}
-                    title={
-                      !current.trusted ? "项目尚未信任，请先在「授权」页信任此工作区" : undefined
-                    }
-                    onClick={() => void probe()}
-                  >
-                    {busy ? "测试中…" : "测试连接"}
-                  </Button>
-                  {current.editable && (
-                    <>
-                      <Button
-                        onClick={() => {
-                          setForm({ draft: draftOf(current), replace: true });
-                        }}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="danger"
-                        onClick={() => {
-                          setDeleting(true);
-                        }}
-                      >
-                        删除
-                      </Button>
-                    </>
-                  )}
-                </>
-              }
-            />
-            <SettingsGroup title="连接">
-              <SettingsRow label={current.transport === "http" ? "地址" : "命令"}>
-                <span className="mono">
-                  {current.url ?? [current.command, ...(current.args ?? [])].join(" ")}
-                </span>
-              </SettingsRow>
-              <SettingsRow label="状态">
-                {r ? resultText(r) : liveText(liveOf(current))}
-              </SettingsRow>
-              <SettingsRow label="服务器">
-                {r?.serverInfo ? `${r.serverInfo.name} ${r.serverInfo.version}` : "—"}
-              </SettingsRow>
-              <SettingsRow label={current.transport === "http" ? "传输" : "工作目录"}>
-                {current.transport === "http" ? "流式 HTTP" : (current.cwd ?? "会话工作区（默认）")}
-              </SettingsRow>
-              <SettingsRow label="超时（启动 / 调用）">
-                {current.startupTimeoutMs / 1000} 秒 / {current.callTimeoutMs / 1000} 秒
-              </SettingsRow>
-            </SettingsGroup>
-            {r && <ProbeResult result={r} />}
-            {(current.headers ?? current.env ?? []).length > 0 && (
-              <SettingsGroup title={current.transport === "http" ? "请求头" : "环境变量"}>
-                {(current.headers ?? current.env ?? []).map((row) => (
-                  <SettingsRow key={row.name} label={<code>{row.name}</code>}>
-                    <Badge>
-                      {row.kind === "stored" ? "凭据库" : row.kind === "env" ? "环境变量" : "明文"}
-                    </Badge>
-                    <span>
-                      {row.kind === "stored"
-                        ? row.stored === "set"
-                          ? "● 已保存"
-                          : "缺少凭据"
-                        : row.value}
-                    </span>
-                  </SettingsRow>
-                ))}
-              </SettingsGroup>
-            )}
-          </>
-        ) : (
-          <EmptyState
-            action={
+    <div className="page3 mcp-page">
+      <div className="spage">
+        <div className="readable">
+          <PageHeader
+            title="MCP"
+            actions={
               <>
-                <Button variant="primary" onClick={add}>
-                  <Icon name="add" size={ICON_SM} />
-                  添加服务器
-                </Button>
                 <Button
+                  size="sm"
                   onClick={() => {
                     setImporting(true);
                   }}
                 >
                   从 JSON 导入
                 </Button>
+                <Button variant="primary" size="sm" onClick={add} disabled={!client}>
+                  <Icon name="add" size={ICON_SM} />
+                  添加服务器
+                </Button>
               </>
             }
+          />
+          {error && (
+            <div className="errt" role="alert">
+              {error}
+            </div>
+          )}
+          <MasterDetail
+            framed
+            listLabel="MCP 服务器列表"
+            list={(["app", "readonly"] as const).map((group) => {
+              const count = servers.filter(
+                (s) => (s.origin === "app") === (group === "app"),
+              ).length;
+              return (
+                count > 0 && (
+                  <ListGroup key={group} title={group === "app" ? undefined : "只读"} count={count}>
+                    {servers
+                      .filter((s) => (s.origin === "app") === (group === "app"))
+                      .map((s) => (
+                        <ListItem
+                          key={s.id}
+                          label={s.id}
+                          mono
+                          selected={selected === s.id && !form}
+                          dot={dotOf(s)}
+                          onClick={() => {
+                            setSelected(s.id);
+                            setForm(undefined);
+                            setQueue([]);
+                          }}
+                        />
+                      ))}
+                  </ListGroup>
+                )
+              );
+            })}
           >
-            给 Nocturne 接上外部工具
-          </EmptyState>
-        )}
-      </MasterDetail>
+            {form && client ? (
+              <McpForm
+                key={`${form.replace}-${form.draft.id}`}
+                client={client}
+                draft={form.draft}
+                replace={form.replace}
+                backend={backend}
+                workspaceRoot={workspaceRoot}
+                onCancel={finish}
+                onSaved={async (id) => {
+                  await changed(`已保存 ${id}`);
+                  setSelected(id);
+                  finish();
+                }}
+                onSaveFailed={() => void refresh()}
+              />
+            ) : current ? (
+              <>
+                <DetailHeader
+                  title={current.id}
+                  mono
+                  extra={
+                    !current.editable && (
+                      <Badge title={`来自 ${current.path}，请修改该文件`}>只读</Badge>
+                    )
+                  }
+                  actions={
+                    <>
+                      <Switch
+                        aria-label="启用"
+                        checked={current.enabled}
+                        disabled={!current.editable || busy}
+                        title={!current.editable ? `来自 ${current.path}，请修改该文件` : undefined}
+                        onChange={(next) => {
+                          if (!client) return;
+                          setBusy(true);
+                          void client.runtime
+                            .setMcpServerEnabled({ id: current.id, enabled: next })
+                            .then(() => changed(current.enabled ? "已停用" : "已启用"))
+                            .catch((e: unknown) => {
+                              setError(message(e));
+                              // 失败时磁盘上的配置可能已改，列表重新拉取
+                              void refresh();
+                            })
+                            .finally(() => {
+                              setBusy(false);
+                            });
+                        }}
+                      />
+                      <Button
+                        disabled={busy || !current.trusted}
+                        title={
+                          !current.trusted
+                            ? "项目尚未信任，请先在「授权」页信任此工作区"
+                            : undefined
+                        }
+                        onClick={() => void probe()}
+                      >
+                        {busy ? "测试中…" : "测试连接"}
+                      </Button>
+                      {current.editable && (
+                        <>
+                          <Button
+                            onClick={() => {
+                              setForm({ draft: draftOf(current), replace: true });
+                            }}
+                          >
+                            编辑
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() => {
+                              setDeleting(true);
+                            }}
+                          >
+                            删除
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  }
+                />
+                <SettingsGroup title="连接">
+                  <SettingsRow label={current.transport === "http" ? "地址" : "命令"}>
+                    <span className="mono">
+                      {current.url ?? [current.command, ...(current.args ?? [])].join(" ")}
+                    </span>
+                  </SettingsRow>
+                  <SettingsRow label="状态">
+                    {r ? resultText(r) : liveText(liveOf(current))}
+                  </SettingsRow>
+                  <SettingsRow label="服务器">
+                    {r?.serverInfo ? `${r.serverInfo.name} ${r.serverInfo.version}` : "—"}
+                  </SettingsRow>
+                  <SettingsRow label={current.transport === "http" ? "传输" : "工作目录"}>
+                    {current.transport === "http"
+                      ? "流式 HTTP"
+                      : (current.cwd ?? "会话工作区（默认）")}
+                  </SettingsRow>
+                  <SettingsRow label="超时（启动 / 调用）">
+                    {current.startupTimeoutMs / 1000} 秒 / {current.callTimeoutMs / 1000} 秒
+                  </SettingsRow>
+                </SettingsGroup>
+                {r && <ProbeResult result={r} />}
+                {(current.headers ?? current.env ?? []).length > 0 && (
+                  <SettingsGroup title={current.transport === "http" ? "请求头" : "环境变量"}>
+                    {(current.headers ?? current.env ?? []).map((row) => (
+                      <SettingsRow key={row.name} label={<code>{row.name}</code>}>
+                        <Badge>
+                          {row.kind === "stored"
+                            ? "凭据库"
+                            : row.kind === "env"
+                              ? "环境变量"
+                              : "明文"}
+                        </Badge>
+                        <span>
+                          {row.kind === "stored"
+                            ? row.stored === "set"
+                              ? "● 已保存"
+                              : "缺少凭据"
+                            : row.value}
+                        </span>
+                      </SettingsRow>
+                    ))}
+                  </SettingsGroup>
+                )}
+              </>
+            ) : (
+              <EmptyState
+                action={
+                  <>
+                    <Button variant="primary" onClick={add}>
+                      <Icon name="add" size={ICON_SM} />
+                      添加服务器
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setImporting(true);
+                      }}
+                    >
+                      从 JSON 导入
+                    </Button>
+                  </>
+                }
+              >
+                给 Nocturne 接上外部工具
+              </EmptyState>
+            )}
+          </MasterDetail>
+        </div>
+      </div>
       {toast && (
         <div className="toast3" role="status">
           ✓ {toast}

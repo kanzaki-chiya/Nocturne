@@ -6,24 +6,28 @@ export interface MasterDetailProps {
   /** 左栏内容：ListGroup / ListItem，底部操作放 listFoot */
   list: ReactNode;
   listFoot?: ReactNode;
-  /** 详情区内容（最宽 --w-readable） */
+  /** 居中带框双栏卡片（设置区五页用）；默认铺满 */
+  framed?: boolean | undefined;
+  /** 详情区内容 */
   children?: ReactNode;
   /** 详情区滚动容器 */
   detailRef?: Ref<HTMLDivElement> | undefined;
   className?: string | undefined;
 }
 
-/** 主从布局（`.md` / `.md-list` / `.md-detail`）：左栏 --w-list，详情区内容最宽 --w-readable */
+/** 主从布局（`.md` / `.md-list` / `.md-detail`）：默认铺满；framed 时为居中双栏卡片 */
 export function MasterDetail({
   listLabel,
   list,
   listFoot,
+  framed = false,
   children,
   detailRef,
   className,
 }: MasterDetailProps) {
-  return (
-    <div className={className === undefined ? "md" : `md ${className}`}>
+  const classes = ["md", framed ? "framed" : "", className].filter(Boolean).join(" ");
+  const body = (
+    <div className={classes}>
       <nav className="md-list" aria-label={listLabel}>
         {list}
         {listFoot !== undefined && <div className="foot">{listFoot}</div>}
@@ -33,6 +37,7 @@ export function MasterDetail({
       </div>
     </div>
   );
+  return framed ? <div className="md-frame">{body}</div> : body;
 }
 
 export interface ListGroupProps {

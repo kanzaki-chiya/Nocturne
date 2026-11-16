@@ -221,275 +221,283 @@ export function ExternalAgentsPage({
     await refresh();
   };
   return (
-    <div className="page3 external-agents-page spage flush">
-      <PageHeader
-        title="子代理"
-        actions={
-          <>
-            <Button size="sm" disabled={!client || busy} onClick={add}>
-              添加 agent
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!client || busy}
-              onClick={() => {
-                setProfileName(undefined);
-                setForm(undefined);
-                setProfileDraft({ name: "", config: { description: "", enabled: true } });
-              }}
-            >
-              添加档位
-            </Button>
-          </>
-        }
-      />
-      {error && (
-        <div className="desc err" role="alert">
-          {error}
-        </div>
-      )}
-      {warnings.map((warning, i) => (
-        <div className="desc err" role="status" key={`${i}-${warning}`}>
-          {warning}
-        </div>
-      ))}
-      <MasterDetail
-        listLabel="子代理列表"
-        list={
-          <>
-            <ListGroup title="内置档位" count={profiles.length + 1}>
-              {[
-                {
-                  name: "default",
-                  config: {
-                    description: "通用",
-                    enabled: true,
-                    model: defaultModel,
-                    effort: undefined,
-                  },
-                },
-                ...profiles,
-              ].map((entry) => (
-                <ListItem
-                  key={entry.name}
-                  label={entry.name}
-                  mono
-                  selected={profileName === entry.name && !profileDraft}
-                  dot={entry.config.enabled ? "ok" : "hollow"}
-                  title={`${entry.config.model ?? "跟随当前模型"} · ${entry.config.effort ?? "跟随会话"}`}
-                  meta={entry.name === "default" ? "默认" : entry.config.enabled ? "" : "已停用"}
+    <div className="page3 external-agents-page">
+      <div className="spage">
+        <div className="readable">
+          <PageHeader
+            title="子代理"
+            actions={
+              <>
+                <Button size="sm" disabled={!client || busy} onClick={add}>
+                  添加 agent
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!client || busy}
                   onClick={() => {
-                    setProfileName(entry.name);
-                    setProfileDraft(undefined);
+                    setProfileName(undefined);
                     setForm(undefined);
+                    setProfileDraft({ name: "", config: { description: "", enabled: true } });
                   }}
-                />
-              ))}
-            </ListGroup>
-            {agents.length > 0 && (
-              <ListGroup title="外部 Agent" count={agents.length}>
-                {(["app", "user"] as const).map(
-                  (origin) =>
-                    agents.some((a) => a.origin === origin) && (
-                      <ListGroup key={origin} title={origin === "app" ? undefined : "只读"}>
-                        {agents
-                          .filter((a) => a.origin === origin)
-                          .map((a) => (
-                            <ListItem
-                              key={a.name}
-                              label={a.name}
-                              mono
-                              selected={
-                                selected === a.name &&
-                                !form &&
-                                profileName === undefined &&
-                                profileDraft === undefined
-                              }
-                              dot={
-                                results[a.name]?.result.ok
-                                  ? "ok"
-                                  : results[a.name]
-                                    ? "warn"
-                                    : "hollow"
-                              }
-                              meta={
-                                externalAgentSlashConflict(a.name, skills)
-                                  ? "名称冲突"
-                                  : !a.enabled
-                                    ? "已停用"
-                                    : resultText(results[a.name]?.result)
-                              }
-                              title={externalAgentSlashConflict(a.name, skills)}
-                              onClick={() => {
-                                setProfileName(undefined);
-                                setProfileDraft(undefined);
-                                setSelected(a.name);
-                                setForm(undefined);
-                              }}
-                            />
-                          ))}
-                      </ListGroup>
-                    ),
-                )}
-              </ListGroup>
-            )}
-          </>
-        }
-      >
-        {profileConfig !== undefined ? (
-          <SubagentProfileEditor
-            key={
-              profileDraft
-                ? `new-${profileDraft.name}`
-                : `${profileName}-${JSON.stringify(profileConfig)}`
+                >
+                  添加档位
+                </Button>
+              </>
             }
-            name={profileDraft?.name ?? profileName ?? ""}
-            initial={profileConfig}
-            creating={profileDraft !== undefined}
-            items={items}
-            models={models}
-            agents={agents}
-            onSave={saveProfile}
-            onCancel={() => {
-              setProfileDraft(undefined);
-              setProfileName("default");
-            }}
-            onDelete={async () => {
-              if (!profileName) return;
-              await saveProfile({ [`subagents.profiles.${profileName}`]: null });
-              setProfileName("default");
-            }}
           />
-        ) : form && client ? (
-          <ExternalAgentForm
-            key={`${form.replace}-${form.config.name}`}
-            client={client}
-            initial={form.config}
-            replace={form.replace}
-            recent={results[form.config.name]?.result}
-            onProbed={(agentName, result) => {
-              setResults((old) => ({
-                ...old,
-                [agentName]: { result, at: new Date().toLocaleTimeString() },
-              }));
-            }}
-            onCancel={() => {
-              setForm(undefined);
-            }}
-            onSaved={async (name, tested) => {
-              await changed(`已保存 ${name}`);
-              setSelected(name);
-              setForm(undefined);
-              // 保存的正是刚测试过的草稿时保留结果；配置有改动则旧结果作废
-              setResults((old) => {
-                const { [name]: _removed, ...rest } = old;
-                return tested
-                  ? { ...rest, [name]: { result: tested, at: new Date().toLocaleTimeString() } }
-                  : rest;
-              });
-            }}
-          />
-        ) : current ? (
-          <>
-            {(() => {
-              const sourcePath =
-                current.path ?? (current.origin === "app" ? "external-agents.json" : "config.json");
-              const readonlyReason = !current.editable
-                ? `来自 ${sourcePath}，请修改该文件`
-                : undefined;
-              return (
-                <DetailHeader
-                  title={current.name}
-                  mono
-                  extra={!current.editable && <Badge title={readonlyReason}>只读</Badge>}
-                  actions={
-                    <>
-                      {" "}
-                      <Switch
-                        aria-label="启用 agent"
-                        checked={current.enabled}
-                        disabled={!client || !current.editable || busy}
-                        title={readonlyReason}
-                        onChange={(next) => {
-                          if (client)
-                            void mutate(
-                              () =>
-                                client.runtime.setExternalAgentEnabled({
-                                  name: current.name,
-                                  enabled: next,
-                                }),
-                              current.enabled ? "已停用" : "已启用",
-                            );
-                        }}
-                      />
-                      <Button disabled={!client || busy} onClick={() => void probe()}>
-                        {busy ? "处理中…" : "测试连接"}
-                      </Button>
-                      <Button
-                        disabled={!current.editable || busy}
-                        title={readonlyReason}
-                        onClick={() => {
-                          setError("");
-                          setForm({ config: configOf(current), replace: true });
-                        }}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="danger"
-                        disabled={!current.editable || busy}
-                        title={readonlyReason}
-                        onClick={() => {
-                          setDeleting(true);
-                        }}
-                      >
-                        删除
-                      </Button>
-                    </>
-                  }
-                />
-              );
-            })()}
-            {current.description && <p className="desc">{current.description}</p>}
-            {externalAgentSlashConflict(current.name, skills) && (
-              <p className="errt" role="status">
-                {externalAgentSlashConflict(current.name, skills)}
-              </p>
+          {error && (
+            <div className="desc err" role="alert">
+              {error}
+            </div>
+          )}
+          {warnings.map((warning, i) => (
+            <div className="desc err" role="status" key={`${i}-${warning}`}>
+              {warning}
+            </div>
+          ))}
+          <MasterDetail
+            framed
+            listLabel="子代理列表"
+            list={
+              <>
+                <ListGroup title="内置档位" count={profiles.length + 1}>
+                  {[
+                    {
+                      name: "default",
+                      config: {
+                        description: "通用",
+                        enabled: true,
+                        model: defaultModel,
+                        effort: undefined,
+                      },
+                    },
+                    ...profiles,
+                  ].map((entry) => (
+                    <ListItem
+                      key={entry.name}
+                      label={entry.name}
+                      mono
+                      selected={profileName === entry.name && !profileDraft}
+                      dot={entry.config.enabled ? "ok" : "hollow"}
+                      title={`${entry.config.model ?? "跟随当前模型"} · ${entry.config.effort ?? "跟随会话"}`}
+                      meta={
+                        entry.name === "default" ? "默认" : entry.config.enabled ? "" : "已停用"
+                      }
+                      onClick={() => {
+                        setProfileName(entry.name);
+                        setProfileDraft(undefined);
+                        setForm(undefined);
+                      }}
+                    />
+                  ))}
+                </ListGroup>
+                {agents.length > 0 && (
+                  <ListGroup title="外部 Agent" count={agents.length}>
+                    {(["app", "user"] as const).map(
+                      (origin) =>
+                        agents.some((a) => a.origin === origin) && (
+                          <ListGroup key={origin} title={origin === "app" ? undefined : "只读"}>
+                            {agents
+                              .filter((a) => a.origin === origin)
+                              .map((a) => (
+                                <ListItem
+                                  key={a.name}
+                                  label={a.name}
+                                  mono
+                                  selected={
+                                    selected === a.name &&
+                                    !form &&
+                                    profileName === undefined &&
+                                    profileDraft === undefined
+                                  }
+                                  dot={
+                                    results[a.name]?.result.ok
+                                      ? "ok"
+                                      : results[a.name]
+                                        ? "warn"
+                                        : "hollow"
+                                  }
+                                  meta={
+                                    externalAgentSlashConflict(a.name, skills)
+                                      ? "名称冲突"
+                                      : !a.enabled
+                                        ? "已停用"
+                                        : resultText(results[a.name]?.result)
+                                  }
+                                  title={externalAgentSlashConflict(a.name, skills)}
+                                  onClick={() => {
+                                    setProfileName(undefined);
+                                    setProfileDraft(undefined);
+                                    setSelected(a.name);
+                                    setForm(undefined);
+                                  }}
+                                />
+                              ))}
+                          </ListGroup>
+                        ),
+                    )}
+                  </ListGroup>
+                )}
+              </>
+            }
+          >
+            {profileConfig !== undefined ? (
+              <SubagentProfileEditor
+                key={
+                  profileDraft
+                    ? `new-${profileDraft.name}`
+                    : `${profileName}-${JSON.stringify(profileConfig)}`
+                }
+                name={profileDraft?.name ?? profileName ?? ""}
+                initial={profileConfig}
+                creating={profileDraft !== undefined}
+                items={items}
+                models={models}
+                agents={agents}
+                onSave={saveProfile}
+                onCancel={() => {
+                  setProfileDraft(undefined);
+                  setProfileName("default");
+                }}
+                onDelete={async () => {
+                  if (!profileName) return;
+                  await saveProfile({ [`subagents.profiles.${profileName}`]: null });
+                  setProfileName("default");
+                }}
+              />
+            ) : form && client ? (
+              <ExternalAgentForm
+                key={`${form.replace}-${form.config.name}`}
+                client={client}
+                initial={form.config}
+                replace={form.replace}
+                recent={results[form.config.name]?.result}
+                onProbed={(agentName, result) => {
+                  setResults((old) => ({
+                    ...old,
+                    [agentName]: { result, at: new Date().toLocaleTimeString() },
+                  }));
+                }}
+                onCancel={() => {
+                  setForm(undefined);
+                }}
+                onSaved={async (name, tested) => {
+                  await changed(`已保存 ${name}`);
+                  setSelected(name);
+                  setForm(undefined);
+                  // 保存的正是刚测试过的草稿时保留结果；配置有改动则旧结果作废
+                  setResults((old) => {
+                    const { [name]: _removed, ...rest } = old;
+                    return tested
+                      ? { ...rest, [name]: { result: tested, at: new Date().toLocaleTimeString() } }
+                      : rest;
+                  });
+                }}
+              />
+            ) : current ? (
+              <>
+                {(() => {
+                  const sourcePath =
+                    current.path ??
+                    (current.origin === "app" ? "external-agents.json" : "config.json");
+                  const readonlyReason = !current.editable
+                    ? `来自 ${sourcePath}，请修改该文件`
+                    : undefined;
+                  return (
+                    <DetailHeader
+                      title={current.name}
+                      mono
+                      extra={!current.editable && <Badge title={readonlyReason}>只读</Badge>}
+                      actions={
+                        <>
+                          {" "}
+                          <Switch
+                            aria-label="启用 agent"
+                            checked={current.enabled}
+                            disabled={!client || !current.editable || busy}
+                            title={readonlyReason}
+                            onChange={(next) => {
+                              if (client)
+                                void mutate(
+                                  () =>
+                                    client.runtime.setExternalAgentEnabled({
+                                      name: current.name,
+                                      enabled: next,
+                                    }),
+                                  current.enabled ? "已停用" : "已启用",
+                                );
+                            }}
+                          />
+                          <Button disabled={!client || busy} onClick={() => void probe()}>
+                            {busy ? "处理中…" : "测试连接"}
+                          </Button>
+                          <Button
+                            disabled={!current.editable || busy}
+                            title={readonlyReason}
+                            onClick={() => {
+                              setError("");
+                              setForm({ config: configOf(current), replace: true });
+                            }}
+                          >
+                            编辑
+                          </Button>
+                          <Button
+                            variant="danger"
+                            disabled={!current.editable || busy}
+                            title={readonlyReason}
+                            onClick={() => {
+                              setDeleting(true);
+                            }}
+                          >
+                            删除
+                          </Button>
+                        </>
+                      }
+                    />
+                  );
+                })()}
+                {current.description && <p className="desc">{current.description}</p>}
+                {externalAgentSlashConflict(current.name, skills) && (
+                  <p className="errt" role="status">
+                    {externalAgentSlashConflict(current.name, skills)}
+                  </p>
+                )}
+                <SettingsGroup title="连接">
+                  <SettingsRow label="命令">
+                    <code>
+                      {current.command} {current.args.join(" ")}
+                    </code>
+                  </SettingsRow>
+                  <SettingsRow label="模式">
+                    <span className="val">{current.mode ?? "使用 agent 默认模式"}</span>
+                  </SettingsRow>
+                  <SettingsRow label="环境变量">
+                    <pre>{JSON.stringify(current.env ?? {}, null, 2)}</pre>
+                  </SettingsRow>
+                  <SettingsRow label="会话配置项">
+                    <pre>{JSON.stringify(current.configOptions ?? {}, null, 2)}</pre>
+                  </SettingsRow>
+                  <SettingsRow label="最近测试">
+                    <span className="val">
+                      {resultText(recent?.result)}
+                      {recent ? `（${recent.at}，${recent.result.durationMs} ms）` : ""}
+                    </span>
+                  </SettingsRow>
+                </SettingsGroup>
+                {recent && <ProbeDetails result={recent.result} />}
+              </>
+            ) : (
+              <EmptyState>
+                <span>还没有外部 Agent</span>
+                <Button variant="primary" disabled={!client} onClick={add}>
+                  添加 agent
+                </Button>
+              </EmptyState>
             )}
-            <SettingsGroup title="连接">
-              <SettingsRow label="命令">
-                <code>
-                  {current.command} {current.args.join(" ")}
-                </code>
-              </SettingsRow>
-              <SettingsRow label="模式">
-                <span className="val">{current.mode ?? "使用 agent 默认模式"}</span>
-              </SettingsRow>
-              <SettingsRow label="环境变量">
-                <pre>{JSON.stringify(current.env ?? {}, null, 2)}</pre>
-              </SettingsRow>
-              <SettingsRow label="会话配置项">
-                <pre>{JSON.stringify(current.configOptions ?? {}, null, 2)}</pre>
-              </SettingsRow>
-              <SettingsRow label="最近测试">
-                <span className="val">
-                  {resultText(recent?.result)}
-                  {recent ? `（${recent.at}，${recent.result.durationMs} ms）` : ""}
-                </span>
-              </SettingsRow>
-            </SettingsGroup>
-            {recent && <ProbeDetails result={recent.result} />}
-          </>
-        ) : (
-          <EmptyState>
-            <span>还没有外部 Agent</span>
-            <Button variant="primary" disabled={!client} onClick={add}>
-              添加 agent
-            </Button>
-          </EmptyState>
-        )}
-      </MasterDetail>
+          </MasterDetail>
+        </div>
+      </div>
       {toast && (
         <div className="toast3" role="status">
           ✓ {toast}

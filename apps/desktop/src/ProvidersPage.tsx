@@ -361,115 +361,118 @@ export function ProvidersPage({
 
   return (
     <section className="page3" data-testid="providers-page" aria-label="服务商">
-      <div className="spage flush">
-        <PageHeader title="服务商" />
-        <MasterDetail
-          listLabel="服务商列表"
-          list={
-            <>
-              {configured.length > 0 && (
-                <ListGroup title="已配置" count={configured.length}>
-                  {configured.map((p) => {
-                    const off = p.enabled === false;
-                    const total = p.modelCount;
-                    const on = p.enabledModelCount ?? total;
-                    return (
+      <div className="spage">
+        <div className="readable">
+          <PageHeader title="服务商" />
+          <MasterDetail
+            framed
+            listLabel="服务商列表"
+            list={
+              <>
+                {configured.length > 0 && (
+                  <ListGroup title="已配置" count={configured.length}>
+                    {configured.map((p) => {
+                      const off = p.enabled === false;
+                      const total = p.modelCount;
+                      const on = p.enabledModelCount ?? total;
+                      return (
+                        <ListItem
+                          key={p.id}
+                          label={p.displayName ?? p.id}
+                          title={p.displayName !== undefined ? p.id : undefined}
+                          mono={p.displayName === undefined}
+                          selected={sel?.kind === "provider" && sel.id === p.id}
+                          dot={off ? "hollow" : statusDot(p)}
+                          off={off}
+                          badge={
+                            p.id === currentProvider ? (
+                              <Badge variant="accent">当前</Badge>
+                            ) : undefined
+                          }
+                          meta={
+                            failed(p)
+                              ? "已失效"
+                              : off
+                                ? "已停用"
+                                : on < total
+                                  ? `${on} / ${total}`
+                                  : `${total} 个模型`
+                          }
+                          onClick={() => {
+                            setSel({ kind: "provider", id: p.id });
+                          }}
+                        />
+                      );
+                    })}
+                  </ListGroup>
+                )}
+                {available.length > 0 && (
+                  <ListGroup title="可添加">
+                    {available.map((p) => (
                       <ListItem
                         key={p.id}
-                        label={p.displayName ?? p.id}
-                        title={p.displayName !== undefined ? p.id : undefined}
-                        mono={p.displayName === undefined}
-                        selected={sel?.kind === "provider" && sel.id === p.id}
-                        dot={off ? "hollow" : statusDot(p)}
-                        off={off}
-                        badge={
-                          p.id === currentProvider ? (
-                            <Badge variant="accent">当前</Badge>
-                          ) : undefined
-                        }
-                        meta={
-                          failed(p)
-                            ? "已失效"
-                            : off
-                              ? "已停用"
-                              : on < total
-                                ? `${on} / ${total}`
-                                : `${total} 个模型`
-                        }
+                        label={p.label}
+                        dot="hollow"
+                        selected={sel?.kind === "preset" && sel.id === p.id}
                         onClick={() => {
-                          setSel({ kind: "provider", id: p.id });
+                          setSel({ kind: "preset", id: p.id });
                         }}
                       />
-                    );
-                  })}
-                </ListGroup>
-              )}
-              {available.length > 0 && (
-                <ListGroup title="可添加">
-                  {available.map((p) => (
-                    <ListItem
-                      key={p.id}
-                      label={p.label}
-                      dot="hollow"
-                      selected={sel?.kind === "preset" && sel.id === p.id}
-                      onClick={() => {
-                        setSel({ kind: "preset", id: p.id });
-                      }}
-                    />
-                  ))}
-                </ListGroup>
-              )}
-            </>
-          }
-        >
-          {client === undefined ? (
-            <EmptyState>后台尚未就绪，稍后自动刷新。</EmptyState>
-          ) : (
-            <>
-              {loadError !== null && <p className="desc err">{loadError}</p>}
-              {selProvider !== undefined && (
-                <ProviderDetail
-                  key={selProvider.id}
-                  client={client}
-                  provider={selProvider}
-                  current={selProvider.id === currentProvider}
-                  inUse={inUse?.has(selProvider.id) === true}
-                  defaultKey={data.defaultKey}
-                  editable={
-                    selProvider.managed &&
-                    !data.presets.some(
-                      (pr) => pr.defaultName !== "" && pr.defaultName === selProvider.id,
-                    )
-                  }
-                  inUseModel={
-                    sessionProvider !== undefined
-                      ? selProvider.id === sessionProvider
-                        ? sessionModel
-                        : undefined
-                      : data.defaultKey?.startsWith(`${selProvider.id}/`) === true
-                        ? data.defaultKey.slice(selProvider.id.length + 1)
-                        : undefined
-                  }
-                  openUrl={openUrl}
-                  onChanged={() => void refresh()}
-                />
-              )}
-              {selPreset !== undefined && (
-                <PresetForm
-                  key={selPreset.id}
-                  client={client}
-                  preset={selPreset}
-                  openUrl={openUrl}
-                  onSaved={(providerId) => {
-                    setSel({ kind: "provider", id: providerId });
-                    void refresh();
-                  }}
-                />
-              )}
-              {sel === null && loadError === null && <EmptyState>选择左侧条目</EmptyState>}
-            </>
-          )}
-        </MasterDetail>
+                    ))}
+                  </ListGroup>
+                )}
+              </>
+            }
+          >
+            {client === undefined ? (
+              <EmptyState>后台尚未就绪，稍后自动刷新。</EmptyState>
+            ) : (
+              <>
+                {loadError !== null && <p className="desc err">{loadError}</p>}
+                {selProvider !== undefined && (
+                  <ProviderDetail
+                    key={selProvider.id}
+                    client={client}
+                    provider={selProvider}
+                    current={selProvider.id === currentProvider}
+                    inUse={inUse?.has(selProvider.id) === true}
+                    defaultKey={data.defaultKey}
+                    editable={
+                      selProvider.managed &&
+                      !data.presets.some(
+                        (pr) => pr.defaultName !== "" && pr.defaultName === selProvider.id,
+                      )
+                    }
+                    inUseModel={
+                      sessionProvider !== undefined
+                        ? selProvider.id === sessionProvider
+                          ? sessionModel
+                          : undefined
+                        : data.defaultKey?.startsWith(`${selProvider.id}/`) === true
+                          ? data.defaultKey.slice(selProvider.id.length + 1)
+                          : undefined
+                    }
+                    openUrl={openUrl}
+                    onChanged={() => void refresh()}
+                  />
+                )}
+                {selPreset !== undefined && (
+                  <PresetForm
+                    key={selPreset.id}
+                    client={client}
+                    preset={selPreset}
+                    openUrl={openUrl}
+                    onSaved={(providerId) => {
+                      setSel({ kind: "provider", id: providerId });
+                      void refresh();
+                    }}
+                  />
+                )}
+                {sel === null && loadError === null && <EmptyState>选择左侧条目</EmptyState>}
+              </>
+            )}
+          </MasterDetail>
+        </div>
       </div>
     </section>
   );
