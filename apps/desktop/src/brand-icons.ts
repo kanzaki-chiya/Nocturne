@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import anthropicSvg from "./brand-icons/anthropic.svg?raw";
 import antigravitySvg from "./brand-icons/antigravity.svg?raw";
 import bailianSvg from "./brand-icons/bailian.svg?raw";
