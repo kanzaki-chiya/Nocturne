@@ -100,6 +100,7 @@ export function ListItem({
   "aria-label": ariaLabel,
   onClick,
 }: ListItemProps) {
+  const hasIcon = icon !== undefined;
   const dotEl =
     dot !== undefined ? (
       <span className={dot === "" ? "dot" : `dot ${dot}`} aria-hidden="true" />
@@ -107,13 +108,13 @@ export function ListItem({
   return (
     <button
       type="button"
-      className={`nav-item${selected ? " on" : ""}${off ? " off" : ""}`}
+      className={`nav-item${hasIcon ? " has-icon" : ""}${selected ? " on" : ""}${off ? " off" : ""}`}
       aria-current={selected ? "true" : undefined}
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}
     >
-      {icon === undefined ? dotEl : icon}
+      {hasIcon ? icon : dotEl}
       <span
         className={`name trunc${mono ? " mono" : ""}`}
         title={typeof label === "string" ? label : undefined}
@@ -122,7 +123,7 @@ export function ListItem({
       </span>
       {badge}
       {meta !== undefined && meta !== null && meta !== "" && <span className="meta">{meta}</span>}
-      {icon !== undefined ? dotEl : null}
+      {hasIcon ? dotEl : null}
     </button>
   );
 }

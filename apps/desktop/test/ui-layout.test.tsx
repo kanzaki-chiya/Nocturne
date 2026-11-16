@@ -223,6 +223,49 @@ describe("设置页骨架组件 (src/ui)", () => {
     expect(plainChildren.at(-1)?.classList.contains("meta")).toBe(true);
   });
 
+  it("ListItem：传 icon 时按钮带 has-icon 且 meta/badge 不收缩；不传 icon 的条目不受影响", () => {
+    const { rerender } = render(
+      <ListItem
+        icon={<span data-testid="prov-ic" />}
+        label="very-long-custom-gateway-provider-identifier"
+        mono
+        dot="warn"
+        badge={<span className="badge accent">当前</span>}
+        meta="已失效"
+      />,
+    );
+    const iconBtn = screen.getByRole("button", {
+      name: /very-long-custom-gateway-provider-identifier/,
+    });
+    expect(iconBtn.classList.contains("has-icon")).toBe(true);
+    expect(iconBtn.querySelector(".meta")?.textContent).toBe("已失效");
+
+    rerender(
+      <ListItem
+        label="very-long-custom-gateway-provider-identifier"
+        mono
+        dot="warn"
+        badge={<span className="badge accent">当前</span>}
+        meta="0 项授权 · 没有项目配置"
+      />,
+    );
+    const plainBtn = screen.getByRole("button", {
+      name: /very-long-custom-gateway-provider-identifier/,
+    });
+    expect(plainBtn.classList.contains("has-icon")).toBe(false);
+
+    const cssPath = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "ui.css");
+    const css = readFileSync(cssPath, "utf8");
+    const defaultShrinkRule =
+      /\.nav-item\s+\.badge,\s*\.nav-item\s+\.meta\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const iconNoShrinkRule =
+      /\.nav-item\.has-icon\s+\.badge,\s*\.nav-item\.has-icon\s+\.meta\s*\{([^}]*)\}/.exec(
+        css,
+      )?.[1] ?? "";
+    expect(defaultShrinkRule).toContain("flex-shrink: 1");
+    expect(iconNoShrinkRule).toContain("flex-shrink: 0");
+  });
+
   it("DataTable：表头为 columnheader，数字列右对齐", () => {
     render(
       <DataTable

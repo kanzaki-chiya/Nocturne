@@ -799,6 +799,10 @@
   color: var(--a-muted);
   font-variant-numeric: tabular-nums;
 }
+.nav-item.has-icon .badge,
+.nav-item.has-icon .meta {
+  flex-shrink: 0;
+}
 
 /* ---------- 表格（只有横线） ---------- */
 .tbl-wrap {
