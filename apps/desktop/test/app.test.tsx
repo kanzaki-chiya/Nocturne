@@ -2526,7 +2526,7 @@ it("新会话发送后侧栏立即出现并选中、输入框显示中断；拒�
   });
 });
 
-const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: swarm.created";
 
 it("旧格式会话留在列表里，打开只显示 Runtime 原文，归档后其它会话仍可打开", async () => {
   const host = replayHost([], undefined, undefined, (request) =>
@@ -2549,6 +2549,9 @@ it("旧格式会话留在列表里，打开只显示 Runtime 原文，归档后�
     "打开会话失败",
   );
   expect(screen.getByText(LEGACY_OPEN_ERROR).className).toContain("lead");
+  expect(
+    screen.getByText(LEGACY_OPEN_ERROR).textContent?.match(/不认识的持久化事件类型/g),
+  ).toHaveLength(1);
   expect(document.querySelector(".nodecard")?.textContent).not.toContain("旧格式");
   expect(document.querySelector(".nodecard")?.textContent).not.toContain("迁移");
   expect(screen.getByText("可搜索的好会话")).toBeTruthy();

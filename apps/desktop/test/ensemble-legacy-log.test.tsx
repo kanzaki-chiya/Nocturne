@@ -20,7 +20,7 @@ import { PhoneApp } from "../src/web/App";
 import { PhonePush } from "../src/web/push";
 import { memoryStorage } from "../src/web/storage";
 
-const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: swarm.created";
 
 const shared = vi.hoisted(() => ({
   connect: undefined as ((client: unknown, relay: unknown) => Promise<void>) | undefined,
@@ -151,6 +151,9 @@ it("桌面端打开旧日志只记下 Runtime 原文，列表、搜索、归档�
     );
     await expect(controller.open(parentId, cwd)).rejects.toBeInstanceOf(RpcError);
     expect(controller.openErrors.get(parentId)?.message).toBe(LEGACY_OPEN_ERROR);
+    expect(
+      controller.openErrors.get(parentId)?.message.match(/不认识的持久化事件类型/g),
+    ).toHaveLength(1);
     expect(failures).toEqual([]);
     const good = await client.runtime.resumeSession(goodId);
     expect(good.session.id).toBe(goodId);
@@ -229,6 +232,9 @@ it("手机网页列出旧日志，打开时警告是 Runtime 原文，归档后�
     await vi.waitFor(() =>
       expect(container.querySelector(".phone-error")?.textContent).toBe(LEGACY_OPEN_ERROR),
     );
+    expect(
+      container.querySelector(".phone-error")?.textContent?.match(/不认识的持久化事件类型/g),
+    ).toHaveLength(1);
     expect(container.textContent).not.toContain("旧格式");
     expect(container.textContent).not.toContain("迁移");
     expect((await phone.runtime.listSessions()).map((item) => item.id).sort()).toEqual(

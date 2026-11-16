@@ -56,11 +56,11 @@ export function parseLogBytes(buf: Uint8Array): ParsedLog {
       event = decodeDurableEvent(line);
     } catch (e) {
       if (e instanceof EventParseError && e.code === "unknown_event_type") {
-        throw new SessionError(
-          "session_log_newer",
-          `日志包含不认识的持久化事件类型: ${e.message}`,
-          { cause: e },
-        );
+        const prefix = "不认识的持久化事件类型: ";
+        const type = e.message.startsWith(prefix) ? e.message.slice(prefix.length) : e.message;
+        throw new SessionError("session_log_newer", `日志包含不认识的持久化事件类型: ${type}`, {
+          cause: e,
+        });
       }
       if (i === lineOffsets.length - 1 && tailStart === -1) {
         // 已终止但无法解析的最后一行同样算损坏尾部（sessions.md 第 4 节）

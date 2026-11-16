@@ -32,7 +32,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: swarm.created";
 
 function eventLine(event: unknown): string {
   return JSON.stringify(event);
@@ -147,6 +147,7 @@ it("旧 swarm 日志打不开，列表、搜索、归档和删文件仍正常；
   const opened = await runtime.resumeSession(parentId).catch((error: unknown) => error);
   expect(opened).toBeInstanceOf(SessionError);
   expect(opened).toMatchObject({ code: "session_log_newer", message: LEGACY_OPEN_ERROR });
+  expect((opened as SessionError).message.match(/不认识的持久化事件类型/g)).toHaveLength(1);
 
   const child = await runtime.resumeSession(childId);
   sessions.push(child);

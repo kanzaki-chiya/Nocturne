@@ -1594,7 +1594,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
       resumedEvents.filter(
         (event) => event.type === "runtime.warning" && event.payload.code === "compaction_failed",
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       resumedEvents.filter(
         (event) => event.type === "context.compacted" || event.type === "tool.started",
@@ -1660,7 +1660,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
       events.filter(
         (event) => event.type === "runtime.warning" && event.payload.code === "compaction_failed",
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     await session.close();
   });
 
@@ -1965,7 +1965,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await runtime.close();
   });
 
-  it("自动摘要：前缀与转录形式都抛错时不写压缩事件，警告只发一次，本轮后续步骤不再发摘要请求", async () => {
+  it("自动摘要：前缀与转录形式都抛错时不写压缩事件、不发警告，本轮后续步骤不再发摘要请求", async () => {
     const ws = makeTmpDir("nct-rt-fallback-both-fail-");
     writeFileSync(path.join(ws, "a.txt"), "alpha");
     writeFileSync(path.join(ws, "b.txt"), "beta");
@@ -2045,7 +2045,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
     expect(events.filter((e) => e.type === "context.compacted")).toHaveLength(0);
     expect(
       events.filter((e) => e.type === "runtime.warning" && e.payload.code === "compaction_failed"),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     // 1(step1) + 1(step2) + 2(prefix+transcript summary) + 1(step3) + 1(step4) = 6
     expect(provider.requests).toHaveLength(6);
 

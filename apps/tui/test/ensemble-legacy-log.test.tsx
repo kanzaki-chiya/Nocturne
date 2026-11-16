@@ -29,7 +29,7 @@ const tmp = (prefix: string) => {
   return dir;
 };
 
-const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+const LEGACY_OPEN_ERROR = "日志包含不认识的持久化事件类型: swarm.created";
 const CHILD_POST = '<swarm-post n="1" from="orders">成员汇报订单</swarm-post>';
 
 function writeLegacy(
@@ -172,6 +172,7 @@ it("TUI /resume 列出旧日志，打开时只显示 Runtime 原文，归档后�
     );
     const failed = lastFrame() ?? "";
     expect(failed).toContain(`! ${LEGACY_OPEN_ERROR}`);
+    expect(failed.match(/不认识的持久化事件类型/g)).toHaveLength(1);
     expect(failed).not.toContain("已切换到会话");
     expect(failed).not.toContain("旧格式");
 

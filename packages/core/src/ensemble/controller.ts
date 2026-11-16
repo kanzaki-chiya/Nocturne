@@ -288,7 +288,6 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
     profile?: string | undefined;
     effort?: ReasoningEffort | undefined;
     preset?: "general" | "explore" | undefined;
-    agent?: string | undefined;
     requireExplicitModelOrProfile: boolean;
   }):
     | {
@@ -299,12 +298,6 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
         preset: "general" | "explore";
       }
     | { ok: false; message: string } {
-    if (input.agent !== undefined && input.agent.trim() !== "") {
-      return {
-        ok: false,
-        message: `External ACP agent "${input.agent}" cannot be an ensemble member. Only built-in subagent sessions are supported.`,
-      };
-    }
     const rawModel = input.model?.trim() ? input.model.trim() : undefined;
     const rawProfile = input.profile?.trim() ? input.profile.trim() : undefined;
 
@@ -1148,7 +1141,6 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       effort?: ReasoningEffort | undefined;
       preset?: "general" | "explore" | undefined;
       isolated?: boolean | undefined;
-      agent?: string | undefined;
     }): Promise<EnsembleToolActionResult> {
       if (!active) {
         return {
@@ -1170,7 +1162,6 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
         profile: input.profile,
         effort: input.effort,
         preset: input.preset,
-        agent: input.agent,
         requireExplicitModelOrProfile: false,
       });
       if (!selected.ok) {
@@ -1292,7 +1283,6 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       model?: string | undefined;
       profile?: string | undefined;
       effort?: ReasoningEffort | undefined;
-      agent?: string | undefined;
     }): Promise<EnsembleToolActionResult> {
       if (!active) {
         return {
@@ -1314,7 +1304,6 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
         profile: input.profile,
         effort: input.effort,
         preset: member.preset,
-        agent: input.agent,
         requireExplicitModelOrProfile: true,
       });
       if (!selected.ok) {

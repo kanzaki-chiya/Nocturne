@@ -344,7 +344,7 @@ describe("REPL /resume 与切换器组合", () => {
     const current = await runtime.createSession({ model: "fake/fake-1" });
     const meta = current.state().meta;
     const id = "20261114-clilegacy";
-    const message = "日志包含不认识的持久化事件类型: 不认识的持久化事件类型: swarm.created";
+    const message = "日志包含不认识的持久化事件类型: swarm.created";
     writeFileSync(
       path.join(sessionsDir, `${id}.jsonl`),
       [
@@ -375,6 +375,9 @@ describe("REPL /resume 与切换器组合", () => {
     const { holder, switcher } = makeSwitcher(runtime, meta.cwd, current);
     const result = await switcher(id);
     expect(result).toEqual({ kind: "error", message });
+    expect(
+      result.kind === "error" ? result.message.match(/不认识的持久化事件类型/g) : null,
+    ).toHaveLength(1);
     expect(resumeFailureHint(new SessionError("session_log_newer", message), true)).toBeUndefined();
     expect(holder.current.id).toBe(current.id);
   });

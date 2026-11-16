@@ -76,7 +76,6 @@ export interface EnsembleMaestroToolHandlers {
     effort?: ReasoningEffort | undefined;
     preset?: "general" | "explore" | undefined;
     isolated?: boolean | undefined;
-    agent?: string | undefined;
   }): Promise<EnsembleToolActionResult>;
   post(input: {
     text: string;
@@ -86,7 +85,6 @@ export interface EnsembleMaestroToolHandlers {
     model?: string | undefined;
     profile?: string | undefined;
     effort?: ReasoningEffort | undefined;
-    agent?: string | undefined;
   }): Promise<EnsembleToolActionResult>;
   removeMember(input: {
     name: string;
@@ -149,7 +147,6 @@ export function createEnsembleMaestroTools(
     effort?: ReasoningEffort;
     preset?: "general" | "explore";
     isolated?: boolean;
-    agent?: string;
   }> = {
     name: "ensemble_add_member",
     description: [
@@ -202,10 +199,6 @@ export function createEnsembleMaestroTools(
           type: "boolean",
           description: "Set true to give this member an isolated git worktree.",
         },
-        agent: {
-          type: "string",
-          description: "Unsupported: external ACP agents cannot be ensemble members.",
-        },
       },
       required: ["name", "charter"],
       additionalProperties: false,
@@ -224,7 +217,6 @@ export function createEnsembleMaestroTools(
     model?: string;
     profile?: string;
     effort?: ReasoningEffort;
-    agent?: string;
   }> = {
     name: "ensemble_change_model",
     description: [
@@ -250,10 +242,6 @@ export function createEnsembleMaestroTools(
           type: "string",
           enum: [...REASONING_EFFORT_ORDER],
           description: "Optional reasoning effort level.",
-        },
-        agent: {
-          type: "string",
-          description: "Unsupported: external ACP agents cannot be ensemble members.",
         },
       },
       required: ["name"],

@@ -394,7 +394,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
                 charter: VALID_CHARTER,
                 model: "fake/non-existent",
               }),
-              // 外部 ACP agent（无论是 agent 字段还是传给 model/profile）→ 被拒
+              // 外部 ACP agent（传未定义的 agent 字段应按 schema 未知字段报错；传给 model/profile 仍由业务层拒绝）
               callTool("ext1", "ensemble_add_member", {
                 name: "bad-ext-1",
                 charter: VALID_CHARTER,
@@ -404,6 +404,11 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
                 name: "bad-ext-2",
                 charter: VALID_CHARTER,
                 model: "codex-ext",
+              }),
+              callTool("ext3", "ensemble_add_member", {
+                name: "bad-ext-3",
+                charter: VALID_CHARTER,
+                profile: "codex-ext",
               }),
               // 指定已启用模型 + 思考强度生效
               callTool("m-ok", "ensemble_add_member", {
@@ -434,6 +439,11 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
           );
           if (allText.includes("Finished first round") && !hasSwitched) {
             return [
+              callTool("chg-ext", "ensemble_change_model", {
+                name: "impl",
+                model: "m-coord",
+                agent: "codex-ext",
+              }),
               callTool("chg", "ensemble_change_model", {
                 name: "impl",
                 model: "m-coord",
@@ -511,9 +521,19 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       expect(view.ensemble?.status).toBe("ended");
     });
 
-    // 验证工具说明包含 subagentSelectionTable 档位与带价格的可选已启用模型清单，不含停用模型与外部 agent
+    // 验证工具说明包含 subagentSelectionTable 档位与带价格的可选已启用模型清单，不含停用模型与外部 agent；
+    // 且 ensemble_add_member 与 ensemble_change_model 的 schema 均不含 agent 字段
     const firstCoordReq = must(recorded.find((r) => requestRole(r.req) === "maestro")).req;
     const addToolSpec = must(firstCoordReq.tools.find((t) => t.name === "ensemble_add_member"));
+    const changeModelToolSpec = must(
+      firstCoordReq.tools.find((t) => t.name === "ensemble_change_model"),
+    );
+    expect(
+      Object.keys((addToolSpec.inputSchema.properties ?? {}) as Record<string, unknown>),
+    ).not.toContain("agent");
+    expect(
+      Object.keys((changeModelToolSpec.inputSchema.properties ?? {}) as Record<string, unknown>),
+    ).not.toContain("agent");
     expect(addToolSpec.description).toContain("fake/m-worker");
     expect(addToolSpec.description).toContain("$1/$5");
     expect(addToolSpec.description).toContain("fast");
@@ -521,6 +541,19 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     expect(addToolSpec.description).not.toContain("disabled-prov");
     expect(addToolSpec.description).not.toContain("codex-ext");
 
+    const assistantCallByProviderId = new Map(
+      session
+        .durableEvents()
+        .filter(
+          (e): e is Extract<DurableEvent, { type: "message.assistant" }> =>
+            e.type === "message.assistant",
+        )
+        .flatMap((e) => e.payload.toolCalls)
+        .filter(
+          (tc): tc is typeof tc & { providerCallId: string } => tc.providerCallId !== undefined,
+        )
+        .map((tc) => [tc.providerCallId, tc.callId]),
+    );
     const startedById = new Map(
       session
         .durableEvents()
@@ -529,14 +562,20 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
         )
         .map((e) => [e.payload.callId, e.payload.input as { name?: string }]),
     );
-    const completedByMemberName = new Map(
+    const completedByCallId = new Map(
       session
         .durableEvents()
         .filter(
           (e): e is Extract<DurableEvent, { type: "tool.completed" }> =>
             e.type === "tool.completed",
         )
-        .map((e) => [startedById.get(e.payload.callId)?.name ?? e.payload.callId, e.payload]),
+        .map((e) => [e.payload.callId, e.payload]),
+    );
+    const completedByMemberName = new Map(
+      [...completedByCallId.values()].map((payload) => [
+        startedById.get(payload.callId)?.name ?? payload.callId,
+        payload,
+      ]),
     );
 
     expect(completedByMemberName.get("bad-both")?.error?.code).toBe("invalid_input");
@@ -549,8 +588,22 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       expect(availablePart).not.toContain("off-model");
       expect(availablePart).not.toContain("disabled-prov");
     }
-    expect(completedByMemberName.get("bad-ext-1")?.error?.code).toBe("invalid_input");
+    // 传 agent 字段时，在 schema 校验阶段即以未知字段拒绝（不会进入 tool.started）
+    const ext1CallId = must(assistantCallByProviderId.get("ext1"));
+    expect(startedById.has(ext1CallId)).toBe(false);
+    expect(completedByCallId.get(ext1CallId)?.error?.code).toBe("invalid_input");
+    expect(completedByCallId.get(ext1CallId)?.modelContent).toContain("输入不符合 schema");
+    const chgExtCallId = must(assistantCallByProviderId.get("chg-ext"));
+    expect(startedById.has(chgExtCallId)).toBe(false);
+    expect(completedByCallId.get(chgExtCallId)?.error?.code).toBe("invalid_input");
+    expect(completedByCallId.get(chgExtCallId)?.modelContent).toContain("输入不符合 schema");
+    // 外部 agent 名作为 model 或 profile 仍被拒绝
     expect(completedByMemberName.get("bad-ext-2")?.error?.code).toBe("invalid_input");
+    expect(completedByMemberName.get("bad-ext-2")?.modelContent).toContain("external ACP agent");
+    expect(completedByMemberName.get("bad-ext-3")?.error?.code).toBe("invalid_input");
+    expect(completedByMemberName.get("bad-ext-3")?.modelContent).toContain("external ACP agent");
+    // 已启用普通 provider/model 能成功加成员
+    expect(completedByMemberName.get("impl")?.status).toBe("ok");
 
     // 验证成员加入事件记录了实际模型、思考强度与 explore 预设
     const addedEvents = session
@@ -751,18 +804,24 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
 
     // 等待 fix-1 进入工作中，fix-2 完成一轮，而 fixture 从未被唤醒
     await fix1Started;
-    await vi.waitFor(() => {
-      expect(recorded.some((r) => requestRole(r.req) === "member:fix-2")).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(recorded.some((r) => requestRole(r.req) === "member:fix-2")).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
     expect(recorded.some((r) => requestRole(r.req) === "member:fixture")).toBe(false);
 
     // 在 fix-1 正在跑第一轮期间，用户发帖 @fix-1 -> 作为安全点插话（steer）在同一轮内插入！
     await session.postToEnsemble({ text: "@fix-1 STEER-UPDATE: also check edge case." });
     slowRelease();
 
-    await vi.waitFor(() => {
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
 
     const view1 = replaySessionView(session.durableEvents());
     const fix1Member = must(must(view1.ensemble).members.find((m) => m.name === "fix-1"));
@@ -783,21 +842,27 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
 
     // 测试 @all：送给除发帖者外的全体在场者（此时唤醒 fix-1、fix-2、fixture、maestro）
     await session.postToEnsemble({ text: "@all Broadcast status check" });
-    await vi.waitFor(() => {
-      expect(recorded.some((r) => requestRole(r.req) === "member:fixture")).toBe(true);
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(recorded.some((r) => requestRole(r.req) === "member:fixture")).toBe(true);
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
 
     // 测试用户发帖无任何 @ 时默认唤醒指挥
     const coordCountBefore = recorded.filter((r) => requestRole(r.req) === "maestro").length;
     const postRes = await session.postToEnsemble({ text: "How is progress going?" });
     expect(postRes.recipients).toEqual(["maestro"]);
-    await vi.waitFor(() => {
-      expect(recorded.filter((r) => requestRole(r.req) === "maestro").length).toBeGreaterThan(
-        coordCountBefore,
-      );
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(recorded.filter((r) => requestRole(r.req) === "maestro").length).toBeGreaterThan(
+          coordCountBefore,
+        );
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
 
     // 测试用户直接给成员会话发消息：只给该成员，不上指挥留言板
     const boardCountBefore = must(replaySessionView(session.durableEvents()).ensemble).posts.length;
@@ -816,7 +881,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     ).toBe(true);
 
     await session.endEnsemble();
-  });
+  }, 30_000);
 
   it("工作区与独立工作树：默认共用主工作区、每轮自动提交、验证成员分离头指针检出并清残留、未并回拒绝移除、结束保留未并回并清理已并回", async () => {
     const ws = makeTempDir();
@@ -1073,17 +1138,23 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     openRuntimes.push({ sessions: [session] });
 
     await session.submit({ text: "test concurrency", workMode: "ensemble" });
-    await vi.waitFor(() => {
-      expect(activeWorkers).toBe(2);
-    });
+    await vi.waitFor(
+      () => {
+        expect(activeWorkers).toBe(2);
+      },
+      { timeout: 10_000 },
+    );
     // 严格遵守 maxConcurrent = 2：另外 2 名在队列中等待，未超过上限
     expect(peakWorkers).toBe(2);
 
     releaseBatch();
-    await vi.waitFor(() => {
-      expect(finishedWorkers).toHaveLength(4);
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(finishedWorkers).toHaveLength(4);
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
     expect(peakWorkers).toBeLessThanOrEqual(2);
     expect(finishedWorkers.sort()).toEqual([
       "member:w-1",
@@ -1093,7 +1164,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     ]);
 
     await session.endEnsemble();
-  });
+  }, 30_000);
 
   it("状态机：一轮以错误结束进入 paused 且不自动重试；新帖、换模型或用户直接发消息恢复；移除后不能再唤醒", async () => {
     const ws = makeTempDir();
@@ -1164,48 +1235,71 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     const getView = trackView(session);
 
     await session.submit({ text: "start", workMode: "ensemble" });
-    await vi.waitFor(() => {
-      const m = getView().ensemble?.members.find((x) => x.name === "fragile");
-      expect(m?.status).toBe("paused");
-    });
+    await vi.waitFor(
+      () => {
+        const m = getView().ensemble?.members.find((x) => x.name === "fragile");
+        expect(m?.status).toBe("paused");
+      },
+      { timeout: 10_000 },
+    );
     // 等待片刻确认不自动重试（安静提醒会唤醒指挥一次，但绝不会重试 fragile）
-    await vi.waitFor(() => expect(session.isIdle()).toBe(true));
+    await vi.waitFor(() => expect(session.isIdle()).toBe(true), { timeout: 10_000 });
     expect(memberAttempts).toBe(1);
     expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe("paused");
 
     // 方式 A：新帖 @fragile 恢复运行（此处让它再失败一次回到 paused，以接着测换模型恢复）
     await session.postToEnsemble({ text: "@fragile retry via new post" });
-    await vi.waitFor(() => expect(memberAttempts).toBe(2));
-    await vi.waitFor(() => {
-      expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe("paused");
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(() => expect(memberAttempts).toBe(2), { timeout: 10_000 });
+    await vi.waitFor(
+      () => {
+        expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe(
+          "paused",
+        );
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
 
     // 方式 B：指挥调用 ensemble_change_model 换模型后自动从 paused 恢复！
     failMode = false;
     await session.submit({ text: "switch fragile model" });
-    await vi.waitFor(() => {
-      expect(memberAttempts).toBe(3);
-      expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe("waiting");
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(memberAttempts).toBe(3);
+        expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe(
+          "waiting",
+        );
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
 
     // 方式 C：再让 fragile 进入 paused，验证用户直接向成员会话发消息（submit）也能恢复
     failMode = true;
     await session.postToEnsemble({ text: "@fragile fail once more" });
-    await vi.waitFor(() => {
-      expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe("paused");
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe(
+          "paused",
+        );
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
     failMode = false;
     const fragileId = must(
       must(getView().ensemble).members.find((x) => x.name === "fragile"),
     ).childSessionId;
     const fragileSession = await rt.resumeSession(fragileId);
     await fragileSession.submit({ text: "resume via direct user message" });
-    await vi.waitFor(() => {
-      expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe("waiting");
-    });
+    await vi.waitFor(
+      () => {
+        expect(getView().ensemble?.members.find((x) => x.name === "fragile")?.status).toBe(
+          "waiting",
+        );
+      },
+      { timeout: 10_000 },
+    );
 
     // 移除成员 temp：移除后状态为 removed，不能再被 @ 唤醒，也不能再直接 submit
     const tempId = must(
@@ -1225,7 +1319,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     expect(memberAttempts).toBeLessThan(100);
 
     await session.endEnsemble();
-  });
+  }, 30_000);
 
   it("权限确认冒泡：default 预设下成员写文件等用户确认而不直接拒绝，派生视图列出等待确认的成员，批准后继续完成", async () => {
     const ws = makeTempDir();
@@ -1272,9 +1366,12 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     await session.submit({ text: "write file with approval", workMode: "ensemble" });
 
     // 等待成员触发权限确认：不应被非交互直接拒绝，指挥派生视图应列出 writer 正在等确认！
-    await vi.waitFor(() => {
-      expect(getView().ensemble?.awaitingPermissionMembers).toEqual(["writer"]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(getView().ensemble?.awaitingPermissionMembers).toEqual(["writer"]);
+      },
+      { timeout: 10_000 },
+    );
     const writerView = must(must(getView().ensemble).members.find((m) => m.name === "writer"));
     expect(writerView.status).toBe("working");
     expect(writerView.pendingPermissions).toHaveLength(1);
@@ -1288,15 +1385,20 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     const writerSession = await rt.resumeSession(writerView.childSessionId);
     await writerSession.respondPermission(reqId, { decision: "allow" });
 
-    await vi.waitFor(() => {
-      expect(getView().ensemble?.awaitingPermissionMembers).toEqual([]);
-      expect(getView().ensemble?.members.find((m) => m.name === "writer")?.status).toBe("waiting");
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(getView().ensemble?.awaitingPermissionMembers).toEqual([]);
+        expect(getView().ensemble?.members.find((m) => m.name === "writer")?.status).toBe(
+          "waiting",
+        );
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
     expect(readFileSync(path.join(ws, "approved.txt"), "utf8")).toBe("confirmed-by-user\n");
 
     await session.endEnsemble();
-  });
+  }, 30_000);
 
   it("安静提醒：全员等待时发一次提醒 @maestro，无新帖不重复发，有新帖后重新计", async () => {
     const ws = makeTempDir();
@@ -1337,10 +1439,13 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       session.durableEvents().filter((e) => e.type === "turn.completed").length;
 
     // silent-worker 静默结束后，Runtime 发一条作者为 Runtime 的安静提醒唤醒指挥（完成第 2 个 Turn）
-    await vi.waitFor(() => {
-      expect(completedCoordTurns()).toBe(2);
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(completedCoordTurns()).toBe(2);
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
 
     const runtimePosts1 = must(replaySessionView(session.durableEvents()).ensemble).posts.filter(
       (p) => p.fromKind === "runtime",
@@ -1360,10 +1465,13 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
 
     // 用户发一条新帖 @silent-worker -> 重新计数！silent-worker 跑完再次静默后，Runtime 再发一次安静提醒！
     await session.postToEnsemble({ text: "@silent-worker one more check" });
-    await vi.waitFor(() => {
-      expect(completedCoordTurns()).toBe(3);
-      expect(session.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(completedCoordTurns()).toBe(3);
+        expect(session.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
     expect(
       must(replaySessionView(session.durableEvents()).ensemble).posts.filter(
         (p) => p.fromKind === "runtime",
@@ -1371,7 +1479,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     ).toHaveLength(2);
 
     await session.endEnsemble();
-  });
+  }, 30_000);
 
   it("持久化：重启补送未送达提及且不自动唤醒；回退到建立之前结束 Ensemble；分叉新会话不继承 Ensemble；日志格式兼容", async () => {
     const ws = makeTempDir();

@@ -22,18 +22,25 @@ it("大文件分帧着色，不改变原文，每帧保持在预算内", async (
     vi.spyOn(await import("../src/code-parse"), "parseCode").mockResolvedValueOnce(lines);
     highlightCode(root, { path: "huge.ts", text, kind: "numbered" }, controller.signal);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    let fakeNow = 0;
+    const stepMs = 0.25;
+    // 用确定性假时钟按每步 0.25ms 推进，验证单帧严格受 4ms 预算上限约束，不依赖机器墙钟速度
+    vi.spyOn(performance, "now").mockImplementation(() => {
+      fakeNow += stepMs;
+      return fakeNow;
+    });
     while (frames.length > 0) {
       const next = frames.shift();
-      const start = performance.now();
+      const start = fakeNow;
       next?.(start);
-      durations.push(performance.now() - start);
+      durations.push(fakeNow - start);
     }
   } finally {
     globalThis.requestAnimationFrame = originalRaf;
     vi.restoreAllMocks();
   }
   expect(durations.length).toBeGreaterThan(1);
-  expect(Math.max(...durations)).toBeLessThan(50);
+  expect(Math.max(...durations)).toBeLessThanOrEqual(4.25);
   expect(root.textContent).toBe(text);
   expect(root.querySelectorAll(".syntax-keyword").length).toBe(2000);
 });

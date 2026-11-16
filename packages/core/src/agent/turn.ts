@@ -517,16 +517,7 @@ export async function runTurn(
           continue;
         }
         summaryFailed = true;
-        if (!built.mustCompact) {
-          session.emitEphemeral(
-            "runtime.warning",
-            {
-              code: "compaction_failed",
-              message: "预防性摘要压缩失败，按未压缩历史继续",
-            },
-            { turnId },
-          );
-        } else {
+        if (built.mustCompact) {
           return await finish("error", {
             code: "compaction_failed",
             message:

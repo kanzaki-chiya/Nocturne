@@ -384,9 +384,12 @@ describe("load 校验（events.md 第 8 节）", () => {
 
   it("不认识的持久化事件类型 → session_log_newer", async () => {
     await writeLog("newer1", [created(), { ...base, type: "future.event", seq: 2, payload: {} }]);
-    await expect(store.load("newer1")).rejects.toMatchObject({
+    const err = await store.load("newer1").catch((e: unknown) => e);
+    expect(err).toMatchObject({
       code: "session_log_newer",
+      message: "日志包含不认识的持久化事件类型: future.event",
     });
+    expect((err as Error).message.match(/不认识的持久化事件类型/g)).toHaveLength(1);
   });
 
   it("formatVersion 更高 → session_log_newer", async () => {
