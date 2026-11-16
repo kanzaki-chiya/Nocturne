@@ -77,7 +77,7 @@ describe("概览", () => {
     expect(container.querySelector(".tool-range")?.textContent).toContain("p/m");
     expect(container.querySelector(".tool-range")?.textContent).toContain("high");
   });
-  it("后台子代理带「后台」标记与取消按钮；同步子代理没有；点名字仍打开观察", () => {
+  it("后台子代理有取消按钮、不带「后台」标记；同步子代理没有取消按钮；点名字仍打开观察", () => {
     const onOpen = vi.fn();
     const onCancel = vi.fn();
     render(
@@ -98,7 +98,7 @@ describe("概览", () => {
         }}
       />,
     );
-    expect(screen.getAllByText("后台")).toHaveLength(1);
+    expect(screen.queryByText("后台")).toBeNull();
     const cancels = screen.getAllByRole("button", { name: /取消后台子代理/ });
     expect(cancels).toHaveLength(1);
     fireEvent.click(cancels[0] as HTMLElement);
