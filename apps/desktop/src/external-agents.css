@@ -1,27 +1,12 @@
-.external-agents-page fieldset {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  border: 0;
-  padding: 0;
-  margin: 0;
+.external-agents-page .external-option-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
   min-width: 0;
 }
-.external-agents-page .srow code,
-.external-agents-page .srow pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  margin: 0;
-}
-.external-agents-page .external-option code {
-  font-family: var(--mono);
-}
-.external-agents-page .external-option {
-  margin-block: var(--space-4);
-}
-.external-agents-page .external-probe {
-  margin-block: var(--space-4);
-}
-.external-agents-page .external-option-reset {
-  align-self: flex-start;
+.external-agents-page .st .muted-value {
+  color: var(--a-muted);
+  margin-left: var(--space-1);
 }

@@ -367,6 +367,8 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 
 [ADR-0058](../decisions/ADR-0058-subagent-profiles.md)：task.profile 缺省 default；可选值为 default、已启用且模型可用的内置档位、已启用外部 agent。只有 default 时不公开 profile 字段且描述保持原状。agent 字段兼容一个版本，按同名 profile 处理；同时指定时报 invalid_input。外部档位仍与 preset/tools/outputSchema 互斥。
 
+桌面端在「设置」→「子代理」中用列表管理档位；点击档位进入详情。已有档位的模型、思考档位、工具集上限、超时与启用状态按字段即时写入设置，描述在失焦且非空时写入；保存失败恢复已保存值。新建档位仍使用取消 / 保存表单，删除经详情页「更多」菜单确认后返回列表。
+
 声明为 `{description, model?, effort?, tools?, timeoutMs?, enabled}`，由 config 层解析，launcher 使用解析结果；Agent Loop 不认识档位。default 模型即 modelRoles.task，不迁移数据，不能删或停用。其他档位模型留空跟随当前会话；effort 留空继承父会话，再以 clampReasoningEffort 就近降档。实际模型和强度记 session.created，并由 task.output.model / reasoningEffort 供客户端呈现（后者可选，旧输出兼容）。运行中以既有 tool.progress 传递模型和强度。
 
 explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 `timeoutMs` 是可选默认值，显式请求可覆盖，不封顶；profile 配置不再有 3600 秒上限。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。

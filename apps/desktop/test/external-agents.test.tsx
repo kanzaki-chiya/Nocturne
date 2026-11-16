@@ -44,45 +44,77 @@ describe("外部 agent 设置页", () => {
       },
     ]);
   });
-  it("来源只读、保存测试近期结果与无额度探测说明", async () => {
+
+  it("列表行点行进详情、面包屑返列表、行内开关不导航；不可编辑无更多菜单", async () => {
+    let agents = [managed, manual];
     const f = fakeServer(
       withInit({
-        "agents.describeExternalAgents": {
-          agents: [managed, manual],
+        "agents.describeExternalAgents": () => ({
+          agents,
           warnings: ["忽略项目外部 agent"],
-        },
+        }),
         "skills.describeSkills": { skills: [], warnings: [] },
+        "agents.setExternalAgentEnabled": (params: Record<string, unknown>) => {
+          agents = agents.map((a) =>
+            a.name === params.name ? { ...a, enabled: Boolean(params.enabled) } : a,
+          );
+          return null;
+        },
         "agents.probeExternalAgent": {
           ok: true,
           durationMs: 25,
           agentInfo: { name: "Fake", version: "1" },
-          authMethods: [{ id: "login", name: "Local login" }],
+          authMethods: [{ id: "login", name: "Local login", description: "ignored desc" }],
           configOptions: [],
         },
       }),
     );
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot="/work" version={0} />);
-    fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
-    await screen.findByRole("heading", { name: "managed" });
+    await screen.findByRole("heading", { level: 1, name: "子代理" });
+
+    // 列表行内 switch 切换不进入详情
+    const rowSwitch = screen.getByRole("switch", { name: "启用 managed" });
+    fireEvent.click(rowSwitch);
+    await waitFor(() =>
+      expect(
+        f.calls.some(
+          (call) =>
+            call.method === "agents.setExternalAgentEnabled" &&
+            call.params.name === "managed" &&
+            call.params.enabled === false,
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "子代理" })).toBeTruthy();
+
+    // 点击列表行进入详情，再点面包屑返回列表
+    fireEvent.click(screen.getByRole("button", { name: /managed/ }));
+    await screen.findByRole("heading", { level: 1, name: /managed/ });
     expect(screen.queryByText(/外部费用计在其自己的账号/)).toBeNull();
+    expect(screen.getByRole("button", { name: "更多" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "子代理" }));
+    await screen.findByRole("heading", { level: 1, name: "子代理" });
+
+    // 只读外部 agent：列表排在后，进详情无更多菜单，开关禁用并保留来源 title
     fireEvent.click(screen.getByRole("button", { name: /manual/ }));
-    await screen.findByRole("heading", { name: "manual" });
-    expect(document.querySelector(".md-detail p.desc")).toBeNull();
+    await screen.findByRole("heading", { level: 1, name: /manual/ });
+    expect(document.querySelector("p.desc")).toBeNull();
     const badge = screen.getByText("只读", { selector: ".badge" });
     expect(badge.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
-    const sw = screen.getByRole("switch") as HTMLButtonElement;
-    const editBtn = screen.getByRole("button", { name: "编辑" }) as HTMLButtonElement;
-    const deleteBtn = screen.getByRole("button", { name: "删除" }) as HTMLButtonElement;
+    const sw = screen.getByRole("switch", { name: "启用 agent" }) as HTMLButtonElement;
     expect(sw.disabled).toBe(true);
     expect(sw.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
-    expect(editBtn.disabled).toBe(true);
-    expect(editBtn.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
-    expect(deleteBtn.disabled).toBe(true);
-    expect(deleteBtn.getAttribute("title")).toBe("来自 home/config.json，请修改该文件");
+    expect(screen.queryByRole("button", { name: "更多" })).toBeNull();
+
+    // 探测连接：最近测试组显示结果、时间、登录方式（无 description）与可配置选项数
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     await screen.findByText("Local login");
-    expect(screen.getByRole("group", { name: "最近测试" }).textContent).toContain("已连接Fake 1");
+    expect(screen.queryByText(/ignored desc/)).toBeNull();
+    const probeRegion = screen.getByRole("region", { name: "最近测试" });
+    expect(probeRegion.textContent).toContain("已连接Fake 1");
+    expect(probeRegion.textContent).toMatch(/\d{2}:\d{2}:\d{2} · 25 ms/);
+    expect(probeRegion.textContent).toContain("0 项");
     expect(
       f.calls
         .filter((call) => call.method === "agents.probeExternalAgent")
@@ -90,6 +122,7 @@ describe("外部 agent 设置页", () => {
     ).toEqual([{ name: "manual" }]);
     f.close();
   });
+
   it("草稿探测与700项搜索下拉，create保存包括不透明配置值", async () => {
     const f = fakeServer(
       withInit({
@@ -115,10 +148,13 @@ describe("外部 agent 设置页", () => {
     );
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
-    await screen.findByRole("heading", { name: "default" });
+    await screen.findByRole("heading", { level: 1, name: "子代理" });
+    // 空外部组不显示
+    expect(screen.queryByRole("region", { name: /外部 Agent/ })).toBeNull();
     const [add] = screen.getAllByRole("button", { name: "添加 agent" });
     if (add === undefined) throw new Error("外部 agent 添加入口不存在");
     fireEvent.click(add);
+    await screen.findByRole("heading", { level: 1, name: /添加外部 Agent/ });
     fireEvent.click(screen.getByRole("combobox", { name: "外部 agent 预设" }));
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /omp/ }));
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
@@ -151,6 +187,7 @@ describe("外部 agent 设置页", () => {
     expect(f.calls.some((call) => call.method === "runtime.reloadConfig")).toBe(false);
     f.close();
   });
+
   it("同名配置选项显示对方给的说明或值，可按值搜索，测试结果保存后保留", async () => {
     const f = fakeServer(
       withInit({
@@ -178,7 +215,8 @@ describe("外部 agent 设置页", () => {
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
     fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.click(await screen.findByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
     fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
     const model = await screen.findByRole("combobox", { name: "Model" });
     // id 与名称只差大小写时不重复显示
@@ -202,7 +240,8 @@ describe("外部 agent 设置页", () => {
     await waitFor(() => expect(screen.getAllByText("omp 18.6.0").length).toBeGreaterThan(0));
     f.close();
   });
-  it("toggle、replace、删除和失败保持草稿；名称锁定", async () => {
+
+  it("toggle、replace、更多菜单删除确认后回列表和失败保持草稿；名称锁定", async () => {
     let agents = [managed];
     let reject = true;
     const f = fakeServer(
@@ -226,12 +265,15 @@ describe("外部 agent 设置页", () => {
     await f.initialize();
     render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
     fireEvent.click(await screen.findByRole("button", { name: /managed/ }));
-    await screen.findByRole("heading", { name: "managed" });
-    fireEvent.click(screen.getByRole("switch"));
+    await screen.findByRole("heading", { level: 1, name: /managed/ });
+    fireEvent.click(screen.getByRole("switch", { name: "启用 agent" }));
     await waitFor(() =>
-      expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false"),
+      expect(screen.getByRole("switch", { name: "启用 agent" }).getAttribute("aria-checked")).toBe(
+        "false",
+      ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
     expect((screen.getByLabelText(/^名称/) as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: "描述" }), {
       target: { value: "保持草稿" },
@@ -243,13 +285,17 @@ describe("外部 agent 设置页", () => {
     );
     reject = false;
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await screen.findByRole("heading", { name: "managed" });
+    await screen.findByRole("heading", { level: 1, name: /managed/ });
     expect(f.calls.find((call) => call.method === "agents.saveExternalAgent")?.params.mode).toBe(
       "replace",
     );
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
-    await screen.findByText("还没有外部 Agent");
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除 managed？" });
+    expect(dialog.textContent).not.toContain("不会卸载命令行工具");
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    await screen.findByRole("heading", { level: 1, name: "子代理" });
+    expect(screen.queryByRole("region", { name: /外部 Agent/ })).toBeNull();
     expect(f.calls.find((call) => call.method === "agents.deleteExternalAgent")?.params).toEqual({
       name: "managed",
     });

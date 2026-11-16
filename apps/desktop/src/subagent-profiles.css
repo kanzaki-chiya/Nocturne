@@ -1,27 +1,43 @@
-.profile-editor .dhead {
-  padding-inline: 0;
-}
 .profile-editor .profile-description {
   field-sizing: content;
   resize: none;
-  min-height: calc(3lh + var(--space-4) + 2px);
+  min-height: var(--ctl-h-md);
   max-height: 240px;
   overflow-y: auto;
+  padding-block: var(--space-1);
 }
-.profile-pair {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--w-field-md), 1fr));
-  gap: var(--space-4);
+.profile-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.profile-unit .input {
+  width: var(--w-field-sm);
+  text-align: right;
+  font-family: var(--mono);
+}
+.profile-unit-label {
+  color: var(--a-muted);
+  font-size: var(--fs-2);
 }
 .profile-preview {
   color: var(--a-muted);
   font-size: var(--fs-1);
 }
+.profile-preview summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+}
 .profile-preview pre {
+  margin: var(--space-2) 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--mono);
-  background: var(--a-panel);
+  background: var(--a-raised);
+  border: 1px solid var(--a-border);
   padding: var(--space-3);
   border-radius: var(--radius-2);
+  color: var(--a-secondary);
 }
