@@ -2238,6 +2238,27 @@ describe("Conversation 工具行与拒绝", () => {
     expect(container.querySelector(".tool-arg")?.textContent).toBe("· project");
     expect(container.querySelector(".tool-dir")).toBeNull();
   });
+
+  it("update_goal 工具行显示「目标」", () => {
+    const view = createSessionView();
+    view.entries = [
+      tool({
+        name: "update_goal",
+        input: { status: "met" },
+        result: {
+          status: "ok",
+          modelContent: "目标已完成",
+          output: { status: "met" },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 4,
+        },
+      }),
+    ];
+    const { container } = mount(view);
+    expect(container.querySelector(".tool-name")?.textContent).toBe("目标");
+  });
   it("工作区内路径相对化、区外绝对化；10 秒以上才显示时长", () => {
     const view = createSessionView();
     const inside = tool({ name: "edit", input: { path: "Z:/project/src/a.ts" } });
@@ -2536,7 +2557,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(deny?.textContent).toBe("✕ 已拒绝exa/web_search_exa 热点新闻");
   });
 
-  it("ADR-0067：mcp_search 显示为「搜索 MCP 工具」，带 target 的 mcp_call 显示为目标工具与参数，无 target 旧日志照原样显示", () => {
+  it("ADR-0067：mcp_search 显示为「搜索 MCP 工具」，带 target 的 mcp_call 显示为目标工具与参数，无 target 退回「调用 MCP 工具」", () => {
     const view = createSessionView();
     const searchEntry = tool({
       key: "t:c-search",
@@ -2590,8 +2611,8 @@ describe("Conversation 工具行与拒绝", () => {
     // 2. 带 target 的 mcp_call 显示为目标工具 github/search_issues 与参数 pruneLimit
     expect(lines[1]?.querySelector(".tool-name")?.textContent).toBe("github/search_issues");
     expect(lines[1]?.querySelector(".tool-arg")?.textContent).toBe("pruneLimit");
-    // 3. 无 target 且无 mcp subject 的旧日志照原样显示
-    expect(lines[2]?.querySelector(".tool-name")?.textContent).toBe("mcp_call");
+    // 3. 无 target 且无 mcp subject（流式未解析或旧日志）退回显示「调用 MCP 工具」
+    expect(lines[2]?.querySelector(".tool-name")?.textContent).toBe("调用 MCP 工具");
     // 4. 权限确认卡片按目标工具显示，不出现 mcp_call
     const permCard = screen.getByRole("region", { name: "权限确认" });
     expect(permCard.textContent).toContain("调用 MCP 工具");

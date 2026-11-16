@@ -6,6 +6,7 @@ import type { ToolEntry } from "@nocturne/core/protocol";
 
 export const TOOL_META: Record<string, string> = {
   todo_write: "任务清单",
+  update_goal: "目标",
   render_html: "页面",
   skill: "技能",
   read: "读取",
@@ -21,9 +22,11 @@ export const TOOL_META: Record<string, string> = {
   web_search: "网页搜索",
   subagent: "子代理",
   task: "子代理",
+  finish: "提交结果",
   ask_user: "提问",
   schedule: "定时任务",
   mcp_search: "搜索 MCP 工具",
+  mcp_call: "调用 MCP 工具",
   ensemble_init: "合奏",
   ensemble_add_member: "添加",
   ensemble_post: "发帖",

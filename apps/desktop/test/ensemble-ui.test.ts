@@ -63,6 +63,9 @@ describe("toolMeta Ensemble 工具标签与参数", () => {
   it("保留原有内置工具和 MCP 名称映射", () => {
     expect(toolMeta("shell").label).toBe("命令");
     expect(toolMeta("edit").label).toBe("编辑");
+    expect(toolMeta("update_goal").label).toBe("目标");
+    expect(toolMeta("finish").label).toBe("提交结果");
+    expect(toolMeta("mcp_call").label).toBe("调用 MCP 工具");
     expect(mcpToolLabel("mcp__github__list_prs")).toBe("github/list_prs");
   });
 

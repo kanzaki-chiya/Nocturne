@@ -172,6 +172,8 @@ it("finish 的 input.result 是最终结果（Markdown），提交回执不当�
   expect(result.querySelector("h2")?.textContent).toBe("结论");
   expect(result.querySelector("strong")?.textContent).toBe("正常");
   expect(result.textContent).not.toContain("结果已提交给父会话");
+  // 子代理面板里的 finish 工具行用中文名
+  expect(document.querySelector(".tool-name")?.textContent).toBe("提交结果");
   expect(
     within(document.querySelector(".sp-sub-head") as HTMLElement).getByRole("status").textContent,
   ).toBe("结果已提交");
