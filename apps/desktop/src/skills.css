@@ -1,45 +1,28 @@
-.skill-budget {
-  display: grid;
-  gap: 8px;
+.skill-catalog-budget {
+  font-size: var(--fs-1);
+  font-weight: var(--fw-regular);
   color: var(--a-muted);
-  font-size: var(--fs-1);
+  letter-spacing: 0;
+  margin-left: var(--space-1);
+  align-self: flex-end;
+  padding-bottom: var(--space-0-5);
 }
-.skill-budget b {
-  color: var(--a-text);
-  font-weight: 500;
+.skill-catalog-budget .mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
-.skill-budget meter {
-  width: 100%;
-  height: 10px;
-  accent-color: var(--a-accent);
+.skill-search {
+  width: var(--out-max-h);
 }
-.skill-budget meter::-webkit-meter-bar {
-  background: var(--a-raised);
-  border: 0;
-  border-radius: var(--radius-1);
+.skill-detail-title {
+  font-family: var(--mono);
+  font-weight: var(--fw-medium);
 }
-.skill-budget meter::-webkit-meter-optimum-value {
-  background: var(--a-accent);
-}
-.skill-scanned {
-  overflow-wrap: anywhere;
-  margin: 12px 10px;
-  font-size: var(--fs-1);
-}
-.skill-banner {
-  border: 1px solid;
-  border-radius: var(--radius-2);
-  padding: 10px 12px;
-  font-weight: 500;
+.skill-warn {
+  color: var(--a-warning);
 }
 .skill-warnings code {
   font-family: var(--mono);
-}
-.skill-banner.warn {
-  color: var(--a-warning);
-  /* stylelint-disable-next-line function-disallowed-list -- 技能警告横幅用 35% --a-warning 混入 --a-border 的描边 */
-  border-color: color-mix(in srgb, var(--a-warning) 35%, var(--a-border));
-  background: var(--a-warning-bg);
 }
 .skill-description {
   padding: var(--space-2) var(--space-1);
@@ -92,7 +75,7 @@
   color: var(--a-faint);
 }
 .skill-warnings {
-  margin: 12px 10px 0;
+  margin: var(--space-2) var(--space-1) 0;
   font-size: var(--fs-1);
   color: var(--a-warning);
 }

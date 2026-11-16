@@ -85,8 +85,11 @@ it("补全命令优先，技能过滤、排序、参数提示及用户调用", (
   expect(parseSlash("/compact", "session", skills)?.kind).toBe("command");
 });
 
-it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明和解析失败路径", async () => {
-  const normal = skill({ source: ".nocturne" });
+it("列表分组、模型目录预算、进详情、截断、写法、覆盖同名、缺说明、冲突与解析失败", async () => {
+  const normal = skill({
+    source: ".nocturne",
+    otherEntries: ["C:/alt/alpha"],
+  });
   const ignored = skill({
     name: "release",
     entryPath: "C:/home/release",
@@ -138,6 +141,86 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
     }),
   );
   await f.initialize();
+  const openDirectory = vi.fn(async () => undefined);
+  render(
+    <SkillsPage
+      client={f.client}
+      workspaceRoot="Z:/project"
+      version={0}
+      openDirectory={openDirectory}
+      openUrl={vi.fn()}
+    />,
+  );
+  // 列表页：预算在 PageHeader，不显示旧预算条、统计句、扫描目录
+  await screen.findByText("678 / 2,560");
+  expect(screen.queryByRole("meter")).toBeNull();
+  expect(screen.queryByText(/完整说明 \d+ 个/)).toBeNull();
+  expect(screen.queryByText(/扫描目录/)).toBeNull();
+  expect(screen.getByText("project").parentElement?.textContent).toBe("项目project · 1");
+
+  const userGroup = screen.getByRole("region", { name: /用户 · 5/ });
+  expect(within(userGroup).queryByText("模型 + 用户")).toBeNull();
+  expect(within(userGroup).getByText("只限用户")).toBeTruthy();
+  expect(within(userGroup).getByText("不加载")).toBeTruthy();
+  expect(within(userGroup).getByText("缺说明")).toBeTruthy();
+  expect(within(userGroup).queryByText(/2 处不生效/)).toBeNull();
+  expect(within(userGroup).getAllByText("alpha")).toHaveLength(1);
+
+  // 解析失败汇总
+  fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看"));
+  expect(screen.getByText("C:/home/bad/SKILL.md:3")).toBeTruthy();
+
+  // 进入 alpha 详情：概况、同名、位置 title、截断、图标按钮打开目录
+  fireEvent.click(within(userGroup).getByText("alpha"));
+  await screen.findByText("模型目录到此为止");
+  expect(screen.getByRole("button", { name: "技能" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "同名" }).textContent).toContain("Z:/project/alpha");
+  expect(screen.queryByRole("button", { name: "查看生效的那份" })).toBeNull();
+  expect(screen.queryByText(/另有入口 C:\/alt\/alpha/)).toBeNull();
+  expect(screen.getByText("C:/actual/alpha\\SKILL.md").getAttribute("title")).toContain(
+    "经 C:/home/alpha 进入；另有入口 C:/alt/alpha 指向同一目录，只算一个",
+  );
+  expect(screen.getByRole("region", { name: "说明 · 400 字" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: /^写法/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "在资源管理器中打开" }));
+  expect(openDirectory).toHaveBeenCalledWith("C:/actual/alpha");
+
+  // 面包屑返回列表，再进入 release 查看写法组（无旧警告横幅）
+  fireEvent.click(screen.getByRole("button", { name: "技能" }));
+  await screen.findByText("678 / 2,560");
+  fireEvent.click(screen.getByText("release"));
+  expect(screen.queryByText(/处写法在 Nocturne 里不生效/)).toBeNull();
+  const ignoredGroup = await screen.findByRole("region", { name: "写法 · 2" });
+  expect(within(ignoredGroup).getByText("allowed-tools: Bash(*)")).toBeTruthy();
+  expect(within(ignoredGroup).getByText("照常确认")).toBeTruthy();
+
+  // 返回列表，进入 manual 查看斜杠冲突与缺说明（无旧警告横幅）
+  fireEvent.click(screen.getByRole("button", { name: "技能" }));
+  fireEvent.click(await screen.findByText("manual"));
+  expect(screen.queryByText("缺少说明，模型看不到这个技能")).toBeNull();
+  expect(screen.queryByText("与内置命令重名，斜杠不能调用")).toBeNull();
+  expect(screen.getByRole("group", { name: "斜杠" }).textContent).toContain("/manual");
+  expect(screen.getByRole("group", { name: "斜杠" }).textContent).toContain("与内置命令重名");
+  expect(within(screen.getByRole("region", { name: "说明" })).getByText("缺说明")).toBeTruthy();
+
+  // 详情页开关调用 setSkillEnabled 且留在详情页
+  fireEvent.click(screen.getByRole("switch", { name: "启用 manual" }));
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "✓ 已停用 manual");
+  expect(screen.getByRole("button", { name: "技能" })).toBeTruthy();
+});
+
+it("列表开关只调用启用不导航，fallback 预算带 title", async () => {
+  const base = data([skill()]);
+  const f = fakeServer(
+    withInit({
+      "skills.describeSkills": {
+        ...base,
+        budget: { ...base.budget, basis: "fallback", limitTokens: 8000 },
+      },
+      "skills.setSkillEnabled": { affectedSessions: 1 },
+    }),
+  );
+  await f.initialize();
   render(
     <SkillsPage
       client={f.client}
@@ -147,48 +230,67 @@ it("分组、状态、预算、截断、忽略横幅、覆盖只读、缺说明�
       openUrl={vi.fn()}
     />,
   );
-  await screen.findByText("模型目录到此为止");
-  expect(screen.queryByText(/模型目录里显示前/)).toBeNull();
-  expect(screen.getByRole("meter").getAttribute("value")).toBe("678");
-  expect(screen.getByText(/完整说明 2 个，只显示名字 4 个，已停用 1 个/)).toBeTruthy();
-  expect(screen.getByText("project").parentElement?.textContent).toBe("项目project · 1");
-  const list = screen.getByRole("navigation", { name: "技能列表" });
-  const normalRow = within(list).getByRole("button", { name: "alpha" });
-  expect(normalRow.textContent).toBe("alpha");
-  expect(normalRow.textContent).not.toContain(".nocturne");
-  expect(normalRow.textContent).not.toContain("模型 + 用户");
-  expect(document.querySelector(".dhead .badge")).toBeNull();
-  expect(within(list).getByRole("button", { name: /release/ }).textContent).toBe(
-    "release2 处不生效",
+  const budgetText = await screen.findByText("678 / 8,000");
+  expect(budgetText.parentElement?.getAttribute("title")).toBe(
+    "模型上下文窗口未知，使用 8,000 token 上限",
   );
-  expect(within(list).getAllByRole("button", { name: /alpha/ })).toHaveLength(1);
-  expect(list.textContent).not.toContain("被覆盖");
-  expect(screen.getByRole("group", { name: "同名" }).textContent).toContain("Z:/project/alpha");
-  expect(screen.queryByRole("button", { name: "查看生效的那份" })).toBeNull();
-  expect(within(list).getByRole("button", { name: /manual/ }).textContent).toBe("manual缺说明");
-  expect(within(list).getByRole("button", { name: /pdf-tools/ }).textContent).toBe("pdf-tools");
-  expect(within(list).getByRole("button", { name: /deploy/ }).textContent).toBe("deploy已停用");
-  fireEvent.click(within(list).getByRole("button", { name: /release/ }));
-  expect(screen.getByText("有 2 处写法在 Nocturne 里不生效").className).toContain("warn");
-  expect(screen.getByRole("columnheader", { name: "在 Nocturne 里" })).toBeTruthy();
-  fireEvent.click(within(list).getByRole("button", { name: /manual/ }));
-  const missingBanner = screen.getByText("缺少说明，模型看不到这个技能");
-  expect(missingBanner.className).toContain("warn");
-  expect(missingBanner.querySelector("span")).toBeNull();
-  expect(screen.queryByText(/下个会话起就会进入模型目录/)).toBeNull();
-  const conflictBanner = screen.getByText("与内置命令重名，斜杠不能调用");
-  expect(conflictBanner.className).toContain("warn");
-  expect(conflictBanner.querySelector("span")).toBeNull();
-  expect(screen.queryByText(/已经是内置命令/)).toBeNull();
-  fireEvent.click(screen.getByText("1 个技能的前言解析失败，查看"));
-  expect(screen.getByText("C:/home/bad/SKILL.md:3")).toBeTruthy();
-  fireEvent.click(within(list).getByRole("button", { name: "alpha" }));
-  fireEvent.click(screen.getByRole("switch"));
+  fireEvent.click(screen.getByRole("switch", { name: "启用 alpha" }));
   expect(await screen.findByRole("status")).toHaveProperty("textContent", "✓ 已停用 alpha");
-  expect(screen.queryByText(/进行中的会话本轮结束后生效/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "技能" })).toBeNull();
+  expect(f.calls.find((c) => c.method === "skills.setSkillEnabled")?.params).toMatchObject({
+    name: "alpha",
+    enabled: false,
+  });
 });
 
-it("大小格只在有子目录时显示子目录数", async () => {
+it("搜索技能按名称和说明不区分大小写过滤，无结果各组只显示一行 —", async () => {
+  const userSkill = skill({
+    name: "Alpha-Tool",
+    description: "Read PDF files",
+    entryPath: "C:/home/alpha-tool",
+  });
+  const projectSkill = skill({
+    name: "build-check",
+    layer: "project",
+    description: "Run Build Verification",
+    entryPath: "Z:/project/build-check",
+  });
+  const f = fakeServer(
+    withInit({
+      "skills.describeSkills": data([userSkill, projectSkill]),
+    }),
+  );
+  await f.initialize();
+  render(
+    <SkillsPage
+      client={f.client}
+      workspaceRoot="Z:/project"
+      version={0}
+      openDirectory={vi.fn()}
+      openUrl={vi.fn()}
+    />,
+  );
+  const search = (await screen.findByPlaceholderText("搜索技能")) as HTMLInputElement;
+  // 按名称不区分大小写匹配
+  fireEvent.change(search, { target: { value: "alpha" } });
+  const userGroup = screen.getByRole("region", { name: "用户 · 1" });
+  expect(within(userGroup).getByText("Alpha-Tool")).toBeTruthy();
+  const projectGroup = screen.getByRole("region", { name: /项目.*· 0/ });
+  expect(within(projectGroup).getByText("—")).toBeTruthy();
+
+  // 按说明不区分大小写匹配
+  fireEvent.change(search, { target: { value: "VERIFICATION" } });
+  expect(within(screen.getByRole("region", { name: "用户 · 0" })).getByText("—")).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: /项目.*· 1/ })).getByText("build-check"),
+  ).toBeTruthy();
+
+  // 全部无结果时各组只留一行 —
+  fireEvent.change(search, { target: { value: "not-found" } });
+  expect(screen.getAllByText("—")).toHaveLength(2);
+});
+
+it("大小格只在有支持文件时显示支持文件数", async () => {
   const nested = skill({
     name: "nested",
     entryPath: "C:/home/nested",
@@ -210,10 +312,11 @@ it("大小格只在有子目录时显示子目录数", async () => {
     />,
   );
   const size = () => screen.getByRole("group", { name: "大小" }).textContent?.slice("大小".length);
-  expect((await screen.findByRole("group", { name: "大小" })).textContent).toBe("大小1.0 KB");
-  const list = screen.getByRole("navigation", { name: "技能列表" });
-  fireEvent.click(within(list).getByRole("button", { name: /nested/ }));
-  expect(size()).toBe("1.0 KB，2 个子目录");
+  fireEvent.click(await screen.findByText("alpha"));
+  expect(size()).toBe("1.0 KB");
+  fireEvent.click(screen.getByRole("button", { name: "技能" }));
+  fireEvent.click(await screen.findByText("nested"));
+  expect(size()).toBe("1.0 KB · 2 个支持文件");
 });
 
 it("输入技能与参数后 Enter 把 skill 字段交给提交，不执行斜杠命令", () => {
@@ -257,6 +360,7 @@ it("空态打开 Nocturne 技能目录和规范链接", async () => {
   );
   fireEvent.click(await screen.findByRole("button", { name: "打开技能文件夹" }));
   expect(openDirectory).toHaveBeenCalledWith("C:/home/skills", true);
+  expect(screen.queryByText(/扫描目录/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /Agent Skills 规范/ }));
   expect(openUrl).toHaveBeenCalledWith("https://agentskills.io");
 });
