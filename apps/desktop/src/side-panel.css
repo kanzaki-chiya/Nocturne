@@ -1284,12 +1284,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ovpop-ensemble-tag {
-  flex: none;
-  color: var(--a-muted);
-  font: var(--fs-1) var(--mono);
-  white-space: nowrap;
-}
 .ovpop-agent-note {
   color: var(--a-faint);
   font-size: var(--fs-1);
@@ -1297,13 +1291,6 @@
 .ovpop-time {
   color: var(--a-muted);
   font-variant-numeric: tabular-nums;
-}
-.ovpop-bg {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: var(--radius-1);
-  background: var(--a-raised);
-  color: var(--a-muted);
 }
 .ovpop-agent-row {
   display: flex;

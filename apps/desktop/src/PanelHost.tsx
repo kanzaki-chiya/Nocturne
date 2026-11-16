@@ -1390,7 +1390,6 @@ export function useSidePanel({
     external: externalRows,
     onOpen: openSubagent,
     cancelError: subagentCancelError,
-    isolated: new Set(retainedWorktrees.map((record) => record.childSessionId)),
     pendingPermissions: view?.pendingSubagentPermissions ?? [],
     retained: retainedWorktrees
       .filter((record) => record.changes)

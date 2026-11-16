@@ -34,7 +34,7 @@ import {
 } from "./ensemble-ui";
 import { KeyHint } from "./KeyHint";
 import { keyDiag } from "./key-diag";
-import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
+import { Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 
 /** WindowFrame 标题栏里给 App 放按钮的位置；没有标题栏（测试、手机）时为 null */
 export const TitlebarSlot = createContext<HTMLElement | null>(null);
@@ -276,7 +276,6 @@ export interface OverviewSubagents {
     applied?: boolean | undefined;
   }[];
   onDelete?: (id: string) => void;
-  isolated?: ReadonlySet<string>;
   pendingPermissions?: readonly SubagentPendingPermission[] | undefined;
 }
 
@@ -307,11 +306,6 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
             <span className="ovpop-agent-text">
               <span className="ovpop-agent-profile">
                 {[agent.profile, agent.model, agent.effort].filter(Boolean).join(" · ")}
-                {agent.background === true && (
-                  <Badge className="ovpop-bg">
-                    {subagents.isolated?.has(agent.childSessionId) ? "后台 · 隔离" : "后台"}
-                  </Badge>
-                )}
               </span>
               <span className={`ovpop-agent-summary${awaitingPermission ? " warn" : ""}`}>
                 {Array.from(agent.taskSummary).slice(0, SUBAGENT_SUMMARY_MAX).join("")}
@@ -423,11 +417,6 @@ function EnsembleOverviewRows({ ensemble: group }: { ensemble: OverviewEnsemble 
               <span className="ovpop-ensemble-line1">
                 <span className="ovpop-ensemble-name">{member.name}</span>
                 {modelLabel !== "" && <span className="ovpop-ensemble-meta">{modelLabel}</span>}
-                {member.isolated && (
-                  <span className="ovpop-ensemble-tag">
-                    {modelLabel !== "" ? " · 独立工作树" : "独立工作树"}
-                  </span>
-                )}
               </span>
               {summary !== "" && (
                 <span className={`ovpop-agent-summary${pending ? " warn" : ""}`}>{summary}</span>

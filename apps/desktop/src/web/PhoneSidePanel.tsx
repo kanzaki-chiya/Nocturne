@@ -446,11 +446,6 @@ export function PhoneSidePanel({
                           {modelLabel !== "" && (
                             <span className="phone-ensemble-meta">{modelLabel}</span>
                           )}
-                          {member.isolated && (
-                            <span className="phone-ensemble-tag">
-                              {modelLabel !== "" ? " · 独立工作树" : "独立工作树"}
-                            </span>
-                          )}
                         </span>
                         {summaryText !== "" && (
                           <span

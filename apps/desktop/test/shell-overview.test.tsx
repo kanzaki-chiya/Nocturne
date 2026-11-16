@@ -175,7 +175,9 @@ it("合奏概览分组：进行中显示在变更之后子代理之前、结束�
   const ensembleGroup = screen.getByRole("group", { name: "合奏" });
   expect(ensembleGroup.querySelector(".sp-ensemble-dot.warn")).not.toBeNull();
   expect(screen.queryByText("old-1")).toBeNull();
-  expect(ensembleGroup.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
+  // 独立工作树不再显示标记，只保留模型/档位
+  expect(ensembleGroup.textContent).toContain("claude-sonnet-4.5");
+  expect(ensembleGroup.textContent).not.toContain("独立工作树");
   expect(ensembleGroup.textContent).toContain("deep");
 
   // 待确认成员：头像 warn 描边与摘要 warn 类
@@ -206,4 +208,72 @@ it("合奏概览分组：进行中显示在变更之后子代理之前、结束�
     />,
   );
   expect(screen.queryByRole("group", { name: "合奏" })).toBeNull();
+});
+
+it("概览只留模型/档位：后台子代理行与独立工作树成员行不再带文字标记", () => {
+  const isolatedMember = makeEnsembleMember("api-1", { isolated: true });
+  const activeEnsemble: EnsembleView = {
+    createdSeq: 1,
+    title: "标记回归",
+    status: "active",
+    maestro: {
+      model: { provider: "anthropic", model: "claude-opus-4.6" },
+      status: "working",
+      awaitingPermission: false,
+    },
+    members: [isolatedMember],
+    awaitingPermissionMembers: [],
+    posts: [],
+  };
+  const onOpen = vi.fn();
+  const onCancel = vi.fn();
+  render(
+    <SessionOverview
+      project="test"
+      workspace="Z:/test"
+      totals={{ added: 0, removed: 0, files: 0 }}
+      rightOffset={0}
+      onOpenChanges={vi.fn()}
+      ensemble={{
+        ensemble: activeEnsemble,
+        onOpenBoard: vi.fn(),
+        onOpenMember: vi.fn(),
+      }}
+      subagents={{
+        running: [
+          {
+            parentSessionId: "p",
+            callId: "sub-bg",
+            childSessionId: "child-bg",
+            profile: "quick",
+            model: "fake/m1",
+            background: true,
+            taskSummary: "改造登录页",
+            startedAt: "2026-11-08T00:00:00Z",
+            state: "running",
+          },
+        ],
+        external: [],
+        onOpen,
+        onCancel,
+        retained: [{ childSessionId: "child-bg", branch: "nocturne/child-bg", files: 2 }],
+      }}
+    />,
+  );
+
+  const agentGroup = screen.getByRole("group", { name: "子代理" });
+  // 该后台子代理同时有工作树记录（保留的副本与分支里列出）
+  expect(agentGroup.textContent).toContain("nocturne/child-bg");
+  expect(agentGroup.textContent).toContain("fake/m1");
+  expect(agentGroup.textContent).not.toContain("后台");
+  expect(agentGroup.textContent).not.toContain("隔离");
+  // 取消按钮仍在，且与打开按钮同行不嵌套
+  const cancel = agentGroup.querySelector(".ovpop-cancel");
+  expect(cancel?.textContent).toBe("取消");
+  fireEvent.click(cancel as HTMLElement);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+
+  const ensembleGroup = screen.getByRole("group", { name: "合奏" });
+  expect(ensembleGroup.textContent).toContain("claude-sonnet-4.5");
+  expect(ensembleGroup.textContent).not.toContain("独立工作树");
 });

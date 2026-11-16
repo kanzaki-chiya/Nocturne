@@ -151,12 +151,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.phone-ensemble-tag {
-  flex: none;
-  color: var(--a-muted);
-  font: var(--fs-1) var(--mono);
-  white-space: nowrap;
-}
 .phone .phone-panel-row.phone-ensemble-head {
   min-height: 40px;
 }

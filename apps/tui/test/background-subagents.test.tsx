@@ -224,7 +224,7 @@ describe("TUI 后台子代理", () => {
     expect(apply(["src/a.ts"])).toContain("有冲突 • 1 个文件");
   });
 
-  it("ADR-0075：/subagents 标出隔离的运行项，单列保留的副本与分支，确认后删除", async () => {
+  it("ADR-0075：/subagents 不标出隔离的运行项，单列保留的副本与分支，确认后删除", async () => {
     const summary = {
       childSessionId: "c1",
       parentSessionId: "p",
@@ -263,7 +263,8 @@ describe("TUI 后台子代理", () => {
       expect(ui.lastFrame()).toContain("nocturne/c9 • 改动 2 个文件");
       expect(ui.lastFrame()).toContain("nocturne/c8 • 改动 1 个文件 • 已并回");
     });
-    expect(ui.lastFrame()).toContain("general • 隔离");
+    expect(ui.lastFrame()).toContain("general");
+    expect(ui.lastFrame()).not.toContain("隔离");
     expect(ui.lastFrame()).not.toContain("nocturne/c1");
     await pause(100);
     ui.stdin.write("\u001B[B");
@@ -280,6 +281,38 @@ describe("TUI 后台子代理", () => {
         childSessionId: "c9",
       }),
     );
+    ui.unmount();
+  });
+
+  it("隔离的运行项只留档位、秒数与任务摘要，不再显示「隔离」", async () => {
+    const summary = {
+      childSessionId: "c1",
+      parentSessionId: "p",
+      callId: "t1",
+      profile: "general",
+      model: "provider/model-x",
+      effort: "high",
+      background: true,
+      state: "running",
+      taskSummary: "改登录",
+      startedAt: new Date().toISOString(),
+    } as SubagentSummary;
+    const runtime = {
+      listSubagents: () => Promise.resolve([summary]),
+      // c1 有工作树记录，即隔离运行
+      listSubagentWorktrees: () =>
+        Promise.resolve([{ childSessionId: "c1", branch: "nocturne/c1" }]),
+    } as unknown as Runtime;
+    const ui = render(
+      inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={vi.fn()} />),
+    );
+    await vi.waitFor(() => expect(ui.lastFrame()).toContain("general"));
+    const frame = ui.lastFrame() ?? "";
+    expect(frame).toContain("后台子代理");
+    expect(frame).toContain("provider/model-x");
+    expect(frame).toContain("high");
+    expect(frame).toContain("改登录");
+    expect(frame).not.toContain("隔离");
     ui.unmount();
   });
 });

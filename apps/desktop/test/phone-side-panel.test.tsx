@@ -205,7 +205,8 @@ it("手机侧边栏合奏分组：在上下文之后子代理之前显示，结�
   const ensembleSection = screen.getByLabelText("合奏");
   expect(ensembleSection.querySelector(".sp-ensemble-dot.warn")).not.toBeNull();
   expect(ensembleSection.textContent).not.toContain("gone");
-  expect(ensembleSection.textContent).toContain("claude-sonnet-4.5 · 独立工作树");
+  expect(ensembleSection.textContent).toContain("claude-sonnet-4.5");
+  expect(ensembleSection.textContent).not.toContain("独立工作树");
   const rows = ensembleSection.querySelectorAll(".phone-panel-row");
   expect(rows[2]?.querySelector(".ensemble-av.warn")).not.toBeNull();
   expect(rows[2]?.querySelector(".phone-ensemble-summary.warn")?.textContent).toBe(
@@ -228,4 +229,50 @@ it("手机侧边栏合奏分组：在上下文之后子代理之前显示，结�
     />,
   );
   expect(screen.queryByLabelText("合奏")).toBeNull();
+});
+
+it("手机侧边栏只留模型/档位：后台子代理行与独立工作树成员行不再带文字标记", async () => {
+  const fixture = panelFixture({
+    agents: [
+      summary({
+        background: true,
+        profile: "quick",
+        model: "p/model",
+        taskSummary: "整理副本",
+      }),
+    ],
+  });
+  fixture.entry.view.ensemble = {
+    createdSeq: 1,
+    title: "副本核对",
+    status: "active",
+    maestro: {
+      model: { provider: "anthropic", model: "claude-opus-4.6" },
+      status: "working",
+      awaitingPermission: false,
+    },
+    members: [
+      {
+        name: "api-1",
+        childSessionId: "c-api",
+        charter: { owns: "api", handsOff: "ui", doneWhen: "ok" },
+        model: { provider: "anthropic", model: "claude-sonnet-4.5" },
+        preset: "general" as const,
+        isolated: true,
+        status: "working" as const,
+        pendingPermissions: [],
+      },
+    ],
+    awaitingPermissionMembers: [],
+    posts: [],
+  };
+  render(<PanelHarness fixture={fixture} />);
+  await screen.findByText("整理副本");
+  expect(screen.getByText("quick · p/model")).toBeTruthy();
+  expect(screen.queryByText("后台")).toBeNull();
+  expect(screen.queryByText("隔离")).toBeNull();
+
+  const ensembleSection = screen.getByLabelText("合奏");
+  expect(ensembleSection.textContent).toContain("claude-sonnet-4.5");
+  expect(ensembleSection.textContent).not.toContain("独立工作树");
 });

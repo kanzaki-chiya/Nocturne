@@ -53,7 +53,6 @@ export function Subagents({
     };
   }, [runtime, sessionId]);
   if (error) return <Text>{error}</Text>;
-  const isolated = new Set(worktrees.map((record) => record.childSessionId));
   const retained = worktrees.filter(
     (record) =>
       record.changes !== undefined &&
@@ -128,7 +127,6 @@ export function Subagents({
             item.profile,
             item.model,
             item.effort,
-            isolated.has(item.childSessionId) ? "隔离" : "",
             `${Math.max(0, Math.floor((now - Date.parse(item.startedAt)) / 1000))}s`,
             item.taskSummary,
           ]
