@@ -599,6 +599,10 @@
   text-overflow: ellipsis;
   color: var(--a-muted);
 }
+/* 连续工具行间距从 12px 收到 4px，summary 维持 44px 触控高度不变 */
+.phone .conversation-transcript > .tool + .tool {
+  margin-top: -8px;
+}
 
 /* ── 输入框与工具栏 ── */
 .phone-composer {
