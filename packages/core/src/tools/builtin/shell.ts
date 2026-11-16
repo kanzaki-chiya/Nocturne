@@ -39,6 +39,12 @@ interface ShellOutput {
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 1_800_000;
 /**
+ * 中断/超时后执行器等待 `shell` 自行收尾的宽限期：`platform` 的 `kill()`
+ * 终止进程树上限为 15s（Windows 下 `taskkill` 启动即约 2s），再留 2s 余量
+ * 让 `shell` 在杀树与分离管道后能带回已捕获的部分输出。
+ */
+const SHELL_ABORT_GRACE_MS = 17_000;
+/**
  * 输出管道自然收尾的宽限：仅覆盖子进程 exit 到 stdio 关闭的正常间隙，
  * 正常退出时流已结束、立即返回；到期仍被占用说明有后台进程继承了管道。
  */
@@ -154,6 +160,7 @@ export function createShellTool(
       mutates: true,
       concurrencySafe: false,
       timeoutMs: MAX_TIMEOUT_MS + 30_000,
+      abortGraceMs: SHELL_ABORT_GRACE_MS,
     },
 
     permissionSubjects(input: ShellInput, scope: ToolScope): SubjectRequest[] {

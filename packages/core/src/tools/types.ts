@@ -86,6 +86,8 @@ export interface ToolTraits {
   concurrencySafe: boolean;
   /** 默认超时（毫秒） */
   timeoutMs?: number | undefined;
+  /** 中断或超时后执行器等待该工具自行结束的宽限期（毫秒）；未声明用全局默认 */
+  abortGraceMs?: number | undefined;
   /** 允许输入 timeoutMs 覆盖，未声明 maxTimeoutMs 时不封顶。 */
   inputTimeoutMs?: boolean | undefined;
   /** 调用方可指定超时时的上限 */

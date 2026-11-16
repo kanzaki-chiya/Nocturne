@@ -717,6 +717,7 @@ export function createToolExecutor(
         },
       };
 
+      const effectiveAbortGraceMs = Math.max(0, tool.traits.abortGraceMs ?? abortGraceMs);
       let result: ToolResult;
       let executionStatus: "error" | "cancelled" | undefined;
       const execStart = Date.now();
@@ -725,7 +726,7 @@ export function createToolExecutor(
         const execOutcome = await awaitWithAbortGrace(
           () => tool.execute(input, toolCtx),
           combined,
-          abortGraceMs,
+          effectiveAbortGraceMs,
         );
         if (execOutcome === GRACE_EXPIRED) {
           abandoned = true;
@@ -762,7 +763,7 @@ export function createToolExecutor(
       }
       if (executionStatus !== undefined) return finish(executionStatus, result);
       if (aborted(scope.signal)) {
-        return finish("cancelled", errorResult("cancelled", "调用已被中断"));
+        return finish("cancelled", result);
       }
 
       scope.diagnostics?.record("tool.exec", {

@@ -825,6 +825,67 @@ describe("执行器超时", () => {
       process.off("unhandledRejection", onUnhandled);
     }
   });
+
+  it("声明 traits.abortGraceMs 的工具在默认宽限期后、自身宽限期内返回时保留其结果", async () => {
+    const ac = new AbortController();
+    const h = await makeHarness(tmpWorkspace(), allowAll, ac.signal);
+    const registry = createToolRegistry();
+    let resolveStarted!: () => void;
+    const startedPromise = new Promise<void>((r) => {
+      resolveStarted = r;
+    });
+    let resolveTool!: (res: {
+      status: "error";
+      modelContent: string;
+      output: { partial: true };
+      error: { code: string; message: string };
+    }) => void;
+    registry.register({
+      name: "slow_cleanup",
+      description: "x",
+      inputSchema: { type: "object" },
+      traits: { mutates: false, concurrencySafe: true, abortGraceMs: 5_000 },
+      permissionSubjects: () => [],
+      execute() {
+        resolveStarted();
+        return new Promise((resolve) => {
+          resolveTool = resolve;
+        });
+      },
+    });
+
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const pending = createToolExecutor(registry)
+        .execute(call("slow_cleanup", {}), h.scope)
+        .then((res) => {
+          settled = true;
+          return res;
+        });
+      await startedPromise;
+      ac.abort();
+      // 越过默认 2000ms 宽限期但仍在自身 5000ms 宽限期内：不得提前放弃
+      await vi.advanceTimersByTimeAsync(TOOL_ABORT_GRACE_MS + 500);
+      expect(settled).toBe(false);
+
+      resolveTool({
+        status: "error",
+        modelContent: "已捕获部分输出",
+        output: { partial: true },
+        error: { code: "cancelled", message: "清理完成" },
+      });
+      const r = await pending;
+      expect(r.status).toBe("cancelled");
+      expect(r.result.modelContent).toBe("已捕获部分输出");
+      expect(r.result.modelContent).not.toContain("调用已被中断");
+      expect(r.result.output).toEqual({ partial: true });
+      expect(completedOf(h)).toHaveLength(1);
+      expect(completedOf(h)[0]?.payload.modelContent).toBe("已捕获部分输出");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("read 工具", () => {

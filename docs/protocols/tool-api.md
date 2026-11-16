@@ -46,6 +46,8 @@ interface ToolTraits {
   concurrencySafe: boolean
   /** 可选默认超时；省略且未由输入覆盖时不启动执行器超时计时器 */
   timeoutMs?: number
+  /** 中断或超时后执行器等待该工具自行结束的宽限期（毫秒）；未声明时使用全局默认值 */
+  abortGraceMs?: number
   /** 声明为 true 且 inputSchema 声明整数 timeoutMs 时，输入正整数可覆盖默认值；
       maxTimeoutMs 存在时封顶，否则不封顶。未声明时不读输入 */
   inputTimeoutMs?: boolean
