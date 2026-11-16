@@ -141,7 +141,7 @@ function imageView(attachments = [historyImage]) {
   return view;
 }
 
-it("插话消息按普通用户消息显示，并带「插话」标签（ADR-0070）", () => {
+it("插话消息按普通用户消息显示，不带「插话」标签（ADR-0070）", () => {
   const view = createSessionView();
   view.entries = [
     {
@@ -164,11 +164,31 @@ it("插话消息按普通用户消息显示，并带「插话」标签（ADR-007
   ];
   const rendered = mount(view);
   expect(screen.getByText("改成蓝色")).toBeTruthy();
-  const tags = rendered.container.querySelectorAll(".u-steer");
-  expect(tags).toHaveLength(1);
-  expect(tags[0]?.textContent).toBe("插话");
-  // 普通用户消息没有标签
+  expect(rendered.container.querySelectorAll(".u-steer")).toHaveLength(0);
+  expect(rendered.container.textContent).not.toContain("插话");
   expect(screen.getAllByText("做个页面")).toHaveLength(1);
+});
+
+it("复制用户消息后按钮 aria-label 变成「已复制」", async () => {
+  const writeText = vi.fn(async (_text: string) => undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  const view = createSessionView();
+  view.entries = [
+    {
+      kind: "user",
+      key: "u1",
+      seq: 1,
+      turnId: "t",
+      content: [{ type: "text", text: "你好" }],
+      attachments: [],
+    },
+  ];
+  mount(view);
+  const copy = screen.getByRole("button", { name: "复制" });
+  expect(copy.getAttribute("title")).toBe("复制");
+  fireEvent.click(copy);
+  await waitFor(() => expect(copy.getAttribute("aria-label")).toBe("已复制"));
+  expect(copy.getAttribute("title")).toBe("已复制");
 });
 
 it("用户技能小标签使用日志快照，展开正文，工具行显示已加载", () => {

@@ -6,7 +6,7 @@
  *    对话以 readOnly + frozen 只读展示（保留私信气泡但无编辑/重发按钮，不误标子代理「任务/催促」）；
  * 3) Ensemble 仍为 "active" 但成员 status 变为 "removed"（或同会话新建第二个 Ensemble 不再包含该成员）时，同样只读并收起输入框。
  */
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatEnsemblePostForModel,
@@ -298,7 +298,8 @@ describe("SidePanel 成员会话标签只读冻结", () => {
       "这是一条私信",
     );
     expect(container.querySelector(".sp-ensemble-member .ro-user")).toBeNull();
-    expect(container.textContent).not.toContain("编辑并重发");
+    expect(within(container).queryByRole("button", { name: "编辑并重发" })).toBeNull();
+    expect(within(container).queryByRole("button", { name: "重发" })).toBeNull();
 
     images.dispose();
     h.close();

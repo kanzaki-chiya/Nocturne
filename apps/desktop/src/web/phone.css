@@ -521,17 +521,18 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
-/* 手机没有悬停：消息操作（复制、编辑并重发、重发、分叉）常驻显示，按钮加大到可点 */
+/* 手机没有悬停：消息操作（复制、编辑并重发、重发、分叉）常驻显示，图标按钮触控区放大到 44px 并居中 */
 .phone .u-actions {
   visibility: visible;
   opacity: 1;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.phone .conversation .u-act {
-  min-height: 32px;
-  padding: 4px 8px;
-  font-size: var(--fs-2);
+.phone .conversation .u-act-icon {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  justify-content: center;
 }
 /* 本轮改动与 diff：不撑宽页面，diff 正文在卡内横向滚动 */
 .phone .turn-changes,

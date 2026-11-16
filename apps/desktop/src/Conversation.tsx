@@ -1278,7 +1278,7 @@ function UserImages({
 }
 
 /**
- * 用户消息（U-01）：悬停显示「复制」「编辑并重发」「重发」。重发与编辑重发
+ * 用户消息（U-01）：悬停显示「复制」「编辑并重发」「重发」「分叉」四个图标按钮。重发与编辑重发
  * 先 rewind 再 submit——成功前旧回复保持显示（编辑中变暗，见 .u.editing ~ *）。
  */
 function UserMessage({
@@ -1533,9 +1533,6 @@ function UserMessage({
               {scheduleSource?.preface !== undefined && (
                 <span className="sched-pre">{scheduleSource.preface}</span>
               )}
-              {entry.steer === true && entry.workMode === undefined && (
-                <Badge className="u-steer">插话</Badge>
-              )}
               <UserImages
                 attachments={entry.attachments ?? []}
                 images={images}
@@ -1639,49 +1636,54 @@ function UserMessage({
             <div className="u-actions">
               <button
                 type="button"
-                className="u-act"
+                className="u-act u-act-icon"
+                aria-label={copied ? "已复制" : "复制"}
+                title={copied ? "已复制" : "复制"}
                 onClick={() => {
                   void copy(body);
                 }}
               >
-                {copied ? "已复制" : "复制"}
+                <Icon name={copied ? "check" : "copy_2"} size={ICON_SM} />
               </button>
               {resubmittable && (
                 <button
                   type="button"
-                  className="u-act"
+                  className="u-act u-act-icon"
                   disabled={busy || pending}
+                  aria-label="编辑并重发"
                   title={busyTitle ?? "编辑并重发"}
                   onClick={startEdit}
                 >
-                  编辑并重发
+                  <Icon name="edit_2" size={ICON_SM} />
                 </button>
               )}
               {resubmittable && (
                 <button
                   type="button"
-                  className="u-act"
+                  className="u-act u-act-icon"
                   disabled={busy || pending}
+                  aria-label="重发"
                   title={busyTitle ?? "重发"}
                   onClick={() => {
                     sendResubmit(body, "both");
                   }}
                 >
-                  重发
+                  <Icon name="refresh_2" size={ICON_SM} />
                 </button>
               )}
               {onFork && (
                 <button
                   type="button"
-                  className="u-act"
+                  className="u-act u-act-icon"
                   disabled={pending}
+                  aria-label="分叉"
                   title="分叉"
                   onClick={() => {
                     setError(undefined);
                     setConfirmFork(true);
                   }}
                 >
-                  分叉
+                  <Icon name="git_branch" size={ICON_SM} />
                 </button>
               )}
             </div>

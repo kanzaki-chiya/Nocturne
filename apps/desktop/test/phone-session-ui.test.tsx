@@ -1,6 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createMemoryTransportPair,
@@ -613,16 +614,13 @@ it("执行方式消息重发带原 workMode；Runtime 写入的模式消息没�
   };
   await user("t1", "加功能");
   await user("t2", "批准", "runtime");
-  const bubbles = [...container.querySelectorAll<HTMLElement>('article[aria-label="用户消息"]')];
-  expect(bubbles).toHaveLength(2);
-  const buttons = (article: HTMLElement | undefined) =>
-    [...(article?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
-  expect(buttons(bubbles[1])).not.toContain("重发");
-  expect(buttons(bubbles[1])).not.toContain("编辑并重发");
-  const resend = [...(bubbles[0]?.querySelectorAll("button") ?? [])].find(
-    (b) => b.textContent === "重发",
-  );
-  if (!resend) throw new Error("缺少重发");
+  const [first, second] = [
+    ...container.querySelectorAll<HTMLElement>('article[aria-label="用户消息"]'),
+  ];
+  if (!first || !second) throw new Error("缺少用户消息");
+  expect(within(second).queryByRole("button", { name: "重发" })).toBeNull();
+  expect(within(second).queryByRole("button", { name: "编辑并重发" })).toBeNull();
+  const resend = within(first).getByRole("button", { name: "重发" });
   await act(async () => {
     resend.click();
     await Promise.resolve();

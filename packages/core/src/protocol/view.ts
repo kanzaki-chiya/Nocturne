@@ -151,7 +151,7 @@ export interface UserEntry {
   /** 技能调用的正文快照（skills.md 第 2 节）；普通消息字段不出现 */
   skill?: SkillSnapshot | undefined;
   delegate?: AgentDelegation | undefined;
-  /** 运行中插话（ADR-0070）：界面加「插话」标签，不是新 Turn 的开始 */
+  /** 运行中插话（ADR-0070），不是新 Turn 的开始 */
   steer?: true | undefined;
   subagent?: SubagentResult | undefined;
   backgroundShell?: BackgroundShellResult | undefined;
