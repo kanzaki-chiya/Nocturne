@@ -17,7 +17,6 @@ import type { ModelInfo, SettingItem, SettingsPatch } from "./rpc-types";
 import {
   Badge,
   Button,
-  Checkbox,
   Field,
   FormFooter,
   ICON_MD,
@@ -901,10 +900,10 @@ function ExternalAgentForm({
                 required
               />
             </Field>
-            <Field label="参数（逐行一个）" htmlFor={argsId}>
+            <Field label="参数" htmlFor={argsId}>
               <textarea
                 id={argsId}
-                aria-label="参数（逐行一个）"
+                aria-label="参数"
                 className="textarea mono"
                 rows={3}
                 value={args}
@@ -914,10 +913,10 @@ function ExternalAgentForm({
                 }}
               />
             </Field>
-            <Field label="模式 id（可选）" htmlFor={modeId}>
+            <Field label="模式 id" htmlFor={modeId}>
               <input
                 id={modeId}
-                aria-label="模式 id（可选）"
+                aria-label="模式 id"
                 className="input mono"
                 value={mode}
                 onChange={(event) => {
@@ -926,10 +925,10 @@ function ExternalAgentForm({
                 }}
               />
             </Field>
-            <Field label="环境变量（JSON 对象）" htmlFor={envId}>
+            <Field label="环境变量" htmlFor={envId}>
               <textarea
                 id={envId}
-                aria-label="环境变量（JSON 对象）"
+                aria-label="环境变量"
                 className="textarea mono"
                 rows={3}
                 value={env}
@@ -939,8 +938,8 @@ function ExternalAgentForm({
                 }}
               />
             </Field>
-            <SettingsRow label="启用 agent">
-              <Checkbox aria-label="启用 agent" checked={enabled} onChange={setEnabled} />
+            <SettingsRow label="启用">
+              <Switch aria-label="启用" checked={enabled} onChange={setEnabled} />
             </SettingsRow>
           </fieldset>
         </SettingsGroup>
@@ -961,11 +960,6 @@ function ExternalAgentForm({
                   </>
                 }
                 aside={option.description}
-                desc={
-                  selectedOptions[option.id] === undefined
-                    ? `使用 agent 默认值（${option.currentValue}）`
-                    : `已指定：${selectedOptions[option.id]}`
-                }
               >
                 <div className="external-option-ctl">
                   <Dropdown
@@ -1015,10 +1009,10 @@ function ExternalAgentForm({
                 </div>
               </Field>
             ))}
-          <Field label="configOptions（JSON 对象）" htmlFor={optionsId}>
+          <Field label="JSON" htmlFor={optionsId}>
             <textarea
               id={optionsId}
-              aria-label="configOptions（JSON 对象）"
+              aria-label="JSON"
               className="textarea mono"
               rows={3}
               disabled={busy}

@@ -221,6 +221,7 @@ describe("外部 agent 设置页", () => {
     const model = await screen.findByRole("combobox", { name: "Model" });
     // id 与名称只差大小写时不重复显示
     expect(screen.queryByText("model", { selector: "code" })).toBeNull();
+    expect(screen.queryByText(/使用 agent 默认值/)).toBeNull();
     fireEvent.click(model);
     const options = screen.getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
@@ -232,7 +233,12 @@ describe("外部 agent 设置页", () => {
     });
     expect(screen.getAllByRole("option")).toHaveLength(1);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "搜索Model" }), { key: "Enter" });
-    expect(screen.getByText("已指定：b/grok")).toBeTruthy();
+    expect(model.textContent).toBe("Grok 4.7");
+    expect((screen.getByRole("textbox", { name: "JSON" }) as HTMLTextAreaElement).value).toContain(
+      '"b/grok"',
+    );
+    expect(screen.queryByText(/已指定/)).toBeNull();
+    expect(screen.queryByText(/使用 agent 默认值/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() =>
       expect(f.calls.some((call) => call.method === "agents.saveExternalAgent")).toBe(true),
@@ -300,6 +306,63 @@ describe("外部 agent 设置页", () => {
       name: "managed",
     });
     expect(f.calls.some((call) => call.method === "runtime.reloadConfig")).toBe(false);
+    f.close();
+  });
+
+  it("表单字段名对齐、启用开关切换后保存正确的 enabled 值", async () => {
+    const f = fakeServer(
+      withInit({
+        "agents.describeExternalAgents": { agents: [], warnings: [] },
+        "skills.describeSkills": { skills: [], warnings: [] },
+        "agents.saveExternalAgent": managed,
+      }),
+    );
+    await f.initialize();
+    render(<ExternalAgentsPage client={f.client} workspaceRoot={undefined} version={0} />);
+    await screen.findByRole("heading", { level: 1, name: "子代理" });
+    const [add] = screen.getAllByRole("button", { name: "添加 agent" });
+    if (add === undefined) throw new Error("外部 agent 添加入口不存在");
+    fireEvent.click(add);
+    await screen.findByRole("heading", { level: 1, name: /添加外部 Agent/ });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "名称" }), {
+      target: { value: "custom" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "命令" }), { target: { value: "node" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "参数" }), {
+      target: { value: "--acp\n--stdio" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "模式 id" }), {
+      target: { value: "code" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "环境变量" }), {
+      target: { value: '{"FOO": "bar"}' },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "JSON" }), {
+      target: { value: '{"model": "m1"}' },
+    });
+
+    const enableSwitch = screen.getByRole("switch", { name: "启用" });
+    expect(enableSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(enableSwitch);
+    expect(enableSwitch.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(f.calls.some((call) => call.method === "agents.saveExternalAgent")).toBe(true),
+    );
+    expect(f.calls.find((call) => call.method === "agents.saveExternalAgent")?.params).toEqual({
+      mode: "create",
+      name: "custom",
+      config: {
+        command: "node",
+        args: ["--acp", "--stdio"],
+        enabled: true,
+        mode: "code",
+        env: { FOO: "bar" },
+        configOptions: { model: "m1" },
+      },
+    });
     f.close();
   });
 });

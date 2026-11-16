@@ -14,9 +14,9 @@
 | `codex` | `npx` | `@agentclientprotocol/codex-acp` |
 | `omp` | `omp` | `--mode`、`acp` |
 
-3. 根据需要填写「名称」、「描述」、「命令」、「参数（逐行一个）」、「模式 id（可选）」和「环境变量（JSON 对象）」。
-4. 点击表单底部「测试连接」：Nocturne 会按配置启动进程并执行 ACP 握手。探测成功后，可在「会话配置项」下拉框中选择对方使用的模型或模式，点击「恢复默认」可还原，也可直接编辑 `configOptions（JSON 对象）`。
-5. 勾选「启用 agent」，点击「保存」进入详情，可查看连接配置与最近测试结果；点击页头「子代理」返回列表，在详情右上角「更多」菜单中选择「编辑」或「删除」。界面中添加的外部 Agent 保存在 `~/.nocturne/external-agents.json`，也可以手写在 `~/.nocturne/config.json` 的 `externalAgents` 字段中（在「外部 Agent」分组末尾显示「只读」徽标；出于安全原因，项目级 `.nocturne/config.json` 中的 `externalAgents` 不会生效）。
+3. 根据需要填写「名称」、「描述」、「命令」、「参数」、「模式 id」和「环境变量」。
+4. 点击表单底部「测试连接」：Nocturne 会按配置启动进程并执行 ACP 握手。探测成功后，可在「会话配置项」下拉框中选择对方使用的模型或模式，点击「恢复默认」可还原，也可直接编辑「会话配置项」下的「JSON」。
+5. 打开「启用」开关，点击「保存」进入详情，可查看连接配置与最近测试结果；点击页头「子代理」返回列表，在详情右上角「更多」菜单中选择「编辑」或「删除」。界面中添加的外部 Agent 保存在 `~/.nocturne/external-agents.json`，也可以手写在 `~/.nocturne/config.json` 的 `externalAgents` 字段中（在「外部 Agent」分组末尾显示「只读」徽标；出于安全原因，项目级 `.nocturne/config.json` 中的 `externalAgents` 不会生效）。
 
 在终端（TUI 与 CLI）中，输入 `/agents` 可列出已配置的外部 Agent 及其状态。
 
