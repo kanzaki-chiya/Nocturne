@@ -2,7 +2,12 @@ export * from "./types.js";
 export { createPausableTimeout, type PausableTimeout } from "./pausable-timeout.js";
 export { createSkillTool } from "./builtin/skill.js";
 export { createToolRegistry } from "./registry.js";
-export { createToolExecutor, resolveSubjects } from "./executor.js";
+export {
+  createToolExecutor,
+  resolveSubjects,
+  TOOL_ABORT_GRACE_MS,
+  type ToolExecutorOptions,
+} from "./executor.js";
 export { createExecutionScope } from "./scope.js";
 export { createAttachmentStore, type AttachmentStore } from "./attachments.js";
 export {

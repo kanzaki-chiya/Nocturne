@@ -63,6 +63,7 @@ async function makeHarness(options: {
   provider?: FakeProvider;
   attachments?: TurnDeps["execEnv"]["attachments"];
   diagnostics?: TurnDeps["execEnv"]["diagnostics"];
+  abortGraceMs?: number;
 }): Promise<Harness> {
   const ws = makeTmpDir("nct-agent-ws-");
   const sessionsDir = makeTmpDir("nct-agent-sessions-");
@@ -98,7 +99,10 @@ async function makeHarness(options: {
     session,
     model,
     tools: registry,
-    executor: createToolExecutor(registry),
+    executor: createToolExecutor(
+      registry,
+      options.abortGraceMs !== undefined ? { abortGraceMs: options.abortGraceMs } : undefined,
+    ),
     execEnv: {
       platform,
       gate:
@@ -1113,6 +1117,46 @@ describe("runTurn", () => {
     const end = h.events.find((e) => e.type === "turn.completed");
     expect(end?.type === "turn.completed" && end.payload.reason).toBe("aborted");
     expect(reason).not.toBe("max_steps");
+  });
+
+  it("工具忽略 signal 且永不返回：中断后宽限期内结算为 cancelled，Turn 以 aborted 结束", async () => {
+    const ac = new AbortController();
+    const h = await makeHarness({
+      signal: ac.signal,
+      abortGraceMs: 25,
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "h1", name: "hang", input: {} },
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    h.deps.tools.register({
+      name: "hang",
+      description: "hang forever",
+      inputSchema: { type: "object" },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      execute() {
+        return new Promise(() => undefined);
+      },
+    });
+    let abortAt = 0;
+    h.session.subscribe((e) => {
+      if (e.type === "tool.started") {
+        abortAt = Date.now();
+        ac.abort();
+      }
+    });
+    const reason = await runTurn(h.deps, prompt());
+    const elapsed = Date.now() - abortAt;
+    expect(abortAt).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThan(500);
+    expect(reason).toBe("aborted");
+    const completed = h.events.find((e) => e.type === "tool.completed");
+    expect(completed?.type === "tool.completed" && completed.payload.status).toBe("cancelled");
+    const end = h.events.find((e) => e.type === "turn.completed");
+    expect(end?.type === "turn.completed" && end.payload.reason).toBe("aborted");
   });
 
   it("权限拒绝：denied 结果回模型，Turn 正常继续", async () => {

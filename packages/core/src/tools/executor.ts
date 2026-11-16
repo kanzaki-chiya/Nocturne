@@ -114,6 +114,77 @@ function aborted(signal: AbortSignal): boolean {
 const EXECUTOR_TIMEOUT_GRACE_MS = 1_000;
 
 /**
+ * `combined`（中断或超时）触发后等待工具自行结束的宽限期（毫秒）。
+ * 超出后执行器放弃等待，按中断/超时规则结算。
+ */
+export const TOOL_ABORT_GRACE_MS = 2_000;
+
+export interface ToolExecutorOptions {
+  /** 覆盖中断/超时后的宽限期（毫秒，默认 `TOOL_ABORT_GRACE_MS`）。 */
+  abortGraceMs?: number | undefined;
+}
+
+const GRACE_EXPIRED = Symbol("grace_expired");
+
+/**
+ * 等待工具执行完成；`signal` 中止后若工具在 `graceMs` 内仍未结束，
+ * 返回 `GRACE_EXPIRED` 放弃等待，并吸收被放弃 Promise 的后续 rejection。
+ */
+async function awaitWithAbortGrace<T>(
+  run: () => Promise<T>,
+  signal: AbortSignal,
+  graceMs: number,
+): Promise<T | typeof GRACE_EXPIRED> {
+  // async 包装：同步异常转为 rejected promise，且保留原抛出值
+  const execPromise = (async () => await run())();
+  // 被宽限期放弃后若延迟 reject，不能成为未处理的 rejection
+  execPromise.catch(() => undefined);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const grace = new Promise<typeof GRACE_EXPIRED>((resolve) => {
+    const arm = () => {
+      if (timer !== undefined) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        resolve(GRACE_EXPIRED);
+      }, graceMs);
+    };
+    if (signal.aborted) {
+      arm();
+    } else {
+      onAbort = arm;
+      signal.addEventListener("abort", arm, { once: true });
+    }
+  });
+
+  try {
+    return await Promise.race([execPromise, grace]);
+  } finally {
+    if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function abortSettlement(
+  toolName: string,
+  scopeSignal: AbortSignal,
+  timeoutSignal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): { status: "cancelled" | "error"; result: ToolResult } | undefined {
+  if (aborted(scopeSignal)) {
+    return { status: "cancelled", result: errorResult("cancelled", "调用已被中断") };
+  }
+  if (timeoutSignal && aborted(timeoutSignal)) {
+    return {
+      status: "error",
+      result: errorResult("timeout", `工具 "${toolName}" 超过 ${timeoutMs}ms 超时`),
+    };
+  }
+  return undefined;
+}
+
+/**
  * 读取输入里的超时覆盖（tool-api.md 第 1 节）：声明 traits.maxTimeoutMs
  * 即「可由输入覆盖」；输入字段固定为 inputSchema 里声明的 timeoutMs，
  * 值为正整数时取 min(输入值, maxTimeoutMs)，否则由 traits.timeoutMs 兜底。
@@ -133,7 +204,11 @@ function timeoutMsOverrideOf(tool: ToolDefinition, input: unknown): number | und
     : Math.min(requested, tool.traits.maxTimeoutMs);
 }
 
-export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
+export function createToolExecutor(
+  registry: ToolRegistry,
+  options?: ToolExecutorOptions,
+): ToolExecutor {
+  const abortGraceMs = Math.max(0, options?.abortGraceMs ?? TOOL_ABORT_GRACE_MS);
   return {
     async execute(call: ToolCallRef, scope: ExecutionScope): Promise<ToolExecution> {
       const startedAt = Date.now();
@@ -550,6 +625,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       // 缺省该字段时声明 needsUser 的工具按 not_interactive 结算
       const questionBroker = scope.askUser;
       const attachmentStore = scope.attachments;
+      let abandoned = false;
       const toolCtx = {
         cwd: scope.cwd,
         workspaceRoot: scope.workspaceRoot,
@@ -632,6 +708,7 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
         ...(scope.shellEnvStrip !== undefined ? { shellEnvStrip: scope.shellEnvStrip } : {}),
         shell: scope.shell,
         progress: (chunk: string, stream?: "stdout" | "stderr" | "info") => {
+          if (abandoned) return;
           scope.events.emitEphemeral(
             "tool.progress",
             { callId: call.callId, stream: stream ?? "info", chunk },
@@ -645,20 +722,33 @@ export function createToolExecutor(registry: ToolRegistry): ToolExecutor {
       const execStart = Date.now();
       await scope.checkpoint?.("before", call.callId, outcome.subjects, scope.sessionId);
       try {
-        result = await tool.execute(input, toolCtx);
-        if (result.status === "ok" && outcome.resultNotice !== undefined) {
-          result = {
-            ...result,
-            modelContent: `${result.modelContent}\n${outcome.resultNotice}`,
+        const execOutcome = await awaitWithAbortGrace(
+          () => tool.execute(input, toolCtx),
+          combined,
+          abortGraceMs,
+        );
+        if (execOutcome === GRACE_EXPIRED) {
+          abandoned = true;
+          const settled = abortSettlement(tool.name, scope.signal, timeoutSignal, timeoutMs) ?? {
+            status: "cancelled" as const,
+            result: errorResult("cancelled", "调用已被中断"),
           };
+          executionStatus = settled.status;
+          result = settled.result;
+        } else {
+          result = execOutcome;
+          if (result.status === "ok" && outcome.resultNotice !== undefined) {
+            result = {
+              ...result,
+              modelContent: `${result.modelContent}\n${outcome.resultNotice}`,
+            };
+          }
         }
       } catch (e) {
-        if (aborted(scope.signal)) {
-          executionStatus = "cancelled";
-          result = errorResult("cancelled", "调用已被中断");
-        } else if (timeoutSignal && aborted(timeoutSignal)) {
-          result = errorResult("timeout", `工具 "${tool.name}" 超过 ${timeoutMs}ms 超时`);
-          executionStatus = "error";
+        const settled = abortSettlement(tool.name, scope.signal, timeoutSignal, timeoutMs);
+        if (settled !== undefined) {
+          executionStatus = settled.status;
+          result = settled.result;
         } else {
           executionStatus = "error";
           result = errorResult(

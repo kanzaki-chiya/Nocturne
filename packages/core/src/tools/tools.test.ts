@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDefaultPolicy,
@@ -23,6 +23,7 @@ import {
   createToolExecutor,
   createToolRegistry,
   readTool,
+  TOOL_ABORT_GRACE_MS,
   type ExecutionScope,
   type GateOutcome,
   type PermissionGate,
@@ -660,6 +661,169 @@ describe("执行器超时", () => {
     await executor.execute(call("task", { task: "x" }), h.scope);
     await executor.execute(call("task", { task: "x", agent: "offline" }), h.scope);
     expect(timeouts).toEqual([undefined, undefined]);
+  });
+
+  it("忽略 signal 且永不返回的工具：中断后在宽限期内结算为 cancelled", async () => {
+    const ac = new AbortController();
+    const h = await makeHarness(tmpWorkspace(), allowAll, ac.signal);
+    const checkpoints: string[] = [];
+    h.scope.checkpoint = (phase) => {
+      checkpoints.push(phase);
+      return Promise.resolve();
+    };
+    const registry = createToolRegistry();
+    let resolveStarted!: () => void;
+    const startedPromise = new Promise<void>((r) => {
+      resolveStarted = r;
+    });
+    registry.register({
+      name: "hang",
+      description: "x",
+      inputSchema: { type: "object" },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      execute() {
+        resolveStarted();
+        return new Promise(() => undefined);
+      },
+    });
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const pending = createToolExecutor(registry)
+        .execute(call("hang", {}), h.scope)
+        .then((res) => {
+          settled = true;
+          return res;
+        });
+      await startedPromise;
+      ac.abort();
+      await vi.advanceTimersByTimeAsync(TOOL_ABORT_GRACE_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const r = await pending;
+      expect(r.status).toBe("cancelled");
+      expect(errorPayload(h)).toEqual({ code: "cancelled", message: "调用已被中断" });
+      expect(completedOf(h)).toHaveLength(1);
+      expect(checkpoints).toEqual(["before", "after"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("忽略 signal 且声明短 timeoutMs 的工具：超时后在宽限期内结算为 timeout", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const registry = createToolRegistry();
+    let resolveStarted!: () => void;
+    const startedPromise = new Promise<void>((r) => {
+      resolveStarted = r;
+    });
+    registry.register({
+      name: "hang",
+      description: "x",
+      inputSchema: { type: "object" },
+      traits: { mutates: false, concurrencySafe: true, timeoutMs: 20 },
+      permissionSubjects: () => [],
+      execute() {
+        resolveStarted();
+        return new Promise(() => undefined);
+      },
+    });
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const pending = createToolExecutor(registry)
+        .execute(call("hang", {}), h.scope)
+        .then((res) => {
+          settled = true;
+          return res;
+        });
+      await startedPromise;
+      // 生效超时 20ms + 兜底余量 1000ms 触发超时信号，再经宽限期结算
+      await vi.advanceTimersByTimeAsync(1_020 + TOOL_ABORT_GRACE_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const r = await pending;
+      expect(r.status).toBe("error");
+      expect(errorPayload(h).code).toBe("timeout");
+      expect(errorPayload(h).message).toContain("20ms");
+      expect(completedOf(h)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("被放弃的工具之后 reject 或 resolve，不产生未处理 rejection 也不再写事件", async () => {
+    const ac = new AbortController();
+    const h = await makeHarness(tmpWorkspace(), allowAll, ac.signal);
+    const checkpoints: string[] = [];
+    h.scope.checkpoint = (phase) => {
+      checkpoints.push(phase);
+      return Promise.resolve();
+    };
+    let rejectLate: ((err: Error) => void) | undefined;
+    let resolveLate: ((res: { status: "ok"; modelContent: string }) => void) | undefined;
+    let emitLateProgress: ((chunk: string) => void) | undefined;
+    let mode: "reject" | "resolve" = "reject";
+    const registry = createToolRegistry();
+    registry.register({
+      name: "hang",
+      description: "x",
+      inputSchema: { type: "object" },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      execute(_input, ctx) {
+        emitLateProgress = (chunk) => ctx.progress(chunk);
+        return new Promise((resolve, reject) => {
+          if (mode === "reject") rejectLate = reject;
+          else resolveLate = resolve;
+        });
+      },
+    });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const executor = createToolExecutor(registry, { abortGraceMs: 20 });
+      const pendingReject = executor.execute(call("hang", {}, "c-rej"), h.scope);
+      await vi.waitFor(() => expect(rejectLate).toBeDefined());
+      ac.abort();
+      const first = await pendingReject;
+      expect(first.status).toBe("cancelled");
+      const eventCountAfterCancel = h.events.length;
+      const ephemeralCountAfterCancel = h.ephemeral.length;
+
+      emitLateProgress?.("late-chunk");
+      rejectLate?.(new Error("late rejection after abandon"));
+      await new Promise((r) => setTimeout(r, 30));
+
+      expect(unhandled).toEqual([]);
+      expect(h.events).toHaveLength(eventCountAfterCancel);
+      expect(h.ephemeral).toHaveLength(ephemeralCountAfterCancel);
+      expect(checkpoints).toEqual(["before", "after"]);
+
+      // 另一轮验证：工具在放弃后延迟 resolve，结果同样直接丢弃
+      mode = "resolve";
+      const ac2 = new AbortController();
+      const h2 = await makeHarness(tmpWorkspace(), allowAll, ac2.signal);
+      const executor2 = createToolExecutor(registry, { abortGraceMs: 20 });
+      const pendingResolve = executor2.execute(call("hang", {}, "c-res"), h2.scope);
+      await vi.waitFor(() => expect(resolveLate).toBeDefined());
+      ac2.abort();
+      const second = await pendingResolve;
+      expect(second.status).toBe("cancelled");
+      const count2 = h2.events.length;
+      resolveLate?.({ status: "ok", modelContent: "too late" });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(h2.events).toHaveLength(count2);
+      expect(completedOf(h2)).toHaveLength(1);
+      expect(completedOf(h2)[0]?.payload.status).toBe("cancelled");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });
 
