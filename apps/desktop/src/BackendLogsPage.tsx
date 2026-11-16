@@ -110,52 +110,56 @@ export function BackendLogsPage({
   };
 
   return (
-    <section className="page3" data-testid="logs-page" aria-label="后台日志">
+    <section className="page3 logs-page" data-testid="logs-page" aria-label="后台日志">
       <div className="spage">
-        <PageHeader
-          title="后台日志"
-          actions={
-            <>
-              <Dropdown
-                appearance="flat"
-                label="后台"
-                value={current === undefined ? undefined : String(current.backendId)}
-                options={backends.map((b) => ({
-                  value: String(b.backendId),
-                  label: b.label,
-                  ...(b.detail !== undefined && b.detail !== "" ? { description: b.detail } : {}),
-                }))}
-                onChange={setPicked}
-                placeholder="没有运行中的后台"
-                {...(backends.length === 0 ? { disabled: "当前没有运行中的后台" } : {})}
-              />
-              <Button
-                disabled={current === undefined || loading}
-                onClick={() => {
-                  if (current !== undefined) void load(current);
-                }}
-              >
-                {loading ? "读取中…" : "刷新"}
-              </Button>
-              <Button disabled={lines === null || lines.length === 0} onClick={copyAll}>
-                {copied ? "已复制" : "复制全部"}
-              </Button>
-            </>
-          }
-        />
-        <div className="logpage sbody">
-          {backends.length === 0 && <EmptyState>当前没有运行中的后台</EmptyState>}
-          {error !== null && <div className="logerr">{error}</div>}
-          {current !== undefined && lines !== null && lines.length === 0 && error === null && (
-            <EmptyState>
-              {current.backendId === KEY_DIAG_ID
-                ? "暂无记录"
-                : current.backendId === SHELL_LOG_ID
-                  ? "外壳暂无诊断输出。"
-                  : "该后台暂无 stderr 输出"}
-            </EmptyState>
-          )}
-          {lines !== null && lines.length > 0 && <pre className="logview">{lines.join("\n")}</pre>}
+        <div className="readable">
+          <PageHeader
+            title="后台日志"
+            actions={
+              <>
+                <Dropdown
+                  appearance="flat"
+                  label="后台"
+                  value={current === undefined ? undefined : String(current.backendId)}
+                  options={backends.map((b) => ({
+                    value: String(b.backendId),
+                    label: b.label,
+                    ...(b.detail !== undefined && b.detail !== "" ? { description: b.detail } : {}),
+                  }))}
+                  onChange={setPicked}
+                  placeholder="没有运行中的后台"
+                  {...(backends.length === 0 ? { disabled: "当前没有运行中的后台" } : {})}
+                />
+                <Button
+                  disabled={current === undefined || loading}
+                  onClick={() => {
+                    if (current !== undefined) void load(current);
+                  }}
+                >
+                  {loading ? "读取中…" : "刷新"}
+                </Button>
+                <Button disabled={lines === null || lines.length === 0} onClick={copyAll}>
+                  {copied ? "已复制" : "复制全部"}
+                </Button>
+              </>
+            }
+          />
+          <div className="logpage sbody">
+            {backends.length === 0 && <EmptyState>当前没有运行中的后台</EmptyState>}
+            {error !== null && <div className="logerr">{error}</div>}
+            {current !== undefined && lines !== null && lines.length === 0 && error === null && (
+              <EmptyState>
+                {current.backendId === KEY_DIAG_ID
+                  ? "暂无记录"
+                  : current.backendId === SHELL_LOG_ID
+                    ? "外壳暂无诊断输出。"
+                    : "该后台暂无 stderr 输出"}
+              </EmptyState>
+            )}
+            {lines !== null && lines.length > 0 && (
+              <pre className="logview">{lines.join("\n")}</pre>
+            )}
+          </div>
         </div>
       </div>
     </section>

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelUsageStats, PerformancePoint, UsageStats } from "@nocturne/core/protocol";
-import { UsageView, priceLine } from "../src/UsagePage";
+import { UsageView } from "../src/UsagePage";
 import {
   CATEGORY_COLORS,
   DailyBars,
@@ -223,62 +223,43 @@ describe("模型行展开", () => {
     expect(document.querySelector(".usage-detail")).toBeNull();
   });
 
-  it("新列：有计时显示 Tokens/s、TTFT 与速度线，旧日志显示「—」", () => {
+  it("新列：有计时显示 Tokens/s、TTFT，旧日志显示「—」", () => {
     render(view("30"));
     const headers = within(screen.getByRole("table", { name: "按模型用量" }))
       .getAllByRole("columnheader")
       .map((e) => e.textContent);
     expect(headers).toEqual([
       "模型 / 服务商",
-      "轮",
       "输入",
       "输出",
       "缓存命中",
       "预估费用",
       "Tokens/s",
       "TTFT",
-      "近期速度",
-      "输入单价",
-      "输出单价",
     ]);
-    expect(row(/timed/).children).toHaveLength(11);
-    expect([...row(/timed/).querySelectorAll("td")].slice(-2).map((e) => e.textContent)).toEqual([
-      "$2",
-      "$8",
-    ]);
-    const cells = (tr: HTMLElement) => [...tr.querySelectorAll("td")].slice(5, 8);
-    const [tps, ttft, spark] = cells(row(/timed/));
+    expect(row(/timed/).children).toHaveLength(7);
+    const cells = (tr: HTMLElement) => [...tr.querySelectorAll("td")].slice(4, 6);
+    const [tps, ttft] = cells(row(/timed/));
     expect(tps?.textContent).toBe("61.3");
     expect(ttft?.textContent).toBe("12s");
-    expect(spark?.querySelector("svg.usage-spark polyline")).not.toBeNull();
-    expect(spark?.querySelectorAll("circle")).toHaveLength(1);
-    const [tps2, ttft2, spark2] = cells(row(/legacy/));
+    const [tps2, ttft2] = cells(row(/legacy/));
     expect(tps2?.textContent).toBe("—");
     expect(tps2?.className).toBe("r dim");
     expect(ttft2?.textContent).toBe("—");
-    expect(spark2?.querySelector("svg")).toBeNull();
   });
 
-  it("数字列带不折行类名，次要列带可按容器宽度隐藏的类名", () => {
+  it("数字列带不折行类名", () => {
     render(view("30"));
     const table = screen.getByRole("table", { name: "按模型用量" });
     const colHeaders = within(table).getAllByRole("columnheader");
     const tds = [...row(/timed/).querySelectorAll("td")];
-    // 除第 8 个 td（近期速度折线）外，其余 9 个数字单元格与对应表头均带不折行类名 r
-    for (const idx of [0, 1, 2, 3, 4, 5, 6, 8, 9]) {
+    for (const idx of [0, 1, 2, 3, 4, 5]) {
       expect(tds[idx]?.classList.contains("r")).toBe(true);
       expect(colHeaders[idx + 1]?.classList.contains("r")).toBe(true);
     }
-    // 次要列：近期速度、输入单价、输出单价在表头和单元格上均带可隐藏类名
-    expect(colHeaders[8]?.classList.contains("usage-col-spark")).toBe(true);
-    expect(tds[7]?.classList.contains("usage-col-spark")).toBe(true);
-    expect(colHeaders[9]?.classList.contains("usage-col-price")).toBe(true);
-    expect(colHeaders[10]?.classList.contains("usage-col-price")).toBe(true);
-    expect(tds[8]?.classList.contains("usage-col-price")).toBe(true);
-    expect(tds[9]?.classList.contains("usage-col-price")).toBe(true);
   });
 
-  it("展开区显示效率、延迟、Tokens 明细与首次 / 最近使用", () => {
+  it("展开区显示效率、延迟与 Tokens 明细", () => {
     render(view("30"));
     fireEvent.click(row(/timed/));
     const detail = document.querySelector<HTMLElement>(".usage-detail");
@@ -300,21 +281,14 @@ describe("模型行展开", () => {
       缓存写: "1 万",
       输出: "4 万",
     });
-    expect(detail.querySelector(".usage-basis")?.textContent).toBe("基于 12 次请求");
-    expect(detail.querySelector(".usage-prices")?.textContent).toBe(
-      "单价 输入 $2，缓存读 $0.2 / 写 —，输出 $8（USD / 每百万 token）",
-    );
-    expect(detail.closest("td")?.colSpan).toBe(11);
-    const seen = detail.querySelector(".usage-seen");
-    expect(seen?.textContent).toBe("首次使用 3 天前，最近使用 2 小时前");
-    expect(seen?.querySelector("span")?.getAttribute("title")).toMatch(
-      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/,
-    );
+    expect(detail.querySelector(".usage-basis")).toBeNull();
+    expect(detail.querySelector(".usage-seen")).toBeNull();
+    expect(detail.closest("td")?.colSpan).toBe(7);
     expect(within(detail).getByRole("img", { name: "每个活跃小时的性能" })).toBeTruthy();
 
     fireEvent.click(row(/legacy/));
     const other = document.querySelectorAll<HTMLElement>(".usage-detail")[1];
-    expect(other?.querySelector(".usage-basis")?.textContent).toBe("没有带计时的请求");
+    expect(other?.querySelector(".usage-basis")).toBeNull();
     expect(other?.querySelector(".usage-chart-empty")?.textContent).toBe(
       "这个范围内没有带计时的请求",
     );
@@ -324,12 +298,12 @@ describe("模型行展开", () => {
   });
 });
 
-/** jsdom 没有布局：模拟图区像素宽度 */
-function withChartWidth(width: number, run: () => void) {
+/** jsdom 没有布局：模拟图区像素宽高 */
+function withChartSize(width: number, height: number, run: () => void) {
   const rect = HTMLElement.prototype.getBoundingClientRect;
   HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
     return this.classList.contains("usage-chart")
-      ? ({ width, height: 220 } as DOMRect)
+      ? ({ width, height } as DOMRect)
       : rect.call(this);
   };
   try {
@@ -337,6 +311,10 @@ function withChartWidth(width: number, run: () => void) {
   } finally {
     HTMLElement.prototype.getBoundingClientRect = rect;
   }
+}
+
+function withChartWidth(width: number, run: () => void) {
+  withChartSize(width, 220, run);
 }
 
 describe("性能图", () => {
@@ -376,14 +354,23 @@ describe("性能图", () => {
     expect(labels()).toEqual(["0", "0s", "20", "0.5s", "40", "1s", "60", "1.5s", "80", "2s"]);
   });
 
-  it("viewBox 宽度等于图区像素宽度", () => {
-    withChartWidth(1260, () => {
+  it("viewBox 尺寸等于图区像素宽高，高度最小 220", () => {
+    withChartSize(1260, 310, () => {
+      const { unmount } = render(
+        <PerformanceChart points={[point(new Date(2026, 9, 9), 50, 900)]} granularity="day" />,
+      );
+      const svg = document.querySelector(".usage-chart svg");
+      expect(svg?.getAttribute("viewBox")).toBe("0 0 1260 310");
+      expect(svg?.getAttribute("width")).toBe("1260");
+      expect(svg?.getAttribute("height")).toBe("310");
+      unmount();
+    });
+    withChartSize(640, 160, () => {
       render(
         <PerformanceChart points={[point(new Date(2026, 9, 9), 50, 900)]} granularity="day" />,
       );
       const svg = document.querySelector(".usage-chart svg");
-      expect(svg?.getAttribute("viewBox")).toBe("0 0 1260 220");
-      expect(svg?.getAttribute("width")).toBe("1260");
+      expect(svg?.getAttribute("viewBox")).toBe("0 0 640 220");
       expect(svg?.getAttribute("height")).toBe("220");
     });
   });
@@ -468,20 +455,5 @@ describe("性能图", () => {
     expect(document.querySelector(".usage-chart-hover line.cursor")).not.toBeNull();
     fireEvent.blur(must(hits[1]));
     expect(screen.queryByRole("tooltip")).toBeNull();
-  });
-});
-
-describe("展开区单价行", () => {
-  it("缺失显示「—」，分档模型显示基础档并注明分档", () => {
-    expect(priceLine(undefined)).toBe("单价 输入 —，缓存读 — / 写 —，输出 —（USD / 每百万 token）");
-    expect(
-      priceLine({
-        input: 1.25,
-        output: 10,
-        cacheRead: 0.125,
-        cacheWrite: 1.5,
-        tiers: [{ aboveInputTokens: 200_000, input: 2.5, output: 15 }],
-      }),
-    ).toBe("单价 输入 $1.25，缓存读 $0.125 / 写 $1.5，输出 $10（USD / 每百万 token），分档");
   });
 });

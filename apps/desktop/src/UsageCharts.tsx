@@ -44,8 +44,6 @@ const shortDate = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
 const longDate = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 const isoDate = (d: Date): string =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-export const formatDateTime = (d: Date) =>
-  `${isoDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 /** 「7 天」的每日按模型堆叠柱：最后一根是本地今天 */
 export function DailyBars({
@@ -190,32 +188,6 @@ const tps = (v: number | undefined) => (v === undefined ? "—" : v.toFixed(1));
 const seconds = (ms: number | undefined) =>
   ms === undefined ? "—" : `${ms < 10_000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)}s`;
 
-/** 近期速度：最近 24 个有 Tokens/s 的桶 */
-export function Sparkline({ points }: { points: readonly PerformancePoint[] }) {
-  const values = points.flatMap((p) =>
-    p.tokensPerSecond === undefined ? [] : [p.tokensPerSecond],
-  );
-  const series = values.slice(-24);
-  const w = 84;
-  const h = 22;
-  if (series.length === 0) return null;
-  const max = Math.max(...series) * 1.1 || 1;
-  const xy = series.map(
-    (v, i) =>
-      [
-        series.length === 1 ? w / 2 : 2 + (i * (w - 4)) / (series.length - 1),
-        h - 2 - (v / max) * (h - 4),
-      ] as const,
-  );
-  const last = xy[xy.length - 1];
-  return (
-    <svg className="usage-spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-      {xy.length > 1 && <polyline points={xy.map((p) => p.join(",")).join(" ")} />}
-      {last && <circle cx={last[0]} cy={last[1]} r={2.2} />}
-    </svg>
-  );
-}
-
 export const CHART_TITLES: Record<PerformanceGranularity, string> = {
   hour: "每个活跃小时的性能",
   day: "每个活跃日的性能",
@@ -254,14 +226,22 @@ export function niceAxis(
 const axisLabel = (v: number, kind: "count" | "seconds") =>
   kind === "count" ? String(Math.round(v)) : `${Number(v.toFixed(3))}s`;
 
-/** 图区实际像素宽度：viewBox 用它作宽，字号与线宽不随容器缩放 */
-function usePixelWidth(element: HTMLElement | null, fallback: number): number {
-  const [width, setWidth] = useState(fallback);
+/** 图区实际像素宽高：viewBox 用它作尺寸，字号与线宽不随容器缩放 */
+function usePixelSize(
+  element: HTMLElement | null,
+  fallbackWidth: number,
+  minHeight: number,
+): { width: number; height: number } {
+  const [size, setSize] = useState({ width: fallbackWidth, height: minHeight });
   useLayoutEffect(() => {
     if (element === null) return;
     const measure = () => {
-      const w = Math.round(element.getBoundingClientRect().width);
-      if (w > 0) setWidth(w);
+      const rect = element.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.max(minHeight, Math.round(rect.height));
+      if (w > 0) {
+        setSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+      }
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -270,8 +250,8 @@ function usePixelWidth(element: HTMLElement | null, fallback: number): number {
     return () => {
       observer.disconnect();
     };
-  }, [element]);
-  return width;
+  }, [element, minHeight]);
+  return size;
 }
 
 /** 双轴折线：左轴 Tokens/s（强调色实线 + 淡填充），右轴 TTFT（中性色虚线，秒） */
@@ -285,8 +265,7 @@ export function PerformanceChart({
   const [active, setActive] = useState<number | undefined>();
   const title = CHART_TITLES[granularity];
   const [box, setBox] = useState<HTMLDivElement | null>(null);
-  const W = usePixelWidth(box, 640);
-  const H = 220;
+  const { width: W, height: H } = usePixelSize(box, 640, 220);
   const L = 44;
   const R = 44;
   const T = 10;

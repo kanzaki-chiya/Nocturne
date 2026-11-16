@@ -276,17 +276,7 @@
   padding-top: 16px;
   line-height: 1.8;
 }
-@container (max-width: 1080px) {
-  .usage-data .usage-col-price {
-    display: none;
-  }
-}
-@container (max-width: 920px) {
-  .usage-data .usage-col-spark {
-    display: none;
-  }
-}
-@container (max-width: 900px) {
+@container (max-width: 760px) {
   .usage-overview {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -511,19 +501,6 @@
     transition: none;
   }
 }
-.usage-spark {
-  display: block;
-  margin-left: auto;
-}
-.usage-spark polyline {
-  fill: none;
-  stroke: var(--a-accent);
-  stroke-width: 1.4;
-  stroke-linejoin: round;
-}
-.usage-spark circle {
-  fill: var(--a-accent);
-}
 .usage-detail {
   /* 表格比可视区宽时横向滚动；展开区按可视宽度贴左，不随整张表变宽 */
   position: sticky;
@@ -563,26 +540,14 @@
   font-variant-numeric: tabular-nums;
   color: var(--a-text);
 }
-.usage-basis {
-  margin: 6px 0 0;
-  color: var(--a-faint);
-  font-size: var(--fs-1);
-}
-.usage-seen {
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  border-top: 1px solid var(--a-border);
-  padding-top: 10px;
-}
-.usage-seen span {
-  border-bottom: 1px dotted var(--a-faint);
-  cursor: help;
-}
 
 /* ── 展开区性能图 ── */
 .usage-chart-card {
-  align-self: start;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--a-panel);
   border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
@@ -622,11 +587,15 @@
 }
 .usage-chart {
   position: relative;
+  flex: 1;
+  min-height: 220px;
 }
 .usage-chart svg {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
   overflow: visible;
 }
 /* viewBox 宽度等于图区像素宽度（UsageCharts usePixelWidth），字号、线宽按屏幕像素 */
@@ -686,9 +655,10 @@
   color: var(--a-faint);
 }
 .usage-chart-empty {
+  flex: 1;
   display: grid;
   place-items: center;
-  min-height: 200px;
+  min-height: 220px;
   padding: 20px;
   color: var(--a-muted);
   font-size: var(--fs-1);
@@ -698,6 +668,12 @@
   .usage-detail {
     grid-template-columns: minmax(0, 1fr);
     padding: 6px 12px 16px;
+  }
+  .usage-chart,
+  .usage-chart-empty {
+    flex: none;
+    min-height: 220px;
+    height: 220px;
   }
 }
 @container (max-width: 560px) {

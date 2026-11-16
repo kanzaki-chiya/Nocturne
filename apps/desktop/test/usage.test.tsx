@@ -127,8 +127,8 @@ describe("desktop usage", () => {
     const unpriced = within(table)
       .getByRole("rowheader", { name: /unpriced/ })
       .closest("tr");
-    // 费用 + 输入 / 输出单价 + 无计时的 Tokens/s、TTFT
-    expect(unpriced?.textContent?.match(/—/g)).toHaveLength(5);
+    // 费用 + 无计时的 Tokens/s、TTFT
+    expect(unpriced?.textContent?.match(/—/g)).toHaveLength(3);
     const vendor = within(table).getByRole("rowheader", { name: /grok-4\.7/ });
     // 模型名下只有服务商，不写价格来源
     expect(vendor.textContent).not.toContain("厂商价");
