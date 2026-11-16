@@ -977,6 +977,8 @@
 }
 .phone-option-check {
   flex: none;
+  width: 18px;
+  text-align: center;
   color: var(--a-success);
   /* stylelint-disable-next-line declaration-property-value-allowed-list -- 手机选项勾选 ✓ 字符光学居中与触控辨识度 */
   font-size: 18px;

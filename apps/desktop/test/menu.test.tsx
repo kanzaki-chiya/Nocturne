@@ -454,4 +454,45 @@ describe("Menu", () => {
     expect(phoneBrandRule).toContain("width: var(--icon-sm)");
     expect(phoneBrandRule).toContain("height: var(--icon-sm)");
   });
+
+  it("MenuItem：带 icon 的单选项 .menu-ck 在行尾，不带 icon 的单选项 .menu-ck 仍在最前", () => {
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    const { rerender } = render(
+      <Menu anchor={anchor} label="模型" onClose={vi.fn()}>
+        <MenuItem
+          icon={<span data-testid="ic-a" />}
+          label="Claude"
+          checked={true}
+          onSelect={vi.fn()}
+        />
+        <MenuItem
+          icon={<span data-testid="ic-b" />}
+          label="GPT"
+          checked={false}
+          onSelect={vi.fn()}
+        />
+      </Menu>,
+    );
+    const modelItems = screen.getAllByRole("menuitemradio");
+    expect(modelItems[0]?.firstElementChild?.getAttribute("data-testid")).toBe("ic-a");
+    expect(modelItems[0]?.lastElementChild?.classList.contains("menu-ck")).toBe(true);
+    expect(modelItems[0]?.lastElementChild?.textContent).toBe("✓");
+    expect(modelItems[1]?.firstElementChild?.getAttribute("data-testid")).toBe("ic-b");
+    expect(modelItems[1]?.lastElementChild?.classList.contains("menu-ck")).toBe(true);
+    expect(modelItems[1]?.lastElementChild?.textContent).toBe("");
+
+    rerender(
+      <Menu anchor={anchor} label="思考档位" onClose={vi.fn()}>
+        <MenuItem label="medium" checked={true} right="中" onSelect={vi.fn()} />
+        <MenuItem label="high" checked={false} right="高" onSelect={vi.fn()} />
+      </Menu>,
+    );
+    const effortItems = screen.getAllByRole("menuitemradio");
+    expect(effortItems[0]?.firstElementChild?.classList.contains("menu-ck")).toBe(true);
+    expect(effortItems[0]?.firstElementChild?.textContent).toBe("✓");
+    expect(effortItems[1]?.firstElementChild?.classList.contains("menu-ck")).toBe(true);
+    expect(effortItems[1]?.firstElementChild?.textContent).toBe("");
+    anchor.remove();
+  });
 });

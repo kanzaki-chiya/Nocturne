@@ -109,7 +109,7 @@ export function PopoverOption({
   icon,
   label,
   detail,
-  checked = false,
+  checked,
   disabled,
   risk = false,
   onSelect,
@@ -127,7 +127,7 @@ export function PopoverOption({
     <button
       type="button"
       role="menuitemradio"
-      aria-checked={checked}
+      aria-checked={checked ?? false}
       className={`phone-option${risk ? " risk" : ""}`}
       disabled={disabled !== undefined || onSelect === undefined}
       title={disabled}
@@ -140,7 +140,11 @@ export function PopoverOption({
           <small>{disabled !== undefined && detail === undefined ? disabled : detail}</small>
         )}
       </span>
-      {checked && <span className="phone-option-check">✓</span>}
+      {checked !== undefined && (
+        <span className="phone-option-check" aria-hidden="true">
+          {checked ? "✓" : ""}
+        </span>
+      )}
     </button>
   );
 }

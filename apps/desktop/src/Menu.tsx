@@ -607,6 +607,13 @@ export function MenuItem({
   onHover,
   onSelect,
 }: MenuItemProps) {
+  const check =
+    checked !== undefined ? (
+      <span className="menu-ck" aria-hidden="true">
+        {checked ? "✓" : ""}
+      </span>
+    ) : null;
+  const trailingCheck = icon !== undefined;
   return (
     <button
       type="button"
@@ -632,11 +639,7 @@ export function MenuItem({
         }
       }}
     >
-      {checked !== undefined && (
-        <span className="menu-ck" aria-hidden="true">
-          {checked ? "✓" : ""}
-        </span>
-      )}
+      {!trailingCheck && check}
       {icon}
       <span className="menu-label">
         {label}
@@ -645,6 +648,7 @@ export function MenuItem({
         ) : null}
       </span>
       {right !== undefined && right !== null ? <span className="menu-r">{right}</span> : null}
+      {trailingCheck && check}
     </button>
   );
 }

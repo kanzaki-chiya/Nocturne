@@ -125,7 +125,7 @@
 - **开关（`.switch`）**：`button[role="switch"][aria-checked]`，尺寸 `--switch-w` × `--switch-h`（`32px × 18px`），打开时轨道用强调色 `--a-accent`，圆钮 `--switch-knob`。立即生效的布尔设置用开关；进表单点「保存」才生效的布尔字段用复选框 `.check`。
 - **分段控件（`.seg`）**：2–4 个互斥短选项，选中项 `[aria-pressed="true"]` / `[aria-selected="true"]` / `[aria-checked="true"]` 用 `--a-sel-strong` 底。
 - **下拉与输入框（`.dd`、`.input`、`.textarea`）**：默认高度 `--ctl-h-md`（`28px`；`.lg` 为 `--ctl-h-lg`），下拉触发器 `.dd` 采用透明底与 `1px solid var(--a-border)` 描边；机器值加 `.mono`，宽度档位 `.sm-w`（`--w-field-sm`）、`.md-w`（`--w-field-md`）。
-- **菜单、对话框与浮层（`Menu`、`.ddm`、`.dlg`、`.ovpop`、`.qopen`、`.search-dialog`）**：统一使用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边与 `--a-panel` 底色；菜单项与下拉项高 `--item-h`（`30px`），焦点与选中底色 `--a-sel`；`MenuItem` 仅在传入 `checked`（单选模式）时渲染 `.menu-ck` 勾选列，普通菜单图标贴左对齐；模型菜单每项名字前显示 `16px` 品牌或通用图标（`box_3`，手机网页模型菜单内为 `14px`），思考档位与权限菜单不显示图标。
+- **菜单、对话框与浮层（`Menu`、`.ddm`、`.dlg`、`.ovpop`、`.qopen`、`.search-dialog`）**：统一使用 `--radius-3` 圆角、`1px solid var(--a-border)` 描边与 `--a-panel` 底色；菜单项与下拉项高 `--item-h`（`30px`），焦点与选中底色 `--a-sel`；`MenuItem` 仅在传入 `checked`（单选模式）时渲染 `.menu-ck` 勾选列（无 `icon` 时在最前，带 `icon` 时移至行尾并保留固定宽度），普通菜单图标贴左对齐；模型菜单每项名字前显示 `16px` 品牌或通用图标（`box_3`，手机网页模型菜单内为 `14px`），思考档位与权限菜单不显示图标。
 - **徽标（`.badge`）与覆盖警告**：`.badge` 用于状态标签（`.accent`、`.warn`、`.err`、`.ok`）和「只读」。除覆盖警告和只读徽标外不显示配置来源；被更高层覆盖的设置值用 `--a-warning` 色，现有覆盖警告只放在值的 `title`，不加徽标或可见说明。Shell 行既有的「由…指定」保留。
 
 ---
