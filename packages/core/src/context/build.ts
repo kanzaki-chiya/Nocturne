@@ -1003,6 +1003,39 @@ export interface BuildSummaryRequestInput {
   events?: readonly DurableEvent[] | undefined;
 }
 
+export interface BuildTranscriptSummaryRequestInput {
+  /** 折叠后的历史（SessionState.history），函数内部按 throughSeq 截断 */
+  history: readonly HistoryEntry[];
+  model: ModelInfo;
+  /** 摘要覆盖到该 seq 为止（必须是闭合步骤边界） */
+  throughSeq: number;
+}
+
+/**
+ * 组装独立文本转录形式的摘要请求（context.md 6.6）：
+ * 独立 system + 文本转录 + 空工具集，供沿用前缀装不下或沿用前缀请求失败时回退使用。
+ */
+export function buildTranscriptSummaryRequest(
+  input: BuildTranscriptSummaryRequestInput,
+): ModelRequest {
+  const { model, throughSeq } = input;
+  const covered = input.history.filter((e) => e.kind === "compaction" || e.seq <= throughSeq);
+  const transcript = renderTranscript(covered, model.ref.provider, model.protocol);
+  const userText = `以下是会话历史转录，请按系统提示压缩为摘要。\n\n${transcript}`;
+  return {
+    model: model.ref.model,
+    ...(model.protocol !== undefined ? { protocol: model.protocol } : {}),
+    system: [{ text: SUMMARY_SYSTEM }],
+    messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
+    tools: [],
+    // 未声明输出上限时摘要仍按既有上限请求（不替上游做决定，只约束摘要本身）
+    maxOutputTokens: Math.min(
+      model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS,
+      SUMMARY_MAX_OUTPUT_TOKENS,
+    ),
+  };
+}
+
 /**
  * 组装一次摘要请求：沿用主请求投影直到边界，追加摘要指令；
  * 沿用前缀装不下（或未提供主请求）时，退回独立 system 加转录。
@@ -1010,12 +1043,12 @@ export interface BuildSummaryRequestInput {
  */
 export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelRequest {
   const { model, throughSeq } = input;
-  const covered = input.history.filter((e) => e.kind === "compaction" || e.seq <= throughSeq);
-  const maxOutputTokens = Math.min(
-    model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS,
-    SUMMARY_MAX_OUTPUT_TOKENS,
-  );
   if (input.mainRequest !== undefined) {
+    const covered = input.history.filter((e) => e.kind === "compaction" || e.seq <= throughSeq);
+    const maxOutputTokens = Math.min(
+      model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS,
+      SUMMARY_MAX_OUTPUT_TOKENS,
+    );
     const main = input.mainRequest;
     const count = historyToMessages(
       covered,
@@ -1053,20 +1086,7 @@ export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelReque
     };
     if (requestTokens(request) <= inputBudgetTokens(model, maxOutputTokens)) return request;
   }
-  const transcript = renderTranscript(covered, model.ref.provider, model.protocol);
-  const userText = `以下是会话历史转录，请按系统提示压缩为摘要。\n\n${transcript}`;
-  return {
-    model: model.ref.model,
-    ...(model.protocol !== undefined ? { protocol: model.protocol } : {}),
-    system: [{ text: SUMMARY_SYSTEM }],
-    messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
-    tools: [],
-    // 未声明输出上限时摘要仍按既有上限请求（不替上游做决定，只约束摘要本身）
-    maxOutputTokens: Math.min(
-      model.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS,
-      SUMMARY_MAX_OUTPUT_TOKENS,
-    ),
-  };
+  return buildTranscriptSummaryRequest({ history: input.history, model, throughSeq });
 }
 
 /**

@@ -12,16 +12,10 @@ import { randomUUID } from "node:crypto";
 import {
   attachmentsToLoad,
   buildContext,
-  buildSummaryRequest,
-  runSummaryCall,
+  runSummaryWithFallback,
   type CompactionPlan,
 } from "../context/index.js";
-import {
-  clampReasoningEffort,
-  isProviderError,
-  type ModelRequest,
-  type ProviderError,
-} from "../provider/index.js";
+import { clampReasoningEffort, isProviderError, type ProviderError } from "../provider/index.js";
 import type {
   AgentDelegation,
   ContentBlock,
@@ -354,28 +348,23 @@ export async function runTurn(
 
   /**
    * 执行一次 L2 摘要计划：成功写 context.compacted(kind="summary") 并返回 true；
-   * 失败或中断不写任何压缩事件（context.md 6.6），返回 false。
+   * 沿用前缀失败（非中断）时在 runSummaryWithFallback 内回退文本转录再试一次；
+   * 两种形式都失败或中断不写任何压缩事件（context.md 6.6），返回 false。
    */
   async function runSummaryPlan(plan: CompactionPlan): Promise<boolean> {
-    const request: ModelRequest = {
-      ...(plan.summaryRequest ??
-        buildSummaryRequest({
-          history: session.state().history,
-          model: deps.model.model,
-          throughSeq: plan.throughSeq,
-        })),
-      // ADR-0031 §3：摘要请求同属本会话，同样携带会话 ID
-      sessionId: deps.rootSessionId ?? session.id,
-    };
-    let result: Awaited<ReturnType<typeof runSummaryCall>>;
+    let result: Awaited<ReturnType<typeof runSummaryWithFallback>>;
     try {
-      result = await runSummaryCall(
-        deps.model,
-        request,
+      result = await runSummaryWithFallback({
+        model: deps.model,
+        plan,
+        history: session.state().history,
+        sessionId: deps.rootSessionId ?? session.id,
         signal,
-        config.firstEventTimeoutMs,
-        config.idleTimeoutMs,
-      );
+        firstEventTimeoutMs: config.firstEventTimeoutMs,
+        idleTimeoutMs: config.idleTimeoutMs,
+        diagnostics: deps.execEnv.diagnostics,
+        turnId,
+      });
     } catch {
       return false;
     }

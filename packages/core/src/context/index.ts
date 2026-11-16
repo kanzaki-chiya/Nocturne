@@ -6,6 +6,7 @@ export {
   imageRefsInCap,
   buildContext,
   buildSummaryRequest,
+  buildTranscriptSummaryRequest,
   chooseSummaryBoundary,
   closedBoundaries,
   compactionCutoffs,
@@ -25,4 +26,5 @@ export {
   retentionTokens,
   SUMMARY_MAX_OUTPUT_TOKENS,
   type BuildSummaryRequestInput,
+  type BuildTranscriptSummaryRequestInput,
 } from "./build.js";

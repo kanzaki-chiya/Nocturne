@@ -42,7 +42,7 @@ import {
 import {
   buildContext,
   attachmentsToLoad,
-  runSummaryCall,
+  runSummaryWithFallback,
   type BuiltContext,
   type EnvironmentInfo,
   type InstructionFile,
@@ -4954,15 +4954,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               "没有可行的压缩边界（历史为空、最新摘要之后没有新内容，或摘要请求在任何边界下都装不进窗口）",
             );
           }
-          const request = { ...plan.summaryRequest, sessionId: session.id };
-          // context.md 6.6：摘要请求只尝试一轮，不嵌套压缩
-          const summaryResult = await runSummaryCall(
+          // context.md 6.6：沿用前缀失败（非中断）时以同一 throughSeq 退回文本转录再试一次，不嵌套压缩
+          const summaryResult = await runSummaryWithFallback({
             model,
-            request,
-            ac.signal,
-            turnConfig.firstEventTimeoutMs,
-            turnConfig.idleTimeoutMs,
-          );
+            plan,
+            history,
+            sessionId: session.id,
+            signal: ac.signal,
+            firstEventTimeoutMs: turnConfig.firstEventTimeoutMs,
+            idleTimeoutMs: turnConfig.idleTimeoutMs,
+            diagnostics,
+          });
           await session.emit(
             "context.compacted",
             {

@@ -1131,9 +1131,18 @@ describe("上下文与运行时命令（Phase 2）", () => {
           { type: "usage", usage: { inputTokens: 27_500, outputTokens: 300 } },
           { type: "finish", reason: "tool_calls" },
         ],
-        // 预防性摘要只返回工具调用、无文本 → 摘要失败（不触发空流重试），记 summaryFailed
+        // 预防性摘要只返回工具调用、无文本 → 前缀与回退转录均失败（不触发空流重试），记 summaryFailed
         [
           { type: "tool_call", toolCallId: "ignored", name: "read", input: { path: "small.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          {
+            type: "tool_call",
+            toolCallId: "ignored-2",
+            name: "read",
+            input: { path: "small.txt" },
+          },
           { type: "finish", reason: "tool_calls" },
         ],
         // Step 2 主请求：读 big.txt（10k token 工具结果），锚定 22k + 10k > B → 下一步超预算
@@ -1162,8 +1171,8 @@ describe("上下文与运行时命令（Phase 2）", () => {
     expect(compacted).toEqual(["prune"]);
     const done = events.find((e) => e.type === "turn.completed");
     expect(done?.type === "turn.completed" && done.payload.error?.code).toBe("compaction_failed");
-    // 总共 4 次请求（Step 1、失败的摘要、Step 2、Step 3），没有第二次摘要请求
-    expect(provider.requests).toHaveLength(4);
+    // 总共 5 次请求（Step 1、前缀摘要失败、转录摘要失败、Step 2、Step 3），没有第二次摘要尝试
+    expect(provider.requests).toHaveLength(5);
     await session.close();
   });
 
@@ -1347,11 +1356,17 @@ describe("上下文与运行时命令（Phase 2）", () => {
             error: new ProviderError({ kind: "context_overflow", message: "still too many" }),
           },
         ],
-        // 摘要调用抛错 → 溢出路径下无可行压缩 → compaction_failed
+        // 摘要调用抛错（前缀 + 回退转录均抛错）→ 溢出路径下无可行压缩 → compaction_failed
         [
           {
             type: "throw",
             error: new ProviderError({ kind: "network", message: "summary boom" }),
+          },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "network", message: "transcript boom" }),
           },
         ],
       ],
@@ -1444,6 +1459,12 @@ describe("上下文与运行时命令（Phase 2）", () => {
           {
             type: "throw",
             error: new ProviderError({ kind: "network", message: "summary boom" }),
+          },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({ kind: "network", message: "transcript boom" }),
           },
         ],
       ],
@@ -1541,6 +1562,10 @@ describe("上下文与运行时命令（Phase 2）", () => {
           { type: "finish", reason: "tool_calls" },
         ],
         [
+          { type: "tool_call", toolCallId: "ignored-2", name: "read", input: { path: "never" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
           { type: "text_delta", text: "摘要失败仍可继续" },
           { type: "finish", reason: "stop" },
         ],
@@ -1564,7 +1589,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await runtime.updateSettings({ "compaction.threshold": "80%" });
     const resumedEvents = collect(restored);
     expect(await restored.submit({ text: "第三轮" })).toBe("done");
-    expect(provider.requests).toHaveLength(4);
+    expect(provider.requests).toHaveLength(5);
     expect(
       resumedEvents.filter(
         (event) => event.type === "runtime.warning" && event.payload.code === "compaction_failed",
@@ -1575,7 +1600,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
         (event) => event.type === "context.compacted" || event.type === "tool.started",
       ),
     ).toHaveLength(0);
-    expect(JSON.stringify(provider.requests[3]?.messages)).toContain("第一轮");
+    expect(JSON.stringify(provider.requests[4]?.messages)).toContain("第一轮");
     expect(provider.requests[2]?.reasoningEffort).toBeUndefined();
     await restored.close();
   });
@@ -1596,6 +1621,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
           { type: "usage", usage: { inputTokens: 16_000, outputTokens: 100 } },
           { type: "finish", reason: "stop" },
         ],
+        [{ type: "finish", reason: "stop" }],
         [{ type: "finish", reason: "stop" }],
         [
           { type: "tool_call", toolCallId: "read", name: "read", input: { path: "large.txt" } },
@@ -1624,7 +1650,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
     await session.submit({ text: "第一轮" });
     const events = collect(session);
     expect(await session.submit({ text: "读取大文件" })).toBe("done");
-    expect(provider.requests).toHaveLength(5);
+    expect(provider.requests).toHaveLength(6);
     expect(
       events
         .filter((event) => event.type === "context.compacted")
@@ -1823,6 +1849,358 @@ describe("上下文与运行时命令（Phase 2）", () => {
     const reason = await session.submit({ text: "after" });
     expect(reason).toBe("done");
     await session.close();
+  });
+
+  it("自动摘要：前缀请求抛错时退回文本转录形式，写出同 throughSeq 的 context.compacted", async () => {
+    const ws = makeTmpDir("nct-rt-fallback-ok-");
+    writeFileSync(path.join(ws, "a.txt"), "alpha");
+    writeFileSync(path.join(ws, "b.txt"), "beta");
+    const debugFile = path.join(makeTmpDir("nct-rt-diag-"), "debug.jsonl");
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-rt-home-"),
+      env: () => undefined,
+    });
+    await config.updateSettings({ "compaction.threshold": "40000" });
+    const noPruneModel: ModelInfo = {
+      ...tinyModel,
+      ref: { provider: "fake", model: "fake-model" },
+      contextWindow: 100_000,
+      maxOutputTokens: 4_000,
+      capabilities: { ...tinyModel.capabilities, historyPrune: false },
+    };
+    const provider = new FakeProvider({
+      models: [noPruneModel],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "a.txt" } },
+          { type: "usage", usage: { inputTokens: 20_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "tool_call", toolCallId: "c2", name: "read", input: { path: "b.txt" } },
+          { type: "usage", usage: { inputTokens: 42_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 第一次摘要（沿用前缀，末尾含 tool_result）被上游 409 拒绝
+        [
+          {
+            type: "throw",
+            error: new ProviderError({
+              kind: "invalid_request",
+              status: 409,
+              message: "HTTP 409",
+              providerMessage: "agy-cli: agy bridge: no active MCP call matches these tool results",
+              retryable: false,
+            }),
+          },
+        ],
+        // 第二次摘要（独立文本转录）成功
+        [
+          { type: "text_delta", text: "转录回退摘要内容" },
+          { type: "usage", usage: { inputTokens: 500, outputTokens: 40 } },
+          { type: "finish", reason: "stop" },
+        ],
+        // 压缩后继续完成本轮
+        [
+          { type: "text_delta", text: "已完成" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-sessions-"),
+      providers: [provider],
+      config,
+      debug: { enabled: true, file: debugFile },
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    expect(await session.submit({ text: "检查文件" })).toBe("done");
+
+    const step1Completed = events.find(
+      (e): e is Extract<RuntimeEvent, { type: "tool.completed" }> =>
+        e.type === "tool.completed" && e.payload.callId.endsWith("-call-1"),
+    );
+    expect(step1Completed).toBeDefined();
+
+    const compacted = events.filter(
+      (e): e is Extract<RuntimeEvent, { type: "context.compacted" }> =>
+        e.type === "context.compacted",
+    );
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0]?.payload).toMatchObject({
+      kind: "summary",
+      throughSeq: step1Completed?.seq,
+      summary: "转录回退摘要内容",
+    });
+
+    // 第一次摘要是前缀形式（带工具、含 tool 消息），第二次是纯文本转录形式
+    const prefixReq = provider.requests[2];
+    const transcriptReq = provider.requests[3];
+    expect(prefixReq?.tools.length).toBeGreaterThan(0);
+    expect(prefixReq?.messages.some((m) => m.role === "tool")).toBe(true);
+    expect(transcriptReq?.tools).toEqual([]);
+    expect(transcriptReq?.system).toHaveLength(1);
+    expect(transcriptReq?.system[0]?.text).toContain("你是 Nocturne 会话的压缩器");
+    expect(transcriptReq?.messages).toHaveLength(1);
+    expect(transcriptReq?.messages[0]?.role).toBe("user");
+    expect(transcriptReq?.messages.some((m) => m.role === "tool")).toBe(false);
+    expect(JSON.stringify(transcriptReq?.messages)).not.toContain("tool_result");
+
+    await vi.waitFor(() => {
+      const records = readFileSync(debugFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const failed = records.filter((r) => r.kind === "context.summary_failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toMatchObject({
+        phase: "prefix",
+        throughSeq: step1Completed?.seq,
+        status: 409,
+      });
+    });
+    await session.close();
+    await runtime.close();
+  });
+
+  it("自动摘要：前缀与转录形式都抛错时不写压缩事件，警告只发一次，本轮后续步骤不再发摘要请求", async () => {
+    const ws = makeTmpDir("nct-rt-fallback-both-fail-");
+    writeFileSync(path.join(ws, "a.txt"), "alpha");
+    writeFileSync(path.join(ws, "b.txt"), "beta");
+    writeFileSync(path.join(ws, "c.txt"), "gamma");
+    const debugFile = path.join(makeTmpDir("nct-rt-diag-"), "debug.jsonl");
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-rt-home-"),
+      env: () => undefined,
+    });
+    await config.updateSettings({ "compaction.threshold": "40000" });
+    const noPruneModel: ModelInfo = {
+      ...tinyModel,
+      ref: { provider: "fake", model: "fake-model" },
+      contextWindow: 100_000,
+      maxOutputTokens: 4_000,
+      capabilities: { ...tinyModel.capabilities, historyPrune: false },
+    };
+    const provider = new FakeProvider({
+      models: [noPruneModel],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "a.txt" } },
+          { type: "usage", usage: { inputTokens: 20_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "tool_call", toolCallId: "c2", name: "read", input: { path: "b.txt" } },
+          { type: "usage", usage: { inputTokens: 42_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 前缀与转录两次摘要都抛错
+        [
+          {
+            type: "throw",
+            error: new ProviderError({
+              kind: "invalid_request",
+              status: 409,
+              message: "prefix rejected",
+              retryable: false,
+            }),
+          },
+        ],
+        [
+          {
+            type: "throw",
+            error: new ProviderError({
+              kind: "server",
+              status: 500,
+              message: "transcript failed",
+              retryable: false,
+            }),
+          },
+        ],
+        // 后续继续多步（仍超 40k 阈值），本轮不得再发摘要请求
+        [
+          { type: "tool_call", toolCallId: "c3", name: "read", input: { path: "c.txt" } },
+          { type: "usage", usage: { inputTokens: 45_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "全部完成" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-sessions-"),
+      providers: [provider],
+      config,
+      debug: { enabled: true, file: debugFile },
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    expect(await session.submit({ text: "连续执行" })).toBe("done");
+
+    expect(events.filter((e) => e.type === "context.compacted")).toHaveLength(0);
+    expect(
+      events.filter((e) => e.type === "runtime.warning" && e.payload.code === "compaction_failed"),
+    ).toHaveLength(1);
+    // 1(step1) + 1(step2) + 2(prefix+transcript summary) + 1(step3) + 1(step4) = 6
+    expect(provider.requests).toHaveLength(6);
+
+    await vi.waitFor(() => {
+      const records = readFileSync(debugFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const failed = records.filter((r) => r.kind === "context.summary_failed");
+      expect(failed).toHaveLength(2);
+      expect(failed[0]).toMatchObject({ phase: "prefix", error: "prefix rejected" });
+      expect(failed[1]).toMatchObject({ phase: "transcript", error: "transcript failed" });
+    });
+    await session.close();
+    await runtime.close();
+  });
+
+  it("自动摘要：第一次请求期间中断 → 不再发第二次转录请求", async () => {
+    const ws = makeTmpDir("nct-rt-fallback-abort-");
+    writeFileSync(path.join(ws, "a.txt"), "alpha");
+    writeFileSync(path.join(ws, "b.txt"), "beta");
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: makeTmpDir("nct-rt-home-"),
+      env: () => undefined,
+    });
+    await config.updateSettings({ "compaction.threshold": "40000" });
+    const noPruneModel: ModelInfo = {
+      ...tinyModel,
+      ref: { provider: "fake", model: "fake-model" },
+      contextWindow: 100_000,
+      maxOutputTokens: 4_000,
+      capabilities: { ...tinyModel.capabilities, historyPrune: false },
+    };
+    const provider = new FakeProvider({
+      models: [noPruneModel],
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "a.txt" } },
+          { type: "usage", usage: { inputTokens: 20_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "tool_call", toolCallId: "c2", name: "read", input: { path: "b.txt" } },
+          { type: "usage", usage: { inputTokens: 42_000, outputTokens: 100 } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // 第一次摘要请求等待期间被中断
+        [{ type: "wait", ms: 5_000 }],
+        // 若错误回退到这里会让断言失效
+        [
+          { type: "text_delta", text: "不应到达这里" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-sessions-"),
+      providers: [provider],
+      config,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    session.subscribe((e) => {
+      if (e.type === "runtime.status" && e.payload.status === "compacting") {
+        setTimeout(() => session.interrupt(), 10);
+      }
+    });
+
+    expect(await session.submit({ text: "中断测试" })).toBe("aborted");
+    // Step 1 + Step 2 + 第一次前缀摘要（被中断）= 3，绝不发第二次转录请求
+    expect(provider.requests).toHaveLength(3);
+    expect(events.filter((e) => e.type === "context.compacted")).toHaveLength(0);
+    await session.close();
+  });
+
+  it("compact()：第一次前缀摘要失败、第二次转录成功时写出 context.compacted", async () => {
+    const ws = makeTmpDir("nct-rt-compact-fallback-");
+    writeFileSync(path.join(ws, "a.txt"), "alpha");
+    const debugFile = path.join(makeTmpDir("nct-rt-diag-"), "debug.jsonl");
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "c1", name: "read", input: { path: "a.txt" } },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "已读取文件" },
+          { type: "finish", reason: "stop" },
+        ],
+        // compact() 第一次前缀请求抛错
+        [
+          {
+            type: "throw",
+            error: new ProviderError({
+              kind: "invalid_request",
+              status: 409,
+              message: "HTTP 409",
+              providerMessage: "agy-cli: agy bridge: no active MCP call matches these tool results",
+              retryable: false,
+            }),
+          },
+        ],
+        // compact() 第二次文本转录请求成功
+        [
+          { type: "text_delta", text: "手动摘要回退成功" },
+          { type: "usage", usage: { inputTokens: 300, outputTokens: 25 } },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmpDir("nct-rt-sessions-"),
+      providers: [provider],
+      debug: { enabled: true, file: debugFile },
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    await session.submit({ text: "读取并结束" });
+
+    await session.compact();
+
+    const compacted = events.filter(
+      (e): e is Extract<RuntimeEvent, { type: "context.compacted" }> =>
+        e.type === "context.compacted",
+    );
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0]?.payload).toMatchObject({
+      kind: "summary",
+      summary: "手动摘要回退成功",
+      usage: { inputTokens: 300, outputTokens: 25 },
+    });
+
+    // 确认第一次是前缀请求，第二次是转录请求
+    const firstCompactReq = provider.requests[2];
+    const secondCompactReq = provider.requests[3];
+    expect(firstCompactReq?.tools.length).toBeGreaterThan(0);
+    expect(secondCompactReq?.tools).toEqual([]);
+    expect(secondCompactReq?.system).toHaveLength(1);
+    expect(secondCompactReq?.messages).toHaveLength(1);
+    expect(secondCompactReq?.messages[0]?.role).toBe("user");
+    expect(secondCompactReq?.messages.some((m) => m.role === "tool")).toBe(false);
+
+    await vi.waitFor(() => {
+      const records = readFileSync(debugFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(
+        records.filter((r) => r.kind === "context.summary_failed" && r.phase === "prefix"),
+      ).toHaveLength(1);
+    });
+    await session.close();
+    await runtime.close();
   });
 
   it("setModel：config_changed + 后续请求走新模型；未知模型 invalid_model", async () => {
