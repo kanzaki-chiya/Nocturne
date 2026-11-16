@@ -1,23 +1,97 @@
+.mcp-page .mcp-head-mono {
+  font-family: var(--mono);
+  font-weight: var(--fw-medium);
+}
+
+.mcp-page .mcp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.mcp-page .mcp-status-row {
+  flex-wrap: nowrap;
+}
+
+.mcp-page .mcp-status-row .lab {
+  flex: 0 0 auto;
+}
+
+.mcp-page .mcp-status-row .ctl {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.mcp-page .mcp-ellip {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.mcp-kv-add {
+  align-self: flex-end;
+}
+
 .mcp-value-editor {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(140px, 1fr) minmax(140px, 1.4fr) 30px;
-  gap: 8px;
-  margin: 8px 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.2fr) var(--ctl-h-md);
+  gap: var(--space-2);
   align-items: center;
+  width: 100%;
 }
+
 .mcp-value-editor .ddw,
 .mcp-value-editor .dd {
   width: 100%;
   min-width: 0;
 }
+
+.mcp-saved-value {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
+}
+
+.mcp-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mcp-unit .mcp-unit-input {
+  text-align: right;
+}
+
+.mcp-unit-label {
+  color: var(--a-muted);
+  font-size: var(--fs-2);
+}
+
 .mcp-page .ms {
   flex-wrap: wrap;
 }
+
 .mcp-page input.mcp-name-locked {
   background: var(--a-raised);
   color: var(--a-faint);
   cursor: default;
 }
+
 .mcp-import {
   width: min(var(--w-dialog), 90vw);
 }
