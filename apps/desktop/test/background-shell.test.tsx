@@ -205,3 +205,31 @@ it.each(["check", "node fixture"])(
     expect(update).not.toHaveBeenCalled();
   },
 );
+
+it("shell_output 的工具行显示「命令输出」", () => {
+  const outputEntry: ToolEntry = {
+    kind: "tool",
+    key: "t-output",
+    seq: 2,
+    turnId: "turn-1",
+    callId: "call-output",
+    name: "shell_output",
+    status: "ok",
+    input: { id: task.taskId },
+    subjects: [],
+    permission: undefined,
+    resolution: undefined,
+    liveOutput: "",
+    result: {
+      status: "ok",
+      output: { task, text: "", durationMs: 5 },
+      modelContent: "{}",
+      error: undefined,
+      truncated: false,
+      spillPath: undefined,
+      durationMs: 5,
+    },
+  };
+  const { container } = render(conversation([outputEntry], []));
+  expect(container.querySelector(".tool-name")?.textContent).toBe("命令输出");
+});

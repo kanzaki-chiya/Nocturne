@@ -18,6 +18,8 @@ export const TOOL_META: Record<string, string> = {
   apply_subagent_changes: "并回子代理改动",
   switch_worktree: "切换工作树",
   shell: "命令",
+  shell_output: "命令输出",
+  shell_kill: "停止命令",
   web_fetch: "读取网页",
   web_search: "网页搜索",
   subagent: "子代理",
