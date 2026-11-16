@@ -1168,7 +1168,7 @@ export function PhoneApp({
   } else if (page.kind === "usage") {
     body = (
       <section className="phone-body phone-usage">
-        <UsagePage client={connected ? sessions.client : undefined} />
+        <UsagePage client={connected ? sessions.client : undefined} variant="phone" />
       </section>
     );
   } else if (page.kind === "diagnostics") {

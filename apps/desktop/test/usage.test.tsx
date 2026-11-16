@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UsageStats } from "@nocturne/core/protocol";
-import { UsagePage, formatUsageCost, formatUsageTokens } from "../src/UsagePage";
+import { UsagePage, UsageView, formatUsageCost, formatUsageTokens } from "../src/UsagePage";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
 const cost = { input: 1, cacheRead: 2, cacheWrite: 3, output: 4, total: 10 };
@@ -74,14 +74,15 @@ const stats: UsageStats = {
 };
 const servers: ReturnType<typeof fakeServer>[] = [];
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   for (const s of servers.splice(0)) s.close();
 });
-async function mount(handler: unknown = stats) {
+async function mount(handler: unknown = stats, variant?: "phone") {
   const server = fakeServer(withInit({ "runtime.usageStats": handler }));
   servers.push(server);
   await server.initialize();
-  const view = render(<UsagePage client={server.client} />);
+  const view = render(<UsagePage client={server.client} variant={variant} />);
   await screen.findByText("累计 tokens");
   return { server, ...view };
 }
@@ -224,5 +225,152 @@ describe("desktop usage", () => {
     expect(formatUsageTokens(115_000_000)).toBe("1.15 亿");
     expect(formatUsageCost(123.45)).toBe("$123");
     expect(formatUsageCost(1.2)).toBe("$1.20");
+  });
+  it("still renders DataTable in desktop variant", () => {
+    render(
+      <UsageView
+        stats={stats}
+        range="30"
+        loading={false}
+        error={undefined}
+        onRange={() => undefined}
+        onRefresh={() => undefined}
+      />,
+    );
+    expect(screen.getByRole("table", { name: "按模型用量" })).toBeTruthy();
+  });
+  it("hides first heatmap month label when it spans fewer than 3 columns", () => {
+    // 2026-11-20 往前 364 天是 2025-11-21，11 月只占第 1–2 列，与 12 月间隔不足 3 列
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 20, 12));
+    const rendered = render(
+      <UsageView
+        stats={stats}
+        range="30"
+        loading={false}
+        error={undefined}
+        onRange={() => undefined}
+        onRefresh={() => undefined}
+      />,
+    );
+    const labelsShort = [...document.querySelectorAll(".usage-months span")].map(
+      (e) => e.textContent,
+    );
+    expect(labelsShort[0]).toBe("12 月");
+    expect(labelsShort.at(-1)).toBe("11 月");
+    expect(labelsShort).toHaveLength(12);
+
+    // 2026-11-10 往前 364 天是 2025-11-11（周二），11 月占第 1–3 列，与 12 月间隔恰好 3 列
+    vi.setSystemTime(new Date(2026, 10, 10, 12));
+    rendered.rerender(
+      <UsageView
+        stats={{ ...stats }}
+        range="30"
+        loading={false}
+        error={undefined}
+        onRange={() => undefined}
+        onRefresh={() => undefined}
+      />,
+    );
+    const labelsFull = [...document.querySelectorAll(".usage-months span")].map(
+      (e) => e.textContent,
+    );
+    expect(labelsFull[0]).toBe("11 月");
+    expect(labelsFull).toHaveLength(13);
+  });
+  it("scrolls heatmap container to scrollWidth on mount and stats update", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollWidth");
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("usage-heat-scroll") ? 720 : 0;
+      },
+    });
+    try {
+      const rendered = render(
+        <UsageView
+          stats={stats}
+          range="30"
+          loading={false}
+          error={undefined}
+          onRange={() => undefined}
+          onRefresh={() => undefined}
+        />,
+      );
+      const scrollEl = document.querySelector<HTMLElement>(".usage-heat-scroll");
+      expect(scrollEl?.scrollLeft).toBe(720);
+      if (!scrollEl) throw new Error("missing heatmap scroll container");
+      scrollEl.scrollLeft = 0;
+      rendered.rerender(
+        <UsageView
+          stats={{ ...stats, sessions: 9 }}
+          range="30"
+          loading={false}
+          error={undefined}
+          onRange={() => undefined}
+          onRefresh={() => undefined}
+        />,
+      );
+      expect(scrollEl.scrollLeft).toBe(720);
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, "scrollWidth", original);
+      else delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth;
+    }
+  });
+});
+
+describe("phone usage", () => {
+  it("renders button list instead of DataTable and expands ModelDetail on click", () => {
+    render(
+      <UsageView
+        stats={stats}
+        range="30"
+        loading={false}
+        error={undefined}
+        variant="phone"
+        onRange={() => undefined}
+        onRefresh={() => undefined}
+      />,
+    );
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(document.querySelector(".usage-detail")).toBeNull();
+    const modelBtn = screen.getByRole("button", { name: /expensive/ });
+    expect(modelBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(modelBtn.textContent).toContain("输入 10 万 · 输出 2 万 · 缓存命中 80.0%");
+    expect(modelBtn.querySelector(".usage-phone-model-name")?.getAttribute("title")).toBe(
+      "expensive",
+    );
+    fireEvent.click(modelBtn);
+    expect(modelBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector(".usage-detail")).not.toBeNull();
+    fireEvent.click(modelBtn);
+    expect(modelBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector(".usage-detail")).toBeNull();
+  });
+  it("uses 刷新 as refresh button aria-label and disables it while loading", async () => {
+    let reply: ((value: UsageStats) => void) | undefined;
+    let count = 0;
+    await mount(
+      () =>
+        ++count === 1
+          ? stats
+          : new Promise<UsageStats>((resolve) => {
+              reply = resolve;
+            }),
+      "phone",
+    );
+    const refreshBtn = screen.getByRole("button", { name: "刷新" }) as HTMLButtonElement;
+    expect(refreshBtn.title).toBe("刷新");
+    expect(refreshBtn.disabled).toBe(false);
+    fireEvent.click(refreshBtn);
+    await waitFor(() => expect(refreshBtn.disabled).toBe(true));
+    expect(refreshBtn.title).toBe("读取中…");
+    if (!reply) throw new Error("missing deferred response");
+    const resolve = reply;
+    await act(async () => {
+      resolve(stats);
+    });
+    await waitFor(() => expect(refreshBtn.disabled).toBe(false));
+    expect(refreshBtn.title).toBe("刷新");
   });
 });

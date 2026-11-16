@@ -1285,24 +1285,6 @@
   gap: 8px;
 }
 
-/* ── 用量页：复用桌面 UsagePage，收窄内边距，标题由页头给出 ── */
-.phone-usage {
-  padding: 0;
-}
-.phone-usage .usage-page .phead {
-  padding: 12px 16px 0;
-}
-.phone-usage .usage-page .phead h1 {
-  display: none;
-}
-.phone-usage .usage-body {
-  padding: 12px 16px 24px;
-}
-.phone-usage .usage-cell {
-  padding: 0;
-  border-radius: var(--radius-1);
-}
-
 /* 待发输入列表：图标按钮放大到 44px 触控区，不放大图标 */
 .phone .pi-row,
 .phone .pi-paused {
@@ -1319,9 +1301,389 @@
   padding: 0 10px;
 }
 
-.phone-usage .usage-page .spage {
+/* ── 用量页（手机布局） ── */
+.phone-usage {
   padding: 0;
 }
-.phone-usage .usage-page .usage-body {
+.phone-usage .usage-page {
+  overflow: visible;
+}
+.phone-usage .usage-page .spage {
+  padding: 0;
+  overflow: visible;
+}
+.phone-usage .usage-phone-range {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) 0;
+}
+.phone-usage .usage-phone-range .seg {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: var(--space-0-5);
+  gap: var(--space-0-5);
+  border: 0;
+  border-radius: var(--radius-3);
+  background: var(--a-raised);
+}
+.phone-usage .usage-phone-range .seg button {
+  min-height: calc(var(--ctl-h-touch) - var(--space-1));
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  font-size: var(--fs-3);
+  color: var(--a-secondary);
+}
+.phone-usage .usage-phone-range .seg button[aria-pressed="true"] {
+  background: var(--a-bg);
+  color: var(--a-text);
+  font-weight: var(--fw-semibold);
+}
+.phone-usage .usage-phone-refresh {
+  width: var(--ctl-h-touch);
+  height: var(--ctl-h-touch);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-bg);
+  color: var(--a-text);
+}
+.phone-usage .usage-body {
+  padding: var(--space-5) var(--space-4) var(--space-6);
+  gap: var(--space-5);
+}
+.phone-usage .usage-error {
+  margin-bottom: 0;
+}
+
+/* 概览：上为双列大数字，下为三行细线列表 */
+.phone-usage .usage-phone-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.phone-usage .usage-phone-hero {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.phone-usage .usage-phone-hero > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+}
+.phone-usage .usage-phone-hero span {
+  font-size: var(--fs-2);
+  color: var(--a-muted);
+}
+.phone-usage .usage-phone-hero strong {
+  font-family: var(--mono);
+  font-size: calc(var(--fs-5) * 1.4);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
+  color: var(--a-text);
+  white-space: nowrap;
+}
+.phone-usage .usage-phone-kv {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--a-border);
+}
+.phone-usage .usage-phone-kv > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--a-border);
+  font-size: var(--fs-3);
+}
+.phone-usage .usage-phone-kv > div > span {
+  color: var(--a-secondary);
+  flex: none;
+}
+.phone-usage .usage-phone-kv-val {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.phone-usage .usage-phone-kv-val strong {
+  flex: none;
+  font-family: var(--mono);
+  font-size: calc(var(--fs-3) + 1px);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--a-text);
+  white-space: nowrap;
+}
+.phone-usage .usage-phone-kv-val em {
+  font-style: normal;
+  font-family: var(--sans);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-regular);
+  color: var(--a-muted);
+  margin-left: var(--space-0-5);
+}
+.phone-usage .usage-phone-kv-val small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--sans);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-regular);
+  color: var(--a-muted);
+}
+
+/* 小节标题与右侧分段控件 */
+.phone-usage .group {
+  gap: var(--space-2);
+}
+.phone-usage .ghead {
+  padding: 0;
+  min-height: var(--ctl-h-lg);
+  align-items: center;
+}
+.phone-usage .ghead h2 {
+  margin: 0 auto 0 0;
+  font-size: calc(var(--fs-3) + 1px);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0;
+  color: var(--a-text);
+  line-height: var(--lh-tight);
+}
+.phone-usage .ghead .seg {
+  padding: var(--space-0-5);
+  gap: var(--space-0-5);
+  border: 0;
+  border-radius: var(--radius-2);
+  background: var(--a-raised);
+}
+.phone-usage .ghead .seg.sm button {
+  height: var(--ctl-h-md);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  font-size: var(--fs-2);
+  color: var(--a-secondary);
+}
+.phone-usage .ghead .seg.sm button[aria-pressed="true"] {
+  background: var(--a-bg);
+  color: var(--a-text);
+  font-weight: var(--fw-semibold);
+}
+
+/* 热力图：格子圆角与内边距重置 */
+.phone-usage .usage-cell {
+  padding: 0;
+  border-radius: var(--radius-1);
+}
+.phone-usage .usage-heat-scroll {
+  max-width: 100%;
+}
+
+/* Token 构成与费用 */
+.phone-usage .usage-composition-bar {
+  margin-bottom: var(--space-2);
+}
+.phone-usage .usage-composition {
+  display: flex;
+  flex-direction: column;
   gap: 0;
+}
+.phone-usage .usage-composition > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(76px, auto);
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--a-border);
+}
+.phone-usage .usage-composition > div:last-child {
+  border-bottom: 0;
+}
+.phone-usage .usage-composition span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--fs-3);
+  color: var(--a-text);
+}
+.phone-usage .usage-composition span i {
+  flex: none;
+  margin-right: 0;
+  border-radius: 50%;
+}
+.phone-usage .usage-composition b {
+  font-family: var(--mono);
+  font-size: var(--fs-3);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--a-text);
+  white-space: nowrap;
+}
+.phone-usage .usage-composition small {
+  font-family: var(--mono);
+  font-size: var(--fs-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--a-muted);
+  white-space: nowrap;
+}
+
+/* 常用工具 / 常用技能 */
+.phone-usage .usage-rankings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.phone-usage .usage-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.phone-usage .usage-ranking li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+  margin-top: 0;
+}
+.phone-usage .usage-ranking li > span {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: var(--fs-3);
+  color: var(--a-text);
+}
+.phone-usage .usage-ranking b {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: var(--fs-2);
+  font-weight: var(--fw-regular);
+  color: var(--a-secondary);
+  text-align: right;
+  white-space: nowrap;
+}
+.phone-usage .usage-ranking .usage-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: var(--space-1);
+}
+
+/* 7 天每日用量柱状图 */
+.phone-usage .usage-daily {
+  padding: var(--space-3) var(--space-2);
+  min-width: 0;
+}
+.phone-usage .usage-daily-cols {
+  gap: var(--space-0-5);
+  min-width: 0;
+}
+.phone-usage .usage-daily-col {
+  min-width: 0;
+}
+.phone-usage .usage-daily-val {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: calc(var(--fs-1) * 0.85);
+  letter-spacing: -0.02em;
+}
+
+/* 按模型按钮列表与单列展开详情 */
+.phone-usage .usage-phone-models {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--a-border);
+}
+.phone-usage .usage-phone-model {
+  border-bottom: 1px solid var(--a-border);
+}
+.phone-usage .usage-phone-model-row {
+  display: grid;
+  grid-template-columns: var(--space-2) minmax(0, 1fr) auto var(--icon-sm);
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-3) 0;
+  border-radius: 0;
+  text-align: left;
+  background: transparent;
+}
+.phone-usage .usage-phone-model-row:hover:not(:disabled) {
+  background: transparent;
+}
+.phone-usage .usage-phone-model-row .usage-swatch {
+  margin-right: 0;
+  border-radius: 50%;
+}
+.phone-usage .usage-phone-model-main {
+  display: block;
+  min-width: 0;
+}
+.phone-usage .usage-phone-model-name {
+  display: block;
+  font-size: var(--fs-3);
+  font-weight: var(--fw-medium);
+  color: var(--a-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phone-usage .usage-phone-model-main small {
+  display: block;
+  margin-top: var(--space-0-5);
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.phone-usage .usage-phone-model-cost {
+  font-family: var(--mono);
+  font-size: calc(var(--fs-3) + 1px);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--a-text);
+  white-space: nowrap;
+}
+.phone-usage .usage-phone-model-row .usage-chev {
+  margin-top: 0;
+}
+.phone-usage .usage-phone-model-row[aria-expanded="true"] .usage-chev {
+  transform: rotate(90deg);
+  color: var(--a-secondary);
+}
+.phone-usage .usage-detail {
+  position: static;
+  width: auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: 0 0 var(--space-4) var(--space-4);
+}
+.phone-usage .usage-metrics {
+  gap: var(--space-3);
+}
+.phone-usage .usage-metrics dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.phone-usage .usage-chart-card {
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+.phone-usage .usage-chart,
+.phone-usage .usage-chart-empty {
+  flex: none;
+  min-height: 220px;
+  height: 220px;
+}
+.phone-usage .usage-table-note,
+.phone-usage .usage-notice {
+  margin: var(--space-1) 0 0;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import type {
   DailyUsageStats,
@@ -21,8 +21,10 @@ import {
   SegmentedControl,
   DataTable,
   EmptyState,
+  ICON_MD,
   ICON_SM,
   Icon,
+  IconButton,
   PageHeader,
   SettingsGroup,
 } from "./ui";
@@ -39,6 +41,11 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
   const [mode, setMode] = useState<"tokens" | "cost">("tokens");
   const [hover, setHover] = useState<DailyUsageStats | undefined>();
   const [pinned, setPinned] = useState<DailyUsageStats | undefined>();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [stats]);
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   const first = new Date(now);
@@ -59,7 +66,7 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
     `${d.date}，${formatUsageTokens(d.tokens)} tokens，约 ${formatUsageCost(d.cost)}，${d.turns} 轮`;
   const selected = hover ?? pinned;
   const columns = Math.ceil((first.getDay() + cells.length) / 7);
-  const months = cells.flatMap(({ day }, i) =>
+  const rawMonths = cells.flatMap(({ day }, i) =>
     i === 0 || day.date.slice(0, 7) !== cells[i - 1]?.day.date.slice(0, 7)
       ? [
           {
@@ -69,6 +76,11 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
         ]
       : [],
   );
+  // 与下一个月份标签间隔不到 3 列时不显示，避免首尾窄列标签挤在一起
+  const months = rawMonths.filter((m, i) => {
+    const next = rawMonths[i + 1];
+    return next === undefined || next.column - m.column >= 3;
+  });
   return (
     <SettingsGroup
       title="每日活跃"
@@ -90,7 +102,7 @@ function Activity({ stats, range }: { stats: UsageStats; range: Range }) {
         </>
       }
     >
-      <div className="usage-heat-scroll">
+      <div className="usage-heat-scroll" ref={scrollRef}>
         <div
           className="usage-months"
           style={{ gridTemplateColumns: `repeat(${columns}, minmax(9px, 1fr))` }}
@@ -271,6 +283,7 @@ export function UsageView({
   range,
   loading,
   error,
+  variant,
   onRange,
   onRefresh,
 }: {
@@ -278,9 +291,11 @@ export function UsageView({
   range: Range;
   loading: boolean;
   error: string | undefined;
+  variant?: "phone" | undefined;
   onRange: (range: Range) => void;
   onRefresh: () => void;
 }) {
+  const phone = variant === "phone";
   const [sort, setSort] = useState<"cost" | "input">("cost");
   // 展开状态按模型键保存，切换范围时保留
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -335,31 +350,68 @@ export function UsageView({
       ]
     : [];
   const tokenSum = (total?.inputTokens ?? 0) + (total?.outputTokens ?? 0);
+  const rangeOptions = (["7", "30", "all"] as const).map((r) => ({
+    value: r,
+    label: r === "all" ? "全部" : `${r} 天`,
+  }));
+  const longestDuration = stats?.longestTurn
+    ? (stats.longestTurn.durationMs / 60_000).toFixed(1)
+    : "—";
+  const longestUnit = stats?.longestTurn ? "分钟" : "";
+  const longestDetail = stats?.longestTurn
+    ? `${stats.longestTurn.date}，${stats.longestTurn.sessionTitle}`
+    : "暂无已完成的轮";
+  const sessionsText = stats ? stats.sessions.toLocaleString("en-US") : "0";
+  const turnsText = stats
+    ? `${stats.turns.toLocaleString("en-US")} 轮，子代理 ${stats.subagentTurns} 轮`
+    : "";
   return (
-    <section className="page3 usage-page" aria-label="用量" aria-busy={loading}>
+    <section
+      className={phone ? "page3 usage-page usage-phone" : "page3 usage-page"}
+      aria-label="用量"
+      aria-busy={loading}
+    >
       <div className="spage">
         <div className="readable">
-          <PageHeader
-            title="用量"
-            actions={
-              <>
-                {" "}
-                <SegmentedControl
-                  className="usage-toggle"
-                  aria-label="统计范围"
-                  value={range}
-                  options={(["7", "30", "all"] as const).map((r) => ({
-                    value: r,
-                    label: r === "all" ? "全部" : `${r} 天`,
-                  }))}
-                  onChange={onRange}
-                />
-                <Button disabled={loading} onClick={onRefresh}>
-                  {loading ? "读取中…" : "刷新"}
-                </Button>
-              </>
-            }
-          />
+          {phone ? (
+            <div className="usage-phone-range">
+              <SegmentedControl
+                className="usage-toggle"
+                aria-label="统计范围"
+                value={range}
+                options={rangeOptions}
+                onChange={onRange}
+              />
+              <IconButton
+                className="usage-phone-refresh"
+                aria-label="刷新"
+                title={loading ? "读取中…" : "刷新"}
+                disabled={loading}
+                onClick={onRefresh}
+              >
+                <Icon name="refresh_2" size={ICON_MD} />
+              </IconButton>
+            </div>
+          ) : (
+            <PageHeader
+              title="用量"
+              actions={
+                <>
+                  {" "}
+                  <SegmentedControl
+                    className="usage-toggle"
+                    aria-label="统计范围"
+                    value={range}
+                    options={rangeOptions}
+                    onChange={onRange}
+                  />
+                  <Button disabled={loading} onClick={onRefresh}>
+                    {loading ? "读取中…" : "刷新"}
+                  </Button>
+                </>
+              }
+            />
+          )}
           <div className="usage-body sbody">
             {error && (
               <div className="usage-error" role="alert">
@@ -373,42 +425,79 @@ export function UsageView({
               <EmptyState>{loading ? "正在读取用量…" : "尚无统计数据"}</EmptyState>
             ) : (
               <>
-                <div className="usage-overview">
-                  <div>
-                    <span>累计 tokens</span>
-                    <strong>{formatUsageTokens(tokenSum)}</strong>
+                {phone ? (
+                  <div className="usage-phone-overview">
+                    <div className="usage-phone-hero">
+                      <div>
+                        <span>预估费用</span>
+                        <strong>{formatUsageCost(stats.totals.cost.total)}</strong>
+                      </div>
+                      <div>
+                        <span>累计 tokens</span>
+                        <strong>{formatUsageTokens(tokenSum)}</strong>
+                      </div>
+                    </div>
+                    <div className="usage-phone-kv">
+                      <div>
+                        <span>缓存命中率</span>
+                        <div className="usage-phone-kv-val">
+                          <strong>
+                            {cacheRate.toFixed(1)}
+                            <em>%</em>
+                          </strong>
+                        </div>
+                      </div>
+                      <div>
+                        <span>会话 / 轮</span>
+                        <div className="usage-phone-kv-val">
+                          <strong>{sessionsText}</strong>
+                          <small>{turnsText}</small>
+                        </div>
+                      </div>
+                      <div>
+                        <span>最长一轮</span>
+                        <div className="usage-phone-kv-val">
+                          <strong>
+                            {longestDuration}
+                            <em>{longestUnit}</em>
+                          </strong>
+                          <small title={stats.longestTurn?.sessionTitle}>{longestDetail}</small>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span>预估费用</span>
-                    <strong>{formatUsageCost(stats.totals.cost.total)}</strong>
+                ) : (
+                  <div className="usage-overview">
+                    <div>
+                      <span>累计 tokens</span>
+                      <strong>{formatUsageTokens(tokenSum)}</strong>
+                    </div>
+                    <div>
+                      <span>预估费用</span>
+                      <strong>{formatUsageCost(stats.totals.cost.total)}</strong>
+                    </div>
+                    <div>
+                      <span>缓存命中率</span>
+                      <strong>
+                        {cacheRate.toFixed(1)}
+                        <em>%</em>
+                      </strong>
+                    </div>
+                    <div>
+                      <span>会话 / 轮</span>
+                      <strong>{sessionsText}</strong>
+                      <small>{turnsText}</small>
+                    </div>
+                    <div>
+                      <span>最长一轮</span>
+                      <strong>
+                        {longestDuration}
+                        <em>{longestUnit}</em>
+                      </strong>
+                      <small title={stats.longestTurn?.sessionTitle}>{longestDetail}</small>
+                    </div>
                   </div>
-                  <div>
-                    <span>缓存命中率</span>
-                    <strong>
-                      {cacheRate.toFixed(1)}
-                      <em>%</em>
-                    </strong>
-                  </div>
-                  <div>
-                    <span>会话 / 轮</span>
-                    <strong>{stats.sessions.toLocaleString("en-US")}</strong>
-                    <small>
-                      {stats.turns.toLocaleString("en-US")} 轮，子代理 {stats.subagentTurns} 轮
-                    </small>
-                  </div>
-                  <div>
-                    <span>最长一轮</span>
-                    <strong>
-                      {stats.longestTurn ? (stats.longestTurn.durationMs / 60_000).toFixed(1) : "—"}
-                      <em>{stats.longestTurn ? "分钟" : ""}</em>
-                    </strong>
-                    <small title={stats.longestTurn?.sessionTitle}>
-                      {stats.longestTurn
-                        ? `${stats.longestTurn.date}，${stats.longestTurn.sessionTitle}`
-                        : "暂无已完成的轮"}
-                    </small>
-                  </div>
-                </div>
+                )}
                 <Activity stats={stats} range={range} />
                 <SettingsGroup title="Token 构成与费用" plain>
                   <div className="usage-composition-bar" aria-hidden="true">
@@ -455,98 +544,147 @@ export function UsageView({
                     />
                   }
                 >
-                  <DataTable
-                    aria-label="按模型用量"
-                    className="usage-table-scroll usage-data"
-                    rows={models}
-                    rowKey={(m) => usageModelKey(m.model)}
-                    rowHeaderKey="model"
-                    rowClassName={() => "usage-model-row"}
-                    rowProps={(m) => ({
-                      tabIndex: 0,
-                      "aria-expanded": expanded.has(usageModelKey(m.model)),
-                      onClick: () => {
-                        toggle(usageModelKey(m.model));
-                      },
-                      onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
-                        if (
-                          event.target !== event.currentTarget ||
-                          (event.key !== "Enter" && event.key !== " ")
-                        )
-                          return;
-                        event.preventDefault();
-                        toggle(usageModelKey(m.model));
-                      },
-                    })}
-                    renderDetail={(m) =>
-                      expanded.has(usageModelKey(m.model)) ? (
-                        <ModelDetail model={m} granularity={stats.performanceGranularity} />
-                      ) : null
-                    }
-                    columns={[
-                      {
-                        key: "model",
-                        header: "模型 / 服务商",
-                        render: (m) => {
+                  {phone ? (
+                    models.length > 0 && (
+                      <div className="usage-phone-models">
+                        {models.map((m) => {
                           const key = usageModelKey(m.model);
+                          const color = palette.get(key) ?? OTHER_COLOR;
+                          const isExpanded = expanded.has(key);
                           return (
-                            <div className="usage-row-name">
-                              <Icon name="right_small" size={ICON_SM} className="usage-chev" />
-                              <i
-                                className="usage-swatch"
-                                data-color={palette.get(key) ?? OTHER_COLOR}
-                                style={{ background: palette.get(key) ?? OTHER_COLOR }}
-                                aria-hidden="true"
-                              />
-                              <div>
-                                <span>{m.model.model}</span>
-                                <small>{m.model.provider}</small>
-                              </div>
+                            <div key={key} className="usage-phone-model">
+                              <button
+                                type="button"
+                                className="usage-phone-model-row"
+                                aria-expanded={isExpanded}
+                                onClick={() => {
+                                  toggle(key);
+                                }}
+                              >
+                                <i
+                                  className="usage-swatch"
+                                  data-color={color}
+                                  style={{ background: color }}
+                                  aria-hidden="true"
+                                />
+                                <span className="usage-phone-model-main">
+                                  <span className="usage-phone-model-name" title={m.model.model}>
+                                    {m.model.model}
+                                  </span>
+                                  <small>
+                                    输入 {formatUsageTokens(m.inputTokens)} · 输出{" "}
+                                    {formatUsageTokens(m.outputTokens)} · 缓存命中{" "}
+                                    {(m.cacheHitRate * 100).toFixed(1)}%
+                                  </small>
+                                </span>
+                                <span className="usage-phone-model-cost">
+                                  {m.pricing ? formatUsageCost(m.cost.total) : "—"}
+                                </span>
+                                <Icon name="right_small" size={ICON_SM} className="usage-chev" />
+                              </button>
+                              {isExpanded && (
+                                <ModelDetail model={m} granularity={stats.performanceGranularity} />
+                              )}
                             </div>
                           );
+                        })}
+                      </div>
+                    )
+                  ) : (
+                    <DataTable
+                      aria-label="按模型用量"
+                      className="usage-table-scroll usage-data"
+                      rows={models}
+                      rowKey={(m) => usageModelKey(m.model)}
+                      rowHeaderKey="model"
+                      rowClassName={() => "usage-model-row"}
+                      rowProps={(m) => ({
+                        tabIndex: 0,
+                        "aria-expanded": expanded.has(usageModelKey(m.model)),
+                        onClick: () => {
+                          toggle(usageModelKey(m.model));
                         },
-                      },
-                      {
-                        key: "in",
-                        header: "输入",
-                        numeric: true,
-                        render: (m) => formatUsageTokens(m.inputTokens),
-                      },
-                      {
-                        key: "out",
-                        header: "输出",
-                        numeric: true,
-                        render: (m) => formatUsageTokens(m.outputTokens),
-                      },
-                      {
-                        key: "cache",
-                        header: "缓存命中",
-                        numeric: true,
-                        render: (m) => (m.cacheHitRate * 100).toFixed(1) + "%",
-                      },
-                      {
-                        key: "cost",
-                        header: "预估费用",
-                        numeric: true,
-                        render: (m) => (m.pricing ? formatUsageCost(m.cost.total) : "—"),
-                      },
-                      {
-                        key: "tps",
-                        header: "Tokens/s",
-                        numeric: true,
-                        className: (m) =>
-                          m.latency?.tokensPerSecond === undefined ? "dim" : undefined,
-                        render: (m) => formatTokensPerSecond(m.latency?.tokensPerSecond),
-                      },
-                      {
-                        key: "ttft",
-                        header: "TTFT",
-                        numeric: true,
-                        className: (m) => (m.latency?.avgTtftMs === undefined ? "dim" : undefined),
-                        render: (m) => formatLatency(m.latency?.avgTtftMs),
-                      },
-                    ]}
-                  />
+                        onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
+                          if (
+                            event.target !== event.currentTarget ||
+                            (event.key !== "Enter" && event.key !== " ")
+                          )
+                            return;
+                          event.preventDefault();
+                          toggle(usageModelKey(m.model));
+                        },
+                      })}
+                      renderDetail={(m) =>
+                        expanded.has(usageModelKey(m.model)) ? (
+                          <ModelDetail model={m} granularity={stats.performanceGranularity} />
+                        ) : null
+                      }
+                      columns={[
+                        {
+                          key: "model",
+                          header: "模型 / 服务商",
+                          render: (m) => {
+                            const key = usageModelKey(m.model);
+                            return (
+                              <div className="usage-row-name">
+                                <Icon name="right_small" size={ICON_SM} className="usage-chev" />
+                                <i
+                                  className="usage-swatch"
+                                  data-color={palette.get(key) ?? OTHER_COLOR}
+                                  style={{ background: palette.get(key) ?? OTHER_COLOR }}
+                                  aria-hidden="true"
+                                />
+                                <div>
+                                  <span>{m.model.model}</span>
+                                  <small>{m.model.provider}</small>
+                                </div>
+                              </div>
+                            );
+                          },
+                        },
+                        {
+                          key: "in",
+                          header: "输入",
+                          numeric: true,
+                          render: (m) => formatUsageTokens(m.inputTokens),
+                        },
+                        {
+                          key: "out",
+                          header: "输出",
+                          numeric: true,
+                          render: (m) => formatUsageTokens(m.outputTokens),
+                        },
+                        {
+                          key: "cache",
+                          header: "缓存命中",
+                          numeric: true,
+                          render: (m) => (m.cacheHitRate * 100).toFixed(1) + "%",
+                        },
+                        {
+                          key: "cost",
+                          header: "预估费用",
+                          numeric: true,
+                          render: (m) => (m.pricing ? formatUsageCost(m.cost.total) : "—"),
+                        },
+                        {
+                          key: "tps",
+                          header: "Tokens/s",
+                          numeric: true,
+                          className: (m) =>
+                            m.latency?.tokensPerSecond === undefined ? "dim" : undefined,
+                          render: (m) => formatTokensPerSecond(m.latency?.tokensPerSecond),
+                        },
+                        {
+                          key: "ttft",
+                          header: "TTFT",
+                          numeric: true,
+                          className: (m) =>
+                            m.latency?.avgTtftMs === undefined ? "dim" : undefined,
+                          render: (m) => formatLatency(m.latency?.avgTtftMs),
+                        },
+                      ]}
+                    />
+                  )}
                   {!models.length && <EmptyState inline>这个时间范围内还没有模型用量</EmptyState>}
                   <p className="usage-table-note">按声明价格估算，以服务商账单为准。</p>
                   {stats.unpricedModels.length > 0 && (
@@ -573,9 +711,11 @@ export function UsageView({
 export function UsagePage({
   client,
   version = 0,
+  variant,
 }: {
   client: RpcClient | null | undefined;
   version?: number;
+  variant?: "phone" | undefined;
 }) {
   const [range, setRange] = useState<Range>("30");
   const [stats, setStats] = useState<UsageStats>();
@@ -609,6 +749,7 @@ export function UsagePage({
       range={range}
       loading={loading}
       error={error}
+      variant={variant}
       onRange={setRange}
       onRefresh={() => {
         setRefresh((n) => n + 1);
