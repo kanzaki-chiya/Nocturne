@@ -458,7 +458,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 |---|---|
 | `initialize` | 仅连接握手，不创建 Runtime |
 | `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件，远程即使传 `includeArchived: true` 仍强制排除归档 |
-| `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeSettings`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限（含读取 `appearance.themePreset`，ADR-0093） |
+| `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeSettings`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限（含读取 `appearance.themePreset` 与 `appearance.customThemes`，ADR-0093、ADR-0094） |
 | `runtime.createSession` | 允许除 `branch` 外的选项（携带 `branch` 报 `remote_not_allowed`，ADR-0085）。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
@@ -483,7 +483,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.readFile` | 允许（ADR-0084）：限本连接已打开会话的工作区与 fileIndex 可见普通文件；真实路径校验、拒绝链接与越界，二进制不返回内容，超限 `file_too_large` 带原始字节数，见第 3.2 节 |
 | `remote.lanEndpoints` | 允许（ADR-0087）：只读返回本机局域网直连监听地址列表 `{endpoints}`（未开启时为空数组），仅经已建立的端到端加密通道下发 |
 | `runtime.readFile`、`runtime.searchSessions` | 拒绝：任意绝对路径 `readFile` 仅本机（ADR-0060），手机文件入口使用上面的受限会话方法；`searchSessions` 仅桌面端跨会话搜索（ADR-0077） |
-| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入（含 `updateSettings` 修改 `appearance.themePreset` 等，见 ADR-0093）、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入（含 `updateSettings` 修改 `appearance.themePreset`、`appearance.customThemes` 等，见 ADR-0093、ADR-0094）、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。

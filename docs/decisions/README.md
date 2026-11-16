@@ -101,6 +101,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0091](ADR-0091-subagent-permission-forward.md) | 一次性内置子代理权限确认向父会话转发 | 已接受 |
 | [ADR-0092](ADR-0092-desktop-redesign-workbench.md) | 桌面端界面改版（工作台方向） | 已接受 |
 | [ADR-0093](ADR-0093-appearance-theme-presets.md) | 外观主题预设、桌面内容宽度与手机配色同步 | 已接受 |
+| [ADR-0094](ADR-0094-custom-themes.md) | 自定义主题：单面三色 OKLCH 推算、双面卡片、导入导出与手机缓存同步 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

@@ -21,7 +21,7 @@
 ## 1. 颜色
 
 - **定义位置**：`design/tokens.json` 的 `color` 分组，由 `apps/desktop/src/tokens.css` 导出深浅模式。
-- **主题预设**：工作台、夜曲、纸面、青瓷、松烟的种子色、效果图出处、推算规则、对比度下限与手机同步见 [ADR-0093](docs/decisions/ADR-0093-appearance-theme-presets.md)。预设在运行时覆盖颜色 token，工作台恢复原 token；迷你卡片使用相同推算结果，无须固定预览色豁免。
+- **主题预设与自定义主题**：工作台、夜曲、纸面、青瓷、松烟的种子色、效果图出处、推算规则、对比度下限与手机同步见 [ADR-0093](docs/decisions/ADR-0093-appearance-theme-presets.md)；自定义主题的单面三色 OKLCH 双面推算、亮暗双面卡片、编辑/导入/导出浮窗与首帧缓存见 [ADR-0094](docs/decisions/ADR-0094-custom-themes.md)。预设与自定义主题在运行时覆盖颜色 token，工作台恢复原 token；迷你卡片左半亮面、右半暗面使用相同推算结果，无须固定预览色豁免。
 - **工作台单层平铺与中性灰选中态**（[ADR-0092](docs/decisions/ADR-0092-desktop-redesign-workbench.md)）：保持强调色、语义色、分类色与代码高亮不变；中性色表面与选中态（`--a-sel`、`--a-sel-strong`）转为纯粹中性灰。主区（`--a-bg`）与标题栏/侧栏（`--a-side`）处于同一平面，只靠 `1px` `--a-border` 细线分隔，不再使用浮起卡片包裹主区。
 - **表面与文字**：
   - 表面层次：`--a-bg`（主画布）、`--a-side`（标题栏、侧栏与设置导航）、`--a-panel`（浮层、菜单、对话框、输入框）、`--a-raised`（悬停底、次级块、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg`（二维码底）。
