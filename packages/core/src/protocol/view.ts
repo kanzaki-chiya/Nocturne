@@ -211,6 +211,15 @@ export function inlineFilesOfTool(
   return filterInlineFiles(entry.result.files);
 }
 
+/**
+ * 共享派生规则：工具已结束且结果错误码为 not_read（未读文件即写，被先读守卫拒绝）时返回 true，
+ * 图形界面据此隐藏该工具行；执行中与其他错误一律返回 false。只看错误码，不按工具名判断。
+ */
+export function isNotReadToolFailure(entry: Pick<ToolEntry, "status" | "result">): boolean {
+  if (entry.status === "awaiting_permission" || entry.status === "running") return false;
+  return entry.result?.error?.code === "not_read";
+}
+
 export interface AssistantEntry {
   kind: "assistant";
   key: string;

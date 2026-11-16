@@ -28,6 +28,7 @@ import { SegmentText, TodoRows } from "./todo-panel.js";
 import type { LiveTool, ToolEntry, ViewEntry } from "@nocturne/core/protocol";
 import {
   inlineFilesOfTool,
+  isNotReadToolFailure,
   todoItemsFromCompletion,
   subagentRowInfo,
   subagentApplyLine,
@@ -103,6 +104,8 @@ export function ToolRow({
   ) : null;
   const running = entry.status === "running";
   const spinner = useSpinner(running);
+  // 未读文件即写（not_read）的已结束工具行不渲染；执行中照常显示，出结果后该行消失。
+  if (isNotReadToolFailure(entry)) return <></>;
   if (entry.name === "ask_user")
     return (
       <Box flexDirection="column">

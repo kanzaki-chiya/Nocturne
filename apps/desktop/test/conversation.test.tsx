@@ -1819,7 +1819,7 @@ describe("Conversation 渲染与滚动", () => {
     view.entries = [entry];
     const rendered = mount(view);
     entry.status = "error";
-    entry.result = failedTool("not_read", "请读取文件").result;
+    entry.result = failedTool("write_failed", "请读取文件").result;
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     const summary = screen.getByLabelText("工具详细信息");
@@ -1828,7 +1828,8 @@ describe("Conversation 渲染与滚动", () => {
     view.revision += 1;
     rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
     expect(summary.closest("details")?.open).toBe(true);
-    expect(screen.getByText("请读取文件")).toBeTruthy();
+    // 普通错误无句末标点：行尾摘要与展开原文同文，展开后两处都显示
+    expect(screen.getAllByText("请读取文件")).toHaveLength(2);
   });
 
   it("用户上翻后增量不会拉回；回到底部继续跟随，切会话重置", () => {
@@ -2268,34 +2269,92 @@ describe("Conversation 工具行与拒绝", () => {
     expect(rows[1]?.textContent).not.toContain("ms");
   });
 
-  it.each<[string, string]>([
-    ["not_read", "需先读取文件"],
-    ["stale_file", "文件已变化，需重新读取"],
-  ])("可恢复守卫错误 %s 行尾淡色显示、无失败字样，原文点击展开", (code, brief) => {
-    const message = "拒绝修改文件：Z:/project/src/a.ts。请先读取文件后重试";
+  it.each<[string, string]>([["stale_file", "文件已变化，需重新读取"]])(
+    "可恢复守卫错误 %s 行尾淡色显示、无失败字样，原文点击展开",
+    (code, brief) => {
+      const message = "拒绝修改文件：Z:/project/src/a.ts。请先读取文件后重试";
+      const view = createSessionView();
+      view.entries = [failedTool(code, message)];
+      const { container } = mount(view);
+      const article = screen.getByRole("article", { name: "工具 edit" });
+      const details = container.querySelector<HTMLDetailsElement>(".tool-details");
+      expect(container.querySelector(".conversation-tool-error")).toBeNull();
+      expect(article.querySelector(".tool-res.err")).toBeNull();
+      expect(article.querySelector(".tool-res.recoverable")?.textContent).toBe(brief);
+      expect(article.textContent).not.toContain("失败");
+      expect(details?.querySelector(".conversation-error")).toBeNull();
+      expect(details?.open).toBe(false);
+      expect(article.textContent).not.toContain(code);
+      expect(
+        Array.from(article.querySelectorAll("[title]"), (node) => node.getAttribute("title")).join(
+          " ",
+        ),
+      ).not.toContain(code);
+      expect(article.querySelector(".tool-details .conversation-tool-output")).toBeNull();
+      fireEvent.click(within(article).getByText(brief));
+      expect(details?.open).toBe(true);
+      expect(details?.querySelector(".conversation-tool-output")?.textContent).toBe(message);
+      fireEvent.click(within(article).getByText(brief));
+      expect(details?.open).toBe(false);
+    },
+  );
+
+  it("not_read 的工具行执行中显示、出结果后从 DOM 消失，成功的 read 与 edit 照常显示", () => {
+    const message = "拒绝覆盖未读取的文件：Z:/project/src/a.ts。请先用 read 读取该文件";
     const view = createSessionView();
-    view.entries = [failedTool(code, message)];
-    const { container } = mount(view);
-    const article = screen.getByRole("article", { name: "工具 edit" });
-    const details = container.querySelector<HTMLDetailsElement>(".tool-details");
-    expect(container.querySelector(".conversation-tool-error")).toBeNull();
-    expect(article.querySelector(".tool-res.err")).toBeNull();
-    expect(article.querySelector(".tool-res.recoverable")?.textContent).toBe(brief);
-    expect(article.textContent).not.toContain("失败");
-    expect(details?.querySelector(".conversation-error")).toBeNull();
-    expect(details?.open).toBe(false);
-    expect(article.textContent).not.toContain(code);
-    expect(
-      Array.from(article.querySelectorAll("[title]"), (node) => node.getAttribute("title")).join(
-        " ",
-      ),
-    ).not.toContain(code);
-    expect(article.querySelector(".tool-details .conversation-tool-output")).toBeNull();
-    fireEvent.click(within(article).getByText(brief));
-    expect(details?.open).toBe(true);
-    expect(details?.querySelector(".conversation-tool-output")?.textContent).toBe(message);
-    fireEvent.click(within(article).getByText(brief));
-    expect(details?.open).toBe(false);
+    const failed = tool({
+      callId: "call-a",
+      key: "t:call-a",
+      status: "running",
+      result: undefined,
+      liveOutput: "edit src/a.ts",
+    });
+    const read = tool({
+      callId: "call-b",
+      key: "t:call-b",
+      name: "read",
+      input: { path: "src/a.ts" },
+      result: {
+        status: "ok",
+        modelContent: "已读取 src/a.ts",
+        output: { path: "src/a.ts" },
+        error: undefined,
+        truncated: false,
+        spillPath: undefined,
+        durationMs: 3,
+      },
+    });
+    const edit = tool({
+      callId: "call-c",
+      key: "t:call-c",
+      input: { path: "src/b.ts", old_string: "old", new_string: "new" },
+      result: {
+        status: "ok",
+        modelContent: "已修改 src/b.ts",
+        output: { path: "src/b.ts", diff: "@@ -1,2 +1,2 @@\n-old\n+new\n keep" },
+        error: undefined,
+        truncated: false,
+        spillPath: undefined,
+        durationMs: 12,
+      },
+    });
+    view.entries = [failed, read, edit];
+    const rendered = mount(view);
+    // 执行中：edit 行（失败的与成功的）都在
+    expect(screen.getAllByRole("article", { name: "工具 edit" })).toHaveLength(2);
+    failed.status = "error";
+    failed.result = failedTool("not_read", message).result;
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    // 出结果后失败行消失，只剩成功的 edit；read 照常显示，不留占位或错误文案
+    const edits = screen.getAllByRole("article", { name: "工具 edit" });
+    expect(edits).toHaveLength(1);
+    expect(edits[0]?.textContent).toContain("b.ts");
+    expect(edits[0]?.textContent).not.toContain("请先用 read 读取该文件");
+    expect(screen.getByRole("article", { name: "工具 read" })).toBeTruthy();
+    expect(screen.queryByText("需先读取文件")).toBeNull();
+    expect(screen.queryByText(message)).toBeNull();
+    expect(rendered.container.querySelector(".conversation-tool-error")).toBeNull();
   });
 
   it("stale_file 附带 diff 时行尾显示已附上变更（淡色）", () => {

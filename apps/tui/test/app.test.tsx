@@ -551,6 +551,37 @@ describe("TUI", () => {
     unmount();
   });
 
+  it("not_read 的工具行不渲染，stale_file 照常显示", () => {
+    const hidden = toolEntry("c-not-read", "error");
+    hidden.name = "edit";
+    hidden.input = { path: "src/a.ts", old_string: "old", new_string: "new" };
+    hidden.result = {
+      status: "error",
+      modelContent: "拒绝覆盖未读取的文件：src/a.ts。请先用 read 读取该文件",
+      output: undefined,
+      error: { code: "not_read", message: "拒绝覆盖未读取的文件：src/a.ts" },
+      truncated: false,
+      spillPath: undefined,
+      durationMs: 2,
+    };
+    const screen = render(inEnv(createElement(ToolRow, { entry: hidden, width: 80 })));
+    expect(screen.lastFrame() ?? "").not.toContain("edit");
+    expect(screen.lastFrame() ?? "").not.toContain("请先用 read 读取该文件");
+    screen.unmount();
+
+    const shown = toolEntry("c-stale", "error");
+    shown.name = "edit";
+    shown.input = { path: "src/a.ts", old_string: "old", new_string: "new" };
+    shown.result = {
+      ...hidden.result,
+      error: { code: "stale_file", message: "文件自上次读取后已被外部修改" },
+    };
+    const shownScreen = render(inEnv(createElement(ToolRow, { entry: shown, width: 80 })));
+    expect(shownScreen.lastFrame()).toContain("edit");
+    expect(shownScreen.lastFrame()).toContain("文件自上次读取后已被外部修改");
+    shownScreen.unmount();
+  });
+
   it("全屏接管的 console 输出显示为对话区提示行，不压进输入行", async () => {
     const { runtime, session } = await makeSession();
     const target = { ...console } as Console;

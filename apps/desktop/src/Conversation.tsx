@@ -72,6 +72,7 @@ export function GrantedTag({
 import {
   allPendingPermissions,
   inlineFilesOfTool,
+  isNotReadToolFailure,
   parseFileRefs,
   untrackedCallsText,
   todoItemsFromCompletion,
@@ -1941,7 +1942,7 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
 }
 
 /** 可恢复的守卫错误：保护机制在起作用，模型重新读取就能继续，行尾用中性淡色，不标红。 */
-export const RECOVERABLE_TOOL_ERRORS: ReadonlySet<string> = new Set(["not_read", "stale_file"]);
+export const RECOVERABLE_TOOL_ERRORS: ReadonlySet<string> = new Set(["stale_file"]);
 
 function isRecoverableToolErrorCode(code: string | undefined): boolean {
   return code !== undefined && RECOVERABLE_TOOL_ERRORS.has(code);
@@ -1978,7 +1979,6 @@ function timeoutBody(modelContent: string): string {
 /** 简述只取 Core 的第一句；扩展名与小数中的 "." 不算句末。 */
 function toolErrorSummary(entry: ToolEntry, cwd: string): string {
   const error = entry.result?.error;
-  if (error?.code === "not_read") return "需先读取文件";
   if (error?.code === "stale_file") {
     return hasStaleDiff(entry) ? "文件已变化，已附上变更" : "文件已变化，需重新读取";
   }
@@ -2925,6 +2925,8 @@ function ToolEntryView({
       </div>
     );
   }
+  // 未读文件即写（not_read）的已结束工具行不显示；执行中照常渲染，出结果后该行消失。
+  if (isNotReadToolFailure(entry)) return null;
   const inlineFiles = !preparing ? inlineFilesOfTool(entry) : [];
   if (inlineFiles.length > 0) {
     return (
