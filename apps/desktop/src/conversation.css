@@ -605,8 +605,8 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* 连续工具行（含被拒绝的工具行）间距从 12px 收到 6px；前一行末项展开时保留 12px 以免更挤 */
-.conversation-transcript
+/* 连续工具行（含被拒绝的工具行）间距从 12px 收到 6px；前一行末项展开时保留 12px 以免更挤，仅作用于桌面端 */
+.conversation-transcript:not(.phone *)
   > :where(.tool:not(:has(> .tool-details[open]:last-child)), .note.deny)
   + :where(.tool, .note.deny) {
   margin-top: -6px;
@@ -738,8 +738,8 @@
 .conversation .tool-details {
   min-width: 0;
 }
-/* 同一工具调用的多文件行之间与连续工具行保持一致的 6px 间距 */
-.conversation .tool > .tool-details + .tool-details {
+/* 同一工具调用的多文件行之间与连续工具行保持一致的 6px 间距，仅作用于桌面端 */
+.conversation:not(.phone *) .tool > .tool-details + .tool-details {
   margin-top: 6px;
 }
 /* 展开不改行头：行头不加框、不加内边距，展开内容缩进到图标列下方；
