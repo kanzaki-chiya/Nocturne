@@ -12,6 +12,7 @@
   font-size: var(--fs-2);
   font-weight: var(--fw-regular);
   color: var(--a-text);
+  white-space: normal;
 }
 .usage-data .dim {
   color: var(--a-faint);
@@ -479,6 +480,11 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
+  min-width: 0;
+}
+.usage-row-name > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .usage-row-name span {
   display: block;
