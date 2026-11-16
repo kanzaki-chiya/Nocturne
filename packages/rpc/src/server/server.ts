@@ -225,6 +225,7 @@ export const REMOTE_METHODS = [
   "runtime.listModels",
   "runtime.defaultModel",
   "runtime.listRecentModels",
+  "runtime.describeSettings",
   "runtime.describeModelRoles",
   "runtime.listShells",
   // ADR-0064：手机能看任务与历史、立即运行（不改任务、跑完不留撤销后仍生效的东西，等同会话内操作）；
@@ -1588,14 +1589,17 @@ class Connection implements HubPeer {
         });
         return null;
       },
-      "runtime.setShellSetting": async (p) =>
-        this.runtime().setShellSetting(reqString(p, "kind"), {
+      "runtime.setShellSetting": async (p) => {
+        const result = await this.runtime().setShellSetting(reqString(p, "kind"), {
           workspaceRoot: await this.workspaceOf(p),
-        }),
+        });
+        this.hub.notifySettingsChanged();
+        return result;
+      },
       "runtime.updateSettings": async (p) => {
         const reviewerKey = optString(p, "reviewerKey");
         const workspaceRoot = await this.workspaceOf(p);
-        return this.runtime().updateSettings(
+        const result = await this.runtime().updateSettings(
           reqObject(p, "patch") as SettingsPatch,
           reviewerKey !== undefined || workspaceRoot !== undefined
             ? {
@@ -1604,6 +1608,8 @@ class Connection implements HubPeer {
               }
             : undefined,
         );
+        this.hub.notifySettingsChanged();
+        return result;
       },
       "runtime.setDefaultModel": async (p) => {
         const effort = optString(p, "reasoningEffort");
@@ -1611,11 +1617,13 @@ class Connection implements HubPeer {
           throw new InvalidParamsError(`reasoningEffort 不是已知档位：${effort}`);
         }
         const workspaceRoot = await this.workspaceOf(p);
-        return this.runtime().setDefaultModel(
+        const result = await this.runtime().setDefaultModel(
           reqString(p, "model"),
           effort ?? null,
           workspaceRoot !== undefined ? { workspaceRoot } : undefined,
         );
+        this.hub.notifySettingsChanged();
+        return result;
       },
       "runtime.describeModelRoles": async (p) =>
         this.runtime().describeModelRoles({ workspaceRoot: await this.workspaceOf(p) }),
@@ -1625,11 +1633,13 @@ class Connection implements HubPeer {
           throw new InvalidParamsError(`role 必须是 ${MODEL_ROLES.join("/")} 之一`);
         }
         const workspaceRoot = await this.workspaceOf(p);
-        return this.runtime().setModelRole(
+        const result = await this.runtime().setModelRole(
           role as ModelRole,
           optString(p, "ref") ?? null,
           workspaceRoot !== undefined ? { workspaceRoot } : undefined,
         );
+        this.hub.notifySettingsChanged();
+        return result;
       },
       "runtime.getPreference": (p) => this.runtime().getPreference(reqString(p, "key")) ?? null,
       "runtime.setPreference": async (p) => {
@@ -1638,10 +1648,13 @@ class Connection implements HubPeer {
       },
       "runtime.listReviewerProviders": async (p) =>
         this.runtime().listReviewerProviders({ workspaceRoot: await this.workspaceOf(p) }),
-      // 与配置变更方法走同一串行队列；完成后照常推 providersChanged。多后台客户端
+      // 与配置变更方法走同一串行队列；完成后照常推 providersChanged 与 settingsChanged。多后台客户端
       // 不能再拿这条通知去触发别处的 reloadConfig，否则成环（rpc.md 3.1）
       "runtime.reloadConfig": async () => {
-        await this.enqueueConfig(() => this.reloadProviders());
+        await this.enqueueConfig(async () => {
+          await this.reloadProviders();
+          this.hub.notifySettingsChanged();
+        });
         return null;
       },
       "mcp.describeMcpServers": (p) => this.runtime().describeMcpServers(p),
@@ -2423,6 +2436,7 @@ class Connection implements HubPeer {
       },
       "session.setShell": async (p) => {
         await this.session(p).session.setShell(reqString(p, "kind"));
+        this.hub.notifySettingsChanged();
         return null;
       },
       "session.compact": async (p) => {

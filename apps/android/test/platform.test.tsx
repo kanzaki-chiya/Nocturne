@@ -327,7 +327,10 @@ it("通知目标经原生一次性读取，暖启动事件送到当前页面", a
 it("生效主题变化时同步系统状态栏与导航栏深浅", () => {
   const setSystemBars = vi.fn(() => Promise.resolve());
   const platform = appPlatform({ ...shellHost, setSystemBars });
-  platform.observer?.theme?.("light");
-  platform.observer?.theme?.("dark");
-  expect(setSystemBars.mock.calls).toEqual([[true], [false]]);
+  platform.observer?.theme?.("light", "#fbfaf6");
+  platform.observer?.theme?.("dark", "#171512");
+  expect(setSystemBars.mock.calls).toEqual([
+    [true, "#fbfaf6"],
+    [false, "#171512"],
+  ]);
 });

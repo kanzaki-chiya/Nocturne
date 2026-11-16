@@ -42,7 +42,7 @@ export interface PhoneObserver {
    * 页面当前实际生效的主题变化（启动、手动切换、或选「跟随系统」时系统深浅色切换）。
    * App 据此同步状态栏与导航栏图标深浅；网页不实现此钩子。
    */
-  theme?(resolved: "light" | "dark"): void;
+  theme?(resolved: "light" | "dark", background: string): void;
 }
 export interface PhoneExtensionApi {
   /** 打开 `pages` 里登记的页面 */

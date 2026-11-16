@@ -21,6 +21,13 @@
   overflow-anchor: none;
   overscroll-behavior: contain;
 }
+/* ADR-0093：内容宽度只作用于主窗口，设置与子视图保留各自宽度。 */
+:root[data-content-width="wide"] .mainpane {
+  --w-thread: 960px;
+}
+:root[data-content-width="full"] .mainpane {
+  --w-thread: none;
+}
 .conversation-transcript {
   width: 100%;
   max-width: var(--w-thread);

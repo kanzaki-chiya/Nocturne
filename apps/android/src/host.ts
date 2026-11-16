@@ -35,7 +35,7 @@ export interface AppHost {
   openSettings(target: SettingsTarget): Promise<void>;
   scanQr(): Promise<{ text: string } | { cancelled: true } | { denied: true }>;
   downloadApk(url: string): Promise<void>;
-  setSystemBars(light: boolean): Promise<void>;
+  setSystemBars(light: boolean, background: string): Promise<void>;
   /** 原生一侧的探针记录（前台服务启停、Activity 前后台、渲染进程回收），每行 `毫秒时间戳\t事件` */
   nativeLog(): Promise<string>;
   clearNativeLog(): Promise<void>;
@@ -112,8 +112,8 @@ export const tauriHost: AppHost = {
   downloadApk: async (url) => {
     await call("download_apk", { url });
   },
-  setSystemBars: async (light) => {
-    await call("set_system_bars", { light });
+  setSystemBars: async (light, background) => {
+    await call("set_system_bars", { light, background });
   },
   backgroundStatus: async () => {
     const state = await call<{ running: boolean; ignoringBatteryOptimizations: boolean }>("status");

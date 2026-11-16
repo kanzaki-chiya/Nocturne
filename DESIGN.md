@@ -20,11 +20,12 @@
 
 ## 1. 颜色
 
-- **定义位置**：`design/tokens.json` 的 `color` 分组，浅色在 `:root`、深色在 `[data-theme="dark"]` 下由 `apps/desktop/src/tokens.css` 导出。
+- **定义位置**：`design/tokens.json` 的 `color` 分组，由 `apps/desktop/src/tokens.css` 导出深浅模式。
+- **主题预设**：工作台、夜曲、纸面、青瓷、松烟的种子色、效果图出处、推算规则、对比度下限与手机同步见 [ADR-0093](docs/decisions/ADR-0093-appearance-theme-presets.md)。预设在运行时覆盖颜色 token，工作台恢复原 token；迷你卡片使用相同推算结果，无须固定预览色豁免。
 - **工作台单层平铺与中性灰选中态**（[ADR-0092](docs/decisions/ADR-0092-desktop-redesign-workbench.md)）：保持强调色、语义色、分类色与代码高亮不变；中性色表面与选中态（`--a-sel`、`--a-sel-strong`）转为纯粹中性灰。主区（`--a-bg`）与标题栏/侧栏（`--a-side`）处于同一平面，只靠 `1px` `--a-border` 细线分隔，不再使用浮起卡片包裹主区。
 - **表面与文字**：
   - 表面层次：`--a-bg`（主画布）、`--a-side`（标题栏、侧栏与设置导航）、`--a-panel`（浮层、菜单、对话框、输入框）、`--a-raised`（悬停底、次级块、代码块表头）、`--a-input`（表单输入底）、`--a-code-bg`（代码块底）、`--a-overlay`（浮层遮罩）、`--a-qr-bg`（二维码底）。
-  - 文字层次：`--a-text`（正文与标题）、`--a-secondary`（次要正文、未选中导航、按钮文字）、`--a-muted`（分组标题、辅助标签）、`--a-faint`（占位符、装饰分隔、禁用灰字）。深浅色都不使用纯黑或纯白作大面积底或字。
+  - 文字层次：`--a-text`（正文与标题）、`--a-secondary`（次要正文、未选中导航、按钮文字）、`--a-muted`（分组标题、辅助标签）、`--a-faint`（占位符、装饰分隔、禁用灰字）。工作台使用既定中性色；其他预设按 ADR-0093 的种子色取值。
 - **强调与状态**：
   - 强调色：`--a-accent`、`--a-accent-hover`、`--a-accentAlt`、`--a-on-accent`、`--a-accent-subtle`、`--a-accent-border`、`--a-focus-ring`；选中态：`--a-sel`、`--a-sel-strong`、`--a-multi-sel`、`--a-multi-sel-strong`。
   - 实心主按钮（发送）：`--a-btn`（指向 `--a-text`）与 `--a-on-btn`（指向 `--a-bg`），组件不直接引用 `--a-text`。
@@ -226,13 +227,6 @@
 | `pages.css` | `.page3 .keybox` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 密钥提示框用 45% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .scrim` | `color-no-hex, function-disallowed-list` | `color-mix(in srgb, #000 32%, transparent)` | 设置页对话框遮罩固定 32% 黑，深浅色共用 |
 | `pages.css` | `.page3 .effs button.on` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 50%, transparent)` | 推理档位选中态用 50% `--a-accent` 半透明描边 |
-| `pages.css` | `.tcard.on` | `function-disallowed-list` | `0 0 0 2px color-mix(in srgb, var(--a-accent) 30%, transparent)` | 主题卡片选中外圈用 30% `--a-accent` 2px 半透明环 |
-| `pages.css` | `.tcard .pv i:first-child` | `color-no-hex` | `#f0f0f4` | 浅色主题预览卡侧栏固定色，不随当前主题变化 |
-| `pages.css` | `.tcard .pv i:last-child` | `color-no-hex` | `#fafafb` | 浅色主题预览卡画布固定色，不随当前主题变化 |
-| `pages.css` | `.tcard.dk .pv i:first-child` | `color-no-hex` | `#0d0f13` | 深色主题预览卡侧栏固定色，不随当前主题变化 |
-| `pages.css` | `.tcard.dk .pv i:last-child` | `color-no-hex` | `#121419` | 深色主题预览卡画布固定色，不随当前主题变化 |
-| `pages.css` | `.tcard.sys .pv i:first-child` | `color-no-hex` | `linear-gradient(90deg, #f0f0f4 34%, #fafafb 34%)` | 跟随系统预览卡浅色半边固定色，不随当前主题变化 |
-| `pages.css` | `.tcard.sys .pv i:last-child` | `color-no-hex` | `linear-gradient(90deg, #0d0f13 34%, #121419 34%)` | 跟随系统预览卡深色半边固定色，不随当前主题变化 |
 | `remote.css` | `.scrim:has(> .agent-pair-dlg)` | `color-no-hex, function-disallowed-list` | `color-mix(in srgb, #000 36%, transparent)` | 外部代理配对对话框遮罩固定 36% 黑，深浅色共用 |
 | `skills.css` | `.skill-banner.warn` | `function-disallowed-list` | `color-mix(in srgb, var(--a-warning) 35%, var(--a-border))` | 技能警告横幅用 35% `--a-warning` 混入 `--a-border` 的描边 |
 | `skills.css` | `.skill-banner.info`（`border-color`） | `function-disallowed-list` | `color-mix(in srgb, var(--a-accentAlt) 35%, var(--a-border))` | 技能信息横幅用 35% `--a-accentAlt` 混入 `--a-border` 的描边 |

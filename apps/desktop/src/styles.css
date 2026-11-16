@@ -1005,7 +1005,7 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
 }
 .hero-composer {
   width: 100%;
-  max-width: 680px;
+  max-width: var(--w-thread);
 }
 .hero-composer .composer {
   padding: 0;

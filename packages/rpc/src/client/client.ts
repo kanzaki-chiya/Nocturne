@@ -569,6 +569,11 @@ export interface RpcClient {
    * 响应之前到达一次。桌面端据此刷新服务商/模型相关视图。
    */
   onProvidersChanged(handler: () => void): () => void;
+  /**
+   * 设置成功写入或显式重载配置后，在对应请求的响应之前到达一次（ADR-0093）。
+   * 客户端据此重读 `runtime.describeSettings()`。
+   */
+  onSettingsChanged(handler: () => void): () => void;
   /** 登录会话完成或失败（含取消）；绝不先于对应 start/startDraft 的返回到达 */
   onLoginCompleted(handler: (notification: LoginCompleted) => void): () => void;
   /** 请求服务端清理并退出，回复后关闭传输 */
@@ -623,6 +628,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   const sessionListeners = new Map<string, Set<EventListener>>();
   const globalListeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const providersChangedListeners = new Set<() => void>();
+  const settingsChangedListeners = new Set<() => void>();
   const loginCompletedListeners = new Set<(n: LoginCompleted) => void>();
   const notificationListeners = new Map<string, Set<(params: never) => void>>();
   /** 子会话只读观察表：subscriptionId → 观察；pair 表用于「同一 child 再观察替换旧观察」 */
@@ -685,6 +691,15 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     }
     if (message.method === "runtime.providersChanged") {
       for (const handler of [...providersChangedListeners]) {
+        try {
+          handler();
+        } catch {
+          // 监听器异常不影响其他监听器
+        }
+      }
+    }
+    if (message.method === "runtime.settingsChanged") {
+      for (const handler of [...settingsChangedListeners]) {
         try {
           handler();
         } catch {
@@ -1286,6 +1301,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       providersChangedListeners.add(handler);
       return () => {
         providersChangedListeners.delete(handler);
+      };
+    },
+    onSettingsChanged(handler) {
+      settingsChangedListeners.add(handler);
+      return () => {
+        settingsChangedListeners.delete(handler);
       };
     },
     onLoginCompleted(handler) {

@@ -586,7 +586,10 @@ describe("tauriHost 经白名单命令调用插件", () => {
     await tauriHost.downloadApk(
       "https://github.com/kanzaki-chiya/Nocturne/releases/download/v1.0.0/nocturne-1.0.0.apk",
     );
-    await tauriHost.setSystemBars(true);
+    await tauriHost.setSystemBars(true, "#fbfaf6");
+    expect(
+      invoke.mock.calls.find(([, args]) => args?.command === "set_system_bars")?.[1]?.payload,
+    ).toEqual({ light: true, background: "#fbfaf6" });
     expect(await tauriHost.backgroundStatus()).toEqual({
       supported: true,
       running: true,

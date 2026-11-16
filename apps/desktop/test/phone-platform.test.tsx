@@ -446,12 +446,12 @@ it("observer.theme 报告启动、切换及跟随系统时系统深浅色变化"
   const container = await mount(
     <PhoneApp storage={storage} platform={{ relay: "link", observer: { theme } }} />,
   );
-  expect(theme).toHaveBeenLastCalledWith("dark");
+  expect(theme).toHaveBeenLastCalledWith("dark", expect.any(String));
   systemLight = true;
   await act(async () => {
     changeListener?.();
   });
-  expect(theme).toHaveBeenLastCalledWith("light");
+  expect(theme).toHaveBeenLastCalledWith("light", expect.any(String));
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
@@ -460,6 +460,6 @@ it("observer.theme 报告启动、切换及跟随系统时系统深浅色变化"
       .find((b) => b.textContent === "月之暗面")
       ?.click();
   });
-  expect(theme).toHaveBeenLastCalledWith("dark");
+  expect(theme).toHaveBeenLastCalledWith("dark", expect.any(String));
   expect(changeListener).toBeUndefined();
 });

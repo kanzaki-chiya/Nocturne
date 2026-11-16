@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
+import { watchTheme } from "../appearance";
+import { subscribeThemePreset } from "../theme-sync";
+import type { ThemePresetId } from "../theme-presets";
 import type { ParsedOffer } from "@nocturne/remote";
 import { createAttachmentImageSource, type AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
@@ -28,7 +31,6 @@ import { webHost, type WebHost } from "./host";
 import { pushAvailable, type PhonePush } from "./push";
 import { webPlatform, type PhoneExtensionApi, type PhonePlatform } from "./platform";
 import {
-  applyTheme,
   clearDisconnects,
   loadDisconnects,
   loadTheme,
@@ -203,6 +205,7 @@ export function PhoneApp({
   const [installHint, setInstallHint] = useState(false);
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
+  const [themePreset, setThemePreset] = useState<ThemePresetId>("workbench");
   const [menu, setMenu] = useState<"hosts" | null>(null);
   /** 会话页顶栏右侧的位置：SessionScreen 放入会话菜单与侧边栏按钮 */
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
@@ -273,22 +276,13 @@ export function PhoneApp({
       setBusy(false);
     }
   };
-  useEffect(() => {
-    applyTheme(theme);
-    const media =
-      theme === "system" && typeof window.matchMedia === "function"
-        ? (window.matchMedia("(prefers-color-scheme: light)") as Partial<MediaQueryList>)
-        : undefined;
-    const report = () => {
-      const resolved = theme === "system" ? (media?.matches === true ? "light" : "dark") : theme;
-      platformRef.current.observer?.theme?.(resolved);
-    };
-    report();
-    media?.addEventListener?.("change", report);
-    return () => {
-      media?.removeEventListener?.("change", report);
-    };
-  }, [theme]);
+  useEffect(
+    () =>
+      watchTheme(document.documentElement, theme, themePreset, (resolved, background) => {
+        platformRef.current.observer?.theme?.(resolved, background);
+      }),
+    [theme, themePreset],
+  );
   useEffect(() => {
     void push?.refresh();
     let active = true;
@@ -388,6 +382,7 @@ export function PhoneApp({
   const computer = hosts.find((h) => h.hostId === hostId);
   useEffect(() => {
     if (!hostId) {
+      setThemePreset("workbench");
       setConnection(undefined);
       sessions.clear();
       return;
@@ -396,6 +391,8 @@ export function PhoneApp({
     if (!target) return;
     let active = true;
     let channel: PhoneConnectionLike | undefined;
+    let stopTheme: (() => void) | undefined;
+    setThemePreset("workbench");
     sessions.clear();
     void storage
       .identity()
@@ -416,11 +413,16 @@ export function PhoneApp({
             ? { versionMessage: platform.versionMessage.bind(platform) }
             : {}),
           connected: async (client, relay) => {
+            if (!active) return;
+            stopTheme?.();
+            stopTheme = subscribeThemePreset(client, setThemePreset);
             await sessions.connected(client);
             await storage.putHost({ ...target, lastConnectedAt: Date.now() });
             if (relay) await push?.attach(target.hostId, relay).catch(() => undefined);
           },
           disconnected: (reason) => {
+            stopTheme?.();
+            stopTheme = undefined;
             recordDisconnect(target.name, reason);
             platformRef.current.observer?.disconnected?.(target, reason);
             sessions.disconnected();
@@ -441,6 +443,7 @@ export function PhoneApp({
     document.addEventListener("visibilitychange", visibility);
     return () => {
       active = false;
+      stopTheme?.();
       channel?.stop();
       push?.detach(target.hostId);
       document.removeEventListener("visibilitychange", visibility);

@@ -1,12 +1,12 @@
 /**
- * 桌面端外观（设置 › 外观）：界面字体、代码字体、字号。只在桌面端入口应用；
- * 手机网页与安卓共用样式文件，但入口（web/main.tsx）不调用这里，设置不生效。
+ * 外观应用：主题预设与模式供桌面、手机共用；字体、字号、内容宽度只在桌面入口应用。
  *
  * 做法：在 <html> 的行内样式上覆盖 token。所选字体放到原字体栈最前面，原栈整体留作回退；
  * --fs-1..5 按 Math.round(原值 × 字号 / 14) 缩放。原值每次都从样式表现读（先清掉覆盖），
  * 所以 design/tokens.json 改了这里自动跟着变。
  */
 import { FONT_SIZE_DEFAULT, readPrefs, type Prefs } from "./prefs";
+import { themeVars, type ThemeMode } from "./theme-presets";
 
 export interface FontFamily {
   name: string;
@@ -85,6 +85,51 @@ export function applyTheme(root: HTMLElement, theme: ThemePref): void {
   else root.dataset.theme = theme;
 }
 
+export function systemThemeMedia(): Partial<MediaQueryList> | undefined {
+  return typeof globalThis.matchMedia === "function"
+    ? globalThis.matchMedia("(prefers-color-scheme: light)")
+    : undefined;
+}
+
+export function resolvedTheme(theme: ThemePref): ThemeMode {
+  return theme === "system" ? (systemThemeMedia()?.matches ? "light" : "dark") : theme;
+}
+
+export function applyThemePreset(root: HTMLElement, id: string, mode: ThemeMode): void {
+  for (const name of Array.from(root.style)) {
+    if (name.startsWith("--a-")) root.style.removeProperty(name);
+  }
+  for (const [name, value] of Object.entries(themeVars(id, mode))) {
+    root.style.setProperty(name, value);
+  }
+}
+
+/** 模式和系统外观变化共用一次应用；调用方卸载时移除监听。 */
+export function watchTheme(
+  root: HTMLElement,
+  theme: ThemePref,
+  id: string,
+  report?: (mode: ThemeMode, background: string) => void,
+): () => void {
+  const media = systemThemeMedia();
+  const apply = () => {
+    applyTheme(root, theme);
+    const mode = theme === "system" ? (media?.matches ? "light" : "dark") : theme;
+    applyThemePreset(root, id, mode);
+    report?.(mode, getComputedStyle(root).getPropertyValue("--a-bg").trim());
+  };
+  apply();
+  if (theme === "system") media?.addEventListener?.("change", apply);
+  return () => {
+    media?.removeEventListener?.("change", apply);
+  };
+}
+
+export function applyContentWidth(root: HTMLElement, width: Prefs["contentWidth"]): void {
+  if (width === "wide" || width === "full") root.dataset.contentWidth = width;
+  else delete root.dataset.contentWidth;
+}
+
 /** 桌面端入口在首次渲染前调用：读本机 prefs，应用主题与字体；存储不可读时按缺省 */
 export function applyStoredAppearance(root: HTMLElement): void {
   let storage: Storage | undefined;
@@ -95,6 +140,8 @@ export function applyStoredAppearance(root: HTMLElement): void {
   }
   const prefs = readPrefs(storage);
   applyTheme(root, prefs.theme ?? "system");
+  applyThemePreset(root, prefs.themePreset ?? "workbench", resolvedTheme(prefs.theme ?? "system"));
+  applyContentWidth(root, prefs.contentWidth);
   applyAppearance(root, prefs);
 }
 

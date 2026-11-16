@@ -27,6 +27,8 @@ export interface SettingsStore {
   setModelsEnabled(provider: string, models: readonly string[], enabled: boolean): Promise<void>;
   /** 删除向导服务商时清除其在两个停用列表里的条目（ADR-0054 §2） */
   clearProviderToggles(provider: string): Promise<void>;
+  /** ADR-0093：全局 settings.json 的 appearance.themePreset（不枚举预设、不参与项目合并） */
+  themePreset(): string | undefined;
   fields(): ConfigFile;
   update(patch: SettingsPatch): Promise<void>;
   setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<void>;
@@ -52,6 +54,7 @@ const reservedFields = new Set([
   "shellPath",
   "compaction",
   "notifications",
+  "appearance",
   "disabledProviders",
   "disabledModels",
 ]);
@@ -86,14 +89,23 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "compaction.threshold" &&
         key !== "compaction.pruneLimit" &&
         key !== "mcp.toolSearch" &&
+        key !== "appearance.themePreset" &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.* 与 notifications.*；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.* 与 appearance.themePreset；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
+  const themePreset = patch["appearance.themePreset"];
+  if (
+    themePreset !== undefined &&
+    themePreset !== null &&
+    (typeof themePreset !== "string" || themePreset.trim() === "")
+  ) {
+    throw new TypeError("appearance.themePreset 必须是非空字符串或 null");
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (!key.startsWith("subagents.profiles.")) continue;
     const name = key.slice("subagents.profiles.".length);
@@ -346,6 +358,28 @@ function toSpec(fields: {
   return undefined;
 }
 
+function readAppearanceThemePreset(
+  data: SettingsData,
+  warn?: (message: string) => void,
+): string | undefined {
+  if (!Object.hasOwn(data, "appearance")) return undefined;
+  const appearance = data.appearance;
+  if (typeof appearance !== "object" || appearance === null || Array.isArray(appearance)) {
+    warn?.("settings.json 的 appearance 无效，已忽略");
+    return undefined;
+  }
+  const record = appearance as Record<string, unknown>;
+  if (!Object.hasOwn(record, "themePreset") || record.themePreset === undefined) {
+    return undefined;
+  }
+  const preset = record.themePreset;
+  if (typeof preset !== "string" || preset.trim() === "") {
+    warn?.("settings.json 的 appearance.themePreset 无效，已忽略");
+    return undefined;
+  }
+  return preset;
+}
+
 /**
  * 加载 settings.json：文件不存在 → 空设置；损坏 → 忽略并给警告
  * （设置层降级不阻塞启动，与项目配置损坏同一处理）。
@@ -370,6 +404,9 @@ export async function loadSettingsStore(
     }
   }
   configFields(data, (message) => {
+    warning = warning ? `${warning}\n${message}` : message;
+  });
+  readAppearanceThemePreset(data, (message) => {
     warning = warning ? `${warning}\n${message}` : message;
   });
   const fields = readShellFields(data);
@@ -475,6 +512,7 @@ export async function loadSettingsStore(
           );
         });
       },
+      themePreset: () => readAppearanceThemePreset(data),
       fields: () => configFields(data),
       async update(patch) {
         validateSettingsPatch(patch);
@@ -621,6 +659,18 @@ export async function loadSettingsStore(
             else if (notifySound !== undefined) notifications.sound = notifySound;
             if (Object.keys(notifications).length > 0) next.notifications = notifications;
             else delete next.notifications;
+          }
+          const themePreset = patch["appearance.themePreset"];
+          if (themePreset !== undefined) {
+            const raw = next.appearance;
+            const appearance: Record<string, unknown> =
+              typeof raw === "object" && raw !== null && !Array.isArray(raw)
+                ? { ...(raw as Record<string, unknown>) }
+                : {};
+            if (themePreset === null) delete appearance.themePreset;
+            else appearance.themePreset = themePreset;
+            if (Object.keys(appearance).length > 0) next.appearance = appearance;
+            else delete next.appearance;
           }
         });
       },

@@ -48,10 +48,10 @@ afterEach(async () => {
 });
 
 describe("手机端不应用桌面外观设置", () => {
-  it("web/ 里没有任何文件引用外观模块或外观页", () => {
+  it("web/ 不引用桌面外观页，允许共用主题应用函数", () => {
     expect(web.length).toBeGreaterThan(0);
     for (const { file, text } of web) {
-      expect(text, file).not.toMatch(/["']\.\.\/(appearance|AppearancePreview|SettingsPage)["']/);
+      expect(text, file).not.toMatch(/["']\.\.\/(AppearancePreview|SettingsPage)["']/);
     }
   });
 

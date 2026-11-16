@@ -58,10 +58,42 @@ async function openList(name: string) {
 }
 
 describe("设置 › 外观", () => {
-  it("从上到下是主题、字体、预览；字体三行，不写多余文字", async () => {
+  it("五张预设单选卡只有名字，方向键循环切换并移动焦点，宽度立即应用", () => {
+    const onPresetChange = vi.fn();
+    const onContentWidthChange = vi.fn();
+    render(page({ themePreset: "paper", onPresetChange, onContentWidthChange }).element);
+    const cards = within(screen.getByRole("radiogroup", { name: "主题" })).getAllByRole("radio");
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+      "工作台",
+      "夜曲",
+      "纸面",
+      "青瓷",
+      "松烟",
+    ]);
+    expect(cards.map((card) => card.textContent)).toEqual([
+      "工作台",
+      "夜曲",
+      "纸面✓",
+      "青瓷",
+      "松烟",
+    ]);
+    fireEvent.keyDown(screen.getByRole("radio", { name: "纸面" }), { key: "ArrowRight" });
+    expect(onPresetChange).toHaveBeenLastCalledWith("celadon");
+    expect(document.activeElement).toBe(cards[3]);
+    fireEvent.keyDown(screen.getByRole("radio", { name: "工作台" }), { key: "ArrowLeft" });
+    expect(onPresetChange).toHaveBeenLastCalledWith("ink");
+    fireEvent.click(screen.getByRole("button", { name: "宽" }));
+    expect(onContentWidthChange).toHaveBeenLastCalledWith("wide");
+    fireEvent.click(screen.getByRole("button", { name: "铺满" }));
+    expect(onContentWidthChange).toHaveBeenLastCalledWith("full");
+    expect(screen.queryByText("保存")).toBeNull();
+    expect(screen.queryByText("浅色")).toBeNull();
+    expect(screen.queryByText("深色")).toBeNull();
+  });
+  it("从上到下是主题、字体、布局、预览；字体三行，不写多余文字", async () => {
     render(page().element);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["主题", "字体", "预览"]);
+    expect(headings).toEqual(["主题", "字体", "布局", "预览"]);
     const fonts = group("字体");
     // 只有这些词：分组标题、三行标签、两个「默认」、字号数值
     await waitFor(() => {

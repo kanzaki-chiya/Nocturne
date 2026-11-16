@@ -690,6 +690,114 @@ describe("ADR-0034 设置层", () => {
     expect(malformed.base.notifications?.enabled).toBe(false);
     expect(malformed.base.warnings.join("\n")).toContain("notifications.events");
   });
+  it("ADR-0093 外观主题预设：持久读写、未知字符串原样返回、不参与项目合并、null 删除与非法降级", async () => {
+    const defaults = await load();
+    expect(
+      defaults.describeSettings().find((item) => item.key === "appearance.themePreset"),
+    ).toEqual({
+      key: "appearance.themePreset",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    // 保存已知预设与未知字符串（Core 不枚举预设列表），重读持久生效
+    await defaults.updateSettings({ "appearance.themePreset": "nocturne" });
+    expect(await readSettings()).toEqual({ appearance: { themePreset: "nocturne" } });
+    const reloaded = await load();
+    expect(
+      reloaded.describeSettings().find((item) => item.key === "appearance.themePreset"),
+    ).toEqual({
+      key: "appearance.themePreset",
+      effective: "nocturne",
+      saved: "nocturne",
+      source: "settings",
+      overridden: false,
+    });
+
+    await reloaded.updateSettings({ "appearance.themePreset": "future-custom-preset" });
+    expect((await readSettings()).appearance).toEqual({ themePreset: "future-custom-preset" });
+    expect(
+      reloaded.describeSettings().find((item) => item.key === "appearance.themePreset"),
+    ).toEqual({
+      key: "appearance.themePreset",
+      effective: "future-custom-preset",
+      saved: "future-custom-preset",
+      source: "settings",
+      overridden: false,
+    });
+
+    // 不参与用户/项目配置合并：用户 config.json 与可信项目层声明 appearance 均不生效、不覆盖全局 settings.json
+    await json("config.json", {
+      compaction: { threshold: "80%" },
+      appearance: { themePreset: "ink" },
+    });
+    await mkdir(path.join(workspace, ".nocturne")).catch(() => undefined);
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ appearance: { themePreset: "paper" } }),
+    );
+    const withProject = await load();
+    await withProject.setWorkspaceTrusted(workspace, true);
+    await withProject.forWorkspace(workspace);
+    expect(
+      withProject.describeSettings(workspace).find((item) => item.key === "appearance.themePreset"),
+    ).toEqual({
+      key: "appearance.themePreset",
+      effective: "future-custom-preset",
+      saved: "future-custom-preset",
+      source: "settings",
+      overridden: false,
+    });
+
+    // 非法补丁值拒绝且不改动磁盘；保留字禁止经 setPreference 覆盖
+    const beforeInvalid = await readSettings();
+    for (const bad of ["", "   ", 123, false]) {
+      await expect(
+        withProject.updateSettings({ "appearance.themePreset": bad as never }),
+      ).rejects.toThrow(TypeError);
+    }
+    await expect(withProject.setPreference("appearance", "ink")).rejects.toThrow(TypeError);
+    expect(await readSettings()).toEqual(beforeInvalid);
+
+    // null 删除：保留 appearance 下未知兄弟字段；空对象则整段清除
+    await json("settings.json", {
+      appearance: { themePreset: "celadon", futureFlag: true },
+      shell: "cmd",
+    });
+    const withSibling = await load();
+    await withSibling.updateSettings({ "appearance.themePreset": null });
+    expect(await readSettings()).toEqual({ appearance: { futureFlag: true }, shell: "cmd" });
+    expect(
+      withSibling.describeSettings().find((item) => item.key === "appearance.themePreset"),
+    ).toEqual({
+      key: "appearance.themePreset",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    await json("settings.json", { appearance: { themePreset: "paper" } });
+    const onlyTheme = await load();
+    await onlyTheme.updateSettings({ "appearance.themePreset": null });
+    expect(await readSettings()).toEqual({});
+
+    // 磁盘上 appearance / themePreset 损坏时告警降级，不影响其他合法设置
+    await json("settings.json", { appearance: { themePreset: "" }, shell: "cmd" });
+    const badPreset = await load();
+    expect(badPreset.base.shell).toBe("cmd");
+    expect(badPreset.base.warnings.join("\n")).toContain("appearance.themePreset");
+    expect(
+      badPreset.describeSettings().find((item) => item.key === "appearance.themePreset")?.effective,
+    ).toBeUndefined();
+
+    await json("settings.json", { appearance: "invalid", shell: "cmd" });
+    const badAppearance = await load();
+    expect(badAppearance.base.shell).toBe("cmd");
+    expect(badAppearance.base.warnings.join("\n")).toContain("appearance");
+  });
   it.each(PERMISSION_PRESET_NAMES)("%s 对 settings edit 至少 ask（read-only deny）", (preset) => {
     const policy = createRulePolicy({
       workspaceRoot: root,

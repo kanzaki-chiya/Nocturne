@@ -402,6 +402,7 @@ class SwitchingRpcFacade {
       onNotification: (method, handler) => register((c) => c.onNotification(method, handler)),
       onEvent: (handler) => register((c) => c.onEvent(handler)),
       onProvidersChanged: (handler) => register((c) => c.onProvidersChanged(handler)),
+      onSettingsChanged: (handler) => register((c) => c.onSettingsChanged(handler)),
       onLoginCompleted: (handler) => register((c) => c.onLoginCompleted(handler)),
       runtime: runtimeProxy,
       provider: providerProxy,

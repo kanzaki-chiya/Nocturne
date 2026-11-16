@@ -53,7 +53,6 @@ const STILL_LOCAL = [
   "runtime.getPreference",
   "runtime.reloadConfig",
   "runtime.testReviewerSample",
-  "runtime.describeSettings",
   "runtime.listReviewerProviders",
   "runtime.listReviewerModels",
   "runtime.listReviewerSamples",
@@ -91,6 +90,7 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
       "session.setShell",
     ]);
     for (const allowed of [
+      "runtime.describeSettings",
       "subagent.cancel",
       "subagent.list",
       "subagent.subscribe",
@@ -585,6 +585,72 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
         data: { code: "file_too_large", bytes: overMaxBytes },
       });
     }
+
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
+  it("ADR-0093 远程连接可读 appearance.themePreset，拒绝经 updateSettings 修改，其他远程会话设置不变", async () => {
+    const h = await connectManyWithConfig();
+    const remote = await h.add();
+    let settingsChanged = 0;
+    remote.client.onSettingsChanged(() => {
+      settingsChanged += 1;
+    });
+
+    expect(
+      (await remote.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.themePreset",
+      ),
+    ).toEqual({
+      key: "appearance.themePreset",
+      effective: undefined,
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    await h.client.runtime.updateSettings({ "appearance.themePreset": "celadon" });
+    expect(settingsChanged).toBe(1);
+    expect(
+      (await remote.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.themePreset",
+      ),
+    ).toMatchObject({
+      key: "appearance.themePreset",
+      effective: "celadon",
+      saved: "celadon",
+      source: "settings",
+    });
+
+    // 远程写 appearance.themePreset（及删除）一律以 remote_not_allowed 拒绝，且不发通知、不改设置
+    for (const patch of [
+      { "appearance.themePreset": "ink" },
+      { "appearance.themePreset": null },
+    ] as const) {
+      await expect(remote.client.runtime.updateSettings(patch)).rejects.toMatchObject({
+        code: "remote_not_allowed",
+        rpcCode: -32004,
+      });
+    }
+    expect(settingsChanged).toBe(1);
+    expect(
+      (await h.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.themePreset",
+      )?.effective,
+    ).toBe("celadon");
+
+    // 既有远程会话级设置（权限预设、思考档位）与模型角色只读查询照常可用
+    const { session } = await remote.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    await session.setPermissionPreset("read-only");
+    await session.setReasoningEffort("off");
+    expect((await session.state()).config.permissionPreset).toBe("read-only");
+    expect((await remote.client.runtime.describeModelRoles()).map((r) => r.role)).toEqual([
+      "task",
+      "vision",
+      "smol",
+    ]);
+    await session.close();
 
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);

@@ -717,32 +717,36 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("主题只写本机 prefs：点选立即生效并提示", async () => {
+  it("模式只写本机 prefs：点选立即生效且不显示提示", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
     const onThemeChange = vi.fn(() => true);
     render(<SettingsPage {...props(server.client, { section: "appearance", onThemeChange })} />);
-    const dark = await screen.findByRole("radio", { name: /月之暗面/ });
-    expect(screen.getByRole("radio", { name: "跟随系统" }).getAttribute("aria-checked")).toBe(
+    const dark = await screen.findByRole("button", { name: "月之暗面" });
+    expect(screen.getByRole("button", { name: "跟随系统" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
     fireEvent.click(dark);
     expect(onThemeChange).toHaveBeenCalledWith("dark");
-    expect((await screen.findByRole("status")).textContent).toBe("✓已保存 主题 = 月之暗面");
+    expect(screen.queryByRole("status")).toBeNull();
     expect(server.calls.some((c) => c.method === "runtime.updateSettings")).toBe(false);
     server.close();
   });
 
-  it("主题卡片同时显示新名与浅色/深色小字", async () => {
+  it("模式分段控件不带浅色/深色小字，主题卡片只显示五个名字", async () => {
     const server = fakeServer(handlers());
     await server.initialize();
     render(<SettingsPage {...props(server.client, { section: "appearance" })} />);
-    const light = await screen.findByRole("radio", { name: /月之亮面/ });
-    const dark = await screen.findByRole("radio", { name: /月之暗面/ });
-    expect(light.textContent).toContain("月之亮面");
-    expect(light.querySelector(".tsub")?.textContent).toBe("浅色");
-    expect(dark.textContent).toContain("月之暗面");
-    expect(dark.querySelector(".tsub")?.textContent).toBe("深色");
+    expect(screen.getByRole("button", { name: "月之亮面" }).textContent).toBe("月之亮面");
+    expect(screen.getByRole("button", { name: "月之暗面" }).textContent).toBe("月之暗面");
+    expect(screen.getAllByRole("radio").map((card) => card.getAttribute("aria-label"))).toEqual([
+      "工作台",
+      "夜曲",
+      "纸面",
+      "青瓷",
+      "松烟",
+    ]);
+    expect(document.querySelector(".tsub")).toBeNull();
     server.close();
   });
 
@@ -764,7 +768,7 @@ describe("SettingsPage", () => {
 
     view.rerender(<SettingsPage {...props(server.client, { section: "appearance" })} />);
     expect(groups()).toEqual(["主题"]);
-    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect(screen.getAllByRole("radio")).toHaveLength(5);
     server.close();
   });
 

@@ -882,6 +882,11 @@ export interface RpcServerNotifications {
    */
   "runtime.providersChanged": Record<string, never>;
   /**
+   * 设置成功写入或显式重载配置成功后、响应之前广播给所有已握手的连接（含远程）；
+   * 易失、不写日志、不带设置内容（ADR-0093）。
+   */
+  "runtime.settingsChanged": Record<string, never>;
+  /**
    * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建、分叉、重命名、归档或恢复会话成功，
    * 发送消息自动恢复归档、首条用户消息或标题落盘之后推送，短时间内的多次变化合并为一条。
    * 不带任何会话内容；别的进程改的列表不在此列

@@ -144,6 +144,16 @@ export class Hub {
     }
   }
 
+  /** `runtime.settingsChanged` 广播给所有已握手的连接（含远程） */
+  notifySettingsChanged(): void {
+    if (this.stopping) return;
+    for (const peer of this.peers) {
+      if (peer.initialized) {
+        peer.send({ jsonrpc: "2.0", method: "runtime.settingsChanged", params: {} });
+      }
+    }
+  }
+
   /**
    * `schedule.changed`（ADR-0064）广播给所有已握手的连接（含远程；list 在远程白名单内）。
    * 一次运行会建出新会话，所以顺带通知会话列表变化（同样合并）。

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -387,5 +387,133 @@ describe("多连接共享后台", () => {
     expect(h.diagnostics).toContainEqual({ kind: "connection", state: "open", origin: "remote" });
     await h.client.shutdown();
     await Promise.all([h.served, served]);
+  });
+
+  it("ADR-0093 runtime.settingsChanged：写设置与 reload 成功时响应前跨连接广播空载荷，失败不发通知且不写会话日志", async () => {
+    const h = await connectWithConfig();
+    const [remoteServerEnd, remoteTransport] = createMemoryTransportPair();
+    const remoteServed = h.server.serve(remoteServerEnd, { origin: "remote" });
+    const remoteWire: string[] = [];
+    const observedRemoteTransport = {
+      onLine(handler: (line: string) => void) {
+        remoteTransport.onLine((line) => {
+          remoteWire.push(line);
+          handler(line);
+        });
+      },
+      send(line: string) {
+        remoteTransport.send(line);
+      },
+      onClose(handler: () => void) {
+        remoteTransport.onClose(handler);
+      },
+      close() {
+        remoteTransport.close();
+      },
+    };
+    const remote = createRpcClient(observedRemoteTransport, { clientName: "remote-phone" });
+    await remote.initialize();
+
+    // 未握手的连接不收广播
+    const [uninitServerEnd, uninitTransport] = createMemoryTransportPair();
+    const uninitServed = h.server.serve(uninitServerEnd, { origin: "remote" });
+    const uninitLines: string[] = [];
+    uninitTransport.onLine((line) => uninitLines.push(line));
+
+    const { session } = await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    const durableBefore = h.durable(session.id).length;
+
+    const order: string[] = [];
+    let providersChanged = 0;
+    h.client.onProvidersChanged(() => {
+      providersChanged += 1;
+    });
+    let localSeenPreset: string | undefined;
+    h.client.onSettingsChanged(() => {
+      order.push("local-notified");
+      localSeenPreset = h.runtimes[0]
+        ?.describeSettings()
+        .find((item) => item.key === "appearance.themePreset")?.effective;
+    });
+    let remoteCount = 0;
+    let remoteLatestPreset: string | undefined;
+    const offRemote = remote.onSettingsChanged(() => {
+      remoteCount += 1;
+      order.push("remote-notified");
+      void remote.runtime.describeSettings().then((items) => {
+        remoteLatestPreset = items.find((item) => item.key === "appearance.themePreset")?.effective;
+      });
+    });
+
+    // 1. 成功写入已知与未知预设：通知在响应前到达全部已握手连接，载荷为空对象，不写会话日志、不发 providersChanged
+    const updated = await h.client.runtime.updateSettings({
+      "appearance.themePreset": "future-unknown-preset",
+    });
+    order.push("response");
+    expect(order).toEqual(["local-notified", "remote-notified", "response"]);
+    expect(localSeenPreset).toBe("future-unknown-preset");
+    await until(() => remoteLatestPreset === "future-unknown-preset");
+    expect(updated.find((item) => item.key === "appearance.themePreset")?.effective).toBe(
+      "future-unknown-preset",
+    );
+    expect(JSON.parse(readFileSync(path.join(h.home, "settings.json"), "utf8"))).toEqual({
+      appearance: { themePreset: "future-unknown-preset" },
+    });
+    expect(providersChanged).toBe(0);
+    expect(h.durable(session.id)).toHaveLength(durableBefore);
+    expect(uninitLines).toEqual([]);
+    const wireNotification = remoteWire
+      .map((line) => JSON.parse(line) as { method?: string; params?: unknown })
+      .find((msg) => msg.method === "runtime.settingsChanged");
+    expect(wireNotification).toEqual({
+      jsonrpc: "2.0",
+      method: "runtime.settingsChanged",
+      params: {},
+    });
+
+    // 2. 失败写入（非法参数、不可用模型角色、远程越权）不发送通知
+    const countBeforeFail = order.length;
+    await expect(
+      h.client.runtime.updateSettings({ "appearance.themePreset": "" }),
+    ).rejects.toThrow();
+    await expect(
+      h.client.runtime.updateSettings({ "modelRoles.task": "missing/model" }),
+    ).rejects.toMatchObject({ code: "invalid_model" });
+    await expect(
+      remote.runtime.updateSettings({ "appearance.themePreset": "nocturne" }),
+    ).rejects.toMatchObject({ code: "remote_not_allowed" });
+    expect(order).toHaveLength(countBeforeFail);
+    expect(remoteCount).toBe(1);
+
+    // 3. reloadConfig：外部改了 settings.json 后重载成功，响应前广播 settingsChanged，两端读到新预设
+    order.length = 0;
+    writeFileSync(
+      path.join(h.home, "settings.json"),
+      JSON.stringify({ appearance: { themePreset: "paper" } }),
+    );
+    await h.client.runtime.reloadConfig();
+    order.push("reload-response");
+    expect(order).toEqual(["local-notified", "remote-notified", "reload-response"]);
+    await until(() => remoteLatestPreset === "paper");
+    expect(
+      (await h.client.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.themePreset",
+      )?.effective,
+    ).toBe("paper");
+
+    // 4. 退订后不再回调；null 删除成功仍广播
+    offRemote();
+    await h.client.runtime.updateSettings({ "appearance.themePreset": null });
+    expect(remoteCount).toBe(2);
+    expect(
+      (await remote.runtime.describeSettings()).find(
+        (item) => item.key === "appearance.themePreset",
+      )?.effective,
+    ).toBeUndefined();
+
+    await session.close();
+    uninitTransport.close();
+    await h.client.shutdown();
+    await Promise.all([h.served, remoteServed, uninitServed]);
   });
 });

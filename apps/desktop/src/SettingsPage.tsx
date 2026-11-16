@@ -16,6 +16,8 @@ import {
   type ThemePref,
 } from "./appearance";
 import { AppearancePreview } from "./AppearancePreview";
+import { ThemeCards } from "./ThemeCards";
+import type { ThemePresetId } from "./theme-presets";
 import { presetOptions } from "./choice-info";
 import { Dropdown, type DropdownOption } from "./Dropdown";
 import {
@@ -73,6 +75,10 @@ export interface AppearanceControls {
   uiFont: string | undefined;
   codeFont: string | undefined;
   fontSize: number;
+  themePreset?: ThemePresetId | undefined;
+  onPresetChange?: ((id: ThemePresetId) => void) | undefined;
+  contentWidth?: Prefs["contentWidth"];
+  onContentWidthChange?: ((width: NonNullable<Prefs["contentWidth"]>) => void) | undefined;
   /** 本机字体；没有外壳或读取失败时列表只剩「默认」 */
   listFonts?: (() => Promise<FontFamily[]>) | undefined;
   /** 写本机 prefs；返回 false 表示写不进存储（本次运行内仍生效） */
@@ -137,10 +143,10 @@ const SECTION_HEAD: Record<SettingsPageSection, { title: string }> = {
   appearance: { title: "外观" },
 };
 
-const THEMES: { value: ThemePref; label: string; sub?: string; cls: string }[] = [
-  { value: "system", label: "跟随系统", cls: "sys" },
-  { value: "light", label: "月之亮面", sub: "浅色", cls: "" },
-  { value: "dark", label: "月之暗面", sub: "深色", cls: "dk" },
+const THEMES: { value: ThemePref; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "月之亮面" },
+  { value: "dark", label: "月之暗面" },
 ];
 
 function errText(e: unknown): string {
@@ -1044,35 +1050,21 @@ export function SettingsPage({
 
             {section === "appearance" && (
               <SettingsGroup title="主题">
-                <div className="themes" role="radiogroup" aria-label="主题">
-                  {THEMES.map(({ value, label, sub, cls }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      role="radio"
-                      aria-checked={theme === value}
-                      className={`tcard${cls !== "" ? ` ${cls}` : ""}${theme === value ? " on" : ""}`}
-                      onClick={() => {
-                        if (theme === value) return;
-                        const ok = onThemeChange(value);
-                        setRowErr("theme", ok ? null : "本机存储不可写，主题只在本次运行内生效");
-                        showToast(`已保存 主题 = ${label}`);
-                      }}
-                    >
-                      <span className="pv" aria-hidden="true">
-                        <i />
-                        <i />
-                      </span>
-                      <span className="tlabel">{label}</span>
-                      {sub !== undefined && <small className="tsub">{sub}</small>}
-                    </button>
-                  ))}
-                </div>
-                {rowError.theme !== undefined && (
-                  <div className="desc err theme-err" role="alert">
-                    {rowError.theme}
-                  </div>
-                )}
+                <SettingsRow label="模式">
+                  <SegmentedControl
+                    aria-label="模式"
+                    options={THEMES}
+                    value={theme}
+                    onChange={(value) => {
+                      onThemeChange(value);
+                    }}
+                  />
+                </SettingsRow>
+                <ThemeCards
+                  value={appearance?.themePreset ?? "workbench"}
+                  mode={theme}
+                  onChange={(id) => appearance?.onPresetChange?.(id)}
+                />
               </SettingsGroup>
             )}
             {section === "appearance" && appearance !== undefined && (
@@ -1156,6 +1148,20 @@ export function SettingsPage({
                       {rowError.appearance}
                     </div>
                   )}
+                </SettingsGroup>
+                <SettingsGroup title="布局">
+                  <SettingsRow label="内容宽度">
+                    <SegmentedControl
+                      aria-label="内容宽度"
+                      options={[
+                        { value: "standard", label: "标准" },
+                        { value: "wide", label: "宽" },
+                        { value: "full", label: "铺满" },
+                      ]}
+                      value={appearance.contentWidth ?? "standard"}
+                      onChange={(width) => appearance.onContentWidthChange?.(width)}
+                    />
+                  </SettingsRow>
                 </SettingsGroup>
                 <SettingsGroup title="预览">
                   <AppearancePreview />

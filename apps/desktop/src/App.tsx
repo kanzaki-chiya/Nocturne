@@ -24,7 +24,8 @@ import type {
 } from "@nocturne/core/protocol";
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
-import { applyAppearance, applyTheme } from "./appearance";
+import { applyAppearance, applyContentWidth, watchTheme } from "./appearance";
+import { subscribeThemePreset } from "./theme-sync";
 import { appIconResolver } from "./app-icon";
 import { ArchivePage } from "./ArchivePage";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
@@ -753,9 +754,14 @@ export function App({ host }: { host: DesktopHost }) {
   }, [phase.kind, host, updateSvc]);
 
   // 主题：prefs.theme 覆盖系统外观，立即生效；跟随系统则删掉属性回到 media query
+  useLayoutEffect(
+    () => watchTheme(document.documentElement, p.theme ?? "system", p.themePreset ?? "workbench"),
+    [p.theme, p.themePreset],
+  );
+
   useLayoutEffect(() => {
-    applyTheme(document.documentElement, p.theme ?? "system");
-  }, [p.theme]);
+    applyContentWidth(document.documentElement, p.contentWidth);
+  }, [p.contentWidth]);
 
   // 字体与字号（设置 › 外观）：覆盖根元素上的 --sans / --mono / --fs-*，立即生效
   useLayoutEffect(() => {
@@ -786,6 +792,10 @@ export function App({ host }: { host: DesktopHost }) {
           void refresh();
         });
         let alive = true;
+        const stopSettings = subscribeThemePreset(client, (id) => {
+          prefs.update({ themePreset: id });
+          bumpPrefs();
+        });
         const loadSchedules = () => {
           void client.runtime
             .listSchedules()
@@ -834,6 +844,7 @@ export function App({ host }: { host: DesktopHost }) {
         return () => {
           alive = false;
           stopProviders();
+          stopSettings();
           stopSchedules();
           stopSessions();
           stopComputer();
@@ -2154,6 +2165,21 @@ export function App({ host }: { host: DesktopHost }) {
                         uiFont: p.uiFont,
                         codeFont: p.codeFont,
                         fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
+                        themePreset: p.themePreset ?? "workbench",
+                        onPresetChange: (id) => {
+                          prefs.update({ themePreset: id });
+                          bumpPrefs();
+                          void pageClient?.runtime
+                            .updateSettings({ "appearance.themePreset": id })
+                            .catch((error: unknown) => {
+                              console.error("主题保存失败", error);
+                            });
+                        },
+                        contentWidth: p.contentWidth,
+                        onContentWidthChange: (width) => {
+                          prefs.update({ contentWidth: width === "standard" ? undefined : width });
+                          bumpPrefs();
+                        },
                         listFonts: host.listFonts,
                         onChange: (patch) => {
                           prefs.update(patch);
