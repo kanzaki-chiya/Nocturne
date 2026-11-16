@@ -3170,6 +3170,16 @@ function EntryView({
         />
       );
     case "assistant":
+      if (
+        entry.reasoning === "" &&
+        parts.get(entry.messageId)?.at(-1) === undefined &&
+        entry.text.trim() === "" &&
+        entry.finishReason !== "aborted" &&
+        (changesCard === null || changesCard === undefined || changesCard === false) &&
+        !showReplyActions
+      ) {
+        return null;
+      }
       return (
         <article
           className={`a${searchHit ? " search-hit" : ""}`}

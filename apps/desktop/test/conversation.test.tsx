@@ -3331,4 +3331,59 @@ describe("会话区提示", () => {
     expect(idxU2).toBeLessThan(idxA2);
     expect(idxA2).toBeLessThan(idxTail);
   });
+
+  it("没有可见内容的助手消息不渲染，有文字或思考的助手消息仍然渲染", () => {
+    const view = createSessionView();
+    view.entries = [
+      assistant({
+        key: "a1",
+        seq: 1,
+        messageId: "m1",
+        text: "",
+        reasoning: "",
+        finishReason: "tool_calls",
+      }),
+      tool({ key: "t1", seq: 2, callId: "c1" }),
+      assistant({
+        key: "a2",
+        seq: 3,
+        messageId: "m2",
+        text: " \n\t ",
+        reasoning: "",
+        finishReason: "tool_calls",
+      }),
+      tool({ key: "t2", seq: 4, callId: "c2" }),
+    ];
+    const rendered = mount(view);
+    const transcript = rendered.container.querySelector(".conversation-transcript");
+    const children = [...(transcript?.children ?? [])];
+    expect(children).toHaveLength(2);
+    expect(children.every((el) => el.classList.contains("tool"))).toBe(true);
+
+    view.entries = [
+      assistant({
+        key: "a-think",
+        seq: 5,
+        messageId: "m3",
+        text: "",
+        reasoning: "先查一下",
+        finishReason: "tool_calls",
+      }),
+      assistant({
+        key: "a-text",
+        seq: 6,
+        messageId: "m4",
+        text: "已处理",
+        reasoning: "",
+        finishReason: "stop",
+      }),
+    ];
+    view.revision += 1;
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    const articles = [...(transcript?.children ?? [])];
+    expect(articles).toHaveLength(2);
+    expect(articles.every((el) => el.classList.contains("a"))).toBe(true);
+    expect(articles[0]?.querySelector(".think")?.textContent).toContain("思考");
+    expect(articles[1]?.textContent).toContain("已处理");
+  });
 });
