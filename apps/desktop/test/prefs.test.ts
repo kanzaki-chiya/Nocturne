@@ -437,4 +437,42 @@ describe("外观：字体与字号", () => {
       expect(store.get().codeFont).toBeUndefined();
     }
   });
+
+  it("缓存自定义主题 id 与三色并兼容旧 prefs 字符串预设", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    const custom = {
+      id: "c-fog",
+      name: "雾蓝",
+      bg: "#f6f8fa",
+      text: "#16202a",
+      accent: "#2f6db5",
+    };
+    store.update({ themePreset: "c-fog", customTheme: custom });
+    expect(createPrefsStore(storage).get()).toMatchObject({
+      themePreset: "c-fog",
+      customTheme: custom,
+    });
+
+    // 切回内置预设后清掉 customTheme
+    store.update({ themePreset: "paper", customTheme: undefined });
+    const reread = createPrefsStore(storage).get();
+    expect(reread.themePreset).toBe("paper");
+    expect(reread.customTheme).toBeUndefined();
+
+    // 旧 prefs 只有 string id 时照常读取；失配或损坏的 customTheme 回退工作台
+    const legacy = createPrefsStore(
+      memoryStorage({ [PREFS_KEY]: JSON.stringify({ themePreset: "celadon" }) }),
+    ).get();
+    expect(legacy.themePreset).toBe("celadon");
+    expect(legacy.customTheme).toBeUndefined();
+
+    const mismatched = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({ themePreset: "c-other", customTheme: custom }),
+      }),
+    ).get();
+    expect(mismatched.themePreset).toBe("workbench");
+    expect(mismatched.customTheme).toBeUndefined();
+  });
 });

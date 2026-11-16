@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { RpcError } from "@nocturne/rpc/client";
 import { watchTheme } from "../appearance";
-import { subscribeThemePreset } from "../theme-sync";
-import type { ThemePresetId } from "../theme-presets";
+import { subscribeThemeSettings } from "../theme-sync";
+import type { CustomTheme } from "../theme-presets";
 import type { ParsedOffer } from "@nocturne/remote";
 import { createAttachmentImageSource, type AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
@@ -32,10 +32,10 @@ import { pushAvailable, type PhonePush } from "./push";
 import { webPlatform, type PhoneExtensionApi, type PhonePlatform } from "./platform";
 import {
   clearDisconnects,
+  loadCachedTheme,
   loadDisconnects,
   loadTheme,
   loadThemeHost,
-  loadThemePreset,
   recordDisconnect,
   saveTheme,
   saveThemePreset,
@@ -210,12 +210,17 @@ export function PhoneApp({
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
   const hostId = "hostId" in page ? page.hostId : undefined;
-  const [remoteTheme, setRemoteTheme] = useState<{ hostId: string; id: ThemePresetId }>();
-  const themePreset = !ready
-    ? loadThemePreset()
-    : remoteTheme?.hostId === hostId && remoteTheme
-      ? remoteTheme.id
-      : loadThemePreset(hostId ?? "");
+  const [remoteTheme, setRemoteTheme] = useState<{
+    hostId: string;
+    id: string;
+    customThemes: CustomTheme[];
+  }>();
+  const hasRemote = ready && remoteTheme !== undefined && remoteTheme.hostId === hostId;
+  const cachedTheme = hasRemote ? undefined : loadCachedTheme(ready ? (hostId ?? "") : undefined);
+  const themePreset = hasRemote ? remoteTheme.id : (cachedTheme?.id ?? "workbench");
+  const activeCustomTheme = hasRemote
+    ? remoteTheme.customThemes.find((entry) => entry.id === remoteTheme.id)
+    : cachedTheme?.customTheme;
   const [menu, setMenu] = useState<"hosts" | null>(null);
   /** 会话页顶栏右侧的位置：SessionScreen 放入会话菜单与侧边栏按钮 */
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
@@ -288,10 +293,23 @@ export function PhoneApp({
   };
   useLayoutEffect(
     () =>
-      watchTheme(document.documentElement, theme, themePreset, (resolved, background) => {
-        platformRef.current.observer?.theme?.(resolved, background);
-      }),
-    [theme, themePreset],
+      watchTheme(
+        document.documentElement,
+        theme,
+        themePreset,
+        (resolved, background) => {
+          platformRef.current.observer?.theme?.(resolved, background);
+        },
+        activeCustomTheme ? [activeCustomTheme] : undefined,
+      ),
+    [
+      theme,
+      themePreset,
+      activeCustomTheme?.id,
+      activeCustomTheme?.bg,
+      activeCustomTheme?.text,
+      activeCustomTheme?.accent,
+    ],
   );
   useLayoutEffect(() => {
     if (ready) selectThemeHost(hostId);
@@ -425,9 +443,10 @@ export function PhoneApp({
           connected: async (client, relay) => {
             if (!active) return;
             stopTheme?.();
-            stopTheme = subscribeThemePreset(client, (id) => {
-              saveThemePreset(target.hostId, id);
-              setRemoteTheme({ hostId: target.hostId, id });
+            stopTheme = subscribeThemeSettings(client, ({ id, customThemes }) => {
+              if (!active) return;
+              saveThemePreset(target.hostId, id, customThemes);
+              setRemoteTheme({ hostId: target.hostId, id, customThemes });
             });
             await sessions.connected(client);
             await storage.putHost({ ...target, lastConnectedAt: Date.now() });

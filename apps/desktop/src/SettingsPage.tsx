@@ -11,13 +11,19 @@ import {
   baseFontStack,
   fontGroups,
   fontStack,
+  resolvedTheme,
   type AppearancePrefs,
   type FontFamily,
   type ThemePref,
 } from "./appearance";
 import { AppearancePreview } from "./AppearancePreview";
+import {
+  CustomThemeDialog,
+  seedForMode,
+  type CustomTheme,
+  type CustomThemeDialogRequest,
+} from "./CustomThemeDialog";
 import { ThemeCards } from "./ThemeCards";
-import type { ThemePresetId } from "./theme-presets";
 import { presetOptions } from "./choice-info";
 import { Dropdown, type DropdownOption } from "./Dropdown";
 import {
@@ -75,8 +81,17 @@ export interface AppearanceControls {
   uiFont: string | undefined;
   codeFont: string | undefined;
   fontSize: number;
-  themePreset?: ThemePresetId | undefined;
-  onPresetChange?: ((id: ThemePresetId) => void) | undefined;
+  themePreset?: string | undefined;
+  customThemes?: readonly CustomTheme[] | undefined;
+  onPresetChange?: ((id: string) => void) | undefined;
+  /** 选择任意主题（含自定义主题）时调用；未传时回退调用 onPresetChange */
+  onThemeSelect?: ((id: string) => void) | undefined;
+  /**
+   * 自定义主题增删改或导入在设置页完成一次 updateSettings 后的同步回调；
+   * 父组件只需同步本地状态与 prefs，不再重复调 updateSettings。
+   */
+  onCustomThemesChange?:
+    ((themes: CustomTheme[], selectedPreset: string | null) => void) | undefined;
   contentWidth?: Prefs["contentWidth"];
   onContentWidthChange?: ((width: NonNullable<Prefs["contentWidth"]>) => void) | undefined;
   /** 本机字体；没有外壳或读取失败时列表只剩「默认」 */
@@ -392,6 +407,22 @@ export function SettingsPage({
   const [dialog, setDialog] = useState<
     null | "defaultModel" | "reviewer" | "threshold" | { role: RoleKey }
   >(null);
+  const [themeDialog, setThemeDialog] = useState<CustomThemeDialogRequest | null>(null);
+  const [localCustomThemes, setLocalCustomThemes] = useState<readonly CustomTheme[]>(
+    () => appearance?.customThemes ?? [],
+  );
+  const [localPreset, setLocalPreset] = useState<string>(
+    () => appearance?.themePreset ?? "workbench",
+  );
+  const [revealSeq, setRevealSeq] = useState(0);
+  useEffect(() => {
+    if (appearance?.customThemes !== undefined) setLocalCustomThemes(appearance.customThemes);
+  }, [appearance?.customThemes]);
+  useEffect(() => {
+    if (appearance?.themePreset !== undefined) setLocalPreset(appearance.themePreset);
+  }, [appearance?.themePreset]);
+  const activeThemePreset = localPreset;
+  const activeCustomThemes = localCustomThemes;
   const [wsBusy, setWsBusy] = useState(false);
   const [shells, setShells] = useState<
     Awaited<ReturnType<NonNullable<typeof client>["runtime"]["listShells"]>>
@@ -461,11 +492,37 @@ export function SettingsPage({
     try {
       const next = await action();
       generation.current++;
-      setItems(next);
+      if (Array.isArray(next)) setItems(next);
       return next;
     } finally {
       writing.current--;
     }
+  };
+
+  const commitCustomThemes = async (
+    nextThemes: CustomTheme[],
+    nextSelectedPreset: string | null | undefined,
+    reveal: boolean,
+  ) => {
+    if (client !== undefined) {
+      const patch: SettingsPatch = { "appearance.customThemes": nextThemes };
+      if (nextSelectedPreset !== undefined) {
+        patch["appearance.themePreset"] = nextSelectedPreset;
+      }
+      await commitSettings(() => client.runtime.updateSettings(patch));
+    }
+    setLocalCustomThemes(nextThemes);
+    const resolvedPreset =
+      nextSelectedPreset === undefined ? activeThemePreset : (nextSelectedPreset ?? "workbench");
+    if (nextSelectedPreset !== undefined) {
+      setLocalPreset(resolvedPreset);
+    }
+    appearance?.onCustomThemesChange?.(
+      nextThemes,
+      nextSelectedPreset === undefined ? activeThemePreset : nextSelectedPreset,
+    );
+    if (reveal) setRevealSeq((seq) => seq + 1);
+    setThemeDialog(null);
   };
 
   /** 逐项保存：成功写回 items 并提示；失败把原因挂到该行（值仍是 items 里的原值） */
@@ -1049,7 +1106,40 @@ export function SettingsPage({
             )}
 
             {section === "appearance" && (
-              <SettingsGroup title="主题">
+              <SettingsGroup
+                title="主题"
+                action={
+                  <div className="theme-head-actions">
+                    <button
+                      type="button"
+                      className="theme-link-btn"
+                      onClick={() => {
+                        setThemeDialog({ kind: "import" });
+                      }}
+                    >
+                      <Icon name="download_2" size={ICON_SM} />
+                      导入
+                    </button>
+                    <button
+                      type="button"
+                      className="theme-link-btn"
+                      onClick={() => {
+                        setThemeDialog({
+                          kind: "new",
+                          initialSeed: seedForMode(
+                            activeThemePreset,
+                            resolvedTheme(theme),
+                            activeCustomThemes,
+                          ),
+                        });
+                      }}
+                    >
+                      <Icon name="add" size={ICON_SM} />
+                      新建
+                    </button>
+                  </div>
+                }
+              >
                 <SettingsRow label="模式">
                   <SegmentedControl
                     aria-label="模式"
@@ -1061,9 +1151,21 @@ export function SettingsPage({
                   />
                 </SettingsRow>
                 <ThemeCards
-                  value={appearance?.themePreset ?? "workbench"}
+                  value={activeThemePreset}
                   mode={theme}
-                  onChange={(id) => appearance?.onPresetChange?.(id)}
+                  customThemes={activeCustomThemes}
+                  revealSeq={revealSeq}
+                  onChange={(id) => {
+                    setLocalPreset(id);
+                    if (appearance?.onThemeSelect) {
+                      appearance.onThemeSelect(id);
+                    } else {
+                      appearance?.onPresetChange?.(id);
+                    }
+                  }}
+                  onEditCustom={(custom) => {
+                    setThemeDialog({ kind: "edit", theme: custom });
+                  }}
                 />
               </SettingsGroup>
             )}
@@ -1249,6 +1351,30 @@ export function SettingsPage({
             const err = await save(key, label, { [key]: ref } as SettingsPatch);
             if (err === undefined) setDialog(null);
             return err;
+          }}
+        />
+      )}
+      {themeDialog !== null && (
+        <CustomThemeDialog
+          request={themeDialog}
+          existingThemes={activeCustomThemes}
+          onClose={() => {
+            setThemeDialog(null);
+          }}
+          onSave={async (saved, isNew) => {
+            const nextThemes = isNew
+              ? [...activeCustomThemes, saved]
+              : activeCustomThemes.map((entry) => (entry.id === saved.id ? saved : entry));
+            await commitCustomThemes(nextThemes, saved.id, true);
+          }}
+          onDelete={async (id) => {
+            const nextThemes = activeCustomThemes.filter((entry) => entry.id !== id);
+            const deletingCurrent = activeThemePreset === id;
+            await commitCustomThemes(nextThemes, deletingCurrent ? null : undefined, false);
+          }}
+          onImport={async (imported) => {
+            const nextThemes = [...activeCustomThemes, imported];
+            await commitCustomThemes(nextThemes, imported.id, true);
           }}
         />
       )}

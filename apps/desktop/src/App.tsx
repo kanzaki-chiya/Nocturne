@@ -25,7 +25,8 @@ import type {
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
 import { applyAppearance, applyContentWidth, watchTheme } from "./appearance";
-import { subscribeThemePreset } from "./theme-sync";
+import { subscribeThemeSettings } from "./theme-sync";
+import { PRESETS, type CustomTheme } from "./theme-presets";
 import { appIconResolver } from "./app-icon";
 import { ArchivePage } from "./ArchivePage";
 import { createAttachmentImageSource, type AttachmentImageSource } from "./attachment-images";
@@ -206,6 +207,9 @@ export function App({ host }: { host: DesktopHost }) {
   remoteRef.current = remoteStatus;
   const images = useMemo(() => createAttachmentImageSource(), []);
   const p = prefs.get();
+  const [customThemes, setCustomThemes] = useState<CustomTheme[]>(() =>
+    p.customTheme ? [p.customTheme] : [],
+  );
   useEffect(
     () => () => {
       images.dispose();
@@ -755,8 +759,15 @@ export function App({ host }: { host: DesktopHost }) {
 
   // 主题：prefs.theme 覆盖系统外观，立即生效；跟随系统则删掉属性回到 media query
   useLayoutEffect(
-    () => watchTheme(document.documentElement, p.theme ?? "system", p.themePreset ?? "workbench"),
-    [p.theme, p.themePreset],
+    () =>
+      watchTheme(
+        document.documentElement,
+        p.theme ?? "system",
+        p.themePreset ?? "workbench",
+        undefined,
+        customThemes,
+      ),
+    [p.theme, p.themePreset, customThemes],
   );
 
   useLayoutEffect(() => {
@@ -792,10 +803,18 @@ export function App({ host }: { host: DesktopHost }) {
           void refresh();
         });
         let alive = true;
-        const stopSettings = subscribeThemePreset(client, (id) => {
-          prefs.update({ themePreset: id });
-          bumpPrefs();
-        });
+        const stopSettings = subscribeThemeSettings(
+          client,
+          ({ id, customThemes: nextCustomThemes }) => {
+            if (!alive) return;
+            const activeCustom = PRESETS.some((preset) => preset.id === id)
+              ? undefined
+              : nextCustomThemes.find((entry) => entry.id === id);
+            setCustomThemes(nextCustomThemes);
+            prefs.update({ themePreset: id, customTheme: activeCustom });
+            bumpPrefs();
+          },
+        );
         const loadSchedules = () => {
           void client.runtime
             .listSchedules()
@@ -2166,14 +2185,31 @@ export function App({ host }: { host: DesktopHost }) {
                         codeFont: p.codeFont,
                         fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
                         themePreset: p.themePreset ?? "workbench",
-                        onPresetChange: (id) => {
-                          prefs.update({ themePreset: id });
+                        customThemes,
+                        onPresetChange: (id: string) => {
+                          const activeCustom = PRESETS.some((preset) => preset.id === id)
+                            ? undefined
+                            : (customThemes.find((entry) => entry.id === id) ??
+                              (p.customTheme?.id === id ? p.customTheme : undefined));
+                          prefs.update({ themePreset: id, customTheme: activeCustom });
                           bumpPrefs();
                           void pageClient?.runtime
                             .updateSettings({ "appearance.themePreset": id })
                             .catch((error: unknown) => {
                               console.error("主题保存失败", error);
                             });
+                        },
+                        onCustomThemesChange: (nextThemes, selectedPreset) => {
+                          const nextId = selectedPreset ?? "workbench";
+                          const activeCustom = PRESETS.some((preset) => preset.id === nextId)
+                            ? undefined
+                            : nextThemes.find((entry) => entry.id === nextId);
+                          setCustomThemes(nextThemes);
+                          prefs.update({
+                            themePreset: selectedPreset === null ? undefined : nextId,
+                            customTheme: activeCustom,
+                          });
+                          bumpPrefs();
                         },
                         contentWidth: p.contentWidth,
                         onContentWidthChange: (width) => {

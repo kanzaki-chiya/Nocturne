@@ -12,6 +12,11 @@ import {
 } from "../src/host";
 import { ProbeLog } from "../src/probe";
 import { APP_PAIR_HINT, APP_TRUST_TEXT, appPlatform } from "../src/platform";
+import {
+  applyStoredPhoneAppearance,
+  saveThemePreset,
+  selectThemeHost,
+} from "../../desktop/src/web/local";
 
 let root: Root | undefined;
 beforeEach(() => {
@@ -333,4 +338,21 @@ it("生效主题变化时同步系统状态栏与导航栏深浅", () => {
     [true, "#fbfaf6"],
     [false, "#171512"],
   ]);
+});
+
+it("安卓共享缓存自定义三色首帧应用后把计算后的 --a-bg 同步到原生系统栏", () => {
+  const setSystemBars = vi.fn(() => Promise.resolve());
+  const platform = appPlatform({ ...shellHost, setSystemBars });
+  saveThemePreset("desktop-1", "c-fog", [
+    { id: "c-fog", name: "雾蓝", bg: "#f6f8fa", text: "#16202a", accent: "#2f6db5" },
+  ]);
+  selectThemeHost("desktop-1");
+  localStorage.setItem("nocturne.phone.theme", "dark");
+  applyStoredPhoneAppearance(document.documentElement);
+  const bg = document.documentElement.style.getPropertyValue("--a-bg");
+  expect(bg).toBe("#121518");
+  platform.observer?.theme?.("dark", bg);
+  expect(setSystemBars).toHaveBeenCalledWith(false, "#121518");
+  document.documentElement.removeAttribute("style");
+  document.documentElement.removeAttribute("data-theme");
 });

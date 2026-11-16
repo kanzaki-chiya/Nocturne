@@ -7,7 +7,15 @@ import {
   applyThemePreset,
   watchTheme,
 } from "../src/appearance";
-import { deriveTheme, PRESETS, previewThemeVars, themeVars } from "../src/theme-presets";
+import {
+  deriveTheme,
+  expandCustomTheme,
+  PRESETS,
+  previewThemeVars,
+  themePresetId,
+  themeVars,
+  type CustomTheme,
+} from "../src/theme-presets";
 import { createPrefsStore, PREFS_KEY } from "../src/prefs";
 
 // 按 WCAG 相对亮度独立核算，不复用主题引擎的对比度函数。
@@ -152,5 +160,104 @@ describe("主题预设", () => {
     expect(root.dataset.contentWidth).toBe("full");
     applyContentWidth(root, "standard");
     expect(root.dataset.contentWidth).toBeUndefined();
+  });
+
+  it.each([
+    [
+      { bg: "#fbfaf6", text: "#1f1d1a", accent: "#9a5b2e" },
+      {
+        light: { bg: "#fbfaf6", side: "#f2f1ed", text: "#1f1d1a", accent: "#9a5b2e" },
+        dark: { bg: "#13120b", side: "#1a1912", text: "#f0eee9", accent: "#d99e78" },
+      },
+    ],
+    [
+      { bg: "#0a1213", text: "#e2eeee", accent: "#83c4c8" },
+      {
+        light: { bg: "#f7fcfd", side: "#eef3f4", text: "#182021", accent: "#05666b" },
+        dark: { bg: "#0a1213", side: "#10191a", text: "#e2eeee", accent: "#83c4c8" },
+      },
+    ],
+    [
+      { bg: "#ffffff", text: "#111111", accent: "#111111" },
+      {
+        light: { bg: "#ffffff", side: "#f5f5f5", text: "#111111", accent: "#111111" },
+        dark: { bg: "#0b0b0b", side: "#121212", text: "#ebebeb", accent: "#ebebeb" },
+      },
+    ],
+    [
+      { bg: "#f6f8fa", text: "#16202a", accent: "#2f6db5" },
+      {
+        light: { bg: "#f6f8fa", side: "#edeff2", text: "#16202a", accent: "#2f6db5" },
+        dark: { bg: "#121518", side: "#181c1f", text: "#e0eefc", accent: "#79aef0" },
+      },
+    ],
+    [
+      { bg: "#11140f", text: "#e5eadf", accent: "#a3c98a" },
+      {
+        light: { bg: "#f8faf7", side: "#eff1ee", text: "#20231b", accent: "#3d651b" },
+        dark: { bg: "#11140f", side: "#171a15", text: "#e5eadf", accent: "#a3c98a" },
+      },
+    ],
+  ])("expandCustomTheme 严格匹配五组参考种子色 %#", (seed, expected) => {
+    expect(expandCustomTheme(seed)).toEqual(expected);
+  });
+
+  it("id 解析、themeVars 与 previewThemeVars 支持自定义列表且内置预设优先、未知回退工作台", () => {
+    const custom: CustomTheme[] = [
+      { id: "c-fog", name: "雾蓝", bg: "#f6f8fa", text: "#16202a", accent: "#2f6db5" },
+      { id: "paper", name: "冒名纸面", bg: "#000000", text: "#ffffff", accent: "#ff0000" },
+    ];
+    expect(themePresetId("paper", custom)).toBe("paper");
+    expect(themePresetId("c-fog", custom)).toBe("c-fog");
+    expect(themePresetId("c-missing", custom)).toBe("workbench");
+    expect(themePresetId("c-fog")).toBe("workbench");
+
+    expect(themeVars("paper", "light", custom)["--a-bg"]).toBe("#fbfaf6");
+    expect(themeVars("c-fog", "light", custom)["--a-bg"]).toBe("#f6f8fa");
+    expect(themeVars("c-fog", "dark", custom)["--a-bg"]).toBe("#121518");
+    expect(previewThemeVars("c-fog", "dark", custom)).toEqual(themeVars("c-fog", "dark", custom));
+    expect(previewThemeVars("workbench", "light", custom)["--a-bg"]).toBe("#ffffff");
+    expect(themeVars("c-missing", "light", custom)).toEqual({});
+    expect(previewThemeVars("c-missing", "light", custom)).toEqual({});
+  });
+
+  it("deriveTheme 保持第一期行为，不调整用户原三色低对比度", () => {
+    const lowContrast = { bg: "#777777", side: "#707070", text: "#888888", accent: "#999999" };
+    const vars = deriveTheme(lowContrast, "light");
+    expect(vars["--a-bg"]).toBe("#777777");
+    expect(vars["--a-text"]).toBe("#888888");
+    expect(vars["--a-accent"]).toBe("#999999");
+  });
+
+  it("首屏 applyStoredAppearance 应用缓存的自定义主题三色，损坏或失配时回退工作台", () => {
+    localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({
+        theme: "dark",
+        themePreset: "c-fog",
+        customTheme: {
+          id: "c-fog",
+          name: "雾蓝",
+          bg: "#f6f8fa",
+          text: "#16202a",
+          accent: "#2f6db5",
+        },
+      }),
+    );
+    applyStoredAppearance(root);
+    expect(root.style.getPropertyValue("--a-bg")).toBe("#121518");
+    expect(root.style.getPropertyValue("--a-side")).toBe("#181c1f");
+
+    // 缓存失配或损坏时回退工作台并清掉旧覆盖
+    localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({
+        theme: "light",
+        themePreset: "c-fog",
+        customTheme: { id: "c-fog", bg: "bad", text: "#16202a", accent: "#2f6db5" },
+      }),
+    );
+    applyStoredAppearance(root);
+    expect(Array.from(root.style).filter((name) => name.startsWith("--a-"))).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@
  */
 
 import { applyThemePreset, resolvedTheme } from "../appearance";
-import { themePresetId, type ThemePresetId } from "../theme-presets";
+import { parseCustomTheme, PRESETS, themePresetId, type CustomTheme } from "../theme-presets";
 
 export type PhoneTheme = "system" | "light" | "dark";
 
@@ -64,30 +64,92 @@ function cachedThemePresets(): Record<string, unknown> {
   }
 }
 
+export interface CachedPhoneTheme {
+  id: string;
+  customTheme?: CustomTheme | undefined;
+}
+
 export function loadThemeHost(): string | undefined {
   const hostId = read(THEME_HOST_KEY);
   return hostId === "" ? undefined : (hostId ?? undefined);
 }
 
+function resolveCachedEntry(entry: unknown): CachedPhoneTheme {
+  if (typeof entry === "string") {
+    return { id: themePresetId(entry) };
+  }
+  const custom = parseCustomTheme(entry, { allowEmptyName: true });
+  if (!custom) return { id: "workbench" };
+  if (themePresetId(custom.id) === custom.id) {
+    return { id: custom.id };
+  }
+  return { id: custom.id, customTheme: custom };
+}
+
 /** 不传 hostId 时读上次打开的电脑，用于数据库与网络就绪前的首帧。 */
-export function loadThemePreset(hostId = loadThemeHost() ?? ""): ThemePresetId {
+export function loadCachedTheme(hostId = loadThemeHost() ?? ""): CachedPhoneTheme {
   const presets = cachedThemePresets();
-  return themePresetId(Object.hasOwn(presets, hostId) ? presets[hostId] : undefined);
+  return resolveCachedEntry(Object.hasOwn(presets, hostId) ? presets[hostId] : undefined);
+}
+
+/** 不传 hostId 时读上次打开的电脑，用于数据库与网络就绪前的首帧。 */
+export function loadThemePreset(hostId = loadThemeHost() ?? ""): string {
+  return loadCachedTheme(hostId).id;
 }
 
 export function selectThemeHost(hostId: string | undefined): void {
   write(THEME_HOST_KEY, hostId ?? "");
 }
 
-export function saveThemePreset(hostId: string, preset: ThemePresetId): void {
-  write(THEME_PRESETS_KEY, JSON.stringify({ ...cachedThemePresets(), [hostId]: preset }));
+export function saveThemePreset(
+  hostId: string,
+  preset: string | CustomTheme,
+  customThemes?: readonly CustomTheme[],
+): void {
+  let stored: string | CustomTheme = "workbench";
+  if (typeof preset === "string") {
+    if (PRESETS.some((entry) => entry.id === preset)) {
+      stored = preset;
+    } else {
+      const custom = customThemes?.find((entry) => entry.id === preset);
+      if (custom) {
+        stored = {
+          id: custom.id,
+          name: custom.name,
+          bg: custom.bg,
+          text: custom.text,
+          accent: custom.accent,
+        };
+      }
+    }
+  } else if (PRESETS.some((entry) => entry.id === preset.id)) {
+    stored = preset.id;
+  } else {
+    const custom = parseCustomTheme(preset, { allowEmptyName: true });
+    if (custom) {
+      stored = {
+        id: custom.id,
+        name: custom.name,
+        bg: custom.bg,
+        text: custom.text,
+        accent: custom.accent,
+      };
+    }
+  }
+  write(THEME_PRESETS_KEY, JSON.stringify({ ...cachedThemePresets(), [hostId]: stored }));
 }
 
 export function applyStoredPhoneAppearance(root: HTMLElement): void {
   const theme = loadTheme();
   if (theme === "system") delete root.dataset.theme;
   else root.dataset.theme = theme;
-  applyThemePreset(root, loadThemePreset(), resolvedTheme(theme));
+  const cached = loadCachedTheme();
+  applyThemePreset(
+    root,
+    cached.id,
+    resolvedTheme(theme),
+    cached.customTheme ? [cached.customTheme] : undefined,
+  );
 }
 
 /** 会话页任务清单默认收起；手机自己的状态，不读写桌面 prefs 的 todosCollapsed。 */

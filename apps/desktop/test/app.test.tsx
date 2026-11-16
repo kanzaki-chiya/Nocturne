@@ -2565,3 +2565,85 @@ it("旧格式会话留在列表里，打开只显示 Runtime 原文，归档后�
   );
   expect(document.querySelector("aside")?.textContent).toContain("alive 正文");
 });
+
+it("桌面读取 appearance.customThemes 与 themePreset，settingsChanged 重读并更新 Prefs 缓存与样式", async () => {
+  const fog = { id: "c-fog", name: "雾蓝", bg: "#f6f8fa", text: "#16202a", accent: "#2f6db5" };
+  const moss = { id: "c-moss", name: "苔绿", bg: "#11140f", text: "#e5eadf", accent: "#a3c98a" };
+  const baseHost = replayHost();
+  let preset = "c-fog";
+  let customThemes = [fog];
+  const channels = new Map<number, (message: BackendMessage) => void>();
+  const host: DesktopHost = {
+    ...baseHost,
+    invoke: async (command, args) => {
+      if (command === "backend_open") {
+        const channel = args?.channel as (message: BackendMessage) => void;
+        const wrapped: (message: BackendMessage) => void = (msg) => channel(msg);
+        const orig = baseHost.invoke(command, {
+          ...args,
+          channel: wrapped,
+        });
+        const id = await orig;
+        channels.set(id as number, channel);
+        return id;
+      }
+      if (command === "backend_send") {
+        const line = JSON.parse(String(args?.line ?? "{}")) as {
+          id?: number;
+          method?: string;
+          params?: Record<string, unknown>;
+        };
+        if (line.method === "runtime.describeSettings") {
+          baseHost.calls.push({
+            backendId: Number(args?.backendId ?? 0),
+            method: line.method,
+            params: line.params ?? {},
+          });
+          channels.get(Number(args?.backendId ?? 0))?.({
+            kind: "lines",
+            lines: [
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: line.id,
+                result: [
+                  { key: "appearance.themePreset", effective: preset },
+                  { key: "appearance.customThemes", effective: JSON.stringify(customThemes) },
+                ],
+              }),
+            ],
+          });
+          return;
+        }
+      }
+      return baseHost.invoke(command, args);
+    },
+  };
+  const readDesktopPrefs = () =>
+    JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
+      themePreset?: string;
+      customTheme?: unknown;
+    };
+  localStorage.setItem("nocturne.desktop.prefs.v1", JSON.stringify({ theme: "light" }));
+  try {
+    render(<App host={host} />);
+    await waitFor(() => {
+      expect(document.documentElement.style.getPropertyValue("--a-bg")).toBe("#f6f8fa");
+    });
+    expect(readDesktopPrefs().themePreset).toBe("c-fog");
+    expect(readDesktopPrefs().customTheme).toEqual(fog);
+
+    preset = "c-moss";
+    customThemes = [fog, moss];
+    act(() => {
+      baseHost.providerNotify(1, "runtime.settingsChanged");
+    });
+    await waitFor(() => {
+      expect(document.documentElement.style.getPropertyValue("--a-bg")).toBe("#f8faf7");
+    });
+    expect(readDesktopPrefs().themePreset).toBe("c-moss");
+    expect(readDesktopPrefs().customTheme).toEqual(moss);
+  } finally {
+    document.documentElement.removeAttribute("style");
+    document.documentElement.removeAttribute("data-theme");
+  }
+});

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { subscribeThemePreset } from "../src/theme-sync";
+import { subscribeThemePreset, subscribeThemeSettings } from "../src/theme-sync";
 import { fakeServer, withInit } from "./fake-server";
 
 const servers: ReturnType<typeof fakeServer>[] = [];
@@ -53,4 +53,39 @@ it("旧请求与旧电脑的迟到响应不能覆盖新预设", async () => {
   finish?.([{ key: "appearance.themePreset", effective: "paper" }]);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(changed.mock.calls).toEqual([["ink"]]);
+});
+
+it("读取 appearance.customThemes JSON 与 themePreset，settingsChanged 实时重读并忽略无效项", async () => {
+  const fog = { id: "c-fog", name: "雾蓝", bg: "#f6f8fa", text: "#16202a", accent: "#2f6db5" };
+  const moss = { id: "c-moss", name: "苔绿", bg: "#11140f", text: "#e5eadf", accent: "#a3c98a" };
+  let preset = "c-fog";
+  let rawThemes = JSON.stringify([fog, { id: "bad", name: "", bg: "nope" }]);
+  const server = fakeServer(
+    withInit({
+      "runtime.describeSettings": () => [
+        { key: "appearance.themePreset", effective: preset },
+        { key: "appearance.customThemes", effective: rawThemes },
+      ],
+    }),
+  );
+  servers.push(server);
+  await server.initialize();
+  const changed = vi.fn();
+  const stop = subscribeThemeSettings(server.client, changed);
+  await vi.waitFor(() =>
+    expect(changed).toHaveBeenLastCalledWith({ id: "c-fog", customThemes: [fog] }),
+  );
+  preset = "c-moss";
+  rawThemes = JSON.stringify([fog, moss]);
+  server.notify("runtime.settingsChanged", {});
+  await vi.waitFor(() =>
+    expect(changed).toHaveBeenLastCalledWith({ id: "c-moss", customThemes: [fog, moss] }),
+  );
+  // 自定义主题被删除或 JSON 损坏时回退工作台
+  rawThemes = "{broken";
+  server.notify("runtime.settingsChanged", {});
+  await vi.waitFor(() =>
+    expect(changed).toHaveBeenLastCalledWith({ id: "workbench", customThemes: [] }),
+  );
+  stop();
 });

@@ -5,7 +5,7 @@
  */
 
 import type { ProjectSort } from "./session-tree";
-import { themePresetId, type ThemePresetId } from "./theme-presets";
+import { parseCustomTheme, themePresetId, type CustomTheme } from "./theme-presets";
 import {
   parseStoredSessionPanels,
   parseStoredTabs,
@@ -63,7 +63,9 @@ export interface Prefs {
   /** 主题：跟随系统 / 月之亮面（浅色） / 月之暗面（深色）；取值仍是 system/light/dark（桌面端本机设置，不进 Core） */
   theme?: "system" | "light" | "dark" | undefined;
   /** 全局预设的首屏缓存，连接后台后以 settings.json 为准 */
-  themePreset?: ThemePresetId | undefined;
+  themePreset?: string | undefined;
+  /** 当前选中自定义主题的三色首屏缓存，仅在 themePreset 为自定义主题时写入 */
+  customTheme?: CustomTheme | undefined;
   /** 桌面对话与输入框宽度；缺省 standard，手机不读 */
   contentWidth?: "standard" | "wide" | "full" | undefined;
   /** 界面字体族名；缺省用 --sans（只在桌面端应用，手机网页不读） */
@@ -208,7 +210,19 @@ function parse(raw: string | null): Prefs {
   if (obj.theme === "system" || obj.theme === "light" || obj.theme === "dark") {
     prefs.theme = obj.theme;
   }
-  if (obj.themePreset !== undefined) prefs.themePreset = themePresetId(obj.themePreset);
+  const rawCustomTheme = parseCustomTheme(obj.customTheme, { allowEmptyName: true });
+  const resolvedPreset =
+    obj.themePreset !== undefined
+      ? themePresetId(obj.themePreset, rawCustomTheme ? [rawCustomTheme] : undefined)
+      : undefined;
+  if (resolvedPreset !== undefined) prefs.themePreset = resolvedPreset;
+  if (
+    rawCustomTheme !== undefined &&
+    resolvedPreset === rawCustomTheme.id &&
+    themePresetId(rawCustomTheme.id) !== rawCustomTheme.id
+  ) {
+    prefs.customTheme = rawCustomTheme;
+  }
   if (obj.contentWidth === "standard" || obj.contentWidth === "wide" || obj.contentWidth === "full")
     prefs.contentWidth = obj.contentWidth;
   if (typeof obj.uiFont === "string" && obj.uiFont.trim() !== "") prefs.uiFont = obj.uiFont;
@@ -313,6 +327,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.lastEffort !== undefined ? { lastEffort: prefs.lastEffort } : {}),
         ...(prefs.theme !== undefined ? { theme: prefs.theme } : {}),
         ...(prefs.themePreset !== undefined ? { themePreset: prefs.themePreset } : {}),
+        ...(prefs.customTheme !== undefined ? { customTheme: { ...prefs.customTheme } } : {}),
         ...(prefs.contentWidth !== undefined ? { contentWidth: prefs.contentWidth } : {}),
         ...(prefs.uiFont !== undefined ? { uiFont: prefs.uiFont } : {}),
         ...(prefs.codeFont !== undefined ? { codeFont: prefs.codeFont } : {}),

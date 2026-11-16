@@ -6,7 +6,7 @@
  * 所以 design/tokens.json 改了这里自动跟着变。
  */
 import { FONT_SIZE_DEFAULT, readPrefs, type Prefs } from "./prefs";
-import { themeVars, type ThemeMode } from "./theme-presets";
+import { themeVars, type CustomTheme, type ThemeMode } from "./theme-presets";
 
 export interface FontFamily {
   name: string;
@@ -95,11 +95,16 @@ export function resolvedTheme(theme: ThemePref): ThemeMode {
   return theme === "system" ? (systemThemeMedia()?.matches ? "light" : "dark") : theme;
 }
 
-export function applyThemePreset(root: HTMLElement, id: string, mode: ThemeMode): void {
+export function applyThemePreset(
+  root: HTMLElement,
+  id: string,
+  mode: ThemeMode,
+  customThemes?: readonly CustomTheme[],
+): void {
   for (const name of Array.from(root.style)) {
     if (name.startsWith("--a-")) root.style.removeProperty(name);
   }
-  for (const [name, value] of Object.entries(themeVars(id, mode))) {
+  for (const [name, value] of Object.entries(themeVars(id, mode, customThemes))) {
     root.style.setProperty(name, value);
   }
 }
@@ -110,12 +115,13 @@ export function watchTheme(
   theme: ThemePref,
   id: string,
   report?: (mode: ThemeMode, background: string) => void,
+  customThemes?: readonly CustomTheme[],
 ): () => void {
   const media = systemThemeMedia();
   const apply = () => {
     applyTheme(root, theme);
     const mode = theme === "system" ? (media?.matches ? "light" : "dark") : theme;
-    applyThemePreset(root, id, mode);
+    applyThemePreset(root, id, mode, customThemes);
     report?.(mode, getComputedStyle(root).getPropertyValue("--a-bg").trim());
   };
   apply();
@@ -140,7 +146,12 @@ export function applyStoredAppearance(root: HTMLElement): void {
   }
   const prefs = readPrefs(storage);
   applyTheme(root, prefs.theme ?? "system");
-  applyThemePreset(root, prefs.themePreset ?? "workbench", resolvedTheme(prefs.theme ?? "system"));
+  applyThemePreset(
+    root,
+    prefs.themePreset ?? "workbench",
+    resolvedTheme(prefs.theme ?? "system"),
+    prefs.customTheme ? [prefs.customTheme] : undefined,
+  );
   applyContentWidth(root, prefs.contentWidth);
   applyAppearance(root, prefs);
 }

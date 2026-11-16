@@ -5,7 +5,12 @@ import { PhoneApp } from "../src/web/App";
 import { memoryStorage } from "../src/web/storage";
 import type { PhoneConnectionOptions } from "../src/web/connection";
 import { fakeServer, withInit } from "./fake-server";
-import { loadThemePreset, saveThemePreset, selectThemeHost } from "../src/web/local";
+import {
+  loadCachedTheme,
+  loadThemePreset,
+  saveThemePreset,
+  selectThemeHost,
+} from "../src/web/local";
 
 afterEach(() => {
   cleanup();
@@ -212,5 +217,131 @@ it("手机按电脑预设配色、保留本机模式并向安卓观察者传背�
     expect(screen.queryByText("内容宽度")).toBeNull();
   } finally {
     server.close();
+  }
+});
+
+it("手机缓存与同步自定义三色：首帧先缓存、切换电脑防旧连接迟到、同 id 改色实时更新并通知安卓观察者", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  const fog = { id: "c-fog", name: "雾蓝", bg: "#f6f8fa", text: "#16202a", accent: "#2f6db5" };
+  const moss = { id: "c-moss", name: "苔绿", bg: "#11140f", text: "#e5eadf", accent: "#a3c98a" };
+  const mossEdited = { ...moss, bg: "#141812" };
+
+  const storage = memoryStorage();
+  await storage.putHost({
+    hostId: "first",
+    hostPub: "pub",
+    name: "first",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  await storage.putHost({
+    hostId: "second",
+    hostPub: "pub",
+    name: "second",
+    pairedAt: 1,
+    origin: "https://relay.example",
+  });
+  saveThemePreset("first", "c-fog", [fog]);
+  saveThemePreset("second", "paper");
+  selectThemeHost("first");
+
+  let resolveFirstSettings: ((value: unknown) => void) | undefined;
+  const firstServer = fakeServer(
+    withInit({
+      "runtime.describeSettings": () =>
+        new Promise((resolve) => {
+          resolveFirstSettings = resolve;
+        }),
+      "runtime.listSessions": [],
+    }),
+  );
+  const secondPreset = "c-moss";
+  let secondCustom = [moss];
+  const secondServer = fakeServer(
+    withInit({
+      "runtime.describeSettings": () => [
+        { key: "appearance.themePreset", effective: secondPreset },
+        { key: "appearance.customThemes", effective: JSON.stringify(secondCustom) },
+      ],
+      "runtime.listSessions": [],
+    }),
+  );
+  await firstServer.initialize();
+  await secondServer.initialize();
+
+  const connections = new Map<string, PhoneConnectionOptions>();
+  const theme = vi.fn();
+  render(
+    <PhoneApp
+      storage={storage}
+      platform={{
+        relay: "link",
+        observer: { theme },
+        createConnection: (value) => {
+          connections.set(value.host.hostId, value);
+          return {
+            state: "online",
+            message: "",
+            sessionsDir: undefined,
+            start: vi.fn(),
+            stop: vi.fn(),
+            visibility: vi.fn(),
+          };
+        },
+      }}
+    />,
+  );
+
+  try {
+    // 启动首帧先应用 first 的缓存自定义主题（暗面）
+    expect(theme.mock.calls[0]).toEqual(["dark", "#121518"]);
+    await waitFor(() => expect(connections.has("first")).toBe(true));
+
+    await act(async () => {
+      await connections.get("first")?.connected(firstServer.client);
+    });
+
+    // 切换到 second：先应用 second 的旧 string 缓存（纸面暗面），并且 first 的迟到响应不能覆盖
+    await screen.findByRole("button", { name: "切换电脑" });
+    theme.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "切换电脑" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^second/ }));
+    expect(theme.mock.calls).toEqual([["dark", "#171512"]]);
+
+    // first 的迟到 describeSettings 响应到达，必须被忽略
+    resolveFirstSettings?.([
+      { key: "appearance.themePreset", effective: "celadon" },
+      { key: "appearance.customThemes", effective: "[]" },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(loadThemePreset("first")).toBe("c-fog");
+
+    // second 连上后同步自定义主题并写回缓存
+    await waitFor(() => expect(connections.has("second")).toBe(true));
+    await act(async () => {
+      await connections.get("second")?.connected(secondServer.client);
+    });
+    await waitFor(() => expect(theme).toHaveBeenLastCalledWith("dark", "#11140f"));
+    expect(loadCachedTheme("second")).toEqual({ id: "c-moss", customTheme: moss });
+
+    // 同 id 修改三色并触发 settingsChanged，立即重新推算并通知安卓观察者
+    secondCustom = [mossEdited];
+    await act(async () => {
+      secondServer.notify("runtime.settingsChanged", {});
+    });
+    await waitFor(() => expect(theme).toHaveBeenLastCalledWith("dark", "#141812"));
+    expect(loadCachedTheme("second")).toEqual({ id: "c-moss", customTheme: mossEdited });
+
+    // 手机设置页仍只包含模式切换，不能编辑自定义主题
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(screen.queryByText(/新建|导入|编辑/)).toBeNull();
+  } finally {
+    firstServer.close();
+    secondServer.close();
   }
 });
