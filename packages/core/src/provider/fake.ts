@@ -84,8 +84,10 @@ export class FakeProvider implements Provider {
       : this.callCount++;
     (role ? this.roleRequests : this.requests).push(request);
     const content = request.messages[0]?.content;
-    const titleText =
+    const rawTitleText =
       typeof content === "string" ? content : content?.find((b) => b.type === "text")?.text;
+    const titleText =
+      rawTitleText?.match(/<message>\n([\s\S]*?)\n<\/message>/u)?.[1] ?? rawTitleText;
     const script = role
       ? await (this.roleHandler?.(request, index) ?? [
           {
