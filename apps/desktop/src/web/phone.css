@@ -942,8 +942,15 @@
   color: var(--a-text);
 }
 .phone-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   color: var(--a-secondary);
+}
+.phone .phone-option .brand-icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 .phone-option.risk .phone-option-icon,
 .phone-option.risk .phone-option-text b {

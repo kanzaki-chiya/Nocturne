@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChoiceMenu, Menu, MenuItem } from "../src/Menu";
 import { modelGroups } from "../src/session-controls";
+import { PhoneComposer } from "../src/web/PhoneComposer";
 
 afterEach(() => {
   cleanup();
@@ -374,5 +375,83 @@ describe("Menu", () => {
       />,
     );
     expect(container.querySelectorAll(".brand-icon")).toHaveLength(0);
+  });
+
+  it("手机网页模型菜单在 .phone 作用域下使用 14px 图标并居中对齐，桌面菜单保持 16px", () => {
+    const capabilities = {
+      toolCalls: true,
+      parallelToolCalls: true,
+      reasoning: "none" as const,
+      imageInput: false,
+      promptCache: false,
+      editTool: "edit" as const,
+    };
+    const groups = modelGroups(
+      [
+        {
+          ref: { provider: "anthropic", model: "claude-sonnet-4-5" },
+          displayName: "Claude Sonnet 4.5",
+          capabilities,
+        },
+        {
+          ref: { provider: "custom", model: "never-stuck" },
+          displayName: "Never Stuck",
+          capabilities,
+        },
+      ],
+      [],
+    );
+    const { container } = render(
+      <main className="phone">
+        <PhoneComposer
+          variant="session"
+          controls={{
+            model: {
+              value: "anthropic/claude-sonnet-4-5",
+              label: "Claude Sonnet 4.5",
+              icon: "claude-color",
+              groups,
+              onSelect: vi.fn(),
+            },
+            effort: {
+              value: "medium",
+              label: "medium",
+              groups: [{ options: [{ value: "medium", label: "medium" }] }],
+              onSelect: vi.fn(),
+            },
+            preset: {
+              value: "default",
+              label: "默认",
+              groups: [{ options: [{ value: "default", label: "默认" }] }],
+              onSelect: vi.fn(),
+            },
+          }}
+          running={false}
+          onSubmit={vi.fn(() => Promise.resolve(true))}
+          onInterrupt={vi.fn()}
+          onSlash={vi.fn()}
+        />
+      </main>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "切换模型" }));
+    const icons = container.querySelectorAll(".phone-popover .phone-option .brand-icon");
+    expect(icons).toHaveLength(2);
+    expect(icons[0]?.classList.contains("brand-icon-sm")).toBe(true);
+    expect(icons[0]?.classList.contains("brand-icon-md")).toBe(false);
+    expect(icons[1]?.classList.contains("brand-icon-sm")).toBe(true);
+    expect(icons[1]?.classList.contains("is-fallback")).toBe(true);
+    expect(icons[1]?.querySelector("svg")?.getAttribute("width")).toBe("14");
+
+    const phoneCss = readFileSync(
+      path.resolve(import.meta.dirname, "../src/web/phone.css"),
+      "utf8",
+    );
+    const iconWrapRule = /\.phone-option-icon\s*\{([^}]*)\}/.exec(phoneCss)?.[1] ?? "";
+    const phoneBrandRule =
+      /\.phone\s+\.phone-option\s+\.brand-icon\s*\{([^}]*)\}/.exec(phoneCss)?.[1] ?? "";
+    expect(iconWrapRule).toContain("display: inline-flex");
+    expect(iconWrapRule).toContain("align-items: center");
+    expect(phoneBrandRule).toContain("width: var(--icon-sm)");
+    expect(phoneBrandRule).toContain("height: var(--icon-sm)");
   });
 });

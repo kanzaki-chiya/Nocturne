@@ -481,7 +481,7 @@ export function PhoneComposer({
               {...(kind === "preset"
                 ? { icon: <IconShield risk={option.risk === true} /> }
                 : kind === "model" && option.icon !== undefined
-                  ? { icon: <BrandIcon iconKey={option.icon} size="md" /> }
+                  ? { icon: <BrandIcon iconKey={option.icon} size="sm" /> }
                   : {})}
               label={
                 kind === "model" ? (
