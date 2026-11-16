@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { BrandIcon } from "./BrandIcon";
 import { providerIcon } from "./brand-icons";
 import { LoginWaitCard } from "./LoginWaitCard";
+import { Menu, MenuItem } from "./Menu";
 import { ModelSettingsDialog } from "./ModelSettingsDialog";
 import type { LoginCompleted, LoginStarted, RpcClient, RpcProvider } from "@nocturne/rpc/client";
 import { RpcError } from "@nocturne/rpc/client";
@@ -568,6 +569,8 @@ function ProviderDetail({
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [dialog, setDialog] = useState<null | "edit" | "rekey" | "remove" | "logout">(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
   const [relogin, setRelogin] = useState<ReloginState>({ kind: "idle" });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [unstored, setUnstored] = useState<NonNullable<LoginCompleted["unstoredKey"]> | null>(null);
@@ -784,18 +787,44 @@ function ProviderDetail({
                 退出登录
               </Button>
             )}
-            <span title={deleteBlocked ?? undefined}>
-              <Button
-                variant="danger"
-                disabled={busy !== null || deleteBlocked !== null}
-                title={deleteBlocked ?? undefined}
-                onClick={() => {
-                  setDialog("remove");
+            <IconButton
+              ref={moreRef}
+              aria-label="更多"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              disabled={busy !== null}
+              onClick={() => {
+                setMenuOpen((open) => !open);
+              }}
+            >
+              <Icon name="more" size={ICON_MD} />
+            </IconButton>
+            {menuOpen && (
+              <Menu
+                anchor={moreRef.current}
+                align="right"
+                className="more-menu"
+                label="更多"
+                onClose={() => {
+                  setMenuOpen(false);
                 }}
               >
-                删除
-              </Button>
-            </span>
+                <hr className="menu-sep" />
+                <MenuItem
+                  danger
+                  label="删除"
+                  {...(busy !== null
+                    ? { disabled: "正在处理" }
+                    : deleteBlocked !== null
+                      ? { disabled: deleteBlocked }
+                      : {})}
+                  onSelect={() => {
+                    setMenuOpen(false);
+                    setDialog("remove");
+                  }}
+                />
+              </Menu>
+            )}
           </>
         }
       />
@@ -1305,7 +1334,7 @@ export function ConfirmDialog({
   onConfirm,
 }: {
   title: string;
-  body: string;
+  body?: string | undefined;
   confirmLabel: string;
   danger?: boolean;
   /** 正文下的补充内容（如停用确认的受影响列表） */
@@ -1321,7 +1350,7 @@ export function ConfirmDialog({
       <div className="dlg narrow" role="dialog" aria-label={title}>
         <div className="dh3">
           <b>{title}</b>
-          <span>{body}</span>
+          {body !== undefined && <span>{body}</span>}
           {extra}
           {note !== undefined && <span>{note}</span>}
         </div>

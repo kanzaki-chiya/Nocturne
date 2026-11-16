@@ -22,6 +22,7 @@
   --w-menu-wide: 300px;
   --w-field-sm: 120px;
   --w-field-md: 240px;
+  --w-field-lg: 400px;
   --a-bg: #0b0b0d;
   --a-side: #0f0f12;
   --a-panel: #141417;
@@ -95,6 +96,7 @@
   --fs-5: 20px;
   --fs-file-badge: 10px;
   --fs-diff: 12.5px;
+  --fs-mono-sm: 11.5px;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
@@ -125,6 +127,8 @@
   --ctl-px-sm: 8px;
   --ctl-px-md: 12px;
   --row-h: 48px;
+  --list-row-h: 56px;
+  --list-row-outset: 10px;
   --item-h: 30px;
   --icon-sm: 14px;
   --icon-md: 16px;

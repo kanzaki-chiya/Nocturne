@@ -133,20 +133,27 @@
 
 ## 6. 页面模板与容器宽度
 
-页面只有三种模板，布局宽度由 `design/tokens.json` 的 `layout` 分组控制：
+页面模板如下，布局宽度由 `design/tokens.json` 的 `layout` 分组控制：
 
 1. **设置导航与单栏设置页**（常规、模型、远程、外观、浏览器、电脑操控、已归档的会话）：
    - 设置导航（`.snav`）与侧栏共用一套样式：行高 `--item-h`（`30px`）、图标加名称、选中底 `--a-sel`，顶部为「← 返回」与 `Esc` 键帽提示，底部不放说明文字；
    - 外层 `.spage` 滚动，内套 `.readable`（`max-width: var(--w-readable)` `880px`，水平居中，顶部留白 `32px` `--space-8`）；
    - 顶栏 `.phead`（高 `--h-page-head`，标题 `--fs-5`、`--fw-semibold`、`letter-spacing: -0.01em`），正文 `.sbody`（分组间距 `--space-8`）；
    - 每组 `.group` 去掉外层卡片框，分组上方（含首组）以 `1px solid var(--a-border)` 分隔，`.ghead` 标题用 `--fs-1`、`--fw-medium`、`letter-spacing: 0.02em`、`--a-muted`；`.card` 仅作内容容器，内部设置行 `.srow` 最小高 `--row-h`（`48px`）、左 `.lab` 右 `.ctl`，行间以 `1px solid var(--a-border)` 分隔。
-2. **主从设置页**（服务商、子代理、技能、MCP、授权；定时任务除外）：
-   - 上述五个主从设置页采用居中双栏卡片（`.spage` > `.readable` 宽 `880px` > `.phead` > `.md-frame` > `.md.framed`）：卡片带 `1px solid var(--a-border)` 描边、`--radius-3` 圆角与 `--a-panel` 底色，撑满页头以下剩余高度（底部留 `--space-8`）；左栏 `.md-list` 宽 `220px`（内边距 `--space-2`）、右栏 `.md-detail`（内边距 `--space-5` `--space-6` `--space-6`，`.inner` 铺满右栏不限 `680px`），左右各自独立滚动，按卡片宽度（`< 640px`）上下堆叠；定时任务页（`SchedulePage`）仍沿用旧的 `.spage.flush` 铺满式布局（左栏 `--w-list` `280px`，`.inner` 限 `--w-readable`）。详情分组与列表同样去掉外层卡片框，行高 `48px`，表格统一表头与 `1px solid var(--a-border)` 行线；名字单行省略，完整名字放名字的 `title`；服务商左栏行与详情标题前显示 `16px` 品牌或通用图标（`cloud`，行内状态点移至最右），添加选择页 `30px` 方块内居中显示 `18px` 图标（自定义类保留「+」）；MCP 列表只显示状态点与名字；
-   - 新增与导入按钮在页头右侧（`.phead` 的 `actions`），主操作与删除在右栏详情顶栏 `.dhead .actions`。
-   - 全部滚动区共用无箭头的细滚动条，隐藏滚动条的区域保留 `scrollbar-width: none`。子代理描述框按内容增高，最少约三行、最高 `240px`，超出才滚动；启用开关位于标题最右侧，不写可见标签，只读与默认档位禁用。
-3. **数据页**（用量、后台日志）：
+2. **主从设置页**（服务商）：
+   - 服务商页保留居中双栏卡片（`.spage` > `.readable` 宽 `880px` > `.phead` > `.md-frame` > `.md.framed`）：卡片带 `1px solid var(--a-border)` 描边、`--radius-3` 圆角与 `--a-panel` 底色，撑满页头以下剩余高度（底部留 `--space-8`）；左栏 `.md-list` 宽 `220px`（内边距 `--space-2`）、右栏 `.md-detail`（内边距 `--space-5` `--space-6` `--space-6`，`.inner` 铺满右栏不限 `680px`），左右各自独立滚动，按卡片宽度（`< 640px`）上下堆叠。定时任务页（`SchedulePage`）仍沿用旧的 `.spage.flush` 铺满式布局（左栏 `--w-list` `280px`，`.inner` 限 `--w-readable`）。详情分组去掉外层卡片框，行高 `48px`，表格统一表头与行线；名字单行省略，完整名字放 `title`。服务商左栏行与详情标题前显示 `16px` 品牌或通用图标（`cloud`，行内状态点移至最右），添加选择页 `30px` 方块内居中显示 `18px` 图标（自定义类保留「+」）。
+   - 新增按钮在页头右侧，主操作在右栏详情顶栏；删除收入「更多」菜单，禁用条件与来源 `title` 保留。
+3. **列表页**（子代理、技能、MCP、桌面授权）：
+   - 使用 `.spage` > `.readable`（`880px` 居中）> `PageHeader` 与自上而下的 `SettingsGroup`，无双栏卡片。`SettingsListRow` 最小高 `56px`、上下内边距 `8px`、底边 `1px solid var(--a-border)`；悬停底 `--a-raised` 左右各外扩 `10px`、圆角 `6px`。组标题与行线沿用设置页。
+   - 左侧名称 `13px`、`--a-text`，可用等宽字并带徽标；第二行 `12px`、`--a-muted`、单行省略，等宽时 `11.5px`。停用名称用 `--a-faint`。右侧依次为状态或文字、开关、`14px` `right_small` 箭头（`--a-faint`）。左侧文字由按钮包裹，开关是兄弟元素；点击空白也打开详情，点击开关只启停。
+   - 点击条目、新建、编辑进入独立子页面。`PageHeader.crumb` 显示「父页面 › 当前名称」，父页面按钮用 `--a-muted`、悬停 `--a-text`，分隔符 `--a-faint`，字号沿用页标题，徽标和路径放 `extra`；点击父页面返回列表，不增加 Esc 返回。
+   - 详情右侧放启用、已有的测试连接与 `IconButton`「更多」菜单（横排三点）；菜单沿用原操作名称，删除项危险色且前有分隔线。只读条目不提供编辑与删除菜单。
+   - 子页面表单左标签、右控件，文本输入、多行输入与键值编辑器宽 `400px` 靠右，下拉、开关、分段控件保持自身宽度靠右；行最小高 `48px`、设置行线，底部按钮靠右依次为取消、原有的测试连接、保存。描述框从单行随内容增高。
+   - 已有子代理档位即改即存：选择项与开关变更即保存，描述失焦且有变化才保存（清空则恢复），超时失焦或回车保存（清空不设）；失败恢复已保存值，成功沿用 toast。新建档位仍有取消与保存；默认档位仅模型可改。
+   - 全部滚动区共用无箭头的细滚动条，隐藏滚动条的区域保留 `scrollbar-width: none`。手机授权沿用原页面结构。
+4. **数据页**（用量、后台日志）：
    - 同样套用 `.spage` > `.readable`（`max-width: var(--w-readable)` `880px` 居中，顶部留白与常规页一致），表格统一表头与 `1px solid var(--a-border)` 行线（`.tbl`）；后台日志页的日志框撑满下方剩余高度，长行在框内换行。
-4. **对话区与侧面板**：
+5. **对话区与侧面板**：
    - 对话消息流与输入框最大宽度 `--w-thread`（`720px`），消息条目间距 `--space-3`（`12px`）；侧面板默认宽度 `520px`（`PANEL_DEFAULT_WIDTH`，可拖拽调宽）；左侧栏宽度 `--w-sidebar`（设置导航 `--w-settings-nav`）；
    - 用户消息气泡（`.u-bubble`）使用 `--a-raised` 底色与 `--radius-3` 圆角；
    - 工具行（`.tool-line`）按语义拆分字体：动作动词、计数、状态等中文/阅读文本用 `--sans`，路径、文件名、命令、参数名值用 `--mono`，通过基线对齐；连续工具行之间、同一调用的多文件行之间都是 6px，工具行与正文、思考块之间 12px；
@@ -168,15 +175,11 @@
   - `width <= 1240px`：`--w-sidebar` 收窄为 `232px`，`--page-px` 收窄为 `24px`；
   - `width <= 1060px`：非带框主从布局 `.md:not(.framed)`（定时任务）改为上下单列堆叠，左栏 `.md-list` 置顶（`max-height: 220px`）；
   - `width <= 900px`：`--w-settings-nav` 收窄为 `168px`。
-- **`.md-frame`（`md-frame` 容器，带框主从卡片）**：
+- **`.md-frame`（`md-frame` 容器，仅服务商带框主从卡片）**：
   - `width < 640px`：`.md.framed` 改为上下单列堆叠，列表置顶（`max-height: 220px`，底部边线）。
 - **`.md.framed > .md-detail`（`md-detail` 容器）**：
   - `width < 480px`：服务商添加选择页 `.addgrid` 改为单列。
-- **`.settings-over`（`settings-content` 容器）**：
-  - `width < 900px`：授权页 `.grants-page .cols3` 左栏收窄为 `200px`。
-- **`.grants-page .pane`（`provider-detail` 容器）**：
-  - `width < 520px`：服务商模型表隐藏「最大输出」列（`.model-output`）；
-  - `width < 400px`：横幅允许换行。
+- **列表页与子页面**：子代理、技能、MCP、桌面授权始终使用单列 `.readable`；表单控件宽度不超过可用空间，窄内容区允许标签与控件换行，菜单与页头操作不撑宽页面。
 - **`.usage-page`（容器查询）**：
   - `max-width: 760px` 概览改 3 列、展开区 `.usage-detail` 改上下排列（图区固定 220px 高）；`560px` 概览与构成改 2 列；`320px` 概览改单列。
 - **侧栏运行状态与输入框收敛**：侧栏运行中且无「待确认」或留痕标签的会话行末显示 `12px` 环形转圈（悬停/聚焦显示「…」时隐藏）；输入框底栏在窄屏内保持单行不换行，新会话页工作区与分支收入下方 `.tray` 托盘并按各自宽度上限省略；不再保留底部状态栏与相关让位规则，详见 [docs/apps/desktop.md](docs/apps/desktop.md#54-上下文用量标题栏控制与状态迁移)。

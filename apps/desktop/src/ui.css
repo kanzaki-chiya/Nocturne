@@ -434,6 +434,33 @@
   gap: var(--space-2);
   min-width: 0;
 }
+.phead h1 .crumb {
+  color: var(--a-muted);
+  font: inherit;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  flex: none;
+}
+.phead h1 .crumb:hover {
+  color: var(--a-text);
+}
+.phead h1 .sep {
+  color: var(--a-faint);
+  font-weight: var(--fw-regular);
+  flex: none;
+}
+.phead h1 .cur {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.phead h1 .cur .mono {
+  font-family: var(--mono);
+  font-weight: var(--fw-medium);
+}
 .sbody {
   display: flex;
   flex-direction: column;
@@ -446,6 +473,16 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+}
+.group:has(> .slist-row, > .field, > .srow) {
+  gap: 0;
+}
+.group:has(> .slist-row, > .field, > .srow) > .ghead {
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--a-border);
+}
+.group:not(:has(> .ghead)):has(> .slist-row, > .field, > .srow) {
+  border-top: 1px solid var(--a-border);
 }
 .ghead {
   display: flex;
@@ -625,6 +662,232 @@
 .kvline {
   display: flex;
   gap: var(--space-2);
+}
+
+/* ---------- 设置列表行（SettingsListRow） ---------- */
+.slist-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--list-row-h);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--a-border);
+  cursor: pointer;
+  position: relative;
+  isolation: isolate;
+}
+.slist-row:hover::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(0px - var(--list-row-outset));
+  right: calc(0px - var(--list-row-outset));
+  background: var(--a-raised);
+  border-radius: var(--radius-2);
+  z-index: -1;
+}
+.slist-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.slist-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.slist-name {
+  font-size: var(--fs-2);
+  color: var(--a-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.slist-name.mono {
+  font-family: var(--mono);
+}
+.slist-row.off .slist-name {
+  color: var(--a-faint);
+}
+.slist-desc {
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.slist-desc.mono {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+}
+.slist-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+}
+.slist-status {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.slist-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+.slist-chev {
+  color: var(--a-faint);
+  flex: none;
+}
+
+/* ---------- 状态点与单行省略 ---------- */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.st.ok {
+  color: var(--a-success);
+}
+.st.warn {
+  color: var(--a-warning);
+}
+.st.err {
+  color: var(--a-error);
+}
+.st .dot {
+  background: currentColor;
+}
+.st .dot.hollow,
+.dot.hollow {
+  background: transparent;
+  border: 1.5px solid currentColor;
+}
+.ellip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.srow:has(.ellip) {
+  flex-wrap: nowrap;
+}
+.srow:has(.ellip) .lab {
+  flex: none;
+}
+.srow:has(.ellip) .ctl {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+/* ---------- 菜单危险项与紧凑动作菜单 ---------- */
+.menu .menu-item.danger,
+.menu .menu-item.danger:focus,
+.menu .menu-item.danger svg {
+  color: var(--a-error);
+}
+.menu.more-menu {
+  min-width: var(--w-field-sm);
+}
+
+/* ---------- 设置子页通用表单（settings-subpage-form） ---------- */
+.settings-subpage-form {
+  max-width: none;
+  padding: 0;
+  gap: var(--space-5);
+}
+.settings-subpage-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.settings-subpage-form > .field:first-child,
+.settings-subpage-form > fieldset > .field:first-child {
+  border-top: 1px solid var(--a-border);
+}
+.settings-subpage-form .field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  min-height: var(--row-h);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--a-border);
+}
+.settings-subpage-form .field:has(> textarea:not(.ta-auto), > .settings-form-wide) {
+  align-items: start;
+  padding-block: var(--space-3);
+}
+.settings-subpage-form
+  .field:has(> textarea:not(.ta-auto), > .settings-form-wide)
+  > :is(label, .flabel, .field-head) {
+  padding-top: var(--space-1);
+}
+.settings-subpage-form .field > :is(label, .flabel, .field-head) {
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+  margin: 0;
+}
+.settings-subpage-form .field > :not(label, .flabel, .field-head, .desc) {
+  justify-self: end;
+}
+.settings-subpage-form .field > .ddw,
+.settings-subpage-form .field > .seg {
+  width: auto;
+  align-self: center;
+  justify-self: end;
+}
+.settings-subpage-form
+  .field
+  > :is(input.input:not(.sm-w, .md-w), textarea.textarea, .settings-form-wide),
+.settings-subpage-form
+  .srow
+  .ctl
+  > :is(input.input:not(.sm-w, .md-w), textarea.textarea, .settings-form-wide) {
+  width: var(--w-field-lg);
+  max-width: 100%;
+}
+.settings-subpage-form .field > .desc {
+  grid-column: 2;
+  justify-self: end;
+  text-align: right;
+}
+.settings-subpage-form .srow {
+  padding-inline: 0;
+  border-bottom: 1px solid var(--a-border);
+}
+.settings-subpage-form .srow + .srow {
+  border-top: 0;
+}
+.settings-subpage-form .srow:has(> .ctl > :is(textarea:not(.ta-auto), .settings-form-wide)) {
+  align-items: flex-start;
+  padding-block: var(--space-3);
+}
+.settings-subpage-form .form-foot {
+  justify-content: flex-end;
 }
 
 /* ---------- 主从布局 ---------- */

@@ -12,12 +12,15 @@ import {
   Field,
   Form,
   FormFooter,
+  Icon,
   ListGroup,
   ListItem,
   MasterDetail,
   PageHeader,
   SettingsGroup,
+  SettingsListRow,
   SettingsRow,
+  Switch,
 } from "../src/ui";
 
 afterEach(() => {
@@ -30,6 +33,79 @@ describe("设置页骨架组件 (src/ui)", () => {
     const header = screen.getByRole("banner");
     expect(within(header).getByRole("heading", { level: 1, name: "MCP" })).toBeTruthy();
     expect(within(header).getByRole("button", { name: "添加服务器" })).toBeTruthy();
+  });
+
+  it("PageHeader：支持 crumb 面包屑返回按钮与 extra", () => {
+    const onBack = vi.fn();
+    render(
+      <PageHeader
+        crumb={{ parent: "子代理", onBack }}
+        title="deep"
+        extra={<span className="badge">只读</span>}
+      />,
+    );
+    const header = screen.getByRole("banner");
+    const back = within(header).getByRole("button", { name: "子代理" });
+    expect(back.className).toBe("crumb");
+    expect(header.querySelector(".sep")?.textContent).toBe("›");
+    expect(header.querySelector(".cur")?.textContent).toBe("deep");
+    expect(within(header).getByText("只读")).toBeTruthy();
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("SettingsListRow：点击文字或空白区打开，操作开关（含禁用）不打开", () => {
+    const onOpen = vi.fn();
+    const onToggle = vi.fn();
+    const { container, rerender } = render(
+      <SettingsListRow
+        name="deep"
+        mono
+        badge={<span className="badge">claude-opus</span>}
+        description="长任务"
+        descriptionMono
+        status={<span>可用</span>}
+        toggle={<Switch aria-label="启用 deep" checked onChange={onToggle} />}
+        onOpen={onOpen}
+      />,
+    );
+    const row = container.querySelector(".slist-row") as HTMLElement;
+    expect(row.classList.contains("off")).toBe(false);
+    expect(row.querySelector(".slist-name")?.classList.contains("mono")).toBe(true);
+    expect(row.querySelector(".slist-desc")?.classList.contains("mono")).toBe(true);
+    // 点击文字按钮打开
+    fireEvent.click(screen.getByRole("button", { name: /deep/ }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // 点击右侧状态/空白区打开
+    fireEvent.click(screen.getByText("可用"));
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    // 点击开关只切换不打开
+    const sw = screen.getByRole("switch", { name: "启用 deep" });
+    fireEvent.click(sw);
+    expect(onToggle).toHaveBeenCalledWith(false);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    // 禁用开关区域点击也不打开，disabled 时名称带 off 类
+    rerender(
+      <SettingsListRow
+        name="deep"
+        disabled
+        toggle={<Switch aria-label="启用 deep" checked={false} disabled onChange={onToggle} />}
+        onOpen={onOpen}
+      />,
+    );
+    expect(container.querySelector(".slist-row")?.classList.contains("off")).toBe(true);
+    fireEvent.click(container.querySelector(".slist-toggle") as HTMLElement);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("Icon more 与 settings-subpage-form / settings-form-wide 样式就绪", () => {
+    const { container } = render(<Icon name="more" />);
+    expect(container.querySelector("svg path")?.getAttribute("d")).toBeTruthy();
+    const cssPath = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "ui.css");
+    const css = readFileSync(cssPath, "utf8");
+    expect(css).toContain(".settings-subpage-form");
+    expect(css).toContain(".settings-form-wide");
+    expect(css).toContain(".slist-row");
   });
 
   it("SettingsGroup：标题带计数与右侧操作；默认包卡片，plain 不包；无标题时不渲染标题行", () => {

@@ -293,7 +293,7 @@ export const ICON_DATA = {
 export type IconName = keyof typeof ICON_DATA;
 
 export interface IconProps {
-  name: IconName;
+  name: IconName | "more";
   size?: number | undefined;
   className?: string | undefined;
   "aria-hidden"?: boolean | "true" | "false" | undefined;
@@ -307,7 +307,7 @@ export function Icon({
   "aria-hidden": ariaHidden = true,
   "aria-label": ariaLabel,
 }: IconProps) {
-  const def: IconDefinition = ICON_DATA[name];
+  const def: IconDefinition = ICON_DATA[name === "more" ? "more_1" : name];
   const classes = [className, "icon"].filter(Boolean).join(" ");
   return (
     <svg

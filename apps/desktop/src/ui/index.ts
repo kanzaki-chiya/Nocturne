@@ -40,5 +40,6 @@ export {
   type SegmentedOption,
 } from "./SegmentedControl";
 export { SettingsGroup, type SettingsGroupProps } from "./SettingsGroup";
+export { SettingsListRow, type SettingsListRowProps } from "./SettingsListRow";
 export { SettingsRow, type SettingsRowProps } from "./SettingsRow";
 export { Switch, type SwitchProps } from "./Switch";

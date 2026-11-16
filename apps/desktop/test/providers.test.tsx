@@ -331,7 +331,11 @@ describe("ProvidersPage 列表与详情", () => {
     await screen.findByText("Claude Sonnet 4");
     expect(button("换密钥")).toBeTruthy();
     expect(button("刷新模型列表")).toBeTruthy();
-    expect(button("删除").disabled).toBe(false);
+    fireEvent.click(button("更多"));
+    const delItem = screen.getByRole("menuitem", { name: "删除" }) as HTMLButtonElement;
+    expect(delItem.disabled).toBe(false);
+    expect(delItem.classList.contains("danger")).toBe(true);
+    fireEvent.keyDown(delItem, { key: "Escape" });
     expect(within(screen.getByRole("table", { name: "模型" })).getByText("默认")).toBeTruthy();
     expect(screen.queryByText("已编辑")).toBeNull();
     expect(screen.getByText("200,000")).toBeTruthy();
@@ -388,20 +392,47 @@ describe("ProvidersPage 列表与详情", () => {
       <ProvidersPage {...pageProps({ client: server.client, inUse: new Set(["openrouter"]) })} />,
     );
     await screen.findByText("没有模型");
-    expect(button("删除").disabled).toBe(true);
-    expect(button("删除").parentElement?.getAttribute("title")).toBe("当前会话正在使用，不能删除");
+    fireEvent.click(button("更多"));
+    let delItem = screen.getByRole("menuitem", { name: "删除" }) as HTMLButtonElement;
+    expect(delItem.disabled).toBe(true);
+    expect(delItem.getAttribute("title")).toBe("当前会话正在使用，不能删除");
+    fireEvent.keyDown(delItem, { key: "Escape" });
     fireEvent.click(
       within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
         name: /^local/,
       }),
     );
     await waitFor(() => {
-      expect(button("删除").getAttribute("title")).toBe("来自 config.json，请修改该文件");
+      expect(screen.getByText("只读").getAttribute("title")).toBe("来自 config.json，请修改该文件");
     });
-    const badge = screen.getByText("只读");
-    expect(badge.getAttribute("title")).toBe("来自 config.json，请修改该文件");
-    expect(button("删除").disabled).toBe(true);
+    fireEvent.click(button("更多"));
+    delItem = screen.getByRole("menuitem", { name: "删除" }) as HTMLButtonElement;
+    expect(delItem.getAttribute("title")).toBe("来自 config.json，请修改该文件");
+    expect(delItem.disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "换密钥" })).toBeNull();
+    server.close();
+  });
+
+  it("通过更多菜单删除服务商调用 removeSetupProvider", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [PROVIDER] },
+        "provider.listProviderPresets": [],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.removeSetupProvider": null,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByText("没有模型");
+    fireEvent.click(button("更多"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+    const dlg = await screen.findByRole("dialog", { name: "删除 openrouter？" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "删除" }));
+    await waitFor(() => {
+      expect(called(server, "provider.removeSetupProvider", "providerId", "openrouter")).toBe(true);
+    });
     server.close();
   });
 });
