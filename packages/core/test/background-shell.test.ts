@@ -362,4 +362,44 @@ describe("ADR-0083 Runtime", () => {
       false,
     );
   });
+  it("shell_output returns Chinese error message without Error prefix for unknown task id", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "nct-background-shell-"));
+    roots.push(root);
+    let calls = 0;
+    const provider = new FakeProvider({
+      handler: () => {
+        if (calls++ === 0) {
+          return [
+            {
+              type: "tool_call",
+              toolCallId: "read-missing",
+              name: "shell_output",
+              input: { id: "missing-task-id" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return done;
+      },
+    });
+    const runtime = await createRuntime({
+      cwd: root,
+      sessionsDir: path.join(root, "sessions"),
+      providers: [provider],
+      shell: { background: true },
+      permissions: { autoApproveAsk: true },
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    sessions.push(session);
+    await session.submit({ text: "check" });
+    const completed = must(
+      session
+        .durableEvents()
+        .find((event) => event.type === "tool.completed" && event.payload.name === "shell_output"),
+    );
+    expect(completed.type === "tool.completed" && completed.payload.error).toEqual({
+      code: "invalid_input",
+      message: "本会话没有这个后台命令",
+    });
+  });
 });

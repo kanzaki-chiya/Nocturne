@@ -90,8 +90,8 @@ describe("ADR-0083 background shell", () => {
     expect(output.text).toContain(started.logPath);
     expect(manager.list()).toHaveLength(1);
     const other = setup("two").manager;
-    await expect(other.output(started.taskId)).rejects.toThrow();
-    await expect(other.kill(started.taskId)).rejects.toThrow();
+    await expect(other.output(started.taskId)).rejects.toThrow("本会话没有这个后台命令");
+    await expect(other.kill(started.taskId)).rejects.toThrow("本会话没有这个后台命令");
   });
   it("kills its process tree and settles killed", async () => {
     const { manager, dir } = setup();

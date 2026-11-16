@@ -84,7 +84,7 @@ export class BackgroundShells {
   ) {}
 
   async start(input: ShellStart): Promise<{ taskId: string; logPath: string; background: true }> {
-    if (this.closed) throw new Error("Background commands are closed");
+    if (this.closed) throw new Error("后台命令已关闭");
     const { platform, sessionsDir, sessionId } = this.options;
     const taskId = randomUUID();
     const directory = platform.paths.join(sessionsDir, `${sessionId}.tasks`);
@@ -100,7 +100,7 @@ export class BackgroundShells {
     });
     if (proc.pid <= 0) {
       await proc.wait();
-      throw new Error("Background command failed to start");
+      throw new Error("后台命令启动失败");
     }
     const task: BackgroundShellTask = {
       taskId,
@@ -242,8 +242,7 @@ export class BackgroundShells {
 
   async kill(id: string, source: "user" | "model" = "model"): Promise<PreparedInput> {
     const job = this.require(id);
-    if (job.task.status !== "running" || job.stopSource)
-      throw new Error("Background command is not running");
+    if (job.task.status !== "running" || job.stopSource) throw new Error("后台命令没有在运行");
     job.stopSource = source;
     await job.process.kill();
     await job.settled;
@@ -319,7 +318,7 @@ export class BackgroundShells {
   }
 
   private result(task: BackgroundShellTask): BackgroundShellResult {
-    if (task.status === "running") throw new Error("Background command is still running");
+    if (task.status === "running") throw new Error("后台命令仍在运行");
     return {
       taskId: task.taskId,
       callId: task.callId,
@@ -339,7 +338,7 @@ export class BackgroundShells {
 
   private require(id: string): Job {
     const job = this.jobs.get(id);
-    if (!job) throw new Error("Unknown background command in this session");
+    if (!job) throw new Error("本会话没有这个后台命令");
     return job;
   }
 }

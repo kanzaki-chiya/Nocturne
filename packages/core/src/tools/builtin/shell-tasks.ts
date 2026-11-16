@@ -27,7 +27,7 @@ export function shellTaskTools(tasks: BackgroundShells): ToolDefinition[] {
             }));
         return { status: "ok", modelContent: JSON.stringify(value), output: value };
       } catch (cause) {
-        const message = String(cause);
+        const message = cause instanceof Error ? cause.message : String(cause);
         return {
           status: "error",
           modelContent: message,
@@ -58,7 +58,7 @@ export function shellTaskTools(tasks: BackgroundShells): ToolDefinition[] {
           output: result.backgroundShell,
         };
       } catch (cause) {
-        const message = String(cause);
+        const message = cause instanceof Error ? cause.message : String(cause);
         return {
           status: "error",
           modelContent: message,
