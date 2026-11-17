@@ -83,7 +83,7 @@ picture {
   margin-top: clamp(40px, 6vw, 72px);
   box-shadow:
     0 0 0 1px var(--line),
-    0 32px 80px rgb(0 0 0 / 0.28);
+    var(--hero-shadow);
 }
 
 main > section {

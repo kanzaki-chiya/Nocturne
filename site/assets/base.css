@@ -7,16 +7,17 @@
 }
 :root {
   color-scheme: dark;
-  --bg: #121419;
-  --layer: #1a1d24;
-  --raised: #22262f;
-  --line: #2c303a;
-  --ink: #eceef3;
-  --body: #b4b9c4;
-  --caption: #868c99;
+  --bg: #0b0b0d;
+  --layer: #0f0f12;
+  --raised: #141417;
+  --line: #1f1f24;
+  --ink: #ededef;
+  --body: #a0a0a8;
+  --caption: #7a7a83;
   --moon: #a8a5ec;
   --moon-alt: #83c4c8;
-  --on-moon: #15141f;
+  --on-moon: #17152b;
+  --hero-shadow: 0 32px 80px rgb(0 0 0 / 0.28);
   --serif: "Nocturne Serif", "Songti SC", SimSun, serif;
   --mono: "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
   scrollbar-color: var(--line) var(--bg);
@@ -24,16 +25,17 @@
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    --bg: #f3f4f7;
-    --layer: #ebedf2;
+    --bg: #ffffff;
+    --layer: #fafafa;
     --raised: #ffffff;
-    --line: #d5d8e0;
-    --ink: #1c1f28;
-    --body: #3a404c;
-    --caption: #5d6472;
-    --moon: #4b3f94;
+    --line: #ececef;
+    --ink: #0d0d10;
+    --body: #55555c;
+    --caption: #55555c;
+    --moon: #5d50b0;
     --moon-alt: #24727a;
     --on-moon: #ffffff;
+    --hero-shadow: 0 20px 48px rgba(28, 24, 52, 0.18);
   }
 }
 * {

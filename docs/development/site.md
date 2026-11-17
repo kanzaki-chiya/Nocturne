@@ -2,6 +2,8 @@
 
 主页地址是 <https://nocturne.koxia.cn/>，中文默认，英文位于 `/en/`。深色优先，经 `prefers-color-scheme` 跟随系统切换浅色；主题变量、页头页脚只在 `base.css`，主页和更新日志页另加 `site.css`，有深浅两版的截图用 `<picture>` 的浅色 `source` 切换。纯静态 HTML + CSS，无运行时 JavaScript、统计、第三方脚本或 cookie。
 
+官网配色取桌面端「工作台」主题的 token，对应关系以 `base.css` 为准。
+
 ## 目录与构建
 
 - `site/index.html`、`site/en/index.html`：结构相同的双语页面。功能事实以根 README 为准。
