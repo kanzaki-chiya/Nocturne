@@ -13,7 +13,7 @@
 
 共享纯 TypeScript 模块定义 `ThemeSeed = { bg, side, text, accent }`，每套预设包含 id、名称与 light/dark 两组种子。id 顺序为 `workbench`、`nocturne`、`paper`、`celadon`、`ink`，名称依次为工作台、夜曲、纸面、青瓷、松烟。
 
-配色依据是本轮[效果图](https://claude.ai/artifact/XMSG2TVPRhKjYHH9VkaFZA)（本地源 `Z:\nocturne-mockups\appearance\mockup.html`）的 `PRESETS`、`derive()`、`WORKBENCH`、`FIXED`，种子值与混合比例照抄。`deriveTheme(seed, mode)` 在 sRGB 字节值上混合并取整，返回 CSS 自定义变量表；`themeVars(id, mode)` 对工作台或未知 id 返回空表。工作台就是现有 `tokens.css` 原值，不经过推算，不覆盖任何颜色变量；卡片预览使用原 token 的对应模式值。
+配色依据是本轮[效果图](https://claude.ai/artifact/XMSG2TVPRhKjYHH9VkaFZA)（本地源 `Z:\nocturne-mockups\appearance\mockup.html`）的 `PRESETS`、`derive()`、`WORKBENCH`、`FIXED`，种子值与混合比例照抄（后续修订见末节）。`deriveTheme(seed, mode)` 在 sRGB 字节值上混合并取整，返回 CSS 自定义变量表；`themeVars(id, mode)` 对工作台或未知 id 返回空表。工作台就是现有 `tokens.css` 原值，不经过推算，不覆盖任何颜色变量；卡片预览使用原 token 的对应模式值。
 
 次要文字 `--a-secondary` 与背景的对比度至少 7，弱化文字 `--a-muted` 与背景至少 4.5，`--a-on-accent` 与强调色至少 4.5。文字混色未达标时按效果图的 0.01 步长朝正文色回退；强调色上的文字先沿用效果图选择，未达标再朝正文色回退。界面不显示任何提示。装饰色 `--a-faint` 沿用效果图，不作为弱化正文文字。
 
@@ -46,3 +46,14 @@ RPC 新增易失的 `runtime.settingsChanged` 通知，参数为 `{}`，设置�
 - 只保存 localStorage：手机拿不到当前电脑配色，不能满足实时同步。
 - 将全部颜色写入 Core 或协议：增加 UI 与 Core 耦合，且会复制推算规则。
 - 复用 `runtime.providersChanged`：外观变更并非服务商变更，会触发无关目录刷新，因此采用单独设置通知。
+
+## 修订
+
+### 2026-11-18
+
+- **浅色预设对比度与表面层次对齐工作台**：由于浅色下夜曲、纸面、青瓷的正文与边框色差小于工作台（字发虚、边框和气泡偏弱、侧栏带色较多），用户反馈阅读费力，调整浅色种子与 `deriveTheme` 浅色分支比例（深色与工作台、自定义主题 `withSide` 比例保持不变）：
+  - 夜曲浅色：`text` `#1c1d2c` → `#0a0a12`，`side` `#efeef7` → `#f1f0f6`；
+  - 纸面浅色：`text` `#1f1d1a` → `#100f0c`，`side` `#f3f1ea` → `#f5f4f0`；
+  - 青瓷浅色：`text` `#102224` → `#0a1415`，`side` `#f0f6f6` → `#f5f7f7`；
+  - `deriveTheme` 浅色混合比例：`--a-raised` `0.045` → `0.048`，`--a-border` `0.075` → `0.08`，`--a-border-strong` `0.14` → `0.15`。
+- **松烟强调色改为墨蓝**：此前松烟浅色与深色的 `accent` 与 `text` 同色，导致链接和可交互控件与正文难以区分，现改为墨蓝：浅色 `accent` `#111111` → `#34506e`，深色 `accent` `#f2f2f2` → `#a3b6cc`；`--a-on-accent` 仍由现有推算规则得出。

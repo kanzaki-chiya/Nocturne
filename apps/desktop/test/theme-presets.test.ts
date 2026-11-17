@@ -65,7 +65,7 @@ describe("主题预设", () => {
         style.getPropertyValue(name).trim(),
       );
       expect(resolved).toBe(style.getPropertyValue("--a-faint").trim());
-      expect(resolved).toBe(id === "paper" ? "#aaa8a5" : "#505050");
+      expect(resolved).toBe(id === "paper" ? "#a4a39f" : "#505050");
       expect(style.getPropertyValue("--cm-active-line").replace(/\s/g, "")).toBe(
         "color-mix(insrgb,var(--a-raised)70%,transparent)",
       );
@@ -93,10 +93,10 @@ describe("主题预设", () => {
       expect(themeVars("unknown", mode)).toEqual({});
     }
   });
-  it("纸面种子与推算值照抄效果图，固定颜色由原 token 提供", () => {
+  it("纸面种子与推算值匹配预设，固定颜色由原 token 提供", () => {
     const vars = deriveTheme(PRESETS[2].light, "light");
     expect(vars["--a-bg"]).toBe("#fbfaf6");
-    expect(vars["--a-side"]).toBe("#f3f1ea");
+    expect(vars["--a-side"]).toBe("#f5f4f0");
     expect(vars["--a-accent"]).toBe("#9a5b2e");
     expect(vars["--a-on-accent"]).toBe("#ffffff");
     expect(
@@ -104,6 +104,43 @@ describe("主题预设", () => {
         /success|warning|error|accentAlt|cat[2-5]|overlay|qr-bg/.test(name),
       ),
     ).toBe(false);
+  });
+  it("浅色夜曲、纸面、青瓷正文对比度≥18，推算表面按新比例生成，松烟强调色独立可辨", () => {
+    const mixSrgb = (bg: string, fg: string, ratio: number) =>
+      "#" +
+      [0, 2, 4]
+        .map((offset) => {
+          const a = Number.parseInt(bg.slice(1 + offset, 3 + offset), 16);
+          const b = Number.parseInt(fg.slice(1 + offset, 3 + offset), 16);
+          return Math.max(0, Math.min(255, Math.round(a + (b - a) * ratio)))
+            .toString(16)
+            .padStart(2, "0");
+        })
+        .join("");
+    for (const id of ["nocturne", "paper", "celadon"] as const) {
+      const vars = themeVars(id, "light");
+      expect(contrastRatio(vars["--a-text"] ?? "", vars["--a-bg"] ?? "")).toBeGreaterThanOrEqual(
+        18,
+      );
+    }
+    for (const preset of PRESETS) {
+      if (preset.id === "workbench") continue;
+      const vars = themeVars(preset.id, "light");
+      const { bg, text } = preset.light;
+      expect(vars["--a-raised"]).toBe(mixSrgb(bg, text, 0.048));
+      expect(vars["--a-border"]).toBe(mixSrgb(bg, text, 0.08));
+      expect(vars["--a-border-strong"]).toBe(mixSrgb(bg, text, 0.15));
+    }
+    for (const mode of ["light", "dark"] as const) {
+      const vars = themeVars("ink", mode);
+      const accent = vars["--a-accent"] ?? "";
+      const bg = vars["--a-bg"] ?? "";
+      const text = vars["--a-text"] ?? "";
+      const onAccent = vars["--a-on-accent"] ?? "";
+      expect(accent).not.toBe(text);
+      expect(contrastRatio(accent, bg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(onAccent, accent)).toBeGreaterThanOrEqual(4.5);
+    }
   });
   it("切换清掉上一套变量，工作台恢复 tokens.css 原值且保留字体", () => {
     const sheet = document.createElement("style");
