@@ -295,44 +295,49 @@ export type ResolveEnsembleMentionsResult =
       error: string;
     };
 
-/**
- * 将正文中提取的 `@token` 解析为展示用 `mentions` 与展开后的实际接收者 `recipients`：
- * - `@maestro` / `@指挥` → `"maestro"`
- * - `@all` → 除作者自身外的全体在场成员 + `"maestro"`
- * - `@<name>` → 对应成员（若已移除则报错拒绝唤醒）
- * - `@<prefix>` → 展开为 `<prefix>-<digits>` 全部未移除成员（若仅有已移除成员则按已移除报错）
- * - 其他未知 token（如正文偶现装饰器名）忽略，不计入有效提及
- */
-export function resolveEnsembleMentions(options: {
+function resolveEnsembleMentionsCore(options: {
   text: string;
   author: string;
   authorKind: EnsembleAuthorKind;
   members: readonly EnsembleMentionMemberRef[];
   defaultToMaestro?: boolean | undefined;
-}): ResolveEnsembleMentionsResult {
+}):
+  | {
+      ok: true;
+      mentions: string[];
+      recipients: string[];
+      targets: string[];
+    }
+  | {
+      ok: false;
+      removedMember: string;
+      error: string;
+    } {
   const tokens = extractEnsembleMentionTokens(options.text);
   const selfTarget = options.authorKind === "maestro" ? "maestro" : options.author;
   const mentions: string[] = [];
   const recipientSet = new Set<string>();
+  const targetSet = new Set<string>();
 
   const addMention = (label: string) => {
     if (!mentions.includes(label)) mentions.push(label);
   };
-  const addRecipient = (target: string) => {
+  const addTarget = (target: string) => {
+    targetSet.add(target);
     if (target !== selfTarget) recipientSet.add(target);
   };
 
   for (const token of tokens) {
     if (token === "maestro" || token === "指挥") {
       addMention("maestro");
-      addRecipient("maestro");
+      addTarget("maestro");
       continue;
     }
     if (token === "all") {
       addMention("all");
-      addRecipient("maestro");
+      addTarget("maestro");
       for (const m of options.members) {
-        if (!m.removed) addRecipient(m.name);
+        if (!m.removed) addTarget(m.name);
       }
       continue;
     }
@@ -346,7 +351,7 @@ export function resolveEnsembleMentions(options: {
         };
       }
       addMention(exact.name);
-      addRecipient(exact.name);
+      addTarget(exact.name);
       continue;
     }
     const groupRe = new RegExp(`^${escapeRegExp(token)}-\\d+$`, "u");
@@ -362,20 +367,60 @@ export function resolveEnsembleMentions(options: {
         };
       }
       addMention(token);
-      for (const m of activeGroup) addRecipient(m.name);
+      for (const m of activeGroup) addTarget(m.name);
     }
   }
 
   if (mentions.length === 0 && options.defaultToMaestro === true) {
     addMention("maestro");
-    addRecipient("maestro");
+    addTarget("maestro");
   }
 
   return {
     ok: true,
     mentions,
     recipients: [...recipientSet],
+    targets: [...targetSet],
   };
+}
+
+/**
+ * 将正文中提取的 `@token` 解析为展示用 `mentions` 与展开后的实际接收者 `recipients`：
+ * - `@maestro` / `@指挥` → `"maestro"`
+ * - `@all` → 除作者自身外的全体在场成员 + `"maestro"`
+ * - `@<name>` → 对应成员（若已移除则报错拒绝唤醒）
+ * - `@<prefix>` → 展开为 `<prefix>-<digits>` 全部未移除成员（若仅有已移除成员则按已移除报错）
+ * - 其他未知 token（如正文偶现装饰器名）忽略，不计入有效提及
+ */
+export function resolveEnsembleMentions(options: {
+  text: string;
+  author: string;
+  authorKind: EnsembleAuthorKind;
+  members: readonly EnsembleMentionMemberRef[];
+  defaultToMaestro?: boolean | undefined;
+}): ResolveEnsembleMentionsResult {
+  const res = resolveEnsembleMentionsCore(options);
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    mentions: res.mentions,
+    recipients: res.recipients,
+  };
+}
+
+/**
+ * 解析帖子在发帖当时命中的全部目标成员（与 `resolveEnsembleMentions` 同源，但保留被 `recipients`
+ * 排除的作者自身——例如组成员向自己所属组发 `@组名` 帖时，查询 `mention: <作者>` 仍应命中）。
+ */
+export function resolveEnsembleMentionTargets(options: {
+  text: string;
+  author: string;
+  authorKind: EnsembleAuthorKind;
+  members: readonly EnsembleMentionMemberRef[];
+  defaultToMaestro?: boolean | undefined;
+}): string[] {
+  const res = resolveEnsembleMentionsCore(options);
+  return res.ok ? res.targets : [];
 }
 
 // ── `<ensemble-post>` 包裹与解包（ADR-0089 §7） ────────────────

@@ -4426,7 +4426,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 (ensembleOrigin !== undefined && targetSeq <= ensembleOrigin)
               ) {
                 await ensembleController.endOnRewind();
+              } else {
+                await ensembleController.syncOnRewind();
               }
+            } else if (ensembleController !== undefined) {
+              await ensembleController.syncOnRewind();
             }
             installGoalTool();
           }

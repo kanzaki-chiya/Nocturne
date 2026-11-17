@@ -6,6 +6,8 @@ import {
   REASONING_EFFORT_ORDER,
   subagentSelectionTable,
   ensembleEnabledModelsTable,
+  type EnsembleAuthorKind,
+  type EnsembleMemberStatus,
   type ModelPricing,
   type ReasoningEffort,
   type SubagentProfileConfig,
@@ -29,7 +31,7 @@ export interface EnsembleToolFailure {
 
 export type EnsembleToolActionResult<T = unknown> = EnsembleToolOutcome<T> | EnsembleToolFailure;
 
-function toToolResult<T>(res: EnsembleToolActionResult<T>): ToolResult {
+function toToolResult<T>(res: EnsembleToolActionResult<T>): ToolResult<T> {
   if (!res.ok) {
     return {
       status: "error",
@@ -65,6 +67,38 @@ function buildSelectionAppendix(catalog: EnsembleModelCatalogSnapshot): string {
   return `${profilesTable}\n\n${modelsTable}`;
 }
 
+export interface EnsembleReadInput {
+  from?: string | undefined;
+  mention?: string | undefined;
+  query?: string | undefined;
+  before?: number | undefined;
+  limit?: number | undefined;
+}
+
+export interface EnsembleReadPostItem {
+  number: number;
+  from: string;
+  fromKind: EnsembleAuthorKind;
+  text: string;
+  mentions: string[];
+}
+
+export interface EnsembleReadMemberItem {
+  name: string;
+  status: EnsembleMemberStatus;
+  isolated: boolean;
+  charter: EnsembleCharter;
+}
+
+export interface EnsembleReadOutput {
+  posts: EnsembleReadPostItem[];
+  hasMore: boolean;
+  members: EnsembleReadMemberItem[];
+}
+
+export const ENSEMBLE_READ_DEFAULT_LIMIT = 20;
+export const ENSEMBLE_READ_MAX_LIMIT = 50;
+
 export interface EnsembleMaestroToolHandlers {
   catalog(): EnsembleModelCatalogSnapshot;
   init(input: { title: string }): Promise<EnsembleToolActionResult<{ title: string }>>;
@@ -80,6 +114,7 @@ export interface EnsembleMaestroToolHandlers {
   post(input: {
     text: string;
   }): Promise<EnsembleToolActionResult<{ number: number; recipients: string[] }>>;
+  read(input: EnsembleReadInput): Promise<EnsembleToolActionResult<EnsembleReadOutput>>;
   changeModel(input: {
     name: string;
     model?: string | undefined;
@@ -102,10 +137,21 @@ const ENSEMBLE_TOOL_TRAITS = {
   timeoutMs: 60_000,
 };
 
+const ENSEMBLE_READ_TOOL_TRAITS = {
+  mutates: false,
+  concurrencySafe: true,
+  timeoutMs: 10_000,
+  // ADR-0095 §2：工具自身以 limit（最大 50）约束帖子条数并完整返回当前成员名单；
+  // 帖子正文、charter 三段与成员人数均无固定上限，无法推导固定字符上界，故不设预算截断
+  maxModelChars: Number.MAX_SAFE_INTEGER,
+  maxOutputChars: Number.MAX_SAFE_INTEGER,
+};
+
 export const ENSEMBLE_MAESTRO_TOOL_NAMES = [
   "ensemble_init",
   "ensemble_add_member",
   "ensemble_post",
+  "ensemble_read",
   "ensemble_change_model",
   "ensemble_remove_member",
   "ensemble_end",
@@ -211,6 +257,7 @@ export function createEnsembleMaestroTools(
   };
 
   const postTool = createEnsemblePostTool((input) => handlers.post(input));
+  const readTool = createEnsembleReadTool((input) => handlers.read(input));
 
   const changeModelTool: ToolDefinition<{
     name: string;
@@ -292,7 +339,7 @@ export function createEnsembleMaestroTools(
     },
   };
 
-  return [initTool, addMemberTool, postTool, changeModelTool, removeMemberTool, endTool];
+  return [initTool, addMemberTool, postTool, readTool, changeModelTool, removeMemberTool, endTool];
 }
 
 export function createEnsemblePostTool(
@@ -319,6 +366,53 @@ export function createEnsemblePostTool(
     permissionSubjects: () => [],
     async execute(input) {
       return toToolResult(await post(input));
+    },
+  };
+}
+
+/** Create the read-only `ensemble_read` tool for querying the message board and current roster (ADR-0095 §2). */
+export function createEnsembleReadTool(
+  read: (input: EnsembleReadInput) => Promise<EnsembleToolActionResult<EnsembleReadOutput>>,
+): ToolDefinition<EnsembleReadInput, EnsembleReadOutput> {
+  return {
+    name: "ensemble_read",
+    description:
+      "Read the current ensemble member roster (name, status, workspace isolation, and charter) and query historical posts on the shared message board. Optional filters (`from`, `mention`, `query`, `before`, `limit`) are combined with AND; returns up to `limit` (default 20, max 50) matching posts in ascending order and `hasMore` if earlier matches exist.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: {
+          type: "string",
+          description:
+            "Filter posts by author name (e.g. `maestro`, `user`, `Runtime`, or member name; leading `@` is optional).",
+        },
+        mention: {
+          type: "string",
+          description:
+            "Filter posts mentioning this target (e.g. `maestro`, `all`, or member name; leading `@` is optional). Posts mentioning `@all` match every recipient.",
+        },
+        query: {
+          type: "string",
+          description: "Case-insensitive substring filter against post body text.",
+        },
+        before: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Pagination cursor: return only posts with number strictly less than `before`.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          description: "Maximum number of matching posts to return (default 20, max 50).",
+        },
+      },
+      additionalProperties: false,
+    },
+    traits: ENSEMBLE_READ_TOOL_TRAITS,
+    permissionSubjects: () => [],
+    async execute(input) {
+      return toToolResult(await read(input));
     },
   };
 }

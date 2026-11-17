@@ -191,3 +191,11 @@
 - **内部标识改名**：持久事件 `swarm.*`、临时事件 `swarm.member_updated`、工具 `swarm_*`、`SessionView.swarm`、`message.user.swarm`、workMode 名 `"swarm"`、成员 `parent.callId` 前缀 `swarm:`、`<swarm-post>`、Runtime / RPC 方法与类型名、目录 `src/swarm/` 全部改为 `ensemble` / `ensemble:` / `<ensemble-post>`。不保留 `/swarm` 命令别名，也不保留 `@coordinator`、`@协调者`。
 - **协调者改名**：中文界面称「指挥」；发给模型的文字与英文文档称 Maestro；提及写法 `@maestro`，内部标识 `maestro`。用户在留言板输入 `@指挥` 解析为 `maestro`。保留名改为 `maestro`、`指挥`、`all`、`user`、`runtime`。结束原因 `"coordinator"` 改为 `"maestro"`。`SessionView.ensemble.coordinator` 改为 `maestro`。
 - **旧日志不可读，不做兼容**：含 `swarm.*` 持久事件的会话按 [events.md](../protocols/events.md) 第 8 节既有规则报 `session_log_newer`。不提升 `formatVersion`，不提供迁移。影响只限于打不开这一个会话；列表、搜索、归档、取消归档与删除仍按单文件失败隔离。
+
+## 修订（2026-11-17）：保留 `note_write` 与新增 `ensemble_read`
+
+见 [ADR-0095](ADR-0095-session-notes-board-read.md) §1–§2：
+
+- **指挥保留 `note_write`**：Ensemble 期间仅按 `traits.editTool` 卸载文件编辑工具与 `task`，指挥继续保留 `note_write`（非编辑工具）记录会话笔记。
+- **成员与指挥新增 `ensemble_read`**：指挥与全部未移除成员（含 `explore` 只读成员）均挂载只读工具 `ensemble_read`，用于过滤/翻页查询留言板完整原文并获取当前未移除成员名单（`limit` 默认 20、最大 50，不声明 `pinResult`）。
+- **生命周期与卸载**：`ensemble_read` 在合奏存续期间可用，成员被移除后该成员不可用，合奏结束或回退后从指挥卸载并停止成员侧挂载。

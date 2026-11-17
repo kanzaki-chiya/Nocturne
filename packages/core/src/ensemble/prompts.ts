@@ -71,6 +71,7 @@ export function buildEnsembleMemberPrompt(input: EnsembleMemberPromptInput): str
     "",
     "# Message Board Rules",
     "- Communicate with `@maestro` and other members ONLY by calling `ensemble_post`.",
+    "- Call `ensemble_read` when you need the current full member roster and charters or want to check earlier board posts.",
     "- Address recipients in your post text with `@name`, `@group` (for `<group>-1`, `<group>-2`, ...), `@maestro`, or `@all`. Only mentioned recipients are woken.",
     "- Respect your `Hands off` boundary strictly. If you need a shared interface or helper owned by another member, post to `@<member>` on the board instead of editing their files.",
     "- When delivering work, call `ensemble_post` mentioning the assigned verifier (or `@maestro` if no verifier applies) and state clearly which files you changed and how you verified them, then end your turn and wait.",

@@ -523,7 +523,17 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         // ponytail: rebuild only on explicit rewind; normal event delivery stays O(1).
         const rebuilt = createSessionView();
         book(rebuilt).events = b.events;
-        for (const ev of effectiveEvents(b.events)) reduceDurable(rebuilt, ev, true);
+        const createdEv = b.events[0];
+        const forkSeq =
+          createdEv?.type === "session.created" ? (createdEv.payload.forkedFrom?.seq ?? 0) : 0;
+        for (const ev of effectiveEvents(b.events)) {
+          reduceDurable(rebuilt, ev, true);
+          const ensemble = reduceEnsembleDurable(rebuilt.ensemble, ev, {
+            forkSeq,
+            maestroModel: rebuilt.config.model,
+          });
+          if (ensemble !== rebuilt.ensemble) rebuilt.ensemble = ensemble;
+        }
         view.entries = rebuilt.entries;
         view.backgroundShells = rebuilt.backgroundShells;
         view.currentCwd = rebuilt.currentCwd;
@@ -532,6 +542,11 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         view.title = visibleTitle(view);
         view.todos = rebuilt.todos;
         view.notes = rebuilt.notes;
+        if (rebuilt.ensemble !== undefined) {
+          view.ensemble = rebuilt.ensemble;
+        } else if (event.payload.fork === true || view.ensemble?.status !== "active") {
+          view.ensemble = undefined;
+        }
         view.lastTurn = rebuilt.lastTurn;
         view.currentTurn = undefined;
         view.pendingPermission = undefined;

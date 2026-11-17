@@ -122,6 +122,8 @@ execute(call, ctx):
 
 主会话的目标为 active 时另注册 `update_goal({ status: "met" | "blocked", checklist?: { item, evidence }[], reason? })`（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.2）：在 Turn 边界与续跑时按目标状态装卸；`met` 须有至少一项、证据非空的清单，`blocked` 须有原因，否则 `invalid_input`；目标此刻已不是 active 时同样以 `invalid_input` 结算。无权限主体，`mutates: false`、`fileEffects: "none"`，写入由目标模块完成（`session.config_changed.goal`），`tool.completed.output` 保存清单与证据。
 
+合奏（Ensemble）期间，指挥会话与全部未移除成员会话（含 `explore` 只读成员）另挂载只读工具 `ensemble_read({ from?, mention?, query?, before?, limit? })`（[ADR-0095](../decisions/ADR-0095-session-notes-board-read.md) §2）：读取控制器内存中的留言板与成员名单，不读文件、不新增持久事件，无权限主体，`mutates: false`、`concurrencySafe: true`、不声明 `pinResult`（一次性查询结果可被 L1 正常修剪）。`limit` 默认 20、最大 50（由工具自身约束返回帖子条数），`before` 取编号严格小于它的命中帖按升序返回并附 `hasMore`；开头固定完整返回当前未移除成员名单（名字、状态、是否独立工作树、任务书三段）与命中帖子的完整原文。由于帖子正文、任务书三段及成员人数均无固定上限，工具声明 `maxModelChars`/`maxOutputChars` 为 `Number.MAX_SAFE_INTEGER` 以免执行器截断正文或丢弃结构化 `output`。成员被移除后拒绝调用，合奏结束或回退后随其他合奏工具一并卸载且不再可用；重启恢复在合奏仍 active 时继续保留。输入与结果契约见 [tool-api.md](../protocols/tool-api.md)。
+
 另有只在**子会话**注册表中出现的 `finish` 工具：子代理用它提交结果结束 Turn（[subagent.md](subagent.md) 第 2 节）；它不是内置工具表的成员。
 
 ### `schedule`
