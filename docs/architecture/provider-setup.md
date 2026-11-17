@@ -31,7 +31,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 ```
 
 - 内置预设不再问名称与地址（直接用预设默认值）。ChatGPT、Grok 与 Grok CLI 跳过密钥输入，改走登录或外部文件（第 5 节）。两个自定义预设问名称（必填）、服务地址（openai 兼容必填，anthropic 兼容可留空用官方端点）与**会话标识请求头**（ADR-0031 §3，可选）：填写请求头名（如 `x-opencode-session`）则写入条目 `sessionHeader`，之后每个模型请求携带该头（值为根会话 ID，见 [providers.md](providers.md) 第 4 节）；回车留空不写该字段。
-- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。保存配置确认前获取并展示结果，需要手填模型时先填写模型 ID，获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用服务商页「刷新模型列表」或 `/provider refresh <名>` 重试。
+- **向导不再选择模型**（v0.3）：模型列表仍经 `GET /models` 获取并把上游声明的上下文窗口、最大输出长度与能力标记写回条目 `models`（第 7 节），但不再出现"编号选择模型"与"设为默认模型"两步；默认模型在 `/model` 页设置。保存配置确认前获取并展示结果，需要手填模型时先填写模型 ID，获取结果替换进行中提示：成功显示"已获取 N 个模型"；失败显示原因并继续后续步骤——`GET /models` 返回 401/403 时提示"密钥可能无效（获取模型列表被拒绝）"，404/网络错误等其余失败提示"模型将手动填写"；保存后可用桌面端服务商页「刷新」或 `/provider refresh <名>` 重试。
 - 添加服务商和刷新模型列表时顺带更新 models.dev 缓存；失败沿用本地缓存或内置快照，并在结果中提示一行，不影响上游列表的保存。向导不再询问服务商级思考档位。
 - **TUI 表单形态**（ADR-0019 第 2 条）：全屏页面内不出现需要打字回答的是非题；已完成步骤折叠为一行摘要（如"名称 command • 地址 api.xxx.com • 密钥已保存"），当前步骤用强调色提问、灰色小字给说明（密钥获取入口、回车改用环境变量等）。
 - **向导不发送模型请求**：连接测试会消耗 token 且重复了首次真实请求才能发现的问题，因此不做。密钥、地址与模型 id 的有效性由会话中的首次真实请求检验；请求失败时按 `ProviderError.kind` 给出可操作提示（`auth` → 密钥可能无效，附 `/provider key <name>`；连接阶段的 `network`/`timeout` → 地址不通，附 `nctrn setup`；`invalid_request`/404 → 模型 id 或地址路径有误），实现位置为 `agent/turn.ts` 的 `providerFailureHint`（turn.completed.error.message，CLI 与 TUI 共用）；流已开始后的断开改为提示实际重试次数和发送「继续」，见 [ADR-0055](../decisions/ADR-0055-retry-after-partial-stream.md)。
@@ -47,7 +47,7 @@ API Key（掩码输入；直接回车表示改用环境变量）：********
 |---|---|
 | `/provider` | CLI 列出全部服务商：名称、类型、主机名、鉴权描述、凭据状态（有效 / 即将过期 / 已失效 / 缺少；判定见第 6 节 `describeProviders`）、保存位置（系统保存 / 明文保存 / 仅本次运行）、来源层，以及当前会话使用的是哪一个。不含令牌。TUI 中打开全屏**服务商页**（[tui.md](../apps/tui.md) 第 8 节） |
 | `/provider add` | 逐行向导（CLI）或服务商页内嵌向导（TUI 打开服务商页并选中预设）；保存后提示"用 /model 选择模型" |
-| `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；等价于服务商页「换密钥」 |
+| `/provider key <name>` | 更新该服务商的密钥（不回显），保存后即完成；桌面端在服务商详情表单的 API 密钥栏修改 |
 | `/provider refresh <name>` | 重新从上游获取模型列表与限额（第 7 节），写入向导配置并更新 models.dev 缓存；models.dev 失败只提示，不中断刷新 |
 | `/provider model <name> <模型>` | 编辑该模型的八个设置（显示名 / 上下文长度 / 最大输出 / 推理 / 图片输入 / 思考档位 / 协议 / 编辑工具），写入条目 `userModels.<模型>`。推理为「跟随 / 是 / 否」，CLI 输入 `-`/`y`/`n`，选否时不询问档位；协议为「跟随 / Chat Completions / Messages / Responses」，CLI 输入 `-`/`chat`/`messages`/`responses`，选「跟随」清除用户编辑（ADR-0026 第 7 节、ADR-0031 §1）；编辑工具为「跟随 / edit / apply_patch」，CLI 输入 `edit`/`patch`（或 `apply_patch`）/`-`（ADR-0035 §5）；来源含「models.dev」「按接口声明推导」「服务商类型」。手写配置来源的字段只显示不提问；只能编辑清单内模型，程序不改写 `config.json` |
 | `/provider remove <name>` | 删除向导写入的条目及其凭据，并一并清除它在 `settings.json` 停用集合里的条目（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)），之后同名重新添加从全部启用开始；清理写盘失败时服务商已删除、旧条目残留，以 `config_unavailable` 显式报错（重新添加时提交路径会再清理一次）；当前会话正在使用的服务商拒绝删除；手写在 `config.json` 或其他层的条目只读，提示去对应文件修改；等价于「删除」 |
@@ -95,7 +95,7 @@ interface ProviderSetupFile {
 - 添加服务商时，`prepareProvider` 在字段校验通过后、获取模型列表之前检查一次，`commitProvider` 开头再检查一次（准备之后别的进程可能已写入同名条目）；重名抛 `ProviderSetupError("name", "已有同名服务商 grok（providers.json）")`，括号里是冲突条目所在的最高层，报错里用已有条目的原拼写。CLI、TUI 与 RPC（-32005 / `field: "name"`）都依赖这一处检查，客户端不各自实现。
 - 写文件时 `saveSetupProvider` 带模式：`create`（只有 `commitProvider` 使用）在写入前重读 providers.json，发现同 id（不分大小写）即抛 `ConfigError("provider_exists")`，`commitProvider` 把它转成上面的 name 字段错误，并撤回本次已写入的账号凭据；`replace`（缺省）保持整条替换，刷新模型列表、编辑模型等更新已有条目的路径都用它。providers.json 的写入没有跨进程锁，重读与原子替换之间仍有极小的竞争窗口，两个进程恰好同时添加同名服务商时后写者覆盖，与此前行为相同。
 - `create` 提交前先删除同 id 的**孤立凭据**（条目已被手工删掉、凭据还在），新条目不会继承旧密钥或旧账号。
-- 此前重新添加同名服务商会静默整条替换已有条目（地址、凭据方式等被新表单覆盖，只有 `userModels` 保留），属于缺陷，已直接修正，不提供兼容开关。要换地址或密钥，用服务商页的「换密钥」或先删除再添加。
+- 此前重新添加同名服务商会静默整条替换已有条目（地址、凭据方式等被新表单覆盖，只有 `userModels` 保留），属于缺陷，已直接修正，不提供兼容开关。要换地址或密钥，桌面端在详情表单里修改（或先删除再添加），终端用 `/provider key`。
 
 为什么不直接改 `config.json`：程序改写用户手写的 JSON 会丢失用户的排版与字段顺序（JSON 没有注释，但顺序和分组对人有意义），并且会模糊"哪些是我写的、哪些是程序生成的"。ADR-0007/0008 已经确立"程序写自己的文件"的模式，本设计沿用它。
 
@@ -271,7 +271,7 @@ saveSetupProvider(entry: ProviderConfig, opts: { key?: string; mode?: "create" |
 findProviderConflict(id: string, workspaceRoot?: string): Promise<{ id: string; layer: string } | undefined>
   // 名称唯一性检查：在合并层里不分大小写找同名条目，返回原拼写与最高所在层的显示名
 setCredential(providerId: string, key: string): Promise<void>
-  // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）；/provider key 与服务商页「换密钥」直接调用它
+  // 经 credentials.set 完成（缓存随之失效，下一次请求即用新密钥）；/provider key 与桌面端详情表单直接调用它
 removeSetupProvider(providerId: string): Promise<void>     // 删除条目并经 credentials.delete 删凭据；
   // ADR-0054 §2：随后清理它在 disabledProviders/disabledModels 里的条目。清理是第二次写盘，
   //   失败时服务商已删除、旧条目残留——抛 ConfigError("config_unavailable") 显式说明
@@ -281,12 +281,13 @@ describeSetupProvider(providerId: string): Promise<ProviderEntryConfig | undefin
   // 现读 providers.json 里的条目原文（U-07 编辑表单预填用）；非向导条目返回 undefined。
   //   返回对象不含任何凭据字段——凭据只存在于凭据存储，条目从来不携带。
 describeProviders(workspaceRoot?: string): Promise<ProviderOverview[]>
-  // /provider 与服务商页列表数据：名称、类型、主机名、鉴权描述、认证方式 authKind、凭据状态、保存位置、来源层、
-  //   模型数；不含令牌。给 workspaceRoot 时并入该工作区可信项目层的条目。
+  // /provider 与服务商页列表数据：名称、类型、主机名 host、完整地址 baseURL（去掉 URL 中的用户名密码，
+  //   保留路径/端口/末尾斜杠/查询串；官方端点省略）、鉴权描述、认证方式 authKind、凭据状态、保存位置、
+  //   来源层、模型数；不含令牌。给 workspaceRoot 时并入该工作区可信项目层的条目。
   // ADR-0054：每条另带 enabled（服务商是否启用，缺省按启用）与 enabledModelCount
   //（已启用模型数，服务商停用时为 0，缺省用声明总数）。
   // authKind："apiKey"（凭据存储里的密钥）/ "env"（环境变量）/ "account"（ChatGPT、Grok 账号登录）/
-  //   "external-file"（外部登录文件）/ "none"（尚无凭据）；客户端据此选择「换密钥」或「重新登录」。
+  //   "external-file"（外部登录文件）/ "none"（尚无凭据）；客户端据此决定显示密钥输入还是「重新登录」。
   // 账号凭据状态：每次从磁盘读最新记录（不用进程内缓存），只看本地记录，不发网络请求——
   //   有刷新令牌即为 valid，访问令牌是否过期都一样（下一次请求自动续期）；没有刷新令牌时按访问令牌到期时间
   //   给 valid / expiring（5 分钟内到期）/ expired。刷新令牌被服务端拒绝（invalid_grant 等终止性失败）时，

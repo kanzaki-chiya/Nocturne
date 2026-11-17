@@ -399,6 +399,46 @@ describe("describeProviders", () => {
     expect(corp?.modelCount).toBe(1);
     await fs.unlink(path.join(home, "providers.json"));
   });
+
+  it("baseURL 保留路径与末尾斜杠并去掉用户名密码，无 baseURL 时不返回该字段", async () => {
+    await writeJson(path.join(home, "providers.json"), {
+      version: 1,
+      providers: [
+        {
+          id: "with-v1",
+          type: "openai-compatible",
+          baseURL: "http://127.0.0.1:10100/v1",
+        },
+        {
+          id: "with-v3-slash",
+          type: "openai-compatible",
+          baseURL: "https://example.test/api/v3/",
+        },
+        {
+          id: "with-auth",
+          type: "openai-compatible",
+          baseURL: "https://user:pass@host.test/v1",
+        },
+        {
+          id: "official-anthropic",
+          type: "anthropic",
+        },
+      ],
+    });
+    const rc = await loadConfig(platform, { nocturneHome: home, env: noEnv });
+    const list = await rc.describeProviders();
+    expect(list.find((p) => p.id === "with-v1")?.baseURL).toBe("http://127.0.0.1:10100/v1");
+    expect(list.find((p) => p.id === "with-v3-slash")?.baseURL).toBe(
+      "https://example.test/api/v3/",
+    );
+    const withAuth = list.find((p) => p.id === "with-auth");
+    expect(withAuth?.baseURL).toBe("https://host.test/v1");
+    expect(withAuth?.host).toBe("host.test");
+    const official = list.find((p) => p.id === "official-anthropic");
+    expect(official).toBeDefined();
+    expect(official).not.toHaveProperty("baseURL");
+    await fs.unlink(path.join(home, "providers.json"));
+  });
 });
 
 // ── refreshUpstreamLimits ───────────────────────────────

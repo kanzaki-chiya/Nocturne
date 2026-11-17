@@ -15,6 +15,7 @@ export { loadSettingsStore, validateSettingsPatch, type SettingsStore } from "./
 // 向导配置层与凭据存储（provider-setup.md）：CLI/TUI 的向导与 /provider 命令共用
 export { createCredentialStore, type CredentialStoreInit } from "./credentials.js";
 export {
+  baseURLOf,
   describeProviderLayers,
   hostOf,
   loadProviderSetup,

@@ -151,12 +151,12 @@
   color: var(--a-error);
   font-weight: 500;
 }
-.page3 .fetch .ms {
+.page3 .ms {
   display: flex;
   gap: 5px;
   flex-wrap: wrap;
 }
-.page3 .fetch .ms span {
+.page3 .ms span {
   font: var(--fs-1)/20px var(--mono);
   padding: 0 7px;
   border-radius: var(--radius-1);
@@ -164,11 +164,27 @@
   color: var(--a-secondary);
   border: 1px solid var(--a-border);
 }
-.page3 .fetch .ms span.more {
+.page3 .ms span.more {
   font-family: var(--sans);
   background: none;
   border-color: transparent;
   color: var(--a-faint);
+}
+.page3 .provider-form {
+  max-width: none;
+  padding: 0;
+}
+.page3 .provider-form .key-input::placeholder {
+  letter-spacing: 2px;
+}
+.page3 .provider-form .kvline {
+  align-items: center;
+}
+.page3 .ghead {
+  flex-wrap: wrap;
+}
+.page3 .ghead .input.md-w {
+  max-width: 100%;
 }
 
 /* 登录等待卡 */
@@ -1129,6 +1145,16 @@
   }
 }
 @container provider-detail (width < 400px) {
+  .page3 .pbanner {
+    flex-wrap: wrap;
+  }
+}
+@container md-detail (width < 520px) {
+  .page3 .model-output {
+    display: none;
+  }
+}
+@container md-detail (width < 400px) {
   .page3 .pbanner {
     flex-wrap: wrap;
   }

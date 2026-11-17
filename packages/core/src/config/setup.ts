@@ -101,6 +101,30 @@ export function hostOf(baseURL: string | undefined): string | undefined {
   }
 }
 
+/** 保留条目填写的完整 baseURL（保留路径、端口、末尾斜杠与查询串），仅去掉用户名密码 */
+export function baseURLOf(baseURL: string | undefined): string | undefined {
+  if (baseURL === undefined || baseURL === "") return undefined;
+  try {
+    const url = new URL(baseURL);
+    if (url.username === "" && url.password === "") return baseURL;
+    const schemeSep = baseURL.indexOf("://");
+    if (schemeSep !== -1) {
+      const authStart = schemeSep + 3;
+      const pathStart = baseURL.slice(authStart).search(/[/?#]/);
+      const authEnd = pathStart === -1 ? baseURL.length : authStart + pathStart;
+      const at = baseURL.lastIndexOf("@", authEnd - 1);
+      if (at >= authStart) {
+        return baseURL.slice(0, authStart) + baseURL.slice(at + 1);
+      }
+    }
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return baseURL;
+  }
+}
+
 export interface DescribeLayers {
   /** 各层 providers 条目（低→高）：向导、用户、项目（可信）、环境变量、命令行 */
   setup?: readonly ProviderEntryConfig[] | undefined;
@@ -177,6 +201,7 @@ export function describeProviderLayers(
         : ("missing" as const);
     const modelIds = Object.keys(entry.models ?? {});
     const enabled = !disabledProviders.has(entry.id);
+    const baseURL = baseURLOf(entry.baseURL);
     return {
       enabled,
       enabledModelCount: enabled
@@ -213,6 +238,7 @@ export function describeProviderLayers(
       ...(entry.displayName !== undefined ? { displayName: entry.displayName } : {}),
       type: entry.type ?? "openai-compatible",
       host: hostOf(entry.baseURL),
+      ...(baseURL !== undefined ? { baseURL } : {}),
       keySource,
       keyEnvName: apiKeyEnv,
       origin: layer,

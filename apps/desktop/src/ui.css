@@ -365,6 +365,11 @@
   opacity: var(--disabled-opacity);
   cursor: default;
 }
+.input[readonly] {
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  cursor: default;
+}
 
 /* ---------- 设置页结构（效果图「设置结构」） ---------- */
 .spage {

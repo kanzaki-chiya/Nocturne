@@ -420,6 +420,8 @@ export interface ProviderOverview {
   type: "openai-compatible" | "anthropic";
   /** baseURL 的主机名；无 baseURL（Anthropic 官方端点）时为 undefined */
   host?: string | undefined;
+  /** baseURL 原文（去掉用户名密码，保留路径、端口、末尾斜杠与查询串）；无 baseURL 时为 undefined */
+  baseURL?: string | undefined;
   /** 密钥来源：凭据文件 / 环境变量（envName 给出变量名）/ 缺失 */
   keySource: "credential" | "env" | "missing";
   /** keySource="env" 或条目声明了 apiKeyEnv 时的变量名 */

@@ -16,6 +16,7 @@ const PROVIDER: ProviderOverview = {
   id: "openrouter",
   type: "openai-compatible",
   host: "openrouter.ai",
+  baseURL: "https://openrouter.ai/api/v1",
   auth: "API Key · 凭据存储",
   credentialStatus: "valid",
   credentialStorage: "system",
@@ -33,6 +34,7 @@ const EXPIRED: ProviderOverview = {
   id: "chatgpt",
   type: "openai-compatible",
   host: "chatgpt.com",
+  baseURL: "https://chatgpt.com/backend-api/codex",
   auth: "ChatGPT 账号",
   credentialStatus: "expired",
   credentialStorage: "system",
@@ -195,7 +197,7 @@ async function openForm(name = "test-provider") {
   fireEvent.click(await screen.findByRole("button", { name: new RegExp(PRESET.label) }));
   await screen.findByText(`添加 ${PRESET.label}`);
   fireEvent.change(screen.getByLabelText("名称"), { target: { value: name } });
-  fireEvent.change(screen.getByPlaceholderText("粘贴密钥"), { target: { value: "sk-test" } });
+  fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test" } });
 }
 
 function button(name: string): HTMLButtonElement {
@@ -216,7 +218,7 @@ function called(
 afterEach(cleanup);
 
 describe("ProvidersPage 列表与详情", () => {
-  it("左栏只渲染已配置分组，展示当前标记、模型数与失效标黄", async () => {
+  it("左栏只渲染已配置分组，不写当前/已失效/模型数文字，失效只保留警告色状态点", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER, EXPIRED] },
@@ -236,24 +238,28 @@ describe("ProvidersPage 列表与详情", () => {
         .queryAllByRole("button")
         .find((a) => a.textContent?.startsWith(text));
     await waitFor(() => expect(row("openrouter")).toBeDefined());
-    expect(row("openrouter")?.textContent).toContain("当前");
-    expect(row("openrouter")?.textContent).toContain("2 个模型");
+    expect(row("openrouter")?.textContent).toBe("openrouter");
+    expect(row("openrouter")?.textContent).not.toContain("当前");
+    expect(row("openrouter")?.textContent).not.toContain("个模型");
+    expect(row("chatgpt")?.textContent).toBe("chatgpt");
+    expect(row("chatgpt")?.textContent).not.toContain("已失效");
+    expect(row("chatgpt")?.querySelector(".dot.warn")).not.toBeNull();
+
     const page = screen.getByTestId("providers-page");
     expect(page.textContent).not.toContain("可添加");
     expect(screen.getByRole("button", { name: "添加服务商" })).toBeTruthy();
     const heading = within(page).getByRole("heading", { level: 2, name: "openrouter" });
     expect(heading.textContent).toBe("openrouter");
-    expect(
-      heading.parentElement
-        ? within(heading.parentElement).getByText("当前").textContent
-        : undefined,
-    ).toBe("当前");
     expect(within(heading).queryByRole("button")).toBeNull();
-    expect(
-      heading.parentElement
-        ? within(heading.parentElement).getByRole("button", { name: "换密钥" })
-        : null,
-    ).not.toBeNull();
+    expect(screen.queryByText("当前")).toBeNull();
+    expect(screen.queryByText("已失效")).toBeNull();
+    expect(screen.queryByText("已停用")).toBeNull();
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "换密钥" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "更多" })).toBeNull();
+    expect(button("刷新")).toBeTruthy();
+    expect(button("删除")).toBeTruthy();
+
     await screen.findByText("Claude Sonnet 4");
     expect(
       within(screen.getByRole("table", { name: "模型" }))
@@ -280,25 +286,25 @@ describe("ProvidersPage 列表与详情", () => {
       }),
     ).not.toBeNull();
     expect(page.textContent).not.toContain("停用的模型不出现在模型菜单里");
-    expect(row("chatgpt")?.textContent).toContain("已失效");
     // 左栏只列已配置，不列预设
     expect(row("OpenRouter")).toBeUndefined();
     expect(row(PRESET.label)).toBeUndefined();
-    // 切到 chatgpt（账号类、已失效）：内联重新登录横幅，无「换密钥」
+    // 切到 chatgpt（账号类、已失效）：内联重新登录横幅只留「账号登录已失效」和「重新登录」，无密钥输入框
     const chatgpt = row("chatgpt");
     if (chatgpt === undefined) throw new Error("缺少 chatgpt 行");
     fireEvent.click(chatgpt);
     await screen.findByText("账号登录已失效");
+    expect(page.textContent).not.toContain("需要重新登录才能继续调用");
     expect(screen.getByRole("button", { name: "重新登录" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "换密钥" })).toBeNull();
+    expect(screen.queryByLabelText("API 密钥")).toBeNull();
     server.close();
   });
 
-  it("没有打开的会话时，「当前」落到默认模型的服务商，并默认选中它", async () => {
+  it("没有打开的会话时默认选中默认模型的服务商，但不显示「当前」", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [EXPIRED, PROVIDER] },
-        "provider.listProviderPresets": [PRESET],
+        "provider.listProviderPresets": [PRESET, OPENROUTER_PRESET],
         "runtime.defaultModel": { provider: "openrouter", model: "anthropic/claude-sonnet-4" },
         "provider.listModelSettings": MODEL_SETTINGS,
       }),
@@ -307,21 +313,17 @@ describe("ProvidersPage 列表与详情", () => {
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     const list = await screen.findByRole("navigation", { name: "服务商列表" });
     await waitFor(() => {
-      expect(
-        within(list)
-          .getByRole("button", { current: true })
-          .textContent?.replace(/当前.*$/, ""),
-      ).toBe("openrouter");
+      expect(within(list).getByRole("button", { current: true }).textContent).toBe("openrouter");
     });
-    expect(within(list).getByRole("button", { current: true }).textContent).toContain("当前");
+    expect(screen.queryByText("当前")).toBeNull();
     server.close();
   });
 
-  it("API key 类：换密钥 / 刷新 / 删除；模型列表保留默认与能力、不显示来源，搜索与「设置」可用", async () => {
+  it("内置预设 API key 类：协议与地址只读、可改密钥、刷新/删除与模型搜索可用", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER] },
-        "provider.listProviderPresets": [],
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
         "runtime.defaultModel": { provider: "openrouter", model: "anthropic/claude-sonnet-4" },
         "provider.listModelSettings": MODEL_SETTINGS,
       }),
@@ -329,13 +331,22 @@ describe("ProvidersPage 列表与详情", () => {
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await screen.findByText("Claude Sonnet 4");
-    expect(button("换密钥")).toBeTruthy();
-    expect(button("刷新模型列表")).toBeTruthy();
-    fireEvent.click(button("更多"));
-    const delItem = screen.getByRole("menuitem", { name: "删除" }) as HTMLButtonElement;
-    expect(delItem.disabled).toBe(false);
-    expect(delItem.classList.contains("danger")).toBe(true);
-    fireEvent.keyDown(delItem, { key: "Escape" });
+    expect(button("刷新")).toBeTruthy();
+    const delBtn = button("删除");
+    expect(delBtn.disabled).toBe(false);
+    expect(delBtn.classList.contains("btn-danger")).toBe(true);
+    expect((screen.getByLabelText("协议") as HTMLInputElement).readOnly).toBe(true);
+    const urlInput = screen.getByLabelText("服务地址") as HTMLInputElement;
+    expect(urlInput.readOnly).toBe(true);
+    expect(urlInput.value).toBe("https://openrouter.ai/api/v1");
+    expect(screen.queryByLabelText("显示名称")).toBeNull();
+    expect(screen.queryByLabelText("会话标识请求头")).toBeNull();
+    const keyInput = screen.getByLabelText("API 密钥") as HTMLInputElement;
+    expect(keyInput.type).toBe("password");
+    expect(keyInput.placeholder).toBe("••••••••");
+    expect(button("取消").disabled).toBe(true);
+    expect(button("保存").disabled).toBe(true);
+
     expect(within(screen.getByRole("table", { name: "模型" })).getByText("默认")).toBeTruthy();
     expect(screen.queryByText("已编辑")).toBeNull();
     expect(screen.getByText("200,000")).toBeTruthy();
@@ -350,11 +361,11 @@ describe("ProvidersPage 列表与详情", () => {
     server.close();
   });
 
-  it("换密钥：password 输入，提交 setCredential", async () => {
+  it("只改密钥只调 setCredential，保存后清空输入框并恢复置灰", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER] },
-        "provider.listProviderPresets": [],
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
         "runtime.defaultModel": null,
         "provider.listModelSettings": MODEL_SETTINGS,
         "provider.setCredential": null,
@@ -363,26 +374,39 @@ describe("ProvidersPage 列表与详情", () => {
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await screen.findByText("Claude Sonnet 4");
-    fireEvent.click(button("换密钥"));
-    const input = await screen.findByLabelText("新的 API Key");
-    expect(input.getAttribute("type")).toBe("password");
+    const input = screen.getByLabelText("API 密钥") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    expect(button("取消").disabled).toBe(true);
+    expect(button("保存").disabled).toBe(true);
     fireEvent.change(input, { target: { value: "sk-new" } });
+    expect(button("取消").disabled).toBe(false);
+    expect(button("保存").disabled).toBe(false);
     fireEvent.click(button("保存"));
     await waitFor(() => {
       expect(server.calls.some((c) => c.method === "provider.setCredential")).toBe(true);
     });
+    expect(server.calls.some((c) => c.method === "provider.updateSetupProvider")).toBe(false);
+    expect(server.calls.some((c) => c.method === "provider.probeSetupProviderModels")).toBe(false);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(input.value).toBe("");
+      expect(button("取消").disabled).toBe(true);
+      expect(button("保存").disabled).toBe(true);
     });
     server.close();
   });
 
-  it("删除：会话在用时置灰并说明原因；外部配置的条目只读", async () => {
-    const READONLY: ProviderOverview = { ...PROVIDER, id: "local", origin: "user", managed: false };
+  it("删除：会话在用时置灰并说明原因；外部配置的条目只读且地址显示完整 URL", async () => {
+    const READONLY: ProviderOverview = {
+      ...PROVIDER,
+      id: "local",
+      origin: "user",
+      managed: false,
+      baseURL: "http://127.0.0.1:8080/v1",
+    };
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER, READONLY] },
-        "provider.listProviderPresets": [],
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
         "runtime.defaultModel": null,
         "provider.listModelSettings": [],
       }),
@@ -392,11 +416,9 @@ describe("ProvidersPage 列表与详情", () => {
       <ProvidersPage {...pageProps({ client: server.client, inUse: new Set(["openrouter"]) })} />,
     );
     await screen.findByText("没有模型");
-    fireEvent.click(button("更多"));
-    let delItem = screen.getByRole("menuitem", { name: "删除" }) as HTMLButtonElement;
-    expect(delItem.disabled).toBe(true);
-    expect(delItem.getAttribute("title")).toBe("当前会话正在使用，不能删除");
-    fireEvent.keyDown(delItem, { key: "Escape" });
+    let delBtn = button("删除");
+    expect(delBtn.disabled).toBe(true);
+    expect(delBtn.getAttribute("title")).toBe("当前会话正在使用，不能删除");
     fireEvent.click(
       within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
         name: /^local/,
@@ -405,19 +427,25 @@ describe("ProvidersPage 列表与详情", () => {
     await waitFor(() => {
       expect(screen.getByText("只读").getAttribute("title")).toBe("来自 config.json，请修改该文件");
     });
-    fireEvent.click(button("更多"));
-    delItem = screen.getByRole("menuitem", { name: "删除" }) as HTMLButtonElement;
-    expect(delItem.getAttribute("title")).toBe("来自 config.json，请修改该文件");
-    expect(delItem.disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "换密钥" })).toBeNull();
+    delBtn = button("删除");
+    expect(delBtn.getAttribute("title")).toBe("来自 config.json，请修改该文件");
+    expect(delBtn.disabled).toBe(true);
+    expect((screen.getByLabelText("协议") as HTMLInputElement).readOnly).toBe(true);
+    const urlInput = screen.getByLabelText("服务地址") as HTMLInputElement;
+    expect(urlInput.readOnly).toBe(true);
+    expect(urlInput.value).toBe("http://127.0.0.1:8080/v1");
+    expect(screen.queryByLabelText("API 密钥")).toBeNull();
+    expect(screen.queryByLabelText("显示名称")).toBeNull();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
     server.close();
   });
 
-  it("通过更多菜单删除服务商调用 removeSetupProvider", async () => {
+  it("页头「删除」按钮调用 removeSetupProvider", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER] },
-        "provider.listProviderPresets": [],
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
         "runtime.defaultModel": null,
         "provider.listModelSettings": [],
         "provider.removeSetupProvider": null,
@@ -426,8 +454,7 @@ describe("ProvidersPage 列表与详情", () => {
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await screen.findByText("没有模型");
-    fireEvent.click(button("更多"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+    fireEvent.click(button("删除"));
     const dlg = await screen.findByRole("dialog", { name: "删除 openrouter？" });
     fireEvent.click(within(dlg).getByRole("button", { name: "删除" }));
     await waitFor(() => {
@@ -492,10 +519,12 @@ describe("添加服务商", () => {
     expect(button("保存").disabled).toBe(true);
     expect(button("获取模型").disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "test-provider" } });
-    fireEvent.change(screen.getByPlaceholderText("粘贴密钥"), { target: { value: "sk-test" } });
-    expect(screen.getByPlaceholderText("粘贴密钥").getAttribute("type")).toBe("password");
+    const keyInput = screen.getByLabelText("API Key");
+    expect(keyInput.getAttribute("type")).toBe("password");
+    expect(keyInput.getAttribute("placeholder")).toBeNull();
+    fireEvent.change(keyInput, { target: { value: "sk-test" } });
     fireEvent.click(button("获取模型"));
-    await screen.findByText(/已获取 120 个模型/);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
     expect(button("保存").disabled).toBe(false);
     const prepare = server.calls.find((c) => c.method === "provider.prepareProvider");
     expect(prepare?.params.name).toBe("test-provider");
@@ -504,7 +533,7 @@ describe("添加服务商", () => {
     await waitFor(() => {
       expect(button("保存").disabled).toBe(true);
     });
-    expect(screen.queryByText(/已获取 120 个模型/)).toBeNull();
+    expect(screen.queryByRole("region", { name: "模型 · 120 个" })).toBeNull();
     await waitFor(() => {
       expect(called(server, "provider.discardProvider", "draftId", "draft-1")).toBe(true);
     });
@@ -531,10 +560,116 @@ describe("添加服务商", () => {
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await openForm();
     fireEvent.click(button("获取模型"));
-    await screen.findByText(/已获取 120 个模型/);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
     fireEvent.click(button("保存"));
     await screen.findByRole("heading", { level: 2, name: "test-provider" });
     expect(called(server, "provider.commitProvider", "draftId", "draft-1")).toBe(true);
+    server.close();
+  });
+
+  it("自定义预设不显示会话标识请求头与字段说明/可选/改用环境变量/粘贴密钥，获取模型在标题行右侧", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [] },
+        "provider.listProviderPresets": [PRESET],
+        "runtime.defaultModel": null,
+        "provider.describeProviderSetup": {
+          ...SETUP,
+          fields: [
+            ...SETUP.fields,
+            {
+              key: "sessionHeader",
+              prompt: "会话标识请求头（可选，回车跳过）：",
+              hint: "部分网关要求每个对话带固定的会话 ID",
+              required: false,
+            },
+          ],
+          credential: {
+            ...SETUP.credential,
+            methods: [
+              {
+                kind: "apiKey",
+                label: "粘贴密钥",
+                available: true,
+                prompt: "API Key：",
+                hint: "从控制台获取；输入不回显",
+              },
+              ...SETUP.credential.methods.slice(1),
+            ],
+          },
+        },
+        "provider.prepareProvider": PREPARED,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await openForm();
+    const page = screen.getByTestId("providers-page");
+    expect(screen.queryByLabelText(/会话标识请求头/)).toBeNull();
+    expect(page.textContent).not.toContain("改用环境变量");
+    expect(page.textContent).not.toContain("从控制台获取");
+    expect(page.textContent).not.toContain("可选");
+    expect(page.textContent).not.toContain("服务商 ID（回车确认）");
+    expect(page.textContent).not.toContain("服务地址");
+    expect(page.textContent).not.toContain("输入不回显");
+    expect(
+      (screen.getByLabelText("Base URL") as HTMLInputElement).getAttribute("placeholder"),
+    ).toBeNull();
+    expect(
+      (screen.getByLabelText("API Key") as HTMLInputElement).getAttribute("placeholder"),
+    ).toBeNull();
+    const fetchBtn = button("获取模型");
+    expect(fetchBtn.getAttribute("title")).toBeNull();
+    expect(fetchBtn.parentElement?.classList.contains("ghead")).toBe(true);
+    expect(fetchBtn.parentElement?.querySelector("h2")?.textContent).toBe("模型");
+    fireEvent.click(fetchBtn);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
+    expect(fetchBtn.parentElement?.querySelector("h2")?.textContent).toBe("模型 · 120 个");
+    expect(page.textContent).not.toContain("已获取");
+    expect(page.textContent).not.toContain("重新获取");
+    server.close();
+  });
+
+  it("凭据后端不可用时显示环境变量栏且没有「改用密钥」与字段说明", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [] },
+        "provider.listProviderPresets": [PRESET],
+        "runtime.defaultModel": null,
+        "provider.describeProviderSetup": {
+          ...SETUP,
+          credential: {
+            backend: { kind: "none", available: false, label: "系统凭据" },
+            methods: [
+              {
+                kind: "apiKey",
+                label: "粘贴密钥",
+                available: false,
+                prompt: "API Key：",
+                hint: "输入不回显",
+              },
+              {
+                kind: "env",
+                label: "环境变量",
+                available: true,
+                prompt: "凭据环境变量名 [OPENAI_API_KEY]：",
+                hint: "读取已有环境变量",
+                defaultName: "OPENAI_API_KEY",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(PRESET.label) }));
+    const envInput = (await screen.findByLabelText("凭据环境变量名")) as HTMLInputElement;
+    expect(envInput.value).toBe("OPENAI_API_KEY");
+    expect(screen.queryByLabelText("API Key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "改用密钥" })).toBeNull();
+    expect(screen.getByTestId("providers-page").textContent).not.toContain("读取已有环境变量");
+    expect(screen.getByTestId("providers-page").textContent).not.toContain("改为读取环境变量");
     server.close();
   });
 
@@ -576,7 +711,7 @@ describe("添加服务商", () => {
     fireEvent.click(button("获取模型"));
     await screen.findByText("401 Unauthorized");
     expect(screen.getByLabelText("名称")).toHaveProperty("value", "test-provider");
-    expect(screen.getByPlaceholderText("粘贴密钥")).toHaveProperty("value", "sk-test");
+    expect(screen.getByLabelText("API Key")).toHaveProperty("value", "sk-test");
     server.close();
   });
 
@@ -607,7 +742,7 @@ describe("添加服务商", () => {
     await waitFor(() => {
       expect(called(server, "provider.discardProvider", "draftId", "late-draft")).toBe(true);
     });
-    expect(screen.queryByText(/已获取/)).toBeNull();
+    expect(screen.queryByRole("region", { name: /模型 ·/ })).toBeNull();
     server.close();
   });
 
@@ -629,6 +764,7 @@ describe("添加服务商", () => {
     await openForm();
     fireEvent.click(button("获取模型"));
     const modelInput = await screen.findByLabelText("模型 ID");
+    expect(screen.queryByText("上游没有模型列表时手填")).toBeNull();
     expect(button("保存").disabled).toBe(true);
     fireEvent.change(modelInput, { target: { value: "my-model" } });
     expect(button("保存").disabled).toBe(false);
@@ -656,7 +792,7 @@ describe("添加服务商", () => {
     await screen.findByText("Claude Sonnet 4");
     await openForm();
     fireEvent.click(button("获取模型"));
-    await screen.findByText(/已获取 120 个模型/);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
     // 「取消」：释放草稿，表单清空
     fireEvent.click(button("取消"));
     await waitFor(() => {
@@ -666,7 +802,7 @@ describe("添加服务商", () => {
     // 再获取一次，然后切回已配置条目 → 卸载表单 → 释放
     await openForm();
     fireEvent.click(button("获取模型"));
-    await screen.findByText(/已获取 120 个模型/);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
     fireEvent.click(
       within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
         name: /^openrouter/,
@@ -740,7 +876,7 @@ describe("添加服务商", () => {
 
     await openForm();
     fireEvent.click(button("获取模型"));
-    await screen.findByText(/已获取 120 个模型/);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
 
     fireEvent.click(button("返回"));
     await screen.findByRole("heading", { level: 2, name: "添加服务商" });
@@ -798,7 +934,7 @@ describe("登录", () => {
     // 展开「粘贴回调地址」
     fireEvent.click(button("粘贴回调地址…"));
     expect(screen.getByLabelText("粘贴回调地址")).toBeTruthy();
-    fireEvent.click(button("取消"));
+    fireEvent.click(within(card).getByRole("button", { name: "取消" }));
     await waitFor(() => {
       expect(called(server, "login.cancel", "loginId", "login-1")).toBe(true);
     });
@@ -843,7 +979,7 @@ describe("模型设置对话框", () => {
     expect(endpoint.placeholder).toBe("https://api.test/v1");
     fireEvent.change(endpoint, { target: { value: "https://google.test/v1beta" } });
     fireEvent.click(button("Gemini"));
-    fireEvent.click(button("保存"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "保存" }));
     await waitFor(() => {
       expect(saved.params).toBeDefined();
     });
@@ -868,19 +1004,20 @@ describe("模型设置对话框", () => {
     await server.initialize();
     await OPEN_DIALOG(server);
     fireEvent.change(screen.getByLabelText("显示名"), { target: { value: "changed" } });
-    fireEvent.click(button("取消"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(server.calls.some((c) => c.method === "provider.saveModelSettings")).toBe(false);
     server.close();
   });
 });
 
-describe("编辑服务商（U-07）", () => {
+describe("详情内联配置表单", () => {
   /** 自定义条目：id 不与任何 preset.defaultName 相同 → 可编辑 */
   const CUSTOM: ProviderOverview = {
     ...PROVIDER,
     id: "corp",
     host: "api.corp.test",
+    baseURL: "https://api.corp.test/v1",
   };
   const ENTRY = {
     id: "corp",
@@ -892,8 +1029,7 @@ describe("编辑服务商（U-07）", () => {
     models: { m1: {}, m2: {} },
   };
 
-  function openList(server: ReturnType<typeof fakeServer>) {
-    void server;
+  function openList() {
     const list = screen.getByRole("navigation", { name: "服务商列表" });
     return (text: string) =>
       within(list)
@@ -901,46 +1037,77 @@ describe("编辑服务商（U-07）", () => {
         .find((a) => a.textContent?.startsWith(text));
   }
 
-  async function openEditDialog(server: ReturnType<typeof fakeServer>, entry: unknown = ENTRY) {
+  async function selectCorp(entry: unknown = ENTRY) {
     await screen.findByText(/已配置 ·/);
-    const row = openList(server)("corp");
+    const row = openList()("corp") ?? openList()("Corp AI");
     if (row === undefined) throw new Error("缺少 corp 行");
     fireEvent.click(row);
-    const edit = await screen.findByRole("button", { name: "编辑" });
-    fireEvent.click(edit);
-    const dialog = await screen.findByRole("dialog", { name: "编辑 corp" });
     await waitFor(() => {
       expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
         (entry as { displayName?: string } | null)?.displayName ?? "",
       );
     });
-    return dialog;
   }
 
-  it("内置预设条目没有「编辑」；自定义条目有", async () => {
+  it("内置预设条目协议与地址只读；自定义条目可编辑且无服务商 ID 栏", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [PROVIDER, CUSTOM] },
         "provider.listProviderPresets": [OPENROUTER_PRESET],
         "runtime.defaultModel": null,
         "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
       }),
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await screen.findByText(/已配置 ·/);
-    const row = openList(server);
-    // openrouter 是内置预设条目（id === preset.defaultName）→ 只读
+    const row = openList();
+    // openrouter 是内置预设条目（id === preset.defaultName）→ 协议与服务地址只读
     const openrouter = row("openrouter");
     if (openrouter === undefined) throw new Error("缺少 openrouter 行");
     fireEvent.click(openrouter);
-    await screen.findByRole("button", { name: "换密钥" });
-    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-    // corp 是自定义条目 → 可编辑
+    expect(((await screen.findByLabelText("协议")) as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByLabelText("服务地址") as HTMLInputElement).readOnly).toBe(true);
+    expect(screen.queryByLabelText("显示名称")).toBeNull();
+    // corp 是自定义条目 → 可编辑，且无服务商 ID 输入框
     const corp = row("corp");
     if (corp === undefined) throw new Error("缺少 corp 行");
     fireEvent.click(corp);
-    await screen.findByRole("button", { name: "编辑" });
+    await waitFor(() => {
+      expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe("Corp AI");
+    });
+    expect(screen.queryByLabelText("服务商 ID")).toBeNull();
+    expect((screen.getByLabelText("服务地址") as HTMLInputElement).readOnly).toBe(false);
+    server.close();
+  });
+
+  it("没改动时取消/保存置灰，改动后可点，点取消恢复已保存值并重新置灰", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await selectCorp();
+
+    expect(button("取消").disabled).toBe(true);
+    expect(button("保存").disabled).toBe(true);
+
+    const nameInput = screen.getByLabelText("显示名称") as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "临时名字" } });
+    expect(button("取消").disabled).toBe(false);
+    expect(button("保存").disabled).toBe(false);
+
+    fireEvent.click(button("取消"));
+    expect(nameInput.value).toBe("Corp AI");
+    expect(button("取消").disabled).toBe(true);
+    expect(button("保存").disabled).toBe(true);
     server.close();
   });
 
@@ -962,23 +1129,23 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    const dialog = await openEditDialog(server);
+    await selectCorp();
 
-    expect((screen.getByLabelText("服务商 ID") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("服务地址") as HTMLInputElement).value).toBe(
       "https://api.corp.test/v1",
     );
     expect((screen.getByLabelText("请求头 1 名称") as HTMLInputElement).value).toBe("X-Team");
     expect((screen.getByLabelText("请求头 1 值") as HTMLInputElement).value).toBe("core");
     expect((screen.getByLabelText("会话标识请求头") as HTMLInputElement).value).toBe("X-Session");
-    expect(dialog.textContent).not.toContain("密钥在详情页「换密钥」修改");
-    expect(dialog.textContent).not.toContain("地址与协议未变化，模型列表保持现状");
+    const page = screen.getByTestId("providers-page");
+    expect(page.textContent).not.toContain("必填");
+    expect(page.textContent).not.toContain("地址或协议已变化");
 
     // 改显示名后保存（地址未变 → 不需要探测）
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "新名字" } });
     fireEvent.click(button("保存"));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(button("保存").disabled).toBe(true);
     });
     const call = server.calls.find((c) => c.method === "provider.updateSetupProvider");
     expect(call).toBeDefined();
@@ -995,7 +1162,44 @@ describe("编辑服务商（U-07）", () => {
     server.close();
   });
 
-  it("地址变化必须先探测；成功后提示在用模型是否仍在、保存携带新清单", async () => {
+  it("同时改配置与密钥：先写条目再写密钥；写密钥失败保留密钥输入并显示错误", async () => {
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [CUSTOM] },
+        "provider.listProviderPresets": [OPENROUTER_PRESET],
+        "runtime.defaultModel": null,
+        "provider.listModelSettings": [],
+        "provider.describeSetupProvider": ENTRY,
+        "provider.updateSetupProvider": {
+          providerId: "corp",
+          modelCount: 2,
+          message: "已更新 corp",
+        },
+        "provider.setCredential": new RpcFail(-32000, "凭据后端不可用"),
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await selectCorp();
+
+    fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "新名字" } });
+    const keyInput = screen.getByLabelText("API 密钥") as HTMLInputElement;
+    fireEvent.change(keyInput, { target: { value: "sk-next" } });
+    fireEvent.click(button("保存"));
+
+    await screen.findByText("凭据后端不可用");
+    const writeMethods = server.calls
+      .filter(
+        (c) => c.method === "provider.updateSetupProvider" || c.method === "provider.setCredential",
+      )
+      .map((c) => c.method);
+    expect(writeMethods).toEqual(["provider.updateSetupProvider", "provider.setCredential"]);
+    expect(keyInput.value).toBe("sk-next");
+    expect(button("保存").disabled).toBe(false);
+    server.close();
+  });
+
+  it("地址变化时点保存自动先探测，成功后携带新清单保存", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [CUSTOM] },
@@ -1015,29 +1219,23 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    const dialog = await openEditDialog(server);
+    await selectCorp();
 
     fireEvent.change(screen.getByLabelText("服务地址"), {
       target: { value: "https://api.corp.test/v2" },
     });
-    expect(dialog.textContent).toContain("保存前先按候选配置获取模型列表");
-    expect(button("保存").disabled).toBe(true);
+    expect(button("保存").disabled).toBe(false);
+    fireEvent.click(button("保存"));
 
-    fireEvent.click(button("获取模型"));
-    await screen.findByText("✓ 2 个模型");
-    // 默认模型 corp/m1：m1 在新清单里
-    expect(dialog.textContent).toContain("在用的 m1 仍在列表中");
+    await waitFor(() => {
+      expect(server.calls.some((c) => c.method === "provider.updateSetupProvider")).toBe(true);
+    });
     const probe = server.calls.find((c) => c.method === "provider.probeSetupProviderModels");
     expect(probe?.params).toMatchObject({
       providerId: "corp",
       type: "openai-compatible",
       baseURL: "https://api.corp.test/v2",
       headers: { "X-Team": "core" },
-    });
-    expect(button("保存").disabled).toBe(false);
-    fireEvent.click(button("保存"));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
     });
     const call = server.calls.find((c) => c.method === "provider.updateSetupProvider");
     expect(call?.params.patch).toMatchObject({
@@ -1047,7 +1245,7 @@ describe("编辑服务商（U-07）", () => {
     server.close();
   });
 
-  it("在用模型不在新清单里给出警告", async () => {
+  it("在用模型不在新清单里时给出警告并要求再点一次「保存」确认", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [CUSTOM] },
@@ -1065,17 +1263,29 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    const dialog = await openEditDialog(server);
+    await selectCorp();
+
     fireEvent.change(screen.getByLabelText("服务地址"), {
       target: { value: "https://api.corp.test/v2" },
     });
-    fireEvent.click(button("获取模型"));
-    await screen.findByText("✓ 1 个模型");
-    expect(dialog.textContent).toContain("在用的 m1 不在新列表里");
+    fireEvent.click(button("保存"));
+    await screen.findByText(/在用的 m1 不在新列表里，保存后需重新选择模型/);
+    expect(server.calls.some((c) => c.method === "provider.updateSetupProvider")).toBe(false);
+
+    fireEvent.click(button("保存"));
+    await waitFor(() => {
+      expect(server.calls.some((c) => c.method === "provider.updateSetupProvider")).toBe(true);
+    });
+    expect(
+      server.calls.find((c) => c.method === "provider.updateSetupProvider")?.params.patch,
+    ).toMatchObject({
+      baseURL: "https://api.corp.test/v2",
+      models: [{ id: "m9" }],
+    });
     server.close();
   });
 
-  it("探测失败允许「仍然保存」（不携带 models）", async () => {
+  it("探测失败错误显示在服务地址下方，按钮变为「仍然保存」（不携带 models）", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [CUSTOM] },
@@ -1093,15 +1303,16 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    await openEditDialog(server);
-    fireEvent.change(screen.getByLabelText("服务地址"), {
-      target: { value: "https://api.corp.test/v2" },
-    });
-    fireEvent.click(button("获取模型"));
-    await screen.findByText("✗ 获取失败：连接超时");
+    await selectCorp();
+
+    const urlInput = screen.getByLabelText("服务地址");
+    fireEvent.change(urlInput, { target: { value: "https://api.corp.test/v2" } });
+    fireEvent.click(button("保存"));
+    await screen.findByText(/连接超时/);
+    expect(urlInput.className).toContain("err");
     fireEvent.click(button("仍然保存"));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(server.calls.some((c) => c.method === "provider.updateSetupProvider")).toBe(true);
     });
     const call = server.calls.find((c) => c.method === "provider.updateSetupProvider");
     expect(call?.params.patch).toMatchObject({ baseURL: "https://api.corp.test/v2" });
@@ -1109,7 +1320,7 @@ describe("编辑服务商（U-07）", () => {
     server.close();
   });
 
-  it("describeSetupProvider 返回 null：对话框给出错误且不渲染表单", async () => {
+  it("describeSetupProvider 返回 null：表单下显示错误", async () => {
     const server = fakeServer(
       withInit({
         "provider.describeProviders": { providers: [CUSTOM] },
@@ -1121,16 +1332,7 @@ describe("编辑服务商（U-07）", () => {
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    await screen.findByText(/已配置 ·/);
-    const row = openList(server)("corp");
-    if (row === undefined) throw new Error("缺少 corp 行");
-    fireEvent.click(row);
-    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
-    const dialog = await screen.findByRole("dialog", { name: "编辑 corp" });
-    await waitFor(() => {
-      expect(dialog.textContent).toContain("不是向导写入的条目");
-    });
-    expect(screen.queryByLabelText("服务地址")).toBeNull();
+    await screen.findByText(/不是向导写入的条目/);
     server.close();
   });
 
@@ -1142,17 +1344,19 @@ describe("编辑服务商（U-07）", () => {
         "runtime.defaultModel": null,
         "provider.listModelSettings": [],
         "provider.describeSetupProvider": ENTRY,
-        "provider.updateSetupProvider": new RpcFail(-32005, "服务地址不能为空", {
-          field: "baseURL",
+        "provider.updateSetupProvider": new RpcFail(-32005, "请求头名称无效", {
+          field: "sessionHeader",
         }),
       }),
     );
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
-    await openEditDialog(server);
+    await selectCorp();
+
+    fireEvent.change(screen.getByLabelText("会话标识请求头"), { target: { value: "bad header" } });
     fireEvent.click(button("保存"));
-    await screen.findByText("服务地址不能为空");
-    // 可继续编辑重试（committing 已复位）
+    await screen.findByText("请求头名称无效");
+    expect(screen.getByLabelText("会话标识请求头").className).toContain("err");
     expect(button("保存").disabled).toBe(false);
     server.close();
   });

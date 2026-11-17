@@ -131,7 +131,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | 方法 | 参数 → 结果 |
 |---|---|
 | `listProviderPresets` | `{}` → `ProviderPreset[]` |
-| `describeProviders` | `{ workspaceRoot? }` → `{ providers: ProviderOverview[]; setupWarning? }`（`workspaceRoot` 指定按哪个工作区合并项目层，ADR-0051；缺省为后台启动目录）；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示「换密钥」还是「重新登录」，不再自行推断；`displayName` 是条目声明的显示名（缺省显示 id） |
+| `describeProviders` | `{ workspaceRoot? }` → `{ providers: ProviderOverview[]; setupWarning? }`（`workspaceRoot` 指定按哪个工作区合并项目层，ADR-0051；缺省为后台启动目录）；`ProviderOverview.authKind`（`"apiKey"` / `"env"` / `"account"` / `"external-file"` / `"none"`）是条目的认证方式，客户端据此决定显示密钥输入还是「重新登录」，不再自行推断；`displayName` 是条目声明的显示名（缺省显示 id）；`baseURL` 为条目填写的完整地址原文（去掉 URL 中的用户名密码，官方端点省略） |
 | `describeProviderSetup` | `{ presetId }` → `ProviderSetupDescription` |
 | `describeAccountStorage` | `{ providerId }` → `AccountStorageSetup \| null` |
 | `prepareProvider` | `Omit<AddProviderInput,"modelId">` → `PrepareProviderResult`（只校验、暂存草稿，不落盘）；名称与已有服务商重复时报 -32005 / `field: "name"`（[provider-setup.md](../architecture/provider-setup.md)「名称唯一性」）。结果的 `models` 是获取到的上游模型摘要（`id`、`displayName?`、`reasoning?`、`imageInput?`、`contextWindow?`、`maxOutputTokens?`，与 `modelCount` 同数），供保存前预览 |

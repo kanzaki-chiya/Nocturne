@@ -68,7 +68,7 @@ const last = (calls: RpcCall[], method: string) =>
 afterEach(cleanup);
 
 describe("ProvidersPage 启停", () => {
-  it("服务商开关：无人在用时直接切换；停用后横幅、模型开关不可点、列表标已停用", async () => {
+  it("服务商开关：无人在用时直接切换；停用后无横幅、模型开关不可点、列表空心点且名字变淡", async () => {
     let enabled = true;
     const server = fakeServer(
       withInit({
@@ -77,6 +77,12 @@ describe("ProvidersPage 启停", () => {
         "runtime.defaultModel": null,
         "provider.listModelSettings": ["m1", "m2", "m3"].map(modelSettings),
         "runtime.listModels": LIST_MODELS,
+        "provider.describeSetupProvider": {
+          id: "ocx",
+          type: "openai-compatible",
+          baseURL: "http://127.0.0.1:8317/v1",
+          models: { m1: {}, m2: {}, m3: {} },
+        },
         "provider.describeToggleImpact": { affectedSessions: 0, defaultModel: false, roles: [] },
         "provider.setProviderEnabled": (params: Record<string, unknown>) => {
           enabled = params.enabled === true;
@@ -90,8 +96,9 @@ describe("ProvidersPage 启停", () => {
     const sw = await screen.findByRole("switch", { name: "启用服务商 ocx" });
     expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(sw.textContent).toBe("");
-    // 有模型被停用时写「已启用 N / 总数」
-    expect(await screen.findByText(/已启用 2 \/ 3/)).toBeTruthy();
+    // 有模型被逐个停用时写「N / 总数」，不加「已启用」；模型行不显示「已停用」徽标
+    expect((await screen.findByText(/2 \/ 3/)).textContent).toBe(" · 2 / 3");
+    expect(screen.queryByText("已停用")).toBeNull();
 
     fireEvent.click(sw);
     await waitFor(() =>
@@ -100,30 +107,23 @@ describe("ProvidersPage 启停", () => {
         enabled: false,
       }),
     );
-    // 停用横幅 + 「重新启用」；模型开关保留但不可点
-    await screen.findByRole("button", { name: "重新启用" });
+    // 停用后没有「已停用 / 重新启用」横幅；模型开关保留但不可点
+    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("false"));
+    expect(screen.queryByRole("button", { name: "重新启用" })).toBeNull();
+    expect(screen.queryByText("已停用")).toBeNull();
     const modelSwitch = screen.getByRole("switch", { name: "启用 m1" }) as HTMLButtonElement;
     expect(modelSwitch.disabled).toBe(true);
-    // 逐个开关保留状态（Core 的 disabled 个别优先报 "model"）：m1 仍为启用，
-    // 表头计数写「逐个设置保留」（ADR-0054 §4「开关保留状态」）
     expect(modelSwitch.getAttribute("aria-checked")).toBe("true");
-    expect((await screen.findByText(/服务商已停用，逐个设置保留/)).textContent).toBe(
-      " · 服务商已停用，逐个设置保留 2 / 3",
-    );
-    // 左侧列表：空心点、名字变淡、标「已停用」
-    await waitFor(() => {
-      expect(
-        within(screen.getByRole("navigation", { name: "服务商列表" })).getByText("已停用")
-          .textContent,
-      ).toBe("已停用");
-    });
-    expect(
-      within(screen.getByRole("navigation", { name: "服务商列表" })).getByRole("button", {
-        name: /ocx.*已停用/,
-      }),
-    ).toBeTruthy();
+    // 服务商停用时计数仍按逐个设置保留规则写「N / 总数」
+    expect(screen.getByText(/2 \/ 3/).textContent).toBe(" · 2 / 3");
+    // 左侧列表：空心点、名字变淡（off），不写「已停用」文字
+    const nav = screen.getByRole("navigation", { name: "服务商列表" });
+    const rowBtn = within(nav).getByRole("button", { name: "ocx" });
+    expect(rowBtn.classList.contains("off")).toBe(true);
+    expect(rowBtn.querySelector(".dot.hollow")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "重新启用" }));
+    // 重新启用仍用页头开关
+    fireEvent.click(sw);
     await waitFor(() =>
       expect(
         server.calls
@@ -131,9 +131,7 @@ describe("ProvidersPage 启停", () => {
           .map((c) => c.params.enabled),
       ).toEqual([false, true]),
     );
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "重新启用" })).toBeNull();
-    });
+    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("true"));
   });
 
   it("停用正被使用的服务商：先弹页内确认并列出影响，确认后才写设置", async () => {
