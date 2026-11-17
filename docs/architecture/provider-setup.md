@@ -178,7 +178,7 @@ API key **不以明文落盘**。向导把密钥交给操作系统自带的凭�
 
 1. **内置硬拒绝**（[permissions.md](permissions.md) 5.3）：对 `<NOCTURNE_HOME>/credentials.json` 以及所有生效 `external-file` 路径的 `read` 与 `edit` 一律 `deny`，在规则求值之前生效。明文账号记录仍在这个文件里，不另建凭据文件。任何规则、Grant、`--yes`、预设与 Hook 都不能放开它。
 2. **shell 子进程剥离凭据变量**：`shell` 工具启动子进程时，从环境中移除所有已解析服务商的 `apiKeyEnv` 变量名，以及 `NOCTURNE_API_KEY`、`ANTHROPIC_API_KEY` 两个默认名。默认补入 `PYTHONUNBUFFERED` 的规则见 [tools.md](tools.md) 第 6 节。MCP 服务器已经使用白名单环境（[mcp.md](mcp.md) 第 2 节），不受影响。Hook 维持继承完整环境（它是用户自己配置的脚本，[ADR-0012](../decisions/ADR-0012-hooks.md)）。
-3. **命令提示**：调用系统凭据后端或路径片段指向真实凭据、位置无法静态确定的 `shell` 在全部预设（含 `guarded`/`smart`/`bypass`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"；这是基于模式的提示，不是可靠检测，详见 [permissions.md 第 6 节第 5 条](permissions.md#6-预设)。
+3. **命令提示**：调用系统凭据后端或路径片段指向真实凭据或位置无法静态确定的 `shell` 在全部预设（含 `guarded`/`smart`/`bypass`）中至少 `ask`，`label` 为"可能读取 Nocturne 凭据"；这是基于模式的提示，不是可靠检测，详见 [permissions.md 第 6 节第 5 条](permissions.md#6-预设)。
 4. `providers.json` 加入"Nocturne 授权数据"一组（permissions.md 第 6 节第 4 条）：对它的 `edit` 至少 `ask`——它能把会话重定向到别的端点。
 
 **权限不是沙箱**（permissions.md 第 1 节）：一条已获准的 shell 命令仍然可以用任何方式取出密钥（比如拼接路径、调用脚本、间接调用系统凭据命令）。第 1、2 条挡住的是工具层面的直接读取与环境变量泄漏，第 3 条只是提示。文档与界面都不暗示凭据文件对 shell 完全不可见。

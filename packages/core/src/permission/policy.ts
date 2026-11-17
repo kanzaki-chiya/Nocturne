@@ -126,6 +126,11 @@ function isAbsoluteFragment(fragment: string): boolean {
   );
 }
 
+/** Windows 下将 `/c/…`、`/mnt/c/…`、`/cygdrive/c/…` 转为 `c:/…` 以便与规则 2 比对。 */
+function normalizePosixDrivePrefix(fragment: string): string {
+  return fragment.replace(/^\/(?:(?:mnt|cygdrive)\/)?([a-zA-Z])\//i, "$1:/");
+}
+
 /**
  * 从命令文本中定位每一处凭据文件名并向两侧扩展到分隔符，得到路径片段。
  * 保留嵌入在路径内的 `${…}` / `$(…)` 插值不被内部括号打断。
@@ -198,7 +203,8 @@ function isSensitiveCredentialFragment(
   if (VARIABLE_REF_PATTERN.test(fragment) || fragment.startsWith("~")) return true;
 
   if (isAbsoluteFragment(fragment)) {
-    if (realCredentialPaths.has(normalizePathText(fragment, caseSensitive))) return true;
+    const candidate = caseSensitive ? fragment : normalizePosixDrivePrefix(fragment);
+    if (realCredentialPaths.has(normalizePathText(candidate, caseSensitive))) return true;
     return fragment.split(/[\\/]/).some((seg) => SHORT_83_SEGMENT_PATTERN.test(seg));
   }
 

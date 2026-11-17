@@ -638,10 +638,13 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
       });
 
     const cases: { cmd: string; shellCwd?: string | undefined }[] = [
-      // 绝对路径大小写、分隔符变体、引号包裹
+      // 绝对路径大小写、分隔符变体、引号包裹与 POSIX 盘符写法
       { cmd: "type C:/USERS/TESTER/.NOCTURNE/CREDENTIALS.JSON", shellCwd: WS },
       { cmd: `type "${CRED_INDEX}"`, shellCwd: WS },
       { cmd: `type '${CRED_INDEX.replaceAll("\\", "/")}'`, shellCwd: WS },
+      { cmd: "cat /c/Users/tester/.nocturne/credentials.json", shellCwd: WS },
+      { cmd: "cat /mnt/c/Users/tester/.nocturne/credentials.json", shellCwd: WS },
+      { cmd: "cat /cygdrive/c/Users/tester/.nocturne/credentials.json", shellCwd: WS },
       // ~、环境变量与变量引用
       { cmd: "type ~/.nocturne/credentials.json", shellCwd: WS },
       { cmd: "Get-Content $env:USERPROFILE\\.nocturne\\credentials.json", shellCwd: WS },
@@ -749,6 +752,7 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
       "rg -n '来源标记|状态栏|magpie.json' docs/apps/desktop.md; rg -n 'magpie.json' docs/architecture/config.md",
       'rg -n "magpie.json" next-app',
       'rg -n "credentials.json" .nocturne-bak',
+      "cat /c/tmp/home/credentials.json",
       "git status",
     ];
 
@@ -760,5 +764,26 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
       const gr = guarded.evaluate([subject({ kind: "shell", target: cmd, shellCwd: WS })]);
       expect(gr.decision.reason, `guarded: ${cmd}`).not.toContain("可能读取 Nocturne 凭据");
     }
+  });
+
+  it("caseSensitive 为 true 时不转换 POSIX 盘符路径", () => {
+    const policy = createRulePolicy({
+      workspaceRoot: "/ws/proj",
+      caseSensitive: true,
+      preset: "bypass",
+      protectedPaths: {
+        lexical: ["c:/Users/tester/.nocturne/credentials.json"],
+        resolved: ["c:/Users/tester/.nocturne/credentials.json"],
+      },
+    });
+    const result = policy.evaluate([
+      subject({
+        kind: "shell",
+        target: "cat /c/Users/tester/.nocturne/credentials.json",
+        shellCwd: "/ws/proj",
+      }),
+    ]);
+    expect(result.decision.action).toBe("allow");
+    expect(result.userOnly).not.toBe(true);
   });
 });
