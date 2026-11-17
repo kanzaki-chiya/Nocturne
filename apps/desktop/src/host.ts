@@ -2,6 +2,7 @@ import type { FontFamily } from "./appearance";
 import type { NotifyResult } from "./notify";
 import type { PickedImage } from "./picked-images";
 import type { BackendMessage } from "./types";
+import type { RawChangelogEntry } from "./versions";
 
 /**
  * updater 插件发现的新版本（前端只拿展示数据与安装入口；
@@ -11,6 +12,8 @@ export interface AvailableUpdate {
   version: string;
   /** 发布说明（latest.json 的 notes）；没有为 null */
   notes: string | null;
+  /** latest.json 携带的全部版本更新日志；旧服务端可能没有 */
+  changelog?: readonly RawChangelogEntry[] | undefined;
   downloadAndInstall: (
     onProgress?: (downloaded: number, total: number | undefined) => void,
   ) => Promise<void>;

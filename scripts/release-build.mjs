@@ -26,10 +26,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { extractNotes } from "./release-notes.mjs";
+import { extractChangelog, extractNotes } from "./release-notes.mjs";
 import { packNpm } from "./pack-npm.mjs";
 import { packRelay } from "./pack-relay.mjs";
 import { run } from "./lib/proc.mjs";
@@ -65,6 +65,33 @@ export function effectiveConfig(overridePath) {
   const base = JSON.parse(readFileSync(join(tauriDir, "tauri.conf.json"), "utf8"));
   if (overridePath === undefined) return base;
   return mergeConfig(base, JSON.parse(readFileSync(overridePath, "utf8")));
+}
+
+/**
+ * 生成 latest.json 内容：`notes` 支持 `--notes` 覆盖，`changelog` 始终取 CHANGELOG 全部版本（从新到旧）。
+ */
+export function buildLatestManifest({
+  version,
+  signature,
+  setupName,
+  changelogText,
+  notesOverride,
+  pubDate = new Date().toISOString(),
+}) {
+  const notes = notesOverride ?? extractNotes(changelogText, version);
+  const changelog = extractChangelog(changelogText);
+  return {
+    version,
+    notes,
+    changelog,
+    pub_date: pubDate,
+    platforms: {
+      "windows-x86_64": {
+        signature,
+        url: `${REPO_RELEASES}/v${version}/${setupName}`,
+      },
+    },
+  };
 }
 
 function main() {
@@ -125,20 +152,14 @@ function main() {
     );
   }
   const signature = readFileSync(sigPath, "utf8").trim();
-  const notes =
-    notesOverride ?? extractNotes(readFileSync(join(root, "CHANGELOG.md"), "utf8"), version);
-
-  const latest = {
+  const changelogText = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+  const latest = buildLatestManifest({
     version,
-    notes,
-    pub_date: new Date().toISOString(),
-    platforms: {
-      "windows-x86_64": {
-        signature,
-        url: `${REPO_RELEASES}/v${version}/${setupName}`,
-      },
-    },
-  };
+    signature,
+    setupName,
+    changelogText,
+    notesOverride,
+  });
 
   copyFileSync(setupPath, join(releaseDir, setupName));
   copyFileSync(sigPath, join(releaseDir, `${setupName}.sig`));
@@ -149,9 +170,11 @@ function main() {
   console.log(`latest.json url: ${latest.platforms["windows-x86_64"].url}`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }

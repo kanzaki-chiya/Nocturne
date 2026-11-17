@@ -1,3 +1,50 @@
+export interface RawChangelogEntry {
+  version: string;
+  notes: string;
+}
+
+export interface ChangelogEntry {
+  version: string;
+  notes: string | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * 解析 latest.json 的 changelog 字段：每项必须有字符串 version 与 notes，不合格项丢弃；
+ * 字段缺失或非数组时返回空数组。
+ */
+export function parseRawChangelog(raw: unknown): RawChangelogEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const entries: RawChangelogEntry[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    if (typeof item.version === "string" && item.version !== "" && typeof item.notes === "string") {
+      entries.push({ version: item.version, notes: item.notes });
+    }
+  }
+  return entries;
+}
+
+/** 解析 prefs.pendingUpdate 里的 changelog 字段；字段缺失或非数组返回 undefined（旧格式兼容）。 */
+export function parseStoredChangelog(raw: unknown): ChangelogEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const entries: ChangelogEntry[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    if (
+      typeof item.version === "string" &&
+      item.version !== "" &&
+      (typeof item.notes === "string" || item.notes === null)
+    ) {
+      entries.push({ version: item.version, notes: item.notes });
+    }
+  }
+  return entries;
+}
+
 /** semver 比较：a<b→负数；无预发布号的版本大于同基线的预发布版（0.6.0 > 0.6.0-rc.1） */
 export function compareVersions(a: string, b: string): number {
   const parse = (v: string) => {

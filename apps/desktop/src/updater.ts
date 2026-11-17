@@ -10,14 +10,15 @@
 
 import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
-import { compareVersions } from "./versions";
+import { compareVersions, type ChangelogEntry } from "./versions";
 
 export const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** 提示条展示用的新版本数据 */
+/** 弹窗展示用的新版本数据 */
 export interface UpdateNotice {
   version: string;
   notes: string | null;
+  changelog: ChangelogEntry[];
 }
 
 export type CheckResult =
@@ -27,7 +28,52 @@ export type CheckResult =
 
 export type InstallResult = "installed" | "gone";
 
-export { compareVersions } from "./versions";
+export { compareVersions, type ChangelogEntry } from "./versions";
+
+/**
+ * 从更新源携带的 changelog 中筛出「比当前版本新、且不比最新版本新」的条目，按版本从新到旧排。
+ * 拿不到当前版本时只保留最新版本那一项；过滤后为空时退回成 `[{ version, notes }]`。
+ */
+export function resolveChangelog(
+  latestVersion: string,
+  latestNotes: string | null,
+  rawChangelog: readonly ChangelogEntry[] | undefined,
+  currentVersion: string | undefined,
+): ChangelogEntry[] {
+  const source = rawChangelog ?? [];
+  let filtered: ChangelogEntry[];
+  if (currentVersion === undefined) {
+    const latestEntry = source.find((entry) => compareVersions(entry.version, latestVersion) === 0);
+    filtered = latestEntry !== undefined ? [latestEntry] : [];
+  } else {
+    filtered = source
+      .filter(
+        (entry) =>
+          compareVersions(entry.version, currentVersion) > 0 &&
+          compareVersions(entry.version, latestVersion) <= 0,
+      )
+      .sort((a, b) => compareVersions(b.version, a.version));
+  }
+  if (filtered.length === 0) {
+    return [{ version: latestVersion, notes: latestNotes }];
+  }
+  return filtered.map((entry) => ({ version: entry.version, notes: entry.notes }));
+}
+
+function buildNotice(
+  source: {
+    version: string;
+    notes: string | null;
+    changelog?: readonly ChangelogEntry[] | undefined;
+  },
+  currentVersion: string | undefined,
+): UpdateNotice {
+  return {
+    version: source.version,
+    notes: source.notes,
+    changelog: resolveChangelog(source.version, source.notes, source.changelog, currentVersion),
+  };
+}
 
 /**
  * 把 updater 的原始错误（多为 tauri-plugin-updater 的英文信息）映射成界面用的中文说明。
@@ -75,7 +121,7 @@ export function createUpdateService(opts: {
       prefs.update({ pendingUpdate: undefined });
       return undefined;
     }
-    return pending;
+    return buildNotice(pending, current);
   }
 
   /** 自动检查：开关关或距上次不足 24h 时跳过。失败只写外壳日志。 */
@@ -91,7 +137,7 @@ export function createUpdateService(opts: {
         prefs.update({ pendingUpdate: undefined });
         return undefined;
       }
-      const notice: UpdateNotice = { version: update.version, notes: update.notes };
+      const notice = buildNotice(update, opts.currentVersion());
       prefs.update({ pendingUpdate: notice });
       note(`发现新版本 v${update.version}`);
       return notice;
@@ -110,7 +156,7 @@ export function createUpdateService(opts: {
         prefs.update({ pendingUpdate: undefined });
         return { kind: "latest" };
       }
-      const notice: UpdateNotice = { version: update.version, notes: update.notes };
+      const notice = buildNotice(update, opts.currentVersion());
       prefs.update({ pendingUpdate: notice });
       return { kind: "update", notice };
     } catch (error) {
@@ -139,7 +185,7 @@ export function createUpdateService(opts: {
     try {
       await update.downloadAndInstall(onProgress);
     } catch (error) {
-      prefs.update({ pendingUpdate: { version: update.version, notes: update.notes } });
+      prefs.update({ pendingUpdate: buildNotice(update, opts.currentVersion()) });
       note(`更新安装失败：${messageOf(error)}`);
       throw error;
     }

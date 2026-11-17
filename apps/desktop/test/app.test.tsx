@@ -1801,32 +1801,75 @@ it("一次切换只刷新一次会话列表", async () => {
 // ── 自动更新（ADR-0050 第 3 节）──────────────────────────────
 
 /** 让假宿主的更新检查返回一个可用的新版本 */
-function serveUpdate(host: ReturnType<typeof replayHost>, failInstall?: unknown) {
-  const install = vi.fn(async () => {
-    if (failInstall !== undefined) throw failInstall;
+function serveUpdate(
+  host: ReturnType<typeof replayHost>,
+  opts?: {
+    version?: string;
+    notes?: string | null;
+    changelog?: { version: string; notes: string }[];
+    failInstall?: unknown;
+    onInstall?: (
+      onProgress?: (downloaded: number, total: number | undefined) => void,
+    ) => Promise<void>;
+  },
+) {
+  const install = vi.fn(async (onProgress?: (d: number, t: number | undefined) => void) => {
+    if (opts?.onInstall !== undefined) {
+      await opts.onInstall(onProgress);
+      return;
+    }
+    if (opts?.failInstall !== undefined) throw opts.failInstall;
   });
   host.checkUpdate = async () => ({
-    version: "9.9.9",
-    notes: "## 修复\n- 修好了一些事",
+    version: opts?.version ?? "9.9.9",
+    notes: opts?.notes === undefined ? "### 修复\n- 修好了一些事" : opts.notes,
+    ...(opts?.changelog !== undefined ? { changelog: opts.changelog } : {}),
     downloadAndInstall: install,
   });
   return install;
 }
 
-it("发现新版本时底部出提示条；「稍后」只隐藏本次运行", async () => {
+it("发现新版本时弹出跨版本更新日志弹窗（无 .updbar）；「稍后」与 Esc 关闭弹窗", async () => {
   const host = replayHost();
-  serveUpdate(host);
-  render(<App host={host} />);
-  const bar = await screen.findByRole("status", { name: "发现新版本" });
-  expect(bar.textContent).toContain("发现新版本 v9.9.9");
-  expect(bar.textContent).toContain("修复");
-  // 「稍后」隐藏提示条；pendingUpdate 仍留在 prefs 里，下次启动再提示
-  fireEvent.click(within(bar).getByRole("button", { name: "稍后" }));
+  host.appVersion = async () => "0.48.0";
+  serveUpdate(host, {
+    version: "0.50.0",
+    notes: "### 桌面端\n- 新增 A",
+    changelog: [
+      { version: "0.48.0", notes: "- 旧版" },
+      { version: "0.49.0", notes: "### 桌面端\n- 改进 B" },
+      { version: "0.50.0", notes: "### 桌面端\n- 新增 A" },
+    ],
+  });
+  const { unmount } = render(<App host={host} />);
+  const dialog = await screen.findByRole("dialog", { name: "发现新版本 v0.50.0" });
+  expect(document.querySelector(".updbar")).toBeNull();
   expect(screen.queryByRole("status", { name: "发现新版本" })).toBeNull();
+  // 按版本从新到旧列出当前版本（不含）到最新版本（含）之间的小标题
+  const subheadings = within(dialog)
+    .getAllByRole("heading", { level: 4 })
+    .map((el) => el.textContent);
+  expect(subheadings).toEqual(["v0.50.0", "v0.49.0"]);
+  expect(dialog.textContent).toContain("新增 A");
+  expect(dialog.textContent).toContain("改进 B");
+  expect(dialog.textContent).not.toContain("旧版");
+
+  // 「稍后」关闭本次运行弹窗；pendingUpdate 仍留在 prefs 里，下次启动再提示
+  fireEvent.click(within(dialog).getByRole("button", { name: "稍后" }));
+  expect(screen.queryByRole("dialog", { name: "发现新版本 v0.50.0" })).toBeNull();
   const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
-    pendingUpdate?: { version?: string };
+    pendingUpdate?: { version?: string; changelog?: { version: string }[] };
   };
-  expect(stored.pendingUpdate?.version).toBe("9.9.9");
+  expect(stored.pendingUpdate?.version).toBe("0.50.0");
+  expect(stored.pendingUpdate?.changelog?.map((e) => e.version)).toEqual(["0.50.0", "0.49.0"]);
+
+  // 下次启动从 pendingNotice() 恢复弹窗，按 Esc 关闭
+  unmount();
+  render(<App host={host} />);
+  const reopened = await screen.findByRole("dialog", { name: "发现新版本 v0.50.0" });
+  expect(reopened).toBeTruthy();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "发现新版本 v0.50.0" })).toBeNull();
 });
 
 it("自动检查失败不出 UI，原因写进外壳日志", async () => {
@@ -1839,61 +1882,99 @@ it("自动检查失败不出 UI，原因写进外壳日志", async () => {
   await waitFor(() =>
     expect(host.shellLog.some((line) => line.includes("endpoint 404"))).toBe(true),
   );
-  expect(screen.queryByRole("status", { name: "发现新版本" })).toBeNull();
+  expect(document.querySelector(".updbar")).toBeNull();
+  expect(screen.queryByRole("dialog", { name: /^发现新版本/ })).toBeNull();
 });
 
-it("有运行中的会话时点「立即更新」先确认会中断会话", async () => {
+it("有运行中的会话时点「立即更新」先在弹窗内确认，「取消」回到更新日志", async () => {
   const host = replayHost();
   const install = serveUpdate(host);
   render(<App host={host} />);
   // alpha 有未决权限卡片 → 非 idle
   fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
   await screen.findByRole("region", { name: "权限确认" });
-  const bar = await screen.findByRole("status", { name: "发现新版本" });
-  fireEvent.click(within(bar).getByRole("button", { name: "立即更新" }));
-  const dialog = await screen.findByRole("dialog", { name: "更新确认" });
+  const dialog = await screen.findByRole("dialog", { name: "发现新版本 v9.9.9" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "立即更新" }));
   expect(dialog.textContent).toMatch(/将中断\s*1\s*个正在运行的会话/);
-  // 取消：对话框关掉、提示条还在、没有开始安装
+  // 取消：留在同一个弹窗并回到更新日志、没有开始安装
   fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-  expect(screen.queryByRole("dialog", { name: "更新确认" })).toBeNull();
-  expect(screen.getByRole("status", { name: "发现新版本" })).toBeTruthy();
+  expect(dialog.textContent).not.toContain("将中断");
+  expect(within(dialog).getByRole("heading", { level: 4, name: "v9.9.9" })).toBeTruthy();
+  expect(dialog.textContent).toContain("修好了一些事");
   expect(install).not.toHaveBeenCalled();
   // 确认后真正下载安装
-  fireEvent.click(
-    within(screen.getByRole("status", { name: "发现新版本" })).getByRole("button", {
-      name: "立即更新",
-    }),
-  );
-  fireEvent.click(
-    within(await screen.findByRole("dialog", { name: "更新确认" })).getByRole("button", {
-      name: "继续更新",
-    }),
-  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "立即更新" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "继续更新" }));
   await waitFor(() => expect(install).toHaveBeenCalled());
 });
 
-it("没有运行中的会话时直接下载安装；失败把原因留在提示条", async () => {
+it("没有运行中的会话时直接下载安装；下载中禁用 Esc/遮罩，失败留在弹窗并可重试", async () => {
   const host = replayHost();
-  const install = serveUpdate(host, new Error("Invalid encoding in minisign data"));
+  let finishInstall!: () => void;
+  let rejectNext = true;
+  const install = serveUpdate(host, {
+    onInstall: (onProgress) =>
+      new Promise<void>((resolve, reject) => {
+        onProgress?.(5 * 1048576, 10 * 1048576);
+        finishInstall = () => {
+          if (rejectNext) {
+            reject(new Error("Invalid encoding in minisign data"));
+          } else {
+            resolve();
+          }
+        };
+      }),
+  });
   render(<App host={host} />);
-  const bar = await screen.findByRole("status", { name: "发现新版本" });
+  const dialog = await screen.findByRole("dialog", { name: "发现新版本 v9.9.9" });
   // gamma 会话是 idle；不打开任何会话也没有 running Turn
-  fireEvent.click(within(bar).getByRole("button", { name: "立即更新" }));
-  // 不弹确认框，直接安装
-  expect(screen.queryByRole("dialog", { name: "更新确认" })).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "立即更新" }));
+  expect(dialog.textContent).not.toContain("将中断");
+  // 下载期间显示进度且隐藏按钮，Esc 与点遮罩均不关闭
+  await waitFor(() => expect(dialog.textContent).toContain("已下载 5 / 10 MB"));
+  expect(within(dialog).queryByRole("button")).toBeNull();
+  fireEvent.keyDown(window, { key: "Escape" });
+  const backdrop = dialog.parentElement;
+  if (backdrop !== null) fireEvent.mouseDown(backdrop);
+  expect(screen.getByRole("dialog", { name: "发现新版本 v9.9.9" })).toBeTruthy();
+
+  finishInstall();
   await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
-  // 界面只显示中文说明，原始英文信息进外壳日志
-  await waitFor(() => expect(bar.textContent).toContain("签名校验失败，已取消安装"));
-  expect(bar.textContent).not.toContain("minisign");
+  // 界面只显示中文说明，原始英文信息进外壳日志，按钮换成「稍后」「重试」
+  await waitFor(() => expect(dialog.textContent).toContain("签名校验失败，已取消安装"));
+  expect(dialog.textContent).not.toContain("minisign");
   expect(host.shellLog.some((line) => line.includes("Invalid encoding in minisign data"))).toBe(
     true,
   );
-  expect(within(bar).getByRole("button", { name: "重试" })).toBeTruthy();
+  expect(within(dialog).getByRole("button", { name: "稍后" })).toBeTruthy();
+  expect(within(dialog).getByRole("button", { name: "重试" })).toBeTruthy();
   // pendingUpdate 恢复，下次启动仍提示
   const stored = JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}") as {
     pendingUpdate?: { version?: string };
   };
   expect(stored.pendingUpdate?.version).toBe("9.9.9");
+  rejectNext = false;
+  fireEvent.click(within(dialog).getByRole("button", { name: "重试" }));
+  finishInstall();
+  await waitFor(() => expect(install).toHaveBeenCalledTimes(2));
+});
+
+it("设置 › 常规 手动检查发现新版本也打开更新弹窗；按 Esc 只关闭弹窗不退出设置", async () => {
+  localStorage.setItem("nocturne.desktop.prefs.v1", JSON.stringify({ autoUpdate: false }));
+  const host = replayHost();
+  serveUpdate(host, {
+    version: "1.2.0",
+    notes: "### 修复\n- 手动检查发现的新版",
+  });
+  render(<App host={host} />);
+  await screen.findByLabelText("消息输入");
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
+  const dialog = await screen.findByRole("dialog", { name: "发现新版本 v1.2.0" });
+  expect(dialog.textContent).toContain("手动检查发现的新版");
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "发现新版本 v1.2.0" })).toBeNull();
+  expect(screen.getByRole("navigation", { name: "设置" })).toBeTruthy();
 });
 
 /** 后台会话的一条实时 turn.completed（time 用给定时刻，算用时） */

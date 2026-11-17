@@ -436,8 +436,8 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 - **检查时机**：启动进入就绪页后自动检查一次；之后由 `prefs.lastUpdateCheck` 节流，24 小时内最多一次。`prefs.autoUpdate` 显式 `false` 时自动检查完全不跑。手动「检查更新」同样计入节流但不等 24 小时。
 - **失败降级**：自动检查失败（网络不可达、签名/端点错误）只写外壳日志（`app_note`），不出任何 UI；手动检查失败把原因写在设置行内。界面上的失败原因统一经 `describeUpdateError` 映射成中文（签名相关 →「签名校验失败，已取消安装」，网络/下载 →「下载失败，请检查网络后重试」，其他 →「更新失败：」加原始信息），原始英文信息只写外壳日志。
-- **提示**：发现新版本把 `{ version, notes }` 存进 `prefs.pendingUpdate`，并在窗口底部出提示条（`.updbar`，盖过设置层但不打断输入）：版本号 + 发布说明首行 + 「立即更新」「稍后」。「稍后」只清本次运行的提示状态，`pendingUpdate` 保留，下次启动若仍比当前版本新会继续提示；不比当前版本新时 `pendingUpdate` 被丢弃。
-- **确认与安装**：点「立即更新」时若还有非空闲会话（运行中或等待确认），先弹「将中断 N 个正在运行的会话」确认框；没有则直接下载。安装前再调一次 `checkUpdate` 拿 `Update` 句柄（存的 `pendingUpdate` 没有安装入口），期间提示条显示下载进度；下载/签名校验失败把原因留在提示条并恢复 `pendingUpdate`。Windows 下安装器在 `downloadAndInstall` 期间接管并退出进程（被动安装），随后由更新流程自动重启；其他平台装完调 `process` 插件 `relaunch`。
+- **提示**：发现新版本把 `{ version, notes, changelog }` 存进 `prefs.pendingUpdate`（`changelog` 只保留比当前版本新且不比最新版本新的条目，按版本从新到旧排；拿不到当前版本时只保留最新版本那一项，过滤后为空则退回到 `[{ version, notes }]`；读旧格式 `pendingUpdate` 同样退回），并在窗口内打开更新日志弹窗（`.desktop-dialog.update-dialog`）：标题「发现新版本 v…」，正文按版本从新到旧用 `Markdown` 渲染各版本说明（`v<版本>` 小标题用 `--mono`，限高内部滚动），按钮「稍后」「立即更新」。「稍后」、Esc 与点遮罩只清本次运行的弹窗状态，`pendingUpdate` 保留，下次启动若仍比当前版本新会继续弹窗；不比当前版本新时 `pendingUpdate` 被丢弃。
+- **确认与安装**：点「立即更新」时若还有非空闲会话（运行中或等待确认），先在同一个弹窗内切换为「将中断 N 个正在运行的会话」确认内容（按钮「取消」「继续更新」，「取消」回到更新日志）；没有则直接下载。安装前再调一次 `checkUpdate` 拿 `Update` 句柄（存的 `pendingUpdate` 没有安装入口），期间弹窗显示下载进度并隐藏按钮，Esc 与点遮罩均不起作用；下载/签名校验失败在弹窗内显示原因、按钮换成「稍后」「重试」，并恢复 `pendingUpdate`。Windows 下安装器在 `downloadAndInstall` 期间接管并退出进程（被动安装），随后由更新流程自动重启；其他平台装完调 `process` 插件 `relaunch`。
 - **更新器配置**：`tauri.conf.json` 开 `bundle.createUpdaterArtifacts`，`plugins.updater` 配 `pubkey`（minisign 公钥）、`endpoints` 指向 GitHub Release 的 `latest.json`、Windows `installMode: "passive"`。签名私钥只经 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` 环境变量在构建期注入（见 [workflow.md](../development/workflow.md) 第 8 节）。
 
 ### 5.9 会话通知（ADR-0056）

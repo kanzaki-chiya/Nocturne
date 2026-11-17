@@ -6,7 +6,9 @@ import {
   compareVersions,
   createUpdateService,
   describeUpdateError,
+  resolveChangelog,
 } from "../src/updater";
+import { parseRawChangelog } from "../src/versions";
 import type { AvailableUpdate } from "../src/host";
 
 function memoryStorage(initial?: Record<string, string>): Storage {
@@ -30,6 +32,7 @@ function memoryStorage(initial?: Record<string, string>): Storage {
 function fakeUpdate(
   version: string,
   notes: string | null = null,
+  changelog?: AvailableUpdate["changelog"],
 ): AvailableUpdate & {
   installs: number;
   /** 安装时要抛出的错误；undefined 表示安装成功 */
@@ -38,6 +41,7 @@ function fakeUpdate(
   const update = {
     version,
     notes,
+    ...(changelog !== undefined ? { changelog } : {}),
     installs: 0,
     failInstall: undefined as unknown,
     downloadAndInstall(onProgress?: (d: number, t: number | undefined) => void) {
@@ -54,7 +58,8 @@ function harness(opts?: {
   update?: AvailableUpdate | null;
   checkError?: unknown;
   prefs?: Record<string, string>;
-  version?: string;
+  version?: string | undefined;
+  hasVersion?: boolean;
   now?: () => number;
 }) {
   const notes: string[] = [];
@@ -78,7 +83,7 @@ function harness(opts?: {
   const svc = createUpdateService({
     host,
     prefs,
-    currentVersion: () => opts?.version ?? "0.5.0",
+    currentVersion: () => (opts?.hasVersion === false ? undefined : (opts?.version ?? "0.5.0")),
     ...(opts?.now !== undefined ? { now: opts.now } : {}),
   });
   return {
@@ -131,11 +136,13 @@ describe("update service", () => {
   it("发现新版本时写 pendingUpdate 并返回提示", async () => {
     const h = harness({ update: fakeUpdate("0.6.0", "修复若干问题") });
     const notice = await h.svc.autoCheck();
-    expect(notice).toEqual({ version: "0.6.0", notes: "修复若干问题" });
-    expect(h.prefs.get().pendingUpdate).toEqual({
+    const expected = {
       version: "0.6.0",
       notes: "修复若干问题",
-    });
+      changelog: [{ version: "0.6.0", notes: "修复若干问题" }],
+    };
+    expect(notice).toEqual(expected);
+    expect(h.prefs.get().pendingUpdate).toEqual(expected);
   });
 
   it("手动检查：失败把原因交回界面；无更新时回报 latest", async () => {
@@ -153,7 +160,10 @@ describe("update service", () => {
   it("手动检查发现新版本时写 pendingUpdate", async () => {
     const h = harness({ update: fakeUpdate("9.9.9") });
     const result = await h.svc.manualCheck();
-    expect(result).toEqual({ kind: "update", notice: { version: "9.9.9", notes: null } });
+    expect(result).toEqual({
+      kind: "update",
+      notice: { version: "9.9.9", notes: null, changelog: [{ version: "9.9.9", notes: null }] },
+    });
     expect(h.prefs.get().pendingUpdate?.version).toBe("9.9.9");
   });
 
@@ -170,7 +180,7 @@ describe("update service", () => {
     expect(stale.svc.pendingNotice()).toBeUndefined();
     expect(stale.prefs.get().pendingUpdate).toBeUndefined();
 
-    // 仍比当前新：重启后再提示（「稍后」只清本次运行的提示状态，不动 prefs）
+    // 仍比当前新（旧格式 pendingUpdate 没有 changelog）：退回成单条并正常提示
     const fresh = harness({
       version: "0.5.0",
       prefs: {
@@ -179,7 +189,86 @@ describe("update service", () => {
         }),
       },
     });
-    expect(fresh.svc.pendingNotice()).toEqual({ version: "0.6.0", notes: "n" });
+    expect(fresh.svc.pendingNotice()).toEqual({
+      version: "0.6.0",
+      notes: "n",
+      changelog: [{ version: "0.6.0", notes: "n" }],
+    });
+  });
+
+  it("跨版本 changelog 过滤：当前版本落在中间、拿不到当前版本、changelog 缺失退回、旧格式 pendingUpdate", async () => {
+    const fullChangelog = [
+      { version: "0.51.0", notes: "超前版本" },
+      { version: "0.49.0", notes: "中间版本" },
+      { version: "0.50.0", notes: "最新版本" },
+      { version: "0.48.0", notes: "当前版本" },
+      { version: "0.47.0", notes: "更早版本" },
+    ];
+
+    // 1. 当前版本落在中间：只保留 (0.48.0, 0.50.0]，按从新到旧排
+    const mid = harness({
+      version: "0.48.0",
+      update: fakeUpdate("0.50.0", "最新版本", fullChangelog),
+    });
+    const midNotice = await mid.svc.autoCheck();
+    expect(midNotice?.changelog).toEqual([
+      { version: "0.50.0", notes: "最新版本" },
+      { version: "0.49.0", notes: "中间版本" },
+    ]);
+
+    // 2. 拿不到当前版本：只保留最新版本那一项
+    const noVer = harness({
+      hasVersion: false,
+      update: fakeUpdate("0.50.0", "最新版本", fullChangelog),
+    });
+    const noVerNotice = await noVer.svc.autoCheck();
+    expect(noVerNotice?.changelog).toEqual([{ version: "0.50.0", notes: "最新版本" }]);
+
+    // 3. changelog 缺失或过滤后为空：退回成 [{ version, notes }]
+    const missing = harness({
+      version: "0.48.0",
+      update: fakeUpdate("0.50.0", "单版说明"),
+    });
+    expect((await missing.svc.autoCheck())?.changelog).toEqual([
+      { version: "0.50.0", notes: "单版说明" },
+    ]);
+    expect(
+      resolveChangelog("0.50.0", "单版说明", [{ version: "0.48.0", notes: "旧" }], "0.48.0"),
+    ).toEqual([{ version: "0.50.0", notes: "单版说明" }]);
+
+    // 4. 旧格式 pendingUpdate（无 changelog 字段）不报错，退回成 [{ version, notes }]
+    const legacy = harness({
+      version: "0.48.0",
+      prefs: {
+        [PREFS_KEY]: JSON.stringify({
+          pendingUpdate: { version: "0.50.0", notes: "旧格式说明" },
+        }),
+      },
+    });
+    expect(legacy.svc.pendingNotice()).toEqual({
+      version: "0.50.0",
+      notes: "旧格式说明",
+      changelog: [{ version: "0.50.0", notes: "旧格式说明" }],
+    });
+  });
+
+  it("parseRawChangelog 校验 rawJson.changelog 形状并丢弃不合格项", () => {
+    expect(parseRawChangelog(undefined)).toEqual([]);
+    expect(parseRawChangelog("not-array")).toEqual([]);
+    expect(
+      parseRawChangelog([
+        null,
+        { version: "0.50.0", notes: "有效" },
+        { version: 50, notes: "版本号不是字符串" },
+        { version: "", notes: "空版本号" },
+        { version: "0.49.0", notes: null },
+        { version: "0.48.0" },
+        { version: "0.47.0", notes: "有效2" },
+      ]),
+    ).toEqual([
+      { version: "0.50.0", notes: "有效" },
+      { version: "0.47.0", notes: "有效2" },
+    ]);
   });
 
   it("安装：重新检查、下载安装、清 pendingUpdate 并重启", async () => {
@@ -245,7 +334,11 @@ describe("compareVersions", () => {
         [PREFS_KEY]: JSON.stringify({ pendingUpdate: { version: "0.6.0", notes: null } }),
       },
     });
-    expect(h.svc.pendingNotice()).toEqual({ version: "0.6.0", notes: null });
+    expect(h.svc.pendingNotice()).toEqual({
+      version: "0.6.0",
+      notes: null,
+      changelog: [{ version: "0.6.0", notes: null }],
+    });
   });
 });
 

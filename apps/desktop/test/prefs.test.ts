@@ -278,6 +278,34 @@ describe("prefs store", () => {
     expect(bad.autoUpdate).toBeUndefined();
     expect(bad.lastUpdateCheck).toBeUndefined();
     expect(bad.pendingUpdate).toEqual({ version: "0.6.0", notes: null });
+
+    // pendingUpdate.changelog 往返并过滤不合格条目
+    store.update({
+      pendingUpdate: {
+        version: "0.6.0",
+        notes: "n",
+        changelog: [
+          { version: "0.6.0", notes: "新版" },
+          { version: "0.5.5", notes: null },
+        ],
+      },
+    });
+    expect(createPrefsStore(storage).get().pendingUpdate?.changelog).toEqual([
+      { version: "0.6.0", notes: "新版" },
+      { version: "0.5.5", notes: null },
+    ]);
+    const mixed = createPrefsStore(
+      memoryStorage({
+        [PREFS_KEY]: JSON.stringify({
+          pendingUpdate: {
+            version: "0.6.0",
+            notes: "n",
+            changelog: [{ version: "0.6.0", notes: "ok" }, { version: 1, notes: "bad" }, "bad"],
+          },
+        }),
+      }),
+    ).get();
+    expect(mixed.pendingUpdate?.changelog).toEqual([{ version: "0.6.0", notes: "ok" }]);
   });
 
   it("右侧面板：开关、宽度、概览、标签读写往返；损坏的标签逐项丢弃", () => {

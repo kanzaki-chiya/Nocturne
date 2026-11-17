@@ -21,6 +21,7 @@ import type {
 import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
+import { parseRawChangelog } from "./versions";
 
 export function createTauriHost(): DesktopHost {
   const paths = (globalThis as typeof globalThis & { __NOCTURNE_SESSION_PATHS__?: unknown })
@@ -141,6 +142,7 @@ export function createTauriHost(): DesktopHost {
       return {
         version: update.version,
         notes: update.body ?? null,
+        changelog: parseRawChangelog(update.rawJson.changelog),
         downloadAndInstall(onProgress) {
           let downloaded = 0;
           let total: number | undefined;

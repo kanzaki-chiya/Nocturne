@@ -47,6 +47,7 @@ import {
 } from "./Composer";
 import {
   Conversation,
+  Markdown,
   QuestionCard,
   type ConversationProps,
   type FileLinkHooks,
@@ -425,6 +426,8 @@ export function App({ host }: { host: DesktopHost }) {
   );
   /** 待提示的新版本；「稍后」只清这个 state，prefs.pendingUpdate 保留到下次启动 */
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
+  /** 本次启动期间用户已「稍后」的版本号，避免飞行中的 autoCheck 结束后把刚关掉的同一版本弹窗再顶出来 */
+  const dismissedUpdateVersionRef = useRef<string | null>(null);
   const [updateFlow, setUpdateFlow] = useState<
     | null
     | { stage: "confirm"; running: number }
@@ -751,9 +754,14 @@ export function App({ host }: { host: DesktopHost }) {
         // 版本号取不到不阻塞更新流程（pendingUpdate 的版本过滤跳过）
       }
       const pending = updateSvc.pendingNotice();
-      if (pending !== undefined) setUpdateNotice(pending);
+      if (pending !== undefined) {
+        dismissedUpdateVersionRef.current = null;
+        setUpdateNotice(pending);
+      }
       const found = await updateSvc.autoCheck();
-      if (found !== undefined) setUpdateNotice(found);
+      if (found !== undefined && dismissedUpdateVersionRef.current !== found.version) {
+        setUpdateNotice(found);
+      }
     })();
   }, [phase.kind, host, updateSvc]);
 
@@ -1602,7 +1610,31 @@ export function App({ host }: { host: DesktopHost }) {
     return next;
   };
 
-  // ── 更新安装：有运行中的 Turn 先确认；下载/签名失败把原因留在提示条里 ──
+  const dismissUpdateDialog = useCallback(() => {
+    setUpdateNotice((cur) => {
+      if (cur !== null) dismissedUpdateVersionRef.current = cur.version;
+      return null;
+    });
+    setUpdateFlow(null);
+  }, []);
+
+  // 更新弹窗：Esc 等同「稍后」，下载期间不起作用；capture 阶段截断，避免同时关闭底下的设置页
+  useEffect(() => {
+    if (updateNotice === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (updateFlow?.stage === "working") return;
+      dismissUpdateDialog();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [updateNotice, updateFlow?.stage, dismissUpdateDialog]);
+
+  // 更新安装：有运行中的 Turn 先确认；下载/签名失败把原因留在弹窗里
   const doUpdateInstall = async () => {
     setUpdateFlow({ stage: "working", text: "正在下载并安装更新…" });
     try {
@@ -1638,18 +1670,6 @@ export function App({ host }: { host: DesktopHost }) {
       void doUpdateInstall();
     }
   };
-
-  const updateNoticeSummary =
-    updateNotice?.notes
-      ?.split("\n")
-      .map((line) =>
-        line
-          .trim()
-          .replace(/^#+\s*/, "")
-          .replace(/^-+\s*/, ""),
-      )
-      .find((line) => line !== "")
-      ?.slice(0, 80) ?? null;
 
   if (phase.kind === "probing" && !sessionsVisible) {
     return <div className="center" />;
@@ -2159,7 +2179,11 @@ export function App({ host }: { host: DesktopHost }) {
                         },
                         onCheck: async () => {
                           const result = await updateSvc.manualCheck();
-                          if (result.kind === "update") setUpdateNotice(result.notice);
+                          if (result.kind === "update") {
+                            dismissedUpdateVersionRef.current = null;
+                            setUpdateFlow(null);
+                            setUpdateNotice(result.notice);
+                          }
                           return result;
                         },
                       }}
@@ -2416,66 +2440,6 @@ export function App({ host }: { host: DesktopHost }) {
               </PaneErrorBoundary>
             )}
           </div>
-          {updateNotice !== null && (
-            <div className="updbar" role="status" aria-label="发现新版本">
-              {updateFlow?.stage === "working" ? (
-                <span className="t">{updateFlow.text}</span>
-              ) : (
-                <>
-                  <span className="t">发现新版本 v{updateNotice.version}</span>
-                  {updateNoticeSummary !== null && (
-                    <span className="notes">{updateNoticeSummary}</span>
-                  )}
-                  {updateFlow?.stage === "error" && (
-                    <span className="err">{describeUpdateError(updateFlow.message)}</span>
-                  )}
-                  <Button variant="primary" size="sm" onClick={beginUpdateInstall}>
-                    {updateFlow?.stage === "error" ? "重试" : "立即更新"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      // 「稍后」只对本次运行有效：prefs.pendingUpdate 保留，
-                      // 下次启动若仍比当前版本新会继续提示
-                      setUpdateNotice(null);
-                      setUpdateFlow(null);
-                    }}
-                  >
-                    稍后
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
-          {updateFlow?.stage === "confirm" && (
-            <div className="dialog-backdrop">
-              <div className="desktop-dialog" role="dialog" aria-modal="true" aria-label="更新确认">
-                <h3>更新到 v{updateNotice?.version ?? "新版本"}</h3>
-                <p>
-                  将中断 {updateFlow.running}
-                  个正在运行的会话。安装更新会关闭窗口与后台进程，完成后自动重启。
-                </p>
-                <div className="acts">
-                  <Button
-                    onClick={() => {
-                      setUpdateFlow(null);
-                    }}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      void doUpdateInstall();
-                    }}
-                  >
-                    继续更新
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
           {quitPrompt !== null && (
             <div className="dialog-backdrop">
               <div
@@ -2589,6 +2553,91 @@ export function App({ host }: { host: DesktopHost }) {
           />
         )}
         {sidePanel.panel}
+        {updateNotice !== null && (
+          <div
+            className="dialog-backdrop update-dialog-backdrop"
+            onMouseDown={(event) => {
+              if (event.target !== event.currentTarget || updateFlow?.stage === "working") return;
+              dismissUpdateDialog();
+            }}
+          >
+            <div
+              className="desktop-dialog update-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="update-dialog-title"
+            >
+              <h3 id="update-dialog-title">
+                发现新版本 v{updateNotice.version.replace(/^v/i, "")}
+              </h3>
+              {updateFlow?.stage === "confirm" ? (
+                <>
+                  <p className="update-dialog-msg">
+                    将中断 {updateFlow.running}{" "}
+                    个正在运行的会话。安装更新会关闭窗口与后台进程，完成后自动重启。
+                  </p>
+                  <div className="acts">
+                    <Button
+                      onClick={() => {
+                        setUpdateFlow(null);
+                      }}
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        void doUpdateInstall();
+                      }}
+                    >
+                      继续更新
+                    </Button>
+                  </div>
+                </>
+              ) : updateFlow?.stage === "working" ? (
+                <p className="update-dialog-msg">{updateFlow.text}</p>
+              ) : updateFlow?.stage === "error" ? (
+                <>
+                  <p className="update-dialog-msg err">{describeUpdateError(updateFlow.message)}</p>
+                  <div className="acts">
+                    <Button variant="ghost" onClick={dismissUpdateDialog}>
+                      稍后
+                    </Button>
+                    <Button variant="primary" onClick={beginUpdateInstall}>
+                      重试
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="update-dialog-body">
+                    {updateNotice.changelog.map((entry, idx) => (
+                      <section className="update-dialog-ver" key={`${entry.version}-${idx}`}>
+                        <h4>v{entry.version.replace(/^v/i, "")}</h4>
+                        {entry.notes !== null && entry.notes !== "" && (
+                          <Markdown
+                            text={entry.notes}
+                            openUrl={(url) => {
+                              void host.openUrl(url);
+                            }}
+                          />
+                        )}
+                      </section>
+                    ))}
+                  </div>
+                  <div className="acts divided">
+                    <Button variant="ghost" onClick={dismissUpdateDialog}>
+                      稍后
+                    </Button>
+                    <Button variant="primary" onClick={beginUpdateInstall}>
+                      立即更新
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </ImageViewerProvider>
   );

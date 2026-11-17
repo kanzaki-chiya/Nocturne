@@ -12,6 +12,7 @@ import {
   type StoredPanelTab,
   type StoredSessionPanel,
 } from "./side-panel";
+import { parseStoredChangelog, type ChangelogEntry } from "./versions";
 
 export type { ProjectSort };
 
@@ -132,7 +133,8 @@ export interface Prefs {
   /** 模型回复里的本地网址（localhost / 127.0.0.1 / [::1]）；缺省系统浏览器，只存 "panel" */
   localLinkOpener?: LinkOpener | undefined;
   /** 上次检查发现的新版本；「稍后」只清本次运行，重启后若仍比当前新则继续提示 */
-  pendingUpdate?: { version: string; notes: string | null } | undefined;
+  pendingUpdate?:
+    { version: string; notes: string | null; changelog?: ChangelogEntry[] | undefined } | undefined;
 }
 
 const DEFAULTS: Prefs = {
@@ -279,9 +281,11 @@ function parse(raw: string | null): Prefs {
     typeof (pending as Record<string, unknown>).version === "string"
   ) {
     const notes = (pending as Record<string, unknown>).notes;
+    const changelog = parseStoredChangelog((pending as Record<string, unknown>).changelog);
     prefs.pendingUpdate = {
       version: (pending as { version: string }).version,
       notes: typeof notes === "string" ? notes : null,
+      ...(changelog !== undefined ? { changelog } : {}),
     };
   }
   // lastProject 已废弃：旧数据里的这个字段直接忽略
@@ -372,7 +376,19 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.downloadDir !== undefined ? { downloadDir: prefs.downloadDir } : {}),
         ...(prefs.webLinkOpener !== undefined ? { webLinkOpener: prefs.webLinkOpener } : {}),
         ...(prefs.localLinkOpener !== undefined ? { localLinkOpener: prefs.localLinkOpener } : {}),
-        ...(prefs.pendingUpdate !== undefined ? { pendingUpdate: { ...prefs.pendingUpdate } } : {}),
+        ...(prefs.pendingUpdate !== undefined
+          ? {
+              pendingUpdate: {
+                version: prefs.pendingUpdate.version,
+                notes: prefs.pendingUpdate.notes,
+                ...(prefs.pendingUpdate.changelog !== undefined
+                  ? {
+                      changelog: prefs.pendingUpdate.changelog.map((entry) => ({ ...entry })),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
       };
     },
     update(patch) {
