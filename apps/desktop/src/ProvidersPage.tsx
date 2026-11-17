@@ -1160,7 +1160,7 @@ type ProbeState =
  * 服务商详情内联配置表单：
  * - 自定义条目可改协议、显示名称、服务地址、请求头与会话标识请求头；
  * - 其他条目以只读输入框显示协议与完整 baseURL；
- * - apiKey / none 且 managed 时显示 API 密钥输入框；
+ * - apiKey / none 且 managed 时显示 API Key 输入框；
  * - 地址或协议变更后点保存时先自动探测模型列表，失败时在服务地址下报错并允许「仍然保存」。
  */
 function ProviderConfigForm({
@@ -1496,7 +1496,7 @@ function ProviderConfigForm({
       </Field>
 
       {showKeyField && (
-        <Field label="API 密钥" htmlFor="pd-key">
+        <Field label="API Key" htmlFor="pd-key">
           <input
             id="pd-key"
             className="input lg mono key-input"

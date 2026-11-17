@@ -296,7 +296,7 @@ describe("ProvidersPage 列表与详情", () => {
     await screen.findByText("账号登录已失效");
     expect(page.textContent).not.toContain("需要重新登录才能继续调用");
     expect(screen.getByRole("button", { name: "重新登录" })).toBeTruthy();
-    expect(screen.queryByLabelText("API 密钥")).toBeNull();
+    expect(screen.queryByLabelText("API Key")).toBeNull();
     server.close();
   });
 
@@ -341,7 +341,7 @@ describe("ProvidersPage 列表与详情", () => {
     expect(urlInput.value).toBe("https://openrouter.ai/api/v1");
     expect(screen.queryByLabelText("显示名称")).toBeNull();
     expect(screen.queryByLabelText("会话标识请求头")).toBeNull();
-    const keyInput = screen.getByLabelText("API 密钥") as HTMLInputElement;
+    const keyInput = screen.getByLabelText("API Key") as HTMLInputElement;
     expect(keyInput.type).toBe("password");
     expect(keyInput.placeholder).toBe("••••••••");
     expect(button("取消").disabled).toBe(true);
@@ -374,7 +374,7 @@ describe("ProvidersPage 列表与详情", () => {
     await server.initialize();
     render(<ProvidersPage {...pageProps({ client: server.client })} />);
     await screen.findByText("Claude Sonnet 4");
-    const input = screen.getByLabelText("API 密钥") as HTMLInputElement;
+    const input = screen.getByLabelText("API Key") as HTMLInputElement;
     expect(input.type).toBe("password");
     expect(button("取消").disabled).toBe(true);
     expect(button("保存").disabled).toBe(true);
@@ -434,7 +434,7 @@ describe("ProvidersPage 列表与详情", () => {
     const urlInput = screen.getByLabelText("服务地址") as HTMLInputElement;
     expect(urlInput.readOnly).toBe(true);
     expect(urlInput.value).toBe("http://127.0.0.1:8080/v1");
-    expect(screen.queryByLabelText("API 密钥")).toBeNull();
+    expect(screen.queryByLabelText("API Key")).toBeNull();
     expect(screen.queryByLabelText("显示名称")).toBeNull();
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
     expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
@@ -1183,7 +1183,7 @@ describe("详情内联配置表单", () => {
     await selectCorp();
 
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "新名字" } });
-    const keyInput = screen.getByLabelText("API 密钥") as HTMLInputElement;
+    const keyInput = screen.getByLabelText("API Key") as HTMLInputElement;
     fireEvent.change(keyInput, { target: { value: "sk-next" } });
     fireEvent.click(button("保存"));
 
