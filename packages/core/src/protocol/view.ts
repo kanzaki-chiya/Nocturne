@@ -620,6 +620,8 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         view.todos.every((item) => item.status === "completed")
       )
         view.todos = [];
+      // ADR-0089 修订：Runtime 安静提醒写进指挥日志供模型唤醒与重放，不在对话视图显示
+      if (event.payload.ensembleQuietReminder === true) break;
       if (view.firstTitle === undefined && !view.entries.some((entry) => entry.kind === "user"))
         view.firstTitle = firstUserText(event.payload);
       view.title = visibleTitle(view);

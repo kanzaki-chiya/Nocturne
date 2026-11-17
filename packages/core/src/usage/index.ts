@@ -158,7 +158,8 @@ function parse(text: string): FileAggregate {
         current = e.payload.model ?? current;
         break;
       case "message.user":
-        if (!result.title) result.title = firstUserText(e.payload) ?? "";
+        if (!result.title && e.payload.ensembleQuietReminder !== true)
+          result.title = firstUserText(e.payload) ?? "";
         if (e.payload.skill) result.skills.push({ time, name: e.payload.skill.name });
         break;
       case "session.titled":

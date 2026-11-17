@@ -276,6 +276,26 @@ function postMatchesMention(post: BoardPostRecord, mentionLower: string): boolea
   return post.resolvedTargets.some((t) => t.toLowerCase() === mentionLower);
 }
 
+function inferQuietReminderSent(
+  activeEvents: readonly DurableEvent[],
+  createdSeq: number,
+): boolean {
+  let sent = false;
+  for (const ev of activeEvents) {
+    if (ev.seq <= createdSeq) continue;
+    if (ev.type === "ensemble.posted") {
+      if (ev.payload.fromKind === "runtime" && ev.payload.charterOf === undefined) {
+        sent = true;
+      } else if (ev.payload.fromKind !== "runtime") {
+        sent = false;
+      }
+    } else if (ev.type === "message.user" && ev.payload.ensembleQuietReminder === true) {
+      sent = true;
+    }
+  }
+  return sent;
+}
+
 function foldEnsembleViewFromEvents(
   events: readonly DurableEvent[],
   maestroModel: ModelRef,
@@ -895,34 +915,10 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
 
     quietReminderSent = true;
     const text =
-      "@maestro All ensemble members are waiting or paused and there are no pending deliveries. Review the board and member statuses, dispatch next steps, or call `ensemble_end` if the work is complete.";
-    const number = nextPostNumber++;
-    const payload: EnsemblePostedPayload = {
-      number,
-      from: "Runtime",
-      fromKind: "runtime",
-      text,
-      mentions: ["maestro"],
-      recipients: ["maestro"],
-    };
-    await deps.emitDurable("ensemble.posted", payload);
-    posts.push({
-      number: payload.number,
-      from: payload.from,
-      fromKind: payload.fromKind,
-      text: payload.text,
-      mentions: [...payload.mentions],
-      recipients: [...payload.recipients],
-      resolvedTargets: [...payload.recipients],
-    });
+      "All ensemble members are waiting or paused and there are no pending deliveries. Review the board and member statuses, dispatch next steps, or call `ensemble_end` if the work is complete.";
     const prepared: PreparedInput = {
-      ensemble: { postNumber: number, from: "Runtime", fromKind: "runtime" },
-      content: [
-        {
-          type: "text",
-          text: formatEnsemblePostForModel({ number, from: "Runtime", text }),
-        },
-      ],
+      ensembleQuietReminder: true,
+      content: [{ type: "text", text }],
       appended: [],
     };
     await deps.deliverToMaestro(prepared, false);
@@ -1687,7 +1683,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       active = view.status === "active";
       // 重启刚打开时不立即主动触发安静提醒（等有新活动后再计）
       armed = false;
-      quietReminderSent = view.posts.at(-1)?.fromKind === "runtime";
+      quietReminderSent = inferQuietReminderSent(activeEvents, view.createdSeq);
 
       members.clear();
       posts = active ? replayBoardPostsFromEvents(activeEvents, forkSeq, view) : [];
@@ -1909,6 +1905,8 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       if (view?.status !== "active") {
         const hadState = active || members.size > 0 || posts.length > 0;
         active = false;
+        armed = false;
+        quietReminderSent = false;
         title = view?.title ?? "";
         initSeq = view?.createdSeq;
         nextPostNumber = (view?.posts.at(-1)?.number ?? 0) + 1;
@@ -1999,7 +1997,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       nextPostNumber = (view.posts.at(-1)?.number ?? 0) + 1;
       active = true;
       armed = false;
-      quietReminderSent = view.posts.at(-1)?.fromKind === "runtime";
+      quietReminderSent = inferQuietReminderSent(activeEvents, view.createdSeq);
       posts = replayBoardPostsFromEvents(activeEvents, forkSeq, view);
       deps.clearMaestroEnsembleInputs();
       deps.syncMaestroTools();

@@ -3176,7 +3176,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // ADR-0070 §7：插话不是回退目标
         !session
           .state()
-          .history.some((e) => e.kind === "user" && e.seq === targetSeq && e.steer !== true)
+          .history.some(
+            (e) =>
+              e.kind === "user" &&
+              e.seq === targetSeq &&
+              e.steer !== true &&
+              e.ensembleQuietReminder !== true,
+          )
       )
         throw new RuntimeCommandError("invalid_command", "目标不是当前有效对话中的用户消息");
     };
@@ -3970,6 +3976,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.workMode,
             prepared.backgroundShell,
             prepared.ensemble,
+            prepared.ensembleQuietReminder,
           );
           if (ensembleTurnStarting) {
             ensembleTurnStarting = false;
@@ -4139,6 +4146,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         resume !== undefined ||
         meta.parent !== undefined ||
         event.type !== "message.user" ||
+        event.payload.ensembleQuietReminder === true ||
         titleSettled !== undefined ||
         session.durableEvents().some((e) => e.type === "session.titled")
       )

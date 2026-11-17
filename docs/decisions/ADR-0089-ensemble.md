@@ -26,7 +26,7 @@
 | 工作区隔离 | 默认共用工作区按任务书划界，冲突或构建干扰时用独立 git worktree | 一致：默认共用主工作区；`isolated: true` 复用 ADR-0075 工作树并在每轮及发帖前增量提交 |
 | 权限确认 | 成员的权限请求等用户确认 | 一致：修订 `subagent.md` §7.1，Ensemble 成员使用交互式 gate，确认挂在成员会话上并在指挥派生视图中汇总 |
 | 留言板存储 | 独立留言板存储 | 作为指挥会话日志中的 `ensemble.*` 持久事件，天然支持回放、回退、重启恢复，并随指挥事件流同步到远程端，不新开通道 |
-| 停滞检测 | 独立 `@monitor` 成员定期跑模型巡检，或固定返工轮数上限 | **零 token 的 Runtime 安静提醒**：全员等待或暂停且无待送达帖子时，Runtime 以作者 `Runtime` 发一条帖子 `@maestro`，每段安静期只发一次，有新帖后重计；不设固定返工轮数上限 |
+| 停滞检测 | 独立 `@monitor` 成员定期跑模型巡检，或固定返工轮数上限 | **零 token 的 Runtime 安静提醒**：全员等待或暂停且无待送达帖子时，Runtime 直接向指挥模型投递一条英文提醒（不上留言板、不占帖子编号、不在对话视图显示），每段安静期只发一次，有新帖后重计；不设固定返工轮数上限 |
 | 模型选择 | 为不同成员选不同模型（如异构验证） | 复用模型选择器的已启用模型清单与 [ADR-0058](ADR-0058-subagent-profiles.md) 子代理档位（互斥），带价格写入工具说明；外部 ACP agent 不可作为成员 |
 
 ## 决定
@@ -112,7 +112,7 @@
 
 ### 9. Runtime 安静提醒
 
-- 当满足以下全部条件时，Runtime 自动向留言板发出一条作者为 `Runtime`（`fromKind: "runtime"`）的英文提醒帖 `@maestro`：
+- 当满足以下全部条件时，Runtime 自动向指挥的模型投递一条不带 `@maestro` 前缀、不用 `<ensemble-post>` 包装的英文提醒（写为带 `ensembleQuietReminder: true` 标记的 `message.user`，不上留言板、不写 `ensemble.posted`、不占帖子编号、不在三端对话视图显示）：
   1. Ensemble 已建立且处于 `active`；
   2. 本次运行周期内已发生过至少一次活动推进（刚从磁盘 `resumeSession` 打开、尚未产生新活动时不主动唤醒）；
   3. 指挥处于空闲等待（无进行中 Turn，且指挥待发队列中无未暂停条目）；
@@ -199,3 +199,9 @@
 - **指挥保留 `note_write`**：Ensemble 期间仅按 `traits.editTool` 卸载文件编辑工具与 `task`，指挥继续保留 `note_write`（非编辑工具）记录会话笔记。
 - **成员与指挥新增 `ensemble_read`**：指挥与全部未移除成员（含 `explore` 只读成员）均挂载只读工具 `ensemble_read`，用于过滤/翻页查询留言板完整原文并获取当前未移除成员名单（`limit` 默认 20、最大 50，不声明 `pinResult`）。
 - **生命周期与卸载**：`ensemble_read` 在合奏存续期间可用，成员被移除后该成员不可用，合奏结束或回退后从指挥卸载并停止成员侧挂载。
+
+## 修订（2026-11-18）：Runtime 安静提醒不再发到留言板
+
+- **只送指挥模型、不上留言板、不占编号**：全员等待或暂停且无待送达帖子时，Runtime 不再写 `ensemble.posted`（`fromKind: "runtime"`），不占用帖子编号、不进入 `posts` 与 `ensemble_read`；改为直接向指挥投递不带 `@maestro` 前缀、也不用 `<ensemble-post>` 包装的英文提醒，并在 `message.user` 上携带可选标记 `ensembleQuietReminder: true`。
+- **三端对话视图不显示，旧日志照旧**：`SessionView` 归约遇到 `message.user.ensembleQuietReminder === true` 时不创建对话条目，桌面端、手机网页与 TUI 均不渲染该提醒（亦不作为回退或分叉目标、不更新会话活动时间），但模型上下文折叠、压缩与修剪照常保留；旧日志中既有的 `fromKind: "runtime"` 提醒帖不迁移、不隐藏，留言板与对话仍照旧显示。
+- **恢复与回退判定**：重启恢复与对话回退时，按有效事件中最近一条非 `runtime` 作者的 `ensemble.posted` 之后是否已存在安静提醒（新标记 `message.user.ensembleQuietReminder === true` 或旧日志非任务书 `fromKind: "runtime"` 帖子）推断 `quietReminderSent`，保持每段安静期只发一次、有新帖后重计的语义。

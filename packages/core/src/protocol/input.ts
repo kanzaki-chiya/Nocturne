@@ -19,6 +19,8 @@ export interface PreparedInput {
   subagent?: SubagentResult | undefined;
   backgroundShell?: BackgroundShellResult | undefined;
   ensemble?: EnsemblePostDelivery | undefined;
+  /** Ensemble Runtime 安静提醒标记（ADR-0089 §9 修订） */
+  ensembleQuietReminder?: true | undefined;
   /** 用户输入的正文块；编辑待发输入时只替换这里 */
   content: ContentBlock[];
   /** Core 追加给模型看的快照块（`@` 引用、技能正文、委派指令），编辑文本时原样保留 */

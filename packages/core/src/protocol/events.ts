@@ -134,6 +134,8 @@ export interface MessageUserPayload {
   subagent?: SubagentResult | undefined;
   /** Ensemble 留言板帖子投递标记（ADR-0089 §7）；旧版本忽略未知字段，不提升 formatVersion */
   ensemble?: EnsemblePostDelivery | undefined;
+  /** Ensemble Runtime 安静提醒标记（ADR-0089 §9 修订）：写进指挥日志供模型唤醒与重放，不在对话视图显示 */
+  ensembleQuietReminder?: true | undefined;
   messageId: string;
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */

@@ -344,6 +344,8 @@ const payloadSchemas = {
         fromKind: z.enum(["maestro", "member", "user", "runtime"]),
       })
       .optional(),
+    // ADR-0089 修订：Runtime 安静提醒只送指挥模型，不在对话视图显示；旧版本按普通用户消息读取
+    ensembleQuietReminder: z.literal(true).optional(),
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
     steer: z.literal(true).optional(),
     // ADR-0076：执行方式说明块快照；未知名字的旧/新日志照常读取

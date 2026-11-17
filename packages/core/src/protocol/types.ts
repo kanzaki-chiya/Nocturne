@@ -548,6 +548,7 @@ export type HistoryEntry =
       subagent?: SubagentResult | undefined;
       backgroundShell?: BackgroundShellResult | undefined;
       ensemble?: EnsemblePostDelivery | undefined;
+      ensembleQuietReminder?: true | undefined;
     }
   | {
       kind: "assistant";

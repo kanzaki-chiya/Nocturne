@@ -1297,3 +1297,92 @@ it("subagent.permissions 是临时快照：持久重放不复活，并与父 pen
   // 3) 仅持久重放（重启恢复）不展示旧未决子代理请求
   expect(replaySessionView(durable).pendingSubagentPermissions).toEqual([]);
 });
+
+it("ADR-0089 修订：ensembleQuietReminder 不进 SessionView.entries、不改标题，旧日志 Runtime 帖照常投影", () => {
+  const events: DurableEvent[] = [
+    {
+      type: "message.user",
+      sessionId: "s",
+      seq: 1,
+      time: "t",
+      turnId: "t1",
+      payload: {
+        messageId: "u1",
+        content: [{ type: "text", text: "启动合奏" }],
+        workMode: { name: "ensemble", body: "Ensemble mode" },
+      },
+    },
+    {
+      type: "ensemble.created",
+      sessionId: "s",
+      seq: 2,
+      time: "t",
+      turnId: "t1",
+      payload: { title: "Quiet" },
+    },
+    {
+      type: "ensemble.posted",
+      sessionId: "s",
+      seq: 3,
+      time: "t",
+      payload: {
+        number: 1,
+        from: "Runtime",
+        fromKind: "runtime",
+        text: "@maestro 旧日志提醒",
+        mentions: ["maestro"],
+        recipients: ["maestro"],
+      },
+    },
+    {
+      type: "message.user",
+      sessionId: "s",
+      seq: 4,
+      time: "t",
+      turnId: "t2",
+      payload: {
+        messageId: "u2",
+        ensemble: { postNumber: 1, from: "Runtime", fromKind: "runtime" },
+        content: [
+          {
+            type: "text",
+            text: '<ensemble-post n="1" from="Runtime">\n@maestro 旧日志提醒\n</ensemble-post>',
+          },
+        ],
+      },
+    },
+    {
+      type: "message.user",
+      sessionId: "s",
+      seq: 5,
+      time: "t",
+      turnId: "t3",
+      payload: {
+        messageId: "u3",
+        ensembleQuietReminder: true,
+        content: [{ type: "text", text: "All ensemble members are waiting or paused." }],
+      },
+    },
+    {
+      type: "message.assistant",
+      sessionId: "s",
+      seq: 6,
+      time: "t",
+      turnId: "t3",
+      payload: {
+        messageId: "a3",
+        model: { provider: "p", model: "m" },
+        content: [{ type: "text", text: "收到，我来收尾" }],
+        toolCalls: [],
+        finishReason: "stop",
+      },
+    },
+  ];
+  const live = liveView(events);
+  const replay = replaySessionView(events);
+  expect(replay).toEqual({ ...live, revision: replay.revision });
+  expect(replay.title).toBe("启动合奏");
+  // 新版安静提醒不进 entries，旧日志 Runtime 帖照常在 entries 和 ensemble.posts 中
+  expect(replay.entries.map((e) => e.key)).toEqual(["u:u1", "u:u2", "a:a3"]);
+  expect(replay.ensemble?.posts.map((p) => p.fromKind)).toEqual(["runtime"]);
+});

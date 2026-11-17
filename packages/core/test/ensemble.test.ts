@@ -1401,14 +1401,16 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     await session.endEnsemble();
   }, 30_000);
 
-  it("安静提醒：全员等待时发一次提醒 @maestro，无新帖不重复发，有新帖后重新计", async () => {
+  it("安静提醒：只送指挥模型不写 ensemble.posted、不占编号、SessionView 与 ensemble_read 均不可见，有新帖后重计", async () => {
     const ws = makeTempDir();
     let coordTurn = 0;
+    const maestroRequests: ModelRequest[] = [];
     const provider = createRoutedProvider("fake", [{ id: "m1" }], (req) => {
       const role = requestRole(req);
       if (role === "maestro") {
-        coordTurn++;
-        if (coordTurn === 1) {
+        maestroRequests.push(req);
+        const hasInit = req.messages.some((m) => m.role === "tool" && m.name === "ensemble_init");
+        if (!hasInit) {
           return [
             callTool("i", "ensemble_init", { title: "Quiet Monitor" }),
             callTool("a", "ensemble_add_member", { name: "silent-worker", charter: VALID_CHARTER }),
@@ -1416,7 +1418,17 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
             { type: "finish", reason: "tool_calls" },
           ];
         }
-        // 收到 Runtime 安静提醒后，指挥选择先不发帖、直接文字回复结束本轮
+        const isQuietTurn = req.messages.some(
+          (m) => m.role === "user" && JSON.stringify(m.content).includes("All ensemble members"),
+        );
+        const hasReadInQuietTurn = req.messages.some(
+          (m) => m.role === "tool" && m.name === "ensemble_read",
+        );
+        if (isQuietTurn && !hasReadInQuietTurn) {
+          // 收到安静提醒后调用 ensemble_read 核对留言板没有 Runtime 帖子，再直接文字结束本轮
+          return [callTool("r", "ensemble_read", {}), { type: "finish", reason: "tool_calls" }];
+        }
+        coordTurn++;
         return stopText(`coord-turn-${coordTurn}`);
       }
       // silent-worker 完成工作但忘记发帖 @maestro
@@ -1439,7 +1451,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     const completedCoordTurns = () =>
       session.durableEvents().filter((e) => e.type === "turn.completed").length;
 
-    // silent-worker 静默结束后，Runtime 发一条作者为 Runtime 的安静提醒唤醒指挥（完成第 2 个 Turn）
+    // silent-worker 静默结束后，Runtime 触发指挥第 2 个 Turn
     await vi.waitFor(
       () => {
         expect(completedCoordTurns()).toBe(2);
@@ -1448,24 +1460,76 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       { timeout: 10_000 },
     );
 
-    const runtimePosts1 = must(replaySessionView(session.durableEvents()).ensemble).posts.filter(
-      (p) => p.fromKind === "runtime",
+    const events1 = session.durableEvents();
+    const quietMsgs1 = events1.filter(
+      (e): e is Extract<DurableEvent, { type: "message.user" }> =>
+        e.type === "message.user" && e.payload.ensembleQuietReminder === true,
     );
-    expect(runtimePosts1).toHaveLength(1);
-    expect(runtimePosts1[0]?.from).toBe("Runtime");
-    expect(runtimePosts1[0]?.recipients).toEqual(["maestro"]);
+    expect(quietMsgs1).toHaveLength(1);
+    expect(quietMsgs1[0]?.payload.ensemble).toBeUndefined();
+    const reminderText1 = quietMsgs1[0]?.payload.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    expect(reminderText1).toContain("All ensemble members are waiting or paused");
+    expect(reminderText1).not.toContain("@maestro");
+    expect(reminderText1).not.toContain("<ensemble-post");
+
+    // 指挥模型请求确实收到了这条提醒
+    const turn2ModelMsg = maestroRequests
+      .find((r) =>
+        r.messages.some(
+          (m) => m.role === "user" && JSON.stringify(m.content).includes("All ensemble members"),
+        ),
+      )
+      ?.messages.find(
+        (m) => m.role === "user" && JSON.stringify(m.content).includes("All ensemble members"),
+      );
+    expect(turn2ModelMsg).toBeDefined();
+
+    // 留言板没有 ensemble.posted(fromKind: "runtime")，帖子编号保持连续（#1 任务书，#2 @silent-worker）
+    const view1 = replaySessionView(events1);
+    expect(must(view1.ensemble).posts.map((p) => p.number)).toEqual([1, 2]);
+    expect(must(view1.ensemble).posts.some((p) => p.fromKind === "runtime")).toBe(false);
+    // SessionView 的对话条目里没有安静提醒，但指挥的回复照常出现
+    expect(
+      view1.entries.some(
+        (e) => e.kind === "user" && JSON.stringify(e.content).includes("All ensemble members"),
+      ),
+    ).toBe(false);
+    expect(view1.entries.some((e) => e.kind === "assistant" && e.text === "coord-turn-2")).toBe(
+      true,
+    );
+    // rewindTargets 也不列安静提醒
+    expect(
+      (await session.rewindTargets()).some((t) => t.text.includes("All ensemble members")),
+    ).toBe(false);
+
+    // ensemble_read 查不到安静提醒
+    const readToolEv = events1.find(
+      (e): e is Extract<DurableEvent, { type: "tool.completed" }> =>
+        e.type === "tool.completed" && e.payload.name === "ensemble_read",
+    );
+    expect(readToolEv).toBeDefined();
+    expect(readToolEv?.payload.modelContent).not.toContain("All ensemble members");
+    expect(
+      (readToolEv?.payload.output as { posts?: { fromKind: string }[] } | undefined)?.posts?.some(
+        (p) => p.fromKind === "runtime",
+      ),
+    ).toBe(false);
 
     // 指挥第 2 轮没有发新帖就结束了：再等 80ms 确认绝不会重复发第 2 条安静提醒！
     await new Promise((r) => setTimeout(r, 80));
     expect(completedCoordTurns()).toBe(2);
     expect(
-      must(replaySessionView(session.durableEvents()).ensemble).posts.filter(
-        (p) => p.fromKind === "runtime",
-      ),
+      session
+        .durableEvents()
+        .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
     ).toHaveLength(1);
 
-    // 用户发一条新帖 @silent-worker -> 重新计数！silent-worker 跑完再次静默后，Runtime 再发一次安静提醒！
-    await session.postToEnsemble({ text: "@silent-worker one more check" });
+    // 用户发一条新帖 @silent-worker：编号连续为 #3，并重置安静期计数！
+    const posted = await session.postToEnsemble({ text: "@silent-worker one more check" });
+    expect(posted.number).toBe(3);
     await vi.waitFor(
       () => {
         expect(completedCoordTurns()).toBe(3);
@@ -1474,12 +1538,361 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       { timeout: 10_000 },
     );
     expect(
-      must(replaySessionView(session.durableEvents()).ensemble).posts.filter(
-        (p) => p.fromKind === "runtime",
-      ),
+      session
+        .durableEvents()
+        .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
     ).toHaveLength(2);
+    expect(
+      must(replaySessionView(session.durableEvents()).ensemble).posts.map((p) => p.number),
+    ).toEqual([1, 2, 3]);
 
     await session.endEnsemble();
+  }, 30_000);
+
+  it("安静提醒持久化：重启恢复后不重复发；回退到提醒之前再继续仍触发；旧日志 Runtime 帖仍显示", async () => {
+    const ws = makeTempDir();
+    const sessionsDir = path.join(ws, ".sessions");
+    let phase = 1;
+    const provider = createRoutedProvider("fake", [{ id: "m1" }], (req) => {
+      const role = requestRole(req);
+      if (role === "maestro") {
+        const hasInit = req.messages.some((m) => m.role === "tool" && m.name === "ensemble_init");
+        if (phase === 1 && !hasInit) {
+          return [
+            callTool("i", "ensemble_init", { title: "Quiet Persist" }),
+            callTool("a", "ensemble_add_member", { name: "worker", charter: VALID_CHARTER }),
+            callTool("p", "ensemble_post", { text: "@worker first task" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText(`coord-phase-${phase}`);
+      }
+      return stopText("worker silent done");
+    });
+
+    const rt1 = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const session1 = await rt1.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+    openRuntimes.push({ sessions: [session1] });
+
+    await session1.submit({ text: "start", workMode: "ensemble" });
+    // 等 worker 跑完、锚点消息提交前先等 Turn 1 + 安静提醒 Turn 2? 先插一条锚点消息在提醒前！
+    await vi.waitFor(
+      () =>
+        expect(
+          session1.durableEvents().filter((e) => e.type === "turn.completed").length,
+        ).toBeGreaterThanOrEqual(2),
+      { timeout: 10_000 },
+    );
+
+    const quietCount1 = () =>
+      session1
+        .durableEvents()
+        .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true)
+        .length;
+    expect(quietCount1()).toBe(1);
+
+    // 1. 重启恢复：打开后不自动发，之后指挥再跑普通轮（未发新帖）也不重复发安静提醒
+    const sid = session1.id;
+    await session1.close();
+
+    phase = 2;
+    const rt2 = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const session2 = await rt2.resumeSession(sid);
+    openRuntimes[0]?.sessions.push(session2);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(
+      session2
+        .durableEvents()
+        .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+    ).toHaveLength(1);
+
+    // 指挥跑一轮普通对话（没有发新帖）并归于空闲，仍然不重复发安静提醒
+    await session2.submit({ text: "just check in" });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(
+      session2
+        .durableEvents()
+        .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+    ).toHaveLength(1);
+
+    // 2. 回退到安静提醒之前再继续：新帖发出后触发第 2 次提醒，记录 anchor 再回退到 anchor（在第 2 次提醒之前）
+    await session2.postToEnsemble({ text: "@worker second task" });
+    await vi.waitFor(
+      () => {
+        expect(
+          session2
+            .durableEvents()
+            .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+        ).toHaveLength(2);
+        expect(session2.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+    // 先发一条锚点用户消息（在已有 #4 新帖后的安静期内？改为先发新帖、同时提交一条普通消息再回退）：
+    await session2.postToEnsemble({ text: "@worker third task" });
+    await vi.waitFor(
+      () => {
+        expect(
+          session2
+            .durableEvents()
+            .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+        ).toHaveLength(3);
+        expect(session2.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+    await session2.close();
+
+    // 构造一个带「提醒前用户消息 anchor → 安静提醒」的会话来测回退到提醒前再继续
+    let releaseWorkerGate: (() => void) | undefined;
+    const gateProvider = createRoutedProvider("fake", [{ id: "m1" }], async (req) => {
+      const role = requestRole(req);
+      if (role === "maestro") {
+        const hasInit = req.messages.some((m) => m.role === "tool" && m.name === "ensemble_init");
+        if (!hasInit) {
+          return [
+            callTool("i", "ensemble_init", { title: "Quiet Rewind" }),
+            callTool("a", "ensemble_add_member", { name: "worker", charter: VALID_CHARTER }),
+            callTool("p", "ensemble_post", { text: "@worker first task" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("coord ok");
+      }
+      if (JSON.stringify(req.messages).includes("task before anchor")) {
+        await new Promise<void>((resolve) => {
+          releaseWorkerGate = resolve;
+        });
+      }
+      return stopText("worker silent done");
+    });
+    const rtRewind = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: makeTempDir(),
+      providers: [gateProvider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const rwSession = await rtRewind.createSession({
+      model: "fake/m1",
+      permissionPreset: "bypass",
+    });
+    openRuntimes[0]?.sessions.push(rwSession);
+    await rwSession.submit({ text: "init only", workMode: "ensemble" });
+    await vi.waitFor(
+      () =>
+        expect(
+          rwSession
+            .durableEvents()
+            .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+        ).toHaveLength(1),
+      { timeout: 10_000 },
+    );
+    // 发新帖触发新周期，worker 在 gate 上等待，确保 anchor 在第 2 次提醒之前落盘
+    await rwSession.postToEnsemble({ text: "@worker task before anchor" });
+    await vi.waitFor(() => expect(releaseWorkerGate).toBeDefined(), { timeout: 10_000 });
+    await rwSession.submit({ text: "anchor before second reminder" });
+    releaseWorkerGate?.();
+    await vi.waitFor(
+      () => {
+        expect(
+          rwSession
+            .durableEvents()
+            .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+        ).toHaveLength(2);
+        expect(rwSession.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+    const anchorEv = must(
+      rwSession
+        .durableEvents()
+        .find(
+          (e) =>
+            e.type === "message.user" &&
+            JSON.stringify(e.payload.content).includes("anchor before second reminder"),
+        ),
+    );
+    await rwSession.rewind(anchorEv.seq, "conversation");
+    expect(replaySessionView(rwSession.durableEvents()).ensemble?.status).toBe("active");
+    // 回退后上下文里不再包含被撤回的那条提醒
+    const ctxTextAfterRewind = JSON.stringify(rwSession.describeContext().request.messages);
+    expect(ctxTextAfterRewind).not.toContain("anchor before second reminder");
+
+    // 继续一轮普通对话：有效历史回到了提醒之前，安静提醒应再次触发
+    await rwSession.submit({ text: "continue after rewind" });
+    await vi.waitFor(
+      () => {
+        expect(rwSession.isIdle()).toBe(true);
+        const lastReminderInCtx = rwSession
+          .describeContext()
+          .request.messages.filter(
+            (m) => m.role === "user" && JSON.stringify(m.content).includes("All ensemble members"),
+          );
+        expect(lastReminderInCtx.length).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 10_000 },
+    );
+    await rwSession.endEnsemble();
+
+    // 3. 旧日志兼容：日志里已有的 fromKind: "runtime" 提醒帖仍出现在留言板，且恢复后不重复发
+    const legacyDir = makeTempDir();
+    const legacyId = "20261117-legacy-quiet";
+    const legacyLog = [
+      {
+        type: "session.created",
+        sessionId: legacyId,
+        seq: 1,
+        time: "2026-11-17T00:00:00.000Z",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "0.0.0",
+          cwd: ws,
+          workspaceRoot: ws,
+          model: { provider: "fake", model: "m1" },
+          permissionPreset: "bypass",
+        },
+      },
+      {
+        type: "turn.started",
+        sessionId: legacyId,
+        seq: 2,
+        time: "2026-11-17T00:00:01.000Z",
+        turnId: "t1",
+        payload: { turnIndex: 1 },
+      },
+      {
+        type: "message.user",
+        sessionId: legacyId,
+        seq: 3,
+        time: "2026-11-17T00:00:01.000Z",
+        turnId: "t1",
+        payload: { messageId: "u1", content: [{ type: "text", text: "go" }] },
+      },
+      {
+        type: "ensemble.created",
+        sessionId: legacyId,
+        seq: 4,
+        time: "2026-11-17T00:00:02.000Z",
+        turnId: "t1",
+        payload: { title: "Legacy Quiet" },
+      },
+      {
+        type: "ensemble.posted",
+        sessionId: legacyId,
+        seq: 5,
+        time: "2026-11-17T00:00:03.000Z",
+        turnId: "t1",
+        payload: {
+          number: 1,
+          from: "maestro",
+          fromKind: "maestro",
+          text: "initial",
+          mentions: [],
+          recipients: [],
+        },
+      },
+      {
+        type: "turn.completed",
+        sessionId: legacyId,
+        seq: 6,
+        time: "2026-11-17T00:00:04.000Z",
+        turnId: "t1",
+        payload: { reason: "done", steps: 1, usage: { inputTokens: 1, outputTokens: 1 } },
+      },
+      {
+        type: "ensemble.posted",
+        sessionId: legacyId,
+        seq: 7,
+        time: "2026-11-17T00:00:05.000Z",
+        payload: {
+          number: 2,
+          from: "Runtime",
+          fromKind: "runtime",
+          text: "@maestro Legacy quiet reminder",
+          mentions: ["maestro"],
+          recipients: ["maestro"],
+        },
+      },
+      {
+        type: "turn.started",
+        sessionId: legacyId,
+        seq: 8,
+        time: "2026-11-17T00:00:06.000Z",
+        turnId: "t2",
+        payload: { turnIndex: 2 },
+      },
+      {
+        type: "message.user",
+        sessionId: legacyId,
+        seq: 9,
+        time: "2026-11-17T00:00:06.000Z",
+        turnId: "t2",
+        payload: {
+          messageId: "u2",
+          ensemble: { postNumber: 2, from: "Runtime", fromKind: "runtime" },
+          content: [
+            {
+              type: "text",
+              text: '<ensemble-post n="2" from="Runtime">\n@maestro Legacy quiet reminder\n</ensemble-post>',
+            },
+          ],
+        },
+      },
+      {
+        type: "turn.completed",
+        sessionId: legacyId,
+        seq: 10,
+        time: "2026-11-17T00:00:07.000Z",
+        turnId: "t2",
+        payload: { reason: "done", steps: 1, usage: { inputTokens: 1, outputTokens: 1 } },
+      },
+    ];
+    writeFileSync(
+      path.join(legacyDir, `${legacyId}.jsonl`),
+      legacyLog.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf8",
+    );
+    const rtLegacy = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: legacyDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const legacySession = await rtLegacy.resumeSession(legacyId);
+    openRuntimes[0]?.sessions.push(legacySession);
+    const legacyView = replaySessionView(legacySession.durableEvents());
+    expect(legacyView.ensemble?.posts.some((p) => p.fromKind === "runtime" && p.number === 2)).toBe(
+      true,
+    );
+    expect(
+      legacyView.entries.some((e) => e.kind === "user" && e.ensemble?.fromKind === "runtime"),
+    ).toBe(true);
+    // 恢复后跑普通轮（未发新帖），不重复发安静提醒
+    await legacySession.submit({ text: "after legacy resume" });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(
+      legacySession
+        .durableEvents()
+        .filter((e) => e.type === "message.user" && e.payload.ensembleQuietReminder === true),
+    ).toHaveLength(0);
   }, 30_000);
 
   it("持久化：重启补送未送达提及且不自动唤醒；回退到建立之前结束 Ensemble；分叉新会话不继承 Ensemble；日志格式兼容", async () => {

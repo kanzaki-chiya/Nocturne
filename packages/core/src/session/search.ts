@@ -69,7 +69,9 @@ function textBlocks(content: ContentBlock[]): string {
 }
 
 function eventText(event: DurableEvent): string | undefined {
-  if (event.type === "message.user") return userEntryText(event.payload);
+  if (event.type === "message.user") {
+    return event.payload.ensembleQuietReminder === true ? undefined : userEntryText(event.payload);
+  }
   if (event.type === "message.assistant") return textBlocks(event.payload.content);
   if (event.type === "tool.completed") return event.payload.modelContent;
   return undefined;

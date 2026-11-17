@@ -54,7 +54,7 @@ function firstUserTextInLog(logText: string): { firstText: string | undefined; s
     try {
       const ev = decodeDurableEvent(line);
       if (ev.type === "session.titled" && ev.payload.source !== "user") title = ev.payload.title;
-      if (ev.type === "message.user" && !sawUser) {
+      if (ev.type === "message.user" && !sawUser && ev.payload.ensembleQuietReminder !== true) {
         sawUser = true;
         firstText = firstUserText(ev.payload);
       }

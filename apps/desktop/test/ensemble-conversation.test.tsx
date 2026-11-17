@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSessionView,
   formatEnsemblePostForModel,
+  replaySessionView,
   type EnsembleMemberView,
   type EnsemblePostView,
   type EnsembleView,
@@ -309,5 +310,101 @@ describe("Ensemble 对话内渲染", () => {
     );
     expect(highlighted).toEqual(["@users", "@maestro"]);
     expect(container.querySelector("code .ensemble-at")).toBeNull();
+  });
+
+  it("指挥对话不渲染新 Runtime 安静提醒，旧日志 Runtime 提醒帖照旧渲染", () => {
+    const view = replaySessionView([
+      {
+        type: "session.created",
+        sessionId: "s-coord",
+        seq: 1,
+        time: "2026-11-18T00:00:00.000Z",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "0.0.0",
+          cwd: "/repo",
+          workspaceRoot: "/repo",
+          model: { provider: "anthropic", model: "claude-opus-5.5" },
+          permissionPreset: "default",
+        },
+      },
+      {
+        type: "message.user",
+        sessionId: "s-coord",
+        seq: 2,
+        time: "2026-11-18T00:00:01.000Z",
+        turnId: "turn-1",
+        payload: {
+          messageId: "u-1",
+          content: [{ type: "text", text: "发起合奏" }],
+          workMode: { name: "ensemble", body: "Ensemble mode" },
+        },
+      },
+      {
+        type: "message.user",
+        sessionId: "s-coord",
+        seq: 3,
+        time: "2026-11-18T00:00:02.000Z",
+        turnId: "turn-2",
+        payload: {
+          messageId: "u-legacy",
+          ensemble: { postNumber: 1, from: "Runtime", fromKind: "runtime" },
+          content: [
+            {
+              type: "text",
+              text: '<ensemble-post n="1" from="Runtime">\n@maestro 旧日志提醒\n</ensemble-post>',
+            },
+          ],
+        },
+      },
+      {
+        type: "message.user",
+        sessionId: "s-coord",
+        seq: 4,
+        time: "2026-11-18T00:00:03.000Z",
+        turnId: "turn-3",
+        payload: {
+          messageId: "u-quiet",
+          ensembleQuietReminder: true,
+          content: [
+            {
+              type: "text",
+              text: "All ensemble members are waiting or paused and there are no pending deliveries.",
+            },
+          ],
+        },
+      },
+      {
+        type: "message.assistant",
+        sessionId: "s-coord",
+        seq: 5,
+        time: "2026-11-18T00:00:04.000Z",
+        turnId: "turn-3",
+        payload: {
+          messageId: "a-3",
+          model: { provider: "anthropic", model: "claude-opus-5.5" },
+          content: [{ type: "text", text: "继续调度成员" }],
+          toolCalls: [],
+          finishReason: "stop",
+        },
+      },
+    ]);
+
+    const { container } = render(
+      <Conversation
+        session={fakeSession()}
+        view={view}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+      />,
+    );
+
+    expect(container.textContent).not.toContain("All ensemble members are waiting or paused");
+    expect(container.textContent).toContain("继续调度成员");
+    expect(container.querySelector(".post-in-head")?.textContent).toBe("Runtime → 指挥 · #1");
+    expect(container.textContent).toContain("@maestro 旧日志提醒");
   });
 });

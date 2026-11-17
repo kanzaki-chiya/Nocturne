@@ -106,6 +106,7 @@ export async function runTurn(
   workMode?: WorkModeSnapshot,
   backgroundShell?: BackgroundShellResult,
   ensemble?: EnsemblePostDelivery,
+  ensembleQuietReminder?: true,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -175,6 +176,7 @@ export async function runTurn(
         ...(item.subagent !== undefined ? { subagent: item.subagent } : {}),
         ...(item.backgroundShell !== undefined ? { backgroundShell: item.backgroundShell } : {}),
         ...(item.ensemble !== undefined ? { ensemble: item.ensemble } : {}),
+        ...(item.ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
         steer: true,
       },
@@ -390,6 +392,7 @@ export async function runTurn(
         ...(subagent !== undefined ? { subagent } : {}),
         ...(backgroundShell !== undefined ? { backgroundShell } : {}),
         ...(ensemble !== undefined ? { ensemble } : {}),
+        ...(ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),
