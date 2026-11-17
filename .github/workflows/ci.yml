@@ -54,6 +54,14 @@ jobs:
       - name: test
         run: pnpm test
 
+      - name: 检查工作区干净
+        run: |
+          $dirty = git status --porcelain
+          if ($dirty) {
+            $dirty | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+
   relay-docker:
     name: 中继 Docker 冒烟（ubuntu-latest）
     runs-on: ubuntu-latest

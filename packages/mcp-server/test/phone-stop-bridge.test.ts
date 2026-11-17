@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -29,9 +29,7 @@ import {
 import { createRpcServer, type RpcServer } from "@nocturne/rpc/server";
 import { createNocturneMcpServer } from "../src/index.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "../../..");
-const worktreeTmpRoot = path.join(repoRoot, ".tmp-r1117g-test");
+const createdRunRoots: string[] = [];
 
 const TEST_MODELS: ModelInfo[] = [
   {
@@ -100,8 +98,8 @@ async function setupRig(
   source: FakeScript[] | FakeHandler,
   options?: { wrapAgentTransport?: (transport: LineTransport) => LineTransport },
 ): Promise<IntegrationRig> {
-  await mkdir(worktreeTmpRoot, { recursive: true });
-  const runRoot = await mkdtemp(path.join(worktreeTmpRoot, "run-"));
+  const runRoot = await mkdtemp(path.join(tmpdir(), "nct-mcp-phone-stop-"));
+  createdRunRoots.push(runRoot);
   const home = path.join(runRoot, "home");
   const userHome = path.join(runRoot, "user-home");
   const workspace = path.join(runRoot, "ws");
@@ -110,7 +108,7 @@ async function setupRig(
   await mkdir(workspace, { recursive: true });
   await writeFile(path.join(workspace, "readme.txt"), "hello\n", "utf8");
 
-  // 彻底隔离 NOCTURNE_HOME / HOME / USERPROFILE 到当前工作树临时目录，确保 createRuntime 不触及真实用户目录
+  // 彻底隔离 NOCTURNE_HOME / HOME / USERPROFILE 到系统临时目录，确保 createRuntime 不触及真实用户目录
   vi.stubEnv("NOCTURNE_HOME", home);
   vi.stubEnv("HOME", userHome);
   vi.stubEnv("USERPROFILE", userHome);
@@ -469,7 +467,11 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await rm(worktreeTmpRoot, { recursive: true, force: true }).catch(() => undefined);
+  await Promise.all(
+    createdRunRoots
+      .splice(0)
+      .map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)),
+  );
 });
 
 describe("agent 桥创建慢 Turn，remote 手机 / local 桌面按实际顺序中断", () => {

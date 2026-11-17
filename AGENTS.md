@@ -42,8 +42,8 @@
 ## 3. 硬性约束
 
 - Core（`packages/core`）不得依赖任何 UI、终端或客户端代码；客户端只能通过 Core 的公开 API 和 `protocol` 类型与 Runtime 交互。
-- 不得在 Agent Loop 中按工具名写分支（`if tool === "shell"`）；工具差异通过工具声明表达。
-- 不得在 Agent Loop 或 Context 中按 Provider 写分支；Provider 差异在 Provider 适配器内归一化。
+- 不得在 Agent Loop 中按工具名写分支（`if tool === "shell"`）；工具差异通过工具声明表达（eslint 检查）。
+- 不得在 Agent Loop 或 Context 中按 Provider 写分支；Provider 差异在 Provider 适配器内归一化（eslint 检查）。
 - 权限判定只能发生在权限层；工具实现和 UI 中不得自行决定"是否需要确认"。
 - 模块依赖方向以 [modules.md](docs/architecture/modules.md) 为准，禁止循环依赖。
 

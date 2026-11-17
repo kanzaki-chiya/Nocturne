@@ -1,6 +1,26 @@
 import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
+const agentContextBoundaryMessage =
+  "不得在 Agent Loop 或 Context 中按工具名或 Provider 写分支；请改为在工具声明或 Provider 适配器中表达（见 AGENTS.md 第 3 节）。";
+const memberOrChain = (attrs) =>
+  `:matches(MemberExpression${attrs}, ChainExpression:has(> MemberExpression${attrs}))`;
+const toolNameSelector = memberOrChain("[computed=false][property.name=/^(name|toolName)$/]");
+const providerIdSelector = `:matches(${[
+  memberOrChain("[computed=false][property.name=/^(provider|providerId|protocol|api)$/]"),
+  memberOrChain('[computed=false][property.name=/^(id|type)$/][object.name="provider"]'),
+  memberOrChain('[computed=false][property.name=/^(id|type)$/][object.property.name="provider"]'),
+  "Identifier[name=/^(providerId|currentModelProvider|currentModelProtocol)$/]",
+].join(", ")})`;
+const stringLiteralSelector =
+  ":matches(Literal[raw=/^['\"]/], TemplateLiteral[expressions.length=0])";
+const toolNameStringLiteralSelector =
+  ":matches(Literal[raw=/^['\"]/]:not([value=/Error$/]), TemplateLiteral[expressions.length=0]:not([quasis.0.value.raw=/Error$/]))";
+const eqComparisonBothSides = (expr, literal) => [
+  `BinaryExpression[operator=/^(===|!==|==|!=)$/]:has(> .left${expr}):has(> .right${literal})`,
+  `BinaryExpression[operator=/^(===|!==|==|!=)$/]:has(> .left${literal}):has(> .right${expr})`,
+];
+
 export default tseslint.config(
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -48,6 +68,28 @@ export default tseslint.config(
     files: ["apps/desktop/src/**/*.{ts,tsx}"],
     rules: {
       "no-alert": "error",
+    },
+  },
+  {
+    // AGENTS.md 第 3 节硬性约束：Agent Loop 与 Context 不按工具名或 Provider 写分支
+    files: [
+      "packages/core/src/agent/turn.ts",
+      "packages/core/src/agent/stream.ts",
+      "packages/core/src/context/**/*.ts",
+    ],
+    ignores: ["**/*.test.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...[
+          ...eqComparisonBothSides(toolNameSelector, toolNameStringLiteralSelector),
+          ...eqComparisonBothSides(providerIdSelector, stringLiteralSelector),
+          `SwitchStatement:has(> .discriminant:matches(${toolNameSelector}, ${providerIdSelector})) > SwitchCase:has(> .test${stringLiteralSelector})`,
+        ].map((selector) => ({
+          selector,
+          message: agentContextBoundaryMessage,
+        })),
+      ],
     },
   },
   {

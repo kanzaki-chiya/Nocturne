@@ -84,4 +84,22 @@ describe("lint:css 输出", () => {
     });
     expect(output).toContain("超过上限 0");
   });
+
+  it("警告低于上限时提示下调上限且不污染退出码", () => {
+    const prevExitCode = process.exitCode;
+    const output = formatter([{ source: "a.css", warnings: [warning] }], {
+      maxWarnings: 2,
+    });
+    expect(output).toContain("间距警告已降到 1 处，把 package.json 里的上限改成 1");
+    expect(process.exitCode).toBe(prevExitCode);
+  });
+
+  it("警告等于上限时正常输出总数", () => {
+    const prevExitCode = process.exitCode;
+    const output = formatter([{ source: "a.css", warnings: [warning, warning] }], {
+      maxWarnings: 2,
+    });
+    expect(output.trim()).toBe("间距警告 2 处");
+    expect(process.exitCode).toBe(prevExitCode);
+  });
 });

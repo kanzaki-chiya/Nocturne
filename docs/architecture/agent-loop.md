@@ -234,7 +234,7 @@ idle ──submit──▶ thinking ──工具调用──▶ running_tool ─
 
 ## 5. 明确不在 Agent Loop 中的内容
 
-- 按工具名或 Provider 名的分支；
+- 按工具名或 Provider 名的分支（由 [eslint.config.mjs](../../eslint.config.mjs) 检查）；
 - "是否需要确认"的判断；
 - 渲染、颜色、spinner；
 - 持久化格式；

@@ -44,6 +44,7 @@
   - 压缩：边界不拆分工具调用对、多次压缩叠加、摘要失败与必须压缩时失败。
 - Agent Loop 的测试使用脚本化的假 Provider，不访问真实模型服务；真实 Provider 的冒烟测试单独运行，不进入默认测试集。
 - 测试要监听本机随机端口、再用 `fetch` 访问时，用共用的 `scripts/test/ports.mjs`（`listenFetchSafe` / `unusedFetchSafePort`，类型在 `ports.d.mts`）：系统分配的随机端口可能落在 fetch 规范的禁用端口上，Node 的 fetch 会直接报 `bad port`，测试偶发失败。relay、mcp、rpc、cli 与 core 的 HTTP 测试都用它。
+- 测试的临时文件写到系统临时目录（`os.tmpdir()`），不得写入仓库工作区。
 - 涉及文件系统与子进程的行为需考虑 Windows、macOS、Linux 差异；无法在当前平台验证的，在变更说明中如实写明。
 - 代码、测试、文档三者冲突时必须显式指出，不得静默跳过或修改测试迁就实现。
 
@@ -51,15 +52,15 @@
 
 在仓库根目录运行（以 `package.json` scripts 为准）：
 
-GitHub Actions 的 `ci` 工作流（`.github/workflows/ci.yml`）在推送 main 与 Pull Request 时于 windows-latest 干净检出上依次跑 typecheck、lint、format:check、depcheck、build、test（不含 cargo test 与冒烟），与发布流水线的检查部分一致。
+GitHub Actions 的 `ci` 工作流（`.github/workflows/ci.yml`）在推送 main 与 Pull Request 时于 windows-latest 干净检出上依次跑 typecheck、lint、format:check、depcheck、build、test（不含 cargo test 与冒烟），并在 test 后检查工作区是否干净，与发布流水线的检查部分一致。
 
 另有并行的 Ubuntu 中继部署任务：构建后运行 `pack-relay.mjs`、`smoke-relay.mjs`，再调用 `apps/relay/deploy/ci-smoke.sh` 构建 Docker 镜像、验证静态网页、容器内管理命令、数据卷重启持久化和正常停止；不推送镜像。
 
 ```bash
 pnpm install        # 安装依赖
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
-pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、stylelint 样式检查（pnpm lint:css，含警告数上限 --max-warnings，只能减不能增）、gen-tokens --check 与桌面端未定义 CSS 变量检查
-pnpm lint:css       # stylelint 检查 apps/desktop/src/**/*.css（排除 tokens.css），锁定存量间距警告上限
+pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、stylelint 样式检查（pnpm lint:css，含警告数上限 --max-warnings 598，只能减不能增；实际数低于上限时同样失败，需把上限改成实际数）、gen-tokens --check 与桌面端未定义 CSS 变量检查
+pnpm lint:css       # stylelint 检查 apps/desktop/src/**/*.css（排除 tokens.css），锁定存量间距警告上限 598（实际数低于上限时同样失败，需把上限改成实际数）
 pnpm format:check   # prettier --check；修复用 pnpm format
 pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，TUI 包内限 4 个 worker，避免渲染测试在并行负载下超时；`CI=true` 时（GitHub runner 明显更慢）core 与 cli 单测超时由 5s 放宽到 30s、TUI 由 15s 放宽到 60s，各包（含 `scripts/` 测试，其超时本地 30s、CI 60s）失败重试 2 次，本地不重试；TUI 测试固定 `CI=false`，避免 Ink 在 CI 下关闭增量渲染。本轮实测大致耗时：core 约 25 秒、TUI 约 312 秒、ACP 约 112 秒、桌面端约 9 秒，全量约 8 分钟；Agent 在本仓库跑全量测试时把 shell `timeoutMs` 设到足以覆盖全量的值（例如 600000 毫秒）。
 pnpm -r --workspace-concurrency=1 --no-bail test  # 全部包串行，失败后仍继续看各包结果（scripts/ 测试另跑下一行）
