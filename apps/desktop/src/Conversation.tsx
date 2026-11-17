@@ -1,6 +1,7 @@
 import {
   createContext,
   Fragment,
+  memo,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -415,6 +416,44 @@ function renderEnsembleTextNode(text: string, mentions: readonly string[] | unde
   );
 }
 
+/** 判断 marked 产出的代码块围栏是否已闭合；缩进块和未闭合围栏在流式输出时不启动解析。 */
+export function isClosedCodeFence(code: Tokens.Code): boolean {
+  if (code.codeBlockStyle === "indented") return false;
+  const open = /^ {0,3}(`{3,}|~{3,})[^\n]*\r?\n([\s\S]*)$/.exec(code.raw);
+  if (open?.[1] === undefined || open[2] === undefined) return false;
+  const fence = open[1];
+  const body = open[2].replace(/\r?\n$/, "");
+  const lastNewline = body.lastIndexOf("\n");
+  const lastLine = lastNewline < 0 ? body : body.slice(lastNewline + 1);
+  return new RegExp(`^ {0,3}${fence}[~` + "`" + `]* *$`).test(lastLine);
+}
+
+const MarkdownCodeBlock = memo(function MarkdownCodeBlock({
+  lang,
+  text: codeText,
+  closed,
+}: {
+  lang: string;
+  text: string;
+  closed: boolean;
+}) {
+  const ref = useCodeHighlight<HTMLElement>(undefined, codeText, "text", {
+    language: lang,
+    enabled: closed,
+  });
+  return (
+    <div className="conversation-code">
+      <div className="conversation-code-language">
+        <span>{lang}</span>
+        <CopyButton text={codeText} label="复制代码" />
+      </div>
+      <pre>
+        <code ref={ref}>{codeText}</code>
+      </pre>
+    </div>
+  );
+});
+
 /** Only lexer tokens become React elements. Raw HTML and remote images stay inert text. */
 function markdownNodes(
   tokens: readonly Token[],
@@ -480,15 +519,12 @@ function markdownNodes(
       case "code": {
         const code = token as Tokens.Code;
         return (
-          <div key={key} className="conversation-code">
-            <div className="conversation-code-language">
-              <span>{code.lang}</span>
-              <CopyButton text={code.text} label="复制代码" />
-            </div>
-            <pre>
-              <code>{code.text}</code>
-            </pre>
-          </div>
+          <MarkdownCodeBlock
+            key={key}
+            lang={code.lang ?? ""}
+            text={code.text}
+            closed={isClosedCodeFence(code)}
+          />
         );
       }
       case "blockquote":

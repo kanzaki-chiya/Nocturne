@@ -77,3 +77,19 @@ it("hunk 间缺失的上下文不向后传播解析状态", async () => {
 it("未知语言不着色", async () => {
   expect(await parseCode({ path: "Makefile", text: "all: build", kind: "text" })).toBeUndefined();
 });
+
+it("按语言名与别名解析并保留原文，纯文本和未知标记返回 undefined", async () => {
+  const source = 'def greet(name):\n    return f"hi {name}"';
+  const pyLines = await parseCode({ language: "py", text: source, kind: "text" });
+  expect(pyLines?.map((line) => line.text).join("\n")).toBe(source);
+  expect(pyLines?.[0]?.spans.some((span) => span.classes === "syntax-keyword")).toBe(true);
+
+  const pythonLines = await parseCode({ language: "python", text: source, kind: "text" });
+  expect(pythonLines).toEqual(pyLines);
+
+  expect(await parseCode({ language: "text", text: "plain", kind: "text" })).toBeUndefined();
+  expect(await parseCode({ language: "plaintext", text: "plain", kind: "text" })).toBeUndefined();
+  expect(await parseCode({ language: "console", text: "$ ls", kind: "text" })).toBeUndefined();
+  expect(await parseCode({ language: "output", text: "ok", kind: "text" })).toBeUndefined();
+  expect(await parseCode({ language: "unknown-lang", text: "ok", kind: "text" })).toBeUndefined();
+});

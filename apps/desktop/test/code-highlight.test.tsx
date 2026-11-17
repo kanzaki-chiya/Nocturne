@@ -1,6 +1,7 @@
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { marked, type Tokens } from "marked";
 import { afterEach, expect, it, vi } from "vitest";
-import { DiffBody } from "../src/Conversation";
+import { DiffBody, Markdown, isClosedCodeFence } from "../src/Conversation";
 import { highlightCode } from "../src/code-highlight-client";
 import { visibleLineWindow } from "../src/code-lines";
 import * as parseModule from "../src/code-parse";
@@ -67,4 +68,141 @@ it("可视行范围按实际行位置计算，不受折行和行高影响", () =
   expect(visibleLineWindow(1000, top, 0, 280, 2)).toEqual({ start: 0, end: 6 });
   expect(visibleLineWindow(1000, top, 99999, 100279, 2).end).toBe(1000);
   expect(visibleLineWindow(0, top, 0, 280)).toEqual({ start: 0, end: 0 });
+});
+
+it("确认 marked 未闭合与闭合围栏的 raw 结尾特征及闭合判断", () => {
+  const firstCodeToken = (src: string) => {
+    const token = marked.lexer(src, { gfm: true, breaks: true }).find((t) => t.type === "code");
+    if (token === undefined) throw new Error("expected code token");
+    return token as Tokens.Code;
+  };
+
+  for (const unclosed of [
+    "```python",
+    "```python\n",
+    "```python\ndef f():\n    return 1",
+    "```python\ndef f():\n    return 1\n",
+    "```python\ndef f():\n    return 1\n``",
+    "~~~~ts\nconst x = 1",
+    "````md\n```py\nx = 1\n```\n",
+    "```python\ncode\n    ```",
+  ]) {
+    const token = firstCodeToken(unclosed);
+    expect(isClosedCodeFence(token)).toBe(false);
+  }
+
+  for (const closed of [
+    "```python\ndef f():\n    return 1\n```",
+    "```python\ndef f():\n    return 1\n```\n",
+    "```python\ndef f():\n    return 1\n```  \n\n后续说明",
+    "```python\n   ```",
+    "~~~~ts\nconst x = 1\n~~~~",
+    "````md\n```py\nx = 1\n```\n````",
+    "```python\n```",
+  ]) {
+    const token = firstCodeToken(closed);
+    expect(isClosedCodeFence(token)).toBe(true);
+  }
+
+  const indented = firstCodeToken("    const x = 1");
+  expect(indented.codeBlockStyle).toBe("indented");
+  expect(isClosedCodeFence(indented)).toBe(false);
+});
+
+const noop = () => undefined;
+
+it("Markdown python 与 py 代码块闭合后着色且逐字保留原文", async () => {
+  const pySource = 'def greet(name):\n    # 问候\n    return f"hi {name}"';
+  const view = render(<Markdown text={`\`\`\`python\n${pySource}\n\`\`\``} openUrl={noop} />);
+  await waitFor(
+    () => {
+      const code = view.container.querySelector(".conversation-code pre code");
+      expect(code?.querySelector(".syntax-keyword")).not.toBeNull();
+    },
+    { timeout: 5000 },
+  );
+  const pythonCode = view.container.querySelector(".conversation-code pre code");
+  expect(pythonCode?.textContent).toBe(pySource);
+  expect(pythonCode?.querySelector(".syntax-comment")?.textContent).toBe("# 问候");
+
+  view.unmount();
+  const pyView = render(<Markdown text={`\`\`\`py\n${pySource}\n\`\`\``} openUrl={noop} />);
+  await waitFor(
+    () => {
+      const code = pyView.container.querySelector(".conversation-code pre code");
+      expect(code?.querySelector(".syntax-keyword")).not.toBeNull();
+    },
+    { timeout: 5000 },
+  );
+  expect(pyView.container.querySelector(".conversation-code pre code")?.textContent).toBe(pySource);
+});
+
+it("无语言标记、text、认不出的语言保持纯文本且不启动语法解析", async () => {
+  const parseSpy = vi.spyOn(parseModule, "parseCode");
+  const view = render(
+    <Markdown text={"```\nconst a = 1\n```\n\n```text\ndef f(): pass\n```"} openUrl={noop} />,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(parseSpy).not.toHaveBeenCalled();
+
+  view.rerender(<Markdown text={"```nonexistent-lang-xyz\nconst a = 1\n```"} openUrl={noop} />);
+  await waitFor(() => expect(parseSpy).toHaveBeenCalledTimes(1));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const code = view.container.querySelector(".conversation-code pre code");
+  expect(code?.textContent).toBe("const a = 1");
+  expect(code?.querySelector("span")).toBeNull();
+});
+
+it("未闭合围栏不发起解析，补上结尾围栏后才发起，之后追加段落不再重跑", async () => {
+  const parseSpy = vi.spyOn(parseModule, "parseCode");
+  const source = "def add(a, b):\n    return a + b";
+
+  const view = render(<Markdown text={`\`\`\`python\n${source}`} openUrl={noop} />);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(parseSpy).not.toHaveBeenCalled();
+  expect(view.container.querySelector(".conversation-code pre code")?.textContent).toBe(source);
+  expect(view.container.querySelector(".conversation-code pre code span")).toBeNull();
+
+  view.rerender(<Markdown text={`\`\`\`python\n${source}\n\`\`\``} openUrl={noop} />);
+  await waitFor(() => expect(parseSpy).toHaveBeenCalledTimes(1));
+  await waitFor(
+    () => {
+      expect(
+        view.container.querySelector(".conversation-code pre code .syntax-keyword"),
+      ).not.toBeNull();
+    },
+    { timeout: 5000 },
+  );
+
+  view.rerender(
+    <Markdown
+      text={`\`\`\`python\n${source}\n\`\`\`\n\n后面流式追加的一段解释文字`}
+      openUrl={noop}
+    />,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(parseSpy).toHaveBeenCalledTimes(1);
+  expect(view.container.querySelector(".conversation-code pre code")?.textContent).toBe(source);
+  expect(
+    view.container.querySelector(".conversation-code pre code .syntax-keyword"),
+  ).not.toBeNull();
+});
+
+it("代码块复制按钮始终复制代码原文", async () => {
+  const writeText = vi.fn(async (_text: string) => undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  const source = "const x = 1;\nconsole.log(x);";
+
+  const view = render(<Markdown text={`\`\`\`ts\n${source}\n\`\`\``} openUrl={noop} />);
+  await waitFor(
+    () => {
+      expect(
+        view.container.querySelector(".conversation-code pre code .syntax-keyword"),
+      ).not.toBeNull();
+    },
+    { timeout: 5000 },
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(source));
 });

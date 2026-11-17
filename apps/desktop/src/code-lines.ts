@@ -52,7 +52,8 @@ export interface CodeLine {
   spans: CodeSpan[];
 }
 export interface CodeRequest {
-  path: string;
+  path?: string | undefined;
+  language?: string | undefined;
   text: string;
   kind: "text" | "numbered" | "diff";
 }

@@ -1,5 +1,5 @@
 import { highlightTree } from "@lezer/highlight";
-import { languageFor } from "./code-language";
+import { languageFor, languageForName } from "./code-language";
 import { codeHighlighter } from "./code-tags";
 import { diffRows, type CodeLine, type CodeRequest } from "./code-lines";
 
@@ -18,7 +18,13 @@ export async function parseCode(
   request: CodeRequest,
   signal?: AbortSignal,
 ): Promise<CodeLine[] | undefined> {
-  const support = await languageFor(request.path)?.();
+  const loadLanguage =
+    request.language !== undefined
+      ? languageForName(request.language)
+      : request.path !== undefined
+        ? languageFor(request.path)
+        : undefined;
+  const support = await loadLanguage?.();
   if (support === undefined || signal?.aborted === true) return undefined;
   const parser = support.language.parser;
   async function parseTree(text: string): Promise<ReturnType<typeof parser.parse> | undefined> {
