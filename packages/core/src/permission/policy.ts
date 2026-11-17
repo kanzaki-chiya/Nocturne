@@ -94,23 +94,124 @@ interface SubjectVerdict {
 const STRICTNESS: Record<PermissionAction, number> = { deny: 2, ask: 1, allow: 0 };
 
 /**
- * 凭据相关命令模式（provider-setup.md 第 4 节第 3 条）：shell 命令中
- * 出现凭据索引文件名或系统凭据后端的读取调用时至少 ask——即便宽
- * 规则/Grant 已 allow。
- * - 索引：credentials.json
+ * 凭据后端命令模式（provider-setup.md 第 4 节第 3 条）：shell 命令调用系统凭据后端时
+ * 至少 ask——即便宽规则/Grant 已 allow。
  * - macOS：security …-generic-password（-i 交互模式同命令族）
  * - Linux：secret-tool（store/lookup/clear 都经它）
  * - Windows：ProtectedData（DPAPI 的 .NET 入口类名）
  */
-const CREDENTIAL_COMMAND_PATTERNS = [
-  /\bcredentials\.json\b/i,
+const CREDENTIAL_BACKEND_PATTERNS = [
   /\bsecurity\b[^\n]*-generic-password\b/i,
   /\bsecret-tool\b/i,
   /\bProtectedData\b/i,
 ];
 
 function isCredentialBackendCommand(command: string): boolean {
-  return CREDENTIAL_COMMAND_PATTERNS.some((re) => re.test(command));
+  return CREDENTIAL_BACKEND_PATTERNS.some((re) => re.test(command));
+}
+
+const CREDENTIAL_FRAGMENT_DELIMITER = /[\s"'`,()[\]{};|&<>=]/;
+const VARIABLE_REF_PATTERN = /\$(?:[A-Za-z_0-9{(?])|%[A-Za-z_][^%\s]*%/;
+const SHORT_83_SEGMENT_PATTERN = /^[^~]+~\d+(?:\.[^.]*)?$/;
+const DIRECTORY_CHANGE_PATTERN =
+  /(?:^|[\s;&|({`"'=])(?:cd|chdir|pushd|Set-Location|sl|Push-Location)(?=$|[\s;&|)}`"']|\.\.)/i;
+
+function escapeRegExpText(s: string): string {
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isAbsoluteFragment(fragment: string): boolean {
+  return (
+    fragment.startsWith("/") || fragment.startsWith("\\\\") || /^[a-zA-Z]:[\\/]/.test(fragment)
+  );
+}
+
+/**
+ * 从命令文本中定位每一处凭据文件名并向两侧扩展到分隔符，得到路径片段。
+ * 保留嵌入在路径内的 `${…}` / `$(…)` 插值不被内部括号打断。
+ */
+function extractCredentialFragments(
+  command: string,
+  fileNames: readonly string[],
+  caseSensitive: boolean,
+): string[] {
+  const haystack = caseSensitive ? command : command.toLowerCase();
+  const fragments: string[] = [];
+  for (const name of fileNames) {
+    let pos = 0;
+    while (pos < haystack.length) {
+      const idx = haystack.indexOf(name, pos);
+      if (idx === -1) break;
+      pos = idx + name.length;
+      const prev = idx > 0 ? (command[idx - 1] ?? "") : "";
+      const next = idx + name.length < command.length ? (command[idx + name.length] ?? "") : "";
+      const validPrev =
+        idx === 0 ||
+        CREDENTIAL_FRAGMENT_DELIMITER.test(prev) ||
+        prev === "/" ||
+        prev === "\\" ||
+        prev === ":";
+      const validNext = idx + name.length === command.length || !/[A-Za-z0-9_]/.test(next);
+      if (!validPrev || !validNext) continue;
+
+      let left = idx;
+      while (left > 0) {
+        const ch = command[left - 1] ?? "";
+        if (ch === "}" || ch === ")") {
+          const open = ch === "}" ? "{" : "(";
+          let depth = 1;
+          let j = left - 2;
+          while (j >= 0 && depth > 0) {
+            if (command[j] === ch) depth++;
+            else if (command[j] === open) depth--;
+            j--;
+          }
+          if (depth === 0 && j >= 0 && command[j] === "$") {
+            left = j;
+            continue;
+          }
+        }
+        if (CREDENTIAL_FRAGMENT_DELIMITER.test(ch)) break;
+        left--;
+      }
+
+      let right = idx + name.length;
+      while (right < command.length && !CREDENTIAL_FRAGMENT_DELIMITER.test(command[right] ?? "")) {
+        right++;
+      }
+
+      fragments.push(command.slice(left, right));
+    }
+  }
+  return fragments;
+}
+
+/** 判定单个凭据路径片段是否命中真实凭据路径，或位置无法静态确定（规则 2、3）。 */
+function isSensitiveCredentialFragment(
+  fragment: string,
+  command: string,
+  shellCwd: string | undefined,
+  realCredentialPaths: ReadonlySet<string>,
+  dirNamePatterns: readonly RegExp[],
+  caseSensitive: boolean,
+): boolean {
+  if (VARIABLE_REF_PATTERN.test(fragment) || fragment.startsWith("~")) return true;
+
+  if (isAbsoluteFragment(fragment)) {
+    if (realCredentialPaths.has(normalizePathText(fragment, caseSensitive))) return true;
+    return fragment.split(/[\\/]/).some((seg) => SHORT_83_SEGMENT_PATTERN.test(seg));
+  }
+
+  // 相对路径、驱动器相对路径或裸文件名：任一不确定条件命中即至少 ask
+  if (shellCwd === undefined || /^[a-zA-Z]:(?![\\/])/.test(fragment)) return true;
+  if (
+    VARIABLE_REF_PATTERN.test(command) ||
+    DIRECTORY_CHANGE_PATTERN.test(command) ||
+    dirNamePatterns.some((re) => re.test(command))
+  ) {
+    return true;
+  }
+  return realCredentialPaths.has(normalizePathText(`${shellCwd}/${fragment}`, caseSensitive));
 }
 
 function describeHit(origin: RuleOrigin, index: number | undefined, presetName: string): string {
@@ -197,13 +298,46 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     [s.target, s.resolved].some(
       (p) => p !== undefined && externalPaths.has(normalizePathText(p, caseSensitive)),
     );
-  // 和已有凭据命令提示一致：按文件名保守匹配，可覆盖 ~、相对路径及分隔符别名。
-  const externalFileNames = [...externalPaths].map((p) => p.split("/").at(-1) ?? p);
-  const isCredentialCommand = (command: string): boolean =>
-    isCredentialBackendCommand(command) ||
-    externalFileNames.some((name) =>
-      (caseSensitive ? command : command.toLowerCase()).includes(name),
+  // 按路径判断可能读取凭据的命令（permissions.md 第 6 节第 5 条）：命中后端命令、真实凭据路径或位置无法静态确定的片段时至少 ask。
+  const realCredentialPaths = new Set<string>([
+    ...protectedLexical,
+    ...protectedResolved,
+    ...externalPaths,
+  ]);
+  const credentialDirNames = new Set<string>();
+  for (const p of realCredentialPaths) {
+    const parent = p.split("/").at(-2);
+    if (parent !== undefined && parent !== "" && !/^[a-zA-Z]:$/.test(parent)) {
+      credentialDirNames.add(parent);
+    }
+  }
+  const dirNamePatterns = [...credentialDirNames].map(
+    (dir) =>
+      new RegExp(
+        `(?:^|[\\s"'\`,()[\\]{};|&<>=\\\\/:\\r\\n])${escapeRegExpText(dir)}(?:$|[\\s"'\`,()[\\]{};|&<>=\\\\/:\\r\\n])`,
+        caseSensitive ? "" : "i",
+      ),
+  );
+  const credentialFileNames = [
+    ...new Set([
+      "credentials.json",
+      ...[...externalPaths].map((p) => p.split("/").at(-1) ?? "").filter((n) => n !== ""),
+    ]),
+  ];
+  const isCredentialCommand = (s: PermissionSubject): boolean => {
+    if (isCredentialBackendCommand(s.target)) return true;
+    return extractCredentialFragments(s.target, credentialFileNames, caseSensitive).some(
+      (fragment) =>
+        isSensitiveCredentialFragment(
+          fragment,
+          s.target,
+          s.shellCwd,
+          realCredentialPaths,
+          dirNamePatterns,
+          caseSensitive,
+        ),
     );
+  };
   const isProtected = (s: PermissionSubject): boolean => {
     if (!isPathKind(s.kind)) return false;
     const lex = normalizePathText(s.target, caseSensitive);
@@ -464,8 +598,8 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     }
 
     // 凭据相关命令至少 ask（provider-setup.md 第 4 节）：shell allow 命中
-    // 凭据文件名或后端读取命令时降级；Grant/--yes 仍可在 ask 层批准
-    if (s.kind === "shell" && action === "allow" && isCredentialCommand(s.target)) {
+    // 凭据路径/后端命令时降级；Grant/--yes 仍可在 ask 层批准
+    if (s.kind === "shell" && action === "allow" && isCredentialCommand(s)) {
       action = "ask";
       note = [note, "可能读取 Nocturne 凭据"].filter(Boolean).join("；");
     }
@@ -514,7 +648,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     const presetHit = lastMatch(preset, s);
     const userOnly =
       smartDirect ||
-      (s.kind === "shell" && isCredentialCommand(s.target)) ||
+      (s.kind === "shell" && isCredentialCommand(s)) ||
       presetHit?.rule?.userOnly === true ||
       (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
     return { action, hit, note, userOnly };

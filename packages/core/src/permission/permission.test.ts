@@ -604,6 +604,7 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
       workspaceRoot: WS,
       caseSensitive: false,
       preset: "guarded",
+      protectedPaths,
     });
     for (const cmd of [
       `type ${CRED_INDEX}`,
@@ -611,13 +612,153 @@ describe("provider-setup 权限规则（provider-setup.md 第 4 节）", () => {
       "secret-tool lookup service nocturne provider corp",
       'powershell -NoProfile -Command "[System.Security.Cryptography.ProtectedData]::Unprotect()"',
     ]) {
-      const r = policy.evaluate([subject({ kind: "shell", target: cmd })]);
+      const r = policy.evaluate([subject({ kind: "shell", target: cmd, shellCwd: WS })]);
       expect(r.decision.action).toBe("ask");
       expect(r.decision.reason).toContain("可能读取 Nocturne 凭据");
     }
     // 普通命令不受影响
     expect(
-      policy.evaluate([subject({ kind: "shell", target: "git status" })]).decision.action,
+      policy.evaluate([subject({ kind: "shell", target: "git status", shellCwd: WS })]).decision
+        .action,
     ).toBe("allow");
+  });
+
+  it("凭据命令按路径判断：真实凭据路径与位置不确定写法在 guarded 与 bypass 下均为 ask 且 userOnly", () => {
+    const externalCredentialPaths = {
+      lexical: ["C:/ext/magpie.json"],
+      resolved: ["C:/ext/magpie.json"],
+    };
+    const extPolicy = (preset: "guarded" | "bypass") =>
+      createRulePolicy({
+        workspaceRoot: WS,
+        caseSensitive: false,
+        preset,
+        protectedPaths,
+        externalCredentialPaths,
+      });
+
+    const cases: { cmd: string; shellCwd?: string | undefined }[] = [
+      // 绝对路径大小写、分隔符变体、引号包裹
+      { cmd: "type C:/USERS/TESTER/.NOCTURNE/CREDENTIALS.JSON", shellCwd: WS },
+      { cmd: `type "${CRED_INDEX}"`, shellCwd: WS },
+      { cmd: `type '${CRED_INDEX.replaceAll("\\", "/")}'`, shellCwd: WS },
+      // ~、环境变量与变量引用
+      { cmd: "type ~/.nocturne/credentials.json", shellCwd: WS },
+      { cmd: "Get-Content $env:USERPROFILE\\.nocturne\\credentials.json", shellCwd: WS },
+      { cmd: 'cat "$HOME/.nocturne/credentials.json"', shellCwd: WS },
+      { cmd: "type %USERPROFILE%\\.nocturne\\credentials.json", shellCwd: WS },
+      // 切换目录
+      { cmd: "cd C:/home; cat credentials.json", shellCwd: WS },
+      { cmd: "Set-Location C:/home; gc .\\credentials.json", shellCwd: WS },
+      // shellCwd 位于凭据目录或缺失
+      { cmd: "cat credentials.json", shellCwd: HOME },
+      { cmd: "cat credentials.json", shellCwd: undefined },
+      // 外部凭据绝对路径与所在目录 shellCwd
+      { cmd: "type C:/ext/magpie.json", shellCwd: WS },
+      { cmd: "type magpie.json", shellCwd: "C:/ext" },
+      // 8.3 短名
+      { cmd: "type C:\\Users\\TESTER~1\\.nocturne\\credentials.json", shellCwd: WS },
+      // 真实日志派生写法（使用假路径）
+      {
+        cmd: 'node -e \'const x=JSON.parse(fs.readFileSync("C:/ext/magpie.json","utf8"))\'',
+        shellCwd: WS,
+      },
+      {
+        cmd: "foreach ($name in @('config.json', 'magpie.json')) { $src = Join-Path C:\\home $name; Copy-Item $src Z:\\x }",
+        shellCwd: WS,
+      },
+      {
+        cmd: 'node -e \'fs.readFileSync(path.join(os.homedir(), ".nocturne", "credentials.json"))\'',
+        shellCwd: WS,
+      },
+      { cmd: "writeJson(`${home}/magpie.json`, {})", shellCwd: WS },
+      // 三条系统凭据后端命令
+      { cmd: "security find-generic-password -s nocturne -a corp -w", shellCwd: WS },
+      { cmd: "secret-tool lookup service nocturne provider corp", shellCwd: WS },
+      {
+        cmd: 'powershell -NoProfile -Command "[System.Security.Cryptography.ProtectedData]::Unprotect()"',
+        shellCwd: WS,
+      },
+    ];
+
+    for (const preset of ["guarded", "bypass"] as const) {
+      const policy = extPolicy(preset);
+      for (const { cmd, shellCwd } of cases) {
+        const r = policy.evaluate([subject({ kind: "shell", target: cmd, shellCwd })]);
+        expect(r.decision.action, `${preset}: ${cmd}`).toBe("ask");
+        expect(r.decision.reason, `${preset}: ${cmd}`).toContain("可能读取 Nocturne 凭据");
+        expect(r.userOnly, `${preset}: ${cmd}`).toBe(true);
+      }
+    }
+
+    // Grant 与 --yes 在 ask 层的批准行为不变
+    const askCmd = "type ~/.nocturne/credentials.json";
+    const withGrant = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "bypass",
+      protectedPaths,
+      grants: {
+        session: [{ kind: "shell", target: askCmd, createdAt: "2026-01-01T00:00:00Z" }],
+      },
+    });
+    expect(
+      withGrant.evaluate([subject({ kind: "shell", target: askCmd, shellCwd: WS })]).decision
+        .action,
+    ).toBe("allow");
+
+    const withYes = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "bypass",
+      protectedPaths,
+      autoApproveAsk: true,
+    });
+    expect(
+      withYes.evaluate([subject({ kind: "shell", target: askCmd, shellCwd: WS })]).decision.action,
+    ).toBe("allow");
+  });
+
+  it("非真实凭据绝对路径与静态可确定搜索命令不再触发凭据提示", () => {
+    const externalCredentialPaths = {
+      lexical: ["C:/ext/magpie.json"],
+      resolved: ["C:/ext/magpie.json"],
+    };
+    const bypass = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "bypass",
+      protectedPaths,
+      externalCredentialPaths,
+    });
+    const guarded = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      preset: "guarded",
+      protectedPaths,
+      externalCredentialPaths,
+    });
+
+    const commands = [
+      "$c = Get-Content -Raw Z:\\mockups\\impl\\r1\\home\\credentials.json | ConvertFrom-Json; $c.PSObject.Properties.Name",
+      [
+        '$ErrorActionPreference = "Stop"',
+        'Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "Z:\\wt\\r1\\.tmp-e2e\\home\\remote.json","Z:\\wt\\r1\\.tmp-e2e\\home\\credentials.json"',
+      ].join("\n"),
+      'rg -n "credentials.json" packages -g "*.ts" -g "!**/test/**" | Select-Object -First 5',
+      "rg -n '来源标记|状态栏|magpie.json' docs/apps/desktop.md; rg -n 'magpie.json' docs/architecture/config.md",
+      'rg -n "magpie.json" next-app',
+      'rg -n "credentials.json" .nocturne-bak',
+      "git status",
+    ];
+
+    for (const cmd of commands) {
+      const br = bypass.evaluate([subject({ kind: "shell", target: cmd, shellCwd: WS })]);
+      expect(br.decision.action, `bypass: ${cmd}`).toBe("allow");
+      expect(br.userOnly, `bypass userOnly: ${cmd}`).not.toBe(true);
+
+      const gr = guarded.evaluate([subject({ kind: "shell", target: cmd, shellCwd: WS })]);
+      expect(gr.decision.reason, `guarded: ${cmd}`).not.toContain("可能读取 Nocturne 凭据");
+    }
   });
 });
