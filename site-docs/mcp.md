@@ -73,5 +73,5 @@ MCP 服务器在工具定义中声明 `readOnlyHint: true` 的工具，可进入
 | `nocturne_list_models` | 列出当前可用模型与默认模型 |
 | `nocturne_start_session` | 在指定 `cwd` 新建会话并发送首条 `prompt`（可选等待完成） |
 | `nocturne_send` | 向已有会话追加消息（走 `queue` 排队模式，不打断运行中回合） |
-| `nocturne_wait` | 等待正在运行的会话完成当前轮次，或在等待审批/回答提问时返回 |
+| `nocturne_wait` | 等待正在运行的会话完成当前轮次（含正常接续的排队消息），或在等待审批/回答提问、或因中断/出错导致队列暂停时立即返回（详见[外部 Agent 接入指南](https://github.com/kanzaki-chiya/Nocturne/blob/main/docs/apps/outside-agents.md#4-提供的-mcp-工具)） |
 | `nocturne_interrupt` | 中断指定会话正在运行的轮次 |

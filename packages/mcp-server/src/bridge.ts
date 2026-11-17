@@ -17,6 +17,7 @@ import {
   formatReadSessionOutput,
   MAX_MCP_OUTPUT_BYTES,
   truncateMcpOutput,
+  type McpSessionStatus,
 } from "./view-format.js";
 
 export const DESKTOP_NOT_RUNNING_MESSAGE =
@@ -53,10 +54,11 @@ interface TrackedBridgeSession {
   readonly rpcSession: RpcSession;
   tracker: SessionViewTracker;
   readonly listeners: Set<(view: SessionView, event: RuntimeEvent) => void>;
+  readonly waitWakeups: Set<() => void>;
   pendingInputIds: Set<string>;
   paused: boolean;
-  startingTurn: boolean;
-  transitionTimer: ReturnType<typeof setTimeout> | undefined;
+  startTokenSeq: number;
+  activeStartToken: number | undefined;
   inTransition: boolean;
   lastReportedPermissionId: string | undefined;
   lastReportedQuestionId: string | undefined;
@@ -173,8 +175,8 @@ export class McpBridge {
 
   private clearTrackedSessions(): void {
     for (const s of this.sessions.values()) {
-      if (s.transitionTimer !== undefined) clearTimeout(s.transitionTimer);
       s.listeners.clear();
+      s.waitWakeups.clear();
     }
     this.sessions.clear();
   }
@@ -184,8 +186,8 @@ export class McpBridge {
     const current = this.client;
     this.client = undefined;
     for (const s of this.sessions.values()) {
-      if (s.transitionTimer !== undefined) clearTimeout(s.transitionTimer);
       s.listeners.clear();
+      s.waitWakeups.clear();
       await s.tracker.stop().catch(() => undefined);
       await s.rpcSession.close().catch(() => undefined);
     }
@@ -292,10 +294,11 @@ export class McpBridge {
       rpcSession,
       tracker: undefined as unknown as SessionViewTracker,
       listeners,
+      waitWakeups: new Set<() => void>(),
       pendingInputIds: new Set<string>(),
       paused: false,
-      startingTurn: false,
-      transitionTimer: undefined,
+      startTokenSeq: 0,
+      activeStartToken: undefined,
       inTransition: false,
       lastReportedPermissionId: undefined,
       lastReportedQuestionId: undefined,
@@ -307,25 +310,29 @@ export class McpBridge {
     };
     const tracker = await trackSessionView(rpcSession, (view, event) => {
       if (event.type === "turn.started") {
-        entry.startingTurn = false;
+        clearStartTurn(entry);
         entry.inTransition = false;
-        if (entry.transitionTimer !== undefined) {
-          clearTimeout(entry.transitionTimer);
-          entry.transitionTimer = undefined;
-        }
+      } else if (
+        (event.type === "runtime.status" && event.payload.status === "idle") ||
+        (event.type === "runtime.error" && event.payload.code === "session_failed") ||
+        (event.type === "runtime.warning" && event.payload.code === "input_queue_failed")
+      ) {
+        entry.inTransition = false;
       } else if (event.type === "input.pending") {
         const prevSize = entry.pendingInputIds.size;
+        const wasPaused = entry.paused;
         entry.pendingInputIds = new Set(event.payload.items.map((i) => i.id));
         entry.paused = event.payload.paused;
-        if (prevSize > 0 && entry.pendingInputIds.size === 0 && view.currentTurn === undefined) {
+        // Core 取出队首后在 write turn.started 前存在异步间隙：
+        // 过渡态仅由下一轮 turn.started、Core 延迟发出的 runtime.status("idle")
+        // 或失败事件（runtime.error(session_failed) / runtime.warning(input_queue_failed)）解除，不用魔法计时器猜测
+        if (
+          prevSize > 0 &&
+          entry.pendingInputIds.size === 0 &&
+          !wasPaused &&
+          view.currentTurn === undefined
+        ) {
           entry.inTransition = true;
-          if (entry.transitionTimer !== undefined) clearTimeout(entry.transitionTimer);
-          entry.transitionTimer = setTimeout(() => {
-            entry.inTransition = false;
-            entry.transitionTimer = undefined;
-            notifyListeners(view, event);
-          }, 60);
-          entry.transitionTimer.unref();
         }
       }
       notifyListeners(view, event);
@@ -512,7 +519,7 @@ export class McpBridge {
     tracked: TrackedBridgeSession,
     prompt: string,
   ): Promise<void> {
-    tracked.startingTurn = true;
+    const startToken = beginStartTurn(tracked);
     let initialError: unknown;
     let startedOrSettled = false;
 
@@ -527,10 +534,9 @@ export class McpBridge {
       const onEvent = (_view: SessionView, event: RuntimeEvent): void => {
         if (
           event.type === "turn.started" ||
-          event.type === "turn.completed" ||
-          event.type === "input.pending"
+          (event.type === "input.pending" && event.payload.items.length > 0)
         ) {
-          tracked.startingTurn = false;
+          clearStartTurn(tracked, startToken);
           finish();
         }
       };
@@ -540,14 +546,14 @@ export class McpBridge {
 
       tracked.rpcSession.enqueueInput("queue", { text: prompt }).then(
         (res) => {
-          tracked.startingTurn = false;
           if (res.queued) {
             tracked.pendingInputIds.add(res.id);
           }
+          clearStartTurn(tracked, startToken);
           finish();
         },
         (err: unknown) => {
-          tracked.startingTurn = false;
+          clearStartTurn(tracked, startToken);
           initialError = err;
           finish();
         },
@@ -563,7 +569,7 @@ export class McpBridge {
     tracked: TrackedBridgeSession,
     prompt: string,
   ): Promise<void> {
-    tracked.startingTurn = true;
+    const startToken = beginStartTurn(tracked);
     let initialError: unknown;
     let startedOrSettled = false;
 
@@ -586,23 +592,25 @@ export class McpBridge {
 
       tracked.rpcSession.submit({ text: prompt }).then(
         () => {
-          tracked.startingTurn = false;
+          clearStartTurn(tracked, startToken);
           finish();
         },
         async (err: unknown) => {
-          tracked.startingTurn = false;
           if (err instanceof RpcError && err.code === "session_busy") {
             try {
               const enq = await tracked.rpcSession.enqueueInput("queue", { text: prompt });
               if (enq.queued) tracked.pendingInputIds.add(enq.id);
+              clearStartTurn(tracked, startToken);
               finish();
               return;
             } catch (enqErr) {
+              clearStartTurn(tracked, startToken);
               initialError = enqErr;
               finish();
               return;
             }
           }
+          clearStartTurn(tracked, startToken);
           initialError = err;
           finish();
         },
@@ -650,9 +658,10 @@ export class McpBridge {
       if (
         view.currentTurn === undefined &&
         (view.status === "idle" || view.status === "failed") &&
-        !tracked.startingTurn &&
+        tracked.activeStartToken === undefined &&
         !tracked.inTransition &&
-        tracked.pendingInputIds.size === 0
+        // 非 done 结束（aborted/error）会把剩余待发输入全部暂停；此时会话已停止，不应继续等超时
+        (tracked.pendingInputIds.size === 0 || tracked.paused)
       ) {
         return true;
       }
@@ -668,6 +677,13 @@ export class McpBridge {
         resolve();
       }, timeoutMs);
       timer.unref();
+
+      const wake = (): void => {
+        if (isStopped()) {
+          cleanup();
+          resolve();
+        }
+      };
 
       const onEvent = (_view: SessionView, event: RuntimeEvent): void => {
         if (context?.onProgress !== undefined) {
@@ -697,36 +713,29 @@ export class McpBridge {
             });
           }
         }
-        if (isStopped()) {
-          cleanup();
-          resolve();
-        }
+        wake();
       };
 
       const cleanup = (): void => {
         clearTimeout(timer);
         tracked.listeners.delete(onEvent);
+        tracked.waitWakeups.delete(wake);
       };
 
       tracked.listeners.add(onEvent);
+      tracked.waitWakeups.add(wake);
     });
   }
 
   private buildSessionWaitResult(tracked: TrackedBridgeSession): McpToolCallResult {
     const view = tracked.tracker.view;
-    const pendingCount = tracked.pendingInputIds.size + (tracked.startingTurn ? 1 : 0);
+    const pendingCount =
+      tracked.pendingInputIds.size + (tracked.activeStartToken !== undefined ? 1 : 0);
     const status = deriveMcpSessionStatus(view, pendingCount, tracked.paused);
     const folded = extractFoldedTurns(view).at(-1);
     const reply = folded?.assistantText ?? "";
 
-    const turnOutcome =
-      status === "idle"
-        ? view.lastTurn?.reason === "aborted"
-          ? "aborted"
-          : "done"
-        : status === "error"
-          ? "error"
-          : status;
+    const turnOutcome = deriveTurnOutcome(status, view);
 
     const payload: Record<string, unknown> = {
       sessionId: tracked.sessionId,
@@ -776,6 +785,36 @@ export class McpBridge {
 
     return this.textResult(JSON.stringify(payload, null, 2), payload);
   }
+}
+
+/** 标记一次新的 Turn 启动窗口，返回只属于本次触发的令牌，避免前序 RPC 迟到完成误清状态。 */
+function beginStartTurn(tracked: TrackedBridgeSession): number {
+  const token = ++tracked.startTokenSeq;
+  tracked.activeStartToken = token;
+  return token;
+}
+
+/** 清除当前启动窗口标记（传入 token 时仅当仍匹配本次触发才清除），并唤醒等待中的观察者。 */
+function clearStartTurn(tracked: TrackedBridgeSession, token?: number): void {
+  if (token !== undefined && tracked.activeStartToken !== token) return;
+  if (tracked.activeStartToken === undefined) return;
+  tracked.activeStartToken = undefined;
+  for (const wake of [...tracked.waitWakeups]) {
+    wake();
+  }
+}
+
+/** 根据桥接状态与刚结束的 Turn 原因推导 `turnOutcome`；队列暂停时保留刚结束轮次的真实结果。 */
+function deriveTurnOutcome(status: McpSessionStatus, view: SessionView): string {
+  if (status === "idle") {
+    return view.lastTurn?.reason === "aborted" ? "aborted" : "done";
+  }
+  if (status === "error") return "error";
+  if (status === "paused") {
+    if (view.lastTurn?.reason === "aborted") return "aborted";
+    if (view.lastTurn?.reason === "error" || view.status === "failed") return "error";
+  }
+  return status;
 }
 
 class BridgeNotRunningError extends Error {

@@ -81,7 +81,7 @@ codex mcp add nocturne -- nctrn mcp --name codex
 | `nocturne_list_models` | 只读 | `{ workspaceRoot? }`：列出可用模型与默认模型。 |
 | `nocturne_start_session` | 可运行 | `{ cwd, prompt, model?, reasoningEffort?, permissionPreset?, wait?, timeoutSeconds? }`：在已信任或已有会话用过的工作区新建会话并发送首条消息。 |
 | `nocturne_send` | 可运行 | `{ sessionId, prompt, wait?, timeoutSeconds? }`：向已有会话发送消息。采用 `queue` 排队模式，**从不打断**正在运行的轮次。 |
-| `nocturne_wait` | 可运行 | `{ sessionId, timeoutSeconds? }`（默认 300s，上限 600s）：等待当前轮结束；超时返回 `running` 不中断会话；停在权限确认或提问上时立即返回 `waiting_for_permission` / `waiting_for_answer`。 |
+| `nocturne_wait` | 可运行 | `{ sessionId, timeoutSeconds? }`（默认 300s，上限 600s）：等待当前轮及正常 `done` 接续的排队轮次结束；超时返回 `running` 不中断会话；停在权限确认或提问上时立即返回 `waiting_for_permission` / `waiting_for_answer`；若因中断或出错导致待发队列暂停，立即返回 `status: "paused"` 及刚结束轮次的 `turnOutcome`（`"aborted"` / `"error"`），`nocturne_start_session` / `nocturne_send` 的 `wait: true` 共用同一等待规则。 |
 | `nocturne_interrupt` | 可运行 | `{ sessionId }`：中断指定会话当前正在运行的轮次。 |
 
 ## 5. 安全边界说明

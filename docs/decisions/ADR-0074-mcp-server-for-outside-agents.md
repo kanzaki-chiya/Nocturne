@@ -86,3 +86,10 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
 - **localhost HTTP + 令牌**：MCP 客户端都支持，但要开 TCP 端口、处理令牌下发与轮换，同机其他用户也能连到端口；命名管道配合 ACL 更窄。HTTP 留给以后的远程 MCP。
 - **只允许动 agent 自己开的会话**：更稳，但不能让外部 agent 接手用户手动开的会话；用户选择全开。
 - **桥直接复用远程白名单**：远程允许 `respondPermission`、`setPermissionPreset`、`rewind`，对外部 agent 太宽；单独收窄。
+
+## 修订（2026-11-18）：队列暂停时的等待收束与轮间过渡状态
+
+- **返回字段口径**：等待工具（`nocturne_wait`，以及 `nocturne_start_session` / `nocturne_send` 的 `wait: true`）通过 `status`（`idle` / `running` / `waiting_for_permission` / `waiting_for_answer` / `paused` / `error`）表达会话当前状态，并通过 `turnOutcome` 表达刚结束这一轮的实际结果（`done` / `aborted` / `error`；未结束时与 `status` 一致）。
+- **队列暂停立即返回**：当一轮以非 `done`（如 `aborted`、`error`）结束且存在待发排队输入时，Core 会将待发队列整列暂停（[ADR-0070](ADR-0070-steer-and-queue-input.md) 第 4 节）。桥层的 `waitForTrackedSession` 将 `paused` 视作会话已停止，不再因 `pendingInputIds.size > 0` 空等到超时；结果返回 `status: "paused"` 与刚结束轮次的真实 `turnOutcome`（例如 `"aborted"` 或 `"error"`），并附带 `queuedInputs`。
+- **正常 `done` 队列接续不提前返回**：上一轮以 `done` 结束并从队首取出下一条消息开始接续轮次时，Core 会延迟发送 `runtime.status("idle")` 直至整条队列排空。桥层在非暂停队列被取空后进入过渡态，改由下一轮 `turn.started`、延迟的 `runtime.status("idle")` 或失败事件（`runtime.error("session_failed")` / `runtime.warning("input_queue_failed")`）解除，避免 `turn.started` 落盘/广播略慢时过早返回上一轮结果。
+- **Turn 启动窗口代际令牌与跨轮回调隔离**：`waitForTrackedSession` 可在收到 `runtime.status("idle")` 后即刻返回，此时上一轮 `session.submit` / `session.enqueueInput` RPC 响应可能尚未回传。桥层以单调递增的代际令牌（`startTokenSeq` / `activeStartToken`）取代共享布尔标记来标识当前启动中的触发窗口：前序 RPC 迟到完成/报错只能清理匹配的旧令牌，不得误清新一轮启动标记；`triggerEnqueueOnTracked` 仅由 `turn.started` 或非空 `input.pending`（`items.length > 0`）解除本轮启动标记（忽略上一轮残留的 `turn.completed` 或取空队首时的空 `input.pending`）；`clearStartTurn` 清除令牌时同步唤醒 `waitWakeups`，确保启动 RPC 异步拒绝且无事件到达时 `waitForTrackedSession` 也能及时收束。
