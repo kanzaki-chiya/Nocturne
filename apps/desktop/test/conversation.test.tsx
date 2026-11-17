@@ -3496,7 +3496,7 @@ describe("会话区提示", () => {
         callId: "c-note-add",
         name: "note_write",
         status: "ok",
-        input: { add: ["apply_patch 改没读过的文件会被拒，先 read", "另一条约束"] },
+        input: { add: ["apply_patch 改没读过的文件会被拒，先 read", "另一条约束\n第二行补充"] },
         result: {
           status: "ok",
           durationMs: 5,
@@ -3505,7 +3505,7 @@ describe("会话区提示", () => {
               { n: 1, text: "旧约束 1" },
               { n: 2, text: "旧约束 2" },
               { n: 3, text: "apply_patch 改没读过的文件会被拒，先 read" },
-              { n: 4, text: "另一条约束" },
+              { n: 4, text: "另一条约束\n第二行补充" },
             ],
           },
           error: undefined,
@@ -3528,7 +3528,7 @@ describe("会话区提示", () => {
             notes: [
               { n: 1, text: "旧约束 2" },
               { n: 2, text: "apply_patch 改没读过的文件会被拒，先 read" },
-              { n: 3, text: "另一条约束" },
+              { n: 3, text: "另一条约束\n第二行补充" },
             ],
           },
           error: undefined,
@@ -3562,14 +3562,16 @@ describe("会话区提示", () => {
     const addSummary = addRow.querySelector("summary");
     if (!addSummary) throw new Error("missing note_write summary");
     fireEvent.click(addSummary);
-    const list = addRow.querySelector("ol.todo-list");
+    const list = addRow.querySelector("ol.todo-list.note-list");
     if (!list) throw new Error("missing expanded note list");
+    expect(list.querySelectorAll("[style]")).toHaveLength(0);
     expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
       "1.旧约束 1",
       "2.旧约束 2",
       "3.apply_patch 改没读过的文件会被拒，先 read",
-      "4.另一条约束",
+      "4.另一条约束\n第二行补充",
     ]);
+    expect(list.querySelectorAll(".todo-text")[3]?.textContent).toBe("另一条约束\n第二行补充");
   });
 
   it("ensemble_read 工具行（ADR-0095）：显示「留言板」与过滤条件、右侧「N 条」、无条件留空、展开显示帖子", () => {
@@ -3591,7 +3593,7 @@ describe("会话区提示", () => {
                 number: 7,
                 from: "maestro",
                 fromKind: "maestro",
-                text: "先跑 build 验证",
+                text: "先跑 build 验证\n再汇报结果",
                 mentions: ["orders"],
               },
               {
@@ -3647,12 +3649,22 @@ describe("会话区提示", () => {
     const summary = filteredRow.querySelector("summary");
     if (!summary) throw new Error("missing ensemble_read summary");
     fireEvent.click(summary);
-    const body = filteredRow.querySelector(".tool-body .tool-payload");
-    expect(body).not.toBeNull();
-    expect(body?.textContent).toContain("#7 指挥 → @orders");
-    expect(body?.textContent).toContain("先跑 build 验证");
-    expect(body?.textContent).toContain("#9 @orders → 指挥");
-    expect(body?.textContent).toContain("build 已通过");
-    expect(body?.textContent).not.toContain("raw model content");
+    const body = filteredRow.querySelector(".tool-body .tool-payload.board-posts");
+    if (!body) throw new Error("missing expanded board posts");
+    expect([...body.childNodes].every((node) => node.nodeType === Node.ELEMENT_NODE)).toBe(true);
+    const posts = [...body.querySelectorAll(".board-post")];
+    expect(posts).toHaveLength(2);
+    const [firstPost, secondPost] = posts;
+    if (!firstPost || !secondPost) throw new Error("missing board posts");
+    expect([...firstPost.childNodes].every((node) => node.nodeType === Node.ELEMENT_NODE)).toBe(
+      true,
+    );
+    expect(firstPost.querySelector(".board-post-head")?.textContent).toBe("#7 指挥 → @orders");
+    expect(firstPost.querySelector(".board-post-text")?.textContent).toBe(
+      "先跑 build 验证\n再汇报结果",
+    );
+    expect(secondPost.querySelector(".board-post-head")?.textContent).toBe("#9 @orders → 指挥");
+    expect(secondPost.querySelector(".board-post-text")?.textContent).toBe("build 已通过");
+    expect(body.textContent).not.toContain("raw model content");
   });
 });

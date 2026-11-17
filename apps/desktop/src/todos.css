@@ -20,6 +20,13 @@
   overflow-wrap: anywhere;
   color: var(--a-secondary);
 }
+.note-list .todo-mark {
+  flex: none;
+  min-width: var(--icon-sm);
+}
+.note-list .todo-text {
+  white-space: pre-wrap;
+}
 .todo-completed .todo-mark {
   color: var(--a-success);
 }

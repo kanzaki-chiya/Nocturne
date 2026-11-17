@@ -2837,15 +2837,11 @@ function ToolRow({
                 <TodoList items={todos} />
               ) : notes !== undefined ? (
                 notes.length > 0 ? (
-                  <ol className="todo-list">
+                  <ol className="todo-list note-list">
                     {notes.map((item) => (
                       <li key={item.n}>
-                        <span className="todo-mark" style={{ flex: "none", minWidth: "14px" }}>
-                          {item.n}.
-                        </span>
-                        <span className="todo-text" style={{ whiteSpace: "pre-wrap" }}>
-                          {item.text}
-                        </span>
+                        <span className="todo-mark">{item.n}.</span>
+                        <span className="todo-text">{item.text}</span>
                       </li>
                     ))}
                   </ol>
@@ -2853,16 +2849,12 @@ function ToolRow({
               ) : boardPosts !== undefined ? (
                 boardPosts.length > 0 ? (
                   <div className="tool-body">
-                    <div className="tool-payload conversation-tool-output">
-                      {boardPosts.map((post, postIndex) => (
-                        <Fragment key={post.number}>
-                          {postIndex > 0 ? "\n\n" : null}
-                          <div>
-                            <strong>{ensemblePostHead(post)}</strong>
-                            {"\n"}
-                            {post.text}
-                          </div>
-                        </Fragment>
+                    <div className="tool-payload conversation-tool-output board-posts">
+                      {boardPosts.map((post) => (
+                        <div key={post.number} className="board-post">
+                          <strong className="board-post-head">{ensemblePostHead(post)}</strong>
+                          <div className="board-post-text">{post.text}</div>
+                        </div>
                       ))}
                     </div>
                   </div>
