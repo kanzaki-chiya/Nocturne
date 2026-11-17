@@ -10,6 +10,7 @@ import type {
   EnsembleMemberView,
   EnsemblePostView,
   EnsembleView,
+  ToolEntry,
 } from "@nocturne/core/protocol";
 
 /** Ensemble 指挥工具的工具行标签（与桌面端 tool-meta 同词） */
@@ -17,15 +18,21 @@ export const ENSEMBLE_TOOL_LABELS: Readonly<Record<string, string>> = {
   ensemble_init: "合奏",
   ensemble_add_member: "添加",
   ensemble_post: "发帖",
+  ensemble_read: "留言板",
   ensemble_change_model: "换模型",
   ensemble_remove_member: "移除",
   ensemble_end: "结束",
   ensemble_checkout: "检出",
 };
 
-/** 工具行头部显示的名字：Ensemble 工具用标签，其余沿用工具名 */
+const TUI_TOOL_LABELS: Readonly<Record<string, string>> = {
+  ...ENSEMBLE_TOOL_LABELS,
+  note_write: "笔记",
+};
+
+/** 工具行头部显示的名字：已登记中文标签的工具用标签，其余沿用工具名 */
 export function toolDisplayName(name: string): string {
-  return ENSEMBLE_TOOL_LABELS[name] ?? name;
+  return TUI_TOOL_LABELS[name] ?? name;
 }
 
 /** 活动摘要里的工具动词：与 TUI 工具行头部的写法一致 */
@@ -36,6 +43,27 @@ function recordOf(value: unknown): Record<string, unknown> {
 
 function stringOf(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function atToken(value: unknown): string {
+  const s = stringOf(value);
+  if (s === "") return "";
+  return s.startsWith("@") ? s : `@${s}`;
+}
+
+/** 留言板查询参数位：`@作者`、`@提及` 原样（不重复 `@`），关键词紧随其后；无条件为空 */
+export function ensembleReadFilterParts(input: unknown): {
+  primary: string;
+  query: string;
+  text: string;
+} {
+  const rec = recordOf(input);
+  const from = atToken(rec.from);
+  const mention = atToken(rec.mention);
+  const primary = [from, mention].filter(Boolean).join(" ");
+  const query = firstLine(rec.query);
+  const text = [primary, query].filter(Boolean).join(" ");
+  return { primary, query, text };
 }
 
 /** 多行文本的首个非空行 */
@@ -68,6 +96,8 @@ export function ensembleToolSummary(name: string, input: unknown): string | unde
     }
     case "ensemble_post":
       return firstLine(rec.text);
+    case "ensemble_read":
+      return ensembleReadFilterParts(input).text;
     case "ensemble_change_model": {
       const member = stringOf(rec.name) || stringOf(rec.member);
       const target = shortModelName(stringOf(rec.model) || stringOf(rec.profile));
@@ -150,6 +180,53 @@ export function ensemblePostHead(
   const mentions = ensemblePostRecipients(post).map(ensembleMentionLabel).join(" ");
   const author = ensembleAuthorLabel(post.from, post.fromKind);
   return mentions === "" ? `#${post.number} ${author}` : `#${post.number} ${author} → ${mentions}`;
+}
+
+export interface EnsembleBoardPost {
+  number: number;
+  from: string;
+  fromKind: EnsembleAuthorKind;
+  text: string;
+  mentions: string[];
+}
+
+function isAuthorKind(value: unknown): value is EnsembleAuthorKind {
+  return value === "maestro" || value === "member" || value === "user" || value === "runtime";
+}
+
+/** 从 `ensemble_read` 的 `output` 提取命中的帖子列表。 */
+export function ensembleReadPostsFromOutput(output: unknown): EnsembleBoardPost[] | undefined {
+  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+  const raw = (output as { posts?: unknown }).posts;
+  if (!Array.isArray(raw)) return undefined;
+  const posts: EnsembleBoardPost[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    if (
+      typeof rec.number !== "number" ||
+      typeof rec.from !== "string" ||
+      typeof rec.text !== "string"
+    ) {
+      continue;
+    }
+    const fromKind: EnsembleAuthorKind = isAuthorKind(rec.fromKind) ? rec.fromKind : "member";
+    const mentions = Array.isArray(rec.mentions)
+      ? rec.mentions.filter((mention): mention is string => typeof mention === "string")
+      : [];
+    posts.push({ number: rec.number, from: rec.from, fromKind, text: rec.text, mentions });
+  }
+  return posts;
+}
+
+/** 成功的 `ensemble_read` 工具行状态位显示命中条数「N 条」。 */
+export function ensembleReadCountText(
+  entry: Pick<ToolEntry, "name" | "target" | "status" | "result">,
+): string | undefined {
+  const name = entry.target?.name ?? entry.name;
+  if (name !== "ensemble_read" || entry.status !== "ok") return undefined;
+  const posts = ensembleReadPostsFromOutput(entry.result?.output);
+  return posts === undefined ? undefined : `${posts.length} 条`;
 }
 
 export type EnsembleDot = "work" | "attention" | "wait" | "removed";

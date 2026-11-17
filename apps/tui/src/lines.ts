@@ -34,16 +34,25 @@ import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import {
   boxSafe,
   lastWrapBreak,
+  noteItemsFromEntry,
   permissionReviewLine,
   stripControls,
   summarizeToolInput,
   subagentModel,
   tailLines,
+  toolHeadlineSegments,
+  toolTwoToneSummaryParts,
   truncateLine,
 } from "./format.js";
 import { renderAssistant } from "./markdown.js";
 import { reasoningLabel, type ReasoningMap, type ReasoningPart } from "./reasoning.js";
-import { ensembleAuthorLabel, toolDisplayName } from "./text-format-ensemble.js";
+import {
+  ensembleAuthorLabel,
+  ensemblePostHead,
+  ensembleReadCountText,
+  ensembleReadPostsFromOutput,
+  toolDisplayName,
+} from "./text-format-ensemble.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
 import type { TranscriptItem } from "./components/transcript.js";
@@ -456,30 +465,56 @@ function layoutEntryBody(
       }
       const shownName = entry.target?.name ?? entry.name;
       const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
-      const summary = summarizeToolInput(shownName, shownInput, entry.result?.output);
       const notStarted = subagentStartRejected(entry);
       const status = notStarted
         ? "未启动"
         : (shellToolStatus(entry, options.entries ?? [], options.backgroundShells) ??
           backgroundToolStatus(entry, options.entries ?? []) ??
+          ensembleReadCountText(entry) ??
           entry.status);
-      const head =
-        shownName === "apply_subagent_changes" && entry.result
-          ? `${mark} ${subagentApplyLine(entry.result.output)}`
-          : shownName === "switch_worktree"
-            ? `${mark} 切换工作树 · ${summary} ${status}`
-            : shownName === "mcp_search"
-              ? `${mark} 搜索 MCP 工具：${summary} ${status}`
-              : `${mark} ${shownName === undefined ? "?" : toolDisplayName(shownName)}${subagentModel(entry)} ${summary} ${status}`;
-      const lines = [
-        ...review,
-        ...rows(
-          entry.key,
-          `${head}${entry.permission?.source === "grant" ? "（已授权）" : ""}`,
-          width,
-          { toggle },
-        ),
-      ];
+      const grantSuffix = entry.permission?.source === "grant" ? "（已授权）" : "";
+      const twoTone = toolTwoToneSummaryParts(
+        shownName,
+        shownInput,
+        entry.status === "ok" ? entry.result?.output : undefined,
+      );
+      let lines: LaidLine[];
+      if (twoTone !== undefined && shownName !== undefined) {
+        const segments = toolHeadlineSegments({
+          mark,
+          toolLabel: toolDisplayName(shownName),
+          primary: boxSafe(twoTone.primary),
+          query: boxSafe(twoTone.query),
+          tail: ` ${status}${grantSuffix}`,
+          width: budget(width),
+          ellipsis: "...",
+        });
+        lines = [
+          ...review,
+          {
+            key: `${entry.key}:0`,
+            toggle,
+            text: segments.map((seg) => seg.text).join(""),
+            segments,
+          },
+        ];
+      } else {
+        const summary = summarizeToolInput(
+          shownName,
+          shownInput,
+          entry.status === "ok" ? entry.result?.output : undefined,
+        );
+        const summaryPart = summary !== "" ? ` ${summary}` : "";
+        const head =
+          shownName === "apply_subagent_changes" && entry.result
+            ? `${mark} ${subagentApplyLine(entry.result.output)}`
+            : shownName === "switch_worktree"
+              ? `${mark} 切换工作树 · ${summary} ${status}`
+              : shownName === "mcp_search"
+                ? `${mark} 搜索 MCP 工具：${summary} ${status}`
+                : `${mark} ${shownName === undefined ? "?" : toolDisplayName(shownName)}${subagentModel(entry)}${summaryPart} ${status}`;
+        lines = [...review, ...rows(entry.key, `${head}${grantSuffix}`, width, { toggle })];
+      }
       if (
         entry.name === "shell" &&
         (entry.result?.output as { background?: unknown } | undefined)?.background === true
@@ -559,9 +594,20 @@ function layoutEntryBody(
           line.key.endsWith(":diff:more") ? { ...line, toggle } : line,
         );
       }
+      const notes = noteItemsFromEntry(entry);
+      const boardPosts =
+        shownName === "ensemble_read" && entry.status === "ok"
+          ? ensembleReadPostsFromOutput(entry.result?.output)
+          : undefined;
+      const formattedResult =
+        notes !== undefined
+          ? notes.map((item) => `${item.n}. ${item.text}`).join("\n")
+          : boardPosts !== undefined
+            ? boardPosts.map((post) => `${ensemblePostHead(post)}\n${post.text}`).join("\n\n")
+            : undefined;
       const content = diffExpanded
-        ? entry.result?.modelContent
-        : notStarted
+        ? (formattedResult ?? entry.result?.modelContent)
+        : notStarted || formattedResult !== undefined
           ? undefined
           : (webFetchSummary(entry) ?? entry.result?.modelContent);
       if (content !== undefined && content !== "") {
@@ -797,7 +843,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   function entryBlock(entry: ViewEntry): LineBlock {
     const revision =
       entry.kind === "tool"
-        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${shellToolStatus(entry, src.entries, src.live.backgroundShells) ?? backgroundToolStatus(entry, src.entries) ?? ""}:${src.shellOutputs?.get(entry.callId) ?? ""}`
+        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${shellToolStatus(entry, src.entries, src.live.backgroundShells) ?? backgroundToolStatus(entry, src.entries) ?? ensembleReadCountText(entry) ?? ""}:${noteItemsFromEntry(entry)?.length ?? ""}:${src.shellOutputs?.get(entry.callId) ?? ""}`
         : entry.kind === "assistant"
           ? `${entry.text.length}:${entry.reasoning.length}:${
               src.reasoning

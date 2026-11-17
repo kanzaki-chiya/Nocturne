@@ -34,6 +34,27 @@ function stringOf(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function atToken(value: unknown): string {
+  const s = stringOf(value);
+  if (s === "") return "";
+  return s.startsWith("@") ? s : `@${s}`;
+}
+
+/** 留言板查询参数位：`@作者`、`@提及` 原样（不重复 `@`）放在 `primary`，关键词放在淡色 `query`。 */
+export function ensembleReadFilterParts(input: unknown): {
+  primary: string;
+  query: string;
+  text: string;
+} {
+  const rec = recordOf(input);
+  const from = atToken(rec.from);
+  const mention = atToken(rec.mention);
+  const primary = [from, mention].filter(Boolean).join(" ");
+  const query = firstEnsembleLine(rec.query);
+  const text = [primary, query].filter(Boolean).join(" ");
+  return { primary, query, text };
+}
+
 /** 取多行文本首个非空行（去掉首尾空白）；为空或非字符串时返回 "" */
 export function firstEnsembleLine(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -67,6 +88,8 @@ export function ensembleToolSummary(name: string, input: unknown): string | unde
     }
     case "ensemble_post":
       return firstEnsembleLine(rec.text);
+    case "ensemble_read":
+      return ensembleReadFilterParts(input).text;
     case "ensemble_change_model": {
       const member = stringOf(rec.name) || stringOf(rec.member);
       const target = shortModelName(stringOf(rec.model) || stringOf(rec.profile));
@@ -220,6 +243,52 @@ export function ensemblePostRecipients(
 ): string[] {
   const self = post.fromKind === "maestro" ? "maestro" : post.from;
   return post.mentions.filter((mention) => mention !== self);
+}
+
+export interface EnsembleBoardPost {
+  number: number;
+  from: string;
+  fromKind: EnsembleAuthorKind;
+  text: string;
+  mentions: string[];
+}
+
+/** 帖子标题 `#n 作者 → 提及`（没有提及时省去箭头） */
+export function ensemblePostHead(
+  post: Pick<EnsembleBoardPost, "number" | "from" | "fromKind" | "mentions">,
+): string {
+  const mentions = ensemblePostRecipients(post).map(ensembleMentionLabel).join(" ");
+  const author = ensembleAuthorLabel(post.from, post.fromKind);
+  return mentions === "" ? `#${post.number} ${author}` : `#${post.number} ${author} → ${mentions}`;
+}
+
+function isAuthorKind(value: unknown): value is EnsembleAuthorKind {
+  return value === "maestro" || value === "member" || value === "user" || value === "runtime";
+}
+
+/** 从 `ensemble_read` 的 `output` 提取命中的帖子列表。 */
+export function ensembleReadPostsFromOutput(output: unknown): EnsembleBoardPost[] | undefined {
+  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+  const raw = (output as { posts?: unknown }).posts;
+  if (!Array.isArray(raw)) return undefined;
+  const posts: EnsembleBoardPost[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    if (
+      typeof rec.number !== "number" ||
+      typeof rec.from !== "string" ||
+      typeof rec.text !== "string"
+    ) {
+      continue;
+    }
+    const fromKind: EnsembleAuthorKind = isAuthorKind(rec.fromKind) ? rec.fromKind : "member";
+    const mentions = Array.isArray(rec.mentions)
+      ? rec.mentions.filter((mention): mention is string => typeof mention === "string")
+      : [];
+    posts.push({ number: rec.number, from: rec.from, fromKind, text: rec.text, mentions });
+  }
+  return posts;
 }
 
 export interface EnsembleMentionToken {

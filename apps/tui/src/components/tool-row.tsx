@@ -13,14 +13,21 @@ import { diffSummary, parseDiff, toolFileDiffs, type ToolFileDiff } from "../dif
 import { glyphs, useTuiEnv } from "../env.js";
 import {
   formatDuration,
+  noteItemsFromEntry,
   permissionReviewLine,
   summarizeToolInput,
   subagentModel,
   tailLines,
+  toolHeadlineSegments,
+  toolTwoToneSummaryParts,
   truncateLine,
 } from "../format.js";
 import { useTheme, type ThemePalette } from "../theme.js";
-import { toolDisplayName } from "../text-format-ensemble.js";
+import {
+  ensembleReadCountText,
+  ensembleReadPostsFromOutput,
+  toolDisplayName,
+} from "../text-format-ensemble.js";
 import { todoHeadline } from "../todo-format.js";
 import { DiffView } from "./diff.js";
 import { SegmentText, TodoRows } from "./todo-panel.js";
@@ -119,18 +126,34 @@ export function ToolRow({
     );
   const b = badge(entry.status, spinner, env, theme);
   const name = entry.name ?? "?";
-  const summary = truncateLine(
-    summarizeToolInput(entry.name, entry.input, entry.result?.output),
-    Math.max(10, width - 24),
-    g.ellipsis,
+  const shownName = entry.target?.name ?? entry.name ?? "?";
+  const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
+  const twoTone = toolTwoToneSummaryParts(
+    shownName,
+    shownInput,
+    entry.status === "ok" ? entry.result?.output : undefined,
   );
+  const summary =
+    twoTone !== undefined
+      ? ""
+      : truncateLine(
+          summarizeToolInput(
+            entry.name,
+            entry.input,
+            entry.status === "ok" ? entry.result?.output : undefined,
+          ),
+          Math.max(10, width - 24),
+          g.ellipsis,
+        );
+  const summaryPart = summary !== "" ? ` ${summary}` : "";
   const head =
     name === "apply_subagent_changes" && entry.result
       ? ` ${subagentApplyLine(entry.result.output)}`
       : name === "switch_worktree"
         ? ` 切换工作树 · ${summary}`
-        : ` ${toolDisplayName(name)}${subagentModel(entry)} ${summary}`;
+        : ` ${toolDisplayName(name)}${subagentModel(entry)}${summaryPart}`;
   const duration = entry.result?.durationMs;
+  const boardCount = ensembleReadCountText(entry);
   const suffix = subagentStartRejected(entry)
     ? "未启动"
     : (shellToolStatus(entry, entries) ??
@@ -139,7 +162,9 @@ export function ToolRow({
         ? ` ${b.word}`
         : entry.status === "running"
           ? ""
-          : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd()));
+          : boardCount !== undefined
+            ? ` ${boardCount}${duration !== undefined ? ` ${formatDuration(duration)}` : ""}`
+            : ` ${b.word !== "" ? `${b.word} ` : ""}${formatDuration(duration)}`.trimEnd()));
   const todos =
     entry.result === undefined
       ? undefined
@@ -173,15 +198,32 @@ export function ToolRow({
       </Box>
     );
   }
+  const grantSuffix = entry.permission?.source === "grant" ? "（已授权）" : "";
   return (
     <Box flexDirection="column">
       {review}
-      <Text wrap="truncate">
-        <Text color={b.color}>{b.glyph}</Text>
-        <Text>{head}</Text>
-        {suffix !== "" ? <Text dimColor> {suffix.trim()}</Text> : null}
-        {entry.permission?.source === "grant" && <Text dimColor>（已授权）</Text>}
-      </Text>
+      {twoTone !== undefined ? (
+        <SegmentText
+          segments={toolHeadlineSegments({
+            mark: b.glyph,
+            markColor: b.color,
+            toolLabel: toolDisplayName(shownName),
+            primary: twoTone.primary,
+            query: twoTone.query,
+            tail: `${suffix !== "" ? ` ${suffix.trim()}` : ""}${grantSuffix}`,
+            tailDim: true,
+            width,
+            ellipsis: g.ellipsis,
+          })}
+        />
+      ) : (
+        <Text wrap="truncate">
+          <Text color={b.color}>{b.glyph}</Text>
+          <Text>{head}</Text>
+          {suffix !== "" ? <Text dimColor> {suffix.trim()}</Text> : null}
+          {grantSuffix !== "" && <Text dimColor>{grantSuffix}</Text>}
+        </Text>
+      )}
       {subagentRowInfo(entry).reason !== undefined && (
         <Text dimColor wrap="truncate">{`  选择理由：${subagentRowInfo(entry).reason}`}</Text>
       )}
@@ -222,6 +264,11 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
   const single = diffs?.length === 1 && diffs[0]?.label === "" ? diffs[0].diff : undefined;
   const spill = result.spillPath;
   const webSummary = webFetchSummary(entry);
+  const suppressModelContent =
+    entry.status === "ok" &&
+    (noteItemsFromEntry(entry) !== undefined ||
+      ((entry.target?.name ?? entry.name) === "ensemble_read" &&
+        ensembleReadPostsFromOutput(result.output) !== undefined));
   return (
     <Box flexDirection="column">
       {webSummary !== undefined ? (
@@ -254,7 +301,7 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
           >{`  ${result.modelContent.split("\n")[0] ?? ""}；${diffSummary(parseDiff(single))}`}</Text>
           <DiffView diff={single} width={width} />
         </>
-      ) : result.modelContent !== "" ? (
+      ) : !suppressModelContent && result.modelContent !== "" ? (
         tailLines(result.modelContent, RESULT_TAIL).map((l, i) => (
           <Text key={i} dimColor wrap="truncate">
             {"  "}

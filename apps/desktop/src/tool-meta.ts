@@ -2,10 +2,11 @@
  * 工具行的展示名（DESIGN.md §8「工具行用中文名称」）：内置工具、Ensemble 工具与 MCP 工具
  * 显示给用户的名称。桌面端、手机网页与子代理面板共用；只含纯数据与纯函数，不依赖 React。
  */
-import type { ToolEntry } from "@nocturne/core/protocol";
+import { noteItemsFromCompletion, type NoteItem, type ToolEntry } from "@nocturne/core/protocol";
 
 export const TOOL_META: Record<string, string> = {
   todo_write: "任务清单",
+  note_write: "笔记",
   update_goal: "目标",
   render_html: "页面",
   skill: "技能",
@@ -32,6 +33,7 @@ export const TOOL_META: Record<string, string> = {
   ensemble_init: "合奏",
   ensemble_add_member: "添加",
   ensemble_post: "发帖",
+  ensemble_read: "留言板",
   ensemble_change_model: "换模型",
   ensemble_remove_member: "移除",
   ensemble_end: "结束",
@@ -62,4 +64,54 @@ export function toolMeta(name: string, subjects?: ToolEntry["subjects"]): { labe
   const mcp = mcpToolLabel(name, subjects);
   if (mcp !== undefined) return { label: mcp };
   return { label: name };
+}
+
+/** 从成功的 `note_write` 工具条目提取更新后的完整笔记列表。 */
+export function noteItemsFromEntry(
+  entry: Pick<ToolEntry, "name" | "target" | "status" | "result">,
+): NoteItem[] | undefined {
+  const name = entry.target?.name ?? entry.name ?? "";
+  if (name !== "note_write" || entry.status !== "ok") return undefined;
+  const output = entry.result?.output;
+  const strict = noteItemsFromCompletion({ name, status: entry.status, output });
+  if (strict !== undefined) return strict;
+  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+  const raw = (output as { notes?: unknown }).notes;
+  if (!Array.isArray(raw)) return undefined;
+  const out: NoteItem[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const { n, text } = item as { n?: unknown; text?: unknown };
+    if (typeof n === "number" && Number.isInteger(n) && n >= 1 && typeof text === "string") {
+      out.push({ n, text });
+    }
+  }
+  return out;
+}
+
+/** 从 `note_write` 输入提取首条新增笔记的单行摘要；只删除或无有效文本时返回空串。 */
+export function noteFirstAddedText(input: unknown): string {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return "";
+  const add = (input as { add?: unknown }).add;
+  if (!Array.isArray(add)) return "";
+  for (const item of add) {
+    if (typeof item !== "string") continue;
+    const singleLine = item.trim().replace(/\r?\n+/g, " ");
+    if (singleLine !== "") return singleLine;
+  }
+  return "";
+}
+
+/** `note_write` 工具行参数摘要：成功取 `output.notes.length` 构成「N 条」，有 `add` 时附首条新增原文。 */
+export function noteWriteSummary(
+  entry: Pick<ToolEntry, "name" | "target" | "status" | "input" | "result">,
+): { count: string; note: string; text: string } | undefined {
+  const name = entry.target?.name ?? entry.name ?? "";
+  if (name !== "note_write") return undefined;
+  const notes = noteItemsFromEntry(entry);
+  const count = notes !== undefined ? `${notes.length} 条` : "";
+  const rawInput = entry.target !== undefined ? entry.target.input : entry.input;
+  const note = noteFirstAddedText(rawInput);
+  const text = count !== "" && note !== "" ? `${count} ${note}` : count || note;
+  return { count, note, text };
 }

@@ -26,16 +26,19 @@ import {
   type EnsembleMemberView,
   type EnsemblePostView,
   type EnsembleView,
+  type ToolEntry,
   type ViewEntry,
 } from "@nocturne/core/protocol";
 
 import { App } from "../src/app.js";
+import { ToolRow } from "../src/components/tool-row.js";
 import {
   EnsembleBoard,
   boardSideItems,
   type EnsembleBoardProps,
 } from "../src/components/ensemble-board.js";
 import { EnsembleStrip, ensembleStripRows } from "../src/components/ensemble-strip.js";
+import { summarizeToolInput } from "../src/format.js";
 import { layoutEntry, transcriptBlocks } from "../src/lines.js";
 import { NOTIFY_DEFAULTS, ensembleMemberRing } from "../src/notify.js";
 import {
@@ -171,12 +174,315 @@ describe("工具行与文案", () => {
       ].map(toolDisplayName),
     ).toEqual(["合奏", "添加", "发帖", "换模型", "移除", "结束", "检出"]);
     expect(toolDisplayName("shell")).toBe("shell");
+    expect(toolDisplayName("note_write")).toBe("笔记");
+    expect(toolDisplayName("ensemble_read")).toBe("留言板");
     expect(ensembleToolSummary("ensemble_add_member", { name: "orders" })).toBe("@orders");
     expect(ensembleToolSummary("ensemble_change_model", { name: "orders", model: "p/m-2" })).toBe(
       "@orders m-2",
     );
     expect(ensembleToolSummary("ensemble_post", { text: "\n首行\n次行" })).toBe("首行");
+    expect(ensembleToolSummary("ensemble_read", { from: "maestro", query: "build" })).toBe(
+      "@maestro build",
+    );
+    expect(ensembleToolSummary("ensemble_read", { from: "@maestro", mention: "@orders" })).toBe(
+      "@maestro @orders",
+    );
+    expect(ensembleToolSummary("ensemble_read", {})).toBe("");
+    expect(summarizeToolInput("ensemble_read", { from: "maestro", query: "build" })).toBe(
+      "@maestro build",
+    );
+    expect(
+      summarizeToolInput(
+        "note_write",
+        { add: ["apply_patch 改没读过的文件会被拒，先 read"] },
+        {
+          notes: [
+            { n: 1, text: "旧约束" },
+            { n: 2, text: "apply_patch 改没读过的文件会被拒，先 read" },
+          ],
+        },
+      ),
+    ).toBe("2 条 apply_patch 改没读过的文件会被拒，先 read");
+    expect(
+      summarizeToolInput("note_write", { remove: [1] }, { notes: [{ n: 1, text: "保留" }] }),
+    ).toBe("1 条");
     expect(ensembleToolSummary("shell", { command: "ls" })).toBeUndefined();
+    expect(summarizeToolInput("shell", { command: "ls" })).toBe("ls");
+  });
+
+  it("note_write 与 ensemble_read 工具行：ToolRow 与 ToolBlock(layoutEntry/transcriptBlocks) 一致显示总数与命中数并支持展开", () => {
+    const noteResult: NonNullable<ToolEntry["result"]> = {
+      status: "ok",
+      modelContent: "原始提示不应直接刷屏",
+      output: {
+        notes: [
+          { n: 1, text: "旧约束" },
+          { n: 2, text: "新约束" },
+          { n: 3, text: "新增事实" },
+        ],
+      },
+      error: undefined,
+      truncated: false,
+      spillPath: undefined,
+      durationMs: undefined,
+    };
+    const noteEntry: ToolEntry = {
+      kind: "tool",
+      key: "t-note",
+      turnId: "turn",
+      callId: "c-note",
+      name: "note_write",
+      seq: 1,
+      status: "ok",
+      input: { add: ["新增事实"] },
+      subjects: [],
+      permission: undefined,
+      resolution: undefined,
+      liveOutput: "",
+      result: noteResult,
+    };
+    const noteRmEntry: ToolEntry = {
+      ...noteEntry,
+      key: "t-note-rm",
+      callId: "c-note-rm",
+      input: { remove: [1] },
+      result: {
+        ...noteResult,
+        output: {
+          notes: [
+            { n: 1, text: "新约束" },
+            { n: 2, text: "新增事实" },
+          ],
+        },
+      },
+    };
+    const boardEntry: ToolEntry = {
+      kind: "tool",
+      key: "t-board",
+      turnId: "turn",
+      callId: "c-board",
+      name: "ensemble_read",
+      seq: 2,
+      status: "ok",
+      input: { from: "@maestro", query: "build" },
+      subjects: [],
+      permission: undefined,
+      resolution: undefined,
+      liveOutput: "",
+      result: {
+        status: "ok",
+        modelContent: "<ensemble-post>raw</ensemble-post>",
+        output: {
+          posts: [
+            {
+              number: 5,
+              from: "maestro",
+              fromKind: "maestro",
+              text: "检查 build",
+              mentions: ["orders"],
+            },
+          ],
+          hasMore: false,
+          members: [],
+        },
+        error: undefined,
+        truncated: false,
+        spillPath: undefined,
+        durationMs: undefined,
+      },
+    };
+
+    // 1. ToolRow（inline / 组件渲染）与 ANSI dim 层次
+    const noteInline = render(createElement(ToolRow, { entry: noteEntry, width: 100 }));
+    const noteRaw = noteInline.lastFrame() ?? "";
+    expect(strip(noteRaw)).toContain("✓ 笔记 3 条 新增事实");
+    expect(strip(noteRaw)).not.toContain("原始提示不应直接刷屏");
+    expect(noteRaw).toContain("\x1b[2m 新增事实\x1b[22m");
+    expect(noteRaw).not.toContain("\x1b[2m 笔记");
+    expect(noteRaw).not.toContain("\x1b[2m 3 条");
+    noteInline.unmount();
+
+    const noteRmInline = render(createElement(ToolRow, { entry: noteRmEntry, width: 100 }));
+    const noteRmRaw = noteRmInline.lastFrame() ?? "";
+    expect(strip(noteRmRaw)).toContain("✓ 笔记 2 条");
+    expect(strip(noteRmRaw)).not.toContain("新增事实");
+    expect(noteRmRaw).not.toContain("\x1b[2m");
+    noteRmInline.unmount();
+
+    const boardInline = render(createElement(ToolRow, { entry: boardEntry, width: 100 }));
+    const boardRaw = boardInline.lastFrame() ?? "";
+    expect(strip(boardRaw)).toContain("✓ 留言板 @maestro build 1 条");
+    expect(strip(boardRaw)).not.toContain("<ensemble-post>");
+    expect(boardRaw).toContain("留言板 @maestro\x1b[2m build");
+    expect(boardRaw).toContain("\x1b[2m build");
+    expect(boardRaw).not.toContain("\x1b[2m 留言板");
+    expect(boardRaw).not.toContain("\x1b[2m @maestro");
+    boardInline.unmount();
+
+    // 2. transcriptBlocks / layoutEntry（全屏 ToolBlock）与 segments.dim 层次
+    const blocks = transcriptBlocks({
+      welcome: [],
+      notices: [],
+      frozen: [],
+      entries: [noteEntry, noteRmEntry, boardEntry],
+      hide: () => false,
+      live: createSessionView(),
+      clientLines: [],
+      ascii: false,
+    });
+    const noteLines = blocks[1]?.layout(100) ?? [];
+    expect(noteLines).toHaveLength(1);
+    expect(noteLines[0]?.text).toContain("✓ 笔记 3 条 新增事实");
+    expect(noteLines[0]?.segments?.find((s) => s.text.includes("笔记"))?.dim).not.toBe(true);
+    expect(noteLines[0]?.segments?.find((s) => s.text.includes("3 条"))?.dim).not.toBe(true);
+    expect(noteLines[0]?.segments?.find((s) => s.text.includes("新增事实"))?.dim).toBe(true);
+
+    const noteRmLines = blocks[2]?.layout(100) ?? [];
+    expect(noteRmLines).toHaveLength(1);
+    expect(noteRmLines[0]?.text).toBe("✓ 笔记 2 条 ok");
+    expect(noteRmLines[0]?.segments?.some((s) => s.dim === true)).toBe(false);
+
+    const boardLines = blocks[3]?.layout(100) ?? [];
+    expect(boardLines).toHaveLength(1);
+    expect(boardLines[0]?.text).toBe("✓ 留言板 @maestro build 1 条");
+    expect(boardLines[0]?.segments?.find((s) => s.text.includes("留言板"))?.dim).not.toBe(true);
+    expect(boardLines[0]?.segments?.find((s) => s.text.includes("@maestro"))?.dim).not.toBe(true);
+    expect(boardLines[0]?.segments?.find((s) => s.text.includes("build"))?.dim).toBe(true);
+
+    // 3. 展开（diffExpanded=true）
+    const noteExpanded = layoutEntry(noteEntry, 100, false, undefined, undefined, false, true)
+      .map((l) => l.text)
+      .join("\n");
+    expect(noteExpanded).toContain("1. 旧约束");
+    expect(noteExpanded).toContain("2. 新约束");
+    expect(noteExpanded).toContain("3. 新增事实");
+
+    const boardExpanded = layoutEntry(boardEntry, 100, false, undefined, undefined, false, true)
+      .map((l) => l.text)
+      .join("\n");
+    expect(boardExpanded).toContain("#5 指挥 > @orders");
+    expect(boardExpanded).toContain("检查 build");
+  });
+
+  it("500 字符笔记与长 query 在窄窗口保持单行省略、保留计数与状态，完整原文留展开", () => {
+    const longNote = "约束说明".repeat(125); // 500 字符
+    const longQuery = "search_keyword_token_".repeat(15);
+    const longNoteEntry: ToolEntry = {
+      kind: "tool",
+      key: "t-long-note",
+      turnId: "turn",
+      callId: "c-long-note",
+      name: "note_write",
+      seq: 1,
+      status: "ok",
+      input: { add: [longNote] },
+      subjects: [],
+      permission: undefined,
+      resolution: undefined,
+      liveOutput: "",
+      result: {
+        status: "ok",
+        modelContent: "ok",
+        output: { notes: [{ n: 1, text: longNote }] },
+        error: undefined,
+        truncated: false,
+        spillPath: undefined,
+        durationMs: undefined,
+      },
+    };
+    const longBoardEntry: ToolEntry = {
+      kind: "tool",
+      key: "t-long-board",
+      turnId: "turn",
+      callId: "c-long-board",
+      name: "ensemble_read",
+      seq: 2,
+      status: "ok",
+      input: { from: "@maestro", mention: "@orders", query: longQuery },
+      subjects: [],
+      permission: undefined,
+      resolution: undefined,
+      liveOutput: "",
+      result: {
+        status: "ok",
+        modelContent: "ok",
+        output: {
+          posts: [
+            {
+              number: 8,
+              from: "maestro",
+              fromKind: "maestro",
+              text: `命中 ${longQuery}`,
+              mentions: ["orders"],
+            },
+          ],
+          hasMore: false,
+          members: [],
+        },
+        error: undefined,
+        truncated: false,
+        spillPath: undefined,
+        durationMs: undefined,
+      },
+    };
+
+    const blocks = transcriptBlocks({
+      welcome: [],
+      notices: [],
+      frozen: [],
+      entries: [longNoteEntry, longBoardEntry],
+      hide: () => false,
+      live: createSessionView(),
+      clientLines: [],
+      ascii: false,
+    });
+
+    for (const width of [40, 28]) {
+      const noteLaid = layoutEntry(longNoteEntry, width, false);
+      expect(noteLaid).toHaveLength(1);
+      expect(noteLaid[0]?.text).toContain("1 条");
+      expect(noteLaid[0]?.text).toContain("ok");
+      expect(noteLaid[0]?.segments?.some((s) => s.dim === true)).toBe(true);
+      expect(blocks[1]?.layout(width)).toHaveLength(1);
+      expect(blocks[1]?.layout(width)[0]?.text).toContain("1 条");
+
+      const boardLaid = layoutEntry(longBoardEntry, width, false);
+      expect(boardLaid).toHaveLength(1);
+      expect(boardLaid[0]?.text).toContain("1 条");
+      expect(blocks[2]?.layout(width)).toHaveLength(1);
+      expect(blocks[2]?.layout(width)[0]?.text).toContain("1 条");
+
+      const noteInline = render(createElement(ToolRow, { entry: longNoteEntry, width }));
+      const noteRaw = noteInline.lastFrame() ?? "";
+      expect(strip(noteRaw).split("\n")).toHaveLength(1);
+      expect(strip(noteRaw)).toContain("1 条");
+      expect(noteRaw).toContain("\x1b[2m");
+      noteInline.unmount();
+
+      const boardInline = render(createElement(ToolRow, { entry: longBoardEntry, width }));
+      const boardRaw = boardInline.lastFrame() ?? "";
+      expect(strip(boardRaw).split("\n")).toHaveLength(1);
+      expect(strip(boardRaw)).toContain("1 条");
+      expect(boardRaw).not.toContain("\x1b[2m 留言板");
+      boardInline.unmount();
+    }
+
+    // 40 列时 @filter 正常、query 淡色被省略但存在
+    const board40 = layoutEntry(longBoardEntry, 40, false)[0];
+    expect(board40?.segments?.find((s) => s.text.includes("@maestro"))?.dim).not.toBe(true);
+    expect(board40?.segments?.find((s) => s.dim === true)?.text).toContain("...");
+
+    // 展开态保留完整原文
+    const noteExpanded = layoutEntry(longNoteEntry, 40, false, undefined, undefined, false, true)
+      .slice(1)
+      .map((l) => l.text.slice(2))
+      .join("");
+    expect(noteExpanded).toContain(longNote);
+    const boardExpanded = layoutEntry(longBoardEntry, 40, false, undefined, undefined, false, true)
+      .slice(1)
+      .map((l) => l.text.slice(2))
+      .join("");
+    expect(boardExpanded).toContain(longQuery);
   });
 
   it("工具行头部：全屏布局显示标签与参数，而不是工具名", () => {

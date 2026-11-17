@@ -16,10 +16,13 @@ import {
   ensembleMentionLabel,
   ensembleMentionToken,
   ensemblePostRecipients,
+  ensemblePostHead,
+  ensembleReadFilterParts,
+  ensembleReadPostsFromOutput,
   ensembleStatusDot,
   ensembleToolSummary,
 } from "../src/ensemble-ui";
-import { mcpToolLabel, toolMeta } from "../src/tool-meta";
+import { mcpToolLabel, noteWriteSummary, toolMeta } from "../src/tool-meta";
 
 function makeMember(name: string, overrides: Partial<EnsembleMemberView> = {}): EnsembleMemberView {
   return {
@@ -50,14 +53,16 @@ function makePost(number: number, overrides: Partial<EnsemblePostView> = {}): En
 }
 
 describe("toolMeta Ensemble 工具标签与参数", () => {
-  it("七个 Ensemble 工具显示规定的标签", () => {
+  it("七个 Ensemble 工具及留言板/笔记显示规定的标签", () => {
     expect(toolMeta("ensemble_init").label).toBe("合奏");
     expect(toolMeta("ensemble_add_member").label).toBe("添加");
     expect(toolMeta("ensemble_post").label).toBe("发帖");
+    expect(toolMeta("ensemble_read").label).toBe("留言板");
     expect(toolMeta("ensemble_change_model").label).toBe("换模型");
     expect(toolMeta("ensemble_remove_member").label).toBe("移除");
     expect(toolMeta("ensemble_end").label).toBe("结束");
     expect(toolMeta("ensemble_checkout").label).toBe("检出");
+    expect(toolMeta("note_write").label).toBe("笔记");
   });
 
   it("保留原有内置工具和 MCP 名称映射", () => {
@@ -89,6 +94,64 @@ describe("toolMeta Ensemble 工具标签与参数", () => {
     expect(ensembleToolSummary("ensemble_end", {})).toBe("");
     expect(ensembleToolSummary("ensemble_end", { summary: "全部并回\n补充说明" })).toBe("全部并回");
     expect(ensembleToolSummary("ensemble_checkout", { member: "orders" })).toBe("@orders");
+    expect(ensembleToolSummary("ensemble_read", { from: "maestro", query: "build" })).toBe(
+      "@maestro build",
+    );
+    expect(ensembleToolSummary("ensemble_read", { from: "@maestro", mention: "@orders" })).toBe(
+      "@maestro @orders",
+    );
+    expect(ensembleToolSummary("ensemble_read", { limit: 20 })).toBe("");
+    expect(ensembleReadFilterParts({ from: "maestro", query: "build" })).toEqual({
+      primary: "@maestro",
+      query: "build",
+      text: "@maestro build",
+    });
+    expect(
+      ensembleReadPostsFromOutput({
+        posts: [
+          { number: 3, from: "maestro", fromKind: "maestro", text: "请看", mentions: ["orders"] },
+        ],
+        hasMore: false,
+      })?.map(ensemblePostHead),
+    ).toEqual(["#3 指挥 → @orders"]);
+    expect(
+      noteWriteSummary({
+        name: "note_write",
+        status: "ok",
+        input: { add: ["第一条", "第二条"] },
+        result: {
+          status: "ok",
+          modelContent: "",
+          output: {
+            notes: [
+              { n: 1, text: "旧笔记" },
+              { n: 2, text: "第一条" },
+              { n: 3, text: "第二条" },
+            ],
+          },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 1,
+        },
+      }),
+    ).toEqual({ count: "3 条", note: "第一条", text: "3 条 第一条" });
+    expect(
+      noteWriteSummary({
+        name: "note_write",
+        status: "ok",
+        input: { remove: [1] },
+        result: {
+          status: "ok",
+          modelContent: "",
+          output: { notes: [{ n: 1, text: "保留" }] },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 1,
+        },
+      }),
+    ).toEqual({ count: "1 条", note: "", text: "1 条" });
     expect(ensembleToolSummary("shell", { command: "pnpm test" })).toBeUndefined();
   });
 });

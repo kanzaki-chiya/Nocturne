@@ -3486,4 +3486,173 @@ describe("会话区提示", () => {
     expect(articles[0]?.querySelector(".think")?.textContent).toContain("思考");
     expect(articles[1]?.textContent).toContain("已处理");
   });
+
+  it("note_write 工具行（ADR-0095）：显示「笔记」与「N 条」、淡色接首条新增原文、只删无淡色、展开编号列表", () => {
+    const view = createSessionView();
+    view.entries = [
+      tool({
+        key: "note-add",
+        seq: 1,
+        callId: "c-note-add",
+        name: "note_write",
+        status: "ok",
+        input: { add: ["apply_patch 改没读过的文件会被拒，先 read", "另一条约束"] },
+        result: {
+          status: "ok",
+          durationMs: 5,
+          output: {
+            notes: [
+              { n: 1, text: "旧约束 1" },
+              { n: 2, text: "旧约束 2" },
+              { n: 3, text: "apply_patch 改没读过的文件会被拒，先 read" },
+              { n: 4, text: "另一条约束" },
+            ],
+          },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          modelContent: "会话笔记已更新",
+        },
+      }),
+      tool({
+        key: "note-rm",
+        seq: 2,
+        callId: "c-note-rm",
+        name: "note_write",
+        status: "ok",
+        input: { remove: [1] },
+        result: {
+          status: "ok",
+          durationMs: 3,
+          output: {
+            notes: [
+              { n: 1, text: "旧约束 2" },
+              { n: 2, text: "apply_patch 改没读过的文件会被拒，先 read" },
+              { n: 3, text: "另一条约束" },
+            ],
+          },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          modelContent: "会话笔记已更新",
+        },
+      }),
+    ];
+    const { container } = mount(view);
+    const rows = [...container.querySelectorAll("article.tool")];
+    expect(rows).toHaveLength(2);
+    const [addRow, rmRow] = rows;
+    if (!addRow || !rmRow) throw new Error("missing note_write rows");
+
+    expect(addRow.querySelector(".tool-name")?.textContent).toBe("笔记");
+    expect(addRow.querySelector(".tool-arg")?.textContent).toBe(
+      "4 条 apply_patch 改没读过的文件会被拒，先 read",
+    );
+    expect(addRow.querySelector(".tool-dir")?.textContent).toBe(
+      "apply_patch 改没读过的文件会被拒，先 read",
+    );
+    expect(addRow.querySelector(".tool-res")?.textContent).toBe("完成");
+    expect(addRow.querySelector("ol.todo-list")).toBeNull();
+
+    expect(rmRow.querySelector(".tool-name")?.textContent).toBe("笔记");
+    expect(rmRow.querySelector(".tool-arg")?.textContent).toBe("3 条");
+    expect(rmRow.querySelector(".tool-dir")).toBeNull();
+    expect(rmRow.querySelector(".tool-res")?.textContent).toBe("完成");
+
+    const addSummary = addRow.querySelector("summary");
+    if (!addSummary) throw new Error("missing note_write summary");
+    fireEvent.click(addSummary);
+    const list = addRow.querySelector("ol.todo-list");
+    if (!list) throw new Error("missing expanded note list");
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "1.旧约束 1",
+      "2.旧约束 2",
+      "3.apply_patch 改没读过的文件会被拒，先 read",
+      "4.另一条约束",
+    ]);
+  });
+
+  it("ensemble_read 工具行（ADR-0095）：显示「留言板」与过滤条件、右侧「N 条」、无条件留空、展开显示帖子", () => {
+    const view = createSessionView();
+    view.entries = [
+      tool({
+        key: "board-filtered",
+        seq: 1,
+        callId: "c-board-1",
+        name: "ensemble_read",
+        status: "ok",
+        input: { from: "@maestro", query: "build" },
+        result: {
+          status: "ok",
+          durationMs: 4,
+          output: {
+            posts: [
+              {
+                number: 7,
+                from: "maestro",
+                fromKind: "maestro",
+                text: "先跑 build 验证",
+                mentions: ["orders"],
+              },
+              {
+                number: 9,
+                from: "orders",
+                fromKind: "member",
+                text: "build 已通过",
+                mentions: ["maestro"],
+              },
+            ],
+            hasMore: false,
+            members: [],
+          },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          modelContent: "raw model content",
+        },
+      }),
+      tool({
+        key: "board-empty",
+        seq: 2,
+        callId: "c-board-2",
+        name: "ensemble_read",
+        status: "ok",
+        input: { limit: 20 },
+        result: {
+          status: "ok",
+          durationMs: 2,
+          output: { posts: [], hasMore: false, members: [] },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          modelContent: "",
+        },
+      }),
+    ];
+    const { container } = mount(view);
+    const rows = [...container.querySelectorAll("article.tool")];
+    expect(rows).toHaveLength(2);
+    const [filteredRow, unfilteredRow] = rows;
+    if (!filteredRow || !unfilteredRow) throw new Error("missing ensemble_read rows");
+
+    expect(filteredRow.querySelector(".tool-name")?.textContent).toBe("留言板");
+    expect(filteredRow.querySelector(".tool-arg")?.textContent).toBe("@maestro build");
+    expect(filteredRow.querySelector(".tool-dir")?.textContent).toBe("build");
+    expect(filteredRow.querySelector(".tool-res")?.textContent).toBe("2 条");
+
+    expect(unfilteredRow.querySelector(".tool-name")?.textContent).toBe("留言板");
+    expect(unfilteredRow.querySelector(".tool-arg")?.textContent).toBe("");
+    expect(unfilteredRow.querySelector(".tool-res")?.textContent).toBe("0 条");
+
+    const summary = filteredRow.querySelector("summary");
+    if (!summary) throw new Error("missing ensemble_read summary");
+    fireEvent.click(summary);
+    const body = filteredRow.querySelector(".tool-body .tool-payload");
+    expect(body).not.toBeNull();
+    expect(body?.textContent).toContain("#7 指挥 → @orders");
+    expect(body?.textContent).toContain("先跑 build 验证");
+    expect(body?.textContent).toContain("#9 @orders → 指挥");
+    expect(body?.textContent).toContain("build 已通过");
+    expect(body?.textContent).not.toContain("raw model content");
+  });
 });

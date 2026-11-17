@@ -4,10 +4,15 @@
  */
 import stringWidth from "string-width";
 
-import type { PermissionReviewedPayload, ToolEntry, Usage } from "@nocturne/core/protocol";
-import { subagentRowInfo } from "@nocturne/core/protocol";
+import type {
+  NoteItem,
+  PermissionReviewedPayload,
+  ToolEntry,
+  Usage,
+} from "@nocturne/core/protocol";
+import { noteItemsFromCompletion, subagentRowInfo } from "@nocturne/core/protocol";
 
-import { ensembleToolSummary } from "./text-format-ensemble.js";
+import { ensembleToolSummary, ensembleReadFilterParts } from "./text-format-ensemble.js";
 
 export function subagentModel(entry: ToolEntry): string {
   const info = subagentRowInfo(entry);
@@ -131,6 +136,156 @@ const inputString = (input: unknown, key: string): string | undefined => {
   return typeof v === "string" ? v : undefined;
 };
 
+export function noteItemsFromOutput(output: unknown): NoteItem[] | undefined {
+  const strict = noteItemsFromCompletion({ name: "note_write", status: "ok", output });
+  if (strict !== undefined) return strict;
+  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+  const raw = (output as { notes?: unknown }).notes;
+  if (!Array.isArray(raw)) return undefined;
+  const out: NoteItem[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const { n, text } = item as { n?: unknown; text?: unknown };
+    if (typeof n === "number" && Number.isInteger(n) && n >= 1 && typeof text === "string") {
+      out.push({ n, text });
+    }
+  }
+  return out;
+}
+
+export function noteItemsFromEntry(
+  entry: Pick<ToolEntry, "name" | "target" | "status" | "result">,
+): NoteItem[] | undefined {
+  const name = entry.target?.name ?? entry.name;
+  if (name !== "note_write" || entry.status !== "ok") return undefined;
+  return noteItemsFromOutput(entry.result?.output);
+}
+
+export function noteFirstAddedText(input: unknown): string {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return "";
+  const add = (input as { add?: unknown }).add;
+  if (!Array.isArray(add)) return "";
+  for (const item of add) {
+    if (typeof item !== "string") continue;
+    const singleLine = item.trim().replace(/\r?\n+/g, " ");
+    if (singleLine !== "") return singleLine;
+  }
+  return "";
+}
+
+export interface ToolSummaryParts {
+  primary: string;
+  query: string;
+  text: string;
+}
+
+export function noteWriteSummaryParts(input: unknown, output?: unknown): ToolSummaryParts {
+  const notes = noteItemsFromOutput(output);
+  const primary = notes !== undefined ? `${notes.length} 条` : "";
+  const query = noteFirstAddedText(input);
+  const text = [primary, query].filter(Boolean).join(" ");
+  return { primary, query, text };
+}
+
+export function noteWriteSummary(input: unknown, output?: unknown): string {
+  return noteWriteSummaryParts(input, output).text;
+}
+
+export function toolTwoToneSummaryParts(
+  name: string | undefined,
+  input: unknown,
+  output?: unknown,
+): ToolSummaryParts | undefined {
+  if (name === "note_write") return noteWriteSummaryParts(input, output);
+  if (name === "ensemble_read") return ensembleReadFilterParts(input);
+  return undefined;
+}
+
+export interface ToolHeadlineSegment {
+  text: string;
+  color?: string | undefined;
+  dim?: boolean | undefined;
+}
+
+/**
+ * 折叠工具行双色调标题（note_write / ensemble_read 共用）：
+ * 工具名、计数或 @filter 保持正常色，首条新增或关键词用淡色；
+ * 按可用显示宽度单行省略，优先保留工具名与右侧结果状态/命中数。
+ */
+export function toolHeadlineSegments(options: {
+  mark: string;
+  markColor?: string | undefined;
+  toolLabel: string;
+  primary: string;
+  query: string;
+  tail: string;
+  tailDim?: boolean | undefined;
+  width: number;
+  ellipsis: string;
+}): ToolHeadlineSegment[] {
+  const sanitize = (text: string) => stripControls(text.replace(/\r\n?|\n|\t/g, " "));
+  const primary = sanitize(options.primary);
+  const query = sanitize(options.query);
+  const lead = `${options.mark} ${options.toolLabel}`;
+  const leadSegs: ToolHeadlineSegment[] =
+    options.markColor !== undefined
+      ? [{ text: options.mark, color: options.markColor }, { text: ` ${options.toolLabel}` }]
+      : [{ text: lead }];
+  const tailSegs: ToolHeadlineSegment[] =
+    options.tail !== ""
+      ? [{ text: options.tail, ...(options.tailDim === true ? { dim: true } : {}) }]
+      : [];
+  const maxW = Math.max(1, options.width);
+  const leadW = stringWidth(lead);
+  const tailW = stringWidth(options.tail);
+  const avail = maxW - leadW - tailW;
+  if (avail < 0) {
+    if (tailW < maxW) {
+      const room = maxW - tailW;
+      const markW = stringWidth(options.mark);
+      if (options.markColor !== undefined && room > markW) {
+        return [
+          { text: options.mark, color: options.markColor },
+          { text: truncateLine(` ${options.toolLabel}`, room - markW, options.ellipsis) },
+          ...tailSegs,
+        ];
+      }
+      return [{ text: truncateLine(lead, room, options.ellipsis) }, ...tailSegs];
+    }
+    return [{ text: truncateLine(`${lead}${options.tail}`, maxW, options.ellipsis) }];
+  }
+  const ellipsisW = stringWidth(options.ellipsis);
+  let rem = avail;
+  let shownPrimary = "";
+  if (primary !== "") {
+    const pw = stringWidth(primary);
+    if (1 + pw <= rem) {
+      shownPrimary = primary;
+      rem -= 1 + pw;
+    } else if (rem >= 1 + ellipsisW + 1) {
+      shownPrimary = truncateLine(primary, rem - 1, options.ellipsis);
+      rem = 0;
+    } else {
+      rem = 0;
+    }
+  }
+  let shownQuery = "";
+  if (query !== "" && rem > 0) {
+    const qw = stringWidth(query);
+    if (1 + qw <= rem) {
+      shownQuery = query;
+    } else if (rem >= 1 + ellipsisW + 1) {
+      shownQuery = truncateLine(query, rem - 1, options.ellipsis);
+    }
+  }
+  return [
+    ...leadSegs,
+    ...(shownPrimary !== "" ? [{ text: ` ${shownPrimary}` }] : []),
+    ...(shownQuery !== "" ? [{ text: ` ${shownQuery}`, dim: true }] : []),
+    ...tailSegs,
+  ];
+}
+
 /** 工具输入单行摘要：shell→command；read/write/edit→path；grep/glob→pattern；apply_patch→文件清单 */
 export function summarizeToolInput(
   name: string | undefined,
@@ -139,6 +294,7 @@ export function summarizeToolInput(
 ): string {
   const ensemble = name === undefined ? undefined : ensembleToolSummary(name, input);
   if (ensemble !== undefined) return ensemble;
+  if (name === "note_write") return noteWriteSummary(input, output);
   if (name === "task") return inputString(input, "task") ?? "";
   if (name === "mcp_search") return inputString(input, "query") ?? "";
   if (name === "render_html") return inputString(input, "title") ?? "";

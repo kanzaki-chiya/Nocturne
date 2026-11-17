@@ -122,8 +122,15 @@ import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
 import { elapsedText, type SubagentLink } from "./subagent-panel";
-import { splitEnsembleMentions, ensembleAuthorLabel, ensembleToolSummary } from "./ensemble-ui";
-import { mcpToolLabel, toolMeta } from "./tool-meta";
+import {
+  ensembleAuthorLabel,
+  ensemblePostHead,
+  ensembleReadFilterParts,
+  ensembleReadPostsFromOutput,
+  ensembleToolSummary,
+  splitEnsembleMentions,
+} from "./ensemble-ui";
+import { mcpToolLabel, noteItemsFromEntry, noteWriteSummary, toolMeta } from "./tool-meta";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
@@ -1764,6 +1771,8 @@ function toolArgumentValue(
   const ensembleArg = ensembleToolSummary(name, input);
   if (ensembleArg !== undefined) return plain(ensembleArg, false);
   switch (name) {
+    case "note_write":
+      return plain(noteWriteSummary(entry)?.text ?? "", false);
     case "skill":
       return plain(input === undefined ? "" : text(input.name), true);
     case "render_html":
@@ -1932,6 +1941,9 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
       break;
     case "mcp_search":
       if (Array.isArray(value?.matches)) base = `${value.matches.length} 个工具`;
+      break;
+    case "ensemble_read":
+      if (Array.isArray(value?.posts)) base = `${value.posts.length} 条`;
       break;
     default:
       break;
@@ -2205,7 +2217,7 @@ export function ToolLine({
         {arg.name}
         {arg.dir !== "" && (
           <>
-            {" "}
+            {arg.name !== "" ? " " : null}
             <span className="tool-dir">{arg.dir}</span>
           </>
         )}
@@ -2630,15 +2642,27 @@ function ToolRow({
     output: entry.result?.output,
   });
   const summary = todos === undefined ? undefined : todoSummary(todos);
+  const notes = noteItemsFromEntry(entry);
+  const noteSummary = noteWriteSummary(entry);
+  const boardFilter =
+    shownName === "ensemble_read" ? ensembleReadFilterParts(rawInputOf(entry)) : undefined;
+  const boardPosts =
+    shownName === "ensemble_read" && entry.status === "ok"
+      ? ensembleReadPostsFromOutput(entry.result?.output)
+      : undefined;
   const argument = toolArgumentValue(entry, cwd);
   const arg: ArgParts =
     summary !== undefined
       ? { name: summary.count, dir: summary.note, title: summary.text }
-      : preparing && inputOf(entry) === undefined
-        ? { name: "", dir: "", title: "" }
-        : argument.path
-          ? pathParts(argument.text)
-          : { name: argument.text, dir: "", title: argument.text };
+      : noteSummary !== undefined
+        ? { name: noteSummary.count, dir: noteSummary.note, title: noteSummary.text }
+        : boardFilter !== undefined
+          ? { name: boardFilter.primary, dir: boardFilter.query, title: boardFilter.text }
+          : preparing && inputOf(entry) === undefined
+            ? { name: "", dir: "", title: "" }
+            : argument.path
+              ? pathParts(argument.text)
+              : { name: argument.text, dir: "", title: argument.text };
   const range = toolRange(entry);
   const running = !preparing && entry.status === "running";
   // 只读且日志未收束：保留 running 的事实，但不转圈、不计时
@@ -2811,6 +2835,38 @@ function ToolRow({
             {renderedDetails.current.has(detailKey) ? (
               todos !== undefined ? (
                 <TodoList items={todos} />
+              ) : notes !== undefined ? (
+                notes.length > 0 ? (
+                  <ol className="todo-list">
+                    {notes.map((item) => (
+                      <li key={item.n}>
+                        <span className="todo-mark" style={{ flex: "none", minWidth: "14px" }}>
+                          {item.n}.
+                        </span>
+                        <span className="todo-text" style={{ whiteSpace: "pre-wrap" }}>
+                          {item.text}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null
+              ) : boardPosts !== undefined ? (
+                boardPosts.length > 0 ? (
+                  <div className="tool-body">
+                    <div className="tool-payload conversation-tool-output">
+                      {boardPosts.map((post, postIndex) => (
+                        <Fragment key={post.number}>
+                          {postIndex > 0 ? "\n\n" : null}
+                          <div>
+                            <strong>{ensemblePostHead(post)}</strong>
+                            {"\n"}
+                            {post.text}
+                          </div>
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
+                ) : null
               ) : (
                 <div className="tool-body">
                   {file?.diff !== undefined ? (
