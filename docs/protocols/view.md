@@ -62,6 +62,8 @@ interface SessionView {
   entries: ViewEntry[];
   /** 当前任务清单；全部完成后由下一条非插话的持久化 message.user 归档（ADR-0070） */
   todos: TodoItem[];
+  /** 当前会话笔记（ADR-0095）；不归档，由模型显式删除 */
+  notes: NoteItem[];
   backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
   /** Ensemble 派生视图（ADR-0089）：持久骨架由 ensemble.* 事件归约，成员运行态由临时事件 ensemble.member_updated 更新 */
   ensemble?: EnsembleView;
@@ -224,7 +226,7 @@ interface SessionNotice {
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目（`source: "reviewer"` 时不追加：结论已由该工具条目的 `review` 展示）。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |
 | `tool.started` | 同 `callId` 的 `live.tools` 项移除并晋升（`inputText` 丢弃）；`entries` 中已有条目（requested 建的 awaiting）则更新为 `running` 并填 `input`/`subjects`/`permission`/`turnId`/`name`；否则新建 `running` 条目 |
-| `tool.completed` | 同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput`；同 `callId` 的 `pendingQuestion` 清除（ADR-0032） |
+| `tool.completed` | 若为合法且成功的 `todo_write` / `note_write`（`todoItemsFromCompletion` / `noteItemsFromCompletion`），分别更新 `todos` / `notes`；同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput`；同 `callId` 的 `pendingQuestion` 清除（ADR-0032） |
 | `context.compacted` | `kind: "prune"` 的修剪不产生条目；`kind: "summary"` 追加 `compacted` notice 条目，`message` 为「上下文已压缩为摘要」（`compactedNoticeText`），不含 kind 与 throughSeq，payload 原样保留。两种事件均照常持久化并参与上下文构建，`lastSeq` 与重放事件簿记照常推进 |
 | `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission`、`pendingQuestion` 清空；**清空整个 `live`**（管线串行、同一时刻至多一个 Turn；`LiveTool.turnId` 可为空，按 turnId 筛选会留下无持久落点的孤儿，破坏 V8）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
 
@@ -375,7 +377,7 @@ function allPendingPermissions(
 
 ## 回退
 
-`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；分叉追加的回退（`fork: true`）只截断，不生成通知；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、笔记、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；分叉追加的回退（`fork: true`）只截断，不生成通知；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
 
 回退目标只取非插话的 `message.user`（`steer !== true`）：回退到一条插话会把 Turn 截成半截（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。`rewindTargets()` 不列插话，`rewind` / `forkSession` 指向插话一律返回 `invalid_command`。
 

@@ -2466,6 +2466,7 @@ class Connection implements HubPeer {
           meta: state.meta,
           config: state.config,
           todos: state.todos,
+          notes: state.notes,
           usage: state.usage,
           lastSeq: state.lastSeq,
           openTurn: state.openTurn,

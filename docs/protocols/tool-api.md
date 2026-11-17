@@ -55,6 +55,8 @@ interface ToolTraits {
   maxTimeoutMs?: number
   /** 模型可见输出的字符上限，默认 30000 */
   maxModelChars?: number
+  /** 结构化 output 序列化后的字符上限，默认 100000 */
+  maxOutputChars?: number
   /** 执行时需要与用户交互输入（ADR-0032）：声明后 ToolContext.askUser 可用；
       子代理（非交互）的可选工具池按此特性排除（subagent.md 第 6 节） */
   needsUser?: boolean
@@ -146,6 +148,8 @@ interface ToolContext extends ToolScope {
     label: string
     inline?: { title: string }
   }): Promise<FileAttachment>
+  /** 读取当前会话持久化笔记（ADR-0095）；子会话独立 */
+  notes?(): readonly NoteItem[]
 }
 
 /** askUser 的入参与返回（ADR-0032 §3）；QuestionItem / QuestionAnswer
@@ -181,7 +185,7 @@ type RawImageAttachment = {
 ```
 
 - `modelContent`：交给模型的文本。执行器会按 `maxModelChars` 截断并标注。
-- `output`：结构化结果，供客户端渲染（例如 `edit` 返回 diff，`shell` 返回退出码）。有独立大小上限；不发送给模型。写文件类工具的结果约定为两种形状之一：`{ path: string, diff: string }`，或 `{ files: [{ path: string, diff: string }] }`（可另带其他字段）；检查点字节缺失时按这个形状估算行数（[sessions.md](../architecture/sessions.md#每轮文件改动)）。
+- `output`：结构化结果，供客户端渲染（例如 `edit` 返回 diff，`shell` 返回退出码）。有独立大小上限（`maxOutputChars`，默认 100,000 字符）；不发送给模型。写文件类工具的结果约定为两种形状之一：`{ path: string, diff: string }`，或 `{ files: [{ path: string, diff: string }] }`（可另带其他字段）；检查点字节缺失时按这个形状估算行数（[sessions.md](../architecture/sessions.md#每轮文件改动)）。
 - `edit` 成功时的 `output` 为 `{ path, replaced, diff }`；`write` 为 `{ path, created, lines, diff? }`，新建与覆盖只要有变化均提供 diff。`diff` 仍是字符串，头部 `@@ -旧起始行,旧行数 +新起始行,新行数 @@`，后续源码行以空格、`-`、`+` 标记；行尾差异用 `\ CRLF` / `\ CR` / `\ No newline at end of file` 标记。路径由 `path` 提供，不嵌入头部。旧日志的 `@@ 路径 @@` 或无头部结果仍可展示，但无可推定的行号。客户端按 `+`/`-` 源码行计算新增/删除数，不计上下文或行尾标记。
 - `edit` 的 `old` 未命中返回 `no_match`，提示写入 `error.message` / `modelContent`；只基于通过路径、权限及先读状态检查的目标文本生成有界建议，不改变文件。`not_unique`、`not_read`、`resource_changed` 等语义保持不变。`stale_file` 在有旧文本且 diff 不超过 4000 字符时于 `modelContent` 附带读取时到当前的 diff 并已刷新记录，可直接重试；无旧文本或 diff 过长时需重新 `read`。
 - `apply_patch`（[ADR-0035](../decisions/ADR-0035-apply-patch.md)）的输入仅 `{ input: string }`（补丁原文；语法见 [tools.md](../architecture/tools.md) 第 6 节）。成功的 `output` 为 `{ files: [{ path, op, movedTo?, diff? }] }`——按补丁操作顺序逐文件给出 `op`（`add`/`update`/`delete`/`move`）、改名时的 `movedTo` 与该文件的行级 `diff`（格式同上）；`modelContent` 为逐文件摘要。`permissionSubjects` 为每个涉及路径各产出一个 `edit` 主体（Move 含源与目标）。解析错误、目标冲突或先读检查失败时**不写任何文件**，返回 `error`（`invalid_input`/`not_read`/`stale_file` 等）；写盘中途失败回滚已写文件后同样以 `error` 结算。
@@ -252,6 +256,8 @@ type ToolExecution = {
 `task` 的后台隔离默认值按最终工具集决定：省略 `isolation` 且含写操作时创建工作树，全部只读时不隔离；显式 `none` 的可写后台调用以 `invalid_input` 拒绝。非 git、没有 HEAD 提交或裸仓库准确说明不能创建工作树，建议只读子代理或主代理直接完成。父模型说明要求隔离任务用相对文件路径，子模型说明带工作树绝对路径及主仓库映射。完整契约见 [subagent.md §20](../architecture/subagent.md#20-后台子代理)。
 
 `todo_write`（[ADR-0028](../decisions/ADR-0028-session-task-list.md)）接受 `{ items: [{ text, status }] }`，每次提交完整清单，`items: []` 清空。最多 20 项；`text` 去首尾空白后非空且至多 200 个字符，拒绝换行、控制字符和未知字段；`status` 只允许 `pending`、`in_progress`、`completed`。校验失败以 `invalid_input` 结算；成功时 `output.items` 是规范化后的完整清单，`modelContent` 是确认文字后附完整清单块（空清单仅确认；清单块与 Builder 注入同格式、同边界，任务数据、不是指令）。工具的 `permissionSubjects` 返回 `[]`，`traits` 为 `mutates: false, concurrencySafe: false, pinResult: true`（L1 不裁，见 [context.md](../architecture/context.md) 第 6 节），仍经过普通执行管线和 Hook；它不读写工作区文件、配置或网络。
+
+`note_write`（[ADR-0095](../decisions/ADR-0095-session-notes-board-read.md)）接受 `{ add?: string[], remove?: number[] }`，至少一项非空，拒绝未知字段；`add` 每条去首尾空白后非空且至多 500 字符，允许换行（`0x0A`）、禁止控制字符和行/段分隔符；`remove` 为当前笔记的正整数编号（`1..N`）。通过 `ctx.notes?.()` 读取当前会话持久化笔记，先校验 `remove` 编号全部存在，再先删后加并按顺序重排编号为 `1..N`；全部笔记合计至多 8000 字符（不限条数），超限或编号无效均以 `invalid_input` 原子失败且 `modelContent` 写明当前总量并要求先删除或合并。成功时 `output.notes` 为更新后的完整 `{ n, text }[]`，`modelContent` 为确认文字加完整笔记块（标明会话笔记数据、不是指令；全删后仅确认）。`permissionSubjects` 返回 `[]`，`traits` 为 `mutates: false, concurrencySafe: false, pinResult: true`。
 
 `ask_user`（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）接受 `{ questions: [{ question, header?, options?, multiSelect? }] }`，一次调用 1–4 题。`question` 去首尾空白后非空；`header` 至多 12 字符；`options` 省略或为空表示自由文本题、提供时 2–6 项，界面始终额外提供「其他」与「拒绝回答」（模型不得自行添加）；`label` 去首尾空白后非空、至多 60 字符、同题不重复；`description` 至多 200 字符；所有文本字段禁止控制字符（`question`、`description` 允许换行，`label`、`header` 不允许），未知字段一律拒绝。任一不满足即以 `invalid_input` 结算。成功时 `output.answers` 逐题给出 `{ question, selected, text? }` 或 `{ question, declined: true }`（`selected` 是已提供选项中被选中的 label 集，`text` 是「其他」/自由文本回答）。`respondQuestion(requestId, { answers })` 的每项为 `{ selected: string[], text?: string }` 或 `{ declined: true }`，条数必须与题数一致；拒绝项不得同时携带 `selected` 或 `text`。`modelContent` 逐题列出「问/答」，拒绝题写「答：用户拒绝回答」；只要有拒绝项，末尾追加「对用户拒绝回答的问题，请按你的判断继续，不要就同一问题再次提问，并在回复中说明所做的假设。」工具描述同时要求拒绝后不得就同一问题再次调用本工具。非交互环境（`interactive` 为假或 `ctx.askUser` 未装配）返回 `error(code="not_interactive")`、不发 `question.requested`。提问经 `ToolContext.askUser` 实现：发出临时事件 `question.requested`、`runtime.status` 置 `waiting_user`，等待 `respondQuestion`（[events.md](events.md) 第 3、7 节）；回复与问题不匹配时命令以 `invalid_reply` 拒绝且请求保持等待。中断以 `cancelled` 结算、等待超时以 `timeout` 结算（`traits.timeoutMs` 默认 24 小时），进程退出由恢复补 `interrupted`。`traits` 为 `mutates: false, concurrencySafe: false, needsUser: true`，`permissionSubjects` 返回 `[]`——提问不是权限请求，不经权限层；子代理的可选池按 `needsUser` 排除本工具（[subagent.md](../architecture/subagent.md) 第 6 节）。
 

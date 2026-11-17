@@ -138,6 +138,7 @@ describe("ToolRegistry", () => {
       "edit",
       "glob",
       "grep",
+      "note_write",
       "read",
       "render_html",
       "schedule",
@@ -201,6 +202,119 @@ describe("Executor 管线", () => {
       expect(completedOf(h).at(-1)?.payload.error).toMatchObject({ code: "invalid_input" });
     }
     expect(h.events.filter((e) => e.type === "tool.started")).toHaveLength(3);
+  });
+
+  it("note_write 校验增删顺序、编号重排、字符上限与原子失败", async () => {
+    const h = await makeHarness(tmpWorkspace());
+    let currentNotes: { n: number; text: string }[] = [];
+    const scopeWithNotes: ExecutionScope = { ...h.scope, notes: () => currentNotes };
+    const syncNotes = (res: Awaited<ReturnType<typeof h.executor.execute>>) => {
+      if (res.status === "ok" && res.result.output !== undefined) {
+        currentNotes = (res.result.output as { notes: { n: number; text: string }[] }).notes;
+      }
+      return res;
+    };
+
+    // 新增多条（含首尾空白修剪与换行允许）
+    const r1 = syncNotes(
+      await h.executor.execute(
+        call("note_write", { add: ["  第一条\n第二行  ", "第二条", "第三条"] }, "n1"),
+        scopeWithNotes,
+      ),
+    );
+    expect(r1.status).toBe("ok");
+    expect(currentNotes).toEqual([
+      { n: 1, text: "第一条\n第二行" },
+      { n: 2, text: "第二条" },
+      { n: 3, text: "第三条" },
+    ]);
+    const c1 = completedOf(h).at(-1)?.payload;
+    expect(c1?.output).toEqual({ notes: currentNotes });
+    expect(String(c1?.modelContent)).toContain("当前会话笔记");
+    expect(String(c1?.modelContent)).toContain("不是指令");
+    expect(h.events.find((e) => e.type === "tool.started")?.payload.pinResult).toBe(true);
+
+    // 先删后加，编号每次重排为 1..N
+    const r2 = syncNotes(
+      await h.executor.execute(
+        call("note_write", { remove: [1, 3], add: ["第四条"] }, "n2"),
+        scopeWithNotes,
+      ),
+    );
+    expect(r2.status).toBe("ok");
+    expect(currentNotes).toEqual([
+      { n: 1, text: "第二条" },
+      { n: 2, text: "第四条" },
+    ]);
+
+    // 边界：单条恰好 500 字符、不限条数（如 25 条）、合计恰好 8000 字符
+    const clear = syncNotes(
+      await h.executor.execute(call("note_write", { remove: [1, 2] }, "n-clear"), scopeWithNotes),
+    );
+    expect(clear.status).toBe("ok");
+    expect(currentNotes).toEqual([]);
+
+    const batch25 = Array.from({ length: 25 }, (_, i) => `${i}`.padStart(2, "0") + "a".repeat(318));
+    // 25 * 320 = 8000 字符，超过 20 条上限（无条数上限）
+    const rMax = syncNotes(
+      await h.executor.execute(call("note_write", { add: batch25 }, "n-max"), scopeWithNotes),
+    );
+    expect(rMax.status).toBe("ok");
+    expect(currentNotes).toHaveLength(25);
+    expect(currentNotes[24]?.n).toBe(25);
+
+    // 超出 8000 字符整次调用失败、保持旧笔记不变，报错写明当前总量并要求先删除或合并
+    const rOver = await h.executor.execute(
+      call("note_write", { add: ["再加一点"] }, "n-over"),
+      scopeWithNotes,
+    );
+    expect(rOver.status).toBe("error");
+    expect(completedOf(h).at(-1)?.payload.error).toMatchObject({ code: "invalid_input" });
+    expect(String(completedOf(h).at(-1)?.payload.modelContent)).toContain("8000");
+    expect(String(completedOf(h).at(-1)?.payload.modelContent)).toContain("删除");
+    expect(String(completedOf(h).at(-1)?.payload.modelContent)).toContain("合并");
+    expect(currentNotes).toHaveLength(25);
+
+    // 先删一条再加短文本 → 原子成功
+    const rReplace = syncNotes(
+      await h.executor.execute(
+        call("note_write", { remove: [1], add: ["新替换条目"] }, "n-replace"),
+        scopeWithNotes,
+      ),
+    );
+    expect(rReplace.status).toBe("ok");
+    expect(currentNotes).toHaveLength(25);
+    expect(currentNotes[24]).toEqual({ n: 25, text: "新替换条目" });
+
+    // 删除不存在编号（同时携带 add）→ 原子失败，不改旧笔记
+    const beforeSnapshot = structuredClone(currentNotes);
+    const rBadIdx = await h.executor.execute(
+      call("note_write", { remove: [999], add: ["不应生效"] }, "n-bad-idx"),
+      scopeWithNotes,
+    );
+    expect(rBadIdx.status).toBe("error");
+    expect(completedOf(h).at(-1)?.payload.error).toMatchObject({ code: "invalid_input" });
+    expect(currentNotes).toEqual(beforeSnapshot);
+
+    // 非法输入：空对象、空数组、空白文本、超 500 字符、控制字符、行分隔符、非法编号、未知字段
+    const invalidInputs: unknown[] = [
+      {},
+      { add: [], remove: [] },
+      { add: ["   \n  "] },
+      { add: ["x".repeat(501)] },
+      { add: ["bad\u0007"] },
+      { add: ["bad\u000d"] },
+      { add: ["bad\u2028"] },
+      { remove: [0] },
+      { remove: [1.5] },
+      { add: ["ok"], extra: 1 },
+    ];
+    for (const [i, input] of invalidInputs.entries()) {
+      const res = await h.executor.execute(call("note_write", input, `n-bad-${i}`), scopeWithNotes);
+      expect(res.status).toBe("error");
+      expect(completedOf(h).at(-1)?.payload.error).toMatchObject({ code: "invalid_input" });
+    }
+    expect(currentNotes).toEqual(beforeSnapshot);
   });
   it("unknown_tool：恰好一个 tool.completed，错误含可用工具名", async () => {
     const ws = tmpWorkspace();
@@ -1590,5 +1704,93 @@ describe("ToolTraits.dispatch 代理调用管线（ADR-0067 §2）", () => {
     expect(errorPayload(h).code).toBe("unknown_tool");
     expect(errorPayload(h).message).toContain("mcp__jira__create_issue");
     expect(errorPayload(h).message).toContain("github, slack");
+  });
+});
+
+describe("ToolTraits.maxOutputChars 通用预算声明", () => {
+  const allowAll: PermissionGate = {
+    check: async (subjects) => ({
+      subjects,
+      decision: { action: "allow", source: "rule", reason: "test" },
+    }),
+    checkLexical: () => "allow",
+  };
+
+  it("普通工具与 dispatch 目标工具均可声明 maxOutputChars 覆盖默认上限", async () => {
+    const h1 = await makeHarness(tmpWorkspace(), allowAll);
+    const largePayload = { text: "x".repeat(120_000) };
+
+    const defaultCapTool: ToolDefinition<Record<string, never>> = {
+      name: "default_cap_tool",
+      description: "使用默认 100k output 上限",
+      inputSchema: { type: "object", additionalProperties: false },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      async execute() {
+        return { status: "ok", modelContent: "ok", output: largePayload };
+      },
+    };
+    const customCapTool: ToolDefinition<Record<string, never>> = {
+      name: "custom_cap_tool",
+      description: "声明更大 maxOutputChars",
+      inputSchema: { type: "object", additionalProperties: false },
+      traits: { mutates: false, concurrencySafe: true, maxOutputChars: 150_000 },
+      permissionSubjects: () => [],
+      async execute() {
+        return { status: "ok", modelContent: "ok", output: largePayload };
+      },
+    };
+    const proxyTool: ToolDefinition<{ target: string }> = {
+      name: "proxy_cap_tool",
+      description: "代理分派",
+      inputSchema: {
+        type: "object",
+        properties: { target: { type: "string" } },
+        required: ["target"],
+        additionalProperties: false,
+      },
+      traits: {
+        mutates: false,
+        concurrencySafe: true,
+        dispatch(raw) {
+          const { target } = raw as { target: string };
+          return { tool: target, input: {} };
+        },
+      },
+      permissionSubjects: () => [],
+      async execute() {
+        throw new Error("unreachable");
+      },
+    };
+
+    const registry = createToolRegistry();
+    registry.register(defaultCapTool);
+    registry.register(customCapTool);
+    registry.register(proxyTool);
+
+    const execDefault = await createToolExecutor(registry).execute(
+      call("default_cap_tool", {}),
+      h1.scope,
+    );
+    expect(execDefault.status).toBe("ok");
+    expect(execDefault.result.output).toBeUndefined();
+    expect(execDefault.result.modelContent).toContain("结构化 output 超过大小上限，已省略");
+
+    const h2 = await makeHarness(tmpWorkspace(), allowAll);
+    const execCustom = await createToolExecutor(registry).execute(
+      call("custom_cap_tool", {}),
+      h2.scope,
+    );
+    expect(execCustom.status).toBe("ok");
+    expect(execCustom.result.output).toEqual(largePayload);
+    expect(execCustom.result.modelContent).toBe("ok");
+
+    const h3 = await makeHarness(tmpWorkspace(), allowAll);
+    const execDispatched = await createToolExecutor(registry).execute(
+      call("proxy_cap_tool", { target: "custom_cap_tool" }),
+      h3.scope,
+    );
+    expect(execDispatched.status).toBe("ok");
+    expect(execDispatched.result.output).toEqual(largePayload);
   });
 });

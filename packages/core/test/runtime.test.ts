@@ -898,9 +898,9 @@ describe("上下文与运行时命令（Phase 2）", () => {
 
   it("L1 修剪：超阈值时写 context.compacted(prune)，工具结果以占位说明回模型", async () => {
     const ws = makeTmpDir("nct-rt-prune-");
-    writeFileSync(path.join(ws, "big.txt"), "x".repeat(20_000));
+    writeFileSync(path.join(ws, "big.txt"), "x".repeat(32_000));
     const provider = new FakeProvider({
-      models: [tinyModel],
+      models: [{ ...tinyModel, contextWindow: 12_000 }],
       scripts: [
         [
           {

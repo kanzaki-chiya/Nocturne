@@ -79,7 +79,7 @@ execute(call, ctx):
 模型可见的工具输出必须有界：
 
 - 每个工具声明 `maxModelChars`（默认 30,000 字符，约 7,500 token）。超出时保留开头与结尾，中间替换为"已省略 N 字符"的说明。
-- 结构化 `output`（供客户端渲染，例如 diff、退出码）与模型可见的 `modelContent` 分开；前者也有独立上限，防止事件与日志膨胀。
+- 结构化 `output`（供客户端渲染，例如 diff、退出码）与模型可见的 `modelContent` 分开；前者也有独立上限（`maxOutputChars`，默认 100,000 字符，工具可在 `traits` 中显式覆盖），防止事件与日志膨胀。
 - **完整输出落盘**：`modelContent` 因超预算被截断时，执行器把截断前的完整文本写入附件文件，模型可见内容中注明文件路径，可用 `read` 按需查看：
   - **截断说明**：模型可见内容末尾的说明写明总字符数与总行数、预算、保留的头尾字符数、被省略的行号范围（行号按完整输出的换行计，与 `read` 一致）、落盘路径，以及可直接使用的 `read` 参数（`offset=<起始行>`、`limit=<行数>`）；落盘不可用时说明未保留。`skill` 的正文超过预算时，在结果开头（不会被截掉的位置）先给出正文总长与 `<技能目录>/SKILL.md` 的读法。
   - 位置：`<sessionsDir>/attachments/<sessionId>/<callId>.txt`（`sessionsDir` 来自 `RuntimeOptions`，默认 `<NOCTURNE_HOME>/sessions`；不写入被操作的仓库）；文件随会话数据一起由用户管理，运行时不做自动清理。
@@ -113,6 +113,7 @@ execute(call, ctx):
 | `shell` | 执行非交互式命令 | 执行命令 | 指定工作目录与超时；合并输出流并截断；返回退出码；shell 与进程树终止见下 |
 | `task` | 启动一个子代理会话执行独立任务（Phase 6） | 运行一个受控子 Turn | 输入 `task`/`preset`/`tools`/`outputSchema`/`timeoutMs`；受限工具集、独立上下文、继承或收紧的权限；结果上限与落盘走第 4 节既有路径；完整契约见 [subagent.md](subagent.md) |
 | `todo_write` | 完整替换当前会话任务清单 | 只改变会话派生状态 | 输入最多 20 项的完整 `items`；空数组清空；无文件、配置或网络 I/O。输入与结果契约见 [tool-api.md](../protocols/tool-api.md)，状态来源见 [sessions.md](sessions.md) |
+| `note_write` | 增删当前会话持久笔记（[ADR-0095](../decisions/ADR-0095-session-notes-board-read.md)） | 只改变会话派生状态 | 输入 `{ add?, remove? }` 至少一项非空，先删后加并重排 `1..N`；单条 ≤ 500 字符（允许换行，禁控制字符）、合计 ≤ 8000 字符、不限条数；失败原子；声明 `pinResult` 与足以容纳合法最坏结果的 `maxModelChars`/`maxOutputChars`（各 256,000 字符）。输入与结果契约见 [tool-api.md](../protocols/tool-api.md)，状态来源见 [sessions.md](sessions.md) |
 | `ask_user` | 需要用户拍板时暂停并提问（ADR-0032） | 无 | 输入与结果契约见 [tool-api.md](../protocols/tool-api.md)；等待经临时事件 `question.requested` 与会话命令 `respondQuestion`（[events.md](../protocols/events.md) 第 3、7 节）；声明 `needsUser`，子代理可选池按特性排除 |
 | `render_html` | 将自包含的单文件 HTML 存为会话附件并在对话内沙箱渲染（[ADR-0088](../decisions/ADR-0088-inline-html.md)） | 仅写会话附件，不改工作区 | 输入 `{ title, html, images? }`（单行标题 ≤ 80 字符、UTF-8 HTML ≤ 256 KiB；`images` 为至多 20 个本地图片路径，保存时按精确引用替换为 `data:`，替换后整页 ≤ 8 MiB）；每个 `images` 路径一条 `read` 主体，不带 `images` 时无权限主体（`read-only` 与计划模式下工作区内读取同样直接放行）；声明 `mainSessionOnly`，仅对顶层交互主会话开放，子代理与非交互定时会话按特性排除；显示时注入 12 个主题变量（`--bg`、`--raised`、`--text`、`--secondary`、`--muted`、`--border`、`--accent`、`--ok`、`--warn`、`--bad`、`--sans`、`--mono`）及 `color-scheme`，详见 [ADR-0088](../decisions/ADR-0088-inline-html.md) |
 | `schedule` | 列出、创建、修改、暂停、删除定时任务（ADR-0064） | 写 `schedules.json`，不改工作区文件 | 见下方；声明 `mutatesSchedule`，定时会话与子代理按特性排除 |

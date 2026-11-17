@@ -7,6 +7,7 @@ import type {
   HistoryEntry,
   ImageAttachment,
   LoopGuardConfig,
+  NoteItem,
   TodoItem,
   ToolSpec,
 } from "../protocol/index.js";
@@ -63,6 +64,8 @@ export interface BuildContextInput {
   history: readonly HistoryEntry[];
   /** 当前会话清单，独立于可能被压缩的历史 */
   todos?: readonly TodoItem[] | undefined;
+  /** 当前会话笔记，独立于可能被压缩的历史（ADR-0095） */
+  notes?: readonly NoteItem[] | undefined;
   model: ModelInfo;
   /** 由 agent 从 ToolRegistry 取得后作为数据传入 */
   tools: ToolSpec[];
@@ -124,7 +127,8 @@ export interface ContextHistoryBreakdown {
 
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */
 export interface ContextSection {
-  name: "system" | "tools" | "instructions" | "skills" | "environment" | "todos" | "history";
+  name:
+    "system" | "tools" | "instructions" | "skills" | "environment" | "notes" | "todos" | "history";
   /** 来源说明（版本、文件路径、条目数） */
   source: string;
   chars: number;

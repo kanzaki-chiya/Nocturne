@@ -102,6 +102,8 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 
 `todo_write` 不新增事件类型或 `formatVersion`：成功且已持久化的 `tool.completed` 在 `output.items` 中携带规范化后的完整清单。折叠规则与边界见 [sessions.md](../architecture/sessions.md) 和 [tool-api.md](tool-api.md)；其他状态和无效输出均不改变当前清单。
 
+`note_write` 同样复用 `tool.completed`，不新增事件类型或 `formatVersion`：成功且已持久化的 `tool.completed` 在 `output.notes` 中携带更新后的完整 `{ n, text }[]`。折叠规则与边界见 [sessions.md](../architecture/sessions.md) 和 [tool-api.md](tool-api.md)；其他状态和无效输出均不改变当前笔记。
+
 `message.user.delegate` 是 ADR-0049 第 2 步的兼容可选字段，不提升 `formatVersion`。`agent` 为配置中的规范名称，`task` 保留用户任务原文。Core 只生成指令，不直接启动外部 agent 或授予权限。历史、在线视图和回放保留该字段与原消息内容，恢复时不重新查配置或改写旧委派。
 
 `tool.completed.status`：`ok`、`error`、`denied`、`cancelled`、`interrupted`（仅恢复修复产生）。

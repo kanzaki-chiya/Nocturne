@@ -457,6 +457,7 @@ export async function runTurn(
         skills: deps.skills,
         history: state.history,
         todos: state.todos,
+        notes: state.notes,
         model: deps.model.model,
         tools: deps.tools.specs(deps.model.model.capabilities.editTool),
         instructions: deps.instructions,

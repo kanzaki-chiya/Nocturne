@@ -264,6 +264,7 @@ describe("contextSourceLabel", () => {
     );
     expect(contextSourceLabel("8 items")).toBe("8 项");
     expect(contextSourceLabel("2 entries")).toBe("2 条");
+    expect(contextSourceLabel("3 notes")).toBe("3 条");
     expect(contextSourceLabel("C:\\Users\\me\\proj\\file.ts", "C:/Users/me")).toBe(
       "~\\proj\\file.ts",
     );

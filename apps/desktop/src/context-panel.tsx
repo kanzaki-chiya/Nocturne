@@ -27,6 +27,7 @@ const SECTIONS: Record<Section["name"], { label: string; color: string }> = {
   instructions: { label: "项目说明", color: "var(--a-secondary)" },
   skills: { label: "技能目录", color: "var(--a-accentAlt)" },
   environment: { label: "环境", color: "var(--a-muted)" },
+  notes: { label: "笔记", color: "var(--a-muted)" },
   todos: { label: "任务清单", color: "var(--a-muted)" },
   history: { label: "对话历史", color: "var(--a-accent)" },
 };
@@ -97,7 +98,7 @@ export function contextSourceLabel(source: string, home?: string | null): string
   }
   const items = /^(\d+) items$/.exec(source);
   if (items !== null) return `${items[1]} 项`;
-  const entries = /^(\d+) entries$/.exec(source);
+  const entries = /^(\d+) (?:entries|notes)$/.exec(source);
   if (entries !== null) return `${entries[1]} 条`;
   return abbreviateHome(source, home);
 }

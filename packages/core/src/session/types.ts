@@ -19,6 +19,7 @@ import type {
   SessionSchedule,
   Usage,
   TodoItem,
+  NoteItem,
 } from "../protocol/index.js";
 
 export type { HistoryEntry };
@@ -77,6 +78,8 @@ export interface SessionState {
   plan?: PlanConfig | undefined;
   /** 最后一次有效且持久化的 todo_write 快照 */
   todos: TodoItem[];
+  /** 最后一次有效且持久化的 note_write 快照（ADR-0095） */
+  notes: NoteItem[];
   /** 累计 token 用量（由 message.assistant 与 permission.reviewed 的 usage 累加） */
   usage: Usage;
   lastSeq: number;

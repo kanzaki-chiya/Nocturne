@@ -186,6 +186,65 @@ describe("load / 状态折叠", () => {
     await reopened.close();
     await child.close();
   });
+
+  it("笔记只跟随有效已落盘的完成事件，不随新用户消息归档，恢复与子会话隔离", async () => {
+    const parent = await store.create(INPUT);
+    const view = replaySessionView(parent.durableEvents());
+    const unsub = parent.subscribe((event) => reduceSessionView(view, event));
+    const note = { n: 1, text: "接口 X 实际返回 Y" };
+    const completed = (status: "ok" | "error" | "denied" | "interrupted", output: unknown) => ({
+      callId: "note",
+      name: "note_write",
+      status,
+      modelContent: "updated",
+      output,
+    });
+    await parent.emit("tool.completed", completed("ok", { notes: [note] }));
+    expect(parent.state().notes).toEqual([note]);
+    expect(view.notes).toEqual([note]);
+
+    // 非插话用户消息不归档笔记
+    await parent.emit("message.user", {
+      messageId: "next-turn",
+      content: [{ type: "text", text: "继续下一步" }],
+    });
+    expect(parent.state().notes).toEqual([note]);
+    expect(view.notes).toEqual([note]);
+
+    // 未完成 / 失败 / 拒绝 / 中断 / 结构非法（如超 500 字符或编号不连续）不改变旧笔记
+    await parent.emit("tool.started", {
+      callId: "later",
+      name: "note_write",
+      input: { remove: [1] },
+      subjects: [],
+      permission: { action: "allow", source: "rule" },
+    });
+    await parent.emit("tool.completed", completed("error", { notes: [] }));
+    await parent.emit("tool.completed", completed("denied", { notes: [] }));
+    await parent.emit("tool.completed", completed("interrupted", { notes: [] }));
+    await parent.emit("tool.completed", completed("ok", { notes: [{ n: 2, text: "编号错位" }] }));
+    await parent.emit(
+      "tool.completed",
+      completed("ok", { notes: [{ n: 1, text: "x".repeat(501) }] }),
+    );
+    expect(parent.state().notes).toEqual([note]);
+    expect(view.notes).toEqual([note]);
+    expect(replaySessionView(parent.durableEvents()).notes).toEqual([note]);
+
+    // 子会话隔离
+    const child = await store.create(INPUT);
+    expect(child.state().notes).toEqual([]);
+    await child.emit("tool.completed", completed("ok", { notes: [{ n: 1, text: "子会话笔记" }] }));
+    expect(parent.state().notes).toEqual([note]);
+
+    unsub();
+    await parent.close();
+    const reopened = await store.load(parent.id);
+    expect(reopened.state().notes).toEqual([note]);
+    expect(replaySessionView(reopened.durableEvents()).notes).toEqual([note]);
+    await reopened.close();
+    await child.close();
+  });
   it("load 重建状态：新 runId、seq 继续、历史完整", async () => {
     const s1 = await store.create(INPUT);
     await s1.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" });
@@ -565,12 +624,20 @@ describe("写入失败 → failed", () => {
   it("append 失败：health=failed、failedSignal 中止、后续 emit 拒绝、发出 runtime.error", async () => {
     const s = await store.create(INPUT);
     const oldItems = [{ text: "保留旧清单", status: "pending" as const }];
+    const oldNotes = [{ n: 1, text: "保留旧笔记" }];
     await s.emit("tool.completed", {
       callId: "old",
       name: "todo_write",
       status: "ok",
       modelContent: "updated",
       output: { items: oldItems },
+    });
+    await s.emit("tool.completed", {
+      callId: "old-note",
+      name: "note_write",
+      status: "ok",
+      modelContent: "updated",
+      output: { notes: oldNotes },
     });
     const ephemeral: RuntimeEvent[] = [];
     s.subscribe((e) => {
@@ -592,11 +659,39 @@ describe("写入失败 → failed", () => {
     expect(s.health).toBe("failed");
     expect(s.failedSignal.aborted).toBe(true);
     expect(s.state().todos).toEqual(oldItems);
+    expect(s.state().notes).toEqual(oldNotes);
     await expect(s.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" })).rejects.toMatchObject({
       code: "session_failed",
     });
     const err = ephemeral.find((e) => e.type === "runtime.error");
     expect(err).toBeDefined();
+  });
+
+  it("note_write 合法结果 append 失败时保留旧笔记且状态不变", async () => {
+    const s = await store.create(INPUT);
+    const oldNotes = [{ n: 1, text: "旧笔记事实 A" }];
+    await s.emit("tool.completed", {
+      callId: "old-note",
+      name: "note_write",
+      status: "ok",
+      modelContent: "updated",
+      output: { notes: oldNotes },
+    });
+    // 把日志路径替换成目录，appendFile 必败
+    await fs.rm(s.logPath);
+    await fs.mkdir(s.logPath);
+
+    await expect(
+      s.emit("tool.completed", {
+        callId: "new-note",
+        name: "note_write",
+        status: "ok",
+        modelContent: "updated",
+        output: { notes: [{ n: 1, text: "新笔记事实 B" }] },
+      }),
+    ).rejects.toMatchObject({ code: "session_failed" });
+    expect(s.health).toBe("failed");
+    expect(s.state().notes).toEqual(oldNotes);
   });
 });
 

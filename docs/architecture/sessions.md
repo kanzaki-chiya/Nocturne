@@ -146,6 +146,8 @@ interface SessionRecovery {
 
 当前任务清单由 [ADR-0028](../decisions/ADR-0028-session-task-list.md) 的 `todo_write` 结果派生：只有持久化成功的 `tool.completed` 同时满足 `name: "todo_write"`、`status: "ok"`、`output.items` 有效，才原子替换 `SessionState.todos`。`[]` 清空；拒绝、失败、中断、只有 `tool.started` 或日志写入失败均保留旧清单。清单非空且每项均为 `completed` 时，下一条持久化的 `message.user` 先将 `SessionState.todos` 置空，再处理该消息；尚有未完成项时保留清单，历史工具快照始终保留。恢复时从日志逐事件重放同一归档规则，不读取独立清单文件；旧日志初始清单为空。子会话有独立状态，不向父会话合并。客户端遵循同一规则，见 [view.md](../protocols/view.md)。
 
+会话笔记 `SessionState.notes`（`{ n, text }[]`）由 [ADR-0095](../decisions/ADR-0095-session-notes-board-read.md) 的 `note_write` 结果派生：仅有效事件前缀中持久化且 `name: "note_write"`、`status: "ok"`、`output.notes` 合法（顺序编号 `1..N`、单条 ≤ 500 字符、合计 ≤ 8000 字符）的 `tool.completed` 替换当前笔记；其他状态、结构无效、日志写入失败或只有 `tool.started` 均保留旧笔记。与清单不同，笔记**不归档**（`message.user` 不清空它），在会话内持续有效直至模型显式删除。恢复、回退与分叉按有效事件前缀重建；子会话笔记独立，不继承父会话也不向父会话合并。客户端遵循同一规则，见 [view.md](../protocols/view.md)。
+
 目标模式的状态 `SessionState.goal` 与计划模式的状态 `SessionState.plan` 由 `session.config_changed` 的 `goal`、`plan` 字段折叠（[ADR-0076](../decisions/ADR-0076-work-modes.md) §2）：与预设一样对全部事件推进（折叠本身不看回退），恢复与分叉原样继承；回退到设定目标或进入计划的那条消息时，由 Runtime 另写 `config_changed` 停止目标（`reason: "rewound"`）或放弃计划（ADR-0076 §2）；目标的轮数与时长从持久事件算出（自最近一次变为 active 起的核对说明条数、各 Turn 的 `turn.started` 到 `turn.completed` 墙钟时间），恢复后照常累计。恢复会话不会因目标为 active 自动开 Turn。
 
 ## 会话归档
@@ -164,7 +166,7 @@ interface SessionRecovery {
 
 ## 回退
 
-`RuntimeSession.rewindTargets()` 返回有效用户消息（最新优先）、文字、时间、文件状态、未追踪调用数及按类别拆分的 `untrackedByKind`。`rewind(targetSeq, mode)` 仅在空闲时执行；Turn（包括中断未收束）、压缩、回退进行中拒绝 `session_busy`，非法目标或模式拒绝 `invalid_command`。关闭等待回退落盘。回退追加 `session.rewound`，原日志完整保留。还原扫描原日志所有 `seq > targetSeq` 的 before，每路径取最早一条；每文件独立报告结果，绕过权限层但仅写记录路径，缺失或损坏的快照、当前路径变成链接或目录均报告失败。历史、清单、图片描述按有效事件重建；配置、标题和累计用量保留。详见 ADR-0041 第 2、4 节。
+`RuntimeSession.rewindTargets()` 返回有效用户消息（最新优先）、文字、时间、文件状态、未追踪调用数及按类别拆分的 `untrackedByKind`。`rewind(targetSeq, mode)` 仅在空闲时执行；Turn（包括中断未收束）、压缩、回退进行中拒绝 `session_busy`，非法目标或模式拒绝 `invalid_command`。关闭等待回退落盘。回退追加 `session.rewound`，原日志完整保留。还原扫描原日志所有 `seq > targetSeq` 的 before，每路径取最早一条；每文件独立报告结果，绕过权限层但仅写记录路径，缺失或损坏的快照、当前路径变成链接或目录均报告失败。历史、清单、笔记、图片描述按有效事件重建；配置、标题和累计用量保留。详见 ADR-0041 第 2、4 节。
 
 ## 每轮文件改动
 

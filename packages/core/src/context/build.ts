@@ -10,6 +10,7 @@ import type {
   ImageAttachment,
   ModelProtocol,
   ProcessedImage,
+  ProjectedToolResultRef,
 } from "../protocol/index.js";
 import {
   DEFAULT_PRUNE_LIMIT,
@@ -17,8 +18,10 @@ import {
   parseCompactionPruneLimit,
   parseCompactionThreshold,
   effectiveEvents,
+  formatNoteBlock,
   formatTodoBlock,
   loopGuardNotes,
+  notesToInjectAtCompaction,
   staleTodoNotes,
 } from "../protocol/index.js";
 export { estimateTokens } from "../protocol/index.js";
@@ -63,6 +66,13 @@ const SUMMARY_SYSTEM = `你是 Nocturne 会话的压缩器。把给定的会话�
  */
 const REINJECTED_TASK_MARK =
   "[当前 Turn 开始时的用户请求（原文）]\n它被上面的摘要覆盖后重新附在这里，不是新的请求。其后是摘要之后的真实进展，请接着做，不要从头重做摘要里已完成的工作。";
+
+/**
+ * 由 buildContext 生成的、仅用于在摘要位置补注或重申的独立消息对象身份集合
+ * （笔记补注、清单补注、被摘要覆盖的进行中 Turn 请求）。
+ * buildSummaryRequest 按对象身份排除它们，避免把用户恰好贴出的同文正文误删。
+ */
+const runtimeSummaryExcludedMessages = new WeakSet<ModelMessage>();
 
 function messageTokens(message: ModelMessage, cache?: Map<string, number>): number {
   const tokens = (text: string): number => {
@@ -247,6 +257,11 @@ commands, investigating bugs, and answering questions about the codebase.
   mark items completed as soon as they are done, and skip the list for simple
   requests. The current list is in the todo_write result; after compaction the
   runtime re-attaches it after the summary; it is data, not a message from the user.
+- For long tasks, use note_write to record facts, constraints, decisions, and failed
+  approaches you will still need later (use todo_write for step progress), and
+  remove entries when they become outdated or resolved. The current notes stay in
+  the note_write result and are re-attached after compaction as data, not user
+  instructions.
 - Use task to hand off a self-contained piece of work. It sees only the task text, so
   include everything it needs. Use the explore preset for read-only investigation.
   Subagents can't ask the user for approval, so actions that still need it under the
@@ -773,6 +788,8 @@ interface HistoryProjection {
   deferred: ModelMessage[];
   /** 摘要注入产生的 user 角色消息（至多一条）：token 归类时靠对象身份区分 */
   summaryMessage?: ModelMessage | undefined;
+  /** 未被摘要或 L1 修剪覆盖的工具结果元信息（供 protocol 纯函数判定快照是否仍在投影中） */
+  visibleTools: ProjectedToolResultRef[];
 }
 
 function historyToMessages(
@@ -790,6 +807,7 @@ function historyToMessages(
   const byChars = emptyBreakdown();
   let entries = 0;
   let summaryMessage: ModelMessage | undefined;
+  const visibleTools: ProjectedToolResultRef[] = [];
   // 未提供投影参数（历史调用方）按"不支持看图"处理：附件 → 不支持占位
   const imgOpts: ImageProjectionOpts = {
     ...(images ?? { mode: "estimate", supported: false }),
@@ -936,6 +954,15 @@ function historyToMessages(
         if (atts.imageGroups.length > 0) imgOpts.imageGroups?.set(msg, atts.imageGroups);
         if (atts.virtualGroups.length > 0) imgOpts.virtualGroups?.set(msg, atts.virtualGroups);
         messages.push(msg);
+        if (!pruned) {
+          visibleTools.push({
+            seq: entry.seq,
+            callId: entry.callId,
+            name: entry.name,
+            status: entry.status,
+            modelContent: entry.modelContent,
+          });
+        }
         if (unsettled.delete(entry.callId) && unsettled.size === 0) {
           messages.push(...deferred.splice(0));
         }
@@ -956,7 +983,7 @@ function historyToMessages(
       }
     }
   }
-  return { messages, byChars, entries, unsettled, deferred, summaryMessage };
+  return { messages, byChars, entries, unsettled, deferred, summaryMessage, visibleTools };
 }
 
 /**
@@ -1057,16 +1084,11 @@ export function buildSummaryRequest(input: BuildSummaryRequestInput): ModelReque
       undefined,
       input.events,
     ).messages.length;
-    // 压缩后注入的独立清单消息（单块 user 消息，以清单标记开头）与重新注入的当前请求
-    // （首块为 REINJECTED_TASK_MARK）都不进摘要输入
-    const mainBase = main.messages.filter(
-      (m) =>
-        !(
-          m.role === "user" &&
-          m.content.length === 1 &&
-          m.content[0]?.text.startsWith("当前会话任务清单（由 Runtime 附加") === true
-        ) && !(m.role === "user" && m.content[0]?.text === REINJECTED_TASK_MARK),
-    );
+    // 压缩后注入的独立笔记/清单消息与重新注入的当前请求都不进摘要输入；
+    // 按 buildContext 记录的运行期注入对象身份排除，不按正文前缀判定。
+    const mainBase = main.messages.some((m) => runtimeSummaryExcludedMessages.has(m))
+      ? main.messages.filter((m) => !runtimeSummaryExcludedMessages.has(m))
+      : main.messages;
     const request: ModelRequest = {
       model: main.model,
       ...(main.protocol !== undefined ? { protocol: main.protocol } : {}),
@@ -1267,15 +1289,11 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     estimatedTokens: estimateTokens(envText),
   });
 
-  // ADR-0028 2026-10-11 修订：清单只追加、不回改。`todo_write` 的工具结果
-  // 就是模型看到清单的位置（结果含完整清单，见 protocol/todo.ts formatTodoBlock，
-  // traits pinResult 让 L1 不裁它）；Builder 只在当前清单已不在投影历史里时
-  // 才注入（被 L2 摘要覆盖，或旧日志无 pinResult 被修剪掉），位置固定在摘要
-  // 处，不放在请求末尾。空清单不注入；归档后不再注入。
-  let todoText: string | undefined;
-  if (input.todos !== undefined && input.todos.length > 0) {
-    todoText = formatTodoBlock(input.todos);
-  }
+  // ADR-0028 2026-10-11 修订 / ADR-0095：笔记与清单只追加、不回改。工具结果就是模型
+  // 看到最新状态的位置（结果含完整块，traits pinResult 让 L1 不裁它）；Builder 只在
+  // 需要补注时注入，位置固定在摘要处（notes 排在 todos 之前），不放在请求末尾。空不注入；清单归档后不再注入。
+  const todoText =
+    input.todos !== undefined && input.todos.length > 0 ? formatTodoBlock(input.todos) : undefined;
 
   // 5. 历史（含图片附件投影，ADR-0023：Builder 不做 I/O，
   //    字节由调用方按 sha256 读入 attachmentData；未提供 = 估算模式）
@@ -1298,6 +1316,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     unsettled,
     deferred,
     summaryMessage: injectedSummary,
+    visibleTools,
   } = historyToMessages(
     input.history,
     model.ref.provider,
@@ -1315,13 +1334,14 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   const summaryMessage = injectedSummary;
   // context.md 6.5：进行中 Turn 的 message.user 被摘要覆盖时重新注入，
   // 保证"当前任务"不因压缩丢失（恢复投影中 open Turn 同理）
-  const { summaryThrough: summaryCut } = compactionCutoffs(input.history);
+  const { summaryThrough, pruneThrough } = compactionCutoffs(input.history);
   const openTurn = input.events !== undefined ? lastOpenTurnId(input.events) : undefined;
+  let reinjectedTaskIdx: number | undefined;
   if (openTurn !== undefined) {
     // ADR-0070 §6：被摘要覆盖的插话与原始请求按提交顺序合并到同一条重新注入的
     // user 消息里（插话在后），不单独成为"新请求"
     const coveredUsers = input.history.filter(
-      (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryCut,
+      (e) => e.kind === "user" && e.turnId === openTurn && e.seq <= summaryThrough,
     );
     const original = coveredUsers[0];
     if (original?.kind === "user") {
@@ -1346,11 +1366,9 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       if (atts.virtualGroups.length > 0) imageOpts.virtualGroups?.set(msg, atts.virtualGroups);
       // 紧跟摘要（清单注入随后插在两者之间）、排在保留区之前：它在时间上先于保留区里的
       // 一切进展；放在末尾会让模型把最新一条 user 消息当成新请求而从头重做
-      messages.splice(
-        summaryMessage !== undefined ? messages.indexOf(summaryMessage) + 1 : 0,
-        0,
-        msg,
-      );
+      const insertAt = summaryMessage !== undefined ? messages.indexOf(summaryMessage) + 1 : 0;
+      messages.splice(insertAt, 0, msg);
+      reinjectedTaskIdx = insertAt;
       byChars.user += blockChars(blocks);
     }
   }
@@ -1378,45 +1396,58 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   );
   byChars.user += imageCap.addedByRole.user;
   byChars.tool += imageCap.addedByRole.tool;
-  // ADR-0028 2026-10-11 修订：只追加、不回改。投影历史里已含当前清单文本
-  // （`todo_write` 结果原样保留）时不再注入，保证连续请求的 strict prefix；
-  // 只有清单已不在投影里（被 L2 摘要覆盖，或旧日志无 pinResult 被修剪掉）时，
-  // 才在摘要处固定注入一次（并入摘要消息之后，不放末尾）。按内容判定，不按工具名判断。
-  function messageContainsTodo(message: ModelMessage, text: string): boolean {
+  const reinjectedTaskMessage =
+    reinjectedTaskIdx !== undefined ? messages[reinjectedTaskIdx] : undefined;
+  // ADR-0095：会话笔记按当前压缩边界的有效事件确定快照，并通过投影可见工具结果的
+  // seq/callId 元信息判断该合法成功结果是否仍保留；边界后更新或清空只追加工具结果，
+  // 不撤回已发补注。ADR-0028 任务清单沿用原有判定以保持现有行为。
+  const notesAtCompaction = notesToInjectAtCompaction({
+    events: input.events,
+    summaryThrough,
+    pruneThrough,
+    visibleTools,
+    fallbackNotes: input.notes,
+  });
+  function messageContainsBlock(message: ModelMessage, text: string): boolean {
     if (message.role === "tool") return message.content.includes(text);
     return message.content.some((block) => block.text.includes(text));
   }
-  let todosInjectedMessage: ModelMessage | undefined;
-  if (todoText !== undefined) {
-    const alreadyVisible = messages.some((m) => messageContainsTodo(m, todoText));
-    if (!alreadyVisible) {
-      const injected: ModelMessage = {
-        role: "user",
-        content: [{ type: "text", text: todoText }],
-      };
-      const summaryIdx = summaryMessage !== undefined ? messages.indexOf(summaryMessage) : -1;
-      if (summaryIdx >= 0) messages.splice(summaryIdx + 1, 0, injected);
-      else messages.unshift(injected);
-      todosInjectedMessage = injected;
-      sections.push({
-        name: "todos",
-        source: `${input.todos?.length ?? 0} items`,
-        chars: todoText.length,
-        estimatedTokens: estimateTokens(todoText),
-      });
-    }
+  const summaryIdx = summaryMessage !== undefined ? messages.indexOf(summaryMessage) : -1;
+  let injectAt = summaryIdx >= 0 ? summaryIdx + 1 : 0;
+  const injectedMessages = new Set<ModelMessage>();
+  const pushSummaryAttachment = (name: "notes" | "todos", text: string, source: string): void => {
+    const injected: ModelMessage = { role: "user", content: [{ type: "text", text }] };
+    messages.splice(injectAt, 0, injected);
+    injectAt += 1;
+    injectedMessages.add(injected);
+    sections.push({
+      name,
+      source,
+      chars: text.length,
+      estimatedTokens: estimateTokens(text),
+    });
+  };
+  if (notesAtCompaction !== undefined && notesAtCompaction.length > 0) {
+    pushSummaryAttachment(
+      "notes",
+      formatNoteBlock(notesAtCompaction),
+      `${notesAtCompaction.length} notes`,
+    );
+  }
+  if (todoText !== undefined && !messages.some((m) => messageContainsBlock(m, todoText))) {
+    pushSummaryAttachment("todos", todoText, `${input.todos?.length ?? 0} items`);
   }
   // ADR-0046 §5 历史细分：token 按最终投影逐条归类（与上方字符口径一一对应）——
   // assistant 的文字/推理归 assistant、toolCalls 序列化归 tool；
   // user 角色的摘要注入按对象身份归 summary，其余 user 消息（含 note、
   // 重新注入的当前任务、pending）归 user；图片不计（report.images 单列）。
-  // 清单在工具结果里时计入 tool；只有压缩后注入的独立消息计入 todos section，
-  // 此处从历史细分中跳过它。
+  // 笔记/清单在工具结果里时计入 tool；只有压缩后注入的独立消息计入各自 section，
+  // 此处从历史细分中跳过它们。
   const byTokens = emptyBreakdown();
   // 只用于让无锚点时的 estimated 与计入 providerData 之前保持一致，不参与压缩公式本身。
   let opaqueTokens = 0;
   for (const m of messages) {
-    if (m === todosInjectedMessage) continue;
+    if (injectedMessages.has(m)) continue;
     if (m.role === "assistant") {
       byTokens.assistant += m.content.reduce((total, block) => {
         const extra = opaqueText(block.providerData);
@@ -1474,13 +1505,15 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     // 可缓存前缀：只追加保证每次请求都是下一次的严格前缀，全部消息均可缓存
     cachePrefix: { systemBlocks: system.length, messages: messages.length },
   };
-  // 摘要规划用的基线请求不含压缩后注入的独立清单消息（摘要只覆盖历史，
-  // 注入消息固定在摘要之后，不参与边界切片）。
+  // 摘要规划用的基线请求不含压缩后注入的独立笔记/清单消息以及重新注入的进行中 Turn 请求
+  // （摘要只覆盖历史，运行期注入消息不参与边界切片）；同时登记对象身份供直接传主请求时排除。
+  const summaryExcludedMessages = new Set<ModelMessage>(injectedMessages);
+  if (reinjectedTaskMessage !== undefined) summaryExcludedMessages.add(reinjectedTaskMessage);
+  for (const m of summaryExcludedMessages) runtimeSummaryExcludedMessages.add(m);
   const requestForSummary: ModelRequest =
-    todosInjectedMessage === undefined
+    summaryExcludedMessages.size === 0
       ? request
-      : { ...request, messages: messages.filter((m) => m !== todosInjectedMessage) };
-  const { summaryThrough, pruneThrough } = compactionCutoffs(input.history);
+      : { ...request, messages: messages.filter((m) => !summaryExcludedMessages.has(m)) };
   const threshold = parseCompactionThreshold(input.compactionThreshold ?? "90%");
   const summaryThreshold = Math.min(
     budgetTokens,

@@ -218,13 +218,14 @@ export function createToolExecutor(
       // finish 闭包先于 tool 定义，不能反向收窄，故单独持有
       let attachmentSource: ImageAttachment["source"] = "read";
       let maxModelChars: number | undefined;
+      let maxOutputChars: number | undefined;
 
       /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
       async function finish(
         status: ToolExecution["status"],
         result: ToolResult,
       ): Promise<ToolExecution> {
-        const budget = applyBudget(result, maxModelChars);
+        const budget = applyBudget(result, maxModelChars, maxOutputChars);
         // 超预算时把完整输出落盘到本会话附件目录（tools.md 第 4 节）；
         // 写盘失败降级为普通截断，并在 modelContent 里如实说明
         let spillPath: string | undefined;
@@ -338,6 +339,7 @@ export function createToolExecutor(
       }
       attachmentSource = entryTool.origin === "mcp" ? "mcp" : "read";
       maxModelChars = entryTool.traits.maxModelChars;
+      maxOutputChars = entryTool.traits.maxOutputChars;
 
       // 2. 校验并规范化输入（若带 traits.dispatch 则在顶层输入校验后解析为目标工具与目标输入，ADR-0067 §2）
       if (call.input === undefined || call.input === null) {
@@ -405,6 +407,7 @@ export function createToolExecutor(
         isDispatched = true;
         attachmentSource = tool.origin === "mcp" ? "mcp" : "read";
         maxModelChars = tool.traits.maxModelChars;
+        maxOutputChars = tool.traits.maxOutputChars;
         const targetValidate = validatorFor(tool, scope);
         if (targetValidate !== null && !targetValidate(input)) {
           const detail = schemas.errorsText(targetValidate.errors);
@@ -674,6 +677,7 @@ export function createToolExecutor(
             }
           : {}),
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
+        ...(scope.notes !== undefined ? { notes: scope.notes } : {}),
         pauseTimeouts,
         ...(attachmentStore !== undefined
           ? {

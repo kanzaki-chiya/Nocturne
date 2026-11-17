@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { DurableEvent, HistoryEntry, ImageAttachment } from "../protocol/index.js";
-import { formatTodoBlock } from "../protocol/index.js";
-import type { ModelInfo, ModelMessage } from "../provider/index.js";
+import { formatNoteBlock, formatTodoBlock } from "../protocol/index.js";
+import type { ModelInfo, ModelMessage, ModelRequest } from "../provider/index.js";
 import {
   attachmentsToLoad,
   buildContext,
@@ -1598,7 +1598,7 @@ describe("压缩边界与有效历史（context.md 6.3/6.4）", () => {
 
   it("超过 80% 阈值且存在新边界 → 给出 prune 计划", () => {
     // 预算 8000-256-1024=6720，阈值 5376；构造 ~6000 token 的历史
-    const big = "x".repeat(21_000);
+    const big = "x".repeat(20_000);
     const history: HistoryEntry[] = [assistantEntry(2, ["c3"]), toolEntry(3, big)];
     const events = [
       ev(1, "session.created", {}),
@@ -2645,6 +2645,993 @@ describe("ADR-0028 2026-10-11 只追加（前缀缓存）", () => {
           m.content[0]?.text.startsWith("当前会话任务清单（由 Runtime 附加") === true,
       ).length,
     ).toBe(0);
+  });
+
+  it("note_write 结果 pinResult，L1 修剪后仍在", () => {
+    const notes = [{ n: 1, text: "方案 Z 试过不行" }];
+    const block = formatNoteBlock(notes);
+    const history: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t",
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "ok" }],
+        toolCalls: [{ callId: "c1", name: "note_write", input: { add: ["方案 Z 试过不行"] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 3,
+        turnId: "t",
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${block}`,
+        pinResult: true,
+      },
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: undefined,
+        compactKind: "prune",
+        throughSeq: 3,
+        summary: undefined,
+      },
+    ];
+    const built = buildContext(baseInput({ history, notes }));
+    expect(JSON.stringify(built.request.messages)).toContain("方案 Z 试过不行");
+    expect(JSON.stringify(built.request.messages)).not.toContain("输出已省略] 工具 note_write");
+    expect(built.report.sections.some((s) => s.name === "notes")).toBe(false);
+  });
+
+  it("L2 覆盖 note_write 后在摘要处补注并排在 todos 之前、计预算与 notes section、保持连续请求严格前缀", () => {
+    const notes = [{ n: 1, text: "X 不能动" }];
+    const todos = [{ text: "步骤一", status: "in_progress" as const }];
+    const base: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t",
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "ok" }],
+        toolCalls: [{ callId: "c1", name: "note_write", input: { add: ["X 不能动"] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 3,
+        turnId: "t",
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(notes)}`,
+        pinResult: true,
+      },
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 3,
+        summary: "进展摘要",
+      },
+      todoUser(5, "q2"),
+    ];
+    const plain = buildContext(baseInput({ history: base }));
+    const b1 = buildContext(baseInput({ history: base, notes, todos }));
+    // 消息顺序：summary -> notes -> todos -> q2
+    expect(b1.request.messages).toHaveLength(4);
+    const m0 = b1.request.messages[0];
+    const m1 = b1.request.messages[1];
+    const m2 = b1.request.messages[2];
+    expect(m0?.role === "user" ? m0.content[0]?.text : "").toContain("进展摘要");
+    expect(m1?.role === "user" ? m1.content[0]?.text : "").toContain("X 不能动");
+    expect(m2?.role === "user" ? m2.content[0]?.text : "").toContain("步骤一");
+    expect(b1.report.sections.map((s) => s.name)).toEqual([
+      "system",
+      "tools",
+      "environment",
+      "notes",
+      "todos",
+      "history",
+    ]);
+    const notesSec = b1.report.sections.find((s) => s.name === "notes");
+    expect(notesSec?.estimatedTokens).toBeGreaterThan(0);
+    expect(b1.report.estimatedTokens).toBeGreaterThan(plain.report.estimatedTokens);
+    // 注入的 notes 不重复计入 history section
+    expect(b1.report.sections.find((s) => s.name === "history")).toEqual(
+      plain.report.sections.find((s) => s.name === "history"),
+    );
+
+    // 连续请求保持严格前缀
+    const extended: HistoryEntry[] = [
+      ...base,
+      {
+        kind: "assistant",
+        seq: 6,
+        turnId: "t",
+        messageId: "a6",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "r2" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+      todoUser(7, "q3"),
+    ];
+    const b2 = buildContext(baseInput({ history: extended, notes, todos }));
+    expect(b2.request.messages.slice(0, b1.request.messages.length)).toEqual(b1.request.messages);
+    expect(b1.request.cachePrefix?.messages).toBe(b1.request.messages.length);
+    expect(b2.request.cachePrefix?.messages).toBe(b2.request.messages.length);
+
+    // 空笔记不注入
+    const emptyBuilt = buildContext(baseInput({ history: base, notes: [] }));
+    expect(emptyBuilt.report.sections.some((s) => s.name === "notes")).toBe(false);
+    expect(JSON.stringify(emptyBuilt.request.messages)).not.toContain("当前会话笔记");
+
+    // 摘要请求排除补注的 notes 消息
+    const summaryReq = buildSummaryRequest({
+      history: extended,
+      model,
+      throughSeq: 6,
+      mainRequest: b2.request,
+    });
+    expect(JSON.stringify(summaryReq.messages)).not.toContain("当前会话笔记");
+    expect(JSON.stringify(summaryReq.messages)).not.toContain("当前会话任务清单");
+  });
+
+  it("L2 覆盖后笔记更新或清空仅追加工具结果、不撤回已发补注，保持严格前缀直到下次压缩边界", () => {
+    const notesA = [{ n: 1, text: "边界内约束 A" }];
+    const notesB = [
+      { n: 1, text: "边界内约束 A" },
+      { n: 2, text: "边界后新增 B" },
+    ];
+    const events1: DurableEvent[] = [
+      ev(1, "message.user", {
+        messageId: "u1",
+        content: [{ type: "text", text: "q1" }],
+      }),
+      ev(2, "message.assistant", {
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c1", name: "note_write", input: { add: ["边界内约束 A"] } }],
+        finishReason: "tool_calls",
+      }),
+      ev(3, "tool.started", {
+        callId: "c1",
+        name: "note_write",
+        input: { add: ["边界内约束 A"] },
+        subjects: [],
+        mutates: false,
+        pinResult: true,
+      }),
+      ev(4, "tool.completed", {
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(notesA)}`,
+        output: { notes: notesA },
+      }),
+      ev(5, "context.compacted", { kind: "summary", throughSeq: 4, summary: "进展摘要 1" }),
+      ev(6, "message.user", {
+        messageId: "u6",
+        content: [{ type: "text", text: "q2" }],
+      }),
+    ];
+    const history1: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t",
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c1", name: "note_write", input: { add: ["边界内约束 A"] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 4,
+        turnId: "t",
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(notesA)}`,
+        pinResult: true,
+      },
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 4,
+        summary: "进展摘要 1",
+      },
+      todoUser(6, "q2"),
+    ];
+
+    const r1 = buildContext(baseInput({ history: history1, events: events1, notes: notesA }));
+    expect(r1.report.sections.find((s) => s.name === "notes")?.source).toBe("1 notes");
+
+    // 边界后更新为 B：只追加工具结果，已发的 notes(A) 补注绝不撤回，维持逐消息严格前缀
+    const events2: DurableEvent[] = [
+      ...events1,
+      ev(7, "message.assistant", {
+        messageId: "a7",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c2", name: "note_write", input: { add: ["边界后新增 B"] } }],
+        finishReason: "tool_calls",
+      }),
+      ev(8, "tool.started", {
+        callId: "c2",
+        name: "note_write",
+        input: { add: ["边界后新增 B"] },
+        subjects: [],
+        mutates: false,
+        pinResult: true,
+      }),
+      ev(9, "tool.completed", {
+        callId: "c2",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 2 条。\n\n${formatNoteBlock(notesB)}`,
+        output: { notes: notesB },
+      }),
+    ];
+    const history2: HistoryEntry[] = [
+      ...history1,
+      {
+        kind: "assistant",
+        seq: 7,
+        turnId: "t",
+        messageId: "a7",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c2", name: "note_write", input: { add: ["边界后新增 B"] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 9,
+        turnId: "t",
+        callId: "c2",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 2 条。\n\n${formatNoteBlock(notesB)}`,
+        pinResult: true,
+      },
+    ];
+    const r2 = buildContext(baseInput({ history: history2, events: events2, notes: notesB }));
+    expect(r2.request.messages.slice(0, r1.request.messages.length)).toEqual(r1.request.messages);
+    expect(r2.report.sections.find((s) => s.name === "notes")?.source).toBe("1 notes");
+
+    // 边界后清空全部笔记：依然只追加清空结果，不撤回已发 notes(A) 补注
+    const events3: DurableEvent[] = [
+      ...events2,
+      ev(10, "message.assistant", {
+        messageId: "a10",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c3", name: "note_write", input: { remove: [1, 2] } }],
+        finishReason: "tool_calls",
+      }),
+      ev(11, "tool.started", {
+        callId: "c3",
+        name: "note_write",
+        input: { remove: [1, 2] },
+        subjects: [],
+        mutates: false,
+        pinResult: true,
+      }),
+      ev(12, "tool.completed", {
+        callId: "c3",
+        name: "note_write",
+        status: "ok",
+        modelContent: "会话笔记已更新：当前共 0 条（合计 0/8000 字符）。",
+        output: { notes: [] },
+      }),
+    ];
+    const history3: HistoryEntry[] = [
+      ...history2,
+      {
+        kind: "assistant",
+        seq: 10,
+        turnId: "t",
+        messageId: "a10",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c3", name: "note_write", input: { remove: [1, 2] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 12,
+        turnId: "t",
+        callId: "c3",
+        name: "note_write",
+        status: "ok",
+        modelContent: "会话笔记已更新：当前共 0 条（合计 0/8000 字符）。",
+        pinResult: true,
+      },
+    ];
+    const r3 = buildContext(baseInput({ history: history3, events: events3, notes: [] }));
+    expect(r3.request.messages.slice(0, r2.request.messages.length)).toEqual(r2.request.messages);
+    expect(r3.report.sections.find((s) => s.name === "notes")?.source).toBe("1 notes");
+
+    // 直到新摘要覆盖清空后的边界，才撤去补注
+    const events4: DurableEvent[] = [
+      ...events3,
+      ev(13, "context.compacted", { kind: "summary", throughSeq: 12, summary: "进展摘要 2" }),
+      ev(14, "message.user", {
+        messageId: "u14",
+        content: [{ type: "text", text: "q3" }],
+      }),
+    ];
+    const history4: HistoryEntry[] = [
+      ...history3,
+      {
+        kind: "compaction",
+        seq: 13,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 12,
+        summary: "进展摘要 2",
+      },
+      todoUser(14, "q3"),
+    ];
+    const r4 = buildContext(baseInput({ history: history4, events: events4, notes: [] }));
+    expect(r4.report.sections.some((s) => s.name === "notes")).toBe(false);
+    expect(JSON.stringify(r4.request.messages)).not.toContain("边界内约束 A");
+  });
+
+  it("禁止纯文本匹配抑制补注：摘要复述、用户粘贴、其他工具、失败结果同文均不抑制/撤销补注", () => {
+    const notes = [{ n: 1, text: "不可改契约" }];
+    const block = formatNoteBlock(notes);
+    const events: DurableEvent[] = [
+      ev(1, "message.user", { messageId: "u1", content: [{ type: "text", text: "q1" }] }),
+      ev(2, "message.assistant", {
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c1", name: "note_write", input: { add: ["不可改契约"] } }],
+        finishReason: "tool_calls",
+      }),
+      ev(3, "tool.started", {
+        callId: "c1",
+        name: "note_write",
+        input: { add: ["不可改契约"] },
+        subjects: [],
+        mutates: false,
+        pinResult: true,
+      }),
+      ev(4, "tool.completed", {
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${block}`,
+        output: { notes },
+      }),
+      // 1) 摘要正文直接复述完整块文本
+      ev(5, "context.compacted", {
+        kind: "summary",
+        throughSeq: 4,
+        summary: `摘要复述：\n${block}`,
+      }),
+      // 2) 用户粘贴完整块文本
+      ev(6, "message.user", {
+        messageId: "u6",
+        content: [{ type: "text", text: `用户粘贴：\n${block}` }],
+      }),
+      // 3) 其他工具与 4) 失败的 note_write 返回完整块文本
+      ev(7, "message.assistant", {
+        messageId: "a7",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [
+          { callId: "c-other", name: "read", input: { path: "notes.txt" } },
+          { callId: "c-fail", name: "note_write", input: { remove: [99] } },
+        ],
+        finishReason: "tool_calls",
+      }),
+      ev(8, "tool.completed", {
+        callId: "c-other",
+        name: "read",
+        status: "ok",
+        modelContent: block,
+        output: { notes },
+      }),
+      ev(9, "tool.completed", {
+        callId: "c-fail",
+        name: "note_write",
+        status: "error",
+        modelContent: `失败仍回显：\n${block}`,
+        error: { code: "invalid_input", message: "bad" },
+      }),
+    ];
+    const history: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t",
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c1", name: "note_write", input: { add: ["不可改契约"] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 4,
+        turnId: "t",
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${block}`,
+        pinResult: true,
+      },
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 4,
+        summary: `摘要复述：\n${block}`,
+      },
+      todoUser(6, `用户粘贴：\n${block}`),
+      {
+        kind: "assistant",
+        seq: 7,
+        turnId: "t",
+        messageId: "a7",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [
+          { callId: "c-other", name: "read", input: { path: "notes.txt" } },
+          { callId: "c-fail", name: "note_write", input: { remove: [99] } },
+        ],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 8,
+        turnId: "t",
+        callId: "c-other",
+        name: "read",
+        status: "ok",
+        modelContent: block,
+      },
+      {
+        kind: "tool",
+        seq: 9,
+        turnId: "t",
+        callId: "c-fail",
+        name: "note_write",
+        status: "error",
+        modelContent: `失败仍回显：\n${block}`,
+      },
+    ];
+
+    const withEvents = buildContext(baseInput({ history, events, notes }));
+    expect(withEvents.report.sections.some((s) => s.name === "notes")).toBe(true);
+    const injectedMsg = withEvents.request.messages[1];
+    expect(injectedMsg?.role).toBe("user");
+    expect(injectedMsg?.role === "user" ? injectedMsg.content[0]?.text : "").toBe(block);
+
+    // 事件缺省兼容路径同样不以纯文本匹配抑制补注
+    const withoutEvents = buildContext(baseInput({ history, notes }));
+    expect(withoutEvents.report.sections.some((s) => s.name === "notes")).toBe(true);
+    expect(
+      withoutEvents.request.messages[1]?.role === "user"
+        ? withoutEvents.request.messages[1].content[0]?.text
+        : "",
+    ).toBe(block);
+  });
+
+  it("旧日志无 pinResult 时 L1 修剪后在头部补注（排在 todos 之前）且边界后更新保持严格前缀", () => {
+    const notes = [{ n: 1, text: "旧日志约束" }];
+    const todos = [{ text: "旧日志任务", status: "in_progress" as const }];
+    const events: DurableEvent[] = [
+      ev(1, "message.user", { messageId: "u1", content: [{ type: "text", text: "q1" }] }),
+      ev(2, "message.assistant", {
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [
+          { callId: "c1", name: "note_write", input: { add: ["旧日志约束"] } },
+          { callId: "ct", name: "todo_write", input: { items: todos } },
+        ],
+        finishReason: "tool_calls",
+      }),
+      // 旧日志：tool.started 不带 pinResult
+      ev(3, "tool.started", {
+        callId: "c1",
+        name: "note_write",
+        input: { add: ["旧日志约束"] },
+        subjects: [],
+        mutates: false,
+      }),
+      ev(4, "tool.completed", {
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(notes)}`,
+        output: { notes },
+      }),
+      ev(5, "tool.started", {
+        callId: "ct",
+        name: "todo_write",
+        input: { items: todos },
+        subjects: [],
+        mutates: false,
+      }),
+      ev(6, "tool.completed", {
+        callId: "ct",
+        name: "todo_write",
+        status: "ok",
+        modelContent: `任务清单已更新。\n\n${formatTodoBlock(todos)}`,
+        output: { items: todos },
+      }),
+      ev(7, "context.compacted", { kind: "prune", throughSeq: 6 }),
+      ev(8, "message.user", { messageId: "u8", content: [{ type: "text", text: "q2" }] }),
+    ];
+    const history: HistoryEntry[] = [
+      todoUser(1, "q1"),
+      {
+        kind: "assistant",
+        seq: 2,
+        turnId: "t",
+        messageId: "a2",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [
+          { callId: "c1", name: "note_write", input: { add: ["旧日志约束"] } },
+          { callId: "ct", name: "todo_write", input: { items: todos } },
+        ],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 4,
+        turnId: "t",
+        callId: "c1",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(notes)}`,
+      },
+      {
+        kind: "tool",
+        seq: 6,
+        turnId: "t",
+        callId: "ct",
+        name: "todo_write",
+        status: "ok",
+        modelContent: `任务清单已更新。\n\n${formatTodoBlock(todos)}`,
+      },
+      {
+        kind: "compaction",
+        seq: 7,
+        turnId: undefined,
+        compactKind: "prune",
+        throughSeq: 6,
+        summary: undefined,
+      },
+      todoUser(8, "q2"),
+    ];
+
+    const b1 = buildContext(baseInput({ history, events, notes, todos }));
+    expect(b1.report.sections.map((s) => s.name)).toEqual([
+      "system",
+      "tools",
+      "environment",
+      "notes",
+      "todos",
+      "history",
+    ]);
+    // 头部补注顺序：notes -> todos -> q1 -> ...
+    const m0 = b1.request.messages[0];
+    const m1 = b1.request.messages[1];
+    expect(m0?.role === "user" ? m0.content[0]?.text : "").toContain("旧日志约束");
+    expect(m1?.role === "user" ? m1.content[0]?.text : "").toContain("旧日志任务");
+    expect(JSON.stringify(b1.request.messages)).toContain("输出已省略] 工具 note_write");
+
+    // 边界后新增笔记，头部补注依然固定保留，维持严格前缀
+    const nextNotes = [...notes, { n: 2, text: "后续新增" }];
+    const events2: DurableEvent[] = [
+      ...events,
+      ev(9, "message.assistant", {
+        messageId: "a9",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c2", name: "note_write", input: { add: ["后续新增"] } }],
+        finishReason: "tool_calls",
+      }),
+      ev(10, "tool.completed", {
+        callId: "c2",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 2 条。\n\n${formatNoteBlock(nextNotes)}`,
+        output: { notes: nextNotes },
+      }),
+    ];
+    const history2: HistoryEntry[] = [
+      ...history,
+      {
+        kind: "assistant",
+        seq: 9,
+        turnId: "t",
+        messageId: "a9",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "c2", name: "note_write", input: { add: ["后续新增"] } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 10,
+        turnId: "t",
+        callId: "c2",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 2 条。\n\n${formatNoteBlock(nextNotes)}`,
+        pinResult: true,
+      },
+    ];
+    const b2 = buildContext(
+      baseInput({ history: history2, events: events2, notes: nextNotes, todos }),
+    );
+    expect(b2.request.messages.slice(0, b1.request.messages.length)).toEqual(b1.request.messages);
+  });
+
+  it("buildSummaryRequest 回归：按对象身份排除 Runtime 补注，保留同文/块后附要求的真实用户消息且严格截止配对闭合", () => {
+    const runtimeNotes = [{ n: 1, text: "Runtime补注专属事实" }];
+    const runtimeTodos = [{ text: "Runtime补注专属待办", status: "in_progress" as const }];
+    const pastedNotes = [{ n: 1, text: "用户原文贴出的笔记块" }];
+    const pastedTodos = [{ text: "用户原文贴出的清单块", status: "pending" as const }];
+    const exactUserNoteBlock = formatNoteBlock(pastedNotes);
+    const userNoteWithInstruction = `${formatNoteBlock(pastedNotes)}\n请逐条核对以上笔记块，不要漏掉这一行要求`;
+    const exactUserTodoBlock = formatTodoBlock(pastedTodos);
+
+    const evT = (
+      seq: number,
+      type: DurableEvent["type"],
+      payload: Record<string, unknown>,
+      turnId: string,
+    ): DurableEvent => ({ ...ev(seq, type, payload), turnId }) as DurableEvent;
+
+    const events: DurableEvent[] = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t-open"),
+      evT(
+        2,
+        "message.user",
+        {
+          messageId: "u-open",
+          content: [{ type: "text", text: "进行中原始任务" }],
+        },
+        "t-open",
+      ),
+      evT(
+        3,
+        "message.assistant",
+        {
+          messageId: "a-init",
+          model: { provider: "test", model: "m1" },
+          content: [],
+          toolCalls: [
+            { callId: "cn-init", name: "note_write", input: { add: ["Runtime补注专属事实"] } },
+            { callId: "ct-init", name: "todo_write", input: { items: runtimeTodos } },
+          ],
+          finishReason: "tool_calls",
+        },
+        "t-open",
+      ),
+      evT(
+        4,
+        "tool.started",
+        {
+          callId: "cn-init",
+          name: "note_write",
+          input: { add: ["Runtime补注专属事实"] },
+          subjects: [],
+          mutates: false,
+          pinResult: true,
+        },
+        "t-open",
+      ),
+      evT(
+        5,
+        "tool.completed",
+        {
+          callId: "cn-init",
+          name: "note_write",
+          status: "ok",
+          modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(runtimeNotes)}`,
+          output: { notes: runtimeNotes },
+        },
+        "t-open",
+      ),
+      evT(
+        6,
+        "tool.started",
+        {
+          callId: "ct-init",
+          name: "todo_write",
+          input: { items: runtimeTodos },
+          subjects: [],
+          mutates: false,
+        },
+        "t-open",
+      ),
+      evT(
+        7,
+        "tool.completed",
+        {
+          callId: "ct-init",
+          name: "todo_write",
+          status: "ok",
+          modelContent: `任务清单已更新。\n\n${formatTodoBlock(runtimeTodos)}`,
+          output: { items: runtimeTodos },
+        },
+        "t-open",
+      ),
+      ev(8, "context.compacted", { kind: "summary", throughSeq: 7, summary: "更早摘要" }),
+      // 边界内：真实用户消息分别恰为完整笔记块、块后附要求、完整清单块
+      evT(
+        9,
+        "message.user",
+        {
+          messageId: "u9",
+          content: [{ type: "text", text: exactUserNoteBlock }],
+        },
+        "t-open",
+      ),
+      evT(
+        10,
+        "message.user",
+        {
+          messageId: "u10",
+          content: [{ type: "text", text: userNoteWithInstruction }],
+        },
+        "t-open",
+      ),
+      evT(
+        11,
+        "message.user",
+        {
+          messageId: "u11",
+          content: [{ type: "text", text: exactUserTodoBlock }],
+        },
+        "t-open",
+      ),
+      evT(
+        12,
+        "message.assistant",
+        {
+          messageId: "a12",
+          model: { provider: "test", model: "m1" },
+          content: [{ type: "text", text: `已收到全部用户块\n${"a".repeat(16_000)}` }],
+          toolCalls: [{ callId: "c12", name: "read", input: { path: "ok.ts" } }],
+          finishReason: "tool_calls",
+        },
+        "t-open",
+      ),
+      evT(
+        13,
+        "tool.completed",
+        {
+          callId: "c12",
+          name: "read",
+          status: "ok",
+          modelContent: "ok.ts content",
+        },
+        "t-open",
+      ),
+      // 边界 seq=13 之后紧接一个带 toolCalls 的步骤（若前面误删用户消息，切片会越界拉进该 assistant 而缺 tool 结果）
+      evT(
+        14,
+        "message.assistant",
+        {
+          messageId: "a14",
+          model: { provider: "test", model: "m1" },
+          content: [],
+          toolCalls: [{ callId: "after-boundary-call", name: "read", input: { path: "z.ts" } }],
+          finishReason: "tool_calls",
+        },
+        "t-open",
+      ),
+      evT(
+        15,
+        "tool.completed",
+        {
+          callId: "after-boundary-call",
+          name: "read",
+          status: "ok",
+          modelContent: "z.ts content",
+        },
+        "t-open",
+      ),
+    ];
+
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t-open",
+        messageId: "u-open",
+        content: [{ type: "text", text: "进行中原始任务" }],
+      },
+      {
+        kind: "assistant",
+        seq: 3,
+        turnId: "t-open",
+        messageId: "a-init",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [
+          { callId: "cn-init", name: "note_write", input: { add: ["Runtime补注专属事实"] } },
+          { callId: "ct-init", name: "todo_write", input: { items: runtimeTodos } },
+        ],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 5,
+        turnId: "t-open",
+        callId: "cn-init",
+        name: "note_write",
+        status: "ok",
+        modelContent: `会话笔记已更新：当前共 1 条。\n\n${formatNoteBlock(runtimeNotes)}`,
+        pinResult: true,
+      },
+      {
+        kind: "tool",
+        seq: 7,
+        turnId: "t-open",
+        callId: "ct-init",
+        name: "todo_write",
+        status: "ok",
+        modelContent: `任务清单已更新。\n\n${formatTodoBlock(runtimeTodos)}`,
+      },
+      {
+        kind: "compaction",
+        seq: 8,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 7,
+        summary: "更早摘要",
+      },
+      todoUser(9, exactUserNoteBlock),
+      todoUser(10, userNoteWithInstruction),
+      todoUser(11, exactUserTodoBlock),
+      {
+        kind: "assistant",
+        seq: 12,
+        turnId: "t-open",
+        messageId: "a12",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: `已收到全部用户块\n${"a".repeat(16_000)}` }],
+        toolCalls: [{ callId: "c12", name: "read", input: { path: "ok.ts" } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 13,
+        turnId: "t-open",
+        callId: "c12",
+        name: "read",
+        status: "ok",
+        modelContent: "ok.ts content",
+      },
+      {
+        kind: "assistant",
+        seq: 14,
+        turnId: "t-open",
+        messageId: "a14",
+        model: { provider: "test", model: "m1" },
+        content: [],
+        toolCalls: [{ callId: "after-boundary-call", name: "read", input: { path: "z.ts" } }],
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      {
+        kind: "tool",
+        seq: 15,
+        turnId: "t-open",
+        callId: "after-boundary-call",
+        name: "read",
+        status: "ok",
+        modelContent: "z.ts content",
+      },
+    ];
+
+    const boundedModel: ModelInfo = {
+      ...model,
+      contextWindow: 16_000,
+      maxOutputTokens: 1_000,
+    };
+    const built = buildContext(
+      baseInput({
+        history,
+        events,
+        model: boundedModel,
+        notes: runtimeNotes,
+        todos: runtimeTodos,
+        compactionState: { force: true, summaryOnly: true },
+      }),
+    );
+
+    // 主请求中应同时存在 Runtime 补注（notes + todos + 重注入任务）与三条真实用户块
+    const mainTexts = built.request.messages.map((m) =>
+      m.role === "user" ? m.content.map((b) => b.text).join("\n") : "",
+    );
+    expect(mainTexts.some((t) => t.includes("Runtime补注专属事实"))).toBe(true);
+    expect(mainTexts.some((t) => t.includes("Runtime补注专属待办"))).toBe(true);
+    expect(mainTexts.some((t) => t.includes("不是新的请求"))).toBe(true);
+
+    const assertSummaryReq = (req: ModelRequest) => {
+      const slice = req.messages.slice(0, -1);
+      const serializedSlice = JSON.stringify(slice);
+      // 1) 真实用户原文完整保留
+      expect(
+        slice.some((m) => m.role === "user" && m.content[0]?.text === exactUserNoteBlock),
+      ).toBe(true);
+      expect(
+        slice.some((m) => m.role === "user" && m.content[0]?.text === userNoteWithInstruction),
+      ).toBe(true);
+      expect(
+        slice.some((m) => m.role === "user" && m.content[0]?.text === exactUserTodoBlock),
+      ).toBe(true);
+      // 2) 真正的 Runtime 补注与重注入请求均被排除
+      expect(serializedSlice).not.toContain("Runtime补注专属事实");
+      expect(serializedSlice).not.toContain("Runtime补注专属待办");
+      expect(serializedSlice).not.toContain("不是新的请求");
+      // 3) 严格截止于 throughSeq=7，绝不越界拉进 seq=8 的 assistant toolCalls
+      expect(serializedSlice).not.toContain("after-boundary-call");
+      for (const m of slice) {
+        if (m.role === "assistant") {
+          for (const call of m.toolCalls) {
+            expect(slice.some((t) => t.role === "tool" && t.callId === call.callId)).toBe(true);
+          }
+        }
+      }
+      expect(req.cachePrefix?.messages).toBe(slice.length);
+    };
+
+    // 路径 A：buildContext 内部规划产出的 summaryRequest
+    if (built.compaction?.kind !== "summary" || built.compaction.summaryRequest === undefined) {
+      throw new Error("Expected summary compaction plan");
+    }
+    expect(built.compaction.throughSeq).toBe(13);
+    assertSummaryReq(built.compaction.summaryRequest);
+
+    // 路径 B：直接传 built.request 调用 buildSummaryRequest
+    const directReq = buildSummaryRequest({
+      history,
+      model: boundedModel,
+      throughSeq: 13,
+      mainRequest: built.request,
+      events,
+    });
+    assertSummaryReq(directReq);
   });
 });
 

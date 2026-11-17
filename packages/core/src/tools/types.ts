@@ -41,6 +41,7 @@ import type {
   JsonSchema,
   McpServerEntry,
   McpServerPayload,
+  NoteItem,
   PermissionAction,
   PermissionSubject,
   QuestionAnswer,
@@ -94,6 +95,8 @@ export interface ToolTraits {
   maxTimeoutMs?: number | undefined;
   /** 模型可见输出字符上限，默认 30000 */
   maxModelChars?: number | undefined;
+  /** 结构化 output 序列化后的字符上限，默认 100000 */
+  maxOutputChars?: number | undefined;
   /** 结果保留在 L1 修剪后的上下文中；L2 摘要仍可压缩。 */
   pinResult?: boolean | undefined;
   /**
@@ -224,6 +227,8 @@ export interface ToolContext extends ToolScope {
    * schedule_unavailable 结算。
    */
   schedule?: ScheduleAccess;
+  /** 读取当前会话持久化笔记（ADR-0095）；子会话独立 */
+  notes?: (() => readonly NoteItem[]) | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
   /**
@@ -474,6 +479,8 @@ export interface ExecutionScope extends ToolScope {
   askUser?: QuestionBroker | undefined;
   /** 定时任务读写（ADR-0064）：缺省时声明 mutatesSchedule 的工具按 schedule_unavailable 结算 */
   schedule?: ScheduleAccess | undefined;
+  /** 读取当前会话持久化笔记（ADR-0095） */
+  notes?: (() => readonly NoteItem[]) | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
   /**
@@ -523,6 +530,8 @@ export interface ExecutionEnvironment {
   askUser?: QuestionBroker | undefined;
   /** 定时任务读写（ADR-0064）；缺省时 schedule 工具按 schedule_unavailable 结算 */
   schedule?: ScheduleAccess | undefined;
+  /** 读取当前会话持久化笔记（ADR-0095） */
+  notes?: (() => readonly NoteItem[]) | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
 }

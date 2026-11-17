@@ -34,6 +34,7 @@ import type {
 } from "./events.js";
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
 import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
+import { noteItemsFromCompletion, type NoteItem } from "./note.js";
 import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
 export { firstUserText } from "./rewind.js";
 import type {
@@ -69,6 +70,8 @@ export interface SessionView {
   userTitle: string | undefined;
   /** 当前任务清单；全部完成后由下一条持久化 message.user 归档 */
   todos: TodoItem[];
+  /** 当前会话笔记（ADR-0095）；不归档，由模型自行删除 */
+  notes: NoteItem[];
   /** 每次归约 +1；不参与重放等价 */
   revision: number;
   meta:
@@ -402,6 +405,7 @@ export function createSessionView(): SessionView {
     generatedTitle: undefined,
     userTitle: undefined,
     todos: [],
+    notes: [],
     backgroundShells: [],
     revision: 0,
     meta: undefined,
@@ -527,6 +531,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         // 标题是会话元数据，不随对话回退；保留当前两个显式来源。
         view.title = visibleTitle(view);
         view.todos = rebuilt.todos;
+        view.notes = rebuilt.notes;
         view.lastTurn = rebuilt.lastTurn;
         view.currentTurn = undefined;
         view.pendingPermission = undefined;
@@ -756,6 +761,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
     case "tool.completed": {
       const p = event.payload;
       view.todos = todoItemsFromCompletion(p) ?? view.todos;
+      view.notes = noteItemsFromCompletion(p) ?? view.notes;
       // 未执行即终态：丢弃 preparing 残片（inputText 不属于可重放视图）
       view.live.tools = view.live.tools.filter((t) => t.callId !== p.callId);
       const entry = promoteTool(view, b, p.callId, turnId ?? "", event.seq);

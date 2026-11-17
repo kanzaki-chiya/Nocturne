@@ -898,6 +898,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
           ...(deps.shellEnvStrip !== undefined ? { shellEnvStrip: deps.shellEnvStrip } : {}),
           ...(deps.shell !== undefined ? { shell: deps.shell } : {}),
+          notes: () => child?.state().notes ?? [],
         };
         const executor = createToolExecutor(registry);
 

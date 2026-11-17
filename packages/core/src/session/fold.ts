@@ -5,12 +5,14 @@
 import { shellSwitchNote } from "../platform/index.js";
 import {
   todoItemsFromCompletion,
+  noteItemsFromCompletion,
   effectiveEvents,
   reduceGoal,
   reducePlan,
   rewindNote,
   type DurableEvent,
   type GoalState,
+  type NoteItem,
   type PlanConfig,
   type TodoItem,
   type Usage,
@@ -59,6 +61,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const history: HistoryEntry[] = [];
   const stoppedTasks: { taskId: string; callId: string }[] = [];
   let todos: TodoItem[] = [];
+  let notes: NoteItem[] = [];
   const mcpAvailability: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
   const usage = { ...ZERO_USAGE };
   let openTurn: SessionState["openTurn"];
@@ -268,6 +271,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
       case "tool.completed": {
         const p = event.payload;
         todos = todoItemsFromCompletion(p) ?? todos;
+        notes = noteItemsFromCompletion(p) ?? notes;
         history.push({
           kind: "tool",
           seq: event.seq,
@@ -345,6 +349,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     ...(goal !== undefined ? { goal } : {}),
     ...(plan !== undefined ? { plan } : {}),
     todos,
+    notes,
     usage,
     lastSeq,
     openTurn,

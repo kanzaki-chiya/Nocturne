@@ -62,7 +62,10 @@ export function truncationNote(
 }
 
 /** 返回写入事件的 output：超出独立上限则丢弃并说明 */
-export function capOutput(output: unknown): { output: unknown; dropped: boolean } {
+export function capOutput(
+  output: unknown,
+  maxOutputChars: number = MAX_OUTPUT_CHARS,
+): { output: unknown; dropped: boolean } {
   if (output === undefined) return { output: undefined, dropped: false };
   let serialized: string;
   try {
@@ -70,7 +73,7 @@ export function capOutput(output: unknown): { output: unknown; dropped: boolean 
   } catch {
     return { output: undefined, dropped: true };
   }
-  if (serialized.length <= MAX_OUTPUT_CHARS) {
+  if (serialized.length <= maxOutputChars) {
     return { output, dropped: false };
   }
   return { output: undefined, dropped: true };
@@ -79,6 +82,7 @@ export function capOutput(output: unknown): { output: unknown; dropped: boolean 
 export function applyBudget(
   result: ToolResult,
   maxModelChars: number = DEFAULT_MAX_MODEL_CHARS,
+  maxOutputChars: number = MAX_OUTPUT_CHARS,
 ): {
   result: ToolResult;
   truncated: boolean;
@@ -87,7 +91,7 @@ export function applyBudget(
   maxChars: number;
 } {
   const { text, truncated, span } = truncateModelContent(result.modelContent, maxModelChars);
-  const { output, dropped } = capOutput(result.output);
+  const { output, dropped } = capOutput(result.output, maxOutputChars);
   let modelContent = text;
   if (dropped) {
     modelContent += "\n[结构化 output 超过大小上限，已省略]";

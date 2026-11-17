@@ -712,6 +712,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     expect(duringCoordTools).toContain("read");
     expect(duringCoordTools).toContain("shell");
     expect(duringCoordTools).toContain("apply_subagent_changes");
+    expect(duringCoordTools).toContain("note_write");
     expect(duringCoordTools).toContain("ensemble_add_member");
 
     // 成员的工具列表：只有通用工具 + ensemble_post，没有 ensemble_add_member / task / finish

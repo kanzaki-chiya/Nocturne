@@ -49,6 +49,7 @@ export { editTool } from "./builtin/edit.js";
 export { applyPatchTool, parsePatch } from "./builtin/apply-patch.js";
 export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
+export { noteWriteTool } from "./builtin/note-write.js";
 export {
   renderHtmlTool,
   MAX_INLINE_HTML_BYTES,
@@ -94,6 +95,7 @@ import { editTool } from "./builtin/edit.js";
 import { applyPatchTool } from "./builtin/apply-patch.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
+import { noteWriteTool } from "./builtin/note-write.js";
 import { renderHtmlTool } from "./builtin/render-html.js";
 import { askUserTool } from "./builtin/ask-user.js";
 import { scheduleTool } from "./builtin/schedule.js";
@@ -112,6 +114,7 @@ export function builtinTools(): ToolDefinition[] {
     applyPatchTool,
     shellTool,
     todoWriteTool,
+    noteWriteTool,
     renderHtmlTool,
     askUserTool,
     scheduleTool,

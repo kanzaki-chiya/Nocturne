@@ -2438,6 +2438,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       askUser: questions,
       // ADR-0064：schedule 工具经此读写任务（校验在 Runtime 一侧）
       schedule: scheduleAccess,
+      // ADR-0095：读取当前会话持久化笔记
+      notes: () => session.state().notes,
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -4938,6 +4940,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             skills: catalog,
             history,
             todos: session.state().todos,
+            notes: session.state().notes,
             model: model.model,
             tools: tools.specs(model.model.capabilities.editTool),
             instructions,
@@ -5034,6 +5037,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           loopGuard: turnConfig.loopGuard,
           history: state.history,
           todos: state.todos,
+          notes: state.notes,
           model: model.model,
           tools: specs,
           instructions,
