@@ -18,6 +18,7 @@ const PRESETS: ProviderPreset[] = [
   {
     id: "other-oai",
     label: "其他 OpenAI 兼容服务",
+    group: "custom",
     type: "openai-compatible",
     defaultName: "",
     fetchableModels: true,

@@ -32,9 +32,10 @@ const jsonRes = (data: unknown, status = 200) =>
 // ── 预设 ────────────────────────────────────────────────
 
 describe("服务商预设", () => {
-  it("API key 与 Grok 外部登录预设", () => {
+  it("既有预设仍存在且新预设按分组排列", () => {
     const presets = listProviderPresets();
-    expect(presets.map((p) => p.id)).toEqual([
+    const ids = presets.map((p) => p.id);
+    for (const existing of [
       "chatgpt",
       "grok",
       "grok-cli",
@@ -45,16 +46,22 @@ describe("服务商预设", () => {
       "opencode-go",
       "custom-openai",
       "custom-anthropic",
-    ]);
+    ]) {
+      expect(ids).toContain(existing);
+    }
     expect(presets.find((p) => p.id === "anthropic")?.baseURL).toBeUndefined();
     // ADR-0026 §3：「其他 Anthropic 兼容」可拉取 /models（失败照旧转手动）
     expect(presets.find((p) => p.id === "custom-anthropic")?.fetchableModels).toBe(true);
+    expect(presets.find((p) => p.id === "opencode-go")?.baseURL).toBe(
+      "https://opencode.ai/inference/go/openai/v1",
+    );
   });
 
   it("ChatGPT 预设声明账号登录、模型目录与官方端点", () => {
     expect(listProviderPresets().find((preset) => preset.id === "chatgpt")).toEqual({
       id: "chatgpt",
       label: "ChatGPT",
+      group: "vendor",
       defaultName: "chatgpt",
       type: "openai-compatible",
       baseURL: "https://api.openai.com/v1",
@@ -64,6 +71,57 @@ describe("服务商预设", () => {
       modelsDevPricing: "openai",
       fetchableModels: true,
     });
+  });
+
+  it("所有预设 id 与 defaultName 唯一、均有 group、非 local 均为 https、新预设不设 modelsDevProvider", () => {
+    const presets = listProviderPresets();
+    const ids = new Set<string>();
+    const defaultNames = new Set<string>();
+    const existingWithModelsDevProvider = new Set(["chatgpt", "opencode-zen", "opencode-go"]);
+    for (const p of presets) {
+      expect(ids.has(p.id)).toBe(false);
+      ids.add(p.id);
+      if (p.defaultName !== "") {
+        expect(defaultNames.has(p.defaultName)).toBe(false);
+        defaultNames.add(p.defaultName);
+      }
+      expect(["vendor", "relay", "local", "custom"]).toContain(p.group);
+      if (p.baseURL !== undefined) {
+        if (p.group === "local") {
+          expect(p.baseURL.startsWith("http://")).toBe(true);
+        } else {
+          expect(p.baseURL.startsWith("https://")).toBe(true);
+        }
+      }
+      if (!existingWithModelsDevProvider.has(p.id)) {
+        expect(p.modelsDevProvider).toBeUndefined();
+      }
+    }
+  });
+
+  it("有 Region 的厂商按地域/套餐拆成独立预设与地址", () => {
+    const presets = listProviderPresets();
+    const zhipu = presets.filter((p) => p.id.startsWith("zhipu-"));
+    expect(zhipu.map((p) => [p.id, p.baseURL])).toEqual([
+      ["zhipu-api", "https://open.bigmodel.cn/api/paas/v4"],
+      ["zhipu-coding", "https://open.bigmodel.cn/api/coding/paas/v4"],
+    ]);
+
+    const xiaomi = presets.filter((p) => p.id.startsWith("xiaomi-"));
+    expect(xiaomi.map((p) => [p.id, p.baseURL])).toEqual([
+      ["xiaomi-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1"],
+      ["xiaomi-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1"],
+      ["xiaomi-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1"],
+      ["xiaomi-api", "https://api.xiaomimimo.com/v1"],
+    ]);
+
+    const tencent = presets.filter((p) => p.id.startsWith("tencent-cloud-"));
+    expect(tencent.map((p) => [p.id, p.baseURL])).toEqual([
+      ["tencent-cloud-plan", "https://tokenhub.tencentmaas.com/plan/v3"],
+      ["tencent-cloud-cn", "https://tokenhub.tencentmaas.com/v1"],
+      ["tencent-cloud-intl", "https://tokenhub-intl.tencentmaas.com/v1"],
+      ["tencent-cloud-enterprise-intl", "https://tokenhub-intl.tencentmaas.com/plan/v3"],
+    ]);
   });
 });
 

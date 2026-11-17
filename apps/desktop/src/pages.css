@@ -1333,6 +1333,35 @@
 }
 
 /* 添加服务商选择页 */
+.addsearch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--ctl-h-lg);
+  padding: 0 var(--space-3);
+  color: var(--a-muted);
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+}
+.addsearch:focus-within {
+  border-color: var(--a-border-strong);
+}
+.addsearch input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  color: var(--a-text);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: var(--fs-2);
+}
+.addgroup {
+  gap: var(--space-2);
+}
 .addgrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

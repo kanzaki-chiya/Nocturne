@@ -306,13 +306,45 @@ describe("addProvider", () => {
     );
     expect(saved[2]?.entry).toMatchObject({
       id: "opencode-go",
-      baseURL: "https://opencode.ai/zen/go/v1",
+      baseURL: "https://opencode.ai/inference/go/openai/v1",
       apiKeyEnv: "OPENCODE_API_KEY",
       sessionHeader: "x-opencode-session",
       modelsDevProvider: "opencode-go",
     });
     const zen = listProviderPresets().find((p) => p.id === "opencode-zen");
     expect(zen).toMatchObject({ baseURL: "https://opencode.ai/zen/v1", fetchableModels: true });
+  });
+
+  it("本地预设（keyOptional）不填密钥能走完 describeProviderSetup / prepareProvider / commitProvider", async () => {
+    let seenAuth: string | null = null;
+    vi.stubGlobal("fetch", async (_input: unknown, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      seenAuth = headers.get("authorization");
+      return new Response(JSON.stringify({ data: [{ id: "qwen3:8b" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const { config, saved, stored } = makeConfig("none");
+    const desc = describeProviderSetup(config, "ollama");
+    expect(desc.keyOptional).toBe(true);
+    const prepared = await prepareProvider(
+      config,
+      { presetId: "ollama", credential: { kind: "apiKey", key: "" } },
+      { env: () => undefined, fetchModels: (req, key, signal) => fetchModels(req, key, signal) },
+    );
+    expect(seenAuth).toBeNull();
+    expect(prepared.modelCount).toBe(1);
+    expect(prepared.steps).toContain("无需密钥");
+    const committed = await commitProvider(config, prepared.draftId);
+    expect(committed.providerId).toBe("ollama");
+    expect(saved[0]?.entry).toMatchObject({
+      id: "ollama",
+      baseURL: "http://localhost:11434/v1",
+      models: { "qwen3:8b": {} },
+    });
+    expect(saved[0]?.entry.apiKeyEnv).toBeUndefined();
+    expect(stored.size).toBe(0);
   });
 
   it("校验失败带字段名，且不写任何东西、不发请求", async () => {

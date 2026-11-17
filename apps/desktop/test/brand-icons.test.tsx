@@ -37,6 +37,24 @@ describe("providerIcon", () => {
     ["github", "github"],
     ["githubcopilot", "githubcopilot"],
     ["vercel", "vercel"],
+    ["google", "gemini-color"],
+    ["baidu-qianfan-api", "baiducloud"],
+    ["tencent-cloud-intl", "tencentcloud"],
+    ["huaweicloud-plan", "huaweicloud"],
+    ["nous", "nousresearch"],
+    ["gmicloud", "gmicloud"],
+    ["clinepass", "cline"],
+    ["kilo", "kilocode"],
+    ["commandcode", "commandcode"],
+    ["together", "together"],
+    ["fireworks", "fireworks"],
+    ["nvidia", "nvidia"],
+    ["modelscope", "modelscope"],
+    ["aihubmix", "aihubmix"],
+    ["302ai", "ai302"],
+    ["qwencloud-cn-beijing", "qwen-color"],
+    ["stepfun-cn-plan", "stepfun-color"],
+    ["xiaomi-plan-sgp", "xiaomimimo"],
     ["OpenRouter", "openrouter"],
   ])("映射服务商 %s → %s", (id, expected) => {
     const res = providerIcon(id);
@@ -51,7 +69,18 @@ describe("providerIcon", () => {
   });
 
   it("自定义服务商和未知 ID 回退到通用服务商图标 cloud", () => {
-    for (const id of ["custom-openai", "custom-anthropic", "unknown-gw", "group"]) {
+    for (const id of [
+      "custom-openai",
+      "custom-anthropic",
+      "unknown-gw",
+      "group",
+      "pipellm",
+      "cherryin",
+      "yylx-auto",
+      "aigocode",
+      "omlx",
+      "mlx-serve",
+    ]) {
       expect(providerIcon(id)).toEqual({ kind: "fallback", name: "cloud" });
     }
   });

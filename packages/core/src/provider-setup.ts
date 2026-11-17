@@ -115,6 +115,8 @@ export interface ProviderSetupDescription {
   type: "openai-compatible" | "anthropic";
   fields: ProviderSetupField[];
   credential: ProviderCredentialSetup;
+  /** 本地等免密钥预设：API Key 可留空 */
+  keyOptional?: boolean | undefined;
   /** 准备时会不会向上游获取模型列表（决定界面显示获取列表还是准备） */
   fetchableModels: boolean;
   /** 上游没给出模型列表时（如外部登录文件的服务）需要手填模型 ID */
@@ -338,9 +340,10 @@ function describeCredential(
     label: "粘贴密钥",
     available,
     prompt: "API Key：",
-    hint:
-      (preset.keyHint !== undefined ? `从 ${preset.keyHint} 获取；` : "") +
-      "输入不回显；直接回车改用环境变量",
+    hint: preset.keyOptional
+      ? "本地服务可不填；输入不回显；直接回车跳过"
+      : (preset.keyHint !== undefined ? `从 ${preset.keyHint} 获取；` : "") +
+        "输入不回显；直接回车改用环境变量",
   };
   const env: ProviderCredentialMethod = {
     kind: "env",
@@ -390,6 +393,7 @@ export function describeProviderSetup(
     type: preset.type,
     fields: describeFields(preset),
     credential: describeCredential(config, preset),
+    ...(preset.keyOptional ? { keyOptional: true } : {}),
     fetchableModels: preset.fetchableModels,
     ...(preset.auth?.kind === "external-file"
       ? {
@@ -422,7 +426,7 @@ export function setupCredentialStep(
 ): string {
   switch (credential.kind) {
     case "apiKey":
-      return "密钥已保存（凭据存储）";
+      return credential.key === "" ? "无需密钥" : "密钥已保存（凭据存储）";
     case "env":
       return `密钥来源：环境变量 ${credential.name}`;
     case "login":
@@ -440,7 +444,9 @@ export function setupCredentialNotice(
   credential: ProviderCredentialInput,
 ): string | undefined {
   const { backend } = description.credential;
-  if (credential.kind === "apiKey") return `密钥已交给 ${backend.label} 加密保存`;
+  if (credential.kind === "apiKey") {
+    return credential.key === "" ? undefined : `密钥已交给 ${backend.label} 加密保存`;
+  }
   if (credential.kind === "env" && !backend.available)
     return "系统凭据后端不可用，使用环境变量方式";
   return undefined;
@@ -505,13 +511,18 @@ export async function prepareProvider(
       if (account || preset.auth?.kind === "external-file") {
         throw new ProviderSetupError("credential", `${preset.label} 不使用 API Key`);
       }
+      if (credential.key === "") {
+        if (!preset.keyOptional) {
+          throw new ProviderSetupError("credential", "API Key 不能为空");
+        }
+        break;
+      }
       if (!backendAvailable) {
         throw new ProviderSetupError(
           "credential",
           "系统凭据后端不可用，无法保存密钥；请改用环境变量方式",
         );
       }
-      if (credential.key === "") throw new ProviderSetupError("credential", "API Key 不能为空");
       key = credential.key;
       break;
     }

@@ -476,3 +476,7 @@ DEALINGS IN THE FONT SOFTWARE.
 
 图标中的商标归各自所有者，仅用于标识对应的服务商与模型。
 
+## 参考的预设地址数据
+
+内置服务商预设（`packages/core/src/provider/presets.ts`）的服务商名称、地域/套餐端点与目录映射参考了开源项目 [magpie](https://github.com/yetone/magpie)（commit `60b10c69a7f6` 的 `internal/provider/presets.go` 与 `internal/provider/opencode_endpoints.go`），该项目按 **MIT** 许可分发。
+

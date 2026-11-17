@@ -105,10 +105,14 @@ export async function runProviderSetupFlow(
       if (key !== "") credential = { kind: "apiKey", key };
     }
     if (credential === undefined) {
-      const env = setup.methods.find((m) => m.kind === "env");
-      if (env?.kind !== "env") throw new SetupAbort();
-      const input = await prompts.ask(env.prompt, { hint: env.hint });
-      credential = { kind: "env", name: input !== "" ? input : env.defaultName };
+      if (description.keyOptional === true) {
+        credential = { kind: "apiKey", key: "" };
+      } else {
+        const env = setup.methods.find((m) => m.kind === "env");
+        if (env?.kind !== "env") throw new SetupAbort();
+        const input = await prompts.ask(env.prompt, { hint: env.hint });
+        credential = { kind: "env", name: input !== "" ? input : env.defaultName };
+      }
     }
   }
   const finalCredential: ProviderCredentialInput = credential;

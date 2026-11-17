@@ -48,6 +48,13 @@ import "./mcp.css";
 
 /* ---------------- 小工具 ---------------- */
 
+const PRESET_GROUPS: readonly { key: ProviderPreset["group"]; label: string }[] = [
+  { key: "vendor", label: "厂商" },
+  { key: "relay", label: "中转" },
+  { key: "local", label: "本地" },
+  { key: "custom", label: "自定义" },
+];
+
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -246,6 +253,7 @@ export function ProvidersPage({
   }>({ providers: [], presets: [], defaultKey: null, defaultProvider: undefined });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sel, setSel] = useState<Sel>(null);
+  const [addQuery, setAddQuery] = useState("");
   const currentProvider = sessionProvider ?? data.defaultProvider;
   const currentRef = useRef(sessionProvider);
   currentRef.current = sessionProvider;
@@ -311,6 +319,20 @@ export function ProvidersPage({
       ...filtered.filter((p) => p.defaultName === ""),
     ];
   }, [data.presets, configured]);
+  const groupedAvailable = useMemo(() => {
+    const q = addQuery.trim().toLowerCase();
+    const matched =
+      q === ""
+        ? available
+        : available.filter(
+            (p) => p.label.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
+          );
+    return PRESET_GROUPS.map(({ key, label }) => ({
+      key,
+      label,
+      items: matched.filter((p) => p.group === key),
+    })).filter((g) => g.items.length > 0);
+  }, [available, addQuery]);
   const selProvider =
     sel?.kind === "provider" ? configured.find((p) => p.id === sel.id) : undefined;
   const selPreset = sel?.kind === "preset" ? available.find((p) => p.id === sel.id) : undefined;
@@ -352,6 +374,7 @@ export function ProvidersPage({
                 size="sm"
                 disabled={client === undefined}
                 onClick={() => {
+                  setAddQuery("");
                   setSel({ kind: "add" });
                 }}
               >
@@ -430,26 +453,44 @@ export function ProvidersPage({
                       }
                       title="添加服务商"
                     />
-                    <div className="addgrid">
-                      {available.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="addcard"
-                          onClick={() => {
-                            setSel({ kind: "preset", id: p.id });
+                    <div className="sbody">
+                      <div className="addsearch">
+                        <Icon name="search" size={ICON_MD} />
+                        <input
+                          type="text"
+                          aria-label="搜索"
+                          value={addQuery}
+                          spellCheck={false}
+                          onChange={(e) => {
+                            setAddQuery(e.target.value);
                           }}
-                        >
-                          <span className="addcard-ic" aria-hidden="true">
-                            {p.defaultName === "" ? (
-                              "+"
-                            ) : (
-                              <BrandIcon icon={providerIcon(p.id)} size="lg" />
-                            )}
-                          </span>
-                          <span className="addcard-label">{p.label}</span>
-                          <Icon name="right_small" size={ICON_SM} className="addcard-chev" />
-                        </button>
+                        />
+                      </div>
+                      {groupedAvailable.map((g) => (
+                        <SettingsGroup key={g.key} title={g.label} plain className="addgroup">
+                          <div className="addgrid">
+                            {g.items.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="addcard"
+                                onClick={() => {
+                                  setSel({ kind: "preset", id: p.id });
+                                }}
+                              >
+                                <span className="addcard-ic" aria-hidden="true">
+                                  {p.defaultName === "" ? (
+                                    "+"
+                                  ) : (
+                                    <BrandIcon icon={providerIcon(p.id)} size="lg" />
+                                  )}
+                                </span>
+                                <span className="addcard-label">{p.label}</span>
+                                <Icon name="right_small" size={ICON_SM} className="addcard-chev" />
+                              </button>
+                            ))}
+                          </div>
+                        </SettingsGroup>
                       ))}
                     </div>
                   </>
@@ -464,6 +505,7 @@ export function ProvidersPage({
                       setSel({ kind: "add" });
                     }}
                     onSaved={(providerId) => {
+                      setAddQuery("");
                       setSel({ kind: "provider", id: providerId });
                       void refresh();
                     }}
@@ -1806,7 +1848,11 @@ function PresetForm({
   const credentialInput = (): CredentialInput | null => {
     switch (mode) {
       case "apiKey":
-        return apiKey.trim() !== "" ? { kind: "apiKey", key: apiKey.trim() } : null;
+        return apiKey.trim() !== ""
+          ? { kind: "apiKey", key: apiKey.trim() }
+          : setup.keyOptional === true
+            ? { kind: "apiKey", key: "" }
+            : null;
       case "env":
         return {
           kind: "env",

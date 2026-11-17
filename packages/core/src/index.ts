@@ -6410,6 +6410,7 @@ export {
   ProviderUpstreamError,
   type FetchModelsRequest,
   type ProviderPreset,
+  type ProviderPresetGroup,
   type UpstreamModelInfo,
 } from "./provider/index.js";
 export { SessionError } from "./session/index.js";

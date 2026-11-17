@@ -103,6 +103,7 @@ const PRESETS: ProviderPreset[] = [
   {
     id: "commandcode",
     label: "CommandCode",
+    group: "relay",
     type: "openai-compatible",
     defaultName: "CommandCode",
     baseURL: "https://x",

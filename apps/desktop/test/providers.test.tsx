@@ -52,6 +52,7 @@ const EXPIRED: ProviderOverview = {
 const PRESET: ProviderPreset = {
   id: "openai-compatible",
   label: "自定义 OpenAI 兼容",
+  group: "custom",
   type: "openai-compatible",
   defaultName: "",
   fetchableModels: true,
@@ -60,6 +61,7 @@ const PRESET: ProviderPreset = {
 const OPENROUTER_PRESET: ProviderPreset = {
   id: "openrouter",
   label: "OpenRouter",
+  group: "relay",
   type: "openai-compatible",
   defaultName: "openrouter",
   baseURL: "https://openrouter.ai/api",
@@ -818,6 +820,7 @@ describe("添加服务商", () => {
     const DEEPSEEK_PRESET: ProviderPreset = {
       id: "deepseek",
       label: "DeepSeek",
+      group: "vendor",
       type: "openai-compatible",
       defaultName: "deepseek",
       baseURL: "https://api.deepseek.com",
@@ -845,8 +848,8 @@ describe("添加服务商", () => {
 
     const cards = Array.from(document.querySelectorAll<HTMLButtonElement>(".addgrid .addcard"));
     expect(cards.map((c) => c.querySelector(".addcard-label")?.textContent)).toEqual([
-      "OpenRouter",
       "DeepSeek",
+      "OpenRouter",
       PRESET.label,
     ]);
     expect(cards.map((c) => c.querySelector(".addcard-ic")?.textContent)).toEqual(["", "", "+"]);
@@ -855,6 +858,107 @@ describe("添加服务商", () => {
 
     fireEvent.click(button("返回"));
     await screen.findByRole("heading", { level: 2, name: "chatgpt" });
+    server.close();
+  });
+
+  it("选择页按组渲染、隐藏已配置预设、搜索过滤后空组隐藏，且本地预设可不填密钥获取", async () => {
+    const DEEPSEEK_PRESET: ProviderPreset = {
+      id: "deepseek",
+      label: "DeepSeek",
+      group: "vendor",
+      type: "openai-compatible",
+      defaultName: "deepseek",
+      baseURL: "https://api.deepseek.com/v1",
+      fetchableModels: true,
+    };
+    const MOONSHOT_PRESET: ProviderPreset = {
+      id: "moonshot-cn",
+      label: "Kimi · 国内",
+      group: "vendor",
+      type: "openai-compatible",
+      defaultName: "moonshot-cn",
+      baseURL: "https://api.moonshot.cn/v1",
+      fetchableModels: true,
+    };
+    const OLLAMA_PRESET: ProviderPreset = {
+      id: "ollama",
+      label: "Ollama",
+      group: "local",
+      type: "openai-compatible",
+      defaultName: "ollama",
+      baseURL: "http://localhost:11434/v1",
+      keyOptional: true,
+      fetchableModels: true,
+    };
+    const OLLAMA_SETUP = {
+      ...SETUP,
+      presetId: "ollama",
+      label: "Ollama",
+      keyOptional: true,
+      fields: [
+        { key: "name" as const, prompt: "名称：", hint: "", required: true, fixed: "ollama" },
+        {
+          key: "baseURL" as const,
+          prompt: "服务地址：",
+          hint: "",
+          required: true,
+          fixed: "http://localhost:11434/v1",
+        },
+      ],
+    };
+    const server = fakeServer(
+      withInit({
+        "provider.describeProviders": { providers: [{ ...PROVIDER, id: "deepseek" }] },
+        "provider.listProviderPresets": [
+          PRESET,
+          OLLAMA_PRESET,
+          OPENROUTER_PRESET,
+          DEEPSEEK_PRESET,
+          MOONSHOT_PRESET,
+        ],
+        "runtime.defaultModel": null,
+        "provider.describeProviderSetup": OLLAMA_SETUP,
+        "provider.listModelSettings": MODEL_SETTINGS,
+        "provider.prepareProvider": PREPARED,
+      }),
+    );
+    await server.initialize();
+    render(<ProvidersPage {...pageProps({ client: server.client })} />);
+    await screen.findByText(/已配置 ·/);
+
+    fireEvent.click(button("添加服务商"));
+    await screen.findByRole("heading", { level: 2, name: "添加服务商" });
+
+    // 组标题按 厂商 -> 中转 -> 本地 -> 自定义 顺序渲染，且已配置的 deepseek 不出现
+    const headings = Array.from(
+      document.querySelectorAll<HTMLHeadingElement>(".addgroup .ghead h2"),
+    );
+    expect(headings.map((h) => h.textContent)).toEqual(["厂商", "中转", "本地", "自定义"]);
+    expect(screen.queryByRole("button", { name: "DeepSeek" })).toBeNull();
+
+    // 按 id 忽略大小写搜索「MOONSHOT」：只剩「厂商」组，其余空组隐藏
+    const searchInput = screen.getByRole("textbox", { name: "搜索" });
+    expect(searchInput.getAttribute("placeholder")).toBeNull();
+    fireEvent.change(searchInput, { target: { value: "MOONSHOT" } });
+    expect(
+      Array.from(document.querySelectorAll<HTMLHeadingElement>(".addgroup .ghead h2")).map(
+        (h) => h.textContent,
+      ),
+    ).toEqual(["厂商"]);
+    expect(
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".addgrid .addcard")).map(
+        (c) => c.querySelector(".addcard-label")?.textContent,
+      ),
+    ).toEqual(["Kimi · 国内"]);
+
+    // 搜「ollama」并点卡片进入表单，不填密钥也可点「获取模型」
+    fireEvent.change(searchInput, { target: { value: "ollama" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ollama" }));
+    await screen.findByRole("heading", { level: 2, name: "添加 Ollama" });
+    const fetchBtn = button("获取模型");
+    expect(fetchBtn.disabled).toBe(false);
+    fireEvent.click(fetchBtn);
+    await screen.findByRole("region", { name: "模型 · 120 个" });
     server.close();
   });
 

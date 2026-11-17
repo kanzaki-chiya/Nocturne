@@ -195,13 +195,17 @@ API key **不以明文落盘**。向导把密钥交给操作系统自带的凭�
 | OpenRouter | `openai-compatible` | `openrouter` | `https://openrouter.ai/api/v1` | `GET /models` | `openrouter` |
 | Anthropic | `anthropic` | `anthropic` | 官方端点（省略 `baseURL`） | `GET /models`（`https://api.anthropic.com/v1/models`） | — |
 | OpenCode Zen | `openai-compatible` | `opencode-zen` | `https://opencode.ai/zen/v1` | `GET /models` | — |
-| OpenCode Go | `openai-compatible` | `opencode-go` | `https://opencode.ai/zen/go/v1` | `GET /models` | — |
+| OpenCode Go | `openai-compatible` | `opencode-go` | `https://opencode.ai/inference/go/openai/v1` | `GET /models` | — |
 | 其他 OpenAI 兼容 | `openai-compatible` | 用户输入 | 用户输入 | `GET /models`（可能不提供） | `openai` |
 | 其他 Anthropic 兼容 | `anthropic` | 用户输入 | 用户输入（可留空用官方端点） | `GET /models`（失败转手动输入；ADR-0026 §3） | — |
 
+其余预设见 `packages/core/src/provider/presets.ts`，按 `vendor`（厂商）/ `relay`（中转）/ `local`（本地）/ `custom`（自定义）分组，服务地址取自 magpie `60b10c69a7f6`（`internal/provider/presets.go`）。
+
 - 预设只负责向导里的默认值；写进 `providers.json` 的是完整条目，之后与手写条目没有区别。预设数据更新不会改变已写入的条目。
 - OpenCode 两个预设（[ADR-0031](../decisions/ADR-0031-opencode-presets-responses.md) §5）额外写死 `sessionHeader: "x-opencode-session"`（同系网关要求，Zen 文档未写明但带上无害）与 `modelsDevProvider`（`opencode` / `opencode-go`，启用 models.dev 服务商层的逐模型接口声明，见 [providers.md](providers.md) 第 2 节）；默认凭据变量名 `OPENCODE_API_KEY`，密钥入口为官方文档的 `https://opencode.ai/auth`。
-- 新增预设的门槛：服务地址与协议兼容性有官方文档可查，并在真实服务上跑过一次连接测试。未满足的服务走"其他 OpenAI 兼容"。
+- **新预设只写 `modelsDevPricing`、不写 `modelsDevProvider`**：因为 `modelsDevProvider` 不仅影响取价，还会启用 models.dev 的逐模型接口声明和 `provider.api` 地址覆盖（[ADR-0061](../decisions/ADR-0061-gemini-protocol.md) 中 models.dev 的 `provider.api` 优先于条目 `baseURL`），会把国内/国际或不同套餐预设的请求重导至 models.dev 记录的单个地址；因此新增预设只通过 `modelsDevPricing` 借用目录价格。
+- **本地服务可不填密钥**：`local` 分组的本地预设（Ollama、LM Studio、oMLX、MLX-Serve）标记 `keyOptional: true`，`describeProviderSetup` 返回 `keyOptional: true`（提示可留空跳过），`prepareProvider` 接受 `{ kind: "apiKey", key: "" }` 且不校验凭据后端、不保存凭据、不在 `GET /models` 发送 `Authorization` 头。
+- 新增预设的门槛：服务地址与协议兼容性有官方文档可查，或已被开源网关的内置预设实际采用（注明来源与提交，如 `yetone/magpie` `60b10c69a7f6`）。未满足的服务走"其他 OpenAI 兼容"。
 
 ## 6. Core 接口
 

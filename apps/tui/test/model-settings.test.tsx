@@ -663,6 +663,7 @@ describe("服务商页 Delete 入口与底部提示（ADR-0030 §6）", () => {
       {
         id: "other-oai",
         label: "其他 OpenAI 兼容服务",
+        group: "custom",
         type: "openai-compatible",
         defaultName: "",
         fetchableModels: true,
