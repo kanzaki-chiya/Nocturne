@@ -341,7 +341,7 @@ function describeCredential(
     available,
     prompt: "API Key：",
     hint: preset.keyOptional
-      ? "本地服务可不填；输入不回显；直接回车跳过"
+      ? "输入不回显；直接回车跳过"
       : (preset.keyHint !== undefined ? `从 ${preset.keyHint} 获取；` : "") +
         "输入不回显；直接回车改用环境变量",
   };

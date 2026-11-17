@@ -169,7 +169,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultKeyEnv: "MOONSHOT_API_KEY",
     modelsDevPricing: "moonshotai",
     fetchableModels: true,
-    keyHint: "https://platform.kimi.ai/console/api-keys?aff=magpie",
+    keyHint: "https://platform.kimi.ai/console/api-keys",
   },
   {
     id: "moonshot-cn",
@@ -181,7 +181,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultKeyEnv: "MOONSHOT_API_KEY",
     modelsDevPricing: "moonshotai",
     fetchableModels: true,
-    keyHint: "https://platform.kimi.com/console/api-keys?aff=magpie",
+    keyHint: "https://platform.kimi.com/console/api-keys",
   },
   {
     id: "kimi-code",
@@ -193,7 +193,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultKeyEnv: "KIMI_CODE_API_KEY",
     modelsDevPricing: "kimi-code-plan-global",
     fetchableModels: true,
-    keyHint: "https://www.kimi.ai/code/console?aff=magpie",
+    keyHint: "https://www.kimi.ai/code/console",
   },
   {
     id: "kimi-code-cn",
@@ -205,7 +205,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultKeyEnv: "KIMI_CODE_API_KEY",
     modelsDevPricing: "kimi-code-plan-cn",
     fetchableModels: true,
-    keyHint: "https://www.kimi.com/code/console?aff=magpie",
+    keyHint: "https://www.kimi.com/code/console",
   },
   {
     id: "zhipu-api",
