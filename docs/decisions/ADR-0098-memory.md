@@ -77,9 +77,9 @@ Nocturne 此前没有跨会话记忆。[context.md](../architecture/context.md) 
 - RPC 方法命名为 `memory.describeMemory`、`memory.readMemory`、`memory.deleteMemory`、`memory.clearMemory`，**仅向本机连接开放**（不加入远程白名单 `REMOTE_METHODS` 或外部 agent 白名单，因为返回包含本机绝对路径）。
 - 通过工具或 Runtime 写入、删除或清空记忆后触发 `onMemoryChanged`，Hub 收到后向已握手连接推送 `runtime.providersChanged`。
 
-### 8. 界面（二期，另轮实现）
+### 8. 界面
 
-规划在桌面端等客户端「设置」侧栏「技能」之前增加「记忆」页（顶部两个开关 + 全局/项目/其他项目列表）。本轮仅在 `apps/desktop/src/context-panel.tsx` 的 `SECTIONS` 表补录 `memory: { label: "记忆", color: "var(--a-secondary)" }` 以匹配 `ContextSection["name"]` 联合类型，其余界面改动留待二期。
+已在桌面端「设置」侧栏「技能」之前实现「记忆」页（`apps/desktop/src/MemoryPage.tsx`：顶部全局/项目开关、全局/项目/其他项目列表、详情查看、删除与清空确认），并在 `apps/desktop/src/context-panel.tsx` 的 `SECTIONS` 表补录 `memory` 项。
 
 ### 9. 明确不做
 

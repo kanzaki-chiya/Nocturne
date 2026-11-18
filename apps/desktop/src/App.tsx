@@ -77,6 +77,7 @@ import { SessionGrants, useSessionGrants } from "./SessionGrants";
 import { desktopWarningText } from "./open-warnings";
 import { ModelRecoveryCard } from "./ModelRecoveryCard";
 import { ExternalAgentsPage } from "./ExternalAgentsPage";
+import { MemoryPage } from "./MemoryPage";
 import { SkillsPage } from "./SkillsPage";
 import { SettingsPage, downloadSettings, type DownloadsHost } from "./SettingsPage";
 import { ComputerSettingsPage } from "./ComputerSettingsPage";
@@ -2123,6 +2124,21 @@ export function App({ host }: { host: DesktopHost }) {
                 ) : settingsPage === "remote" ? (
                   <PaneErrorBoundary key="remote">
                     <RemotePage client={pageClient} />
+                  </PaneErrorBoundary>
+                ) : settingsPage === "memory" ? (
+                  <PaneErrorBoundary key="memory">
+                    <MemoryPage
+                      client={pageClient}
+                      workspaceRoot={effectiveWorkspace ?? undefined}
+                      version={settingsVersion}
+                      openDirectory={(path) =>
+                        host.invoke("open_skill_directory", {
+                          path,
+                          create: false,
+                        }) as Promise<void>
+                      }
+                      openUrl={openReplyLink}
+                    />
                   </PaneErrorBoundary>
                 ) : settingsPage === "skills" ? (
                   <PaneErrorBoundary key="skills">

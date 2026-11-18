@@ -8,6 +8,7 @@ const SECTIONS: SettingsSection[] = [
   "providers",
   "models",
   "agents",
+  "memory",
   "skills",
   "mcp",
   "plugins",

@@ -74,6 +74,19 @@ describe("Sidebar", () => {
     expect(onOpenPage).toHaveBeenCalledWith("plugins");
   });
 
+  it("设置导航在「技能」之前包含「记忆」，点击进入 memory 页", () => {
+    const onOpenPage = vi.fn();
+    render(<Sidebar {...props({ page: "general", onOpenPage })} />);
+    const nav = screen.getByRole("navigation", { name: "设置" });
+    const labels = [...nav.querySelectorAll("button")].map((b) => b.textContent?.trim());
+    const memoryIdx = labels.indexOf("记忆");
+    const skillsIdx = labels.indexOf("技能");
+    expect(memoryIdx).toBeGreaterThanOrEqual(0);
+    expect(skillsIdx).toBe(memoryIdx + 1);
+    fireEvent.click(within(nav).getByRole("button", { name: "记忆" }));
+    expect(onOpenPage).toHaveBeenCalledWith("memory");
+  });
+
   it("新会话下方是定时任务入口，显示启用数", () => {
     const onOpenSchedules = vi.fn();
     const { container } = render(
@@ -288,7 +301,7 @@ describe("Sidebar", () => {
     expect(onArchive).toHaveBeenCalledWith("idle");
   });
 
-  it("设置导航顺序：常规、外观、服务商、模型、子代理、技能、MCP、插件、浏览器、电脑操控、授权、远程、已归档的会话、用量、后台日志", () => {
+  it("设置导航顺序：常规、外观、服务商、模型、子代理、记忆、技能、MCP、插件、浏览器、电脑操控、授权、远程、已归档的会话、用量、后台日志", () => {
     render(<Sidebar {...props({ page: "general" })} />);
     const nav = screen.getByRole("navigation", { name: "设置" });
     const labels = [...nav.querySelectorAll("button.item")].map((button) => button.textContent);
@@ -298,6 +311,7 @@ describe("Sidebar", () => {
       "服务商",
       "模型",
       "子代理",
+      "记忆",
       "技能",
       "MCP",
       "插件",
