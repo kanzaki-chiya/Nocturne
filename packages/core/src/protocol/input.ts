@@ -12,7 +12,7 @@ import type {
   ImageAttachment,
   FileAttachment,
 } from "./types.js";
-import type { SkillSnapshot } from "./skills.js";
+import type { SkillInvocation, SkillSnapshot } from "./skills.js";
 import type { WorkModeSnapshot } from "./work-modes.js";
 
 export interface PreparedInput {
@@ -29,6 +29,8 @@ export interface PreparedInput {
   files?: FileAttachment[] | undefined;
   fileRefs?: FileRef[] | undefined;
   skill?: SkillSnapshot | undefined;
+  /** 技能斜杠原始调用参数（仅供 UserPromptSubmit Hook，不写入持久化事件） */
+  skillInvocation?: SkillInvocation | undefined;
   delegate?: AgentDelegation | undefined;
   /** 执行方式快照（ADR-0076）；说明块在 appended 里 */
   workMode?: WorkModeSnapshot | undefined;

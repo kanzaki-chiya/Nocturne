@@ -255,7 +255,9 @@ const hookPointSchema = z.enum([
   "PermissionRequest",
   "TurnStart",
   "TurnEnd",
+  "UserPromptSubmit",
   "SessionStart",
+  "SubagentStart",
   "SessionEnd",
 ]);
 

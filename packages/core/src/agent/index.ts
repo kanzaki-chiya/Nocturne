@@ -1,5 +1,6 @@
 export * from "./types.js";
 export { runTurn } from "./turn.js";
+export { runHookContextSnapshot } from "./hook-context.js";
 export {
   runRoleCall,
   cleanTitle,

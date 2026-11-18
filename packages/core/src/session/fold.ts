@@ -4,6 +4,7 @@
  */
 import { shellSwitchNote } from "../platform/index.js";
 import {
+  formatHookContextEntries,
   todoItemsFromCompletion,
   noteItemsFromCompletion,
   effectiveEvents,
@@ -12,6 +13,7 @@ import {
   rewindNote,
   type DurableEvent,
   type GoalState,
+  type HookContextEntry,
   type NoteItem,
   type PlanConfig,
   type TodoItem,
@@ -62,6 +64,8 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const stoppedTasks: { taskId: string; callId: string }[] = [];
   let todos: TodoItem[] = [];
   let notes: NoteItem[] = [];
+  let hookContext:
+    { SessionStart?: HookContextEntry[]; SubagentStart?: HookContextEntry[] } | undefined;
   const mcpAvailability: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
   const usage = { ...ZERO_USAGE };
   let openTurn: SessionState["openTurn"];
@@ -302,6 +306,23 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         });
         break;
       }
+      case "hook.context": {
+        const p = event.payload;
+        if (p.point === "UserPromptSubmit") {
+          if (p.entries.length > 0) {
+            history.push({
+              kind: "note",
+              seq: event.seq,
+              turnId,
+              text: formatHookContextEntries("UserPromptSubmit", p.entries),
+            });
+          }
+        } else {
+          hookContext ??= {};
+          hookContext[p.point] = p.entries;
+        }
+        break;
+      }
       case "turn.completed": {
         if (openTurn !== undefined && openTurn.turnId === turnId) {
           openTurn = undefined;
@@ -351,6 +372,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     ...(plan !== undefined ? { plan } : {}),
     todos,
     notes,
+    ...(hookContext !== undefined ? { hookContext } : {}),
     usage,
     lastSeq,
     openTurn,

@@ -4,7 +4,14 @@
  * "无效果 + hook_failed 警告"。继承完整进程环境（Hook 是用户自己的脚本，
  * 与 MCP 的白名单环境相反，见 hooks.md 第 2 节、ADR-0012）。
  */
-import type { Diagnostics, HookEntry, HookPoint } from "../protocol/index.js";
+import {
+  MAX_HOOK_CONTEXT_ENTRY_CHARS,
+  MAX_HOOK_CONTEXT_TOTAL_CHARS,
+  type Diagnostics,
+  type HookContextEntry,
+  type HookEntry,
+  type HookPoint,
+} from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
 import type { HookCallInput, HookOutput, HookRunner } from "../tools/types.js";
 
@@ -42,9 +49,13 @@ export interface HookRunnerOptions {
   warn?: ((code: string, message: string) => void) | undefined;
 }
 
+interface RawHookOutput extends HookOutput {
+  additionalContext?: unknown;
+}
+
 interface EntryResult {
   ok: boolean;
-  output?: HookOutput;
+  output?: RawHookOutput;
 }
 
 export function createHookRunner(opts: HookRunnerOptions): HookRunner {
@@ -189,7 +200,34 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
     let currentInput = input.input;
     let askReason: string | undefined;
     let merged: HookOutput | undefined;
+    const contextEntries: HookContextEntry[] = [];
+    let contextChars = 0;
+    let contextDropped = false;
     let spoke = false;
+
+    const collectContext = (entry: HookEntry, raw: unknown): void => {
+      if (typeof raw !== "string" || raw === "") return;
+      const truncated =
+        raw.length > MAX_HOOK_CONTEXT_ENTRY_CHARS ? raw.length - MAX_HOOK_CONTEXT_ENTRY_CHARS : 0;
+      const text = truncated > 0 ? raw.slice(0, MAX_HOOK_CONTEXT_ENTRY_CHARS) : raw;
+      if (contextDropped || contextChars + text.length > MAX_HOOK_CONTEXT_TOTAL_CHARS) {
+        contextDropped = true;
+        opts.diagnostics?.record("hook.context_dropped", {
+          point,
+          command: entry.command,
+          chars: text.length,
+          totalChars: contextChars,
+          limit: MAX_HOOK_CONTEXT_TOTAL_CHARS,
+        });
+        return;
+      }
+      contextChars += text.length;
+      contextEntries.push({
+        hook: `hook ${point} ${entry.command}`,
+        text,
+        ...(truncated > 0 ? { truncated } : {}),
+      });
+    };
 
     for (const entry of entries) {
       if (signal?.aborted === true) return undefined;
@@ -246,14 +284,36 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
           }
           break;
         }
+        case "UserPromptSubmit": {
+          if (out.block === true) {
+            spoke = true;
+            return { block: true, reason: out.reason };
+          }
+          collectContext(entry, out.additionalContext);
+          if (contextEntries.length > 0) spoke = true;
+          break;
+        }
+        case "SessionStart":
+        case "SubagentStart": {
+          collectContext(entry, out.additionalContext);
+          spoke = true;
+          break;
+        }
         default:
-          // TurnEnd / SessionStart / SessionEnd：忽略所有输出
+          // TurnEnd / SessionEnd：忽略所有输出
           spoke = true;
           break;
       }
     }
 
     if (!spoke) return undefined;
+    if (point === "SessionStart" || point === "SubagentStart") {
+      if (signal?.aborted === true) return undefined;
+      return { contextEntries };
+    }
+    if (point === "UserPromptSubmit") {
+      return contextEntries.length > 0 ? { contextEntries } : undefined;
+    }
     if (merged !== undefined) {
       // PostToolUse 的 feedback 合并结果
       return merged;

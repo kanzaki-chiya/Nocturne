@@ -438,6 +438,17 @@ const payloadSchemas = {
     usage: usageSchema.optional(),
     model: modelRefSchema.optional(),
   }),
+  "hook.context": z.object({
+    point: z.enum(["SessionStart", "SubagentStart", "UserPromptSubmit"]),
+    source: z.string().optional(),
+    entries: z.array(
+      z.object({
+        hook: z.string(),
+        text: z.string(),
+        truncated: z.number().int().positive().optional(),
+      }),
+    ),
+  }),
   "turn.completed": z.object({
     reason: z.enum(["done", "truncated", "refused", "aborted", "max_steps", "error"]),
     steps: z.number().int(),
@@ -545,6 +556,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("tool.completed", payloadSchemas["tool.completed"]),
   envelope("attachment.described", payloadSchemas["attachment.described"]),
   envelope("context.compacted", payloadSchemas["context.compacted"]),
+  envelope("hook.context", payloadSchemas["hook.context"]),
   envelope("turn.completed", payloadSchemas["turn.completed"]),
   envelope("ensemble.created", payloadSchemas["ensemble.created"]),
   envelope("ensemble.member_added", payloadSchemas["ensemble.member_added"]),

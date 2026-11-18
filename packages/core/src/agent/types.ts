@@ -3,7 +3,7 @@
  * Agent 是 Core 内唯一的编排者：不感知工具名、Provider 名、权限规则与 UI。
  */
 import type { EnvironmentInfo, InstructionSet } from "../context/index.js";
-import type { LoopGuardConfig, PreparedInput } from "../protocol/index.js";
+import type { LoopGuardConfig, PreparedInput, SkillInvocation } from "../protocol/index.js";
 import type { ResolvedModel } from "../provider/index.js";
 import type { Session, SessionState } from "../session/index.js";
 import type { ExecutionEnvironment, ToolExecutor, ToolRegistry } from "../tools/index.js";
@@ -95,6 +95,12 @@ export interface TurnDeps {
   basePrompt?: string | undefined;
   shouldFinish?: ((state: SessionState) => boolean) | undefined;
   toolChoice?: { name: string } | undefined;
+  /**
+   * 本轮若由用户输入发起，提供 UserPromptSubmit 所需原文与技能调用参数（hooks.md）：
+   * - index.ts 从 PreparedInput（不含 appended 快照块）传入；
+   * - false 表示非用户输入（子会话 / runtime / 后台投递），跳过 UserPromptSubmit。
+   */
+  userPrompt?: { text: string; skill?: SkillInvocation | undefined } | false | undefined;
   /**
    * 写入本 Turn 所有 ModelRequest.sessionId 的会话标识（ADR-0031 §3）：
    * 缺省取 session.id；子代理填根会话 ID（沿 parent 链到顶），保证

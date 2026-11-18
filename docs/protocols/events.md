@@ -87,6 +87,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`files?: FileAttachment[]`（工具结果文件附件引用，[ADR-0072](../decisions/ADR-0072-file-attachments.md)、[ADR-0088](../decisions/ADR-0088-inline-html.md)）、`durationMs?` |
 
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`、`usage?: Usage`、`model?: ModelRef`（摘要请求成功时记录用量与模型；prune 不写，旧日志兼容；规则见 [context.md](../architecture/context.md) 第 6 节） |
+| `hook.context` | ✓ 或 — | `point: "SessionStart" \| "SubagentStart" \| "UserPromptSubmit"`、`source?`、`entries: { hook: string; text: string; truncated?: number }[]`（[ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)：Hook 注入模型上下文的唯一持久事件；`UserPromptSubmit` 携带 `turnId`，其余为会话级快照事件，不提升 `formatVersion`） |
 | `turn.completed` | ✓ | `reason`、`steps`、`usage`、`error?`、`recovered?` |
 | `attachment.described` | ✓ | `attachmentRef: { seq, index }`（`message.user` 或 `tool.completed` 的 seq、从 0 开始的附件序号）、`model: string`（provider/model）、`text`、`usage?` |
 | `ensemble.created` | — | `title: string`（建立 Ensemble 留言板，[ADR-0089](../decisions/ADR-0089-ensemble.md) §7） |
@@ -134,6 +135,8 @@ ADR-0083 修订（2026-11-08）：撤回后台结果时写入会话级持久事�
 ADR-0083 停止修订（2026-11-08）：新增会话级持久事件 `shell.task_stopped`（无 turnId），payload 为 `{ taskId, callId, status: "killed", source: "user" | "model", exitCode?, signal? }`，时间为结束时间。停止不再产生待发输入；恢复不补 interrupted。用户停止在其后第一个 `turn.started` 折叠为普通 note，复用现有上下文投影，不创建对话条目；追加后留在历史，按现有规则投影、修剪和压缩，不因回合结束而删除。恢复按持久事件顺序保证每个任务只追加一次，不新增第二条。模型停止直接返回工具结果。不提升 formatVersion；旧 Runtime 拒绝恢复含此未知持久事件的日志，旧只读客户端忽略。旧 `message.user.backgroundShell.status: "killed"` 仍可读，但新停止不再写它。`message.user.backgroundShell.name?` 与 `input.pending.items[].shellName?` 传递任务名（无名取启动命令首行），待发显示「后台任务 · <任务名> · 等待送达」。
 
 ADR-0089：Ensemble 留言板在指挥（Maestro，`@maestro`）会话日志中记录六个会话级持久事件（`ensemble.created`、`ensemble.member_added`、`ensemble.posted`、`ensemble.member_model_changed`、`ensemble.member_removed`、`ensemble.ended`），不提升 `formatVersion`（旧 Runtime 拒绝恢复含未知持久事件的指挥日志，只读端忽略）。送达给成员或指挥的帖子在目标会话日志中写为普通 `message.user`，附可选字段 `ensemble?: { postNumber: number; from: string; fromKind: "maestro" | "member" | "user" | "runtime" }`，正文以 `<ensemble-post n="…" from="…">…</ensemble-post>` 包裹；旧版本读取成员日志时按非严格 schema 忽略未知字段 `ensemble`，作为普通用户消息读取。Runtime 安静提醒写为指挥日志中的 `message.user`，附可选字段 `ensembleQuietReminder?: true`（不写 `ensemble.posted`、不带 `ensemble` 字段、不提升 `formatVersion`，旧版本按普通用户消息读取），`SessionView` 不投影到对话条目，模型上下文照常保留。
+
+ADR-0096：新增持久事件 `hook.context` 记录 Hook 向模型注入的上下文（`SessionStart` / `SubagentStart` 快照与 `UserPromptSubmit` 上下文），`hook` 字段采用 `hook <点位> <command>` 格式，单条上限 10,000 字符、单事件合计上限 30,000 字符。不提升 `formatVersion`；旧版 Runtime 拒绝恢复包含该未知持久事件的日志（`session_log_newer`），旧只读客户端与 `SessionView` 忽略。
 
 ### 3.2 临时事件
 

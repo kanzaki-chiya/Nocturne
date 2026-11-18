@@ -7,6 +7,7 @@
 
 import type {
   DurablePayload,
+  HookContextEntry,
   HookPoint,
   Usage,
   ToolProgressPayload,
@@ -14,6 +15,7 @@ import type {
   RuntimeStatusPayload,
   QuestionRequestedPayload,
   PermissionReply,
+  SkillInvocation,
   SubjectRequest,
   ModelRef,
   PermissionAction,
@@ -205,8 +207,10 @@ export interface HookInput {
         error?: { code: string; message: string } | undefined;
       }
     | undefined;
-  /** TurnStart：本轮用户提示词 */
+  /** TurnStart：本轮用户提示词；UserPromptSubmit：用户原文（不含技能渲染块和文件块） */
   text?: string | undefined;
+  /** UserPromptSubmit：技能斜杠调用名与参数 */
+  skill?: SkillInvocation | undefined;
   /** TurnEnd / SessionEnd：结束原因 */
   reason?: string | undefined;
   /** TurnEnd */
@@ -214,6 +218,10 @@ export interface HookInput {
   usage?: Usage | undefined;
   /** SessionStart：本次为恢复会话 */
   resumed?: boolean | undefined;
+  /** SessionStart：触发来源（startup / resume / fork / compact） */
+  source?: "startup" | "resume" | "fork" | "compact" | undefined;
+  /** SubagentStart：子代理类型（档位名、general、explore 或 custom） */
+  agentType?: string | undefined;
   /** 子会话标记（subagent.md 第 10 节）：仅子会话的 Hook 输入携带 */
   subagent?: { parentSessionId: string; parentCallId: string; depth: number } | undefined;
 }
@@ -221,7 +229,8 @@ export interface HookInput {
 /**
  * Hook 的 stdout JSON（hooks.md 第 3 节）。各点位允许的字段见文档：
  * PreToolUse 只允许 decision/updatedInput（无 allow）；PermissionRequest 只允许 action；
- * PostToolUse 只允许 feedback；生命周期点位允许 block。
+ * PostToolUse 只允许 feedback；TurnStart/UserPromptSubmit 允许 block；
+ * SessionStart/SubagentStart/UserPromptSubmit 的 additionalContext 归并进 contextEntries。
  */
 export interface HookOutput {
   /** PreToolUse：ask（强制确认，绕过 Grant/--yes）或 deny */
@@ -233,8 +242,10 @@ export interface HookOutput {
   action?: "allow" | "deny" | undefined;
   /** PostToolUse：追加给模型的反馈文本 */
   feedback?: string | undefined;
-  /** 生命周期点位：非空时中止对应操作 */
+  /** TurnStart / UserPromptSubmit：非空时中止对应 Turn */
   block?: boolean | undefined;
+  /** SessionStart / SubagentStart / UserPromptSubmit：已截断并限流后的上下文条目 */
+  contextEntries?: HookContextEntry[] | undefined;
 }
 
 /**

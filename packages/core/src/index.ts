@@ -31,6 +31,7 @@ import {
   createSubagentLauncher,
   createSubagentLimiter,
   DEFAULT_TURN_CONFIG,
+  runHookContextSnapshot,
   runTurn,
   runRoleCall,
   cleanTitle,
@@ -3418,6 +3419,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // 的文本时只替换正文，快照块原样保留
       const appended = refs.content.slice(content.length);
       let skillSnapshot: SkillSnapshot | undefined;
+      let skillInvocation: SkillInvocation | undefined;
       const invocation = input.skill;
       if (invocation) {
         const overview = catalog.skills.find(
@@ -3437,6 +3439,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
         const body = renderSkill(source.body, overview, invocation, meta.workspaceRoot, session.id);
         skillSnapshot = { name: overview.name, body };
+        skillInvocation = {
+          name: overview.name,
+          ...(invocation.arguments !== undefined ? { arguments: invocation.arguments } : {}),
+        };
         const escaped = overview.name
           .replace(/&/g, "&amp;")
           .replace(/"/g, "&quot;")
@@ -3490,6 +3496,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         attachments: [...attachments, ...refs.attachments],
         fileRefs: refs.fileRefs,
         ...(skillSnapshot !== undefined ? { skill: skillSnapshot } : {}),
+        ...(skillInvocation !== undefined ? { skillInvocation } : {}),
         ...(delegation !== undefined ? { delegate: delegation } : {}),
         ...(workMode !== undefined ? { workMode } : {}),
       };
@@ -3896,7 +3903,25 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           prepare = undefined;
           await recordBranch().catch(() => undefined);
           await applyWorkModeStart(prepared);
+          const isNonUserMessage =
+            prepared.subagent !== undefined ||
+            prepared.backgroundShell !== undefined ||
+            prepared.ensemble !== undefined ||
+            prepared.ensembleQuietReminder === true ||
+            prepared.workMode?.source === "runtime";
+          const userPrompt = isNonUserMessage
+            ? false
+            : {
+                text: prepared.content
+                  .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+                  .map((b) => b.text)
+                  .join("\n"),
+                ...(prepared.skillInvocation !== undefined
+                  ? { skill: prepared.skillInvocation }
+                  : {}),
+              };
           const deps: TurnDeps = {
+            userPrompt,
             deferIdle: (turnId) => {
               idleTurnId = turnId;
             },
@@ -4117,11 +4142,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           pendingInputStore.add(input.backgroundShell ? "shell" : "subagent", input);
       }
     }
-    // SessionStart Hook（hooks.md）：会话打开完成后触发（新建与恢复都算）
+    // SessionStart Hook（hooks.md）：会话新建、恢复与分叉打开后触发
     if (hookRunner !== undefined) {
-      await hookRunner
-        .run("SessionStart", { resumed: resume !== undefined })
-        .catch(() => undefined);
+      let source: "startup" | "resume" | "fork" = "startup";
+      if (resume !== undefined) {
+        const events = session.durableEvents();
+        const forkRewind = events.findLast(
+          (e) => e.type === "session.rewound" && e.payload.fork === true,
+        );
+        const forkBoundarySeq =
+          meta.forkedFrom !== undefined ? (forkRewind?.seq ?? meta.forkedFrom.seq) : undefined;
+        const isFreshFork =
+          forkBoundarySeq !== undefined && (events.at(-1)?.seq ?? 0) <= forkBoundarySeq;
+        source = isFreshFork ? "fork" : "resume";
+      }
+      await runHookContextSnapshot(session, hookRunner, "SessionStart", {
+        resumed: resume !== undefined,
+        source,
+      });
     }
     diagnostics.record("session.open", {
       sessionId: session.id,
@@ -4941,7 +4979,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw invalidModelError(model.model.unavailable.reason, model.model);
           }
           const events = session.durableEvents();
-          const history = session.state().history;
+          const state = session.state();
+          const history = state.history;
           const attachmentData = new Map<string, string>();
           for (const ref of attachmentsToLoad(history, model.model, events)) {
             const bytes = await execEnv.attachments?.load(ref);
@@ -4950,9 +4989,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           }
           const plan = buildContext({
             skills: catalog,
+            ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
             history,
-            todos: session.state().todos,
-            notes: session.state().notes,
+            todos: state.todos,
+            notes: state.notes,
             model: model.model,
             tools: tools.specs(model.model.capabilities.editTool),
             instructions,
@@ -4989,6 +5029,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               model: model.model.ref,
             },
             {},
+          );
+          await runHookContextSnapshot(
+            session,
+            hookRunner,
+            "SessionStart",
+            { resumed: false, source: "compact" },
+            ac.signal,
           );
         } catch (e) {
           if (ac.signal.aborted) {
@@ -5043,6 +5090,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const state = session.state();
         const value = buildContext({
           skills: catalog,
+          ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
           compactionThreshold,
           compactionPruneLimit,
           omittedMcpTools: omittedMcpToolCount,

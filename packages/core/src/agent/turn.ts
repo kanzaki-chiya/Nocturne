@@ -45,6 +45,7 @@ import { preparedContent, type PreparedInput } from "../protocol/input.js";
 import { consumeStream, EmptyResponseError, type StreamAccumulation } from "./stream.js";
 import type { TurnDeps } from "./types.js";
 import { describeImages } from "./roles.js";
+import { runHookContextSnapshot } from "./hook-context.js";
 
 function isPersistenceFailure(e: unknown): boolean {
   return e instanceof SessionError && (e.code === "session_failed" || e.code === "session_closed");
@@ -401,6 +402,52 @@ export async function runTurn(
       { turnId },
     );
 
+    // UserPromptSubmit Hook（hooks.md 第 1 节）：仅在由用户输入发起时触发，
+    // 在 message.user 写入后、TurnStart 之前运行；block 时丢弃 additionalContext。
+    const shouldRunUserPrompt =
+      deps.userPrompt !== false &&
+      session.state().meta.parent === undefined &&
+      subagent === undefined &&
+      backgroundShell === undefined &&
+      ensemble === undefined &&
+      ensembleQuietReminder !== true &&
+      workMode?.source !== "runtime";
+    if (shouldRunUserPrompt && deps.execEnv.hooks !== undefined) {
+      const explicitPrompt = deps.userPrompt === false ? undefined : deps.userPrompt;
+      const promptText =
+        explicitPrompt !== undefined
+          ? explicitPrompt.text
+          : content
+              .filter((b): b is { type: "text"; text: string } => b.type === "text")
+              .map((b) => b.text)
+              .join("\n");
+      const promptSkill = explicitPrompt?.skill;
+      const promptHook = await deps.execEnv.hooks
+        .run(
+          "UserPromptSubmit",
+          {
+            turnId,
+            text: promptText,
+            ...(promptSkill !== undefined ? { skill: promptSkill } : {}),
+          },
+          signal,
+        )
+        .catch(() => undefined);
+      if (promptHook?.block === true) {
+        return await finish("error", {
+          code: "hook_blocked",
+          message: promptHook.reason ?? "UserPromptSubmit Hook 拦截",
+        });
+      }
+      if (promptHook?.contextEntries !== undefined && promptHook.contextEntries.length > 0) {
+        await session.emit(
+          "hook.context",
+          { point: "UserPromptSubmit", entries: promptHook.contextEntries },
+          { turnId },
+        );
+      }
+    }
+
     // TurnStart Hook（hooks.md 第 1 节）：block → Turn 以 error(hook_blocked) 结算
     const startHook = await deps.execEnv.hooks
       ?.run(
@@ -458,6 +505,7 @@ export async function runTurn(
       }
       const built = buildContext({
         skills: deps.skills,
+        ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
         history: state.history,
         todos: state.todos,
         notes: state.notes,
@@ -516,6 +564,14 @@ export async function runTurn(
         const ok = await runSummaryPlan(plan);
         if (aborted(signal)) return await finish("aborted");
         if (ok) {
+          await runHookContextSnapshot(
+            session,
+            deps.execEnv.hooks,
+            "SessionStart",
+            { resumed: false, source: "compact" },
+            signal,
+          );
+          if (aborted(signal)) return await finish("aborted");
           pruneAttempted = true;
           forceCompaction = false;
           continue;

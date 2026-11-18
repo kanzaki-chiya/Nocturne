@@ -5,6 +5,7 @@
 import type {
   DurableEvent,
   HistoryEntry,
+  HookContextSnapshot,
   ImageAttachment,
   LoopGuardConfig,
   NoteItem,
@@ -42,6 +43,8 @@ export interface EnvironmentInfo {
 
 export interface BuildContextInput {
   skills?: { text: string; truncated: boolean } | undefined;
+  /** SessionStart / SubagentStart Hook 注入的会话快照（context.md 第 3 节） */
+  hookContext?: HookContextSnapshot | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;
   /** ADR-0067 §4：按需模式下未放进 tools 的 MCP 工具数，/context 据此注明 */
@@ -128,7 +131,15 @@ export interface ContextHistoryBreakdown {
 /** ContextReport 中的一个部分（context.md 第 4 节"可解释"） */
 export interface ContextSection {
   name:
-    "system" | "tools" | "instructions" | "skills" | "environment" | "notes" | "todos" | "history";
+    | "system"
+    | "tools"
+    | "instructions"
+    | "skills"
+    | "hooks"
+    | "environment"
+    | "notes"
+    | "todos"
+    | "history";
   /** 来源说明（版本、文件路径、条目数） */
   source: string;
   chars: number;

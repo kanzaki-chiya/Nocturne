@@ -240,7 +240,7 @@ launch(request, ctx)
 ## 10. MCP 与 Hooks
 
 - **MCP**：子注册表直接放入父会话 `mcpSession.tools()` 返回的 `ToolDefinition`（经第 6 节裁剪）——这些定义已绑定既有连接，**不产生新的服务器进程、不做第二次 initialize**。子会话取的是创建时刻的快照；`list_changed`/重连的暂存切换只发生在父会话自己的 Turn 边界。`mcp` 主体求值照常（子会话里同样只能得到"父会话也会自动放行"的结果）。
-- **Hooks**：子会话沿用父会话**已按信任过滤后的同一批条目**，以子会话 `sessionId`/`cwd`/`workspaceRoot` 重建 runner。全部点位照常触发——`SessionStart`（`resumed:false`）、`TurnStart`（`text` 为任务或催促文本）、`PreToolUse`/`PermissionRequest`/`PostToolUse`、`TurnEnd`、`SessionEnd`（`close` 时）。`HookInput` 增加可选 `subagent?: { parentSessionId, parentCallId, depth }`：Hook 脚本据此区分子会话（例如只审计、或对子会话一律不放宽）。Hook 失败降级、`hook_failed` 警告、只能收紧的边界全部不变；子会话里的 `runtime.warning` 写子会话自己的临时事件。
+- **Hooks**：子会话沿用父会话**已按信任过滤后的同一批条目**，以子会话 `sessionId`/`cwd`/`workspaceRoot` 重建 runner。`SessionStart`（`resumed: false, source: "startup"`）之后、首个 Turn 之前触发 `SubagentStart`（携带 `agentType`：档位名，无档位或 `default` 为 `"general"`，自定义工具集为 `"custom"`；外部 ACP agent 不触发 `SubagentStart`），之后 `TurnStart`（`text` 为任务或催促文本）、`PreToolUse`/`PermissionRequest`/`PostToolUse`、`TurnEnd`、`SessionEnd`（`close` 时）照常触发（子会话不触发 `UserPromptSubmit`）。`HookInput` 增加可选 `subagent?: { parentSessionId, parentCallId, depth }`：Hook 脚本据此区分子会话（例如只审计、或对子会话一律不放宽）。Hook 失败降级、`hook_failed` 警告、只能收紧的边界全部不变；子会话里的 `runtime.warning` 写子会话自己的临时事件。
 
 ## 11. 并发
 

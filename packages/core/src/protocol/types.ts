@@ -614,7 +614,9 @@ export type HookPoint =
   | "PermissionRequest"
   | "TurnStart"
   | "TurnEnd"
+  | "UserPromptSubmit"
   | "SessionStart"
+  | "SubagentStart"
   | "SessionEnd";
 
 /**

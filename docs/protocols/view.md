@@ -10,7 +10,7 @@
 
 - **纯函数、无 I/O**：只依赖 `protocol` 的类型；不触碰文件系统、网络、时钟。遵守 protocol 的全部依赖红线（modules.md §6）。
 - **就地归约**：`reduceSessionView` 原地更新视图并递增 `revision`；客户端按需渲染。需要不可变快照的客户端自行 `structuredClone`（视图只含 JSON 数据）。
-- **容差**：未知事件类型忽略（events.md §8 客户端规则）；事件乱序不崩溃——`tool.completed` 可能先于 `tool.started` 到达（权限拒绝路径），`permission.resolved` 先于 `tool.started`（ask 回复在闸门内结算后才放行执行）。
+- **容差**：未知事件类型忽略（events.md §8 客户端规则）；事件乱序不崩溃——`tool.completed` 可能先于 `tool.started` 到达（权限拒绝路径），`permission.resolved` 先于 `tool.started`（ask 回复在闸门内结算后才放行执行）。持久事件 `hook.context`（[ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)）仅面向模型上下文投影，`SessionView` 不将其投影到 `entries` 或任何视图字段（仅按持久事件规则推进 `lastSeq` 与 `revision`）。
 - **不含行为**：视图不决定能不能做什么，只表达"发生了什么"。权限判定、Turn 推进都在 Runtime；客户端只发命令。
 
 ## 2. 视图状态形状

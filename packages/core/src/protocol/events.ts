@@ -3,6 +3,7 @@
  * 持久化事件构成会话日志的唯一事实来源；临时事件只发布不写日志。
  */
 import type { SkillSnapshot } from "./skills.js";
+import type { HookContextEntry, HookContextPoint } from "./hook-context.js";
 import type {
   EnsembleCreatedPayload,
   EnsembleEndedPayload,
@@ -396,6 +397,12 @@ export type CheckpointFilePayload = {
   sessionId?: string;
 } & ({ phase: "before"; before: CheckpointBefore } | { phase: "after"; sha256: string | null });
 
+export interface HookContextPayload {
+  point: HookContextPoint;
+  source?: string | undefined;
+  entries: HookContextEntry[];
+}
+
 export interface DurablePayloadMap {
   "shell.task_stopped": BackgroundShellResult & { status: "killed"; source: "user" | "model" };
   "shell.result_discarded": BackgroundShellResult;
@@ -414,6 +421,7 @@ export interface DurablePayloadMap {
   "permission.reviewed": PermissionReviewedPayload;
   "tool.completed": ToolCompletedPayload;
   "context.compacted": ContextCompactedPayload;
+  "hook.context": HookContextPayload;
   "turn.completed": TurnCompletedPayload;
   "ensemble.created": EnsembleCreatedPayload;
   "ensemble.member_added": EnsembleMemberAddedPayload;
@@ -526,6 +534,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "permission.reviewed",
   "tool.completed",
   "context.compacted",
+  "hook.context",
   "turn.completed",
   "ensemble.created",
   "ensemble.member_added",

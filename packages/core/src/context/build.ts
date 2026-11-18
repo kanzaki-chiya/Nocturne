@@ -15,6 +15,7 @@ import type {
 import {
   DEFAULT_PRUNE_LIMIT,
   estimateTokens,
+  formatHookContextSystem,
   parseCompactionPruneLimit,
   parseCompactionThreshold,
   effectiveEvents,
@@ -1191,6 +1192,7 @@ function anchoredEstimate(input: BuildContextInput): number | undefined {
       (event) =>
         event.seq > anchor.seq &&
         (event.type === "attachment.described" ||
+          (event.type === "hook.context" && event.payload.point !== "UserPromptSubmit") ||
           (event.type === "session.config_changed" &&
             event.payload.model !== undefined &&
             (event.payload.model.provider !== ref.provider ||
@@ -1269,7 +1271,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     });
   }
 
-  // 4. 环境信息
+  // 4. 技能目录、Hook 上下文与环境信息
   if (input.skills?.text) {
     system.push({ text: input.skills.text });
     sections.push({
@@ -1278,6 +1280,16 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       chars: input.skills.text.length,
       estimatedTokens: estimateTokens(input.skills.text),
       truncated: input.skills.truncated,
+    });
+  }
+  const hookText = formatHookContextSystem(input.hookContext);
+  if (hookText !== undefined) {
+    system.push({ text: hookText.text });
+    sections.push({
+      name: "hooks",
+      source: `${hookText.count} entries`,
+      chars: hookText.text.length,
+      estimatedTokens: estimateTokens(hookText.text),
     });
   }
   const envText = environmentText(input);

@@ -63,6 +63,7 @@ import {
   type ToolDefinition,
 } from "../tools/index.js";
 import { runTurn } from "./turn.js";
+import { runHookContextSnapshot } from "./hook-context.js";
 import type { PreparedInput } from "../protocol/index.js";
 import { backgroundAdmission, type BackgroundSubagents } from "./background-subagents.js";
 import type { TurnConfig, TurnDeps } from "./types.js";
@@ -921,8 +922,18 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           toolCount: selected.length,
         });
 
+        const agentType =
+          request.profile !== undefined && request.profile !== "default"
+            ? request.profile
+            : (request.preset ?? (request.tools !== undefined ? "custom" : "general"));
         if (childRunner !== undefined) {
-          await childRunner.run("SessionStart", { resumed: false }).catch(() => undefined);
+          await runHookContextSnapshot(child, childRunner, "SessionStart", {
+            resumed: false,
+            source: "startup",
+          });
+          await runHookContextSnapshot(child, childRunner, "SubagentStart", {
+            agentType,
+          });
         }
 
         // 子会话环境信息在派生时刻生成（ADR-0022：Shell 行取当前生效值）
@@ -980,6 +991,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 shouldFinish: finishSubmitted,
                 // ADR-0031 §3：子代理请求填根会话 ID
                 rootSessionId: deps.rootSessionId,
+                userPrompt: false,
                 ...(!last && childEffort !== undefined ? { reasoningEffort: childEffort } : {}),
                 ...(last ? { toolChoice: { name: "finish" } } : {}),
               };

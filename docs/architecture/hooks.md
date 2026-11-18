@@ -1,6 +1,6 @@
 # Hooks
 
-> 状态：已接受 v0.1（Phase 5 已验收）｜ 前置阅读：[tools.md](tools.md) 第 3 节、[permissions.md](permissions.md)、[config.md](config.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md) ｜ 决策：[ADR-0012](../decisions/ADR-0012-hooks.md)
+> 状态：已接受 v0.2（[ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md) 修订）｜ 前置阅读：[tools.md](tools.md) 第 3 节、[permissions.md](permissions.md)、[config.md](config.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md) ｜ 决策：[ADR-0012](../decisions/ADR-0012-hooks.md)、[ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)
 
 Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一个子进程，stdin 传入 JSON 上下文，读取 stdout 的 JSON 结果（或退出码语义），把结果作为**输入/建议**合并进既有管线。Hook 不是事件系统插件——它不能调用 Runtime 内部 API，只能在自己的事件点上做契约允许的有限动作。
 
@@ -11,17 +11,19 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 | `PreToolUse` | 管线第 2 步（输入校验）通过之后、第 3 步（权限主体计算）之前 | 拦截或改写工具输入 | `deny` 直接拒绝；`ask` 强制走确认；`updatedInput` 修改输入后**重新校验**。没有 `allow`：此点在主体解析之前运行，看到的是未解析的原始输入（如 `foo/link`），放行等于批准一个解析后才知道目标的操作——放宽只走 `PermissionRequest` |
 | `PermissionRequest` | 规则求值为 `ask` 之后、发出 `permission.requested` 之前 | 把确认自动化（如 CI 策略、审批网关） | `allow` / `deny` 直接结算（无输出字段 = 继续询问用户）；唯一能放宽 `ask` 的 Hook 点，因为它能看到已解析的权限主体 |
 | `PostToolUse` | 工具执行返回之后、结果归一化（第 8 步）之前 | 追加反馈给模型 | `feedback` 追加进 `modelContent`（有上限，见第 4 节）；不能改结果状态 |
-| `TurnStart` | `turn.started` 与 `message.user` 写入之后、Agent Loop 开始前 | 提交级拦截 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算 |
+| `TurnStart` | `turn.started` 与 `message.user` 写入之后、`UserPromptSubmit` 之后、Agent Loop 开始前 | 提交级拦截 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算 |
 | `TurnEnd` | `turn.completed` 写入之后 | 审计/统计 | 无效果（仅通知） |
-| `SessionStart` | 会话打开完成后（新建与恢复都触发） | 环境准备、外部记账 | 无效果（仅通知） |
+| `UserPromptSubmit` | `message.user` 写入后、`TurnStart` 之前（仅本轮由用户输入发起时触发） | 提交前拦截或注入本次用户输入附带上下文 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算并丢弃 `additionalContext`；`additionalContext` 写 `hook.context` 并折叠为该条 `message.user` 之后的 `note` |
+| `SessionStart` | 会话新建、恢复、分叉打开后；以及 L2 摘要（自动或手动）成功后、下一次模型请求前 | 环境准备、外部记账、会话级上下文注入 | `additionalContext` 写 `hook.context` 作为会话快照（与 `SubagentStart` 共用 system `hookContext` section，位于技能目录之后、环境信息之前） |
+| `SubagentStart` | 子会话的 `SessionStart` 之后、第一个 Turn 之前（外部 ACP agent 不触发） | 子会话级上下文注入与记账 | `additionalContext` 写 `hook.context` 作为子会话快照（同 `SessionStart` 进入 `hookContext` section） |
 | `SessionEnd` | `session.close()` 内、清理开始前 | 清理、审计 | 无效果（仅通知） |
 
 取哪些点的理由：
 
 - `PreToolUse` / `PostToolUse` 是 tools.md 预留的两个点位，覆盖绝大多数用途。
 - `PermissionRequest` 解决真实需求：团队想在 `ask` 时自动放行"安全"操作、自动拒绝"危险"操作，而不是每次问人。它与 `PreToolUse` 有重叠但语义不同——前者在**权限主体已解析**之后运行，能拿到精确的权限请求内容（`mcp github/push` 而不是模糊的工具名）。
-- `SessionStart` / `SessionEnd` 是生命周期里唯二不耦合 turn 节奏的点（恢复会话时也会触发 `SessionStart`，便于"恢复后继续"场景）。
-- 后台子代理结果（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §3）不是用户输入：它唤起的 Turn 照常触发 `TurnStart`（`text` 为结果消息正文），但不得触发用户输入类点位——将来实现 `UserPromptSubmit` 时须跳过带 `subagent` 的消息。
+- `SessionStart` / `SessionEnd` 是生命周期里唯二不耦合 turn 节奏的点（恢复、分叉与 L2 摘要后也会触发 `SessionStart`，便于"恢复/压缩后重注规则"场景）；`SubagentStart` 在子会话首个 Turn 前单独注入子代理所需上下文。
+- 后台子代理结果（[ADR-0073](../decisions/ADR-0073-background-subagents.md) §3）与运行时内部消息不是用户输入：它们唤起的 Turn 照常触发 `TurnStart`，但**不**触发 `UserPromptSubmit`。具体跳过：带 `subagent` / `backgroundShell` / `ensemble` / `ensembleQuietReminder` 的消息、`workMode.source === "runtime"` 的消息、`steer: true`（插话）以及子会话内的消息。
 - `TurnStart` / `TurnEnd` 提供提交级拦截与审计；`TurnStart` 放在 `message.user` **之后**是有意的——被拦截的输入仍然落进持久日志，可审计。
 - **不做**：`ModelRequest`/`ModelResponse`（采样级 Hook 会把模型上下文暴露给外部进程，信任与脱敏问题另议）、`Compact`（若加入，需另行设计）。
 
@@ -51,10 +53,10 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 - **stdin**：单个 JSON 对象，`Content-Type` 隐含 UTF-8，写完关闭。字段：
   - 公共：`point`（事件点名）、`sessionId`、`cwd`、`workspaceRoot`、`turnId?`；`subagent?: { parentSessionId, parentCallId, depth }` 仅子会话上下文出现（Phase 6，Hook 据此区分父子会话，见 [subagent.md](subagent.md) 第 10 节）
   - `PreToolUse`/`PermissionRequest`/`PostToolUse`：加 `callId`、`tool`、`input`；`PermissionRequest` 加 `subjects`（已解析权限主体数组）与 `permission`（当前求值结果 `{action, reason, rule?}`）；`PostToolUse` 加 `result`（工具返回的 `{status, modelContent 前 4000 字符, error?}`）
-  - `TurnStart`：加 `text`（用户提交原文）；`TurnEnd`：加 `reason`、`steps`、`usage`；`SessionStart`：加 `resumed`（是否恢复会话）；`SessionEnd`：加 `reason`
+  - `TurnStart`：加 `text`（全部文本块拼接）；`UserPromptSubmit`：加 `turnId`、`text`（用户原文 `submit.text`，不含技能渲染块和文件块）、`skill?: { name, arguments? }`；`TurnEnd`：加 `reason`、`steps`、`usage`；`SessionStart`：加 `resumed`（是否恢复会话）与 `source`（`"startup" | "resume" | "fork" | "compact"`）；`SubagentStart`：加 `agentType`（档位名；无档位或 `default` 为 `"general"`；自定义工具集为 `"custom"`）；`SessionEnd`：加 `reason`
 - **stdout**：单个 JSON 对象（可选；空输出视为"无效果"）。允许字段按点位限定，多写字段忽略；无法解析为 JSON 记失败。
 - **stderr**：进诊断日志（observability.md），不进会话事件。
-- **退出码**：`0` = 成功（按 stdout 的 JSON 生效）；非零 = 失败，stdout 忽略。
+- **退出码**：`0` = 成功（按 stdout 的 JSON 生效）；非零 = 失败，stdout 忽略（不产生上下文，只写诊断，不阻断会话）。
 - **环境**：继承 Runtime 进程环境（Hook 是用户自己写的脚本，定位与本地工具一致），另注入 `NOCTURNE_HOOK_EVENT`、`NOCTURNE_SESSION_ID`、`NOCTURNE_WORKSPACE_ROOT`、`NOCTURNE_CWD`。注意这与 MCP 服务器不同——MCP 子进程只拿白名单环境（mcp.md 第 3 节），因为第三方服务器不该默认看到 Provider 凭据；Hook 进程经 `platform.spawnPipe` 启动，超时/失败时进程树终止——与 MCP 同一套 platform 能力。
 
 按点位的输出契约：
@@ -65,7 +67,9 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 | `PermissionRequest` | `{ "action": "allow" \| "deny", "reason"?: string }`（无字段/无输出 = 继续询问） |
 | `PostToolUse` | `{ "feedback"?: string }`（追加进 `modelContent`，上限 4000 字符，超出截断） |
 | `TurnStart` | `{ "block"?: boolean, "reason"?: string }` |
-| `TurnEnd` / `SessionStart` / `SessionEnd` | 忽略所有输出 |
+| `UserPromptSubmit` | `{ "block"?: boolean, "reason"?: string, "additionalContext"?: string }`（`block: true` 时丢弃 `additionalContext`；每条 `additionalContext` 上限 10,000 字符、单事件合计上限 30,000 字符） |
+| `SessionStart` / `SubagentStart` | `{ "additionalContext"?: string }`（单条上限 10,000 字符，超出截断并在 `truncated` 记被截掉的字符数；单事件全部条目合计上限 30,000 字符，超出后续条目丢弃并写 `hook.context_dropped` 诊断） |
+| `TurnEnd` / `SessionEnd` | 忽略所有输出 |
 
 同一事件点多个条目**按配置顺序串行执行**：`PreToolUse`/`PostToolUse` 后续条目看到前一个条目的 `updatedInput`（链式修改）；`deny` / `block` 结算后短路，不再执行后续条目。
 
@@ -83,7 +87,7 @@ PreToolUse **不能**做的事（设计边界）：
 
 - 不能生成 Grant（`remember` 语义只属于用户确认路径）；
 - 不能放宽权限（无 `allow`，见上）；
-- 不能注入模型上下文（`updatedInput` 是工具参数，不是提示词）；SessionStart 同理（本阶段 Hook 无上下文注入通道，见第 8 节）。
+- 不能注入模型上下文（`updatedInput` 是工具参数，不是提示词；模型上下文注入只属于 `SessionStart` / `SubagentStart` / `UserPromptSubmit`，按第 2、7 节与 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md) 受有界持久事件与快照规则约束）。
 
 ## 4. 超时、失败、输出过大
 
@@ -135,17 +139,17 @@ Hook 调用的耗时计入诊断（`hook.run` 记录），不占 `tool.exec` 的
 
 **不变量**：未配置任何 Hook 时，事件序列、管线步序、权限结果与 Phase 4 逐项一致（测试断言）；配置了 Hook 但未匹配到条目时同样不产生任何可观测差异。
 
-**子会话（Phase 6）**：子代理会话沿用父会话同一批**已按信任过滤**的 Hook 条目，以子会话 `sessionId` 重建 runner——全部点位照常触发（`SessionStart`/`TurnStart`/工具三点/`TurnEnd`/`SessionEnd`），stdin 中 `sessionId` 为子会话 id 并带 `subagent` 标记字段；信任判定不做第二次（未信任项目的条目在父会话装配时已被整段剔除）。效果边界不变：`PermissionRequest` 仍是唯一能放宽 ask 的点，子会话里它是 ask 唯一可能的放行来源（[subagent.md](subagent.md) 第 7 节）。
+**子会话（Phase 6）**：子代理会话沿用父会话同一批**已按信任过滤**的 Hook 条目，以子会话 `sessionId` 重建 runner——`SessionStart`（`resumed: false, source: "startup"`）之后、首个 Turn 之前触发 `SubagentStart`（携带 `agentType`），之后 `TurnStart`/工具三点/`TurnEnd`/`SessionEnd` 照常触发（子会话不触发 `UserPromptSubmit`），stdin 中 `sessionId` 为子会话 id 并带 `subagent` 标记字段；信任判定不做第二次（未信任项目的条目在父会话装配时已被整段剔除）。效果边界不变：`PermissionRequest` 仍是唯一能放宽 ask 的点，子会话里它是 ask 唯一可能的放行来源（[subagent.md](subagent.md) 第 7 节）。
 
 ## 7. 事件与诊断
 
-- 不为 Hook 新增持久事件：Hook 是运行态自动化，其效果已经体现在既有持久事件里（`permission.resolved`、`tool.completed`、`turn.completed`）；写 Hook 专属持久事件会提高恢复兼容成本而无对应收益。
-- `PermissionSource` 增加 `"hook"`；`permission.resolved.source = "hook"` 是 Hook 决策的唯一持久痕迹（`rule` 字段记 Hook 描述：`hook PreToolUse <command>`）。
-- 每次 Hook 执行（含失败）写诊断记录 `hook.run` / `hook.done`（observability.md），包含点位、命令、耗时、退出码、效果摘要。
+- `hook.context` 是唯一的 Hook 持久事件（payload 为 `{ point, source?, entries: { hook, text, truncated? }[] }`，`UserPromptSubmit` 带 `turnId`）：Hook 注入的上下文属于模型输入，必须在会话恢复、分叉、回退与重放时逐字可重现，不能只作运行态临时状态。其余点位（`PreToolUse`、`PermissionRequest`、`PostToolUse`、`TurnStart`）仍不新增持久事件，效果继续体现在 `permission.resolved`、`tool.completed`、`turn.completed` 里。
+- `SessionStart` / `SubagentStart` 仅在本次结果与有效历史当前快照不同（含原非空、本次成功执行后为空时写 `entries: []` 清空）时写入 `hook.context`；未配置 Hook 或无匹配条目时不写事件。
+- `PermissionSource` 增加 `"hook"`；`permission.resolved.source = "hook"` 是 Hook 权限决策的持久痕迹（`rule` 字段记 Hook 描述：`hook PreToolUse <command>`）；`hook.context.entries[].hook` 沿用同一格式（`hook <点位> <command>`）。
+- 每次 Hook 执行（含失败）写诊断记录 `hook.run` / `hook.done`（observability.md），包含点位、命令、耗时、退出码、效果摘要；上下文超限丢弃写 `hook.context_dropped`。
 
 ## 8. 暂不设计
 
-- **上下文注入**（SessionStart 返回"附加系统提示"、UserPromptSubmit 改写提示词）：需要上下文构成协议的扩展，等上下文压缩阶段一并设计；本阶段 Hook 只做控制流与反馈。
 - **ModelRequest / 采样级 Hook**：把模型请求暴露给外部进程涉及凭据与内容边界，另议。
 - **Hook 内嵌脚本**（`command: "inline"`）：外部文件已经够用；内嵌会引入引号/转义与平台差异。
 - **并行执行同一事件点**：串行顺序可预期且便于链式 `updatedInput`；并行没有迫切场景。

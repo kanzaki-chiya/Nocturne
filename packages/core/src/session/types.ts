@@ -11,6 +11,7 @@ import type {
   EphemeralType,
   GoalState,
   HistoryEntry,
+  HookContextSnapshot,
   PlanConfig,
   ModelRef,
   ReasoningEffort,
@@ -80,6 +81,8 @@ export interface SessionState {
   todos: TodoItem[];
   /** 最后一次有效且持久化的 note_write 快照（ADR-0095） */
   notes: NoteItem[];
+  /** SessionStart / SubagentStart Hook 的当前会话快照（按有效事件折叠） */
+  hookContext?: HookContextSnapshot | undefined;
   /** 累计 token 用量（由 message.assistant 与 permission.reviewed 的 usage 累加） */
   usage: Usage;
   lastSeq: number;
