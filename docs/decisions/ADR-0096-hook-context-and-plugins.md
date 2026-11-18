@@ -127,7 +127,7 @@ ADR-0012 与 [hooks.md](../architecture/hooks.md) 将 Hook 定位为控制流与
 #### 5. 技能接入与 Runtime / RPC 接口
 
 - 已启用且未变化插件的技能目录（清单 `skills` 字段或默认 `skills/`）作为 `user` 来源层排在 `extraDirs` 之后，优先级最低（同名用户技能优先）；`SkillOverview.source` 新增 `"plugin"`，并新增可选字段 `plugin: "<name>@<marketplace>"`；插件变为 `changed` 时其技能立即消失。
-- `Runtime` 与 RPC 新增 `describePlugins`（`plugins.describePlugins`）与 `setPluginEnabled`（`plugins.setPluginEnabled`，响应前推 `runtime.providersChanged` 并返回 `{ affectedSessions }`）；桌面端界面在下一轮单独实现。
+- `Runtime` 与 RPC 新增 `describePlugins`（`plugins.describePlugins`）与 `setPluginEnabled`（`plugins.setPluginEnabled`，响应前推 `runtime.providersChanged` 并返回 `{ affectedSessions }`）；桌面端界面已实现于「设置 › 插件」（`apps/desktop/src/PluginsPage.tsx`）。
 
 #### 6. 明确不做
 

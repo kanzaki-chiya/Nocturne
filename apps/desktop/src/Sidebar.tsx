@@ -16,6 +16,7 @@ export type SettingsSection =
   | "models"
   | "providers"
   | "mcp"
+  | "plugins"
   | "grants"
   | "skills"
   | "agents"
@@ -107,6 +108,11 @@ const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode
     key: "mcp",
     label: "MCP",
     icon: <Icon name="server" size={ICON_MD} className="glyph" />,
+  },
+  {
+    key: "plugins",
+    label: "插件",
+    icon: <Icon name="code" size={ICON_MD} className="glyph" />,
   },
   {
     key: "browser",

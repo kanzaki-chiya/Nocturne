@@ -10,6 +10,7 @@ const SECTIONS: SettingsSection[] = [
   "agents",
   "skills",
   "mcp",
+  "plugins",
   "browser",
   "computer",
   "grants",

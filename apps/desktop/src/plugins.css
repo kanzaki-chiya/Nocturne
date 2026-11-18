@@ -1,0 +1,139 @@
+.plugins-page .plugin-version {
+  font-family: var(--mono);
+}
+
+.plugins-page .slist-toggle {
+  gap: var(--space-2);
+}
+
+.plugins-page .plugin-warn {
+  color: var(--a-warning);
+}
+
+.plugins-page .chips {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.plugins-page .sbody .chips {
+  padding: var(--space-2) var(--space-1);
+}
+
+.plugins-page .chips span {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  line-height: var(--chip-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  border: 1px solid var(--a-border);
+}
+
+.plugins-page .plugin-hooks {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugins-page .sbody .plugin-hooks {
+  border-top: 1px solid var(--a-border);
+}
+
+.plugins-page .plugin-hook-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--a-border);
+  min-width: 0;
+}
+
+.plugins-page .dlg .plugin-hook-item {
+  padding: var(--space-2) 0;
+}
+
+.plugins-page .dlg .plugin-hook-item:last-child {
+  border-bottom: 0;
+}
+
+.plugins-page .plugin-hook-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.plugins-page .plugin-hook-point {
+  font-family: var(--mono);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-medium);
+  color: var(--a-text);
+}
+
+.plugins-page .plugin-hook-matcher {
+  font-family: var(--mono);
+}
+
+.plugins-page .plugin-hook-cmd {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  line-height: var(--lh-code);
+  color: var(--a-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.plugins-page .plugin-dlg-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  min-width: 0;
+}
+
+.plugins-page .plugin-dlg-section:first-child {
+  margin-top: 0;
+}
+
+.plugins-page .plugin-dlg-title {
+  font-size: var(--fs-1);
+  font-weight: var(--fw-medium);
+  color: var(--a-muted);
+}
+
+.plugins-page .plugin-dlg-unsupported {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugins-page .plugin-dlg-unsupported-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  font-size: var(--fs-2);
+}
+
+.plugins-page .plugin-dlg-unsupported-row code {
+  font-family: var(--mono);
+  color: var(--a-text);
+}
+
+.plugins-page .plugin-warnings {
+  margin: var(--space-2) var(--space-1) 0;
+  font-size: var(--fs-1);
+  color: var(--a-warning);
+}
+
+.plugins-page .plugin-warnings summary {
+  cursor: pointer;
+}
+
+.plugins-page .plugin-warnings div {
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+  color: var(--a-muted);
+}

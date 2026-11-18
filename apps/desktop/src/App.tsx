@@ -71,6 +71,7 @@ import { ConversationHeader } from "./ConversationHeader";
 import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
+import { PluginsPage } from "./PluginsPage";
 import { GrantsPage } from "./GrantsPage";
 import { SessionGrants, useSessionGrants } from "./SessionGrants";
 import { desktopWarningText } from "./open-warnings";
@@ -2068,6 +2069,19 @@ export function App({ host }: { host: DesktopHost }) {
                       }}
                       loadLive={loadLiveMcp}
                       liveRevision={liveMcpRevision}
+                    />
+                  </PaneErrorBoundary>
+                ) : settingsPage === "plugins" ? (
+                  <PaneErrorBoundary key="plugins">
+                    <PluginsPage
+                      client={pageClient}
+                      version={settingsVersion}
+                      openDirectory={(path) =>
+                        host.invoke("open_skill_directory", {
+                          path,
+                          create: false,
+                        }) as Promise<void>
+                      }
                     />
                   </PaneErrorBoundary>
                 ) : settingsPage === "grants" ? (
