@@ -955,6 +955,11 @@ describe("添加服务商", () => {
     fireEvent.change(searchInput, { target: { value: "ollama" } });
     fireEvent.click(screen.getByRole("button", { name: "Ollama" }));
     await screen.findByRole("heading", { level: 2, name: "添加 Ollama" });
+    const addForm = screen.getByTestId("providers-page").querySelector(".form");
+    expect(addForm?.querySelector(".form-grid")).toBeNull();
+    const fixedEls = Array.from(addForm?.querySelectorAll(".fixed-val") ?? []);
+    expect(fixedEls.map((el) => el.textContent)).toEqual(["ollama", "http://localhost:11434/v1"]);
+    expect(fixedEls.every((el) => el.parentElement?.parentElement === addForm)).toBe(true);
     const fetchBtn = button("获取模型");
     expect(fetchBtn.disabled).toBe(false);
     fireEvent.click(fetchBtn);

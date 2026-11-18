@@ -118,6 +118,8 @@
   min-height: var(--ctl-h-lg);
   display: flex;
   align-items: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .page3 .fetched-models {
   max-height: var(--w-list);

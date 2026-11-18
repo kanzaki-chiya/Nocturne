@@ -2038,15 +2038,11 @@ function PresetForm({
         title={`添加 ${setup.label}`}
       />
       <div className="form">
-        {fixedFields.length > 0 && (
-          <div className="form-grid">
-            {fixedFields.map((f) => (
-              <Field key={f.key} label={labelOf(f.prompt)}>
-                <span className="val mono fixed-val">{f.fixed}</span>
-              </Field>
-            ))}
-          </div>
-        )}
+        {fixedFields.map((f) => (
+          <Field key={f.key} label={labelOf(f.prompt)}>
+            <span className="val mono fixed-val">{f.fixed}</span>
+          </Field>
+        ))}
         {visibleFields.map((f) => (
           <Field
             key={f.key}
