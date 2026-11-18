@@ -115,6 +115,10 @@ export interface ToolTraits {
    */
   mainSessionOnly?: boolean | undefined;
   /**
+   * 声明工具会启动一次性子代理会话（如 `task`）：不依赖子代理的工具集按此特性排除，不按名字判断。
+   */
+  spawnsSubagent?: boolean | undefined;
+  /**
    * 编辑工具归属（ADR-0035 §5）：声明后仅当模型的
    * capabilities.editTool 等于该值时对模型可见（specs 不列出、
    * 执行按 unknown_tool 结算）；未声明始终可见。子代理按子会话

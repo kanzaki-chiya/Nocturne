@@ -14,6 +14,15 @@ import type {
   EnsemblePostDelivery,
   EnsemblePostedPayload,
 } from "./ensemble.js";
+import type {
+  SuiteReportDelivery,
+  SuiteThreadModelChangedPayload,
+  SuiteThreadReopenedPayload,
+  SuiteThreadReportedPayload,
+  SuiteThreadResolvedPayload,
+  SuiteThreadStartedPayload,
+  SuiteThreadUpdatedPayload,
+} from "./suite.js";
 import type { GoalConfig, PlanConfig, WorkModeSnapshot } from "./work-modes.js";
 import type {
   AgentDelegation,
@@ -34,6 +43,7 @@ import type {
   ReasoningEffort,
   SessionClient,
   SessionSchedule,
+  SessionSuiteMeta,
   ToolCallRef,
   Usage,
 } from "./types.js";
@@ -57,6 +67,8 @@ export interface SessionCreatedPayload {
   schedule?: SessionSchedule | undefined;
   /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5）；旧版本读到时忽略 */
   client?: SessionClient | undefined;
+  /** 组曲会话归属（ADR-0097）；旧版本读到时忽略 */
+  suite?: SessionSuiteMeta | undefined;
 }
 
 export interface SessionConfigChangedPayload {
@@ -137,6 +149,8 @@ export interface MessageUserPayload {
   ensemble?: EnsemblePostDelivery | undefined;
   /** Ensemble Runtime 安静提醒标记（ADR-0089 §9 修订）：写进指挥日志供模型唤醒与重放，不在对话视图显示 */
   ensembleQuietReminder?: true | undefined;
+  /** 组曲线程自动汇报投递标记（ADR-0097 §3.4）；旧版本忽略未知字段，不提升 formatVersion */
+  suiteReport?: SuiteReportDelivery | undefined;
   messageId: string;
   content: ContentBlock[];
   /** 随消息附带的图片引用（ADR-0023，粘贴/拖入）；无附件时缺省 */
@@ -429,6 +443,11 @@ export interface DurablePayloadMap {
   "ensemble.member_model_changed": EnsembleMemberModelChangedPayload;
   "ensemble.member_removed": EnsembleMemberRemovedPayload;
   "ensemble.ended": EnsembleEndedPayload;
+  "suite.thread_started": SuiteThreadStartedPayload;
+  "suite.thread_reported": SuiteThreadReportedPayload;
+  "suite.thread_resolved": SuiteThreadResolvedPayload;
+  "suite.thread_reopened": SuiteThreadReopenedPayload;
+  "suite.thread_model_changed": SuiteThreadModelChangedPayload;
 }
 
 export interface SubagentPendingPermission {
@@ -460,6 +479,7 @@ export interface SubagentPermissionsPayload {
 export interface EphemeralPayloadMap {
   "shell.task_updated": { task: BackgroundShellTask };
   "ensemble.member_updated": EnsembleMemberUpdatedPayload;
+  "suite.thread_updated": SuiteThreadUpdatedPayload;
   "subagent.permissions": SubagentPermissionsPayload;
   "message.assistant.delta": AssistantDeltaPayload;
   "tool.input.delta": ToolInputDeltaPayload;
@@ -542,6 +562,11 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "ensemble.member_model_changed",
   "ensemble.member_removed",
   "ensemble.ended",
+  "suite.thread_started",
+  "suite.thread_reported",
+  "suite.thread_resolved",
+  "suite.thread_reopened",
+  "suite.thread_model_changed",
 ];
 
 const DURABLE_TYPE_SET: ReadonlySet<string> = new Set(DURABLE_EVENT_TYPES);
@@ -563,6 +588,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "input.pending",
   "shell.task_updated",
   "ensemble.member_updated",
+  "suite.thread_updated",
   "subagent.permissions",
 ];
 

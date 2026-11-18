@@ -67,6 +67,8 @@ interface SessionView {
   backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
   /** Ensemble 派生视图（ADR-0089）：持久骨架由 ensemble.* 事件归约，成员运行态由临时事件 ensemble.member_updated 更新 */
   ensemble?: EnsembleView;
+  /** 组曲（Suite）派生视图（ADR-0097）：持久骨架由 suite.* 事件归约，线程运行态由临时事件 suite.thread_updated 更新 */
+  suite?: SuiteView;
   /** 在途实体：只由临时事件创建，对应持久事件到达时转入 entries（§4） */
   live: {
     assistants: LiveAssistant[];
@@ -88,7 +90,7 @@ interface SessionView {
 ```ts
 type ViewEntry =
   | { kind: "user"; key: string; seq: number; turnId: string; content: ContentBlock[];
-      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; steer?: true; subagent?: SubagentResult; workMode?: { name: string; body: string }; descriptions?: AttachmentDescribedPayload[] }
+      attachments?: ImageAttachment[]; fileRefs?: FileRef[]; skill?: { name: string; body: string }; delegate?: { agent: string; task: string }; steer?: true; subagent?: SubagentResult; suiteReport?: SuiteReportDelivery; workMode?: { name: string; body: string }; descriptions?: AttachmentDescribedPayload[] }
   | AssistantEntry
   | ToolEntry
   | NoticeEntry;
@@ -271,6 +273,8 @@ Phase 6 的基础进度仍只经 `tool.progress`（`stream:"info"`）进入 `liv
 合奏（内部标识 `ensemble`，[ADR-0089](../decisions/ADR-0089-ensemble.md)）：`SessionView.ensemble` 由指挥（Maestro，`@maestro`）日志中的 `ensemble.created` / `member_added` / `posted` / `member_model_changed` / `member_removed` / `ended` 持久事件建立成员清单（含每名成员的 `model`、`lastPostNumber`、最近活动 `activity`）与留言板帖子列表；持久重放时未移除成员的状态均为 `"waiting"`、`pendingPermissions` 为空。视图顶层记录两个事件坐标：`createdSeq`（建群事件自身的 `seq`）与其后紧凑排列的 `endedSeq?`（`ensemble.ended` 事件自身的 `seq`）——活动期间 `endedSeq` 为 `undefined`；同一会话再次 `ensemble.created` 时整个视图重建，`createdSeq` 换新值，`endedSeq` 回到 `undefined`。运行中成员的实时状态（`working` / `waiting` / `paused`、当前工具行摘要、暂停错误及等待用户确认的权限请求）经临时事件 `ensemble.member_updated` 更新，并汇总出 `awaitingPermissionMembers`（成员在等确认时客户端据此提示并跳转到成员会话）。分叉（`session.created.forkedFrom`）不继承分叉点及之前的合奏；对话回退到 `ensemble.created` 之前时 Runtime 追加 `ensemble.ended(reason: "rewound")`，折叠时记录该事件的 `endedSeq`。成员实时运行态字段（如 `paused` 与 `toolActivity`）与 `mcpServers`、`backgroundShells[].outputChars` 同属运行期瞬态投影。
 
 指挥与成员的 `activity` 是结构化的 `EnsembleActivity`，协议层不产出给人看的句子，由客户端按 `kind` 组成文字：`{ kind: "tool", tool, detail? }`（正在执行的工具及主要参数）、`{ kind: "permission", target? }`（等待用户确认，`target` 为首个确认对象或原因）、`{ kind: "paused", code, message }`（上一轮以错误结束）、`{ kind: "post", number, line }`（最近帖子首行）、`{ kind: "charter", line }`（尚未发帖时取任务书「负责」段首行）、`{ kind: "removed", reason? }`。成员的 `toolActivity` 为 `{ tool, detail? }`。
+
+组曲（Suite，[ADR-0097](../decisions/ADR-0097-suites.md)）：`SessionView.suite` 仅在组曲指挥会话（`session.created.suite.role === "coordinator"` 且非分叉）出现，由持久事件 `suite.thread_started`、`suite.thread_reported`、`suite.thread_resolved`、`suite.thread_reopened`、`suite.thread_model_changed` 与 `tool.completed(name: "apply_subagent_changes", status: "ok")`（清除对应线程 `hasUnmergedWorktree`）归约出线程清单、最近汇报首行（`lastReportLine`）与未并回标记；每条线程按 `computeSuiteThreadGroup` 归入五个总览分组之一：`needs_attention`（待确认权限/提问或 `paused`）、`running`（`working`）、`unmerged`（独立工作树有未并回提交）、`resolved`（已标记完成）、`idle`（其余）。临时事件 `suite.thread_updated` 更新线程实时 `status`（`working`/`idle`/`paused`）、`toolActivity`、`pauseError`、`pendingPermissions`、`hasPendingQuestion` 与 `hasUnmergedWorktree`，并重算 `group` 与 `needsAttentionThreads`。持久重放时未结束线程的状态归为 `idle`（上一轮为 `paused` 且 `pauseError` 来自最近 `suite.thread_reported` 时保持 `paused`）、`toolActivity` 为 `undefined`、`pendingPermissions` 为 `[]`、`hasPendingQuestion` 为 `false`。指挥对话回退不撤销 `suite.*` 事件也不回收线程。
 
 ## 5. 权限请求生命周期
 

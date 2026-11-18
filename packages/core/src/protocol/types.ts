@@ -1,6 +1,7 @@
 import type { BackgroundShellResult, SubagentResult } from "./events.js";
 import type { SkillSnapshot } from "./skills.js";
 import type { EnsemblePostDelivery } from "./ensemble.js";
+import type { SuiteReportDelivery } from "./suite.js";
 /**
  * 公共数据类型（docs/protocols/events.md 第 4 节）。
  * 只包含类型，不包含任何行为或 I/O。
@@ -29,6 +30,16 @@ export interface SessionClient {
   name: string;
   deviceId: string;
   id?: string | undefined;
+}
+
+/** 组曲会话角色（ADR-0097） */
+export type SessionSuiteRole = "coordinator" | "thread";
+
+/** 组曲会话归属元数据（`session.created.suite`，ADR-0097） */
+export interface SessionSuiteMeta {
+  id: string;
+  role: SessionSuiteRole;
+  threadId?: string | undefined;
 }
 
 /** 用户点名外部 agent 的任务原文快照（ADR-0049 第 2 步）。 */
@@ -549,6 +560,7 @@ export type HistoryEntry =
       backgroundShell?: BackgroundShellResult | undefined;
       ensemble?: EnsemblePostDelivery | undefined;
       ensembleQuietReminder?: true | undefined;
+      suiteReport?: SuiteReportDelivery | undefined;
     }
   | {
       kind: "assistant";

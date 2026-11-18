@@ -41,7 +41,8 @@
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
 - `schedule`（定时任务的计划、存储与调度循环）依赖 protocol、platform，以及 session 的锁和 config 的原子写；不依赖 agent、tools。由 `core/index` 装配，`tools` 只经注入的接口读写（见 [schedule.md](schedule.md)）。
-- `resident`（常驻子会话共享层）只依赖 protocol、platform 与 tools（`ToolDefinition` 类型）；不得依赖 `ensemble`、`agent`、`session`。由 `core/index` 装配并注入给 `ensemble`（及后续组曲）。
+- `resident`（常驻子会话共享层）只依赖 protocol、platform 与 tools（`ToolDefinition` 类型）；不得依赖 `ensemble`、`agent`、`session`。由 `core/index` 装配并注入给 `ensemble` 与 `suites`。
+- `suites`（组曲，[ADR-0097](../decisions/ADR-0097-suites.md)）只依赖 `resident`、`protocol`、`platform`、`config`（原子写）、`tools`（类型）与 `provider`（`clampReasoningEffort`、`ResolvedModel` 类型）；不得依赖 `ensemble`、`agent`、`session`；只由 `core/index` 引用（由 dependency-cruiser `suites-deps` 与 `only-index-imports-suites` 固化）。
 - `packages/mcp`（`@nocturne/mcp`）只允许依赖 `@nocturne/core` 的 `index` / `protocol/index` 两个入口与 `@modelcontextprotocol/sdk`——与 `apps/*` 同一检查规则；**Core 不依赖 `mcp`**（见 [mcp.md](mcp.md)、[ADR-0011](../decisions/ADR-0011-mcp-client.md)）。
 - `packages/mcp-server`（`@nocturne/mcp-server`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md)）是对外 MCP 服务器桥：对外经 `@modelcontextprotocol/sdk` 提供 stdio MCP 服务，对内经 `@nocturne/rpc/client` 与 `@nocturne/remote` 连接桌面后台的本机管道，并使用 `@nocturne/core/protocol` 折叠会话视图。**不依赖 `@nocturne/core` 运行时或 `@nocturne/rpc/server`**，不读写会话日志与凭据；仅由 `apps/cli`（`nctrn mcp` 子命令入口）调用，由 depcheck `mcp-server-*` 与 `only-cli-imports-mcp-server` 规则强制。
 - `packages/acp`（`@nocturne/acp`）只依赖 Core 公开入口与 `@agentclientprotocol/sdk`，由 CLI 经 `RuntimeOptions.externalAgents` 注入；Core 不依赖 ACP 实现。权限判定留在 Core 权限层，connector 只映射 ACP 主体与一次性选项，见 [subagent.md](subagent.md#17-外部-agentacp)。
@@ -210,6 +211,12 @@
 - **负责**：Ensemble 执行方式（[ADR-0089](../decisions/ADR-0089-ensemble.md)）的会话级控制器、留言板提及解析与投递、常驻成员生命周期与安静提醒、模型/档位校验以及六个指挥（Maestro，`@maestro`）工具与成员发帖/检出工具定义。工作树操作与常驻子会话打开由 `core/index` 注入。
 - **不负责**：Turn 编排与安全点（Agent Loop 不感知 Ensemble）、权限判定（走成员自身 `PermissionGate`）、视图纯函数归约（在 `protocol`）。
 - **依赖**：`resident`、`protocol`、`tools`、`provider`（类型）、`session`（类型）；仅由 `core/index` 引用（dependency-cruiser 规则 `ensemble-deps` 与 `only-index-imports-ensemble` 固化）。
+
+### suites（`src/suites/`）
+
+- **负责**：长期工作流「组曲（Suite）」（[ADR-0097](../decisions/ADR-0097-suites.md)）的持久化存储（`store.ts`：`<NOCTURNE_HOME>/suites/<suiteId>/suite.json`，共用 `config/files.ts` 原子写队列）、指挥与线程提示词构造（`prompts.ts`）、五个指挥工具（`tools.ts`：`thread_start` / `thread_send` / `thread_list` / `thread_read` / `thread_resolve`）以及指挥会话控制器（`controller.ts`：管理线程生命周期、常驻子会话懒打开、工作树增量检查点与并回、每轮 `<thread-report>` 自动汇报、状态广播、重启补报与用户直连动作）。工作树操作与常驻子会话打开由 `core/index` 经 `resident` 接口注入。
+- **不负责**：Turn 编排与安全点（Agent Loop 不感知组曲）、权限判定（走线程自身 `PermissionGate`）、组曲记忆读写（复用 `memory` 模块 `suite` 范围）、视图纯函数归约（在 `protocol/suite.ts`）。
+- **依赖**：`resident`、`protocol`、`platform`、`config`（`files.ts` 原子写）、`tools`（类型）、`provider`（`clampReasoningEffort`、`ResolvedModel` 类型）；不得依赖 `ensemble`、`agent`、`session`，仅由 `core/index` 引用（dependency-cruiser 规则 `suites-deps` 与 `only-index-imports-suites` 固化）。
 
 ### core/index（公开 API）
 

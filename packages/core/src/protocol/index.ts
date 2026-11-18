@@ -36,4 +36,5 @@ export * from "./work-modes.js";
 export * from "./workspace-branches.js";
 export * from "./background-shell.js";
 export * from "./ensemble.js";
+export * from "./suite.js";
 export * from "./memory.js";

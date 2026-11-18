@@ -46,8 +46,14 @@ Claude Code Projects 把这种用法做成了产品：一条常驻的协调对�
   - `ResidentWorktreeHandle` 与 `ResidentWorktreeOps`（由原 `EnsembleWorktreeHandle` / `EnsembleWorktreeOps` 改名而来）。
 - `packages/core/src/index.ts` 将原合奏专用装配类型与内部控制符号改为中性的 `ResidentChildAssemblyOptions`（带 `kind: ResidentKind`）、`ResidentChildInternalControls` 与 `RESIDENT_CHILD_CONTROLS`，并在 `assembleSession` 作用域内提取可复用的 `openResidentChild(spec, isParentActive)` 与 `residentWorktreeOps(parentSessionId, activeIsolatedChildIds)`，由 `ensemble` 控制器与后续 `suites` 指挥共同注入；`session/subagent-observe.ts` 经注入的 `isResidentParent`（底层调用 `residentKindOf`）排除常驻子会话；`protocol/types.ts` 的 `PendingInputMode` 预留 `"suite"` 类型成员。
 - `packages/core/src/ensemble/controller.ts` 改用 `resident` 层的类型并在导出入口保留原别名（`ManagedMemberSession`、`EnsembleMemberOpenSpec`、`EnsembleWorktreeHandle`、`EnsembleWorktreeOps`）；合奏行为不变，既有测试原样通过即为验收标准。
-- 后续组曲实现新增 `packages/core/src/suites/`，与 `ensemble/` 平级，**不 import `ensemble/`**。
-- `docs/architecture/modules.md` 与 `.dependency-cruiser.cjs` 增加 `resident` 一节及 `resident-deps` 规则：`resident` 只依赖 `protocol`、`platform` 与 `tools`（`ToolDefinition` 类型），不得依赖 `ensemble`、`agent`、`session`；`ensemble` 可以依赖 `resident`。后续新增 `suites` 时再补充 `suites` 规则（依赖 `protocol`、`platform`、`config` 原子写与 `resident`）。
+- 后续组曲实现新增 `packages/core/src/suites/`，与 `ensemble/` 平级，**不 import `ensemble/`**，实际文件与导出接口如下：
+  - `packages/core/src/suites/store.ts`：`createSuiteStore`、`isValidSuiteId`、`newSuiteId`、`SuiteStore`（读写 `<NOCTURNE_HOME>/suites/<suiteId>/suite.json`，走 `config/files.ts` 的 `enqueueConfigWrite` 与 `writeJsonAtomic`）；
+  - `packages/core/src/suites/prompts.ts`：`buildSuiteCoordinatorPrompt`、`buildSuiteThreadPrompt`（`SuiteCoordinatorPromptInput`、`SuiteThreadPromptInput`）；
+  - `packages/core/src/suites/tools.ts`：`createSuiteCoordinatorTools`、`SUITE_COORDINATOR_TOOL_NAMES`、`SUITE_THREAD_READ_DEFAULT_LIMIT`（5）、`SUITE_THREAD_READ_MAX_LIMIT`（50）及相关类型（五个指挥工具 `thread_start` / `thread_send` / `thread_list` / `thread_read` / `thread_resolve`）；
+  - `packages/core/src/suites/controller.ts`：`createSuiteController`、`SuiteController`、`SuiteControllerDeps`、`SuiteEnabledModelEntry`、`SuiteAvailableProfileEntry`（管理线程生命周期、常驻子会话懒打开、工作树增量检查点与并回、每轮 `<thread-report>` 自动汇报、状态广播、重启补报、用户直连动作与关闭收尾）；
+  - `packages/core/src/suites/index.ts`：统一导出以上模块，仅由 `packages/core/src/index.ts` 引入；
+  - `packages/core/src/protocol/suite.ts`：组曲记录/输入类型（`SuiteRecord`、`CreateSuiteInput`、`UpdateSuiteInput`）、事件 payload、`<thread-report>` 格式化与 `SessionView.suite` 归约纯函数（`computeSuiteThreadGroup`、`reduceSuiteDurable`、`applySuiteThreadUpdated`、`summarizeSuiteToolCall` 等）。
+- `docs/architecture/modules.md` 与 `.dependency-cruiser.cjs` 增加 `resident` 一节及 `resident-deps` 规则：`resident` 只依赖 `protocol`、`platform` 与 `tools`（`ToolDefinition` 类型），不得依赖 `ensemble`、`agent`、`session`；`ensemble` 可以依赖 `resident`。`suites` 由 `suites-deps`（允许 `resident`、`protocol`、`platform`、`config`、`tools`、`provider`）与 `only-index-imports-suites` 规则约束，不依赖 `ensemble`、`agent`、`session`。
 
 ### 3.2 存储
 

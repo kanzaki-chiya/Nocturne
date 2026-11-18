@@ -33,7 +33,7 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `listSessions` | `{ cwd?, includeSubagents?, includeArchived? }`（归档默认排除，本机可显式包含并返回 `archivedAt`；非本机强制排除，ADR-0080） → `(SessionSummary & { openHere?: boolean })[]`；`SessionSummary.lastUserMs` 为最后一条由用户发出的消息时间戳（旁路缺失或无效、或旧后台均缺省，客户端排序退回 `mtimeMs`）。`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
+| `listSessions` | `{ cwd?, includeSubagents?, includeSuiteCoordinators?, includeArchived? }`（子会话与组曲指挥会话均默认排除；归档默认排除，本机可显式包含并返回 `archivedAt`；非本机强制排除，ADR-0080、ADR-0097） → `(SessionSummary & { openHere?: boolean })[]`；`SessionSummary.lastUserMs` 为最后一条由用户发出的消息时间戳（旁路缺失或无效、或旧后台均缺省，客户端排序退回 `mtimeMs`）。`openHere` 表示此刻在本后台 Hub 已打开或正在打开，与调用连接是否持有引用无关；关闭后为 false。`locked` 仍按锁文件判定，不区分持有者。旧客户端忽略此字段，旧后台缺省时客户端沿用原来的锁标记与跟踪逻辑 |
 | `searchSessions` | `{ query: string, searchId?: string, includeArchived?: boolean }`（默认不搜归档，本机可显式包含） → 完整 `SessionSearchResult[]`（[ADR-0077](../decisions/ADR-0077-cross-session-search.md)）；`query` 必须为字符串。`searchId` 由客户端为每次查询生成，提供时经 `runtime.sessionSearchProgress` 交付有序增量，省略时不发进度通知。同一连接发起新查询或断线时立即中止上一次扫描、丢弃待发批次（被取代的旧查询返回 `[]`）；最终响应始终为完整结果 |
 | `createSession` | `CreateSessionOptions` → `SessionOpened`；ADR-0051 新增可选 `cwd` 与 `workspaceRoot`，按该目录加载项目层并把两个值写入 `session.created`。`cwd` 缺省沿用 Runtime 的 cwd；工作区根依次取显式 `workspaceRoot`、显式 `cwd` 的真实路径、Runtime 的 workspaceRoot；[ADR-0085](../decisions/ADR-0085-new-session-branch-picker.md) 新增可选 `branch: { name: string, create?: boolean }`（仅本机连接允许，远程连接携带时报 `remote_not_allowed`），在不切换项目目录分支的前提下将新会话定位或建工作树到 `<repo>-wt/<branch>` 并写 `session.config_changed.worktree`；恢复会话沿用日志记录的工作区，不带参数 |
 | `resumeSession` | `{ sessionId, model?, force? }` → `SessionOpened` |
@@ -79,6 +79,8 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `postToEnsemble` | `{ text: string }` → `{ number: number, recipients: string[] }`；在活动合奏（内部标识 `ensemble`）留言板发帖（[ADR-0089](../decisions/ADR-0089-ensemble.md) §10），解析正文 `@` 提及，无提及默认 `@maestro`；本机与远程均可用 |
 | `removeEnsembleMember` | `{ name: string }` → `null`；移除成员，独立工作树有未并回提交时报 `invalid_command`；本机与远程均可用 |
 | `endEnsemble` | → `{ unmerged: EnsembleUnmergedWorktree[] }`；结束活动合奏，停止成员、清理已并回工作树并返回保留的未并回分支列表；本机与远程均可用 |
+| `resolveThread` | `{ thread: string, reopen?: boolean }` → `null`；组曲总览标记指定线程完成或重新打开（[ADR-0097](../decisions/ADR-0097-suites.md) §3.6）；本机与远程均可用 |
+| `sendToThread` | `{ thread: string, text: string }` → `null`；组曲总览绕过指挥直接向线程发消息（[ADR-0097](../decisions/ADR-0097-suites.md) §3.6）；本机与远程均可用 |
 | `pendingInputs` | → `{ items: PendingInputItem[], paused }`，与临时事件 `input.pending` 同形的完整快照；`input.pending` 不回放，附加后用它对齐（[view.md](view.md#待发输入预览状态)） |
 | `respondPermission` / `respondQuestion` | `{ requestId, reply }` → `null` |
 | `respondSubagentPermission` | `{ childSessionId, requestId, reply }` → `null`；仅路由当前父会话活动转发池中的子代理确认请求（支持嵌套后代冒泡，不打开 child 交互句柄；不匹配、已结束或跨会话树报 `unknown_request`，选项/回复校验失败报 `invalid_reply` 且不清除 pending，见 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)） |
@@ -320,12 +322,24 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `memory.describeMemory` | `{ workspaceRoot? }` → `MemoryDescription`（`{ global, project?, otherProjects }`） |
-| `memory.readMemory` | `{ scope, key?, workspaceRoot?, name }` → `MemoryEntry` |
+| `memory.describeMemory` | `{ workspaceRoot?, suiteId? }` → `MemoryDescription`（`{ global, project?, suite?, otherProjects }`） |
+| `memory.readMemory` | `{ scope, key?, workspaceRoot?, name }` → `MemoryEntry`（`scope` 为 `"global" \| "project" \| "suite"`，组曲记忆传 `scope: "suite", key: suiteId`） |
 | `memory.deleteMemory` | `{ scope, key?, workspaceRoot?, name }` → `null`；实际删除后推 `runtime.providersChanged` |
 | `memory.clearMemory` | `{ scope, key?, workspaceRoot? }` → `null`；清空后推 `runtime.providersChanged` |
 
 开关 `memory.global` / `memory.project` 走 `runtime.describeSettings` / `runtime.updateSettings`。
+
+### 3.16 `suites.*`（ADR-0097）
+
+组曲（Suite）管理方法，本机与远程均可用（第 7 节）。组曲记忆读写复用第 3.15 节 `memory.*` 的 `suite` 范围。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `suites.list` | `{ includeArchived?: boolean }` → `SuiteRecord[]` |
+| `suites.create` | `CreateSuiteInput`（`{ name, workspaces, goal?, instructions?, threadDefaults?, model?, permissionPreset?, reasoningEffort? }`） → `SuiteRecord`；远程创建时对每个 `workspaces` 项执行与 `runtime.createSession` 相同的工作区校验 |
+| `suites.update` | `UpdateSuiteInput`（`{ id, name?, goal?, workspaces?, instructions?, threadDefaults? }`） → `SuiteRecord`；远程修改 `workspaces` 时同样校验工作区 |
+| `suites.archive` | `{ id: string }` → `null`；指挥或任意线程忙时报 `session_busy` |
+| `suites.open` | `{ id: string, model?: string \| ModelRef, force?: boolean }` → `SessionOpened`；经 Hub 共享打开对应组曲的指挥会话，同一连接内已打开时直接返回当前 `SessionOpened` |
 
 ## 4. 订阅与回放
 
@@ -488,6 +502,9 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.enqueueInput` | 允许完整载荷（同 `submit`）。ADR-0070 的「追加消息」：手机可在运行中插话或排队 |
 | `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
 | `session.stopGoal` / `session.cancelGoal` / `session.resumeGoal` / `session.approvePlan` / `session.cancelPlan` | 允许；属于会话内操作（ADR-0076 §7 及修订） |
+| `session.postToEnsemble` / `session.removeEnsembleMember` / `session.endEnsemble` | 允许；合奏指挥与留言板操作（ADR-0089） |
+| `suites.list` / `suites.create` / `suites.update` / `suites.archive` / `suites.open` | 允许（ADR-0097 §3.6）；`suites.create` / `suites.update` 携带 `workspaces` 时逐项复用 `checkRemoteWorkspace` 校验 |
+| `session.resolveThread` / `session.sendToThread` | 允许；组曲总览线程操作（ADR-0097 §3.6） |
 | `session.interrupt` | 请求与通知均允许 |
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作；手机只在后台子代理子视图提供取消 |
 | `subagent.list`、`subagent.subscribe`、`subagent.unsubscribe` | 允许（ADR-0084）：只读、限本连接已打开父会话的直接子会话。总览据 list 区分同步与后台运行项，subscribe / unsubscribe 复用连接内观察和清理机制，不开放子会话交互或工作树操作 |

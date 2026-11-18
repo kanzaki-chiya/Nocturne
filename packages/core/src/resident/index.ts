@@ -4,10 +4,12 @@
  * 只依赖 protocol 与 tools 的 ToolDefinition 类型，不依赖 ensemble 或 suites。
  */
 import type {
+  DurableEvent,
   ModelRef,
   PreparedInput,
   ReasoningEffort,
   RuntimeEvent,
+  SessionSuiteMeta,
   SubagentChanges,
   TurnEndReason,
 } from "../protocol/index.js";
@@ -63,6 +65,7 @@ export interface ResidentChildSession {
   interruptAndWait(): Promise<void>;
   clearPendingInputs(): void;
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
+  durableEvents?(): readonly DurableEvent[];
   closeUnderlying(): Promise<void>;
 }
 
@@ -78,6 +81,7 @@ export interface ResidentChildOpenSpec {
   reasoningEffort?: ReasoningEffort | undefined;
   preset: "general" | "explore";
   worktreePath?: string | undefined;
+  suite?: SessionSuiteMeta | undefined;
   extraTools: ToolDefinition[];
   basePrompt(): string;
   onTurnLifecycle: {

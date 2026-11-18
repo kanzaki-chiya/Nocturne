@@ -179,7 +179,7 @@ launch(request, ctx)
 
 | 方案 | 子会话 ask 的处理 | 能力 | 适用范围 |
 |---|---|---|---|
-| (a) 冒泡到交互父会话（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)） | 经 `SubagentPermissionsDeps` 登记到最外层交互父会话的活动转发池与 `SessionView.pendingSubagentPermissions`，在父会话直接回应；`permission.requested` / `resolved` 仅落子会话日志 | 完整（子代理在 `default`/`smart` 等预设下可获批写/执行，会话 Grant 树共享） | **交互父会话（`interactive: true`）下的全部内置 `task` 子代理**（前/后台、`general`/`explore`、隔离与否、直接及 `maxDepth > 1` 嵌套后代） |
+| (a) 冒泡到交互父会话（[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)） | 经 `SubagentPermissionsDeps` 登记到最外层交互父会话的活动转发池与 `SessionView.pendingSubagentPermissions`，在父会话直接回应；`permission.requested` / `resolved` 仅落子会话日志 | 完整（子代理在 `default`/`smart` 等预设下可获批写/执行，会话 Grant 树共享） | **交互父会话（`interactive: true`）下的全部内置 `task` 子代理**（前/后台、`general`/`explore`、隔离与否、直接及 `maxDepth > 1` 嵌套后代），以及经 `resident` 机制运行的**合奏常驻成员（[ADR-0089](../decisions/ADR-0089-ensemble.md)）与组曲线程（[ADR-0097](../decisions/ADR-0097-suites.md)）** |
 | (b) 非交互拒绝 | `ask` 一律 `deny`（`source: "non_interactive"` 既有路径） | 仅规则、Grant、`--yes`、Hook 或 smart 审查放行的操作可执行 | **非交互宿主**（`interactive: false`、定时任务、`nctrn -p`）以及 **外部 ACP agent**（`task({ agent })`） |
 | (c) 按工具集预设 | 正交能力裁剪：`explore` 只含只读工具 | 只读场景在默认规则下自动放行 | 与 (a)/(b) 均兼容；工作区外读取、`mcp` 等仍按规则进入 ask/转发或非交互拒绝 |
 
@@ -187,7 +187,7 @@ launch(request, ctx)
 
 - 交互父会话派生的内置 `task` 子代理不再以 `non_interactive` 直接拒批，而是通过注入的 `SubagentPermissionsDeps` 打开子会话 `PermissionGate` 的交互开关（`interactive: true`）并将待决请求登记到最外层交互父会话的活动转发池（`smart` 预设仍先经过 `PermissionRequest` Hook 与安全审查，仅 `unsure` 或 `userOnly` 主体进入等待确认）。
 - 非交互宿主（`interactive: false`、定时任务、`nctrn -p`）与外部 ACP agent（[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）保持原非交互语义不变；`ask_user` 工具（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）仍不向子代理暴露、也不参与转发。
-- **修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8：Ensemble 常驻成员权限确认）**：Ensemble 常驻成员仍使用成员自己会话的交互式 `PermissionGate`，请求原样挂在成员自身 `SessionView.pendingPermission` 上并通过 `ensemble.member_updated` 汇报给指挥。
+- **修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8、[ADR-0097](../decisions/ADR-0097-suites.md) §3.4：常驻子会话权限确认）**：合奏常驻成员与组曲线程除了冒泡到父会话（经 `respondSubagentPermission` 确认），其请求也原样保留在自身 `SessionView.pendingPermission` 上，并分别通过 `ensemble.member_updated` 与 `suite.thread_updated` 汇报给指挥与总览；用户可直接打开线程或成员会话确认，也可经父会话转发池确认。
 
 ### 7.2 子会话的有效策略
 

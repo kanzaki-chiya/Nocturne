@@ -271,6 +271,26 @@ module.exports = {
       to: { path: "^packages/core/src/ensemble/" },
     },
     {
+      name: "suites-deps",
+      severity: "error",
+      comment:
+        "suites（组曲，ADR-0097）只能依赖 resident/protocol/platform/config/tools/provider（不依赖 ensemble/agent/session）",
+      from: { path: "^packages/core/src/suites/" },
+      to: {
+        path: "^packages/core/src/(?!suites/|resident/|protocol/|platform/|config/|tools/|provider/)",
+      },
+    },
+    {
+      name: "only-index-imports-suites",
+      severity: "error",
+      comment: "除 core/index（src/index.ts）外，任何模块不能 import suites",
+      from: {
+        path: "^packages/core/src",
+        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/suites/"],
+      },
+      to: { path: "^packages/core/src/suites/" },
+    },
+    {
       name: "input-history-deps",
       severity: "error",
       comment: "input-history 只能依赖 platform（modules.md：单文件业务模块）",

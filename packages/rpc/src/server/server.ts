@@ -32,6 +32,7 @@ import {
   type ApplicationTarget,
   type ContentBlock,
   type CreateSessionOptions,
+  type CreateSuiteInput,
   type JevEndpoint,
   type JevReviewerConfig,
   type LoginResult,
@@ -52,7 +53,9 @@ import {
   type SettingsPatch,
   type SubagentObservation,
   type SubmitInput,
+  type SuiteThreadDefaults,
   type UpdateSetupProviderPatch,
+  type UpdateSuiteInput,
 } from "@nocturne/core";
 
 import {
@@ -234,6 +237,11 @@ export const REMOTE_METHODS = [
   "schedule.list",
   "schedule.history",
   "schedule.runNow",
+  "suites.list",
+  "suites.create",
+  "suites.update",
+  "suites.archive",
+  "suites.open",
   "session.subscribe",
   "session.unsubscribe",
   "session.open",
@@ -253,6 +261,8 @@ export const REMOTE_METHODS = [
   "session.postToEnsemble",
   "session.removeEnsembleMember",
   "session.endEnsemble",
+  "session.resolveThread",
+  "session.sendToThread",
   "session.pendingInputs",
   "shell.tasks",
   "shell.output",
@@ -711,6 +721,18 @@ class Connection implements HubPeer {
       }
       if (this.initialized && this.hub.available) {
         await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
+      }
+    }
+    if (
+      (method === "suites.create" || method === "suites.update") &&
+      this.initialized &&
+      this.hub.available &&
+      Array.isArray(p.workspaces)
+    ) {
+      for (const ws of p.workspaces) {
+        if (typeof ws === "string" && ws.trim() !== "") {
+          await this.hub.checkRemoteWorkspace(undefined, ws);
+        }
       }
     }
   }
@@ -1338,11 +1360,13 @@ class Connection implements HubPeer {
       "runtime.listSessions": async (p) => {
         const cwd = optString(p, "cwd");
         const includeSubagents = optBool(p, "includeSubagents");
+        const includeSuiteCoordinators = optBool(p, "includeSuiteCoordinators");
         const includeArchived = this.origin === "local" && optBool(p, "includeArchived") === true;
         const summaries = await this.runtime().listSessions({
           includeArchived,
           ...(cwd !== undefined ? { cwd } : {}),
           ...(includeSubagents !== undefined ? { includeSubagents } : {}),
+          ...(includeSuiteCoordinators !== undefined ? { includeSuiteCoordinators } : {}),
         });
         return summaries.map((summary) => ({
           ...summary,
@@ -1758,8 +1782,13 @@ class Connection implements HubPeer {
         });
       },
       // 长期记忆管理（ADR-0098 §7）：只在本机连接开放（返回绝对路径，不在 REMOTE_METHODS）
-      "memory.describeMemory": async (p) =>
-        this.runtime().describeMemory({ workspaceRoot: await this.workspaceOf(p) }),
+      "memory.describeMemory": async (p) => {
+        const suiteId = optString(p, "suiteId");
+        return this.runtime().describeMemory({
+          workspaceRoot: await this.workspaceOf(p),
+          ...(suiteId !== undefined ? { suiteId } : {}),
+        });
+      },
       "memory.readMemory": async (p) => {
         const target = await this.parseMemoryTarget(p);
         return this.runtime().readMemory({ ...target, name: reqString(p, "name") });
@@ -1836,6 +1865,68 @@ class Connection implements HubPeer {
       },
       "schedule.runNow": (p) => this.runtime().runSchedule({ id: reqString(p, "id") }),
       "schedule.history": (p) => this.runtime().scheduleHistory({ id: reqString(p, "id") }),
+      "suites.list": (p) => {
+        const includeArchived = optBool(p, "includeArchived");
+        return this.runtime().listSuites(
+          includeArchived !== undefined ? { includeArchived } : undefined,
+        );
+      },
+      "suites.create": (p) => this.runtime().createSuite(parseCreateSuiteInput(p)),
+      "suites.update": (p) => this.runtime().updateSuite(parseUpdateSuiteInput(p)),
+      "suites.archive": async (p) => {
+        await this.runtime().archiveSuite(reqString(p, "id"));
+        return null;
+      },
+      "suites.open": (p) =>
+        this.track(
+          (async () => {
+            const id = reqString(p, "id");
+            const force = optBool(p, "force");
+            const model =
+              p.model !== undefined && p.model !== null ? reqModel(p, "model") : undefined;
+            const suite = (await this.runtime().listSuites({ includeArchived: true })).find(
+              (item) => item.id === id,
+            );
+            if (suite === undefined) {
+              const session = await this.runtime().openSuite(id, {
+                ...(force !== undefined ? { force } : {}),
+                ...(model !== undefined ? { model } : {}),
+              });
+              return await this.register(session);
+            }
+            const sessionId = suite.coordinatorSessionId;
+            const existing = this.sessions.get(sessionId);
+            if (existing !== undefined) {
+              const state = existing.session.state();
+              return {
+                sessionId: existing.session.id,
+                meta: state.meta,
+                config: state.config,
+                warnings: [...existing.session.warnings],
+                ...(existing.session.recovery !== undefined
+                  ? { recovery: existing.session.recovery }
+                  : {}),
+                lastSeq: state.lastSeq,
+              };
+            }
+            if (this.openingIds.has(sessionId)) {
+              throw new RpcProtocolError(
+                "session_already_open",
+                `会话已在本连接中打开：${sessionId}`,
+              );
+            }
+            this.openingIds.add(sessionId);
+            try {
+              const session = await this.hub.resume(sessionId, {
+                ...(force !== undefined ? { force } : {}),
+                ...(model !== undefined ? { model } : {}),
+              });
+              return await this.register(session, true);
+            } finally {
+              this.openingIds.delete(sessionId);
+            }
+          })(),
+        ),
       "runtime.defaultReviewer": async (p) => {
         const baseURL = optString(p, "baseURL");
         const workspaceRoot = await this.workspaceOf(p);
@@ -2409,6 +2500,25 @@ class Connection implements HubPeer {
         const { session } = this.session(p);
         return await this.hub.operate(session, () => session.endEnsemble());
       },
+      "session.resolveThread": async (p) => {
+        const { session } = this.session(p);
+        const thread = reqString(p, "thread");
+        const reopen = optBool(p, "reopen");
+        await this.hub.operate(session, () =>
+          session.resolveThread({
+            thread,
+            ...(reopen !== undefined ? { reopen } : {}),
+          }),
+        );
+        return null;
+      },
+      "session.sendToThread": async (p) => {
+        const { session } = this.session(p);
+        const thread = reqString(p, "thread");
+        const text = reqString(p, "text");
+        await this.hub.operate(session, () => session.sendToThread({ thread, text }));
+        return null;
+      },
       "shell.tasks": (p) => this.session(p).session.shellTasks(),
       "shell.output": (p) => {
         const offset = p.offset;
@@ -2776,4 +2886,76 @@ function parseSubmitInput(p: {
     input.attachments = parseAttachments(p.attachments);
   }
   return input;
+}
+
+function parseSuiteWorkspaces(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.some((item) => typeof item !== "string")) {
+    throw new InvalidParamsError("参数 workspaces 必须是字符串数组");
+  }
+  return raw as string[];
+}
+
+function parseSuiteThreadDefaults(raw: unknown): SuiteThreadDefaults {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new InvalidParamsError("参数 threadDefaults 必须是对象");
+  }
+  const o = raw as Params;
+  const out: SuiteThreadDefaults = {};
+  const model = optString(o, "model");
+  if (model !== undefined) out.model = model;
+  const effort = optString(o, "reasoningEffort");
+  if (effort !== undefined) {
+    if (!isReasoningEffort(effort)) {
+      throw new InvalidParamsError(`threadDefaults.reasoningEffort 不是已知档位：${effort}`);
+    }
+    out.reasoningEffort = effort;
+  }
+  const preset = optString(o, "preset");
+  if (preset !== undefined) out.preset = preset;
+  const isolated = optBool(o, "isolated");
+  if (isolated !== undefined) out.isolated = isolated;
+  return out;
+}
+
+function parseCreateSuiteInput(p: Params): CreateSuiteInput {
+  const name = reqString(p, "name");
+  const workspaces = parseSuiteWorkspaces(p.workspaces);
+  const goal = optString(p, "goal");
+  const instructions = optString(p, "instructions");
+  const permissionPreset = optString(p, "permissionPreset");
+  const effort = optString(p, "reasoningEffort");
+  if (effort !== undefined && !isReasoningEffort(effort)) {
+    throw new InvalidParamsError(`reasoningEffort 不是已知档位：${effort}`);
+  }
+  return {
+    name,
+    workspaces,
+    ...(goal !== undefined ? { goal } : {}),
+    ...(instructions !== undefined ? { instructions } : {}),
+    ...(p.threadDefaults !== undefined && p.threadDefaults !== null
+      ? { threadDefaults: parseSuiteThreadDefaults(p.threadDefaults) }
+      : {}),
+    ...(p.model !== undefined && p.model !== null ? { model: reqModel(p, "model") } : {}),
+    ...(permissionPreset !== undefined ? { permissionPreset } : {}),
+    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+  };
+}
+
+function parseUpdateSuiteInput(p: Params): UpdateSuiteInput {
+  const id = reqString(p, "id");
+  const name = optString(p, "name");
+  const goal = p.goal === null ? null : optString(p, "goal");
+  const instructions = optString(p, "instructions");
+  return {
+    id,
+    ...(name !== undefined ? { name } : {}),
+    ...(goal !== undefined ? { goal } : {}),
+    ...(p.workspaces !== undefined && p.workspaces !== null
+      ? { workspaces: parseSuiteWorkspaces(p.workspaces) }
+      : {}),
+    ...(instructions !== undefined ? { instructions } : {}),
+    ...(p.threadDefaults !== undefined && p.threadDefaults !== null
+      ? { threadDefaults: parseSuiteThreadDefaults(p.threadDefaults) }
+      : {}),
+  };
 }

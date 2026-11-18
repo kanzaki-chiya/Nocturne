@@ -28,6 +28,7 @@ import type {
 } from "./protocol/index.js";
 
 import {
+  attachChildPermissionForwarder,
   createSubagentLauncher,
   createSubagentLimiter,
   DEFAULT_TURN_CONFIG,
@@ -37,6 +38,8 @@ import {
   cleanTitle,
   TITLE_SYSTEM_PROMPT,
   formatTitleUserMessage,
+  type ChildPermissionForwarder,
+  type SubagentPermissionsDeps,
   type TurnConfig,
   type TurnDeps,
 } from "./agent/index.js";
@@ -114,6 +117,7 @@ import {
 import { createHookRunner, type HookRunnerEntry } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import { createUsageStats } from "./usage/index.js";
+import type { CreateSuiteInput, SuiteRecord, UpdateSuiteInput } from "./protocol/suite.js";
 import type { UsageStats } from "./protocol/index.js";
 import type {
   ScheduleChangedPayload,
@@ -277,6 +281,14 @@ import {
   ENSEMBLE_MAESTRO_TOOL_NAMES,
   type EnsembleController,
 } from "./ensemble/index.js";
+import {
+  createSuiteController,
+  createSuiteStore,
+  isValidSuiteId,
+  newSuiteId,
+  SUITE_COORDINATOR_TOOL_NAMES,
+  type SuiteController,
+} from "./suites/index.js";
 import {
   residentCallId,
   residentKindOf,
@@ -648,6 +660,10 @@ export interface RuntimeSession {
   removeEnsembleMember(input: string | { name: string }): Promise<void>;
   /** 结束当前活动 Ensemble（ADR-0089 §1、§11）：停止全部成员，返回未并回的独立工作树分支列表 */
   endEnsemble(): Promise<{ unmerged: EnsembleUnmergedWorktree[] }>;
+  /** 组曲总览：标记指定线程完成或重新打开（ADR-0097 §3.6） */
+  resolveThread(input: { thread: string; reopen?: boolean | undefined }): Promise<void>;
+  /** 组曲总览：用户绕过指挥直接向线程发消息（ADR-0097 §3.6） */
+  sendToThread(input: { thread: string; text: string }): Promise<void>;
   /**
    * 待发输入的当前快照。待发输入是临时状态、不写日志，`input.pending` 不回放，
    * 新附加的客户端用它在订阅后对齐（view.md 第 6 节）。
@@ -809,12 +825,21 @@ export interface Runtime {
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   /** 长期记忆管理（ADR-0098 §7） */
-  describeMemory(input?: { workspaceRoot?: string | undefined }): Promise<MemoryDescription>;
+  describeMemory(input?: {
+    workspaceRoot?: string | undefined;
+    suiteId?: string | undefined;
+  }): Promise<MemoryDescription>;
   readMemory(input: ReadMemoryInput): Promise<MemoryEntry>;
   deleteMemory(input: DeleteMemoryInput): Promise<void>;
   clearMemory(input: ClearMemoryInput): Promise<void>;
   /** 记忆文件变化通知（写入/删除/清空后触发，供 RPC 推送 runtime.providersChanged） */
   onMemoryChanged(listener: () => void): () => void;
+  /** 组曲管理（ADR-0097 §3.6） */
+  listSuites(filter?: { includeArchived?: boolean | undefined }): Promise<SuiteRecord[]>;
+  createSuite(input: CreateSuiteInput): Promise<SuiteRecord>;
+  updateSuite(input: UpdateSuiteInput): Promise<SuiteRecord>;
+  archiveSuite(id: string): Promise<void>;
+  openSuite(id: string, options?: ResumeSessionOptions): Promise<RuntimeSession>;
   /**
    * 导入技能（skills.md 第 7 节，ADR-0048 修订 U-08）：只支持本地文件夹。
    * `mode: "preview"` 只扫描校验、不写任何东西；`mode: "commit"` 按逐项
@@ -964,6 +989,8 @@ export interface Runtime {
     cwd?: string | undefined;
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
     includeSubagents?: boolean | undefined;
+    /** 默认 false：组曲指挥会话不进列表（ADR-0097） */
+    includeSuiteCoordinators?: boolean | undefined;
     /** 默认 false：已归档会话不进列表（ADR-0080） */
     includeArchived?: boolean | undefined;
   }): Promise<SessionSummary[]>;
@@ -1280,6 +1307,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       );
     },
   });
+  const suiteStore = createSuiteStore(platform, nocturneHome);
   const subagentObservation = createSubagentObservation({
     platform,
     sessionsDir,
@@ -1342,6 +1370,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ensembleMember?(childSessionId: string): Promise<RuntimeSession | undefined>;
     /** 当前活动 Ensemble 中未移除的独立工作树成员 childSessionId 集合 */
     ensembleActiveIsolatedChildIds?(): ReadonlySet<string>;
+    /** 若 childSessionId 属于本组曲指挥会话的线程，返回其共享托管会话句柄（ADR-0097） */
+    suiteThread?(childSessionId: string): Promise<RuntimeSession | undefined>;
+    /** 当前组曲指挥会话中独立工作树线程 childSessionId 集合 */
+    suiteActiveIsolatedChildIds?(): ReadonlySet<string>;
+    /** 同步更新打开的组曲指挥会话持有的 SuiteRecord */
+    updateSuiteRecord?(record: SuiteRecord): void;
+    /** 组曲指挥或任意线程是否正在运行（供 archiveSuite 忙检查） */
+    suiteCoordinatorBusy?(): boolean;
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
   }
@@ -1547,6 +1583,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     parentGrants: Grant[];
     isActive(): boolean;
     onTurnLifecycle: ResidentChildOpenSpec["onTurnLifecycle"];
+    permissions?:
+      | {
+          parentCallId: string;
+          profile: string;
+          taskSummary: string;
+          register: SubagentPermissionsDeps["register"];
+          clearChild: (childSessionId: string) => void;
+        }
+      | undefined;
   }
 
   interface ResidentChildInternalControls {
@@ -1597,6 +1642,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     residentChild?: ResidentChildAssemblyOptions,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
+    const isSuiteCoordinator = meta.suite?.role === "coordinator";
+    const suiteId = meta.suite?.id;
     const residentKind = residentKindOf(meta.parent?.callId);
     const isResidentChild = residentChild !== undefined || residentKind !== undefined;
     const isTaskSubagent = meta.parent !== undefined && !isResidentChild;
@@ -1624,6 +1671,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const availableMemoryScopes: MemoryScope[] = [
       ...(memorySwitches.global ? (["global"] as const) : []),
       ...(memorySwitches.project && hasProjectMemoryScope ? (["project"] as const) : []),
+      ...(suiteId !== undefined ? (["suite"] as const) : []),
     ];
     let memorySnapshot: MemoryContextSnapshot | undefined;
     const refreshMemorySnapshot = async (): Promise<void> => {
@@ -1634,6 +1682,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       memorySnapshot = await snapshotMemoryContext(platform, nocturneHome, {
         scopes: availableMemoryScopes,
         workspaceRoot: meta.workspaceRoot,
+        ...(suiteId !== undefined ? { suiteId } : {}),
         writable: memoryPolicy.write,
       });
     };
@@ -2112,6 +2161,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         );
     };
     // 经委托读取当前 policy，使 setPermissionPreset 立即生效
+    let residentPermForwarder: ChildPermissionForwarder | undefined;
     const gate: PermissionGate = createPolicyGate(
       {
         evaluate: (subjects, evaluationOptions) => {
@@ -2141,8 +2191,31 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         saveAppPermissions,
         hooks: hookRunner,
         worktrees: activeWorktrees,
+        ...(residentChild?.permissions !== undefined
+          ? {
+              onPendingSettled: (requestId: string) => {
+                residentPermForwarder?.onPendingSettled(requestId);
+              },
+            }
+          : {}),
       },
     );
+    if (residentChild?.permissions !== undefined) {
+      const perms = residentChild.permissions;
+      residentPermForwarder = attachChildPermissionForwarder({
+        child: session,
+        gate,
+        permissions: {
+          register: perms.register,
+          clearChild: perms.clearChild,
+        },
+        parentCallId: perms.parentCallId,
+        profile: perms.profile,
+        taskSummary: perms.taskSummary,
+        workspaceRoot: () => meta.workspaceRoot,
+      });
+      teardown.push(() => residentPermForwarder?.dispose());
+    }
     // 提问通道（ADR-0032）按会话持有：等待中的请求与会话绑定，
     // respondQuestion 按 requestId 路由；非交互时 ask 立即不可用
     const questions = createQuestionBroker({ interactive: sessionInteractive });
@@ -2154,6 +2227,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const tool of builtinTools()) {
       if (meta.schedule !== undefined && tool.traits.mutatesSchedule === true) continue;
       if (residentChild?.preset === "explore" && tool.traits.mutates) continue;
+      if (isSuiteCoordinator && tool.traits.editTool !== undefined) continue;
       if (
         (meta.parent !== undefined || meta.schedule !== undefined) &&
         tool.traits.mainSessionOnly === true
@@ -2173,7 +2247,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         async readMemory(scope, name) {
           const targetDir = await resolveMemoryScopeDir(platform, nocturneHome, {
             scope,
-            workspaceRoot: meta.workspaceRoot,
+            ...(scope === "suite" ? { key: suiteId } : { workspaceRoot: meta.workspaceRoot }),
           });
           if (targetDir === undefined) {
             return {
@@ -2187,7 +2261,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         async writeMemory(input) {
           const targetDir = await resolveMemoryScopeDir(platform, nocturneHome, {
             scope: input.scope,
-            workspaceRoot: meta.workspaceRoot,
+            ...(input.scope === "suite" ? { key: suiteId } : { workspaceRoot: meta.workspaceRoot }),
           });
           if (targetDir === undefined) {
             throw new Error(`Memory scope "${input.scope}" is not available for this workspace.`);
@@ -2209,7 +2283,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         async deleteMemory(scope, name) {
           const targetDir = await resolveMemoryScopeDir(platform, nocturneHome, {
             scope,
-            workspaceRoot: meta.workspaceRoot,
+            ...(scope === "suite" ? { key: suiteId } : { workspaceRoot: meta.workspaceRoot }),
           });
           if (targetDir === undefined) return false;
           const deleted = await deleteMemoryEntry(platform, targetDir.dir, name);
@@ -2813,16 +2887,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let ensembleTurnStarting = false;
     const isEnsembleMaestroActive = (): boolean =>
       Boolean(ensembleController?.isActive()) || ensembleTurnStarting;
+    let suiteController: SuiteController | undefined;
+    const allActiveIsolatedChildIds = (): ReadonlySet<string> | undefined => {
+      if (isSuiteCoordinator) return suiteController?.activeIsolatedChildIds();
+      return ensembleController?.activeIsolatedChildIds();
+    };
 
     const scheduleWorktreeCleanup = (): void => {
       if (closing) return;
       void runWorktreeTask(async () => {
         if (closing) return;
-        await cleanupMergedWorktrees(
-          sessionsDir,
-          session.id,
-          ensembleController?.activeIsolatedChildIds(),
-        );
+        await cleanupMergedWorktrees(sessionsDir, session.id, allActiveIsolatedChildIds());
       }).catch((cause: unknown) => {
         if (closing) return;
         session.emitEphemeral("runtime.warning", {
@@ -2976,7 +3051,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const hasExternalAgents = enabledExternalAgents.length > 0;
       // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
       if (
-        options.shell?.background === true &&
+        (options.shell?.background === true || isSuiteCoordinator) &&
         meta.parent === undefined &&
         meta.schedule === undefined
       ) {
@@ -2992,7 +3067,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         meta.parent === undefined &&
         meta.schedule === undefined;
       tools.unregister("apply_subagent_changes");
-      if (backgroundEnabled) {
+      if (backgroundEnabled || isSuiteCoordinator) {
         const lookup = (id: string) => {
           const events = effectiveEvents(session.durableEvents());
           const changes = events
@@ -3012,11 +3087,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 event.payload.status === "ok" &&
                 (event.payload.output as { id?: string } | undefined)?.id === id,
             );
-            return { changes, repository: currentWorkspaceRoot(), applied, fromEnsemble: false };
+            return {
+              changes,
+              repository: currentWorkspaceRoot(),
+              applied,
+              residentKind: undefined as ResidentKind | undefined,
+            };
           }
           const ensembleFound = ensembleController?.lookupMemberWorktreeSync(id);
           if (ensembleFound !== undefined) {
-            return { ...ensembleFound, fromEnsemble: true };
+            return { ...ensembleFound, residentKind: "ensemble" as const };
+          }
+          const suiteFound = suiteController?.lookupThreadWorktreeSync(id);
+          if (suiteFound !== undefined) {
+            return { ...suiteFound, residentKind: "suite" as const };
           }
           return undefined;
         };
@@ -3024,13 +3108,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           createApplySubagentChangesTool({
             lookup,
             async apply(id, mode) {
-              const { applied, fromEnsemble, head } = await runWorktreeTask(async () => {
+              const { applied, residentKind, head } = await runWorktreeTask(async () => {
                 const result = lookup(id);
                 if (!result || result.applied)
                   throw new Error("No unapplied isolated changes found");
-                const repository = await inspectWorktreeRepository(currentWorkspaceRoot());
+                const repository =
+                  result.residentKind !== undefined
+                    ? result.repository
+                    : await inspectWorktreeRepository(currentWorkspaceRoot());
                 const out = await applyWorktreeChanges(repository, result.changes, mode);
-                if (!result.fromEnsemble) {
+                if (result.residentKind === undefined) {
                   await removeWorktree(
                     {
                       repository,
@@ -3047,20 +3134,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 }
                 return {
                   applied: out,
-                  fromEnsemble: result.fromEnsemble,
+                  residentKind: result.residentKind,
                   head: result.changes.head,
                 };
               });
-              if (fromEnsemble) {
+              if (residentKind === "ensemble") {
                 await ensembleController?.onMemberWorktreeApplied(id, head);
+              } else if (residentKind === "suite") {
+                await suiteController?.onThreadWorktreeApplied(id, head);
               }
               return applied;
             },
           }),
         );
       }
-      tools.unregister("task");
-      if (residentChild !== undefined || isEnsembleMaestroActive()) return;
+      for (const spec of tools.specs()) {
+        if (tools.get(spec.name)?.traits.spawnsSubagent === true) {
+          tools.unregister(spec.name);
+        }
+      }
+      if (residentChild !== undefined || isEnsembleMaestroActive() || isSuiteCoordinator) return;
       if (!subagentEnabled && !hasExternalAgents) return;
       let launcher: SubagentLauncher | undefined;
       if (subagentEnabled)
@@ -3326,7 +3419,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       controller === undefined &&
       backgroundSubagents.count(session.id) === 0 &&
       backgroundShells.count() === 0 &&
-      !(ensembleController?.hasRunningWork() ?? false);
+      !(ensembleController?.hasRunningWork() ?? false) &&
+      !(suiteController?.hasRunningWork() ?? false);
     const notifyIdle = () => {
       if (closing || !isIdle()) return;
       for (const listener of idleListeners) {
@@ -3501,6 +3595,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("invalid_command", "当前环境不支持后台子代理");
         // ADR-0089 §1：/ensemble 依赖后台子代理、子代理启用且非无人值守/定时任务，同时至多一个活动 Ensemble
         if (input.workMode === "ensemble") {
+          if (isSuiteCoordinator) {
+            throw new RuntimeCommandError("invalid_command", "组曲指挥会话不能启动合奏");
+          }
           if (
             !subagentEnabled ||
             options.subagent?.background !== true ||
@@ -3785,7 +3882,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
      * 不在 Agent Loop 中按工具名写分支；同时装卸指挥的 Ensemble 工具。
      */
     const syncEnsembleTools = (): void => {
-      if (meta.parent !== undefined) return;
+      if (meta.parent !== undefined || isSuiteCoordinator) return;
       for (const name of ENSEMBLE_MAESTRO_TOOL_NAMES) {
         tools.unregister(name);
       }
@@ -3829,6 +3926,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           nocturneVersion: options.version ?? NOCTURNE_VERSION,
           ...(spec.reasoningEffort !== undefined ? { reasoningEffort: spec.reasoningEffort } : {}),
           parent: { sessionId: session.id, callId: residentCallId(spec.kind, spec.name) },
+          ...(spec.suite !== undefined ? { suite: spec.suite } : {}),
         });
       } else {
         childRaw = await store.load(spec.childSessionId);
@@ -3852,6 +3950,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             parentGrants: sessionGrants,
             isActive: () => childActive && isParentActive(),
             onTurnLifecycle: spec.onTurnLifecycle,
+            ...(sessionInteractive()
+              ? {
+                  permissions: {
+                    parentCallId: residentCallId(spec.kind, spec.name),
+                    profile: spec.preset,
+                    taskSummary: spec.name,
+                    register: (input) => forwardedPermissions.register(input),
+                    clearChild: (childSessionId) => {
+                      forwardedPermissions.clearChild(childSessionId);
+                    },
+                  },
+                }
+              : {}),
           },
         );
       } catch (e) {
@@ -3886,6 +3997,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           controls.clearPendingInputs();
         },
         subscribe: (listener) => wrappedChild.subscribe(listener),
+        durableEvents: () => wrappedChild.durableEvents(),
         closeUnderlying: async () => {
           childActive = false;
           memberProxies.delete(spec.childSessionId);
@@ -4035,6 +4147,124 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     }
 
+    const syncSuiteTools = (): void => {
+      if (!isSuiteCoordinator || suiteController === undefined) return;
+      for (const name of SUITE_COORDINATOR_TOOL_NAMES) {
+        tools.unregister(name);
+      }
+      for (const tool of suiteController.coordinatorTools()) {
+        tools.register(tool);
+      }
+    };
+
+    if (isSuiteCoordinator && suiteId !== undefined) {
+      const loadedSuite = await suiteStore.get(suiteId);
+      const suiteRecord = loadedSuite ?? {
+        version: 1 as const,
+        id: suiteId,
+        name: suiteId,
+        workspaces: [meta.workspaceRoot],
+        instructions: "",
+        coordinatorSessionId: session.id,
+        threadDefaults: {},
+        createdAt: meta.createdAt,
+      };
+      const deliverSuiteReportToCoordinator = (
+        input: PreparedInput,
+        forcePaused = false,
+      ): Promise<void> => {
+        if (closing || session.health !== "ok") return Promise.resolve();
+        pendingInputStore.add("suite", input, forcePaused);
+        if (forcePaused) return Promise.resolve();
+        void pumpQueue().catch(() => {
+          pendingInputStore.pauseAll();
+        });
+        return Promise.resolve();
+      };
+      suiteController = createSuiteController({
+        suite: suiteRecord,
+        coordinatorSessionId: session.id,
+        newChildSessionId: () => newSessionId(),
+        isClosing: () => closing,
+        currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
+        pathsEqual: (a, b) => paths.equals(a, b),
+        coordinatorModel: () => model,
+        coordinatorEffort: () => session.state().config.reasoningEffort,
+        enabledModels: () => {
+          const disabled = disabledSet();
+          return sessionRegistry
+            .providers()
+            .flatMap((p) => p.models())
+            .map((m) => applyDisabled(m, disabled))
+            .filter((m) => m.disabled === undefined && m.unavailable === undefined)
+            .map((m) => ({
+              provider: m.ref.provider,
+              model: m.ref.model,
+              ...(m.displayName !== undefined ? { name: m.displayName } : {}),
+            }));
+        },
+        availableProfiles: () => {
+          const configured =
+            config?.resolvedSettings(session.state().meta.workspaceRoot).subagentProfiles ?? {};
+          return Object.entries(configured).flatMap(([name, profile]) => {
+            if (!profile.enabled) return [];
+            if (
+              profile.model !== undefined &&
+              resolveModelRole(sessionRegistry, profile.model, "task") === undefined
+            ) {
+              return [];
+            }
+            return [{ ...profile, name }];
+          });
+        },
+        externalAgentNames: () => {
+          const names = new Set<string>();
+          for (const a of config?.base.externalAgents ?? []) {
+            names.add(a.name);
+          }
+          return names;
+        },
+        resolveEnabledModel: (ref) => {
+          try {
+            const resolvedModel = sessionRegistry.resolve(ref);
+            const disabled = applyDisabled(resolvedModel.model, disabledSet());
+            if (disabled.disabled !== undefined || disabled.unavailable !== undefined) {
+              return undefined;
+            }
+            return resolvedModel;
+          } catch {
+            return undefined;
+          }
+        },
+        pricing: (modelKey) => {
+          let ref: ModelRef;
+          if (modelKey !== undefined) {
+            try {
+              ref = parseModelRef(modelKey);
+            } catch {
+              return undefined;
+            }
+          } else {
+            ref = model.model.ref;
+          }
+          return resolvePricing(sessionRegistry, ref)?.pricing;
+        },
+        durableEvents: () => session.durableEvents(),
+        readChildDurableEvents: async (childSessionId) => {
+          const logFile = paths.join(sessionsDir, `${childSessionId}.jsonl`);
+          const { events } = await readLogReadonly(fs, logFile, childSessionId);
+          return events;
+        },
+        emitDurable: (type, payload) => session.emit(type, payload),
+        emitEphemeral: (type, payload) => session.emitEphemeral(type, payload),
+        deliverToCoordinator: deliverSuiteReportToCoordinator,
+        notifyCoordinatorIdle: notifyIdle,
+        openThreadSession: (spec) => openResidentChild(spec, () => !closing),
+        worktrees: residentWorktreeOps(session.id, () => suiteController?.activeIsolatedChildIds()),
+        commandError: (code, message) => new RuntimeCommandError(code, message),
+      });
+    }
+
     /**
      * 设置 Turn 控制器并跑一个或连续多个 Turn（ADR-0070 §3：`done` 结束后取队首
      * 一条排队输入作为新 Turn；其他结束原因把剩余条目全部转排队并暂停）。
@@ -4097,6 +4327,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.backgroundShell !== undefined ||
             prepared.ensemble !== undefined ||
             prepared.ensembleQuietReminder === true ||
+            prepared.suiteReport !== undefined ||
             prepared.workMode?.source === "runtime";
           const userPrompt = isNonUserMessage
             ? false
@@ -4149,7 +4380,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                   basePrompt: residentChild.basePrompt(),
                   rootSessionId: residentChild.rootSessionId,
                 }
-              : {}),
+              : suiteController !== undefined
+                ? {
+                    basePrompt: suiteController.basePrompt(),
+                  }
+                : {}),
             skills: catalog,
             memory: () => memorySnapshot,
             refreshMemory: refreshMemorySnapshot,
@@ -4193,6 +4428,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.backgroundShell,
             prepared.ensemble,
             prepared.ensembleQuietReminder,
+            prepared.suiteReport,
           );
           if (ensembleTurnStarting) {
             ensembleTurnStarting = false;
@@ -4288,21 +4524,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return true;
     };
 
+    if (suiteController !== undefined) {
+      await suiteController.initializeFromLog();
+      syncSuiteTools();
+    }
+
     // ADR-0073 §4 & ADR-0089 §7：重启不复活后台子代理，恢复 Ensemble 骨架与缺失提及（暂停待发，不自动唤醒）
     if (resume !== undefined && meta.parent === undefined) {
       if (ensembleController !== undefined) {
         await ensembleController.initializeFromLog();
         syncEnsembleTools();
       }
-      await cleanupMergedWorktrees(
-        sessionsDir,
-        session.id,
-        ensembleController?.activeIsolatedChildIds(),
-      ).catch((cause: unknown) =>
-        session.emitEphemeral("runtime.warning", {
-          code: "worktree_cleanup_failed",
-          message: String(cause),
-        }),
+      await cleanupMergedWorktrees(sessionsDir, session.id, allActiveIsolatedChildIds()).catch(
+        (cause: unknown) =>
+          session.emitEphemeral("runtime.warning", {
+            code: "worktree_cleanup_failed",
+            message: String(cause),
+          }),
       );
       const retained = await listWorktreeRecords(sessionsDir, session.id);
       const recovered = backgroundSubagents.recover(
@@ -4376,6 +4614,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         meta.parent !== undefined ||
         event.type !== "message.user" ||
         event.payload.ensembleQuietReminder === true ||
+        event.payload.suiteReport !== undefined ||
         titleSettled !== undefined ||
         session.durableEvents().some((e) => e.type === "session.titled")
       )
@@ -4431,6 +4670,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const forkOpen = async (targetSeq?: number): Promise<string> => {
       assertUsable();
       assertBranchNotSwitching();
+      if (isSuiteCoordinator) {
+        throw new RuntimeCommandError("invalid_command", "组曲指挥会话不支持分叉");
+      }
       if (busy() || compactController !== undefined)
         throw new RuntimeCommandError("session_busy", "请先等待或按 Esc 中断");
       validateForkTarget(targetSeq);
@@ -4463,7 +4705,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       repositoryFor,
       branchBusy: () =>
-        busy() || compacting() || closing || (ensembleController?.hasWorkspaceMembers() ?? false),
+        busy() ||
+        compacting() ||
+        closing ||
+        (ensembleController?.hasWorkspaceMembers() ?? false) ||
+        (suiteController?.hasWorkspaceThreads() ?? false),
       pumpPending: () => {
         void pumpQueue().catch(() => {
           pendingInputStore.pauseAll();
@@ -4503,6 +4749,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       ensembleActiveIsolatedChildIds: () =>
         ensembleController?.activeIsolatedChildIds() ?? new Set(),
+      suiteThread: async (childSessionId) => {
+        if (suiteController === undefined) return undefined;
+        const opened = await suiteController.openOrGetThreadBySessionId(childSessionId);
+        if (!opened?.active) return undefined;
+        return memberProxies.get(childSessionId);
+      },
+      suiteActiveIsolatedChildIds: () => suiteController?.activeIsolatedChildIds() ?? new Set(),
+      updateSuiteRecord: (record) => {
+        suiteController?.updateSuiteRecord(record);
+      },
+      suiteCoordinatorBusy: () =>
+        busy() || compacting() || closing || (suiteController?.hasRunningWork() ?? false),
       rename: async (title) => {
         assertUsable();
         if (meta.parent !== undefined)
@@ -4704,6 +4962,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             afterSeq: session.state().lastSeq,
             time: new Date().toISOString(),
             payload: memberSnap,
+          });
+        }
+        for (const threadSnap of suiteController?.threadSnapshots() ?? []) {
+          listener({
+            type: "suite.thread_updated",
+            sessionId: session.id,
+            runId: session.runId,
+            eseq: 0,
+            afterSeq: session.state().lastSeq,
+            time: new Date().toISOString(),
+            payload: threadSnap,
           });
         }
         const subagentPermsSnap = forwardedPermissions.snapshots();
@@ -4980,6 +5249,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         return await ensembleController.endFromUser();
       },
+      async resolveThread(input) {
+        assertUsable();
+        assertMainSession();
+        if (suiteController === undefined) {
+          throw new RuntimeCommandError("invalid_command", "当前会话不是组曲指挥会话");
+        }
+        await suiteController.resolveThreadFromUser(input);
+      },
+      async sendToThread(input) {
+        assertUsable();
+        assertMainSession();
+        if (suiteController === undefined) {
+          throw new RuntimeCommandError("invalid_command", "当前会话不是组曲指挥会话");
+        }
+        await suiteController.sendToThreadFromUser(input);
+      },
       pendingInputs: () => pendingInputStore.snapshot(),
       async setModel(input) {
         assertUsable();
@@ -5020,6 +5305,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // default 档位跟随当前模型时，选择表里的价格要换成新模型的
         installTask();
         syncEnsembleTools();
+        syncSuiteTools();
         warnIfCapabilitiesDefaulted(resolved.model);
         warnIfEffortClamped(resolved.model);
         // recent-models.json（provider-setup.md 第 6 节）：写入失败不阻塞切换
@@ -5265,7 +5551,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const resolved = config?.resolvedSettings(environment.workspaceRoot);
         const compactionThreshold = resolved?.compactionThreshold;
         const compactionPruneLimit = resolved?.compactionPruneLimit;
-        const residentBasePrompt = residentChild?.basePrompt();
+        const residentBasePrompt = residentChild?.basePrompt() ?? suiteController?.basePrompt();
         const key = JSON.stringify({
           seq: events.at(-1)?.seq,
           model: model.model,
@@ -5326,11 +5612,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await backgroundSubagents.discard(session.id);
         await backgroundShells.discard();
         await ensembleController?.dispose();
+        await suiteController?.dispose();
         await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
         // 父工具可能正在创建 child；等父 Turn 退出后再收束这期间登记的后台任务。
         await backgroundSubagents.discard(session.id);
         await backgroundShells.discard();
         await ensembleController?.dispose();
+        await suiteController?.dispose();
         await worktreeChain;
         // SessionEnd Hook（hooks.md）：清理开始前运行；失败已在 runner 内降级
         if (hookRunner !== undefined) {
@@ -5352,7 +5640,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (!forcePaused) {
             pendingInputStore.resume();
           }
-          pendingInputStore.add("ensemble", input, forcePaused);
+          pendingInputStore.add(residentChild.kind, input, forcePaused);
           if (forcePaused) return Promise.resolve();
           void pumpQueue().catch(() => {
             pendingInputStore.pauseAll();
@@ -5371,7 +5659,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (!busy() && !compacting()) {
             const prefix = residentChild.kind === "suite" ? "[Suite]" : "[Ensemble]";
             const resumePrompt = `${prefix} Your model was switched to ${modelKey} after the previous turn failed. Continue your task from where you left off.`;
-            pendingInputStore.add("ensemble", {
+            pendingInputStore.add(residentChild.kind, {
               content: [{ type: "text", text: resumePrompt }],
               appended: [],
             });
@@ -5861,9 +6149,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     async describeMemory(input) {
       const parsed = z
-        .object({ workspaceRoot: z.string().min(1).optional() })
+        .object({
+          workspaceRoot: z.string().min(1).optional(),
+          suiteId: z.string().min(1).optional(),
+        })
         .strict()
         .parse(input ?? {});
+      if (parsed.suiteId !== undefined && !isValidSuiteId(parsed.suiteId)) {
+        throw new RuntimeCommandError("invalid_command", `无效的 suiteId：${parsed.suiteId}`);
+      }
       const root =
         parsed.workspaceRoot !== undefined
           ? await platform.resolveReal(parsed.workspaceRoot)
@@ -5872,6 +6166,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return describeMemoryStore(platform, nocturneHome, {
         workspaceRoot: root,
         switches,
+        ...(parsed.suiteId !== undefined ? { suiteId: parsed.suiteId } : {}),
       });
     },
     async readMemory(input) {
@@ -5923,6 +6218,219 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return () => {
         memoryChangedListeners.delete(listener);
       };
+    },
+    listSuites: (filter) => suiteStore.list(filter),
+    async createSuite(input) {
+      const name = typeof input.name === "string" ? input.name.trim() : "";
+      if (name === "") {
+        throw new RuntimeCommandError("invalid_command", "组曲名称不能为空");
+      }
+      if (!Array.isArray(input.workspaces) || input.workspaces.length === 0) {
+        throw new RuntimeCommandError("invalid_command", "组曲至少需要一个工作区");
+      }
+      const workspaces: string[] = [];
+      for (const ws of input.workspaces) {
+        if (typeof ws !== "string" || ws.trim() === "") {
+          throw new RuntimeCommandError("invalid_command", "工作区路径不能为空");
+        }
+        const resolvedWs = await platform.resolveReal(ws);
+        if (!workspaces.some((existing) => paths.equals(existing, resolvedWs))) {
+          workspaces.push(resolvedWs);
+        }
+      }
+      const primaryWorkspace = workspaces[0];
+      if (primaryWorkspace === undefined) {
+        throw new RuntimeCommandError("invalid_command", "组曲至少需要一个工作区");
+      }
+      const defaults =
+        config !== undefined ? (await config.forWorkspace(primaryWorkspace)).resolved : undefined;
+      const preset = normalizePermissionPreset(
+        input.permissionPreset ?? defaults?.permissionPreset ?? DEFAULT_PERMISSION_PRESET,
+      );
+      if (!isPermissionPresetName(preset)) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `未知权限预设：${preset}（可选：read-only | default | auto-edit | guarded | smart | bypass）`,
+        );
+      }
+      const initialEffort = input.reasoningEffort ?? defaults?.reasoningEffort;
+      if (initialEffort !== undefined && !isReasoningEffort(initialEffort)) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `未知思考档位：${initialEffort}（可选：${REASONING_EFFORT_ORDER.join(" | ")}）`,
+        );
+      }
+      const wsRegistry = config !== undefined ? buildRegistry(defaults?.providers ?? []) : registry;
+      const disabled = disabledSet();
+      const rawModel =
+        input.model ??
+        defaults?.model ??
+        wsRegistry
+          .providers()
+          .flatMap((p) => p.models())
+          .map((m) => applyDisabled(m, disabled))
+          .find((m) => m.disabled === undefined && m.unavailable === undefined)?.ref;
+      if (rawModel === undefined || rawModel === "") {
+        throw new RuntimeCommandError("invalid_model", "未指定 model 且未找到可用的默认模型");
+      }
+      let modelRef: ModelRef;
+      try {
+        modelRef = parseModelRef(rawModel);
+        const resolvedModel = wsRegistry.resolve(modelRef);
+        const checked = applyDisabled(resolvedModel.model, disabled);
+        if (checked.unavailable !== undefined) {
+          throw invalidModelError(checked.unavailable.reason, checked);
+        }
+      } catch (e) {
+        if (e instanceof UnknownModelError) {
+          throw new RuntimeCommandError("invalid_model", e.message);
+        }
+        throw e;
+      }
+
+      const threadDefaults = input.threadDefaults ?? {};
+      if (
+        threadDefaults.reasoningEffort !== undefined &&
+        !isReasoningEffort(threadDefaults.reasoningEffort)
+      ) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `threadDefaults.reasoningEffort 无效：${String(threadDefaults.reasoningEffort)}`,
+        );
+      }
+      if (
+        threadDefaults.preset !== undefined &&
+        threadDefaults.preset !== "general" &&
+        threadDefaults.preset !== "explore"
+      ) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          `threadDefaults.preset 无效：${threadDefaults.preset}`,
+        );
+      }
+
+      const suiteId = newSuiteId();
+      const coordRaw = await store.create({
+        cwd: primaryWorkspace,
+        workspaceRoot: primaryWorkspace,
+        model: modelRef,
+        permissionPreset: preset,
+        nocturneVersion: options.version ?? NOCTURNE_VERSION,
+        ...(initialEffort !== undefined ? { reasoningEffort: initialEffort } : {}),
+        suite: { id: suiteId, role: "coordinator" },
+      });
+      await coordRaw.close();
+
+      const record: SuiteRecord = {
+        version: 1,
+        id: suiteId,
+        name,
+        ...(input.goal !== undefined && input.goal.trim() !== ""
+          ? { goal: input.goal.trim() }
+          : {}),
+        workspaces,
+        instructions: input.instructions ?? "",
+        coordinatorSessionId: coordRaw.id,
+        threadDefaults: {
+          ...(threadDefaults.model !== undefined ? { model: threadDefaults.model } : {}),
+          ...(threadDefaults.reasoningEffort !== undefined
+            ? { reasoningEffort: threadDefaults.reasoningEffort }
+            : {}),
+          ...(threadDefaults.preset !== undefined ? { preset: threadDefaults.preset } : {}),
+          ...(threadDefaults.isolated !== undefined ? { isolated: threadDefaults.isolated } : {}),
+        },
+        createdAt: new Date().toISOString(),
+      };
+      await suiteStore.save(record);
+      return record;
+    },
+    async updateSuite(input) {
+      if (!isValidSuiteId(input.id)) {
+        throw new RuntimeCommandError("invalid_command", `组曲不存在：${input.id}`);
+      }
+      const patch: Omit<UpdateSuiteInput, "id"> = {};
+      if (input.name !== undefined) {
+        const trimmed = input.name.trim();
+        if (trimmed === "") {
+          throw new RuntimeCommandError("invalid_command", "组曲名称不能为空");
+        }
+        patch.name = trimmed;
+      }
+      if (input.goal !== undefined) {
+        patch.goal =
+          input.goal === null ? null : input.goal.trim() === "" ? null : input.goal.trim();
+      }
+      if (input.workspaces !== undefined) {
+        if (!Array.isArray(input.workspaces) || input.workspaces.length === 0) {
+          throw new RuntimeCommandError("invalid_command", "组曲至少需要一个工作区");
+        }
+        const resolvedWorkspaces: string[] = [];
+        for (const ws of input.workspaces) {
+          if (typeof ws !== "string" || ws.trim() === "") {
+            throw new RuntimeCommandError("invalid_command", "工作区路径不能为空");
+          }
+          const real = await platform.resolveReal(ws);
+          if (!resolvedWorkspaces.some((existing) => paths.equals(existing, real))) {
+            resolvedWorkspaces.push(real);
+          }
+        }
+        patch.workspaces = resolvedWorkspaces;
+      }
+      if (input.instructions !== undefined) {
+        patch.instructions = input.instructions;
+      }
+      if (input.threadDefaults !== undefined) {
+        if (
+          input.threadDefaults.reasoningEffort !== undefined &&
+          !isReasoningEffort(input.threadDefaults.reasoningEffort)
+        ) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `threadDefaults.reasoningEffort 无效：${String(input.threadDefaults.reasoningEffort)}`,
+          );
+        }
+        if (
+          input.threadDefaults.preset !== undefined &&
+          input.threadDefaults.preset !== "general" &&
+          input.threadDefaults.preset !== "explore"
+        ) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `threadDefaults.preset 无效：${input.threadDefaults.preset}`,
+          );
+        }
+        patch.threadDefaults = input.threadDefaults;
+      }
+      const updated = await suiteStore.update(input.id, patch);
+      if (updated === undefined) {
+        throw new RuntimeCommandError("invalid_command", `组曲不存在：${input.id}`);
+      }
+      openSessions.get(updated.coordinatorSessionId)?.updateSuiteRecord?.(updated);
+      return updated;
+    },
+    async archiveSuite(id) {
+      if (!isValidSuiteId(id)) {
+        throw new RuntimeCommandError("invalid_command", `组曲不存在：${id}`);
+      }
+      const existing = await suiteStore.get(id);
+      if (existing === undefined) {
+        throw new RuntimeCommandError("invalid_command", `组曲不存在：${id}`);
+      }
+      if (openSessions.get(existing.coordinatorSessionId)?.suiteCoordinatorBusy?.()) {
+        throw new RuntimeCommandError("session_busy", "组曲指挥或线程正忙，不能归档");
+      }
+      if (existing.archivedAt !== undefined) return;
+      await suiteStore.update(id, { archivedAt: new Date().toISOString() });
+    },
+    async openSuite(id, resumeOpts) {
+      if (!isValidSuiteId(id)) {
+        throw new RuntimeCommandError("invalid_command", `组曲不存在：${id}`);
+      }
+      const existing = await suiteStore.get(id);
+      if (existing === undefined) {
+        throw new RuntimeCommandError("invalid_command", `组曲不存在：${id}`);
+      }
+      return await runtime.resumeSession(existing.coordinatorSessionId, resumeOpts);
     },
     async setPluginEnabled(input) {
       const parsed = z
@@ -6416,6 +6924,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       for (const hooks of openSessions.values()) {
         const sharedMember = await hooks.ensembleMember?.(id);
         if (sharedMember !== undefined) return sharedMember;
+        const sharedThread = await hooks.suiteThread?.(id);
+        if (sharedThread !== undefined) return sharedThread;
       }
       const session = await store.load(id, { force: resumeOpts?.force });
       try {
@@ -6488,18 +6998,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         )
           .then((log) => log.events)
           .catch(() => []));
-      const activeEnsembleIds = new Set(
+      const activeResidentIds = new Set(
         openSessions.get(input.parentSessionId)?.ensembleActiveIsolatedChildIds?.() ?? [],
       );
-      const ensembleView = replaySessionView(events).ensemble;
+      for (const id of openSessions.get(input.parentSessionId)?.suiteActiveIsolatedChildIds?.() ??
+        []) {
+        activeResidentIds.add(id);
+      }
+      const replayed = replaySessionView(events);
+      const ensembleView = replayed.ensemble;
       if (ensembleView?.status === "active") {
         for (const member of ensembleView.members) {
           if (member.status !== "removed" && member.isolated) {
-            activeEnsembleIds.add(member.childSessionId);
+            activeResidentIds.add(member.childSessionId);
           }
         }
       }
-      const visible = records.filter((record) => !activeEnsembleIds.has(record.childSessionId));
+      if (replayed.suite !== undefined) {
+        for (const thread of replayed.suite.threads) {
+          if (thread.isolated) {
+            activeResidentIds.add(thread.childSessionId);
+          }
+        }
+      }
+      const visible = records.filter((record) => !activeResidentIds.has(record.childSessionId));
       if (visible.length === 0) return visible;
       const appliedIds = new Set(
         effectiveEvents(events).flatMap((event) =>
@@ -6527,7 +7049,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           .get(input.parentSessionId)
           ?.ensembleActiveIsolatedChildIds?.()
           .has(input.childSessionId) === true;
-      if (subagentRegistry.find(input.childSessionId) || ensembleActive)
+      const suiteActive =
+        openSessions
+          .get(input.parentSessionId)
+          ?.suiteActiveIsolatedChildIds?.()
+          .has(input.childSessionId) === true;
+      if (subagentRegistry.find(input.childSessionId) || ensembleActive || suiteActive)
         throw new RuntimeCommandError("invalid_command", "子代理仍在运行");
       await removeWorktree(record, true);
     },
@@ -6540,6 +7067,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (open !== undefined) return open.fork(forkOptions?.targetSeq);
       const source = await store.load(id);
       try {
+        if (source.state().meta.suite?.role === "coordinator") {
+          throw new RuntimeCommandError("invalid_command", "组曲指挥会话不支持分叉");
+        }
         const target = forkOptions?.targetSeq;
         if (
           target !== undefined &&

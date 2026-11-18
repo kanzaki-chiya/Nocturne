@@ -244,6 +244,7 @@ export function createTaskTool(
       concurrencySafe: false,
       inputTimeoutMs: true,
       maxModelChars: 30_000,
+      spawnsSubagent: true,
     },
     validateInput,
 

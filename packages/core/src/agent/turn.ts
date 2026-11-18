@@ -7,6 +7,7 @@
  */
 import type { BackgroundShellResult, SubagentResult } from "../protocol/events.js";
 import type { EnsemblePostDelivery } from "../protocol/ensemble.js";
+import type { SuiteReportDelivery } from "../protocol/suite.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -108,6 +109,7 @@ export async function runTurn(
   backgroundShell?: BackgroundShellResult,
   ensemble?: EnsemblePostDelivery,
   ensembleQuietReminder?: true,
+  suiteReport?: SuiteReportDelivery,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -178,6 +180,7 @@ export async function runTurn(
         ...(item.backgroundShell !== undefined ? { backgroundShell: item.backgroundShell } : {}),
         ...(item.ensemble !== undefined ? { ensemble: item.ensemble } : {}),
         ...(item.ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
+        ...(item.suiteReport !== undefined ? { suiteReport: item.suiteReport } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
         steer: true,
       },
@@ -394,6 +397,7 @@ export async function runTurn(
         ...(backgroundShell !== undefined ? { backgroundShell } : {}),
         ...(ensemble !== undefined ? { ensemble } : {}),
         ...(ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
+        ...(suiteReport !== undefined ? { suiteReport } : {}),
         ...(fileRefs?.length ? { fileRefs } : {}),
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),
@@ -411,6 +415,7 @@ export async function runTurn(
       backgroundShell === undefined &&
       ensemble === undefined &&
       ensembleQuietReminder !== true &&
+      suiteReport === undefined &&
       workMode?.source !== "runtime";
     if (shouldRunUserPrompt && deps.execEnv.hooks !== undefined) {
       const explicitPrompt = deps.userPrompt === false ? undefined : deps.userPrompt;

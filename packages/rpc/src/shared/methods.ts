@@ -1,5 +1,6 @@
 import type {
   ClearMemoryInput,
+  CreateSuiteInput,
   DeleteMemoryInput,
   MemoryDescription,
   MemoryEntry,
@@ -11,6 +12,8 @@ import type {
   SkillImportOutput,
   SkillInvocation,
   SkillsDescription,
+  SuiteRecord,
+  UpdateSuiteInput,
 } from "@nocturne/core";
 /**
  * 方法表：每个 RPC 方法的参数与结果类型（ADR-0044 第 4 节、docs/protocols/rpc.md）。
@@ -440,7 +443,7 @@ export interface RpcMethods {
     result: { affectedSessions: number };
   };
   "memory.describeMemory": {
-    params: { workspaceRoot?: string | undefined };
+    params: { workspaceRoot?: string | undefined; suiteId?: string | undefined };
     result: MemoryDescription;
   };
   "memory.readMemory": {
@@ -467,7 +470,12 @@ export interface RpcMethods {
   "runtime.shutdown": { params: Record<string, never>; result: null };
 
   "runtime.listSessions": {
-    params: { cwd?: string; includeSubagents?: boolean; includeArchived?: boolean };
+    params: {
+      cwd?: string;
+      includeSubagents?: boolean;
+      includeSuiteCoordinators?: boolean;
+      includeArchived?: boolean;
+    };
     result: (SessionSummary & { openHere?: boolean })[];
   };
   "runtime.searchSessions": {
@@ -591,6 +599,27 @@ export interface RpcMethods {
   "schedule.delete": { params: { id: string }; result: null };
   "schedule.runNow": { params: { id: string }; result: ScheduleRunNowResult };
   "schedule.history": { params: { id: string }; result: ScheduleHistoryEntry[] };
+  /** 组曲管理（ADR-0097 §3.6）：本机与远程均可用 */
+  "suites.list": {
+    params: { includeArchived?: boolean | undefined };
+    result: SuiteRecord[];
+  };
+  "suites.create": {
+    params: CreateSuiteInput;
+    result: SuiteRecord;
+  };
+  "suites.update": {
+    params: UpdateSuiteInput;
+    result: SuiteRecord;
+  };
+  "suites.archive": {
+    params: { id: string };
+    result: null;
+  };
+  "suites.open": {
+    params: { id: string; model?: string | ModelRef; force?: boolean };
+    result: SessionOpened;
+  };
   "runtime.reloadConfig": { params: Record<string, never>; result: null };
   "runtime.defaultReviewer": {
     params: { endpoint: JevEndpoint; baseURL?: string; workspaceRoot?: string | undefined };
@@ -803,6 +832,16 @@ export interface RpcMethods {
   "session.endEnsemble": {
     params: SessionParams;
     result: { unmerged: EnsembleUnmergedWorktree[] };
+  };
+  /** 组曲总览：标记指定线程完成或重新打开（ADR-0097 §3.6） */
+  "session.resolveThread": {
+    params: SessionParams & { thread: string; reopen?: boolean | undefined };
+    result: null;
+  };
+  /** 组曲总览：用户绕过指挥直接向线程发消息（ADR-0097 §3.6） */
+  "session.sendToThread": {
+    params: SessionParams & { thread: string; text: string };
+    result: null;
   };
   /**
    * 待发输入的当前快照：`input.pending` 是临时事件、不回放，新附加的客户端在
@@ -1025,6 +1064,11 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "schedule.delete": true,
   "schedule.runNow": true,
   "schedule.history": true,
+  "suites.list": true,
+  "suites.create": true,
+  "suites.update": true,
+  "suites.archive": true,
+  "suites.open": true,
   "runtime.defaultReviewer": true,
   "runtime.listReviewerModels": true,
   "runtime.listReviewerSamples": true,
@@ -1077,6 +1121,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.postToEnsemble": true,
   "session.removeEnsembleMember": true,
   "session.endEnsemble": true,
+  "session.resolveThread": true,
+  "session.sendToThread": true,
   "session.pendingInputs": true,
   "shell.tasks": true,
   "shell.output": true,

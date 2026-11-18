@@ -39,6 +39,7 @@ export function isUserActivityMessage(payload: DurablePayload<"message.user">): 
     payload.backgroundShell === undefined &&
     payload.ensemble === undefined &&
     payload.ensembleQuietReminder !== true &&
+    payload.suiteReport === undefined &&
     payload.workMode?.source !== "runtime"
   );
 }

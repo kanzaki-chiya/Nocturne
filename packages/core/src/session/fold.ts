@@ -110,6 +110,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.forkedFrom !== undefined ? { forkedFrom: p.forkedFrom } : {}),
           ...(p.schedule !== undefined ? { schedule: p.schedule } : {}),
           ...(p.client !== undefined ? { client: p.client } : {}),
+          ...(p.suite !== undefined ? { suite: p.suite } : {}),
         };
         config = {
           model: p.model,
@@ -224,6 +225,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.backgroundShell !== undefined ? { backgroundShell: p.backgroundShell } : {}),
           ...(p.ensemble !== undefined ? { ensemble: p.ensemble } : {}),
           ...(p.ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
+          ...(p.suiteReport !== undefined ? { suiteReport: p.suiteReport } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
           ...(p.files !== undefined ? { files: p.files } : {}),

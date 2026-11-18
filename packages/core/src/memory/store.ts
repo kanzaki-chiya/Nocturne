@@ -387,13 +387,14 @@ export async function snapshotMemoryContext(
   return { writable: input.writable, scopes };
 }
 
-/** 查询全局、当前项目及其他项目的记忆总览（ADR-0098 §7） */
+/** 查询全局、当前项目、其他项目（及可选组曲）的记忆总览（ADR-0098 §7） */
 export async function describeMemoryStore(
   platform: Platform,
   nocturneHome: string,
   input: {
     workspaceRoot: string;
     switches: MemorySettings;
+    suiteId?: string | undefined;
   },
 ): Promise<MemoryDescription> {
   const globalDir = globalMemoryDir(platform, nocturneHome);
@@ -451,9 +452,27 @@ export async function describeMemoryStore(
   }
   otherProjects.sort((a, b) => a.path.localeCompare(b.path) || a.key.localeCompare(b.key));
 
+  let suite: MemoryScopeOverview | undefined;
+  if (input.suiteId !== undefined) {
+    const resolvedSuite = await resolveMemoryScopeDir(platform, nocturneHome, {
+      scope: "suite",
+      key: input.suiteId,
+    });
+    if (resolvedSuite !== undefined) {
+      const suiteList = await listMemoryDir(platform, resolvedSuite.dir);
+      suite = {
+        enabled: true,
+        dir: resolvedSuite.dir,
+        entries: suiteList.entries,
+        warnings: suiteList.warnings,
+      };
+    }
+  }
+
   return {
     global,
     ...(project !== undefined ? { project } : {}),
+    ...(suite !== undefined ? { suite } : {}),
     otherProjects,
   };
 }

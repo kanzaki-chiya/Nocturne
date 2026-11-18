@@ -18,6 +18,7 @@ import type {
   RuntimeEvent,
   SessionClient,
   SessionSchedule,
+  SessionSuiteMeta,
   Usage,
   TodoItem,
   NoteItem,
@@ -39,6 +40,8 @@ export interface SessionMeta {
   schedule?: SessionSchedule | undefined;
   /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5） */
   client?: SessionClient | undefined;
+  /** 组曲会话归属（ADR-0097） */
+  suite?: SessionSuiteMeta | undefined;
 }
 
 export interface SessionConfig {
@@ -201,6 +204,8 @@ export interface SessionSummary {
   schedule?: SessionSchedule | undefined;
   /** 外部 agent（经 MCP 桥）创建的会话来源（ADR-0074 §5） */
   client?: SessionClient | undefined;
+  /** 组曲会话归属（ADR-0097）；指挥会话默认不进列表，见 list 的 includeSuiteCoordinators */
+  suite?: SessionSuiteMeta | undefined;
   /**
    * 首条 message.user 的首行文本（TUI 欢迎框"最近会话"摘要，v0.3）；
    * 无用户消息或日志损坏时缺省
@@ -224,6 +229,8 @@ export interface CreateSessionInput {
   schedule?: SessionSchedule | undefined;
   /** 外部 agent 来源（ADR-0074 §5）；写入 session.created.client */
   client?: SessionClient | undefined;
+  /** 组曲会话归属（ADR-0097）；写入 session.created.suite */
+  suite?: SessionSuiteMeta | undefined;
 }
 
 export interface LoadSessionOptions {
@@ -258,6 +265,8 @@ export interface SessionStore {
   list(filter?: {
     cwd?: string | undefined;
     includeSubagents?: boolean | undefined;
+    /** 默认 false：不列出组曲指挥会话（ADR-0097） */
+    includeSuiteCoordinators?: boolean | undefined;
     /** 默认 false：不列出已归档会话（ADR-0080） */
     includeArchived?: boolean | undefined;
   }): Promise<SessionSummary[]>;

@@ -479,6 +479,9 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       if (event.payload.parent !== undefined && filter.includeSubagents !== true) {
         return undefined;
       }
+      if (event.payload.suite?.role === "coordinator" && filter.includeSuiteCoordinators !== true) {
+        return undefined;
+      }
       if (filter.cwd !== undefined && !paths.equals(event.payload.cwd, filter.cwd)) {
         return undefined;
       }
@@ -507,6 +510,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         ...(event.payload.forkedFrom !== undefined ? { forkedFrom: event.payload.forkedFrom } : {}),
         ...(event.payload.schedule !== undefined ? { schedule: event.payload.schedule } : {}),
         ...(event.payload.client !== undefined ? { client: event.payload.client } : {}),
+        ...(event.payload.suite !== undefined ? { suite: event.payload.suite } : {}),
         ...(firstText !== undefined ? { firstText } : {}),
       };
     } catch {
@@ -567,6 +571,8 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       const first = events[0];
       if (first?.type !== "session.created")
         throw new SessionError("session_log_corrupt", "日志第一行不是 session.created");
+      if (first.payload.suite?.role === "coordinator")
+        throw new SessionError("invalid_command", "组曲指挥会话不支持分叉");
       const id = newSessionId();
       const lock = await acquireSessionLock(fs, platform, lockPath(id));
       const pendingLog = `${logPath(id)}.fork`;
@@ -599,6 +605,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
             parent: undefined,
             // 分叉是用户亲自开的会话：不继承定时任务来源（ADR-0064），也就不再是无人值守
             schedule: undefined,
+            suite: undefined,
             forkedFrom: { sessionId: source.id, seq: targetSeq ?? source.state().lastSeq },
           },
         };
@@ -667,6 +674,7 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
           ...(input.parent !== undefined ? { parent: input.parent } : {}),
           ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
           ...(input.client !== undefined ? { client: input.client } : {}),
+          ...(input.suite !== undefined ? { suite: input.suite } : {}),
         });
         return session;
       } catch (e) {

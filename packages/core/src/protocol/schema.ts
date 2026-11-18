@@ -241,6 +241,13 @@ const payloadSchemas = {
         id: z.string().optional(),
       })
       .optional(),
+    suite: z
+      .object({
+        id: z.string(),
+        role: z.enum(["coordinator", "thread"]),
+        threadId: z.string().optional(),
+      })
+      .optional(),
   }),
   "session.config_changed": z.object({
     model: modelRefSchema.optional(),
@@ -346,6 +353,14 @@ const payloadSchemas = {
       .optional(),
     // ADR-0089 修订：Runtime 安静提醒只送指挥模型，不在对话视图显示；旧版本按普通用户消息读取
     ensembleQuietReminder: z.literal(true).optional(),
+    // ADR-0097：组曲线程自动汇报投递标记；旧版本按普通用户消息读取
+    suiteReport: z
+      .object({
+        threadId: z.string(),
+        turnId: z.string(),
+        status: z.enum(["idle", "paused"]),
+      })
+      .optional(),
     // ADR-0070：运行中插话的持久消息；旧版本按普通用户消息读取
     steer: z.literal(true).optional(),
     // ADR-0076：执行方式说明块快照；未知名字的旧/新日志照常读取
@@ -523,6 +538,49 @@ const payloadSchemas = {
       )
       .optional(),
   }),
+  "suite.thread_started": z.object({
+    threadId: z.string(),
+    childSessionId: z.string(),
+    title: z.string(),
+    task: z.string(),
+    workspace: z.string(),
+    model: modelRefSchema,
+    reasoningEffort: reasoningEffortSchema.optional(),
+    profile: z.string().optional(),
+    preset: z.enum(["general", "explore"]),
+    isolated: z.boolean(),
+    worktree: z
+      .object({
+        path: z.string(),
+        branch: z.string(),
+        base: z.string(),
+      })
+      .optional(),
+  }),
+  "suite.thread_reported": z.object({
+    threadId: z.string(),
+    childSessionId: z.string(),
+    turnId: z.string(),
+    status: z.enum(["idle", "paused"]),
+    report: z.string(),
+    summaryLine: z.string().optional(),
+    error: errorInfoSchema.optional(),
+    hasUnmergedWorktree: z.boolean().optional(),
+  }),
+  "suite.thread_resolved": z.object({
+    threadId: z.string(),
+    source: z.enum(["coordinator", "user"]),
+  }),
+  "suite.thread_reopened": z.object({
+    threadId: z.string(),
+    source: z.enum(["coordinator", "user"]),
+  }),
+  "suite.thread_model_changed": z.object({
+    threadId: z.string(),
+    model: modelRefSchema,
+    reasoningEffort: reasoningEffortSchema.optional(),
+    profile: z.string().optional(),
+  }),
 } satisfies Record<DurableType, z.ZodType>;
 
 // ── 事件信封 schema ────────────────────────────────────────
@@ -564,6 +622,11 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("ensemble.member_model_changed", payloadSchemas["ensemble.member_model_changed"]),
   envelope("ensemble.member_removed", payloadSchemas["ensemble.member_removed"]),
   envelope("ensemble.ended", payloadSchemas["ensemble.ended"]),
+  envelope("suite.thread_started", payloadSchemas["suite.thread_started"]),
+  envelope("suite.thread_reported", payloadSchemas["suite.thread_reported"]),
+  envelope("suite.thread_resolved", payloadSchemas["suite.thread_resolved"]),
+  envelope("suite.thread_reopened", payloadSchemas["suite.thread_reopened"]),
+  envelope("suite.thread_model_changed", payloadSchemas["suite.thread_model_changed"]),
 ]);
 
 // ── 解析错误 ───────────────────────────────────────────────

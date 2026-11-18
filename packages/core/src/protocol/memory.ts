@@ -51,6 +51,7 @@ export interface OtherProjectMemory {
 export interface MemoryDescription {
   global: MemoryScopeOverview;
   project?: MemoryScopeOverview | undefined;
+  suite?: MemoryScopeOverview | undefined;
   otherProjects: OtherProjectMemory[];
 }
 

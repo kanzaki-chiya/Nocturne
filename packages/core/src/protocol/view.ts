@@ -6,6 +6,12 @@ import {
   type EnsembleView,
 } from "./ensemble.js";
 import {
+  applySuiteThreadUpdated,
+  reduceSuiteDurable,
+  type SuiteReportDelivery,
+  type SuiteView,
+} from "./suite.js";
+import {
   reduceGoal,
   reducePlan,
   type GoalState,
@@ -103,6 +109,8 @@ export interface SessionView {
   plan?: PlanConfig | undefined;
   /** Ensemble 派生视图（ADR-0089 §5）；从未建立或分叉不继承时缺省 */
   ensemble?: EnsembleView | undefined;
+  /** Suite 派生视图（ADR-0097 §3.5）；仅组曲指挥会话存在 */
+  suite?: SuiteView | undefined;
   pendingPermission: PendingPermission | undefined;
   /** 子代理转发到当前父会话的待决权限快照（只由临时事件 subagent.permissions 产生，不写日志） */
   pendingSubagentPermissions: SubagentPendingPermission[];
@@ -159,6 +167,7 @@ export interface UserEntry {
   subagent?: SubagentResult | undefined;
   backgroundShell?: BackgroundShellResult | undefined;
   ensemble?: EnsemblePostDelivery | undefined;
+  suiteReport?: SuiteReportDelivery | undefined;
   /** 执行方式快照（ADR-0076）：界面在正文旁显示命令名 */
   workMode?: WorkModeSnapshot | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
@@ -438,6 +447,8 @@ export function reduceSessionView(view: SessionView, event: RuntimeEvent): void 
       if (goal !== view.goal) view.goal = goal;
       const plan = reducePlan(view.plan, event);
       if (plan !== view.plan) view.plan = plan;
+      const suite = reduceSuiteDurable(view.suite, event);
+      if (suite !== view.suite) view.suite = suite;
       reduceDurable(view, event);
       const createdEv = book(view).events[0];
       const forkSeq =
@@ -642,6 +653,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
           ? { backgroundShell: event.payload.backgroundShell }
           : {}),
         ...(event.payload.ensemble !== undefined ? { ensemble: event.payload.ensemble } : {}),
+        ...(event.payload.suiteReport !== undefined
+          ? { suiteReport: event.payload.suiteReport }
+          : {}),
         ...(event.payload.workMode !== undefined ? { workMode: event.payload.workMode } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
@@ -966,6 +980,10 @@ function reduceEphemeral(view: SessionView, event: EphemeralEvent): void {
   }
   if (event.type === "ensemble.member_updated") {
     applyEnsembleMemberUpdated(view.ensemble, event.payload);
+    return;
+  }
+  if (event.type === "suite.thread_updated") {
+    applySuiteThreadUpdated(view.suite, event.payload);
     return;
   }
   if (event.type === "subagent.permissions") {

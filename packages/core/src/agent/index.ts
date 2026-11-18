@@ -10,8 +10,10 @@ export {
 } from "./roles.js";
 export { consumeStream, type StreamOutcome, type StreamAccumulation } from "./stream.js";
 export {
+  attachChildPermissionForwarder,
   createSubagentLauncher,
   createSubagentLimiter,
+  type ChildPermissionForwarder,
   type SubagentDeps,
   type SubagentLimiter,
   type SubagentLimits,

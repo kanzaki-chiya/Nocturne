@@ -1,5 +1,6 @@
 import type {
   ClearMemoryInput,
+  CreateSuiteInput,
   DeleteMemoryInput,
   MemoryDescription,
   MemoryEntry,
@@ -9,6 +10,8 @@ import type {
   SkillImportInput,
   SkillImportOutput,
   SkillsDescription,
+  SuiteRecord,
+  UpdateSuiteInput,
 } from "@nocturne/core";
 /**
  * RPC 客户端（ADR-0044）：类型化封装。运行时只依赖 `@nocturne/core/protocol`，
@@ -246,6 +249,10 @@ export interface RpcSession {
   removeEnsembleMember(input: string | { name: string }): Promise<void>;
   /** 结束活动 Ensemble（ADR-0089） */
   endEnsemble(): Promise<{ unmerged: EnsembleUnmergedWorktree[] }>;
+  /** 组曲总览：标记指定线程完成或重新打开（ADR-0097 §3.6） */
+  resolveThread(input: { thread: string; reopen?: boolean | undefined }): Promise<void>;
+  /** 组曲总览：用户绕过指挥直接向线程发消息（ADR-0097 §3.6） */
+  sendToThread(input: { thread: string; text: string }): Promise<void>;
   /** 待发输入快照（`input.pending` 是临时事件，订阅后用它对齐） */
   pendingInputs(): Promise<PendingInputsSnapshot>;
   shellTasks(): Promise<RpcResult<"shell.tasks">>;
@@ -315,7 +322,10 @@ export interface RpcRuntime {
   importSkills(input: SkillImportInput): Promise<SkillImportOutput>;
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
-  describeMemory(input?: { workspaceRoot?: string | undefined }): Promise<MemoryDescription>;
+  describeMemory(input?: {
+    workspaceRoot?: string | undefined;
+    suiteId?: string | undefined;
+  }): Promise<MemoryDescription>;
   readMemory(input: ReadMemoryInput): Promise<MemoryEntry>;
   deleteMemory(input: DeleteMemoryInput): Promise<void>;
   clearMemory(input: ClearMemoryInput): Promise<void>;
@@ -336,9 +346,19 @@ export interface RpcRuntime {
   deleteSchedule(input: { id: string }): Promise<void>;
   runSchedule(input: { id: string }): Promise<ScheduleRunNowResult>;
   scheduleHistory(input: { id: string }): Promise<ScheduleHistoryEntry[]>;
+  /** 组曲管理（ADR-0097 §3.6） */
+  listSuites(filter?: { includeArchived?: boolean | undefined }): Promise<SuiteRecord[]>;
+  createSuite(input: CreateSuiteInput): Promise<SuiteRecord>;
+  updateSuite(input: UpdateSuiteInput): Promise<SuiteRecord>;
+  archiveSuite(id: string): Promise<void>;
+  openSuite(
+    id: string,
+    options?: { model?: string | ModelRef; force?: boolean },
+  ): Promise<{ opened: SessionOpened; session: RpcSession }>;
   listSessions(filter?: {
     cwd?: string;
     includeSubagents?: boolean;
+    includeSuiteCoordinators?: boolean;
     includeArchived?: boolean;
   }): Promise<RpcResult<"runtime.listSessions">>;
   searchSessions(
@@ -883,6 +903,12 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         await call("session.removeEnsembleMember", { ...p, name });
       },
       endEnsemble: () => call("session.endEnsemble", p),
+      resolveThread: async (input) => {
+        await call("session.resolveThread", { ...p, ...input });
+      },
+      sendToThread: async (input) => {
+        await call("session.sendToThread", { ...p, ...input });
+      },
       pendingInputs: () => call("session.pendingInputs", p),
       shellTasks: () => call("shell.tasks", p),
       shellOutput: (taskId, offset) =>
@@ -1025,6 +1051,16 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     runSchedule: (input) => call("schedule.runNow", input),
     scheduleHistory: (input) => call("schedule.history", input),
+    listSuites: (filter) => call("suites.list", filter ?? {}),
+    createSuite: (input) => call("suites.create", input),
+    updateSuite: (input) => call("suites.update", input),
+    archiveSuite: async (id) => {
+      await call("suites.archive", { id });
+    },
+    openSuite: async (id, resumeOptions) => {
+      const opened = await call("suites.open", { id, ...resumeOptions });
+      return { opened, session: session(opened.sessionId) };
+    },
     listSessions: (filter) => call("runtime.listSessions", filter ?? {}),
     searchSessions: (input) => call("runtime.searchSessions", input),
     workspaceBranches: (input) => call("workspace.branches", input),

@@ -23,6 +23,7 @@ import type {
   PermissionReviewedPayload,
   PermissionSubject,
   ReasoningEffort,
+  RuntimeEvent,
   Usage,
 } from "../protocol/index.js";
 import type { InstructionSet, EnvironmentInfo } from "../context/index.js";
@@ -55,6 +56,7 @@ import {
   type HookRunner,
   type ImageProcessor,
   type PausableTimeout,
+  type PermissionGate,
   type SubagentLauncher,
   type SubagentOutcome,
   type SubagentRequest,
@@ -102,6 +104,142 @@ function parseDispatchedTargetName(inputText: string): string | undefined {
     // 流式半截 JSON 忽略
   }
   return undefined;
+}
+
+export interface ChildPermissionForwarder {
+  onPendingSettled(requestId: string): void;
+  dispose(): void;
+}
+
+/** 将子会话的待决权限请求转发注册到交互父会话活动转发池，并在结算/销毁时撤除。 */
+export function attachChildPermissionForwarder(opts: {
+  child: { id: string; subscribe(listener: (event: RuntimeEvent) => void): () => void };
+  gate: Pick<PermissionGate, "hasPending" | "respond" | "cancelAll">;
+  permissions:
+    Pick<SubagentPermissionsDeps, "register" | "clearChild" | "onGrantChanged"> | undefined;
+  parentCallId: string;
+  profile: string;
+  taskSummary: string;
+  workspaceRoot: () => string;
+  onCancel?: (() => void) | undefined;
+}): ChildPermissionForwarder {
+  const { permissions } = opts;
+  if (permissions === undefined) {
+    return {
+      onPendingSettled: () => undefined,
+      dispose: () => undefined,
+    };
+  }
+  const unregisterPending = new Map<string, () => void>();
+  const liveInputs = new Map<string, { name: string; inputText: string }>();
+  const callTools = new Map<string, { name: string; targetName?: string | undefined }>();
+  const pendingReviews = new Map<string, PermissionReviewedPayload>();
+
+  const unsubscribe = opts.child.subscribe((e) => {
+    if (e.type === "tool.input.delta") {
+      const prev = liveInputs.get(e.payload.callId);
+      liveInputs.set(e.payload.callId, {
+        name: prev?.name ?? e.payload.name,
+        inputText: (prev?.inputText ?? "") + e.payload.delta,
+      });
+      return;
+    }
+    if (e.type === "message.assistant") {
+      for (const tc of e.payload.toolCalls) {
+        const targetName =
+          tc.name === "mcp_call" &&
+          tc.input !== undefined &&
+          tc.input !== null &&
+          typeof tc.input === "object" &&
+          typeof (tc.input as { tool?: unknown }).tool === "string"
+            ? (tc.input as { tool: string }).tool
+            : undefined;
+        callTools.set(tc.callId, { name: tc.name, targetName });
+      }
+      return;
+    }
+    if (e.type === "permission.reviewed") {
+      pendingReviews.set(e.payload.callId, e.payload);
+      return;
+    }
+    if (e.type === "permission.requested") {
+      if (!opts.gate.hasPending?.(e.payload.requestId)) return;
+      const mcpSubject = e.payload.subjects.find((s) => s.kind === "mcp")?.target;
+      const live = liveInputs.get(e.payload.callId);
+      const callInfo = callTools.get(e.payload.callId);
+      const dispatchedTarget =
+        live?.name === "mcp_call"
+          ? parseDispatchedTargetName(live.inputText)
+          : callInfo?.targetName;
+      const resolvedToolName =
+        dispatchedTarget ??
+        (mcpSubject !== undefined ? `mcp__${mcpSubject.replace("/", "__")}` : undefined) ??
+        callInfo?.name ??
+        live?.name;
+      const review = pendingReviews.get(e.payload.callId);
+      const unreg = permissions.register({
+        childSessionId: opts.child.id,
+        parentCallId: opts.parentCallId,
+        profile: opts.profile,
+        taskSummary: opts.taskSummary,
+        request: {
+          requestId: e.payload.requestId,
+          callId: e.payload.callId,
+          toolName: resolvedToolName,
+          subjects: e.payload.subjects,
+          reason: e.payload.reason,
+          options: e.payload.options,
+          ...(review !== undefined ? { review } : {}),
+        },
+        respond: (reply) =>
+          opts.gate.respond?.(e.payload.requestId, reply) ?? Promise.resolve(false),
+        cancel: () => {
+          opts.gate.cancelAll?.();
+          opts.onCancel?.();
+        },
+      });
+      if (opts.gate.hasPending(e.payload.requestId)) {
+        unregisterPending.set(e.payload.requestId, unreg);
+      } else {
+        unreg();
+      }
+      return;
+    }
+    if (e.type === "permission.resolved") {
+      pendingReviews.delete(e.payload.callId);
+      if (e.payload.remember !== undefined) {
+        permissions.onGrantChanged?.(e.payload.remember, opts.workspaceRoot());
+      }
+      return;
+    }
+    if (e.type === "tool.completed") {
+      liveInputs.delete(e.payload.callId);
+      callTools.delete(e.payload.callId);
+      pendingReviews.delete(e.payload.callId);
+      return;
+    }
+    if (e.type === "turn.completed") {
+      liveInputs.clear();
+      callTools.clear();
+      pendingReviews.clear();
+    }
+  });
+
+  return {
+    onPendingSettled(requestId) {
+      const unreg = unregisterPending.get(requestId);
+      if (unreg !== undefined) {
+        unregisterPending.delete(requestId);
+        unreg();
+      }
+    },
+    dispose() {
+      for (const unreg of unregisterPending.values()) unreg();
+      unregisterPending.clear();
+      permissions.clearChild(opts.child.id);
+      unsubscribe();
+    },
+  };
 }
 
 export interface SubagentLimits {
@@ -470,8 +608,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
       let registration: SubagentRegistration | undefined;
       let launchTimeout: PausableTimeout | undefined;
       let childGate: ReturnType<typeof createPolicyGate> | undefined;
-      let unsubscribePermissions: (() => void) | undefined;
-      const unregisterPending = new Map<string, () => void>();
+      let permForwarder: ChildPermissionForwarder | undefined;
       let detached = false;
       const effectiveParentCallId = deps.rootCallId ?? ctx.callId;
       const cancellation = request.background ? new AbortController() : undefined;
@@ -479,10 +616,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
       const cleanup = async () => {
         launchTimeout?.dispose();
         childGate?.cancelAll?.();
-        for (const unreg of unregisterPending.values()) unreg();
-        unregisterPending.clear();
-        if (child !== undefined) deps.permissions?.clearChild(child.id);
-        unsubscribePermissions?.();
+        permForwarder?.dispose();
         try {
           if (child !== undefined) {
             await deps
@@ -773,111 +907,24 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             nonInteractiveDenyHint: NON_INTERACTIVE_DENY_HINT,
             pauseTimeouts: childPauseTimeouts,
             onPendingSettled: (requestId) => {
-              const unreg = unregisterPending.get(requestId);
-              if (unreg !== undefined) {
-                unregisterPending.delete(requestId);
-                unreg();
-              }
+              permForwarder?.onPendingSettled(requestId);
             },
           },
         );
         childGate = gate;
         const profileName = subagentProfile(request);
         const taskSummary = summarizeSubagentTask(request.task);
-        const liveInputs = new Map<string, { name: string; inputText: string }>();
-        const callTools = new Map<string, { name: string; targetName?: string | undefined }>();
-        const pendingReviews = new Map<string, PermissionReviewedPayload>();
-        unsubscribePermissions = child.subscribe((e) => {
-          if (e.type === "tool.input.delta") {
-            const prev = liveInputs.get(e.payload.callId);
-            liveInputs.set(e.payload.callId, {
-              name: prev?.name ?? e.payload.name,
-              inputText: (prev?.inputText ?? "") + e.payload.delta,
-            });
-            return;
-          }
-          if (e.type === "message.assistant") {
-            for (const tc of e.payload.toolCalls) {
-              const targetName =
-                tc.name === "mcp_call" &&
-                tc.input !== undefined &&
-                tc.input !== null &&
-                typeof tc.input === "object" &&
-                typeof (tc.input as { tool?: unknown }).tool === "string"
-                  ? (tc.input as { tool: string }).tool
-                  : undefined;
-              callTools.set(tc.callId, { name: tc.name, targetName });
-            }
-            return;
-          }
-          if (e.type === "permission.reviewed") {
-            pendingReviews.set(e.payload.callId, e.payload);
-            return;
-          }
-          if (e.type === "permission.requested") {
-            if (deps.permissions === undefined || !gate.hasPending?.(e.payload.requestId)) return;
-            const mcpSubject = e.payload.subjects.find((s) => s.kind === "mcp")?.target;
-            const live = liveInputs.get(e.payload.callId);
-            const callInfo = callTools.get(e.payload.callId);
-            const dispatchedTarget =
-              live?.name === "mcp_call"
-                ? parseDispatchedTargetName(live.inputText)
-                : callInfo?.targetName;
-            const resolvedToolName =
-              dispatchedTarget ??
-              (mcpSubject !== undefined ? `mcp__${mcpSubject.replace("/", "__")}` : undefined) ??
-              callInfo?.name ??
-              live?.name;
-            const review = pendingReviews.get(e.payload.callId);
-            const unreg = deps.permissions.register({
-              childSessionId: childSessionRef.id,
-              parentCallId: effectiveParentCallId,
-              profile: profileName,
-              taskSummary,
-              request: {
-                requestId: e.payload.requestId,
-                callId: e.payload.callId,
-                toolName: resolvedToolName,
-                subjects: e.payload.subjects,
-                reason: e.payload.reason,
-                options: e.payload.options,
-                ...(review !== undefined ? { review } : {}),
-              },
-              respond: (reply) =>
-                gate.respond?.(e.payload.requestId, reply) ?? Promise.resolve(false),
-              cancel: () => {
-                gate.cancelAll?.();
-                effectiveBgController?.abort();
-              },
-            });
-            if (gate.hasPending(e.payload.requestId)) {
-              unregisterPending.set(e.payload.requestId, unreg);
-            } else {
-              unreg();
-            }
-            return;
-          }
-          if (e.type === "permission.resolved") {
-            pendingReviews.delete(e.payload.callId);
-            if (e.payload.remember !== undefined) {
-              deps.permissions?.onGrantChanged?.(
-                e.payload.remember,
-                worktree?.workspaceRoot ?? ctx.workspaceRoot,
-              );
-            }
-            return;
-          }
-          if (e.type === "tool.completed") {
-            liveInputs.delete(e.payload.callId);
-            callTools.delete(e.payload.callId);
-            pendingReviews.delete(e.payload.callId);
-            return;
-          }
-          if (e.type === "turn.completed") {
-            liveInputs.clear();
-            callTools.clear();
-            pendingReviews.clear();
-          }
+        permForwarder = attachChildPermissionForwarder({
+          child,
+          gate,
+          permissions: deps.permissions,
+          parentCallId: effectiveParentCallId,
+          profile: profileName,
+          taskSummary,
+          workspaceRoot: () => worktree?.workspaceRoot ?? ctx.workspaceRoot,
+          onCancel: () => {
+            effectiveBgController?.abort();
+          },
         });
         const execEnv: ExecutionEnvironment = {
           checkpoint: worktree ? undefined : deps.checkpoint,
