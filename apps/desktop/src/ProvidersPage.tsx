@@ -1992,6 +1992,10 @@ function PresetForm({
     setCommitErr(null);
     setFetchState({ kind: "idle" });
   };
+  const cancel = () => {
+    abandon();
+    onBack();
+  };
 
   const startLogin = async () => {
     const name = nameValue();
@@ -2025,13 +2029,7 @@ function PresetForm({
     <>
       <DetailHeader
         leading={
-          <IconButton
-            aria-label="返回"
-            onClick={() => {
-              abandon();
-              onBack();
-            }}
-          >
+          <IconButton aria-label="返回" onClick={cancel}>
             <Icon name="arrow_left" size={ICON_MD} />
           </IconButton>
         }
@@ -2248,7 +2246,7 @@ function PresetForm({
         )}
 
         <FormFooter>
-          <Button disabled={committing} onClick={abandon}>
+          <Button disabled={committing} onClick={cancel}>
             取消
           </Button>
           <Button variant="primary" disabled={!canSave} onClick={() => void save()}>

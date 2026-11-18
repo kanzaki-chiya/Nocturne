@@ -795,12 +795,14 @@ describe("添加服务商", () => {
     await openForm();
     fireEvent.click(button("获取模型"));
     await screen.findByRole("region", { name: "模型 · 120 个" });
-    // 「取消」：释放草稿，表单清空
+    // 「取消」：释放草稿并回到选择页
     fireEvent.click(button("取消"));
     await waitFor(() => {
       expect(called(server, "provider.discardProvider", "draftId", "draft-1")).toBe(true);
     });
-    expect(screen.getByLabelText("名称")).toHaveProperty("value", "");
+    await screen.findByRole("heading", { level: 2, name: "添加服务商" });
+    expect(screen.queryByLabelText("名称")).toBeNull();
+    expect(screen.getByRole("button", { name: new RegExp(PRESET.label) })).toBeTruthy();
     // 再获取一次，然后切回已配置条目 → 卸载表单 → 释放
     await openForm();
     fireEvent.click(button("获取模型"));
