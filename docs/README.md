@@ -130,6 +130,8 @@ Hook 上下文注入（`SessionStart` / `UserPromptSubmit` / `SubagentStart`、`
 
 长期工作流「组曲 / Suite」（常驻指挥 + 线程 + 总览；先行抽出 `resident` 常驻子会话共享层）见 [ADR-0097](decisions/ADR-0097-suites.md)。
 
+长期记忆（全局 / 项目 / 组曲三层存储、`memory` 上下文索引、`memory_read` / `memory_write` / `memory_delete`、`memory.global` / `memory.project` 开关与 `memory.*` 本机 RPC）见 [ADR-0098](decisions/ADR-0098-memory.md)。
+
 ## Roadmap
 子代理档位（按任务选择执行者）见 [ADR-0058](decisions/ADR-0058-subagent-profiles.md)，主文档是 [subagent.md](architecture/subagent.md)。
 

@@ -1,5 +1,10 @@
 import type {
+  ClearMemoryInput,
+  DeleteMemoryInput,
+  MemoryDescription,
+  MemoryEntry,
   PluginsDescription,
+  ReadMemoryInput,
   Runtime,
   SkillImportInput,
   SkillImportOutput,
@@ -310,6 +315,10 @@ export interface RpcRuntime {
   importSkills(input: SkillImportInput): Promise<SkillImportOutput>;
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  describeMemory(input?: { workspaceRoot?: string | undefined }): Promise<MemoryDescription>;
+  readMemory(input: ReadMemoryInput): Promise<MemoryEntry>;
+  deleteMemory(input: DeleteMemoryInput): Promise<void>;
+  clearMemory(input: ClearMemoryInput): Promise<void>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
@@ -993,6 +1002,14 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     importSkills: (input) => call("skills.importSkills", input),
     describePlugins: () => call("plugins.describePlugins", {}),
     setPluginEnabled: (input) => call("plugins.setPluginEnabled", input),
+    describeMemory: (input = {}) => call("memory.describeMemory", input),
+    readMemory: (input) => call("memory.readMemory", input),
+    deleteMemory: async (input) => {
+      await call("memory.deleteMemory", input);
+    },
+    clearMemory: async (input) => {
+      await call("memory.clearMemory", input);
+    },
     saveMcpServer: (input) => call("mcp.saveMcpServer", input),
     deleteMcpServer: async (input) => {
       await call("mcp.deleteMcpServer", input);

@@ -331,6 +331,7 @@ describe("ADR-0095 note_write 端到端集成测试", () => {
       expect(sectionNames.filter((n) => n !== "instructions" && n !== "skills")).toEqual([
         "system",
         "tools",
+        "memory",
         "environment",
         "notes",
         "todos",

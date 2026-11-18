@@ -338,6 +338,8 @@ export async function loadConfig(
     const savedCustomThemes = settings.store.customThemes();
     const serializedCustomThemes =
       savedCustomThemes === undefined ? undefined : JSON.stringify(savedCustomThemes);
+    const savedMemory = settings.store.memoryFields();
+    const effectiveMemory = settings.store.memorySettings();
     return (
       [
         [
@@ -466,6 +468,18 @@ export async function loadConfig(
           serializedCustomThemes,
           serializedCustomThemes,
         ],
+        [
+          "memory.global",
+          "memory.global",
+          String(effectiveMemory.global),
+          savedMemory?.global === undefined ? undefined : String(savedMemory.global),
+        ],
+        [
+          "memory.project",
+          "memory.project",
+          String(effectiveMemory.project),
+          savedMemory?.project === undefined ? undefined : String(savedMemory.project),
+        ],
         ...Object.entries(merged.resolved.subagentProfiles ?? {}).map(
           ([name, profile]) =>
             [
@@ -488,9 +502,17 @@ export async function loadConfig(
             ? savedCustomThemes !== undefined
               ? "settings"
               : undefined
-            : key === "shell" && merged.resolved.shellPath !== undefined
-              ? merged.origins.shellPath
-              : merged.origins[field];
+            : key === "memory.global"
+              ? savedMemory?.global !== undefined
+                ? "settings"
+                : undefined
+              : key === "memory.project"
+                ? savedMemory?.project !== undefined
+                  ? "settings"
+                  : undefined
+                : key === "shell" && merged.resolved.shellPath !== undefined
+                  ? merged.origins.shellPath
+                  : merged.origins[field];
       const source =
         origin === "modelsDev" ||
         origin === "app" ||
@@ -738,6 +760,7 @@ export async function loadConfig(
     skillConfig: () => userFile.skills ?? {},
     disabledSkills: () => settings.store.disabledSkills(),
     setSkillEnabled: (name, enabled) => settings.store.setSkillEnabled(name, enabled),
+    memoryConfig: () => settings.store.memorySettings(),
     disabledProviders: () => settings.store.disabledProviders(),
     disabledModels: () => settings.store.disabledModels(),
     setProviderEnabled: (provider, enabled) => settings.store.setProviderEnabled(provider, enabled),

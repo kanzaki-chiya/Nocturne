@@ -206,6 +206,26 @@ module.exports = {
       },
     },
     {
+      name: "memory-deps",
+      severity: "error",
+      comment:
+        "memory 只能依赖 protocol 与 platform（不能依赖 agent/tools/session/context/config/provider，ADR-0098）",
+      from: { path: "^packages/core/src/memory/" },
+      to: {
+        path: "^packages/core/src/(?!memory/|protocol/|platform/)",
+      },
+    },
+    {
+      name: "only-index-imports-memory",
+      severity: "error",
+      comment: "除 core/index（src/index.ts）外，任何模块不能 import memory",
+      from: {
+        path: "^packages/core/src",
+        pathNot: ["^packages/core/src/index\\.ts$", "^packages/core/src/memory/"],
+      },
+      to: { path: "^packages/core/src/memory/" },
+    },
+    {
       name: "agent-deps",
       severity: "error",
       comment:

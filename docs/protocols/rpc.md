@@ -314,6 +314,19 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `plugins.describePlugins` | `{}` → `PluginsDescription`（`{ plugins: PluginOverview[], warnings: string[] }`）；每次重新扫描并重新校验已启用插件的整目录指纹 |
 | `plugins.setPluginEnabled` | `{ id: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列原子写 `plugins.json`（`enabled: true` 时计算整目录指纹，含符号链接等失败时拒绝并报 `invalid_command`），响应之前推 `runtime.providersChanged`，技能在空闲边界重建，Hook 对之后打开的会话生效 |
 
+### 3.15 `memory.*`（ADR-0098）
+
+长期记忆总览、单条读取、单条删除与范围清空，只向本机连接开放（返回值包含本机绝对路径，不在远程或外部 agent 白名单，第 7 节）。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `memory.describeMemory` | `{ workspaceRoot? }` → `MemoryDescription`（`{ global, project?, otherProjects }`） |
+| `memory.readMemory` | `{ scope, key?, workspaceRoot?, name }` → `MemoryEntry` |
+| `memory.deleteMemory` | `{ scope, key?, workspaceRoot?, name }` → `null`；实际删除后推 `runtime.providersChanged` |
+| `memory.clearMemory` | `{ scope, key?, workspaceRoot? }` → `null`；清空后推 `runtime.providersChanged` |
+
+开关 `memory.global` / `memory.project` 走 `runtime.describeSettings` / `runtime.updateSettings`。
+
 ## 4. 订阅与回放
 
 `session.subscribe { sessionId, afterSeq }`：服务端先挂实时监听并缓冲，再读日志，推送 `seq > afterSeq` 的全部**持久**事件，随后冲刷缓冲（按 `seq` 去重，已推过的不再推），最后转入实时推送（持久与临时都推）。请求在回放与衔接完成后才返回 `{ lastSeq }`，因此回放期间产生的新事件不丢、不重，`seq` 连续。
@@ -492,7 +505,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.readFile` | 允许（ADR-0084）：限本连接已打开会话的工作区与 fileIndex 可见普通文件；真实路径校验、拒绝链接与越界，二进制不返回内容，超限 `file_too_large` 带原始字节数，见第 3.2 节 |
 | `remote.lanEndpoints` | 允许（ADR-0087）：只读返回本机局域网直连监听地址列表 `{endpoints}`（未开启时为空数组），仅经已建立的端到端加密通道下发 |
 | `runtime.readFile`、`runtime.searchSessions` | 拒绝：任意绝对路径 `readFile` 仅本机（ADR-0060），手机文件入口使用上面的受限会话方法；`searchSessions` 仅桌面端跨会话搜索（ADR-0077） |
-| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入（含 `updateSettings` 修改 `appearance.themePreset`、`appearance.customThemes` 等，见 ADR-0093、ADR-0094）、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`，以及上面未列出的 `schedule.*` |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入（含 `updateSettings` 修改 `appearance.themePreset`、`appearance.customThemes`、`memory.global`、`memory.project` 等，见 ADR-0093、ADR-0094、ADR-0098）、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`、`plugins.*`、`memory.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。

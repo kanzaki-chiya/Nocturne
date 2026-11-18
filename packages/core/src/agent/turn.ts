@@ -503,7 +503,9 @@ export async function runTurn(
         }
         attachmentData = data;
       }
+      const memorySnapshot = deps.memory?.();
       const built = buildContext({
+        ...(memorySnapshot !== undefined ? { memory: memorySnapshot } : {}),
         skills: deps.skills,
         ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
         history: state.history,
@@ -571,6 +573,8 @@ export async function runTurn(
             { resumed: false, source: "compact" },
             signal,
           );
+          if (aborted(signal)) return await finish("aborted");
+          await deps.refreshMemory?.();
           if (aborted(signal)) return await finish("aborted");
           pruneAttempted = true;
           forceCompaction = false;

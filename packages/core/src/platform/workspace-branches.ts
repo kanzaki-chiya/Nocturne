@@ -42,6 +42,34 @@ export async function gitRepository(workspace: string): Promise<string | null> {
   }
 }
 
+/**
+ * Resolve the main repository root for a workspace directory.
+ * Linked git worktrees resolve back to the main repository containing the shared `.git` directory;
+ * bare repositories and non-git directories return null so callers fall back to `workspaceRoot`.
+ */
+export async function gitMainRepository(workspace: string): Promise<string | null> {
+  if (!hasGitMarker(workspace)) return null;
+  try {
+    const out = await git(workspace, [
+      "rev-parse",
+      "--is-bare-repository",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
+    const lines = out.trim().split(/\r?\n/);
+    if (lines.length < 2) return null;
+    const [isBare, rawCommonDir] = lines;
+    if (isBare?.trim() === "true") return null;
+    const commonDir = rawCommonDir?.trim();
+    if (!commonDir) return null;
+    const resolved = resolve(commonDir);
+    if (basename(resolved).toLowerCase() !== ".git") return null;
+    return dirname(resolved);
+  } catch {
+    return null;
+  }
+}
+
 export async function gitCurrentBranch(workspace: string): Promise<string | null> {
   if (!hasGitMarker(workspace)) return null;
   try {

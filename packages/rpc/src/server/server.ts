@@ -14,6 +14,7 @@ import {
   describeProviderSetup,
   discardDraftLogin,
   discardProvider,
+  isMemoryScope,
   isReasoningEffort,
   isWorkModeName,
   listProviderPresets,
@@ -826,6 +827,22 @@ class Connection implements HubPeer {
 
   private workspaceOf(p: Params): Promise<string | undefined> {
     return this.hub.workspaceOf(p);
+  }
+
+  private async parseMemoryTarget(
+    p: Params,
+  ): Promise<{ scope: "global" | "project" | "suite"; key?: string; workspaceRoot?: string }> {
+    const scope = reqString(p, "scope");
+    if (!isMemoryScope(scope)) {
+      throw new InvalidParamsError(`无效的记忆范围：${scope}`);
+    }
+    const key = optString(p, "key");
+    const workspaceRoot = await this.workspaceOf(p);
+    return {
+      scope,
+      ...(key !== undefined ? { key } : {}),
+      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+    };
   }
 
   private enqueueConfig<T>(task: (config: RuntimeConfig) => Promise<T>): Promise<T> {
@@ -1739,6 +1756,23 @@ class Connection implements HubPeer {
           this.hub.notifyProvidersChanged();
           return result;
         });
+      },
+      // 长期记忆管理（ADR-0098 §7）：只在本机连接开放（返回绝对路径，不在 REMOTE_METHODS）
+      "memory.describeMemory": async (p) =>
+        this.runtime().describeMemory({ workspaceRoot: await this.workspaceOf(p) }),
+      "memory.readMemory": async (p) => {
+        const target = await this.parseMemoryTarget(p);
+        return this.runtime().readMemory({ ...target, name: reqString(p, "name") });
+      },
+      "memory.deleteMemory": async (p) => {
+        const target = await this.parseMemoryTarget(p);
+        await this.runtime().deleteMemory({ ...target, name: reqString(p, "name") });
+        return null;
+      },
+      "memory.clearMemory": async (p) => {
+        const target = await this.parseMemoryTarget(p);
+        await this.runtime().clearMemory(target);
+        return null;
       },
       "session.describeSkills": (p) => this.session(p).session.describeSkills(),
       "mcp.saveMcpServer": (p) =>

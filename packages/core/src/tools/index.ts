@@ -69,6 +69,13 @@ export { diffLines } from "./builtin/diff.js";
 export { createTaskTool } from "./builtin/task.js";
 export { createSwitchWorktreeTool } from "./builtin/switch-worktree.js";
 export {
+  createMemoryTools,
+  type MemoryDeleteInput,
+  type MemoryReadInput,
+  type MemoryToolDeps,
+  type MemoryWriteInput,
+} from "./builtin/memory.js";
+export {
   createMcpOnDemandTools,
   estimateMcpToolsTokens,
   MAX_MCP_SEARCH_RESULTS,

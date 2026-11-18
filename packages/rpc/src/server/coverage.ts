@@ -13,6 +13,7 @@ export const RUNTIME_NOT_MAPPED = {
   onGrantsChanged: "事件订阅：Hub 广播 grants.changed 给全部已握手连接",
   onSessionsChanged: "事件订阅：Hub 广播 runtime.sessionsChanged，含发送时自动恢复归档",
   onScheduleChanged: "事件订阅：Hub 订阅后以 schedule.changed 通知广播给所有已握手的连接",
+  onMemoryChanged: "事件订阅：Hub 订阅后以 runtime.providersChanged 通知广播给所有已握手的连接",
   stopScheduler: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
   close: "生命周期：后台退出前由 RpcRuntimeHandle.dispose 调用，不是 RPC 方法",
 } as const satisfies Partial<Record<keyof Runtime, string>>;
@@ -84,6 +85,10 @@ export const RUNTIME_METHODS: Record<
   setSkillEnabled: "skills.setSkillEnabled",
   describePlugins: "plugins.describePlugins",
   setPluginEnabled: "plugins.setPluginEnabled",
+  describeMemory: "memory.describeMemory",
+  readMemory: "memory.readMemory",
+  deleteMemory: "memory.deleteMemory",
+  clearMemory: "memory.clearMemory",
   setProviderEnabled: "provider.setProviderEnabled",
   setModelsEnabled: "provider.setModelsEnabled",
   describeToggleImpact: "provider.describeToggleImpact",
@@ -161,6 +166,8 @@ export const SESSION_METHODS: Record<
 /** 没有（或没有一一对应的）RPC 方法的 RuntimeConfig 成员，附原因 */
 export const CONFIG_NOT_MAPPED = {
   appPermissions: "用户层软件规则存储，由权限层持久授权使用，不直接暴露存储对象",
+  memoryConfig:
+    "记忆开关由 memory.describeMemory 与 runtime.describeSettings 返回，经 runtime.updateSettings 修改",
   skillConfig: "用户级技能来源设置由 skills.describeSkills 使用",
   disabledSkills: "技能开关由 skills.describeSkills 返回",
   setSkillEnabled: "Runtime 统一写入并更新会话，映射 skills.setSkillEnabled",

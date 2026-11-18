@@ -33,6 +33,7 @@ import type {
   PermissionRule,
   ProviderAuth,
   CustomTheme,
+  MemorySettings,
 } from "../protocol/index.js";
 
 export type { AnnotatedRule };
@@ -599,6 +600,8 @@ export interface SettingItem {
     | "notifications.sound"
     | "appearance.themePreset"
     | "appearance.customThemes"
+    | "memory.global"
+    | "memory.project"
     /** 子代理档位逐条：effective/saved 为档位 JSON（ADR-0058） */
     | `subagents.profiles.${string}`;
   effective: string | undefined;
@@ -628,6 +631,8 @@ export type SettingsPatch = Partial<{
   "notifications.sound": boolean | null;
   "appearance.themePreset": string | null;
   "appearance.customThemes": CustomTheme[] | null;
+  "memory.global": boolean | null;
+  "memory.project": boolean | null;
 }> &
   /** 子代理档位逐条补丁：null 删除设置层条目（ADR-0058） */
   Partial<Record<`subagents.profiles.${string}`, SubagentProfileConfig | null>>;
@@ -646,6 +651,8 @@ export interface RuntimeConfig {
   skillConfig(): SkillsConfig;
   disabledSkills(): string[];
   setSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  /** ADR-0098：用户级 settings.json 的长期记忆开关（默认皆为 true，不参与项目配置合并） */
+  memoryConfig(): MemorySettings;
   /**
    * ADR-0054：settings.json 顶层的停用集合（用户级专用读写，与技能启停同一
    * 文件同一写队列，不进入 ADR-0034 的白名单通用合并）。指向不存在服务商/

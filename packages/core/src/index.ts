@@ -101,6 +101,16 @@ import {
 // ADR-0035 §5：编辑工具的模型默认表（config 层纯数据）注入 provider 解析
 import { defaultEditToolForModel } from "./config/edit-tool.js";
 import { createDiagnostics } from "./diagnostics/index.js";
+import {
+  clearMemoryDir,
+  deleteMemoryEntry,
+  describeMemoryStore,
+  isDefaultMemoryWorkspace,
+  readMemoryEntry,
+  resolveMemoryScopeDir,
+  snapshotMemoryContext,
+  writeMemoryEntry,
+} from "./memory/index.js";
 import { createHookRunner, type HookRunnerEntry } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import { createUsageStats } from "./usage/index.js";
@@ -184,9 +194,11 @@ import {
 import { resolveProviderAuth } from "./provider-oauth.js";
 import type {
   AgentDelegation,
+  ClearMemoryInput,
   CommandRejectCode,
   CommandErrorDetail,
   ContentBlock,
+  DeleteMemoryInput,
   Diagnostics,
   Grant,
   HookEntry,
@@ -194,6 +206,11 @@ import type {
   DurableEvent,
   DurablePayload,
   McpToolSearchMode,
+  MemoryContextSnapshot,
+  MemoryDescription,
+  MemoryEntry,
+  MemoryScope,
+  MemorySettings,
   ModelPricing,
   ModelRef,
   PendingInputMode,
@@ -202,6 +219,7 @@ import type {
   PermissionSubject,
   PricingSource,
   QuestionReply,
+  ReadMemoryInput,
   ReasoningEffort,
   ReasoningEffortLevel,
   RuntimeEvent,
@@ -219,7 +237,12 @@ import type {
   TurnChangeDiff,
   WorkspaceBranches,
 } from "./protocol/index.js";
-import { DEFAULT_LOOP_GUARD, normalizePermissionPreset } from "./protocol/index.js";
+import {
+  DEFAULT_LOOP_GUARD,
+  isMemoryScope,
+  isValidMemoryName,
+  normalizePermissionPreset,
+} from "./protocol/index.js";
 import type { FileRefResolution, LocalFileContent } from "./protocol/file-refs.js";
 import { resolveFileRefs } from "./tools/file-refs.js";
 import { buildFileIndex, type FileIndexEntry } from "./tools/file-index.js";
@@ -315,6 +338,7 @@ import {
   createTaskTool,
   createSwitchWorktreeTool,
   createSkillTool,
+  createMemoryTools,
   createToolExecutor,
   createToolRegistry,
   MCP_CALL_TOOL_NAME,
@@ -784,6 +808,13 @@ export interface Runtime {
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  /** 长期记忆管理（ADR-0098 §7） */
+  describeMemory(input?: { workspaceRoot?: string | undefined }): Promise<MemoryDescription>;
+  readMemory(input: ReadMemoryInput): Promise<MemoryEntry>;
+  deleteMemory(input: DeleteMemoryInput): Promise<void>;
+  clearMemory(input: ClearMemoryInput): Promise<void>;
+  /** 记忆文件变化通知（写入/删除/清空后触发，供 RPC 推送 runtime.providersChanged） */
+  onMemoryChanged(listener: () => void): () => void;
   /**
    * 导入技能（skills.md 第 7 节，ADR-0048 修订 U-08）：只支持本地文件夹。
    * `mode: "preview"` 只扫描校验、不写任何东西；`mode: "commit"` 按逐项
@@ -1358,6 +1389,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     }
   };
+  const memoryChangedListeners = new Set<() => void>();
+  const notifyMemoryChanged = (): void => {
+    for (const listener of memoryChangedListeners) {
+      try {
+        listener();
+      } catch {
+        /* 监听者不能阻断记忆操作。 */
+      }
+    }
+  };
   /** 每次配置广播递增；打开途中错过的广播在登记时补成待应用（下一 Turn 边界生效） */
   let configGeneration = 0;
   /**
@@ -1556,6 +1597,47 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     residentChild?: ResidentChildAssemblyOptions,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
+    const residentKind = residentKindOf(meta.parent?.callId);
+    const isResidentChild = residentChild !== undefined || residentKind !== undefined;
+    const isTaskSubagent = meta.parent !== undefined && !isResidentChild;
+    const memoryPolicy = isTaskSubagent
+      ? ({ inject: false, read: false, write: false } as const)
+      : ({
+          inject: true,
+          read: true,
+          write:
+            !isResidentChild &&
+            meta.client?.kind !== "agent" &&
+            meta.schedule === undefined &&
+            interactive &&
+            !unattendedOption,
+        } as const);
+    const memorySwitches: MemorySettings = config?.memoryConfig() ?? {
+      global: true,
+      project: true,
+    };
+    const hasProjectMemoryScope = !(await isDefaultMemoryWorkspace(
+      platform,
+      nocturneHome,
+      meta.workspaceRoot,
+    ));
+    const availableMemoryScopes: MemoryScope[] = [
+      ...(memorySwitches.global ? (["global"] as const) : []),
+      ...(memorySwitches.project && hasProjectMemoryScope ? (["project"] as const) : []),
+    ];
+    let memorySnapshot: MemoryContextSnapshot | undefined;
+    const refreshMemorySnapshot = async (): Promise<void> => {
+      if (!memoryPolicy.inject || availableMemoryScopes.length === 0) {
+        memorySnapshot = undefined;
+        return;
+      }
+      memorySnapshot = await snapshotMemoryContext(platform, nocturneHome, {
+        scopes: availableMemoryScopes,
+        workspaceRoot: meta.workspaceRoot,
+        writable: memoryPolicy.write,
+      });
+    };
+    await refreshMemorySnapshot();
     const projectCwd = await platform.resolveReal(meta.cwd);
     const projectRepository = (await gitRepository(projectCwd)) ?? projectCwd;
     const repositoryFor = (cwd: string) =>
@@ -2083,6 +2165,62 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       for (const extra of residentChild.extraTools) {
         tools.unregister(extra.name);
         tools.register(extra);
+      }
+    }
+    if (memoryPolicy.read) {
+      const memoryTools = createMemoryTools({
+        availableScopes: availableMemoryScopes,
+        async readMemory(scope, name) {
+          const targetDir = await resolveMemoryScopeDir(platform, nocturneHome, {
+            scope,
+            workspaceRoot: meta.workspaceRoot,
+          });
+          if (targetDir === undefined) {
+            return {
+              ok: false,
+              code: "memory_not_found",
+              message: `Memory "${name}" was not found in ${scope} scope.`,
+            };
+          }
+          return readMemoryEntry(platform, targetDir.dir, scope, name);
+        },
+        async writeMemory(input) {
+          const targetDir = await resolveMemoryScopeDir(platform, nocturneHome, {
+            scope: input.scope,
+            workspaceRoot: meta.workspaceRoot,
+          });
+          if (targetDir === undefined) {
+            throw new Error(`Memory scope "${input.scope}" is not available for this workspace.`);
+          }
+          const entry = await writeMemoryEntry(
+            platform,
+            {
+              dir: targetDir.dir,
+              scope: input.scope,
+              ...(targetDir.projectPath !== undefined
+                ? { projectPath: targetDir.projectPath }
+                : {}),
+            },
+            input,
+          );
+          notifyMemoryChanged();
+          return entry;
+        },
+        async deleteMemory(scope, name) {
+          const targetDir = await resolveMemoryScopeDir(platform, nocturneHome, {
+            scope,
+            workspaceRoot: meta.workspaceRoot,
+          });
+          if (targetDir === undefined) return false;
+          const deleted = await deleteMemoryEntry(platform, targetDir.dir, name);
+          if (deleted) notifyMemoryChanged();
+          return deleted;
+        },
+      });
+      tools.register(memoryTools.read);
+      if (memoryPolicy.write) {
+        tools.register(memoryTools.write);
+        tools.register(memoryTools.delete);
       }
     }
     if (meta.parent === undefined) {
@@ -4013,6 +4151,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 }
               : {}),
             skills: catalog,
+            memory: () => memorySnapshot,
+            refreshMemory: refreshMemorySnapshot,
             visionModel: () =>
               resolveModelRole(
                 sessionRegistry,
@@ -5039,6 +5179,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               attachmentData.set(ref.sha256, Buffer.from(bytes).toString("base64"));
           }
           const plan = buildContext({
+            ...(memorySnapshot !== undefined ? { memory: memorySnapshot } : {}),
             skills: catalog,
             ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
             history,
@@ -5088,6 +5229,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             { resumed: false, source: "compact" },
             ac.signal,
           );
+          await refreshMemorySnapshot();
         } catch (e) {
           if (ac.signal.aborted) {
             // 中断：不写任何事件，历史不变（context.md 6.6）
@@ -5129,6 +5271,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           model: model.model,
           tools: specs,
           omittedMcpToolCount,
+          memory: memorySnapshot,
           skills: catalog,
           instructions,
           environment,
@@ -5140,6 +5283,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (contextCache?.key === key) return structuredClone(contextCache.value);
         const state = session.state();
         const value = buildContext({
+          ...(memorySnapshot !== undefined ? { memory: memorySnapshot } : {}),
           skills: catalog,
           ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
           compactionThreshold,
@@ -5445,6 +5589,40 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
     return current.id;
   };
+  const resolveMemoryTarget = async (input: {
+    scope: string;
+    key?: string | undefined;
+    workspaceRoot?: string | undefined;
+    name?: string | undefined;
+  }): Promise<{ scope: MemoryScope; dir: string }> => {
+    if (!isMemoryScope(input.scope)) {
+      throw new RuntimeCommandError("invalid_command", `未知记忆范围：${input.scope}`);
+    }
+    if (input.name !== undefined && !isValidMemoryName(input.name)) {
+      throw new RuntimeCommandError(
+        "invalid_command",
+        `记忆名称无效 "${input.name}"（须匹配 ^[a-z0-9][a-z0-9-]*$）`,
+      );
+    }
+    const target = await resolveMemoryScopeDir(platform, nocturneHome, {
+      scope: input.scope,
+      ...(input.key !== undefined ? { key: input.key } : {}),
+      ...(input.key === undefined && input.scope === "project"
+        ? {
+            workspaceRoot:
+              input.workspaceRoot !== undefined
+                ? await platform.resolveReal(input.workspaceRoot)
+                : workspaceRoot,
+          }
+        : {}),
+    }).catch((e: unknown) => {
+      throw new RuntimeCommandError("invalid_command", e instanceof Error ? e.message : String(e));
+    });
+    if (target === undefined) {
+      throw new RuntimeCommandError("invalid_command", "默认工作区没有项目记忆范围");
+    }
+    return { scope: input.scope, dir: target.dir };
+  };
   const runtime: Runtime = {
     async workspaceBranches({ workspace }) {
       const root = await gitRepository(workspace);
@@ -5680,6 +5858,71 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     describePlugins() {
       return describeInstalledPluginsOverview(platform, pluginDiscoveryOptions);
+    },
+    async describeMemory(input) {
+      const parsed = z
+        .object({ workspaceRoot: z.string().min(1).optional() })
+        .strict()
+        .parse(input ?? {});
+      const root =
+        parsed.workspaceRoot !== undefined
+          ? await platform.resolveReal(parsed.workspaceRoot)
+          : workspaceRoot;
+      const switches = config?.memoryConfig() ?? { global: true, project: true };
+      return describeMemoryStore(platform, nocturneHome, {
+        workspaceRoot: root,
+        switches,
+      });
+    },
+    async readMemory(input) {
+      const parsed = z
+        .object({
+          scope: z.string().min(1),
+          key: z.string().min(1).optional(),
+          workspaceRoot: z.string().min(1).optional(),
+          name: z.string().min(1),
+        })
+        .strict()
+        .parse(input);
+      const target = await resolveMemoryTarget(parsed);
+      const res = await readMemoryEntry(platform, target.dir, target.scope, parsed.name);
+      if (!res.ok) {
+        throw new RuntimeCommandError("invalid_command", res.message);
+      }
+      return res.entry;
+    },
+    async deleteMemory(input) {
+      const parsed = z
+        .object({
+          scope: z.string().min(1),
+          key: z.string().min(1).optional(),
+          workspaceRoot: z.string().min(1).optional(),
+          name: z.string().min(1),
+        })
+        .strict()
+        .parse(input);
+      const target = await resolveMemoryTarget(parsed);
+      const deleted = await deleteMemoryEntry(platform, target.dir, parsed.name);
+      if (deleted) notifyMemoryChanged();
+    },
+    async clearMemory(input) {
+      const parsed = z
+        .object({
+          scope: z.string().min(1),
+          key: z.string().min(1).optional(),
+          workspaceRoot: z.string().min(1).optional(),
+        })
+        .strict()
+        .parse(input);
+      const target = await resolveMemoryTarget(parsed);
+      await clearMemoryDir(platform, target.dir, target.scope);
+      notifyMemoryChanged();
+    },
+    onMemoryChanged(listener) {
+      memoryChangedListeners.add(listener);
+      return () => {
+        memoryChangedListeners.delete(listener);
+      };
     },
     async setPluginEnabled(input) {
       const parsed = z

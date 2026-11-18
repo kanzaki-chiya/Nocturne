@@ -1,5 +1,10 @@
 import type {
+  ClearMemoryInput,
+  DeleteMemoryInput,
+  MemoryDescription,
+  MemoryEntry,
   PluginsDescription,
+  ReadMemoryInput,
   Runtime,
   SessionSearchResult,
   SkillImportInput,
@@ -433,6 +438,22 @@ export interface RpcMethods {
   "plugins.setPluginEnabled": {
     params: { id: string; enabled: boolean };
     result: { affectedSessions: number };
+  };
+  "memory.describeMemory": {
+    params: { workspaceRoot?: string | undefined };
+    result: MemoryDescription;
+  };
+  "memory.readMemory": {
+    params: ReadMemoryInput;
+    result: MemoryEntry;
+  };
+  "memory.deleteMemory": {
+    params: DeleteMemoryInput;
+    result: null;
+  };
+  "memory.clearMemory": {
+    params: ClearMemoryInput;
+    result: null;
   };
   "session.describeSkills": { params: SessionParams; result: SkillsDescription };
   "session.turnChanges": { params: SessionParams; result: Ret<"turnChanges"> };
@@ -990,6 +1011,10 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "skills.importSkills": true,
   "plugins.describePlugins": true,
   "plugins.setPluginEnabled": true,
+  "memory.describeMemory": true,
+  "memory.readMemory": true,
+  "memory.deleteMemory": true,
+  "memory.clearMemory": true,
   "session.describeSkills": true,
   "mcp.saveMcpServer": true,
   "mcp.deleteMcpServer": true,

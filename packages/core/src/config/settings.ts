@@ -11,7 +11,7 @@ import { enqueueConfigWrite, writeJsonAtomic } from "./files.js";
 import { parseConfigFile } from "./schema.js";
 import type { ConfigFile, SettingsPatch } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
-import type { CustomTheme, ReasoningEffort } from "../protocol/index.js";
+import type { CustomTheme, MemorySettings, ReasoningEffort } from "../protocol/index.js";
 import { isValidSubagentProfileName, validateCustomThemes } from "../protocol/index.js";
 
 /** settings.json 的原始 JSON 对象（未知字段保留） */
@@ -31,6 +31,9 @@ export interface SettingsStore {
   themePreset(): string | undefined;
   /** 全局 settings.json 的 appearance.customThemes（不参与项目合并） */
   customThemes(): CustomTheme[] | undefined;
+  /** ADR-0098：全局 settings.json 的 memory.{global,project} 已保存原文与生效值（缺省皆 true） */
+  memoryFields(): { global?: boolean | undefined; project?: boolean | undefined } | undefined;
+  memorySettings(): MemorySettings;
   fields(): ConfigFile;
   update(patch: SettingsPatch): Promise<void>;
   setDefaultModel(model: string, effort: ReasoningEffort | null): Promise<void>;
@@ -57,6 +60,7 @@ const reservedFields = new Set([
   "compaction",
   "notifications",
   "appearance",
+  "memory",
   "disabledProviders",
   "disabledModels",
 ]);
@@ -93,14 +97,22 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "mcp.toolSearch" &&
         key !== "appearance.themePreset" &&
         key !== "appearance.customThemes" &&
+        key !== "memory.global" &&
+        key !== "memory.project" &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset 与 appearance.customThemes；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global 与 memory.project；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
+  for (const key of ["memory.global", "memory.project"] as const) {
+    const v = patch[key];
+    if (v !== undefined && v !== null && typeof v !== "boolean") {
+      throw new TypeError(`${key} 必须是布尔值或 null`);
+    }
+  }
   const themePreset = patch["appearance.themePreset"];
   if (
     themePreset !== undefined &&
@@ -413,6 +425,37 @@ function readAppearanceCustomThemes(
   return parsed.themes;
 }
 
+function readMemoryFields(
+  data: SettingsData,
+  warn?: (message: string) => void,
+): { global?: boolean | undefined; project?: boolean | undefined } | undefined {
+  if (!Object.hasOwn(data, "memory")) return undefined;
+  const memory = data.memory;
+  if (typeof memory !== "object" || memory === null || Array.isArray(memory)) {
+    warn?.("settings.json 的 memory 无效，已忽略");
+    return undefined;
+  }
+  const record = memory as Record<string, unknown>;
+  const out: { global?: boolean | undefined; project?: boolean | undefined } = {};
+  for (const key of ["global", "project"] as const) {
+    if (!Object.hasOwn(record, key) || record[key] === undefined) continue;
+    if (typeof record[key] !== "boolean") {
+      warn?.(`settings.json 的 memory.${key} 无效，已忽略`);
+      continue;
+    }
+    out[key] = record[key];
+  }
+  return out.global !== undefined || out.project !== undefined ? out : undefined;
+}
+
+function readMemorySettings(data: SettingsData): MemorySettings {
+  const fields = readMemoryFields(data);
+  return {
+    global: fields?.global ?? true,
+    project: fields?.project ?? true,
+  };
+}
+
 /**
  * 加载 settings.json：文件不存在 → 空设置；损坏 → 忽略并给警告
  * （设置层降级不阻塞启动，与项目配置损坏同一处理）。
@@ -444,6 +487,7 @@ export async function loadSettingsStore(
     readAppearanceThemePreset(data, appendWarning);
     readAppearanceCustomThemes(data, appendWarning);
   }
+  readMemoryFields(data, appendWarning);
   const fields = readShellFields(data);
   if (
     fields?.shell !== undefined &&
@@ -549,6 +593,8 @@ export async function loadSettingsStore(
       },
       themePreset: () => readAppearanceThemePreset(data),
       customThemes: () => readAppearanceCustomThemes(data),
+      memoryFields: () => readMemoryFields(data),
+      memorySettings: () => readMemorySettings(data),
       fields: () => configFields(data),
       async update(patch) {
         validateSettingsPatch(patch);
@@ -714,6 +760,21 @@ export async function loadSettingsStore(
             }
             if (Object.keys(appearance).length > 0) next.appearance = appearance;
             else delete next.appearance;
+          }
+          const memoryGlobal = patch["memory.global"];
+          const memoryProject = patch["memory.project"];
+          if (memoryGlobal !== undefined || memoryProject !== undefined) {
+            const raw = next.memory;
+            const memory: Record<string, unknown> =
+              typeof raw === "object" && raw !== null && !Array.isArray(raw)
+                ? { ...(raw as Record<string, unknown>) }
+                : {};
+            if (memoryGlobal === null) delete memory.global;
+            else if (memoryGlobal !== undefined) memory.global = memoryGlobal;
+            if (memoryProject === null) delete memory.project;
+            else if (memoryProject !== undefined) memory.project = memoryProject;
+            if (Object.keys(memory).length > 0) next.memory = memory;
+            else delete next.memory;
           }
         });
       },

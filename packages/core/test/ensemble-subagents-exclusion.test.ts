@@ -108,6 +108,7 @@ function makeConfig(): RuntimeConfig {
     disabledModels: () => [],
     disabledSkills: () => [],
     skillConfig: () => undefined,
+    memoryConfig: () => ({ global: true, project: true }),
     shellSetting: () => undefined,
     recentModels: () => [],
     recordRecentModel: async () => undefined,

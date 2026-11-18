@@ -8,6 +8,7 @@ import type {
   HookContextSnapshot,
   ImageAttachment,
   LoopGuardConfig,
+  MemoryContextSnapshot,
   NoteItem,
   TodoItem,
   ToolSpec,
@@ -42,6 +43,7 @@ export interface EnvironmentInfo {
 }
 
 export interface BuildContextInput {
+  memory?: MemoryContextSnapshot | undefined;
   skills?: { text: string; truncated: boolean } | undefined;
   /** SessionStart / SubagentStart Hook 注入的会话快照（context.md 第 3 节） */
   hookContext?: HookContextSnapshot | undefined;
@@ -134,6 +136,7 @@ export interface ContextSection {
     | "system"
     | "tools"
     | "instructions"
+    | "memory"
     | "skills"
     | "hooks"
     | "environment"

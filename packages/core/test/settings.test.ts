@@ -1011,4 +1011,73 @@ describe("ADR-0034 设置层", () => {
     if (preset !== "read-only")
       expect(decision.matchedRule?.rule?.label).toBe("修改 Nocturne 授权配置");
   });
+  it("memory.global / memory.project：默认 true、专用读写、null 恢复、忽略项目与手写 config.json、坏字段降级告警", async () => {
+    const defaults = await load();
+    expect(defaults.memoryConfig()).toEqual({ global: true, project: true });
+    expect(defaults.describeSettings().find((item) => item.key === "memory.global")).toEqual({
+      key: "memory.global",
+      effective: "true",
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+    expect(defaults.describeSettings().find((item) => item.key === "memory.project")).toEqual({
+      key: "memory.project",
+      effective: "true",
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    // 用户 config.json 与可信项目 .nocturne/config.json 里的 memory 一律忽略
+    await json("config.json", { memory: { global: false, project: false } });
+    await mkdir(path.join(workspace, ".nocturne"), { recursive: true });
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ memory: { global: false, project: false } }),
+    );
+    const ignored = await load();
+    await ignored.setWorkspaceTrusted(workspace, true);
+    await ignored.forWorkspace(workspace);
+    expect(ignored.memoryConfig()).toEqual({ global: true, project: true });
+    expect(
+      ignored.describeSettings(workspace).find((item) => item.key === "memory.global"),
+    ).toMatchObject({ effective: "true", saved: undefined, source: "default", overridden: false });
+
+    // updateSettings 持久化写入，保留兄弟未知字段，null 清除恢复默认
+    await json("settings.json", { memory: { future: 1 } });
+    const cfg = await load();
+    await cfg.updateSettings({ "memory.global": false, "memory.project": false });
+    expect(await readSettings()).toEqual({
+      memory: { future: 1, global: false, project: false },
+    });
+    expect(cfg.memoryConfig()).toEqual({ global: false, project: false });
+    expect(cfg.describeSettings().find((item) => item.key === "memory.global")).toEqual({
+      key: "memory.global",
+      effective: "false",
+      saved: "false",
+      source: "settings",
+      overridden: false,
+    });
+
+    await expect(cfg.updateSettings({ "memory.global": "no" as never })).rejects.toThrow(TypeError);
+    await expect(cfg.updateSettings({ "memory.project": 1 as never })).rejects.toThrow(TypeError);
+    await expect(cfg.setPreference("memory", "off")).rejects.toThrow(TypeError);
+
+    await cfg.updateSettings({ "memory.global": null });
+    expect(await readSettings()).toEqual({ memory: { future: 1, project: false } });
+    expect(cfg.memoryConfig()).toEqual({ global: true, project: false });
+
+    await json("settings.json", { memory: { global: false } });
+    const onlyGlobal = await load();
+    await onlyGlobal.updateSettings({ "memory.global": null });
+    expect(await readSettings()).toEqual({});
+
+    // 磁盘损坏字段告警并回退 true
+    await json("settings.json", { memory: { global: "bad", project: false }, shell: "cmd" });
+    const partial = await load();
+    expect(partial.base.shell).toBe("cmd");
+    expect(partial.base.warnings.join("\n")).toContain("memory.global");
+    expect(partial.memoryConfig()).toEqual({ global: true, project: false });
+  });
 });

@@ -3,7 +3,12 @@
  * Agent 是 Core 内唯一的编排者：不感知工具名、Provider 名、权限规则与 UI。
  */
 import type { EnvironmentInfo, InstructionSet } from "../context/index.js";
-import type { LoopGuardConfig, PreparedInput, SkillInvocation } from "../protocol/index.js";
+import type {
+  LoopGuardConfig,
+  MemoryContextSnapshot,
+  PreparedInput,
+  SkillInvocation,
+} from "../protocol/index.js";
 import type { ResolvedModel } from "../provider/index.js";
 import type { Session, SessionState } from "../session/index.js";
 import type { ExecutionEnvironment, ToolExecutor, ToolRegistry } from "../tools/index.js";
@@ -66,6 +71,9 @@ export interface TurnDeps {
    */
   continueTurn?: ((signal: AbortSignal) => Promise<PreparedInput | undefined>) | undefined;
   skills?: { text: string; truncated: boolean } | undefined;
+  /** 长期记忆索引快照（ADR-0098）：会话打开与 L2 压缩后刷新；agent 不直接读盘 */
+  memory?: (() => MemoryContextSnapshot | undefined) | undefined;
+  refreshMemory?: (() => Promise<void>) | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;
   session: Session;

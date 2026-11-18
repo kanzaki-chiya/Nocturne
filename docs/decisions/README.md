@@ -105,6 +105,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0095](ADR-0095-session-notes-board-read.md) | 会话笔记与合奏留言板查询（`note_write` 增删与 `pinResult` 补注、`ensemble_read` 过滤翻页与成员名单） | 已接受 |
 | [ADR-0096](ADR-0096-hook-context-and-plugins.md) | Hook 上下文注入（`SessionStart` / `UserPromptSubmit` / `SubagentStart`、`hook.context` 与 `hookContext` section）与第二期插件兼容设计 | 已接受 |
 | [ADR-0097](ADR-0097-suites.md) | 长期工作流「组曲 / Suite」：常驻指挥 + 线程 + 总览（先行抽出 `resident` 常驻子会话共享层） | 已接受 |
+| [ADR-0098](ADR-0098-memory.md) | 长期记忆（全局 / 项目 / 组曲三层范围、`memory` 上下文段、记忆工具、开关与 Runtime / RPC） | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

@@ -25,6 +25,7 @@ const SECTIONS: Record<Section["name"], { label: string; color: string }> = {
   system: { label: "系统提示", color: "var(--a-faint)" },
   tools: { label: "工具定义", color: "var(--a-accentAlt)" },
   instructions: { label: "项目说明", color: "var(--a-secondary)" },
+  memory: { label: "记忆", color: "var(--a-secondary)" },
   skills: { label: "技能目录", color: "var(--a-accentAlt)" },
   hooks: { label: "Hook", color: "var(--a-muted)" },
   environment: { label: "环境", color: "var(--a-muted)" },

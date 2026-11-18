@@ -324,6 +324,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       disabledModels: () => ["fake/off-model"],
       disabledSkills: () => [],
       skillConfig: () => undefined,
+      memoryConfig: () => ({ global: true, project: true }),
       shellSetting: () => undefined,
       recentModels: () => [],
       recordRecentModel: async () => undefined,

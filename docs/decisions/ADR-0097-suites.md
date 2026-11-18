@@ -52,7 +52,7 @@ Claude Code Projects 把这种用法做成了产品：一条常驻的协调对�
 ### 3.2 存储
 
 - `<NOCTURNE_HOME>/suites/<suiteId>/suite.json`：`{ version: 1, id, name, goal?, workspaces: string[], instructions, coordinatorSessionId, threadDefaults: { model?, reasoningEffort?, preset?, isolated? }, createdAt }`。程序维护，走配置写入队列和原子写，与 `mcp.json`、`plugins.json` 同一规则。
-- `<NOCTURNE_HOME>/suites/<suiteId>/memory.md`：组曲记忆，纯文本，指挥用工具追加，用户可在界面直接编辑。
+- 组曲记忆复用 [ADR-0098](ADR-0098-memory.md) 的 `suite` 范围（`<NOCTURNE_HOME>/memory/suites/<suiteId>/`），取消单独的 `memory.md`；指挥可读写，线程只读，用户可在界面管理。
 - 线程名单与状态写在**指挥会话日志**的持久事件里（见 3.5），与合奏一样随事件流回放和远程同步。
 - 不往仓库里写任何文件。
 
@@ -66,7 +66,7 @@ Claude Code Projects 把这种用法做成了产品：一条常驻的协调对�
   - `thread_list()`：列出线程、状态和最近汇报首行；
   - `thread_read({ thread, limit? })`：读某个线程最近几轮的汇报全文；
   - `thread_resolve({ thread, reopen? })`：标记完成或重新打开；
-  - `suite_remember({ text })`：追加一条组曲记忆。
+  - 记忆读写使用 [ADR-0098](ADR-0098-memory.md) 的 `memory_read` / `memory_write({ scope: "suite", ... })` / `memory_delete`（取消 `suite_remember`）。
 - 指挥的系统上下文带组曲名、目标、说明、记忆和线程名单摘要。
 - 指挥收到用户消息后自己决定：直接回答、开新线程、还是交给已有线程。这条规则写在指挥的系统提示里，不在 Agent Loop 里写分支。
 
@@ -74,7 +74,7 @@ Claude Code Projects 把这种用法做成了产品：一条常驻的协调对�
 
 - 线程是指挥的常驻子会话（`parent = { sessionId: 指挥, callId: "suite:" + threadId }`），复用 `resident` 层：交互式权限确认（与合奏成员相同，修订 `subagent.md` §7.1 的适用范围）、并发槽排队（成员总数不设上限，只受 `maxConcurrent` 约束）、可选独立工作树和每轮增量提交。
 - 线程开局的上下文：组曲说明、组曲记忆、工作区自己的 AGENTS.md，加上指挥给的 `task`。
-- 线程没有 `task`、`thread_*`、`suite_remember` 工具。线程想记一条组曲记忆时写在汇报里，由指挥决定是否记。
+- 线程没有 `task`、`thread_*`、`memory_write`、`memory_delete` 工具（对 `suite` 范围仅可使用 `memory_read`）。线程想记一条组曲记忆时写在汇报里，由指挥决定是否记。
 - **汇报**：线程每轮结束（含出错暂停）时，Runtime 把最后一条助手回复包成
   ```xml
   <thread-report thread="t3" title="设置页插件列表" status="idle">…</thread-report>
@@ -101,7 +101,7 @@ Claude Code Projects 把这种用法做成了产品：一条常驻的协调对�
 
 ### 3.6 Runtime 与 RPC
 
-- Runtime：`listSuites()`、`createSuite({ name, goal?, workspaces, instructions? })`、`updateSuite({ id, ... })`、`archiveSuite(id)`、`readSuiteMemory(id)` / `writeSuiteMemory(id, text)`、`openSuite(id)`（返回指挥会话句柄）。
+- Runtime：`listSuites()`、`createSuite({ name, goal?, workspaces, instructions? })`、`updateSuite({ id, ... })`、`archiveSuite(id)`、`openSuite(id)`（返回指挥会话句柄）。组曲记忆管理复用 [ADR-0098](ADR-0098-memory.md) 的 `describeMemory` / `readMemory` / `deleteMemory` / `clearMemory`。
 - 会话方法：`resolveThread({ thread, reopen? })`、`sendToThread({ thread, text })`（用户绕过指挥直接派活时用）。
 - RPC 名称 `suites.*`、`session.resolveThread`、`session.sendToThread`。本机和远程连接都可用（手机要能看总览、插话、确认权限）。
 - Nocturne MCP（ADR-0074）以后可以加 `nocturne_suite_send` 一类工具，本 ADR 不做。
@@ -131,3 +131,10 @@ Compline（独立常驻 agent，见 `compline-brief.md`）也需要长期记忆�
 | 一期 | 抽出 `resident` 层（合奏测试原样通过）、`suites` 模块、存储、指挥工具、线程汇报、持久事件与视图、Runtime/RPC、文档 | 离线测试覆盖：开线程、自动汇报、`thread_send` 插话、权限冒泡、工作树并回、重启补报、指挥回退不影响线程 |
 | 二期 | 桌面端组曲入口、组曲页、总览面板、记忆与说明编辑 | 真实截图，两种主题 |
 | 三期 | 手机网页 / 安卓、TUI（`/suite` 与总览块） | 真实截图 / 帧文本 |
+
+## 修订（2026-11-19）
+
+- 配合 [ADR-0098](ADR-0098-memory.md) 长期记忆模块落地，修订第 3.2、3.3、3.4、3.6 节中的组曲记忆存储与接口：
+  - 第 3.2 节：组曲记忆改用 ADR-0098 的 `suite` 范围（`<NOCTURNE_HOME>/memory/suites/<suiteId>/`），取消单独的 `<NOCTURNE_HOME>/suites/<suiteId>/memory.md`。
+  - 第 3.3、3.4 节：取消 `suite_remember`，指挥改用 `memory_write({ scope: "suite", ... })`（及 `memory_read` / `memory_delete`）维护组曲记忆；线程按 ADR-0098 常驻子会话策略保持只读（无 `memory_write` / `memory_delete`）。
+  - 第 3.6 节：去掉 Runtime 方法 `readSuiteMemory` 与 `writeSuiteMemory`，组曲记忆查询与清理复用 ADR-0098 的 `describeMemory` / `readMemory` / `deleteMemory` / `clearMemory`。

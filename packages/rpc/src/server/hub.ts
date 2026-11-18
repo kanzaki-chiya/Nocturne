@@ -102,6 +102,7 @@ export class Hub {
   private unsubscribeGrants: (() => void) | undefined;
   private unsubscribeComputer: (() => void) | undefined;
   private unsubscribeAppPermissions: (() => void) | undefined;
+  private unsubscribeMemory: (() => void) | undefined;
 
   get available(): boolean {
     return this.handle !== undefined && !this.stopping;
@@ -242,6 +243,10 @@ export class Hub {
     this.unsubscribeAppPermissions?.();
     this.unsubscribeAppPermissions = handle.providerConfig?.config.appPermissions?.subscribe(() => {
       this.notifyComputerChanged();
+    });
+    this.unsubscribeMemory?.();
+    this.unsubscribeMemory = handle.runtime.onMemoryChanged(() => {
+      this.notifyProvidersChanged();
     });
     const providerConfig = handle.providerConfig;
     this.providerState =
@@ -500,6 +505,8 @@ export class Hub {
     this.unsubscribeComputer = undefined;
     this.unsubscribeAppPermissions?.();
     this.unsubscribeAppPermissions = undefined;
+    this.unsubscribeMemory?.();
+    this.unsubscribeMemory = undefined;
     clearTimeout(this.sessionsChangedTimer);
     this.sessionsChangedTimer = undefined;
     for (const session of sessions) session.interrupt();
