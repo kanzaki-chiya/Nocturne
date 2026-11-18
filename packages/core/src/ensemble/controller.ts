@@ -35,8 +35,13 @@ import {
   type EnsembleToolActivity,
   type EnsembleUnmergedWorktree,
   type EnsembleView,
-  type TurnEndReason,
 } from "../protocol/index.js";
+import type {
+  ResidentChildOpenSpec,
+  ResidentChildSession,
+  ResidentWorktreeHandle,
+  ResidentWorktreeOps,
+} from "../resident/index.js";
 import type { ToolDefinition } from "../tools/index.js";
 import { buildEnsembleMemberPrompt } from "./prompts.js";
 import {
@@ -54,79 +59,21 @@ import {
   type EnsembleToolActionResult,
 } from "./tools.js";
 
-export interface EnsembleWorktreeHandle {
-  childSessionId: string;
-  parentSessionId: string;
-  repository: string;
-  worktree: string;
-  branch: string;
-  base: string;
-  snapshot: boolean;
-  cwd: string;
-  workspaceRoot: string;
-  task: string;
-  includeSkipped: boolean;
-  skippedSymlinks?: string[] | undefined;
-  applied?: boolean | undefined;
-  changes?: SubagentChanges | undefined;
-}
+export type EnsembleWorktreeHandle = ResidentWorktreeHandle;
 
-export interface ManagedMemberSession {
-  readonly id: string;
-  isBusy(): boolean;
-  hasActivePendingInputs(): boolean;
+export type ManagedMemberSession = Omit<
+  ResidentChildSession,
+  "deliverInput" | "clearPendingInputs"
+> & {
   deliverEnsemblePost(input: PreparedInput, forcePaused?: boolean): Promise<void>;
-  resumeFromModelChange(modelKey: string): Promise<void>;
-  setModelAndEffort(model: ModelRef, effort?: ReasoningEffort): Promise<void>;
-  interruptAndWait(): Promise<void>;
   clearPendingEnsembleInputs(): void;
-  subscribe(listener: (event: RuntimeEvent) => void): () => void;
-  closeUnderlying(): Promise<void>;
-}
+};
 
-export interface EnsembleMemberOpenSpec {
-  childSessionId: string;
-  name: string;
-  create: boolean;
-  cwd: string;
-  workspaceRoot: string;
-  model: ModelRef;
-  reasoningEffort?: ReasoningEffort | undefined;
-  preset: "general" | "explore";
-  worktreePath?: string | undefined;
-  extraTools: ToolDefinition[];
-  basePrompt(): string;
-  onTurnLifecycle: {
-    onSlotWaitStart(): void;
-    onTurnCompleted(
-      reason: TurnEndReason,
-      error?: { code: string; message: string },
-    ): Promise<void>;
-  };
-}
+export type EnsembleMemberOpenSpec = ResidentChildOpenSpec;
 
-export interface EnsembleWorktreeOps {
-  inspectRepository(cwd: string): Promise<string>;
-  create(input: {
-    childSessionId: string;
-    repository: string;
-    cwd: string;
-    workspaceRoot: string;
-    task: string;
-  }): Promise<EnsembleWorktreeHandle>;
-  loadRecord(childSessionId: string): Promise<EnsembleWorktreeHandle | undefined>;
-  listParentRecords(): Promise<EnsembleWorktreeHandle[]>;
-  checkpoint(
-    record: EnsembleWorktreeHandle,
-    commitMessage?: string,
-  ): Promise<SubagentChanges | undefined>;
-  currentHead(worktreePath: string): Promise<string>;
-  isOnMemberBranch(record: EnsembleWorktreeHandle): Promise<boolean>;
-  resetToCommit(worktreePath: string, commitSha: string): Promise<string>;
-  markApplied(record: EnsembleWorktreeHandle, appliedHead: string): Promise<void>;
-  remove(record: EnsembleWorktreeHandle, removeBranch: boolean): Promise<void>;
-  cleanupMerged(): Promise<void>;
-}
+export type EnsembleWorktreeOps = Omit<ResidentWorktreeOps, "isOnBranch"> & {
+  isOnMemberBranch(record: ResidentWorktreeHandle): Promise<boolean>;
+};
 
 export interface EnsembleEnabledModelEntry {
   provider: string;
@@ -160,8 +107,10 @@ export interface EnsembleControllerDeps {
   hasMaestroPendingActive(): boolean;
   syncMaestroTools(): void;
   notifyMaestroIdle(): void;
-  openMemberSession(spec: EnsembleMemberOpenSpec): Promise<ManagedMemberSession>;
-  worktrees: EnsembleWorktreeOps;
+  openMemberSession(
+    spec: ResidentChildOpenSpec,
+  ): Promise<ResidentChildSession | ManagedMemberSession>;
+  worktrees: ResidentWorktreeOps | EnsembleWorktreeOps;
   commandError(code: "invalid_command" | "session_busy", message: string): Error;
 }
 
@@ -175,14 +124,14 @@ interface MemberRuntimeState {
   preset: "general" | "explore";
   isolated: boolean;
   worktreeRef?: { path: string; branch: string; base: string } | undefined;
-  worktreeRecord?: EnsembleWorktreeHandle | undefined;
+  worktreeRecord?: ResidentWorktreeHandle | undefined;
   status: "working" | "waiting" | "paused" | "removed";
   toolActivity?: EnsembleToolActivity | undefined;
   pauseError?: { code: string; message: string } | undefined;
   pendingPermissions: EnsembleMemberPermission[];
-  session?: ManagedMemberSession | undefined;
+  session?: ResidentChildSession | undefined;
   unsubscribe?: (() => void) | undefined;
-  opening?: Promise<ManagedMemberSession> | undefined;
+  opening?: Promise<ResidentChildSession> | undefined;
   missedPosts: EnsemblePostedPayload[];
   pendingCheckoutCommit?: string | undefined;
 }
@@ -211,7 +160,7 @@ export interface EnsembleController {
   /** 按 childSessionId 查找本 Ensemble 的成员（供 runtime.resumeSession 复用或懒打开托管会话） */
   openOrGetMemberBySessionId(childSessionId: string): Promise<
     | {
-        session: ManagedMemberSession;
+        session: ResidentChildSession;
         active: boolean;
       }
     | undefined
@@ -236,7 +185,7 @@ export interface EnsembleController {
   lookupMemberWorktreeChanges(idOrName: string): Promise<
     | {
         memberName: string;
-        record: EnsembleWorktreeHandle;
+        record: ResidentWorktreeHandle;
         changes: SubagentChanges;
         stillActive: boolean;
       }
@@ -390,7 +339,31 @@ function formatEnsembleReadModelContent(input: {
   ].join("\n\n");
 }
 
+function toResidentChildSession(
+  opened: ResidentChildSession | ManagedMemberSession,
+): ResidentChildSession {
+  if ("deliverInput" in opened) return opened;
+  return {
+    id: opened.id,
+    isBusy: () => opened.isBusy(),
+    hasActivePendingInputs: () => opened.hasActivePendingInputs(),
+    deliverInput: (input, forcePaused) => opened.deliverEnsemblePost(input, forcePaused),
+    resumeFromModelChange: (modelKey) => opened.resumeFromModelChange(modelKey),
+    setModelAndEffort: (modelRef, effort) => opened.setModelAndEffort(modelRef, effort),
+    interruptAndWait: () => opened.interruptAndWait(),
+    clearPendingInputs: () => {
+      opened.clearPendingEnsembleInputs();
+    },
+    subscribe: (listener) => opened.subscribe(listener),
+    closeUnderlying: () => opened.closeUnderlying(),
+  };
+}
+
 export function createEnsembleController(deps: EnsembleControllerDeps): EnsembleController {
+  const isWorktreeOnOwnBranch = (record: ResidentWorktreeHandle): Promise<boolean> =>
+    "isOnBranch" in deps.worktrees
+      ? deps.worktrees.isOnBranch(record)
+      : deps.worktrees.isOnMemberBranch(record);
   let title = "";
   let active = false;
   let initSeq: number | undefined;
@@ -657,7 +630,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
 
   async function ensureWorktreeRecord(
     member: MemberRuntimeState,
-  ): Promise<EnsembleWorktreeHandle | undefined> {
+  ): Promise<ResidentWorktreeHandle | undefined> {
     if (!member.isolated) return undefined;
     if (member.worktreeRecord !== undefined) return member.worktreeRecord;
     const loaded = await deps.worktrees.loadRecord(member.childSessionId);
@@ -698,7 +671,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
     }
     // ADR-0089 §4：保护调用者自身的工作树与分支——先对调用者做一次检查点，
     // 只要调用者自身分支上有未并回的改动就拒绝检出，防止丢弃未提交改动或切到分离头指针后漏提交
-    const viewerOnBranch = await deps.worktrees.isOnMemberBranch(viewerRecord);
+    const viewerOnBranch = await isWorktreeOnOwnBranch(viewerRecord);
     const viewerOwnChanges = viewerOnBranch
       ? await deps.worktrees.checkpoint(viewerRecord, `Ensemble @${viewer.name} snapshot`)
       : viewerRecord.changes;
@@ -710,7 +683,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       };
     }
     // 先把目标作者未提交的改动提交一次（若在自身分支上）
-    const targetOnBranch = await deps.worktrees.isOnMemberBranch(targetRecord);
+    const targetOnBranch = await isWorktreeOnOwnBranch(targetRecord);
     if (targetOnBranch) {
       await deps.worktrees
         .checkpoint(targetRecord, `Ensemble @${target.name} snapshot`)
@@ -728,7 +701,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
   async function ensureMemberSession(
     member: MemberRuntimeState,
     create = false,
-  ): Promise<ManagedMemberSession> {
+  ): Promise<ResidentChildSession> {
     if (member.session !== undefined) return member.session;
     if (member.opening !== undefined) return await member.opening;
 
@@ -754,64 +727,69 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
         );
       }
 
-      const handle = await deps.openMemberSession({
-        childSessionId: member.childSessionId,
-        name: member.name,
-        create,
-        cwd,
-        workspaceRoot,
-        model: member.model,
-        reasoningEffort: member.reasoningEffort,
-        preset: member.preset,
-        ...(record !== undefined ? { worktreePath: record.worktree } : {}),
-        extraTools,
-        basePrompt: () => buildMemberSystemPrompt(member),
-        onTurnLifecycle: {
-          onSlotWaitStart: () => {
-            armed = true;
-            if (member.status !== "removed") {
-              member.status = "working";
-              member.pauseError = undefined;
-              emitMemberUpdate(member);
-            }
-          },
-          onTurnCompleted: async (reason, error) => {
-            if (member.isolated) {
-              const wt = await ensureWorktreeRecord(member);
-              if (wt !== undefined) {
-                const onBranch = await deps.worktrees.isOnMemberBranch(wt).catch(() => false);
-                if (onBranch) {
-                  await deps.worktrees
-                    .checkpoint(wt, `Ensemble @${member.name} changes`)
-                    .catch(() => undefined);
-                }
-                if (member.pendingCheckoutCommit !== undefined) {
-                  const nextSha = member.pendingCheckoutCommit;
-                  member.pendingCheckoutCommit = undefined;
-                  if (!onBranch || wt.changes === undefined) {
-                    await deps.worktrees.resetToCommit(wt.worktree, nextSha).catch(() => undefined);
+      const handle = toResidentChildSession(
+        await deps.openMemberSession({
+          kind: "ensemble",
+          childSessionId: member.childSessionId,
+          name: member.name,
+          create,
+          cwd,
+          workspaceRoot,
+          model: member.model,
+          reasoningEffort: member.reasoningEffort,
+          preset: member.preset,
+          ...(record !== undefined ? { worktreePath: record.worktree } : {}),
+          extraTools,
+          basePrompt: () => buildMemberSystemPrompt(member),
+          onTurnLifecycle: {
+            onSlotWaitStart: () => {
+              armed = true;
+              if (member.status !== "removed") {
+                member.status = "working";
+                member.pauseError = undefined;
+                emitMemberUpdate(member);
+              }
+            },
+            onTurnCompleted: async (reason, error) => {
+              if (member.isolated) {
+                const wt = await ensureWorktreeRecord(member);
+                if (wt !== undefined) {
+                  const onBranch = await isWorktreeOnOwnBranch(wt).catch(() => false);
+                  if (onBranch) {
+                    await deps.worktrees
+                      .checkpoint(wt, `Ensemble @${member.name} changes`)
+                      .catch(() => undefined);
+                  }
+                  if (member.pendingCheckoutCommit !== undefined) {
+                    const nextSha = member.pendingCheckoutCommit;
+                    member.pendingCheckoutCommit = undefined;
+                    if (!onBranch || wt.changes === undefined) {
+                      await deps.worktrees
+                        .resetToCommit(wt.worktree, nextSha)
+                        .catch(() => undefined);
+                    }
                   }
                 }
               }
-            }
-            if (member.status === "removed") return;
-            member.toolActivity = undefined;
-            member.pendingPermissions = [];
-            if (reason === "done" || reason === "aborted") {
-              if (!handle.hasActivePendingInputs()) {
-                member.status = "waiting";
-                member.pauseError = undefined;
+              if (member.status === "removed") return;
+              member.toolActivity = undefined;
+              member.pendingPermissions = [];
+              if (reason === "done" || reason === "aborted") {
+                if (!handle.hasActivePendingInputs()) {
+                  member.status = "waiting";
+                  member.pauseError = undefined;
+                }
+              } else {
+                member.status = "paused";
+                member.pauseError = error ?? { code: reason, message: `Turn ended with ${reason}` };
               }
-            } else {
-              member.status = "paused";
-              member.pauseError = error ?? { code: reason, message: `Turn ended with ${reason}` };
-            }
-            emitMemberUpdate(member);
-            deps.notifyMaestroIdle();
-            scheduleQuietCheck();
+              emitMemberUpdate(member);
+              deps.notifyMaestroIdle();
+              scheduleQuietCheck();
+            },
           },
-        },
-      });
+        }),
+      );
 
       const unsub = handle.subscribe((event) => {
         if (member.status === "removed") return;
@@ -874,7 +852,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
             ],
             appended: [],
           };
-          await handle.deliverEnsemblePost(prepared, true);
+          await handle.deliverInput(prepared, true);
         }
       }
 
@@ -1049,7 +1027,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
             if (!handle.isBusy()) {
               const targetWt = await ensureWorktreeRecord(member);
               if (targetWt !== undefined) {
-                const onBranch = await deps.worktrees.isOnMemberBranch(targetWt);
+                const onBranch = await isWorktreeOnOwnBranch(targetWt);
                 const ownChanges = onBranch
                   ? await deps.worktrees.checkpoint(targetWt, `Ensemble @${member.name} snapshot`)
                   : undefined;
@@ -1087,7 +1065,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
             ],
             appended: [],
           };
-          await handle.deliverEnsemblePost(prepared, false);
+          await handle.deliverInput(prepared, false);
         }
       } finally {
         deliveringCount -= 1;
@@ -1161,7 +1139,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       member.unsubscribe = undefined;
     }
     if (member.session !== undefined) {
-      member.session.clearPendingEnsembleInputs();
+      member.session.clearPendingInputs();
       await member.session.closeUnderlying().catch(() => undefined);
       member.session = undefined;
     }
@@ -1187,7 +1165,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       member.unsubscribe = undefined;
     }
     if (member.session !== undefined) {
-      member.session.clearPendingEnsembleInputs();
+      member.session.clearPendingInputs();
       await member.session.interruptAndWait().catch(() => undefined);
       await member.session.closeUnderlying().catch(() => undefined);
       member.session = undefined;
@@ -1222,7 +1200,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       if (member.status === "removed" || !member.isolated) continue;
       const wt = await ensureWorktreeRecord(member);
       if (wt === undefined) continue;
-      const onBranch = await deps.worktrees.isOnMemberBranch(wt).catch(() => false);
+      const onBranch = await isWorktreeOnOwnBranch(wt).catch(() => false);
       const changes = onBranch
         ? await deps.worktrees
             .checkpoint(wt, `Ensemble @${member.name} final snapshot`)
@@ -1426,7 +1404,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
 
       const isolated = input.isolated === true;
       const childSessionId = deps.newChildSessionId();
-      let worktreeRecord: EnsembleWorktreeHandle | undefined;
+      let worktreeRecord: ResidentWorktreeHandle | undefined;
       if (isolated) {
         const dir = deps.currentDirectory();
         let repository: string;
@@ -1944,7 +1922,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
           }
         } else {
           if (m.session !== undefined) {
-            m.session.clearPendingEnsembleInputs();
+            m.session.clearPendingInputs();
             if (m.session.isBusy()) {
               await m.session.interruptAndWait().catch(() => undefined);
             }

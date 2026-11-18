@@ -49,6 +49,9 @@ export interface SubagentObservationDeps {
   platform: Pick<Platform, "fs" | "paths">;
   sessionsDir: string;
   registry: SubagentRegistry;
+  /** 判定父关联是否属于常驻子会话（由 core/index 按 residentKindOf 注入，排除出子代理列表） */
+  isResidentParent?:
+    ((parent: { sessionId: string; callId: string } | null | undefined) => boolean) | undefined;
 }
 
 export interface SubagentObservationService {
@@ -341,11 +344,9 @@ export function createSubagentObservation(
     return decodeDurableEvent(new TextDecoder().decode(bytes.subarray(0, end)));
   }
 
-  const isEnsembleMemberParent = (
-    parent: { sessionId: string; callId: string } | null | undefined,
-  ): boolean => parent?.callId.startsWith("ensemble:") ?? false;
+  const isResidentParent = deps.isResidentParent ?? (() => false);
 
-  /** 日志头索引：parentSessionId 的全部直接子会话（含已结束，排除 Ensemble 常驻成员） */
+  /** 日志头索引：parentSessionId 的全部直接子会话（含已结束，排除常驻子会话） */
   async function childrenOf(parentSessionId: string): Promise<string[]> {
     let entries;
     try {
@@ -375,7 +376,7 @@ export function createSubagentObservation(
     }
     return ids.filter((id) => {
       const parent = heads.get(id);
-      return parent?.sessionId === parentSessionId && !isEnsembleMemberParent(parent);
+      return parent?.sessionId === parentSessionId && !isResidentParent(parent);
     });
   }
 
@@ -431,7 +432,7 @@ export function createSubagentObservation(
     const created = log.events[0];
     const parent = created?.type === "session.created" ? created.payload.parent : undefined;
     assertParent(
-      parent !== undefined && !isEnsembleMemberParent(parent) ? parent.sessionId : undefined,
+      parent !== undefined && !isResidentParent(parent) ? parent.sessionId : undefined,
       parentSessionId,
     );
     return { events: log.events, tailIgnored: log.tailIgnored };

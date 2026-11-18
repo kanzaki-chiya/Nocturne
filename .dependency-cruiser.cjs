@@ -223,12 +223,22 @@ module.exports = {
       to: { path: "^packages/core/src/(?!work-modes/|protocol/)" },
     },
     {
+      name: "resident-deps",
+      severity: "error",
+      comment:
+        "resident（常驻子会话共享层，ADR-0097）只依赖 protocol、platform 与 tools（ToolDefinition 类型），不得依赖 ensemble/agent/session",
+      from: { path: "^packages/core/src/resident/" },
+      to: { path: "^packages/core/src/(?!resident/|protocol/|platform/|tools/)" },
+    },
+    {
       name: "ensemble-deps",
       severity: "error",
       comment:
-        "ensemble（Ensemble 执行方式，ADR-0089）只能依赖 protocol/tools/provider/session；工作树与会话托管由 core/index 注入",
+        "ensemble（Ensemble 执行方式，ADR-0089）只能依赖 resident/protocol/tools/provider/session；工作树与会话托管由 core/index 注入",
       from: { path: "^packages/core/src/ensemble/" },
-      to: { path: "^packages/core/src/(?!ensemble/|protocol/|tools/|provider/|session/)" },
+      to: {
+        path: "^packages/core/src/(?!ensemble/|resident/|protocol/|tools/|provider/|session/)",
+      },
     },
     {
       name: "only-index-imports-ensemble",

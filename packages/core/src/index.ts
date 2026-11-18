@@ -252,10 +252,16 @@ import {
 import {
   createEnsembleController,
   ENSEMBLE_MAESTRO_TOOL_NAMES,
-  type ManagedMemberSession,
   type EnsembleController,
-  type EnsembleMemberOpenSpec,
 } from "./ensemble/index.js";
+import {
+  residentCallId,
+  residentKindOf,
+  type ResidentChildOpenSpec,
+  type ResidentChildSession,
+  type ResidentKind,
+  type ResidentWorktreeOps,
+} from "./resident/index.js";
 import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-changes.js";
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
@@ -1247,6 +1253,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     platform,
     sessionsDir,
     registry: subagentRegistry,
+    isResidentParent: (parent) => residentKindOf(parent?.callId) !== undefined,
   });
   const resolvePricing = (
     reg: ProviderRegistry,
@@ -1487,8 +1494,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     });
   }
 
-  interface EnsembleMemberAssemblyOptions {
-    maestroSessionId: string;
+  interface ResidentChildAssemblyOptions {
+    kind: ResidentKind;
+    parentSessionId: string;
     rootSessionId: string;
     name: string;
     preset: "general" | "explore";
@@ -1497,26 +1505,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     basePrompt(): string;
     parentGrants: Grant[];
     isActive(): boolean;
-    onTurnLifecycle: EnsembleMemberOpenSpec["onTurnLifecycle"];
+    onTurnLifecycle: ResidentChildOpenSpec["onTurnLifecycle"];
   }
 
-  interface EnsembleMemberInternalControls {
+  interface ResidentChildInternalControls {
     isBusy(): boolean;
     hasActivePendingInputs(): boolean;
-    deliverEnsemblePost(input: PreparedInput, forcePaused?: boolean): Promise<void>;
+    deliverInput(input: PreparedInput, forcePaused?: boolean): Promise<void>;
     resumeFromModelChange(modelKey: string): Promise<void>;
     setModelAndEffort(modelRef: ModelRef, effort?: ReasoningEffort): Promise<void>;
     interruptAndWait(): Promise<void>;
-    clearPendingEnsembleInputs(): void;
+    clearPendingInputs(): void;
   }
 
-  const ENSEMBLE_MEMBER_CONTROLS = Symbol("nocturne.ensembleMemberControls");
+  const RESIDENT_CHILD_CONTROLS = Symbol("nocturne.residentChildControls");
 
   async function wrapSession(
     session: Session,
     resume?: { modelOverride?: string | ModelRef | undefined },
     unattended = false,
-    ensembleMember?: EnsembleMemberAssemblyOptions,
+    residentChild?: ResidentChildAssemblyOptions,
   ): Promise<RuntimeSession> {
     // 打开途中取得的 Runtime 级登记与外部资源（MCP 连接）按序登记撤销步骤；
     // 打开失败在此逆序撤销，close 复用同一份。会话锁由调用方 session.close() 释放。
@@ -1531,7 +1539,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         teardown,
         runTeardown,
         unattended,
-        ensembleMember,
+        residentChild,
       );
     } catch (e) {
       await runTeardown().catch(() => undefined);
@@ -1545,7 +1553,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     teardown: (() => Promise<void> | void)[],
     runTeardown: () => Promise<void>,
     unattendedOption: boolean,
-    ensembleMember?: EnsembleMemberAssemblyOptions,
+    residentChild?: ResidentChildAssemblyOptions,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
     const projectCwd = await platform.resolveReal(meta.cwd);
@@ -1732,10 +1740,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       grantRootId = grantParent;
       grantParent = subagentRegistry.liveSession(grantParent)?.state().meta.parent?.sessionId;
     }
-    const sessionGrants: Grant[] =
-      ensembleMember?.parentGrants ?? grantLists.get(grantRootId) ?? [];
+    const sessionGrants: Grant[] = residentChild?.parentGrants ?? grantLists.get(grantRootId) ?? [];
     grantLists.set(grantRootId, sessionGrants);
-    if (grantRootId === session.id && ensembleMember === undefined)
+    if (grantRootId === session.id && residentChild === undefined)
       teardown.push(() => {
         grantLists.delete(grantRootId);
       });
@@ -1800,15 +1807,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         },
         autoApproveAsk,
       });
-    const memberWorktreePolicy =
-      ensembleMember?.worktreePath !== undefined
-        ? { root: ensembleMember.worktreePath, cwd: meta.cwd }
+    const residentWorktreePolicy =
+      residentChild?.worktreePath !== undefined
+        ? { root: residentChild.worktreePath, cwd: meta.cwd }
         : undefined;
     let policy = buildPolicy(
       session.state().config.permissionPreset,
       session.id,
-      ensembleMember?.worktreePath !== undefined ? meta.workspaceRoot : undefined,
-      memberWorktreePolicy,
+      residentChild?.worktreePath !== undefined ? meta.workspaceRoot : undefined,
+      residentWorktreePolicy,
     );
     if (!isPermissionPresetName(session.state().config.permissionPreset)) {
       warnings.push(
@@ -2029,8 +2036,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           policy = buildPolicy(
             session.state().config.permissionPreset,
             session.id,
-            ensembleMember?.worktreePath !== undefined ? meta.workspaceRoot : undefined,
-            memberWorktreePolicy,
+            residentChild?.worktreePath !== undefined ? meta.workspaceRoot : undefined,
+            residentWorktreePolicy,
           );
           return policy.evaluate(subjects, evaluationOptions);
         },
@@ -2064,7 +2071,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // ADR-0064 第 7 节：定时任务发起的会话不提供改写定时任务的工具（按特性，不按名字）
     for (const tool of builtinTools()) {
       if (meta.schedule !== undefined && tool.traits.mutatesSchedule === true) continue;
-      if (ensembleMember?.preset === "explore" && tool.traits.mutates) continue;
+      if (residentChild?.preset === "explore" && tool.traits.mutates) continue;
       if (
         (meta.parent !== undefined || meta.schedule !== undefined) &&
         tool.traits.mainSessionOnly === true
@@ -2072,8 +2079,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         continue;
       tools.register(tool);
     }
-    if (ensembleMember !== undefined) {
-      for (const extra of ensembleMember.extraTools) {
+    if (residentChild !== undefined) {
+      for (const extra of residentChild.extraTools) {
         tools.unregister(extra.name);
         tools.register(extra);
       }
@@ -2237,7 +2244,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       tools.unregister(MCP_CALL_TOOL_NAME);
 
       const currentMcpTools = [...activeMcpTools.values()].filter(
-        (tool) => !(ensembleMember?.preset === "explore" && tool.traits.mutates),
+        (tool) => !(residentChild?.preset === "explore" && tool.traits.mutates),
       );
       const mode =
         config?.resolvedSettings(meta.workspaceRoot).mcpToolSearch ??
@@ -2915,7 +2922,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         );
       }
       tools.unregister("task");
-      if (ensembleMember !== undefined || isEnsembleMaestroActive()) return;
+      if (residentChild !== undefined || isEnsembleMaestroActive()) return;
       if (!subagentEnabled && !hasExternalAgents) return;
       let launcher: SubagentLauncher | undefined;
       if (subagentEnabled)
@@ -3233,13 +3240,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
     };
     const assertSubmittableSession = () => {
-      if (meta.parent?.callId.startsWith("ensemble:") && !ensembleMember?.isActive()) {
-        throw new RuntimeCommandError("invalid_command", "合奏成员已移除或合奏已结束");
+      const kind = residentKindOf(meta.parent?.callId);
+      if (kind !== undefined && !residentChild?.isActive()) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          kind === "suite" ? "线程已关闭" : "合奏成员已移除或合奏已结束",
+        );
       }
     };
     const assertInputQueueAllowed = () => {
       assertSubmittableSession();
-      if (meta.parent !== undefined && !ensembleMember?.isActive()) {
+      if (meta.parent !== undefined && !residentChild?.isActive()) {
         throw new RuntimeCommandError("invalid_command", "子会话不能收发待发输入");
       }
     };
@@ -3665,6 +3676,121 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     const memberProxies = new Map<string, RuntimeSession>();
 
+    const openResidentChild = async (
+      spec: ResidentChildOpenSpec,
+      isParentActive: () => boolean = () => true,
+    ): Promise<ResidentChildSession> => {
+      let childRaw: Session;
+      if (spec.create) {
+        childRaw = await store.create({
+          id: spec.childSessionId,
+          cwd: spec.cwd,
+          workspaceRoot: spec.workspaceRoot,
+          model: spec.model,
+          permissionPreset: session.state().config.permissionPreset,
+          nocturneVersion: options.version ?? NOCTURNE_VERSION,
+          ...(spec.reasoningEffort !== undefined ? { reasoningEffort: spec.reasoningEffort } : {}),
+          parent: { sessionId: session.id, callId: residentCallId(spec.kind, spec.name) },
+        });
+      } else {
+        childRaw = await store.load(spec.childSessionId);
+      }
+      let childActive = true;
+      let wrappedChild: RuntimeSession;
+      try {
+        wrappedChild = await wrapSession(
+          childRaw,
+          { modelOverride: spec.model },
+          unattendedOption,
+          {
+            kind: spec.kind,
+            parentSessionId: session.id,
+            rootSessionId: grantRootId,
+            name: spec.name,
+            preset: spec.preset,
+            worktreePath: spec.worktreePath,
+            extraTools: spec.extraTools,
+            basePrompt: () => spec.basePrompt(),
+            parentGrants: sessionGrants,
+            isActive: () => childActive && isParentActive(),
+            onTurnLifecycle: spec.onTurnLifecycle,
+          },
+        );
+      } catch (e) {
+        await childRaw.close().catch(() => undefined);
+        throw e;
+      }
+      const controls = (
+        wrappedChild as unknown as Record<symbol, ResidentChildInternalControls | undefined>
+      )[RESIDENT_CHILD_CONTROLS];
+      if (controls === undefined) {
+        await wrappedChild.close().catch(() => undefined);
+        throw new Error("Missing ResidentChildInternalControls");
+      }
+
+      // 创建不关闭底层会话的共享外部代理句柄（供 runtime.resumeSession / RPC 使用）
+      const proxy: RuntimeSession = {
+        ...wrappedChild,
+        close: () => Promise.resolve(),
+      };
+      Object.defineProperty(proxy, INTERNAL_SESSION, { value: childRaw });
+      memberProxies.set(spec.childSessionId, proxy);
+
+      return {
+        id: spec.childSessionId,
+        isBusy: () => controls.isBusy(),
+        hasActivePendingInputs: () => controls.hasActivePendingInputs(),
+        deliverInput: (input, forcePaused) => controls.deliverInput(input, forcePaused),
+        resumeFromModelChange: (modelKey) => controls.resumeFromModelChange(modelKey),
+        setModelAndEffort: (modelRef, effort) => controls.setModelAndEffort(modelRef, effort),
+        interruptAndWait: () => controls.interruptAndWait(),
+        clearPendingInputs: () => {
+          controls.clearPendingInputs();
+        },
+        subscribe: (listener) => wrappedChild.subscribe(listener),
+        closeUnderlying: async () => {
+          childActive = false;
+          memberProxies.delete(spec.childSessionId);
+          await wrappedChild.close();
+        },
+      };
+    };
+
+    const residentWorktreeOps = (
+      parentSessionId: string,
+      activeIsolatedChildIds?: () => ReadonlySet<string> | undefined,
+    ): ResidentWorktreeOps => ({
+      inspectRepository: (dir) => inspectWorktreeRepository(dir),
+      create: (input) =>
+        runWorktreeTask(() =>
+          createWorktree({
+            childSessionId: input.childSessionId,
+            parentSessionId,
+            repository: input.repository,
+            sessionsDir,
+            cwd: input.cwd,
+            workspaceRoot: input.workspaceRoot,
+            task: input.task,
+            trusted: ws?.projectConfig.trusted === true,
+          }),
+        ),
+      loadRecord: async (childSessionId) => {
+        const list = await listWorktreeRecords(sessionsDir, parentSessionId);
+        return list.find((r) => r.childSessionId === childSessionId);
+      },
+      listParentRecords: () => listWorktreeRecords(sessionsDir, parentSessionId),
+      checkpoint: (record, msg) => runWorktreeTask(() => checkpointWorktreeTurn(record, msg)),
+      currentHead: (wtPath) => worktreeCurrentHead(wtPath),
+      isOnBranch: (record) => isWorktreeOnBranch(record),
+      resetToCommit: (wtPath, sha) => runWorktreeTask(() => resetWorktreeToCommit(wtPath, sha)),
+      markApplied: (record, appliedHead) => markWorktreeApplied(record, appliedHead),
+      remove: (record, removeBranch) => runWorktreeTask(() => removeWorktree(record, removeBranch)),
+      cleanupMerged: () =>
+        runWorktreeTask(() =>
+          cleanupMergedWorktrees(sessionsDir, parentSessionId, activeIsolatedChildIds?.()),
+        ),
+    });
+
     if (meta.parent === undefined && meta.schedule === undefined) {
       const deliverEnsembleToMaestro = (
         input: PreparedInput,
@@ -3762,120 +3888,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           pendingInputStore.snapshot().items.some((item) => !item.paused),
         syncMaestroTools: syncEnsembleTools,
         notifyMaestroIdle: notifyIdle,
-        openMemberSession: async (spec): Promise<ManagedMemberSession> => {
-          let childRaw: Session;
-          if (spec.create) {
-            childRaw = await store.create({
-              id: spec.childSessionId,
-              cwd: spec.cwd,
-              workspaceRoot: spec.workspaceRoot,
-              model: spec.model,
-              permissionPreset: session.state().config.permissionPreset,
-              nocturneVersion: options.version ?? NOCTURNE_VERSION,
-              ...(spec.reasoningEffort !== undefined
-                ? { reasoningEffort: spec.reasoningEffort }
-                : {}),
-              parent: { sessionId: session.id, callId: `ensemble:${spec.name}` },
-            });
-          } else {
-            childRaw = await store.load(spec.childSessionId);
-          }
-          let memberActive = true;
-          let wrappedMember: RuntimeSession;
-          try {
-            wrappedMember = await wrapSession(
-              childRaw,
-              { modelOverride: spec.model },
-              unattendedOption,
-              {
-                maestroSessionId: session.id,
-                rootSessionId: grantRootId,
-                name: spec.name,
-                preset: spec.preset,
-                worktreePath: spec.worktreePath,
-                extraTools: spec.extraTools,
-                basePrompt: () => spec.basePrompt(),
-                parentGrants: sessionGrants,
-                isActive: () => memberActive && Boolean(ensembleController?.isActive()),
-                onTurnLifecycle: spec.onTurnLifecycle,
-              },
-            );
-          } catch (e) {
-            await childRaw.close().catch(() => undefined);
-            throw e;
-          }
-          const controls = (
-            wrappedMember as unknown as Record<symbol, EnsembleMemberInternalControls | undefined>
-          )[ENSEMBLE_MEMBER_CONTROLS];
-          if (controls === undefined) {
-            await wrappedMember.close().catch(() => undefined);
-            throw new Error("Missing EnsembleMemberInternalControls");
-          }
-
-          // 创建不关闭底层会话的共享外部代理句柄（供 runtime.resumeSession / RPC 使用）
-          const proxy: RuntimeSession = {
-            ...wrappedMember,
-            close: () => Promise.resolve(),
-          };
-          Object.defineProperty(proxy, INTERNAL_SESSION, { value: childRaw });
-          memberProxies.set(spec.childSessionId, proxy);
-
-          return {
-            id: spec.childSessionId,
-            isBusy: () => controls.isBusy(),
-            hasActivePendingInputs: () => controls.hasActivePendingInputs(),
-            deliverEnsemblePost: (input, forcePaused) =>
-              controls.deliverEnsemblePost(input, forcePaused),
-            resumeFromModelChange: (modelKey) => controls.resumeFromModelChange(modelKey),
-            setModelAndEffort: (modelRef, effort) => controls.setModelAndEffort(modelRef, effort),
-            interruptAndWait: () => controls.interruptAndWait(),
-            clearPendingEnsembleInputs: () => {
-              controls.clearPendingEnsembleInputs();
-            },
-            subscribe: (listener) => wrappedMember.subscribe(listener),
-            closeUnderlying: async () => {
-              memberActive = false;
-              memberProxies.delete(spec.childSessionId);
-              await wrappedMember.close();
-            },
-          };
-        },
-        worktrees: {
-          inspectRepository: (dir) => inspectWorktreeRepository(dir),
-          create: (input) =>
-            runWorktreeTask(() =>
-              createWorktree({
-                childSessionId: input.childSessionId,
-                parentSessionId: session.id,
-                repository: input.repository,
-                sessionsDir,
-                cwd: input.cwd,
-                workspaceRoot: input.workspaceRoot,
-                task: input.task,
-                trusted: ws?.projectConfig.trusted === true,
-              }),
-            ),
-          loadRecord: async (childSessionId) => {
-            const list = await listWorktreeRecords(sessionsDir, session.id);
-            return list.find((r) => r.childSessionId === childSessionId);
-          },
-          listParentRecords: () => listWorktreeRecords(sessionsDir, session.id),
-          checkpoint: (record, msg) => runWorktreeTask(() => checkpointWorktreeTurn(record, msg)),
-          currentHead: (wtPath) => worktreeCurrentHead(wtPath),
-          isOnMemberBranch: (record) => isWorktreeOnBranch(record),
-          resetToCommit: (wtPath, sha) => runWorktreeTask(() => resetWorktreeToCommit(wtPath, sha)),
-          markApplied: (record, appliedHead) => markWorktreeApplied(record, appliedHead),
-          remove: (record, removeBranch) =>
-            runWorktreeTask(() => removeWorktree(record, removeBranch)),
-          cleanupMerged: () =>
-            runWorktreeTask(() =>
-              cleanupMergedWorktrees(
-                sessionsDir,
-                session.id,
-                ensembleController?.activeIsolatedChildIds(),
-              ),
-            ),
-        },
+        openMemberSession: (spec) =>
+          openResidentChild(spec, () => Boolean(ensembleController?.isActive())),
+        worktrees: residentWorktreeOps(session.id, () =>
+          ensembleController?.activeIsolatedChildIds(),
+        ),
         commandError: (code, message) => new RuntimeCommandError(code, message),
       });
     }
@@ -3900,8 +3917,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // 空闲边界：controller 先置位（busy 语义立即生效），再重建
       // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
       try {
-        if (ensembleMember !== undefined) {
-          ensembleMember.onTurnLifecycle.onSlotWaitStart();
+        if (residentChild !== undefined) {
+          residentChild.onTurnLifecycle.onSlotWaitStart();
           heldSubagentSlot = await subagentLimiter.acquire(ac.signal);
           if (!heldSubagentSlot) {
             pendingInputStore.pauseAll();
@@ -3989,10 +4006,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             },
             // ADR-0076 §4.3：目标模式在 Turn 想结束时决定是否续跑
             ...(meta.parent === undefined ? { continueTurn: continueGoal } : {}),
-            ...(ensembleMember !== undefined
+            ...(residentChild !== undefined
               ? {
-                  basePrompt: ensembleMember.basePrompt(),
-                  rootSessionId: ensembleMember.rootSessionId,
+                  basePrompt: residentChild.basePrompt(),
+                  rootSessionId: residentChild.rootSessionId,
                 }
               : {}),
             skills: catalog,
@@ -4049,13 +4066,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (reason === "failed") {
             throw new RuntimeCommandError("session_failed", "会话持久化失败");
           }
-          if (ensembleMember !== undefined) {
+          if (residentChild !== undefined) {
             const lastCompleted = session
               .durableEvents()
               .findLast((ev) => ev.type === "turn.completed");
             const lastErr =
               lastCompleted?.type === "turn.completed" ? lastCompleted.payload.error : undefined;
-            await ensembleMember.onTurnLifecycle.onTurnCompleted(
+            await residentChild.onTurnLifecycle.onTurnCompleted(
               reason,
               lastErr !== undefined ? { code: lastErr.code, message: lastErr.message } : undefined,
             );
@@ -4642,8 +4659,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (busy() || compactController !== undefined) {
           throw new RuntimeCommandError("session_busy", "会话正忙（Turn 或压缩进行中）");
         }
-        // ADR-0089 §5、§10：用户直接向暂停中的 Ensemble 成员发消息时恢复运行
-        if (ensembleMember !== undefined && pendingInputStore.snapshot().paused) {
+        // ADR-0089 §5、§10：用户直接向暂停中的常驻子会话发消息时恢复运行
+        if (residentChild !== undefined && pendingInputStore.snapshot().paused) {
           const prepared = await prepareInput(input, new AbortController().signal);
           pendingInputStore.add("queue", prepared);
           pendingInputStore.resume();
@@ -5106,7 +5123,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const resolved = config?.resolvedSettings(environment.workspaceRoot);
         const compactionThreshold = resolved?.compactionThreshold;
         const compactionPruneLimit = resolved?.compactionPruneLimit;
-        const memberBasePrompt = ensembleMember?.basePrompt();
+        const residentBasePrompt = residentChild?.basePrompt();
         const key = JSON.stringify({
           seq: events.at(-1)?.seq,
           model: model.model,
@@ -5118,7 +5135,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           compactionThreshold,
           compactionPruneLimit,
           loopGuard: turnConfig.loopGuard ?? DEFAULT_LOOP_GUARD,
-          basePrompt: memberBasePrompt,
+          basePrompt: residentBasePrompt,
         });
         if (contextCache?.key === key) return structuredClone(contextCache.value);
         const state = session.state();
@@ -5137,7 +5154,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           instructions,
           environment,
           events,
-          ...(memberBasePrompt !== undefined ? { basePrompt: memberBasePrompt } : {}),
+          ...(residentBasePrompt !== undefined ? { basePrompt: residentBasePrompt } : {}),
         });
         contextCache = { key, value: structuredClone(value) };
         return structuredClone(contextCache.value);
@@ -5181,12 +5198,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
     };
     teardown.push(backgroundSubagents.onSettled(session.id, notifyIdle));
-    if (ensembleMember !== undefined) {
-      const controls: EnsembleMemberInternalControls = {
+    if (residentChild !== undefined) {
+      const controls: ResidentChildInternalControls = {
         isBusy: () => busy() || compacting(),
         hasActivePendingInputs: () =>
           pendingInputStore.snapshot().items.some((item) => !item.paused),
-        deliverEnsemblePost: (input, forcePaused = false) => {
+        deliverInput: (input, forcePaused = false) => {
           if (closing || session.health !== "ok") return Promise.resolve();
           if (!forcePaused) {
             pendingInputStore.resume();
@@ -5208,7 +5225,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             return Promise.resolve();
           }
           if (!busy() && !compacting()) {
-            const resumePrompt = `[Ensemble] Your model was switched to ${modelKey} after the previous turn failed. Continue your task from where you left off.`;
+            const prefix = residentChild.kind === "suite" ? "[Suite]" : "[Ensemble]";
+            const resumePrompt = `${prefix} Your model was switched to ${modelKey} after the previous turn failed. Continue your task from where you left off.`;
             pendingInputStore.add("ensemble", {
               content: [{ type: "text", text: resumePrompt }],
               appended: [],
@@ -5236,11 +5254,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           questions.cancelAll();
           await Promise.all([turnSettled, compactSettled]);
         },
-        clearPendingEnsembleInputs: () => {
+        clearPendingInputs: () => {
           pendingInputStore.dropMode("ensemble");
         },
       };
-      Object.defineProperty(runtimeSession, ENSEMBLE_MEMBER_CONTROLS, { value: controls });
+      Object.defineProperty(runtimeSession, RESIDENT_CHILD_CONTROLS, { value: controls });
     }
     // 内部 Session 句柄只留给各包测试：非导出 Symbol 键，不在 RuntimeSession 类型里
     Object.defineProperty(runtimeSession, INTERNAL_SESSION, { value: session });
