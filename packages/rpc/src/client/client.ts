@@ -1,4 +1,5 @@
 import type {
+  PluginsDescription,
   Runtime,
   SkillImportInput,
   SkillImportOutput,
@@ -307,6 +308,8 @@ export interface RpcRuntime {
    * 写入经 Core，客户端不直接写技能目录。
    */
   importSkills(input: SkillImportInput): Promise<SkillImportOutput>;
+  describePlugins(): Promise<PluginsDescription>;
+  setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
@@ -988,6 +991,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     describeSkills: (input = {}) => call("skills.describeSkills", input),
     setSkillEnabled: (input) => call("skills.setSkillEnabled", input),
     importSkills: (input) => call("skills.importSkills", input),
+    describePlugins: () => call("plugins.describePlugins", {}),
+    setPluginEnabled: (input) => call("plugins.setPluginEnabled", input),
     saveMcpServer: (input) => call("mcp.saveMcpServer", input),
     deleteMcpServer: async (input) => {
       await call("mcp.deleteMcpServer", input);

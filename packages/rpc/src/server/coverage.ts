@@ -82,6 +82,8 @@ export const RUNTIME_METHODS: Record<
   probeExternalAgent: "agents.probeExternalAgent",
   describeSkills: "skills.describeSkills",
   setSkillEnabled: "skills.setSkillEnabled",
+  describePlugins: "plugins.describePlugins",
+  setPluginEnabled: "plugins.setPluginEnabled",
   setProviderEnabled: "provider.setProviderEnabled",
   setModelsEnabled: "provider.setModelsEnabled",
   describeToggleImpact: "provider.describeToggleImpact",

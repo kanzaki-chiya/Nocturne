@@ -77,6 +77,7 @@ export async function discoverSkills(
     workspaceRoot: string;
     cwd: string;
     config?: SkillsConfig | undefined;
+    pluginSkillDirs?: readonly { path: string; plugin: string }[] | undefined;
   },
 ): Promise<{
   skills: DiscoveredSkill[];
@@ -85,7 +86,12 @@ export async function discoverSkills(
   homeDir: string;
 }> {
   const { fs, paths } = platform;
-  const roots: { path: string; layer: "user" | "project"; source: SkillOverview["source"] }[] = [];
+  const roots: {
+    path: string;
+    layer: "user" | "project";
+    source: SkillOverview["source"];
+    plugin?: string | undefined;
+  }[] = [];
   const add = (base: string, layer: "user" | "project", user = false) => {
     roots.push({
       path: paths.join(base, user ? "skills" : ".nocturne/skills"),
@@ -110,6 +116,14 @@ export async function discoverSkills(
       source: "extra",
     });
   }
+  for (const dir of input.pluginSkillDirs ?? []) {
+    roots.push({
+      path: dir.path,
+      layer: "user",
+      source: "plugin",
+      plugin: dir.plugin,
+    });
+  }
   let dir = paths.resolve(input.cwd, ".");
   while (paths.isWithin(input.workspaceRoot, dir)) {
     add(dir, "project");
@@ -124,15 +138,24 @@ export async function discoverSkills(
   const names = new Map<string, DiscoveredSkill>();
   for (const root of roots) {
     if (!(await fs.exists(root.path))) continue;
-    let entries;
-    try {
-      entries = await fs.readdir(root.path);
-    } catch (e) {
-      warnings.push({ path: root.path, line: 1, kind: "read", message: String(e) });
-      continue;
+    let skillEntries: { name: string; path: string }[] = [];
+    const directSkill = root.source === "plugin" ? paths.join(root.path, "SKILL.md") : undefined;
+    if (directSkill !== undefined && (await fs.exists(directSkill))) {
+      skillEntries = [{ name: paths.basename(root.path), path: root.path }];
+    } else {
+      let entries;
+      try {
+        entries = await fs.readdir(root.path);
+      } catch (e) {
+        warnings.push({ path: root.path, line: 1, kind: "read", message: String(e) });
+        continue;
+      }
+      skillEntries = entries
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .filter((e) => e.type === "directory" || e.type === "symlink")
+        .map((e) => ({ name: e.name, path: e.path }));
     }
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (entry.type !== "directory" && entry.type !== "symlink") continue;
+    for (const entry of skillEntries) {
       const file = paths.join(entry.path, "SKILL.md");
       if (!(await fs.exists(file))) continue;
       try {
@@ -175,6 +198,7 @@ export async function discoverSkills(
           name,
           layer: root.layer,
           source: root.source,
+          ...(root.plugin !== undefined ? { plugin: root.plugin } : {}),
           entryPath: entry.path,
           realPath,
           otherEntries: [],

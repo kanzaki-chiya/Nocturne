@@ -6,17 +6,17 @@ Hook 是**配置驱动的外部命令**：Runtime 在固定事件点上启动一
 
 ## 1. 事件点
 
-| 事件点 | 触发时机 | 目的 | 可用的效果 |
-|---|---|---|---|
-| `PreToolUse` | 管线第 2 步（输入校验）通过之后、第 3 步（权限主体计算）之前 | 拦截或改写工具输入 | `deny` 直接拒绝；`ask` 强制走确认；`updatedInput` 修改输入后**重新校验**。没有 `allow`：此点在主体解析之前运行，看到的是未解析的原始输入（如 `foo/link`），放行等于批准一个解析后才知道目标的操作——放宽只走 `PermissionRequest` |
-| `PermissionRequest` | 规则求值为 `ask` 之后、发出 `permission.requested` 之前 | 把确认自动化（如 CI 策略、审批网关） | `allow` / `deny` 直接结算（无输出字段 = 继续询问用户）；唯一能放宽 `ask` 的 Hook 点，因为它能看到已解析的权限主体 |
-| `PostToolUse` | 工具执行返回之后、结果归一化（第 8 步）之前 | 追加反馈给模型 | `feedback` 追加进 `modelContent`（有上限，见第 4 节）；不能改结果状态 |
-| `TurnStart` | `turn.started` 与 `message.user` 写入之后、`UserPromptSubmit` 之后、Agent Loop 开始前 | 提交级拦截 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算 |
-| `TurnEnd` | `turn.completed` 写入之后 | 审计/统计 | 无效果（仅通知） |
-| `UserPromptSubmit` | `message.user` 写入后、`TurnStart` 之前（仅本轮由用户输入发起时触发） | 提交前拦截或注入本次用户输入附带上下文 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算并丢弃 `additionalContext`；`additionalContext` 写 `hook.context` 并折叠为该条 `message.user` 之后的 `note` |
-| `SessionStart` | 会话新建、恢复、分叉打开后；以及 L2 摘要（自动或手动）成功后、下一次模型请求前 | 环境准备、外部记账、会话级上下文注入 | `additionalContext` 写 `hook.context` 作为会话快照（与 `SubagentStart` 共用 system `hookContext` section，位于技能目录之后、环境信息之前） |
-| `SubagentStart` | 子会话的 `SessionStart` 之后、第一个 Turn 之前（外部 ACP agent 不触发） | 子会话级上下文注入与记账 | `additionalContext` 写 `hook.context` 作为子会话快照（同 `SessionStart` 进入 `hookContext` section） |
-| `SessionEnd` | `session.close()` 内、清理开始前 | 清理、审计 | 无效果（仅通知） |
+| 事件点 | 触发时机 | 目的 | 可用的效果 | 插件 Hook |
+|---|---|---|---|---|
+| `PreToolUse` | 管线第 2 步（输入校验）通过之后、第 3 步（权限主体计算）之前 | 拦截或改写工具输入 | `deny` 直接拒绝；`ask` 强制走确认；`updatedInput` 修改输入后**重新校验**。没有 `allow`：此点在主体解析之前运行，看到的是未解析的原始输入（如 `foo/link`），放行等于批准一个解析后才知道目标的操作——放宽只走 `PermissionRequest` | 不支持 |
+| `PermissionRequest` | 规则求值为 `ask` 之后、发出 `permission.requested` 之前 | 把确认自动化（如 CI 策略、审批网关） | `allow` / `deny` 直接结算（无输出字段 = 继续询问用户）；唯一能放宽 `ask` 的 Hook 点，因为它能看到已解析的权限主体 | 不支持 |
+| `PostToolUse` | 工具执行返回之后、结果归一化（第 8 步）之前 | 追加反馈给模型 | `feedback` 追加进 `modelContent`（有上限，见第 4 节）；不能改结果状态 | 不支持 |
+| `TurnStart` | `turn.started` 与 `message.user` 写入之后、`UserPromptSubmit` 之后、Agent Loop 开始前 | 提交级拦截 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算 | 不支持 |
+| `TurnEnd` | `turn.completed` 写入之后 | 审计/统计 | 无效果（仅通知） | 不支持 |
+| `UserPromptSubmit` | `message.user` 写入后、`TurnStart` 之前（仅本轮由用户输入发起时触发） | 提交前拦截或注入本次用户输入附带上下文 | `block: true` + `reason` → Turn 以 `error`（`hook_blocked`）结算并丢弃 `additionalContext`；`additionalContext` 写 `hook.context` 并折叠为该条 `message.user` 之后的 `note` | 支持 |
+| `SessionStart` | 会话新建、恢复、分叉打开后；以及 L2 摘要（自动或手动）成功后、下一次模型请求前 | 环境准备、外部记账、会话级上下文注入 | `additionalContext` 写 `hook.context` 作为会话快照（与 `SubagentStart` 共用 system `hookContext` section，位于技能目录之后、环境信息之前） | 支持（仅父会话） |
+| `SubagentStart` | 子会话的 `SessionStart` 之后、第一个 Turn 之前（外部 ACP agent 不触发） | 子会话级上下文注入与记账 | `additionalContext` 写 `hook.context` 作为子会话快照（同 `SessionStart` 进入 `hookContext` section） | 支持 |
+| `SessionEnd` | `session.close()` 内、清理开始前 | 清理、审计 | 无效果（仅通知） | 支持（仅父会话） |
 
 取哪些点的理由：
 
@@ -148,7 +148,18 @@ Hook 调用的耗时计入诊断（`hook.run` 记录），不占 `tool.exec` 的
 - `PermissionSource` 增加 `"hook"`；`permission.resolved.source = "hook"` 是 Hook 权限决策的持久痕迹（`rule` 字段记 Hook 描述：`hook PreToolUse <command>`）；`hook.context.entries[].hook` 沿用同一格式（`hook <点位> <command>`）。
 - 每次 Hook 执行（含失败）写诊断记录 `hook.run` / `hook.done`（observability.md），包含点位、命令、耗时、退出码、效果摘要；上下文超限丢弃写 `hook.context_dropped`。
 
-## 8. 暂不设计
+## 8. 插件 Hook（ADR-0096 第二期）
+
+Core 内部将已启用且通过整目录指纹校验（`<NOCTURNE_HOME>/plugins.json`）的 Codex / Claude Code 插件 Hook 翻译为扩展条目 `HookEntry & { plugin: PluginHookSpec }`（不写入手写 `config.json` schema），仅接 `SessionStart`、`UserPromptSubmit`、`SubagentStart`、`SessionEnd`（其余点位、非 `command`、`async: true` 与含 `${user_config.` 的条目均记为 `unsupported` 且不运行）：
+
+- **只在父会话运行**：两种宿主来源的 `SessionStart` 与 `SessionEnd` 都只在父会话触发；子会话只跑 `SubagentStart`。
+- **调用方式按宿主区分**：Codex 在 Windows 优先用 `commandWindows ?? command` 经 `%COMSPEC%` 原样执行，其余平台 `$SHELL -lc`（无 `SHELL` 用 `/bin/sh`）；Claude 有 `args` 走 exec 形式，否则按 `shell`（Windows Git Bash → 回退 PowerShell，其余平台 `sh -c`）。
+- **环境与占位符**：仅给 `envMode: "minimal"` 白名单环境，注入 `PLUGIN_ROOT`、`CLAUDE_PLUGIN_ROOT`、`PLUGIN_DATA`（`<NOCTURNE_HOME>/plugins/data/<name>-<marketplace>`，运行前创建）、`CLAUDE_PLUGIN_DATA`、`CLAUDE_PROJECT_DIR` 及 4 个 `NOCTURNE_HOOK_*` 变量，并在 `command` / `args` 中单次展开同名占位符。
+- **超时与 matcher**：一般点位缺省 60 秒（上限 60 秒），`SessionEnd` 缺省 1 秒（上限 3 秒）。`matcher` 仅含 `[A-Za-z0-9_\- ,|]` 时按 `|` / `,` 精确匹配，否则按正则匹配（非法正则跳过并告警）；`SessionStart` 匹配插件看到的 `source`（`fork` 映射为 `resume`），`SubagentStart` 匹配 `agent_type`，`UserPromptSubmit` 与 `SessionEnd` 忽略 matcher。
+- **stdin / stdout / 退出码**：stdin 传 snake_case JSON（`hook_event_name`、`session_id`、`cwd`、`source`、`turn_id`、`prompt`、`agent_type`、`reason`；技能调用时 `prompt` 为 `/<name>` 或 `/<name> <arguments>`）。退出码 0 时取 JSON 的 `hookSpecificOutput.additionalContext`（`UserPromptSubmit` 另认 `decision: "block"` + `reason`），非 JSON 非空文本整段作为上下文；`UserPromptSubmit` 退出码 2 拦截（`reason` 取 stderr），其余非零退出按 `hook_failed` 降级。
+- **条目名**：`hook.context`、warning 与诊断给用户看的标识一律为 `plugin <name>@<marketplace> <点位>`，不暴露展开后命令与绝对路径。
+
+## 9. 暂不设计
 
 - **ModelRequest / 采样级 Hook**：把模型请求暴露给外部进程涉及凭据与内容边界，另议。
 - **Hook 内嵌脚本**（`command: "inline"`）：外部文件已经够用；内嵌会引入引号/转义与平台差异。

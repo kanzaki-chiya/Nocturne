@@ -35,6 +35,8 @@ export interface PipeSpawnOptions extends SpawnOptions {
    *   env 在白名单之上叠加——第三方 MCP 服务器拿不到 Provider API Key 等敏感变量。
    */
   envMode?: "inherit" | "minimal" | undefined;
+  /** Windows 下原样传参（如经 %COMSPEC% /c 执行整条命令行） */
+  verbatimArgs?: boolean | undefined;
 }
 
 /**
@@ -796,7 +798,7 @@ export function createProcessRunner(): ProcessRunner {
               cwd: options.cwd,
               env,
               windowsHide: true,
-              windowsVerbatimArguments: invocation.verbatim,
+              windowsVerbatimArguments: options.verbatimArgs === true || invocation.verbatim,
               detached: process.platform !== "win32",
               stdio: ["pipe", "pipe", "pipe"],
             });

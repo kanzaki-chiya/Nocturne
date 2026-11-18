@@ -230,7 +230,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 |---|---|---|---|
 | 客户端→服务端 | `session.interrupt` | `{ sessionId }` | 中断运行中的 Turn；无 Turn 时无操作。`submit` 请求随后以 `aborted` 返回。服务端也接受带 `id` 的请求形式（回复 `null`） |
 | 服务端→客户端 | `event` | `{ sessionId, event }` | `event` 原样是 [events.md](events.md) 的 `RuntimeEvent` 信封，不另包一层 |
-| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能或外部 agent 配置变更成功后的通知；`provider.*`、`skills.*` 写方法（`setSkillEnabled`、`importSkills` 的 commit）、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7） |
+| 服务端→客户端 | `runtime.providersChanged` | `{}` | 服务商、技能、插件或外部 agent 配置变更成功后的通知；`provider.*`、`skills.*` 写方法（`setSkillEnabled`、`importSkills` 的 commit）、`plugins.setPluginEnabled`、`agents.*` 三个写方法的响应之前到达一次，登录和显式重载同原规则（3.3–3.7、3.14） |
 | 服务端→客户端 | `runtime.sessionsChanged` | `{}` | 会话列表变了，请重拉 `runtime.listSessions`。**不带任何会话内容**（标题、路径都不带）。本后台的 `runtime.createSession`、`runtime.forkSession`、`runtime.renameSession` 成功后发；会话首条用户消息落盘（列表标题 `firstText` 从无到有）和 `session.titled`（生成的标题优先于首句）也发，其余事件不发。发送前合并：第一次变化起 300 ms 内的所有变化只发一条，窗口内不顺延。别的进程（如另开的 CLI）改的列表不经过本后台，没有通知，客户端回前台时自行重拉。旧客户端没有监听器，忽略即可 |
 | 服务端→客户端 | `grants.changed` | `{ workspace?, sessionId? }` | 新增、撤销授权或改信任后重拉；会话 ID 为树根。易失、不写日志，广播给所有已握手连接（含远程） |
 | 服务端→客户端 | `schedule.changed` | `{ taskId? }` | 定时任务列表、启停或运行状态变了，请重拉 `schedule.list`（ADR-0064）。易失，不写日志，不带任务内容；保存、删除、一次运行开始/结束/被跳过之后发。`taskId` 缺省表示整体变化。广播给所有已握手连接（含远程）。每次发出时同时触发一次 `runtime.sessionsChanged`（运行会建出新会话，照常 300 ms 合并） |
@@ -304,6 +304,15 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `computer.appIcon` | `{ pid?: number, windowId?: number, identity?: string }` → `string \| null`（单个软件的 base64 PNG 图标，权限确认卡按 `app` 主体自身的 pid / windowId / identity 取，按 identity 缓存；电脑操控关闭、驱动未运行或取不到时为 `null`，不报错） |
 | `computer.setPermission` | `{ identity: string, action: PermissionAction \| null, app?: { name?, icon? } }` → `ComputerDescription` |
 | `computer.changed`（服务端→客户端） | `ComputerDescription` |
+
+### 3.14 `plugins.*`（ADR-0096 第二期）
+
+只读发现已安装 Codex / Claude Code 插件与用户启停信任管理，均不在远程白名单（第 7 节）。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `plugins.describePlugins` | `{}` → `PluginsDescription`（`{ plugins: PluginOverview[], warnings: string[] }`）；每次重新扫描并重新校验已启用插件的整目录指纹 |
+| `plugins.setPluginEnabled` | `{ id: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列原子写 `plugins.json`（`enabled: true` 时计算整目录指纹，含符号链接等失败时拒绝并报 `invalid_command`），响应之前推 `runtime.providersChanged`，技能在空闲边界重建，Hook 对之后打开的会话生效 |
 
 ## 4. 订阅与回放
 

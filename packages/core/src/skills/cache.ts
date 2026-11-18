@@ -65,6 +65,7 @@ export function createSkillDiscoveryCache(platform: Platform) {
         input.config?.sources?.agents ?? true,
         input.config?.sources?.claude ?? true,
         input.config?.extraDirs ?? [],
+        input.pluginSkillDirs ?? [],
       ]);
       const pending = scans.get(key);
       if (pending) return pending.then((result) => structuredClone(result));

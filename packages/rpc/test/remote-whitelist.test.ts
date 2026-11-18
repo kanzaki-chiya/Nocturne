@@ -66,6 +66,8 @@ const STILL_LOCAL = [
   "subagent.readAttachment",
   "skills.importSkills",
   "skills.setSkillEnabled",
+  "plugins.describePlugins",
+  "plugins.setPluginEnabled",
   "schedule.save",
   "schedule.delete",
   "provider.refreshModelsDev",

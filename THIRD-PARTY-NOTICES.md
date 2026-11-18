@@ -18,6 +18,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `ink` | 7.1.1 | MIT |
 | `marked` | 18.0.7 | MIT |
 | `node-html-markdown` | 2.0.0 | MIT |
+| `smol-toml` | 1.9.1 | BSD-3-Clause |
 | `react` | 19.3.0 | MIT |
 | `react-dom` | 19.3.0 | MIT |
 | `scheduler`（手机网页间接依赖） | 0.28.0 | MIT |

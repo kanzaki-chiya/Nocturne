@@ -35,7 +35,8 @@
 - `provider` 不依赖 `tools`、`session`、`agent`；它只看到中性的消息与工具规格数据。
 - `context` 只依赖 `protocol` 与 `provider` 的**类型**，不调用 Provider，也不执行工具。
 - 真实 I/O（文件系统、子进程、环境变量、网络之外的系统访问）集中在 `platform` 与 Provider 适配器中，业务逻辑不直接调用 `node:fs`、`node:child_process`。
-- `hooks`（实现模块）依赖 protocol、platform、diagnostics；`HookRunner` 接口定义在 `permission`（`tools` 保留类型重导出），实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
+- `hooks`（实现模块）依赖 protocol、platform、tools（`HookRunner` 接口类型）、plugins（`PluginHookSpec` 类型）与 diagnostics；`HookRunner` 接口定义在 `permission`（`tools` 保留类型重导出），实例由 `core/index` 按会话配置装配注入——`tools` 与 `agent` 只见接口，不 import 实现（见 [hooks.md](hooks.md)）。
+- `plugins`（只读插件发现与启用信任存储）依赖 protocol、platform、skills（`parseSkill`）与 config（原子写文件原语）；不依赖 agent、tools、hooks、session。由 `core/index` 装配查询、启停与会话 Hook / 技能注入。
 - `diagnostics`（调试通道）只依赖 protocol、platform；被 agent / context / tools / hooks / index 经注入使用，并经 `McpConnector` 传给 `packages/mcp`（见 [observability.md](observability.md)）。
 - `skills`（技能发现与目录构建）只依赖 protocol、platform；由 `core/index` 与 `tools` 使用，不经公开 API 导出（见 [skills.md](skills.md)）。
 - `schedule`（定时任务的计划、存储与调度循环）依赖 protocol、platform，以及 session 的锁和 config 的原子写；不依赖 agent、tools。由 `core/index` 装配，`tools` 只经注入的接口读写（见 [schedule.md](schedule.md)）。
@@ -150,10 +151,18 @@
 
 ### hooks
 
-- **负责**：`HookRunner` 的实现——按配置在固定事件点 spawn 外部命令、stdin 传 JSON、解析 stdout JSON / 退出码、超时与输出上限控制。
-- **不负责**：决定 Hook 输出如何生效（`PreToolUse`/`PostToolUse` 的效果合并在 tools 管线，`PermissionRequest` 在 gate，生命周期点在 index/agent）；信任判定（config 层按 `trust.json` 决定项目 Hook 是否进入配置）。
-- **依赖**：protocol、platform、diagnostics。**不能依赖**：agent、tools、session。
+- **负责**：`HookRunner` 的实现——按配置在固定事件点 spawn 外部命令、stdin 传 JSON、解析 stdout JSON / 退出码、超时与输出上限控制（含插件 Hook 翻译执行）。
+- **不负责**：决定 Hook 输出如何生效（`PreToolUse`/`PostToolUse` 的效果合并在 tools 管线，`PermissionRequest` 在 gate，生命周期点在 index/agent）；信任判定（config 层按 `trust.json` 决定项目 Hook 是否进入配置；plugins 层按整目录指纹决定插件 Hook 是否启用）。
+- **依赖**：protocol、platform、tools（类型）、plugins（`PluginHookSpec` 类型）、diagnostics。**不能依赖**：agent、session。
 - 详见 [hooks.md](hooks.md)。
+
+### plugins（`src/plugins/`）
+
+- **负责**：只读发现本机已安装的 Codex / Claude Code 插件（版本选择、清单查找、路径 containment、hooks/skills 翻译）、整目录 SHA-256 指纹计算（`nocturne-plugin-bundle-v1`），以及 `<NOCTURNE_HOME>/plugins.json` 的启用与信任状态读写（经 config 写入队列原子写）。
+- **不负责**：修改 `~/.codex` 或 `~/.claude`；Hook 进程执行（由 `hooks` 消费 `PluginHookSpec`）；技能目录构建（由 `core/index` 将已启用且未变化插件的技能目录传入 `skills`）；界面展示（由客户端经 RPC 调用）。
+- **公开接口**：`describePlugins`、`setPluginEnabled`、`resolvePlugins`、`resolveActivePluginSkillDirs`、`PluginHookEntry`、`PluginHookSpec`——Core 内部模块，仅由 `core/index` 装配与 `hooks`（类型）引用；客户端只见 `Runtime.describePlugins` / `setPluginEnabled` 与 `protocol` 的 `PluginOverview` / `PluginsDescription`。
+- **依赖**：protocol、platform、skills（`parseSkill`）、config（`files.ts` 原子写原语）。**不能依赖**：agent、tools、hooks、session、provider、context（由 dependency-cruiser `plugins-deps` 强制）。
+- 详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md) 与 [hooks.md](hooks.md)。
 
 ### platform
 

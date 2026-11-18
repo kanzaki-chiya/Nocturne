@@ -126,7 +126,7 @@ MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-00
 
 会话笔记（`note_write` 增删事实与压缩后补注）与合奏留言板查询（`ensemble_read` 过滤翻页与当前成员名单）见 [ADR-0095](decisions/ADR-0095-session-notes-board-read.md)。
 
-Hook 上下文注入（`SessionStart` / `UserPromptSubmit` / `SubagentStart`、`hook.context` 持久事件与 `hookContext`）及第二期插件兼容设计见 [ADR-0096](decisions/ADR-0096-hook-context-and-plugins.md)。
+Hook 上下文注入（`SessionStart` / `UserPromptSubmit` / `SubagentStart`、`hook.context` 持久事件与 `hookContext`）及第二期已装插件兼容（Core 部分）见 [ADR-0096](decisions/ADR-0096-hook-context-and-plugins.md)。
 
 ## Roadmap
 子代理档位（按任务选择执行者）见 [ADR-0058](decisions/ADR-0058-subagent-profiles.md)，主文档是 [subagent.md](architecture/subagent.md)。

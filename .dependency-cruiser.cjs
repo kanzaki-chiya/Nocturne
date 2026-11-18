@@ -189,10 +189,20 @@ module.exports = {
       name: "hooks-deps",
       severity: "error",
       comment:
-        "hooks 只能依赖 protocol、platform、tools（HookRunner 接口类型）与 diagnostics（注入）",
+        "hooks 只能依赖 protocol、platform、tools（HookRunner 接口类型）、plugins（PluginHookSpec 类型）与 diagnostics（注入）",
       from: { path: "^packages/core/src/hooks/" },
       to: {
-        path: "^packages/core/src/(?!hooks/|protocol/|platform/|tools/|diagnostics/)",
+        path: "^packages/core/src/(?!hooks/|protocol/|platform/|tools/|plugins/|diagnostics/)",
+      },
+    },
+    {
+      name: "plugins-deps",
+      severity: "error",
+      comment:
+        "plugins 只能依赖 protocol、platform、skills（parseSkill）与 config（原子写文件原语）",
+      from: { path: "^packages/core/src/plugins/" },
+      to: {
+        path: "^packages/core/src/(?!plugins/|protocol/|platform/|skills/|config/)",
       },
     },
     {

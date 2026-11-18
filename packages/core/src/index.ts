@@ -72,12 +72,19 @@ import {
 } from "./config/index.js";
 import { MODEL_ROLES } from "./config/index.js";
 import {
+  type PluginsDescription,
   type SkillImportInput,
   type SkillImportOutput,
   type SkillsDescription,
   type SkillInvocation,
   type SkillSnapshot,
 } from "./protocol/index.js";
+import {
+  describePlugins as describeInstalledPluginsOverview,
+  resolveActivePluginSkillDirs,
+  resolvePlugins,
+  setPluginEnabled as setPluginEnabledInStore,
+} from "./plugins/index.js";
 import {
   commitSkillImport,
   createSkillDiscoveryCache,
@@ -94,7 +101,7 @@ import {
 // ADR-0035 §5：编辑工具的模型默认表（config 层纯数据）注入 provider 解析
 import { defaultEditToolForModel } from "./config/edit-tool.js";
 import { createDiagnostics } from "./diagnostics/index.js";
-import { createHookRunner } from "./hooks/index.js";
+import { createHookRunner, type HookRunnerEntry } from "./hooks/index.js";
 import { appendInputHistory, readInputHistory } from "./input-history.js";
 import { createUsageStats } from "./usage/index.js";
 import type { UsageStats } from "./protocol/index.js";
@@ -424,6 +431,13 @@ export interface RuntimeOptions {
   shell?: { background: boolean } | undefined;
   /** ADR-0049：外部 agent 连接器；Core 只负责委派、权限和共享并发限制。 */
   externalAgents?: ExternalAgentConnector | undefined;
+  /** ADR-0096 第二期：注入 Codex / Claude 插件根目录（测试与嵌入方用） */
+  plugins?:
+    | {
+        codexHome?: string | undefined;
+        claudeHome?: string | undefined;
+      }
+    | undefined;
 }
 
 export interface RuntimeSubagentOptions {
@@ -762,6 +776,8 @@ export interface Runtime {
   close(): Promise<void>;
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  describePlugins(): Promise<PluginsDescription>;
+  setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   /**
    * 导入技能（skills.md 第 7 节，ADR-0048 修订 U-08）：只支持本地文件夹。
    * `mode: "preview"` 只扫描校验、不写任何东西；`mode: "commit"` 按逐项
@@ -1394,6 +1410,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   const detectedShells = await detectShells(platform);
   const skillCache = createSkillDiscoveryCache(platform);
+  const pluginDiscoveryOptions = {
+    nocturneHome,
+    ...(options.plugins?.codexHome !== undefined ? { codexHome: options.plugins.codexHome } : {}),
+    ...(options.plugins?.claudeHome !== undefined
+      ? { claudeHome: options.plugins.claudeHome }
+      : {}),
+  };
   const imageProcessor = createImageProcessor();
 
   type ShellResolution = ReturnType<ReturnType<typeof createShellResolver>["current"]>;
@@ -1565,12 +1588,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       hookPoints: Object.keys(resolved?.hooks ?? {}).length,
       warnings: resolved?.warnings.length ?? 0,
     });
-    const warnings: string[] = [...(resolved?.warnings ?? [])];
+    const pluginResolution = await resolvePlugins(platform, pluginDiscoveryOptions);
+    const warnings: string[] = [...(resolved?.warnings ?? []), ...pluginResolution.warnings];
     let skillDiscovery = await skillCache.discover({
       nocturneHome,
       workspaceRoot: meta.workspaceRoot,
       cwd: meta.cwd,
       config: config?.skillConfig(),
+      pluginSkillDirs: pluginResolution.skillDirs,
     });
     for (const warning of skillDiscovery.warnings)
       warnings.push(`${warning.path}:${warning.line}：${warning.message}`);
@@ -1585,6 +1610,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
     for (const message of warnings) {
       session.emitEphemeral("runtime.warning", { code: "config_warning", message });
+    }
+    for (const changed of pluginResolution.changedPlugins) {
+      const message = `插件 ${changed.name}@${changed.marketplace}（${changed.id}）内容已变化，已停用；请重新启用后生效`;
+      warnings.push(message);
+      session.emitEphemeral("runtime.warning", {
+        code: "plugin_changed",
+        message,
+      });
     }
     for (const providerId of resolved?.providerThinkingWarnings ?? []) {
       const message = `服务商 ${providerId}：服务商级思考档位已停用，模型能力改由上游与 models.dev 提供，个别模型可在编辑模型里修改`;
@@ -1786,8 +1819,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     // 项目层未信任时 resolved.hooks 已不含项目段（load.ts 整段忽略）。
     // 工厂形态：子会话以同一批条目换自己的 sessionId 重建，并注入
     // subagent 标记让 Hook 区分父子会话（subagent.md 第 10 节）
-    const hookEntries: Partial<Record<HookPoint, HookEntry[]>> = {};
-    for (const src of [options.hooks, resolved?.hooks]) {
+    const hookEntries: Partial<Record<HookPoint, HookRunnerEntry[]>> = {};
+    for (const src of [options.hooks, resolved?.hooks, pluginResolution.hooks]) {
       for (const [point, entries] of Object.entries(src ?? {})) {
         const key = point as HookPoint;
         hookEntries[key] = [...(hookEntries[key] ?? []), ...entries];
@@ -2135,6 +2168,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           workspaceRoot: meta.workspaceRoot,
           cwd: meta.cwd,
           config: config?.skillConfig(),
+          pluginSkillDirs: await resolveActivePluginSkillDirs(platform, pluginDiscoveryOptions),
         });
       pendingSkillRescan = false;
       pendingSkillEnable = false;
@@ -5607,6 +5641,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         workspaceRoot: root,
         cwd: root,
         config: config?.skillConfig(),
+        pluginSkillDirs: await resolveActivePluginSkillDirs(platform, pluginDiscoveryOptions),
       });
       const result = skillCatalog(
         discovery.skills,
@@ -5624,6 +5659,28 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (!config) throw new RuntimeCommandError("invalid_command", "技能开关需要配置存储");
       await config.setSkillEnabled(parsed.name, parsed.enabled);
       return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(false)) };
+    },
+    describePlugins() {
+      return describeInstalledPluginsOverview(platform, pluginDiscoveryOptions);
+    },
+    async setPluginEnabled(input) {
+      const parsed = z
+        .object({ id: z.string().min(1), enabled: z.boolean() })
+        .strict()
+        .parse(input);
+      try {
+        await setPluginEnabledInStore(platform, {
+          ...pluginDiscoveryOptions,
+          id: parsed.id,
+          enabled: parsed.enabled,
+        });
+      } catch (e) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+      return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(true)) };
     },
     async importSkills(input) {
       const base = z.object({

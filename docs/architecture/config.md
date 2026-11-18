@@ -27,7 +27,7 @@
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
 | 命令行参数 | `nctrn` 参数 | 可信 | 本次启动的显式意图，优先级最高 |
 
-机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存；另有只读的 Magpie 接入文件 `magpie.json`，由 Magpie 写）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。定时任务同样是程序维护的 `<NOCTURNE_HOME>/schedules.json` 和 `schedules/`，不参与上面的分层合并，见 [schedule.md](schedule.md)。
+机器维护的运行时数据（信任列表、项目 Grant、向导配置、MCP 与外部 agent 管理、程序设置、凭据索引、最近模型列表、models.dev 缓存、插件启用与信任状态；另有只读的 Magpie 接入文件 `magpie.json`，由 Magpie 写）不放在 `config.json` 里，而是各自独立的 JSON 文件（`trust.json`、`grants/`、`providers.json`、`mcp.json`、`external-agents.json`、`settings.json`、`credentials.json`、`recent-models.json`、`cache/models-dev.json`、`plugins.json`，见第 3、4 节与 [provider-setup.md](provider-setup.md) 第 2 节）——程序写自己的文件，不碰用户手写的配置。定时任务同样是程序维护的 `<NOCTURNE_HOME>/schedules.json` 和 `schedules/`，不参与上面的分层合并，见 [schedule.md](schedule.md)。
 
 远程登记单独保存在 `<NOCTURNE_HOME>/remote.json`，只属于用户层，不参与分层合并，项目配置不能覆盖或引用。原子写入，POSIX 权限 0600；只存中继地址、电脑 id、远程总开关 `enabled`、局域网直连开关 `lanDirect`（布尔值，缺省 `false`，见 [ADR-0087](../decisions/ADR-0087-lan-direct.md)）及首次开启后固定的监听端口 `lanPort`（`1..65535`，占用时重新分配并写回）、以及配对设备公钥，私钥存凭据后端。损坏时保留文件、按未登记并警告。精确格式与主机生命周期见 [RPC 远程主机](../protocols/rpc.md#11-远程主机)。
 
@@ -247,6 +247,25 @@ Core 公开导出 `EXTERNAL_AGENT_PRESETS` 数据表，默认全部禁用：omp 
 `Runtime.probeExternalAgent({ name } | { config })` 可测试已保存条目或草稿。只在用户点测试时解析 PATH、`initialize`、在 `<NOCTURNE_HOME>` 临时目录 `session/new`、返回 agentInfo、authMethods 与可选 configOptions，然后关闭进程；从不发送 prompt，探测结果不持久化。
 
 CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配置维护已启用列表，每次调用把配置传给 connector；管理写入或重载配置后，已打开会话在 Turn 边界重建 `task`，在途调用保留原快照。生命周期、账号费用、检查点边界与 transcript 见 [subagent.md 第 17 节](subagent.md#17-外部-agentacp)。
+
+### 插件启用与信任状态（`plugins.json`）
+
+已发现的 Codex / Claude Code 插件默认不启用，启用与整目录指纹信任记录保存在 `<NOCTURNE_HOME>/plugins.json`，形状为：
+
+```json
+{
+  "version": 1,
+  "plugins": {
+    "<host>:<name>@<marketplace>": {
+      "enabled": true,
+      "hash": "sha256:<hex>"
+    }
+  }
+}
+```
+
+- 与 `mcp.json`、`external-agents.json` 共用配置写入队列（`enqueueConfigWrite`），先写同目录临时文件再原子 `rename`；`enabled: false` 删除对应条目。
+- 文件损坏或 `version !== 1` 时整份忽略并告警；单个条目无效时仅忽略该条目并告警，不阻塞会话启动。详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)。
 
 ## 3. 项目配置的信任模型
 

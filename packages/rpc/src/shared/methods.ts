@@ -1,4 +1,5 @@
 import type {
+  PluginsDescription,
   Runtime,
   SessionSearchResult,
   SkillImportInput,
@@ -424,6 +425,14 @@ export interface RpcMethods {
   "skills.importSkills": {
     params: SkillImportInput;
     result: SkillImportOutput;
+  };
+  "plugins.describePlugins": {
+    params: Record<string, never>;
+    result: PluginsDescription;
+  };
+  "plugins.setPluginEnabled": {
+    params: { id: string; enabled: boolean };
+    result: { affectedSessions: number };
   };
   "session.describeSkills": { params: SessionParams; result: SkillsDescription };
   "session.turnChanges": { params: SessionParams; result: Ret<"turnChanges"> };
@@ -979,6 +988,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "skills.describeSkills": true,
   "skills.setSkillEnabled": true,
   "skills.importSkills": true,
+  "plugins.describePlugins": true,
+  "plugins.setPluginEnabled": true,
   "session.describeSkills": true,
   "mcp.saveMcpServer": true,
   "mcp.deleteMcpServer": true,

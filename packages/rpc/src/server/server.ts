@@ -1727,6 +1727,17 @@ class Connection implements HubPeer {
         }
         throw new InvalidParamsError("mode 必须是 preview 或 commit");
       },
+      "plugins.describePlugins": () => this.runtime().describePlugins(),
+      "plugins.setPluginEnabled": async (p) => {
+        const enabled = optBool(p, "enabled");
+        if (enabled === undefined) throw new InvalidParamsError("enabled 必须是布尔值");
+        const result = await this.runtime().setPluginEnabled({
+          id: reqString(p, "id"),
+          enabled,
+        });
+        this.hub.notifyProvidersChanged();
+        return result;
+      },
       "session.describeSkills": (p) => this.session(p).session.describeSkills(),
       "mcp.saveMcpServer": (p) =>
         this.mutateAndReload(

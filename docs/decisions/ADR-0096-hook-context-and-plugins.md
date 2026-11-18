@@ -11,7 +11,7 @@ ADR-0012 与 [hooks.md](../architecture/hooks.md) 将 Hook 定位为控制流与
 为了兼容「在会话开始、子代理启动与用户提交提示词时向模型注入规则/上下文」的工作流（并作为后续兼容 Claude Code / Codex 已安装插件的前置能力），需要分两期演进：
 
 1. **第一期（本轮实现）**：让 Hook 能够向模型上下文注入有界文本，新增 `UserPromptSubmit` 与 `SubagentStart` 事件点，扩展 `SessionStart`（携带 `source` 与压缩后重跑），并以持久事件 `hook.context` 保证重放可重现。
-2. **第二期（本轮只设计，不实现）**：只读发现用户本机已安装的 Claude Code / Codex 插件，经由受控白名单与用户显式启用后接入第一期的生命周期 Hook 与技能目录。
+2. **第二期（已实现 Core 部分；界面另轮）**：只读发现用户本机已安装的 Claude Code / Codex 插件，经由受控白名单与用户显式启用后接入第一期的生命周期 Hook 与技能目录。
 
 ---
 
@@ -78,54 +78,58 @@ ADR-0012 与 [hooks.md](../architecture/hooks.md) 将 Hook 定位为控制流与
 
 ---
 
-### 第二部分：读取已装插件（第二期设计，本轮不实现）
+### 第二部分：读取已装插件（第二期，已实现 Core 部分；界面另轮）
 
-#### 1. 发现（只读）
+> 依据说明：本部分以 `openai/codex` commit `6257fbc4bd5339144e6ffb3398a011917d883a2e` 与 Claude Code 官方文档（`plugins-reference`、`hooks`）为事实依据，并修订第一轮设计稿中的偏差项。
 
-- **Codex**：读取 `~/.codex/config.toml` 中 `[plugins."<name>@<marketplace>"] enabled = true`。插件目录位于 `~/.codex/plugins/cache/<marketplace>/<name>/<version>/`，清单为 `.codex-plugin/plugin.json`（含 `skills`、`hooks` 字段；`hooks` 缺省为 `hooks/hooks.json`；路径必须以 `./` 开头且不越出插件根目录）。
-- **Claude Code**：读取 `~/.claude/plugins/installed_plugins.json` 中的 `installPath`，结合 `~/.claude/settings.json` 中的 `enabledPlugins`；清单为 `.claude-plugin/plugin.json`。
-- **未决事项（实现前必查）**：Codex 如何从多个版本目录中选定生效版本**尚未确认**（本机 5.3.2 目录缺少 `.codex-plugin`，且同级存在 `plugin-install-*` 目录）。第二期实现前必须先查证 Codex 源码确认版本选择规则，不得自行臆定。
+#### 1. 发现（只读）与版本/清单规则
 
-#### 2. 只兼容上下文注入类生命周期事件
+- **Codex**：用 `smol-toml` 只读解析 `<codexHome>/config.toml`（默认 `CODEX_HOME` 或 `~/.codex`），仅收集 `[plugins."<name>@<marketplace>"]` 中 `enabled = true` 的条目；`name` 与 `marketplace` 禁止路径分隔符及 `.` / `..`。解析失败整份忽略并告警（不打印文件内容）。
+  - **版本选择规则**（依据 `codex-rs/core-plugin-common/src/installed.rs` `active_plugin_version`）：列出 `<codexHome>/plugins/cache/<marketplace>/<name>/` 下合法子目录（仅允许 ASCII 字母、数字、`.`、`+`、`_`、`-`，排除 `.` 与 `..`）；存在 `local` 时优先选 `local`；否则按双 SemVer 2.0 比较或字符串比较取最大值。
+  - **清单查找顺序**（依据 `codex-rs/utils/plugins/src/plugin_namespace.rs` `find_plugin_manifest_path`）：依次查找 `.codex-plugin/plugin.json`、`.claude-plugin/plugin.json`；根目录 `plugin.json`、agent-plugins 格式与 `.cursor-plugin` 不支持。
+- **Claude Code**：只读解析 `<claudeHome>/plugins/installed_plugins.json`（取 `scope === "user"` 条目的 `installPath`）与 `<claudeHome>/settings.json`（取 `enabledPlugins[id] === true`），两份文件其余字段不留存内存也不写日志；文件损坏时整份忽略并告警。默认 `claudeHome` 为 `CLAUDE_CONFIG_DIR` 或 `~/.claude`。
+  - **清单查找**：仅查找 `.claude-plugin/plugin.json`（缺失时按默认布局尝试 `hooks/hooks.json` 与 `skills/`）。
+- **插件标识**：`<host>:<name>@<marketplace>`（`host` 为 `codex` 或 `claude`）；同一插件在两边均安装时为两个独立 id，各自独立启停。
+- **路径 containment 与 hooks 来源**（依据 `codex-rs/core-plugins/src/loader.rs` `load_plugin_hooks` 与 Claude Code `plugins-reference`）：
+  - 清单内相对路径必须以 `./` 开头且解析后不越出插件根目录；
+  - 清单 `hooks` 支持字符串路径、路径数组、内联事件映射对象或混合数组；Codex 省略时读取 `hooks/hooks.json`，Claude 始终先读 `hooks/hooks.json`（若存在）再合并清单 `hooks` 字段（按规范路径去重）；
+  - 不含 `hooks` 键的 JSON 文件（如 `claude-band.json`）静默跳过，不报警告。
 
-- **兼容点位**：`SessionStart`、`UserPromptSubmit`、`SubagentStart`、`SessionEnd`。
-- **明确不支持**：插件里的 `PreToolUse`、`PermissionRequest`、`PostToolUse` 等工具级拦截/审批点位。原因是这些插件格式允许 `allow` 并按 Claude 工具名做正则匹配，接入会绕过 Nocturne 权限层与工具主体模型。
-- **避免重复注入**：Claude 格式的 `SessionStart` 只在父会话触发，子会话只走 `SubagentStart`。
+#### 2. 支持范围、跳过规则与父子会话边界
 
-#### 3. 格式翻译
+- **兼容点位**：仅接 `SessionStart`、`UserPromptSubmit`、`SubagentStart`、`SessionEnd`。
+- **跳过规则**：以下条目全部跳过并记入 `PluginOverview.unsupported`（不运行）：
+  - 其他点位（含 `PreToolUse`、`PermissionRequest`、`PostToolUse` 等工具点位）→ `"point"`；
+  - 非 `command` 类型（如 `prompt`、`agent`、`mcp_tool`）→ `"type"`；
+  - `async: true` → `"async"`；
+  - `command` 或 `args` 含 `${user_config.` → `"user_config"`。
+- **只在父会话运行**：插件的 `SessionStart` 与 `SessionEnd` 对 Codex 与 Claude 两种来源都**只在父会话运行**，子会话只跑 `SubagentStart`，避免子会话重复触发会话级规则注入。
 
-- 配置条目 `{ matcher, hooks: [{ type: "command", command, timeout }] }` 翻译为内部 `HookEntry`。
-- `command` 是 shell 字符串：Windows 上优先使用 Git Bash，没有时回退 PowerShell；其他平台使用 `sh -c`（遵循官方插件 Hook 文档约定）。
-- `${PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_ROOT}` / `${PLUGIN_DATA}` / `${CLAUDE_PLUGIN_DATA}` 在命令字符串中展开替换，同时也作为环境变量注入。
-- `timeout` 单位为秒，转换为毫秒并夹到 `60_000` 以内。
-- `matcher` 按官方文档解析：仅含字母、数字、`_`、`-`、空格、`,`、`|` 时按精确列表匹配，否则按正则匹配；`SessionStart` 匹配 `source`，`SubagentStart` 匹配 `agent_type`。
-- stdin 字段映射为宿主约定字段：`hook_event_name`、`session_id`、`cwd`、`source`、`prompt`、`agent_type`、`turn_id`（技能调用时 `prompt` 为 `/<name> <arguments>`）。
-- stdout 翻译：
-  - 纯文本 stdout 当作上下文；
-  - `hookSpecificOutput.additionalContext` 当作上下文；
-  - `decision: "block"` 加 `reason` 表示拦截；
-  - `UserPromptSubmit` 退出码 `2` 表示拦截，原因取 stderr；
-  - 其余字段忽略。
+#### 3. 格式翻译（内部扩展类型 `HookEntry & { plugin: PluginHookSpec }`）
 
-#### 4. 环境变量与数据隔离
+- **执行方式按宿主区分**：
+  - **Codex 来源**（依据 `hooks/src/engine/command_runner.rs` `build_command` 与 `discovery.rs` 约 670 行）：Windows 优先使用 `commandWindows ?? commandWindows_snake ?? command`，经 `%COMSPEC%`（`cmd /d /s /c "<command>"`，`windowsVerbatimArguments: true`）原样执行；其他平台使用 `$SHELL -lc <command>`（无 `SHELL` 时回退 `/bin/sh`）。
+  - **Claude 来源**（依据 Claude Code `hooks` 官方文档）：带 `args` 时走 exec 形式直接 spawn；否则按 `shell` 字段（缺省 `"bash"`）：Windows 优先 Git Bash（`detectShells`），找不到时回退 PowerShell；其他平台使用 `sh -c`。
+- **占位符与环境**：`${PLUGIN_ROOT}`、`${CLAUDE_PLUGIN_ROOT}`、`${PLUGIN_DATA}`、`${CLAUDE_PLUGIN_DATA}`、`${CLAUDE_PROJECT_DIR}` 在命令与参数中按纯字符串单次替换；子进程仅使用白名单环境（`envMode: "minimal"`），叠加上述 5 个环境变量与 4 个 `NOCTURNE_HOOK_*` 变量；运行前创建 `PLUGIN_DATA`（`<NOCTURNE_HOME>/plugins/data/<name>-<marketplace>`）。不读写 `~/.codex`、`~/.claude` 运行时数据目录。
+- **缺省超时与上限**（依据 `discovery.rs` `normalize_command_hook`）：单位为秒转毫秒；一般点位缺省 60 秒、上限 60 秒；`SessionEnd` 缺省 1 秒、上限 3 秒。
+- **matcher**：仅含 `[A-Za-z0-9_\- ,|]` 时按 `|` / `,` 切分为精确列表匹配，否则按正则匹配；`*`、空串或缺省匹配全部；`SessionStart` 匹配插件看到的 `source`（Nocturne 的 `fork` 映射为 `resume`），`SubagentStart` 匹配 `agent_type`，`UserPromptSubmit` 与 `SessionEnd` 忽略 matcher；正则非法时跳过该条目并告警。
+- **stdin / stdout / 退出码**：
+  - stdin 为 snake_case JSON：`hook_event_name`、`session_id`、`cwd`，`SessionStart` 带 `source`（`fork` → `resume`），`UserPromptSubmit` 带 `turn_id` 与 `prompt`（技能调用时为 `/<name>` 或 `/<name> <arguments>`，否则为用户原文），`SubagentStart` 带 `agent_type`，`SessionEnd` 带 `reason`。
+  - stdout 退出码 0：trim 后为 JSON 对象时取 `hookSpecificOutput.additionalContext`，`UserPromptSubmit` 另认顶层 `decision: "block"` 与 `reason`；非 JSON 非空文本整段作为上下文。`UserPromptSubmit` 退出码 2 表示拦截（`reason` 取 stderr）；其他非零退出按 `hook_failed` 失败降级。上下文上限沿用第一期（单条 10,000、单事件合计 30,000 字符）。
+- **条目名**：`hook.context` 条目名、warning 与诊断给用户看的标识一律为 `plugin <name>@<marketplace> <点位>`，不写展开后命令与绝对路径（诊断 `command` 字段可保留未展开的原始命令）。
 
-- 插件 Hook 仅获得白名单环境变量（与 [mcp.md](../architecture/mcp.md) 第 3 节出于同一安全原因，防止第三方插件默认读取用户 Provider 凭据），另行注入以模拟插件安装时所在宿主的约定：
-  - `PLUGIN_ROOT` / `CLAUDE_PLUGIN_ROOT`
-  - `PLUGIN_DATA` / `CLAUDE_PLUGIN_DATA`，指向 `<NOCTURNE_HOME>/plugins/data/<name>-<marketplace>`
-  - `CLAUDE_PROJECT_DIR`
-- 不读写 `~/.codex`、`~/.claude` 下的运行时数据目录。
+#### 4. 启用、整目录指纹信任与状态文件
 
-#### 5. 启用与信任
+- **状态文件**：`<NOCTURNE_HOME>/plugins.json`（形状 `{ "version": 1, "plugins": { "<id>": { "enabled": true, "hash": "sha256:…" } } }`），与 `mcp.json` 共用配置写入队列并原子写；损坏或版本不符整份忽略并告警，无效条目逐条忽略。不写入手写 `config.json`。
+- **整目录指纹**（依据 `hooks/src/engine/plugin_fingerprint.rs`）：对整个插件根目录做深度优先、按字节序排列文件名的 SHA-256 指纹，前缀改为 `nocturne-plugin-bundle-v1`（跳过 `__pycache__`、`.venv`、`*.pyc`、`*.egg-info`）；遇到符号链接或非普通文件/目录即失败且禁止启用（`setPluginEnabled` 抛错）。
+- **校验与生效时机**：已发现插件默认不启用（`state: "off"`）。每次会话打开与每次 `describePlugins` 重新计算指纹：一致为 `on`，变化或校验失败为 `changed`（不运行 Hook、不提供技能，会话打开时发一次 `runtime.warning`，code 为 `plugin_changed` 并写插件名；再次启用即重新信任）。Hook 变更对之后打开的会话生效；技能目录在空闲边界重建。
 
-- 已发现的插件在 Nocturne 中默认**不启用**，由用户在桌面端「设置 › 插件」逐个显式打开。
-- 启用时记录 Hook 定义及插件目录内被引用脚本的内容哈希；哈希变化（包括插件升级）即视为未信任，需用户重新确认后才生效。
-- 启用与信任状态存储在 `<NOCTURNE_HOME>` 下的独立文件中，不写进用户手写的 `config.json`。
+#### 5. 技能接入与 Runtime / RPC 接口
 
-#### 6. 技能接入
+- 已启用且未变化插件的技能目录（清单 `skills` 字段或默认 `skills/`）作为 `user` 来源层排在 `extraDirs` 之后，优先级最低（同名用户技能优先）；`SkillOverview.source` 新增 `"plugin"`，并新增可选字段 `plugin: "<name>@<marketplace>"`；插件变为 `changed` 时其技能立即消失。
+- `Runtime` 与 RPC 新增 `describePlugins`（`plugins.describePlugins`）与 `setPluginEnabled`（`plugins.setPluginEnabled`，响应前推 `runtime.providersChanged` 并返回 `{ affectedSessions }`）；桌面端界面在下一轮单独实现。
 
-- 已启用插件的 `skills` 目录作为新的技能发现来源层接入技能目录构建，按 [skills.md](../architecture/skills.md) 的真实路径规则去重。
-
-#### 7. 明确不做
+#### 6. 明确不做
 
 - 不支持 `commands/`（Codex `.toml` / Claude `.md` 自定义斜杠命令）；
 - 不支持 `modules` / band / statusline 等宿主界面扩展；

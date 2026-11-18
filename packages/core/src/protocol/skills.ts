@@ -13,7 +13,8 @@ export interface SkillWarning {
 export interface SkillOverview {
   name: string;
   layer: "user" | "project";
-  source: ".nocturne" | ".agents" | ".claude" | "extra";
+  source: ".nocturne" | ".agents" | ".claude" | "extra" | "plugin";
+  plugin?: string | undefined;
   entryPath: string;
   realPath: string;
   otherEntries: string[];
