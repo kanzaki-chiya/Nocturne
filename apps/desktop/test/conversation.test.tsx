@@ -3667,4 +3667,64 @@ describe("会话区提示", () => {
     expect(secondPost.querySelector(".board-post-text")?.textContent).toBe("build 已通过");
     expect(body.textContent).not.toContain("raw model content");
   });
+
+  it("运行中工具行与思考块随动效开关切换流光与转圈", async () => {
+    const motionListeners = new Set<() => void>();
+    const eventListeners = new Set<(event: RuntimeEvent) => void>();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(prefers-reduced-motion: no-preference)",
+      addEventListener: (_event: string, listener: () => void) => {
+        motionListeners.add(listener);
+      },
+      removeEventListener: (_event: string, listener: () => void) => {
+        motionListeners.delete(listener);
+      },
+    }));
+    const view = createSessionView();
+    view.entries = [
+      assistant({ reasoning: "先检查文件" }),
+      tool({ status: "running", result: undefined }),
+    ];
+    try {
+      const rendered = mount(view, {
+        subscribeEvents: (listener) => {
+          eventListeners.add(listener);
+          return () => {
+            eventListeners.delete(listener);
+          };
+        },
+      });
+      act(() => {
+        const event: RuntimeEvent = {
+          type: "message.assistant.delta",
+          sessionId: "session-1",
+          runId: "run-1",
+          eseq: 1,
+          afterSeq: 1,
+          time: new Date().toISOString(),
+          turnId: "turn-1",
+          payload: { messageId: "message-1", kind: "reasoning", delta: "先检查文件" },
+        };
+        for (const listener of eventListeners) listener(event);
+      });
+      const runningRow = rendered.container.querySelector("article.tool.running");
+      expect(runningRow).not.toBeNull();
+      expect(runningRow?.classList.contains("shim")).toBe(true);
+      expect(runningRow?.querySelector(".tool-spin")).toBeNull();
+      expect(rendered.container.querySelector(".think .shim")).not.toBeNull();
+
+      act(() => {
+        document.documentElement.dataset.reduceMotion = "";
+      });
+      await waitFor(() => {
+        const reducedRow = rendered.container.querySelector("article.tool.running");
+        expect(reducedRow?.classList.contains("shim")).toBe(false);
+        expect(reducedRow?.querySelector(".tool-spin")).not.toBeNull();
+        expect(rendered.container.querySelector(".think .shim")).toBeNull();
+      });
+    } finally {
+      delete document.documentElement.dataset.reduceMotion;
+      vi.unstubAllGlobals();
+    }
+  });
 });

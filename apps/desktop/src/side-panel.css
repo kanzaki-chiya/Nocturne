@@ -33,10 +33,10 @@
   box-shadow: var(--shadow-edge);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .sp-rail.sp-opening {
+  :root:not([data-reduce-motion]) .sp-rail.sp-opening {
     animation: sp-rail-open var(--dur-panel) var(--ease-both) both;
   }
-  .sp-rail.sp-closing {
+  :root:not([data-reduce-motion]) .sp-rail.sp-closing {
     animation: sp-rail-close var(--dur-panel) var(--ease-both) both;
   }
   @keyframes sp-rail-open {
@@ -1092,6 +1092,9 @@
     animation: none;
   }
 }
+:root[data-reduce-motion] .sp-spinner {
+  animation: none;
+}
 /* 截图占位换上之前，伸进浏览器区域的主界面浮层先透明（browser-occlusion.ts） */
 [data-nct-cover-hold] {
   opacity: 0 !important;
@@ -1154,6 +1157,9 @@
   .sp-sub-status .tool-spin {
     animation: none;
   }
+}
+:root[data-reduce-motion] .sp-sub-status .tool-spin {
+  animation: none;
 }
 .sp-sub-time {
   flex: none;
@@ -1380,6 +1386,14 @@
   50% {
     opacity: 0.3;
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-agent-dot.busy {
+    animation: none;
+  }
+}
+:root[data-reduce-motion] .sp-agent-dot.busy {
+  animation: none;
 }
 .sp-agent-browser .sp-browser-bar {
   gap: 8px;

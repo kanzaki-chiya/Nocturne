@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import {
   RpcError,
@@ -24,7 +25,8 @@ import type {
 } from "@nocturne/core/protocol";
 import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
 
-import { applyAppearance, applyContentWidth, watchTheme } from "./appearance";
+import { applyAppearance, applyContentWidth, applyReduceMotion, watchTheme } from "./appearance";
+import { runThemeTransition } from "./motion";
 import { subscribeThemeSettings } from "./theme-sync";
 import { PRESETS, type CustomTheme } from "./theme-presets";
 import { appIconResolver } from "./app-icon";
@@ -781,6 +783,10 @@ export function App({ host }: { host: DesktopHost }) {
   useLayoutEffect(() => {
     applyContentWidth(document.documentElement, p.contentWidth);
   }, [p.contentWidth]);
+
+  useLayoutEffect(() => {
+    applyReduceMotion(document.documentElement, p.reduceMotion);
+  }, [p.reduceMotion]);
 
   // 字体与字号（设置 › 外观）：覆盖根元素上的 --sans / --mono / --fs-*，立即生效
   useLayoutEffect(() => {
@@ -2189,7 +2195,11 @@ export function App({ host }: { host: DesktopHost }) {
                       }}
                       onThemeChange={(theme) => {
                         prefs.update({ theme: theme === "system" ? undefined : theme });
-                        bumpPrefs();
+                        runThemeTransition(() => {
+                          flushSync(() => {
+                            bumpPrefs();
+                          });
+                        });
                         return prefs.persistent;
                       }}
                       onWorkspaceChange={changePlainWorkspace}
@@ -2216,7 +2226,11 @@ export function App({ host }: { host: DesktopHost }) {
                             : (customThemes.find((entry) => entry.id === id) ??
                               (p.customTheme?.id === id ? p.customTheme : undefined));
                           prefs.update({ themePreset: id, customTheme: activeCustom });
-                          bumpPrefs();
+                          runThemeTransition(() => {
+                            flushSync(() => {
+                              bumpPrefs();
+                            });
+                          });
                           void pageClient?.runtime
                             .updateSettings({ "appearance.themePreset": id })
                             .catch((error: unknown) => {
@@ -2238,6 +2252,11 @@ export function App({ host }: { host: DesktopHost }) {
                         contentWidth: p.contentWidth,
                         onContentWidthChange: (width) => {
                           prefs.update({ contentWidth: width === "standard" ? undefined : width });
+                          bumpPrefs();
+                        },
+                        reduceMotion: p.reduceMotion,
+                        onReduceMotionChange: (reduce) => {
+                          prefs.update({ reduceMotion: reduce ? true : undefined });
                           bumpPrefs();
                         },
                         listFonts: host.listFonts,

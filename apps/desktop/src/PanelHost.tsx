@@ -38,6 +38,7 @@ import type { FileLinkHooks, SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
 import type { BrowserBounds, DesktopHost } from "./host";
 import { keyDiag, panelKeyReason, shouldRecordKey } from "./key-diag";
+import { motionAllowed, subscribeMotionChange } from "./motion";
 import { ConfirmDialog } from "./ProvidersPage";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
@@ -319,8 +320,7 @@ export function useSidePanel({
   const canAnimate =
     sessionId !== null &&
     !settingsOpen &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: no-preference)").matches &&
+    motionAllowed() &&
     (!nativeBrowser || (motionTab.agent === undefined && panelSnapshot?.tabId === motionTab.id));
   const previous = previousPanel.current;
   const changing =
@@ -344,15 +344,9 @@ export function useSidePanel({
     setPanelMotion({ sessionId, closing: !shown });
   }, [sessionId, settingsOpen, shown, canAnimate]);
   useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia("(prefers-reduced-motion: no-preference)");
-    const changed = () => {
+    return subscribeMotionChange(() => {
       setPanelMotion(undefined);
-    };
-    media.addEventListener("change", changed);
-    return () => {
-      media.removeEventListener("change", changed);
-    };
+    });
   }, []);
   const closing = motion?.sessionId === sessionId && motion.closing && !shown;
   const panelVisible = shown || closing;
@@ -500,8 +494,7 @@ export function useSidePanel({
           tab?.kind !== "browser" ||
           tab.agent !== undefined ||
           pool === undefined ||
-          typeof window.matchMedia !== "function" ||
-          !window.matchMedia("(prefers-reduced-motion: no-preference)").matches
+          !motionAllowed()
         ) {
           hideBrowserThen(apply);
           return;

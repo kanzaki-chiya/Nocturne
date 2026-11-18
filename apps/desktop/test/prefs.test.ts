@@ -503,4 +503,23 @@ describe("外观：字体与字号", () => {
     expect(mismatched.themePreset).toBe("workbench");
     expect(mismatched.customTheme).toBeUndefined();
   });
+
+  it("reduceMotion 只认布尔 true；其他值丢弃，关时移除字段", () => {
+    const storage = memoryStorage();
+    const store = createPrefsStore(storage);
+    expect(store.get().reduceMotion).toBeUndefined();
+    store.update({ reduceMotion: true });
+    expect(createPrefsStore(storage).get().reduceMotion).toBe(true);
+    store.update({ reduceMotion: undefined });
+    const raw = JSON.parse(storage.data.get(PREFS_KEY) ?? "{}") as Record<string, unknown>;
+    expect("reduceMotion" in raw).toBe(false);
+    expect(createPrefsStore(storage).get().reduceMotion).toBeUndefined();
+
+    for (const invalid of [false, "true", 1, null, {}]) {
+      const parsed = createPrefsStore(
+        memoryStorage({ [PREFS_KEY]: JSON.stringify({ reduceMotion: invalid }) }),
+      ).get();
+      expect(parsed.reduceMotion).toBeUndefined();
+    }
+  });
 });

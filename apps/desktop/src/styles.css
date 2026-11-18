@@ -801,6 +801,14 @@ details[open] > summary:not(.tool-line) > .fold-arrow {
     animation: none;
   }
 }
+:root[data-reduce-motion] .opening {
+  animation: none;
+  opacity: 1;
+}
+:root[data-reduce-motion] .opening .spin,
+:root[data-reduce-motion] .nav .item .row-spin {
+  animation: none;
+}
 .probe {
   border: 1px solid var(--a-border);
   border-radius: var(--radius-3);

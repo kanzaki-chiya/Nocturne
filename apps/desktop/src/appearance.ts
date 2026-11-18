@@ -136,6 +136,11 @@ export function applyContentWidth(root: HTMLElement, width: Prefs["contentWidth"
   else delete root.dataset.contentWidth;
 }
 
+export function applyReduceMotion(root: HTMLElement, reduceMotion: Prefs["reduceMotion"]): void {
+  if (reduceMotion === true) root.dataset.reduceMotion = "";
+  else delete root.dataset.reduceMotion;
+}
+
 /** 桌面端入口在首次渲染前调用：读本机 prefs，应用主题与字体；存储不可读时按缺省 */
 export function applyStoredAppearance(root: HTMLElement): void {
   let storage: Storage | undefined;
@@ -153,6 +158,7 @@ export function applyStoredAppearance(root: HTMLElement): void {
     prefs.customTheme ? [prefs.customTheme] : undefined,
   );
   applyContentWidth(root, prefs.contentWidth);
+  applyReduceMotion(root, prefs.reduceMotion);
   applyAppearance(root, prefs);
 }
 

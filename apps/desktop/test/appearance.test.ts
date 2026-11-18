@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   applyAppearance,
+  applyReduceMotion,
   applyStoredAppearance,
   baseFontStack,
   cssFontName,
@@ -40,6 +41,7 @@ afterEach(() => {
   document.getElementById("tokens")?.remove();
   root.removeAttribute("style");
   delete root.dataset.theme;
+  delete root.dataset.reduceMotion;
   localStorage.clear();
 });
 
@@ -155,5 +157,20 @@ describe("首屏应用", () => {
     } finally {
       if (original) Object.defineProperty(globalThis, "localStorage", original);
     }
+  });
+
+  it("减少动态效果：开时设置 data-reduce-motion，关时移除；首屏立即应用", () => {
+    applyReduceMotion(root, true);
+    expect(root.hasAttribute("data-reduce-motion")).toBe(true);
+    applyReduceMotion(root, undefined);
+    expect(root.hasAttribute("data-reduce-motion")).toBe(false);
+
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ reduceMotion: true }));
+    applyStoredAppearance(root);
+    expect(root.hasAttribute("data-reduce-motion")).toBe(true);
+
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ reduceMotion: false }));
+    applyStoredAppearance(root);
+    expect(root.hasAttribute("data-reduce-motion")).toBe(false);
   });
 });

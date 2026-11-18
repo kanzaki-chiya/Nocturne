@@ -85,7 +85,6 @@
   padding: 2px 2px 0;
   visibility: hidden;
   opacity: 0;
-  transition: opacity 0.12s;
 }
 .conversation .u:hover .u-actions,
 .conversation .u:focus-within .u-actions {
@@ -514,13 +513,15 @@
   background: var(--a-raised);
 }
 .conversation-markdown .file-ref-link:hover .file-ref-text {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration-color: currentColor;
 }
 .conversation-markdown .file-ref-text {
   font-family: var(--mono);
   font-size: max(var(--fs-1), 0.92em);
   overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
 }
 .conversation-markdown .file-ref-glyph {
   display: inline-block;
@@ -733,6 +734,41 @@
 @media (prefers-reduced-motion: reduce) {
   .conversation .tool-spin {
     animation: none;
+  }
+}
+:root[data-reduce-motion] .conversation .tool-spin {
+  animation: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion]) .conversation .tool.shim .tool-name,
+  :root:not([data-reduce-motion]) .conversation .tool.shim .tool-arg,
+  :root:not([data-reduce-motion]) .conversation .think .shim {
+    background: linear-gradient(
+      90deg,
+      var(--a-muted) 0 38%,
+      var(--a-text) 50%,
+      var(--a-muted) 62% 100%
+    );
+    background-size: 260% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: nct-shimmer var(--shimmer-cycle) linear infinite;
+  }
+  :root:not([data-reduce-motion]) .conversation .tool.shim .tool-arg {
+    animation-delay: calc(var(--shimmer-cycle) * 0.15);
+  }
+  :root:not([data-reduce-motion]) .conversation .tool.shim .tool-dir,
+  :root:not([data-reduce-motion]) .conversation .think .shim .muted-value {
+    color: inherit;
+  }
+  @keyframes nct-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0 0;
+    }
   }
 }
 .conversation .tool-details {
@@ -1569,10 +1605,13 @@
   color: var(--a-text);
   font: inherit;
   cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
 }
 .conversation .subagent-file:hover,
 .conversation .subagent-file:focus-visible {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 .conversation .ro-user-tag {
   flex: none;

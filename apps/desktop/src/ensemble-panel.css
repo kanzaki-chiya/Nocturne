@@ -422,8 +422,10 @@
 .ensemble-retired-toggle:hover {
   color: var(--a-text);
 }
-.ensemble-retired-toggle .fold-arrow {
-  transition: transform var(--dur) var(--ease-out);
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion]) .ensemble-retired-toggle .fold-arrow {
+    transition: transform var(--dur) var(--ease-out);
+  }
 }
 .ensemble-retired-toggle .fold-arrow.down {
   transform: rotate(90deg);

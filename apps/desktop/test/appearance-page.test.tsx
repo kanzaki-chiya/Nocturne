@@ -90,10 +90,10 @@ describe("设置 › 外观", () => {
     expect(screen.queryByText("浅色")).toBeNull();
     expect(screen.queryByText("深色")).toBeNull();
   });
-  it("从上到下是主题、字体、布局、预览；字体三行，不写多余文字", async () => {
+  it("从上到下是主题、字体、布局、动效、预览；字体三行，不写多余文字", async () => {
     render(page().element);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["主题", "字体", "布局", "预览"]);
+    expect(headings).toEqual(["主题", "字体", "布局", "动效", "预览"]);
     const fonts = group("字体");
     // 只有这些词：分组标题、三行标签、两个「默认」、字号数值
     await waitFor(() => {
@@ -223,5 +223,22 @@ describe("设置 › 外观", () => {
     expect(preview.querySelector(".conversation-code pre code")?.textContent).toContain(
       "def parse_list",
     );
+  });
+
+  it("动效组只有「减少动态效果」开关，切换时触发 onReduceMotionChange 且无多余说明文字", () => {
+    const onReduceMotionChange = vi.fn();
+    const view = render(page({ reduceMotion: undefined, onReduceMotionChange }).element);
+    const motionGroup = group("动效");
+    expect(motionGroup.textContent).toBe("动效减少动态效果");
+    const toggle = within(motionGroup).getByRole("switch", { name: "减少动态效果" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    expect(onReduceMotionChange).toHaveBeenLastCalledWith(true);
+
+    view.rerender(page({ reduceMotion: true, onReduceMotionChange }).element);
+    const checkedToggle = within(group("动效")).getByRole("switch", { name: "减少动态效果" });
+    expect(checkedToggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(checkedToggle);
+    expect(onReduceMotionChange).toHaveBeenLastCalledWith(false);
   });
 });

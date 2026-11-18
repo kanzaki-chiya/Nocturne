@@ -26,6 +26,7 @@ import "./code-colors.css";
 import { diffRows } from "./code-lines";
 import { useCodeHighlight } from "./use-code-highlight";
 import { shellResultSummary, shellResultText, shellToolStatus } from "./background-shell";
+import { useMotionAllowed } from "./motion";
 
 export function GrantedTag({
   permission,
@@ -945,6 +946,8 @@ function Think({
   now: number;
 }) {
   const scroll = useContext(ThinkScrollContext);
+  const frozen = useContext(FrozenContext);
+  const motion = useMotionAllowed();
   const [open, setOpen] = useState(false);
   const [tall, setTall] = useState(false);
   const header = useRef<HTMLButtonElement>(null);
@@ -975,9 +978,16 @@ function Think({
     part?.started === undefined
       ? 0
       : Math.max(0, Math.floor(((part.active ? now : (part.ended ?? now)) - part.started) / 1000));
+  const shimmer = !frozen && part?.active === true && motion;
   const label =
     seconds < 1 ? "思考" : part?.active === true ? `思考中 ${seconds}s` : `思考了 ${seconds}s`;
-  if (body === "") return <div className="think">{label}</div>;
+  if (body === "") {
+    return (
+      <div className="think">
+        <span className={shimmer ? "shim" : undefined}>{label}</span>
+      </div>
+    );
+  }
   const openLabel =
     seconds < 1 ? (
       "思考"
@@ -1004,7 +1014,7 @@ function Think({
           else setOpen(true);
         }}
       >
-        <span className="think-label">{open ? openLabel : label}</span>
+        <span className={`think-label${shimmer ? " shim" : ""}`}>{open ? openLabel : label}</span>
         <span className="think-tw" aria-hidden="true">
           <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " up" : ""}`} />
         </span>
@@ -2704,6 +2714,7 @@ function ToolRow({
   // 只读且日志未收束：保留 running 的事实，但不转圈、不计时
   const frozen = useContext(FrozenContext) && running;
   const animating = running && !frozen;
+  const motion = useMotionAllowed();
   const links = useContext(SubagentLinksContext);
   const subagentLink = links !== null && !preparing ? links.link(entry) : undefined;
   const result = toolResultText(entry);
@@ -2726,11 +2737,12 @@ function ToolRow({
   const diffs =
     entry.status === "ok" && shownName !== "apply_subagent_changes" ? fileDiffs(entry, cwd) : [];
   const asked = running && waiting;
+  const shimmer = !preparing && animating && !asked && !childAwaitingPermission && motion;
   const status = preparing ? (
     <span className="tool-res">{queued ? "排队中" : "接收参数中"}</span>
   ) : (
     <>
-      {animating && !asked && !childAwaitingPermission && (
+      {animating && !asked && !childAwaitingPermission && !motion && (
         <span className="tool-spin" aria-hidden="true" />
       )}
       {(subagent.model !== undefined || subagent.effort !== undefined) && (
@@ -2822,7 +2834,7 @@ function ToolRow({
   return (
     <article
       ref={rowElement}
-      className={`tool${animating ? " running" : ""}${preparing ? " preparing" : ""}${searchHit ? " search-hit" : ""}${childAwaitingPermission || selfAwaitingPermission ? " warn" : ""}`}
+      className={`tool${animating ? " running" : ""}${shimmer ? " shim" : ""}${preparing ? " preparing" : ""}${searchHit ? " search-hit" : ""}${childAwaitingPermission || selfAwaitingPermission ? " warn" : ""}`}
       data-session-seq={entry.seq}
       data-completed-seq={entry.completedSeq}
       aria-label={`工具 ${shownName || entry.callId}`}

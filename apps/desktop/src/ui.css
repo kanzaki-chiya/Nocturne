@@ -54,10 +54,6 @@
   white-space: nowrap;
   line-height: 1;
   cursor: pointer;
-  transition:
-    background var(--dur),
-    color var(--dur),
-    border-color var(--dur);
 }
 .btn:hover:not(:disabled) {
   background: var(--a-raised);
@@ -124,9 +120,6 @@
   background: transparent;
   color: var(--a-muted);
   cursor: pointer;
-  transition:
-    background var(--dur),
-    color var(--dur);
 }
 .ib:hover:not(:disabled) {
   background: var(--a-raised);
@@ -158,7 +151,6 @@
   background: var(--a-switch-off);
   position: relative;
   cursor: pointer;
-  transition: background var(--dur);
 }
 .switch::after {
   content: "";
@@ -169,9 +161,16 @@
   height: var(--switch-knob);
   border-radius: var(--radius-pill);
   background: var(--a-switch-knob);
-  transition:
-    transform var(--dur),
-    background var(--dur);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion]) .switch {
+    transition: background-color var(--dur-switch-bg) var(--ease-out);
+  }
+  :root:not([data-reduce-motion]) .switch::after {
+    transition:
+      transform var(--dur-switch) var(--ease-spring),
+      background-color var(--dur-switch-bg) var(--ease-out);
+  }
 }
 .switch[aria-checked="true"] {
   background: var(--a-accent);
@@ -681,16 +680,20 @@
   position: relative;
   isolation: isolate;
 }
-.slist-row:hover::before {
+.slist-row::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
   left: calc(0px - var(--list-row-outset));
   right: calc(0px - var(--list-row-outset));
-  background: var(--a-raised);
+  background: transparent;
   border-radius: var(--radius-2);
   z-index: -1;
+  pointer-events: none;
+}
+.slist-row:hover::before {
+  background: var(--a-raised);
 }
 .slist-main {
   flex: 1 1 auto;

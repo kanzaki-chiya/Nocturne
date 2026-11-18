@@ -2728,3 +2728,49 @@ it("桌面读取 appearance.customThemes 与 themePreset，settingsChanged 重�
     document.documentElement.removeAttribute("data-theme");
   }
 });
+
+it("外观页「减少动态效果」读写 prefs.reduceMotion 并同步 data-reduce-motion，无 startViewTransition 时直接换主题", async () => {
+  const host = replayHost();
+  localStorage.setItem("nocturne.desktop.prefs.v1", JSON.stringify({ theme: "dark" }));
+  try {
+    render(<App host={host} />);
+    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+    fireEvent.click(await screen.findByRole("button", { name: "外观" }));
+
+    const toggle = await screen.findByRole("switch", { name: "减少动态效果" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(document.documentElement.hasAttribute("data-reduce-motion")).toBe(false);
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(document.documentElement.hasAttribute("data-reduce-motion")).toBe(true);
+    });
+    expect(JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}").reduceMotion).toBe(
+      true,
+    );
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(document.documentElement.hasAttribute("data-reduce-motion")).toBe(false);
+    });
+    expect(
+      "reduceMotion" in JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}"),
+    ).toBe(false);
+
+    // jsdom 没有 startViewTransition 时切换模式与预设卡也能直接应用
+    fireEvent.click(screen.getByRole("button", { name: "月之亮面" }));
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe("light");
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "纸面" }));
+    await waitFor(() => {
+      expect(
+        JSON.parse(localStorage.getItem("nocturne.desktop.prefs.v1") ?? "{}").themePreset,
+      ).toBe("paper");
+    });
+  } finally {
+    document.documentElement.removeAttribute("style");
+    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("data-reduce-motion");
+  }
+});

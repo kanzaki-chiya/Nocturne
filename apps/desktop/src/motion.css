@@ -3,49 +3,265 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  :is(.menu, .ddm, .composer-popup, .ctxmenu):not([data-motion-entered]) {
+  :root:not([data-reduce-motion])
+    :is(.menu, .ddm, .composer-popup, .ctxmenu):not([data-motion-entered]) {
     animation: nct-enter-menu var(--dur-menu) var(--ease-out);
   }
-  :is(.menu, .ddm)[style*="bottom:"],
-  .composer-popup {
+  :root:not([data-reduce-motion]) :is(.menu, .ddm)[style*="bottom:"],
+  :root:not([data-reduce-motion]) .composer-popup {
     --motion-y: 4px;
   }
-  .ctxmenu.sub {
+  :root:not([data-reduce-motion]) .ctxmenu.sub {
     --motion-y: 0px;
     --motion-x: -4px;
   }
-  :is(.dlg, .desktop-dialog, .search-dialog, .qopen):not([data-motion-entered]) {
+  :root:not([data-reduce-motion])
+    :is(.dlg, .desktop-dialog, .search-dialog, .qopen):not([data-motion-entered]) {
     animation: nct-enter-dialog var(--dur-dialog) var(--ease-out);
   }
-  :is(.scrim, .dialog-backdrop, .search-backdrop, .qopen-backdrop):not([data-motion-entered]) {
+  :root:not([data-reduce-motion])
+    :is(.scrim, .dialog-backdrop, .search-backdrop, .qopen-backdrop):not([data-motion-entered]) {
     animation: nct-enter-backdrop var(--dur-dialog) var(--ease-out);
   }
   /* A held overlay starts only after the native webview has been replaced by its screenshot. */
-  [data-nct-cover-hold],
-  [data-nct-cover-hold] * {
+  :root:not([data-reduce-motion]) [data-nct-cover-hold],
+  :root:not([data-reduce-motion]) [data-nct-cover-hold] * {
     animation-play-state: paused !important;
   }
-  .conversation details[data-motion-fold] > summary .fold-arrow {
+  :root:not([data-reduce-motion]) .conversation details[data-motion-fold] > summary .fold-arrow {
     transition: transform var(--dur-fold) var(--ease-both);
   }
   @supports (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {
-    .conversation details::details-content {
+    :root:not([data-reduce-motion]) .conversation details::details-content {
       interpolate-size: allow-keywords;
       height: 0;
       opacity: 0;
       overflow: clip;
     }
-    .conversation details[data-motion-fold]::details-content {
+    :root:not([data-reduce-motion]) .conversation details[data-motion-fold]::details-content {
       transition:
         height var(--dur-fold) var(--ease-both),
         opacity var(--dur-fold) var(--ease-both),
         content-visibility var(--dur-fold) var(--ease-both) allow-discrete;
     }
-    .conversation details[open]::details-content {
+    :root:not([data-reduce-motion]) .conversation details[open]::details-content {
       height: auto;
       opacity: 1;
     }
   }
+  :root:not([data-reduce-motion])::view-transition-group(root),
+  :root:not([data-reduce-motion])::view-transition-old(root),
+  :root:not([data-reduce-motion])::view-transition-new(root) {
+    animation-duration: var(--dur-theme);
+    animation-timing-function: var(--ease-both);
+  }
+
+  /* 悬停 + 按下缩放（Button / IconButton / 服务商预设卡片） */
+  :root:not([data-reduce-motion]) :is(.btn, .ib, .addcard):not(:disabled, [aria-disabled="true"]) {
+    transition:
+      background-color var(--dur-hover-out) ease-out,
+      border-color var(--dur-hover-out) ease-out,
+      color var(--dur-hover-out) ease-out,
+      opacity var(--dur-hover-out) ease-out,
+      text-decoration-color var(--dur-hover-out) ease-out,
+      transform var(--dur-press) var(--ease-out);
+  }
+  :root:not([data-reduce-motion])
+    :is(.btn, .ib, .addcard):not(:disabled, [aria-disabled="true"]):hover {
+    transition-duration:
+      var(--dur-hover-in), var(--dur-hover-in), var(--dur-hover-in), var(--dur-hover-in),
+      var(--dur-hover-in), var(--dur-press);
+  }
+  :root:not([data-reduce-motion])
+    :is(.btn, .ib, .addcard):active:not(:disabled, [aria-disabled="true"]) {
+    transform: scale(0.97);
+  }
+
+  /* 主题卡片按下缩放 */
+  :root:not([data-reduce-motion]) .theme-card {
+    transition: transform var(--dur-press) var(--ease-out);
+  }
+  :root:not([data-reduce-motion]) .theme-card:active:not([aria-disabled="true"]) {
+    transform: scale(0.97);
+  }
+
+  /* 预设卡片箭头右移 2px */
+  :root:not([data-reduce-motion]) .addcard-chev {
+    transition:
+      transform var(--dur-nudge) var(--ease-out),
+      color var(--dur-hover-out) ease-out;
+  }
+  :root:not([data-reduce-motion]) .addcard:hover:not(:disabled) .addcard-chev {
+    transform: translateX(2px);
+    transition-duration: var(--dur-nudge), var(--dur-hover-in);
+  }
+
+  /* 用户消息悬停操作行（opacity + 延迟隐藏 visibility） */
+  :root:not([data-reduce-motion]) .conversation .u-actions {
+    transition:
+      opacity var(--dur-hover-out) ease-out,
+      visibility 0s linear var(--dur-hover-out);
+  }
+  :root:not([data-reduce-motion]) .conversation .u:hover .u-actions,
+  :root:not([data-reduce-motion]) .conversation .u:focus-within .u-actions {
+    transition:
+      opacity var(--dur-hover-in) ease-out,
+      visibility 0s;
+  }
+
+  /* 其余可点击元素及悬停显示元素的淡入淡出过渡 */
+  :root:not([data-reduce-motion]) .slist-row::before {
+    transition: background-color var(--dur-hover-out) ease-out;
+  }
+  :root:not([data-reduce-motion]) .slist-row:hover::before {
+    transition-duration: var(--dur-hover-in);
+  }
+  :root:not([data-reduce-motion])
+    :is(
+      .seg button:not(:disabled),
+      .phead h1 .crumb,
+      .nav-item,
+      .side .h4row .hb,
+      .snav .sback,
+      .nav .item:not([aria-disabled="true"]),
+      .gh,
+      .irow .imenu,
+      .gh .gmenu,
+      .gh .gadd,
+      .archive-open,
+      .status-branch:not(:disabled),
+      .composer .thumb2 .x,
+      .composer .chip:not(:disabled),
+      .dd:not(:disabled),
+      .conversation .u-act:not(:disabled),
+      .conversation button.u-img-frame,
+      .turn-changes-more,
+      .conversation .think-h,
+      .conversation .think-end button,
+      .conversation-markdown .file-ref-link,
+      .conversation-markdown .file-ref-link .file-ref-text,
+      .conversation .tool-details > summary.tool-line:not([aria-disabled="true"]),
+      .qcard .tab,
+      .qcard .opt,
+      .qcard .link,
+      .conversation .subagent-view:not(:disabled),
+      .conversation .subagent-file,
+      button.fcard,
+      .fcard button,
+      .ensemble-seg button,
+      .ensemble-ib,
+      .ensemble-chip,
+      .ensemble-mem,
+      .ensemble-mem-menu,
+      .ensemble-retired-toggle,
+      .grant-workspace,
+      .grant-revoke,
+      .image-viewer .iv-btn:not(:disabled),
+      .inline-page .inline-page-tool-btn:not(:disabled),
+      .inline-page .inline-page-more:not(:disabled),
+      .inline-page-fullscreen .inline-page-btn:not(:disabled),
+      .theme-link-btn:not(:disabled),
+      .theme-strip-arrow,
+      .theme-pen,
+      .theme-dlg-close:not(:disabled),
+      .icon-x:not(:disabled),
+      .computer-add:not(:disabled),
+      .search-close,
+      .search-tab,
+      .ovpop-shell-row:has(.shell-stop),
+      .sp-tab,
+      .sp-tab-close,
+      .sp-newtab,
+      .sp-tool:not(:disabled),
+      .sp-tree-dir,
+      .sp-tree-file,
+      .ovpop button,
+      .ovpop .ovpop-cancel,
+      .todo-panel-toggle,
+      .usage-model-row > *,
+      .window-controls button
+    ) {
+    transition:
+      background-color var(--dur-hover-out) ease-out,
+      border-color var(--dur-hover-out) ease-out,
+      color var(--dur-hover-out) ease-out,
+      opacity var(--dur-hover-out) ease-out,
+      text-decoration-color var(--dur-hover-out) ease-out;
+  }
+  :root:not([data-reduce-motion])
+    :is(
+      .seg button:not(:disabled):hover,
+      .phead h1 .crumb:hover,
+      .nav-item:hover,
+      .side .h4row:hover .hb,
+      .side .h4row .hb:hover,
+      .snav .sback:hover,
+      .nav .item:not([aria-disabled="true"]):hover,
+      .irow:hover .item,
+      .gh:hover,
+      .irow:hover .imenu,
+      .irow .imenu:hover,
+      .gh:hover .gmenu,
+      .gh .gmenu:hover,
+      .gh:hover .gadd,
+      .gh .gadd:hover,
+      .archive-open:hover,
+      .status-branch:not(:disabled):hover,
+      .composer .thumb2 .x:hover,
+      .composer .chip:not(:disabled):hover,
+      .dd:not(:disabled):hover,
+      .conversation .u-act:not(:disabled):hover,
+      .conversation button.u-img-frame:hover,
+      .turn-changes-more:hover,
+      .conversation .think-h:hover,
+      .conversation .think-end button:hover,
+      .conversation-markdown .file-ref-link:hover,
+      .conversation-markdown .file-ref-link:hover .file-ref-text,
+      .conversation .tool-details > summary.tool-line:not([aria-disabled="true"]):hover,
+      .qcard .tab:hover,
+      .qcard .opt:hover,
+      .qcard .link:hover,
+      .conversation .subagent-view:not(:disabled):hover,
+      .conversation .subagent-file:hover,
+      button.fcard:hover,
+      .fcard button:hover,
+      .ensemble-seg button:hover,
+      .ensemble-ib:hover,
+      .ensemble-chip:hover,
+      .ensemble-mem:hover,
+      .ensemble-mem:hover .ensemble-mem-menu,
+      .ensemble-retired-toggle:hover,
+      .grant-workspace:hover,
+      .grant-revoke:hover,
+      .image-viewer .iv-btn:not(:disabled):hover,
+      .inline-page .inline-page-tool-btn:not(:disabled):hover,
+      .inline-page .inline-page-more:not(:disabled):hover,
+      .inline-page-fullscreen .inline-page-btn:not(:disabled):hover,
+      .theme-link-btn:not(:disabled):hover,
+      .theme-strip-arrow:hover,
+      .theme-card-slot:hover .theme-pen,
+      .theme-pen:hover,
+      .theme-dlg-close:not(:disabled):hover,
+      .icon-x:not(:disabled):hover,
+      .computer-add:not(:disabled):hover,
+      .search-close:hover,
+      .search-tab:hover,
+      .ovpop-shell-row:has(.shell-stop):hover,
+      .sp-tab:hover,
+      .sp-tab-close:hover,
+      .sp-newtab:hover,
+      .sp-tool:not(:disabled):hover,
+      .sp-tree-dir:hover,
+      .sp-tree-file:hover,
+      .ovpop button:hover,
+      .ovpop .ovpop-cancel:hover,
+      .todo-panel-toggle:hover,
+      .usage-model-row:hover > *,
+      .window-controls button:hover
+    ) {
+    transition-duration: var(--dur-hover-in);
+  }
+
   @keyframes nct-enter-menu {
     from {
       opacity: 0;

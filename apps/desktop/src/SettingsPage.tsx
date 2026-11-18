@@ -94,6 +94,8 @@ export interface AppearanceControls {
     ((themes: CustomTheme[], selectedPreset: string | null) => void) | undefined;
   contentWidth?: Prefs["contentWidth"];
   onContentWidthChange?: ((width: NonNullable<Prefs["contentWidth"]>) => void) | undefined;
+  reduceMotion?: Prefs["reduceMotion"];
+  onReduceMotionChange?: ((reduce: boolean) => void) | undefined;
   /** 本机字体；没有外壳或读取失败时列表只剩「默认」 */
   listFonts?: (() => Promise<FontFamily[]>) | undefined;
   /** 写本机 prefs；返回 false 表示写不进存储（本次运行内仍生效） */
@@ -1262,6 +1264,17 @@ export function SettingsPage({
                       ]}
                       value={appearance.contentWidth ?? "standard"}
                       onChange={(width) => appearance.onContentWidthChange?.(width)}
+                    />
+                  </SettingsRow>
+                </SettingsGroup>
+                <SettingsGroup title="动效">
+                  <SettingsRow label="减少动态效果">
+                    <Switch
+                      aria-label="减少动态效果"
+                      checked={appearance.reduceMotion === true}
+                      onChange={(reduce) => {
+                        appearance.onReduceMotionChange?.(reduce);
+                      }}
                     />
                   </SettingsRow>
                 </SettingsGroup>

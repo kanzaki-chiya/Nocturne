@@ -507,6 +507,9 @@
     transition: none;
   }
 }
+:root[data-reduce-motion] .usage-chev {
+  transition: none;
+}
 .usage-detail {
   /* 表格比可视区宽时横向滚动；展开区按可视宽度贴左，不随整张表变宽 */
   position: sticky;

@@ -1,9 +1,12 @@
-import { afterEach, expect, it } from "vitest";
-import { installMotion } from "../src/motion";
+import { afterEach, expect, it, vi } from "vitest";
+import { installMotion, motionAllowed, runThemeTransition } from "../src/motion";
 
 let dispose: (() => void) | undefined;
 afterEach(() => {
   dispose?.();
+  dispose = undefined;
+  delete document.documentElement.dataset.reduceMotion;
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
 
@@ -61,4 +64,52 @@ it("clears a stale fold opt-in before a later programmatic jump, even without tr
   details.open = false;
   await Promise.resolve();
   expect(details.hasAttribute("data-motion-fold")).toBe(false);
+});
+
+it("motionAllowed: data-reduce-motion takes priority over media query", () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-reduced-motion: no-preference)",
+  }));
+  expect(motionAllowed()).toBe(true);
+  document.documentElement.dataset.reduceMotion = "";
+  expect(motionAllowed()).toBe(false);
+  delete document.documentElement.dataset.reduceMotion;
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  expect(motionAllowed()).toBe(false);
+});
+
+it("runThemeTransition applies directly without startViewTransition and uses startViewTransition when allowed", () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-reduced-motion: no-preference)",
+  }));
+  let count = 0;
+  runThemeTransition(() => {
+    count += 1;
+  });
+  expect(count).toBe(1);
+
+  const startViewTransition = vi.fn((update: () => void) => {
+    update();
+    return { ready: Promise.resolve(), finished: Promise.resolve() };
+  });
+  Object.defineProperty(document, "startViewTransition", {
+    configurable: true,
+    value: startViewTransition,
+  });
+  try {
+    runThemeTransition(() => {
+      count += 1;
+    });
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(count).toBe(2);
+
+    document.documentElement.dataset.reduceMotion = "";
+    runThemeTransition(() => {
+      count += 1;
+    });
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(count).toBe(3);
+  } finally {
+    delete (document as { startViewTransition?: unknown }).startViewTransition;
+  }
 });

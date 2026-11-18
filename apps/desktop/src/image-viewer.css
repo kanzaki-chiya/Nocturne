@@ -19,7 +19,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .image-viewer {
+  :root:not([data-reduce-motion]) .image-viewer {
     animation: nct-enter-backdrop var(--dur-dialog) var(--ease-out);
   }
 }

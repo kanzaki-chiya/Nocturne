@@ -69,6 +69,8 @@ export interface Prefs {
   customTheme?: CustomTheme | undefined;
   /** 桌面对话与输入框宽度；缺省 standard，手机不读 */
   contentWidth?: "standard" | "wide" | "full" | undefined;
+  /** 减少动态效果；缺省跟随系统（undefined），开启只存 true（只在桌面主窗口生效） */
+  reduceMotion?: true | undefined;
   /** 界面字体族名；缺省用 --sans（只在桌面端应用，手机网页不读） */
   uiFont?: string | undefined;
   /** 代码字体族名；缺省用 --mono */
@@ -227,6 +229,7 @@ function parse(raw: string | null): Prefs {
   }
   if (obj.contentWidth === "standard" || obj.contentWidth === "wide" || obj.contentWidth === "full")
     prefs.contentWidth = obj.contentWidth;
+  if (obj.reduceMotion === true) prefs.reduceMotion = true;
   if (typeof obj.uiFont === "string" && obj.uiFont.trim() !== "") prefs.uiFont = obj.uiFont;
   if (typeof obj.codeFont === "string" && obj.codeFont.trim() !== "") prefs.codeFont = obj.codeFont;
   if (isFontSize(obj.fontSize)) prefs.fontSize = obj.fontSize;
@@ -333,6 +336,7 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
         ...(prefs.themePreset !== undefined ? { themePreset: prefs.themePreset } : {}),
         ...(prefs.customTheme !== undefined ? { customTheme: { ...prefs.customTheme } } : {}),
         ...(prefs.contentWidth !== undefined ? { contentWidth: prefs.contentWidth } : {}),
+        ...(prefs.reduceMotion !== undefined ? { reduceMotion: prefs.reduceMotion } : {}),
         ...(prefs.uiFont !== undefined ? { uiFont: prefs.uiFont } : {}),
         ...(prefs.codeFont !== undefined ? { codeFont: prefs.codeFont } : {}),
         ...(prefs.fontSize !== undefined ? { fontSize: prefs.fontSize } : {}),
