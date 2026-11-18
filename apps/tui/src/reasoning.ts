@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef } from "react";
 
 import type { RuntimeSession } from "@nocturne/core";
-import type { RuntimeEvent } from "@nocturne/core/protocol";
+import { thinkingPhrase, type RuntimeEvent } from "@nocturne/core/protocol";
 
 export interface ReasoningPart {
   text: string;
@@ -113,5 +113,10 @@ export function reasoningLabel(
     part.started === undefined
       ? ""
       : ` ${Math.floor(Math.max(0, (part.ended ?? now) - part.started) / 1000)}s`;
-  return `${mark} ${part.active ? "思考中" : part.started === undefined ? "思考" : "思考了"}${seconds}${expanded ? "" : fullscreen ? "（单击或 Ctrl+O 展开）" : "（Ctrl+O 展开）"}`;
+  const label = part.active
+    ? thinkingPhrase(part.started, now)
+    : part.started === undefined
+      ? "思考"
+      : "思考了";
+  return `${mark} ${label}${seconds}${expanded ? "" : fullscreen ? "（单击或 Ctrl+O 展开）" : "（Ctrl+O 展开）"}`;
 }

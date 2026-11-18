@@ -88,6 +88,7 @@ import {
   userWorkMode,
   unwrapEnsemblePostText,
   workModeCommandName,
+  thinkingPhrase,
   type FileAttachment,
   type WorkModeName,
   type PendingPermission,
@@ -934,6 +935,65 @@ function durationText(seconds: number): string {
   return `${String(Math.floor(seconds / 60))} 分${rest > 0 ? ` ${String(rest)} 秒` : ""}`;
 }
 
+const THINK_PHRASE_FADE_MS = 200;
+
+/** 思考进行中文案切换槽：允许动效时 200ms 淡入淡出，禁用动效时直接替换。 */
+function ThinkPhrase({
+  phrase,
+  animate,
+  shimmer,
+}: {
+  phrase: string;
+  animate: boolean;
+  shimmer: boolean;
+}) {
+  const [transition, setTransition] = useState<{
+    current: string;
+    exiting?: string;
+    animated: boolean;
+  }>({ current: phrase, animated: false });
+
+  if (transition.current !== phrase) {
+    setTransition({
+      current: phrase,
+      ...(animate ? { exiting: transition.current, animated: true } : { animated: false }),
+    });
+  }
+
+  useEffect(() => {
+    if (transition.exiting === undefined) return;
+    if (!animate) {
+      setTransition((prev) =>
+        prev.exiting === undefined ? prev : { current: prev.current, animated: false },
+      );
+      return;
+    }
+    const timer = setTimeout(() => {
+      setTransition((prev) =>
+        prev.exiting === undefined ? prev : { current: prev.current, animated: false },
+      );
+    }, THINK_PHRASE_FADE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [transition.exiting, transition.current, animate]);
+
+  const inClass = `think-phrase-layer${transition.animated && animate ? " think-phrase-in" : ""}`;
+  if (transition.exiting === undefined || !animate) {
+    return <>{transition.current}</>;
+  }
+  return (
+    <span className="think-phrase-slot" aria-hidden="true">
+      <span key={`out:${transition.exiting}`} className="think-phrase-layer think-phrase-out">
+        <span className={shimmer ? "shim" : undefined}>{transition.exiting}</span>
+      </span>
+      <span key={transition.current} className={inClass}>
+        <span className={shimmer ? "shim" : undefined}>{transition.current}</span>
+      </span>
+    </span>
+  );
+}
+
 function Think({
   messageId,
   text: reasoning,
@@ -978,13 +1038,37 @@ function Think({
     part?.started === undefined
       ? 0
       : Math.max(0, Math.floor(((part.active ? now : (part.ended ?? now)) - part.started) / 1000));
-  const shimmer = !frozen && part?.active === true && motion;
+  const active = part?.active === true;
+  const shimmer = !frozen && active && motion;
+  const animatePhrase = !frozen && motion;
+  const rotating = active && seconds >= 1;
+  const phrase = rotating ? thinkingPhrase(part.started, now) : undefined;
+  const srStatus = rotating ? (
+    <span className="sr-only" aria-live="polite">
+      思考中
+    </span>
+  ) : null;
   const label =
-    seconds < 1 ? "思考" : part?.active === true ? `思考中 ${seconds}s` : `思考了 ${seconds}s`;
+    seconds < 1 ? (
+      "思考"
+    ) : phrase !== undefined ? (
+      <>
+        <ThinkPhrase phrase={phrase} animate={animatePhrase} shimmer={shimmer} />
+        {` ${seconds}s`}
+      </>
+    ) : (
+      `思考了 ${seconds}s`
+    );
   if (body === "") {
     return (
       <div className="think">
-        <span className={shimmer ? "shim" : undefined}>{label}</span>
+        {srStatus}
+        <span
+          className={`think-label${shimmer ? " shim" : ""}`}
+          aria-hidden={rotating ? true : undefined}
+        >
+          {label}
+        </span>
       </div>
     );
   }
@@ -993,7 +1077,11 @@ function Think({
       "思考"
     ) : (
       <>
-        {part?.active === true ? "思考中" : "思考"}
+        {phrase !== undefined ? (
+          <ThinkPhrase phrase={phrase} animate={animatePhrase} shimmer={shimmer} />
+        ) : (
+          "思考"
+        )}
         <span className="muted-value">{durationText(seconds)}</span>
       </>
     );
@@ -1014,7 +1102,13 @@ function Think({
           else setOpen(true);
         }}
       >
-        <span className={`think-label${shimmer ? " shim" : ""}`}>{open ? openLabel : label}</span>
+        {srStatus}
+        <span
+          className={`think-label${shimmer ? " shim" : ""}`}
+          aria-hidden={rotating ? true : undefined}
+        >
+          {open ? openLabel : label}
+        </span>
         <span className="think-tw" aria-hidden="true">
           <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " up" : ""}`} />
         </span>

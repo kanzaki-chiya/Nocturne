@@ -4,6 +4,7 @@
  */
 export * from "./types.js";
 export * from "./appearance.js";
+export * from "./thinking-phrases.js";
 export * from "./input.js";
 export * from "./mcp.js";
 export * from "./events.js";

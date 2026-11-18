@@ -386,8 +386,10 @@
   margin-bottom: 4px;
 }
 .conversation .think-h {
+  position: relative;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 6px;
   width: 100%;
   padding: 2px 0;
@@ -401,9 +403,23 @@
 .conversation .think-h:hover {
   color: var(--a-secondary);
 }
+.conversation .think-label {
+  min-width: 0;
+  white-space: nowrap;
+}
+.conversation .think-phrase-slot {
+  display: inline-grid;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+.conversation .think-phrase-layer {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
 .conversation .think-tw {
   display: inline-flex;
   align-items: center;
+  flex: none;
   color: var(--a-faint);
 }
 .conversation .think.open > .think-h {
@@ -453,6 +469,7 @@
   background: color-mix(in srgb, var(--a-accent) 10%, transparent);
 }
 .conversation div.think {
+  position: relative;
   font-size: var(--fs-1);
   color: var(--a-muted);
   padding: 2px 0;
@@ -768,6 +785,28 @@
     }
     to {
       background-position: 0 0;
+    }
+  }
+  :root:not([data-reduce-motion]) .conversation .think-phrase-in {
+    animation: nct-think-phrase-in 200ms var(--ease-both) both;
+  }
+  :root:not([data-reduce-motion]) .conversation .think-phrase-out {
+    animation: nct-think-phrase-out 200ms var(--ease-both) forwards;
+  }
+  @keyframes nct-think-phrase-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes nct-think-phrase-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
     }
   }
 }

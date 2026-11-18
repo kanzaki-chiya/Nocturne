@@ -443,3 +443,40 @@ it("速度订阅只显示本次到达的生成，最多每秒更新，切换会�
     vi.useRealTimers();
   }
 });
+
+it("状态栏 thinking 状态按时间轮换文案，离开 thinking 后重置计时", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  vi.setSystemTime(10_000);
+  try {
+    const view = createSessionView();
+    view.status = "thinking";
+    const screen = render(createElement(StatusBar, { view, width: 80, context: { used: 0 } }));
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("思考中"));
+
+    vi.advanceTimersByTime(4000);
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("推理中"));
+
+    vi.advanceTimersByTime(4000);
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("梳理思路"));
+
+    const runningView = createSessionView();
+    runningView.status = "running_tool";
+    screen.rerender(
+      createElement(StatusBar, { view: runningView, width: 80, context: { used: 0 } }),
+    );
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("工具执行中"));
+
+    const restartedView = createSessionView();
+    restartedView.status = "thinking";
+    screen.rerender(
+      createElement(StatusBar, { view: restartedView, width: 80, context: { used: 0 } }),
+    );
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("思考中"));
+
+    vi.advanceTimersByTime(4000);
+    await vi.waitFor(() => expect(screen.lastFrame()).toContain("推理中"));
+    screen.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});

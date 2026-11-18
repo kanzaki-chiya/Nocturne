@@ -21,6 +21,14 @@ body {
 .mono {
   font-family: var(--mono);
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 /* 文案规则 R1「标签 + 弱化值」：值单独成元素、弱化色，不再写中点（docs/apps/desktop.md §9） */
 .muted-value {
   color: var(--a-muted);

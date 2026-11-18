@@ -23,17 +23,17 @@ describe("思考折叠", () => {
     const parts: ReasoningMap = new Map();
     recordReasoning(parts, delta("m1", "reasoning", "一\n二"), 1000);
     expect(layoutLive(view, 80, false, parts, 13000).map((l) => l.text)).toEqual([
-      "∴ 思考中 12s（Ctrl+O 展开）",
+      "∴ 分析问题 12s（Ctrl+O 展开）",
       "一",
       "二|",
     ]);
     recordReasoning(parts, delta("m1", "reasoning", "\n三\n四\n五"), 2000);
     const full = layoutLive(view, 80, false, parts, 13000).map((l) => l.text);
     expect(full).toHaveLength(5);
-    expect(full).toEqual(["∴ 思考中 12s（Ctrl+O 展开）", "二", "三", "四", "五|"]);
+    expect(full).toEqual(["∴ 分析问题 12s（Ctrl+O 展开）", "二", "三", "四", "五|"]);
     recordReasoning(parts, delta("m1", "reasoning", "\n六"), 3000);
     expect(layoutLive(view, 80, false, parts, 13000).map((l) => l.text)).toEqual([
-      "∴ 思考中 12s（Ctrl+O 展开）",
+      "∴ 分析问题 12s（Ctrl+O 展开）",
       "三",
       "四",
       "五",
@@ -247,5 +247,18 @@ describe("思考折叠", () => {
         head: { abs: lines.length - 1, col: last.text.length },
       }),
     ).toBe("abcdefghij");
+  });
+
+  it("reasoningLabel 进行中按时间轮换文案，结束后恢复「思考了」", () => {
+    const active = { text: "思考", started: 1000, active: true };
+    expect(reasoningLabel(active, 1000, false)).toBe("∴ 思考中 0s（Ctrl+O 展开）");
+    expect(reasoningLabel(active, 5000, false)).toBe("∴ 推理中 4s（Ctrl+O 展开）");
+    expect(reasoningLabel(active, 9000, false, true)).toBe("∴ 梳理思路 8s");
+    expect(reasoningLabel({ text: "思考", active: true }, 9000, false)).toBe(
+      "∴ 思考中（Ctrl+O 展开）",
+    );
+    expect(
+      reasoningLabel({ text: "思考", started: 1000, ended: 6000, active: false }, 9000, false),
+    ).toBe("∴ 思考了 5s（Ctrl+O 展开）");
   });
 });

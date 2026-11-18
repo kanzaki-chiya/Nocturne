@@ -1955,6 +1955,141 @@ describe("Conversation 渲染与滚动", () => {
       vi.useRealTimers();
     }
   });
+
+  it("思考进行中过了 4 秒后轮换文案，秒数保留，结束后显示「思考了」", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const listeners = new Set<(event: RuntimeEvent) => void>();
+      const view = createSessionView();
+      view.entries = [assistant({ reasoning: "先检查文件" })];
+      const rendered = mount(view, {
+        subscribeEvents: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      });
+      const emit = (kind: "reasoning" | "text", delta: string) => {
+        const event: RuntimeEvent = {
+          type: "message.assistant.delta",
+          sessionId: "session-1",
+          runId: "run-1",
+          eseq: kind === "reasoning" ? 1 : 2,
+          afterSeq: 1,
+          time: new Date().toISOString(),
+          turnId: "turn-1",
+          payload: { messageId: "message-1", kind, delta },
+        };
+        for (const listener of listeners) listener(event);
+      };
+      act(() => {
+        emit("reasoning", "先检查文件");
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.getByText("思考中 1s", { selector: ".think-label" }).textContent).toBe(
+        "思考中 1s",
+      );
+      expect(rendered.container.querySelector(".think-h .sr-only")?.textContent).toBe("思考中");
+      expect(rendered.container.querySelector(".think-label")?.getAttribute("aria-hidden")).toBe(
+        "true",
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      const rotated = screen.getByText("推理中 4s", { selector: ".think-label" });
+      expect(rotated.textContent).toBe("推理中 4s");
+      expect(rendered.container.querySelector(".think-h .sr-only")?.textContent).toBe("思考中");
+
+      const button = rotated.closest("button");
+      expect(button).not.toBeNull();
+      if (button) fireEvent.click(button);
+      expect(rendered.container.querySelector(".think-label")?.textContent).toBe("推理中4 秒");
+
+      act(() => {
+        emit("text", "完成");
+      });
+      expect(rendered.container.querySelector(".think-h .sr-only")).toBeNull();
+      expect(
+        rendered.container.querySelector(".think-label")?.getAttribute("aria-hidden"),
+      ).toBeNull();
+      expect(rendered.container.querySelector(".think-label")?.textContent).toBe("思考4 秒");
+      if (button) fireEvent.click(button);
+      expect(screen.getByText("思考了 4s", { selector: ".think-label" }).textContent).toBe(
+        "思考了 4s",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("思考文案切换在允许动效时做 200ms 淡入淡出，禁用动效时直接换字", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(prefers-reduced-motion: no-preference)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    try {
+      const listeners = new Set<(event: RuntimeEvent) => void>();
+      const view = createSessionView();
+      view.entries = [assistant({ reasoning: "先检查文件" })];
+      const rendered = mount(view, {
+        subscribeEvents: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      });
+      act(() => {
+        for (const listener of listeners) {
+          listener({
+            type: "message.assistant.delta",
+            sessionId: "session-1",
+            runId: "run-1",
+            eseq: 1,
+            afterSeq: 1,
+            time: new Date().toISOString(),
+            turnId: "turn-1",
+            payload: { messageId: "message-1", kind: "reasoning", delta: "先检查文件" },
+          });
+        }
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(rendered.container.querySelector(".think-label")?.textContent).toBe("思考中 1s");
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(rendered.container.querySelector(".think-phrase-out")?.textContent).toBe("思考中");
+      expect(rendered.container.querySelector(".think-phrase-in")?.textContent).toBe("推理中");
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(rendered.container.querySelector(".think-phrase-out")).toBeNull();
+      expect(rendered.container.querySelector(".think-label")?.textContent).toBe("推理中 4s");
+
+      act(() => {
+        document.documentElement.dataset.reduceMotion = "";
+        vi.advanceTimersByTime(3800);
+      });
+      expect(rendered.container.querySelector(".think-phrase-out")).toBeNull();
+      expect(rendered.container.querySelector(".think-phrase-in")).toBeNull();
+      expect(rendered.container.querySelector(".think-label")?.textContent).toBe("梳理思路 8s");
+    } finally {
+      delete document.documentElement.dataset.reduceMotion;
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Markdown 换行", () => {

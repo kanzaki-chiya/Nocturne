@@ -5,6 +5,7 @@
  * Shift+Tab / Alt+M 只短暂高亮对应段，不往对话区插条目。
  * 缓存命中率为本会话累计值（含进行中 Turn 已完成的步骤），紧贴上下文段；宽度不够时依次去速度、用量条、目录、缓存。
  */
+import { useEffect, useReducer, useRef } from "react";
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
 
@@ -18,7 +19,12 @@ import {
 import { useTheme } from "../theme.js";
 
 import type { ModelInfo } from "@nocturne/core";
-import { sessionUsageSoFar, type RuntimeStatus, type SessionView } from "@nocturne/core/protocol";
+import {
+  sessionUsageSoFar,
+  thinkingPhrase,
+  type RuntimeStatus,
+  type SessionView,
+} from "@nocturne/core/protocol";
 
 const STATUS_TEXT: Record<RuntimeStatus, string> = {
   idle: "idle",
@@ -80,10 +86,29 @@ export function StatusBar({
   const env = useTuiEnv();
   const theme = useTheme();
   const sep = env.ascii ? " - " : " • ";
+  const thinkingStarted = useRef<number | undefined>(undefined);
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  const nowMs = Date.now();
+  if (view.status === "thinking") {
+    thinkingStarted.current ??= nowMs;
+  } else {
+    thinkingStarted.current = undefined;
+  }
+  useEffect(() => {
+    if (view.status !== "thinking") return;
+    const timer = setInterval(() => {
+      tick();
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [view.status]);
   const status =
-    view.status === "retrying" && view.retry !== undefined
-      ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts - 1}`
-      : STATUS_TEXT[view.status];
+    view.status === "thinking"
+      ? thinkingPhrase(thinkingStarted.current, nowMs)
+      : view.status === "retrying" && view.retry !== undefined
+        ? `${STATUS_TEXT.retrying} ${view.retry.attempt}/${view.retry.maxAttempts - 1}`
+        : STATUS_TEXT[view.status];
   const statusColor = view.status === "idle" ? theme.secondary : theme.warning;
   const ctx = `上下文 ${formatContextOccupancy(context.used, context.limit)}`;
 
