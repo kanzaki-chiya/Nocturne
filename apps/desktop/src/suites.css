@@ -1,0 +1,35 @@
+/* 组曲列表页（ADR-0097 §3.7）：复用 .page3 / .spage / .readable 与 .slist-row */
+
+.suites-page .suites-attn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.suites-page .suites-attn-dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  background: var(--a-warning);
+  flex: none;
+}
+
+.suites-page .dlg .db {
+  gap: var(--space-3);
+}
+
+.suites-page .dlg .textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.suites-page .dlg .ddw-lg {
+  width: 100%;
+}
+
+.suites-page .dlg .ddw-lg .dd {
+  width: 100%;
+  justify-content: space-between;
+}

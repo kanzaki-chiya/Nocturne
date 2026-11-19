@@ -18,8 +18,10 @@ import type {
   ScheduleTaskOverview,
   SessionView,
   SkillOverview,
+  SuiteRecord,
   TurnChanges,
   TurnChangeDiff,
+  UpdateSuiteInput,
   WorkModeName,
   WorkspaceBranches,
 } from "@nocturne/core/protocol";
@@ -87,6 +89,7 @@ import { AgentPairingDialog, RemotePage } from "./RemotePage";
 import { useRemoteStatus } from "./remote";
 import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
+import { SuitesPage, type SuiteWorkspaceOption } from "./SuitesPage";
 import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
 import { catchupPreface } from "./schedule-format";
 import { Button, MoonMark } from "./ui";
@@ -125,7 +128,7 @@ import {
   type SessionSummary,
   type SessionTree,
 } from "./session-tree";
-import { Sidebar, type SettingsSection } from "./Sidebar";
+import { Sidebar, type SettingsSection, type SidebarSuiteItem } from "./Sidebar";
 import { readSessionsCache, writeSessionsCache } from "./sessions-cache";
 import type { NodeProbe } from "./types";
 import { createUpdateService, describeUpdateError, type UpdateNotice } from "./updater";
@@ -398,6 +401,10 @@ export function App({ host }: { host: DesktopHost }) {
   const [page, setPage] = useState<SettingsSection | null>(null);
   /** 定时任务页盖在会话区上，左栏会话树保持显示（不同于设置区） */
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  /** 组曲列表页盖在会话区上，左栏会话树保持显示 */
+  const [suitesOpen, setSuitesOpen] = useState(false);
+  const [suites, setSuites] = useState<SuiteRecord[]>([]);
+  const [suitesVersion, setSuitesVersion] = useState(0);
   const [scheduleTasks, setScheduleTasks] = useState<ScheduleTaskOverview[]>([]);
   const [scheduleTarget, setScheduleTarget] = useState<{ id: string } | undefined>();
   const [searchOpen, setSearchOpenState] = useState(false);
@@ -458,6 +465,7 @@ export function App({ host }: { host: DesktopHost }) {
     /** 设置区当前导航；非 null 时会话区被盖住，不算「在看」任何会话 */
     page: null as SettingsSection | null,
     schedulesOpen: false,
+    suitesOpen: false,
     prefs: NOTIFY_DEFAULTS,
     /** 会话标题来源（treeSessions：会话标题 ?? 首条用户消息首行） */
     sessions: [] as SessionSummary[],
@@ -469,6 +477,7 @@ export function App({ host }: { host: DesktopHost }) {
   notifyState.current.selectedId = selectedId;
   notifyState.current.page = page;
   notifyState.current.schedulesOpen = schedulesOpen;
+  notifyState.current.suitesOpen = suitesOpen;
   /** 侧栏留痕：本次运行里「没看到」的出错 / 已完成，打开会话即清除（不持久化） */
   const [sessionMarks, setSessionMarks] = useState<Record<string, SessionMark>>({});
 
@@ -567,6 +576,7 @@ export function App({ host }: { host: DesktopHost }) {
         state.focused &&
         state.page === null &&
         !state.schedulesOpen &&
+        !state.suitesOpen &&
         state.selectedId === sessionId;
       if (live && !watching) {
         const mark = sessionMarkFor(event);
@@ -656,9 +666,25 @@ export function App({ host }: { host: DesktopHost }) {
     setPrefsVersion((v) => v + 1);
   }, []);
 
+  const refreshSuites = useCallback(
+    async (targetClient = pool.get()): Promise<SuiteRecord[]> => {
+      if (targetClient === undefined) return [];
+      try {
+        const list = await targetClient.runtime.listSuites();
+        setSuites(list);
+        setSuitesVersion((v) => v + 1);
+        return list;
+      } catch {
+        return [];
+      }
+    },
+    [pool],
+  );
+
   const refresh = useCallback(async (): Promise<SessionSummary[]> => {
     const client = pool.get();
     if (client === undefined) return [];
+    void refreshSuites(client);
     try {
       // 归档页与项目存在判定也要归档摘要；侧栏树自己剔除（ADR-0080）
       const list = await client.runtime.listSessions({
@@ -675,7 +701,7 @@ export function App({ host }: { host: DesktopHost }) {
       setStartupError({ message: errMessage(error) });
       return [];
     }
-  }, [pool, host]);
+  }, [pool, host, refreshSuites]);
 
   const connect = useCallback(async (): Promise<ConnectResult> => {
     try {
@@ -843,6 +869,7 @@ export function App({ host }: { host: DesktopHost }) {
             .catch(() => undefined);
         };
         loadSchedules();
+        void refreshSuites(client);
         const stopSchedules = client.onNotification("schedule.changed", () => {
           loadSchedules();
           void refresh();
@@ -1043,7 +1070,12 @@ export function App({ host }: { host: DesktopHost }) {
     }
     pendingSelection.current = null;
     try {
-      await conversations.open(id, workspace, force, model);
+      const suite = suites.find((item) => item.coordinatorSessionId === id);
+      if (suite !== undefined) {
+        await conversations.openSuite(suite, force, model);
+      } else {
+        await conversations.open(id, workspace, force, model);
+      }
       selectedIdRef.current = conversations.selectedId;
       setSelectedId(conversations.selectedId);
       await refresh();
@@ -1052,6 +1084,38 @@ export function App({ host }: { host: DesktopHost }) {
         setLockedSession({ id, cwd: workspace, ...(model !== undefined ? { model } : {}) });
       }
       // 其他失败：openErrors 已按错误码记录，占位区显示「换模型」卡片或错误与「重试」
+    }
+  };
+
+  const selectSuite = async (id: string, force = false, model?: ModelRef) => {
+    const client = pool.get();
+    const existing =
+      suites.find((item) => item.id === id) ??
+      (client !== undefined
+        ? (await refreshSuites(client)).find((item) => item.id === id)
+        : undefined);
+    if (existing === undefined) return;
+    setPage(null);
+    setSchedulesOpen(false);
+    setSuitesOpen(false);
+    selectedIdRef.current = existing.coordinatorSessionId;
+    setSelectedId(existing.coordinatorSessionId);
+    setPanel(null);
+    setLockedSession(null);
+    markSeen(existing.coordinatorSessionId);
+    try {
+      await conversations.openSuite(existing, force, model);
+      selectedIdRef.current = conversations.selectedId;
+      setSelectedId(conversations.selectedId);
+      await refresh();
+    } catch (error) {
+      if (error instanceof RpcError && error.code === "session_locked") {
+        setLockedSession({
+          id: existing.coordinatorSessionId,
+          cwd: existing.workspaces[0] ?? effectiveWorkspace ?? "",
+          ...(model !== undefined ? { model } : {}),
+        });
+      }
     }
   };
 
@@ -1105,6 +1169,7 @@ export function App({ host }: { host: DesktopHost }) {
     if (item.kind === "sessions" && item.sessionId !== undefined) {
       const summary = sessions.find((session) => session.id === item.sessionId);
       setSchedulesOpen(false);
+      setSuitesOpen(false);
       searchArrived.current = false;
       setSearchTarget({ sessionId: item.sessionId, seq: item.seq, nonce: Date.now() });
       void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
@@ -1113,6 +1178,7 @@ export function App({ host }: { host: DesktopHost }) {
     if (item.kind === "projects" && item.projectKey !== undefined) {
       const key = item.projectKey;
       setSchedulesOpen(false);
+      setSuitesOpen(false);
       setCollapsed((current) => {
         const next = new Set(current);
         next.delete(key);
@@ -1128,6 +1194,7 @@ export function App({ host }: { host: DesktopHost }) {
     }
     if (item.kind === "schedules" && item.scheduleId !== undefined) {
       setScheduleTarget({ id: item.scheduleId });
+      setSuitesOpen(false);
       setSchedulesOpen(true);
     }
   };
@@ -1142,6 +1209,8 @@ export function App({ host }: { host: DesktopHost }) {
         const memberName = notifyState.current.ensembleNotifyMember.get(sessionId);
         notifyState.current.ensembleNotifyMember.delete(sessionId);
         setPage(null);
+        setSchedulesOpen(false);
+        setSuitesOpen(false);
         void Promise.resolve(selectSessionRef.current?.(summary.id, summary.cwd)).then(() => {
           if (memberName === undefined) return;
           const member = conversations.opened
@@ -1434,8 +1503,10 @@ export function App({ host }: { host: DesktopHost }) {
     // 刚建好、列表还没刷新到的会话：用本地消息的首行先进侧栏。拒收撤掉本地消息后
     // 没有标题，不显示，侧栏不留空会话。
     const now = Date.now();
+    const suiteCoordinatorIds = new Set(suites.map((suite) => suite.coordinatorSessionId));
     for (const [id, entry] of conversations.opened) {
       if (known.has(id) || entry.dead === true) continue;
+      if (entry.view.suite !== undefined || suiteCoordinatorIds.has(id)) continue;
       const firstText = entry.view.title ?? outgoingTitle(entry.outgoing);
       if (firstText === undefined) continue;
       const cwd = entry.view.meta?.cwd ?? entry.workspace;
@@ -1452,7 +1523,7 @@ export function App({ host }: { host: DesktopHost }) {
       });
     }
     return merged;
-  }, [sessions, conversationVersion]);
+  }, [sessions, conversationVersion, suites]);
   const displayedSessions = listed ? treeSessions : (cachedSessions ?? treeSessions);
   const tree = useMemo(
     () =>
@@ -1490,6 +1561,38 @@ export function App({ host }: { host: DesktopHost }) {
     { path: null, label: "普通对话" },
     ...tree.projects.map((project) => ({ path: project.path, label: project.name })),
   ];
+  const suiteWorkspaces: SuiteWorkspaceOption[] = [
+    ...tree.projects.map((project) => ({ path: project.path, label: project.name })),
+    ...(effectiveWorkspace !== null &&
+    !tree.projects.some((project) => projectKey(project.path) === projectKey(effectiveWorkspace))
+      ? [{ path: effectiveWorkspace, label: "普通对话" }]
+      : []),
+  ];
+  const needsAttentionBySuite = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const suite of suites) {
+      const entry = conversations.opened.get(suite.coordinatorSessionId);
+      const count =
+        entry?.dead !== true ? (entry?.view.suite?.needsAttentionThreads.length ?? 0) : 0;
+      if (count > 0) map.set(suite.id, count);
+    }
+    return map;
+  }, [suites, conversations, conversationVersion]);
+  const sidebarSuites: SidebarSuiteItem[] = useMemo(
+    () =>
+      suites.map((suite) => ({
+        id: suite.id,
+        name: suite.name,
+        coordinatorSessionId: suite.coordinatorSessionId,
+        needsAttentionCount: needsAttentionBySuite.get(suite.id) ?? 0,
+      })),
+    [suites, needsAttentionBySuite],
+  );
+  const suiteNeedsAttentionCount = useMemo(() => {
+    let total = 0;
+    for (const count of needsAttentionBySuite.values()) total += count;
+    return total;
+  }, [needsAttentionBySuite]);
 
   // 项目手动顺序：拿到会话列表后，旧数据（无 projectOrder）按升级前「最近活动」的显示顺序
   // 初始化一次（隐藏项目也排进去，恢复时回原位）；之后每次列表变化把新出现的项目键按显示
@@ -1568,7 +1671,7 @@ export function App({ host }: { host: DesktopHost }) {
     openIds: new Set(conversations.opened.keys()),
     loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
     editors,
-    settingsOpen: page !== null || schedulesOpen,
+    settingsOpen: page !== null || schedulesOpen || suitesOpen,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
     client: panelClient,
     ensureClient: () => pool.ensure(),
@@ -1579,6 +1682,15 @@ export function App({ host }: { host: DesktopHost }) {
         ? panelShell.kind
         : undefined,
     resolveAppIcon: panelResolveAppIcon,
+    suites,
+    suitesVersion,
+    onUpdateSuite: async (input: UpdateSuiteInput) => {
+      const client = await pool.ensure();
+      const updated = await client.runtime.updateSuite(input);
+      await refreshSuites(client);
+      return updated;
+    },
+    openDirectory: (path) => host.revealItem(path),
   });
   panelRef.current = sidePanel;
   // 有活着的 agent 标签的会话不随空闲关闭；标签都关了再按原规则关
@@ -1784,6 +1896,7 @@ export function App({ host }: { host: DesktopHost }) {
     if (summary === undefined) return;
     setPage(null);
     setSchedulesOpen(false);
+    setSuitesOpen(false);
     void selectSession(summary.id, summary.cwd);
   };
 
@@ -1837,12 +1950,24 @@ export function App({ host }: { host: DesktopHost }) {
           collapsed={collapsed}
           enabledScheduleCount={enabledScheduleCount}
           schedulesOpen={schedulesOpen}
+          suites={sidebarSuites}
+          suiteNeedsAttentionCount={suiteNeedsAttentionCount}
+          suitesOpen={suitesOpen}
           onSearch={() => {
             setSearchOpen(true);
           }}
           onOpenSchedules={() => {
             setPage(null);
+            setSuitesOpen(false);
             setSchedulesOpen(true);
+          }}
+          onOpenSuites={() => {
+            setPage(null);
+            setSchedulesOpen(false);
+            setSuitesOpen(true);
+          }}
+          onSelectSuite={(id) => {
+            void selectSuite(id);
           }}
           onExpandScheduled={() => {
             setScheduledLimit((n) => n + EXPAND_STEP);
@@ -1855,6 +1980,7 @@ export function App({ host }: { host: DesktopHost }) {
             if (summary !== undefined) {
               setPage(null);
               setSchedulesOpen(false);
+              setSuitesOpen(false);
               void selectSession(summary.id, summary.cwd);
             }
           }}
@@ -1933,11 +2059,13 @@ export function App({ host }: { host: DesktopHost }) {
           onNewSession={(workspace) => {
             setPage(null);
             setSchedulesOpen(false);
+            setSuitesOpen(false);
             void newSession(workspace);
           }}
           page={page}
           onOpenPage={(target) => {
             setSchedulesOpen(false);
+            setSuitesOpen(false);
             setPage(target);
           }}
           onLeaveSettings={() => {
@@ -2040,6 +2168,24 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                   onChanged={() => {
                     void refresh();
+                  }}
+                />
+              </PaneErrorBoundary>
+            </div>
+          )}
+          {suitesOpen && page === null && (
+            <div className="settings-over">
+              <PaneErrorBoundary key="suites">
+                <SuitesPage
+                  client={pageClient}
+                  workspaces={suiteWorkspaces}
+                  version={suitesVersion}
+                  needsAttentionBySuite={needsAttentionBySuite}
+                  onOpenSuite={(id) => {
+                    void selectSuite(id);
+                  }}
+                  onChanged={() => {
+                    void refreshSuites();
                   }}
                 />
               </PaneErrorBoundary>
@@ -2313,8 +2459,8 @@ export function App({ host }: { host: DesktopHost }) {
           </SettingsDeck>
           <div
             className="mainpane"
-            inert={page !== null || schedulesOpen}
-            aria-hidden={page !== null || schedulesOpen ? true : undefined}
+            inert={page !== null || schedulesOpen || suitesOpen}
+            aria-hidden={page !== null || schedulesOpen || suitesOpen ? true : undefined}
           >
             {active !== undefined && selectedOpenError === undefined ? (
               <PaneErrorBoundary key={active.session.id}>
@@ -2398,6 +2544,14 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                   onManageSkills={() => {
                     setPage("skills");
+                  }}
+                  suiteRecord={suites.find(
+                    (item) =>
+                      item.id === active.view.suite?.suiteId ||
+                      item.coordinatorSessionId === active.session.id,
+                  )}
+                  onOpenSuiteThread={(thread) => {
+                    sidePanel.openSuiteThread(thread);
                   }}
                   onShellKindChange={onShellKindChange}
                 />
@@ -2759,6 +2913,9 @@ interface SessionPaneProps {
   providersVersion: number;
   scheduleSource?: ConversationProps["scheduleSource"];
   searchTarget?: { sessionId: string; seq?: number | undefined; nonce: number } | undefined;
+  suiteRecord?: SuiteRecord | undefined;
+  onOpenSuiteThread?:
+    ((thread: { threadId: string; childSessionId: string; title: string }) => void) | undefined;
   onShellKindChange?: ((sessionId: string, kind: string | undefined) => void) | undefined;
 }
 
@@ -2826,6 +2983,8 @@ function SessionPane({
   onStopComputer,
   scheduleSource,
   searchTarget,
+  suiteRecord,
+  onOpenSuiteThread,
   onShellKindChange,
 }: SessionPaneProps) {
   const runtime = client.runtime;
@@ -2886,7 +3045,7 @@ function SessionPane({
   return (
     <>
       <ConversationHeader
-        title={view.title ?? selected?.firstText ?? "新会话"}
+        title={suiteRecord?.name ?? view.title ?? selected?.firstText ?? "新会话"}
         workspace={workspace}
         branch={
           <BranchMenu
@@ -2914,7 +3073,7 @@ function SessionPane({
         scheduleSource={scheduleSource}
         searchTarget={searchTarget}
         onResubmit={onResubmit}
-        onFork={onFork}
+        onFork={view.suite !== undefined ? undefined : onFork}
         onApprovePlan={onApprovePlan}
         turnChanges={turnChanges}
         onRewindFiles={onRewindFiles}
@@ -2923,6 +3082,20 @@ function SessionPane({
         subagentLinks={subagentLinks}
         fileLinks={fileLinks}
         resolveAppIcon={resolveAppIcon}
+        onOpenSuiteThread={
+          view.suite !== undefined && onOpenSuiteThread !== undefined
+            ? (threadId) => {
+                const thread = view.suite?.threads.find((item) => item.threadId === threadId);
+                if (thread !== undefined) {
+                  onOpenSuiteThread({
+                    threadId: thread.threadId,
+                    childSessionId: thread.childSessionId,
+                    title: thread.title,
+                  });
+                }
+              }
+            : undefined
+        }
         localEntries={localTurnEntries(outgoing, (key, data, mimeType) => {
           images.preview(key, data, mimeType);
         })}

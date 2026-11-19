@@ -29,6 +29,13 @@ export type SettingsSection =
   | "usage"
   | "logs";
 
+export interface SidebarSuiteItem {
+  id: string;
+  name: string;
+  coordinatorSessionId: string;
+  needsAttentionCount: number;
+}
+
 export interface SidebarProps {
   tree: SessionTree;
   pinnedIds: ReadonlySet<string>;
@@ -39,6 +46,14 @@ export interface SidebarProps {
   /** 主区正在显示定时任务页 */
   schedulesOpen?: boolean;
   onOpenSchedules?: () => void;
+  /** 未归档的组曲列表 */
+  suites?: readonly SidebarSuiteItem[] | undefined;
+  /** 等你处理的组曲线程总数；为 0 或未读到时不显示 */
+  suiteNeedsAttentionCount?: number | undefined;
+  /** 主区正在显示组曲列表页 */
+  suitesOpen?: boolean;
+  onOpenSuites?: () => void;
+  onSelectSuite?: (id: string) => void;
   onSearch?: () => void;
   onExpandScheduled?: () => void;
   onCollapseScheduled?: () => void;
@@ -756,6 +771,20 @@ export function Sidebar(props: SidebarProps) {
             <span className="meta">{props.enabledScheduleCount}</span>
           )}
         </button>
+        <button
+          type="button"
+          className={`item${props.suitesOpen === true ? " on" : ""}`}
+          aria-current={props.suitesOpen === true ? "page" : undefined}
+          onClick={() => {
+            props.onOpenSuites?.();
+          }}
+        >
+          <Icon name="layout" size={ICON_MD} className="glyph" />
+          <span className="t">组曲</span>
+          {props.suiteNeedsAttentionCount !== undefined && props.suiteNeedsAttentionCount > 0 && (
+            <span className="meta">{props.suiteNeedsAttentionCount}</span>
+          )}
+        </button>
       </nav>
       <div className="tree">
         {props.tree.pinned.length > 0 && (
@@ -763,6 +792,39 @@ export function Sidebar(props: SidebarProps) {
             <h4>置顶</h4>
             <nav className="nav">
               {props.tree.pinned.map((row) => renderRow(row, "pinned", row))}
+            </nav>
+          </>
+        )}
+        {props.suites !== undefined && props.suites.length > 0 && (
+          <>
+            <h4>组曲</h4>
+            <nav className="nav" aria-label="组曲">
+              {props.suites.map((suite) => {
+                const active =
+                  props.suitesOpen !== true &&
+                  props.schedulesOpen !== true &&
+                  props.selectedId === suite.coordinatorSessionId;
+                return (
+                  <button
+                    key={suite.id}
+                    type="button"
+                    className={`item${active ? " on" : ""}`}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => {
+                      props.onSelectSuite?.(suite.id);
+                    }}
+                  >
+                    <Icon name="layout" size={ICON_MD} className="glyph" />
+                    <span className="t">{suite.name}</span>
+                    {suite.needsAttentionCount > 0 && (
+                      <span className="meta suite-attn-meta">
+                        <span className="suite-attn-dot" aria-hidden="true" />
+                        {suite.needsAttentionCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </nav>
           </>
         )}

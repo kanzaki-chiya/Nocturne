@@ -249,6 +249,18 @@ button {
   color: var(--a-faint);
   flex: none;
 }
+.nav .item .meta.suite-attn-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.nav .item .suite-attn-dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  background: var(--a-warning);
+  flex: none;
+}
 .nav .item.on {
   background: var(--a-sel);
   color: var(--a-text);

@@ -1771,3 +1771,87 @@ button.fcard:hover {
   font: var(--fs-1)/var(--lh-code) var(--mono);
   color: var(--a-secondary);
 }
+
+/* ── 组曲（ADR-0097 §3.4）：线程汇报行 ── */
+
+.conversation .suite-report-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--ctl-h-lg);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--a-secondary);
+  font: inherit;
+  font-size: var(--fs-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation .suite-report-row:hover {
+  background: var(--a-sel);
+}
+
+.conversation .suite-report-row.search-hit {
+  outline: 2px solid var(--a-accent-border);
+  outline-offset: 1px;
+}
+
+.conversation .suite-report-title {
+  flex: none;
+  font-weight: var(--fw-medium);
+  color: var(--a-text);
+  white-space: nowrap;
+}
+
+.conversation .suite-report-line {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation .suite-report-arrow {
+  flex: none;
+  color: var(--a-muted);
+}
+
+.conversation .suite-report-row .suite-dot {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  background: var(--a-border-strong);
+}
+
+.conversation .suite-report-row .suite-dot.work {
+  background: var(--a-accent);
+  /* stylelint-disable-next-line function-disallowed-list -- 运行中线程用 22% --a-accent 光圈 */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 22%, transparent);
+}
+
+.conversation .suite-report-row .suite-dot.ask {
+  background: var(--a-warning);
+  /* stylelint-disable-next-line function-disallowed-list -- 等待确认的线程用 25% --a-warning 光圈 */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-warning) 25%, transparent);
+}
+
+.conversation .suite-report-row .suite-dot.pause {
+  background: var(--a-warning);
+}
+
+.conversation .suite-report-row .suite-dot.merge {
+  background: var(--a-accentAlt);
+}
+
+.conversation .suite-report-row .suite-dot.ok {
+  background: var(--a-success);
+}
+
+.conversation .suite-report-row .suite-dot.retired {
+  background: var(--a-faint);
+}

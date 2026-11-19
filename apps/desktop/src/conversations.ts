@@ -6,6 +6,7 @@ import {
   type RewindMode,
   type RuntimeEvent,
   type SessionView,
+  type SuiteRecord,
   type TurnChanges,
   type TurnChangeDiff,
   type WorkModeName,
@@ -421,6 +422,34 @@ export class Conversations {
    * 交给 resumeSession，由 Core 先写 config_changed 再开放（sessions.md 4.2）。
    */
   open(id: string, workspace: string, force = false, model?: ModelRef | string): Promise<void> {
+    return this.openWith(id, workspace, model, (client) =>
+      client.runtime.resumeSession(id, {
+        force,
+        ...(model !== undefined ? { model } : {}),
+      }),
+    );
+  }
+
+  /**
+   * 选中并打开组曲指挥会话（ADR-0097 §3.6）：经 `openSuite` 唤起指挥会话后按
+   * 普通会话路径接入视图与事件流。
+   */
+  openSuite(suite: SuiteRecord, force = false, model?: ModelRef | string): Promise<void> {
+    const workspace = suite.workspaces[0] ?? this.plainWorkspace() ?? "";
+    return this.openWith(suite.coordinatorSessionId, workspace, model, (client) =>
+      client.runtime.openSuite(suite.id, {
+        force,
+        ...(model !== undefined ? { model } : {}),
+      }),
+    );
+  }
+
+  private openWith(
+    id: string,
+    workspace: string,
+    model: ModelRef | string | undefined,
+    doOpen: (client: RpcClient) => Promise<{ session: RpcSession; opened: SessionOpened }>,
+  ): Promise<void> {
     const token = ++this.openToken;
     const previous = this.selected;
     this.selectedId = id;
@@ -443,13 +472,11 @@ export class Conversations {
           const continuity =
             dead !== undefined ? { view: dead.view, afterSeq: dead.view.lastSeq } : undefined;
           const client = await this.pool.ensure();
+          const opened = await doOpen(client);
           entry = await this.attach(
             client,
-            target,
-            await client.runtime.resumeSession(id, {
-              force,
-              ...(model !== undefined ? { model } : {}),
-            }),
+            dead?.workspace ?? (opened.opened.meta.workspaceRoot || target),
+            opened,
             continuity,
           );
         }
@@ -985,6 +1012,10 @@ export class Conversations {
       // ADR-0089：活动 Ensemble 的指挥不随切走关掉，否则成员会话与整个 Ensemble 一起被收掉；
       // 结束（status === "ended"）后照常按空闲规则关闭
       entry.view.ensemble?.status === "active" ||
+      (entry.view.suite?.threads.some(
+        (t) => t.status === "working" || t.pendingPermissions.length > 0 || t.hasPendingQuestion,
+      ) ??
+        false) ||
       this.opened.get(entry.session.id) !== entry
     )
       return;

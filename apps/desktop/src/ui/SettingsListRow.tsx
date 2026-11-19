@@ -11,6 +11,7 @@ export interface SettingsListRowProps {
   descriptionMono?: boolean | undefined;
   disabled?: boolean | undefined;
   onOpen: () => void;
+  onContextMenu?: ((event: MouseEvent<HTMLDivElement>) => void) | undefined;
   title?: string | undefined;
   className?: string | undefined;
 }
@@ -28,6 +29,7 @@ export function SettingsListRow({
   descriptionMono = false,
   disabled = false,
   onOpen,
+  onContextMenu,
   title,
   className,
 }: SettingsListRowProps) {
@@ -41,7 +43,7 @@ export function SettingsListRow({
     onOpen();
   };
   return (
-    <div className={classes} title={title} onClick={handleRowClick}>
+    <div className={classes} title={title} onClick={handleRowClick} onContextMenu={onContextMenu}>
       <button type="button" className="slist-main" onClick={onOpen}>
         <span className="slist-top">
           <span className={mono ? "slist-name mono" : "slist-name"}>{name}</span>

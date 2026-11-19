@@ -20,7 +20,9 @@ import type {
   BackgroundShellTask,
   LocalFileContent,
   SubagentSummary,
+  SuiteRecord,
   TurnChangeDiff,
+  UpdateSuiteInput,
 } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
@@ -146,6 +148,13 @@ export interface SidePanelController {
     member: { name: string; childSessionId: string },
     targetSessionId?: string,
   ) => void;
+  /** 打开或切换到当前会话的组曲标签 */
+  openSuite: () => void;
+  /** 打开或切换到指定会话（缺省当前会话）里某条组曲线程的会话标签 */
+  openSuiteThread: (
+    thread: { threadId: string; childSessionId: string; title: string },
+    targetSessionId?: string,
+  ) => void;
   /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
   subagentLinks: SubagentLinks | undefined;
   bodyClass: string;
@@ -178,6 +187,10 @@ export function useSidePanel({
   fileLinks,
   shellKind,
   resolveAppIcon,
+  suites,
+  suitesVersion,
+  onUpdateSuite,
+  openDirectory,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
@@ -206,6 +219,10 @@ export function useSidePanel({
   fileLinks?: FileLinkHooks | undefined;
   shellKind?: string | undefined;
   resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
+  suites?: readonly SuiteRecord[] | undefined;
+  suitesVersion?: number | undefined;
+  onUpdateSuite?: ((input: UpdateSuiteInput) => Promise<SuiteRecord>) | undefined;
+  openDirectory?: ((path: string) => Promise<void>) | undefined;
 }): SidePanelController {
   const [width, setWidth] = useState(() => prefs.get().panelWidth ?? PANEL_DEFAULT_WIDTH);
   const [overview, setOverview] = useState(() => prefs.get().overviewOpen === true);
@@ -923,6 +940,57 @@ export function useSidePanel({
     },
     [sessionId, hideBrowserThen, update, panelFor],
   );
+  const openSuite = useCallback(() => {
+    hideBrowserThen(() => {
+      update((panel) => {
+        const found = panel.tabs.find((tab) => tab.kind === "suite");
+        if (found) return { ...panel, open: true, activeId: found.id };
+        return withTab(panel, { id: newTabId(), kind: "suite" });
+      });
+    });
+  }, [hideBrowserThen, update]);
+  const openSuiteThread = useCallback(
+    (
+      thread: { threadId: string; childSessionId: string; title: string },
+      targetSessionId?: string,
+    ) => {
+      const target = targetSessionId ?? sessionId;
+      if (target === null) return;
+      const applyTo = (panel: SessionPanel): SessionPanel => {
+        const found = panel.tabs.find(
+          (tab) => tab.kind === "suite_thread" && tab.childSessionId === thread.childSessionId,
+        );
+        if (found) return { ...panel, open: true, activeId: found.id };
+        return withTab(panel, {
+          id: newTabId(),
+          kind: "suite_thread",
+          threadId: thread.threadId,
+          childSessionId: thread.childSessionId,
+          title: thread.title,
+        });
+      };
+      if (target === sessionId) {
+        hideBrowserThen(() => {
+          update(applyTo);
+        });
+      } else {
+        setPanels((map) => new Map(map).set(target, applyTo(panelFor(target, map))));
+      }
+    },
+    [sessionId, hideBrowserThen, update, panelFor],
+  );
+  const autoOpenedSuites = useRef(new Set<string>());
+  const activeSuiteId = active?.view.suite?.suiteId;
+  useEffect(() => {
+    if (sessionId === null || activeSuiteId === undefined) return;
+    if (autoOpenedSuites.current.has(sessionId)) return;
+    autoOpenedSuites.current.add(sessionId);
+    update((panel) => {
+      const found = panel.tabs.find((tab) => tab.kind === "suite");
+      if (found) return panel;
+      return withTab(panel, { id: newTabId(), kind: "suite" });
+    });
+  }, [sessionId, activeSuiteId, update]);
   const openSubagentById = useCallback(
     (childSessionId: string) => {
       const summary = directory.summaries.find((s) => s.childSessionId === childSessionId);
@@ -1529,6 +1597,39 @@ export function useSidePanel({
             }
           : undefined
       }
+      suite={
+        active?.view.suite !== undefined
+          ? {
+              suiteId: active.view.suite.suiteId,
+              suiteRecord: suites?.find(
+                (item) =>
+                  item.id === active.view.suite?.suiteId ||
+                  item.coordinatorSessionId === active.session.id,
+              ),
+              suiteView: active.view.suite,
+              session: active.session,
+              client,
+              version: suitesVersion,
+              ensureClient,
+              images: imageSource,
+              prefs,
+              pickImages: () => host.pickImages(),
+              fileLinks,
+              openUrl: (url) => {
+                if (!openUrl(url)) void host.openUrl(url);
+              },
+              openDirectory,
+              onOpenThread: (thread) => {
+                openSuiteThread({
+                  threadId: thread.threadId,
+                  childSessionId: thread.childSessionId,
+                  title: thread.title,
+                });
+              },
+              onUpdateSuite,
+            }
+          : undefined
+      }
       subagents={
         sessionId === null
           ? undefined
@@ -1674,6 +1775,8 @@ export function useSidePanel({
     viewChanges: openChanges,
     openEnsemble,
     openEnsembleMember,
+    openSuite,
+    openSuiteThread,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewVisible && !shown ? " ov-open" : "",

@@ -27,7 +27,7 @@ import "./pages.css";
 import "./mcp.css";
 import "./memory.css";
 
-const MEMORY_TYPE_LABEL: Record<MemoryType, string> = {
+export const MEMORY_TYPE_LABEL: Record<MemoryType, string> = {
   user: "用户",
   feedback: "反馈",
   project: "项目",
@@ -39,13 +39,13 @@ interface SelectedMemory {
   name: string;
 }
 
-function memoryFilePath(dir: string, name: string): string {
+export function memoryFilePath(dir: string, name: string): string {
   const trimmed = dir.replace(/[\\/]+$/, "");
   const sep = dir.includes("\\") ? "\\" : "/";
   return `${trimmed}${sep}${name}.md`;
 }
 
-function formatUpdatedAt(iso: string): string {
+export function formatUpdatedAt(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString("zh-CN", { hour12: false });
@@ -276,58 +276,21 @@ export function MemoryPage({
       <div className="spage">
         <div className="readable">
           {inDetail ? (
-            <>
-              <PageHeader
-                title={<span className="memory-detail-title">{selected.name}</span>}
-                crumb={{
-                  parent: "记忆",
-                  onBack: leaveDetail,
-                }}
-                actions={
-                  <>
-                    <IconButton
-                      aria-label="在资源管理器中打开"
-                      title="在资源管理器中打开"
-                      onClick={() => void attempt(() => openDirectory(selectedOverview.dir))}
-                    >
-                      <Icon name="folder" size={ICON_MD} />
-                    </IconButton>
-                    <Button
-                      variant="danger"
-                      disabled={busy || !client}
-                      onClick={() => {
-                        setConfirmDelete(true);
-                      }}
-                    >
-                      删除
-                    </Button>
-                  </>
-                }
-              />
-              {error && (
-                <div className="errt" role="alert">
-                  {error}
-                </div>
-              )}
-              <div className="sbody">
-                <SettingsGroup title="概况" plain>
-                  <SettingsRow label="类型">
-                    {MEMORY_TYPE_LABEL[detail?.type ?? selectedMeta.type]}
-                  </SettingsRow>
-                  <SettingsRow label="位置">
-                    <code>{memoryFilePath(selectedOverview.dir, selected.name)}</code>
-                  </SettingsRow>
-                  <SettingsRow label="更新时间">
-                    {formatUpdatedAt(detail?.updatedAt ?? selectedMeta.updatedAt)}
-                  </SettingsRow>
-                </SettingsGroup>
-                {detail !== undefined && (
-                  <div className="memory-content">
-                    <Markdown text={detail.content} openUrl={openUrl} />
-                  </div>
-                )}
-              </div>
-            </>
+            <MemoryEntryDetail
+              name={selected.name}
+              dir={selectedOverview.dir}
+              meta={selectedMeta}
+              detail={detail}
+              busy={busy}
+              disableDelete={busy || !client}
+              error={error}
+              onBack={leaveDetail}
+              onOpenDirectory={(dir) => void attempt(() => openDirectory(dir))}
+              onRequestDelete={() => {
+                setConfirmDelete(true);
+              }}
+              openUrl={openUrl}
+            />
           ) : (
             <>
               <PageHeader title="记忆" />
@@ -454,38 +417,16 @@ export function MemoryPage({
         </div>
       )}
       {confirmDelete && selected !== undefined && (
-        <Scrim
+        <MemoryDeleteDialog
+          name={selected.name}
+          busy={busy}
           onClose={() => {
             if (!busy) setConfirmDelete(false);
           }}
-        >
-          <div className="dlg narrow" role="dialog" aria-label={`删除 ${selected.name}？`}>
-            <div className="dh3">
-              <b>删除 {selected.name}？</b>
-            </div>
-            <div className="df">
-              <span className="sp" />
-              <Button
-                autoFocus
-                disabled={busy}
-                onClick={() => {
-                  setConfirmDelete(false);
-                }}
-              >
-                取消
-              </Button>
-              <Button
-                variant="danger-solid"
-                disabled={busy}
-                onClick={() => {
-                  void confirmDeleteMemory();
-                }}
-              >
-                删除
-              </Button>
-            </div>
-          </div>
-        </Scrim>
+          onConfirm={() => {
+            void confirmDeleteMemory();
+          }}
+        />
       )}
       {confirmClear !== undefined && (
         <Scrim
@@ -561,12 +502,9 @@ function MemoryScopeGroup({
       }
     >
       {overview.entries.map((entry) => (
-        <SettingsListRow
+        <MemoryEntryRow
           key={`${scope}-${entry.name}`}
-          name={entry.name}
-          mono
-          description={entry.description}
-          status={MEMORY_TYPE_LABEL[entry.type]}
+          entry={entry}
           disabled={!overview.enabled}
           onOpen={() => {
             onOpenEntry(entry);
@@ -578,7 +516,135 @@ function MemoryScopeGroup({
   );
 }
 
-function MemoryWarnings({ warnings }: { warnings: readonly string[] }) {
+export function MemoryEntryRow({
+  entry,
+  disabled = false,
+  onOpen,
+}: {
+  entry: MemoryEntryMeta;
+  disabled?: boolean | undefined;
+  onOpen: () => void;
+}) {
+  return (
+    <SettingsListRow
+      name={entry.name}
+      mono
+      description={entry.description}
+      status={MEMORY_TYPE_LABEL[entry.type]}
+      disabled={disabled}
+      onOpen={onOpen}
+    />
+  );
+}
+
+export function MemoryEntryDetail({
+  name,
+  dir,
+  meta,
+  detail,
+  disableDelete,
+  error,
+  onBack,
+  onOpenDirectory,
+  onRequestDelete,
+  openUrl,
+}: {
+  name: string;
+  dir: string;
+  meta: MemoryEntryMeta;
+  detail: MemoryEntry | undefined;
+  busy?: boolean | undefined;
+  disableDelete?: boolean | undefined;
+  error?: string | undefined;
+  onBack: () => void;
+  onOpenDirectory?: ((path: string) => void) | undefined;
+  onRequestDelete: () => void;
+  openUrl: (url: string) => void;
+}) {
+  return (
+    <>
+      <PageHeader
+        title={<span className="memory-detail-title">{name}</span>}
+        crumb={{
+          parent: "记忆",
+          onBack,
+        }}
+        actions={
+          <>
+            {onOpenDirectory !== undefined && (
+              <IconButton
+                aria-label="在资源管理器中打开"
+                title="在资源管理器中打开"
+                onClick={() => {
+                  onOpenDirectory(dir);
+                }}
+              >
+                <Icon name="folder" size={ICON_MD} />
+              </IconButton>
+            )}
+            <Button variant="danger" disabled={disableDelete} onClick={onRequestDelete}>
+              删除
+            </Button>
+          </>
+        }
+      />
+      {error !== undefined && error !== "" && (
+        <div className="errt" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="sbody">
+        <SettingsGroup title="概况" plain>
+          <SettingsRow label="类型">{MEMORY_TYPE_LABEL[detail?.type ?? meta.type]}</SettingsRow>
+          <SettingsRow label="位置">
+            <code>{memoryFilePath(dir, name)}</code>
+          </SettingsRow>
+          <SettingsRow label="更新时间">
+            {formatUpdatedAt(detail?.updatedAt ?? meta.updatedAt)}
+          </SettingsRow>
+        </SettingsGroup>
+        {detail !== undefined && (
+          <div className="memory-content">
+            <Markdown text={detail.content} openUrl={openUrl} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function MemoryDeleteDialog({
+  name,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  name: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Scrim onClose={onClose}>
+      <div className="dlg narrow" role="dialog" aria-label={`删除 ${name}？`}>
+        <div className="dh3">
+          <b>删除 {name}？</b>
+        </div>
+        <div className="df">
+          <span className="sp" />
+          <Button autoFocus disabled={busy} onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="danger-solid" disabled={busy} onClick={onConfirm}>
+            删除
+          </Button>
+        </div>
+      </div>
+    </Scrim>
+  );
+}
+
+export function MemoryWarnings({ warnings }: { warnings: readonly string[] }) {
   return warnings.length ? (
     <details className="memory-warnings">
       <summary>

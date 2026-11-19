@@ -21,7 +21,7 @@ import type {
   SubagentSummary,
   ToolEntry,
 } from "@nocturne/core/protocol";
-import type { RpcClient } from "@nocturne/rpc/client";
+import type { RpcClient, RpcSession } from "@nocturne/rpc/client";
 import { RpcError } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
@@ -64,11 +64,18 @@ import type {
   BackgroundShellTask,
   EnsembleMemberView,
   EnsembleView,
+  SuiteRecord,
+  SuiteThreadView,
+  SuiteView,
+  UpdateSuiteInput,
 } from "@nocturne/core/protocol";
 import type { SubagentWatcher } from "./subagent-watch";
 import { EnsemblePane, type EnsembleSession } from "./EnsemblePane";
 import { EnsembleMemberPane } from "./EnsembleMemberPane";
 import { ensembleStatusDot } from "./ensemble-ui";
+import { SuitePane } from "./SuitePane";
+import { SuiteThreadPane } from "./SuiteThreadPane";
+import { suiteStatusDot } from "./suite-ui";
 import { TerminalPane, type TerminalShellChoice } from "./TerminalPane";
 import { Badge, Button, ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
 import "./side-panel.css";
@@ -174,8 +181,28 @@ export interface SidePanelProps {
     { session?: ShellSession | undefined; tasks: readonly BackgroundShellTask[] } | undefined;
   /** Ensemble 面板标签的数据与动作 */
   ensemble?: PanelEnsemble | undefined;
+  /** 组曲面板标签的数据与动作 */
+  suite?: PanelSuite | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
   agents?: PanelAgents | undefined;
+}
+
+export interface PanelSuite {
+  suiteId: string;
+  suiteRecord: SuiteRecord | undefined;
+  suiteView: SuiteView | undefined;
+  session: Pick<RpcSession, "resolveThread" | "sendToThread"> | undefined;
+  client: RpcClient | undefined;
+  version?: number | undefined;
+  ensureClient?: (() => Promise<RpcClient>) | undefined;
+  images?: AttachmentImageSource | undefined;
+  prefs?: PrefsStore | undefined;
+  pickImages?: DesktopHost["pickImages"] | undefined;
+  fileLinks?: FileLinkHooks | undefined;
+  openUrl: (url: string) => void;
+  openDirectory?: ((path: string) => Promise<void>) | undefined;
+  onOpenThread: (thread: SuiteThreadView) => void;
+  onUpdateSuite?: ((input: UpdateSuiteInput) => Promise<SuiteRecord>) | undefined;
 }
 
 export interface PanelEnsemble {
@@ -211,7 +238,8 @@ const AGENT_TAB_STATE: Record<AgentTabInfo["state"], string> = {
 function Glyph({
   kind,
 }: {
-  kind: "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent" | "ensemble";
+  kind:
+    "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent" | "ensemble" | "suite";
 }) {
   const names: Record<typeof kind, IconName> = {
     changes: "git_commit",
@@ -220,6 +248,7 @@ function Glyph({
     globe: "earth",
     agent: "robot",
     ensemble: "group",
+    suite: "layout",
     plus: "add",
     close: "close",
   };
@@ -231,6 +260,7 @@ function Glyph({
 function tabTitle(
   tab: PanelTab,
   ensembleTitle?: string,
+  suiteThreads?: readonly SuiteThreadView[],
 ): { name: string; project?: string; title: string } {
   if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
@@ -240,6 +270,14 @@ function tabTitle(
   }
   if (tab.kind === "ensemble_member") {
     const name = `@${tab.memberName}`;
+    return { name, title: name };
+  }
+  if (tab.kind === "suite") {
+    return { name: "组曲", title: "组曲" };
+  }
+  if (tab.kind === "suite_thread") {
+    const liveTitle = suiteThreads?.find((t) => t.threadId === tab.threadId)?.title;
+    const name = liveTitle !== undefined && liveTitle !== "" ? liveTitle : tab.title;
     return { name, title: name };
   }
   if (tab.kind === "terminal") return { name: "终端", project: tab.label, title: tab.cwd };
@@ -323,10 +361,19 @@ function TabBar(props: SidePanelProps) {
     <div className="sp-tabbar">
       <div className="sp-tabs" role="tablist" aria-label="面板标签" ref={bar}>
         {tabs.map((tab) => {
-          const { name, project, title } = tabTitle(tab, props.ensemble?.ensemble?.title);
+          const { name, project, title } = tabTitle(
+            tab,
+            props.ensemble?.ensemble?.title,
+            props.suite?.suiteView?.threads,
+          );
           const active = tab.id === activeId;
           const ensembleDot =
             tab.kind === "ensemble" ? ensembleStatusDot(props.ensemble?.ensemble) : undefined;
+          const suiteDot =
+            tab.kind === "suite" ? suiteStatusDot(props.suite?.suiteView) : undefined;
+          const suiteThreadWarn =
+            tab.kind === "suite_thread" &&
+            (props.suite?.suiteView?.needsAttentionThreads.includes(tab.threadId) ?? false);
           const subagentWarn =
             tab.kind === "subagent" &&
             (props.subagents?.pendingPermissions?.some(
@@ -337,7 +384,7 @@ function TabBar(props: SidePanelProps) {
             <div
               key={tab.id}
               data-tab-id={tab.id}
-              className={`sp-tab${active ? " on" : ""}${subagentWarn ? " warn" : ""}${tab.kind === "browser" && tab.agent !== undefined ? " agent" : ""}${tab.kind === "browser" && tab.agent?.state === "busy" ? " busy" : ""}${dragging === tab.id ? " dragging" : ""}`}
+              className={`sp-tab${active ? " on" : ""}${subagentWarn || suiteThreadWarn ? " warn" : ""}${tab.kind === "browser" && tab.agent !== undefined ? " agent" : ""}${tab.kind === "browser" && tab.agent?.state === "busy" ? " busy" : ""}${dragging === tab.id ? " dragging" : ""}`}
               role="tab"
               aria-selected={active}
               tabIndex={active ? 0 : -1}
@@ -386,6 +433,12 @@ function TabBar(props: SidePanelProps) {
                 ) : (
                   <Glyph kind="ensemble" />
                 )
+              ) : tab.kind === "suite" ? (
+                suiteDot !== undefined ? (
+                  <span className={`sp-ensemble-dot ${suiteDot}`} aria-hidden="true" />
+                ) : (
+                  <Glyph kind="suite" />
+                )
               ) : tab.kind === "browser" && tab.agent !== undefined ? (
                 <Glyph kind="agent" />
               ) : tab.kind === "browser" && props.browsers !== undefined ? (
@@ -395,7 +448,9 @@ function TabBar(props: SidePanelProps) {
                   kind={
                     tab.kind === "new" || tab.kind === "browser"
                       ? "globe"
-                      : tab.kind === "subagent" || tab.kind === "ensemble_member"
+                      : tab.kind === "subagent" ||
+                          tab.kind === "ensemble_member" ||
+                          tab.kind === "suite_thread"
                         ? "agent"
                         : tab.kind === "shell"
                           ? "terminal"
@@ -1474,6 +1529,43 @@ export function SidePanel(props: SidePanelProps) {
                     session={props.shells?.session}
                     visible={!hidden && tab.id === activeId && current.has(tab.id)}
                   />
+                ) : tab.kind === "suite" ? (
+                  props.suite?.session !== undefined && props.suite.onUpdateSuite !== undefined ? (
+                    <SuitePane
+                      suiteId={props.suite.suiteId}
+                      suiteRecord={props.suite.suiteRecord}
+                      suiteView={props.suite.suiteView}
+                      session={props.suite.session}
+                      client={props.suite.client}
+                      openUrl={props.suite.openUrl}
+                      openDirectory={props.suite.openDirectory}
+                      onOpenThread={props.suite.onOpenThread}
+                      onUpdateSuite={props.suite.onUpdateSuite}
+                      version={props.suite.version}
+                    />
+                  ) : (
+                    <div className="suite-pane" />
+                  )
+                ) : tab.kind === "suite_thread" ? (
+                  props.suite?.ensureClient !== undefined &&
+                  props.suite.session !== undefined &&
+                  props.suite.images !== undefined &&
+                  props.suite.pickImages !== undefined ? (
+                    <SuiteThreadPane
+                      threadId={tab.threadId}
+                      childSessionId={tab.childSessionId}
+                      coordinatorSession={props.suite.session}
+                      workspace={props.workspace ?? ""}
+                      ensureClient={props.suite.ensureClient}
+                      images={props.suite.images}
+                      openUrl={props.suite.openUrl}
+                      fileLinks={props.suite.fileLinks}
+                      prefs={props.suite.prefs}
+                      pickImages={props.suite.pickImages}
+                    />
+                  ) : (
+                    <div className="sp-ensemble-member" />
+                  )
                 ) : tab.kind === "ensemble" ? (
                   props.ensemble?.ensemble !== undefined && props.ensemble.session !== undefined ? (
                     <EnsemblePane

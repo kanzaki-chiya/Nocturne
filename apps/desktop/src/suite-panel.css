@@ -1,0 +1,202 @@
+/* 组曲右侧面板「组曲」标签（ADR-0097 §3.7）：总览、记忆、说明 */
+
+.suite-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  color: var(--a-text);
+  font-size: var(--fs-2);
+}
+
+.suite-subbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--a-border);
+}
+
+.suite-error {
+  flex: none;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--a-border);
+  font-size: var(--fs-1);
+  color: var(--a-error);
+}
+
+.suite-overview {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1) 0 var(--space-3);
+  display: flex;
+  flex-direction: column;
+}
+
+.suite-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.suite-group-head,
+.suite-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--ctl-h-lg);
+  padding: 0 var(--space-4);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-medium);
+  color: var(--a-muted);
+  letter-spacing: 0.02em;
+}
+
+.suite-group-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suite-group-toggle:hover {
+  color: var(--a-text);
+}
+
+.suite-group-count {
+  font-family: var(--mono);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.suite-group-toggle .fold-arrow {
+  margin-left: auto;
+}
+
+.suite-thread-row {
+  display: grid;
+  grid-template-columns: var(--dot) 1fr auto;
+  column-gap: var(--space-2);
+  row-gap: var(--space-0-5);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suite-thread-row:hover,
+.suite-thread-row.hot {
+  background: var(--a-sel);
+}
+
+.suite-thread-title {
+  font-weight: var(--fw-medium);
+  color: var(--a-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.suite-thread-row.dim .suite-thread-title {
+  color: var(--a-secondary);
+  font-weight: var(--fw-regular);
+}
+
+.suite-thread-model {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+  white-space: nowrap;
+}
+
+.suite-thread-sub {
+  grid-column: 2 / 4;
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.suite-thread-sub.warn {
+  color: var(--a-warning);
+}
+
+.suite-dot.merge {
+  background: var(--a-accentAlt);
+}
+
+.suite-dot.ok {
+  background: var(--a-success);
+}
+
+/* ── 记忆标签（复用 MemoryPage 行样式与弹窗） ── */
+.suite-memory.page3 {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+}
+
+.suite-memory.page3 .phead {
+  padding-top: var(--space-1);
+}
+
+.suite-memory .empty {
+  padding-top: var(--space-4);
+}
+
+/* ── 说明标签 ── */
+.suite-doc {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.suite-doc-input {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-bg);
+  color: var(--a-text);
+  font-family: var(--mono);
+  font-size: var(--fs-2);
+  line-height: var(--lh-code);
+  padding: var(--space-3);
+  outline: none;
+}
+
+.suite-doc-input:focus-visible {
+  border-color: var(--a-accent-border);
+}
+
+.suite-doc-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.suite-doc-error {
+  font-size: var(--fs-1);
+  color: var(--a-error);
+}

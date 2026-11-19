@@ -112,6 +112,25 @@ export interface EnsembleMemberTab {
   memberName: string;
 }
 
+/**
+ * 组曲面板标签（ADR-0097 §3.7）：每个组曲指挥会话最多一个；本机偏好里只存「有这个标签」。
+ */
+export interface SuiteTab {
+  id: string;
+  kind: "suite";
+}
+
+/**
+ * 组曲线程会话标签（ADR-0097 §3.7）：每条线程最多一个标签，经 `session.open` 打开 `childSessionId`。
+ */
+export interface SuiteThreadTab {
+  id: string;
+  kind: "suite_thread";
+  threadId: string;
+  childSessionId: string;
+  title: string;
+}
+
 export type PanelTab =
   | NewTab
   | ChangesTab
@@ -121,14 +140,18 @@ export type PanelTab =
   | SubagentTab
   | ShellTab
   | EnsembleTab
-  | EnsembleMemberTab;
+  | EnsembleMemberTab
+  | SuiteTab
+  | SuiteThreadTab;
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」（新标签页、终端不恢复） */
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
   | { id: string; kind: "ensemble" }
   | { id: string; kind: "ensemble_member"; childSessionId: string; memberName: string }
+  | { id: string; kind: "suite" }
+  | { id: string; kind: "suite_thread"; threadId: string; childSessionId: string; title: string }
   | {
       id: string;
       kind: "subagent";
@@ -337,9 +360,11 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const ids = new Set<string>();
   const subagentChildren = new Set<string>();
   const ensembleMembers = new Set<string>();
+  const suiteThreads = new Set<string>();
   const shellTasks = new Set<string>();
   let changes = false;
   let ensemble = false;
+  let suite = false;
   for (const item of value) {
     if (typeof item !== "object" || item === null) continue;
     const raw = item as Record<string, unknown>;
@@ -352,6 +377,26 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       ensemble = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "ensemble" });
+    } else if (raw.kind === "suite" && !suite) {
+      suite = true;
+      ids.add(raw.id);
+      tabs.push({ id: raw.id, kind: "suite" });
+    } else if (
+      raw.kind === "suite_thread" &&
+      str(raw.threadId) &&
+      str(raw.childSessionId) &&
+      str(raw.title) &&
+      !suiteThreads.has(raw.childSessionId)
+    ) {
+      suiteThreads.add(raw.childSessionId);
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "suite_thread",
+        threadId: raw.threadId,
+        childSessionId: raw.childSessionId,
+        title: raw.title,
+      });
     } else if (
       raw.kind === "ensemble_member" &&
       str(raw.childSessionId) &&
@@ -429,6 +474,18 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
   return tabs.flatMap((tab): StoredPanelTab[] => {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
     if (tab.kind === "ensemble") return [{ id: tab.id, kind: "ensemble" }];
+    if (tab.kind === "suite") return [{ id: tab.id, kind: "suite" }];
+    if (tab.kind === "suite_thread") {
+      return [
+        {
+          id: tab.id,
+          kind: "suite_thread",
+          threadId: tab.threadId,
+          childSessionId: tab.childSessionId,
+          title: tab.title,
+        },
+      ];
+    }
     if (tab.kind === "ensemble_member") {
       return [
         {

@@ -104,6 +104,7 @@ import {
   type RuntimeEvent,
   type SessionView,
   type EnsembleView,
+  type SuiteView,
   type ToolEntry,
   type TurnEndReason,
   type UserEntry,
@@ -133,6 +134,7 @@ import {
   ensembleToolSummary,
   splitEnsembleMentions,
 } from "./ensemble-ui";
+import { parseSuiteThreadReport, suiteReportDotTone } from "./suite-ui";
 import { mcpToolLabel, noteItemsFromEntry, noteWriteSummary, toolMeta } from "./tool-meta";
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
@@ -253,6 +255,8 @@ export interface ConversationProps {
   saveFile?: SaveFileFn | undefined;
   /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：指挥会话默认「指挥」，成员会话传 `@name` */
   ensembleRecipientLabel?: string | undefined;
+  /** 点击组曲汇报行在右侧面板打开对应线程 */
+  onOpenSuiteThread?: ((threadId: string) => void) | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -3194,6 +3198,8 @@ function EntryView({
   userRole,
   scheduleSource,
   ensembleRecipientLabel,
+  viewSuite,
+  onOpenSuiteThread,
 }: {
   entry: ViewEntry;
   searchHit?: boolean;
@@ -3221,11 +3227,36 @@ function EntryView({
   userRole?: "task" | "nudge" | undefined;
   scheduleSource?: ConversationProps["scheduleSource"];
   ensembleRecipientLabel?: string | undefined;
+  viewSuite?: SuiteView | undefined;
+  onOpenSuiteThread?: ((threadId: string) => void) | undefined;
 }) {
   const subagentLinks = useContext(SubagentLinksContext);
   const backgroundView = useContext(BackgroundViewContext);
   switch (entry.kind) {
     case "user":
+      if (entry.suiteReport !== undefined) {
+        const report = entry.suiteReport;
+        const parsed = parseSuiteThreadReport(userText(entry));
+        const thread = viewSuite?.threads.find((item) => item.threadId === report.threadId);
+        const title = thread?.title ?? parsed?.title ?? report.threadId;
+        const line = parsed?.line ?? thread?.lastReportLine ?? "";
+        const dotTone = suiteReportDotTone(report.status, thread);
+        return (
+          <button
+            type="button"
+            className={`suite-report-row${searchHit ? " search-hit" : ""}`}
+            data-session-seq={entry.seq}
+            onClick={() => {
+              onOpenSuiteThread?.(report.threadId);
+            }}
+          >
+            <span className={`ensemble-dot suite-dot ${dotTone}`} aria-hidden="true" />
+            <span className="suite-report-title">{title}</span>
+            <span className="suite-report-line">{line}</span>
+            <Icon name="right_small" size={ICON_SM} className="suite-report-arrow" />
+          </button>
+        );
+      }
       if (entry.ensemble !== undefined) {
         const author = ensembleAuthorLabel(entry.ensemble.from, entry.ensemble.fromKind);
         const recipient = ensembleRecipientLabel ?? "指挥";
@@ -4441,6 +4472,7 @@ function ConversationContent({
   resolveAppIcon,
   localEntries = [],
   entryKey,
+  onOpenSuiteThread,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -4720,6 +4752,8 @@ function ConversationContent({
                               : undefined
                           }
                           ensembleRecipientLabel={ensembleRecipientLabel}
+                          viewSuite={view.suite}
+                          onOpenSuiteThread={onOpenSuiteThread}
                           onResubmit={onResubmit}
                           onFork={onFork}
                           fileLinks={fileLinks}

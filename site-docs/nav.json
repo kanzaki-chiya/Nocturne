@@ -24,6 +24,7 @@
     "pages": [
       { "slug": "mcp", "title": "MCP" },
       { "slug": "memory", "title": "记忆" },
+      { "slug": "suites", "title": "组曲" },
       { "slug": "skills", "title": "技能" },
       { "slug": "plugins", "title": "插件" },
       { "slug": "subagents", "title": "子代理" },

@@ -105,6 +105,70 @@ describe("Sidebar", () => {
     expect(onOpenSchedules).toHaveBeenCalledOnce();
   });
 
+  it("定时任务下方是组曲入口，组曲分组位于置顶之后对话之前", () => {
+    const onOpenSuites = vi.fn();
+    const onSelectSuite = vi.fn();
+    const tree: SessionTree = {
+      ...emptyTree,
+      pinned: [
+        {
+          id: "p1",
+          title: "置顶会话",
+          project: "对话",
+          meta: "现在",
+          locked: false,
+          status: "idle",
+        },
+      ],
+      chats: {
+        rows: [{ id: "c1", title: "普通对话", meta: "现在", locked: false, status: "idle" }],
+        moreCount: 0,
+      },
+    };
+    const { container } = render(
+      <Sidebar
+        {...props({
+          tree,
+          suites: [
+            {
+              id: "suite-1",
+              name: "插件兼容",
+              coordinatorSessionId: "coord-1",
+              needsAttentionCount: 2,
+            },
+          ],
+          suiteNeedsAttentionCount: 2,
+          suitesOpen: false,
+          selectedId: "coord-1",
+          onOpenSuites,
+          onSelectSuite,
+        })}
+      />,
+    );
+
+    const topButtons = [...container.querySelectorAll(".side > .nav .item")];
+    const topLabels = topButtons.map((b) => b.textContent ?? "");
+    const scheduleAt = topLabels.findIndex((label) => label.includes("定时任务"));
+    const suitesAt = topLabels.findIndex((label) => label.includes("组曲"));
+    expect(scheduleAt).toBeGreaterThanOrEqual(0);
+    expect(suitesAt).toBe(scheduleAt + 1);
+    const suitesEntry = topButtons[suitesAt] as HTMLElement;
+    expect(suitesEntry.querySelector(".meta")?.textContent).toBe("2");
+    fireEvent.click(suitesEntry);
+    expect(onOpenSuites).toHaveBeenCalledOnce();
+
+    const headings = [...container.querySelectorAll(".tree h4")].map((h) => h.textContent?.trim());
+    expect(headings.indexOf("置顶")).toBeLessThan(headings.indexOf("组曲"));
+    expect(headings.indexOf("组曲")).toBeLessThan(headings.indexOf("对话"));
+
+    const suiteGroup = screen.getByRole("navigation", { name: "组曲" });
+    const suiteBtn = within(suiteGroup).getByRole("button", { name: /插件兼容/ });
+    expect(suiteBtn.classList.contains("on")).toBe(true);
+    expect(suiteBtn.textContent).toContain("2");
+    fireEvent.click(suiteBtn);
+    expect(onSelectSuite).toHaveBeenCalledWith("suite-1");
+  });
+
   it("有定时任务会话时渲染独立分组，不和对话混在一起", () => {
     const tree: SessionTree = {
       ...emptyTree,
