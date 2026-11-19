@@ -2090,6 +2090,28 @@ describe("Conversation 渲染与滚动", () => {
       vi.useRealTimers();
     }
   });
+
+  it("思考文案切换动画先出后进：前 100ms 淡出，后 100ms 淡入且延迟期不可见", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(join(here, "..", "src", "conversation.css"), "utf8");
+    const rule = (selector: string) => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      return new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+    };
+    expect(rule(".conversation .think-phrase-slot")).toMatch(/display:\s*inline-grid/);
+    expect(rule(".conversation .think-phrase-layer")).toMatch(/grid-area:\s*1\s*\/\s*1/);
+    expect(rule(":root:not([data-reduce-motion]) .conversation .think-phrase-out")).toMatch(
+      /animation:\s*nct-think-phrase-out\s+100ms\s+var\(--ease-both\)\s+forwards/,
+    );
+    expect(rule(":root:not([data-reduce-motion]) .conversation .think-phrase-in")).toMatch(
+      /animation:\s*nct-think-phrase-in\s+100ms\s+var\(--ease-both\)\s+100ms\s+both/,
+    );
+    const parentReset = rule(
+      ":root:not([data-reduce-motion]) .conversation .think .think-label.shim:has(.think-phrase-slot)",
+    );
+    expect(parentReset).toMatch(/background-clip:\s*border-box/);
+    expect(parentReset).toMatch(/color:\s*inherit/);
+  });
 });
 
 describe("Markdown 换行", () => {
