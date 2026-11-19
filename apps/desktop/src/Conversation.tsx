@@ -2,6 +2,7 @@ import {
   createContext,
   Fragment,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -146,6 +147,14 @@ import { ShellToolOutput } from "./ShellPane";
 import type { ShellSession } from "./use-shell-output";
 import { useCopyText } from "./useCopyText";
 import { KeyHint } from "./KeyHint";
+import {
+  buildVirtualOffsets,
+  buildVirtualSegments,
+  computeVirtualRange,
+  DEFAULT_VIEWPORT_HEIGHT,
+  isPinnedInlineHtmlEntry,
+  type VirtualRange,
+} from "./virtual-stream";
 import "./conversation.css";
 
 export { toolMeta };
@@ -257,6 +266,8 @@ export interface ConversationProps {
   ensembleRecipientLabel?: string | undefined;
   /** 点击组曲汇报行在右侧面板打开对应线程 */
   onOpenSuiteThread?: ((threadId: string) => void) | undefined;
+  /** 启用消息列表虚拟化（仅手机网页开启，桌面端保持整段渲染） */
+  virtualize?: boolean | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -933,6 +944,62 @@ const BackgroundViewContext = createContext<
 });
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
 
+interface EntryUiStateStore {
+  getToggle: (key: string) => boolean | undefined;
+  setToggle: (key: string, value: boolean) => void;
+  getRecord: (key: string) => Record<string, boolean> | undefined;
+  setRecord: (key: string, value: Record<string, boolean>) => void;
+}
+
+const EntryUiStateContext = createContext<EntryUiStateStore | null>(null);
+
+function usePersistedToggle(
+  persistKey: string,
+  initial: boolean,
+): [boolean, (next: boolean | ((current: boolean) => boolean)) => void] {
+  const store = useContext(EntryUiStateContext);
+  const [value, setValue] = useState<boolean>(() => store?.getToggle(persistKey) ?? initial);
+  const setPersisted = useCallback(
+    (next: boolean | ((current: boolean) => boolean)) => {
+      setValue((current) => {
+        const resolved = typeof next === "function" ? next(current) : next;
+        store?.setToggle(persistKey, resolved);
+        return resolved;
+      });
+    },
+    [store, persistKey],
+  );
+  return [value, setPersisted];
+}
+
+function usePersistedRecord(
+  persistKey: string,
+): [
+  Record<string, boolean>,
+  (
+    next: Record<string, boolean> | ((current: Record<string, boolean>) => Record<string, boolean>),
+  ) => void,
+] {
+  const store = useContext(EntryUiStateContext);
+  const [value, setValue] = useState<Record<string, boolean>>(
+    () => store?.getRecord(persistKey) ?? {},
+  );
+  const setPersisted = useCallback(
+    (
+      next:
+        Record<string, boolean> | ((current: Record<string, boolean>) => Record<string, boolean>),
+    ) => {
+      setValue((current) => {
+        const resolved = typeof next === "function" ? next(current) : next;
+        store?.setRecord(persistKey, resolved);
+        return resolved;
+      });
+    },
+    [store, persistKey],
+  );
+  return [value, setPersisted];
+}
+
 function durationText(seconds: number): string {
   if (seconds < 60) return `${String(seconds)} 秒`;
   const rest = seconds % 60;
@@ -1012,7 +1079,7 @@ function Think({
   const scroll = useContext(ThinkScrollContext);
   const frozen = useContext(FrozenContext);
   const motion = useMotionAllowed();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistedToggle(`think:${messageId}`, false);
   const [tall, setTall] = useState(false);
   const header = useRef<HTMLButtonElement>(null);
   const bodyRef = useRef<HTMLPreElement>(null);
@@ -2476,7 +2543,7 @@ function ToolDetails({
   images?: AttachmentImageSource | undefined;
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = usePersistedToggle(`tool-details:${entry.key}`, false);
   const result = entry.result;
   const isTimeout = result?.error?.code === "timeout";
   const input = inputOf(entry);
@@ -2765,8 +2832,8 @@ function ToolRow({
   images?: AttachmentImageSource | undefined;
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
-  const [open, setOpen] = useState(searchExpand);
-  const [fileOpen, setFileOpen] = useState<Record<string, boolean>>({});
+  const [open, setOpen] = usePersistedToggle(`tool:${entry.key}`, searchExpand);
+  const [fileOpen, setFileOpen] = usePersistedRecord(`tool-files:${entry.key}`);
   const renderedDetails = useRef(new Set<string>());
   const rowElement = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -4413,7 +4480,7 @@ export function QuestionCard({
 }
 
 function EnsembleEndedRow({ ensemble }: { ensemble: EnsembleView }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistedToggle(`ensemble-ended:${ensemble.createdSeq}`, false);
   const unmerged = ensemble.unmerged ?? [];
   const hasUnmerged = unmerged.length > 0;
   return (
@@ -4473,6 +4540,7 @@ function ConversationContent({
   localEntries = [],
   entryKey,
   onOpenSuiteThread,
+  virtualize = false,
 }: ContentProps) {
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -4481,7 +4549,15 @@ function ConversationContent({
   const [following, setFollowing] = useState(true);
   const [highlightedSeq, setHighlightedSeq] = useState<number | undefined>();
   const { parts, now } = useReasoning(subscribeEvents);
-  const users = view.entries.filter((e) => e.kind === "user");
+  const lastEntry = view.entries.at(-1);
+  // view.entries 可能在 reduceSessionView 或测试中被原地 push/更新，不能仅以数组引用做 memo 依赖
+  const entriesVersion = `${String(view.lastSeq)}:${String(view.entries.length)}:${lastEntry?.key ?? ""}:${
+    lastEntry?.kind === "assistant" ? String(lastEntry.text.length) : ""
+  }`;
+  const users = useMemo(
+    () => view.entries.filter((e) => e.kind === "user"),
+    [view.entries, entriesVersion],
+  );
   const lastSeq = users.at(-1)?.seq;
   const firstUserSeq = users[0]?.seq;
   /** 只读视图里的用户消息是任务/催促，不是可编辑的气泡；Ensemble 成员会话里的私信保留用户消息气泡 */
@@ -4491,21 +4567,24 @@ function ConversationContent({
       : entry.seq === firstUserSeq
         ? "task"
         : "nudge";
-  const changesByKey = new Map<string, TurnChanges>();
-  for (const [index, user] of users.entries()) {
-    const turn = turnChanges?.get(user.seq);
-    if (
-      !turn ||
-      (!turn.files.length && !turn.untrackedCalls) ||
-      (user.seq === lastSeq && view.currentTurn !== undefined)
-    )
-      continue;
-    const nextSeq = users[index + 1]?.seq ?? Infinity;
-    const entries = view.entries.filter((e) => e.seq >= user.seq && e.seq < nextSeq);
-    const anchor =
-      entries.findLast((e) => e.kind === "assistant" && e.text.trim() !== "") ?? entries.at(-1);
-    if (anchor) changesByKey.set(anchor.key, turn);
-  }
+  const changesByKey = useMemo(() => {
+    const map = new Map<string, TurnChanges>();
+    for (const [index, user] of users.entries()) {
+      const turn = turnChanges?.get(user.seq);
+      if (
+        !turn ||
+        (!turn.files.length && !turn.untrackedCalls) ||
+        (user.seq === lastSeq && view.currentTurn !== undefined)
+      )
+        continue;
+      const nextSeq = users[index + 1]?.seq ?? Infinity;
+      const entries = view.entries.filter((e) => e.seq >= user.seq && e.seq < nextSeq);
+      const anchor =
+        entries.findLast((e) => e.kind === "assistant" && e.text.trim() !== "") ?? entries.at(-1);
+      if (anchor) map.set(anchor.key, turn);
+    }
+    return map;
+  }, [users, turnChanges, lastSeq, view.currentTurn, view.entries, entriesVersion]);
   const renderChanges = (turn: TurnChanges | undefined) =>
     turn && onRewindFiles && loadChangeDiff && isLiveSession(session) ? (
       <TurnChangesCard
@@ -4521,24 +4600,29 @@ function ConversationContent({
         onViewChanges={onViewChanges}
       />
     ) : null;
-  const replies = new Map<string, string>();
-  let userSeq: number | undefined;
-  for (const entry of view.entries) {
-    if (entry.kind === "user") userSeq = entry.seq;
-    if (
-      entry.kind !== "assistant" ||
-      entry.text.trim() === "" ||
-      entry.turnId === view.currentTurn?.turnId ||
-      (userSeq !== undefined && userSeq === lastSeq && view.currentTurn !== undefined)
-    )
-      continue;
-    const key = userSeq === undefined ? entry.turnId : String(userSeq);
-    replies.set(key, entry.key);
-  }
-  const replyActionKeys = new Set(replies.values());
-  const latestReplyKey = [...replyActionKeys].at(-1);
+  const { replyActionKeys, latestReplyKey } = useMemo(() => {
+    const replies = new Map<string, string>();
+    let userSeq: number | undefined;
+    for (const entry of view.entries) {
+      if (entry.kind === "user") userSeq = entry.seq;
+      if (
+        entry.kind !== "assistant" ||
+        entry.text.trim() === "" ||
+        entry.turnId === view.currentTurn?.turnId ||
+        (userSeq !== undefined && userSeq === lastSeq && view.currentTurn !== undefined)
+      )
+        continue;
+      const key = userSeq === undefined ? entry.turnId : String(userSeq);
+      replies.set(key, entry.key);
+    }
+    const keys = new Set(replies.values());
+    return { replyActionKeys: keys, latestReplyKey: [...keys].at(-1) };
+  }, [view.entries, view.currentTurn, lastSeq, entriesVersion]);
   const canApprovePlan = view.plan !== undefined && !busy && onApprovePlan !== undefined;
-  const entryKeys = new Set(view.entries.map((entry) => entry.key));
+  const entryKeys = useMemo(
+    () => new Set(view.entries.map((entry) => entry.key)),
+    [view.entries, entriesVersion],
+  );
   // U-01：每条用户消息之后将被撤回的回复轮数（按助手 turnId 去重）
   const repliesAfter = useMemo(() => {
     const counts = new Map<number, number>();
@@ -4557,27 +4641,168 @@ function ConversationContent({
       }
     }
     return counts;
-  }, [view.entries]);
-  const scrollToBottom = () => {
+  }, [view.entries, entriesVersion]);
+
+  const [entryUiState] = useState<EntryUiStateStore>(() => {
+    const toggles = new Map<string, boolean>();
+    const records = new Map<string, Record<string, boolean>>();
+    return {
+      getToggle: (key) => toggles.get(key),
+      setToggle: (key, value) => {
+        toggles.set(key, value);
+      },
+      getRecord: (key) => records.get(key),
+      setRecord: (key, value) => {
+        records.set(key, value);
+      },
+    };
+  });
+
+  const entryKeysList = useMemo(
+    () => view.entries.map((entry) => entryKey?.(entry.key) ?? entry.key),
+    [view.entries, entryKey, entriesVersion],
+  );
+  const entryKeysListRef = useRef(entryKeysList);
+  entryKeysListRef.current = entryKeysList;
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const pinnedKeysRef = useRef<Set<string>>(new Set());
+  const itemNodesRef = useRef<Map<number, HTMLDivElement>>(new Map());
+  const anchorRef = useRef<{ key: string; topInViewport: number } | null>(null);
+  const offsets = useMemo(
+    () =>
+      virtualize
+        ? buildVirtualOffsets(view.entries, entryKeysList, measuredHeightsRef.current)
+        : new Float64Array(0),
+    [virtualize, view.entries, entryKeysList, entriesVersion],
+  );
+  const offsetsRef = useRef(offsets);
+  offsetsRef.current = offsets;
+  const [virtualRange, setVirtualRange] = useState<VirtualRange>(() =>
+    virtualize
+      ? computeVirtualRange({
+          offsets,
+          count: view.entries.length,
+          scrollTop: 0,
+          viewportHeight: DEFAULT_VIEWPORT_HEIGHT,
+          followBottom: true,
+        })
+      : { start: 0, end: -1 },
+  );
+  const virtualRangeRef = useRef(virtualRange);
+  const effectiveRange: VirtualRange = virtualize
+    ? following
+      ? computeVirtualRange({
+          offsets,
+          count: view.entries.length,
+          scrollTop: 0,
+          viewportHeight: scroll.current?.clientHeight ?? DEFAULT_VIEWPORT_HEIGHT,
+          followBottom: true,
+        })
+      : virtualRange
+    : { start: 0, end: view.entries.length - 1 };
+  virtualRangeRef.current = effectiveRange;
+
+  const captureAnchor = useCallback(() => {
+    const scrollEl = scroll.current;
+    if (!scrollEl) {
+      anchorRef.current = null;
+      return;
+    }
+    const scrollTopRect = scrollEl.getBoundingClientRect().top;
+    let best: { index: number; key: string; topInViewport: number } | null = null;
+    for (const [index, node] of itemNodesRef.current) {
+      const key = entryKeysListRef.current[index];
+      if (key === undefined) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.height <= 0) continue;
+      if (rect.bottom > scrollTopRect + 1) {
+        if (best === null || index < best.index) {
+          best = { index, key, topInViewport: rect.top - scrollTopRect };
+        }
+      }
+    }
+    anchorRef.current = best !== null ? { key: best.key, topInViewport: best.topInViewport } : null;
+  }, []);
+
+  const restoreAnchor = useCallback(() => {
+    const scrollEl = scroll.current;
+    const anchor = anchorRef.current;
+    if (!scrollEl || anchor === null || follow.current) return;
+    const index = entryKeysListRef.current.indexOf(anchor.key);
+    if (index < 0) return;
+    const node = itemNodesRef.current.get(index);
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const actualTop = rect.top - scrollEl.getBoundingClientRect().top;
+    const drift = actualTop - anchor.topInViewport;
+    if (Math.abs(drift) > 0.5) {
+      scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + drift);
+      previousTop.current = scrollEl.scrollTop;
+    }
+  }, []);
+
+  const measureMountedItems = useCallback(() => {
+    for (const [index, node] of itemNodesRef.current) {
+      const key = entryKeysListRef.current[index];
+      if (key === undefined) continue;
+      const height = node.getBoundingClientRect().height;
+      if (height > 0) {
+        measuredHeightsRef.current.set(key, height);
+      }
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
     const element = scroll.current;
     if (!element) return;
     element.scrollTop = element.scrollHeight;
     previousTop.current = element.scrollTop;
-  };
+  }, []);
   const scrolledNonce = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (searchTarget?.seq === undefined) return;
     const seq = searchTarget.seq;
     follow.current = false;
     setFollowing(false);
+    anchorRef.current = null;
     setHighlightedSeq(seq);
+    if (virtualize) {
+      const targetIndex = view.entries.findIndex((entry) => matchesSearchSeq(entry, seq));
+      if (targetIndex >= 0) {
+        const currentOffsets = buildVirtualOffsets(
+          view.entries,
+          entryKeysListRef.current,
+          measuredHeightsRef.current,
+        );
+        const scrollEl = scroll.current;
+        const measuredViewport = scrollEl?.clientHeight ?? 0;
+        const viewportHeight = measuredViewport > 0 ? measuredViewport : DEFAULT_VIEWPORT_HEIGHT;
+        const estScrollTop = Math.max(0, (currentOffsets[targetIndex] ?? 0) - viewportHeight / 2);
+        if (scrollEl) {
+          scrollEl.scrollTop = estScrollTop;
+          previousTop.current = scrollEl.scrollTop;
+        }
+        const nextRange = computeVirtualRange({
+          offsets: currentOffsets,
+          count: view.entries.length,
+          scrollTop: estScrollTop,
+          viewportHeight,
+          followBottom: false,
+        });
+        setVirtualRange({
+          start: Math.min(nextRange.start, targetIndex),
+          end: Math.max(nextRange.end, targetIndex),
+        });
+      }
+    }
     const timer = window.setTimeout(() => {
       setHighlightedSeq(undefined);
     }, 1800);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [searchTarget]);
+  }, [searchTarget, virtualize, view.entries]);
   useEffect(() => {
     if (searchTarget?.seq === undefined || scrolledNonce.current === searchTarget.nonce) return;
     const seq = searchTarget.seq;
@@ -4585,16 +4810,33 @@ function ConversationContent({
       `[data-session-seq="${seq}"], [data-completed-seq="${seq}"]`,
     );
     if (anchor === null || anchor === undefined) return;
-    scrolledNonce.current = searchTarget.nonce;
     const frame = requestAnimationFrame(() => {
+      scrolledNonce.current = searchTarget.nonce;
       anchor.scrollIntoView({ block: "center" });
+      if (virtualize) {
+        previousTop.current = scroll.current?.scrollTop ?? 0;
+        captureAnchor();
+      }
     });
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [searchTarget, view.entries.length]);
+  }, [
+    searchTarget,
+    view.entries.length,
+    effectiveRange.start,
+    effectiveRange.end,
+    virtualize,
+    captureAnchor,
+  ]);
   useLayoutEffect(() => {
-    if (follow.current) scrollToBottom();
+    if (virtualize) {
+      measureMountedItems();
+      if (follow.current) scrollToBottom();
+      else restoreAnchor();
+    } else if (follow.current) {
+      scrollToBottom();
+    }
   });
   // 思考块收起：跟随最新时留在底部（先于滚动事件把位置定下来，跟随不会被误关）；
   // 否则标题行若已在视野上方，把它滚回顶部，读者停在刚收起的位置
@@ -4613,20 +4855,55 @@ function ConversationContent({
         element.scrollTop += delta;
         previousTop.current = element.scrollTop;
       }
+      captureAnchor();
     },
   }));
   useLayoutEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (follow.current) scrollToBottom();
+      if (virtualize) {
+        measureMountedItems();
+        if (follow.current) scrollToBottom();
+        else restoreAnchor();
+      } else if (follow.current) {
+        scrollToBottom();
+      }
     });
     if (content.current) observer.observe(content.current);
     if (scroll.current) observer.observe(scroll.current);
     return () => {
       observer.disconnect();
     };
-  }, []);
-  return (
+  }, [virtualize, measureMountedItems, scrollToBottom, restoreAnchor]);
+  const updateVirtualWindowFromScroll = useCallback(
+    (element: HTMLDivElement, nextFollowing: boolean) => {
+      if (!virtualize) return;
+      if (nextFollowing) {
+        anchorRef.current = null;
+        return;
+      }
+      captureAnchor();
+      const currentOffsets = buildVirtualOffsets(
+        view.entries,
+        entryKeysListRef.current,
+        measuredHeightsRef.current,
+      );
+      offsetsRef.current = currentOffsets;
+      const next = computeVirtualRange({
+        offsets: currentOffsets,
+        count: view.entries.length,
+        scrollTop: element.scrollTop,
+        viewportHeight: element.clientHeight,
+        followBottom: false,
+      });
+      const prev = virtualRangeRef.current;
+      if (next.start !== prev.start || next.end !== prev.end) {
+        setVirtualRange(next);
+      }
+    },
+    [virtualize, view.entries, captureAnchor],
+  );
+  const inner = (
     <div className="conversation">
       <div
         className="stream conversation-stream conversation-scroll"
@@ -4638,18 +4915,23 @@ function ConversationContent({
           if (event.deltaY < 0) {
             follow.current = false;
             setFollowing(false);
+            if (scroll.current) updateVirtualWindowFromScroll(scroll.current, false);
           }
         }}
         onScroll={(event) => {
           const element = event.currentTarget;
+          let nextFollowing = follow.current;
           if (element.scrollHeight - element.clientHeight - element.scrollTop <= 2) {
             follow.current = true;
             setFollowing(true);
+            nextFollowing = true;
           } else if (element.scrollTop < previousTop.current) {
             follow.current = false;
             setFollowing(false);
+            nextFollowing = false;
           }
           previousTop.current = element.scrollTop;
+          updateVirtualWindowFromScroll(element, nextFollowing);
         }}
       >
         <ThinkScrollContext.Provider value={thinkScroll}>
@@ -4717,6 +4999,130 @@ function ConversationContent({
                 }
               }
 
+              const renderEntryBlock = (entry: ViewEntry, entryIndex: number) => (
+                <>
+                  <EntryView
+                    entry={entry}
+                    searchHit={matchesSearchSeq(entry, highlightedSeq)}
+                    searchExpand={matchesSearchSeq(entry, searchTarget?.seq)}
+                    openUrl={openUrl}
+                    cwd={cwd}
+                    parts={parts}
+                    now={now}
+                    images={images}
+                    session={session}
+                    busy={busy}
+                    waitingCallId={view.pendingQuestion?.callId}
+                    userRole={roleOf(entry)}
+                    repliesAfter={entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0}
+                    scheduleSource={
+                      entry.kind === "user" && entry.seq === firstUserSeq
+                        ? scheduleSource
+                        : undefined
+                    }
+                    ensembleRecipientLabel={ensembleRecipientLabel}
+                    viewSuite={view.suite}
+                    onOpenSuiteThread={onOpenSuiteThread}
+                    onResubmit={onResubmit}
+                    onFork={onFork}
+                    fileLinks={fileLinks}
+                    showReplyActions={replyActionKeys.has(entry.key)}
+                    onApprovePlan={
+                      canApprovePlan && entry.key === latestReplyKey ? onApprovePlan : undefined
+                    }
+                    changesCard={
+                      entry.kind === "assistant" ? renderChanges(changesByKey.get(entry.key)) : null
+                    }
+                  />
+                  {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
+                  {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
+                  {ensembleEnded !== undefined && ensembleEndedAfterIdx === entryIndex ? (
+                    <EnsembleEndedRow
+                      key={`ensemble-ended:${ensembleEnded.createdSeq}`}
+                      ensemble={ensembleEnded}
+                    />
+                  ) : null}
+                </>
+              );
+
+              const renderEntries = () => {
+                if (!virtualize) {
+                  return view.entries.map((entry, entryIndex) => (
+                    <Fragment key={entryKeysList[entryIndex] ?? entry.key}>
+                      {renderEntryBlock(entry, entryIndex)}
+                    </Fragment>
+                  ));
+                }
+                if (effectiveRange.end >= effectiveRange.start) {
+                  const lo = Math.max(0, effectiveRange.start);
+                  const hi = Math.min(view.entries.length - 1, effectiveRange.end);
+                  for (let i = lo; i <= hi; i += 1) {
+                    const item = view.entries[i];
+                    const itemKey = entryKeysList[i];
+                    if (
+                      item !== undefined &&
+                      itemKey !== undefined &&
+                      isPinnedInlineHtmlEntry(item)
+                    ) {
+                      pinnedKeysRef.current.add(itemKey);
+                    }
+                  }
+                }
+                const pinnedIndices: number[] = [];
+                if (pinnedKeysRef.current.size > 0) {
+                  for (let i = 0; i < entryKeysList.length; i += 1) {
+                    const itemKey = entryKeysList[i];
+                    if (itemKey !== undefined && pinnedKeysRef.current.has(itemKey)) {
+                      pinnedIndices.push(i);
+                    }
+                  }
+                }
+                if (searchTarget?.seq !== undefined) {
+                  const targetIdx = view.entries.findIndex((entry) =>
+                    matchesSearchSeq(entry, searchTarget.seq),
+                  );
+                  if (targetIdx >= 0) pinnedIndices.push(targetIdx);
+                }
+                const segments = buildVirtualSegments({
+                  count: view.entries.length,
+                  range: effectiveRange,
+                  pinnedIndices,
+                  offsets,
+                });
+                return (
+                  <div className="conversation-virtual-list">
+                    {segments.map((segment) => {
+                      if (segment.kind === "spacer") {
+                        return (
+                          <div
+                            key={segment.key}
+                            className="conversation-virtual-spacer"
+                            aria-hidden="true"
+                            style={{ height: `${String(segment.height)}px` }}
+                          />
+                        );
+                      }
+                      const entry = view.entries[segment.index];
+                      if (entry === undefined) return null;
+                      const key = entryKeysList[segment.index] ?? entry.key;
+                      return (
+                        <div
+                          key={key}
+                          className="conversation-virtual-item"
+                          data-virtual-index={segment.index}
+                          ref={(node) => {
+                            if (node !== null) itemNodesRef.current.set(segment.index, node);
+                            else itemNodesRef.current.delete(segment.index);
+                          }}
+                        >
+                          {renderEntryBlock(entry, segment.index)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              };
+
               return (
                 <>
                   {(byAfterEntry.get(0) ?? []).map(renderNotice)}
@@ -4726,59 +5132,9 @@ function ConversationContent({
                       ensemble={ensembleEnded}
                     />
                   ) : null}
+                  {virtualize ? renderEntries() : null}
                   {[
-                    ...view.entries.map((entry, entryIndex) => (
-                      <Fragment key={entryKey?.(entry.key) ?? entry.key}>
-                        <EntryView
-                          entry={entry}
-                          searchHit={matchesSearchSeq(entry, highlightedSeq)}
-                          searchExpand={matchesSearchSeq(entry, searchTarget?.seq)}
-                          openUrl={openUrl}
-                          cwd={cwd}
-                          parts={parts}
-                          now={now}
-                          images={images}
-                          session={session}
-                          busy={busy}
-                          waitingCallId={view.pendingQuestion?.callId}
-                          userRole={roleOf(entry)}
-                          repliesAfter={
-                            entry.kind === "user" ? (repliesAfter.get(entry.seq) ?? 0) : 0
-                          }
-                          scheduleSource={
-                            entry.kind === "user" &&
-                            entry.seq === view.entries.find((item) => item.kind === "user")?.seq
-                              ? scheduleSource
-                              : undefined
-                          }
-                          ensembleRecipientLabel={ensembleRecipientLabel}
-                          viewSuite={view.suite}
-                          onOpenSuiteThread={onOpenSuiteThread}
-                          onResubmit={onResubmit}
-                          onFork={onFork}
-                          fileLinks={fileLinks}
-                          showReplyActions={replyActionKeys.has(entry.key)}
-                          onApprovePlan={
-                            canApprovePlan && entry.key === latestReplyKey
-                              ? onApprovePlan
-                              : undefined
-                          }
-                          changesCard={
-                            entry.kind === "assistant"
-                              ? renderChanges(changesByKey.get(entry.key))
-                              : null
-                          }
-                        />
-                        {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
-                        {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
-                        {ensembleEnded !== undefined && ensembleEndedAfterIdx === entryIndex ? (
-                          <EnsembleEndedRow
-                            key={`ensemble-ended:${ensembleEnded.createdSeq}`}
-                            ensemble={ensembleEnded}
-                          />
-                        ) : null}
-                      </Fragment>
-                    )),
+                    ...(virtualize ? [] : (renderEntries() as ReactNode[])),
                     ...localEntries.map((entry) => (
                       <Fragment key={entry.key}>
                         <EntryView
@@ -4865,6 +5221,7 @@ function ConversationContent({
             className="conversation-jump"
             onClick={() => {
               follow.current = true;
+              anchorRef.current = null;
               setFollowing(true);
               scrollToBottom();
             }}
@@ -4927,6 +5284,11 @@ function ConversationContent({
         );
       })()}
     </div>
+  );
+  return virtualize ? (
+    <EntryUiStateContext.Provider value={entryUiState}>{inner}</EntryUiStateContext.Provider>
+  ) : (
+    inner
   );
 }
 

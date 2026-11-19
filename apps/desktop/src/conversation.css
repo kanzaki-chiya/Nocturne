@@ -1863,3 +1863,24 @@ button.fcard:hover {
 .conversation .suite-report-row .suite-dot.retired {
   background: var(--a-faint);
 }
+
+.conversation-virtual-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.conversation-virtual-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+}
+
+.conversation-virtual-item:last-child {
+  padding-bottom: 0;
+}
+
+.conversation-virtual-spacer {
+  flex: none;
+  pointer-events: none;
+}
