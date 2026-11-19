@@ -41,8 +41,27 @@ export async function readLogReadonly(
   }
   const { events, tailStart } = parseLogBytes(buf);
   assertLogHead(events);
-  if (events.some((event) => event.sessionId !== sessionId)) {
+  const head = events[0];
+  if (head?.type !== "session.created" || head.sessionId !== sessionId) {
     throw new SessionError("session_log_corrupt", `日志中的 sessionId 与 ${sessionId} 不一致`);
+  }
+  const forkedFrom = head.payload.forkedFrom;
+  if (forkedFrom === undefined) {
+    if (events.some((event) => event.sessionId !== sessionId)) {
+      throw new SessionError("session_log_corrupt", `日志中的 sessionId 与 ${sessionId} 不一致`);
+    }
+  } else {
+    // 分叉会话复制了源会话的前缀事件（保留原 sessionId），仅分叉边界之后的事件属于本 sessionId
+    const forkRewind = events.findLast(
+      (event) => event.type === "session.rewound" && event.payload.fork === true,
+    );
+    const ownStartSeq =
+      forkRewind !== undefined && forkRewind.seq > forkedFrom.seq
+        ? forkRewind.seq
+        : forkedFrom.seq + 1;
+    if (events.some((event) => event.seq >= ownStartSeq && event.sessionId !== sessionId)) {
+      throw new SessionError("session_log_corrupt", `日志中的 sessionId 与 ${sessionId} 不一致`);
+    }
   }
   return { events, tailIgnored: tailStart >= 0, size: buf.length };
 }

@@ -137,7 +137,7 @@ import {
   type RunOutcome,
 } from "./schedule/index.js";
 import { createCheckpointRecorder } from "./session/checkpoints.js";
-import { readLogReadonly } from "./session/readonly-log.js";
+import { assertSafeSessionId, readLogReadonly } from "./session/readonly-log.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import { createTurnChanges } from "./session/turn-changes.js";
 import {
@@ -235,6 +235,8 @@ import type {
   SessionSchedule,
   SubagentObservation,
   SubagentObserver,
+  SessionReadSnapshot,
+  SessionSnapshotObserver,
   SubagentSummary,
   EnsembleUnmergedWorktree,
   TurnEndReason,
@@ -987,6 +989,21 @@ export interface Runtime {
     childSessionId: string;
     file: string;
   }): Promise<ReadAttachmentResult>;
+  /**
+   * 顶层会话只读快照观察（ADR-0099、rpc.md 4.2）：不打开会话、不取锁、不修复日志；
+   * 会话已在本 Runtime 打开时直接读取内存持久事件，否则读取固定字节快照并按批次交付 `seq > afterSeq` 的持久事件。
+   * 子会话拒绝（`invalid_command`），请走 `observeSubagent`。
+   */
+  observeSession(
+    input: {
+      sessionId: string;
+      afterSeq?: number | undefined;
+      signal?: AbortSignal | undefined;
+    },
+    observer: SessionSnapshotObserver,
+  ): Promise<SessionReadSnapshot>;
+  /** 读取顶层会话持久事件登记过的附件，不打开会话、不取锁；子会话拒绝 */
+  readSessionAttachment(input: { sessionId: string; file: string }): Promise<ReadAttachmentResult>;
   listSessions(filter?: {
     cwd?: string | undefined;
     /** 默认 false：子会话（session.created.parent 存在）不进列表 */
@@ -7069,6 +7086,94 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     listSubagents: (input) => subagentObservation.list(input),
     observeSubagent: (input, observer) => subagentObservation.observe(input, observer),
     readSubagentAttachment: (input) => subagentObservation.readAttachment(input),
+    async observeSession(input, observer) {
+      assertSafeSessionId(input.sessionId);
+      const isAborted = (): boolean => input.signal?.aborted === true;
+      const abortError = (): Error => {
+        const reason: unknown = input.signal?.reason;
+        return reason instanceof Error ? reason : new Error("会话观察已取消");
+      };
+      if (isAborted()) throw abortError();
+      const open = openSessions.get(input.sessionId);
+      let events: readonly DurableEvent[];
+      let tailIgnored = false;
+      if (open !== undefined) {
+        events = [...open.durableEvents()];
+      } else {
+        const snapshot = await readLogReadonly(
+          fs,
+          paths.resolve(sessionsDir, `${input.sessionId}.jsonl`),
+          input.sessionId,
+        );
+        events = snapshot.events;
+        tailIgnored = snapshot.tailIgnored;
+      }
+      if (isAborted()) throw abortError();
+      const first = events[0];
+      if (first?.type !== "session.created") {
+        throw new SessionError("session_log_corrupt", "日志第一行不是 session.created");
+      }
+      if (first.payload.parent !== undefined) {
+        throw new RuntimeCommandError("invalid_command", "子会话请通过父会话观察");
+      }
+      const highWater = events.at(-1)?.seq ?? 0;
+      const start = input.afterSeq ?? 0;
+      if (!Number.isSafeInteger(start) || start < 0 || start > highWater) {
+        throw new SessionError(
+          "invalid_after_seq",
+          `afterSeq ${String(start)} 超出范围（0..${String(highWater)}）`,
+        );
+      }
+      const replay = start === 0 ? events : events.filter((event) => event.seq > start);
+      const OBSERVE_REPLAY_CHUNK = 256;
+      for (let i = 0; i < replay.length; i += OBSERVE_REPLAY_CHUNK) {
+        if (isAborted()) throw abortError();
+        for (const event of replay.slice(i, i + OBSERVE_REPLAY_CHUNK)) {
+          if (isAborted()) throw abortError();
+          try {
+            observer.onEvent(event);
+          } catch {
+            // 观察者异常不影响服务端
+          }
+        }
+        if (i + OBSERVE_REPLAY_CHUNK < replay.length) {
+          await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          });
+        }
+      }
+      if (isAborted()) throw abortError();
+      return {
+        sessionId: input.sessionId,
+        lastSeq: highWater,
+        cwd: first.payload.cwd,
+        workspaceRoot: first.payload.workspaceRoot,
+        openHere: open !== undefined,
+        tailIgnored,
+      };
+    },
+    async readSessionAttachment(input) {
+      assertSafeSessionId(input.sessionId);
+      const open = openSessions.get(input.sessionId);
+      const events =
+        open !== undefined
+          ? open.durableEvents()
+          : (
+              await readLogReadonly(
+                fs,
+                paths.resolve(sessionsDir, `${input.sessionId}.jsonl`),
+                input.sessionId,
+              )
+            ).events;
+      const first = events[0];
+      if (first?.type !== "session.created") {
+        throw new SessionError("session_log_corrupt", "日志第一行不是 session.created");
+      }
+      if (first.payload.parent !== undefined) {
+        throw new RuntimeCommandError("invalid_command", "子会话请通过父会话观察");
+      }
+      return readSessionAttachment(platform, sessionsDir, input.sessionId, events, input.file);
+    },
     usageStats,
     async forkSession(id, forkOptions) {
       const open = openSessions.get(id);
