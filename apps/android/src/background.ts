@@ -1,14 +1,8 @@
-import {
-  createSessionView,
-  reduceSessionView,
-  type RuntimeEvent,
-  type SessionView,
-} from "@nocturne/core/protocol";
-import { conversationStatus } from "../../desktop/src/conversations";
+import type { RuntimeEvent } from "@nocturne/core/protocol";
 import { sessionMarkFor, sessionTitle, type NotifySession } from "../../desktop/src/notify";
 import type { SessionMark, SessionStatus } from "../../desktop/src/session-tree";
 import type { ConnectionState } from "../../desktop/src/web/connection";
-import type { PhoneObserver } from "../../desktop/src/web/platform";
+import type { ObservedPhoneSession, PhoneObserver } from "../../desktop/src/web/platform";
 import type { PairedHost } from "../../desktop/src/web/storage";
 import type { AppHost, ServiceNotification } from "./host";
 import type { ProbeLog } from "./probe";
@@ -114,25 +108,23 @@ function sameNotice(a: ServiceNotification | undefined, b: ServiceNotification):
   );
 }
 
-interface TrackedSession {
-  view: SessionView;
-}
-
 /**
  * 「后台保持连接」：已配对电脑且开关打开时让前台服务运行，常驻通知跟随连接状态与会话状态；
+ * 会话运行态直接来自 `PhoneSessions.opened`（`observer.sessions`），不再另行折叠并行视图。
  * 关闭则停止服务，页面隐藏时的行为与网页版一致（不主动断开、不重连，回前台再连）。
  */
 export class Background {
   private hostCount = 0;
   private currentHost: PairedHost | undefined;
   private connectionState: ConnectionState = "offline";
-  private readonly sessions = new Map<string, TrackedSession>();
+  private activeSessions: readonly ObservedPhoneSession[] = [];
   private readonly titles = new Map<string, NotifySession>();
   private marks: Readonly<Record<string, SessionMark>> = {};
   private viewingSessionId: string | undefined;
   private started = false;
   private lastSent: ServiceNotification | undefined;
   private pending: Promise<void> = Promise.resolve();
+  private syncScheduled = false;
 
   constructor(
     private readonly host: AppHost,
@@ -171,13 +163,13 @@ export class Background {
       this.currentHost = host;
       this.connectionState = state;
       if (hostChanged) {
-        this.sessions.clear();
+        this.activeSessions = [];
         this.titles.clear();
         this.marks = {};
         this.viewingSessionId = undefined;
       } else if (state !== "online") {
-        // 断线或重连期间清空旧会话运行态视图，重连后由订阅回放重建；未看标记与会话名保留到用户查看
-        this.sessions.clear();
+        // 断线或重连期间清空旧会话运行态快照；未看标记与会话名保留到用户查看
+        this.activeSessions = [];
       }
       this.sync();
     },
@@ -187,9 +179,25 @@ export class Background {
     event: (sessionId, type, seq, live, eventTime) => {
       this.probe.event(sessionId, type, seq, live, eventTime);
     },
+    sessions: (hostId, sessions) => {
+      if (this.currentHost && hostId !== this.currentHost.hostId) return;
+      this.activeSessions = sessions;
+      for (const item of sessions) {
+        if (item.title !== undefined || item.firstText !== undefined) {
+          const prev = this.titles.get(item.id);
+          const title = item.title ?? prev?.title;
+          const firstText = item.firstText ?? prev?.firstText;
+          this.titles.set(item.id, {
+            ...(title !== undefined ? { title } : {}),
+            ...(firstText !== undefined ? { firstText } : {}),
+          });
+        }
+      }
+      this.sync();
+    },
     sessionEvent: (hostId, sessionId, event, live, session, watching) => {
       if (this.currentHost && hostId !== this.currentHost.hostId) return;
-      this.trackEvent(sessionId, event, live, session, watching);
+      this.trackMark(sessionId, event, live, session, watching);
       this.sync();
     },
     viewing: (target) => {
@@ -206,22 +214,16 @@ export class Background {
     },
   };
 
-  private trackEvent(
+  private trackMark(
     sessionId: string,
     event: RuntimeEvent,
     live: boolean,
     session: NotifySession,
     watching: boolean,
   ): void {
-    let tracked = this.sessions.get(sessionId);
-    if (!tracked || (event.type === "session.created" && event.seq === 1)) {
-      tracked = { view: createSessionView() };
-      this.sessions.set(sessionId, tracked);
-    }
-    reduceSessionView(tracked.view, event);
     const prevTitle = this.titles.get(sessionId);
-    const title = session.title ?? tracked.view.title ?? prevTitle?.title;
-    const firstText = session.firstText ?? tracked.view.firstTitle ?? prevTitle?.firstText;
+    const title = session.title ?? prevTitle?.title;
+    const firstText = session.firstText ?? prevTitle?.firstText;
     if (title !== undefined || firstText !== undefined) {
       this.titles.set(sessionId, {
         ...(title !== undefined ? { title } : {}),
@@ -240,19 +242,23 @@ export class Background {
 
   private buildNotice(): ServiceNotification {
     const title = connectedText(this.currentHost, this.connectionState);
-    const list: LiveUpdateSession[] = [...this.sessions.entries()].map(([id, item]) => {
-      const meta = this.titles.get(id);
+    const activeIds = new Set<string>();
+    const list: LiveUpdateSession[] = this.activeSessions.map((item) => {
+      activeIds.add(item.id);
+      const meta = this.titles.get(item.id);
+      const resolvedTitle = item.title ?? meta?.title;
+      const resolvedFirstText = item.firstText ?? meta?.firstText;
       return {
-        id,
-        status: conversationStatus({ view: item.view, busy: false }),
-        mark: this.marks[id],
-        ...(meta?.title !== undefined ? { title: meta.title } : {}),
-        ...(meta?.firstText !== undefined ? { firstText: meta.firstText } : {}),
+        id: item.id,
+        status: item.status,
+        mark: this.marks[item.id],
+        ...(resolvedTitle !== undefined ? { title: resolvedTitle } : {}),
+        ...(resolvedFirstText !== undefined ? { firstText: resolvedFirstText } : {}),
       };
     });
-    // 若未看标记所在的会话因空闲或断线已不在活动 Map 中，仍作为 idle 会话参与汇总
+    // 若未看标记所在的会话因空闲或断线已不在活动列表中，仍作为 idle 会话参与汇总
     for (const [id, mark] of Object.entries(this.marks)) {
-      if (!this.sessions.has(id)) {
+      if (!activeIds.has(id)) {
         const meta = this.titles.get(id);
         list.push({
           id,
@@ -283,6 +289,15 @@ export class Background {
   }
 
   private sync(): void {
+    if (this.syncScheduled) return;
+    this.syncScheduled = true;
+    queueMicrotask(() => {
+      this.syncScheduled = false;
+      this.flushSync();
+    });
+  }
+
+  private flushSync(): void {
     const wanted = this.enabled && this.hostCount > 0;
     const notice = this.buildNotice();
     this.pending = this.pending

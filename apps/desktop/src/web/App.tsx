@@ -151,9 +151,6 @@ export function PhoneApp({
   platform?: PhonePlatform;
 }) {
   const [, render] = useState(0);
-  const changed = () => {
-    render((n) => n + 1);
-  };
   const platformRef = useRef(platform);
   platformRef.current = platform;
   const currentRef = useRef<{
@@ -161,34 +158,47 @@ export function PhoneApp({
     sessionId: string | undefined;
     covered: boolean;
   }>({ hostId: undefined, sessionId: undefined, covered: false });
-  const [sessions] = useState(
-    () =>
-      new PhoneSessions(
-        changed,
-        (sessionId, type, seq, live, eventTime) => {
-          platformRef.current.observer?.event?.(sessionId, type, seq, live, eventTime);
-        },
-        (sessionId, event, live, entry, turnStartedAt) => {
-          const current = currentRef.current;
-          if (!current.hostId) return;
-          const summary = sessions.list.find((item) => item.id === sessionId);
-          platformRef.current.observer?.sessionEvent?.(
-            current.hostId,
-            sessionId,
-            event,
-            live,
-            {
-              ...(entry.view.title !== undefined ? { title: entry.view.title } : {}),
-              ...(summary?.firstText !== undefined ? { firstText: summary.firstText } : {}),
-            },
-            platformRef.current.isForeground?.() === true &&
-              !current.covered &&
-              current.sessionId === sessionId,
-            turnStartedAt,
-          );
-        },
-      ),
-  );
+  const sessionsRef = useRef<PhoneSessions | undefined>(undefined);
+  const notifyObservedSessions = () => {
+    const activeHostId = currentRef.current.hostId;
+    const store = sessionsRef.current;
+    if (!activeHostId || !store) return;
+    platformRef.current.observer?.sessions?.(activeHostId, store.observedSessions());
+  };
+  const changed = () => {
+    notifyObservedSessions();
+    render((n) => n + 1);
+  };
+  const [sessions] = useState(() => {
+    const store = new PhoneSessions(
+      changed,
+      (sessionId, type, seq, live, eventTime) => {
+        platformRef.current.observer?.event?.(sessionId, type, seq, live, eventTime);
+      },
+      (sessionId, event, live, entry, turnStartedAt) => {
+        const current = currentRef.current;
+        if (!current.hostId) return;
+        const summary = store.list.find((item) => item.id === sessionId);
+        platformRef.current.observer?.sessionEvent?.(
+          current.hostId,
+          sessionId,
+          event,
+          live,
+          {
+            ...(entry.view.title !== undefined ? { title: entry.view.title } : {}),
+            ...(summary?.firstText !== undefined ? { firstText: summary.firstText } : {}),
+          },
+          platformRef.current.isForeground?.() === true &&
+            !current.covered &&
+            current.sessionId === sessionId,
+          turnStartedAt,
+        );
+      },
+    );
+    sessionsRef.current = store;
+    return store;
+  });
+  sessionsRef.current = sessions;
   // 消息里的图片经 readAttachment 回读；过大的由后台拒绝，占位条显示原因
   const [images] = useState<AttachmentImageSource>(() => ({
     ...createAttachmentImageSource(),
@@ -651,6 +661,7 @@ export function PhoneApp({
     const target = await sessions.create(path, options);
     const local = trackPhoneOutgoing(target, input, "turn", "steer");
     target.busy = true;
+    notifyObservedSessions();
     navigate({ kind: "session", hostId, sessionId: target.session.id });
     try {
       await submitAccepted(

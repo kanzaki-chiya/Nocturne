@@ -1,8 +1,20 @@
 import type { ReactNode } from "react";
 import type { ImageViewerCapabilities, SaveFileFn } from "../ImageViewer";
+import type { SessionStatus } from "../session-tree";
 import type { ConnectionState, PhoneConnectionLike, PhoneConnectionOptions } from "./connection";
 import type { PairedHost } from "./storage";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
+
+/**
+ * 供平台观察者（安卓常驻通知）消费的会话快照，直接派生自 `PhoneSessions.opened` 的同一份视图，
+ * 不由平台另行维护并行 `SessionView`。
+ */
+export interface ObservedPhoneSession {
+  id: string;
+  status: SessionStatus;
+  title?: string | undefined;
+  firstText?: string | undefined;
+}
 
 /**
  * 手机界面的平台扩展点。网页入口不传（等同 `{ relay: "page" }`）；安卓 App 入口
@@ -23,7 +35,12 @@ export interface PhoneObserver {
     live: boolean,
     eventTime?: string,
   ): void;
-  /** App 本地通知与常驻通知状态汇总消费完整事件；网页不实现此钩子。 */
+  /**
+   * 当前已打开且已就绪的会话状态快照（直接来自 `PhoneSessions.opened`，与会话页共用同一份视图）。
+   * 会话状态变化、关闭、移除或断线时同步推送；网页不实现此钩子。
+   */
+  sessions?(hostId: string, sessions: readonly ObservedPhoneSession[]): void;
+  /** App 本地通知与未看标记消费完整事件；网页不实现此钩子。 */
   sessionEvent?(
     hostId: string,
     sessionId: string,

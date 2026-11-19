@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
+import type { RpcClient, RpcSession } from "@nocturne/rpc/client";
+import { PhoneSessions } from "../../desktop/src/web/sessions";
 import {
   Background,
   connectedText,
@@ -44,39 +46,6 @@ function started(sessionId: string, seq = 1): RuntimeEvent {
     turnId: "t1",
     time: "2026-11-10T00:00:00Z",
     payload: { turnIndex: 1 },
-  };
-}
-
-function permissionRequested(sessionId: string, seq = 2): RuntimeEvent {
-  return {
-    type: "permission.requested",
-    sessionId,
-    seq,
-    turnId: "t1",
-    time: "2026-11-10T00:00:01Z",
-    payload: {
-      requestId: "r1",
-      callId: "c1",
-      reason: "need approval",
-      subjects: [{ kind: "shell", target: "ls" }],
-      options: ["allow_once"],
-    },
-  };
-}
-
-function questionRequested(sessionId: string): RuntimeEvent {
-  return {
-    type: "question.requested",
-    sessionId,
-    runId: "t1",
-    eseq: 1,
-    afterSeq: 1,
-    time: "2026-11-10T00:00:01Z",
-    payload: {
-      requestId: "q1",
-      callId: "c2",
-      questions: [{ question: "继续吗？" }],
-    },
   };
 }
 
@@ -387,7 +356,8 @@ describe("Background", () => {
       },
     });
 
-    // 运行中：流式增量不重复触发相同内容的 updateService
+    // 运行中：状态直接来自 PhoneSessions 快照，流式增量不重复触发相同内容的 updateService
+    background.observer.sessions?.("h", [{ id: "s1", status: "running", title: "任务 1" }]);
     background.observer.sessionEvent?.("h", "s1", started("s1"), true, { title: "任务 1" }, false);
     await settle();
     const countAfterStart = calls.length;
@@ -421,18 +391,11 @@ describe("Background", () => {
     expect(calls.length).toBe(countAfterStart);
 
     // 权限请求 & 提问 → 待确认
-    background.observer.sessionEvent?.(
-      "h",
-      "s1",
-      permissionRequested("s1"),
-      true,
-      { title: "任务 1" },
-      false,
-    );
+    background.observer.sessions?.("h", [{ id: "s1", status: "pending", title: "任务 1" }]);
     await settle();
     expect(calls.at(-1)?.notice?.shortCriticalText).toBe("待确认");
 
-    // 完成后进入未看「已完成」，用户查看后清除并回到不上岛
+    // 完成后进入未看「已完成」（即使随后会话被 closeIfIdle 移除仍保留未看标记），用户查看后清除并回到不上岛
     background.observer.sessionEvent?.(
       "h",
       "s1",
@@ -441,6 +404,7 @@ describe("Background", () => {
       { title: "任务 1" },
       false,
     );
+    background.observer.sessions?.("h", [{ id: "s1", status: "idle", title: "任务 1" }]);
     await settle();
     expect(calls.at(-1)).toEqual({
       action: "update",
@@ -452,6 +416,11 @@ describe("Background", () => {
         target: { hostId: "h", sessionId: "s1" },
       },
     });
+    // 会话被关闭从活动列表移除后，「已完成」未看标记照旧保留
+    background.observer.sessions?.("h", []);
+    await settle();
+    expect(calls.at(-1)?.notice?.shortCriticalText).toBe("已完成");
+
     background.observer.viewing?.({ hostId: "h", sessionId: "s1" });
     await settle();
     expect(calls.at(-1)).toEqual({
@@ -463,22 +432,7 @@ describe("Background", () => {
     });
 
     // 提问也是待确认
-    background.observer.sessionEvent?.(
-      "h",
-      "s2",
-      started("s2"),
-      true,
-      { title: "提问会话" },
-      false,
-    );
-    background.observer.sessionEvent?.(
-      "h",
-      "s2",
-      questionRequested("s2"),
-      true,
-      { title: "提问会话" },
-      false,
-    );
+    background.observer.sessions?.("h", [{ id: "s2", status: "pending", title: "提问会话" }]);
     await settle();
     expect(calls.at(-1)).toEqual({
       action: "update",
@@ -501,6 +455,294 @@ describe("Background", () => {
         promoted: true,
       },
     });
+  });
+
+  it("回归：切走空闲会话触发 closeIfIdle，session.close 在途期间收到真实新轮事件序列，关闭后常驻通知同步清除运行中", async () => {
+    const { calls, background, settle } = fixture();
+    background.observer.hosts?.([computer]);
+    background.observer.state?.(computer, "online", "");
+    await settle();
+
+    const sessionId = "202611191321-9369911a";
+    let pushEvent: ((event: RuntimeEvent) => void) | undefined;
+    let resolveClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      resolveClose = resolve;
+    });
+
+    const initialReplay: RuntimeEvent[] = [
+      {
+        type: "session.created",
+        sessionId,
+        seq: 1,
+        time: "2026-11-19T13:21:00.000Z",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "0.54.0",
+          cwd: "/repo",
+          workspaceRoot: "/repo",
+          model: { provider: "fake", model: "fake-1" },
+          permissionPreset: "default",
+        },
+      },
+      {
+        type: "session.titled",
+        sessionId,
+        seq: 2,
+        time: "2026-11-19T13:21:01.000Z",
+        payload: { title: "情形3-closeIfIdle竞态", source: "user" },
+      },
+      {
+        type: "turn.started",
+        sessionId,
+        seq: 3,
+        turnId: "turn-1-a6b8f365",
+        time: "2026-11-19T13:21:02.000Z",
+        payload: { turnIndex: 1 },
+      },
+      {
+        type: "message.user",
+        sessionId,
+        seq: 4,
+        turnId: "turn-1-a6b8f365",
+        time: "2026-11-19T13:21:02.100Z",
+        payload: { messageId: "u1", content: [{ type: "text", text: "init" }] },
+      },
+      {
+        type: "message.assistant",
+        sessionId,
+        seq: 5,
+        turnId: "turn-1-a6b8f365",
+        time: "2026-11-19T13:21:02.200Z",
+        payload: {
+          messageId: "a1",
+          model: { provider: "fake", model: "fake-1" },
+          content: [{ type: "text", text: "ok" }],
+          toolCalls: [],
+          finishReason: "stop",
+        },
+      },
+      {
+        type: "turn.completed",
+        sessionId,
+        seq: 6,
+        turnId: "turn-1-a6b8f365",
+        time: "2026-11-19T13:21:02.300Z",
+        payload: { reason: "done", steps: 1, usage: { inputTokens: 1, outputTokens: 1 } },
+      },
+    ];
+
+    const rpcSession = {
+      id: sessionId,
+      subscribe: vi.fn(async (listener: (event: RuntimeEvent) => void) => {
+        pushEvent = listener;
+        for (const ev of initialReplay) listener(ev);
+        return {
+          lastSeq: 6,
+          unsubscribe: vi.fn(() => {
+            pushEvent = undefined;
+            return Promise.resolve();
+          }),
+        };
+      }),
+      close: vi.fn(() => closeGate),
+      listShells: vi.fn(() => Promise.resolve([])),
+      pendingInputs: vi.fn(() => Promise.resolve({ items: [], paused: false })),
+      turnChanges: vi.fn(() => Promise.resolve([])),
+    } as unknown as RpcSession;
+
+    const client = {
+      onNotification: vi.fn(() => () => undefined),
+      runtime: {
+        listSessions: vi.fn(() => Promise.resolve([])),
+        resumeSession: vi.fn(() =>
+          Promise.resolve({
+            opened: {
+              sessionId,
+              meta: { cwd: "/repo" },
+              config: {},
+              warnings: [],
+              lastSeq: 6,
+            },
+            session: rpcSession,
+          }),
+        ),
+      },
+      session: vi.fn(() => rpcSession),
+    } as unknown as RpcClient;
+
+    const sessions = new PhoneSessions(
+      () => {
+        background.observer.sessions?.("h", sessions.observedSessions());
+      },
+      undefined,
+      (sid, event, live, entry) => {
+        background.observer.sessionEvent?.(
+          "h",
+          sid,
+          event,
+          live,
+          { ...(entry.view.title !== undefined ? { title: entry.view.title } : {}) },
+          false,
+        );
+      },
+    );
+
+    await sessions.connected(client);
+    await sessions.open(sessionId, true);
+    await settle();
+    expect(calls.at(-1)?.notice?.promoted).toBe(false);
+
+    // 用户切回首页，空闲会话触发 closeIfIdle（session.close() 在中继在途）
+    sessions.setSelected(undefined);
+    expect(rpcSession.close).toHaveBeenCalledTimes(1);
+
+    // 真实复现事件序列：在 session.close() 生效前，电脑端启动新轮并推来 4 条实时事件
+    const realRacedEvents: RuntimeEvent[] = [
+      {
+        type: "turn.started",
+        sessionId,
+        seq: 7,
+        turnId: "turn-2-0c6a1403",
+        time: "2026-11-19T13:21:40.000Z",
+        payload: { turnIndex: 2 },
+      },
+      {
+        type: "message.user",
+        sessionId,
+        seq: 8,
+        turnId: "turn-2-0c6a1403",
+        time: "2026-11-19T13:21:40.010Z",
+        payload: { messageId: "u2", content: [{ type: "text", text: "turn racing closeIfIdle" }] },
+      },
+      {
+        type: "runtime.status",
+        sessionId,
+        turnId: "turn-2-0c6a1403",
+        runId: "turn-2-0c6a1403",
+        eseq: 5,
+        afterSeq: 8,
+        time: "2026-11-19T13:21:40.020Z",
+        payload: { status: "thinking" },
+      },
+      {
+        type: "message.assistant.delta",
+        sessionId,
+        turnId: "turn-2-0c6a1403",
+        runId: "turn-2-0c6a1403",
+        eseq: 6,
+        afterSeq: 8,
+        time: "2026-11-19T13:21:40.030Z",
+        payload: { messageId: "a2", kind: "text", delta: "Turn 2 started... " },
+      },
+    ];
+    for (const ev of realRacedEvents) pushEvent?.(ev);
+    await settle();
+    expect(calls.at(-1)?.notice?.shortCriticalText).toBe("运行中");
+
+    // session.close() 在电脑端生效并退订，PhoneSessions 移除该会话（后续不会再收到 turn.completed）
+    resolveClose();
+    await settle();
+    expect(sessions.opened.has(sessionId)).toBe(false);
+    expect(calls.at(-1)?.notice).toEqual({
+      title: "Nocturne 远程：已连接 电脑 1",
+      promoted: false,
+    });
+  });
+
+  it("回归：长会话回放期间收到历史 turn.started 不把通知闪成运行中，回放中途失败也同步清理", async () => {
+    const { calls, background, settle } = fixture();
+    background.observer.hosts?.([computer]);
+    background.observer.state?.(computer, "online", "");
+    await settle();
+
+    const sessionId = "202611190224-079332c3";
+    let rejectSubscribe!: (error: Error) => void;
+    const rpcSession = {
+      id: sessionId,
+      subscribe: vi.fn((listener: (event: RuntimeEvent) => void) => {
+        // 推送前几条历史事件（含 seq 3 turn.started），但尚未到达 seq 332 turn.completed
+        listener({
+          type: "session.created",
+          sessionId,
+          seq: 1,
+          time: "2026-11-19T02:24:50.000Z",
+          payload: {
+            formatVersion: 1,
+            nocturneVersion: "0.54.0",
+            cwd: "/repo",
+            workspaceRoot: "/repo",
+            model: { provider: "fake", model: "fake-1" },
+            permissionPreset: "default",
+          },
+        });
+        listener({
+          type: "turn.started",
+          sessionId,
+          seq: 3,
+          turnId: "turn-1-750a062e",
+          time: "2026-11-19T02:24:53.474Z",
+          payload: { turnIndex: 1 },
+        });
+        return new Promise((_resolve, reject) => {
+          rejectSubscribe = reject;
+        });
+      }),
+      close: vi.fn(() => Promise.resolve()),
+      listShells: vi.fn(() => Promise.resolve([])),
+      pendingInputs: vi.fn(() => Promise.resolve({ items: [], paused: false })),
+      turnChanges: vi.fn(() => Promise.resolve([])),
+    } as unknown as RpcSession;
+
+    const client = {
+      onNotification: vi.fn(() => () => undefined),
+      runtime: {
+        listSessions: vi.fn(() => Promise.resolve([])),
+        resumeSession: vi.fn(() =>
+          Promise.resolve({
+            opened: {
+              sessionId,
+              meta: { cwd: "/repo" },
+              config: {},
+              warnings: [],
+              lastSeq: 1367,
+            },
+            session: rpcSession,
+          }),
+        ),
+      },
+      session: vi.fn(() => rpcSession),
+    } as unknown as RpcClient;
+
+    const sessions = new PhoneSessions(
+      () => {
+        background.observer.sessions?.("h", sessions.observedSessions());
+      },
+      undefined,
+      (sid, event, live, entry) => {
+        background.observer.sessionEvent?.(
+          "h",
+          sid,
+          event,
+          live,
+          { ...(entry.view.title !== undefined ? { title: entry.view.title } : {}) },
+          false,
+        );
+      },
+    );
+
+    await sessions.connected(client);
+    const openPromise = sessions.open(sessionId, true);
+    await settle();
+    // 回放尚未完成：绝不因历史 turn.started 报运行中
+    expect(calls.some((c) => c.notice?.shortCriticalText === "运行中")).toBe(false);
+
+    // 订阅中途失败：entry 被清理，通知保持不上岛
+    rejectSubscribe(new Error("connection_closed"));
+    await expect(openPromise).rejects.toThrow("connection_closed");
+    await settle();
+    expect(sessions.opened.has(sessionId)).toBe(false);
+    expect(calls.at(-1)?.notice?.promoted).toBe(false);
   });
 
   it("开关默认开，关闭后停止服务，再打开重新启动；设置存在本地", async () => {

@@ -37,6 +37,7 @@ import {
 import { syncShellSnapshot } from "../shell-snapshot";
 import { forkDraftText } from "../fork-session";
 import { activityMs, type SessionSummary, type SessionStatus } from "../session-tree";
+import type { ObservedPhoneSession } from "./platform";
 
 export interface PhoneSession {
   session: RpcSession;
@@ -223,6 +224,27 @@ export class PhoneSessions {
     }
   }
 
+  /**
+   * 导出当前已打开且已就绪的会话状态快照，供平台观察者（如安卓常驻通知）直接复用，
+   * 不再在平台侧维护并行 SessionView。
+   */
+  observedSessions(): ObservedPhoneSession[] {
+    const list: ObservedPhoneSession[] = [];
+    for (const [id, entry] of this.opened) {
+      if (entry.dead || entry.replaying === true) continue;
+      const summary = this.list.find((item) => item.id === id);
+      const title = entry.view.title;
+      const firstText = summary?.firstText ?? entry.view.firstTitle;
+      list.push({
+        id,
+        status: phoneStatus(entry),
+        ...(title !== undefined ? { title } : {}),
+        ...(firstText !== undefined ? { firstText } : {}),
+      });
+    }
+    return list;
+  }
+
   private async closeIfIdle(entry: PhoneSession): Promise<void> {
     const id = entry.session.id;
     if (entry.member === true) {
@@ -294,6 +316,7 @@ export class PhoneSessions {
     });
     // 只恢复连接开始时已有的会话：恢复期间通知带来的新会话由 track/open 打开，
     // 遍历活 Map 会把它们再 resume 一次（后台报 session_already_open）
+    let pruned = false;
     for (const [id, entry] of [...this.opened]) {
       if (generation !== this.generation) return;
       if (
@@ -306,6 +329,8 @@ export class PhoneSessions {
             !hasActiveSuiteThreads(entry)))
       ) {
         this.opened.delete(id);
+        this.turnStarts.delete(id);
+        pruned = true;
         continue;
       }
       // 恢复期间用户已点开它：并入那次打开，不重复 resume
@@ -330,6 +355,7 @@ export class PhoneSessions {
         if (this.opening.get(id) === run) this.opening.delete(id);
       }
     }
+    if (pruned) this.changed();
     await this.refresh();
   }
   disconnected(): void {
@@ -470,38 +496,53 @@ export class PhoneSessions {
     const subscribeStart = Date.now();
     let subscribed = false;
     let pendingRevision = 0;
-    entry.tracker = await trackSessionView(
-      session,
-      (_view, event) => {
-        // 待发输入快照（ADR-0070）：临时事件，订阅后再取一次当前快照对齐
-        if (event.type === "input.pending") {
-          pendingRevision += 1;
-          entry.pendingInputs = event.payload;
-        }
-        syncPhoneOutgoing(entry);
-        const at = Date.parse(event.time);
-        const live = subscribed || !("seq" in event) || (!Number.isNaN(at) && at >= subscribeStart);
-        if (event.type === "turn.started" && !Number.isNaN(at)) this.turnStarts.set(session.id, at);
-        this.onEvent?.(
-          session.id,
-          event.type,
-          "seq" in event ? event.seq : undefined,
-          live,
-          event.time,
-        );
-        this.onSessionEvent?.(session.id, event, live, entry, this.turnStarts.get(session.id));
-        if (entry.replaying !== true) {
-          for (const listener of entry.listeners) listener();
-          this.changed();
-        }
-        if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
-        if (subscribed) void this.closeIfIdle(entry).catch(() => undefined);
-      },
-      {
-        view,
-        afterSeq: view.lastSeq,
-      },
-    );
+    try {
+      entry.tracker = await trackSessionView(
+        session,
+        (_view, event) => {
+          // 待发输入快照（ADR-0070）：临时事件，订阅后再取一次当前快照对齐
+          if (event.type === "input.pending") {
+            pendingRevision += 1;
+            entry.pendingInputs = event.payload;
+          }
+          syncPhoneOutgoing(entry);
+          const at = Date.parse(event.time);
+          const live =
+            subscribed || !("seq" in event) || (!Number.isNaN(at) && at >= subscribeStart);
+          if (event.type === "turn.started" && !Number.isNaN(at))
+            this.turnStarts.set(session.id, at);
+          this.onEvent?.(
+            session.id,
+            event.type,
+            "seq" in event ? event.seq : undefined,
+            live,
+            event.time,
+          );
+          this.onSessionEvent?.(session.id, event, live, entry, this.turnStarts.get(session.id));
+          if (entry.replaying !== true) {
+            for (const listener of entry.listeners) listener();
+            this.changed();
+          }
+          if (live && event.type === "turn.completed") void this.refreshTurnChanges(entry);
+          if (subscribed) void this.closeIfIdle(entry).catch(() => undefined);
+        },
+        {
+          view,
+          afterSeq: view.lastSeq,
+        },
+      );
+    } catch (error) {
+      if (this.opened.get(session.id) === entry) {
+        this.opened.delete(session.id);
+        this.turnStarts.delete(session.id);
+        this.changed();
+      }
+      throw error;
+    }
+    if (this.opened.get(session.id) !== entry || entry.dead) {
+      await entry.tracker.stop().catch(() => undefined);
+      return entry;
+    }
     subscribed = true;
     entry.replaying = false;
     void syncShellSnapshot(session, view)
