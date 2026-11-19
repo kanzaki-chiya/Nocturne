@@ -198,9 +198,42 @@
         }
 
         const DEFAULT_CAPTURE_SCALE = 2;
+        const CAPTURE_PADDING = 24;
         const MAX_CANVAS_DIM = 16384;
         const MAX_CANVAS_AREA = 67108864;
         const SVG_NS = "http://www.w3.org/2000/svg";
+        const REPLACED_TAGS = new Set([
+          "IMG",
+          "SVG",
+          "CANVAS",
+          "VIDEO",
+          "PICTURE",
+          "IFRAME",
+          "INPUT",
+          "TEXTAREA",
+          "SELECT",
+          "BUTTON",
+        ]);
+        const NON_TRAVERSED_TAGS = new Set([
+          "HEAD",
+          "SCRIPT",
+          "NOSCRIPT",
+          "STYLE",
+          "LINK",
+          "META",
+          "TITLE",
+          "TEMPLATE",
+        ]);
+        const LEAF_REPLACED_TAGS = new Set([
+          "IMG",
+          "SVG",
+          "CANVAS",
+          "VIDEO",
+          "IFRAME",
+          "INPUT",
+          "TEXTAREA",
+          "SELECT",
+        ]);
         const HTML_COMPUTED_PROPS = [
           "color",
           "background-color",
@@ -312,10 +345,128 @@
 
         function isTransparentColor(color) {
           if (!color || color === "transparent") return true;
+          const slash = color.match(/\/\s*([\d.]+)(%?)\s*\)$/);
+          if (slash) return parseFloat(slash[1]) === 0;
           const m = color.match(/^rgba?\(([^)]+)\)$/i);
           if (!m) return false;
-          const parts = m[1].split(/[,/]/).map((s) => s.trim());
+          const parts = m[1].split(",").map((s) => s.trim());
           return parts.length >= 4 && parseFloat(parts[3]) === 0;
+        }
+
+        function hasBackgroundImage(cs) {
+          const bgImg = cs.backgroundImage;
+          if (!bgImg || bgImg === "none") return false;
+          return !/^(?:\s*none\s*,)*\s*none\s*$/i.test(bgImg);
+        }
+
+        function hasVisibleBorder(cs) {
+          for (const side of ["Top", "Right", "Bottom", "Left"]) {
+            const width = parseFloat(cs[`border${side}Width`]);
+            if (!(width > 0)) continue;
+            const style = cs[`border${side}Style`];
+            if (!style || style === "none" || style === "hidden") continue;
+            if (!isTransparentColor(cs[`border${side}Color`])) return true;
+          }
+          return false;
+        }
+
+        function hasBoxShadowOrOutline(cs) {
+          if (cs.boxShadow && cs.boxShadow !== "none") return true;
+          const outlineWidth = parseFloat(cs.outlineWidth);
+          const outlineStyle = cs.outlineStyle;
+          return (
+            outlineWidth > 0 &&
+            Boolean(outlineStyle) &&
+            outlineStyle !== "none" &&
+            !isTransparentColor(cs.outlineColor)
+          );
+        }
+
+        function isPaintedElement(tag, cs) {
+          if (REPLACED_TAGS.has(tag)) return true;
+          if (!isTransparentColor(cs.backgroundColor)) return true;
+          if (hasBackgroundImage(cs)) return true;
+          if (hasVisibleBorder(cs)) return true;
+          if (hasBoxShadowOrOutline(cs)) return true;
+          return false;
+        }
+
+        function computeCaptureBounds(docEl, body, docWidth, docHeight) {
+          const full = { x: 0, y: 0, width: docWidth, height: docHeight };
+          const docStyle = getComputedStyle(docEl);
+          const bodyStyle = getComputedStyle(body);
+          if (hasBackgroundImage(docStyle) || hasBackgroundImage(bodyStyle)) {
+            return full;
+          }
+
+          const scrollX = window.scrollX || window.pageXOffset || docEl.scrollLeft || 0;
+          const scrollY = window.scrollY || window.pageYOffset || docEl.scrollTop || 0;
+
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+
+          function includeRect(rect) {
+            if (!rect || !(rect.width > 0) || !(rect.height > 0)) return;
+            const left = rect.left + scrollX;
+            const top = rect.top + scrollY;
+            const right = rect.right + scrollX;
+            const bottom = rect.bottom + scrollY;
+            if (left < minX) minX = left;
+            if (top < minY) minY = top;
+            if (right > maxX) maxX = right;
+            if (bottom > maxY) maxY = bottom;
+          }
+
+          const range = document.createRange();
+
+          function walk(node, isRootContainer) {
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            const tag = node.tagName.toUpperCase();
+            if (NON_TRAVERSED_TAGS.has(tag)) return;
+
+            const cs = isRootContainer ? bodyStyle : getComputedStyle(node);
+            if (cs.display === "none") return;
+
+            const isHidden = cs.visibility === "hidden" || cs.visibility === "collapse";
+
+            if (!isRootContainer && !isHidden && isPaintedElement(tag, cs)) {
+              includeRect(node.getBoundingClientRect());
+            }
+
+            if (!isRootContainer && LEAF_REPLACED_TAGS.has(tag)) {
+              return;
+            }
+
+            for (const child of node.childNodes) {
+              if (child.nodeType === Node.TEXT_NODE) {
+                if (isHidden) continue;
+                if (!child.nodeValue || !/\S/.test(child.nodeValue)) continue;
+                range.selectNodeContents(child);
+                for (const rect of range.getClientRects()) {
+                  includeRect(rect);
+                }
+              } else if (child.nodeType === Node.ELEMENT_NODE) {
+                walk(child, false);
+              }
+            }
+          }
+
+          walk(body, true);
+
+          if (!Number.isFinite(minX)) {
+            return full;
+          }
+
+          const x = Math.max(0, Math.floor(minX - CAPTURE_PADDING));
+          const y = Math.max(0, Math.floor(minY - CAPTURE_PADDING));
+          const right = Math.min(docWidth, Math.ceil(maxX + CAPTURE_PADDING));
+          const bottom = Math.min(docHeight, Math.ceil(maxY + CAPTURE_PADDING));
+          if (right <= x || bottom <= y) {
+            return full;
+          }
+          return { x, y, width: right - x, height: bottom - y };
         }
 
         function resolveCaptureBackground() {
@@ -563,31 +714,32 @@
           const body = document.body;
           if (!docEl || !body) throw new Error("document not ready");
 
-          const width = Math.ceil(
+          const docWidth = Math.ceil(
             Math.max(docEl.scrollWidth, body.scrollWidth, docEl.clientWidth, 1),
           );
-          const height = Math.ceil(
+          const docHeight = Math.ceil(
             Math.max(docEl.scrollHeight, body.scrollHeight, docEl.clientHeight, 1),
           );
+          const bounds = computeCaptureBounds(docEl, body, docWidth, docHeight);
 
           let scale = DEFAULT_CAPTURE_SCALE;
-          if (width * scale > MAX_CANVAS_DIM) {
-            scale = Math.min(scale, MAX_CANVAS_DIM / width);
+          if (bounds.width * scale > MAX_CANVAS_DIM) {
+            scale = Math.min(scale, MAX_CANVAS_DIM / bounds.width);
           }
-          if (height * scale > MAX_CANVAS_DIM) {
-            scale = Math.min(scale, MAX_CANVAS_DIM / height);
+          if (bounds.height * scale > MAX_CANVAS_DIM) {
+            scale = Math.min(scale, MAX_CANVAS_DIM / bounds.height);
           }
-          if (width * height * scale * scale > MAX_CANVAS_AREA) {
-            scale = Math.min(scale, Math.sqrt(MAX_CANVAS_AREA / (width * height)));
+          if (bounds.width * bounds.height * scale * scale > MAX_CANVAS_AREA) {
+            scale = Math.min(scale, Math.sqrt(MAX_CANVAS_AREA / (bounds.width * bounds.height)));
           }
-          const canvasWidth = Math.max(1, Math.floor(width * scale));
-          const canvasHeight = Math.max(1, Math.floor(height * scale));
+          const canvasWidth = Math.max(1, Math.floor(bounds.width * scale));
+          const canvasHeight = Math.max(1, Math.floor(bounds.height * scale));
 
           const bgColor = resolveCaptureBackground();
           const blobCache = new Map();
           const collectedCss = await collectStylesheets(
-            docEl.clientWidth || width,
-            docEl.clientHeight || window.innerHeight || height,
+            docEl.clientWidth || docWidth,
+            docEl.clientHeight || window.innerHeight || docHeight,
             blobCache,
           );
 
@@ -610,9 +762,9 @@
           styleEl.textContent = collectedCss;
           cloneHead.appendChild(styleEl);
 
-          cloneRoot.style.width = `${width}px`;
-          cloneRoot.style.height = `${height}px`;
-          cloneRoot.style.minHeight = `${height}px`;
+          cloneRoot.style.width = `${docWidth}px`;
+          cloneRoot.style.height = `${docHeight}px`;
+          cloneRoot.style.minHeight = `${docHeight}px`;
           cloneRoot.style.margin = "0";
           cloneRoot.style.overflow = "hidden";
           if (bgColor !== "transparent") {
@@ -620,13 +772,13 @@
           }
           const cloneBody = cloneRoot.querySelector("body");
           if (cloneBody) {
-            cloneBody.style.minHeight = `${height}px`;
+            cloneBody.style.minHeight = `${docHeight}px`;
           }
 
           const serialized = new XMLSerializer().serializeToString(cloneRoot);
           const svg =
-            `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasWidth}" height="${canvasHeight}" viewBox="0 0 ${width} ${height}">` +
-            `<foreignObject x="0" y="0" width="${width}" height="${height}">${serialized}</foreignObject>` +
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasWidth}" height="${canvasHeight}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}">` +
+            `<foreignObject x="0" y="0" width="${docWidth}" height="${docHeight}">${serialized}</foreignObject>` +
             `</svg>`;
           const svgBytes = new TextEncoder().encode(svg);
           const svgUrl = `data:image/svg+xml;base64,${bytesToBase64(svgBytes)}`;
