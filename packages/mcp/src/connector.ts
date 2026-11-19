@@ -1849,8 +1849,8 @@ export function createMcpConnector(options?: {
               }
               st.tools = staged;
               reordered = true;
-            } else if (reordered && st.tools.size > 0) {
-              // 靠前服务器工具变化时，重放靠后已注册服务器（如缓存命中的 standby 插件）以保持声明顺序
+            } else if (reordered && st.cfg.origin === "plugin" && st.tools.size > 0) {
+              // 靠前服务器工具变化时，只重放靠后已注册的插件服务器（如缓存命中的 standby 插件）以保持声明顺序
               for (const [name, def] of st.tools) {
                 diff.remove.push(name);
                 diff.add.push(def);

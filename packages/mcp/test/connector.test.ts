@@ -306,6 +306,55 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
     }
   });
 
+  it("配置文件服务器 A、B 共存时，A 中途 list_changed 不重放 B，下一边界顺序为 B 在前、A 新工具在后", async () => {
+    const session = await createMcpConnector().open({
+      servers: [
+        { name: "alpha", origin: "user", command: process.execPath, args: [FAKE_SERVER] },
+        { name: "beta", origin: "user", command: process.execPath, args: [FAKE_SERVER] },
+      ],
+      cwd,
+      workspaceRoot: cwd,
+      sessionId: "test-session-order",
+      platform,
+      emitServer: () => undefined,
+      warn: () => undefined,
+    });
+    try {
+      await session.startup();
+      const activeTools = new Map<string, ToolDefinition>();
+      const applyToActive = (diff: ReturnType<McpSession["applyPendingTools"]>) => {
+        for (const name of diff.remove) activeTools.delete(name);
+        for (const tool of diff.add) activeTools.set(tool.name, tool);
+      };
+
+      applyToActive(session.applyPendingTools());
+      const initialNames = [...activeTools.keys()];
+      const alphaBefore = initialNames.filter((n) => n.startsWith("mcp__alpha__"));
+      const betaBefore = initialNames.filter((n) => n.startsWith("mcp__beta__"));
+      expect(initialNames).toEqual([...alphaBefore, ...betaBefore]);
+
+      await call(getTool(session, "mcp__alpha__mutate"), {});
+      await vi.waitFor(() =>
+        expect(session.status().find((s) => s.name === "alpha")?.toolCount).toBe(
+          alphaBefore.length + 1,
+        ),
+      );
+
+      const diff = session.applyPendingTools();
+      expect(diff.remove.some((n) => n.startsWith("mcp__beta__"))).toBe(false);
+      expect(diff.add.some((t) => t.name.startsWith("mcp__beta__"))).toBe(false);
+      expect(diff.add.map((t) => t.name)).toContain("mcp__alpha__added");
+
+      applyToActive(diff);
+      const nextNames = [...activeTools.keys()];
+      const alphaAfter = nextNames.filter((n) => n.startsWith("mcp__alpha__"));
+      expect(alphaAfter).toContain("mcp__alpha__added");
+      expect(nextNames).toEqual([...betaBefore, ...alphaAfter]);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("stdio 每会话只允许重连三次，成功不清零，第四次不再 spawn", async () => {
     const { session } = await openFake();
     const spawn = vi.spyOn(platform.process, "spawnPipe");
