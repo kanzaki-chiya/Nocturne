@@ -53,6 +53,12 @@ export function formatTime(at: number): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 }
 
+/** 探针导出文件名：不含路径分隔符或冒号，供系统保存选择器预填。 */
+export function probeExportFilename(at: number): string {
+  const date = new Date(at);
+  return `nocturne-probe-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.txt`;
+}
+
 export function summarize(
   entries: readonly ProbeEntry[],
   native: readonly NativeEvent[],

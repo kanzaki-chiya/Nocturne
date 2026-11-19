@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseNativeLog, ProbeLog, summarize, type ProbeEntry } from "../src/probe";
+import {
+  parseNativeLog,
+  probeExportFilename,
+  ProbeLog,
+  summarize,
+  type ProbeEntry,
+} from "../src/probe";
 
 beforeEach(() => {
   localStorage.clear();
@@ -143,5 +149,9 @@ describe("ProbeLog", () => {
     expect(
       summarize([[1000, "event", "bg live s turn.completed 1 sent=1650"]], []).backgroundLatency,
     ).toEqual({ count: 1, median: -650, max: -650 });
+  });
+  it("导出文件名安全且不含路径或冒号字符", () => {
+    const name = probeExportFilename(new Date(2026, 10, 19, 8, 5, 9).getTime());
+    expect(name).toBe("nocturne-probe-20261119-080509.txt");
   });
 });

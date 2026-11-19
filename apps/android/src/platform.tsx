@@ -4,7 +4,7 @@ import { Background } from "./background";
 import { RESUME_EVENT, type AppHost, type BackgroundStatus } from "./host";
 import { BACK_EVENT, PAUSE_EVENT, TARGET_EVENT } from "./host";
 import { LocalNotifications, DONE_THRESHOLD_CHOICES, saveNotifyPrefs } from "./notifications";
-import { parseNativeLog, ProbeLog, summarize } from "./probe";
+import { parseNativeLog, probeExportFilename, ProbeLog, summarize } from "./probe";
 import { version } from "../package.json";
 import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import { versionMessage } from "../../desktop/src/web/connection";
@@ -217,18 +217,11 @@ function useRefreshEvery2s() {
   }, []);
 }
 
-function copyText(text: string): Promise<boolean> {
-  // 剪贴板不可用时由页面下方的日志框兜底：长按选择文字即可复制
-  return navigator.clipboard.writeText(text).then(
-    () => true,
-    () => false,
-  );
-}
-
 function ProbePage({ host, probe }: { host: AppHost; probe: ProbeLog }) {
   useRefreshEvery2s();
   const [native, setNative] = useState("");
   const [note, setNote] = useState("");
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     let active = true;
     const read = () => {
@@ -249,6 +242,31 @@ function ProbePage({ host, probe }: { host: AppHost; probe: ProbeLog }) {
   const nativeEvents = parseNativeLog(native);
   const summary = summarize(probe.all(), nativeEvents);
   const info = { version: APP_VERSION, agent: navigator.userAgent };
+  const exportLog = () => {
+    if (exporting) return;
+    setExporting(true);
+    setNote("");
+    const bytes = new TextEncoder().encode(probe.text(nativeEvents, info));
+    void host
+      .saveFile({
+        name: probeExportFilename(Date.now()),
+        mimeType: "text/plain",
+        bytes,
+      })
+      .then(
+        (result) => {
+          setNote("saved" in result ? "已导出探针记录" : "");
+        },
+        (cause: unknown) => {
+          setNote(
+            cause instanceof Error && cause.message ? `导出失败：${cause.message}` : "导出失败",
+          );
+        },
+      )
+      .finally(() => {
+        setExporting(false);
+      });
+  };
   return (
     <>
       <p>
@@ -267,15 +285,8 @@ function ProbePage({ host, probe }: { host: AppHost; probe: ProbeLog }) {
         前台服务启 {summary.native.serviceStarts} 次、停 {summary.native.serviceStops} 次。
       </p>
       <div className="phone-actions">
-        <button
-          className="phone-list-action"
-          onClick={() => {
-            void copyText(probe.text(nativeEvents, info)).then((ok) => {
-              setNote(ok ? "已复制探针记录" : "复制失败，请长按下面的记录选择文字");
-            });
-          }}
-        >
-          复制探针记录
+        <button className="phone-list-action" disabled={exporting} onClick={exportLog}>
+          导出探针记录
         </button>
         <button
           className="phone-list-action"

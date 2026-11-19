@@ -135,10 +135,16 @@ it("连接诊断里有后台探针入口，探针页能复制与清除记录", a
   const probe = new ProbeLog(() => true);
   probe.event("session-1", "message.delta", 1, true);
   const clear = vi.fn(() => Promise.resolve());
+  const saveFile = vi
+    .fn<AppHost["saveFile"]>()
+    .mockResolvedValueOnce({ saved: true })
+    .mockResolvedValueOnce({ cancelled: true })
+    .mockRejectedValueOnce(new Error("无法打开文件选择器"));
   const platform = appPlatform(
     withBackground(true, {
       nativeLog: () => Promise.resolve(`${Date.now()}\tservice_start\n`),
       clearNativeLog: clear,
+      saveFile,
     }),
     probe,
   );
@@ -149,8 +155,6 @@ it("连接诊断里有后台探针入口，探针页能复制与清除记录", a
   });
   expect(open).toHaveBeenCalledWith("probe");
   expect(platform.pages?.probe?.title).toBe("后台探针");
-  const writeText = vi.fn(() => Promise.resolve());
-  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
   await act(async () => {
     root?.unmount();
   });
@@ -158,14 +162,35 @@ it("连接诊断里有后台探针入口，探针页能复制与清除记录", a
   document.body.innerHTML = "";
   const page = await mount(platform.pages?.probe?.render(api()));
   expect(page.textContent).toContain("前台服务启 1 次");
-  const [copy, clearButton] = [...page.querySelectorAll("button")];
+  expect(page.querySelector("small")?.textContent).toBe(
+    "只记事件类型、会话 id 和时间，不含会话内容；只存在这台手机上。",
+  );
+  const [exportButton, clearButton] = [...page.querySelectorAll("button")];
+  expect(exportButton?.textContent).toBe("导出探针记录");
   await act(async () => {
-    copy?.click();
+    exportButton?.click();
   });
-  expect(writeText).toHaveBeenCalledOnce();
-  const exported = (writeText.mock.calls[0] as unknown as [string])[0];
+  expect(saveFile).toHaveBeenCalledTimes(1);
+  const firstCall = saveFile.mock.calls[0]?.[0];
+  expect(firstCall?.name).toMatch(/^nocturne-probe-\d{8}-\d{6}\.txt$/);
+  expect(firstCall?.mimeType).toBe("text/plain");
+  const exported = new TextDecoder().decode(firstCall?.bytes);
   expect(exported).toContain("Nocturne 后台探针");
   expect(exported).toContain("event fg live session-1 message.delta 1");
+  expect(page.querySelector('[role="status"]')?.textContent).toBe("已导出探针记录");
+
+  // 取消保存不报错，清空状态提示
+  await act(async () => {
+    exportButton?.click();
+  });
+  expect(page.querySelector('[role="status"]')).toBeNull();
+
+  // 导出失败给出提示
+  await act(async () => {
+    exportButton?.click();
+  });
+  expect(page.querySelector('[role="status"]')?.textContent).toBe("导出失败：无法打开文件选择器");
+
   await act(async () => {
     clearButton?.click();
   });

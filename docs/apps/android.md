@@ -102,7 +102,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 | 连接状态 `offline` | 电脑离线 | 是 |
 | 已连接且以上都没有 | 不设置 | 否（`setRequestPromotedOngoing(false)`） |
 
-  「出错 / 已完成」的未看语义与桌面侧栏 `rowTag` 一致：没在看该会话时实时结束才记，打开会话或新一轮实时开始时清除。
+  会话运行态直接取自 `PhoneSessions.opened` 中非回放、非断开条目的视图与状态，会话关闭、移除或回放中断时同步移出，不在 `Background` 另行维护并行 `SessionView`。「出错 / 已完成」的未看语义与桌面侧栏 `rowTag` 一致：没在看该会话时实时结束才记，打开会话或新一轮实时开始时清除。
 - `START_NOT_STICKY`：进程被回收后不自动拉起，WebView 不在，服务会谎称已连接。
 - 首页 Android 返回将任务退到后台（不 finish），内页按页面历史返回；从最近任务划掉时服务 `onTaskRemoved` 停止。原生主题改为 AppCompat DayNight，不再依赖 Material3 Gradle 包。
 - Android 13+ 需要 `POST_NOTIFICATIONS` 才会显示通知，启动服务时请求一次；授权后立即重新发布被丢弃的常驻通知。前台服务本身不依赖这个权限。
@@ -144,7 +144,7 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 - 原生一侧（`NativeLog`）：前台服务启停、Activity 前后台、渲染进程回收与重启、通知权限结果；
 - 页面启动。
 
-摘要给出前后台事件数、最大事件间隔、间隔大于 5 秒的次数、「成批涌入」批次、后台计时器最大延迟，以及原生事件计数；实时后台事件按 `到达 epoch − event.time epoch` 统计中位数与最大值，重放不算。前后台标签来自 Activity 的原生 pause/resume 信号，绝不用 WebView 的 `document.visibilityState`（它因保活而一直 visible）。「复制探针记录」导出纯文本（JS 与原生逐行都附 epoch 毫秒），清除同时清掉两侧；JS 侧最多 20000 条。小米实测与长期风险见 [ADR-0059 修订](../decisions/ADR-0059-android-app.md#修订2026-10-16-小米真机与第-2-轮)。
+摘要给出前后台事件数、最大事件间隔、间隔大于 5 秒的次数、「成批涌入」批次、后台计时器最大延迟，以及原生事件计数；实时后台事件按 `到达 epoch − event.time epoch` 统计中位数与最大值，重放不算。前后台标签来自 Activity 的原生 pause/resume 信号，绝不用 WebView 的 `document.visibilityState`（它因保活而一直 visible）。「导出探针记录」经 `host.saveFile`（`ACTION_CREATE_DOCUMENT`）导出 `.txt` 纯文本文件（JS 与原生逐行都附 epoch 毫秒），清除同时清掉两侧；JS 侧最多 20000 条。小米实测与长期风险见 [ADR-0059 修订](../decisions/ADR-0059-android-app.md#修订2026-10-16-小米真机与第-2-轮)。
 
 到达延迟依赖电脑和手机时钟同步，负值保留用于发现时钟偏差，不能直接当成网络耗时；导出也带此提示。
 
