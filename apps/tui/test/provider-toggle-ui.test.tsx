@@ -14,17 +14,8 @@ import { ProviderPage, type ProviderToggleBridge } from "../src/components/provi
 
 const ENTER = "\r";
 const SPACE = " ";
-function pause(ms = 40): Promise<undefined> {
-  const { promise, resolve } = Promise.withResolvers<undefined>();
-  setTimeout(() => resolve(undefined), ms);
-  return promise;
-}
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await pause(20);
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
 }
 /** 等 React 跑完 useInput 订阅/退订：帧写出不代表按键路由已切换。 */
 async function flushInput(): Promise<void> {
