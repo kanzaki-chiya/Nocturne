@@ -383,9 +383,13 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 保存、删除和开关在服务端走配置写队列，写完后重载配置并更新已打开会话；MCP 变更自身不发 providersChanged，页面以响应回执刷新本页数据；请求失败时显示错误并同样重新拉取一次列表，因为磁盘上的配置可能已经改了。toast 显示保存或删除结果。接口见 [rpc.md](../protocols/rpc.md) 第 3.5 节，生命周期见 [mcp.md](../architecture/mcp.md)。
 
+#### 插件
+
+「插件」页（`src/PluginsPage.tsx`）按宿主（Codex / Claude Code）分组列出只读发现的已装插件（空组隐藏）。列表每行左侧与详情页头部均显示固定尺寸的插件图标（有 `PluginOverview.icon` 时经 `<img>` 渲染，缺失时显示统一默认插件图标，不显示首字母等替代文字）；列表行显示显示名、版本徽标、说明、变更状态（「已更改」与「重新确认」）与启停开关，点击行进入带面包屑的独立详情页（含概况、Hook、技能、不运行项与警告，及资源管理器打开目录按钮）。打开开关前先弹确认对话框核对 Hook、技能与不运行项；数据经 `plugins.describePlugins` / `plugins.setPluginEnabled` 读取并监听 `runtime.providersChanged` 刷新。接口见 [rpc.md](../protocols/rpc.md) 第 3.14 节，规则见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)。
+
 #### Hook
 
-「Hook」页（`src/HooksPage.tsx`）只读展示配置文件中的 Hook（不含插件 Hook；插件 Hook 仍在「插件」页查看）。数据经 `hooks.describeHooks` 读取，传入当前活动会话工作区（无活动会话时回退普通对话工作区 `effectiveWorkspace`），并监听 `runtime.providersChanged` 与 `grants.changed` 刷新。列表按事件点分组（规范顺序，空组隐藏），组内按配置与执行顺序排列；每行参照插件页 `PluginHookList` 样式展示等宽命令与参数、`matcher`（仅 `PreToolUse` / `PermissionRequest` / `PostToolUse` 有值时显示）、超时与来源配置文件路径；项目级条目按 Core 返回的 `trusted` 显示「已信任」或「未信任」（未信任条目淡化命令文字以示不生效，UI 不自行判定信任或权限）。无任何条目时显示「没有 Hook」空状态；页面不提供增删改开关、说明文字或外链按钮。接口见 [rpc.md](../protocols/rpc.md) 第 3.17 节，规则见 [hooks.md](../architecture/hooks.md)。
+「Hook」页（`src/HooksPage.tsx`）只读展示实际会运行的 Hook。配置文件中的 Hook 经 `hooks.describeHooks` 读取（传入当前活动会话工作区，无活动会话时回退普通对话工作区 `effectiveWorkspace`），按事件点分组（规范顺序，空组隐藏）排在前面，组内按配置与执行顺序排列；每行参照插件页 `PluginHookList` 样式展示等宽命令与参数、`matcher`（仅 `PreToolUse` / `PermissionRequest` / `PostToolUse` 有值时显示）、超时与来源配置文件路径；项目级条目按 Core 返回的 `trusted` 显示「已信任」或「未信任」（未信任条目淡化命令文字以示不生效，UI 不自行判定信任或权限）。其后经 `plugins.describePlugins` 展示「来自插件」分组（空组隐藏）：只列状态为 `on` 且至少包含 1 个受支持 Hook 的插件，每行显示图标、显示名、下一行「N 个 Hook」（不含不受支持的条目）与右侧 `›`，点击跳转到「设置 › 插件」里该插件的详情页（从详情返回时回到插件列表）。页面监听 `runtime.providersChanged` 与 `grants.changed` 刷新；配置 Hook 与插件 Hook 都没有时才显示「没有 Hook」空状态；页面不提供增删改开关、说明文字或外链按钮。接口见 [rpc.md](../protocols/rpc.md) 第 3.14 / 3.17 节，规则见 [hooks.md](../architecture/hooks.md)。
 
 #### 外部 agent
 

@@ -121,7 +121,7 @@ ADR-0012 与 [hooks.md](../architecture/hooks.md) 将 Hook 定位为控制流与
 #### 4. 启用、整目录指纹信任与状态文件
 
 - **状态文件**：`<NOCTURNE_HOME>/plugins.json`（形状 `{ "version": 1, "plugins": { "<id>": { "enabled": true, "hash": "sha256:…" } } }`），与 `mcp.json` 共用配置写入队列并原子写；损坏或版本不符整份忽略并告警，无效条目逐条忽略。不写入手写 `config.json`。
-- **整目录指纹**（依据 `hooks/src/engine/plugin_fingerprint.rs`）：对整个插件根目录做深度优先、按字节序排列文件名的 SHA-256 指纹，前缀改为 `nocturne-plugin-bundle-v1`（跳过 `__pycache__`、`.venv`、`*.pyc`、`*.egg-info`）；遇到符号链接或非普通文件/目录即失败且禁止启用（`setPluginEnabled` 抛错）。
+- **整目录指纹**（依据 `hooks/src/engine/plugin_fingerprint.rs`）：对整个插件根目录做深度优先、按字节序排列文件名的 SHA-256 指纹，前缀改为 `nocturne-plugin-bundle-v1`（跳过 `__pycache__`、`.venv`、`*.pyc`、`*.egg-info`；清单 `interface.composerIcon` / `interface.logo` 字段及其指向的受支持图片文件不计入指纹）；遇到符号链接或非普通文件/目录即失败且禁止启用（`setPluginEnabled` 抛错）。
 - **校验与生效时机**：已发现插件默认不启用（`state: "off"`）。每次会话打开与每次 `describePlugins` 重新计算指纹：一致为 `on`，变化或校验失败为 `changed`（不运行 Hook、不提供技能，会话打开时发一次 `runtime.warning`，code 为 `plugin_changed` 并写插件名；再次启用即重新信任）。Hook 变更对之后打开的会话生效；技能目录在空闲边界重建。
 
 #### 5. 技能接入与 Runtime / RPC 接口
