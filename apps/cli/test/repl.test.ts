@@ -4,7 +4,7 @@
  * 对已关闭的 rl 调 prompt() → ERR_USE_AFTER_CLOSE。
  */
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSession, SessionSummary } from "@nocturne/core";
 import type { RuntimeEvent, TurnEndReason } from "@nocturne/core/protocol";
@@ -30,19 +30,19 @@ it("REPL 外部 agent 点名传递delegate和任务原文，空任务不提交",
     },
   };
   const done = runRepl(session, fakeRuntime, io);
-  await tick();
+  await ready(stdoutChunks);
   stdin.write("/codex\n");
-  await tick();
-  expect(stdoutChunks.join("")).toContain("用法：/Codex 任务");
+  await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("用法：/Codex 任务"));
   expect(submitted).toEqual([]);
   stdin.write("/cOdEx 检查  两个空格\n");
-  await tick();
-  expect(submitted).toEqual([
-    {
-      text: "/cOdEx 检查  两个空格",
-      delegate: { agent: "Codex", task: "检查  两个空格" },
-    },
-  ]);
+  await vi.waitFor(() =>
+    expect(submitted).toEqual([
+      {
+        text: "/cOdEx 检查  两个空格",
+        delegate: { agent: "Codex", task: "检查  两个空格" },
+      },
+    ]),
+  );
   stdin.end();
   expect(await done).toBe(0);
 });
@@ -89,34 +89,26 @@ it("REPL 执行方式（ADR-0076）：带任务提交 workMode，/goal 看状态
       }) as ReturnType<RuntimeSession["state"]>,
   };
   const done = runRepl(session, fakeRuntime, io);
-  await tick();
-  stdin.write("/grill-me\n");
-  await tick();
+  await ready(stdoutChunks);
+  await enter(stdin, stdoutChunks, "/grill-me");
   expect(stdoutChunks.join("")).toContain("用法：/grill-me 需求");
-  stdin.write("/goal 修好测试\n");
-  await tick();
+  await enter(stdin, stdoutChunks, "/goal 修好测试");
   expect(submitted).toEqual([{ text: "修好测试", workMode: "goal" }]);
-  stdin.write("/goal\n");
-  await tick();
+  await enter(stdin, stdoutChunks, "/goal");
   expect(stdoutChunks.join("")).toContain("轮数：2");
-  stdin.write("/goal stop\n");
-  await tick();
+  await enter(stdin, stdoutChunks, "/goal stop");
   expect(stopped).toBe(1);
   expect(stdoutChunks.join("")).toContain("目标已停止");
   // 目标已完成时 stopGoal 不改动：回执如实说明
   goalStatus = "met";
-  stdin.write("/goal stop\n");
-  await tick();
+  await enter(stdin, stdoutChunks, "/goal stop");
   expect(stopped).toBe(2);
   expect(stdoutChunks.join("")).toContain("目标已完成，无需停止");
-  stdin.write("/goal cancel\n");
-  await tick();
+  await enter(stdin, stdoutChunks, "/goal cancel");
   expect(goalCancelled).toBe(1);
   expect(stdoutChunks.join("")).toContain("目标已取消");
-  stdin.write("/plan approve\n");
-  await tick();
-  stdin.write("/plan cancel\n");
-  await tick();
+  await enter(stdin, stdoutChunks, "/plan approve");
+  await enter(stdin, stdoutChunks, "/plan cancel");
   expect([approved, cancelled]).toEqual([1, 1]);
   stdin.end();
   expect(await done).toBe(0);
@@ -175,11 +167,20 @@ const fakeRuntime = createRuntimeStub({
   listModels: () => [],
 });
 
-const tick = () => new Promise((r) => setTimeout(r, 10));
+/** 提示符写出次数：REPL 每处理完一行（或启动）重新就绪时写一次 */
+const prompts = (stdoutChunks: string[]) => (stdoutChunks.join("").match(/nctrn> /g) ?? []).length;
+/** 就绪：readline 建好后写出的第一条提示符（非 TTY 直写，TTY 走刷新序列） */
+const ready = (stdoutChunks: string[]) => vi.waitFor(() => expect(prompts(stdoutChunks)).toBe(1));
+/** 写一行并等到 REPL 再次就绪——上一行的处理（含异步回执）到这拍已落盘 */
+async function enter(stdin: PassThrough, stdoutChunks: string[], text: string): Promise<void> {
+  const before = prompts(stdoutChunks);
+  stdin.write(`${text}\n`);
+  await vi.waitFor(() => expect(prompts(stdoutChunks)).toBe(before + 1));
+}
 
 describe("REPL 生命周期", () => {
   it("TTY readline 读取 Core 历史并记录新输入", async () => {
-    const { io, stdin } = makeIo();
+    const { io, stdin, stdoutChunks } = makeIo();
     io.stdin.isTTY = true;
     (io.stdin as typeof io.stdin & { setRawMode: (enabled: boolean) => void }).setRawMode = () =>
       undefined;
@@ -199,9 +200,11 @@ describe("REPL 生命周期", () => {
       return "done";
     };
     const done = runRepl(session, fakeRuntime, io);
-    await tick();
+    await ready(stdoutChunks);
     stdin.write("新输入\n");
-    await tick();
+    // 行进入 Turn 并写入历史后才结束 stdin：否则 readline 可能先关闭
+    await vi.waitFor(() => expect(submitted).toEqual(["新输入"]));
+    await vi.waitFor(() => expect(recorded).toEqual(["新输入"]));
     stdin.end();
     expect(await done).toBe(0);
     expect(reads).toBe(1);
@@ -212,18 +215,19 @@ describe("REPL 生命周期", () => {
   it("EOF（Ctrl+D / stdin 结束）时 Turn 进行中：中断并等待收束后退出，无 prompt-after-close", async () => {
     const { io, stdin, stderrChunks } = makeIo();
     const interrupted = { value: false };
-    const { session } = fakeSessionWithPendingTurn(interrupted);
+    const { session, settle } = fakeSessionWithPendingTurn(interrupted);
 
     const done = runRepl(session, fakeRuntime, io);
     stdin.write("修一个 bug\n");
-    await tick(); // 让 line 处理进入 Turn（busy）
+    // 让 line 处理进入 Turn（busy）
+    await vi.waitFor(() => expect(settle()).toBeDefined());
     stdin.end(); // Turn 尚未结束时 EOF
     const code = await done; // 修复前：这里返回后 finally 再 rl.prompt() → ERR_USE_AFTER_CLOSE
     expect(code).toBe(0);
     expect(interrupted.value).toBe(true);
     expect(stderrChunks.join("")).not.toContain("ERR_USE_AFTER_CLOSE");
     // 进程已返回，不应再有遗留回调抛错（让事件循环跑一拍）
-    await tick();
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
   it("空闲时 EOF：直接退出", async () => {
@@ -235,14 +239,16 @@ describe("REPL 生命周期", () => {
   });
 
   it("Turn 正常结束后 EOF：不重复中断，直接退出", async () => {
-    const { io, stdin } = makeIo();
+    const { io, stdin, stdoutChunks } = makeIo();
     const interrupted = { value: false };
     const { session, settle } = fakeSessionWithPendingTurn(interrupted);
     const done = runRepl(session, fakeRuntime, io);
+    await ready(stdoutChunks);
     stdin.write("hi\n");
-    await tick();
+    await vi.waitFor(() => expect(settle()).toBeDefined());
     settle()?.resolve("done");
-    await tick();
+    // Turn 收束后 REPL 重新提示；此时 EOF 走空闲路径
+    await vi.waitFor(() => expect(stdoutChunks.join("").match(/nctrn> /g)).toHaveLength(2));
     stdin.end();
     expect(await done).toBe(0);
     expect(interrupted.value).toBe(false);
@@ -258,13 +264,14 @@ describe("REPL 生命周期", () => {
     };
     const done = runRepl(session, fakeRuntime, io);
     stdin.write("hi\n");
-    await tick(); // 进入 Turn（busy）
+    // 进入 Turn（busy）
+    await vi.waitFor(() => expect(settle()).toBeDefined());
     stdin.write("/preset bypass\n");
-    await tick();
-    expect(presets).toEqual(["bypass"]);
+    await vi.waitFor(() => expect(presets).toEqual(["bypass"]));
     stdin.write("再一句\n");
-    await tick();
-    expect(stdoutChunks.join("")).toContain("会话忙（本轮进行中）；Ctrl+C 可中断");
+    await vi.waitFor(() =>
+      expect(stdoutChunks.join("")).toContain("会话忙（本轮进行中）；Ctrl+C 可中断"),
+    );
     settle()?.resolve("done");
     stdin.end();
     expect(await done).toBe(0);
@@ -295,7 +302,7 @@ describe("REPL 生命周期", () => {
     } as unknown as RuntimeSession;
 
     const done = runRepl(session, fakeRuntime, io);
-    await tick();
+    await ready(stdoutChunks);
     const requested = (id: string, restricted = false) =>
       listener?.({
         type: "permission.requested",
@@ -322,21 +329,23 @@ describe("REPL 生命周期", () => {
     ];
     for (const [i, [key, expected]] of cases.entries()) {
       requested(`req-${i}`);
-      await tick();
       stdin.write(`${key}\n`);
-      await tick();
-      expect(replies.at(-1)).toEqual({ requestId: `req-${i}`, reply: expected });
+      await vi.waitFor(() =>
+        expect(replies.at(-1)).toEqual({ requestId: `req-${i}`, reply: expected }),
+      );
     }
     requested("restricted", true);
-    await tick();
+    // s/p 不在该请求的选项里：两次都应重提示且不产生回复
     stdin.write("s\n");
-    await tick();
     stdin.write("p\n");
-    await tick();
+    await vi.waitFor(() =>
+      expect(stdoutChunks.join("").match(/请输入当前确认框中的选项/g)).toHaveLength(2),
+    );
     expect(replies).toHaveLength(5);
     stdin.write("a\n");
-    await tick();
-    expect(replies.at(-1)).toEqual({ requestId: "restricted", reply: { decision: "allow" } });
+    await vi.waitFor(() =>
+      expect(replies.at(-1)).toEqual({ requestId: "restricted", reply: { decision: "allow" } }),
+    );
     // 提示块列出了全部五个选项
     const prompt = stdoutChunks.join("");
     expect(prompt).toContain("本会话内允许");
@@ -378,7 +387,7 @@ describe("REPL 生命周期", () => {
     } as unknown as RuntimeSession;
 
     const done = runRepl(session, fakeRuntime, io);
-    await tick();
+    await ready(stdoutChunks);
 
     const childReq1 = {
       childSessionId: "c1",
@@ -437,35 +446,37 @@ describe("REPL 生命周期", () => {
         options: ["allow_once", "deny"],
       },
     } as RuntimeEvent);
-    await tick();
 
     // 首先提示 child1（afterSeq=5 < seq=6）
     expect(stdoutChunks.join("")).toContain("子代理 [explore] · 检查日志");
     stdin.write("s\n");
-    await tick();
-    expect(subReplies).toEqual([
-      {
-        childSessionId: "c1",
-        requestId: "r-c1",
-        reply: { decision: "allow", remember: "session" },
-      },
-    ]);
+    await vi.waitFor(() =>
+      expect(subReplies).toEqual([
+        {
+          childSessionId: "c1",
+          requestId: "r-c1",
+          reply: { decision: "allow", remember: "session" },
+        },
+      ]),
+    );
 
     // 紧接着按顺序提示父请求（seq=6 < afterSeq=7）
     expect(stdoutChunks.join("")).toContain("/x/parent.ts");
     stdin.write("a\n");
-    await tick();
-    expect(parentReplies).toEqual([{ requestId: "r-parent", reply: { decision: "allow" } }]);
+    await vi.waitFor(() =>
+      expect(parentReplies).toEqual([{ requestId: "r-parent", reply: { decision: "allow" } }]),
+    );
 
     // 最后提示 child2（afterSeq=7）
     expect(stdoutChunks.join("")).toContain("子代理 · 写回测试");
     stdin.write("d 换只读方案\n");
-    await tick();
-    expect(subReplies.at(-1)).toEqual({
-      childSessionId: "c2",
-      requestId: "r-c2",
-      reply: { decision: "deny", feedback: "换只读方案" },
-    });
+    await vi.waitFor(() =>
+      expect(subReplies.at(-1)).toEqual({
+        childSessionId: "c2",
+        requestId: "r-c2",
+        reply: { decision: "deny", feedback: "换只读方案" },
+      }),
+    );
 
     stdin.end();
     expect(await done).toBe(0);
@@ -512,14 +523,12 @@ describe("REPL /resume 会话切换", () => {
     const done = runRepl(s1, createRuntimeStub({ listModels: () => [] }), io, {
       newSession: async () => ({ kind: "ok", session: ++count === 1 ? s2 : s3 }),
     });
-    await tick();
+    await ready(stdoutChunks);
     stdin.write("/new\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("新会话 s2"));
     stdin.write("/clear\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("新会话 s3"));
     expect(count).toBe(2);
-    expect(stdoutChunks.join("")).toContain("新会话 s2");
-    expect(stdoutChunks.join("")).toContain("新会话 s3");
     stdin.end();
     expect(await done).toBe(0);
   });
@@ -542,11 +551,11 @@ describe("REPL /resume 会话切换", () => {
         return { kind: "ok", session: s2 };
       },
     });
-    await tick();
+    await ready(stdoutChunks);
     stdin.write("/resume\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("2. s2"));
     stdin.write("2\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("已切换到会话 s2"));
     const out = stdoutChunks.join("");
     expect(out).toContain("1. s1");
     expect(out).toContain("2. s2");
@@ -574,17 +583,15 @@ describe("REPL /resume 会话切换", () => {
         return { kind: "ok", session: s2 };
       },
     });
-    await tick();
+    await ready(stdoutChunks);
     stdin.write("/resume\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("2. s2"));
     stdin.write("\n"); // 空行取消
-    await tick();
-    expect(stdoutChunks.join("")).toContain("已取消");
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("已取消"));
     expect(calls).toEqual([]);
     stdin.write("/resume s2\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("已切换到会话 s2"));
     expect(calls).toEqual(["s2"]);
-    expect(stdoutChunks.join("")).toContain("已切换到会话 s2");
     stdin.end();
     expect(await done).toBe(0);
   });
@@ -602,17 +609,15 @@ describe("REPL /resume 会话切换", () => {
         return { kind: "ok", session: s2 };
       },
     });
-    await tick();
+    await ready(stdoutChunks);
     stdin.write("/resume s2\n");
-    await tick();
-    expect(stdoutChunks.join("")).toContain("与当前目录不同");
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("与当前目录不同"));
     stdin.write("y\n");
-    await tick();
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("已切换到会话 s2"));
     expect(calls).toEqual([
       { id: "s2", foreign: false },
       { id: "s2", foreign: true },
     ]);
-    expect(stdoutChunks.join("")).toContain("已切换到会话 s2");
     stdin.end();
     expect(await done).toBe(0);
   });
@@ -624,10 +629,9 @@ describe("REPL /resume 会话切换", () => {
       switchSession: () =>
         Promise.resolve({ kind: "error", message: "会话被另一个进程占用（锁文件…）" }),
     });
-    await tick();
+    await ready(stdoutChunks);
     stdin.write("/resume s2\n");
-    await tick();
-    expect(stdoutChunks.join("")).toContain("占用");
+    await vi.waitFor(() => expect(stdoutChunks.join("")).toContain("占用"));
     expect(stdoutChunks.join("")).not.toContain("已切换");
     stdin.end();
     expect(await done).toBe(0);

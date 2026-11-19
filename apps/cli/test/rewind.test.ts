@@ -243,7 +243,8 @@ it("执行方式消息：列表与回填带命令名、不含说明块；Runtime
     await ui.line("2", "文件保持当前状态");
     const before = ui.output().length;
     await ui.line("y", "已回退到");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 回填在同一条命令的后续微任务里落盘：让事件循环跑一拍再核对没有回填提示
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(ui.output().slice(before)).not.toContain("可修改后重发");
     await ui.line("/rewind", "选择轮次");
     await ui.line("1", "只回退对话");

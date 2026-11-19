@@ -20,7 +20,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   replaySessionView,
@@ -190,12 +190,12 @@ function comparable(view: SessionView) {
 }
 
 async function until(check: () => boolean, label: string, timeoutMs = 20_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`等待超时：${label}`);
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error(`等待超时：${label}`);
+    },
+    { timeout: timeoutMs },
+  );
 }
 
 async function exitWithin(c: Child, ms = 20_000): Promise<number | null> {

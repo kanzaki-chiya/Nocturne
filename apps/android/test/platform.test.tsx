@@ -43,8 +43,9 @@ async function mount(node: React.ReactNode): Promise<HTMLElement> {
   await act(async () => {
     root?.render(node);
   });
+  // 首帧后的宿主查询（backgroundStatus / notificationStatus）在微任务里回填
   await act(async () => {
-    await new Promise((done) => setTimeout(done, 20));
+    await Promise.resolve();
   });
   return container;
 }

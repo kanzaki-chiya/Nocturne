@@ -153,8 +153,7 @@ describe("createSessionSwitcher", () => {
 
     const { holder, switcher } = makeSwitcher(runtime, cwd, s1);
     const turn = s1.submit({ text: "hi" });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(s1.state().openTurn).toBeDefined();
+    await vi.waitFor(() => expect(s1.state().openTurn).toBeDefined());
 
     const res = await switcher(s2.id);
     expect(res.kind).toBe("busy");
@@ -305,7 +304,7 @@ describe("createNewSession", () => {
     const old = await runtime.createSession({ model: "fake/fake-1" });
     const holder: SessionHolder = { current: old };
     const turn = old.submit({ text: "hold" });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.waitFor(() => expect(old.state().openTurn).toBeDefined());
     expect(await createNewSession({ runtime, holder })()).toEqual({ kind: "busy" });
     expect(holder.current).toBe(old);
     old.interrupt();

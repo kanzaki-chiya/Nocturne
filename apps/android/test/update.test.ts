@@ -23,6 +23,14 @@ it("自动检查未结束时手动检查显示进度，失败可重试", async (
   expect(fetch).toHaveBeenCalledOnce();
 });
 
+/**
+ * 标签校验是纯 Promise 链（fetch → 记录 → changed），没有定时器：
+ * 连跑几拍微任务即可落盘，用于「校验完成后结论仍是旧值」这类反向断言。
+ */
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+};
+
 function fixture() {
   let time = 100;
   const data = new Map<string, string>();
@@ -72,14 +80,12 @@ it("两个来源均需更新，电脑版本确认 APK 后取较大的版本", as
   update.computer("0.9.0");
   expect(update.version).toBeUndefined();
   update.computer("1.1.0");
-  await new Promise((done) => setTimeout(done, 0));
-  expect(update.version).toBe("1.1.0");
+  await vi.waitFor(() => expect(update.version).toBe("1.1.0"));
   expect(fetch).not.toHaveBeenCalled();
   await update.check(true);
   expect(update.version).toBe("1.2.0");
   update.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 0));
-  expect(update.version).toBe("2.0.0");
+  await vi.waitFor(() => expect(update.version).toBe("2.0.0"));
   update.computer("1.0.0");
   expect(update.version).toBe("1.2.0");
   update.computer(undefined);
@@ -143,8 +149,7 @@ it("失败不记时间，自动失败静默，电脑来源仍有效", async () =
   await update.check();
   expect(fetch).toHaveBeenCalledTimes(3);
   update.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 0));
-  expect(update.version).toBe("2.0.0");
+  await vi.waitFor(() => expect(update.version).toBe("2.0.0"));
 });
 
 it("关闭按版本记住，更高版本恢复提示", async () => {
@@ -156,8 +161,7 @@ it("关闭按版本记住，更高版本恢复提示", async () => {
   const restored = new AndroidUpdate({ version: "1.0.0", fetch: wrappedFetch, storage });
   expect(restored.notice).toBeUndefined();
   restored.computer("1.3.0");
-  await new Promise((done) => setTimeout(done, 0));
-  expect(restored.notice).toBe("1.3.0");
+  await vi.waitFor(() => expect(restored.notice).toBe("1.3.0"));
   expect(restored.url("1.3.0")).toBe(
     "https://github.com/kanzaki-chiya/Nocturne/releases/download/v1.3.0/nocturne-1.3.0.apk",
   );
@@ -236,14 +240,16 @@ it.each([
     tagFetch.mockResolvedValueOnce(tagResponse);
     update.computer("2.0.0");
     expect(update.version).toBe("1.2.0");
-    await new Promise((done) => setTimeout(done, 10));
+    // 标签确认不存在后结论不回退
+    await vi.waitFor(() => expect(tagFetch).toHaveBeenCalledOnce());
+    await flush();
     expect(update.version).toBe("1.2.0");
     const updateNoGithub = new AndroidUpdate({
       version: "1.0.0",
       fetch: vi.fn().mockResolvedValue(tagResponse),
     });
     updateNoGithub.computer("2.0.0");
-    await new Promise((done) => setTimeout(done, 10));
+    await flush();
     expect(updateNoGithub.version).toBeUndefined();
   },
 );
@@ -320,7 +326,8 @@ it("确认存在后不再请求；确认不存在后 1h 内不请求、1h 后重
 
   fetch.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) });
   update.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 10));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  await flush();
   expect(update.version).toBeUndefined();
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(data.size).toBe(0);
@@ -349,7 +356,8 @@ it("missing 记录过期后连续 computer() 只发一个标签请求", async ()
   const fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 });
   const update = new AndroidUpdate({ version: "1.0.0", fetch, now: () => time });
   update.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 10));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  await flush();
   expect(update.version).toBeUndefined();
   time += 3600000;
   fetch.mockImplementation(
@@ -381,7 +389,8 @@ it("missing 记录手动重新确认时连续 check(true) 只发一个标签请�
   );
   const update = new AndroidUpdate({ version: "1.0.0", fetch });
   update.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 10));
+  await vi.waitFor(() => expect(tagFetch).toHaveBeenCalledOnce());
+  await flush();
   expect(update.version).toBeUndefined();
   tagFetch.mockImplementation(
     () =>
@@ -466,7 +475,8 @@ it("手动 check(true) 重新确认已记录为不存在的电脑版本，并等
   const fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) });
   const update = new AndroidUpdate({ version: "1.0.0", fetch });
   update.computer("2.0.0");
-  await new Promise((done) => setTimeout(done, 10));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  await flush();
   expect(update.version).toBeUndefined();
   expect(fetch).toHaveBeenCalledTimes(1);
 
@@ -487,7 +497,8 @@ it("手动 check(true) 重新确认已记录为不存在的电脑版本，并等
     status: 200,
     json: async () => ({ tag_name: "v1.2.0", assets: [{ name: "nocturne-1.2.0.apk" }] }),
   });
-  await new Promise((done) => setTimeout(done, 10));
+  // latest 已落地（github 1.2.0 生效），标签请求仍挂着：仍算 checking
+  await vi.waitFor(() => expect(update.version).toBe("1.2.0"));
   expect(update.state).toBe("checking");
 
   resolveTag({
@@ -516,9 +527,11 @@ it("晚到的标签响应只更新记录，不把已切换的电脑版本改回�
     status: 200,
     json: async () => ({ tag_name: "v2.0.0", assets: [{ name: "nocturne-2.0.0.apk" }] }),
   });
-  await new Promise((done) => setTimeout(done, 10));
+  // 响应晚于电脑版本清空到达：记录写入 present，但电脑来源已清空，不显示版本
+  await flush();
   expect(update.version).toBeUndefined();
   update.computer("2.0.0");
   expect(fetch).toHaveBeenCalledOnce();
-  expect(update.version).toBe("2.0.0");
+  // 记录可复用：不再发请求，直接按已确认存在生效
+  await vi.waitFor(() => expect(update.version).toBe("2.0.0"));
 });

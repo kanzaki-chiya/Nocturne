@@ -34,7 +34,8 @@ function fixture(overrides: Partial<AppHost> = {}) {
   };
   const probe = new ProbeLog(() => true);
   const background = new Background(host, probe);
-  const settle = () => new Promise((done) => setTimeout(done, 0));
+  // 服务调用是纯 Promise 链：宏任务边界前微任务队列已排空，异步效果必然落盘
+  const settle = () => new Promise<void>((done) => setImmediate(done));
   return { calls, probe, background, settle };
 }
 

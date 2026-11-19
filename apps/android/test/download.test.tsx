@@ -52,6 +52,10 @@ function installTauriMock(
   return { invoke, transformCallback };
 }
 
+function saveFileCalls(mock: TauriInternalsMock) {
+  return mock.invoke.mock.calls.filter(([cmd]) => cmd === "plugin:save-file|save_file");
+}
+
 function ViewerLauncher({ item }: { item: ViewerImageItem }) {
   const open = useImageViewer();
   return (
@@ -106,8 +110,9 @@ async function mount(node: React.ReactNode): Promise<HTMLElement> {
   await act(async () => {
     root?.render(node);
   });
+  // 首帧后的宿主查询（后台状态 / 通知状态）在微任务里回填
   await act(async () => {
-    await new Promise((done) => setTimeout(done, 25));
+    await Promise.resolve();
   });
   return container;
 }
@@ -144,12 +149,10 @@ describe("Android native file & image download", () => {
 
     await act(async () => {
       downloadBtn.click();
-      await new Promise((done) => setTimeout(done, 30));
+      await vi.waitFor(() => expect(saveFileCalls(mock)).toHaveLength(1));
     });
 
-    const saveCalls = mock.invoke.mock.calls.filter(
-      ([cmd]) => cmd === "plugin:save-file|save_file",
-    );
+    const saveCalls = saveFileCalls(mock);
     expect(saveCalls).toHaveLength(1);
     const firstCall = saveCalls[0];
     if (!firstCall) throw new Error("missing save call");
@@ -162,7 +165,7 @@ describe("Android native file & image download", () => {
 
   it("handles user cancellation and failure in ImageViewer without unhandled rejections", async () => {
     let mode: "cancel" | "fail" = "cancel";
-    installTauriMock(async (cmd) => {
+    const mock = installTauriMock(async (cmd) => {
       if (cmd === "plugin:save-file|save_file") {
         if (mode === "cancel") return { cancelled: true };
         throw new Error("SAF write denied");
@@ -189,7 +192,7 @@ describe("Android native file & image download", () => {
     // 1) Cancel resolves cleanly without changing title
     await act(async () => {
       downloadBtn.click();
-      await new Promise((done) => setTimeout(done, 30));
+      await vi.waitFor(() => expect(saveFileCalls(mock)).toHaveLength(1));
     });
     expect(downloadBtn.getAttribute("title")).toBe(defaultTitle);
     expect(unhandled).toHaveLength(0);
@@ -198,8 +201,8 @@ describe("Android native file & image download", () => {
     mode = "fail";
     await act(async () => {
       downloadBtn.click();
-      await new Promise((done) => setTimeout(done, 30));
     });
+    await vi.waitFor(() => expect(downloadBtn.getAttribute("title")).toBe("SAF write denied"));
     expect(downloadBtn.getAttribute("title")).toBe("SAF write denied");
     expect(document.body.querySelector('[role="alert"]')).toBeNull();
     expect(unhandled).toHaveLength(0);
@@ -268,13 +271,11 @@ describe("Android native file & image download", () => {
 
     await act(async () => {
       card.click();
-      await new Promise((done) => setTimeout(done, 30));
+      await vi.waitFor(() => expect(saveFileCalls(mock)).toHaveLength(1));
     });
 
     expect(readAttachment).toHaveBeenCalledWith("att-pdf-1");
-    const saveCalls = mock.invoke.mock.calls.filter(
-      ([cmd]) => cmd === "plugin:save-file|save_file",
-    );
+    const saveCalls = saveFileCalls(mock);
     expect(saveCalls).toHaveLength(1);
     const firstCall = saveCalls[0];
     if (!firstCall) throw new Error("missing save call");
@@ -288,8 +289,8 @@ describe("Android native file & image download", () => {
     shouldFail = true;
     await act(async () => {
       card.click();
-      await new Promise((done) => setTimeout(done, 30));
     });
+    await vi.waitFor(() => expect(card.getAttribute("title")).toBe("Storage quota exceeded"));
     expect(card.getAttribute("title")).toBe("Storage quota exceeded");
     expect(container.querySelector(".conversation-error")).toBeNull();
     expect(unhandled).toHaveLength(0);
@@ -374,9 +375,7 @@ describe("Android native file & image download", () => {
       </ImageViewerProvider>,
     );
 
-    await act(async () => {
-      await new Promise((done) => setTimeout(done, 20));
-    });
+    await vi.waitFor(() => expect(container.querySelector(".inline-page iframe")).not.toBeNull());
     const iframe = container.querySelector<HTMLIFrameElement>(".inline-page iframe");
     if (!iframe) throw new Error("missing inline iframe");
     expect(iframe.getAttribute("src")).toBe("http://nct-sandbox.localhost/sandbox.html");
@@ -401,12 +400,10 @@ describe("Android native file & image download", () => {
     if (!htmlItem) throw new Error("missing HTML menu item");
     await act(async () => {
       htmlItem.click();
-      await new Promise((done) => setTimeout(done, 30));
+      await vi.waitFor(() => expect(saveFileCalls(mock)).toHaveLength(1));
     });
 
-    const saveCalls = mock.invoke.mock.calls.filter(
-      ([cmd]) => cmd === "plugin:save-file|save_file",
-    );
+    const saveCalls = saveFileCalls(mock);
     expect(saveCalls).toHaveLength(1);
     const payload = saveCalls[0]?.[1] as { name: string; mimeType: string; data: string };
     expect(payload.name).toBe("报表.html");
@@ -450,12 +447,10 @@ describe("Android native file & image download", () => {
           },
         }),
       );
-      await new Promise((done) => setTimeout(done, 30));
+      await vi.waitFor(() => expect(saveFileCalls(mock)).toHaveLength(2));
     });
 
-    const saveCallsAfter = mock.invoke.mock.calls.filter(
-      ([cmd]) => cmd === "plugin:save-file|save_file",
-    );
+    const saveCallsAfter = saveFileCalls(mock);
     expect(saveCallsAfter).toHaveLength(2);
     const pngPayload = saveCallsAfter[1]?.[1] as { name: string; mimeType: string; data: string };
     expect(pngPayload.name).toBe("报表.png");
