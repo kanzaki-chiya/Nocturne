@@ -21,11 +21,21 @@ const eqComparisonBothSides = (expr, literal) => [
   `BinaryExpression[operator=/^(===|!==|==|!=)$/]:has(> .left${literal}):has(> .right${expr})`,
 ];
 
+const fixedWaitInTestMessage =
+  "测试中禁止 new Promise + setTimeout 固定等待；请改用 await 真实事件/Promise、vi.useFakeTimers() 或 vi.waitFor()，确需反向断言或测试替身延时时用 eslint-disable-next-line 注明原因（见 docs/development/workflow.md 第 4 节）。";
+const testFixedWaitSelector = [
+  'NewExpression[callee.name="Promise"]:not(:has(CallExpression[callee.name="reject"])):not(CallExpression[callee.object.name="Promise"][callee.property.name="race"] > ArrayExpression > NewExpression)',
+  'CallExpression:matches([callee.name="setTimeout"], [callee.object.name=/^(globalThis|window)$/][callee.property.name="setTimeout"]):matches([arguments.1.raw=/^[0-9]/], [arguments.1.type="Identifier"])',
+].join(" ");
+
 export default tseslint.config(
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
   prettier,
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: "error",
+    },
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -89,6 +99,18 @@ export default tseslint.config(
           selector,
           message: agentContextBoundaryMessage,
         })),
+      ],
+    },
+  },
+  {
+    files: ["**/*.test.{ts,tsx}", "packages/*/test/**/*.{ts,tsx}", "apps/*/test/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: testFixedWaitSelector,
+          message: fixedWaitInTestMessage,
+        },
       ],
     },
   },
