@@ -70,6 +70,7 @@
 |---|---|
 | [repository-layout.md](development/repository-layout.md) | 仓库目录、代码放在哪里、何时拆包 |
 | [workflow.md](development/workflow.md) | 修改流程、文档同步清单、测试要求 |
+| [ui-map.md](development/ui-map.md) | 桌面端、手机网页与 TUI 界面功能地图（界面名、入口、源码、测试与截图定位） |
 | [site.md](development/site.md) | 静态主页与用户文档构建、Pages 部署、字体子集与隔离截图重拍 |
 
 ## Decisions（架构决策记录）

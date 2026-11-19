@@ -58,8 +58,10 @@ GitHub Actions 的 `ci` 工作流（`.github/workflows/ci.yml`）在推送 main 
 
 ```bash
 pnpm install        # 安装依赖
+pnpm verify         # 本地日常验证入口（scripts/verify.mjs）：自动清代理，依次跑 typecheck / lint / format:check / depcheck / 相关包测试（--maxWorkers=2）/ build；支持 --base <ref>、--report <绝对路径>、--skip-build
+pnpm shot           # 隔离环境启动调试版桌面端并按步骤脚本 CDP 截图（scripts/shot.mjs），详见下方「桌面端截图」
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
-pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、stylelint 样式检查（pnpm lint:css，含警告数上限 --max-warnings 598，只能减不能增；实际数低于上限时同样失败，需把上限改成实际数）、gen-tokens --check 与桌面端未定义 CSS 变量检查
+pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、stylelint 样式检查（pnpm lint:css，含警告数上限 --max-warnings 598，只能减不能增；实际数低于上限时同样失败，需把上限改成实际数）、gen-tokens --check、桌面端未定义 CSS 变量检查与界面功能地图路径检查（check-ui-map.mjs）
 pnpm lint:css       # stylelint 检查 apps/desktop/src/**/*.css（排除 tokens.css），锁定存量间距警告上限 598（实际数低于上限时同样失败，需把上限改成实际数）
 pnpm format:check   # prettier --check；修复用 pnpm format
 pnpm test           # vitest run，默认测试集：完全离线，不依赖网络/API key/外部服务；各包依次运行，TUI 包内限 4 个 worker，避免渲染测试在并行负载下超时；`CI=true` 时（GitHub runner 明显更慢）core 与 cli 单测超时由 5s 放宽到 30s、TUI 由 15s 放宽到 60s，各包（含 `scripts/` 测试，其超时本地 30s、CI 60s）失败重试 2 次，本地不重试；TUI 测试固定 `CI=false`，避免 Ink 在 CI 下关闭增量渲染。本轮实测大致耗时：core 约 25 秒、TUI 约 312 秒、ACP 约 112 秒、桌面端约 9 秒，全量约 8 分钟；Agent 在本仓库跑全量测试时把 shell `timeoutMs` 设到足以覆盖全量的值（例如 600000 毫秒）。
@@ -69,7 +71,7 @@ pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖�
 pnpm build          # tsdown 构建 packages/core/dist
 ```
 
-日常改动在本地只跑 `typecheck`、`lint`、`format:check`、`depcheck`、`build` 和改动涉及的包（`pnpm --filter <包名> test`；改了共享类型时加上依赖它的包），全量测试交给推送后的 CI。需要在本地看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
+日常改动在本地以 `pnpm verify` 为准（支持 `--base <ref>` 默认 `main`、`--report <绝对路径>` 写 Markdown 汇总、`--skip-build`）：自动去掉 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，按顺序执行 `typecheck`、`lint`、`format:check`、`depcheck`、相关测试与 `build`，任一步失败后继续执行其余步骤并在最后以非 0 退出。测试范围规则不变，由脚本自动判定：改动所在包跑整包测试；按 workspace `package.json` 递归依赖这些包的下游包，通过 vitest alias 跑 `vitest related --run --passWithNoTests` 只测关联用例；`scripts/` 有改动时跑 `vitest run --root scripts`；仅改了 `docs/`、`site-docs/` 或根目录 Markdown 时跳过测试；vitest 统一加 `--maxWorkers=2` 且各包串行，不跑全量测试（全量交给推送后的 CI）。需要在本地看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
 
 本地 vitest 按包限制并发（TUI 4 个 worker，core、rpc、cli、desktop、`scripts/` 6 个），开发机同时还在使用；CI 保持默认。
 
@@ -136,7 +138,7 @@ ADR-0061 Gemini 冒烟只要求 `NOCTURNE_SMOKE_OPENCODE_API_KEY` 与 `NOCTURNE_
 
 ### UI 截图验收清单
 
-修改桌面端或手机网页的界面、布局与样式时，按以下清单逐项验收（设计规范见根目录 [`DESIGN.md`](../../DESIGN.md)）：
+修改桌面端或手机网页的界面、布局与样式时，按以下清单逐项验收（设计规范见根目录 [`DESIGN.md`](../../DESIGN.md)，各界面组件、测试与截图定位见 [界面功能地图](ui-map.md)）：
 
 - 改 UI 必须看实际渲染，不凭代码或单测推测视觉结果；
 - 深浅色主题各截一张；
@@ -144,6 +146,32 @@ ADR-0061 Gemini 冒烟只要求 `NOCTURNE_SMOKE_OPENCODE_API_KEY` 与 `NOCTURNE_
 - 涉及手机网页要截 `390×844`；
 - 与上一版或效果图并排对比；
 - 检查有没有新增说明文字。
+
+#### 桌面端截图（`pnpm shot`）
+
+桌面端截图统一用 `pnpm shot`（`scripts/shot.mjs`），不要临时手写一次性 CDP 脚本：
+
+```bash
+# 先构建后台与调试版桌面 exe（未填充打包 resources 时用 TAURI_CONFIG 置空）
+pnpm build
+TAURI_CONFIG='{"bundle":{"resources":null}}' cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+# 隔离目录运行步骤脚本截图
+pnpm shot \
+  --home <隔离目录> \
+  --fixture <可选夹具目录> \
+  --size 1440x900 \
+  --theme light \
+  --steps <步骤脚本.mjs> \
+  [--port <CDP端口>] \
+  [--exe <调试版exe路径>]
+```
+
+- **环境隔离**：`--home` 必填且禁止等于或位于真实 `~/.nocturne` 内；`WEBVIEW2_USER_DATA_FOLDER` 自动隔离到 `<home>/webview2`；自动去掉代理环境变量。
+- **启动与调试端口**：最小化启动（不抢前台），通过命令行 `--edge-webview-switches=--remote-debugging-port=<端口>` 开启 CDP（不使用会被 wry 覆盖的 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`），经 CDP `Page.captureScreenshot` 截 PNG 并在写入后校验文件存在与 PNG 像素尺寸。
+- **前端来源**：默认针对标准调试版 exe（`devUrl=http://localhost:31420`）由脚本自行拉起独立的 `apps/desktop` Vite 开发服务器（改动前端代码后无需重编 Rust）；启动前先检查 IPv4/IPv6 的 `31420` 端口是否空闲，若被已有 `pnpm dev` 占用则直接报错退出，绝不复用或停止已有服务。若传入的是内嵌前端的自定义构建，可加 `--no-vite`。
+- **步骤脚本**：`--steps` 指向一个 ES 模块，默认导出 `async ({ eval, click, waitFor, shot }) => {}`（亦提供 `evaluate` 作为 `eval` 的别名，便于严格模式解构）；在其中导航到目标界面并调用 `shot(<绝对路径>)`。
+- **进程清理**：结束后只按脚本自身记录的 PID 停止自己启动的桌面端（含 `nctrn rpc` 子进程）与 Vite 进程树，不影响本机其他 Nocturne 或开发服务。
 
 ## 6. 许可证与第三方代码
 

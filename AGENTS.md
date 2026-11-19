@@ -63,6 +63,7 @@
 验证命令（仓库根目录，详见 [development/workflow.md](docs/development/workflow.md) 第 5 节）：
 
 ```bash
+pnpm verify         # 本地日常验证入口（静态检查 + 受影响包与关联测试 + 构建；用法见 workflow.md 第 5 节）
 pnpm typecheck      # tsc --noEmit（src + test）
 pnpm lint           # eslint
 pnpm format:check   # prettier --check
