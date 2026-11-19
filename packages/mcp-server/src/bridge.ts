@@ -1,4 +1,11 @@
-import type { QuestionAnswer, RuntimeEvent, SessionView } from "@nocturne/core/protocol";
+import {
+  allPendingPermissions,
+  type AggregatedPendingPermission,
+  type PermissionReply,
+  type QuestionAnswer,
+  type RuntimeEvent,
+  type SessionView,
+} from "@nocturne/core/protocol";
 import { connectChannel } from "@nocturne/remote";
 import {
   createRpcClient,
@@ -63,7 +70,7 @@ interface TrackedBridgeSession {
   startTokenSeq: number;
   activeStartToken: number | undefined;
   inTransition: boolean;
-  lastReportedPermissionId: string | undefined;
+  lastReportedPermissionKeys: Set<string>;
   lastReportedQuestionId: string | undefined;
   waitToolCursor: WaitToolCursor | undefined;
 }
@@ -236,6 +243,8 @@ export class McpBridge {
           return await this.handleInterrupt(args);
         case "nocturne_answer":
           return await this.handleAnswer(args, context);
+        case "nocturne_respond_permission":
+          return await this.handleRespondPermission(args, context);
         default:
           return this.errorResult(`未知的工具：${name}`);
       }
@@ -364,7 +373,7 @@ export class McpBridge {
       startTokenSeq: 0,
       activeStartToken: undefined,
       inTransition: false,
-      lastReportedPermissionId: undefined,
+      lastReportedPermissionKeys: new Set<string>(),
       lastReportedQuestionId: undefined,
       waitToolCursor: undefined,
     };
@@ -682,6 +691,56 @@ export class McpBridge {
     return this.buildSessionWaitResult(tracked, { advanceCursor: true });
   }
 
+  private async handleRespondPermission(
+    args: Record<string, unknown>,
+    context?: McpToolCallContext,
+  ): Promise<McpToolCallResult> {
+    const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
+    if (!sessionId) return this.errorResult("参数错误：需要非空 sessionId");
+    const requestId = typeof args.requestId === "string" ? args.requestId.trim() : "";
+    if (!requestId) return this.errorResult("参数错误：需要非空 requestId");
+
+    let childSessionId: string | undefined;
+    if (args.childSessionId !== undefined) {
+      if (typeof args.childSessionId !== "string" || args.childSessionId.trim() === "") {
+        return this.errorResult("参数错误：childSessionId 必须为非空字符串");
+      }
+      childSessionId = args.childSessionId.trim();
+    }
+
+    const parsedReply = parsePermissionReply(args.reply);
+    if (!parsedReply.ok) {
+      return this.errorResult(parsedReply.error);
+    }
+
+    const wait = typeof args.wait === "boolean" ? args.wait : true;
+    const timeoutSeconds =
+      typeof args.timeoutSeconds === "number" && Number.isFinite(args.timeoutSeconds)
+        ? args.timeoutSeconds
+        : 300;
+
+    const client = await this.ensureConnected();
+    const tracked = await this.openSessionForRun(client, sessionId);
+    // 权限上限、归属与持久授权校验一律交给 RPC 的 agent 接入层，不在 MCP 桥拦截
+    if (childSessionId !== undefined) {
+      await tracked.rpcSession.respondSubagentPermission(
+        childSessionId,
+        requestId,
+        parsedReply.reply,
+      );
+      tracked.lastReportedPermissionKeys.add(subagentPermissionKey(childSessionId, requestId));
+    } else {
+      await tracked.rpcSession.respondPermission(requestId, parsedReply.reply);
+      tracked.lastReportedPermissionKeys.add(requestId);
+    }
+
+    if (!wait) {
+      return this.buildSessionWaitResult(tracked, { advanceCursor: false });
+    }
+    await this.waitForTrackedSessions([tracked], timeoutSeconds, context);
+    return this.buildSessionWaitResult(tracked, { advanceCursor: true });
+  }
+
   private async triggerEnqueueOnTracked(
     tracked: TrackedBridgeSession,
     prompt: string,
@@ -811,11 +870,11 @@ export class McpBridge {
 
     const initialReported = new Map<
       string,
-      { permId: string | undefined; questionId: string | undefined }
+      { permKeys: Set<string>; questionId: string | undefined }
     >();
     for (const tracked of trackedList) {
       initialReported.set(tracked.sessionId, {
-        permId: tracked.lastReportedPermissionId,
+        permKeys: new Set(tracked.lastReportedPermissionKeys),
         questionId: tracked.lastReportedQuestionId,
       });
     }
@@ -823,10 +882,8 @@ export class McpBridge {
     const isStopped = (tracked: TrackedBridgeSession): boolean => {
       const view = tracked.tracker.view;
       const initial = initialReported.get(tracked.sessionId);
-      if (
-        view.pendingPermission !== undefined &&
-        view.pendingPermission.requestId !== initial?.permId
-      ) {
+      const pendingPerms = allPendingPermissions(view);
+      if (pendingPerms.some((item) => !initial?.permKeys.has(pendingPermissionKey(item)))) {
         return true;
       }
       if (
@@ -975,19 +1032,28 @@ export class McpBridge {
       ...(pendingCount > 0 ? { queuedInputs: tracked.pendingInputIds.size } : {}),
     };
 
-    if (status === "waiting_for_permission" && view.pendingPermission !== undefined) {
-      tracked.lastReportedPermissionId = view.pendingPermission.requestId;
-      payload.message = "Ask the user to respond in Nocturne.";
-      payload.pendingPermissions = [
-        {
-          requestId: view.pendingPermission.requestId,
-          toolName: view.pendingPermission.toolName,
-          reason: view.pendingPermission.reason,
-          subjects: view.pendingPermission.subjects,
-        },
-      ];
+    const pendingPerms = allPendingPermissions(view);
+    if (status === "waiting_for_permission" && pendingPerms.length > 0) {
+      tracked.lastReportedPermissionKeys = new Set(pendingPerms.map(pendingPermissionKey));
+      payload.message = this.buildWaitingForPermissionMessage(tracked);
+      payload.pendingPermissions = pendingPerms.map((item) =>
+        item.kind === "subagent"
+          ? {
+              requestId: item.permission.requestId,
+              childSessionId: item.permission.childSessionId,
+              toolName: item.permission.toolName,
+              reason: item.permission.reason,
+              subjects: item.permission.subjects,
+            }
+          : {
+              requestId: item.permission.requestId,
+              toolName: item.permission.toolName,
+              reason: item.permission.reason,
+              subjects: item.permission.subjects,
+            },
+      );
     } else {
-      tracked.lastReportedPermissionId = undefined;
+      tracked.lastReportedPermissionKeys.clear();
     }
 
     if (status === "waiting_for_answer" && view.pendingQuestion !== undefined) {
@@ -1018,6 +1084,24 @@ export class McpBridge {
     return tracked.clientId === this.agentSelf.id;
   }
 
+  private canApprovePermissions(): boolean {
+    return this.agentSelf?.scope === "run" && this.agentSelf.maxPermissionPreset === "bypass";
+  }
+
+  private buildWaitingForPermissionMessage(tracked: TrackedBridgeSession): string {
+    const owned = this.isOwnSession(tracked);
+    if (this.canApprovePermissions()) {
+      if (owned === false) {
+        return "Session is waiting for permission. Only the agent that created this session can respond via nocturne_respond_permission; ask the user to respond in Nocturne.";
+      }
+      return "Session is waiting for permission. Call nocturne_respond_permission with this sessionId and pendingPermissions[].requestId (and childSessionId for subagent requests) to allow (once or session) or deny, or ask the user to respond in Nocturne.";
+    }
+    if (this.agentSelf !== undefined && (this.agentSelf.scope !== "run" || owned === false)) {
+      return "Session is waiting for permission. This agent cannot approve permissions; ask the user to respond in Nocturne.";
+    }
+    return 'Session is waiting for permission. This agent cannot approve permissions; call nocturne_respond_permission with decision "deny" to reject, or ask the user to respond in Nocturne.';
+  }
+
   private buildWaitingForAnswerMessage(tracked: TrackedBridgeSession): string {
     const owned = this.isOwnSession(tracked);
     if (this.agentSelf !== undefined && (this.agentSelf.scope !== "run" || owned === false)) {
@@ -1037,6 +1121,46 @@ export class McpBridge {
     const payload = this.buildSessionWaitPayload(tracked, options);
     return this.textResult(JSON.stringify(payload, null, 2), payload);
   }
+}
+
+function subagentPermissionKey(childSessionId: string, requestId: string): string {
+  return `${childSessionId}:${requestId}`;
+}
+
+function pendingPermissionKey(item: AggregatedPendingPermission): string {
+  return item.kind === "subagent"
+    ? subagentPermissionKey(item.permission.childSessionId, item.permission.requestId)
+    : item.permission.requestId;
+}
+
+function parsePermissionReply(
+  raw: unknown,
+): { ok: true; reply: PermissionReply } | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: "参数错误：reply 必须为对象" };
+  }
+  const obj = raw as Record<string, unknown>;
+  if (obj.decision !== "allow" && obj.decision !== "deny") {
+    return { ok: false, error: "参数错误：reply.decision 必须为 allow 或 deny" };
+  }
+  if (obj.stop !== undefined && typeof obj.stop !== "boolean") {
+    return { ok: false, error: "参数错误：reply.stop 必须为布尔值" };
+  }
+  if (obj.feedback !== undefined && typeof obj.feedback !== "string") {
+    return { ok: false, error: "参数错误：reply.feedback 必须为字符串" };
+  }
+  if (obj.remember !== undefined && typeof obj.remember !== "string") {
+    return { ok: false, error: "参数错误：reply.remember 必须为字符串" };
+  }
+  const reply: PermissionReply = {
+    decision: obj.decision,
+    ...(obj.stop !== undefined ? { stop: obj.stop } : {}),
+    ...(obj.remember !== undefined
+      ? { remember: obj.remember as PermissionReply["remember"] }
+      : {}),
+    ...(obj.feedback !== undefined ? { feedback: obj.feedback } : {}),
+  };
+  return { ok: true, reply };
 }
 
 function parseQuestionAnswers(

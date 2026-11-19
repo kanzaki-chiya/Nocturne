@@ -109,8 +109,13 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
 
 ## 修订：2026-11-20 外部 agent 作答
 
-- **回答提问**：`session.respondQuestion` 加入 `AGENT_RUN_METHODS`（只读范围不开放），MCP 桥新增 `nocturne_answer({ sessionId, requestId, answers, wait?, timeoutSeconds? })`。答案结构与 `session.respondQuestion` 一致（每题提供 `selected` 与可选 `text`，或 `{ declined: true }` 放弃作答），作答后可选等待并沿用增量摘要规则。
-- **归属边界（只限自己创建的会话）**：RPC 服务端的 agent 接入层在执行 `session.respondQuestion` 前校验目标会话的 `client.id` 必须等于当前外部 agent 的 id，不匹配时返回 `-32004 / agent_not_allowed`，不调用 Core；`requestId` 过期或不存在按既有 RPC 错误（`unknown_request`）返回。
-- **等待提示与范围同步**：`initialize` 结果在 `origin === "agent"` 且已登记时附带自身 `agent: { id, scope, maxPermissionPreset }`，配对批准与范围变更时向该 agent 连接推送 `agent.selfChanged`。会话停在 `waiting_for_answer` 时，等待返回保留 `pendingQuestion`，提示文本说明可调用 `nocturne_answer` 或请用户在 Nocturne 中处理。
-- **对原第 77 行规则的替代**：原「后果」第 77 行「权限确认与提问仍由用户本人处理；外部 agent 拿不到任何批准能力」中，**提问仅由用户本人处理**的限制对「外部 agent 自己创建的会话」被本修订替代；用户或其他外部 agent 创建的会话中的提问，以及权限确认，仍维持原限制。
+- **两项作答能力**：
+  - **回答提问**：`session.respondQuestion` 加入 `AGENT_RUN_METHODS`（只读范围不开放），MCP 桥新增 `nocturne_answer({ sessionId, requestId, answers, wait?, timeoutSeconds? })`。答案结构与 `session.respondQuestion` 一致（每题提供 `selected` 与可选 `text`，或 `{ declined: true }` 放弃作答），`requestId` 过期或不存在按既有 RPC 错误（`unknown_request`）返回；作答后可选等待并沿用增量摘要规则。
+  - **处理审批**：`session.respondPermission` 与 `session.respondSubagentPermission` 加入 `AGENT_RUN_METHODS`（只读范围不开放），MCP 桥新增 `nocturne_respond_permission({ sessionId, requestId, childSessionId?, reply, wait?, timeoutSeconds? })`。`reply` 沿用 `PermissionReply`；处理子代理转发审批时传入 `childSessionId`，走 `session.respondSubagentPermission`。桌面端照常弹出审批，任何一方先回复即生效，另一方界面随事件更新且后续重复回复按 `unknown_request` 返回。
+- **三条安全边界（全部在 RPC 的 agent 接入层校验，不在 MCP 桥拦截）**：
+  1. **只限自己创建的会话**：执行 `session.respondQuestion`、`session.respondPermission` 与 `session.respondSubagentPermission` 前，校验目标会话（子代理审批时为父会话）的 `client.id` 必须等于当前外部 agent 的 id，否则返回 `-32004 / agent_not_allowed` 且不调用 Core。
+  2. **允许类只限最高档上限**：拒绝类回复（`decision: "deny"`，含 `stop: true` 与 `feedback`）在任意权限上限下均允许；允许类回复（`decision: "allow"`，含本次允许与 `remember: "session"` 本会话内允许）仅在该 agent 登记的权限上限为最高档（`bypass`）时允许，较低上限（`read-only` / `default` / `auto-edit` / `guarded` / `smart`）一律返回 `-32004 / agent_not_allowed`。
+  3. **不写持久授权**：外部 agent 不得写入任何持久授权（Grant / 用户规则）。`PermissionReply.remember` 为 `"project"` 或 `"always"` 的变体在任意权限上限（含 `bypass`）下一律拒绝，返回 `-32004 / agent_not_allowed`。
+- **等待提示与范围同步**：`initialize` 结果在 `origin === "agent"` 且已登记时附带自身 `agent: { id, scope, maxPermissionPreset }`，配对批准与范围变更时向该 agent 连接推送 `agent.selfChanged`。会话停在 `waiting_for_answer` / `waiting_for_permission` 时，等待返回保留 `pendingQuestion` / `pendingPermissions`（子代理转发审批条目附带 `childSessionId`），提示文本说明可调用的工具；若该 agent 不能批准，权限提示仅说明可拒绝或请用户在 Nocturne 中处理。
+- **对原第 77 行规则的替代**：原「后果」第 77 行「权限确认与提问仍由用户本人处理；外部 agent 拿不到任何批准能力」中，在**外部 agent 自己创建的会话**范围内：提问可由该 agent 通过 `nocturne_answer` 回答；审批可由该 agent 通过 `nocturne_respond_permission` 拒绝，且当且仅当其登记权限上限为最高档（`bypass`）时可做非持久允许（本次 / 本会话）。对用户或其他外部 agent 创建的会话、较低权限上限下的批准，以及全部持久授权（`project` / `always`），原规则继续生效。
 

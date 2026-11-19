@@ -1,4 +1,5 @@
 import {
+  allPendingPermissions,
   userEntryText,
   type LiveTool,
   type SessionView,
@@ -57,7 +58,9 @@ export function deriveMcpSessionStatus(
   pendingCount = 0,
   paused = false,
 ): McpSessionStatus {
-  if (view.pendingPermission !== undefined) return "waiting_for_permission";
+  if (view.pendingPermission !== undefined || view.pendingSubagentPermissions.length > 0) {
+    return "waiting_for_permission";
+  }
   if (view.pendingQuestion !== undefined) return "waiting_for_answer";
   if (paused) return "paused";
   if (
@@ -438,6 +441,7 @@ export function formatReadSessionOutput(
   const selected = allTurns.slice(-lastTurns);
   const status = deriveMcpSessionStatus(view, pendingCount, paused);
 
+  const pendingPerms = allPendingPermissions(view);
   const buildPayload = (turns: FoldedTurn[], truncatedNote?: string) => ({
     ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     title: view.title,
@@ -447,16 +451,24 @@ export function formatReadSessionOutput(
     turnCount: view.turnCount,
     totalTurnsInView: allTurns.length,
     returnedTurns: turns.length,
-    ...(view.pendingPermission !== undefined
+    ...(pendingPerms.length > 0
       ? {
-          pendingPermissions: [
-            {
-              requestId: view.pendingPermission.requestId,
-              toolName: view.pendingPermission.toolName,
-              reason: view.pendingPermission.reason,
-              subjects: view.pendingPermission.subjects,
-            },
-          ],
+          pendingPermissions: pendingPerms.map((item) =>
+            item.kind === "subagent"
+              ? {
+                  requestId: item.permission.requestId,
+                  childSessionId: item.permission.childSessionId,
+                  toolName: item.permission.toolName,
+                  reason: item.permission.reason,
+                  subjects: item.permission.subjects,
+                }
+              : {
+                  requestId: item.permission.requestId,
+                  toolName: item.permission.toolName,
+                  reason: item.permission.reason,
+                  subjects: item.permission.subjects,
+                },
+          ),
         }
       : {}),
     ...(view.pendingQuestion !== undefined

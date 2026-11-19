@@ -85,6 +85,7 @@ import {
 import type { LineTransport } from "../shared/transport.js";
 import {
   AgentHost,
+  isHighestPermissionPreset,
   lowerPermissionPreset,
   parsePermissionPreset,
   presetRank,
@@ -798,6 +799,49 @@ class Connection implements HubPeer {
             : "回答自己创建的会话中的提问";
         throw new RpcProtocolError("agent_not_allowed", `外部 agent 只能${action}`);
       }
+    }
+    if (
+      (method === "session.respondPermission" || method === "session.respondSubagentPermission") &&
+      this.initialized &&
+      this.hub.available &&
+      agentDevice
+    ) {
+      const p = asParams(params);
+      const sessionId = reqString(p, "sessionId");
+      // 子代理审批时 sessionId 即为父会话 ID，按父会话归属判定
+      const client = await this.resolveSessionClient(sessionId);
+      if (client?.id !== agentDevice.id) {
+        throw new RpcProtocolError(
+          "agent_not_allowed",
+          "外部 agent 只能处理自己创建的会话中的权限审批",
+        );
+      }
+      const reply = reqObject(p, "reply");
+      const remember = reply.remember;
+      if (remember === "project" || remember === "always") {
+        throw new RpcProtocolError(
+          "agent_not_allowed",
+          "外部 agent 不能保存持久授权（project / always）",
+        );
+      }
+      if (remember !== undefined && remember !== "session") {
+        const desc = typeof remember === "string" ? remember : typeof remember;
+        throw new InvalidParamsError(`无效的 reply.remember：${desc}`);
+      }
+      const decision = reply.decision;
+      if (decision === "deny") {
+        return;
+      }
+      if (decision === "allow") {
+        if (!isHighestPermissionPreset(agentDevice.maxPermissionPreset)) {
+          throw new RpcProtocolError(
+            "agent_not_allowed",
+            `仅权限上限为 bypass 的外部 agent 可批准权限请求（当前上限：${agentDevice.maxPermissionPreset}）`,
+          );
+        }
+        return;
+      }
+      throw new InvalidParamsError("reply.decision 必须为 allow 或 deny");
     }
   }
 

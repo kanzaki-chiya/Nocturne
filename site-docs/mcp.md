@@ -76,3 +76,4 @@ MCP 服务器在工具定义中声明 `readOnlyHint: true` 的工具，可进入
 | `nocturne_wait` | 等待单个或多个正在运行的会话（传 `sessionId` 或 `sessionIds`，任一就绪即返回，工具进度以增量单行摘要呈现），或在等待审批/回答提问、或因中断/出错导致队列暂停时立即返回（详见[外部 Agent 接入指南](https://github.com/kanzaki-chiya/Nocturne/blob/main/docs/apps/outside-agents.md#4-提供的-mcp-工具)） |
 | `nocturne_interrupt` | 中断指定会话正在运行的轮次 |
 | `nocturne_answer` | 回答该外部 agent 自己创建的会话中当前挂起的提问（可选等待继续执行完成） |
+| `nocturne_respond_permission` | 处理该外部 agent 自己创建的会话中挂起的权限审批（含子代理转发审批；任意上限均可拒绝，非持久允许仅限 `bypass` 上限，不写持久授权） |

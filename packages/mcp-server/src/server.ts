@@ -222,6 +222,64 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
       required: ["sessionId", "requestId", "answers"],
     },
   },
+  {
+    name: "nocturne_respond_permission",
+    description:
+      "回复 Nocturne 会话当前挂起的权限审批（含子代理转发的审批）。仅限本外部 agent 自己创建的会话（子代理审批按父会话归属判定）；拒绝在任意上限下均可用，允许（本次或本会话）仅在权限上限为 bypass 时可用，持久授权（project / always）由服务端一律拒绝。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "目标会话 ID（处理子代理转发审批时为父会话 ID；必须由本外部 agent 创建）。",
+        },
+        requestId: {
+          type: "string",
+          description: "待审批请求的 requestId（取自 pendingPermissions[].requestId）。",
+        },
+        childSessionId: {
+          type: "string",
+          description:
+            "可选；处理子代理转发的审批时传入子会话 ID（取自 pendingPermissions[].childSessionId），走 session.respondSubagentPermission。",
+        },
+        reply: {
+          type: "object",
+          description: "权限审批回复，结构沿用 PermissionReply。",
+          properties: {
+            decision: {
+              type: "string",
+              enum: ["allow", "deny"],
+              description: "审批决定：allow（允许，需最高档上限 bypass）或 deny（拒绝）。",
+            },
+            remember: {
+              type: "string",
+              enum: ["session", "project", "always"],
+              description:
+                "decision 为 allow 时可选；仅 session（本会话内允许）可用，project / always 等持久授权由服务端一律拒绝。",
+            },
+            stop: {
+              type: "boolean",
+              description: "decision 为 deny 时可选；设为 true 表示拒绝并停止当前轮次。",
+            },
+            feedback: {
+              type: "string",
+              description: "decision 为 deny 时可选；附带给模型的拒绝原因反馈。",
+            },
+          },
+          required: ["decision"],
+        },
+        wait: {
+          type: "boolean",
+          description: "回复后是否等待执行完成或下一次暂停（默认 true）。",
+        },
+        timeoutSeconds: {
+          type: "number",
+          description: "等待超时秒数（默认 300，上限 600）。",
+        },
+      },
+      required: ["sessionId", "requestId", "reply"],
+    },
+  },
 ];
 
 export interface NocturneMcpServerOptions extends McpBridgeOptions {

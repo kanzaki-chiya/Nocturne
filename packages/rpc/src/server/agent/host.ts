@@ -59,6 +59,8 @@ export const AGENT_RUN_METHODS = [
   "runtime.renameSession",
   "session.submit",
   "session.enqueueInput",
+  "session.respondPermission",
+  "session.respondSubagentPermission",
   "session.respondQuestion",
   "session.interrupt",
   "session.abort",
@@ -86,6 +88,10 @@ export function parsePermissionPreset(raw: string): PermissionPresetName | undef
 export function presetRank(preset: PermissionPresetName): number {
   const idx = PERMISSION_PRESET_NAMES.indexOf(preset);
   return idx >= 0 ? idx : 1;
+}
+
+export function isHighestPermissionPreset(preset: PermissionPresetName): boolean {
+  return presetRank(preset) >= presetRank("bypass");
 }
 
 export function lowerPermissionPreset(

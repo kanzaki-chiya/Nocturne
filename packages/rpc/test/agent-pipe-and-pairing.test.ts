@@ -9,6 +9,7 @@ import {
   createMemoryTransportPair,
   createRpcClient,
   RpcError,
+  trackSessionView,
   type AgentSelfInfo,
 } from "../src/client/index.js";
 import {
@@ -1180,5 +1181,548 @@ describe("外部 agent 配对、范围、白名单、权限上限与会话来源
       }),
     ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
     expect(respondSpy).not.toHaveBeenCalled();
+  });
+
+  it("外部 agent 处理权限审批：拒绝在任意上限成功；允许仅在 bypass 上限成功；持久变体、非本人会话与只读档位一律 agent_not_allowed", async () => {
+    const h = await connectWithConfig({
+      enableRemote: true,
+      scripts: [
+        // Turn 1: 尝试写入文件 -> 触发权限确认（在较低上限下允许被拒，最终用 deny 拒绝并继续）
+        [
+          {
+            type: "tool_call",
+            toolCallId: "tc-w-1",
+            name: "write",
+            input: { path: "deny-test.txt", content: "blocked" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "收到拒绝反馈，不写入" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Turn 2: 再次尝试写入 -> 触发权限确认（升为 bypass 上限后，测试 project/always 被拒，再用 allow + session 放行）
+        [
+          {
+            type: "tool_call",
+            toolCallId: "tc-w-2",
+            name: "write",
+            input: { path: "allow-test.txt", content: "ok" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "已放行并写入完成" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Turn 3: 再触发一次审批，测试 deny + stop: true 立即中止轮次
+        [
+          {
+            type: "tool_call",
+            toolCallId: "tc-w-3",
+            name: "write",
+            input: { path: "stop-test.txt", content: "stop" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    cleanups.push(async () => {
+      h.client.close();
+      await h.served;
+    });
+
+    // 用户会话
+    const { session: userSession, opened: userOpened } = await h.client.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+    cleanups.push(async () => userSession.close().catch(() => undefined));
+
+    const connectAgent = async (
+      id: string,
+      name: string,
+      scope: "run" | "read-only",
+      maxPermissionPreset: "read-only" | "default" | "auto-edit" | "guarded" | "smart" | "bypass",
+    ) => {
+      const [cT, sT] = createMemoryTransportPair();
+      void h.server.serve(sT, { origin: "agent", agent: { id, name } });
+      const client = createRpcClient(cT, { clientName: name, interactive: false });
+      cleanups.push(async () => client.close());
+      await client.initialize();
+      await h.client.call("agent.respondPairing", {
+        agentId: id,
+        approved: true,
+        scope,
+        maxPermissionPreset,
+      });
+      return client;
+    };
+
+    const agentOwner = await connectAgent("agent-perm-owner", "Perm Owner", "run", "read-only");
+    const agentOther = await connectAgent("agent-perm-other", "Perm Other", "run", "bypass");
+    const agentRo = await connectAgent("agent-perm-ro", "Perm RO", "read-only", "bypass");
+
+    // 用 default 预设开一个需要审批 write 的会话（先给 default 上限再开会话，再测更低上限）
+    await h.client.call("agent.setScope", {
+      id: "agent-perm-owner",
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+    const { session: ownerSess, opened: ownerOpened } = await agentOwner.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+      permissionPreset: "default",
+    });
+
+    let latestPermId: string | undefined;
+    let turnCompletedCount = 0;
+    await ownerSess.subscribe((ev) => {
+      if (ev.type === "permission.requested") {
+        latestPermId = ev.payload.requestId;
+      } else if (ev.type === "turn.completed") {
+        turnCompletedCount++;
+      }
+    });
+
+    // Turn 1：触发 write 权限审批
+    const t1 = ownerSess.submit({ text: "写 deny-test.txt" });
+    await vi.waitFor(() => {
+      expect(latestPermId).toBeDefined();
+    });
+    if (latestPermId === undefined) throw new Error("missing permId 1");
+    const perm1 = latestPermId;
+
+    // 1. 较低上限（read-only / default / auto-edit / guarded / smart）下，allow 和 allow+session 均返回 agent_not_allowed
+    for (const lowPreset of ["read-only", "default", "auto-edit", "guarded", "smart"] as const) {
+      await h.client.call("agent.setScope", {
+        id: "agent-perm-owner",
+        scope: "run",
+        maxPermissionPreset: lowPreset,
+      });
+      await expect(ownerSess.respondPermission(perm1, { decision: "allow" })).rejects.toMatchObject(
+        { code: "agent_not_allowed", rpcCode: -32004 },
+      );
+      await expect(
+        ownerSess.respondPermission(perm1, { decision: "allow", remember: "session" }),
+      ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    }
+
+    // 2. 其他 agent（即使上限 bypass）与只读 agent（即使上限 bypass）均被拒绝
+    await expect(
+      agentOther.call("session.respondPermission", {
+        sessionId: ownerOpened.sessionId,
+        requestId: perm1,
+        reply: { decision: "allow" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    await expect(
+      agentOther.call("session.respondPermission", {
+        sessionId: ownerOpened.sessionId,
+        requestId: perm1,
+        reply: { decision: "deny" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    await expect(
+      agentRo.call("session.respondPermission", {
+        sessionId: ownerOpened.sessionId,
+        requestId: perm1,
+        reply: { decision: "deny" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    // 本 agent 尝试处理用户会话也被拒绝
+    await expect(
+      agentOwner.call("session.respondPermission", {
+        sessionId: userOpened.sessionId,
+        requestId: "p-user-1",
+        reply: { decision: "deny" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+
+    // 3. 在最低上限 read-only 下，拒绝（deny）成功且会话继续完成
+    await h.client.call("agent.setScope", {
+      id: "agent-perm-owner",
+      scope: "run",
+      maxPermissionPreset: "read-only",
+    });
+    await expect(
+      ownerSess.respondPermission(perm1, { decision: "deny", feedback: "禁止写入此文件" }),
+    ).resolves.toBeUndefined();
+    await t1;
+    await vi.waitFor(() => {
+      expect(turnCompletedCount).toBe(1);
+    });
+
+    // Turn 2：提升权限上限为 bypass，验证持久授权变体一律被拒，非持久 allow (remember: "session") 成功
+    await h.client.call("agent.setScope", {
+      id: "agent-perm-owner",
+      scope: "run",
+      maxPermissionPreset: "bypass",
+    });
+    latestPermId = undefined;
+    const t2 = ownerSess.submit({ text: "写 allow-test.txt" });
+    await vi.waitFor(() => {
+      expect(latestPermId).toBeDefined();
+    });
+    if (latestPermId === undefined) throw new Error("missing permId 2");
+    const perm2 = latestPermId;
+
+    await expect(
+      ownerSess.respondPermission(perm2, { decision: "allow", remember: "project" }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    await expect(
+      ownerSess.respondPermission(perm2, { decision: "allow", remember: "always" }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+
+    // 非持久 allow (remember: "session") 在 bypass 上限下成功
+    await expect(
+      ownerSess.respondPermission(perm2, { decision: "allow", remember: "session" }),
+    ).resolves.toBeUndefined();
+    await t2;
+    await vi.waitFor(() => {
+      expect(turnCompletedCount).toBe(2);
+    });
+
+    // Turn 3：验证 deny + stop: true 在 default 上限下成功中止轮次
+    await h.client.call("agent.setScope", {
+      id: "agent-perm-owner",
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+    latestPermId = undefined;
+    const t3 = ownerSess.submit({ text: "写 stop-test.txt" });
+    await vi.waitFor(() => {
+      expect(latestPermId).toBeDefined();
+    });
+    if (latestPermId === undefined) throw new Error("missing permId 3");
+    await expect(
+      ownerSess.respondPermission(latestPermId, { decision: "deny", stop: true }),
+    ).resolves.toBeUndefined();
+    await t3;
+    await vi.waitFor(() => {
+      expect(turnCompletedCount).toBe(3);
+    });
+  });
+
+  it("桌面端与外部 agent 同时面对同一审批：一方先回复即生效，另一方视图同步更新且再回复报 unknown_request", async () => {
+    const h = await connectWithConfig({
+      enableRemote: true,
+      scripts: [
+        // Turn 1: 桌面端先批准，agent 视图清空且再回复报 unknown_request
+        [
+          {
+            type: "tool_call",
+            toolCallId: "tc-race-1",
+            name: "write",
+            input: { path: "race-1.txt", content: "from desktop" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "第一轮完成" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Turn 2: agent 先批准，桌面端视图清空且再回复报 unknown_request
+        [
+          {
+            type: "tool_call",
+            toolCallId: "tc-race-2",
+            name: "write",
+            input: { path: "race-2.txt", content: "from agent" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "第二轮完成" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    cleanups.push(async () => {
+      h.client.close();
+      await h.served;
+    });
+    // 使 h.ws 成为已有会话使用过的工作区
+    const initHost = await h.client.runtime.createSession({ cwd: h.ws, model: MODEL });
+    await initHost.session.close();
+
+    const [agentCT, agentST] = createMemoryTransportPair();
+    void h.server.serve(agentST, {
+      origin: "agent",
+      agent: { id: "agent-race", name: "Race Agent" },
+    });
+    const agentClient = createRpcClient(agentCT, { clientName: "Race Agent", interactive: false });
+    cleanups.push(async () => agentClient.close());
+    await agentClient.initialize();
+    await h.client.call("agent.respondPairing", {
+      agentId: "agent-race",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "bypass",
+    });
+
+    // Agent 创建 default 预设会话，桌面端同时打开并跟踪 SessionView
+    const { session: agentSess, opened } = await agentClient.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+      permissionPreset: "default",
+    });
+    const { session: desktopSess } = await h.client.runtime.resumeSession(opened.sessionId);
+    const desktopTracker = await trackSessionView(desktopSess);
+    const agentTracker = await trackSessionView(agentSess);
+    cleanups.push(async () => {
+      await desktopTracker.stop().catch(() => undefined);
+      await agentTracker.stop().catch(() => undefined);
+    });
+
+    // Case 1: 桌面端先回复 -> agent 视图清除 pendingPermission，agent 再回复报 unknown_request
+    const turn1 = agentSess.submit({ text: "写 race-1.txt" });
+    await vi.waitFor(() => {
+      expect(desktopTracker.view.pendingPermission).toBeDefined();
+      expect(agentTracker.view.pendingPermission).toBeDefined();
+    });
+    const req1 = desktopTracker.view.pendingPermission?.requestId ?? "";
+    expect(req1).toBe(agentTracker.view.pendingPermission?.requestId);
+
+    await desktopSess.respondPermission(req1, { decision: "allow" });
+    await expect(agentSess.respondPermission(req1, { decision: "deny" })).rejects.toMatchObject({
+      code: "unknown_request",
+    });
+    await turn1;
+    await vi.waitFor(() => {
+      expect(desktopTracker.view.pendingPermission).toBeUndefined();
+      expect(agentTracker.view.pendingPermission).toBeUndefined();
+      expect(agentTracker.view.status).toBe("idle");
+    });
+
+    // Case 2: agent 先回复 -> 桌面端视图清除 pendingPermission，桌面端再回复报 unknown_request
+    const turn2 = agentSess.submit({ text: "写 race-2.txt" });
+    await vi.waitFor(() => {
+      expect(desktopTracker.view.pendingPermission).toBeDefined();
+      expect(agentTracker.view.pendingPermission).toBeDefined();
+    });
+    const req2 = agentTracker.view.pendingPermission?.requestId ?? "";
+    expect(req2).toBe(desktopTracker.view.pendingPermission?.requestId);
+
+    await agentSess.respondPermission(req2, { decision: "allow" });
+    await expect(desktopSess.respondPermission(req2, { decision: "allow" })).rejects.toMatchObject({
+      code: "unknown_request",
+    });
+    await turn2;
+    await vi.waitFor(() => {
+      expect(desktopTracker.view.pendingPermission).toBeUndefined();
+      expect(agentTracker.view.pendingPermission).toBeUndefined();
+      expect(desktopTracker.view.status).toBe("idle");
+    });
+  });
+
+  it("使用 createRuntimeStub：子代理转发审批按父会话归属、权限上限与禁止持久授权校验", async () => {
+    const home = tmpDir("rpc-agent-subperm-stub-");
+    const ownSubPermSpy = vi.fn(async () => undefined);
+    const otherSubPermSpy = vi.fn(async () => undefined);
+
+    const makeStubSession = (
+      id: string,
+      client: { kind: "agent"; name: string; deviceId: string; id: string } | undefined,
+      spy: ReturnType<typeof vi.fn>,
+    ) => ({
+      id,
+      state: () => ({
+        meta: {
+          id,
+          createdAt: "2026-11-20T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          formatVersion: 1,
+          ...(client !== undefined ? { client } : {}),
+        },
+        config: {
+          model: { provider: "fake", model: "fake-model" },
+          permissionPreset: "default",
+        },
+        status: "idle",
+        turnCount: 0,
+        lastSeq: 0,
+      }),
+      subscribe: () => () => undefined,
+      durableEvents: () => [],
+      isIdle: () => true,
+      onIdle: () => () => undefined,
+      warnings: [],
+      pendingInputs: () => ({ items: [], paused: false }),
+      interrupt: () => undefined,
+      respondSubagentPermission: spy,
+      close: async () => undefined,
+    });
+
+    const ownParent = makeStubSession(
+      "parent-own",
+      { kind: "agent", name: "SubPerm Agent", deviceId: "agent-sub-owner", id: "agent-sub-owner" },
+      ownSubPermSpy,
+    );
+    const otherParent = makeStubSession(
+      "parent-other",
+      { kind: "agent", name: "Other Agent", deviceId: "agent-other", id: "agent-other" },
+      otherSubPermSpy,
+    );
+
+    const stubRuntime = createRuntimeStub({
+      resumeSession: async (id) => {
+        if (id === "parent-own") return ownParent as never;
+        if (id === "parent-other") return otherParent as never;
+        throw new Error(`unexpected session ${id}`);
+      },
+      listSessions: async () => [
+        {
+          id: "parent-own",
+          createdAt: "2026-11-20T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          model: { provider: "fake", model: "fake-model" },
+          mtimeMs: Date.now(),
+          client: {
+            kind: "agent",
+            name: "SubPerm Agent",
+            deviceId: "agent-sub-owner",
+            id: "agent-sub-owner",
+          },
+        },
+        {
+          id: "parent-other",
+          createdAt: "2026-11-20T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          model: { provider: "fake", model: "fake-model" },
+          mtimeMs: Date.now(),
+          client: {
+            kind: "agent",
+            name: "Other Agent",
+            deviceId: "agent-other",
+            id: "agent-other",
+          },
+        },
+      ],
+      close: async () => undefined,
+    });
+
+    const server = createRpcServer({
+      nocturneVersion: "test",
+      createRuntime: async () => ({ runtime: stubRuntime }),
+    });
+    const [localCT, localST] = createMemoryTransportPair();
+    const localServed = server.serve(localST);
+    const localClient = createRpcClient(localCT, { clientName: "desktop", interactive: true });
+    cleanups.push(async () => {
+      localClient.close();
+      await localServed;
+    });
+    await localClient.initialize();
+
+    const [agentCT, agentST] = createMemoryTransportPair();
+    void server.serve(agentST, {
+      origin: "agent",
+      agent: { id: "agent-sub-owner", name: "SubPerm Agent" },
+    });
+    const agentClient = createRpcClient(agentCT, {
+      clientName: "SubPerm Agent",
+      interactive: false,
+    });
+    cleanups.push(async () => agentClient.close());
+    await agentClient.initialize();
+    await localClient.call("agent.respondPairing", {
+      agentId: "agent-sub-owner",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+
+    await agentClient.runtime.resumeSession("parent-own");
+    await agentClient.runtime.resumeSession("parent-other");
+
+    // 1. 别人父会话上的子代理审批：允许与拒绝均报 agent_not_allowed，不调 Core
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-other",
+        childSessionId: "child-1",
+        requestId: "req-1",
+        reply: { decision: "deny" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    expect(otherSubPermSpy).not.toHaveBeenCalled();
+
+    // 2. 自己父会话在 default 上限下：allow 被拒，deny 成功
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-own",
+        childSessionId: "child-1",
+        requestId: "req-1",
+        reply: { decision: "allow" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    expect(ownSubPermSpy).not.toHaveBeenCalled();
+
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-own",
+        childSessionId: "child-1",
+        requestId: "req-1",
+        reply: { decision: "deny", feedback: "子代理不可写此路径" },
+      }),
+    ).resolves.toBeNull();
+    expect(ownSubPermSpy).toHaveBeenCalledWith("child-1", "req-1", {
+      decision: "deny",
+      feedback: "子代理不可写此路径",
+    });
+
+    // 3. 升级为 bypass 后：project/always 仍被拒，allow 与 allow+session 成功
+    await localClient.call("agent.setScope", {
+      id: "agent-sub-owner",
+      scope: "run",
+      maxPermissionPreset: "bypass",
+    });
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-own",
+        childSessionId: "child-1",
+        requestId: "req-2",
+        reply: { decision: "allow", remember: "project" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-own",
+        childSessionId: "child-1",
+        requestId: "req-2",
+        reply: { decision: "allow", remember: "always" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-own",
+        childSessionId: "child-1",
+        requestId: "req-2",
+        reply: { decision: "allow", remember: "session" },
+      }),
+    ).resolves.toBeNull();
+    expect(ownSubPermSpy).toHaveBeenCalledWith("child-1", "req-2", {
+      decision: "allow",
+      remember: "session",
+    });
+
+    // 4. 切为 read-only 档位：即使上限为 bypass 也被拒
+    await localClient.call("agent.setScope", {
+      id: "agent-sub-owner",
+      scope: "read-only",
+      maxPermissionPreset: "bypass",
+    });
+    await expect(
+      agentClient.call("session.respondSubagentPermission", {
+        sessionId: "parent-own",
+        childSessionId: "child-1",
+        requestId: "req-3",
+        reply: { decision: "deny" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
   });
 });
