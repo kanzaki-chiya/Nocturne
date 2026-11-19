@@ -61,7 +61,7 @@ GitHub Actions 的 `ci` 工作流（`.github/workflows/ci.yml`）在推送 main 
 
 ```bash
 pnpm install        # 安装依赖
-pnpm verify         # 本地日常验证入口（scripts/verify.mjs）：自动清代理，依次跑 typecheck / lint / format:check / depcheck / 相关包测试（--maxWorkers=2）/ build；支持 --base <ref>、--report <绝对路径>、--skip-build
+pnpm verify         # 本地日常验证入口（scripts/verify.mjs）：自动清代理，依次跑 typecheck / lint / format:check / depcheck / 相关包测试（--maxWorkers=2）/ build；支持 --base <ref>、--report <绝对路径>、--skip-build、--no-cache
 pnpm shot           # 隔离环境启动调试版桌面端并按步骤脚本 CDP 截图（scripts/shot.mjs），详见下方「桌面端截图」
 pnpm typecheck      # tsc --noEmit（src 与 test 两套 tsconfig）
 pnpm lint           # eslint（strictTypeChecked + stylisticTypeChecked）、stylelint 样式检查（pnpm lint:css，含警告数上限 --max-warnings 598，只能减不能增；实际数低于上限时同样失败，需把上限改成实际数）、gen-tokens --check、桌面端未定义 CSS 变量检查与界面功能地图路径检查（check-ui-map.mjs）
@@ -74,7 +74,7 @@ pnpm depcheck       # dependency-cruiser 依赖方向检查（modules.md 依赖�
 pnpm build          # tsdown 构建 packages/core/dist
 ```
 
-日常改动在本地以 `pnpm verify` 为准（支持 `--base <ref>` 默认 `main`、`--report <绝对路径>` 写 Markdown 汇总、`--skip-build`）：自动去掉 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，按顺序执行 `typecheck`、`lint`、`format:check`、`depcheck`、相关测试与 `build`，任一步失败后继续执行其余步骤并在最后以非 0 退出。本机一次通常要 10–15 分钟（四项静态检查合计约 5.5 分钟，另加相关测试与构建）；Agent 调用时把 shell `timeoutMs` 设为 1800000，或以后台命令运行，不要设 600000。测试范围规则不变，由脚本自动判定：改动所在包跑整包测试；按 workspace `package.json` 递归依赖这些包的下游包，通过 vitest alias 跑 `vitest related --run --passWithNoTests` 只测关联用例；`scripts/` 有改动时跑 `vitest run --root scripts`；仅改了 `docs/`、`site-docs/` 或根目录 Markdown 时跳过测试；vitest 统一加 `--maxWorkers=2` 且各包串行，不跑全量测试（全量交给推送后的 CI）。需要在本地看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
+日常改动在本地以 `pnpm verify` 为准（支持 `--base <ref>` 默认 `main`、`--report <绝对路径>` 写 Markdown 汇总、`--skip-build`、`--no-cache`）：自动去掉 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，按顺序执行 `typecheck`、`lint`、`format:check`、`depcheck`、相关测试与 `build`，任一步失败后继续执行其余步骤并在最后以非 0 退出。每步通过后按「工作区内容指纹 + 步骤名 + 完整命令参数」即时写入当前工作树 git 目录下的 `verify-cache.json`（仅保留最近一个指纹、仅缓存通过步骤，运行期间文件变动则不写），工作区未变时重跑直接复用已通过步骤并在报告中标记为 `PASS (cached)`。传入 `--no-cache` 时本轮忽略已有缓存重跑全部步骤，通过的步骤仍照常写入缓存。本机一次通常要 10–15 分钟（四项静态检查合计约 5.5 分钟，另加相关测试与构建）；Agent 调用时把 shell `timeoutMs` 设为 1800000，或以后台命令运行，不要设 600000。测试范围规则不变，由脚本自动判定：改动所在包跑整包测试；按 workspace `package.json` 递归依赖这些包的下游包，通过 vitest alias 跑 `vitest related --run --passWithNoTests` 只测关联用例；`scripts/` 有改动时跑 `vitest run --root scripts`；仅改了 `docs/`、`site-docs/` 或根目录 Markdown 时跳过测试；vitest 统一加 `--maxWorkers=2` 且各包串行，不跑全量测试（全量交给推送后的 CI）。需要在本地看所有包结果时使用 `pnpm -r --workspace-concurrency=1 --no-bail test`，随后运行 `pnpm exec vitest run --root scripts`。不要用并行的 `pnpm -r --no-bail test` 作为常规全量命令：CLI 的 `rpc.e2e.test.ts` 会执行根目录 `pnpm build`，清空并重建各包 dist，可能与其他测试读取构建产物冲突。普通单测的兄弟包导入应通过 vitest alias 指向源码；CLI e2e 故意运行构建产物，保持独立验证该路径。
 
 本地 vitest 按包限制并发（TUI 4 个 worker，core、rpc、cli、desktop、`scripts/` 6 个），开发机同时还在使用；CI 保持默认。
 

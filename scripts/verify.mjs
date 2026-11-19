@@ -1,11 +1,25 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptDir, "..");
+const VERIFY_CACHE_VERSION = 1;
+const VERIFY_CACHE_FILENAME = "verify-cache.json";
 
 const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
 
@@ -29,12 +43,15 @@ export function parseVerifyArgs(argv = process.argv.slice(2)) {
   let base = "main";
   let report;
   let skipBuild = false;
+  let noCache = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--") continue;
     if (arg === "--skip-build") {
       skipBuild = true;
+    } else if (arg === "--no-cache") {
+      noCache = true;
     } else if (arg === "--base") {
       const value = argv[++i];
       if (!value || value.startsWith("-")) throw new Error("--base 缺少参数值");
@@ -52,13 +69,13 @@ export function parseVerifyArgs(argv = process.argv.slice(2)) {
       if (!value) throw new Error("--report 缺少参数值");
       report = value;
     } else if (arg === "-h" || arg === "--help") {
-      return { help: true, base, report, skipBuild };
+      return { help: true, base, report, skipBuild, noCache };
     } else {
       throw new Error(`未知参数：${arg}`);
     }
   }
 
-  return { help: false, base, report, skipBuild };
+  return { help: false, base, report, skipBuild, noCache };
 }
 
 /** 仅文档文件（docs/、site-docs/ 或根目录 Markdown） */
@@ -318,22 +335,24 @@ export function planVerifyTests(changedFiles, workspaces) {
   };
 }
 
+function runGit(repoRoot, args, env) {
+  const res = spawnSync("git", args, {
+    cwd: repoRoot,
+    env,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (res.error) throw res.error;
+  if (res.status !== 0) {
+    throw new Error(`git ${args.join(" ")} 失败：${(res.stderr || res.stdout || "").trim()}`);
+  }
+  return res.stdout;
+}
+
 /** 收集 merge-base 以来已提交 + 暂存 + 工作区 + 未跟踪的改动文件，去掉已删除文件 */
 export function collectChangedFiles(repoRoot, baseRef, env) {
-  const git = (args) => {
-    const res = spawnSync("git", args, {
-      cwd: repoRoot,
-      env,
-      encoding: "utf8",
-      maxBuffer: 32 * 1024 * 1024,
-      windowsHide: true,
-    });
-    if (res.error) throw res.error;
-    if (res.status !== 0) {
-      throw new Error(`git ${args.join(" ")} 失败：${(res.stderr || res.stdout || "").trim()}`);
-    }
-    return res.stdout;
-  };
+  const git = (args) => runGit(repoRoot, args, env);
 
   const mergeBase = git(["merge-base", baseRef, "HEAD"]).trim();
   const splitNul = (text) => text.split("\0").filter(Boolean);
@@ -351,6 +370,113 @@ export function collectChangedFiles(repoRoot, baseRef, env) {
     .sort();
 
   return { mergeBase, files: existing };
+}
+
+/** 返回当前工作树对应的缓存文件路径（位于 git 目录下，不进仓库） */
+export function getVerifyCachePath(repoRoot, env = process.env) {
+  const gitDir = runGit(repoRoot, ["rev-parse", "--git-dir"], env).trim();
+  return resolve(repoRoot, gitDir, VERIFY_CACHE_FILENAME);
+}
+
+/**
+ * 计算工作区内容指纹（覆盖已跟踪文件当前内容与未被忽略的未跟踪文件）。
+ * 使用临时 GIT_INDEX_FILE 副本执行 git add -A + git write-tree，不触碰真实 index / 工作区 / stash。
+ */
+export function computeWorkspaceFingerprint(repoRoot, env = process.env) {
+  const realIndexPath = env?.GIT_INDEX_FILE
+    ? resolve(repoRoot, env.GIT_INDEX_FILE)
+    : resolve(repoRoot, runGit(repoRoot, ["rev-parse", "--git-path", "index"], env).trim());
+  const tmpDir = mkdtempSync(join(tmpdir(), "nocturne-verify-idx-"));
+  const tmpIndexPath = join(tmpDir, "index");
+  try {
+    if (existsSync(realIndexPath)) {
+      copyFileSync(realIndexPath, tmpIndexPath);
+    }
+    const gitEnv = { ...env, GIT_INDEX_FILE: tmpIndexPath };
+    runGit(repoRoot, ["add", "-A"], gitEnv);
+    return runGit(repoRoot, ["write-tree"], gitEnv).trim();
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+/** 构造单个步骤的缓存键（步骤名 + 完整命令与参数） */
+export function makeStepCacheKey(step) {
+  return JSON.stringify([step.name, step.cmd, ...(step.args ?? [])]);
+}
+
+function isValidCachedStepEntry(entry) {
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    !Array.isArray(entry) &&
+    typeof entry.durationMs === "number" &&
+    Number.isFinite(entry.durationMs) &&
+    entry.durationMs >= 0 &&
+    typeof entry.summary === "string"
+  );
+}
+
+/** 读取缓存文件；不存在、读失败或格式非法时按无缓存处理 */
+export function readVerifyCache(cachePath) {
+  try {
+    const parsed = JSON.parse(readFileSync(cachePath, "utf8"));
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      parsed.version !== VERIFY_CACHE_VERSION ||
+      typeof parsed.fingerprint !== "string" ||
+      parsed.fingerprint.length === 0 ||
+      !parsed.steps ||
+      typeof parsed.steps !== "object" ||
+      Array.isArray(parsed.steps)
+    ) {
+      return null;
+    }
+    const steps = {};
+    for (const [key, value] of Object.entries(parsed.steps)) {
+      if (isValidCachedStepEntry(value)) {
+        steps[key] = { durationMs: value.durationMs, summary: value.summary };
+      }
+    }
+    return { version: VERIFY_CACHE_VERSION, fingerprint: parsed.fingerprint, steps };
+  } catch {
+    return null;
+  }
+}
+
+/** 查询当前指纹下某一步骤的缓存记录 */
+export function getCachedStep(cache, fingerprint, step) {
+  if (!cache || !fingerprint || cache.fingerprint !== fingerprint) return null;
+  const entry = cache.steps[makeStepCacheKey(step)];
+  return isValidCachedStepEntry(entry) ? entry : null;
+}
+
+/**
+ * 将单个已通过步骤即时写入缓存（临时文件 + rename）。
+ * 指纹变化时整份丢弃旧记录；FAIL 步骤不写入。
+ */
+export function writeVerifyCacheStep(cachePath, fingerprint, step, record) {
+  if (!record?.ok || !fingerprint) return false;
+  const existing = readVerifyCache(cachePath);
+  const steps = existing && existing.fingerprint === fingerprint ? { ...existing.steps } : {};
+  steps[makeStepCacheKey(step)] = {
+    durationMs: record.durationMs,
+    summary: record.summary,
+  };
+  const payload = JSON.stringify({ version: VERIFY_CACHE_VERSION, fingerprint, steps }, null, 2);
+  const dir = dirname(cachePath);
+  mkdirSync(dir, { recursive: true });
+  const tmpPath = join(dir, `.verify-cache.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    writeFileSync(tmpPath, `${payload}\n`, "utf8");
+    renameSync(tmpPath, cachePath);
+  } catch (error) {
+    rmSync(tmpPath, { force: true });
+    throw error;
+  }
+  return true;
 }
 
 /** 解析 vitest 输出中的测试数与通过数 */
@@ -453,7 +579,7 @@ export function formatDuration(ms) {
 
 /** 渲染步骤汇总行 */
 export function formatStepRow(result) {
-  const status = result.ok ? "PASS" : "FAIL";
+  const status = result.ok ? (result.cached ? "PASS (cached)" : "PASS") : "FAIL";
   return `| ${result.name} | ${status} | ${formatDuration(result.durationMs)} | ${result.summary} |`;
 }
 
@@ -527,15 +653,18 @@ async function runVerify(argv = process.argv.slice(2), repoRoot = defaultRepoRoo
   const args = parseVerifyArgs(argv);
   if (args.help) {
     console.log(
-      "用法: pnpm verify [--base <ref>] [--report <绝对路径>] [--skip-build]\n" +
+      "用法: pnpm verify [--base <ref>] [--report <绝对路径>] [--skip-build] [--no-cache]\n" +
         "  --base <ref>       对比基准分支/提交，默认 main（取与 HEAD 的 merge-base）\n" +
         "  --report <路径>    将 Markdown 汇总写入指定路径\n" +
-        "  --skip-build       跳过最后的 build 步骤",
+        "  --skip-build       跳过最后的 build 步骤\n" +
+        "  --no-cache         忽略已有缓存重跑全部步骤（通过的步骤仍写入缓存）",
     );
     return 0;
   }
 
   const env = stripProxyEnv(process.env);
+  const startFingerprint = computeWorkspaceFingerprint(repoRoot, env);
+  const cachePath = getVerifyCachePath(repoRoot, env);
   const { mergeBase, files: changedFiles } = collectChangedFiles(repoRoot, args.base, env);
   const workspaces = discoverWorkspaces(repoRoot);
   const testPlan = planVerifyTests(changedFiles, workspaces);
@@ -591,6 +720,23 @@ async function runVerify(argv = process.argv.slice(2), repoRoot = defaultRepoRoo
 
   const results = [];
   for (const step of steps) {
+    const cached = args.noCache
+      ? null
+      : getCachedStep(readVerifyCache(cachePath), startFingerprint, step);
+    if (cached) {
+      const record = {
+        name: step.name,
+        ok: true,
+        cached: true,
+        durationMs: cached.durationMs,
+        summary: cached.summary,
+        output: "",
+      };
+      results.push(record);
+      process.stderr.write(`${formatStepRow(record)}\n`);
+      continue;
+    }
+
     const res = await runCommand(step.cmd, step.args, { cwd: repoRoot, env });
     let summary;
     if (step.kind === "vitest") summary = parseVitestSummary(res.output, res.exitCode);
@@ -601,10 +747,20 @@ async function runVerify(argv = process.argv.slice(2), repoRoot = defaultRepoRoo
     const record = {
       name: step.name,
       ok: res.exitCode === 0,
+      cached: false,
       durationMs: res.durationMs,
       summary,
       output: res.output,
     };
+    if (record.ok) {
+      try {
+        if (computeWorkspaceFingerprint(repoRoot, env) === startFingerprint) {
+          writeVerifyCacheStep(cachePath, startFingerprint, step, record);
+        }
+      } catch {
+        // 缓存写入失败不影响验证主流程
+      }
+    }
     results.push(record);
     // 实时打印每步一行，让终端可见进度
     process.stderr.write(`${formatStepRow(record)}\n`);
