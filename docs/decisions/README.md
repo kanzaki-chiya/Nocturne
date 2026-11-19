@@ -107,6 +107,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0097](ADR-0097-suites.md) | 长期工作流「组曲 / Suite」：常驻指挥 + 线程 + 总览（先行抽出 `resident` 常驻子会话共享层） | 已接受 |
 | [ADR-0098](ADR-0098-memory.md) | 长期记忆（全局 / 项目 / 组曲三层范围、`memory` 上下文段、记忆工具、开关与 Runtime / RPC） | 已接受 |
 | [ADR-0099](ADR-0099-top-level-session-readonly-observe.md) | 顶层会话只读快照观察与手机端按需唤醒（`session.observe` / `session.observeAttachment`、免取锁回放与 `afterSeq` 无损升级） | 已接受 |
+| [ADR-0100](ADR-0100-native-plugins.md) | Nocturne 自有插件（`.nocturne-plugin` 清单、内置与本地目录安装、插件 MCP 服务器与 9 点位 Hook）与内置 office 插件（LibreOffice 转换与读取） | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
