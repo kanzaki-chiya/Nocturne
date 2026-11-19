@@ -93,3 +93,16 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
 - **队列暂停立即返回**：当一轮以非 `done`（如 `aborted`、`error`）结束且存在待发排队输入时，Core 会将待发队列整列暂停（[ADR-0070](ADR-0070-steer-and-queue-input.md) 第 4 节）。桥层的 `waitForTrackedSession` 将 `paused` 视作会话已停止，不再因 `pendingInputIds.size > 0` 空等到超时；结果返回 `status: "paused"` 与刚结束轮次的真实 `turnOutcome`（例如 `"aborted"` 或 `"error"`），并附带 `queuedInputs`。
 - **正常 `done` 队列接续不提前返回**：上一轮以 `done` 结束并从队首取出下一条消息开始接续轮次时，Core 会延迟发送 `runtime.status("idle")` 直至整条队列排空。桥层在非暂停队列被取空后进入过渡态，改由下一轮 `turn.started`、延迟的 `runtime.status("idle")` 或失败事件（`runtime.error("session_failed")` / `runtime.warning("input_queue_failed")`）解除，避免 `turn.started` 落盘/广播略慢时过早返回上一轮结果。
 - **Turn 启动窗口代际令牌与跨轮回调隔离**：`waitForTrackedSession` 可在收到 `runtime.status("idle")` 后即刻返回，此时上一轮 `session.submit` / `session.enqueueInput` RPC 响应可能尚未回传。桥层以单调递增的代际令牌（`startTokenSeq` / `activeStartToken`）取代共享布尔标记来标识当前启动中的触发窗口：前序 RPC 迟到完成/报错只能清理匹配的旧令牌，不得误清新一轮启动标记；`triggerEnqueueOnTracked` 仅由 `turn.started` 或非空 `input.pending`（`items.length > 0`）解除本轮启动标记（忽略上一轮残留的 `turn.completed` 或取空队首时的空 `input.pending`）；`clearStartTurn` 清除令牌时同步唤醒 `waitWakeups`，确保启动 RPC 异步拒绝且无事件到达时 `waitForTrackedSession` 也能及时收束。
+
+## 修订：2026-11-19 等待返回增量摘要、多会话等待与子会话提示
+
+- **等待返回增量摘要**：`nocturne_wait` 与 `nocturne_start_session` / `nocturne_send` 的 `wait: true` 返回中，`lastTurn.tools` 改为按连接维护增量游标：同一连接对同一会话在同一轮次只列出上次返回后新增或状态变化的工具调用，在 `lastTurn.omittedPreviousTools` 中注明本次之前已省略条数；首次等待、进入新轮次或连接断开重连后从本轮开头算，不同连接互不影响。
+- **单行压缩与条数上限**：每条工具摘要压成单行 `[工具名] 状态 — 目标`，`shell` 命令只取第一个非空行、折叠换行与连续空白并截断至 **120 字符**；单次最多列出最近 **20 条**工具调用，超出部分在 `lastTurn.omittedExcessTools` 注明省略条数。轮次结束时仍返回最终回复全文，整体受 64 KB 上限约束；完整工具清单仍由 `nocturne_read_session` 提供。
+- **多会话等待**：`nocturne_wait` 支持 `sessionIds: string[]`（与单会话 `sessionId` 二选一，单个 `sessionId` 的旧调用方式与返回形状不变）。任一会话满足现有停止条件（或调用时已满足）即立即返回 `{ timedOut, readySessionIds, sessions }`，其中每项复用单会话状态与增量摘要并附 `ready: boolean`；默认超时 300s、上限 600s，超时返回各会话当前 `running` 状态，不中断任何会话。
+- **子会话明确报错**：对子代理会话 ID 调用等待或打开类工具时，桥层从 `runtime.listSessions({ includeSubagents: true })` 的 `SessionSummary.parent` 解析父会话 ID，统一返回明确错误说明该会话为子代理会话并给出父会话 ID，避免暴露底层的「会话被另一个进程占用」。
+
+## 修订：2026-11-19 外部 agent 改名
+
+- **白名单与范围**：`runtime.renameSession` 加入 `AGENT_RUN_METHODS`（仅可运行范围可用，只读范围 `AGENT_READONLY_METHODS` 不开放）。
+- **归属校验**：RPC 服务端的 agent 接入层在执行 `runtime.renameSession` 前校验目标会话的 `client.id` 必须等于当前外部 agent 的 id；不匹配（用户或其他外部 agent 创建的会话，或无来源标记）时拒绝执行并返回 `-32004 / agent_not_allowed`，不调用 Core。
+- **新建会话指定标题**：`runtime.createSession` 不新增 `title` 参数；`nocturne_start_session` 增加可选 `title`，桥层在建会话后、提交首条消息前调用 `runtime.renameSession` 设为手动标题（不被自动标题覆盖）。若改名失败，会话照常创建并继续执行，返回中附带 `renameError` 说明原因。

@@ -536,7 +536,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
-  - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`session.submit`、`session.enqueueInput`、`session.interrupt`（含别名 `session.abort`）。
+  - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`runtime.renameSession`（仅允许重命名目标会话 `client.id` 等于当前 agent id 的会话，否则报 `-32004 / agent_not_allowed`；只读范围不开放）、`session.submit`、`session.enqueueInput`、`session.interrupt`（含别名 `session.abort`）。
   - `runtime.listSessions` 在 agent 连接中强制排除已归档会话，忽略 `includeArchived: true`；按已知 ID 打开不改既有规则。
   - **一律拒绝**：`runtime.archiveSession`、`runtime.unarchiveSession`、`session.respondPermission`、`session.respondSubagentPermission`、`session.respondQuestion`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
   - **新建会话约束**：`runtime.createSession` 的 `permissionPreset` 不得高于该 agent 登记的权限上限（超出报 `-32602 / invalid_params`），不传时取「权限上限」与「用户默认预设」中较低者；工作区信任规则同远程（`workspace_untrusted`）；服务端自动填入 `session.created.client`，忽略客户端同名参数。
