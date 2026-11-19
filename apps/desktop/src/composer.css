@@ -662,6 +662,10 @@
   background: var(--a-error);
 }
 
+.menu .mcp-state-dot.is-standby {
+  background: var(--a-muted);
+}
+
 .menu .mcp-state-dot.is-starting {
   background: var(--a-warning);
 }

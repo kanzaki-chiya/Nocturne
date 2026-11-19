@@ -1233,7 +1233,7 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
           variant: "session",
           mcpServers: {
             broken: { state: "ready", toolCount: 1 },
-            docs: { state: "ready", toolCount: 2 },
+            docs: { state: "standby", toolCount: 2 },
           },
           onManageMcp,
         })}
@@ -1241,8 +1241,10 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     );
     expect(screen.getByRole("button", { name: "添加" }).querySelector(".mcp-dot")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
-    expect(
-      (await screen.findByRole("menuitem", { name: "MCP" })).querySelector(".mcp-dot"),
-    ).toBeNull();
+    const mcpTrigger2 = await screen.findByRole("menuitem", { name: "MCP" });
+    expect(mcpTrigger2.querySelector(".mcp-dot")).toBeNull();
+    fireEvent.click(mcpTrigger2);
+    const mcpSubmenu2 = await screen.findByRole("menu", { name: "MCP" });
+    expect(mcpSubmenu2.querySelector(".mcp-state-dot.is-standby")).not.toBeNull();
   });
 });

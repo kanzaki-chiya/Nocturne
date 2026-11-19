@@ -373,18 +373,28 @@ export interface QuestionBroker {
 
 // ── MCP 装配点（mcp.md 第 8 节）──────────────────────────
 
+/** 插件 MCP 服务器按需启动的工具缓存键（ADR-0100） */
+export interface PluginMcpCacheKey {
+  pluginId: string;
+  /** 内置插件按版本号失效，已安装插件按目录指纹失效 */
+  keyKind: "version" | "fingerprint";
+  keyValue: string;
+}
+
 /** 合并配置层后交给装配点的单服务器配置 */
 export interface McpServerConfig extends McpServerEntry {
   name: string;
   origin: "app" | "user" | "project" | "plugin";
   /** 定义该条目的配置文件所在目录；相对 cwd 按 workspaceRoot 解析 */
   dir?: string | undefined;
+  /** 仅插件 MCP 服务器设置：按需启动工具缓存键 */
+  pluginCache?: PluginMcpCacheKey | undefined;
 }
 
 /** 会话内服务器状态（mcp.md 第 5 节；status() 返回值） */
 export interface McpServerStatus {
   name: string;
-  state: "starting" | "ready" | "failed" | "crashed" | "stopped";
+  state: "standby" | "starting" | "ready" | "failed" | "crashed" | "stopped";
   toolCount: number;
   /** failed / crashed 的人读原因 */
   error?: string | undefined;
@@ -406,6 +416,8 @@ export interface McpOpenScope {
   workspaceRoot: string;
   sessionId: string;
   platform: Platform;
+  /** 插件 MCP 工具缓存目录：<NOCTURNE_HOME>/plugins/cache/mcp-tools（ADR-0100） */
+  pluginMcpCacheDir?: string | undefined;
   credentials?:
     | { get(id: string, options?: { fresh?: boolean | undefined }): Promise<string | undefined> }
     | undefined;

@@ -37,6 +37,12 @@ import type {
 } from "@nocturne/core";
 
 import { mcpToolName } from "./names.js";
+import {
+  cachedToolsEqual,
+  readPluginMcpCache,
+  writePluginMcpCache,
+  type CachedPluginMcpTool,
+} from "./plugin-cache.js";
 import { StdioPipeTransport } from "./transport.js";
 
 const CLIENT_NAME = "nocturne";
@@ -119,6 +125,14 @@ interface Server {
   announced?: boolean | undefined;
   /** HTTP：冷却结束时间戳（Date.now 毫秒）；undefined 表示无冷却 */
   retryAt?: number | undefined;
+  /** 仅插件 MCP 服务器：最近一次已缓存/加载的工具快照（用于检测变化） */
+  cachedTools?: readonly CachedPluginMcpTool[] | undefined;
+  /** 最近一次 listTools 拉回的原始脱敏工具列表（用于写缓存与检测变化） */
+  rawTools?: CachedPluginMcpTool[] | undefined;
+  /** 最近一次 listTools 确认存在的远端工具名（用于判定 mcp_tool_missing） */
+  liveRemoteNames?: Set<string> | undefined;
+  /** 标记当前是否处于缓存加载后的未启动状态（尚未完成本会话首次连接） */
+  fromCache?: boolean | undefined;
   /** 受信运行时来源（桌面浏览器）：tools/call 注入调用者 _meta；普通 MCP 为 false */
   callerMetadata?: boolean | undefined;
   /** 运行时来源提供的条目：reconcile 时保留，不因用户配置重载被移除 */
@@ -185,6 +199,77 @@ function safeOutput(st: Server, value: unknown): unknown {
   return value;
 }
 
+function isPluginLazy(cfg: McpServerConfig, scope: McpOpenScope): boolean {
+  return (
+    cfg.origin === "plugin" &&
+    cfg.pluginCache !== undefined &&
+    scope.pluginMcpCacheDir !== undefined
+  );
+}
+
+function expandEnvSilent(
+  env: Record<string, McpValue> | undefined,
+  scope: McpOpenScope,
+): Record<string, string> | undefined {
+  if (env === undefined) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") continue;
+    out[key] = value.replaceAll(
+      /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+      (_m, name: string) => scope.platform.env(name) ?? "",
+    );
+  }
+  return out;
+}
+
+function toCachedTool(st: Server, tool: Tool): CachedPluginMcpTool {
+  return {
+    name: safeText(st, tool.name),
+    ...(tool.title !== undefined ? { title: safeText(st, tool.title) } : {}),
+    ...(tool.description !== undefined ? { description: safeText(st, tool.description) } : {}),
+    inputSchema: safeOutput(st, tool.inputSchema) as Tool["inputSchema"],
+    ...(tool.annotations !== undefined
+      ? { annotations: safeOutput(st, tool.annotations) as Tool["annotations"] }
+      : {}),
+  };
+}
+
+function wrapCachedTools(
+  scope: McpOpenScope,
+  st: Server,
+  tools: readonly CachedPluginMcpTool[],
+): Map<string, ToolDefinition> {
+  const defs = new Map<string, ToolDefinition>();
+  for (const item of tools) {
+    const def = wrapTool(scope, st, item, new Set(defs.keys()));
+    defs.set(def.name, def);
+  }
+  return defs;
+}
+
+async function persistPluginCache(scope: McpOpenScope, st: Server): Promise<void> {
+  if (!isPluginLazy(st.cfg, scope) || st.rawTools === undefined) return;
+  const cacheKey = st.cfg.pluginCache;
+  const cacheDir = scope.pluginMcpCacheDir;
+  if (cacheKey === undefined || cacheDir === undefined) return;
+  const info = st.runtime?.client.getServerVersion();
+  const serverInfo =
+    info !== undefined
+      ? { name: safeText(st, info.name), version: safeText(st, info.version) }
+      : undefined;
+  await writePluginMcpCache(scope.platform, cacheDir, {
+    schemaVersion: 1,
+    pluginId: cacheKey.pluginId,
+    serverId: st.cfg.name,
+    keyKind: cacheKey.keyKind,
+    keyValue: cacheKey.keyValue,
+    ...(serverInfo !== undefined ? { serverInfo } : {}),
+    tools: st.rawTools,
+  });
+  st.cachedTools = st.rawTools;
+}
+
 function fingerprint(cfg: McpServerConfig, values: Record<string, string> | undefined): string {
   const normalized = {
     type: cfg.type ?? "stdio",
@@ -195,6 +280,7 @@ function fingerprint(cfg: McpServerConfig, values: Record<string, string> | unde
     enabled: cfg.enabled !== false,
     startupTimeoutMs: cfg.startupTimeoutMs ?? DEFAULT_STARTUP_MS,
     callTimeoutMs: cfg.callTimeoutMs ?? DEFAULT_CALL_MS,
+    ...(cfg.pluginCache !== undefined ? { pluginCache: cfg.pluginCache } : {}),
     values: Object.entries(values ?? {})
       .map(([key, value]) => [cfg.type === "http" ? key.toLowerCase() : key, value])
       .sort(([a], [b]) => (a ?? "").localeCompare(b ?? "")),
@@ -439,20 +525,27 @@ async function fetchToolDefs(
   const client = st.runtime?.client;
   if (client === undefined) throw new Error("客户端未连接");
   const defs = new Map<string, ToolDefinition>();
-  st.listed = [];
+  const listed: NonNullable<McpProbeResult["tools"]> = [];
+  const rawTools: CachedPluginMcpTool[] = [];
+  const liveRemoteNames = new Set<string>();
   let cursor: string | undefined;
   do {
     const res = await client.listTools(cursor !== undefined ? { cursor } : {});
     for (const tool of res.tools) {
-      st.listed.push({
+      listed.push({
         name: safeText(st, tool.name),
         description: tool.description ? safeText(st, tool.description) : undefined,
       });
+      rawTools.push(toCachedTool(st, tool));
+      liveRemoteNames.add(tool.name);
       const def = wrapTool(scope, st, tool, new Set(defs.keys()));
       defs.set(def.name, def);
     }
     cursor = res.nextCursor;
   } while (cursor !== undefined);
+  st.listed = listed;
+  st.rawTools = rawTools;
+  st.liveRemoteNames = liveRemoteNames;
   return defs;
 }
 
@@ -638,6 +731,13 @@ async function refreshTools(scope: McpOpenScope, st: Server): Promise<void> {
   if (st.state !== "ready" || st.closed) return;
   try {
     st.staged = await fetchToolDefs(scope, st);
+    if (
+      isPluginLazy(st.cfg, scope) &&
+      st.rawTools !== undefined &&
+      (st.cachedTools === undefined || !cachedToolsEqual(st.cachedTools, st.rawTools))
+    ) {
+      await persistPluginCache(scope, st);
+    }
     scope.warn("mcp_tools_changed", `MCP 服务器 ${st.cfg.name} 的工具列表已更新，下一个 Turn 生效`);
   } catch (e) {
     scope.warn(
@@ -679,11 +779,12 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
       )} 秒后可重试）`,
     );
   }
+  const wasStandby = st.state === "standby";
   const run = ++st.run;
   const attempt = (async (): Promise<boolean> => {
     st.state = "starting";
     st.announced = false;
-    if (st.cfg.type !== "http") st.restarts += 1;
+    if (st.cfg.type !== "http" && !wasStandby) st.restarts += 1;
     scope.emitServer({ name: st.cfg.name, state: "starting" });
     scope.diagnostics?.record("mcp.event", { server: st.cfg.name, state: "starting" });
     try {
@@ -697,6 +798,26 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
         // 在途重连被关闭/重配取代：丢弃本次运行时，不复活旧连接
         await discardRuntime(st, runtime);
         return false;
+      }
+      if (isPluginLazy(st.cfg, scope)) {
+        const hadCache = st.fromCache === true;
+        st.fromCache = false;
+        const changed =
+          st.cachedTools === undefined ||
+          st.rawTools === undefined ||
+          !cachedToolsEqual(st.cachedTools, st.rawTools);
+        if (hadCache && !changed) {
+          // 首次按需启动且实际工具列表与缓存一致：沿用已注册工具，不触发边界刷新
+          st.staged = undefined;
+        } else {
+          if (changed) await persistPluginCache(scope, st);
+          if (hadCache && changed) {
+            scope.warn(
+              "mcp_tools_changed",
+              `MCP 服务器 ${st.cfg.name} 的工具列表已更新，下一个 Turn 生效`,
+            );
+          }
+        }
       }
       // 重连拉到的工具集同样按 Turn 边界生效（mcp.md 第 5 节）：
       // st.tools 保持旧集，staged 在 applyPendingTools() 时切换
@@ -741,7 +862,10 @@ async function ensureClient(scope: McpOpenScope, st: Server): Promise<Client> {
         httpStatus: httpStatusOf(e, st),
       });
       st.announced = true;
-      scope.warn("mcp_server_failed", `MCP 服务器 ${st.cfg.name} 重连失败：${st.error}`);
+      scope.warn(
+        "mcp_server_failed",
+        `MCP 服务器 ${st.cfg.name} ${wasStandby ? "启动" : "重连"}失败：${st.error}`,
+      );
       return false;
     }
   })();
@@ -1061,6 +1185,14 @@ function wrapTool(
         client = await ensureClient(scope, st);
       } catch (e) {
         return err("mcp_unavailable", safeText(st, toolError(e)));
+      }
+      if (isAborted(ctx.signal)) return err("cancelled", "调用已被中断");
+      if (
+        st.cfg.origin === "plugin" &&
+        st.liveRemoteNames !== undefined &&
+        !st.liveRemoteNames.has(remote)
+      ) {
+        return err("mcp_tool_missing", safeText(st, `MCP 工具 ${st.cfg.name}/${remote} 已不存在`));
       }
       const timeoutSignal = AbortSignal.timeout(callMs);
       const combined = AbortSignal.any([ctx.signal, timeoutSignal]);
@@ -1413,17 +1545,54 @@ export function createMcpConnector(options?: {
             fromRuntime: rt !== undefined,
           };
         });
+      // 插件 MCP 服务器先查工具缓存（ADR-0100 修订第 4 节）：命中直接进入 standby 并注册工具，不启动进程
+      await Promise.all(
+        servers.map(async (st) => {
+          if (!isPluginLazy(st.cfg, effectiveScope)) return;
+          const cacheKey = st.cfg.pluginCache;
+          const cacheDir = effectiveScope.pluginMcpCacheDir;
+          if (cacheKey === undefined || cacheDir === undefined) return;
+          const cached = await readPluginMcpCache(
+            effectiveScope.platform,
+            cacheDir,
+            st.cfg.name,
+            cacheKey,
+          );
+          if (cached === undefined) return;
+          const defs = wrapCachedTools(effectiveScope, st, cached.tools);
+          st.tools = defs;
+          st.cachedTools = cached.tools;
+          st.fromCache = true;
+          st.state = "standby";
+          st.listed = cached.tools.map((t) => ({ name: t.name, description: t.description }));
+          st.fingerprint = fingerprint(st.cfg, expandEnvSilent(st.cfg.env, effectiveScope));
+          effectiveScope.emitServer({
+            name: st.cfg.name,
+            state: "standby",
+            toolCount: defs.size,
+          });
+          effectiveScope.diagnostics?.record("mcp.event", {
+            server: st.cfg.name,
+            state: "standby",
+            toolCount: defs.size,
+          });
+        }),
+      );
       // 并行启动；单服务器失败只影响自身（降级为无该服务器工具）
       const initialStartup = Promise.all(
         servers.map(async (st) => {
+          if (st.state === "standby") return;
           effectiveScope.emitServer({ name: st.cfg.name, state: "starting" });
           effectiveScope.diagnostics?.record("mcp.event", {
             server: st.cfg.name,
             state: "starting",
           });
           try {
-            await connectServer(effectiveScope, st, ++st.run);
-            if (st.closed) return;
+            const run = ++st.run;
+            await connectServer(effectiveScope, st, run);
+            if (!isCurrentAttempt(st, run)) return;
+            await persistPluginCache(effectiveScope, st);
+            if (!isCurrentAttempt(st, run)) return;
             st.state = "ready";
             st.error = undefined;
             st.announced = false;
@@ -1537,14 +1706,46 @@ export function createMcpConnector(options?: {
             st.cfg = cfg;
             st.closed = false;
             st.fingerprint = digest;
-            st.state = "starting";
+            st.cachedTools = undefined;
+            st.rawTools = undefined;
+            st.liveRemoteNames = undefined;
+            st.fromCache = undefined;
             // 新配置是新故障期：清掉冷却与失败计数/警告标记
             st.retryAt = undefined;
             st.restarts = 0;
             st.announced = false;
+            if (
+              isPluginLazy(cfg, effectiveScope) &&
+              cfg.pluginCache !== undefined &&
+              effectiveScope.pluginMcpCacheDir !== undefined
+            ) {
+              const cached = await readPluginMcpCache(
+                effectiveScope.platform,
+                effectiveScope.pluginMcpCacheDir,
+                cfg.name,
+                cfg.pluginCache,
+              );
+              if (cached !== undefined) {
+                const defs = wrapCachedTools(effectiveScope, st, cached.tools);
+                st.staged = defs;
+                st.cachedTools = cached.tools;
+                st.fromCache = true;
+                st.state = "standby";
+                st.error = undefined;
+                st.listed = cached.tools.map((t) => ({ name: t.name, description: t.description }));
+                effectiveScope.emitServer({
+                  name: cfg.name,
+                  state: "standby",
+                  toolCount: defs.size,
+                });
+                continue;
+              }
+            }
+            st.state = "starting";
             effectiveScope.emitServer({ name: cfg.name, state: "starting" });
             try {
               await connectServer(effectiveScope, st, ++st.run);
+              await persistPluginCache(effectiveScope, st);
               st.state = "ready";
               st.error = undefined;
             } catch (e) {
@@ -1631,21 +1832,30 @@ export function createMcpConnector(options?: {
             add: runtimeDiffs.flatMap((change) => change.add),
             remove: [...removed.splice(0), ...runtimeDiffs.flatMap((change) => change.remove)],
           };
+          let reordered = false;
           for (const st of servers) {
-            if (st.staged === undefined) continue;
-            const staged = st.staged;
-            const previousNames = new Set([...st.tools.keys(), ...(st.recoveredNames ?? [])]);
-            st.staged = undefined;
-            st.recovered = undefined;
-            st.recoveredNames = undefined;
-            for (const name of previousNames) {
-              if (!staged.has(name)) diff.remove.push(name);
+            if (st.staged !== undefined) {
+              const staged = st.staged;
+              const previousNames = new Set([...st.tools.keys(), ...(st.recoveredNames ?? [])]);
+              st.staged = undefined;
+              st.recovered = undefined;
+              st.recoveredNames = undefined;
+              for (const name of previousNames) {
+                if (!staged.has(name)) diff.remove.push(name);
+              }
+              for (const [name, def] of staged) {
+                diff.remove.push(name);
+                diff.add.push(def);
+              }
+              st.tools = staged;
+              reordered = true;
+            } else if (reordered && st.tools.size > 0) {
+              // 靠前服务器工具变化时，重放靠后已注册服务器（如缓存命中的 standby 插件）以保持声明顺序
+              for (const [name, def] of st.tools) {
+                diff.remove.push(name);
+                diff.add.push(def);
+              }
             }
-            for (const [name, def] of staged) {
-              diff.remove.push(name);
-              diff.add.push(def);
-            }
-            st.tools = staged;
           }
           return diff;
         },

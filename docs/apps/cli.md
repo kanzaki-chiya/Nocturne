@@ -144,7 +144,7 @@ nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端
 | `/settings preset <名称\|reset>` | 保存默认预设，`reset` 清除；可选 `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | `runtime.updateSettings()` |
 | `/new`、`/clear` | 新建空会话并切换，使用最新生效的默认模型、思考档位与权限预设；未注入配置时沿用当前会话值；旧会话仍可恢复，`/clear` 不是清屏 | CLI 注入的 `newSession` 回调 |
 | `/grants`、`/grants revoke <编号>` | 列出本会话和本项目授权（标范围、合并编号），或撤销对应项；下次调用生效，失败仅显示错误 | `session.listGrants/revokeGrant`、`runtime.listGrants/revokeGrant` |
-| `/mcp` | 列出本会话各 MCP 服务器的状态（`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
+| `/mcp` | 列出本会话各 MCP 服务器的状态（`standby`/`starting`/`ready`/`failed`/`crashed`/`stopped`）、工具数与失败原因；未配置 MCP 时打印提示 | `session.mcpServers()`（Phase 5，只读查询不产事件，[mcp.md](../architecture/mcp.md) 第 7 节） |
 | `/agents` | 只读列出外部 agent 的来源、启停与碰撞警告，不探测、不写配置 | `session.describeExternalAgents()` |
 | `/provider` | 列出服务商与来源，不显示密钥或令牌；附鉴权描述、凭据状态与保存位置。TUI 中打开服务商页。`add` 与 `nctrn setup --cli` 共用向导；`key` / `refresh` / `remove` / `login` / `logout` 为快捷操作。`model <名> <模型>` 逐字段显示 `当前值（来源）`，来源可为 models.dev；回车保留、`-` 清除用户编辑。图片输入和推理接受 `y`/`n`/`-`，推理为否时不询问档位；编辑工具接受 `edit`/`patch`/`apply_patch`/`-`（ADR-0035 §5）；来源为手写配置的字段只读。成功后写入 `userModels`，详见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节 | `describeProviders()`、`saveModelSettings()` 等 + `runtime.updateProviders` |
 | `/exit`、`/quit` | 关闭会话并退出 | `session.close()` |

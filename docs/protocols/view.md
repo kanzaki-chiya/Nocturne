@@ -260,7 +260,7 @@ interface SessionNotice {
 
 ```ts
 interface McpServerViewState {
-  state: "starting" | "ready" | "failed" | "crashed";
+  state: "standby" | "starting" | "ready" | "failed" | "crashed";
   toolCount?: number;
   error?: string;
 }

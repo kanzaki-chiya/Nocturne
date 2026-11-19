@@ -366,7 +366,7 @@ export interface RuntimeErrorPayload {
  */
 export interface McpServerPayload {
   name: string;
-  state: "starting" | "ready" | "failed" | "crashed" | "stopped";
+  state: "standby" | "starting" | "ready" | "failed" | "crashed" | "stopped";
   toolCount?: number | undefined;
   error?: string | undefined;
 }

@@ -596,7 +596,7 @@ export async function runSlashCommand(
         return "handled";
       }
       const lines = servers.map((s) => {
-        const tools = s.state === "ready" ? `，${s.toolCount} 个工具` : "";
+        const tools = s.state === "ready" || s.state === "standby" ? `，${s.toolCount} 个工具` : "";
         const err = s.error !== undefined ? `，${s.error}` : "";
         const restarts = s.restarts > 0 ? `，重连 ${s.restarts} 次` : "";
         return `  ${s.name.padEnd(16)} ${s.state}${tools}${restarts}${err}`;

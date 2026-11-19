@@ -669,4 +669,52 @@ describe("MCP 设置页", () => {
     expect(describeCalls()).toEqual([{ workspaceRoot: "/repo-a" }, { workspaceRoot: "/repo-b" }]);
     f.close();
   });
+
+  it("standby 状态在列表与详情页显示「未启动」及工具数", async () => {
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": {
+          servers: [
+            {
+              id: "word",
+              origin: "app",
+              editable: true,
+              trusted: true,
+              path: "home/mcp.json",
+              transport: "stdio",
+              enabled: true,
+              command: "node",
+              args: ["server.mjs"],
+              env: [],
+              startupTimeoutMs: 15000,
+              callTimeoutMs: 60000,
+            },
+          ],
+          warnings: [],
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+      }),
+    );
+    await f.initialize();
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot="/repo"
+        version={0}
+        onChanged={() => undefined}
+        loadLive={async () => [{ name: "word", state: "standby", toolCount: 4 }]}
+        liveRevision="standby"
+      />,
+    );
+
+    const row = (await screen.findByText("word")).closest("button, div");
+    expect(row).not.toBeNull();
+    await waitFor(() => expect(screen.getByText(/未启动/)).toBeTruthy());
+    expect(screen.getByText("4 个工具")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("word"));
+    await waitFor(() => expect(screen.getByText(/未启动/)).toBeTruthy());
+    expect(screen.getByText("4 个工具")).toBeTruthy();
+    f.close();
+  });
 });

@@ -169,7 +169,7 @@ it("恢复会话仍失败不重复写，重放 note 一致；压缩不记录 MCP
     await f.session.close();
   }
 });
-it.each(["ready", "stopped"] as const)("%s 不记录不可用", async (state) => {
+it.each(["ready", "standby", "stopped"] as const)("%s 不记录不可用", async (state) => {
   const f = await fixture(state);
   try {
     await f.session.submit({ text: "test" });

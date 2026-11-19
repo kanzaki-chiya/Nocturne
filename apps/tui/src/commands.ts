@@ -324,7 +324,7 @@ export async function runSlash(
         return { kind: "message", text: "本会话没有配置 MCP 服务器" };
       }
       const lines = servers.map((s) => {
-        const tools = s.state === "ready" ? `，${s.toolCount} 个工具` : "";
+        const tools = s.state === "ready" || s.state === "standby" ? `，${s.toolCount} 个工具` : "";
         const err = s.error !== undefined ? `，${s.error}` : "";
         const restarts = s.restarts > 0 ? `，重连 ${s.restarts} 次` : "";
         return `  ${s.name}  ${s.state}${tools}${restarts}${err}`;

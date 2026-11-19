@@ -296,6 +296,7 @@ export class Conversations {
     const subscribeStart = Date.now();
     let subscribed = false;
     let pendingRevision = 0;
+    const seenMcpServers = new Set<string>();
     const isLive = (event: RuntimeEvent): boolean => {
       if (subscribed) return true;
       if (!("seq" in event)) return true;
@@ -311,6 +312,8 @@ export class Conversations {
           if (event.type === "input.pending") {
             pendingRevision += 1;
             entry.pendingInputs = event.payload;
+          } else if (event.type === "mcp.server") {
+            seenMcpServers.add(event.payload.name);
           }
           this.syncOutgoing(entry);
           if (entry.replaying !== true) {
@@ -352,6 +355,39 @@ export class Conversations {
           this.changed();
         })
         .catch(() => undefined);
+      // MCP 服务器初始状态（如缓存命中进入 standby 的插件服务器）在订阅前已发出，
+      // 订阅后取一次快照补齐尚未收到实时事件的条目。
+      if (typeof entry.session.mcpServers === "function") {
+        void Promise.resolve()
+          .then(() => entry.session.mcpServers())
+          .then((servers) => {
+            if (entry.dead === true) return;
+            let updated = false;
+            for (const server of servers) {
+              if (server.state === "stopped" || seenMcpServers.has(server.name)) continue;
+              const next = {
+                state: server.state,
+                toolCount: server.toolCount,
+                ...(server.error !== undefined ? { error: server.error } : {}),
+              };
+              const prev = entry.view.mcpServers[server.name];
+              if (
+                prev?.state === next.state &&
+                prev.toolCount === next.toolCount &&
+                prev.error === next.error
+              ) {
+                continue;
+              }
+              entry.view.mcpServers[server.name] = next;
+              updated = true;
+            }
+            if (!updated) return;
+            this.syncOutgoing(entry);
+            for (const listener of entry.listeners) listener();
+            this.changed();
+          })
+          .catch(() => undefined);
+      }
       for (const listener of entry.listeners) listener();
       this.changed();
       await this.refreshTurnChanges(entry);

@@ -1125,13 +1125,15 @@ function mcpEvent(eseq: number, payload: McpServerPayload): RuntimeEvent {
   return { type: "mcp.server", sessionId: "s", runId: "r", eseq, afterSeq: 0, time: "t", payload };
 }
 
-it("mcp.server 归约进 mcpServers：同名以最新事件为准，stopped 移除", () => {
+it("mcp.server 归约进 mcpServers：同名以最新事件为准，standby 保留工具数，stopped 移除", () => {
   const view = createSessionView();
+  reduceSessionView(view, mcpEvent(0, { name: "doc", state: "standby", toolCount: 3 }));
   reduceSessionView(view, mcpEvent(1, { name: "exa", state: "starting" }));
   reduceSessionView(view, mcpEvent(2, { name: "neo", state: "starting" }));
   reduceSessionView(view, mcpEvent(3, { name: "neo", state: "failed", error: "连接失败" }));
   reduceSessionView(view, mcpEvent(4, { name: "exa", state: "ready", toolCount: 2 }));
   expect(view.mcpServers).toEqual({
+    doc: { state: "standby", toolCount: 3 },
     exa: { state: "ready", toolCount: 2 },
     neo: { state: "failed", error: "连接失败" },
   });
@@ -1139,7 +1141,7 @@ it("mcp.server 归约进 mcpServers：同名以最新事件为准，stopped 移�
   reduceSessionView(view, mcpEvent(5, { name: "neo", state: "ready", toolCount: 1 }));
   expect(view.mcpServers.neo).toEqual({ state: "ready", toolCount: 1 });
   reduceSessionView(view, mcpEvent(6, { name: "exa", state: "stopped" }));
-  expect(Object.keys(view.mcpServers)).toEqual(["neo"]);
+  expect(Object.keys(view.mcpServers)).toEqual(["doc", "neo"]);
 });
 
 it("mcpServers 是临时状态：持久重放不产生，不参与重放等价", () => {

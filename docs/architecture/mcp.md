@@ -149,6 +149,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 | `structuredContent` | 进 `ToolResult.output.structured`（受 `output` 独立上限约束）；SDK 按工具 `outputSchema` 校验，校验器选项与 SDK 默认一致，非标准 format 只记诊断日志（`mcp.event` 的 warning），不打印到终端 |
 | `isError: true` | `status: "error"`，`error.code = "mcp_error"`，`modelContent` 为拼接出的错误文本 |
 | 传输错误 / 服务器不可用 | `error.code = "mcp_unavailable"`（崩溃、连接断开、重连失败或 HTTP 重连冷却中；冷却时说明剩余时间） |
+| 插件按需启动后工具已不存在 | `error.code = "mcp_tool_missing"`（缓存命中的插件服务器在首次调用启动并拉取最新 `tools/list` 后发现该工具已移除；见第 11 节与 [ADR-0100](../decisions/ADR-0100-native-plugins.md)） |
 | 服务器返回 JSON-RPC error | `error.code = "mcp_error"`，message 带服务器给的 message |
 
 其余约定：
@@ -170,7 +171,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 
 **状态可见性**：
 
-- 临时事件 `mcp.server`：`{ server, state: "starting"|"ready"|"failed"|"crashed"|"stopped", toolCount?, error? }`，在状态转移时发出。选**临时**而非持久事件：服务器进程是本次打开的运行态，恢复时重新拉起，写进日志只会让旧版本 Runtime 拒绝恢复（events.md 第 8 节）。
+- 临时事件 `mcp.server`：`{ name, state: "standby"|"starting"|"ready"|"failed"|"crashed"|"stopped", toolCount?, error? }`，在状态转移时发出（`standby` 仅用于命中工具缓存、尚未启动进程的插件服务器）。选**临时**而非持久事件：服务器进程是本次打开的运行态，恢复时重新拉起，写进日志只会让旧版本 Runtime 拒绝恢复（events.md 第 8 节）。
 - 失败同时发 `runtime.warning`（`mcp_server_failed` / `mcp_server_crashed` / `mcp_tool_conflict` / `mcp_env_missing`），TUI/CLI 走既有警告渲染；`mcp.server` 另归约进 `SessionView.mcpServers`，桌面端据此在状态栏显示「MCP 未连接」，不在消息流显示这几类状态警告（[view.md](../protocols/view.md) §4、[desktop.md](../apps/desktop.md) 5.2/5.4）。
 - `session.mcpServers(): McpServerStatus[]`（只读查询，不产事件）：供 `/mcp` 命令列出每台服务器的状态、工具数与失败原因（[apps/cli.md](../apps/cli.md)）。
 - **部分失败降级**：启动失败的服务器不阻塞会话——其工具不存在，模型调用到不存在的工具名时得到 `unknown_tool`（列出可用工具名，与工具名漂移的既有自愈路径一致）。
@@ -226,3 +227,9 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 ## 11. 插件来源的 MCP 服务器
 
 已启用插件可通过清单 `mcpServers`（内联对象或 `./` 相对路径 JSON）或根目录 `.mcp.json` 声明 stdio MCP 服务器（`origin: "plugin"`），`command` / `args` / `env` 单次展开 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}`、`${NOCTURNE_NODE}`，不允许 `{ stored: true }`，与配置文件同名时配置文件优先并跳过发出 `plugin_mcp_conflict` 警告；插件启停时在空闲会话及运行中会话的 Turn 边界随 `reconcile` 增减，详见 [ADR-0100](../decisions/ADR-0100-native-plugins.md)。
+
+**按需启动与工具缓存**（[ADR-0100 修订](../decisions/ADR-0100-native-plugins.md#4-插件-mcp-服务器按需启动补充第-2-节)）：仅作用于插件来源的服务器，配置文件中的服务器行为不变。
+
+- **缓存路径与键**：首次连接取得 `tools/list` 后，以「临时文件 + rename」原子写入 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/`；缓存键为插件 id、服务器 id 加上内置插件版本号（`version`）或已安装插件目录指纹（`fingerprint`），内容含服务器信息与工具列表（名称、说明、参数 schema、annotations）。文件损坏或键不匹配一律按未命中处理，不报错。
+- **会话打开**：缓存命中时直接用缓存注册工具并进入 `standby`（未启动）状态，不启动进程，可用性检查视为可用；未命中时照常启动取工具列表并写缓存，本会话内不再退出。
+- **首次调用**：收到该服务器的第一次 `tools/call` 时拉起进程并完成 initialize 与 `tools/list`（`standby` → `starting` → `ready`，不计入崩溃重连次数）。若实际工具列表与缓存不同，更新缓存并将新工具集暂存到下一个 MCP 边界（[ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）生效；若本次调用的工具已不存在，返回错误 `mcp_tool_missing`。启动后的退出、崩溃与重连规则同普通 stdio 服务器。

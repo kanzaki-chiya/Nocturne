@@ -93,10 +93,18 @@ export async function resolvePlugins(
     const pluginWarnings = [...item.overview.warnings];
     const builtin = isBuiltinPlugin(item.overview);
     let state: PluginState = "off";
+    let cacheKey: PluginMcpServerSpec["cache"];
 
     if (builtin) {
       // 内置插件不做指纹确认，默认开启；用户关闭时在 plugins.json 记 enabled: false
       state = stored?.enabled === false ? "off" : "on";
+      if (state === "on") {
+        cacheKey = {
+          pluginId: item.overview.id,
+          keyKind: "version",
+          keyValue: item.overview.version,
+        };
+      }
     } else {
       // 非内置插件：每次会话打开与每次 describePlugins 都重新计算目录指纹
       let currentHash: string | undefined;
@@ -115,6 +123,11 @@ export async function resolvePlugins(
       if (stored?.enabled === true) {
         if (currentHash !== undefined && currentHash === stored.hash) {
           state = "on";
+          cacheKey = {
+            pluginId: item.overview.id,
+            keyKind: "fingerprint",
+            keyValue: currentHash,
+          };
         } else {
           state = "changed";
           if (hashError !== undefined) {
@@ -166,7 +179,7 @@ export async function resolvePlugins(
           continue;
         }
         activePluginMcpLower.add(server.id.toLowerCase());
-        mcpServers.push(server);
+        mcpServers.push(cacheKey !== undefined ? { ...server, cache: cacheKey } : server);
       }
     }
   }

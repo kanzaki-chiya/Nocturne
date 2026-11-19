@@ -2465,6 +2465,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...s.entry,
         name: s.id,
         origin: "plugin" as const,
+        ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
       })),
     ].filter((s) => s.enabled !== false);
     let mcpSession: McpSession | undefined;
@@ -2474,7 +2475,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const changes: NonNullable<DurablePayload<"session.config_changed">["mcp"]> = [];
       for (const status of mcpSession.status()) {
         if (status.state === "stopped") continue;
-        const available = status.state === "ready";
+        const available = status.state === "ready" || status.state === "standby";
         if (available === (previous[status.name] ?? true)) continue;
         changes.push({
           server: status.name,
@@ -2525,7 +2526,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (mcpOnDemand) {
         omittedMcpToolCount = currentMcpTools.length;
         const readyServers = (mcpSession?.status() ?? [])
-          .filter((s) => s.state === "ready")
+          .filter((s) => s.state === "ready" || s.state === "standby")
           .map((s) => s.name);
         const pair = createMcpOnDemandTools(
           currentMcpTools,
@@ -2578,6 +2579,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             workspaceRoot: meta.workspaceRoot,
             sessionId: session.id,
             platform,
+            pluginMcpCacheDir: paths.join(nocturneHome, "plugins", "cache", "mcp-tools"),
             credentials: config?.credentials,
             emitServer: (p) => session.emitEphemeral("mcp.server", p),
             warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
@@ -2647,6 +2649,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 ...s.entry,
                 name: s.id,
                 origin: "plugin" as const,
+                ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
               })),
             ]);
           }
@@ -3326,7 +3329,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           mcpServers: () => [
             ...new Set([
               ...mcpServerConfigs.map((s) => s.name),
-              ...(mcpSession?.status() ?? []).filter((s) => s.state === "ready").map((s) => s.name),
+              ...(mcpSession?.status() ?? [])
+                .filter((s) => s.state === "ready" || s.state === "standby")
+                .map((s) => s.name),
             ]),
           ],
           skills: () => ({
@@ -7541,6 +7546,7 @@ export type {
   McpServerStatus,
   McpSession,
   McpToolDiff,
+  PluginMcpCacheKey,
   ToolContext,
   ToolDefinition,
   ToolResult,

@@ -142,7 +142,7 @@ function visibleTitle(view: SessionView): string | undefined {
 }
 
 export interface McpServerViewState {
-  state: "starting" | "ready" | "failed" | "crashed";
+  state: "standby" | "starting" | "ready" | "failed" | "crashed";
   toolCount?: number;
   error?: string;
 }

@@ -49,6 +49,14 @@ export interface PluginMcpServerSpec {
   pluginRoot: string;
   pluginDataDir: string;
   entry: McpServerEntry;
+  /** 启用插件解析出的 MCP 工具缓存键（内置用 version，已安装用 fingerprint） */
+  cache?:
+    | {
+        pluginId: string;
+        keyKind: "version" | "fingerprint";
+        keyValue: string;
+      }
+    | undefined;
 }
 
 export interface DiscoveredPlugin {

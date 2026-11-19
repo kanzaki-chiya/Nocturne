@@ -35,7 +35,7 @@ import "./mcp.css";
 
 export interface McpLiveStatus {
   name: string;
-  state: "starting" | "ready" | "failed" | "crashed" | "stopped";
+  state: "standby" | "starting" | "ready" | "failed" | "crashed" | "stopped";
   toolCount: number;
   error?: string | undefined;
 }
@@ -83,6 +83,10 @@ const liveText = (live: McpLiveStatus | undefined): ReactNode =>
     <>
       已连接<span className="muted-value">{live.toolCount} 个工具</span>
     </>
+  ) : live.state === "standby" ? (
+    <>
+      未启动<span className="muted-value">{live.toolCount} 个工具</span>
+    </>
   ) : live.state === "starting" ? (
     "连接中"
   ) : (
@@ -117,6 +121,16 @@ function detailStatusOf(
       label: (
         <>
           已连接<span className="muted-value">{live.toolCount} 个工具</span>
+        </>
+      ),
+    };
+  }
+  if (live.state === "standby") {
+    return {
+      dot: "",
+      label: (
+        <>
+          未启动<span className="muted-value">{live.toolCount} 个工具</span>
         </>
       ),
     };
