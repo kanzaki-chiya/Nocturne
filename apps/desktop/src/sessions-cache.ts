@@ -1,7 +1,7 @@
 import { projectKey, type TreeSessionSummary } from "./session-tree";
 
 export const SESSIONS_CACHE_KEY = "nocturne.desktop.sessionsCache.v1";
-type CachedSession = Omit<TreeSessionSummary, "locked" | "openHere">;
+type CachedSession = Omit<TreeSessionSummary, "locked" | "openHere" | "status">;
 interface CacheHost {
   sessionPaths?: { sessionsDir: string; plainWorkspace: string } | undefined;
   note: (line: string) => void;

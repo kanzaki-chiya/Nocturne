@@ -21,6 +21,7 @@ const session: SessionSummary = {
   client: { kind: "agent", name: "agent", deviceId: "device" },
   locked: true,
   openHere: true,
+  status: "running",
 };
 const storage = () => localStorage;
 beforeEach(() => {
@@ -31,7 +32,7 @@ beforeEach(() => {
 it("只保存展示白名单与目录标识，顺序原样保留，丢弃实时锁与模型配置", () => {
   writeSessionsCache(storage, host, [session, { ...session, id: "two" }]);
   const raw = localStorage.getItem(SESSIONS_CACHE_KEY) ?? "";
-  expect(raw).not.toMatch(/locked|openHere|workspaceRoot|model/);
+  expect(raw).not.toMatch(/locked|openHere|status|workspaceRoot|model/);
   expect(raw).toContain('"sessionsDir":"Z:/isolated/sessions"');
   const result = readSessionsCache(storage, host);
   expect(result?.map((s) => s.id)).toEqual(["one", "two"]);

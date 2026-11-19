@@ -2781,3 +2781,72 @@ it("外观页「减少动态效果」读写 prefs.reduceMotion 并同步 data-re
     document.documentElement.removeAttribute("data-reduce-motion");
   }
 });
+
+it("侧栏对未在 conversations.opened 里的运行中会话排到分组最前并显示运行标记，结束后回到原序", async () => {
+  const host = replayHost();
+  const base = host.sessions[0];
+  if (base === undefined) throw new Error("缺少测试会话");
+  host.sessions.splice(
+    0,
+    host.sessions.length,
+    {
+      ...base,
+      id: "newer",
+      cwd: "Z:/plain",
+      workspaceRoot: "Z:/plain",
+      mtimeMs: 2000,
+      lastUserMs: 2000,
+      firstText: "newer 会话",
+    },
+    {
+      ...base,
+      id: "older",
+      cwd: "Z:/plain",
+      workspaceRoot: "Z:/plain",
+      mtimeMs: 1000,
+      lastUserMs: 1000,
+      firstText: "older 会话",
+    },
+  );
+  const { container } = render(<App host={host} />);
+  const rowSummary = () =>
+    [...container.querySelectorAll(".side .irow .item")].map((btn) => ({
+      title: btn.querySelector(".t")?.textContent?.trim(),
+      running: btn.querySelector(".row-spin") !== null,
+    }));
+
+  // 列表项缺少 status 字段（旧后台）时按 activityMs 降序且无运行标记
+  await waitFor(() => {
+    expect(rowSummary()).toEqual([
+      { title: "newer 会话", running: false },
+      { title: "older 会话", running: false },
+    ]);
+  });
+
+  // 未打开的会话在后台醒来运行：收到 sessionsChanged 后顶到最前并显示运行标记
+  const older = host.sessions.find((s) => s.id === "older");
+  if (older === undefined) throw new Error("缺少 older 会话");
+  older.openHere = true;
+  older.status = "running";
+  act(() => {
+    host.providerNotify(1, "runtime.sessionsChanged");
+  });
+  await waitFor(() => {
+    expect(rowSummary()).toEqual([
+      { title: "older 会话", running: true },
+      { title: "newer 会话", running: false },
+    ]);
+  });
+
+  // 本轮结束不再带 status：回到按 activityMs 排序的位置，运行标记消失
+  delete older.status;
+  act(() => {
+    host.providerNotify(1, "runtime.sessionsChanged");
+  });
+  await waitFor(() => {
+    expect(rowSummary()).toEqual([
+      { title: "newer 会话", running: false },
+      { title: "older 会话", running: false },
+    ]);
+  });
+});

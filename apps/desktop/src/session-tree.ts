@@ -22,6 +22,7 @@ export type TreeSessionSummary = Pick<
   | "client"
   | "locked"
   | "openHere"
+  | "status"
 >;
 
 /** 侧栏与项目「最近活动」排序键：优先最后一条用户发言时间，缺省退回日志 mtimeMs */
@@ -208,6 +209,26 @@ function toRow(
 /** 运行中或待确认的会话固定排在所在分组最前 */
 function isActiveStatus(status: SessionStatus | undefined): boolean {
   return status === "running" || status === "pending";
+}
+
+/**
+ * 合并桌面侧栏的会话状态：
+ * - 本窗口已打开的会话（`openedStatuses`）优先；
+ * - 否则回落到列表项上报的后台状态（`running` / `pending`）；
+ * - 旧后台未返回该字段时不写入（由 `buildSessionTree` 按 `idle` 处理）。
+ */
+export function resolveSidebarStatuses(
+  sessions: readonly TreeSessionSummary[],
+  openedStatuses: Readonly<Record<string, SessionStatus>>,
+): Record<string, SessionStatus> {
+  const merged: Record<string, SessionStatus> = {};
+  for (const session of sessions) {
+    if (session.status !== undefined) merged[session.id] = session.status;
+  }
+  for (const [id, status] of Object.entries(openedStatuses)) {
+    merged[id] = status;
+  }
+  return merged;
 }
 
 /**

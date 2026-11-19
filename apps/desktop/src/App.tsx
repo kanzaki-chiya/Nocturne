@@ -124,6 +124,7 @@ import {
   moveProjectKey,
   projectKey,
   projectName,
+  resolveSidebarStatuses,
   type SessionMark,
   type SessionSummary,
   type SessionTree,
@@ -1535,8 +1536,11 @@ export function App({ host }: { host: DesktopHost }) {
         projectLimits,
         collapsed,
         statuses: listed
-          ? Object.fromEntries(
-              [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
+          ? resolveSidebarStatuses(
+              displayedSessions,
+              Object.fromEntries(
+                [...conversations.opened].map(([id, entry]) => [id, conversationStatus(entry)]),
+              ),
             )
           : {},
         marks: listed ? sessionMarks : {},

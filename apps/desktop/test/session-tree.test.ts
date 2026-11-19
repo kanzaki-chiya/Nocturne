@@ -8,6 +8,7 @@ import {
   formatRelative,
   moveProjectKey,
   projectKey,
+  resolveSidebarStatuses,
   type SessionStatus,
   type SessionSummary,
 } from "../src/session-tree";
@@ -692,5 +693,49 @@ describe("运行中与待确认会话排在最前", () => {
     expect(tree.scheduled.rows).toHaveLength(DEFAULT_LIMIT);
     expect(tree.scheduled.rows.map((r) => r.id)).toEqual(["s5", "s7", "s0", "s1", "s2"]);
     expect(tree.scheduled.moreCount).toBe(3);
+  });
+});
+
+describe("resolveSidebarStatuses", () => {
+  it("未在本窗口打开、列表项为 running 的会话排在分组最前并带有运行状态", () => {
+    const list = [
+      session("newer", WS, NOW - 1000, { lastUserMs: NOW - 1000 }),
+      session("woke-a", WS, NOW - 5000, { lastUserMs: NOW - 5000, status: "running" }),
+      session("pending-c", WS, NOW - 8000, { lastUserMs: NOW - 8000, status: "pending" }),
+    ];
+    const statuses = resolveSidebarStatuses(list, { newer: "idle" });
+    const tree = buildSessionTree(list, noPrefs, opts({ plainWorkspace: WS, statuses }));
+    expect(tree.chats.rows.map((r) => [r.id, r.status])).toEqual([
+      ["woke-a", "running"],
+      ["pending-c", "pending"],
+      ["newer", "idle"],
+    ]);
+  });
+
+  it("已在本窗口打开的会话以 conversationStatus 为准，覆盖过时的列表项状态", () => {
+    const list = [
+      session("newer", WS, NOW - 1000, { lastUserMs: NOW - 1000 }),
+      session("opened-a", WS, NOW - 5000, { lastUserMs: NOW - 5000, status: "running" }),
+    ];
+    const statuses = resolveSidebarStatuses(list, { "opened-a": "idle" });
+    const tree = buildSessionTree(list, noPrefs, opts({ plainWorkspace: WS, statuses }));
+    expect(tree.chats.rows.map((r) => [r.id, r.status])).toEqual([
+      ["newer", "idle"],
+      ["opened-a", "idle"],
+    ]);
+  });
+
+  it("列表项缺少 status 字段（旧后台）时排序和状态与原来一致", () => {
+    const list = [
+      session("newer", WS, NOW - 1000, { lastUserMs: NOW - 1000 }),
+      session("older", WS, NOW - 5000, { lastUserMs: NOW - 5000 }),
+    ];
+    const statuses = resolveSidebarStatuses(list, {});
+    expect(statuses).toEqual({});
+    const tree = buildSessionTree(list, noPrefs, opts({ plainWorkspace: WS, statuses }));
+    expect(tree.chats.rows.map((r) => [r.id, r.status])).toEqual([
+      ["newer", "idle"],
+      ["older", "idle"],
+    ]);
   });
 });
