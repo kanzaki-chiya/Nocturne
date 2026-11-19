@@ -3,6 +3,8 @@ import type { RpcClient } from "@nocturne/rpc/client";
 import type {
   PluginHookOverview,
   PluginHost,
+  PluginMcpServerOverview,
+  PluginMcpSkipReason,
   PluginOverview,
   PluginUnsupportedHook,
   PluginUnsupportedReason,
@@ -27,18 +29,42 @@ import "./pages.css";
 import "./mcp.css";
 import "./plugins.css";
 
-const HOSTS: readonly PluginHost[] = ["codex", "claude"];
-
 const HOST_LABEL: Record<PluginHost, string> = {
+  nocturne: "Nocturne",
   codex: "Codex",
   claude: "Claude Code",
 };
+
+const isBuiltinPlugin = (plugin: PluginOverview): boolean =>
+  plugin.host === "nocturne" && plugin.marketplace === "builtin";
+
+const PLUGIN_GROUPS: readonly {
+  key: string;
+  title: string;
+  match: (plugin: PluginOverview) => boolean;
+}[] = [
+  { key: "builtin", title: "内置", match: isBuiltinPlugin },
+  {
+    key: "nocturne",
+    title: "Nocturne",
+    match: (p) => p.host === "nocturne" && p.marketplace !== "builtin",
+  },
+  { key: "codex", title: "Codex", match: (p) => p.host === "codex" },
+  { key: "claude", title: "Claude Code", match: (p) => p.host === "claude" },
+];
 
 const UNSUPPORTED_REASON_LABEL: Record<PluginUnsupportedReason, string> = {
   point: "不支持的点位",
   type: "不支持的类型",
   async: "异步",
   user_config: "需要用户配置",
+};
+
+const MCP_SKIP_REASON_LABEL: Record<PluginMcpSkipReason, string> = {
+  http: "不支持 HTTP",
+  stored: "不支持凭据库",
+  conflict: "与配置同名",
+  invalid: "配置无效",
 };
 
 const pluginLabel = (plugin: PluginOverview): string => plugin.displayName ?? plugin.name;
@@ -220,6 +246,10 @@ export function PluginsPage({
       void disablePlugin(target);
       return;
     }
+    if (isBuiltinPlugin(target)) {
+      void enablePlugin(target);
+      return;
+    }
     openConfirm(target);
   };
 
@@ -320,6 +350,11 @@ export function PluginsPage({
                     </div>
                   </SettingsGroup>
                 )}
+                {plugin.mcpServers.length > 0 && (
+                  <SettingsGroup title="MCP 服务器" plain count={plugin.mcpServers.length}>
+                    <PluginMcpServerList servers={plugin.mcpServers} />
+                  </SettingsGroup>
+                )}
                 {plugin.unsupported.length > 0 && (
                   <SettingsGroup title="不运行" plain count={plugin.unsupported.length}>
                     {plugin.unsupported.map((item, i) => (
@@ -350,17 +385,17 @@ export function PluginsPage({
                 </div>
               ) : (
                 <div className="sbody">
-                  {HOSTS.map((host) => {
-                    const hostPlugins = data?.plugins.filter((p) => p.host === host) ?? [];
-                    if (hostPlugins.length === 0) return null;
+                  {PLUGIN_GROUPS.map((group) => {
+                    const groupPlugins = data?.plugins.filter(group.match) ?? [];
+                    if (groupPlugins.length === 0) return null;
                     return (
                       <SettingsGroup
-                        key={host}
+                        key={group.key}
                         plain
-                        title={HOST_LABEL[host]}
-                        count={hostPlugins.length}
+                        title={group.title}
+                        count={groupPlugins.length}
                       >
-                        {hostPlugins.map((p) => {
+                        {groupPlugins.map((p) => {
                           const label = pluginLabel(p);
                           return (
                             <SettingsListRow
@@ -473,6 +508,30 @@ function PluginHookList({ hooks }: { hooks: readonly PluginHookOverview[] }) {
   );
 }
 
+function PluginMcpServerList({ servers }: { servers: readonly PluginMcpServerOverview[] }) {
+  return (
+    <div className="plugin-hooks">
+      {servers.map((server) => (
+        <div key={server.id} className="plugin-hook-item">
+          <div className="plugin-hook-head">
+            <span className="plugin-hook-point">{server.id}</span>
+            {server.skipped === true && (
+              <span className="plugin-warn">
+                {server.skipReason !== undefined
+                  ? MCP_SKIP_REASON_LABEL[server.skipReason]
+                  : "已跳过"}
+              </span>
+            )}
+          </div>
+          {server.command !== undefined && server.command !== "" && (
+            <code className="plugin-hook-cmd">{server.command}</code>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PluginUnsupportedList({ unsupported }: { unsupported: readonly PluginUnsupportedHook[] }) {
   return (
     <div className="plugin-dlg-unsupported">
@@ -519,6 +578,12 @@ function PluginEnableDialog({
                   <span key={name}>{name}</span>
                 ))}
               </div>
+            </div>
+          )}
+          {plugin.mcpServers.length > 0 && (
+            <div className="plugin-dlg-section">
+              <div className="plugin-dlg-title">MCP 服务器</div>
+              <PluginMcpServerList servers={plugin.mcpServers} />
             </div>
           )}
           {plugin.unsupported.length > 0 && (

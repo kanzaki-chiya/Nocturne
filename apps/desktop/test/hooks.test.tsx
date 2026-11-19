@@ -44,6 +44,7 @@ const samplePlugin = (overrides: Partial<PluginOverview> = {}): PluginOverview =
   ],
   unsupported: [{ point: "PreToolUse", reason: "point" }],
   skills: [],
+  mcpServers: [],
   warnings: [],
   ...overrides,
 });
@@ -327,6 +328,33 @@ describe("Hook 设置页（只读）", () => {
     await waitFor(() => {
       expect(screen.getByText("已信任")).toBeTruthy();
     });
+    f.close();
+  });
+
+  it("「来自插件」照常列出带 Hook 的自有插件", async () => {
+    const nativePlugin = samplePlugin({
+      id: "nocturne:guard@builtin",
+      host: "nocturne",
+      name: "guard",
+      marketplace: "builtin",
+      displayName: "Guard Native",
+      state: "on",
+      hooks: [{ point: "PreToolUse", matcher: "shell", command: "${NOCTURNE_NODE} ./guard.mjs" }],
+      unsupported: [],
+    });
+    const f = fakeServer(
+      withInit({
+        "hooks.describeHooks": desc([]),
+        "plugins.describePlugins": pluginsDesc([nativePlugin]),
+      }),
+    );
+    await f.initialize();
+
+    render(<HooksPage client={f.client} workspaceRoot={undefined} version={0} />);
+
+    const region = await screen.findByRole("region", { name: "来自插件 · 1" });
+    expect(within(region).getByText("Guard Native")).toBeTruthy();
+    expect(within(region).getByText("1 个 Hook")).toBeTruthy();
     f.close();
   });
 });

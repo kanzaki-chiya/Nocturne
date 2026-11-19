@@ -25,6 +25,7 @@ const plugin = (overrides: Partial<PluginOverview> = {}): PluginOverview => ({
   ],
   unsupported: [{ point: "PreToolUse", reason: "point" }],
   skills: ["review-diff"],
+  mcpServers: [],
   warnings: [],
   ...overrides,
 });
@@ -399,4 +400,114 @@ it("在支持 URL.createObjectURL 的环境下将图标 data URI 转为 blob URL
     Object.defineProperty(URL, "createObjectURL", { value: origCreate, configurable: true });
     Object.defineProperty(URL, "revokeObjectURL", { value: origRevoke, configurable: true });
   }
+});
+
+it("按来源将内置插件单独分组，标题只写来源名；内置插件开关直接启停不弹指纹确认框", async () => {
+  let state: PluginOverview["state"] = "on";
+  const builtinPlugin = plugin({
+    id: "nocturne:office@builtin",
+    host: "nocturne",
+    name: "office",
+    marketplace: "builtin",
+    version: "0.1.0",
+    displayName: "Office 文档",
+    description: "文档转换与读取",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: ["office-docs"],
+    mcpServers: [{ id: "office", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/server.mjs" }],
+  });
+  const localPlugin = plugin({
+    id: "nocturne:my-tool@local",
+    host: "nocturne",
+    name: "my-tool",
+    marketplace: "local",
+    version: "1.0.0",
+    displayName: "Local Tool",
+    state: "off",
+    hooks: [],
+    unsupported: [],
+    skills: ["local-skill"],
+    mcpServers: [],
+  });
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": () => desc([{ ...builtinPlugin, state }, localPlugin]),
+      "plugins.setPluginEnabled": (p: Record<string, unknown>) => {
+        if (p.id === builtinPlugin.id) state = p.enabled ? "on" : "off";
+        return { affectedSessions: 0 };
+      },
+    }),
+  );
+  await f.initialize();
+  render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+
+  const builtinRegion = await screen.findByRole("region", { name: "内置 · 1" });
+  expect(within(builtinRegion).getByText("Office 文档")).toBeTruthy();
+  const nocturneRegion = await screen.findByRole("region", { name: "Nocturne · 1" });
+  expect(within(nocturneRegion).getByText("Local Tool")).toBeTruthy();
+
+  // 关闭内置插件再开启：直接调 setPluginEnabled，不弹确认对话框
+  const toggle = within(builtinRegion).getByRole("switch", { name: "启用 Office 文档" });
+  fireEvent.click(toggle);
+  await waitFor(() => {
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+  fireEvent.click(toggle);
+  await waitFor(() => {
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    f.calls.filter((c) => c.method === "plugins.setPluginEnabled").map((c) => c.params),
+  ).toEqual([
+    { id: "nocturne:office@builtin", enabled: false },
+    { id: "nocturne:office@builtin", enabled: true },
+  ]);
+
+  f.close();
+});
+
+it("插件详情在技能、Hook 之后显示「MCP 服务器」一节，列 id、命令与跳过原因", async () => {
+  const item = plugin({
+    id: "nocturne:kit@builtin",
+    host: "nocturne",
+    name: "kit",
+    marketplace: "builtin",
+    version: "1.0.0",
+    displayName: "Toolkit",
+    state: "on",
+    hooks: [{ point: "PreToolUse", matcher: "shell", command: "${NOCTURNE_NODE} ./guard.mjs" }],
+    unsupported: [{ point: "mcp:remote", reason: "type" }],
+    skills: ["kit-skill"],
+    mcpServers: [
+      { id: "local-mcp", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/mcp.mjs" },
+      {
+        id: "dup-mcp",
+        command: "${NOCTURNE_NODE} ./dup.mjs",
+        skipped: true,
+        skipReason: "conflict",
+      },
+      { id: "remote", command: "https://example.com/mcp", skipped: true, skipReason: "http" },
+    ],
+  });
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": desc([item]),
+    }),
+  );
+  await f.initialize();
+  render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+
+  fireEvent.click(await screen.findByText("Toolkit"));
+  const mcpRegion = await screen.findByRole("region", { name: "MCP 服务器 · 3" });
+  expect(within(mcpRegion).getByText("local-mcp")).toBeTruthy();
+  expect(within(mcpRegion).getByText("${NOCTURNE_NODE} ${PLUGIN_ROOT}/mcp.mjs")).toBeTruthy();
+  expect(within(mcpRegion).getByText("dup-mcp")).toBeTruthy();
+  expect(within(mcpRegion).getByText("与配置同名")).toBeTruthy();
+  expect(within(mcpRegion).getByText("remote")).toBeTruthy();
+  expect(within(mcpRegion).getByText("不支持 HTTP")).toBeTruthy();
+
+  f.close();
 });
