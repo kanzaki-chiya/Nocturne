@@ -717,4 +717,86 @@ describe("MCP 设置页", () => {
     expect(screen.getByText("4 个工具")).toBeTruthy();
     f.close();
   });
+
+  it("「来自插件」分组列出已启用插件的 MCP 服务器并展示未启动与已连接状态，点击跳转插件详情", async () => {
+    const openedPlugin = vi.fn();
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": { servers: [], warnings: [] },
+        "plugins.describePlugins": {
+          plugins: [
+            {
+              id: "nocturne:docx@builtin",
+              host: "nocturne",
+              name: "docx",
+              displayName: "Word 文档",
+              marketplace: "builtin",
+              version: "0.55.0",
+              root: "/plugins/docx",
+              state: "on",
+              hooks: [],
+              skills: ["docx"],
+              mcpServers: [{ id: "word", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/server.mjs" }],
+              unsupported: [],
+              warnings: [],
+            },
+            {
+              id: "nocturne:xlsx@builtin",
+              host: "nocturne",
+              name: "xlsx",
+              displayName: "电子表格",
+              marketplace: "builtin",
+              version: "0.55.0",
+              root: "/plugins/xlsx",
+              state: "on",
+              hooks: [],
+              skills: ["xlsx"],
+              mcpServers: [
+                { id: "sheets", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/server.mjs" },
+                {
+                  id: "skipped_http",
+                  command: "https://example.com",
+                  skipped: true,
+                  skipReason: "unsupported_transport",
+                },
+              ],
+              unsupported: [],
+              warnings: [],
+            },
+          ],
+          warnings: [],
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+      }),
+    );
+    await f.initialize();
+    render(
+      <McpPage
+        client={f.client}
+        workspaceRoot="/repo"
+        version={0}
+        onChanged={() => undefined}
+        loadLive={async () => [
+          { name: "word", state: "standby", toolCount: 5 },
+          { name: "sheets", state: "ready", toolCount: 4 },
+        ]}
+        liveRevision="plugin-standby"
+        onOpenPlugin={openedPlugin}
+      />,
+    );
+
+    await screen.findByText("word");
+    expect(screen.getByText("来自插件")).toBeTruthy();
+    expect(screen.getByText("Word 文档")).toBeTruthy();
+    expect(screen.getByText("电子表格")).toBeTruthy();
+    expect(screen.queryByText("skipped_http")).toBeNull();
+    await waitFor(() => expect(screen.getByText(/未启动/)).toBeTruthy());
+    expect(screen.getByText("5 个工具")).toBeTruthy();
+    expect(screen.getByText(/已连接/)).toBeTruthy();
+    expect(screen.getByText("4 个工具")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("word"));
+    expect(openedPlugin).toHaveBeenCalledWith("nocturne:docx@builtin");
+    f.close();
+  });
 });

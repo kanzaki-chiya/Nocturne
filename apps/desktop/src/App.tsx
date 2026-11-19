@@ -2222,6 +2222,10 @@ export function App({ host }: { host: DesktopHost }) {
                       }}
                       loadLive={loadLiveMcp}
                       liveRevision={liveMcpRevision}
+                      onOpenPlugin={(id) => {
+                        setPluginJump((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
+                        setPage("plugins");
+                      }}
                     />
                   </PaneErrorBoundary>
                 ) : settingsPage === "plugins" ? (

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { RpcError, type RpcClient } from "@nocturne/rpc/client";
-import type { McpProbeResult, McpServerOverview, McpValueOverview } from "@nocturne/core/protocol";
+import type {
+  McpProbeResult,
+  McpServerOverview,
+  McpValueOverview,
+  PluginMcpServerOverview,
+  PluginOverview,
+} from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { Scrim } from "./ProvidersPage";
@@ -167,6 +173,7 @@ export function McpPage({
   onChanged,
   loadLive,
   liveRevision,
+  onOpenPlugin,
 }: {
   client: RpcClient | undefined;
   workspaceRoot: string | undefined;
@@ -176,8 +183,12 @@ export function McpPage({
   loadLive?: (() => Promise<readonly McpLiveStatus[]>) | undefined;
   /** 会话连接状态变化时改变，触发重新读取 */
   liveRevision?: string | undefined;
+  onOpenPlugin?: ((id: string) => void) | undefined;
 }) {
   const [servers, setServers] = useState<McpServerOverview[]>([]);
+  const [pluginServers, setPluginServers] = useState<
+    { plugin: PluginOverview; server: PluginMcpServerOverview }[]
+  >([]);
   const [view, setView] = useState<McpView>({ kind: "list" });
   const [results, setResults] = useState<Record<string, McpProbeResult>>({});
   const [live, setLive] = useState<readonly McpLiveStatus[]>([]);
@@ -200,8 +211,22 @@ export function McpPage({
   const refresh = useCallback(async () => {
     if (!client) return;
     try {
-      const data = await client.runtime.describeMcpServers({ workspaceRoot });
+      const [data, pluginsResult] = await Promise.all([
+        client.runtime.describeMcpServers({ workspaceRoot }),
+        client.runtime.describePlugins().catch(() => undefined),
+      ]);
       setServers(data.servers);
+      if (pluginsResult !== undefined) {
+        const nextPluginServers: { plugin: PluginOverview; server: PluginMcpServerOverview }[] = [];
+        for (const plugin of pluginsResult.plugins) {
+          if (plugin.state !== "on") continue;
+          for (const server of plugin.mcpServers) {
+            if (server.skipped === true) continue;
+            nextPluginServers.push({ plugin, server });
+          }
+        }
+        setPluginServers(nextPluginServers);
+      }
       setView((current) =>
         current.kind === "detail" && !data.servers.some((s) => s.id === current.id)
           ? { kind: "list" }
@@ -216,7 +241,13 @@ export function McpPage({
 
   useEffect(() => {
     void refresh();
-  }, [refresh, version]);
+    const offProviders = client?.onProvidersChanged(() => {
+      void refresh();
+    });
+    return () => {
+      offProviders?.();
+    };
+  }, [client, refresh, version]);
 
   // 页面离开后仍保留：重新进入、配置变化或切换会话时，手动测试结果让位给会话状态
   useEffect(() => {
@@ -556,7 +587,7 @@ export function McpPage({
                   {error}
                 </div>
               )}
-              {servers.length === 0 ? (
+              {servers.length === 0 && pluginServers.length === 0 ? (
                 <EmptyState
                   action={
                     <>
@@ -635,6 +666,51 @@ export function McpPage({
                       </SettingsGroup>
                     );
                   })}
+                  {pluginServers.length > 0 && (
+                    <SettingsGroup plain title="来自插件" count={pluginServers.length}>
+                      {pluginServers.map(({ plugin, server }) => {
+                        const liveItem = live.find(
+                          (s) => s.name === server.id && s.state !== "stopped",
+                        );
+                        const dot =
+                          liveItem?.state === "ready"
+                            ? "ok"
+                            : liveItem?.state === "failed" || liveItem?.state === "crashed"
+                              ? "warn"
+                              : "";
+                        return (
+                          <SettingsListRow
+                            key={`${plugin.id}:${server.id}`}
+                            name={server.id}
+                            mono
+                            title={server.id}
+                            description={plugin.displayName ?? plugin.name}
+                            status={
+                              <span className="mcp-status">
+                                <span
+                                  className={dot === "" ? "dot" : `dot ${dot}`}
+                                  aria-hidden="true"
+                                />
+                                {liveText(liveItem)}
+                              </span>
+                            }
+                            toggle={
+                              <Switch
+                                aria-label="启用"
+                                checked
+                                disabled
+                                title={`来自插件 ${plugin.displayName ?? plugin.name}`}
+                                onChange={() => undefined}
+                              />
+                            }
+                            onOpen={() => {
+                              onOpenPlugin?.(plugin.id);
+                            }}
+                          />
+                        );
+                      })}
+                    </SettingsGroup>
+                  )}
                 </div>
               )}
             </>
