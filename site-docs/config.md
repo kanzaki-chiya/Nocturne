@@ -96,7 +96,7 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 | `turn.loopGuard` | `warnAt`、`stopAt` 或 `false` | 重复工具调用保护阈值（默认 `warnAt` 为 `3`、`stopAt` 为 `6`，设 `false` 关闭） |
 | `mcp.servers` | `Record<string, McpServerEntry>` | 手写配置的 MCP 服务器 |
 | `mcp.toolSearch` | `auto`、`always`、`never` | MCP 工具按需搜索模式（默认 `auto`，工具定义估算超过 10,000 tokens 时启用） |
-| `hooks` | `Partial<Record<HookPoint, HookEntry[]>>` | 按事件点配置的外部 Hook 命令（项目级须信任后才生效） |
+| `hooks` | `Partial<Record<HookPoint, HookEntry[]>>` | 按事件点配置的外部 Hook 命令（项目级须信任后才生效，见 [Hook](hooks.md)） |
 | `skills` | `sources`（`agents`、`claude`）、`extraDirs` | 技能兼容目录开关与附加扫描目录（仅用户级生效） |
 | `externalAgents` | `ExternalAgentConfig[]` | 手写配置的外部 ACP Agent（仅用户级生效） |
 | `notifications` | `enabled`、`events`、`doneAfterSeconds`、`sound` | 会话通知与完成提醒秒数阈值（默认 `60` 秒） |
@@ -104,13 +104,7 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 
 ## Hooks
 
-`hooks` 允许在固定事件点执行外部命令（stdin 传入 JSON，stdout 返回 JSON）：
-
-- **可用点位**：`PreToolUse`、`PermissionRequest`、`PostToolUse`、`TurnStart`、`TurnEnd`、`UserPromptSubmit`、`SessionStart`、`SubagentStart`、`SessionEnd`。
-- **上下文注入（`additionalContext`）**：
-  - `SessionStart`（新建 `startup`、恢复 `resume`、分叉 `fork` 以及 L2 摘要后 `compact`）与 `SubagentStart`（携带 `agentType`）可返回 `{ "additionalContext": "..." }`，作为会话级快照注入系统上下文。
-  - `UserPromptSubmit`（仅用户主动输入时触发，接收 `turnId`、用户原文 `text` 与 `skill?`）可返回 `{ "block": true, "reason": "..." }` 拦截本轮，或返回 `{ "additionalContext": "..." }` 附注在当条用户消息之后（拦截时丢弃 `additionalContext`）。
-  - 单条 `additionalContext` 上限 `10,000` 字符（超出截断），单事件全部条目合计上限 `30,000` 字符（超出丢弃）。
+`hooks` 允许在 `PreToolUse`、`PermissionRequest`、`PostToolUse`、`TurnStart`、`TurnEnd`、`UserPromptSubmit`、`SessionStart`、`SubagentStart`、`SessionEnd` 等事件点执行外部命令（stdin 传入 JSON，stdout 返回 JSON），按用户级与项目级配置顺序追加执行，项目级需先信任工作区才生效。完整配置示例、事件点输出与排查方法见 [Hook](hooks.md)。
 
 ## 环境变量
 

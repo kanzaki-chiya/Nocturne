@@ -31,23 +31,24 @@
 
 | 界面名 | 进入方式 | 主组件文件 | 测试文件 | `pnpm shot` 步骤 / CDP 定位 |
 |---|---|---|---|---|
-| 常规 | 侧栏底部点「设置」默认页，或设置导航点「常规」 | `apps/desktop/src/SettingsPage.tsx` | `apps/desktop/test/settings.test.tsx` | `await click('text=设置'); await waitFor('nav[aria-label="设置"]'); await waitFor('section[aria-label="常规"]');` |
-| 外观 | 设置导航点「外观」 | `apps/desktop/src/SettingsPage.tsx`、`apps/desktop/src/ThemeCards.tsx`、`apps/desktop/src/AppearancePreview.tsx` | `apps/desktop/test/appearance-page.test.tsx`、`apps/desktop/test/theme-presets.test.ts` | `await click('text=设置'); await click('text=外观'); await waitFor('.theme-strip');` |
+| 常规 | 侧栏底部点「设置」默认页，或设置导航「基础设置」组点「常规」 | `apps/desktop/src/SettingsPage.tsx` | `apps/desktop/test/settings.test.tsx` | `await click('text=设置'); await waitFor('nav[aria-label="设置"]'); await waitFor('section[aria-label="常规"]');` |
+| 外观 | 设置导航「基础设置」组点「外观」 | `apps/desktop/src/SettingsPage.tsx`、`apps/desktop/src/ThemeCards.tsx`、`apps/desktop/src/AppearancePreview.tsx` | `apps/desktop/test/appearance-page.test.tsx`、`apps/desktop/test/theme-presets.test.ts` | `await click('text=设置'); await click('text=外观'); await waitFor('.theme-strip');` |
 | 新建主题 / 编辑主题 / 导入主题 / 导出主题 | 设置 › 外观主题区点新建、编辑、导入或导出 | `apps/desktop/src/CustomThemeDialog.tsx` | `apps/desktop/test/custom-theme.test.tsx` | `await click('text=设置'); await click('text=外观'); await waitFor('[role="dialog"][aria-label="新建主题"]');` |
-| 服务商 | 设置导航点「服务商」 | `apps/desktop/src/ProvidersPage.tsx`、`apps/desktop/src/ModelSettingsDialog.tsx` | `apps/desktop/test/providers.test.tsx`、`apps/desktop/test/provider-toggle.test.tsx` | `await click('text=设置'); await click('text=服务商'); await waitFor('[data-testid="providers-page"]');` |
-| 模型 | 设置导航点「模型」 | `apps/desktop/src/SettingsPage.tsx` | `apps/desktop/test/settings.test.tsx` | `await click('text=设置'); await click('text=模型'); await waitFor('section[aria-label="模型"]');` |
-| 子代理 | 设置导航点「子代理」 | `apps/desktop/src/ExternalAgentsPage.tsx`、`apps/desktop/src/SubagentProfileEditor.tsx` | `apps/desktop/test/external-agents.test.tsx`、`apps/desktop/test/subagent-profiles.test.tsx` | `await click('text=设置'); await click('text=子代理'); await waitFor('.external-agents-page');` |
-| 记忆 | 设置导航点「记忆」 | `apps/desktop/src/MemoryPage.tsx` | `apps/desktop/test/memory.test.tsx` | `await click('text=设置'); await click('text=记忆'); await waitFor('.memory-page');` |
-| 技能 | 设置导航点「技能」 | `apps/desktop/src/SkillsPage.tsx` | `apps/desktop/test/skills.test.tsx` | `await click('text=设置'); await click('text=技能'); await waitFor('.skills-page');` |
-| MCP | 设置导航点「MCP」 | `apps/desktop/src/McpPage.tsx` | `apps/desktop/test/mcp.test.tsx` | `await click('text=设置'); await click('text=MCP'); await waitFor('.mcp-page');` |
-| 插件 | 设置导航点「插件」 | `apps/desktop/src/PluginsPage.tsx` | `apps/desktop/test/plugins.test.tsx` | `await click('text=设置'); await click('text=插件'); await waitFor('.plugins-page');` |
-| 浏览器 | 设置导航点「浏览器」 | `apps/desktop/src/BrowserSettingsPage.tsx` | `apps/desktop/test/browser-settings.test.tsx` | `await click('text=设置'); await click('text=浏览器'); await waitFor('section[aria-label="浏览器"]');` |
-| 电脑操控 | 设置导航点「电脑操控」 | `apps/desktop/src/ComputerSettingsPage.tsx` | `apps/desktop/test/computer-settings.test.tsx` | `await click('text=设置'); await click('text=电脑操控'); await waitFor('section[aria-label="电脑操控"]');` |
-| 授权 | 设置导航点「授权」 | `apps/desktop/src/GrantsPage.tsx` | `apps/desktop/test/grants.test.tsx` | `await click('text=设置'); await click('text=授权'); await waitFor('.grants-page');` |
-| 远程 | 设置导航点「远程」 | `apps/desktop/src/RemotePage.tsx` | `apps/desktop/test/remote.test.tsx`、`apps/desktop/test/pairing-qr.test.ts` | `await click('text=设置'); await click('text=远程'); await waitFor('text=让手机连到这台电脑');` |
-| 已归档的会话 | 设置导航点「已归档的会话」 | `apps/desktop/src/ArchivePage.tsx` | `apps/desktop/test/archive-page.test.tsx` | `await click('text=设置'); await click('text=已归档的会话'); await waitFor('section[aria-label="已归档的会话"]');` |
-| 用量 | 设置导航点「用量」 | `apps/desktop/src/UsagePage.tsx`、`apps/desktop/src/UsageCharts.tsx` | `apps/desktop/test/usage.test.tsx`、`apps/desktop/test/usage-details.test.tsx` | `await click('text=设置'); await click('text=用量'); await waitFor('.usage-body');` |
-| 后台日志 | 设置导航点「后台日志」 | `apps/desktop/src/BackendLogsPage.tsx` | `apps/desktop/test/app.test.tsx` | `await click('text=设置'); await click('text=后台日志'); await waitFor('[data-testid="logs-page"]');` |
+| 服务商 | 设置导航「基础设置」组点「服务商」 | `apps/desktop/src/ProvidersPage.tsx`、`apps/desktop/src/ModelSettingsDialog.tsx` | `apps/desktop/test/providers.test.tsx`、`apps/desktop/test/provider-toggle.test.tsx` | `await click('text=设置'); await click('text=服务商'); await waitFor('[data-testid="providers-page"]');` |
+| 模型 | 设置导航「基础设置」组点「模型」 | `apps/desktop/src/SettingsPage.tsx` | `apps/desktop/test/settings.test.tsx` | `await click('text=设置'); await click('text=模型'); await waitFor('section[aria-label="模型"]');` |
+| 子代理 | 设置导航「Agent 能力」组点「子代理」 | `apps/desktop/src/ExternalAgentsPage.tsx`、`apps/desktop/src/SubagentProfileEditor.tsx` | `apps/desktop/test/external-agents.test.tsx`、`apps/desktop/test/subagent-profiles.test.tsx` | `await click('text=设置'); await click('text=子代理'); await waitFor('.external-agents-page');` |
+| 记忆 | 设置导航「Agent 能力」组点「记忆」 | `apps/desktop/src/MemoryPage.tsx` | `apps/desktop/test/memory.test.tsx` | `await click('text=设置'); await click('text=记忆'); await waitFor('.memory-page');` |
+| 技能 | 设置导航「Agent 能力」组点「技能」 | `apps/desktop/src/SkillsPage.tsx` | `apps/desktop/test/skills.test.tsx` | `await click('text=设置'); await click('text=技能'); await waitFor('.skills-page');` |
+| MCP | 设置导航「Agent 能力」组点「MCP」 | `apps/desktop/src/McpPage.tsx` | `apps/desktop/test/mcp.test.tsx` | `await click('text=设置'); await click('text=MCP'); await waitFor('.mcp-page');` |
+| 插件 | 设置导航「Agent 能力」组点「插件」 | `apps/desktop/src/PluginsPage.tsx` | `apps/desktop/test/plugins.test.tsx` | `await click('text=设置'); await click('text=插件'); await waitFor('.plugins-page');` |
+| Hook | 设置导航「Agent 能力」组点「Hook」 | `apps/desktop/src/HooksPage.tsx` | `apps/desktop/test/hooks.test.tsx` | `await click('text=设置'); await click('text=Hook'); await waitFor('.hooks-page');` |
+| 浏览器 | 设置导航「连接」组点「浏览器」 | `apps/desktop/src/BrowserSettingsPage.tsx` | `apps/desktop/test/browser-settings.test.tsx` | `await click('text=设置'); await click('text=浏览器'); await waitFor('section[aria-label="浏览器"]');` |
+| 电脑操控 | 设置导航「连接」组点「电脑操控」 | `apps/desktop/src/ComputerSettingsPage.tsx` | `apps/desktop/test/computer-settings.test.tsx` | `await click('text=设置'); await click('text=电脑操控'); await waitFor('section[aria-label="电脑操控"]');` |
+| 远程 | 设置导航「连接」组点「远程」 | `apps/desktop/src/RemotePage.tsx` | `apps/desktop/test/remote.test.tsx`、`apps/desktop/test/pairing-qr.test.ts` | `await click('text=设置'); await click('text=远程'); await waitFor('text=让手机连到这台电脑');` |
+| 授权 | 设置导航「数据与安全」组点「授权」 | `apps/desktop/src/GrantsPage.tsx` | `apps/desktop/test/grants.test.tsx` | `await click('text=设置'); await click('text=授权'); await waitFor('.grants-page');` |
+| 已归档的会话 | 设置导航「数据与安全」组点「已归档的会话」 | `apps/desktop/src/ArchivePage.tsx` | `apps/desktop/test/archive-page.test.tsx` | `await click('text=设置'); await click('text=已归档的会话'); await waitFor('section[aria-label="已归档的会话"]');` |
+| 用量 | 设置导航「数据与安全」组点「用量」 | `apps/desktop/src/UsagePage.tsx`、`apps/desktop/src/UsageCharts.tsx` | `apps/desktop/test/usage.test.tsx`、`apps/desktop/test/usage-details.test.tsx` | `await click('text=设置'); await click('text=用量'); await waitFor('.usage-body');` |
+| 后台日志 | 设置导航「数据与安全」组点「后台日志」 | `apps/desktop/src/BackendLogsPage.tsx` | `apps/desktop/test/app.test.tsx` | `await click('text=设置'); await click('text=后台日志'); await waitFor('[data-testid="logs-page"]');` |
 
 ## 手机网页
 

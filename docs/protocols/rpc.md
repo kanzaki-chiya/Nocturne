@@ -341,6 +341,16 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `suites.archive` | `{ id: string }` → `null`；指挥或任意线程忙时报 `session_busy` |
 | `suites.open` | `{ id: string, model?: string \| ModelRef, force?: boolean }` → `SessionOpened`；经 Hub 共享打开对应组曲的指挥会话，同一连接内已打开时直接返回当前 `SessionOpened` |
 
+### 3.17 `hooks.*`
+
+配置文件中的 Hook 只读概览（不含插件 Hook），只向本机连接开放（返回本机配置文件路径，与 `mcp.describeMcpServers` 一致，不在 `REMOTE_METHODS`，远程调用报 `remote_not_allowed`）。规则见 [hooks.md](../architecture/hooks.md)。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `hooks.describeHooks` | `{ workspaceRoot? }` → `HooksDescription`（`{ hooks: HookOverview[], warnings: string[] }`） |
+
+`HookOverview` 含 `point`（`HookPoint`）、`matcher?`（仅 `PreToolUse` / `PermissionRequest` / `PostToolUse` 保留）、`command`、`args`（数组）、`timeoutMs`（已应用缺省 `5000` 与上限 `60000`）、`origin`（`"user" \| "project"`）、`path`（配置文件路径）与 `trusted`（用户级恒为 `true`；项目级按 `trust.json` 判定，`false` 表示未信任且不生效）。给定 `workspaceRoot` 时附带该项目 `.nocturne/config.json` 中的条目（含未信任项目），同事件点内按层序追加（用户级在前、项目级在后）；省略 `workspaceRoot` 时仅返回用户级条目。
+
 ## 4. 订阅与回放
 
 `session.subscribe { sessionId, afterSeq }`：服务端先挂实时监听并缓冲，再读日志，推送 `seq > afterSeq` 的全部**持久**事件，随后冲刷缓冲（按 `seq` 去重，已推过的不再推），最后转入实时推送（持久与临时都推）。请求在回放与衔接完成后才返回 `{ lastSeq }`，因此回放期间产生的新事件不丢、不重，`seq` 连续。
