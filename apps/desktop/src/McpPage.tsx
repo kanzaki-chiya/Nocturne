@@ -683,7 +683,6 @@ export function McpPage({
                             key={`${plugin.id}:${server.id}`}
                             name={server.id}
                             mono
-                            title={server.id}
                             description={plugin.displayName ?? plugin.name}
                             status={
                               <span className="mcp-status">
@@ -693,15 +692,6 @@ export function McpPage({
                                 />
                                 {liveText(liveItem)}
                               </span>
-                            }
-                            toggle={
-                              <Switch
-                                aria-label="启用"
-                                checked
-                                disabled
-                                title={`来自插件 ${plugin.displayName ?? plugin.name}`}
-                                onChange={() => undefined}
-                              />
                             }
                             onOpen={() => {
                               onOpenPlugin?.(plugin.id);

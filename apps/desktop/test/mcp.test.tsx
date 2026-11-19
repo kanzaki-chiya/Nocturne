@@ -786,16 +786,18 @@ describe("MCP 设置页", () => {
     );
 
     await screen.findByText("word");
-    expect(screen.getByText("来自插件")).toBeTruthy();
-    expect(screen.getByText("Word 文档")).toBeTruthy();
-    expect(screen.getByText("电子表格")).toBeTruthy();
+    const pluginGroup = screen.getByRole("region", { name: /^来自插件/ });
+    expect(within(pluginGroup).getByText("Word 文档")).toBeTruthy();
+    expect(within(pluginGroup).getByText("电子表格")).toBeTruthy();
     expect(screen.queryByText("skipped_http")).toBeNull();
-    await waitFor(() => expect(screen.getByText(/未启动/)).toBeTruthy());
-    expect(screen.getByText("5 个工具")).toBeTruthy();
-    expect(screen.getByText(/已连接/)).toBeTruthy();
-    expect(screen.getByText("4 个工具")).toBeTruthy();
+    expect(within(pluginGroup).queryByRole("switch")).toBeNull();
+    expect(pluginGroup.querySelector("[title]")).toBeNull();
+    await waitFor(() => expect(within(pluginGroup).getByText(/未启动/)).toBeTruthy());
+    expect(within(pluginGroup).getByText("5 个工具")).toBeTruthy();
+    expect(within(pluginGroup).getByText(/已连接/)).toBeTruthy();
+    expect(within(pluginGroup).getByText("4 个工具")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("word"));
+    fireEvent.click(within(pluginGroup).getByText("word"));
     expect(openedPlugin).toHaveBeenCalledWith("nocturne:docx@builtin");
     f.close();
   });
