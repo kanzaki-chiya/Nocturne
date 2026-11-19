@@ -433,4 +433,61 @@ describe("runtime.listSessions 活动状态与 runtime.sessionsChanged", () => {
       await served;
     }
   });
+
+  it("另一条 RPC 连接新建并运行的会话，主连接未打开时 listSessions 带 running 且收到 sessionsChanged，结束后不带", async () => {
+    let releaseTurn!: () => void;
+    const turnGate = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    let inProvider = false;
+    const provider = new FakeProvider({
+      models: VISION_MODELS,
+      handler: async (): Promise<FakeScript> => {
+        inProvider = true;
+        await turnGate;
+        return textScript("外部任务完成");
+      },
+    });
+    const h = await connectMany({ provider });
+    const second = await h.add();
+    try {
+      await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
+      const desktopChanged = countSessionsChanged(h.client);
+
+      const { session: externalSession } = await second.client.runtime.createSession({
+        model: MODEL,
+      });
+      const turn = externalSession.submit({ text: "外部连接新建任务" });
+      await until(() => inProvider, "第二条连接的新建会话进入模型流");
+
+      const during = (await h.client.runtime.listSessions()).find(
+        (s) => s.id === externalSession.id,
+      );
+      expect(during).toMatchObject({
+        id: externalSession.id,
+        openHere: true,
+        status: "running",
+      });
+
+      await vi.advanceTimersByTimeAsync(WINDOW_MS + 50);
+      const changedDuring = desktopChanged.count();
+      expect(changedDuring).toBeGreaterThanOrEqual(1);
+
+      releaseTurn();
+      expect(await turn).toBe("done");
+
+      const after = (await h.client.runtime.listSessions()).find(
+        (s) => s.id === externalSession.id,
+      );
+      expect(after?.openHere).toBe(true);
+      expect(after !== undefined && "status" in after).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(WINDOW_MS + 50);
+      expect(desktopChanged.count()).toBe(changedDuring + 1);
+    } finally {
+      second.client.close();
+      await h.client.shutdown();
+      await Promise.all([h.served, second.served]);
+    }
+  });
 });
