@@ -76,11 +76,7 @@ export function SuiteThreadPane({
   const handleSubmit = async (input: ComposerSubmit): Promise<boolean> => {
     setSubmitError(undefined);
     const trimmed = input.text.trim();
-    if (trimmed === "") {
-      const error = new Error("发送给线程的消息不能为空");
-      setSubmitError(error.message);
-      throw error;
-    }
+    if (trimmed === "") return false;
     try {
       void session.recordInputHistory(input.text).catch(() => undefined);
       await coordinatorSession.sendToThread({ thread: threadId, text: input.text });
@@ -157,6 +153,7 @@ export function SuiteThreadPane({
         recordInputHistory={(text) => session.recordInputHistory(text)}
         fileRefs={fileRefs}
         pickImages={pickImages}
+        allowAttachments={false}
         onSlash={handleSlash}
       />
     </div>

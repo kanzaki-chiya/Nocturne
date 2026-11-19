@@ -721,6 +721,61 @@ describe("SuiteThreadPane 组曲线程标签", () => {
     });
     expect(f.calls.filter((c) => c.method === "session.submit")).toHaveLength(0);
 
+    // 线程标签不提供附件入口
+    expect(screen.queryByRole("button", { name: "添加文件" })).toBeNull();
+
+    // 空白文本按发送不调用 sendToThread 也不出错误提示
+    sendToThread.mockClear();
+    fireEvent.change(textarea, { target: { value: "   " } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(sendToThread).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    f.close();
+  });
+
+  it("保存组曲期间工作区下拉禁用提示为「正在处理」", async () => {
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const f = fakeServer(
+      withInit({
+        "suites.list": () => [],
+        "suites.create": async () => {
+          await createGate;
+          return makeSuite({ id: "suite-busy", name: "保存中" });
+        },
+      }),
+    );
+    await f.initialize();
+
+    render(
+      <SuitesPage
+        client={f.client}
+        workspaces={[{ path: "Z:/nocturne", label: "nocturne" }]}
+        onOpenSuite={vi.fn()}
+      />,
+    );
+
+    const [headerNew] = await screen.findAllByRole("button", { name: "新建" });
+    if (headerNew === undefined) throw new Error("未找到新建按钮");
+    fireEvent.click(headerNew);
+
+    const dlg = screen.getByRole("dialog", { name: "新建组曲" });
+    fireEvent.change(within(dlg).getByLabelText("名称"), { target: { value: "保存中" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      const workspaceTrigger = within(dlg).getByRole("combobox", { name: "工作区" });
+      expect((workspaceTrigger as HTMLButtonElement).disabled).toBe(true);
+      expect(workspaceTrigger.getAttribute("title")).toBe("正在处理");
+    });
+
+    releaseCreate();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "新建组曲" })).toBeNull();
+    });
     f.close();
   });
 });

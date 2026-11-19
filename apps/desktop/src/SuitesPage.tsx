@@ -30,8 +30,10 @@ export interface SuitesPageProps {
   workspaces: readonly SuiteWorkspaceOption[];
   version?: number | undefined;
   needsAttentionBySuite?: ReadonlyMap<string, number> | undefined;
+  readOnly?: boolean | undefined;
   onOpenSuite: (id: string) => void;
   onChanged?: () => void;
+  onLoaded?: ((suites: SuiteRecord[]) => void) | undefined;
 }
 
 interface SuiteDraft {
@@ -58,8 +60,10 @@ export function SuitesPage({
   workspaces,
   version = 0,
   needsAttentionBySuite,
+  readOnly = false,
   onOpenSuite,
   onChanged,
+  onLoaded,
 }: SuitesPageProps) {
   const [suites, setSuites] = useState<SuiteRecord[]>();
   const [error, setError] = useState("");
@@ -69,6 +73,8 @@ export function SuitesPage({
   const [menu, setMenu] = useState<OpenRowMenu | null>(null);
   const [confirmArchive, setConfirmArchive] = useState<SuiteRecord>();
   const refreshGeneration = useRef(0);
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -76,6 +82,7 @@ export function SuitesPage({
     try {
       const list = await client.runtime.listSuites();
       if (generation !== refreshGeneration.current) return;
+      onLoadedRef.current?.(list);
       setSuites(list);
       setError("");
     } catch (cause) {
@@ -182,29 +189,33 @@ export function SuitesPage({
     <section className="page3 suites-page" aria-label="组曲" aria-busy={busy}>
       <div className="spage">
         <div className="readable">
-          <PageHeader
-            title="组曲"
-            actions={
-              <Button variant="primary" size="sm" disabled={!client || busy} onClick={openCreate}>
-                <Icon name="add" size={ICON_SM} />
-                新建
-              </Button>
-            }
-          />
+          {!readOnly && (
+            <PageHeader
+              title="组曲"
+              actions={
+                <Button variant="primary" size="sm" disabled={!client || busy} onClick={openCreate}>
+                  <Icon name="add" size={ICON_SM} />
+                  新建
+                </Button>
+              }
+            />
+          )}
           {error !== "" && (
             <div className="errt" role="alert">
               {error}
             </div>
           )}
           {suites?.length === 0 ? (
-            <EmptyState
-              action={
-                <Button variant="primary" disabled={!client || busy} onClick={openCreate}>
-                  <Icon name="add" size={ICON_SM} />
-                  新建
-                </Button>
-              }
-            />
+            readOnly ? null : (
+              <EmptyState
+                action={
+                  <Button variant="primary" disabled={!client || busy} onClick={openCreate}>
+                    <Icon name="add" size={ICON_SM} />
+                    新建
+                  </Button>
+                }
+              />
+            )
           ) : (
             suites !== undefined && (
               <div className="sbody">
@@ -225,24 +236,30 @@ export function SuitesPage({
                           ) : undefined
                         }
                         toggle={
-                          <IconButton
-                            size="sm"
-                            aria-label={`${suite.name} 操作`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setMenu({ anchor: event.currentTarget, suite });
-                            }}
-                          >
-                            <Icon name="more" size={ICON_SM} />
-                          </IconButton>
+                          readOnly ? undefined : (
+                            <IconButton
+                              size="sm"
+                              aria-label={`${suite.name} 操作`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setMenu({ anchor: event.currentTarget, suite });
+                              }}
+                            >
+                              <Icon name="more" size={ICON_SM} />
+                            </IconButton>
+                          )
                         }
                         onOpen={() => {
                           onOpenSuite(suite.id);
                         }}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          setMenu({ anchor: event.currentTarget, suite });
-                        }}
+                        onContextMenu={
+                          readOnly
+                            ? undefined
+                            : (event) => {
+                                event.preventDefault();
+                                setMenu({ anchor: event.currentTarget, suite });
+                              }
+                        }
                       />
                     );
                   })}
@@ -253,7 +270,7 @@ export function SuitesPage({
         </div>
       </div>
 
-      {menu !== null && (
+      {!readOnly && menu !== null && (
         <Menu
           anchor={menu.anchor}
           align="right"
@@ -282,7 +299,7 @@ export function SuitesPage({
         </Menu>
       )}
 
-      {dialog !== undefined && (
+      {!readOnly && dialog !== undefined && (
         <Scrim
           onClose={() => {
             if (!busy) setDialog(undefined);
@@ -337,7 +354,7 @@ export function SuitesPage({
                     label="工作区"
                     appearance="lg"
                     value={dialog.draft.workspace}
-                    disabled={busy ? "正在保存" : undefined}
+                    disabled={busy ? "正在处理" : undefined}
                     options={workspaceChoices.map((item) => ({
                       value: item.path,
                       label: item.label,
@@ -400,7 +417,7 @@ export function SuitesPage({
         </Scrim>
       )}
 
-      {confirmArchive !== undefined && (
+      {!readOnly && confirmArchive !== undefined && (
         <ConfirmDialog
           title={`归档 ${confirmArchive.name}？`}
           confirmLabel="归档"

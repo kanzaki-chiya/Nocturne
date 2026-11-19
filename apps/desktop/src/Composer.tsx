@@ -197,6 +197,8 @@ export interface ComposerProps {
   /** 首张图片加入时调用一次；显示在卡片上方气泡 */
   getVisionHint?: () => Promise<string | undefined>;
   pickImages: () => Promise<PickedImage[]>;
+  /** 关闭附件按钮及粘贴 / 拖入文件（如组曲线程标签只支持纯文本）；默认开启 */
+  allowAttachments?: boolean | undefined;
   dirMenuOpen?: boolean;
   onDirMenuOpenChange?: (open: boolean) => void;
   /** 处理 /compact、/mcp；false 时草稿保留 */
@@ -294,6 +296,7 @@ export function Composer({
   fileRefs,
   getVisionHint,
   pickImages,
+  allowAttachments = true,
   dirMenuOpen,
   onDirMenuOpenChange,
   onSlash,
@@ -973,6 +976,7 @@ export function Composer({
   const pasteNumber = useRef(1);
   // ── 粘贴 / 拖入文件 ──
   const onPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    if (!allowAttachments) return;
     const items = Array.from(event.clipboardData.items);
     const files = items.flatMap((item) => {
       if (item.kind !== "file") return [];
@@ -1007,6 +1011,7 @@ export function Composer({
   };
 
   const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!allowAttachments) return;
     event.preventDefault();
     setDragOver(false);
     const files = Array.from(event.dataTransfer.files);
@@ -1364,7 +1369,7 @@ export function Composer({
         <div
           className={`cbox${dragOver ? " drop" : ""}`}
           onDragOver={(event) => {
-            if (event.dataTransfer.types.includes("Files")) {
+            if (allowAttachments && event.dataTransfer.types.includes("Files")) {
               event.preventDefault();
               setDragOver(true);
             }
@@ -1387,7 +1392,7 @@ export function Composer({
           {txtBlock}
           <div className="tb">
             {plusButton}
-            {paperclipButton}
+            {allowAttachments && paperclipButton}
             {controls !== undefined &&
               chip(
                 "preset",

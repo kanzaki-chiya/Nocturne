@@ -15,6 +15,7 @@ export const IconChevron = () => <PhoneIcon name="down_small" />;
 export const IconHome = () => <PhoneIcon name="home_4" />;
 export const IconTime = () => <PhoneIcon name="time" />;
 export const IconFolder = () => <PhoneIcon name="folder" />;
+export const IconLayout = () => <PhoneIcon name="layout" />;
 export const IconPlus = () => <PhoneIcon name="add" />;
 export const IconPaperclip = () => <PhoneIcon name="attachment" />;
 export const IconShield = ({ risk: _risk = false }: { risk?: boolean }) => (

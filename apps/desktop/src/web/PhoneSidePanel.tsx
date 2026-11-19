@@ -1,5 +1,10 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { EnsembleMemberView, ToolEntry, TurnChangeDiff } from "@nocturne/core/protocol";
+import type {
+  EnsembleMemberView,
+  SuiteThreadView,
+  ToolEntry,
+  TurnChangeDiff,
+} from "@nocturne/core/protocol";
 import { RpcError, type ContextSummary, type RpcSession } from "@nocturne/rpc/client";
 import type { AttachmentImageSource } from "../attachment-images";
 import { DiffBody } from "../Conversation";
@@ -18,6 +23,12 @@ import {
   ensembleMemberMetaLabel,
   ensembleStatusDot,
 } from "../ensemble-ui";
+import {
+  groupSuiteThreads,
+  suiteThreadDot,
+  suiteThreadModelLabel,
+  suiteThreadSecondary,
+} from "../suite-ui";
 import { Button, Icon, IconButton } from "../ui";
 import { useNow } from "../use-now";
 import { useSessionRefresh } from "../use-session-refresh";
@@ -45,6 +56,7 @@ interface Props {
   onClose: () => void;
   onOpenEnsemble?: (() => void) | undefined;
   onOpenEnsembleMember?: ((member: EnsembleMemberView) => void) | undefined;
+  onOpenSuiteThread?: ((thread: SuiteThreadView) => void) | undefined;
   onError: (message: string) => void;
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
   shellKind?: string | undefined;
@@ -227,12 +239,14 @@ export function PhoneSidePanel({
   onClose,
   onOpenEnsemble,
   onOpenEnsembleMember,
+  onOpenSuiteThread,
   onError,
   loadDiff,
   shellKind,
 }: Props) {
   const { session, view } = entry;
   const [summary, setSummary] = useState<ContextSummary>();
+  const [suiteResolvedOpen, setSuiteResolvedOpen] = useState(false);
   const [directory] = useState(() => new SubagentDirectory());
   const [watcher] = useState(() => new SubagentWatcher());
   const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
@@ -319,6 +333,7 @@ export function PhoneSidePanel({
     ? activeEnsemble.members.filter((member) => member.status !== "removed")
     : [];
   const ensembleDot = activeEnsemble ? ensembleStatusDot(activeEnsemble) : undefined;
+  const suiteGroups = view.suite !== undefined ? groupSuiteThreads(view.suite.threads) : undefined;
   const shells = view.backgroundShells.filter(
     (task) => !task.endedAt || now - Date.parse(task.endedAt) < 300_000,
   );
@@ -403,6 +418,86 @@ export function PhoneSidePanel({
                 <Icon name="right_small" size={16} />
               </button>
             </section>
+            {suiteGroups !== undefined && (
+              <section className="phone-panel-section phone-suite-section" aria-label="组曲">
+                <h2>组曲</h2>
+                {suiteGroups.map((group) => {
+                  if (group.threads.length === 0) return null;
+                  const isResolved = group.key === "resolved";
+                  return (
+                    <div
+                      key={group.key}
+                      className="phone-suite-group"
+                      role="group"
+                      aria-label={`${group.label} ${group.threads.length}`}
+                    >
+                      {isResolved ? (
+                        <button
+                          type="button"
+                          className="phone-suite-group-toggle"
+                          aria-expanded={suiteResolvedOpen}
+                          onClick={() => {
+                            setSuiteResolvedOpen((open) => !open);
+                          }}
+                        >
+                          <span>{group.label}</span>
+                          <span className="phone-suite-group-count">{group.threads.length}</span>
+                          <Icon
+                            name="right_small"
+                            size={16}
+                            className={`fold-arrow${suiteResolvedOpen ? " down" : ""}`}
+                          />
+                        </button>
+                      ) : (
+                        <div className="phone-suite-group-head">
+                          <span>{group.label}</span>
+                          <span className="phone-suite-group-count">{group.threads.length}</span>
+                        </div>
+                      )}
+                      {(!isResolved || suiteResolvedOpen) &&
+                        group.threads.map((thread) => {
+                          const secondary = suiteThreadSecondary(thread);
+                          const modelLabel = suiteThreadModelLabel(thread);
+                          return (
+                            <button
+                              type="button"
+                              key={thread.threadId}
+                              className={`phone-panel-row phone-suite-row${
+                                group.key === "needs_attention" ? " hot" : ""
+                              }${isResolved ? " dim" : ""}`}
+                              onClick={() => {
+                                onOpenSuiteThread?.(thread);
+                              }}
+                            >
+                              <span
+                                className={`ensemble-dot suite-dot ${suiteThreadDot(thread)}`}
+                                aria-hidden="true"
+                              />
+                              <span className="phone-panel-item">
+                                <span className="phone-suite-line1">
+                                  <span className="phone-suite-title">{thread.title}</span>
+                                  {modelLabel !== "" && (
+                                    <span className="phone-suite-model">{modelLabel}</span>
+                                  )}
+                                </span>
+                                {secondary.text !== "" && (
+                                  <span
+                                    className={`phone-panel-summary phone-suite-sub${
+                                      secondary.warn ? " warn" : ""
+                                    }`}
+                                  >
+                                    {secondary.text}
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  );
+                })}
+              </section>
+            )}
             {activeEnsemble !== undefined && (
               <section className="phone-panel-section" aria-label="合奏">
                 <h2>合奏</h2>

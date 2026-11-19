@@ -6,6 +6,7 @@ import {
   type SubagentSummary,
   type SubagentObserver,
   type EnsembleMemberView,
+  type SuiteThreadView,
 } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcClient, RpcSession } from "@nocturne/rpc/client";
 import { createAttachmentImageSource } from "../src/attachment-images";
@@ -89,12 +90,14 @@ export function PanelHarness({
   initial = { kind: "overview" },
   onOpenEnsemble,
   onOpenEnsembleMember,
+  onOpenSuiteThread,
 }: {
   fixture: ReturnType<typeof panelFixture>;
   initial?: PhonePanelPage;
   context?: PhoneContextSource;
   onOpenEnsemble?: () => void;
   onOpenEnsembleMember?: (member: EnsembleMemberView) => void;
+  onOpenSuiteThread?: (thread: SuiteThreadView) => void;
 }) {
   const [page, setPage] = useState<PhonePanelPage>(initial);
   return (
@@ -111,6 +114,7 @@ export function PanelHarness({
         onClose={fixture.onClose}
         onOpenEnsemble={onOpenEnsemble}
         onOpenEnsembleMember={onOpenEnsembleMember}
+        onOpenSuiteThread={onOpenSuiteThread}
         onError={fixture.onError}
         loadDiff={fixture.loadDiff}
       />

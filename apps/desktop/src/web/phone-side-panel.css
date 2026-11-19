@@ -154,6 +154,82 @@
 .phone .phone-panel-row.phone-ensemble-head {
   min-height: 40px;
 }
+.phone-suite-group {
+  display: flex;
+  flex-direction: column;
+}
+.phone-suite-group-head,
+.phone .phone-suite-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-medium);
+}
+.phone-suite-group-head {
+  padding-top: var(--space-2);
+}
+.phone .phone-suite-group-toggle {
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+  border-radius: var(--radius-2);
+}
+.phone-suite-group-count {
+  font-family: var(--mono);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+}
+.phone-suite-group-toggle .fold-arrow {
+  margin-left: auto;
+  transition: transform var(--dur);
+}
+.phone-suite-group-toggle .fold-arrow.down {
+  transform: rotate(90deg);
+}
+.phone .phone-suite-row.hot {
+  background: var(--a-sel);
+}
+.phone-suite-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.phone-suite-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phone-suite-row.dim .phone-suite-title {
+  color: var(--a-secondary);
+  font-weight: var(--fw-regular);
+}
+.phone-suite-model {
+  flex: none;
+  color: var(--a-muted);
+  font: var(--fs-1) var(--mono);
+  white-space: nowrap;
+}
+.phone-suite-sub {
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
+}
+.phone-suite-sub.warn {
+  color: var(--a-warning);
+}
+.phone-suite-row .suite-dot.merge {
+  background: var(--a-accentAlt);
+}
+.phone-suite-row .suite-dot.ok {
+  background: var(--a-success);
+}
 .phone-panel-name {
   display: block;
   font-size: var(--fs-3);

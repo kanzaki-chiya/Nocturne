@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type {
-  ExternalAgentOverview,
-  PendingInputsSnapshot,
-  SkillOverview,
+import {
+  WORK_MODE_COMMANDS,
+  type ExternalAgentOverview,
+  type PendingInputsSnapshot,
+  type SkillOverview,
 } from "@nocturne/core/protocol";
 
 import { completeSlash, parseSlash, type ParsedSlash } from "../commands";
@@ -99,6 +100,10 @@ export interface PhoneComposerProps {
   initialAttachments?: ComposerSubmit["attachments"] | undefined;
   initialError?: string | undefined;
   onInitialUsed?: (() => void) | undefined;
+  /** 关闭附件按钮与粘贴 / 拖入文件（如组曲线程页只支持纯文本）；默认开启 */
+  allowAttachments?: boolean | undefined;
+  /** 关闭执行方式切换（斜杠补全与解析）；默认开启 */
+  allowWorkMode?: boolean | undefined;
 }
 
 type PopoverKind = "attach" | "preset" | "model" | "effort" | "output";
@@ -122,6 +127,8 @@ interface PhoneAttachment {
   source: "paste" | "upload";
   url: string;
 }
+
+const WORK_MODE_NAMES = new Set<string>(WORK_MODE_COMMANDS.map((command) => command.name));
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -149,6 +156,8 @@ export function PhoneComposer({
   initialAttachments,
   initialError,
   onInitialUsed,
+  allowAttachments = true,
+  allowWorkMode = true,
 }: PhoneComposerProps) {
   const [draft, setDraft] = useState(initialDraft ?? "");
   const draftRef = useRef(initialDraft ?? "");
@@ -247,14 +256,24 @@ export function PhoneComposer({
     node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
   }, [draft]);
 
-  const slashGroups = useMemo(
-    () => (dismissed ? [] : completeSlash(draft, skills, externalAgents)),
-    [draft, dismissed, skills, externalAgents],
-  );
-  const parsed = useMemo(
-    () => parseSlash(draft, variant, skills, externalAgents),
-    [draft, variant, skills, externalAgents],
-  );
+  const slashGroups = useMemo(() => {
+    if (dismissed) return [];
+    const groups = completeSlash(draft, skills, externalAgents);
+    if (allowWorkMode) return groups;
+    return groups.flatMap((group) => {
+      if (group.id !== "commands") return [group];
+      const items = group.items.filter((item) => !WORK_MODE_NAMES.has(item.label));
+      return items.length > 0 ? [{ ...group, items }] : [];
+    });
+  }, [draft, dismissed, skills, externalAgents, allowWorkMode]);
+  const parsed = useMemo(() => {
+    const result = parseSlash(draft, variant, skills, externalAgents);
+    if (!allowWorkMode && result?.kind === "work") return null;
+    if (!allowWorkMode && result?.kind === "command" && WORK_MODE_NAMES.has(result.name)) {
+      return null;
+    }
+    return result;
+  }, [draft, variant, skills, externalAgents, allowWorkMode]);
   const redirect = parsed?.kind === "redirect" ? phoneSlashHint(parsed) : undefined;
 
   const revision = useRef(0);
@@ -359,7 +378,13 @@ export function PhoneComposer({
     if (disabled !== undefined || submitting || processing > 0) return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     if (tooLarge) return;
-    const slash = parseSlash(text, variant, skills, externalAgents);
+    const rawSlash = parseSlash(text, variant, skills, externalAgents);
+    const slash =
+      !allowWorkMode &&
+      (rawSlash?.kind === "work" ||
+        (rawSlash?.kind === "command" && WORK_MODE_NAMES.has(rawSlash.name)))
+        ? null
+        : rawSlash;
     if (slash?.kind === "redirect" || slash?.kind === "unknown") {
       setHint(phoneSlashHint(slash));
       return;
@@ -608,13 +633,21 @@ export function PhoneComposer({
       <div
         className="phone-card"
         ref={card}
-        onDragOver={(event) => {
-          event.preventDefault();
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          void addFiles(Array.from(event.dataTransfer.files));
-        }}
+        onDragOver={
+          allowAttachments
+            ? (event) => {
+                event.preventDefault();
+              }
+            : undefined
+        }
+        onDrop={
+          allowAttachments
+            ? (event) => {
+                event.preventDefault();
+                void addFiles(Array.from(event.dataTransfer.files));
+              }
+            : undefined
+        }
       >
         {(attachments.length > 0 || processing > 0) && (
           <ImageViewerBoundary>
@@ -638,6 +671,7 @@ export function PhoneComposer({
             setCaret(event.currentTarget.selectionStart);
           }}
           onPaste={(event) => {
+            if (!allowAttachments) return;
             const files = Array.from(event.clipboardData.files);
             if (files.length) {
               event.preventDefault();
@@ -712,7 +746,7 @@ export function PhoneComposer({
         )}
       </div>
       <div className="phone-tools" role="toolbar" aria-label="会话控件">
-        {tool("attach", "添加文件", <IconPaperclip />)}
+        {allowAttachments && tool("attach", "添加文件", <IconPaperclip />)}
         {tool("preset", "切换权限预设", <IconShield risk={controls?.preset.value === "bypass"} />, {
           disabled: busyDisabled(controls?.preset),
         })}
@@ -745,30 +779,34 @@ export function PhoneComposer({
           {error ?? controls?.error}
         </div>
       )}
-      <input
-        ref={camera}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        aria-label="拍照"
-        onChange={(event) => {
-          void addFiles([...(event.target.files ?? [])]);
-          event.target.value = "";
-        }}
-      />
-      <input
-        ref={gallery}
-        type="file"
-        multiple
-        hidden
-        aria-label="选择图片"
-        onChange={(event) => {
-          void addFiles([...(event.target.files ?? [])]);
-          event.target.value = "";
-        }}
-      />
-      {open === "attach" && (
+      {allowAttachments && (
+        <>
+          <input
+            ref={camera}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            aria-label="拍照"
+            onChange={(event) => {
+              void addFiles([...(event.target.files ?? [])]);
+              event.target.value = "";
+            }}
+          />
+          <input
+            ref={gallery}
+            type="file"
+            multiple
+            hidden
+            aria-label="选择图片"
+            onChange={(event) => {
+              void addFiles([...(event.target.files ?? [])]);
+              event.target.value = "";
+            }}
+          />
+        </>
+      )}
+      {allowAttachments && open === "attach" && (
         <Popover anchor={triggers.current.attach ?? null} label="添加" onClose={close}>
           <div className="phone-popover-h">添加</div>
           <PopoverOption

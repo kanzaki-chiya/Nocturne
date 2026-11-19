@@ -44,18 +44,21 @@ export function SessionHeaderTools({
   loadMcp,
   inputHistory,
   onPickHistory,
+  suiteThread,
 }: {
   connected: boolean;
   /** 有进行中的 Turn：压缩上下文要等本轮结束 */
   running: boolean;
   /** probing：还在探测可用 Shell，这一行置灰；load 在打开菜单时触发探测 */
   shell: { label: string; probing?: boolean; load?: () => void };
-  onRename: () => void;
+  onRename?: (() => void) | undefined;
   onCompact: () => void;
   loadMcp: () => Promise<string>;
   /** 当前会话发过的消息，旧到新 */
   inputHistory: () => string[];
   onPickHistory: (text: string) => void;
+  /** 组曲线程页：「…」菜单提供「完成」/「重开」 */
+  suiteThread?: { resolved: boolean; onToggleResolve: () => void } | undefined;
 }) {
   const [open, setOpen] = useState<Open | null>(null);
   const [mcp, setMcp] = useState<string>();
@@ -110,14 +113,26 @@ export function SessionHeaderTools({
       </button>
       {open === "menu" && (
         <Popover anchor={more.current} label="会话菜单" onClose={close}>
-          <PopoverOption
-            label="重命名"
-            disabled={offline}
-            onSelect={() => {
-              close();
-              onRename();
-            }}
-          />
+          {suiteThread !== undefined && (
+            <PopoverOption
+              label={suiteThread.resolved ? "重开" : "完成"}
+              disabled={offline}
+              onSelect={() => {
+                close();
+                suiteThread.onToggleResolve();
+              }}
+            />
+          )}
+          {onRename !== undefined && (
+            <PopoverOption
+              label="重命名"
+              disabled={offline}
+              onSelect={() => {
+                close();
+                onRename();
+              }}
+            />
+          )}
           <PopoverOption
             label="压缩上下文"
             disabled={offline ?? (running ? "本轮结束后可压缩" : undefined)}

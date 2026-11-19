@@ -5,9 +5,10 @@ import {
   allPendingPermissions,
   goalStatusLines,
   parseWorkModeSlash,
+  type EnsembleMemberView,
   type ExternalAgentOverview,
   type SkillOverview,
-  type EnsembleMemberView,
+  type SuiteThreadView,
 } from "@nocturne/core/protocol";
 import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
@@ -76,7 +77,9 @@ export function SessionScreen({
   onPanelClose,
   onOpenEnsemble,
   onOpenEnsembleMember,
+  onOpenSuiteThread,
   ensembleMember,
+  suiteThread,
 }: {
   panel?: PhonePanelPage | undefined;
   onPanel?: ((panel: PhonePanelPage) => void) | undefined;
@@ -86,8 +89,19 @@ export function SessionScreen({
   onOpenEnsemble?: (() => void) | undefined;
   /** 侧边栏合奏成员行进入该成员会话页 */
   onOpenEnsembleMember?: ((member: EnsembleMemberView) => void) | undefined;
+  /** 侧边栏组曲线程行或指挥汇报行进入该线程页 */
+  onOpenSuiteThread?: ((thread: SuiteThreadView) => void) | undefined;
   /** 成员会话模式：标题 `@name`，移除或结束后只读冻结 */
   ensembleMember?: { name: string; frozen: boolean } | undefined;
+  /** 组曲线程模式：发送走指挥会话的 sendToThread，「…」菜单含完成 / 重开 */
+  suiteThread?:
+    | {
+        threadId: string;
+        resolved: boolean;
+        onSend: (text: string) => Promise<void>;
+        onToggleResolve: () => Promise<void>;
+      }
+    | undefined;
   entry: PhoneSession;
   /** 回退、改动摘要与分叉经由会话管理器（与桌面 Conversations 相同的刷新规则） */
   sessions: PhoneSessions;
@@ -167,6 +181,13 @@ export function SessionScreen({
     mode: "steer" | "queue" = "queue",
   ): Promise<boolean> => {
     if (entry.dead) throw new Error("电脑尚未连接");
+    if (suiteThread !== undefined) {
+      if (input.text.trim() === "") return false;
+      await suiteThread.onSend(input.text);
+      void session.recordInputHistory(input.text).catch(() => undefined);
+      onChanged();
+      return true;
+    }
     if (allPendingPermissions(view).length > 0 || view.pendingQuestion !== undefined) {
       throw new Error("请先处理待确认的请求");
     }
@@ -243,6 +264,7 @@ export function SessionScreen({
     // ADR-0076 §7 / ADR-0089 §10：无任务子命令
     const work = parseWorkModeSlash(line);
     if (work?.kind === "action") {
+      if (suiteThread !== undefined) return false;
       if (work.action === "ensemble-board" || work.action === "ensemble-end") {
         if (view.ensemble === undefined) return "用法：/ensemble 任务";
         if (work.action === "ensemble-board") {
@@ -364,7 +386,7 @@ export function SessionScreen({
                   controls.loadShells();
                 },
               }}
-              onRename={() => onRename?.()}
+              onRename={onRename}
               onCompact={() => {
                 void compact().catch((reason: unknown) => {
                   onError(errorText(reason));
@@ -375,20 +397,34 @@ export function SessionScreen({
               onPickHistory={(text) => {
                 setFill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
               }}
+              suiteThread={
+                suiteThread !== undefined
+                  ? {
+                      resolved: suiteThread.resolved,
+                      onToggleResolve: () => {
+                        void suiteThread.onToggleResolve().catch((reason: unknown) => {
+                          onError(errorText(reason));
+                        });
+                      },
+                    }
+                  : undefined
+              }
             />
-            <button
-              type="button"
-              className={`phone-icon-button${panel ? " on" : ""}`}
-              aria-label="侧边栏"
-              aria-expanded={panel !== undefined}
-              aria-controls="phone-side-panel"
-              onClick={() => {
-                if (panel) onPanelClose?.();
-                else onPanel?.({ kind: "overview" });
-              }}
-            >
-              <Icon name="layout_right" size={22} />
-            </button>
+            {suiteThread === undefined && onPanel !== undefined && (
+              <button
+                type="button"
+                className={`phone-icon-button${panel ? " on" : ""}`}
+                aria-label="侧边栏"
+                aria-expanded={panel !== undefined}
+                aria-controls="phone-side-panel"
+                onClick={() => {
+                  if (panel) onPanelClose?.();
+                  else onPanel({ kind: "overview" });
+                }}
+              >
+                <Icon name="layout_right" size={22} />
+              </button>
+            )}
           </>,
           headerSlot,
         )}
@@ -409,7 +445,15 @@ export function SessionScreen({
         hideRequests
         subscribeEvents={subscribeEvents}
         ensembleRecipientLabel={ensembleMember ? `@${ensembleMember.name}` : undefined}
-        {...(ensembleMember === undefined
+        onOpenSuiteThread={
+          view.suite !== undefined && onOpenSuiteThread !== undefined
+            ? (threadId) => {
+                const thread = view.suite?.threads.find((item) => item.threadId === threadId);
+                if (thread !== undefined) onOpenSuiteThread(thread);
+              }
+            : undefined
+        }
+        {...(ensembleMember === undefined && suiteThread === undefined
           ? {
               onResubmit: async (targetSeq, text, mode, workMode) => {
                 // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
@@ -422,10 +466,14 @@ export function SessionScreen({
                 await submit({ text, attachments: [], ...(workMode ? { workMode } : {}) });
               },
               onApprovePlan: approvePlan,
-              onFork: async (targetSeq) => {
-                const forked = await sessions.fork(entry, targetSeq);
-                onForked(forked.session.id);
-              },
+              ...(view.suite === undefined
+                ? {
+                    onFork: async (targetSeq: number) => {
+                      const forked = await sessions.fork(entry, targetSeq);
+                      onForked(forked.session.id);
+                    },
+                  }
+                : {}),
               turnChanges: entry.turnChanges,
               onRewindFiles: async (seq) => {
                 setBusy(true);
@@ -456,6 +504,7 @@ export function SessionScreen({
           onClose={() => onPanelClose?.()}
           onOpenEnsemble={onOpenEnsemble}
           onOpenEnsembleMember={onOpenEnsembleMember}
+          onOpenSuiteThread={onOpenSuiteThread}
           onError={onError}
           loadDiff={(seq, path) => sessions.turnChangeDiff(entry, seq, path)}
           shellKind={controls.shell?.effective?.kind}
@@ -524,6 +573,8 @@ export function SessionScreen({
         fileRefs={plain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
         fill={fill}
         getVisionHint={controls.visionHint}
+        allowAttachments={suiteThread === undefined}
+        allowWorkMode={suiteThread === undefined}
       />
       {pendingKey !== undefined &&
         pendingKey !== dismissed &&

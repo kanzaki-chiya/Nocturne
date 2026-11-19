@@ -6,6 +6,7 @@ import {
   type RuntimeEvent,
   type RewindMode,
   type SessionView,
+  type SuiteRecord,
   type TurnChangeDiff,
   type TurnChanges,
 } from "@nocturne/core/protocol";
@@ -59,8 +60,17 @@ export interface PhoneSession {
   outgoing: OutgoingBook;
   /** 本地发送尚未被 Core 接受 */
   busy: boolean;
-  /** Ensemble 成员子会话句柄（经 `session.open` 打开，退出成员页即 `session.close` 释放，不中断成员） */
+  /** Ensemble / 组曲线程子会话句柄（经 `session.open` 打开，退出页面即 `session.close` 释放，不中断子会话） */
   member?: boolean;
+  /** 组曲指挥会话对应的组曲 id（重连时经 `openSuite` 恢复） */
+  suiteId?: string;
+}
+function hasActiveSuiteThreads(entry: PhoneSession): boolean {
+  return (
+    entry.view.suite?.threads.some(
+      (t) => t.status === "working" || t.pendingPermissions.length > 0 || t.hasPendingQuestion,
+    ) ?? false
+  );
 }
 export interface PhoneCreateOptions {
   model?: ModelRef | undefined;
@@ -229,6 +239,8 @@ export class PhoneSessions {
       entry.outgoing.items.some((item) => item.place === "pending") ||
       // ADR-0089：活动 Ensemble 的指挥会话切走时不能关，否则整个 Ensemble 会被收掉
       entry.view.ensemble?.status === "active" ||
+      // ADR-0097：组曲有线程运行或等确认时不随切走关掉指挥会话
+      hasActiveSuiteThreads(entry) ||
       this.opened.get(id) !== entry
     )
       return;
@@ -290,7 +302,8 @@ export class PhoneSessions {
         (entry.member === true ||
           (phoneStatus(entry) === "idle" &&
             entry.pendingInputs.items.length === 0 &&
-            entry.view.ensemble?.status !== "active"))
+            entry.view.ensemble?.status !== "active" &&
+            !hasActiveSuiteThreads(entry)))
       ) {
         this.opened.delete(id);
         continue;
@@ -302,14 +315,10 @@ export class PhoneSessions {
         continue;
       }
       if (this.opened.get(id) !== entry) continue;
-      const run = this.resume(
-        client,
-        id,
-        entry.workspace,
-        entry.view,
-        generation,
-        entry.member === true,
-      );
+      const run =
+        entry.suiteId !== undefined
+          ? this.resumeSuite(client, entry.suiteId, entry.workspace, entry.view, generation)
+          : this.resume(client, id, entry.workspace, entry.view, generation, entry.member === true);
       this.opening.set(id, run);
       try {
         const restored = await run;
@@ -434,6 +443,7 @@ export class PhoneSessions {
     workspace: string,
     view = createSessionView(),
     member = false,
+    suiteId?: string,
   ): Promise<PhoneSession> {
     const { session } = result;
     const previous = this.opened.get(session.id);
@@ -453,6 +463,7 @@ export class PhoneSessions {
       outgoing: emptyOutgoing(),
       busy: false,
       ...(member ? { member: true } : {}),
+      ...(suiteId !== undefined ? { suiteId } : {}),
     };
     this.opened.set(session.id, entry);
     // 与桌面 conversations.ts 一致：订阅窗口期间的新持久事件按 event.time 判断。
@@ -590,6 +601,58 @@ export class PhoneSessions {
       }
       if (attempt >= 1) return entry;
     }
+  }
+  async openSuite(
+    suite: Pick<SuiteRecord, "id" | "coordinatorSessionId" | "workspaces">,
+    select = true,
+  ): Promise<PhoneSession> {
+    const id = suite.coordinatorSessionId;
+    if (select) this.setSelected(id);
+    for (let attempt = 0; ; attempt += 1) {
+      await this.closing.get(id);
+      const old = this.opened.get(id);
+      if (old && !old.dead) return old;
+      const entry = await (this.opening.get(id) ?? this.beginOpenSuite(suite));
+      await this.closing.get(id);
+      if (!entry.dead && this.opened.get(id) === entry) {
+        await this.closeIfIdle(entry);
+        return entry;
+      }
+      if (attempt >= 1) return entry;
+    }
+  }
+  private async beginOpenSuite(
+    suite: Pick<SuiteRecord, "id" | "coordinatorSessionId" | "workspaces">,
+  ): Promise<PhoneSession> {
+    const client = this.requireClient();
+    const generation = this.generation;
+    const id = suite.coordinatorSessionId;
+    const run = this.resumeSuite(
+      client,
+      suite.id,
+      suite.workspaces[0] ?? "",
+      this.opened.get(id)?.view,
+      generation,
+    );
+    this.opening.set(id, run);
+    try {
+      return await run;
+    } finally {
+      if (this.opening.get(id) === run) this.opening.delete(id);
+    }
+  }
+  private async resumeSuite(
+    client: RpcClient,
+    suiteId: string,
+    workspace: string,
+    view: SessionView | undefined,
+    generation: number,
+  ): Promise<PhoneSession> {
+    const result = await client.runtime.openSuite(suiteId);
+    if (generation !== this.generation) throw new Error("电脑连接已切换");
+    const metaCwd = (result.opened as Partial<SessionOpened>).meta?.cwd;
+    const cwd = metaCwd !== undefined && metaCwd !== "" ? metaCwd : workspace;
+    return this.attach(client, result, cwd, view, false, suiteId);
   }
   async openMember(
     childSessionId: string,

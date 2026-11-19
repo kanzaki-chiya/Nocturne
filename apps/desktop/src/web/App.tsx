@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import type { SuiteRecord, SuiteThreadView } from "@nocturne/core/protocol";
 import { RpcError } from "@nocturne/rpc/client";
 import { watchTheme } from "../appearance";
 import { subscribeThemeSettings } from "../theme-sync";
@@ -10,6 +11,7 @@ import { PaneErrorBoundary } from "../ErrorBoundary";
 import { projectKey } from "../session-tree";
 import { UsagePage } from "../UsagePage";
 import { SchedulePage } from "../SchedulePage";
+import { SuitesPage } from "../SuitesPage";
 import { GrantsPage } from "../GrantsPage";
 import {
   PhoneConnection,
@@ -55,6 +57,7 @@ import {
   IconComputer,
   IconFolder,
   IconHome,
+  IconLayout,
   IconPlus,
   IconSettings,
   IconTerminal,
@@ -86,7 +89,24 @@ type Page =
   | { kind: "welcome" }
   | { kind: "home"; hostId: string }
   | { kind: "project"; hostId: string; path: string }
-  | { kind: "session"; hostId: string; sessionId: string; panel?: PhonePanelPage }
+  | {
+      kind: "session";
+      hostId: string;
+      sessionId: string;
+      suiteId?: string;
+      suiteName?: string;
+      panel?: PhonePanelPage;
+    }
+  | { kind: "suites"; hostId: string }
+  | {
+      kind: "suite-thread";
+      hostId: string;
+      sessionId: string;
+      suiteId?: string;
+      threadId: string;
+      childSessionId: string;
+      threadTitle: string;
+    }
   | { kind: "ensemble"; hostId: string; sessionId: string }
   | {
       kind: "ensemble-member";
@@ -208,6 +228,7 @@ export function PhoneApp({
   const [cameraDenied, setCameraDenied] = useState(false);
   const [installHint, setInstallHint] = useState(false);
   const [ready, setReady] = useState(false);
+  const [suites, setSuites] = useState<SuiteRecord[]>([]);
   const [theme, setTheme] = useState<PhoneTheme>(() => loadTheme());
   const hostId = "hostId" in page ? page.hostId : undefined;
   const [remoteTheme, setRemoteTheme] = useState<{
@@ -257,7 +278,7 @@ export function PhoneApp({
   const syncSelection = (target: Page) => {
     if (target.kind === "session" || target.kind === "ensemble") {
       sessions.setSelected(target.sessionId);
-    } else if (target.kind === "ensemble-member") {
+    } else if (target.kind === "ensemble-member" || target.kind === "suite-thread") {
       sessions.setSelected(target.childSessionId, target.sessionId);
     } else {
       sessions.setSelected(undefined);
@@ -369,7 +390,10 @@ export function PhoneApp({
   const shouldConnect = () =>
     platformRef.current.keepConnected === true || document.visibilityState !== "hidden";
   const activeSessionId =
-    page.kind === "session" || page.kind === "ensemble" || page.kind === "ensemble-member"
+    page.kind === "session" ||
+    page.kind === "ensemble" ||
+    page.kind === "ensemble-member" ||
+    page.kind === "suite-thread"
       ? page.sessionId
       : undefined;
   const viewingSessionId =
@@ -411,6 +435,7 @@ export function PhoneApp({
   );
   const computer = hosts.find((h) => h.hostId === hostId);
   useEffect(() => {
+    setSuites([]);
     if (!hostId) {
       setConnection(undefined);
       sessions.clear();
@@ -558,19 +583,28 @@ export function PhoneApp({
   const entry =
     page.kind === "session"
       ? maestroEntry
-      : page.kind === "ensemble-member"
+      : page.kind === "ensemble-member" || page.kind === "suite-thread"
         ? sessions.opened.get(page.childSessionId)
         : undefined;
   useEffect(() => {
     if (!online) return;
-    if (page.kind === "ensemble" && !maestroEntry) {
+    if (page.kind === "session" && page.suiteId !== undefined && !maestroEntry) {
+      const suite = suites.find((item) => item.id === page.suiteId);
+      void sessions
+        .openSuite({
+          id: page.suiteId,
+          coordinatorSessionId: page.sessionId,
+          workspaces: suite?.workspaces ?? [],
+        })
+        .catch(() => undefined);
+    } else if (page.kind === "ensemble" && !maestroEntry) {
       void sessions.open(page.sessionId).catch(() => undefined);
-    } else if (page.kind === "ensemble-member" && !entry) {
+    } else if ((page.kind === "ensemble-member" || page.kind === "suite-thread") && !entry) {
       void sessions
         .openMember(page.childSessionId, maestroEntry?.workspace ?? "", page.sessionId)
         .catch(() => undefined);
     }
-  }, [online, page, maestroEntry, entry, sessions]);
+  }, [online, page, maestroEntry, entry, sessions, suites]);
   const connected = online;
   const extension: PhoneExtensionApi = {
     open: (name) => {
@@ -789,15 +823,27 @@ export function PhoneApp({
         return "连接诊断";
       case "schedules":
         return "定时任务";
+      case "suites":
+        return "组曲";
       case "ext":
         return platform.pages?.[page.page]?.title ?? "设置";
       case "project":
         return phoneProjectName(page.path, plainWorkspace);
-      case "session":
+      case "session": {
+        const suiteId = page.suiteId ?? entry?.view.suite?.suiteId;
+        if (suiteId !== undefined) {
+          return suites.find((item) => item.id === suiteId)?.name ?? page.suiteName ?? "组曲";
+        }
         return (
           entry?.view.title ??
           sessions.list.find((item) => item.id === page.sessionId)?.firstText ??
           "会话"
+        );
+      }
+      case "suite-thread":
+        return (
+          maestroEntry?.view.suite?.threads.find((item) => item.threadId === page.threadId)
+            ?.title ?? page.threadTitle
         );
       case "ensemble":
         return maestroEntry?.view.ensemble?.title ?? "合奏";
@@ -892,6 +938,20 @@ export function PhoneApp({
           </span>
           <span className="phone-row-main">
             <b>定时任务</b>
+          </span>
+        </button>
+        <button
+          className="phone-row"
+          disabled={!connected}
+          onClick={() => {
+            navigate({ kind: "suites", hostId: page.hostId });
+          }}
+        >
+          <span className="phone-row-icon">
+            <IconLayout />
+          </span>
+          <span className="phone-row-main">
+            <b>组曲</b>
           </span>
         </button>
         {projects.map((project) => (
@@ -1035,6 +1095,23 @@ export function PhoneApp({
       </>
     );
   } else if (page.kind === "session") {
+    const isSuiteCoordinator = page.suiteId !== undefined || entry?.view.suite !== undefined;
+    const openSuiteThread = (thread: SuiteThreadView) => {
+      const parentId = page.sessionId;
+      const workspace = thread.workspace !== "" ? thread.workspace : (entry?.workspace ?? "");
+      navigate({
+        kind: "suite-thread",
+        hostId: page.hostId,
+        sessionId: parentId,
+        ...(page.suiteId !== undefined ? { suiteId: page.suiteId } : {}),
+        threadId: thread.threadId,
+        childSessionId: thread.childSessionId,
+        threadTitle: thread.title,
+      });
+      void operation(async () => {
+        await sessions.openMember(thread.childSessionId, workspace, parentId);
+      });
+    };
     body = entry ? (
       <SessionScreen
         key={entry.session.id}
@@ -1080,15 +1157,96 @@ export function PhoneApp({
             await sessions.openMember(member.childSessionId, workspace, parentId);
           });
         }}
-        onRename={() => {
-          setRenameError("");
-          setRenameDraft(title);
-        }}
+        onOpenSuiteThread={openSuiteThread}
+        onRename={
+          isSuiteCoordinator
+            ? undefined
+            : () => {
+                setRenameError("");
+                setRenameDraft(title);
+              }
+        }
         onManageGrants={() => {
           navigate({ kind: "grants", hostId: page.hostId });
         }}
         onForked={(id) => {
           navigate({ kind: "session", hostId: page.hostId, sessionId: id });
+        }}
+      />
+    ) : (
+      <section className="phone-body">{connected && <p role="status">正在打开会话…</p>}</section>
+    );
+  } else if (page.kind === "suites") {
+    const needsAttentionBySuite = new Map<string, number>();
+    for (const suite of suites) {
+      const opened = sessions.opened.get(suite.coordinatorSessionId);
+      const count =
+        opened?.dead !== true ? (opened?.view.suite?.needsAttentionThreads.length ?? 0) : 0;
+      if (count > 0) needsAttentionBySuite.set(suite.id, count);
+    }
+    body = (
+      <section className="phone-body phone-suites">
+        <SuitesPage
+          client={connected ? sessions.client : undefined}
+          workspaces={[]}
+          needsAttentionBySuite={needsAttentionBySuite}
+          readOnly
+          onLoaded={setSuites}
+          onOpenSuite={(id) => {
+            const suite = suites.find((item) => item.id === id);
+            if (!suite) return;
+            navigate({
+              kind: "session",
+              hostId: page.hostId,
+              sessionId: suite.coordinatorSessionId,
+              suiteId: suite.id,
+              suiteName: suite.name,
+            });
+            void operation(async () => {
+              await sessions.openSuite(suite);
+            });
+          }}
+        />
+      </section>
+    );
+  } else if (page.kind === "suite-thread") {
+    const suiteThreadView = maestroEntry?.view.suite?.threads.find(
+      (item) => item.threadId === page.threadId,
+    );
+    const resolved = suiteThreadView?.resolved === true;
+    body = entry ? (
+      <SessionScreen
+        key={entry.session.id}
+        entry={entry}
+        connected={connected}
+        images={images}
+        plain={
+          plainWorkspace !== undefined && projectKey(entry.workspace) === projectKey(plainWorkspace)
+        }
+        openUrl={(url) => {
+          host.openUrl(url);
+        }}
+        onError={setError}
+        onChanged={() => {
+          void sessions.refresh().catch(() => undefined);
+        }}
+        sessions={sessions}
+        headerSlot={headerSlot}
+        onForked={() => undefined}
+        suiteThread={{
+          threadId: page.threadId,
+          resolved,
+          onSend: async (text) => {
+            if (!maestroEntry || maestroEntry.dead) throw new Error("电脑尚未连接");
+            await maestroEntry.session.sendToThread({ thread: page.threadId, text });
+          },
+          onToggleResolve: async () => {
+            if (!maestroEntry || maestroEntry.dead) throw new Error("电脑尚未连接");
+            await maestroEntry.session.resolveThread({
+              thread: page.threadId,
+              ...(resolved ? { reopen: true } : {}),
+            });
+          },
         }}
       />
     ) : (
@@ -1403,6 +1561,7 @@ export function PhoneApp({
 
   const homeHeader = page.kind === "home" && !offer;
   const sessionHeader = page.kind === "session" && !offer;
+  const suiteThreadHeader = page.kind === "suite-thread" && !offer;
   const ensembleHeaderDot =
     page.kind === "ensemble" && !offer ? ensembleStatusDot(maestroEntry?.view.ensemble) : undefined;
   const sessionPath =
@@ -1475,7 +1634,7 @@ export function PhoneApp({
           ) : (
             <h1>{title}</h1>
           )}
-          {sessionHeader ? (
+          {sessionHeader || suiteThreadHeader ? (
             <div className="phone-header-tools" ref={setHeaderSlot} />
           ) : page.kind === "ensemble" ||
             page.kind === "ensemble-member" ||
@@ -1483,6 +1642,7 @@ export function PhoneApp({
             page.kind === "diagnostics" ||
             page.kind === "usage" ||
             page.kind === "schedules" ||
+            page.kind === "suites" ||
             page.kind === "ext" ||
             offer ? (
             <span className="phone-header-side" />
