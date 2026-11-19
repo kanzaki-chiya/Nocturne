@@ -174,7 +174,10 @@ const pick = async (files: File[]) => {
   Object.defineProperty(input, "files", { value: files, configurable: true });
   await act(async () => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((done) => setTimeout(done, 0));
+  });
+  // 图片读取是异步的：等「正在处理图片」撤掉即附件已就绪，不猜墙钟
+  await vi.waitFor(() => {
+    expect(container.querySelector('[aria-label="正在处理图片"]')).toBeNull();
   });
 };
 
@@ -363,7 +366,6 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
   expect(load).toHaveBeenCalledOnce();
   await act(async () => {
     button("src/main.ts").click();
-    await new Promise((done) => setTimeout(done, 0));
   });
   expect(container.querySelector("textarea")?.value).toBe("看 @src/main.ts ");
   expect(container.querySelector('[aria-label="文件引用补全"]')).toBeNull();
@@ -373,7 +375,10 @@ it("@ 文件引用用文件索引补全，普通对话不可用；输入历史�
   expect(container.querySelector('[aria-label^="上下文用量"]')).toBeNull();
   extra.fill = { text: "最近一条", seq: 1 };
   await render({ load, key: 1 });
-  await act(() => new Promise((done) => setTimeout(done, 0)));
+  // 挂载后的填回 effect 已随 act 跑完，再等一拍微任务确认
+  await act(async () => {
+    await Promise.resolve();
+  });
   expect(container.querySelector("textarea")?.value).toBe("最近一条");
   // 同一 seq 重渲染不覆盖用户之后的输入
   await setText("改过了");

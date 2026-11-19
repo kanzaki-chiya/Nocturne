@@ -100,11 +100,16 @@ it("设置页按电脑分组；连接诊断子页列出断线记录并可清除�
   await act(async () => {
     root?.render(<PhoneApp storage={storage} />);
   });
-  await act(async () => {
-    await new Promise((done) => setTimeout(done, 50));
+  // 存储读取（身份密钥与电脑记录）是异步的：等到首页渲染出来再进设置
+  await vi.waitFor(() => {
+    expect(container.querySelector('button[aria-label="设置"]')).not.toBeNull();
   });
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
+  });
+  // 设置页按电脑记录分组：等分组渲染出来
+  await vi.waitFor(() => {
+    expect(container.querySelector('section[aria-label="电脑 1"]')).not.toBeNull();
   });
   const group = container.querySelector('section[aria-label="电脑 1"]');
   expect(group?.querySelector("h3")?.textContent).toBe("电脑 1");

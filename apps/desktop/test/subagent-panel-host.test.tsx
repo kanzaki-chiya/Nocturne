@@ -196,9 +196,10 @@ function setup(options: { overview?: boolean; browsers?: BrowserHost } = {}) {
   return { storage, prefs, host, backend: fakeBackend() };
 }
 
+/** 等已排队的 promise 链与 React 更新跑完：setImmediate 在微任务清空后执行 */
 const flush = () =>
   act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
 const overview = () => screen.queryByRole("dialog", { name: "会话概览" });

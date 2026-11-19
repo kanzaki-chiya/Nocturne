@@ -687,9 +687,10 @@ function browserSetup(storage = memoryStorage()) {
   return { ...base, ...fake, host };
 }
 
+/** 等这一拍的外壳命令与观察者（MutationObserver 在微任务里送达）跑完，不猜墙钟 */
 const flushAsync = () =>
   act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
 it("地址栏输入网址：新标签页就地变成浏览器标签；不像网址的提示「请输入网址」", async () => {

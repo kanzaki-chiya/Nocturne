@@ -484,7 +484,8 @@ it("连续多条通知只触发有限次 listSessions：刷新中再来的合并
   await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
   release();
   await vi.waitFor(() => expect(sessions.list.map((s) => s.id)).toEqual(["a"]));
-  await new Promise((done) => setTimeout(done, 30));
+  // 合并后的补拉也只多一次：把这一拍的 promise 链跑完再数
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(list).toHaveBeenCalledTimes(2);
   expect(maxInflight).toBe(1);
   client.close();
@@ -497,7 +498,8 @@ it("断线、清空、切换电脑之后，旧连接的通知不再触发 listSe
   first.list.mockClear();
   sessions.disconnected();
   first.server.send(SESSIONS_CHANGED);
-  await new Promise((done) => setTimeout(done, 30));
+  // 旧连接的通知不再触发查询：通知交付与刷新判断都在微任务里，setImmediate 在其后
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(first.list).not.toHaveBeenCalled();
 
   // 重连到另一台电脑：只有新连接的通知生效
@@ -508,13 +510,13 @@ it("断线、清空、切换电脑之后，旧连接的通知不再触发 listSe
   sessions.clear();
   first.server.send(SESSIONS_CHANGED);
   second.server.send(SESSIONS_CHANGED);
-  await new Promise((done) => setTimeout(done, 30));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(first.list).not.toHaveBeenCalled();
   expect(second.list).not.toHaveBeenCalled();
   await sessions.connected(second.client);
   second.list.mockClear();
   first.server.send(SESSIONS_CHANGED);
-  await new Promise((done) => setTimeout(done, 30));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(first.list).not.toHaveBeenCalled();
   expect(second.list).not.toHaveBeenCalled();
   second.server.send(SESSIONS_CHANGED);
@@ -635,7 +637,8 @@ it("重连队列里靠后的 C 被用户抢先打开（仍在进行或已完成�
   const opening = sessions.open("C");
   await vi.waitFor(() => expect(calls).toEqual(["A", "C"]));
   releaseA();
-  await new Promise((done) => setTimeout(done, 20));
+  // A 落定后恢复队列继续推进（纯 promise 链）：等微任务清空再放行 C
+  await new Promise<void>((resolve) => setImmediate(resolve));
   releaseC();
   await Promise.all([connecting, opening]);
   expect(calls).toEqual(["A", "C"]);
@@ -678,7 +681,8 @@ it("断线后才返回的旧 listSessions 不覆写列表，也不订阅旧列�
   await stale;
   expect(sessions.list).toEqual([]);
   expect(sessions.loaded).toBe(false);
-  await new Promise((done) => setTimeout(done, 30));
+  // 旧列表里的会话不再被订阅：等 promise 链跑完再确认没有 resume
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(first.resume).not.toHaveBeenCalled();
   expect(sessions.opened.has("stale")).toBe(false);
   first.client.close();
@@ -699,7 +703,7 @@ it("切换电脑（clear 后连新电脑）后才返回的旧 listSessions 不�
   expect(sessions.list.map((s) => s.id)).toEqual(["fresh"]);
   release([listedSession("stale", 99, true, "旧电脑")]);
   await stale;
-  await new Promise((done) => setTimeout(done, 30));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(sessions.list.map((s) => s.id)).toEqual(["fresh"]);
   expect(sessions.opened.has("stale")).toBe(false);
   expect(first.resume).not.toHaveBeenCalled();

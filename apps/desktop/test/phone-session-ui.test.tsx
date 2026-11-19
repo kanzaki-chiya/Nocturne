@@ -155,23 +155,27 @@ it("会话徽标、只提交 text、中断、另一端结算关闭面板、重�
   expect(history.state.panel).toEqual({ kind: "context" });
   await act(async () => {
     androidBack?.();
-    await new Promise((done) => setTimeout(done, 30));
   });
-  expect(container.querySelector(".phone-panel-overview")).not.toBeNull();
+  // 安卓返回键走 history.back()：popstate 是异步的，等面板回到总览
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-panel-overview")).not.toBeNull();
+  });
   expect(history.state.kind).toBe("session");
   await act(async () => {
     androidBack?.();
-    await new Promise((done) => setTimeout(done, 30));
   });
-  expect(container.querySelector(".phone-side-panel")).toBeNull();
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-side-panel")).toBeNull();
+  });
   expect(history.state.kind).toBe("session");
   expect(container.querySelector("textarea")).toBe(composerBeforePanel);
   await act(() => container.querySelector<HTMLButtonElement>('[aria-label="侧边栏"]')?.click());
   await act(async () => {
     container.querySelector<HTMLButtonElement>('[aria-label="侧边栏"]')?.click();
-    await new Promise((done) => setTimeout(done, 30));
   });
-  expect(container.querySelector(".phone-side-panel")).toBeNull();
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-side-panel")).toBeNull();
+  });
   const rename = vi
     .spyOn(client.runtime, "renameSession")
     .mockRejectedValueOnce(new RpcError("session_locked", "锁冲突"));
@@ -364,7 +368,6 @@ it("从推送点进来连上后直接进入会话", async () => {
   // 返回时回到该会话所在的项目页
   await act(async () => {
     history.back();
-    await new Promise((done) => setTimeout(done, 20));
   });
   await vi.waitFor(() => {
     expect(container.querySelector(".phone-row.session")?.textContent).toContain("测试会话");
@@ -502,13 +505,15 @@ it("其他目录：输入路径进入项目页，后台拒绝时在输入框下�
   });
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click();
-    await new Promise((done) => setTimeout(done, 0));
+  });
+  // 新建会话被后台拒绝：等错误条出现（请求走内存管道，纯 promise 链）
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-composer-error")?.textContent).toContain(
+      "请在电脑上信任该项目",
+    );
   });
   expect(create).toHaveBeenCalledWith(
     expect.objectContaining({ cwd: "Z:/fresh", workspaceRoot: "Z:/fresh" }),
-  );
-  expect(container.querySelector(".phone-composer-error")?.textContent).toContain(
-    "请在电脑上信任该项目",
   );
   expect(field.value).toBe("开始");
 
@@ -517,10 +522,13 @@ it("其他目录：输入路径进入项目页，后台拒绝时在输入框下�
   });
   await act(async () => {
     [...container.querySelectorAll("button")].find((b) => b.textContent === "用量›")?.click();
-    await new Promise((done) => setTimeout(done, 0));
   });
-  expect(container.querySelector("h1")?.textContent).toBe("用量");
-  expect(usage).toHaveBeenCalledWith({ days: 30 });
+  await vi.waitFor(() => {
+    expect(container.querySelector("h1")?.textContent).toBe("用量");
+  });
+  await vi.waitFor(() => {
+    expect(usage).toHaveBeenCalledWith({ days: 30 });
+  });
   await vi.waitFor(() => {
     expect(container.textContent).toContain("统计暂不可用");
   });

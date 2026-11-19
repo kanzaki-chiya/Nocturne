@@ -1777,6 +1777,12 @@ it("旧数据（projectSort activity、无 projectOrder）迁移为手动并保�
   expect(projectNames()).toEqual(["qa-alpha", "qa-beta", "qa-gamma", "manual"]);
 });
 
+/** 等这一拍已排队的 promise 链与 React 更新跑完：setImmediate 在微任务清空后执行，不猜墙钟 */
+const flushAsync = () =>
+  act(async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
 it("一次切换只刷新一次会话列表", async () => {
   const host = replayHost();
   render(<App host={host} />);
@@ -1788,13 +1794,14 @@ it("一次切换只刷新一次会话列表", async () => {
   fireEvent.click(screen.getByRole("button", { name: /^gamma (?:会话|正文)/ }));
   await within(await screen.findByRole("region", { name: "会话消息" })).findByText("gamma 正文");
   await waitFor(() => expect(lists()).toBe(boot + 1));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // 切换只应触发一次刷新：把这一拍跑完仍没有第二次
+  await flushAsync();
   expect(lists()).toBe(boot + 1);
 
   fireEvent.click(screen.getByRole("button", { name: /^beta (?:会话|正文)/ }));
   await within(await screen.findByRole("region", { name: "会话消息" })).findByText("beta 正文");
   await waitFor(() => expect(lists()).toBe(boot + 2));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await flushAsync();
   expect(lists()).toBe(boot + 2);
 });
 

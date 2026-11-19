@@ -8,7 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import { BrowserPool, downloadNotice, errorText, MAX_LIVE_BROWSERS } from "../src/browser-pool";
 import type { BrowserBounds, BrowserHost, BrowserMessage } from "../src/host";
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** 队列全是 promise 链：setImmediate 在微任务清空后执行，等它即可确定跑完，不依赖墙钟 */
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 const box: BrowserBounds = { x: 10, y: 40, width: 400, height: 300 };
 
 function fakeHost() {

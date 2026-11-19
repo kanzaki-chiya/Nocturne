@@ -21,7 +21,8 @@ it("大文件分帧着色，不改变原文，每帧保持在预算内", async (
   try {
     vi.spyOn(await import("../src/code-parse"), "parseCode").mockResolvedValueOnce(lines);
     highlightCode(root, { path: "huge.ts", text, kind: "numbered" }, controller.signal);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // 解析完成后的下一帧才会登记 tick：等帧队列出现，不猜墙钟
+    await vi.waitFor(() => expect(frames.length).toBeGreaterThan(0));
     let fakeNow = 0;
     const stepMs = 0.25;
     // 用确定性假时钟按每步 0.25ms 推进，验证单帧严格受 4ms 预算上限约束，不依赖机器墙钟速度

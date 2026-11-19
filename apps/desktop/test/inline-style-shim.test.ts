@@ -20,7 +20,8 @@ function blockedStyle(text: string): HTMLStyleElement {
 
 const adopted = () =>
   (document as unknown as { adoptedStyleSheets: FakeSheet[] }).adoptedStyleSheets;
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** MutationObserver 回调在微任务里送达：setImmediate 在其后执行，等到它就是确定性的一拍 */
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("installInlineStyleShim", () => {
   let uninstall: () => void = () => undefined;

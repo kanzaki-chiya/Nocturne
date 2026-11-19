@@ -494,11 +494,11 @@ describe("自定义主题 UI 交互", () => {
       id: "ignored-id",
     });
     const file = new File([jsonPayload], "theme.json", { type: "application/json" });
+    // FileReader 读完才把内容写进文本框：等到读入完成，不猜墙钟
     await act(async () => {
       fireEvent.change(fileInput, { target: { files: [file] } });
-      await new Promise((r) => setTimeout(r, 20));
     });
-    expect(textarea.value).toBe(jsonPayload);
+    await waitFor(() => expect(textarea.value).toBe(jsonPayload));
     expect(textarea.classList.contains("bad")).toBe(false);
 
     fireEvent.click(within(impDlg).getByRole("button", { name: "导入" }));

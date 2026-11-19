@@ -185,6 +185,12 @@ async function forkAt(index: number) {
   fireEvent.click(within(confirm).getByRole("button", { name: "分叉" }));
 }
 
+/** 等这一拍已排队的 promise 链与 React 更新跑完：setImmediate 在微任务清空后执行，不猜墙钟 */
+const flushAsync = () =>
+  act(async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
 async function openSeeded() {
   const seeded = await seed();
   render(<App host={seeded.desktop} />);
@@ -277,7 +283,8 @@ it("分叉后清空输入框，切走再切回，原消息不再填一次", asyn
   };
   for (const expected of [3, 1, 3, 1]) {
     await switchTo(expected);
-    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    // 等切回后的挂载与填回 effect 跑完（promise 链在微任务里，setImmediate 在其后）再断言保持为空
+    await flushAsync();
     expect(screen.getByLabelText<HTMLTextAreaElement>("消息输入").value).toBe("");
   }
 }, 60_000);

@@ -83,6 +83,9 @@ function fakeHost() {
   };
 }
 
+/** send 队列只串 promise：setImmediate 在微任务清空后执行，等它就是确定性的一拍 */
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 async function openTransport() {
   const f = fakeHost();
   const opening = TauriLineTransport.open(f.host, "Z:\\repo");
@@ -125,13 +128,13 @@ describe("TauriLineTransport", () => {
     transport.send("two");
     transport.send("three");
     // 链上第一个 invoke 已发出，后面的排队等待
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(f.invokes.filter((i) => i.cmd === "backend_send")).toHaveLength(1);
     // 逐个放行，后续 invoke 才依次发出
     for (const release of deferreds.splice(0)) release();
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     for (const release of deferreds.splice(0)) release();
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     for (const release of deferreds.splice(0)) release();
     await transport.flush();
     const sends = f.invokes.filter((i) => i.cmd === "backend_send");
@@ -153,10 +156,10 @@ describe("TauriLineTransport", () => {
     };
     transport.send("a");
     transport.send("b");
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(sendCalls).toEqual(["a"]);
     gates[0]?.();
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(sendCalls).toEqual(["a", "b"]);
     gates[1]?.();
     await transport.flush();
@@ -229,7 +232,7 @@ describe("TauriLineTransport", () => {
     f.raw.onInvoke = () => Promise.resolve(null);
     transport.close();
     transport.close();
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(f.invokes.filter((i) => i.cmd === "backend_close")).toHaveLength(1);
   });
 

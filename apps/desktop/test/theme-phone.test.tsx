@@ -318,7 +318,8 @@ it("手机缓存与同步自定义三色：首帧先缓存、切换电脑防旧�
       { key: "appearance.themePreset", effective: "celadon" },
       { key: "appearance.customThemes", effective: "[]" },
     ]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // first 的迟到 describeSettings 响应到达，必须被忽略：等它的 promise 链跑完再确认缓存没被覆盖
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(loadThemePreset("first")).toBe("c-fog");
 
     // second 连上后同步自定义主题并写回缓存

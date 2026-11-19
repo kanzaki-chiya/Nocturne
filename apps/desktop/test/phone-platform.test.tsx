@@ -54,9 +54,9 @@ async function mount(ui: React.ReactElement): Promise<HTMLElement> {
   await act(async () => {
     root?.render(ui);
   });
-  // 身份密钥与电脑记录异步读取，连接在其后创建
-  await act(async () => {
-    await new Promise((done) => setTimeout(done, 100));
+  // 身份密钥与电脑记录异步读取，连接在其后创建：等存储读取完成（欢迎页的加载提示撤掉）再断言
+  await vi.waitFor(() => {
+    expect(container.textContent).not.toContain("正在读取手机存储");
   });
   return container;
 }
@@ -155,9 +155,11 @@ it("设置页添加电脑拒绝相机权限后点返回离开（popstate）再�
   expect(container.textContent).toContain("打开系统设置");
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="返回"]')?.click();
-    await new Promise((done) => setTimeout(done, 50));
   });
-  expect(container.querySelector("h1")?.textContent).toBe("电脑");
+  // 返回走 history.back()：popstate 是异步的，等到设置 › 电脑页回来
+  await vi.waitFor(() => {
+    expect(container.querySelector("h1")?.textContent).toBe("电脑");
+  });
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
@@ -270,7 +272,10 @@ it("App 平台：用电脑记录里的中继地址连接，没有推送区块，
     background: () => <section aria-label="后台服务">后台区块</section>,
   };
   const container = await mount(<PhoneApp storage={storage} platform={platform} />);
-  expect(connections).toEqual([{ origin: "https://relay.example", hostId: "computer" }]);
+  // 身份密钥读完后才按电脑记录建连接（mock 在构造时登记）
+  await vi.waitFor(() => {
+    expect(connections).toEqual([{ origin: "https://relay.example", hostId: "computer" }]);
+  });
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
@@ -320,7 +325,9 @@ it("网页平台仍用页面源连接，推送区块照常", async () => {
   const storage = memoryStorage();
   await storage.putHost({ hostId: "computer", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
   const container = await mount(<PhoneApp storage={storage} />);
-  expect(connections).toEqual([{ origin: location.origin, hostId: "computer" }]);
+  await vi.waitFor(() => {
+    expect(connections).toEqual([{ origin: location.origin, hostId: "computer" }]);
+  });
   await act(async () => {
     container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click();
   });
@@ -331,8 +338,10 @@ it("没有中继地址的 App 电脑记录提示重新配对，不连接", async
   const storage = memoryStorage();
   await storage.putHost({ hostId: "computer", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
   const container = await mount(<PhoneApp storage={storage} platform={{ relay: "link" }} />);
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("缺少中继地址");
+  });
   expect(connections).toEqual([]);
-  expect(container.textContent).toContain("缺少中继地址");
 });
 
 it.each([true, false])("keepConnected=%s：页面隐藏时的连接判定", async (keep) => {
@@ -346,11 +355,16 @@ it.each([true, false])("keepConnected=%s：页面隐藏时的连接判定", asyn
   });
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
   await mount(<PhoneApp storage={storage} platform={{ relay: "link", keepConnected: keep }} />);
-  expect(visibilities.at(-1)).toBe(keep);
+  // 连接在身份密钥读完后建立，构造时上报可见性
+  await vi.waitFor(() => {
+    expect(visibilities.at(-1)).toBe(keep);
+  });
   await act(async () => {
     document.dispatchEvent(new Event("visibilitychange"));
   });
-  expect(visibilities.at(-1)).toBe(keep);
+  await vi.waitFor(() => {
+    expect(visibilities.at(-1)).toBe(keep);
+  });
 });
 
 it("平台的 onForeground 在页面挂载时登记、卸载时退订；没有它的平台不受影响", async () => {
@@ -403,9 +417,13 @@ it("版本不兼容状态条：App 外层加 phone-update-content，网页版保
       }}
     />,
   );
+  await vi.waitFor(() => {
+    expect(appContainer.querySelector("aside.phone-status")?.textContent).toBe(
+      "App 版本过旧下载 2.0.0",
+    );
+  });
   const appStatus = appContainer.querySelector("aside.phone-status");
   expect(appStatus?.className).toBe("phone-status phone-update-content");
-  expect(appStatus?.textContent).toBe("App 版本过旧下载 2.0.0");
   await act(() => root?.unmount());
   root = undefined;
   connectionState = {
@@ -413,9 +431,13 @@ it("版本不兼容状态条：App 外层加 phone-update-content，网页版保
     message: "此手机界面需要更新的电脑端，请升级电脑上的 Nocturne",
   };
   const webContainer = await mount(<PhoneApp storage={storage} />);
+  await vi.waitFor(() => {
+    expect(webContainer.querySelector("aside.phone-status")?.textContent).toBe(
+      "此手机界面需要更新的电脑端，请升级电脑上的 Nocturne",
+    );
+  });
   const webStatus = webContainer.querySelector("aside.phone-status");
   expect(webStatus?.className).toBe("phone-status");
-  expect(webStatus?.textContent).toBe("此手机界面需要更新的电脑端，请升级电脑上的 Nocturne");
 });
 
 it("observer.theme 报告启动、切换及跟随系统时系统深浅色变化", async () => {
@@ -446,7 +468,9 @@ it("observer.theme 报告启动、切换及跟随系统时系统深浅色变化"
   const container = await mount(
     <PhoneApp storage={storage} platform={{ relay: "link", observer: { theme } }} />,
   );
-  expect(theme).toHaveBeenLastCalledWith("dark", expect.any(String));
+  await vi.waitFor(() => {
+    expect(theme).toHaveBeenLastCalledWith("dark", expect.any(String));
+  });
   systemLight = true;
   await act(async () => {
     changeListener?.();

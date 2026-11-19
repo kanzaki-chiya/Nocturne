@@ -51,7 +51,8 @@ it("旧请求与旧电脑的迟到响应不能覆盖新预设", async () => {
   await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith("ink"));
   stop();
   finish?.([{ key: "appearance.themePreset", effective: "paper" }]);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  // 迟到响应的忽略只走 promise 链：setImmediate 在微任务清空后执行，等它即可确定跑完
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(changed.mock.calls).toEqual([["ink"]]);
 });
 

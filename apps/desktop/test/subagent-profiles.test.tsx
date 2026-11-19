@@ -236,7 +236,8 @@ it("档位详情：模型/思考档位/工具集上限/默认超时每改各 upd
     },
   });
   fireEvent.blur(timeout);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // blur 不再重复保存：把这一拍的 promise 链跑完（setImmediate 在微任务清空后执行），仍只有 4 次
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(patches).toHaveLength(4);
 
   fireEvent.change(timeout, { target: { value: "" } });
@@ -324,7 +325,8 @@ it("删除档位用应用内确认框：默认焦点在取消，取消和 Esc �
   expect(fireEvent.keyDown(document.activeElement ?? dialog, { key: "Escape" })).toBe(false);
   expect(screen.queryByRole("dialog")).toBeNull();
 
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  // 取消与 Esc 都不该保存：把这一拍的 promise 链跑完（setImmediate 在微任务清空后执行）仍没有补丁
+  await new Promise<void>((resolve) => setImmediate(resolve));
   expect(patches).toEqual([]);
 
   openDelete();

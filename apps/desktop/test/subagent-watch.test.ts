@@ -19,7 +19,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+/** 观察里的回调链只排微任务：setImmediate 在微任务清空后执行，等它即可确定跑完 */
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 it("观察建立后事件折叠进独立视图；重复的持久事件按 seq 去重；临时事件照收", async () => {
   const watcher = new SubagentWatcher();

@@ -108,8 +108,10 @@ it("会话页渲染抛错时保留顶栏，显示错误，返回后恢复", asyn
   expect(back).not.toBeNull();
   await act(async () => {
     back?.click();
-    await new Promise((done) => setTimeout(done, 50));
+  });
+  // 返回走 history.back()：popstate 是异步的，等项目页的会话行回来
+  await vi.waitFor(() => {
+    expect(container.querySelector(".phone-row.session")?.textContent).toContain("测试会话");
   });
   expect(container.querySelector('[role="alert"]')).toBeNull();
-  expect(container.querySelector(".phone-row.session")?.textContent).toContain("测试会话");
 });

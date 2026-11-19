@@ -301,7 +301,7 @@ it("浮层遮挡只截用户的浏览器标签；agent 标签不进浏览器池�
   // 浮层盖住用户标签的占位区：截图只打到这个 webview
   document.body.insertAdjacentHTML("beforeend", '<div role="dialog"></div>');
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
   expect(host.capture).toHaveBeenCalledTimes(1);
   expect(host.capture).toHaveBeenCalledWith(7);

@@ -178,22 +178,54 @@ it("手机从 /plan 消息分叉：输入框填好带命令名的原消息，光
   // 清空后回到列表，再依次进入两个会话：都不再填
   fireEvent.change(field(), { target: { value: "" } });
   const rows = () => [...document.querySelectorAll<HTMLButtonElement>(".phone-row.session")];
+  // 消息上的「分叉」按钮数区分两个会话（原会话 3 条、分叉会话 1 条）
+  const messageCount = () => screen.queryAllByRole("button", { name: "分叉" }).length;
   const backToList = async () => {
+    // 返回走 history.back()：分叉会多压一条会话记录，先退到它再退到项目页。
+    // 每次只退一层，等 popstate 真正到达并渲染后再决定要不要继续退（中间会话页可能仍在加载）。
     for (let i = 0; i < 3 && rows().length === 0; i++) {
-      fireEvent.click(screen.getByRole("button", { name: "返回" }));
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      const popped = new Promise<void>((resolve) => {
+        window.addEventListener("popstate", () => resolve(), { once: true });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "返回" }));
+        await popped;
+      });
     }
     await waitFor(() => {
       expect(rows()).toHaveLength(2);
     });
+    // 退回列表后仍有在途的 session.close / 后台刷新：等这些 promise 链跑完再点下一项
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+  };
+  /** 等会话页稳定：输入框挂载后跨过一拍仍在同一个节点上，说明切走 / 重开的过渡已经停下 */
+  const stableField = async (): Promise<HTMLTextAreaElement> => {
+    for (let i = 0; i < 20; i++) {
+      const node = screen.queryByLabelText<HTMLTextAreaElement>("消息");
+      await act(async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      });
+      if (node !== null && node.isConnected && screen.queryByLabelText("消息") === node)
+        return node;
+    }
+    throw new Error("会话页反复卸载，输入框没有稳定下来");
   };
   for (const index of [0, 1]) {
     await backToList();
-    fireEvent.click(rows()[index] as HTMLButtonElement);
-    await screen.findAllByRole("article", { name: "用户消息" }, { timeout: 10_000 });
-    // 等输入框挂载后的填回 effect 跑完再断言
-    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-    expect(field().value).toBe("");
+    expect(messageCount()).toBe(0);
+    const row = rows()[index];
+    if (row === undefined) throw new Error(`项目页没有第 ${String(index)} 个会话行`);
+    fireEvent.click(row);
+    // 消息挂载（分叉按钮数 > 0）后等输入框稳定，再确认没有再被填回
+    await waitFor(
+      () => {
+        expect(messageCount()).toBeGreaterThan(0);
+      },
+      { timeout: 10_000 },
+    );
+    expect((await stableField()).value).toBe("");
   }
 }, 60_000);
 

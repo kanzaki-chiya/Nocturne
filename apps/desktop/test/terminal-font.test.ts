@@ -56,6 +56,9 @@ if (typeof window.matchMedia !== "function") {
 
 const root = document.documentElement;
 
+/** 字体变化走 MutationObserver：回调在微任务里送达，setImmediate 在其后执行即确定性的一拍 */
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 afterEach(() => {
   root.removeAttribute("style");
   terminals.length = 0;
@@ -83,7 +86,7 @@ it("初始字号与字体取计算后的 --fs-2 / --mono，设置变化后立即
   // 设置页把字号调到 20、代码字体换成 Fira Code（appearance.ts 写的就是这几个变量）
   root.style.setProperty("--fs-2", "19px");
   root.style.setProperty("--mono", '"Fira Code", "JetBrains Mono", monospace');
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await flush();
   expect(term?.options.fontSize).toBe(19);
   expect(term?.options.fontFamily).toBe('"Fira Code", "JetBrains Mono", monospace');
   expect(fits).toHaveBeenCalled();
@@ -91,7 +94,7 @@ it("初始字号与字体取计算后的 --fs-2 / --mono，设置变化后立即
   // 和字体无关的行内样式变化不重排
   fits.mockClear();
   root.style.setProperty("--unrelated", "1");
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await flush();
   expect(fits).not.toHaveBeenCalled();
   mounted.dispose();
   parent.remove();

@@ -122,9 +122,10 @@ function mount(
   return { watcher, view, props, backend, feed };
 }
 
+/** 等已排队的 promise 链与 React 更新跑完：setImmediate 在微任务清空后执行 */
 const flush = () =>
   act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
 it("运行中：标题行显示档位、摘要、状态和只读标记；父尚未结算", async () => {

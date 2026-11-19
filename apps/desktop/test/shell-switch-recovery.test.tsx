@@ -175,6 +175,7 @@ afterEach(() => {
   cleanup();
 });
 
+// eslint-disable-next-line no-restricted-syntax -- 真实子进程 RPC 上的静默窗口（“这段时间内不应再发生刷新”）与丢响应的真实超时等待，假时钟会打乱真实 IPC 时序，waitFor 也表达不了“不存在”
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 打开 App、建会话、返回权限预设按钮（Turn 结束、菜单可开）。settleMs>0 时再等回复落盘并静默一段，确保随后没有滞留事件驱动刷新。 */

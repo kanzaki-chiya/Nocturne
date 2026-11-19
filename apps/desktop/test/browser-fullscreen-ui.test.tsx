@@ -29,9 +29,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** 等这一拍的外壳命令与观察者（MutationObserver 在微任务里送达）跑完，不猜墙钟 */
 const tick = () =>
   act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setImmediate(resolve));
   });
 
 it("全屏期间浮层伸进占位区不截图、不隐藏 webview；退出全屏后照常遮挡", async () => {

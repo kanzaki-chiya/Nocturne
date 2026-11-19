@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { marked, type Tokens } from "marked";
 import { afterEach, expect, it, vi } from "vitest";
 import { DiffBody, Markdown, isClosedCodeFence } from "../src/Conversation";
@@ -111,6 +111,9 @@ it("确认 marked 未闭合与闭合围栏的 raw 结尾特征及闭合判断", 
 
 const noop = () => undefined;
 
+/** 把这一拍的动态 import 与 promise 链跑完：setImmediate 在微任务清空后执行，不猜墙钟 */
+const flushAsync = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 it("Markdown python 与 py 代码块闭合后着色且逐字保留原文", async () => {
   const pySource = 'def greet(name):\n    # 问候\n    return f"hi {name}"';
   const view = render(<Markdown text={`\`\`\`python\n${pySource}\n\`\`\``} openUrl={noop} />);
@@ -142,12 +145,15 @@ it("无语言标记、text、认不出的语言保持纯文本且不启动语法
   const view = render(
     <Markdown text={"```\nconst a = 1\n```\n\n```text\ndef f(): pass\n```"} openUrl={noop} />,
   );
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await flushAsync();
   expect(parseSpy).not.toHaveBeenCalled();
 
   view.rerender(<Markdown text={"```nonexistent-lang-xyz\nconst a = 1\n```"} openUrl={noop} />);
   await waitFor(() => expect(parseSpy).toHaveBeenCalledTimes(1));
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // 等这次解析真正落定（未知语言返回 undefined），再确认没有着色
+  await act(async () => {
+    await parseSpy.mock.results[0]?.value;
+  });
   const code = view.container.querySelector(".conversation-code pre code");
   expect(code?.textContent).toBe("const a = 1");
   expect(code?.querySelector("span")).toBeNull();
@@ -158,7 +164,7 @@ it("未闭合围栏不发起解析，补上结尾围栏后才发起，之后追�
   const source = "def add(a, b):\n    return a + b";
 
   const view = render(<Markdown text={`\`\`\`python\n${source}`} openUrl={noop} />);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await flushAsync();
   expect(parseSpy).not.toHaveBeenCalled();
   expect(view.container.querySelector(".conversation-code pre code")?.textContent).toBe(source);
   expect(view.container.querySelector(".conversation-code pre code span")).toBeNull();
@@ -180,7 +186,7 @@ it("未闭合围栏不发起解析，补上结尾围栏后才发起，之后追�
       openUrl={noop}
     />,
   );
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await flushAsync();
   expect(parseSpy).toHaveBeenCalledTimes(1);
   expect(view.container.querySelector(".conversation-code pre code")?.textContent).toBe(source);
   expect(
