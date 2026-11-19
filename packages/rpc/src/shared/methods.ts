@@ -27,6 +27,7 @@ import type {
   ExternalAgentProbeResult,
   ExternalAgentSaveInput,
   ExternalAgentsDescription,
+  HooksDescription,
   McpProbeInput,
   McpProbeResult,
   McpSaveInput,
@@ -581,6 +582,10 @@ export interface RpcMethods {
     params: { workspaceRoot?: string | undefined };
     result: { servers: McpServerOverview[]; warnings: string[] };
   };
+  "hooks.describeHooks": {
+    params: { workspaceRoot?: string | undefined };
+    result: HooksDescription;
+  };
   "mcp.saveMcpServer": { params: McpSaveInput; result: McpServerOverview };
   "mcp.deleteMcpServer": {
     params: { id: string; workspaceRoot?: string | undefined };
@@ -1043,6 +1048,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.listReviewerProviders": true,
   "runtime.reloadConfig": true,
   "mcp.describeMcpServers": true,
+  "hooks.describeHooks": true,
   "agents.describeExternalAgents": true,
   "agents.saveExternalAgent": true,
   "agents.deleteExternalAgent": true,

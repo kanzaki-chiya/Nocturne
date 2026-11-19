@@ -81,6 +81,7 @@ export const RUNTIME_METHODS: Record<
   archiveSuite: "suites.archive",
   openSuite: "suites.open",
   describeMcpServers: "mcp.describeMcpServers",
+  describeHooks: "hooks.describeHooks",
   describeExternalAgents: "agents.describeExternalAgents",
   saveExternalAgent: "agents.saveExternalAgent",
   deleteExternalAgent: "agents.deleteExternalAgent",
@@ -210,6 +211,7 @@ export const CONFIG_METHODS: Record<
   RpcMethodName
 > = {
   describeMcpServers: "mcp.describeMcpServers",
+  describeHooks: "hooks.describeHooks",
   describeExternalAgents: "agents.describeExternalAgents",
   saveExternalAgent: "agents.saveExternalAgent",
   deleteExternalAgent: "agents.deleteExternalAgent",

@@ -34,6 +34,7 @@ import type {
   ExternalAgentProbeResult,
   ExternalAgentSaveInput,
   ExternalAgentsDescription,
+  HooksDescription,
   McpProbeInput,
   McpProbeResult,
   McpSaveInput,
@@ -332,6 +333,7 @@ export interface RpcRuntime {
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
+  describeHooks(input?: { workspaceRoot?: string | undefined }): Promise<HooksDescription>;
   saveMcpServer(input: McpSaveInput): Promise<McpServerOverview>;
   deleteMcpServer(input: { id: string; workspaceRoot?: string | undefined }): Promise<void>;
   setMcpServerEnabled(input: {
@@ -1023,6 +1025,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     probeExternalAgent: (input) => call("agents.probeExternalAgent", input),
     describeMcpServers: (input = {}) => call("mcp.describeMcpServers", input),
+    describeHooks: (input = {}) => call("hooks.describeHooks", input),
     describeSkills: (input = {}) => call("skills.describeSkills", input),
     setSkillEnabled: (input) => call("skills.setSkillEnabled", input),
     importSkills: (input) => call("skills.importSkills", input),

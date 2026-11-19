@@ -1703,6 +1703,9 @@ class Connection implements HubPeer {
         return null;
       },
       "mcp.describeMcpServers": (p) => this.runtime().describeMcpServers(p),
+      // 只读 Hook 概览（返回本机配置文件路径，与 mcp.describeMcpServers 一致，不在 REMOTE_METHODS）
+      "hooks.describeHooks": (p) =>
+        this.runtime().describeHooks({ workspaceRoot: optString(p, "workspaceRoot") }),
       "agents.describeExternalAgents": (p) =>
         this.runtime().describeExternalAgents({ workspaceRoot: optString(p, "workspaceRoot") }),
       "agents.saveExternalAgent": (p) =>
