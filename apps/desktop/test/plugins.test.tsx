@@ -314,3 +314,89 @@ it("runtime.providersChanged 触发刷新且迟到响应不覆盖新快照", asy
 
   f.close();
 });
+
+it("插件列表行与详情页头部同时支持图标 img 与统一默认插件图标（无替代文字）", async () => {
+  const iconUri =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const withIcon = plugin({
+    id: "codex:with-icon@mkt",
+    name: "with-icon",
+    displayName: "With Icon",
+    icon: iconUri,
+    state: "on",
+  });
+  const withoutIcon = plugin({
+    id: "claude:no-icon@mkt",
+    host: "claude",
+    name: "no-icon",
+    displayName: "No Icon",
+    icon: undefined,
+    state: "on",
+  });
+
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": desc([withIcon, withoutIcon]),
+    }),
+  );
+  await f.initialize();
+  render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+
+  const codexRegion = await screen.findByRole("region", { name: "Codex · 1" });
+  const claudeRegion = screen.getByRole("region", { name: "Claude Code · 1" });
+
+  await waitFor(() => {
+    const listImg = codexRegion.querySelector("img.plugin-icon-img");
+    expect(listImg?.getAttribute("src")).toBe(iconUri);
+  });
+
+  expect(claudeRegion.querySelector("img")).toBeNull();
+  const fallback = claudeRegion.querySelector(".plugin-icon.fallback");
+  expect(fallback?.querySelector("svg")).toBeTruthy();
+  expect(fallback?.textContent).toBe("");
+
+  // 进入带图标插件详情，页头也渲染 img
+  fireEvent.click(within(codexRegion).getByText("With Icon"));
+  await screen.findByRole("button", { name: "插件" });
+  await waitFor(() => {
+    const headerImg = document.querySelector(".phead img.plugin-icon-img");
+    expect(headerImg?.getAttribute("src")).toBe(iconUri);
+  });
+
+  f.close();
+});
+
+it("在支持 URL.createObjectURL 的环境下将图标 data URI 转为 blob URL 并在卸载时释放", async () => {
+  const createSpy = vi.fn(() => "blob:plugin-icon-1");
+  const revokeSpy = vi.fn();
+  const origCreate = URL.createObjectURL;
+  const origRevoke = URL.revokeObjectURL;
+  Object.defineProperty(URL, "createObjectURL", { value: createSpy, configurable: true });
+  Object.defineProperty(URL, "revokeObjectURL", { value: revokeSpy, configurable: true });
+  try {
+    const iconUri =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const f = fakeServer(
+      withInit({
+        "plugins.describePlugins": desc([plugin({ icon: iconUri, state: "on" })]),
+      }),
+    );
+    await f.initialize();
+    const view = render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+
+    const codexRegion = await screen.findByRole("region", { name: "Codex · 1" });
+    await waitFor(() => {
+      expect(codexRegion.querySelector("img.plugin-icon-img")?.getAttribute("src")).toBe(
+        "blob:plugin-icon-1",
+      );
+    });
+    expect(createSpy).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    expect(revokeSpy).toHaveBeenCalledWith("blob:plugin-icon-1");
+    f.close();
+  } finally {
+    Object.defineProperty(URL, "createObjectURL", { value: origCreate, configurable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: origRevoke, configurable: true });
+  }
+});

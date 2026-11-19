@@ -401,6 +401,7 @@ export function App({ host }: { host: DesktopHost }) {
    * （inert），返回时还是原来的会话和滚动位置。
    */
   const [page, setPage] = useState<SettingsSection | null>(null);
+  const [pluginJump, setPluginJump] = useState<{ id: string; seq: number }>();
   /** 定时任务页盖在会话区上，左栏会话树保持显示（不同于设置区） */
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   /** 组曲列表页盖在会话区上，左栏会话树保持显示 */
@@ -2228,6 +2229,7 @@ export function App({ host }: { host: DesktopHost }) {
                     <PluginsPage
                       client={pageClient}
                       version={settingsVersion}
+                      openPlugin={pluginJump}
                       openDirectory={(path) =>
                         host.invoke("open_skill_directory", {
                           path,
@@ -2244,6 +2246,10 @@ export function App({ host }: { host: DesktopHost }) {
                         active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
                       }
                       version={settingsVersion}
+                      onOpenPlugin={(id) => {
+                        setPluginJump((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
+                        setPage("plugins");
+                      }}
                     />
                   </PaneErrorBoundary>
                 ) : settingsPage === "grants" ? (

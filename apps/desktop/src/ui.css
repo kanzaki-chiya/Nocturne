@@ -709,6 +709,24 @@
   text-align: left;
   cursor: pointer;
 }
+.slist-main.has-leading {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+}
+.slist-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.slist-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
 .slist-top {
   display: flex;
   align-items: center;

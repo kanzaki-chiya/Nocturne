@@ -43,14 +43,76 @@ const UNSUPPORTED_REASON_LABEL: Record<PluginUnsupportedReason, string> = {
 
 const pluginLabel = (plugin: PluginOverview): string => plugin.displayName ?? plugin.name;
 
+function dataUriToBlobUrl(uri: string): string {
+  const match = /^data:([^;,]+);base64,(.+)$/s.exec(uri);
+  if (!match) return uri;
+  const [, mime, payload] = match;
+  if (!mime || !payload) return uri;
+  try {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  } catch {
+    return uri;
+  }
+}
+
+export function PluginIcon({
+  icon,
+  size = "md",
+}: {
+  icon?: string | undefined;
+  size?: "sm" | "md";
+}) {
+  // 桌面端 CSP 为 img-src 'self' blob:，在支持 ObjectURL 的环境将 data URI 转为 blob URL 渲染
+  const canBlobUrl = typeof URL.createObjectURL === "function";
+  const [blobSrc, setBlobSrc] = useState<string>();
+
+  useEffect(() => {
+    if (!icon || !canBlobUrl) {
+      setBlobSrc(undefined);
+      return;
+    }
+    const url = dataUriToBlobUrl(icon);
+    setBlobSrc(url);
+    return () => {
+      if (url.startsWith("blob:") && typeof URL.revokeObjectURL === "function") {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [icon, canBlobUrl]);
+
+  const imgSrc = icon ? (canBlobUrl ? blobSrc : icon) : undefined;
+
+  return (
+    <span
+      className={`plugin-icon plugin-icon-${size}${icon ? "" : " fallback"}`}
+      aria-hidden="true"
+    >
+      {icon ? (
+        imgSrc !== undefined ? (
+          <img className="plugin-icon-img" src={imgSrc} alt="" />
+        ) : null
+      ) : (
+        <Icon name="box_3" size={size === "sm" ? ICON_SM : ICON_MD} />
+      )}
+    </span>
+  );
+}
+
 export function PluginsPage({
   client,
   version,
   openDirectory,
+  openPlugin,
 }: {
   client: RpcClient | undefined;
   version: number;
   openDirectory: (path: string) => Promise<void>;
+  openPlugin?: { id: string; seq: number } | undefined;
 }) {
   const [data, setData] = useState<PluginsDescription>();
   const [selected, setSelected] = useState<string>();
@@ -59,6 +121,15 @@ export function PluginsPage({
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const refreshGeneration = useRef(0);
+  const handledJumpSeq = useRef(0);
+
+  useEffect(() => {
+    if (openPlugin !== undefined && openPlugin.seq !== handledJumpSeq.current) {
+      handledJumpSeq.current = openPlugin.seq;
+      setError("");
+      setSelected(openPlugin.id);
+    }
+  }, [openPlugin]);
 
   useEffect(() => {
     if (!toast) return;
@@ -162,7 +233,12 @@ export function PluginsPage({
           {plugin ? (
             <>
               <PageHeader
-                title={pluginLabel(plugin)}
+                title={
+                  <span className="plugin-detail-title">
+                    <PluginIcon icon={plugin.icon} size="sm" />
+                    <span className="plugin-detail-name">{pluginLabel(plugin)}</span>
+                  </span>
+                }
                 crumb={{
                   parent: "插件",
                   onBack: () => {
@@ -289,6 +365,7 @@ export function PluginsPage({
                           return (
                             <SettingsListRow
                               key={p.id}
+                              leading={<PluginIcon icon={p.icon} />}
                               name={label}
                               badge={
                                 p.version ? (

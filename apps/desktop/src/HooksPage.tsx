@@ -4,9 +4,11 @@ import {
   isToolHookPoint,
   type HookOverview,
   type HooksDescription,
+  type PluginsDescription,
 } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
-import { Badge, EmptyState, PageHeader, SettingsGroup } from "./ui";
+import { PluginIcon } from "./PluginsPage";
+import { Badge, EmptyState, PageHeader, SettingsGroup, SettingsListRow } from "./ui";
 import "./pages.css";
 import "./hooks.css";
 
@@ -58,12 +60,15 @@ export function HooksPage({
   client,
   workspaceRoot,
   version,
+  onOpenPlugin,
 }: {
   client: RpcClient | undefined;
   workspaceRoot: string | undefined;
   version: number;
+  onOpenPlugin?: ((id: string) => void) | undefined;
 }) {
   const [data, setData] = useState<HooksDescription>();
+  const [pluginsData, setPluginsData] = useState<PluginsDescription>();
   const [error, setError] = useState("");
   const refreshGeneration = useRef(0);
 
@@ -71,9 +76,13 @@ export function HooksPage({
     if (!client) return;
     const generation = ++refreshGeneration.current;
     try {
-      const result = await client.runtime.describeHooks({ workspaceRoot });
+      const [hooksResult, pluginsResult] = await Promise.all([
+        client.runtime.describeHooks({ workspaceRoot }),
+        client.runtime.describePlugins(),
+      ]);
       if (generation !== refreshGeneration.current) return;
-      setData(result);
+      setData(hooksResult);
+      setPluginsData(pluginsResult);
       setError("");
     } catch (e) {
       if (generation === refreshGeneration.current) {
@@ -98,7 +107,14 @@ export function HooksPage({
   }, [client, refresh, version]);
 
   const hooks = data?.hooks ?? [];
-  const empty = data !== undefined && hooks.length === 0;
+  const pluginHooks = (pluginsData?.plugins ?? []).filter(
+    (p) => p.state === "on" && p.hooks.length > 0,
+  );
+  const empty =
+    data !== undefined &&
+    pluginsData !== undefined &&
+    hooks.length === 0 &&
+    pluginHooks.length === 0;
 
   return (
     <section className="page3 hooks-page" aria-label="Hook">
@@ -123,6 +139,21 @@ export function HooksPage({
                   </SettingsGroup>
                 );
               })}
+              {pluginHooks.length > 0 && (
+                <SettingsGroup plain title="来自插件" count={pluginHooks.length}>
+                  {pluginHooks.map((plugin) => (
+                    <SettingsListRow
+                      key={plugin.id}
+                      leading={<PluginIcon icon={plugin.icon} />}
+                      name={plugin.displayName ?? plugin.name}
+                      description={`${plugin.hooks.length} 个 Hook`}
+                      onOpen={() => {
+                        onOpenPlugin?.(plugin.id);
+                      }}
+                    />
+                  ))}
+                </SettingsGroup>
+              )}
             </div>
           )}
         </div>
