@@ -7,6 +7,7 @@
  * 数据只展示上游或配置明确声明的字段：未声明的上下文/最大输出/价格
  * 留空或 ?（ADR-0016，不编造数据）。能力标记只在声明时显示 R/I。
  */
+import type { spawn } from "node:child_process";
 import { Box, Text, useInput } from "ink";
 import { useMemo, useState } from "react";
 
@@ -114,6 +115,7 @@ export function ModelPicker({
   width,
   height,
   active,
+  copySpawn,
 }: {
   models: readonly ModelInfo[];
   recents: readonly ModelRef[];
@@ -148,6 +150,7 @@ export function ModelPicker({
   width: number;
   height: number;
   active: boolean;
+  copySpawn?: typeof spawn | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -442,6 +445,7 @@ export function ModelPicker({
             onSubmitMulti={wizard.submitMulti}
             onCancel={wizard.cancel}
             onMouseFrame={onMouseFrame}
+            copySpawn={copySpawn}
           />
         </Box>
       ) : null}

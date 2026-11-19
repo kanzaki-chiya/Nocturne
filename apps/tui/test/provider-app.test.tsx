@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, type RuntimeConfig } from "@nocturne/core";
 import { App } from "../src/app.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
+import { fakeCopySpawn } from "./fake-copy-spawn.js";
 import { changedFrame, settle } from "./provider-test-utils.js";
 
 const roots: string[] = [];
@@ -55,6 +56,7 @@ async function mount(inline: boolean) {
       env: { ascii: true, animated: false },
       inline,
       mouse,
+      copySpawn: fakeCopySpawn().spawn,
     }),
   );
   await settle(() => ui.lastFrame()?.includes("offline") === true);

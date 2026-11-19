@@ -14,6 +14,7 @@ import { layoutEntry } from "../src/lines.js";
 import { createImageStore, droppedImage, splitImageTokens } from "../src/images.js";
 import { palettes } from "../src/theme.js";
 import { createPlatform } from "@nocturne/core";
+import { fakeCopySpawn } from "./fake-copy-spawn.js";
 
 const roots: string[] = [];
 const tmp = () => {
@@ -201,6 +202,7 @@ describe("TUI 图片输入", () => {
         runtime,
         env,
         mouse,
+        copySpawn: fakeCopySpawn().spawn,
         clipboard: clip(png),
         clipboardPlatform: "win32",
       }),

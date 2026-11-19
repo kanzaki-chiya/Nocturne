@@ -12,6 +12,7 @@
  * 由 App 在备用屏内渲染；进出序列在 App（ADR-0017 约束沿用）。
  * 本组件只管页面内状态与按键，业务逻辑都在父级（Core 公开 API）。
  */
+import type { spawn } from "node:child_process";
 import { Box, Text } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -211,6 +212,7 @@ export function ProviderPage({
   height,
   termRows,
   active,
+  copySpawn,
 }: {
   presets: readonly ProviderPreset[];
   /** 已配置条目（describeProviders 结果） */
@@ -267,6 +269,7 @@ export function ProviderPage({
   /** 终端行数。Logo 阈值按终端行数 ≥30，不按帧高。缺省时用 height。 */
   termRows?: number | undefined;
   active: boolean;
+  copySpawn?: typeof spawn | undefined;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -701,6 +704,7 @@ export function ProviderPage({
             onSubmitMulti={wizard.submitMulti}
             onCancel={wizard.cancel}
             onMouseFrame={onMouseFrame}
+            copySpawn={copySpawn}
           />
         </Box>
       ) : confirmRemove !== undefined || action !== undefined ? (

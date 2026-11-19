@@ -578,6 +578,7 @@ function SetupFlow({
   setup,
   inline,
   mouse,
+  copySpawn,
   onOutputLayout,
   onDone,
 }: {
@@ -586,6 +587,7 @@ function SetupFlow({
   setup: SetupFlowSpec;
   inline: boolean;
   mouse?: MouseSource | undefined;
+  copySpawn?: typeof spawn | undefined;
   onOutputLayout?: ((conversation: number, page: string) => void) | undefined;
   onDone: (d: SetupDone) => void;
 }): React.JSX.Element | null {
@@ -740,6 +742,7 @@ function SetupFlow({
         height={frame.frameHeight}
         termRows={rows}
         onMouseFrame={inline ? undefined : reportDialogMouse}
+        copySpawn={copySpawn}
         active
       />
     );
@@ -776,6 +779,7 @@ function SetupFlow({
         width={width}
         height={Math.max(1, frame.frameHeight - 1)}
         onMouseFrame={inline ? undefined : reportDialogMouse}
+        copySpawn={copySpawn}
         active
       />
     </Box>
@@ -832,6 +836,7 @@ export function App({
             setup={setup}
             inline={inline === true}
             mouse={mouse}
+            copySpawn={copySpawn}
             onOutputLayout={onOutputLayout}
             onDone={onSetupDone}
           />
@@ -3919,6 +3924,7 @@ function SessionApp({
         width={width}
         height={budget.frameHeight}
         onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+        copySpawn={copySpawn}
         active={wizardOverlay === undefined}
       />
     ) : providerPageOpen ? (
@@ -3951,6 +3957,7 @@ function SessionApp({
         width={width}
         height={budget.frameHeight}
         termRows={rows}
+        copySpawn={copySpawn}
         active
       />
     ) : null;
@@ -4430,6 +4437,7 @@ function SessionApp({
         onCancel={() => {
           wizard.cancel();
         }}
+        copySpawn={copySpawn}
       />
     ) : providerRemove !== undefined ? (
       <ConfirmBox

@@ -28,6 +28,7 @@ import { anchorFromBottom, selectVisible, type LineBlock } from "../src/viewport
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
 import { palettes } from "../src/theme.js";
 import { internalSession } from "./internal-session.js";
+import { fakeCopySpawn } from "./fake-copy-spawn.js";
 import { APP_VERSION } from "../src/version.js";
 
 const roots: string[] = [];
@@ -99,6 +100,7 @@ it("单段点击展开/收起保持标题行，Ctrl+O 清除单段覆盖，拖�
       session,
       env: { ascii: false, animated: false },
       mouse,
+      copySpawn: fakeCopySpawn().spawn,
       transcriptOut: out,
     }),
   );
@@ -141,6 +143,7 @@ it("工具标题展开完整输出并收起；diff 标题和省略行共享状�
       session,
       env: { ascii: false, animated: false },
       mouse,
+      copySpawn: fakeCopySpawn().spawn,
       transcriptOut: out,
     }),
   );

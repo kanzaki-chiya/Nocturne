@@ -13,6 +13,7 @@ import {
   inlinePageShellName,
 } from "../src/inline-page-open.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
+import { fakeCopySpawn } from "./fake-copy-spawn.js";
 import { flush } from "./provider-test-utils.js";
 
 const roots: string[] = [];
@@ -171,6 +172,7 @@ describe("全屏单击内嵌页面行", () => {
         session,
         env: { ascii: false, animated: false },
         mouse,
+        copySpawn: fakeCopySpawn().spawn,
         openFile,
       }),
     );

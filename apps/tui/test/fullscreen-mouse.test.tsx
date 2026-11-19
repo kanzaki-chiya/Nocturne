@@ -117,7 +117,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();
     const { lastFrame, unmount, frames } = render(
-      createElement(App, { session, runtime, env: ENV, mouse }),
+      createElement(App, { session, runtime, env: ENV, mouse, copySpawn: okSpawn().spawn }),
     );
     await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     const diff = `@@ -0,0 +1,50 @@\n${Array.from({ length: 50 }, (_, i) => `+line${i + 1}`).join("\n")}`;
@@ -193,7 +193,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const { runtime, session } = await longSession();
     const mouse = fakeMouse();
     const { lastFrame, unmount } = render(
-      createElement(App, { session, runtime, env: ENV, mouse }),
+      createElement(App, { session, runtime, env: ENV, mouse, copySpawn: okSpawn().spawn }),
     );
     await waitFor(() => (lastFrame() ?? "").includes(`v${APP_VERSION}`));
     await session.submit({ text: "长" });

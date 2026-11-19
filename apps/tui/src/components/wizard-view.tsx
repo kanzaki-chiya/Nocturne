@@ -1,4 +1,5 @@
 /** Core 编排的服务商向导；只负责对话框画法、焦点与输入。 */
+import type { spawn } from "node:child_process";
 import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
@@ -27,6 +28,7 @@ export function WizardView({
   onSubmitMulti,
   onCancel,
   onMouseFrame,
+  copySpawn,
 }: {
   title: string;
   state: WizardState;
@@ -40,6 +42,7 @@ export function WizardView({
   onSubmitMulti: (indices: number[]) => void;
   onCancel: () => void;
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
+  copySpawn?: typeof spawn | undefined;
 }): React.JSX.Element {
   const theme = useTheme();
   const [value, setValue] = useState("");
@@ -131,7 +134,7 @@ export function WizardView({
   const copyUrl = () => {
     const url = state.login?.authorizeUrl;
     if (url === undefined) return;
-    void copyText(url).then((ok) => {
+    void copyText(url, { spawn: copySpawn }).then((ok) => {
       setCopyNote(
         ok.length > 0 ? "已复制授权地址，粘贴到浏览器打开" : "! 复制失败，请手动选中地址",
       );

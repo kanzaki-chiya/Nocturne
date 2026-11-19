@@ -47,6 +47,7 @@
 - 测试中需要假 `Runtime` 时，从 `@nocturne/core/testing` 导入 `createRuntimeStub(overrides)`（实现在 [runtime-stub.ts](../../packages/core/test/runtime-stub.ts)），不要手写 `as unknown as Runtime` 或 `as never` 对象。
 - 测试中禁止使用固定毫秒等待（`new Promise` 配合 `setTimeout`），应等待真实事件 / Promise、`vi.useFakeTimers()` 或 `vi.waitFor()`；机器检查规则见 [eslint.config.mjs](../../eslint.config.mjs)，确需保留的反向断言或测试替身延时用 `eslint-disable-next-line` 注明原因。
 - 测试的临时文件写到系统临时目录（`os.tmpdir()`），不得写入仓库工作区。
+- 测试不得写入真实系统剪贴板，由测试 setup 拦截。
 - 涉及文件系统与子进程的行为需考虑 Windows、macOS、Linux 差异；无法在当前平台验证的，在变更说明中如实写明。
 - 代码、测试、文档三者冲突时必须显式指出，不得静默跳过或修改测试迁就实现。
 

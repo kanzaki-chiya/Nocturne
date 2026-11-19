@@ -27,7 +27,7 @@ export default defineConfig({
     // vitest 只在 NODE_ENV 未设置时才默认 test
     include: ["test/**/*.test.{ts,tsx}"],
     environment: "node",
-    setupFiles: ["test/setup-isolated-home.ts"],
+    setupFiles: ["test/setup-isolated-home.ts", "test/setup-no-real-clipboard.ts"],
     testTimeout: process.env.CI === "true" ? 60_000 : 15_000,
     // 仅 CI：失败重试 2 次，吸收慢速 runner 上的时序抖动；本地不重试，偶发问题照常暴露
     retry: process.env.CI === "true" ? 2 : 0,
