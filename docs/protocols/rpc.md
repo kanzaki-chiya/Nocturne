@@ -459,6 +459,27 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 - 连接持有观察表（含还在建立的观察）；unsubscribe、替换、父 `session.close`、连接断开和 shutdown 都撤监听、取消回放并丢缓冲。未完成的异步读取返回时检查取消代数并立即退订，不得复活。自然 closed 后释放表项；客户端缓存视图不影响服务器清理。观察退出不触碰 launcher、并发槽或 child.close。本机整条连接断开导致 Turn 中断是第 6 节既有宿主行为，不是观察的副作用。
 - `resumeSession` 保留原来的交互式打开/锁/修复语义，**不能描述为只读**；`listSessions({includeSubagents})` 保留原语义，既不建立事件订阅也不授予操作能力。本接口是新增方法，不是给这两者添加一个含糊的 readonly 开关。
 
+### 4.2 顶层会话只读快照观察（ADR-0099）
+
+手机等远程客户端打开尚未在后台运行的顶层历史会话时，无需先 `runtime.resumeSession` 装配插件/技能/工作树/记忆，可先经只读快照方法把历史事件显示出来，在用户发起写操作或会话已在后台运行（`openHere === true`）时再按 `afterSeq` 升级为 `runtime.resumeSession` + `session.subscribe`（完整生命周期与切换规则见 [ADR-0099](../decisions/ADR-0099-top-level-session-readonly-observe.md)）。
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `session.observe` | `{ sessionId, observeId, afterSeq? }` → `SessionObservationSnapshot`（`{ sessionId, lastSeq, cwd, workspaceRoot, openHere, tailIgnored }`）；全部匹配事件推送完毕后响应 |
+| `session.observeAttachment` | `{ sessionId, file }` → `{ data: base64, mimeType, bytes }`；不打开会话、不取锁读取该顶层会话已登记附件，沿用 3.2 的文件名、真实路径、字节数、SHA-256 及远程字节上限校验 |
+
+| 服务端通知 | 参数 | 说明 |
+|---|---|---|
+| `session.observeEvent` | `{ observeId, sessionId, event }` | 原样 `DurableEvent`（`seq > afterSeq`），只发给发起该次 `session.observe` 的连接，不广播；每 128 条让出事件循环 |
+
+- **只读与边界**：
+  - `sessionId` 须为安全单文件名标识；拒绝子会话（日志含 `parent` 时报 `RuntimeCommandError / invalid_command`）。
+  - 会话未在本后台打开时，以 `readLogReadonly` 读固定字节快照，不获取会话锁、不修改或修复磁盘日志（损坏末行仅内存忽略并置 `tailIgnored: true`）；已在本后台打开时直接从内存持久事件回放并置 `openHere: true`。
+  - 不在 `Hub.sessions` / `Connection.sessions` 登记可交互句柄，不改变会话引用计数。
+  - `observeId` 须为非空字符串（至多 128 字符）且在连接内不与进行中的观察重复；`afterSeq` 缺省 `0`，须为非负整数且不大于快照 `lastSeq`，否则报 `-32602 / invalid_params`。
+  - `session.observe` 与 `session.observeAttachment` 在 `REMOTE_METHODS` 白名单内，可见内容严格不超过原有 `resumeSession` + `session.subscribe` + `session.readAttachment`。
+- **客户端封装与兼容**：`RpcRuntime.observeSession(input, observer, options?)` 自动生成连接内唯一的 `observeId`、挂载通知路由并在结束或异常时清理；`RpcRuntime.readSessionAttachment(input)` 将 base64 解码为 `Uint8Array`。旧后台未实现 `session.observe`（`-32601 / method_not_found`）时，手机客户端自动退回 `resumeSession` + `session.subscribe`。
+
 ## 5. 错误
 
 失败响应是 JSON-RPC error：`code` 取固定数值，`message` 是原来的用户可读文案，`data.code` 是原来的**字符串错误码**，`data.name` 是错误类名。客户端按 `data.code` 分支，与进程内按 `error.code` 分支等价（`RpcError.code`）。
@@ -508,6 +529,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `runtime.createSession` | 允许除 `branch` 外的选项（携带 `branch` 报 `remote_not_allowed`，ADR-0085）。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |
+| `session.observe`、`session.observeAttachment` | 允许（ADR-0099）：只读观察顶层会话快照与已登记附件，不打开会话、不取锁，不超出 `resumeSession` + `session.readAttachment` 的可见范围；附件原始字节超过远程上限报 `attachment_too_large` |
 | `session.submit` | 允许完整载荷（图片、文件引用、技能、`delegate`、`workMode`） |
 | `session.enqueueInput` | 允许完整载荷（同 `submit`）。ADR-0070 的「追加消息」：手机可在运行中插话或排队 |
 | `session.updateInput` / `session.cancelInput` / `session.resumeInputs` / `session.pendingInputs` | 允许；待发输入是同一会话的共享状态，手机改了桌面立刻看到（`input.pending`） |
@@ -557,6 +579,8 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | Core 公开 API | RPC 方法 | 客户端返回 |
 |---|---|---|
 | `RuntimeSession.readAttachment(file)` | `session.readAttachment({ sessionId, file })` | `{ data: Uint8Array, mimeType, bytes }`（线上 `data` 为 base64） |
+| `Runtime.observeSession(input, observer, options?)` | `session.observe({ sessionId, observeId, afterSeq? })` + `session.observeEvent` | `SessionObservationSnapshot`（通知按序经 `observer.onEvent` 交付） |
+| `Runtime.readSessionAttachment(input)` | `session.observeAttachment({ sessionId, file })` | `{ data: Uint8Array, mimeType, bytes }`（线上 `data` 为 base64） |
 | `Runtime.cancelSubagent({ parentSessionId, childSessionId })` | `subagent.cancel` | `void` |
 | `RuntimeSession.respondSubagentPermission(childSessionId, requestId, reply)` | `session.respondSubagentPermission({ sessionId, childSessionId, requestId, reply })` | `void` |
 
