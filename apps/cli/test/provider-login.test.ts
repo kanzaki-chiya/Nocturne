@@ -8,6 +8,7 @@ import {
   type RuntimeConfig,
   type RuntimeSession,
 } from "@nocturne/core";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { runSlashCommand } from "../src/commands.js";
 import { createSetupPrompts, runProviderSetupWizard, SetupAbort } from "../src/setup.js";
 import { runProviderLogin } from "@nocturne/tui/provider-login";
@@ -36,21 +37,21 @@ function bridge() {
 describe("CLI 服务商登录入口", () => {
   it("/provider login 交给 REPL 向导桥", async () => {
     const { deps, io } = bridge();
-    await runSlashCommand("/provider login openrouter", session, {} as never, io, deps);
+    await runSlashCommand("/provider login openrouter", session, createRuntimeStub(), io, deps);
     expect(deps.runLoginWizard).toHaveBeenCalledWith("openrouter");
   });
   it("/provider logout 删除凭据后刷新配置", async () => {
     const { deps, io, lines } = bridge();
-    await runSlashCommand("/provider logout openrouter", session, {} as never, io, deps);
+    await runSlashCommand("/provider logout openrouter", session, createRuntimeStub(), io, deps);
     expect(logoutProvider).toHaveBeenCalledWith(config, "openrouter");
     expect(deps.provider.updateProviders).toHaveBeenCalledWith(config);
     expect(lines).toContain("已退出登录 openrouter");
   });
   it("缺少名称与非交互入口给用法", async () => {
     const { deps, io, lines } = bridge();
-    await runSlashCommand("/provider login", session, {} as never, io, deps);
-    await runSlashCommand("/provider logout", session, {} as never, io, deps);
-    await runSlashCommand("/provider login openrouter", session, {} as never, io, {
+    await runSlashCommand("/provider login", session, createRuntimeStub(), io, deps);
+    await runSlashCommand("/provider logout", session, createRuntimeStub(), io, deps);
+    await runSlashCommand("/provider login openrouter", session, createRuntimeStub(), io, {
       provider: deps.provider,
     });
     expect(lines.filter((text) => text.includes("需要服务商名"))).toHaveLength(2);
@@ -59,10 +60,10 @@ describe("CLI 服务商登录入口", () => {
   it("安全 Core 错误保留，未知错误不回显 token", async () => {
     const { deps, io, lines } = bridge();
     deps.runLoginWizard.mockRejectedValueOnce(new ProviderLoginError("timeout"));
-    await runSlashCommand("/provider login openrouter", session, {} as never, io, deps);
+    await runSlashCommand("/provider login openrouter", session, createRuntimeStub(), io, deps);
     expect(lines.at(-1)).toContain(new ProviderLoginError("timeout").message);
     deps.runLoginWizard.mockRejectedValueOnce(new Error("mock-secret-token"));
-    await runSlashCommand("/provider login openrouter", session, {} as never, io, deps);
+    await runSlashCommand("/provider login openrouter", session, createRuntimeStub(), io, deps);
     expect(lines.join("\n")).not.toContain("mock-secret-token");
   });
   it("setup 向导：OpenRouter 选浏览器登录时以草稿（预设、名称、地址）和原 IO 调登录客户端", async () => {
@@ -107,7 +108,7 @@ describe("CLI 服务商登录入口", () => {
         },
       ],
     } as unknown as RuntimeConfig;
-    await runSlashCommand("/provider", session, {} as never, io, deps);
+    await runSlashCommand("/provider", session, createRuntimeStub(), io, deps);
     expect(lines.join("\n")).toContain("浏览器登录 • 有效 • 系统保存");
   });
 });

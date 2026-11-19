@@ -5,8 +5,8 @@ import {
   defaultJevReviewer,
   type JevReviewerConfig,
   type ProviderOverview,
-  type Runtime,
 } from "@nocturne/core";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { ReviewerDialog } from "../src/components/reviewer-dialog.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { detectTuiEnv, TuiEnvContext } from "../src/env.js";
@@ -34,18 +34,18 @@ function dialog(
 ) {
   const apply = vi.fn(() => Promise.resolve(undefined as string | undefined));
   const cancel = vi.fn();
-  const list = vi.fn(async (_config: JevReviewerConfig, _signal: AbortSignal) =>
+  const list = vi.fn(async (_config: JevReviewerConfig, _signal?: AbortSignal) =>
     options.fallback
       ? { models: ["jev-1.13-free"], warning: "模型列表拉取失败，已退回默认模型；也可手动输入" }
       : { models: ["jev-1.13-free", "jev-1.13"] },
   );
-  const runtime = {
+  const runtime = createRuntimeStub({
     getPreference: () => (options.accepted ? "yes" : undefined),
     defaultReviewer: async (endpoint: JevReviewerConfig["endpoint"], url?: string) =>
       defaultJevReviewer(endpoint, [borrowed], url),
     listReviewerModels: list,
     listReviewerProviders: async () => [borrowed],
-  } as unknown as Runtime;
+  });
   let mouse: DialogMouseFrame | undefined;
   const screen = render(
     createElement(

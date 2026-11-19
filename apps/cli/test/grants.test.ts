@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
-import type { Runtime, RuntimeConfig, RuntimeSession } from "@nocturne/core";
+import type { RuntimeConfig, RuntimeSession } from "@nocturne/core";
 import type { Grant } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { parseArgs } from "../src/args.js";
 import { projectGrants, sessionGrants } from "../src/grants.js";
 it("grants 参数：默认 list、工作区、编号和全撤销", () => {
@@ -59,10 +60,10 @@ it("会话内合并本会话 / 本项目、编号路由到对应 Core 入口", a
     listGrants: () => [first],
     revokeGrant: vi.fn(async () => undefined),
   } as unknown as RuntimeSession;
-  const runtime = {
+  const runtime = createRuntimeStub({
     listGrants: async () => [second],
     revokeGrant: vi.fn(async () => undefined),
-  } as unknown as Runtime;
+  });
   expect(await sessionGrants(runtime, session, [])).toContain("1. [本会话]");
   expect(await sessionGrants(runtime, session, [])).toContain("2. [本项目]");
   await sessionGrants(runtime, session, ["revoke", "1"]);

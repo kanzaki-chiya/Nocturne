@@ -9,6 +9,7 @@ import {
   type SettingsPatch,
   type ProviderOverview,
 } from "@nocturne/core";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { SettingsPage } from "../src/components/settings-page.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { detectTuiEnv, TuiEnvContext } from "../src/env.js";
@@ -104,7 +105,7 @@ function page(
   const shell = vi.fn(async () => undefined);
   const close = vi.fn();
   const preview = vi.fn();
-  const runtime = {
+  const runtime = createRuntimeStub({
     describeSettings: () => items,
     updateSettings: update,
     setPreference: preference,
@@ -119,9 +120,20 @@ function page(
     listReviewerModels: async () => ({ models: ["jev-1.13-free"] }),
     listRecentModels: () => [],
     listModels: () => [
-      { ref: { provider: "fake", model: "m" }, capabilities: { reasoningEffort: ["low", "high"] } },
+      {
+        ref: { provider: "fake", model: "m" },
+        capabilities: {
+          reasoning: "visible",
+          reasoningEffort: ["low", "high"],
+          imageInput: false,
+          promptCache: false,
+          toolCalls: true,
+          parallelToolCalls: false,
+          editTool: "edit",
+        },
+      },
     ],
-  } as unknown as Runtime;
+  });
   const session = {
     shellInfo: () => ({ selected: "cmd" }),
     setShell: shell,

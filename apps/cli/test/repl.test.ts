@@ -6,8 +6,9 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import type { Runtime, RuntimeSession, SessionSummary } from "@nocturne/core";
+import type { RuntimeSession, SessionSummary } from "@nocturne/core";
 import type { RuntimeEvent, TurnEndReason } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 
 import { runRepl } from "../src/repl.js";
 
@@ -170,9 +171,9 @@ function fakeSessionWithPendingTurn(interrupted: { value: boolean }) {
   return { session, settle: () => control };
 }
 
-const fakeRuntime = {
+const fakeRuntime = createRuntimeStub({
   listModels: () => [],
-} as unknown as Runtime;
+});
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
@@ -508,7 +509,7 @@ describe("REPL /resume 会话切换", () => {
     const s2 = fakeSession("s2");
     const s3 = fakeSession("s3");
     let count = 0;
-    const done = runRepl(s1, { listModels: () => [] } as unknown as Runtime, io, {
+    const done = runRepl(s1, createRuntimeStub({ listModels: () => [] }), io, {
       newSession: async () => ({ kind: "ok", session: ++count === 1 ? s2 : s3 }),
     });
     await tick();
@@ -527,13 +528,13 @@ describe("REPL /resume 会话切换", () => {
     const { io, stdin, stdoutChunks } = makeIo();
     const s1 = fakeSession("s1");
     const s2 = fakeSession("s2");
-    const rt = {
+    const rt = createRuntimeStub({
       listModels: () => [],
-      listSessions: (filter?: { cwd?: string }) => {
+      listSessions: (filter) => {
         expect(filter?.cwd).toBe("/ws");
         return Promise.resolve([summary("s2", 100), summary("s1", 200)]);
       },
-    } as unknown as Runtime;
+    });
     const calls: string[] = [];
     const done = runRepl(s1, rt, io, {
       switchSession: async (id) => {
@@ -559,13 +560,13 @@ describe("REPL /resume 会话切换", () => {
     const { io, stdin, stdoutChunks } = makeIo();
     const s1 = fakeSession("s1");
     const s2 = fakeSession("s2");
-    const rt = {
+    const rt = createRuntimeStub({
       listModels: () => [],
-      listSessions: (filter?: { cwd?: string }) => {
+      listSessions: (filter) => {
         expect(filter?.cwd).toBe("/ws");
         return Promise.resolve([summary("s2", 100), summary("s1", 200)]);
       },
-    } as unknown as Runtime;
+    });
     const calls: string[] = [];
     const done = runRepl(s1, rt, io, {
       switchSession: async (id) => {

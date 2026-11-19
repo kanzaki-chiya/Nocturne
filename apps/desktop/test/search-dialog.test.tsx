@@ -4,8 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScheduleTaskOverview } from "@nocturne/core/protocol";
-import { RPC_PROTOCOL_VERSION, type RpcClient, type RpcParams } from "@nocturne/rpc/client";
+import type { RuntimeSession } from "@nocturne/core";
+import type { DurableEvent, ScheduleTaskOverview } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
+import type { RpcClient, RpcParams } from "@nocturne/rpc/client";
+import { createMemoryTransportPair, createRpcServer } from "@nocturne/rpc/server";
 
 import { App } from "../src/App";
 import type { DesktopHost } from "../src/host";
@@ -569,6 +572,7 @@ describe("SearchDialog 组件", () => {
 
 function createTestHost() {
   const channels = new Map<number, (message: BackendMessage) => void>();
+  const clients = new Map<number, ReturnType<typeof createMemoryTransportPair>[0]>();
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   const cheap = { provider: "test", model: "cheap" };
   const sessions = [
@@ -581,6 +585,201 @@ function createTestHost() {
   const schedules = [
     makeSchedule("daily", "每日构建检查", "运行 pnpm test 并汇报", "2026-11-02T09:00:00Z"),
   ];
+  const makeSessionStub = (sid: string): RuntimeSession => {
+    const events: DurableEvent[] = [
+      {
+        type: "message.user",
+        seq: 1,
+        sessionId: sid,
+        turnId: "t1",
+        time: "2026-11-02T00:00:00Z",
+        payload: { messageId: "u1", content: [{ type: "text", text: `${sid} 提问` }] },
+      },
+      {
+        type: "turn.started",
+        seq: 2,
+        sessionId: sid,
+        turnId: "t1",
+        time: "2026-11-02T00:00:00Z",
+        payload: { turnIndex: 1 },
+      },
+      {
+        type: "tool.started",
+        seq: 3,
+        sessionId: sid,
+        turnId: "t1",
+        time: "2026-11-02T00:00:00Z",
+        payload: {
+          callId: "c1",
+          name: "read",
+          input: { path: "readme.md" },
+          subjects: [{ kind: "read", target: "readme.md" }],
+          permission: { action: "allow", source: "rule" },
+        },
+      },
+      {
+        type: "tool.completed",
+        seq: 4,
+        sessionId: sid,
+        turnId: "t1",
+        time: "2026-11-02T00:00:00Z",
+        payload: {
+          callId: "c1",
+          name: "read",
+          status: "ok",
+          modelContent: "工具输出里包含工具命中词",
+        },
+      },
+    ];
+    return {
+      id: sid,
+      warnings: [],
+      durableEvents: () => events,
+      subscribe: () => () => undefined,
+      state: () => ({
+        meta: {
+          id: sid,
+          formatVersion: 1,
+          createdAt: "2026-11-01T00:00:00Z",
+          cwd: `Z:/qa-${sid}`,
+          workspaceRoot: `Z:/qa-${sid}`,
+        },
+        config: { model: cheap, permissionPreset: "default" },
+        history: [],
+        lastSeq: 4,
+        turnCount: 1,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        status: "idle",
+      }),
+      describeContext: () => ({
+        system: [],
+        messages: [],
+        tools: [],
+        report: { estimatedTokens: 0, budgetTokens: 1000, totalChars: 0, sections: [] },
+      }),
+      shellInfo: () => ({
+        selected: "pwsh",
+        source: "settings",
+        effective: { kind: "pwsh", name: "pwsh", path: "pwsh.exe" },
+      }),
+      listShells: () => [],
+      rewindTargets: () => [],
+      turnChanges: () => [],
+      listGrants: () => [],
+      mcpServers: () => [],
+      fileIndex: async () => [],
+      reasoningEffortInfo: () => ({ current: "off", effective: "off", available: ["low", "high"] }),
+      visionInfo: () => ({ imageInput: true, available: true, model: undefined }),
+      pendingInputs: () => ({ items: [], paused: false }),
+      describeSkills: () => ({
+        skills: [],
+        warnings: [],
+        budget: {
+          usedTokens: 0,
+          limitTokens: 4000,
+          fullCount: 0,
+          nameCount: 0,
+          disabledCount: 0,
+          basis: "fallback",
+        },
+        scannedDirs: [],
+        homeDir: "C:/Users/me",
+      }),
+      describeExternalAgents: async () => ({ agents: [], warnings: [] }),
+      isIdle: () => true,
+      onIdle: () => () => undefined,
+      close: async () => undefined,
+    } as unknown as RuntimeSession;
+  };
+  const runtime = createRuntimeStub({
+    listSessions: async () => sessions,
+    searchSessions: async (query) =>
+      query === "工具命中词"
+        ? [
+            {
+              sessionId: "beta",
+              mtimeMs: NOW - 120_000,
+              snippet: "工具输出里包含工具命中词",
+              ranges: [{ start: 7, end: 12 }],
+              seq: 4,
+            },
+          ]
+        : query === "旧会话"
+          ? [{ sessionId: "archived", mtimeMs: NOW - 180_000 }]
+          : [],
+    listSchedules: async () => ({ tasks: schedules, scheduler: { running: true }, warnings: [] }),
+    scheduleHistory: async () => [],
+    listModels: () => [
+      {
+        ref: cheap,
+        capabilities: {
+          reasoning: "none",
+          imageInput: false,
+          promptCache: false,
+          toolCalls: true,
+          parallelToolCalls: false,
+          editTool: "edit",
+        },
+      },
+    ],
+    listRecentModels: () => [cheap],
+    defaultModel: () => cheap,
+    listReviewerProviders: async () => [],
+    listSuites: async () => [],
+    listGrantWorkspaces: async () => [],
+    listGrants: async () => [],
+    listSessionGrants: () => [],
+    workspaceBranches: async () => ({
+      isGit: false,
+      current: null,
+      branches: [],
+      dirty: false,
+      busy: false,
+    }),
+    describeSettings: () => [
+      {
+        key: "reasoningEffort",
+        effective: "low",
+        saved: undefined,
+        source: "default",
+        overridden: false,
+      },
+      {
+        key: "permissions.preset",
+        effective: "default",
+        saved: undefined,
+        source: "default",
+        overridden: false,
+      },
+    ],
+    resumeSession: async (id) => makeSessionStub(id),
+    listSubagents: async () => [],
+    listSubagentWorktrees: async () => [],
+    describeSkills: async () => ({
+      skills: [],
+      warnings: [],
+      budget: {
+        usedTokens: 0,
+        limitTokens: 4000,
+        fullCount: 0,
+        nameCount: 0,
+        disabledCount: 0,
+        basis: "fallback",
+      },
+      scannedDirs: [],
+      homeDir: "C:/Users/me",
+    }),
+    describeExternalAgents: async () => ({ agents: [], warnings: [] }),
+    describeMcpServers: async () => ({ servers: [], warnings: [] }),
+    describePlugins: async () => ({ plugins: [], warnings: [] }),
+    describeMemory: async () => ({
+      global: { enabled: false, dir: "C:/Users/me/.nocturne/memory", entries: [], warnings: [] },
+      otherProjects: [],
+    }),
+    describeModelRoles: () => [],
+    getPreference: () => undefined,
+    close: async () => undefined,
+  });
   const host: DesktopHost & { calls: typeof calls } = {
     calls,
     createChannel: (onMessage) => onMessage,
@@ -603,195 +802,46 @@ function createTestHost() {
     invoke: async (command, args) => {
       if (command === "node_probe") return { ok: true };
       if (command === "plain_workspace") return "Z:/plain";
-      if (command === "app_note" || command === "backend_close") return;
+      if (command === "app_note") return;
       if (command === "shell_log" || command === "key_diag_log" || command === "backend_stderr")
         return [];
       if (command === "backend_open") {
         const channel = args?.channel as (message: BackendMessage) => void;
         const id = channels.size + 1;
         channels.set(id, channel);
+        const [clientEnd, serverEnd] = createMemoryTransportPair();
+        const server = createRpcServer({
+          nocturneVersion: "test",
+          createRuntime: async () => ({ runtime }),
+        });
+        void server.serve(serverEnd);
+        clients.set(id, clientEnd);
+        clientEnd.onLine((line) => {
+          channels.get(id)?.({ kind: "lines", lines: [line] });
+        });
+        clientEnd.onClose(() => {
+          channels.get(id)?.({ kind: "closed", code: 0, stderr: [] });
+        });
         return id;
       }
-      if (command !== "backend_send") throw new Error(`未处理命令 ${command}`);
-      const backendId = Number(args?.backendId);
-      const channel = channels.get(backendId);
-      const req = JSON.parse(String(args?.line)) as {
-        id: number;
-        method: string;
-        params: Record<string, unknown> & { sessionId?: string; query?: string };
-      };
-      calls.push({ method: req.method, params: req.params });
-      const sid = req.params.sessionId;
-      let result: unknown = null;
-      switch (req.method) {
-        case "initialize":
-          result = { protocolVersion: RPC_PROTOCOL_VERSION, nocturneVersion: "test" };
-          break;
-        case "runtime.listSessions":
-          result = sessions;
-          break;
-        case "runtime.searchSessions":
-          result =
-            req.params.query === "工具命中词"
-              ? [
-                  {
-                    sessionId: "beta",
-                    mtimeMs: NOW - 120_000,
-                    snippet: "工具输出里包含工具命中词",
-                    ranges: [{ start: 7, end: 12 }],
-                    seq: 4,
-                  },
-                ]
-              : req.params.query === "旧会话"
-                ? [{ sessionId: "archived", mtimeMs: NOW - 180_000 }]
-                : [];
-          break;
-        case "schedule.list":
-          result = { tasks: schedules, scheduler: { running: true }, warnings: [] };
-          break;
-        case "schedule.history":
-          result = [];
-          break;
-        case "runtime.listModels":
-          result = [{ ref: cheap, capabilities: {} }];
-          break;
-        case "runtime.listRecentModels":
-          result = [cheap];
-          break;
-        case "runtime.defaultModel":
-          result = cheap;
-          break;
-        case "runtime.listReviewerProviders":
-        case "suites.list":
-        case "grants.workspaces":
-        case "grants.list":
-          result = [];
-          break;
-        case "runtime.describeSettings":
-          result = [
-            { key: "reasoningEffort", effective: "low" },
-            { key: "permissions.preset", effective: "default" },
-          ];
-          break;
-        case "runtime.resumeSession":
-          result = {
-            sessionId: sid,
-            meta: { id: sid, cwd: `Z:/qa-${sid}` },
-            config: { model: cheap, permissionPreset: "default" },
-            warnings: [],
-            lastSeq: 4,
-          };
-          break;
-        case "session.subscribe":
-          [
-            {
-              type: "message.user",
-              seq: 1,
-              payload: { messageId: "u1", content: [{ type: "text", text: `${sid} 提问` }] },
-            },
-            { type: "turn.started", seq: 2, payload: { turnIndex: 1 } },
-            {
-              type: "tool.started",
-              seq: 3,
-              payload: {
-                callId: "c1",
-                name: "read",
-                input: { path: "readme.md" },
-                subjects: [{ kind: "read", target: "readme.md" }],
-                permission: { action: "allow", source: "preset" },
-              },
-            },
-            {
-              type: "tool.completed",
-              seq: 4,
-              payload: {
-                callId: "c1",
-                name: "read",
-                status: "ok",
-                modelContent: "工具输出里包含工具命中词",
-              },
-            },
-          ].forEach((ev) => {
-            channel?.({
-              kind: "lines",
-              lines: [
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  method: "event",
-                  params: {
-                    sessionId: sid,
-                    event: {
-                      ...ev,
-                      sessionId: sid,
-                      turnId: "t1",
-                      time: "2026-11-02T00:00:00Z",
-                    },
-                  },
-                }),
-              ],
-            });
-          });
-          result = { lastSeq: 4 };
-          break;
-        case "session.state":
-          result = { config: { model: cheap, permissionPreset: "default" } };
-          break;
-        case "session.describeContext":
-          result = {
-            report: { estimatedTokens: 0, budgetTokens: 1000, totalChars: 0, sections: [] },
-          };
-          break;
-        case "session.shellInfo":
-          result = {
-            selected: "pwsh",
-            source: "settings",
-            effective: { kind: "pwsh", name: "pwsh", path: "pwsh.exe" },
-          };
-          break;
-        case "session.listShells":
-        case "session.rewindTargets":
-        case "session.turnChanges":
-        case "session.listGrants":
-        case "session.mcpServers":
-        case "session.fileIndex":
-        case "subagent.list":
-        case "subagent.worktrees":
-          result = [];
-          break;
-        case "session.reasoningEffortInfo":
-          result = { current: "off", effective: "off", available: ["low", "high"] };
-          break;
-        case "session.visionInfo":
-          result = { imageInput: true, available: true };
-          break;
-        case "session.pendingInputs":
-          result = { items: [] };
-          break;
-        case "session.describeSkills":
-        case "skills.describeSkills":
-          result = { skills: [], warnings: [], budgetChars: 4000, usedChars: 0 };
-          break;
-        case "session.describeExternalAgents":
-        case "agents.describeExternalAgents":
-          result = { agents: [], warnings: [] };
-          break;
-        case "remote.describe":
-          result = {
-            enabled: false,
-            registered: false,
-            connected: false,
-            devices: [],
-            agents: [],
-            pendingAgentPairings: [],
-          };
-          break;
-        default:
-          result = {};
+      if (command === "backend_close") {
+        clients.get(Number(args?.backendId))?.close();
+        return;
       }
-      channel?.({
-        kind: "lines",
-        lines: [JSON.stringify({ jsonrpc: "2.0", id: req.id, result })],
-      });
+      if (command !== "backend_send") throw new Error(`未处理命令 ${command}`);
+      const line = String(args?.line ?? "");
+      try {
+        const parsed = JSON.parse(line) as { method?: unknown; params?: unknown };
+        if (typeof parsed.method === "string") {
+          calls.push({
+            method: parsed.method,
+            params: (parsed.params ?? {}) as Record<string, unknown>,
+          });
+        }
+      } catch {
+        // 非 JSON 行不记录
+      }
+      clients.get(Number(args?.backendId))?.send(line);
     },
   };
   return host;

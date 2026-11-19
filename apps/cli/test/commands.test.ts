@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
 import { RuntimeCommandError, SessionError, BUILTIN_SLASH_COMMANDS } from "@nocturne/core";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { SLASH_COMMANDS } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand } from "../src/commands.js";
@@ -38,12 +39,12 @@ it("/agents 只读列表显示来源、启停、警告，不运行探测或写�
       warnings: ["忽略项目外部 agent"],
     }),
   });
-  const runtime = {
+  const runtime = createRuntimeStub({
     probeExternalAgent: vi.fn(),
     saveExternalAgent: vi.fn(),
     deleteExternalAgent: vi.fn(),
     setExternalAgentEnabled: vi.fn(),
-  } as unknown as Runtime;
+  });
   expect(await runSlashCommand("/agents", session, runtime, io)).toBe("handled");
   expect(lines.join("\n")).toContain("config.json");
   expect(lines.join("\n")).toContain("程序管理");
@@ -83,7 +84,7 @@ function fakeSession(overrides: Partial<RuntimeSession> = {}): RuntimeSession {
   } as unknown as RuntimeSession;
 }
 
-const fakeRuntime = {
+const fakeRuntimeOverrides: Partial<Runtime> = {
   listModels: () => [
     {
       ref: { provider: "p", model: "m1" },
@@ -95,6 +96,7 @@ const fakeRuntime = {
         promptCache: false,
         toolCalls: true,
         parallelToolCalls: false,
+        editTool: "edit",
       },
     },
     {
@@ -105,6 +107,7 @@ const fakeRuntime = {
         promptCache: false,
         toolCalls: true,
         parallelToolCalls: false,
+        editTool: "edit",
       },
     },
     {
@@ -116,13 +119,15 @@ const fakeRuntime = {
         promptCache: false,
         toolCalls: true,
         parallelToolCalls: false,
+        editTool: "edit",
       },
     },
   ],
   defaultModel: () => ({ provider: "p", model: "m2" }),
   listRecentModels: () => [],
-  updateProviders: () => undefined,
-} as unknown as Runtime;
+  updateProviders: async () => undefined,
+};
+const fakeRuntime = createRuntimeStub(fakeRuntimeOverrides);
 
 function capture() {
   const lines: string[] = [];
@@ -134,7 +139,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     const renameSession = vi.fn(async (_id: string, title: string) => {
       if (title === "锁") throw new SessionError("session_locked", "locked");
     });
-    const runtime = { ...fakeRuntime, renameSession };
+    const runtime = createRuntimeStub({ ...fakeRuntimeOverrides, renameSession });
     const { lines, io } = capture();
     const session = fakeSession();
     expect(await runSlashCommand("/rename  我的  标题  ", session, runtime, io)).toBe("handled");
@@ -152,8 +157,8 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     ]);
   });
   it("/settings 列出分组、生效值、来源和覆盖提示", async () => {
-    const runtime = {
-      ...fakeRuntime,
+    const runtime = createRuntimeStub({
+      ...fakeRuntimeOverrides,
       describeSettings: () => [
         {
           key: "permissions.preset",
@@ -162,11 +167,23 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
           source: "user",
           overridden: true,
         },
-        { key: "defaultModel", effective: "p/m1", source: "settings", overridden: false },
-        { key: "reasoningEffort", effective: "off", source: "default", overridden: false },
-        { key: "shell", effective: "cmd", source: "env", overridden: false },
+        {
+          key: "defaultModel",
+          effective: "p/m1",
+          saved: undefined,
+          source: "settings",
+          overridden: false,
+        },
+        {
+          key: "reasoningEffort",
+          effective: "off",
+          saved: undefined,
+          source: "default",
+          overridden: false,
+        },
+        { key: "shell", effective: "cmd", saved: undefined, source: "env", overridden: false },
       ],
-    } as Runtime;
+    });
     const { lines, io } = capture();
     await runSlashCommand("/settings", fakeSession(), runtime, io);
     expect(lines.join("\n")).toContain("已保存，但被 config.json 覆盖");
@@ -189,7 +206,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     await runSlashCommand(
       `/settings ${args}`,
       fakeSession(),
-      { ...fakeRuntime, updateSettings },
+      createRuntimeStub({ ...fakeRuntimeOverrides, updateSettings }),
       io,
     );
     expect(updateSettings).toHaveBeenCalledWith(patch);
@@ -211,7 +228,7 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     await runSlashCommand(
       `/settings ${args}`,
       fakeSession(),
-      { ...fakeRuntime, updateSettings },
+      createRuntimeStub({ ...fakeRuntimeOverrides, updateSettings }),
       io,
     );
     expect(lines.join("")).toContain("invalid_command");

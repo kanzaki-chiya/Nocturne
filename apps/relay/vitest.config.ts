@@ -26,6 +26,12 @@ export default defineConfig({
         ),
       },
       {
+        find: /^@nocturne\/core\/testing$/,
+        replacement: fileURLToPath(
+          new URL("../../packages/core/test/runtime-stub.ts", import.meta.url),
+        ),
+      },
+      {
         find: /^@nocturne\/core$/,
         replacement: fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
       },

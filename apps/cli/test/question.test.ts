@@ -5,8 +5,9 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { RuntimeSession } from "@nocturne/core";
 import type { QuestionItem, RuntimeEvent, TurnEndReason } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 
 import { runRepl } from "../src/repl.js";
 
@@ -30,7 +31,7 @@ function makeIo() {
   };
 }
 
-const fakeRuntime = { listModels: () => [] } as unknown as Runtime;
+const fakeRuntime = createRuntimeStub({ listModels: () => [] });
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
 interface QuestionReplySeen {

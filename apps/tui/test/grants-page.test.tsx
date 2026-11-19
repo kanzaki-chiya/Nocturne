@@ -1,8 +1,9 @@
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { expect, it, vi } from "vitest";
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { RuntimeSession } from "@nocturne/core";
 import type { Grant } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { GrantsPage } from "../src/components/grants-page.js";
 import { runSlash } from "../src/commands.js";
 import { ToolRow } from "../src/components/tool-row.js";
@@ -40,12 +41,11 @@ it("工具已授权标签在普通屏幕和全屏一致", () => {
 function fixture() {
   let entries: Grant[] = [{ kind: "shell", target: "git status", createdAt: "2026-10-20" }];
   let trusted = false;
-  const runtime = {
+  const runtime = createRuntimeStub({
     listGrantWorkspaces: vi.fn(async () => [
       { workspace: "Z:/project", grantCount: entries.length, trusted, hasProjectConfig: true },
     ]),
     listGrants: vi.fn(async () => entries),
-    onGrantsChanged: () => () => undefined,
     revokeGrant: vi.fn(async () => {
       entries = [];
     }),
@@ -53,19 +53,22 @@ function fixture() {
       entries = [];
     }),
     describeProject: vi.fn(async () => ({
+      workspace: "Z:/project",
+      trusted,
+      hasProjectConfig: true,
       mcpServers: [{ name: "test", command: "node test.mjs --stdio" }],
       hooks: [{ event: "PreToolUse", count: 2 }],
       relaxedRuleCount: 3,
     })),
-    setWorkspaceTrusted: vi.fn(async (input: { trusted: boolean }) => {
+    setWorkspaceTrusted: vi.fn(async (input: { workspace: string; trusted: boolean }) => {
       trusted = input.trusted;
     }),
-  };
+  });
   const session = { state: () => ({ meta: { workspaceRoot: "Z:/project" } }) } as RuntimeSession;
   const close = vi.fn();
   const screen = render(
     createElement(GrantsPage, {
-      runtime: runtime as unknown as Runtime,
+      runtime,
       session,
       width: 110,
       height: 28,

@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { RuntimeSession } from "@nocturne/core";
 import { createSessionView, type UsageStats } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { runSlash } from "../src/commands.js";
 
 it("TUI /cost shows current session and 30-day model totals", async () => {
@@ -53,10 +54,23 @@ it("TUI /cost shows current session and 30-day model totals", async () => {
     skippedFiles: 0,
   };
   const usageStats = vi.fn(async () => stats);
-  const runtime = {
+  const runtime = createRuntimeStub({
     usageStats,
-    listModels: () => [{ ref: view.config.model, pricing: { input: 2, output: 8 } }],
-  } as unknown as Runtime;
+    listModels: () => [
+      {
+        ref: { provider: "p", model: "m" },
+        capabilities: {
+          reasoning: "none",
+          imageInput: false,
+          promptCache: false,
+          toolCalls: true,
+          parallelToolCalls: false,
+          editTool: "edit",
+        },
+        pricing: { input: 2, output: 8 },
+      },
+    ],
+  });
   const result = await runSlash("/cost", {} as RuntimeSession, undefined, { runtime, view });
   expect(result.kind).toBe("message");
   if (result.kind !== "message") throw new Error("expected cost text");

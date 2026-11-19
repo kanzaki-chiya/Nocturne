@@ -10,6 +10,9 @@ import {
   type UserEntry,
   type ToolEntry,
 } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
+
+type WorktreeRecord = Awaited<ReturnType<Runtime["listSubagentWorktrees"]>>[number];
 
 import { PendingInputsPanel, pendingPanelRows } from "../src/components/pending-inputs.js";
 import { StatusBar } from "../src/components/status-bar.js";
@@ -154,12 +157,12 @@ describe("TUI 后台子代理", () => {
       startedAt: new Date(Date.now() - 5000).toISOString(),
     } as SubagentSummary;
     const cancelSubagent = vi.fn(() => Promise.resolve());
-    const runtime = {
+    const runtime = createRuntimeStub({
       listSubagents: () =>
         Promise.resolve([summary, { ...summary, childSessionId: "c2", background: false }]),
       cancelSubagent,
       listSubagentWorktrees: () => Promise.resolve([]),
-    } as unknown as Runtime;
+    });
     const onClose = vi.fn();
     const ui = render(
       inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={onClose} />),
@@ -236,25 +239,56 @@ describe("TUI 后台子代理", () => {
       startedAt: new Date().toISOString(),
     } as SubagentSummary;
     const deleteSubagentWorktree = vi.fn(() => Promise.resolve());
-    const runtime = {
+    const worktreeRecord = (
+      partial: Partial<WorktreeRecord> & { childSessionId: string; branch: string },
+    ): WorktreeRecord => ({
+      parentSessionId: "p",
+      repository: "/repo",
+      worktree: `/wt/${partial.childSessionId}`,
+      base: "base",
+      snapshot: false,
+      cwd: `/wt/${partial.childSessionId}`,
+      workspaceRoot: "/repo",
+      task: "task",
+      includeSkipped: false,
+      ...partial,
+    });
+    const runtime = createRuntimeStub({
       listSubagents: () => Promise.resolve([summary]),
       listSubagentWorktrees: () =>
         Promise.resolve([
-          { childSessionId: "c1", branch: "nocturne/c1" },
-          {
+          worktreeRecord({ childSessionId: "c1", branch: "nocturne/c1" }),
+          worktreeRecord({
             childSessionId: "c9",
             branch: "nocturne/c9",
-            changes: { files: [{ path: "a" }, { path: "b" }] },
-          },
-          {
+            changes: {
+              branch: "nocturne/c9",
+              base: "base",
+              head: "head",
+              snapshot: false,
+              worktree: "/wt/c9",
+              files: [
+                { path: "a", status: "modified", additions: 1, deletions: 0 },
+                { path: "b", status: "modified", additions: 1, deletions: 0 },
+              ],
+            },
+          }),
+          worktreeRecord({
             childSessionId: "c8",
             branch: "nocturne/c8",
             applied: true,
-            changes: { files: [{ path: "c" }] },
-          },
+            changes: {
+              branch: "nocturne/c8",
+              base: "base",
+              head: "head",
+              snapshot: false,
+              worktree: "/wt/c8",
+              files: [{ path: "c", status: "modified", additions: 1, deletions: 0 }],
+            },
+          }),
         ]),
       deleteSubagentWorktree,
-    } as unknown as Runtime;
+    });
     const onClose = vi.fn();
     const ui = render(
       inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={onClose} />),
@@ -297,12 +331,26 @@ describe("TUI 后台子代理", () => {
       taskSummary: "改登录",
       startedAt: new Date().toISOString(),
     } as SubagentSummary;
-    const runtime = {
+    const runtime = createRuntimeStub({
       listSubagents: () => Promise.resolve([summary]),
       // c1 有工作树记录，即隔离运行
       listSubagentWorktrees: () =>
-        Promise.resolve([{ childSessionId: "c1", branch: "nocturne/c1" }]),
-    } as unknown as Runtime;
+        Promise.resolve([
+          {
+            childSessionId: "c1",
+            parentSessionId: "p",
+            repository: "/repo",
+            worktree: "/wt/c1",
+            branch: "nocturne/c1",
+            base: "base",
+            snapshot: false,
+            cwd: "/wt/c1",
+            workspaceRoot: "/repo",
+            task: "改登录",
+            includeSkipped: false,
+          },
+        ]),
+    });
     const ui = render(
       inEnv(<Subagents runtime={runtime} sessionId="p" width={80} onClose={vi.fn()} />),
     );

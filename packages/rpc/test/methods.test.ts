@@ -14,6 +14,7 @@ import {
   loadConfig,
 } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { encodeBase64 } from "@nocturne/rpc/client";
 import {
   CONFIG_METHODS,
@@ -45,7 +46,7 @@ const coreIndexPath = path.resolve(here, "../../core/src/index.ts");
 function methodNames(): readonly string[] {
   return createRpcServer({
     nocturneVersion: "0",
-    createRuntime: () => Promise.resolve({ runtime: {} as never }),
+    createRuntime: () => Promise.resolve({ runtime: createRuntimeStub() }),
   }).methods;
 }
 

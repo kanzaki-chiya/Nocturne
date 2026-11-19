@@ -1,7 +1,8 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { RuntimeSession } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { completeLine } from "../src/completer.js";
 import { renderEvent, renderPermissionPrompt } from "../src/render.js";
 import { runRepl } from "../src/repl.js";
@@ -29,7 +30,7 @@ describe("CLI 文件引用", () => {
       fileIndex,
       interrupt: vi.fn(),
     } as unknown as RuntimeSession;
-    const runtime = { listModels: () => [] } as unknown as Runtime;
+    const runtime = createRuntimeStub({ listModels: () => [] });
     const done = runRepl(session, runtime, { stdin, stdout, stderr: new PassThrough() });
     try {
       await vi.waitFor(() => expect(output).toContain("nctrn>"));

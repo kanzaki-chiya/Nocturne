@@ -5,6 +5,7 @@ import { PassThrough, Writable } from "node:stream";
 import { afterEach, expect, it } from "vitest";
 
 import { createRuntime, FakeProvider } from "@nocturne/core";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
 
 import { cleanupTmp, MODEL, tmpDir, until } from "./harness.js";
@@ -131,7 +132,7 @@ it("输出 EPIPE：停止发送并正常收尾", async () => {
   });
   const server = createRpcServer({
     nocturneVersion: "test",
-    createRuntime: async () => ({ runtime: undefined as never }),
+    createRuntime: async () => ({ runtime: createRuntimeStub({ close: () => Promise.resolve() }) }),
   });
   const served = server.serve(createStdioTransport(input, output));
   input.write(encode(init));

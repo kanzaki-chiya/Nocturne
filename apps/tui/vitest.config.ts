@@ -13,6 +13,10 @@ export default defineConfig({
         replacement: path.resolve(here, "../../packages/core/src/protocol/index.ts"),
       },
       {
+        find: /^@nocturne\/core\/testing$/,
+        replacement: path.resolve(here, "../../packages/core/test/runtime-stub.ts"),
+      },
+      {
         find: /^@nocturne\/core$/,
         replacement: path.resolve(here, "../../packages/core/src/index.ts"),
       },

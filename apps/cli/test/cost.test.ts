@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
-import type { Runtime, RuntimeSession } from "@nocturne/core";
+import type { RuntimeSession } from "@nocturne/core";
 import type { DurableEvent, UsageStats } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { runSlashCommand } from "../src/commands.js";
 
 it("CLI /cost shows current session and 30-day totals without model calls", async () => {
@@ -50,7 +51,7 @@ it("CLI /cost shows current session and 30-day totals without model calls", asyn
     skippedFiles: 0,
   };
   const usageStats = vi.fn(async () => stats);
-  const runtime = { usageStats, listModels: () => [] } as unknown as Runtime;
+  const runtime = createRuntimeStub({ usageStats, listModels: () => [] });
   const session = { durableEvents: () => events } as unknown as RuntimeSession;
   const print = vi.fn();
   expect(await runSlashCommand("/cost", session, runtime, { print })).toBe("handled");
@@ -62,16 +63,24 @@ it("CLI /cost shows current session and 30-day totals without model calls", asyn
   expect(text).toContain("合计 6,000 tokens · $5.00");
   expect(usageStats).toHaveBeenCalledWith({ days: 30 });
 
-  const vendorRuntime = {
+  const vendorRuntime = createRuntimeStub({
     usageStats,
     listModels: () => [
       {
         ref: { provider: "p", model: "m" },
+        capabilities: {
+          reasoning: "none",
+          imageInput: false,
+          promptCache: false,
+          toolCalls: true,
+          parallelToolCalls: false,
+          editTool: "edit",
+        },
         pricing: { input: 2, output: 8 },
         pricingSource: "vendor",
       },
     ],
-  } as unknown as Runtime;
+  });
   expect(await runSlashCommand("/cost", session, vendorRuntime, { print })).toBe("handled");
   const vendorText = print.mock.calls[1]?.[0] as string;
   expect(vendorText).toContain("预估费用 $0.00（厂商价）");

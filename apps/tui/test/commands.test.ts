@@ -13,6 +13,7 @@ import {
   type SessionShellInfo,
 } from "@nocturne/core";
 import { BUILTIN_SLASH_COMMANDS } from "@nocturne/core/protocol";
+import { createRuntimeStub } from "@nocturne/core/testing";
 
 import { contextLines, modelErrorText, runSlash, type ProviderBridge } from "../src/commands.js";
 import { SLASH_COMMANDS, cliHelpText, completeSlash, helpLines } from "../src/slash-catalog.js";
@@ -120,7 +121,7 @@ describe("TUI /rename", () => {
     const renameSession = vi.fn(async (_id: string, title: string) => {
       if (title === "锁") throw new SessionError("session_locked", "locked");
     });
-    const rt = { renameSession } as unknown as Runtime;
+    const rt = createRuntimeStub({ renameSession });
     const context = { runtime: rt };
     const session = fakeSession();
     expect(await runSlash("/rename  我的  标题  ", session, undefined, context)).toEqual({
@@ -271,10 +272,10 @@ describe("TUI /provider 启停（ADR-0054 §5）", () => {
   } satisfies ProviderBridge;
 
   const runtime = (): Runtime =>
-    ({
+    createRuntimeStub({
       setProviderEnabled: vi.fn(async () => undefined),
       setModelsEnabled: vi.fn(async () => undefined),
-    }) as unknown as Runtime;
+    });
 
   it("/provider disable <名称> 写停用；enable 写启用", async () => {
     const rt = runtime();
