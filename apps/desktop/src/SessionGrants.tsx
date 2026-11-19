@@ -4,12 +4,17 @@ import type { Grant } from "@nocturne/core/protocol";
 import { grantKind } from "./GrantsPage";
 import "./grants.css";
 
-export function useSessionGrants(session: RpcSession | undefined, client: RpcClient | undefined) {
+export function useSessionGrants(
+  session: RpcSession | undefined,
+  client: RpcClient | undefined,
+  /** 只读观察模式（ADR-0099）：跳过 session.listGrants，升级为 live 后再拉取 */
+  observed = false,
+) {
   const [grants, setGrants] = useState<Grant[]>([]);
   const [error, setError] = useState("");
   const generation = useRef(0);
   const refresh = useCallback(async () => {
-    if (!session) return;
+    if (!session || observed) return;
     const version = ++generation.current;
     try {
       const entries = await session.listGrants();
@@ -20,9 +25,10 @@ export function useSessionGrants(session: RpcSession | undefined, client: RpcCli
       if (version === generation.current)
         setError(reason instanceof Error ? reason.message : String(reason));
     }
-  }, [session]);
+  }, [session, observed]);
   useEffect(() => {
     setGrants([]);
+    if (observed) return;
     void refresh();
     const unsubscribe = client?.onNotification("grants.changed", () => {
       void refresh();
@@ -31,7 +37,7 @@ export function useSessionGrants(session: RpcSession | undefined, client: RpcCli
       generation.current++;
       unsubscribe?.();
     };
-  }, [client, refresh]);
+  }, [client, refresh, observed]);
   return { grants, error, refresh };
 }
 export function SessionGrants({

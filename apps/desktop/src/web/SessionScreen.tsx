@@ -122,8 +122,9 @@ export function SessionScreen({
   onChanged: () => void;
 }) {
   const { session, view } = entry;
+  const observed = entry.observed === true;
   const [todosCollapsed, setTodosCollapsed] = useState(() => loadTodosCollapsed());
-  const { grants } = useSessionGrants(session, entry.client);
+  const { grants } = useSessionGrants(session, entry.client, observed);
   // 查询函数按会话稳定：圆环的刷新边界由 replaying/key 决定，不因父组件重绘重建。
   const loadContext = useCallback(() => session.describeContext(), [session]);
   const controls = useSessionControls(
@@ -134,6 +135,7 @@ export function SessionScreen({
     0,
     entry.workspace,
     entry.replaying,
+    observed,
   );
   const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
@@ -148,6 +150,7 @@ export function SessionScreen({
     sessions.forkDrafts.delete(session.id);
   }, [sessions, session.id]);
   useEffect(() => {
+    if (observed) return;
     let active = true;
     void session.describeSkills().then(
       (result) => {
@@ -168,7 +171,7 @@ export function SessionScreen({
     return () => {
       active = false;
     };
-  }, [session, view.turnCount]);
+  }, [session, view.turnCount, observed]);
 
   const running =
     busy || entry.busy || view.currentTurn !== undefined || view.status === "compacting";
@@ -217,6 +220,9 @@ export function SessionScreen({
         if (input.text !== "") void session.recordInputHistory(input.text).catch(() => undefined);
         onChanged();
         return true;
+      }
+      if (entry.observed === true) {
+        await sessions.ensureLive(session.id);
       }
       await submitAccepted(
         entry,
@@ -364,6 +370,7 @@ export function SessionScreen({
         busy={false}
         hidePersistentPermissions
         hideRequests
+        virtualize
         subscribeEvents={subscribeEvents}
         ensembleRecipientLabel={`@${ensembleMember.name}`}
       />
@@ -443,6 +450,7 @@ export function SessionScreen({
         entryKey={(key) => entry.outgoing.keys.get(key) ?? key}
         hidePersistentPermissions
         hideRequests
+        virtualize
         subscribeEvents={subscribeEvents}
         ensembleRecipientLabel={ensembleMember ? `@${ensembleMember.name}` : undefined}
         onOpenSuiteThread={

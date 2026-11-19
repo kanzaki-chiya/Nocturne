@@ -1,16 +1,20 @@
 import {
+  allPendingPermissions,
   createSessionView,
+  reduceSessionView,
   type ModelRef,
   type PendingInputsSnapshot,
   type ReasoningEffort,
   type RuntimeEvent,
   type RewindMode,
+  type SessionReadSnapshot,
   type SessionView,
   type SuiteRecord,
   type TurnChangeDiff,
   type TurnChanges,
 } from "@nocturne/core/protocol";
 import {
+  RpcError,
   trackSessionView,
   type RpcClient,
   type RpcSession,
@@ -65,7 +69,84 @@ export interface PhoneSession {
   member?: boolean;
   /** 组曲指挥会话对应的组曲 id（重连时经 `openSuite` 恢复） */
   suiteId?: string;
+  /**
+   * 只读快照观察态（ADR-0099）：通过 `session.observe` 免唤醒打开，服务端尚未 resume/取锁。
+   * 需要交互（发送、批准、回答等）或服务端变为 `openHere` 时经 `ensureLive` 按 `afterSeq` 无损升级。
+   */
+  observed?: boolean;
 }
+
+function isObserveUnsupportedError(error: unknown): boolean {
+  return (
+    error instanceof RpcError && (error.code === "method_not_found" || error.rpcCode === -32601)
+  );
+}
+
+interface ObservedSessionHandle {
+  session: RpcSession;
+  attachLive(live: RpcSession): void;
+  live(): RpcSession | undefined;
+}
+
+/**
+ * 为只读观察态会话构造稳定的 `RpcSession` 包装器（ADR-0099）：
+ * - `readAttachment` 在只读态走 `runtime.readSessionAttachment`，不唤醒会话、不取锁；
+ * - `close` / `interrupt` 在只读态为空操作；
+ * - 其他任何会话方法首次调用时先 `ensureLive()` 按 `afterSeq` 无损升级，再透传给真实句柄；
+ * - 升级前后 `session` 对象引用不变，避免控件和面板状态重置。
+ */
+function createObservedSession(
+  id: string,
+  client: RpcClient,
+  ensureLive: () => Promise<RpcSession>,
+): ObservedSessionHandle {
+  let live: RpcSession | undefined;
+  const template = client.session(id) as unknown as Record<string, unknown>;
+  const wrapper: Record<string, unknown> = { id };
+  for (const key of Object.keys(template)) {
+    if (key === "id") continue;
+    if (key === "readAttachment") {
+      wrapper[key] = (file: string) =>
+        live !== undefined
+          ? live.readAttachment(file)
+          : client.runtime.readSessionAttachment({ sessionId: id, file });
+      continue;
+    }
+    if (key === "close") {
+      wrapper[key] = () => (live !== undefined ? live.close() : Promise.resolve());
+      continue;
+    }
+    if (key === "interrupt") {
+      wrapper[key] = () => {
+        live?.interrupt();
+      };
+      continue;
+    }
+    if (typeof template[key] === "function") {
+      const invoke = (target: RpcSession, args: unknown[]) => {
+        const fn = (target as unknown as Record<string, unknown>)[key];
+        if (typeof fn !== "function") {
+          throw new Error(`会话不支持方法：${key}`);
+        }
+        return (fn as (...a: unknown[]) => unknown).apply(target, args);
+      };
+      wrapper[key] = (...args: unknown[]) => {
+        if (live !== undefined) {
+          return invoke(live, args);
+        }
+        return ensureLive().then((real) => invoke(real, args));
+      };
+    }
+  }
+  return {
+    session: wrapper as unknown as RpcSession,
+    attachLive(real) {
+      live = real;
+    },
+    live: () => live,
+  };
+}
+
 function hasActiveSuiteThreads(entry: PhoneSession): boolean {
   return (
     entry.view.suite?.threads.some(
@@ -211,7 +292,10 @@ export class PhoneSessions {
   client: RpcClient | undefined;
   private generation = 0;
   private readonly opening = new Map<string, Promise<PhoneSession>>();
+  private readonly upgrading = new Map<string, Promise<PhoneSession>>();
+  private readonly observedHandles = new Map<PhoneSession, ObservedSessionHandle>();
   private readonly turnStarts = new Map<string, number>();
+  private observeUnsupported = false;
   private selectedId: string | undefined;
   private pinnedId: string | undefined;
   private readonly closing = new Map<string, Promise<void>>();
@@ -247,6 +331,22 @@ export class PhoneSessions {
 
   private async closeIfIdle(entry: PhoneSession): Promise<void> {
     const id = entry.session.id;
+    if (entry.observed === true) {
+      if (
+        id === this.selectedId ||
+        id === this.pinnedId ||
+        entry.dead ||
+        entry.replaying ||
+        this.upgrading.has(id) ||
+        this.opened.get(id) !== entry
+      )
+        return;
+      this.opened.delete(id);
+      this.observedHandles.delete(entry);
+      this.turnStarts.delete(id);
+      this.changed();
+      return;
+    }
     if (entry.member === true) {
       if (id === this.selectedId || entry.dead || entry.replaying || this.opened.get(id) !== entry)
         return;
@@ -308,6 +408,8 @@ export class PhoneSessions {
   ) {}
   async connected(client: RpcClient): Promise<void> {
     this.client = client;
+    this.observeUnsupported = false;
+    this.upgrading.clear();
     const generation = ++this.generation;
     // 电脑上新建或分叉了会话：旧后台没有这条通知，退化为 App 回前台时刷新
     this.unsubscribeChanged?.();
@@ -322,13 +424,15 @@ export class PhoneSessions {
       if (
         id !== this.selectedId &&
         id !== this.pinnedId &&
-        (entry.member === true ||
+        (entry.observed === true ||
+          entry.member === true ||
           (phoneStatus(entry) === "idle" &&
             entry.pendingInputs.items.length === 0 &&
             entry.view.ensemble?.status !== "active" &&
             !hasActiveSuiteThreads(entry)))
       ) {
         this.opened.delete(id);
+        this.observedHandles.delete(entry);
         this.turnStarts.delete(id);
         pruned = true;
         continue;
@@ -343,7 +447,16 @@ export class PhoneSessions {
       const run =
         entry.suiteId !== undefined
           ? this.resumeSuite(client, entry.suiteId, entry.workspace, entry.view, generation)
-          : this.resume(client, id, entry.workspace, entry.view, generation, entry.member === true);
+          : entry.observed === true
+            ? this.observe(client, id, entry.workspace, entry.view, generation)
+            : this.resume(
+                client,
+                id,
+                entry.workspace,
+                entry.view,
+                generation,
+                entry.member === true,
+              );
       this.opening.set(id, run);
       try {
         const restored = await run;
@@ -363,6 +476,7 @@ export class PhoneSessions {
     this.stopListening();
     this.loaded = false;
     this.opening.clear();
+    this.upgrading.clear();
     this.closing.clear();
     this.client = undefined;
     for (const entry of this.opened.values()) entry.dead = true;
@@ -377,6 +491,8 @@ export class PhoneSessions {
     this.stopListening();
     this.loaded = false;
     this.opening.clear();
+    this.upgrading.clear();
+    this.observedHandles.clear();
     this.closing.clear();
     this.client = undefined;
     this.opened.clear();
@@ -455,7 +571,13 @@ export class PhoneSessions {
     const generation = this.generation;
     for (const item of items) {
       if (generation !== this.generation) return;
-      if (this.opened.get(item.id)?.dead === false) continue;
+      const existing = this.opened.get(item.id);
+      if (existing?.dead === false) {
+        if (existing.observed === true) {
+          await this.ensureLive(item.id).catch(() => undefined);
+        }
+        continue;
+      }
       const closing = this.closing.get(item.id);
       if (closing) await closing.catch(() => undefined);
       if (generation !== this.generation) return;
@@ -463,35 +585,13 @@ export class PhoneSessions {
       if (entry) await this.closeIfIdle(entry).catch(() => undefined);
     }
   }
-  private async attach(
-    client: RpcClient,
-    result: { session: RpcSession; opened: SessionOpened },
-    workspace: string,
-    view = createSessionView(),
-    member = false,
-    suiteId?: string,
-  ): Promise<PhoneSession> {
-    const { session } = result;
-    const previous = this.opened.get(session.id);
-    const listeners = previous?.listeners ?? new Set<() => void>();
-    const entry: PhoneSession = {
-      client,
-      session,
-      workspace,
-      view,
-      warnings: result.opened.warnings,
-      dead: false,
-      replaying: true,
-      listeners,
-      turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
-      changeDiffs: new Map(),
-      pendingInputs: { items: [], paused: false },
-      outgoing: emptyOutgoing(),
-      busy: false,
-      ...(member ? { member: true } : {}),
-      ...(suiteId !== undefined ? { suiteId } : {}),
-    };
-    this.opened.set(session.id, entry);
+  private async bindLiveTracker(
+    entry: PhoneSession,
+    session: RpcSession,
+    removeOnError: boolean,
+    onSubscribed?: () => void,
+  ): Promise<void> {
+    const view = entry.view;
     // 与桌面 conversations.ts 一致：订阅窗口期间的新持久事件按 event.time 判断。
     const subscribeStart = Date.now();
     let subscribed = false;
@@ -532,7 +632,7 @@ export class PhoneSessions {
         },
       );
     } catch (error) {
-      if (this.opened.get(session.id) === entry) {
+      if (removeOnError && this.opened.get(session.id) === entry) {
         this.opened.delete(session.id);
         this.turnStarts.delete(session.id);
         this.changed();
@@ -541,9 +641,10 @@ export class PhoneSessions {
     }
     if (this.opened.get(session.id) !== entry || entry.dead) {
       await entry.tracker.stop().catch(() => undefined);
-      return entry;
+      return;
     }
     subscribed = true;
+    onSubscribed?.();
     entry.replaying = false;
     void syncShellSnapshot(session, view)
       .then(() => {
@@ -568,11 +669,178 @@ export class PhoneSessions {
     for (const listener of entry.listeners) listener();
     this.changed();
     void this.refreshTurnChanges(entry);
+  }
+  private async attach(
+    client: RpcClient,
+    result: { session: RpcSession; opened: SessionOpened },
+    workspace: string,
+    view = createSessionView(),
+    member = false,
+    suiteId?: string,
+  ): Promise<PhoneSession> {
+    const { session } = result;
+    const previous = this.opened.get(session.id);
+    const listeners = previous?.listeners ?? new Set<() => void>();
+    const entry: PhoneSession = {
+      client,
+      session,
+      workspace,
+      view,
+      warnings: result.opened.warnings,
+      dead: false,
+      replaying: true,
+      listeners,
+      turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
+      changeDiffs: new Map(),
+      pendingInputs: { items: [], paused: false },
+      outgoing: emptyOutgoing(),
+      busy: false,
+      ...(member ? { member: true } : {}),
+      ...(suiteId !== undefined ? { suiteId } : {}),
+    };
+    this.opened.set(session.id, entry);
+    await this.bindLiveTracker(entry, session, true);
     return entry;
+  }
+  /**
+   * 顶层会话只读快照打开（ADR-0099）：不调用 `resumeSession`，不取锁；
+   * 仅通过 `session.observe` 回放持久事件并折叠出完整 `SessionView`。
+   * 旧后台不支持 `session.observe`（`-32601` / `method_not_found`）时自动退回 `resume`。
+   */
+  private async observe(
+    client: RpcClient,
+    id: string,
+    workspace: string,
+    existingView: SessionView | undefined,
+    generation: number,
+  ): Promise<PhoneSession> {
+    const view = existingView ?? createSessionView();
+    const previous = this.opened.get(id);
+    const listeners = previous?.listeners ?? new Set<() => void>();
+    const handle = createObservedSession(id, client, async () => {
+      await this.ensureLive(id);
+      const live = handle.live();
+      if (live === undefined) throw new Error("会话尚未就绪");
+      return live;
+    });
+    const entry: PhoneSession = {
+      client,
+      session: handle.session,
+      workspace,
+      view,
+      warnings: [],
+      dead: false,
+      replaying: true,
+      observed: true,
+      listeners,
+      turnChanges: previous?.turnChanges ?? new Map<number, TurnChanges>(),
+      changeDiffs: new Map(),
+      pendingInputs: { items: [], paused: false },
+      outgoing: emptyOutgoing(),
+      busy: false,
+    };
+    this.observedHandles.set(entry, handle);
+    this.opened.set(id, entry);
+    let snapshot: SessionReadSnapshot;
+    try {
+      snapshot = await client.runtime.observeSession(
+        { sessionId: id, afterSeq: view.lastSeq },
+        {
+          onEvent: (event) => {
+            if (generation !== this.generation || this.opened.get(id) !== entry || entry.dead)
+              return;
+            reduceSessionView(view, event);
+            const at = Date.parse(event.time);
+            if (event.type === "turn.started" && !Number.isNaN(at)) {
+              this.turnStarts.set(id, at);
+            }
+            this.onEvent?.(id, event.type, event.seq, false, event.time);
+            this.onSessionEvent?.(id, event, false, entry, this.turnStarts.get(id));
+          },
+        },
+      );
+    } catch (error) {
+      if (this.opened.get(id) === entry) {
+        this.opened.delete(id);
+        this.observedHandles.delete(entry);
+        this.turnStarts.delete(id);
+        this.changed();
+      }
+      if (generation === this.generation && isObserveUnsupportedError(error)) {
+        this.observeUnsupported = true;
+        return this.resume(client, id, workspace, existingView, generation, false);
+      }
+      throw error;
+    }
+    if (generation !== this.generation) throw new Error("电脑连接已切换");
+    if (this.opened.get(id) !== entry || entry.dead) return entry;
+    if (snapshot.cwd !== "") entry.workspace = snapshot.cwd;
+    entry.replaying = false;
+    for (const listener of entry.listeners) listener();
+    this.changed();
+    if (
+      snapshot.openHere ||
+      view.currentTurn !== undefined ||
+      view.status === "compacting" ||
+      allPendingPermissions(view).length > 0 ||
+      view.pendingQuestion !== undefined
+    ) {
+      void this.ensureLive(id).catch(() => undefined);
+    }
+    return entry;
+  }
+  /**
+   * 将只读观察态会话原地无损升级为实时会话（ADR-0099）：
+   * 调 `resumeSession` 后按 `afterSeq: entry.view.lastSeq` 续接 `session.subscribe`，
+   * 既不重复回放也不丢事件；并发调用合并为同一次升级。
+   */
+  async ensureLive(id: string): Promise<PhoneSession> {
+    const existing = this.opened.get(id);
+    if (!existing || existing.dead) throw new Error("电脑尚未连接，请稍后重试");
+    if (existing.observed !== true) return existing;
+    const inFlight = this.upgrading.get(id);
+    if (inFlight) return inFlight;
+    const client = this.requireClient();
+    const generation = this.generation;
+    const handle = this.observedHandles.get(existing);
+    const run = (async () => {
+      const result = await client.runtime.resumeSession(id);
+      if (generation !== this.generation || this.opened.get(id) !== existing || existing.dead) {
+        await result.session.close().catch(() => undefined);
+        throw new Error("电脑连接已切换");
+      }
+      const metaCwd = (result.opened as Partial<SessionOpened>).meta?.cwd;
+      if (metaCwd !== undefined && metaCwd !== "") existing.workspace = metaCwd;
+      existing.warnings = result.opened.warnings;
+      existing.replaying = true;
+      try {
+        await this.bindLiveTracker(existing, result.session, false, () => {
+          handle?.attachLive(result.session);
+          this.observedHandles.delete(existing);
+          existing.observed = false;
+        });
+      } catch (error) {
+        existing.replaying = false;
+        await result.session.close().catch(() => undefined);
+        throw error;
+      }
+      if (generation !== this.generation || this.opened.get(id) !== existing) {
+        await existing.tracker?.stop().catch(() => undefined);
+        await result.session.close().catch(() => undefined);
+        throw new Error("电脑连接已切换");
+      }
+      return existing;
+    })();
+    this.upgrading.set(id, run);
+    try {
+      return await run;
+    } finally {
+      if (this.upgrading.get(id) === run) this.upgrading.delete(id);
+    }
   }
   /** 与桌面 Conversations.refreshTurnChanges 相同：Turn 进行中不查，查完视图已前进则丢弃 */
   async refreshTurnChanges(entry: PhoneSession): Promise<void> {
-    if (entry.dead || entry.view.currentTurn !== undefined) return;
+    if (entry.dead || entry.observed === true || entry.view.currentTurn !== undefined) return;
     const boundary = entry.view.lastSeq;
     try {
       const changes = await entry.session.turnChanges();
@@ -723,14 +991,12 @@ export class PhoneSessions {
     const client = this.requireClient();
     const generation = this.generation;
     const item = this.list.find((s) => s.id === id);
-    const run = this.resume(
-      client,
-      id,
-      item?.cwd ?? fallbackWorkspace ?? "",
-      this.opened.get(id)?.view,
-      generation,
-      member,
-    );
+    const workspace = item?.cwd ?? fallbackWorkspace ?? "";
+    const existingView = this.opened.get(id)?.view;
+    const canObserve = !member && !this.observeUnsupported && item?.openHere === false;
+    const run = canObserve
+      ? this.observe(client, id, workspace, existingView, generation)
+      : this.resume(client, id, workspace, existingView, generation, member);
     this.opening.set(id, run);
     try {
       return await run;

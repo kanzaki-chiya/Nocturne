@@ -13,6 +13,10 @@ type ModelInfo = Awaited<ReturnType<RpcRuntime["listModels"]>>[number];
 type ShellInfo = Awaited<ReturnType<RpcSession["shellInfo"]>>;
 type ShellEntry = Awaited<ReturnType<RpcSession["listShells"]>>[number];
 type EffortInfo = Awaited<ReturnType<RpcSession["reasoningEffortInfo"]>>;
+type SnapshotEffort = Omit<EffortInfo, "current" | "effective"> & {
+  current?: EffortInfo["current"] | undefined;
+  effective?: EffortInfo["effective"] | undefined;
+};
 type SettingItem = Awaited<ReturnType<RpcRuntime["describeSettings"]>>[number];
 
 export const refKey = (ref: ModelRef): string => `${ref.provider}/${ref.model}`;
@@ -103,11 +107,13 @@ export function useSessionControls(
   workspace?: string,
   /** 历史回放期间为 true：不按条目数刷新，结束后刷新一次 */
   replaying = false,
+  /** 只读观察模式（ADR-0099）：跳过 session.* 查询，按 view.config 与 runtime 模型清单派生展示 */
+  observed = false,
 ): SessionControls {
   const [snapshot, setSnapshot] = useState<{
     model: ModelRef | undefined;
     preset: string | undefined;
-    effort: EffortInfo | undefined;
+    effort: SnapshotEffort | undefined;
     shell: ShellInfo | undefined;
     models: ModelInfo[];
     recents: ModelRef[];
@@ -122,6 +128,34 @@ export function useSessionControls(
 
   const refresh = useSessionRefresh(session, !replaying, async (isCurrent) => {
     try {
+      if (observed) {
+        const [models, recents] = await Promise.all([
+          runtime.listModels(workspace !== undefined ? { workspaceRoot: workspace } : undefined),
+          runtime.listRecentModels(),
+        ]);
+        if (!isCurrent()) return;
+        const modelRef = view.config.model;
+        const info =
+          modelRef === undefined
+            ? undefined
+            : models.find((item) => refKey(item.ref) === refKey(modelRef));
+        const available = info?.capabilities.reasoningEffort ?? [];
+        const storedEffort = view.config.reasoningEffort;
+        const effort: SnapshotEffort = {
+          available,
+          ...(storedEffort !== undefined ? { current: storedEffort, effective: storedEffort } : {}),
+        };
+        setSnapshot({
+          model: modelRef,
+          preset: view.config.permissionPreset,
+          effort,
+          shell: undefined,
+          models,
+          recents,
+        });
+        setError(undefined);
+        return;
+      }
       const [state, effort, shell, models, recents] = await Promise.all([
         session.state(),
         session.reasoningEffortInfo(),
@@ -150,6 +184,7 @@ export function useSessionControls(
   }, [
     refresh,
     replaying,
+    observed,
     providersVersion,
     view.entries.length,
     view.status,
