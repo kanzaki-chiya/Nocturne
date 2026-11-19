@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createRuntime,
@@ -283,13 +283,14 @@ async function start(
   };
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const flushTasks = () => new Promise<void>((resolve) => setImmediate(resolve));
 async function until(check: () => boolean, label: string): Promise<void> {
-  const begin = Date.now();
-  while (!check()) {
-    if (Date.now() - begin > 10_000) throw new Error(`等待超时：${label}`);
-    await sleep(5);
-  }
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error(`等待超时：${label}`);
+    },
+    { timeout: 10_000, interval: 5 },
+  );
 }
 
 function collect() {
@@ -391,7 +392,7 @@ describe("subagent.list / subscribe：已结束与快照", () => {
     expect(indices.lastIndexOf("subagent.event")).toBeLessThan(closedAt);
     // 快照的 closed 先于 subscribe 响应：服务端释放表项，退订是空操作
     observation.unsubscribe();
-    await sleep(20);
+    await flushTasks();
     expect(
       h.wire.filter((line) => (JSON.parse(line) as { id?: unknown }).id !== undefined).length,
     ).toBeGreaterThan(0);
@@ -613,7 +614,7 @@ describe("运行中的 child：真实 Runtime 门闩", () => {
       r.h.wire.length - notifications(r.h.wire, "event").length;
     const before = observationMessages();
     observation.unsubscribe();
-    await sleep(20);
+    await flushTasks();
     expect(observationMessages()).toBe(before);
     expect(r.h.calls[0]?.unsubscribed).toBe(0);
     await r.session.close();
@@ -635,7 +636,7 @@ describe("运行中的 child：真实 Runtime 门闩", () => {
     const notices = r.h.wire.length;
     r.open();
     await expect(r.submitting).resolves.toBe("done");
-    await sleep(30);
+    await flushTasks();
     expect(got.events).toHaveLength(delivered);
     expect(got.ends).toEqual([]);
     expect(notifications(r.h.wire.slice(notices), "subagent.event")).toEqual([]);

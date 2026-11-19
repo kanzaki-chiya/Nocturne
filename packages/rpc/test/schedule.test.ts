@@ -3,7 +3,7 @@
  * （list / history / runNow 放开，save / delete 只在本机）。
  * 任务与历史写在 connectManyWithConfig 的临时 NOCTURNE_HOME 下，不碰真实目录。
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@nocturne/rpc/client";
 import { REMOTE_METHODS } from "@nocturne/rpc/server";
 
@@ -142,12 +142,15 @@ describe("调度器进程里的立即运行", () => {
 
     const started = await phone.client.runtime.runSchedule({ id: saved.id });
     expect(started).toMatchObject({ started: true });
-    let history = await phone.client.runtime.scheduleHistory({ id: saved.id });
-    const deadline = Date.now() + 8000;
-    while (history[0]?.result !== "done" && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 20));
-      history = await phone.client.runtime.scheduleHistory({ id: saved.id });
-    }
+    // 轮询历史直到这次运行完成（原逻辑上限 8s）
+    await vi.waitFor(
+      async () => {
+        const polled = await phone.client.runtime.scheduleHistory({ id: saved.id });
+        expect(polled[0]?.result).toBe("done");
+      },
+      { timeout: 8_000 },
+    );
+    const history = await phone.client.runtime.scheduleHistory({ id: saved.id });
     expect(history[0]).toMatchObject({ trigger: "manual", result: "done", denied: 1 });
 
     const sessions = await h.client.runtime.listSessions();

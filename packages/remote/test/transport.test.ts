@@ -20,7 +20,7 @@ describe("内存帧管道", () => {
     expect(events).toEqual(["1", "2", "close"]);
     a.send(new Uint8Array([3]));
     b.close();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(events).toEqual(["1", "2", "close"]);
   });
 });

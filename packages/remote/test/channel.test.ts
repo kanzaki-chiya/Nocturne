@@ -396,7 +396,7 @@ describe("数据帧", () => {
     expect(events).toEqual(["一", "二", "close"]);
     s.host.close();
     s.host.onClose(() => events.push("again"));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(events).toHaveLength(3);
     expect(s.host.closeReason).toBeUndefined();
     expect(s.phone.closeReason).toBeUndefined();

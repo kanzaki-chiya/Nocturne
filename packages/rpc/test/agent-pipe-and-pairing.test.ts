@@ -420,10 +420,11 @@ describe("外部 agent 配对、范围、白名单、权限上限与会话来源
       code: "agent_pairing_pending",
     });
     expect(pairingRequests).toHaveLength(2);
-    await new Promise((r) => setTimeout(r, 220));
-    const afterTimeout = await h.client.call("agent.describe", {});
-    expect(afterTimeout.agents).toHaveLength(0);
-    expect(afterTimeout.pendingPairings).toHaveLength(0);
+    await vi.waitFor(async () => {
+      const described = await h.client.call("agent.describe", {});
+      expect(described.agents).toHaveLength(0);
+      expect(described.pendingPairings).toHaveLength(0);
+    });
 
     // 4. 再次调用重新发起配对，并由桌面端批准为只读
     await expect(agentClient.runtime.listSessions()).rejects.toMatchObject({

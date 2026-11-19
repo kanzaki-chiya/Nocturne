@@ -48,13 +48,12 @@ const TEST_MODELS: ModelInfo[] = [
 type McpCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
 
 async function until(check: () => boolean, label: string, timeoutMs = 8_000): Promise<void> {
-  const start = Date.now();
-  while (!check()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`等待超时：${label}`);
-    }
-    await new Promise((r) => setTimeout(r, 10));
-  }
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error(`等待超时：${label}`);
+    },
+    { timeout: timeoutMs, interval: 10 },
+  );
 }
 
 function isTextBlock(value: unknown): value is { type: "text"; text: string } {
@@ -331,6 +330,7 @@ async function collectLayerAAfterInterrupt(
     () => rig.durableEvents(sessionId).some((e) => e.type === "turn.completed"),
     "durable 写入 turn.completed",
   );
+  // eslint-disable-next-line no-restricted-syntax -- 反向断言：中断后需真实经过静默窗口（quietWindowMs），确认没有迟到的后续 Turn 或队列接续
   await new Promise((r) => setTimeout(r, quietWindowMs));
 
   const durable = rig.durableEvents(sessionId);
@@ -581,6 +581,7 @@ describe("agent 桥创建慢 Turn，remote 手机 / local 桌面按实际顺序�
           return { res, elapsedMs: Date.now() - waitStartedAt };
         });
 
+      // eslint-disable-next-line no-restricted-syntax -- 反向断言：长 Turn 仍在运行，nocturne_wait(3s) 在真实 30ms 窗口内不得提前返回
       await new Promise((r) => setTimeout(r, 30));
       expect(waitSettled).toBe(false);
 
@@ -684,6 +685,7 @@ describe("agent 桥创建慢 Turn，remote 手机 / local 桌面按实际顺序�
           return { res, elapsedMs: Date.now() - waitStartedAt };
         });
 
+      // eslint-disable-next-line no-restricted-syntax -- 反向断言：长 Turn 仍在运行，nocturne_wait(2s) 在真实 30ms 窗口内不得提前返回
       await new Promise((r) => setTimeout(r, 30));
       expect(waitSettled).toBe(false);
 
@@ -871,6 +873,7 @@ describe("桥接等待边界回归（start/send wait:true 与正常 done 队列�
         return res;
       });
 
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：Turn 仍在运行，nocturne_send(wait:true) 在真实 40ms 窗口内不得提前返回
     await new Promise((r) => setTimeout(r, 40));
     expect(sendSettled).toBe(false);
 
@@ -947,11 +950,13 @@ describe("桥接等待边界回归（start/send wait:true 与正常 done 队列�
       });
 
     await until(() => rig.provider.requests.length === 2, "恢复后第 2 轮已发往 provider");
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：第 2 轮仍在 provider 中运行，send(wait:true) 在真实 120ms 窗口内不得提前收束
     await new Promise((r) => setTimeout(r, 120));
     expect(sendSettled).toBe(false);
 
     turn2Gate.resolve();
     await until(() => rig.provider.requests.length === 3, "第 2 轮 done 后接续第 3 轮");
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：第 3 轮运行中，send(wait:true) 在真实 120ms 窗口内不得提前收束
     await new Promise((r) => setTimeout(r, 120));
     expect(sendSettled).toBe(false);
 
@@ -1043,12 +1048,14 @@ describe("桥接等待边界回归（start/send wait:true 与正常 done 队列�
         return res;
       });
 
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：第 1 轮未 done，nocturne_wait(5s) 在真实 30ms 窗口内不得提前返回
     await new Promise((r) => setTimeout(r, 30));
     expect(waitSettled).toBe(false);
 
     // 放行第 1 轮正常 done；transport gate 拦截第 2 个 turn.started 及全部后续帧，明确保持 >60ms 间隙
     turn1Gate.resolve();
     await secondTurnStartedIntercepted;
+    // eslint-disable-next-line no-restricted-syntax -- 边界回归：turn.started 之间保持真实 >60ms 间隙，覆盖 shortTimer 判定窗口
     await new Promise((r) => setTimeout(r, 120));
     expect(waitSettled).toBe(false);
 
@@ -1117,6 +1124,7 @@ describe("桥接等待边界回归（start/send wait:true 与正常 done 队列�
         return res;
       });
 
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：首轮未抛错结束，nocturne_wait(5s) 在真实 30ms 窗口内不得提前返回
     await new Promise((r) => setTimeout(r, 30));
     expect(waitSettled).toBe(false);
 
@@ -1132,6 +1140,7 @@ describe("桥接等待边界回归（start/send wait:true 与正常 done 队列�
     expect(waitData.queuedInputs).toBe(1);
 
     // 静默窗口确认无第二轮发起，且 durable 与 pendingInputs 状态一致
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：错误结束后需真实经过 200ms 静默窗口，确认没有自动发起第二轮
     await new Promise((r) => setTimeout(r, 200));
     const durable = rig.durableEvents(sessionId);
     const started = durable.filter((e) => e.type === "turn.started");
@@ -1281,6 +1290,7 @@ describe("桥接等待边界回归（start/send wait:true 与正常 done 队列�
 
     await turn2StartedIntercepted;
     // 越过 triggerEnqueueOnTracked 的 40ms shortTimer 窗口，确认不会误判为上一轮 idle 提前返回
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：必须真实越过 40ms shortTimer 窗口，确认 send(wait:true) 不会提前返回上一轮 idle
     await new Promise((r) => setTimeout(r, 80));
     expect(sendSettled).toBe(false);
 

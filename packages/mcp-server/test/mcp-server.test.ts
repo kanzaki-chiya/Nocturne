@@ -547,10 +547,16 @@ describe("packages/mcp-server 单元与集成测试", () => {
     });
     cleanups.push(() => backend.close());
 
-    // 让 provider 的流挂起 350ms，而 wait timeoutSeconds 设为 0.06s
+    // provider 的流在门闩放行前不产出，而 wait timeoutSeconds 设为 0.06s。
+    // 门闩在断言 running 之后释放，并在清理阶段兜底释放，避免失败时挂住运行时。
+    let releaseStream!: () => void;
+    const streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    cleanups.push(() => Promise.resolve(releaseStream()));
     const origStream = backend.provider.stream.bind(backend.provider);
     backend.provider.stream = async function* (req, signal) {
-      await new Promise((r) => setTimeout(r, 350));
+      await streamGate;
       yield* origStream(req, signal);
     };
 
@@ -590,6 +596,9 @@ describe("packages/mcp-server 单元与集成测试", () => {
     const startData = parseToolJson(startRes);
     const sessionId = startData.sessionId as string;
     expect(startData.status).toBe("running");
+
+    // 放行 provider 流，让会话正常跑完；wait 仍在进行中
+    releaseStream();
 
     // 继续调用 nocturne_wait 等到完成 -> 状态变为 idle，且回复完整
     const waitRes = await mcpClient.callTool({

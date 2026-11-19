@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { request as httpRequest, createServer } from "node:http";
 import { createPublicKey, verify } from "node:crypto";
 import { WebSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   generateIdentity,
   registerHost,
@@ -320,7 +320,8 @@ describe("relay", () => {
   it("配对过期槽位拒绝，存活时间到关闭", async () => {
     const f = await hostFixture({ slotLifetimeMs: 20, pairLifetimeMs: 30 });
     const expired = await f.host.openPairingSlot();
-    await new Promise((done) => setTimeout(done, 30));
+    // 槽位 20ms 后过期；轮询到过期时刻再发起连接（此前没有任何请求副作用）
+    await vi.waitFor(() => expect(Date.now()).toBeGreaterThanOrEqual(expired.expiresAt));
     const bad = new WebSocket(`${f.origin.replace("http", "ws")}/v1/pair?slot=${expired.slot}`);
     expect(await closeCode(bad)).toBe(4008);
     const live = await hostFixture({ pairLifetimeMs: 30 });

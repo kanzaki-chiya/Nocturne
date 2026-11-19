@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { vi } from "vitest";
 import {
   createCredentialStore,
   createPlatform,
@@ -368,16 +369,21 @@ export async function connectWithConfig(
   };
 }
 
+/**
+ * 轮询到条件成立。用 `vi.waitFor` 轮询（内部用安全计时器，配合 vi.useFakeTimers 也能推进），
+ * 超时错误沿用原有文案；检查函数自身抛错沿用 waitFor 的语义，最后一次错误在超时时抛出。
+ */
 export async function until(
   check: () => boolean,
   label = "条件",
   timeoutMs = 10_000,
 ): Promise<void> {
-  const start = Date.now();
-  while (!check()) {
-    if (Date.now() - start > timeoutMs) throw new Error(`等待超时：${label}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error(`等待超时：${label}`);
+    },
+    { timeout: timeoutMs, interval: 5 },
+  );
 }
 
 /** 给已有服务端再接一条内存连接（默认远程，并完成握手） */

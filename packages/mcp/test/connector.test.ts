@@ -293,9 +293,10 @@ describe("MCP 连接器（假 stdio 服务器）", () => {
   it("list_changed 暂存，applyPendingTools 后才生效", async () => {
     const { session } = await openFake();
     try {
+      const before = session.tools().length;
       await call(getTool(session, "mcp__fake__mutate"), {});
-      // 等通知处理与 tools/list 完成
-      await new Promise((r) => setTimeout(r, 300));
+      // 等通知处理与 tools/list 完成：status().toolCount 读的是暂存集，生效集保持不变
+      await vi.waitFor(() => expect(session.status()[0]?.toolCount).toBe(before + 1));
       expect(session.tools().some((t) => t.name === "mcp__fake__added")).toBe(false);
       const diff = session.applyPendingTools();
       expect(diff.add.map((t) => t.name)).toContain("mcp__fake__added");

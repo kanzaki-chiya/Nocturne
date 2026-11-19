@@ -1,12 +1,19 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeProvider } from "@nocturne/core";
 import type { RpcClient } from "@nocturne/rpc/client";
 import { cleanupTmp, connectMany, MODEL, textScript, until, VISION_MODELS } from "./harness.js";
 
-afterEach(cleanupTmp);
-
 const WINDOW_MS = 300;
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Hub 的合并窗口只靠 setTimeout；虚拟化这两个计时器后可用 advanceTimersByTimeAsync
+// 精确推进窗口，其他计时器、真实 I/O 与微任务保持原样（until 里的 vi.waitFor 会自动推进）。
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+  cleanupTmp();
+});
 
 /** 统计某条连接收到的 runtime.sessionsChanged，并核对通知不带任何内容 */
 function countSessionsChanged(client: RpcClient): { count: () => number } {
@@ -26,7 +33,7 @@ describe("runtime.sessionsChanged", () => {
     const phone = countSessionsChanged(remote.client);
     await remote.client.runtime.createSession({ model: MODEL, cwd: h.ws });
     await until(() => local.count() > 0 && phone.count() > 0, "创建会话的通知");
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect([local.count(), phone.count()]).toEqual([1, 1]);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
@@ -36,12 +43,12 @@ describe("runtime.sessionsChanged", () => {
     const h = await connectMany({ scripts: [textScript("好")] });
     const { session } = await h.client.runtime.createSession({ model: MODEL });
     await session.submit({ text: "你好" });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const remote = await h.add();
     const phone = countSessionsChanged(remote.client);
     await remote.client.runtime.forkSession(session.id);
     await until(() => phone.count() > 0, "分叉的通知");
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(phone.count()).toBe(1);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
@@ -51,7 +58,7 @@ describe("runtime.sessionsChanged", () => {
     const h = await connectMany();
     const remote = await h.add();
     const { session } = await h.client.runtime.createSession({ model: MODEL });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const local = countSessionsChanged(h.client);
     const phone = countSessionsChanged(remote.client);
     expect(await remote.client.runtime.renameSession(session.id, "手动标题")).toBeUndefined();
@@ -60,7 +67,7 @@ describe("runtime.sessionsChanged", () => {
       (await remote.client.runtime.listSessions()).find((item) => item.id === session.id)
         ?.firstText,
     ).toBe("手动标题");
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect([local.count(), phone.count()]).toEqual([1, 1]);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
@@ -69,7 +76,7 @@ describe("runtime.sessionsChanged", () => {
   it("重命名参数形状错误时不调用 Core，也不发送列表通知", async () => {
     const h = await connectMany();
     const { session } = await h.client.runtime.createSession({ model: MODEL });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const local = countSessionsChanged(h.client);
     for (const params of [
       { sessionId: 1, title: "错误" },
@@ -80,7 +87,7 @@ describe("runtime.sessionsChanged", () => {
         rpcCode: -32602,
       });
     }
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(local.count()).toBe(0);
     await h.client.shutdown();
     await h.served;
@@ -90,17 +97,17 @@ describe("runtime.sessionsChanged", () => {
     const h = await connectMany({ scripts: [textScript("一"), textScript("二")] });
     const remote = await h.add();
     const { session } = await h.client.runtime.createSession({ model: MODEL });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const phone = countSessionsChanged(remote.client);
     await session.submit({ text: "第一句" });
     await until(() => phone.count() > 0, "首条消息的通知");
     // 通知到达时列表里已经能读到标题
     const listed = await remote.client.runtime.listSessions();
     expect(listed.find((item) => item.id === session.id)?.firstText).toBeTruthy();
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const afterFirst = phone.count();
     await session.submit({ text: "第二句" });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(phone.count()).toBe(afterFirst);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
@@ -120,7 +127,7 @@ describe("runtime.sessionsChanged", () => {
     const h = await connectMany({ provider });
     const remote = await h.add();
     const { session } = await h.client.runtime.createSession({ model: MODEL });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const phone = countSessionsChanged(remote.client);
     await session.submit({ text: "第一句话" });
     await until(() => phone.count() === 1, "首条消息的通知");
@@ -133,7 +140,7 @@ describe("runtime.sessionsChanged", () => {
     await until(() => phone.count() === 2, "标题的通知");
     const listed = await remote.client.runtime.listSessions();
     expect(listed.find((item) => item.id === session.id)?.firstText).toBe("生成的标题");
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(phone.count()).toBe(2);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
@@ -144,11 +151,11 @@ describe("runtime.sessionsChanged", () => {
     const { session } = await h.client.runtime.createSession({ model: MODEL });
     await session.submit({ text: "你好" });
     await session.close();
-    await sleep(WINDOW_MS + 200);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 200);
     const remote = await h.add();
     const phone = countSessionsChanged(remote.client);
     await remote.client.runtime.resumeSession(session.id);
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(phone.count()).toBe(0);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
@@ -163,7 +170,7 @@ describe("runtime.sessionsChanged", () => {
       remote.client.runtime.createSession({ model: MODEL, cwd: h.ws }),
       h.client.runtime.createSession({ model: MODEL, cwd: h.ws }),
     ]);
-    await sleep(WINDOW_MS + 150);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 150);
     expect(phone.count()).toBe(1);
     // 窗口过后的新变化再推一条
     await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
@@ -177,7 +184,7 @@ describe("runtime.sessionsChanged", () => {
     const idle = await h.add("remote", false);
     const phone = countSessionsChanged(idle.client);
     await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(phone.count()).toBe(0);
     idle.client.close();
     await h.client.shutdown();
@@ -188,7 +195,7 @@ describe("runtime.sessionsChanged", () => {
     const h = await connectMany();
     const remote = await h.add();
     await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
-    await sleep(WINDOW_MS + 100);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     expect(await remote.client.runtime.listSessions()).toHaveLength(1);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
