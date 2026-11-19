@@ -7,7 +7,7 @@
  * - permissions.rules：追加（高层规则排在低层之后，权限"后写优先"）
  */
 import { inferShellKindFromPath } from "../platform/index.js";
-import type { HookPoint, RuleOrigin } from "../protocol/index.js";
+import type { HookOrigin, HookPoint, RuleOrigin } from "../protocol/index.js";
 import type {
   ConfigFile,
   McpServerEntry,
@@ -330,6 +330,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     providers: [],
     turn: {},
     hooks: {},
+    hookSources: [],
     mcpServers: [],
     externalAgents: [],
     warnings: [],
@@ -491,9 +492,18 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
       });
     }
     // hooks：按点位追加（高层条目排在其后，hooks.md 第 2 节）
+    const hookOrigin: HookOrigin = kind === "project" ? "project" : "user";
     for (const [point, entries] of Object.entries(file.hooks ?? {})) {
       const key = point as HookPoint;
       out.hooks[key] = [...(out.hooks[key] ?? []), ...entries.map((e) => ({ ...e }))];
+      for (const e of entries) {
+        out.hookSources.push({
+          point: key,
+          entry: { ...e },
+          origin: hookOrigin,
+          path: layer.path ?? "",
+        });
+      }
     }
     // mcp.servers：按名字合并，同名字段浅覆盖；origin 记录定义它的层
     // （setup/userModels/env/cli 层不产生 mcp 配置，落到 "user" 仅为类型收敛）

@@ -16,7 +16,9 @@ import type {
   EditToolKind,
   Grant,
   HookEntry,
+  HookOrigin,
   HookPoint,
+  HooksDescription,
   LoopGuardConfig,
   McpServerEntry,
   McpServerOverview,
@@ -327,6 +329,13 @@ export interface ResolvedConfig {
   turn: TurnOverrides;
   /** 合并后的 Hook 条目：按层序追加（user → project） */
   hooks: Partial<Record<HookPoint, HookEntry[]>>;
+  /** 合并后的 Hook 来源记录：按层序排列，供 describeHooks 只读展示 */
+  hookSources: {
+    point: HookPoint;
+    entry: HookEntry;
+    origin: HookOrigin;
+    path: string;
+  }[];
   /** 合并后的 MCP 服务器（带来源标注）；项目层只在信任时并入 */
   mcpServers: {
     name: string;
@@ -675,6 +684,7 @@ export interface RuntimeConfig {
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
+  describeHooks(input?: { workspaceRoot?: string | undefined }): Promise<HooksDescription>;
   saveMcpServer(input: McpSaveInput): Promise<McpServerOverview>;
   deleteMcpServer(input: { id: string; workspaceRoot?: string | undefined }): Promise<void>;
   setMcpServerEnabled(input: {

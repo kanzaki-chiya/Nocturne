@@ -4,7 +4,19 @@
  * （不含项目层）；forWorkspace(root) 按会话记录的工作区加载项目层与 Grant。
  * v0.2 增补：凭据存储、providers.json 向导写入接口、recent-models.json。
  */
-import { DEFAULT_PRUNE_LIMIT, resolveEffectiveProtocol, type ModelRef } from "../protocol/index.js";
+import {
+  DEFAULT_HOOK_TIMEOUT_MS,
+  DEFAULT_PRUNE_LIMIT,
+  HOOK_POINTS,
+  isToolHookPoint,
+  MAX_HOOK_TIMEOUT_MS,
+  resolveEffectiveProtocol,
+  type HookEntry,
+  type HookOrigin,
+  type HookOverview,
+  type HookPoint,
+  type ModelRef,
+} from "../protocol/index.js";
 import type { Platform } from "../platform/index.js";
 import { envLayerConfig, cliLayerConfig } from "./env.js";
 import { ConfigError } from "./errors.js";
@@ -814,6 +826,54 @@ export async function loadConfig(
         }
       }
       return { servers, warnings: resolved.warnings };
+    },
+    async describeHooks(input = {}) {
+      const workspace = input.workspaceRoot ? await forWorkspace(input.workspaceRoot) : undefined;
+      const resolved = workspace ? workspace.resolved : base().resolved;
+      const toOverview = (
+        point: HookPoint,
+        entry: HookEntry,
+        origin: HookOrigin,
+        sourcePath: string,
+        trusted: boolean,
+      ): HookOverview => ({
+        point,
+        ...(isToolHookPoint(point) && entry.matcher !== undefined
+          ? { matcher: entry.matcher }
+          : {}),
+        command: entry.command,
+        args: [...(entry.args ?? [])],
+        timeoutMs: Math.min(entry.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS, MAX_HOOK_TIMEOUT_MS),
+        origin,
+        path: sourcePath,
+        trusted,
+      });
+      const byPoint = new Map<HookPoint, HookOverview[]>();
+      const push = (item: HookOverview) => {
+        const list = byPoint.get(item.point);
+        if (list) list.push(item);
+        else byPoint.set(item.point, [item]);
+      };
+      for (const item of resolved.hookSources) {
+        push(toOverview(item.point, item.entry, item.origin, item.path || userConfigPath, true));
+      }
+      if (workspace && !workspace.projectConfig.trusted && workspace.projectConfig.path) {
+        const project = await loadConfigFile(fs, workspace.projectConfig.path, "project").catch(
+          () => undefined,
+        );
+        for (const [point, entries] of Object.entries(project?.hooks ?? {})) {
+          const key = point as HookPoint;
+          for (const entry of entries) {
+            push(toOverview(key, entry, "project", workspace.projectConfig.path, false));
+          }
+        }
+      }
+      const hooks: HookOverview[] = [];
+      for (const point of HOOK_POINTS) {
+        const list = byPoint.get(point);
+        if (list) hooks.push(...list);
+      }
+      return { hooks, warnings: resolved.warnings };
     },
     async saveMcpServer(input) {
       if (input.mode === "create" && input.workspaceRoot) {

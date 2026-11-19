@@ -75,6 +75,7 @@ import {
 } from "./config/index.js";
 import { MODEL_ROLES } from "./config/index.js";
 import {
+  type HooksDescription,
   type PluginsDescription,
   type SkillImportInput,
   type SkillImportOutput,
@@ -850,6 +851,7 @@ export interface Runtime {
   describeMcpServers(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<{ servers: McpServerOverview[]; warnings: string[] }>;
+  describeHooks(input?: { workspaceRoot?: string | undefined }): Promise<HooksDescription>;
   saveMcpServer(input: McpSaveInput): Promise<McpServerOverview>;
   deleteMcpServer(input: { id: string; workspaceRoot?: string | undefined }): Promise<void>;
   setMcpServerEnabled(input: {
@@ -6010,6 +6012,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       requireMcpConfig().describeMcpServers(
         mcpInput(z.object({ workspaceRoot: workspaceField }), input),
       ),
+    describeHooks: (input = {}) => {
+      const parsed = z.object({ workspaceRoot: workspaceField }).parse(input);
+      return config !== undefined
+        ? config.describeHooks(parsed)
+        : Promise.resolve({ hooks: [], warnings: [] });
+    },
     describeExternalAgents: (input = {}) =>
       requireExternalAgentConfig().describeExternalAgents(
         externalAgentInput(z.object({ workspaceRoot: workspaceField }).strict(), input),
