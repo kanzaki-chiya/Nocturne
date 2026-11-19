@@ -736,6 +736,72 @@ it("变更：点哪一轮高亮哪一轮（含「查看变更」定位、重复�
   });
 });
 
+it("变更：空列表加载出差异后，高亮提交进 DOM 即同步滚入视野，不依赖计时器", () => {
+  vi.useFakeTimers();
+  try {
+    const events: { seq: string; focused: boolean }[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      const seq = this.getAttribute("data-change-seq");
+      if (seq === null) return;
+      events.push({
+        seq,
+        focused: this.classList.contains("focus"),
+      });
+    };
+    const emptySource = {
+      workspace: "Z:\\proj",
+      turns: new Map<number, TurnChanges>(),
+      userSeqs: [],
+      loadDiff: vi.fn(async () => ({ diff: "" })),
+    };
+    const view = render(
+      <SidePanel
+        {...props({
+          tabs: [{ id: "c", kind: "changes", focusSeq: 2, focusNonce: 1 }],
+          activeId: "c",
+          changes: emptySource,
+        })}
+      />,
+    );
+    expect(events).toEqual([]);
+    const loadedSource = {
+      workspace: "Z:\\proj",
+      turns: new Map<number, TurnChanges>([
+        [1, { seq: 1, files: [{ path: "Z:\\proj\\a.ts", added: 1, removed: 0 }] } as TurnChanges],
+        [2, { seq: 2, files: [{ path: "Z:\\proj\\b.ts", added: 3, removed: 1 }] } as TurnChanges],
+      ]),
+      userSeqs: [1, 2],
+      loadDiff: vi.fn(async () => ({ diff: "" })),
+    };
+    view.rerender(
+      <SidePanel
+        {...props({
+          tabs: [{ id: "c", kind: "changes", focusSeq: 2, focusNonce: 1 }],
+          activeId: "c",
+          changes: loadedSource,
+        })}
+      />,
+    );
+    expect(events).toEqual([{ seq: "2", focused: true }]);
+    // 同一轮再次触发「查看变更」（focusNonce 变化）也会立即再滚一次
+    view.rerender(
+      <SidePanel
+        {...props({
+          tabs: [{ id: "c", kind: "changes", focusSeq: 2, focusNonce: 2 }],
+          activeId: "c",
+          changes: loadedSource,
+        })}
+      />,
+    );
+    expect(events).toEqual([
+      { seq: "2", focused: true },
+      { seq: "2", focused: true },
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("分隔条：按下即获得焦点，之后 ← → Home End 能用；往窄拖到 180 为止", () => {
   const onTreeWidth = vi.fn();
   const onResize = vi.fn();

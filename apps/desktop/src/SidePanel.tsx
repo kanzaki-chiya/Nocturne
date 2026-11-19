@@ -948,6 +948,8 @@ function ChangesView({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<string>();
+  const [pendingScroll, setPendingScroll] = useState<{ key: string; token: number }>();
+  const scrollToken = useRef(0);
   /** 拖动中的树宽；松手后回到会话记住的宽度 */
   const [live, setLive] = useState<number>();
   const list = useRef<HTMLDivElement>(null);
@@ -971,20 +973,21 @@ function ChangesView({
     const node = list.current?.querySelector<HTMLElement>(`[data-change-key="${CSS.escape(key)}"]`);
     if (node && "scrollIntoView" in node) node.scrollIntoView({ block: "start" });
   };
-  // 「查看变更」定位到那一轮
-  useEffect(() => {
+  // 「查看变更」定位到那一轮：先选中对应项，再在 DOM 提交后的 layout effect 里滚入视野
+  useLayoutEffect(() => {
     if (tab.focusSeq === undefined) return;
     const first = items.find((item) => item.seq === tab.focusSeq);
     setSelected(first?.key);
-    // 等差异区渲染出来再滚
-    const timer = setTimeout(() => {
-      scrollTo(first?.key);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-    };
+    if (first !== undefined) {
+      scrollToken.current += 1;
+      setPendingScroll({ key: first.key, token: scrollToken.current });
+    }
     // items 变化不重新定位，避免轮次刷新时跳动
   }, [tab.focusSeq, tab.focusNonce, items.length > 0]);
+  useLayoutEffect(() => {
+    if (pendingScroll === undefined) return;
+    scrollTo(pendingScroll.key);
+  }, [pendingScroll]);
   if (source === undefined) {
     return <div className="sp-empty">没有打开的会话</div>;
   }
