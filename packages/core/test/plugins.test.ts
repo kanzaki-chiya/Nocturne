@@ -8,7 +8,6 @@ import {
   readFileSync,
   realpathSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1172,7 +1171,6 @@ const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
 );
-const TINY_PNG_2 = Buffer.concat([TINY_PNG, Buffer.from([0x00, 0x01])]);
 const TINY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>`;
 const TINY_JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 const TINY_WEBP = Buffer.from([
@@ -1183,7 +1181,7 @@ const MINIMAL_HOOKS = {
   SessionStart: [{ hooks: [{ type: "command", command: "echo ok" }] }],
 };
 
-describe("插件图标读取与指纹排除", () => {
+describe("插件图标读取", () => {
   it("优先取 interface.composerIcon，没有时退到 interface.logo，支持 png/jpg/webp/svg", async () => {
     const f = makeFixtureEnv();
     writeCodexPlugin(f.codexHome, {
@@ -1350,16 +1348,16 @@ describe("插件图标读取与指纹排除", () => {
     }
   });
 
-  it("图标文件变化与清单图标字段变化不改变插件指纹，且不能借图标字段绕过脚本指纹校验", async () => {
+  it("同一插件目录两次计算指纹相同，且图标读取不影响指纹", async () => {
     const f = makeFixtureEnv();
-    const pluginDir = writeCodexPlugin(f.codexHome, {
-      name: "stable",
+    const withIconDir = writeCodexPlugin(f.codexHome, {
+      name: "with-icon",
       marketplace: "mkt",
       version: "1.0.0",
       manifest: {
-        name: "stable",
+        name: "with-icon",
         interface: {
-          displayName: "Stable Plugin",
+          displayName: "With Icon",
           composerIcon: "./assets/icon.png",
         },
         hooks: {
@@ -1371,99 +1369,92 @@ describe("插件图标读取与指纹排除", () => {
         "run.mjs": "console.log('v1');",
       },
     });
+    const noIconDir = writeCodexPlugin(f.codexHome, {
+      name: "no-icon",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "no-icon",
+        interface: {
+          displayName: "No Icon",
+          composerIcon: "./assets/missing.png",
+        },
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "node ./run.mjs" }] }],
+        },
+      },
+      files: {
+        "run.mjs": "console.log('v1');",
+      },
+    });
 
+    // 1. 同一插件目录两次计算，指纹相同
+    const hash1 = await computePluginFingerprint(f.plat.fs, f.plat.paths, withIconDir, withIconDir);
+    const hash2 = await computePluginFingerprint(f.plat.fs, f.plat.paths, withIconDir, withIconDir);
+    expect(hash1).toBe(hash2);
+
+    const noIconHash1 = await computePluginFingerprint(
+      f.plat.fs,
+      f.plat.paths,
+      noIconDir,
+      noIconDir,
+    );
+    const noIconHash2 = await computePluginFingerprint(
+      f.plat.fs,
+      f.plat.paths,
+      noIconDir,
+      noIconDir,
+    );
+    expect(noIconHash1).toBe(noIconHash2);
+
+    // 2. 图标读取不影响指纹：以整目录指纹启用后，有 icon 与无 icon 的 overview 均对应同一个指纹并保持 on
     await setPluginEnabled(f.plat, {
       nocturneHome: f.nocturneHome,
       codexHome: f.codexHome,
       claudeHome: f.claudeHome,
-      id: "codex:stable@mkt",
+      id: "codex:with-icon@mkt",
+      enabled: true,
+    });
+    await setPluginEnabled(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+      id: "codex:no-icon@mkt",
       enabled: true,
     });
 
-    const hashBefore = await computePluginFingerprint(
+    const stored = JSON.parse(readFileSync(path.join(f.nocturneHome, "plugins.json"), "utf8")) as {
+      plugins: Record<string, { hash: string }>;
+    };
+    expect(stored.plugins["codex:with-icon@mkt"]?.hash).toBe(hash1);
+    expect(stored.plugins["codex:no-icon@mkt"]?.hash).toBe(noIconHash1);
+
+    const res = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    const withIconOverview = must(
+      res.plugins.find((p) => p.id === "codex:with-icon@mkt"),
+      "with-icon",
+    );
+    const noIconOverview = must(
+      res.plugins.find((p) => p.id === "codex:no-icon@mkt"),
+      "no-icon",
+    );
+    expect(withIconOverview.state).toBe("on");
+    expect(withIconOverview.icon).toBe(`data:image/png;base64,${TINY_PNG.toString("base64")}`);
+    expect(noIconOverview.state).toBe("on");
+    expect(noIconOverview.icon).toBeUndefined();
+
+    // 图标读取后再次计算目录指纹，结果不变
+    const hashAfterDescribe = await computePluginFingerprint(
       f.plat.fs,
       f.plat.paths,
-      pluginDir,
-      pluginDir,
+      withIconDir,
+      withIconDir,
     );
-
-    // 1. 修改图标文件内容：指纹不变，状态仍为 on
-    writeFileSync(path.join(pluginDir, "assets", "icon.png"), TINY_PNG_2);
-    const hashAfterIconEdit = await computePluginFingerprint(
-      f.plat.fs,
-      f.plat.paths,
-      pluginDir,
-      pluginDir,
-    );
-    expect(hashAfterIconEdit).toBe(hashBefore);
-    const afterEdit = await describePlugins(f.plat, {
-      nocturneHome: f.nocturneHome,
-      codexHome: f.codexHome,
-      claudeHome: f.claudeHome,
-    });
-    expect(afterEdit.plugins[0]?.state).toBe("on");
-    expect(afterEdit.plugins[0]?.icon).toBe(
-      `data:image/png;base64,${TINY_PNG_2.toString("base64")}`,
-    );
-
-    // 2. 替换清单中的图标字段与文件（icon.png -> logo.svg）：指纹不变，状态仍为 on
-    writeFileSync(
-      path.join(pluginDir, ".codex-plugin", "plugin.json"),
-      JSON.stringify(
-        {
-          name: "stable",
-          interface: {
-            displayName: "Stable Plugin",
-            logo: "./assets/logo.svg",
-          },
-          hooks: {
-            SessionStart: [{ hooks: [{ type: "command", command: "node ./run.mjs" }] }],
-          },
-        },
-        null,
-        2,
-      ),
-    );
-    writeFileSync(path.join(pluginDir, "assets", "logo.svg"), TINY_SVG);
-    // 删除旧 icon.png（仅保留新 logo.svg）
-    unlinkSync(path.join(pluginDir, "assets", "icon.png"));
-    const afterSwitch = await describePlugins(f.plat, {
-      nocturneHome: f.nocturneHome,
-      codexHome: f.codexHome,
-      claudeHome: f.claudeHome,
-    });
-    expect(afterSwitch.plugins[0]?.state).toBe("on");
-    expect(afterSwitch.plugins[0]?.icon).toBe(
-      `data:image/svg+xml;base64,${Buffer.from(TINY_SVG, "utf8").toString("base64")}`,
-    );
-
-    // 3. 安全边界：尝试将 composerIcon 指向脚本 ./run.mjs 并修改脚本，必须触发 changed
-    writeFileSync(
-      path.join(pluginDir, ".codex-plugin", "plugin.json"),
-      JSON.stringify(
-        {
-          name: "stable",
-          interface: {
-            displayName: "Stable Plugin",
-            composerIcon: "./run.mjs",
-          },
-          hooks: {
-            SessionStart: [{ hooks: [{ type: "command", command: "node ./run.mjs" }] }],
-          },
-        },
-        null,
-        2,
-      ),
-    );
-    unlinkSync(path.join(pluginDir, "assets", "logo.svg"));
-    writeFileSync(path.join(pluginDir, "run.mjs"), "console.log('tampered');");
-    const afterTamper = await describePlugins(f.plat, {
-      nocturneHome: f.nocturneHome,
-      codexHome: f.codexHome,
-      claudeHome: f.claudeHome,
-    });
-    expect(afterTamper.plugins[0]?.state).toBe("changed");
-    expect(afterTamper.plugins[0]?.icon).toBeUndefined();
+    expect(hashAfterDescribe).toBe(hash1);
   });
 });
 

@@ -316,7 +316,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `plugins.describePlugins` | `{}` → `PluginsDescription`（`{ plugins: PluginOverview[], warnings: string[] }`）；每次重新扫描并重新校验已启用插件的整目录指纹 |
 | `plugins.setPluginEnabled` | `{ id: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列原子写 `plugins.json`（`enabled: true` 时计算整目录指纹，含符号链接等失败时拒绝并报 `invalid_command`），响应之前推 `runtime.providersChanged`，技能在空闲边界重建，Hook 对之后打开的会话生效 |
 
-`PluginOverview` 包含 `id`、`host`、`name`、`marketplace`、`version`、`root`、`displayName?`、`description?`、`icon?`、`state`、`hooks`、`unsupported`、`skills` 与 `warnings`。其中 `icon?` 为图标 data URI：优先读取清单 `interface.composerIcon`，缺失或无效时回退 `interface.logo`；仅接受位于插件根目录内（禁止 `..` 与符号链接越界）、不超过 64 KB 的 `png` / `jpg` / `webp` / `svg` 文件，不符条件或读取失败时省略且不报警告；图标字段与对应图片文件不计入整目录指纹。
+`PluginOverview` 包含 `id`、`host`、`name`、`marketplace`、`version`、`root`、`displayName?`、`description?`、`icon?`、`state`、`hooks`、`unsupported`、`skills` 与 `warnings`。其中 `icon?` 为图标 data URI：优先读取清单 `interface.composerIcon`，缺失或无效时回退 `interface.logo`；仅接受位于插件根目录内（禁止 `..` 与符号链接越界）、不超过 64 KB 的 `png` / `jpg` / `webp` / `svg` 文件，不符条件或读取失败时省略且不报警告。
 
 ### 3.15 `memory.*`（ADR-0098）
 
