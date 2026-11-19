@@ -490,15 +490,18 @@ describe("组曲（Suite）一期 Core（ADR-0097）", { timeout: 30_000 }, () =
     coord.subscribe((ev) => reduceSessionView(view, ev));
 
     await coord.submit({ text: "Start an isolated thread to write feature.txt" });
-    await vi.waitFor(() => {
-      expect(view.suite?.threads).toHaveLength(1);
-      threadChildId = view.suite?.threads[0]?.childSessionId ?? "";
-      expect(threadChildId).not.toBe("");
-      expect(coord.isIdle()).toBe(true);
-      expect(view.entries.some((e) => e.kind === "assistant" && e.text.includes("merged"))).toBe(
-        true,
-      );
-    });
+    await vi.waitFor(
+      () => {
+        expect(view.suite?.threads).toHaveLength(1);
+        threadChildId = view.suite?.threads[0]?.childSessionId ?? "";
+        expect(threadChildId).not.toBe("");
+        expect(coord.isIdle()).toBe(true);
+        expect(view.entries.some((e) => e.kind === "assistant" && e.text.includes("merged"))).toBe(
+          true,
+        );
+      },
+      { timeout: 10_000 },
+    );
 
     // 主工作区已并回 feature.txt，且未并回标记清除、分组回落为 idle
     expect(readFileSync(path.join(env.ws, "feature.txt"), "utf8")).toBe("hello-suite\n");

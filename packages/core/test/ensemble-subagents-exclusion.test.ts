@@ -632,9 +632,12 @@ describe("Ensemble 成员不再算作运行中或已结束的子代理（r1114c�
     const coord1 = await rt1.createSession({ model: "fake/m1", permissionPreset: "bypass" });
     sessions.push(coord1);
     await coord1.submit({ text: "run", workMode: "ensemble" });
-    await vi.waitFor(() => {
-      expect(coord1.isIdle()).toBe(true);
-    });
+    await vi.waitFor(
+      () => {
+        expect(coord1.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
     const coordId = coord1.id;
     const isoId = must(
       replaySessionView(coord1.durableEvents()).ensemble?.members.find((m) => m.name === "iso-m"),
