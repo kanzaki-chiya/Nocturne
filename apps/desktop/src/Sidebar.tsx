@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import {
   DEFAULT_LIMIT,
@@ -17,6 +17,7 @@ export type SettingsSection =
   | "providers"
   | "mcp"
   | "plugins"
+  | "hooks"
   | "grants"
   | "memory"
   | "skills"
@@ -89,86 +90,114 @@ export interface SidebarProps {
   onLeaveSettings?: () => void;
 }
 
-const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
+const SETTINGS_NAV_GROUPS: readonly {
+  label: string;
+  items: readonly { key: SettingsSection; label: string; icon: React.ReactNode }[];
+}[] = [
   {
-    key: "general",
-    label: "常规",
-    icon: <Icon name="settings_6" size={ICON_MD} className="glyph" />,
+    label: "基础设置",
+    items: [
+      {
+        key: "general",
+        label: "常规",
+        icon: <Icon name="settings_6" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "appearance",
+        label: "外观",
+        icon: <Icon name="sun" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "providers",
+        label: "服务商",
+        icon: <Icon name="cloud" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "models",
+        label: "模型",
+        icon: <Icon name="box_3" size={ICON_MD} className="glyph" />,
+      },
+    ],
   },
   {
-    key: "appearance",
-    label: "外观",
-    icon: <Icon name="sun" size={ICON_MD} className="glyph" />,
+    label: "Agent 能力",
+    items: [
+      {
+        key: "agents",
+        label: "子代理",
+        icon: <Icon name="robot" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "memory",
+        label: "记忆",
+        icon: <Icon name="copy_2" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "skills",
+        label: "技能",
+        icon: <Icon name="file" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "mcp",
+        label: "MCP",
+        icon: <Icon name="server" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "plugins",
+        label: "插件",
+        icon: <Icon name="code" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "hooks",
+        label: "Hook",
+        icon: <Icon name="terminal" size={ICON_MD} className="glyph" />,
+      },
+    ],
   },
   {
-    key: "providers",
-    label: "服务商",
-    icon: <Icon name="cloud" size={ICON_MD} className="glyph" />,
+    label: "连接",
+    items: [
+      {
+        key: "browser",
+        label: "浏览器",
+        icon: <Icon name="earth" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "computer",
+        label: "电脑操控",
+        icon: <Icon name="computer" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "remote",
+        label: "远程",
+        icon: <Icon name="cellphone" size={ICON_MD} className="glyph" />,
+      },
+    ],
   },
   {
-    key: "models",
-    label: "模型",
-    icon: <Icon name="box_3" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "agents",
-    label: "子代理",
-    icon: <Icon name="robot" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "memory",
-    label: "记忆",
-    icon: <Icon name="copy_2" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "skills",
-    label: "技能",
-    icon: <Icon name="file" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "mcp",
-    label: "MCP",
-    icon: <Icon name="server" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "plugins",
-    label: "插件",
-    icon: <Icon name="code" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "browser",
-    label: "浏览器",
-    icon: <Icon name="earth" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "computer",
-    label: "电脑操控",
-    icon: <Icon name="computer" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "grants",
-    label: "授权",
-    icon: <Icon name="safe_shield" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "remote",
-    label: "远程",
-    icon: <Icon name="cellphone" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "archive",
-    label: "已归档的会话",
-    icon: <Icon name="archive" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "usage",
-    label: "用量",
-    icon: <Icon name="chart_bar" size={ICON_MD} className="glyph" />,
-  },
-  {
-    key: "logs",
-    label: "后台日志",
-    icon: <Icon name="terminal_box" size={ICON_MD} className="glyph" />,
+    label: "数据与安全",
+    items: [
+      {
+        key: "grants",
+        label: "授权",
+        icon: <Icon name="safe_shield" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "archive",
+        label: "已归档的会话",
+        icon: <Icon name="archive" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "usage",
+        label: "用量",
+        icon: <Icon name="chart_bar" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "logs",
+        label: "后台日志",
+        icon: <Icon name="terminal_box" size={ICON_MD} className="glyph" />,
+      },
+    ],
   },
 ];
 
@@ -441,19 +470,24 @@ export function Sidebar(props: SidebarProps) {
           返回
         </button>
         <nav className="nav" aria-label="设置">
-          {SETTINGS_NAV.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`item${page === item.key ? " on" : ""}`}
-              aria-current={page === item.key ? "page" : undefined}
-              onClick={() => {
-                props.onOpenPage?.(item.key);
-              }}
-            >
-              {item.icon}
-              {item.label}
-            </button>
+          {SETTINGS_NAV_GROUPS.map((group) => (
+            <Fragment key={group.label}>
+              <h4>{group.label}</h4>
+              {group.items.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`item${page === item.key ? " on" : ""}`}
+                  aria-current={page === item.key ? "page" : undefined}
+                  onClick={() => {
+                    props.onOpenPage?.(item.key);
+                  }}
+                >
+                  {item.icon}
+                  <span className="t">{item.label}</span>
+                </button>
+              ))}
+            </Fragment>
           ))}
         </nav>
       </aside>

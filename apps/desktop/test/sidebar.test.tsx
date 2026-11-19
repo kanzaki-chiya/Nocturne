@@ -87,6 +87,35 @@ describe("Sidebar", () => {
     expect(onOpenPage).toHaveBeenCalledWith("memory");
   });
 
+  it("设置导航按四个分组与固定顺序渲染，高亮当前项并可进入 Hook 页", () => {
+    const onOpenPage = vi.fn();
+    render(<Sidebar {...props({ page: "hooks", onOpenPage })} />);
+    const nav = screen.getByRole("navigation", { name: "设置" });
+
+    const groups: { heading: string; items: string[] }[] = [];
+    for (const node of [...nav.children]) {
+      if (node.tagName === "H4") {
+        groups.push({ heading: node.textContent?.trim() ?? "", items: [] });
+      } else if (node.tagName === "BUTTON" && groups.length > 0) {
+        groups[groups.length - 1]?.items.push(node.textContent?.trim() ?? "");
+      }
+    }
+
+    expect(groups).toEqual([
+      { heading: "基础设置", items: ["常规", "外观", "服务商", "模型"] },
+      { heading: "Agent 能力", items: ["子代理", "记忆", "技能", "MCP", "插件", "Hook"] },
+      { heading: "连接", items: ["浏览器", "电脑操控", "远程"] },
+      { heading: "数据与安全", items: ["授权", "已归档的会话", "用量", "后台日志"] },
+    ]);
+
+    const hookButton = within(nav).getByRole("button", { name: "Hook" });
+    expect(hookButton.getAttribute("aria-current")).toBe("page");
+    expect(hookButton.className).toContain("on");
+
+    fireEvent.click(hookButton);
+    expect(onOpenPage).toHaveBeenCalledWith("hooks");
+  });
+
   it("新会话下方是定时任务入口，显示启用数", () => {
     const onOpenSchedules = vi.fn();
     const { container } = render(
@@ -365,7 +394,7 @@ describe("Sidebar", () => {
     expect(onArchive).toHaveBeenCalledWith("idle");
   });
 
-  it("设置导航顺序：常规、外观、服务商、模型、子代理、记忆、技能、MCP、插件、浏览器、电脑操控、授权、远程、已归档的会话、用量、后台日志", () => {
+  it("设置导航顺序：常规、外观、服务商、模型、子代理、记忆、技能、MCP、插件、Hook、浏览器、电脑操控、远程、授权、已归档的会话、用量、后台日志", () => {
     render(<Sidebar {...props({ page: "general" })} />);
     const nav = screen.getByRole("navigation", { name: "设置" });
     const labels = [...nav.querySelectorAll("button.item")].map((button) => button.textContent);
@@ -379,10 +408,11 @@ describe("Sidebar", () => {
       "技能",
       "MCP",
       "插件",
+      "Hook",
       "浏览器",
       "电脑操控",
-      "授权",
       "远程",
+      "授权",
       "已归档的会话",
       "用量",
       "后台日志",

@@ -1,0 +1,68 @@
+.hooks-page .hooks-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.hooks-page .sbody .hooks-list {
+  border-top: 1px solid var(--a-border);
+}
+
+.hooks-page .hook-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--a-border);
+  min-width: 0;
+}
+
+.hooks-page .hook-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.hooks-page .hook-cmd {
+  font-family: var(--mono);
+  font-size: var(--fs-2);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-code);
+  color: var(--a-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.hooks-page .hook-item.untrusted .hook-cmd {
+  color: var(--a-muted);
+}
+
+.hooks-page .hook-matcher {
+  font-family: var(--mono);
+}
+
+.hooks-page .hook-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-1);
+  line-height: var(--lh-code);
+  color: var(--a-secondary);
+  min-width: 0;
+}
+
+.hooks-page .hook-timeout {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.hooks-page .hook-source {
+  font-family: var(--mono);
+  color: var(--a-muted);
+  overflow-wrap: anywhere;
+  user-select: text;
+}

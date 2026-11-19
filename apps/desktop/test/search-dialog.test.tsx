@@ -771,6 +771,7 @@ function createTestHost() {
     }),
     describeExternalAgents: async () => ({ agents: [], warnings: [] }),
     describeMcpServers: async () => ({ servers: [], warnings: [] }),
+    describeHooks: async () => ({ hooks: [], warnings: [] }),
     describePlugins: async () => ({ plugins: [], warnings: [] }),
     describeMemory: async () => ({
       global: { enabled: false, dir: "C:/Users/me/.nocturne/memory", entries: [], warnings: [] },

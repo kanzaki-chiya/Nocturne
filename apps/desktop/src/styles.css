@@ -181,6 +181,9 @@ button {
   min-height: 0;
   overflow-y: auto;
 }
+.snav .nav h4:first-child {
+  padding-top: var(--space-2);
+}
 .snav .sback {
   display: flex;
   align-items: center;

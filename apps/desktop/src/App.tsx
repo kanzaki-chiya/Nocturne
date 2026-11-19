@@ -74,6 +74,7 @@ import { PaneErrorBoundary } from "./ErrorBoundary";
 import { ProvidersPage } from "./ProvidersPage";
 import { McpPage } from "./McpPage";
 import { PluginsPage } from "./PluginsPage";
+import { HooksPage } from "./HooksPage";
 import { GrantsPage } from "./GrantsPage";
 import { SessionGrants, useSessionGrants } from "./SessionGrants";
 import { desktopWarningText } from "./open-warnings";
@@ -2233,6 +2234,16 @@ export function App({ host }: { host: DesktopHost }) {
                           create: false,
                         }) as Promise<void>
                       }
+                    />
+                  </PaneErrorBoundary>
+                ) : settingsPage === "hooks" ? (
+                  <PaneErrorBoundary key="hooks">
+                    <HooksPage
+                      client={pageClient}
+                      workspaceRoot={
+                        active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
+                      }
+                      version={settingsVersion}
                     />
                   </PaneErrorBoundary>
                 ) : settingsPage === "grants" ? (
