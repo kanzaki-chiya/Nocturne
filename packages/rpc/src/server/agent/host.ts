@@ -55,6 +55,7 @@ export const AGENT_READONLY_METHODS = [
 export const AGENT_RUN_METHODS = [
   ...AGENT_READONLY_METHODS,
   "runtime.createSession",
+  "runtime.renameSession",
   "session.submit",
   "session.enqueueInput",
   "session.interrupt",

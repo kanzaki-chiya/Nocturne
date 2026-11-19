@@ -758,4 +758,149 @@ describe("外部 agent 配对、范围、白名单、权限上限与会话来源
       code: "subagent_session_not_allowed",
     });
   });
+
+  it("外部 agent（run 范围）给自己创建的会话改名成功", async () => {
+    const h = await connectWithConfig({ enableRemote: true });
+    cleanups.push(async () => {
+      h.client.close();
+      await h.served;
+    });
+    // 使 h.ws 成为已有会话使用过的工作区
+    await h.client.runtime.createSession({ cwd: h.ws, model: MODEL });
+
+    const [agentClientT, agentServerT] = createMemoryTransportPair();
+    void h.server.serve(agentServerT, {
+      origin: "agent",
+      agent: { id: "agent-owner", name: "Owner Agent" },
+    });
+    const agentClient = createRpcClient(agentClientT, {
+      clientName: "Owner Agent",
+      interactive: false,
+    });
+    cleanups.push(async () => agentClient.close());
+    await agentClient.initialize();
+
+    await h.client.call("agent.respondPairing", {
+      agentId: "agent-owner",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+
+    const { session: ownedSession, opened } = await agentClient.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+
+    // 会话打开状态下改名成功
+    await expect(
+      agentClient.runtime.renameSession(opened.sessionId, "任务 A：精简返回"),
+    ).resolves.toBeUndefined();
+    const list1 = await h.client.runtime.listSessions();
+    expect(list1.find((s) => s.id === opened.sessionId)?.firstText).toBe("任务 A：精简返回");
+
+    // 会话关闭后（走磁盘元数据查找）仍可给自己创建的会话改名
+    await ownedSession.close();
+    await expect(
+      agentClient.runtime.renameSession(opened.sessionId, "任务 A：离线重命名"),
+    ).resolves.toBeUndefined();
+    const list2 = await h.client.runtime.listSessions();
+    expect(list2.find((s) => s.id === opened.sessionId)?.firstText).toBe("任务 A：离线重命名");
+  });
+
+  it("外部 agent 给用户或其他 agent 创建的会话改名返回 agent_not_allowed", async () => {
+    const h = await connectWithConfig({ enableRemote: true });
+    cleanups.push(async () => {
+      h.client.close();
+      await h.served;
+    });
+    const rt = h.runtimes[0];
+    if (!rt) throw new Error("missing runtime");
+
+    // 用户（本机）创建的会话
+    const { opened: userSession } = await h.client.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+    await h.client.runtime.renameSession(userSession.sessionId, "用户原始标题");
+
+    // 连接两个不同的外部 agent（A 与 B）
+    const [agentAT, serverAT] = createMemoryTransportPair();
+    void h.server.serve(serverAT, {
+      origin: "agent",
+      agent: { id: "agent-a", name: "Agent A" },
+    });
+    const agentA = createRpcClient(agentAT, { clientName: "Agent A", interactive: false });
+    cleanups.push(async () => agentA.close());
+    await agentA.initialize();
+    await h.client.call("agent.respondPairing", {
+      agentId: "agent-a",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+
+    const [agentBT, serverBT] = createMemoryTransportPair();
+    void h.server.serve(serverBT, {
+      origin: "agent",
+      agent: { id: "agent-b", name: "Agent B" },
+    });
+    const agentB = createRpcClient(agentBT, { clientName: "Agent B", interactive: false });
+    cleanups.push(async () => agentB.close());
+    await agentB.initialize();
+    await h.client.call("agent.respondPairing", {
+      agentId: "agent-b",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+
+    // Agent B 创建一个会话并改名
+    const { opened: bSession } = await agentB.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+    await agentB.runtime.renameSession(bSession.sessionId, "Agent B 标题");
+
+    const renameSpy = vi.spyOn(rt, "renameSession");
+
+    // 1. Agent A 给用户会话改名 -> agent_not_allowed (-32004)
+    await expect(
+      agentA.runtime.renameSession(userSession.sessionId, "篡改用户标题"),
+    ).rejects.toMatchObject({
+      code: "agent_not_allowed",
+      rpcCode: -32004,
+    });
+
+    // 2. Agent A 给 Agent B 的会话改名 -> agent_not_allowed (-32004)
+    await expect(
+      agentA.runtime.renameSession(bSession.sessionId, "篡改 B 标题"),
+    ).rejects.toMatchObject({
+      code: "agent_not_allowed",
+      rpcCode: -32004,
+    });
+
+    // 3. 只读范围下的 agent 即使给自己曾经创建的会话改名也被拒绝
+    const { opened: aSession } = await agentA.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+    await h.client.call("agent.setScope", {
+      id: "agent-a",
+      scope: "read-only",
+      maxPermissionPreset: "default",
+    });
+    await expect(
+      agentA.runtime.renameSession(aSession.sessionId, "只读改名"),
+    ).rejects.toMatchObject({
+      code: "agent_not_allowed",
+      rpcCode: -32004,
+    });
+
+    expect(renameSpy).not.toHaveBeenCalled();
+
+    const list = await h.client.runtime.listSessions();
+    expect(list.find((s) => s.id === userSession.sessionId)?.firstText).toBe("用户原始标题");
+    expect(list.find((s) => s.id === bSession.sessionId)?.firstText).toBe("Agent B 标题");
+  });
 });

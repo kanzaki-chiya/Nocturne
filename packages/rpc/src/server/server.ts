@@ -772,6 +772,38 @@ class Connection implements HubPeer {
       }
       await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
     }
+    if (
+      method === "runtime.renameSession" &&
+      this.initialized &&
+      this.hub.available &&
+      agentDevice
+    ) {
+      const p = asParams(params);
+      const sessionId = reqString(p, "sessionId");
+      let found = false;
+      let client = this.sessions.get(sessionId)?.session.state().meta.client;
+      if (this.sessions.has(sessionId)) {
+        found = true;
+      } else {
+        for (const open of this.hub.openSessions()) {
+          if (open.id === sessionId) {
+            client = open.state().meta.client;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        const summaries = await this.runtime().listSessions({
+          includeArchived: true,
+          includeSubagents: true,
+        });
+        client = summaries.find((s) => s.id === sessionId)?.client;
+      }
+      if (client?.id !== agentDevice.id) {
+        throw new RpcProtocolError("agent_not_allowed", "外部 agent 只能重命名自己创建的会话");
+      }
+    }
   }
 
   private get remoteLimit(): number {
