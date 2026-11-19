@@ -124,6 +124,7 @@ describe("连接约束", () => {
                 onScheduleChanged: () => () => undefined,
                 onGrantsChanged: () => () => undefined,
                 onSessionsChanged: () => () => undefined,
+                onMemoryChanged: () => () => undefined,
               } as never,
             });
       },
