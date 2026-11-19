@@ -1007,6 +1007,21 @@ function durationText(seconds: number): string {
 }
 
 const THINK_PHRASE_FADE_MS = 200;
+const SHIMMER_ANIMATION_NAME = "nct-shimmer";
+
+/** 将思考流光动画对齐到同一时间原点（document.timeline 0ms），避免切换文案时跳回第 0 帧。 */
+function syncShimmerPhase(root: Element | null): void {
+  if (root === null || typeof root.getAnimations !== "function") return;
+  for (const anim of root.getAnimations({ subtree: true })) {
+    if (
+      "animationName" in anim &&
+      anim.animationName === SHIMMER_ANIMATION_NAME &&
+      anim.startTime !== 0
+    ) {
+      anim.startTime = 0;
+    }
+  }
+}
 
 /** 思考进行中文案切换槽：允许动效时 200ms 淡入淡出，禁用动效时直接替换。 */
 function ThinkPhrase({
@@ -1018,6 +1033,7 @@ function ThinkPhrase({
   animate: boolean;
   shimmer: boolean;
 }) {
+  const slotRef = useRef<HTMLSpanElement>(null);
   const [transition, setTransition] = useState<{
     current: string;
     exiting?: string;
@@ -1049,12 +1065,17 @@ function ThinkPhrase({
     };
   }, [transition.exiting, transition.current, animate]);
 
+  useLayoutEffect(() => {
+    if (!shimmer || !animate || transition.exiting === undefined) return;
+    syncShimmerPhase(slotRef.current);
+  }, [shimmer, animate, transition.exiting, transition.current]);
+
   const inClass = `think-phrase-layer${transition.animated && animate ? " think-phrase-in" : ""}`;
   if (transition.exiting === undefined || !animate) {
     return <>{transition.current}</>;
   }
   return (
-    <span className="think-phrase-slot" aria-hidden="true">
+    <span ref={slotRef} className="think-phrase-slot" aria-hidden="true">
       <span key={`out:${transition.exiting}`} className="think-phrase-layer think-phrase-out">
         <span className={shimmer ? "shim" : undefined}>{transition.exiting}</span>
       </span>
@@ -1082,10 +1103,19 @@ function Think({
   const [open, setOpen] = usePersistedToggle(`think:${messageId}`, false);
   const [tall, setTall] = useState(false);
   const header = useRef<HTMLButtonElement>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
   const bodyRef = useRef<HTMLPreElement>(null);
   const reveal = useRef(false);
   const part = parts.get(messageId)?.at(-1);
   const body = reasoning !== "" ? reasoning : (part?.text ?? "");
+  const active = part?.active === true;
+  const shimmer = !frozen && active && motion;
+  const hasBody = body !== "";
+
+  useLayoutEffect(() => {
+    if (!shimmer) return;
+    syncShimmerPhase(labelRef.current);
+  }, [shimmer, hasBody]);
 
   // 展开时量一次：思考不到一屏就不显示底部「收起思考」，只用标题行
   useLayoutEffect(() => {
@@ -1109,8 +1139,6 @@ function Think({
     part?.started === undefined
       ? 0
       : Math.max(0, Math.floor(((part.active ? now : (part.ended ?? now)) - part.started) / 1000));
-  const active = part?.active === true;
-  const shimmer = !frozen && active && motion;
   const animatePhrase = !frozen && motion;
   const rotating = active && seconds >= 1;
   const phrase = rotating ? thinkingPhrase(part.started, now) : undefined;
@@ -1135,6 +1163,7 @@ function Think({
       <div className="think">
         {srStatus}
         <span
+          ref={labelRef}
           className={`think-label${shimmer ? " shim" : ""}`}
           aria-hidden={rotating ? true : undefined}
         >
@@ -1175,6 +1204,7 @@ function Think({
       >
         {srStatus}
         <span
+          ref={labelRef}
           className={`think-label${shimmer ? " shim" : ""}`}
           aria-hidden={rotating ? true : undefined}
         >

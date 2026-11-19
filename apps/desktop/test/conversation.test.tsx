@@ -2111,6 +2111,77 @@ describe("Conversation 渲染与滚动", () => {
     );
     expect(parentReset).toMatch(/background-clip:\s*border-box/);
     expect(parentReset).toMatch(/color:\s*inherit/);
+    expect(parentReset).not.toMatch(/animation:\s*none/);
+  });
+
+  it("思考流光相位在挂载与切换文案时对齐同一时间原点，不影响淡入淡出动画", () => {
+    vi.useFakeTimers();
+    const listeners = new Set<(event: RuntimeEvent) => void>();
+    const labelAnims = [{ animationName: "nct-shimmer", startTime: 1234 }];
+    const slotAnims = [
+      { animationName: "nct-shimmer", startTime: 4000 },
+      { animationName: "nct-shimmer", startTime: 4000 },
+      { animationName: "nct-think-phrase-out", startTime: 4000 },
+      { animationName: "nct-think-phrase-in", startTime: 4000 },
+    ];
+    const origGetAnimations = Element.prototype.getAnimations;
+    Element.prototype.getAnimations = function (this: Element) {
+      if (this.classList.contains("think-phrase-slot")) {
+        return slotAnims as unknown as Animation[];
+      }
+      if (this.classList.contains("think-label")) {
+        return labelAnims as unknown as Animation[];
+      }
+      return [];
+    };
+    try {
+      vi.setSystemTime(0);
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: query === "(prefers-reduced-motion: no-preference)",
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }));
+      const view = createSessionView();
+      view.entries = [assistant({ reasoning: "先检查文件" })];
+      mount(view, {
+        subscribeEvents: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      });
+      act(() => {
+        for (const listener of listeners) {
+          listener({
+            type: "message.assistant.delta",
+            sessionId: "session-1",
+            runId: "run-1",
+            eseq: 1,
+            afterSeq: 1,
+            time: new Date().toISOString(),
+            turnId: "turn-1",
+            payload: { messageId: "message-1", kind: "reasoning", delta: "先检查文件" },
+          });
+        }
+      });
+      expect(labelAnims[0]?.startTime).toBe(0);
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(slotAnims[0]?.startTime).toBe(0);
+      expect(slotAnims[1]?.startTime).toBe(0);
+      expect(slotAnims[2]?.startTime).toBe(4000);
+      expect(slotAnims[3]?.startTime).toBe(4000);
+    } finally {
+      Element.prototype.getAnimations = origGetAnimations;
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });
 
