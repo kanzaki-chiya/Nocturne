@@ -662,6 +662,7 @@ function createTestHost() {
           result = cheap;
           break;
         case "runtime.listReviewerProviders":
+        case "suites.list":
         case "grants.workspaces":
         case "grants.list":
           result = [];
