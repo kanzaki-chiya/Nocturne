@@ -25,6 +25,120 @@ const DEFAULT_HOOK_TIMEOUT_MS = 60_000;
 const MAX_HOOK_TIMEOUT_MS = 60_000;
 const SESSION_END_DEFAULT_TIMEOUT_MS = 1_000;
 const SESSION_END_MAX_TIMEOUT_MS = 3_000;
+const MAX_PLUGIN_ICON_BYTES = 64 * 1024;
+const PLUGIN_ICON_MIME: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+};
+const SVG_START_RE =
+  /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[\s\S]*?>\s*)*<svg[\s>]/i;
+
+function iconExtension(filePath: string): string {
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const dot = filePath.lastIndexOf(".");
+  if (dot <= slash) return "";
+  return filePath.slice(dot).toLowerCase();
+}
+
+function matchesIconMagic(mime: string, bytes: Uint8Array): boolean {
+  if (mime === "image/png") {
+    return (
+      bytes.byteLength >= 8 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    );
+  }
+  if (mime === "image/jpeg") {
+    return bytes.byteLength >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (mime === "image/webp") {
+    return (
+      bytes.byteLength >= 12 &&
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50
+    );
+  }
+  if (mime === "image/svg+xml") {
+    const text = Buffer.from(bytes)
+      .toString("utf8")
+      .replace(/^\uFEFF/, "");
+    return SVG_START_RE.test(text);
+  }
+  return false;
+}
+
+async function tryReadPluginIcon(
+  platform: Platform,
+  pluginRoot: string,
+  pluginRootReal: string,
+  rawPath: unknown,
+): Promise<string | undefined> {
+  const rel = nonEmptyString(rawPath);
+  if (rel === undefined || rel.includes("\0")) return undefined;
+  const { fs, paths } = platform;
+  if (
+    paths.isAbsolute(rel) ||
+    /^[A-Za-z]:/.test(rel) ||
+    rel.startsWith("/") ||
+    rel.startsWith("\\")
+  ) {
+    return undefined;
+  }
+  const candidate = paths.resolve(pluginRoot, rel);
+  if (!paths.isWithin(pluginRoot, candidate) || paths.equals(pluginRoot, candidate)) {
+    return undefined;
+  }
+  const mime = PLUGIN_ICON_MIME[iconExtension(candidate)];
+  if (mime === undefined) return undefined;
+  try {
+    if (!(await fs.exists(candidate))) return undefined;
+    const real = await platform.resolveReal(candidate);
+    if (!paths.isWithin(pluginRootReal, real) || paths.equals(pluginRootReal, real)) {
+      return undefined;
+    }
+    const stat = await fs.stat(real);
+    if (stat.type !== "file" || stat.size <= 0 || stat.size > MAX_PLUGIN_ICON_BYTES) {
+      return undefined;
+    }
+    const bytes = await fs.readFile(real);
+    if (bytes.byteLength <= 0 || bytes.byteLength > MAX_PLUGIN_ICON_BYTES) {
+      return undefined;
+    }
+    if (!matchesIconMagic(mime, bytes)) return undefined;
+    return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readPluginIcon(
+  platform: Platform,
+  pluginRoot: string,
+  pluginRootReal: string,
+  iface: Record<string, unknown> | undefined,
+): Promise<string | undefined> {
+  if (!iface) return undefined;
+  for (const raw of [iface.composerIcon, iface.logo]) {
+    const uri = await tryReadPluginIcon(platform, pluginRoot, pluginRootReal, raw);
+    if (uri !== undefined) return uri;
+  }
+  return undefined;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -355,6 +469,7 @@ async function buildDiscoveredPlugin(
     nonEmptyString(iface?.shortDescription) ??
     nonEmptyString(iface?.longDescription);
   const version = input.version !== "" ? input.version : (nonEmptyString(manifest.version) ?? "");
+  const icon = await readPluginIcon(platform, input.rawRoot, pluginRootReal, iface);
 
   // ── Hooks 解析 ─────────────────────────────────────────
   const parsedHooks: ParsedPluginHooks = {
@@ -472,6 +587,7 @@ async function buildDiscoveredPlugin(
       root: pluginRootReal,
       ...(displayName !== undefined ? { displayName } : {}),
       ...(description !== undefined ? { description } : {}),
+      ...(icon !== undefined ? { icon } : {}),
       hooks: parsedHooks.overviewHooks,
       unsupported: parsedHooks.unsupported,
       skills: skillNames,

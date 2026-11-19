@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,7 +94,7 @@ function writeCodexPlugin(
     enabled?: boolean;
     manifestDir?: ".codex-plugin" | ".claude-plugin" | "root";
     manifest?: Record<string, unknown>;
-    files?: Record<string, string>;
+    files?: Record<string, string | Uint8Array>;
   },
 ): string {
   const pluginDir = path.join(
@@ -141,7 +142,7 @@ function writeClaudePlugin(
     enabled?: boolean;
     scope?: string;
     manifest?: Record<string, unknown>;
-    files?: Record<string, string>;
+    files?: Record<string, string | Uint8Array>;
   },
 ): string {
   const slug = `${opts.name}@${opts.marketplace}`;
@@ -1151,5 +1152,292 @@ describe("启用、整目录指纹信任、技能与 Runtime 集成", () => {
       claudeHome: f.claudeHome,
     });
     expect(d2.warnings.some((w) => w.includes("bad"))).toBe(true);
+  });
+});
+
+// 1x1 透明 PNG
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
+const TINY_PNG_2 = Buffer.concat([TINY_PNG, Buffer.from([0x00, 0x01])]);
+const TINY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>`;
+const TINY_JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const TINY_WEBP = Buffer.from([
+  0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20,
+]);
+
+describe("插件图标读取与指纹排除", () => {
+  it("优先取 interface.composerIcon，没有时退到 interface.logo，支持 png/jpg/webp/svg", async () => {
+    const f = makeFixtureEnv();
+    writeCodexPlugin(f.codexHome, {
+      name: "both",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "both",
+        interface: {
+          composerIcon: "./assets/composer.png",
+          logo: "./assets/logo.svg",
+        },
+      },
+      files: {
+        "assets/composer.png": TINY_PNG,
+        "assets/logo.svg": TINY_SVG,
+      },
+    });
+    writeCodexPlugin(f.codexHome, {
+      name: "logo-only",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "logo-only",
+        interface: {
+          logo: "./assets/logo.svg",
+        },
+      },
+      files: {
+        "assets/logo.svg": TINY_SVG,
+      },
+    });
+    writeCodexPlugin(f.codexHome, {
+      name: "jpg-icon",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "jpg-icon",
+        interface: { composerIcon: "assets/pic.jpg" },
+      },
+      files: { "assets/pic.jpg": TINY_JPG },
+    });
+    writeCodexPlugin(f.codexHome, {
+      name: "webp-icon",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "webp-icon",
+        interface: { composerIcon: "./assets/pic.webp" },
+      },
+      files: { "assets/pic.webp": TINY_WEBP },
+    });
+
+    const res = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    const byName = (name: string) =>
+      must(
+        res.plugins.find((p) => p.name === name),
+        name,
+      );
+
+    expect(byName("both").icon).toBe(`data:image/png;base64,${TINY_PNG.toString("base64")}`);
+    expect(byName("logo-only").icon).toBe(
+      `data:image/svg+xml;base64,${Buffer.from(TINY_SVG, "utf8").toString("base64")}`,
+    );
+    expect(byName("jpg-icon").icon).toBe(`data:image/jpeg;base64,${TINY_JPG.toString("base64")}`);
+    expect(byName("webp-icon").icon).toBe(`data:image/webp;base64,${TINY_WEBP.toString("base64")}`);
+    for (const p of res.plugins) {
+      expect(p.warnings).toEqual([]);
+    }
+  });
+
+  it("越界路径、符号链接指向外部、超过 64 KB、不支持格式时均无 icon 且不报警告", async () => {
+    const f = makeFixtureEnv();
+    const outsidePng = path.join(f.root, "outside.png");
+    writeFileSync(outsidePng, TINY_PNG);
+
+    // 1. .. 越界
+    writeCodexPlugin(f.codexHome, {
+      name: "escape",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "escape",
+        interface: { composerIcon: "../../../../../../outside.png" },
+      },
+    });
+    // 2. 超过 64 KB（65537 字节）
+    const oversized = Buffer.concat([TINY_PNG, Buffer.alloc(64 * 1024 + 1 - TINY_PNG.length)]);
+    writeCodexPlugin(f.codexHome, {
+      name: "too-big",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "too-big",
+        interface: { composerIcon: "./big.png" },
+      },
+      files: { "big.png": oversized },
+    });
+    // 3. 不支持的格式（.gif 与内容不符的 .png）
+    writeCodexPlugin(f.codexHome, {
+      name: "bad-ext",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "bad-ext",
+        interface: { composerIcon: "./anim.gif" },
+      },
+      files: { "anim.gif": Buffer.from("GIF89a") },
+    });
+    writeCodexPlugin(f.codexHome, {
+      name: "bad-magic",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "bad-magic",
+        interface: { composerIcon: "./fake.png" },
+      },
+      files: { "fake.png": "not really a png" },
+    });
+    // 4. 符号链接指向根目录外（Windows 若无文件 symlink 权限则用目录 junction）
+    const symlinkPluginDir = writeCodexPlugin(f.codexHome, {
+      name: "sym-icon",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "sym-icon",
+        interface: { composerIcon: "./linked/outside.png" },
+      },
+    });
+    const outsideDir = path.join(f.root, "outside-icons");
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(path.join(outsideDir, "outside.png"), TINY_PNG);
+    symlinkSync(
+      outsideDir,
+      path.join(symlinkPluginDir, "linked"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const { plugins } = await discoverInstalledPlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    for (const name of ["escape", "too-big", "bad-ext", "bad-magic", "sym-icon"]) {
+      const p = must(
+        plugins.find((item) => item.overview.name === name),
+        name,
+      );
+      expect(p.overview.icon).toBeUndefined();
+      expect(p.overview.warnings).toEqual([]);
+    }
+  });
+
+  it("图标文件变化与清单图标字段变化不改变插件指纹，且不能借图标字段绕过脚本指纹校验", async () => {
+    const f = makeFixtureEnv();
+    const pluginDir = writeCodexPlugin(f.codexHome, {
+      name: "stable",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "stable",
+        interface: {
+          displayName: "Stable Plugin",
+          composerIcon: "./assets/icon.png",
+        },
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "node ./run.mjs" }] }],
+        },
+      },
+      files: {
+        "assets/icon.png": TINY_PNG,
+        "run.mjs": "console.log('v1');",
+      },
+    });
+
+    await setPluginEnabled(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+      id: "codex:stable@mkt",
+      enabled: true,
+    });
+
+    const hashBefore = await computePluginFingerprint(
+      f.plat.fs,
+      f.plat.paths,
+      pluginDir,
+      pluginDir,
+    );
+
+    // 1. 修改图标文件内容：指纹不变，状态仍为 on
+    writeFileSync(path.join(pluginDir, "assets", "icon.png"), TINY_PNG_2);
+    const hashAfterIconEdit = await computePluginFingerprint(
+      f.plat.fs,
+      f.plat.paths,
+      pluginDir,
+      pluginDir,
+    );
+    expect(hashAfterIconEdit).toBe(hashBefore);
+    const afterEdit = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    expect(afterEdit.plugins[0]?.state).toBe("on");
+    expect(afterEdit.plugins[0]?.icon).toBe(
+      `data:image/png;base64,${TINY_PNG_2.toString("base64")}`,
+    );
+
+    // 2. 替换清单中的图标字段与文件（icon.png -> logo.svg）：指纹不变，状态仍为 on
+    writeFileSync(
+      path.join(pluginDir, ".codex-plugin", "plugin.json"),
+      JSON.stringify(
+        {
+          name: "stable",
+          interface: {
+            displayName: "Stable Plugin",
+            logo: "./assets/logo.svg",
+          },
+          hooks: {
+            SessionStart: [{ hooks: [{ type: "command", command: "node ./run.mjs" }] }],
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    writeFileSync(path.join(pluginDir, "assets", "logo.svg"), TINY_SVG);
+    // 删除旧 icon.png（仅保留新 logo.svg）
+    unlinkSync(path.join(pluginDir, "assets", "icon.png"));
+    const afterSwitch = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    expect(afterSwitch.plugins[0]?.state).toBe("on");
+    expect(afterSwitch.plugins[0]?.icon).toBe(
+      `data:image/svg+xml;base64,${Buffer.from(TINY_SVG, "utf8").toString("base64")}`,
+    );
+
+    // 3. 安全边界：尝试将 composerIcon 指向脚本 ./run.mjs 并修改脚本，必须触发 changed
+    writeFileSync(
+      path.join(pluginDir, ".codex-plugin", "plugin.json"),
+      JSON.stringify(
+        {
+          name: "stable",
+          interface: {
+            displayName: "Stable Plugin",
+            composerIcon: "./run.mjs",
+          },
+          hooks: {
+            SessionStart: [{ hooks: [{ type: "command", command: "node ./run.mjs" }] }],
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    unlinkSync(path.join(pluginDir, "assets", "logo.svg"));
+    writeFileSync(path.join(pluginDir, "run.mjs"), "console.log('tampered');");
+    const afterTamper = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    expect(afterTamper.plugins[0]?.state).toBe("changed");
+    expect(afterTamper.plugins[0]?.icon).toBeUndefined();
   });
 });

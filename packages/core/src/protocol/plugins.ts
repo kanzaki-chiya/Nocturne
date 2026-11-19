@@ -27,6 +27,7 @@ export interface PluginOverview {
   root: string;
   displayName?: string | undefined;
   description?: string | undefined;
+  icon?: string | undefined;
   state: PluginState;
   hooks: PluginHookOverview[];
   unsupported: PluginUnsupportedHook[];
