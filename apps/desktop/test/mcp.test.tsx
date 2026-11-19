@@ -616,4 +616,57 @@ describe("MCP 设置页", () => {
     expect(screen.queryByRole("switch", { name: /面板浏览器/ })).toBeNull();
     f.close();
   });
+
+  it("拉取 MCP 列表时带上 workspaceRoot，切换工作区后重新请求", async () => {
+    const server = (id: string, path: string) => ({
+      id,
+      origin: "project",
+      editable: false,
+      trusted: true,
+      path,
+      transport: "stdio",
+      enabled: true,
+      command: "node",
+      args: [],
+      env: [],
+      startupTimeoutMs: 15000,
+      callTimeoutMs: 60000,
+    });
+    const f = fakeServer(
+      withInit({
+        "mcp.describeMcpServers": (params: unknown) => {
+          const root = (params as { workspaceRoot?: string } | undefined)?.workspaceRoot;
+          if (root === "/repo-a") {
+            return { servers: [server("proj-a", "/repo-a/.mcp.json")], warnings: [] };
+          }
+          if (root === "/repo-b") {
+            return { servers: [server("proj-b", "/repo-b/.mcp.json")], warnings: [] };
+          }
+          return { servers: [], warnings: [] };
+        },
+        "provider.describeProviderSetup": { credential: { backend: { available: true } } },
+      }),
+    );
+    await f.initialize();
+    const page = (workspaceRoot: string | undefined) => (
+      <McpPage
+        client={f.client}
+        workspaceRoot={workspaceRoot}
+        version={0}
+        onChanged={() => undefined}
+      />
+    );
+    const { rerender } = render(page("/repo-a"));
+    await screen.findByText("proj-a");
+
+    const describeCalls = () =>
+      f.calls.filter((call) => call.method === "mcp.describeMcpServers").map((call) => call.params);
+    expect(describeCalls()).toEqual([{ workspaceRoot: "/repo-a" }]);
+
+    rerender(page("/repo-b"));
+    await screen.findByText("proj-b");
+    expect(screen.queryByText("proj-a")).toBeNull();
+    expect(describeCalls()).toEqual([{ workspaceRoot: "/repo-a" }, { workspaceRoot: "/repo-b" }]);
+    f.close();
+  });
 });

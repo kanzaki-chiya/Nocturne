@@ -186,7 +186,7 @@ export function McpPage({
   const refresh = useCallback(async () => {
     if (!client) return;
     try {
-      const data = await client.runtime.describeMcpServers({});
+      const data = await client.runtime.describeMcpServers({ workspaceRoot });
       setServers(data.servers);
       setView((current) =>
         current.kind === "detail" && !data.servers.some((s) => s.id === current.id)
@@ -198,7 +198,7 @@ export function McpPage({
     } catch (e) {
       setError(message(e));
     }
-  }, [client]);
+  }, [client, workspaceRoot]);
 
   useEffect(() => {
     void refresh();
