@@ -159,6 +159,8 @@ Core 内部将已启用且通过整目录指纹校验（`<NOCTURNE_HOME>/plugins
 - **stdin / stdout / 退出码**：stdin 传 snake_case JSON（`hook_event_name`、`session_id`、`cwd`、`source`、`turn_id`、`prompt`、`agent_type`、`reason`；技能调用时 `prompt` 为 `/<name>` 或 `/<name> <arguments>`）。退出码 0 时取 JSON 的 `hookSpecificOutput.additionalContext`（`UserPromptSubmit` 另认 `decision: "block"` + `reason`），非 JSON 非空文本整段作为上下文；`UserPromptSubmit` 退出码 2 拦截（`reason` 取 stderr），其余非零退出按 `hook_failed` 降级。
 - **条目名**：`hook.context`、warning 与诊断给用户看的标识一律为 `plugin <name>@<marketplace> <点位>`，不暴露展开后命令与绝对路径。
 
+Nocturne 自有清单（`.nocturne-plugin/plugin.json`）的插件可接入全部 9 个事件点，输入、输出、超时、matcher 与执行方式与配置文件 Hook 相同，但子进程走白名单环境（`envMode: "minimal"`）并叠加 `PLUGIN_ROOT`、`PLUGIN_DATA`，命令与参数单次展开 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}`；兼容清单（`.codex-plugin` / `.claude-plugin`）仍按上文 4 点位翻译，详见 [ADR-0100](../decisions/ADR-0100-native-plugins.md)。
+
 ## 9. 暂不设计
 
 - **ModelRequest / 采样级 Hook**：把模型请求暴露给外部进程涉及凭据与内容边界，另议。

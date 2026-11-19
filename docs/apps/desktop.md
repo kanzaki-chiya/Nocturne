@@ -385,7 +385,7 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 #### 插件
 
-「插件」页（`src/PluginsPage.tsx`）按宿主（Codex / Claude Code）分组列出只读发现的已装插件（空组隐藏；发现阶段跳过 Codex 系统市场 `openai-bundled` / `openai-primary-runtime` 与既无受支持 Hook 又无技能的插件）。列表每行左侧与详情页头部均显示固定尺寸的插件图标（有 `PluginOverview.icon` 时经 `<img>` 渲染，缺失时显示统一默认插件图标，不显示首字母等替代文字）；列表行显示显示名、版本徽标、说明、变更状态（「已更改」与「重新确认」）与启停开关，点击行进入带面包屑的独立详情页（含概况、Hook、技能、不运行项与警告，及资源管理器打开目录按钮）。打开开关前先弹确认对话框核对 Hook、技能与不运行项；数据经 `plugins.describePlugins` / `plugins.setPluginEnabled` 读取并监听 `runtime.providersChanged` 刷新。接口见 [rpc.md](../protocols/rpc.md) 第 3.14 节，规则见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)。
+「插件」页（`src/PluginsPage.tsx`）按来源分组列出已发现的插件（依次为「内置」「Nocturne」「Codex」「Claude Code」，分组标题仅写来源名、不加说明文字，空组隐藏；发现阶段跳过 Codex 系统市场 `openai-bundled` / `openai-primary-runtime` 与受支持 Hook、技能、受支持 MCP 服务器三者均为空的插件）。列表每行左侧与详情页头部均显示固定尺寸的插件图标（有 `PluginOverview.icon` 时经 `<img>` 渲染，缺失时显示统一默认插件图标，不显示首字母等替代文字）；列表行显示显示名、版本徽标、说明、变更状态（「已更改」与「重新确认」）与启停开关，点击行进入带面包屑的独立详情页（含概况、Hook、技能、MCP 服务器、不运行项与警告，及资源管理器打开目录按钮；MCP 服务器一节列出服务器 id、命令摘要与跳过原因）。非内置插件打开开关前先弹确认对话框核对 Hook、技能、MCP 服务器与不运行项；内置插件默认开启且不做指纹确认，开关直接启停。数据经 `plugins.describePlugins` / `plugins.setPluginEnabled` 读取并监听 `runtime.providersChanged` 刷新。接口见 [rpc.md](../protocols/rpc.md) 第 3.14 节，规则见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md) 与 [ADR-0100](../decisions/ADR-0100-native-plugins.md)。
 
 #### Hook
 

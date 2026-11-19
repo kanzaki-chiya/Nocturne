@@ -222,3 +222,7 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 ## 10. 桌面浏览器运行时来源
 
 桌面外壳提供回环 HTTP MCP，经 CLI 的桌面后台启动凭证装配为临时来源，不写用户 mcp.json；根会话绑定、子 actor、停用、同名冲突和图片附件映射的契约见 [desktop-browser.md](../protocols/desktop-browser.md)。普通配置的传输、重载与权限语义不变。
+
+## 11. 插件来源的 MCP 服务器
+
+已启用插件可通过清单 `mcpServers`（内联对象或 `./` 相对路径 JSON）或根目录 `.mcp.json` 声明 stdio MCP 服务器（`origin: "plugin"`），`command` / `args` / `env` 单次展开 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}`、`${NOCTURNE_NODE}`，不允许 `{ stored: true }`，与配置文件同名时配置文件优先并跳过发出 `plugin_mcp_conflict` 警告；插件启停时在空闲会话及运行中会话的 Turn 边界随 `reconcile` 增减，详见 [ADR-0100](../decisions/ADR-0100-native-plugins.md)。

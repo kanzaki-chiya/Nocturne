@@ -307,16 +307,16 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `computer.setPermission` | `{ identity: string, action: PermissionAction \| null, app?: { name?, icon? } }` → `ComputerDescription` |
 | `computer.changed`（服务端→客户端） | `ComputerDescription` |
 
-### 3.14 `plugins.*`（ADR-0096 第二期）
+### 3.14 `plugins.*`（ADR-0096 第二期 / ADR-0100）
 
-只读发现已安装 Codex / Claude Code 插件与用户启停信任管理，均不在远程白名单（第 7 节）。
+发现 Nocturne 自有插件（内置与 `<NOCTURNE_HOME>/plugins/installed/local/`）及已安装 Codex / Claude Code 插件，并进行启停信任管理；均不在远程白名单（第 7 节）。
 
 | 方法 | 参数 → 结果 |
 |---|---|
-| `plugins.describePlugins` | `{}` → `PluginsDescription`（`{ plugins: PluginOverview[], warnings: string[] }`）；每次重新扫描并重新校验已启用插件的整目录指纹 |
-| `plugins.setPluginEnabled` | `{ id: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列原子写 `plugins.json`（`enabled: true` 时计算整目录指纹，含符号链接等失败时拒绝并报 `invalid_command`），响应之前推 `runtime.providersChanged`，技能在空闲边界重建，Hook 对之后打开的会话生效 |
+| `plugins.describePlugins` | `{}` → `PluginsDescription`（`{ plugins: PluginOverview[], warnings: string[] }`）；每次重新扫描并重新校验非内置已启用插件的整目录指纹（内置插件不做指纹，默认 `on`） |
+| `plugins.setPluginEnabled` | `{ id: string, enabled: boolean }` → `{ affectedSessions: number }`；走配置写队列原子写 `plugins.json`（非内置插件 `enabled: true` 时计算整目录指纹，含符号链接等失败时拒绝并报 `invalid_command`；内置插件停用记 `enabled: false`，再开启恢复默认 `on`），响应之前推 `runtime.providersChanged`，技能与 MCP 服务器在空闲会话立即更新（运行中会话在 Turn 边界应用），Hook 对之后打开的会话生效 |
 
-`PluginOverview` 包含 `id`、`host`、`name`、`marketplace`、`version`、`root`、`displayName?`、`description?`、`icon?`、`state`、`hooks`、`unsupported`、`skills` 与 `warnings`。其中 `icon?` 为图标 data URI：优先读取清单 `interface.composerIcon`，缺失或无效时回退 `interface.logo`；仅接受位于插件根目录内（禁止 `..` 与符号链接越界）、不超过 64 KB 的 `png` / `jpg` / `webp` / `svg` 文件，不符条件或读取失败时省略且不报警告。
+`PluginOverview` 包含 `id`、`host`（`"nocturne" | "codex" | "claude"`）、`name`、`marketplace`（内置插件为 `"builtin"`，本地安装为 `"local"`）、`version`、`root`、`displayName?`、`description?`、`icon?`、`state`、`hooks`、`unsupported`、`skills`、`mcpServers` 与 `warnings`。其中 `mcpServers` 每项为 `{ id, command?, skipped?, skipReason? }`（`skipReason` 为 `"http" | "stored" | "conflict" | "invalid"`）；`icon?` 为图标 data URI：优先读取清单 `interface.composerIcon`，缺失或无效时回退 `interface.logo`；仅接受位于插件根目录内（禁止 `..` 与符号链接越界）、不超过 64 KB 的 `png` / `jpg` / `webp` / `svg` 文件，不符条件或读取失败时省略且不报警告。规则见 [ADR-0100](../decisions/ADR-0100-native-plugins.md)。
 
 ### 3.15 `memory.*`（ADR-0098）
 
