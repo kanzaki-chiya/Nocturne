@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createPlatform,
@@ -22,6 +22,7 @@ import {
 import {
   createNewSession,
   createSessionSwitcher,
+  createSuiteOpener,
   resumeFailureHint,
   sessionOpenNotes,
   type SessionHolder,
@@ -403,5 +404,43 @@ describe("恢复失败的 CLI 用法提示", () => {
     // 新建路径的同名错误不提示（--model 本就是显式入参）
     expect(resumeFailureHint(failure, false)).toBeUndefined();
     expect(resumeFailureHint(new Error("boom"), true)).toBeUndefined();
+  });
+});
+
+describe("createSuiteOpener", () => {
+  it("经 openSuite 打开组曲指挥会话，支持跨目录、关闭旧会话并在重复打开同一组曲时提示", async () => {
+    const home = await tmp("nct-suite-home-");
+    vi.stubEnv("NOCTURNE_HOME", home);
+    try {
+      const cwd = await tmp("nct-suite-cwd-");
+      const otherWs = await tmp("nct-suite-other-");
+      const sd = await tmp("nct-suite-sd-");
+      const runtime = await makeRuntime(cwd, sd);
+      const plain = await runtime.createSession({ model: "fake/fake-1" });
+      const suite = await runtime.createSuite({
+        name: "发版准备",
+        goal: "完成 v0.54 发版",
+        workspaces: [otherWs],
+        model: "fake/fake-1",
+      });
+
+      const holder: SessionHolder = { current: plain };
+      const openSuite = createSuiteOpener({ runtime, holder });
+
+      const opened = await openSuite(suite.id);
+      expect(opened.kind).toBe("ok");
+      if (opened.kind === "ok") {
+        expect(opened.session.id).toBe(suite.coordinatorSessionId);
+        expect(opened.session.state().meta.suite).toEqual({ id: suite.id, role: "coordinator" });
+        expect(holder.current.id).toBe(suite.coordinatorSessionId);
+        // 再次打开当前已在的组曲
+        const again = await openSuite(suite.id);
+        expect(again).toEqual({ kind: "error", message: "已在该会话中" });
+        await opened.session.close();
+      }
+      await runtime.close();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

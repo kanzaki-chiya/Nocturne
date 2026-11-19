@@ -162,6 +162,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "plan",
   "boost",
   "ensemble",
+  "suite",
 ];
 
 export function parseSkillSlash(

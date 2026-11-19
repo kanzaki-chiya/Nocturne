@@ -38,6 +38,33 @@ export function resumeFailureHint(e: unknown, resuming: boolean): string | undef
 
 export type NewSessionFn = () => Promise<SwitchResult>;
 
+export type SuiteOpener = (id: string) => Promise<SwitchResult>;
+
+export function createSuiteOpener(deps: { runtime: Runtime; holder: SessionHolder }): SuiteOpener {
+  const { runtime, holder } = deps;
+  return async (id) => {
+    const current = holder.current;
+    const currentSuite = current.state().meta.suite;
+    if (currentSuite?.role === "coordinator" && currentSuite.id === id) {
+      return { kind: "error", message: "已在该会话中" };
+    }
+    if (current.state().openTurn !== undefined) return { kind: "busy" };
+    let next: RuntimeSession;
+    try {
+      next = await runtime.openSuite(id);
+    } catch (e) {
+      return { kind: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+    holder.current = next;
+    try {
+      await current.close();
+    } catch {
+      // 新会话已经建立；旧锁由进程退出兜底。
+    }
+    return { kind: "ok", session: next };
+  };
+}
+
 export function createNewSession(deps: { runtime: Runtime; holder: SessionHolder }): NewSessionFn {
   const { runtime, holder } = deps;
   return async () => {

@@ -46,6 +46,8 @@ import {
   type RewindMode,
   type RewindTarget,
   type SessionView,
+  type SuiteRecord,
+  type SuiteThreadView,
   type ViewEntry,
 } from "@nocturne/core/protocol";
 
@@ -149,6 +151,8 @@ import { RewindPage } from "./components/rewind-page.js";
 import { TodoPanel, todoPanelRows } from "./components/todo-panel.js";
 import { EnsembleBoard } from "./components/ensemble-board.js";
 import { EnsembleStrip, ensembleStripRows } from "./components/ensemble-strip.js";
+import { SuiteOverview } from "./components/suite-overview.js";
+import { SuiteStrip, suiteStripRows } from "./components/suite-strip.js";
 import { Transcript, type TranscriptItem } from "./components/transcript.js";
 import { useAltScreen, waitCommit } from "./alt-screen.js";
 import { WizardView } from "./components/wizard-view.js";
@@ -157,9 +161,10 @@ import { useOptionalSessionView, useSessionView, usePendingInputs } from "./sess
 import { useGenerationSpeed } from "./speed.js";
 import stringWidth from "string-width";
 import { useReasoning } from "./reasoning.js";
-import { useNotifyBell, useEnsembleMemberBell } from "./notify.js";
+import { useNotifyBell, useEnsembleMemberBell, useSuiteThreadBell } from "./notify.js";
+import { matchSuiteTarget } from "./text-format-suite.js";
 import { useTheme, type ThemeId } from "./theme.js";
-import type { NewSessionFn, SwitchSessionFn } from "./types.js";
+import type { NewSessionFn, OpenSuiteFn, SwitchSessionFn } from "./types.js";
 import type { ConsoleLines } from "./console-capture.js";
 import { useProviderWizard } from "./wizard-io.js";
 import { safeLoginError } from "./provider-login.js";
@@ -311,6 +316,7 @@ export interface AppProps {
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
   newSession?: NewSessionFn | undefined;
+  openSuite?: OpenSuiteFn | undefined;
   /** /provider 与全屏页的配置桥（cli 注入）；缺省时相关命令提示不可用 */
   provider?: ProviderBridge | undefined;
   /** 首次配置流程（session 为 undefined 时生效） */
@@ -783,6 +789,7 @@ export function App({
   env,
   switchSession,
   newSession,
+  openSuite,
   provider,
   setup,
   inline,
@@ -841,6 +848,7 @@ export function App({
       env={env}
       switchSession={switchSession}
       newSession={newSession}
+      openSuite={openSuite}
       provider={provider}
       inline={inline === true}
       mouse={mouse}
@@ -865,6 +873,7 @@ function SessionApp({
   env,
   switchSession,
   newSession,
+  openSuite,
   provider,
   inline = false,
   mouse,
@@ -885,6 +894,7 @@ function SessionApp({
   env: TuiEnv;
   switchSession?: SwitchSessionFn | undefined;
   newSession?: NewSessionFn | undefined;
+  openSuite?: OpenSuiteFn | undefined;
   provider?: ProviderBridge | undefined;
   /** 普通屏幕（行内）模式；缺省 false = 全屏 */
   inline?: boolean | undefined;
@@ -929,11 +939,17 @@ function SessionApp({
   >(undefined);
   const memberRef = useRef(memberSession);
   memberRef.current = memberSession;
-  const session = memberSession?.session ?? maestro;
+  const [suiteThreadSession, setSuiteThreadSession] = useState<
+    { session: RuntimeSession; threadId: string; title: string } | undefined
+  >(undefined);
+  const suiteThreadRef = useRef(suiteThreadSession);
+  suiteThreadRef.current = suiteThreadSession;
+  const session = suiteThreadSession?.session ?? memberSession?.session ?? maestro;
   const coordView = useSessionView(maestro);
-  const memberView = useOptionalSessionView(memberSession?.session);
-  const view = memberView ?? coordView;
+  const childView = useOptionalSessionView(suiteThreadSession?.session ?? memberSession?.session);
+  const view = childView ?? coordView;
   const coordEnsemble = coordView.ensemble;
+  const coordSuite = coordView.suite;
   // 待发输入（ADR-0070）：运行中插话/排队，临时状态按整份快照覆盖
   const pendingInputs = usePendingInputs(session);
   const [pendingIndex, setPendingIndex] = useState(0);
@@ -986,11 +1002,27 @@ function SessionApp({
     writeOob,
     viewing: memberSession?.name,
   });
+  // 组曲线程的新待确认请求 / 提问（实时到达）同样响铃；正在看的线程由上面那条覆盖
+  useSuiteThreadBell({
+    session: maestro,
+    runtime,
+    focus,
+    writeOob,
+    viewing: suiteThreadSession?.threadId,
+  });
   const { parts: reasoning, now: reasoningNow } = useReasoning(session);
   const speed = useGenerationSpeed(session);
-  // 成员会话的第一条消息是 Ensemble 帖子送达：标题行不露出 `<ensemble-post>` 标签
-  const title =
-    view.title !== undefined && /^<ensemble-post[^>]*>/u.test(view.title) ? undefined : view.title;
+  // 成员会话/指挥会话的自动投递不露出 `<ensemble-post>` / `<thread-report>` 标签；线程视图显示线程标题
+  const baseTitle =
+    view.title !== undefined && /^<(?:ensemble-post|thread-report)[^>]*>/u.test(view.title)
+      ? undefined
+      : view.title;
+  const suiteThreadTitle =
+    suiteThreadSession !== undefined
+      ? (coordSuite?.threads.find((t) => t.threadId === suiteThreadSession.threadId)?.title ??
+        suiteThreadSession.title)
+      : undefined;
+  const title = suiteThreadTitle ?? baseTitle;
   useEffect(() => {
     onSessionId?.(maestro.id);
   }, [maestro, onSessionId]);
@@ -1086,19 +1118,30 @@ function SessionApp({
   const [recordOpen, setRecordOpen] = useState(false);
   /** `/ensemble board` 全屏留言板（仅全屏，tui.md §2） */
   const [boardOpen, setBoardOpen] = useState(false);
+  /** `/suite overview` 全屏组曲总览页（仅全屏，tui.md） */
+  const [suiteOverviewOpen, setSuiteOverviewOpen] = useState(false);
+  // 常驻子会话（合奏成员 / 组曲线程）权限保留在各自成员视图 / 线程视图中确认，不在指挥主界面抢占输入框或打断全屏页
+  const nonResidentSubagentPermissions = view.pendingSubagentPermissions.filter(
+    (p) => !p.parentCallId.startsWith("ensemble:") && !p.parentCallId.startsWith("suite:"),
+  );
   // 当前会话出现权限确认或提问时让出整帧，确认框照常显示
   useEffect(() => {
     if (
       view.pendingPermission !== undefined ||
-      view.pendingSubagentPermissions.length > 0 ||
+      nonResidentSubagentPermissions.length > 0 ||
       view.pendingQuestion !== undefined
-    )
+    ) {
       setBoardOpen(false);
-  }, [view.pendingPermission, view.pendingSubagentPermissions.length, view.pendingQuestion]);
-  // Ensemble 不存在时没有留言板
+      setSuiteOverviewOpen(false);
+    }
+  }, [view.pendingPermission, nonResidentSubagentPermissions.length, view.pendingQuestion]);
+  // Ensemble / 组曲不存在时关闭对应全屏页
   useEffect(() => {
     if (coordEnsemble === undefined) setBoardOpen(false);
   }, [coordEnsemble]);
+  useEffect(() => {
+    if (coordSuite === undefined) setSuiteOverviewOpen(false);
+  }, [coordSuite]);
   const [recordScroll, setRecordScroll] = useState<ScrollState>(scrollFollow);
   const recordTotal = useRef<number | undefined>(undefined);
   const recordCommitted = useRef(false);
@@ -1145,6 +1188,29 @@ function SessionApp({
   }, [session, fullscreen]);
   /** /resume 弹层的会话清单（打开弹层时拉取） */
   const [resumeList, setResumeList] = useState<readonly SessionSummary[] | undefined>(undefined);
+  /** /suite 弹层的未归档组曲清单（打开弹层时拉取） */
+  const [suiteList, setSuiteList] = useState<readonly SuiteRecord[] | undefined>(undefined);
+  /** 组曲 id → 名称缓存（供状态块与总览页头部显示） */
+  const [suiteNames, setSuiteNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const coordSuiteId = coordSuite?.suiteId;
+  useEffect(() => {
+    if (coordSuiteId === undefined || coordSuiteId === "") return;
+    let alive = true;
+    void runtime
+      .listSuites({ includeArchived: true })
+      .then((rows) => {
+        if (!alive) return;
+        setSuiteNames((prev) => {
+          const next = new Map(prev);
+          for (const row of rows) next.set(row.id, row.name);
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [coordSuiteId, runtime]);
   /** /search 弹层的挂载纪元与预填查询词 */
   const [searchInit, setSearchInit] = useState<{ key: number; query: string }>({
     key: 0,
@@ -1250,11 +1316,11 @@ function SessionApp({
   // 所以成员 Turn 进行中切进来时 view.status 仍是 idle。用 live 状态补齐忙闲，
   // 插话/排队与 Esc/Ctrl+C 中断才和指挥一致。
   const memberLiveBusy =
-    memberView !== undefined &&
-    (memberView.currentTurn !== undefined ||
-      memberView.live.tools.length > 0 ||
-      memberView.live.assistants.length > 0 ||
-      allPendingPermissions(memberView).length > 0);
+    childView !== undefined &&
+    (childView.currentTurn !== undefined ||
+      childView.live.tools.length > 0 ||
+      childView.live.assistants.length > 0 ||
+      allPendingPermissions(childView).length > 0);
   const busy = view.status !== "idle" || submitPending || memberLiveBusy;
   // 回复发出到事件回来之间有异步间隔，本地先结算，这段时间的按键才不会被权限框吞掉。
   const [settledPermissions, setSettledPermissions] = useState<ReadonlySet<string>>(
@@ -1267,7 +1333,10 @@ function SessionApp({
     item.kind === "subagent"
       ? `subagent:${item.permission.childSessionId}:${item.permission.requestId}`
       : `session:${item.permission.requestId}`;
-  const pendingItems = allPendingPermissions(view);
+  const pendingItems = allPendingPermissions({
+    pendingPermission: view.pendingPermission,
+    pendingSubagentPermissions: nonResidentSubagentPermissions,
+  });
   const activePendingKeys = pendingItems.map(pendingPermissionKey).join("\n");
   useEffect(() => {
     setSettledPermissions((prev) => {
@@ -1636,10 +1705,15 @@ function SessionApp({
           if (
             clicked.startsWith("reasoning:") ||
             clicked.startsWith("description:") ||
-            clicked.startsWith("subagent:")
+            clicked.startsWith("subagent:") ||
+            clicked.startsWith("suite-report:")
           ) {
             const next = new Map(reasoningExpandedRef.current);
-            next.set(clicked, !(next.get(clicked) ?? source.expanded));
+            const fallback =
+              clicked.startsWith("suite-report:") || clicked.startsWith("subagent:")
+                ? false
+                : source.expanded;
+            next.set(clicked, !(next.get(clicked) ?? fallback));
             reasoningExpandedRef.current = next;
             setReasoningExpanded(next);
             nextSource = { ...source, reasoningExpanded: next };
@@ -1885,6 +1959,173 @@ function SessionApp({
     showSession(undefined);
   }, [showSession]);
 
+  /**
+   * 组曲线程视图（tui.md、ADR-0097）：照合奏成员视图的做法换绑显示视图，指挥始终打开，
+   * 进出都不 close、不 interrupt；旧内容冻结（全屏）或留在回滚区（--inline）。
+   */
+  const showSuiteThread = useCallback(
+    (next: { session: RuntimeSession; threadId: string; title: string } | undefined): void => {
+      const target = next?.session ?? maestro;
+      if (target === session) return;
+      const epoch = sessionEpoch.current++;
+      const sep: TranscriptItem = {
+        kind: "separator",
+        key: `sw-${epoch}`,
+        text: `已切换到会话 ${target.id}`,
+      };
+      if (fullscreen) {
+        const frozenItems = interleaveClient<ViewEntry, TranscriptItem>(
+          entriesRef.current,
+          0,
+          clientLinesRef.current,
+          (e) => [{ ...e, key: `z${epoch}:${e.key}` }],
+          (line) => ({
+            kind: "header",
+            key: `z${epoch}:c${line.id}`,
+            lines: [{ key: `z${epoch}:c${line.id}`, text: line.text, dim: true }],
+          }),
+        );
+        setFrozen((prev) => [...prev, ...frozenItems, sep]);
+        setClientLines([]);
+        setSel(undefined);
+        setScroll(scrollToBottom());
+      } else {
+        staticQueue.current.push(sep);
+        staticWritten.current.clear();
+        staticAttempts.current.clear();
+      }
+      pastes.reset(inputRef.current);
+      setMemberSession(undefined);
+      setSuiteThreadSession(next);
+    },
+    [maestro, session, fullscreen, pastes],
+  );
+  const openSuiteThread = useCallback(
+    async (thread: SuiteThreadView): Promise<boolean> => {
+      if (suiteThreadRef.current?.session.id === thread.childSessionId) return true;
+      try {
+        const opened = await runtime.resumeSession(thread.childSessionId);
+        showSuiteThread({ session: opened, threadId: thread.threadId, title: thread.title });
+        return true;
+      } catch (e) {
+        pushLine(`! ${errText(e)}`);
+        return false;
+      }
+    },
+    [runtime, showSuiteThread, pushLine],
+  );
+  const backToCoordinator = useCallback((): void => {
+    showSuiteThread(undefined);
+  }, [showSuiteThread]);
+
+  /** /suite 打开组曲指挥会话：先换回指挥视图（若在成员/线程视图），再走注入的 openSuite */
+  const doOpenSuite = useCallback(
+    async (suite: SuiteRecord): Promise<void> => {
+      const fromChild = memberRef.current !== undefined || suiteThreadRef.current !== undefined;
+      if (memberRef.current !== undefined) setMemberSession(undefined);
+      if (suiteThreadRef.current !== undefined) setSuiteThreadSession(undefined);
+      if (submitting.current || (busy && !fromChild)) {
+        pushLine("! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换");
+        return;
+      }
+      if (switching.current) return;
+      if (openSuite === undefined && switchSession === undefined) {
+        pushLine("! 当前环境不支持会话切换");
+        return;
+      }
+      switching.current = true;
+      setSwitchPending(true);
+      let switched = false;
+      try {
+        const res =
+          openSuite !== undefined
+            ? await openSuite(suite.id)
+            : switchSession !== undefined
+              ? await switchSession(suite.coordinatorSessionId, { allowForeign: true })
+              : { kind: "error" as const, message: "当前环境不支持会话切换" };
+        if (res.kind === "ok") {
+          const epoch = sessionEpoch.current++;
+          const sep: TranscriptItem = {
+            kind: "separator",
+            key: `sw-${epoch}`,
+            text: `已切换到会话 ${res.session.id}`,
+          };
+          if (fullscreen) {
+            const frozenItems = interleaveClient<ViewEntry, TranscriptItem>(
+              entriesRef.current,
+              0,
+              clientLinesRef.current,
+              (e) =>
+                e.kind === "notice" && e.subtype === "config" && hiddenNotices.current.has(e.key)
+                  ? []
+                  : [{ ...e, key: `z${epoch}:${e.key}` }],
+              (line) => ({
+                kind: "header",
+                key: `z${epoch}:c${line.id}`,
+                lines: [{ key: `z${epoch}:c${line.id}`, text: line.text, dim: true }],
+              }),
+            );
+            setFrozen((prev) => [...prev, ...frozenItems, sep]);
+            setClientLines([]);
+            setSel(undefined);
+            setScroll(scrollToBottom());
+          } else {
+            staticQueue.current.push(sep);
+            staticWritten.current.clear();
+            staticAttempts.current.clear();
+          }
+          switched = true;
+          pastes.reset(inputRef.current);
+          setSuiteNames((prev) => {
+            const next = new Map(prev);
+            next.set(suite.id, suite.name);
+            return next;
+          });
+          setSuiteOverviewOpen(false);
+          setSession(res.session);
+          setOverlay(undefined);
+          for (const n of sessionNotes(res.session)) pushLine(`! ${n}`);
+          return;
+        }
+        pushLine(
+          res.kind === "busy"
+            ? "! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换"
+            : res.kind === "foreign"
+              ? `! 会话绑定到 ${res.workspaceRoot}`
+              : `! ${res.message}`,
+        );
+      } finally {
+        if (!switched) {
+          switching.current = false;
+          setSwitchPending(false);
+        }
+      }
+    },
+    [openSuite, switchSession, pushLine, fullscreen, busy, pastes],
+  );
+  const doOpenSuiteByTarget = useCallback(
+    async (target: string): Promise<void> => {
+      try {
+        const suites = await runtime.listSuites();
+        const matched = matchSuiteTarget(suites, target);
+        if (matched.kind === "not_found") {
+          pushLine(`! 组曲不存在：${target}`);
+          return;
+        }
+        if (matched.kind === "ambiguous") {
+          pushLine(
+            `! 组曲 ${target} 有多个匹配；可选：${matched.matches.map((s) => s.name).join(", ")}`,
+          );
+          return;
+        }
+        await doOpenSuite(matched.suite);
+      } catch (e) {
+        pushLine(`! ${errText(e)}`);
+      }
+    },
+    [runtime, doOpenSuite, pushLine],
+  );
+
   /** 会话切换：冻结旧回放进 Static、换绑 session、新日志重放进 SessionView */
   const doSwitch = useCallback(
     async (
@@ -1893,10 +2134,11 @@ function SessionApp({
       draft?: RewindTarget,
       jump?: SeqJump,
     ): Promise<void> => {
-      // 成员视图下切换会话：先回到指挥视图，再走原来的 switchSession（tui.md §6）；
-      // 这时的 busy 是成员的，忙闲以 switchSession 对指挥的判定为准
-      const fromMember = memberRef.current !== undefined;
-      if (fromMember) setMemberSession(undefined);
+      // 成员视图 / 线程视图下切换会话：先回到指挥视图，再走原来的 switchSession（tui.md §6）；
+      // 这时的 busy 是子会话的，忙闲以 switchSession 对指挥的判定为准
+      const fromMember = memberRef.current !== undefined || suiteThreadRef.current !== undefined;
+      if (memberRef.current !== undefined) setMemberSession(undefined);
+      if (suiteThreadRef.current !== undefined) setSuiteThreadSession(undefined);
       if (submitting.current || (busy && !fromMember)) {
         pushLine("! 会话忙（本轮进行中）；先 Ctrl+C 中断再切换");
         return;
@@ -2061,8 +2303,9 @@ function SessionApp({
   );
 
   const doNew = useCallback(async (): Promise<void> => {
-    const fromMember = memberRef.current !== undefined;
-    if (fromMember) setMemberSession(undefined);
+    const fromMember = memberRef.current !== undefined || suiteThreadRef.current !== undefined;
+    if (memberRef.current !== undefined) setMemberSession(undefined);
+    if (suiteThreadRef.current !== undefined) setSuiteThreadSession(undefined);
     if (submitting.current || (busy && !fromMember)) {
       pushLine("! 会话忙（本轮进行中）；先中断再新建");
       return;
@@ -2279,6 +2522,22 @@ function SessionApp({
           pushLine(`! ${errText(e)}`);
           setOverlay(undefined);
         });
+    } else if (overlay === "suite") {
+      setSuiteList(undefined);
+      runtime
+        .listSuites()
+        .then((rows) => {
+          setSuiteList(rows);
+          setSuiteNames((prev) => {
+            const next = new Map(prev);
+            for (const row of rows) next.set(row.id, row.name);
+            return next;
+          });
+        })
+        .catch((e: unknown) => {
+          pushLine(`! ${errText(e)}`);
+          setOverlay(undefined);
+        });
     }
   }, [overlay, runtime, session, pushLine]);
 
@@ -2292,6 +2551,7 @@ function SessionApp({
     providerPageOpen ||
     recordOpen ||
     boardOpen ||
+    suiteOverviewOpen ||
     overlay === "settings" ||
     overlay === "grants" ||
     rewindTargets !== undefined;
@@ -2662,7 +2922,7 @@ function SessionApp({
       }
     }
     if (key.ctrl && ch === "o") {
-      if (boardOpen) return;
+      if (boardOpen || suiteOverviewOpen) return;
       toggleReasoning();
       return;
     }
@@ -2766,7 +3026,7 @@ function SessionApp({
       }
     }
     if (key.meta && !key.ctrl && (ch === "v" || ch === "V")) {
-      if (inputIdle) pasteClipboardImage();
+      if (inputIdle && suiteThreadRef.current === undefined) pasteClipboardImage();
       return;
     }
     // 全屏视口翻阅（ADR-0021）：弹层/页面/权限待决时不响应
@@ -2853,7 +3113,7 @@ function SessionApp({
               });
             else if (r.kind === "overlay") {
               if (r.name === "theme") clearInput();
-              if (r.name === "resume" && submitting.current)
+              if ((r.name === "resume" || r.name === "suite") && submitting.current)
                 pushLine("! 会话忙（本轮进行中）；先中断再切换");
               else if (r.name === "settings" || r.name === "grants")
                 void alt.enter(async () => {
@@ -2870,7 +3130,14 @@ function SessionApp({
             } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
             else if (r.kind === "switch") void doSwitch(r.id);
-            else if (r.kind === "provider-wizard") openProviderWizard(r.start);
+            else if (r.kind === "suite-open") void doOpenSuiteByTarget(r.target);
+            else if (r.kind === "suite-overview") {
+              if (coordSuite === undefined || !fullscreen) pushLine("用法：/suite [<名称>]");
+              else {
+                setSel(undefined);
+                setSuiteOverviewOpen(true);
+              }
+            } else if (r.kind === "provider-wizard") openProviderWizard(r.start);
             else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
             else if (r.kind === "message") pushLine(r.text);
           })
@@ -3020,6 +3287,74 @@ function SessionApp({
       const expanded = pastes.expand(text);
       const pendingFiles = files.in(text);
       const allAttachments = [...images.in(text), ...pendingFiles];
+      // 组曲线程视图（tui.md、ADR-0097）：输入框提交走指挥会话 sendToThread（非子会话 submit）；
+      // 附件与执行方式不可用（空文本不提交、不提示）；斜杠命令仅允许内置命令（如 /suite overview、/resume、/new、/suite）
+      const activeThread = suiteThreadRef.current;
+      if (activeThread !== undefined) {
+        if (expanded.startsWith("/")) {
+          if (parseWorkModeSlash(expanded) !== undefined) {
+            return;
+          }
+          clearInput();
+          images.clear();
+          files.clear();
+          void runSlash(text, session, provider, { runtime, view })
+            .then((r) => {
+              if (r.kind === "exit") requestExit();
+              else if (r.kind === "new") void doNew();
+              else if (r.kind === "rewind") openRewind();
+              else if (r.kind === "fork")
+                void doFork().catch((e: unknown) => {
+                  pushLine(`! ${errText(e)}`);
+                });
+              else if (r.kind === "overlay") {
+                if (r.name === "theme") clearInput();
+                if ((r.name === "resume" || r.name === "suite") && submitting.current)
+                  pushLine("! 会话忙（本轮进行中）；先中断再切换");
+                else if (r.name === "settings" || r.name === "grants")
+                  void alt.enter(async () => {
+                    clearInput();
+                    setOverlay(r.name);
+                    await waitCommit(settingsCommitted, true);
+                  });
+                else {
+                  if (r.name === "search") {
+                    setSearchInit((prev) => ({ key: prev.key + 1, query: r.query ?? "" }));
+                  }
+                  setOverlay(r.name);
+                }
+              } else if (r.kind === "picker") openPicker(r.focus);
+              else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
+              else if (r.kind === "switch") void doSwitch(r.id);
+              else if (r.kind === "suite-open") void doOpenSuiteByTarget(r.target);
+              else if (r.kind === "suite-overview") {
+                if (coordSuite === undefined || !fullscreen) pushLine("用法：/suite [<名称>]");
+                else {
+                  setSel(undefined);
+                  setSuiteOverviewOpen(true);
+                }
+              } else if (r.kind === "provider-wizard") openProviderWizard(r.start);
+              else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
+              else if (r.kind === "message") pushLine(r.text);
+            })
+            .catch((e: unknown) => {
+              pushLine(`! ${errText(e)}`);
+            });
+          return;
+        }
+        const cleanText = files.strip(images.strip(expanded)).trim();
+        if (cleanText === "") return;
+        clearInput();
+        images.clear();
+        files.clear();
+        if (fullscreen) setScroll(scrollToBottom());
+        void maestro
+          .sendToThread({ thread: activeThread.threadId, text: cleanText })
+          .catch((e: unknown) => {
+            pushLine(`! ${errText(e)}`);
+          });
+        return;
+      }
       if (
         allAttachments.length > 10 ||
         allAttachments.some((item) => item.data.byteLength > 20 * 1024 * 1024)
@@ -3050,7 +3385,8 @@ function SessionApp({
             entry.kind === "user" &&
             entry.subagent === undefined &&
             entry.backgroundShell === undefined &&
-            entry.ensemble === undefined
+            entry.ensemble === undefined &&
+            entry.suiteReport === undefined
               ? [entry.seq]
               : [],
           ),
@@ -3188,7 +3524,7 @@ function SessionApp({
               });
             else if (r.kind === "overlay") {
               if (r.name === "theme") clearInput();
-              if (r.name === "resume" && submitting.current)
+              if ((r.name === "resume" || r.name === "suite") && submitting.current)
                 pushLine("! 会话忙（本轮进行中）；先中断再切换");
               else if (r.name === "settings" || r.name === "grants")
                 void alt.enter(async () => {
@@ -3205,7 +3541,14 @@ function SessionApp({
             } else if (r.kind === "picker") openPicker(r.focus);
             else if (r.kind === "provider-page") openProviderPage(r.presetId, r.modelTarget);
             else if (r.kind === "switch") void doSwitch(r.id);
-            else if (r.kind === "provider-wizard") openProviderWizard(r.start);
+            else if (r.kind === "suite-open") void doOpenSuiteByTarget(r.target);
+            else if (r.kind === "suite-overview") {
+              if (coordSuite === undefined || !fullscreen) pushLine("用法：/suite [<名称>]");
+              else {
+                setSel(undefined);
+                setSuiteOverviewOpen(true);
+              }
+            } else if (r.kind === "provider-wizard") openProviderWizard(r.start);
             else if (r.kind === "provider-remove") setProviderRemove(r.providerId);
             else if (r.kind === "message") pushLine(r.text);
           })
@@ -3323,6 +3666,13 @@ function SessionApp({
       openPicker,
       openProviderPage,
       openProviderWizard,
+      maestro,
+      coordSuite,
+      fullscreen,
+      runtime,
+      view,
+      alt,
+      doOpenSuiteByTarget,
       provider,
       pastes,
     ],
@@ -3346,6 +3696,16 @@ function SessionApp({
     hint: `${s.locked === true ? "locked " : ""}${s.id === session.id ? "当前" : ""}`.trim(),
     value: s.id,
   }));
+  const suiteItems: PickItem<SuiteRecord>[] = (suiteList ?? []).map((s) => {
+    const attention = coordSuite?.suiteId === s.id ? coordSuite.needsAttentionThreads.length : 0;
+    return {
+      key: s.id,
+      label: s.name,
+      ...(s.goal !== undefined && s.goal.trim() !== "" ? { secondary: s.goal.trim() } : {}),
+      ...(attention > 0 ? { badge: { text: String(attention), tone: "warning" as const } } : {}),
+      value: s,
+    };
+  });
 
   // /shell 选择页（ADR-0022 第 4 节）：auto 在前，未安装灰显不可选，
   // 当前选择高亮；被 env/config 覆盖时顶部说明。
@@ -3399,8 +3759,12 @@ function SessionApp({
     fullscreen && !pageOpen ? todoPanelRows(view.todos.length, view.goal) : 0,
     // 待发输入列表（ADR-0070）：全屏才画，行数随条目数（最多 3 条 + 提示）
     fullscreen ? pendingPanelRows(pendingInputs.items.length, pendingInputs.paused) : 0,
-    // Ensemble 状态块（tui.md §2）：全屏与 --inline 都画，始终读指挥
-    boardOpen ? 0 : ensembleStripRows(coordEnsemble),
+    // Ensemble / 组曲状态块（tui.md §2）：全屏与 --inline 都画，始终读指挥（两者不同时出现）
+    boardOpen || suiteOverviewOpen
+      ? 0
+      : coordEnsemble?.status === "active"
+        ? ensembleStripRows(coordEnsemble)
+        : suiteStripRows(coordSuite),
   );
   const promptOverlay = pending !== undefined || pendingQ !== undefined;
   const popupHeight = Math.min(
@@ -3426,7 +3790,31 @@ function SessionApp({
 
   // Static 始终保持挂载，进出备用屏幕时不会重新写入旧回滚区。
   const pageBody =
-    boardOpen && coordEnsemble !== undefined ? (
+    suiteOverviewOpen && coordSuite !== undefined ? (
+      <SuiteOverview
+        suite={coordSuite}
+        name={suiteNames.get(coordSuite.suiteId)}
+        width={width}
+        height={budget.frameHeight}
+        active={!dialogOpen}
+        onClose={() => {
+          setSuiteOverviewOpen(false);
+        }}
+        onOpenThread={(thread) => {
+          void openSuiteThread(thread).then((ok) => {
+            if (ok) setSuiteOverviewOpen(false);
+          });
+        }}
+        onOpenCoordinator={() => {
+          backToCoordinator();
+          setSuiteOverviewOpen(false);
+        }}
+        onResolveThread={async (threadId, reopen) => {
+          await maestro.resolveThread({ thread: threadId, ...(reopen ? { reopen: true } : {}) });
+        }}
+        onMouseFrame={fullscreen ? reportDialogMouse : undefined}
+      />
+    ) : boardOpen && coordEnsemble !== undefined ? (
       <EnsembleBoard
         ensemble={coordEnsemble}
         width={width}
@@ -3633,6 +4021,7 @@ function SessionApp({
     fullscreen,
     theme,
     ensembleRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
+    suite: coordSuite,
   };
   sourceRef.current = transcriptSource;
   const exportBlocks: LineBlock[] =
@@ -3782,6 +4171,7 @@ function SessionApp({
             backgroundShells: view.backgroundShells,
             shellOutputs,
             ensembleRecipient: memberSession !== undefined ? `@${memberSession.name}` : undefined,
+            suite: coordSuite,
           }),
         ],
         clientRows,
@@ -3898,6 +4288,23 @@ function SessionApp({
           onThemeChange?.(id);
           setOverlay(undefined);
           clearInput();
+        }}
+        onCancel={() => {
+          setOverlay(undefined);
+        }}
+      />
+    ) : overlay === "suite" ? (
+      <PickList
+        title="组曲"
+        items={suiteItems}
+        emptyText={null}
+        showFooter={false}
+        active
+        width={width}
+        onPick={(suite) => {
+          setOverlay(undefined);
+          clearInput();
+          void doOpenSuite(suite);
         }}
         onCancel={() => {
           setOverlay(undefined);
@@ -4157,7 +4564,7 @@ function SessionApp({
       {promptOverlay ? overlayBody : null}
       <Composer
         pastes={pastes}
-        onPasteFile={(text) => files.addPaste(text)}
+        onPasteFile={suiteThreadSession !== undefined ? undefined : (text) => files.addPaste(text)}
         value={input}
         cursor={cursor}
         onChange={(next, nextCursor) => {
@@ -4171,11 +4578,12 @@ function SessionApp({
         onHistory={recallHistory}
         onSubmit={onSubmit}
         onQueue={(line) => {
+          if (suiteThreadRef.current !== undefined) return;
           // 运行中 Tab 排队（ADR-0070）；空闲时没有待排队的东西
           if (busy) onSubmit(line, "queue");
           else pushLine("! 排队只在运行中可用；空闲时直接 Enter 发送");
         }}
-        onPasteImage={onPasteImage}
+        onPasteImage={suiteThreadSession !== undefined ? undefined : onPasteImage}
         active={!dialogOpen && pending === undefined && pendingQ === undefined && !pageOpen}
         disabledReason={composerDisabled}
         width={width}
@@ -4217,8 +4625,15 @@ function SessionApp({
             </Text>,
           ])
         : null}
-      {budget.ensemble > 0 && coordEnsemble !== undefined ? (
+      {budget.ensemble > 0 && coordEnsemble?.status === "active" ? (
         <EnsembleStrip ensemble={coordEnsemble} width={width} height={budget.ensemble} />
+      ) : budget.ensemble > 0 && coordSuite !== undefined ? (
+        <SuiteStrip
+          suite={coordSuite}
+          name={suiteNames.get(coordSuite.suiteId)}
+          width={width}
+          height={budget.ensemble}
+        />
       ) : null}
       {budget.status > 0 ? (
         <StatusBar
@@ -4240,17 +4655,19 @@ function SessionApp({
     pageBody !== null || recordBody !== null || overlayBody !== null ? 0 : budget.conversation,
     rewindTargets !== undefined
       ? "rewind"
-      : boardOpen
-        ? "ensemble-board"
-        : pickerOpen
-          ? "model"
-          : providerPageOpen
-            ? "provider"
-            : recordOpen
-              ? "record"
-              : overlayBody !== null
-                ? "overlay"
-                : "conversation",
+      : suiteOverviewOpen
+        ? "suite-overview"
+        : boardOpen
+          ? "ensemble-board"
+          : pickerOpen
+            ? "model"
+            : providerPageOpen
+              ? "provider"
+              : recordOpen
+                ? "record"
+                : overlayBody !== null
+                  ? "overlay"
+                  : "conversation",
   );
 
   return (
@@ -4264,6 +4681,7 @@ function SessionApp({
           reasoning={reasoning}
           now={reasoningNow}
           ensembleRecipient={memberSession !== undefined ? `@${memberSession.name}` : undefined}
+          suite={coordSuite}
         />
       )}
       {pageBody ??

@@ -20,9 +20,18 @@ import {
   unwrapEnsemblePostText,
   workModeDisplayText,
   type BackgroundShellTask,
+  type SuiteView,
   type ViewEntry,
 } from "@nocturne/core/protocol";
+import stringWidth from "string-width";
+import { boxSafe, stripControls, truncateLine } from "../format.js";
 import { ensembleAuthorLabel } from "../text-format-ensemble.js";
+import {
+  parseSuiteThreadReport,
+  suiteDotColor,
+  suiteDotGlyph,
+  suiteReportDotTone,
+} from "../text-format-suite.js";
 
 /** 回放区条目：会话视图条目 + 客户端本地分隔线（/resume 切换标记） */
 export type TranscriptItem =
@@ -36,11 +45,15 @@ function UserRow({
   entries,
   backgroundShells,
   ensembleRecipient,
+  suite,
+  width,
 }: {
   entry: Extract<ViewEntry, { kind: "user" }>;
   entries: readonly ViewEntry[];
   backgroundShells: BackgroundShellTask[];
   ensembleRecipient?: string | undefined;
+  suite?: SuiteView | undefined;
+  width: number;
 }): React.JSX.Element {
   const env = useTuiEnv();
   const theme = useTheme();
@@ -57,6 +70,38 @@ function UserRow({
         <Text color={theme.secondary}>{`子代理结果 · ${subagentResultLine(entry.subagent)}`}</Text>
       </Box>
     );
+  if (entry.suiteReport !== undefined) {
+    const report = entry.suiteReport;
+    const parsed = parseSuiteThreadReport(userText(entry));
+    const thread = suite?.threads.find((t) => t.threadId === report.threadId);
+    const title = stripControls(thread?.title ?? parsed?.title ?? report.threadId);
+    const summaryLine = stripControls(parsed?.line ?? thread?.lastReportLine ?? "");
+    const tone = suiteReportDotTone(report.status, thread);
+    const dot = suiteDotGlyph(tone, env.ascii);
+    const dotColor = suiteDotColor(tone, theme);
+    const g = glyphs(env);
+    const inner = Math.max(1, width - 4);
+    const dotPart = `${dot} `;
+    const shownTitle = truncateLine(
+      boxSafe(title),
+      Math.max(4, inner - stringWidth(dotPart)),
+      g.ellipsis,
+    );
+    const lineRoom = inner - stringWidth(dotPart) - stringWidth(shownTitle) - 2;
+    const shownLine =
+      summaryLine !== "" && lineRoom > 0
+        ? truncateLine(boxSafe(summaryLine), lineRoom, g.ellipsis)
+        : "";
+    return (
+      <Box marginTop={1}>
+        <Text wrap="truncate">
+          <Text color={dotColor}>{dotPart}</Text>
+          <Text bold>{shownTitle}</Text>
+          {shownLine !== "" ? <Text dimColor>{`  ${shownLine}`}</Text> : null}
+        </Text>
+      </Box>
+    );
+  }
   if (entry.ensemble !== undefined) {
     const bar = env.ascii ? "|" : "│";
     const head = `${ensembleAuthorLabel(entry.ensemble.from, entry.ensemble.fromKind)} → ${ensembleRecipient ?? "指挥"} · #${entry.ensemble.postNumber}`;
@@ -212,8 +257,10 @@ export function EntryRow({
   entries = [],
   backgroundShells = [],
   ensembleRecipient,
+  suite,
 }: {
   ensembleRecipient?: string | undefined;
+  suite?: SuiteView | undefined;
   backgroundShells?: BackgroundShellTask[];
   entries?: readonly ViewEntry[];
   entry: TranscriptItem;
@@ -229,6 +276,8 @@ export function EntryRow({
           entries={entries}
           backgroundShells={backgroundShells}
           ensembleRecipient={ensembleRecipient}
+          suite={suite}
+          width={width}
         />
       );
     case "assistant":
@@ -296,8 +345,10 @@ export function Transcript({
   reasoning,
   now,
   ensembleRecipient,
+  suite,
 }: {
   ensembleRecipient?: string | undefined;
+  suite?: SuiteView | undefined;
   entries: readonly TranscriptItem[];
   backgroundShells?: BackgroundShellTask[];
   allEntries?: readonly ViewEntry[];
@@ -317,6 +368,7 @@ export function Transcript({
           entries={allEntries}
           backgroundShells={backgroundShells}
           ensembleRecipient={ensembleRecipient}
+          suite={suite}
         />
       )}
     </Static>

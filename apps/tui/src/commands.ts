@@ -23,6 +23,7 @@ export type OverlayName =
   | "context"
   | "help"
   | "resume"
+  | "suite"
   | "search"
   | "preset"
   | "effort"
@@ -56,6 +57,10 @@ export type SlashResult =
   | { kind: "rewind" | "fork" }
   /** /resume <id>：由 App 调用注入的 switchSession 执行切换 */
   | { kind: "switch"; id: string }
+  /** /suite <名称或 id>：按名称或 id 匹配未归档组曲并打开指挥会话 */
+  | { kind: "suite-open"; target: string }
+  /** /suite overview：在指挥会话里打开全屏总览页 */
+  | { kind: "suite-overview" }
   /** /provider add/key：App 侧打开向导弹层 */
   | { kind: "provider-wizard"; start: ProviderWizardStart }
   /** /provider remove <name>：App 侧确认后删除 */
@@ -351,6 +356,12 @@ export async function runSlash(
     case "/resume":
       // 无参：列表选择器；带 id：直接切换（App 侧执行注入的 switchSession）
       return arg === "" ? { kind: "overlay", name: "resume" } : { kind: "switch", id: arg };
+    case "/suite": {
+      const target = line.trim().slice(cmd.length).trim();
+      if (target === "") return { kind: "overlay", name: "suite" };
+      if (target === "overview") return { kind: "suite-overview" };
+      return { kind: "suite-open", target };
+    }
     case "/search": {
       const query = line.trim().slice(cmd.length).trim();
       return query === ""

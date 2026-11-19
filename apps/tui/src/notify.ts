@@ -117,7 +117,10 @@ export function subagentPermissionRing(
   settings: NotifySettings,
 ): boolean {
   if (event.type !== "subagent.permissions") return false;
-  const pending = event.payload.pending;
+  // 常驻子会话（合奏成员 / 组曲线程）权限由各自专属钩子统一判定（含提问与当前查看去重），避免同一请求响两次
+  const pending = event.payload.pending.filter(
+    (p) => !p.parentCallId.startsWith("ensemble:") && !p.parentCallId.startsWith("suite:"),
+  );
   if (event.eseq === 0) {
     for (const p of pending) seen.add(`${p.childSessionId}:${p.requestId}`);
     return false;
@@ -242,6 +245,79 @@ export function useEnsembleMemberBell({
         ensembleMemberRing(
           event,
           seen,
+          { focused: focus?.focused() === true, viewing: viewingRef.current },
+          readNotifySettings(runtime),
+        )
+      )
+        writeOob?.(BELL);
+    });
+  }, [session, runtime, focus, writeOob]);
+}
+
+/**
+ * 组曲线程待确认 / 提问响铃判定（ADR-0097、tui.md）：指挥会话的 `suite.thread_updated`
+ * 带线程的 `pendingPermissions` 与 `hasPendingQuestion`；订阅起始快照（`eseq === 0`）里
+ * 已有的请求与提问只登记，之后真正新出现的 requestId 或新提问才按「需要确认」一类判定一次。
+ * `viewing` 是正在显示的线程 id：它自己的 `permission.requested` / `question.requested`
+ * 已由 useNotifyBell 判定，这里不重复响。
+ */
+export interface SuiteThreadRingState {
+  seenPermissions: Set<string>;
+  pendingQuestionThreads: Set<string>;
+}
+
+export function createSuiteThreadRingState(): SuiteThreadRingState {
+  return { seenPermissions: new Set<string>(), pendingQuestionThreads: new Set<string>() };
+}
+
+export function suiteThreadRing(
+  event: RuntimeEvent,
+  state: SuiteThreadRingState,
+  context: { focused: boolean; viewing?: string | undefined },
+  settings: NotifySettings,
+): boolean {
+  if (event.type !== "suite.thread_updated") return false;
+  const threadId = event.payload.threadId;
+  const pending = event.payload.pendingPermissions ?? [];
+  const hasQuestion = event.payload.hasPendingQuestion === true;
+  if (event.eseq === 0) {
+    for (const p of pending) state.seenPermissions.add(p.requestId);
+    if (hasQuestion) state.pendingQuestionThreads.add(threadId);
+    return false;
+  }
+  const freshPermissions = pending.filter((p) => !state.seenPermissions.has(p.requestId));
+  for (const p of freshPermissions) state.seenPermissions.add(p.requestId);
+  const freshQuestion = hasQuestion && !state.pendingQuestionThreads.has(threadId);
+  if (hasQuestion) state.pendingQuestionThreads.add(threadId);
+  else state.pendingQuestionThreads.delete(threadId);
+  if (freshPermissions.length === 0 && !freshQuestion) return false;
+  if (threadId === context.viewing) return false;
+  return settings.enabled && settings.attention && !context.focused;
+}
+
+/** 挂上组曲线程待确认 / 提问响铃：订阅指挥会话，规则见 suiteThreadRing */
+export function useSuiteThreadBell({
+  session,
+  runtime,
+  focus,
+  writeOob,
+  viewing,
+}: {
+  session: RuntimeSession;
+  runtime: Runtime;
+  focus?: FocusSource | undefined;
+  writeOob?: ((data: string) => boolean) | undefined;
+  viewing?: string | undefined;
+}): void {
+  const viewingRef = useRef(viewing);
+  viewingRef.current = viewing;
+  useEffect(() => {
+    const state = createSuiteThreadRingState();
+    return session.subscribe((event) => {
+      if (
+        suiteThreadRing(
+          event,
+          state,
           { focused: focus?.focused() === true, viewing: viewingRef.current },
           readNotifySettings(runtime),
         )

@@ -18,3 +18,5 @@ export type SwitchSessionFn = (
 ) => Promise<SessionSwitchResult>;
 
 export type NewSessionFn = () => Promise<SessionSwitchResult>;
+
+export type OpenSuiteFn = (id: string) => Promise<SessionSwitchResult>;

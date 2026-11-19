@@ -34,6 +34,7 @@ import { runRpcStdio } from "./rpc.js";
 import {
   createNewSession,
   createSessionSwitcher,
+  createSuiteOpener,
   resumeFailureHint,
   sessionOpenNotes,
   type SessionHolder,
@@ -340,6 +341,7 @@ async function main(): Promise<number> {
               workspaceRoot: cwd,
             },
             switchSession: createSessionSwitcher({ runtime, platform, cwd, holder }),
+            openSuite: createSuiteOpener({ runtime, holder }),
           },
         );
         await created?.close();
@@ -479,6 +481,7 @@ async function main(): Promise<number> {
     const holder: SessionHolder = { current: session };
     const switchSession = createSessionSwitcher({ runtime, platform, cwd, holder });
     const newSession = createNewSession({ runtime, holder });
+    const openSuite = createSuiteOpener({ runtime, holder });
 
     let prompt: string | undefined = args.prompt;
     if (args.print && prompt === "") {
@@ -511,6 +514,7 @@ async function main(): Promise<number> {
           inline: args.inline,
           switchSession,
           newSession,
+          openSuite,
           provider: {
             config: runtimeConfig,
             reloadConfig: makeConfigLoader(args, platform),

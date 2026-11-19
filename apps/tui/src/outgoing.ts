@@ -39,7 +39,8 @@ function human(entry: ViewEntry): entry is UserEntry {
     entry.kind === "user" &&
     entry.subagent === undefined &&
     entry.backgroundShell === undefined &&
-    entry.ensemble === undefined
+    entry.ensemble === undefined &&
+    entry.suiteReport === undefined
   );
 }
 

@@ -22,6 +22,10 @@ export interface PickItem<T> {
   key?: string | undefined;
   label: string;
   hint?: string | undefined;
+  /** 跟在 label 后的淡色副文本（如组曲目标） */
+  secondary?: string | undefined;
+  /** 行尾带色尾注（如组曲待处理线程数） */
+  badge?: { text: string; tone: "warning" | "muted" | "accent" } | undefined;
   /** 可选第二行（如搜索命中片段）；accent 段以主题强调色渲染 */
   detail?: readonly PickSpan[] | undefined;
   value: T;
@@ -394,22 +398,73 @@ export function PickList<T>({
       {visible.map((item, idx) => {
         const focused = start + idx === cursor;
         const dim = item.disabled === true;
+        const rowW = Math.max(4, width - 8);
+        const hasStructured = item.secondary !== undefined || item.badge !== undefined;
+        let structuredRow: React.ReactNode = null;
+        if (hasStructured) {
+          const badgeText = item.badge !== undefined ? boxSafe(item.badge.text) : "";
+          const badgeW = badgeText !== "" ? stringWidth(badgeText) : 0;
+          const badgeReserve = badgeW > 0 ? badgeW + 2 : 0;
+          const leftRoom = Math.max(1, rowW - badgeReserve);
+          const labelText = truncateLine(boxSafe(item.label), leftRoom, g.ellipsis);
+          const labelW = stringWidth(labelText);
+          const secRoom = leftRoom - labelW - 2;
+          const secText =
+            item.secondary !== undefined && item.secondary !== "" && secRoom > 0
+              ? truncateLine(boxSafe(item.secondary), secRoom, g.ellipsis)
+              : "";
+          const leftUsed = labelW + (secText !== "" ? 2 + stringWidth(secText) : 0);
+          const gap = badgeW > 0 ? Math.max(2, rowW - leftUsed - badgeW) : 0;
+          const badgeColor =
+            item.badge?.tone === "warning"
+              ? theme.warning
+              : item.badge?.tone === "accent"
+                ? theme.accent
+                : theme.muted;
+          const bgProp = focused ? { backgroundColor: theme.selectionBg } : {};
+          structuredRow = (
+            <>
+              <Text {...(focused ? { color: theme.selected } : {})} {...bgProp} dimColor={dim}>
+                {labelText}
+              </Text>
+              {secText !== "" ? (
+                <Text color={theme.muted} {...bgProp}>
+                  {`  ${secText}`}
+                </Text>
+              ) : null}
+              {badgeW > 0 ? (
+                <>
+                  <Text {...bgProp}>{" ".repeat(gap)}</Text>
+                  <Text color={badgeColor} {...bgProp}>
+                    {badgeText}
+                  </Text>
+                </>
+              ) : null}
+            </>
+          );
+        }
         return (
           <Box key={item.key ?? start + idx} flexDirection="column">
             <Text wrap="truncate">
               <Text {...(focused ? { color: theme.accent } : {})}>
                 {focused ? `${g.prompt} ` : "  "}
               </Text>
-              <Text
-                {...(focused ? { color: theme.selected, backgroundColor: theme.selectionBg } : {})}
-                dimColor={dim}
-              >
-                {truncateLine(
-                  boxSafe(item.label + (item.hint !== undefined ? `  ${item.hint}` : "")),
-                  Math.max(4, width - 8),
-                  g.ellipsis,
-                )}
-              </Text>
+              {hasStructured ? (
+                structuredRow
+              ) : (
+                <Text
+                  {...(focused
+                    ? { color: theme.selected, backgroundColor: theme.selectionBg }
+                    : {})}
+                  dimColor={dim}
+                >
+                  {truncateLine(
+                    boxSafe(item.label + (item.hint !== undefined ? `  ${item.hint}` : "")),
+                    rowW,
+                    g.ellipsis,
+                  )}
+                </Text>
+              )}
             </Text>
             {item.detail !== undefined && item.detail.length > 0 ? (
               <Text wrap="truncate">

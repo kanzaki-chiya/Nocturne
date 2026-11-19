@@ -63,11 +63,22 @@ v0.4 起主对话运行在**全屏模式**（[ADR-0021](../decisions/ADR-0021-tu
 
 合奏活动期间，输入框下方、状态栏上方固定一块状态（[ADR-0089](../decisions/ADR-0089-ensemble.md)，内部标识 `ensemble`）：首行是强调色 `◆` 加合奏标题、最近一帖的 `#n 作者: 首行`（单行截断）和淡色的 `N 条`；其下每行一名 `working`、`paused` 或有待确认请求的成员，状态点分别是强调色 `●` 与警告色 `●`，名字按最长名字对齐，后接淡色模型名与活动摘要。`tool` 活动用工具行标签加 `detail`，`permission` 是「等待确认：target」，`paused` 显示 Runtime 错误原文首行。行数不设上限：终端高度不足时 `frameBudget` 先压缩对话区，仍放不下时最后一行写 `+N`。合奏结束或不存在时整块撤去；`--inline` 同样显示状态块。
 
-对话里的合奏工具调用沿用与桌面端一致的工具行标签：`ensemble_init` → `合奏`、`ensemble_add_member` → `添加`、`ensemble_post` → `发帖`、`ensemble_read` → `留言板`、`ensemble_change_model` → `换模型`、`ensemble_remove_member` → `移除`、`ensemble_end` → `结束`、`ensemble_checkout` → `检出`；参数摘要同 ADR-0089 与 [ADR-0095](../decisions/ADR-0095-session-notes-board-read.md)。带 `ensemble` 字段的 `message.user` 不按用户消息显示：左侧一条强调色竖线加头部 `作者 → 本会话 · #n`，正文用 `unwrapEnsemblePostText` 解包；作者显示「指挥（Maestro，`@maestro`）」「你」「Runtime」或 `@name`。成员出现新的待确认请求时按 §2「通知响铃」的「需要确认」一类响一次终端响铃。
+对话里的合奏工具调用沿用与桌面端一致的工具行标签：`ensemble_init` → `合奏`、`ensemble_add_member` → `添加`、`ensemble_post` → `发帖`、`ensemble_read` → `留言板`、`ensemble_change_model` → `换模型`、`ensemble_remove_member` → `移除`、`ensemble_end` → `结束`、`ensemble_checkout` → `检出`；参数摘要同 ADR-0089 与 [ADR-0095](../decisions/ADR-0095-session-notes-board-read.md)。带 `ensemble` 字段的 `message.user` 不按用户消息显示：左侧一条强调色竖线加头部 `作者 → 本会话 · #n`，正文用 `unwrapEnsemblePostText` 解包；作者显示「指挥（Maestro，`@maestro`）」「你」「Runtime」或 `@name`。成员出现新的待确认请求时按 §2「通知响铃」的「需要确认」一类响一次终端响铃。TUI 指挥层不显示合奏成员转发到父会话的权限请求，只在成员视图里确认（单输入框）。
 
 `/ensemble board` 打开全屏留言板（复用 PageShell 的布局函数与配色）：头部是强调色标题、淡色 `N 条`，跟随状态下加 ` · 跟随`。左列依次是「全部」、在场成员、淡色的已移除成员、「指挥」；状态点是强调色 `●`（working）、警告色 `●`（待确认 / paused）、淡色 `○`（waiting / 已移除）。右列与底部详情头部显示 `#n 作者 → 收件人`（剔除作者自身，指挥作者剔除 `maestro`，无收件人时不显示箭头）；选中某个成员时只列 `from` 等于他或 `recipients` 含他的帖子，选「全部」时列出全部。详情正文只给 `mentions` 中的 `@token` 上强调色；任务书帖按「负责」「不碰」「完成」三段显示。最下方一行发帖输入框，没有占位符，输入 `@` 时在输入框上方按主输入框补全样式弹出 `@` 候选（指挥、未移除成员、2 名以上同前缀 `@前缀` 组、`all`；`↑`/`↓` 选择、`Enter`/`Tab` 填入 `@名字 ` 不提交、`Esc` 收起），其余时候 `Enter` 调用 `postToEnsemble`，失败时以 `! ` 错误行显示 Runtime 返回的原文。已结束的合奏也能打开查看，但没有输入框。`--inline` 不提供留言板；该模式下 `/ensemble board` 显示「用法：/ensemble 任务」。`/ensemble end` 结束后，未合并分支按 `@name 分支名` 逐行提示。
 
 留言板键位只写在文档里，界面不显示：`↑`/`↓` 在当前列移动；`Tab`/`Shift+Tab` 在成员、帖子、输入框三处之间轮换；成员列 `Enter` 进入该成员会话，「指挥」行 `Enter` 回到指挥会话；`Esc` 关闭；`End` 跳到最新一帖并恢复跟随。跟随状态下新帖到达自动选中最新一帖，向上移动选择退出跟随。鼠标沿用 §11 的单击选中规则（不加双击），滚轮在帖子列移动。
+
+### 组曲
+
+TUI 通过 `/suite` 使用组曲（[ADR-0097](../decisions/ADR-0097-suites.md)，仅 TUI，不做新建、编辑与归档）：
+
+- **`/suite`**：无参弹出与 `/resume` 同样式的 `PickList` 列表选择器，列出所有未归档组曲（名称、淡色目标，有等你处理线程时行尾显示警告色数字），`Enter` 打开对应组曲的指挥会话。`/suite <名称或 id>` 按名称精确匹配优先、其次唯一前缀直接打开；匹配不到或不唯一时以 `! ` 错误行提示。打开指挥会话经 CLI 注入的 `openSuite` 回调（`createSuiteOpener`，调用 `runtime.openSuite`），视口切换与 `/resume` 一致。
+- **状态块**：当前会话是组曲指挥时，在合奏状态块同一位置固定一块（两者不会同时出现），全屏与 `--inline` 都显示。首行是强调色 `◆` + 组曲名 + 淡色各非空组计数（组名「等你处理」「进行中」「待并回」「空闲」「已完成」，以 ` · ` 分隔）。其下每行一条「等你处理」或「进行中」的线程：状态点（等你处理警告色 `●`、进行中强调色 `●`）+ 按最长标题对齐的标题 + 淡色模型名 + 第二段摘要（待确认为「等待确认 · …」，暂停为错误首行，进行中为工具活动，否则最近汇报首行）。没有这两组线程时只留首行；放不下时按 `frameBudget` 与 `+N` 规则截断。
+- **汇报行**：带 `suiteReport` 的 `message.user` 不按用户消息显示，渲染为单行：状态点 + 加粗线程标题 + 淡色汇报首行（单行截断）；全屏模式单击展开显示汇报正文全文（去掉 `<thread-report>` 外壳），`--inline` 仅显示单行。
+- **全屏总览页**（`/suite overview`，仅指挥会话且全屏可用，否则提示 `用法：/suite [<名称>]`）：复用 PageShell 的布局函数与配色（`page/layout.ts`）。头部为强调色组曲名；列表按五组排列，组名行带数量，空组不显示，「已完成」默认折叠；每条线程一行，内容同状态块的线程行；最后一行「指挥」。键位只写进文档、界面不显示：`↑`/`↓` 移动（`PgUp`/`PgDn`/`Home`/`End` 翻页/跳端）；组名行 `Enter` 折叠/展开；线程行 `Enter` 进入线程视图；「指挥」行 `Enter` 回指挥会话；`Alt+D` 对选中线程标记完成（已完成线程为重开），调 `resolveThread`，失败时以 `! ` 错误行显示 Runtime 原文；`Esc` 关闭。鼠标沿用 §11 单击选中、再点执行与滚轮每格 3 行规则。
+- **线程视图**：照合奏成员视图的做法，经 `runtime.resumeSession(childSessionId)` 叠加显示视图，指挥始终打开，切回不 `interrupt`、不 `close`；权限确认、提问与中断沿用现有界面。TUI 指挥层不显示组曲线程转发到父会话的权限请求，只在线程视图里确认（单输入框）。输入框上方标题横线显示线程标题；提交走指挥会话的 `sendToThread({ thread, text })`（不走子会话 `submit`），附件与执行方式不可用（空文本不提交、不提示）。在线程视图里 `/suite overview` 回总览页，`/resume`、`/new`、`/suite` 先换回指挥视图再走原流程。
+- **响铃**：线程出现新的待确认权限请求或提问时，在 `notify.ts`（`useSuiteThreadBell`）按「需要确认」一类响一次终端响铃；正在查看该线程或订阅起始快照不重复响（`subagentPermissionRing` 忽略 `suite:` 前缀，避免与 `subagent.permissions` 双响）。
 
 ### 全屏输出层
 
@@ -123,6 +134,7 @@ Markdown 任务列表的 `[ ]` / `[x]` 与首段正文排在同一行，长正�
 | EOF/退出 | Ctrl+D、`/exit` | Ctrl+D（空闲）、`/exit`、`/quit` |
 | 展开思考 | 无 | Ctrl+O 全屏原位展开/收起；`--inline` 打开/返回完整记录页；权限确认框打开时不响应 |
 | 合奏留言板 | 无 | `/ensemble board` 打开全屏页（仅全屏）：`↑`/`↓` 在当前列移动，`Tab`/`Shift+Tab` 轮换成员、帖子、输入框，成员列 `Enter` 进成员会话、「指挥」行 `Enter` 回指挥会话，`Esc` 关闭，`End` 跳到最新一帖并恢复跟随；发帖输入框支持 `@` 补全（列表打开时 `↑`/`↓` 选择、`Enter`/`Tab` 填入、`Esc` 收起），关闭列表时 `Enter` 调用 `postToEnsemble`。键位不显示在界面上 |
+| 组曲 | 无 | `/suite` 弹出未归档组曲列表选择器，`/suite <名称或 id>` 直接打开指挥会话；`/suite overview` 打开全屏总览页（仅指挥会话且全屏）：`↑`/`↓` 移动，组名行 `Enter` 折叠/展开，线程行 `Enter` 进线程视图、「指挥」行 `Enter` 回指挥会话，`Alt+D` 完成/重开线程（`resolveThread`），`Esc` 关闭。键位不显示在界面上 |
 | 恢复 | `--resume <id>` / `--continue` | 同参数 |
 | 会话列表 | `--sessions` 打印后退出 | 同（`--tui` 不改变 `--sessions` 的只读退出行为） |
 | 会话内切换 | `/resume`（REPL：编号列表，`/resume <id>` 直达） | `/resume` 弹出列表选择器（复用 PickList 组件，Esc 取消）；`/resume <id>` 直达。切换语义见 §6 |

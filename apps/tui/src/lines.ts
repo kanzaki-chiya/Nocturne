@@ -6,7 +6,7 @@
 import stringWidth from "string-width";
 import { shellToolStatus, shellResultLine, shellResultText } from "./background-shell.js";
 
-import type { SessionView, ViewEntry } from "@nocturne/core/protocol";
+import type { SessionView, SuiteView, ViewEntry } from "@nocturne/core/protocol";
 import {
   inlineFilesOfTool,
   todoItemsFromCompletion,
@@ -53,6 +53,12 @@ import {
   ensembleReadPostsFromOutput,
   toolDisplayName,
 } from "./text-format-ensemble.js";
+import {
+  parseSuiteThreadReport,
+  suiteDotColor,
+  suiteDotGlyph,
+  suiteReportDotTone,
+} from "./text-format-suite.js";
 import { palettes, type ThemePalette } from "./theme.js";
 import { todoHeadline, todoItemRows, todoSnapshotWindow } from "./todo-format.js";
 import type { TranscriptItem } from "./components/transcript.js";
@@ -185,6 +191,8 @@ interface LayoutOptions {
   written?: ReadonlyMap<string, number>;
   /** 帖子送达头部的接收者：指挥会话为「指挥」，成员会话为 `@name` */
   ensembleRecipient?: string | undefined;
+  /** 组曲视图：用于汇报行匹配线程标题与当前状态点色调 */
+  suite?: SuiteView | undefined;
 }
 
 export function layoutEntry(
@@ -274,6 +282,40 @@ function layoutEntryBody(
               )
             : []),
         ];
+      }
+      if (entry.suiteReport !== undefined) {
+        const report = entry.suiteReport;
+        const parsed = parseSuiteThreadReport(userText(entry));
+        const thread = options.suite?.threads.find((t) => t.threadId === report.threadId);
+        const title = stripControls(thread?.title ?? parsed?.title ?? report.threadId);
+        const summaryLine = stripControls(parsed?.line ?? thread?.lastReportLine ?? "");
+        const body = stripControls(parsed?.body ?? userText(entry));
+        const tone = suiteReportDotTone(report.status, thread);
+        const dot = suiteDotGlyph(tone, ascii);
+        const dotColor = suiteDotColor(tone, theme);
+        const ellipsis = ascii ? "..." : "…";
+        const inner = budget(width);
+        const dotPart = `${dot} `;
+        const titleBudget = Math.max(4, inner - stringWidth(dotPart));
+        const shownTitle = truncateLine(boxSafe(title), titleBudget, ellipsis);
+        const lineRoom = inner - stringWidth(dotPart) - stringWidth(shownTitle) - 2;
+        const shownLine =
+          summaryLine !== "" && lineRoom > 0
+            ? truncateLine(boxSafe(summaryLine), lineRoom, ellipsis)
+            : "";
+        const id = `suite-report:${entry.key}`;
+        const open = options.fullscreen === true && (options.reasoningExpanded?.get(id) ?? false);
+        const headerLine: LaidLine = {
+          key: `${entry.key}:0`,
+          text: `${dotPart}${shownTitle}${shownLine !== "" ? `  ${shownLine}` : ""}`,
+          segments: [
+            { text: dotPart, color: dotColor },
+            { text: shownTitle, bold: true },
+            ...(shownLine !== "" ? [{ text: `  ${shownLine}`, dim: true }] : []),
+          ],
+          ...(options.fullscreen === true ? { toggle: { id, anchor: `${entry.key}:0` } } : {}),
+        };
+        return [headerLine, ...(open && body !== "" ? rows(`${entry.key}:body`, body, width) : [])];
       }
       if (entry.ensemble !== undefined) {
         const bar = ascii ? "| " : "│ ";
@@ -772,6 +814,7 @@ interface TranscriptSource {
   reasoningExpanded?: ReadonlyMap<string, boolean> | undefined;
   theme?: ThemePalette;
   ensembleRecipient?: string | undefined;
+  suite?: SuiteView | undefined;
 }
 
 function block(key: string, revision: string, lines: (width: number) => LaidLine[]): LineBlock {
@@ -793,6 +836,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
     backgroundShells: src.live.backgroundShells,
     ...(src.shellOutputs ? { shellOutputs: src.shellOutputs } : {}),
     ...(src.ensembleRecipient !== undefined ? { ensembleRecipient: src.ensembleRecipient } : {}),
+    ...(src.suite !== undefined ? { suite: src.suite } : {}),
   };
   const overrides = JSON.stringify([...(src.reasoningExpanded ?? [])]);
   const blocks: LineBlock[] = [
@@ -851,7 +895,14 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
                 ?.map((p) => p.ended ?? "")
                 .join(",") ?? ""
             }`
-          : entry.key;
+          : entry.kind === "user" && entry.suiteReport !== undefined
+            ? (() => {
+                const thread = src.suite?.threads.find(
+                  (t) => t.threadId === entry.suiteReport?.threadId,
+                );
+                return `${entry.key}:${thread?.title ?? ""}:${suiteReportDotTone(entry.suiteReport.status, thread)}`;
+              })()
+            : entry.key;
     return block(
       entry.key,
       `${revision}:${entry.kind === "user" || entry.kind === "tool" ? entry.descriptions?.map((d) => `${d.model}:${d.text}`).join("|") : ""}:${src.expanded}:${src.diffExpanded?.has(entry.key)}:${overrides}`,

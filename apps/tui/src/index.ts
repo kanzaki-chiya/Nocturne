@@ -42,7 +42,7 @@ import { captureConsole } from "./console-capture.js";
 /** 复位全部文字属性：退出路径统一收尾，保证不把颜色留给后续的 shell */
 const SGR_RESET = "\x1b[0m";
 
-import type { NewSessionFn, SwitchSessionFn } from "./types.js";
+import type { NewSessionFn, OpenSuiteFn, SwitchSessionFn } from "./types.js";
 
 export interface TuiOptions {
   stdin?: NodeJS.ReadStream | undefined;
@@ -76,6 +76,7 @@ export interface TuiOptions {
    */
   switchSession?: SwitchSessionFn | undefined;
   newSession?: NewSessionFn | undefined;
+  openSuite?: OpenSuiteFn | undefined;
   /**
    * /provider 与模型选择页的配置桥（provider-setup.md 第 6 节）：
    * config + reloadConfig + updateProviders。缺省时相关命令提示不可用。
@@ -181,6 +182,7 @@ export async function runTui(
           env: detectTuiEnv(),
           switchSession: options.switchSession,
           newSession: options.newSession,
+          openSuite: options.openSuite,
           provider: options.provider,
           inline,
           mouse: mouseSource,

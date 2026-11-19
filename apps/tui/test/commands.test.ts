@@ -452,6 +452,24 @@ describe("内置命令名单", () => {
     ).toBe(true);
   });
 
+  it("TUI /suite 命令解析、帮助与补全", async () => {
+    const session = fakeSession();
+    expect(await runSlash("/suite", session)).toEqual({ kind: "overlay", name: "suite" });
+    expect(await runSlash("/suite overview", session)).toEqual({ kind: "suite-overview" });
+    expect(await runSlash("/suite   插件兼容  ", session)).toEqual({
+      kind: "suite-open",
+      target: "插件兼容",
+    });
+    expect(helpLines().join("\n")).toContain("/suite");
+    expect(helpLines().join("\n")).toContain("组曲");
+    expect(cliHelpText()).not.toContain("/suite");
+    expect(
+      completeSlash("/sui", { effortLevels: [], providerIds: [] }).some(
+        (c) => c.insert === "/suite",
+      ),
+    ).toBe(true);
+  });
+
   it("TUI 每个斜杠命令都在 Core 的 BUILTIN_SLASH_COMMANDS 里", () => {
     // 技能与命令重名时禁止斜杠调用（skills.md 第 6 节）；新增命令要同步名单
     const builtin = new Set(BUILTIN_SLASH_COMMANDS);
