@@ -164,8 +164,6 @@ const taskCompleted = (events: RuntimeEvent[]) =>
       e.type === "tool.completed" && e.payload.name === "task",
   );
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 describe("子代理档位 launcher", () => {
   const quick = {
     description: "查找",
@@ -810,7 +808,8 @@ describe("subagent：中断、超时与失败", () => {
       handler: async (req) => {
         if (isChildRequest(req)) {
           // 子代理慢：给中断留窗口（stream 循环逐事件检查 signal）
-          await sleep(150);
+          // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，给父会话中断留观察窗口
+          await new Promise((r) => setTimeout(r, 150));
           return [
             { type: "text_delta", text: "慢" },
             { type: "finish", reason: "stop" },

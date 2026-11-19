@@ -1120,6 +1120,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
         activeWorkers++;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         await gate;
+        // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，使并发成员保持活跃以测 maxConcurrent 峰值
         await new Promise((r) => setTimeout(r, 25));
         activeWorkers--;
         finishedWorkers.push(role);
@@ -1520,6 +1521,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     ).toBe(false);
 
     // 指挥第 2 轮没有发新帖就结束了：再等 80ms 确认绝不会重复发第 2 条安静提醒！
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：80ms 内不再补发第 2 条安静提醒
     await new Promise((r) => setTimeout(r, 80));
     expect(completedCoordTurns()).toBe(2);
     expect(
@@ -1614,6 +1616,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     });
     const session2 = await rt2.resumeSession(sid);
     openRuntimes[0]?.sessions.push(session2);
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：恢复会话后 60ms 内不自动补发安静提醒
     await new Promise((r) => setTimeout(r, 60));
     expect(
       session2
@@ -1623,6 +1626,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
 
     // 指挥跑一轮普通对话（没有发新帖）并归于空闲，仍然不重复发安静提醒
     await session2.submit({ text: "just check in" });
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：普通轮结束后 80ms 内不重复补发安静提醒
     await new Promise((r) => setTimeout(r, 80));
     expect(
       session2
@@ -1888,6 +1892,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     ).toBe(true);
     // 恢复后跑普通轮（未发新帖），不重复发安静提醒
     await legacySession.submit({ text: "after legacy resume" });
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：旧日志恢复后普通轮结束 80ms 内不补发安静提醒
     await new Promise((r) => setTimeout(r, 80));
     expect(
       legacySession
@@ -2022,6 +2027,7 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     expect(resumedView.ensemble?.status).toBe("active");
     expect(resumedView.ensemble?.members[0]?.status).toBe("waiting");
     // 不自动唤醒任何模型调用
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：重启恢复后 50ms 内不自动唤醒成员模型调用
     await new Promise((r) => setTimeout(r, 50));
     expect(wakeCalls).toBe(0);
 

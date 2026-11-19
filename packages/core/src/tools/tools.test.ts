@@ -912,7 +912,7 @@ describe("执行器超时", () => {
 
       emitLateProgress?.("late-chunk");
       rejectLate?.(new Error("late rejection after abandon"));
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise<void>((r) => setImmediate(r));
 
       expect(unhandled).toEqual([]);
       expect(h.events).toHaveLength(eventCountAfterCancel);
@@ -931,7 +931,7 @@ describe("执行器超时", () => {
       expect(second.status).toBe("cancelled");
       const count2 = h2.events.length;
       resolveLate?.({ status: "ok", modelContent: "too late" });
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise<void>((r) => setImmediate(r));
       expect(h2.events).toHaveLength(count2);
       expect(completedOf(h2)).toHaveLength(1);
       expect(completedOf(h2)[0]?.payload.status).toBe("cancelled");

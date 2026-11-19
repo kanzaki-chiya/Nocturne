@@ -781,8 +781,8 @@ describe("image auto-downscale & tiling integration (ADR-0090)", () => {
         .then(() => {
           sessionAFinishedAt = performance.now();
         });
-      // 等一个微任务让 sessionA 的图片 worker 请求发出后再并发启动 sessionB
-      await new Promise((r) => setTimeout(r, 20));
+      // 让 sessionA 的图片 worker 请求先发出后再并发启动 sessionB
+      await new Promise<void>((r) => setImmediate(r));
       const pB = sessionB.submit({ text: "hello from session B" }).then(() => {
         sessionBFinishedAt = performance.now();
       });

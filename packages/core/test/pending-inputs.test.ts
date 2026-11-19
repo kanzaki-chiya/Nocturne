@@ -477,6 +477,7 @@ describe("ADR-0070 排队", () => {
       handler: async (_request, index) => {
         if (index === 0) {
           // 第一个 Turn 卡住一下，好在此期间入列两条排队输入
+          // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，为期间入列排队输入留窗口
           await new Promise((resolve) => setTimeout(resolve, 60));
         }
         return textScript(index === 0 ? "第一条回复" : "继续");

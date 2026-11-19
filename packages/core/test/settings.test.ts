@@ -194,6 +194,7 @@ describe("ADR-0034 设置层", () => {
       ),
     ).rejects.toThrow("单独密钥");
     const concurrent = vi.spyOn(config, "updateSettings").mockImplementationOnce(async () => {
+      // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，制造并发写入重叠
       await new Promise((resolve) => setTimeout(resolve, 10));
       throw new Error("disk failure");
     });

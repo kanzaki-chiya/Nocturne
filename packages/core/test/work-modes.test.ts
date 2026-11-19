@@ -196,7 +196,10 @@ describe("提交入口 workMode", () => {
       })();
     });
     expect(await session.submit({ text: "做 A" })).toBe("done");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.waitFor(() => {
+      expect(users(session).at(-1)?.payload.workMode?.name).toBe("grill-me");
+      expect(session.isIdle()).toBe(true);
+    });
     const all = users(session);
     expect(all.at(-1)?.payload.workMode?.name).toBe("grill-me");
     expect(all.at(-1)?.payload.steer).toBeUndefined();
@@ -696,7 +699,7 @@ describe("/plan（ADR-0076 §5）", () => {
     await rejects(session.cancelPlan(), "invalid_command");
     await session.submit({ text: "任务", workMode: "plan" });
     const running = session.submit({ text: "补充一点" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(calls).toBe(2));
     await rejects(session.approvePlan(), "session_busy");
     release();
     await running;

@@ -52,13 +52,14 @@ const writeThenDone = (rel: string): FakeScript[] => [
 ];
 
 async function waitForHistory(runtime: Runtime, id: string, result: string) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const [entry] = await runtime.scheduleHistory({ id });
-    if (entry?.result === result) return entry;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error(`等待历史 ${result} 超时`);
+  return vi.waitFor(
+    async () => {
+      const [entry] = await runtime.scheduleHistory({ id });
+      if (entry?.result !== result) throw new Error(`等待历史 ${result} 超时`);
+      return entry;
+    },
+    { timeout: 5_000, interval: 10 },
+  );
 }
 
 describe("Runtime 定时任务", () => {

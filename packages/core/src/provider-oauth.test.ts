@@ -425,6 +425,7 @@ describe("ChatGPT 刷新与请求链路", () => {
     const pending = resolver.token(signal);
     // 刷新撞锁后按真实 50ms 退避重试；node:timers/promises 不受假时钟控制。
     await new Promise<void>((resolve) => {
+      // eslint-disable-next-line no-restricted-syntax -- 反向断言：50ms 真实 timers/promises 退避重试期间锁被占用时不发起刷新
       setTimeout(resolve, 80);
     });
     expect(calls).toBe(0);

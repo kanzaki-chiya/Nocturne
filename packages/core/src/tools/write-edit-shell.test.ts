@@ -2,7 +2,7 @@
  * write / edit / shell 工具的离线测试（tools.md 第 6 节）。
  * 写文件与 shell 命令只在临时目录中执行。
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -246,9 +246,10 @@ describe("write 工具", () => {
     writeFileSync(file, "v1\n");
     const h = await makeHarness(ws);
     await readViaTool(h, "a.ts");
-    // 外部修改：改变大小与 mtime
-    await new Promise((r) => setTimeout(r, 20));
+    // 外部修改：改变大小与 mtime（显式推进 mtime，避免靠 sleep 等文件系统时间粒度）
     writeFileSync(file, "v1-external-longer\n");
+    const later = new Date(Date.now() + 2_000);
+    utimesSync(file, later, later);
     const r = await h.executor.execute(call("write", { path: "a.ts", content: "v2\n" }), h.scope);
     expect(r.status).toBe("error");
     expect(r.result.status === "error" && r.result.error.code).toBe("stale_file");
@@ -597,14 +598,15 @@ setInterval(()=>{},1000);`,
     // 等孙进程 pid 文件出现
     const pidFile = path.join(ws, "grandchild.pid");
     let grandchildPid = -1;
-    for (let i = 0; i < 100; i++) {
-      if (await platform.fs.exists(pidFile)) {
-        grandchildPid = Number(await platform.fs.readTextFile(pidFile));
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(grandchildPid).toBeGreaterThan(0);
+    await vi.waitFor(
+      async () => {
+        expect(await platform.fs.exists(pidFile)).toBe(true);
+        const raw = Number(await platform.fs.readTextFile(pidFile));
+        expect(raw).toBeGreaterThan(0);
+        grandchildPid = raw;
+      },
+      { timeout: 10_000, interval: 50 },
+    );
     processes.trackPid(grandchildPid);
 
     ac.abort();
@@ -621,10 +623,10 @@ setInterval(()=>{},1000);`,
       }
     };
     // 给 taskkill / 进程组信号一点落点时间
-    for (let i = 0; i < 50 && alive(grandchildPid); i++) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(alive(grandchildPid)).toBe(false);
+    await vi.waitFor(() => expect(alive(grandchildPid)).toBe(false), {
+      timeout: 5_000,
+      interval: 50,
+    });
   });
 
   it("cwd 指定到工作区外 → invalid_input", async () => {

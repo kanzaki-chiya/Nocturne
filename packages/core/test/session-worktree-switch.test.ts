@@ -217,9 +217,7 @@ it("nested current worktree activity does not block switching the project branch
   const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
   const running = s.submit({ text: "switch and hold" });
   try {
-    for (let i = 0; i < 100 && release === undefined; i++)
-      await new Promise((r) => setTimeout(r, 10));
-    expect(release).toBeDefined();
+    await vi.waitFor(() => expect(release).toBeDefined(), { timeout: 2_000, interval: 10 });
     expect((await rt.workspaceBranches({ workspace: f.project })).busy).toBe(false);
     expect((await rt.workspaceBranches({ workspace: nested })).busy).toBe(true);
   } finally {
@@ -426,26 +424,22 @@ it("switch_worktree validates repository worktrees, maps subdirectories, keeps p
   });
   const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
   await s.submit({ text: "start" });
-  for (
-    let i = 0;
-    i < 120 &&
-    s.state().history.filter((e) => e.kind === "tool" && e.name === "switch_worktree").length < 6;
-    i++
-  ) {
-    if (
-      s
-        .state()
-        .history.some(
+  await vi.waitFor(
+    () => {
+      const history = s.state().history;
+      const done =
+        history.filter((e) => e.kind === "tool" && e.name === "switch_worktree").length >= 6 ||
+        history.some(
           (e) =>
             e.kind === "tool" &&
             e.name === "switch_worktree" &&
             e.status === "error" &&
             e.modelContent.includes("未知"),
-        )
-    )
-      break;
-    await new Promise((r) => setTimeout(r, 100));
-  }
+        );
+      expect(done).toBe(true);
+    },
+    { timeout: 12_000, interval: 50 },
+  );
   const tools = s.state().history.filter((e) => e.kind === "tool");
   const swCalls = tools.filter((e) => e.name === "switch_worktree");
   expect(swCalls.map((e) => `${e.status}:${e.modelContent}`)).toEqual([
@@ -652,8 +646,7 @@ it("cross-switch rewind restores files across worktrees, reports only deleted-wo
   const s = await rt.createSession({ model: "fake/fake-1", permissionPreset: "bypass" });
   await s.submit({ text: "m1" });
   const running = s.submit({ text: "m2" });
-  for (let i = 0; i < 50 && gateResolve === undefined; i++)
-    await new Promise((r) => setTimeout(r, 20));
+  await vi.waitFor(() => expect(gateResolve).toBeDefined(), { timeout: 2_000, interval: 20 });
   expect((await rt.workspaceBranches({ workspace: f.project })).busy).toBe(false);
   expect((await rt.workspaceBranches({ workspace: f.worktree })).busy).toBe(true);
   await rt.switchBranch({ workspace: f.project, branch: "proj-b", create: true });

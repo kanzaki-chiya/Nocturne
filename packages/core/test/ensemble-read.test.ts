@@ -710,21 +710,23 @@ describe("ADR-0095 §2 ensemble_read Core 单元与集成测试", { timeout: 30_
     await maestro.submit({ text: "launch ensemble", workMode: "ensemble" });
 
     // 等待两个成员都完成读帖并回复
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const waitDeadline = Date.now() + 10_000;
-    while (
-      (!readerDone ||
-        !workerDone ||
-        !maestro
-          .durableEvents()
-          .some((e) => e.type === "ensemble.posted" && e.payload.from === "reader") ||
-        !maestro
-          .durableEvents()
-          .some((e) => e.type === "ensemble.posted" && e.payload.from === "worker")) &&
-      Date.now() < waitDeadline
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+    await vi.waitFor(
+      () => {
+        expect(readerDone).toBe(true);
+        expect(workerDone).toBe(true);
+        expect(
+          maestro
+            .durableEvents()
+            .some((e) => e.type === "ensemble.posted" && e.payload.from === "reader"),
+        ).toBe(true);
+        expect(
+          maestro
+            .durableEvents()
+            .some((e) => e.type === "ensemble.posted" && e.payload.from === "worker"),
+        ).toBe(true);
+      },
+      { timeout: 10_000, interval: 25 },
+    );
 
     // 1. 验证指挥工具列表包含 ensemble_read，且调用结果未截断原文、格式与 <ensemble-post> 一致
     const maestroReq = must(recorded.find((r) => r.role === "maestro")).req;

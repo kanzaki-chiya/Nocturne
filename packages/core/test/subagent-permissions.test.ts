@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   allPendingPermissions,
@@ -92,13 +92,16 @@ function firstOrThrow<T>(arr: readonly T[], label = "item"): T {
 }
 
 async function waitFor<T>(fn: () => T | undefined | false, timeoutMs = 4000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const val = fn();
-    if (val) return val;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error("waitFor timeout");
+  let result!: T;
+  await vi.waitFor(
+    () => {
+      const val = fn();
+      if (!val) throw new Error("waitFor timeout");
+      result = val;
+    },
+    { timeout: timeoutMs, interval: 10 },
+  );
+  return result;
 }
 
 function attachView(session: RuntimeSession): {
@@ -878,6 +881,7 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
       rootTaskStarted?.type === "tool.started" ? rootTaskStarted.payload.callId : undefined,
     );
 
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：权限等待期间 250ms 内三层 80ms 超时不触发
     await new Promise((r) => setTimeout(r, 250));
     // 仍处于等待中，三层超时均未误触发
     expect(view.pendingSubagentPermissions).toHaveLength(1);
@@ -1593,6 +1597,7 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
     const pending = await waitFor(() =>
       view.pendingSubagentPermissions.length === 1 ? view.pendingSubagentPermissions[0] : false,
     );
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：权限等待期间 150ms 内 80ms task 超时不触发
     await new Promise((r) => setTimeout(r, 150));
     expect(view.pendingSubagentPermissions).toHaveLength(1);
 
@@ -1956,6 +1961,7 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
       view.pendingSubagentPermissions.length === 1 ? view.pendingSubagentPermissions[0] : false,
     );
     // 超过 task input.timeoutMs (80ms) + EXECUTOR_TIMEOUT_GRACE_MS (1000ms) = 1080ms
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：权限等待期间 1300ms 内 80ms 超时与 1000ms 宽限均不触发
     await new Promise((r) => setTimeout(r, 1300));
     expect(view.pendingSubagentPermissions).toHaveLength(1);
 
@@ -2055,6 +2061,7 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
     const pend1 = await waitFor(() =>
       vProf.pendingSubagentPermissions.length === 1 ? vProf.pendingSubagentPermissions[0] : false,
     );
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：权限等待期间 200ms 内 80ms 超时不触发
     await new Promise((r) => setTimeout(r, 200));
     expect(vProf.pendingSubagentPermissions).toHaveLength(1);
     await sProf.respondSubagentPermission(pend1.childSessionId, pend1.requestId, {
@@ -2144,6 +2151,7 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
     const rPend1 = await waitFor(() =>
       vRt.pendingSubagentPermissions.length === 1 ? vRt.pendingSubagentPermissions[0] : false,
     );
+    // eslint-disable-next-line no-restricted-syntax -- 反向断言：权限等待期间 200ms 内 80ms 超时不触发
     await new Promise((r) => setTimeout(r, 200));
     expect(vRt.pendingSubagentPermissions).toHaveLength(1);
     await sRt.respondSubagentPermission(rPend1.childSessionId, rPend1.requestId, {

@@ -362,15 +362,12 @@ it("holds directory admission while git switch is still running", async () => {
   );
   const session = await rt.createSession({ model: "fake/fake-1" });
   const switching = rt.switchBranch({ workspace: root, branch: "slow", create: true });
-  let observed = false;
-  for (let attempt = 0; attempt < 15; attempt++) {
-    if ((await rt.workspaceBranches({ workspace: root })).busy) {
-      observed = true;
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  }
-  expect(observed).toBe(true);
+  await vi.waitFor(
+    async () => {
+      expect((await rt.workspaceBranches({ workspace: root })).busy).toBe(true);
+    },
+    { timeout: 5_000 },
+  );
   await expect(session.submit({ text: "must not start during switch" })).rejects.toMatchObject({
     code: "session_busy",
   });
@@ -385,14 +382,19 @@ it("holds directory admission while git switch is still running", async () => {
 it("blocks on a shared read-only background child after its parent Turn has ended", async () => {
   const root = repository();
   let parentCalls = 0;
+  let releaseChild!: () => void;
+  const childGate = new Promise<void>((resolve) => {
+    releaseChild = resolve;
+  });
   const provider = new FakeProvider({
-    handler: (request) => {
-      if (request.tools.some((tool) => tool.name === "finish"))
+    handler: async (request) => {
+      if (request.tools.some((tool) => tool.name === "finish")) {
+        await childGate;
         return [
-          { type: "wait", ms: 1200 },
           { type: "tool_call", toolCallId: "finished", name: "finish", input: { result: "done" } },
           { type: "finish", reason: "tool_calls" },
         ];
+      }
       if (parentCalls++ === 0)
         return [
           {
@@ -423,21 +425,30 @@ it("blocks on a shared read-only background child after its parent Turn has ende
   await expect(
     rt.switchBranch({ workspace: root, branch: "blocked", create: true }),
   ).rejects.toMatchObject({ code: "session_busy" });
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  releaseChild();
+  await vi.waitFor(async () => {
+    expect((await rt.workspaceBranches({ workspace: root })).busy).toBe(false);
+    expect(session.isIdle()).toBe(true);
+  });
   await session.close();
 });
 
 it("does not block the parent repository for an isolated background worktree", async () => {
   const root = repository();
   let parentCalls = 0;
+  let releaseChild!: () => void;
+  const childGate = new Promise<void>((resolve) => {
+    releaseChild = resolve;
+  });
   const provider = new FakeProvider({
-    handler: (request) => {
-      if (request.tools.some((tool) => tool.name === "finish"))
+    handler: async (request) => {
+      if (request.tools.some((tool) => tool.name === "finish")) {
+        await childGate;
         return [
-          { type: "wait", ms: 1200 },
           { type: "tool_call", toolCallId: "finished", name: "finish", input: { result: "done" } },
           { type: "finish", reason: "tool_calls" },
         ];
+      }
       if (parentCalls++ === 0)
         return [
           {
@@ -470,7 +481,15 @@ it("does not block the parent repository for an isolated background worktree", a
   ).toBe(true);
   expect((await rt.workspaceBranches({ workspace: root })).busy).toBe(false);
   await rt.switchBranch({ workspace: root, branch: "independent", create: true });
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  releaseChild();
+  await vi.waitFor(async () => {
+    expect(
+      (await rt.listSubagents({ parentSessionId: session.id })).every(
+        (child) => child.state !== "running",
+      ),
+    ).toBe(true);
+    expect(session.isIdle()).toBe(true);
+  });
   await session.close();
 });
 
@@ -488,12 +507,21 @@ it("pumps inputs queued while a branch switch is running after the switch finish
   git(root, "config", "core.hooksPath", hooks);
   let parentCalls = 0;
   let childCalls = 0;
+  const childGates: (() => void)[] = [];
+  const childPromises = [
+    new Promise<void>((resolve) => {
+      childGates.push(resolve);
+    }),
+    new Promise<void>((resolve) => {
+      childGates.push(resolve);
+    }),
+  ];
   const provider = new FakeProvider({
-    handler: (request) => {
+    handler: async (request) => {
       if (request.tools.some((tool) => tool.name === "finish")) {
         const id = ++childCalls;
+        await childPromises[id - 1];
         return [
-          { type: "wait", ms: 80 },
           {
             type: "tool_call",
             toolCallId: `finished-${id}`,
@@ -503,7 +531,8 @@ it("pumps inputs queued while a branch switch is running after the switch finish
           { type: "finish", reason: "tool_calls" },
         ];
       }
-      if (parentCalls === 0 || parentCalls === 2) {
+      const last = request.messages.at(-1);
+      if (last?.role === "user" && JSON.stringify(last.content).includes("launch-")) {
         parentCalls++;
         return [
           {
@@ -530,13 +559,8 @@ it("pumps inputs queued while a branch switch is running after the switch finish
     permissions: { autoApproveAsk: true },
   });
   const session = await rt.createSession({ model: "fake/fake-1" });
-  let turnIdle = true;
-  session.subscribe((event) => {
-    if (event.type === "turn.started") turnIdle = false;
-    if (event.type === "runtime.status" && event.payload.status === "idle") turnIdle = true;
-  });
   const delivered = (marker: string) =>
-    turnIdle &&
+    session.isIdle() &&
     session.pendingInputs().items.length === 0 &&
     session.state().openTurn === undefined &&
     session
@@ -548,12 +572,15 @@ it("pumps inputs queued while a branch switch is running after the switch finish
         resolve();
         return;
       }
-      const off = session.subscribe(() => {
+      const check = () => {
         if (delivered(marker)) {
-          off();
+          offEvents();
+          offIdle();
           resolve();
         }
-      });
+      };
+      const offEvents = session.subscribe(check);
+      const offIdle = session.onIdle(check);
     });
   await session.submit({ text: "launch-success" });
   writeFileSync(gate, "1");
@@ -562,9 +589,13 @@ it("pumps inputs queued while a branch switch is running after the switch finish
     branch: "queued-during-success",
     create: true,
   });
-  for (let i = 0; i < 40 && session.pendingInputs().items.length === 0; i++)
-    await new Promise((resolve) => setTimeout(resolve, 40));
-  expect(session.pendingInputs().items).toHaveLength(1);
+  await vi.waitFor(async () => {
+    expect((await rt.workspaceBranches({ workspace: root })).busy).toBe(true);
+  });
+  childGates[0]?.();
+  await vi.waitFor(() => {
+    expect(session.pendingInputs().items).toHaveLength(1);
+  });
   rmSync(gate);
   await switching;
   await waitForDelivered("bg-1");
@@ -578,9 +609,13 @@ it("pumps inputs queued while a branch switch is running after the switch finish
     branch: "queued-during-failure",
     create: true,
   });
-  for (let i = 0; i < 40 && session.pendingInputs().items.length === 0; i++)
-    await new Promise((resolve) => setTimeout(resolve, 40));
-  expect(session.pendingInputs().items).toHaveLength(1);
+  await vi.waitFor(async () => {
+    expect((await rt.workspaceBranches({ workspace: root })).busy).toBe(true);
+  });
+  childGates[1]?.();
+  await vi.waitFor(() => {
+    expect(session.pendingInputs().items).toHaveLength(1);
+  });
   rmSync(gate);
   await expect(failing).rejects.toThrow();
   await waitForDelivered("bg-2");

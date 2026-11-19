@@ -478,6 +478,10 @@ describe("Hook 上下文注入（ADR-0096）", () => {
     const holdPromise = new Promise<void>((r) => {
       resolveHold = r;
     });
+    let resolveTurn1Entered: (() => void) | undefined;
+    const turn1Entered = new Promise<void>((r) => {
+      resolveTurn1Entered = r;
+    });
 
     const provider = new FakeProvider({
       handler: async (req) => {
@@ -485,6 +489,7 @@ describe("Hook 上下文注入（ADR-0096）", () => {
         turnNo += 1;
         // 第 1 轮：阻塞一下好让测试往运行中插话 steer
         if (turnNo === 1) {
+          resolveTurn1Entered?.();
           await holdPromise;
           return [
             { type: "tool_call", toolCallId: "t_read", name: "read", input: { path: "ref.txt" } },
@@ -534,7 +539,7 @@ describe("Hook 上下文注入（ADR-0096）", () => {
       skill: { name: "alpha", arguments: "target @ref.txt" },
     });
     // 等第 1 步发进模型后，再 enqueueInput("steer")，然后放行
-    await new Promise((r) => setTimeout(r, 80));
+    await turn1Entered;
     await session.enqueueInput("steer", { text: "steer msg should skip" });
     resolveHold?.();
     await t1;

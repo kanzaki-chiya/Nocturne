@@ -250,6 +250,7 @@ describe("openai-responses 适配器", () => {
       const reader = response.body?.getReader();
       const delayed = new ReadableStream<Uint8Array>({
         async start(c) {
+          // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，模拟响应头先到而正文迟到
           await new Promise((resolve) => setTimeout(resolve, 300));
           for (;;) {
             const chunk = await reader?.read();

@@ -5,7 +5,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, type Runtime, type RuntimeSession } from "../src/index.js";
 import { FakeProvider, type FakeScript, type ModelRequest } from "../src/provider/index.js";
@@ -78,11 +78,12 @@ async function makeRuntime(
 }
 
 const until = async (check: () => boolean | Promise<boolean>, label: string): Promise<void> => {
-  const start = Date.now();
-  while (!(await check())) {
-    if (Date.now() - start > 10_000) throw new Error(`等待超时：${label}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await vi.waitFor(
+    async () => {
+      if (!(await check())) throw new Error(`等待超时：${label}`);
+    },
+    { timeout: 10_000, interval: 5 },
+  );
 };
 
 function observer() {

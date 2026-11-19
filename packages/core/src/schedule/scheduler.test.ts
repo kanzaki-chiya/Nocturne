@@ -71,18 +71,14 @@ class FakeClock implements ScheduleClock {
   }
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 async function waitFor(cond: () => boolean | Promise<boolean>, what = "条件"): Promise<void> {
-  for (let i = 0; i < 20; i += 1) {
-    if (await cond()) return;
-    await Promise.resolve();
-  }
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await cond()) return;
-    await sleep(5);
-  }
-  throw new Error(`等待超时：${what}`);
+  await vi.waitFor(
+    async () => {
+      if (!(await cond())) throw new Error(`等待超时：${what}`);
+    },
+    { timeout: 15_000, interval: 5 },
+  );
 }
 
 interface FakeCall {
@@ -249,7 +245,7 @@ describe("错过的运行", () => {
     // 再检查不会重复补跑
     s.calls[0]?.finish();
     await s.scheduler.tick();
-    await sleep(30);
+    await flush();
     expect(s.calls).toHaveLength(1);
   });
 
@@ -300,7 +296,7 @@ describe("错过的运行", () => {
       enabled: true,
     });
     await s.scheduler.tick();
-    await sleep(30);
+    await flush();
     expect(s.calls).toHaveLength(0);
     s.clock.jumpTo(at("2026-10-28T01:00:30Z"));
     await s.scheduler.tick();
@@ -311,7 +307,7 @@ describe("错过的运行", () => {
     const s = setup({ start: "2026-10-25T05:00:00Z" });
     await s.make();
     await s.scheduler.start();
-    await sleep(30);
+    await flush();
     expect(s.calls).toHaveLength(0);
   });
 });

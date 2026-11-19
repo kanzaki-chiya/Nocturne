@@ -756,6 +756,7 @@ describe("工作树生命周期", () => {
     const realApply = worktreeModule.applyWorktreeChanges;
     vi.spyOn(worktreeModule, "cleanupMergedWorktrees").mockImplementation(async (dir, sid) => {
       order.push("cleanup:start");
+      // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，模拟后台清理进行中以验证串行
       await new Promise((resolve) => setTimeout(resolve, 120));
       await realCleanup(dir, sid);
       order.push("cleanup:end");

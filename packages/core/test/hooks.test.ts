@@ -5,7 +5,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDefaultPolicy,
@@ -363,9 +363,11 @@ describe("执行管线集成", () => {
       { forceAsk: true, askReason: "Hook 要求", tool: "shell", input: { command: "echo hi" } },
     );
     // forceAsk 下必须挂起为 permission.requested，而不是被 Grant 自动放行
-    await new Promise((r) => setTimeout(r, 50));
-    const requested = events.find((e) => e.type === "permission.requested");
-    expect(requested).toBeDefined();
+    let requested: { type: string; payload: Record<string, unknown> } | undefined;
+    await vi.waitFor(() => {
+      requested = events.find((e) => e.type === "permission.requested");
+      expect(requested).toBeDefined();
+    });
     const requestId = (requested?.payload as { requestId: string }).requestId;
     const ok = await gate.respond?.(requestId, { decision: "allow" });
     expect(ok).toBe(true);

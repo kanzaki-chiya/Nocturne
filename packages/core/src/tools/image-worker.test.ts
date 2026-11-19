@@ -4,7 +4,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { deflateSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import jpegDecode, { init as initJpegDecode } from "@jsquash/jpeg/decode.js";
 import jpegEncode, { init as initJpegEncode } from "@jsquash/jpeg/encode.js";
 import webpEncode, { init as initWebpEncode } from "@jsquash/webp/encode.js";
@@ -326,8 +326,7 @@ describe("image worker & AttachmentStore processing (ADR-0090)", () => {
     const doneAtt = await store.save({ data: tallPng, mimeType: "image/png", source: "paste" });
     expect(doneAtt.processed?.length).toBeGreaterThan(1);
     expect(processor.hasWorker()).toBe(true);
-    await new Promise((r) => setTimeout(r, 200));
-    expect(processor.hasWorker()).toBe(false);
+    await vi.waitFor(() => expect(processor.hasWorker()).toBe(false), { timeout: 2_000 });
 
     // 2. 处理中途取消：等首段落盘触发后再中止
     const sessionDir = path.join(dir, "s2");
@@ -346,21 +345,22 @@ describe("image worker & AttachmentStore processing (ADR-0090)", () => {
       signal: ac.signal,
     });
     // 轮询直到至少写出首段半成品后再立即中止
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      let existing: string[] = [];
-      try {
-        existing = readdirSync(sessionDir);
-      } catch {
-        existing = [];
-      }
-      if (existing.some((f) => f.startsWith("img-1-"))) {
-        ac.abort();
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 5));
+    try {
+      await vi.waitFor(
+        () => {
+          let existing: string[] = [];
+          try {
+            existing = readdirSync(sessionDir);
+          } catch {
+            existing = [];
+          }
+          expect(existing.some((f) => f.startsWith("img-1-"))).toBe(true);
+        },
+        { timeout: 10_000, interval: 5 },
+      );
+    } finally {
+      ac.abort();
     }
-    if (!ac.signal.aborted) ac.abort();
     await expect(savePromise).rejects.toMatchObject({ name: "AbortError" });
     expect(processor.hasWorker()).toBe(false);
     const remaining = readdirSync(sessionDir);

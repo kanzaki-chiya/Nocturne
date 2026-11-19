@@ -140,7 +140,7 @@ describe("公开 Runtime API", () => {
     const session = await makeSession(runtime);
     const events = collect(session);
     const turn = session.submit({ text: "close race" });
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => expect(durableTypes(events)).toContain("turn.started"));
     await session.close();
     expect(await turn).toBe("aborted");
     expect(durableTypes(events)).toContain("turn.started");
@@ -510,6 +510,7 @@ describe("公开 Runtime API", () => {
   it("submit 忙时拒绝 session_busy", async () => {
     const provider = new FakeProvider({
       handler: async () => {
+        // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，模拟慢响应以制造 Turn 进行中窗口
         await new Promise((r) => setTimeout(r, 150));
         return [
           { type: "text_delta", text: "done" },
@@ -1781,6 +1782,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
   it("compact 并发约束：Turn 进行中 session_busy；压缩进行中 compaction_in_progress", async () => {
     const provider = new FakeProvider({
       handler: async () => {
+        // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，模拟慢响应以制造 Turn 进行中窗口
         await new Promise((r) => setTimeout(r, 120));
         return [
           { type: "text_delta", text: "s" },
@@ -1824,6 +1826,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
             { type: "finish", reason: "stop" },
           ];
         }
+        // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，模拟慢响应以供 compact 中断测试
         await new Promise((r) => setTimeout(r, 300));
         return [
           { type: "text_delta", text: "late" },
@@ -2312,6 +2315,7 @@ describe("上下文与运行时命令（Phase 2）", () => {
   it("setModel / compact 在 Turn 进行中拒绝 session_busy", async () => {
     const provider = new FakeProvider({
       handler: async () => {
+        // eslint-disable-next-line no-restricted-syntax -- 测试替身故意延时，模拟慢响应以制造 Turn 进行中窗口
         await new Promise((r) => setTimeout(r, 120));
         return [
           { type: "text_delta", text: "ok" },
