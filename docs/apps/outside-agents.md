@@ -8,7 +8,7 @@
 
 - **保持 Nocturne 桌面端处于打开状态**：`nctrn mcp` 本身不创建 Runtime、不直接读写会话日志或凭据，而是通过本机加密管道连接桌面端后台（Windows 为命名管道 `\\.\pipe\nocturne-agent-<SID哈希>`，macOS / Linux 为 `<nocturneHome>/agent.sock`）。
 - 桌面端未运行时，`nctrn mcp` 的 MCP `initialize` 与 `tools/list` 仍正常返回（避免宿主启动报错），调用工具时返回明确提示请先打开桌面应用。
-- 外部 agent 创建或驱动的会话在桌面端实时可见；遇到需要审批的权限请求（`permission.requested`）或提问（`question.requested`）时，仍由用户在桌面端或已配对手机上亲自处理，外部 agent 无法代为批准。
+- 外部 agent 创建或驱动的会话在桌面端实时可见；遇到提问（`question.requested`）时，可运行范围的外部 agent 可经 `nocturne_answer` 回答**自己创建的会话**中的提问，用户也可在桌面端或已配对手机上处理；权限确认（`permission.requested`）仍由用户本人处理。
 
 ## 2. 在 Claude Code 与 Codex 中登记
 
@@ -68,7 +68,7 @@ codex mcp add nocturne -- nctrn mcp --name codex
 1. 外部 agent 首次调用工具连接桌面端时，桌面端弹出**外部 Agent 接入请求**对话框，展示桥的名称与公钥指纹。
 2. 用户可选择授权范围：
    - **只读（`read-only`）**：仅允许列出模型、列出会话、读取会话折叠内容；
-   - **可运行（`run`）**：允许全部工具，并指定新建会话的**权限上限**（默认 `default`，可选 `read-only` / `default` / `auto-edit` / `guarded` / `smart` / `bypass`）；重命名（`runtime.renameSession`）仅允许作用于该外部 agent 自己创建的会话（目标会话 `client.id` 须等于当前 agent id），不能改名用户或其他外部 agent 创建的会话。
+   - **可运行（`run`）**：允许全部工具，并指定新建会话的**权限上限**（默认 `default`，可选 `read-only` / `default` / `auto-edit` / `guarded` / `smart` / `bypass`）；重命名（`runtime.renameSession`）与回答提问（`session.respondQuestion`）仅允许作用于该外部 agent 自己创建的会话（目标会话 `client.id` 须等于当前 agent id），不能操作用户或其他外部 agent 创建的会话。
 3. **注意事项**：可运行范围的外部 agent 能向任何非子代理会话发送消息，消息按**该会话自己的权限预设**执行；权限上限仅约束外部 agent 新建的会话。
 4. 已批准的外部 agent 显示在桌面端「设置 › 远程 › 外部 Agent」分组中，可随时调整范围、修改权限上限或吊销；吊销后立即断开当前连接。
 
@@ -83,6 +83,7 @@ codex mcp add nocturne -- nctrn mcp --name codex
 | `nocturne_send` | 可运行 | `{ sessionId, prompt, wait?, timeoutSeconds? }`：向已有会话发送消息。采用 `queue` 排队模式，**从不打断**正在运行的轮次。`wait: true` 共用下方等待与增量摘要规则。 |
 | `nocturne_wait` | 可运行 | `{ sessionId?, sessionIds?, timeoutSeconds? }`（`sessionId` 与 `sessionIds` 二选一；默认 300s，上限 600s）：等待单个或多个会话的当前轮及正常 `done` 接续的排队轮次结束；传 `sessionIds` 时，任意一个会话满足停止条件（或调用时已满足）即立即返回 `{ timedOut, readySessionIds, sessions }`，列明就绪会话及各会话状态；超时返回各会话 `running` 不中断会话；停在权限确认或提问上时立即返回 `waiting_for_permission` / `waiting_for_answer`；若因中断或出错导致待发队列暂停，立即返回 `status: "paused"` 及刚结束轮次的 `turnOutcome`（`"aborted"` / `"error"`）。对子代理会话调用等待类工具会直接报错并给出其父会话 ID（取自 `SessionSummary.parent`）。 |
 | `nocturne_interrupt` | 可运行 | `{ sessionId }`：中断指定会话当前正在运行的轮次。 |
+| `nocturne_answer` | 可运行 | `{ sessionId, requestId, answers, wait?, timeoutSeconds? }`：回答自己创建的会话当前挂起的提问（`answers` 与 `session.respondQuestion` 一致：每题为 `{ selected, text? }` 或 `{ declined: true }`）。非本 agent 创建的会话报 `agent_not_allowed`；`wait: true`（默认）共用等待与增量摘要规则。 |
 
 ### 等待类返回增量摘要规则
 

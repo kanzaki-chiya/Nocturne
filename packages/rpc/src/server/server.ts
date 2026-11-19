@@ -505,6 +505,11 @@ class Connection implements HubPeer {
     private readonly agentContext: AgentConnectionContext | undefined,
     private readonly attachAgentsToStatus: (status: RemoteStatus) => RemoteStatus,
   ) {
+    if (this.origin === "agent" && this.agentContext !== undefined) {
+      this.agentContext.notifySelf = (info) => {
+        this.send({ jsonrpc: "2.0", method: "agent.selfChanged", params: info });
+      };
+    }
     this.handlers = this.buildHandlers();
   }
 
@@ -778,37 +783,41 @@ class Connection implements HubPeer {
       await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
     }
     if (
-      method === "runtime.renameSession" &&
+      (method === "runtime.renameSession" || method === "session.respondQuestion") &&
       this.initialized &&
       this.hub.available &&
       agentDevice
     ) {
       const p = asParams(params);
       const sessionId = reqString(p, "sessionId");
-      let found = false;
-      let client = this.sessions.get(sessionId)?.session.state().meta.client;
-      if (this.sessions.has(sessionId)) {
-        found = true;
-      } else {
-        for (const open of this.hub.openSessions()) {
-          if (open.id === sessionId) {
-            client = open.state().meta.client;
-            found = true;
-            break;
-          }
-        }
-      }
-      if (!found) {
-        const summaries = await this.runtime().listSessions({
-          includeArchived: true,
-          includeSubagents: true,
-        });
-        client = summaries.find((s) => s.id === sessionId)?.client;
-      }
+      const client = await this.resolveSessionClient(sessionId);
       if (client?.id !== agentDevice.id) {
-        throw new RpcProtocolError("agent_not_allowed", "外部 agent 只能重命名自己创建的会话");
+        const action =
+          method === "runtime.renameSession"
+            ? "重命名自己创建的会话"
+            : "回答自己创建的会话中的提问";
+        throw new RpcProtocolError("agent_not_allowed", `外部 agent 只能${action}`);
       }
     }
+  }
+
+  private async resolveSessionClient(
+    sessionId: string,
+  ): Promise<{ id?: string | undefined } | undefined> {
+    const own = this.sessions.get(sessionId);
+    if (own !== undefined) {
+      return own.session.state().meta.client;
+    }
+    for (const open of this.hub.openSessions()) {
+      if (open.id === sessionId) {
+        return open.state().meta.client;
+      }
+    }
+    const summaries = await this.runtime().listSessions({
+      includeArchived: true,
+      includeSubagents: true,
+    });
+    return summaries.find((s) => s.id === sessionId)?.client;
   }
 
   private get remoteLimit(): number {
@@ -1358,10 +1367,23 @@ class Connection implements HubPeer {
         });
       this.initPromise = init;
       await init;
+      const registeredAgent =
+        this.origin === "agent" && this.agentContext !== undefined
+          ? this.agentHost.getRegisteredAgent(this.agentContext.agentId)
+          : undefined;
       return {
         protocolVersion: RPC_PROTOCOL_VERSION,
         nocturneVersion: this.options.nocturneVersion,
         ...(this.hub.sessionsDir !== undefined ? { sessionsDir: this.hub.sessionsDir } : {}),
+        ...(registeredAgent !== undefined
+          ? {
+              agent: {
+                id: registeredAgent.id,
+                scope: registeredAgent.scope,
+                maxPermissionPreset: registeredAgent.maxPermissionPreset,
+              },
+            }
+          : {}),
       };
     };
     const handleShutdown = async () => {

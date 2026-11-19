@@ -153,11 +153,19 @@ export interface InitializeParams {
   processInfo?: AgentProcessInfo | undefined;
 }
 
+export interface AgentSelfInfo {
+  id: string;
+  scope: AgentScope;
+  maxPermissionPreset: PermissionPresetName;
+}
+
 export interface InitializeResult {
   protocolVersion: number;
   nocturneVersion: string;
   /** 会话日志目录（只读信息）；服务端不知道时缺省 */
   sessionsDir?: string;
+  /** 仅 `origin === "agent"` 且已登记批准时返回该外部 agent 自身的能力范围与权限上限 */
+  agent?: AgentSelfInfo;
 }
 
 /** createSession / resumeSession 的结果：会话已打开，事件要另行 session.subscribe */
@@ -957,6 +965,8 @@ export interface RpcServerNotifications {
   "remote.pairingFailed": { code: string };
   "agent.pairingRequested": AgentPairingRequest;
   "agent.statusChanged": AgentStatus;
+  /** 仅发给对应 `origin === "agent"` 连接：自身配对批准或范围/上限变化 */
+  "agent.selfChanged": AgentSelfInfo;
   event: { sessionId: string; event: RuntimeEvent };
   /** 顶层会话只读快照事件，原样 DurableEvent；与实时 `event` 通道隔离（ADR-0099） */
   "session.observeEvent": {

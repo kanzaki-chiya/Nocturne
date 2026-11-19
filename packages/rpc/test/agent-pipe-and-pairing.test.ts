@@ -3,12 +3,19 @@ import { chmodSync, writeFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRuntimeStub } from "@nocturne/core/testing";
 import { connectChannel, generateIdentity } from "@nocturne/remote";
-import { createMemoryTransportPair, createRpcClient, RpcError } from "../src/client/index.js";
+import {
+  createMemoryTransportPair,
+  createRpcClient,
+  RpcError,
+  type AgentSelfInfo,
+} from "../src/client/index.js";
 import {
   AGENT_READONLY_METHODS,
   AGENT_RUN_METHODS,
   connectAgentPipe,
+  createRpcServer,
   currentUserSid,
   listenAgentPipe,
   readWindowsPipeAclRules,
@@ -902,5 +909,276 @@ describe("外部 agent 配对、范围、白名单、权限上限与会话来源
     const list = await h.client.runtime.listSessions();
     expect(list.find((s) => s.id === userSession.sessionId)?.firstText).toBe("用户原始标题");
     expect(list.find((s) => s.id === bSession.sessionId)?.firstText).toBe("Agent B 标题");
+  });
+
+  it("外部 agent（run 范围）回答自己会话的提问成功；用户/其他 agent 会话、只读档位返回 agent_not_allowed；过期 requestId 返回 unknown_request", async () => {
+    const h = await connectWithConfig({
+      enableRemote: true,
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "tc-q-1",
+            name: "ask_user",
+            input: {
+              questions: [
+                {
+                  question: "选择目标环境？",
+                  options: [{ label: "staging" }, { label: "prod" }],
+                },
+                {
+                  question: "是否附带备注？",
+                },
+              ],
+            },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "已按 staging 继续完成" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    cleanups.push(async () => {
+      h.client.close();
+      await h.served;
+    });
+
+    // 用户（本机）先建一个会话，使 h.ws 成为已有会话用过的工作区，同时也作为非本 agent 会话样本
+    const { session: userSession, opened: userOpened } = await h.client.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+    cleanups.push(async () => userSession.close().catch(() => undefined));
+
+    const connectAgent = async (id: string, name: string, scope: "run" | "read-only") => {
+      const [cT, sT] = createMemoryTransportPair();
+      void h.server.serve(sT, { origin: "agent", agent: { id, name } });
+      const client = createRpcClient(cT, { clientName: name, interactive: false });
+      cleanups.push(async () => client.close());
+      const selfUpdates: AgentSelfInfo[] = [];
+      client.onNotification("agent.selfChanged", (info) => selfUpdates.push(info));
+      const initBefore = await client.initialize();
+      expect(initBefore.agent).toBeUndefined();
+      await h.client.call("agent.respondPairing", {
+        agentId: id,
+        approved: true,
+        scope,
+        maxPermissionPreset: "default",
+      });
+      await vi.waitFor(() => {
+        expect(selfUpdates).toEqual([{ id, scope, maxPermissionPreset: "default" }]);
+      });
+      return { client, selfUpdates };
+    };
+
+    const { client: agentA, selfUpdates: aUpdates } = await connectAgent(
+      "agent-q-a",
+      "Agent A",
+      "run",
+    );
+    const { client: agentB } = await connectAgent("agent-q-b", "Agent B", "run");
+    const { client: agentRo } = await connectAgent("agent-q-ro", "Agent RO", "read-only");
+
+    // 已登记的 agent 重新连接时，initialize 直接返回 agent 范围与权限上限
+    const [reconnCT, reconnST] = createMemoryTransportPair();
+    void h.server.serve(reconnST, { origin: "agent", agent: { id: "agent-q-a", name: "Agent A" } });
+    const reconnA = createRpcClient(reconnCT, { clientName: "Agent A", interactive: false });
+    cleanups.push(async () => reconnA.close());
+    const initAfter = await reconnA.initialize();
+    expect(initAfter.agent).toEqual({
+      id: "agent-q-a",
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+
+    // Agent A 创建自己的会话并触发 ask_user
+    const { session: aSess, opened: aOpened } = await agentA.runtime.createSession({
+      cwd: h.ws,
+      model: MODEL,
+    });
+    const events: { type: string; payload: Record<string, unknown> }[] = [];
+    let pendingRequestId: string | undefined;
+    let doneResolve: (() => void) | undefined;
+    const donePromise = new Promise<void>((r) => {
+      doneResolve = r;
+    });
+    await aSess.subscribe((ev) => {
+      events.push({ type: ev.type, payload: ev.payload as unknown as Record<string, unknown> });
+      if (ev.type === "question.requested") {
+        pendingRequestId = ev.payload.requestId;
+      }
+      if (ev.type === "turn.completed") {
+        doneResolve?.();
+      }
+    });
+
+    const submitPromise = aSess.submit({ text: "请先问我部署环境" });
+    await vi.waitFor(() => {
+      expect(pendingRequestId).toBeDefined();
+    });
+    if (pendingRequestId === undefined) throw new Error("missing pendingRequestId");
+    const reqId = pendingRequestId;
+
+    // 1. Agent B（其他 agent）回答 Agent A 的会话 -> agent_not_allowed
+    await expect(
+      agentB.call("session.respondQuestion", {
+        sessionId: aOpened.sessionId,
+        requestId: reqId,
+        reply: { answers: [{ selected: ["staging"] }, { declined: true }] },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+
+    // 2. Agent A 回答用户会话 -> agent_not_allowed
+    await expect(
+      agentA.call("session.respondQuestion", {
+        sessionId: userOpened.sessionId,
+        requestId: "q-user-1",
+        reply: { answers: [{ selected: ["staging"] }] },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+
+    // 3. 只读 agent 调用 session.respondQuestion -> agent_not_allowed
+    await expect(
+      agentRo.call("session.respondQuestion", {
+        sessionId: aOpened.sessionId,
+        requestId: reqId,
+        reply: { answers: [{ selected: ["staging"] }, { declined: true }] },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+
+    // 4. 自己的会话传入不存在/过期的 requestId -> unknown_request
+    await expect(
+      aSess.respondQuestion("q-stale-999", {
+        answers: [{ selected: ["staging"] }, { declined: true }],
+      }),
+    ).rejects.toMatchObject({ code: "unknown_request" });
+
+    // 5. 自己的会话以正确 requestId 作答（选题 + 放弃第二题）-> 成功，会话继续并完成
+    await expect(
+      aSess.respondQuestion(reqId, {
+        answers: [{ selected: ["staging"], text: "优先灰度" }, { declined: true }],
+      }),
+    ).resolves.toBeUndefined();
+    await submitPromise;
+    await donePromise;
+
+    // 6. 提问已处理后再次用同一（过期）requestId 作答 -> unknown_request
+    await expect(
+      aSess.respondQuestion(reqId, {
+        answers: [{ selected: ["staging"] }, { declined: true }],
+      }),
+    ).rejects.toMatchObject({ code: "unknown_request" });
+
+    // 7. setScope 更新后推送 agent.selfChanged
+    await h.client.call("agent.setScope", {
+      id: "agent-q-a",
+      scope: "run",
+      maxPermissionPreset: "bypass",
+    });
+    await vi.waitFor(() => {
+      expect(aUpdates.at(-1)).toEqual({
+        id: "agent-q-a",
+        scope: "run",
+        maxPermissionPreset: "bypass",
+      });
+    });
+
+    // 8. 切回 read-only 后，连自己的会话也不能调 session.respondQuestion
+    await h.client.call("agent.setScope", {
+      id: "agent-q-a",
+      scope: "read-only",
+      maxPermissionPreset: "default",
+    });
+    await expect(
+      aSess.respondQuestion(reqId, {
+        answers: [{ selected: ["staging"] }, { declined: true }],
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+  });
+
+  it("使用 createRuntimeStub：非本人会话调用 session.respondQuestion 在接入层拦截且不调用 Core", async () => {
+    const respondSpy = vi.fn(async () => undefined);
+    const home = tmpDir("rpc-agent-q-stub-");
+    const stubSession = {
+      id: "sess-user-1",
+      state: () => ({
+        meta: {
+          id: "sess-user-1",
+          createdAt: "2026-11-20T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          formatVersion: 1,
+        },
+        config: {
+          model: { provider: "fake", model: "fake-model" },
+          permissionPreset: "default",
+        },
+        status: "idle",
+        turnCount: 0,
+        lastSeq: 0,
+      }),
+      subscribe: () => () => undefined,
+      durableEvents: () => [],
+      isIdle: () => true,
+      onIdle: () => () => undefined,
+      warnings: [],
+      pendingInputs: () => ({ items: [], paused: false }),
+      interrupt: () => undefined,
+      respondQuestion: respondSpy,
+      close: async () => undefined,
+    };
+    const stubRuntime = createRuntimeStub({
+      resumeSession: async () => stubSession as never,
+      listSessions: async () => [
+        {
+          id: "sess-user-1",
+          createdAt: "2026-11-20T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          model: { provider: "fake", model: "fake-model" },
+          mtimeMs: Date.now(),
+        },
+      ],
+      close: async () => undefined,
+    });
+    const server = createRpcServer({
+      nocturneVersion: "test",
+      createRuntime: async () => ({ runtime: stubRuntime }),
+    });
+    const [localCT, localST] = createMemoryTransportPair();
+    const localServed = server.serve(localST);
+    const localClient = createRpcClient(localCT, { clientName: "desktop", interactive: true });
+    cleanups.push(async () => {
+      localClient.close();
+      await localServed;
+    });
+    await localClient.initialize();
+
+    const [agentCT, agentST] = createMemoryTransportPair();
+    void server.serve(agentST, {
+      origin: "agent",
+      agent: { id: "agent-stub", name: "Stub Agent" },
+    });
+    const agentClient = createRpcClient(agentCT, { clientName: "Stub Agent", interactive: false });
+    cleanups.push(async () => agentClient.close());
+    await agentClient.initialize();
+    await localClient.call("agent.respondPairing", {
+      agentId: "agent-stub",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "default",
+    });
+
+    await agentClient.runtime.resumeSession("sess-user-1");
+    await expect(
+      agentClient.call("session.respondQuestion", {
+        sessionId: "sess-user-1",
+        requestId: "q-1",
+        reply: { answers: [{ selected: ["A"] }] },
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    expect(respondSpy).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@
 
 如果你本机已经安装了 Codex、omp 等支持 ACP（Agent Client Protocol）的编码命令行工具，可以把它们接入 Nocturne：既能由主会话通过 `task` 工具委派独立任务，也能在输入框里用斜杠命令直接跟它对话。
 
-（若要反过来从其他编码工具通过 MCP 操控 Nocturne 桌面端，请见 [MCP](mcp.md) 中的 `nctrn mcp` 说明。）
+（若要反过来从其他编码工具通过 MCP 操控 Nocturne 桌面端，请见 [MCP](mcp.md) 中的 `nctrn mcp` 说明；经 MCP 接入的外部 agent 现可回答它自己创建的会话里的提问。）
 
 ## 添加与测试外部 Agent
 

@@ -16,6 +16,7 @@ import type {
   AgentPipeStatus,
   AgentProcessInfo,
   AgentScope,
+  AgentSelfInfo,
   AgentStatus,
   RpcServerNotifications,
 } from "../../shared/methods.js";
@@ -58,6 +59,7 @@ export const AGENT_RUN_METHODS = [
   "runtime.renameSession",
   "session.submit",
   "session.enqueueInput",
+  "session.respondQuestion",
   "session.interrupt",
   "session.abort",
 ] as const;
@@ -106,6 +108,8 @@ export interface AgentConnectionContext {
   name: string;
   processInfo?: AgentProcessInfo | undefined;
   readonly close: () => void;
+  /** 服务端向该 agent 自身连接推送范围/权限上限更新 */
+  notifySelf?: ((info: AgentSelfInfo) => void) | undefined;
 }
 
 interface PendingPairingInternal extends AgentPairingRequest {
@@ -483,6 +487,7 @@ export class AgentHost {
         this.agents.push(entry);
       }
       await this.persist();
+      this.notifyAgentSelf(entry);
     }
     this.emitStatus();
     return this.describe();
@@ -513,6 +518,7 @@ export class AgentHost {
       target.maxPermissionPreset = normalized;
     }
     await this.persist();
+    this.notifyAgentSelf(target);
     this.emitStatus();
     return this.describe();
   }
@@ -589,6 +595,23 @@ export class AgentHost {
   private async persist(): Promise<void> {
     if (this.home !== undefined) {
       await saveAgents(this.home, this.agents);
+    }
+  }
+
+  private notifyAgentSelf(agent: StoredAgentDevice): void {
+    const info: AgentSelfInfo = {
+      id: agent.id,
+      scope: agent.scope,
+      maxPermissionPreset: agent.maxPermissionPreset,
+    };
+    for (const conn of this.connections.values()) {
+      if (conn.agentId === agent.id) {
+        try {
+          conn.notifySelf?.(info);
+        } catch {
+          // 单个连接通知失败不影响其他连接
+        }
+      }
     }
   }
 

@@ -1,9 +1,10 @@
-import type { RuntimeEvent, SessionView } from "@nocturne/core/protocol";
+import type { QuestionAnswer, RuntimeEvent, SessionView } from "@nocturne/core/protocol";
 import { connectChannel } from "@nocturne/remote";
 import {
   createRpcClient,
   RpcError,
   trackSessionView,
+  type AgentSelfInfo,
   type LineTransport,
   type RpcClient,
   type RpcSession,
@@ -52,6 +53,7 @@ export interface McpBridgeOptions {
 
 interface TrackedBridgeSession {
   readonly sessionId: string;
+  readonly clientId: string | undefined;
   readonly rpcSession: RpcSession;
   tracker: SessionViewTracker;
   readonly listeners: Set<(view: SessionView, event: RuntimeEvent) => void>;
@@ -72,6 +74,7 @@ export class McpBridge {
   private identityPromise: Promise<BridgeIdentityResult> | undefined;
   private client: RpcClient | undefined;
   private connectingPromise: Promise<RpcClient> | undefined;
+  private agentSelf: AgentSelfInfo | undefined;
   private readonly sessions = new Map<string, TrackedBridgeSession>();
   private closed = false;
 
@@ -153,10 +156,19 @@ export class McpBridge {
         void rpcClient.closed.then(() => {
           if (this.client === rpcClient) {
             this.client = undefined;
+            this.agentSelf = undefined;
             this.clearTrackedSessions();
           }
         });
-        await rpcClient.initialize();
+        rpcClient.onNotification("agent.selfChanged", (info) => {
+          if (this.client === rpcClient || this.connectingPromise === task) {
+            this.agentSelf = info;
+          }
+        });
+        const initRes = await rpcClient.initialize();
+        if (initRes.agent !== undefined) {
+          this.agentSelf = initRes.agent;
+        }
         this.client = rpcClient;
         return rpcClient;
       } catch (error) {
@@ -187,6 +199,7 @@ export class McpBridge {
     this.closed = true;
     const current = this.client;
     this.client = undefined;
+    this.agentSelf = undefined;
     for (const s of this.sessions.values()) {
       s.listeners.clear();
       s.waitWakeups.clear();
@@ -221,6 +234,8 @@ export class McpBridge {
           return await this.handleWait(args, context);
         case "nocturne_interrupt":
           return await this.handleInterrupt(args);
+        case "nocturne_answer":
+          return await this.handleAnswer(args, context);
         default:
           return this.errorResult(`未知的工具：${name}`);
       }
@@ -243,6 +258,7 @@ export class McpBridge {
         error.code === "shutting_down"
       ) {
         this.client = undefined;
+        this.agentSelf = undefined;
         this.clearTrackedSessions();
         return this.errorResult(DESKTOP_NOT_RUNNING_MESSAGE);
       }
@@ -283,12 +299,14 @@ export class McpBridge {
   ): Promise<TrackedBridgeSession> {
     const existing = this.sessions.get(sessionId);
     if (existing !== undefined) return existing;
+    let clientId: string | undefined;
     try {
       const opened = await client.call("session.open", { sessionId });
       if (opened.meta.parent !== undefined) {
         await client.call("session.close", { sessionId }).catch(() => undefined);
         throw new SubagentSessionError(sessionId, opened.meta.parent.sessionId);
       }
+      clientId = opened.meta.client?.id;
     } catch (error) {
       if (error instanceof SubagentSessionError) throw error;
       const parentId = await this.resolveSubagentParentId(client, sessionId);
@@ -298,7 +316,7 @@ export class McpBridge {
       throw error;
     }
     const rpcSession = client.session(sessionId);
-    return this.attachTracker(sessionId, rpcSession);
+    return this.attachTracker(sessionId, rpcSession, clientId);
   }
 
   private async openSessionForRun(
@@ -308,6 +326,7 @@ export class McpBridge {
     const existing = this.sessions.get(sessionId);
     if (existing !== undefined) return existing;
     let rpcSession: RpcSession;
+    let clientId: string | undefined;
     try {
       const resumed = await client.runtime.resumeSession(sessionId);
       if (resumed.opened.meta.parent !== undefined) {
@@ -315,6 +334,7 @@ export class McpBridge {
         throw new SubagentSessionError(sessionId, resumed.opened.meta.parent.sessionId);
       }
       rpcSession = resumed.session;
+      clientId = resumed.opened.meta.client?.id;
     } catch (error) {
       if (error instanceof SubagentSessionError) throw error;
       const parentId = await this.resolveSubagentParentId(client, sessionId);
@@ -323,16 +343,18 @@ export class McpBridge {
       }
       throw error;
     }
-    return this.attachTracker(sessionId, rpcSession);
+    return this.attachTracker(sessionId, rpcSession, clientId);
   }
 
   private async attachTracker(
     sessionId: string,
     rpcSession: RpcSession,
+    clientId: string | undefined,
   ): Promise<TrackedBridgeSession> {
     const listeners = new Set<(view: SessionView, event: RuntimeEvent) => void>();
     const entry: TrackedBridgeSession = {
       sessionId,
+      clientId,
       rpcSession,
       tracker: undefined as unknown as SessionViewTracker,
       listeners,
@@ -494,7 +516,7 @@ export class McpBridge {
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
     } as never);
     const rpcSession = client.session(opened.sessionId);
-    const tracked = await this.attachTracker(opened.sessionId, rpcSession);
+    const tracked = await this.attachTracker(opened.sessionId, rpcSession, opened.meta.client?.id);
 
     let renameError: string | undefined;
     if (title !== undefined) {
@@ -626,6 +648,38 @@ export class McpBridge {
     await this.openSessionForRun(client, sessionId);
     await client.call("session.interrupt", { sessionId });
     return this.textResult(JSON.stringify({ sessionId, aborted: true }, null, 2));
+  }
+
+  private async handleAnswer(
+    args: Record<string, unknown>,
+    context?: McpToolCallContext,
+  ): Promise<McpToolCallResult> {
+    const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
+    if (!sessionId) return this.errorResult("参数错误：需要非空 sessionId");
+    const requestId = typeof args.requestId === "string" ? args.requestId.trim() : "";
+    if (!requestId) return this.errorResult("参数错误：需要非空 requestId");
+
+    const parsedAnswers = parseQuestionAnswers(args.answers);
+    if (!parsedAnswers.ok) {
+      return this.errorResult(parsedAnswers.error);
+    }
+
+    const wait = typeof args.wait === "boolean" ? args.wait : true;
+    const timeoutSeconds =
+      typeof args.timeoutSeconds === "number" && Number.isFinite(args.timeoutSeconds)
+        ? args.timeoutSeconds
+        : 300;
+
+    const client = await this.ensureConnected();
+    const tracked = await this.openSessionForRun(client, sessionId);
+    await tracked.rpcSession.respondQuestion(requestId, { answers: parsedAnswers.answers });
+    tracked.lastReportedQuestionId = requestId;
+
+    if (!wait) {
+      return this.buildSessionWaitResult(tracked, { advanceCursor: false });
+    }
+    await this.waitForTrackedSessions([tracked], timeoutSeconds, context);
+    return this.buildSessionWaitResult(tracked, { advanceCursor: true });
   }
 
   private async triggerEnqueueOnTracked(
@@ -938,7 +992,7 @@ export class McpBridge {
 
     if (status === "waiting_for_answer" && view.pendingQuestion !== undefined) {
       tracked.lastReportedQuestionId = view.pendingQuestion.requestId;
-      payload.message = "Ask the user to respond in Nocturne.";
+      payload.message = this.buildWaitingForAnswerMessage(tracked);
       payload.pendingQuestion = {
         requestId: view.pendingQuestion.requestId,
         questions: view.pendingQuestion.questions,
@@ -959,6 +1013,19 @@ export class McpBridge {
     return payload;
   }
 
+  private isOwnSession(tracked: TrackedBridgeSession): boolean | undefined {
+    if (this.agentSelf === undefined) return undefined;
+    return tracked.clientId === this.agentSelf.id;
+  }
+
+  private buildWaitingForAnswerMessage(tracked: TrackedBridgeSession): string {
+    const owned = this.isOwnSession(tracked);
+    if (this.agentSelf !== undefined && (this.agentSelf.scope !== "run" || owned === false)) {
+      return "Session is waiting for an answer. Only the agent that created this session can call nocturne_answer; ask the user to respond in Nocturne.";
+    }
+    return "Session is waiting for an answer. Call nocturne_answer with this sessionId and pendingQuestion.requestId to respond, or ask the user to respond in Nocturne.";
+  }
+
   private buildSessionWaitResult(
     tracked: TrackedBridgeSession,
     options?: {
@@ -970,6 +1037,54 @@ export class McpBridge {
     const payload = this.buildSessionWaitPayload(tracked, options);
     return this.textResult(JSON.stringify(payload, null, 2), payload);
   }
+}
+
+function parseQuestionAnswers(
+  raw: unknown,
+): { ok: true; answers: QuestionAnswer[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "参数错误：answers 必须为数组" };
+  }
+  const answers: QuestionAnswer[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const item: unknown = raw[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return { ok: false, error: `参数错误：answers[${i}] 必须为对象` };
+    }
+    const obj = item as Record<string, unknown>;
+    if ("declined" in obj && obj.declined !== undefined) {
+      if (obj.declined !== true) {
+        return { ok: false, error: `参数错误：answers[${i}].declined 仅支持 true` };
+      }
+      if ("selected" in obj || "text" in obj) {
+        return {
+          ok: false,
+          error: `参数错误：answers[${i}] 声明 declined: true 时不可同时提供 selected 或 text`,
+        };
+      }
+      answers.push({ declined: true });
+      continue;
+    }
+    let selected: string[];
+    if (obj.selected === undefined) {
+      selected = [];
+    } else if (
+      Array.isArray(obj.selected) &&
+      obj.selected.every((s): s is string => typeof s === "string")
+    ) {
+      selected = obj.selected;
+    } else {
+      return { ok: false, error: `参数错误：answers[${i}].selected 必须为字符串数组` };
+    }
+    if (obj.text !== undefined && typeof obj.text !== "string") {
+      return { ok: false, error: `参数错误：answers[${i}].text 必须为字符串` };
+    }
+    answers.push({
+      selected,
+      ...(obj.text !== undefined ? { text: obj.text } : {}),
+    });
+  }
+  return { ok: true, answers };
 }
 
 /** 标记一次新的 Turn 启动窗口，返回只属于本次触发的令牌，避免前序 RPC 迟到完成误清状态。 */

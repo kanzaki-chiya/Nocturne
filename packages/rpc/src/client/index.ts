@@ -29,6 +29,7 @@ export type {
   AgentPipeStatus,
   AgentProcessInfo,
   AgentScope,
+  AgentSelfInfo,
   AgentStatus,
   ComputerDescription,
   ComputerDriverState,

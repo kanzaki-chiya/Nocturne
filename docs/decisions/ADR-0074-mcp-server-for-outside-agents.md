@@ -106,3 +106,11 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
 - **白名单与范围**：`runtime.renameSession` 加入 `AGENT_RUN_METHODS`（仅可运行范围可用，只读范围 `AGENT_READONLY_METHODS` 不开放）。
 - **归属校验**：RPC 服务端的 agent 接入层在执行 `runtime.renameSession` 前校验目标会话的 `client.id` 必须等于当前外部 agent 的 id；不匹配（用户或其他外部 agent 创建的会话，或无来源标记）时拒绝执行并返回 `-32004 / agent_not_allowed`，不调用 Core。
 - **新建会话指定标题**：`runtime.createSession` 不新增 `title` 参数；`nocturne_start_session` 增加可选 `title`，桥层在建会话后、提交首条消息前调用 `runtime.renameSession` 设为手动标题（不被自动标题覆盖）。若改名失败，会话照常创建并继续执行，返回中附带 `renameError` 说明原因。
+
+## 修订：2026-11-20 外部 agent 作答
+
+- **回答提问**：`session.respondQuestion` 加入 `AGENT_RUN_METHODS`（只读范围不开放），MCP 桥新增 `nocturne_answer({ sessionId, requestId, answers, wait?, timeoutSeconds? })`。答案结构与 `session.respondQuestion` 一致（每题提供 `selected` 与可选 `text`，或 `{ declined: true }` 放弃作答），作答后可选等待并沿用增量摘要规则。
+- **归属边界（只限自己创建的会话）**：RPC 服务端的 agent 接入层在执行 `session.respondQuestion` 前校验目标会话的 `client.id` 必须等于当前外部 agent 的 id，不匹配时返回 `-32004 / agent_not_allowed`，不调用 Core；`requestId` 过期或不存在按既有 RPC 错误（`unknown_request`）返回。
+- **等待提示与范围同步**：`initialize` 结果在 `origin === "agent"` 且已登记时附带自身 `agent: { id, scope, maxPermissionPreset }`，配对批准与范围变更时向该 agent 连接推送 `agent.selfChanged`。会话停在 `waiting_for_answer` 时，等待返回保留 `pendingQuestion`，提示文本说明可调用 `nocturne_answer` 或请用户在 Nocturne 中处理。
+- **对原第 77 行规则的替代**：原「后果」第 77 行「权限确认与提问仍由用户本人处理；外部 agent 拿不到任何批准能力」中，**提问仅由用户本人处理**的限制对「外部 agent 自己创建的会话」被本修订替代；用户或其他外部 agent 创建的会话中的提问，以及权限确认，仍维持原限制。
+

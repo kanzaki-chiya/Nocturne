@@ -172,6 +172,56 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
       required: ["sessionId"],
     },
   },
+  {
+    name: "nocturne_answer",
+    description:
+      "回答 Nocturne 会话当前挂起的提问（ask_user）。仅限本外部 agent 自己创建的会话；作答后可选等待本轮继续执行完成或进入下一次暂停。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "目标会话 ID（必须由本外部 agent 创建）。",
+        },
+        requestId: {
+          type: "string",
+          description: "待回答提问的 requestId（取自 pendingQuestion.requestId）。",
+        },
+        answers: {
+          type: "array",
+          description:
+            "按提问顺序一一对应的答案数组。每项为 { selected: string[], text?: string }（选中项 label 列表，自由文本题可传 selected: [] 或省略 selected 并附 text），或 { declined: true } 表示放弃回答该题。",
+          items: {
+            type: "object",
+            properties: {
+              selected: {
+                type: "array",
+                items: { type: "string" },
+                description: "该题选中的选项 label 列表（自由文本题可传空数组 [] 或省略）。",
+              },
+              text: {
+                type: "string",
+                description: "可选补充文字或自由文本回答。",
+              },
+              declined: {
+                type: "boolean",
+                description: "设为 true 表示放弃回答该题（不可与 selected / text 同时提供）。",
+              },
+            },
+          },
+        },
+        wait: {
+          type: "boolean",
+          description: "作答后是否等待执行完成或下一次暂停（默认 true）。",
+        },
+        timeoutSeconds: {
+          type: "number",
+          description: "等待超时秒数（默认 300，上限 600）。",
+        },
+      },
+      required: ["sessionId", "requestId", "answers"],
+    },
+  },
 ];
 
 export interface NocturneMcpServerOptions extends McpBridgeOptions {
