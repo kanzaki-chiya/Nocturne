@@ -115,3 +115,88 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
 - **在技能里让模型直接拼 `soffice` 命令**：引号转义、找可执行文件、并发 profile 冲突、输出校验都要靠模型每次做对，三个平台行为不一致。
 - **用 UNO 直接改文档**：能力更强，但脚本要自己写、要在三个平台测，留待后续。
 - **复用 Claude Code 的插件目录，往 `~/.claude/plugins` 里装**：违反「不写别家配置目录」的原则。
+
+## 修订：2026-11-20 四个文档插件、创建与编辑、按需启动
+
+本节取代第 4 节和第 6 节第 2 项，并补充第 2 节的 MCP 服务器规则。
+
+### 依据（2026-11-20 本机实测，LibreOffice 26.8.0.3，Windows 11）
+
+- 以 `--accept=pipe,name=<名称>;urp;` 启动一个常驻的 headless soffice，再用 LibreOffice 自带的 Python（3.13.15）通过 UNO 连接，可以：
+  - 新建两页的演示文稿并写入文字，存为 pptx；用 `GraphicExportFilter` 把每页导出为 PNG，中文显示正常；
+  - 新建表格，写入公式 `=A1*A2`，`calculateAll()` 后得 6，插入第二个工作表，存为 xlsx；
+  - 新建文字文档，用 `replaceAll` 替换文本，存为 docx。
+- 以上三项连续执行共约 1.0 秒（不含 soffice 启动）。
+
+### 1. 四个内置插件
+
+取代原来的单个 office 插件：
+
+| 插件 name | 显示名 | MCP 服务器 id | 技能 |
+|---|---|---|---|
+| `docx` | Word 文档 | `word` | `docx` |
+| `xlsx` | 电子表格 | `sheets` | `xlsx` |
+| `pptx` | 演示文档 | `slides` | `pptx` |
+| `pdf` | PDF | `pdf` | `pdf` |
+
+- 范围：创建、读取、编辑、转换，并能按页导出图片供模型查看效果。
+  - Word、表格、演示通过 UNO 实现编辑；具体工具与参数由实现轮确定，写进 `site-docs/`；
+  - PDF：由其他格式生成 PDF、按页导出图片、提取文本、合并与拆分。
+- 图标自行绘制，不使用其他产品的图标素材。
+- 技能和服务器全部自研，不参考、不改写第三方的文档类技能文本。
+
+### 2. 源码与构建
+
+- 源码放在工作区包 `plugins-src/`（四个插件共用的 LibreOffice 引擎代码也在这里）。
+- `pnpm build` 把每个插件构建成自包含的 `plugins/<name>/`：清单、技能、单文件 `server.mjs`、引擎用到的 Python 脚本。
+  - 运行时不依赖 `node_modules`；
+  - `plugins/` 是构建产物，不入库；
+  - 第 3 节的打包规则照旧复制它。
+- 允许把许可证兼容（MIT、Apache-2.0、BSD）的 npm 依赖打进 `server.mjs`，例如处理 PDF 的库；第三方许可证写进 `THIRD-PARTY-NOTICES.md`。
+
+### 3. LibreOffice 引擎
+
+- 每个 MCP 服务器进程在第一次需要时，才启动自己的 soffice（headless，`--accept` 管道，独立的临时 `-env:UserInstallation`）和一个 UNO 辅助进程（LibreOffice 的 Python 运行引擎脚本，与服务器之间用 stdio 交换 JSON）。
+- 闲置 5 分钟后，两者都退出；下次调用再启动。服务器进程退出时，两者一并结束，临时目录删除。
+- 同一服务器进程内的调用串行。
+- 找 Python：
+  - Windows `<LibreOffice>\program\python.exe`；
+  - macOS `/Applications/LibreOffice.app/Contents/Resources/python`；
+  - Linux 用系统 `python3`，要求能 `import uno`。
+- 错误：
+  - 找不到 LibreOffice 时返回 `libreoffice_not_found`；
+  - 找到了但 UNO 不可用（例如 Linux 没装 `python3-uno`）时返回 `libreoffice_uno_unavailable`；
+  - 只用命令行转换就能完成的工具，在 UNO 不可用时照常工作。
+- 第 4 节原有的要求仍然有效：输出文件存在才算成功、单次调用超时 120 秒并结束进程树、不连到用户正在使用的 LibreOffice。
+
+### 4. 插件 MCP 服务器按需启动（补充第 2 节）
+
+适用于所有插件带来的 MCP 服务器；配置文件里的 MCP 服务器行为不变。
+
+- **工具缓存**：服务器第一次启动、取得 `tools/list` 后，缓存到 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/`。
+  - 缓存键：插件 id、服务器 id，加上内置插件的版本或已安装插件的指纹；
+  - 缓存内容：服务器信息与工具列表（名称、说明、参数 schema、annotations）。
+- **会话打开**：
+  - 缓存命中：直接用缓存的工具定义注册工具，不启动进程；
+  - 缓存未命中或已失效：照常启动服务器取工具列表并写缓存，本会话里不再退出。
+- **第一次调用**：启动服务器，完成 initialize 与 `tools/list`，再执行这次调用。
+  - 实际工具列表与缓存不同时，更新缓存，新工具集在下一个 MCP 边界生效（[ADR-0086](ADR-0086-mcp-steer-boundary.md)）；
+  - 这次要调用的工具已不存在时，返回错误 `mcp_tool_missing`。
+- **生命周期**：启动后随会话关闭而结束。崩溃与重启规则同普通 stdio 服务器。
+- **状态**：会话的 MCP 状态里增加「未启动」，区别于「已连接」和「失败」。
+- **结果**：不用文档的会话不会多出任何进程；工具定义与提示词缓存前缀和启动后一致。
+
+### 5. 分期（取代第 6 节第 2 项，其余顺延）
+
+1. Core 与打包（第 6 节第 1 项），另加本修订第 4 节的按需启动。
+2. 四个文档插件：`plugins-src/`、构建、引擎、技能与测试。
+3. 插件详情页：大图标、各节计数、版本与来源、「立即试用」（新开会话并调用该插件的技能）；本地目录安装与卸载。
+4. 查看器：桌面端侧边面板显示文档，加上对应的查看器技能。
+5. 插件定义子代理（例如视觉验收），届时修订第 2 节「明确不做」。
+
+### 对「后果」的修订
+
+- 默认开启的代价，由「每个会话多一个 Node 进程」改为：
+  - 不用文档的会话，不增加进程；
+  - 工具列表多出四个插件的工具，技能目录多 4 条；
+  - 用到某个插件时，多一个 Node 进程、一个 soffice、一个 Python 辅助进程，闲置 5 分钟后 soffice 和 Python 退出。
