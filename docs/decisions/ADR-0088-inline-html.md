@@ -125,3 +125,21 @@
 ### 3. 回复正文不复述页面
 
 成功时的 `modelContent` 改为「内嵌页面「<标题>」已显示给用户（<文件>，<字节数> B）。回复中不要复述页面里的数据、结论或说明。」，工具说明中的对应句改为「回复正文不要复述页面里的数据、结论或说明」。
+
+## 第三版（2026-11-19）：下载为图片
+
+- **交互入口**：全屏查看右上角的下载按钮点击后弹出下拉菜单（`Menu`），提供「下载为 HTML」（行为与第一版完全一致）与「下载为图片」两项；Esc 先关闭菜单并归还焦点至下载按钮。导出图片期间下载按钮禁用，失败时沿用原有做法将简短错误「导出失败」写入下载按钮 `title`。
+- **隔离通信协议**（不放宽 CSP、不增设 iframe `sandbox` 权限、不加载任何外部脚本）：
+  - 父 → 子：`{ type: "nocturne:inline-html:capture", id, requestId }`；空壳页仅响应 `event.source === window.parent` 且 `id` 与当前实例匹配、非空字符串 `requestId` 的消息，不修改实时页面状态与滚动位置。
+  - 子 → 父：`{ type: "nocturne:inline-html:captured", id, requestId, png: ArrayBuffer }`（成功时以 `png` 作为 transferable 传回），失败时返回 `{ type: "nocturne:inline-html:captured", id, requestId, error: string }`。
+- **沙箱内光栅化**（`apps/desktop/public-web/sandbox.html` 与同步的 `apps/relay/public/sandbox.html`）：
+  - 按完整文档滚动尺寸（`Math.max(documentElement.scrollWidth, body.scrollWidth, documentElement.clientWidth)` 与对应高度）构建 DOM → SVG `<foreignObject>` → `<canvas>` → PNG 管线，截取脚本运行后的当前 DOM 与表单值状态。
+  - 收集所有样式表（含 `adoptedStyleSheets` 与 `<style>` 内的 `data:` `@font-face` 字体），将视口单位换算为像素并在克隆文档中禁用动画与过渡（避免关键帧回到首帧），同时对克隆节点内联计算样式；页面内 `<canvas>` 先经 `toDataURL("image/png")` 替换为 `<img>`；`<img>`、SVG `<image>` 与 CSS 中的 `blob:` 图片经离屏 `<canvas>` 转为 `data:` URL（不触发 `fetch`，满足 `connect-src 'none'`）；背景取 `body` 计算背景色，透明时回退至 `:root` / 主题变量 `--bg`。
+- **比例与尺寸上限**：默认导出比例 `2×`；受 Chromium 2D `<canvas>` 限制，单边上限取 `16384 px`、面积上限取 `67,108,864 px²`（`8192 × 8192`），超限时等比下调比例并向下取整，确保超长页面（如高度 > `20000 px`）可完整导出。
+- **宿主校验与保存**（`apps/desktop/src/InlinePage.tsx`）：仅接受 `event.source === iframe.contentWindow`、`id` 匹配且 `requestId` 等于当前挂起请求的回应；校验 `png` 为 `ArrayBuffer`、字节数 ≤ `16 MiB`（`INLINE_PAGE_CAPTURE_MAX_BYTES`，与安卓 `save_file` 上限对齐）且开头匹配 8 字节 PNG 魔数；超时时间 `15000 ms`（`INLINE_PAGE_CAPTURE_TIMEOUT_MS`）。校验通过后经 `triggerBytesDownload` 保存，文件名将原 `.html`/`.htm` 后缀替换为 `.png`（无对应后缀则追加 `.png`），MIME 为 `image/png`。
+- **已知限制（Windows WebView2 实测）**：
+  - 未开启 `preserveDrawingBuffer: true` 的 WebGL `<canvas>` 在合成后绘图缓冲被清空，实测 `toDataURL()` 读出为全透明空白（开启 `preserveDrawingBuffer: true` 时可正常导出）；
+  - `backdrop-filter: blur(...)` 在 Windows WebView2（Chromium）的 `<foreignObject>` 实测可产生模糊效果，但在其他渲染引擎或复杂合成层下仍可能退化或失真；
+  - `<video>` 实时画面、嵌套 `<iframe>` 及滚动容器内部未展开的溢出内容不随 `<foreignObject>` 光栅化；
+  - CSS 动画与过渡在克隆快照中会被冻结停用，不保证捕获特定中间帧。
+

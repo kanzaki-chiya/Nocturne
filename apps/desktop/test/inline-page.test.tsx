@@ -14,6 +14,8 @@ import { createAttachmentImageSource } from "../src/attachment-images";
 import { Conversation, type ReadOnlyConversationProps } from "../src/Conversation";
 import { ImageViewerProvider, type ImageViewerControl, type SaveFileFn } from "../src/ImageViewer";
 import {
+  INLINE_PAGE_CAPTURE_MAX_BYTES,
+  INLINE_PAGE_CAPTURE_TIMEOUT_MS,
   INLINE_PAGE_COLLAPSE_HEIGHT,
   INLINE_PAGE_MAX_HEIGHT,
   INLINE_PAGE_MIN_HEIGHT,
@@ -335,11 +337,13 @@ describe("InlinePage 回复内嵌页面", () => {
     expect(collectVisibleTextNodes(dlg1)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "下载为 HTML" }));
     await waitFor(() => {
       expect(saveFile).toHaveBeenCalledTimes(1);
     });
     expect(saveFile.mock.calls[0]?.[0]).toMatchObject({
       filename: "季度统计.html",
+      mimeType: "text/html;charset=utf-8",
     });
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
@@ -368,6 +372,342 @@ describe("InlinePage 回复内嵌页面", () => {
     });
     expect(screen.queryByRole("dialog", { name: "季度统计" })).toBeNull();
     expect(document.activeElement).toBe(fullBtn);
+  });
+
+  it("全屏下载菜单包含 HTML 与图片两项，Esc 先关闭菜单，「下载为 HTML」保持原行为", async () => {
+    const view = createSessionView();
+    view.entries = [
+      makeToolEntry({
+        files: [makeFile({ label: "月报.html", inlineTitle: "月报" })],
+      }),
+    ];
+    const saveFile = vi.fn<SaveFileFn>(async () => undefined);
+    const props = makeConversationProps(view);
+    render(
+      <ImageViewerProvider saveFile={saveFile}>
+        <Conversation {...props} />
+      </ImageViewerProvider>,
+    );
+
+    const fullBtn = await waitFor(() => screen.getByRole("button", { name: "全屏" }));
+    fireEvent.click(fullBtn);
+
+    const downloadBtn = screen.getByRole("button", { name: "下载" });
+    fireEvent.click(downloadBtn);
+
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((el) => el.textContent?.trim())).toEqual(["下载为 HTML", "下载为图片"]);
+
+    // Esc 仅关闭菜单，不关闭全屏遮罩，焦点回到下载按钮
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "月报" })).toBeDefined();
+    expect(document.activeElement).toBe(downloadBtn);
+
+    // 再次打开并选择「下载为 HTML」
+    fireEvent.click(downloadBtn);
+    fireEvent.click(screen.getByRole("menuitem", { name: "下载为 HTML" }));
+    await waitFor(() => {
+      expect(saveFile).toHaveBeenCalledTimes(1);
+    });
+    expect(saveFile.mock.calls[0]?.[0]).toMatchObject({
+      filename: "月报.html",
+      mimeType: "text/html;charset=utf-8",
+    });
+    expect(new TextDecoder("utf-8").decode(saveFile.mock.calls[0]?.[0].bytes)).toContain(
+      "<h1>Chart</h1>",
+    );
+  });
+
+  it("「下载为图片」发出 capture 消息、导出期间禁用按钮，并在合法 PNG 回应后保存为 .png", async () => {
+    const view = createSessionView();
+    view.entries = [
+      makeToolEntry({
+        files: [makeFile({ label: "季度统计.html", inlineTitle: "季度统计" })],
+      }),
+    ];
+    const saveFile = vi.fn<SaveFileFn>(async () => undefined);
+    render(
+      <ImageViewerProvider saveFile={saveFile}>
+        <Conversation {...makeConversationProps(view)} />
+      </ImageViewerProvider>,
+    );
+
+    const fullBtn = await waitFor(() => screen.getByRole("button", { name: "全屏" }));
+    fireEvent.click(fullBtn);
+
+    const dlg = screen.getByRole("dialog", { name: "季度统计" });
+    const fullIframe = dlg.querySelector<HTMLIFrameElement>("iframe");
+    if (!fullIframe?.contentWindow) throw new Error("missing fullscreen iframe");
+    const postSpy = vi.spyOn(fullIframe.contentWindow, "postMessage");
+
+    const downloadBtn = screen.getByRole("button", { name: "下载" });
+    fireEvent.click(downloadBtn);
+    fireEvent.click(screen.getByRole("menuitem", { name: "下载为图片" }));
+
+    expect(downloadBtn.hasAttribute("disabled")).toBe(true);
+    const captureCall = postSpy.mock.calls.find(
+      (args) =>
+        typeof args[0] === "object" &&
+        args[0] !== null &&
+        (args[0] as { type?: string }).type === "nocturne:inline-html:capture",
+    );
+    expect(captureCall).toBeDefined();
+    const { id, requestId } = captureCall?.[0] as { id: string; requestId: string };
+    expect(id).toMatch(/^full:/);
+    expect(requestId).toBeTruthy();
+
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: fullIframe.contentWindow,
+          data: {
+            type: "nocturne:inline-html:captured",
+            id,
+            requestId,
+            png: pngBytes.buffer.slice(0),
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(saveFile).toHaveBeenCalledTimes(1);
+    });
+    expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+    expect(downloadBtn.getAttribute("title")).toBe("下载");
+    expect(saveFile.mock.calls[0]?.[0]).toMatchObject({
+      filename: "季度统计.png",
+      mimeType: "image/png",
+    });
+    expect(Array.from(saveFile.mock.calls[0]?.[0].bytes ?? [])).toEqual(Array.from(pngBytes));
+  });
+
+  it("「下载为图片」忽略来源不对、id 不对与 requestId 不对的回应，不保存并提示失败", async () => {
+    const view = createSessionView();
+    view.entries = [
+      makeToolEntry({
+        files: [makeFile({ label: "校验.html", inlineTitle: "校验" })],
+      }),
+    ];
+    const saveFile = vi.fn<SaveFileFn>(async () => undefined);
+    render(
+      <ImageViewerProvider saveFile={saveFile}>
+        <Conversation {...makeConversationProps(view)} />
+      </ImageViewerProvider>,
+    );
+
+    const fullBtn = await waitFor(() => screen.getByRole("button", { name: "全屏" }));
+    fireEvent.click(fullBtn);
+
+    const dlg = screen.getByRole("dialog", { name: "校验" });
+    const fullIframe = dlg.querySelector<HTMLIFrameElement>("iframe");
+    if (!fullIframe?.contentWindow) throw new Error("missing fullscreen iframe");
+    const postSpy = vi.spyOn(fullIframe.contentWindow, "postMessage");
+    const downloadBtn = screen.getByRole("button", { name: "下载" });
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8]);
+
+    vi.useFakeTimers();
+    try {
+      const startCapture = () => {
+        postSpy.mockClear();
+        fireEvent.click(downloadBtn);
+        fireEvent.click(screen.getByRole("menuitem", { name: "下载为图片" }));
+        const call = postSpy.mock.calls.find(
+          (args) =>
+            typeof args[0] === "object" &&
+            args[0] !== null &&
+            (args[0] as { type?: string }).type === "nocturne:inline-html:capture",
+        );
+        if (!call) throw new Error("missing capture postMessage");
+        return call[0] as { id: string; requestId: string };
+      };
+
+      // 1. 来源不对
+      const cap1 = startCapture();
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: window,
+            data: {
+              type: "nocturne:inline-html:captured",
+              id: cap1.id,
+              requestId: cap1.requestId,
+              png: pngBytes.buffer.slice(0),
+            },
+          }),
+        );
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(INLINE_PAGE_CAPTURE_TIMEOUT_MS);
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+      expect(downloadBtn.getAttribute("title")).toBe("导出失败");
+
+      // 2. id 不对
+      const cap2 = startCapture();
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: fullIframe.contentWindow,
+            data: {
+              type: "nocturne:inline-html:captured",
+              id: "full:wrong-id",
+              requestId: cap2.requestId,
+              png: pngBytes.buffer.slice(0),
+            },
+          }),
+        );
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(INLINE_PAGE_CAPTURE_TIMEOUT_MS);
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+      expect(downloadBtn.getAttribute("title")).toBe("导出失败");
+
+      // 3. requestId 不对
+      const cap3 = startCapture();
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: fullIframe.contentWindow,
+            data: {
+              type: "nocturne:inline-html:captured",
+              id: cap3.id,
+              requestId: "stale-request-id",
+              png: pngBytes.buffer.slice(0),
+            },
+          }),
+        );
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(INLINE_PAGE_CAPTURE_TIMEOUT_MS);
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+      expect(downloadBtn.getAttribute("title")).toBe("导出失败");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("「下载为图片」拒绝非 PNG、超过 16 MiB 与超时，均不保存且提示失败", async () => {
+    const view = createSessionView();
+    view.entries = [
+      makeToolEntry({
+        files: [makeFile({ label: "边界.html", inlineTitle: "边界" })],
+      }),
+    ];
+    const saveFile = vi.fn<SaveFileFn>(async () => undefined);
+    render(
+      <ImageViewerProvider saveFile={saveFile}>
+        <Conversation {...makeConversationProps(view)} />
+      </ImageViewerProvider>,
+    );
+
+    const fullBtn = await waitFor(() => screen.getByRole("button", { name: "全屏" }));
+    fireEvent.click(fullBtn);
+
+    const dlg = screen.getByRole("dialog", { name: "边界" });
+    const fullIframe = dlg.querySelector<HTMLIFrameElement>("iframe");
+    if (!fullIframe?.contentWindow) throw new Error("missing fullscreen iframe");
+    const postSpy = vi.spyOn(fullIframe.contentWindow, "postMessage");
+    const downloadBtn = screen.getByRole("button", { name: "下载" });
+
+    vi.useFakeTimers();
+    try {
+      const startCapture = () => {
+        postSpy.mockClear();
+        fireEvent.click(downloadBtn);
+        fireEvent.click(screen.getByRole("menuitem", { name: "下载为图片" }));
+        const call = postSpy.mock.calls.find(
+          (args) =>
+            typeof args[0] === "object" &&
+            args[0] !== null &&
+            (args[0] as { type?: string }).type === "nocturne:inline-html:capture",
+        );
+        if (!call) throw new Error("missing capture postMessage");
+        return call[0] as { id: string; requestId: string };
+      };
+
+      // 4. 非 PNG 文件头
+      const cap1 = startCapture();
+      const notPng = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: fullIframe.contentWindow,
+            data: {
+              type: "nocturne:inline-html:captured",
+              id: cap1.id,
+              requestId: cap1.requestId,
+              png: notPng.buffer,
+            },
+          }),
+        );
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+      expect(downloadBtn.getAttribute("title")).toBe("导出失败");
+
+      // 5. 超过 16 MiB
+      const cap2 = startCapture();
+      const oversized = new Uint8Array(INLINE_PAGE_CAPTURE_MAX_BYTES + 1);
+      oversized.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: fullIframe.contentWindow,
+            data: {
+              type: "nocturne:inline-html:captured",
+              id: cap2.id,
+              requestId: cap2.requestId,
+              png: oversized.buffer,
+            },
+          }),
+        );
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+      expect(downloadBtn.getAttribute("title")).toBe("导出失败");
+
+      // 6. 超时（以及超时后迟到的合法回应不再保存）
+      const cap3 = startCapture();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(INLINE_PAGE_CAPTURE_TIMEOUT_MS);
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(downloadBtn.hasAttribute("disabled")).toBe(false);
+      expect(downloadBtn.getAttribute("title")).toBe("导出失败");
+
+      const latePng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: fullIframe.contentWindow,
+            data: {
+              type: "nocturne:inline-html:captured",
+              id: cap3.id,
+              requestId: cap3.requestId,
+              png: latePng.buffer,
+            },
+          }),
+        );
+      });
+      expect(saveFile).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("附件读取失败或远程被拒时退回普通文件附件卡片", async () => {

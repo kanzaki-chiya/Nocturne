@@ -186,6 +186,48 @@
   color: var(--a-text);
 }
 
+/* 手机网页与安卓不加载 composer.css，内嵌页下载菜单自带基础弹层样式 */
+.menu.inline-page-dl-menu {
+  position: fixed;
+  z-index: 110;
+  min-width: var(--w-field-sm);
+  padding: var(--space-1);
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-popover);
+}
+
+.menu.inline-page-dl-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--item-h);
+  font: inherit;
+  font-size: var(--fs-2);
+  color: var(--a-secondary);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-2);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.menu.inline-page-dl-menu .menu-item:focus {
+  background: var(--a-sel);
+  color: var(--a-text);
+  outline: none;
+}
+
+.menu.inline-page-dl-menu .menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
 @media (max-width: 600px) {
   .inline-page-tools {
     opacity: 1;

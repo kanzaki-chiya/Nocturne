@@ -197,6 +197,482 @@
           }
         }
 
+        const DEFAULT_CAPTURE_SCALE = 2;
+        const MAX_CANVAS_DIM = 16384;
+        const MAX_CANVAS_AREA = 67108864;
+        const SVG_NS = "http://www.w3.org/2000/svg";
+        const HTML_COMPUTED_PROPS = [
+          "color",
+          "background-color",
+          "background-image",
+          "background-position",
+          "background-size",
+          "background-repeat",
+          "background-clip",
+          "background-origin",
+          "font-family",
+          "font-size",
+          "font-weight",
+          "font-style",
+          "font-variant",
+          "line-height",
+          "letter-spacing",
+          "text-align",
+          "text-decoration-line",
+          "text-decoration-color",
+          "text-decoration-style",
+          "text-transform",
+          "white-space",
+          "word-break",
+          "overflow-wrap",
+          "opacity",
+          "visibility",
+          "border-top-color",
+          "border-right-color",
+          "border-bottom-color",
+          "border-left-color",
+          "box-shadow",
+          "color-scheme",
+        ];
+        const SVG_COMPUTED_PROPS = [
+          "fill",
+          "fill-opacity",
+          "fill-rule",
+          "stroke",
+          "stroke-width",
+          "stroke-opacity",
+          "stroke-dasharray",
+          "stroke-dashoffset",
+          "stroke-linecap",
+          "stroke-linejoin",
+          "opacity",
+          "visibility",
+          "color",
+          "font-family",
+          "font-size",
+          "font-weight",
+          "font-style",
+          "text-anchor",
+          "dominant-baseline",
+          "letter-spacing",
+        ];
+        const CANVAS_REPLACE_PROPS = [
+          "display",
+          "box-sizing",
+          "margin-top",
+          "margin-right",
+          "margin-bottom",
+          "margin-left",
+          "padding-top",
+          "padding-right",
+          "padding-bottom",
+          "padding-left",
+          "border-top-width",
+          "border-right-width",
+          "border-bottom-width",
+          "border-left-width",
+          "border-top-style",
+          "border-right-style",
+          "border-bottom-style",
+          "border-left-style",
+          "border-top-color",
+          "border-right-color",
+          "border-bottom-color",
+          "border-left-color",
+          "border-top-left-radius",
+          "border-top-right-radius",
+          "border-bottom-right-radius",
+          "border-bottom-left-radius",
+          "background-color",
+          "box-shadow",
+          "opacity",
+          "visibility",
+          "position",
+          "top",
+          "right",
+          "bottom",
+          "left",
+          "transform",
+          "transform-origin",
+          "vertical-align",
+          "flex-grow",
+          "flex-shrink",
+          "flex-basis",
+          "align-self",
+          "justify-self",
+          "grid-column-start",
+          "grid-column-end",
+          "grid-row-start",
+          "grid-row-end",
+          "max-width",
+          "max-height",
+          "min-width",
+          "min-height",
+        ];
+
+        function isTransparentColor(color) {
+          if (!color || color === "transparent") return true;
+          const m = color.match(/^rgba?\(([^)]+)\)$/i);
+          if (!m) return false;
+          const parts = m[1].split(/[,/]/).map((s) => s.trim());
+          return parts.length >= 4 && parseFloat(parts[3]) === 0;
+        }
+
+        function resolveCaptureBackground() {
+          const bodyBg = document.body ? getComputedStyle(document.body).backgroundColor : "";
+          if (!isTransparentColor(bodyBg)) return bodyBg;
+          const rootStyle = document.documentElement
+            ? getComputedStyle(document.documentElement)
+            : null;
+          if (rootStyle) {
+            const rootBg = rootStyle.backgroundColor;
+            if (!isTransparentColor(rootBg)) return rootBg;
+            const varBg = rootStyle.getPropertyValue("--bg").trim();
+            if (varBg && !isTransparentColor(varBg)) return varBg;
+          }
+          return "transparent";
+        }
+
+        function loadImage(src) {
+          return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("image load failed"));
+            img.src = src;
+          });
+        }
+
+        function imageElementToDataUrl(imgEl) {
+          const w = imgEl.naturalWidth || imgEl.width;
+          const h = imgEl.naturalHeight || imgEl.height;
+          if (!w || !h) return null;
+          const c = document.createElement("canvas");
+          c.width = w;
+          c.height = h;
+          const ctx = c.getContext("2d");
+          if (!ctx) return null;
+          ctx.drawImage(imgEl, 0, 0, w, h);
+          return c.toDataURL("image/png");
+        }
+
+        async function blobUrlToDataUrl(url, blobCache, existingImg) {
+          if (blobCache.has(url)) return blobCache.get(url);
+          try {
+            let img = existingImg;
+            if (!img || !img.complete || img.naturalWidth === 0) {
+              img = await loadImage(url);
+            }
+            const dataUrl = imageElementToDataUrl(img);
+            if (dataUrl) {
+              blobCache.set(url, dataUrl);
+              return dataUrl;
+            }
+          } catch {
+            // ignore unreadable blob image
+          }
+          return null;
+        }
+
+        async function replaceBlobUrlsInCss(cssText, blobCache) {
+          if (!cssText || !cssText.includes("blob:")) return cssText;
+          const re = /url\(\s*(['"]?)(blob:[^)'"]+)\1\s*\)/gi;
+          const matches = Array.from(cssText.matchAll(re));
+          if (matches.length === 0) return cssText;
+          let out = "";
+          let last = 0;
+          for (const m of matches) {
+            out += cssText.slice(last, m.index);
+            const dataUrl = await blobUrlToDataUrl(m[2], blobCache);
+            out += dataUrl ? `url("${dataUrl}")` : m[0];
+            last = m.index + m[0].length;
+          }
+          out += cssText.slice(last);
+          return out;
+        }
+
+        function resolveViewportUnits(cssText, vw, vh) {
+          return cssText.replace(/(-?\d*\.?\d+)(?:d|s|l)?v(h|w)\b/gi, (_, num, axis) => {
+            const base = axis.toLowerCase() === "h" ? vh : vw;
+            return `${((parseFloat(num) * base) / 100).toFixed(2)}px`;
+          });
+        }
+
+        async function collectStylesheets(vw, vh, blobCache) {
+          const parts = [];
+          const sheets = Array.from(document.styleSheets || []);
+          if (Array.isArray(document.adoptedStyleSheets)) {
+            for (const s of document.adoptedStyleSheets) sheets.push(s);
+          }
+          for (const sheet of sheets) {
+            try {
+              const rules = sheet.cssRules;
+              if (rules) {
+                for (const rule of Array.from(rules)) {
+                  parts.push(rule.cssText);
+                }
+              }
+            } catch {
+              if (sheet.ownerNode && typeof sheet.ownerNode.textContent === "string") {
+                parts.push(sheet.ownerNode.textContent);
+              }
+            }
+          }
+          let text = resolveViewportUnits(parts.join("\n"), vw, vh);
+          text = await replaceBlobUrlsInCss(text, blobCache);
+          text +=
+            "\n*, *::before, *::after { animation: none !important; transition: none !important; }";
+          return text;
+        }
+
+        function bytesToBase64(bytes) {
+          let bin = "";
+          const chunk = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+          }
+          return btoa(bin);
+        }
+
+        async function syncClonedSubtree(origEl, cloneEl, blobCache) {
+          const tag = origEl.tagName.toUpperCase();
+          if (
+            tag === "HEAD" ||
+            tag === "SCRIPT" ||
+            tag === "NOSCRIPT" ||
+            tag === "STYLE" ||
+            tag === "LINK" ||
+            tag === "META" ||
+            tag === "TITLE"
+          ) {
+            return;
+          }
+
+          if (tag === "CANVAS" && origEl.namespaceURI !== SVG_NS) {
+            const img = document.createElement("img");
+            for (const attr of Array.from(origEl.attributes)) {
+              const name = attr.name.toLowerCase();
+              if (name !== "width" && name !== "height" && name !== "style") {
+                img.setAttribute(attr.name, attr.value);
+              }
+            }
+            const cs = getComputedStyle(origEl);
+            const rect = origEl.getBoundingClientRect();
+            const decls = [];
+            for (const prop of CANVAS_REPLACE_PROPS) {
+              const val = cs.getPropertyValue(prop);
+              if (val) decls.push(`${prop}:${val}`);
+            }
+            const cssW = cs.width && cs.width !== "auto" ? cs.width : `${rect.width}px`;
+            const cssH = cs.height && cs.height !== "auto" ? cs.height : `${rect.height}px`;
+            decls.push(`width:${cssW}`);
+            decls.push(`height:${cssH}`);
+            img.setAttribute("style", decls.join(";"));
+            try {
+              const dataUrl = origEl.toDataURL("image/png");
+              if (dataUrl && dataUrl !== "data:,") {
+                img.setAttribute("src", dataUrl);
+              }
+            } catch {
+              // tainted or unreadable canvas; leave empty placeholder
+            }
+            cloneEl.replaceWith(img);
+            return;
+          }
+
+          if (tag === "IMG" && origEl.namespaceURI !== SVG_NS) {
+            const src = origEl.currentSrc || origEl.getAttribute("src") || "";
+            if (src.startsWith("blob:")) {
+              const dataUrl = await blobUrlToDataUrl(src, blobCache, origEl);
+              if (dataUrl) {
+                cloneEl.setAttribute("src", dataUrl);
+                cloneEl.removeAttribute("srcset");
+              }
+            }
+          } else if (tag === "IMAGE" && origEl.namespaceURI === SVG_NS) {
+            const href =
+              origEl.getAttribute("href") ||
+              origEl.getAttributeNS("http://www.w3.org/1999/xlink", "href") ||
+              "";
+            if (href.startsWith("blob:")) {
+              const dataUrl = await blobUrlToDataUrl(href, blobCache);
+              if (dataUrl) {
+                cloneEl.setAttribute("href", dataUrl);
+                if (cloneEl.hasAttributeNS("http://www.w3.org/1999/xlink", "href")) {
+                  cloneEl.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", dataUrl);
+                }
+              }
+            }
+          } else if (tag === "INPUT" && origEl.namespaceURI !== SVG_NS) {
+            const type = (origEl.type || "").toLowerCase();
+            if (type === "checkbox" || type === "radio") {
+              if (origEl.checked) cloneEl.setAttribute("checked", "");
+              else cloneEl.removeAttribute("checked");
+            } else {
+              cloneEl.setAttribute("value", origEl.value);
+            }
+          } else if (tag === "TEXTAREA" && origEl.namespaceURI !== SVG_NS) {
+            cloneEl.textContent = origEl.value;
+          } else if (tag === "OPTION" && origEl.namespaceURI !== SVG_NS) {
+            if (origEl.selected) cloneEl.setAttribute("selected", "");
+            else cloneEl.removeAttribute("selected");
+          }
+
+          const isSvg = origEl.namespaceURI === SVG_NS;
+          const cs = getComputedStyle(origEl);
+          const props = isSvg ? SVG_COMPUTED_PROPS : HTML_COMPUTED_PROPS;
+          const decls = [];
+          const existing = origEl.getAttribute("style");
+          if (existing) decls.push(existing);
+          for (const prop of props) {
+            let val = cs.getPropertyValue(prop);
+            if (!val) continue;
+            if (prop === "background-image" && val.includes("blob:")) {
+              val = await replaceBlobUrlsInCss(val, blobCache);
+            }
+            decls.push(`${prop}:${val}`);
+          }
+          if (isSvg && tag === "SVG" && origEl.parentElement?.namespaceURI !== SVG_NS) {
+            const rect = origEl.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              decls.push(`width:${rect.width}px`);
+              decls.push(`height:${rect.height}px`);
+            }
+          }
+          if (decls.length > 0) {
+            cloneEl.setAttribute("style", decls.join(";"));
+          }
+
+          const origChildren = origEl.children;
+          const cloneChildren = cloneEl.children;
+          const len = Math.min(origChildren.length, cloneChildren.length);
+          for (let i = 0; i < len; i += 1) {
+            await syncClonedSubtree(origChildren[i], cloneChildren[i], blobCache);
+          }
+        }
+
+        async function captureDocument() {
+          if (document.fonts && document.fonts.ready) {
+            try {
+              await document.fonts.ready;
+            } catch {
+              // ignore font loading errors
+            }
+          }
+
+          const docEl = document.documentElement;
+          const body = document.body;
+          if (!docEl || !body) throw new Error("document not ready");
+
+          const width = Math.ceil(
+            Math.max(docEl.scrollWidth, body.scrollWidth, docEl.clientWidth, 1),
+          );
+          const height = Math.ceil(
+            Math.max(docEl.scrollHeight, body.scrollHeight, docEl.clientHeight, 1),
+          );
+
+          let scale = DEFAULT_CAPTURE_SCALE;
+          if (width * scale > MAX_CANVAS_DIM) {
+            scale = Math.min(scale, MAX_CANVAS_DIM / width);
+          }
+          if (height * scale > MAX_CANVAS_DIM) {
+            scale = Math.min(scale, MAX_CANVAS_DIM / height);
+          }
+          if (width * height * scale * scale > MAX_CANVAS_AREA) {
+            scale = Math.min(scale, Math.sqrt(MAX_CANVAS_AREA / (width * height)));
+          }
+          const canvasWidth = Math.max(1, Math.floor(width * scale));
+          const canvasHeight = Math.max(1, Math.floor(height * scale));
+
+          const bgColor = resolveCaptureBackground();
+          const blobCache = new Map();
+          const collectedCss = await collectStylesheets(
+            docEl.clientWidth || width,
+            docEl.clientHeight || window.innerHeight || height,
+            blobCache,
+          );
+
+          const cloneRoot = docEl.cloneNode(true);
+          await syncClonedSubtree(docEl, cloneRoot, blobCache);
+
+          for (const el of Array.from(
+            cloneRoot.querySelectorAll("script, noscript, style, link"),
+          )) {
+            el.remove();
+          }
+
+          let cloneHead = cloneRoot.querySelector("head");
+          if (!cloneHead) {
+            cloneHead = document.createElement("head");
+            cloneRoot.prepend(cloneHead);
+          }
+          const styleEl = document.createElement("style");
+          styleEl.id = "__nct_capture_styles__";
+          styleEl.textContent = collectedCss;
+          cloneHead.appendChild(styleEl);
+
+          cloneRoot.style.width = `${width}px`;
+          cloneRoot.style.height = `${height}px`;
+          cloneRoot.style.minHeight = `${height}px`;
+          cloneRoot.style.margin = "0";
+          cloneRoot.style.overflow = "hidden";
+          if (bgColor !== "transparent") {
+            cloneRoot.style.backgroundColor = bgColor;
+          }
+          const cloneBody = cloneRoot.querySelector("body");
+          if (cloneBody) {
+            cloneBody.style.minHeight = `${height}px`;
+          }
+
+          const serialized = new XMLSerializer().serializeToString(cloneRoot);
+          const svg =
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasWidth}" height="${canvasHeight}" viewBox="0 0 ${width} ${height}">` +
+            `<foreignObject x="0" y="0" width="${width}" height="${height}">${serialized}</foreignObject>` +
+            `</svg>`;
+          const svgBytes = new TextEncoder().encode(svg);
+          const svgUrl = `data:image/svg+xml;base64,${bytesToBase64(svgBytes)}`;
+          const img = await loadImage(svgUrl);
+
+          const canvas = document.createElement("canvas");
+          canvas.width = canvasWidth;
+          canvas.height = canvasHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("2d context unavailable");
+          if (bgColor !== "transparent") {
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+          }
+          ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+
+          const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob(
+              (result) => (result ? resolve(result) : reject(new Error("png encode failed"))),
+              "image/png",
+            );
+          });
+          return blob.arrayBuffer();
+        }
+
+        async function handleCapture(requestId) {
+          try {
+            const png = await captureDocument();
+            window.parent.postMessage(
+              { type: "nocturne:inline-html:captured", id: instanceId, requestId, png },
+              "*",
+              [png],
+            );
+          } catch (err) {
+            window.parent.postMessage(
+              {
+                type: "nocturne:inline-html:captured",
+                id: instanceId,
+                requestId,
+                error: err instanceof Error ? err.message : String(err),
+              },
+              "*",
+            );
+          }
+        }
+
         window.addEventListener("message", (event) => {
           if (event.source !== window.parent) return;
           const data = event.data;
@@ -206,6 +682,16 @@
           } else if (data.type === "nocturne:inline-html:theme") {
             applyTheme(data.theme, data.colorScheme, data.fontSize);
             scheduleMeasure();
+          } else if (data.type === "nocturne:inline-html:capture") {
+            if (
+              !rendered ||
+              data.id !== instanceId ||
+              typeof data.requestId !== "string" ||
+              !data.requestId
+            ) {
+              return;
+            }
+            void handleCapture(data.requestId);
           }
         });
 

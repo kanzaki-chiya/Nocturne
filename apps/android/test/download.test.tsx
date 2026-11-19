@@ -394,6 +394,13 @@ describe("Android native file & image download", () => {
     if (!downloadBtn) throw new Error("missing fullscreen download button");
     await act(async () => {
       downloadBtn.click();
+    });
+    const htmlItem = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((el) => el.textContent?.trim() === "下载为 HTML");
+    if (!htmlItem) throw new Error("missing HTML menu item");
+    await act(async () => {
+      htmlItem.click();
       await new Promise((done) => setTimeout(done, 30));
     });
 
@@ -405,6 +412,55 @@ describe("Android native file & image download", () => {
     expect(payload.name).toBe("报表.html");
     expect(payload.mimeType).toContain("text/html");
     expect(Array.from(decodeBase64(payload.data))).toEqual(Array.from(htmlBytes));
+
+    // 下载为图片：通过 save_file 以 image/png 保存
+    const fullIframe = document.body.querySelector<HTMLIFrameElement>(
+      ".inline-page-fullscreen iframe",
+    );
+    if (!fullIframe?.contentWindow) throw new Error("missing fullscreen iframe");
+    const postSpy = vi.spyOn(fullIframe.contentWindow, "postMessage");
+    await act(async () => {
+      downloadBtn.click();
+    });
+    const imgItem = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((el) => el.textContent?.trim() === "下载为图片");
+    if (!imgItem) throw new Error("missing image menu item");
+    await act(async () => {
+      imgItem.click();
+    });
+    const captureCall = postSpy.mock.calls.find(
+      (args) =>
+        typeof args[0] === "object" &&
+        args[0] !== null &&
+        (args[0] as { type?: string }).type === "nocturne:inline-html:capture",
+    );
+    if (!captureCall) throw new Error("missing capture postMessage");
+    const { id, requestId } = captureCall[0] as { id: string; requestId: string };
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 4, 5, 6]);
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: fullIframe.contentWindow,
+          data: {
+            type: "nocturne:inline-html:captured",
+            id,
+            requestId,
+            png: pngBytes.buffer.slice(0),
+          },
+        }),
+      );
+      await new Promise((done) => setTimeout(done, 30));
+    });
+
+    const saveCallsAfter = mock.invoke.mock.calls.filter(
+      ([cmd]) => cmd === "plugin:save-file|save_file",
+    );
+    expect(saveCallsAfter).toHaveLength(2);
+    const pngPayload = saveCallsAfter[1]?.[1] as { name: string; mimeType: string; data: string };
+    expect(pngPayload.name).toBe("报表.png");
+    expect(pngPayload.mimeType).toBe("image/png");
+    expect(Array.from(decodeBase64(pngPayload.data))).toEqual(Array.from(pngBytes));
   });
 
   it("keeps web bundle free of Android save-file native invoke", async () => {

@@ -16,13 +16,18 @@ import {
   useFullscreenDialogTrap,
   useSaveFile,
 } from "./ImageViewer";
+import { Menu, MenuItem } from "./Menu";
 import { ICON_LG, ICON_MD, Icon, IconButton } from "./ui";
 import "./inline-page.css";
 
 export const INLINE_PAGE_COLLAPSE_HEIGHT = 420;
 export const INLINE_PAGE_MIN_HEIGHT = 48;
 export const INLINE_PAGE_MAX_HEIGHT = 4096;
+export const INLINE_PAGE_CAPTURE_MAX_BYTES = 16 * 1024 * 1024;
+export const INLINE_PAGE_CAPTURE_TIMEOUT_MS = 15_000;
 const INLINE_PAGE_INITIAL_HEIGHT = 160;
+const IMAGE_EXPORT_FAILED = "导出失败";
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
 /** 注入给内嵌页面的稳定主题变量及对应的宿主 CSS 自定义属性名（ADR-0088） */
 export const INLINE_THEME_SOURCES: readonly (readonly [target: string, source: string])[] = [
@@ -109,19 +114,67 @@ function isEscapeMessage(data: unknown, expectedId: string): boolean {
   return rec.id === undefined || rec.id === expectedId;
 }
 
+interface CapturedMessage {
+  type: "nocturne:inline-html:captured";
+  id: string;
+  requestId: string;
+  png?: unknown;
+  error?: unknown;
+}
+
+function isCapturedMessage(data: unknown, expectedId: string): data is CapturedMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  if (rec.type !== "nocturne:inline-html:captured") return false;
+  if (rec.id !== expectedId) return false;
+  return typeof rec.requestId === "string" && rec.requestId !== "";
+}
+
+function toArrayBufferBytes(value: unknown): Uint8Array | null {
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    Object.prototype.toString.call(value) === "[object ArrayBuffer]"
+  ) {
+    return new Uint8Array(value as ArrayBuffer);
+  }
+  return null;
+}
+
+function hasPngSignature(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < PNG_SIGNATURE.length) return false;
+  for (let i = 0; i < PNG_SIGNATURE.length; i += 1) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) return false;
+  }
+  return true;
+}
+
+export function toPngFilename(filename: string): string {
+  if (/\.html?$/i.test(filename)) {
+    return filename.replace(/\.html?$/i, ".png");
+  }
+  return `${filename}.png`;
+}
+
 function useSandboxedHtmlFrame(opts: {
   html: string | undefined;
   instanceId: string;
   fullscreen: boolean;
   onResize?: ((height: number) => void) | undefined;
   onEscape?: (() => void) | undefined;
+  onCaptured?: ((message: CapturedMessage) => void) | undefined;
 }) {
-  const { html, instanceId, fullscreen, onResize, onEscape } = opts;
+  const { html, instanceId, fullscreen, onResize, onEscape, onCaptured } = opts;
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onResizeRef = useRef(onResize);
   onResizeRef.current = onResize;
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+  const onCapturedRef = useRef(onCaptured);
+  onCapturedRef.current = onCaptured;
   const htmlRef = useRef(html);
   htmlRef.current = html;
 
@@ -170,6 +223,10 @@ function useSandboxedHtmlFrame(opts: {
       }
       if (isEscapeMessage(event.data, instanceId)) {
         onEscapeRef.current?.();
+        return;
+      }
+      if (isCapturedMessage(event.data, instanceId)) {
+        onCapturedRef.current?.(event.data);
         return;
       }
       if (isValidResizeMessage(event.data, instanceId)) {
@@ -233,21 +290,80 @@ function InlinePageFullscreen({
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  const downloadBtnRef = useRef<HTMLButtonElement | null>(null);
   const saveFile = useSaveFile();
   const [downloadError, setDownloadError] = useState<string>();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const menuOpenRef = useRef(menuOpen);
+  menuOpenRef.current = menuOpen;
+  const pendingCaptureRef = useRef<{ requestId: string; timer: number } | null>(null);
+  const captureSeqRef = useRef(0);
   const instanceId = useId();
+  const fullInstanceId = `full:${instanceId}`;
   const sandboxSrc = resolveSandboxFrameSrc();
 
-  useFullscreenDialogTrap({ rootRef, opener, onClose });
+  useEffect(() => {
+    return () => {
+      if (pendingCaptureRef.current !== null) {
+        window.clearTimeout(pendingCaptureRef.current.timer);
+        pendingCaptureRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleEscape = useCallback(() => {
+    if (menuOpenRef.current) {
+      setMenuOpen(false);
+      downloadBtnRef.current?.focus();
+      return;
+    }
+    onClose();
+  }, [onClose]);
+
+  const handleCaptured = useCallback(
+    (message: CapturedMessage) => {
+      const pending = pendingCaptureRef.current;
+      if (pending?.requestId !== message.requestId) return;
+      window.clearTimeout(pending.timer);
+      pendingCaptureRef.current = null;
+      setCapturing(false);
+      if (typeof message.error === "string") {
+        setDownloadError(IMAGE_EXPORT_FAILED);
+        return;
+      }
+      const pngBytes = toArrayBufferBytes(message.png);
+      if (
+        pngBytes === null ||
+        pngBytes.byteLength > INLINE_PAGE_CAPTURE_MAX_BYTES ||
+        !hasPngSignature(pngBytes)
+      ) {
+        setDownloadError(IMAGE_EXPORT_FAILED);
+        return;
+      }
+      triggerBytesDownload({
+        filename: toPngFilename(filename),
+        mimeType: "image/png",
+        bytes: pngBytes,
+        saveFile,
+        onError: setDownloadError,
+      });
+    },
+    [filename, saveFile],
+  );
+
+  useFullscreenDialogTrap({ rootRef, opener, onClose: handleEscape });
 
   const { iframeRef, handleLoad } = useSandboxedHtmlFrame({
     html,
-    instanceId: `full:${instanceId}`,
+    instanceId: fullInstanceId,
     fullscreen: true,
-    onEscape: onClose,
+    onEscape: handleEscape,
+    onCaptured: handleCaptured,
   });
 
-  const handleDownload = () => {
+  const handleDownloadHtml = () => {
+    setMenuOpen(false);
     setDownloadError(undefined);
     triggerBytesDownload({
       filename,
@@ -256,6 +372,42 @@ function InlinePageFullscreen({
       saveFile,
       onError: setDownloadError,
     });
+  };
+
+  const handleDownloadImage = () => {
+    setMenuOpen(false);
+    if (pendingCaptureRef.current !== null) return;
+    const win = iframeRef.current?.contentWindow;
+    if (!win) {
+      setDownloadError(IMAGE_EXPORT_FAILED);
+      return;
+    }
+    setDownloadError(undefined);
+    setCapturing(true);
+    captureSeqRef.current += 1;
+    const requestId = `${fullInstanceId}:capture:${captureSeqRef.current}`;
+    const timer = window.setTimeout(() => {
+      if (pendingCaptureRef.current?.requestId !== requestId) return;
+      pendingCaptureRef.current = null;
+      setCapturing(false);
+      setDownloadError(IMAGE_EXPORT_FAILED);
+    }, INLINE_PAGE_CAPTURE_TIMEOUT_MS);
+    pendingCaptureRef.current = { requestId, timer };
+    try {
+      win.postMessage(
+        {
+          type: "nocturne:inline-html:capture",
+          id: fullInstanceId,
+          requestId,
+        },
+        "*",
+      );
+    } catch {
+      window.clearTimeout(timer);
+      pendingCaptureRef.current = null;
+      setCapturing(false);
+      setDownloadError(IMAGE_EXPORT_FAILED);
+    }
   };
 
   return (
@@ -283,10 +435,16 @@ function InlinePageFullscreen({
         />
         <div className="inline-page-full-tools">
           <IconButton
+            ref={downloadBtnRef}
             className="inline-page-btn"
             aria-label="下载"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             title={downloadError ?? "下载"}
-            onClick={handleDownload}
+            disabled={capturing}
+            onClick={() => {
+              setMenuOpen((open) => !open);
+            }}
           >
             <Icon name="download_2" size={ICON_LG} />
           </IconButton>
@@ -295,6 +453,21 @@ function InlinePageFullscreen({
           </IconButton>
         </div>
       </div>
+      {menuOpen && (
+        <Menu
+          anchor={downloadBtnRef.current}
+          align="right"
+          placement="below"
+          className="more-menu inline-page-dl-menu"
+          label="下载"
+          onClose={() => {
+            setMenuOpen(false);
+          }}
+        >
+          <MenuItem label="下载为 HTML" onSelect={handleDownloadHtml} />
+          <MenuItem label="下载为图片" onSelect={handleDownloadImage} />
+        </Menu>
+      )}
     </div>
   );
 }
