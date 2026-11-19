@@ -1368,10 +1368,14 @@ class Connection implements HubPeer {
           ...(includeSubagents !== undefined ? { includeSubagents } : {}),
           ...(includeSuiteCoordinators !== undefined ? { includeSuiteCoordinators } : {}),
         });
-        return summaries.map((summary) => ({
-          ...summary,
-          openHere: this.hub.isOpenHere(summary.id),
-        }));
+        return summaries.map((summary) => {
+          const status = this.hub.sessionStatus(summary.id);
+          return {
+            ...summary,
+            openHere: this.hub.isOpenHere(summary.id),
+            ...(status !== undefined ? { status } : {}),
+          };
+        });
       },
       "runtime.searchSessions": async (p) => {
         const query = reqString(p, "query");

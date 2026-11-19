@@ -14,10 +14,15 @@ import {
   type RuntimeSession,
 } from "@nocturne/core";
 
-import type { ComputerDescription, ComputerDriverState } from "../shared/methods.js";
+import type {
+  ComputerDescription,
+  ComputerDriverState,
+  HubSessionStatus,
+} from "../shared/methods.js";
 import type { RpcMessage } from "../shared/jsonrpc.js";
 import { RpcProtocolError } from "./errors.js";
 import { optString, type Params } from "./params.js";
+import { createSessionStatusTracker } from "./session-status.js";
 
 /** createRuntime 的产物：Runtime 加上服务端要对外报告与收尾的信息 */
 export interface RpcRuntimeHandle {
@@ -94,8 +99,10 @@ export class Hub {
   private readonly active = new Map<string, number>();
   private readonly opening = new Map<string, Promise<RuntimeSession>>();
   private readonly closing = new Map<string, Promise<void>>();
-  /** 已登记会话的列表变化监听（首条用户消息、标题），随会话关闭撤销 */
+  /** 已登记会话的列表变化监听（首条用户消息、标题、运行状态），随会话关闭撤销 */
   private readonly watchers = new Map<string, () => void>();
+  /** 本后台已打开会话的活动状态（空闲不在 Map 中） */
+  private readonly sessionStatuses = new Map<string, HubSessionStatus>();
   private sessionsChangedTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribeSchedule: (() => void) | undefined;
   private unsubscribeSessions: (() => void) | undefined;
@@ -187,19 +194,34 @@ export class Hub {
   }
 
   /**
-   * 会话进入后台后监听列表可见的变化：首条用户消息从无到有（列表标题 firstText 出现）
-   * 与 session.titled（生成的标题优先于首句）。其余事件不触发。
+   * 会话进入后台后监听列表可见的变化：首条用户消息从无到有（列表标题 firstText 出现）、
+   * session.titled（生成的标题优先于首句）以及本后台会话的活动状态变化（轮次开始/结束、
+   * 出现或撤销待确认、出现或撤销提问）。其余事件不触发。
    */
   private watch(session: RuntimeSession): void {
     if (this.watchers.has(session.id)) return;
-    let hasUser = session.durableEvents().some((event) => event.type === "message.user");
+    const durable = session.durableEvents();
+    let hasUser = durable.some((event) => event.type === "message.user");
+    const tracker = createSessionStatusTracker(durable);
+    const initial = tracker.status();
+    if (initial !== undefined) this.sessionStatuses.set(session.id, initial);
+    else this.sessionStatuses.delete(session.id);
+
     const unsubscribe = session.subscribe((event) => {
+      let changed = false;
       if (event.type === "message.user" && !hasUser) {
         hasUser = true;
-        this.notifySessionsChanged();
+        changed = true;
       } else if (event.type === "session.titled") {
-        this.notifySessionsChanged();
+        changed = true;
       }
+      if (tracker.apply(event)) {
+        const next = tracker.status();
+        if (next !== undefined) this.sessionStatuses.set(session.id, next);
+        else this.sessionStatuses.delete(session.id);
+        changed = true;
+      }
+      if (changed) this.notifySessionsChanged();
     });
     const unsubscribeIdle = session.onIdle(() => {
       void this.closeUnused(session.id).catch(() => undefined);
@@ -213,6 +235,7 @@ export class Hub {
   private unwatch(sessionId: string): void {
     this.watchers.get(sessionId)?.();
     this.watchers.delete(sessionId);
+    this.sessionStatuses.delete(sessionId);
   }
 
   // ── Runtime ──────────────────────────────────────────────
@@ -352,6 +375,11 @@ export class Hub {
 
   isOpenHere(sessionId: string): boolean {
     return this.sessions.has(sessionId) || this.opening.has(sessionId);
+  }
+
+  sessionStatus(sessionId: string): HubSessionStatus | undefined {
+    if (!this.sessions.has(sessionId)) return undefined;
+    return this.sessionStatuses.get(sessionId);
   }
 
   addSession(session: RuntimeSession): void {
@@ -495,6 +523,7 @@ export class Hub {
     this.sessions.clear();
     for (const unsubscribe of this.watchers.values()) unsubscribe();
     this.watchers.clear();
+    this.sessionStatuses.clear();
     this.unsubscribeSchedule?.();
     this.unsubscribeSchedule = undefined;
     this.unsubscribeSessions?.();

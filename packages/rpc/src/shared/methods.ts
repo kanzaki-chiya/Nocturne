@@ -321,6 +321,9 @@ export interface ComputerDescription {
   rules: PermissionRule[];
 }
 
+/** 本后台已打开会话的活动状态（空闲或非本后台打开时缺省） */
+export type HubSessionStatus = "running" | "pending";
+
 export interface RpcMethods {
   "computer.describe": { params: Record<string, never>; result: ComputerDescription };
   "computer.setEnabled": { params: { enabled: boolean }; result: ComputerDescription };
@@ -476,7 +479,7 @@ export interface RpcMethods {
       includeSuiteCoordinators?: boolean;
       includeArchived?: boolean;
     };
-    result: (SessionSummary & { openHere?: boolean })[];
+    result: (SessionSummary & { openHere?: boolean; status?: HubSessionStatus })[];
   };
   "runtime.searchSessions": {
     params: { query: string; searchId?: string; includeArchived?: boolean };
@@ -957,7 +960,8 @@ export interface RpcServerNotifications {
   "runtime.settingsChanged": Record<string, never>;
   /**
    * 会话列表变了，请重拉 `runtime.listSessions`：本后台创建、分叉、重命名、归档或恢复会话成功，
-   * 发送消息自动恢复归档、首条用户消息或标题落盘之后推送，短时间内的多次变化合并为一条。
+   * 发送消息自动恢复归档、首条用户消息或标题落盘、以及本后台已打开会话的状态变化（轮次开始/结束、
+   * 出现或撤销待确认、出现或撤销提问）之后推送，短时间内的多次变化合并为一条。
    * 不带任何会话内容；别的进程改的列表不在此列
    */
   "runtime.sessionsChanged": Record<string, never>;

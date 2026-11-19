@@ -33,6 +33,7 @@ export type {
   ComputerDescription,
   ComputerDriverState,
   ContextSummary,
+  HubSessionStatus,
   RemoteStatus,
   InitializeParams,
   InitializeResult,

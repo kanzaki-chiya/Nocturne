@@ -93,7 +93,7 @@ describe("runtime.sessionsChanged", () => {
     await h.served;
   });
 
-  it("首条用户消息落盘后推送，后续消息不再推送", async () => {
+  it("首条用户消息落盘后推送并更新列表标题，后续轮次也会因状态变化推送", async () => {
     const h = await connectMany({ scripts: [textScript("一"), textScript("二")] });
     const remote = await h.add();
     const { session } = await h.client.runtime.createSession({ model: MODEL });
@@ -107,8 +107,9 @@ describe("runtime.sessionsChanged", () => {
     await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
     const afterFirst = phone.count();
     await session.submit({ text: "第二句" });
+    await until(() => phone.count() === afterFirst + 1, "后续轮次状态变化的通知");
     await vi.advanceTimersByTimeAsync(WINDOW_MS + 100);
-    expect(phone.count()).toBe(afterFirst);
+    expect(phone.count()).toBe(afterFirst + 1);
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);
   });
