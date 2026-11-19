@@ -19,6 +19,7 @@ import {
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
 
 import type { CliArgs } from "./args.js";
+import { resolveBuiltinPluginsDir } from "./builtin-plugins.js";
 import { collectConfig, makeConfigLoader } from "./config.js";
 
 export interface RpcIo {
@@ -114,6 +115,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
         },
       },
       createRuntime: async ({ interactive }) => {
+        const builtinPluginsDir = resolveBuiltinPluginsDir();
         const runtime = await createRuntime({
           cwd,
           config: runtimeConfig,
@@ -124,6 +126,7 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           permissions: { autoApproveAsk: false },
           mcp: createMcpConnector({ runtimeServers }),
           externalAgents: createAcpConnector(platform),
+          ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
           debug: {
             enabled: debugEnabled,
             file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,

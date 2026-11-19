@@ -20,6 +20,7 @@ import {
 import { createMcpConnector } from "@nocturne/mcp";
 
 import { HELP_TEXT, parseArgs, resolveUiMode, UsageError, type CliArgs } from "./args.js";
+import { resolveBuiltinPluginsDir } from "./builtin-plugins.js";
 import {
   collectConfig,
   configProblemsReport,
@@ -176,6 +177,7 @@ async function main(): Promise<number> {
       return 2;
     }
     if (!args.cli) {
+      const builtinPluginsDir = resolveBuiltinPluginsDir();
       const runtime = await createRuntime({
         cwd,
         config: collected.config.runtime,
@@ -183,6 +185,7 @@ async function main(): Promise<number> {
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
         externalAgents: createAcpConnector(platform),
+        ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
         debug: {
           enabled: debugEnabled,
           file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
@@ -294,6 +297,7 @@ async function main(): Promise<number> {
           return 1;
         }
       }
+      const builtinPluginsDir = resolveBuiltinPluginsDir();
       const runtime = await createRuntime({
         cwd,
         config: runtimeConfig,
@@ -301,6 +305,7 @@ async function main(): Promise<number> {
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
         externalAgents: createAcpConnector(platform),
+        ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
         debug: {
           enabled: debugEnabled,
           file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,
@@ -364,6 +369,7 @@ async function main(): Promise<number> {
     process.stderr.write(`! ${w}\n`);
   }
 
+  const builtinPluginsDir = resolveBuiltinPluginsDir();
   const runtime = await createRuntime({
     cwd,
     config: runtimeConfig,
@@ -373,6 +379,7 @@ async function main(): Promise<number> {
     permissions: { autoApproveAsk: args.yes },
     mcp: createMcpConnector(),
     externalAgents: createAcpConnector(platform),
+    ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
     debug: {
       enabled: debugEnabled,
       file: args.debugFile ?? process.env.NOCTURNE_DEBUG_FILE,

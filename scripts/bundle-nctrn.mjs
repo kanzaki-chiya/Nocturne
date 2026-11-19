@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { build } from "tsdown";
 import { copyImageWasmToDir } from "./lib/image-wasm.mjs";
+import { copyBuiltinPluginsDir } from "./lib/plugins.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliDir = join(root, "apps", "cli");
@@ -27,9 +28,16 @@ const targetDir =
     ? resolve(process.argv[outDirIndex + 1] ?? "")
     : join(root, "apps", "desktop", "src-tauri", "resources");
 if (outDirIndex >= 0 && process.argv[outDirIndex + 1] === undefined) {
-  console.error("用法: node scripts/bundle-nctrn.mjs [--out-dir <目录>]");
+  console.error("用法: node scripts/bundle-nctrn.mjs [--out-dir <目录>] [--plugins-dir <目录>]");
   process.exit(1);
 }
+const pluginsDirIndex = process.argv.indexOf("--plugins-dir");
+if (pluginsDirIndex >= 0 && process.argv[pluginsDirIndex + 1] === undefined) {
+  console.error("用法: node scripts/bundle-nctrn.mjs [--out-dir <目录>] [--plugins-dir <目录>]");
+  process.exit(1);
+}
+const pluginsSrcDir =
+  pluginsDirIndex >= 0 ? resolve(process.argv[pluginsDirIndex + 1]) : join(root, "plugins");
 const outFile = join(targetDir, "nctrn.mjs");
 const workerOutFile = join(targetDir, "image-worker.mjs");
 
@@ -108,6 +116,8 @@ try {
   writeFileSync(outFile, withShebang);
   writeFileSync(workerOutFile, readFileSync(join(outDir, "image-worker.mjs")));
   copyImageWasmToDir(join(coreDir, "package.json"), join(targetDir, "wasm"));
+  // Tauri bundle.resources 要求 resources/plugins/ 存在，源目录缺失时建空目录
+  copyBuiltinPluginsDir(pluginsSrcDir, join(targetDir, "plugins"), { ensureDestDir: true });
   const mib = (statSync(outFile).size / 1024 / 1024).toFixed(2);
   console.log(`nctrn.mjs: ${outFile} (${mib} MiB)`);
 } finally {

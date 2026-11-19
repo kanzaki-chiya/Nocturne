@@ -71,6 +71,31 @@ describe("pack-npm", () => {
     expect(files.get("package/nctrn.mjs")).toContain("fake");
   });
 
+  it("bundle 旁存在 plugins/ 时一起打进 npm 包，且排除 test/ 与 node_modules/", () => {
+    const bundle = join(dir, "nctrn.mjs");
+    writeFileSync(bundle, "#!/usr/bin/env node\nconsole.log('fake');\n");
+    writeFileSync(join(dir, "image-worker.mjs"), "console.log('worker');\n");
+    mkdirSync(join(dir, "wasm"), { recursive: true });
+    for (const [wasmFile] of IMAGE_WASM_FILES) {
+      writeFileSync(join(dir, "wasm", wasmFile), "wasm");
+    }
+    const demoDir = join(dir, "plugins", "demo");
+    mkdirSync(join(demoDir, ".nocturne-plugin"), { recursive: true });
+    mkdirSync(join(demoDir, "test"), { recursive: true });
+    mkdirSync(join(demoDir, "node_modules", "dep"), { recursive: true });
+    writeFileSync(join(demoDir, ".nocturne-plugin", "plugin.json"), '{"name":"demo"}');
+    writeFileSync(join(demoDir, "server.mjs"), "export {};");
+    writeFileSync(join(demoDir, "test", "a.test.mjs"), "test");
+    writeFileSync(join(demoDir, "node_modules", "dep", "index.js"), "dep");
+
+    const tgz = packNpm({ bundleFile: bundle, out: join(dir, "out") });
+    const files = untar(tgz);
+    expect(files.has("package/plugins/demo/.nocturne-plugin/plugin.json")).toBe(true);
+    expect(files.has("package/plugins/demo/server.mjs")).toBe(true);
+    expect(files.has("package/plugins/demo/test/a.test.mjs")).toBe(false);
+    expect(files.has("package/plugins/demo/node_modules/dep/index.js")).toBe(false);
+  });
+
   it("bundle 文件不存在时报错", () => {
     expect(() => packNpm({ bundleFile: join(dir, "none.mjs"), out: join(dir, "o") })).toThrow(
       "找不到单文件",

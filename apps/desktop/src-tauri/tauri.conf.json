@@ -42,7 +42,8 @@
       "resources/wasm/squoosh_resize_bg.wasm": "wasm/squoosh_resize_bg.wasm",
       "resources/node/node.exe": "node/node.exe",
       "resources/node/LICENSE": "node/LICENSE",
-      "resources/computer/": "computer/"
+      "resources/computer/": "computer/",
+      "resources/plugins/": "plugins/"
     },
     "windows": {
       "nsis": {

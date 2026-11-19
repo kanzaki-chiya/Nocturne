@@ -14,6 +14,7 @@
     "nctrn.mjs",
     "image-worker.mjs",
     "wasm/",
+    "plugins/",
     "THIRD-PARTY-NOTICES.md"
   ],
   "repository": {
