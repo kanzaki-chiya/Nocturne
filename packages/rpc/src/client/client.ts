@@ -21,8 +21,11 @@ import type {
 import {
   createSessionView,
   reduceSessionView,
+  type SessionReadSnapshot,
+  type SessionSnapshotObserver,
   type SessionView,
   type RuntimeEvent,
+  type DurableEvent,
   type SubagentObservation,
   type SubagentObserver,
   type SubagentSummary,
@@ -412,6 +415,16 @@ export interface RpcRuntime {
     observer: SubagentObserver,
   ): Promise<SubagentObservation>;
   /**
+   * 顶层会话只读快照观察（ADR-0099、rpc.md 4.2）：不打开会话、不取锁、不修复日志；
+   * 持久事件经 `observer.onEvent` 交付完毕后返回高水位与工作区元数据。
+   */
+  observeSession(
+    input: { sessionId: string; afterSeq?: number | undefined },
+    observer: SessionSnapshotObserver,
+  ): Promise<SessionReadSnapshot>;
+  /** 只读读取顶层会话持久事件登记过的附件，不打开会话、不取锁；字节已解码 */
+  readSessionAttachment(input: { sessionId: string; file: string }): Promise<ReadAttachmentResult>;
+  /**
    * workspaceRoot（ADR-0051）：下列方法可带 `workspaceRoot` 指定按哪个工作区
    * 合并配置层；缺省为后台启动目录。
    */
@@ -668,6 +681,10 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   /** 子会话只读观察表：subscriptionId → 观察；pair 表用于「同一 child 再观察替换旧观察」 */
   const subagentWatches = new Map<string, SubagentWatch>();
   const subagentPairs = new Map<string, string>();
+  const sessionObserves = new Map<
+    string,
+    { sessionId: string; onEvent: (event: DurableEvent) => void }
+  >();
   let nextSubscriptionId = 1;
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => {
@@ -758,6 +775,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     isClosed = true;
     subagentWatches.clear();
     subagentPairs.clear();
+    sessionObserves.clear();
     for (const entry of pending.values()) entry.reject(connectionClosed());
     pending.clear();
     resolveClosed();
@@ -816,6 +834,20 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     dropSubagentWatch(watch);
     watch.observer.onEnd(params.end);
   });
+  {
+    const listeners =
+      notificationListeners.get("session.observeEvent") ?? new Set<(params: never) => void>();
+    notificationListeners.set("session.observeEvent", listeners);
+    listeners.add((params: RpcServerNotifications["session.observeEvent"]) => {
+      const watch = sessionObserves.get(params.observeId);
+      if (watch?.sessionId !== params.sessionId) return;
+      try {
+        watch.onEvent(params.event as DurableEvent);
+      } catch {
+        // 观察者异常不影响连接
+      }
+    });
+  }
 
   const notify = (method: string, params: unknown): void => {
     if (isClosed) return;
@@ -1170,6 +1202,28 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
             void call("subagent.unsubscribe", { subscriptionId }).catch(() => undefined);
         },
       };
+    },
+    async observeSession(input, observer) {
+      const observeId = `observe-${nextSubscriptionId++}`;
+      sessionObserves.set(observeId, {
+        sessionId: input.sessionId,
+        onEvent: (event) => {
+          observer.onEvent(event);
+        },
+      });
+      try {
+        return await call("session.observe", {
+          sessionId: input.sessionId,
+          observeId,
+          ...(input.afterSeq !== undefined ? { afterSeq: input.afterSeq } : {}),
+        });
+      } finally {
+        sessionObserves.delete(observeId);
+      }
+    },
+    async readSessionAttachment(input) {
+      const result = await call("session.observeAttachment", input);
+      return { data: decodeBase64(result.data), mimeType: result.mimeType, bytes: result.bytes };
     },
     listModels: (input) => call("runtime.listModels", input ?? {}),
     defaultModel: async (input) => (await call("runtime.defaultModel", input ?? {})) ?? undefined,

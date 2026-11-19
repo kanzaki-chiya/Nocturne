@@ -242,6 +242,8 @@ export const REMOTE_METHODS = [
   "suites.update",
   "suites.archive",
   "suites.open",
+  "session.observe",
+  "session.observeAttachment",
   "session.subscribe",
   "session.unsubscribe",
   "session.open",
@@ -476,6 +478,8 @@ class Connection implements HubPeer {
   /** 子会话只读观察表：subscriptionId → 观察；pair 表用于「同一 child 再订阅替换旧观察」 */
   private readonly subagentWatches = new Map<string, SubagentWatch>();
   private readonly subagentPairs = new Map<string, string>();
+  /** 顶层会话只读快照观察（进行中）：observeId → AbortController（断线/关闭时立即取消） */
+  private readonly sessionObserves = new Map<string, AbortController>();
   private readonly opening = new Set<Promise<unknown>>();
   private readonly openingIds = new Set<string>();
   private readonly abort = new AbortController();
@@ -515,6 +519,7 @@ class Connection implements HubPeer {
         this.sessionSearch?.abort();
         // 子会话观察不等在途请求：断线时立即撤监听、取消尚在建立的回放
         this.cancelSubagentWatches();
+        this.cancelSessionObserves();
         if (this.origin === "local") {
           if (this.cleanupPromise === undefined) this.hub.stopping = true;
           this.remote?.stop();
@@ -857,6 +862,7 @@ class Connection implements HubPeer {
       this.draftLogins.clear();
       // 子会话观察：撤监听、取消回放、丢缓冲；不触碰子会话的运行、锁与并发槽
       this.cancelSubagentWatches();
+      this.cancelSessionObserves();
       for (const entry of this.sessions.values()) {
         entry.generation++;
         entry.unsubscribe?.();
@@ -1133,6 +1139,61 @@ class Connection implements HubPeer {
   private cancelSubagentWatches(match?: (watch: SubagentWatch) => boolean): void {
     for (const watch of [...this.subagentWatches.values()]) {
       if (match === undefined || match(watch)) this.cancelSubagentWatch(watch);
+    }
+  }
+
+  private cancelSessionObserves(): void {
+    for (const controller of this.sessionObserves.values()) {
+      controller.abort();
+    }
+    this.sessionObserves.clear();
+  }
+
+  private async observeSession(p: Params): Promise<RpcMethods["session.observe"]["result"]> {
+    const sessionId = reqString(p, "sessionId");
+    const observeId = reqString(p, "observeId");
+    if (observeId === "" || observeId.length > 128) {
+      throw new InvalidParamsError("observeId 必须是 1 到 128 个字符的非空字符串");
+    }
+    const afterSeq = optInt(p, "afterSeq");
+    if (afterSeq !== undefined && (!Number.isSafeInteger(afterSeq) || afterSeq < 0)) {
+      throw new InvalidParamsError("afterSeq 必须是非负整数");
+    }
+    if (this.sessionObserves.has(observeId)) {
+      throw new InvalidParamsError("observeId 已在使用");
+    }
+    if (this.shuttingDown || this.closed) {
+      throw new RpcProtocolError("shutting_down", "服务端正在关闭");
+    }
+    const controller = new AbortController();
+    this.sessionObserves.set(observeId, controller);
+    try {
+      return await this.runtime().observeSession(
+        {
+          sessionId,
+          ...(afterSeq !== undefined ? { afterSeq } : {}),
+          signal: controller.signal,
+        },
+        {
+          onEvent: (event) => {
+            if (controller.signal.aborted || this.closed) return;
+            this.send({
+              jsonrpc: "2.0",
+              method: "session.observeEvent",
+              params: { observeId, sessionId, event },
+            });
+          },
+        },
+      );
+    } catch (error) {
+      if (error instanceof SessionError && error.code === "invalid_after_seq") {
+        throw new InvalidParamsError(error.message);
+      }
+      throw error;
+    } finally {
+      if (this.sessionObserves.get(observeId) === controller) {
+        this.sessionObserves.delete(observeId);
+      }
     }
   }
 
@@ -2376,6 +2437,24 @@ class Connection implements HubPeer {
         const watch = this.subagentWatches.get(reqString(p, "subscriptionId"));
         if (watch !== undefined) this.cancelSubagentWatch(watch);
         return null;
+      },
+      "session.observe": (p) => this.observeSession(p),
+      "session.observeAttachment": async (p) => {
+        const attachment = await this.runtime().readSessionAttachment({
+          sessionId: reqString(p, "sessionId"),
+          file: reqString(p, "file"),
+        });
+        if (
+          this.origin === "remote" &&
+          attachment.bytes > remoteAttachmentLimit(this.remoteLimit)
+        ) {
+          throw new RpcProtocolError("attachment_too_large", "附件过大，请在电脑上查看");
+        }
+        return {
+          data: Buffer.from(attachment.data).toString("base64"),
+          mimeType: attachment.mimeType,
+          bytes: attachment.bytes,
+        };
       },
       "session.subscribe": async (p) => {
         const entry = this.session(p);

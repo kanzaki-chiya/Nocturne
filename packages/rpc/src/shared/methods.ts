@@ -77,6 +77,7 @@ import type {
   SessionRewoundPayload,
   SessionState,
   SessionSummary,
+  SessionReadSnapshot,
   SettingItem,
   SubagentReadEnd,
   SubagentObservationInfo,
@@ -781,6 +782,24 @@ export interface RpcMethods {
     result: SubagentObservationInfo;
   };
   "subagent.unsubscribe": { params: { subscriptionId: string }; result: null };
+  /**
+   * 顶层会话只读快照观察（ADR-0099、rpc.md 4.2）：不打开会话、不取锁、不修复日志；
+   * 持久事件经 `session.observeEvent` 通知推送完成后返回高水位与工作区元数据。
+   */
+  "session.observe": {
+    params: {
+      sessionId: string;
+      /** 客户端生成、本连接内不复用的观察标识 */
+      observeId: string;
+      afterSeq?: number;
+    };
+    result: SessionReadSnapshot;
+  };
+  /** 只读读取顶层会话持久事件登记过的附件，不打开会话、不取锁 */
+  "session.observeAttachment": {
+    params: { sessionId: string; file: string };
+    result: { data: string; mimeType: string; bytes: number };
+  };
   "session.subscribe": {
     params: SessionParams & { afterSeq?: number };
     /** 回放与实时衔接已完成时返回；`lastSeq` 是已推送的最后一个持久事件的 seq */
@@ -939,6 +958,12 @@ export interface RpcServerNotifications {
   "agent.pairingRequested": AgentPairingRequest;
   "agent.statusChanged": AgentStatus;
   event: { sessionId: string; event: RuntimeEvent };
+  /** 顶层会话只读快照事件，原样 DurableEvent；与实时 `event` 通道隔离（ADR-0099） */
+  "session.observeEvent": {
+    observeId: string;
+    sessionId: string;
+    event: RuntimeEvent;
+  };
   /** 子会话事件，原样 RuntimeEvent（sessionId 等于 childSessionId）；不混入父 `event` 通道 */
   "subagent.event": {
     subscriptionId: string;
@@ -1115,6 +1140,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "subagent.readAttachment": true,
   "subagent.subscribe": true,
   "subagent.unsubscribe": true,
+  "session.observe": true,
+  "session.observeAttachment": true,
   "session.subscribe": true,
   "session.unsubscribe": true,
   "session.readAttachment": true,
