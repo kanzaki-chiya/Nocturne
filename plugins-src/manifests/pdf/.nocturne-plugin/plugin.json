@@ -1,0 +1,16 @@
+{
+  "name": "pdf",
+  "version": "0.55.0",
+  "description": "生成、提取文本、按页预览、合并与拆分 PDF 文档。",
+  "skills": "./skills",
+  "mcpServers": {
+    "pdf": {
+      "command": "${NOCTURNE_NODE}",
+      "args": ["${PLUGIN_ROOT}/server.mjs"]
+    }
+  },
+  "interface": {
+    "displayName": "PDF",
+    "composerIcon": "./icon.svg"
+  }
+}

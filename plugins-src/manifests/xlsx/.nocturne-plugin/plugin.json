@@ -1,0 +1,16 @@
+{
+  "name": "xlsx",
+  "version": "0.55.0",
+  "description": "创建、读取、编辑、重算、转换与按页预览电子表格。",
+  "skills": "./skills",
+  "mcpServers": {
+    "sheets": {
+      "command": "${NOCTURNE_NODE}",
+      "args": ["${PLUGIN_ROOT}/server.mjs"]
+    }
+  },
+  "interface": {
+    "displayName": "电子表格",
+    "composerIcon": "./icon.svg"
+  }
+}

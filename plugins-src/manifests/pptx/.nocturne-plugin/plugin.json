@@ -1,0 +1,16 @@
+{
+  "name": "pptx",
+  "version": "0.55.0",
+  "description": "创建、读取、编辑、转换与按页预览演示文稿。",
+  "skills": "./skills",
+  "mcpServers": {
+    "slides": {
+      "command": "${NOCTURNE_NODE}",
+      "args": ["${PLUGIN_ROOT}/server.mjs"]
+    }
+  },
+  "interface": {
+    "displayName": "演示文档",
+    "composerIcon": "./icon.svg"
+  }
+}
