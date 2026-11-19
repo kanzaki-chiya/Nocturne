@@ -95,6 +95,13 @@ async function setup() {
   await seeded.close();
 
   const [clientEnd, serverEnd] = createMemoryTransportPair();
+  const inFlight = new Set<unknown>();
+  const serverSend = serverEnd.send.bind(serverEnd);
+  serverEnd.send = (line: string) => {
+    const parsed = JSON.parse(line) as { id?: unknown; method?: unknown };
+    if (parsed.id !== undefined && parsed.method === undefined) inFlight.delete(parsed.id);
+    serverSend(line);
+  };
   const server = createRpcServer({
     nocturneVersion: "test",
     createRuntime: async () => ({ runtime, sessionsDir }),
@@ -103,12 +110,14 @@ async function setup() {
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   const send = clientEnd.send.bind(clientEnd);
   clientEnd.send = (line: string) => {
-    const parsed = JSON.parse(line) as { method?: unknown; params?: unknown };
-    if (typeof parsed.method === "string")
+    const parsed = JSON.parse(line) as { id?: unknown; method?: unknown; params?: unknown };
+    if (typeof parsed.method === "string") {
+      if (parsed.id !== undefined) inFlight.add(parsed.id);
       calls.push({
         method: parsed.method,
         params: (parsed.params ?? {}) as Record<string, unknown>,
       });
+    }
     send(line);
   };
   const client = createRpcClient(clientEnd, { clientName: "test" });
@@ -146,7 +155,7 @@ async function setup() {
     return item as HTMLButtonElement;
   });
   fireEvent.click(row);
-  return { container, calls };
+  return { container, calls, pendingRpc: () => inFlight.size };
 }
 
 async function forkAt(index: number) {
@@ -161,7 +170,7 @@ async function forkAt(index: number) {
 const field = () => screen.getByLabelText<HTMLTextAreaElement>("消息");
 
 it("手机从 /plan 消息分叉：输入框填好带命令名的原消息，光标在末尾，不发送、无回退提示；再进不填", async () => {
-  const { calls } = await setup();
+  const { calls, pendingRpc } = await setup();
   await forkAt(1);
   await waitFor(
     () => {
@@ -192,25 +201,14 @@ it("手机从 /plan 消息分叉：输入框填好带命令名的原消息，光
         await popped;
       });
     }
-    await waitFor(() => {
-      expect(rows()).toHaveLength(2);
-    });
-    // 退回列表后仍有在途的 session.close / 后台刷新：等这些 promise 链跑完再点下一项
-    await act(async () => {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    });
-  };
-  /** 等会话页稳定：输入框挂载后跨过一拍仍在同一个节点上，说明切走 / 重开的过渡已经停下 */
-  const stableField = async (): Promise<HTMLTextAreaElement> => {
-    for (let i = 0; i < 20; i++) {
-      const node = screen.queryByLabelText<HTMLTextAreaElement>("消息");
-      await act(async () => {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      });
-      if (node !== null && node.isConnected && screen.queryByLabelText("消息") === node)
-        return node;
-    }
-    throw new Error("会话页反复卸载，输入框没有稳定下来");
+    await waitFor(
+      () => {
+        expect(rows()).toHaveLength(2);
+        // 等离开会话触发的 session.close / 列表刷新全部落定，避免切走关闭与下一次打开交错
+        expect(pendingRpc()).toBe(0);
+      },
+      { timeout: 10_000 },
+    );
   };
   for (const index of [0, 1]) {
     await backToList();
@@ -218,14 +216,19 @@ it("手机从 /plan 消息分叉：输入框填好带命令名的原消息，光
     const row = rows()[index];
     if (row === undefined) throw new Error(`项目页没有第 ${String(index)} 个会话行`);
     fireEvent.click(row);
-    // 消息挂载（分叉按钮数 > 0）后等输入框稳定，再确认没有再被填回
+    // 等会话重新打开、消息与输入框挂载，且加载期间的 RPC 与被动 effect 全部落定
     await waitFor(
       () => {
         expect(messageCount()).toBeGreaterThan(0);
+        expect(screen.queryByLabelText("消息")).not.toBeNull();
+        expect(pendingRpc()).toBe(0);
       },
       { timeout: 10_000 },
     );
-    expect((await stableField()).value).toBe("");
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+    expect(field().value).toBe("");
   }
 }, 60_000);
 
