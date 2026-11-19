@@ -12,8 +12,7 @@ import {
   permissionDialogRows,
   scheduleDetailRows,
 } from "../src/components/permission-dialog.js";
-
-const pause = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+import { flush } from "./provider-test-utils.js";
 
 const header = [
   "新建定时任务",
@@ -88,9 +87,9 @@ describe("schedule 确认框（TUI）", () => {
         onToggleExpanded: toggle,
       }),
     );
-    await pause();
+    await flush();
     long.stdin.write("e");
-    await pause();
+    await flush();
     expect(toggle).toHaveBeenCalledTimes(1);
     long.unmount();
 
@@ -104,9 +103,9 @@ describe("schedule 确认框（TUI）", () => {
         onToggleExpanded: shortToggle,
       }),
     );
-    await pause();
+    await flush();
     short.stdin.write("e");
-    await pause();
+    await flush();
     expect(shortToggle).not.toHaveBeenCalled();
     short.unmount();
   });
@@ -123,14 +122,14 @@ describe("schedule 确认框（TUI）", () => {
         expanded: true,
       }),
     );
-    await pause();
+    await flush();
     const first = lastFrame() ?? "";
     expect(first).toContain("新建定时任务");
     expect(first).toContain("[a] 允许一次");
     expect(first).toContain(boxSafe("↑/↓ 滚动"));
     expect(first).not.toContain("第 30 步");
     for (let i = 0; i < 40; i++) stdin.write("\x1b[B");
-    await pause(120);
+    await flush();
     const last = lastFrame() ?? "";
     expect(last).toContain("第 30 步：检查服务 30");
     expect(last).toContain("[a] 允许一次");

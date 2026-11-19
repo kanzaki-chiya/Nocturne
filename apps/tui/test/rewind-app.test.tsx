@@ -6,7 +6,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider, type RuntimeSession } from "@nocturne/core";
 import { App } from "../src/app.js";
-import { settle, changedFrame } from "./provider-test-utils.js";
+import { flush, settle, changedFrame } from "./provider-test-utils.js";
 import type { SwitchSessionFn } from "../src/types.js";
 import { internalSession } from "./internal-session.js";
 
@@ -22,7 +22,6 @@ afterEach(() => {
   vi.unstubAllEnvs();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-const pause = (ms = 100) => new Promise((resolve) => setTimeout(resolve, ms));
 async function app(inline = false, pending = false) {
   const runtime = await createRuntime({
     cwd: temp(),
@@ -65,12 +64,12 @@ async function app(inline = false, pending = false) {
     }),
   );
   await settle(() => ui.lastFrame()?.includes("fake-1") === true);
-  await pause();
+  await flush();
   return { ...ui, original, runtime, current: (): RuntimeSession => session };
 }
 async function command(ui: Awaited<ReturnType<typeof app>>, text: string) {
   ui.stdin.write(text);
-  await pause();
+  await flush();
   ui.stdin.write("\r");
 }
 it.each([false, true])(
@@ -155,13 +154,22 @@ it("Turn 进行中双 Esc 中断且不打开列表，Core 拒绝回退", async (
   try {
     const turn = ui.original.submit({ text: "正在执行" });
     await settle(() => ui.original.state().openTurn !== undefined);
+    // App 的 busy 来自视图事件：等状态栏进入「思考中」，否则 Esc 会走空闲双击路径去开回退页
+    await settle(() => ui.lastFrame()?.includes("思考中") === true);
     const target = ui.original.durableEvents().find((event) => event.type === "message.user");
     await expect(ui.original.rewind(target?.seq ?? 0, "conversation")).rejects.toMatchObject({
       code: "session_busy",
     });
-    ui.stdin.write("\x1b");
-    await pause(25);
-    ui.stdin.write("\x1b");
+    // 两次裸 Esc 必须各自被 Ink 派发（pending escape 20ms），且第二次后过 80ms 中断窗口
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      ui.stdin.write("\x1b");
+      await vi.advanceTimersByTimeAsync(25);
+      ui.stdin.write("\x1b");
+      await vi.advanceTimersByTimeAsync(120);
+    } finally {
+      vi.useRealTimers();
+    }
     await turn;
     expect(ui.lastFrame()).not.toContain("轮次列表");
   } finally {

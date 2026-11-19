@@ -14,6 +14,7 @@ import type { FakeScript } from "@nocturne/core";
 import { runTui } from "../src/index.js";
 import { sessionSavedLine } from "../src/exit-note.js";
 import { APP_VERSION } from "../src/version.js";
+import { flush } from "./provider-test-utils.js";
 
 const tmpRoots: string[] = [];
 const tmp = (prefix: string) => {
@@ -102,11 +103,17 @@ function preservedBeforeMessage(chunks: string[], id: string): void {
 }
 
 async function waitFor(check: () => boolean): Promise<void> {
-  const end = Date.now() + 5000;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await new Promise((r) => setTimeout(r, 20));
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: 5000, interval: 20 });
+}
+
+/**
+ * App 在裸 Esc 之后 80ms 内会吞掉单个字母（conhost 把 Alt+M 拆成 Esc+字母时的保护，
+ * 见 src/keys.ts 的 SWALLOW_MS）。上一轮 Esc 关闭模型页后，下一轮 "/model" 里的 m
+ * 必须落在窗口外；窗口只读 Date.now()，没有可观察状态能证明它已过，只能等真实时间。
+ */
+async function waitEscapeSwallowWindow(): Promise<void> {
+  // eslint-disable-next-line no-restricted-syntax -- 80ms 吞字母窗口是产品真实时间语义，不能用假计时器跨越（runTui 用真实流）
+  await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
 describe("退出保留回滚区", () => {
@@ -188,13 +195,13 @@ describe("退出保留回滚区", () => {
     });
     await waitFor(() => io.stdoutChunks.join("").includes(APP_VERSION));
     for (let i = 1; i <= 5; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitEscapeSwallowWindow();
       const before = io.stdoutChunks.length;
       io.stdin.write("/model");
       await waitFor(() => io.stdoutChunks.slice(before).join("").includes("/model"));
       io.stdin.write("\r");
       await waitFor(() => io.stdoutChunks.join("").split("\x1b[?1049h").length - 1 === i);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await flush();
       io.stdin.write("\x1b");
       await waitFor(() => io.stdoutChunks.join("").split("\x1b[?1049l").length - 1 === i);
       expect(io.stdoutChunks.join("")).toContain("\x1b[?1004l\x1b[?1049l\x1b[?1004h");

@@ -108,11 +108,7 @@ async function openSession(
 }
 
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await new Promise((r) => setTimeout(r, 20));
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
 }
 
 const bellCount = (chunks: string[]): number => chunks.join("").split(BELL).length - 1;

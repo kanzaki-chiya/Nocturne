@@ -19,6 +19,7 @@ import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "
 import { App } from "../src/app.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
 import { internalSession } from "./internal-session.js";
+import { flush } from "./provider-test-utils.js";
 import { APP_VERSION } from "../src/version.js";
 
 const tmpRoots: string[] = [];
@@ -33,14 +34,24 @@ const tmp = (p: string) => {
   return d;
 };
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await pause(20);
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
+}
+
+/**
+ * 裸 Esc 由 Ink 挂起约 20ms 才派发；用假计时器精确推进，并越过 App 在 Esc
+ * 之后 80ms 的吞字母窗口（src/keys.ts SWALLOW_MS），不依赖固定睡眠。
+ */
+async function escape(stdin: { write(data: string): void }, advance = 120): Promise<void> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    stdin.write("\x1b");
+    await vi.advanceTimersByTimeAsync(advance);
+  } finally {
+    vi.useRealTimers();
   }
+  await flush();
 }
 
 async function longSession(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
@@ -255,7 +266,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const session = await runtime.createSession({ model: "fake/fake-1" });
     const mouse = fakeMouse();
     const { spawn } = okSpawn();
-    const { lastFrame, unmount } = render(
+    const { frames, lastFrame, unmount } = render(
       createElement(App, {
         session,
         runtime,
@@ -277,8 +288,10 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const third = rowOf("第三段");
     expect(second - top).toBe(2);
     mouse.emit({ type: "press", button: 0, x: 1, y: top + 1 });
+    const beforeDrag = frames.length;
     mouse.emit({ type: "drag", button: 0, x: 4, y: tail + 1 });
-    await pause(150); // 测试帧不带颜色码，选区反色不可见；等选区提交进状态并重绘
+    // 测试帧不带颜色码，选区反色不可见；等这一轮选区提交真的重绘后再断言布局未变
+    await vi.waitFor(() => expect(frames.length).toBeGreaterThan(beforeDrag), { timeout: 2000 });
     // 选区覆盖三个空行时，内容行的位置与未选中时一致
     expect(rowOf("第一段")).toBe(top);
     expect(rowOf("第二段")).toBe(second);
@@ -327,7 +340,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     const y = frame.split("\n").findIndex((l) => l.includes("末尾标记")) + 1;
     mouse.emit({ type: "press", button: 0, x: 1, y });
     mouse.emit({ type: "drag", button: 0, x: 4, y });
-    await pause(40);
+    await flush();
     // Ctrl+C：复制 + 清高亮，界面仍在（输入照常，未退出）
     stdin.write("\x03");
     await waitFor(() => (lastFrame() ?? "").includes("已复制"));
@@ -339,14 +352,13 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     // 再建选区 → Esc：只清选区，不中断不退出；随后 Ctrl+C 才退出
     mouse.emit({ type: "press", button: 0, x: 1, y });
     mouse.emit({ type: "drag", button: 0, x: 4, y });
-    await pause(40);
-    stdin.write("\x1b");
-    await pause(120);
+    await flush();
+    await escape(stdin);
     expect(lastFrame()).not.toContain("已复制"); // Esc 未触发复制
     stdin.write("\x03");
     // 无选区时 Ctrl+C = 退出：之后的输入不再进入输入框
     stdin.write("探针");
-    await pause(60);
+    await flush();
     expect(lastFrame()).not.toContain("探针");
     unmount();
     await session.close();
@@ -364,7 +376,7 @@ describe("全屏鼠标", { timeout: 15_000 }, () => {
     await waitFor(() => (lastFrame() ?? "").includes("末尾标记"));
     mouse.emit({ type: "press", button: 0, x: 3, y: 2 });
     mouse.emit({ type: "release", button: 0, x: 3, y: 2 });
-    await pause(60);
+    await flush();
     expect(lastFrame()).not.toContain("已复制");
     expect(calls).toHaveLength(0);
     unmount();

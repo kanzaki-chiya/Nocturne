@@ -6,6 +6,7 @@ import { Composer } from "../src/components/composer.js";
 import { TuiEnvContext } from "../src/env.js";
 import { createPasteStore } from "../src/paste.js";
 import { createFileStore } from "../src/files.js";
+import { flush } from "./provider-test-utils.js";
 
 const env = { ascii: false, animated: false };
 describe("Composer 多行编辑", () => {
@@ -183,11 +184,11 @@ describe("Composer 待发输入（ADR-0070）", () => {
     const second = render(<Harness suspendNav />);
     await vi.waitFor(() => expect(second.lastFrame()).toContain("继续一句"));
     second.stdin.write("\t");
-    await new Promise((done) => setTimeout(done, 20));
+    await flush();
     expect(queued).toEqual(["继续一句"]);
     // 补全列表打开时 Tab 与 Enter 都归列表
     second.stdin.write("\r");
-    await new Promise((done) => setTimeout(done, 20));
+    await flush();
     expect(queued).toEqual(["继续一句"]);
     expect(submitted).toEqual([]);
     second.unmount();

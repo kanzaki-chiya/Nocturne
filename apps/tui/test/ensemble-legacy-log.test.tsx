@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { render } from "ink-testing-library";
 import { createElement } from "react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, replaySessionView } from "@nocturne/core";
 
@@ -17,6 +17,7 @@ import { App } from "../src/app.js";
 import { TuiEnvContext } from "../src/env.js";
 import { layoutEntry } from "../src/lines.js";
 import type { SwitchSessionFn } from "../src/types.js";
+import { flush } from "./provider-test-utils.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -101,11 +102,12 @@ function writeLegacy(
 }
 
 async function waitFor(check: () => boolean, detail: () => string, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error(`waitFor 超时\n${detail()}`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error(`waitFor 超时\n${detail()}`);
+    },
+    { timeout: ms, interval: 20 },
+  );
 }
 
 it("TUI /resume 列出旧日志，打开时只显示 Runtime 原文，归档后从列表消失", async () => {
@@ -151,7 +153,10 @@ it("TUI /resume 列出旧日志，打开时只显示 Runtime 原文，归档后�
     ),
   );
   try {
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(
+      () => (lastFrame() ?? "").includes("fake-1"),
+      () => lastFrame() ?? "",
+    );
     stdin.write("/resume");
     stdin.write("\r");
     await waitFor(
@@ -164,7 +169,7 @@ it("TUI /resume 列出旧日志，打开时只显示 Runtime 原文，归档后�
     expect(list).not.toContain(childId);
     // 旧日志更新更晚，排在第一行；Enter 打开它
     expect(list.indexOf("旧合奏要改订单页")).toBeLessThan(list.indexOf("可搜索的好会话"));
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await flush();
     stdin.write("\r");
     await waitFor(
       () => (lastFrame() ?? "").includes("swarm.created"),

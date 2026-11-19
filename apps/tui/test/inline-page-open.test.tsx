@@ -13,6 +13,7 @@ import {
   inlinePageShellName,
 } from "../src/inline-page-open.js";
 import type { MouseEvent, MouseSource } from "../src/mouse.js";
+import { flush } from "./provider-test-utils.js";
 
 const roots: string[] = [];
 function temp() {
@@ -181,7 +182,7 @@ describe("全屏单击内嵌页面行", () => {
       mouse.emit({ type: "press", button: 0, x: 3, y });
       mouse.emit({ type: "drag", button: 0, x: 5, y });
       mouse.emit({ type: "release", button: 0, x: 3, y });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await flush();
       expect(openFile).not.toHaveBeenCalled();
 
       mouse.emit({ type: "press", button: 0, x: 3, y });

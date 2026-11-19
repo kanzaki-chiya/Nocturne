@@ -23,9 +23,9 @@ import { runTui } from "../src/index.js";
 import { App } from "../src/app.js";
 import { PermissionDialog, permissionDialogRows } from "../src/components/permission-dialog.js";
 import { TuiEnvContext } from "../src/env.js";
+import { flush } from "./provider-test-utils.js";
 
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 40) => new Promise<void>((r) => setTimeout(r, ms));
 
 const tmpRoots: string[] = [];
 const tmp = (p: string) => {
@@ -131,7 +131,7 @@ describe("TUI 子代理权限转发", () => {
       }),
     );
     try {
-      await pause(80);
+      await flush();
 
       const childReq: SubagentPendingPermission = {
         childSessionId: "child-1",
@@ -171,13 +171,13 @@ describe("TUI 子代理权限转发", () => {
           options: ["allow_once", "deny"],
         },
       });
-      await pause(80);
+      await flush();
 
       expect(lastFrame() ?? "").toContain("子代理 [general] • 修改配置脚本");
 
       // 按 a 允许子请求
       stdin.write("a");
-      await pause(80);
+      await flush();
       expect(subReplies).toEqual([
         { childSessionId: "child-1", requestId: "r-child", reply: { decision: "allow" } },
       ]);
@@ -185,7 +185,7 @@ describe("TUI 子代理权限转发", () => {
       // 紧接着显示父自身请求
       expect(lastFrame() ?? "").toContain("/ws/parent.ts");
       stdin.write("a");
-      await pause(80);
+      await flush();
       expect(parentReplies).toEqual([{ requestId: "r-parent", reply: { decision: "allow" } }]);
     } finally {
       unmount();
@@ -298,11 +298,12 @@ describe("TUI 子代理权限转发", () => {
     });
 
     const waitUntil = async (check: () => boolean, label: string, timeoutMs = 6000) => {
-      const end = Date.now() + timeoutMs;
-      while (!check()) {
-        if (Date.now() > end) throw new Error(`等待超时：${label}`);
-        await pause(20);
-      }
+      await vi.waitFor(
+        () => {
+          if (!check()) throw new Error(`等待超时：${label}`);
+        },
+        { timeout: timeoutMs, interval: 20 },
+      );
     };
 
     try {
@@ -314,7 +315,7 @@ describe("TUI 子代理权限转发", () => {
       // 此时父会话已 idle，仅后台子代理在等待确认；首次 Ctrl+C 应先 interrupt 结算而不退出
       stdin.write("\x03");
       await waitUntil(() => interruptSpy.mock.calls.length === 1, "触发 session.interrupt");
-      await pause(150);
+      await flush();
       expect(exited).toBe(false);
 
       // 结算后再按 Ctrl+C：正常退出

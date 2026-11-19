@@ -20,6 +20,7 @@ import type { PendingQuestion } from "@nocturne/core/protocol";
 import { App } from "../src/app.js";
 import { QuestionDialog } from "../src/components/question-dialog.js";
 import { TuiEnvContext } from "../src/env.js";
+import { flush } from "./provider-test-utils.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
@@ -34,14 +35,8 @@ const tmp = (p: string) => {
 };
 
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 30) => new Promise((r) => setTimeout(r, ms));
-
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await pause(20);
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
 }
 const inEnv = (child: React.ReactNode, env = ENV) =>
   createElement(TuiEnvContext.Provider, { value: env }, child);
@@ -85,17 +80,17 @@ describe("提问面板", () => {
         createElement(QuestionDialog, { pending: twoQ(), active: true, onReply: reply, width: 80 }),
       ),
     );
-    await pause();
+    await flush();
     screen.stdin.write("\x1b[A");
-    await pause(); // 循环到拒绝
+    await flush(); // 循环到拒绝
     screen.stdin.write("\r");
-    await pause();
+    await flush();
     screen.stdin.write("\r");
-    await pause(); // 第二题选丙
+    await flush(); // 第二题选丙
     expect(screen.lastFrame()).toMatch(/第一题？[^\n]*\n[^\n]*> 拒绝回答/);
     expect(screen.lastFrame()).toMatch(/第二题？[^\n]*\n[^\n]*> 丙/);
     screen.stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }, { selected: ["丙"] }] });
     screen.unmount();
   });
@@ -112,36 +107,36 @@ describe("提问面板", () => {
         }),
       ),
     );
-    await pause();
+    await flush();
     screen.stdin.write(" ");
-    await pause();
+    await flush();
     screen.stdin.write("\x1b[B");
-    await pause();
+    await flush();
     screen.stdin.write("\x1b[B");
-    await pause();
+    await flush();
     screen.stdin.write("自定义");
-    await pause();
+    await flush();
     screen.stdin.write("\x1b[B");
-    await pause();
+    await flush();
     screen.stdin.write(" ");
-    await pause();
+    await flush();
     expect(screen.lastFrame()).toContain("[x] 拒绝回答");
     expect(screen.lastFrame()).not.toContain("[x] 方案A");
     expect(screen.lastFrame()).not.toContain("自定义");
     screen.stdin.write("\x1b[B");
-    await pause();
+    await flush();
     screen.stdin.write(" ");
-    await pause();
+    await flush();
     expect(screen.lastFrame()).toContain("[ ] 拒绝回答");
     expect(screen.lastFrame()).toContain("[x] 方案A");
     screen.stdin.write("\x1b[A");
-    await pause();
+    await flush();
     screen.stdin.write(" ");
-    await pause();
+    await flush();
     screen.stdin.write("\r");
-    await pause();
+    await flush();
     screen.stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }] });
     screen.unmount();
   });
@@ -168,16 +163,16 @@ describe("提问面板", () => {
         { ascii: true, animated: false },
       ),
     );
-    await pause();
+    await flush();
     screen.stdin.write("\x1b[A");
-    await pause();
+    await flush();
     expect(screen.lastFrame()?.split("\n")).toHaveLength(5);
     expect(screen.lastFrame()).toContain("> ( ) 拒绝回答");
     screen.stdin.write("\r");
-    await pause();
+    await flush();
     expect(screen.lastFrame()).toContain("拒绝回答");
     screen.stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ declined: true }] });
     screen.unmount();
   });
@@ -197,24 +192,24 @@ describe("提问面板", () => {
         }),
       ),
     );
-    await pause();
+    await flush();
     expect(screen.lastFrame()).toContain("甲");
     expect(screen.lastFrame()).not.toContain("第1段");
     screen.stdin.write("[5~");
-    await pause();
+    await flush();
     screen.stdin.write("[5~");
-    await pause();
+    await flush();
     screen.stdin.write("[5~");
-    await pause();
+    await flush();
     screen.stdin.write("[5~");
-    await pause();
+    await flush();
     expect(screen.lastFrame()).toContain("第1段");
     expect(screen.lastFrame()).not.toContain("甲");
     screen.stdin.write("[6~");
-    await pause();
+    await flush();
     expect(screen.lastFrame()).not.toContain("第1段");
     screen.stdin.write("[B");
-    await pause();
+    await flush();
     expect(screen.lastFrame()).toContain("> ( ) 乙");
     screen.unmount();
   });
@@ -241,13 +236,13 @@ describe("提问面板", () => {
     expect(frame).toContain("保守做法");
     // ↓ 到方案B，Enter 选中并进确认行（单题直接到确认）
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("确认回答");
     expect(lastFrame()).toMatch(/选哪个方案？[^\n]*\n[^\n]*> 方案B/); // 框内 → 经 boxSafe 显示为 >
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案B"] }] });
     unmount();
   });
@@ -266,18 +261,18 @@ describe("提问面板", () => {
     );
     expect(lastFrame()).toContain("[ ] 方案A");
     stdin.write(" ");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("[x] 方案A");
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write(" ");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("[x] 方案B");
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("方案A、方案B");
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案A", "方案B"] }] });
     unmount();
   });
@@ -296,17 +291,17 @@ describe("提问面板", () => {
     );
     // ↓ ↓ 到「其他」行（两个选项之后）
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write("自己写");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("自己写");
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("自己写");
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: [], text: "自己写" }] });
     unmount();
   });
@@ -325,15 +320,15 @@ describe("提问面板", () => {
     );
     expect(lastFrame()).toContain("> 回答：");
     stdin.write("小夜曲");
-    await pause();
+    await flush();
     // 文本紧跟标签，不再有方括号和下划线光标
     expect(lastFrame()).toContain("> 回答：小夜曲");
     expect(lastFrame()).not.toContain("小夜曲_");
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(lastFrame()).toMatch(/想要什么名字？[^\n]*\n[^\n]*> 小夜曲/);
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: [], text: "小夜曲" }] });
     unmount();
   });
@@ -353,14 +348,14 @@ describe("提问面板", () => {
     expect(lastFrame()).toContain("第 1/2 题");
     expect(lastFrame()).toContain("第一题？");
     stdin.write("\x1b[C"); // → 下一题
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("第 2/2 题");
     expect(lastFrame()).toContain("第二题？");
     stdin.write("\x1b[Z"); // Shift+Tab 回上一题
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("第 1/2 题");
     stdin.write("\t"); // Tab 再切到第二题
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("第 2/2 题");
     unmount();
   });
@@ -378,18 +373,18 @@ describe("提问面板", () => {
       ),
     );
     stdin.write("\r"); // 选中 方案A → 确认行
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("方案A");
     stdin.write("\x1b[D"); // ← 返回
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("(o) 方案A"); // 之前的选择保留
     stdin.write("\x1b[B"); // ↓ 到方案B
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(lastFrame()).toMatch(/选哪个方案？[^\n]*\n[^\n]*> 方案B/);
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案B"] }] });
     unmount();
   });
@@ -409,8 +404,7 @@ describe("提问面板", () => {
       ),
     );
     stdin.write("\x1b");
-    await pause();
-    expect(escape).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(escape).toHaveBeenCalledOnce(), { timeout: 1000 });
     expect(reply).not.toHaveBeenCalled();
     unmount();
   });
@@ -430,14 +424,13 @@ describe("提问面板", () => {
       ),
     );
     stdin.write("abc");
-    await pause();
+    await flush();
     stdin.write("\x1b"); // 退出输入
-    await pause();
+    await vi.waitFor(() => expect(lastFrame()).toContain("Esc 中断"), { timeout: 1000 });
     expect(reply).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("abc");
     stdin.write("\x1b"); // 中断
-    await pause();
-    expect(escape).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(escape).toHaveBeenCalledOnce(), { timeout: 1000 });
     expect(reply).not.toHaveBeenCalled();
     unmount();
   });
@@ -459,12 +452,12 @@ describe("提问面板", () => {
     expect(frame).toContain("? 提问"); // ASCII 下 wait 标记为 ?
     expect(frame).toContain("[ ] 方案A");
     stdin.write(" ");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("[x] 方案A");
     stdin.write("\r");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案A"] }] });
     unmount();
   });
@@ -485,9 +478,9 @@ describe("提问面板", () => {
     expect(frame).toContain("方案A");
     expect(frame).not.toContain("保守做法");
     stdin.write("\r");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["方案A"] }] });
     unmount();
   });
@@ -506,16 +499,16 @@ describe("提问面板", () => {
     const { lastFrame, stdin, unmount } = render(
       inEnv(createElement(QuestionDialog, { pending, active: true, onReply: reply, width: 24 })),
     );
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     const frame = (lastFrame() ?? "").replace(/[│╭╮╰╯─\s]/g, "");
     expect(frame).toContain("确认回答");
     expect(frame).toContain("要把只写模型名会因多个服务商命中而报错这条行为写进文档吗？");
     expect(frame).toContain(">写进文档并补一张对照表");
     expect(frame).toContain("Enter提交");
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ answers: [{ selected: ["写进文档并补一张对照表"] }] });
     unmount();
   });
@@ -556,7 +549,7 @@ describe("提问面板 · App 集成", () => {
     );
     const turn = session.submit({ text: "干活" });
     await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
-    await pause(60); // 等面板 useInput 订阅生效
+    await flush(); // 等面板 useInput 订阅生效
     stdin.write("\x1b"); // Esc：非输入态中断 Turn
     await waitFor(() => (lastFrame() ?? "").includes("已取消"));
     expect(interrupt).toHaveBeenCalledOnce();
@@ -594,7 +587,7 @@ describe("提问面板 · App 集成", () => {
     const turn = session.submit({ text: "干活" });
     await waitFor(() => (lastFrame() ?? "").includes("Esc 中断"));
     expect(lastFrame()).toContain("等待回答");
-    await pause(60); // 等面板 useInput 订阅生效
+    await flush(); // 等面板 useInput 订阅生效
     stdin.write("\r"); // 选中 A → 确认行
     await waitFor(() => (lastFrame() ?? "").includes("确认回答"));
     stdin.write("\r"); // 提交

@@ -32,11 +32,7 @@ const png = new Uint8Array([
 ]);
 const env = { ascii: false, animated: false };
 async function waitFor(check: () => boolean): Promise<void> {
-  const deadline = Date.now() + 12_000;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error("render timeout");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: 12_000, interval: 20 });
 }
 async function session(imageInput = true, vision = false, wait = false) {
   const home = tmp();

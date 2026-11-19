@@ -55,7 +55,7 @@ import {
 } from "../src/text-format-suite.js";
 import { palettes } from "../src/theme.js";
 import type { OpenSuiteFn, SwitchSessionFn } from "../src/types.js";
-import { settle as settleRaw } from "./provider-test-utils.js";
+import { flush, settle as settleRaw } from "./provider-test-utils.js";
 
 const inkChalkPromise = (async (): Promise<{ level: 0 | 1 | 2 | 3 }> => {
   const req = createRequire(import.meta.resolve("ink"));
@@ -91,7 +91,6 @@ afterEach(async () => {
 });
 
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 let currentFrame: (() => string) | undefined;
@@ -691,7 +690,7 @@ describe("App 集成：/suite、状态块、总览页、线程视图与响铃", 
     currentFrame = frame;
     const enter = async (value: string) => {
       ui.stdin.write(value);
-      await pause(80);
+      await flush();
       ui.stdin.write("\r");
     };
 
@@ -821,7 +820,7 @@ describe("App 集成：/suite、状态块、总览页、线程视图与响铃", 
     currentFrame = frame;
     const enter = async (value: string) => {
       ui.stdin.write(value);
-      await pause(80);
+      await flush();
       ui.stdin.write("\r");
     };
 
@@ -896,7 +895,7 @@ describe("App 集成：/suite、状态块、总览页、线程视图与响铃", 
         () => expect(oobWrites.filter((b) => b === BELL).length).toBeGreaterThanOrEqual(1),
         { timeout: 8000 },
       );
-      await pause(120);
+      await flush();
       expect(oobWrites.filter((b) => b === BELL)).toHaveLength(1);
       // 线程等待权限确认时指挥输入框不被抢占，状态块显示等待确认且可正常打开 /suite overview
       await vi.waitFor(
@@ -958,7 +957,7 @@ describe("App 集成：/suite、状态块、总览页、线程视图与响铃", 
     try {
       await settle(() => inlineFrame().includes("◆ 路由重构"));
       inlineUi.stdin.write("/suite overview");
-      await pause(80);
+      await flush();
       inlineUi.stdin.write("\r");
       await settle(() => inlineFrame().includes("用法：/suite [<名称>]"));
     } finally {
@@ -980,7 +979,7 @@ describe("App 集成：/suite、状态块、总览页、线程视图与响铃", 
     currentFrame = frame;
     const enter = async (value: string) => {
       ui.stdin.write(value);
-      await pause(80);
+      await flush();
       ui.stdin.write("\r");
     };
 

@@ -6,8 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CompactionThresholdDialog } from "../src/components/compaction-threshold-dialog.js";
 import { CursorClaimsContext, InputCursor } from "../src/components/input-cursor.js";
 import { createCursorStream, type CursorClaims, type CursorPoint } from "../src/cursor.js";
-
-const pause = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
+import { flush } from "./provider-test-utils.js";
 
 /** 记录登记表的最终目标：后登记的有效项优先。 */
 function recorder(): CursorClaims & { current(): CursorPoint | undefined } {
@@ -115,7 +114,7 @@ describe("浮层输入法光标", () => {
         ),
       ),
     );
-    await pause();
+    await flush();
     expect(claims.current()).toEqual({ x: 4, y: 3 });
     unmount();
   });
@@ -202,7 +201,7 @@ describe("压缩阈值对话框的真实光标", () => {
       ),
     );
     await vi.waitFor(() => expect(screen.lastFrame()).toContain("压缩阈值"));
-    await pause(100);
+    await flush();
     screen.stdin.write("\t");
     await vi.waitFor(() => expect(claims.current()).toBeDefined());
     const line = (screen.lastFrame() ?? "").split("\n").find((l) => l.includes("[ 90"));

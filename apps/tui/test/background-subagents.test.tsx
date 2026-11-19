@@ -20,12 +20,11 @@ import { Subagents } from "../src/components/subagents.js";
 import { TuiEnvContext } from "../src/env.js";
 import { layoutEntry } from "../src/lines.js";
 import { runSlash } from "../src/commands.js";
+import { flush } from "./provider-test-utils.js";
 
 const ENV = { ascii: false, animated: false };
 const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
-const pause = (ms = 30) => new Promise((done) => setTimeout(done, ms));
-
 const resultEntry: UserEntry = {
   kind: "user",
   key: "u:9",
@@ -132,7 +131,7 @@ describe("TUI 后台子代理", () => {
         height={pendingPanelRows(1, false)}
       />,
     );
-    await pause(20);
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("子代理结果 · 等待送达");
     expect(frame).toContain("Alt+X 撤回");
@@ -170,11 +169,11 @@ describe("TUI 后台子代理", () => {
     await vi.waitFor(() => expect(ui.lastFrame()).toContain("explore • 5s • 查找调用方"));
     expect((ui.lastFrame() ?? "").match(/查找调用方/g)).toHaveLength(1);
     // Ink 在首帧之后才订阅输入：按键前稍等，结果用 waitFor 判断而不是固定等待
-    await pause(100);
+    await flush();
     ui.stdin.write("\r");
     await vi.waitFor(() => expect(ui.lastFrame()).toContain("取消 explore？"));
     ui.stdin.write("\u001B[B");
-    await pause(30);
+    await flush();
     ui.stdin.write("\r");
     await vi.waitFor(() =>
       expect(cancelSubagent).toHaveBeenCalledWith({ parentSessionId: "p", childSessionId: "c1" }),
@@ -300,14 +299,14 @@ describe("TUI 后台子代理", () => {
     expect(ui.lastFrame()).toContain("general");
     expect(ui.lastFrame()).not.toContain("隔离");
     expect(ui.lastFrame()).not.toContain("nocturne/c1");
-    await pause(100);
+    await flush();
     ui.stdin.write("\u001B[B");
-    await pause(30);
+    await flush();
     ui.stdin.write("\r");
     await vi.waitFor(() => expect(ui.lastFrame()).toContain("其中的改动会丢失"));
-    await pause(100);
+    await flush();
     ui.stdin.write("\u001B[B");
-    await pause(30);
+    await flush();
     ui.stdin.write("\r");
     await vi.waitFor(() =>
       expect(deleteSubagentWorktree, ui.lastFrame()).toHaveBeenCalledWith({

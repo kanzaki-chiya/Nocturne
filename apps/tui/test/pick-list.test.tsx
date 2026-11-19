@@ -20,12 +20,7 @@ const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
 
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  for (;;) {
-    if (check()) return;
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await new Promise((r) => setTimeout(r, 10));
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 10 });
 }
 
 function renderList(

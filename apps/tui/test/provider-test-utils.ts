@@ -7,7 +7,16 @@ import type { MouseEvent } from "../src/mouse.js";
 export async function settle(check: () => boolean): Promise<void> {
   await vi.waitFor(() => expect(check()).toBe(true), { timeout: 5000, interval: 20 });
   // Ink 写帧之后，等新层 useInput 的 effect 接上再发送下一键。
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  await flush();
+}
+/**
+ * 冲刷 React 已排队的渲染/被动 effect：一次按键引起的提交与 useInput 订阅都在
+ * 宏任务里完成（React 调度走 MessageChannel，多让几轮更稳），不用固定延时。
+ */
+export async function flush(times = 4): Promise<void> {
+  for (let i = 0; i < times; i += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 export async function changedFrame(ui: ReturnType<typeof render>, action: () => void) {
   const before = ui.lastFrame();

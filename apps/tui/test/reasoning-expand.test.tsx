@@ -99,7 +99,7 @@ it("展开思考的拖动复制去掉显示缩进", async () => {
     child.stdin.on("finish", () => child.emit("exit", 0));
     return child;
   }) as unknown as typeof nodeSpawn;
-  const { lastFrame, stdin, unmount } = render(
+  const { frames, lastFrame, stdin, unmount } = render(
     createElement(App, {
       session,
       runtime,
@@ -115,8 +115,10 @@ it("展开思考的拖动复制去掉显示缩进", async () => {
   const y =
     (lastFrame() ?? "").split("\n").findIndex((line) => line.includes("完整思考第一行")) + 1;
   mouse.emit({ type: "press", button: 0, x: 1, y });
+  const beforeDrag = frames.length;
   mouse.emit({ type: "drag", button: 0, x: 20, y });
-  await new Promise<void>((resolve) => setTimeout(resolve, 60)); // 等选区状态提交，与现有鼠标测试一致
+  // 拖动只改选区状态（帧内容不带颜色码，看不出变化）：等这一轮提交真的重绘后再松开
+  await vi.waitFor(() => expect(frames.length).toBeGreaterThan(beforeDrag), { timeout: 2000 });
   mouse.emit({ type: "release", button: 0, x: 20, y });
   await vi.waitFor(() => expect(copied.length).toBeGreaterThan(0));
   expect(copied.join("")).toContain("完整思考第一行");

@@ -17,9 +17,9 @@ import type {
 
 import { ModelPicker } from "../src/components/model-picker.js";
 import { TuiEnvContext } from "../src/env.js";
+import { flush } from "./provider-test-utils.js";
 
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
 
@@ -176,24 +176,24 @@ describe("模型选择页", () => {
         ...(savedEffort ? { savedEffort } : {}),
       });
       await vi.waitFor(() => expect(screen.lastFrame()).toContain("fake/reasoner"));
-      await pause(100);
+      await flush();
       screen.stdin.write("\r");
       await vi.waitFor(() => expect(screen.lastFrame()).toContain("仅本会话"));
-      await pause(100);
+      await flush();
       screen.stdin.write("\x1b[C");
-      await pause(100);
+      await flush();
       screen.stdin.write("\r");
       await vi.waitFor(() => expect(screen.lastFrame()).toContain(`* ${expected}`));
-      await pause(100);
+      await flush();
       screen.stdin.write("\x1b");
       await vi.waitFor(() => expect(screen.lastFrame()).toContain("仅本会话"));
-      await pause(100);
+      await flush();
       expect(screen.onPick).not.toHaveBeenCalled();
       screen.stdin.write("\r");
       await vi.waitFor(() => expect(screen.lastFrame()).toContain(`* ${expected}`));
-      await pause(100);
+      await flush();
       screen.stdin.write("\x1b[C");
-      await pause(100);
+      await flush();
       screen.stdin.write("\r");
       await vi.waitFor(() =>
         expect(screen.onPick).toHaveBeenCalledWith(
@@ -207,7 +207,7 @@ describe("模型选择页", () => {
   );
   it("双栏布局：左栏范围/服务商/预设，右栏搜索框与模型行", async () => {
     const { lastFrame, unmount } = renderPicker();
-    await pause();
+    await flush();
     const frame = lastFrame() ?? "";
     // 左栏
     expect(frame).toContain("最近使用");
@@ -231,14 +231,14 @@ describe("模型选择页", () => {
       models: MODELS.filter((m) => m.ref.model !== "llama-4"),
       recents: [{ provider: "openrouter", model: "llama-4" }],
     });
-    await pause();
+    await flush();
     expect(lastFrame() ?? "").not.toContain("llama-4");
     unmount();
   });
 
   it("最近使用置顶并以分隔线隔开；详情行标注当前/默认", async () => {
     const { lastFrame, unmount } = renderPicker();
-    await pause();
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("最近使用");
     // anthropic/claude-opus-4.6 是 recent，在 all 范围置顶
@@ -256,7 +256,7 @@ describe("模型选择页", () => {
         { provider: "deepseek", model: "deepseek-chat" },
       ],
     });
-    await pause();
+    await flush();
     const frame = lastFrame() ?? "";
     const llama = frame.indexOf("openrouter/llama-4");
     const chat = frame.indexOf("deepseek/deepseek-chat");
@@ -269,47 +269,45 @@ describe("模型选择页", () => {
 
   it("打字自动聚焦搜索框并模糊过滤；Esc 先清搜索再关闭", async () => {
     const { lastFrame, stdin, unmount, onClose } = renderPicker();
-    await pause();
+    await flush();
     stdin.write("codex");
-    await pause();
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("codex");
     expect(frame).toContain("gpt-5.2-codex");
     expect(frame).not.toContain("llama-4");
-    // Esc 清空搜索
+    // Esc 清空搜索（Ink 对裸 ESC 有 20ms 派发延迟，等帧变）
     stdin.write("\x1b");
-    await pause();
-    expect(lastFrame()).toContain("llama-4");
+    await vi.waitFor(() => expect(lastFrame()).toContain("llama-4"), { timeout: 2000 });
     // 搜索框已空再 Esc → 关闭
     stdin.write("\x1b");
-    await pause();
-    expect(onClose).toHaveBeenCalled();
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 2000 });
     unmount();
   });
 
   it("Enter 弹内联选项条；→ 选设为默认后 Enter 确认", async () => {
     const { stdin, unmount, onPick } = renderPicker();
-    await pause();
+    await flush();
     // 列表第一行是 recent（claude-opus），移到 deepseek-chat
     stdin.write("\x1b[B"); // ↓
-    await pause();
+    await flush();
     stdin.write("\r"); // Enter → 选项条
-    await pause();
+    await flush();
     stdin.write("\x1b[C"); // → 设为默认
-    await pause();
+    await flush();
     stdin.write("\r"); // 确认
-    await pause();
+    await flush();
     expect(onPick).toHaveBeenCalledWith("deepseek/deepseek-chat", true, null);
     unmount();
   });
 
   it("Enter 默认项为仅本会话", async () => {
     const { stdin, unmount, onPick } = renderPicker();
-    await pause();
+    await flush();
     stdin.write("\r"); // 第一行（recent claude-opus）→ 选项条
-    await pause();
+    await flush();
     stdin.write("\r"); // 确认仅本会话
-    await pause();
+    await flush();
     expect(onPick).toHaveBeenCalledWith("anthropic/claude-opus-4.6", false, null);
     unmount();
   });
@@ -318,40 +316,40 @@ describe("模型选择页", () => {
     const { lastFrame, stdin, unmount, onStartWizard } = renderPicker({
       initialFocus: "left",
     });
-    await pause();
+    await flush();
     // 左栏：最近使用 → 全部模型 → deepseek → openrouter
     stdin.write("\x1b[B"); // 全部模型
-    await pause();
+    await flush();
     stdin.write("\x1b[B"); // deepseek
-    await pause();
+    await flush();
     stdin.write("\r"); // Enter → 过滤为 deepseek
-    await pause();
+    await flush();
     const f1 = lastFrame() ?? "";
     expect(f1).toContain("deepseek/deepseek-chat");
     expect(f1).not.toContain("llama-4");
     // 选中服务商后焦点切到右栏；按 ← 回左栏继续移动到 ○ commandcode
     stdin.write("\x1b[D");
-    await pause();
+    await flush();
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write("\x1b[B");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(onStartWizard).toHaveBeenCalledWith("commandcode");
     unmount();
   });
 
   it("窄屏 <80 隐藏左栏，←/→ 循环范围", async () => {
     const { lastFrame, stdin, unmount } = renderPicker({ width: 60 });
-    await pause();
+    await flush();
     const f0 = lastFrame() ?? "";
     expect(f0).not.toContain("● deepseek"); // 左栏隐藏
     // 初始 scope=all；← 循环到 recent
     stdin.write("\x1b[D");
-    await pause();
+    await flush();
     const f1 = lastFrame() ?? "";
     expect(f1).toContain("anthropic/claude-opus-4.6");
     expect(f1).not.toContain("llama-4"); // recent 范围只有 1 个
@@ -382,16 +380,16 @@ describe("模型选择页", () => {
         }),
       ),
     );
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("1/40");
     stdin.write("\x1b[6~"); // PageDown
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("13/40");
     stdin.write("\x1b[F"); // End
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("m39");
     stdin.write("\x1b[H"); // Home
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("1/40");
     unmount();
   });
@@ -423,7 +421,7 @@ describe("模型选择页", () => {
       ],
       recents: [],
     });
-    await pause();
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("gw/responses-only");
     expect(frame).toContain("协议不支持");
@@ -469,7 +467,7 @@ describe("模型选择页", () => {
 describe("模型选择页 PageShell 形态（ADR-0045）", () => {
   it("面包屑加序号计数，分组名「最近使用 / 其余模型」，当前/默认变成附注标签", async () => {
     const { lastFrame, unmount } = renderPicker();
-    await pause();
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame.split("\n")[0]).toMatch(/^模型\s+1\/4/);
     expect(frame).toContain("其余模型");
@@ -481,28 +479,28 @@ describe("模型选择页 PageShell 形态（ADR-0045）", () => {
 
   it("→/← 与 Tab 都能切换栏；左栏 Enter 应用服务商范围并回到右栏", async () => {
     const { lastFrame, stdin, unmount } = renderPicker();
-    await pause();
+    await flush();
     stdin.write("\x1b[D");
-    await pause(80);
+    await flush();
     expect(lastFrame()).toContain("Enter 应用");
     // 左栏光标从当前范围（全部模型）开始 → 下移到 deepseek
     stdin.write("\x1b[B");
-    await pause(60);
+    await flush();
     stdin.write("\r");
-    await pause(100);
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("Enter 选择");
     expect(frame).toContain("deepseek/deepseek-chat");
     expect(frame).not.toContain("openrouter/llama-4");
     stdin.write("\t");
-    await pause(80);
+    await flush();
     expect(lastFrame()).toContain("Enter 应用");
     unmount();
   });
 
   it("选中行的价格、最大输出进说明区", async () => {
     const { lastFrame, stdin, unmount } = renderPicker({ recents: [] });
-    await pause();
+    await flush();
     // 第一行即 deepseek/deepseek-chat
     const frame = lastFrame() ?? "";
     expect(frame).toContain("上下文 128k");
@@ -510,7 +508,7 @@ describe("模型选择页 PageShell 形态（ADR-0045）", () => {
     expect(frame).toContain("$0.27/1.1 每 M");
     expect(frame).toContain("当前会话");
     stdin.write("\x1b[B");
-    await pause(80);
+    await flush();
     expect(lastFrame()).toContain("默认模型");
     unmount();
   });

@@ -1,6 +1,6 @@
 /** 待发输入列表（ADR-0070 §6）：标签、选中、暂停提示与溢出 */
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PendingInputsPanel, pendingPanelRows } from "../src/components/pending-inputs.js";
 
@@ -24,7 +24,7 @@ describe("PendingInputsPanel", () => {
         height={pendingPanelRows(2, false)}
       />,
     );
-    await new Promise((done) => setTimeout(done, 20));
+    await vi.waitFor(() => expect(lastFrame()).toContain("› 1 插话 改成蓝色  2 张图"));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("› 1 插话 改成蓝色  2 张图");
     expect(frame).toContain("2 排队 再来一次");
@@ -48,7 +48,7 @@ describe("PendingInputsPanel", () => {
         height={pendingPanelRows(items.length, true)}
       />,
     );
-    await new Promise((done) => setTimeout(done, 20));
+    await vi.waitFor(() => expect(lastFrame()).toContain("已暂停  Alt+R 继续发送"));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("已暂停  Alt+R 继续发送");
     expect(frame).toContain("还有 1 条");

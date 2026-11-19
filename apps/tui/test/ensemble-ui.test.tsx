@@ -50,7 +50,7 @@ import {
   toolDisplayName,
 } from "../src/text-format-ensemble.js";
 import { palettes } from "../src/theme.js";
-import { settle as settleRaw } from "./provider-test-utils.js";
+import { flush, settle as settleRaw } from "./provider-test-utils.js";
 
 // 与 session-search 同法：把 Ink 用的 chalk 调到真彩色，才能断言强调色
 const inkChalkPromise = (async (): Promise<{ level: 0 | 1 | 2 | 3 }> => {
@@ -85,7 +85,6 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 /** 超时时把当前帧带进报错 */
 let currentFrame: (() => string) | undefined;
@@ -109,6 +108,11 @@ async function press(ui: ReturnType<typeof render>, data: string): Promise<void>
 }
 async function keys(ui: ReturnType<typeof render>, ...seq: string[]): Promise<void> {
   for (const data of seq) await press(ui, data);
+}
+/** 输入斜杠命令并提交：命令与 Enter 分两次写，各留一次冲刷。 */
+async function enter(ui: ReturnType<typeof render>, value: string): Promise<void> {
+  await press(ui, value);
+  await press(ui, "\r");
 }
 
 const CHARTER = {
@@ -860,8 +864,11 @@ describe("/ensemble board", () => {
     await press(ui, "\x1b[A");
     await settle(() => !frame().split("\n")[0]?.includes("跟随"));
     const five = boardEnsemble({ posts: [...next.posts, post(5, { text: "第五帖正文" })] });
+    const beforeRerender = ui.frames.length;
     ui.rerender(createElement(EnsembleBoard, { ...props, ensemble: five }));
-    await pause();
+    await vi.waitFor(() => expect(ui.frames.length).toBeGreaterThan(beforeRerender), {
+      timeout: 2000,
+    });
     expect(frame()).not.toContain("第五帖正文");
     expect(frame()).toContain("@orders 返工");
     ui.unmount();
@@ -894,9 +901,9 @@ describe("/ensemble board", () => {
     expect(frame()).toContain("#3 @verifier → @orders");
     expect(frame().trimEnd().split("\n").at(-1)).not.toMatch(/^›/);
     ui.stdin.write("\t\t\t");
-    await pause();
+    await flush();
     ui.stdin.write("abc\r");
-    await pause();
+    await flush();
     expect(mocks.onPost).not.toHaveBeenCalled();
     ui.unmount();
   });
@@ -936,9 +943,9 @@ describe("/ensemble board", () => {
     await settle(() => frame().includes("model-api-2"));
     expect(frame()).not.toContain("model-old");
 
-    // Esc 关闭弹层而不关闭留言板（等 Ink 50ms ESC 计时器 settle 后再输入）
+    // Esc 关闭弹层而不关闭留言板（裸 Esc 由 Ink 挂起 20ms 才派发，等弹层消失）
     await press(ui, "\x1b");
-    await pause(80);
+    await flush();
     await settle(() => !frame().includes("model-api-2"));
     expect(mocks.onClose).not.toHaveBeenCalled();
 
@@ -1029,15 +1036,10 @@ describe("App 里的 Ensemble", () => {
     const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
     const frame = () => strip(ui.lastFrame() ?? "");
     currentFrame = frame;
-    const enter = async (value: string) => {
-      ui.stdin.write(value);
-      await pause(100);
-      ui.stdin.write("\r");
-    };
     let orders: RuntimeSession | undefined;
     try {
       await settle(() => frame().includes("fake-1"));
-      await enter("/ensemble 校验订单");
+      await enter(ui, "/ensemble 校验订单");
       // 状态块：orders 等确认
       await vi.waitFor(() => expect(frame()).toContain("◆ 订单校验"), { timeout: 8000 });
       await vi.waitFor(
@@ -1059,7 +1061,7 @@ describe("App 里的 Ensemble", () => {
       const memberClose = vi.spyOn(orders, "close");
 
       // board：成员列选 orders，Enter 进入成员会话
-      await enter("/ensemble board");
+      await enter(ui, "/ensemble board");
       await settle(() => frame().includes("订单校验  ") && frame().includes("全部"));
       await keys(ui, "\x1b[Z", "\x1b[B", "\r");
       // 成员会话：确认框就是现有权限框；帖子送达头部写本会话的名字
@@ -1067,11 +1069,12 @@ describe("App 里的 Ensemble", () => {
       await vi.waitFor(() => expect(frame()).toContain("echo ok > approved.txt"));
       // 状态块仍读指挥
       expect(frame()).toContain("◆ 订单校验");
+      await settle(() => frame().includes("需要确认"));
       await press(ui, "a");
       await vi.waitFor(() => expect(frame()).not.toMatch(/等待确认：echo ok/), { timeout: 8000 });
 
       // 回指挥：board 的「指挥」行
-      await enter("/ensemble board");
+      await enter(ui, "/ensemble board");
       await settle(() => frame().includes("全部"));
       await keys(ui, "\x1b[Z", "\x1b[A", "\r");
       await settle(() => !frame().includes("全部") && frame().includes("◆ 订单校验"));
@@ -1082,7 +1085,7 @@ describe("App 里的 Ensemble", () => {
       expect(memberInterrupt).not.toHaveBeenCalled();
       expect(coordInterrupt).not.toHaveBeenCalled();
 
-      await enter("/ensemble end");
+      await enter(ui, "/ensemble end");
       await settle(() => replaySessionView(session.durableEvents()).ensemble?.status === "ended");
       await settle(() => !frame().includes("◆ 订单校验"));
     } finally {
@@ -1107,22 +1110,20 @@ describe("App 里的 Ensemble", () => {
     );
     const frame = () => strip(ui.lastFrame() ?? "");
     currentFrame = frame;
-    const enter = async (value: string) => {
-      ui.stdin.write(value);
-      await pause(100);
-      ui.stdin.write("\r");
-    };
     try {
       await settle(() => frame().includes("fake-1"));
-      await enter("/ensemble 校验订单");
+      await enter(ui, "/ensemble 校验订单");
       await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
-      await enter("/ensemble board");
+      await enter(ui, "/ensemble board");
       await settle(() => frame().includes("全部"));
       await keys(ui, "\x1b[Z", "\x1b[B", "\r");
       await settle(() => frame().includes("指挥 → @orders · #3"));
+      // 权限框由成员的 pending 事件驱动：先等「需要确认」渲染出来再按 a，
+      // 否则确认键会落在还没订阅/还没权限框的层上而丢失（已知偶发超时的根因）。
+      await settle(() => frame().includes("需要确认"));
       await press(ui, "a");
       await vi.waitFor(() => expect(frame()).not.toMatch(/等待确认：echo ok/), { timeout: 8000 });
-      await enter(`/resume ${otherId}`);
+      await enter(ui, `/resume ${otherId}`);
       await settle(() => switchSession.mock.calls.length === 1);
       expect(calls[0]).toBe(otherId);
       // 回调之后整帧已换回指挥视图（不是成员会话）
@@ -1146,17 +1147,12 @@ describe("App 里的 Ensemble", () => {
     const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
     const frame = () => strip(ui.lastFrame() ?? "");
     currentFrame = frame;
-    const enter = async (value: string) => {
-      ui.stdin.write(value);
-      await pause(100);
-      ui.stdin.write("\r");
-    };
     let member: RuntimeSession | undefined;
     try {
       await settle(() => frame().includes("fake-1"));
-      await enter("/ensemble 校验订单");
+      await enter(ui, "/ensemble 校验订单");
       await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
-      await enter("/ensemble board");
+      await enter(ui, "/ensemble board");
       await settle(() => frame().includes("全部"));
       await keys(ui, "\x1b[Z", "\x1b[B", "\r");
       await settle(() => frame().includes("指挥 → @orders · #3"));
@@ -1209,17 +1205,12 @@ describe("App 里的 Ensemble", () => {
     const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
     const frame = () => strip(ui.lastFrame() ?? "");
     currentFrame = frame;
-    const enter = async (value: string) => {
-      ui.stdin.write(value);
-      await pause(100);
-      ui.stdin.write("\r");
-    };
     let member: RuntimeSession | undefined;
     try {
       await settle(() => frame().includes("fake-1"));
-      await enter("/ensemble 校验订单");
+      await enter(ui, "/ensemble 校验订单");
       await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
-      await enter("/ensemble board");
+      await enter(ui, "/ensemble board");
       await settle(() => frame().includes("全部"));
       await keys(ui, "\x1b[Z", "\x1b[B", "\r");
       await settle(() => frame().includes("指挥 → @orders · #3"));
@@ -1254,17 +1245,12 @@ describe("App 里的 Ensemble", () => {
     const ui = render(createElement(App, { session, runtime, env: ENV, inline: false }));
     const frame = () => strip(ui.lastFrame() ?? "");
     currentFrame = frame;
-    const enter = async (value: string) => {
-      ui.stdin.write(value);
-      await pause(100);
-      ui.stdin.write("\r");
-    };
     const text = "只发一次的私信";
     try {
       await settle(() => frame().includes("fake-1"));
-      await enter("/ensemble 校验订单");
+      await enter(ui, "/ensemble 校验订单");
       await vi.waitFor(() => expect(frame()).toContain("等待确认：echo ok"), { timeout: 8000 });
-      await enter("/ensemble board");
+      await enter(ui, "/ensemble board");
       await settle(() => frame().includes("全部"));
       await keys(ui, "\x1b[Z", "\x1b[B", "\r");
       await settle(() => frame().includes("指挥 → @orders · #3"));
@@ -1279,7 +1265,14 @@ describe("App 里的 Ensemble", () => {
       await press(ui, text);
       await press(ui, "\r");
       await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1), { timeout: 3000 });
-      await pause(200);
+      // 等这条私信真的进了待发列表：同一次 Enter 若重复 enqueue，这里会看到两次调用
+      await vi.waitFor(
+        async () => {
+          const pending = await member.pendingInputs();
+          expect(pending.items.some((i) => i.text.includes(text))).toBe(true);
+        },
+        { timeout: 3000 },
+      );
       expect(enqueue).toHaveBeenCalledTimes(1);
       release(stopText("orders 完成"));
       await vi.waitFor(

@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider } from "@nocturne/core";
 import { App } from "../src/app.js";
+import { flush } from "./provider-test-utils.js";
 
 const roots: string[] = [];
 function tmp(): string {
@@ -20,13 +21,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-const pause = () => new Promise((resolve) => setTimeout(resolve, 40));
 async function waitFor(check: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error("弹窗未出现");
-    await pause();
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: 5000, interval: 20 });
 }
 
 describe("弹窗位置", () => {
@@ -87,7 +83,7 @@ describe("弹窗位置", () => {
         createElement(App, { session, runtime, env: { ascii: false, animated: false }, inline }),
         { stdout, stdin, stderr, exitOnCtrlC: false, patchConsole: false, debug: true },
       );
-      await pause();
+      await flush();
       const turn = session.submit({ text: "检查布局" });
       try {
         await waitFor(() =>
@@ -110,14 +106,14 @@ describe("弹窗位置", () => {
         if (!inline) expect(lines.length).toBe(rows - 1);
         else expect(bottom - top).toBeLessThan(12);
         if (rows === 8) {
-          await pause();
+          await flush();
           (stdin as unknown as PassThrough).write(name === "ask_user" ? "\x1b[A" : "\t");
           await waitFor(() =>
             frame.includes(name === "ask_user" ? "> ( ) 拒绝回答" : ">[s] 本会话内允许"),
           );
         }
         (stdin as unknown as PassThrough).write("\x1b[5~");
-        await pause();
+        await flush();
         expect(frame).not.toContain("已向上翻阅");
       } finally {
         session.interrupt();

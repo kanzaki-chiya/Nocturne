@@ -26,13 +26,8 @@ import { ProviderPage } from "../src/components/provider-page.js";
 import { draftToPatch, ModelEditPane } from "../src/components/model-settings-view.js";
 import { TuiEnvContext } from "../src/env.js";
 
-const pause = (ms = 50) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await pause(20);
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
 }
 
 /**

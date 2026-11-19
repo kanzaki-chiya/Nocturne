@@ -30,6 +30,7 @@ import { TuiEnvContext } from "../src/env.js";
 import type { SwitchSessionFn } from "../src/types.js";
 import { internalSession } from "./internal-session.js";
 import { APP_VERSION } from "../src/version.js";
+import { flush } from "./provider-test-utils.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
@@ -44,14 +45,9 @@ const tmp = (p: string) => {
 };
 
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await pause(20);
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
 }
 const inEnv = (child: React.ReactNode) =>
   createElement(TuiEnvContext.Provider, { value: ENV }, child);
@@ -108,16 +104,16 @@ describe("TUI", () => {
       // 目录懒加载：输入 / 才拉取，回车走先取目录再分发的兜底路径
       screen.stdin.write("/");
       await vi.waitFor(() => expect(catalog).toHaveBeenCalled());
-      await pause(100);
+      await flush();
       screen.stdin.write("cod");
-      await pause(50);
+      await flush();
       screen.stdin.write("\r");
-      await pause(50);
+      await flush();
       screen.stdin.write("\r");
       await waitFor(() => (screen.lastFrame() ?? "").includes("用法：/Codex 任务"));
       expect(submit).not.toHaveBeenCalled();
       screen.stdin.write("检查  两个空格");
-      await pause(50);
+      await flush();
       screen.stdin.write("\r");
       await vi.waitFor(() =>
         expect(submit).toHaveBeenCalledWith({
@@ -173,13 +169,13 @@ describe("TUI", () => {
     const { runtime, session } = await makeSession();
     const screen = render(createElement(App, { session, runtime, env: ENV, inline }));
     await waitFor(() => (screen.lastFrame() ?? "").includes("fake-model"));
-    await pause(100);
+    await flush();
     screen.stdin.write("/settings");
     screen.stdin.write("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("默认权限预设"));
     expect(screen.lastFrame()).toContain("在 /model 设置");
     expect(screen.lastFrame()).not.toContain("上下文");
-    await pause(100);
+    await flush();
     screen.stdin.write("\x1b");
     await waitFor(
       () =>
@@ -210,13 +206,13 @@ describe("TUI", () => {
         switchSession,
       }),
     );
-    await pause(60);
+    await flush();
     stdin.write("hello");
     stdin.write("\r");
     await waitFor(() => submit.mock.calls.length === 1);
     stdin.write(cmd);
     stdin.write("\r");
-    await pause(100);
+    await waitFor(() => (lastFrame() ?? "").includes("会话忙"));
     expect(newSession).not.toHaveBeenCalled();
     expect(switchSession).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("会话忙");
@@ -243,13 +239,13 @@ describe("TUI", () => {
         newSession,
       }),
     );
-    await pause(60);
+    await flush();
     stdin.write("/new");
     stdin.write("\r");
     await waitFor(() => newSession.mock.calls.length === 1);
     stdin.write("must not submit");
     stdin.write("\r");
-    await pause(80);
+    await waitFor(() => (lastFrame() ?? "").includes("正在切换会话"));
     expect(submit).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("正在切换会话");
     finish({ kind: "busy" });
@@ -281,17 +277,17 @@ describe("TUI", () => {
       expect(lastFrame()).toContain(label);
     }
     stdin.write("\t");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ decision: "allow", remember: "session" });
     stdin.write("d");
-    await pause();
+    await flush();
     expect(lastFrame()).toContain("Enter 发送拒绝");
     stdin.write("请先检查");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ decision: "deny", feedback: "请先检查" });
     unmount();
   });
@@ -309,12 +305,12 @@ describe("TUI", () => {
     const { stdin, unmount } = render(
       inEnv(createElement(PermissionDialog, { pending, active: true, onReply: reply, width: 80 })),
     );
-    await pause();
+    await flush();
     // Shift+Tab：焦点 0 → 末位 deny_stop；Enter 激活 → 拒绝并停止
     stdin.write("\x1b[Z");
-    await pause();
+    await flush();
     stdin.write("\r");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ decision: "deny", stop: true });
     unmount();
   });
@@ -460,10 +456,10 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await flush();
     expect(lastFrame()).not.toContain("思考:");
     stdin.write("\x1b[Z");
-    await pause(80);
+    await flush();
     expect(lastFrame()).not.toContain("未声明可用思考档位");
     expect(lastFrame()).not.toContain("思考:");
     unmount();
@@ -526,14 +522,14 @@ describe("TUI", () => {
     expect(screen.lastFrame()).toContain("未明确授权目标");
     expect(screen.lastFrame()).not.toContain("[s]");
     expect(screen.lastFrame()).not.toContain("[p]");
-    await pause();
+    await flush();
     screen.stdin.write("s");
-    await pause();
+    await flush();
     screen.stdin.write("p");
-    await pause();
+    await flush();
     expect(reply).not.toHaveBeenCalled();
     screen.stdin.write("a");
-    await pause();
+    await flush();
     expect(reply).toHaveBeenCalledWith({ decision: "allow" });
     screen.unmount();
   });
@@ -693,7 +689,7 @@ describe("TUI", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("fake-model");
     stdin.write("\x03"); // Ctrl+C：空闲退出
-    await new Promise((r) => setTimeout(r, 50));
+    await flush();
     unmount();
     await session.close();
   });
@@ -788,7 +784,7 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, newSession, inline: true }),
     );
-    await pause(60);
+    await flush();
     // 每次切换等到分隔行出现且输入框解除「正在切换」再发下一条：
     // 固定间隔在系统计时器粒度粗（约 15.6ms）时不够，切换尚未完成就会被拒
     for (const [i, cmd] of ["/new", "/clear"].entries()) {
@@ -841,7 +837,7 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, newSession }),
     );
-    await pause(60);
+    await flush();
     await session.submit({ text: "旧问题" });
     await waitFor(() => (lastFrame() ?? "").includes("旧回答"));
     stdin.write("\x1b[5~");
@@ -874,7 +870,7 @@ describe("TUI", () => {
       createElement(App, { session, runtime, env: ENV, switchSession: vi.fn() }),
     );
     try {
-      await pause(50);
+      await flush();
       stdin.write("/resume");
       stdin.write("\r");
       await waitFor(() => (lastFrame() ?? "").includes("切换到会话（当前目录）"));
@@ -898,7 +894,7 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session: s1, runtime, env: ENV, switchSession: vi.fn() }),
     );
-    await pause(50);
+    await flush();
     stdin.write("/resume");
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("切换到会话（当前目录）"));
@@ -910,7 +906,7 @@ describe("TUI", () => {
 
   it("/resume 列表：显示会话、方向键移动并选择", async () => {
     const { runtime, session: s1 } = await makeSession();
-    await pause();
+    await flush();
     const s2 = await runtime.createSession({ model: "fake/fake-model" });
     const s2id = s2.id;
     await s2.close();
@@ -921,7 +917,7 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session: s1, runtime, env: ENV, switchSession: switcher }),
     );
-    await pause(50);
+    await flush();
     stdin.write("/resume");
     stdin.write("\r");
     await waitFor(
@@ -933,17 +929,17 @@ describe("TUI", () => {
     const frame = lastFrame() ?? "";
     const s2First = frame.indexOf(s2id) < frame.indexOf(s1.id);
     stdin.write("\u001b[B"); // ↓ 到第二行
-    await pause();
+    await flush();
     if (!s2First) {
       stdin.write("\u001b[B"); // s2 在第二行时多按一次 ↓（PickList 环绕回 s1 也无妨，重按 ↓ 回到 s2）
-      await pause();
+      await flush();
       stdin.write("\u001b[A"); // 回 s2
-      await pause();
+      await flush();
       stdin.write("\u001b[B");
-      await pause();
+      await flush();
     } else {
       stdin.write("\u001b[A"); // 回第一行 s2
-      await pause();
+      await flush();
     }
     stdin.write("\r");
     await waitFor(
@@ -990,12 +986,12 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, provider }),
     );
-    await pause(80);
+    await flush();
     stdin.write("/model");
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("fake/fake-1"));
     // 首帧出现后页面的按键订阅在 effect 里才挂上，留一点时间再打字
-    await pause(100);
+    await flush();
     const frame = lastFrame() ?? "";
     // 备用屏内渲染模型选择页：面包屑 + 模型行
     expect(frame).toContain("全部模型");
@@ -1031,12 +1027,12 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, provider }),
     );
-    await pause(80);
+    await flush();
     stdin.write("/provider");
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("○"));
     // 首帧出现后页面的按键订阅在 effect 里才挂上，留一点时间再打字
-    await pause(100);
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("服务商");
     expect(frame).toContain("可添加");
@@ -1062,10 +1058,10 @@ describe("TUI", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, switchSession: switcher }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => (lastFrame() ?? "").includes("fake-model"));
     stdin.write("/resume sX");
     stdin.write("\r");
-    await new Promise((r) => setTimeout(r, 150));
+    await waitFor(() => (lastFrame() ?? "").includes("占用"));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("占用");
     expect(frame).not.toContain("已切换到会话");

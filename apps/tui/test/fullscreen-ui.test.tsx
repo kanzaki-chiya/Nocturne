@@ -16,6 +16,7 @@ import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "
 import { App } from "../src/app.js";
 import { mergeInputHistory, splitTextBlocks } from "../src/app.js";
 import { internalSession } from "./internal-session.js";
+import { flush } from "./provider-test-utils.js";
 
 const tmpRoots: string[] = [];
 beforeEach(() => vi.stubEnv("NOCTURNE_HOME", tmp("nct-tui-home-")));
@@ -29,14 +30,25 @@ const tmp = (p: string) => {
   return d;
 };
 const ENV = { ascii: false, animated: false };
-const pause = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await pause(20);
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
+}
+
+/**
+ * 裸 Esc 由 Ink 挂起约 20ms 才派发（pendingInputFlushDelayMilliseconds=20）。
+ * 用假计时器精确推进这一步，并可越过 App 在 Esc 之后 80ms 的吞字母窗口
+ * （src/keys.ts SWALLOW_MS）；setImmediate/MessageChannel 上的 React 调度不被伪造。
+ */
+async function escape(stdin: { write(data: string): void }, advance = 25): Promise<void> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    stdin.write("\x1b");
+    await vi.advanceTimersByTimeAsync(advance);
+  } finally {
+    vi.useRealTimers();
   }
+  await flush();
 }
 
 async function sessionWithEffort(): Promise<{ runtime: Runtime; session: RuntimeSession }> {
@@ -178,30 +190,30 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(80);
+    await flush();
     stdin.write("/preset");
-    await pause(40);
+    await flush();
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("选择权限预设"));
     expect(lastFrame()).toContain("› default");
-    await pause(60);
+    await flush();
     stdin.write("\x1b[B");
-    await pause(80);
+    await flush();
     expect(lastFrame()).toContain("› auto-edit");
     stdin.write("\r");
     await waitFor(() => session.state().config.permissionPreset === "auto-edit");
     stdin.write("/effort");
-    await pause(40);
+    await flush();
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("选择思考档位"));
     expect(lastFrame()).toContain("› off");
-    await pause(60);
+    await flush();
     stdin.write("\x1b[B");
     await waitFor(() => (lastFrame() ?? "").includes("› low"));
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("思考:low"));
     stdin.write("/effort");
-    await pause(40);
+    await flush();
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("选择思考档位"));
     expect(lastFrame()).toContain("› low");
@@ -233,19 +245,26 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(80);
+    await flush();
     stdin.write("草稿");
-    stdin.write("\x1b");
-    await pause(120);
+    await escape(stdin, 120);
     expect(lastFrame()).toContain("草稿");
     expect(interrupt).not.toHaveBeenCalled();
     const turn = session.submit({ text: "开始" });
     await waitFor(() => (lastFrame() ?? "").includes("思考中"));
-    stdin.write("\x1b");
-    stdin.write("m");
-    await pause(120);
+    // conhost 把 Alt 拆成 Esc+字母：字母在 80ms 窗口内到达应被吞掉并取消中断
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      stdin.write("\x1b");
+      await vi.advanceTimersByTimeAsync(25); // Ink 派发裸 Esc，armEscapeInterrupt
+      stdin.write("m");
+      await vi.advanceTimersByTimeAsync(120); // 越过 80ms 中断窗口，期间不得中断
+    } finally {
+      vi.useRealTimers();
+    }
+    await flush();
     expect(interrupt).not.toHaveBeenCalled();
-    stdin.write("\x1b");
+    await escape(stdin, 120);
     await waitFor(() => interrupt.mock.calls.length === 1);
     await turn;
     await waitFor(() => (lastFrame() ?? "").includes("idle"));
@@ -258,7 +277,7 @@ describe("全屏界面", () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, inline: true }),
     );
-    await pause(80);
+    await flush();
     expect(frameLines(lastFrame()).length).toBeLessThan(23);
     unmount();
     await session.close();
@@ -296,7 +315,7 @@ describe("全屏界面", () => {
       patchConsole: false,
       debug: true,
     });
-    await pause(80);
+    await flush();
     const frame = stdout.frames.at(-1) ?? "";
     const lines = frameLines(frame);
     expect(lines.length).toBeLessThanOrEqual(7);
@@ -311,7 +330,7 @@ describe("全屏界面", () => {
       createElement(App, { session, runtime, env: ENV, inline: true }),
     );
     expect(splitTextBlocks("甲\n\n乙", false)).toEqual({ blocks: ["甲\n\n"], tail: "乙" });
-    await pause(80);
+    await flush();
     const raw = internalSession(session);
     await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "turn" });
     raw.emitEphemeral(
@@ -361,7 +380,7 @@ describe("全屏界面", () => {
     await waitFor(() => (lastFrame() ?? "").includes("完毕"));
     expect(occurrences(lastFrame() ?? "", "完成块")).toBe(1);
     stdin.write("\x1b[5~");
-    await pause(40);
+    await flush();
     expect(lastFrame()).not.toContain("已向上翻阅");
     unmount();
     await session.close();
@@ -374,7 +393,7 @@ describe("全屏界面", () => {
       const { lastFrame, unmount } = render(
         createElement(App, { session, runtime, env: ENV, inline }),
       );
-      await pause(80);
+      await flush();
       const raw = internalSession(session);
       await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "turn" });
       raw.emitEphemeral(
@@ -455,7 +474,7 @@ describe("全屏界面", () => {
     const { lastFrame, unmount } = render(
       createElement(App, { session, runtime, env: ENV, inline: true }),
     );
-    await pause(80);
+    await flush();
     const raw = internalSession(session);
     await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "turn" });
     raw.emitEphemeral(
@@ -542,7 +561,7 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(80);
+    await flush();
     await session.submit({ text: "长回答" });
     await waitFor(() => (lastFrame() ?? "").includes("完毕"));
     stdin.write("\x1b[5~");
@@ -579,7 +598,7 @@ describe("全屏界面", () => {
     });
     const session = await runtime.createSession({ model: "fake/fake-1" });
     const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
-    await pause(80);
+    await flush();
     await session.submit({ text: "问" });
     await waitFor(() => (lastFrame() ?? "").includes("结束。"));
     const frame = lastFrame() ?? "";
@@ -624,7 +643,7 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session: s1, runtime, env: ENV, newSession, inline: true }),
     );
-    await pause(80);
+    await flush();
     const turn = s1.submit({ text: "问" });
     await waitFor(() => (lastFrame() ?? "").includes("第一步"));
     // 流式中途 Ctrl+C 中断：部分内容落盘后只写一次，未发出的部分不补写
@@ -668,20 +687,20 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV, provider }),
     );
-    await pause(60);
+    await flush();
     stdin.write("草稿");
-    await pause(40);
+    await flush();
     expect(lastFrame()).toContain("草稿");
     for (const _ of "草稿") stdin.write("\x7f");
-    await pause(40);
+    await flush();
     stdin.write("/model");
     stdin.write("\r");
-    await pause(250);
-    expect(lastFrame()).toContain("全部模型");
-    stdin.write("\x1b");
-    stdin.write("\x1b");
-    await pause(150);
+    await waitFor(() => (lastFrame() ?? "").includes("全部模型"));
+    await escape(stdin, 25); // 第一下：关闭模型页
+    await escape(stdin, 120); // 第二下：空闲且输入非空，只保留输入，不打开轮次列表
+    await waitFor(() => !(lastFrame() ?? "").includes("全部模型"));
     expect(lastFrame()).toContain("/model");
+    expect(lastFrame()).not.toContain("轮次列表");
     unmount();
     await session.close();
   });
@@ -738,7 +757,7 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(80);
+    await flush();
     const turn = session.submit({ text: "开始" });
     await waitFor(() => (lastFrame() ?? "").includes("思考中"));
     // 快捷键循环
@@ -747,12 +766,12 @@ describe("全屏界面", () => {
     expect(lastFrame()).toContain("auto-edit");
     // 忙时 /preset 带参直接切换（文字与回车分开发，避免补全列表抢走 Enter）
     stdin.write("/preset smart");
-    await pause(80);
+    await flush();
     stdin.write("\r");
     await waitFor(() => session.state().config.permissionPreset === "smart");
     // ADR-0070：忙时普通输入回车 = 插话入列（不再只是忙时提示）
     stdin.write("第二条");
-    await pause(80);
+    await flush();
     stdin.write("\r");
     await waitFor(() => (lastFrame() ?? "").includes("插话"));
     await waitFor(() => session.pendingInputs().items.length === 1);
@@ -769,7 +788,7 @@ describe("全屏界面", () => {
   it("状态栏是百分比 / 大写长度，模型段只显示模型 ID", async () => {
     const { runtime, session } = await sessionWithEffort();
     const { lastFrame, unmount } = render(createElement(App, { session, runtime, env: ENV }));
-    await pause(80);
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("deepseek/deepseek-v4.1-flash");
     expect(frame).not.toContain("commandcode/");
@@ -783,18 +802,18 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await flush();
     stdin.write("/p");
-    await pause(60);
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("/provider");
     expect(frame).toContain("/preset");
     expect(frame.indexOf("/preset")).toBeLessThan(frame.indexOf("/provider"));
     stdin.write("\t");
-    await pause(40);
+    await flush();
     expect(lastFrame()).toContain("/preset");
-    stdin.write("\x1b");
-    await pause(40);
+    await escape(stdin, 120);
+    await waitFor(() => !(lastFrame() ?? "").includes("/provider"));
     expect(lastFrame()).toContain("/preset");
     unmount();
     await session.close();
@@ -805,17 +824,15 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await flush();
     stdin.write("/pre");
-    await pause(40);
+    await flush();
     stdin.write("\t");
-    await pause(40);
-    stdin.write("\x1b");
-    await pause(40);
+    await flush();
+    await escape(stdin, 120);
     stdin.write("\x7f");
     stdin.write("X");
-    await pause(60);
-    expect(lastFrame()).toContain("› /preseX");
+    await waitFor(() => (lastFrame() ?? "").includes("› /preseX"));
     expect(lastFrame()).not.toContain("/prXset");
     unmount();
     await session.close();
@@ -857,7 +874,7 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await flush();
     stdin.write("你好abc");
     stdin.write("\r");
     // 事件视图回到 idle 后，提交 Promise 仍可能尚未结算；等待输入框解除禁用。
@@ -893,7 +910,7 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await flush();
     stdin.write("你好abc");
     stdin.write("\r");
     await waitFor(() => {
@@ -901,7 +918,7 @@ describe("全屏界面", () => {
       return frame.includes("完毕") && frame.includes("idle") && !frame.includes("会话忙");
     });
     release();
-    await pause(30);
+    await flush();
     stdin.write("\x1b[A");
     await waitFor(() => (lastFrame() ?? "").includes("› 你好abc"));
     stdin.write("\x1b[A");
@@ -926,7 +943,7 @@ describe("全屏界面", () => {
     );
     await waitFor(() => historyLoad.mock.results.length > 0);
     await historyLoad.mock.results[0]?.value;
-    await pause(80);
+    await flush();
     stdin.write("\x1b[A");
     await waitFor(() => (lastFrame() ?? "").includes("[Paste #1, +1 lines]"));
     unmount();
@@ -974,9 +991,9 @@ describe("全屏界面", () => {
     const { lastFrame, stdin, unmount } = render(
       createElement(App, { session, runtime, env: ENV }),
     );
-    await pause(60);
+    await flush();
     stdin.write("/effort ");
-    await pause(60);
+    await flush();
     const frame = lastFrame() ?? "";
     expect(frame).toContain("off");
     expect(frame).toContain("low");

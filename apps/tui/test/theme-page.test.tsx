@@ -26,11 +26,7 @@ afterEach(() => {
 });
 
 async function waitFor(check: () => boolean, timeout = 8000): Promise<void> {
-  const end = Date.now() + timeout;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("waitFor 超时");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+  await vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 20 });
 }
 
 const ENV = { ascii: false, animated: false };

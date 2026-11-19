@@ -14,8 +14,8 @@ import { SettingsPage } from "../src/components/settings-page.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { detectTuiEnv, TuiEnvContext } from "../src/env.js";
 import { ThemeContext, palettes, type ThemeId } from "../src/theme.js";
+import { flush } from "./provider-test-utils.js";
 
-const pause = (ms = 100) => new Promise((resolve) => setTimeout(resolve, ms));
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -171,13 +171,16 @@ function page(
   const screen = render(createElement(Harness));
   const ready = async () => {
     await waitFor(() => (screen.lastFrame() ?? "").includes("默认权限预设"));
-    await pause();
+    await flush();
   };
-  // 先等帧变化（不变的按键最多等 300ms），再留时间给新组件订阅 useInput，避免慢机器上丢键
+  // 先等帧变化（不变的按键最多等 300ms），再冲刷一次让新组件接上 useInput，避免慢机器上丢键
   const settle = async (before: string | undefined) => {
-    const deadline = Date.now() + 300;
-    while (screen.lastFrame() === before && Date.now() < deadline) await pause(10);
-    await pause();
+    if (screen.lastFrame() === before) {
+      await vi
+        .waitFor(() => expect(screen.lastFrame()).not.toBe(before), { timeout: 300 })
+        .catch(() => undefined);
+    }
+    await flush();
   };
   const input = async (value: string) => {
     const before = screen.lastFrame();
@@ -435,7 +438,7 @@ describe("ADR-0045 设置页", () => {
     await screen.down(4);
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("选择 shell"));
-    await pause();
+    await flush();
     await screen.input("\x1b[B");
     await screen.input("\r");
     await waitFor(() => screen.shell.mock.calls.length === 1);
@@ -445,7 +448,7 @@ describe("ADR-0045 设置页", () => {
     expect(selected(screen.lastFrame())).toContain("default 档位模型");
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("跟随当前模型"));
-    await pause();
+    await flush();
     await screen.input("\x1b[B");
     await screen.input("\r");
     await waitFor(() => screen.update.mock.calls.length === 1);
@@ -459,7 +462,7 @@ describe("ADR-0045 设置页", () => {
     await screen.down(3);
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("选择主题"));
-    await pause();
+    await flush();
     await screen.input("\x1b[B");
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("默认权限预设"));

@@ -12,6 +12,7 @@ import { splitInputTokens } from "../src/file-refs.js";
 import { layoutEntry } from "../src/lines.js";
 import { truncateMiddle } from "../src/format.js";
 import { webFetchSummary } from "../src/web-fetch.js";
+import { flush } from "./provider-test-utils.js";
 
 const roots: string[] = [];
 const temp = () => {
@@ -162,7 +163,7 @@ describe("TUI 文件引用", () => {
     );
     try {
       await vi.waitFor(() => expect(lastFrame()).toContain("fake-model"), { timeout: 5000 });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await flush();
       stdin.write("@sr");
       await vi.waitFor(() => expect(lastFrame()).toContain("正在索引"), { timeout: 5000 });
       stdin.write("\r");
@@ -203,7 +204,7 @@ describe("TUI 文件引用", () => {
     );
     try {
       await vi.waitFor(() => expect(lastFrame()).toContain("fake-1"), { timeout: 5000 });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await flush();
       stdin.write("@old");
       await vi.waitFor(() => expect(lastFrame()).toContain("old.ts"), { timeout: 5000 });
       stdin.write("\u007f");

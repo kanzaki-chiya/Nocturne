@@ -17,6 +17,7 @@ import {
 } from "../src/components/page/layout.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { TuiEnvContext } from "../src/env.js";
+import { flush } from "./provider-test-utils.js";
 
 const GROUPS = [
   { id: "a", label: "会话默认" },
@@ -49,8 +50,6 @@ const ROWS: ShellRow[] = [
     trail: [{ text: "设置", tone: "muted" }],
   },
 ];
-
-const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function shell(overrides: Partial<PageShellProps> = {}, ascii = false) {
   const props: PageShellProps = {
@@ -94,7 +93,7 @@ async function press(ui: ReturnType<typeof render>, data: string) {
   const before = ui.lastFrame();
   ui.stdin.write(data);
   await vi.waitFor(() => expect(ui.lastFrame()).not.toBe(before), { timeout: 2000, interval: 10 });
-  await pause(10);
+  await flush();
 }
 const selectedLine = (frame: string | undefined) => lines(frame).find((l) => l.includes("▌"));
 
@@ -236,7 +235,7 @@ describe("PageShell 按键", () => {
     const a = shell({ onAdjust });
     a.ui.stdin.write("\x1b[C");
     a.ui.stdin.write("\x1b[D");
-    await pause();
+    await flush();
     expect(onAdjust.mock.calls).toEqual([
       ["preset", 1],
       ["preset", -1],
@@ -254,7 +253,7 @@ describe("PageShell 按键", () => {
     const onActivate = vi.fn();
     const { ui } = shell({ onActivate });
     ui.stdin.write("\r");
-    await pause();
+    await flush();
     expect(onActivate).toHaveBeenCalledWith("preset");
     for (let i = 0; i < 4; i++) await press(ui, "\x1b[B");
     expect(selectedLine(ui.lastFrame())).toContain("默认权限预设");
@@ -285,7 +284,7 @@ describe("PageShell 按键", () => {
     const { ui } = shell({ active: false, onClose });
     ui.stdin.write("\x1b");
     ui.stdin.write("a");
-    await pause(60);
+    await flush();
     expect(onClose).not.toHaveBeenCalled();
     expect(lines(ui.lastFrame())[2]).not.toContain("过滤");
     ui.unmount();
@@ -299,7 +298,7 @@ describe("PageShell 按键", () => {
     });
     expect(ui.lastFrame()).toContain("保存失败：disk");
     ui.stdin.write("\x1b[3~");
-    await pause();
+    await flush();
     expect(onKey).toHaveBeenCalled();
     expect(lines(ui.lastFrame())[2]).not.toContain("过滤");
     ui.unmount();
@@ -325,7 +324,7 @@ describe("PageShell 鼠标", () => {
     };
     click("row:theme");
     await vi.waitFor(() => expect(selectedLine(ui.lastFrame())).toContain("主题"));
-    await pause();
+    await flush();
     click("row:theme");
     expect(onActivate).toHaveBeenCalledWith("theme");
     ui.unmount();

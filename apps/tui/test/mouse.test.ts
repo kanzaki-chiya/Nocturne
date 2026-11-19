@@ -77,15 +77,20 @@ describe("SGR 鼠标解析", () => {
   });
 
   it("裸 ESC 尾巴到时限放行（Esc 键不被挂死）", async () => {
-    const { p, events, flushed } = parser();
-    expect(p.feed("\x1b")).toBe("");
-    // 前一块的 "\x1b" 与 "\x1b[" 拼接后仍不是鼠标序列：ESC 即刻放行，
-    // 仅剩 "\x1b[" 挂起等超时
-    expect(p.feed("\x1b[")).toBe("\x1b");
-    await new Promise((r) => setTimeout(r, 300));
-    expect(flushed).toEqual(["\x1b["]);
-    expect(events).toEqual([]);
-    p.dispose();
+    vi.useFakeTimers();
+    try {
+      const { p, events, flushed } = parser();
+      expect(p.feed("\x1b")).toBe("");
+      // 前一块的 "\x1b" 与 "\x1b[" 拼接后仍不是鼠标序列：ESC 即刻放行，
+      // 仅剩 "\x1b[" 挂起等超时
+      expect(p.feed("\x1b[")).toBe("\x1b");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(flushed).toEqual(["\x1b["]);
+      expect(events).toEqual([]);
+      p.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("开/关序列的字节与顺序", () => {

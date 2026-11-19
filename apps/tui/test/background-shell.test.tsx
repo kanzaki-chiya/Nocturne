@@ -13,6 +13,7 @@ import { PendingInputsPanel } from "../src/components/pending-inputs.js";
 import { TuiEnvContext } from "../src/env.js";
 import { layoutEntry } from "../src/lines.js";
 import { runSlash } from "../src/commands.js";
+import { flush } from "./provider-test-utils.js";
 
 const task: BackgroundShellTask = {
   taskId: "task",
@@ -155,10 +156,10 @@ describe("TUI background shell", () => {
     try {
       await vi.waitFor(() => expect(ui.lastFrame()).toContain("fixture"));
       expect(ui.lastFrame()).not.toContain("expired");
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await flush();
       ui.stdin.write("\r");
       await vi.waitFor(() => expect(ui.lastFrame()).toContain("live tail"));
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await flush();
       ui.stdin.write("\r");
       await vi.waitFor(() => expect(shellKill).toHaveBeenCalledWith("task"));
     } finally {

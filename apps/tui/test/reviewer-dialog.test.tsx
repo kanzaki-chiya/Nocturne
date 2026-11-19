@@ -1,15 +1,12 @@
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  defaultJevReviewer,
-  type JevReviewerConfig,
-  type ProviderOverview,
-} from "@nocturne/core";
+import { defaultJevReviewer, type JevReviewerConfig, type ProviderOverview } from "@nocturne/core";
 import { createRuntimeStub } from "@nocturne/core/testing";
 import { ReviewerDialog } from "../src/components/reviewer-dialog.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { detectTuiEnv, TuiEnvContext } from "../src/env.js";
+import { flush } from "./provider-test-utils.js";
 
 const borrowed = {
   id: "opencode-go",
@@ -21,7 +18,6 @@ const screens: ReturnType<typeof render>[] = [];
 afterEach(() => {
   for (const screen of screens.splice(0)) screen.unmount();
 });
-const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
 function dialog(
   options: {
     initial?: JevReviewerConfig;
@@ -65,13 +61,14 @@ function dialog(
     ),
   );
   screens.push(screen);
-  // Ink 渲染一帧可能超过 100ms；固定等待会在新组件订阅 useInput 前写入按键而丢键，
-  // 因此先等帧变化（不变的按键最多等 300ms），再留 100ms 给被动 effect 订阅输入。
+  // 先等帧变化（不变的按键最多等 300ms），再冲刷到新组件接上 useInput，避免丢键。
   const settle = async (before: string | undefined) => {
-    const deadline = Date.now() + 300;
-    while (screen.lastFrame() === before && Date.now() < deadline)
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    await pause();
+    if (screen.lastFrame() === before) {
+      await vi
+        .waitFor(() => expect(screen.lastFrame()).not.toBe(before), { timeout: 300 })
+        .catch(() => undefined);
+    }
+    await flush();
   };
   const input = async (value: string) => {
     const before = screen.lastFrame();
