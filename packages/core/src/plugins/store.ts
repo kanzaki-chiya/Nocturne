@@ -1,14 +1,13 @@
 /**
  * `<NOCTURNE_HOME>/plugins.json` 读写（与 mcp.json 等共用 config 写队列与原子写）。
- * 格式：{ "version": 1, "plugins": { "<id>": { "enabled": true, "hash": "sha256:..." } } }
+ * 格式：
+ * - 非内置插件启用：{ "enabled": true, "hash": "sha256:..." }
+ * - 内置插件停用：{ "enabled": false }（默认开启，重新开启时删除条目）
  */
 import { enqueueConfigWrite, writeJsonAtomic } from "../config/files.js";
 import type { Platform } from "../platform/index.js";
 
-export interface StoredPluginEntry {
-  enabled: true;
-  hash: string;
-}
+export type StoredPluginEntry = { enabled: true; hash: string } | { enabled: false };
 
 export interface PluginStoreReadResult {
   entries: Map<string, StoredPluginEntry>;
@@ -42,16 +41,19 @@ export function createPluginStore(platform: Platform, nocturneHome: string) {
       return { entries, warnings };
     }
     for (const [id, item] of Object.entries(raw.plugins)) {
-      if (
-        !isPlainObject(item) ||
-        item.enabled !== true ||
-        typeof item.hash !== "string" ||
-        !HASH_RE.test(item.hash)
-      ) {
+      if (!isPlainObject(item)) {
         warnings.push(`plugins_config_invalid：${filePath} 中条目 ${id} 无效，已忽略`);
         continue;
       }
-      entries.set(id, { enabled: true, hash: item.hash });
+      if (item.enabled === false) {
+        entries.set(id, { enabled: false });
+        continue;
+      }
+      if (item.enabled === true && typeof item.hash === "string" && HASH_RE.test(item.hash)) {
+        entries.set(id, { enabled: true, hash: item.hash });
+        continue;
+      }
+      warnings.push(`plugins_config_invalid：${filePath} 中条目 ${id} 无效，已忽略`);
     }
     return { entries, warnings };
   }
@@ -60,10 +62,17 @@ export function createPluginStore(platform: Platform, nocturneHome: string) {
     id: string,
     enabled: boolean,
     computeHash?: () => Promise<string>,
+    options?: { builtin?: boolean | undefined },
   ): Promise<void> {
     await enqueueConfigWrite(fs, async () => {
       const { entries } = await readState();
-      if (enabled) {
+      if (options?.builtin === true) {
+        if (enabled) {
+          entries.delete(id);
+        } else {
+          entries.set(id, { enabled: false });
+        }
+      } else if (enabled) {
         if (!computeHash) throw new Error("启用插件需要计算哈希");
         const hash = await computeHash();
         entries.set(id, { enabled: true, hash });

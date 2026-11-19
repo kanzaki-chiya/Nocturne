@@ -3,6 +3,7 @@
  * 所有测试均使用临时目录夹具，不读写本机真实 `~/.codex` / `~/.claude`。
  */
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -741,6 +742,8 @@ process.stdin.on("data", d => raw += d).on("end", () => {
       plugin: {
         pluginLabel: "matchers@mkt",
         host: "claude",
+        mode: "compat",
+        compatHost: "claude",
         pluginRoot: matcherPlugin.overview.root,
         pluginDataDir: path.join(f.nocturneHome, "plugins", "data", "matchers-mkt"),
         rawCommand: "echo never",
@@ -1618,5 +1621,499 @@ describe("排除 Codex 系统市场与无 Hook 无技能插件", () => {
 
     // plugins.json 保持原样，不删除、不改写
     expect(readFileSync(pluginsJsonPath, "utf8")).toBe(storedPayload);
+  });
+});
+
+// ── ADR-0100 自有插件（内置、本地安装、9 点位 Hook、MCP 服务器） ──────────────
+
+function writeNativePlugin(
+  parentDir: string,
+  opts: {
+    dirName?: string;
+    manifestDir?: ".nocturne-plugin" | ".codex-plugin" | ".claude-plugin";
+    manifest: Record<string, unknown>;
+    files?: Record<string, string | Uint8Array>;
+  },
+): string {
+  const name = opts.dirName ?? String(opts.manifest.name ?? "sample");
+  const pluginDir = path.join(parentDir, name);
+  const mDir = path.join(pluginDir, opts.manifestDir ?? ".nocturne-plugin");
+  mkdirSync(mDir, { recursive: true });
+  writeFileSync(path.join(mDir, "plugin.json"), JSON.stringify(opts.manifest, null, 2));
+  for (const [rel, content] of Object.entries(opts.files ?? {})) {
+    const target = path.join(pluginDir, rel);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+  return pluginDir;
+}
+
+describe("ADR-0100 自有插件发现与启停", () => {
+  it("自有清单内置插件默认 on、无指纹；关闭记 enabled:false，再开启恢复 on", async () => {
+    const f = makeFixtureEnv();
+    const builtinDir = path.join(f.root, "builtin-plugins");
+    const pluginDir = writeNativePlugin(builtinDir, {
+      dirName: "office-fixture",
+      manifest: {
+        name: "office-fixture",
+        version: "0.1.0",
+        description: "内置夹具插件",
+      },
+      files: {
+        "skills/doc-read/SKILL.md": "---\ndescription: read doc\n---\nDOC BODY",
+      },
+    });
+
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      builtinPluginsDir: builtinDir,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    // 默认开启，无 plugins.json 也是 on
+    const initial = await describePlugins(f.plat, discOpts);
+    expect(initial.plugins).toHaveLength(1);
+    const p = must(initial.plugins[0]);
+    expect(p.id).toBe("nocturne:office-fixture@builtin");
+    expect(p.host).toBe("nocturne");
+    expect(p.marketplace).toBe("builtin");
+    expect(p.state).toBe("on");
+    expect(p.skills).toEqual(["doc-read"]);
+
+    // 修改内置插件文件不会触发 changed（不做指纹）
+    writeFileSync(path.join(pluginDir, "extra.txt"), "updated");
+    const afterModify = await describePlugins(f.plat, discOpts);
+    expect(afterModify.plugins[0]?.state).toBe("on");
+
+    // 关闭后 plugins.json 记 enabled: false，状态为 off
+    await setPluginEnabled(f.plat, { ...discOpts, id: p.id, enabled: false });
+    const stored = JSON.parse(readFileSync(path.join(f.nocturneHome, "plugins.json"), "utf8")) as {
+      plugins: Record<string, unknown>;
+    };
+    expect(stored.plugins[p.id]).toEqual({ enabled: false });
+    expect((await describePlugins(f.plat, discOpts)).plugins[0]?.state).toBe("off");
+
+    // 再开启恢复 on，且不写哈希
+    await setPluginEnabled(f.plat, { ...discOpts, id: p.id, enabled: true });
+    const storedAgain = JSON.parse(
+      readFileSync(path.join(f.nocturneHome, "plugins.json"), "utf8"),
+    ) as { plugins: Record<string, unknown> };
+    expect(storedAgain.plugins[p.id]).toBeUndefined();
+    expect((await describePlugins(f.plat, discOpts)).plugins[0]?.state).toBe("on");
+  });
+
+  it("本地安装目录里的插件默认 off，启用后内容变化变为 changed；兼容清单仍只接 4 点位", async () => {
+    const f = makeFixtureEnv();
+    const localBase = path.join(f.nocturneHome, "plugins", "installed", "local");
+    const nativeDir = writeNativePlugin(path.join(localBase, "local-native"), {
+      dirName: "1.0.0",
+      manifest: {
+        name: "local-native",
+        version: "1.0.0",
+        hooks: {
+          PreToolUse: [{ matcher: "shell", command: "node", args: ["./hook.mjs"] }],
+        },
+      },
+      files: { "hook.mjs": "console.log('{}')" },
+    });
+    writeNativePlugin(path.join(localBase, "local-compat"), {
+      dirName: "1.0.0",
+      manifestDir: ".claude-plugin",
+      manifest: {
+        name: "local-compat",
+        version: "1.0.0",
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "node -e 1" }] }],
+          PreToolUse: [{ hooks: [{ type: "command", command: "node -e 1" }] }],
+        },
+      },
+    });
+
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    const initial = await describePlugins(f.plat, discOpts);
+    const nativeItem = must(initial.plugins.find((p) => p.id === "nocturne:local-native@local"));
+    const compatItem = must(initial.plugins.find((p) => p.id === "nocturne:local-compat@local"));
+    expect(nativeItem.state).toBe("off");
+    expect(nativeItem.hooks.map((h) => h.point)).toEqual(["PreToolUse"]);
+    expect(compatItem.state).toBe("off");
+    // 兼容清单只接 4 点位，PreToolUse 记入 unsupported
+    expect(compatItem.hooks.map((h) => h.point)).toEqual(["SessionStart"]);
+    expect(compatItem.unsupported).toEqual([{ point: "PreToolUse", reason: "point" }]);
+
+    // 启用后为 on，改内容后变为 changed
+    await setPluginEnabled(f.plat, { ...discOpts, id: nativeItem.id, enabled: true });
+    expect(
+      (await describePlugins(f.plat, discOpts)).plugins.find((p) => p.id === nativeItem.id)?.state,
+    ).toBe("on");
+    writeFileSync(path.join(nativeDir, "hook.mjs"), 'console.log(\'{"decision":"deny"}\')');
+    expect(
+      (await describePlugins(f.plat, discOpts)).plugins.find((p) => p.id === nativeItem.id)?.state,
+    ).toBe("changed");
+  });
+});
+
+describe("ADR-0100 自有插件 Hook（9 点位）与 MCP 策略", () => {
+  it("自有插件 PreToolUse(deny) 与 PermissionRequest(allow) 在真实会话生效，PreToolUse(allow) 不被接受", async () => {
+    const f = makeFixtureEnv();
+    const builtinDir = path.join(f.root, "builtin-hooks");
+    const hookScript = `
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+if (input.point === "PreToolUse") {
+  const p = String((input.input && input.input.path) || "");
+  if (p.includes("blocked.txt")) {
+    console.log(JSON.stringify({ decision: "deny", reason: "blocked by native plugin" }));
+  } else if (p.includes("try-allow.txt")) {
+    // PreToolUse 返回 allow 必须被忽略（不能绕过权限层）
+    console.log(JSON.stringify({ decision: "allow", reason: "should be ignored" }));
+  }
+} else if (input.point === "PermissionRequest") {
+  const subjects = input.subjects || [];
+  if (subjects.some((s) => String(s.target || "").includes("approved.txt"))) {
+    console.log(JSON.stringify({ action: "allow", reason: "approved by native plugin" }));
+  }
+}
+`;
+    writeNativePlugin(builtinDir, {
+      dirName: "guard-plugin",
+      manifest: {
+        name: "guard-plugin",
+        version: "1.0.0",
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "write",
+              command: process.execPath,
+              args: ["${PLUGIN_ROOT}/hook.cjs"],
+              timeoutMs: 10000,
+            },
+          ],
+          PermissionRequest: [
+            {
+              matcher: "write",
+              command: process.execPath,
+              args: ["${PLUGIN_ROOT}/hook.cjs"],
+              timeoutMs: 10000,
+            },
+          ],
+        },
+      },
+      files: { "hook.cjs": hookScript },
+    });
+
+    const config = await loadConfig(f.plat, { nocturneHome: f.nocturneHome });
+    const provider = new FakeProvider({
+      scripts: [
+        // Turn 1: blocked.txt → PreToolUse deny
+        [
+          {
+            type: "tool_call",
+            toolCallId: "c1",
+            name: "write",
+            input: { path: "blocked.txt", content: "x" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "t1" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Turn 2: try-allow.txt → PreToolUse 返回 allow 不被接受；非交互模式 ask → deny
+        [
+          {
+            type: "tool_call",
+            toolCallId: "c2",
+            name: "write",
+            input: { path: "try-allow.txt", content: "y" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "t2" },
+          { type: "finish", reason: "stop" },
+        ],
+        // Turn 3: approved.txt → PermissionRequest 返回 allow 放行写入
+        [
+          {
+            type: "tool_call",
+            toolCallId: "c3",
+            name: "write",
+            input: { path: "approved.txt", content: "ok" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "t3" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const rt = await createRuntime({
+      cwd: f.ws,
+      sessionsDir: f.sessionsDir,
+      config,
+      interactive: false,
+      providers: [provider],
+      builtinPluginsDir: builtinDir,
+      plugins: { codexHome: f.codexHome, claudeHome: f.claudeHome },
+    });
+    openRuntimes.push(rt);
+    const s = await rt.createSession({ model: "fake/fake-model" });
+    openSessions.push(s);
+
+    const events: { type: string; payload: Record<string, unknown> }[] = [];
+    s.subscribe((e) => {
+      events.push({ type: e.type, payload: e.payload as Record<string, unknown> });
+    });
+
+    await s.submit({ text: "write blocked" });
+    await s.submit({ text: "write try-allow" });
+    await s.submit({ text: "write approved" });
+
+    const completed = events.filter((e) => e.type === "tool.completed");
+    expect(completed[0]?.payload.status).toBe("denied");
+    expect(
+      String((completed[0]?.payload.error as { message?: string } | undefined)?.message),
+    ).toContain("blocked by native plugin");
+    // PreToolUse 返回 allow 未被接受，仍由非交互权限层拒绝且未落盘
+    expect(completed[1]?.payload.status).toBe("denied");
+    expect(existsSync(path.join(f.ws, "try-allow.txt"))).toBe(false);
+    const c2Resolved = events.find(
+      (e) => e.type === "permission.resolved" && e.payload.callId === completed[1]?.payload.callId,
+    );
+    expect(c2Resolved?.payload.source).toBe("non_interactive");
+    // PermissionRequest 返回 allow 放行写入
+    expect(completed[2]?.payload.status).toBe("ok");
+    expect(readFileSync(path.join(f.ws, "approved.txt"), "utf8")).toBe("ok");
+    const c3Resolved = events.find(
+      (e) => e.type === "permission.resolved" && e.payload.callId === completed[2]?.payload.callId,
+    );
+    expect(c3Resolved?.payload.action).toBe("allow");
+    expect(c3Resolved?.payload.source).toBe("hook");
+  });
+
+  it("MCP 策略：只带 MCP 的插件会列出；{stored:true} 被拒；type:http 记入 unsupported；同名冲突跳过并告警；启停触发空闲会话 reconcile", async () => {
+    const f = makeFixtureEnv();
+    const builtinDir = path.join(f.root, "builtin-mcp");
+    // 仅含受支持 stdio MCP 的插件 + 同名冲突 + stored 被拒 + http 记 unsupported
+    writeNativePlugin(builtinDir, {
+      dirName: "mcp-mix",
+      manifest: {
+        name: "mcp-mix",
+        version: "0.2.0",
+        mcpServers: {
+          alpha: {
+            command: "${NOCTURNE_NODE}",
+            args: ["${PLUGIN_ROOT}/srv.mjs", "${PLUGIN_DATA}"],
+            env: { DATA_DIR: "${PLUGIN_DATA}" },
+          },
+          conflictSrv: {
+            command: "${NOCTURNE_NODE}",
+            args: ["${PLUGIN_ROOT}/conflict.mjs"],
+          },
+          badStored: {
+            command: "${NOCTURNE_NODE}",
+            args: ["${PLUGIN_ROOT}/stored.mjs"],
+            env: { API_KEY: { stored: true } },
+          },
+          remoteHttp: {
+            type: "http",
+            url: "https://example.com/mcp",
+          },
+        },
+      },
+    });
+    // 只有不支持的 http MCP、无 Hook 无技能的插件：不应列出
+    writeNativePlugin(builtinDir, {
+      dirName: "http-only",
+      manifest: {
+        name: "http-only",
+        version: "0.1.0",
+        mcpServers: {
+          onlyHttp: { type: "http", url: "https://example.com/mcp" },
+        },
+      },
+    });
+
+    // 用户配置已声明同名服务器 conflictSrv
+    writeFileSync(
+      path.join(f.nocturneHome, "config.json"),
+      JSON.stringify({
+        modelsDev: false,
+        skills: { sources: { agents: false, claude: false } },
+        mcp: {
+          servers: {
+            conflictSrv: { command: process.execPath, args: ["-e", ""] },
+          },
+        },
+      }),
+    );
+
+    const openCalls: string[][] = [];
+    const reconcileCalls: string[][] = [];
+    const fakeMcp = {
+      probe: async () => ({ ok: true as const, tools: [], durationMs: 1 }),
+      open: async (scope: { servers: readonly { name: string }[] }) => {
+        openCalls.push(scope.servers.map((s) => s.name));
+        return {
+          startup: async () => undefined,
+          reconcile: async (servers: readonly { name: string }[]) => {
+            reconcileCalls.push(servers.map((s) => s.name));
+          },
+          tools: () => [],
+          status: () => [],
+          applyPendingTools: () => ({ add: [], remove: [] }),
+          close: async () => undefined,
+        };
+      },
+    };
+
+    const config = await loadConfig(f.plat, { nocturneHome: f.nocturneHome });
+    const rt = await createRuntime({
+      cwd: f.ws,
+      sessionsDir: f.sessionsDir,
+      config,
+      mcp: fakeMcp,
+      providers: [new FakeProvider({ scripts: [] })],
+      builtinPluginsDir: builtinDir,
+      plugins: { codexHome: f.codexHome, claudeHome: f.claudeHome },
+    });
+    openRuntimes.push(rt);
+
+    const desc = await rt.describePlugins();
+    expect(desc.plugins.map((p) => p.id)).toEqual(["nocturne:mcp-mix@builtin"]);
+    const mix = must(desc.plugins[0]);
+    expect(mix.unsupported).toContainEqual({ point: "mcp:remoteHttp", reason: "type" });
+    expect(mix.mcpServers).toEqual([
+      { id: "alpha", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/srv.mjs ${PLUGIN_DATA}" },
+      {
+        id: "conflictSrv",
+        command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/conflict.mjs",
+        skipped: true,
+        skipReason: "conflict",
+      },
+      {
+        id: "badStored",
+        command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/stored.mjs",
+        skipped: true,
+        skipReason: "stored",
+      },
+      {
+        id: "remoteHttp",
+        command: "https://example.com/mcp",
+        skipped: true,
+        skipReason: "http",
+      },
+    ]);
+
+    const s = await rt.createSession({ model: "fake/fake-model" });
+    openSessions.push(s);
+    const conflictWarnings: string[] = [];
+    // 打开会话时冲突警告写入 s.warnings，且只把 conflictSrv（配置优先）和 alpha 交给 MCP connector
+    expect(openCalls).toEqual([["conflictSrv", "alpha"]]);
+    expect(s.warnings.some((w) => w.includes("conflictSrv"))).toBe(true);
+
+    s.subscribe((e) => {
+      if (e.type === "runtime.warning" && e.payload.code === "plugin_mcp_conflict") {
+        conflictWarnings.push(e.payload.message);
+      }
+    });
+
+    // 关闭插件 → 空闲会话立即 reconcile，移除 alpha
+    await rt.setPluginEnabled({ id: "nocturne:mcp-mix@builtin", enabled: false });
+    expect(reconcileCalls.at(-1)).toEqual(["conflictSrv"]);
+
+    // 再开启插件 → 空闲会话立即 reconcile，恢复 alpha 并发冲突告警
+    await rt.setPluginEnabled({ id: "nocturne:mcp-mix@builtin", enabled: true });
+    expect(reconcileCalls.at(-1)).toEqual(["conflictSrv", "alpha"]);
+    expect(conflictWarnings.some((w) => w.includes("conflictSrv"))).toBe(true);
+  });
+
+  it("支持 mcpServers 相对路径与默认 .mcp.json；自有插件 Hook 走白名单环境并注入 PLUGIN_ROOT/PLUGIN_DATA", async () => {
+    const f = makeFixtureEnv();
+    const builtinDir = path.join(f.root, "builtin-forms");
+    writeNativePlugin(builtinDir, {
+      dirName: "by-path",
+      manifest: {
+        name: "by-path",
+        version: "0.1.0",
+        mcpServers: "./cfg/mcp.json",
+      },
+      files: {
+        "cfg/mcp.json": JSON.stringify({
+          mcpServers: {
+            fromPath: { command: "${NOCTURNE_NODE}", args: ["${PLUGIN_ROOT}/s.mjs"] },
+          },
+        }),
+      },
+    });
+    writeNativePlugin(builtinDir, {
+      dirName: "by-default",
+      manifest: {
+        name: "by-default",
+        version: "0.1.0",
+        hooks: {
+          SessionStart: [
+            {
+              command: process.execPath,
+              args: [
+                "-e",
+                "console.log(JSON.stringify({ additionalContext: [process.env.PLUGIN_ROOT ? 'R' : '', process.env.PLUGIN_DATA ? 'D' : '', process.env.ANTHROPIC_API_KEY || 'NOKEY'].join(':') }))",
+              ],
+            },
+          ],
+        },
+      },
+      files: {
+        ".mcp.json": JSON.stringify({
+          mcpServers: {
+            fromDefault: { command: "${NOCTURNE_NODE}", args: ["${PLUGIN_DATA}/d.mjs"] },
+          },
+        }),
+      },
+    });
+
+    const platWithSecret = {
+      ...f.plat,
+      env: (name: string) => (name === "ANTHROPIC_API_KEY" ? "sk-ant-secret" : f.plat.env(name)),
+    };
+    const origKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-secret";
+    try {
+      const discovered = await discoverInstalledPlugins(platWithSecret, {
+        nocturneHome: f.nocturneHome,
+        builtinPluginsDir: builtinDir,
+        codexHome: f.codexHome,
+        claudeHome: f.claudeHome,
+      });
+      const byPath = must(
+        discovered.plugins.find((p) => p.overview.id === "nocturne:by-path@builtin"),
+      );
+      const byDefault = must(
+        discovered.plugins.find((p) => p.overview.id === "nocturne:by-default@builtin"),
+      );
+      expect(byPath.mcpServers[0]?.id).toBe("fromPath");
+      expect(byPath.mcpServers[0]?.entry.type).not.toBe("http");
+      expect(byDefault.mcpServers[0]?.id).toBe("fromDefault");
+
+      const runner = createHookRunner({
+        hooks: byDefault.hooks,
+        platform: platWithSecret,
+        sessionId: "s-native-env",
+        cwd: f.ws,
+        workspaceRoot: f.ws,
+      });
+      const out = await runner.run("SessionStart", { resumed: false, source: "startup" });
+      expect(out?.contextEntries?.[0]?.text).toBe("R:D:NOKEY");
+    } finally {
+      if (origKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = origKey;
+    }
   });
 });

@@ -376,7 +376,7 @@ export interface QuestionBroker {
 /** 合并配置层后交给装配点的单服务器配置 */
 export interface McpServerConfig extends McpServerEntry {
   name: string;
-  origin: "app" | "user" | "project";
+  origin: "app" | "user" | "project" | "plugin";
   /** 定义该条目的配置文件所在目录；相对 cwd 按 workspaceRoot 解析 */
   dir?: string | undefined;
 }

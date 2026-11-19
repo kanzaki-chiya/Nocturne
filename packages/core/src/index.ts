@@ -476,6 +476,8 @@ export interface RuntimeOptions {
   shell?: { background: boolean } | undefined;
   /** ADR-0049：外部 agent 连接器；Core 只负责委派、权限和共享并发限制。 */
   externalAgents?: ExternalAgentConnector | undefined;
+  /** ADR-0100：随发行包分发的内置插件目录（宿主显式传入；缺省时无内置插件） */
+  builtinPluginsDir?: string | undefined;
   /** ADR-0096 第二期：注入 Codex / Claude 插件根目录（测试与嵌入方用） */
   plugins?:
     | {
@@ -1515,10 +1517,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const skillCache = createSkillDiscoveryCache(platform);
   const pluginDiscoveryOptions = {
     nocturneHome,
+    ...(options.builtinPluginsDir !== undefined
+      ? { builtinPluginsDir: options.builtinPluginsDir }
+      : {}),
     ...(options.plugins?.codexHome !== undefined ? { codexHome: options.plugins.codexHome } : {}),
     ...(options.plugins?.claudeHome !== undefined
       ? { claudeHome: options.plugins.claudeHome }
       : {}),
+  };
+  const collectReservedMcpIds = (
+    configServers: readonly { name: string }[] | undefined,
+  ): Set<string> => {
+    const ids = new Set<string>();
+    for (const s of options.mcpServers ?? []) ids.add(s.name.toLowerCase());
+    for (const s of configServers ?? []) ids.add(s.name.toLowerCase());
+    return ids;
   };
   const imageProcessor = createImageProcessor();
 
@@ -1746,7 +1759,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       hookPoints: Object.keys(resolved?.hooks ?? {}).length,
       warnings: resolved?.warnings.length ?? 0,
     });
-    const pluginResolution = await resolvePlugins(platform, pluginDiscoveryOptions);
+    const pluginResolution = await resolvePlugins(platform, {
+      ...pluginDiscoveryOptions,
+      reservedMcpIds: collectReservedMcpIds(resolved?.mcpServers),
+    });
     const warnings: string[] = [...(resolved?.warnings ?? []), ...pluginResolution.warnings];
     let skillDiscovery = await skillCache.discover({
       nocturneHome,
@@ -1768,6 +1784,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
     for (const message of warnings) {
       session.emitEphemeral("runtime.warning", { code: "config_warning", message });
+    }
+    const warnedPluginMcpConflicts = new Set<string>();
+    for (const conflict of pluginResolution.mcpConflicts) {
+      const key = `${conflict.pluginId}:${conflict.serverId}`;
+      warnedPluginMcpConflicts.add(key);
+      const message = `插件 ${conflict.pluginLabel} 的 MCP 服务器 "${conflict.serverId}" 与已有配置同名，已跳过`;
+      warnings.push(message);
+      session.emitEphemeral("runtime.warning", {
+        code: "plugin_mcp_conflict",
+        message,
+      });
     }
     for (const changed of pluginResolution.changedPlugins) {
       const message = `插件 ${changed.name}@${changed.marketplace}（${changed.id}）内容已变化，已停用；请重新启用后生效`;
@@ -2420,7 +2447,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     };
     const executor = createToolExecutor(tools);
 
-    // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）
+    // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）∪ 已启用插件 mcpServers
+    await Promise.all(
+      pluginResolution.mcpServers.map((s) =>
+        platform.fs.mkdir(s.pluginDataDir).catch(() => undefined),
+      ),
+    );
     const mcpServerConfigs: McpServerConfig[] = [
       ...(options.mcpServers ?? []),
       ...(resolved?.mcpServers ?? []).map((s) => ({
@@ -2428,6 +2460,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         name: s.name,
         origin: s.origin,
         dir: s.dir,
+      })),
+      ...pluginResolution.mcpServers.map((s) => ({
+        ...s.entry,
+        name: s.id,
+        origin: "plugin" as const,
       })),
     ].filter((s) => s.enabled !== false);
     let mcpSession: McpSession | undefined;
@@ -2579,9 +2616,38 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const next = config
               ? (await config.forWorkspace(meta.workspaceRoot)).resolved.mcpServers
               : [];
+            const nextPlugins = await resolvePlugins(platform, {
+              ...pluginDiscoveryOptions,
+              reservedMcpIds: collectReservedMcpIds(next),
+            });
+            const currentConflictKeys = new Set<string>();
+            for (const conflict of nextPlugins.mcpConflicts) {
+              const key = `${conflict.pluginId}:${conflict.serverId}`;
+              currentConflictKeys.add(key);
+              if (!warnedPluginMcpConflicts.has(key)) {
+                warnedPluginMcpConflicts.add(key);
+                session.emitEphemeral("runtime.warning", {
+                  code: "plugin_mcp_conflict",
+                  message: `插件 ${conflict.pluginLabel} 的 MCP 服务器 "${conflict.serverId}" 与已有配置同名，已跳过`,
+                });
+              }
+            }
+            for (const oldKey of [...warnedPluginMcpConflicts]) {
+              if (!currentConflictKeys.has(oldKey)) warnedPluginMcpConflicts.delete(oldKey);
+            }
+            await Promise.all(
+              nextPlugins.mcpServers.map((s) =>
+                platform.fs.mkdir(s.pluginDataDir).catch(() => undefined),
+              ),
+            );
             await mcpSession.reconcile([
               ...(options.mcpServers ?? []),
               ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
+              ...nextPlugins.mcpServers.map((s) => ({
+                ...s.entry,
+                name: s.id,
+                origin: "plugin" as const,
+              })),
             ]);
           }
           const diff = mcpSession.applyPendingTools();
@@ -6170,7 +6236,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(false)) };
     },
     describePlugins() {
-      return describeInstalledPluginsOverview(platform, pluginDiscoveryOptions);
+      return describeInstalledPluginsOverview(platform, {
+        ...pluginDiscoveryOptions,
+        reservedMcpIds: collectReservedMcpIds(config?.base.mcpServers),
+      });
     },
     async describeMemory(input) {
       const parsed = z
@@ -6474,7 +6543,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           e instanceof Error ? e.message : String(e),
         );
       }
-      return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(true)) };
+      const affectedSessions = await broadcast("skills", (hooks) => hooks.refreshSkills(true));
+      await broadcast("mcp", (hooks) => hooks.reconcileMcp());
+      return { affectedSessions };
     },
     async importSkills(input) {
       const base = z.object({

@@ -1,10 +1,12 @@
 import type { HookPoint } from "./types.js";
 
-export type PluginHost = "codex" | "claude";
+export type PluginHost = "nocturne" | "codex" | "claude";
 
 export type PluginState = "off" | "on" | "changed";
 
 export type PluginUnsupportedReason = "point" | "type" | "async" | "user_config";
+
+export type PluginMcpSkipReason = "http" | "stored" | "conflict" | "invalid";
 
 export interface PluginHookOverview {
   point: HookPoint;
@@ -16,6 +18,14 @@ export interface PluginHookOverview {
 export interface PluginUnsupportedHook {
   point: string;
   reason: PluginUnsupportedReason;
+}
+
+export interface PluginMcpServerOverview {
+  id: string;
+  /** 命令与参数摘要（未展开占位符）；跳过条目可能省略 */
+  command?: string | undefined;
+  skipped?: boolean | undefined;
+  skipReason?: PluginMcpSkipReason | undefined;
 }
 
 export interface PluginOverview {
@@ -32,6 +42,7 @@ export interface PluginOverview {
   hooks: PluginHookOverview[];
   unsupported: PluginUnsupportedHook[];
   skills: string[];
+  mcpServers: PluginMcpServerOverview[];
   warnings: string[];
 }
 

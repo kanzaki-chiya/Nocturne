@@ -28,6 +28,7 @@ const MAX_FEEDBACK_CHARS = 4_000;
 const EXACT_MATCHER_RE = /^[A-Za-z0-9_\- ,|]+$/;
 const PLACEHOLDER_RE =
   /\$\{(PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|PLUGIN_DATA|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR)\}/g;
+const NATIVE_PLACEHOLDER_RE = /\$\{(PLUGIN_ROOT|PLUGIN_DATA|NOCTURNE_NODE)\}/g;
 
 function nonEmpty(value: string | undefined): string | undefined {
   return value !== undefined && value.trim() !== "" ? value : undefined;
@@ -70,6 +71,24 @@ function matchPluginMatcher(matcher: string | undefined, target: string | undefi
   }
   const re = new RegExp(matcher);
   return target !== undefined && re.test(target);
+}
+
+function expandNativePlaceholders(
+  raw: string,
+  vars: { pluginRoot: string; pluginDataDir: string; nodePath: string },
+): string {
+  return raw.replace(NATIVE_PLACEHOLDER_RE, (match, key: string) => {
+    switch (key) {
+      case "PLUGIN_ROOT":
+        return vars.pluginRoot;
+      case "PLUGIN_DATA":
+        return vars.pluginDataDir;
+      case "NOCTURNE_NODE":
+        return vars.nodePath;
+      default:
+        return match;
+    }
+  });
 }
 
 function expandPlaceholders(
@@ -167,8 +186,9 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
     };
     const expandedCmd = expandPlaceholders(plugin.rawCommand, vars);
     const expandedArgs = plugin.rawArgs?.map((arg) => expandPlaceholders(arg, vars));
+    const compatHost = plugin.compatHost ?? (plugin.host === "codex" ? "codex" : "claude");
 
-    if (plugin.host === "codex") {
+    if (compatHost === "codex") {
       if (process.platform === "win32") {
         const comspec = nonEmpty(platform.env("COMSPEC")) ?? "C:\\Windows\\System32\\cmd.exe";
         const inv = shellDescriptor("cmd", comspec, "win32").invoke(expandedCmd);
@@ -298,7 +318,32 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
 
     let proc;
     try {
-      if (plugin !== undefined) {
+      if (plugin?.mode === "native") {
+        await platform.fs.mkdir(plugin.pluginDataDir);
+        const vars = {
+          pluginRoot: plugin.pluginRoot,
+          pluginDataDir: plugin.pluginDataDir,
+          nodePath: process.execPath,
+        };
+        const expandedCmd = expandNativePlaceholders(plugin.rawCommand, vars);
+        const expandedArgs = (plugin.rawArgs ?? []).map((arg) =>
+          expandNativePlaceholders(arg, vars),
+        );
+        proc = platform.process.spawnPipe(expandedCmd, expandedArgs, {
+          cwd: opts.workspaceRoot,
+          envMode: "minimal",
+          env: {
+            PLUGIN_ROOT: plugin.pluginRoot,
+            PLUGIN_DATA: plugin.pluginDataDir,
+            NOCTURNE_HOOK_EVENT: point,
+            NOCTURNE_SESSION_ID: opts.sessionId,
+            NOCTURNE_WORKSPACE_ROOT: opts.workspaceRoot,
+            NOCTURNE_CWD: opts.cwd,
+          },
+          timeoutMs,
+          signal,
+        });
+      } else if (plugin !== undefined) {
         await platform.fs.mkdir(plugin.pluginDataDir);
         const inv = await resolvePluginInvocation(plugin);
         proc = platform.process.spawnPipe(inv.command, inv.args, {
@@ -358,7 +403,7 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
       return fail(`stdout 超过 ${MAX_STDOUT_BYTES} 字节上限`, { stderrTail: stderrText });
     }
 
-    if (plugin !== undefined) {
+    if (plugin?.mode === "compat") {
       if (exit.code === 2 && point === "UserPromptSubmit") {
         const reason = stderrText.trim();
         opts.diagnostics?.record("hook.done", {
@@ -428,6 +473,7 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
       opts.diagnostics?.record("hook.done", {
         point,
         command: entry.command,
+        ...(plugin !== undefined ? { plugin: plugin.pluginLabel } : {}),
         durationMs: Date.now() - startedAt,
         ok: true,
         effect: "none",
@@ -459,8 +505,8 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
 
     const entries: HookRunnerEntry[] = [];
     for (const e of all) {
-      if (e.plugin !== undefined) {
-        // 插件的 SessionStart / SessionEnd 只在父会话运行，子会话只跑 SubagentStart
+      if (e.plugin?.mode === "compat") {
+        // 兼容插件的 SessionStart / SessionEnd 只在父会话运行，子会话只跑 SubagentStart
         if (input.subagent !== undefined && (point === "SessionStart" || point === "SessionEnd")) {
           continue;
         }
@@ -531,7 +577,7 @@ export function createHookRunner(opts: HookRunnerOptions): HookRunner {
     for (const entry of entries) {
       if (signal?.aborted === true) return undefined;
       const payload =
-        entry.plugin !== undefined
+        entry.plugin?.mode === "compat"
           ? buildPluginStdinPayload(point, input)
           : (() => {
               const next = { ...base };

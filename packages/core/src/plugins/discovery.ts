@@ -3,12 +3,16 @@
  * 绝不修改 `~/.codex` 或 `~/.claude` 下任何文件；解析失败降级为 warning。
  */
 import { parse as parseToml } from "smol-toml";
+import { MCP_ID, mcpEntrySchema } from "../config/schema.js";
 import type { Platform } from "../platform/index.js";
-import type {
-  HookPoint,
-  PluginHookOverview,
-  PluginHost,
-  PluginUnsupportedHook,
+import {
+  HOOK_POINTS,
+  type HookPoint,
+  type McpServerEntry,
+  type PluginHookOverview,
+  type PluginHost,
+  type PluginMcpServerOverview,
+  type PluginUnsupportedHook,
 } from "../protocol/index.js";
 import { parseSkill } from "../skills/index.js";
 import { selectActivePluginVersion } from "./semver.js";
@@ -17,10 +21,17 @@ import {
   type DiscoveredPlugin,
   type PluginDiscoveryOptions,
   type PluginHookEntry,
+  type PluginManifestKind,
+  type PluginMcpServerSpec,
   type PluginSkillDir,
 } from "./types.js";
 
 const EXACT_MATCHER_RE = /^[A-Za-z0-9_\- ,|]+$/;
+const NATIVE_PLUGIN_NAME_RE = /^[a-z0-9-]+$/;
+const MCP_ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MCP_PLACEHOLDER_RE = /\$\{(PLUGIN_ROOT|PLUGIN_DATA|NOCTURNE_NODE)\}/g;
+const ALL_HOOK_POINTS: ReadonlySet<string> = new Set<string>(HOOK_POINTS);
+const NATIVE_DEFAULT_HOOK_TIMEOUT_MS = 5_000;
 const DEFAULT_HOOK_TIMEOUT_MS = 60_000;
 const MAX_HOOK_TIMEOUT_MS = 60_000;
 const SESSION_END_DEFAULT_TIMEOUT_MS = 1_000;
@@ -177,6 +188,34 @@ function normalizeTimeoutMs(point: HookPoint, rawTimeout: unknown): number {
   return Math.min(Math.max(1, Math.round(rawTimeout * 1000)), maxMs);
 }
 
+function normalizeNativeTimeoutMs(rawTimeoutMs: unknown, rawTimeoutSec: unknown): number {
+  if (typeof rawTimeoutMs === "number" && Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0) {
+    return Math.min(Math.max(1, Math.round(rawTimeoutMs)), MAX_HOOK_TIMEOUT_MS);
+  }
+  if (typeof rawTimeoutSec === "number" && Number.isFinite(rawTimeoutSec) && rawTimeoutSec > 0) {
+    return Math.min(Math.max(1, Math.round(rawTimeoutSec * 1000)), MAX_HOOK_TIMEOUT_MS);
+  }
+  return NATIVE_DEFAULT_HOOK_TIMEOUT_MS;
+}
+
+function expandMcpPlaceholders(
+  raw: string,
+  vars: { pluginRoot: string; pluginDataDir: string; nodePath: string },
+): string {
+  return raw.replace(MCP_PLACEHOLDER_RE, (match, key: string) => {
+    switch (key) {
+      case "PLUGIN_ROOT":
+        return vars.pluginRoot;
+      case "PLUGIN_DATA":
+        return vars.pluginDataDir;
+      case "NOCTURNE_NODE":
+        return vars.nodePath;
+      default:
+        return match;
+    }
+  });
+}
+
 /** 解析插件清单内相对路径：必须以 `./` 开头且不可越出插件根目录 */
 async function resolvePluginRelativePath(
   platform: Platform,
@@ -212,10 +251,17 @@ interface ParsedPluginHooks {
   unsupported: PluginUnsupportedHook[];
 }
 
+interface ParsedPluginMcp {
+  servers: PluginMcpServerSpec[];
+  overviewServers: PluginMcpServerOverview[];
+  seenIds: Set<string>;
+}
+
 function collectHookMap(
   eventMap: Record<string, unknown>,
   ctx: {
     host: PluginHost;
+    manifestKind: PluginManifestKind;
     pluginLabel: string;
     pluginRootReal: string;
     pluginDataDir: string;
@@ -224,12 +270,17 @@ function collectHookMap(
   },
 ): void {
   const isWin = process.platform === "win32";
+  const isNative = ctx.manifestKind === "nocturne";
+  const allowedPoints = isNative ? ALL_HOOK_POINTS : SUPPORTED_PLUGIN_HOOK_POINTS;
+  const compatHost: "codex" | "claude" | undefined =
+    ctx.manifestKind === "nocturne" ? undefined : ctx.manifestKind;
+
   for (const [pointRaw, rawGroups] of Object.entries(eventMap)) {
     if (!Array.isArray(rawGroups)) {
       ctx.warnings.push(`plugin ${ctx.pluginLabel} ${pointRaw}：hooks 组必须是数组，已忽略`);
       continue;
     }
-    if (!SUPPORTED_PLUGIN_HOOK_POINTS.has(pointRaw)) {
+    if (!allowedPoints.has(pointRaw)) {
       for (const group of rawGroups) {
         const handlers = isPlainObject(group) && Array.isArray(group.hooks) ? group.hooks : [];
         const count = Math.max(1, handlers.length);
@@ -242,12 +293,28 @@ function collectHookMap(
 
     const point = pointRaw as HookPoint;
     for (const group of rawGroups) {
-      if (!isPlainObject(group) || !Array.isArray(group.hooks)) {
+      if (!isPlainObject(group)) {
         ctx.warnings.push(`plugin ${ctx.pluginLabel} ${point}：无效的 hook 组，已忽略`);
         continue;
       }
-      const matcher = typeof group.matcher === "string" ? group.matcher : undefined;
+
+      // 自有清单同时支持 Nocturne 直接条目 `{ command, args?, matcher?, timeoutMs? }`
+      // 与 Claude 分组形式 `{ matcher?, hooks: [...] }`
+      let matcher: string | undefined;
+      let handlers: unknown[];
+      if (Array.isArray(group.hooks)) {
+        matcher = typeof group.matcher === "string" ? group.matcher : undefined;
+        handlers = group.hooks;
+      } else if (isNative && typeof group.command === "string") {
+        matcher = typeof group.matcher === "string" ? group.matcher : undefined;
+        handlers = [group];
+      } else {
+        ctx.warnings.push(`plugin ${ctx.pluginLabel} ${point}：无效的 hook 组，已忽略`);
+        continue;
+      }
+
       if (
+        !isNative &&
         (point === "SessionStart" || point === "SubagentStart") &&
         matcher !== undefined &&
         matcher !== "" &&
@@ -264,12 +331,17 @@ function collectHookMap(
         }
       }
 
-      for (const handler of group.hooks) {
+      for (const handler of handlers) {
         if (!isPlainObject(handler)) {
           ctx.warnings.push(`plugin ${ctx.pluginLabel} ${point}：无效的 handler，已忽略`);
           continue;
         }
-        if (handler.type !== "command") {
+        if (isNative) {
+          if (handler.type !== undefined && handler.type !== "command") {
+            ctx.out.unsupported.push({ point, reason: "type" });
+            continue;
+          }
+        } else if (handler.type !== "command") {
           ctx.out.unsupported.push({ point, reason: "type" });
           continue;
         }
@@ -285,14 +357,14 @@ function collectHookMap(
             : typeof handler.command_windows === "string"
               ? handler.command_windows
               : undefined;
-        const rawCommand = isWin && ctx.host === "codex" ? (winCmd ?? baseCmd) : baseCmd;
+        const rawCommand = isWin && compatHost === "codex" ? (winCmd ?? baseCmd) : baseCmd;
         if (rawCommand === undefined || rawCommand.trim() === "") {
           ctx.warnings.push(`plugin ${ctx.pluginLabel} ${point}：缺少 command，已跳过`);
           continue;
         }
 
         let rawArgs: string[] | undefined;
-        if (ctx.host === "claude" && handler.args !== undefined) {
+        if ((isNative || compatHost === "claude") && handler.args !== undefined) {
           if (!Array.isArray(handler.args) || !handler.args.every((a) => typeof a === "string")) {
             ctx.warnings.push(`plugin ${ctx.pluginLabel} ${point}：args 必须是字符串数组，已跳过`);
             continue;
@@ -309,7 +381,7 @@ function collectHookMap(
         }
 
         let shell: "bash" | "powershell" | undefined;
-        if (ctx.host === "claude" && rawArgs === undefined && handler.shell !== undefined) {
+        if (compatHost === "claude" && rawArgs === undefined && handler.shell !== undefined) {
           if (handler.shell === "bash" || handler.shell === "powershell") {
             shell = handler.shell;
           } else {
@@ -320,7 +392,9 @@ function collectHookMap(
           }
         }
 
-        const timeoutMs = normalizeTimeoutMs(point, handler.timeout);
+        const timeoutMs = isNative
+          ? normalizeNativeTimeoutMs(handler.timeoutMs, handler.timeout)
+          : normalizeTimeoutMs(point, handler.timeout);
         const displayCommand =
           rawArgs !== undefined && rawArgs.length > 0
             ? [rawCommand, ...rawArgs].join(" ")
@@ -329,10 +403,13 @@ function collectHookMap(
         const entry: PluginHookEntry = {
           ...(matcher !== undefined ? { matcher } : {}),
           command: rawCommand,
+          ...(isNative && rawArgs !== undefined ? { args: rawArgs } : {}),
           timeoutMs,
           plugin: {
             pluginLabel: ctx.pluginLabel,
             host: ctx.host,
+            mode: isNative ? "native" : "compat",
+            ...(compatHost !== undefined ? { compatHost } : {}),
             pluginRoot: ctx.pluginRootReal,
             pluginDataDir: ctx.pluginDataDir,
             rawCommand,
@@ -386,15 +463,215 @@ async function loadHooksFile(
     ctx.warnings.push(`plugin ${ctx.pluginLabel}：hooks 文件顶层必须是对象`);
     return;
   }
-  // 没有 `hooks` 键的文件（如 claude-band.json）静默跳过，不报警告
-  if (!Object.hasOwn(raw, "hooks") || raw.hooks === undefined) {
+  if (Object.hasOwn(raw, "hooks") && raw.hooks !== undefined) {
+    if (!isPlainObject(raw.hooks)) {
+      ctx.warnings.push(`plugin ${ctx.pluginLabel}：hooks 字段必须是对象`);
+      return;
+    }
+    collectHookMap(raw.hooks, ctx);
     return;
   }
-  if (!isPlainObject(raw.hooks)) {
-    ctx.warnings.push(`plugin ${ctx.pluginLabel}：hooks 字段必须是对象`);
+  // 自有清单的 hooks 文件也允许顶层直接以事件点为键；无事件点键（如 claude-band.json）静默跳过
+  if (ctx.manifestKind === "nocturne" && Object.keys(raw).some((k) => ALL_HOOK_POINTS.has(k))) {
+    collectHookMap(raw, ctx);
+  }
+}
+
+function collectMcpMap(
+  serversMap: Record<string, unknown>,
+  ctx: {
+    pluginId: string;
+    pluginLabel: string;
+    pluginRootReal: string;
+    pluginDataDir: string;
+    nodePath: string;
+    warnings: string[];
+    unsupported: PluginUnsupportedHook[];
+    out: ParsedPluginMcp;
+  },
+): void {
+  const vars = {
+    pluginRoot: ctx.pluginRootReal,
+    pluginDataDir: ctx.pluginDataDir,
+    nodePath: ctx.nodePath,
+  };
+  for (const [serverId, rawEntry] of Object.entries(serversMap)) {
+    if (ctx.out.seenIds.has(serverId)) continue;
+    ctx.out.seenIds.add(serverId);
+
+    if (!MCP_ID.test(serverId)) {
+      ctx.warnings.push(`plugin ${ctx.pluginLabel} MCP ${serverId}：服务器名称无效，已跳过`);
+      ctx.out.overviewServers.push({ id: serverId, skipped: true, skipReason: "invalid" });
+      continue;
+    }
+    if (!isPlainObject(rawEntry)) {
+      ctx.warnings.push(`plugin ${ctx.pluginLabel} MCP ${serverId}：服务器配置必须是对象，已跳过`);
+      ctx.out.overviewServers.push({ id: serverId, skipped: true, skipReason: "invalid" });
+      continue;
+    }
+
+    if (rawEntry.type === "http") {
+      ctx.unsupported.push({ point: `mcp:${serverId}`, reason: "type" });
+      const urlSummary = nonEmptyString(rawEntry.url);
+      ctx.out.overviewServers.push({
+        id: serverId,
+        ...(urlSummary !== undefined ? { command: urlSummary } : {}),
+        skipped: true,
+        skipReason: "http",
+      });
+      continue;
+    }
+    if (rawEntry.type !== undefined && rawEntry.type !== "stdio") {
+      ctx.unsupported.push({ point: `mcp:${serverId}`, reason: "type" });
+      ctx.out.overviewServers.push({ id: serverId, skipped: true, skipReason: "invalid" });
+      continue;
+    }
+
+    const rawCmd = nonEmptyString(rawEntry.command);
+    const rawArgs =
+      Array.isArray(rawEntry.args) && rawEntry.args.every((a) => typeof a === "string")
+        ? rawEntry.args
+        : undefined;
+    const commandSummary =
+      rawCmd !== undefined
+        ? rawArgs !== undefined && rawArgs.length > 0
+          ? [rawCmd, ...rawArgs].join(" ")
+          : rawCmd
+        : undefined;
+
+    if (
+      isPlainObject(rawEntry.env) &&
+      Object.values(rawEntry.env).some((v) => isPlainObject(v) && Object.hasOwn(v, "stored"))
+    ) {
+      ctx.warnings.push(
+        `plugin ${ctx.pluginLabel} MCP ${serverId}：插件不能声明 { stored: true } 凭据，已跳过`,
+      );
+      ctx.out.overviewServers.push({
+        id: serverId,
+        ...(commandSummary !== undefined ? { command: commandSummary } : {}),
+        skipped: true,
+        skipReason: "stored",
+      });
+      continue;
+    }
+
+    const parsed = mcpEntrySchema(false).safeParse(rawEntry);
+    if (!parsed.success || parsed.data.type === "http") {
+      ctx.warnings.push(`plugin ${ctx.pluginLabel} MCP ${serverId}：服务器配置无效，已跳过`);
+      ctx.out.overviewServers.push({
+        id: serverId,
+        ...(commandSummary !== undefined ? { command: commandSummary } : {}),
+        skipped: true,
+        skipReason: "invalid",
+      });
+      continue;
+    }
+
+    const envEntries = parsed.data.env;
+    if (envEntries !== undefined) {
+      const badEnvKey = Object.keys(envEntries).find((k) => !MCP_ENV_NAME_RE.test(k));
+      if (badEnvKey !== undefined) {
+        ctx.warnings.push(
+          `plugin ${ctx.pluginLabel} MCP ${serverId}：环境变量名 "${badEnvKey}" 无效，已跳过`,
+        );
+        ctx.out.overviewServers.push({
+          id: serverId,
+          ...(commandSummary !== undefined ? { command: commandSummary } : {}),
+          skipped: true,
+          skipReason: "invalid",
+        });
+        continue;
+      }
+    }
+
+    const expandedCommand = expandMcpPlaceholders(parsed.data.command, vars);
+    const expandedArgs = parsed.data.args?.map((arg) => expandMcpPlaceholders(arg, vars));
+    const expandedEnv =
+      envEntries !== undefined
+        ? Object.fromEntries(
+            Object.entries(envEntries).map(([k, v]) => [
+              k,
+              typeof v === "string" ? expandMcpPlaceholders(v, vars) : v,
+            ]),
+          )
+        : undefined;
+    const expandedCwd =
+      parsed.data.cwd !== undefined ? expandMcpPlaceholders(parsed.data.cwd, vars) : undefined;
+
+    const entry: McpServerEntry = {
+      ...parsed.data,
+      command: expandedCommand,
+      ...(expandedArgs !== undefined ? { args: expandedArgs } : {}),
+      ...(expandedEnv !== undefined ? { env: expandedEnv } : {}),
+      ...(expandedCwd !== undefined ? { cwd: expandedCwd } : {}),
+    };
+
+    ctx.out.servers.push({
+      id: serverId,
+      pluginId: ctx.pluginId,
+      pluginLabel: ctx.pluginLabel,
+      pluginRoot: ctx.pluginRootReal,
+      pluginDataDir: ctx.pluginDataDir,
+      entry,
+    });
+    ctx.out.overviewServers.push({
+      id: serverId,
+      ...(commandSummary !== undefined ? { command: commandSummary } : {}),
+    });
+  }
+}
+
+async function loadMcpFile(
+  platform: Platform,
+  filePath: string,
+  required: boolean,
+  seenPaths: Set<string>,
+  ctx: Parameters<typeof collectMcpMap>[1],
+): Promise<void> {
+  const { fs, paths } = platform;
+  const key = paths.canonicalize(filePath);
+  if (seenPaths.has(key)) return;
+  seenPaths.add(key);
+
+  if (!(await fs.exists(filePath))) {
+    if (required) {
+      ctx.warnings.push(
+        `plugin ${ctx.pluginLabel}：mcpServers 文件不存在（${paths.basename(filePath)}）`,
+      );
+    }
     return;
   }
-  collectHookMap(raw.hooks, ctx);
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await fs.readTextFile(filePath));
+  } catch {
+    ctx.warnings.push(
+      `plugin ${ctx.pluginLabel}：mcpServers 文件不是合法 JSON（${paths.basename(filePath)}）`,
+    );
+    return;
+  }
+  if (!isPlainObject(raw)) {
+    ctx.warnings.push(`plugin ${ctx.pluginLabel}：mcpServers 文件顶层必须是对象`);
+    return;
+  }
+  if (Object.hasOwn(raw, "mcpServers") && raw.mcpServers !== undefined) {
+    if (!isPlainObject(raw.mcpServers)) {
+      ctx.warnings.push(`plugin ${ctx.pluginLabel}：mcpServers 字段必须是对象`);
+      return;
+    }
+    collectMcpMap(raw.mcpServers, ctx);
+    return;
+  }
+  if (Object.keys(raw).length === 0) return;
+  const looksLikeServerMap = Object.values(raw).some(
+    (v) => isPlainObject(v) && ("command" in v || "url" in v || "type" in v),
+  );
+  if (looksLikeServerMap) {
+    collectMcpMap(raw, ctx);
+  } else if (required) {
+    ctx.warnings.push(`plugin ${ctx.pluginLabel}：mcpServers 文件缺少 mcpServers 对象`);
+  }
 }
 
 async function scanSkillNamesInDir(
@@ -445,11 +722,13 @@ async function buildDiscoveredPlugin(
   platform: Platform,
   input: {
     host: PluginHost;
+    manifestKind: PluginManifestKind;
     name: string;
     marketplace: string;
     version: string;
     rawRoot: string;
     nocturneHome: string;
+    nodePath: string;
     manifest?: Record<string, unknown> | undefined;
     manifestWarnings?: string[] | undefined;
   },
@@ -484,6 +763,7 @@ async function buildDiscoveredPlugin(
   };
   const hookCtx = {
     host: input.host,
+    manifestKind: input.manifestKind,
     pluginLabel,
     pluginRootReal,
     pluginDataDir,
@@ -493,7 +773,7 @@ async function buildDiscoveredPlugin(
   const seenHookFiles = new Set<string>();
   const defaultHooksPath = paths.join(pluginRootReal, "hooks", "hooks.json");
 
-  if (input.host === "claude") {
+  if (input.manifestKind === "claude") {
     // Claude Code 官方文档：hooks/hooks.json 与清单 hooks 字段合并加载
     await loadHooksFile(platform, defaultHooksPath, false, seenHookFiles, hookCtx);
   }
@@ -520,8 +800,59 @@ async function buildDiscoveredPlugin(
         warnings.push(`plugin ${pluginLabel}：hooks 字段元素必须是相对路径或对象`);
       }
     }
-  } else if (input.host === "codex") {
+  } else if (input.manifestKind === "codex" || input.manifestKind === "nocturne") {
     await loadHooksFile(platform, defaultHooksPath, false, seenHookFiles, hookCtx);
+  }
+
+  // ── MCP 服务器解析（ADR-0100 第 2 节） ──────────────────
+  const parsedMcp: ParsedPluginMcp = {
+    servers: [],
+    overviewServers: [],
+    seenIds: new Set<string>(),
+  };
+  const mcpCtx = {
+    pluginId: id,
+    pluginLabel,
+    pluginRootReal,
+    pluginDataDir,
+    nodePath: input.nodePath,
+    warnings,
+    unsupported: parsedHooks.unsupported,
+    out: parsedMcp,
+  };
+  const seenMcpFiles = new Set<string>();
+  const manifestMcp = manifest.mcpServers;
+  if (manifestMcp !== undefined) {
+    const items = Array.isArray(manifestMcp) ? manifestMcp : [manifestMcp];
+    for (const item of items) {
+      if (typeof item === "string") {
+        const resolved = await resolvePluginRelativePath(
+          platform,
+          input.rawRoot,
+          pluginRootReal,
+          item,
+        );
+        if (resolved.error !== undefined || resolved.path === undefined) {
+          warnings.push(`plugin ${pluginLabel}：${resolved.error ?? "无效 mcpServers 路径"}`);
+          continue;
+        }
+        await loadMcpFile(platform, resolved.path, true, seenMcpFiles, mcpCtx);
+      } else if (isPlainObject(item)) {
+        collectMcpMap(item, mcpCtx);
+      } else {
+        warnings.push(`plugin ${pluginLabel}：mcpServers 字段必须是相对路径或对象`);
+      }
+    }
+  } else {
+    const defaultMcpPath = paths.join(pluginRootReal, ".mcp.json");
+    if (await fs.exists(defaultMcpPath)) {
+      const realMcp = await platform.resolveReal(defaultMcpPath);
+      if (paths.isWithin(pluginRootReal, realMcp)) {
+        await loadMcpFile(platform, realMcp, false, seenMcpFiles, mcpCtx);
+      } else {
+        warnings.push(`plugin ${pluginLabel}：默认 .mcp.json 越出插件根目录`);
+      }
+    }
   }
 
   // ── Skills 目录解析 ────────────────────────────────────
@@ -583,6 +914,7 @@ async function buildDiscoveredPlugin(
     rawRoot: input.rawRoot,
     hooks: parsedHooks.hooks,
     skillDirs,
+    mcpServers: parsedMcp.servers,
     overview: {
       id,
       host: input.host,
@@ -596,6 +928,7 @@ async function buildDiscoveredPlugin(
       hooks: parsedHooks.overviewHooks,
       unsupported: parsedHooks.unsupported,
       skills: skillNames,
+      mcpServers: parsedMcp.overviewServers,
       warnings,
     },
   };
@@ -620,10 +953,165 @@ async function readManifestFile(
   }
 }
 
+async function discoverBuiltinPlugins(
+  platform: Platform,
+  builtinPluginsDir: string | undefined,
+  nocturneHome: string,
+  nodePath: string,
+  warnings: string[],
+): Promise<DiscoveredPlugin[]> {
+  if (builtinPluginsDir === undefined || builtinPluginsDir.trim() === "") return [];
+  const { fs, paths } = platform;
+  if (!(await fs.exists(builtinPluginsDir))) return [];
+
+  let entries;
+  try {
+    entries = await fs.readdir(builtinPluginsDir);
+  } catch {
+    return [];
+  }
+
+  const results: DiscoveredPlugin[] = [];
+  const seenNames = new Set<string>();
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.type !== "directory" && entry.type !== "symlink") continue;
+    const rawRoot = entry.path;
+    const manifestPath = paths.join(rawRoot, ".nocturne-plugin", "plugin.json");
+    if (!(await fs.exists(manifestPath))) continue;
+
+    const manifestWarnings: string[] = [];
+    const manifest = await readManifestFile(
+      platform,
+      manifestPath,
+      manifestWarnings,
+      `${entry.name}@builtin`,
+    );
+    if (manifest === undefined) {
+      warnings.push(...manifestWarnings);
+      continue;
+    }
+    const name = nonEmptyString(manifest.name) ?? entry.name;
+    if (!NATIVE_PLUGIN_NAME_RE.test(name)) {
+      warnings.push(`nocturne_plugin_invalid：内置插件名称 "${name}" 非法，已跳过`);
+      continue;
+    }
+    if (seenNames.has(name)) {
+      warnings.push(`nocturne_plugin_duplicate：内置插件 "${name}" 重复，已跳过`);
+      continue;
+    }
+    seenNames.add(name);
+
+    results.push(
+      await buildDiscoveredPlugin(platform, {
+        host: "nocturne",
+        manifestKind: "nocturne",
+        name,
+        marketplace: "builtin",
+        version: nonEmptyString(manifest.version) ?? "",
+        rawRoot,
+        nocturneHome,
+        nodePath,
+        manifest,
+        manifestWarnings,
+      }),
+    );
+  }
+  return results;
+}
+
+async function discoverLocalNocturnePlugins(
+  platform: Platform,
+  nocturneHome: string,
+  nodePath: string,
+  warnings: string[],
+): Promise<DiscoveredPlugin[]> {
+  const { fs, paths } = platform;
+  const localRoot = paths.join(nocturneHome, "plugins", "installed", "local");
+  if (!(await fs.exists(localRoot))) return [];
+
+  let nameEntries;
+  try {
+    nameEntries = await fs.readdir(localRoot);
+  } catch {
+    return [];
+  }
+
+  const results: DiscoveredPlugin[] = [];
+  for (const entry of nameEntries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.type !== "directory" && entry.type !== "symlink") continue;
+    if (!isSafeSegment(entry.name)) {
+      warnings.push(`nocturne_plugin_invalid：本地插件目录名 "${entry.name}" 非法，已跳过`);
+      continue;
+    }
+
+    let versionEntries;
+    try {
+      versionEntries = await fs.readdir(entry.path);
+    } catch {
+      continue;
+    }
+    const version = selectActivePluginVersion(versionEntries);
+    if (version === undefined) continue;
+
+    const rawRoot = paths.join(entry.path, version);
+    const label = `${entry.name}@local`;
+    const manifestWarnings: string[] = [];
+    const nocturneManifestPath = paths.join(rawRoot, ".nocturne-plugin", "plugin.json");
+    const codexManifestPath = paths.join(rawRoot, ".codex-plugin", "plugin.json");
+    const claudeManifestPath = paths.join(rawRoot, ".claude-plugin", "plugin.json");
+
+    let manifestKind: PluginManifestKind;
+    let manifest: Record<string, unknown> | undefined;
+    if (await fs.exists(nocturneManifestPath)) {
+      manifestKind = "nocturne";
+      manifest = await readManifestFile(platform, nocturneManifestPath, manifestWarnings, label);
+      if (manifest === undefined) {
+        warnings.push(...manifestWarnings);
+        continue;
+      }
+      const declaredName = nonEmptyString(manifest.name);
+      if (
+        !NATIVE_PLUGIN_NAME_RE.test(entry.name) ||
+        (declaredName !== undefined && !NATIVE_PLUGIN_NAME_RE.test(declaredName))
+      ) {
+        warnings.push(
+          `nocturne_plugin_invalid：本地插件名称 "${declaredName ?? entry.name}" 非法，已跳过`,
+        );
+        continue;
+      }
+    } else if (await fs.exists(codexManifestPath)) {
+      manifestKind = "codex";
+      manifest = await readManifestFile(platform, codexManifestPath, manifestWarnings, label);
+    } else if (await fs.exists(claudeManifestPath)) {
+      manifestKind = "claude";
+      manifest = await readManifestFile(platform, claudeManifestPath, manifestWarnings, label);
+    } else {
+      continue;
+    }
+
+    results.push(
+      await buildDiscoveredPlugin(platform, {
+        host: "nocturne",
+        manifestKind,
+        name: entry.name,
+        marketplace: "local",
+        version,
+        rawRoot,
+        nocturneHome,
+        nodePath,
+        manifest,
+        manifestWarnings,
+      }),
+    );
+  }
+  return results;
+}
+
 async function discoverCodexPlugins(
   platform: Platform,
   codexHome: string,
   nocturneHome: string,
+  nodePath: string,
   warnings: string[],
 ): Promise<DiscoveredPlugin[]> {
   const { fs, paths } = platform;
@@ -684,11 +1172,13 @@ async function discoverCodexPlugins(
     results.push(
       await buildDiscoveredPlugin(platform, {
         host: "codex",
+        manifestKind: "codex",
         name: slug.name,
         marketplace: slug.marketplace,
         version,
         rawRoot,
         nocturneHome,
+        nodePath,
         manifest,
         manifestWarnings,
       }),
@@ -702,6 +1192,7 @@ async function discoverClaudePlugins(
   platform: Platform,
   claudeHome: string,
   nocturneHome: string,
+  nodePath: string,
   warnings: string[],
 ): Promise<DiscoveredPlugin[]> {
   const { fs, paths } = platform;
@@ -780,11 +1271,13 @@ async function discoverClaudePlugins(
     results.push(
       await buildDiscoveredPlugin(platform, {
         host: "claude",
+        manifestKind: "claude",
         name: slug.name,
         marketplace: slug.marketplace,
         version: "",
         rawRoot: installPath,
         nocturneHome,
+        nodePath,
         manifest,
         manifestWarnings,
       }),
@@ -795,7 +1288,11 @@ async function discoverClaudePlugins(
 }
 
 function hasUsablePluginCapabilities(plugin: DiscoveredPlugin): boolean {
-  return plugin.overview.hooks.length > 0 || plugin.overview.skills.length > 0;
+  return (
+    plugin.overview.hooks.length > 0 ||
+    plugin.overview.skills.length > 0 ||
+    plugin.mcpServers.length > 0
+  );
 }
 
 export async function discoverInstalledPlugins(
@@ -803,6 +1300,7 @@ export async function discoverInstalledPlugins(
   options: PluginDiscoveryOptions,
 ): Promise<{ plugins: DiscoveredPlugin[]; warnings: string[] }> {
   const { paths } = platform;
+  const nodePath = nonEmptyString(options.nodePath) ?? process.execPath;
   const codexHome =
     nonEmptyString(options.codexHome) ??
     nonEmptyString(platform.env("CODEX_HOME")) ??
@@ -813,12 +1311,20 @@ export async function discoverInstalledPlugins(
     paths.join(platform.homeDir(), ".claude");
 
   const warnings: string[] = [];
-  const [codex, claude] = await Promise.all([
-    discoverCodexPlugins(platform, codexHome, options.nocturneHome, warnings),
-    discoverClaudePlugins(platform, claudeHome, options.nocturneHome, warnings),
+  const [builtin, local, codex, claude] = await Promise.all([
+    discoverBuiltinPlugins(
+      platform,
+      options.builtinPluginsDir,
+      options.nocturneHome,
+      nodePath,
+      warnings,
+    ),
+    discoverLocalNocturnePlugins(platform, options.nocturneHome, nodePath, warnings),
+    discoverCodexPlugins(platform, codexHome, options.nocturneHome, nodePath, warnings),
+    discoverClaudePlugins(platform, claudeHome, options.nocturneHome, nodePath, warnings),
   ]);
 
-  const plugins = [...codex, ...claude]
+  const plugins = [...builtin, ...local, ...codex, ...claude]
     .filter(hasUsablePluginCapabilities)
     .sort((a, b) => (a.overview.id < b.overview.id ? -1 : a.overview.id > b.overview.id ? 1 : 0));
   return { plugins, warnings };
