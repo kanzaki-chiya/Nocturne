@@ -380,13 +380,10 @@ describe("PhoneSessions 顶层会话只读观察与按需升级（ADR-0099）", 
       );
       await Promise.resolve();
     });
-    // 给 React effect 和微任务足够机会运行
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 30));
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("历史提问");
+      expect(container.textContent).toContain("历史回答");
     });
-
-    expect(container.textContent).toContain("历史提问");
-    expect(container.textContent).toContain("历史回答");
     expect(entry.observed).toBe(true);
     expect(h.resumeSpy).not.toHaveBeenCalled();
     expect(h.sessionCalls).toEqual([]);
