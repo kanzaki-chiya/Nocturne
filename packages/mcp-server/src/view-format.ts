@@ -1,6 +1,15 @@
-import { userEntryText, type SessionView, type ToolEntry } from "@nocturne/core/protocol";
+import {
+  userEntryText,
+  type LiveTool,
+  type SessionView,
+  type ToolEntry,
+} from "@nocturne/core/protocol";
 
 export const MAX_MCP_OUTPUT_BYTES = 64 * 1024;
+/** 等待类返回中单条工具目标文本的最大字符数（含省略号） */
+export const MAX_WAIT_TOOL_TARGET_CHARS = 120;
+/** 等待类返回中单次最多列出的最近工具调用条数 */
+export const MAX_WAIT_TOOLS_PER_CALL = 20;
 
 export type McpSessionStatus =
   "idle" | "running" | "waiting_for_permission" | "waiting_for_answer" | "paused" | "error";
@@ -12,6 +21,31 @@ export interface FoldedTurn {
   tools: string[];
   assistantText: string;
   error?: string | undefined;
+}
+
+export interface WaitToolCursor {
+  turnId: string;
+  /** 本轮内已报告给当前 MCP 连接的 callId -> 状态 */
+  reportedStates: Map<string, string>;
+}
+
+export interface WaitFoldedTurn extends FoldedTurn {
+  /** 本次之前（上一次等待返回）已省略的本轮工具调用条数 */
+  omittedPreviousTools: number;
+  /** 本次新增工具超出单次条数上限时，因上限被省略的较早条数 */
+  omittedExcessTools?: number | undefined;
+}
+
+export interface IncrementalWaitTurnOptions {
+  /** 是否推进增量游标（wait: true 与 nocturne_wait 推进；wait: false 不推进） */
+  advanceCursor?: boolean | undefined;
+  maxTools?: number | undefined;
+  maxTargetChars?: number | undefined;
+}
+
+export interface IncrementalWaitTurnResult {
+  turn: WaitFoldedTurn | undefined;
+  nextCursor: WaitToolCursor | undefined;
 }
 
 /**
@@ -53,6 +87,234 @@ function summarizeToolEntry(tool: ToolEntry): string {
     detail = firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
   }
   return `[${name}] ${status}${detail ? ` — ${detail}` : ""}`;
+}
+
+function readStringField(input: unknown, keys: readonly string[]): string | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const record = input as Record<string, unknown>;
+  for (const key of keys) {
+    const val = record[key];
+    if (typeof val === "string" && val.trim() !== "") return val;
+  }
+  return undefined;
+}
+
+function truncateChars(text: string, maxChars: number, forceEllipsis = false): string {
+  const limit = Math.max(2, maxChars);
+  const chars = Array.from(text);
+  if (chars.length > limit) {
+    return `${chars.slice(0, limit - 1).join("")}…`;
+  }
+  if (forceEllipsis) {
+    if (chars.length === limit) {
+      return `${chars.slice(0, limit - 1).join("")}…`;
+    }
+    return `${text}…`;
+  }
+  return text;
+}
+
+function collapseToSingleLine(text: string, maxChars: number, firstLineOnly: boolean): string {
+  if (firstLineOnly) {
+    const nonEmptyLines = text
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter((line) => line !== "");
+    const first = nonEmptyLines[0] ?? "";
+    if (!first) return "";
+    return truncateChars(first, maxChars, nonEmptyLines.length > 1);
+  }
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return "";
+  return truncateChars(collapsed, maxChars, false);
+}
+
+/**
+ * 为等待类返回生成单行工具调用摘要：工具名、状态、目标。
+ * shell 命令只取第一非空行，折叠空白并按上限截断；所有输出均保证不含换行符。
+ */
+export function summarizeWaitToolEntry(
+  tool: ToolEntry,
+  maxTargetChars = MAX_WAIT_TOOL_TARGET_CHARS,
+): string {
+  const name = tool.target?.name ?? tool.name ?? "tool";
+  const status = tool.result?.status ?? tool.status;
+  const shellSubject = tool.subjects.find((s) => s.kind === "shell");
+  const isShell = name === "shell" || shellSubject !== undefined;
+
+  let target = "";
+  if (isShell) {
+    const command =
+      shellSubject?.target ?? readStringField(tool.target?.input ?? tool.input, ["command"]);
+    if (command !== undefined) {
+      target = collapseToSingleLine(command, maxTargetChars, true);
+    }
+  }
+  if (!target && tool.subjects.length > 0) {
+    target = collapseToSingleLine(
+      tool.subjects.map((s) => s.target).join(", "),
+      maxTargetChars,
+      false,
+    );
+  }
+  if (!target) {
+    const inputTarget = readStringField(tool.target?.input ?? tool.input, [
+      "path",
+      "filePath",
+      "url",
+      "pattern",
+      "command",
+    ]);
+    if (inputTarget !== undefined) {
+      target = collapseToSingleLine(inputTarget, maxTargetChars, true);
+    }
+  }
+  if (!target && tool.result?.error?.message) {
+    target = collapseToSingleLine(tool.result.error.message, maxTargetChars, false);
+  }
+  if (
+    !target &&
+    typeof tool.result?.modelContent === "string" &&
+    tool.result.modelContent.trim() !== ""
+  ) {
+    target = collapseToSingleLine(tool.result.modelContent, maxTargetChars, true);
+  }
+
+  return `[${name}] ${status}${target ? ` — ${target}` : ""}`;
+}
+
+function summarizeWaitLiveTool(liveTool: LiveTool): string {
+  return `[${liveTool.name}] running`;
+}
+
+/**
+ * 提取等待类返回用的最新轮次增量摘要：
+ * - 仅列出上次返回后新增或状态有变化的工具调用（同一轮次内）；
+ * - 每条工具调用压成单行，shell 命令只取首行并截断；
+ * - 单次最多列出最近 `maxTools`（默认 20）条，超出与历史省略数分开注明。
+ */
+export function extractIncrementalWaitTurn(
+  view: SessionView,
+  cursor: WaitToolCursor | undefined,
+  options?: IncrementalWaitTurnOptions,
+): IncrementalWaitTurnResult {
+  const maxTools = Math.max(1, options?.maxTools ?? MAX_WAIT_TOOLS_PER_CALL);
+  const maxTargetChars = Math.max(2, options?.maxTargetChars ?? MAX_WAIT_TOOL_TARGET_CHARS);
+  const advanceCursor = options?.advanceCursor ?? true;
+
+  let lastTurnId: string | undefined;
+  for (const entry of view.entries) {
+    if (entry.kind === "user" || entry.kind === "tool" || entry.kind === "assistant") {
+      lastTurnId = entry.turnId;
+    }
+  }
+  for (const liveTool of view.live.tools) {
+    if (liveTool.turnId !== undefined) lastTurnId = liveTool.turnId;
+  }
+  for (const liveAsst of view.live.assistants) {
+    if (liveAsst.turnId !== undefined && liveAsst.text.trim() !== "") {
+      lastTurnId = liveAsst.turnId;
+    }
+  }
+
+  if (lastTurnId === undefined) {
+    return { turn: undefined, nextCursor: cursor };
+  }
+
+  const userParts: string[] = [];
+  const assistantParts: string[] = [];
+  const allTools: { id: string; status: string; line: string }[] = [];
+  const seenCallIds = new Set<string>();
+
+  for (const entry of view.entries) {
+    if (entry.kind === "user" && entry.turnId === lastTurnId) {
+      const text = userEntryText(entry);
+      if (text.trim() !== "") userParts.push(text);
+    } else if (entry.kind === "tool" && entry.turnId === lastTurnId) {
+      const id = entry.callId || entry.key;
+      seenCallIds.add(id);
+      const status = entry.result?.status ?? entry.status;
+      allTools.push({
+        id,
+        status,
+        line: summarizeWaitToolEntry(entry, maxTargetChars),
+      });
+    } else if (entry.kind === "assistant" && entry.turnId === lastTurnId) {
+      if (entry.text.trim() !== "") assistantParts.push(entry.text);
+    }
+  }
+
+  for (const liveTool of view.live.tools) {
+    if (liveTool.turnId === lastTurnId && !seenCallIds.has(liveTool.callId)) {
+      allTools.push({
+        id: liveTool.callId,
+        status: "running",
+        line: summarizeWaitLiveTool(liveTool),
+      });
+    }
+  }
+
+  for (const liveAsst of view.live.assistants) {
+    if (liveAsst.turnId === lastTurnId && liveAsst.text.trim() !== "") {
+      assistantParts.push(liveAsst.text);
+    }
+  }
+
+  const prevStates =
+    cursor?.turnId === lastTurnId ? cursor.reportedStates : new Map<string, string>();
+
+  let omittedPreviousTools = 0;
+  const newTools: { id: string; status: string; line: string }[] = [];
+  for (const item of allTools) {
+    if (prevStates.get(item.id) === item.status) {
+      omittedPreviousTools++;
+    } else {
+      newTools.push(item);
+    }
+  }
+
+  const omittedExcessTools = newTools.length > maxTools ? newTools.length - maxTools : 0;
+  const visibleTools = omittedExcessTools > 0 ? newTools.slice(-maxTools) : newTools;
+
+  let nextCursor = cursor;
+  if (advanceCursor) {
+    const reportedStates = new Map<string, string>(prevStates);
+    for (const item of allTools) {
+      reportedStates.set(item.id, item.status);
+    }
+    nextCursor = {
+      turnId: lastTurnId,
+      reportedStates,
+    };
+  }
+
+  const isCurrent = view.currentTurn?.turnId === lastTurnId;
+  let status: FoldedTurn["status"] = "completed";
+  let error: string | undefined;
+  if (isCurrent) {
+    status = "running";
+  } else if (view.lastTurn !== undefined) {
+    if (view.lastTurn.reason === "error") {
+      status = "failed";
+      error = "turn failed";
+    } else if (view.lastTurn.reason === "aborted") {
+      status = "cancelled";
+    }
+  }
+
+  return {
+    turn: {
+      turnId: lastTurnId,
+      status,
+      userText: userParts.join("\n"),
+      tools: visibleTools.map((t) => t.line),
+      omittedPreviousTools,
+      ...(omittedExcessTools > 0 ? { omittedExcessTools } : {}),
+      assistantText: assistantParts.join("\n\n"),
+      ...(error !== undefined ? { error } : {}),
+    },
+    nextCursor,
+  };
 }
 
 /**

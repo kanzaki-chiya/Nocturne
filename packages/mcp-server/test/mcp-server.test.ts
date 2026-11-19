@@ -451,6 +451,15 @@ describe("packages/mcp-server 单元与集成测试", () => {
     });
     expect(subReadRes.isError).toBe(true);
     expect(getToolText(subReadRes)).toContain("子代理会话");
+    expect(getToolText(subReadRes)).toContain(sessionId);
+
+    const subWaitRes = await mcpClient.callTool({
+      name: "nocturne_wait",
+      arguments: { sessionId: subId },
+    });
+    expect(subWaitRes.isError).toBe(true);
+    expect(getToolText(subWaitRes)).toContain("子代理会话");
+    expect(getToolText(subWaitRes)).toContain(sessionId);
 
     // 8. 不在 ADR-0074 §4 工具集中的旧别名应被拒绝
     const unknownAbort = await mcpClient.callTool({

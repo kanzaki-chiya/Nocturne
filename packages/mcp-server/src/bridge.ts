@@ -13,11 +13,12 @@ import { loadOrCreateBridgeIdentity, type BridgeIdentityResult } from "./identit
 import { connectAgentPipe, WindowsSidError } from "./pipe.js";
 import {
   deriveMcpSessionStatus,
-  extractFoldedTurns,
+  extractIncrementalWaitTurn,
   formatReadSessionOutput,
   MAX_MCP_OUTPUT_BYTES,
   truncateMcpOutput,
   type McpSessionStatus,
+  type WaitToolCursor,
 } from "./view-format.js";
 
 export const DESKTOP_NOT_RUNNING_MESSAGE =
@@ -62,6 +63,7 @@ interface TrackedBridgeSession {
   inTransition: boolean;
   lastReportedPermissionId: string | undefined;
   lastReportedQuestionId: string | undefined;
+  waitToolCursor: WaitToolCursor | undefined;
 }
 
 export class McpBridge {
@@ -263,13 +265,38 @@ export class McpBridge {
     };
   }
 
+  private async resolveSubagentParentId(
+    client: RpcClient,
+    sessionId: string,
+  ): Promise<string | undefined> {
+    try {
+      const summaries = await client.runtime.listSessions({ includeSubagents: true });
+      return summaries.find((s) => s.id === sessionId)?.parent?.sessionId;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async openSessionForRead(
     client: RpcClient,
     sessionId: string,
   ): Promise<TrackedBridgeSession> {
     const existing = this.sessions.get(sessionId);
     if (existing !== undefined) return existing;
-    await client.call("session.open", { sessionId });
+    try {
+      const opened = await client.call("session.open", { sessionId });
+      if (opened.meta.parent !== undefined) {
+        await client.call("session.close", { sessionId }).catch(() => undefined);
+        throw new SubagentSessionError(sessionId, opened.meta.parent.sessionId);
+      }
+    } catch (error) {
+      if (error instanceof SubagentSessionError) throw error;
+      const parentId = await this.resolveSubagentParentId(client, sessionId);
+      if (parentId !== undefined) {
+        throw new SubagentSessionError(sessionId, parentId);
+      }
+      throw error;
+    }
     const rpcSession = client.session(sessionId);
     return this.attachTracker(sessionId, rpcSession);
   }
@@ -280,7 +307,22 @@ export class McpBridge {
   ): Promise<TrackedBridgeSession> {
     const existing = this.sessions.get(sessionId);
     if (existing !== undefined) return existing;
-    const { session: rpcSession } = await client.runtime.resumeSession(sessionId);
+    let rpcSession: RpcSession;
+    try {
+      const resumed = await client.runtime.resumeSession(sessionId);
+      if (resumed.opened.meta.parent !== undefined) {
+        await resumed.session.close().catch(() => undefined);
+        throw new SubagentSessionError(sessionId, resumed.opened.meta.parent.sessionId);
+      }
+      rpcSession = resumed.session;
+    } catch (error) {
+      if (error instanceof SubagentSessionError) throw error;
+      const parentId = await this.resolveSubagentParentId(client, sessionId);
+      if (parentId !== undefined) {
+        throw new SubagentSessionError(sessionId, parentId);
+      }
+      throw error;
+    }
     return this.attachTracker(sessionId, rpcSession);
   }
 
@@ -302,6 +344,7 @@ export class McpBridge {
       inTransition: false,
       lastReportedPermissionId: undefined,
       lastReportedQuestionId: undefined,
+      waitToolCursor: undefined,
     };
     const notifyListeners = (view: SessionView, event: RuntimeEvent): void => {
       for (const fn of [...listeners]) {
@@ -425,6 +468,8 @@ export class McpBridge {
     if (!cwd) return this.errorResult("参数错误：需要非空 cwd");
     if (!prompt.trim()) return this.errorResult("参数错误：需要非空 prompt");
 
+    const title =
+      typeof args.title === "string" && args.title.trim() !== "" ? args.title.trim() : undefined;
     const model =
       typeof args.model === "string" && args.model.trim() !== "" ? args.model.trim() : undefined;
     const permissionPreset =
@@ -451,13 +496,30 @@ export class McpBridge {
     const rpcSession = client.session(opened.sessionId);
     const tracked = await this.attachTracker(opened.sessionId, rpcSession);
 
+    let renameError: string | undefined;
+    if (title !== undefined) {
+      try {
+        await client.runtime.renameSession(opened.sessionId, title);
+      } catch (error) {
+        renameError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
     await this.triggerSubmitOnTracked(tracked, prompt);
 
     if (!wait) {
-      return this.buildSessionWaitResult(tracked);
+      return this.buildSessionWaitResult(tracked, {
+        advanceCursor: false,
+        requestedTitle: title,
+        renameError,
+      });
     }
-    await this.waitForTrackedSession(tracked, timeoutSeconds, context);
-    return this.buildSessionWaitResult(tracked);
+    await this.waitForTrackedSessions([tracked], timeoutSeconds, context);
+    return this.buildSessionWaitResult(tracked, {
+      advanceCursor: true,
+      requestedTitle: title,
+      renameError,
+    });
   }
 
   private async handleSend(
@@ -482,27 +544,78 @@ export class McpBridge {
     await this.triggerEnqueueOnTracked(tracked, prompt);
 
     if (!wait) {
-      return this.buildSessionWaitResult(tracked);
+      return this.buildSessionWaitResult(tracked, { advanceCursor: false });
     }
-    await this.waitForTrackedSession(tracked, timeoutSeconds, context);
-    return this.buildSessionWaitResult(tracked);
+    await this.waitForTrackedSessions([tracked], timeoutSeconds, context);
+    return this.buildSessionWaitResult(tracked, { advanceCursor: true });
   }
 
   private async handleWait(
     args: Record<string, unknown>,
     context?: McpToolCallContext,
   ): Promise<McpToolCallResult> {
-    const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
-    if (!sessionId) return this.errorResult("参数错误：需要非空 sessionId");
+    const hasSingle = args.sessionId !== undefined;
+    const hasMulti = args.sessionIds !== undefined;
+    if (hasSingle && hasMulti) {
+      return this.errorResult("参数错误：sessionId 与 sessionIds 请二选一");
+    }
+    if (!hasSingle && !hasMulti) {
+      return this.errorResult("参数错误：需要非空 sessionId 或 sessionIds");
+    }
+
     const timeoutSeconds =
       typeof args.timeoutSeconds === "number" && Number.isFinite(args.timeoutSeconds)
         ? args.timeoutSeconds
         : 300;
 
+    if (hasSingle) {
+      const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
+      if (!sessionId) return this.errorResult("参数错误：需要非空 sessionId");
+      const client = await this.ensureConnected();
+      const tracked = await this.openSessionForRead(client, sessionId);
+      await this.waitForTrackedSessions([tracked], timeoutSeconds, context);
+      return this.buildSessionWaitResult(tracked, { advanceCursor: true });
+    }
+
+    if (!Array.isArray(args.sessionIds)) {
+      return this.errorResult("参数错误：sessionIds 必须为非空字符串数组");
+    }
+    const dedupedIds: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of args.sessionIds) {
+      if (typeof raw !== "string" || raw.trim() === "") {
+        return this.errorResult("参数错误：sessionIds 只能包含非空字符串");
+      }
+      const id = raw.trim();
+      if (!seen.has(id)) {
+        seen.add(id);
+        dedupedIds.push(id);
+      }
+    }
+    if (dedupedIds.length === 0) {
+      return this.errorResult("参数错误：sessionIds 需要至少一个非空会话 ID");
+    }
+
     const client = await this.ensureConnected();
-    const tracked = await this.openSessionForRead(client, sessionId);
-    await this.waitForTrackedSession(tracked, timeoutSeconds, context);
-    return this.buildSessionWaitResult(tracked);
+    const trackedList: TrackedBridgeSession[] = [];
+    for (const id of dedupedIds) {
+      trackedList.push(await this.openSessionForRead(client, id));
+    }
+    const { readyIds, timedOut } = await this.waitForTrackedSessions(
+      trackedList,
+      timeoutSeconds,
+      context,
+    );
+    const sessions = trackedList.map((tracked) => ({
+      ...this.buildSessionWaitPayload(tracked, { advanceCursor: true }),
+      ready: readyIds.has(tracked.sessionId),
+    }));
+    const payload: Record<string, unknown> = {
+      timedOut,
+      readySessionIds: trackedList.map((t) => t.sessionId).filter((id) => readyIds.has(id)),
+      sessions,
+    };
+    return this.textResult(JSON.stringify(payload, null, 2), payload);
   }
 
   private async handleInterrupt(args: Record<string, unknown>): Promise<McpToolCallResult> {
@@ -622,36 +735,49 @@ export class McpBridge {
     }
   }
 
-  private async waitForTrackedSession(
-    tracked: TrackedBridgeSession,
+  private async waitForTrackedSessions(
+    trackedList: readonly TrackedBridgeSession[],
     timeoutSeconds: number,
     context?: McpToolCallContext,
-  ): Promise<void> {
+  ): Promise<{ readyIds: Set<string>; timedOut: boolean }> {
     const clampedSeconds = Math.min(600, Math.max(0.05, timeoutSeconds));
     const timeoutMs = Math.round(clampedSeconds * 1000);
 
-    try {
-      const pendingSnap = await tracked.rpcSession.pendingInputs();
-      tracked.pendingInputIds = new Set(pendingSnap.items.map((i) => i.id));
-      tracked.paused = pendingSnap.paused;
-    } catch {
-      /* 忽略冲刷失败 */
+    await Promise.all(
+      trackedList.map(async (tracked) => {
+        try {
+          const pendingSnap = await tracked.rpcSession.pendingInputs();
+          tracked.pendingInputIds = new Set(pendingSnap.items.map((i) => i.id));
+          tracked.paused = pendingSnap.paused;
+        } catch {
+          /* 忽略冲刷失败 */
+        }
+      }),
+    );
+
+    const initialReported = new Map<
+      string,
+      { permId: string | undefined; questionId: string | undefined }
+    >();
+    for (const tracked of trackedList) {
+      initialReported.set(tracked.sessionId, {
+        permId: tracked.lastReportedPermissionId,
+        questionId: tracked.lastReportedQuestionId,
+      });
     }
 
-    const initialPermId = tracked.lastReportedPermissionId;
-    const initialQuestionId = tracked.lastReportedQuestionId;
-
-    const isStopped = (): boolean => {
+    const isStopped = (tracked: TrackedBridgeSession): boolean => {
       const view = tracked.tracker.view;
+      const initial = initialReported.get(tracked.sessionId);
       if (
         view.pendingPermission !== undefined &&
-        view.pendingPermission.requestId !== initialPermId
+        view.pendingPermission.requestId !== initial?.permId
       ) {
         return true;
       }
       if (
         view.pendingQuestion !== undefined &&
-        view.pendingQuestion.requestId !== initialQuestionId
+        view.pendingQuestion.requestId !== initial?.questionId
       ) {
         return true;
       }
@@ -668,77 +794,124 @@ export class McpBridge {
       return false;
     };
 
-    if (isStopped()) return;
+    const collectReadyIds = (): Set<string> => {
+      const ready = new Set<string>();
+      for (const tracked of trackedList) {
+        if (isStopped(tracked)) {
+          ready.add(tracked.sessionId);
+        }
+      }
+      return ready;
+    };
 
+    const immediate = collectReadyIds();
+    if (immediate.size > 0) {
+      return { readyIds: immediate, timedOut: false };
+    }
+
+    const isMulti = trackedList.length > 1;
     let progressStep = 0;
-    await new Promise<void>((resolve) => {
+    return await new Promise<{ readyIds: Set<string>; timedOut: boolean }>((resolve) => {
+      const bindings: {
+        tracked: TrackedBridgeSession;
+        onEvent: (view: SessionView, event: RuntimeEvent) => void;
+        wake: () => void;
+      }[] = [];
+
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        for (const b of bindings) {
+          b.tracked.listeners.delete(b.onEvent);
+          b.tracked.waitWakeups.delete(b.wake);
+        }
+      };
+
       const timer = setTimeout(() => {
         cleanup();
-        resolve();
+        const readyIds = collectReadyIds();
+        resolve({ readyIds, timedOut: readyIds.size === 0 });
       }, timeoutMs);
       timer.unref();
 
       const wake = (): void => {
-        if (isStopped()) {
+        const readyIds = collectReadyIds();
+        if (readyIds.size > 0) {
           cleanup();
-          resolve();
+          resolve({ readyIds, timedOut: false });
         }
       };
 
-      const onEvent = (_view: SessionView, event: RuntimeEvent): void => {
-        if (context?.onProgress !== undefined) {
-          if (event.type === "tool.started") {
-            progressStep++;
-            context.onProgress({
-              progress: progressStep,
-              message: `调用工具 ${event.payload.name}`,
-            });
-          } else if (event.type === "tool.completed") {
-            progressStep++;
-            context.onProgress({
-              progress: progressStep,
-              message: `工具完成 (${event.payload.status})`,
-            });
-          } else if (event.type === "turn.started") {
-            progressStep++;
-            context.onProgress({
-              progress: progressStep,
-              message: "开始新一轮执行",
-            });
-          } else if (event.type === "turn.completed") {
-            progressStep++;
-            context.onProgress({
-              progress: progressStep,
-              message: "本轮执行完成",
-            });
+      for (const tracked of trackedList) {
+        const prefix = isMulti ? `[${tracked.sessionId}] ` : "";
+        const onEvent = (_view: SessionView, event: RuntimeEvent): void => {
+          if (context?.onProgress !== undefined) {
+            if (event.type === "tool.started") {
+              progressStep++;
+              context.onProgress({
+                progress: progressStep,
+                message: `${prefix}调用工具 ${event.payload.name}`,
+              });
+            } else if (event.type === "tool.completed") {
+              progressStep++;
+              context.onProgress({
+                progress: progressStep,
+                message: `${prefix}工具完成 (${event.payload.status})`,
+              });
+            } else if (event.type === "turn.started") {
+              progressStep++;
+              context.onProgress({
+                progress: progressStep,
+                message: `${prefix}开始新一轮执行`,
+              });
+            } else if (event.type === "turn.completed") {
+              progressStep++;
+              context.onProgress({
+                progress: progressStep,
+                message: `${prefix}本轮执行完成`,
+              });
+            }
           }
-        }
-        wake();
-      };
-
-      const cleanup = (): void => {
-        clearTimeout(timer);
-        tracked.listeners.delete(onEvent);
-        tracked.waitWakeups.delete(wake);
-      };
-
-      tracked.listeners.add(onEvent);
-      tracked.waitWakeups.add(wake);
+          wake();
+        };
+        bindings.push({ tracked, onEvent, wake });
+        tracked.listeners.add(onEvent);
+        tracked.waitWakeups.add(wake);
+      }
     });
   }
 
-  private buildSessionWaitResult(tracked: TrackedBridgeSession): McpToolCallResult {
+  private buildSessionWaitPayload(
+    tracked: TrackedBridgeSession,
+    options?: {
+      advanceCursor?: boolean | undefined;
+      requestedTitle?: string | undefined;
+      renameError?: string | undefined;
+    },
+  ): Record<string, unknown> {
     const view = tracked.tracker.view;
     const pendingCount =
       tracked.pendingInputIds.size + (tracked.activeStartToken !== undefined ? 1 : 0);
     const status = deriveMcpSessionStatus(view, pendingCount, tracked.paused);
-    const folded = extractFoldedTurns(view).at(-1);
+    const incremental = extractIncrementalWaitTurn(view, tracked.waitToolCursor, {
+      advanceCursor: options?.advanceCursor ?? true,
+    });
+    if (options?.advanceCursor !== false) {
+      tracked.waitToolCursor = incremental.nextCursor;
+    }
+    const folded = incremental.turn;
     const reply = folded?.assistantText ?? "";
 
     const turnOutcome = deriveTurnOutcome(status, view);
+    const effectiveTitle =
+      view.title ??
+      (options?.requestedTitle !== undefined && options.renameError === undefined
+        ? options.requestedTitle
+        : undefined);
 
     const payload: Record<string, unknown> = {
       sessionId: tracked.sessionId,
+      ...(effectiveTitle !== undefined ? { title: effectiveTitle } : {}),
+      ...(options?.renameError !== undefined ? { renameError: options.renameError } : {}),
       status,
       turnOutcome,
       reply,
@@ -783,6 +956,18 @@ export class McpBridge {
       payload.lastTurn = folded;
     }
 
+    return payload;
+  }
+
+  private buildSessionWaitResult(
+    tracked: TrackedBridgeSession,
+    options?: {
+      advanceCursor?: boolean | undefined;
+      requestedTitle?: string | undefined;
+      renameError?: string | undefined;
+    },
+  ): McpToolCallResult {
+    const payload = this.buildSessionWaitPayload(tracked, options);
     return this.textResult(JSON.stringify(payload, null, 2), payload);
   }
 }
@@ -821,5 +1006,19 @@ class BridgeNotRunningError extends Error {
   constructor(cause?: string) {
     super(cause ?? DESKTOP_NOT_RUNNING_MESSAGE);
     this.name = "BridgeNotRunningError";
+  }
+}
+
+class SubagentSessionError extends Error {
+  readonly sessionId: string;
+  readonly parentSessionId: string;
+
+  constructor(sessionId: string, parentSessionId: string) {
+    super(
+      `会话 ${sessionId} 是子代理会话，不能直接等待或操作；请改为等待或观察其父会话：${parentSessionId}`,
+    );
+    this.name = "SubagentSessionError";
+    this.sessionId = sessionId;
+    this.parentSessionId = parentSessionId;
   }
 }

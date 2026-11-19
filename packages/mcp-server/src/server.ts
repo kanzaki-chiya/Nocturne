@@ -77,6 +77,10 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
           type: "string",
           description: "首条任务提示词。",
         },
+        title: {
+          type: "string",
+          description: "可选会话标题。传入后在会话建立后设为标题，不被首条消息的自动标题覆盖。",
+        },
         model: {
           type: "string",
           description: "可选模型引用（provider/model）。",
@@ -132,20 +136,26 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
   {
     name: "nocturne_wait",
     description:
-      "等待正在运行的 Nocturne 会话完成当前轮次，或在等待用户审批权限 / 回答提问时立即返回。",
+      "等待一个或多个正在运行的 Nocturne 会话完成当前轮次（含正常接续的排队轮次），或在等待用户审批权限 / 回答提问 / 队列暂停时立即返回。传 sessionId 等单个会话，传 sessionIds 同时等多个会话（任一满足停止条件即返回）。返回增量单行工具摘要。",
     inputSchema: {
       type: "object",
       properties: {
         sessionId: {
           type: "string",
-          description: "目标会话 ID。",
+          description: "单个目标会话 ID（与 sessionIds 二选一）。",
+        },
+        sessionIds: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          description:
+            "多个目标会话 ID 列表（与 sessionId 二选一）。任意一个会话满足停止条件即立即返回。",
         },
         timeoutSeconds: {
           type: "number",
           description: "等待超时秒数（默认 300，上限 600）。超时返回 running，不中断会话。",
         },
       },
-      required: ["sessionId"],
     },
   },
   {

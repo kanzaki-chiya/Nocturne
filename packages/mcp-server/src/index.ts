@@ -38,10 +38,18 @@ export {
 export {
   deriveMcpSessionStatus,
   extractFoldedTurns,
+  extractIncrementalWaitTurn,
   formatReadSessionOutput,
   MAX_MCP_OUTPUT_BYTES,
+  MAX_WAIT_TOOL_TARGET_CHARS,
+  MAX_WAIT_TOOLS_PER_CALL,
+  summarizeWaitToolEntry,
   truncateMcpOutput,
   type FoldedTurn,
+  type IncrementalWaitTurnOptions,
+  type IncrementalWaitTurnResult,
   type McpSessionStatus,
   type ReadSessionFormatOptions,
+  type WaitFoldedTurn,
+  type WaitToolCursor,
 } from "./view-format.js";
