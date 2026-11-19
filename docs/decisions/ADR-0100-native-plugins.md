@@ -200,3 +200,14 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
   - 不用文档的会话，不增加进程；
   - 工具列表多出四个插件的工具，技能目录多 4 条；
   - 用到某个插件时，多一个 Node 进程、一个 soffice、一个 Python 辅助进程，闲置 5 分钟后 soffice 和 Python 退出。
+
+## 修订：2026-11-20 四个文档插件实现补充与实测调整
+
+本节补充四个内置文档插件（`plugins-src/`）实测与落地后的边界约定，不改动上述正文：
+
+- **演示文稿重排页序**：无头模式下 LibreOffice Impress 的 `.uno:MovePageFirst` 等界面调度命令不生效；`slides.edit` 的 `reorder_slides` 通过改写 `.pptx` 内 `ppt/presentation.xml` 的 `<p:sldIdLst>` 节点顺序实现，再由 UNO 重新打开继续后续操作，保留全部版式、图片与备注。
+- **Word / 表格按页出图**：Writer 与 Calc 不直接支持逐页 `GraphicExportFilter`，`word.render` 与 `sheets.render` 先导出临时 PDF（`writer_pdf_Export` / `calc_pdf_Export`），再经 LibreOffice Draw（`draw_pdf_import`）逐页 `GraphicExportFilter` 输出 PNG；演示文档直接经 Impress `GraphicExportFilter` 输出。
+- **PDF 文本提取、出图、合并与拆分**：`pdf.read` 与 `pdf.render` 采用 LibreOffice Draw（`draw_pdf_import`）导入 PDF 后按页提取文本与导出 PNG，复用系统字体（含中文字体）而无需打包原生 Canvas 或 CMap 资源；`pdf.merge` 与 `pdf.split` 使用打入 `server.mjs` 的 `pdf-lib`（MIT）在 Node 中无损完成，不依赖 LibreOffice。
+- **`render` 默认页数与上限**：缺省返回前 4 页，单次调用最多返回 4 张 PNG，与 Nocturne MCP 客户端每次工具调用 4 张图片的附件上限一致；超过 4 页的文档通过 `pages` 参数分批查看。
+- **查找与超时覆盖**：环境变量 `NOCTURNE_OFFICE_SOFFICE` 与 `NOCTURNE_OFFICE_PYTHON` 优先于各平台默认安装路径；`NOCTURNE_OFFICE_IDLE_MS` 与 `NOCTURNE_OFFICE_TIMEOUT_MS` 可覆盖 5 分钟闲置超时与 120 秒单次调用超时。
+

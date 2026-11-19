@@ -27,6 +27,7 @@
       { "slug": "suites", "title": "组曲" },
       { "slug": "skills", "title": "技能" },
       { "slug": "plugins", "title": "插件" },
+      { "slug": "documents", "title": "文档处理" },
       { "slug": "hooks", "title": "Hook" },
       { "slug": "subagents", "title": "子代理" },
       { "slug": "schedule", "title": "定时任务" },
