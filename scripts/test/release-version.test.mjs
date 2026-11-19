@@ -33,6 +33,11 @@ function makeFixture() {
     "apps/android/package.json",
     "apps/android/src-tauri/tauri.conf.json",
     "packaging/npm/package.json",
+    "plugins-src/package.json",
+    "plugins-src/manifests/docx/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/xlsx/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/pptx/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/pdf/.nocturne-plugin/plugin.json",
   ];
   for (const rel of jsonFiles) {
     const file = join(root, rel);
@@ -84,6 +89,7 @@ function makeFixture() {
     "apps/cli/src/main.ts": 'const VERSION = "0.5.0";\nconst OTHER_VERSION = "9.9.9";\n',
     "apps/tui/src/version.ts": 'export const APP_VERSION = "0.5.0";\n',
     "apps/relay/src/server.ts": 'import x from "y";\n\nexport const RELAY_VERSION = "0.5.0";\n',
+    "plugins-src/src/shared/mcp.ts": 'export const PLUGIN_SERVER_VERSION = "0.5.0";\n',
   };
   for (const [rel, text] of Object.entries(constFiles)) {
     const file = join(root, rel);
@@ -169,6 +175,12 @@ describe("release-version", () => {
     "apps/android/src-tauri/tauri.conf.json",
     "apps/android/src-tauri/Cargo.toml",
     "apps/android/src-tauri/Cargo.lock",
+    "plugins-src/package.json",
+    "plugins-src/manifests/docx/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/xlsx/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/pptx/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/pdf/.nocturne-plugin/plugin.json",
+    "plugins-src/src/shared/mcp.ts",
   ])("--check 检出 %s 版本不一致", (rel) => {
     applyVersion(root, "0.6.0");
     const file = join(root, rel);

@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  - "plugins-src"
 
 # ai@7 与 @ai-sdk/anthropic@4.0.58 分别精确依赖 4.0.15 / 4.0.17；
 # 统一到 4.0.17 避免 LanguageModelV4 双实例的类型冲突（ADR-0006）

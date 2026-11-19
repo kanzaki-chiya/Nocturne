@@ -17,6 +17,7 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `@agentclientprotocol/sdk` | 1.7.0 | Apache-2.0 |
 | `ink` | 7.1.1 | MIT |
 | `marked` | 18.0.7 | MIT |
+| `pdf-lib` | 1.17.1 | MIT |
 | `node-html-markdown` | 2.0.0 | MIT |
 | `smol-toml` | 1.9.1 | BSD-3-Clause |
 | `react` | 19.3.0 | MIT |
@@ -46,6 +47,8 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 桌面端右侧面板的只读文件查看用 CodeMirror 6（上表 `@codemirror/*` 与 `@lezer/highlight`，均为 MIT），按需动态加载。`@codemirror/language-data` 6.5.2 及它引入的 `@codemirror/lang-*`、`@codemirror/legacy-modes`、对应 `@lezer/*` 解析器均为 MIT，与 GPL-3.0-only 兼容；语言包通过目录的 `load()` 按需加载。它们间接带入的 `@codemirror/autocomplete`、`@codemirror/lint`、`@lezer/common`、`@lezer/lr`、各语言的 `@lezer/*` 解析器、`style-mod`、`w3c-keyname`、`crelt`、`@marijn/find-cluster-break` 也都是 MIT。
 
 桌面端右侧面板的终端用 xterm.js（上表 `@xterm/xterm`、`@xterm/addon-fit` 与 `@xterm/addon-unicode11`，均为 MIT，无运行时依赖），随终端标签首次打开动态加载，不进手机网页。
+
+四个内置文档插件（`plugins/{docx,xlsx,pptx,pdf}/server.mjs`）静态内联 `@modelcontextprotocol/sdk` 1.30.0（MIT，含其传递依赖 `zod` 4.6.5 MIT、`ajv` 8.20.0 MIT、`ajv-formats` 3.0.1 MIT、`fast-deep-equal` 3.1.3 MIT、`fast-uri` 3.1.8 BSD-3-Clause、`json-schema-traverse` 1.0.0 MIT）、`marked` 18.0.7（MIT，用于 `docx` 将 Markdown 转为 HTML）与 `pdf-lib` 1.17.1（MIT，用于 `pdf` 合并与拆分；其传递依赖为 `@pdf-lib/standard-fonts` 1.0.0 MIT、`@pdf-lib/upng` 1.0.1 MIT、`pako` 1.0.11 MIT AND Zlib、`tslib` 1.14.1 0BSD），均与 GPL-3.0-only 兼容。
 
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|

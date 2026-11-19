@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist-site/
 dist/
+plugins/
 apps/desktop/dist-web/
 *.tsbuildinfo
 

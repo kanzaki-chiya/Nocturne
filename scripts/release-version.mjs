@@ -37,6 +37,11 @@ const JSON_VERSION_FILES = [
   "apps/android/package.json",
   "apps/android/src-tauri/tauri.conf.json",
   "packaging/npm/package.json",
+  "plugins-src/package.json",
+  "plugins-src/manifests/docx/.nocturne-plugin/plugin.json",
+  "plugins-src/manifests/xlsx/.nocturne-plugin/plugin.json",
+  "plugins-src/manifests/pptx/.nocturne-plugin/plugin.json",
+  "plugins-src/manifests/pdf/.nocturne-plugin/plugin.json",
 ];
 
 /** 源码里的版本常量：文件 → 常量名（`[export ]const <名> = "<版本>";`） */
@@ -48,6 +53,7 @@ const CONST_VERSION_FILES = {
   "apps/cli/src/main.ts": "VERSION",
   "apps/tui/src/version.ts": "APP_VERSION",
   "apps/relay/src/server.ts": "RELAY_VERSION",
+  "plugins-src/src/shared/mcp.ts": "PLUGIN_SERVER_VERSION",
 };
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;
