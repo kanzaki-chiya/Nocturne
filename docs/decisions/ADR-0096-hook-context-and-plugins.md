@@ -148,3 +148,9 @@ ADR-0012 与 [hooks.md](../architecture/hooks.md) 将 Hook 定位为控制流与
 - **把 `SessionStart` 注入当作临时状态、不写持久事件**：会话恢复或换机重放时若 Hook 配置变化或脚本输出依赖当时环境，重放结果会漂移，破坏模型输入可重现性。
 - **直接放行第三方插件的 `PreToolUse` / `PermissionRequest`**：插件按 Claude 工具名匹配且允许返回 `allow`，与 Nocturne 按解析后权限主体求值的安全模型冲突。
 - **把插件 Hook 写进用户 `config.json`**：违背 Nocturne「程序不改写手写 `config.json`」的原则，改用独立状态文件。
+
+## 修订：2026-11-20 不列用不到的插件
+
+- **跳过 Codex 系统市场**：发现阶段不读取 Codex 系统市场 `openai-bundled`、`openai-primary-runtime` 中的插件。
+- **跳过无可用能力的插件**：任意宿主、任意市场的插件解析后，若既无受支持的 Hook（`hooks` 为空；仅有不受支持 Hook 视为空）又无技能（`skills` 为空），不列出也不加载。
+- **行为边界**：以上两类排除均不产生 warning；被排除的插件不出现在 `describePlugins`、不参与 Hook 注入与技能加载；`<NOCTURNE_HOME>/plugins.json` 中已有的启用记录保持原样，不删除、不改写。

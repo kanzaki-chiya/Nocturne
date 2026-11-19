@@ -42,7 +42,10 @@ describe("plugins.* RPC 往返与校验", () => {
     mkdirSync(path.join(linkDir, ".codex-plugin"), { recursive: true });
     writeFileSync(
       path.join(linkDir, ".codex-plugin", "plugin.json"),
-      JSON.stringify({ interface: { displayName: "Sym Plugin" } }),
+      JSON.stringify({
+        interface: { displayName: "Sym Plugin" },
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo sym" }] }] },
+      }),
     );
     const targetDir = path.join(root, "target");
     mkdirSync(targetDir, { recursive: true });

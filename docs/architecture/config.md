@@ -267,7 +267,7 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 ```
 
 - 与 `mcp.json`、`external-agents.json` 共用配置写入队列（`enqueueConfigWrite`），先写同目录临时文件再原子 `rename`；`enabled: false` 删除对应条目。
-- 文件损坏或 `version !== 1` 时整份忽略并告警；单个条目无效时仅忽略该条目并告警，不阻塞会话启动。详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)。
+- 文件损坏或 `version !== 1` 时整份忽略并告警；单个条目无效时仅忽略该条目并告警，不阻塞会话启动。Codex 系统市场（`openai-bundled`、`openai-primary-runtime`）及既无受支持 Hook 又无技能的插件在发现阶段跳过，其已有记录保持原样不删改。详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)。
 
 ## 3. 项目配置的信任模型
 

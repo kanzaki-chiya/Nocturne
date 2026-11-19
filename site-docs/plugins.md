@@ -9,7 +9,7 @@ Nocturne 可以只读读取本机已安装的 Codex 与 Claude Code 插件，在
 - **Codex**：只读解析 `$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`）中 `[plugins."<name>@<marketplace>"]` 且 `enabled = true` 的条目，并在 `$CODEX_HOME/plugins/cache/<marketplace>/<name>/` 下选取活跃版本（存在 `local` 时优先，否则按版本号取最新），读取 `.codex-plugin/plugin.json` 或 `.claude-plugin/plugin.json`。
 - **Claude Code**：只读解析 `$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json`（默认 `~/.claude/plugins/installed_plugins.json`）中 `scope` 为 `"user"` 的安装路径与 `settings.json` 中 `enabledPlugins[id] === true` 的条目，读取 `.claude-plugin/plugin.json`（缺失时按默认布局尝试 `hooks/hooks.json` 与 `skills/`）。
 
-同一插件在两个宿主同时安装时互相独立，各自单独启停。
+同一插件在两个宿主同时安装时互相独立，各自单独启停。Codex 系统市场（`openai-bundled`、`openai-primary-runtime`）中的插件，以及解析后既无受支持 Hook 又无技能（含仅有不受支持 Hook）的插件会被跳过，不列出也不加载。
 
 ## 默认不启用与确认流程
 

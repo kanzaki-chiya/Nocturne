@@ -268,7 +268,10 @@ describe("清单查找、hooks 来源与跳过规则", () => {
       marketplace: "mkt",
       version: "1.0.0",
       manifestDir: ".codex-plugin",
-      manifest: { interface: { displayName: "From Codex" } },
+      manifest: {
+        interface: { displayName: "From Codex" },
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo codex" }] }] },
+      },
       files: {
         ".claude-plugin/plugin.json": JSON.stringify({ displayName: "From Claude" }),
       },
@@ -279,13 +282,19 @@ describe("清单查找、hooks 来源与跳过规则", () => {
       marketplace: "mkt",
       version: "1.0.0",
       manifestDir: ".claude-plugin",
-      manifest: { displayName: "Claude Fallback" },
+      manifest: {
+        displayName: "Claude Fallback",
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo fb" }] }] },
+      },
     });
     // Claude 来源只看 .claude-plugin，不看 .codex-plugin
     writeClaudePlugin(f.claudeHome, {
       name: "claudeonly",
       marketplace: "mkt",
-      manifest: { displayName: "Claude Native" },
+      manifest: {
+        displayName: "Claude Native",
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo claude" }] }] },
+      },
       files: {
         ".codex-plugin/plugin.json": JSON.stringify({ interface: { displayName: "Wrong Codex" } }),
       },
@@ -1102,7 +1111,10 @@ describe("启用、整目录指纹信任、技能与 Runtime 集成", () => {
     const pluginDir = writeClaudePlugin(f.claudeHome, {
       name: "symlinked",
       marketplace: "mkt",
-      manifest: { name: "symlinked" },
+      manifest: {
+        name: "symlinked",
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo sym" }] }] },
+      },
     });
     try {
       symlinkSync(targetFile, path.join(pluginDir, "link.txt"), "file");
@@ -1167,6 +1179,10 @@ const TINY_WEBP = Buffer.from([
   0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20,
 ]);
 
+const MINIMAL_HOOKS = {
+  SessionStart: [{ hooks: [{ type: "command", command: "echo ok" }] }],
+};
+
 describe("插件图标读取与指纹排除", () => {
   it("优先取 interface.composerIcon，没有时退到 interface.logo，支持 png/jpg/webp/svg", async () => {
     const f = makeFixtureEnv();
@@ -1176,6 +1192,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "both",
+        hooks: MINIMAL_HOOKS,
         interface: {
           composerIcon: "./assets/composer.png",
           logo: "./assets/logo.svg",
@@ -1192,6 +1209,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "logo-only",
+        hooks: MINIMAL_HOOKS,
         interface: {
           logo: "./assets/logo.svg",
         },
@@ -1206,6 +1224,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "jpg-icon",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "assets/pic.jpg" },
       },
       files: { "assets/pic.jpg": TINY_JPG },
@@ -1216,6 +1235,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "webp-icon",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "./assets/pic.webp" },
       },
       files: { "assets/pic.webp": TINY_WEBP },
@@ -1255,6 +1275,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "escape",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "../../../../../../outside.png" },
       },
     });
@@ -1266,6 +1287,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "too-big",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "./big.png" },
       },
       files: { "big.png": oversized },
@@ -1277,6 +1299,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "bad-ext",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "./anim.gif" },
       },
       files: { "anim.gif": Buffer.from("GIF89a") },
@@ -1287,6 +1310,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "bad-magic",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "./fake.png" },
       },
       files: { "fake.png": "not really a png" },
@@ -1298,6 +1322,7 @@ describe("插件图标读取与指纹排除", () => {
       version: "1.0.0",
       manifest: {
         name: "sym-icon",
+        hooks: MINIMAL_HOOKS,
         interface: { composerIcon: "./linked/outside.png" },
       },
     });
@@ -1439,5 +1464,168 @@ describe("插件图标读取与指纹排除", () => {
     });
     expect(afterTamper.plugins[0]?.state).toBe("changed");
     expect(afterTamper.plugins[0]?.icon).toBeUndefined();
+  });
+});
+
+describe("排除 Codex 系统市场与无 Hook 无技能插件", () => {
+  it("排除 Codex 系统市场 openai-bundled 与 openai-primary-runtime 插件且不报警告", async () => {
+    const f = makeFixtureEnv();
+    writeCodexPlugin(f.codexHome, {
+      name: "browser",
+      marketplace: "openai-bundled",
+      version: "1.0.0",
+      manifest: {
+        name: "browser",
+        hooks: MINIMAL_HOOKS,
+        skills: "./skills",
+      },
+      files: {
+        "skills/bundled-skill/SKILL.md": "---\ndescription: bundled\n---\nbody",
+      },
+    });
+    writeCodexPlugin(f.codexHome, {
+      name: "documents",
+      marketplace: "openai-primary-runtime",
+      version: "1.0.0",
+      manifest: {
+        name: "documents",
+        hooks: MINIMAL_HOOKS,
+        skills: "./skills",
+      },
+      files: {
+        "skills/doc-skill/SKILL.md": "---\ndescription: doc\n---\nbody",
+      },
+    });
+    writeCodexPlugin(f.codexHome, {
+      name: "kept",
+      marketplace: "openai-curated",
+      version: "1.0.0",
+      manifest: { name: "kept", hooks: MINIMAL_HOOKS },
+    });
+
+    const res = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    expect(res.plugins.map((p) => p.id)).toEqual(["codex:kept@openai-curated"]);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it("排除无 Hook 无技能与仅有不受支持 Hook 的插件，保留有技能无 Hook 的插件且不报警告", async () => {
+    const f = makeFixtureEnv();
+    // 无 Hook 无技能（Codex & Claude）
+    writeCodexPlugin(f.codexHome, {
+      name: "empty-codex",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: { name: "empty-codex" },
+    });
+    writeClaudePlugin(f.claudeHome, {
+      name: "empty-claude",
+      marketplace: "mkt",
+      manifest: { name: "empty-claude" },
+    });
+    // 只有不受支持 Hook 且无技能
+    writeCodexPlugin(f.codexHome, {
+      name: "unsupported-only",
+      marketplace: "mkt",
+      version: "1.0.0",
+      manifest: {
+        name: "unsupported-only",
+        hooks: {
+          PreToolUse: [{ hooks: [{ type: "command", command: "echo tool" }] }],
+          SessionStart: [{ hooks: [{ type: "prompt", prompt: "ignored" }] }],
+        },
+      },
+    });
+    // 有技能无 Hook：应保留
+    writeClaudePlugin(f.claudeHome, {
+      name: "skills-only",
+      marketplace: "mkt",
+      manifest: { name: "skills-only" },
+      files: {
+        "skills/only-skill/SKILL.md": "---\ndescription: useful skill\n---\nSKILL_BODY",
+      },
+    });
+
+    const res = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    });
+    expect(res.plugins.map((p) => p.id)).toEqual(["claude:skills-only@mkt"]);
+    expect(res.plugins[0]?.hooks).toEqual([]);
+    expect(res.plugins[0]?.skills).toEqual(["only-skill"]);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it("被排除插件在 plugins.json 中已有的启用记录保持原样，且不参与 Hook 注入和技能加载", async () => {
+    const f = makeFixtureEnv();
+    const bundledDir = writeCodexPlugin(f.codexHome, {
+      name: "visualize",
+      marketplace: "openai-bundled",
+      version: "1.0.0",
+      manifest: {
+        name: "visualize",
+        hooks: {
+          SessionStart: [
+            { hooks: [{ type: "command", command: `node -e "console.log('bundled-ran')"` }] },
+          ],
+        },
+      },
+      files: {
+        "skills/viz-skill/SKILL.md": "---\ndescription: viz\n---\nVIZ",
+      },
+    });
+    const emptyDir = writeClaudePlugin(f.claudeHome, {
+      name: "empty-stored",
+      marketplace: "mkt",
+      manifest: { name: "empty-stored" },
+    });
+    const bundledHash = await computePluginFingerprint(
+      f.plat.fs,
+      f.plat.paths,
+      bundledDir,
+      bundledDir,
+    );
+    const emptyHash = await computePluginFingerprint(f.plat.fs, f.plat.paths, emptyDir, emptyDir);
+
+    const storedPayload = JSON.stringify(
+      {
+        version: 1,
+        plugins: {
+          "codex:visualize@openai-bundled": { enabled: true, hash: bundledHash },
+          "claude:empty-stored@mkt": { enabled: true, hash: emptyHash },
+        },
+      },
+      null,
+      2,
+    );
+    const pluginsJsonPath = path.join(f.nocturneHome, "plugins.json");
+    writeFileSync(pluginsJsonPath, storedPayload);
+
+    const config = await loadConfig(f.plat, { nocturneHome: f.nocturneHome });
+    const rt = await createRuntime({
+      cwd: f.ws,
+      sessionsDir: f.sessionsDir,
+      config,
+      providers: [new FakeProvider({ scripts: [] })],
+      plugins: { codexHome: f.codexHome, claudeHome: f.claudeHome },
+    });
+    openRuntimes.push(rt);
+
+    const desc = await rt.describePlugins();
+    expect(desc.plugins).toEqual([]);
+    expect(desc.warnings).toEqual([]);
+    expect((await rt.describeSkills()).skills.find((s) => s.name === "viz-skill")).toBeUndefined();
+
+    const s = await rt.createSession({ model: "fake/fake-model" });
+    openSessions.push(s);
+    expect(s.state().hookContext).toBeUndefined();
+    expect(s.warnings).toEqual([]);
+
+    // plugins.json 保持原样，不删除、不改写
+    expect(readFileSync(pluginsJsonPath, "utf8")).toBe(storedPayload);
   });
 });

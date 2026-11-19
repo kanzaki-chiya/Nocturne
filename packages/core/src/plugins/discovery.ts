@@ -26,6 +26,11 @@ const MAX_HOOK_TIMEOUT_MS = 60_000;
 const SESSION_END_DEFAULT_TIMEOUT_MS = 1_000;
 const SESSION_END_MAX_TIMEOUT_MS = 3_000;
 const MAX_PLUGIN_ICON_BYTES = 64 * 1024;
+/** Codex 自带系统市场：包含 Codex 专用运行时/界面能力，发现阶段跳过 */
+const CODEX_SYSTEM_MARKETPLACES: ReadonlySet<string> = new Set([
+  "openai-bundled",
+  "openai-primary-runtime",
+]);
 const PLUGIN_ICON_MIME: Readonly<Record<string, string>> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -649,6 +654,7 @@ async function discoverCodexPlugins(
       warnings.push(`codex_plugin_invalid：插件标识 "${rawId}" 非法，已跳过`);
       continue;
     }
+    if (CODEX_SYSTEM_MARKETPLACES.has(slug.marketplace)) continue;
     const cacheParent = paths.join(codexHome, "plugins", "cache", slug.marketplace, slug.name);
     if (!(await fs.exists(cacheParent))) continue;
 
@@ -788,6 +794,10 @@ async function discoverClaudePlugins(
   return results;
 }
 
+function hasUsablePluginCapabilities(plugin: DiscoveredPlugin): boolean {
+  return plugin.overview.hooks.length > 0 || plugin.overview.skills.length > 0;
+}
+
 export async function discoverInstalledPlugins(
   platform: Platform,
   options: PluginDiscoveryOptions,
@@ -808,8 +818,8 @@ export async function discoverInstalledPlugins(
     discoverClaudePlugins(platform, claudeHome, options.nocturneHome, warnings),
   ]);
 
-  const plugins = [...codex, ...claude].sort((a, b) =>
-    a.overview.id < b.overview.id ? -1 : a.overview.id > b.overview.id ? 1 : 0,
-  );
+  const plugins = [...codex, ...claude]
+    .filter(hasUsablePluginCapabilities)
+    .sort((a, b) => (a.overview.id < b.overview.id ? -1 : a.overview.id > b.overview.id ? 1 : 0));
   return { plugins, warnings };
 }
