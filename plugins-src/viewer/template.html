@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --color-background-primary: #141416;
+        --color-background-secondary: #1c1c20;
+        --color-background-tertiary: #25252b;
+        --color-text-primary: #f4f4f5;
+        --color-text-secondary: #a1a1aa;
+        --color-text-danger: #ef4444;
+        --color-border-primary: rgba(255, 255, 255, 0.12);
+        --color-border-secondary: rgba(255, 255, 255, 0.22);
+        --color-ring-primary: #6366f1;
+        --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --border-radius-sm: 6px;
+        --border-radius-md: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--color-background-primary);
+        color: var(--color-text-primary);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .viewer {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+      }
+
+      .toolbar {
+        flex: 0 0 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 0 10px;
+        background: var(--color-background-secondary);
+        border-bottom: 1px solid var(--color-border-primary);
+        user-select: none;
+        position: relative;
+      }
+
+      .progress {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -1px;
+        height: 2px;
+        overflow: hidden;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 120ms ease;
+      }
+
+      .progress[data-loading="true"] {
+        opacity: 1;
+      }
+
+      .progress::before {
+        content: "";
+        position: absolute;
+        left: -40%;
+        top: 0;
+        width: 40%;
+        height: 100%;
+        background: var(--color-ring-primary);
+        animation: viewer-indeterminate 1.1s infinite linear;
+      }
+
+      @keyframes viewer-indeterminate {
+        0% {
+          left: -40%;
+        }
+        100% {
+          left: 100%;
+        }
+      }
+
+      .doc-name {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+      }
+
+      .controls {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .sep {
+        width: 1px;
+        height: 16px;
+        margin: 0 4px;
+        background: var(--color-border-primary);
+      }
+
+      .icon-btn {
+        appearance: none;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--color-text-primary);
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border-radius: var(--border-radius-sm);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+
+      .icon-btn:hover:not(:disabled) {
+        background: var(--color-background-tertiary);
+        border-color: var(--color-border-primary);
+      }
+
+      .icon-btn:focus-visible {
+        outline: 2px solid var(--color-ring-primary);
+        outline-offset: -1px;
+      }
+
+      .icon-btn:disabled {
+        opacity: 0.38;
+        cursor: default;
+      }
+
+      .icon-btn svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+      }
+
+      .page-jump {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+
+      .page-input {
+        width: 42px;
+        height: 24px;
+        padding: 0 4px;
+        border: 1px solid var(--color-border-primary);
+        border-radius: var(--border-radius-sm);
+        background: var(--color-background-primary);
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .page-input:focus {
+        outline: 2px solid var(--color-ring-primary);
+        outline-offset: -1px;
+        border-color: transparent;
+      }
+
+      .zoom-label {
+        min-width: 42px;
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+
+      .stage {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        padding: 16px;
+        background: var(--color-background-primary);
+      }
+
+      .pages {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        min-height: 100%;
+      }
+
+      .page-slot {
+        position: relative;
+        background: #ffffff;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+        flex: 0 0 auto;
+        overflow: hidden;
+      }
+
+      :root[data-theme="light"] .page-slot {
+        box-shadow:
+          0 1px 6px rgba(0, 0, 0, 0.12),
+          0 0 0 1px rgba(0, 0, 0, 0.06);
+      }
+
+      .page-slot canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      .error-box {
+        max-width: 560px;
+        margin: 32px auto;
+        padding: 12px 14px;
+        border-radius: var(--border-radius-md);
+        border: 1px solid var(--color-border-primary);
+        background: var(--color-background-secondary);
+        color: var(--color-text-danger);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="viewer">
+      <header class="toolbar">
+        <div id="doc-name" class="doc-name"></div>
+        <div class="controls">
+          <button id="btn-prev" class="icon-btn" type="button" aria-label="上一页" disabled>
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10 3.5L5.5 8L10 12.5" />
+            </svg>
+          </button>
+          <div class="page-jump">
+            <input
+              id="page-input"
+              class="page-input"
+              type="text"
+              inputmode="numeric"
+              aria-label="页码"
+              value="0"
+              disabled
+            />
+            <span>/</span>
+            <span id="page-total">0</span>
+          </div>
+          <button id="btn-next" class="icon-btn" type="button" aria-label="下一页" disabled>
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 3.5L10.5 8L6 12.5" />
+            </svg>
+          </button>
+          <span class="sep" aria-hidden="true"></span>
+          <button id="btn-zoom-out" class="icon-btn" type="button" aria-label="缩小" disabled>
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M3.5 8H12.5" />
+            </svg>
+          </button>
+          <span id="zoom-label" class="zoom-label">100%</span>
+          <button id="btn-zoom-in" class="icon-btn" type="button" aria-label="放大" disabled>
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M8 3.5V12.5M3.5 8H12.5" />
+            </svg>
+          </button>
+          <button id="btn-fit-width" class="icon-btn" type="button" aria-label="适应宽度" disabled>
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M2.5 3.5V12.5M13.5 3.5V12.5M5 8H11M6.5 6.2L4.7 8L6.5 9.8M9.5 6.2L11.3 8L9.5 9.8"
+              />
+            </svg>
+          </button>
+        </div>
+        <div id="progress" class="progress" data-loading="false"></div>
+      </header>
+      <main id="stage" class="stage">
+        <div id="error-box" class="error-box" role="alert" hidden></div>
+        <div id="pages" class="pages"></div>
+      </main>
+    </div>
+    <script id="nocturne-pdf-worker" type="text/plain">
+      __PDFJS_WORKER_BASE64__
+    </script>
+    <script type="module">
+      __VIEWER_BUNDLE__;
+    </script>
+  </body>
+</html>

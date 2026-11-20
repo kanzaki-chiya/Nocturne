@@ -15,6 +15,7 @@ interface PluginExpectation {
   name: string;
   displayName: string;
   serverId: string;
+  fileTypes: string[];
   readOnlyTools: string[];
   writeTools: string[];
 }
@@ -24,28 +25,32 @@ const EXPECTED_PLUGINS: PluginExpectation[] = [
     name: "docx",
     displayName: "Word 文档",
     serverId: "word",
-    readOnlyTools: ["read", "render"],
+    fileTypes: [".docx", ".doc", ".odt", ".rtf"],
+    readOnlyTools: ["read", "render", "show_in_viewer", "read_document", "viewer_asset"],
     writeTools: ["create", "edit", "convert"],
   },
   {
     name: "xlsx",
     displayName: "电子表格",
     serverId: "sheets",
-    readOnlyTools: ["read", "render"],
+    fileTypes: [".xlsx", ".xls", ".ods"],
+    readOnlyTools: ["read", "render", "show_in_viewer", "read_document", "viewer_asset"],
     writeTools: ["create", "edit", "recalculate", "convert"],
   },
   {
     name: "pptx",
     displayName: "演示文档",
     serverId: "slides",
-    readOnlyTools: ["read", "render"],
+    fileTypes: [".pptx", ".ppt", ".odp"],
+    readOnlyTools: ["read", "render", "show_in_viewer", "read_document", "viewer_asset"],
     writeTools: ["create", "edit", "convert"],
   },
   {
     name: "pdf",
     displayName: "PDF",
     serverId: "pdf",
-    readOnlyTools: ["read", "render"],
+    fileTypes: [".pdf"],
+    readOnlyTools: ["read", "render", "show_in_viewer", "read_document", "viewer_asset"],
     writeTools: ["create", "merge", "split"],
   },
 ];
@@ -161,17 +166,34 @@ describe("built plugins layout, manifests, icons, and skills", () => {
       const dir = path.join(pluginsDir, spec.name);
       expect(existsSync(dir)).toBe(true);
       const files = listFilesRecursive(dir);
-      expect(files).toEqual(
+      const topAndCoreFiles = files.filter((f) => !f.startsWith("viewer-assets/"));
+      expect(topAndCoreFiles).toEqual(
         [
           ".nocturne-plugin/plugin.json",
           "engine.py",
           "icon.svg",
           "server.mjs",
           `skills/${spec.name}/SKILL.md`,
+          "viewer.html",
         ].sort(),
       );
 
-      // Verify manifest structure
+      // Viewer HTML size must stay within ADR-0101 8 MiB cap
+      const viewerHtmlBytes = statSync(path.join(dir, "viewer.html")).size;
+      expect(viewerHtmlBytes).toBeGreaterThan(100_000);
+      expect(viewerHtmlBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+
+      // Packaged viewer-assets must include manifest, cmaps, Foxit fonts, and wasm — never LiberationSans (GPL-2.0)
+      const assetFiles = files.filter((f) => f.startsWith("viewer-assets/"));
+      expect(assetFiles).toContain("viewer-assets/manifest.json");
+      expect(assetFiles).toContain("viewer-assets/cmaps/UniGB-UCS2-H.bcmap");
+      expect(assetFiles).toContain("viewer-assets/standard_fonts/FoxitSerif.pfb");
+      expect(assetFiles).toContain("viewer-assets/wasm/jbig2.wasm");
+      expect(assetFiles).toContain("viewer-assets/wasm/openjpeg.wasm");
+      expect(assetFiles.some((f) => f.includes("LiberationSans"))).toBe(false);
+      expect(assetFiles.some((f) => f.includes("node_modules"))).toBe(false);
+
+      // Verify manifest structure including ui.surfaces
       const manifest = JSON.parse(
         readFileSync(path.join(dir, ".nocturne-plugin", "plugin.json"), "utf8"),
       ) as {
@@ -180,6 +202,15 @@ describe("built plugins layout, manifests, icons, and skills", () => {
         description: string;
         mcpServers: Record<string, { command: string; args: string[] }>;
         interface: { displayName: string; composerIcon: string };
+        ui?: {
+          surfaces?: {
+            id: string;
+            title: string;
+            server: string;
+            resourceUri: string;
+            open?: { tool: string; fileTypes: string[] };
+          }[];
+        };
       };
       expect(manifest.name).toBe(spec.name);
       expect(manifest.version).toBe(pkgVersion);
@@ -190,6 +221,18 @@ describe("built plugins layout, manifests, icons, and skills", () => {
         command: "${NOCTURNE_NODE}",
         args: ["${PLUGIN_ROOT}/server.mjs"],
       });
+      expect(manifest.ui?.surfaces).toEqual([
+        {
+          id: "viewer",
+          title: spec.displayName,
+          server: spec.serverId,
+          resourceUri: `ui://${spec.serverId}/viewer.html`,
+          open: {
+            tool: "show_in_viewer",
+            fileTypes: spec.fileTypes,
+          },
+        },
+      ]);
 
       // Verify SVG icon rules (<= 64 KB, starts with <svg)
       const iconPath = path.join(dir, "icon.svg");
@@ -235,12 +278,19 @@ describe("MCP stdio protocol on built server.mjs", () => {
 
         client.notify("notifications/initialized");
 
-        // 2. tools/list and readOnlyHint accuracy
+        // 2. tools/list and readOnlyHint + _meta.ui accuracy
         const listRes = await client.request("tools/list");
         expect(listRes.error).toBeUndefined();
         const tools = (listRes.result?.tools ?? []) as {
           name: string;
           annotations?: { readOnlyHint?: boolean };
+          _meta?: {
+            ui?: {
+              resourceUri?: string;
+              surface?: string;
+              visibility?: string[];
+            };
+          };
           inputSchema: Record<string, unknown>;
         }[];
 
@@ -255,6 +305,46 @@ describe("MCP stdio protocol on built server.mjs", () => {
             expect(tool.annotations?.readOnlyHint, `${spec.name}.${tool.name}`).not.toBe(true);
           }
         }
+
+        const showTool = tools.find((t) => t.name === "show_in_viewer");
+        expect(showTool?._meta?.ui).toEqual({
+          resourceUri: `ui://${spec.serverId}/viewer.html`,
+          surface: "viewer",
+          visibility: ["model", "app"],
+        });
+        expect(tools.find((t) => t.name === "read_document")?._meta?.ui).toEqual({
+          visibility: ["app"],
+        });
+        expect(tools.find((t) => t.name === "viewer_asset")?._meta?.ui).toEqual({
+          visibility: ["app"],
+        });
+
+        // 2b. resources/list & resources/read for viewer.html
+        const resList = await client.request("resources/list");
+        expect(resList.error).toBeUndefined();
+        const resources = (resList.result?.resources ?? []) as {
+          uri: string;
+          mimeType: string;
+        }[];
+        expect(resources).toEqual([
+          expect.objectContaining({
+            uri: `ui://${spec.serverId}/viewer.html`,
+            mimeType: "text/html;profile=mcp-app",
+          }),
+        ]);
+
+        const resRead = await client.request("resources/read", {
+          uri: `ui://${spec.serverId}/viewer.html`,
+        });
+        expect(resRead.error).toBeUndefined();
+        const contents = (resRead.result?.contents ?? []) as {
+          uri: string;
+          mimeType: string;
+          text?: string;
+        }[];
+        expect(contents[0]?.uri).toBe(`ui://${spec.serverId}/viewer.html`);
+        expect(contents[0]?.mimeType).toBe("text/html;profile=mcp-app");
+        expect(contents[0]?.text?.includes("<!doctype html>")).toBe(true);
 
         // 3. Unknown method returns JSON-RPC error
         const unknownRes = await client.request("nonexistent/method");

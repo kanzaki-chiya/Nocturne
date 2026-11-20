@@ -15,6 +15,17 @@ import {
   assertSourceExists,
 } from "../shared/paths.js";
 import { runPageRender } from "../shared/render.js";
+import {
+  buildViewerTools,
+  createViewerFeature,
+  type ViewerFeatureOptions,
+} from "../shared/viewer.js";
+
+export type DocPluginServerOptions = LibreOfficeEngineOptions &
+  Pick<
+    ViewerFeatureOptions,
+    "viewerHtmlPath" | "viewerAssetsDir" | "maxDocumentBytes" | "maxChunkBytes"
+  >;
 
 function escapeHtml(text: string): string {
   return text
@@ -176,17 +187,49 @@ export const WORD_TOOLS: readonly Tool[] = [
       required: ["path"],
     },
   },
+  ...buildViewerTools("word"),
 ];
 
-export function createWordPluginServer(options?: LibreOfficeEngineOptions): PluginServerSpec {
+export function createWordPluginServer(options?: DocPluginServerOptions): PluginServerSpec {
   const engine = new LibreOfficeEngine(options);
+  const viewer = createViewerFeature({
+    serverId: "word",
+    title: "Word 文档",
+    viewerHtmlPath: options?.viewerHtmlPath,
+    viewerAssetsDir: options?.viewerAssetsDir,
+    maxDocumentBytes: options?.maxDocumentBytes,
+    maxChunkBytes: options?.maxChunkBytes,
+    convertToPdf: async (inputPath, outputPath) => {
+      await engine.callUnoOrCliFallback(
+        () =>
+          engine.callUno(
+            "docx_convert",
+            { path: inputPath, outputPath, format: "pdf" },
+            { expectedOutputPath: outputPath },
+          ),
+        async () => {
+          await engine.convertViaCli({
+            inputPath,
+            convertTo: "pdf:writer_pdf_Export",
+            outputPath,
+          });
+          return { outputPath, format: "pdf" };
+        },
+      );
+    },
+  });
 
   return {
     name: "word",
     version: PLUGIN_SERVER_VERSION,
     tools: WORD_TOOLS,
-    close: () => engine.close(),
+    resources: viewer.resources,
+    close: async () => {
+      viewer.close();
+      await engine.close();
+    },
     handlers: {
+      ...viewer.handlers,
       read: async (args) => {
         const filePath = assertAbsolutePath(args.path, "path");
         assertSourceExists(filePath);

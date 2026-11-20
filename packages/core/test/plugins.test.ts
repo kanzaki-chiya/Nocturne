@@ -3,6 +3,7 @@
  * 所有测试均使用临时目录夹具，不读写本机真实 `~/.codex` / `~/.claude`。
  */
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -2711,5 +2713,69 @@ describe("插件清单 ui.surfaces（ADR-0101 第 4 节）", () => {
     expect(warnings).toHaveLength(2);
     expect(warnings[0]).toContain("open_rw");
     expect(warnings[1]).toContain("open_model_only");
+  });
+
+  it("Core 插件发现加载四个内置文档插件（docx/xlsx/pptx/pdf）时 warnings 为空且 surface 完整", async () => {
+    const f = makeFixtureEnv();
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+    const builtPluginsDir = path.join(repoRoot, "plugins");
+    const expected = [
+      {
+        name: "docx",
+        server: "word",
+        title: "Word 文档",
+        fileTypes: [".docx", ".doc", ".odt", ".rtf"],
+      },
+      { name: "xlsx", server: "sheets", title: "电子表格", fileTypes: [".xlsx", ".xls", ".ods"] },
+      { name: "pptx", server: "slides", title: "演示文档", fileTypes: [".pptx", ".ppt", ".odp"] },
+      { name: "pdf", server: "pdf", title: "PDF", fileTypes: [".pdf"] },
+    ];
+
+    // 已构建的 plugins/ 存在时直接加载真产物，否则用 manifests 装配同结构目录
+    let targetDir = builtPluginsDir;
+    const allBuilt = expected.every((e) =>
+      existsSync(path.join(builtPluginsDir, e.name, ".nocturne-plugin", "plugin.json")),
+    );
+    if (!allBuilt) {
+      targetDir = path.join(f.root, "doc-builtin");
+      mkdirSync(targetDir, { recursive: true });
+      for (const e of expected) {
+        cpSync(
+          path.join(repoRoot, "plugins-src", "manifests", e.name),
+          path.join(targetDir, e.name),
+          {
+            recursive: true,
+          },
+        );
+      }
+    }
+
+    const desc = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+      builtinPluginsDir: targetDir,
+    });
+    expect(desc.warnings).toEqual([]);
+
+    for (const e of expected) {
+      const plugin = must(
+        desc.plugins.find((p) => p.id === `nocturne:${e.name}@builtin`),
+        `builtin plugin ${e.name}`,
+      );
+      expect(plugin.warnings).toEqual([]);
+      expect(plugin.surfaces).toEqual([
+        {
+          id: "viewer",
+          title: e.title,
+          server: e.server,
+          resourceUri: `ui://${e.server}/viewer.html`,
+          open: {
+            tool: "show_in_viewer",
+            fileTypes: e.fileTypes,
+          },
+        },
+      ]);
+    }
   });
 });

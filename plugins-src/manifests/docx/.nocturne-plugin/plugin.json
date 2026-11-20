@@ -12,5 +12,19 @@
   "interface": {
     "displayName": "Word 文档",
     "composerIcon": "./icon.svg"
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "viewer",
+        "title": "Word 文档",
+        "server": "word",
+        "resourceUri": "ui://word/viewer.html",
+        "open": {
+          "tool": "show_in_viewer",
+          "fileTypes": [".docx", ".doc", ".odt", ".rtf"]
+        }
+      }
+    ]
   }
 }

@@ -8,7 +8,10 @@ export type DocErrorCode =
   | "file_exists"
   | "output_missing"
   | "timeout"
-  | "engine_error";
+  | "engine_error"
+  | "document_unknown"
+  | "document_too_large"
+  | "asset_not_found";
 
 export class DocPluginError extends Error {
   readonly code: DocErrorCode;
@@ -29,11 +32,17 @@ export function toToolError(error: unknown): CallToolResult {
     return {
       isError: true,
       content: [{ type: "text", text: `[${error.code}] ${error.message}` }],
+      structuredContent: {
+        error: { code: error.code, message: error.message },
+      },
     };
   }
   const message = error instanceof Error ? error.message : String(error);
   return {
     isError: true,
     content: [{ type: "text", text: `[engine_error] ${message}` }],
+    structuredContent: {
+      error: { code: "engine_error", message },
+    },
   };
 }

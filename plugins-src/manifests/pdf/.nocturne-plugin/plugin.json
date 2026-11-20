@@ -12,5 +12,19 @@
   "interface": {
     "displayName": "PDF",
     "composerIcon": "./icon.svg"
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "viewer",
+        "title": "PDF",
+        "server": "pdf",
+        "resourceUri": "ui://pdf/viewer.html",
+        "open": {
+          "tool": "show_in_viewer",
+          "fileTypes": [".pdf"]
+        }
+      }
+    ]
   }
 }

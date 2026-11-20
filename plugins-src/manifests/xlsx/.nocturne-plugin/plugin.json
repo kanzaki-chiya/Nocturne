@@ -12,5 +12,19 @@
   "interface": {
     "displayName": "电子表格",
     "composerIcon": "./icon.svg"
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "viewer",
+        "title": "电子表格",
+        "server": "sheets",
+        "resourceUri": "ui://sheets/viewer.html",
+        "open": {
+          "tool": "show_in_viewer",
+          "fileTypes": [".xlsx", ".xls", ".ods"]
+        }
+      }
+    ]
   }
 }

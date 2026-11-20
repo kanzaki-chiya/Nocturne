@@ -12,6 +12,17 @@ import {
   assertSourceExists,
 } from "../shared/paths.js";
 import { runPageRender } from "../shared/render.js";
+import {
+  buildViewerTools,
+  createViewerFeature,
+  type ViewerFeatureOptions,
+} from "../shared/viewer.js";
+
+export type SheetsPluginServerOptions = LibreOfficeEngineOptions &
+  Pick<
+    ViewerFeatureOptions,
+    "viewerHtmlPath" | "viewerAssetsDir" | "maxDocumentBytes" | "maxChunkBytes"
+  >;
 
 const CALC_CSV_ALL_SHEETS_FILTER =
   "csv:Text - txt - csv (StarCalc):44,34,76,1,,0,false,true,false,false,false,-1";
@@ -198,17 +209,49 @@ export const SHEETS_TOOLS: readonly Tool[] = [
       required: ["path"],
     },
   },
+  ...buildViewerTools("sheets"),
 ];
 
-export function createSheetsPluginServer(options?: LibreOfficeEngineOptions): PluginServerSpec {
+export function createSheetsPluginServer(options?: SheetsPluginServerOptions): PluginServerSpec {
   const engine = new LibreOfficeEngine(options);
+  const viewer = createViewerFeature({
+    serverId: "sheets",
+    title: "电子表格",
+    viewerHtmlPath: options?.viewerHtmlPath,
+    viewerAssetsDir: options?.viewerAssetsDir,
+    maxDocumentBytes: options?.maxDocumentBytes,
+    maxChunkBytes: options?.maxChunkBytes,
+    convertToPdf: async (inputPath, outputPath) => {
+      await engine.callUnoOrCliFallback(
+        () =>
+          engine.callUno(
+            "xlsx_convert",
+            { path: inputPath, outputPath, format: "pdf" },
+            { expectedOutputPath: outputPath },
+          ),
+        async () => {
+          await engine.convertViaCli({
+            inputPath,
+            convertTo: "pdf:calc_pdf_Export",
+            outputPath,
+          });
+          return { outputPath, format: "pdf" };
+        },
+      );
+    },
+  });
 
   return {
     name: "sheets",
     version: PLUGIN_SERVER_VERSION,
     tools: SHEETS_TOOLS,
-    close: () => engine.close(),
+    resources: viewer.resources,
+    close: async () => {
+      viewer.close();
+      await engine.close();
+    },
     handlers: {
+      ...viewer.handlers,
       read: async (args) => {
         const filePath = assertAbsolutePath(args.path, "path");
         assertSourceExists(filePath);

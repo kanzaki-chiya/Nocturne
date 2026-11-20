@@ -5,6 +5,7 @@ import path from "node:path";
 import { deflateSync } from "node:zlib";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createWordPluginServer } from "../src/servers/docx.js";
@@ -13,6 +14,7 @@ import { createSlidesPluginServer } from "../src/servers/pptx.js";
 import { createSheetsPluginServer } from "../src/servers/xlsx.js";
 import { findPython, findSoffice } from "../src/shared/discovery.js";
 import type { PluginServerSpec } from "../src/shared/mcp.js";
+import { createViewerBinaryDataFactory } from "../src/shared/pdfjs-factory.js";
 
 function detectRealLibreOfficeUno(): boolean {
   try {
@@ -462,6 +464,146 @@ describe.skipIf(!HAS_REAL_LIBREOFFICE)("Real LibreOffice end-to-end chains", () 
       expect(splitRead.pages[0]?.text).not.toContain("第一部分：系统架构");
     } finally {
       await server.close();
+    }
+  });
+
+  it("viewer: real LibreOffice converts docx, xlsx, and pptx for show_in_viewer -> read_document", async () => {
+    const readAllPdfBytes = async (
+      server: PluginServerSpec,
+      docId: string,
+      totalBytes: number,
+      chunkSize: number,
+    ): Promise<Buffer> => {
+      const parts: Buffer[] = [];
+      let offset = 0;
+      while (offset < totalBytes) {
+        const res = await callTool(server, "read_document", {
+          docId,
+          offset,
+          length: chunkSize,
+        });
+        const sc = res.structuredContent as { data: string; bytesRead: number; eof: boolean };
+        const buf = Buffer.from(sc.data, "base64");
+        expect(buf.length).toBe(sc.bytesRead);
+        parts.push(buf);
+        offset += buf.length;
+        if (sc.eof) break;
+      }
+      return Buffer.concat(parts);
+    };
+
+    const verifyPdfWithPdfjs = async (
+      server: PluginServerSpec,
+      pdfBytes: Buffer,
+      expectedSnippet: string,
+    ): Promise<void> => {
+      expect(pdfBytes.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+      const BinaryDataFactory = createViewerBinaryDataFactory({
+        fetchAsset: async (assetName: string) => {
+          const res = await callTool(server, "viewer_asset", { name: assetName });
+          const sc = res.structuredContent as { data: string };
+          return new Uint8Array(Buffer.from(sc.data, "base64"));
+        },
+      });
+      const task = pdfjsLib.getDocument({
+        data: new Uint8Array(pdfBytes),
+        useWorkerFetch: false,
+        disableWorkerRendering: true,
+        cMapUrl: "cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "standard_fonts/",
+        wasmUrl: "wasm/",
+        BinaryDataFactory,
+      });
+      const doc = await task.promise;
+      try {
+        expect(doc.numPages).toBeGreaterThanOrEqual(1);
+        const page = await doc.getPage(1);
+        const content = await page.getTextContent();
+        const text = content.items.map((item) => ("str" in item ? item.str : "")).join("");
+        expect(text).toContain(expectedSnippet);
+      } finally {
+        await task.destroy();
+      }
+    };
+
+    // 1. docx
+    const wordServer = createWordPluginServer();
+    try {
+      const docxPath = path.join(workDir, "viewer-test.docx");
+      await callTool(wordServer, "create", {
+        outputPath: docxPath,
+        content: "# 文档查看器中文验收\n\n这是一份用于端到端转换测试的 Word 正文。",
+      });
+      const shown = await callTool(wordServer, "show_in_viewer", { path: docxPath });
+      const sc = shown.structuredContent as {
+        docId: string;
+        totalBytes: number;
+        chunkSize: number;
+        pageCount: number;
+      };
+      expect(sc.pageCount).toBeGreaterThanOrEqual(1);
+      const pdfBytes = await readAllPdfBytes(wordServer, sc.docId, sc.totalBytes, sc.chunkSize);
+      await verifyPdfWithPdfjs(wordServer, pdfBytes, "文档查看器中文验收");
+    } finally {
+      await wordServer.close();
+    }
+
+    // 2. xlsx
+    const sheetsServer = createSheetsPluginServer();
+    try {
+      const xlsxPath = path.join(workDir, "viewer-test.xlsx");
+      await callTool(sheetsServer, "create", {
+        outputPath: xlsxPath,
+        sheets: [
+          {
+            name: "销售汇总",
+            rows: [
+              ["产品名称", "数量", "单价", "金额"],
+              ["星云笔记本", 3, 4999, "=B2*C2"],
+            ],
+          },
+        ],
+      });
+      const shown = await callTool(sheetsServer, "show_in_viewer", { path: xlsxPath });
+      const sc = shown.structuredContent as {
+        docId: string;
+        totalBytes: number;
+        chunkSize: number;
+        pageCount: number;
+      };
+      expect(sc.pageCount).toBeGreaterThanOrEqual(1);
+      const pdfBytes = await readAllPdfBytes(sheetsServer, sc.docId, sc.totalBytes, sc.chunkSize);
+      await verifyPdfWithPdfjs(sheetsServer, pdfBytes, "星云笔记本");
+    } finally {
+      await sheetsServer.close();
+    }
+
+    // 3. pptx
+    const slidesServer = createSlidesPluginServer();
+    try {
+      const pptxPath = path.join(workDir, "viewer-test.pptx");
+      await callTool(slidesServer, "create", {
+        outputPath: pptxPath,
+        slides: [
+          {
+            title: "演示查看器端到端验证",
+            bullets: ["中文标题渲染正常", "支持连续滚动与缩放"],
+          },
+        ],
+      });
+      const shown = await callTool(slidesServer, "show_in_viewer", { path: pptxPath });
+      const sc = shown.structuredContent as {
+        docId: string;
+        totalBytes: number;
+        chunkSize: number;
+        pageCount: number;
+      };
+      expect(sc.pageCount).toBeGreaterThanOrEqual(1);
+      const pdfBytes = await readAllPdfBytes(slidesServer, sc.docId, sc.totalBytes, sc.chunkSize);
+      await verifyPdfWithPdfjs(slidesServer, pdfBytes, "演示查看器端到端验证");
+    } finally {
+      await slidesServer.close();
     }
   });
 });

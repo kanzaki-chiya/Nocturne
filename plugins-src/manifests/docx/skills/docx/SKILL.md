@@ -14,12 +14,19 @@ description: 处理 Word 文档（.docx/.doc/.odt）：创建、读取段落与�
 - `edit`：按顺序执行编辑操作（`replace` 替换文本、`insert_paragraph` 插入段落、`delete_paragraph` 删除段落、`set_heading` 设置标题级别、`insert_table` 插入表格）。默认原地保存，也可传 `outputPath` 另存。
 - `convert`：转换为 `pdf`、`odt`、`html`、`txt`（UTF-8）。
 - `render`：按页导出 PNG 图片供视觉检查，默认返回前 4 页，可用 `pages`（如 `"1-4"`、`"5-8"`）指定页码（只读）。
+- `show_in_viewer`：在桌面端右侧面板打开文档查看器，支持可选 `page`（1 起始初始页码），仅向模型返回文件名与页数摘要（只读）。
 
 ## 推荐工作流
 
 1. 修改既有文档前先调用 `read`，确认段落索引、标题层级与表格结构。
 2. 用 `edit` 修改或 `create` 生成文档。
 3. 完成后调用 `render` 查看实际分页、排版、表格与中文字体效果；若有错位或遗漏继续调整，再交付给用户。
+
+## 在面板中查看
+
+- 创建或编辑完 Word 文档后，调用 `show_in_viewer` 在右侧面板向用户展示成稿；再次修改后可再次调用 `show_in_viewer` 刷新查看器内容。
+- 用户说「打开」「给我看看」某个 Word 文档时，直接调用 `show_in_viewer`。
+- `show_in_viewer` 只返回文件名与页数摘要；模型要检查版式与页面内容仍使用 `render`。
 
 ## 依赖异常处理
 

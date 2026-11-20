@@ -5,6 +5,17 @@ import { DocPluginError } from "../shared/errors.js";
 import { jsonTextResult, PLUGIN_SERVER_VERSION, type PluginServerSpec } from "../shared/mcp.js";
 import { assertAbsolutePath, assertOutputWritable, assertSourceExists } from "../shared/paths.js";
 import { runPageRender } from "../shared/render.js";
+import {
+  buildViewerTools,
+  createViewerFeature,
+  type ViewerFeatureOptions,
+} from "../shared/viewer.js";
+
+export type SlidesPluginServerOptions = LibreOfficeEngineOptions &
+  Pick<
+    ViewerFeatureOptions,
+    "viewerHtmlPath" | "viewerAssetsDir" | "maxDocumentBytes" | "maxChunkBytes"
+  >;
 
 function validateSlideImagePaths(items: unknown[]): void {
   for (const item of items) {
@@ -157,17 +168,49 @@ export const SLIDES_TOOLS: readonly Tool[] = [
       required: ["path"],
     },
   },
+  ...buildViewerTools("slides"),
 ];
 
-export function createSlidesPluginServer(options?: LibreOfficeEngineOptions): PluginServerSpec {
+export function createSlidesPluginServer(options?: SlidesPluginServerOptions): PluginServerSpec {
   const engine = new LibreOfficeEngine(options);
+  const viewer = createViewerFeature({
+    serverId: "slides",
+    title: "演示文档",
+    viewerHtmlPath: options?.viewerHtmlPath,
+    viewerAssetsDir: options?.viewerAssetsDir,
+    maxDocumentBytes: options?.maxDocumentBytes,
+    maxChunkBytes: options?.maxChunkBytes,
+    convertToPdf: async (inputPath, outputPath) => {
+      await engine.callUnoOrCliFallback(
+        () =>
+          engine.callUno(
+            "pptx_convert",
+            { path: inputPath, outputPath, format: "pdf" },
+            { expectedOutputPath: outputPath },
+          ),
+        async () => {
+          await engine.convertViaCli({
+            inputPath,
+            convertTo: "pdf:impress_pdf_Export",
+            outputPath,
+          });
+          return { outputPath, format: "pdf" };
+        },
+      );
+    },
+  });
 
   return {
     name: "slides",
     version: PLUGIN_SERVER_VERSION,
     tools: SLIDES_TOOLS,
-    close: () => engine.close(),
+    resources: viewer.resources,
+    close: async () => {
+      viewer.close();
+      await engine.close();
+    },
     handlers: {
+      ...viewer.handlers,
       read: async (args) => {
         const filePath = assertAbsolutePath(args.path, "path");
         assertSourceExists(filePath);

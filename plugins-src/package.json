@@ -10,12 +10,15 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p viewer/tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "marked": "18.0.7",
     "pdf-lib": "1.17.1"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.5.438"
   }
 }

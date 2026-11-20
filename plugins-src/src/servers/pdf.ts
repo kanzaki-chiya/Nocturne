@@ -15,6 +15,17 @@ import {
   parsePageRange,
 } from "../shared/paths.js";
 import { runPageRender } from "../shared/render.js";
+import {
+  buildViewerTools,
+  createViewerFeature,
+  type ViewerFeatureOptions,
+} from "../shared/viewer.js";
+
+export type PdfPluginServerOptions = LibreOfficeEngineOptions &
+  Pick<
+    ViewerFeatureOptions,
+    "viewerHtmlPath" | "viewerAssetsDir" | "maxDocumentBytes" | "maxChunkBytes"
+  >;
 
 export const PDF_TOOLS: readonly Tool[] = [
   {
@@ -112,17 +123,31 @@ export const PDF_TOOLS: readonly Tool[] = [
       required: ["path", "pages", "outputPath"],
     },
   },
+  ...buildViewerTools("pdf"),
 ];
 
-export function createPdfPluginServer(options?: LibreOfficeEngineOptions): PluginServerSpec {
+export function createPdfPluginServer(options?: PdfPluginServerOptions): PluginServerSpec {
   const engine = new LibreOfficeEngine(options);
+  const viewer = createViewerFeature({
+    serverId: "pdf",
+    title: "PDF",
+    viewerHtmlPath: options?.viewerHtmlPath,
+    viewerAssetsDir: options?.viewerAssetsDir,
+    maxDocumentBytes: options?.maxDocumentBytes,
+    maxChunkBytes: options?.maxChunkBytes,
+  });
 
   return {
     name: "pdf",
     version: PLUGIN_SERVER_VERSION,
     tools: PDF_TOOLS,
-    close: () => engine.close(),
+    resources: viewer.resources,
+    close: async () => {
+      viewer.close();
+      await engine.close();
+    },
     handlers: {
+      ...viewer.handlers,
       create: async (args) => {
         const inputPath = assertAbsolutePath(args.inputPath, "inputPath");
         assertSourceExists(inputPath, "inputPath");

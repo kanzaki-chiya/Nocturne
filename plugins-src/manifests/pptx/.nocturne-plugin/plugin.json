@@ -12,5 +12,19 @@
   "interface": {
     "displayName": "演示文档",
     "composerIcon": "./icon.svg"
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "viewer",
+        "title": "演示文档",
+        "server": "slides",
+        "resourceUri": "ui://slides/viewer.html",
+        "open": {
+          "tool": "show_in_viewer",
+          "fileTypes": [".pptx", ".ppt", ".odp"]
+        }
+      }
+    ]
   }
 }

@@ -3,7 +3,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema,
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -12,11 +16,19 @@ import { DocPluginError, toToolError } from "./errors.js";
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 
+export interface PluginResourceSpec {
+  readonly uri: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly read: () => Promise<string> | string;
+}
+
 export interface PluginServerSpec {
   readonly name: string;
   readonly version: string;
   readonly tools: readonly Tool[];
   readonly handlers: Readonly<Record<string, ToolHandler>>;
+  readonly resources?: readonly PluginResourceSpec[] | undefined;
   readonly close: () => Promise<void>;
 }
 
@@ -29,14 +41,44 @@ export function jsonTextResult(data: unknown): CallToolResult {
 }
 
 export async function runDocPluginMcpServer(spec: PluginServerSpec): Promise<void> {
+  const resources = spec.resources ?? [];
   const server = new Server(
     { name: spec.name, version: spec.version },
-    { capabilities: { tools: {} } },
+    {
+      capabilities: resources.length > 0 ? { tools: {}, resources: {} } : { tools: {} },
+    },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [...spec.tools],
   }));
+
+  if (resources.length > 0) {
+    server.setRequestHandler(ListResourcesRequestSchema, () => ({
+      resources: resources.map((r) => ({
+        uri: r.uri,
+        name: r.name,
+        mimeType: r.mimeType,
+      })),
+    }));
+
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const target = resources.find((r) => r.uri === request.params.uri);
+      if (!target) {
+        throw new McpError(ErrorCode.InvalidParams, `Resource not found: ${request.params.uri}`);
+      }
+      const text = await target.read();
+      return {
+        contents: [
+          {
+            uri: target.uri,
+            mimeType: target.mimeType,
+            text,
+          },
+        ],
+      };
+    });
+  }
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     const handler = spec.handlers[request.params.name];

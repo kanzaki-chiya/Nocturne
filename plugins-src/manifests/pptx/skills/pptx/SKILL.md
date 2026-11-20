@@ -14,12 +14,19 @@ description: 处理演示文档（PPT/PowerPoint/.pptx/.odp）：创建幻灯片
 - `edit`：按顺序执行编辑操作（`replace` 替换全篇或指定页文本、`add_slide` 插入页面、`delete_slide` 删除页面、`reorder_slides` 按 1 起始页码序列调整页序）。默认原地保存，可传 `outputPath` 另存。
 - `convert`：转换为 `pdf` 或 `odp`。
 - `render`：按页导出幻灯片 PNG 图片供视觉检查，默认返回前 4 页，可用 `pages`（如 `"1-4"`、`"5-8"`）指定页码（只读）。
+- `show_in_viewer`：在桌面端右侧面板打开文档查看器，支持可选 `page`（1 起始初始页码），仅向模型返回文件名与页数摘要（只读）。
 
 ## 推荐工作流
 
 1. 修改前先调用 `read` 了解总页数、各页文案与备注。
 2. 用 `edit` 修改或 `create` 生成演示文稿。
 3. 完成后务必调用 `render` 逐页检查文字溢出、图片遮挡与中文排版，修正问题后再交付。
+
+## 在面板中查看
+
+- 创建或编辑完演示文稿后，调用 `show_in_viewer` 在右侧面板向用户展示；再次修改后可再次调用 `show_in_viewer` 刷新查看器内容。
+- 用户说「打开」「给我看看」某个演示文稿时，直接调用 `show_in_viewer`。
+- `show_in_viewer` 只返回文件名与页数摘要；模型要检查页面排版仍使用 `render`。
 
 ## 依赖异常处理
 
