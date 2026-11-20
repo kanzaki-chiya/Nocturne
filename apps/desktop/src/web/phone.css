@@ -105,7 +105,7 @@
 .phone
   button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.ensemble-seg button):not(
     .ensemble-chip
-  ):not(.mode-ref):not(.phone-item):not(.usage-cell),
+  ):not(.input-label-button):not(.phone-item):not(.usage-cell),
 .phone input:not(.check input),
 .phone select,
 .phone textarea,
@@ -116,15 +116,15 @@
  * 按钮的 padding、圆角、禁用与悬停基线：:where() 把优先级压到 (0,1,1)，
  * 各按钮类自己写的 .phone .xxx 才能覆盖；共享组件的单类规则仍以此为准。
  */
-.phone button:where(:not(.btn, .ib, .switch, .seg button, .mode-ref)) {
+.phone button:where(:not(.btn, .ib, .switch, .seg button, .input-label-button)) {
   padding: 8px 12px;
   border-radius: var(--radius-3);
 }
-.phone button:where(:not(.btn, .ib, .switch, .seg button, .mode-ref)):disabled {
+.phone button:where(:not(.btn, .ib, .switch, .seg button, .input-label-button)):disabled {
   opacity: 0.45;
   cursor: default;
 }
-.phone .conversation button,
+.phone .conversation button:not(.input-label-button),
 .phone .phone-tools button {
   min-width: 44px;
   min-height: 44px;
@@ -136,7 +136,8 @@
   outline: 2px solid var(--a-accent);
   outline-offset: 2px;
 }
-.phone button:where(:not(.btn, .ib, .switch, .seg button, .mode-ref)):hover:not(:disabled) {
+.phone
+  button:where(:not(.btn, .ib, .switch, .seg button, .input-label-button)):hover:not(:disabled) {
   background: var(--a-raised);
 }
 .phone-icon {
@@ -623,16 +624,56 @@
   border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
 }
-.phone-card textarea {
+.phone-input {
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+.phone-card textarea,
+.phone-input-mirror {
   margin: 0;
   padding: 10px 0;
+  border: 0;
+  font: inherit;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.phone-input-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.phone-card .phone-input textarea {
+  width: 100%;
+  display: block;
   border: 0;
   background: transparent;
   resize: none;
   max-height: 160px;
-  line-height: 1.45;
+}
+.phone-card .has-skill textarea {
+  color: transparent;
+  caret-color: var(--a-text);
+}
+.phone-card .has-skill textarea::selection {
+  color: transparent;
+}
+.phone .phone-work-mode .work-mode-tag {
+  background: transparent;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--a-secondary);
+}
+.phone-work-mode {
+  text-align: center;
+}
+.phone-skill-search {
+  width: 100%;
 }
 /* 待发送图片：卡片顶部一行缩略图，横向滚动 */
 .phone-attachments {
@@ -850,7 +891,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.phone-slash-row span {
+.phone-slash-row > span {
   display: block;
   font-size: var(--fs-2);
   color: var(--a-muted);

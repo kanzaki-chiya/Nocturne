@@ -1,4 +1,6 @@
 import { act } from "react";
+import { fireEvent } from "@testing-library/react";
+import type { SkillOverview } from "@nocturne/core/protocol";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -497,4 +499,100 @@ it("空闲时发送键是普通发送，不带 mode", async () => {
   });
   expect(onSubmit.mock.calls[0]).toHaveLength(1);
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "普通发送" }));
+});
+
+it("手机插件补全、退格、输入历史和分叉回填共用技能标签并保持发送载荷", async () => {
+  const pdf: SkillOverview = {
+    name: "pdf",
+    source: "plugin",
+    plugin: "pdf@builtin",
+    pluginDisplayName: "PDF 文档",
+    layer: "user",
+    entryPath: "skills/pdf/SKILL.md",
+    realPath: "skills/pdf/SKILL.md",
+    description: "处理 PDF",
+    displayedDescriptionLength: 6,
+    otherEntries: [],
+    invocation: "both",
+    catalogStatus: "full",
+    enabled: true,
+    commandConflict: false,
+    missingDescription: false,
+    fields: {},
+    unknownFields: {},
+    ignored: [],
+    bodyLines: 1,
+    bodyPreview: "body",
+    files: [],
+    size: 120,
+  };
+  const onSubmit = vi.fn((_input: ComposerSubmit) => Promise.resolve(true));
+  const ui = (fill?: { text: string; seq: number }) => (
+    <PhoneComposer
+      variant="session"
+      running={false}
+      controls={undefined}
+      onSubmit={onSubmit}
+      onInterrupt={vi.fn()}
+      onSlash={vi.fn()}
+      skills={[pdf]}
+      fill={fill}
+      inputHistory={() => ["/pdf 历史"]}
+    />
+  );
+  await act(() => root?.render(ui()));
+  const field = container.querySelector("textarea");
+  if (!field) throw new Error("缺少输入框");
+  const label = () => container.querySelector(".draft-skill .input-label")?.textContent;
+  act(() => fireEvent.change(field, { target: { value: "/pdf" } }));
+  const option = [...container.querySelectorAll<HTMLButtonElement>(".phone-slash-row")].find(
+    (row) => row.textContent?.includes("PDF 文档"),
+  );
+  if (!option) throw new Error("缺少 PDF 补全");
+  act(() => option.click());
+  expect(label()).toBe("PDF 文档");
+  expect(field.value).toBe("");
+  expect(field.getAttribute("placeholder")).toBeNull();
+  act(() => fireEvent.change(field, { target: { value: "保留正文" } }));
+  field.setSelectionRange(0, 0);
+  act(() => fireEvent.keyDown(field, { key: "Backspace" }));
+  expect(label()).toBeUndefined();
+  expect(field.value).toBe("保留正文");
+  act(() => fireEvent.keyDown(field, { key: "ArrowUp" }));
+  expect(label()).toBe("PDF 文档");
+  expect(field.value).toBe("历史");
+  await act(() => root?.render(ui({ text: "/pdf 分叉", seq: 1 })));
+  expect(field.value).toBe("分叉");
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.click(),
+  );
+  expect(onSubmit).toHaveBeenCalledWith({
+    text: "/pdf 分叉",
+    skill: { name: "pdf", arguments: "分叉" },
+    attachments: [],
+  });
+});
+
+it("手机手输计划等待组字结束再切到执行方式行", async () => {
+  await act(() =>
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        running={false}
+        controls={undefined}
+        onSubmit={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+      />,
+    ),
+  );
+  const field = container.querySelector("textarea");
+  if (!field) throw new Error("缺少输入框");
+  act(() => fireEvent.compositionStart(field));
+  act(() => fireEvent.change(field, { target: { value: "/plan 修复测试" } }));
+  expect(field.value).toBe("/plan 修复测试");
+  expect(container.querySelector(".work-mode-tag")).toBeNull();
+  act(() => fireEvent.compositionEnd(field));
+  expect(field.value).toBe("修复测试");
+  expect(container.querySelector(".work-mode-tag .input-label")?.textContent).toBe("计划");
 });

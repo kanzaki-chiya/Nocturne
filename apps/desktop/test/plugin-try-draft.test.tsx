@@ -186,17 +186,20 @@ it("点「立即试用」关闭设置页、新开草稿会话并预填 /docx ，
   const tryBtn = await screen.findByRole("button", { name: "立即试用" });
   fireEvent.click(tryBtn);
 
-  // 设置页关闭，回到草稿输入框，填入 `/docx ` 且光标在末尾并聚焦
   await waitFor(() => {
     expect(screen.queryByRole("button", { name: "立即试用" })).toBeNull();
   });
   const textarea = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
   await waitFor(() => {
-    expect(textarea.value).toBe("/docx ");
+    const label = textarea.closest(".txt")?.querySelector(".draft-skill .input-label");
+    expect(label?.textContent).toBe("Word 文档");
+    expect(label?.querySelector("svg")).toBeTruthy();
+    expect(textarea.value).toBe("");
+    expect(textarea.placeholder).toBe("");
   });
   expect(document.activeElement).toBe(textarea);
-  expect(textarea.selectionStart).toBe(6);
-  expect(textarea.selectionEnd).toBe(6);
+  expect(textarea.selectionStart).toBe(0);
+  expect(textarea.selectionEnd).toBe(0);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(calls.filter((c) => c.method === "session.submit")).toHaveLength(0);
 });

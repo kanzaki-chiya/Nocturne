@@ -88,7 +88,7 @@ import {
   isRuntimeWorkMode,
   userWorkMode,
   unwrapEnsemblePostText,
-  workModeCommandName,
+  type SkillOverview,
   thinkingPhrase,
   type FileAttachment,
   type WorkModeName,
@@ -121,6 +121,8 @@ import type { AttachmentImageSource } from "./attachment-images";
 import { fileIconText, formatBytes } from "./web/phone-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
+import { InputLabel } from "./InputLabel";
+import { skillCommandLength, skillLabel, workModeLabel } from "./input-labels";
 import { grantKind } from "./GrantsPage";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { operationForSubjectKind } from "./notify";
@@ -194,6 +196,7 @@ export function isLiveSession(session: RpcSession | ReadOnlySessionRef): session
 }
 
 export interface ConversationProps {
+  skills?: readonly SkillOverview[] | undefined;
   session: RpcSession;
   /** task 行的「在面板中查看」；缺省不显示（手机不传） */
   subagentLinks?: SubagentLinks | undefined;
@@ -934,6 +937,7 @@ const ThinkScrollContext = createContext<ThinkScroll>({
 
 /** 只读且日志未收束：工具行停止转圈与计时（ReadOnlyMode.frozen） */
 const FrozenContext = createContext(false);
+const MessageSkillsContext = createContext<readonly SkillOverview[] | undefined>(undefined);
 const ShellSessionContext = createContext<ShellSession | undefined>(undefined);
 const BackgroundViewContext = createContext<
   Pick<SessionView, "entries" | "backgroundShells" | "pendingSubagentPermissions">
@@ -1567,6 +1571,7 @@ function UserMessage({
   const [fileSaveErrors, setFileSaveErrors] = useState<Record<string, string | undefined>>({});
   const [confirmFork, setConfirmFork] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const skills = useContext(MessageSkillsContext);
   const saveFile = useSaveFile();
   const { copy, copied } = useCopyText(setError);
   const hasImages = (entry.attachments?.length ?? 0) > 0;
@@ -1608,22 +1613,31 @@ function UserMessage({
     if (leading) at = tag.length;
     else if (body !== "") segments.push(" ");
   }
-  if (entry.workMode) {
-    // ADR-0076：执行方式消息在正文前显示命令名，点它展开说明块
-    segments.push(
-      <button
-        key="work-mode"
-        type="button"
-        className="delegate-ref mode-ref"
-        aria-expanded={modeOpen}
-        onClick={() => {
-          setModeOpen((open) => !open);
-        }}
-      >
-        {`/${workModeCommandName(entry.workMode.name)}`}
-      </button>,
+  const snapshot = entry.workMode ?? entry.skill;
+  if (snapshot) {
+    const name = snapshot.name;
+    const metadata = skills?.find(
+      (skill) => !skill.shadowedBy && skill.name.toLowerCase() === name.toLowerCase(),
     );
-    if (body !== "") segments.push(" ");
+    const data = entry.workMode ? workModeLabel(name) : skillLabel(name, metadata);
+    if (entry.skill) at = skillCommandLength(body, name);
+    segments.push(
+      <InputLabel
+        key="input-label"
+        data={data}
+        button={
+          snapshot.body === ""
+            ? undefined
+            : {
+                expanded: modeOpen,
+                onClick: () => {
+                  setModeOpen((open) => !open);
+                },
+              }
+        }
+      />,
+    );
+    if (body.length > at && !/^\s/.test(body.slice(at))) segments.push(" ");
   }
   refs.forEach((ref, index) => {
     if (ref.start < at) return;
@@ -1867,20 +1881,10 @@ function UserMessage({
                   <span className="fsize">{formatBytes(file.bytes)}</span>
                 </button>
               ))}
-              {(body !== "" || entry.delegate !== undefined || entry.workMode !== undefined) && (
+              {(body !== "" || entry.delegate !== undefined || snapshot !== undefined) && (
                 <div className="u-text">{segments}</div>
               )}
-              {entry.workMode && modeOpen && <pre className="mode-body">{entry.workMode.body}</pre>}
-              {entry.skill && (
-                <details className="skill-message">
-                  <summary>
-                    <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
-                    技能 <b>{entry.skill.name}</b>（已附加正文{" "}
-                    {entry.skill.body.length.toLocaleString()} 字）
-                  </summary>
-                  <pre>{entry.skill.body}</pre>
-                </details>
-              )}
+              {snapshot && modeOpen && <pre className="mode-body">{snapshot.body}</pre>}
             </div>
             <div className="u-actions">
               <button
@@ -5335,7 +5339,9 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
                 readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
               }
             >
-              <ConversationContent key={props.session.id} {...props} />
+              <MessageSkillsContext.Provider value={props.skills}>
+                <ConversationContent key={props.session.id} {...props} />
+              </MessageSkillsContext.Provider>
             </ShellSessionContext.Provider>
           </BackgroundViewContext.Provider>
         </SubagentLinksContext.Provider>

@@ -322,6 +322,15 @@
   flex: none;
 }
 
+.composer .composer-popup-name.plugin-name {
+  flex: 0 0 25%;
+  font-family: var(--sans);
+}
+
+.composer-work-mode {
+  text-align: center;
+}
+
 .composer .work-mode-tag {
   display: inline-flex;
   align-items: center;
@@ -330,8 +339,8 @@
   padding: 0 var(--space-2);
   border: none;
   border-radius: var(--radius-2);
-  background: var(--a-raised);
-  color: var(--a-text);
+  background: transparent;
+  color: var(--a-secondary);
   font: inherit;
   font-size: var(--fs-1);
   cursor: pointer;
@@ -344,26 +353,9 @@
   cursor: default;
 }
 
-.composer .work-mode-icon,
 .composer .work-mode-close {
   display: inline-flex;
   align-items: center;
-  color: var(--a-secondary);
-}
-
-.composer .work-mode-close {
-  display: none;
-}
-
-.composer .work-mode-tag:hover:not(:disabled) .work-mode-icon,
-.composer .work-mode-tag:focus-visible:not(:disabled) .work-mode-icon {
-  display: none;
-}
-
-.composer .work-mode-tag:hover:not(:disabled) .work-mode-close,
-.composer .work-mode-tag:focus-visible:not(:disabled) .work-mode-close {
-  display: inline-flex;
-  color: var(--a-text);
 }
 
 /* ── 新会话托盘：贴在输入框下方，左/右各缩进 12px ── */
@@ -684,6 +676,10 @@
   border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-popover);
+}
+
+.composer.session .composer-popup:has(.slash-item-icon) {
+  max-height: min(55vh, 480px);
 }
 
 .composer-popup-h {

@@ -6,6 +6,8 @@ import {
   type GoalState,
 } from "@nocturne/core/protocol";
 import { ICON_MD, Icon, IconButton, type IconName } from "./ui";
+import { InputLabel } from "./InputLabel";
+import { workModeLabel } from "./input-labels";
 import "./goal-row.css";
 
 export interface GoalActions {
@@ -77,7 +79,7 @@ export function GoalRow({
     <div className={`goal-row${active ? "" : " goal-off"}`}>
       <div className="goal-row-head">
         <div className="goal-row-line">
-          <span className="goal-mode-ref">/goal</span>
+          <InputLabel data={workModeLabel("goal")} />
           {!expanded && (
             <span className="goal-objective" title={goal.objective}>
               {goal.objective}

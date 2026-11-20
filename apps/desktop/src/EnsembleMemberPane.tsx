@@ -117,6 +117,7 @@ export function EnsembleMemberPane({
           }}
           readOnly={{ frozen: true }}
           view={view}
+          skills={skills}
           openUrl={openUrl}
           cwd={cwd}
           shellKind={shellKind}
@@ -234,6 +235,7 @@ export function EnsembleMemberPane({
       <Conversation
         session={session}
         view={view}
+        skills={skills}
         openUrl={openUrl}
         cwd={cwd}
         shellKind={shellKind}

@@ -104,33 +104,6 @@
   box-shadow: var(--shadow-popover);
   font-size: var(--fs-1);
 }
-.skill-message {
-  color: var(--a-accentAlt);
-  font-size: var(--fs-1);
-  margin-top: 5px;
-}
-.skill-message summary {
-  cursor: pointer;
-  display: inline-flex;
-  gap: 6px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  padding: 2px 8px;
-  font-size: var(--fs-1);
-  color: var(--a-secondary);
-  background: var(--a-raised);
-  list-style: none;
-}
-.skill-message summary b {
-  font: 500 var(--fs-1) var(--mono);
-  color: var(--a-accent);
-}
-.skill-message pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 320px;
-  overflow: auto;
-}
 .composer-popup-name em {
   font-style: normal;
   font-weight: 400;

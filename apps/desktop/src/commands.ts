@@ -13,6 +13,7 @@ import {
   type SkillOverview,
   type SkillInvocation,
 } from "@nocturne/core/protocol";
+import { invocableSkills, skillLabel, WORK_MODE_ITEMS, type InputLabelData } from "./input-labels";
 
 export const COMMANDS = [
   { name: "/compact", summary: "压缩当前上下文" },
@@ -122,13 +123,14 @@ export function parseSlash(
 export interface SlashItem {
   argumentHint?: string | undefined;
   source?: string | undefined;
+  decoration?: InputLabelData | undefined;
   label: string;
   summary: string;
   insert: string;
 }
 
 export interface SlashGroup {
-  id: "commands" | "skills" | "external";
+  id: "commands" | "skills" | "plugins" | "external";
   label: string;
   items: SlashItem[];
 }
@@ -148,27 +150,35 @@ export function completeSlash(
     .filter((command) => command.name.slice(1).startsWith(query))
     .map((command) => ({
       label: command.name,
+      decoration: WORK_MODE_ITEMS.find((item) => `/${item.name}` === command.name),
       summary: command.summary,
       insert: `${leading}${command.name} `,
     }));
-  const skillItems = skills
-    .filter(
-      (skill) =>
-        (skill.invocation === "both" || skill.invocation === "user") &&
-        !skill.commandConflict &&
-        skill.name.toLowerCase().startsWith(query),
+  const skillItems: SlashItem[] = [];
+  const pluginItems: SlashItem[] = [];
+  for (const skill of invocableSkills(skills)) {
+    const plugin = skill.source === "plugin";
+    if (
+      !skill.name.toLowerCase().startsWith(query) &&
+      !(plugin && skill.pluginDisplayName?.toLowerCase().startsWith(query))
     )
-    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-    .map((skill) => ({
-      label: `/${skill.name}`,
-      argumentHint:
-        typeof skill.fields["argument-hint"] === "string"
-          ? skill.fields["argument-hint"]
-          : undefined,
-      source: skill.layer === "user" ? "用户" : "项目",
-      summary: Array.from(skill.description).slice(0, 250).join("") || "没有说明",
+      continue;
+    const decoration = skillLabel(skill.name, skill);
+    const argumentHint = skill.fields["argument-hint"];
+    const item: SlashItem = {
+      decoration,
+      label: plugin ? decoration.label : `/${skill.name}`,
+      argumentHint: !plugin && typeof argumentHint === "string" ? argumentHint : undefined,
+      source: plugin
+        ? (skill.pluginDisplayName ?? skill.plugin?.split("@")[0])
+        : skill.layer === "user"
+          ? "用户"
+          : "项目",
+      summary: Array.from(skill.description).slice(0, 250).join("") || (plugin ? "" : "没有说明"),
       insert: `${leading}/${skill.name} `,
-    }));
+    };
+    (plugin ? pluginItems : skillItems).push(item);
+  }
   const agentItems = agents
     .filter(
       (agent) =>
@@ -186,6 +196,7 @@ export function completeSlash(
   return [
     ...(items.length ? [{ id: "commands" as const, label: "命令", items }] : []),
     ...(skillItems.length ? [{ id: "skills" as const, label: "技能", items: skillItems }] : []),
+    ...(pluginItems.length ? [{ id: "plugins" as const, label: "插件", items: pluginItems }] : []),
     ...(agentItems.length
       ? [{ id: "external" as const, label: "外部 agent", items: agentItems }]
       : []),

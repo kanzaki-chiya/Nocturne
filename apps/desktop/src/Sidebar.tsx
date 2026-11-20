@@ -8,6 +8,7 @@ import {
   type SessionRow,
   type SessionTree,
 } from "./session-tree";
+import { SKILL_ICON } from "./input-labels";
 import { ICON_MD, ICON_SM, Icon } from "./ui";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
@@ -135,7 +136,7 @@ const SETTINGS_NAV_GROUPS: readonly {
       {
         key: "skills",
         label: "技能",
-        icon: <Icon name="file" size={ICON_MD} className="glyph" />,
+        icon: <Icon name={SKILL_ICON} size={ICON_MD} className="glyph" />,
       },
       {
         key: "mcp",

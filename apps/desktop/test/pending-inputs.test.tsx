@@ -34,6 +34,17 @@ function setup(snapshot: { items: PendingInputItem[]; paused: boolean }, running
 }
 
 describe("待发列表", () => {
+  it("执行方式条目在正文前显示图标和名字，省略斜杠命令", () => {
+    const { container } = setup({
+      items: [item({ mode: "queue", workMode: "plan", text: "修复测试" })],
+      paused: false,
+    });
+    const text = container.querySelector(".pi-text");
+    expect(text?.textContent).toBe("计划 修复测试");
+    expect(text?.querySelector(".input-label svg")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
+  });
+
   it("逐条单行显示内容与附件数，无模式徽标与送达说明；排队条目带「立即发送」「编辑」「取消」，插话与空闲时无「立即发送」", () => {
     const { container, rerender, onUpdate, onCancel, onResume } = setup({
       items: [

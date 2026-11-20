@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 
 import {
   unwrapEnsemblePostText,
-  workModeDisplayText,
   type PendingInputItem,
   type PendingInputsSnapshot,
 } from "@nocturne/core/protocol";
 import { Button, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 
+import { InputLabel } from "./InputLabel";
+import { workModeLabel } from "./input-labels";
 import "./pending-inputs.css";
 
 export interface PendingInputsProps {
@@ -147,11 +148,9 @@ export function PendingInputs({
             ? "子代理结果"
             : isEnsemblePost
               ? unwrappedEnsemble
-              : item.workMode !== undefined
-                ? workModeDisplayText(item.text, { name: item.workMode })
-                : item.text === ""
-                  ? "（仅图片）"
-                  : item.text;
+              : item.text === "" && item.workMode === undefined
+                ? "（仅图片）"
+                : item.text;
         return (
           <div key={item.id} className={`pi-row pi-${item.mode}`}>
             <span className="pi-lead" aria-hidden="true">
@@ -178,6 +177,11 @@ export function PendingInputs({
               />
             ) : (
               <span className="pi-text" title={rowText}>
+                {item.workMode && (
+                  <>
+                    <InputLabel data={workModeLabel(item.workMode)} />{" "}
+                  </>
+                )}
                 {rowText}
               </span>
             )}

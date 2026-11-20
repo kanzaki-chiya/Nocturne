@@ -213,12 +213,12 @@ it("用户技能小标签使用日志快照，展开正文，工具行显示已�
     loaded,
   ];
   const rendered = mount(view);
-  expect(screen.getByText("/alpha file")).toBeTruthy();
-  const summary = rendered.container.querySelector(".skill-message summary");
-  expect(summary?.textContent).toBe("技能 alpha（已附加正文 4 字）");
-  if (!summary) throw new Error("缺少技能标签");
-  fireEvent.click(summary);
-  expect(rendered.container.querySelector(".skill-message pre")?.textContent).toBe("快照正文");
+  expect(rendered.container.querySelector(".u-text")?.textContent).toBe("alpha file");
+  const label = screen.getByRole("button", { name: "alpha" });
+  expect(label.querySelector("svg")).not.toBeNull();
+  expect(label.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(label);
+  expect(rendered.container.querySelector(".mode-body")?.textContent).toBe("快照正文");
   expect(screen.getByText("已加载")).toBeTruthy();
 });
 
@@ -361,7 +361,7 @@ describe("斜杠委派行内标记", () => {
       },
     ];
     const rendered = mount(view);
-    expect(rendered.container.querySelector(".u-bubble details.skill-message")).not.toBeNull();
+    expect(rendered.container.querySelector(".u-bubble button.input-label")).not.toBeNull();
     expect(rendered.container.querySelector(".delegate-ref")).toBeNull();
   });
 
@@ -688,7 +688,7 @@ describe("回复与代码复制", () => {
       assistant({ key: "a2", turnId: "t2", messageId: "m2", text: "# 计划二稿" }),
     ];
     const rendered = mount(view, { onApprovePlan });
-    const modeButton = screen.getByRole("button", { name: "/plan" });
+    const modeButton = screen.getByRole("button", { name: "计划" });
     expect(rendered.container.querySelector(".mode-body")).toBeNull();
     fireEvent.click(modeButton);
     expect(rendered.container.querySelector(".mode-body")?.textContent).toBe("说明正文");
@@ -764,7 +764,9 @@ describe("回复与代码复制", () => {
       const view = createSessionView();
       view.entries = [entry];
       const rendered = mount(view);
-      expect(screen.getByRole("button", { name: `/${entry.workMode?.name ?? ""}` })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: entry.workMode?.name === "goal" ? "目标" : "计划" }),
+      ).toBeTruthy();
       expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: "重发" })).toBeNull();
       expect(screen.queryByRole("button", { name: "编辑并重发" })).toBeNull();

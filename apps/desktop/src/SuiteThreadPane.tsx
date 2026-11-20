@@ -101,6 +101,7 @@ export function SuiteThreadPane({
     <div className="sp-ensemble-member">
       <Conversation
         session={session}
+        skills={skills}
         view={view}
         openUrl={openUrl}
         cwd={cwd}

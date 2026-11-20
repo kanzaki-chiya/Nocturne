@@ -184,7 +184,7 @@ describe("Ensemble 对话内渲染", () => {
     expect(container.querySelector(".post-in-head")?.textContent).toBe("@verifier → @orders · #14");
   });
 
-  it("对话区不再渲染入口行，workMode.name=ensemble 显示 /ensemble，结束行仍按 endedSeq 定位并可展开未合并分支", () => {
+  it("对话区不再渲染入口行，workMode.name=ensemble 显示合奏图标标签，结束行仍按 endedSeq 定位并可展开未合并分支", () => {
     const view = createSessionView();
     view.entries = [
       {
@@ -253,7 +253,9 @@ describe("Ensemble 对话内渲染", () => {
 
     expect(container.querySelector(".ensemblerow")).toBeNull();
     expect(container.querySelector(".ensemblerow-count")).toBeNull();
-    expect(container.querySelector(".mode-ref")?.textContent).toBe("/ensemble");
+    const modeLabel = screen.getByRole("button", { name: "合奏" });
+    expect(modeLabel.querySelector("svg")).toBeTruthy();
+    expect(modeLabel.getAttribute("aria-expanded")).toBe("false");
 
     // 结束后仍不出现入口行，结束行出现在 endedSeq 位置并展开 unmerged
     view.ensemble = {

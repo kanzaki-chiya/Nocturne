@@ -1,0 +1,42 @@
+.input-label {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--a-accent);
+  vertical-align: baseline;
+  white-space: nowrap;
+  font: inherit;
+}
+
+.input-label > svg,
+.input-label > .input-label-image {
+  display: inline-block;
+  margin-inline-end: var(--space-1);
+  vertical-align: -0.16em;
+}
+
+.input-label-image {
+  object-fit: contain;
+}
+
+.input-label-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.input-label-button:hover {
+  text-decoration: underline;
+}
+
+.draft-skill > .input-label {
+  max-width: 80%;
+  padding-inline-end: var(--space-2);
+}
+
+.slash-item-icon {
+  display: inline-flex;
+  flex: 0 0 14px;
+  width: 14px;
+  align-items: center;
+}

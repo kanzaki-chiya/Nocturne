@@ -44,7 +44,18 @@ import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
 import { TodoPanel } from "./TodoList";
 import type { GoalActions } from "./GoalRow";
-import { ICON_MD, ICON_SM, Icon, IconButton, type IconName } from "./ui";
+import { ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
+import { InputLabel, InputLabelIcon, useDraftSkillAnchor, useSkillBackspace } from "./InputLabel";
+import {
+  draftLabel,
+  insertSkillCommand,
+  invocableSkills,
+  PLUGIN_ICON,
+  SKILL_ICON,
+  skillLabel,
+  WORK_MODE_ITEMS,
+  type InputLabelData,
+} from "./input-labels";
 import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "./ImageViewer";
 import { fileIconText, formatBytes } from "./web/phone-images";
 
@@ -212,6 +223,7 @@ export interface ComposerProps {
   onManageMcp?: () => void;
   /** 「+」->「技能」子菜单底部「管理技能」（进入设置 › 技能） */
   onManageSkills?: () => void;
+  onManagePlugins?: (() => void) | undefined;
   placeholder?: string;
 }
 
@@ -240,18 +252,6 @@ type PopupKind = "slash" | "refs";
 
 const MAX_TEXTAREA_HEIGHT = 280;
 
-const WORK_MODE_ITEMS: readonly {
-  name: WorkModeName;
-  label: string;
-  icon: IconName;
-}[] = [
-  { name: "grill-me", label: "追问需求", icon: "question" },
-  { name: "goal", label: "目标", icon: "target" },
-  { name: "plan", label: "计划", icon: "list_check" },
-  { name: "boost", label: "多代理攻坚", icon: "robot" },
-  { name: "ensemble", label: "合奏", icon: "group" },
-];
-
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -261,6 +261,7 @@ function appendHistory(history: readonly string[], text: string): string[] {
 }
 
 interface PopupRow {
+  decoration?: InputLabelData | undefined;
   argumentHint?: string | undefined;
   source?: string | undefined;
   key: string;
@@ -308,6 +309,7 @@ export function Composer({
   onManageProviders,
   onManageMcp,
   onManageSkills,
+  onManagePlugins,
   placeholder,
   skills = [],
   externalAgents = [],
@@ -319,6 +321,7 @@ export function Composer({
 }: ComposerProps) {
   const isSession = variant === "session";
   const [draft, setDraft] = useState(initialDraft ?? "");
+  const [showTypedWorkMode, setShowTypedWorkMode] = useState(false);
   const [workMode, setWorkMode] = useState<WorkModeName | null>(initialWorkMode ?? null);
   const [skillQuery, setSkillQuery] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>(() =>
@@ -351,6 +354,19 @@ export function Composer({
   const composingRef = useRef(false);
   const interruptingRef = useRef(false);
   const draftRef = useRef(draft);
+  const draftPresentation = draftLabel(draft, skills, showTypedWorkMode);
+  const lastPresentation = useRef(draftPresentation);
+  if (!composing) lastPresentation.current = draftPresentation;
+  const {
+    prefix,
+    skill: draftSkill,
+    workMode: typedMode,
+  } = composing ? lastPresentation.current : draftPresentation;
+  const offset = prefix.length;
+  const visibleDraft = draft.slice(offset);
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
+  const skillAnchor = useDraftSkillAnchor(textarea, draftSkill);
   const workModeRef = useRef<WorkModeName | null>(workMode);
   workModeRef.current = workMode;
   const attachmentsRef = useRef<Attachment[]>([]);
@@ -482,7 +498,7 @@ export function Composer({
     if (text !== "") {
       const field = textarea.current;
       field?.focus();
-      field?.setSelectionRange(text.length, text.length);
+      field?.setSelectionRange(text.length - offsetRef.current, text.length - offsetRef.current);
       setCaret(text.length);
     }
     initialDraftUsed.current?.();
@@ -493,6 +509,7 @@ export function Composer({
   useEffect(() => {
     if (prefillDraft == null || appliedPrefillSeq.current === prefillDraft.seq) return;
     appliedPrefillSeq.current = prefillDraft.seq;
+    setShowTypedWorkMode(false);
     const prev = draftRef.current;
     const text =
       prefillDraft.append === true && prev !== ""
@@ -513,7 +530,7 @@ export function Composer({
       const field = textarea.current;
       if (!field) return;
       field.focus();
-      field.setSelectionRange(pos, pos);
+      field.setSelectionRange(pos - offsetRef.current, pos - offsetRef.current);
     };
     focusField();
     const raf =
@@ -616,7 +633,8 @@ export function Composer({
           label: item.label,
           summary: item.summary,
           argumentHint: item.argumentHint,
-          source: item.source,
+          source: group.id === "plugins" ? undefined : item.source,
+          decoration: item.decoration,
           insert: item.insert,
         },
       })),
@@ -646,23 +664,17 @@ export function Composer({
       textarea.current?.focus();
       return;
     }
+    pendingCaret.current = row.insert.length;
     updateDraft(row.insert);
     setDismissed(true);
     textarea.current?.focus();
   };
 
   const insertSkillToken = (name: string) => {
-    const field = textarea.current;
-    const text = draftRef.current;
-    const pos = field?.selectionStart ?? text.length;
-    const before = text.slice(0, pos);
-    const after = text.slice(field?.selectionEnd ?? pos);
-    const prefix = before === "" || /\s$/.test(before) ? "" : " ";
-    const token = `/${name} `;
-    const next = `${before}${prefix}${token}${after}`;
-    pendingCaret.current = before.length + prefix.length + token.length;
+    const next = insertSkillCommand(draftRef.current, name, skills);
+    pendingCaret.current = name.length + 2;
     updateDraft(next);
-    field?.focus();
+    textarea.current?.focus();
   };
 
   // ── 附件 ──
@@ -852,7 +864,7 @@ export function Composer({
       event.shiftKey
     )
       return;
-    const position = field.selectionStart;
+    const position = field.selectionStart + offset;
     if (direction === "up" && draft.slice(0, position).includes("\n")) return;
     if (direction === "down" && draft.slice(position).includes("\n")) return;
     if (history.current.length === 0) return;
@@ -864,17 +876,32 @@ export function Composer({
         historyIndex.current = Math.max(0, historyIndex.current - 1);
       }
       event.preventDefault();
-      updateDraft(history.current[historyIndex.current] ?? "", true);
+      const next = history.current[historyIndex.current] ?? "";
+      pendingCaret.current = next.length;
+      setShowTypedWorkMode(false);
+      updateDraft(next, true);
     } else if (historyIndex.current !== null) {
       event.preventDefault();
       const next = historyIndex.current + 1;
       historyIndex.current = next < history.current.length ? next : null;
-      updateDraft(
-        historyIndex.current === null ? historyDraft.current : (history.current[next] ?? ""),
-        true,
-      );
+      const nextText =
+        historyIndex.current === null ? historyDraft.current : (history.current[next] ?? "");
+      pendingCaret.current = nextText.length;
+      setShowTypedWorkMode(false);
+      updateDraft(nextText, true);
     }
   };
+
+  const removeSkill = () => {
+    pendingCaret.current = 0;
+    setCaret(0);
+    updateDraft(draftRef.current.slice(offset));
+  };
+  useSkillBackspace(textarea, draftSkill !== undefined, (event) => {
+    if (composingRef.current) return;
+    event.preventDefault();
+    removeSkill();
+  });
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     literalPaste.current =
@@ -902,9 +929,14 @@ export function Composer({
       // U-05：光标紧挨完整 @引用 时整删；有选区走默认。输入法组合在函数开头已拦截
       const field = event.currentTarget;
       if (field.selectionStart === field.selectionEnd) {
+        if (draftSkill && event.key === "Backspace" && field.selectionStart === 0) {
+          event.preventDefault();
+          removeSkill();
+          return;
+        }
         const range = fileRefDeleteRange(
           draftRef.current,
-          field.selectionStart,
+          field.selectionStart + offset,
           event.key === "Backspace" ? "backward" : "forward",
         );
         if (range !== undefined) {
@@ -1073,21 +1105,21 @@ export function Composer({
 
   // ── 输入区渲染辅助 ──
   const refSpans = useMemo(() => {
-    const refs = parseFileRefs(draft);
+    const refs = parseFileRefs(visibleDraft);
     const parts: ReactNode[] = [];
     let at = 0;
     for (const [index, ref] of refs.entries()) {
-      if (ref.start > at) parts.push(draft.slice(at, ref.start));
+      if (ref.start > at) parts.push(visibleDraft.slice(at, ref.start));
       parts.push(
         <span className="composer-ref" key={index}>
-          {draft.slice(ref.start, ref.end)}
+          {visibleDraft.slice(ref.start, ref.end)}
         </span>,
       );
       at = ref.end;
     }
-    if (at < draft.length) parts.push(draft.slice(at));
+    if (at < visibleDraft.length) parts.push(visibleDraft.slice(at));
     return parts;
-  }, [draft]);
+  }, [visibleDraft]);
 
   const syncMirror = () => {
     if (mirror.current !== null && textarea.current !== null) {
@@ -1101,14 +1133,14 @@ export function Composer({
     field.style.height = `${Math.min(field.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
     syncMirror();
   };
-  useEffect(grow, [draft]);
+  useEffect(grow, [visibleDraft, draftSkill?.label]);
   useEffect(() => {
     if (pendingCaret.current === null) return;
     const pos = pendingCaret.current;
     pendingCaret.current = null;
-    textarea.current?.setSelectionRange(pos, pos);
+    textarea.current?.setSelectionRange(pos - offset, pos - offset);
     setCaret(pos);
-  }, [draft]);
+  }, [draft, offset]);
   useEffect(() => {
     if (popup === null || flatRows.length === 0) return;
     document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
@@ -1128,25 +1160,19 @@ export function Composer({
   const canSend =
     workMode !== null ? draft.trim() !== "" : draft.trim() !== "" || attachments.length > 0;
   const shownError = error ?? controls?.error ?? null;
-  const selectedWorkMode = WORK_MODE_ITEMS.find((item) => item.name === workMode);
+  const selectedWorkMode = WORK_MODE_ITEMS.find((item) => item.name === (typedMode ?? workMode));
   const mcpEntries = Object.entries(mcpServers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   const hasUnavailableMcp = mcpEntries.some(
     ([, server]) => server.state === "failed" || server.state === "crashed",
   );
   const skillFilter = skillQuery.trim().toLowerCase();
-  const invocableSkills = skills
-    .filter(
-      (skill) =>
-        skill.enabled &&
-        skill.shadowedBy === undefined &&
-        (skill.invocation === "both" || skill.invocation === "user") &&
-        !skill.commandConflict,
-    )
-    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  const availableSkills = invocableSkills(skills);
+  const pluginSkills = availableSkills.filter((skill) => skill.source === "plugin");
+  const ordinarySkills = availableSkills.filter((skill) => skill.source !== "plugin");
   const filteredSkills =
     skillFilter === ""
-      ? invocableSkills
-      : invocableSkills.filter(
+      ? ordinarySkills
+      : ordinarySkills.filter(
           (skill) =>
             skill.name.toLowerCase().includes(skillFilter) ||
             skill.description.toLowerCase().includes(skillFilter),
@@ -1261,7 +1287,12 @@ export function Composer({
 
   const txtBlock = (
     <div className="txt">
-      <div className="composer-mirror" aria-hidden="true" ref={mirror}>
+      <div
+        className={`composer-mirror${draftSkill ? " draft-skill" : ""}`}
+        aria-hidden="true"
+        ref={mirror}
+      >
+        {draftSkill && <InputLabel data={draftSkill} anchor={skillAnchor} />}
         {refSpans}
         {"​"}
       </div>
@@ -1273,8 +1304,8 @@ export function Composer({
         id={id}
         ref={textarea}
         rows={1}
-        value={draft}
-        placeholder={placeholder ?? defaultPlaceholder}
+        value={visibleDraft}
+        placeholder={draftSkill ? undefined : (placeholder ?? defaultPlaceholder)}
         aria-autocomplete="list"
         aria-controls={popup !== null ? listId : undefined}
         aria-activedescendant={popup !== null ? `${listId}-${activeIndex}` : undefined}
@@ -1285,11 +1316,15 @@ export function Composer({
           setFocused(false);
         }}
         onSelect={(event) => {
-          setCaret(event.currentTarget.selectionStart);
+          setCaret(event.currentTarget.selectionStart + offset);
         }}
         onChange={(event) => {
-          setCaret(event.target.selectionStart);
-          updateDraft(event.target.value);
+          setShowTypedWorkMode(true);
+          const next = prefix + event.target.value;
+          const pos = event.target.selectionStart + offset;
+          setCaret(pos);
+          if (draftLabel(next, skills, true).prefix !== prefix) pendingCaret.current = pos;
+          updateDraft(next);
         }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
@@ -1298,7 +1333,8 @@ export function Composer({
           composingRef.current = true;
           setComposing(true);
         }}
-        onCompositionEnd={() => {
+        onCompositionEnd={(event) => {
+          pendingCaret.current = event.currentTarget.selectionStart + offset;
           composingRef.current = false;
           setComposing(false);
         }}
@@ -1375,7 +1411,12 @@ export function Composer({
                         chooseRow(item.row);
                       }}
                     >
-                      <span className="composer-popup-name">
+                      <span className="slash-item-icon">
+                        {item.row.decoration && <InputLabelIcon {...item.row.decoration} />}
+                      </span>
+                      <span
+                        className={`composer-popup-name${item.group.id === "plugins" ? " plugin-name" : ""}`}
+                      >
                         {item.row.label}
                         {item.row.argumentHint && <em>{item.row.argumentHint}</em>}
                       </span>
@@ -1433,6 +1474,29 @@ export function Composer({
             </ImageViewerBoundary>
           )}
           {txtBlock}
+          {selectedWorkMode && (
+            <div className="composer-work-mode">
+              <button
+                type="button"
+                className="work-mode-tag"
+                disabled={disabled}
+                aria-label={`取消${selectedWorkMode.label}`}
+                onClick={() => {
+                  if (typedMode) {
+                    pendingCaret.current = textarea.current?.selectionStart ?? visibleDraft.length;
+                    updateDraft(visibleDraft);
+                  }
+                  updateWorkMode(null);
+                  textarea.current?.focus();
+                }}
+              >
+                <InputLabel data={selectedWorkMode} />
+                <span className="work-mode-close" aria-hidden="true">
+                  <Icon name="close_circle" size={ICON_SM} />
+                </span>
+              </button>
+            </div>
+          )}
           <div className="tb">
             {plusButton}
             {allowAttachments && paperclipButton}
@@ -1446,29 +1510,6 @@ export function Composer({
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
-            {selectedWorkMode !== undefined && (
-              <>
-                <span className="tb-sep" aria-hidden="true" />
-                <button
-                  type="button"
-                  className="work-mode-tag"
-                  disabled={disabled}
-                  aria-label={`取消${selectedWorkMode.label}`}
-                  onClick={() => {
-                    updateWorkMode(null);
-                    textarea.current?.focus();
-                  }}
-                >
-                  <span className="work-mode-icon" aria-hidden="true">
-                    <Icon name={selectedWorkMode.icon} size={ICON_SM} />
-                  </span>
-                  <span className="work-mode-close" aria-hidden="true">
-                    <Icon name="close_circle" size={ICON_SM} />
-                  </span>
-                  <span>{selectedWorkMode.label}</span>
-                </button>
-              </>
-            )}
             <span className="sp" />
             {isSession && contextUsage}
             {controls !== undefined &&
@@ -1545,6 +1586,7 @@ export function Composer({
                 {...(disabledReason !== undefined ? { disabled: disabledReason } : {})}
                 onSelect={() => {
                   closeMenu();
+                  if (typedMode) updateDraft(visibleDraft);
                   updateWorkMode(item.name);
                   textarea.current?.focus();
                 }}
@@ -1553,7 +1595,7 @@ export function Composer({
           })}
           <MenuSeparator />
           <MenuSubmenu
-            icon={<Icon name="file" size={ICON_SM} />}
+            icon={<Icon name={SKILL_ICON} size={ICON_SM} />}
             label="技能"
             right={<Icon name="right_small" size={ICON_SM} />}
           >
@@ -1573,6 +1615,7 @@ export function Composer({
               <MenuItem
                 key={skill.name}
                 label={skill.name}
+                icon={<Icon name={SKILL_ICON} size={ICON_SM} />}
                 onSelect={() => {
                   closeMenu();
                   insertSkillToken(skill.name);
@@ -1586,6 +1629,35 @@ export function Composer({
               onSelect={() => {
                 closeMenu();
                 onManageSkills?.();
+              }}
+            />
+          </MenuSubmenu>
+          <MenuSubmenu
+            icon={<Icon name={PLUGIN_ICON} size={ICON_SM} />}
+            label="插件"
+            right={<Icon name="right_small" size={ICON_SM} />}
+          >
+            {pluginSkills.map((skill) => {
+              const label = skillLabel(skill.name, skill);
+              return (
+                <MenuItem
+                  key={skill.name}
+                  label={label.label}
+                  icon={<InputLabelIcon {...label} />}
+                  onSelect={() => {
+                    closeMenu();
+                    insertSkillToken(skill.name);
+                  }}
+                />
+              );
+            })}
+            {pluginSkills.length > 0 && <MenuSeparator />}
+            <MenuItem
+              icon={<Icon name="settings_1" size={ICON_SM} />}
+              label="管理插件"
+              onSelect={() => {
+                closeMenu();
+                onManagePlugins?.();
               }}
             />
           </MenuSubmenu>

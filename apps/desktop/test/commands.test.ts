@@ -193,6 +193,66 @@ describe("completeSlash", () => {
     expect(completeSlash("/sw")).toEqual([]);
   });
 
+  it("分别列出技能和插件，按技能名或插件显示名前缀补全，携带图标和来源", () => {
+    const skill = {
+      name: "notes",
+      source: ".agents",
+      layer: "project",
+      entryPath: "notes/SKILL.md",
+      realPath: "notes/SKILL.md",
+      description: "整理笔记",
+      displayedDescriptionLength: 4,
+      otherEntries: [],
+      invocation: "both",
+      catalogStatus: "full",
+      enabled: true,
+      commandConflict: false,
+      missingDescription: false,
+      fields: {},
+      unknownFields: {},
+      ignored: [],
+      bodyLines: 1,
+      bodyPreview: "body",
+      files: [],
+      size: 100,
+    } as const;
+    const skills = [
+      { ...skill, otherEntries: [], ignored: [], files: [] },
+      {
+        ...skill,
+        otherEntries: [],
+        ignored: [],
+        files: [],
+        name: "pdf",
+        source: "plugin" as const,
+        plugin: "PDF@builtin",
+        pluginDisplayName: "文档 PDF",
+        pluginIcon: "data:image/png;base64,AA==",
+      },
+    ];
+    const groups = completeSlash("/", skills);
+    expect(groups.map((group) => group.id)).toEqual(["commands", "skills", "plugins"]);
+    expect(groups[0]?.items.find((item) => item.label === "/plan")?.decoration?.icon).toBe(
+      "list_check",
+    );
+    expect(groups[0]?.items[0]?.decoration).toBeUndefined();
+    expect(groups[1]?.items[0]).toMatchObject({
+      label: "/notes",
+      source: "项目",
+      decoration: { icon: "magic_1" },
+    });
+    for (const query of ["/PD", "/文档"]) {
+      expect(completeSlash(query, skills)[0]?.items).toMatchObject([
+        {
+          label: "文档 PDF",
+          source: "文档 PDF",
+          insert: "/pdf ",
+          decoration: { image: "data:image/png;base64,AA==" },
+        },
+      ]);
+    }
+  });
+
   it("前缀过滤并保留原始前导空白", () => {
     expect(completeSlash("  /m").map((group) => group.items.map((item) => item.insert))).toEqual([
       ["  /mcp "],

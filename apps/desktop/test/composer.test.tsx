@@ -1047,7 +1047,7 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     expect(within(plusMenu).queryByRole("menuitemradio")).toBeNull();
 
     fireEvent.click(within(plusMenu).getByRole("menuitem", { name: "目标" }));
-    expect(container.querySelector(".tb .tb-sep")).not.toBeNull();
+    expect(container.querySelector(".composer-work-mode .input-label")?.textContent).toBe("目标");
     expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy();
 
     // 选了执行方式但输入为空：发送按钮禁用，按 Enter 给用法提示而不发送
@@ -1187,7 +1187,8 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     fireEvent.change(search, { target: { value: "deploy" } });
     expect(within(submenu).queryByRole("menuitem", { name: "plan-check" })).toBeNull();
     fireEvent.click(within(submenu).getByRole("menuitem", { name: "deploy" }));
-    expect(field.value).toBe("先 /deploy ");
+    expect(field.value).toBe("先");
+    expect(document.querySelector(".draft-skill .input-label")?.textContent).toBe("deploy");
 
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "技能" }));
@@ -1247,4 +1248,65 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     const mcpSubmenu2 = await screen.findByRole("menu", { name: "MCP" });
     expect(mcpSubmenu2.querySelector(".mcp-state-dot.is-standby")).not.toBeNull();
   });
+});
+
+it("技能补全以行内标签呈现并保持原始技能发送载荷", async () => {
+  const onSubmit = vi.fn(async () => true);
+  const { container } = render(<Composer {...props({ skills: [testSkill()], onSubmit })} />);
+  const field = input("/al");
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(container.querySelector(".draft-skill .input-label")?.textContent).toBe("alpha");
+  expect(field.value).toBe("");
+  expect(field.getAttribute("placeholder")).toBeNull();
+  fireEvent.change(field, { target: { value: "检查文件\n并给建议" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  await waitFor(() =>
+    expect(onSubmit).toHaveBeenCalledWith({
+      attachments: [],
+      text: "/alpha 检查文件\n并给建议",
+      skill: { name: "alpha", arguments: "检查文件\n并给建议" },
+    }),
+  );
+});
+
+it("分叉回填和输入历史恢复技能标签，起始退格只删除标签", async () => {
+  const readInputHistory = vi.fn(async () => ["/alpha 历史"]);
+  const { container } = render(
+    <Composer
+      {...props({ skills: [testSkill()], initialDraft: "/alpha 分叉", readInputHistory })}
+    />,
+  );
+  const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
+  expect(field.value).toBe("分叉");
+  expect(container.querySelector(".draft-skill .input-label")?.textContent).toBe("alpha");
+  field.setSelectionRange(0, 0);
+  fireEvent.keyDown(field, { key: "Backspace" });
+  expect(field.value).toBe("分叉");
+  expect(container.querySelector(".draft-skill .input-label")).toBeNull();
+  await waitFor(() => expect(readInputHistory).toHaveBeenCalled());
+  fireEvent.keyDown(field, { key: "ArrowUp" });
+  expect(field.value).toBe("历史");
+  expect(container.querySelector(".draft-skill .input-label")?.textContent).toBe("alpha");
+});
+
+it("手输计划在组字结束后显示执行方式标签并保持命令发送载荷", async () => {
+  const onSubmit = vi.fn(async () => true);
+  render(<Composer {...props({ onSubmit })} />);
+  const field = input("/plan");
+  fireEvent.compositionStart(field);
+  fireEvent.change(field, { target: { value: "/plan 修复测试" } });
+  expect(field.value).toBe("/plan 修复测试");
+  expect(screen.queryByRole("button", { name: "取消计划" })).toBeNull();
+  fireEvent.compositionEnd(field);
+  expect(field.value).toBe("修复测试");
+  expect(screen.getByRole("button", { name: "取消计划" }).textContent).toBe("计划");
+  fireEvent.keyDown(field, { key: "Enter" });
+  await waitFor(() =>
+    expect(onSubmit).toHaveBeenCalledWith({
+      attachments: [],
+      text: "修复测试",
+      draftText: "/plan 修复测试",
+      workMode: "plan",
+    }),
+  );
 });

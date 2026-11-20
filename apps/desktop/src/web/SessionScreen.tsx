@@ -362,6 +362,7 @@ export function SessionScreen({
         }}
         readOnly={{ frozen: true }}
         view={view}
+        skills={skills}
         openWarnings={entry.warnings.map(phoneWarningText)}
         openUrl={openUrl}
         cwd={entry.workspace}
@@ -438,6 +439,7 @@ export function SessionScreen({
       <Conversation
         session={session}
         view={view}
+        skills={skills}
         openWarnings={entry.warnings.map(phoneWarningText)}
         openUrl={openUrl}
         cwd={entry.workspace}
@@ -580,6 +582,7 @@ export function SessionScreen({
         onSlash={slash}
         fileRefs={plain ? null : { load: () => session.fileIndex(), key: view.turnCount }}
         fill={fill}
+        inputHistory={() => sessionInputHistory(view.entries)}
         getVisionHint={controls.visionHint}
         allowAttachments={suiteThread === undefined}
         allowWorkMode={suiteThread === undefined}
@@ -660,9 +663,25 @@ export function DraftComposer({
   onRestoreUsed?: () => void;
 }) {
   const draft = useDraftControls(runtime, undefined, 0, workspace, false);
+  const [skills, setSkills] = useState<SkillOverview[]>([]);
+  useEffect(() => {
+    setSkills([]);
+    if (!runtime || !connected) return;
+    let active = true;
+    void runtime.describeSkills({ workspaceRoot: workspace }).then(
+      (result) => {
+        if (active) setSkills(result.skills);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [runtime, workspace, connected]);
   return (
     <PhoneComposer
       variant="draft"
+      skills={skills}
       controls={draft.controls}
       running={false}
       disabled={!connected ? "电脑尚未连接" : draft.loading ? "正在读取电脑上的模型…" : undefined}

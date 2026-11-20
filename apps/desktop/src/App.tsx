@@ -2634,6 +2634,9 @@ export function App({ host }: { host: DesktopHost }) {
                   onManageSkills={() => {
                     setPage("skills");
                   }}
+                  onManagePlugins={() => {
+                    setPage("plugins");
+                  }}
                   suiteRecord={suites.find(
                     (item) =>
                       item.id === active.view.suite?.suiteId ||
@@ -2723,6 +2726,9 @@ export function App({ host }: { host: DesktopHost }) {
                   }}
                   onManageSkills={() => {
                     setPage("skills");
+                  }}
+                  onManagePlugins={() => {
+                    setPage("plugins");
                   }}
                   restoreDraft={draftRestore}
                   onRestoreDraftUsed={() => {
@@ -3001,6 +3007,7 @@ interface SessionPaneProps {
   onManageMcp: () => void;
   /** 「+」->「技能」子菜单：进入设置 › 技能 */
   onManageSkills: () => void;
+  onManagePlugins: () => void;
   onManageGrants: () => void;
   computerActive?: ApplicationTarget | undefined;
   onStopComputer?: (() => void) | undefined;
@@ -3075,6 +3082,7 @@ function SessionPane({
   onManageProviders,
   onManageMcp,
   onManageSkills,
+  onManagePlugins,
   onManageGrants,
   computerActive,
   onStopComputer,
@@ -3158,6 +3166,7 @@ function SessionPane({
       />
       <Conversation
         key={`conversation:${session.id}`}
+        skills={skills}
         session={session}
         view={view}
         openWarnings={openWarnings.map(desktopWarningText)}
@@ -3228,6 +3237,7 @@ function SessionPane({
         mcpServers={view.mcpServers}
         onManageMcp={onManageMcp}
         onManageSkills={onManageSkills}
+        onManagePlugins={onManagePlugins}
         workModeDisabled={
           view.ensemble?.status === "active" || scheduleSource !== undefined
             ? {
@@ -3311,6 +3321,7 @@ interface DraftPaneProps {
   onManageMcp: () => void;
   /** 「+」->「技能」子菜单底部「管理技能」 */
   onManageSkills: () => void;
+  onManagePlugins: () => void;
   /** 新会话被拒后放回的草稿；只在这次挂载取用 */
   restoreDraft?: {
     text: string;
@@ -3343,6 +3354,7 @@ function DraftPane({
   onManageProviders,
   onManageMcp,
   onManageSkills,
+  onManagePlugins,
   restoreDraft,
   onRestoreDraftUsed,
   prefillDraft,
@@ -3549,6 +3561,7 @@ function DraftPane({
           onManageProviders={onManageProviders}
           onManageMcp={onManageMcp}
           onManageSkills={onManageSkills}
+          onManagePlugins={onManagePlugins}
         />
       </div>
     </div>

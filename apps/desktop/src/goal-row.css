@@ -15,14 +15,10 @@
   display: flex;
   align-items: center;
 }
-.goal-mode-ref {
+.goal-row-line > .input-label {
   flex: none;
-  font: var(--fs-1)/1 var(--mono);
-  padding: var(--space-1) var(--space-2);
-  margin-right: var(--space-2);
-  color: var(--a-accent);
-  background: var(--a-accent-subtle);
-  border-radius: var(--radius-1);
+  margin-inline-end: var(--space-2);
+  font-size: var(--fs-2);
 }
 .goal-objective {
   min-width: 0;
@@ -79,9 +75,8 @@
 .goal-off .goal-detail-text {
   color: var(--a-muted);
 }
-.goal-off .goal-mode-ref {
+.goal-off .input-label {
   color: var(--a-muted);
-  background: var(--a-raised);
 }
 .todo-panel .goal-row + .todo-panel-toggle,
 .todo-panel .goal-row + .todo-list {

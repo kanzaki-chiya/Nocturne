@@ -65,11 +65,11 @@ it("无清单也显示目标，各状态控制与可见性", () => {
         goalActions={actions}
       />,
     );
-    expect(screen.getByText("/goal")).toBeTruthy();
+    expect(screen.getByText("目标", { selector: ".input-label span" })).toBeTruthy();
   }
   for (const g of [goal("met"), goal("stopped", "rewound"), undefined]) {
     rerender(<TodoPanel items={[]} goal={g} goalActions={actions} />);
-    expect(screen.queryByText("/goal")).toBeNull();
+    expect(screen.queryByText("目标", { selector: ".input-label span" })).toBeNull();
   }
 });
 

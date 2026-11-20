@@ -1,7 +1,17 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   WORK_MODE_COMMANDS,
+  type WorkModeName,
   type ExternalAgentOverview,
   type PendingInputsSnapshot,
   type SkillOverview,
@@ -36,6 +46,16 @@ import { BrandIcon } from "../BrandIcon";
 import { Popover, PopoverOption } from "./Popover";
 import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "../ImageViewer";
 import { Icon } from "../ui";
+import { InputLabel, InputLabelIcon, useDraftSkillAnchor, useSkillBackspace } from "../InputLabel";
+import {
+  draftLabel,
+  insertSkillCommand,
+  invocableSkills,
+  PLUGIN_ICON,
+  SKILL_ICON,
+  skillLabel,
+  WORK_MODE_ITEMS,
+} from "../input-labels";
 
 /** 桌面提示里指向左栏、设置页的命令，在手机上换成手机的去处 */
 const PHONE_HINTS: Record<string, string> = {
@@ -91,6 +111,7 @@ export interface PhoneComposerProps {
   fileRefs?: FileRefSource | null;
   /** 从会话菜单「输入历史」选中的一条：seq 变化时填回输入框 */
   fill?: { text: string; seq: number } | undefined;
+  inputHistory?: (() => string[]) | undefined;
   /** 首张图片加入时读一次，模型不支持图片时给出提示（与桌面相同） */
   getVisionHint?: (() => Promise<string | undefined>) | undefined;
   /** 测试注入：图片处理 */
@@ -106,7 +127,8 @@ export interface PhoneComposerProps {
   allowWorkMode?: boolean | undefined;
 }
 
-type PopoverKind = "attach" | "preset" | "model" | "effort" | "output";
+type PopoverKind =
+  "plus" | "skills" | "plugins" | "attach" | "preset" | "model" | "effort" | "output";
 
 function phoneAttachment(attachment: ComposerSubmit["attachments"][number]): PhoneAttachment {
   return {
@@ -150,6 +172,7 @@ export function PhoneComposer({
   grantsFooter,
   fileRefs = null,
   fill,
+  inputHistory,
   getVisionHint,
   prepareImage: _prepareImage = preparePhoneImage,
   initialDraft,
@@ -160,7 +183,13 @@ export function PhoneComposer({
   allowWorkMode = true,
 }: PhoneComposerProps) {
   const [draft, setDraft] = useState(initialDraft ?? "");
+  const [showTypedWorkMode, setShowTypedWorkMode] = useState(false);
   const draftRef = useRef(initialDraft ?? "");
+  const [workMode, setWorkMode] = useState<WorkModeName | undefined>();
+  const workModeRef = useRef<WorkModeName | undefined>(undefined);
+  const [skillQuery, setSkillQuery] = useState("");
+  const [composing, setComposing] = useState(false);
+  const composingRef = useRef(false);
   const [open, setOpen] = useState<PopoverKind | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string }>();
   const [error, setError] = useState<string | undefined>(initialError);
@@ -169,6 +198,21 @@ export function PhoneComposer({
   const [dismissed, setDismissed] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const card = useRef<HTMLDivElement>(null);
+  const mirror = useRef<HTMLDivElement>(null);
+  const presentation = draftLabel(draft, skills, allowWorkMode && showTypedWorkMode);
+  const lastPresentation = useRef(presentation);
+  if (!composing) lastPresentation.current = presentation;
+  const {
+    prefix,
+    skill: draftSkill,
+    workMode: typedMode,
+  } = composing ? lastPresentation.current : presentation;
+  const offset = prefix.length;
+  const visibleDraft = draft.slice(offset);
+  const skillAnchor = useDraftSkillAnchor(field, draftSkill);
+  const pendingCaret = useRef<number | undefined>(undefined);
+  const historyIndex = useRef<number | undefined>(undefined);
+  const historyDraft = useRef("");
   const triggers = useRef<Partial<Record<PopoverKind, HTMLButtonElement | null>>>({});
   const mounted = useRef(true);
   const [attachments, setAttachments] = useState<PhoneAttachment[]>(() =>
@@ -239,7 +283,8 @@ export function PhoneComposer({
         if (indexLoading.current === key) indexLoading.current = null;
       });
   }, [fileRefs, indexKey]);
-  const refToken = fileRefs !== null && !refsDismissed ? fileRefToken(draft, caret) : undefined;
+  const refToken =
+    fileRefs !== null && !refsDismissed && !composing ? fileRefToken(draft, caret) : undefined;
   const refActive = refToken !== undefined;
   useEffect(() => {
     if (refActive) ensureIndex();
@@ -249,15 +294,19 @@ export function PhoneComposer({
     : undefined;
   const indexReady = fileRefs !== null && index?.key === fileRefs.key;
 
+  const syncMirror = () => {
+    if (mirror.current && field.current) mirror.current.scrollTop = field.current.scrollTop;
+  };
   useEffect(() => {
     const node = field.current;
     if (node === null) return;
     node.style.height = "auto";
     node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
-  }, [draft]);
+    syncMirror();
+  }, [visibleDraft, draftSkill?.label]);
 
   const slashGroups = useMemo(() => {
-    if (dismissed) return [];
+    if (dismissed || composing) return [];
     const groups = completeSlash(draft, skills, externalAgents);
     if (allowWorkMode) return groups;
     return groups.flatMap((group) => {
@@ -265,7 +314,7 @@ export function PhoneComposer({
       const items = group.items.filter((item) => !WORK_MODE_NAMES.has(item.label));
       return items.length > 0 ? [{ ...group, items }] : [];
     });
-  }, [draft, dismissed, skills, externalAgents, allowWorkMode]);
+  }, [draft, dismissed, composing, skills, externalAgents, allowWorkMode]);
   const parsed = useMemo(() => {
     const result = parseSlash(draft, variant, skills, externalAgents);
     if (!allowWorkMode && result?.kind === "work") return null;
@@ -277,6 +326,13 @@ export function PhoneComposer({
   const redirect = parsed?.kind === "redirect" ? phoneSlashHint(parsed) : undefined;
 
   const revision = useRef(0);
+  const updateMode = (mode: WorkModeName | undefined) => {
+    revision.current += 1;
+    workModeRef.current = mode;
+    setWorkMode(mode);
+    setHint(undefined);
+    setError(undefined);
+  };
   const update = (text: string, nextCaret = text.length) => {
     revision.current += 1;
     draftRef.current = text;
@@ -288,27 +344,38 @@ export function PhoneComposer({
     setError(undefined);
   };
   const placeCaret = (position: number) => {
-    requestAnimationFrame(() => {
-      const node = field.current;
-      if (node === null) return;
-      node.focus();
-      node.setSelectionRange(position, position);
-      setCaret(position);
-    });
+    pendingCaret.current = position;
+    field.current?.focus();
   };
+  useLayoutEffect(() => {
+    const position = pendingCaret.current;
+    if (position === undefined) return;
+    pendingCaret.current = undefined;
+    field.current?.setSelectionRange(position - offset, position - offset);
+  }, [draft, offset]);
+  const removeSkill = () => {
+    placeCaret(0);
+    update(draft.slice(offset), 0);
+  };
+  useSkillBackspace(field, draftSkill !== undefined, (event) => {
+    if (composingRef.current) return;
+    event.preventDefault();
+    removeSkill();
+  });
   // 只在会话菜单选中新的一条输入历史时填回（update/placeCaret 每次渲染重建，不作依赖）
   const fillSeq = fill?.seq;
   useEffect(() => {
     if (fill === undefined) return;
+    setShowTypedWorkMode(false);
     update(fill.text);
     placeCaret(fill.text.length);
   }, [fillSeq]);
   const insertRef = () => {
     setOpen(null);
     const node = field.current;
-    const at = node?.selectionStart ?? draft.length;
+    const at = node ? node.selectionStart + offset : draft.length;
     const before = draft.slice(0, at);
-    const after = draft.slice(node?.selectionEnd ?? at);
+    const after = draft.slice(node ? node.selectionEnd + offset : at);
     const prefix = before === "" || /\s$/.test(before) ? "" : " ";
     const position = before.length + prefix.length + 1;
     update(`${before}${prefix}@${after}`, position);
@@ -375,7 +442,9 @@ export function PhoneComposer({
 
   const submit = async () => {
     const text = draftRef.current;
-    if (disabled !== undefined || submitting || processing > 0) return;
+    if (disabled !== undefined || submitting || processing > 0 || composingRef.current) return;
+    const selectedMode = workModeRef.current;
+    if (selectedMode && text.trim() === "") return;
     if (text.trim() === "" && attachmentsRef.current.length === 0) return;
     if (tooLarge) return;
     const rawSlash = parseSlash(text, variant, skills, externalAgents);
@@ -402,12 +471,14 @@ export function PhoneComposer({
         if (mounted.current) update("");
         return;
       }
+      const modeFromMenu = slash === null ? selectedMode : undefined;
+      const effectiveMode = slash?.kind === "work" ? slash.workMode : modeFromMenu;
       const task = slash?.kind === "work" ? slash.text : text;
       const snapshot = attachmentsRef.current.slice();
       const payload = {
         text: task,
         ...(task !== text ? { draftText: text } : {}),
-        ...(slash?.kind === "work" ? { workMode: slash.workMode } : {}),
+        ...(effectiveMode ? { workMode: effectiveMode } : {}),
         ...(slash?.kind === "skill" ? { skill: slash.invocation } : {}),
         ...(slash?.kind === "agent" ? { delegate: slash.delegate } : {}),
         attachments: snapshot.map((attachment) => ({
@@ -418,6 +489,7 @@ export function PhoneComposer({
         })),
       };
       update("");
+      if (modeFromMenu) updateMode(undefined);
       attachmentsRef.current = [];
       setAttachments([]);
       const mark = revision.current;
@@ -433,6 +505,7 @@ export function PhoneComposer({
         attachmentsRef.current = snapshot;
         setAttachments(snapshot);
         update(text);
+        if (modeFromMenu) updateMode(modeFromMenu);
       };
       try {
         const accepted = running ? await onSubmit(payload, "queue") : await onSubmit(payload);
@@ -540,10 +613,20 @@ export function PhoneComposer({
     control === undefined ? "正在读取…" : control.disabled;
   const canSend =
     disabled === undefined &&
-    (draft.trim() !== "" || attachments.length > 0) &&
+    (draft.trim() !== "" || (!workMode && attachments.length > 0)) &&
+    !composing &&
     !submitting &&
     processing === 0 &&
     !tooLarge;
+
+  const selectedWorkMode = WORK_MODE_ITEMS.find((item) => item.name === (typedMode ?? workMode));
+  const menuSkills = invocableSkills(skills).filter((skill) =>
+    open === "plugins"
+      ? skill.source === "plugin"
+      : skill.source !== "plugin" &&
+        (skill.name.toLowerCase().includes(skillQuery.trim().toLowerCase()) ||
+          skill.description.toLowerCase().includes(skillQuery.trim().toLowerCase())),
+  );
 
   return (
     <div className="phone-composer">
@@ -613,15 +696,19 @@ export function PhoneComposer({
                   key={`${group.id}:${item.insert}`}
                   className="phone-slash-row"
                   onClick={() => {
+                    placeCaret(item.insert.length);
                     update(item.insert);
                     setDismissed(true);
                     field.current?.focus();
                   }}
                 >
                   <b>
+                    <span className="slash-item-icon">
+                      {item.decoration && <InputLabelIcon {...item.decoration} />}
+                    </span>
                     {item.label}
                     {item.argumentHint && <em>{item.argumentHint}</em>}
-                    {item.source && <small>{item.source}</small>}
+                    {group.id !== "plugins" && item.source && <small>{item.source}</small>}
                   </b>
                   <span>{item.summary}</span>
                 </button>
@@ -658,53 +745,122 @@ export function PhoneComposer({
             />
           </ImageViewerBoundary>
         )}
-        <textarea
-          ref={field}
-          aria-label="消息"
-          rows={1}
-          value={draft}
-          placeholder={placeholder ?? "输入消息"}
-          onChange={(event) => {
-            update(event.target.value, event.target.selectionStart);
-          }}
-          onSelect={(event) => {
-            setCaret(event.currentTarget.selectionStart);
-          }}
-          onPaste={(event) => {
-            if (!allowAttachments) return;
-            const files = Array.from(event.clipboardData.files);
-            if (files.length) {
-              event.preventDefault();
-              void addFiles(files);
-              return;
-            }
-            const text = event.clipboardData.getData("text/plain");
-            if (!literalPaste.current && new TextEncoder().encode(text).byteLength >= 32768) {
-              event.preventDefault();
-              void addFiles(
-                [new File([text], `pasted-${pasteNumber.current++}.txt`, { type: "text/plain" })],
-                "paste",
+        <div className={`phone-input${draftSkill ? " has-skill" : ""}`}>
+          {draftSkill && (
+            <div className="phone-input-mirror draft-skill" aria-hidden="true" ref={mirror}>
+              <InputLabel data={draftSkill} anchor={skillAnchor} />
+              {visibleDraft}
+              {"​"}
+            </div>
+          )}
+          <textarea
+            ref={field}
+            aria-label="消息"
+            rows={1}
+            value={visibleDraft}
+            placeholder={draftSkill ? undefined : (placeholder ?? "输入消息")}
+            onChange={(event) => {
+              historyIndex.current = undefined;
+              setShowTypedWorkMode(true);
+              const next = prefix + event.target.value;
+              const position = event.target.selectionStart + offset;
+              if (draftLabel(next, skills, allowWorkMode).prefix !== prefix)
+                pendingCaret.current = position;
+              update(next, position);
+            }}
+            onSelect={(event) => {
+              setCaret(event.currentTarget.selectionStart + offset);
+            }}
+            onScroll={syncMirror}
+            onCompositionStart={() => {
+              composingRef.current = true;
+              setComposing(true);
+            }}
+            onCompositionEnd={(event) => {
+              pendingCaret.current = event.currentTarget.selectionStart + offset;
+              composingRef.current = false;
+              setComposing(false);
+            }}
+            onPaste={(event) => {
+              if (!allowAttachments) return;
+              const files = Array.from(event.clipboardData.files);
+              if (files.length) {
+                event.preventDefault();
+                void addFiles(files);
+                return;
+              }
+              const text = event.clipboardData.getData("text/plain");
+              if (!literalPaste.current && new TextEncoder().encode(text).byteLength >= 32768) {
+                event.preventDefault();
+                void addFiles(
+                  [new File([text], `pasted-${pasteNumber.current++}.txt`, { type: "text/plain" })],
+                  "paste",
+                );
+              }
+              literalPaste.current = false;
+            }}
+            onKeyDown={(event) => {
+              literalPaste.current =
+                (event.ctrlKey || event.metaKey) &&
+                event.shiftKey &&
+                event.key.toLowerCase() === "v";
+              if (
+                event.nativeEvent.isComposing ||
+                composingRef.current ||
+                // eslint-disable-next-line @typescript-eslint/no-deprecated -- 旧 IME 用 keyCode 229 标记组合中
+                event.nativeEvent.keyCode === 229
+              )
+                return;
+              if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+              const node = event.currentTarget;
+              if (node.selectionStart !== node.selectionEnd) return;
+              if (
+                !refActive &&
+                slashGroups.length === 0 &&
+                (event.key === "ArrowUp" || event.key === "ArrowDown")
+              ) {
+                const history = inputHistory?.() ?? [];
+                const previous = historyIndex.current;
+                const position = node.selectionStart;
+                const up = event.key === "ArrowUp";
+                if (
+                  history.length === 0 ||
+                  (up ? visibleDraft.slice(0, position) : visibleDraft.slice(position)).includes(
+                    "\n",
+                  ) ||
+                  (!up && previous === undefined)
+                )
+                  return;
+                if (previous === undefined) historyDraft.current = draft;
+                const next = up
+                  ? Math.max(0, (previous ?? history.length) - 1)
+                  : (previous ?? 0) + 1;
+                historyIndex.current = next < history.length ? next : undefined;
+                const text = history[next] ?? historyDraft.current;
+                event.preventDefault();
+                setShowTypedWorkMode(false);
+                placeCaret(text.length);
+                update(text);
+                return;
+              }
+              if (event.key !== "Backspace" && event.key !== "Delete") return;
+              if (draftSkill && event.key === "Backspace" && node.selectionStart === 0) {
+                event.preventDefault();
+                removeSkill();
+                return;
+              }
+              const range = fileRefDeleteRange(
+                draft,
+                node.selectionStart + offset,
+                event.key === "Backspace" ? "backward" : "forward",
               );
-            }
-            literalPaste.current = false;
-          }}
-          onKeyDown={(event) => {
-            literalPaste.current =
-              (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v";
-            if (event.key !== "Backspace" && event.key !== "Delete") return;
-            const node = event.currentTarget;
-            if (node.selectionStart !== node.selectionEnd) return;
-            const range = fileRefDeleteRange(
-              draft,
-              node.selectionStart,
-              event.key === "Backspace" ? "backward" : "forward",
-            );
-            if (range === undefined) return;
-            event.preventDefault();
-            update(draft.slice(0, range.start) + draft.slice(range.end), range.start);
-            placeCaret(range.start);
-          }}
-        />
+              if (range === undefined) return;
+              event.preventDefault();
+              update(draft.slice(0, range.start) + draft.slice(range.end), range.start);
+              placeCaret(range.start);
+            }}
+          />
+        </div>
         {running ? (
           <>
             <button
@@ -745,7 +901,25 @@ export function PhoneComposer({
           </button>
         )}
       </div>
+      {selectedWorkMode && (
+        <div className="phone-work-mode">
+          <button
+            type="button"
+            className="work-mode-tag"
+            aria-label={`取消${selectedWorkMode.label}`}
+            onClick={() => {
+              if (typedMode) update(visibleDraft);
+              updateMode(undefined);
+              field.current?.focus();
+            }}
+          >
+            <InputLabel data={selectedWorkMode} />
+            <Icon name="close_circle" size={14} />
+          </button>
+        </div>
+      )}
       <div className="phone-tools" role="toolbar" aria-label="会话控件">
+        {(allowWorkMode || skills.length > 0) && tool("plus", "添加", <Icon name="add" />)}
         {allowAttachments && tool("attach", "添加文件", <IconPaperclip />)}
         {tool("preset", "切换权限预设", <IconShield risk={controls?.preset.value === "bypass"} />, {
           disabled: busyDisabled(controls?.preset),
@@ -805,6 +979,84 @@ export function PhoneComposer({
             }}
           />
         </>
+      )}
+      {(open === "plus" || open === "skills" || open === "plugins") && (
+        <Popover
+          anchor={triggers.current.plus ?? null}
+          label={open === "plus" ? "添加" : open === "skills" ? "技能" : "插件"}
+          onClose={close}
+        >
+          {open === "plus" ? (
+            <>
+              {allowWorkMode &&
+                WORK_MODE_ITEMS.map((item) => (
+                  <PopoverOption
+                    key={item.name}
+                    label={item.label}
+                    icon={<InputLabelIcon {...item} />}
+                    onSelect={() => {
+                      close();
+                      if (typedMode) update(visibleDraft);
+                      updateMode(item.name);
+                      field.current?.focus();
+                    }}
+                  />
+                ))}
+              <PopoverOption
+                label="技能"
+                icon={<Icon name={SKILL_ICON} />}
+                onSelect={() => {
+                  setSkillQuery("");
+                  setOpen("skills");
+                }}
+              />
+              <PopoverOption
+                label="插件"
+                icon={<Icon name={PLUGIN_ICON} />}
+                onSelect={() => {
+                  setOpen("plugins");
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <PopoverOption
+                label="返回"
+                icon={<Icon name="arrow_left" />}
+                onSelect={() => {
+                  setOpen("plus");
+                }}
+              />
+              {open === "skills" && (
+                <input
+                  type="search"
+                  className="phone-skill-search"
+                  aria-label="搜索技能"
+                  value={skillQuery}
+                  onChange={(event) => {
+                    setSkillQuery(event.target.value);
+                  }}
+                />
+              )}
+              {menuSkills.map((skill) => {
+                const label = skillLabel(skill.name, skill);
+                return (
+                  <PopoverOption
+                    key={skill.name}
+                    label={label.label}
+                    icon={<InputLabelIcon {...label} />}
+                    onSelect={() => {
+                      close();
+                      const next = insertSkillCommand(draft, skill.name, skills);
+                      placeCaret(skill.name.length + 2);
+                      update(next, skill.name.length + 2);
+                    }}
+                  />
+                );
+              })}
+            </>
+          )}
+        </Popover>
       )}
       {allowAttachments && open === "attach" && (
         <Popover anchor={triggers.current.attach ?? null} label="添加" onClose={close}>
