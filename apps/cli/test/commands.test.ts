@@ -1,7 +1,16 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Runtime, RuntimeSession } from "@nocturne/core";
-import { RuntimeCommandError, SessionError, BUILTIN_SLASH_COMMANDS } from "@nocturne/core";
+import {
+  BUILTIN_SLASH_COMMANDS,
+  createRuntime,
+  FakeProvider,
+  RuntimeCommandError,
+  SessionError,
+} from "@nocturne/core";
 import { createRuntimeStub } from "@nocturne/core/testing";
 import { SLASH_COMMANDS } from "@nocturne/tui/slash-catalog";
 
@@ -420,6 +429,55 @@ describe("斜杠命令（cli.md 第 4 节）", () => {
     expect(text).toContain("    tool           150 chars  ~40 tok");
     expect(text).toContain("    summary         50 chars  ~10 tok");
     expect(text).not.toContain("assistant");
+  });
+
+  it("/context 明细大于总量时显示的行之和等于总量", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "nct-cli-ctx-scale-"));
+    vi.stubEnv("NOCTURNE_HOME", dir);
+    let runtime: Runtime | undefined;
+    try {
+      runtime = await createRuntime({
+        cwd: dir,
+        sessionsDir: path.join(dir, "sessions"),
+        providers: [
+          new FakeProvider({
+            scripts: [
+              [
+                { type: "text_delta", text: "答".repeat(800) },
+                { type: "usage", usage: { inputTokens: 120, outputTokens: 30 } },
+              ],
+            ],
+          }),
+        ],
+      });
+      const session = await runtime.createSession({ model: "fake/fake-1" });
+      await session.submit({ text: "问".repeat(400) });
+      const { lines, io } = capture();
+      await runSlashCommand("/context", session, runtime, io);
+      const outputLines = lines.join("\n").split("\n");
+      const totalMatch = /合计 ~(\d+) \/ \d+ tok/.exec(outputLines.at(-1) ?? "");
+      expect(totalMatch).not.toBeNull();
+      const total = Number(totalMatch?.[1]);
+      expect(total).toBe(150);
+      const parseTok = (line: string | undefined): number => {
+        const m = /~(\d+) tok/.exec(line ?? "");
+        expect(m).not.toBeNull();
+        return Number(m?.[1]);
+      };
+      const topRows = outputLines.filter((line) => /^ {2}[a-z]/.test(line));
+      const topSum = topRows.reduce((sum, line) => sum + parseTok(line), 0);
+      expect(topSum).toBe(total);
+      const historyLine = topRows.find((line) => line.startsWith("  history "));
+      const historyTokens = parseTok(historyLine);
+      const subRows = outputLines.filter((line) => /^ {4}[a-z]/.test(line));
+      const subSum = subRows.reduce((sum, line) => sum + parseTok(line), 0);
+      expect(subSum).toBe(historyTokens);
+      expect(outputLines.join("\n")).not.toContain("other");
+    } finally {
+      await runtime?.close();
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("/compact 调 compact；失败只显示不抛", async () => {
