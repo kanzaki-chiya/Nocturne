@@ -2848,6 +2848,32 @@ class Connection implements HubPeer {
       "session.listShells": (p) => this.session(p).session.listShells(),
       "session.visionInfo": (p) => this.session(p).session.visionInfo(),
       "session.mcpServers": (p) => this.session(p).session.mcpServers(),
+      // MCP Apps 仅本地开放（ADR-0101 第 7 节；不在 REMOTE_METHODS 与 AGENT_*_METHODS）
+      "session.readAppResource": (p) =>
+        this.session(p).session.readAppResource({
+          pluginId: reqString(p, "pluginId"),
+          serverId: reqString(p, "serverId"),
+          uri: reqString(p, "uri"),
+        }),
+      "session.callAppTool": (p) => {
+        const pluginId = reqString(p, "pluginId");
+        const serverId = reqString(p, "serverId");
+        const tool = reqString(p, "tool");
+        const rawArgs: unknown = p.arguments;
+        if (
+          rawArgs !== undefined &&
+          (typeof rawArgs !== "object" || rawArgs === null || Array.isArray(rawArgs))
+        ) {
+          throw new InvalidParamsError("arguments 必须是对象");
+        }
+        return this.session(p).session.callAppTool({
+          pluginId,
+          serverId,
+          tool,
+          ...(rawArgs !== undefined ? { arguments: rawArgs as Record<string, unknown> } : {}),
+        });
+      },
+      "session.listAppSurfaces": (p) => this.session(p).session.listAppSurfaces(),
       "session.fileIndex": (p) => this.session(p).session.fileIndex(),
       "session.readFile": async (p) => {
         const { session } = this.session(p);

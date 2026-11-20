@@ -4,7 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { READ_FILE_MAX_BYTES } from "@nocturne/core";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
-import { REMOTE_METHODS, remoteAttachmentLimit } from "@nocturne/rpc/server";
+import {
+  AGENT_READONLY_METHODS,
+  AGENT_RUN_METHODS,
+  REMOTE_METHODS,
+  remoteAttachmentLimit,
+} from "@nocturne/rpc/server";
 import { RPC_METHOD_NAMES } from "../src/shared/methods.js";
 import {
   cleanupTmp,
@@ -59,6 +64,9 @@ const STILL_LOCAL = [
   "runtime.searchSessions",
   "runtime.defaultReviewer",
   "session.setShell",
+  "session.readAppResource",
+  "session.callAppTool",
+  "session.listAppSurfaces",
   "runtime.readFile",
   "subagent.diff",
   "subagent.worktrees",
@@ -94,8 +102,11 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
       }
     }
     expect(REMOTE_METHODS as readonly string[]).toContain("remote.lanEndpoints");
-    // 会话方法只有写 settings.json 的 setShell 留在本机；session.readFile 与子会话观察已开放
+    // 会话方法只有 setShell 与三个 MCP Apps 本地方法留在本机；session.readFile 与子会话观察已开放
     expect(denied.filter((name) => name.startsWith("session.")).sort()).toEqual([
+      "session.callAppTool",
+      "session.listAppSurfaces",
+      "session.readAppResource",
       "session.setShell",
     ]);
     for (const allowed of [
@@ -731,6 +742,44 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
         (item) => item.key === "appearance.customThemes",
       )?.effective,
     ).toBe(expectedJson);
+
+    await h.client.shutdown();
+    await Promise.all([h.served, remote.served]);
+  });
+
+  it("MCP Apps 三个本地方法不在远程白名单与 agent 白名单，远程调用报 remote_not_allowed", async () => {
+    const appMethods = [
+      "session.readAppResource",
+      "session.callAppTool",
+      "session.listAppSurfaces",
+    ] as const;
+    for (const m of appMethods) {
+      expect(REMOTE_METHODS as readonly string[]).not.toContain(m);
+      expect(AGENT_READONLY_METHODS as readonly string[]).not.toContain(m);
+      expect(AGENT_RUN_METHODS as readonly string[]).not.toContain(m);
+    }
+
+    const h = await connectMany({ scripts: [textScript("ok")] });
+    const remote = await h.add();
+    const { session: s } = await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    const { session: remoteS } = await remote.client.runtime.resumeSession(s.id);
+
+    await expect(remoteS.listAppSurfaces()).rejects.toMatchObject({
+      code: "remote_not_allowed",
+      rpcCode: -32004,
+    });
+    await expect(
+      remoteS.readAppResource({ pluginId: "p", serverId: "s", uri: "ui://s/a.html" }),
+    ).rejects.toMatchObject({
+      code: "remote_not_allowed",
+      rpcCode: -32004,
+    });
+    await expect(
+      remoteS.callAppTool({ pluginId: "p", serverId: "s", tool: "t", arguments: {} }),
+    ).rejects.toMatchObject({
+      code: "remote_not_allowed",
+      rpcCode: -32004,
+    });
 
     await h.client.shutdown();
     await Promise.all([h.served, remote.served]);

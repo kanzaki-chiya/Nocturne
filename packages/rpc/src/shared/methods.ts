@@ -29,10 +29,13 @@ import type {
   ExternalAgentSaveInput,
   ExternalAgentsDescription,
   HooksDescription,
+  McpAppResourceResult,
+  McpAppToolCallResult,
   McpProbeInput,
   McpProbeResult,
   McpSaveInput,
   McpServerOverview,
+  SessionAppSurface,
   AccountStorageSetup,
   AddProviderInput,
   AddProviderResult,
@@ -934,6 +937,23 @@ export interface RpcMethods {
   "session.listShells": { params: SessionParams; result: Ret<"listShells"> };
   "session.visionInfo": { params: SessionParams; result: Ret<"visionInfo"> };
   "session.mcpServers": { params: SessionParams; result: Ret<"mcpServers"> };
+  "session.readAppResource": {
+    params: SessionParams & { pluginId: string; serverId: string; uri: string };
+    result: McpAppResourceResult;
+  };
+  "session.callAppTool": {
+    params: SessionParams & {
+      pluginId: string;
+      serverId: string;
+      tool: string;
+      arguments?: Record<string, unknown> | undefined;
+    };
+    result: McpAppToolCallResult;
+  };
+  "session.listAppSurfaces": {
+    params: SessionParams;
+    result: SessionAppSurface[];
+  };
   "session.fileIndex": { params: SessionParams; result: FileIndexEntry[] };
   "session.readFile": {
     params: SessionParams & { path: string };
@@ -1204,6 +1224,9 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.listShells": true,
   "session.visionInfo": true,
   "session.mcpServers": true,
+  "session.readAppResource": true,
+  "session.callAppTool": true,
+  "session.listAppSurfaces": true,
   "session.fileIndex": true,
   "session.readFile": true,
   "session.resolveFiles": true,

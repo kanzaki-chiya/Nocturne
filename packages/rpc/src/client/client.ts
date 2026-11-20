@@ -288,6 +288,18 @@ export interface RpcSession {
   listShells(): Promise<RpcResult<"session.listShells">>;
   visionInfo(): Promise<RpcResult<"session.visionInfo">>;
   mcpServers(): Promise<RpcResult<"session.mcpServers">>;
+  readAppResource(input: {
+    pluginId: string;
+    serverId: string;
+    uri: string;
+  }): Promise<RpcResult<"session.readAppResource">>;
+  callAppTool(input: {
+    pluginId: string;
+    serverId: string;
+    tool: string;
+    arguments?: Record<string, unknown> | undefined;
+  }): Promise<RpcResult<"session.callAppTool">>;
+  listAppSurfaces(): Promise<RpcResult<"session.listAppSurfaces">>;
   fileIndex(): Promise<FileIndexEntry[]>;
   /** 只读读取本会话工作区内、且在 `fileIndex` 可见范围内的文本文件 */
   readFile(path: string): Promise<SessionFileContent>;
@@ -1015,6 +1027,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       listShells: () => call("session.listShells", p),
       visionInfo: () => call("session.visionInfo", p),
       mcpServers: () => call("session.mcpServers", p),
+      readAppResource: (input) => call("session.readAppResource", { ...p, ...input }),
+      callAppTool: (input) => call("session.callAppTool", { ...p, ...input }),
+      listAppSurfaces: () => call("session.listAppSurfaces", p),
       describeSkills: () => call("session.describeSkills", p),
       describeExternalAgents: () => call("session.describeExternalAgents", p),
       fileIndex: () => call("session.fileIndex", p),
