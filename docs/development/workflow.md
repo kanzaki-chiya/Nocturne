@@ -78,6 +78,8 @@ pnpm build          # tsdown 构建 packages/core/dist
 
 在 git 工作树（`git worktree add`）里工作时，读写文件一律用工作树下的绝对路径。相对路径会按进程的当前目录解析，PowerShell `[IO.File]`、.NET API 和部分工具的当前目录可能仍是主目录，改动会写进主目录而不是工作树。
 
+测试或截图时只停自己启动、并记下 PID 的进程，不按进程名停（`taskkill /IM`、`Stop-Process -Name`、`Get-Process <名字> | Stop-Process` 等）。用户正在使用的 Nocturne 安装版与调试包同名（`nocturne-desktop`），按名字停会把它一起关掉。
+
 本地 vitest 按包限制并发（TUI 4 个 worker，core、rpc、cli、desktop、`scripts/` 6 个），开发机同时还在使用；CI 保持默认。
 
 各包与 `scripts/` 的 vitest 配置都固定 `test.env.NODE_ENV = "test"`（vitest 只在未设置时才默认取 `test`），外层环境——包括 Agent 从 `nctrn` 继承来的值——不影响测试，跑测试前不需要手动设 `NODE_ENV`。
