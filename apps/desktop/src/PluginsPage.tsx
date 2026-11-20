@@ -43,6 +43,9 @@ const isBuiltinPlugin = (plugin: PluginOverview): boolean =>
 const isLocalNocturnePlugin = (plugin: PluginOverview): boolean =>
   plugin.host === "nocturne" && plugin.marketplace === "local";
 
+const PLUGIN_CREATOR_ID = "nocturne:plugin-creator@builtin";
+const PLUGIN_CREATOR_SKILL = "plugin-creator";
+
 const isCallablePluginSkill = (skill: SkillOverview, plugin: PluginOverview): boolean =>
   skill.source === "plugin" &&
   (skill.plugin === undefined || skill.plugin === `${plugin.name}@${plugin.marketplace}`) &&
@@ -349,6 +352,12 @@ export function PluginsPage({
     openConfirm(target);
   };
 
+  const creatorPlugin = data?.plugins.find((p) => p.id === PLUGIN_CREATOR_ID);
+  const canCreatePlugin =
+    creatorPlugin?.state === "on" &&
+    creatorPlugin.skills.includes(PLUGIN_CREATOR_SKILL) &&
+    skills.some((s) => s.name === PLUGIN_CREATOR_SKILL && isCallablePluginSkill(s, creatorPlugin));
+
   const empty = data?.plugins.length === 0;
   const pageWarnings = data?.warnings ?? [];
 
@@ -537,16 +546,32 @@ export function PluginsPage({
               <PageHeader
                 title="插件"
                 actions={
-                  pickFolder !== undefined ? (
-                    <Button
-                      size="sm"
-                      disabled={busy || !client}
-                      onClick={() => {
-                        void installLocal();
-                      }}
-                    >
-                      安装插件…
-                    </Button>
+                  pickFolder !== undefined || onTrySkill !== undefined ? (
+                    <>
+                      {pickFolder !== undefined && (
+                        <Button
+                          size="sm"
+                          disabled={busy || !client}
+                          onClick={() => {
+                            void installLocal();
+                          }}
+                        >
+                          安装插件…
+                        </Button>
+                      )}
+                      {onTrySkill !== undefined && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={busy || !client || !canCreatePlugin}
+                          onClick={() => {
+                            onTrySkill(PLUGIN_CREATOR_SKILL);
+                          }}
+                        >
+                          创建插件
+                        </Button>
+                      )}
+                    </>
                   ) : undefined
                 }
               />

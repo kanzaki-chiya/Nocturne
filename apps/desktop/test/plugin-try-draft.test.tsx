@@ -104,7 +104,15 @@ function createTestHost(
                 claudeHome: path.join(home, "empty-claude"),
               },
             });
-            return { runtime, sessionsDir };
+            return {
+              runtime,
+              sessionsDir,
+              providerConfig: {
+                config,
+                reload: () => Promise.resolve(config),
+                workspaceRoot: ws,
+              },
+            };
           },
         });
         void server.serve(serverEnd);
@@ -202,4 +210,90 @@ it("点「立即试用」关闭设置页、新开草稿会话并预填 /docx ，
   expect(textarea.selectionEnd).toBe(0);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(calls.filter((c) => c.method === "session.submit")).toHaveLength(0);
+});
+
+it("点「创建插件」关闭设置页、新开草稿会话并预填 /plugin-creator ，关闭插件创建器后按钮禁用", async () => {
+  const ws = temp("create-ws-");
+  const plain = temp("create-plain-");
+  const sessionsDir = temp("create-sessions-");
+  const home = temp("create-home-");
+  const builtinDir = temp("create-builtin-");
+
+  writeFileSync(
+    path.join(home, "config.json"),
+    JSON.stringify({ modelsDev: false, skills: { sources: { agents: false, claude: false } } }),
+  );
+  const creatorDir = path.join(builtinDir, "plugin-creator");
+  mkdirSync(path.join(creatorDir, ".nocturne-plugin"), { recursive: true });
+  mkdirSync(path.join(creatorDir, "skills", "plugin-creator"), { recursive: true });
+  writeFileSync(
+    path.join(creatorDir, ".nocturne-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "plugin-creator",
+      version: "0.56.0",
+      description: "编写、校验与指导安装 Nocturne 自有插件。",
+      skills: "./skills",
+      interface: { displayName: "插件创建器" },
+    }),
+  );
+  writeFileSync(
+    path.join(creatorDir, "skills", "plugin-creator", "SKILL.md"),
+    "---\nname: plugin-creator\ndescription: 创建 Nocturne 插件\n---\n创建插件指引",
+  );
+
+  const { desktop, calls } = createTestHost(ws, plain, sessionsDir, home, builtinDir);
+  render(<App host={desktop} />);
+
+  const settingsBtn = await screen.findByRole("button", { name: "设置" }, { timeout: 15_000 });
+  fireEvent.click(settingsBtn);
+  fireEvent.click(await screen.findByRole("button", { name: "插件" }));
+
+  await screen.findByText("插件创建器", {}, { timeout: 15_000 });
+  const createBtn = (await screen.findByRole("button", {
+    name: "创建插件",
+  })) as HTMLButtonElement;
+  await waitFor(
+    () => {
+      expect(createBtn.disabled).toBe(false);
+    },
+    { timeout: 15_000 },
+  );
+  fireEvent.click(createBtn);
+
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: "创建插件" })).toBeNull();
+  });
+  const textarea = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+  await waitFor(() => {
+    expect(textarea.value).toBe("/plugin-creator ");
+  });
+  expect(document.activeElement).toBe(textarea);
+  expect(textarea.selectionStart).toBe("/plugin-creator ".length);
+  expect(textarea.selectionEnd).toBe("/plugin-creator ".length);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(calls.filter((c) => c.method === "session.submit")).toHaveLength(0);
+
+  // 回到设置 → 插件，关掉插件创建器后按钮禁用
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  fireEvent.click(await screen.findByRole("button", { name: "插件" }));
+  const toggle = (await screen.findByRole("switch", {
+    name: "启用 插件创建器",
+  })) as HTMLButtonElement;
+  expect(toggle.disabled).toBe(false);
+  fireEvent.click(toggle);
+  await waitFor(
+    () => {
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+    },
+    { timeout: 10_000 },
+  );
+  const createBtnAfter = (await screen.findByRole("button", {
+    name: "创建插件",
+  })) as HTMLButtonElement;
+  await waitFor(
+    () => {
+      expect(createBtnAfter.disabled).toBe(true);
+    },
+    { timeout: 10_000 },
+  );
 });

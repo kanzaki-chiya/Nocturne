@@ -946,3 +946,70 @@ it("Composer 预填草稿（prefillDraft append:true，对应 ui/message）：�
   expect(document.activeElement).toBe(box);
   expect(onSubmit).not.toHaveBeenCalled();
 });
+
+it("「创建插件」按钮在插件创建器启用时可触发 plugin-creator 预填，关闭后禁用", async () => {
+  let creatorState: PluginOverview["state"] = "on";
+  const makeCreator = (): PluginOverview =>
+    plugin({
+      id: "nocturne:plugin-creator@builtin",
+      host: "nocturne",
+      name: "plugin-creator",
+      marketplace: "builtin",
+      version: "0.56.0",
+      displayName: "插件创建器",
+      description: "编写、校验与指导安装 Nocturne 自有插件。",
+      state: creatorState,
+      hooks: [],
+      unsupported: [],
+      skills: ["plugin-creator"],
+      mcpServers: [{ id: "plugin-creator", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/server.mjs" }],
+    });
+  const creatorSkill = skillOverview({
+    name: "plugin-creator",
+    plugin: "plugin-creator@builtin",
+    description: "创建 Nocturne 自有插件",
+  });
+
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": () => desc([makeCreator()]),
+      "skills.describeSkills": () => skillsDesc(creatorState === "on" ? [creatorSkill] : []),
+      "plugins.setPluginEnabled": ({ enabled }: { enabled: boolean }) => {
+        creatorState = enabled ? "on" : "off";
+        return {};
+      },
+    }),
+  );
+  await f.initialize();
+  const onTrySkill = vi.fn();
+  render(
+    <PluginsPage
+      client={f.client}
+      version={0}
+      openDirectory={vi.fn()}
+      pickFolder={vi.fn().mockResolvedValue(null)}
+      onTrySkill={onTrySkill}
+    />,
+  );
+
+  // 1. 插件创建器开启时，「创建插件」在「安装插件…」旁且可点击
+  expect(await screen.findByRole("button", { name: "安装插件…" })).toBeTruthy();
+  const createBtn = (await screen.findByRole("button", { name: "创建插件" })) as HTMLButtonElement;
+  await waitFor(() => {
+    expect(createBtn.disabled).toBe(false);
+  });
+  fireEvent.click(createBtn);
+  expect(onTrySkill).toHaveBeenCalledTimes(1);
+  expect(onTrySkill).toHaveBeenCalledWith("plugin-creator");
+
+  // 2. 关闭插件创建器后，「创建插件」按钮变为禁用
+  const toggle = screen.getByRole("switch", { name: "启用 插件创建器" });
+  fireEvent.click(toggle);
+  await waitFor(() => {
+    expect(createBtn.disabled).toBe(true);
+  });
+  fireEvent.click(createBtn);
+  expect(onTrySkill).toHaveBeenCalledTimes(1);
+
+  f.close();
+});
