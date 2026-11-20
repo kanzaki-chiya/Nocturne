@@ -2,6 +2,14 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 
 import { createViewerBinaryDataFactory } from "../src/shared/pdfjs-factory.js";
+import {
+  formatViewerError,
+  isDocumentUnknownError,
+  ViewerToolError,
+  type ToolResultLike,
+} from "../src/shared/viewer-errors.js";
+
+declare const __NOCTURNE_PLUGIN_VERSION__: string;
 
 interface JsonRpcMessage {
   jsonrpc?: string;
@@ -42,12 +50,6 @@ interface ViewerAssetData {
   data: string;
 }
 
-interface CallToolResultShape {
-  isError?: boolean;
-  content?: { type?: string; text?: string }[];
-  structuredContent?: Record<string, unknown>;
-}
-
 interface ViewerDiagnosticState {
   workerMode: "pending" | "blob" | "main";
   status: "idle" | "loading" | "ready" | "error";
@@ -85,30 +87,7 @@ function decodeBase64(b64: string): Uint8Array {
   return out;
 }
 
-function extractErrorText(res: CallToolResultShape): string {
-  const sc = res.structuredContent;
-  if (isRecord(sc) && isRecord(sc.error) && typeof sc.error.message === "string") {
-    const code = typeof sc.error.code === "string" ? `[${sc.error.code}] ` : "";
-    return `${code}${sc.error.message}`;
-  }
-  if (Array.isArray(res.content)) {
-    const texts = res.content
-      .filter((c) => c.type === "text" && typeof c.text === "string")
-      .map((c) => c.text ?? "");
-    if (texts.length > 0) return texts.join("\n");
-  }
-  return "Unknown error";
-}
-
-function isDocumentUnknownError(res: CallToolResultShape): boolean {
-  const sc = res.structuredContent;
-  if (isRecord(sc) && isRecord(sc.error) && sc.error.code === "document_unknown") {
-    return true;
-  }
-  return extractErrorText(res).includes("document_unknown");
-}
-
-function parseShowInViewerPayload(res: CallToolResultShape): ShowInViewerData | null {
+function parseShowInViewerPayload(res: ToolResultLike): ShowInViewerData | null {
   const sc = res.structuredContent;
   if (!isRecord(sc)) return null;
   if (
@@ -191,7 +170,7 @@ function sendRpcNotification(method: string, params?: Record<string, unknown>): 
 async function callServerTool(
   name: string,
   args: Record<string, unknown>,
-): Promise<CallToolResultShape> {
+): Promise<ToolResultLike> {
   const raw = await sendRpcRequest("tools/call", { name, arguments: args });
   if (!isRecord(raw)) {
     throw new Error(`Invalid tools/call response for ${name}`);
@@ -337,7 +316,7 @@ const ViewerBinaryDataFactory = createViewerBinaryDataFactory({
   fetchAsset: async (assetName: string): Promise<Uint8Array> => {
     const res = await callServerTool("viewer_asset", { name: assetName });
     if (res.isError) {
-      throw new Error(extractErrorText(res));
+      throw new ViewerToolError(formatViewerError(res));
     }
     const sc = res.structuredContent as Partial<ViewerAssetData> | undefined;
     if (!sc || typeof sc.data !== "string") {
@@ -424,12 +403,14 @@ function clearDocumentViews(): void {
   syncRenderedPagesDiag();
 }
 
-function showError(message: string): void {
+function showError(source: unknown): void {
+  const formatted = formatViewerError(source);
   clearDocumentViews();
-  errorBoxEl.textContent = message;
+  errorBoxEl.textContent = formatted.display;
   errorBoxEl.hidden = false;
   diagState.status = "error";
-  diagState.error = message;
+  diagState.error = formatted.raw;
+  console.error("[nocturne-doc-viewer]", formatted.raw);
   setLoading(false);
   syncToolbar();
 }
@@ -692,7 +673,7 @@ async function readPdfBytesWithRecovery(
           page: initial.initialPage,
         });
         if (reopenRes.isError) {
-          throw new Error(extractErrorText(reopenRes));
+          throw new ViewerToolError(formatViewerError(reopenRes));
         }
         const reopened = parseShowInViewerPayload(reopenRes);
         if (!reopened) {
@@ -700,7 +681,7 @@ async function readPdfBytesWithRecovery(
         }
         return readPdfBytesWithRecovery(reopened, token, true);
       }
-      throw new Error(extractErrorText(chunkRes));
+      throw new ViewerToolError(formatViewerError(chunkRes));
     }
 
     const sc = chunkRes.structuredContent as Partial<ReadChunkData> | undefined;
@@ -833,7 +814,7 @@ async function openDocument(info: ShowInViewerData): Promise<void> {
     if (token !== activeLoadToken) return;
     const message = err instanceof Error ? err.message : String(err);
     if (message === "cancelled") return;
-    showError(message);
+    showError(err);
   }
 }
 
@@ -943,9 +924,9 @@ window.addEventListener("message", (event) => {
     }
     case "ui/notifications/tool-result": {
       if (!isRecord(msg.params)) return;
-      const result = msg.params as CallToolResultShape;
+      const result = msg.params as ToolResultLike;
       if (result.isError) {
-        showError(extractErrorText(result));
+        showError(result);
         return;
       }
       const parsed = parseShowInViewerPayload(result);
@@ -955,16 +936,20 @@ window.addEventListener("message", (event) => {
       }
       if (lastToolInputPath) {
         void (async () => {
-          const reopen = await callServerTool("show_in_viewer", {
-            path: lastToolInputPath,
-            page: lastToolInputPage,
-          });
-          if (reopen.isError) {
-            showError(extractErrorText(reopen));
-            return;
+          try {
+            const reopen = await callServerTool("show_in_viewer", {
+              path: lastToolInputPath,
+              page: lastToolInputPage,
+            });
+            if (reopen.isError) {
+              showError(reopen);
+              return;
+            }
+            const info = parseShowInViewerPayload(reopen);
+            if (info) await openDocument(info);
+          } catch (err) {
+            showError(err);
           }
-          const info = parseShowInViewerPayload(reopen);
-          if (info) await openDocument(info);
         })();
       }
       break;
@@ -1002,7 +987,7 @@ window.addEventListener("message", (event) => {
 
 // ── 握手初始化 ──
 void sendRpcRequest("ui/initialize", {
-  appInfo: { name: "nocturne-doc-viewer", version: "0.56.0" },
+  appInfo: { name: "nocturne-doc-viewer", version: __NOCTURNE_PLUGIN_VERSION__ },
   appCapabilities: { availableDisplayModes: ["inline"] },
   protocolVersion: "2026-01-26",
 })
@@ -1013,5 +998,5 @@ void sendRpcRequest("ui/initialize", {
     sendRpcNotification("ui/notifications/initialized", {});
   })
   .catch((err: unknown) => {
-    showError(err instanceof Error ? err.message : String(err));
+    showError(err);
   });

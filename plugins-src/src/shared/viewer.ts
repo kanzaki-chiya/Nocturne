@@ -20,10 +20,11 @@ import { PDFDocument } from "pdf-lib";
 import { DocPluginError } from "./errors.js";
 import type { PluginResourceSpec, ToolHandler } from "./mcp.js";
 import { assertAbsolutePath, assertNonEmptyFileProduced, assertSourceExists } from "./paths.js";
+import { MAX_DOCUMENT_BYTES } from "./viewer-errors.js";
 
+export { MAX_DOCUMENT_BYTES };
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 export const VIEWER_SURFACE_ID = "viewer";
-export const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 /**
  * 实测单块上限：@nocturne/mcp StdioPipeTransport 单行上限为 8 MiB；
  * 4 MiB 原始字节经 base64 编码后约 5.33 MiB（单份存 structuredContent.data），可稳定往返。

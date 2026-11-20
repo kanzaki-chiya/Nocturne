@@ -45,6 +45,7 @@ const require = createRequire(import.meta.url);
 const pdfjsPkgPath = require.resolve("pdfjs-dist/package.json");
 const pdfjsRoot = dirname(pdfjsPkgPath);
 const pdfjsVersion = JSON.parse(readFileSync(pdfjsPkgPath, "utf8")).version;
+const pluginVersion = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")).version;
 
 function stageViewerAssets(assetsOutDir) {
   const files = {};
@@ -122,6 +123,7 @@ async function buildSharedViewerHtml(stagingDir) {
     dts: false,
     clean: true,
     hash: false,
+    define: { __NOCTURNE_PLUGIN_VERSION__: JSON.stringify(pluginVersion) },
     deps: { alwaysBundle: () => true },
     outExtensions: () => ({ js: ".js" }),
     outputOptions: { codeSplitting: false },

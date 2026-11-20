@@ -5,5 +5,5 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["./**/*.ts", "../src/shared/pdfjs-factory.ts"]
+  "include": ["./**/*.ts", "../src/shared/pdfjs-factory.ts", "../src/shared/viewer-errors.ts"]
 }

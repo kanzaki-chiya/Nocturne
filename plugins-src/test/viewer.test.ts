@@ -23,8 +23,14 @@ import { createViewerBinaryDataFactory } from "../src/shared/pdfjs-factory.js";
 import {
   buildViewerTools,
   createViewerFeature,
+  MAX_DOCUMENT_BYTES,
   READ_DOCUMENT_MAX_CHUNK_BYTES,
 } from "../src/shared/viewer.js";
+import {
+  formatViewerError,
+  isDocumentUnknownError,
+  ViewerToolError,
+} from "../src/shared/viewer-errors.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(here, "..");
@@ -385,5 +391,182 @@ describe("pdfjs-dist BinaryDataFactory offline CJK and standard font paths", () 
       ),
     ).toBe(true);
     expect(times.text).toContain("Hello unembedded Times-Roman standard font.");
+  });
+});
+
+describe("viewer error mapping and build-injected version", () => {
+  it("maps structuredContent.error codes to short Chinese messages while preserving raw text", () => {
+    const cases: { code: string; message: string; expected: string }[] = [
+      {
+        code: "libreoffice_not_found",
+        message: "LibreOffice executable not found on PATH.",
+        expected: "未找到 LibreOffice",
+      },
+      {
+        code: "libreoffice_uno_unavailable",
+        message: "Python UNO bridge unavailable.",
+        expected: "未找到 LibreOffice",
+      },
+      {
+        code: "file_not_found",
+        message: "File not found: C:\\secret\\report.docx",
+        expected: "文件不存在",
+      },
+      {
+        code: "document_too_large",
+        message: `Document exceeds the 100 MiB limit (${String(MAX_DOCUMENT_BYTES + 1)} bytes).`,
+        expected: `文件超过 ${String(Math.round(MAX_DOCUMENT_BYTES / (1024 * 1024)))} MB`,
+      },
+      {
+        code: "timeout",
+        message: "Conversion timed out after 120000ms.",
+        expected: "转换超时",
+      },
+      {
+        code: "engine_error",
+        message: "UNO process crashed with exit code 1.",
+        expected: "无法打开此文件",
+      },
+      {
+        code: "invalid_argument",
+        message: "Path must be absolute.",
+        expected: "无法打开此文件",
+      },
+    ];
+
+    for (const c of cases) {
+      const formatted = formatViewerError({
+        isError: true,
+        structuredContent: { error: { code: c.code, message: c.message } },
+      });
+      expect(formatted.display, c.code).toBe(c.expected);
+      expect(formatted.raw, c.code).toBe(`[${c.code}] ${c.message}`);
+      expect(formatted.code, c.code).toBe(c.code);
+    }
+  });
+
+  it("maps [code] message text-only tool results without structuredContent", () => {
+    const cases: { text: string; expected: string; code: string }[] = [
+      {
+        text: "[libreoffice_not_found] soffice missing",
+        expected: "未找到 LibreOffice",
+        code: "libreoffice_not_found",
+      },
+      {
+        text: "[libreoffice_uno_unavailable] no python uno",
+        expected: "未找到 LibreOffice",
+        code: "libreoffice_uno_unavailable",
+      },
+      {
+        text: "[file_not_found] /tmp/missing.pdf does not exist",
+        expected: "文件不存在",
+        code: "file_not_found",
+      },
+      {
+        text: "[document_too_large] Document exceeds limit (120000000 bytes).",
+        expected: "文件超过 100 MB",
+        code: "document_too_large",
+      },
+      {
+        text: "[timeout] soffice timed out",
+        expected: "转换超时",
+        code: "timeout",
+      },
+      {
+        text: "[engine_error] failed to load document",
+        expected: "无法打开此文件",
+        code: "engine_error",
+      },
+    ];
+
+    for (const c of cases) {
+      const formatted = formatViewerError({
+        isError: true,
+        content: [{ type: "text", text: c.text }],
+      });
+      expect(formatted.display, c.code).toBe(c.expected);
+      expect(formatted.raw, c.code).toBe(c.text);
+      expect(formatted.code, c.code).toBe(c.code);
+    }
+  });
+
+  it("derives document_too_large MB threshold dynamically from maxDocumentBytes", () => {
+    const formatted = formatViewerError(
+      {
+        isError: true,
+        structuredContent: { error: { code: "document_too_large", message: "Too big" } },
+      },
+      50 * 1024 * 1024,
+    );
+    expect(formatted.display).toBe("文件超过 50 MB");
+  });
+
+  it("maps pdf.js PasswordException, InvalidPDFException, ViewerToolError, and handshake failures", () => {
+    const pwErr = Object.assign(new Error("No password given"), { name: "PasswordException" });
+    expect(formatViewerError(pwErr)).toEqual({
+      display: "文件已加密",
+      raw: "No password given",
+      code: "PasswordException",
+    });
+
+    const invalidPdf = Object.assign(new Error("Invalid PDF structure."), {
+      name: "InvalidPDFException",
+    });
+    expect(formatViewerError(invalidPdf)).toEqual({
+      display: "无法打开此文件",
+      raw: "Invalid PDF structure.",
+      code: "InvalidPDFException",
+    });
+
+    const handshakeErr = new Error("RPC handshake failed");
+    expect(formatViewerError(handshakeErr)).toEqual({
+      display: "无法打开此文件",
+      raw: "RPC handshake failed",
+    });
+
+    const wrapped = new ViewerToolError(
+      formatViewerError({
+        isError: true,
+        structuredContent: { error: { code: "file_not_found", message: "Gone" } },
+      }),
+    );
+    expect(formatViewerError(wrapped)).toEqual({
+      display: "文件不存在",
+      raw: "[file_not_found] Gone",
+      code: "file_not_found",
+    });
+  });
+
+  it("detects document_unknown in both structuredContent and text-only forms", () => {
+    expect(
+      isDocumentUnknownError({
+        isError: true,
+        structuredContent: { error: { code: "document_unknown", message: "expired" } },
+      }),
+    ).toBe(true);
+    expect(
+      isDocumentUnknownError({
+        isError: true,
+        content: [{ type: "text", text: "[document_unknown] Unknown handle" }],
+      }),
+    ).toBe(true);
+    expect(
+      isDocumentUnknownError({
+        isError: true,
+        structuredContent: { error: { code: "file_not_found", message: "missing" } },
+      }),
+    ).toBe(false);
+  });
+
+  it("injects package.json version into built viewer.html appInfo", () => {
+    const pkg = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8")) as {
+      version: string;
+    };
+    const html = readFileSync(path.join(builtPdfPluginDir, "viewer.html"), "utf8");
+    expect(html).not.toContain("__NOCTURNE_PLUGIN_VERSION__");
+    const escapedVersion = pkg.version.replaceAll(".", "\\.");
+    expect(html).toMatch(
+      new RegExp(`name:["'\`]nocturne-doc-viewer["'\`],version:["'\`]${escapedVersion}["'\`]`),
+    );
   });
 });
