@@ -58,6 +58,8 @@
 
 ## 5. 测试
 
+在 git 工作树里工作时，读写文件一律用工作树下的绝对路径（原因见 [workflow.md](docs/development/workflow.md) 第 5 节）。
+
 修改代码 → 运行相关测试 → 必要时补充或更新测试 → 检查对应文档。代码、测试、文档三者出现冲突时必须显式指出，不得静默忽略。
 
 验证命令（仓库根目录，详见 [development/workflow.md](docs/development/workflow.md) 第 5 节）：
