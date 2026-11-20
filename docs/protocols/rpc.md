@@ -321,6 +321,8 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `plugins.installLocalPlugin` | `{ path: string }` → `PluginOverview`；校验目录（拒绝位于 `<NOCTURNE_HOME>/plugins/` 内）、复用本地清单查找顺序与路径规则，跳过 `.git` 与符号链接复制到 `<NOCTURNE_HOME>/plugins/installed/local/<name>/<version>/`（`version` 缺省或不合法时用 `local`；先写同级临时目录再原子替换整个 `local/<name>/`）；新装为 `off`，同名重装保留 `plugins.json` 记录并按指纹显示 `changed`，广播技能与 MCP 刷新并在响应之前推 `runtime.providersChanged` |
 | `plugins.uninstallPlugin` | `{ id: string }` → `{ affectedSessions: number }`；仅接受 `nocturne:<name>@local`（内置与 Codex / Claude Code 插件一律报 `invalid_command`）；先按停用路径刷新已打开会话，再删除 `installed/local/<name>/` 与 `plugins.json` 记录（目录被占用等删除失败时回滚以保持磁盘与 `plugins.json` 一致），并删除 `plugins/cache/mcp-tools/` 下该插件的缓存文件，不动 `PLUGIN_DATA`，响应之前推 `runtime.providersChanged` |
 
+`SkillOverview` 仅在 `source: "plugin"` 时附带 `pluginDisplayName?`（清单 `interface.displayName`，缺省用插件 `name`）与 `pluginIcon?`（与 `PluginOverview.icon` 复用同一 data URI）。`describeSkills` 的远程白名单不变。
+
 `PluginOverview` 包含 `id`、`host`（`"nocturne" | "codex" | "claude"`）、`name`、`marketplace`（内置插件为 `"builtin"`，本地安装为 `"local"`）、`version`、`root`、`displayName?`、`description?`、`icon?`、`state`、`hooks`、`unsupported`、`skills`、`mcpServers` 与 `warnings`。其中 `mcpServers` 每项为 `{ id, command?, skipped?, skipReason? }`（`skipReason` 为 `"http" | "stored" | "conflict" | "invalid"`）；`icon?` 为图标 data URI：优先读取清单 `interface.composerIcon`，缺失或无效时回退 `interface.logo`；仅接受位于插件根目录内（禁止 `..` 与符号链接越界）、不超过 64 KB 的 `png` / `jpg` / `webp` / `svg` 文件，不符条件或读取失败时省略且不报警告。规则见 [ADR-0100](../decisions/ADR-0100-native-plugins.md)。
 
 ### 3.15 `memory.*`（ADR-0098）

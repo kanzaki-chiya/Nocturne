@@ -128,7 +128,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 | `/boost` | ✓ | ✓ | ✓ | ✓ | — |
 
 - `nctrn -p` 不解析斜杠命令。逐行 CLI 在 Turn 期间只接受中断，命令在空闲时输入。桌面端与手机网页运行中发送带模式的命令按排队处理。
-- 用户消息显示：在用户正文旁显示命令名（如 `/plan`），可展开查看说明块；核对说明只有命令名。Runtime 写入的模式消息（§1 `source`）不显示「编辑并重发」「重发」。不加模式徽标、状态说明、副标题或占位提示；「批准」按钮只在计划模式、会话空闲时出现在最后一条助手消息下方。
+- 用户消息显示：桌面端和手机网页在正文前显示执行方式图标与名字（如「计划」），点击可展开说明块。核对说明折叠时只显示该标签。纯文本客户端保留命令名。Runtime 写入的模式消息（§1 `source`）不显示「编辑并重发」「重发」。不加模式徽标、状态说明、副标题或占位提示；「批准」按钮只在计划模式、会话空闲时出现在最后一条助手消息下方。
 - RPC 新增 `session.approvePlan`、`session.cancelPlan`、`session.stopGoal`、`session.resumeGoal`，`session.submit` / `session.enqueueInput` 接受 `workMode`；都属于会话内操作，远程连接可用（ADR-0052 第 7 轮的口径）。对外 MCP 接口（ADR-0074）不变。
 
 ## 后果
