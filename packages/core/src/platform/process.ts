@@ -27,7 +27,7 @@ export interface SpawnOptions {
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
   /**
-   * 登记到主进程看门狗（ADR-0102）：主进程被强杀后由看门狗清理该进程树。
+   * 登记到主进程看门狗（ADR-0104）：主进程被强杀后由看门狗清理该进程树。
    * 仅用于 stdio MCP 服务器与后台命令；子进程退出或主动 kill 后立即注销。
    */
   guardOrphan?: boolean | undefined;

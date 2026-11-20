@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 真实进程强杀验收（ADR-0102）：
+ * 真实进程强杀验收（ADR-0104）：
  * 1. CLI + 忽略 stdin EOF 的假 MCP 服务器（含派生子进程）：强杀 nctrn 后 5 秒内全部消失；
  * 2. CLI + 后台命令（shell background: true 长 sleep）：强杀 nctrn 后 5 秒内消失；
  * 3. 桌面形态后台（nctrn rpc --stdio）+ 假 MCP 服务器：只强杀后台进程后 5 秒内全部消失；

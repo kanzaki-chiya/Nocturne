@@ -62,7 +62,7 @@
 
 **已知问题（遗留）**：
 
-- Windows 与 POSIX 上强杀 Nocturne 时，不理会 stdin 关闭的 MCP 服务器可能成为孤儿；能在 EOF 后退出的服务器不残留，手动清理方法见 [mcp.md](../architecture/mcp.md) 第 4 节。
+- Windows 与 POSIX 上强杀 Nocturne 时，不理会 stdin 关闭的 MCP 服务器曾可能成为孤儿；现已由 Core 看门狗（[ADR-0104](../decisions/ADR-0104-orphan-process-watchdog.md)）与桌面外壳 Job Object 覆盖，剩余边界见 [mcp.md](../architecture/mcp.md) 第 4 节。
 
 ## Phase 6 — Subagent（已完成，2026-09-25 验收）
 
@@ -92,7 +92,7 @@
 
 Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流消费路径加入首事件与事件间空闲超时，Agent Loop 对无文本无工具调用的 `stop` 作有上限重试（[ADR-0014](../decisions/ADR-0014-stream-timeout-empty-response.md)）；统一工具进度片段的行渲染；补足 TUI 交互测试与真实进程验收；用测试工作区完成两个适配器的基础真实服务冒烟；整理用户指南、更新日志、版本号与第三方许可说明。`ModelRequest.reasoningEffort` 本版保留未使用，见 [provider-api.md](../protocols/provider-api.md) 第 3 节。
 
-**已知限制**：主进程被强杀时，不响应 stdin EOF 的 MCP 服务器可能残留，Windows 与 POSIX 的手动清理方式见 [mcp.md](../architecture/mcp.md) 第 4 节；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示（思考参数部分由"思考强度"一节解决）。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
+**已知限制**：主进程被强杀时的 MCP 服务器与后台命令清理已由 Core 看门狗与桌面外壳 Job Object 覆盖（[ADR-0104](../decisions/ADR-0104-orphan-process-watchdog.md)，剩余边界见 [mcp.md](../architecture/mcp.md) 第 4 节）；传统 conhost 的 TUI 活动区可能有残影，建议 Windows Terminal（[tui.md](../apps/tui.md)）；服务端因能力字段不支持而返回 400 时尚无针对性配置提示（思考参数部分由"思考强度"一节解决）。扩展思考 Anthropic 模型的 `finish` 兜底轮与 DeepSeek 推理历史回传专项只有在配置对应模型变量时才运行；未配置不作为已通过验收。
 
 ## v0.2 — 开箱配置（已完成，2026-09-25 验收）
 
@@ -248,7 +248,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **MCP 服务器管理**（已随 0.6.0 发布，2026-10-07）：桌面端「MCP」设置页添加、编辑、启停服务器，支持 JSON 导入与 HTTP 传输，已打开的会话在 Turn 边界热重载，见 [ADR-0047](../decisions/ADR-0047-mcp-settings.md)；MCP 工具返回图片走附件通道已于 2026-10-22 实现。
 - **技能**（已随 0.6.0 发布，2026-10-07）：兼容 Agent Skills，自动发现用户级与项目内技能目录，`/技能名` 调用，桌面端「技能」页管理，见 [ADR-0048](../decisions/ADR-0048-skills.md)。
 - **外部 agent 子代理**（已随 0.7.0 发布，2026-10-07，见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）：经 ACP 把子任务交给 omp、Codex 等外部 agent；桌面端「外部 agent」设置页、`/agents` 与 `/<名称> 任务` 点名委派。
-- **MCP 强杀清理**：评估纯 Node 看护进程，detached 启动，主进程消失后清理 MCP 进程树；沿用会话锁的"开机时间 + PID"判定规避 PID 复用。MCP 资源的二进制内容（`resource.blob`）目前只记占位，图片已正常显示。
+- **MCP 强杀清理**（已实现，2026-11-21，见 [ADR-0104](../decisions/ADR-0104-orphan-process-watchdog.md)）：Core `platform/watchdog.ts` 按需拉起 detached 看门狗进程，经 stdin 管道登记/注销 stdio MCP 服务器与后台命令，父进程死亡触发 EOF 后清理整棵进程树，CLI / TUI / 桌面后台共用；桌面外壳另保持全局 `KILL_ON_JOB_CLOSE` Job Object 兜底。MCP 资源的二进制内容（`resource.blob`）目前只记占位，图片已正常显示。
 - **分发**（已随 0.6.0 发布，2026-10-07，见 [ADR-0050](../decisions/ADR-0050-distribution.md)）：桌面端随附官方 Node 与自动更新、`pnpm release:build` 发布流水线与草稿 Release；命令行版以单文件 tgz 随 Release 发布。rc.1 → rc.2 自动更新端到端验收通过（2026-10-07）。npm 首发暂缓，见 ADR-0050 修订。
 - **补验证**：macOS 钥匙串与 Linux Secret Service 实机验证；Anthropic 格式思考强度在真实端点验证。
 

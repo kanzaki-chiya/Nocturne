@@ -111,6 +111,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0101](ADR-0101-mcp-apps-host.md) | MCP Apps 宿主：插件 `ui://` 页面在桌面端右侧面板显示，`ui.surfaces` 清单、页面调用工具只放行只读、复用 `nct-sandbox` 隔离 | 已接受 |
 | [ADR-0102](ADR-0102-file-open-system-apps.md) | 「文件」标签用系统建议的应用打开：`list_file_apps` / `open_file_with_app` 直接调 Shell COM（独立 STA 线程、每次重查、只读不改关联），脚本类沿用 ADR-0046 不列系统应用 | 已接受 |
 | [ADR-0103](ADR-0103-remote-channel-compression.md) | 远程通道压缩：电脑→手机下行共享 `deflate-raw` 流、`initialize` 能力协商与流式上限保护 | 已接受 |
+| [ADR-0104](ADR-0104-orphan-process-watchdog.md) | 主进程被强杀后的子进程清理：Core 按需看门狗、管道 EOF 触发、登记 stdio MCP 与后台命令、桌面端不加嵌套 Job | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
