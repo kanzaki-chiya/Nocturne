@@ -228,6 +228,31 @@ export function normalizeToolArgs(raw: unknown): Record<string, unknown> {
   return isPlainObject(raw) ? { ...raw } : {};
 }
 
+function sanitizeMcpSegment(raw: string): string {
+  const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return cleaned === "" ? "x" : cleaned;
+}
+
+/**
+ * 判断模型工具调用是否命中该 surface 的 open.tool（兼容直连名与 mcp__<server>__<tool> 注册名）；
+ * 命中且状态为 ok 时返回可持久化的 openCall，供重启后首次显示自动恢复（ADR-0101 修订）。
+ */
+export function openCallFromToolCompleted(
+  surface: SessionAppSurface | undefined,
+  serverId: string,
+  toolName: string,
+  status: ToolCompletedPayload["status"],
+  input: unknown,
+): { tool: string; arguments: Record<string, unknown> } | undefined {
+  if (status !== "ok" || surface?.open === undefined) return undefined;
+  const expected = `mcp__${sanitizeMcpSegment(serverId)}__${sanitizeMcpSegment(surface.open.tool)}`;
+  if (toolName !== surface.open.tool && toolName !== expected) return undefined;
+  return {
+    tool: surface.open.tool,
+    arguments: normalizeToolArgs(input),
+  };
+}
+
 export function deliveryFromToolCompleted(
   payload: ToolCompletedPayload,
   input: unknown,

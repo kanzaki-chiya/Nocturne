@@ -46,6 +46,7 @@ import { keyDiag, panelKeyReason, shouldRecordKey } from "./key-diag";
 import {
   deliveryFromToolCompleted,
   matchSurfaceForFile,
+  openCallFromToolCompleted,
   type McpAppToolDelivery,
 } from "./mcp-app-host";
 import { motionAllowed, subscribeMotionChange } from "./motion";
@@ -172,6 +173,7 @@ export interface SidePanelController {
     targetSessionId: string,
     payload: ToolCompletedPayload,
     toolInput: unknown,
+    resolvedToolName?: string,
   ) => void;
   /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
   subagentLinks: SubagentLinks | undefined;
@@ -775,7 +777,7 @@ export function useSidePanel({
   );
 
   const onToolCompletedUi = useCallback<SidePanelController["onToolCompletedUi"]>(
-    (targetSessionId, payload, toolInput) => {
+    (targetSessionId, payload, toolInput, resolvedToolName) => {
       const ui = payload.ui;
       if (ui === undefined) return;
       const surfaces = appSurfacesRef.current;
@@ -804,6 +806,13 @@ export function useSidePanel({
       const deliveryKey = `${targetSessionId}\0${targetKey}`;
       const seq = appDeliverySeqRef.current++;
       const delivery = deliveryFromToolCompleted(payload, toolInput, seq);
+      const persistedOpenCall = openCallFromToolCompleted(
+        matched,
+        ui.serverId,
+        resolvedToolName ?? payload.name,
+        payload.status,
+        toolInput,
+      );
       const isCurrent = targetSessionId === sessionId;
       const applyTo = (panel: SessionPanel): SessionPanel => {
         const existing = panel.tabs.find(
@@ -822,6 +831,7 @@ export function useSidePanel({
                     resourceUri: ui.resourceUri,
                     title,
                     ...(icon !== undefined ? { icon } : {}),
+                    ...(persistedOpenCall !== undefined ? { openCall: persistedOpenCall } : {}),
                   }
                 : t,
             ),
@@ -836,6 +846,7 @@ export function useSidePanel({
           resourceUri: ui.resourceUri,
           title,
           ...(icon !== undefined ? { icon } : {}),
+          ...(persistedOpenCall !== undefined ? { openCall: persistedOpenCall } : {}),
         };
         const next = withTab(panel, created);
         return isCurrent ? next : { ...next, open: panel.open };

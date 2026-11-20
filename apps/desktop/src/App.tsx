@@ -593,7 +593,11 @@ export function App({ host }: { host: DesktopHost }) {
               ? toolEntry.target.input
               : toolEntry.input
             : undefined;
-        panelRef.current?.onToolCompletedUi(sessionId, event.payload, toolInput);
+        const resolvedToolName =
+          toolEntry?.kind === "tool" && toolEntry.target !== undefined
+            ? toolEntry.target.name
+            : event.payload.name;
+        panelRef.current?.onToolCompletedUi(sessionId, event.payload, toolInput, resolvedToolName);
       }
       if (event.type === "turn.started") {
         const started = Date.parse(event.time);

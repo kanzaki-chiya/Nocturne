@@ -226,23 +226,26 @@ export function AppPane({
   }, [activated, delivery]);
 
   // 3. 首次激活恢复带 openCall 的标签，或用户点击文件引用触发新的 openCallSeq 时，调用 open.tool
-  const handledOpenKeyRef = useRef<string | null>(null);
+  const restoredOnceRef = useRef(false);
+  const lastOpenCallSeqRef = useRef<number | undefined>(undefined);
   const openSeqCounterRef = useRef(-1);
   const openCallJson = tab.openCall !== undefined ? JSON.stringify(tab.openCall) : null;
   useEffect(() => {
     if (!activated || isDisabled || session === undefined || html === null) return;
     if (tab.openCall === undefined || openCallJson === null) return;
-    // 恢复标签在首次激活前若已有实时模型调用 delivery，不再用旧的持久化 openCall 覆盖
-    if (openCallSeq === undefined && delivery !== undefined && handledOpenKeyRef.current === null) {
-      handledOpenKeyRef.current = `restored:${openCallJson}`;
-      return;
+    const isNewFileRefOpen =
+      openCallSeq !== undefined && openCallSeq !== lastOpenCallSeqRef.current;
+    if (!isNewFileRefOpen) {
+      // 实时模型调用已通过 delivery 送达结果；只标记无需再恢复，不重复调用 callAppTool
+      if (delivery !== undefined || openCallSeq !== undefined || restoredOnceRef.current) {
+        restoredOnceRef.current = true;
+        return;
+      }
+      restoredOnceRef.current = true;
+    } else {
+      lastOpenCallSeqRef.current = openCallSeq;
+      restoredOnceRef.current = true;
     }
-    const openKey =
-      openCallSeq !== undefined
-        ? `live:${openCallSeq}:${openCallJson}`
-        : `restored:${openCallJson}`;
-    if (handledOpenKeyRef.current === openKey) return;
-    handledOpenKeyRef.current = openKey;
     let cancelled = false;
     const call = tab.openCall;
     const seq = openSeqCounterRef.current--;

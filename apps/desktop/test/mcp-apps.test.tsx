@@ -22,6 +22,7 @@ import {
   matchSurfaceForFile,
   MCP_APP_STYLE_SOURCES,
   MCP_APPS_PROTOCOL_VERSION,
+  openCallFromToolCompleted,
   readMcpAppTheme,
   type McpAppToolDelivery,
 } from "../src/mcp-app-host";
@@ -797,5 +798,161 @@ describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
         arguments: { path: "Z:\\ws\\second.nctdemo" },
       });
     });
+  });
+
+  it("openCallFromToolCompleted：模型调用命中 surface.open.tool 时产出可持久化的 openCall", () => {
+    const docSurface: SessionAppSurface = {
+      pluginId: "nocturne:docx@builtin",
+      pluginName: "Word 文档",
+      serverId: "word",
+      id: "viewer",
+      title: "Word 文档",
+      resourceUri: "ui://word/viewer.html",
+      open: { tool: "show_in_viewer", fileTypes: [".docx"] },
+    };
+
+    // 1. 匹配 mcp__<server>__<tool> 注册名
+    expect(
+      openCallFromToolCompleted(docSurface, "word", "mcp__word__show_in_viewer", "ok", {
+        path: "Z:\\ws\\report.docx",
+        page: 2,
+      }),
+    ).toEqual({
+      tool: "show_in_viewer",
+      arguments: { path: "Z:\\ws\\report.docx", page: 2 },
+    });
+
+    // 2. 匹配裸工具名
+    expect(
+      openCallFromToolCompleted(docSurface, "word", "show_in_viewer", "ok", {
+        path: "Z:\\ws\\a.docx",
+      }),
+    ).toEqual({
+      tool: "show_in_viewer",
+      arguments: { path: "Z:\\ws\\a.docx" },
+    });
+
+    // 3. 其他工具名或失败状态不记录 openCall
+    expect(
+      openCallFromToolCompleted(docSurface, "word", "mcp__word__read", "ok", {
+        path: "Z:\\ws\\a.docx",
+      }),
+    ).toBeUndefined();
+    expect(
+      openCallFromToolCompleted(docSurface, "word", "mcp__word__show_in_viewer", "error", {
+        path: "Z:\\ws\\a.docx",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("模型调用打开的标签持久化后重启恢复：首次显示自动重新调用 open.tool，实时投递时不重复调用", async () => {
+    const callAppTool = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "report.docx（共 2 页）" }],
+      structuredContent: { docId: "new-handle", path: "Z:\\ws\\report.docx", pageCount: 2 },
+    });
+    const session = makeFakeSession({ callAppTool });
+
+    const modelTab: AppTab = {
+      id: "app-model-1",
+      kind: "app",
+      pluginId: "nocturne:docx@builtin",
+      serverId: "word",
+      surface: "viewer",
+      resourceUri: "ui://word/viewer.html",
+      title: "Word 文档",
+      openCall: { tool: "show_in_viewer", arguments: { path: "Z:\\ws\\report.docx", page: 2 } },
+    };
+
+    // 1. 持久化与恢复保留 openCall
+    const stored = storeSessionPanel({
+      open: true,
+      tabs: [modelTab],
+      activeId: modelTab.id,
+      treeWidth: 260,
+      wrap: false,
+      recent: [],
+    });
+    const restored = restoreSessionPanel(stored, () => "fallback-id");
+    const restoredTab = restored.tabs.find((t): t is AppTab => t.kind === "app");
+    expect(restoredTab?.openCall).toEqual({
+      tool: "show_in_viewer",
+      arguments: { path: "Z:\\ws\\report.docx", page: 2 },
+    });
+    if (!restoredTab) throw new Error("expected restored app tab");
+
+    // 2. 重启后（无 live delivery）首次显示时自动重新调用 show_in_viewer
+    const { unmount } = render(
+      <AppPane
+        tab={restoredTab}
+        sessionId="sess-1"
+        session={session}
+        visible={true}
+        onAppMessage={vi.fn()}
+        openExternalUrl={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    await waitFor(() => {
+      expect(callAppTool).toHaveBeenCalledTimes(1);
+      expect(callAppTool).toHaveBeenCalledWith({
+        pluginId: "nocturne:docx@builtin",
+        serverId: "word",
+        tool: "show_in_viewer",
+        arguments: { path: "Z:\\ws\\report.docx", page: 2 },
+      });
+    });
+    unmount();
+
+    // 3. 实时模型调用打开（同时存在 delivery 与 tab.openCall），且后续再次模型调用切换文档时均不重复调 callAppTool
+    callAppTool.mockClear();
+    const delivery1: McpAppToolDelivery = {
+      kind: "result",
+      seq: 10,
+      arguments: { path: "Z:\\ws\\first.docx" },
+      result: {
+        content: [{ type: "text", text: "first.docx" }],
+        structuredContent: { docId: "h1" },
+      },
+    };
+    const { rerender } = render(
+      <AppPane
+        tab={{
+          ...modelTab,
+          openCall: { tool: "show_in_viewer", arguments: { path: "Z:\\ws\\first.docx" } },
+        }}
+        sessionId="sess-1"
+        session={session}
+        visible={true}
+        delivery={delivery1}
+        onAppMessage={vi.fn()}
+        openExternalUrl={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    await waitFor(() => {
+      expect(session.readAppResource).toHaveBeenCalled();
+    });
+    const delivery2: McpAppToolDelivery = {
+      kind: "result",
+      seq: 11,
+      arguments: { path: "Z:\\ws\\second.docx" },
+      result: {
+        content: [{ type: "text", text: "second.docx" }],
+        structuredContent: { docId: "h2" },
+      },
+    };
+    rerender(
+      <AppPane
+        tab={{
+          ...modelTab,
+          openCall: { tool: "show_in_viewer", arguments: { path: "Z:\\ws\\second.docx" } },
+        }}
+        sessionId="sess-1"
+        session={session}
+        visible={true}
+        delivery={delivery2}
+        onAppMessage={vi.fn()}
+        openExternalUrl={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(callAppTool).not.toHaveBeenCalled();
   });
 });
