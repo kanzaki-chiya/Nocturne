@@ -660,18 +660,6 @@
 .phone-card .has-skill textarea::selection {
   color: transparent;
 }
-.phone .phone-work-mode .work-mode-tag {
-  background: transparent;
-  border: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0 var(--space-2);
-  color: var(--a-secondary);
-}
-.phone-work-mode {
-  text-align: center;
-}
 .phone-skill-search {
   width: 100%;
 }
@@ -893,6 +881,7 @@
 }
 .phone-slash-row > span {
   display: block;
+  text-align: right;
   font-size: var(--fs-2);
   color: var(--a-muted);
   overflow: hidden;

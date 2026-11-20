@@ -1414,9 +1414,7 @@ export function Composer({
                       <span className="slash-item-icon">
                         {item.row.decoration && <InputLabelIcon {...item.row.decoration} />}
                       </span>
-                      <span
-                        className={`composer-popup-name${item.group.id === "plugins" ? " plugin-name" : ""}`}
-                      >
+                      <span className="composer-popup-name">
                         {item.row.label}
                         {item.row.argumentHint && <em>{item.row.argumentHint}</em>}
                       </span>
@@ -1474,29 +1472,6 @@ export function Composer({
             </ImageViewerBoundary>
           )}
           {txtBlock}
-          {selectedWorkMode && (
-            <div className="composer-work-mode">
-              <button
-                type="button"
-                className="work-mode-tag"
-                disabled={disabled}
-                aria-label={`取消${selectedWorkMode.label}`}
-                onClick={() => {
-                  if (typedMode) {
-                    pendingCaret.current = textarea.current?.selectionStart ?? visibleDraft.length;
-                    updateDraft(visibleDraft);
-                  }
-                  updateWorkMode(null);
-                  textarea.current?.focus();
-                }}
-              >
-                <InputLabel data={selectedWorkMode} />
-                <span className="work-mode-close" aria-hidden="true">
-                  <Icon name="close_circle" size={ICON_SM} />
-                </span>
-              </button>
-            </div>
-          )}
           <div className="tb">
             {plusButton}
             {allowAttachments && paperclipButton}
@@ -1510,6 +1485,28 @@ export function Composer({
                   <Icon name="down_small" size={ICON_SM} className="caret" />
                 </>,
               )}
+            {selectedWorkMode && (
+              <>
+                <button
+                  type="button"
+                  className="work-mode-tag"
+                  disabled={disabled}
+                  aria-label={`取消${selectedWorkMode.label}`}
+                  onClick={() => {
+                    if (typedMode) {
+                      pendingCaret.current =
+                        textarea.current?.selectionStart ?? visibleDraft.length;
+                      updateDraft(visibleDraft);
+                    }
+                    updateWorkMode(null);
+                    textarea.current?.focus();
+                  }}
+                >
+                  <InputLabel data={selectedWorkMode} dismissible />
+                </button>
+                <span className="tb-sep" aria-hidden="true" />
+              </>
+            )}
             <span className="sp" />
             {isSession && contextUsage}
             {controls !== undefined &&

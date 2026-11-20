@@ -61,14 +61,27 @@ export function InputLabel({
   data,
   button,
   anchor,
+  dismissible = false,
 }: {
   data: InputLabelData;
   button?: { expanded: boolean; onClick: () => void } | undefined;
   anchor?: RefObject<HTMLSpanElement | null>;
+  dismissible?: boolean;
 }) {
   const content = (
     <>
-      <InputLabelIcon {...data} />
+      {dismissible ? (
+        <>
+          <span className="work-mode-icon" aria-hidden="true">
+            <InputLabelIcon {...data} />
+          </span>
+          <span className="work-mode-close" aria-hidden="true">
+            <Icon name="close_circle" size={ICON_SM} />
+          </span>
+        </>
+      ) : (
+        <InputLabelIcon {...data} />
+      )}
       <span>{data.label}</span>
     </>
   );

@@ -322,42 +322,6 @@
   flex: none;
 }
 
-.composer .composer-popup-name.plugin-name {
-  flex: 0 0 25%;
-  font-family: var(--sans);
-}
-
-.composer-work-mode {
-  text-align: center;
-}
-
-.composer .work-mode-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: var(--ctl-h-md);
-  padding: 0 var(--space-2);
-  border: none;
-  border-radius: var(--radius-2);
-  background: transparent;
-  color: var(--a-secondary);
-  font: inherit;
-  font-size: var(--fs-1);
-  cursor: pointer;
-  flex: none;
-  white-space: nowrap;
-}
-
-.composer .work-mode-tag:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.composer .work-mode-close {
-  display: inline-flex;
-  align-items: center;
-}
-
 /* ── 新会话托盘：贴在输入框下方，左/右各缩进 12px ── */
 .composer .tray {
   position: relative;
@@ -712,6 +676,10 @@
   color: var(--a-text);
 }
 
+.composer-popup-row:has(.composer-popup-summary) .composer-popup-name {
+  max-width: 50%;
+}
+
 .composer-popup-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -719,10 +687,22 @@
 }
 
 .composer-popup-summary {
-  margin-left: auto;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
   color: var(--a-muted);
   font-size: var(--fs-1);
   white-space: nowrap;
+}
+
+.composer-popup:has(.composer-popup-source)
+  .composer-popup-row:has(.composer-popup-summary):not(:has(.composer-popup-source))::after {
+  content: "";
+  flex: none;
+  inline-size: 2em;
+  font-size: var(--fs-1);
 }
 
 /* ── 提示与错误 ── */

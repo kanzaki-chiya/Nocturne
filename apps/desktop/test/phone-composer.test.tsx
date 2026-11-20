@@ -573,7 +573,7 @@ it("手机插件补全、退格、输入历史和分叉回填共用技能标签�
   });
 });
 
-it("手机手输计划等待组字结束再切到执行方式行", async () => {
+it("手机手输计划等待组字结束再在工具栏显示执行方式标签", async () => {
   await act(() =>
     root?.render(
       <PhoneComposer
@@ -594,5 +594,7 @@ it("手机手输计划等待组字结束再切到执行方式行", async () => {
   expect(container.querySelector(".work-mode-tag")).toBeNull();
   act(() => fireEvent.compositionEnd(field));
   expect(field.value).toBe("修复测试");
-  expect(container.querySelector(".work-mode-tag .input-label")?.textContent).toBe("计划");
+  const tag = container.querySelector(".phone-tools > .work-mode-tag");
+  expect(tag?.querySelector(".input-label")?.textContent).toBe("计划");
+  expect(tag?.nextElementSibling?.className).toBe("phone-tools-sep");
 });

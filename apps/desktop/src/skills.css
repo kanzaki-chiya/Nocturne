@@ -110,19 +110,9 @@
   color: var(--a-faint);
   margin-left: 6px;
 }
-.composer-popup-summary {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.composer-popup-row:has(.composer-popup-source) .composer-popup-name {
-  flex: 0 0 210px;
-  max-width: 50%;
-}
-.composer-popup-row:has(.composer-popup-source) .composer-popup-summary {
-  flex: 1;
-}
 .composer-popup-source {
+  inline-size: 2em;
+  text-align: right;
   color: var(--a-faint);
   font-size: var(--fs-1);
   flex: none;

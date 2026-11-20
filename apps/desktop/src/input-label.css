@@ -34,6 +34,52 @@
   padding-inline-end: var(--space-2);
 }
 
+.composer .work-mode-tag,
+.phone .phone-tools .work-mode-tag {
+  display: inline-flex;
+  align-items: center;
+  height: var(--ctl-h-md);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-2);
+  background: var(--a-raised);
+  color: var(--a-text);
+  font: inherit;
+  font-size: var(--fs-1);
+  cursor: pointer;
+  flex: none;
+}
+
+.work-mode-tag:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.work-mode-tag > .input-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: inherit;
+}
+
+.work-mode-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--a-secondary);
+}
+
+.work-mode-close {
+  display: none;
+}
+
+.work-mode-tag:is(:hover, :focus-visible):not(:disabled) .work-mode-icon {
+  display: none;
+}
+
+.work-mode-tag:is(:hover, :focus-visible):not(:disabled) .work-mode-close {
+  display: inline-flex;
+}
+
 .slash-item-icon {
   display: inline-flex;
   flex: 0 0 14px;

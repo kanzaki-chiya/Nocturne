@@ -1047,8 +1047,12 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     expect(within(plusMenu).queryByRole("menuitemradio")).toBeNull();
 
     fireEvent.click(within(plusMenu).getByRole("menuitem", { name: "目标" }));
-    expect(container.querySelector(".composer-work-mode .input-label")?.textContent).toBe("目标");
-    expect(screen.getByRole("button", { name: "取消目标" })).toBeTruthy();
+    const modeTag = screen.getByRole("button", { name: "取消目标" });
+    expect(modeTag.parentElement).toBe(container.querySelector(".tb"));
+    expect(modeTag.nextElementSibling?.className).toBe("tb-sep");
+    expect(modeTag.querySelector(".input-label")?.textContent).toBe("目标");
+    expect(modeTag.querySelector(".work-mode-icon svg")).toBeTruthy();
+    expect(modeTag.querySelector(".work-mode-close svg")).toBeTruthy();
 
     // 选了执行方式但输入为空：发送按钮禁用，按 Enter 给用法提示而不发送
     const sendBtn = screen.getByRole<HTMLButtonElement>("button", { name: "发送" });

@@ -901,8 +901,13 @@ export function PhoneComposer({
           </button>
         )}
       </div>
-      {selectedWorkMode && (
-        <div className="phone-work-mode">
+      <div className="phone-tools" role="toolbar" aria-label="会话控件">
+        {(allowWorkMode || skills.length > 0) && tool("plus", "添加", <Icon name="add" />)}
+        {allowAttachments && tool("attach", "添加文件", <IconPaperclip />)}
+        {tool("preset", "切换权限预设", <IconShield risk={controls?.preset.value === "bypass"} />, {
+          disabled: busyDisabled(controls?.preset),
+        })}
+        {selectedWorkMode && (
           <button
             type="button"
             className="work-mode-tag"
@@ -913,17 +918,9 @@ export function PhoneComposer({
               field.current?.focus();
             }}
           >
-            <InputLabel data={selectedWorkMode} />
-            <Icon name="close_circle" size={14} />
+            <InputLabel data={selectedWorkMode} dismissible />
           </button>
-        </div>
-      )}
-      <div className="phone-tools" role="toolbar" aria-label="会话控件">
-        {(allowWorkMode || skills.length > 0) && tool("plus", "添加", <Icon name="add" />)}
-        {allowAttachments && tool("attach", "添加文件", <IconPaperclip />)}
-        {tool("preset", "切换权限预设", <IconShield risk={controls?.preset.value === "bypass"} />, {
-          disabled: busyDisabled(controls?.preset),
-        })}
+        )}
         <span className="phone-tools-sep" aria-hidden="true" />
         {tool(
           "model",
