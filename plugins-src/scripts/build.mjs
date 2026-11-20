@@ -9,6 +9,7 @@
  * - viewer.html（四个插件共用的 pdf.js 单文件查看器，内联 pdf.js 与 Worker）
  * - viewer-assets/（合规的 cMap、Foxit 标准字体、jbig2/openjpeg WebAssembly 及 manifest.json）
  */
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   cpSync,
@@ -172,6 +173,34 @@ async function buildSharedViewerHtml(stagingDir) {
   return { html, bytes };
 }
 
+function collectPluginFiles(rootDir, relPrefix = "") {
+  const out = [];
+  for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+    const rel = relPrefix === "" ? entry.name : `${relPrefix}/${entry.name}`;
+    const full = join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...collectPluginFiles(full, rel));
+    } else if (entry.isFile()) {
+      out.push({ rel, full });
+    }
+  }
+  return out;
+}
+
+function computeBuildId(pluginDir) {
+  const files = collectPluginFiles(pluginDir).sort((a, b) =>
+    a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0,
+  );
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(file.rel, "utf8");
+    hash.update("\0");
+    hash.update(readFileSync(file.full));
+    hash.update("\0");
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
 export async function buildDocPlugins(targetBase = outBase) {
   const staging = mkdtempSync(join(tmpdir(), "nocturne-doc-plugins-build-"));
   try {
@@ -212,6 +241,8 @@ export async function buildDocPlugins(targetBase = outBase) {
       copyFileSync(pythonSrc, join(pluginOut, "engine.py"));
       writeFileSync(join(pluginOut, "viewer.html"), viewerHtml, "utf8");
       cpSync(assetsStaging, join(pluginOut, "viewer-assets"), { recursive: true });
+      const buildId = computeBuildId(pluginOut);
+      writeFileSync(join(pluginOut, ".nocturne-plugin", "build-id"), buildId, "utf8");
     }
   } finally {
     rmSync(staging, { recursive: true, force: true });

@@ -31,6 +31,7 @@ import {
   describePlugins,
   discoverInstalledPlugins,
   installLocalPlugin,
+  resolvePlugins,
   selectActivePluginVersion,
   setPluginEnabled,
   uninstallPlugin,
@@ -2777,5 +2778,85 @@ describe("插件清单 ui.surfaces（ADR-0101 第 4 节）", () => {
         },
       ]);
     }
+  });
+
+  it("内置插件存在 .nocturne-plugin/build-id 时缓存键带 +buildId 后缀，缺失或为空时退回纯版本号", async () => {
+    const f = makeFixtureEnv();
+    const builtinDir = path.join(f.root, "builtin-cache-key");
+    writeNativePlugin(builtinDir, {
+      dirName: "with-build-id",
+      manifest: {
+        name: "with-build-id",
+        version: "0.56.0",
+        mcpServers: {
+          srv: { command: "node", args: ["server.mjs"] },
+        },
+      },
+      files: {
+        ".nocturne-plugin/build-id": "a1b2c3d4e5f60708",
+        "server.mjs": "export {};",
+      },
+    });
+    writeNativePlugin(builtinDir, {
+      dirName: "without-build-id",
+      manifest: {
+        name: "without-build-id",
+        version: "0.56.0",
+        mcpServers: {
+          srv2: { command: "node", args: ["server.mjs"] },
+        },
+      },
+      files: {
+        "server.mjs": "export {};",
+      },
+    });
+    writeNativePlugin(builtinDir, {
+      dirName: "blank-build-id",
+      manifest: {
+        name: "blank-build-id",
+        version: "0.56.0",
+        mcpServers: {
+          srv3: { command: "node", args: ["server.mjs"] },
+        },
+      },
+      files: {
+        ".nocturne-plugin/build-id": "   \n",
+        "server.mjs": "export {};",
+      },
+    });
+
+    const resolved = await resolvePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+      builtinPluginsDir: builtinDir,
+    });
+    const withId = must(
+      resolved.mcpServers.find((s) => s.id === "srv"),
+      "srv",
+    );
+    const withoutId = must(
+      resolved.mcpServers.find((s) => s.id === "srv2"),
+      "srv2",
+    );
+    const blankId = must(
+      resolved.mcpServers.find((s) => s.id === "srv3"),
+      "srv3",
+    );
+    expect(withId.cache).toEqual({
+      pluginId: "nocturne:with-build-id@builtin",
+      keyKind: "version",
+      keyValue: "0.56.0+a1b2c3d4e5f60708",
+    });
+    expect(withoutId.cache).toEqual({
+      pluginId: "nocturne:without-build-id@builtin",
+      keyKind: "version",
+      keyValue: "0.56.0",
+    });
+    expect(blankId.cache).toEqual({
+      pluginId: "nocturne:blank-build-id@builtin",
+      keyKind: "version",
+      keyValue: "0.56.0",
+    });
   });
 });

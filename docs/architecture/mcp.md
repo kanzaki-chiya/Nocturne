@@ -230,7 +230,7 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 
 **按需启动与工具缓存**（[ADR-0100 修订](../decisions/ADR-0100-native-plugins.md#4-插件-mcp-服务器按需启动补充第-2-节)）：仅作用于插件来源的服务器，配置文件中的服务器行为不变。
 
-- **缓存路径与键**：首次连接取得 `tools/list` 后，以「临时文件 + rename」原子写入 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/`；缓存键为插件 id、服务器 id 加上内置插件版本号（`version`）或已安装插件目录指纹（`fingerprint`），内容含服务器信息与工具列表（名称、说明、参数 schema、annotations）。文件损坏或键不匹配一律按未命中处理，不报错。
+- **缓存路径与键**：首次连接取得 `tools/list` 后，以「临时文件 + rename」原子写入 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/`；缓存键为插件 id、服务器 id 加上内置插件版本号（`version`；存在 `.nocturne-plugin/build-id` 时附带 `+<buildId>`）或已安装插件目录指纹（`fingerprint`），内容含服务器信息与工具列表（名称、说明、参数 schema、annotations）。文件损坏或键不匹配一律按未命中处理，不报错。
 - **会话打开**：缓存命中时直接用缓存注册工具并进入 `standby`（未启动）状态，不启动进程，可用性检查视为可用；未命中时照常启动取工具列表并写缓存，本会话内不再退出。
 - **首次调用**：收到该服务器的第一次 `tools/call` 时拉起进程并完成 initialize 与 `tools/list`（`standby` → `starting` → `ready`，不计入崩溃重连次数）。若实际工具列表与缓存不同，更新缓存并将新工具集暂存到下一个 MCP 边界（[ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）生效；若本次调用的工具已不存在，返回错误 `mcp_tool_missing`。启动后的退出、崩溃与重连规则同普通 stdio 服务器。
 

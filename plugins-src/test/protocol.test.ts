@@ -169,6 +169,7 @@ describe("built plugins layout, manifests, icons, and skills", () => {
       const topAndCoreFiles = files.filter((f) => !f.startsWith("viewer-assets/"));
       expect(topAndCoreFiles).toEqual(
         [
+          ".nocturne-plugin/build-id",
           ".nocturne-plugin/plugin.json",
           "engine.py",
           "icon.svg",
@@ -177,6 +178,10 @@ describe("built plugins layout, manifests, icons, and skills", () => {
           "viewer.html",
         ].sort(),
       );
+
+      // build-id must be a single 16-char lowercase hex line with no trailing newline
+      const buildId = readFileSync(path.join(dir, ".nocturne-plugin", "build-id"), "utf8");
+      expect(buildId).toMatch(/^[0-9a-f]{16}$/);
 
       // Viewer HTML size must stay within ADR-0101 8 MiB cap
       const viewerHtmlBytes = statSync(path.join(dir, "viewer.html")).size;

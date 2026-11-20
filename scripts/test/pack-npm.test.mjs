@@ -84,6 +84,7 @@ describe("pack-npm", () => {
     mkdirSync(join(demoDir, "test"), { recursive: true });
     mkdirSync(join(demoDir, "node_modules", "dep"), { recursive: true });
     writeFileSync(join(demoDir, ".nocturne-plugin", "plugin.json"), '{"name":"demo"}');
+    writeFileSync(join(demoDir, ".nocturne-plugin", "build-id"), "0123456789abcdef");
     writeFileSync(join(demoDir, "server.mjs"), "export {};");
     writeFileSync(join(demoDir, "test", "a.test.mjs"), "test");
     writeFileSync(join(demoDir, "node_modules", "dep", "index.js"), "dep");
@@ -91,6 +92,7 @@ describe("pack-npm", () => {
     const tgz = packNpm({ bundleFile: bundle, out: join(dir, "out") });
     const files = untar(tgz);
     expect(files.has("package/plugins/demo/.nocturne-plugin/plugin.json")).toBe(true);
+    expect(files.get("package/plugins/demo/.nocturne-plugin/build-id")).toBe("0123456789abcdef");
     expect(files.has("package/plugins/demo/server.mjs")).toBe(true);
     expect(files.has("package/plugins/demo/test/a.test.mjs")).toBe(false);
     expect(files.has("package/plugins/demo/node_modules/dep/index.js")).toBe(false);

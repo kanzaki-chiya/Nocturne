@@ -174,7 +174,7 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
 适用于所有插件带来的 MCP 服务器；配置文件里的 MCP 服务器行为不变。
 
 - **工具缓存**：服务器第一次启动、取得 `tools/list` 后，缓存到 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/`。
-  - 缓存键：插件 id、服务器 id，加上内置插件的版本或已安装插件的指纹；
+  - 缓存键：插件 id、服务器 id，加上内置插件的版本（含 `.nocturne-plugin/build-id` 时为 `<version>+<buildId>`）或已安装插件的指纹；
   - 缓存内容：服务器信息与工具列表（名称、说明、参数 schema、annotations）。
 - **会话打开**：
   - 缓存命中：直接用缓存的工具定义注册工具，不启动进程；

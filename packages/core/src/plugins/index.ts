@@ -66,6 +66,18 @@ function isBuiltinPluginId(id: string): boolean {
   return /^nocturne:[^@]+@builtin$/.test(id);
 }
 
+async function readBuiltinBuildId(platform: Platform, root: string): Promise<string | undefined> {
+  try {
+    const raw = await platform.fs.readTextFile(
+      platform.paths.join(root, ".nocturne-plugin", "build-id"),
+    );
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function resolvePlugins(
   platform: Platform,
   options: PluginDiscoveryOptions,
@@ -101,10 +113,12 @@ export async function resolvePlugins(
       // 内置插件不做指纹确认，默认开启；用户关闭时在 plugins.json 记 enabled: false
       state = stored?.enabled === false ? "off" : "on";
       if (state === "on") {
+        const buildId = await readBuiltinBuildId(platform, item.overview.root);
         cacheKey = {
           pluginId: item.overview.id,
           keyKind: "version",
-          keyValue: item.overview.version,
+          keyValue:
+            buildId !== undefined ? `${item.overview.version}+${buildId}` : item.overview.version,
         };
       }
     } else {
