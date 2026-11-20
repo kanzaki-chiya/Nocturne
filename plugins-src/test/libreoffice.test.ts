@@ -733,4 +733,108 @@ describe.skipIf(!HAS_REAL_LIBREOFFICE)("Real LibreOffice end-to-end chains", () 
       await cliServer.close();
     }
   });
+
+  it("viewer: xlsx SinglePageSheets preserves merged-cell title row", async () => {
+    const rawPath = path.join(workDir, "budget-merged-raw.xlsx");
+    const mergedPath = path.join(workDir, "budget-merged-title.xlsx");
+    const server = createSheetsPluginServer();
+    try {
+      await callTool(server, "create", {
+        outputPath: rawPath,
+        overwrite: true,
+        sheets: [
+          {
+            name: "预算明细",
+            rows: [
+              ["季度预算表", "", "", "", ""],
+              ["编号", "费用科目", "第一季度", "第二季度", "小计"],
+              ["B-001", "研发算力", 1285, 1420, "=C3+D3"],
+              ["B-002", "字体审计", 360, 245, "=C4+D4"],
+              ["合计", "总预算", "=SUM(C3:C4)", "=SUM(D3:D4)", "=SUM(E3:E4)"],
+            ],
+          },
+        ],
+      });
+
+      const python = findPython(findSoffice());
+      execFileSync(
+        python,
+        [
+          "-c",
+          [
+            "import sys, zipfile",
+            "src, dst = sys.argv[1], sys.argv[2]",
+            "with zipfile.ZipFile(src, 'r') as zin, zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as zout:",
+            "    for info in zin.infolist():",
+            "        data = zin.read(info.filename)",
+            "        if info.filename == 'xl/worksheets/sheet1.xml':",
+            "            text = data.decode('utf-8')",
+            "            text = text.replace('</sheetData>', '</sheetData><mergeCells count=\"1\"><mergeCell ref=\"A1:E1\"/></mergeCells>')",
+            "            data = text.encode('utf-8')",
+            "        zout.writestr(info, data)",
+          ].join("\n"),
+          rawPath,
+          mergedPath,
+        ],
+        { timeout: 30_000, windowsHide: true },
+      );
+
+      const shown = await callTool(server, "show_in_viewer", { path: mergedPath });
+      const sc = shown.structuredContent as {
+        docId: string;
+        totalBytes: number;
+        chunkSize: number;
+        pageCount: number;
+      };
+      expect(sc.pageCount).toBe(1);
+
+      const parts: Buffer[] = [];
+      let offset = 0;
+      while (offset < sc.totalBytes) {
+        const res = await callTool(server, "read_document", {
+          docId: sc.docId,
+          offset,
+          length: sc.chunkSize,
+        });
+        const chunk = res.structuredContent as { data: string; bytesRead: number; eof: boolean };
+        parts.push(Buffer.from(chunk.data, "base64"));
+        offset += chunk.bytesRead;
+        if (chunk.eof) break;
+      }
+      const pdfBytes = Buffer.concat(parts);
+
+      const BinaryDataFactory = createViewerBinaryDataFactory({
+        fetchAsset: async (assetName: string) => {
+          const res = await callTool(server, "viewer_asset", { name: assetName });
+          const assetSc = res.structuredContent as { data: string };
+          return new Uint8Array(Buffer.from(assetSc.data, "base64"));
+        },
+      });
+      const task = pdfjsLib.getDocument({
+        data: new Uint8Array(pdfBytes),
+        useWorkerFetch: false,
+        disableWorkerRendering: true,
+        cMapUrl: "cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "standard_fonts/",
+        wasmUrl: "wasm/",
+        BinaryDataFactory,
+      });
+      const doc = await task.promise;
+      try {
+        expect(doc.numPages).toBe(1);
+        const page = await doc.getPage(1);
+        expect(page.getViewport({ scale: 1 }).width).toBeLessThan(450);
+        const content = await page.getTextContent();
+        const text = content.items.map((item) => ("str" in item ? item.str : "")).join("");
+        expect(text).toContain("季度预算表");
+        expect(text).toContain("研发算力");
+        expect(text).toContain("总预算");
+      } finally {
+        await task.destroy();
+      }
+    } finally {
+      await server.close();
+    }
+  });
 });

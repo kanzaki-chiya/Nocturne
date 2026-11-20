@@ -31,6 +31,15 @@ import {
   isDocumentUnknownError,
   ViewerToolError,
 } from "../src/shared/viewer-errors.js";
+import {
+  computeFitWidthScale,
+  getInitialFitWidthBounds,
+  INITIAL_FIT_WIDTH_MAX_SCALE,
+  isSpreadsheetDocument,
+  MAX_SCALE,
+  MIN_SCALE,
+  SPREADSHEET_INITIAL_MIN_SCALE,
+} from "../src/shared/viewer-scale.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(here, "..");
@@ -568,5 +577,48 @@ describe("viewer error mapping and build-injected version", () => {
     expect(html).toMatch(
       new RegExp(`name:["'\`]nocturne-doc-viewer["'\`],version:["'\`]${escapedVersion}["'\`]`),
     );
+  });
+});
+
+describe("viewer initial fit-width scale bounds", () => {
+  it("clamps initial scale for spreadsheets (.xlsx, .xls, .ods) to [1.0, 1.25]", () => {
+    for (const name of ["budget.xlsx", "REPORT.XLS", "calc.ods", "/tmp/data.XLSX"]) {
+      expect(isSpreadsheetDocument(name), name).toBe(true);
+      expect(getInitialFitWidthBounds(name), name).toEqual({
+        min: SPREADSHEET_INITIAL_MIN_SCALE,
+        max: INITIAL_FIT_WIDTH_MAX_SCALE,
+      });
+    }
+
+    const bounds = getInitialFitWidthBounds("wide-32col.xlsx");
+    // Wide 32-col sheet (~2048 pt) in a 519 px viewport stays readable at 100%
+    expect(computeFitWidthScale(2048, 519, bounds)).toBe(1);
+    // Tiny sheet (~128 pt) caps at 125%
+    expect(computeFitWidthScale(128, 519, bounds)).toBe(1.25);
+    // Medium 6-col sheet (384 pt) in a 504 px viewport (after vertical scrollbar) fits inside 472 px inner box
+    const mediumScale = computeFitWidthScale(384.04, 504, bounds);
+    expect(mediumScale).toBeGreaterThan(1);
+    expect(mediumScale).toBeLessThan(1.25);
+    expect(Math.round(384.04 * mediumScale)).toBeLessThanOrEqual(504 - 32);
+  });
+
+  it("keeps [0.25, 1.25] initial bounds for non-spreadsheet documents and unconstrained manual fit-width", () => {
+    for (const name of ["cjk.pdf", "report.docx", "slides.pptx", "notes.txt"]) {
+      expect(isSpreadsheetDocument(name), name).toBe(false);
+      expect(getInitialFitWidthBounds(name), name).toEqual({
+        min: MIN_SCALE,
+        max: INITIAL_FIT_WIDTH_MAX_SCALE,
+      });
+    }
+
+    // Wide presentation slide (960 pt) zooms below 100% to fit width
+    const slideScale = computeFitWidthScale(960, 504, getInitialFitWidthBounds("slides.pptx"));
+    expect(slideScale).toBeLessThan(1);
+    expect(Math.round(960 * slideScale)).toBeLessThanOrEqual(504 - 32);
+
+    // Explicit "fit width" button (default bounds [MIN_SCALE, MAX_SCALE]) is not limited by spreadsheet 1.0 floor
+    const explicitWideScale = computeFitWidthScale(960, 504, { min: MIN_SCALE, max: MAX_SCALE });
+    expect(explicitWideScale).toBeLessThan(1);
+    expect(Math.round(960 * explicitWideScale)).toBeLessThanOrEqual(504 - 32);
   });
 });

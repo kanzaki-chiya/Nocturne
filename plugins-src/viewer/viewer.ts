@@ -8,6 +8,13 @@ import {
   ViewerToolError,
   type ToolResultLike,
 } from "../src/shared/viewer-errors.js";
+import {
+  computeFitWidthScale,
+  getInitialFitWidthBounds,
+  INITIAL_FIT_WIDTH_MAX_SCALE,
+  MAX_SCALE,
+  MIN_SCALE,
+} from "../src/shared/viewer-scale.js";
 
 declare const __NOCTURNE_PLUGIN_VERSION__: string;
 
@@ -69,9 +76,7 @@ declare global {
 }
 
 const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3];
-const MIN_SCALE = 0.25;
-const MAX_SCALE = 4;
-const INITIAL_FIT_WIDTH_MAX_SCALE = 1.25;
+const MAX_INITIAL_DIM_PROBE_PAGES = 20;
 const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
 const WORKER_READY_TIMEOUT_MS = 4000;
 
@@ -350,6 +355,7 @@ let visibleSet = new Set<number>();
 let currentPage = 0;
 let currentScale = 1;
 let fitWidthMode = true;
+let fitWidthMinScale = MIN_SCALE;
 let fitWidthMaxScale = INITIAL_FIT_WIDTH_MAX_SCALE;
 let intersectionObserver: IntersectionObserver | null = null;
 let scrollRaf = 0;
@@ -424,10 +430,19 @@ function hideError(): void {
   diagState.error = null;
 }
 
-function computeFitWidthScale(pageWidth: number, maxScale = MAX_SCALE): number {
-  const available = Math.max(160, stageEl.clientWidth - 36);
-  const raw = available / Math.max(1, pageWidth);
-  return Math.max(MIN_SCALE, Math.min(maxScale, raw));
+function getFitWidthRefWidth(): number {
+  let maxWidth = 0;
+  for (const slot of slots) {
+    if (slot.baseWidth > maxWidth) maxWidth = slot.baseWidth;
+  }
+  return maxWidth > 0 ? maxWidth : 1;
+}
+
+function computeCurrentFitWidthScale(pageWidth: number): number {
+  return computeFitWidthScale(pageWidth, stageEl.clientWidth, {
+    min: fitWidthMinScale,
+    max: fitWidthMaxScale,
+  });
 }
 
 function applySlotSize(slot: PageSlot): void {
@@ -506,10 +521,19 @@ async function renderSlot(slot: PageSlot, token: number): Promise<void> {
 
   const baseVp = page.getViewport({ scale: 1 });
   if (!slot.dimsKnown) {
+    const prevMaxWidth = getFitWidthRefWidth();
     slot.baseWidth = baseVp.width;
     slot.baseHeight = baseVp.height;
     slot.dimsKnown = true;
     applySlotSize(slot);
+    if (fitWidthMode && baseVp.width > prevMaxWidth + 0.5) {
+      const nextScale = computeCurrentFitWidthScale(getFitWidthRefWidth());
+      if (Math.abs(nextScale - currentScale) >= 0.001) {
+        slot.renderingScale = 0;
+        setScale(nextScale, true);
+        return;
+      }
+    }
   }
 
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -641,6 +665,16 @@ function setScale(nextScale: number, isFitWidth: boolean): void {
   for (const slot of slots) {
     applySlotSize(slot);
   }
+  if (isFitWidth) {
+    // 纵向滚动条出现会压缩 clientWidth；单向收缩避免滚动条显隐震荡
+    const settled = computeCurrentFitWidthScale(getFitWidthRefWidth());
+    if (settled < currentScale - 0.001) {
+      currentScale = settled;
+      for (const slot of slots) {
+        applySlotSize(slot);
+      }
+    }
+  }
   if (anchorSlot) {
     stageEl.scrollTop = Math.max(
       0,
@@ -748,13 +782,38 @@ async function openDocument(info: ShowInViewerData): Promise<void> {
     }
 
     currentDoc = pdfDoc;
+    const startPage = Math.max(1, Math.min(pdfDoc.numPages, loaded.info.initialPage));
     const firstPage = await pdfDoc.getPage(1);
     if (token !== activeLoadToken) return;
 
     const firstVp = firstPage.getViewport({ scale: 1 });
+    const probedDims = new Map<number, { width: number; height: number }>();
+    probedDims.set(1, { width: firstVp.width, height: firstVp.height });
+    const probeLimit = Math.min(pdfDoc.numPages, MAX_INITIAL_DIM_PROBE_PAGES);
+    const pagesToProbe: number[] = [];
+    for (let p = 2; p <= probeLimit; p++) {
+      pagesToProbe.push(p);
+    }
+    if (startPage > probeLimit && startPage <= pdfDoc.numPages) {
+      pagesToProbe.push(startPage);
+    }
+    for (const p of pagesToProbe) {
+      const page = await pdfDoc.getPage(p);
+      if (token !== activeLoadToken) return;
+      const vp = page.getViewport({ scale: 1 });
+      probedDims.set(p, { width: vp.width, height: vp.height });
+    }
+
+    let maxProbedWidth = firstVp.width;
+    for (const dim of probedDims.values()) {
+      if (dim.width > maxProbedWidth) maxProbedWidth = dim.width;
+    }
+
+    const initialBounds = getInitialFitWidthBounds(loaded.info.fileName || loaded.info.path);
     fitWidthMode = true;
-    fitWidthMaxScale = INITIAL_FIT_WIDTH_MAX_SCALE;
-    currentScale = computeFitWidthScale(firstVp.width, fitWidthMaxScale);
+    fitWidthMinScale = initialBounds.min;
+    fitWidthMaxScale = initialBounds.max;
+    currentScale = computeCurrentFitWidthScale(maxProbedWidth);
 
     const frag = document.createDocumentFragment();
     slots = [];
@@ -762,12 +821,13 @@ async function openDocument(info: ShowInViewerData): Promise<void> {
       const slotEl = document.createElement("div");
       slotEl.className = "page-slot";
       slotEl.dataset.page = String(p);
+      const known = probedDims.get(p);
       const slot: PageSlot = {
         pageNumber: p,
         el: slotEl,
-        baseWidth: firstVp.width,
-        baseHeight: firstVp.height,
-        dimsKnown: p === 1,
+        baseWidth: known ? known.width : firstVp.width,
+        baseHeight: known ? known.height : firstVp.height,
+        dimsKnown: known !== undefined,
         canvas: null,
         renderedScale: 0,
         renderTask: null,
@@ -779,6 +839,16 @@ async function openDocument(info: ShowInViewerData): Promise<void> {
       frag.appendChild(slotEl);
     }
     pagesEl.replaceChildren(frag);
+    stageEl.scrollLeft = 0;
+
+    // 挂载页面后纵向滚动条可能使 clientWidth 变窄，渲染前即时重算以免出现多余横向滚动条
+    const settledScale = computeCurrentFitWidthScale(getFitWidthRefWidth());
+    if (settledScale < currentScale - 0.001) {
+      currentScale = settledScale;
+      for (const slot of slots) {
+        applySlotSize(slot);
+      }
+    }
 
     intersectionObserver = new IntersectionObserver(
       (entries) => {
@@ -796,7 +866,6 @@ async function openDocument(info: ShowInViewerData): Promise<void> {
       intersectionObserver.observe(slot.el);
     }
 
-    const startPage = Math.max(1, Math.min(pdfDoc.numPages, loaded.info.initialPage));
     currentPage = startPage;
     syncToolbar();
     if (startPage > 1) {
@@ -863,10 +932,10 @@ btnZoomIn.addEventListener("click", () => {
 });
 
 btnFitWidth.addEventListener("click", () => {
-  const ref = slots[Math.max(0, currentPage - 1)] ?? slots[0];
-  if (!ref) return;
+  if (!currentDoc || slots.length === 0) return;
+  fitWidthMinScale = MIN_SCALE;
   fitWidthMaxScale = MAX_SCALE;
-  setScale(computeFitWidthScale(ref.baseWidth, fitWidthMaxScale), true);
+  setScale(computeCurrentFitWidthScale(getFitWidthRefWidth()), true);
 });
 
 stageEl.addEventListener(
@@ -886,9 +955,7 @@ stageEl.addEventListener(
 if (typeof ResizeObserver !== "undefined") {
   const resizeObserver = new ResizeObserver(() => {
     if (!fitWidthMode || !currentDoc || slots.length === 0) return;
-    const ref = slots[Math.max(0, currentPage - 1)] ?? slots[0];
-    if (!ref) return;
-    setScale(computeFitWidthScale(ref.baseWidth, fitWidthMaxScale), true);
+    setScale(computeCurrentFitWidthScale(getFitWidthRefWidth()), true);
   });
   resizeObserver.observe(stageEl);
 }
