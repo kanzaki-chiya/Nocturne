@@ -105,7 +105,7 @@ export function contextSourceLabel(source: string, home?: string | null): string
   return abbreviateHome(source, home);
 }
 
-/** 堆叠条总长等于总量占预算的比例。差额为正时末行补齐；明细大于总量时各项数值不缩放。 */
+/** 堆叠条总长等于总量占预算的比例。差额为正时末行补齐；明细大于总量时由 Core 缩放，客户端直接展示报告数值。 */
 export function segmentWidths(report: Report, rows: ContextRow[]): Map<string, number> {
   const parts = rows.filter((row) => !row.group);
   const sum = parts.reduce((total, row) => total + row.tokens, 0);

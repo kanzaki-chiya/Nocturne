@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createRuntime, FakeProvider } from "@nocturne/core";
 import { createSessionView, type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -250,6 +254,51 @@ describe("上下文 breakdown", () => {
     expect(screen.getByText("已超出输入预算")).toBeTruthy();
     expect(screen.getByText(/模型未声明上下文长度/)).toBeTruthy();
     expect(screen.getByText(/模型未声明输出上限/)).toBeTruthy();
+  });
+
+  it("明细大于总量时面板显示的行之和等于总量", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "nct-desktop-ctx-scale-"));
+    vi.stubEnv("NOCTURNE_HOME", dir);
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      runtime = await createRuntime({
+        cwd: dir,
+        sessionsDir: path.join(dir, "sessions"),
+        providers: [
+          new FakeProvider({
+            scripts: [
+              [
+                { type: "text_delta", text: "答".repeat(800) },
+                { type: "usage", usage: { inputTokens: 120, outputTokens: 30 } },
+              ],
+            ],
+          }),
+        ],
+      });
+      const session = await runtime.createSession({ model: "fake/fake-1" });
+      await session.submit({ text: "问".repeat(400) });
+      const summary = session.describeContext();
+      expect(summary.report.estimatedTokens).toBe(150);
+      const { container } = render(<ContextPanel context={summary} />);
+      expect(screen.queryByText("其他")).toBeNull();
+      const parseNum = (el: Element | null) => Number((el?.textContent ?? "").replaceAll(",", ""));
+      const leafRows = Array.from(
+        container.querySelectorAll(".context-details > div:not(.context-group) > dd"),
+      );
+      const leafSum = leafRows.reduce((sum, dd) => sum + parseNum(dd), 0);
+      expect(leafSum).toBe(150);
+      const groupTokens = parseNum(
+        container.querySelector(".context-details > div.context-group > dd"),
+      );
+      const nestedSum = Array.from(
+        container.querySelectorAll(".context-details > div.context-nested > dd"),
+      ).reduce((sum, dd) => sum + parseNum(dd), 0);
+      expect(nestedSum).toBe(groupTokens);
+    } finally {
+      await runtime?.close();
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
