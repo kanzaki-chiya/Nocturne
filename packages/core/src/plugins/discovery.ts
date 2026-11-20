@@ -27,7 +27,7 @@ import {
 } from "./types.js";
 
 const EXACT_MATCHER_RE = /^[A-Za-z0-9_\- ,|]+$/;
-const NATIVE_PLUGIN_NAME_RE = /^[a-z0-9-]+$/;
+export const NATIVE_PLUGIN_NAME_RE = /^[a-z0-9-]+$/;
 const MCP_ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MCP_PLACEHOLDER_RE = /\$\{(PLUGIN_ROOT|PLUGIN_DATA|NOCTURNE_NODE)\}/g;
 const ALL_HOOK_POINTS: ReadonlySet<string> = new Set<string>(HOOK_POINTS);
@@ -156,15 +156,15 @@ async function readPluginIcon(
   return undefined;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function nonEmptyString(value: unknown): string | undefined {
+export function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function isSafeSegment(seg: string): boolean {
+export function isSafeSegment(seg: string): boolean {
   return seg.length > 0 && seg !== "." && seg !== ".." && !/[\\/\0]/.test(seg);
 }
 
@@ -217,7 +217,7 @@ function expandMcpPlaceholders(
 }
 
 /** 解析插件清单内相对路径：必须以 `./` 开头且不可越出插件根目录 */
-async function resolvePluginRelativePath(
+export async function resolvePluginRelativePath(
   platform: Platform,
   pluginRoot: string,
   pluginRootReal: string,
@@ -718,7 +718,7 @@ async function scanSkillNamesInDir(
   return names;
 }
 
-async function buildDiscoveredPlugin(
+export async function buildDiscoveredPlugin(
   platform: Platform,
   input: {
     host: PluginHost;
@@ -1019,6 +1019,35 @@ async function discoverBuiltinPlugins(
   return results;
 }
 
+export interface LocalPluginManifestLookup {
+  manifestKind: PluginManifestKind;
+  manifest: Record<string, unknown> | undefined;
+  warnings: string[];
+}
+
+const LOCAL_MANIFEST_CANDIDATES: readonly { kind: PluginManifestKind; dir: string }[] = [
+  { kind: "nocturne", dir: ".nocturne-plugin" },
+  { kind: "codex", dir: ".codex-plugin" },
+  { kind: "claude", dir: ".claude-plugin" },
+];
+
+export async function readLocalPluginManifest(
+  platform: Platform,
+  rawRoot: string,
+  label: string,
+): Promise<LocalPluginManifestLookup | undefined> {
+  const { fs, paths } = platform;
+  const warnings: string[] = [];
+  for (const candidate of LOCAL_MANIFEST_CANDIDATES) {
+    const manifestPath = paths.join(rawRoot, candidate.dir, "plugin.json");
+    if (await fs.exists(manifestPath)) {
+      const manifest = await readManifestFile(platform, manifestPath, warnings, label);
+      return { manifestKind: candidate.kind, manifest, warnings };
+    }
+  }
+  return undefined;
+}
+
 async function discoverLocalNocturnePlugins(
   platform: Platform,
   nocturneHome: string,
@@ -1055,16 +1084,10 @@ async function discoverLocalNocturnePlugins(
 
     const rawRoot = paths.join(entry.path, version);
     const label = `${entry.name}@local`;
-    const manifestWarnings: string[] = [];
-    const nocturneManifestPath = paths.join(rawRoot, ".nocturne-plugin", "plugin.json");
-    const codexManifestPath = paths.join(rawRoot, ".codex-plugin", "plugin.json");
-    const claudeManifestPath = paths.join(rawRoot, ".claude-plugin", "plugin.json");
-
-    let manifestKind: PluginManifestKind;
-    let manifest: Record<string, unknown> | undefined;
-    if (await fs.exists(nocturneManifestPath)) {
-      manifestKind = "nocturne";
-      manifest = await readManifestFile(platform, nocturneManifestPath, manifestWarnings, label);
+    const lookup = await readLocalPluginManifest(platform, rawRoot, label);
+    if (lookup === undefined) continue;
+    const { manifestKind, manifest, warnings: manifestWarnings } = lookup;
+    if (manifestKind === "nocturne") {
       if (manifest === undefined) {
         warnings.push(...manifestWarnings);
         continue;
@@ -1079,14 +1102,6 @@ async function discoverLocalNocturnePlugins(
         );
         continue;
       }
-    } else if (await fs.exists(codexManifestPath)) {
-      manifestKind = "codex";
-      manifest = await readManifestFile(platform, codexManifestPath, manifestWarnings, label);
-    } else if (await fs.exists(claudeManifestPath)) {
-      manifestKind = "claude";
-      manifest = await readManifestFile(platform, claudeManifestPath, manifestWarnings, label);
-    } else {
-      continue;
     }
 
     results.push(
@@ -1287,7 +1302,7 @@ async function discoverClaudePlugins(
   return results;
 }
 
-function hasUsablePluginCapabilities(plugin: DiscoveredPlugin): boolean {
+export function hasUsablePluginCapabilities(plugin: DiscoveredPlugin): boolean {
   return (
     plugin.overview.hooks.length > 0 ||
     plugin.overview.skills.length > 0 ||

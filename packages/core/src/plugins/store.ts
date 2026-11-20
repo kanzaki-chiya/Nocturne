@@ -58,6 +58,13 @@ export function createPluginStore(platform: Platform, nocturneHome: string) {
     return { entries, warnings };
   }
 
+  async function writeEntries(entries: Map<string, StoredPluginEntry>): Promise<void> {
+    const sorted = Object.fromEntries(
+      [...entries.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
+    await writeJsonAtomic(fs, paths, filePath, { version: 1, plugins: sorted }, { dirMode: 0o700 });
+  }
+
   async function setEnabled(
     id: string,
     enabled: boolean,
@@ -79,18 +86,17 @@ export function createPluginStore(platform: Platform, nocturneHome: string) {
       } else {
         entries.delete(id);
       }
-      const sorted = Object.fromEntries(
-        [...entries.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-      );
-      await writeJsonAtomic(
-        fs,
-        paths,
-        filePath,
-        { version: 1, plugins: sorted },
-        { dirMode: 0o700 },
-      );
+      await writeEntries(entries);
     });
   }
 
-  return { filePath, readState, setEnabled };
+  async function restoreEntry(id: string, entry: StoredPluginEntry): Promise<void> {
+    await enqueueConfigWrite(fs, async () => {
+      const { entries } = await readState();
+      entries.set(id, entry);
+      await writeEntries(entries);
+    });
+  }
+
+  return { filePath, readState, setEnabled, restoreEntry };
 }

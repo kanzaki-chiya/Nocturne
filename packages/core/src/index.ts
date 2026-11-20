@@ -76,6 +76,7 @@ import {
 import { MODEL_ROLES } from "./config/index.js";
 import {
   type HooksDescription,
+  type PluginOverview,
   type PluginsDescription,
   type SkillImportInput,
   type SkillImportOutput,
@@ -85,9 +86,11 @@ import {
 } from "./protocol/index.js";
 import {
   describePlugins as describeInstalledPluginsOverview,
+  installLocalPlugin as installLocalPluginInStore,
   resolveActivePluginSkillDirs,
   resolvePlugins,
   setPluginEnabled as setPluginEnabledInStore,
+  uninstallPlugin as uninstallPluginInStore,
 } from "./plugins/index.js";
 import {
   commitSkillImport,
@@ -829,6 +832,8 @@ export interface Runtime {
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  installLocalPlugin(input: { path: string }): Promise<PluginOverview>;
+  uninstallPlugin(input: { id: string }): Promise<{ affectedSessions: number }>;
   /** 长期记忆管理（ADR-0098 §7） */
   describeMemory(input?: {
     workspaceRoot?: string | undefined;
@@ -6551,6 +6556,51 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const affectedSessions = await broadcast("skills", (hooks) => hooks.refreshSkills(true));
       await broadcast("mcp", (hooks) => hooks.reconcileMcp());
       return { affectedSessions };
+    },
+    async installLocalPlugin(input) {
+      const parsed = z
+        .object({ path: z.string().min(1) })
+        .strict()
+        .parse(input);
+      let overview: PluginOverview;
+      try {
+        overview = await installLocalPluginInStore(platform, {
+          ...pluginDiscoveryOptions,
+          reservedMcpIds: collectReservedMcpIds(config?.base.mcpServers),
+          path: parsed.path,
+        });
+      } catch (e) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+      await broadcast("skills", (hooks) => hooks.refreshSkills(true));
+      await broadcast("mcp", (hooks) => hooks.reconcileMcp());
+      return overview;
+    },
+    async uninstallPlugin(input) {
+      const parsed = z
+        .object({ id: z.string().min(1) })
+        .strict()
+        .parse(input);
+      const deactivate = async (): Promise<number> => {
+        const affectedSessions = await broadcast("skills", (hooks) => hooks.refreshSkills(true));
+        await broadcast("mcp", (hooks) => hooks.reconcileMcp());
+        return affectedSessions;
+      };
+      try {
+        return await uninstallPluginInStore(platform, {
+          ...pluginDiscoveryOptions,
+          id: parsed.id,
+          onDeactivate: deactivate,
+        });
+      } catch (e) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
     },
     async importSkills(input) {
       const base = z.object({

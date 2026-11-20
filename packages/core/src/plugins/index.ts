@@ -8,6 +8,7 @@ import type {
 } from "../protocol/index.js";
 import { discoverInstalledPlugins } from "./discovery.js";
 import { computePluginFingerprint } from "./fingerprint.js";
+import { installLocalPluginFiles, uninstallLocalPluginFiles } from "./install.js";
 import { createPluginStore } from "./store.js";
 import type {
   DiscoveredPlugin,
@@ -246,4 +247,21 @@ export async function setPluginEnabled(
   await store.setEnabled(options.id, true, () =>
     computePluginFingerprint(platform.fs, platform.paths, target.overview.root, target.rawRoot),
   );
+}
+
+export async function installLocalPlugin(
+  platform: Platform,
+  options: PluginDiscoveryOptions & { path: string },
+): Promise<PluginOverview> {
+  return installLocalPluginFiles(platform, options, () => describePlugins(platform, options));
+}
+
+export async function uninstallPlugin(
+  platform: Platform,
+  options: PluginDiscoveryOptions & {
+    id: string;
+    onDeactivate?: () => Promise<number>;
+  },
+): Promise<{ affectedSessions: number }> {
+  return uninstallLocalPluginFiles(platform, options);
 }

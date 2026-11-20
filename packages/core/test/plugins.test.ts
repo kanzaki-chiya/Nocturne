@@ -27,8 +27,10 @@ import {
   computePluginFingerprint,
   describePlugins,
   discoverInstalledPlugins,
+  installLocalPlugin,
   selectActivePluginVersion,
   setPluginEnabled,
+  uninstallPlugin,
   type PluginHookEntry,
 } from "../src/plugins/index.js";
 import { FakeProvider } from "../src/provider/index.js";
@@ -2115,5 +2117,383 @@ if (input.point === "PreToolUse") {
       if (origKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = origKey;
     }
+  });
+});
+
+describe("ADR-0100 第三期：本地目录安装与卸载", () => {
+  it("安装成功：支持三种清单（nocturne/codex/claude），跳过 .git 与符号链接，新装状态为 off，缺省或不合法版本用 local", async () => {
+    const f = makeFixtureEnv();
+    const sourcesRoot = path.join(f.root, "sources");
+
+    // 1. 自有清单（含 .git、符号链接与合法版本）
+    const nocturneSrc = writeNativePlugin(sourcesRoot, {
+      dirName: "src-nocturne",
+      manifestDir: ".nocturne-plugin",
+      manifest: {
+        name: "my-native",
+        version: "1.2.0",
+        description: "自有本地插件",
+      },
+      files: {
+        "skills/native-hello/SKILL.md": "---\ndescription: native skill\n---\nHello",
+        ".git/HEAD": "ref: refs/heads/main\n",
+      },
+    });
+    const outsideFile = path.join(f.root, "outside-secret.txt");
+    writeFileSync(outsideFile, "do-not-copy");
+    try {
+      symlinkSync(outsideFile, path.join(nocturneSrc, "linked.txt"), "file");
+    } catch {
+      // 无符号链接权限的环境跳过创建，主断言仍覆盖 .git 与清单
+    }
+
+    // 2. Codex 兼容清单（无 version → 版本目录为 local）
+    const codexSrc = writeNativePlugin(sourcesRoot, {
+      dirName: "src-codex",
+      manifestDir: ".codex-plugin",
+      manifest: {
+        name: "my-codex",
+        interface: { displayName: "My Codex", shortDescription: "Codex 描述" },
+      },
+      files: {
+        "skills/codex-s/SKILL.md": "---\ndescription: codex skill\n---\nCodex",
+      },
+    });
+
+    // 3. Claude Code 兼容清单（非法版本含空格/斜杠 → 版本目录为 local）
+    const claudeSrc = writeNativePlugin(sourcesRoot, {
+      dirName: "src-claude",
+      manifestDir: ".claude-plugin",
+      manifest: {
+        name: "my-claude",
+        version: "bad version/1",
+        description: "Claude 描述",
+      },
+      files: {
+        "skills/claude-s/SKILL.md": "---\ndescription: claude skill\n---\nClaude",
+      },
+    });
+
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    const p1 = await installLocalPlugin(f.plat, { ...discOpts, path: nocturneSrc });
+    expect(p1.id).toBe("nocturne:my-native@local");
+    expect(p1.state).toBe("off");
+    expect(p1.version).toBe("1.2.0");
+    expect(p1.skills).toEqual(["native-hello"]);
+    expect(existsSync(path.join(p1.root, ".git"))).toBe(false);
+    expect(existsSync(path.join(p1.root, "linked.txt"))).toBe(false);
+
+    const p2 = await installLocalPlugin(f.plat, { ...discOpts, path: codexSrc });
+    expect(p2.id).toBe("nocturne:my-codex@local");
+    expect(p2.state).toBe("off");
+    expect(p2.version).toBe("local");
+    expect(p2.displayName).toBe("My Codex");
+    expect(path.basename(p2.root)).toBe("local");
+
+    const p3 = await installLocalPlugin(f.plat, { ...discOpts, path: claudeSrc });
+    expect(p3.id).toBe("nocturne:my-claude@local");
+    expect(p3.state).toBe("off");
+    expect(p3.version).toBe("local");
+    expect(path.basename(p3.root)).toBe("local");
+  });
+
+  it("清单无效被拒：缺清单、非法 JSON、非法 name、非法相对路径、无可用能力", async () => {
+    const f = makeFixtureEnv();
+    const sourcesRoot = path.join(f.root, "bad-sources");
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    // 缺少清单
+    const noManifest = path.join(sourcesRoot, "no-manifest");
+    mkdirSync(noManifest, { recursive: true });
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: noManifest })).rejects.toThrow(
+      /未找到/,
+    );
+
+    // 非法 JSON
+    const badJson = path.join(sourcesRoot, "bad-json");
+    mkdirSync(path.join(badJson, ".nocturne-plugin"), { recursive: true });
+    writeFileSync(path.join(badJson, ".nocturne-plugin", "plugin.json"), "{broken");
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: badJson })).rejects.toThrow(
+      /合法 JSON/,
+    );
+
+    // 非法 name（自有清单不允许大写）
+    const badName = writeNativePlugin(sourcesRoot, {
+      dirName: "bad-name",
+      manifest: { name: "Bad_Name", version: "1.0.0" },
+      files: { "skills/s1/SKILL.md": "---\ndescription: s\n---\nhi" },
+    });
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: badName })).rejects.toThrow(
+      /只允许小写字母/,
+    );
+
+    // 相对路径不以 ./ 开头或越界
+    const badRel = writeNativePlugin(sourcesRoot, {
+      dirName: "bad-rel",
+      manifest: { name: "bad-rel", version: "1.0.0", skills: ["../outside"] },
+    });
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: badRel })).rejects.toThrow(
+      /必须以 "\.\/" 开头/,
+    );
+
+    const escapeRel = writeNativePlugin(sourcesRoot, {
+      dirName: "escape-rel",
+      manifest: { name: "escape-rel", version: "1.0.0", skills: ["./../../outside"] },
+    });
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: escapeRel })).rejects.toThrow(
+      /越出插件目录/,
+    );
+
+    // 无可用能力
+    const emptyCap = writeNativePlugin(sourcesRoot, {
+      dirName: "empty-cap",
+      manifest: { name: "empty-cap", version: "1.0.0" },
+    });
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: emptyCap })).rejects.toThrow(
+      /不包含可用的技能、Hook 或 MCP 服务器/,
+    );
+  });
+
+  it("路径在 plugins/ 内或不存在/非目录时被拒", async () => {
+    const f = makeFixtureEnv();
+    const insidePlugins = writeNativePlugin(path.join(f.nocturneHome, "plugins", "tmp"), {
+      dirName: "inside",
+      manifest: { name: "inside", version: "1.0.0" },
+      files: { "skills/s/SKILL.md": "---\ndescription: s\n---\nhi" },
+    });
+    const singleFile = path.join(f.root, "plain.txt");
+    writeFileSync(singleFile, "file");
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: insidePlugins })).rejects.toThrow(
+      /插件目录内/,
+    );
+    await expect(
+      installLocalPlugin(f.plat, { ...discOpts, path: path.join(f.root, "missing-dir") }),
+    ).rejects.toThrow(/不存在/);
+    await expect(installLocalPlugin(f.plat, { ...discOpts, path: singleFile })).rejects.toThrow(
+      /不是目录/,
+    );
+  });
+
+  it("同名重装替换整个 local/<name>/ 且已启用插件按指纹变为 changed", async () => {
+    const f = makeFixtureEnv();
+    const v1Src = writeNativePlugin(path.join(f.root, "v1"), {
+      dirName: "src",
+      manifest: { name: "demo-tool", version: "1.0.0" },
+      files: { "skills/demo/SKILL.md": "---\ndescription: v1\n---\nV1" },
+    });
+    const v2Src = writeNativePlugin(path.join(f.root, "v2"), {
+      dirName: "src",
+      manifest: { name: "demo-tool", version: "2.0.0" },
+      files: { "skills/demo/SKILL.md": "---\ndescription: v2\n---\nV2" },
+    });
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    const first = await installLocalPlugin(f.plat, { ...discOpts, path: v1Src });
+    expect(first.state).toBe("off");
+    expect(first.version).toBe("1.0.0");
+
+    await setPluginEnabled(f.plat, { ...discOpts, id: first.id, enabled: true });
+    expect((await describePlugins(f.plat, discOpts)).plugins[0]?.state).toBe("on");
+
+    // 重装新版本：旧版本目录 1.0.0 被整体替换，plugins.json 记录保留，状态变为 changed
+    const second = await installLocalPlugin(f.plat, { ...discOpts, path: v2Src });
+    expect(second.id).toBe("nocturne:demo-tool@local");
+    expect(second.version).toBe("2.0.0");
+    expect(second.state).toBe("changed");
+    expect(
+      existsSync(path.join(f.nocturneHome, "plugins", "installed", "local", "demo-tool", "1.0.0")),
+    ).toBe(false);
+    expect(
+      existsSync(path.join(f.nocturneHome, "plugins", "installed", "local", "demo-tool", "2.0.0")),
+    ).toBe(true);
+  });
+
+  it("中途复制失败不留临时残留，且原有已安装副本保持完好", async () => {
+    const f = makeFixtureEnv();
+    const v1Src = writeNativePlugin(path.join(f.root, "ok"), {
+      dirName: "src",
+      manifest: { name: "atomic-demo", version: "1.0.0" },
+      files: { "skills/a/SKILL.md": "---\ndescription: a\n---\nA" },
+    });
+    const v2Src = writeNativePlugin(path.join(f.root, "fail"), {
+      dirName: "src",
+      manifest: { name: "atomic-demo", version: "2.0.0" },
+      files: {
+        "skills/a/SKILL.md": "---\ndescription: a2\n---\nA2",
+        "boom.txt": "trigger-fail",
+      },
+    });
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    await installLocalPlugin(f.plat, { ...discOpts, path: v1Src });
+
+    const failingPlat = {
+      ...f.plat,
+      fs: {
+        ...f.plat.fs,
+        writeFile: async (
+          p: string,
+          data: string | Uint8Array,
+          opts?: { mode?: number },
+        ): Promise<void> => {
+          if (p.endsWith("boom.txt")) {
+            throw new Error("simulated disk full");
+          }
+          await f.plat.fs.writeFile(p, data, opts);
+        },
+      },
+    };
+
+    await expect(installLocalPlugin(failingPlat, { ...discOpts, path: v2Src })).rejects.toThrow(
+      /simulated disk full/,
+    );
+
+    const localDir = path.join(f.nocturneHome, "plugins", "installed", "local");
+    const entries = await f.plat.fs.readdir(localDir);
+    expect(entries.map((e) => e.name)).toEqual(["atomic-demo"]);
+    expect(existsSync(path.join(localDir, "atomic-demo", "1.0.0", "skills", "a", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+
+  it("卸载删除目录、plugins.json 记录与 MCP 工具缓存，不动 PLUGIN_DATA；删除失败时状态回滚一致", async () => {
+    const f = makeFixtureEnv();
+    const src = writeNativePlugin(path.join(f.root, "u-src"), {
+      dirName: "src",
+      manifest: { name: "removable", version: "1.0.0" },
+      files: { "skills/rem/SKILL.md": "---\ndescription: rem\n---\nREM" },
+    });
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    const installed = await installLocalPlugin(f.plat, { ...discOpts, path: src });
+    await setPluginEnabled(f.plat, { ...discOpts, id: installed.id, enabled: true });
+
+    // 准备 PLUGIN_DATA 与 MCP 工具缓存（本插件 + 其他插件）
+    const pluginDataDir = path.join(f.nocturneHome, "plugins", "data", "removable-local");
+    mkdirSync(pluginDataDir, { recursive: true });
+    writeFileSync(path.join(pluginDataDir, "keep.txt"), "keep-me");
+
+    const cacheDir = path.join(f.nocturneHome, "plugins", "cache", "mcp-tools");
+    mkdirSync(cacheDir, { recursive: true });
+    const ownCache = path.join(cacheDir, "nocturne_removable_local__srv__0123456789abcdef.json");
+    const otherCache = path.join(cacheDir, "nocturne_docx_builtin__word__fedcba9876543210.json");
+    writeFileSync(
+      ownCache,
+      JSON.stringify({ schemaVersion: 1, pluginId: installed.id, serverId: "srv", tools: [] }),
+    );
+    writeFileSync(
+      otherCache,
+      JSON.stringify({
+        schemaVersion: 1,
+        pluginId: "nocturne:docx@builtin",
+        serverId: "word",
+        tools: [],
+      }),
+    );
+
+    // 1. 模拟插件目录被占用（EBUSY）：报错，且磁盘目录与 plugins.json 记录都保持原样
+    const removableDir = path.join(f.nocturneHome, "plugins", "installed", "local", "removable");
+    const busyPlat = {
+      ...f.plat,
+      fs: {
+        ...f.plat.fs,
+        rename: async (oldPath: string, newPath: string): Promise<void> => {
+          if (f.plat.paths.equals(oldPath, removableDir)) {
+            const err = new Error("resource busy or locked") as NodeJS.ErrnoException;
+            err.code = "EBUSY";
+            throw err;
+          }
+          await f.plat.fs.rename(oldPath, newPath);
+        },
+      },
+    };
+    await expect(uninstallPlugin(busyPlat, { ...discOpts, id: installed.id })).rejects.toThrow(
+      /占用/,
+    );
+    expect(
+      existsSync(path.join(f.nocturneHome, "plugins", "installed", "local", "removable")),
+    ).toBe(true);
+    const storedAfterFail = JSON.parse(
+      readFileSync(path.join(f.nocturneHome, "plugins.json"), "utf8"),
+    ) as { plugins: Record<string, unknown> };
+    expect(storedAfterFail.plugins[installed.id]).toBeDefined();
+
+    // 2. 经 Runtime 卸载：广播已打开会话、删除目录/记录/本插件缓存，保留 PLUGIN_DATA 与其他缓存
+    const cfg = await loadConfig(f.plat, { nocturneHome: f.nocturneHome });
+    const rt = await createRuntime({
+      config: cfg,
+      cwd: f.ws,
+      sessionsDir: f.sessionsDir,
+      providers: [new FakeProvider({ scripts: [] })],
+      plugins: { codexHome: f.codexHome, claudeHome: f.claudeHome },
+    });
+    openRuntimes.push(rt);
+    const session = await rt.createSession({
+      model: { provider: "fake", model: "fake-1" },
+      cwd: f.ws,
+    });
+    openSessions.push(session);
+
+    const res = await rt.uninstallPlugin({ id: installed.id });
+    expect(res.affectedSessions).toBe(1);
+    expect(
+      existsSync(path.join(f.nocturneHome, "plugins", "installed", "local", "removable")),
+    ).toBe(false);
+    const storedAfterOk = JSON.parse(
+      readFileSync(path.join(f.nocturneHome, "plugins.json"), "utf8"),
+    ) as { plugins: Record<string, unknown> };
+    expect(storedAfterOk.plugins[installed.id]).toBeUndefined();
+    expect(existsSync(ownCache)).toBe(false);
+    expect(existsSync(otherCache)).toBe(true);
+    expect(readFileSync(path.join(pluginDataDir, "keep.txt"), "utf8")).toBe("keep-me");
+  });
+
+  it("卸载内置插件或 Codex / Claude Code 插件报错", async () => {
+    const f = makeFixtureEnv();
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    await expect(
+      uninstallPlugin(f.plat, { ...discOpts, id: "nocturne:docx@builtin" }),
+    ).rejects.toThrow(/只能卸载本地安装的 Nocturne 插件/);
+    await expect(uninstallPlugin(f.plat, { ...discOpts, id: "codex:demo@mkt" })).rejects.toThrow(
+      /只能卸载本地安装的 Nocturne 插件/,
+    );
+    await expect(uninstallPlugin(f.plat, { ...discOpts, id: "claude:demo@mkt" })).rejects.toThrow(
+      /只能卸载本地安装的 Nocturne 插件/,
+    );
+    await expect(
+      uninstallPlugin(f.plat, { ...discOpts, id: "nocturne:nonexistent@local" }),
+    ).rejects.toThrow(/未找到本地安装的插件/);
   });
 });
