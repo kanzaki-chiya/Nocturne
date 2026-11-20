@@ -44,14 +44,24 @@ pub async fn open_in_editor(
             "目录请用「在资源管理器中显示」打开",
         ));
     }
-    let exe = match editor.as_str() {
+    launch_editor(&editor, &path, line)
+}
+
+/// 用 VS Code / Cursor 打开文件并跳到行号（`<exe> -g <file>:<line>`）；
+/// `open_in_editor` 与「打开」菜单里的系统应用（file_apps.rs）共用。
+pub(crate) fn launch_editor(
+    editor: &str,
+    path: &str,
+    line: Option<u32>,
+) -> Result<(), CommandError> {
+    let exe = match editor {
         "vscode" => find_editor("code")
             .ok_or_else(|| CommandError::new("editor_missing", "未检测到 VS Code"))?,
         "cursor" => find_editor("cursor")
             .ok_or_else(|| CommandError::new("editor_missing", "未检测到 Cursor"))?,
         _ => return Err(CommandError::new("invalid_editor", "未知的编辑器")),
     };
-    let mut arg = path;
+    let mut arg = path.to_string();
     if let Some(line) = line {
         arg = format!("{arg}:{line}");
     }
@@ -84,11 +94,9 @@ pub async fn open_with_default(path: String) -> Result<DefaultOpenOutcome, Comma
     if !target.is_absolute() {
         return Err(CommandError::new("invalid_path", "文件路径必须是绝对路径"));
     }
+    std::fs::canonicalize(&target).map_err(|_| CommandError::new("not_found", "文件不存在"))?;
     // 真实路径也查一遍：`a.bat.` 这类尾点名、指向脚本的符号链接都按目标类型算
-    let real =
-        std::fs::canonicalize(&target).map_err(|_| CommandError::new("not_found", "文件不存在"))?;
-    let pathext = std::env::var("PATHEXT").ok();
-    if launches_code(&target, pathext.as_deref()) || launches_code(&real, pathext.as_deref()) {
+    if launches_code_any(&target) {
         tauri_plugin_opener::reveal_item_in_dir(&target)
             .map_err(|e| CommandError::new("open_failed", format!("无法显示文件：{e}")))?;
         return Ok(DefaultOpenOutcome::Revealed);
@@ -108,6 +116,14 @@ const LAUNCHING_EXTENSIONS: &[&str] = &[
     "chm", "scf", "sct", "gadget", "settingcontent-ms", "library-ms", "search-ms", "diagcab",
 ];
 
+/// 原路径和真实路径各判一次（`a.bat.` 这类尾点名、指向脚本的符号链接按目标类型算）；
+/// `open_with_default` 与 file_apps.rs 共用。
+pub(crate) fn launches_code_any(path: &Path) -> bool {
+    let pathext = std::env::var("PATHEXT").ok();
+    launches_code(path, pathext.as_deref())
+        || std::fs::canonicalize(path).is_ok_and(|real| launches_code(&real, pathext.as_deref()))
+}
+
 fn launches_code(path: &Path, pathext: Option<&str>) -> bool {
     if path.is_dir() {
         return false;
@@ -126,7 +142,7 @@ fn launches_code(path: &Path, pathext: Option<&str>) -> bool {
     })
 }
 
-fn find_editor(cmd: &str) -> Option<PathBuf> {
+pub(crate) fn find_editor(cmd: &str) -> Option<PathBuf> {
     // PATH 里找 `code.cmd` / `cursor.cmd`（.cmd 由 volta/nvm 类垫片与官方安装程序提供）
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {

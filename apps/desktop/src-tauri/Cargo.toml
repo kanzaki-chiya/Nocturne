@@ -28,6 +28,9 @@ chrono = "=0.4.45"
 portable-pty = "=0.9.0"
 # 设置 › 外观的字体列表：只读系统字体的族名与等宽标记，不打包字体
 fontdb = "=0.24.0"
+# 「打开」菜单的系统应用图标：HICON 像素编码成 PNG data URL（依赖树里已有的版本）
+png = "=0.18.1"
+base64 = "=0.22.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [
@@ -53,6 +56,12 @@ windows = { version = "=0.62.2", features = [
     "Win32_Foundation",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    # 「打开」菜单（file_apps.rs）：建议的应用、默认程序、Invoke 与图标提取
+    "Win32_Graphics_Gdi",
+    "Win32_System_Environment",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # 面板内置浏览器（ADR-0060 第 5 节）：Tauri 没有包装的 WebView2 事件和操作（加速键、
 # 地址与历史、网站图标、外部协议、截图）。版本与 wry 用的一致，类型才能互通。

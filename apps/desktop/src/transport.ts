@@ -14,7 +14,7 @@ export class DesktopError extends Error {
   }
 }
 
-function asDesktopError(error: unknown): DesktopError {
+export function asDesktopError(error: unknown): DesktopError {
   if (
     typeof error === "object" &&
     error !== null &&

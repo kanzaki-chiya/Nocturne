@@ -2282,8 +2282,10 @@ dependencies = [
 name = "nocturne-desktop"
 version = "0.56.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "fontdb",
+ "png 0.18.1",
  "portable-pty",
  "rfd",
  "serde",

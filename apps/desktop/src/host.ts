@@ -188,6 +188,31 @@ export interface AgentBrowserHost {
   status?: (() => Promise<AgentBrowserStatus>) | undefined;
 }
 
+/** 系统给文件的一个「建议的应用」（外壳命令 list_file_apps）；id 是应用键的哈希 */
+export interface FileApp {
+  id: string;
+  name: string;
+  iconDataUrl?: string;
+  isDefault: boolean;
+}
+
+export interface FileAppList {
+  /** 默认程序在最前，其余按系统顺序 */
+  apps: FileApp[];
+  /** 会被直接执行的类型（脚本、可执行文件）：不列系统应用，「打开」改为在资源管理器中显示 */
+  launchesCode: boolean;
+  /** 系统查询失败或不是 Windows */
+  failed: boolean;
+  /** apps 为空时兜底的 VS Code / Cursor 图标（读自本机 exe） */
+  editorIcons: { vscode?: string; cursor?: string };
+}
+
+export interface FileAppsHost {
+  list: (path: string) => Promise<FileAppList>;
+  /** VS Code / Cursor 由外壳改用 `-g file:line` 打开，line 才有用 */
+  open: (path: string, id: string, line?: number) => Promise<void>;
+}
+
 export interface AgentBrowserStatus {
   enabled: boolean;
   restartRequired: boolean;
@@ -218,6 +243,8 @@ export interface DesktopHost {
   listFonts?: () => Promise<FontFamily[]>;
   /** 用指定编辑器打开文件并跳到行号（Rust 命令经 code/cursor -g 启动） */
   openInEditor: (editor: "vscode" | "cursor", path: string, line?: number) => Promise<void>;
+  /** 「文件」标签「打开」菜单的系统建议应用（Windows）；没有时菜单退回 VS Code / Cursor 与系统默认程序 */
+  fileApps?: FileAppsHost | undefined;
   /** 系统文件夹选择对话框；取消返回 null */
   pickFolder: () => Promise<string | null>;
   pickExecutable?: (() => Promise<string | null>) | undefined;

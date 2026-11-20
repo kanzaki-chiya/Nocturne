@@ -19,6 +19,8 @@ fn main() {
             "detect_editors",
             "open_in_editor",
             "open_with_default",
+            "list_file_apps",
+            "open_file_with_app",
             "list_fonts",
             "notify_show",
             "notify_dismiss",

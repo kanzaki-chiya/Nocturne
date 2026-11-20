@@ -11,6 +11,7 @@ mod browser_policy;
 mod browsing_data;
 mod computer;
 mod editor;
+mod file_apps;
 mod fonts;
 mod images;
 mod job;
@@ -161,6 +162,8 @@ pub fn run() {
         editor::detect_editors,
         editor::open_in_editor,
         editor::open_with_default,
+        file_apps::list_file_apps,
+        file_apps::open_file_with_app,
         fonts::list_fonts,
         notify::notify_show,
         notify::notify_dismiss,

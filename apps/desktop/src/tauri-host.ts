@@ -16,11 +16,13 @@ import type {
   AgentWatchSnapshot,
   BrowserMessage,
   DesktopHost,
+  FileAppList,
   TerminalMessage,
 } from "./host";
 import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
 import type { BackendMessage } from "./types";
+import { asDesktopError } from "./transport";
 import { parseRawChangelog } from "./versions";
 
 export function createTauriHost(): DesktopHost {
@@ -121,6 +123,27 @@ export function createTauriHost(): DesktopHost {
         path,
         ...(line !== undefined ? { line } : {}),
       });
+    },
+    // 外壳的 { code, message } 包成 Error，前端顶栏下方的错误行直接显示中文 message
+    fileApps: {
+      async list(path) {
+        try {
+          return await invoke<FileAppList>("list_file_apps", { path });
+        } catch (error) {
+          throw asDesktopError(error);
+        }
+      },
+      async open(path, id, line) {
+        try {
+          await invoke("open_file_with_app", {
+            path,
+            id,
+            ...(line !== undefined ? { line } : {}),
+          });
+        } catch (error) {
+          throw asDesktopError(error);
+        }
+      },
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
     pickExecutable: () =>
