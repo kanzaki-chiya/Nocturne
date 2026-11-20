@@ -1,6 +1,6 @@
 {
   "name": "xlsx",
-  "version": "0.55.0",
+  "version": "0.56.0",
   "description": "创建、读取、编辑、重算、转换与按页预览电子表格。",
   "skills": "./skills",
   "mcpServers": {
