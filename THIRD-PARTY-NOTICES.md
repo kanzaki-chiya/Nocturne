@@ -48,7 +48,16 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 
 桌面端右侧面板的终端用 xterm.js（上表 `@xterm/xterm`、`@xterm/addon-fit` 与 `@xterm/addon-unicode11`，均为 MIT，无运行时依赖），随终端标签首次打开动态加载，不进手机网页。
 
-四个内置文档插件（`plugins/{docx,xlsx,pptx,pdf}/server.mjs`）静态内联 `@modelcontextprotocol/sdk` 1.30.0（MIT，含其传递依赖 `zod` 4.6.5 MIT、`ajv` 8.20.0 MIT、`ajv-formats` 3.0.1 MIT、`fast-deep-equal` 3.1.3 MIT、`fast-uri` 3.1.8 BSD-3-Clause、`json-schema-traverse` 1.0.0 MIT）、`marked` 18.0.7（MIT，用于 `docx` 将 Markdown 转为 HTML）与 `pdf-lib` 1.17.1（MIT，用于 `pdf` 合并与拆分；其传递依赖为 `@pdf-lib/standard-fonts` 1.0.0 MIT、`@pdf-lib/upng` 1.0.1 MIT、`pako` 1.0.11 MIT AND Zlib、`tslib` 1.14.1 0BSD），均与 GPL-3.0-only 兼容。
+四个内置文档插件（`plugins/{docx,xlsx,pptx,pdf}/server.mjs`）静态内联 `@modelcontextprotocol/sdk` 1.30.0（MIT，含其传递依赖 `zod` 4.6.5 MIT、`ajv` 8.20.0 MIT、`ajv-formats` 3.0.1 MIT、`fast-deep-equal` 3.1.3 MIT、`fast-uri` 3.1.8 BSD-3-Clause、`json-schema-traverse` 1.0.0 MIT）、`marked` 18.0.7（MIT，用于 `docx` 将 Markdown 转为 HTML）与 `pdf-lib` 1.17.1（MIT，用于 `pdf` 合并与拆分及文档页数读取；其传递依赖为 `@pdf-lib/standard-fonts` 1.0.0 MIT、`@pdf-lib/upng` 1.0.1 MIT、`pako` 1.0.11 MIT AND Zlib、`tslib` 1.14.1 0BSD），均与 GPL-3.0-only 兼容。
+
+四个内置文档插件共用的文档查看器页面（`plugins/{docx,xlsx,pptx,pdf}/viewer.html`）与辅助资源目录（`viewer-assets/`）静态内联或随插件打包自 `pdfjs-dist` **6.5.438**（Apache-2.0，2026-11-01 发布，无运行时依赖）：
+
+- **查看器核心与 Worker**：内联 `pdfjs-dist/build/pdf.min.mjs` 与 `pdfjs-dist/build/pdf.worker.min.mjs`（Apache-2.0）。
+- **预定义 CMap（`viewer-assets/cmaps/*.bcmap`，168 个文件）**：来自 Adobe CMap 资源（`pdfjs-dist/cmaps/LICENSE`，BSD-3-Clause）。
+- **标准字体（`viewer-assets/standard_fonts/Foxit*.pfb`，10 个文件）**：来自 PDFium Authors（`pdfjs-dist/standard_fonts/LICENSE_FOXIT`，BSD-3-Clause）。注：`pdfjs-dist` 随包附带的 `LiberationSans-*.ttf` 4 个文件使用 `GNU General Public License v2 with font exception`（`LICENSE_LIBERATION`），不在 ADR-0100 允许范围（MIT / Apache-2.0 / BSD）内且与 GPL-3.0-only 存在许可冲突，已显式排除、不打包；`iccs/CGATS001Compat-v2-micro.icc`（CC0 1.0）亦未打包。
+- **WebAssembly 图像解码器（`viewer-assets/wasm/`）**：`jbig2.wasm`（PDFium Authors BSD-3-Clause + Mozilla Apache-2.0，`LICENSE_JBIG2`、`LICENSE_PDFJS_JBIG2`）与 `openjpeg.wasm`（OpenJPEG Team BSD-2-Clause + Mozilla BSD-3-Clause，`LICENSE_OPENJPEG`、`LICENSE_PDFJS_OPENJPEG`）。
+
+以上打包内容均为 Apache-2.0 / BSD 许可，与 GPL-3.0-only 兼容。
 
 | 开发与测试依赖 | 版本 | 许可证 |
 |---|---:|---|

@@ -274,3 +274,14 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
 - 表格按 PDF 分页显示，宽表会被拆到多页；以后需要时再给表格单独做网格视图。
 - 查看 Office 文档需要本机装有 LibreOffice，转换一次通常要几秒；PDF 不需要。
 - 每个插件多一个模型可见的工具。
+
+### 6. 实现约定
+
+- **`read_document` 单块上限**：`4 MiB`（`4,194,304` 字节）。经由 `@nocturne/mcp` `StdioPipeTransport`（单行 JSON-RPC 上限 8 MiB，`packages/mcp/src/transport.ts`）+ RPC 链路实测，1 MiB 与 4 MiB（base64 仅存一份于 `structuredContent.data`，单行约 5.33 MiB）稳定往返，8 MiB（base64 约 10.67 MiB）触达 8 MiB 上限断连。
+- **`pdfjs-dist` 版本与工厂**：`pdfjs-dist@6.5.438`（Apache-2.0，2026-11-01 发布，无 `eval` / `new Function`）。主线程通过自定义 `BinaryDataFactory`（`useWorkerFetch: false`、`disableWorkerRendering: true`）按 `kind`（`cMapUrl` / `standardFontDataUrl` / `wasmUrl`）经 `viewer_asset` 获取资源，不触发任何网络请求。
+- **Worker 路径**：构建时将 `pdf.worker.min.mjs` 打包为经典 IIFE 脚本内联进 `viewer.html`，运行时通过经典 `new Worker(URL.createObjectURL(blob))` 启动真实 blob Worker 并将 `port` 传入 `PDFWorker`（`sandbox="allow-scripts"` 的 opaque origin 下 Chromium 拒绝 `{ type: "module" }` 的 blob Worker，经典 blob Worker 在真实 Windows WebView2 中稳定走通）；创建失败或超时时通过内联 `<script>` 退回 pdf.js 主线程模式。
+- **打包资源清单**（仅打包 MIT / Apache-2.0 / BSD 合规文件，写入 `viewer-assets/manifest.json`）：
+  - `cmaps/*.bcmap`（168 个，1,165,667 字节，BSD-3-Clause）；
+  - `standard_fonts/Foxit*.pfb`（10 个，200,615 字节，BSD-3-Clause）；`LiberationSans-*.ttf`（4 个，GPL-2.0-only with font exception）与 `iccs/CGATS001Compat-v2-micro.icc`（CC0-1.0）因不在允许许可范围内未打包；
+  - `wasm/jbig2.wasm`（103,671 字节，BSD-3-Clause + Apache-2.0）与 `wasm/openjpeg.wasm`（220,817 字节，BSD-2-Clause + BSD-3-Clause）；
+  - 共用 `viewer.html`：约 2.07 MiB（2,171,011 字节，低于 8 MiB 上限）。

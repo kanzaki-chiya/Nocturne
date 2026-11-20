@@ -208,3 +208,7 @@ default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; worker-src bl
   - `'wasm-unsafe-eval'` 只允许编译 WebAssembly，不放开 `eval`、`new Function` 和字符串形式的定时器；
   - `worker-src blob:` 只允许页面用自己生成的 blob 创建 Worker，不能从任何网络地址加载。
 - **不变的约束**：网络仍全部禁止。blob Worker 继承创建它的文档的 CSP（CSP Level 3「Initialize a global object's CSP list」），Worker 里的 `fetch` 同样受 `connect-src 'none'` 限制。实现轮必须在真实桌面端实测：Worker 能创建、能收发消息、Worker 内 `fetch` 被拦；WebAssembly 能编译运行；`eval` 与 `new Function` 仍被拦；页面 `fetch`、远程图片与 Tauri IPC 仍被拦。任何一项不符就停下，不得再放宽其他指令。
+
+## 修订：2026-11-20 模型调用 surface `open.tool` 时持久化 `openCall`
+
+补充第 5 节「生命周期」：当模型实时调用关联到某个 surface 的工具、执行成功且工具名正好是该 surface 的 `open.tool`（含 `mcp_call` 代理调用解析后的目标工具名）时，宿主同时将该次调用的参数记为该标签的 `openCall` 并随 `panelSessions` 持久化，使模型打开的标签重启后首次显示时也能重新打开原文档；实时投递期间仍直接使用模型结果，不重复发起 `callAppTool`。
