@@ -3,6 +3,16 @@ import { fail } from "./errors.js";
 export type Bytes = Uint8Array<ArrayBuffer>;
 export const MAX_FRAME = 1_048_576;
 export const MAX_MESSAGE = 16 * 1024 * 1024;
+/** 压缩载荷重组上限：允许不可压缩的 MAX_MESSAGE 报文带少量 deflate 存储块与 sync flush 开销 */
+export const MAX_COMPRESSED_MESSAGE = MAX_MESSAGE + 65_536;
+/** 压缩流内单条 UTF-8 消息的结束哨兵（RFC 3629 保证 0xFF 永不出现在合法 UTF-8 字节序列中） */
+export const MESSAGE_TERMINATOR = 0xff;
+export const DATA_FLAGS = {
+  uncompressedEnd: 0x00,
+  uncompressedMore: 0x01,
+  compressedEnd: 0x02,
+  compressedMore: 0x03,
+} as const;
 export const FRAME_TYPES = {
   init: 0x01,
   response: 0x02,

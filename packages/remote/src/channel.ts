@@ -1,3 +1,9 @@
+import {
+  createDeflateRawDecompressor,
+  type ChannelCompression,
+  type StreamCompressor,
+  type StreamDecompressor,
+} from "./compression.js";
 import { hkdf, identityId, random, sign, verify, type Identity } from "./crypto.js";
 import {
   b64u,
@@ -9,8 +15,11 @@ import {
   jsonFrame,
   parseFrame,
   version,
+  DATA_FLAGS,
+  MAX_COMPRESSED_MESSAGE,
   MAX_FRAME,
   MAX_MESSAGE,
+  MESSAGE_TERMINATOR,
   FRAME_TYPES,
   type Bytes,
 } from "./encoding.js";
@@ -24,6 +33,8 @@ export interface SecureLineTransport {
   flush(): Promise<void>;
   close(): void;
   readonly closeReason: RemoteChannelError | undefined;
+  enableSendCompression(compressor: StreamCompressor): void;
+  enableReceiveCompression(algorithm: ChannelCompression): void;
 }
 export interface ConnectChannelOptions {
   identity: Identity;
@@ -130,6 +141,8 @@ function channel(
     let chunks: Bytes[] = [],
       size = 0;
     let sendKey: CryptoKey | undefined, receiveKey: CryptoKey | undefined;
+    let sendCompressor: StreamCompressor | undefined;
+    let receiveDecompressor: StreamDecompressor | undefined;
     let temporary: Awaited<ReturnType<typeof ephemeral>> | undefined;
     let fields: Bytes[] | undefined;
     let deviceId = "";
@@ -139,6 +152,13 @@ function channel(
     const timer = setTimeout(() => {
       stop(new RemoteChannelError("timeout"), true);
     }, timeout);
+
+    const releaseCompression = (): void => {
+      sendCompressor?.close();
+      sendCompressor = undefined;
+      receiveDecompressor?.close();
+      receiveDecompressor = undefined;
+    };
 
     const notify = (): void => {
       if (lineHandler !== undefined)
@@ -161,6 +181,7 @@ function channel(
       fields = undefined;
       chunks = [];
       size = 0;
+      releaseCompression();
       if (!ready) {
         if (report) {
           try {
@@ -177,6 +198,29 @@ function channel(
       get closeReason() {
         return reason;
       },
+      enableSendCompression(compressor) {
+        if (closing || stopped || inputClosed) {
+          compressor.close();
+          return;
+        }
+        if (sendCompressor !== undefined) {
+          compressor.close();
+          fail("protocol_error");
+        }
+        sendCompressor = compressor;
+      },
+      enableReceiveCompression(algorithm) {
+        if (stopped || inputClosed) return;
+        const supported: ReadonlySet<string> = new Set(["deflate-raw"]);
+        if (!supported.has(algorithm) || receiveDecompressor !== undefined || chunks.length > 0) {
+          fail("protocol_error");
+        }
+        try {
+          receiveDecompressor = createDeflateRawDecompressor();
+        } catch {
+          fail("protocol_error");
+        }
+      },
       send(line) {
         if (closing || stopped || inputClosed) return;
         // 消息是原始 UTF-8，不做 NFC；只有转录里的字符串规范化。
@@ -185,24 +229,38 @@ function channel(
           stop(new RemoteChannelError("frame_too_large"));
           return;
         }
+        // 在 send() 同步时刻捕获压缩器，确保开启前已入队的报文（如 initialize 响应）保持未压缩。
+        const compressor = sendCompressor;
         outgoing = outgoing
           .then(async () => {
             if (stopped || inputClosed || sendKey === undefined) return;
+            let payload: Bytes = message;
+            let compressed = false;
+            if (compressor !== undefined) {
+              const input = new Uint8Array(message.length + 1);
+              input.set(message, 0);
+              input[message.length] = MESSAGE_TERMINATOR;
+              payload = new Uint8Array(await compressor.compress(input));
+              if (unavailable()) return;
+              compressed = true;
+            }
             const capacity = MAX_FRAME - 9 - 16 - 1;
+            const moreFlag = compressed ? DATA_FLAGS.compressedMore : DATA_FLAGS.uncompressedMore;
+            const endFlag = compressed ? DATA_FLAGS.compressedEnd : DATA_FLAGS.uncompressedEnd;
             let offset = 0;
             do {
               if (sendCounter >= Number.MAX_SAFE_INTEGER) fail("closed");
-              const end = Math.min(offset + capacity, message.length);
+              const end = Math.min(offset + capacity, payload.length);
               const frame = await encryptFrame(
                 sendKey,
                 sendCounter++,
-                end < message.length ? 1 : 0,
-                message.subarray(offset, end),
+                end < payload.length ? moreFlag : endFlag,
+                payload.subarray(offset, end),
               );
               if (unavailable()) return;
               transport.send(frame);
               offset = end;
-            } while (offset < message.length);
+            } while (offset < payload.length);
           })
           .catch((error: unknown) => {
             stop(asChannelError(error));
@@ -223,6 +281,8 @@ function channel(
         if (closing || inputClosed) return;
         closing = true;
         void outgoing.then(() => {
+          sendCompressor?.close();
+          sendCompressor = undefined;
           transport.close();
         });
       },
@@ -257,12 +317,32 @@ function channel(
       }
       if (unavailable()) return;
       receiveCounter++;
-      if (plain[0] !== 0 && plain[0] !== 1) fail();
+      const flag = plain[0];
+      if (receiveDecompressor !== undefined) {
+        if (flag !== DATA_FLAGS.compressedEnd && flag !== DATA_FLAGS.compressedMore) fail();
+        const chunk = plain.subarray(1);
+        size += chunk.length;
+        if (size > MAX_COMPRESSED_MESSAGE) fail("frame_too_large");
+        chunks.push(chunk);
+        if (flag === DATA_FLAGS.compressedEnd) {
+          const compressed = concat(...chunks);
+          chunks = [];
+          size = 0;
+          if (compressed.length === 0) fail("decrypt_failed");
+          const decompressed = await receiveDecompressor.decompress(compressed);
+          if (unavailable()) return;
+          const line = new TextDecoder("utf-8", { fatal: true }).decode(decompressed);
+          pending.push(line);
+          notify();
+        }
+        return;
+      }
+      if (flag !== DATA_FLAGS.uncompressedEnd && flag !== DATA_FLAGS.uncompressedMore) fail();
       const chunk = plain.subarray(1);
       size += chunk.length;
       if (size > MAX_MESSAGE) fail("frame_too_large");
       chunks.push(chunk);
-      if (plain[0] === 0) {
+      if (flag === DATA_FLAGS.uncompressedEnd) {
         const line = new TextDecoder("utf-8", { fatal: true }).decode(concat(...chunks));
         chunks = [];
         size = 0;
@@ -401,6 +481,7 @@ function channel(
         temporary = undefined;
         fields = undefined;
         sendKey = receiveKey = undefined;
+        releaseCompression();
         if (!ready) reject(reason ?? new RemoteChannelError("closed"));
         notify();
       });

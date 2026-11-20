@@ -1,5 +1,10 @@
 export { RemoteChannelError, type RemoteChannelErrorCode } from "./errors.js";
-export { MAX_FRAME, MAX_MESSAGE, FRAME_TYPES } from "./encoding.js";
+export { MAX_FRAME, MAX_MESSAGE, FRAME_TYPES, DATA_FLAGS, MESSAGE_TERMINATOR } from "./encoding.js";
+export {
+  supportsDeflateRawDecompression,
+  type ChannelCompression,
+  type StreamCompressor,
+} from "./compression.js";
 export {
   generateIdentity,
   exportIdentity,

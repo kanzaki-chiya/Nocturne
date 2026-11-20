@@ -1,9 +1,10 @@
 import { createECDH, createHash, createCipheriv, createHmac, hkdfSync } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
+import { constants as zlibConstants, createDeflateRaw } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import vectors from "./vectors.json" with { type: "json" };
 import { required } from "./helpers.js";
-import { b64u, unb64u, transcript, utf8 } from "../src/encoding.js";
+import { b64u, unb64u, transcript, utf8, DATA_FLAGS, MESSAGE_TERMINATOR } from "../src/encoding.js";
 import {
   fingerprint,
   generateIdentity,
@@ -11,6 +12,7 @@ import {
   importIdentity,
   exportIdentity,
 } from "../src/index.js";
+import { createDeflateRawDecompressor } from "../src/compression.js";
 import { hkdf, sign, verify } from "../src/crypto.js";
 import { deriveKeys, encryptFrame } from "../src/channel.js";
 
@@ -189,6 +191,77 @@ describe("固定向量与同构", () => {
     }
     await expect(fingerprint(new Uint8Array(64))).rejects.toMatchObject({ code: "protocol_error" });
     await expect(fingerprint(new Uint8Array(65))).rejects.toMatchObject({ code: "protocol_error" });
+  });
+
+  it("固定压缩数据帧向量：Node zlib 独立交叉校验与 DecompressionStream 还原", async () => {
+    const v = vectors.compressed;
+    const h2pKey = await crypto.subtle.importKey(
+      "raw",
+      bytes(vectors.handshake.kH2P),
+      "AES-GCM",
+      false,
+      ["encrypt", "decrypt"],
+    );
+    const deflate = createDeflateRaw({ level: 6, windowBits: 15 });
+    const decompressor = createDeflateRawDecompressor();
+    try {
+      for (const [counter, message] of v.messages.entries()) {
+        const compressed = await new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = [];
+          const onData = (chunk: Buffer) => chunks.push(chunk);
+          const onError = (error: Error) => {
+            deflate.off("data", onData);
+            deflate.off("error", onError);
+            reject(error);
+          };
+          deflate.on("data", onData);
+          deflate.on("error", onError);
+          deflate.write(
+            Buffer.concat([Buffer.from(message, "utf8"), Buffer.from([MESSAGE_TERMINATOR])]),
+          );
+          deflate.flush(zlibConstants.Z_SYNC_FLUSH, () => {
+            deflate.off("data", onData);
+            deflate.off("error", onError);
+            resolve(Buffer.concat(chunks));
+          });
+        });
+        expect(compressed.toString("hex")).toBe(v.payloads[counter]);
+
+        const head = Buffer.alloc(9);
+        head[0] = 0x10;
+        head.writeBigUInt64BE(BigInt(counter), 1);
+        const iv = Buffer.concat([Buffer.alloc(4), head.subarray(1)]);
+        const cipher = createCipheriv(
+          "aes-256-gcm",
+          Buffer.from(vectors.handshake.kH2P, "hex"),
+          iv,
+        );
+        cipher.setAAD(head);
+        const nodeFrame = Buffer.concat([
+          head,
+          cipher.update(Buffer.concat([Buffer.from([DATA_FLAGS.compressedEnd]), compressed])),
+          cipher.final(),
+          cipher.getAuthTag(),
+        ]);
+        expect(nodeFrame.toString("hex")).toBe(v.frames[counter]);
+        expect(
+          hex(
+            await encryptFrame(
+              h2pKey,
+              counter,
+              DATA_FLAGS.compressedEnd,
+              new Uint8Array(compressed),
+            ),
+          ),
+        ).toBe(v.frames[counter]);
+
+        const restored = await decompressor.decompress(new Uint8Array(compressed));
+        expect(new TextDecoder("utf-8", { fatal: true }).decode(restored)).toBe(message);
+      }
+    } finally {
+      deflate.destroy();
+      decompressor.close();
+    }
   });
 
   it("src 源码不含 Node 全局或内置模块", () => {

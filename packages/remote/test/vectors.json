@@ -23,6 +23,17 @@
     "1000000000000000008c13a31ae7d69c466f3b4e1ced1f4554754d05fb8e86",
     "10000000000000000181bbf8508a2258667f2a6fb61f30d2bb61f91590841c8f41e3d6ace66170"
   ],
+  "compressed": {
+    "messages": ["hello nocturne remote compression", "hello nocturne remote compression 你好，🌙"],
+    "payloads": [
+      "ca48cdc9c957c8cb4f2e292dca4b55284acdcd2f495548cecf2d284a2d2ececccffb0f000000ffff",
+      "ca20a442e1c9de054f97ee7dbfa7e7c3fc9e99ff01000000ffff"
+    ],
+    "frames": [
+      "100000000000000000a8bd09fe0376fde7813d661c29d677220e676133e8ae58f68c5d951aa1fcf050937bea34002c74eb3485c91d0a4c8cd26c036524eeb173a4ef",
+      "100000000000000001fa2e9e63e887f36a9212eef4894a12e305ff7ca6da8af1a479d9a68774e39af773909e2ce6badd9f972b68"
+    ]
+  },
   "pairing": {
     "K": "3333333333333333333333333333333333333333333333333333333333333333",
     "slot": "RERERERERERERERERERERA",
