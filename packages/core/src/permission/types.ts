@@ -32,7 +32,12 @@ export interface PermissionDecision {
   reason: string;
   /** 命中的规则及来源（permissions.md 5.3）；Grant / 兜底 ask 等无规则本体时 rule 缺省 */
   matchedRule?: RuleHit | undefined;
+  /** 权限层显式指定的拒绝错误码（如 MCP App 页面调用受限时的 app_tool_not_allowed） */
+  errorCode?: string | undefined;
 }
+
+/** 工具调用来源：缺省或 "model" 为模型调用；app 为 MCP App 页面调用（ADR-0101 第 3 节） */
+export type PermissionCaller = "model" | { kind: "app"; serverId: string };
 
 /** 求值结果：填好 `where` 的主体列表 + 统一决定 */
 export interface SubjectEvaluation {
@@ -52,6 +57,8 @@ export interface EvaluateOptions {
    * 规则层的 allow/ask/deny 判定不受影响。
    */
   skipApprovals?: boolean | undefined;
+  /** 调用来源；缺省为 "model"。页面来源时按 ADR-0101 第 3 节仅放行同服务器只读工具 */
+  caller?: PermissionCaller | undefined;
   /**
    * 会话状态的只读视图（ADR-0057）：gate 在 edit 主体最终放行时记录目标，
    * policy 据此判断「运行工作区代码」的命令是否仍可信。不持久化，

@@ -89,6 +89,7 @@ interface SubjectVerdict {
   /** 补充说明（组合命令降级、命令行提升等） */
   note?: string | undefined;
   userOnly?: boolean | undefined;
+  errorCode?: string | undefined;
 }
 
 const STRICTNESS: Record<PermissionAction, number> = { deny: 2, ask: 1, allow: 0 };
@@ -391,6 +392,68 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     s: PermissionSubject,
     evalOptions: EvaluateOptions | undefined,
   ): SubjectVerdict {
+    const appCaller =
+      evalOptions?.caller !== undefined && evalOptions.caller !== "model"
+        ? evalOptions.caller
+        : undefined;
+    if (appCaller !== undefined) {
+      if (s.kind !== "mcp") {
+        return {
+          action: "deny",
+          errorCode: "app_tool_not_allowed",
+          hit: { origin: "default", description: "页面调用仅允许同服务器只读 MCP 工具" },
+        };
+      }
+      const slash = s.target.indexOf("/");
+      const targetServer = slash > 0 ? s.target.slice(0, slash) : "";
+      if (appCaller.serverId === "" || targetServer !== appCaller.serverId) {
+        return {
+          action: "deny",
+          errorCode: "app_tool_not_allowed",
+          hit: {
+            origin: "default",
+            description: `页面调用禁止跨服务器调用工具（来源：${appCaller.serverId || "未知"}，目标：${targetServer || s.target}）`,
+          },
+        };
+      }
+      if (s.readOnly !== true) {
+        return {
+          action: "deny",
+          errorCode: "app_tool_not_allowed",
+          hit: {
+            origin: "default",
+            description: "页面调用仅允许只读工具（readOnlyHint: true）",
+          },
+        };
+      }
+      const trustedHit = lastMatch(trusted, s);
+      let action: PermissionAction = trustedHit?.rule?.action ?? "ask";
+      let hit: RuleHit =
+        trustedHit ??
+        ({
+          origin: "default",
+          description: describeHit("default", undefined, presetName),
+        } satisfies RuleHit);
+      const untrustedHit = lastMatch(untrusted, s);
+      const untrustedAction = untrustedHit?.rule?.action;
+      if (
+        untrustedHit !== undefined &&
+        untrustedAction !== undefined &&
+        STRICTNESS[untrustedAction] > STRICTNESS[action]
+      ) {
+        action = untrustedAction;
+        hit = untrustedHit;
+      }
+      if (action === "deny") {
+        return { action: "deny", hit };
+      }
+      return {
+        action: "allow",
+        hit,
+        ...(action === "ask" ? { note: "页面只读调用放行（服务器声明 readOnlyHint）" } : {}),
+      };
+    }
+
     const skipApprovals = evalOptions?.skipApprovals;
     if (s.kind === "app") {
       const userHit = lastMatch(
@@ -685,8 +748,19 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       }
       decisive ??= verdicts.at(-1);
 
-      // 空主体集：工具声明不触碰任何资源，直接放行
+      // 空主体集：模型调用声明不触碰任何资源时直接放行；页面调用必须带同服务器 MCP 主体
       if (verdicts.length === 0) {
+        if (options?.caller !== undefined && options.caller !== "model") {
+          return {
+            subjects: evaluated,
+            decision: {
+              action: "deny",
+              source: "rule",
+              reason: "拒绝——页面调用缺少同服务器只读 MCP 主体",
+              errorCode: "app_tool_not_allowed",
+            },
+          };
+        }
         return {
           subjects: evaluated,
           decision: { action: "allow", source: "rule", reason: "允许——工具声明不触碰任何资源" },
@@ -741,6 +815,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
           source: decisive?.hit.origin === "grant" && action === "allow" ? "grant" : "rule",
           reason,
           matchedRule: decisive?.hit,
+          ...(decisive?.errorCode !== undefined ? { errorCode: decisive.errorCode } : {}),
         },
       };
     },
