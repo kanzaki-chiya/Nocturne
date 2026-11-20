@@ -27,6 +27,7 @@ import {
 import { createHookRunner } from "../src/hooks/index.js";
 import {
   applyToolMetaToPluginSurfaces,
+  checkLocalPluginDirectory,
   computePluginFingerprint,
   describePlugins,
   discoverInstalledPlugins,
@@ -2865,5 +2866,179 @@ describe("插件清单 ui.surfaces（ADR-0101 第 4 节）", () => {
       keyKind: "version",
       keyValue: "0.56.0",
     });
+  });
+
+  it("checkLocalPluginDirectory 独立只读校验：覆盖有效插件、跳过条目、错误收集与 installTimeChecks", async () => {
+    const f = makeFixtureEnv();
+    const sourcesRoot = path.join(f.root, "check-sources");
+
+    // 1. 合法插件：含技能、Hook、stdio MCP、被跳过的 HTTP / stored MCP 与 UI surface
+    const fullSrc = writeNativePlugin(sourcesRoot, {
+      dirName: "full-demo",
+      manifest: {
+        name: "full-demo",
+        version: "1.3.0",
+        description: "完整示例插件",
+        interface: { displayName: "完整示例" },
+        hooks: {
+          SessionStart: [{ command: "node", args: ["${PLUGIN_ROOT}/hook.mjs"] }],
+        },
+        mcpServers: {
+          localSrv: { command: "${NOCTURNE_NODE}", args: ["${PLUGIN_ROOT}/server.mjs"] },
+          remoteSrv: { type: "http", url: "https://example.com/mcp" },
+          secretSrv: {
+            command: "node",
+            args: ["s.mjs"],
+            env: { API_KEY: { stored: true } },
+          },
+        },
+        ui: {
+          surfaces: [
+            {
+              id: "panel",
+              title: "示例面板",
+              server: "localSrv",
+              resourceUri: "ui://localSrv/panel.html",
+            },
+          ],
+        },
+      },
+      files: {
+        "skills/demo-skill/SKILL.md": "---\ndescription: demo skill\n---\nBody",
+        "hook.mjs": "process.exit(0);",
+        "server.mjs": "export {};",
+      },
+    });
+
+    const okRes = await checkLocalPluginDirectory(f.plat, {
+      path: fullSrc,
+      nocturneHome: f.nocturneHome,
+    });
+    expect(okRes.installable).toBe(true);
+    expect(okRes.errors).toEqual([]);
+    expect(okRes.pluginId).toBe("nocturne:full-demo@local");
+    expect(okRes.name).toBe("full-demo");
+    expect(okRes.version).toBe("1.3.0");
+    expect(okRes.displayName).toBe("完整示例");
+    expect(okRes.skills).toEqual(["demo-skill"]);
+    expect(okRes.hooks).toHaveLength(1);
+    expect(okRes.hooks[0]?.point).toBe("SessionStart");
+    expect(okRes.mcpServers).toEqual([
+      { id: "localSrv", command: "${NOCTURNE_NODE} ${PLUGIN_ROOT}/server.mjs" },
+      { id: "remoteSrv", command: "https://example.com/mcp", skipped: true, skipReason: "http" },
+      { id: "secretSrv", command: "node s.mjs", skipped: true, skipReason: "stored" },
+    ]);
+    expect(okRes.surfaces).toHaveLength(1);
+    expect(okRes.installTimeChecks.some((c) => c.includes("安装时才会检查"))).toBe(true);
+    // 只读：未在 nocturneHome 下创建 installed 目录
+    expect(existsSync(path.join(f.nocturneHome, "plugins", "installed"))).toBe(false);
+
+    // 2. 不传 nocturneHome 时也提示源目录位置检查留待安装时
+    const withoutHome = await checkLocalPluginDirectory(f.plat, { path: fullSrc });
+    expect(withoutHome.installable).toBe(true);
+    expect(withoutHome.installTimeChecks.some((c) => c.includes("<NOCTURNE_HOME>/plugins/"))).toBe(
+      true,
+    );
+
+    // 3. 仅有被跳过条目时无可用能力 → installable: false，同时列出被跳过条目与原因
+    const onlySkipped = writeNativePlugin(sourcesRoot, {
+      dirName: "only-http",
+      manifest: {
+        name: "only-http",
+        version: "0.1.0",
+        mcpServers: {
+          remote: { type: "http", url: "https://example.com/mcp" },
+        },
+      },
+    });
+    const skippedRes = await checkLocalPluginDirectory(f.plat, {
+      path: onlySkipped,
+      nocturneHome: f.nocturneHome,
+    });
+    expect(skippedRes.installable).toBe(false);
+    expect(skippedRes.errors).toEqual(["清单无效：插件不包含可用的技能、Hook 或 MCP 服务器"]);
+    expect(skippedRes.mcpServers).toEqual([
+      { id: "remote", command: "https://example.com/mcp", skipped: true, skipReason: "http" },
+    ]);
+  });
+
+  it("同一目录：checkLocalPluginDirectory 与 installLocalPlugin 给出的结论一致", async () => {
+    const f = makeFixtureEnv();
+    const sourcesRoot = path.join(f.root, "parity-sources");
+    const discOpts = {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+    };
+
+    const validSkill = writeNativePlugin(sourcesRoot, {
+      dirName: "parity-ok",
+      manifest: { name: "parity-ok", version: "0.2.0", description: "一致性测试" },
+      files: { "skills/p1/SKILL.md": "---\ndescription: p1\n---\nHello" },
+    });
+    const validMcp = writeNativePlugin(sourcesRoot, {
+      dirName: "parity-mcp",
+      manifest: {
+        name: "parity-mcp",
+        version: "0.3.0",
+        mcpServers: { srv: { command: "${NOCTURNE_NODE}", args: ["${PLUGIN_ROOT}/s.mjs"] } },
+      },
+      files: { "s.mjs": "export {};" },
+    });
+    const badName = writeNativePlugin(sourcesRoot, {
+      dirName: "parity-bad-name",
+      manifest: { name: "Bad_Name", version: "1.0.0" },
+      files: { "skills/s/SKILL.md": "---\ndescription: s\n---\nHi" },
+    });
+    const escapePath = writeNativePlugin(sourcesRoot, {
+      dirName: "parity-escape",
+      manifest: { name: "parity-escape", version: "1.0.0", skills: ["./../../outside"] },
+    });
+    const noCap = writeNativePlugin(sourcesRoot, {
+      dirName: "parity-empty",
+      manifest: { name: "parity-empty", version: "1.0.0" },
+    });
+    const noManifest = path.join(sourcesRoot, "parity-no-manifest");
+    mkdirSync(noManifest, { recursive: true });
+    const insidePlugins = writeNativePlugin(path.join(f.nocturneHome, "plugins", "nested"), {
+      dirName: "parity-inside",
+      manifest: { name: "parity-inside", version: "1.0.0" },
+      files: { "skills/s/SKILL.md": "---\ndescription: s\n---\nHi" },
+    });
+
+    const cases = [
+      validSkill,
+      validMcp,
+      badName,
+      escapePath,
+      noCap,
+      noManifest,
+      insidePlugins,
+      path.join(sourcesRoot, "nonexistent"),
+    ];
+
+    for (const dir of cases) {
+      const checked = await checkLocalPluginDirectory(f.plat, {
+        path: dir,
+        nocturneHome: f.nocturneHome,
+      });
+      if (checked.installable) {
+        const installed = await installLocalPlugin(f.plat, { ...discOpts, path: dir });
+        expect(installed.id).toBe(checked.pluginId);
+        expect(installed.version).toBe(checked.version);
+        expect(installed.skills).toEqual(checked.skills);
+        expect(installed.hooks).toEqual(checked.hooks);
+        expect(installed.mcpServers).toEqual(checked.mcpServers);
+      } else {
+        expect(checked.errors.length).toBeGreaterThan(0);
+        let installErr: Error | undefined;
+        try {
+          await installLocalPlugin(f.plat, { ...discOpts, path: dir });
+        } catch (e) {
+          installErr = e instanceof Error ? e : new Error(String(e));
+        }
+        expect(installErr?.message).toBe(checked.errors[0]);
+      }
+    }
   });
 });

@@ -13,6 +13,10 @@
     "./protocol": {
       "types": "./dist/protocol/index.d.mts",
       "import": "./dist/protocol/index.mjs"
+    },
+    "./plugin-check": {
+      "types": "./dist/plugin-check.d.mts",
+      "import": "./dist/plugin-check.mjs"
     }
   },
   "files": [

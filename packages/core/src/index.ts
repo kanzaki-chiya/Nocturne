@@ -7946,6 +7946,11 @@ export {
   type SkillImportResultView,
 } from "./skills/import.js";
 export {
+  checkLocalPluginDirectory,
+  type LocalPluginCheckOptions,
+  type LocalPluginCheckResult,
+} from "./plugins/check.js";
+export {
   createMcpOnDemandTools,
   estimateMcpToolsTokens,
   MAX_MCP_SEARCH_RESULTS,

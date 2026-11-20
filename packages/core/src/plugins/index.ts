@@ -41,6 +41,11 @@ export {
 export { computePluginFingerprint } from "./fingerprint.js";
 export { createPluginStore, type StoredPluginEntry } from "./store.js";
 export { discoverInstalledPlugins } from "./discovery.js";
+export {
+  checkLocalPluginDirectory,
+  type LocalPluginCheckOptions,
+  type LocalPluginCheckResult,
+} from "./check.js";
 
 export interface PluginMcpConflict {
   serverId: string;

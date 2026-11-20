@@ -15,6 +15,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "protocol/index": "src/protocol/index.ts",
+    "plugin-check": "src/plugins/check.ts",
     "image-worker": "src/tools/image-worker.ts",
   },
   format: "esm",

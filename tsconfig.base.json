@@ -25,6 +25,7 @@
     "paths": {
       "@nocturne/core": ["./packages/core/src/index.ts"],
       "@nocturne/core/protocol": ["./packages/core/src/protocol/index.ts"],
+      "@nocturne/core/plugin-check": ["./packages/core/src/plugins/check.ts"],
       "@nocturne/core/testing": ["./packages/core/test/runtime-stub.ts"],
       "@nocturne/core/*": ["./packages/core/src/*"],
       "@nocturne/mcp": ["./packages/mcp/src/index.ts"],

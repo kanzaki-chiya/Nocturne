@@ -5,101 +5,22 @@
 import { randomUUID } from "node:crypto";
 import { fsErrorCode, type Platform } from "../platform/index.js";
 import type { PluginOverview } from "../protocol/index.js";
+import { checkLocalPluginDirectory } from "./check.js";
 import {
-  NATIVE_PLUGIN_NAME_RE,
   buildDiscoveredPlugin,
   hasUsablePluginCapabilities,
   isPlainObject,
   isSafeSegment,
   nonEmptyString,
   readLocalPluginManifest,
-  resolvePluginRelativePath,
 } from "./discovery.js";
-import { isValidPluginVersionDirName } from "./semver.js";
 import { createPluginStore } from "./store.js";
-import type { PluginDiscoveryOptions, PluginManifestKind } from "./types.js";
+import type { PluginDiscoveryOptions } from "./types.js";
 
 const LOCAL_PLUGIN_ID_RE = /^nocturne:([^@]+)@local$/;
 
 function cacheSlug(value: string): string {
   return value.replaceAll(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 40) || "item";
-}
-
-async function validateManifestPaths(
-  platform: Platform,
-  rawRoot: string,
-  pluginRootReal: string,
-  manifest: Record<string, unknown>,
-): Promise<void> {
-  if (manifest.skills !== undefined) {
-    if (typeof manifest.skills !== "string" && !Array.isArray(manifest.skills)) {
-      throw new Error("清单无效：skills 字段必须是字符串或字符串数组");
-    }
-    const items = Array.isArray(manifest.skills) ? manifest.skills : [manifest.skills];
-    for (const item of items) {
-      if (typeof item !== "string") {
-        throw new Error("清单无效：skills 路径必须是字符串");
-      }
-      const res = await resolvePluginRelativePath(platform, rawRoot, pluginRootReal, item);
-      if (res.error !== undefined) {
-        throw new Error(`清单无效：${res.error}`);
-      }
-    }
-  }
-
-  if (manifest.hooks !== undefined) {
-    const items = Array.isArray(manifest.hooks) ? manifest.hooks : [manifest.hooks];
-    for (const item of items) {
-      if (typeof item === "string") {
-        const res = await resolvePluginRelativePath(platform, rawRoot, pluginRootReal, item);
-        if (res.error !== undefined) {
-          throw new Error(`清单无效：${res.error}`);
-        }
-      } else if (!isPlainObject(item)) {
-        throw new Error("清单无效：hooks 字段元素必须是相对路径或对象");
-      }
-    }
-  }
-
-  if (manifest.mcpServers !== undefined) {
-    const items = Array.isArray(manifest.mcpServers) ? manifest.mcpServers : [manifest.mcpServers];
-    for (const item of items) {
-      if (typeof item === "string") {
-        const res = await resolvePluginRelativePath(platform, rawRoot, pluginRootReal, item);
-        if (res.error !== undefined) {
-          throw new Error(`清单无效：${res.error}`);
-        }
-      } else if (!isPlainObject(item)) {
-        throw new Error("清单无效：mcpServers 字段元素必须是相对路径或对象");
-      }
-    }
-  }
-}
-
-function resolvePluginName(
-  manifestKind: PluginManifestKind,
-  manifest: Record<string, unknown>,
-  fallbackName: string,
-): string {
-  let name: string;
-  if (manifest.name !== undefined) {
-    const declared = nonEmptyString(manifest.name);
-    if (declared === undefined) {
-      throw new Error("清单无效：name 必须是非空字符串");
-    }
-    name = declared;
-  } else {
-    name = fallbackName;
-  }
-
-  if (manifestKind === "nocturne") {
-    if (!NATIVE_PLUGIN_NAME_RE.test(name)) {
-      throw new Error(`清单无效：插件名称 "${name}" 只允许小写字母、数字和连字符`);
-    }
-  } else if (!isSafeSegment(name) || name.includes("@")) {
-    throw new Error(`清单无效：插件名称 "${name}" 非法`);
-  }
-  return name;
 }
 
 /** 递归复制插件目录：跳过 `.git` 与符号链接（不跟随、不复制）。 */
@@ -169,54 +90,23 @@ export async function installLocalPluginFiles(
   describeAfterInstall: () => Promise<{ plugins: PluginOverview[] }>,
 ): Promise<PluginOverview> {
   const { fs, paths } = platform;
-  const rawInput = options.path.trim();
-  if (rawInput === "") {
-    throw new Error("插件目录路径不能为空");
-  }
-  const sourceAbs = paths.isAbsolute(rawInput)
-    ? paths.normalize(rawInput)
-    : paths.resolve(process.cwd(), rawInput);
-
-  let stat;
-  try {
-    stat = await fs.stat(sourceAbs);
-  } catch (e) {
-    if (fsErrorCode(e) === "ENOENT") {
-      throw new Error(`插件目录不存在：${rawInput}`);
-    }
-    throw new Error(`无法读取插件目录：${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (stat.type !== "directory") {
-    throw new Error(`插件路径不是目录：${rawInput}`);
+  const check = await checkLocalPluginDirectory(platform, {
+    path: options.path,
+    nocturneHome: options.nocturneHome,
+    nodePath: options.nodePath,
+  });
+  if (
+    !check.installable ||
+    check.sourceRoot === undefined ||
+    check.name === undefined ||
+    check.version === undefined
+  ) {
+    throw new Error(check.errors[0] ?? "清单无效：插件校验未通过");
   }
 
-  const sourceReal = await platform.resolveReal(sourceAbs);
-  const pluginsDir = paths.join(options.nocturneHome, "plugins");
-  const pluginsDirReal = await platform.resolveReal(pluginsDir);
-  if (paths.isWithin(pluginsDir, sourceAbs) || paths.isWithin(pluginsDirReal, sourceReal)) {
-    throw new Error(`不能从 Nocturne 插件目录内安装插件：${rawInput}`);
-  }
-
-  const fallbackName = paths.basename(sourceReal);
-  const lookup = await readLocalPluginManifest(platform, sourceReal, `${fallbackName}@local`);
-  if (lookup === undefined) {
-    throw new Error(
-      "清单无效：未找到 .nocturne-plugin/plugin.json、.codex-plugin/plugin.json 或 .claude-plugin/plugin.json",
-    );
-  }
-  if (lookup.manifest === undefined) {
-    throw new Error(lookup.warnings[0] ?? "清单无效：无法解析 plugin.json");
-  }
-
-  const name = resolvePluginName(lookup.manifestKind, lookup.manifest, fallbackName);
-  await validateManifestPaths(platform, sourceReal, sourceReal, lookup.manifest);
-
-  const manifestVersion = nonEmptyString(lookup.manifest.version);
-  // 与 selectActivePluginVersion 一致：合法版本目录名沿用清单版本，缺省或不合法时用 "local"
-  const versionDir =
-    manifestVersion !== undefined && isValidPluginVersionDirName(manifestVersion)
-      ? manifestVersion
-      : "local";
+  const sourceReal = check.sourceRoot;
+  const name = check.name;
+  const versionDir = check.version;
 
   const localRoot = paths.join(options.nocturneHome, "plugins", "installed", "local");
   await fs.mkdir(localRoot, { mode: 0o700 });
