@@ -31,7 +31,7 @@ pub fn sandbox_csp() -> String {
 
 pub fn app_sandbox_csp() -> String {
     format!(
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; {FRAME_ANCESTORS}; sandbox allow-scripts"
+        "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; worker-src blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; {FRAME_ANCESTORS}; sandbox allow-scripts"
     )
 }
 
@@ -257,18 +257,28 @@ mod tests {
             .to_str()
             .unwrap();
         assert_eq!(csp, app_sandbox_csp());
-        assert!(csp.contains("default-src 'none'"));
-        assert!(csp.contains("script-src 'unsafe-inline'"));
-        assert!(csp.contains("style-src 'unsafe-inline'"));
-        assert!(csp.contains("img-src data: blob:"));
-        assert!(csp.contains("font-src data:"));
-        assert!(csp.contains("media-src data: blob:"));
-        assert!(csp.contains("connect-src 'none'"));
-        assert!(csp.contains("frame-src 'none'"));
-        assert!(csp.contains("base-uri 'none'"));
-        assert!(csp.contains("form-action 'none'"));
-        assert!(csp.contains("frame-ancestors http://tauri.localhost tauri://localhost"));
-        assert!(csp.contains("sandbox allow-scripts"));
+        let directives: Vec<&str> = csp.split("; ").collect();
+        assert_eq!(
+            directives,
+            vec![
+                "default-src 'none'",
+                "script-src 'unsafe-inline' 'wasm-unsafe-eval'",
+                "worker-src blob:",
+                "style-src 'unsafe-inline'",
+                "img-src data: blob:",
+                "font-src data:",
+                "media-src data: blob:",
+                "connect-src 'none'",
+                "frame-src 'none'",
+                "base-uri 'none'",
+                "form-action 'none'",
+                FRAME_ANCESTORS,
+                "sandbox allow-scripts",
+            ]
+        );
+        assert!(csp.contains("script-src 'unsafe-inline' 'wasm-unsafe-eval'"));
+        assert!(csp.contains("worker-src blob:"));
+        assert!(!csp.contains("'unsafe-eval'"));
         assert!(!csp.contains("allow-same-origin"));
         assert!(String::from_utf8_lossy(res.body()).contains("nocturne:mcp-app:ready"));
     }
