@@ -1,0 +1,29 @@
+{
+  "name": "mcp-apps-demo",
+  "version": "1.0.0",
+  "description": "MCP Apps host test fixture plugin",
+  "interface": {
+    "displayName": "MCP Apps 示例",
+    "logo": "assets/icon.svg"
+  },
+  "mcpServers": {
+    "demo": {
+      "command": "${NOCTURNE_NODE}",
+      "args": ["${PLUGIN_ROOT}/server.mjs"]
+    }
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "demo-viewer",
+        "title": "示例面板",
+        "server": "demo",
+        "resourceUri": "ui://demo/viewer.html",
+        "open": {
+          "tool": "open_demo_file",
+          "fileTypes": [".nctdemo"]
+        }
+      }
+    ]
+  }
+}

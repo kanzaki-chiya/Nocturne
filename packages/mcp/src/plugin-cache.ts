@@ -1,12 +1,18 @@
 /**
- * 插件 MCP 服务器工具列表缓存（ADR-0100 修订第 4 节）。
+ * 插件 MCP 服务器工具列表缓存（ADR-0100 修订第 4 节、ADR-0101 第 2 节）。
  * - 路径：<NOCTURNE_HOME>/plugins/cache/mcp-tools/<slug>__<server>__<hash16>.json
  * - 缓存键：pluginId + serverId + 内置插件版本号（version）或已安装插件指纹（fingerprint）
- * - 写入采用「临时文件 + rename」原子替换；文件损坏或键不匹配一律按未命中处理。
+ * - 写入采用「临时文件 + rename」原子替换；文件损坏、旧 schemaVersion 或键不匹配一律按未命中处理。
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { Platform, PluginMcpCacheKey } from "@nocturne/core";
+import type { McpAppToolMeta, Platform, PluginMcpCacheKey } from "@nocturne/core";
+
+export interface CachedPluginMcpToolUi {
+  resourceUri?: string | undefined;
+  visibility?: ("model" | "app")[] | undefined;
+  surface?: string | undefined;
+}
 
 export interface CachedPluginMcpTool {
   name: string;
@@ -14,10 +20,13 @@ export interface CachedPluginMcpTool {
   description?: string | undefined;
   inputSchema: Tool["inputSchema"];
   annotations?: Tool["annotations"] | undefined;
+  ui?: CachedPluginMcpToolUi | undefined;
 }
 
+export const PLUGIN_MCP_CACHE_SCHEMA_VERSION = 2;
+
 export interface PluginMcpCacheEntry {
-  schemaVersion: 1;
+  schemaVersion: typeof PLUGIN_MCP_CACHE_SCHEMA_VERSION;
   pluginId: string;
   serverId: string;
   keyKind: "version" | "fingerprint";
@@ -48,6 +57,36 @@ export function pluginMcpCachePath(
   return platform.paths.join(cacheDir, pluginMcpCacheFileName(pluginId, serverId));
 }
 
+function parseCachedToolUi(raw: unknown): CachedPluginMcpToolUi | undefined | null {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) return null;
+  let resourceUri: string | undefined;
+  if (raw.resourceUri !== undefined) {
+    if (typeof raw.resourceUri !== "string" || !raw.resourceUri.startsWith("ui://")) return null;
+    resourceUri = raw.resourceUri;
+  }
+  let visibility: ("model" | "app")[] | undefined;
+  if (raw.visibility !== undefined) {
+    if (
+      !Array.isArray(raw.visibility) ||
+      !raw.visibility.every((v): v is "model" | "app" => v === "model" || v === "app")
+    ) {
+      return null;
+    }
+    visibility = [...new Set(raw.visibility)];
+  }
+  let surface: string | undefined;
+  if (raw.surface !== undefined) {
+    if (typeof raw.surface !== "string" || raw.surface === "") return null;
+    surface = raw.surface;
+  }
+  return {
+    ...(resourceUri !== undefined ? { resourceUri } : {}),
+    ...(visibility !== undefined ? { visibility } : {}),
+    ...(surface !== undefined ? { surface } : {}),
+  };
+}
+
 function parseCachedTool(raw: unknown): CachedPluginMcpTool | undefined {
   if (!isPlainObject(raw)) return undefined;
   if (typeof raw.name !== "string" || raw.name === "") return undefined;
@@ -55,12 +94,25 @@ function parseCachedTool(raw: unknown): CachedPluginMcpTool | undefined {
   if (raw.description !== undefined && typeof raw.description !== "string") return undefined;
   if (!isPlainObject(raw.inputSchema)) return undefined;
   if (raw.annotations !== undefined && !isPlainObject(raw.annotations)) return undefined;
+  const ui = parseCachedToolUi(raw.ui);
+  if (ui === null) return undefined;
   return {
     name: raw.name,
     ...(raw.title !== undefined ? { title: raw.title } : {}),
     ...(raw.description !== undefined ? { description: raw.description } : {}),
     inputSchema: raw.inputSchema as Tool["inputSchema"],
     ...(raw.annotations !== undefined ? { annotations: raw.annotations } : {}),
+    ...(ui !== undefined ? { ui } : {}),
+  };
+}
+
+export function cachedToolToAppMeta(tool: CachedPluginMcpTool): McpAppToolMeta {
+  return {
+    name: tool.name,
+    readOnly: tool.annotations?.readOnlyHint === true,
+    visibility: tool.ui?.visibility ?? ["model", "app"],
+    ...(tool.ui?.resourceUri !== undefined ? { resourceUri: tool.ui.resourceUri } : {}),
+    ...(tool.ui?.surface !== undefined ? { surface: tool.ui.surface } : {}),
   };
 }
 
@@ -85,7 +137,7 @@ export async function readPluginMcpCache(
   }
   if (!isPlainObject(raw)) return undefined;
   if (
-    raw.schemaVersion !== 1 ||
+    raw.schemaVersion !== PLUGIN_MCP_CACHE_SCHEMA_VERSION ||
     raw.pluginId !== key.pluginId ||
     raw.serverId !== serverId ||
     raw.keyKind !== key.keyKind ||
@@ -112,7 +164,7 @@ export async function readPluginMcpCache(
     tools.push(parsed);
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: PLUGIN_MCP_CACHE_SCHEMA_VERSION,
     pluginId: key.pluginId,
     serverId,
     keyKind: key.keyKind,

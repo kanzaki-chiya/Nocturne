@@ -22,6 +22,9 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
+  McpAppResourceResult,
+  McpAppToolCallResult,
+  McpAppToolMeta,
   McpConnector,
   McpOpenScope,
   McpServerConfig,
@@ -39,14 +42,31 @@ import type {
 import { mcpToolName } from "./names.js";
 import {
   cachedToolsEqual,
+  cachedToolToAppMeta,
+  PLUGIN_MCP_CACHE_SCHEMA_VERSION,
   readPluginMcpCache,
   writePluginMcpCache,
   type CachedPluginMcpTool,
+  type CachedPluginMcpToolUi,
 } from "./plugin-cache.js";
 import { StdioPipeTransport } from "./transport.js";
 
 const CLIENT_NAME = "nocturne";
 const CLIENT_VERSION = "0.56.0";
+const MCP_APPS_EXTENSION_ID = "io.modelcontextprotocol/ui";
+const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
+/** 页面 HTML UTF-8 解码上限：8 MiB，与 ADR-0088 MAX_INLINE_HTML_SAVED_BYTES 对齐（ADR-0101 第 2 节） */
+const MAX_MCP_APP_HTML_BYTES = 8 * 1024 * 1024;
+const SURFACE_ID_RE = /^[a-z0-9-]+$/;
+
+class McpAppError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "McpAppError";
+    this.code = code;
+  }
+}
 const DEFAULT_STARTUP_MS = 15_000;
 const MAX_STARTUP_MS = 60_000;
 const DEFAULT_CALL_MS = 60_000;
@@ -223,7 +243,51 @@ function expandEnvSilent(
   return out;
 }
 
+function parseToolUiMeta(st: Server, tool: Tool): CachedPluginMcpToolUi | undefined {
+  if (st.cfg.origin !== "plugin") return undefined;
+  const meta = tool._meta;
+  if (meta === undefined) return undefined;
+  const ui = meta.ui;
+  if (typeof ui !== "object" || ui === null || Array.isArray(ui)) return undefined;
+  const obj = ui as Record<string, unknown>;
+  let resourceUri: string | undefined;
+  if (typeof obj.resourceUri === "string") {
+    const trimmed = safeText(st, obj.resourceUri.trim());
+    if (trimmed.startsWith("ui://") && trimmed.length > "ui://".length) {
+      resourceUri = trimmed;
+    }
+  }
+  let visibility: ("model" | "app")[] | undefined;
+  if (Array.isArray(obj.visibility)) {
+    const seen = new Set<"model" | "app">();
+    for (const v of obj.visibility as unknown[]) {
+      if (v === "model" || v === "app") seen.add(v);
+    }
+    visibility = [...seen];
+  }
+  let surface: string | undefined;
+  if (typeof obj.surface === "string") {
+    const trimmed = safeText(st, obj.surface.trim());
+    if (SURFACE_ID_RE.test(trimmed)) surface = trimmed;
+  }
+  if (resourceUri === undefined && visibility === undefined && surface === undefined) {
+    return undefined;
+  }
+  return {
+    ...(resourceUri !== undefined ? { resourceUri } : {}),
+    ...(visibility !== undefined ? { visibility } : {}),
+    ...(surface !== undefined ? { surface } : {}),
+  };
+}
+
+function isModelVisible(st: Server, ui?: CachedPluginMcpToolUi): boolean {
+  if (st.cfg.origin !== "plugin") return true;
+  const vis = ui?.visibility ?? ["model", "app"];
+  return vis.includes("model");
+}
+
 function toCachedTool(st: Server, tool: Tool): CachedPluginMcpTool {
+  const ui = parseToolUiMeta(st, tool);
   return {
     name: safeText(st, tool.name),
     ...(tool.title !== undefined ? { title: safeText(st, tool.title) } : {}),
@@ -232,6 +296,7 @@ function toCachedTool(st: Server, tool: Tool): CachedPluginMcpTool {
     ...(tool.annotations !== undefined
       ? { annotations: safeOutput(st, tool.annotations) as Tool["annotations"] }
       : {}),
+    ...(ui !== undefined ? { ui } : {}),
   };
 }
 
@@ -242,7 +307,8 @@ function wrapCachedTools(
 ): Map<string, ToolDefinition> {
   const defs = new Map<string, ToolDefinition>();
   for (const item of tools) {
-    const def = wrapTool(scope, st, item, new Set(defs.keys()));
+    if (!isModelVisible(st, item.ui)) continue;
+    const def = wrapTool(scope, st, item, new Set(defs.keys()), item.ui);
     defs.set(def.name, def);
   }
   return defs;
@@ -259,7 +325,7 @@ async function persistPluginCache(scope: McpOpenScope, st: Server): Promise<void
       ? { name: safeText(st, info.name), version: safeText(st, info.version) }
       : undefined;
   await writePluginMcpCache(scope.platform, cacheDir, {
-    schemaVersion: 1,
+    schemaVersion: PLUGIN_MCP_CACHE_SCHEMA_VERSION,
     pluginId: cacheKey.pluginId,
     serverId: st.cfg.name,
     keyKind: cacheKey.keyKind,
@@ -532,13 +598,15 @@ async function fetchToolDefs(
   do {
     const res = await client.listTools(cursor !== undefined ? { cursor } : {});
     for (const tool of res.tools) {
+      const cached = toCachedTool(st, tool);
+      rawTools.push(cached);
+      liveRemoteNames.add(tool.name);
+      if (!isModelVisible(st, cached.ui)) continue;
       listed.push({
         name: safeText(st, tool.name),
         description: tool.description ? safeText(st, tool.description) : undefined,
       });
-      rawTools.push(toCachedTool(st, tool));
-      liveRemoteNames.add(tool.name);
-      const def = wrapTool(scope, st, tool, new Set(defs.keys()));
+      const def = wrapTool(scope, st, tool, new Set(defs.keys()), cached.ui);
       defs.set(def.name, def);
     }
     cursor = res.nextCursor;
@@ -654,10 +722,21 @@ async function connectServer(scope: McpOpenScope, st: Server, run: number): Prom
     }
     transport = new StdioPipeTransport(proc);
   }
+  // 仅插件来源服务器声明 MCP Apps 扩展能力；配置文件服务器 initialize 报文保持空 capabilities 不变（ADR-0101 第 2 节）
+  const clientCapabilities =
+    st.cfg.origin === "plugin"
+      ? {
+          extensions: {
+            [MCP_APPS_EXTENSION_ID]: {
+              mimeTypes: [MCP_APP_MIME_TYPE],
+            },
+          },
+        }
+      : {};
   const client = new Client(
     { name: CLIENT_NAME, version: CLIENT_VERSION },
     {
-      capabilities: {},
+      capabilities: clientCapabilities,
       jsonSchemaValidator: createOutputSchemaValidator((message) => {
         scope.diagnostics?.record("mcp.event", {
           server: st.cfg.name,
@@ -1142,10 +1221,21 @@ function wrapTool(
   st: Server,
   tool: Tool,
   taken: ReadonlySet<string>,
+  ui?: CachedPluginMcpToolUi,
 ): ToolDefinition {
   const name = mcpToolName(st.cfg.name, safeText(st, tool.name), taken);
   const remote = tool.name;
   const callMs = Math.min(st.cfg.callTimeoutMs ?? DEFAULT_CALL_MS, MAX_CALL_MS);
+  const pluginId = st.cfg.pluginId ?? st.cfg.pluginCache?.pluginId;
+  const toolUi =
+    st.cfg.origin === "plugin" && pluginId !== undefined && ui?.resourceUri !== undefined
+      ? {
+          pluginId,
+          serverId: st.cfg.name,
+          resourceUri: ui.resourceUri,
+          ...(ui.surface !== undefined ? { surface: ui.surface } : {}),
+        }
+      : undefined;
   return {
     name,
     description: safeText(
@@ -1155,6 +1245,7 @@ function wrapTool(
     inputSchema: safeOutput(st, tool.inputSchema) as Tool["inputSchema"],
     // 来源标记：结果图片附件记为 source "mcp"（ADR-0023）
     origin: "mcp",
+    ...(toolUi !== undefined ? { ui: toolUi } : {}),
     traits: {
       // readOnlyHint 是服务器自己声明的标注（不可信）：只决定能否进入
       // explore 工具集（subagent.md 第 6 节），放行仍由权限层逐项判断
@@ -1418,6 +1509,10 @@ export function createMcpConnector(options?: {
   runtimeServers?: readonly RuntimeMcpSource[] | undefined;
 }): McpConnector {
   return {
+    async readPluginCachedTools(platform, cacheDir, serverId, cacheKey) {
+      const cached = await readPluginMcpCache(platform, cacheDir, serverId, cacheKey);
+      return cached?.tools.map(cachedToolToAppMeta);
+    },
     async probe(scope) {
       const started = Date.now();
       const cfg = scope.servers[0];
@@ -1564,7 +1659,9 @@ export function createMcpConnector(options?: {
           st.cachedTools = cached.tools;
           st.fromCache = true;
           st.state = "standby";
-          st.listed = cached.tools.map((t) => ({ name: t.name, description: t.description }));
+          st.listed = cached.tools
+            .filter((t) => isModelVisible(st, t.ui))
+            .map((t) => ({ name: t.name, description: t.description }));
           st.fingerprint = fingerprint(st.cfg, expandEnvSilent(st.cfg.env, effectiveScope));
           effectiveScope.emitServer({
             name: st.cfg.name,
@@ -1732,7 +1829,9 @@ export function createMcpConnector(options?: {
                 st.fromCache = true;
                 st.state = "standby";
                 st.error = undefined;
-                st.listed = cached.tools.map((t) => ({ name: t.name, description: t.description }));
+                st.listed = cached.tools
+                  .filter((t) => isModelVisible(st, t.ui))
+                  .map((t) => ({ name: t.name, description: t.description }));
                 effectiveScope.emitServer({
                   name: cfg.name,
                   state: "standby",
@@ -1858,6 +1957,168 @@ export function createMcpConnector(options?: {
             }
           }
           return diff;
+        },
+        listServerTools(serverId: string): readonly McpAppToolMeta[] | undefined {
+          const st = servers.find((s) => s.cfg.name === serverId && s.cfg.origin === "plugin");
+          if (st === undefined) return undefined;
+          const source = st.rawTools ?? st.cachedTools;
+          if (source === undefined) return undefined;
+          return source.map(cachedToolToAppMeta);
+        },
+        getAppToolMeta(serverId: string, toolName: string): McpAppToolMeta | undefined {
+          const st = servers.find((s) => s.cfg.name === serverId && s.cfg.origin === "plugin");
+          if (st === undefined) return undefined;
+          const source = st.rawTools ?? st.cachedTools;
+          const found = source?.find((t) => t.name === toolName);
+          return found !== undefined ? cachedToolToAppMeta(found) : undefined;
+        },
+        async ensurePluginServerReady(serverId: string, signal?: AbortSignal): Promise<void> {
+          if (signal?.aborted) throw new McpAppError("cancelled", "调用已被中断");
+          const st = servers.find((s) => s.cfg.name === serverId && s.cfg.origin === "plugin");
+          if (st === undefined) {
+            throw new McpAppError("mcp_unavailable", `插件 MCP 服务器 "${serverId}" 不可用`);
+          }
+          try {
+            await ensureClient(effectiveScope, st);
+          } catch (e) {
+            throw new McpAppError("mcp_unavailable", safeText(st, toolError(e)));
+          }
+          if (signal?.aborted) throw new McpAppError("cancelled", "调用已被中断");
+        },
+        async readAppResource(
+          serverId: string,
+          uri: string,
+          signal?: AbortSignal,
+        ): Promise<McpAppResourceResult> {
+          if (signal?.aborted) throw new McpAppError("cancelled", "读取已被中断");
+          if (!uri.startsWith("ui://") || uri.length <= "ui://".length) {
+            throw new McpAppError("invalid_resource_uri", `只允许读取 ui:// 资源：${uri}`);
+          }
+          const st = servers.find((s) => s.cfg.name === serverId && s.cfg.origin === "plugin");
+          if (st === undefined) {
+            throw new McpAppError("mcp_unavailable", `插件 MCP 服务器 "${serverId}" 不可用`);
+          }
+          let client: Client;
+          try {
+            client = await ensureClient(effectiveScope, st);
+          } catch (e) {
+            throw new McpAppError("mcp_unavailable", safeText(st, toolError(e)));
+          }
+          if (signal?.aborted) throw new McpAppError("cancelled", "读取已被中断");
+          const callMs = Math.min(st.cfg.callTimeoutMs ?? DEFAULT_CALL_MS, MAX_CALL_MS);
+          const timeoutSignal = AbortSignal.timeout(callMs);
+          const combined =
+            signal !== undefined ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+          let res;
+          try {
+            res = await client.readResource({ uri }, { signal: combined, timeout: callMs });
+          } catch (e) {
+            if (signal?.aborted) throw new McpAppError("cancelled", "读取已被中断");
+            throw new McpAppError("resource_read_failed", safeText(st, toolError(e)));
+          }
+          const item = res.contents[0];
+          if (item === undefined) {
+            throw new McpAppError("resource_empty", `资源 "${uri}" 未返回内容`);
+          }
+          if (item.mimeType !== MCP_APP_MIME_TYPE) {
+            throw new McpAppError(
+              "invalid_resource_mime",
+              `资源 "${uri}" 的 MIME 类型必须为 ${MCP_APP_MIME_TYPE}（实际：${item.mimeType ?? "缺失"}）`,
+            );
+          }
+          let html: string;
+          if ("text" in item && typeof item.text === "string") {
+            html = item.text;
+          } else if ("blob" in item && typeof item.blob === "string") {
+            if (item.blob.length > Math.ceil((MAX_MCP_APP_HTML_BYTES * 4) / 3) + 8) {
+              throw new McpAppError(
+                "resource_too_large",
+                `资源 "${uri}" 超过 ${MAX_MCP_APP_HTML_BYTES} 字节上限`,
+              );
+            }
+            html = Buffer.from(item.blob, "base64").toString("utf8");
+          } else {
+            throw new McpAppError("resource_empty", `资源 "${uri}" 缺少 text 或 blob 内容`);
+          }
+          const bytes = Buffer.byteLength(html, "utf8");
+          if (bytes > MAX_MCP_APP_HTML_BYTES) {
+            throw new McpAppError(
+              "resource_too_large",
+              `资源 "${uri}" 解码后 ${bytes} 字节，超过 ${MAX_MCP_APP_HTML_BYTES} 字节上限`,
+            );
+          }
+          const resolvedUri =
+            typeof item.uri === "string" && item.uri.startsWith("ui://") ? item.uri : uri;
+          return { uri: resolvedUri, mimeType: MCP_APP_MIME_TYPE, html, bytes };
+        },
+        async callAppTool(
+          serverId: string,
+          toolName: string,
+          args: Record<string, unknown>,
+          signal?: AbortSignal,
+        ): Promise<McpAppToolCallResult> {
+          if (signal?.aborted) throw new McpAppError("cancelled", "调用已被中断");
+          const st = servers.find((s) => s.cfg.name === serverId && s.cfg.origin === "plugin");
+          if (st === undefined) {
+            throw new McpAppError("mcp_unavailable", `插件 MCP 服务器 "${serverId}" 不可用`);
+          }
+          let client: Client;
+          try {
+            client = await ensureClient(effectiveScope, st);
+          } catch (e) {
+            throw new McpAppError("mcp_unavailable", safeText(st, toolError(e)));
+          }
+          if (signal?.aborted) throw new McpAppError("cancelled", "调用已被中断");
+          if (st.liveRemoteNames !== undefined && !st.liveRemoteNames.has(toolName)) {
+            throw new McpAppError(
+              "mcp_tool_missing",
+              safeText(st, `MCP 工具 ${st.cfg.name}/${toolName} 已不存在`),
+            );
+          }
+          const callMs = Math.min(st.cfg.callTimeoutMs ?? DEFAULT_CALL_MS, MAX_CALL_MS);
+          const timeoutSignal = AbortSignal.timeout(callMs);
+          const combined =
+            signal !== undefined ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+          const startedAt = Date.now();
+          try {
+            const res = await client.callTool({ name: toolName, arguments: args }, undefined, {
+              signal: combined,
+              timeout: callMs,
+            });
+            effectiveScope.diagnostics?.record("mcp.call", {
+              server: st.cfg.name,
+              tool: safeText(st, toolName),
+              caller: "app",
+              durationMs: Date.now() - startedAt,
+              isError: isErrorResult(res),
+            });
+            const content =
+              "content" in res && Array.isArray(res.content)
+                ? (safeOutput(st, res.content) as unknown[])
+                : [];
+            const structured =
+              "structuredContent" in res &&
+              typeof res.structuredContent === "object" &&
+              res.structuredContent !== null &&
+              !Array.isArray(res.structuredContent)
+                ? (safeOutput(st, res.structuredContent) as Record<string, unknown>)
+                : undefined;
+            return {
+              content,
+              ...(structured !== undefined ? { structuredContent: structured } : {}),
+              ...(isErrorResult(res) ? { isError: true } : {}),
+            };
+          } catch (e) {
+            effectiveScope.diagnostics?.record("mcp.call", {
+              server: st.cfg.name,
+              tool: safeText(st, toolName),
+              caller: "app",
+              durationMs: Date.now() - startedAt,
+              error: safeText(st, diagnosticError(e)),
+            });
+            if (signal?.aborted) throw new McpAppError("cancelled", "调用已被中断");
+            throw new McpAppError("tool_error", safeText(st, toolError(e)));
+          }
         },
         async finishTurn(sessionId) {
           await Promise.all(

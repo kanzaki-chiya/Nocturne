@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --color-background-primary: #141416;
+        --color-background-secondary: #1c1c20;
+        --color-background-tertiary: #25252b;
+        --color-background-inverse: #f4f4f5;
+        --color-text-primary: #f4f4f5;
+        --color-text-secondary: #a1a1aa;
+        --color-text-tertiary: #71717a;
+        --color-text-inverse: #141416;
+        --color-border-primary: rgba(255, 255, 255, 0.12);
+        --color-border-secondary: rgba(255, 255, 255, 0.22);
+        --font-sans: system-ui, -apple-system, sans-serif;
+        --font-mono: ui-monospace, monospace;
+        --border-radius-md: 8px;
+        --border-radius-sm: 6px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        background: var(--color-background-primary);
+        color: var(--color-text-primary);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 18px 20px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--color-border-primary);
+      }
+      .title {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+      }
+      .badge {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 9999px;
+        background: var(--color-background-tertiary);
+        color: var(--color-text-secondary);
+        border: 1px solid var(--color-border-primary);
+      }
+      .card {
+        background: var(--color-background-secondary);
+        border: 1px solid var(--color-border-primary);
+        border-radius: var(--border-radius-md);
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        letter-spacing: 0.02em;
+      }
+      pre {
+        margin: 0;
+        padding: 8px 10px;
+        background: var(--color-background-primary);
+        border: 1px solid var(--color-border-primary);
+        border-radius: var(--border-radius-sm);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--color-text-primary);
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      button {
+        appearance: none;
+        border: 1px solid var(--color-border-secondary);
+        background: var(--color-background-tertiary);
+        color: var(--color-text-primary);
+        font-family: var(--font-sans);
+        font-size: 12px;
+        font-weight: 500;
+        padding: 6px 12px;
+        border-radius: var(--border-radius-sm);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--color-background-inverse);
+        color: var(--color-text-inverse);
+        border-color: transparent;
+      }
+      .output {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <h1 class="title">示例面板</h1>
+        <span id="theme-badge" class="badge">theme: --</span>
+      </header>
+
+      <section class="card">
+        <div class="label">工具参数</div>
+        <pre id="tool-input">{}</pre>
+      </section>
+
+      <section class="card">
+        <div class="label">工具结果</div>
+        <pre id="tool-result">等待数据</pre>
+      </section>
+
+      <section class="card">
+        <div class="label">页面交互</div>
+        <div class="actions">
+          <button id="btn-stats" class="primary" type="button">查询统计</button>
+          <button id="btn-message" type="button">引用到输入框</button>
+        </div>
+        <div id="action-output" class="output"></div>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        let nextId = 1;
+        const pending = new Map();
+
+        function sendRequest(method, params) {
+          const id = nextId++;
+          return new Promise((resolve, reject) => {
+            pending.set(id, { resolve, reject });
+            window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+          });
+        }
+
+        function sendNotification(method, params) {
+          window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
+        }
+
+        function applyHostContext(ctx) {
+          if (!ctx || typeof ctx !== "object") return;
+          if (ctx.theme === "light" || ctx.theme === "dark") {
+            document.documentElement.dataset.theme = ctx.theme;
+            document.getElementById("theme-badge").textContent = "theme: " + ctx.theme;
+          }
+          const vars = ctx.styles && ctx.styles.variables;
+          if (vars && typeof vars === "object") {
+            for (const [k, v] of Object.entries(vars)) {
+              if (typeof k === "string" && k.startsWith("--") && typeof v === "string") {
+                document.documentElement.style.setProperty(k, v);
+              }
+            }
+          }
+        }
+
+        window.addEventListener("message", (event) => {
+          if (event.source !== window.parent) return;
+          const msg = event.data;
+          if (!msg || typeof msg !== "object" || msg.jsonrpc !== "2.0") return;
+
+          if (msg.method === undefined && msg.id !== undefined) {
+            const waiter = pending.get(msg.id);
+            if (!waiter) return;
+            pending.delete(msg.id);
+            if (msg.error) waiter.reject(msg.error);
+            else waiter.resolve(msg.result);
+            return;
+          }
+
+          if (msg.method === "ui/notifications/host-context-changed") {
+            applyHostContext(msg.params);
+            return;
+          }
+
+          if (msg.method === "ui/notifications/tool-input") {
+            const args = msg.params && msg.params.arguments ? msg.params.arguments : {};
+            document.getElementById("tool-input").textContent = JSON.stringify(args, null, 2);
+            return;
+          }
+
+          if (msg.method === "ui/notifications/tool-result") {
+            document.getElementById("tool-result").textContent = JSON.stringify(
+              msg.params ?? {},
+              null,
+              2,
+            );
+            return;
+          }
+
+          if (msg.method === "ui/notifications/tool-cancelled") {
+            document.getElementById("tool-result").textContent =
+              "已取消: " + String(msg.params?.reason ?? "");
+            return;
+          }
+
+          if (msg.method === "ui/resource-teardown" && msg.id !== undefined) {
+            window.parent.postMessage({ jsonrpc: "2.0", id: msg.id, result: {} }, "*");
+          }
+        });
+
+        document.getElementById("btn-stats").addEventListener("click", async () => {
+          const out = document.getElementById("action-output");
+          try {
+            const res = await sendRequest("tools/call", {
+              name: "fetch_app_stats",
+              arguments: { section: "overview" },
+            });
+            out.textContent = JSON.stringify(res);
+          } catch (err) {
+            out.textContent = "调用失败: " + JSON.stringify(err);
+          }
+        });
+
+        document.getElementById("btn-message").addEventListener("click", async () => {
+          const out = document.getElementById("action-output");
+          try {
+            await sendRequest("ui/message", {
+              role: "user",
+              content: { type: "text", text: "来自示例面板的引用内容" },
+            });
+            out.textContent = "已写入草稿";
+          } catch (err) {
+            out.textContent = "发送失败: " + JSON.stringify(err);
+          }
+        });
+
+        sendRequest("ui/initialize", {
+          appInfo: { name: "mcp-apps-demo", version: "1.0.0" },
+          appCapabilities: { availableDisplayModes: ["inline"] },
+          protocolVersion: "2026-01-26",
+        }).then((result) => {
+          applyHostContext(result && result.hostContext);
+          sendNotification("ui/notifications/initialized", {});
+        });
+      })();
+    </script>
+  </body>
+</html>

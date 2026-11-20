@@ -425,7 +425,7 @@ describe("插件 MCP 按需启动与工具缓存（ADR-0100 修订第 4 节）",
       tools: { name: string; annotations?: { readOnlyHint?: boolean } }[];
     };
     expect(cachedJson).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       pluginId: "nocturne:lazy-kit@builtin",
       serverId: "lazy",
       keyKind: "version",
@@ -789,7 +789,7 @@ describe("插件 MCP 按需启动与工具缓存（ADR-0100 修订第 4 节）",
       schemaVersion: number;
       tools: { name: string }[];
     };
-    expect(rebuilt.schemaVersion).toBe(1);
+    expect(rebuilt.schemaVersion).toBe(2);
     expect(rebuilt.tools.map((t) => t.name)).toEqual(["ping"]);
   });
 
