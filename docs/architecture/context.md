@@ -108,7 +108,7 @@ Builder 在请求的 `cachePrefix` 中标出"可缓存前缀"的边界：全部 
 
 所有字符估算统一为：CJK 统一表意文字、假名、谚文、全角标点按 1 字 1 token，其余按 4 字符 1 token；适用于纯估算、锚点后的增量、保留区边界和 `/context`。各 section 仍展示本地估算，总用量在有效时采用上游锚点。估算用于预算和压缩判定，不是计费用量。
 
-明细（各 section，history 用四项细分而不重复该段总数，再加上 `report.images`）按上面的字符估算。正文与推理块的 `providerData` 计入 assistant 明细。总量比这些明细之和更大时，`report.unattributedTokens` 等于差额，且只在差额为正时出现；桌面端这一行显示为「其他」，TUI 与 CLI 的 `/context` 显示为 `other`。明细之和大于总量时不设该字段，也不按比例改写各项估算。无锚点时，压缩判定用的 `estimatedTokens` 仍不含这部分 `providerData`，与补记之前的字符估算相同；有锚点时总量就是锚点，不随明细调整。
+明细（各 section，history 用四项细分而不重复该段总数，再加上 `report.images`）按上面的字符估算。正文与推理块的 `providerData` 计入 assistant 明细。总量比这些明细之和更大时，`report.unattributedTokens` 等于差额，且只在差额为正时出现；桌面端这一行显示为「其他」，TUI 与 CLI 的 `/context` 显示为 `other`。明细之和大于总量时不设该字段，并在所有压缩与预算判定完成后按比例缩小报告中各 section、`history.breakdown` 四项和 `report.images` 的 `estimatedTokens`（最大余数法取整），取整后各 section 与图片之和恰好等于总量、`history` 四项之和恰好等于缩放后的 `history`，各 `chars` 保持不变。无锚点时，压缩判定用的 `estimatedTokens` 仍不含这部分 `providerData`，与补记之前的字符估算相同；有锚点时总量就是锚点，不随明细调整。
 
 protocol.estimateTokenUnits 返回未取整的四分之一 token 单位；estimateTokens 统一 ceil(units / 4)。技能目录按单位增量累计、最后取整，避免逐项重扫整段文本，输出与预算保持相同。
 
