@@ -2,9 +2,14 @@
  * TUI 斜杠命令 /shell（ADR-0022 第 4 节）：无参打开选择页 overlay，
  * 带种类名直接切换；被 env/config 覆盖时给出提示；未切换时兜底消息。
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createRuntime,
+  FakeProvider,
   RuntimeCommandError,
   SessionError,
   type Runtime,
@@ -432,6 +437,53 @@ describe("TUI /context 面板（ADR-0046 第 5 节）", () => {
     const text = contextLines(contextSession()).join("\n");
     expect(text).toContain("history");
     expect(text).not.toContain("    user");
+  });
+
+  it("明细大于总量时显示的行之和等于总量", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "nct-tui-ctx-scale-"));
+    vi.stubEnv("NOCTURNE_HOME", dir);
+    let runtime: Runtime | undefined;
+    try {
+      runtime = await createRuntime({
+        cwd: dir,
+        sessionsDir: path.join(dir, "sessions"),
+        providers: [
+          new FakeProvider({
+            scripts: [
+              [
+                { type: "text_delta", text: "答".repeat(800) },
+                { type: "usage", usage: { inputTokens: 120, outputTokens: 30 } },
+              ],
+            ],
+          }),
+        ],
+      });
+      const session = await runtime.createSession({ model: "fake/fake-1" });
+      await session.submit({ text: "问".repeat(400) });
+      const outputLines = contextLines(session);
+      const totalMatch = /合计 ~(\d+) \/ \d+ tok/.exec(outputLines.at(-1) ?? "");
+      expect(totalMatch).not.toBeNull();
+      const total = Number(totalMatch?.[1]);
+      expect(total).toBe(150);
+      const parseTok = (line: string | undefined): number => {
+        const m = /~(\d+) tok/.exec(line ?? "");
+        expect(m).not.toBeNull();
+        return Number(m?.[1]);
+      };
+      const topRows = outputLines.filter((line) => /^ {2}[a-z]/.test(line));
+      const topSum = topRows.reduce((sum, line) => sum + parseTok(line), 0);
+      expect(topSum).toBe(total);
+      const historyLine = topRows.find((line) => line.startsWith("  history "));
+      const historyTokens = parseTok(historyLine);
+      const subRows = outputLines.filter((line) => /^ {4}[a-z]/.test(line));
+      const subSum = subRows.reduce((sum, line) => sum + parseTok(line), 0);
+      expect(subSum).toBe(historyTokens);
+      expect(outputLines.join("\n")).not.toContain("other");
+    } finally {
+      await runtime?.close();
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
