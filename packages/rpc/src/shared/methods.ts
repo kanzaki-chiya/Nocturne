@@ -4,6 +4,7 @@ import type {
   DeleteMemoryInput,
   MemoryDescription,
   MemoryEntry,
+  PluginOverview,
   PluginsDescription,
   ReadMemoryInput,
   Runtime,
@@ -453,6 +454,14 @@ export interface RpcMethods {
   };
   "plugins.setPluginEnabled": {
     params: { id: string; enabled: boolean };
+    result: { affectedSessions: number };
+  };
+  "plugins.installLocalPlugin": {
+    params: { path: string };
+    result: PluginOverview;
+  };
+  "plugins.uninstallPlugin": {
+    params: { id: string };
     result: { affectedSessions: number };
   };
   "memory.describeMemory": {
@@ -1095,6 +1104,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "skills.importSkills": true,
   "plugins.describePlugins": true,
   "plugins.setPluginEnabled": true,
+  "plugins.installLocalPlugin": true,
+  "plugins.uninstallPlugin": true,
   "memory.describeMemory": true,
   "memory.readMemory": true,
   "memory.deleteMemory": true,

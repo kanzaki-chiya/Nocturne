@@ -1947,6 +1947,24 @@ class Connection implements HubPeer {
           return result;
         });
       },
+      "plugins.installLocalPlugin": (p) => {
+        const path = reqString(p, "path");
+        if (path.trim() === "") throw new InvalidParamsError("path 不能为空");
+        return this.enqueueConfig(async () => {
+          const result = await this.runtime().installLocalPlugin({ path });
+          this.hub.notifyProvidersChanged();
+          return result;
+        });
+      },
+      "plugins.uninstallPlugin": (p) => {
+        const id = reqString(p, "id");
+        if (id.trim() === "") throw new InvalidParamsError("id 不能为空");
+        return this.enqueueConfig(async () => {
+          const result = await this.runtime().uninstallPlugin({ id });
+          this.hub.notifyProvidersChanged();
+          return result;
+        });
+      },
       // 长期记忆管理（ADR-0098 §7）：只在本机连接开放（返回绝对路径，不在 REMOTE_METHODS）
       "memory.describeMemory": async (p) => {
         const suiteId = optString(p, "suiteId");

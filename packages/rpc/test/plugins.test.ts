@@ -114,6 +114,45 @@ describe("plugins.* RPC 往返与校验", () => {
       await expect(
         client.call("plugins.setPluginEnabled", { id: "codex:ok@mkt", enabled: "yes" as never }),
       ).rejects.toMatchObject({ rpcCode: -32602 });
+
+      // installLocalPlugin / uninstallPlugin 往返与 providersChanged 通知
+      const localSrc = path.join(root, "local-src");
+      mkdirSync(path.join(localSrc, ".nocturne-plugin"), { recursive: true });
+      mkdirSync(path.join(localSrc, "skills", "rpc-hello"), { recursive: true });
+      writeFileSync(
+        path.join(localSrc, ".nocturne-plugin", "plugin.json"),
+        JSON.stringify({ name: "rpc-demo", version: "1.0.0", description: "RPC 测试插件" }),
+      );
+      writeFileSync(
+        path.join(localSrc, "skills", "rpc-hello", "SKILL.md"),
+        "---\ndescription: rpc hello\n---\nHello",
+      );
+
+      let notifyCount = 0;
+      const offInstall = client.onProvidersChanged(() => {
+        notifyCount += 1;
+      });
+      const installed = await client.runtime.installLocalPlugin({ path: localSrc });
+      expect(installed.id).toBe("nocturne:rpc-demo@local");
+      expect(installed.state).toBe("off");
+      expect(installed.skills).toEqual(["rpc-hello"]);
+      expect(notifyCount).toBe(1);
+
+      expect(await client.runtime.uninstallPlugin({ id: installed.id })).toEqual({
+        affectedSessions: 0,
+      });
+      expect(notifyCount).toBe(2);
+      offInstall();
+
+      const afterUninstall = await client.runtime.describePlugins();
+      expect(afterUninstall.plugins.some((p) => p.id === installed.id)).toBe(false);
+
+      await expect(client.call("plugins.installLocalPlugin", { path: "" })).rejects.toMatchObject({
+        rpcCode: -32602,
+      });
+      await expect(client.call("plugins.uninstallPlugin", { id: "" })).rejects.toMatchObject({
+        rpcCode: -32602,
+      });
     } finally {
       await client.shutdown();
       await served;
@@ -175,6 +214,16 @@ describe("plugins.* RPC 往返与校验", () => {
       });
       await expect(
         remoteClient.runtime.setPluginEnabled({ id: "codex:ok@mkt", enabled: true }),
+      ).rejects.toMatchObject({
+        code: "remote_not_allowed",
+        rpcCode: -32004,
+      });
+      await expect(remoteClient.runtime.installLocalPlugin({ path: ws })).rejects.toMatchObject({
+        code: "remote_not_allowed",
+        rpcCode: -32004,
+      });
+      await expect(
+        remoteClient.runtime.uninstallPlugin({ id: "nocturne:demo@local" }),
       ).rejects.toMatchObject({
         code: "remote_not_allowed",
         rpcCode: -32004,

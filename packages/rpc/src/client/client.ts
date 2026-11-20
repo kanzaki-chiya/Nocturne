@@ -4,6 +4,7 @@ import type {
   DeleteMemoryInput,
   MemoryDescription,
   MemoryEntry,
+  PluginOverview,
   PluginsDescription,
   ReadMemoryInput,
   Runtime,
@@ -326,6 +327,8 @@ export interface RpcRuntime {
   importSkills(input: SkillImportInput): Promise<SkillImportOutput>;
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  installLocalPlugin(input: { path: string }): Promise<PluginOverview>;
+  uninstallPlugin(input: { id: string }): Promise<{ affectedSessions: number }>;
   describeMemory(input?: {
     workspaceRoot?: string | undefined;
     suiteId?: string | undefined;
@@ -1063,6 +1066,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     importSkills: (input) => call("skills.importSkills", input),
     describePlugins: () => call("plugins.describePlugins", {}),
     setPluginEnabled: (input) => call("plugins.setPluginEnabled", input),
+    installLocalPlugin: (input) => call("plugins.installLocalPlugin", input),
+    uninstallPlugin: (input) => call("plugins.uninstallPlugin", input),
     describeMemory: (input = {}) => call("memory.describeMemory", input),
     readMemory: (input) => call("memory.readMemory", input),
     deleteMemory: async (input) => {

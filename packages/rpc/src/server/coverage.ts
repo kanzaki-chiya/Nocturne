@@ -93,6 +93,8 @@ export const RUNTIME_METHODS: Record<
   setSkillEnabled: "skills.setSkillEnabled",
   describePlugins: "plugins.describePlugins",
   setPluginEnabled: "plugins.setPluginEnabled",
+  installLocalPlugin: "plugins.installLocalPlugin",
+  uninstallPlugin: "plugins.uninstallPlugin",
   describeMemory: "memory.describeMemory",
   readMemory: "memory.readMemory",
   deleteMemory: "memory.deleteMemory",

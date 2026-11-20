@@ -47,3 +47,5 @@ export type EditToolKind = ModelSettingsView["fields"]["editTool"]["value"];
 export type AccountStorageSetup = NonNullable<
   Awaited<ReturnType<RpcProvider["describeAccountStorage"]>>
 >;
+export type InstallLocalPluginInput = Parameters<RpcRuntime["installLocalPlugin"]>[0];
+export type UninstallPluginResult = Awaited<ReturnType<RpcRuntime["uninstallPlugin"]>>;

@@ -68,6 +68,8 @@ const STILL_LOCAL = [
   "skills.setSkillEnabled",
   "plugins.describePlugins",
   "plugins.setPluginEnabled",
+  "plugins.installLocalPlugin",
+  "plugins.uninstallPlugin",
   "hooks.describeHooks",
   "memory.describeMemory",
   "memory.readMemory",
