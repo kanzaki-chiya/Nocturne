@@ -194,3 +194,17 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
 - **兼容性实测结论**：在真实 Windows 桌面端（Tauri 调试包）下，使用官方 `@modelcontextprotocol/ext-apps`（v2.0.4）`App` 类直接连接单层 `sandbox="allow-scripts"` 空壳页（`http://nct-sandbox.localhost/app.html`），`connect()` 握手成功（`hostVersion: { name: "nocturne", version: "0.56.0" }`），收到全部 9 个 `hostContext` 字段；只读 `tools/call` 成功返回结果，写工具被权限层以 `app_tool_not_allowed` 拒绝；`requestDisplayMode` 返回 `{ mode: "inline" }`；`sendMessage` 成功将文本预填进对应会话输入框草稿且未自动发送；未支持的 `ui/update-model-context` 返回 `-32601`；深浅色切换触发 `onhostcontextchanged` 并同步更新主题与样式变量。另实测沙箱下 `new Worker(URL.createObjectURL(new Blob(...)))` 被 `worker-src` 拦截、`WebAssembly.instantiate` 因未放开 `unsafe-eval` 被 `script-src 'unsafe-inline'` 拦截（本轮不改 CSP，留作分期第 2 项文档查看器选型依据）。
 - **与 ADR 正文不一致的地方**：无。
 
+
+## 修订：2026-11-20 放宽 CSP：WebAssembly 与 blob Worker
+
+取代第 6 节「空壳页」的 CSP 中 `script-src` 一项，并新增 `worker-src`：
+
+```text
+default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; worker-src blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors <宿主源>; sandbox allow-scripts
+```
+
+- **原因**：上一节实测，blob Worker 被 `worker-src`（回落 `default-src 'none'`）拦截，`WebAssembly.instantiate` 被 `script-src` 拦截。文档查看器（[ADR-0100](ADR-0100-native-plugins.md) 分期第 4 项）用 pdf.js 在页面内渲染，需要 Worker 和 WebAssembly。
+- **放开的范围**：
+  - `'wasm-unsafe-eval'` 只允许编译 WebAssembly，不放开 `eval`、`new Function` 和字符串形式的定时器；
+  - `worker-src blob:` 只允许页面用自己生成的 blob 创建 Worker，不能从任何网络地址加载。
+- **不变的约束**：网络仍全部禁止。blob Worker 继承创建它的文档的 CSP（CSP Level 3「Initialize a global object's CSP list」），Worker 里的 `fetch` 同样受 `connect-src 'none'` 限制。实现轮必须在真实桌面端实测：Worker 能创建、能收发消息、Worker 内 `fetch` 被拦；WebAssembly 能编译运行；`eval` 与 `new Function` 仍被拦；页面 `fetch`、远程图片与 Tauri IPC 仍被拦。任何一项不符就停下，不得再放宽其他指令。

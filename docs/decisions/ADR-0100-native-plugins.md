@@ -225,3 +225,52 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
 ## 修订：2026-11-20 界面扩展
 
 第 2 节「明确不做」中的「界面扩展」由 [ADR-0101](ADR-0101-mcp-apps-host.md) 取代：自有清单的插件可以用 `ui.surfaces` 与 MCP Apps 页面，在桌面端右侧面板提供交互页面。斜杠命令与子代理定义仍不做。
+
+## 修订：2026-11-20 文档查看器
+
+本节落实「修订：四个文档插件」第 5 节分期第 4 项。宿主见 [ADR-0101](ADR-0101-mcp-apps-host.md)，所需 CSP 见其修订「放宽 CSP：WebAssembly 与 blob Worker」。
+
+### 1. 一个查看器，四个插件共用
+
+- 四个插件共用同一个查看器页面，统一按 PDF 显示：
+  - PDF 直接显示；
+  - Word、表格、演示由插件服务器先用 LibreOffice 转成 PDF 再显示，转换结果按「真实路径 + 修改时间 + 大小」缓存在服务器进程的临时目录，进程退出时删除。
+- 页面用 pdf.js（`pdfjs-dist`，Apache-2.0）渲染，整页内联进 HTML（含 Worker 源码），总大小不超过 ADR-0101 第 2 节的 8 MiB。cMap、标准字体、WebAssembly 等 pdf.js 辅助资源随插件一起打包，由页面经下面的辅助资源工具取得，不走网络。
+- 每个插件声明一个 surface：
+
+  | 插件 | surface id | `open.fileTypes` |
+  |---|---|---|
+  | `docx` | `viewer` | `.docx`、`.doc`、`.odt`、`.rtf` |
+  | `xlsx` | `viewer` | `.xlsx`、`.xls`、`.ods` |
+  | `pptx` | `viewer` | `.pptx`、`.ppt`、`.odp` |
+  | `pdf` | `viewer` | `.pdf` |
+
+### 2. 工具（每个插件各一组，名称相同）
+
+| 工具 | 可见性 | 只读 | 作用 |
+|---|---|---|---|
+| `show_in_viewer` | 模型与页面 | 是 | 参数 `{ path, page? }`。登记文档（Office 格式先转换），返回文档句柄、文档的绝对路径、文件名、页数和初始页码；关联查看器页面（`_meta.ui.resourceUri` 与 `_meta.ui.surface`）。也是 surface 的 `open.tool`。 |
+| `read_document` | 仅页面 | 是 | 参数 `{ docId, offset, length }`，按块返回 PDF 字节（base64），单块上限由实现轮按宿主消息大小实测确定。 |
+| `viewer_asset` | 仅页面 | 是 | 参数 `{ name }`，返回 pdf.js 辅助资源；只认打包清单里的名字。 |
+
+- `read_document` 只认 `show_in_viewer` 登记过的句柄。`show_in_viewer` 对页面可见，所以页面本身可以登记任意路径：安全依靠的是查看器页面由插件自带、页面拿不到网络和 Tauri IPC（ADR-0101 第 6 节），读到的字节出不了这个页面。
+- 句柄和转换缓存只在服务器进程内有效，会话关闭、应用重启或服务器崩溃重启后失效。`read_document` 遇到未知句柄返回 `document_unknown`，页面用结果里保存的绝对路径再调一次 `show_in_viewer` 取得新句柄。
+- 单个文档上限 100 MiB，超出返回 `document_too_large`。
+- 模型拿到的 `show_in_viewer` 结果只是一句文字（文件名与页数），要看页面内容仍用 `render`。
+
+### 3. 页面
+
+- 连续滚动，只渲染可见页附近的页面；默认适应宽度，可放大缩小；显示当前页与总页数，可跳页。
+- 页面外框跟随宿主主题（`hostContext` 样式变量），纸面保持白底。
+- 同一标签再次收到工具结果时切换到新文档，模型改完文档再调一次 `show_in_viewer` 就能看到新版本。
+- 不显示说明文字；出错时只显示错误本身（例如找不到 LibreOffice）。
+
+### 4. 技能
+
+不另建技能，取代分期第 4 项「加上对应的查看器技能」的写法：查看器只是现有技能的一个步骤，单独成技能会多占技能目录。四个插件现有的技能各加一小节：创建或编辑完文档后，调用 `show_in_viewer` 让用户在面板里查看；用户说「打开」「给我看看」某个文档时也用它。
+
+### 5. 后果
+
+- 表格按 PDF 分页显示，宽表会被拆到多页；以后需要时再给表格单独做网格视图。
+- 查看 Office 文档需要本机装有 LibreOffice，转换一次通常要几秒；PDF 不需要。
+- 每个插件多一个模型可见的工具。
