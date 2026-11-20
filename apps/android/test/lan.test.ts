@@ -1447,4 +1447,67 @@ describe("安卓端局域网直连（ADR-0087）", () => {
     );
     expect(ipcCalls.find((c) => c.cmd === "plugin:lan-tcp|close")?.args).toEqual({ id: 88 });
   });
+
+  it("11. 安卓直连在能力检测为真时声明 deflate-raw，能力检测为假时不声明", async () => {
+    const hostId = await generateIdentity({ extractable: true });
+    const phoneId = await generateIdentity({ extractable: false });
+
+    // (a) 支持 deflate-raw：LAN 直连声明 capabilities.compression: ["deflate-raw"]
+    const store1 = memoryLanStore({ [hostId.id]: ["tcp://192.168.1.9:43210"] });
+    let lanServer1: ReturnType<typeof serveEncryptedPeer> | undefined;
+    const conn1 = new LanPhoneConnection({
+      origin: "https://relay.example",
+      identity: phoneId,
+      host: { hostId: hostId.id, hostPub: encode(hostId.publicKey), name: "电脑", pairedAt: 1 },
+      endpointStore: store1,
+      connectLan: async () => {
+        const [phoneSide, serverSide] = createMemoryFramePair();
+        lanServer1 = serveEncryptedPeer(serverSide, hostId, phoneId);
+        return phoneSide;
+      },
+      connect: () => new Promise(() => undefined),
+      changed: () => undefined,
+      connected: async () => undefined,
+      disconnected: () => undefined,
+    });
+    conn1.start();
+    await vi.waitFor(() => expect(conn1.state).toBe("online"));
+    const initCall1 = lanServer1?.calls.find((c) => c.method === "initialize");
+    expect((initCall1?.params as { capabilities?: unknown })?.capabilities).toEqual({
+      interactive: true,
+      compression: ["deflate-raw"],
+    });
+    conn1.stop();
+    lanServer1?.closeServer();
+
+    // (b) WebView 不支持 deflate-raw：能力检测为假时不声明 compression
+    vi.stubGlobal("DecompressionStream", function UnsupportedDecompressionStream() {
+      throw new TypeError("deflate-raw unsupported");
+    });
+    const store2 = memoryLanStore({ [hostId.id]: ["tcp://192.168.1.9:43210"] });
+    let lanServer2: ReturnType<typeof serveEncryptedPeer> | undefined;
+    const conn2 = new LanPhoneConnection({
+      origin: "https://relay.example",
+      identity: phoneId,
+      host: { hostId: hostId.id, hostPub: encode(hostId.publicKey), name: "电脑", pairedAt: 1 },
+      endpointStore: store2,
+      connectLan: async () => {
+        const [phoneSide, serverSide] = createMemoryFramePair();
+        lanServer2 = serveEncryptedPeer(serverSide, hostId, phoneId);
+        return phoneSide;
+      },
+      connect: () => new Promise(() => undefined),
+      changed: () => undefined,
+      connected: async () => undefined,
+      disconnected: () => undefined,
+    });
+    conn2.start();
+    await vi.waitFor(() => expect(conn2.state).toBe("online"));
+    const initCall2 = lanServer2?.calls.find((c) => c.method === "initialize");
+    expect((initCall2?.params as { capabilities?: unknown })?.capabilities).toEqual({
+      interactive: true,
+    });
+    conn2.stop();
+    lanServer2?.closeServer();
+  });
 });

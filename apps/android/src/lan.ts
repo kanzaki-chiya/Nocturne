@@ -14,6 +14,7 @@ import {
   handshakeFailure,
   HOST_OFFLINE_MESSAGE,
   nextRetryDelay,
+  phoneCompressionCapabilities,
   relayConnectFailure,
   versionMessage,
   type ConnectionState,
@@ -982,9 +983,11 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     direct: LanHandshakeSuccess,
     generation: number,
   ): Promise<void> {
+    const compression = phoneCompressionCapabilities();
     const rawClient = createRpcClient(direct.channel, {
       clientName: "nocturne-phone",
       interactive: true,
+      ...(compression !== undefined ? { compression } : {}),
     });
     try {
       const initialized = await rawClient.initialize();
@@ -1042,9 +1045,11 @@ export class LanPhoneConnection implements PhoneConnectionLike {
     channel: SecureLineTransport,
     generation: number,
   ): Promise<boolean> {
+    const compression = phoneCompressionCapabilities();
     const relayClient = createRpcClient(channel, {
       clientName: "nocturne-phone",
       interactive: true,
+      ...(compression !== undefined ? { compression } : {}),
     });
     try {
       const initialized = await relayClient.initialize();
@@ -1161,9 +1166,11 @@ export class LanPhoneConnection implements PhoneConnectionLike {
       // 进入切换栅栏：此后新发起的 RPC 调用排队，不发往即将退役的中继连接
       facade.beginCutover();
 
+      const compression = phoneCompressionCapabilities();
       const directClient = createRpcClient(direct.channel, {
         clientName: "nocturne-phone",
         interactive: true,
+        ...(compression !== undefined ? { compression } : {}),
       });
       let recovering = false;
       try {
