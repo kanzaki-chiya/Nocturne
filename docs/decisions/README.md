@@ -108,6 +108,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0098](ADR-0098-memory.md) | 长期记忆（全局 / 项目 / 组曲三层范围、`memory` 上下文段、记忆工具、开关与 Runtime / RPC） | 已接受 |
 | [ADR-0099](ADR-0099-top-level-session-readonly-observe.md) | 顶层会话只读快照观察与手机端按需唤醒（`session.observe` / `session.observeAttachment`、免取锁回放与 `afterSeq` 无损升级） | 已接受 |
 | [ADR-0100](ADR-0100-native-plugins.md) | Nocturne 自有插件（`.nocturne-plugin` 清单、内置与本地目录安装、插件 MCP 服务器与 9 点位 Hook）与内置文档插件（Word、表格、演示、PDF，LibreOffice + UNO；插件 MCP 按需启动） | 已接受 |
+| [ADR-0101](ADR-0101-mcp-apps-host.md) | MCP Apps 宿主：插件 `ui://` 页面在桌面端右侧面板显示，`ui.surfaces` 清单、页面调用工具只放行只读、复用 `nct-sandbox` 隔离 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
