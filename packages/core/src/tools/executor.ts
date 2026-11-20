@@ -219,6 +219,7 @@ export function createToolExecutor(
       let attachmentSource: ImageAttachment["source"] = "read";
       let maxModelChars: number | undefined;
       let maxOutputChars: number | undefined;
+      let toolUi: ToolDefinition["ui"];
 
       /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
       async function finish(
@@ -309,6 +310,7 @@ export function createToolExecutor(
               ? { attachments: [...(attachments ?? []), ...(result.savedImages ?? [])] }
               : {}),
             ...(result.files?.length ? { files: result.files } : {}),
+            ...(toolUi !== undefined ? { ui: toolUi } : {}),
             durationMs: Date.now() - startedAt,
           },
           { turnId },
@@ -340,6 +342,7 @@ export function createToolExecutor(
       attachmentSource = entryTool.origin === "mcp" ? "mcp" : "read";
       maxModelChars = entryTool.traits.maxModelChars;
       maxOutputChars = entryTool.traits.maxOutputChars;
+      toolUi = entryTool.ui;
 
       // 2. 校验并规范化输入（若带 traits.dispatch 则在顶层输入校验后解析为目标工具与目标输入，ADR-0067 §2）
       if (call.input === undefined || call.input === null) {
@@ -408,6 +411,7 @@ export function createToolExecutor(
         attachmentSource = tool.origin === "mcp" ? "mcp" : "read";
         maxModelChars = tool.traits.maxModelChars;
         maxOutputChars = tool.traits.maxOutputChars;
+        toolUi = tool.ui;
         const targetValidate = validatorFor(tool, scope);
         if (targetValidate !== null && !targetValidate(input)) {
           const detail = schemas.errorsText(targetValidate.errors);

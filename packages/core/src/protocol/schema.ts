@@ -444,6 +444,14 @@ const payloadSchemas = {
     spillPath: z.string().optional(),
     attachments: z.array(imageAttachmentSchema).optional(),
     files: z.array(toolResultFileAttachmentSchema).optional(),
+    ui: z
+      .object({
+        pluginId: z.string(),
+        serverId: z.string(),
+        resourceUri: z.string(),
+        surface: z.string().optional(),
+      })
+      .optional(),
     durationMs: z.number().optional(),
   }),
   "context.compacted": z.object({

@@ -52,7 +52,20 @@ export type CommandRejectCode =
   | "invalid_model"
   | "compaction_in_progress"
   | "compaction_interrupted"
-  | "compaction_failed";
+  | "compaction_failed"
+  /** MCP Apps 页面工具/资源调用拒绝与错误码（ADR-0101 第 2、3、7 节） */
+  | "app_tool_not_allowed"
+  | "permission_denied"
+  | "plugin_unavailable"
+  | "mcp_tool_missing"
+  | "mcp_unavailable"
+  | "invalid_resource_uri"
+  | "invalid_resource_mime"
+  | "resource_empty"
+  | "resource_too_large"
+  | "resource_read_failed"
+  | "tool_error"
+  | "cancelled";
 
 /**
  * 命令拒绝的结构化补充（ADR-0054 §3）：`invalid_model` 因模型不可用时携带

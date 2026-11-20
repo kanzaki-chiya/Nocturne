@@ -268,6 +268,14 @@ import type { ToolCallStatus } from "./types.js";
 
 export type { ToolCallStatus };
 
+/** 工具关联的 MCP App 页面信息（ADR-0101 第 2 节） */
+export interface ToolCompletedUi {
+  pluginId: string;
+  serverId: string;
+  resourceUri: string;
+  surface?: string | undefined;
+}
+
 export interface ToolCompletedPayload {
   callId: string;
   name: string;
@@ -283,6 +291,8 @@ export interface ToolCompletedPayload {
   /** 工具结果附带的图片引用（ADR-0023）；字节已落盘，事件只含引用 */
   attachments?: ImageAttachment[] | undefined;
   files?: FileAttachment[] | undefined;
+  /** 插件工具声明了 _meta.ui.resourceUri 时附带的页面定位信息（ADR-0101） */
+  ui?: ToolCompletedUi | undefined;
   durationMs?: number | undefined;
 }
 

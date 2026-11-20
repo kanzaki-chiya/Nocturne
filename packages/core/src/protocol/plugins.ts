@@ -28,6 +28,31 @@ export interface PluginMcpServerOverview {
   skipReason?: PluginMcpSkipReason | undefined;
 }
 
+export interface PluginUiSurfaceOpen {
+  tool: string;
+  fileTypes: string[];
+}
+
+export interface PluginUiSurfaceOverview {
+  id: string;
+  title: string;
+  server: string;
+  resourceUri: string;
+  open?: PluginUiSurfaceOpen | undefined;
+}
+
+/** 当前会话可用的插件面板 surface（ADR-0101 第 4、5、7 节） */
+export interface SessionAppSurface {
+  pluginId: string;
+  pluginName: string;
+  icon?: string | undefined;
+  id: string;
+  title: string;
+  serverId: string;
+  resourceUri: string;
+  open?: PluginUiSurfaceOpen | undefined;
+}
+
 export interface PluginOverview {
   id: string;
   host: PluginHost;
@@ -43,6 +68,7 @@ export interface PluginOverview {
   unsupported: PluginUnsupportedHook[];
   skills: string[];
   mcpServers: PluginMcpServerOverview[];
+  surfaces?: PluginUiSurfaceOverview[] | undefined;
   warnings: string[];
 }
 

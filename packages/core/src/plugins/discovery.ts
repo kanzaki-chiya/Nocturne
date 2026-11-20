@@ -12,6 +12,8 @@ import {
   type PluginHookOverview,
   type PluginHost,
   type PluginMcpServerOverview,
+  type PluginUiSurfaceOpen,
+  type PluginUiSurfaceOverview,
   type PluginUnsupportedHook,
 } from "../protocol/index.js";
 import { parseSkill } from "../skills/index.js";
@@ -910,6 +912,97 @@ export async function buildDiscoveredPlugin(
     }
   }
 
+  // ── UI Surfaces 解析（ADR-0101 第 4 节；仅自有清单读取） ──────────
+  const surfaces: PluginUiSurfaceOverview[] = [];
+  if (input.manifestKind === "nocturne" && manifest.ui !== undefined) {
+    if (!isPlainObject(manifest.ui)) {
+      warnings.push(`plugin ${pluginLabel}：ui 字段必须是对象`);
+    } else if (manifest.ui.surfaces !== undefined) {
+      if (!Array.isArray(manifest.ui.surfaces)) {
+        warnings.push(`plugin ${pluginLabel}：ui.surfaces 字段必须是数组`);
+      } else {
+        const mcpServerIds = new Set(parsedMcp.servers.map((s) => s.id));
+        const seenSurfaceIds = new Set<string>();
+        for (let i = 0; i < manifest.ui.surfaces.length; i += 1) {
+          const item: unknown = manifest.ui.surfaces[i];
+          if (!isPlainObject(item)) {
+            warnings.push(`plugin ${pluginLabel}：ui.surfaces[${i}] 必须是对象，已跳过`);
+            continue;
+          }
+          const surfaceId = nonEmptyString(item.id);
+          if (surfaceId === undefined || !NATIVE_PLUGIN_NAME_RE.test(surfaceId)) {
+            warnings.push(
+              `plugin ${pluginLabel}：ui.surfaces[${i}].id 仅允许小写字母、数字和连字符，已跳过`,
+            );
+            continue;
+          }
+          if (seenSurfaceIds.has(surfaceId)) {
+            warnings.push(`plugin ${pluginLabel}：ui.surfaces 存在重复 id "${surfaceId}"，已跳过`);
+            continue;
+          }
+          const title = typeof item.title === "string" ? item.title.trim() : "";
+          if (title === "") {
+            warnings.push(
+              `plugin ${pluginLabel}：ui.surfaces[${surfaceId}].title 必须是非空字符串，已跳过`,
+            );
+            continue;
+          }
+          const server = nonEmptyString(item.server);
+          if (server === undefined || !mcpServerIds.has(server)) {
+            warnings.push(
+              `plugin ${pluginLabel}：ui.surfaces[${surfaceId}].server 必须是本插件 mcpServers 中的键，已跳过`,
+            );
+            continue;
+          }
+          const resourceUri = typeof item.resourceUri === "string" ? item.resourceUri.trim() : "";
+          if (!resourceUri.startsWith("ui://") || resourceUri.length <= "ui://".length) {
+            warnings.push(
+              `plugin ${pluginLabel}：ui.surfaces[${surfaceId}].resourceUri 必须以 ui:// 开头，已跳过`,
+            );
+            continue;
+          }
+          let open: PluginUiSurfaceOpen | undefined;
+          if (item.open !== undefined) {
+            if (!isPlainObject(item.open)) {
+              warnings.push(
+                `plugin ${pluginLabel}：ui.surfaces[${surfaceId}].open 必须是对象，已忽略`,
+              );
+            } else {
+              const openTool = nonEmptyString(item.open.tool);
+              const rawTypes = item.open.fileTypes;
+              const validTypes =
+                Array.isArray(rawTypes) &&
+                rawTypes.length > 0 &&
+                rawTypes.every(
+                  (ext): ext is string =>
+                    typeof ext === "string" &&
+                    ext.startsWith(".") &&
+                    ext.length > 1 &&
+                    ext === ext.toLowerCase() &&
+                    !/\s/.test(ext),
+                );
+              if (openTool === undefined || !validTypes) {
+                warnings.push(
+                  `plugin ${pluginLabel}：ui.surfaces[${surfaceId}].open 需提供非空 tool 与小写扩展名列表 fileTypes，已忽略`,
+                );
+              } else {
+                open = { tool: openTool, fileTypes: [...new Set(rawTypes)] };
+              }
+            }
+          }
+          seenSurfaceIds.add(surfaceId);
+          surfaces.push({
+            id: surfaceId,
+            title,
+            server,
+            resourceUri,
+            ...(open !== undefined ? { open } : {}),
+          });
+        }
+      }
+    }
+  }
+
   return {
     rawRoot: input.rawRoot,
     hooks: parsedHooks.hooks,
@@ -929,6 +1022,7 @@ export async function buildDiscoveredPlugin(
       unsupported: parsedHooks.unsupported,
       skills: skillNames,
       mcpServers: parsedMcp.overviewServers,
+      surfaces,
       warnings,
     },
   };

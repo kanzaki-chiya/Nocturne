@@ -78,6 +78,7 @@ import {
   type HooksDescription,
   type PluginOverview,
   type PluginsDescription,
+  type SessionAppSurface,
   type SkillImportInput,
   type SkillImportOutput,
   type SkillsDescription,
@@ -85,12 +86,13 @@ import {
   type SkillSnapshot,
 } from "./protocol/index.js";
 import {
-  describePlugins as describeInstalledPluginsOverview,
+  applyToolMetaToPluginSurfaces,
   installLocalPlugin as installLocalPluginInStore,
   resolveActivePluginSkillDirs,
   resolvePlugins,
   setPluginEnabled as setPluginEnabledInStore,
   uninstallPlugin as uninstallPluginInStore,
+  type ActivePluginsResolution,
 } from "./plugins/index.js";
 import {
   commitSkillImport,
@@ -369,11 +371,15 @@ import {
   type ToolContext,
   type ExecutionEnvironment,
   type HookRunner,
+  type McpAppResourceResult,
+  type McpAppToolCallResult,
+  type McpAppToolMeta,
   type McpConnector,
   type McpServerConfig,
   type McpServerStatus,
   type McpSession,
   type PermissionGate,
+  type PluginMcpCacheKey,
   type ScheduleAccess,
   type ToolDefinition,
   type ToolRegistry,
@@ -762,6 +768,21 @@ export interface RuntimeSession {
   describeContext(): BuiltContext;
   /** 本会话 MCP 服务器状态（mcp.md 第 5 节；未配置/未启用时为空数组） */
   mcpServers(): readonly McpServerStatus[];
+  /** 读取本会话插件 MCP 服务器的 ui:// 页面资源（ADR-0101 第 2、7 节；仅本地开放） */
+  readAppResource(input: {
+    pluginId: string;
+    serverId: string;
+    uri: string;
+  }): Promise<McpAppResourceResult>;
+  /** 以页面来源调用同服务器只读工具（ADR-0101 第 3、7 节；不写日志、不触发 Hook；仅本地开放） */
+  callAppTool(input: {
+    pluginId: string;
+    serverId: string;
+    tool: string;
+    arguments?: Record<string, unknown> | undefined;
+  }): Promise<McpAppToolCallResult>;
+  /** 列出本会话当前已启用插件的可用面板 surface（ADR-0101 第 4、5、7 节；仅本地开放） */
+  listAppSurfaces(): Promise<SessionAppSurface[]>;
   /** 打开会话时聚合的警告（配置降级、未信任项目配置等），供客户端展示 */
   readonly warnings: readonly string[];
   /** 打开时执行的恢复修复汇总（sessions.md 第 6 节）；无修复则 undefined */
@@ -1382,6 +1403,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     /** 当前会话模型引用（ADR-0054 describeToggleImpact 的影响面计算） */
     currentModel(): ModelRef;
     reconcileMcp(): Promise<void>;
+    listMcpServerTools?(serverId: string): readonly McpAppToolMeta[] | undefined;
     refreshSkills(rescan: boolean): Promise<void>;
     refreshExternalAgents(): void;
     skillModel: { workspaceRoot: string; contextWindow: () => number | undefined };
@@ -2453,6 +2475,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const executor = createToolExecutor(tools);
 
     // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）∪ 已启用插件 mcpServers
+    let sessionPlugins: ActivePluginsResolution = pluginResolution;
     await Promise.all(
       pluginResolution.mcpServers.map((s) =>
         platform.fs.mkdir(s.pluginDataDir).catch(() => undefined),
@@ -2470,6 +2493,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...s.entry,
         name: s.id,
         origin: "plugin" as const,
+        pluginId: s.pluginId,
         ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
       })),
     ].filter((s) => s.enabled !== false);
@@ -2647,6 +2671,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 platform.fs.mkdir(s.pluginDataDir).catch(() => undefined),
               ),
             );
+            sessionPlugins = nextPlugins;
             await mcpSession.reconcile([
               ...(options.mcpServers ?? []),
               ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
@@ -2654,6 +2679,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 ...s.entry,
                 name: s.id,
                 origin: "plugin" as const,
+                pluginId: s.pluginId,
                 ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
               })),
             ]);
@@ -4826,6 +4852,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
       currentModel: () => model.model.ref,
       reconcileMcp: refreshMcp,
+      listMcpServerTools: (serverId) => mcpSession?.listServerTools?.(serverId),
       refreshSkills: refreshSessionSkills,
       refreshExternalAgents: refreshSessionExternalAgents,
       skillModel: {
@@ -5687,6 +5714,197 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mcpServers() {
         return mcpSession?.status() ?? [];
       },
+      async readAppResource(input) {
+        assertUsable();
+        const pluginId = typeof input.pluginId === "string" ? input.pluginId.trim() : "";
+        const serverId = typeof input.serverId === "string" ? input.serverId.trim() : "";
+        const uri = typeof input.uri === "string" ? input.uri.trim() : "";
+        if (pluginId === "" || serverId === "" || uri === "") {
+          throw new RuntimeCommandError("invalid_command", "缺少 pluginId、serverId 或 uri");
+        }
+        if (!uri.startsWith("ui://") || uri.length <= "ui://".length) {
+          throw new RuntimeCommandError("invalid_resource_uri", `只允许读取 ui:// 资源：${uri}`);
+        }
+        if (mcpSession?.readAppResource === undefined) {
+          throw new RuntimeCommandError("mcp_unavailable", "当前会话未启用 MCP 连接器");
+        }
+        if (!busy()) await applyMcp();
+        const activeServer = sessionPlugins.mcpServers.find(
+          (s) => s.pluginId === pluginId && s.id === serverId,
+        );
+        if (activeServer === undefined) {
+          throw new RuntimeCommandError(
+            "plugin_unavailable",
+            `插件 ${pluginId} 的服务器 "${serverId}" 未启用或不可用`,
+          );
+        }
+        await mcpSession.startup(sessionCloseController.signal);
+        try {
+          return await mcpSession.readAppResource(serverId, uri, sessionCloseController.signal);
+        } catch (e) {
+          const code =
+            typeof e === "object" &&
+            e !== null &&
+            typeof (e as { code?: unknown }).code === "string"
+              ? (e as { code: CommandRejectCode }).code
+              : "resource_read_failed";
+          throw new RuntimeCommandError(code, e instanceof Error ? e.message : String(e));
+        }
+      },
+      async callAppTool(input) {
+        assertUsable();
+        const pluginId = typeof input.pluginId === "string" ? input.pluginId.trim() : "";
+        const serverId = typeof input.serverId === "string" ? input.serverId.trim() : "";
+        const toolName = typeof input.tool === "string" ? input.tool.trim() : "";
+        if (pluginId === "" || serverId === "" || toolName === "" || toolName.includes("/")) {
+          throw new RuntimeCommandError("invalid_command", "缺少合法的 pluginId、serverId 或 tool");
+        }
+        if (mcpSession?.callAppTool === undefined || mcpSession.getAppToolMeta === undefined) {
+          throw new RuntimeCommandError("mcp_unavailable", "当前会话未启用 MCP 连接器");
+        }
+        if (!busy()) await applyMcp();
+        const activeServer = sessionPlugins.mcpServers.find(
+          (s) => s.pluginId === pluginId && s.id === serverId,
+        );
+        if (activeServer === undefined) {
+          throw new RuntimeCommandError(
+            "plugin_unavailable",
+            `插件 ${pluginId} 的服务器 "${serverId}" 未启用或不可用`,
+          );
+        }
+        await mcpSession.startup(sessionCloseController.signal);
+        const evaluateAppTool = (meta: McpAppToolMeta) => {
+          if (!meta.visibility.includes("app")) {
+            throw new RuntimeCommandError(
+              "app_tool_not_allowed",
+              `工具 ${serverId}/${toolName} 不允许页面调用`,
+            );
+          }
+          const evalRes = policy.evaluate(
+            [
+              {
+                kind: "mcp",
+                target: `${serverId}/${toolName}`,
+                ...(meta.readOnly ? { readOnly: true } : {}),
+              },
+            ],
+            { caller: { kind: "app", serverId } },
+          );
+          if (evalRes.decision.action !== "allow") {
+            throw new RuntimeCommandError(
+              (evalRes.decision.errorCode as CommandRejectCode | undefined) ?? "permission_denied",
+              evalRes.decision.reason,
+            );
+          }
+        };
+        let meta = mcpSession.getAppToolMeta(serverId, toolName);
+        if (meta === undefined && mcpSession.ensurePluginServerReady !== undefined) {
+          try {
+            await mcpSession.ensurePluginServerReady(serverId, sessionCloseController.signal);
+          } catch (e) {
+            const code =
+              typeof e === "object" &&
+              e !== null &&
+              typeof (e as { code?: unknown }).code === "string"
+                ? (e as { code: CommandRejectCode }).code
+                : "mcp_unavailable";
+            throw new RuntimeCommandError(code, e instanceof Error ? e.message : String(e));
+          }
+          meta = mcpSession.getAppToolMeta(serverId, toolName);
+        }
+        if (meta === undefined) {
+          throw new RuntimeCommandError(
+            "mcp_tool_missing",
+            `MCP 工具 ${serverId}/${toolName} 不存在`,
+          );
+        }
+        // 启动前按当前已知元数据经权限层判定：拒绝时不拉起 standby 服务器
+        evaluateAppTool(meta);
+        // 拉起服务器后再以实时 tools/list 复核权限，防止过期缓存绕过只读或可见性约束
+        if (mcpSession.ensurePluginServerReady !== undefined) {
+          try {
+            await mcpSession.ensurePluginServerReady(serverId, sessionCloseController.signal);
+          } catch (e) {
+            const code =
+              typeof e === "object" &&
+              e !== null &&
+              typeof (e as { code?: unknown }).code === "string"
+                ? (e as { code: CommandRejectCode }).code
+                : "mcp_unavailable";
+            throw new RuntimeCommandError(code, e instanceof Error ? e.message : String(e));
+          }
+          const liveMeta = mcpSession.getAppToolMeta(serverId, toolName);
+          if (liveMeta === undefined) {
+            throw new RuntimeCommandError(
+              "mcp_tool_missing",
+              `MCP 工具 ${serverId}/${toolName} 已不存在`,
+            );
+          }
+          evaluateAppTool(liveMeta);
+        }
+        try {
+          return await mcpSession.callAppTool(
+            serverId,
+            toolName,
+            input.arguments ?? {},
+            sessionCloseController.signal,
+          );
+        } catch (e) {
+          const code =
+            typeof e === "object" &&
+            e !== null &&
+            typeof (e as { code?: unknown }).code === "string"
+              ? (e as { code: CommandRejectCode }).code
+              : "tool_error";
+          throw new RuntimeCommandError(code, e instanceof Error ? e.message : String(e));
+        }
+      },
+      async listAppSurfaces() {
+        assertUsable();
+        if (!busy()) await applyMcp();
+        if (mcpSession !== undefined) {
+          await mcpSession.startup(sessionCloseController.signal);
+        }
+        const activeServers = new Set(
+          sessionPlugins.mcpServers.map((s) => `${s.pluginId}\0${s.id}`),
+        );
+        const enabledPlugins = sessionPlugins.plugins
+          .filter((p) => p.state === "on" && (p.surfaces?.length ?? 0) > 0)
+          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        const result: SessionAppSurface[] = [];
+        for (const plugin of enabledPlugins) {
+          const rawSurfaces = (plugin.surfaces ?? []).filter((s) =>
+            activeServers.has(`${plugin.id}\0${s.server}`),
+          );
+          if (rawSurfaces.length === 0) continue;
+          const toolsByServer = new Map<string, readonly McpAppToolMeta[]>();
+          for (const s of rawSurfaces) {
+            if (s.open === undefined || toolsByServer.has(s.server)) continue;
+            const listed = mcpSession?.listServerTools?.(s.server);
+            if (listed !== undefined) toolsByServer.set(s.server, listed);
+          }
+          const surfaceWarnings: string[] = [];
+          const validated = applyToolMetaToPluginSurfaces(
+            `${plugin.name}@${plugin.marketplace}`,
+            rawSurfaces,
+            toolsByServer,
+            surfaceWarnings,
+          );
+          for (const s of validated) {
+            result.push({
+              pluginId: plugin.id,
+              pluginName: plugin.displayName ?? plugin.name,
+              ...(plugin.icon !== undefined ? { icon: plugin.icon } : {}),
+              id: s.id,
+              title: s.title,
+              serverId: s.server,
+              resourceUri: s.resourceUri,
+              ...(s.open !== undefined ? { open: s.open } : {}),
+            });
+          }
+        }
+        return result;
+      },
       isIdle,
       onIdle(listener) {
         idleListeners.add(listener);
@@ -6245,11 +6463,53 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await config.setSkillEnabled(parsed.name, parsed.enabled);
       return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(false)) };
     },
-    describePlugins() {
-      return describeInstalledPluginsOverview(platform, {
+    async describePlugins() {
+      const res = await resolvePlugins(platform, {
         ...pluginDiscoveryOptions,
         reservedMcpIds: collectReservedMcpIds(config?.base.mcpServers),
       });
+      const cacheDir = paths.join(nocturneHome, "plugins", "cache", "mcp-tools");
+      const cacheByServer = new Map<string, PluginMcpCacheKey>();
+      for (const s of res.mcpServers) {
+        if (s.cache !== undefined) cacheByServer.set(`${s.pluginId}\0${s.id}`, s.cache);
+      }
+      const plugins = await Promise.all(
+        res.plugins.map(async (plugin) => {
+          const surfaces = plugin.surfaces ?? [];
+          if (!surfaces.some((s) => s.open !== undefined)) return plugin;
+          const toolsByServer = new Map<string, readonly McpAppToolMeta[]>();
+          for (const s of surfaces) {
+            if (s.open === undefined || toolsByServer.has(s.server)) continue;
+            let tools: readonly McpAppToolMeta[] | undefined;
+            for (const hooks of openSessions.values()) {
+              tools = hooks.listMcpServerTools?.(s.server);
+              if (tools !== undefined) break;
+            }
+            if (tools === undefined && options.mcp?.readPluginCachedTools !== undefined) {
+              const cacheKey = cacheByServer.get(`${plugin.id}\0${s.server}`);
+              if (cacheKey !== undefined) {
+                tools = await options.mcp.readPluginCachedTools(
+                  platform,
+                  cacheDir,
+                  s.server,
+                  cacheKey,
+                );
+              }
+            }
+            if (tools !== undefined) toolsByServer.set(s.server, tools);
+          }
+          if (toolsByServer.size === 0) return plugin;
+          const nextWarnings = [...plugin.warnings];
+          const nextSurfaces = applyToolMetaToPluginSurfaces(
+            `${plugin.name}@${plugin.marketplace}`,
+            surfaces,
+            toolsByServer,
+            nextWarnings,
+          );
+          return { ...plugin, surfaces: nextSurfaces, warnings: nextWarnings };
+        }),
+      );
+      return { plugins, warnings: res.warnings };
     },
     async describeMemory(input) {
       const parsed = z
@@ -7590,6 +7850,9 @@ export type {
   HookInput,
   HookOutput,
   HookRunner,
+  McpAppResourceResult,
+  McpAppToolCallResult,
+  McpAppToolMeta,
   McpConnector,
   McpOpenScope,
   McpServerConfig,

@@ -3,6 +3,7 @@
  * 只包含类型与纯函数；不依赖任何其他模块与 Node 内置模块。
  */
 export * from "./types.js";
+export * from "./version.js";
 export * from "./appearance.js";
 export * from "./thinking-phrases.js";
 export * from "./input.js";

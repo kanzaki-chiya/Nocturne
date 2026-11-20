@@ -4,6 +4,7 @@ import type {
   ImageAttachment,
   ExternalAgentProbeResult,
   McpProbeResult,
+  ToolCompletedUi,
 } from "../protocol/index.js";
 /**
  * 工具契约（docs/protocols/tool-api.md）。
@@ -268,6 +269,8 @@ export interface ToolDefinition<Input = unknown, Output = unknown> {
    * 用于给结果附件标注 ImageAttachment.source；缺省为内置/本地来源。
    */
   origin?: "mcp" | undefined;
+  /** 插件 MCP 工具关联的 MCP App 页面信息（ADR-0101 第 2 节） */
+  ui?: ToolCompletedUi | undefined;
   /** 纯函数：本次调用会碰到什么；不得做 I/O */
   permissionSubjects(input: Input, scope: ToolScope): SubjectRequest[];
   resolveSubject?:
@@ -387,8 +390,34 @@ export interface McpServerConfig extends McpServerEntry {
   origin: "app" | "user" | "project" | "plugin";
   /** 定义该条目的配置文件所在目录；相对 cwd 按 workspaceRoot 解析 */
   dir?: string | undefined;
+  /** 仅插件 MCP 服务器设置：所属插件 id（ADR-0101） */
+  pluginId?: string | undefined;
   /** 仅插件 MCP 服务器设置：按需启动工具缓存键 */
   pluginCache?: PluginMcpCacheKey | undefined;
+}
+
+/** MCP Apps 页面工具元数据（ADR-0101 第 2、3 节） */
+export interface McpAppToolMeta {
+  name: string;
+  readOnly: boolean;
+  visibility: readonly ("model" | "app")[];
+  resourceUri?: string | undefined;
+  surface?: string | undefined;
+}
+
+/** MCP Apps 页面资源读取结果（ADR-0101 第 2 节） */
+export interface McpAppResourceResult {
+  uri: string;
+  mimeType: "text/html;profile=mcp-app";
+  html: string;
+  bytes: number;
+}
+
+/** MCP Apps 页面调用工具返回的原始 CallToolResult（ADR-0101 第 3 节） */
+export interface McpAppToolCallResult {
+  content: unknown[];
+  structuredContent?: Record<string, unknown> | undefined;
+  isError?: boolean | undefined;
 }
 
 /** 会话内服务器状态（mcp.md 第 5 节；status() 返回值） */
@@ -458,6 +487,25 @@ export interface McpSession {
   tools(): readonly ToolDefinition[];
   status(): McpServerStatus[];
   applyPendingTools(): McpToolDiff;
+  /** 查询指定插件服务器已发现/缓存的工具元数据（含仅 app 可见工具，ADR-0101） */
+  listServerTools?(serverId: string): readonly McpAppToolMeta[] | undefined;
+  /** 按远端工具名查询指定插件服务器的工具元数据（ADR-0101） */
+  getAppToolMeta?(serverId: string, toolName: string): McpAppToolMeta | undefined;
+  /** 确保插件服务器已连接就绪并完成 tools/list（按需拉起 standby 服务器） */
+  ensurePluginServerReady?(serverId: string, signal?: AbortSignal): Promise<void>;
+  /** 经 resources/read 读取插件服务器的 ui:// 页面资源（ADR-0101 第 2 节） */
+  readAppResource?(
+    serverId: string,
+    uri: string,
+    signal?: AbortSignal,
+  ): Promise<McpAppResourceResult>;
+  /** 直接向插件服务器发起 tools/call，返回原始 CallToolResult（调用方须先经权限层判定） */
+  callAppTool?(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<McpAppToolCallResult>;
   close(): Promise<void>;
 }
 
@@ -468,6 +516,13 @@ export interface McpSession {
 export interface McpConnector {
   probe(scope: McpOpenScope): Promise<McpProbeResult>;
   open(scope: McpOpenScope): Promise<McpSession>;
+  /** 读取插件 MCP 工具缓存中的工具元数据（供 describePlugins 校验 open.tool） */
+  readPluginCachedTools?(
+    platform: Platform,
+    cacheDir: string,
+    serverId: string,
+    cacheKey: PluginMcpCacheKey,
+  ): Promise<readonly McpAppToolMeta[] | undefined>;
 }
 
 /** Agent Loop 提供给 Executor 的运行环境；工具看不到它 */

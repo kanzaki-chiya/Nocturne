@@ -24,6 +24,7 @@ import {
 } from "../src/index.js";
 import { createHookRunner } from "../src/hooks/index.js";
 import {
+  applyToolMetaToPluginSurfaces,
   computePluginFingerprint,
   describePlugins,
   discoverInstalledPlugins,
@@ -2495,5 +2496,220 @@ describe("ADR-0100 第三期：本地目录安装与卸载", () => {
     await expect(
       uninstallPlugin(f.plat, { ...discOpts, id: "nocturne:nonexistent@local" }),
     ).rejects.toThrow(/未找到本地安装的插件/);
+  });
+});
+
+describe("插件清单 ui.surfaces（ADR-0101 第 4 节）", () => {
+  it("解析合法 ui.surfaces 到 PluginOverview，非法条目跳过并记入 warnings，兼容清单不读 ui", async () => {
+    const f = makeFixtureEnv();
+    const builtinDir = path.join(f.root, "builtin");
+    const ownDir = path.join(builtinDir, "ui-kit");
+    mkdirSync(path.join(ownDir, ".nocturne-plugin"), { recursive: true });
+    writeFileSync(
+      path.join(ownDir, ".nocturne-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "ui-kit",
+        version: "1.0.0",
+        mcpServers: {
+          viewer: { command: "${NOCTURNE_NODE}", args: ["${PLUGIN_ROOT}/srv.mjs"] },
+        },
+        ui: {
+          surfaces: [
+            {
+              id: "main-panel",
+              title: "文档查看",
+              server: "viewer",
+              resourceUri: "ui://viewer/index.html",
+              open: { tool: "open_doc", fileTypes: [".docx", ".md"] },
+            },
+            {
+              id: "upper-ext",
+              title: "大写扩展名",
+              server: "viewer",
+              resourceUri: "ui://viewer/upper.html",
+              open: { tool: "open_doc", fileTypes: [".DOCX"] },
+            },
+            {
+              id: "Bad_ID",
+              title: "非法 id",
+              server: "viewer",
+              resourceUri: "ui://viewer/bad.html",
+            },
+            {
+              id: "no-title",
+              title: "",
+              server: "viewer",
+              resourceUri: "ui://viewer/bad.html",
+            },
+            {
+              id: "missing-srv",
+              title: "不存在的服务器",
+              server: "ghost",
+              resourceUri: "ui://ghost/index.html",
+            },
+            {
+              id: "bad-uri",
+              title: "非 ui 协议",
+              server: "viewer",
+              resourceUri: "https://example.com/app.html",
+            },
+            {
+              id: "main-panel",
+              title: "重复 id",
+              server: "viewer",
+              resourceUri: "ui://viewer/dup.html",
+            },
+          ],
+        },
+      }),
+    );
+
+    // 兼容清单（.codex-plugin / .claude-plugin）即使写了 ui 也必须忽略
+    const codexDir = path.join(f.codexHome, "plugins", "cache", "mkt", "cx-ui", "1.0.0");
+    mkdirSync(path.join(codexDir, ".codex-plugin"), { recursive: true });
+    mkdirSync(path.join(codexDir, "skills", "s1"), { recursive: true });
+    writeFileSync(
+      path.join(codexDir, "skills", "s1", "SKILL.md"),
+      "---\ndescription: s1\n---\nbody",
+    );
+    writeFileSync(
+      path.join(codexDir, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "cx-ui",
+        ui: {
+          surfaces: [
+            {
+              id: "ignored",
+              title: "不应读取",
+              server: "s",
+              resourceUri: "ui://s/index.html",
+            },
+          ],
+        },
+      }),
+    );
+    writeFileSync(path.join(f.codexHome, "config.toml"), `[plugins."cx-ui@mkt"]\nenabled = true\n`);
+
+    const claudeDir = path.join(f.claudeHome, "plugins", "cache", "mkt", "cl-ui", "1.0.0");
+    mkdirSync(path.join(claudeDir, ".claude-plugin"), { recursive: true });
+    mkdirSync(path.join(claudeDir, "skills", "s1"), { recursive: true });
+    writeFileSync(
+      path.join(claudeDir, "skills", "s1", "SKILL.md"),
+      "---\ndescription: s1\n---\nbody",
+    );
+    writeFileSync(
+      path.join(claudeDir, ".claude-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "cl-ui",
+        ui: {
+          surfaces: [
+            {
+              id: "ignored",
+              title: "不应读取",
+              server: "s",
+              resourceUri: "ui://s/index.html",
+            },
+          ],
+        },
+      }),
+    );
+    writeFileSync(
+      path.join(f.claudeHome, "settings.json"),
+      JSON.stringify({ enabledPlugins: { "cl-ui@mkt": true } }),
+    );
+    writeFileSync(
+      path.join(f.claudeHome, "plugins", "installed_plugins.json"),
+      JSON.stringify({
+        version: 2,
+        plugins: { "cl-ui@mkt": [{ scope: "user", installPath: claudeDir, version: "1.0.0" }] },
+      }),
+    );
+
+    const desc = await describePlugins(f.plat, {
+      nocturneHome: f.nocturneHome,
+      codexHome: f.codexHome,
+      claudeHome: f.claudeHome,
+      builtinPluginsDir: builtinDir,
+    });
+    const own = must(
+      desc.plugins.find((p) => p.id === "nocturne:ui-kit@builtin"),
+      "own plugin",
+    );
+    expect(own.surfaces).toEqual([
+      {
+        id: "main-panel",
+        title: "文档查看",
+        server: "viewer",
+        resourceUri: "ui://viewer/index.html",
+        open: { tool: "open_doc", fileTypes: [".docx", ".md"] },
+      },
+      {
+        id: "upper-ext",
+        title: "大写扩展名",
+        server: "viewer",
+        resourceUri: "ui://viewer/upper.html",
+      },
+    ]);
+    expect(own.warnings.filter((w) => w.includes("ui.surfaces"))).toHaveLength(6);
+
+    const cx = must(
+      desc.plugins.find((p) => p.id === "codex:cx-ui@mkt"),
+      "codex plugin",
+    );
+    expect(cx.surfaces).toEqual([]);
+    const cl = must(
+      desc.plugins.find((p) => p.id === "claude:cl-ui@mkt"),
+      "claude plugin",
+    );
+    expect(cl.surfaces).toEqual([]);
+  });
+
+  it("open.tool 指向非只读或非 app 可见工具时，不参与文件打开并记入 warnings", () => {
+    const warnings: string[] = [];
+    const surfaces = [
+      {
+        id: "ok",
+        title: "只读打开",
+        server: "demo",
+        resourceUri: "ui://demo/ok.html",
+        open: { tool: "open_ro", fileTypes: [".nctdemo"] },
+      },
+      {
+        id: "write-open",
+        title: "写入打开",
+        server: "demo",
+        resourceUri: "ui://demo/w.html",
+        open: { tool: "open_rw", fileTypes: [".nctdemo"] },
+      },
+      {
+        id: "model-only-open",
+        title: "仅模型可见",
+        server: "demo",
+        resourceUri: "ui://demo/m.html",
+        open: { tool: "open_model_only", fileTypes: [".nctdemo"] },
+      },
+    ];
+    const toolsByServer = new Map([
+      [
+        "demo",
+        [
+          { name: "open_ro", readOnly: true, visibility: ["app" as const] },
+          { name: "open_rw", readOnly: false, visibility: ["app" as const] },
+          { name: "open_model_only", readOnly: true, visibility: ["model" as const] },
+        ],
+      ],
+    ]);
+    const filtered = applyToolMetaToPluginSurfaces(
+      "demo@builtin",
+      surfaces,
+      toolsByServer,
+      warnings,
+    );
+    expect(filtered[0]?.open).toEqual({ tool: "open_ro", fileTypes: [".nctdemo"] });
+    expect(filtered[1]?.open).toBeUndefined();
+    expect(filtered[2]?.open).toBeUndefined();
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("open_rw");
+    expect(warnings[1]).toContain("open_model_only");
   });
 });

@@ -24,7 +24,7 @@ import {
  * 无 I/O、无 Node 内置依赖；entries 只由持久事件创建，live/notices 只由
  * 临时事件创建，收敛点上除 revision/notices 外重放等价（V1）。
  */
-import type { BackgroundShellResult, SubagentResult } from "./events.js";
+import type { BackgroundShellResult, SubagentResult, ToolCompletedUi } from "./events.js";
 import type { BackgroundShellTask } from "./background-shell.js";
 import type {
   AttachmentDescribedPayload,
@@ -291,6 +291,7 @@ export interface ToolEntry {
         /** 工具结果附带的图片引用（ADR-0023）；无附件时字段不出现 */
         attachments?: ImageAttachment[] | undefined;
         files?: FileAttachment[] | undefined;
+        ui?: ToolCompletedUi | undefined;
         durationMs: number | undefined;
       }
     | undefined;
@@ -809,6 +810,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         spillPath: p.spillPath,
         ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         ...(p.files !== undefined ? { files: p.files } : {}),
+        ...(p.ui !== undefined ? { ui: p.ui } : {}),
         durationMs: p.durationMs,
       };
       const inlineFiles = p.status === "ok" ? filterInlineFiles(p.files) : [];

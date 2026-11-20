@@ -4,6 +4,7 @@ import type {
   PluginMcpServerOverview,
   PluginOverview,
   PluginState,
+  PluginUiSurfaceOverview,
   PluginsDescription,
 } from "../protocol/index.js";
 import { discoverInstalledPlugins } from "./discovery.js";
@@ -194,6 +195,38 @@ export async function resolvePlugins(
     changedPlugins,
     warnings,
   };
+}
+
+export interface PluginSurfaceToolInfo {
+  readonly name: string;
+  readonly readOnly: boolean;
+  readonly visibility: readonly ("model" | "app")[];
+}
+
+/**
+ * 校验 surface.open.tool 是否指向本服务器上可被页面调用的只读工具（ADR-0101 第 4 节）。
+ * 工具列表不可得时保持原样；可得但不满足时移除 open 并记录 warning。
+ */
+export function applyToolMetaToPluginSurfaces(
+  pluginLabel: string,
+  surfaces: readonly PluginUiSurfaceOverview[],
+  toolsByServer: ReadonlyMap<string, readonly PluginSurfaceToolInfo[]>,
+  warnings: string[],
+): PluginUiSurfaceOverview[] {
+  return surfaces.map((surface) => {
+    if (surface.open === undefined) return surface;
+    const tools = toolsByServer.get(surface.server);
+    if (tools === undefined) return surface;
+    const target = tools.find((t) => t.name === surface.open?.tool);
+    if (target?.readOnly === true && target.visibility.includes("app")) {
+      return surface;
+    }
+    warnings.push(
+      `plugin ${pluginLabel}：ui.surfaces[${surface.id}].open.tool（${surface.open.tool}）不是可供页面调用的只读工具，已忽略文件打开配置`,
+    );
+    const { open: _ignored, ...rest } = surface;
+    return rest;
+  });
 }
 
 export async function describePlugins(
