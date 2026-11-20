@@ -97,6 +97,7 @@ export class BackgroundShells {
       shell: input.shell,
       envStrip: input.envStrip,
       env: { PYTHONUNBUFFERED: process.env.PYTHONUNBUFFERED ?? "1" },
+      guardOrphan: true,
     });
     if (proc.pid <= 0) {
       await proc.wait();

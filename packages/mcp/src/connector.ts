@@ -715,6 +715,7 @@ async function connectServer(scope: McpOpenScope, st: Server, run: number): Prom
       cwd,
       envMode: "minimal",
       env: values,
+      guardOrphan: true,
     });
     if (proc.pid <= 0) {
       await proc.kill();

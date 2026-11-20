@@ -11,6 +11,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 
 import { defaultShellInvocation, type ShellDescriptor } from "./shells.js";
+import { getSharedProcessWatchdog, type ProcessWatchdog } from "./watchdog.js";
 
 export interface SpawnOptions {
   cwd?: string | undefined;
@@ -25,6 +26,11 @@ export interface SpawnOptions {
   /** 中止时终止整个进程树 */
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
+  /**
+   * 登记到主进程看门狗（ADR-0102）：主进程被强杀后由看门狗清理该进程树。
+   * 仅用于 stdio MCP 服务器与后台命令；子进程退出或主动 kill 后立即注销。
+   */
+  guardOrphan?: boolean | undefined;
 }
 
 export interface PipeSpawnOptions extends SpawnOptions {
@@ -524,12 +530,32 @@ function attachLifecycle(
   child: ChildProcess,
   options: SpawnOptions,
   waitEvent: "exit" | "close" = "close",
+  watchdog?: ProcessWatchdog,
 ): { wait: () => Promise<ProcessExit>; kill: () => Promise<void> } {
   let timedOut = false;
   let killed = false;
-  const kill = () => {
+  const guardedPid =
+    options.guardOrphan === true && child.pid !== undefined && child.pid > 0
+      ? child.pid
+      : undefined;
+  let unregistered = false;
+  const unregister = () => {
+    if (unregistered || guardedPid === undefined) return;
+    unregistered = true;
+    watchdog?.unregister(guardedPid);
+  };
+  if (guardedPid !== undefined) {
+    watchdog?.register(guardedPid);
+    child.once("exit", unregister);
+    child.once("error", unregister);
+  }
+  const kill = async () => {
     killed = true;
-    return killTree(child);
+    try {
+      await killTree(child);
+    } finally {
+      unregister();
+    }
   };
 
   if (options.signal !== undefined) {
@@ -720,7 +746,10 @@ function pipeInvocation(
     verbatim: true,
   };
 }
-export function createProcessRunner(): ProcessRunner {
+export function createProcessRunner(runnerOptions?: {
+  watchdog?: ProcessWatchdog | undefined;
+}): ProcessRunner {
+  const watchdog = runnerOptions?.watchdog ?? getSharedProcessWatchdog();
   // 控制台代码页探测只做一次，全部子进程共享同一个编码结论
   let encodingPromise: Promise<OutputEncoding> | undefined;
   const consoleEncoding = (): Promise<OutputEncoding> =>
@@ -748,7 +777,7 @@ export function createProcessRunner(): ProcessRunner {
     const encoding = consoleEncoding();
     const stdout = decodeOutput(child.stdout, encoding);
     const stderr = decodeOutput(child.stderr, encoding);
-    const { wait, kill } = attachLifecycle(child, options, waitEvent);
+    const { wait, kill } = attachLifecycle(child, options, waitEvent, watchdog);
     let detached = false;
 
     return {
@@ -803,7 +832,7 @@ export function createProcessRunner(): ProcessRunner {
               stdio: ["pipe", "pipe", "pipe"],
             });
       const encoding = consoleEncoding();
-      const { wait, kill } = attachLifecycle(child, options);
+      const { wait, kill } = attachLifecycle(child, options, "close", watchdog);
       const exited = attachLifecycle(child, {}, "exit").wait;
       const stdin = child.stdin;
       // 远端关闭管道时，异步 EPIPE 不能成为未处理的 EventEmitter error。
