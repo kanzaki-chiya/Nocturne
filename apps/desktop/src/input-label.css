@@ -82,6 +82,7 @@
 
 .slash-item-icon {
   display: inline-flex;
+  align-self: center;
   flex: 0 0 14px;
   width: 14px;
   align-items: center;
