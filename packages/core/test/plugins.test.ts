@@ -998,7 +998,7 @@ describe("启用、整目录指纹信任、技能与 Runtime 集成", () => {
       marketplace: "mkt",
       version: "1.0.0",
       manifest: {
-        interface: { displayName: "Demo Plugin" },
+        interface: { displayName: "Demo Plugin", composerIcon: "./icon.svg" },
         description: "desc",
         skills: "./skills/",
         hooks: {
@@ -1015,6 +1015,7 @@ describe("启用、整目录指纹信任、技能与 Runtime 集成", () => {
         },
       },
       files: {
+        "icon.svg": '<svg xmlns="http://www.w3.org/2000/svg"/>',
         "skills/demo-skill/SKILL.md": "---\ndescription: plugin skill\n---\nPLUGIN_SKILL_BODY",
         "skills/user-wins/SKILL.md": "---\ndescription: from plugin\n---\nPLUGIN_LOSES",
       },
@@ -1066,14 +1067,20 @@ describe("启用、整目录指纹信任、技能与 Runtime 集成", () => {
     });
 
     // 已打开的旧会话 s0 技能已刷新，但 Hook 仅对新开会话生效
-    expect(s0.describeSkills().skills.find((s) => s.name === "demo-skill")).toMatchObject({
-      source: "plugin",
-      plugin: "demo@mkt",
-      layer: "user",
-    });
-    expect(s0.describeSkills().skills.find((s) => s.name === "user-wins")).toMatchObject({
-      source: ".nocturne",
-    });
+    const pluginIcon = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64")}`;
+    for (const { skills } of [s0.describeSkills(), await rt.describeSkills()]) {
+      expect(skills.find((s) => s.name === "demo-skill")).toMatchObject({
+        source: "plugin",
+        plugin: "demo@mkt",
+        layer: "user",
+        pluginDisplayName: "Demo Plugin",
+        pluginIcon,
+      });
+      const userSkill = skills.find((s) => s.name === "user-wins" && s.source === ".nocturne");
+      expect(userSkill).toBeDefined();
+      expect(userSkill).not.toHaveProperty("pluginDisplayName");
+      expect(userSkill).not.toHaveProperty("pluginIcon");
+    }
     expect(
       (await rt.describeSkills()).skills.find(
         (s) => s.name === "user-wins" && s.source === "plugin",

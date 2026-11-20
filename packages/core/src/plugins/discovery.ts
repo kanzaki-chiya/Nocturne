@@ -867,7 +867,12 @@ export async function buildDiscoveredPlugin(
     if (seenSkillDirs.has(canonical)) return;
     seenSkillDirs.add(canonical);
     if (!(await fs.exists(dirPath))) return;
-    skillDirs.push({ path: dirPath, plugin: pluginLabel });
+    skillDirs.push({
+      path: dirPath,
+      plugin: pluginLabel,
+      pluginDisplayName: nonEmptyString(iface?.displayName) ?? input.name,
+      ...(icon !== undefined ? { pluginIcon: icon } : {}),
+    });
     const names = await scanSkillNamesInDir(platform, dirPath, warnings, pluginLabel);
     for (const n of names) {
       if (!skillNames.includes(n)) skillNames.push(n);

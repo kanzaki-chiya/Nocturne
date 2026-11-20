@@ -40,6 +40,8 @@ export interface PluginSkillDir {
   path: string;
   /** "<name>@<marketplace>" */
   plugin: string;
+  pluginDisplayName: string;
+  pluginIcon?: string | undefined;
 }
 
 export interface PluginMcpServerSpec {

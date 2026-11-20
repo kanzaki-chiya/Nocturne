@@ -15,6 +15,8 @@ export interface SkillOverview {
   layer: "user" | "project";
   source: ".nocturne" | ".agents" | ".claude" | "extra" | "plugin";
   plugin?: string | undefined;
+  pluginDisplayName?: string | undefined;
+  pluginIcon?: string | undefined;
   entryPath: string;
   realPath: string;
   otherEntries: string[];

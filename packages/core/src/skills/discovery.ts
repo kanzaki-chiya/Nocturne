@@ -77,7 +77,12 @@ export async function discoverSkills(
     workspaceRoot: string;
     cwd: string;
     config?: SkillsConfig | undefined;
-    pluginSkillDirs?: readonly { path: string; plugin: string }[] | undefined;
+    pluginSkillDirs?:
+      | readonly ({ path: string; plugin: string } & Pick<
+          SkillOverview,
+          "pluginDisplayName" | "pluginIcon"
+        >)[]
+      | undefined;
   },
 ): Promise<{
   skills: DiscoveredSkill[];
@@ -86,12 +91,11 @@ export async function discoverSkills(
   homeDir: string;
 }> {
   const { fs, paths } = platform;
-  const roots: {
+  const roots: ({
     path: string;
-    layer: "user" | "project";
+    layer: SkillOverview["layer"];
     source: SkillOverview["source"];
-    plugin?: string | undefined;
-  }[] = [];
+  } & Pick<SkillOverview, "plugin" | "pluginDisplayName" | "pluginIcon">)[] = [];
   const add = (base: string, layer: "user" | "project", user = false) => {
     roots.push({
       path: paths.join(base, user ? "skills" : ".nocturne/skills"),
@@ -118,10 +122,9 @@ export async function discoverSkills(
   }
   for (const dir of input.pluginSkillDirs ?? []) {
     roots.push({
-      path: dir.path,
+      ...dir,
       layer: "user",
       source: "plugin",
-      plugin: dir.plugin,
     });
   }
   let dir = paths.resolve(input.cwd, ".");
@@ -199,6 +202,10 @@ export async function discoverSkills(
           layer: root.layer,
           source: root.source,
           ...(root.plugin !== undefined ? { plugin: root.plugin } : {}),
+          ...(root.pluginDisplayName !== undefined
+            ? { pluginDisplayName: root.pluginDisplayName }
+            : {}),
+          ...(root.pluginIcon !== undefined ? { pluginIcon: root.pluginIcon } : {}),
           entryPath: entry.path,
           realPath,
           otherEntries: [],
