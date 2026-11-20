@@ -36,6 +36,15 @@ Nocturne 支持自有插件（随发行包提供的内置插件与本地目录�
 - **立即试用**：在已启用插件的详情页中，如果该插件包含可直接调用的技能，右侧会显示「立即试用」。点击后会在当前工作区新开会话、关闭设置页，并在输入框中预填 `/<技能名> `，你可以接着补充需求再发送；如果插件包含多个可用技能，会先弹出列表供选择。
 - **卸载本地插件**：打开本地安装插件的详情页，点右上角「卸载」，在弹出的确认框中再次点「卸载」即可移除插件。内置插件以及来自 Codex、Claude Code 的插件不支持在 Nocturne 内卸载；卸载不会删除该插件保存的数据目录。
 
+## 创建插件
+
+Nocturne 内置了「插件创建器」（`plugin-creator`，默认开启），用于辅助编写和校验 Nocturne 自有插件：
+
+1. 打开「设置」→「插件」，点击右上角「创建插件」（或在任意会话输入框输入 `/plugin-creator `）；该按钮会新开会话并预填 `/plugin-creator `，不会自动发送。若已关闭「插件创建器」，按钮会呈禁用状态。
+2. 描述插件需要实现的能力与一个具体的试用例子，模型会在工作区（默认 `<工作区>/plugins/<name>/`）编写 `.nocturne-plugin/plugin.json` 及所需的技能、Hook 或 stdio MCP 服务器。
+3. 模型会调用只读工具 `check_plugin`（与「安装插件…」共用同一套安装前校验规则）确认插件可安装且无错误，并做当前环境能执行的自测。
+4. 源码完成后，模型不会自动安装插件或修改 `plugins.json`；请按模型给出的路径，在「设置」→「插件」点「安装插件…」选择插件根目录安装，打开开关确认启用后即可试用。更新已有插件时提高清单 `version` 再重新选择同一目录安装，状态变为「已更改」后点「重新确认」即可生效。
+
 ## Hook
 
 - **自有清单（`.nocturne-plugin/plugin.json`）**：支持 Nocturne 全部 9 个 Hook 事件点（含 `PreToolUse`、`PermissionRequest`、`PostToolUse`、`TurnStart`、`TurnEnd`、`UserPromptSubmit`、`SessionStart`、`SubagentStart`、`SessionEnd`），输入、输出、超时与执行方式与配置文件 Hook 一致（`PreToolUse` 无 `allow`，仅 `PermissionRequest` 可放宽 `ask`）。子进程运行在最小白名单环境，叠加 `PLUGIN_ROOT`、`PLUGIN_DATA`，命令和参数中的 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 按字符串单次替换。

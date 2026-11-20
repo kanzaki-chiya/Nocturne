@@ -161,11 +161,11 @@
 
 ### plugins（`src/plugins/`）
 
-- **负责**：只读发现本机已安装的 Codex / Claude Code 插件（版本选择、清单查找、路径 containment、hooks/skills 翻译）、整目录 SHA-256 指纹计算（`nocturne-plugin-bundle-v1`），以及 `<NOCTURNE_HOME>/plugins.json` 的启用与信任状态读写（经 config 写入队列原子写）。
+- **负责**：只读发现内置、本地安装及本机已安装的 Codex / Claude Code 插件（版本选择、清单查找、路径 containment、hooks/skills/MCP/UI surface 解析）、本地插件安装前纯只读校验（`check.ts` 的 `checkLocalPluginDirectory`，与 `installLocalPluginFiles` 共用同一份规则）、本地目录安装/卸载（`install.ts`）、整目录 SHA-256 指纹计算（`nocturne-plugin-bundle-v1`），以及 `<NOCTURNE_HOME>/plugins.json` 的启用与信任状态读写（经 config 写入队列原子写）。
 - **不负责**：修改 `~/.codex` 或 `~/.claude`；Hook 进程执行（由 `hooks` 消费 `PluginHookSpec`）；技能目录构建（由 `core/index` 将已启用且未变化插件的技能目录传入 `skills`）；界面展示（由客户端经 RPC 调用）。
-- **公开接口**：`describePlugins`、`setPluginEnabled`、`resolvePlugins`、`resolveActivePluginSkillDirs`、`PluginHookEntry`、`PluginHookSpec`——Core 内部模块，仅由 `core/index` 装配与 `hooks`（类型）引用；客户端只见 `Runtime.describePlugins` / `setPluginEnabled` 与 `protocol` 的 `PluginOverview` / `PluginsDescription`。
-- **依赖**：protocol、platform、skills（`parseSkill`）、config（`files.ts` 原子写原语）。**不能依赖**：agent、tools、hooks、session、provider、context（由 dependency-cruiser `plugins-deps` 强制）。
-- 详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md) 与 [hooks.md](hooks.md)。
+- **公开接口**：`describePlugins`、`setPluginEnabled`、`resolvePlugins`、`resolveActivePluginSkillDirs`、`PluginHookEntry`、`PluginHookSpec` 供 `core/index` 装配与 `hooks`（类型）引用；`checkLocalPluginDirectory` 经 `@nocturne/core` 与轻量子路径 `@nocturne/core/plugin-check` 导出，供 `plugins-src` 构建内置插件 `plugin-creator` 的 `check_plugin` 工具时静态打入单文件服务器，避免复制校验规则；客户端只见 `Runtime.describePlugins` / `setPluginEnabled` / `installLocalPlugin` / `uninstallPlugin` 与 `protocol` 的 `PluginOverview` / `PluginsDescription`。
+- **依赖**：protocol、platform、skills（`parseSkill`）、config（`files.ts` 原子写原语、`schema.ts` MCP 校验）。**不能依赖**：agent、tools、hooks、session、provider、context（由 dependency-cruiser `plugins-deps` 强制）。
+- 详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)、[ADR-0100](../decisions/ADR-0100-native-plugins.md) 与 [hooks.md](hooks.md)。
 
 ### memory（`src/memory/`）
 

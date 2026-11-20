@@ -285,3 +285,17 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
   - `standard_fonts/Foxit*.pfb`（10 个，200,615 字节，BSD-3-Clause）；`LiberationSans-*.ttf`（4 个，GPL-2.0-only with font exception）与 `iccs/CGATS001Compat-v2-micro.icc`（CC0-1.0）因不在允许许可范围内未打包；
   - `wasm/jbig2.wasm`（103,671 字节，BSD-3-Clause + Apache-2.0）与 `wasm/openjpeg.wasm`（220,817 字节，BSD-2-Clause + BSD-3-Clause）；
   - 共用 `viewer.html`：约 2.07 MiB（2,171,011 字节，低于 8 MiB 上限）。
+
+## 修订：2026-11-21 内置插件「插件创建器」与校验规则共用
+
+新增内置插件 `plugin-creator`（`nocturne:plugin-creator@builtin`，显示名「插件创建器」），随四个文档插件一起由 `plugins-src/` 构建到 `plugins/plugin-creator/` 并打包进桌面资源与 `nctrn` npm 包，默认开启：
+
+- **组成**：
+  - 技能 `plugin-creator`（附 `references/manifest-spec.md`、`references/hooks-and-mcp-examples.md`、`references/install-update-uninstall.md`）：引导模型先问清目标与试用例子，在工作区编写 Nocturne 自有插件源码，调用 `check_plugin` 校验并自测，再给出桌面端「安装插件…」与启用、试用步骤；不自动安装、不修改 `plugins.json` 或 `<NOCTURNE_HOME>/plugins/installed/`，交付时如实标注「待安装、待启用、待试用」。
+  - 按需启动的 stdio MCP 服务器 `plugin-creator`（`server.mjs`，不含文档查看器资源），仅提供一个只读工具 `check_plugin`（`readOnlyHint: true`），入参为插件根目录绝对路径 `{ path }`，返回是否可安装、错误、警告、安装后插件 id、版本、技能/Hook/MCP/面板清单、跳过条目原因，以及「安装时才会检查」的项目说明。
+- **检查与安装共用一份规则**：
+  - 将 `installLocalPluginFiles` 中复制前的全部目录、清单、名称、相对路径与可用能力校验抽出为 `packages/core/src/plugins/check.ts` 导出的纯只读函数 `checkLocalPluginDirectory(platform, options)`，同时经 `@nocturne/core` 与轻量子路径 `@nocturne/core/plugin-check` 导出；
+  - `installLocalPluginFiles` 先调用 `checkLocalPluginDirectory`，复制后保留对符号链接跳过导致的清单丢失与能力为空校验；
+  - `plugins-src` 通过 `devDependencies` 引用 `@nocturne/core` 的 `@nocturne/core/plugin-check`，在构建 `plugins/plugin-creator/server.mjs` 时直接打入单文件产物，运行时无外部依赖且不复制校验逻辑。
+- **桌面入口**：在「设置 › 插件」页头「安装插件…」旁增加「创建插件」按钮，复用 `tryPluginSkill` 新开草稿会话并预填 `/plugin-creator `（不自动发送）；插件创建器关闭或技能不可调用时按钮禁用，界面不加说明文字。
+
