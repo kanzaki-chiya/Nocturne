@@ -26,6 +26,8 @@ export type SheetsPluginServerOptions = LibreOfficeEngineOptions &
 
 const CALC_CSV_ALL_SHEETS_FILTER =
   "csv:Text - txt - csv (StarCalc):44,34,76,1,,0,false,true,false,false,false,-1";
+const CALC_PDF_SINGLE_PAGE_FILTER =
+  'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}';
 
 export const SHEETS_TOOLS: readonly Tool[] = [
   {
@@ -226,13 +228,13 @@ export function createSheetsPluginServer(options?: SheetsPluginServerOptions): P
         () =>
           engine.callUno(
             "xlsx_convert",
-            { path: inputPath, outputPath, format: "pdf" },
+            { path: inputPath, outputPath, format: "pdf", singlePageSheets: true },
             { expectedOutputPath: outputPath },
           ),
         async () => {
           await engine.convertViaCli({
             inputPath,
-            convertTo: "pdf:calc_pdf_Export",
+            convertTo: CALC_PDF_SINGLE_PAGE_FILTER,
             outputPath,
           });
           return { outputPath, format: "pdf" };

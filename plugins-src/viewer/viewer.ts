@@ -71,6 +71,7 @@ declare global {
 const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
+const INITIAL_FIT_WIDTH_MAX_SCALE = 1.25;
 const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
 const WORKER_READY_TIMEOUT_MS = 4000;
 
@@ -349,8 +350,10 @@ let visibleSet = new Set<number>();
 let currentPage = 0;
 let currentScale = 1;
 let fitWidthMode = true;
+let fitWidthMaxScale = INITIAL_FIT_WIDTH_MAX_SCALE;
 let intersectionObserver: IntersectionObserver | null = null;
 let scrollRaf = 0;
+let programmaticScrollUntil = 0;
 
 function setLoading(loading: boolean): void {
   progressEl.dataset.loading = loading ? "true" : "false";
@@ -421,10 +424,10 @@ function hideError(): void {
   diagState.error = null;
 }
 
-function computeFitWidthScale(pageWidth: number): number {
+function computeFitWidthScale(pageWidth: number, maxScale = MAX_SCALE): number {
   const available = Math.max(160, stageEl.clientWidth - 36);
   const raw = available / Math.max(1, pageWidth);
-  return Math.max(MIN_SCALE, Math.min(MAX_SCALE, raw));
+  return Math.max(MIN_SCALE, Math.min(maxScale, raw));
 }
 
 function applySlotSize(slot: PageSlot): void {
@@ -613,6 +616,7 @@ function scrollToPage(pageNumber: number): void {
   if (!slot) return;
   currentPage = clamped;
   syncToolbar();
+  programmaticScrollUntil = performance.now() + 250;
   stageEl.scrollTop = Math.max(0, slot.el.offsetTop - 16);
   visibleSet.add(clamped);
   updateVisibleRenders(activeLoadToken);
@@ -749,7 +753,8 @@ async function openDocument(info: ShowInViewerData): Promise<void> {
 
     const firstVp = firstPage.getViewport({ scale: 1 });
     fitWidthMode = true;
-    currentScale = computeFitWidthScale(firstVp.width);
+    fitWidthMaxScale = INITIAL_FIT_WIDTH_MAX_SCALE;
+    currentScale = computeFitWidthScale(firstVp.width, fitWidthMaxScale);
 
     const frag = document.createDocumentFragment();
     slots = [];
@@ -860,15 +865,18 @@ btnZoomIn.addEventListener("click", () => {
 btnFitWidth.addEventListener("click", () => {
   const ref = slots[Math.max(0, currentPage - 1)] ?? slots[0];
   if (!ref) return;
-  setScale(computeFitWidthScale(ref.baseWidth), true);
+  fitWidthMaxScale = MAX_SCALE;
+  setScale(computeFitWidthScale(ref.baseWidth, fitWidthMaxScale), true);
 });
 
 stageEl.addEventListener(
   "scroll",
   () => {
+    if (performance.now() < programmaticScrollUntil) return;
     if (scrollRaf !== 0) return;
     scrollRaf = window.requestAnimationFrame(() => {
       scrollRaf = 0;
+      if (performance.now() < programmaticScrollUntil) return;
       detectCurrentPageFromScroll();
     });
   },
@@ -880,7 +888,7 @@ if (typeof ResizeObserver !== "undefined") {
     if (!fitWidthMode || !currentDoc || slots.length === 0) return;
     const ref = slots[Math.max(0, currentPage - 1)] ?? slots[0];
     if (!ref) return;
-    setScale(computeFitWidthScale(ref.baseWidth), true);
+    setScale(computeFitWidthScale(ref.baseWidth, fitWidthMaxScale), true);
   });
   resizeObserver.observe(stageEl);
 }

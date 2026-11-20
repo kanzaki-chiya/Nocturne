@@ -753,6 +753,13 @@ def op_xlsx_convert(desktop, params):
     }
     if fmt not in filter_map:
         raise EngineError("invalid_argument", f"Unsupported xlsx convert format: {fmt}")
+    filter_props = list(filter_map[fmt])
+    if fmt == "pdf" and params.get("singlePageSheets") is True:
+        filter_data = uno.Any(
+            "[]com.sun.star.beans.PropertyValue",
+            (prop("SinglePageSheets", True),),
+        )
+        filter_props.append(prop("FilterData", filter_data))
     tmp_path = None
     try:
         doc = desktop.loadComponentFromURL(
@@ -760,7 +767,7 @@ def op_xlsx_convert(desktop, params):
         )
         if doc is None:
             raise EngineError("engine_error", f"Could not open spreadsheet: {path}")
-        tmp_path = store_with_temp(doc, output_path, filter_map[fmt])
+        tmp_path = store_with_temp(doc, output_path, filter_props)
     finally:
         safe_close(doc)
     commit_temp(tmp_path, output_path)

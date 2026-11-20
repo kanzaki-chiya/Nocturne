@@ -5,6 +5,7 @@ import path from "node:path";
 import { deflateSync } from "node:zlib";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -604,6 +605,132 @@ describe.skipIf(!HAS_REAL_LIBREOFFICE)("Real LibreOffice end-to-end chains", () 
       await verifyPdfWithPdfjs(slidesServer, pdfBytes, "演示查看器端到端验证");
     } finally {
       await slidesServer.close();
+    }
+  });
+
+  it("viewer: xlsx exports each sheet to a content-fitted single page while convert keeps A4", async () => {
+    const readAllPdfBytes = async (
+      server: PluginServerSpec,
+      docId: string,
+      totalBytes: number,
+      chunkSize: number,
+    ): Promise<Buffer> => {
+      const parts: Buffer[] = [];
+      let offset = 0;
+      while (offset < totalBytes) {
+        const res = await callTool(server, "read_document", {
+          docId,
+          offset,
+          length: chunkSize,
+        });
+        const sc = res.structuredContent as { data: string; bytesRead: number; eof: boolean };
+        const buf = Buffer.from(sc.data, "base64");
+        parts.push(buf);
+        offset += buf.length;
+        if (sc.eof) break;
+      }
+      return Buffer.concat(parts);
+    };
+
+    const workbookPath = path.join(workDir, "single-page-sheets.xlsx");
+    const convertPdfPath = path.join(workDir, "convert-default.pdf");
+
+    // 1. UNO 路径：查看器按 SinglePageSheets=true 导出，convert 保持默认 A4 页面设置
+    const unoServer = createSheetsPluginServer();
+    try {
+      await callTool(unoServer, "create", {
+        outputPath: workbookPath,
+        overwrite: true,
+        sheets: [
+          {
+            name: "第一页",
+            rows: [
+              ["编号", "项目", "金额"],
+              ["A-01", "研发", 1200],
+              ["A-02", "测试", 800],
+            ],
+          },
+          {
+            name: "第二页",
+            rows: [
+              ["部门", "人数", "预算", "实际", "偏差"],
+              ["工程", 12, 3000, 2850, "=C2-D2"],
+            ],
+          },
+          {
+            name: "第三页",
+            rows: [
+              ["指标", "值"],
+              ["完成率", "98%"],
+            ],
+          },
+        ],
+      });
+
+      const shown = await callTool(unoServer, "show_in_viewer", { path: workbookPath });
+      const sc = shown.structuredContent as {
+        docId: string;
+        totalBytes: number;
+        chunkSize: number;
+        pageCount: number;
+      };
+      expect(sc.pageCount).toBe(3);
+
+      const viewerPdfBytes = await readAllPdfBytes(
+        unoServer,
+        sc.docId,
+        sc.totalBytes,
+        sc.chunkSize,
+      );
+      const viewerPdf = await PDFDocument.load(viewerPdfBytes);
+      expect(viewerPdf.getPageCount()).toBe(3);
+      // A4 宽度为 595.3 pt；3 列小表贴合内容宽度约 192 pt，明显小于 450 pt
+      const firstPageSize = viewerPdf.getPage(0).getSize();
+      expect(firstPageSize.width).toBeLessThan(450);
+
+      // 模型可见的 convert 工具输出保持原页面设置（A4 595.3 x 841.9 pt，允许 Letter 612 x 792 pt）
+      await callTool(unoServer, "convert", {
+        path: workbookPath,
+        outputPath: convertPdfPath,
+        format: "pdf",
+        overwrite: true,
+      });
+      const convertPdf = await PDFDocument.load(readFileSync(convertPdfPath));
+      const convertFirstSize = convertPdf.getPage(0).getSize();
+      expect(convertFirstSize.width).toBeGreaterThan(580);
+      expect(convertFirstSize.width).toBeLessThan(620);
+      expect(convertFirstSize.height).toBeGreaterThan(780);
+    } finally {
+      await unoServer.close();
+    }
+
+    // 2. CLI 回退路径：NOCTURNE_OFFICE_PYTHON 缺失时走 JSON 过滤参数，同样单页贴合
+    const cliServer = createSheetsPluginServer({
+      env: {
+        ...process.env,
+        NOCTURNE_OFFICE_PYTHON: path.join(workDir, "nonexistent-python-for-cli-fallback.exe"),
+      },
+    });
+    try {
+      const shownCli = await callTool(cliServer, "show_in_viewer", { path: workbookPath });
+      const scCli = shownCli.structuredContent as {
+        docId: string;
+        totalBytes: number;
+        chunkSize: number;
+        pageCount: number;
+      };
+      expect(scCli.pageCount).toBe(3);
+      const cliPdfBytes = await readAllPdfBytes(
+        cliServer,
+        scCli.docId,
+        scCli.totalBytes,
+        scCli.chunkSize,
+      );
+      const cliPdf = await PDFDocument.load(cliPdfBytes);
+      expect(cliPdf.getPageCount()).toBe(3);
+      expect(cliPdf.getPage(0).getSize().width).toBeLessThan(450);
+    } finally {
+      await cliServer.close();
     }
   });
 });
