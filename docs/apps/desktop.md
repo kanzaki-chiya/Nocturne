@@ -465,13 +465,13 @@ tokens 用万 / 亿并去掉小数末尾的零（880 万、11.5 万），费用�
 
 ### 5.10 右侧面板（ADR-0060）
 
-决定与范围见 [ADR-0060](../decisions/ADR-0060-desktop-side-panel.md)；本节记录实现。标签有「变更」「文件」「终端」「浏览器」「子代理」「合奏」「成员会话」七种和新标签页。
+决定与范围见 [ADR-0060](../decisions/ADR-0060-desktop-side-panel.md)；本节记录实现。标签有「变更」「文件」「终端」「浏览器」「子代理」「后台任务」「合奏」「成员会话」「组曲」「组曲线程」「插件面板」与新标签页。
 
 **框架**（`src/PanelHost.tsx` 的 `useSidePanel` 管状态，`src/SidePanel.tsx` 渲染，纯函数在 `src/side-panel.ts`）：标题栏在最小化按钮左边放「会话概览」和「右侧面板」两个按钮（`PanelChrome.tsx` 经 `TitlebarSlot` portal 放进 `WindowFrame`），Ctrl+B 开关面板。面板左缘是分隔条（拖动或方向键），宽度夹在 320–960 px，上限给对话区留够 480 px：缩小窗口时面板跟着变窄，存下来的宽度不变，窗口放大后恢复；连 480 + 320 都放不下时，面板取 320 px 盖在对话区上（带阴影，标题栏层级更高，不被盖住）。
 
-面板属于会话（ADR-0060 修订 2026-10-18（二））：每个会话有自己的标签、当前标签和开关，以及「变更」的文件树宽度与换行偏好；面板宽度和会话概览的开关是全局的。首页和新建会话页没有会话，也就没有面板：两个标题栏按钮置灰，Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+Shift+G / Ctrl+`不响应（仍拦下浏览器默认行为，比如 Ctrl+P 打印）。设置页同样不显示面板和概览浮层（ADR-0060 修订 2026-10-18（三）），按钮置灰、这些快捷键与概览的 Esc 都不响应；会话的面板状态原样保留，「← 返回」后恢复，终端在后台照常运行。第一条消息建好会话后面板可用，初始关闭；文件引用左键在当前会话的面板里打开。按会话的记录存本机 prefs 的`panelSessions`（会话 id → 开关、「文件」「变更」「浏览器」「Ensemble」「成员会话」「组曲」「组曲线程」标签、当前标签、`treeWidth`、`wrap`；浏览器标签只存地址和标题，不存历史；终端和新标签页不存），宽度存 `panelWidth`。第 1、2 轮存下的全局 `panelOpen`/`panelTabs`/`panelActiveTab` 在第一次拿到会话列表时迁移给最近活动（`mtimeMs`最大）的会话，写入`panelSessionsMigrated`后不再读取，与`fileOpenerMigrated` 同一模式。桌面没有删除或归档会话的入口；每次拿到会话列表时，本次运行里进过列表、这次不在了的会话视为已删除（不管它是否还打开着），一律整套清理：结束它的终端、删掉它的面板记录（`vanishedSessions`）。没进过列表的会话只有打开着时暂缓（刚建好、列表还没跟上），否则是上一次运行之后被删的，记录同样清掉；正在看的会话也暂缓，离开后下一份列表再判。标签可关闭（× 或中键）、拖动排序、方向键切换、Delete 关闭，＋ 或 Ctrl+T 开新标签页；标签栏横向滚动，当前标签不压缩；文件和终端标签显示「名称 + 淡色项目名」，浏览器标签显示网页标题（没有标题时显示主机名或文件名）、加载中转圈、加载完显示网站图标（工作区外的文件显示所在目录名），空间不够时整段隐藏项目名。面板拖窄时当前标签自动滚回可见区。关掉最后一个标签会留下一个新标签页。
+面板属于会话（ADR-0060 修订 2026-10-18（二））：每个会话有自己的标签、当前标签和开关，以及「变更」的文件树宽度与换行偏好；面板宽度和会话概览的开关是全局的。首页和新建会话页没有会话，也就没有面板：两个标题栏按钮置灰，Ctrl+B / Ctrl+T / Ctrl+P / Ctrl+Shift+G / Ctrl+`不响应（仍拦下浏览器默认行为，比如 Ctrl+P 打印）。设置页同样不显示面板和概览浮层（ADR-0060 修订 2026-10-18（三）），按钮置灰、这些快捷键与概览的 Esc 都不响应；会话的面板状态原样保留，「← 返回」后恢复，终端在后台照常运行。第一条消息建好会话后面板可用，初始关闭；文件引用左键在当前会话的面板里打开。按会话的记录存本机 prefs 的`panelSessions`（会话 id → 开关、「文件」「变更」「浏览器」「Ensemble」「成员会话」「组曲」「组曲线程」「插件面板（`app`）」标签、当前标签、`treeWidth`、`wrap`；浏览器标签只存地址和标题，不存历史；终端和新标签页不存），宽度存 `panelWidth`。第 1、2 轮存下的全局 `panelOpen`/`panelTabs`/`panelActiveTab` 在第一次拿到会话列表时迁移给最近活动（`mtimeMs`最大）的会话，写入`panelSessionsMigrated`后不再读取，与`fileOpenerMigrated` 同一模式。桌面没有删除或归档会话的入口；每次拿到会话列表时，本次运行里进过列表、这次不在了的会话视为已删除（不管它是否还打开着），一律整套清理：结束它的终端、删掉它的面板记录（`vanishedSessions`）。没进过列表的会话只有打开着时暂缓（刚建好、列表还没跟上），否则是上一次运行之后被删的，记录同样清掉；正在看的会话也暂缓，离开后下一份列表再判。标签可关闭（× 或中键）、拖动排序、方向键切换、Delete 关闭，＋ 或 Ctrl+T 开新标签页；标签栏横向滚动，当前标签不压缩；文件和终端标签显示「名称 + 淡色项目名」，浏览器标签显示网页标题（没有标题时显示主机名或文件名）、加载中转圈、加载完显示网站图标（工作区外的文件显示所在目录名），空间不够时整段隐藏项目名。面板拖窄时当前标签自动滚回可见区。关掉最后一个标签会留下一个新标签页。
 
-**新标签页**：地址栏接受 http(s) 网址、不带协议的域名（补 `https://`；`localhost`、`127.0.0.1`、`[::1]` 补 `http://`）、`file://` 地址、`about:blank` 和本机 HTML 文件路径（相对路径按当前会话工作区，网络路径不收），回车后这个新标签页就地变成浏览器标签；带了协议、但协议不在白名单里的（`javascript:alert(1)`、`ms-settings:`、`mailto:` 等）提示「不支持 xxx: 地址」，其余不像网址的输入提示「请输入网址」，不接搜索引擎。没有内置浏览器的环境（`host.browsers` 缺失）照旧交给系统浏览器，只放行 https 网址和本机 http 地址；工具列表是「变更」（Ctrl+Shift+G）、「文件」（Ctrl+P）、「终端」（Ctrl+`）。在新标签页上打开变更、文件或终端时，替换这个新标签页而不是另开。
+**新标签页**：地址栏接受 http(s) 网址、不带协议的域名（补 `https://`；`localhost`、`127.0.0.1`、`[::1]` 补 `http://`）、`file://` 地址、`about:blank` 和本机 HTML 文件路径（相对路径按当前会话工作区，网络路径不收），回车后这个新标签页就地变成浏览器标签；带了协议、但协议不在白名单里的（`javascript:alert(1)`、`ms-settings:`、`mailto:` 等）提示「不支持 xxx: 地址」，其余不像网址的输入提示「请输入网址」，不接搜索引擎。没有内置浏览器的环境（`host.browsers` 缺失）照旧交给系统浏览器，只放行 https 网址和本机 http 地址；工具列表是「变更」（Ctrl+Shift+G）、「文件」（Ctrl+P）、「终端」（Ctrl+`），其后列出当前会话已启用插件声明的面板 surface 卡片（图标取插件图标，文字仅为 surface 的 `title`）。在新标签页上打开变更、文件、终端或插件面板时，替换这个新标签页而不是另开。
 
 **子代理**（ADR-0060 第 6 节与修订（五）、[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)；`src/subagent-directory.ts`、`src/subagent-watch.ts`、`src/SubagentPane.tsx`）：从概览浮层的运行项或父对话 task 工具行的「在面板中查看」打开，运行中、已结束和失败的内置 child 都可查看；尚未创建 child 的调用不提供可用入口。标签属于父会话，标题为「档位 · 任务摘要」，同一 child 只开一个，再点切过去；当该 child 存在来自父会话转发池的等待确认请求（`pendingSubagentPermissions` 匹配 `childSessionId`）时，该子代理标签呈警告色（`--a-warning`，作用于标签图标与文字），新标签页的工具列表不增加子代理。外部 ACP 没有 Nocturne 子会话，只在主对话显示进度和最终结果，不提供面板查看。后台子代理的父 task 启动后立刻结算，标签状态不看这次结算，只看运行登记与子日志；已结束且有成功 finish 显示「已完成」，否则显示「已结束」，耗时取近似值。
 
@@ -526,6 +526,37 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 **手机**：手机没有桌面侧面板、「在面板中查看」与 Ctrl+B / Ctrl+P / Ctrl+T / Ctrl+`，不包含 xterm.js 与内置浏览器；文件子视图按需加载只读 `code-viewer`，子代理详情复用共享 `Conversation` 的只读渲染与 `SubagentWatcher`，不传只读开关时原行为不变。会话侧边栏（[ADR-0084](../decisions/ADR-0084-phone-side-panel.md)）提供上下文用量、运行中的子代理、后台命令、变更、文件与终端入口，行为见[第 8 节](#8-手机网页)。`runtime.readFile` 仍不在远程白名单，手机读文件走新增的 `session.readFile`（按工作区、文件索引与远程上限限制）；`subagent.list` / `subagent.subscribe` / `subagent.unsubscribe` 只读开放，范围限本连接已打开父会话的子会话。`subagent.cancel`（ADR-0073）仍是会话内操作，只在后台子代理详情里提供。
 
 **第 5 轮 agent 浏览器**：agent 经外壳提供的 MCP 只操作自己的面板标签，接入、后台离屏、资源权威、接管、专用数据目录及通用图片附件见 [desktop-browser.md](../protocols/desktop-browser.md)；不把本节现有用户浏览器的行为当作 agent 已获授权的行为。离屏的 agent 标签不参与浮层遮挡的截图占位逻辑，也不盖住主界面的任何区域；离屏期间标签上的 agent 徽标带活动状态，概览浮层或标签栏能看出「agent 正在后台操作某个标签」。`open` 新开标签时，所属会话正显示在前台就打开面板并切到新标签，不在前台就在后台新建，不抢用户当前的会话、页面或标签。
+
+**插件面板（MCP Apps，[ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)）**（`src/AppPane.tsx`、`src/mcp-app-host.ts`、`public-web/app.html`、`src-tauri/src/sandbox.rs`）：
+
+- **标签与去重**：标签类型 `kind: "app"`，按 `(pluginId, surface ?? resourceUri)` 在同一会话内去重；持久进 `panelSessions`（保留 `pluginId`、`serverId`、`surface?`、`resourceUri`、`title`、`icon?`、`openCall?`）。
+- **三种打开方式**：
+  1. 模型调用带 `_meta.ui.resourceUri` 的插件工具并收到本次连接实时 `tool.completed.ui`（历史重放不打开）：自动打开面板并切到该标签，握手完成后下发 `ui/notifications/tool-input` 与 `ui/notifications/tool-result`（`status === "error"` 时 `isError: true`；`cancelled` / `interrupted` / `denied` 时改发 `ui/notifications/tool-cancelled`）；
+  2. 在右侧面板新标签页「工具」区点击插件 surface 卡片（排在「变更」「文件」「终端」之后，图标取插件图标、文字仅显示 `title`）；
+  3. 「默认打开方式」为「Nocturne 面板」时，左键点击工作区中扩展名与已启用插件 surface `open.fileTypes` 匹配的文件引用（多个插件匹配同一扩展名时按插件加载顺序取第一个，若 `open.tool` 非只读则跳过不参与文件打开），复用或新建对应标签并调用 `open.tool`（参数 `{ path }`）。
+- **生命周期**：重启恢复的 `app` 标签在首次显示前不读页面、不调用 `open.tool`、不启动插件服务器；同一会话内切走标签保持挂载与状态；关闭标签或切走会话前发 `ui/resource-teardown` 并最多等 1 秒；所属插件停用或卸载时标签不自动关闭，原位显示错误页。
+- **空壳页与沙箱**：`src-tauri/src/sandbox.rs` 在原有 `/sandbox.html` 外仅多放行精确路径 `/app.html`（拒绝大小写变体与查询串），CSP 为 `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'`。单层 `<iframe sandbox="allow-scripts">` 加载 `http://nct-sandbox.localhost/app.html`（macOS/Linux 为 `nct-sandbox://localhost/app.html`），空壳页就绪后发 `{ type: "nocturne:mcp-app:ready" }`，收到 `{ type: "nocturne:mcp-app:load", html }` 后以 `document.open()/write()/close()` 替换文档，页面 `window.parent` 即宿主。
+- **宿主消息清单**（严格校验 `event.source === iframe.contentWindow`，且 `tools/call` 与 `resources/read` 绑定标签自身的 `sessionId` / `pluginId` / `serverId`）：
+  - `ui/initialize`（返回 `protocolVersion: "2026-01-26"`、`hostInfo`、`hostCapabilities` 与 `hostContext`）、`ui/notifications/initialized`（收到前不向页面发通知/请求）、`ping`、`notifications/message`（写入诊断日志）、`ui/request-display-mode`（固定返回 `{ mode: "inline" }`）、`ui/notifications/size-changed`（忽略）、`ui/open-link`（仅 `https:` 交系统浏览器）、`ui/message`（将文本写入所属会话输入框草稿末尾并聚焦，不自动发送）、`tools/call`（经 `session.callAppTool`）、`resources/read`（经 `session.readAppResource`）、`ui/notifications/host-context-changed`（深浅色或主题变化时下发）、`ui/notifications/tool-input`、`ui/notifications/tool-result`、`ui/notifications/tool-cancelled`、`ui/resource-teardown`；其余请求（含 `ui/update-model-context`）返回 JSON-RPC `-32601`。
+- **`hostContext.styles.variables` 映射表**（`MCP_APP_STYLE_SOURCES`，运行时按 `getComputedStyle(document.documentElement)` 随亮/暗/自定义主题计算）：
+
+| 规范 CSS 变量 | Nocturne 主题令牌 / 字面值 |
+|---|---|
+| `--color-background-primary` / `secondary` / `tertiary` / `inverse` / `ghost` | `--a-bg` / `--a-panel` / `--a-raised` / `--a-btn` / `transparent` |
+| `--color-background-info` / `danger` / `success` / `warning` / `disabled` | `--a-accent-subtle` / `--a-error-bg` / `--a-success-bg` / `--a-warning-bg` / `--a-raised` |
+| `--color-text-primary` / `secondary` / `tertiary` / `inverse` / `ghost` | `--a-text` / `--a-secondary` / `--a-muted` / `--a-on-btn` / `--a-muted` |
+| `--color-text-info` / `danger` / `success` / `warning` / `disabled` | `--a-accent` / `--a-error` / `--a-success` / `--a-warning` / `--a-faint` |
+| `--color-border-primary` / `secondary` / `tertiary` / `inverse` / `ghost` | `--a-border` / `--a-border-strong` / `--a-border` / `--a-on-btn` / `transparent` |
+| `--color-border-info` / `danger` / `success` / `warning` / `disabled` | `--a-accent-border` / `--a-error-border` / `--a-success` / `--a-warning` / `--a-border` |
+| `--color-ring-primary` / `secondary` / `inverse` / `info` / `danger` / `success` / `warning` | `--a-focus-ring` / `--a-border-strong` / `--a-on-btn` / `--a-accent` / `--a-error` / `--a-success` / `--a-warning` |
+| `--font-sans` / `--font-mono` | `--sans` / `--mono` |
+| `--font-weight-normal` / `medium` / `semibold` / `bold` | `--fw-regular` / `--fw-medium` / `--fw-semibold` / `700` |
+| `--font-text-xs-size` / `sm` / `md` / `lg` | `--fs-1` / `--fs-2` / `--fs-3` / `--fs-4` |
+| `--font-heading-xs-size` / `sm` / `md` / `lg` | `--fs-2` / `--fs-3` / `--fs-4` / `--fs-5` |
+| `--font-text-{xs,sm,md,lg}-line-height` / `--font-heading-{xs,sm,md,lg}-line-height` | `--lh-base` / `--lh-tight` |
+| `--border-radius-xs` / `sm` / `md` / `lg` / `xl` / `full` | `--radius-1` / `--radius-1` / `--radius-2` / `--radius-3` / `--radius-composer` / `9999px` |
+| `--border-width-regular` | `1px` |
+| `--shadow-hairline` / `sm` / `md` / `lg` | `--shadow-focus` / `--shadow-popover` / `--shadow-popover` / `--shadow-dialog` |
 
 ### 5.11 电脑操控（ADR-0082）
 

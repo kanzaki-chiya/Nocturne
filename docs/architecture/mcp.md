@@ -233,3 +233,16 @@ core:      wrapSession 中 options.mcp 存在时（空集合也建会话以支�
 - **缓存路径与键**：首次连接取得 `tools/list` 后，以「临时文件 + rename」原子写入 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/`；缓存键为插件 id、服务器 id 加上内置插件版本号（`version`）或已安装插件目录指纹（`fingerprint`），内容含服务器信息与工具列表（名称、说明、参数 schema、annotations）。文件损坏或键不匹配一律按未命中处理，不报错。
 - **会话打开**：缓存命中时直接用缓存注册工具并进入 `standby`（未启动）状态，不启动进程，可用性检查视为可用；未命中时照常启动取工具列表并写缓存，本会话内不再退出。
 - **首次调用**：收到该服务器的第一次 `tools/call` 时拉起进程并完成 initialize 与 `tools/list`（`standby` → `starting` → `ready`，不计入崩溃重连次数）。若实际工具列表与缓存不同，更新缓存并将新工具集暂存到下一个 MCP 边界（[ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）生效；若本次调用的工具已不存在，返回错误 `mcp_tool_missing`。启动后的退出、崩溃与重连规则同普通 stdio 服务器。
+
+## 12. MCP Apps（ADR-0101）
+
+仅对插件来源的 MCP 服务器开放 MCP Apps 扩展（SEP-1865，版本 `2026-01-26`）；用户或项目配置文件里的服务器不启用，其 `initialize` 报文保持不变。详见 [ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)。
+
+- **能力协商**：插件服务器 `initialize` 时在 `capabilities.extensions["io.modelcontextprotocol/ui"]` 声明 `{ mimeTypes: ["text/html;profile=mcp-app"] }`。
+- **工具元数据与可见性**：保留工具 `_meta.ui.resourceUri`、`_meta.ui.visibility`、`_meta.ui.surface` 并随工具缓存一并持久化（缓存版本升级后旧缓存按未命中处理，重新拉取 `tools/list`）。`visibility` 缺省为 `["model", "app"]`：
+  - 不含 `"model"` 的工具不进入模型工具列表、`mcp_search` 与 `/context` 工具计数，且在工具集不变时保持 `specs()` 逐字节稳定（[ADR-0086](../decisions/ADR-0086-mcp-steer-boundary.md)）；
+  - 不含 `"app"` 的工具禁止页面调用；
+  - 声明了 `resourceUri` 的工具完成时，在 `tool.completed.ui` 写入 `{ pluginId, serverId, resourceUri, surface? }`（见 [events.md](../protocols/events.md)）。
+- **`resources/read` 约束**：经 `readAppResource(pluginId, serverId, uri)` 校验服务器属于该已启用插件；仅接受 `ui://` 开头的 URI，响应仅接受 `mimeType === "text/html;profile=mcp-app"`，内容可为 `text` 或 base64 `blob`，UTF-8 解码后不超过 **8 MiB**（超限拒绝，不截断）。服务器处于 `standby` 时按需启动后读取。
+- **页面调用工具**：经 `callAppTool(pluginId, serverId, tool, arguments)` 仅允许调用同一会话、同一插件服务器上 `visibility` 含 `"app"` 的工具；跨服务器或越权插件一律拒绝。调用不写会话日志、不触发 Hook，权限判定完全交由权限层的 `callerSource: "app"` 分支完成（见 [permissions.md](permissions.md#57-mcp-apps-页面调用adr-0101)），返回原始 MCP `CallToolResult`（`{ content, structuredContent?, isError? }`）。
+

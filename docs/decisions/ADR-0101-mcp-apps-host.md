@@ -174,3 +174,23 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
 
 1. 宿主：第 2–7 节，外加一个只在测试里用的示例插件（带一个页面、一个模型工具、一个页面专用工具），用来做端到端测试和截图。
 2. 查看器：四个文档插件各加一个查看器页面、对应工具与查看器技能。另行修订 ADR-0100，写明页面渲染方式、锚点格式与工具清单。
+
+## 修订：2026-11-20 宿主实现约定
+
+- **RPC 方法名（仅本机开放，不在远程与 agent 白名单）**：
+  - `session.readAppResource({ sessionId, pluginId, serverId, uri }) → { uri, mimeType: "text/html;profile=mcp-app", html, bytes }`
+  - `session.callAppTool({ sessionId, pluginId, serverId, tool, arguments? }) → { content, structuredContent?, isError? }`
+  - `session.listAppSurfaces({ sessionId }) → SessionAppSurface[]`
+- **`tool.completed.ui` 确切形状**：
+  ```ts
+  {
+    pluginId: string;
+    serverId: string;
+    resourceUri: string;
+    surface?: string;
+  }
+  ```
+- **`hostContext` 实际返回字段**：`theme`（`"light" | "dark"`）、`styles: { variables: Record<string, string> }`（见 [desktop.md](../apps/desktop.md#510-右侧面板adr-0060) 映射表）、`displayMode: "inline"`、`availableDisplayModes: ["inline"]`、`containerDimensions?: { width, height }`、`locale`、`timeZone`、`platform: "desktop"`、`deviceCapabilities: { touch: false, hover: true }`。
+- **兼容性实测结论**：在真实 Windows 桌面端（Tauri 调试包）下，使用官方 `@modelcontextprotocol/ext-apps`（v2.0.4）`App` 类直接连接单层 `sandbox="allow-scripts"` 空壳页（`http://nct-sandbox.localhost/app.html`），`connect()` 握手成功（`hostVersion: { name: "nocturne", version: "0.56.0" }`），收到全部 9 个 `hostContext` 字段；只读 `tools/call` 成功返回结果，写工具被权限层以 `app_tool_not_allowed` 拒绝；`requestDisplayMode` 返回 `{ mode: "inline" }`；`sendMessage` 成功将文本预填进对应会话输入框草稿且未自动发送；未支持的 `ui/update-model-context` 返回 `-32601`；深浅色切换触发 `onhostcontextchanged` 并同步更新主题与样式变量。另实测沙箱下 `new Worker(URL.createObjectURL(new Blob(...)))` 被 `worker-src` 拦截、`WebAssembly.instantiate` 因未放开 `unsafe-eval` 被 `script-src 'unsafe-inline'` 拦截（本轮不改 CSP，留作分期第 2 项文档查看器选型依据）。
+- **与 ADR 正文不一致的地方**：无。
+

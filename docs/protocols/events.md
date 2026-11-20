@@ -84,7 +84,7 @@ type RuntimeEvent = DurableEvent | EphemeralEvent
 | `permission.requested` | ✓ | `requestId`、`callId`、`subjects`、`reason`、`options`（权限层给出的选项子集：通常五项，高风险命令、编码命令或工作区外 edit 只有 `allow_once`、`deny`、`deny_stop`；交互父会话下内置 `task` 子会话仅写入子日志，不写入父会话日志，见 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)） |
 | `permission.resolved` | ✓ | `requestId?`、`callId`、`action: "allow" \| "deny"`、`source: "user" \| "rule" \| "grant" \| "non_interactive" \| "cancelled" \| "hook" \| "reviewer"`、`rule?`、`grant?: { scope: "session" \| "project", createdAt }`、`remember?`、`feedback?`（同上：子会话权限结算只写入子会话自身日志，父日志不落外来 `callId`） |
 | `permission.reviewed` | ✓ | `callId`、`requestId?`、`backend`、`model?: ModelRef`、`verdict: "allow" \| "block" \| "unsure"`、`reason`、`durationMs`、`cached`、`usage?: Usage`（审查来源用量；缓存不重复收费） |
-| `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`files?: FileAttachment[]`（工具结果文件附件引用，[ADR-0072](../decisions/ADR-0072-file-attachments.md)、[ADR-0088](../decisions/ADR-0088-inline-html.md)）、`durationMs?` |
+| `tool.completed` | ✓ | `callId`、`name`、`status`、`modelContent`、`output?`、`error?`、`truncated?`、`spillPath?`（超预算输出的落盘文件绝对路径，见 [tools.md](../architecture/tools.md) 第 4 节）、`attachments?: ImageAttachment[]`（v0.5 新增：工具结果图片的附件引用，字节已落盘，见 [tools.md](../architecture/tools.md) 第 4 节）、`files?: FileAttachment[]`（工具结果文件附件引用，[ADR-0072](../decisions/ADR-0072-file-attachments.md)、[ADR-0088](../decisions/ADR-0088-inline-html.md)）、`ui?: { pluginId: string, serverId: string, resourceUri: string, surface?: string }`（插件工具声明 `_meta.ui.resourceUri` 时附带的页面定位信息，兼容扩展，不提升 `formatVersion`，见 [ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)）、`durationMs?` |
 
 | `context.compacted` | ✓ 或 — | `kind: "prune" \| "summary"`、`throughSeq`、`summary?`、`usage?: Usage`、`model?: ModelRef`（摘要请求成功时记录用量与模型；prune 不写，旧日志兼容；规则见 [context.md](../architecture/context.md) 第 6 节） |
 | `hook.context` | ✓ 或 — | `point: "SessionStart" \| "SubagentStart" \| "UserPromptSubmit"`、`source?`、`entries: { hook: string; text: string; truncated?: number }[]`（[ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)：Hook 注入模型上下文的唯一持久事件；`UserPromptSubmit` 携带 `turnId`，其余为会话级快照事件，不提升 `formatVersion`） |
@@ -364,7 +364,7 @@ ADR-0072：`message.user.files?` 和 `tool.completed.files?` 是 `FileAttachment
 
 演进规则：
 
-- 新增临时事件类型、在已知事件中新增可选字段：兼容变更。新增字段不得改变已有字段的含义。v0.5 的 `message.user.attachments` 与 `tool.completed.attachments` 属于此类：不提升 `formatVersion`，旧版本按上表忽略未知字段。
+- 新增临时事件类型、在已知事件中新增可选字段：兼容变更。新增字段不得改变已有字段的含义。v0.5 的 `message.user.attachments` 与 `tool.completed.attachments` 以及 [ADR-0101](../decisions/ADR-0101-mcp-apps-host.md) 的 `tool.completed.ui` 属于此类：不提升 `formatVersion`，旧版本按上表忽略未知字段；页面数据复用同一事件的 `modelContent` 与 `output.structured`，不另存一份。
 - `session.config_changed.mcp`（[ADR-0071](../decisions/ADR-0071-mcp-availability-notes.md)）是已知事件的可选环境状态字段：不提升 `formatVersion`，旧版本忽略，旧日志折叠不变。
 - `session.config_changed.goal`（含取消时的 `null`）、`session.config_changed.plan` 与 `message.user.workMode`（[ADR-0076](../decisions/ADR-0076-work-modes.md)）不提升 `formatVersion`。尚不认识 goal 的旧版本会忽略该字段；已实现最初版 ADR-0076、要求 maxMinutes/maxRounds 且不接受 null 的中间版本不能读取新的目标写入，需升级 Runtime 与客户端。新版本可读取旧字段、旧 limit 和旧日志，并以 null 清除目标；不能把这一方向的兼容误述为所有旧版本均可读取新日志。
 - 新增持久化事件类型：旧版本 Runtime 将无法恢复包含它的会话（见上表）。这是有意的保守选择；变更说明中需写明。

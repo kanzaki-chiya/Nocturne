@@ -216,6 +216,14 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 全体主体均为已解析的 `app` 时，选项为 `allow_session`、`allow_always`、`deny`，混合主体不提供 `allow_always`。任一主体带 `appUnresolved: true` 时只提供 `allow_session`、`deny`；伪造 `remember: "always"` 回复按未提供的选项拒绝，不写用户规则。回复 `remember: "always"` 由权限层调用用户配置存储，在 `<NOCTURNE_HOME>/config.json` 的 `permissions.rules` 写入精确 `app <身份> → allow`。写入串行、原子替换，保留无关配置；成功后所有会话下一次求值读取最新规则，新会话也生效。失败降级为会话 Grant，发出 `runtime.warning(code: "app_permission_save_failed")`，结算的 `remember` 为 `session`。持久授权是用户规则，不伪装为项目 Grant。
 
+### 5.7 MCP Apps 页面调用（ADR-0101）
+
+插件交互页面（MCP Apps，[ADR-0101](../decisions/ADR-0101-mcp-apps-host.md) 第 3 节）经 `tools/call` 调用本服务器工具时，权限层将调用来源 `callerSource: "app"` 与预期服务器 id（`expectedMcpServer`）作为求值输入，主体与模型调用相同（`mcp <server>/<tool>`，带 `readOnly`）：
+
+- **同服务器校验**：所有主体必须是 `kind === "mcp"` 且目标服务器与 `expectedMcpServer` 一致；跨服务器或非 MCP 主体一律 `deny`，错误码 `app_tool_not_allowed`（不受预设或显式规则影响）。
+- **非只读工具一律拒绝**：工具未声明 `readOnlyHint: true`（`readOnly !== true`）时一律 `deny`，错误码 `app_tool_not_allowed`，不论规则结果、显式 `allow` 还是 `guarded`/`bypass` 预设。
+- **只读工具按规则结果收口**：对 `readOnly === true` 的工具按正常规则链（5.1–5.3）求值后，规则为 `deny` 则保持 `deny`；规则为 `allow` 或 `ask`（含 `default`、`read-only`、`smart` 等预设）一律直接 `allow`，不弹确认、不走安全审查、不触发 Hook、不写会话日志。
+
 ## 6. 预设
 
 为本会话已发现技能的真实根目录生成 `read allow <root>/**` 规则，与本会话落盘目录规则一起在宽规则之后求值。技能实现不做权限判定；链接到根目录外的支持文件仍按解析后真实路径求值。写入、shell 与技能目录外读取不放宽，详见 [skills.md](skills.md) 第 3 节。

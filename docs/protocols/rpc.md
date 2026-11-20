@@ -92,6 +92,9 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `state` | → `SessionState` 去掉 `history` 与 `unsettledCalls`（历史由持久事件折叠得到；后者是进程内 Map） |
 | `describeContext` | → `BuiltContext` 去掉发给模型的整份 `request`，只留报告与判定 |
 | `reasoningEffortInfo` / `shellInfo` / `listShells` / `visionInfo` / `mcpServers` / `fileIndex` | 只读查询，结果同进程内 |
+| `readAppResource` | `{ pluginId, serverId, uri }` → `{ uri, mimeType: "text/html;profile=mcp-app", html, bytes }`；**仅本机开放**（[ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)），从已启用插件对应服务器按需读取 `ui://` 页面（≤ 8 MiB） |
+| `callAppTool` | `{ pluginId, serverId, tool, arguments? }` → `{ content, structuredContent?, isError? }`；**仅本机开放**（[ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)），由权限层按 `callerSource: "app"` 判定，只放行同服务器 `visibility` 含 `"app"` 的只读工具，不写会话日志、不触发 Hook；越权报 `app_tool_not_allowed` |
+| `listAppSurfaces` | → `SessionAppSurface[]`（`{ pluginId, pluginName, icon?, id, title, serverId, resourceUri, open? }`）；**仅本机开放**（[ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)），列出当前会话已启用插件的可用面板 surface |
 | `readFile` | `{ path: string }` → `SessionFileContent`：`{ kind: "text", path, text, bytes }`，path 为 `fileIndex` 中的相对文件路径；只读、完整返回或明确报错，安全边界见下文（ADR-0084） |
 | `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, relativePath?, exists, isDirectory }`，`relativePath` 只在工作区内给出）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端按「打开文件用」决定入口（U-09）。Windows 网络路径（`\\server\share`、`\\?\UNC\...`）不去访问，直接按 `exists: false` 返回；逐级解析链接时 junction / 符号链接指向网络位置的同样不访问。每个路径的解析与 `stat` 有 `RESOLVE_FILE_TIMEOUT_MS`（2 秒）时限，超时按 `exists: false` 返回（映射盘主机离线时不拖慢回答渲染，也不给它加链接），同一批里其余路径照常返回 |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
@@ -558,7 +561,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.readFile` | 允许（ADR-0084）：限本连接已打开会话的工作区与 fileIndex 可见普通文件；真实路径校验、拒绝链接与越界，二进制不返回内容，超限 `file_too_large` 带原始字节数，见第 3.2 节 |
 | `remote.lanEndpoints` | 允许（ADR-0087）：只读返回本机局域网直连监听地址列表 `{endpoints}`（未开启时为空数组），仅经已建立的端到端加密通道下发 |
 | `runtime.readFile`、`runtime.searchSessions` | 拒绝：任意绝对路径 `readFile` 仅本机（ADR-0060），手机文件入口使用上面的受限会话方法；`searchSessions` 仅桌面端跨会话搜索（ADR-0077） |
-| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）；全部 `runtime.*` 设置写入（含 `updateSettings` 修改 `appearance.themePreset`、`appearance.customThemes`、`memory.global`、`memory.project` 等，见 ADR-0093、ADR-0094、ADR-0098）、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`、`plugins.*`、`memory.*`，以及上面未列出的 `schedule.*` |
+| 其他全部方法 | 拒绝。包括 `session.setShell`（会写 `settings.json` 的 Shell 设置）、`session.readAppResource` / `session.callAppTool` / `session.listAppSurfaces`（MCP Apps 宿主仅桌面本机开放，见 ADR-0101）；全部 `runtime.*` 设置写入（含 `updateSettings` 修改 `appearance.themePreset`、`appearance.customThemes`、`memory.global`、`memory.project` 等，见 ADR-0093、ADR-0094、ADR-0098）、`getPreference`、`setPreference`、`reloadConfig`、审查器查询与测试、`refreshModelsDev`、`refreshUpstreamLimits`、`shutdown`；全部 `provider.*`、`login.*`、其余 `remote.*`（含 `remote.setLanDirect`）、`agent.*`、`mcp.*`、`agents.*`、`skills.*`、`plugins.*`、`memory.*`，以及上面未列出的 `schedule.*` |
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
@@ -588,6 +591,9 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `Runtime.readSessionAttachment(input)` | `session.observeAttachment({ sessionId, file })` | `{ data: Uint8Array, mimeType, bytes }`（线上 `data` 为 base64） |
 | `Runtime.cancelSubagent({ parentSessionId, childSessionId })` | `subagent.cancel` | `void` |
 | `RuntimeSession.respondSubagentPermission(childSessionId, requestId, reply)` | `session.respondSubagentPermission({ sessionId, childSessionId, requestId, reply })` | `void` |
+| `RuntimeSession.readAppResource(input)` | `session.readAppResource({ sessionId, pluginId, serverId, uri })` | `McpAppResourceResult`（仅本机） |
+| `RuntimeSession.callAppTool(input)` | `session.callAppTool({ sessionId, pluginId, serverId, tool, arguments? })` | `McpAppToolCallResult`（仅本机） |
+| `RuntimeSession.listAppSurfaces()` | `session.listAppSurfaces({ sessionId })` | `SessionAppSurface[]`（仅本机） |
 
 ## 9. 服务端进程
 
