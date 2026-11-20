@@ -98,14 +98,28 @@ P 发出 hs.fin 后可立即发数据；H 必须验证 hs.fin 后才处理/发�
 | `0x10` | `data` | 数据 | counter(u64be,8 字节) ‖ AES-GCM 密文（含 16 字节 tag） |
 | `0x7f` | `error` | 仅握手阶段错误 | UTF-8 JSON `{code}`，不带其他信息 |
 
+数据帧明文为 `flag(1 字节) ‖ chunk`，`DATA_FLAGS` 导出对应命名常量（[ADR-0103](../decisions/ADR-0103-remote-channel-compression.md)）：
+
+| `flag` | 常量名 | 含义 |
+|---|---|---|
+| `0x00` | `uncompressedEnd` | 未压缩，消息结束 |
+| `0x01` | `uncompressedMore` | 未压缩，还有分片 |
+| `0x02` | `compressedEnd` | 压缩，消息结束 |
+| `0x03` | `compressedMore` | 压缩，还有分片 |
+| 其他值 | — | 非法，报 `protocol_error` |
+
 - 每方向单独 key/counter，从 0 开始，每帧加 1。
 - nonce：`00 00 00 00 ‖ u64be(counter)`（12 字节）。AAD：头 9 字节 `0x10 ‖ counter`。
-- 明文：`flag(1 字节) ‖ chunk`；`0x00` 消息结束，`0x01` 还有分片；其他 flag 为 `protocol_error`。
 - 收方 counter 必须严格等于期望值，否则 `replay`；解密失败 `decrypt_failed`。都直接关闭，**不回错误帧**，避免 oracle。
+- 压缩由上层（RPC `initialize`，见 [rpc.md 第 2 节](rpc.md#2-握手)）协商开启，只用于电脑→手机方向；握手帧、配对帧与错误帧不压缩。
+  - 发送端每条连接持有一个共享 `deflate-raw` 压缩流（level 6，windowBits 15），每条消息按 `utf8(message) ‖ 0xFF`（`MESSAGE_TERMINATOR`，RFC 3629 保证合法 UTF-8 不含 `0xFF`）写入并执行 `Z_SYNC_FLUSH`，将本次刷出的字节作为载荷照原规则分片加密；同一条消息所有分片压缩位一致（中间片 `0x03`，末片 `0x02`）。开启压缩前已入队的消息保持未压缩。
+  - 接收端每条连接持有一个长期存活的 `DecompressionStream("deflate-raw")`，重组完一条压缩消息后串行写入解压流，读至 `0xFF` 哨兵还原明文并按严格 UTF-8 解码后交付上层。
+  - 开启压缩后同一方向禁止混发未压缩消息，收到 `0x00`/`0x01` 报 `protocol_error`；未开启时收到 `0x02`/`0x03` 也报 `protocol_error`。
+  - 解压失败（含数据损坏、空载荷、流提前结束或哨兵后多余字节）按 `decrypt_failed` 同等处理：直接关闭，**不回错误帧**。
 - `MAX_FRAME=1_048_576` 字节（含类型）；每分片容量 `MAX_FRAME-9-16-1`。
-- `MAX_MESSAGE=16*1024*1024` 字节，发送自动分片，重组或发送超限均 `frame_too_large` 并关闭，记录 closeReason。
+- `MAX_MESSAGE=16*1024*1024` 字节，按解压后的明文长度计算：发送超限立即 `frame_too_large` 并关闭；接收未压缩重组或解压过程中明文一超过 `MAX_MESSAGE` 立即停止读取、取消解压流，报 `frame_too_large` 并关闭，记录 closeReason。
 - counter 到 `2^53-1` 关闭，不溢出。
-- 关闭丢弃未完成分片，不交付半条消息。完整消息按原始 UTF-8 保留，不做 NFC。
+- 关闭丢弃未完成分片，释放压缩/解压流，不交付半条消息。完整消息按原始 UTF-8 保留，不做 NFC。
 
 ## 6. 传输 API 与生命周期
 
@@ -117,6 +131,11 @@ interface FrameTransport {
   close(): void;
 }
 createMemoryFramePair(): [FrameTransport, FrameTransport];
+interface StreamCompressor {
+  compress(data: Uint8Array): Promise<Uint8Array>;
+  close(): void;
+}
+type ChannelCompression = "deflate-raw";
 interface SecureLineTransport {
   send(line: string): void;
   onLine(handler: (line: string) => void): void;
@@ -124,7 +143,10 @@ interface SecureLineTransport {
   flush(): Promise<void>;
   close(): void;
   readonly closeReason: RemoteChannelError | undefined;
+  enableSendCompression(compressor: StreamCompressor): void;
+  enableReceiveCompression(algorithm: ChannelCompression): void;
 }
+supportsDeflateRawDecompression(): boolean;
 interface ConnectChannelOptions {
   identity: Identity;
   hostPublicKey: Uint8Array;
@@ -170,6 +192,6 @@ acceptChannel(transport: FrameTransport, options: AcceptChannelOptions): Promise
 
 安卓 App 与电脑端在同一局域网直连时（[ADR-0087](../decisions/ADR-0087-lan-direct.md)），底层使用原生 TCP 流加 4 字节大端无符号长度前缀承载 `FrameTransport`，第 3、4、5、7 节的帧格式、握手转录、加密算法与错误码均保持不变，无中继路由头，也没有 HTTP 升级、掩码、分片或额外控制帧：
 
-- **帧与 TCP 字节流映射**：每一帧 `FrameTransport` 报文（以 1 字节 `type` 开头，见第 3 节）在线上编码为 `[len: u32be][frame: len bytes]`，其中 `len` 合法范围为 `1..MAX_FRAME`（1 MiB）。接收端读满 4 字节长度头即立即判定：长度为 `0` 或超过 `MAX_FRAME` 时当场关闭 TCP 连接，不等待后续负载字节，也不为超限负载分配内存。关闭传输即关闭底层 TCP 连接。
+- **帧与 TCP 字节流映射**：每一帧 `FrameTransport` 报文（以 1 字节 `type` 开头，见第 3 节）在线上编码为 `[len: u32be][frame: len bytes]`，其中 `len` 合法范围为 `1..MAX_FRAME`（1 MiB）。第 5 节的数据帧压缩位于 AES-GCM 密文帧之内，也就是处于 4 字节长度前缀里面，不改变长度前缀的封装格式。接收端读满 4 字节长度头即立即判定：长度为 `0` 或超过 `MAX_FRAME` 时当场关闭 TCP 连接，不等待后续负载字节，也不为超限负载分配内存。关闭传输即关闭底层 TCP 连接。
 - **未认证阶段的限制**：电脑端监听 `0.0.0.0`，只接受来源地址属于私有或本地网段（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、`fc00::/7`、`fe80::/10` 及回环地址）的连接。从 TCP 接入（`connection` 事件）起计入未完成加密握手的并发上限 16，超出直接销毁；握手超时沿用 10 秒。首帧必须是 `hs.init` 且不超过 4096 字节，电脑端发出 `hs.resp` 前不接受第二帧；客户端发出 `hs.fin` 后紧随到达的 `data` 帧在电脑端完成 `hs.fin` 验签前按字节总量上限（不超过 `2 * MAX_FRAME`）暂存，验签通过前绝不交给上层处理（非 `data` 帧或超出字节上限立即断开）。手机端同样在完成 `connectChannel`（含校验电脑 `hostPublicKey` 签名）前不得发送任何 `data` 帧。错误响应仅使用第 7 节既有错误帧，不额外区分设备未知与签名错误之外的状态。
 

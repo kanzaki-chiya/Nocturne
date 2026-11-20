@@ -22,8 +22,9 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `protocolVersion` | 整数；必须与服务端一致（第一版不做向下兼容），否则报错 `protocol_version_mismatch` |
 | `clientName` | 客户端标识，诊断用 |
 | `capabilities.interactive` | 客户端能否回复权限与提问请求；仅本机连接的声明用于创建 Runtime，远程声明不改变交互模式 |
+| `capabilities.compression` | 可选，字符串数组（目前仅 `"deflate-raw"`）；客户端支持的下行压缩算法，仅远程连接参与协商（[ADR-0103](../decisions/ADR-0103-remote-channel-compression.md)）。手机端仅在能力检测 `new DecompressionStream("deflate-raw")` 不抛错时声明 |
 
-结果对两种连接相同：`{ protocolVersion, nocturneVersion, sessionsDir? }`。Runtime 只在本机连接握手时创建，`interactive` 取自本机声明；创建失败时握手报错、连接保持，可重试。远程连接永远不创建 Runtime，本机尚未创建时远程握手报 `runtime_unavailable`，连接保持，可稍后重试。握手前发其他请求报 `not_initialized`（远程能力越界优先报第 7 节错误）。
+结果：`{ protocolVersion, nocturneVersion, sessionsDir?, compression?, agent? }`。当远程连接客户端声明了 `"deflate-raw"` 且底层传输支持发送压缩时，结果返回 `compression: "deflate-raw"`；`initialize` 响应本身不压缩，服务端在发出响应后同步开启下行压缩，从下一条消息开始压缩，客户端收到 `compression: "deflate-raw"` 后同步启用接收解压。旧端不声明或结果缺省 `compression` 时双方均不压缩；本机连接与外部 agent 连接忽略该字段且不返回 `compression`。Runtime 只在本机连接握手时创建，`interactive` 取自本机声明；创建失败时握手报错、连接保持，可重试。远程连接永远不创建 Runtime，本机尚未创建时远程握手报 `runtime_unavailable`，连接保持，可稍后重试。握手前发其他请求报 `not_initialized`（远程能力越界优先报第 7 节错误）。
 
 ## 3. 方法
 

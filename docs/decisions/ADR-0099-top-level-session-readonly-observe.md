@@ -73,3 +73,7 @@
 
 1. **在 `resumeSession` 内把插件/技能/工作树/记忆等装配延迟到首次 `submit`**：实测 `assembleSession` 涉及 690 ms 多项状态（包括权限策略、MCP、技能目录、模型上下文报告），且 `resumeSession` 仍需获取会话锁、执行坏尾修复与对账，打开即占锁会影响并发查看；同时桌面端与 RPC 客户端假设 `resumeSession` 返回即可查询 `describeContext` / `describeSkills` / `listGrants`。相比之下，独立的只读快照观察语义清晰、边界干净、零侵入桌面端。
 2. **让 `session.observe` 建立持续的文件监听长订阅**：顶层历史会话在未唤醒时不会在本进程写入；一旦本后台唤醒（`openHere: true`），已有 `runtime.sessionsChanged` 通知驱动手机端自动升级到标准 `session.subscribe`。不维护额外文件 watcher 可避免跨平台文件锁与句柄泄漏。
+
+## 修订
+
+- 2026-11-21：远程连接下行传输体积的进一步压减由 [ADR-0103](ADR-0103-remote-channel-compression.md) 在加密通道层以共享 `deflate-raw` 流解决，`session.observe` / `session.observeEvent` 报文形状不变。
