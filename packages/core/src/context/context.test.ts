@@ -18,6 +18,7 @@ import {
   retentionTokens,
 } from "./index.js";
 import type { BuildContextInput } from "./index.js";
+import { scaleLargestRemainder } from "./build.js";
 
 const model: ModelInfo = {
   ref: { provider: "test", model: "m1" },
@@ -1252,7 +1253,7 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
     const allZero: HistoryEntry[] = [zeroTail(1, 20), tool(3, 100), zeroTail(7, 5)];
     expect(buildContext(input(allZero)).report.estimatedTokens).toBe(pure(allZero));
   });
-  it("锚点高于明细时报告差额，低于时不缩放各项", () => {
+  it("锚点高于明细时报告差额，低于时按比例缩小各项并保持 chars 不变", () => {
     const high = buildContext(input([assistant(1, 1, 50_000)]));
     const accounted = (built: ReturnType<typeof buildContext>) =>
       built.report.sections.reduce((total, section) => total + section.estimatedTokens, 0) +
@@ -1261,21 +1262,248 @@ describe("ADR-0037 保留、触发、缓存与用量", () => {
     expect(high.report.unattributedTokens).toBe(high.report.estimatedTokens - accounted(high));
     expect(high.report.unattributedTokens).toBeGreaterThan(0);
 
-    const low = buildContext(
+    const imgModel: ModelInfo = {
+      ...small,
+      capabilities: { ...small.capabilities, imageInput: true },
+    };
+    const imgAttachment: ImageAttachment = {
+      type: "image",
+      source: "paste",
+      file: "a.png",
+      mimeType: "image/png",
+      sha256: "abc",
+      bytes: 100,
+    };
+    const history: HistoryEntry[] = [
+      {
+        kind: "compaction",
+        seq: 1,
+        turnId: undefined,
+        compactKind: "summary",
+        throughSeq: 1,
+        summary: "摘要内容".repeat(40),
+      },
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u1",
+        content: [{ type: "text", text: "用户提问".repeat(50) }],
+        attachments: [imgAttachment],
+      },
+      tool(3, 800),
+      {
+        ...assistant(5, 20_000, 1000),
+        usage: { inputTokens: 1000, outputTokens: 0 },
+      },
+    ];
+    const unanchored = buildContext(
+      input(
+        history.map((e) => (e.kind === "assistant" ? { ...e, usage: undefined } : e)),
+        { model: imgModel },
+      ),
+    );
+    const low = buildContext(input(history, { model: imgModel }));
+    expect(low.report.estimatedTokens).toBe(1000);
+    expect(accounted(unanchored)).toBeGreaterThan(1000);
+    expect(accounted(low)).toBe(1000);
+    expect(low.report.unattributedTokens).toBeUndefined();
+    const lowHistory = low.report.sections.find((section) => section.name === "history");
+    const rawHistory = unanchored.report.sections.find((section) => section.name === "history");
+    expect(lowHistory?.breakdown).toBeDefined();
+    expect(
+      (lowHistory?.breakdown?.user.estimatedTokens ?? 0) +
+        (lowHistory?.breakdown?.assistant.estimatedTokens ?? 0) +
+        (lowHistory?.breakdown?.tool.estimatedTokens ?? 0) +
+        (lowHistory?.breakdown?.summary.estimatedTokens ?? 0),
+    ).toBe(lowHistory?.estimatedTokens);
+    expect(low.report.images?.count).toBe(1);
+    expect(low.report.images?.estimatedTokens).toBeLessThan(1600);
+    expect(low.report.totalChars).toBe(unanchored.report.totalChars);
+    expect(low.report.sections.map((s) => s.chars)).toEqual(
+      unanchored.report.sections.map((s) => s.chars),
+    );
+    expect({
+      user: lowHistory?.breakdown?.user.chars,
+      assistant: lowHistory?.breakdown?.assistant.chars,
+      tool: lowHistory?.breakdown?.tool.chars,
+      summary: lowHistory?.breakdown?.summary.chars,
+    }).toEqual({
+      user: rawHistory?.breakdown?.user.chars,
+      assistant: rawHistory?.breakdown?.assistant.chars,
+      tool: rawHistory?.breakdown?.tool.chars,
+      summary: rawHistory?.breakdown?.summary.chars,
+    });
+  });
+
+  it("无锚点时明细大于总量（含 providerData）按比例缩小各项且 chars 不变", () => {
+    const providerData = { sig: "x".repeat(4000) };
+    const opaque = JSON.stringify(providerData);
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t1",
+        messageId: "u1",
+        content: [{ type: "text", text: "用户消息".repeat(30) }],
+      },
+      {
+        ...assistant(2, 1),
+        model: model.ref,
+        content: [{ type: "reasoning", text: "推理".repeat(20), providerData }],
+      },
+      tool(3, 400),
+    ];
+    const scaled = buildContext(baseInput({ history }));
+    const plain = buildContext(
+      baseInput({
+        history: history.map((e) =>
+          e.kind === "assistant"
+            ? { ...e, content: [{ type: "reasoning", text: "推理".repeat(20) }] }
+            : e,
+        ),
+      }),
+    );
+    const accounted = (built: ReturnType<typeof buildContext>) =>
+      built.report.sections.reduce((total, section) => total + section.estimatedTokens, 0) +
+      (built.report.images?.estimatedTokens ?? 0);
+    expect(scaled.report.estimatedTokens).toBe(plain.report.estimatedTokens);
+    expect(scaled.report.unattributedTokens).toBeUndefined();
+    expect(accounted(scaled)).toBe(scaled.report.estimatedTokens);
+    const scaledHistory = scaled.report.sections.find((s) => s.name === "history");
+    const plainHistory = plain.report.sections.find((s) => s.name === "history");
+    expect(scaledHistory?.breakdown).toBeDefined();
+    expect(
+      (scaledHistory?.breakdown?.user.estimatedTokens ?? 0) +
+        (scaledHistory?.breakdown?.assistant.estimatedTokens ?? 0) +
+        (scaledHistory?.breakdown?.tool.estimatedTokens ?? 0) +
+        (scaledHistory?.breakdown?.summary.estimatedTokens ?? 0),
+    ).toBe(scaledHistory?.estimatedTokens);
+    expect(scaledHistory?.breakdown?.assistant.chars).toBe(
+      (plainHistory?.breakdown?.assistant.chars ?? 0) + opaque.length,
+    );
+    expect(scaledHistory?.breakdown?.user.chars).toBe(plainHistory?.breakdown?.user.chars);
+    expect(scaledHistory?.breakdown?.tool.chars).toBe(plainHistory?.breakdown?.tool.chars);
+  });
+
+  it("明细缩放不影响 overBudget、mustCompact、compaction 与 projectedTokens", () => {
+    const providerData = { sig: "p".repeat(8000) };
+    const makeHistory = (withOpaque: boolean): HistoryEntry[] => [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t1",
+        messageId: "u1",
+        content: [{ type: "text", text: "a".repeat(400) }],
+      },
+      tool(2, 15_000),
+      {
+        ...assistant(4, 200),
+        model: small.ref,
+        content: [
+          {
+            type: "reasoning",
+            text: "r".repeat(200),
+            ...(withOpaque ? { providerData } : {}),
+          },
+        ],
+      },
+      tool(5, 25_000),
+    ];
+    const withOpaqueHistory = makeHistory(true);
+    const plainHistory = makeHistory(false);
+    const scaled = buildContext(input(withOpaqueHistory));
+    const baseline = buildContext(input(plainHistory));
+    expect(scaled.report.estimatedTokens).toBe(baseline.report.estimatedTokens);
+    expect(scaled.overBudget).toBe(true);
+    expect(scaled.mustCompact).toBe(true);
+    expect(scaled.compaction?.kind).toBe("prune");
+    expect(scaled.overBudget).toBe(baseline.overBudget);
+    expect(scaled.mustCompact).toBe(baseline.mustCompact);
+    expect(scaled.compaction?.kind).toBe(baseline.compaction?.kind);
+    expect(scaled.compaction?.throughSeq).toBe(baseline.compaction?.throughSeq);
+    expect(projectedTokens(withOpaqueHistory, small)).toBe(projectedTokens(plainHistory, small));
+
+    // 有锚点且锚点低于明细：预防性修剪（overBudget=false, mustCompact=false）与强制超预算（overBudget=true, mustCompact=true）
+    const B = inputBudgetTokens(small);
+    const preventiveAnchor = Math.floor(B * 0.85);
+    const anchoredPreventive = buildContext(
       input([
+        tool(1, 20_000),
+        tool(3, 15_000),
         {
-          ...assistant(1, 20_000, 10),
-          usage: { inputTokens: 10, outputTokens: 0 },
+          ...assistant(5, 20_000, preventiveAnchor),
+          usage: { inputTokens: preventiveAnchor, outputTokens: 0 },
         },
       ]),
     );
-    expect(low.report.estimatedTokens).toBe(10);
-    expect(accounted(low)).toBeGreaterThan(low.report.estimatedTokens);
-    expect(low.report.unattributedTokens).toBeUndefined();
+    expect(anchoredPreventive.report.estimatedTokens).toBe(preventiveAnchor);
+    expect(anchoredPreventive.overBudget).toBe(false);
+    expect(anchoredPreventive.mustCompact).toBe(false);
+    expect(anchoredPreventive.compaction?.kind).toBe("prune");
+    expect(anchoredPreventive.report.sections.reduce((a, s) => a + s.estimatedTokens, 0)).toBe(
+      preventiveAnchor,
+    );
+
+    const anchoredOverBudget = buildContext(
+      input([
+        {
+          kind: "user",
+          seq: 1,
+          turnId: "t1",
+          messageId: "u1",
+          content: [{ type: "text", text: "a".repeat(200) }],
+        },
+        tool(2, 40_000),
+        {
+          ...assistant(4, 80_000, 30_000),
+          usage: { inputTokens: 30_000, outputTokens: 0 },
+        },
+      ]),
+    );
+    expect(anchoredOverBudget.report.estimatedTokens).toBe(30_000);
+    expect(anchoredOverBudget.overBudget).toBe(true);
+    expect(anchoredOverBudget.mustCompact).toBe(true);
+    expect(anchoredOverBudget.compaction?.kind).toBe("prune");
+    expect(anchoredOverBudget.report.sections.reduce((a, s) => a + s.estimatedTokens, 0)).toBe(
+      30_000,
+    );
+  });
+
+  it("最大余数法与报告缩放边界：极小总量、零项、单 section", () => {
+    expect(scaleLargestRemainder([100, 100, 100, 100], 3)).toEqual([1, 1, 1, 0]);
+    expect(scaleLargestRemainder([5, 3, 2], 3)).toEqual([1, 1, 1]);
+    expect(scaleLargestRemainder([0, 10, 0, 10], 3)).toEqual([0, 2, 0, 1]);
+    expect(scaleLargestRemainder([500], 3)).toEqual([3]);
+    expect(scaleLargestRemainder([10, 20, 30], 60)).toEqual([10, 20, 30]);
+    expect(scaleLargestRemainder([10, 20], 0)).toEqual([0, 0]);
+
+    // 端到端极小总量（target = 3）且 history 内存在为 0 的细分项
+    const tiny = buildContext(
+      input([
+        {
+          ...assistant(1, 20_000, 3),
+          usage: { inputTokens: 3, outputTokens: 0 },
+        },
+      ]),
+    );
+    expect(tiny.report.estimatedTokens).toBe(3);
+    expect(tiny.report.unattributedTokens).toBeUndefined();
     expect(
-      low.report.sections.find((section) => section.name === "history")?.breakdown?.assistant
-        .estimatedTokens,
-    ).toBe(20_000);
+      tiny.report.sections.reduce((a, s) => a + s.estimatedTokens, 0) +
+        (tiny.report.images?.estimatedTokens ?? 0),
+    ).toBe(3);
+    const tinyHistory = tiny.report.sections.find((s) => s.name === "history");
+    expect(tinyHistory?.breakdown).toBeDefined();
+    expect(tinyHistory?.breakdown?.user.estimatedTokens).toBe(0);
+    expect(tinyHistory?.breakdown?.tool.estimatedTokens).toBe(0);
+    expect(tinyHistory?.breakdown?.summary.estimatedTokens).toBe(0);
+    expect(
+      (tinyHistory?.breakdown?.user.estimatedTokens ?? 0) +
+        (tinyHistory?.breakdown?.assistant.estimatedTokens ?? 0) +
+        (tinyHistory?.breakdown?.tool.estimatedTokens ?? 0) +
+        (tinyHistory?.breakdown?.summary.estimatedTokens ?? 0),
+    ).toBe(tinyHistory?.estimatedTokens);
   });
   it("content providerData 计入 assistant，但不改变 estimated", () => {
     const providerData = { sig: "x".repeat(80) };

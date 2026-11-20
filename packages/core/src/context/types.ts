@@ -170,13 +170,13 @@ export interface ContextReport {
     | undefined;
   /**
    * 本次请求以图片形式发出的附件（ADR-0023）：仅在 count > 0 时出现；
-   * estimatedTokens = count × 1600，已计入上方 estimatedTokens 总数。
+   * 本地估算为 count × 1600，已计入上方 estimatedTokens 总数（明细之和大于总量时随各项按比例缩放）。
    * 估算模式下同样给出（按将发送的引用数）。
    */
   images?: { count: number; estimatedTokens: number } | undefined;
   /**
    * 总量比各 section 与图片的本地估算之和多出的 token。
-   * 仅在差额为正时出现；明细更大时省略，各项估算不按总量缩放。
+   * 仅在差额为正时出现；明细之和更大时省略，并将报告中的各项估算按比例缩小至与总量相等。
    * 压缩判定用 estimatedTokens，不用本字段。
    */
   unattributedTokens?: number | undefined;

@@ -1239,6 +1239,81 @@ function anchoredEstimate(input: BuildContextInput): number | undefined {
   );
 }
 
+/** 最大余数法按比例将非负整数权重缩放到 target，保证各项非负整数、原零项仍为零且之和等于 target。 */
+export function scaleLargestRemainder(weights: readonly number[], target: number): number[] {
+  if (weights.length === 0) return [];
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (target <= 0 || total <= 0) return weights.map(() => 0);
+  if (target === total) return [...weights];
+  const targetInt = Math.round(target);
+  const targetBig = BigInt(targetInt);
+  const totalBig = BigInt(Math.round(total));
+  const floors: number[] = [];
+  const remainders: { index: number; rem: bigint }[] = [];
+  let sum = 0;
+  for (const [index, weight] of weights.entries()) {
+    const num = BigInt(Math.round(weight)) * targetBig;
+    const q = Number(num / totalBig);
+    floors.push(q);
+    sum += q;
+    remainders.push({ index, rem: num % totalBig });
+  }
+  const remaining = targetInt - sum;
+  remainders.sort((a, b) => (b.rem > a.rem ? 1 : b.rem < a.rem ? -1 : a.index - b.index));
+  for (let i = 0; i < remaining; i++) {
+    const item = remainders[i];
+    if (item === undefined) break;
+    floors[item.index] = (floors[item.index] ?? 0) + 1;
+  }
+  return floors;
+}
+
+/** 仅缩放最终写入 ContextReport 的展示副本：明细之和大于总量时按比例缩小，保持 chars 不变。 */
+function scaleReportDetails(
+  sections: readonly ContextSection[],
+  imageTokens: number,
+  hasImages: boolean,
+  targetTokens: number,
+): { sections: ContextSection[]; imageTokens: number } {
+  const weights = sections.map((s) => s.estimatedTokens);
+  if (hasImages) weights.push(imageTokens);
+  const accounted = weights.reduce((a, b) => a + b, 0);
+  if (accounted <= targetTokens) {
+    return { sections: [...sections], imageTokens };
+  }
+  const scaled = scaleLargestRemainder(weights, targetTokens);
+  const scaledSections = sections.map((section, index): ContextSection => {
+    const estimatedTokens = scaled[index] ?? 0;
+    if (section.breakdown === undefined) {
+      return { ...section, estimatedTokens };
+    }
+    const { user, assistant, tool, summary } = section.breakdown;
+    const [u = 0, a = 0, t = 0, sm = 0] = scaleLargestRemainder(
+      [
+        user.estimatedTokens,
+        assistant.estimatedTokens,
+        tool.estimatedTokens,
+        summary.estimatedTokens,
+      ],
+      estimatedTokens,
+    );
+    return {
+      ...section,
+      estimatedTokens,
+      breakdown: {
+        user: { chars: user.chars, estimatedTokens: u },
+        assistant: { chars: assistant.chars, estimatedTokens: a },
+        tool: { chars: tool.chars, estimatedTokens: t },
+        summary: { chars: summary.chars, estimatedTokens: sm },
+      },
+    };
+  });
+  return {
+    sections: scaledSections,
+    imageTokens: hasImages ? (scaled[sections.length] ?? 0) : imageTokens,
+  };
+}
+
 export function buildContext(input: BuildContextInput): BuiltContext {
   const { model } = input;
 
@@ -1641,10 +1716,13 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     }
   }
 
+  // 仅在所有判定（overBudget / compaction / mustCompact）完成后缩放报告展示副本
+  const reportDetails = scaleReportDetails(sections, imageTokens, imageCap.count > 0, estimated);
+
   return {
     request,
     report: {
-      sections,
+      sections: reportDetails.sections,
       totalChars,
       estimatedTokens: estimated,
       budgetTokens,
@@ -1657,7 +1735,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
           }
         : {}),
       ...(imageCap.count > 0
-        ? { images: { count: imageCap.count, estimatedTokens: imageTokens } }
+        ? { images: { count: imageCap.count, estimatedTokens: reportDetails.imageTokens } }
         : {}),
       ...(unattributedTokens > 0 ? { unattributedTokens } : {}),
     },
