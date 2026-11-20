@@ -1,11 +1,23 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { IMAGE_WASM_FILES } from "../lib/image-wasm.mjs";
 import { packNpm } from "../pack-npm.mjs";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** 最小 tar 读取（tgz 只有普通文件；返回 name → 文本） */
 function untar(tgzPath) {
@@ -96,6 +108,41 @@ describe("pack-npm", () => {
     expect(files.has("package/plugins/demo/server.mjs")).toBe(true);
     expect(files.has("package/plugins/demo/test/a.test.mjs")).toBe(false);
     expect(files.has("package/plugins/demo/node_modules/dep/index.js")).toBe(false);
+  });
+
+  it("真实构建的内置插件 plugin-creator 随 npm 包一起打包", () => {
+    const builtCreator = join(repoRoot, "plugins", "plugin-creator");
+    if (!existsSync(join(builtCreator, "server.mjs"))) {
+      execFileSync(process.execPath, [join(repoRoot, "plugins-src", "scripts", "build.mjs")], {
+        cwd: join(repoRoot, "plugins-src"),
+        stdio: "pipe",
+      });
+    }
+
+    const bundle = join(dir, "nctrn.mjs");
+    writeFileSync(bundle, "#!/usr/bin/env node\nconsole.log('fake');\n");
+    writeFileSync(join(dir, "image-worker.mjs"), "console.log('worker');\n");
+    mkdirSync(join(dir, "wasm"), { recursive: true });
+    for (const [wasmFile] of IMAGE_WASM_FILES) {
+      writeFileSync(join(dir, "wasm", wasmFile), "wasm");
+    }
+    cpSync(builtCreator, join(dir, "plugins", "plugin-creator"), { recursive: true });
+
+    const tgz = packNpm({ bundleFile: bundle, out: join(dir, "out") });
+    const files = untar(tgz);
+    const expected = [
+      "package/plugins/plugin-creator/.nocturne-plugin/plugin.json",
+      "package/plugins/plugin-creator/.nocturne-plugin/build-id",
+      "package/plugins/plugin-creator/icon.svg",
+      "package/plugins/plugin-creator/server.mjs",
+      "package/plugins/plugin-creator/skills/plugin-creator/SKILL.md",
+      "package/plugins/plugin-creator/skills/plugin-creator/references/manifest-spec.md",
+      "package/plugins/plugin-creator/skills/plugin-creator/references/hooks-and-mcp-examples.md",
+      "package/plugins/plugin-creator/skills/plugin-creator/references/install-update-uninstall.md",
+    ];
+    for (const entry of expected) {
+      expect(files.has(entry), entry).toBe(true);
+    }
   });
 
   it("bundle 文件不存在时报错", () => {

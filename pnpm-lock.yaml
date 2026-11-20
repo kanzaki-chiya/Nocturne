@@ -363,6 +363,9 @@ importers:
         specifier: 1.17.1
         version: 1.17.1
     devDependencies:
+      '@nocturne/core':
+        specifier: workspace:*
+        version: link:../packages/core
       pdfjs-dist:
         specifier: 6.5.438
         version: 6.5.438

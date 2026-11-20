@@ -105,4 +105,41 @@ describe("bundle-nctrn --out-dir", () => {
     expect(existsSync(join(out, "plugins", "demo", "fixtures"))).toBe(false);
     expect(existsSync(join(out, "plugins", "demo", "node_modules"))).toBe(false);
   }, 240_000);
+
+  it("默认内置 plugins/ 打包包含 plugin-creator 全部资产", async () => {
+    const coreDist = join(root, "packages", "core", "dist", "index.mjs");
+    if (!existsSync(coreDist)) {
+      throw new Error("缺少 packages/core/dist，请先运行 pnpm build");
+    }
+    const creatorBuilt = join(root, "plugins", "plugin-creator", "server.mjs");
+    if (!existsSync(creatorBuilt)) {
+      await run(process.execPath, [join(root, "plugins-src", "scripts", "build.mjs")], {
+        cwd: join(root, "plugins-src"),
+        stdio: "pipe",
+        timeout: 180_000,
+      });
+    }
+
+    const out = mkdtempSync(join(tmpdir(), "nctrn-bundle-creator-"));
+    directories.push(out);
+    await run(process.execPath, [join(root, "scripts", "bundle-nctrn.mjs"), "--out-dir", out], {
+      stdio: "pipe",
+      timeout: 180_000,
+    });
+
+    const creatorOut = join(out, "plugins", "plugin-creator");
+    const expectedFiles = [
+      ".nocturne-plugin/plugin.json",
+      ".nocturne-plugin/build-id",
+      "icon.svg",
+      "server.mjs",
+      "skills/plugin-creator/SKILL.md",
+      "skills/plugin-creator/references/manifest-spec.md",
+      "skills/plugin-creator/references/hooks-and-mcp-examples.md",
+      "skills/plugin-creator/references/install-update-uninstall.md",
+    ];
+    for (const rel of expectedFiles) {
+      expect(existsSync(join(creatorOut, rel)), rel).toBe(true);
+    }
+  }, 240_000);
 });

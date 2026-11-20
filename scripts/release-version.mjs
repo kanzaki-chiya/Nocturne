@@ -42,6 +42,7 @@ const JSON_VERSION_FILES = [
   "plugins-src/manifests/xlsx/.nocturne-plugin/plugin.json",
   "plugins-src/manifests/pptx/.nocturne-plugin/plugin.json",
   "plugins-src/manifests/pdf/.nocturne-plugin/plugin.json",
+  "plugins-src/manifests/plugin-creator/.nocturne-plugin/plugin.json",
 ];
 
 /** 源码里的版本常量：文件 → 常量名（`[export ]const <名> = "<版本>";`） */

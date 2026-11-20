@@ -35,7 +35,8 @@ const outBase = join(repoRoot, "plugins");
 const pythonSrc = join(pkgDir, "python", "engine.py");
 const viewerTemplatePath = join(pkgDir, "viewer", "template.html");
 
-const PLUGINS = ["docx", "xlsx", "pptx", "pdf"];
+const DOC_PLUGINS = ["docx", "xlsx", "pptx", "pdf"];
+const STANDALONE_PLUGINS = ["plugin-creator"];
 const MAX_VIEWER_HTML_BYTES = 8 * 1024 * 1024;
 
 /** 仅打包符合 ADR-0100（MIT / Apache-2.0 / BSD）许可的 pdf.js 辅助资源 */
@@ -210,12 +211,13 @@ export async function buildDocPlugins(targetBase = outBase) {
     stageViewerAssets(assetsStaging);
     const { html: viewerHtml } = await buildSharedViewerHtml(staging);
 
-    for (const name of PLUGINS) {
+    for (const name of [...DOC_PLUGINS, ...STANDALONE_PLUGINS]) {
+      const isDocPlugin = DOC_PLUGINS.includes(name);
       const bundleDir = join(staging, name);
       await build({
         cwd: pkgDir,
         config: false,
-        name: `doc-plugin-${name}`,
+        name: `builtin-plugin-${name}`,
         entry: { server: `src/entries/${name}-entry.ts` },
         format: "esm",
         platform: "node",
@@ -240,9 +242,11 @@ export async function buildDocPlugins(targetBase = outBase) {
 
       const rawServer = readFileSync(join(bundleDir, "server.mjs"), "utf8");
       writeFileSync(join(pluginOut, "server.mjs"), `/* eslint-disable */\n${rawServer}`, "utf8");
-      copyFileSync(pythonSrc, join(pluginOut, "engine.py"));
-      writeFileSync(join(pluginOut, "viewer.html"), viewerHtml, "utf8");
-      cpSync(assetsStaging, join(pluginOut, "viewer-assets"), { recursive: true });
+      if (isDocPlugin) {
+        copyFileSync(pythonSrc, join(pluginOut, "engine.py"));
+        writeFileSync(join(pluginOut, "viewer.html"), viewerHtml, "utf8");
+        cpSync(assetsStaging, join(pluginOut, "viewer-assets"), { recursive: true });
+      }
       const buildId = computeBuildId(pluginOut);
       writeFileSync(join(pluginOut, ".nocturne-plugin", "build-id"), buildId, "utf8");
     }

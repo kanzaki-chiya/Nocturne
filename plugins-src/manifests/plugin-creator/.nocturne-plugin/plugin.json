@@ -1,0 +1,16 @@
+{
+  "name": "plugin-creator",
+  "version": "0.56.0",
+  "description": "编写、校验与指导安装 Nocturne 自有插件。",
+  "skills": "./skills",
+  "mcpServers": {
+    "plugin-creator": {
+      "command": "${NOCTURNE_NODE}",
+      "args": ["${PLUGIN_ROOT}/server.mjs"]
+    }
+  },
+  "interface": {
+    "displayName": "插件创建器",
+    "composerIcon": "./icon.svg"
+  }
+}

@@ -38,6 +38,7 @@ function makeFixture() {
     "plugins-src/manifests/xlsx/.nocturne-plugin/plugin.json",
     "plugins-src/manifests/pptx/.nocturne-plugin/plugin.json",
     "plugins-src/manifests/pdf/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/plugin-creator/.nocturne-plugin/plugin.json",
   ];
   for (const rel of jsonFiles) {
     const file = join(root, rel);
@@ -180,6 +181,7 @@ describe("release-version", () => {
     "plugins-src/manifests/xlsx/.nocturne-plugin/plugin.json",
     "plugins-src/manifests/pptx/.nocturne-plugin/plugin.json",
     "plugins-src/manifests/pdf/.nocturne-plugin/plugin.json",
+    "plugins-src/manifests/plugin-creator/.nocturne-plugin/plugin.json",
     "plugins-src/src/shared/mcp.ts",
   ])("--check 检出 %s 版本不一致", (rel) => {
     applyVersion(root, "0.6.0");
