@@ -2,6 +2,7 @@ import {
   connectChannel,
   connectDeviceRelay,
   RelayError,
+  supportsDeflateRawDecompression,
   type DeviceRelay,
   type Identity,
 } from "@nocturne/remote";
@@ -19,6 +20,11 @@ export const HOST_OFFLINE_MESSAGE = "电脑已离线，等它上线会自动连�
 export const DEVICE_REVOKED_MESSAGE = "这台手机已被移除或吊销";
 export const RELAY_CONNECT_FAILED_REASON = "无法连接中继";
 export const CHANNEL_CLOSED_REASON = "加密连接关闭";
+
+/** 手机端（网页与安卓 App 共用）在 initialize 前检测是否支持 deflate-raw 解压流 */
+export function phoneCompressionCapabilities(): ["deflate-raw"] | undefined {
+  return supportsDeflateRawDecompression() ? ["deflate-raw"] : undefined;
+}
 
 export function versionMessage(version: number): string {
   return version > RPC_PROTOCOL_VERSION
@@ -205,7 +211,12 @@ export class PhoneConnection implements PhoneConnectionLike {
         channel.close();
         return;
       }
-      const client = createRpcClient(channel, { clientName: "nocturne-phone", interactive: true });
+      const compression = phoneCompressionCapabilities();
+      const client = createRpcClient(channel, {
+        clientName: "nocturne-phone",
+        interactive: true,
+        ...(compression !== undefined ? { compression } : {}),
+      });
       this.client = client;
       const initialized = await client.initialize();
       if (generation !== this.generation) return;

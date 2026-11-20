@@ -1,6 +1,8 @@
 import { webcrypto } from "node:crypto";
+import { constants as zlibConstants, createDeflateRaw } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acceptChannel,
   acceptPairingHello,
   createMemoryFramePair,
   createPairingOffer,
@@ -8,9 +10,11 @@ import {
   RemoteChannelError,
   RelayError,
   type DeviceRelay,
+  type StreamCompressor,
 } from "@nocturne/remote";
 import {
   createMemoryTransportPair,
+  RPC_PROTOCOL_VERSION,
   type RpcClient,
   type RpcSession,
   type SessionOpened,
@@ -245,6 +249,162 @@ it("握手失败关闭触发 onClose 时只安排一次重连", async () => {
   expect(connect).toHaveBeenCalledTimes(1);
   c.stop();
   expect(vi.getTimerCount()).toBe(0);
+});
+function createPhoneTestCompressor(): StreamCompressor {
+  const deflate = createDeflateRaw({ level: 6, windowBits: 15 });
+  return {
+    compress(data) {
+      return new Promise((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const onData = (chunk: Buffer) => chunks.push(chunk);
+        const onError = (err: Error) => {
+          deflate.off("data", onData);
+          deflate.off("error", onError);
+          reject(err);
+        };
+        deflate.on("data", onData);
+        deflate.on("error", onError);
+        deflate.write(data);
+        deflate.flush(zlibConstants.Z_SYNC_FLUSH, () => {
+          deflate.off("data", onData);
+          deflate.off("error", onError);
+          resolve(new Uint8Array(Buffer.concat(chunks)));
+        });
+      });
+    },
+    close() {
+      deflate.on("error", () => undefined);
+      deflate.destroy();
+    },
+  };
+}
+it("PhoneConnection 支持 deflate-raw 时声明压缩能力并能解压后续电脑消息", async () => {
+  const hostId = await generateIdentity({ extractable: true });
+  const phoneId = await generateIdentity({ extractable: false });
+  const [phoneWire, hostWire] = createMemoryFramePair();
+  let seenCaps: unknown;
+  const acceptedPromise = acceptChannel(hostWire, {
+    identity: hostId,
+    lookupDevice: async (id) => (id === phoneId.id ? phoneId.publicKey : undefined),
+  }).then(({ channel }) => {
+    channel.onLine((line) => {
+      const msg = JSON.parse(line) as {
+        id?: number;
+        method?: string;
+        params?: { capabilities?: unknown };
+      };
+      if (msg.method === "initialize") {
+        seenCaps = msg.params?.capabilities;
+        channel.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: msg.id,
+            result: {
+              protocolVersion: RPC_PROTOCOL_VERSION,
+              nocturneVersion: "0.56.0",
+              compression: "deflate-raw",
+            },
+          }),
+        );
+        channel.enableSendCompression(createPhoneTestCompressor());
+      } else if (msg.method === "runtime.listSessions") {
+        channel.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: [] }));
+      }
+    });
+    return channel;
+  });
+  const relay: DeviceRelay = {
+    online: true,
+    transport: phoneWire,
+    onClose: vi.fn(),
+    onHostOnline: (fn) => {
+      queueMicrotask(fn);
+    },
+    subscribePush: vi.fn(),
+    unsubscribePush: vi.fn(),
+  };
+  let connectedClient: RpcClient | undefined;
+  const c = new PhoneConnection({
+    identity: phoneId,
+    host: { hostId: hostId.id, hostPub: encode(hostId.publicKey), name: "电脑", pairedAt: 1 },
+    origin: "https://relay.example",
+    changed: vi.fn(),
+    connected: async (client) => {
+      connectedClient = client;
+      expect(await client.runtime.listSessions()).toEqual([]);
+    },
+    disconnected: vi.fn(),
+    connect: async () => relay,
+  });
+  c.start();
+  await vi.waitFor(() => expect(c.state).toBe("online"));
+  expect(seenCaps).toEqual({ interactive: true, compression: ["deflate-raw"] });
+  expect(connectedClient).toBeDefined();
+  c.stop();
+  (await acceptedPromise).close();
+});
+it("PhoneConnection 在 DecompressionStream 不支持 deflate-raw 时不声明压缩能力", async () => {
+  vi.stubGlobal("DecompressionStream", function UnsupportedDecompressionStream() {
+    throw new TypeError("deflate-raw unsupported");
+  });
+  const hostId = await generateIdentity({ extractable: true });
+  const phoneId = await generateIdentity({ extractable: false });
+  const [phoneWire, hostWire] = createMemoryFramePair();
+  let seenCaps: unknown;
+  const acceptedPromise = acceptChannel(hostWire, {
+    identity: hostId,
+    lookupDevice: async (id) => (id === phoneId.id ? phoneId.publicKey : undefined),
+  }).then(({ channel }) => {
+    channel.onLine((line) => {
+      const msg = JSON.parse(line) as {
+        id?: number;
+        method?: string;
+        params?: { capabilities?: unknown };
+      };
+      if (msg.method === "initialize") {
+        seenCaps = msg.params?.capabilities;
+        channel.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: msg.id,
+            result: {
+              protocolVersion: RPC_PROTOCOL_VERSION,
+              nocturneVersion: "0.56.0",
+            },
+          }),
+        );
+      } else if (msg.method === "runtime.listSessions") {
+        channel.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: [] }));
+      }
+    });
+    return channel;
+  });
+  const relay: DeviceRelay = {
+    online: true,
+    transport: phoneWire,
+    onClose: vi.fn(),
+    onHostOnline: (fn) => {
+      queueMicrotask(fn);
+    },
+    subscribePush: vi.fn(),
+    unsubscribePush: vi.fn(),
+  };
+  const c = new PhoneConnection({
+    identity: phoneId,
+    host: { hostId: hostId.id, hostPub: encode(hostId.publicKey), name: "电脑", pairedAt: 1 },
+    origin: "https://relay.example",
+    changed: vi.fn(),
+    connected: async (client) => {
+      expect(await client.runtime.listSessions()).toEqual([]);
+    },
+    disconnected: vi.fn(),
+    connect: async () => relay,
+  });
+  c.start();
+  await vi.waitFor(() => expect(c.state).toBe("online"));
+  expect(seenCaps).toEqual({ interactive: true });
+  c.stop();
+  (await acceptedPromise).close();
 });
 it("重连续接 lastSeq 并保留显示视图，新建会话可用任意目录并带上草稿选项", async () => {
   const [transport] = createMemoryTransportPair();
@@ -753,7 +913,13 @@ it.each([
     disconnected: vi.fn(),
     connect: () => Promise.resolve(relay),
     channel: () =>
-      Promise.resolve({ ...client, closeReason: undefined, flush: () => Promise.resolve() }),
+      Promise.resolve({
+        ...client,
+        closeReason: undefined,
+        flush: () => Promise.resolve(),
+        enableSendCompression: () => undefined,
+        enableReceiveCompression: () => undefined,
+      }),
     ...(app ? { versionMessage: () => "App 版本过旧" } : {}),
   });
   c.start();
