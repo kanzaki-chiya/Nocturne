@@ -2,7 +2,7 @@
  * 右侧面板界面（ADR-0060 及修订）：文件标签的读取结果与超时重试、新标签页、标签关闭、
  * 快速打开、终端标签（默认 shell 跟随设置、Shell 下拉、退出与重新启动、右键复制粘贴、
  * 剪贴板失败提示、别的会话的终端后台保留）、变更（按文件合并、分隔条、换行、Windows 路径）、
- * 窄标签隐藏项目名。
+ * 窄标签隐藏项目名；文件顶栏的「打开」分裂按钮（不再有「只读」与文字按钮）、自动换行开关、另存为。
  */
 import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -11,9 +11,11 @@ import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/co
 import { RpcError } from "@nocturne/rpc/client";
 
 import type { TerminalHost, TerminalMessage } from "../src/host";
+import { ImageViewerProvider } from "../src/ImageViewer";
 import { QuickOpen, SessionOverview } from "../src/PanelChrome";
 import { SidePanel, type SidePanelProps } from "../src/SidePanel";
 import type { FileTab, PanelTab, TerminalTab } from "../src/side-panel";
+import { fileOpenActionsStub } from "./file-actions-fixture";
 
 // xterm 在 jsdom 里画不出来：换成只记录写入的假终端
 const written: string[] = [];
@@ -81,7 +83,7 @@ function props(overrides: Partial<SidePanelProps>): SidePanelProps {
     readFile: vi.fn(),
     readerKey: "1",
     fileActions: {
-      externalLabel: "用 VS Code 打开",
+      ...fileOpenActionsStub(),
       openExternal: vi.fn(async () => undefined),
       reveal: vi.fn(async () => undefined),
       openInBrowser: vi.fn(async () => undefined),
@@ -164,9 +166,15 @@ it("二进制或过大文件只给外部打开与资源管理器", async () => {
   fireEvent.click(screen.getByRole("button", { name: "在资源管理器中显示" }));
   expect(p.fileActions.reveal).toHaveBeenCalledWith("Z:\\proj\\gone.ts");
   expect(screen.getByRole("button", { name: "在外部编辑器打开" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "打开方式" }));
+  const menu = await screen.findByRole("menu", { name: "打开方式" });
+  expect(within(menu).getByRole("menuitem", { name: "在资源管理器中打开" })).toBeTruthy();
+  expect(within(menu).getByRole("menuitem", { name: "系统默认程序" })).toBeTruthy();
+  expect(within(menu).queryByRole("menuitem", { name: "另存为…" })).toBeNull();
+  expect(within(menu).queryByRole("menuitemcheckbox")).toBeNull();
 });
 
-it("HTML 文件头部有「在系统浏览器打开」", async () => {
+it("HTML：「打开方式」菜单里有「在系统浏览器打开」", async () => {
   const tab: FileTab = { ...fileTab, absolutePath: "Z:\\proj\\a.html" };
   const readFile = vi.fn(async () => ({
     kind: "text" as const,
@@ -176,8 +184,105 @@ it("HTML 文件头部有「在系统浏览器打开」", async () => {
   }));
   const p = props({ tabs: [tab], activeId: "f", readFile });
   render(<SidePanel {...p} />);
-  fireEvent.click(await screen.findByRole("button", { name: "在系统浏览器打开" }));
-  expect(p.fileActions.openInBrowser).toHaveBeenCalledWith("Z:\\proj\\a.html");
+  fireEvent.click(await screen.findByRole("button", { name: "打开方式" }));
+  const menu = await screen.findByRole("menu", { name: "打开方式" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "在系统浏览器打开" }));
+  await waitFor(() => {
+    expect(p.fileActions.openInBrowser).toHaveBeenCalledWith("Z:\\proj\\a.html");
+  });
+});
+
+function textFile(text = "const a = 1;\n") {
+  return vi.fn(async () => ({
+    kind: "text" as const,
+    absolutePath: fileTab.absolutePath,
+    text,
+    bytes: text.length,
+  }));
+}
+
+it("文件顶栏：没有「只读」和旧的文字按钮，只有「打开」分裂按钮和刷新", async () => {
+  const view = render(
+    <SidePanel {...props({ tabs: [fileTab], activeId: "f", readFile: textFile() })} />,
+  );
+  await waitFor(() => {
+    expect(view.container.querySelector(".sp-code")).not.toBeNull();
+  });
+  const head = view.container.querySelector(".sp-file-head");
+  expect(head?.textContent).not.toContain("只读");
+  for (const old of ["用 VS Code 打开", "用 Cursor 打开", "用系统程序打开", "在系统浏览器打开"]) {
+    expect(screen.queryByRole("button", { name: old })).toBeNull();
+  }
+  const group = screen.getByRole("group", { name: "打开" });
+  expect(within(group).getByRole("button", { name: "打开" })).toBeTruthy();
+  expect(within(group).getByRole("button", { name: "打开方式" })).toBeTruthy();
+});
+
+it("自动换行：默认开；菜单里关掉后编辑器不换行（不重建），交给面板记住", async () => {
+  const onFileWrap = vi.fn();
+  const readFile = textFile();
+  const p = props({ tabs: [fileTab], activeId: "f", readFile, onFileWrap });
+  const view = render(<SidePanel {...p} />);
+  await waitFor(() => {
+    expect(view.container.querySelector(".cm-content")).not.toBeNull();
+  });
+  const content = view.container.querySelector(".cm-content");
+  expect(content?.classList.contains("cm-lineWrapping")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "打开方式" }));
+  const menu = await screen.findByRole("menu", { name: "打开方式" });
+  const toggle = within(menu).getByRole("menuitemcheckbox", { name: /自动换行/ });
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
+  await waitFor(() => {
+    expect(onFileWrap).toHaveBeenCalledWith(false);
+  });
+  view.rerender(<SidePanel {...p} fileWrap={false} />);
+  await waitFor(() => {
+    expect(view.container.querySelector(".cm-content")?.classList.contains("cm-lineWrapping")).toBe(
+      false,
+    );
+  });
+  // 同一个编辑器实例：只重配，没有重建
+  expect(view.container.querySelector(".cm-content")).toBe(content);
+  expect(readFile).toHaveBeenCalledTimes(1);
+});
+
+it("另存为：文本用已读到的内容交给 SaveFileFn，默认文件名是原名", async () => {
+  const saveFile = vi.fn(async () => undefined);
+  render(
+    <ImageViewerProvider saveFile={saveFile}>
+      <SidePanel {...props({ tabs: [fileTab], activeId: "f", readFile: textFile("hello") })} />
+    </ImageViewerProvider>,
+  );
+  await screen.findByText("hello");
+  fireEvent.click(screen.getByRole("button", { name: "打开方式" }));
+  const menu = await screen.findByRole("menu", { name: "打开方式" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "另存为…" }));
+  await waitFor(() => {
+    expect(saveFile).toHaveBeenCalledTimes(1);
+  });
+  const [arg] = saveFile.mock.calls[0] as unknown as [
+    { filename: string; mimeType: string; bytes: Uint8Array },
+  ];
+  expect(arg.filename).toBe("gone.ts");
+  expect(arg.mimeType).toBe("text/plain");
+  expect(new TextDecoder().decode(arg.bytes)).toBe("hello");
+});
+
+it("另存为失败：消息显示在操作错误行", async () => {
+  const saveFile = vi.fn(async () => {
+    throw new Error("磁盘已满");
+  });
+  render(
+    <ImageViewerProvider saveFile={saveFile}>
+      <SidePanel {...props({ tabs: [fileTab], activeId: "f", readFile: textFile("hello") })} />
+    </ImageViewerProvider>,
+  );
+  await screen.findByText("hello");
+  fireEvent.click(screen.getByRole("button", { name: "打开方式" }));
+  const menu = await screen.findByRole("menu", { name: "打开方式" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "另存为…" }));
+  expect(await screen.findByText("磁盘已满")).toBeTruthy();
 });
 
 it("新标签页：有终端能力时「终端」可点，没有时置灰", () => {

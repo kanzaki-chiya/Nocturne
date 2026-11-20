@@ -32,6 +32,7 @@ import {
   toolStarted,
   userMessage,
 } from "./subagent-fixtures";
+import { fileOpenActionsStub } from "./file-actions-fixture";
 
 beforeEach(() => {
   vi.stubGlobal("matchMedia", undefined);
@@ -405,7 +406,7 @@ describe("父会话转发确认卡与桌面 UI 集成", () => {
         readFile={vi.fn()}
         readerKey="1"
         fileActions={{
-          externalLabel: "打开",
+          ...fileOpenActionsStub(),
           openExternal: vi.fn(),
           reveal: vi.fn(),
           openInBrowser: vi.fn(),
@@ -467,7 +468,7 @@ describe("父会话转发确认卡与桌面 UI 集成", () => {
         readFile={vi.fn()}
         readerKey="1"
         fileActions={{
-          externalLabel: "打开",
+          ...fileOpenActionsStub(),
           openExternal: vi.fn(),
           reveal: vi.fn(),
           openInBrowser: vi.fn(),

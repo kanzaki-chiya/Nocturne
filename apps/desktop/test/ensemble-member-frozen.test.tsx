@@ -20,6 +20,7 @@ import { createAttachmentImageSource } from "../src/attachment-images";
 import { SidePanel } from "../src/SidePanel";
 import type { PanelTab } from "../src/side-panel";
 import type { EnsembleSession } from "../src/EnsemblePane";
+import { fileOpenActionsStub } from "./file-actions-fixture";
 
 if (!("ResizeObserver" in globalThis)) {
   globalThis.ResizeObserver = class {
@@ -184,7 +185,7 @@ function makeBaseSidePanelProps() {
     },
     readerKey: "r0",
     fileActions: {
-      externalLabel: "VS Code",
+      ...fileOpenActionsStub(),
       openExternal: async () => undefined,
       reveal: async () => undefined,
       openInBrowser: async () => undefined,

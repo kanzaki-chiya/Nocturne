@@ -3,7 +3,7 @@
  * 定位并高亮指定行、Ctrl+F 搜索。整个模块经动态 import 按需加载，语言包再按扩展名
  * 各自按需加载；选择理由与体积见 docs/apps/desktop.md「右侧面板」。
  */
-import { EditorState, RangeSetBuilder, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, RangeSetBuilder, type Extension } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -97,17 +97,30 @@ function targetLines(state: EditorState, line: number, endLine: number): Extensi
 export interface CodeViewer {
   /** 定位并高亮行范围（1 起，含 endLine）；undefined 清除高亮 */
   reveal(line: number | undefined, endLine?: number): void;
+  /** 切换自动换行：只重配这一项，不重建编辑器（滚动、选区、搜索面板保持） */
+  setWrap(wrap: boolean): void;
   destroy(): void;
 }
 
 export async function mountCodeViewer(
   parent: HTMLElement,
-  options: { text: string; path: string; line?: number | undefined; endLine?: number | undefined },
+  options: {
+    text: string;
+    path: string;
+    line?: number | undefined;
+    endLine?: number | undefined;
+    /** 缺省换行（手机侧栏不传，始终换行） */
+    wrap?: boolean | undefined;
+  },
 ): Promise<CodeViewer> {
   const language = await languageFor(options.path)?.().catch(() => undefined);
+  const wrapping = new Compartment();
+  const targets = new Compartment();
+  let wrap = options.wrap !== false;
   const base: Extension[] = [
     lineNumbers(),
-    EditorView.lineWrapping,
+    wrapping.of(wrap ? EditorView.lineWrapping : []),
+    targets.of([]),
     drawSelection(),
     highlightActiveLine(),
     highlightSelectionMatches(),
@@ -123,19 +136,34 @@ export async function mountCodeViewer(
     parent,
     state: EditorState.create({ doc: options.text, extensions: base }),
   });
-  let decorations: Extension = [];
-  const reconfigure = () => {
-    view.setState(EditorState.create({ doc: view.state.doc, extensions: [...base, decorations] }));
-  };
   const viewer: CodeViewer = {
     reveal(line, endLine) {
-      decorations = line === undefined ? [] : targetLines(view.state, line, endLine ?? line);
-      reconfigure();
-      if (line === undefined) return;
+      const marks = line === undefined ? [] : targetLines(view.state, line, endLine ?? line);
+      if (line === undefined) {
+        view.dispatch({ effects: targets.reconfigure(marks) });
+        return;
+      }
       const target = view.state.doc.line(Math.min(Math.max(1, line), view.state.doc.lines));
       view.dispatch({
         selection: { anchor: target.from },
-        effects: EditorView.scrollIntoView(target.from, { y: "center" }),
+        effects: [
+          targets.reconfigure(marks),
+          EditorView.scrollIntoView(target.from, { y: "center" }),
+        ],
+      });
+    },
+    setWrap(next) {
+      if (next === wrap) return;
+      wrap = next;
+      // 换行前后同一行的位置会变：记下视口顶端那一行，重排后滚回去
+      const top = view.lineBlockAtHeight(
+        view.scrollDOM.getBoundingClientRect().top - view.documentTop,
+      );
+      view.dispatch({
+        effects: [
+          wrapping.reconfigure(next ? EditorView.lineWrapping : []),
+          EditorView.scrollIntoView(top.from, { y: "start" }),
+        ],
       });
     },
     destroy() {

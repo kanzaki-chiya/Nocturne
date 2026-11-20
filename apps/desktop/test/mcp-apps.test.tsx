@@ -34,6 +34,7 @@ import {
   type AppTab,
   type PanelTab,
 } from "../src/side-panel";
+import { fileOpenActionsStub } from "./file-actions-fixture";
 
 afterEach(() => {
   cleanup();
@@ -216,6 +217,7 @@ describe("AppPane 生命周期、握手与 JSON-RPC 协议（jsdom + 假 iframe�
       tabs: [{ id: "other", kind: "new" }, restoredTab],
       treeWidth: 240,
       wrap: true,
+      fileWrap: true,
       recent: [],
     });
     const rehydrated = restoreSessionPanel(stored, () => "gen-id");
@@ -666,7 +668,7 @@ describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
       readFile: vi.fn(),
       readerKey: "rk-1",
       fileActions: {
-        externalLabel: "VS Code",
+        ...fileOpenActionsStub(),
         openExternal: vi.fn().mockResolvedValue(undefined),
         reveal: vi.fn().mockResolvedValue(undefined),
         openInBrowser: vi.fn().mockResolvedValue(undefined),
@@ -870,6 +872,7 @@ describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
       activeId: modelTab.id,
       treeWidth: 260,
       wrap: false,
+      fileWrap: true,
       recent: [],
     });
     const restored = restoreSessionPanel(stored, () => "fallback-id");

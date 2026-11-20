@@ -556,7 +556,7 @@ describe("ImageViewer", () => {
       })),
       readerKey: "1",
       fileActions: {
-        externalLabel: "用 VS Code 打开",
+        ...fileOpenActionsStub(),
         openExternal: vi.fn(async () => undefined),
         reveal: vi.fn(async () => undefined),
         openInBrowser: vi.fn(async () => undefined),
@@ -897,3 +897,4 @@ function ConversationThumbHarness({
 }
 
 import { useState as useStateLocal } from "react";
+import { fileOpenActionsStub } from "./file-actions-fixture";

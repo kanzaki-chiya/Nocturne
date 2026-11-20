@@ -10,6 +10,7 @@ import type { AgentTabInfo, BrowserBounds, BrowserHost } from "../src/host";
 import { SidePanel, type SidePanelProps } from "../src/SidePanel";
 import { BrowserPool } from "../src/browser-pool";
 import type { BrowserTab, PanelTab } from "../src/side-panel";
+import { fileOpenActionsStub } from "./file-actions-fixture";
 
 const rect = (width: number, height: number) =>
   ({
@@ -65,7 +66,7 @@ function props(overrides: Partial<SidePanelProps>): SidePanelProps {
     readFile: vi.fn(),
     readerKey: "1",
     fileActions: {
-      externalLabel: "用 VS Code 打开",
+      ...fileOpenActionsStub(),
       openExternal: vi.fn(async () => undefined),
       reveal: vi.fn(async () => undefined),
       openInBrowser: vi.fn(async () => undefined),

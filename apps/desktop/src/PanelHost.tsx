@@ -54,7 +54,13 @@ import { ConfirmDialog } from "./ProvidersPage";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
-import { SidePanel, type PanelChangesSource, type TerminalShellChoice } from "./SidePanel";
+import { FAILED_APP_LIST } from "./FileOpenMenu";
+import {
+  SidePanel,
+  type PanelChangesSource,
+  type PanelFileActions,
+  type TerminalShellChoice,
+} from "./SidePanel";
 import {
   appTabKey,
   browserTabShowing,
@@ -1527,26 +1533,34 @@ export function useSidePanel({
   );
 
   const externalEditor = editors.vscode ? "vscode" : editors.cursor ? "cursor" : undefined;
-  const fileActions = useMemo(
+  const fileActions = useMemo<PanelFileActions>(
     () => ({
-      externalLabel:
-        externalEditor === "vscode"
-          ? "用 VS Code 打开"
-          : externalEditor === "cursor"
-            ? "用 Cursor 打开"
-            : "用系统程序打开",
       openExternal: (absolutePath: string, line?: number) =>
         externalEditor === undefined
           ? host.openPath(absolutePath)
           : host.openInEditor(externalEditor, absolutePath, line),
+      // 「打开」菜单（FileOpenMenu）：系统建议的应用；外壳不提供时按查询失败退回编辑器与系统默认程序
+      listApps: (absolutePath: string) =>
+        host.fileApps === undefined
+          ? Promise.resolve(FAILED_APP_LIST)
+          : host.fileApps.list(absolutePath),
+      openWithApp: async (absolutePath: string, id: string, line?: number) => {
+        if (host.fileApps === undefined) throw new Error("无法打开此文件");
+        await host.fileApps.open(absolutePath, id, line);
+      },
+      openDefault: (absolutePath: string) => host.openPath(absolutePath),
+      editors,
+      openInEditor: (editor, absolutePath, line) => host.openInEditor(editor, absolutePath, line),
       reveal: (absolutePath: string) => host.revealItem(absolutePath),
+      // 与对话里文件引用菜单的「复制绝对路径」同一做法（App.tsx fileLinks.copy）
+      copy: (text: string) => navigator.clipboard.writeText(text),
       openInBrowser: async (absolutePath: string) => {
         if (pool === undefined) await host.openPath(absolutePath);
         else openHtml(absolutePath);
       },
       browserLabel: pool === undefined ? "在系统浏览器打开" : "在浏览器标签打开",
     }),
-    [host, externalEditor, pool, openHtml],
+    [host, editors, externalEditor, pool, openHtml],
   );
   const openExternalUrl = useCallback(
     async (url: string) => {
@@ -1895,6 +1909,10 @@ export function useSidePanel({
       wrap={current?.wrap !== false}
       onWrap={(next) => {
         update((p) => ({ ...p, wrap: next }));
+      }}
+      fileWrap={current?.fileWrap !== false}
+      onFileWrap={(next) => {
+        update((p) => ({ ...p, fileWrap: next }));
       }}
       canOpenFiles={active !== undefined}
       readFile={readFile}

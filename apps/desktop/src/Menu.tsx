@@ -36,6 +36,11 @@ export interface MenuProps {
 }
 
 const MENU_WIDTH = 240;
+const ITEM_SELECTOR = [
+  '[role="menuitemradio"]:not(:disabled)',
+  '[role="menuitemcheckbox"]:not(:disabled)',
+  '[role="menuitem"]:not(:disabled)',
+].join(", ");
 const MENU_GAP = 6;
 const MENU_MARGIN = 8;
 
@@ -126,10 +131,11 @@ export function Menu({
       search.focus();
       return;
     }
-    const items = root.current?.querySelectorAll<HTMLButtonElement>(
-      '[role="menuitemradio"]:not(:disabled), [role="menuitem"]:not(:disabled)',
+    const items = root.current?.querySelectorAll<HTMLButtonElement>(ITEM_SELECTOR);
+    // 单选菜单打开时落在当前选中项；开关项（menuitemcheckbox）的勾不算「当前选中」
+    const checked = root.current?.querySelector<HTMLButtonElement>(
+      '[role="menuitemradio"][aria-checked="true"]',
     );
-    const checked = root.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]');
     (checked ?? items?.[0])?.focus();
   }, [anchor, align, placement]);
 
@@ -164,9 +170,7 @@ export function Menu({
     if (event.target instanceof HTMLInputElement && ["Home", "End"].includes(event.key)) return;
     event.stopPropagation();
     const items = Array.from(
-      root.current?.querySelectorAll<HTMLButtonElement>(
-        '[role="menuitemradio"]:not(:disabled), [role="menuitem"]:not(:disabled)',
-      ) ?? [],
+      root.current?.querySelectorAll<HTMLButtonElement>(ITEM_SELECTOR) ?? [],
     ).filter((item) => item.closest('[role="menu"]') === root.current);
     if (items.length === 0) return;
     const search = Array.from(
@@ -579,6 +583,8 @@ export interface MenuItemProps {
   "aria-haspopup"?: React.AriaAttributes["aria-haspopup"];
   "aria-expanded"?: boolean;
   checked?: boolean;
+  /** 开关项：配合 checked 渲染为 menuitemcheckbox（勾在行尾），不参与「打开时聚焦当前选中」 */
+  toggle?: boolean;
   active?: boolean;
   danger?: boolean;
   disabled?: string;
@@ -596,6 +602,7 @@ export function MenuItem({
   "aria-haspopup": ariaHaspopup,
   "aria-expanded": ariaExpanded,
   checked,
+  toggle = false,
   active,
   danger,
   disabled,
@@ -618,7 +625,7 @@ export function MenuItem({
     <button
       type="button"
       ref={ref}
-      role={checked === undefined ? "menuitem" : "menuitemradio"}
+      role={checked === undefined ? "menuitem" : toggle ? "menuitemcheckbox" : "menuitemradio"}
       aria-haspopup={ariaHaspopup}
       aria-expanded={ariaExpanded}
       aria-checked={checked}

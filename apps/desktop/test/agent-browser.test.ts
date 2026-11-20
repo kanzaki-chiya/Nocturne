@@ -40,7 +40,7 @@ function info(over: Partial<AgentTabInfo> = {}): AgentTabInfo {
 }
 
 function panel(tabs: SessionPanel["tabs"] = [], activeId = ""): SessionPanel {
-  return { open: true, tabs, activeId, treeWidth: 240, wrap: true, recent: [] };
+  return { open: true, tabs, activeId, treeWidth: 240, wrap: true, fileWrap: true, recent: [] };
 }
 
 function hostOf(snapshot: AgentWatchSnapshot = EMPTY_SNAPSHOT) {

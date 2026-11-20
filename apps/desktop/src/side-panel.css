@@ -671,6 +671,39 @@
   font-size: var(--fs-1);
   white-space: nowrap;
 }
+/* 「打开」分裂按钮：一圈外框，两半之间一条细分隔线；面板变窄时面包屑先省略，它不被挤 */
+.sp-open {
+  display: inline-flex;
+  flex: none;
+  align-items: stretch;
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+}
+.sp-open .btn {
+  min-height: calc(var(--ctl-h-sm) - 2px);
+  border: none;
+  border-radius: 0;
+}
+.sp-open .sp-open-more {
+  padding: 0 var(--space-1);
+  border-left: 1px solid var(--a-border-strong);
+}
+/* 菜单图标槽：系统应用图标（PNG）与内置图标同宽同高居中 */
+.sp-open-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.sp-open-icon img {
+  display: block;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  object-fit: contain;
+}
 .sp-file-error {
   margin: 6px 12px 0;
   color: var(--a-error);
@@ -698,6 +731,12 @@
   padding: 8px 12px;
   overflow: auto;
   font: var(--fs-2)/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sp-code-fallback.nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
 }
 .sp-image {
   display: grid;

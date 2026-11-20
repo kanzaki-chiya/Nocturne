@@ -431,6 +431,7 @@ describe("按会话的面板", () => {
     expect(panel.tabs.map((t) => t.kind)).toEqual(["new"]);
     expect(panel.treeWidth).toBe(CHANGE_TREE_DEFAULT_WIDTH);
     expect(panel.wrap).toBe(true);
+    expect(panel.fileWrap).toBe(true);
   });
   it("存储往返：终端和新标签页不存，树宽与换行保留", () => {
     const panel = {
@@ -443,6 +444,7 @@ describe("按会话的面板", () => {
       activeId: "f",
       treeWidth: 300,
       wrap: false,
+      fileWrap: false,
       recent: ["Z:\\p\\a.ts"],
     };
     const stored = storeSessionPanel(panel);
@@ -453,16 +455,33 @@ describe("按会话的面板", () => {
       activeId: "f",
       treeWidth: 300,
       wrap: false,
+      fileWrap: false,
       recent: ["Z:\\p\\a.ts"],
     });
     expect(back.tabs.map((t) => t.id)).toEqual(["c", "f"]);
+    // 「文件」换行与「变更」换行分开记：只关文件换行时，变更换行仍开
+    expect(stored.fileWrap).toBe(false);
+    const onlyFile = restoreSessionPanel(storeSessionPanel({ ...panel, wrap: true }), id);
+    expect(onlyFile.wrap).toBe(true);
+    expect(onlyFile.fileWrap).toBe(false);
+    expect(parseStoredSessionPanels({ s: { tabs: [], fileWrap: false } }).s?.fileWrap).toBe(false);
+    expect(
+      parseStoredSessionPanels({ s: { tabs: [], fileWrap: "no" } }).s?.fileWrap,
+    ).toBeUndefined();
     expect(parseStoredSessionPanels({ s: { tabs: [], recent: ["a", 3, "b"] } }).s?.recent).toEqual([
       "a",
       "b",
     ]);
     // 默认值不写进存储
     expect(
-      storeSessionPanel({ ...panel, open: false, treeWidth: 260, wrap: true, recent: [] }),
+      storeSessionPanel({
+        ...panel,
+        open: false,
+        treeWidth: 260,
+        wrap: true,
+        fileWrap: true,
+        recent: [],
+      }),
     ).toEqual({
       tabs: stored.tabs,
       activeTab: "f",

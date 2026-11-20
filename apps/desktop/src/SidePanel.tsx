@@ -34,11 +34,18 @@ import type { McpAppToolDelivery } from "./mcp-app-host";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody, diffCounts, type FileLinkHooks } from "./Conversation";
-import { ImageViewerBoundary, useImageViewer } from "./ImageViewer";
+import { FileOpenButton, type FileOpenActions } from "./FileOpenMenu";
+import {
+  ImageViewerBoundary,
+  triggerBytesDownload,
+  useImageViewer,
+  useSaveFile,
+} from "./ImageViewer";
 import type { CodeViewer } from "./code-viewer";
 import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
 import {
+  baseName,
   browserTabName,
   buildChangeTree,
   CHANGE_TREE_DEFAULT_WIDTH,
@@ -52,6 +59,7 @@ import {
   isWindowsPath,
   nativeSeparators,
   projectFits,
+  relativeTo,
   subagentTabName,
   type AppTab,
   type ChangeFile,
@@ -94,15 +102,10 @@ export interface PanelChangesSource {
   loadDiff: (seq: number, path: string) => Promise<TurnChangeDiff>;
 }
 
-export interface PanelFileActions {
-  /** 「在外部编辑器打开」按钮文字里的程序名 */
-  externalLabel: string;
+/** 「文件」标签的外部操作：顶栏「打开」菜单（FileOpenMenu）加正文区「在外部编辑器打开」 */
+export interface PanelFileActions extends FileOpenActions {
+  /** 过大或二进制时正文区的「在外部编辑器打开」：检测到的编辑器，没有就用系统默认程序 */
   openExternal: (absolutePath: string, line?: number) => Promise<void>;
-  reveal: (absolutePath: string) => Promise<void>;
-  /** HTML：在面板浏览器标签里打开（没有内置浏览器时用系统浏览器） */
-  openInBrowser: (absolutePath: string) => Promise<void>;
-  /** openInBrowser 按钮的文字 */
-  browserLabel: string;
 }
 
 /** 子代理标签的数据与能力（ADR-0060 第 6 节）；缺省（手机、没有子代理的测试）时子代理标签只显示说明 */
@@ -162,6 +165,9 @@ export interface SidePanelProps {
   /** 「变更」差异是否自动换行（按会话记住）；缺省换行 */
   wrap?: boolean;
   onWrap?: (wrap: boolean) => void;
+  /** 「文件」查看器是否自动换行（按会话记住，与「变更」分开）；缺省换行 */
+  fileWrap?: boolean;
+  onFileWrap?: (wrap: boolean) => void;
   /** 没有打开会话时文件入口置灰 */
   canOpenFiles: boolean;
   /** rpc.md runtime.readFile：按绝对路径读取，不依赖会话 */
@@ -1162,12 +1168,15 @@ function fileErrorText(code: string | undefined, message: string): string {
   }
 }
 
-function CodeArea({ tab, text }: { tab: FileTab; text: string }) {
+function CodeArea({ tab, text, wrap }: { tab: FileTab; text: string; wrap: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<CodeViewer | null>(null);
   const [error, setError] = useState<string>();
   const target = useRef(tab);
   target.current = tab;
+  // 换行开关不进挂载 effect 的依赖：切换时只重配，不重建编辑器
+  const wrapRef = useRef(wrap);
+  wrapRef.current = wrap;
   useEffect(() => {
     const parent = host.current;
     if (parent === null) return;
@@ -1180,11 +1189,17 @@ function CodeArea({ tab, text }: { tab: FileTab; text: string }) {
           path: target.current.absolutePath,
           line: target.current.line,
           endLine: target.current.endLine,
+          wrap: wrapRef.current,
         }),
       )
       .then((mounted) => {
-        if (disposed) mounted.destroy();
-        else viewer.current = mounted;
+        if (disposed) {
+          mounted.destroy();
+          return;
+        }
+        // 模块加载期间开关可能已经变了
+        mounted.setWrap(wrapRef.current);
+        viewer.current = mounted;
       })
       .catch((e: unknown) => {
         if (!disposed) setError(e instanceof Error ? e.message : String(e));
@@ -1198,10 +1213,13 @@ function CodeArea({ tab, text }: { tab: FileTab; text: string }) {
   useEffect(() => {
     viewer.current?.reveal(tab.line, tab.endLine);
   }, [tab.line, tab.endLine, tab.focusNonce]);
+  useEffect(() => {
+    viewer.current?.setWrap(wrap);
+  }, [wrap]);
   if (error !== undefined) {
-    return <pre className="sp-code-fallback">{text}</pre>;
+    return <pre className={wrap ? "sp-code-fallback" : "sp-code-fallback nowrap"}>{text}</pre>;
   }
-  return <div className="sp-code" ref={host} />;
+  return <div className="sp-code" ref={host} data-wrap={wrap ? "true" : "false"} />;
 }
 
 function FileView({
@@ -1209,13 +1227,18 @@ function FileView({
   readFile,
   readerKey,
   actions,
+  wrap,
+  onWrap,
 }: {
   tab: FileTab;
   readFile: SidePanelProps["readFile"];
   readerKey: string;
   actions: PanelFileActions;
+  wrap: boolean;
+  onWrap: (wrap: boolean) => void;
 }) {
   const openViewer = useImageViewer();
+  const saveFile = useSaveFile();
   const [state, setState] = useState<FileState>({ kind: "loading" });
   const [reload, setReload] = useState(0);
   const [actionError, setActionError] = useState<string>();
@@ -1262,6 +1285,33 @@ function FileView({
   const externalOnly =
     state.kind === "error" && (state.code === "file_too_large" || state.code === "file_binary");
   const timedOut = state.kind === "error" && state.code === "file_read_timeout";
+  const inWorkspace =
+    tab.workspace !== undefined && relativeTo(tab.workspace, tab.absolutePath) !== undefined;
+  const filename = baseName(tab.absolutePath);
+  // 另存为：文本用已读到的文本，图片用已读到的 blob；桌面没有 SaveFileFn 时走 WebView2 下载
+  // （外壳按「设置 › 常规 › 下载」弹系统另存为对话框）
+  const saveAs =
+    state.kind === "text"
+      ? () => {
+          triggerBytesDownload({
+            filename,
+            mimeType: "text/plain",
+            bytes: new TextEncoder().encode(state.text),
+            saveFile,
+            onError: setActionError,
+          });
+        }
+      : state.kind === "image"
+        ? async () => {
+            triggerBytesDownload({
+              filename,
+              mimeType: state.blob.type || "application/octet-stream",
+              bytes: new Uint8Array(await state.blob.arrayBuffer()),
+              saveFile,
+              onError: setActionError,
+            });
+          }
+        : undefined;
   return (
     <div className="sp-file">
       <header className="sp-file-head">
@@ -1270,30 +1320,19 @@ function FileView({
           <span className="sp-crumb-sep">/</span>
           <span className="sp-crumb-path">{rel}</span>
         </span>
-        <Badge className="sp-badge">只读</Badge>
-        {isHtmlPath(tab.absolutePath) && !missing && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              run(() => actions.openInBrowser(tab.absolutePath));
-            }}
-          >
-            {actions.browserLabel}
-          </Button>
-        )}
-        {!missing && !externalOnly && (
-          <Button
-            variant="ghost"
-            size="sm"
-            title="在外部编辑器打开"
-            onClick={() => {
-              run(() => actions.openExternal(tab.absolutePath, tab.line));
-            }}
-          >
-            {actions.externalLabel}
-          </Button>
-        )}
+        <FileOpenButton
+          path={tab.absolutePath}
+          line={tab.line}
+          missing={missing}
+          html={isHtmlPath(tab.absolutePath)}
+          relativePath={inWorkspace ? rel : undefined}
+          onSaveAs={saveAs}
+          wrap={state.kind === "text" ? wrap : undefined}
+          onWrap={onWrap}
+          reloadKey={reload}
+          actions={actions}
+          onError={setActionError}
+        />
         <IconButton
           size="sm"
           aria-label="重新读取"
@@ -1316,7 +1355,7 @@ function FileView({
             正在读取…
           </div>
         ) : state.kind === "text" ? (
-          <CodeArea tab={tab} text={state.text} />
+          <CodeArea tab={tab} text={state.text} wrap={wrap} />
         ) : state.kind === "image" ? (
           <div className="sp-image">
             {state.broken === true ? (
@@ -1710,6 +1749,8 @@ export function SidePanel(props: SidePanelProps) {
                     readFile={props.readFile}
                     readerKey={props.readerKey}
                     actions={props.fileActions}
+                    wrap={props.fileWrap !== false}
+                    onWrap={(next) => props.onFileWrap?.(next)}
                   />
                 )}
               </div>

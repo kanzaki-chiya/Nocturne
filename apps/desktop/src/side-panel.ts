@@ -225,8 +225,9 @@ export function clampTreeWidth(width: number): number {
 }
 
 /**
- * 一个会话的面板（ADR-0060 修订 2026-10-18（二））：标签、当前标签、开关，以及
- * 「变更」的文件树宽度和换行偏好。面板宽度是全局的，不在这里。
+ * 一个会话的面板（ADR-0060 修订 2026-10-18（二））：标签、当前标签、开关，
+ * 「变更」的文件树宽度和换行偏好，以及「文件」查看器的换行偏好（修订 2026-11-21，
+ * 与「变更」分开记）。面板宽度是全局的，不在这里。
  */
 export interface SessionPanel {
   open: boolean;
@@ -234,6 +235,7 @@ export interface SessionPanel {
   activeId: string;
   treeWidth: number;
   wrap: boolean;
+  fileWrap: boolean;
   /** 最近在面板里打开过的文件（绝对路径，新的在前，至多 RECENT_FILES_MAX 个） */
   recent: string[];
 }
@@ -245,6 +247,8 @@ export interface StoredSessionPanel {
   activeTab?: string;
   treeWidth?: number;
   wrap?: boolean;
+  /** 「文件」查看器关掉自动换行时存 false；缺省换行 */
+  fileWrap?: boolean;
   recent?: string[];
 }
 
@@ -268,6 +272,7 @@ export function restoreSessionPanel(
     activeId,
     treeWidth: clampTreeWidth(stored?.treeWidth ?? CHANGE_TREE_DEFAULT_WIDTH),
     wrap: stored?.wrap !== false,
+    fileWrap: stored?.fileWrap !== false,
     recent: [...(stored?.recent ?? [])],
   };
 }
@@ -280,6 +285,7 @@ export function storeSessionPanel(panel: SessionPanel): StoredSessionPanel {
     ...(tabs.some((tab) => tab.id === panel.activeId) ? { activeTab: panel.activeId } : {}),
     ...(panel.treeWidth !== CHANGE_TREE_DEFAULT_WIDTH ? { treeWidth: panel.treeWidth } : {}),
     ...(panel.wrap ? {} : { wrap: false }),
+    ...(panel.fileWrap ? {} : { fileWrap: false }),
     ...(panel.recent.length > 0 ? { recent: [...panel.recent] } : {}),
   };
 }
@@ -299,6 +305,7 @@ export function parseStoredSessionPanels(value: unknown): Record<string, StoredS
         ? { treeWidth: clampTreeWidth(entry.treeWidth) }
         : {}),
       ...(entry.wrap === false ? { wrap: false } : {}),
+      ...(entry.fileWrap === false ? { fileWrap: false } : {}),
       ...(Array.isArray(entry.recent) && entry.recent.some(str)
         ? { recent: entry.recent.filter(str).slice(0, RECENT_FILES_MAX) }
         : {}),
