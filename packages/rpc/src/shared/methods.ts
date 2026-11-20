@@ -145,6 +145,8 @@ export interface AgentStatus {
   pipe?: AgentPipeStatus | undefined;
 }
 
+export type CompressionAlgorithm = "deflate-raw";
+
 export interface InitializeParams {
   /** 客户端实现的协议版本；与服务端不一致直接报错（第一版不做向下兼容） */
   protocolVersion: number;
@@ -152,6 +154,8 @@ export interface InitializeParams {
   capabilities: {
     /** 客户端能否回复权限与提问请求；false 时权限请求按非交互规则处理 */
     interactive: boolean;
+    /** 客户端支持的下行压缩算法列表（仅远程连接使用） */
+    compression?: CompressionAlgorithm[] | undefined;
   };
   /** 外部 agent（MCP 桥）握手时附带的进程信息（ADR-0074 §3） */
   processInfo?: AgentProcessInfo | undefined;
@@ -168,6 +172,8 @@ export interface InitializeResult {
   nocturneVersion: string;
   /** 会话日志目录（只读信息）；服务端不知道时缺省 */
   sessionsDir?: string;
+  /** 服务端选定的下行压缩算法；从 initialize 响应之后的第一条消息开始生效 */
+  compression?: CompressionAlgorithm;
   /** 仅 `origin === "agent"` 且已登记批准时返回该外部 agent 自身的能力范围与权限上限 */
   agent?: AgentSelfInfo;
 }

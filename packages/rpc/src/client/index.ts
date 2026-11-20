@@ -32,6 +32,7 @@ export type {
   AgentSelfInfo,
   AgentStatus,
   ComputerDescription,
+  CompressionAlgorithm,
   ComputerDriverState,
   ContextSummary,
   HubSessionStatus,

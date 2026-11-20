@@ -73,6 +73,7 @@ export type {
   AgentProcessInfo,
   AgentScope,
   AgentStatus,
+  CompressionAlgorithm,
   RpcMethodName,
   RpcMethods,
   SessionFileContent,

@@ -72,6 +72,7 @@ import {
 import {
   RPC_METHOD_NAMES,
   type AgentProcessInfo,
+  type CompressionAlgorithm,
   type LoginCompleted,
   type LoginStarted,
   type RemoteStatus,
@@ -93,6 +94,7 @@ import {
 } from "./agent/host.js";
 import { MethodNotFoundError, RpcProtocolError, toRpcError } from "./errors.js";
 import { Hub, type HubPeer, type ProviderState, type RpcRuntimeHandle } from "./hub.js";
+import { createDeflateRawCompressor } from "./remote/compression.js";
 import { RemoteHost, type RemoteHostOptions } from "./remote/host.js";
 import { readSessionFile, sessionErrorWithBytes } from "./session-file.js";
 import { MAX_MESSAGE } from "@nocturne/remote";
@@ -468,6 +470,9 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
 
 class Connection implements HubPeer {
   private initPromise: Promise<void> | undefined;
+  /** 远程连接 initialize 响应发出后再开启发送压缩并置 initialized = true，避免响应前混入广播或压缩自身 */
+  private pendingInitCompletion:
+    { compression?: CompressionAlgorithm; resolve: () => void } | undefined;
   /** 本连接已完成握手（Hub 的广播只发给已握手的连接） */
   initialized = false;
   private shuttingDown = false;
@@ -662,6 +667,18 @@ class Connection implements HubPeer {
       this.checkRemoteSize(method, line, result);
       this.diagnose({ kind: "response", id, ok: true });
       this.sendLine(line);
+      if (
+        (method === "initialize" || method === "runtime.initialize") &&
+        this.pendingInitCompletion !== undefined
+      ) {
+        const completion = this.pendingInitCompletion;
+        this.pendingInitCompletion = undefined;
+        if (completion.compression === "deflate-raw") {
+          this.transport.enableSendCompression?.(createDeflateRawCompressor());
+        }
+        this.initialized = true;
+        completion.resolve();
+      }
       // login.completed 绝不先于对应 start 响应到达（rpc.md 3.4）
       if (method === "login.start" || method === "login.startDraft") {
         const loginId = (result as { loginId?: unknown } | null)?.loginId;
@@ -669,6 +686,16 @@ class Connection implements HubPeer {
       }
       if (method === "shutdown" || method === "runtime.shutdown") this.transport.close();
     } catch (error) {
+      if (
+        (method === "initialize" || method === "runtime.initialize") &&
+        this.pendingInitCompletion !== undefined
+      ) {
+        const completion = this.pendingInitCompletion;
+        this.pendingInitCompletion = undefined;
+        this.initialized = false;
+        this.initPromise = undefined;
+        completion.resolve();
+      }
       const err = this.redactSecrets(method, params, toRpcError(error));
       this.fail({ jsonrpc: "2.0", id, error: err });
     }
@@ -1364,13 +1391,27 @@ class Connection implements HubPeer {
         );
       }
       const clientName = reqString(p, "clientName");
-      const interactive = optBool(reqObject(p, "capabilities"), "interactive") ?? false;
+      const capabilities = reqObject(p, "capabilities");
+      const interactive = optBool(capabilities, "interactive") ?? false;
+      const requestedCompression = Array.isArray(capabilities.compression)
+        ? capabilities.compression
+        : undefined;
+      const selectedCompression: CompressionAlgorithm | undefined =
+        this.origin === "remote" &&
+        this.transport.enableSendCompression !== undefined &&
+        requestedCompression?.includes("deflate-raw")
+          ? "deflate-raw"
+          : undefined;
       if ((this.origin === "remote" || this.origin === "agent") && !this.hub.available) {
         throw new RpcProtocolError(
           "runtime_unavailable",
           "本机连接尚未完成握手，Runtime 不可用；可稍后重试",
         );
       }
+      let finishInit!: () => void;
+      const initFinished = new Promise<void>((resolve) => {
+        finishInit = resolve;
+      });
       const init = (
         this.origin === "local" && !this.hub.available
           ? this.options.createRuntime({ clientName, interactive })
@@ -1378,7 +1419,9 @@ class Connection implements HubPeer {
       )
         .then(async (handle) => {
           if (handle !== undefined) this.hub.setHandle(handle);
-          this.initialized = true;
+          if (this.origin !== "remote") {
+            this.initialized = true;
+          }
           if (this.origin === "local" && !this.hub.stopping) {
             try {
               await this.remote?.start();
@@ -1407,9 +1450,17 @@ class Connection implements HubPeer {
           // 创建失败：允许客户端修正后重试
           this.initialized = false;
           this.initPromise = undefined;
+          this.pendingInitCompletion = undefined;
+          finishInit();
           throw error;
         });
-      this.initPromise = init;
+      this.initPromise = this.origin === "remote" ? init.then(() => initFinished) : init;
+      if (this.origin === "remote") {
+        this.pendingInitCompletion = {
+          ...(selectedCompression !== undefined ? { compression: selectedCompression } : {}),
+          resolve: finishInit,
+        };
+      }
       await init;
       const registeredAgent =
         this.origin === "agent" && this.agentContext !== undefined
@@ -1419,6 +1470,7 @@ class Connection implements HubPeer {
         protocolVersion: RPC_PROTOCOL_VERSION,
         nocturneVersion: this.options.nocturneVersion,
         ...(this.hub.sessionsDir !== undefined ? { sessionsDir: this.hub.sessionsDir } : {}),
+        ...(selectedCompression !== undefined ? { compression: selectedCompression } : {}),
         ...(registeredAgent !== undefined
           ? {
               agent: {

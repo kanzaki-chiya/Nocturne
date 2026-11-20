@@ -13,6 +13,13 @@ export interface LineTransport {
   flush?(): Promise<void>;
   /** 主动关闭 */
   close(): void;
+  /** 可选：启用发送方向流式压缩（由加密通道实现） */
+  enableSendCompression?(compressor: {
+    compress(data: Uint8Array): Promise<Uint8Array>;
+    close(): void;
+  }): void;
+  /** 可选：启用接收方向流式解压（由加密通道实现） */
+  enableReceiveCompression?(algorithm: "deflate-raw"): void;
 }
 
 /**

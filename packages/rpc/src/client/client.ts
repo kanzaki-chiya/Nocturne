@@ -102,6 +102,7 @@ import {
 } from "../shared/jsonrpc.js";
 import type {
   AgentProcessInfo,
+  CompressionAlgorithm,
   ContextSummary,
   InitializeResult,
   LoginCompleted,
@@ -190,6 +191,8 @@ export interface RpcClientOptions {
   clientName: string;
   /** 能否回复权限与提问请求，默认 true；false 时服务端按非交互规则处理 */
   interactive?: boolean;
+  /** 声明客户端支持的下行压缩算法（仅远程连接传入）；服务端选定后在 initialize 响应处理时同步启用解压 */
+  compression?: CompressionAlgorithm[] | undefined;
   /** 外部 agent（MCP 桥）握手时附带的进程信息（ADR-0074 §3） */
   processInfo?: AgentProcessInfo | undefined;
 }
@@ -649,6 +652,7 @@ export interface RpcClient {
 interface Pending {
   resolve(value: unknown): void;
   reject(error: unknown): void;
+  onResult?: ((value: unknown) => void) | undefined;
 }
 
 interface SubagentWatch {
@@ -746,7 +750,10 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       pending.delete(id);
       const error = message.error as RpcErrorObject | undefined;
       if (error !== undefined) entry.reject(RpcError.fromObject(error));
-      else entry.resolve(message.result);
+      else {
+        entry.onResult?.(message.result);
+        entry.resolve(message.result);
+      }
       return;
     }
     if (message.method === "event") {
@@ -799,11 +806,16 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
   const call = <M extends RpcMethodName>(
     method: M,
     params: RpcParams<M>,
+    onResult?: (value: RpcResult<M>) => void,
   ): Promise<RpcResult<M>> => {
     if (isClosed) return Promise.reject(connectionClosed());
     const id = nextId++;
     return new Promise<RpcResult<M>>((resolve, reject) => {
-      pending.set(id, { resolve: resolve, reject });
+      pending.set(id, {
+        resolve: resolve,
+        reject,
+        ...(onResult !== undefined ? { onResult: onResult as (value: unknown) => void } : {}),
+      });
       try {
         transport.send(encodeMessage({ jsonrpc: "2.0", id, method, params }));
       } catch (error) {
@@ -1407,12 +1419,28 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       };
     },
     async initialize() {
-      const result = await call("initialize", {
-        protocolVersion: RPC_PROTOCOL_VERSION,
-        clientName: options.clientName,
-        capabilities: { interactive: options.interactive ?? true },
-        ...(options.processInfo !== undefined ? { processInfo: options.processInfo } : {}),
-      });
+      const advertisedCompression =
+        options.compression !== undefined && options.compression.length > 0
+          ? options.compression
+          : undefined;
+      const result = await call(
+        "initialize",
+        {
+          protocolVersion: RPC_PROTOCOL_VERSION,
+          clientName: options.clientName,
+          capabilities: {
+            interactive: options.interactive ?? true,
+            ...(advertisedCompression !== undefined ? { compression: advertisedCompression } : {}),
+          },
+          ...(options.processInfo !== undefined ? { processInfo: options.processInfo } : {}),
+        },
+        (res) => {
+          // 在 transport.onLine 同步回调内立刻启用解压，确保紧随 initialize 响应之后的下一帧可直接解压
+          if (res.compression === "deflate-raw" && advertisedCompression?.includes("deflate-raw")) {
+            transport.enableReceiveCompression?.("deflate-raw");
+          }
+        },
+      );
       if (result.protocolVersion !== RPC_PROTOCOL_VERSION) {
         throw new RpcError(
           "protocol_version_mismatch",
