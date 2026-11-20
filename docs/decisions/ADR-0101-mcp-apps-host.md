@@ -48,7 +48,7 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
   - 不含 `"model"` 的工具不进模型工具列表，也不进按需模式的 `mcp_search` 结果；
   - 不含 `"app"` 的工具，页面不能调用。
 - **工具结果关联页面**：工具定义带 `resourceUri` 时，`tool.completed` 新增可选字段 `ui`，内容为插件 id、服务器 id、`resourceUri`、`surface`（若有）。
-  - 不提升 `formatVersion`：旧版本的 schema 会剥离未知字段，理由同 ADR-0088 第 4 节。
+  - 不提升 `formatVersion`：`packages/core/src/protocol/schema.ts` 里 `tool.completed` 是普通 `z.object`（未用 `strict`），旧版本读到会剥离未知字段，理由同 ADR-0088 第 4 节。
   - 页面需要的工具结果取自同一事件里已有的 `modelContent`、`output.structured`，不另存一份。
 - **读取页面**：
   - 经 MCP `resources/read` 读取；只接受 `ui://` 开头的 URI，且 `mimeType` 为 `text/html;profile=mcp-app`；
@@ -58,11 +58,11 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
 ### 3. 页面调用工具与权限
 
 - 页面只能调用**同一会话、同一服务器**上 `visibility` 含 `"app"` 的工具。跨服务器调用一律拒绝。
-- 每次调用都经权限层判定，主体与模型调用相同（`mcp <server>/<tool>`，带 `readOnly`），另加调用来源 `app`。判定规则：
-  - 规则结果为 `allow`：执行；
-  - 规则结果为 `deny`：拒绝；
-  - 规则结果为 `ask` 且工具 `readOnlyHint: true`：放行。依据是页面调用由用户在页面上的操作直接触发，没有模型参与；
-  - 规则结果为 `ask` 且工具不是只读：拒绝，错误码 `app_tool_not_allowed`。第一版不在页面调用时弹确认。
+- 每次调用都经权限层判定，主体与模型调用相同（`mcp <server>/<tool>`，带 `readOnly`），另加调用来源 `app`。第一版页面只能调用只读工具，判定规则：
+  - 工具不是 `readOnlyHint: true`：拒绝，错误码 `app_tool_not_allowed`，不论规则结果与预设（含 `guarded`、`bypass` 与显式 `allow`）；
+  - 只读工具，规则结果为 `deny`：拒绝；
+  - 只读工具，规则结果为 `allow` 或 `ask`：执行，不弹确认。
+- 这是对权限的放宽：`default`、`read-only` 预设下 mcp 主体是 `ask`，页面来源的只读调用却直接执行。依据是 `readOnlyHint` 为插件服务器的自我声明，与 `smart` 预设的做法相同（ADR-0057）；且只有用户启用过的插件才有页面。页面加载后脚本即可发起调用，并不保证每次都由用户操作触发。
 - 页面调用：
   - 不经 Agent Loop，不写进会话日志，不触发 PreToolUse 等 Hook；
   - 返回原始 `CallToolResult`（`content`、`structuredContent`、`isError`）；
@@ -91,7 +91,7 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
   - `resourceUri` 必须以 `ui://` 开头；
   - 不合法的条目跳过，记入插件的 `warnings`。
 - `open` 是 Nocturne 的扩展，可选：
-  - `tool`：本服务器上 `visibility` 含 `"app"` 的工具名；
+  - `tool`：本服务器上 `visibility` 含 `"app"`、且 `readOnlyHint: true` 的工具名。工具列表可得时（缓存或已连接）不满足这两条，这个 surface 不参与文件打开，并记入插件的 `warnings`；
   - `fileTypes`：小写扩展名列表，例如 `[".docx"]`。
 - 兼容清单（`.codex-plugin`、`.claude-plugin`）不读 `ui`。
 
@@ -110,7 +110,9 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
      - 命中多个插件时，取插件 id 字典序第一个；
      - 都不命中时，行为与现在相同。
 - **生命周期**：
+  - 标签第一次显示时才读取页面、调用 `open.tool`；重启后恢复的标签在显示之前不启动插件服务器；
   - 同一会话内切换标签，页面状态保留（与终端标签相同，隐藏而不卸载）；
+  - 卸载页面前发送 `ui/resource-teardown`，最多等 1 秒；
   - 切换会话、进设置页时可以卸载页面；
   - `panelSessions` 只保存标签描述：插件 id、服务器 id、surface 或 `resourceUri`，以及最近一次 `open` 调用的参数。恢复时重新读取页面；有保存的参数就重新调用 `open.tool`。
 - **插件停用或卸载后**：标签显示错误页，不自动关闭。
@@ -124,17 +126,25 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
   `<宿主源>` 与 ADR-0088 相同。
 - **网络与权限声明**：第一版不放行任何外部来源。资源 `_meta.ui.csp` 的 `connectDomains`、`resourceDomains`、`frameDomains`、`baseUriDomains` 与 `permissions` 一律忽略，规范允许宿主「进一步限制」。插件页面必须内联全部资源。
 - **装载**：宿主把页面 HTML 经 postMessage 交给空壳页，空壳页用它替换整个文档，页面脚本照常执行。页面里的 `window.parent` 就是宿主，官方 `@modelcontextprotocol/ext-apps` 的 `App` 可直接使用。
+- **与规范「Sandbox proxy」一节的差异**：规范要求网页宿主用双层 iframe（外层代理与宿主不同源，带 `allow-scripts`、`allow-same-origin`，内层装页面），并用保留消息 `ui/notifications/sandbox-proxy-ready`、`ui/notifications/sandbox-resource-ready` 传 HTML。Nocturne 桌面端按规范「UI Initialization (Desktop/Native Hosts)」的单层 iframe 做法：
+  - 页面所在子框架是不透明源（无 `allow-same-origin`），隔离比外层代理更严；
+  - 子框架拿不到 Tauri IPC（ADR-0088 第 2 节）；
+  - 不使用 `ui/notifications/sandbox-*` 两条保留消息，HTML 用 ADR-0088 同款的 postMessage 装载。
 - **宿主实现的消息**（方法名与参数以规范为准）：
   - `ui/initialize`：返回宿主信息与 `hostContext`，包括主题、样式变量、`displayMode: "inline"` 等。样式变量由主题令牌映射到规范的变量名；
-  - `ui/notifications/initialized`；
-  - `ui/notifications/tool-input` 与 `ui/notifications/tool-result`：在第 5 节三种打开方式下发给页面；
+  - `ui/notifications/initialized`：收到之前，宿主不向页面发任何请求或通知；
+  - `ui/notifications/tool-input` 与 `ui/notifications/tool-result`：在第 5 节三种打开方式下发给页面。工具状态为 `error` 时照常发 `tool-result`（`isError: true`）；为 `cancelled`、`interrupted`、`denied` 时发 `ui/notifications/tool-cancelled`。不发 `tool-input-partial`；
+  - `ping`；
+  - `notifications/message`：写入诊断日志；
+  - `ui/request-display-mode`：不切换，返回当前模式 `inline`；
+  - `ui/resource-teardown`：见第 5 节生命周期；
   - `ui/notifications/host-context-changed`：深浅色或主题变化时发送；
   - `tools/call`：按第 3 节经 RPC 执行；
   - `resources/read`：只能读本服务器的 `ui://` 资源；
   - `ui/message`：把文本插入这个会话输入框草稿的末尾并聚焦，不自动发送。正在显示的不是这个会话时，存为这个会话的草稿；
   - `ui/open-link`：只接受 `https:`，交给系统浏览器；
   - `ui/notifications/size-changed`：忽略，面板标签铺满。
-- **其余请求**：返回 JSON-RPC 错误 `-32601`。
+- **其余请求**：返回 JSON-RPC 错误 `-32601`（含 `ui/update-model-context`）。
 - **消息校验**：只接受 `event.source === iframe.contentWindow` 的消息；页面调用一律带上这个标签绑定的会话、插件和服务器，页面自己传的同名字段不算数。
 
 ### 7. RPC
@@ -149,6 +159,7 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
 
 - 插件可以带侧边面板交互页面，写法与 ZCode、MCP Apps 生态一致。页面运行在与 ADR-0088 相同的隔离沙箱里，碰不到宿主界面、存储、网络与外壳命令。
 - 页面调用写入类工具会直接失败（第 3 节），第一版的插件页面只能做查看与只读交互。之后要支持写入，需另行修订，增加页面内确认。
+- 只读工具经页面调用时不弹确认，`default`、`read-only` 预设下也一样（第 3 节）。
 - 页面不能联网，需要外部库的插件必须把库打进页面。
 - 手机网页、安卓 App 与 TUI 看不到页面；带页面的工具调用在这些客户端是普通工具行。
 - 同步死循环会卡住主界面渲染线程，限制与 ADR-0088 第 6 节相同。
