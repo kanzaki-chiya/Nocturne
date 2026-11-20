@@ -345,6 +345,8 @@ export function App({ host }: { host: DesktopHost }) {
     workMode?: WorkModeName | undefined;
     error: string;
   } | null>(null);
+  /** 不带错误的草稿预填（插件详情「立即试用」） */
+  const [draftPrefill, setDraftPrefill] = useState<{ text: string; seq: number } | null>(null);
   /** 已有会话在换模型卡片盖住输入框时被拒，卡片关掉后放回 */
   const [sessionRestore, setSessionRestore] = useState<{
     id: string;
@@ -1318,6 +1320,13 @@ export function App({ host }: { host: DesktopHost }) {
     }
   };
 
+  const tryPluginSkill = async (skillName: string) => {
+    setDraftRestore(null);
+    setPage(null);
+    await newSession();
+    setDraftPrefill((prev) => ({ text: `/${skillName} `, seq: (prev?.seq ?? 0) + 1 }));
+  };
+
   // 「普通对话工作区」切换：prefs 记覆盖与新路径 → 刷新列表。
   // 单后台不随工作区切换重启（ADR-0051）；后台没在跑时 ensure 以新工作区为 cwd 启动。
   // 旧位置的会话 cwd 仍在 plainWorkspaces 里，继续归「对话」区。
@@ -2232,8 +2241,15 @@ export function App({ host }: { host: DesktopHost }) {
                   <PaneErrorBoundary key="plugins">
                     <PluginsPage
                       client={pageClient}
+                      workspaceRoot={effectiveWorkspace ?? undefined}
                       version={settingsVersion}
                       openPlugin={pluginJump}
+                      pickFolder={
+                        typeof host.pickFolder === "function" ? () => host.pickFolder() : undefined
+                      }
+                      onTrySkill={(skillName) => {
+                        void tryPluginSkill(skillName);
+                      }}
                       openDirectory={(path) =>
                         host.invoke("open_skill_directory", {
                           path,
@@ -2663,6 +2679,10 @@ export function App({ host }: { host: DesktopHost }) {
                   restoreDraft={draftRestore}
                   onRestoreDraftUsed={() => {
                     setDraftRestore(null);
+                  }}
+                  prefillDraft={draftPrefill}
+                  onPrefillDraftUsed={() => {
+                    setDraftPrefill(null);
                   }}
                 />
               </PaneErrorBoundary>
@@ -3245,6 +3265,8 @@ interface DraftPaneProps {
     error: string;
   } | null;
   onRestoreDraftUsed?: () => void;
+  prefillDraft?: { text: string; seq: number } | null;
+  onPrefillDraftUsed?: () => void;
 }
 
 function DraftPane({
@@ -3269,6 +3291,8 @@ function DraftPane({
   onManageSkills,
   restoreDraft,
   onRestoreDraftUsed,
+  prefillDraft,
+  onPrefillDraftUsed,
 }: DraftPaneProps) {
   const draft = useDraftControls(runtime, prefs, providersVersion, workspace);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
@@ -3458,6 +3482,8 @@ function DraftPane({
           initialWorkMode={restoreDraft?.workMode}
           initialError={restoreDraft ? `发送失败：${restoreDraft.error}` : undefined}
           onInitialDraftUsed={onRestoreDraftUsed}
+          prefillDraft={prefillDraft}
+          onPrefillDraftUsed={onPrefillDraftUsed}
           controls={draft.controls}
           workspace={workspaceChoice}
           branch={branchChoice}

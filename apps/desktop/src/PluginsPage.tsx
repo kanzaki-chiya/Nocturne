@@ -9,7 +9,9 @@ import type {
   PluginUnsupportedHook,
   PluginUnsupportedReason,
   PluginsDescription,
+  SkillOverview,
 } from "@nocturne/core/protocol";
+import { Menu, MenuItem } from "./Menu";
 import { Scrim } from "./ProvidersPage";
 import {
   Badge,
@@ -37,6 +39,17 @@ const HOST_LABEL: Record<PluginHost, string> = {
 
 const isBuiltinPlugin = (plugin: PluginOverview): boolean =>
   plugin.host === "nocturne" && plugin.marketplace === "builtin";
+
+const isLocalNocturnePlugin = (plugin: PluginOverview): boolean =>
+  plugin.host === "nocturne" && plugin.marketplace === "local";
+
+const isCallablePluginSkill = (skill: SkillOverview, plugin: PluginOverview): boolean =>
+  skill.source === "plugin" &&
+  (skill.plugin === undefined || skill.plugin === `${plugin.name}@${plugin.marketplace}`) &&
+  skill.enabled &&
+  skill.shadowedBy === undefined &&
+  (skill.invocation === "both" || skill.invocation === "user") &&
+  !skill.commandConflict;
 
 const PLUGIN_GROUPS: readonly {
   key: string;
@@ -91,7 +104,7 @@ export function PluginIcon({
   size = "md",
 }: {
   icon?: string | undefined;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
 }) {
   // 桌面端 CSP 为 img-src 'self' blob:，在支持 ObjectURL 的环境将 data URI 转为 blob URL 渲染
   const canBlobUrl = typeof URL.createObjectURL === "function";
@@ -123,7 +136,7 @@ export function PluginIcon({
           <img className="plugin-icon-img" src={imgSrc} alt="" />
         ) : null
       ) : (
-        <Icon name="box_3" size={size === "sm" ? ICON_SM : ICON_MD} />
+        <Icon name="box_3" size={size === "sm" ? ICON_SM : size === "lg" ? 24 : ICON_MD} />
       )}
     </span>
   );
@@ -131,21 +144,31 @@ export function PluginIcon({
 
 export function PluginsPage({
   client,
+  workspaceRoot,
   version,
   openDirectory,
+  pickFolder,
+  onTrySkill,
   openPlugin,
 }: {
   client: RpcClient | undefined;
+  workspaceRoot?: string | undefined;
   version: number;
   openDirectory: (path: string) => Promise<void>;
+  pickFolder?: (() => Promise<string | null>) | undefined;
+  onTrySkill?: ((skillName: string) => void) | undefined;
   openPlugin?: { id: string; seq: number } | undefined;
 }) {
   const [data, setData] = useState<PluginsDescription>();
+  const [skills, setSkills] = useState<SkillOverview[]>([]);
   const [selected, setSelected] = useState<string>();
   const [confirming, setConfirming] = useState<PluginOverview>();
+  const [uninstalling, setUninstalling] = useState<PluginOverview>();
+  const [tryMenuOpen, setTryMenuOpen] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const tryBtnRef = useRef<HTMLButtonElement>(null);
   const refreshGeneration = useRef(0);
   const handledJumpSeq = useRef(0);
 
@@ -153,9 +176,14 @@ export function PluginsPage({
     if (openPlugin !== undefined && openPlugin.seq !== handledJumpSeq.current) {
       handledJumpSeq.current = openPlugin.seq;
       setError("");
+      setTryMenuOpen(false);
       setSelected(openPlugin.id);
     }
   }, [openPlugin]);
+
+  useEffect(() => {
+    setTryMenuOpen(false);
+  }, [selected]);
 
   useEffect(() => {
     if (!toast) return;
@@ -171,9 +199,15 @@ export function PluginsPage({
     if (!client) return;
     const generation = ++refreshGeneration.current;
     try {
-      const result = await client.runtime.describePlugins();
+      const [result, skillsResult] = await Promise.all([
+        client.runtime.describePlugins(),
+        client.runtime
+          .describeSkills(workspaceRoot !== undefined ? { workspaceRoot } : {})
+          .catch(() => undefined),
+      ]);
       if (generation !== refreshGeneration.current) return;
       setData(result);
+      setSkills(skillsResult?.skills ?? []);
       setSelected((old) =>
         old !== undefined && result.plugins.some((p) => p.id === old) ? old : undefined,
       );
@@ -183,7 +217,7 @@ export function PluginsPage({
         setError(e instanceof Error ? e.message : String(e));
       }
     }
-  }, [client]);
+  }, [client, workspaceRoot]);
 
   useEffect(() => {
     void refresh();
@@ -197,6 +231,15 @@ export function PluginsPage({
   }, [client, refresh, version]);
 
   const plugin = selected !== undefined ? data?.plugins.find((p) => p.id === selected) : undefined;
+  const tryableSkills =
+    plugin !== undefined &&
+    onTrySkill !== undefined &&
+    plugin.state === "on" &&
+    plugin.skills.length > 0
+      ? plugin.skills.filter((name) =>
+          skills.some((s) => s.name === name && isCallablePluginSkill(s, plugin)),
+        )
+      : [];
 
   const attempt = async (action: () => Promise<void>) => {
     try {
@@ -235,6 +278,59 @@ export function PluginsPage({
     }
   };
 
+  const installLocal = async () => {
+    if (!client || !pickFolder || busy) return;
+    setError("");
+    let dir: string | null;
+    try {
+      dir = await pickFolder();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!dir) return;
+    setBusy(true);
+    try {
+      const installed = await client.runtime.installLocalPlugin({ path: dir });
+      setData((prev) =>
+        prev === undefined
+          ? prev
+          : prev.plugins.some((p) => p.id === installed.id)
+            ? {
+                ...prev,
+                plugins: prev.plugins.map((p) => (p.id === installed.id ? installed : p)),
+              }
+            : { ...prev, plugins: [...prev.plugins, installed] },
+      );
+      setSelected(installed.id);
+      setToast(`已安装 ${pluginLabel(installed)}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uninstallLocal = async (target: PluginOverview) => {
+    if (!client || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await client.runtime.uninstallPlugin({ id: target.id });
+      setUninstalling(undefined);
+      setSelected(undefined);
+      setToast(`已卸载 ${pluginLabel(target)}`);
+      await refresh();
+    } catch (e) {
+      setUninstalling(undefined);
+      setError(e instanceof Error ? e.message : String(e));
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const openConfirm = (target: PluginOverview) => {
     if (!client || busy) return;
     setError("");
@@ -263,12 +359,7 @@ export function PluginsPage({
           {plugin ? (
             <>
               <PageHeader
-                title={
-                  <span className="plugin-detail-title">
-                    <PluginIcon icon={plugin.icon} size="sm" />
-                    <span className="plugin-detail-name">{pluginLabel(plugin)}</span>
-                  </span>
-                }
+                title={pluginLabel(plugin)}
                 crumb={{
                   parent: "插件",
                   onBack: () => {
@@ -304,6 +395,19 @@ export function PluginsPage({
                     >
                       <Icon name="folder" size={ICON_MD} />
                     </IconButton>
+                    {isLocalNocturnePlugin(plugin) && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={busy || !client}
+                        onClick={() => {
+                          setError("");
+                          setUninstalling(plugin);
+                        }}
+                      >
+                        卸载
+                      </Button>
+                    )}
                   </>
                 }
               />
@@ -313,6 +417,55 @@ export function PluginsPage({
                 </div>
               )}
               <div className="sbody">
+                <div className="plugin-detail-hero">
+                  <PluginIcon icon={plugin.icon} size="lg" />
+                  {plugin.description !== undefined && plugin.description !== "" && (
+                    <p className="plugin-detail-desc">{plugin.description}</p>
+                  )}
+                  {tryableSkills.length > 0 && (
+                    <div className="plugin-try-wrap">
+                      <Button
+                        ref={tryBtnRef}
+                        size="sm"
+                        variant="primary"
+                        disabled={busy || !client}
+                        aria-haspopup={tryableSkills.length > 1 ? "menu" : undefined}
+                        aria-expanded={tryableSkills.length > 1 ? tryMenuOpen : undefined}
+                        onClick={() => {
+                          if (tryableSkills.length === 1) {
+                            const first = tryableSkills[0];
+                            if (first !== undefined) onTrySkill?.(first);
+                          } else {
+                            setTryMenuOpen((open) => !open);
+                          }
+                        }}
+                      >
+                        立即试用
+                      </Button>
+                      {tryMenuOpen && tryableSkills.length > 1 && (
+                        <Menu
+                          anchor={tryBtnRef.current}
+                          align="right"
+                          label="选择技能"
+                          onClose={() => {
+                            setTryMenuOpen(false);
+                          }}
+                        >
+                          {tryableSkills.map((skillName) => (
+                            <MenuItem
+                              key={skillName}
+                              label={skillName}
+                              onSelect={() => {
+                                setTryMenuOpen(false);
+                                onTrySkill?.(skillName);
+                              }}
+                            />
+                          ))}
+                        </Menu>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <SettingsGroup title="概况" plain>
                   <SettingsRow label="位置">
                     <code>{plugin.root}</code>
@@ -372,7 +525,22 @@ export function PluginsPage({
             </>
           ) : (
             <>
-              <PageHeader title="插件" />
+              <PageHeader
+                title="插件"
+                actions={
+                  pickFolder !== undefined ? (
+                    <Button
+                      size="sm"
+                      disabled={busy || !client}
+                      onClick={() => {
+                        void installLocal();
+                      }}
+                    >
+                      安装插件…
+                    </Button>
+                  ) : undefined
+                }
+              />
               {error && (
                 <div className="errt" role="alert">
                   {error}
@@ -480,6 +648,18 @@ export function PluginsPage({
           }}
           onConfirm={() => {
             void enablePlugin(confirming);
+          }}
+        />
+      )}
+      {uninstalling !== undefined && (
+        <PluginUninstallDialog
+          plugin={uninstalling}
+          busy={busy}
+          onCancel={() => {
+            if (!busy) setUninstalling(undefined);
+          }}
+          onConfirm={() => {
+            void uninstallLocal(uninstalling);
           }}
         />
       )}
@@ -600,6 +780,38 @@ function PluginEnableDialog({
           </Button>
           <Button variant="primary" disabled={busy} onClick={onConfirm}>
             启用
+          </Button>
+        </div>
+      </div>
+    </Scrim>
+  );
+}
+
+function PluginUninstallDialog({
+  plugin,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  plugin: PluginOverview;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const title = `卸载 ${pluginLabel(plugin)}？`;
+  return (
+    <Scrim onClose={onCancel}>
+      <div className="dlg narrow" role="dialog" aria-label={title}>
+        <div className="dh3">
+          <b>{title}</b>
+        </div>
+        <div className="df">
+          <span className="sp" />
+          <Button disabled={busy} onClick={onCancel}>
+            取消
+          </Button>
+          <Button variant="danger-solid" disabled={busy} onClick={onConfirm}>
+            卸载
           </Button>
         </div>
       </div>

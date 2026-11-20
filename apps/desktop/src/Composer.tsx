@@ -176,6 +176,9 @@ export interface ComposerProps {
   /** 挂载时显示的发送失败 */
   initialError?: string | undefined;
   onInitialDraftUsed?: (() => void) | undefined;
+  /** 外部预填草稿（如插件「立即试用」）：无错误提示，填入后光标置于末尾并聚焦 */
+  prefillDraft?: { text: string; seq: number } | null | undefined;
+  onPrefillDraftUsed?: (() => void) | undefined;
   readInputHistory?: () => Promise<string[]>;
   /** 父层从当前会话引用记录，因而首次输入创建会话后也能写入历史。 */
   recordInputHistory?: (text: string) => Promise<void>;
@@ -284,6 +287,8 @@ export function Composer({
   initialWorkMode,
   initialError,
   onInitialDraftUsed,
+  prefillDraft,
+  onPrefillDraftUsed,
   readInputHistory,
   recordInputHistory,
   controls,
@@ -482,6 +487,40 @@ export function Composer({
     }
     initialDraftUsed.current?.();
   }, []);
+  const appliedPrefillSeq = useRef<number | null>(null);
+  const onPrefillDraftUsedRef = useRef(onPrefillDraftUsed);
+  onPrefillDraftUsedRef.current = onPrefillDraftUsed;
+  useEffect(() => {
+    if (prefillDraft == null || appliedPrefillSeq.current === prefillDraft.seq) return;
+    appliedPrefillSeq.current = prefillDraft.seq;
+    const text = prefillDraft.text;
+    const pos = text.length;
+    pendingCaret.current = pos;
+    revision.current += 1;
+    draftRef.current = text;
+    setDraft(text);
+    setSelected(0);
+    setDismissed(false);
+    setError(null);
+    setEnterHint(null);
+    historyIndex.current = null;
+    setCaret(pos);
+    const focusField = () => {
+      const field = textarea.current;
+      if (!field) return;
+      field.focus();
+      field.setSelectionRange(pos, pos);
+    };
+    focusField();
+    const raf =
+      typeof requestAnimationFrame === "function" ? requestAnimationFrame(focusField) : undefined;
+    onPrefillDraftUsedRef.current?.();
+    return () => {
+      if (raf !== undefined && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(raf);
+      }
+    };
+  }, [prefillDraft]);
   useEffect(() => {
     let active = true;
     history.current = [];

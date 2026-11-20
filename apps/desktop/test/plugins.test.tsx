@@ -1,6 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { PluginOverview, PluginsDescription } from "@nocturne/core/protocol";
+import type {
+  PluginOverview,
+  PluginsDescription,
+  SkillOverview,
+  SkillsDescription,
+} from "@nocturne/core/protocol";
+import { Composer } from "../src/Composer";
 import { PluginsPage } from "../src/PluginsPage";
 import { fakeServer, RpcFail, withInit } from "./fake-server";
 
@@ -356,12 +362,16 @@ it("插件列表行与详情页头部同时支持图标 img 与统一默认插�
   expect(fallback?.querySelector("svg")).toBeTruthy();
   expect(fallback?.textContent).toBe("");
 
-  // 进入带图标插件详情，页头也渲染 img
+  // 进入带图标插件详情，页头去掉小图标，hero 渲染 48px 大图标，名称只出现一次
   fireEvent.click(within(codexRegion).getByText("With Icon"));
   await screen.findByRole("button", { name: "插件" });
+  expect(document.querySelector(".phead .plugin-icon")).toBeNull();
+  expect(screen.getAllByText("With Icon")).toHaveLength(1);
   await waitFor(() => {
-    const headerImg = document.querySelector(".phead img.plugin-icon-img");
-    expect(headerImg?.getAttribute("src")).toBe(iconUri);
+    const heroImg = document.querySelector(
+      ".plugin-detail-hero .plugin-icon-lg img.plugin-icon-img",
+    );
+    expect(heroImg?.getAttribute("src")).toBe(iconUri);
   });
 
   f.close();
@@ -510,4 +520,334 @@ it("插件详情在技能、Hook 之后显示「MCP 服务器」一节，列 id�
   expect(within(mcpRegion).getByText("不支持 HTTP")).toBeTruthy();
 
   f.close();
+});
+
+const skillOverview = (overrides: Partial<SkillOverview> = {}): SkillOverview => ({
+  name: "docx",
+  layer: "user",
+  source: "plugin",
+  plugin: "docx@builtin",
+  entryPath: "/plugins/docx/skills/docx/SKILL.md",
+  realPath: "/plugins/docx/skills/docx/SKILL.md",
+  otherEntries: [],
+  description: "Word 文档",
+  displayedDescriptionLength: 7,
+  invocation: "both",
+  catalogStatus: "full",
+  enabled: true,
+  commandConflict: false,
+  missingDescription: false,
+  fields: {},
+  unknownFields: {},
+  ignored: [],
+  bodyLines: 10,
+  bodyPreview: "",
+  files: [],
+  size: 100,
+  ...overrides,
+});
+
+const skillsDesc = (skills: SkillOverview[]): SkillsDescription => ({
+  skills,
+  warnings: [],
+  budget: {
+    usedTokens: 0,
+    limitTokens: 1000,
+    fullCount: skills.length,
+    nameCount: 0,
+    disabledCount: 0,
+    basis: "fallback",
+  },
+  scannedDirs: [],
+  homeDir: "/home/.nocturne/skills",
+});
+
+it("安装插件按钮流程：不支持选文件夹时隐藏；取消不调 RPC；成功刷新并进入详情；失败显示在 errt", async () => {
+  const installed = plugin({
+    id: "nocturne:my-local@local",
+    host: "nocturne",
+    name: "my-local",
+    marketplace: "local",
+    version: "1.0.0",
+    displayName: "本地测试插件",
+    description: "本地安装说明",
+    state: "off",
+    hooks: [],
+    unsupported: [],
+    skills: ["hello"],
+  });
+  let current: PluginOverview[] = [];
+  let shouldFail = false;
+
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": () => desc(current),
+      "skills.describeSkills": () => skillsDesc([]),
+      "plugins.installLocalPlugin": () => {
+        if (shouldFail) {
+          return new RpcFail(-32001, "清单无效：未找到 plugin.json", { code: "invalid_command" });
+        }
+        current = [installed];
+        return installed;
+      },
+    }),
+  );
+  await f.initialize();
+
+  // 未传 pickFolder 时不显示安装按钮
+  const view = render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+  await screen.findByText("没有插件");
+  expect(screen.queryByRole("button", { name: "安装插件…" })).toBeNull();
+
+  // 取消选择：什么都不做
+  const pickFolder = vi.fn<() => Promise<string | null>>().mockResolvedValueOnce(null);
+  view.rerender(
+    <PluginsPage client={f.client} version={0} openDirectory={vi.fn()} pickFolder={pickFolder} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "安装插件…" }));
+  await waitFor(() => {
+    expect(pickFolder).toHaveBeenCalledTimes(1);
+  });
+  expect(f.calls.filter((c) => c.method === "plugins.installLocalPlugin")).toHaveLength(0);
+
+  // 失败：在 errt 显示错误
+  shouldFail = true;
+  pickFolder.mockResolvedValueOnce("C:/tmp/bad-plugin");
+  fireEvent.click(screen.getByRole("button", { name: "安装插件…" }));
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "清单无效：未找到 plugin.json",
+  );
+
+  // 成功：刷新列表、toast 提示并进入该插件详情页
+  shouldFail = false;
+  pickFolder.mockResolvedValueOnce("C:/tmp/my-local");
+  fireEvent.click(screen.getByRole("button", { name: "安装插件…" }));
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "✓ 已安装 本地测试插件");
+  expect(await screen.findByRole("button", { name: "插件" })).toBeTruthy();
+  expect(screen.getAllByText("本地测试插件")).toHaveLength(1);
+  expect(screen.getByText("本地安装说明")).toBeTruthy();
+
+  f.close();
+});
+
+it("立即试用按钮显示条件：仅状态为 on 且存在可调用技能时显示，否则隐藏", async () => {
+  const docxOn = plugin({
+    id: "nocturne:docx@builtin",
+    host: "nocturne",
+    name: "docx",
+    marketplace: "builtin",
+    displayName: "Word 文档",
+    description: "创建、读取与编辑 Word 文档",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: ["docx"],
+  });
+  const docxOff = plugin({
+    id: "nocturne:off-doc@local",
+    host: "nocturne",
+    name: "off-doc",
+    marketplace: "local",
+    displayName: "未启用插件",
+    state: "off",
+    hooks: [],
+    unsupported: [],
+    skills: ["off-skill"],
+  });
+  const blocked = plugin({
+    id: "nocturne:blocked@local",
+    host: "nocturne",
+    name: "blocked",
+    marketplace: "local",
+    displayName: "不可调用插件",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: ["s-disabled", "s-shadowed", "s-model", "s-conflict"],
+  });
+
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": desc([docxOn, docxOff, blocked]),
+      "skills.describeSkills": skillsDesc([
+        skillOverview({ name: "docx", plugin: "docx@builtin" }),
+        skillOverview({ name: "off-skill", plugin: "off-doc@local" }),
+        skillOverview({ name: "s-disabled", plugin: "blocked@local", enabled: false }),
+        skillOverview({
+          name: "s-shadowed",
+          plugin: "blocked@local",
+          shadowedBy: "/user/skills/s-shadowed/SKILL.md",
+        }),
+        skillOverview({ name: "s-model", plugin: "blocked@local", invocation: "model" }),
+        skillOverview({ name: "s-conflict", plugin: "blocked@local", commandConflict: true }),
+      ]),
+    }),
+  );
+  await f.initialize();
+  const onTrySkill = vi.fn();
+  render(
+    <PluginsPage client={f.client} version={0} openDirectory={vi.fn()} onTrySkill={onTrySkill} />,
+  );
+
+  // 1. on + 可调用技能：显示「立即试用」，点击直接触发
+  fireEvent.click(await screen.findByText("Word 文档"));
+  const tryBtn = await screen.findByRole("button", { name: "立即试用" });
+  fireEvent.click(tryBtn);
+  expect(onTrySkill).toHaveBeenCalledWith("docx");
+
+  // 2. off：不显示「立即试用」
+  fireEvent.click(screen.getByRole("button", { name: "插件" }));
+  fireEvent.click(await screen.findByText("未启用插件"));
+  await screen.findByRole("region", { name: "概况" });
+  expect(screen.queryByRole("button", { name: "立即试用" })).toBeNull();
+
+  // 3. on 但全部技能不可调用（disabled / shadowedBy / model / commandConflict）：不显示
+  fireEvent.click(screen.getByRole("button", { name: "插件" }));
+  fireEvent.click(await screen.findByText("不可调用插件"));
+  await screen.findByRole("region", { name: "概况" });
+  expect(screen.queryByRole("button", { name: "立即试用" })).toBeNull();
+
+  f.close();
+});
+
+it("多技能插件点「立即试用」弹出菜单列可调用技能，选定后触发回调", async () => {
+  const multi = plugin({
+    id: "nocturne:suite@local",
+    host: "nocturne",
+    name: "suite",
+    marketplace: "local",
+    displayName: "多技能套件",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: ["alpha", "beta", "hidden-model"],
+  });
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": desc([multi]),
+      "skills.describeSkills": skillsDesc([
+        skillOverview({ name: "alpha", plugin: "suite@local", invocation: "both" }),
+        skillOverview({ name: "beta", plugin: "suite@local", invocation: "user" }),
+        skillOverview({ name: "hidden-model", plugin: "suite@local", invocation: "model" }),
+      ]),
+    }),
+  );
+  await f.initialize();
+  const onTrySkill = vi.fn();
+  render(
+    <PluginsPage client={f.client} version={0} openDirectory={vi.fn()} onTrySkill={onTrySkill} />,
+  );
+
+  fireEvent.click(await screen.findByText("多技能套件"));
+  fireEvent.click(await screen.findByRole("button", { name: "立即试用" }));
+
+  const menu = await screen.findByRole("menu", { name: "选择技能" });
+  expect(within(menu).getByRole("menuitem", { name: "alpha" })).toBeTruthy();
+  expect(within(menu).getByRole("menuitem", { name: "beta" })).toBeTruthy();
+  expect(within(menu).queryByRole("menuitem", { name: "hidden-model" })).toBeNull();
+
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "beta" }));
+  expect(onTrySkill).toHaveBeenCalledWith("beta");
+  expect(screen.queryByRole("menu")).toBeNull();
+
+  f.close();
+});
+
+it("本地插件卸载确认流程：仅 local 显示卸载；取消不调 RPC；确认后卸载并回列表提示；非 local 不显示", async () => {
+  const localItem = plugin({
+    id: "nocturne:local-kit@local",
+    host: "nocturne",
+    name: "local-kit",
+    marketplace: "local",
+    displayName: "本地工具箱",
+    state: "off",
+    hooks: [],
+    unsupported: [],
+    skills: ["kit"],
+  });
+  const builtinItem = plugin({
+    id: "nocturne:docx@builtin",
+    host: "nocturne",
+    name: "docx",
+    marketplace: "builtin",
+    displayName: "Word 文档",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: ["docx"],
+  });
+  let current: PluginOverview[] = [builtinItem, localItem];
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": () => desc(current),
+      "skills.describeSkills": () => skillsDesc([]),
+      "plugins.uninstallPlugin": (p: Record<string, unknown>) => {
+        current = current.filter((item) => item.id !== p.id);
+        return { affectedSessions: 0 };
+      },
+    }),
+  );
+  await f.initialize();
+  render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+
+  // 内置插件详情页不显示「卸载」
+  fireEvent.click(await screen.findByText("Word 文档"));
+  await screen.findByRole("region", { name: "概况" });
+  expect(screen.queryByRole("button", { name: "卸载" })).toBeNull();
+
+  // 返回列表进入本地插件详情页：显示「卸载」
+  fireEvent.click(screen.getByRole("button", { name: "插件" }));
+  fireEvent.click(await screen.findByText("本地工具箱"));
+  fireEvent.click(await screen.findByRole("button", { name: "卸载" }));
+
+  const dlg = screen.getByRole("dialog", { name: "卸载 本地工具箱？" });
+  expect(dlg.querySelector(".db")).toBeNull();
+  fireEvent.click(within(dlg).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(f.calls.filter((c) => c.method === "plugins.uninstallPlugin")).toHaveLength(0);
+
+  // 确认卸载：调 RPC、回到列表、显示 toast
+  fireEvent.click(screen.getByRole("button", { name: "卸载" }));
+  const dlg2 = screen.getByRole("dialog", { name: "卸载 本地工具箱？" });
+  fireEvent.click(within(dlg2).getByRole("button", { name: "卸载" }));
+
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "✓ 已卸载 本地工具箱");
+  expect(f.calls.find((c) => c.method === "plugins.uninstallPlugin")?.params).toEqual({
+    id: localItem.id,
+  });
+  await waitFor(() => {
+    expect(screen.queryByText("本地工具箱")).toBeNull();
+  });
+
+  f.close();
+});
+
+it("Composer 预填草稿（prefillDraft）：填入 /docx 、光标在末尾并聚焦、无错误且不自动发送", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  const onUsed = vi.fn();
+  render(
+    <Composer
+      variant="draft"
+      running={false}
+      onSubmit={onSubmit}
+      onInterrupt={() => undefined}
+      fileRefs={null}
+      pickImages={() => Promise.resolve([])}
+      onSlash={() => Promise.resolve(false)}
+      prefillDraft={{ text: "/docx ", seq: 1 }}
+      onPrefillDraftUsed={onUsed}
+    />,
+  );
+
+  const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+  await waitFor(() => {
+    expect(box.value).toBe("/docx ");
+  });
+  expect(document.activeElement).toBe(box);
+  expect(box.selectionStart).toBe(6);
+  expect(box.selectionEnd).toBe(6);
+  expect(onUsed).toHaveBeenCalledTimes(1);
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
