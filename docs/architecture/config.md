@@ -267,6 +267,7 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 ```
 
 - 与 `mcp.json`、`external-agents.json` 共用配置写入队列（`enqueueConfigWrite`），先写同目录临时文件再原子 `rename`；非内置插件停用删除对应条目，内置插件（`nocturne:<name>@builtin`）默认开启且不做指纹确认，停用时写 `{ "enabled": false }`，再开启时删除条目。
+- 本地目录安装的插件复制到 `<NOCTURNE_HOME>/plugins/installed/local/<name>/<version>/`（`version` 缺省或不合法时为 `local`）。同名重装时整体替换 `local/<name>/` 并保留 `plugins.json` 记录（内容变化后按指纹进入 `changed`）；卸载时删除 `local/<name>/`、`plugins.json` 记录以及 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/` 下该插件的缓存文件，不动 `plugins/data/`（`PLUGIN_DATA`），删除目录失败时回滚以保证磁盘与 `plugins.json` 一致。
 - 文件损坏或 `version !== 1` 时整份忽略并告警；单个条目无效时仅忽略该条目并告警，不阻塞会话启动。Codex 系统市场（`openai-bundled`、`openai-primary-runtime`）及受支持 Hook、技能、受支持 MCP 服务器三者均为空的插件在发现阶段跳过，其已有记录保持原样不删改。详见 [ADR-0096](../decisions/ADR-0096-hook-context-and-plugins.md)、[ADR-0100](../decisions/ADR-0100-native-plugins.md)。
 
 ## 3. 项目配置的信任模型

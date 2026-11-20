@@ -211,3 +211,15 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
 - **`render` 默认页数与上限**：缺省返回前 4 页，单次调用最多返回 4 张 PNG，与 Nocturne MCP 客户端每次工具调用 4 张图片的附件上限一致；超过 4 页的文档通过 `pages` 参数分批查看。
 - **查找与超时覆盖**：环境变量 `NOCTURNE_OFFICE_SOFFICE` 与 `NOCTURNE_OFFICE_PYTHON` 优先于各平台默认安装路径；`NOCTURNE_OFFICE_IDLE_MS` 与 `NOCTURNE_OFFICE_TIMEOUT_MS` 可覆盖 5 分钟闲置超时与 120 秒单次调用超时。
 
+## 修订：2026-11-20 第三期实现约定
+
+本节记录第三期（插件详情页大图标与「立即试用」、本地目录安装与卸载）的落地约定：
+
+- **方法名**：取代第 5 节中的 `plugins.installLocal` / `plugins.uninstall`，Runtime 与 RPC 统一命名为 `installLocalPlugin({ path })` / `uninstallPlugin({ id })`（对应 RPC 方法 `plugins.installLocalPlugin`、`plugins.uninstallPlugin`），与 `plugins.describePlugins`、`plugins.setPluginEnabled` 保持同一风格；两个方法均不加入远程白名单。
+- **同名重装**：同名本地插件重新安装（不论版本）时，先复制到同级临时目录再原子替换整个 `<NOCTURNE_HOME>/plugins/installed/local/<name>/`，保留 `plugins.json` 中的已有记录；内容变化后按既有整目录指纹规则自动显示为 `changed`，不新增状态规则。新装插件状态为 `off`；复制时跳过 `.git` 与符号链接。
+- **版本目录名**：与 `selectActivePluginVersion` / `isValidPluginVersionDirName` 保持一致——清单 `version` 满足合法版本目录名时直接采用该值，缺省或不合法时采用 `local`。
+- **卸载与缓存清理**：`uninstallPlugin` 仅接受 `host === "nocturne"` 且 `marketplace === "local"` 的插件；先按停用路径让已打开会话在边界生效，再删除 `installed/local/<name>/` 与 `plugins.json` 记录（目录删除失败如被占用时回滚状态，保持磁盘与 `plugins.json` 一致），最后删除 `<NOCTURNE_HOME>/plugins/cache/mcp-tools/` 下属于该插件的缓存文件，不动 `PLUGIN_DATA`。
+- **「立即试用」**：仅在插件状态为 `on` 且至少有一个可调用技能时在详情页 hero 右侧显示；多技能时经菜单选择。点击后在当前工作区新开会话、关闭设置页、向草稿输入框预填 `/<技能名> `（光标置于末尾并聚焦），不自动发送。
+- **入口范围**：一期只在桌面端「设置 › 插件」提供本地安装与卸载入口。
+
+
