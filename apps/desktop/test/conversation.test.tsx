@@ -2091,21 +2091,39 @@ describe("Conversation 渲染与滚动", () => {
     }
   });
 
-  it("思考文案切换动画先出后进：前 100ms 淡出，后 100ms 淡入且延迟期不可见", () => {
+  it("思考文案切换动画同时上下滚动：200ms 同步淡出上移与淡入上移，纵向裁切不改基线", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const css = readFileSync(join(here, "..", "src", "conversation.css"), "utf8");
     const rule = (selector: string) => {
       const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
-      return new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      const body = new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      return body.replace(/\/\*[\s\S]*?\*\//g, "");
     };
-    expect(rule(".conversation .think-phrase-slot")).toMatch(/display:\s*inline-grid/);
+    const keyframes = (name: string) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return (
+        new RegExp(`@keyframes\\s+${escaped}\\s*\\{([\\s\\S]*?\\n\\s*\\})\\s*\\n\\s*\\}`).exec(
+          css,
+        )?.[1] ?? ""
+      );
+    };
+    const slotRule = rule(".conversation .think-phrase-slot");
+    expect(slotRule).toMatch(/display:\s*inline-grid/);
+    expect(slotRule).toMatch(/clip-path:\s*inset\(0\s+-1em\)/);
+    expect(slotRule).not.toMatch(/overflow(?:-y)?:\s*hidden/);
     expect(rule(".conversation .think-phrase-layer")).toMatch(/grid-area:\s*1\s*\/\s*1/);
     expect(rule(":root:not([data-reduce-motion]) .conversation .think-phrase-out")).toMatch(
-      /animation:\s*nct-think-phrase-out\s+100ms\s+var\(--ease-both\)\s+forwards/,
+      /animation:\s*nct-think-phrase-out\s+200ms\s+var\(--ease-both\)\s+forwards/,
     );
     expect(rule(":root:not([data-reduce-motion]) .conversation .think-phrase-in")).toMatch(
-      /animation:\s*nct-think-phrase-in\s+100ms\s+var\(--ease-both\)\s+100ms\s+both/,
+      /animation:\s*nct-think-phrase-in\s+200ms\s+var\(--ease-both\)\s+both/,
     );
+    const outFrames = keyframes("nct-think-phrase-out");
+    expect(outFrames).toMatch(/from\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\)/);
+    expect(outFrames).toMatch(/to\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(-100%\)/);
+    const inFrames = keyframes("nct-think-phrase-in");
+    expect(inFrames).toMatch(/from\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(100%\)/);
+    expect(inFrames).toMatch(/to\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\)/);
     const parentReset = rule(
       ":root:not([data-reduce-motion]) .conversation .think .think-label.shim:has(.think-phrase-slot)",
     );

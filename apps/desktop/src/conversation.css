@@ -407,10 +407,12 @@
   min-width: 0;
   white-space: nowrap;
 }
+/* 纵向裁到单行高度且不改变 inline-grid 基线，水平留余量避免裁字和流光 */
 .conversation .think-phrase-slot {
   display: inline-grid;
   vertical-align: baseline;
   white-space: nowrap;
+  clip-path: inset(0 -1em);
 }
 .conversation .think-phrase-layer {
   grid-area: 1 / 1;
@@ -795,25 +797,29 @@
     color: inherit;
   }
   :root:not([data-reduce-motion]) .conversation .think-phrase-in {
-    animation: nct-think-phrase-in 100ms var(--ease-both) 100ms both;
+    animation: nct-think-phrase-in 200ms var(--ease-both) both;
   }
   :root:not([data-reduce-motion]) .conversation .think-phrase-out {
-    animation: nct-think-phrase-out 100ms var(--ease-both) forwards;
+    animation: nct-think-phrase-out 200ms var(--ease-both) forwards;
   }
   @keyframes nct-think-phrase-in {
     from {
       opacity: 0;
+      transform: translateY(100%);
     }
     to {
       opacity: 1;
+      transform: translateY(0);
     }
   }
   @keyframes nct-think-phrase-out {
     from {
       opacity: 1;
+      transform: translateY(0);
     }
     to {
       opacity: 0;
+      transform: translateY(-100%);
     }
   }
 }
