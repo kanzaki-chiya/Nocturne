@@ -17,6 +17,7 @@ import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/co
 import type {
   ApplicationTarget,
   PermissionReply,
+  SessionAppSurface,
   SubagentPendingPermission,
   SubagentSummary,
   ToolEntry,
@@ -28,6 +29,8 @@ import type { AttachmentImageSource } from "./attachment-images";
 import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
 import { AgentBrowserPane } from "./AgentBrowserPane";
+import { AppPane } from "./AppPane";
+import type { McpAppToolDelivery } from "./mcp-app-host";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody, diffCounts, type FileLinkHooks } from "./Conversation";
@@ -50,6 +53,7 @@ import {
   nativeSeparators,
   projectFits,
   subagentTabName,
+  type AppTab,
   type ChangeFile,
   type ChangeItem,
   type ChangeTreeDir,
@@ -185,6 +189,26 @@ export interface SidePanelProps {
   suite?: PanelSuite | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
   agents?: PanelAgents | undefined;
+  /** 插件 MCP App 面板标签与新标签页 surface（ADR-0101） */
+  apps?: PanelApps | undefined;
+}
+
+export interface PanelApps {
+  sessionId: string;
+  session: RpcSession | undefined;
+  surfaces: readonly SessionAppSurface[];
+  onOpenSurface: (surface: SessionAppSurface) => void;
+  deliveryFor: (tab: AppTab) => McpAppToolDelivery | undefined;
+  openCallSeqFor?: ((tab: AppTab) => number | undefined) | undefined;
+  resolveMeta: (tab: AppTab) => {
+    title: string;
+    icon?: string | undefined;
+    disabled?: boolean | undefined;
+  };
+  onAppMessage: (sessionId: string, text: string) => void;
+  openExternalUrl: (url: string) => Promise<void>;
+  onDiagnosticLog?: ((message: string) => void) | undefined;
+  registerTeardown: (tabId: string, fn: (reason: string) => Promise<void>) => () => void;
 }
 
 export interface PanelSuite {
@@ -239,7 +263,16 @@ function Glyph({
   kind,
 }: {
   kind:
-    "changes" | "file" | "terminal" | "globe" | "plus" | "close" | "agent" | "ensemble" | "suite";
+    | "changes"
+    | "file"
+    | "terminal"
+    | "globe"
+    | "plus"
+    | "close"
+    | "agent"
+    | "ensemble"
+    | "suite"
+    | "plugin";
 }) {
   const names: Record<typeof kind, IconName> = {
     changes: "git_commit",
@@ -249,6 +282,7 @@ function Glyph({
     agent: "robot",
     ensemble: "group",
     suite: "layout",
+    plugin: "box_3",
     plus: "add",
     close: "close",
   };
@@ -261,9 +295,14 @@ function tabTitle(
   tab: PanelTab,
   ensembleTitle?: string,
   suiteThreads?: readonly SuiteThreadView[],
+  resolveAppTitle?: (tab: AppTab) => string,
 ): { name: string; project?: string; title: string } {
   if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
+  if (tab.kind === "app") {
+    const name = resolveAppTitle?.(tab) ?? tab.title;
+    return { name, title: name };
+  }
   if (tab.kind === "ensemble") {
     const name = ensembleTitle !== undefined && ensembleTitle !== "" ? ensembleTitle : "合奏";
     return { name, title: name };
@@ -361,10 +400,12 @@ function TabBar(props: SidePanelProps) {
     <div className="sp-tabbar">
       <div className="sp-tabs" role="tablist" aria-label="面板标签" ref={bar}>
         {tabs.map((tab) => {
+          const appMeta = tab.kind === "app" ? props.apps?.resolveMeta(tab) : undefined;
           const { name, project, title } = tabTitle(
             tab,
             props.ensemble?.ensemble?.title,
             props.suite?.suiteView?.threads,
+            (appTab) => props.apps?.resolveMeta(appTab).title ?? appTab.title,
           );
           const active = tab.id === activeId;
           const ensembleDot =
@@ -443,6 +484,12 @@ function TabBar(props: SidePanelProps) {
                 <Glyph kind="agent" />
               ) : tab.kind === "browser" && props.browsers !== undefined ? (
                 <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
+              ) : tab.kind === "app" ? (
+                (appMeta?.icon ?? tab.icon) !== undefined ? (
+                  <img src={appMeta?.icon ?? tab.icon} alt="" className="sp-plugin-icon" />
+                ) : (
+                  <Glyph kind="plugin" />
+                )
               ) : (
                 <Glyph
                   kind={
@@ -509,12 +556,16 @@ function NewTabPage({
   canOpenFiles,
   hasSession,
   hasTerminal,
+  appSurfaces,
+  onOpenAppSurface,
 }: Pick<
   SidePanelProps,
   "onOpenChanges" | "onQuickOpen" | "onOpenTerminal" | "onAddress" | "canOpenFiles"
 > & {
   hasSession: boolean;
   hasTerminal: boolean;
+  appSurfaces?: readonly SessionAppSurface[] | undefined;
+  onOpenAppSurface?: ((surface: SessionAppSurface) => void) | undefined;
 }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string>();
@@ -600,6 +651,26 @@ function NewTabPage({
               </span>
             </span>
           </button>
+          {(appSurfaces ?? []).map((surface) => (
+            <button
+              key={`${surface.pluginId}:${surface.id}`}
+              type="button"
+              className="sp-tool"
+              disabled={!hasSession}
+              onClick={() => onOpenAppSurface?.(surface)}
+            >
+              {surface.icon !== undefined ? (
+                <img src={surface.icon} alt="" className="sp-plugin-icon" />
+              ) : (
+                <Glyph kind="plugin" />
+              )}
+              <span className="sp-tool-text">
+                <span className="sp-tool-head">
+                  <span className="sp-tool-name">{surface.title}</span>
+                </span>
+              </span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -1444,7 +1515,27 @@ export function SidePanel(props: SidePanelProps) {
                     canOpenFiles={props.canOpenFiles}
                     hasSession={changes !== undefined}
                     hasTerminal={props.terminals !== undefined}
+                    appSurfaces={props.apps?.surfaces}
+                    onOpenAppSurface={props.apps?.onOpenSurface}
                   />
+                ) : tab.kind === "app" ? (
+                  props.apps === undefined ? (
+                    <div className="sp-app-pane" />
+                  ) : (
+                    <AppPane
+                      tab={{ ...tab, title: props.apps.resolveMeta(tab).title }}
+                      sessionId={props.apps.sessionId}
+                      session={props.apps.session}
+                      visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                      delivery={props.apps.deliveryFor(tab)}
+                      openCallSeq={props.apps.openCallSeqFor?.(tab)}
+                      pluginDisabled={props.apps.resolveMeta(tab).disabled}
+                      onAppMessage={props.apps.onAppMessage}
+                      openExternalUrl={props.apps.openExternalUrl}
+                      onDiagnosticLog={props.apps.onDiagnosticLog}
+                      registerTeardown={props.apps.registerTeardown}
+                    />
+                  )
                 ) : tab.kind === "changes" ? (
                   <ChangesView
                     tab={tab}

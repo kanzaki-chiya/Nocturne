@@ -489,6 +489,15 @@ export function PluginsPage({
                     </>
                   </SettingsRow>
                 </SettingsGroup>
+                {(plugin.surfaces?.length ?? 0) > 0 && (
+                  <SettingsGroup title="面板" plain count={plugin.surfaces?.length ?? 0}>
+                    <div className="chips">
+                      {(plugin.surfaces ?? []).map((surface) => (
+                        <span key={surface.id}>{surface.title}</span>
+                      ))}
+                    </div>
+                  </SettingsGroup>
+                )}
                 {plugin.hooks.length > 0 && (
                   <SettingsGroup title="Hook" plain count={plugin.hooks.length}>
                     <PluginHookList hooks={plugin.hooks} />

@@ -19,8 +19,11 @@ import type {
   ApplicationTarget,
   BackgroundShellTask,
   LocalFileContent,
+  PluginOverview,
+  SessionAppSurface,
   SubagentSummary,
   SuiteRecord,
+  ToolCompletedPayload,
   TurnChangeDiff,
   UpdateSuiteInput,
 } from "@nocturne/core/protocol";
@@ -40,6 +43,11 @@ import type { FileLinkHooks, SubagentLinks } from "./Conversation";
 import type { OpenConversation } from "./conversations";
 import type { BrowserBounds, DesktopHost } from "./host";
 import { keyDiag, panelKeyReason, shouldRecordKey } from "./key-diag";
+import {
+  deliveryFromToolCompleted,
+  matchSurfaceForFile,
+  type McpAppToolDelivery,
+} from "./mcp-app-host";
 import { motionAllowed, subscribeMotionChange } from "./motion";
 import { ConfirmDialog } from "./ProvidersPage";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
@@ -47,6 +55,7 @@ import type { PrefsStore } from "./prefs";
 import { projectKey, projectName } from "./session-tree";
 import { SidePanel, type PanelChangesSource, type TerminalShellChoice } from "./SidePanel";
 import {
+  appTabKey,
   browserTabShowing,
   clampPanelWidth,
   clampTreeWidth,
@@ -67,6 +76,7 @@ import {
   storeSessionPanel,
   subagentTabFor,
   vanishedSessions,
+  type AppTab,
   type BrowserTab,
   type FileTab,
   type PanelTab,
@@ -155,6 +165,14 @@ export interface SidePanelController {
     thread: { threadId: string; childSessionId: string; title: string },
     targetSessionId?: string,
   ) => void;
+  /** 打开或切换到当前会话的某个插件 surface 标签（ADR-0101 第 5 节） */
+  openAppSurface: (surface: SessionAppSurface) => void;
+  /** 实时收到带 ui 的 tool.completed 时打开/切换对应会话的插件标签并投递参数与结果 */
+  onToolCompletedUi: (
+    targetSessionId: string,
+    payload: ToolCompletedPayload,
+    toolInput: unknown,
+  ) => void;
   /** 对话里 task 行的「在面板中查看」；没有连着后台时 undefined（不显示按钮） */
   subagentLinks: SubagentLinks | undefined;
   bodyClass: string;
@@ -191,6 +209,8 @@ export function useSidePanel({
   suitesVersion,
   onUpdateSuite,
   openDirectory,
+  providersVersion,
+  onAppMessage,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
@@ -223,6 +243,8 @@ export function useSidePanel({
   suitesVersion?: number | undefined;
   onUpdateSuite?: ((input: UpdateSuiteInput) => Promise<SuiteRecord>) | undefined;
   openDirectory?: ((path: string) => Promise<void>) | undefined;
+  providersVersion?: number | undefined;
+  onAppMessage?: ((sessionId: string, text: string) => void) | undefined;
 }): SidePanelController {
   const [width, setWidth] = useState(() => prefs.get().panelWidth ?? PANEL_DEFAULT_WIDTH);
   const [overview, setOverview] = useState(() => prefs.get().overviewOpen === true);
@@ -616,6 +638,221 @@ export function useSidePanel({
       return { ...panel, tabs: next, activeId: id, open: true };
     });
   }, [update]);
+  // ── MCP Apps 插件面板状态（ADR-0101 第 5、6 节） ──
+  const [appSurfaces, setAppSurfaces] = useState<SessionAppSurface[]>([]);
+  const appSurfacesRef = useRef<SessionAppSurface[]>([]);
+  appSurfacesRef.current = appSurfaces;
+  const [pluginsById, setPluginsById] = useState<ReadonlyMap<string, PluginOverview> | null>(null);
+  const pluginsByIdRef = useRef<ReadonlyMap<string, PluginOverview> | null>(null);
+  pluginsByIdRef.current = pluginsById;
+  const [appDeliveries, setAppDeliveries] = useState<ReadonlyMap<string, McpAppToolDelivery>>(
+    () => new Map(),
+  );
+  const [appOpenSeqs, setAppOpenSeqs] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const appDeliverySeqRef = useRef(1);
+  const appTeardownsRef = useRef(new Map<string, (reason: string) => Promise<void>>());
+  const registerAppTeardown = useCallback(
+    (tabId: string, fn: (reason: string) => Promise<void>) => {
+      appTeardownsRef.current.set(tabId, fn);
+      return () => {
+        if (appTeardownsRef.current.get(tabId) === fn) {
+          appTeardownsRef.current.delete(tabId);
+        }
+      };
+    },
+    [],
+  );
+
+  // 会话切换、插件配置变更或离开设置页时刷新当前会话可用 surface 与插件状态
+  const activeSession = active?.session;
+  useEffect(() => {
+    if (activeSession === undefined || settingsOpen) {
+      if (activeSession === undefined) {
+        setAppSurfaces((prev) => (prev.length === 0 ? prev : []));
+      }
+      return;
+    }
+    let alive = true;
+    if (typeof activeSession.listAppSurfaces === "function") {
+      void activeSession
+        .listAppSurfaces()
+        .then((list) => {
+          if (alive) setAppSurfaces(list);
+        })
+        .catch(() => {
+          if (alive) setAppSurfaces((prev) => (prev.length === 0 ? prev : []));
+        });
+    } else {
+      setAppSurfaces((prev) => (prev.length === 0 ? prev : []));
+    }
+    if (client !== undefined && typeof client.runtime.describePlugins === "function") {
+      void client.runtime
+        .describePlugins()
+        .then((desc) => {
+          if (alive) setPluginsById(new Map(desc.plugins.map((p) => [p.id, p])));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [activeSession, client, providersVersion, settingsOpen]);
+
+  const resolveAppTabMeta = useCallback(
+    (
+      tab: Pick<AppTab, "pluginId" | "surface" | "resourceUri" | "title" | "icon">,
+    ): { title: string; icon?: string | undefined; disabled?: boolean | undefined } => {
+      const matched = appSurfaces.find(
+        (s) =>
+          s.pluginId === tab.pluginId &&
+          (tab.surface !== undefined ? s.id === tab.surface : s.resourceUri === tab.resourceUri),
+      );
+      const plugin = pluginsById?.get(tab.pluginId);
+      const title =
+        matched?.title ??
+        (tab.surface !== undefined
+          ? plugin?.surfaces?.find((s) => s.id === tab.surface)?.title
+          : undefined) ??
+        plugin?.displayName ??
+        plugin?.name ??
+        tab.title;
+      const icon = matched?.icon ?? plugin?.icon ?? tab.icon;
+      const disabled = pluginsById !== null ? plugin?.state !== "on" : undefined;
+      return {
+        title,
+        ...(icon !== undefined ? { icon } : {}),
+        ...(disabled !== undefined ? { disabled } : {}),
+      };
+    },
+    [appSurfaces, pluginsById],
+  );
+
+  const openAppSurface = useCallback(
+    (surface: SessionAppSurface) => {
+      const targetKey = appTabKey({
+        pluginId: surface.pluginId,
+        surface: surface.id,
+        resourceUri: surface.resourceUri,
+      });
+      hideBrowserThen(() => {
+        update((panel) => {
+          const existing = panel.tabs.find(
+            (t): t is AppTab => t.kind === "app" && appTabKey(t) === targetKey,
+          );
+          if (existing !== undefined) {
+            return {
+              ...panel,
+              open: true,
+              activeId: existing.id,
+              tabs: panel.tabs.map((t) =>
+                t.id === existing.id
+                  ? {
+                      ...existing,
+                      serverId: surface.serverId,
+                      resourceUri: surface.resourceUri,
+                      title: surface.title,
+                      ...(surface.icon !== undefined ? { icon: surface.icon } : {}),
+                    }
+                  : t,
+              ),
+            };
+          }
+          const created: AppTab = {
+            id: newTabId(),
+            kind: "app",
+            pluginId: surface.pluginId,
+            serverId: surface.serverId,
+            surface: surface.id,
+            resourceUri: surface.resourceUri,
+            title: surface.title,
+            ...(surface.icon !== undefined ? { icon: surface.icon } : {}),
+          };
+          return withTab(panel, created);
+        });
+      });
+    },
+    [hideBrowserThen, update],
+  );
+
+  const onToolCompletedUi = useCallback<SidePanelController["onToolCompletedUi"]>(
+    (targetSessionId, payload, toolInput) => {
+      const ui = payload.ui;
+      if (ui === undefined) return;
+      const surfaces = appSurfacesRef.current;
+      const plugins = pluginsByIdRef.current;
+      const matched = surfaces.find(
+        (s) =>
+          s.pluginId === ui.pluginId &&
+          (ui.surface !== undefined ? s.id === ui.surface : s.resourceUri === ui.resourceUri),
+      );
+      const plugin = plugins?.get(ui.pluginId);
+      const title =
+        matched?.title ??
+        (ui.surface !== undefined
+          ? plugin?.surfaces?.find((s) => s.id === ui.surface)?.title
+          : undefined) ??
+        plugin?.displayName ??
+        plugin?.name ??
+        ui.surface ??
+        ui.pluginId;
+      const icon = matched?.icon ?? plugin?.icon;
+      const targetKey = appTabKey({
+        pluginId: ui.pluginId,
+        surface: ui.surface,
+        resourceUri: ui.resourceUri,
+      });
+      const deliveryKey = `${targetSessionId}\0${targetKey}`;
+      const seq = appDeliverySeqRef.current++;
+      const delivery = deliveryFromToolCompleted(payload, toolInput, seq);
+      const isCurrent = targetSessionId === sessionId;
+      const applyTo = (panel: SessionPanel): SessionPanel => {
+        const existing = panel.tabs.find(
+          (t): t is AppTab => t.kind === "app" && appTabKey(t) === targetKey,
+        );
+        if (existing !== undefined) {
+          return {
+            ...panel,
+            open: isCurrent ? true : panel.open,
+            activeId: existing.id,
+            tabs: panel.tabs.map((t) =>
+              t.id === existing.id
+                ? {
+                    ...existing,
+                    serverId: ui.serverId,
+                    resourceUri: ui.resourceUri,
+                    title,
+                    ...(icon !== undefined ? { icon } : {}),
+                  }
+                : t,
+            ),
+          };
+        }
+        const created: AppTab = {
+          id: newTabId(),
+          kind: "app",
+          pluginId: ui.pluginId,
+          serverId: ui.serverId,
+          ...(ui.surface !== undefined ? { surface: ui.surface } : {}),
+          resourceUri: ui.resourceUri,
+          title,
+          ...(icon !== undefined ? { icon } : {}),
+        };
+        const next = withTab(panel, created);
+        return isCurrent ? next : { ...next, open: panel.open };
+      };
+      const commit = () => {
+        setPanels((map) => {
+          const nextPanel = applyTo(panelFor(targetSessionId, map));
+          return new Map(map).set(targetSessionId, nextPanel);
+        });
+        setAppDeliveries((prev) => new Map(prev).set(deliveryKey, delivery));
+      };
+      if (isCurrent) hideBrowserThen(commit);
+      else commit();
+    },
+    [sessionId, hideBrowserThen, panelFor],
+  );
+
   const closeTab = useCallback(
     (id: string) => {
       const closing = tabs.find((t) => t.id === id);
@@ -628,6 +865,21 @@ export function useSidePanel({
         void agents.control(closing.agent.tabId, "close");
       }
       const apply = () => {
+        if (closing?.kind === "app" && sessionId !== null) {
+          const key = `${sessionId}\0${appTabKey(closing)}`;
+          setAppDeliveries((prev) => {
+            if (!prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.delete(key);
+            return next;
+          });
+          setAppOpenSeqs((prev) => {
+            if (!prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.delete(key);
+            return next;
+          });
+        }
         update((panel) => {
           const rest = panel.tabs.filter((t) => t.id !== id);
           if (rest.length === 0) {
@@ -642,6 +894,16 @@ export function useSidePanel({
           };
         });
       };
+      if (closing?.kind === "app") {
+        const teardown = appTeardownsRef.current.get(id);
+        if (teardown !== undefined) {
+          void teardown("tab-closed").finally(() => {
+            if (id === activeTabRef.current) hideBrowserThen(apply);
+            else apply();
+          });
+          return;
+        }
+      }
       if (id === activeTabRef.current) hideBrowserThen(apply);
       else apply();
     },
@@ -766,6 +1028,58 @@ export function useSidePanel({
   );
   const openFile = useCallback<SidePanelController["openFile"]>(
     (absolutePath, line, ref) => {
+      const matched = matchSurfaceForFile(appSurfacesRef.current, absolutePath);
+      if (matched?.open !== undefined && activeSession !== undefined && sessionId !== null) {
+        const openTool = matched.open.tool;
+        const openArgs: Record<string, unknown> = { path: absolutePath };
+        const targetKey = appTabKey({
+          pluginId: matched.pluginId,
+          surface: matched.id,
+          resourceUri: matched.resourceUri,
+        });
+        const deliveryKey = `${sessionId}\0${targetKey}`;
+        const openSeq = appDeliverySeqRef.current++;
+        hideBrowserThen(() => {
+          update((panel) => {
+            const existing = panel.tabs.find(
+              (t): t is AppTab => t.kind === "app" && appTabKey(t) === targetKey,
+            );
+            if (existing !== undefined) {
+              return {
+                ...panel,
+                open: true,
+                activeId: existing.id,
+                tabs: panel.tabs.map((t) =>
+                  t.id === existing.id
+                    ? {
+                        ...existing,
+                        serverId: matched.serverId,
+                        resourceUri: matched.resourceUri,
+                        title: matched.title,
+                        ...(matched.icon !== undefined ? { icon: matched.icon } : {}),
+                        openCall: { tool: openTool, arguments: openArgs },
+                      }
+                    : t,
+                ),
+              };
+            }
+            const created: AppTab = {
+              id: newTabId(),
+              kind: "app",
+              pluginId: matched.pluginId,
+              serverId: matched.serverId,
+              surface: matched.id,
+              resourceUri: matched.resourceUri,
+              title: matched.title,
+              ...(matched.icon !== undefined ? { icon: matched.icon } : {}),
+              openCall: { tool: openTool, arguments: openArgs },
+            };
+            return withTab(panel, created);
+          });
+          setAppOpenSeqs((prev) => new Map(prev).set(deliveryKey, openSeq));
+        });
+        return;
+      }
       if (previewsHtml(absolutePath)) {
         openHtml(absolutePath);
         return;
@@ -776,7 +1090,16 @@ export function useSidePanel({
           : undefined;
       openFileTab({ absolutePath, workspace, line, endLine: ref?.endLine });
     },
-    [currentWorkspace, openFileTab, previewsHtml, openHtml],
+    [
+      activeSession,
+      currentWorkspace,
+      hideBrowserThen,
+      openFileTab,
+      openHtml,
+      previewsHtml,
+      sessionId,
+      update,
+    ],
   );
 
   // ── 子代理（ADR-0060 第 6 节与修订（五））──
@@ -1669,6 +1992,27 @@ export function useSidePanel({
               },
             }
       }
+      apps={
+        sessionId === null
+          ? undefined
+          : {
+              sessionId,
+              session: active?.session,
+              surfaces: appSurfaces,
+              onOpenSurface: openAppSurface,
+              deliveryFor: (tab) => appDeliveries.get(`${sessionId}\0${appTabKey(tab)}`),
+              openCallSeqFor: (tab) => appOpenSeqs.get(`${sessionId}\0${appTabKey(tab)}`),
+              resolveMeta: resolveAppTabMeta,
+              onAppMessage: (targetSessionId, text) => {
+                onAppMessage?.(targetSessionId, text);
+              },
+              openExternalUrl,
+              onDiagnosticLog: (message) => {
+                host.note(message);
+              },
+              registerTeardown: registerAppTeardown,
+            }
+      }
     />
   );
 
@@ -1777,6 +2121,8 @@ export function useSidePanel({
     openEnsembleMember,
     openSuite,
     openSuiteThread,
+    openAppSurface,
+    onToolCompletedUi,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",
     mainClass: overviewVisible && !shown ? " ov-open" : "",

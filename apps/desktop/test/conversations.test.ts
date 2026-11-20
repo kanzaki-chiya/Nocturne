@@ -761,6 +761,57 @@ describe("desktop conversation lifecycle", () => {
     await vi.waitFor(() => expect(seen.some((s) => s.type === "turn.completed")).toBe(true));
     expect(seen.filter((s) => s.type === "turn.completed").every((s) => s.live)).toBe(true);
   });
+
+  it("历史重放的 tool.completed（带 ui）判 live=false 不打开 app 标签，实时到达的判 live=true 才打开", async () => {
+    const openedUiCalls: string[] = [];
+    const onEvent = (_id: string, event: RuntimeEvent, live: boolean) => {
+      if (live && event.type === "tool.completed" && event.payload.ui !== undefined) {
+        openedUiCalls.push(event.payload.callId);
+      }
+    };
+    const f = fixture(undefined, false, undefined, undefined, undefined, onEvent, new Set(["a"]));
+    const opening = f.controller.open("a", "project-a");
+    await vi.waitFor(() =>
+      expect(
+        f.calls.some((c) => c.method === "session.subscribe" && c.params.sessionId === "a"),
+      ).toBe(true),
+    );
+
+    const ui = {
+      pluginId: "nocturne:mcp-apps-demo@builtin",
+      serverId: "demo",
+      resourceUri: "ui://demo/viewer.html",
+      surface: "demo-viewer",
+    };
+    // 历史重放（time 远早于订阅起始）→ live=false，不触发打开标签
+    f.event("a", "tool.completed", {
+      callId: "replay-ui-call",
+      name: "mcp__demo__show_demo",
+      status: "ok",
+      modelContent: "old",
+      durationMs: 10,
+      ui,
+    });
+    f.releaseSubscribe("a");
+    await opening;
+    expect(openedUiCalls).toEqual([]);
+
+    // 订阅完成后的实时事件 → live=true，触发打开标签
+    f.event(
+      "a",
+      "tool.completed",
+      {
+        callId: "live-ui-call",
+        name: "mcp__demo__show_demo",
+        status: "ok",
+        modelContent: "new",
+        durationMs: 10,
+        ui,
+      },
+      new Date().toISOString(),
+    );
+    await vi.waitFor(() => expect(openedUiCalls).toEqual(["live-ui-call"]));
+  });
 });
 
 describe("send 接受语义与创建选项", () => {

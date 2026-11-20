@@ -347,6 +347,25 @@ export function App({ host }: { host: DesktopHost }) {
   } | null>(null);
   /** 不带错误的草稿预填（插件详情「立即试用」） */
   const [draftPrefill, setDraftPrefill] = useState<{ text: string; seq: number } | null>(null);
+  /** 插件页面 ui/message 写入对应会话输入框草稿（ADR-0101 第 6 节） */
+  const appDraftSeqRef = useRef(1);
+  const [appDrafts, setAppDrafts] = useState<
+    ReadonlyMap<string, { text: string; seq: number; append: true }>
+  >(() => new Map());
+  const onAppMessage = useCallback((targetSessionId: string, text: string) => {
+    setAppDrafts((prev) => {
+      const existing = prev.get(targetSessionId);
+      const merged =
+        existing !== undefined && existing.text !== ""
+          ? `${existing.text}${/\s$/.test(existing.text) ? "" : "\n"}${text}`
+          : text;
+      return new Map(prev).set(targetSessionId, {
+        text: merged,
+        seq: appDraftSeqRef.current++,
+        append: true,
+      });
+    });
+  }, []);
   /** 已有会话在换模型卡片盖住输入框时被拒，卡片关掉后放回 */
   const [sessionRestore, setSessionRestore] = useState<{
     id: string;
@@ -563,6 +582,19 @@ export function App({ host }: { host: DesktopHost }) {
   const onSessionEvent = useCallback(
     (sessionId: string, event: RuntimeEvent, live: boolean) => {
       const state = notifyState.current;
+      if (live && event.type === "tool.completed" && event.payload.ui !== undefined) {
+        const entry = conversations.opened.get(sessionId);
+        const toolEntry = entry?.view.entries.find(
+          (item) => item.kind === "tool" && item.callId === event.payload.callId,
+        );
+        const toolInput =
+          toolEntry?.kind === "tool"
+            ? toolEntry.target !== undefined
+              ? toolEntry.target.input
+              : toolEntry.input
+            : undefined;
+        panelRef.current?.onToolCompletedUi(sessionId, event.payload, toolInput);
+      }
       if (event.type === "turn.started") {
         const started = Date.parse(event.time);
         if (!Number.isNaN(started)) state.turnStarts.set(sessionId, started);
@@ -1706,6 +1738,8 @@ export function App({ host }: { host: DesktopHost }) {
       return updated;
     },
     openDirectory: (path) => host.revealItem(path),
+    providersVersion,
+    onAppMessage,
   });
   panelRef.current = sidePanel;
   // 有活着的 agent 标签的会话不随空闲关闭；标签都关了再按原规则关
@@ -2548,6 +2582,16 @@ export function App({ host }: { host: DesktopHost }) {
                     setForkDraft(null);
                     if (sessionRestore?.id === active.session.id) setSessionRestore(null);
                   }}
+                  prefillDraft={appDrafts.get(active.session.id) ?? null}
+                  onPrefillDraftUsed={() => {
+                    const id = active.session.id;
+                    setAppDrafts((prev) => {
+                      if (!prev.has(id)) return prev;
+                      const next = new Map(prev);
+                      next.delete(id);
+                      return next;
+                    });
+                  }}
                   onApprovePlan={() => {
                     conversations.approvePlan();
                   }}
@@ -2922,6 +2966,8 @@ interface SessionPaneProps {
   initialWorkMode?: WorkModeName | undefined;
   initialError?: string | undefined;
   onInitialDraftUsed: () => void;
+  prefillDraft?: { text: string; seq: number; append?: boolean | undefined } | null | undefined;
+  onPrefillDraftUsed?: (() => void) | undefined;
   outgoing: OutgoingBook;
   onApprovePlan: () => void;
   turnChanges: ReadonlyMap<number, TurnChanges>;
@@ -3001,6 +3047,8 @@ function SessionPane({
   initialWorkMode,
   initialError,
   onInitialDraftUsed,
+  prefillDraft,
+  onPrefillDraftUsed,
   outgoing,
   onApprovePlan,
   turnChanges,
@@ -3213,6 +3261,8 @@ function SessionPane({
         initialWorkMode={initialWorkMode}
         initialError={initialError}
         onInitialDraftUsed={onInitialDraftUsed}
+        prefillDraft={prefillDraft}
+        onPrefillDraftUsed={onPrefillDraftUsed}
         readInputHistory={() => session.readInputHistory()}
         fileRefs={
           isPlain

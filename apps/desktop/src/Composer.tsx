@@ -177,7 +177,7 @@ export interface ComposerProps {
   initialError?: string | undefined;
   onInitialDraftUsed?: (() => void) | undefined;
   /** 外部预填草稿（如插件「立即试用」）：无错误提示，填入后光标置于末尾并聚焦 */
-  prefillDraft?: { text: string; seq: number } | null | undefined;
+  prefillDraft?: { text: string; seq: number; append?: boolean | undefined } | null | undefined;
   onPrefillDraftUsed?: (() => void) | undefined;
   readInputHistory?: () => Promise<string[]>;
   /** 父层从当前会话引用记录，因而首次输入创建会话后也能写入历史。 */
@@ -493,7 +493,11 @@ export function Composer({
   useEffect(() => {
     if (prefillDraft == null || appliedPrefillSeq.current === prefillDraft.seq) return;
     appliedPrefillSeq.current = prefillDraft.seq;
-    const text = prefillDraft.text;
+    const prev = draftRef.current;
+    const text =
+      prefillDraft.append === true && prev !== ""
+        ? `${prev}${/\s$/.test(prev) ? "" : "\n"}${prefillDraft.text}`
+        : prefillDraft.text;
     const pos = text.length;
     pendingCaret.current = pos;
     revision.current += 1;

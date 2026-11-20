@@ -14,6 +14,7 @@ use tauri::http::{header, Method, Request, Response, StatusCode};
 pub const SANDBOX_SCHEME: &str = "nct-sandbox";
 
 const SANDBOX_HTML: &str = include_str!("../../public-web/sandbox.html");
+const APP_HTML: &str = include_str!("../../public-web/app.html");
 
 #[cfg(debug_assertions)]
 const FRAME_ANCESTORS: &str =
@@ -28,13 +29,26 @@ pub fn sandbox_csp() -> String {
     )
 }
 
+pub fn app_sandbox_csp() -> String {
+    format!(
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; {FRAME_ANCESTORS}; sandbox allow-scripts"
+    )
+}
+
 pub fn handle_request(request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let method = request.method();
     let uri = request.uri();
-    if (method != Method::GET && method != Method::HEAD)
-        || uri.path() != "/sandbox.html"
-        || uri.query().is_some()
-    {
+    let target = if (method == Method::GET || method == Method::HEAD) && uri.query().is_none() {
+        match uri.path() {
+            "/sandbox.html" => Some((SANDBOX_HTML, sandbox_csp())),
+            "/app.html" => Some((APP_HTML, app_sandbox_csp())),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let Some((html, csp)) = target else {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
@@ -42,18 +56,18 @@ pub fn handle_request(request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
             .header("X-Content-Type-Options", "nosniff")
             .body(Vec::new())
             .expect("static 404 response headers are valid");
-    }
+    };
 
     let body = if method == Method::HEAD {
         Vec::new()
     } else {
-        SANDBOX_HTML.as_bytes().to_vec()
+        html.as_bytes().to_vec()
     };
 
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(header::CONTENT_SECURITY_POLICY, sandbox_csp())
+        .header(header::CONTENT_SECURITY_POLICY, csp)
         .header(header::CACHE_CONTROL, "no-store")
         .header("X-Content-Type-Options", "nosniff")
         .body(body)
@@ -226,6 +240,40 @@ mod tests {
     }
 
     #[test]
+    fn serves_app_html_with_strict_mcp_app_csp_on_exact_path() {
+        let res = handle_request(&build_req(
+            Method::GET,
+            "http://nct-sandbox.localhost/app.html",
+        ));
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
+        let csp = res
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(csp, app_sandbox_csp());
+        assert!(csp.contains("default-src 'none'"));
+        assert!(csp.contains("script-src 'unsafe-inline'"));
+        assert!(csp.contains("style-src 'unsafe-inline'"));
+        assert!(csp.contains("img-src data: blob:"));
+        assert!(csp.contains("font-src data:"));
+        assert!(csp.contains("media-src data: blob:"));
+        assert!(csp.contains("connect-src 'none'"));
+        assert!(csp.contains("frame-src 'none'"));
+        assert!(csp.contains("base-uri 'none'"));
+        assert!(csp.contains("form-action 'none'"));
+        assert!(csp.contains("frame-ancestors http://tauri.localhost tauri://localhost"));
+        assert!(csp.contains("sandbox allow-scripts"));
+        assert!(!csp.contains("allow-same-origin"));
+        assert!(String::from_utf8_lossy(res.body()).contains("nocturne:mcp-app:ready"));
+    }
+
+    #[test]
     fn rejects_other_paths_queries_and_methods_with_404() {
         for (method, uri) in [
             (Method::GET, "http://nct-sandbox.localhost/"),
@@ -233,6 +281,11 @@ mod tests {
             (Method::GET, "http://nct-sandbox.localhost/sandbox.html?x=1"),
             (Method::GET, "http://nct-sandbox.localhost/../sandbox.html"),
             (Method::POST, "http://nct-sandbox.localhost/sandbox.html"),
+            (Method::GET, "http://nct-sandbox.localhost/app.html?x=1"),
+            (Method::GET, "http://nct-sandbox.localhost/APP.html"),
+            (Method::GET, "http://nct-sandbox.localhost/app.html/extra"),
+            (Method::GET, "http://nct-sandbox.localhost/../app.html"),
+            (Method::POST, "http://nct-sandbox.localhost/app.html"),
         ] {
             let res = handle_request(&build_req(method, uri));
             assert_eq!(res.status(), StatusCode::NOT_FOUND, "uri={uri}");

@@ -131,6 +131,29 @@ export interface SuiteThreadTab {
   title: string;
 }
 
+/**
+ * 插件 MCP App 面板标签（ADR-0101 第 5 节）：
+ * 每会话同一插件的同一 surface 只开一个标签；没有 surface 时以 resourceUri 为键。
+ */
+export interface AppTab {
+  id: string;
+  kind: "app";
+  pluginId: string;
+  serverId: string;
+  surface?: string | undefined;
+  resourceUri: string;
+  title: string;
+  icon?: string | undefined;
+  /** 最近一次 open.tool 调用参数（随 panelSessions 持久化，恢复显示时重新调用） */
+  openCall?: { tool: string; arguments: Record<string, unknown> } | undefined;
+}
+
+export function appTabKey(tab: Pick<AppTab, "pluginId" | "surface" | "resourceUri">): string {
+  return tab.surface !== undefined && tab.surface !== ""
+    ? `${tab.pluginId}\0s:${tab.surface}`
+    : `${tab.pluginId}\0u:${tab.resourceUri}`;
+}
+
 export type PanelTab =
   | NewTab
   | ChangesTab
@@ -142,9 +165,10 @@ export type PanelTab =
   | EnsembleTab
   | EnsembleMemberTab
   | SuiteTab
-  | SuiteThreadTab;
+  | SuiteThreadTab
+  | AppTab;
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」（新标签页、终端不恢复） */
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」「插件面板」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
@@ -168,6 +192,16 @@ export type StoredPanelTab =
       workspace?: string;
       line?: number;
       endLine?: number;
+    }
+  | {
+      id: string;
+      kind: "app";
+      pluginId: string;
+      serverId: string;
+      surface?: string;
+      resourceUri: string;
+      title: string;
+      openCall?: { tool: string; arguments: Record<string, unknown> };
     };
 
 export const PANEL_MIN_WIDTH = 320;
@@ -362,6 +396,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const ensembleMembers = new Set<string>();
   const suiteThreads = new Set<string>();
   const shellTasks = new Set<string>();
+  const appKeys = new Set<string>();
   let changes = false;
   let ensemble = false;
   let suite = false;
@@ -464,6 +499,47 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
         ...(posInt(raw.line) ? { line: raw.line } : {}),
         ...(posInt(raw.line) && posInt(raw.endLine) ? { endLine: raw.endLine } : {}),
       });
+    } else if (
+      raw.kind === "app" &&
+      str(raw.pluginId) &&
+      str(raw.serverId) &&
+      str(raw.resourceUri) &&
+      raw.resourceUri.startsWith("ui://")
+    ) {
+      const surface = str(raw.surface) ? raw.surface : undefined;
+      const key = appTabKey({ pluginId: raw.pluginId, surface, resourceUri: raw.resourceUri });
+      if (appKeys.has(key)) continue;
+      let openCall: { tool: string; arguments: Record<string, unknown> } | undefined;
+      if (
+        typeof raw.openCall === "object" &&
+        raw.openCall !== null &&
+        !Array.isArray(raw.openCall)
+      ) {
+        const oc = raw.openCall as Record<string, unknown>;
+        if (
+          str(oc.tool) &&
+          typeof oc.arguments === "object" &&
+          oc.arguments !== null &&
+          !Array.isArray(oc.arguments)
+        ) {
+          openCall = {
+            tool: oc.tool,
+            arguments: { ...(oc.arguments as Record<string, unknown>) },
+          };
+        }
+      }
+      appKeys.add(key);
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "app",
+        pluginId: raw.pluginId,
+        serverId: raw.serverId,
+        ...(surface !== undefined ? { surface } : {}),
+        resourceUri: raw.resourceUri,
+        title: str(raw.title) ? raw.title : (surface ?? raw.pluginId),
+        ...(openCall !== undefined ? { openCall } : {}),
+      });
     }
   }
   return tabs;
@@ -533,6 +609,20 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
           ...(tab.workspace !== undefined ? { workspace: tab.workspace } : {}),
           ...(tab.line !== undefined ? { line: tab.line } : {}),
           ...(tab.endLine !== undefined ? { endLine: tab.endLine } : {}),
+        },
+      ];
+    }
+    if (tab.kind === "app") {
+      return [
+        {
+          id: tab.id,
+          kind: "app",
+          pluginId: tab.pluginId,
+          serverId: tab.serverId,
+          ...(tab.surface !== undefined ? { surface: tab.surface } : {}),
+          resourceUri: tab.resourceUri,
+          title: tab.title,
+          ...(tab.openCall !== undefined ? { openCall: tab.openCall } : {}),
         },
       ];
     }

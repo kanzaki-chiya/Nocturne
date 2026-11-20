@@ -851,3 +851,98 @@ it("Composer 预填草稿（prefillDraft）：填入 /docx 、光标在末尾并
   expect(onSubmit).not.toHaveBeenCalled();
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+it("插件详情页在「概况」之后展示「面板」组，列出 surface 标题与计数且不加说明文字", async () => {
+  const demo = plugin({
+    id: "nocturne:mcp-apps-demo@builtin",
+    host: "nocturne",
+    name: "mcp-apps-demo",
+    marketplace: "builtin",
+    displayName: "MCP Apps 示例",
+    description: "测试示例插件",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: [],
+    surfaces: [
+      {
+        id: "demo-viewer",
+        title: "示例面板",
+        server: "demo",
+        resourceUri: "ui://demo/viewer.html",
+        open: { tool: "open_demo_file", fileTypes: [".nctdemo"] },
+      },
+      {
+        id: "inspector",
+        title: "检查器",
+        server: "demo",
+        resourceUri: "ui://demo/inspector.html",
+      },
+    ],
+  });
+
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": desc([demo]),
+      "skills.describeSkills": skillsDesc([]),
+    }),
+  );
+  render(
+    <PluginsPage
+      client={f.client}
+      version={0}
+      openDirectory={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  fireEvent.click(await screen.findByText("MCP Apps 示例"));
+  const headings = await screen.findAllByRole("heading", { level: 2 });
+  const headingTexts = headings.map((h) => h.textContent?.trim() ?? "");
+  const overviewIdx = headingTexts.findIndex((t) => t.startsWith("概况"));
+  const panelIdx = headingTexts.findIndex((t) => t.startsWith("面板"));
+  expect(overviewIdx).toBeGreaterThanOrEqual(0);
+  expect(panelIdx).toBe(overviewIdx + 1);
+  expect(headingTexts[panelIdx]).toContain("2");
+  expect(screen.getByText("示例面板")).toBeTruthy();
+  expect(screen.getByText("检查器")).toBeTruthy();
+
+  f.close();
+});
+
+it("Composer 预填草稿（prefillDraft append:true，对应 ui/message）：追加到草稿末尾、聚焦且不自动发送", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  const { rerender } = render(
+    <Composer
+      variant="session"
+      running={false}
+      onSubmit={onSubmit}
+      onInterrupt={() => undefined}
+      fileRefs={null}
+      pickImages={() => Promise.resolve([])}
+      onSlash={() => Promise.resolve(false)}
+      prefillDraft={null}
+    />,
+  );
+
+  const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+  fireEvent.change(box, { target: { value: "请帮我看下" } });
+
+  rerender(
+    <Composer
+      variant="session"
+      running={false}
+      onSubmit={onSubmit}
+      onInterrupt={() => undefined}
+      fileRefs={null}
+      pickImages={() => Promise.resolve([])}
+      onSlash={() => Promise.resolve(false)}
+      prefillDraft={{ text: "来自示例面板的引用内容", seq: 1, append: true }}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(box.value).toBe("请帮我看下\n来自示例面板的引用内容");
+  });
+  expect(document.activeElement).toBe(box);
+  expect(onSubmit).not.toHaveBeenCalled();
+});
