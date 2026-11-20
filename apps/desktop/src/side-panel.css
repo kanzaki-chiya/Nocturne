@@ -726,6 +726,10 @@
 .sp-code .cm-editor.cm-focused {
   outline: none;
 }
+/* 关掉自动换行横向滚动时，行号列（CodeMirror 自带 sticky）要不透明，正文才不会从底下透出来 */
+.sp-code .cm-gutters {
+  background: var(--a-bg);
+}
 .sp-code-fallback {
   margin: 0;
   padding: 8px 12px;
