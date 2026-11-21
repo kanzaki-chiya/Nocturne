@@ -212,7 +212,7 @@ it("点「立即试用」关闭设置页、新开草稿会话并预填 /docx ，
   expect(calls.filter((c) => c.method === "session.submit")).toHaveLength(0);
 });
 
-it("点「创建插件」关闭设置页、新开草稿会话并预填 /plugin-creator ，关闭插件创建器后按钮禁用", async () => {
+it("点「创建插件」关闭设置页、新开草稿会话并显示插件创建器技能标签，关闭插件创建器后按钮禁用", async () => {
   const ws = temp("create-ws-");
   const plain = temp("create-plain-");
   const sessionsDir = temp("create-sessions-");
@@ -265,11 +265,14 @@ it("点「创建插件」关闭设置页、新开草稿会话并预填 /plugin-c
   });
   const textarea = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
   await waitFor(() => {
-    expect(textarea.value).toBe("/plugin-creator ");
+    const label = textarea.closest(".txt")?.querySelector(".draft-skill .input-label");
+    expect(label?.textContent).toBe("插件创建器");
+    expect(label?.querySelector("svg")).toBeTruthy();
+    expect(textarea.value).toBe("");
   });
   expect(document.activeElement).toBe(textarea);
-  expect(textarea.selectionStart).toBe("/plugin-creator ".length);
-  expect(textarea.selectionEnd).toBe("/plugin-creator ".length);
+  expect(textarea.selectionStart).toBe(0);
+  expect(textarea.selectionEnd).toBe(0);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(calls.filter((c) => c.method === "session.submit")).toHaveLength(0);
 
