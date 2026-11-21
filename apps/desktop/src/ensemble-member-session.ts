@@ -62,6 +62,37 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 活跃挂载计数：StrictMode 双挂载或快速重开同一成员标签时，避免旧卸载把新挂载的 session.open 关掉 */
+const activeMemberMounts = new Map<string, number>();
+/** 按连接串行化同一 childSessionId 的 session.open，避免并发触发 session_already_open */
+const inflightMemberOpens = new WeakMap<RpcClient, Map<string, Promise<unknown>>>();
+
+function bumpMemberMount(childSessionId: string, delta: 1 | -1): number {
+  const next = Math.max(0, (activeMemberMounts.get(childSessionId) ?? 0) + delta);
+  if (next === 0) activeMemberMounts.delete(childSessionId);
+  else activeMemberMounts.set(childSessionId, next);
+  return next;
+}
+
+async function openMemberSessionSerialized(client: RpcClient, childSessionId: string) {
+  let byId = inflightMemberOpens.get(client);
+  if (byId === undefined) {
+    byId = new Map();
+    inflightMemberOpens.set(client, byId);
+  }
+  const previous = byId.get(childSessionId);
+  if (previous !== undefined) {
+    await previous.catch(() => undefined);
+  }
+  const request = client.call("session.open", { sessionId: childSessionId });
+  byId.set(childSessionId, request);
+  try {
+    return await request;
+  } finally {
+    if (byId.get(childSessionId) === request) byId.delete(childSessionId);
+  }
+}
+
 /**
  * 打开并管理一名活动 Ensemble 成员的子会话。
  *
@@ -93,6 +124,7 @@ export function useEnsembleMemberSession(
   }, [ensureClient, fallbackCwd]);
 
   useEffect(() => {
+    bumpMemberMount(childSessionId, 1);
     let disposed = false;
     /** 回放结束（subscribe 返回）前只折叠，不逐条渲染 */
     let live = false;
@@ -133,13 +165,15 @@ export function useEnsembleMemberSession(
       try {
         const client = await latest.current.ensureClient();
         // 幂等打开（rpc.md 3.2）：复用 Runtime 托管的同一常驻子会话实例
-        const opened = await client.call("session.open", { sessionId: childSessionId });
+        const opened = await openMemberSessionSerialized(client, childSessionId);
         const handle = client.session(opened.sessionId);
         session = handle;
         cwd = opened.meta.cwd === "" ? latest.current.fallbackCwd : opened.meta.cwd;
         if (disposed) {
-          // 关闭标签发生在打开途中：句柄已建立，释放引用后退出
-          await handle.close().catch(() => undefined);
+          // 关闭标签发生在打开途中：仅在没有其他挂载时释放引用，避免误关 StrictMode 新挂载
+          if ((activeMemberMounts.get(childSessionId) ?? 0) === 0) {
+            await handle.close().catch(() => undefined);
+          }
           return;
         }
         const subscription = await handle.subscribe((event) => {
@@ -206,10 +240,17 @@ export function useEnsembleMemberSession(
 
     return () => {
       disposed = true;
+      const remaining = bumpMemberMount(childSessionId, -1);
       void (async () => {
         await stopSubscription?.().catch(() => undefined);
         // 关闭标签只释放本连接的引用；成员可能仍在工作，绝不 interrupt
-        if (session !== undefined) await session.close().catch(() => undefined);
+        if (
+          session !== undefined &&
+          remaining === 0 &&
+          (activeMemberMounts.get(childSessionId) ?? 0) === 0
+        ) {
+          await session.close().catch(() => undefined);
+        }
       })();
     };
   }, [attempt, childSessionId, retry, subscribeEvents]);

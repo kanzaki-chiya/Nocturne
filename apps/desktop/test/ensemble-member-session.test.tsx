@@ -4,6 +4,7 @@
  * 打开成员子会话并折叠事件，可直接对成员发私信、确认权限；关闭标签只释放
  * 本连接的引用（session.close），绝不中断仍在工作的成员。
  */
+import { StrictMode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "@nocturne/core/protocol";
@@ -220,5 +221,26 @@ it("关闭成员标签只退订并 session.close，不中断成员", async () =>
   expect(server.calls("session.close").map((call) => call.params)).toEqual([{ sessionId: CHILD }]);
   // 成员可能仍在工作：关闭标签绝不发 interrupt
   expect(methods).not.toContain("session.interrupt");
+  server.close();
+});
+
+it("StrictMode 双挂载不会把新打开的成员会话提前 close", async () => {
+  const server = harness();
+  const hook = renderHook(
+    () =>
+      useEnsembleMemberSession({
+        ensureClient: server.ensureClient,
+        childSessionId: CHILD,
+        fallbackCwd: "Z:/maestro",
+      }),
+    { wrapper: StrictMode },
+  );
+  await vi.waitFor(() => expect(hook.result.current.status).toBe("ready"));
+  expect(server.calls("session.close")).toHaveLength(0);
+
+  await act(async () => {
+    hook.unmount();
+  });
+  await vi.waitFor(() => expect(server.calls("session.close")).toHaveLength(1));
   server.close();
 });
