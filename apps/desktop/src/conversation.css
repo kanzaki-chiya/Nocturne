@@ -1931,3 +1931,111 @@ button.fcard:hover {
 .conv-find-up {
   transform: rotate(180deg);
 }
+
+/* ── 轮次导航（ADR-0107） ── */
+.conversation.has-turn-rail .conversation-scroll {
+  padding-right: var(--space-8);
+}
+
+.turn-rail {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  max-height: 60%;
+}
+
+.turn-ticks {
+  position: relative;
+  width: 24px;
+  padding: var(--space-2) var(--space-1);
+  outline: none;
+  cursor: pointer;
+}
+
+.turn-ticks:focus-visible {
+  border-radius: var(--radius-1);
+  box-shadow: var(--shadow-focus);
+}
+
+.turn-ticks-track {
+  position: relative;
+  width: 16px;
+}
+
+.turn-tick {
+  position: absolute;
+  right: 0;
+  display: block;
+  width: 10px;
+  height: 2px;
+  border-radius: var(--radius-0-5);
+  background: var(--a-border-strong);
+}
+
+.turn-tick.on {
+  width: 16px;
+  background: var(--a-text);
+  z-index: 1;
+}
+
+.turn-list {
+  position: absolute;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--w-list);
+  max-height: 360px;
+  overflow: auto;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-popover);
+}
+
+.turn-list::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -12px;
+  width: 12px;
+}
+
+.turn-row {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  flex: none;
+  width: 100%;
+  min-height: var(--item-h);
+  line-height: var(--lh-base);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-2);
+  font-size: var(--fs-2);
+  color: var(--a-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.turn-row:hover {
+  background: var(--a-raised);
+  color: var(--a-text);
+}
+
+.turn-row.on {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+
+.turn-row:focus-visible {
+  box-shadow: var(--shadow-focus);
+}

@@ -3179,6 +3179,7 @@ function SessionPane({
         scheduleSource={scheduleSource}
         searchTarget={searchTarget}
         enableFind
+        enableTurnNav
         onResubmit={onResubmit}
         onFork={view.suite !== undefined ? undefined : onFork}
         onApprovePlan={onApprovePlan}

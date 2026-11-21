@@ -169,6 +169,14 @@ import {
   stepMatchIndex,
 } from "./conversation-find";
 import { ConversationFindBar } from "./ConversationFindBar";
+import {
+  extractConversationTurns,
+  findCurrentTurnIndex,
+  MIN_TURNS_FOR_RAIL,
+  MIN_WIDTH_FOR_RAIL,
+  stepTurnIndex,
+} from "./turn-rail";
+import { TurnRail } from "./TurnRail";
 import "./conversation.css";
 
 export { toolMeta };
@@ -285,6 +293,8 @@ export interface ConversationProps {
   virtualize?: boolean | undefined;
   /** 启用会话内搜索（Ctrl+F，仅桌面端主窗口开启） */
   enableFind?: boolean | undefined;
+  /** 启用轮次导航轨与 Alt+↑/↓ 按轮跳转（仅桌面端主窗口开启） */
+  enableTurnNav?: boolean | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -4653,6 +4663,7 @@ function ConversationContent({
   onOpenSuiteThread,
   virtualize = false,
   enableFind = false,
+  enableTurnNav = false,
 }: ContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -4944,6 +4955,7 @@ function ConversationContent({
         previousTop.current = scroll.current?.scrollTop ?? 0;
         captureAnchor();
       }
+      scheduleTurnSyncRef.current();
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -5198,6 +5210,173 @@ function ConversationContent({
     effectiveRange.start,
     effectiveRange.end,
   ]);
+
+  // ── 轮次导航与 Alt+↑/↓（ADR-0107） ──
+  const turns = useMemo(
+    () => (enableTurnNav ? extractConversationTurns(view.entries) : []),
+    [enableTurnNav, view.entries, entriesVersion],
+  );
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+  const [railNarrow, setRailNarrow] = useState(false);
+  const [railHeight, setRailHeight] = useState(0);
+  const [currentTurnIndex, setCurrentTurnIndex] = useState<number>(() =>
+    turns.length > 0 ? turns.length - 1 : -1,
+  );
+  const currentTurnIndexRef = useRef(currentTurnIndex);
+  currentTurnIndexRef.current = currentTurnIndex;
+  const turnSyncRafRef = useRef<number | undefined>(undefined);
+
+  const syncCurrentTurn = useCallback(() => {
+    const list = turnsRef.current;
+    if (list.length === 0) {
+      setCurrentTurnIndex((prev) => (prev === -1 ? prev : -1));
+      return;
+    }
+    const scrollEl = scroll.current;
+    const contentEl = content.current;
+    const entries = entriesRef.current;
+    let midEntryIndex: number | undefined;
+    if (scrollEl !== null && contentEl !== null) {
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const midClientY = scrollRect.top + scrollRect.height / 2;
+      const nodes = contentEl.querySelectorAll<HTMLElement>("[data-session-seq]");
+      let lastBeforeMidSeq: number | undefined;
+      let anyMeasured = false;
+      for (const node of nodes) {
+        const rect = node.getBoundingClientRect();
+        if (rect.height <= 0) continue;
+        anyMeasured = true;
+        if (rect.top <= midClientY) {
+          const raw = node.getAttribute("data-session-seq");
+          if (raw !== null) lastBeforeMidSeq = Number(raw);
+        }
+      }
+      if (anyMeasured) {
+        if (lastBeforeMidSeq !== undefined) {
+          const idx = entries.findIndex((entry) => entry.seq === lastBeforeMidSeq);
+          if (idx >= 0) midEntryIndex = idx;
+        } else {
+          midEntryIndex = 0;
+        }
+      } else if (virtualize && scrollEl.scrollTop > 0) {
+        midEntryIndex = findIndexAtOffset(
+          offsetsRef.current,
+          entries.length,
+          scrollEl.scrollTop + scrollEl.clientHeight / 2,
+        );
+      }
+    }
+    let nextIdx: number;
+    if (midEntryIndex !== undefined) {
+      nextIdx = findCurrentTurnIndex(list, midEntryIndex);
+    } else if (follow.current) {
+      nextIdx = list.length - 1;
+    } else if (currentTurnIndexRef.current >= 0) {
+      nextIdx = Math.min(currentTurnIndexRef.current, list.length - 1);
+    } else {
+      nextIdx = list.length - 1;
+    }
+    setCurrentTurnIndex((prev) => (prev === nextIdx ? prev : nextIdx));
+  }, [virtualize]);
+
+  const scheduleTurnSync = useCallback(() => {
+    if (!enableTurnNav) return;
+    if (turnSyncRafRef.current !== undefined) return;
+    turnSyncRafRef.current = requestAnimationFrame(() => {
+      turnSyncRafRef.current = undefined;
+      syncCurrentTurn();
+    });
+  }, [enableTurnNav, syncCurrentTurn]);
+  const scheduleTurnSyncRef = useRef(scheduleTurnSync);
+  scheduleTurnSyncRef.current = scheduleTurnSync;
+
+  useEffect(() => {
+    return () => {
+      if (turnSyncRafRef.current !== undefined) {
+        cancelAnimationFrame(turnSyncRafRef.current);
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!enableTurnNav) return;
+    syncCurrentTurn();
+  }, [enableTurnNav, turns.length, entriesVersion, syncCurrentTurn]);
+
+  useLayoutEffect(() => {
+    if (!enableTurnNav) return;
+    const root = rootRef.current;
+    if (root === null) return;
+    const updateSize = (width: number, height: number) => {
+      const nextNarrow = width > 0 && width < MIN_WIDTH_FOR_RAIL;
+      setRailNarrow((prev) => (prev === nextNarrow ? prev : nextNarrow));
+      if (height > 0) {
+        setRailHeight((prev) => (Math.abs(prev - height) < 1 ? prev : height));
+      }
+    };
+    updateSize(root.clientWidth, root.clientHeight);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((items) => {
+      const box = items[0]?.contentRect;
+      if (box !== undefined) {
+        updateSize(box.width, box.height);
+      } else {
+        updateSize(root.clientWidth, root.clientHeight);
+      }
+      scheduleTurnSyncRef.current();
+    });
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+    };
+  }, [enableTurnNav]);
+
+  const jumpToTurn = useCallback(
+    (seq: number, index: number) => {
+      setCurrentTurnIndex(index);
+      jumpToSeq(seq);
+    },
+    [jumpToSeq],
+  );
+
+  useEffect(() => {
+    if (!enableTurnNav) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.key === "Process"
+      )
+        return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      const list = turnsRef.current;
+      if (list.length === 0) return;
+      if (!canHandleConversationShortcut(rootRef.current, event)) return;
+      const mainPane = rootRef.current?.closest(".mainpane") ?? document;
+      if (mainPane.querySelector('.composer [role="listbox"]') !== null) return;
+      event.preventDefault();
+      const nextIdx = stepTurnIndex(
+        currentTurnIndexRef.current,
+        list.length,
+        event.key === "ArrowUp" ? -1 : 1,
+      );
+      const target = list[nextIdx];
+      if (target !== undefined) {
+        jumpToTurn(target.seq, nextIdx);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [enableTurnNav, jumpToTurn]);
+
+  const showTurnRail = enableTurnNav && turns.length >= MIN_TURNS_FOR_RAIL && !railNarrow;
+
   useLayoutEffect(() => {
     if (virtualize) {
       measureMountedItems();
@@ -5273,7 +5452,7 @@ function ConversationContent({
     [virtualize, view.entries, captureAnchor],
   );
   const inner = (
-    <div className="conversation" ref={rootRef}>
+    <div className={`conversation${showTurnRail ? " has-turn-rail" : ""}`} ref={rootRef}>
       {enableFind && findOpen ? (
         <ConversationFindBar
           query={findQuery}
@@ -5288,6 +5467,14 @@ function ConversationContent({
             stepFind(1);
           }}
           onClose={closeFind}
+        />
+      ) : null}
+      {showTurnRail ? (
+        <TurnRail
+          turns={turns}
+          currentIndex={currentTurnIndex}
+          containerHeight={railHeight}
+          onJump={jumpToTurn}
         />
       ) : null}
       <div
@@ -5317,6 +5504,7 @@ function ConversationContent({
           }
           previousTop.current = element.scrollTop;
           updateVirtualWindowFromScroll(element, nextFollowing);
+          scheduleTurnSync();
         }}
       >
         <ThinkScrollContext.Provider value={thinkScroll}>
