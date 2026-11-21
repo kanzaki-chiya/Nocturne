@@ -326,4 +326,37 @@ describe("TUI 子代理权限转发", () => {
       await session.close();
     }
   });
+
+  it("带 ruleSuggestion 的 PendingPermission 在 PermissionDialog 中照常只显示原有选项", () => {
+    const pending: PendingPermission = {
+      requestId: "r-rule-1",
+      callId: "c-rule-1",
+      toolName: "shell",
+      subjects: [{ kind: "shell", target: "git status --short" }],
+      reason: "命中规则",
+      options: ["allow_once", "allow_session", "allow_project", "deny", "deny_stop"],
+      ruleSuggestion: { pattern: "git status *" },
+    };
+    const { lastFrame, unmount } = render(
+      inEnv(
+        createElement(PermissionDialog, {
+          pending,
+          active: true,
+          onReply: vi.fn(),
+          width: 100,
+        }),
+      ),
+    );
+    try {
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("允许一次");
+      expect(frame).toContain("本会话内允许");
+      expect(frame).toContain("在此项目中始终允许");
+      expect(frame).toContain("拒绝（可附反馈）");
+      expect(frame).toContain("拒绝并停止本轮");
+      expect(frame).not.toContain("改成规则");
+    } finally {
+      unmount();
+    }
+  });
 });

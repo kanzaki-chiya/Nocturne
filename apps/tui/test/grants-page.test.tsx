@@ -121,3 +121,44 @@ it("D 二次确认；t 展示项目配置后确认信任，取消信任不确认
   });
   h.screen.unmount();
 });
+it("模式 Grant 显示「命令规则」，按 d 撤销透传 match: pattern", async () => {
+  let entries: Grant[] = [
+    { kind: "shell", target: "git status *", match: "pattern", createdAt: "2026-10-21" },
+  ];
+  const runtime = createRuntimeStub({
+    listGrantWorkspaces: vi.fn(async () => [
+      {
+        workspace: "Z:/project",
+        grantCount: entries.length,
+        trusted: false,
+        hasProjectConfig: false,
+      },
+    ]),
+    listGrants: vi.fn(async () => entries),
+    revokeGrant: vi.fn(async () => {
+      entries = [];
+    }),
+  });
+  const session = { state: () => ({ meta: { workspaceRoot: "Z:/project" } }) } as RuntimeSession;
+  const screen = render(
+    createElement(GrantsPage, {
+      runtime,
+      session,
+      width: 110,
+      height: 28,
+      onClose: vi.fn(),
+    }),
+  );
+  await vi.waitFor(() => expect(screen.lastFrame()).toContain("命令规则"));
+  expect(screen.lastFrame()).toContain("git status *");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  screen.stdin.write("d");
+  await vi.waitFor(() => expect(screen.lastFrame()).toContain("还没有项目授权"));
+  expect(runtime.revokeGrant).toHaveBeenCalledWith({
+    workspace: "Z:/project",
+    kind: "shell",
+    target: "git status *",
+    match: "pattern",
+  });
+  screen.unmount();
+});

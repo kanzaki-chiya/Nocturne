@@ -75,7 +75,10 @@ export function GrantsPage({
       ]
     : grants.map((grant, i) => ({
         id: String(i),
-        cells: [{ text: grant.kind }, { text: grant.target }],
+        cells: [
+          { text: grant.match === "pattern" ? "命令规则" : grant.kind },
+          { text: grant.target },
+        ],
         trail: [{ text: grant.createdAt, tone: "muted" }],
       }));
   return (
@@ -150,7 +153,12 @@ export function GrantsPage({
           const grant = grants[Number(context.rowId)];
           if (grant)
             void run(() =>
-              runtime.revokeGrant({ workspace: selected, kind: grant.kind, target: grant.target }),
+              runtime.revokeGrant({
+                workspace: selected,
+                kind: grant.kind,
+                target: grant.target,
+                ...(grant.match !== undefined ? { match: grant.match } : {}),
+              }),
             );
           return true;
         }
