@@ -48,8 +48,12 @@ export interface RulePolicyOptions {
   caseSensitive: boolean;
   /** 内置预设名；缺省 "default" */
   preset?: PermissionPresetName | undefined;
-  /** 预设构造上下文（落盘目录、授权数据路径）；缺省时不生成对应规则 */
-  presetContext?: Omit<PresetContext, "workspaceRoot" | "caseSensitive"> | undefined;
+  /** 预设构造上下文（落盘目录、授权数据路径、页面文件）；缺省时不生成对应规则 */
+  presetContext?:
+    | (Omit<PresetContext, "workspaceRoot" | "caseSensitive" | "inlinePageFiles"> & {
+        inlinePageFiles?: readonly string[] | (() => readonly string[]) | undefined;
+      })
+    | undefined;
   /** 完整替换预设规则（旧固定策略封装用）；与 preset 互斥 */
   baseRules?: PermissionRule[] | undefined;
   /** 可信规则序列（user < project < cli，已按层序排好） */
@@ -256,28 +260,42 @@ function subjectDesc(s: PermissionSubject): string {
 export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
   const { workspaceRoot, caseSensitive, autoApproveAsk = false } = options;
   const presetName = options.preset ?? "default";
-  const presetRulesList =
-    options.baseRules ??
-    presetRules(presetName, {
-      workspaceRoot,
-      caseSensitive,
-      sessionsDir: options.presetContext?.sessionsDir,
-      sessionId: options.presetContext?.sessionId,
-      nocturneHome: options.presetContext?.nocturneHome,
-      skillRoots: options.presetContext?.skillRoots,
-      skillFiles: options.presetContext?.skillFiles,
-    });
-  const preset = presetRulesList.map((rule, i) => ({
-    rule,
-    origin: "preset" as const,
-    index: i + 1,
-  }));
-
+  const inlinePageFilesOpt = options.presetContext?.inlinePageFiles;
+  const buildPresetEntries = (inlinePageFiles: readonly string[] | undefined) => {
+    const list =
+      options.baseRules ??
+      presetRules(presetName, {
+        workspaceRoot,
+        caseSensitive,
+        sessionsDir: options.presetContext?.sessionsDir,
+        sessionId: options.presetContext?.sessionId,
+        nocturneHome: options.presetContext?.nocturneHome,
+        skillRoots: options.presetContext?.skillRoots,
+        skillFiles: options.presetContext?.skillFiles,
+        inlinePageFiles,
+      });
+    return list.map((rule, i) => ({
+      rule,
+      origin: "preset" as const,
+      index: i + 1,
+    }));
+  };
+  const explicitRules = numberByOrigin(options.rules ?? []);
+  const staticPreset = buildPresetEntries(
+    typeof inlinePageFilesOpt === "function" ? undefined : inlinePageFilesOpt,
+  );
   // 可信规则序列：预设 < 用户 < 可信项目 < 命令行；同层内后写优先
-  const trusted: { rule: PermissionRule; origin: RuleOrigin; index: number | undefined }[] = [
-    ...preset,
-    ...numberByOrigin(options.rules ?? []),
+  const staticTrusted: { rule: PermissionRule; origin: RuleOrigin; index: number | undefined }[] = [
+    ...staticPreset,
+    ...explicitRules,
   ];
+  const resolvePresetAndTrusted = () => {
+    if (typeof inlinePageFilesOpt !== "function") {
+      return { preset: staticPreset, trusted: staticTrusted };
+    }
+    const preset = buildPresetEntries(inlinePageFilesOpt());
+    return { preset, trusted: [...preset, ...explicitRules] };
+  };
   const untrusted = numberByOrigin(options.untrustedRules ?? []);
   const grantsOpt = options.grants;
   function resolveGrants(
@@ -394,6 +412,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     s: PermissionSubject,
     evalOptions: EvaluateOptions | undefined,
   ): SubjectVerdict {
+    const { preset, trusted } = resolvePresetAndTrusted();
     const appCaller =
       evalOptions?.caller !== undefined && evalOptions.caller !== "model"
         ? evalOptions.caller

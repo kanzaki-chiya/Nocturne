@@ -2,8 +2,10 @@ import type {
   ExternalAgentConfig,
   FileAttachment,
   ImageAttachment,
+  InlinePageMeta,
   ExternalAgentProbeResult,
   McpProbeResult,
+  SessionPage,
   ToolCompletedUi,
 } from "../protocol/index.js";
 /**
@@ -234,18 +236,26 @@ export interface ToolContext extends ToolScope {
   schedule?: ScheduleAccess;
   /** 读取当前会话持久化笔记（ADR-0095）；子会话独立 */
   notes?: (() => readonly NoteItem[]) | undefined;
+  /** 读取当前会话有效历史中的页面列表（ADR-0109） */
+  pages?: (() => readonly SessionPage[]) | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
   /**
-   * 将工具产出的内容保存为会话文件附件（ADR-0088）：经 AttachmentStore.saveFile
+   * 将工具产出的内容保存为会话文件附件（ADR-0088、ADR-0109）：经 AttachmentStore.saveFile
    * 落盘为 `file-<n>.<ext>`，返回 FileAttachment 引用。缺省 = 当前环境未挂载附件存储。
    */
   saveFileAttachment?(input: {
     data: Uint8Array;
     mimeType?: string | undefined;
     label: string;
-    inline?: { title: string } | undefined;
+    inline?: InlinePageMeta | undefined;
   }): Promise<FileAttachment>;
+  /** 读取当前会话已保存的文件附件字节（校验 sha256）；缺省 = 未挂载附件存储 */
+  loadFileAttachment?(
+    att: Pick<FileAttachment, "file" | "sha256">,
+  ): Promise<Uint8Array | undefined>;
+  /** 返回当前会话附件的绝对路径（供工具在结果中告知模型以便 read） */
+  attachmentPath?(file: string): string;
   /**
    * 保存工具读取/抓取的图片为会话图片附件（ADR-0023、ADR-0090）：
    * 经 AttachmentStore.save 落盘（超预算时在 worker 中自动缩小或切段）。
@@ -552,6 +562,8 @@ export interface ExecutionScope extends ToolScope {
   schedule?: ScheduleAccess | undefined;
   /** 读取当前会话持久化笔记（ADR-0095） */
   notes?: (() => readonly NoteItem[]) | undefined;
+  /** 读取当前会话有效历史中的页面列表（ADR-0109） */
+  pages?: (() => readonly SessionPage[]) | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
   /**
@@ -603,6 +615,8 @@ export interface ExecutionEnvironment {
   schedule?: ScheduleAccess | undefined;
   /** 读取当前会话持久化笔记（ADR-0095） */
   notes?: (() => readonly NoteItem[]) | undefined;
+  /** 读取当前会话有效历史中的页面列表（ADR-0109） */
+  pages?: (() => readonly SessionPage[]) | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
 }

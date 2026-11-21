@@ -2,12 +2,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createRuntime } from "../src/index.js";
+import { createRulePolicy } from "../src/permission/index.js";
 import { FakeProvider } from "../src/provider/index.js";
 import {
   decodeDurableEvent,
   encodeDurableEvent,
   inlineFilesOfTool,
+  legacyInlinePageId,
   replaySessionView,
   type DurableEvent,
   type FileAttachment,
@@ -18,6 +21,7 @@ import {
   MAX_INLINE_HTML_IMAGES,
   MAX_INLINE_HTML_SAVED_BYTES,
   MAX_INLINE_HTML_TITLE_CHARS,
+  applyHtmlEdits,
   isSvgImage,
   renderHtmlTool,
   replaceImageReferences,
@@ -115,9 +119,9 @@ describe("render_html 工具与内嵌页面标记", () => {
       );
       expect(completed).toBeDefined();
       expect(completed?.payload.status).toBe("ok");
-      expect(completed?.payload.modelContent).toMatch(
-        /^内嵌页面「季度对比: Q1\/Q2」已显示给用户（file-1\.html，\d+ B）。回复中不要复述页面里的数据、结论或说明。$/,
-      );
+      expect(completed?.payload.modelContent).toContain("page-1 v1");
+      expect(completed?.payload.modelContent).toContain("file-1.html");
+      expect(completed?.payload.modelContent).toContain("回复中不要复述页面里的数据、结论或说明");
       expect(JSON.stringify(completed?.payload)).not.toContain("unique-secret-marker");
       expect(completed?.payload.files).toHaveLength(1);
       const att = completed?.payload.files?.[0];
@@ -502,5 +506,588 @@ describe("render_html 工具与内嵌页面标记", () => {
     } finally {
       await session.close();
     }
+  });
+
+  describe("页面版本、edits、display 与预设读取放行（ADR-0109）", () => {
+    it("validateInput：更新时 html 与 edits 必须且只能给一个，新建不能传 edits", () => {
+      expect(renderHtmlTool.validateInput?.({ page: "page-1" })).toContain("html 与 edits");
+      expect(
+        renderHtmlTool.validateInput?.({
+          page: "page-1",
+          html: "<p>a</p>",
+          edits: [{ old: "a", new: "b" }],
+        }),
+      ).toContain("html 与 edits");
+      expect(
+        renderHtmlTool.validateInput?.({
+          title: "新建",
+          html: "<p>a</p>",
+          edits: [{ old: "a", new: "b" }],
+        }),
+      ).toContain("edits");
+      expect(
+        renderHtmlTool.validateInput?.({
+          page: "page-1",
+          edits: [{ old: "a", new: "b" }],
+        }),
+      ).toBeUndefined();
+      expect(
+        renderHtmlTool.validateInput?.({
+          page: "page-1",
+          html: "<p>rewrite</p>",
+          display: "panel",
+        }),
+      ).toBeUndefined();
+    });
+
+    it("applyHtmlEdits：顺序依次替换，old 出现 0 次或多次时写明第几条和次数", () => {
+      const ok = applyHtmlEdits("<p>alpha</p><p>beta</p>", [
+        { old: "alpha", new: "ALPHA-$&" },
+        { old: "ALPHA-$&</p><p>beta", new: "DONE" },
+      ]);
+      expect(ok).toEqual({ ok: true, html: "<p>DONE</p>" });
+
+      const miss = applyHtmlEdits("<p>hello</p>", [
+        { old: "hello", new: "world" },
+        { old: "nope", new: "x" },
+      ]);
+      expect(miss.ok).toBe(false);
+      if (!miss.ok) {
+        expect(miss.error).toContain("第 2 条");
+        expect(miss.error).toContain("0 次");
+      }
+
+      const dup = applyHtmlEdits("<p>dup</p><p>dup</p>", [{ old: "dup", new: "one" }]);
+      expect(dup.ok).toBe(false);
+      if (!dup.ok) {
+        expect(dup.error).toContain("第 1 条");
+        expect(dup.error).toContain("2 次");
+      }
+    });
+
+    it("新建 id/版本号、edits 顺序替换、html 整份重写、title 沿用、display 继承与忽略、结果含文件路径", async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-render-ver-"));
+      roots.push(root);
+      const sessionsDir = path.join(root, "sessions");
+      const calls: Record<string, unknown>[] = [
+        // 1. 新建面板页面 page-1 v1
+        {
+          title: "每周提交看板",
+          html: "<h1>看板</h1><p>总数: 100</p><p>环比: +10%</p>",
+          display: "panel",
+        },
+        // 2. edits 顺序替换，不传 title（沿用），传入 display: "inline"（忽略）
+        {
+          page: "page-1",
+          display: "inline",
+          edits: [
+            { old: "总数: 100", new: "总数: 162" },
+            { old: "总数: 162</p><p>环比: +10%", new: "总数: 162</p><p>环比: +26%" },
+          ],
+        },
+        // 3. html 整份重写并更新标题
+        {
+          page: "page-1",
+          title: "每周提交看板（终版）",
+          html: "<h1>终版看板</h1><p>八周平均: 20.3</p>",
+        },
+        // 4. 新建内嵌页面（缺省 display = "inline"）-> page-2 v1
+        { title: "架构对比表", html: "<table><tr><td>A</td></tr></table>" },
+      ];
+      let idx = 0;
+      const provider = new FakeProvider({
+        handler: () => {
+          const input = calls[idx];
+          if (input !== undefined) {
+            const callId = `rh-${++idx}`;
+            return [
+              { type: "tool_call", toolCallId: callId, name: "render_html", input },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            { type: "text_delta", text: "全部完成。" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      });
+      const runtime = await createRuntime({
+        cwd: root,
+        sessionsDir,
+        providers: [provider],
+        interactive: true,
+      });
+      const session = await runtime.createSession({ model: "fake/fake-model" });
+      try {
+        await session.submit({ text: "创建并迭代页面" });
+        const completions = session
+          .durableEvents()
+          .filter(
+            (e): e is DurableEvent<"tool.completed"> =>
+              e.type === "tool.completed" && e.payload.name === "render_html",
+          );
+        expect(completions).toHaveLength(4);
+
+        const [e1, e2, e3, e4] = completions;
+        if (!e1 || !e2 || !e3 || !e4) throw new Error("expected 4 completions");
+        const c1 = e1.payload;
+        const c2 = e2.payload;
+        const c3 = e3.payload;
+        const c4 = e4.payload;
+
+        expect(c1.files?.[0]?.inline).toEqual({
+          title: "每周提交看板",
+          page: "page-1",
+          version: 1,
+          display: "panel",
+        });
+        expect(c2.files?.[0]?.inline).toEqual({
+          title: "每周提交看板",
+          page: "page-1",
+          version: 2,
+          display: "panel",
+        });
+        expect(c3.files?.[0]?.inline).toEqual({
+          title: "每周提交看板（终版）",
+          page: "page-1",
+          version: 3,
+          display: "panel",
+        });
+        expect(c4.files?.[0]?.inline).toEqual({
+          title: "架构对比表",
+          page: "page-2",
+          version: 1,
+          display: "inline",
+        });
+
+        // 工具结果含页面 id、版本号和完整文件路径
+        const file2 = c2.files?.[0]?.file;
+        const file3 = c3.files?.[0]?.file;
+        if (!file2 || !file3) throw new Error("expected attachment files");
+        const expectedPath2 = path.join(sessionsDir, "attachments", session.id, file2);
+        expect(c2.modelContent).toContain("page-1");
+        expect(c2.modelContent).toContain("v2");
+        expect(c2.modelContent).toContain(expectedPath2);
+
+        // 验证 edits 落盘内容
+        const v2Bytes = await session.readAttachment(file2);
+        expect(new TextDecoder().decode(v2Bytes.data)).toBe(
+          "<h1>看板</h1><p>总数: 162</p><p>环比: +26%</p>",
+        );
+        const v3Bytes = await session.readAttachment(file3);
+        expect(new TextDecoder().decode(v3Bytes.data)).toBe(
+          "<h1>终版看板</h1><p>八周平均: 20.3</p>",
+        );
+
+        // 派生视图校验
+        const view = replaySessionView(session.durableEvents());
+        expect(view.pages).toHaveLength(2);
+        const [p0, p1] = view.pages;
+        expect(p0).toMatchObject({
+          page: "page-1",
+          title: "每周提交看板（终版）",
+          display: "panel",
+        });
+        expect(p0?.versions.map((v) => ({ version: v.version, title: v.title }))).toEqual([
+          { version: 1, title: "每周提交看板" },
+          { version: 2, title: "每周提交看板" },
+          { version: 3, title: "每周提交看板（终版）" },
+        ]);
+        expect(p1).toMatchObject({
+          page: "page-2",
+          title: "架构对比表",
+          display: "inline",
+        });
+        expect(p1?.versions).toHaveLength(1);
+      } finally {
+        await session.close();
+      }
+    });
+
+    it("错误路径：page 不存在列出现有页面、edits 失败或超 256 KiB 时整次调用不生效", async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-render-err-"));
+      roots.push(root);
+      const huge = "x".repeat(MAX_INLINE_HTML_BYTES + 10);
+      const calls: Record<string, unknown>[] = [
+        // 1. 新建 page-1
+        { title: "首页", html: "<p>dup</p><p>dup</p><p>tail</p>" },
+        // 2. page 不存在
+        { page: "page-99", html: "<p>new</p>" },
+        // 3. old 未出现（第 2 条）
+        {
+          page: "page-1",
+          edits: [
+            { old: "tail", new: "TAIL" },
+            { old: "missing", new: "x" },
+          ],
+        },
+        // 4. old 出现多次
+        { page: "page-1", edits: [{ old: "dup", new: "one" }] },
+        // 5. 替换后超过 256 KiB
+        { page: "page-1", edits: [{ old: "tail", new: huge }] },
+      ];
+      let idx = 0;
+      const provider = new FakeProvider({
+        handler: () => {
+          const input = calls[idx];
+          if (input !== undefined) {
+            const callId = `err-${++idx}`;
+            return [
+              { type: "tool_call", toolCallId: callId, name: "render_html", input },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      });
+      const runtime = await createRuntime({
+        cwd: root,
+        sessionsDir: path.join(root, "sessions"),
+        providers: [provider],
+        interactive: true,
+      });
+      const session = await runtime.createSession({ model: "fake/fake-model" });
+      try {
+        await session.submit({ text: "测试错误路径" });
+        const completions = session
+          .durableEvents()
+          .filter(
+            (e): e is DurableEvent<"tool.completed"> =>
+              e.type === "tool.completed" && e.payload.name === "render_html",
+          );
+        expect(completions).toHaveLength(5);
+
+        // page 不存在：报错并列出现有 page id 与标题
+        expect(completions[1]?.payload.status).toBe("error");
+        expect(completions[1]?.payload.error?.code).toBe("invalid_input");
+        expect(completions[1]?.payload.modelContent).toContain("page-1");
+        expect(completions[1]?.payload.modelContent).toContain("首页");
+
+        // old 未出现：报第 2 条、0 次
+        expect(completions[2]?.payload.status).toBe("error");
+        expect(completions[2]?.payload.error?.code).toBe("invalid_input");
+        expect(completions[2]?.payload.modelContent).toContain("第 2 条");
+        expect(completions[2]?.payload.modelContent).toContain("0 次");
+
+        // old 出现多次：报第 1 条、2 次
+        expect(completions[3]?.payload.status).toBe("error");
+        expect(completions[3]?.payload.error?.code).toBe("invalid_input");
+        expect(completions[3]?.payload.modelContent).toContain("第 1 条");
+        expect(completions[3]?.payload.modelContent).toContain("2 次");
+
+        // 替换后超 256 KiB：报错
+        expect(completions[4]?.payload.status).toBe("error");
+        expect(completions[4]?.payload.error?.code).toBe("invalid_input");
+        expect(completions[4]?.payload.modelContent).toContain("256 KiB");
+
+        // 整次失败均不生效：页面仍只有 v1
+        const view = replaySessionView(session.durableEvents());
+        expect(view.pages).toHaveLength(1);
+        expect(view.pages[0]?.versions).toHaveLength(1);
+      } finally {
+        await session.close();
+      }
+    });
+
+    it("预设 read allow 只放行本会话页面文件，其他附件与写入/shell 需要确认", () => {
+      const policy = createRulePolicy({
+        workspaceRoot: "C:/work",
+        caseSensitive: false,
+        preset: "default",
+        presetContext: {
+          inlinePageFiles: ["C:/sessions/attachments/s1/file-1.html"],
+        },
+      });
+      const allowed = policy.evaluate([
+        {
+          kind: "read",
+          target: "C:/sessions/attachments/s1/file-1.html",
+          resolved: "C:/sessions/attachments/s1/file-1.html",
+        },
+      ]);
+      expect(allowed.decision.action).toBe("allow");
+      expect(allowed.decision.matchedRule?.rule?.label).toBe("本会话页面文件");
+
+      for (const [kind, target] of [
+        ["read", "C:/sessions/attachments/s1/file-2.html"],
+        ["read", "C:/sessions/attachments/s1/img-1.png"],
+        ["read", "C:/sessions/attachments/s2/file-1.html"],
+        ["edit", "C:/sessions/attachments/s1/file-1.html"],
+        ["shell", "type C:/sessions/attachments/s1/file-1.html"],
+      ] as const) {
+        expect(
+          policy.evaluate([{ kind, target, ...(kind !== "shell" ? { resolved: target } : {}) }])
+            .decision.action,
+        ).toBe("ask");
+      }
+    });
+
+    it("Runtime 会话中模型用 read 读取 render_html 产出的页面文件自动命中本会话页面文件规则", async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-render-read-"));
+      roots.push(root);
+      const sessionsDir = path.join(root, "sessions");
+      let savedPath = "";
+      let step = 0;
+      const provider = new FakeProvider({
+        handler: (req) => {
+          if (step === 0) {
+            step++;
+            return [
+              {
+                type: "tool_call",
+                toolCallId: "rh-1",
+                name: "render_html",
+                input: { title: "面板页", html: "<p>v1 content</p>", display: "panel" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          if (step === 1) {
+            step++;
+            const toolMsg = req.messages.findLast((m) => m.role === "tool");
+            const text = toolMsg && "content" in toolMsg ? String(toolMsg.content) : "";
+            const match = /已保存：(.+?)（/.exec(text);
+            savedPath = match?.[1] ?? "";
+            return [
+              {
+                type: "tool_call",
+                toolCallId: "rd-1",
+                name: "read",
+                input: { path: savedPath },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            { type: "text_delta", text: "已核对全文。" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      });
+      const runtime = await createRuntime({
+        cwd: root,
+        sessionsDir,
+        providers: [provider],
+        interactive: true,
+      });
+      const session = await runtime.createSession({
+        model: "fake/fake-model",
+        permissionPreset: "read-only",
+      });
+      try {
+        const events: RuntimeEvent[] = [];
+        session.subscribe((ev) => events.push(ev));
+        await session.submit({ text: "建页面再读回" });
+        expect(savedPath).toContain("file-1.html");
+        expect(events.some((e) => e.type === "permission.requested")).toBe(false);
+        const readStarted = session
+          .durableEvents()
+          .find(
+            (e): e is DurableEvent<"tool.started"> =>
+              e.type === "tool.started" && e.payload.name === "read",
+          );
+        expect(readStarted?.payload.permission.action).toBe("allow");
+        expect(readStarted?.payload.permission.rule).toContain("本会话页面文件");
+        const readCompleted = session
+          .durableEvents()
+          .find(
+            (e): e is DurableEvent<"tool.completed"> =>
+              e.type === "tool.completed" && e.payload.name === "read",
+          );
+        expect(readCompleted?.payload.status).toBe("ok");
+        expect(readCompleted?.payload.modelContent).toContain("<p>v1 content</p>");
+      } finally {
+        await session.close();
+      }
+    });
+
+    it("回退撤销之后的版本，分叉继承分叉点之前的版本", async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-render-rewind-"));
+      roots.push(root);
+      const sessionsDir = path.join(root, "sessions");
+      let turn = 0;
+      const provider = new FakeProvider({
+        handler: () => {
+          turn++;
+          if (turn === 1) {
+            return [
+              {
+                type: "tool_call",
+                toolCallId: "rh-t1",
+                name: "render_html",
+                input: { title: "看板", html: "<p>v1</p>", display: "panel" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          if (turn === 2) {
+            return [
+              { type: "text_delta", text: "第一版好了" },
+              { type: "finish", reason: "stop" },
+            ];
+          }
+          if (turn === 3) {
+            return [
+              {
+                type: "tool_call",
+                toolCallId: "rh-t2",
+                name: "render_html",
+                input: { page: "page-1", edits: [{ old: "v1", new: "v2" }] },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            { type: "text_delta", text: "第二版好了" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      });
+      const runtime = await createRuntime({
+        cwd: root,
+        sessionsDir,
+        providers: [provider],
+        interactive: true,
+      });
+      const session = await runtime.createSession({ model: "fake/fake-model" });
+      try {
+        await session.submit({ text: "做看板" });
+        await session.submit({ text: "改成 v2" });
+        const before = replaySessionView(session.durableEvents());
+        expect(before.pages[0]?.versions).toHaveLength(2);
+
+        const userEvents = session
+          .durableEvents()
+          .filter((e): e is DurableEvent<"message.user"> => e.type === "message.user");
+        const secondUserSeq = userEvents[1]?.seq;
+        if (secondUserSeq === undefined) throw new Error("expected second user event");
+
+        // 分叉在第二条用户消息之前：只继承 v1
+        const forkedId = await runtime.forkSession(session.id, { targetSeq: secondUserSeq });
+        const forkedSession = await runtime.resumeSession(forkedId);
+        try {
+          const forkedView = replaySessionView(forkedSession.durableEvents());
+          expect(forkedView.pages).toHaveLength(1);
+          expect(forkedView.pages[0]?.versions.map((v) => v.version)).toEqual([1]);
+        } finally {
+          await forkedSession.close();
+        }
+
+        // 原会话回退到第二条用户消息之前：撤销 v2，只剩 v1
+        await session.rewind(secondUserSeq, "conversation");
+        const afterRewind = replaySessionView(session.durableEvents());
+        expect(afterRewind.pages).toHaveLength(1);
+        expect(afterRewind.pages[0]?.versions.map((v) => v.version)).toEqual([1]);
+      } finally {
+        await session.close();
+      }
+    });
+
+    it("旧会话页面派生为单版本 inline 页面且 id 不与新页面冲突；旧版 schema 剥离新字段后仍能解析", () => {
+      const legacyFile: FileAttachment = {
+        type: "file",
+        file: "file-1.html",
+        bytes: 32,
+        sha256: "a".repeat(64),
+        label: "旧图表.html",
+        mimeType: "text/html",
+        source: "upload",
+        inline: { title: "旧图表" },
+      };
+      const newFile: FileAttachment = {
+        type: "file",
+        file: "file-2.html",
+        bytes: 48,
+        sha256: "b".repeat(64),
+        label: "新面板.html",
+        mimeType: "text/html",
+        source: "upload",
+        inline: { title: "新面板", page: "page-1", version: 1, display: "panel" },
+      };
+      const event2: DurableEvent<"tool.completed"> = {
+        seq: 3,
+        sessionId: "s-legacy",
+        turnId: "t2",
+        time: "2026-11-20T00:00:02.000Z",
+        type: "tool.completed",
+        payload: {
+          callId: "c2",
+          name: "render_html",
+          status: "ok",
+          modelContent: "ok",
+          durationMs: 5,
+          files: [newFile],
+        },
+      };
+      const events: DurableEvent[] = [
+        {
+          seq: 1,
+          sessionId: "s-legacy",
+          time: "2026-11-20T00:00:00.000Z",
+          type: "session.created",
+          payload: {
+            cwd: "/ws",
+            workspaceRoot: "/ws",
+            model: { provider: "fake", model: "m" },
+            permissionPreset: "default",
+            formatVersion: 1,
+            nocturneVersion: "0.57.0",
+          },
+        },
+        {
+          seq: 2,
+          sessionId: "s-legacy",
+          turnId: "t1",
+          time: "2026-11-20T00:00:01.000Z",
+          type: "tool.completed",
+          payload: {
+            callId: "c1",
+            name: "render_html",
+            status: "ok",
+            modelContent: "ok",
+            durationMs: 5,
+            files: [legacyFile],
+          },
+        },
+        event2,
+      ];
+
+      const view = replaySessionView(events);
+      expect(view.pages).toHaveLength(2);
+      expect(view.pages[0]).toEqual({
+        page: legacyInlinePageId("file-1.html"),
+        title: "旧图表",
+        display: "inline",
+        versions: [{ version: 1, file: legacyFile, title: "旧图表", seq: 2 }],
+      });
+      expect(view.pages[1]).toEqual({
+        page: "page-1",
+        title: "新面板",
+        display: "panel",
+        versions: [{ version: 1, file: newFile, title: "新面板", seq: 3 }],
+      });
+      expect(view.pages[0]?.page).not.toBe(view.pages[1]?.page);
+
+      // 模拟旧版 Runtime 的 toolResultFileAttachmentSchema（仅 inline: z.object({ title: z.string() })，非 strict）
+      const oldInlineSchema = z.object({ title: z.string() }).optional();
+      const stripped = oldInlineSchema.parse(newFile.inline);
+      expect(stripped).toEqual({ title: "新面板" });
+
+      // 反向验证：新版 decodeDurableEvent 解析带新字段的持久事件完整保留所有字段
+      const encoded = encodeDurableEvent(event2);
+      const decoded = decodeDurableEvent(encoded);
+      expect(decoded.type).toBe("tool.completed");
+      if (decoded.type === "tool.completed") {
+        expect(decoded.payload.files?.[0]?.inline).toEqual({
+          title: "新面板",
+          page: "page-1",
+          version: 1,
+          display: "panel",
+        });
+      }
+    });
   });
 });

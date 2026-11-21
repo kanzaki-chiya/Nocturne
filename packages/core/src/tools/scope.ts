@@ -27,6 +27,7 @@ export function createExecutionScope(
     askUser: env.askUser,
     schedule: env.schedule,
     notes: env.notes,
+    pages: env.pages,
     pauseTimeouts: env.pauseTimeouts,
     // ADR-0035 §5：能力值随调用传入，模型切换后下一次调用即生效
     editTool: call.editTool,

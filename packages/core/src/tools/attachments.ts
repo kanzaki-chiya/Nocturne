@@ -12,6 +12,7 @@ import type {
   FileAttachment,
   ImageAttachment,
   ImageMimeType,
+  InlinePageMeta,
   ProcessedImage,
 } from "../protocol/index.js";
 import {
@@ -56,7 +57,7 @@ export interface AttachmentStore {
     mimeType?: string | undefined;
     label: string;
     source: FileAttachment["source"];
-    inline?: { title: string } | undefined;
+    inline?: InlinePageMeta | undefined;
   }): Promise<FileAttachment>;
   /** 按引用取回字节；文件缺失或 sha256 不符返回 undefined。运行期按 sha256 缓存 */
   load(

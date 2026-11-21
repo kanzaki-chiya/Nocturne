@@ -56,9 +56,11 @@ export {
   MAX_INLINE_HTML_IMAGES,
   MAX_INLINE_HTML_SAVED_BYTES,
   MAX_INLINE_HTML_TITLE_CHARS,
+  applyHtmlEdits,
   isSvgImage,
   replaceImageReferences,
   sanitizeInlineHtmlLabel,
+  type RenderHtmlEdit,
   type RenderHtmlInput,
   type RenderHtmlOutput,
 } from "./builtin/render-html.js";

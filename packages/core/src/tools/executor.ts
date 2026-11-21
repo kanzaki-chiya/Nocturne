@@ -8,8 +8,10 @@
 import type { ValidateFunction } from "ajv";
 
 import type {
+  FileAttachment,
   ImageAttachment,
   ImageMimeType,
+  InlinePageMeta,
   PermissionSubject,
   SubjectRequest,
   ToolCallRef,
@@ -682,14 +684,24 @@ export function createToolExecutor(
           : {}),
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
         ...(scope.notes !== undefined ? { notes: scope.notes } : {}),
+        ...(scope.pages !== undefined ? { pages: scope.pages } : {}),
         pauseTimeouts,
+        ...(scope.attachmentsDir !== undefined
+          ? (() => {
+              const attachmentsDir = scope.attachmentsDir;
+              return {
+                attachmentPath: (file: string) =>
+                  scope.paths.join(attachmentsDir, scope.sessionId, file),
+              };
+            })()
+          : {}),
         ...(attachmentStore !== undefined
           ? {
               saveFileAttachment: (input: {
                 data: Uint8Array;
                 mimeType?: string | undefined;
                 label: string;
-                inline?: { title: string } | undefined;
+                inline?: InlinePageMeta | undefined;
               }) =>
                 attachmentStore.saveFile({
                   data: input.data,
@@ -698,6 +710,8 @@ export function createToolExecutor(
                   source: "upload",
                   ...(input.inline !== undefined ? { inline: input.inline } : {}),
                 }),
+              loadFileAttachment: (att: Pick<FileAttachment, "file" | "sha256">) =>
+                attachmentStore.load(att),
               saveImageAttachment: (input: {
                 data: Uint8Array;
                 mimeType: ImageMimeType;

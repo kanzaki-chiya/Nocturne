@@ -32,11 +32,14 @@ export interface PresetContext {
   skillRoots?: readonly string[] | undefined;
   /** 已发现命令文件技能的真实文件路径：只放行该文件本身，不放行整个目录 */
   skillFiles?: readonly string[] | undefined;
+  /** 本会话 inline 页面附件的绝对文件路径：仅放行这些页面文件的 read（ADR-0109） */
+  inlinePageFiles?: readonly string[] | undefined;
 }
 
 const PROTECTED_LABEL = "受保护路径";
 const AUTH_DATA_LABEL = "修改 Nocturne 授权配置";
 const ATTACHMENTS_LABEL = "本会话落盘目录";
+const INLINE_PAGE_LABEL = "本会话页面文件";
 
 interface BroadRule {
   kind?: PermissionRule["kind"];
@@ -175,6 +178,11 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
   for (const file of ctx.skillFiles ?? []) {
     const filePath = normalizePathText(file, ctx.caseSensitive);
     rules.push({ kind: "read", pattern: filePath, action: "allow", label: "本会话技能文件" });
+  }
+
+  for (const file of ctx.inlinePageFiles ?? []) {
+    const normalized = normalizePathText(file, ctx.caseSensitive);
+    rules.push({ kind: "read", pattern: normalized, action: "allow", label: INLINE_PAGE_LABEL });
   }
 
   // 受保护路径与授权数据"至少 ask"：read-only 中 edit 已一律 deny，不再生成 ask 规则

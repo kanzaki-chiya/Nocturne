@@ -1,4 +1,9 @@
-import type { SubjectRequest } from "../../protocol/index.js";
+import {
+  nextSessionPageId,
+  type InlinePageDisplay,
+  type SessionPage,
+  type SubjectRequest,
+} from "../../protocol/index.js";
 import { sniffImageMime } from "../image.js";
 import type { ToolContext, ToolDefinition, ToolResult, ToolScope } from "../types.js";
 
@@ -12,16 +17,75 @@ export const MAX_INLINE_HTML_IMAGES = 20;
  */
 export const MAX_INLINE_HTML_SAVED_BYTES = 8 * 1024 * 1024;
 
+export interface RenderHtmlEdit {
+  old: string;
+  new: string;
+}
+
 export interface RenderHtmlInput {
-  title: string;
-  html: string;
+  title?: string | undefined;
+  html?: string | undefined;
   images?: string[] | undefined;
+  page?: string | undefined;
+  edits?: RenderHtmlEdit[] | undefined;
+  display?: InlinePageDisplay | undefined;
 }
 
 export interface RenderHtmlOutput {
+  page: string;
+  version: number;
+  display: InlinePageDisplay;
   title: string;
   file: string;
+  path: string;
   bytes: number;
+}
+
+/** 防止同一 step 并发新建多个页面时分配重复 page-<n> */
+const inFlightPageIds = new WeakMap<object, Set<string>>();
+
+function getInFlightSet(key: object | undefined): Set<string> | undefined {
+  if (key === undefined) return undefined;
+  let set = inFlightPageIds.get(key);
+  if (set === undefined) {
+    set = new Set<string>();
+    inFlightPageIds.set(key, set);
+  }
+  return set;
+}
+
+/** 统计 needle 在 text 中不重叠出现的次数（与 edit 工具一致） */
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  let i = 0;
+  for (;;) {
+    const found = text.indexOf(needle, i);
+    if (found === -1) return count;
+    count += 1;
+    i = found + needle.length;
+  }
+}
+
+/** 按顺序依次对 HTML 做精确替换；任一条 old 未恰好出现一次即失败，不生效 */
+export function applyHtmlEdits(
+  baseHtml: string,
+  edits: readonly RenderHtmlEdit[],
+): { ok: true; html: string } | { ok: false; error: string } {
+  let current = baseHtml;
+  for (let i = 0; i < edits.length; i += 1) {
+    const edit = edits[i];
+    if (edit === undefined) continue;
+    const count = countOccurrences(current, edit.old);
+    if (count !== 1) {
+      return {
+        ok: false,
+        error: `edits 第 ${i + 1} 条的 old 在当前 HTML 中出现了 ${count} 次（必须恰好出现 1 次）`,
+      };
+    }
+    const idx = current.indexOf(edit.old);
+    current = `${current.slice(0, idx)}${edit.new}${current.slice(idx + edit.old.length)}`;
+  }
+  return { ok: true, html: current };
 }
 
 /** 将标题清洗为可安全用于文件下载名 `<标题>.html` 的前缀 */
@@ -77,14 +141,49 @@ function failure(code: string, message: string): ToolResult<RenderHtmlOutput> {
   return { status: "error", modelContent: message, error: { code, message } };
 }
 
+function validateTitle(title: unknown): string | undefined {
+  if (typeof title !== "string" || title.trim() === "") {
+    return "title 不能为空";
+  }
+  if (/[\r\n]/.test(title)) {
+    return "title 必须是单行文本，不能包含换行";
+  }
+  if (
+    title.trim().length > MAX_INLINE_HTML_TITLE_CHARS ||
+    title.length > MAX_INLINE_HTML_TITLE_CHARS
+  ) {
+    return `title 长度不能超过 ${MAX_INLINE_HTML_TITLE_CHARS} 个字符`;
+  }
+  return undefined;
+}
+
+function validateHtmlText(html: unknown): string | undefined {
+  if (typeof html !== "string" || html.trim() === "") {
+    return "html 不能为空";
+  }
+  const bytes = Buffer.byteLength(html, "utf8");
+  if (bytes > MAX_INLINE_HTML_BYTES) {
+    return `html 大小不能超过 ${MAX_INLINE_HTML_BYTES / 1024} KiB（当前 ${bytes} B）`;
+  }
+  return undefined;
+}
+
+function formatExistingPages(pages: readonly SessionPage[]): string {
+  if (pages.length === 0) {
+    return "当前会话尚未创建任何页面";
+  }
+  const lines = pages.map((p) => `- ${p.page}: ${p.title}`);
+  return `当前会话已有页面：\n${lines.join("\n")}`;
+}
+
 /** 逐个读取 images 并内联进 html；任一失败整次调用失败 */
 async function inlineImages(
-  input: RenderHtmlInput,
+  baseHtml: string,
+  images: readonly string[] | undefined,
   ctx: ToolContext,
 ): Promise<{ html: string } | { error: ToolResult<RenderHtmlOutput> }> {
-  const images = input.images ?? [];
-  let html = input.html;
-  for (const ref of images) {
+  let html = baseHtml;
+  for (const ref of images ?? []) {
     const lexical = ctx.paths.resolve(ctx.cwd, ref);
     const approved = ctx.subjects.find((s) => s.kind === "read" && s.target === lexical);
     const target = approved?.resolved ?? lexical;
@@ -143,26 +242,69 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "在对话中内嵌渲染一份自包含的单文件 HTML 页面。仅在图表、对比表、示意图、界面草图或轻量交互明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown 回复。页面在断网沙箱中运行：允许内联脚本与内联样式，完全不能联网（远程脚本、样式、图片、字体、fetch、WebSocket 均不可用，图片与字体须用内联 SVG 或 data:），链接跳转、表单提交、弹窗与下载均无效。要显示本地图片文件时，把路径列进 images，并在 html 的属性值或 CSS url() 中写同一字符串，保存时会自动内联。容器桌面宽约 720px、手机宽约 360px，需响应式自适应，高于 420px 自动折叠并可展开或全屏。页面直接显示在对话中，回复正文不要复述页面里的数据、结论或说明。显示时自动注入主题 CSS 变量（随深浅色实时切换）：--bg（页面底色）、--raised（凸起面）、--text（文字）、--secondary（次要文字）、--muted（弱文字）、--border（边线）、--accent（强调色）、--ok（成功色）、--warn（警告色）、--bad（危险色）、--sans（正文字体）、--mono（等宽字体）。",
+    "Create or update a self-contained single-file HTML page rendered in an offline sandbox. " +
+    "Use only when a chart, comparison table, diagram, UI mockup, interactive widget, dashboard, or standalone document is clearly better than prose, or when the user asks for one; use Markdown for ordinary explanations and code. " +
+    "Choose display when creating a page (ignored on updates): use 'inline' (default) for charts, diagrams, and comparison tables that accompany the reply; use 'panel' for pages the user will iterate on or use alongside the chat (widgets, dashboards, documents). " +
+    "To update an existing page, pass its page id returned by an earlier call with either 'edits' (preferred for small changes: sequential exact replacements where each old string appears once) or 'html' (full rewrite); omit 'title' to keep the previous title. " +
+    "Use 'read' on the saved file path from the tool result when you need to inspect the current full HTML. " +
+    "Sandbox rules: inline scripts and styles are allowed; all network access is blocked (no external scripts, stylesheets, images, fonts, fetch, or WebSocket—inline SVG or data: URIs only); links, form submissions, popups, and downloads are disabled. " +
+    "To embed local images, list their paths in 'images' and reference the exact same strings in HTML attributes or CSS url(); they are inlined automatically on save. " +
+    "Make layouts responsive (inline width ~720px on desktop and ~360px on mobile; inline pages taller than 420px collapse with expand/fullscreen). " +
+    "Do not repeat the page's data, conclusions, or explanations in your reply text. " +
+    "Theme CSS variables are injected dynamically on display (live-updated for light/dark mode): --bg, --raised, --text, --secondary, --muted, --border, --accent, --ok, --warn, --bad, --sans, --mono.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
-    required: ["title", "html"],
     properties: {
       title: {
         type: "string",
-        description: "单行页面标题（至多 80 字符）",
+        description:
+          "Single-line page title (up to 80 chars). Required when creating a page; optional when updating (defaults to the previous version's title).",
       },
       html: {
         type: "string",
-        description: "自包含的单文件 HTML（UTF-8 至多 256 KiB）",
+        description:
+          "Self-contained single-file HTML (UTF-8 up to 256 KiB). Required when creating a page; when updating, provide either html (full rewrite) or edits, not both.",
+      },
+      page: {
+        type: "string",
+        minLength: 1,
+        description: "Existing page id (e.g. 'page-1') to update as a new version.",
+      },
+      edits: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["old", "new"],
+          properties: {
+            old: {
+              type: "string",
+              minLength: 1,
+              description: "Exact substring in the current HTML; must occur once.",
+            },
+            new: {
+              type: "string",
+              description: "Replacement text.",
+            },
+          },
+        },
+        description:
+          "Sequential exact replacements applied to the previous version's HTML (update only; mutually exclusive with html). Prefer for small edits.",
+      },
+      display: {
+        type: "string",
+        enum: ["inline", "panel"],
+        description:
+          "Presentation mode on creation (default 'inline'; ignored on updates): 'inline' embeds in the reply (charts, diagrams, comparison tables); 'panel' shows a compact entry row and opens in the side panel (widgets, dashboards, iterative documents).",
       },
       images: {
         type: "array",
         maxItems: MAX_INLINE_HTML_IMAGES,
         items: { type: "string", minLength: 1 },
         description:
-          '页面引用的本地图片路径（相对 cwd 或绝对路径，至多 20 个）；HTML 里用与数组项完全相同的字符串引用，如 src="a.png" 或 url(a.png)',
+          'Local image paths (relative to cwd or absolute, up to 20) to inline; reference each exact string in HTML attributes or CSS url(), e.g. src="a.png" or url(a.png).',
       },
     },
   },
@@ -178,24 +320,52 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
     }));
   },
   validateInput(input) {
-    if (typeof input.title !== "string" || input.title.trim() === "") {
-      return "title 不能为空";
-    }
-    if (/[\r\n]/.test(input.title)) {
-      return "title 必须是单行文本，不能包含换行";
-    }
-    if (
-      input.title.trim().length > MAX_INLINE_HTML_TITLE_CHARS ||
-      input.title.length > MAX_INLINE_HTML_TITLE_CHARS
-    ) {
-      return `title 长度不能超过 ${MAX_INLINE_HTML_TITLE_CHARS} 个字符`;
-    }
-    if (typeof input.html !== "string" || input.html.trim() === "") {
-      return "html 不能为空";
-    }
-    const bytes = Buffer.byteLength(input.html, "utf8");
-    if (bytes > MAX_INLINE_HTML_BYTES) {
-      return `html 大小不能超过 ${MAX_INLINE_HTML_BYTES / 1024} KiB（当前 ${bytes} B）`;
+    const isUpdate = input.page !== undefined;
+    if (isUpdate) {
+      if (typeof input.page !== "string" || input.page.trim() === "") {
+        return "page 必须是非空字符串";
+      }
+      if (input.title !== undefined) {
+        const titleErr = validateTitle(input.title);
+        if (titleErr !== undefined) return titleErr;
+      }
+      const hasHtml = input.html !== undefined;
+      const hasEdits = input.edits !== undefined;
+      if (hasHtml === hasEdits) {
+        return "更新页面时 html 与 edits 必须且只能提供一个";
+      }
+      if (hasHtml) {
+        const htmlErr = validateHtmlText(input.html);
+        if (htmlErr !== undefined) return htmlErr;
+      }
+      if (hasEdits) {
+        if (!Array.isArray(input.edits) || input.edits.length === 0) {
+          return "edits 必须是非空数组";
+        }
+        for (let i = 0; i < input.edits.length; i += 1) {
+          const item = input.edits[i];
+          if (
+            item === undefined ||
+            typeof item.old !== "string" ||
+            item.old.length === 0 ||
+            typeof item.new !== "string"
+          ) {
+            return `edits 第 ${i + 1} 条必须包含非空字符串 old 和字符串 new`;
+          }
+        }
+      }
+    } else {
+      const titleErr = validateTitle(input.title);
+      if (titleErr !== undefined) return titleErr;
+      if (input.edits !== undefined) {
+        return "新建页面时不能传入 edits，请提供 html";
+      }
+      const htmlErr = validateHtmlText(input.html);
+      if (htmlErr !== undefined) return htmlErr;
+      const rawDisplay: unknown = input.display;
+      if (rawDisplay !== undefined && rawDisplay !== "inline" && rawDisplay !== "panel") {
+        return 'display 必须是 "inline" 或 "panel"';
+      }
     }
     if (input.images !== undefined) {
       if (!Array.isArray(input.images) || input.images.length > MAX_INLINE_HTML_IMAGES) {
@@ -218,22 +388,100 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         error: { code: "attachment_unavailable", message: "附件存储不可用" },
       };
     }
-    const title = input.title.trim();
-    const label = sanitizeInlineHtmlLabel(title);
-    const inlined = await inlineImages(input, ctx);
-    if ("error" in inlined) return inlined.error;
-    const data = new TextEncoder().encode(inlined.html);
+
+    const pages = ctx.pages?.() ?? [];
+    let pageId: string;
+    let version: number;
+    let display: InlinePageDisplay;
+    let title: string;
+    let baseHtml: string;
+    let reservedId: string | undefined;
+    const inFlight = getInFlightSet(ctx.pages);
+
+    if (input.page !== undefined) {
+      const requestedPage = input.page.trim();
+      const existing = pages.find((p) => p.page === requestedPage);
+      if (existing === undefined) {
+        return failure(
+          "invalid_input",
+          `页面 "${requestedPage}" 不存在。${formatExistingPages(pages)}`,
+        );
+      }
+      pageId = existing.page;
+      const latest = existing.versions.at(-1);
+      version = (latest?.version ?? existing.versions.length) + 1;
+      // 更新时沿用第一版的显示方式，忽略本次传入的 display
+      display = existing.display;
+      title = input.title !== undefined ? input.title.trim() : existing.title;
+
+      if (input.edits !== undefined) {
+        if (!ctx.loadFileAttachment || latest === undefined) {
+          return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
+        }
+        const prevBytes = await ctx.loadFileAttachment(latest.file);
+        if (prevBytes === undefined) {
+          return failure(
+            "io_error",
+            `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
+          );
+        }
+        const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
+        const applied = applyHtmlEdits(prevHtml, input.edits);
+        if (!applied.ok) {
+          return failure("invalid_input", applied.error);
+        }
+        const htmlErr = validateHtmlText(applied.html);
+        if (htmlErr !== undefined) {
+          return failure("invalid_input", htmlErr);
+        }
+        baseHtml = applied.html;
+      } else {
+        if (input.html === undefined) {
+          return failure("invalid_input", "更新页面时请提供 html 或 edits");
+        }
+        baseHtml = input.html;
+      }
+    } else {
+      if (input.title === undefined || input.html === undefined) {
+        return failure("invalid_input", "新建页面必须提供 title 与 html");
+      }
+      pageId = nextSessionPageId(pages, inFlight);
+      if (inFlight !== undefined) {
+        inFlight.add(pageId);
+        reservedId = pageId;
+      }
+      version = 1;
+      display = input.display ?? "inline";
+      title = input.title.trim();
+      baseHtml = input.html;
+    }
+
     try {
+      const label = sanitizeInlineHtmlLabel(title);
+      const inlined = await inlineImages(baseHtml, input.images, ctx);
+      if ("error" in inlined) return inlined.error;
+      const data = new TextEncoder().encode(inlined.html);
       const saved = await ctx.saveFileAttachment({
         data,
         mimeType: "text/html",
         label,
-        inline: { title },
+        inline: { title, page: pageId, version, display },
       });
+      const filePath = ctx.attachmentPath ? ctx.attachmentPath(saved.file) : saved.file;
       return {
         status: "ok",
-        modelContent: `内嵌页面「${title}」已显示给用户（${saved.file}，${saved.bytes} B）。回复中不要复述页面里的数据、结论或说明。`,
-        output: { title, file: saved.file, bytes: saved.bytes },
+        modelContent:
+          `页面「${title}」（${pageId} v${version}，${display === "panel" ? "面板" : "内嵌"}）已保存：${filePath}（${saved.bytes} B）。` +
+          `回复中不要复述页面里的数据、结论或说明；需要核对当前全文时可用 read 读取该路径。`,
+        output: {
+          page: pageId,
+          version,
+          display,
+          title,
+          file: saved.file,
+          path: filePath,
+          bytes: saved.bytes,
+        },
         files: [saved],
       };
     } catch (e) {
@@ -243,6 +491,10 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         modelContent: `保存内嵌页面失败：${message}`,
         error: { code: "io_error", message },
       };
+    } finally {
+      if (reservedId !== undefined) {
+        inFlight?.delete(reservedId);
+      }
     }
   },
 };
