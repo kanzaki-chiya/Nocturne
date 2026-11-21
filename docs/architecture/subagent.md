@@ -187,7 +187,7 @@ launch(request, ctx)
 
 - 交互父会话派生的内置 `task` 子代理不再以 `non_interactive` 直接拒批，而是通过注入的 `SubagentPermissionsDeps` 打开子会话 `PermissionGate` 的交互开关（`interactive: true`）并将待决请求登记到最外层交互父会话的活动转发池（`smart` 预设仍先经过 `PermissionRequest` Hook 与安全审查，仅 `unsure` 或 `userOnly` 主体进入等待确认）。
 - 非交互宿主（`interactive: false`、定时任务、`nctrn -p`）与外部 ACP agent（[ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）保持原非交互语义不变；`ask_user` 工具（[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)）仍不向子代理暴露、也不参与转发。
-- **修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8、[ADR-0097](../decisions/ADR-0097-suites.md) §3.4：常驻子会话权限确认）**：合奏常驻成员与组曲线程除了冒泡到父会话（经 `respondSubagentPermission` 确认），其请求也原样保留在自身 `SessionView.pendingPermission` 上，并分别通过 `ensemble.member_updated` 与 `suite.thread_updated` 汇报给指挥与总览；用户可直接打开线程或成员会话确认，也可经父会话转发池确认；TUI 只在成员 / 线程视图确认，见 [tui.md](../apps/tui.md)。
+- **修订（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8、[ADR-0097](../decisions/ADR-0097-suites.md) §3.4：常驻子会话权限确认）**：合奏常驻成员与组曲线程除了冒泡到父会话（经 `respondSubagentPermission` 确认），其请求也原样保留在自身 `SessionView.pendingPermission` 上，并分别通过 `ensemble.member_updated` 与 `suite.thread_updated` 汇报给指挥与总览；用户可直接打开线程或成员会话确认，也可经父会话转发池确认；桌面端对合奏成员只在指挥主会话显示待确认提示行、点击进入成员会话标签确认（见 [desktop.md](../apps/desktop.md)），TUI 只在成员 / 线程视图确认，见 [tui.md](../apps/tui.md)。
 
 ### 7.2 子会话的有效策略
 

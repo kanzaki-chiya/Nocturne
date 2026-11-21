@@ -205,3 +205,9 @@
 - **只送指挥模型、不上留言板、不占编号**：全员等待或暂停且无待送达帖子时，Runtime 不再写 `ensemble.posted`（`fromKind: "runtime"`），不占用帖子编号、不进入 `posts` 与 `ensemble_read`；改为直接向指挥投递不带 `@maestro` 前缀、也不用 `<ensemble-post>` 包装的英文提醒，并在 `message.user` 上携带可选标记 `ensembleQuietReminder: true`。
 - **三端对话视图不显示，旧日志照旧**：`SessionView` 归约遇到 `message.user.ensembleQuietReminder === true` 时不创建对话条目，桌面端、手机网页与 TUI 均不渲染该提醒（亦不作为回退或分叉目标、不更新会话活动时间），但模型上下文折叠、压缩与修剪照常保留；旧日志中既有的 `fromKind: "runtime"` 提醒帖不迁移、不隐藏，留言板与对话仍照旧显示。
 - **恢复与回退判定**：重启恢复与对话回退时，按有效事件中最近一条非 `runtime` 作者的 `ensemble.posted` 之后是否已存在安静提醒（新标记 `message.user.ensembleQuietReminder === true` 或旧日志非任务书 `fromKind: "runtime"` 帖子）推断 `quietReminderSent`，保持每段安静期只发一次、有新帖后重计的语义。
+
+## 修订（2026-11-21）：桌面端合奏行入口与成员待确认提示行
+
+- **对话流 `ensemble_init` 行改作合奏入口**（修订 2026-11-14「桌面端与手机端对话流不再渲染入口行」中的桌面端部分）：桌面端指挥会话中已成功的 `ensemble_init` 工具行改为整行可点击、键盘可达的合奏入口（不再展开，去掉「完成」），左侧折叠箭头换为指挥小头像，中间保留「合奏」与单行省略标题；创建当前 `SessionView.ensemble` 的那一行在合奏进行中右侧展示指挥与未移除成员小头像组（有待确认成员时头像加警告色描边）、状态圆点与右箭头，当前合奏已结束时右侧仅显示「已结束」与右箭头且仍可点击打开留言板。同一会话发生过多次合奏时，更早的 `ensemble_init` 行静态显示「已结束」、无箭头、不可点击，避免误打开当前合奏的留言板；运行中、失败或被拒绝的 `ensemble_init` 仍保持通用工具行。手机端与 TUI 维持现状。
+- **桌面端合奏成员确认改为提示行，不在指挥主会话弹出确认卡片**：桌面端指挥会话底部的 `conversation-requests` 过滤掉 `childSessionId` 属于当前合奏成员的转发权限请求，不再在主会话渲染该成员的 `PermissionCard`，改为对每名有待确认请求的未移除成员展示一行提示（带警告色描边的成员小头像、成员名、模型/档位、「等待确认」与右箭头），点击打开该成员的会话标签，在成员会话内完成确认。指挥自身与普通 `task` 子代理转发来的确认卡片照常在主会话显示，排序与首卡 `1–N` / `Esc` 快捷键只作用于剩余卡片。Core 的 `subagent.permissions` 转发与 `respondSubagentPermission`（[ADR-0091](ADR-0091-subagent-permission-forward.md)）保持不变；理由是让桌面端交互与 TUI 及用户文档（`site-docs/work-modes.md`）一致，成员确认回到成员自己的会话中处理，避免打断指挥主会话。
+
