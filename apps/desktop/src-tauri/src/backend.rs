@@ -515,6 +515,9 @@ pub fn handle_backend_open(invoke: tauri::ipc::Invoke) {
     });
     // 桌面浏览器启动凭证（desktop-browser.md 第 1 节）：只在启用时给本次 spawn 的环境。
     // 后台入口读出后立即删除；不进 argv、前端、配置或日志。
+    #[cfg(target_os = "macos")]
+    let browser_bootstrap = None;
+    #[cfg(not(target_os = "macos"))]
     let browser_bootstrap = invoke
         .message
         .webview_ref()
