@@ -136,3 +136,5 @@ Node 24.15.0 在 Windows 上大量建立出站连接时，libuv 的 TCP 连接�
 - 0.6.x 的命令行版经 GitHub Release 附带的 `nctrn-<version>.tgz` 分发，用户以 `npm install -g <tgz 文件或下载地址>` 安装；README 与 Release 说明不再写 `npm install -g nctrn`。
 - `nctrn` 包名、`pack-npm` 产物、tgz 冒烟与 `publish-npm.yml` 保持不变。账号就绪后按 [workflow.md](../development/workflow.md) 第 8 节补做首发与受信发布绑定，届时再恢复 README 的 npm 安装方式。
 - 桌面端分发与自动更新不受影响。
+
+2026-11-22 修订：Apple Silicon 桌面包及发布门槛见 [ADR-0110](ADR-0110-macos-desktop.md)。

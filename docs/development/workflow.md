@@ -200,8 +200,10 @@ pnpm shot \
 
 1. **版本号**：`node scripts/release-version.mjs <version>` 一次改齐所有 `package.json`、桌面与安卓的 `tauri.conf.json`、`Cargo.toml`、`Cargo.lock` 本包版本、npm 模板，以及源码里的版本常量（core `NOCTURNE_VERSION`、mcp/acp `CLIENT_VERSION`、mcp-server `SERVER_VERSION`、cli `VERSION`、tui `APP_VERSION`、relay `RELAY_VERSION`）；重复执行同一版本号不报错；`--check <version>` 只校验不写（流水线用它核对标签）。
 2. **CHANGELOG.md**：为 `<version>` 补一节（`## <version>` 标题格式），[release-notes.mjs](../../scripts/release-notes.mjs) 提取该节作为 Release 说明与 `latest.json` 的 `notes`，同时解析全部版本小节写入 `latest.json` 的 `changelog` 数组（从新到旧，`--notes` 只覆盖 `notes`、不影响 `changelog`）；找不到对应小节会让发布构建失败。
-3. **打标签**：审阅变更后先推送 `main`，等该提交的 CI 通过，再 `git tag v<version>` 并推送标签。
+3. **打标签**：审阅变更后先推送 `main`，等该提交的 `ci.yml` 和 `macos.yml` 都通过，再 `git tag v<version>` 并推送标签。
 4. **流水线**：`.github/workflows/release.yml` 在 windows-latest 上跑完整检查（typecheck / lint / format / depcheck / build / test）、版本一致性校验、`pnpm release:build`（带签名环境变量）、两种 tgz 安装冒烟，然后 `gh release create --draft`（版本号含 `-` 时另加 `--prerelease`）上传 `setup.exe`、`.sig`、`latest.json`、`nctrn-<version>.tgz`、`nocturne-relay-<version>.tgz`；ubuntu-latest 与 macos-latest 对两种 tgz 做安装冒烟，结果分别追加进草稿说明。
+macOS 桌面任务等 Windows 与 tgz 冒烟结束后构建并启动 `.app`；安卓任务再等它结束，以免覆盖同一份草稿说明。仓库变量 `RELEASE_MACOS_DESKTOP` 缺省关闭，仅在实机验收通过后设为 `true`。开启时核对 dmg、更新包与签名，并确认 `latest.json` 同时保留 Windows 和 `darwin-aarch64` 两项；关闭时草稿不应含 macOS 资产。
+
 5. **审草稿**：核对产物（含 `android` 任务附上的 `nocturne-<version>.apk`，见 [android.md](../apps/android.md)）、说明与冒烟结果，确认无误后发布 Release（草稿转正式）。主页由 `pages.yml` 在 Release 发布后自动更新，不需要手动处理（[主页维护](site.md)）。
 6. **npm 发布**（暂缓，见 [ADR-0050 修订](../decisions/ADR-0050-distribution.md#修订)；当前命令行版只随 Release 附 tgz）：`.github/workflows/publish-npm.yml`（workflow_dispatch，输入版本号）从已发布的 Release 下载 tgz 后 `npm publish`，走 npm 受信发布（OIDC）；预发布号挂 `next` 标签，不动 `latest`；版本号输入只经环境变量进入 shell，并先按 semver 正则校验。
 

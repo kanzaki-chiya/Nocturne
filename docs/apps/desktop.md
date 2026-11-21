@@ -6,6 +6,10 @@
 
 `apps/desktop` 是 Nocturne 的桌面端：一个 Tauri 进程内，React 前端经 `@nocturne/rpc/client` 与一个常驻 `nctrn rpc --stdio` 后台进程通信，Rust 外壳只负责进程管理与按行转发。所有会话语义（握手、方法调用、事件）都在前端处理，外壳不解析报文。[ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：侧栏分组、会话概览项目名固定使用创建时的项目目录；对话标题行分支、文件面板、快速打开、本地 HTML 预览与新建终端跟随 `SessionView.currentCwd`；`switch_worktree` 工具行显示为 `切换工作树 <路径>`。
 
+## 平台差异
+
+[ADR-0110](../decisions/ADR-0110-macos-desktop.md) 规定 Apple Silicon / macOS 14+ 的移植范围。Windows 保留自绘标题栏、Ctrl 快捷键及 WebView2 目录。macOS 的目标是原生窗口按钮、Cmd 快捷键、登录 shell 的 PATH 和独立 WKWebView 数据存储；不提供模型操控的面板浏览器与电脑操控。系统通知、文件打开方式与清除浏览数据留待第二轮。安装包与实机验收分开，不以 Windows 构建结果代替 macOS 验收。
+
 ## 1. 进程结构与后台策略
 
 子代理准入失败的桌面/手机共用工具行，收起仅显示「未启动」，展开保留完整原因。子代理标识优先显示实际传入的 preset，其次非 default 的命名档位，无标识时省略；数据规则见 [subagent.md §20](../architecture/subagent.md#20-后台子代理)。
@@ -126,7 +130,7 @@ interface NodeProbe {
 
 ## 5. 会话树与界面状态
 
-主窗口保留系统窗口标题「Nocturne」（任务栏与 Alt+Tab），但 `decorations: false` 隐藏原生标题栏。`src/WindowFrame.tsx` 在窗口顶部自绘整宽 `40px`（`--h-titlebar`）标题栏，底色 `--a-side`，底边 `1px` `--a-border`：左侧放 `16px` `MoonMark` 与「Nocturne」标志（可拖动），中间空白区使用 `data-tauri-drag-region` 由 Tauri 原生拖动和双击最大化处理，右侧放面板与概览工具入口及最小化、最大化/还原、关闭按钮；关闭悬停红底白字，其余悬停使用主题浅底。最大化状态随 WebView resize、focus 及按钮操作查询更新，不保存或自行计算还原尺寸，贴靠、还原与边框缩放交给系统。Windows 11 最大化按钮悬停贴靠布局菜单暂不提供。
+Windows 主窗口保留系统窗口标题「Nocturne」（任务栏与 Alt+Tab），但 `decorations: false` 隐藏原生标题栏。`src/WindowFrame.tsx` 在窗口顶部自绘整宽 `40px`（`--h-titlebar`）标题栏，底色 `--a-side`，底边 `1px` `--a-border`：左侧放 `16px` `MoonMark` 与「Nocturne」标志（可拖动），中间空白区使用 `data-tauri-drag-region` 由 Tauri 原生拖动和双击最大化处理，右侧放面板与概览工具入口及最小化、最大化/还原、关闭按钮；关闭悬停红底白字，其余悬停使用主题浅底。最大化状态随 WebView resize、focus 及按钮操作查询更新，不保存或自行计算还原尺寸，贴靠、还原与边框缩放交给系统。Windows 11 最大化按钮悬停贴靠布局菜单暂不提供。
 
 主区（`.main`）底色 `--a-bg`，去掉卡片圆角、阴影与外边距，与侧栏（`.side`，宽 `248px` `--w-sidebar`、底色 `--a-side`）之间仅靠侧栏右缘 `1px` `--a-border` 分隔；窗口变窄时按容器查询收窄侧栏与设置导航。标题栏始终处在设置覆盖层及会话区域之外，打开设置后仍可拖动窗口、最小化、最大化/还原和关闭。
 
