@@ -4,18 +4,18 @@
 
 ## 1. 发现与格式
 
-Runtime 在打开会话时读取一份技能快照。按以下顺序搜索，每个根目录只扫描下一层包含 `SKILL.md` 的子目录：
+Runtime 在打开会话时读取一份技能快照。按以下顺序搜索：目录技能根只扫描下一层包含 `SKILL.md` 的子目录；命令文件根递归扫描所有 `*.md`（子目录仅用于组织文件，默认名字取文件名去掉 `.md`）：
 
-发现结果在单 Runtime 内按现有扫描参数（用户主目录、nocturneHome、workspaceRoot、cwd、来源开关与 extraDirs 顺序）缓存；当前发现规则不使用信任状态。复用前对全部来源目录、技能入口/真实目录与 SKILL.md（含缺失路径及失败条目）做 stat，mtime/size/type 未变才复用，不重复读正文；任一变化重新扫描，目录 mtime 检出新增删除，缺失路径变为存在也失效。配置、导入与启停仍走既有刷新路径与扫描验证，目录输出与预算规则不变。
+发现结果在单 Runtime 内按现有扫描参数（用户主目录、nocturneHome、workspaceRoot、cwd、来源开关与 extraDirs 顺序）缓存；当前发现规则不使用信任状态。复用前对全部来源目录、递归子目录、技能入口/真实路径与 `SKILL.md` / 命令文件（含缺失路径及失败条目）做 stat，mtime/size/type 未变才复用，不重复读正文；任一变化重新扫描，目录 mtime 检出新增删除，缺失路径变为存在也失效。配置、导入与启停仍走既有刷新路径与扫描验证，目录输出与预算规则不变。
 
-1. 用户：`<NOCTURNE_HOME>/skills`、`~/.agents/skills`、`~/.claude/skills`、`skills.extraDirs`（配置中的顺序），以及已启用插件（含内置、本地安装与 Codex / Claude Code 来源，[ADR-0100](../decisions/ADR-0100-native-plugins.md)）的技能目录（清单 `skills` 字段或默认 `skills/`；`source: "plugin"`，携带 `plugin: "<name>@<marketplace>"`）。
-2. 项目：从 `cwd` 上溯到 `workspaceRoot`，每一级依次搜索 `.nocturne/skills`、`.agents/skills`、`.claude/skills`。
+1. 用户：`<NOCTURNE_HOME>/skills`、`~/.agents/skills`、`~/.claude/skills`、`<NOCTURNE_HOME>/commands`、`~/.claude/commands`（受 `skills.sources.claude` 控制）、`skills.extraDirs`（配置中的顺序），以及已启用插件（含内置、本地安装与 Codex / Claude Code 来源，[ADR-0100](../decisions/ADR-0100-native-plugins.md)）的技能目录（清单 `skills` 字段或默认 `skills/`；`source: "plugin"`，携带 `plugin: "<name>@<marketplace>"`）。
+2. 项目：从 `cwd` 上溯到 `workspaceRoot`，每一级依次搜索 `.nocturne/skills`、`.agents/skills`、`.claude/skills`、`.nocturne/commands`、`.claude/commands`（受 `skills.sources.claude` 控制）。不扫描 `.agents/commands`。
 
 技能根路径不存在或不是目录（例如普通文件）时直接跳过，不报警告；指向目录的符号链接/junction 照常扫描，读目录的其他失败仍报警告。
 
-用户层优先于项目层，项目内部离 cwd 最近的优先；名字不区分大小写。不同目录同名时保留全部条目，低优先级条目带 `shadowedBy`，不加载。同一真实目录的 symlink/junction 入口按真实路径去重，保留最高优先级来源，其余入口放在 `otherEntries`。项目技能不要求项目信任，规则同项目指令。
+用户层优先于项目层，项目内部离 cwd 最近的优先；同一级中目录技能排在命令文件之前，同一命令文件根内同名文件按相对路径排序取第一个；名字不区分大小写。不同位置同名时保留全部条目，低优先级条目带 `shadowedBy`，不加载。同一真实目录或文件的 symlink/junction 入口按真实路径去重，保留最高优先级来源，其余入口放在 `otherEntries`。项目技能不要求项目信任，规则同项目指令。
 
-`SKILL.md` 使用 YAML 前言和 Markdown 正文；支持 BOM、CRLF、折叠/多行 YAML。解析失败跳过该条，warnings 含入口文件路径、行号和原因，其他技能不受影响。name 缺省取目录名；不符合小写字母/数字/连字符、最多 64 字符的规范只警告。description 缺失时不进入模型目录；when_to_use 接在说明后。
+`SKILL.md` 使用 YAML 前言和 Markdown 正文；命令文件（`layout: "file"`）的 YAML 前言可选，无前言时整个文件即正文。均支持 BOM、CRLF、折叠/多行 YAML；解析失败跳过该条，warnings 含入口文件路径、行号和原因，其他技能不受影响。name 缺省取目录名或去掉 `.md` 的文件名；不符合小写字母/数字/连字符、最多 64 字符的规范只警告。`SKILL.md` 缺 `description` 时不进入模型目录；命令文件缺 `description` 时回退取正文第一行非空文字（去掉行首 `#` 与空白），正文也空时按缺说明处理；`when_to_use` 接在说明后。
 
 字段与占位符的完整规范以 ADR 第 1 节为准。支持 name、description、when_to_use、disable-model-invocation、user-invocable、argument-hint、arguments。license、compatibility、metadata 和其他未知字段仅展示；allowed-tools、disallowed-tools、model、effort、context、agent、background、hooks、paths、shell 返回忽略原因，不改变运行配置。正文的 `!` 反引号命令及 ` ```! ` 块列为不执行，正文仍交给模型。
 
@@ -25,7 +25,7 @@ Runtime 在打开会话时读取一份技能快照。按以下顺序搜索，每
 
 正文替换 `$ARGUMENTS`（原始参数）、`$ARGUMENTS[N]` / `$N`（从 0 开始的参数），以及 arguments 声明的 `$name`。参数按空白切分，单/双引号保留包含空白的参数；arguments 可为名字数组、含 name 的对象数组、以名字为键的映射或空白/逗号分隔字符串。未知占位符保留，已声明而未提供的参数替换为空；一次替换，不递归解释参数里的占位符。
 
-`${NOCTURNE_SKILL_DIR}` / `${CLAUDE_SKILL_DIR}` 为技能真实目录，`${CLAUDE_PROJECT_DIR}` 为 workspaceRoot，`${CLAUDE_SESSION_ID}` 为会话 id。有参数而正文没有参数占位符时追加 `ARGUMENTS: …`。
+`${NOCTURNE_SKILL_DIR}` / `${CLAUDE_SKILL_DIR}` 为技能真实目录（`layout: "file"` 时为命令文件所在目录），`${CLAUDE_PROJECT_DIR}` 为 workspaceRoot，`${CLAUDE_SESSION_ID}` 为会话 id。有参数而正文没有参数占位符时追加 `ARGUMENTS: …`。
 
 渲染正文追加为用户消息末尾 `<skill name="…">…</skill>` 文本块；message.user 的可选 `skill: { name, body }` 同时供客户端展示。恢复/重放使用日志快照，不重读文件；客户端仅显示原文和可展开的技能标签。
 
@@ -33,11 +33,11 @@ Runtime 在打开会话时读取一份技能快照。按以下顺序搜索，每
 
 目录在项目指令之后、环境信息之前。只收集启用、未覆盖、有说明且允许模型调用的技能，按项目层优先、名字排序。每条说明至多 250 Unicode 字符，加省略号；整段预算为 `min(floor(contextWindow × 2%), 8000)` token，估算口径同 ContextReport。放不下完整说明时只列名字；名字也放不下时显示「另有 N 个技能未列出」。ContextReport 的 skills section 记录字符、token 和截断；空目录不注入，也不注册 skill 工具。
 
-`skill({ name, arguments? })` 返回替换后的正文、真实目录及第一层最多 50 个文件/子目录。非 mutating、可并发，结果仍经过普通输出预算；正文超过预算时，结果开头（执行器不会截到的位置）写明正文总字符数和 `<技能目录>/SKILL.md` 的 `read` 读法，其余被截部分另有执行器的落盘与续读说明（[tools.md](tools.md) 第 4 节）。不可用名字返回错误和最接近的三个名字。同一会话、同一渲染内容重复加载只返回「已加载，见前文」；切换模型、启停重建目录保留加载记录，L2 摘要后允许重新加载正文。
+`skill({ name, arguments? })` 返回替换后的正文、真实目录及第一层最多 50 个文件/子目录（`layout: "file"` 时返回命令文件所在目录，文件清单固定为空，不列出同目录其他命令文件）。非 mutating、可并发，结果仍经过普通输出预算；正文超过预算时，结果开头（执行器不会截到的位置）写明正文总字符数和 `<技能目录>/SKILL.md`（`layout: "file"` 时为该命令文件本身）的 `read` 读法，其余被截部分另有执行器的落盘与续读说明（[tools.md](tools.md) 第 4 节）。不可用名字返回错误和最接近的三个名字。同一会话、同一渲染内容重复加载只返回「已加载，见前文」；切换模型、启停重建目录保留加载记录，L2 摘要后允许重新加载正文。
 
 工具声明 `pinResult: true` 经 tool.started 写入日志并折叠到历史；L1 据此保留正文，L2 固定提示要求列出已加载技能名。Agent Loop 和 Context 不按工具名分支。
 
-已发现技能的真实目录生成预设 read allow 规则，普通 read 仍走完整权限管线；嵌套链接解析到目录之外时不因此放行。写入、shell 和技能目录外的读取规则不变。子代理默认的 general / explore 工具池含 skill，使用启动时父会话的目录和正文快照，加载记录属于子会话。
+已发现目录技能的真实目录生成预设 `read` allow 规则（`<dir>/**`），命令文件技能只为该真实文件本身生成单文件 `read` allow 规则而不放行整个目录；普通 read 仍走完整权限管线，嵌套链接解析到允许范围之外时不因此放行。写入、shell 和允许范围外的读取规则不变。子代理默认的 general / explore 工具池含 skill，使用启动时父会话的目录和正文快照，加载记录属于子会话。
 
 ## 4. 配置与更新
 
@@ -49,7 +49,7 @@ Runtime 在打开会话时读取一份技能快照。按以下顺序搜索，每
 
 Runtime.describeSkills({ workspaceRoot? }) 重新扫描供设置页使用；RuntimeSession.describeSkills() 返回当前会话快照。setSkillEnabled({ name, enabled }) 返回 affectedSessions。RPC 名称见 rpc.md。
 
-SkillOverview 包含名字、层、来源、入口/真实路径与其他入口、说明全文与目录显示长度、调用方式、目录状态、enabled/shadowedBy、命令冲突/缺说明、支持字段/未知字段/忽略项原因、正文行数/前 40 行、第一层文件清单和 SKILL.md 字节大小。接口不返回全部原始正文。
+SkillOverview 包含名字、层、来源、可选 `layout`（`"directory" | "file"`，缺省视为 `"directory"`）、入口/真实路径与其他入口（`layout: "file"` 时为 `.md` 文件路径）、说明全文与目录显示长度、调用方式、目录状态、enabled/shadowedBy、命令冲突/缺说明、支持字段/未知字段/忽略项原因、正文行数/前 40 行、第一层文件清单（`layout: "file"` 为空）和 `SKILL.md` / 命令文件字节大小。接口不返回全部原始正文。
 
 预算返回 usedTokens、limitTokens、fullCount、nameCount、disabledCount 及 basis。设置页查询优先用所选工作区已打开会话的模型窗口（session-model）；无会话时用默认模型（default-model）；窗口未知时采用 8000 token 上限（fallback），客户端说明依据。停用计数按有效同名技能计，去重入口和被覆盖条目不重复计数。
 
@@ -59,7 +59,7 @@ CLI/TUI 的 `/skills` 只读列出当前快照。三个客户端的斜杠补全�
 
 内置命令名单是 protocol 导出的 `BUILTIN_SLASH_COMMANDS`，内容为三个客户端命令表的并集（TUI 的 `SLASH_COMMANDS` 全集与桌面的 `COMMANDS` ∪ `REDIRECTS`），另含执行方式命令（`WORK_MODE_COMMANDS`，[ADR-0076](../decisions/ADR-0076-work-modes.md)），发现时据此打 `commandConflict`。三个客户端各有测试断言本端每个斜杠命令都在名单内；新增命令必须同步名单，否则与该命令同名的技能会错误获得斜杠调用资格。
 
-桌面设置页在 MCP 后，按用户/所选工作区项目分组，展示预算、来源、状态、只读覆盖开关、横幅原因表、完整路径、说明截断标记、字段 chips、正文预览及支持文件；解析失败汇总可展开路径与行号。目录按钮由 Rust 打开已有目录，只有 `<NOCTURNE_HOME>/skills` 空态按钮允许创建目录；规范按钮打开 agentskills.io。
+桌面设置页在 MCP 后，按用户/所选工作区项目分组，展示预算、来源、状态、只读覆盖开关、横幅原因表、完整路径、说明截断标记、字段 chips、正文预览及支持文件（`layout: "file"` 显示 `.md` 入口路径、隐藏支持文件一节，目录按钮打开其所在目录）；解析失败汇总可展开路径与行号。目录按钮由 Rust 打开已有目录，只有 `<NOCTURNE_HOME>/skills` 空态按钮允许创建目录；规范按钮打开 agentskills.io。
 
 ## 7. 导入（桌面端）
 

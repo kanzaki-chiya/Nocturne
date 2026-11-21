@@ -52,6 +52,25 @@ disable-model-invocation: false
 
 技能正文只提供操作指引，**不会改变当前会话的权限、模型或思考档位**。`SKILL.md` 中若包含 `allowed-tools`、`model`、`effort`、`hooks` 等外部字段，Nocturne 会安全忽略并在技能详情页列出原因。
 
+## 命令文件
+
+如果只需要一段简短的提示词模板、不需要附带脚本或支持文件，可以直接写单个 Markdown 命令文件，Nocturne 会将其与普通技能一并读入，同样支持 `/<name>` 补全调用、参数替换与模型自动加载：
+
+- **用户级**：`~/.nocturne/commands/**/*.md`、`~/.claude/commands/**/*.md`（受 `skills.sources.claude` 控制）
+- **项目级**：`.nocturne/commands/**/*.md`、`.claude/commands/**/*.md`（受 `skills.sources.claude` 控制）
+
+子目录仅用于分类整理，技能名取文件名去掉 `.md`。同一层级中，目录技能（`skills/<name>/SKILL.md`）优先于同名命令文件。命令文件的 YAML 前言可选；未写 `description` 时自动取正文第一行非空文字（去掉行首 `#` 与空白）作为说明。
+
+最小示例（`.nocturne/commands/deploy.md`）：
+
+```markdown
+# 部署当前分支到指定环境
+
+检查 git 状态与构建产物，按项目发布流程部署到 $ARGUMENTS。
+```
+
+保存后即可在输入框使用 `/deploy staging` 调用，或在「设置」→「技能」中查看与启停。
+
 ## 怎么调用技能
 
 - **手动调用（`/<name>`）**：在桌面端和手机网页输入 `/`，从「技能」组选择；也可在「＋ › 技能」中选择，或直接输入 `/<name>` 后接空格。输入框用魔杖图标和技能名显示调用，标签后可以继续输入参数，按退格可移除标签。发送后点击消息中的标签可查看技能正文。

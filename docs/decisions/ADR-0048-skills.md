@@ -165,6 +165,25 @@ Claude Code 的一部分前言字段会改变执行或权限，例如 `allowed-t
 
 ## 修订
 
+### 2026-11-21：命令文件并入技能
+
+不再另设「自定义命令」概念，单个 Markdown 命令文件（`commands/*.md`）直接作为技能读入，统一出现在现有技能列表、斜杠补全和模型技能目录里，界面不新增分组、徽标或开关。
+
+理由：现有技能机制已经完整覆盖 `/name args` 调用、`$ARGUMENTS` / `$N` 参数替换、`argument-hint` 与 `disable-model-invocation`；Claude Code 也已将命令文件并入技能体系（来源：`https://code.claude.com/docs/en/skills`）：
+
+> a file at .claude/commands/deploy.md and a skill at .claude/skills/deploy/SKILL.md both create /deploy and work the same way
+
+- **命令文件根**：
+  - 用户层：`<NOCTURNE_HOME>/commands`、`~/.claude/commands`（后者受 `skills.sources.claude` 控制，与 `~/.claude/skills` 一致）；
+  - 项目层：从 `cwd` 上溯到 `workspaceRoot` 每一级的 `.nocturne/commands`、`.claude/commands`（后者受同一开关控制）；
+  - 不扫描 `.agents/commands`。根目录不存在或非目录时跳过、不报警告。
+- **扫描与优先级**：命令文件根下递归扫描所有 `*.md`，子目录仅用于组织文件，默认技能名取文件名去掉 `.md`。用户层优先于项目层，项目内离 `cwd` 近的优先；同一级中目录技能排在命令文件之前，同名时目录技能生效，命令文件带 `shadowedBy`；同一命令文件根内同名文件按相对路径排序取第一个，其余带 `shadowedBy`。
+- **格式与运行差异（`SkillOverview.layout: "file"`）**：
+  - YAML 前言可选；无前言时整个文件即正文。支持与忽略字段表、正文 `!` 反引号命令不执行的规则均与 `SKILL.md` 一致。
+  - `description` 缺失时，取正文第一行非空文字（去掉行首 `#` 与空白）作为说明，使命令文件可进入模型目录；正文也为空时按既有「缺说明」处理。
+  - `${NOCTURNE_SKILL_DIR}` / `${CLAUDE_SKILL_DIR}` 取命令文件所在目录；`skill` 工具返回的支持文件清单为空，不列出同目录其他命令文件；预设 `read` allow 规则只放行该命令文件本身，不放行整个目录。
+  - `SkillOverview` 新增可选字段 `layout?: "directory" | "file"`（缺省视为 `"directory"`），`source` 沿用现有取值，不新增 RPC 方法与事件；桌面「技能」页详情显示 `.md` 入口路径并隐藏「支持文件」一节。
+
 ### 2026-11-03：列表不显示被覆盖的条目
 
 维护者确认：同一批技能放在多个目录时，被覆盖的条目占满列表，又不能操作。桌面端设置页只列生效的条目，被覆盖副本的路径放在生效条目详情的「同名」行，去掉「被覆盖」状态、横幅和「查看生效的那份」按钮。Core 仍保留全部条目和 `shadowedBy`，TUI 与 CLI 的 `/skills` 不变。
