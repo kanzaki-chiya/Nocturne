@@ -119,16 +119,19 @@ function main() {
   console.log("== 2/7 bundle 单文件");
   run("node", [join(root, "scripts", "bundle-nctrn.mjs")], { cwd: root });
 
-  console.log("== 3/7 npm pack");
-  const tgz = packNpm({ bundleFile, out: releaseDir });
-  console.log(`npm 包: ${tgz}`);
+  const mac = process.platform === "darwin";
+  if (!mac) {
+    console.log("== 3/7 npm pack");
+    const tgz = packNpm({ bundleFile, out: releaseDir });
+    console.log(`npm 包: ${tgz}`);
 
-  console.log("== 4/7 中继 pack（含手机网页）");
-  console.log(`中继包: ${packRelay({ out: releaseDir })}`);
+    console.log("== 4/7 中继 pack（含手机网页）");
+    console.log(`中继包: ${packRelay({ out: releaseDir })}`);
+  }
 
   console.log("== 5/7 随附 Node");
   run("node", [join(root, "scripts", "fetch-node.mjs")], { cwd: root });
-  run("node", [join(root, "scripts", "fetch-computer.mjs")], { cwd: root });
+  if (!mac) run("node", [join(root, "scripts", "fetch-computer.mjs")], { cwd: root });
 
   console.log("== 6/7 cargo test");
   run("cargo", ["test", "--manifest-path", join(tauriDir, "Cargo.toml")], { cwd: root });
@@ -136,7 +139,44 @@ function main() {
   console.log("== 7/7 tauri build");
   const args = ["--dir", join(root, "apps", "desktop"), "exec", "tauri", "build"];
   if (overridePath !== undefined) args.push("--config", overridePath);
+  const signed = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY);
+  if (mac && !signed) args.push("--config", '{"bundle":{"createUpdaterArtifacts":false}}');
   run("pnpm", args, { cwd: root });
+
+  if (mac) {
+    const bundle = join(
+      process.env.CARGO_TARGET_DIR ?? join(tauriDir, "target"),
+      "release",
+      "bundle",
+    );
+    const base = `${config.productName}_${version}_aarch64`;
+    const dmg = `${base}.dmg`;
+    copyFileSync(join(bundle, "dmg", dmg), join(releaseDir, dmg));
+    const app = `${config.productName}.app`;
+    const archive = `${base}.app.tar.gz`;
+    const macDir = join(bundle, "macos");
+    if (!signed) {
+      // --no-sign would bypass ad-hoc app signing too. Archive the signed app instead.
+      run("tar", ["-czf", join(releaseDir, archive), "-C", macDir, app]);
+      console.log("未配置更新签名私钥：已收集安装包与更新包，不生成签名与平台条目");
+      return;
+    }
+    const source = join(macDir, `${app}.tar.gz`);
+    copyFileSync(source, join(releaseDir, archive));
+    copyFileSync(`${source}.sig`, join(releaseDir, `${archive}.sig`));
+    const signature = readFileSync(`${source}.sig`, "utf8").trim();
+    if (!signature) throw new Error("更新签名为空");
+    writeFileSync(
+      join(releaseDir, "darwin-aarch64.json"),
+      JSON.stringify({
+        version,
+        platform: "darwin-aarch64",
+        signature,
+        url: `${REPO_RELEASES}/v${version}/${archive}`,
+      }),
+    );
+    return;
+  }
 
   const nsisDir = join(tauriDir, "target", "release", "bundle", "nsis");
   const setupName = readdirSync(nsisDir).find((name) => name.endsWith(`_${version}_x64-setup.exe`));

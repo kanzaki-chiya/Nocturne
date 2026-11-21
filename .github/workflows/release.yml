@@ -154,9 +154,52 @@ jobs:
 
   # 安卓 APK：等冒烟结束再追加草稿说明，避免互相覆盖；失败不影响已建成的草稿。
   # 没配置签名密钥时不附 APK，并在说明里写明。
+  macos:
+    needs: [windows, smoke]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      # Repository Settings > Secrets and variables > Actions > Variables: literal true to attach.
+      ATTACH: ${{ vars.RELEASE_MACOS_DESKTOP == 'true' }}
+    steps:
+      - run: uname -m && test "$(uname -m)" = arm64
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release:build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - run: bash scripts/smoke-desktop-macos.sh "$PWD/apps/desktop/src-tauri/target/release/bundle/macos/Nocturne.app" "$RUNNER_TEMP/nocturne.png"
+      - if: env.ATTACH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dir="release/${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" -p latest.json -D "$RUNNER_TEMP"
+          node scripts/merge-release-platform.mjs "$RUNNER_TEMP/latest.json" "$dir/darwin-aarch64.json"
+          gh release upload "$GITHUB_REF_NAME" "$dir"/*.dmg "$dir"/*.app.tar.gz "$dir"/*.sig
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/latest.json" --clobber
+      - if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULT: ${{ job.status }}
+        run: |
+          if [[ "$RESULT" != success ]]; then mark="构建或发布失败"
+          elif [[ "$ATTACH" == true ]]; then mark="已附带"
+          else mark="已构建，未附带"; fi
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          printf '\n- macOS 桌面端：%s\n' "$mark" >> "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+
   android:
     name: 安卓 APK
-    needs: [windows, smoke]
+    needs: [windows, smoke, macos]
     if: ${{ !cancelled() && needs.windows.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
