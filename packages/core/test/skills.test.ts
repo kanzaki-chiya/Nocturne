@@ -752,3 +752,329 @@ it("技能根 readdir 因其他错误失败时仍然产生 read 警告", async (
     spy.mockRestore();
   }
 });
+
+it("命令文件发现：用户与项目四个命令根、子目录取文件名、关闭 claude 开关、不扫 .agents/commands", async () => {
+  const f = fixture();
+  const cmd = (filePath: string, content: string) => {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, content);
+    return filePath;
+  };
+  const userNocturne = cmd(path.join(f.home, "commands/u-nocturne.md"), "# 用户命令\n正文");
+  const userClaude = cmd(
+    path.join(f.root, ".claude/commands/ops/u-claude.md"),
+    "---\ndescription: 用户 Claude 命令\n---\n执行 $ARGUMENTS",
+  );
+  const projectNocturne = cmd(
+    path.join(f.workspace, ".nocturne/commands/team/p-nocturne.md"),
+    "项目子目录命令\n细节",
+  );
+  const projectClaude = cmd(
+    path.join(f.workspace, ".claude/commands/p-claude.md"),
+    "## 项目 Claude 命令\n步骤",
+  );
+  // 不读 .agents/commands
+  cmd(path.join(f.root, ".agents/commands/ignored-user.md"), "# 不应被发现");
+  cmd(path.join(f.workspace, ".agents/commands/ignored-project.md"), "# 不应被发现");
+  // 非 .md 文件跳过；命令根是普通文件时不报警告
+  cmd(path.join(f.home, "commands/note.txt"), "not markdown");
+
+  const all = await f.scan();
+  expect(all.warnings).toEqual([]);
+  expect(all.skills.map((s) => [s.name, s.layer, s.source, s.layout])).toEqual([
+    ["u-nocturne", "user", ".nocturne", "file"],
+    ["u-claude", "user", ".claude", "file"],
+    ["p-nocturne", "project", ".nocturne", "file"],
+    ["p-claude", "project", ".claude", "file"],
+  ]);
+  expect(item(all.skills, 0).entryPath).toBe(userNocturne);
+  expect(item(all.skills, 1).entryPath).toBe(userClaude);
+  expect(item(all.skills, 2).entryPath).toBe(projectNocturne);
+  expect(item(all.skills, 3).entryPath).toBe(projectClaude);
+
+  const noClaude = await discoverSkills(f.platform, {
+    nocturneHome: f.home,
+    workspaceRoot: f.workspace,
+    cwd: f.workspace,
+    config: { sources: { claude: false } },
+  });
+  expect(noClaude.skills.map((s) => s.name)).toEqual(["u-nocturne", "p-nocturne"]);
+});
+
+it("命令文件优先级：同级目录技能优先、离 cwd 近优先于上层、用户层优先于项目层、同根重名按路径取首个", async () => {
+  const f = fixture();
+  const cmd = (filePath: string, content: string) => {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, content);
+    return filePath;
+  };
+  const sub = path.join(f.workspace, "packages/web");
+  mkdirSync(sub, { recursive: true });
+
+  // 1. 同一级目录技能与命令文件同名：目录技能优先
+  const sameLevelDir = f.skill(path.join(f.workspace, ".nocturne/skills"), "same-level");
+  const sameLevelCmd = cmd(path.join(f.workspace, ".nocturne/commands/same-level.md"), "命令版");
+
+  // 2. 离 cwd 近的命令文件优先于上层目录技能
+  const nearCmd = cmd(path.join(sub, ".nocturne/commands/near-win.md"), "近处命令");
+  f.skill(path.join(f.workspace, ".nocturne/skills"), "near-win");
+
+  // 3. 用户层命令文件优先于项目层目录技能和命令文件
+  const userCmd = cmd(path.join(f.home, "commands/user-win.md"), "用户命令");
+  f.skill(path.join(sub, ".nocturne/skills"), "user-win");
+  cmd(path.join(sub, ".nocturne/commands/user-win.md"), "项目命令");
+
+  // 4. 同一个命令文件根里出现同名文件：按路径排序取第一个
+  const firstDup = cmd(path.join(f.workspace, ".nocturne/commands/a/dup.md"), "第一个");
+  const secondDup = cmd(path.join(f.workspace, ".nocturne/commands/b/dup.md"), "第二个");
+
+  const result = await discoverSkills(f.platform, {
+    nocturneHome: f.home,
+    workspaceRoot: f.workspace,
+    cwd: sub,
+  });
+
+  const byName = (name: string) => result.skills.filter((s) => s.name === name);
+
+  const sameLevel = byName("same-level");
+  expect(sameLevel).toHaveLength(2);
+  expect(sameLevel[0]).toMatchObject({
+    layout: "directory",
+    entryPath: sameLevelDir,
+    shadowedBy: undefined,
+  });
+  expect(sameLevel[1]).toMatchObject({
+    layout: "file",
+    entryPath: sameLevelCmd,
+    shadowedBy: sameLevelDir,
+  });
+
+  const nearWin = byName("near-win");
+  expect(nearWin).toHaveLength(2);
+  expect(nearWin[0]).toMatchObject({ layout: "file", entryPath: nearCmd, shadowedBy: undefined });
+  expect(nearWin[1]).toMatchObject({ layout: "directory", shadowedBy: nearCmd });
+
+  const userWin = byName("user-win");
+  expect(userWin).toHaveLength(3);
+  expect(userWin[0]).toMatchObject({
+    layer: "user",
+    layout: "file",
+    entryPath: userCmd,
+    shadowedBy: undefined,
+  });
+  expect(userWin[1]?.shadowedBy).toBe(userCmd);
+  expect(userWin[2]?.shadowedBy).toBe(userCmd);
+
+  const dup = byName("dup");
+  expect(dup).toHaveLength(2);
+  expect(dup[0]).toMatchObject({ entryPath: firstDup, shadowedBy: undefined });
+  expect(dup[1]).toMatchObject({ entryPath: secondDup, shadowedBy: firstDup });
+});
+
+it("命令文件格式：无 frontmatter 说明回退正文首行、空正文缺说明、有 frontmatter 字段与参数替换", async () => {
+  const f = fixture();
+  const cmd = (filePath: string, content: string) => {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, content);
+    return filePath;
+  };
+  const plainFile = cmd(
+    path.join(f.workspace, ".nocturne/commands/deploy.md"),
+    "\n  ##  部署到目标环境  \n\n目标：$1\n全部：$ARGUMENTS\n目录：${NOCTURNE_SKILL_DIR}|${CLAUDE_SKILL_DIR}\n!`echo no-run`",
+  );
+  cmd(path.join(f.workspace, ".nocturne/commands/blank.md"), "   \n#\n  ");
+  cmd(
+    path.join(f.workspace, ".nocturne/commands/manual-cmd.md"),
+    "---\nargument-hint: <env>\ndisable-model-invocation: true\nallowed-tools: Bash(*)\n---\n# 手动发布\n执行 $ARGUMENTS",
+  );
+
+  const discovery = await f.scan();
+  const catalog = skillCatalog(discovery.skills, []);
+
+  const deploy = catalog.skills.find((s) => s.name === "deploy");
+  const deploySource = discovery.skills.find((s) => s.name === "deploy");
+  expect(deploy).toMatchObject({
+    layout: "file",
+    description: "部署到目标环境",
+    missingDescription: false,
+    invocation: "both",
+    catalogStatus: "full",
+    files: [],
+  });
+  expect(deploy?.ignored).toEqual([expect.objectContaining({ syntax: "!`echo no-run`" })]);
+  expect(deploySource).toBeDefined();
+  if (!deploySource) throw new Error("expected deploySource");
+  expect(
+    renderSkill(
+      deploySource.body,
+      deploySource,
+      { name: "deploy", arguments: "staging prod" },
+      f.workspace,
+      "sess-1",
+    ),
+  ).toContain(
+    `目标：prod\n全部：staging prod\n目录：${path.dirname(deploySource.realPath)}|${path.dirname(deploySource.realPath)}`,
+  );
+  expect(plainFile).toBe(deploy?.entryPath);
+
+  const blank = catalog.skills.find((s) => s.name === "blank");
+  expect(blank).toMatchObject({
+    missingDescription: true,
+    invocation: "user",
+    catalogStatus: "omitted",
+  });
+
+  const manual = catalog.skills.find((s) => s.name === "manual-cmd");
+  expect(manual).toMatchObject({
+    description: "手动发布",
+    missingDescription: false,
+    invocation: "user",
+    catalogStatus: "omitted",
+    fields: expect.objectContaining({
+      "argument-hint": "<env>",
+      "disable-model-invocation": true,
+    }),
+    ignored: [expect.objectContaining({ syntax: "allowed-tools: Bash(*)" })],
+  });
+});
+
+it("命令文件工具与权限：skill 工具返回正文且文件清单为空，read allow 仅放行单文件", async () => {
+  const f = fixture();
+  const cmdDir = path.join(f.home, "commands");
+  mkdirSync(cmdDir, { recursive: true });
+  const targetFile = path.join(cmdDir, "release.md");
+  const siblingFile = path.join(cmdDir, "secret.txt");
+  writeFileSync(targetFile, "# 发布版本\n检查 $ARGUMENTS 并记录到 ${NOCTURNE_SKILL_DIR}");
+  writeFileSync(siblingFile, "not allowed");
+
+  const discovery = await f.scan();
+  const catalog = skillCatalog(discovery.skills, []);
+  const release = item(catalog.skills, 0);
+  const releaseSource = item(discovery.skills, 0);
+
+  const tool = createSkillTool([{ ...release, body: releaseSource.body }]);
+  const ctx = { sessionId: "sess-cmd", workspaceRoot: f.workspace } as Parameters<
+    typeof tool.execute
+  >[1];
+  const result = await tool.execute({ name: "release", arguments: "v1.2" }, ctx);
+  expect(result.status).toBe("ok");
+  expect(result.output).toEqual({
+    name: "release",
+    directory: path.dirname(releaseSource.realPath),
+    files: [],
+  });
+  expect(result.modelContent).toContain("检查 v1.2");
+  expect(result.modelContent).toContain(`文件：\n`);
+
+  // 预设权限：skillFiles 仅放行单个命令文件的 read，不放行同目录其他文件，也不放行 edit/shell
+  const policy = createRulePolicy({
+    workspaceRoot: f.workspace,
+    caseSensitive: f.platform.caseSensitivePaths,
+    preset: "default",
+    presetContext: { skillFiles: [releaseSource.realPath] },
+  });
+  expect(
+    policy.evaluate([
+      { kind: "read", target: releaseSource.realPath, resolved: releaseSource.realPath },
+    ]).decision.action,
+  ).toBe("allow");
+  expect(
+    policy.evaluate([{ kind: "read", target: siblingFile, resolved: siblingFile }]).decision.action,
+  ).toBe("ask");
+  expect(
+    policy.evaluate([
+      { kind: "edit", target: releaseSource.realPath, resolved: releaseSource.realPath },
+    ]).decision.action,
+  ).toBe("ask");
+
+  // 运行时集成：会话预设放行命令文件本身的 read，不放行同目录其他文件
+  writeFileSync(
+    path.join(f.home, "config.json"),
+    JSON.stringify({ modelsDev: false, skills: { sources: { agents: false, claude: false } } }),
+  );
+  const config = await loadConfig(f.platform, { nocturneHome: f.home });
+  const askedTargets: string[] = [];
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        { type: "tool_call", toolCallId: "read-cmd", name: "read", input: { path: targetFile } },
+        {
+          type: "tool_call",
+          toolCallId: "read-sibling",
+          name: "read",
+          input: { path: siblingFile },
+        },
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "finish", reason: "stop" },
+      ],
+    ],
+  });
+  const runtime = await createRuntime({
+    cwd: f.workspace,
+    config,
+    providers: [provider],
+    interactive: true,
+  });
+  const session = await runtime.createSession({ model: "fake/fake-1" });
+  const unsub = session.subscribe((ev) => {
+    if (ev.type === "permission.requested") {
+      askedTargets.push(...ev.payload.subjects.map((s) => s.target));
+      void session.respondPermission(ev.payload.requestId, { decision: "deny" });
+    }
+  });
+  try {
+    await session.submit({ text: "check read rules" });
+  } finally {
+    unsub();
+    await session.close();
+  }
+  expect(askedTargets.some((t) => f.platform.paths.equals(t, targetFile))).toBe(false);
+  expect(askedTargets.some((t) => f.platform.paths.equals(t, siblingFile))).toBe(true);
+});
+
+it("命令文件发现缓存：根目录新建以及命令文件增改删均失效，未变化时命中不重读", async () => {
+  const f = fixture();
+  const cache = createSkillDiscoveryCache(f.platform);
+  const input = { nocturneHome: f.home, workspaceRoot: f.workspace, cwd: f.workspace };
+  const read = vi.spyOn(f.platform.fs, "readTextFile");
+
+  // 1. 根目录尚不存在 → 创建后能重新发现
+  expect((await cache.discover(input)).skills).toEqual([]);
+  const cmdDir = path.join(f.workspace, ".nocturne/commands");
+  mkdirSync(cmdDir, { recursive: true });
+  const aFile = path.join(cmdDir, "alpha.md");
+  writeFileSync(aFile, "# 初始说明\n正文");
+  const afterCreate = await cache.discover(input);
+  expect(afterCreate.skills.map((s) => [s.name, s.description])).toEqual([["alpha", "初始说明"]]);
+
+  // 2. 未变化时缓存命中，不重读文件
+  read.mockClear();
+  const cached = await cache.discover(input);
+  expect(cached.skills.map((s) => s.name)).toEqual(["alpha"]);
+  expect(read).not.toHaveBeenCalled();
+
+  // 3. 修改命令文件正文 → 失效并读取新内容
+  writeFileSync(aFile, "# 更新后的更长说明\n新正文内容");
+  const afterEdit = await cache.discover(input);
+  expect(afterEdit.skills[0]?.description).toBe("更新后的更长说明");
+  expect(read).toHaveBeenCalledOnce();
+
+  // 4. 子目录新增命令文件 → 失效并发现新文件
+  read.mockClear();
+  const subDir = path.join(cmdDir, "ops");
+  mkdirSync(subDir, { recursive: true });
+  const bFile = path.join(subDir, "beta.md");
+  writeFileSync(bFile, "# 子目录命令\n内容");
+  const afterAdd = await cache.discover(input);
+  expect(afterAdd.skills.map((s) => s.name)).toEqual(["alpha", "beta"]);
+
+  // 5. 删除命令文件 → 失效并移除
+  read.mockClear();
+  rmSync(bFile);
+  const afterDelete = await cache.discover(input);
+  expect(afterDelete.skills.map((s) => s.name)).toEqual(["alpha"]);
+  read.mockRestore();
+});

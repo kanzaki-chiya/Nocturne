@@ -1,5 +1,5 @@
 export { discoverSkills, parseSkill, type DiscoveredSkill } from "./discovery.js";
-export { skillCatalog, renderSkill } from "./catalog.js";
+export { skillCatalog, skillDirectory, renderSkill } from "./catalog.js";
 export { createSkillDiscoveryCache } from "./cache.js";
 export {
   commitSkillImport,

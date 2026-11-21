@@ -94,9 +94,19 @@ export function skillCatalog(
   return { skills: overviews, budget, text, truncated };
 }
 
+export function skillDirectory(skill: Pick<SkillOverview, "realPath" | "layout">): string {
+  if (skill.layout !== "file") return skill.realPath;
+  const trimmed = skill.realPath.replace(/[\\/]+$/, "");
+  const sep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (sep < 0) return ".";
+  if (sep === 0) return trimmed.slice(0, 1);
+  if (sep === 2 && /^[a-zA-Z]:/.test(trimmed)) return trimmed.slice(0, 3);
+  return trimmed.slice(0, sep);
+}
+
 export function renderSkill(
   body: string,
-  skill: Pick<SkillOverview, "realPath" | "fields">,
+  skill: Pick<SkillOverview, "realPath" | "fields" | "layout">,
   input: SkillInvocation,
   workspaceRoot: string,
   sessionId: string,
@@ -134,7 +144,7 @@ export function renderSkill(
     ) => {
       if (variable)
         return variable.endsWith("SKILL_DIR")
-          ? skill.realPath
+          ? skillDirectory(skill)
           : variable === "CLAUDE_PROJECT_DIR"
             ? workspaceRoot
             : sessionId;

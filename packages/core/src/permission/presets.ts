@@ -30,6 +30,8 @@ export interface PresetContext {
   nocturneHome?: string | undefined;
   /** 已发现技能的真实目录：生成技能目录只读放行规则（skills.md 第 3 节） */
   skillRoots?: readonly string[] | undefined;
+  /** 已发现命令文件技能的真实文件路径：只放行该文件本身，不放行整个目录 */
+  skillFiles?: readonly string[] | undefined;
 }
 
 const PROTECTED_LABEL = "受保护路径";
@@ -169,6 +171,10 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
   for (const root of ctx.skillRoots ?? []) {
     const dir = normalizePathText(root, ctx.caseSensitive);
     rules.push({ kind: "read", pattern: `${dir}/**`, action: "allow", label: "本会话技能目录" });
+  }
+  for (const file of ctx.skillFiles ?? []) {
+    const filePath = normalizePathText(file, ctx.caseSensitive);
+    rules.push({ kind: "read", pattern: filePath, action: "allow", label: "本会话技能文件" });
   }
 
   // 受保护路径与授权数据"至少 ask"：read-only 中 edit 已一律 deny，不再生成 ask 规则

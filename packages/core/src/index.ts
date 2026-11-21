@@ -1809,7 +1809,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let skillDiscovery = await skillCache.discover({
       nocturneHome,
       workspaceRoot: meta.workspaceRoot,
-      cwd: meta.cwd,
+      cwd: projectCwd,
       config: config?.skillConfig(),
       pluginSkillDirs: pluginResolution.skillDirs,
     });
@@ -1997,7 +1997,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         caseSensitive: platform.caseSensitivePaths,
         preset: isPermissionPresetName(presetName) ? presetName : "default",
         presetContext: {
-          skillRoots: skillDiscovery.skills.map((s) => s.realPath),
+          skillRoots: skillDiscovery.skills
+            .filter((s) => s.layout !== "file")
+            .map((s) => s.realPath),
+          skillFiles: skillDiscovery.skills
+            .filter((s) => s.layout === "file")
+            .map((s) => s.realPath),
           sessionsDir,
           sessionId: policySessionId,
           nocturneHome,
@@ -2473,7 +2478,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         skillDiscovery = await skillCache.discover({
           nocturneHome,
           workspaceRoot: meta.workspaceRoot,
-          cwd: meta.cwd,
+          cwd: projectCwd,
           config: config?.skillConfig(),
           pluginSkillDirs: await resolveActivePluginSkillDirs(platform, pluginDiscoveryOptions),
         });

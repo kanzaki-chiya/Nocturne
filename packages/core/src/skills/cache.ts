@@ -45,6 +45,10 @@ export function createSkillDiscoveryCache(platform: Platform) {
         watched.add(path);
         return platform.fs.readdir(path);
       },
+      readTextFile: (path) => {
+        watched.add(path);
+        return platform.fs.readTextFile(path);
+      },
       realpath: async (path) => {
         watched.add(path);
         const real = await platform.fs.realpath(path);

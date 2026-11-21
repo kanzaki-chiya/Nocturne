@@ -38,9 +38,15 @@ const parseError = (line: number, message: string) => Object.assign(new Error(me
 export function parseSkill(
   text: string,
   directory: string,
+  options?: { allowMissingFrontmatter?: boolean },
 ): { fields: Record<string, unknown>; body: string } {
   const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
-  if (!normalized.startsWith("---\n")) throw parseError(1, "缺少 YAML 前言");
+  if (!normalized.startsWith("---\n")) {
+    if (options?.allowMissingFrontmatter) {
+      return { fields: { name: directory }, body: normalized };
+    }
+    throw parseError(1, "缺少 YAML 前言");
+  }
   const end = normalized.indexOf("\n---", 4);
   if (end < 0 || !/^\n---(?:\n|$)/.test(normalized.slice(end)))
     throw parseError(1, "YAML 前言未闭合");
@@ -70,6 +76,14 @@ export function parseSkill(
   return { fields: values, body: normalized.slice(end + 4).replace(/^\n/, "") };
 }
 
+function firstNonEmptyBodyLine(body: string): string {
+  for (const rawLine of body.split("\n")) {
+    const cleaned = rawLine.replace(/^\s*#+\s*/, "").trim();
+    if (cleaned) return cleaned;
+  }
+  return "";
+}
+
 export async function discoverSkills(
   platform: Platform,
   input: {
@@ -95,12 +109,14 @@ export async function discoverSkills(
     path: string;
     layer: SkillOverview["layer"];
     source: SkillOverview["source"];
+    layout: "directory" | "file";
   } & Pick<SkillOverview, "plugin" | "pluginDisplayName" | "pluginIcon">)[] = [];
   const add = (base: string, layer: "user" | "project", user = false) => {
     roots.push({
       path: paths.join(base, user ? "skills" : ".nocturne/skills"),
       layer,
       source: ".nocturne",
+      layout: "directory",
     });
     for (const source of ["agents", "claude"] as const) {
       if (input.config?.sources?.[source] !== false)
@@ -108,8 +124,22 @@ export async function discoverSkills(
           path: paths.join(user ? platform.homeDir() : base, `.${source}/skills`),
           layer,
           source: `.${source}`,
+          layout: "directory",
         });
     }
+    roots.push({
+      path: paths.join(base, user ? "commands" : ".nocturne/commands"),
+      layer,
+      source: ".nocturne",
+      layout: "file",
+    });
+    if (input.config?.sources?.claude !== false)
+      roots.push({
+        path: paths.join(user ? platform.homeDir() : base, ".claude/commands"),
+        layer,
+        source: ".claude",
+        layout: "file",
+      });
   };
   add(input.nocturneHome, "user", true);
   for (const dir of input.config?.extraDirs ?? []) {
@@ -118,6 +148,7 @@ export async function discoverSkills(
       path: paths.resolve(platform.homeDir(), expanded),
       layer: "user",
       source: "extra",
+      layout: "directory",
     });
   }
   for (const dir of input.pluginSkillDirs ?? []) {
@@ -125,6 +156,7 @@ export async function discoverSkills(
       ...dir,
       layer: "user",
       source: "plugin",
+      layout: "directory",
     });
   }
   let dir = paths.resolve(input.cwd, ".");
@@ -139,6 +171,84 @@ export async function discoverSkills(
   const warnings: SkillWarning[] = [];
   const realSeen = new Map<string, DiscoveredSkill>();
   const names = new Map<string, DiscoveredSkill>();
+  const collectCommandFiles = async (
+    rootPath: string,
+  ): Promise<{ name: string; entryPath: string; file: string; realTarget: string }[]> => {
+    const collected: {
+      name: string;
+      entryPath: string;
+      file: string;
+      realTarget: string;
+      relPath: string;
+    }[] = [];
+    const visitedDirs = new Set<string>();
+    const visit = async (dirPath: string, relPrefix: string) => {
+      let realDir: string;
+      try {
+        realDir = await fs.realpath(dirPath);
+      } catch (e) {
+        const code = fsErrorCode(e);
+        if (code === "ENOENT" || code === "ENOTDIR") return;
+        warnings.push({ path: dirPath, line: 1, kind: "read", message: String(e) });
+        return;
+      }
+      const canonicalDir = paths.canonicalize(realDir);
+      if (visitedDirs.has(canonicalDir)) return;
+      visitedDirs.add(canonicalDir);
+      let entries;
+      try {
+        entries = await fs.readdir(dirPath);
+      } catch (e) {
+        warnings.push({ path: dirPath, line: 1, kind: "read", message: String(e) });
+        return;
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+        if (entry.type === "directory") {
+          await visit(entry.path, rel);
+        } else if (entry.type === "file") {
+          if (entry.name.endsWith(".md") && entry.name.length > 3) {
+            collected.push({
+              name: entry.name.slice(0, -3),
+              entryPath: entry.path,
+              file: entry.path,
+              realTarget: entry.path,
+              relPath: rel,
+            });
+          }
+        } else if (entry.type === "symlink") {
+          let targetStat;
+          try {
+            targetStat = await fs.stat(entry.path);
+          } catch (e) {
+            const code = fsErrorCode(e);
+            if (code === "ENOENT" || code === "ENOTDIR") continue;
+            warnings.push({ path: entry.path, line: 1, kind: "read", message: String(e) });
+            continue;
+          }
+          if (targetStat.type === "directory") {
+            await visit(entry.path, rel);
+          } else if (
+            targetStat.type === "file" &&
+            entry.name.endsWith(".md") &&
+            entry.name.length > 3
+          ) {
+            collected.push({
+              name: entry.name.slice(0, -3),
+              entryPath: entry.path,
+              file: entry.path,
+              realTarget: entry.path,
+              relPath: rel,
+            });
+          }
+        }
+      }
+    };
+    await visit(rootPath, "");
+    collected.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    return collected;
+  };
   for (const root of roots) {
     let rootStat;
     try {
@@ -150,43 +260,71 @@ export async function discoverSkills(
       continue;
     }
     if (rootStat.type !== "directory") continue;
-    let skillEntries: { name: string; path: string }[] = [];
-    const directSkill = root.source === "plugin" ? paths.join(root.path, "SKILL.md") : undefined;
-    if (directSkill !== undefined && (await fs.exists(directSkill))) {
-      skillEntries = [{ name: paths.basename(root.path), path: root.path }];
+    let skillEntries: { name: string; entryPath: string; file: string; realTarget: string }[] = [];
+    if (root.layout === "file") {
+      skillEntries = await collectCommandFiles(root.path);
     } else {
-      let entries;
-      try {
-        entries = await fs.readdir(root.path);
-      } catch (e) {
-        warnings.push({ path: root.path, line: 1, kind: "read", message: String(e) });
-        continue;
-      }
-      skillEntries = entries
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .filter((e) => e.type === "directory" || e.type === "symlink")
-        .map((e) => ({ name: e.name, path: e.path }));
-    }
-    for (const entry of skillEntries) {
-      const file = paths.join(entry.path, "SKILL.md");
-      if (!(await fs.exists(file))) continue;
-      try {
-        const realPath = await fs.realpath(entry.path);
-        const previous = realSeen.get(paths.canonicalize(realPath));
-        if (previous) {
-          previous.otherEntries.push(entry.path);
+      const directSkill = root.source === "plugin" ? paths.join(root.path, "SKILL.md") : undefined;
+      if (directSkill !== undefined && (await fs.exists(directSkill))) {
+        skillEntries = [
+          {
+            name: paths.basename(root.path),
+            entryPath: root.path,
+            file: directSkill,
+            realTarget: root.path,
+          },
+        ];
+      } else {
+        let entries;
+        try {
+          entries = await fs.readdir(root.path);
+        } catch (e) {
+          warnings.push({ path: root.path, line: 1, kind: "read", message: String(e) });
           continue;
         }
-        const { fields, body } = parseSkill(await fs.readTextFile(file), entry.name);
+        skillEntries = entries
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .filter((e) => e.type === "directory" || e.type === "symlink")
+          .map((e) => ({
+            name: e.name,
+            entryPath: e.path,
+            file: paths.join(e.path, "SKILL.md"),
+            realTarget: e.path,
+          }));
+      }
+    }
+    for (const entry of skillEntries) {
+      if (root.layout === "directory" && !(await fs.exists(entry.file))) continue;
+      try {
+        const realPath = await fs.realpath(entry.realTarget);
+        const previous = realSeen.get(paths.canonicalize(realPath));
+        if (previous) {
+          previous.otherEntries.push(entry.entryPath);
+          continue;
+        }
+        const raw = await fs.readTextFile(entry.file);
+        const hasFrontmatter = raw
+          .replace(/^\uFEFF/, "")
+          .replace(/\r\n/g, "\n")
+          .startsWith("---\n");
+        const { fields, body } = parseSkill(raw, entry.name, {
+          allowMissingFrontmatter: root.layout === "file",
+        });
         const name = String(fields.name);
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 64)
           warnings.push({
-            path: file,
-            line: 2,
+            path: entry.file,
+            line: hasFrontmatter ? 2 : 1,
             kind: "name",
             message: `名字 ${name} 不符合 Agent Skills 规范；仍然可用`,
           });
-        const description = [fields.description, fields.when_to_use]
+        const rawDescription =
+          typeof fields.description === "string" && fields.description.trim()
+            ? fields.description
+            : root.layout === "file"
+              ? firstNonEmptyBodyLine(body)
+              : "";
+        const description = [rawDescription, fields.when_to_use]
           .filter((x) => typeof x === "string" && x.trim())
           .join("\n");
         const ignored = Object.entries(fields).flatMap(([key, value]) =>
@@ -201,21 +339,25 @@ export async function discoverSkills(
         );
         for (const match of body.matchAll(/!`[^`\n]+`|^```![^\n]*/gm))
           ignored.push({ syntax: match[0], reason: "不执行，原文交给模型，模型需要时自己运行" });
-        const files = (await fs.readdir(realPath))
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .slice(0, 50)
-          .map((f) => ({ name: f.name, directory: f.type === "directory" }));
+        const files =
+          root.layout === "file"
+            ? []
+            : (await fs.readdir(realPath))
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .slice(0, 50)
+                .map((f) => ({ name: f.name, directory: f.type === "directory" }));
         const winner = names.get(name.toLowerCase());
         const skill: DiscoveredSkill = {
           name,
           layer: root.layer,
           source: root.source,
+          layout: root.layout,
           ...(root.plugin !== undefined ? { plugin: root.plugin } : {}),
           ...(root.pluginDisplayName !== undefined
             ? { pluginDisplayName: root.pluginDisplayName }
             : {}),
           ...(root.pluginIcon !== undefined ? { pluginIcon: root.pluginIcon } : {}),
-          entryPath: entry.path,
+          entryPath: entry.entryPath,
           realPath,
           otherEntries: [],
           description,
@@ -225,7 +367,7 @@ export async function discoverSkills(
           enabled: true,
           shadowedBy: winner?.entryPath,
           commandConflict: builtinCommands.has(name.toLowerCase()),
-          missingDescription: typeof fields.description !== "string" || !fields.description.trim(),
+          missingDescription: !rawDescription.trim(),
           fields: Object.fromEntries(Object.entries(fields).filter(([key]) => supported.has(key))),
           unknownFields: Object.fromEntries(
             Object.entries(fields).filter(([key]) => !supported.has(key) && !ignoredReasons[key]),
@@ -235,7 +377,7 @@ export async function discoverSkills(
           bodyLines: body.split("\n").length,
           bodyPreview: body.split("\n").slice(0, 40).join("\n"),
           files,
-          size: (await fs.stat(file)).size,
+          size: (await fs.stat(entry.file)).size,
         };
         skills.push(skill);
         realSeen.set(paths.canonicalize(realPath), skill);
@@ -243,7 +385,7 @@ export async function discoverSkills(
       } catch (e) {
         const error = e as { line?: number; message?: string };
         warnings.push({
-          path: file,
+          path: entry.file,
           line: error.line ?? 1,
           kind: "parse",
           message: error.message ?? String(e),
