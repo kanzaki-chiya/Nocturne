@@ -284,6 +284,7 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 - **信任后**，项目配置进入第 1 节的正常分层（规则排序位于用户配置之后、环境变量之前）；用户级专属字段仍不生效，尤其 `externalAgents` 无条件忽略并警告。
 - 信任的标记存放在**机器维护的** `<NOCTURNE_HOME>/trust.json`：`{ version, workspaces: string[] }`，列出工作区真实路径（`realpath` 后比较，大小写规则同平台）。文件由 `nctrn trust` / `nctrn untrust` 原子写（临时文件 + rename）；用户也可以手工编辑。它是唯一能授予信任的来源——项目配置里没有这个字段，仓库不能自我授权。
 - 会话打开（create / resume）时若发现项目配置存在但未信任，发出临时事件 `runtime.warning(code="project_config_untrusted")` 告知客户端；CLI 显示如何信任（`nctrn trust`，见 [apps/cli.md](../apps/cli.md)）。
+- **不需要信任的项目内容**：项目指令（`AGENTS.md` 等）、项目技能（[skills.md](skills.md)）与项目子代理定义（`.nocturne/agents/*.md`、`.claude/agents/*.md`，[ADR-0108](../decisions/ADR-0108-project-subagents.md)）均只提供提示词文本或工具收窄，不能放宽权限、切换模型或启动进程，因此不要求先信任工作区即可加载。
 
 ## 4. Grant 的持久化
 

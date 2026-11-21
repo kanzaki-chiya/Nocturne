@@ -115,6 +115,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0105](ADR-0105-plugin-subagents.md) | 插件定义子代理：原生插件清单 `agents` 目录、`<插件>:<子代理>` 档位 id、用户侧模型覆盖、固定提示词后追加角色说明、工具池交集收窄与四文档插件 `visual-judge` | 已接受 |
 | [ADR-0106](ADR-0106-command-rule-from-confirm.md) | 确认卡片里把命令改成规则：`Grant.match: "pattern"` 项目模式授权、`ruleSuggestion`、校验与预填纯函数、桌面确认表单与授权页「命令规则」 | 已接受 |
 | [ADR-0107](ADR-0107-conversation-find-and-turn-nav.md) | 会话内搜索与按轮跳转（桌面端）：`Ctrl+F` 浮层、CSS Custom Highlight、共用虚拟化跳转函数、右侧轮次导航与 `Alt+↑/↓` | 已接受 |
+| [ADR-0108](ADR-0108-project-subagents.md) | 项目级子代理定义（`.nocturne/agents`、`.claude/agents`）：不要求项目信任、Claude 工具名映射与 description 截断、`project:<名字>` 档位与只读界面 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

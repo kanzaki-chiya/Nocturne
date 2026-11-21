@@ -216,6 +216,7 @@ Probe 返回 `ok/durationMs/tools`，可带 `serverInfo`、`error: { code, messa
 | 方法 | 参数与返回 |
 |---|---|
 | `agents.describeExternalAgents` | `{ workspaceRoot?: string }` → `ExternalAgentsDescription` |
+| `agents.describeProjectSubagents` | `{ workspaceRoot?: string }` → `ProjectSubagentsDescription`；每次重新扫描所选工作区项目子代理（仅本机，远程报 `remote_not_allowed`，[ADR-0108](../decisions/ADR-0108-project-subagents.md)） |
 | `agents.saveExternalAgent` | `{ mode: "create" \| "replace", name, config }` → `ExternalAgentOverview` |
 | `agents.deleteExternalAgent` | `{ name }` → `null` |
 | `agents.setExternalAgentEnabled` | `{ name, enabled }` → `null` |

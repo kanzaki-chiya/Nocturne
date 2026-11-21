@@ -294,11 +294,11 @@ launch(request, ctx)
 
 ## 14. 角色系统边界（结论）
 
-**本阶段仍不开放用户/项目自定义的 agent 定义文件**；经 [ADR-0105](../decisions/ADR-0105-plugin-subagents.md) 修订，**仅放开 Nocturne 自有插件通过清单 `agents` 目录提供的子代理定义**：
+**本阶段仍不开放用户级自定义 agent 定义文件**；经 [ADR-0105](../decisions/ADR-0105-plugin-subagents.md) 与 [ADR-0108](../decisions/ADR-0108-project-subagents.md) 修订，**已放开 Nocturne 自有插件通过清单 `agents` 目录提供的子代理定义，以及项目级定义文件（`.nocturne/agents/*.md` 与 `.claude/agents/*.md`）**：
 
-- 用户级与项目级自定义 agent 文件依然不做：它涉及角色系统、作用域覆盖、不可信项目信任边界与模型覆盖策略，路线图另有独立安排。
-- 原生插件提供的子代理以受控方式接入既有档位解析与 launcher：插件只能提供角色说明、可选工具收窄清单与可选 `effort`，不能指定模型；固定子代理提示词（`subagentBasePrompt`，第 8 节）保持逐字不变，插件角色说明仅以独立段落追加在其后并注明来源插件，不得替换或删减固定提示词。
-- 非插件子代理仍只有内置工具集预设（`general`/`explore`）与配置层档位（第 19 节），任务本身由父模型经 `task` 字段传入。
+- 用户级自定义 agent 文件依然不做。
+- 项目级与原生插件提供的子代理均以受控方式接入既有档位解析与 launcher：只能提供角色说明、可选工具收窄与可选 `effort`，不能指定模型或放宽权限；固定子代理提示词（`subagentBasePrompt`，第 8 节）保持逐字不变，角色说明仅以独立段落追加在其后并注明来源（相对 `workspaceRoot` 的文件路径或来源插件），不得替换或删减固定提示词。
+- 其他内置子代理仍使用内置工具集预设（`general`/`explore`）与配置层档位（第 19 节），任务本身由父模型经 `task` 字段传入。
 
 ## 15. 协议与类型变更清单
 
@@ -375,7 +375,9 @@ explore 档位不能请求 general，显式 tools 必须是只读池子集；gen
 
 选择表由共享 subagentSelectionTable 生成，首行只写一次单位（每百万 token 的输入/输出美元），default 与各自定义档位在括号末尾追加基础档输入/输出单价（`$<input>/$<output>`，与用量统计同源解析；跟随当前模型时写当前模型价格，价格为 0 时照写，查不到完整输入/输出价格时不写价格与占位文字）；外部 agent 不写价格，标记账号费用。选择表在创建 `task` 工具时定下，会话中途刷新价格不会改变已创建工具的选择表；切换会话模型时重建，跟随当前模型的档位随之换价。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
 
-**插件子代理（[ADR-0105](../decisions/ADR-0105-plugin-subagents.md)）**：Nocturne 自有插件可通过清单 `agents` 目录提供子代理定义，档位 id 为 `<插件 name>:<子代理 name>`（如 `pptx:visual-judge`；同名已启用插件按发现顺序保留第一个并警告），排在用户档位之后、外部 agent 之前，随插件启停在下一个空闲边界与档位表一起重建。在配置层解析为同一档位形状（另带角色说明、来源插件与可选工具白名单），launcher 照用解析结果，Agent Loop 不按名字分支。模型优先读取用户设置 `subagents.pluginModels.<id>`，未设时跟随 `default`（`modelRoles.task`）；所选模型不可用时按同一规则排除出选择表并发 `subagent_profile_unavailable` 警告，不回退。`effort` 有定义则用、否则继承父会话，均经 `clampReasoningEffort` 降档；超时用默认值。固定 `subagentBasePrompt` 保持逐字不变，角色说明单独成段追加在其后（段首注明来源插件），工作树段落照旧追加。工具池按第 6 节算出后与 `tools` 取交集（忽略池外工具名），交集只剩 `finish` 时报 `invalid_input` 提示该子代理在当前会话没有可用工具；插件停用后直接调用按不存在/停用档位报 `invalid_input` 并列出可选值。
+**项目子代理（[ADR-0108](../decisions/ADR-0108-project-subagents.md)）**：从 `cwd` 上溯到 `workspaceRoot`，每级单层扫描 `.nocturne/agents/*.md`（与插件子代理同一格式，正文非空且最长 10,000 字）与 `.claude/agents/*.md`（受 `skills.sources.claude` 控制，支持逗号字符串/YAML 列表的 `tools`/`disallowedTools` 映射到 Nocturne 工具名，非法 `effort` 忽略告警，其余不支持字段按文件合并告警），不要求项目信任。同名时离 `cwd` 近的优先、同级 `.nocturne` 优先于 `.claude`，被覆盖者记警告并在公开查询中标 `shadowedBy`。档位 id 为 `project:<名字>`，排在用户档位之后、插件子代理之前（与插件 id 冲突时项目子代理优先，插件条目跳过并告警）；超过 300 字符的 `description` 在选择表中截断到 300 字符加省略号（公开查询保留全文）。在配置层解析为统一档位形状，模型始终跟随 `default`（`modelRoles.task`，不可用时按同一规则排除并告警，`task` 显式 `model` 参数仍可覆盖），`effort` 有定义则用、否则继承父会话并经 `clampReasoningEffort` 降档。固定 `subagentBasePrompt` 保持逐字不变，角色说明单独成段追加在其后（段首注明相对 `workspaceRoot` 的文件路径），工作树段落照旧追加；工具池按第 6 节算出后与白名单取交集（或仅声明 `disallowedTools` 时剔除），只剩 `finish` 时报 `invalid_input`。会话打开时取快照，文件增删改在下一会话或配置重载后生效；`Runtime.describeProjectSubagents({ workspaceRoot? })` 每次重新扫描。
+
+**插件子代理（[ADR-0105](../decisions/ADR-0105-plugin-subagents.md)）**：Nocturne 自有插件可通过清单 `agents` 目录提供子代理定义，档位 id 为 `<插件 name>:<子代理 name>`（如 `pptx:visual-judge`；同名已启用插件按发现顺序保留第一个并警告；与项目子代理 id 冲突时跳过并警告），排在项目子代理之后、外部 agent 之前，随插件启停在下一个空闲边界与档位表一起重建。在配置层解析为同一档位形状（另带角色说明、来源插件与可选工具白名单），launcher 照用解析结果，Agent Loop 不按名字分支。模型优先读取用户设置 `subagents.pluginModels.<id>`，未设时跟随 `default`（`modelRoles.task`）；所选模型不可用时按同一规则排除出选择表并发 `subagent_profile_unavailable` 警告，不回退。`effort` 有定义则用、否则继承父会话，均经 `clampReasoningEffort` 降档；超时用默认值。固定 `subagentBasePrompt` 保持逐字不变，角色说明单独成段追加在其后（段首注明来源插件），工作树段落照旧追加。工具池按第 6 节算出后与 `tools` 取交集（忽略池外工具名），交集只剩 `finish` 时报 `invalid_input` 提示该子代理在当前会话没有可用工具；插件停用后直接调用按不存在/停用档位报 `invalid_input` 并列出可选值。
 
 ## 20. 后台子代理
 

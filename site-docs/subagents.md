@@ -35,6 +35,38 @@
   - 「思考档位」下拉（「跟随会话」、`off` 或具体档位）与「工具集上限」（「全部」或「只读」，主会话调用时只能收窄工具集、不能放宽）；
   - 点击「保存」进入新档位详情。已有档位的模型、思考档位、工具集上限和启用开关改后立即保存；描述失焦后保存，清空则恢复原值；超时失焦或按回车保存。底部可展开「预览模型看到的文字」查看实际注入给 `task` 工具的档位说明；不再需要时在右上角「更多」菜单中选择「删除」。
 
+## 项目子代理
+
+你可以在项目仓库内定义供团队共用的子代理。Nocturne 会从当前工作目录逐级上溯到工作区根目录，单层扫描 `.nocturne/agents/*.md` 与 `.claude/agents/*.md`（后者受 `skills.sources.claude` 开关控制，默认开启），无需先信任工作区即可加载。同名时离当前目录更近的文件优先，同一目录内 `.nocturne/agents` 优先于 `.claude/agents`。
+
+项目子代理的档位 ID 为 `project:<名字>`，自动出现在主会话 `task` 工具的选择表中（排在自定义档位之后、插件子代理之前），模型跟随 `default` 档位（`modelRoles.task`），也可以在「设置」→「子代理」的「项目」分组与 TUI `/settings` 中查看只读详情。文件增删改在下一个会话或配置重载后生效。
+
+### `.nocturne/agents/*.md` 最小示例
+
+```markdown
+---
+name: arch-reviewer
+description: 审查模块边界与依赖方向
+tools:
+  - read
+  - grep
+  - glob
+effort: high
+---
+检查改动是否遵守仓库模块依赖边界，并在结论中列出涉及文件与行号。
+```
+
+- 必填字段：`name`（小写字母、数字与连字符，最长 32 字符，不能为 `default`）、`description` 与正文（最长 10,000 字符）。
+- 可选字段：`tools`（Nocturne 工具名数组，运行时仅收窄工具池）、`effort`（`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`）。
+- 不能在定义文件里指定 `model`；包含 `model` 或其他未知字段时会被忽略并记录警告。
+
+### 兼容 `.claude/agents/*.md`
+
+仓库里已有的 Claude Code 子代理定义文件可直接复用，生效与忽略规则如下：
+
+- **生效字段**：`name`、`description`（超长时不跳过，选择表截断到 300 字符并保留全文供详情查看）、`tools` 与 `disallowedTools`（支持逗号分隔字符串与 YAML 列表，自动映射到 Nocturne 工具名如 `Read → read`、`Write/Edit/MultiEdit → edit/write/apply_patch`、`Bash → shell/shell_output/shell_kill`、`mcp__<server>__<tool>` 原样保留，并扣除 `disallowedTools`）、合法的 `effort` 与 Markdown 正文。
+- **忽略字段**：`model`、`permissionMode`、`mcpServers`、`hooks`、`maxTurns`、`autoCompactWindow`、`skills`、`initialPrompt`、`memory`、`background`、`omitClaudeMd`、`isolation`、`color`、`experimental` 等字段一律忽略，并在设置页合并显示一条警告列出被忽略的字段名。
+
 ## 插件子代理
 
 已启用的 Nocturne 自有插件可以自带子代理定义（例如四个内置文档插件均带有 `visual-judge` 视觉验收子代理）。
