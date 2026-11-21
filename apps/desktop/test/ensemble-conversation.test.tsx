@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSessionView,
@@ -641,5 +641,200 @@ describe("Ensemble 对话内渲染", () => {
 
     expect(container.querySelector(".ensemble-row")).toBeNull();
     expect(container.querySelectorAll("details.tool-details")).toHaveLength(2);
+  });
+
+  it("合奏成员待确认只出提示行不出确认卡片；task 卡片与 1–N/Esc 不受影响；结束后不再出提示行", async () => {
+    const session = fakeSession();
+    const onOpenEnsembleMember = vi.fn();
+    const view = createSessionView();
+    const ensemble: EnsembleView = {
+      createdSeq: 4,
+      title: "验证合奏",
+      status: "active",
+      maestro: {
+        model: { provider: "anthropic", model: "claude-opus-5.5" },
+        status: "waiting",
+        awaitingPermission: false,
+      },
+      members: [
+        makeMember("impl", {
+          childSessionId: "child-impl",
+          model: { provider: "google", model: "gemini-4-neon" },
+          status: "working",
+        }),
+        makeMember("verify", {
+          childSessionId: "child-verify",
+          model: { provider: "openai", model: "gpt-6.2-astra" },
+          status: "working",
+          pendingPermissions: [
+            {
+              requestId: "req-verify",
+              callId: "c-verify",
+              reason: "执行命令",
+              subjects: [{ kind: "shell", target: "pnpm test" }],
+              options: ["allow_once", "deny"],
+            },
+          ],
+        }),
+      ],
+      awaitingPermissionMembers: ["verify"],
+      posts: [],
+    };
+    view.ensemble = ensemble;
+    view.pendingSubagentPermissions = [
+      {
+        requestId: "req-verify",
+        callId: "c-verify",
+        toolName: "shell",
+        reason: "执行命令",
+        subjects: [{ kind: "shell", target: "pnpm test" }],
+        options: ["allow_once", "deny"],
+        childSessionId: "child-verify",
+        parentCallId: "ensemble:verify",
+        profile: "",
+        taskSummary: "verify",
+        afterSeq: 10,
+        order: 1,
+      },
+    ];
+
+    const { container, rerender } = render(
+      <Conversation
+        session={session}
+        view={view}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={vi.fn()}
+        onOpenEnsembleMember={onOpenEnsembleMember}
+      />,
+    );
+
+    // 合奏成员只出提示行，不出 PermissionCard
+    expect(container.querySelector(".ask")).toBeNull();
+    const hints = container.querySelectorAll("button.ensemble-ask-hint");
+    expect(hints).toHaveLength(1);
+    const hint = hints[0];
+    expect(hint?.querySelector(".ensemble-av.warn")).not.toBeNull();
+    expect(hint?.querySelector(".ensemble-ask-name")?.textContent).toBe("verify");
+    expect(hint?.querySelector(".ensemble-ask-meta")?.textContent).toBe("gpt-6.2-astra");
+    expect(hint?.querySelector(".ensemble-ask-status")?.textContent).toBe("等待确认");
+    expect(hint?.querySelector(".ensemble-ask-chevron")).not.toBeNull();
+    if (!hint) throw new Error("missing ensemble-ask-hint");
+    fireEvent.click(hint);
+    expect(onOpenEnsembleMember).toHaveBeenCalledWith({
+      name: "verify",
+      childSessionId: "child-verify",
+    });
+
+    // 同时存在 task 子代理请求（且排序在合奏成员之后）：task 卡片照常显示，且 1/Esc 作用在 task 卡片上
+    const withTask = {
+      ...view,
+      pendingSubagentPermissions: [
+        ...view.pendingSubagentPermissions,
+        {
+          requestId: "req-task",
+          callId: "c-task",
+          toolName: "shell",
+          reason: "执行命令",
+          subjects: [{ kind: "shell" as const, target: "pnpm lint" }],
+          options: ["allow_once" as const, "deny" as const],
+          childSessionId: "child-task",
+          parentCallId: "call-task",
+          profile: "deep",
+          taskSummary: "修补配置",
+          afterSeq: 11,
+          order: 2,
+        },
+      ],
+    };
+    rerender(
+      <Conversation
+        session={session}
+        view={withTask}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={vi.fn()}
+        onOpenEnsembleMember={onOpenEnsembleMember}
+      />,
+    );
+
+    const cards = container.querySelectorAll(".ask");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.textContent).toContain("修补配置");
+    expect(container.querySelectorAll("button.ensemble-ask-hint")).toHaveLength(1);
+
+    fireEvent.keyDown(document.body, { key: "1" });
+    await waitFor(() => {
+      expect(session.respondSubagentPermission).toHaveBeenCalledWith("child-task", "req-task", {
+        decision: "allow",
+      });
+    });
+
+    // 第二张 task 卡片接替后，Esc 也作用在它身上
+    rerender(
+      <Conversation
+        session={session}
+        view={{
+          ...view,
+          pendingSubagentPermissions: [
+            ...view.pendingSubagentPermissions,
+            {
+              requestId: "req-task-2",
+              callId: "c-task-2",
+              toolName: "shell",
+              reason: "执行命令",
+              subjects: [{ kind: "shell" as const, target: "pnpm build" }],
+              options: ["allow_once" as const, "deny" as const],
+              childSessionId: "child-task-2",
+              parentCallId: "call-task-2",
+              profile: "deep",
+              taskSummary: "验证构建",
+              afterSeq: 12,
+              order: 3,
+            },
+          ],
+        }}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={vi.fn()}
+        onOpenEnsembleMember={onOpenEnsembleMember}
+      />,
+    );
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => {
+      expect(session.respondSubagentPermission).toHaveBeenCalledWith("child-task-2", "req-task-2", {
+        decision: "deny",
+      });
+    });
+
+    // 合奏结束后不再出提示行
+    rerender(
+      <Conversation
+        session={session}
+        view={{
+          ...view,
+          ensemble: { ...ensemble, status: "ended", endedSeq: 20, endedReason: "user" },
+          pendingSubagentPermissions: [],
+        }}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={vi.fn()}
+        onOpenEnsembleMember={onOpenEnsembleMember}
+      />,
+    );
+    expect(container.querySelector(".ensemble-ask-hint")).toBeNull();
+    expect(container.querySelector(".conversation-requests")).toBeNull();
   });
 });

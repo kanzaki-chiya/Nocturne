@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  AggregatedPendingPermission,
   EnsembleMemberView,
   EnsemblePostView,
   EnsembleView,
@@ -11,6 +12,7 @@ import {
   filterEnsemblePosts,
   formatEnsembleTime,
   groupEnsembleMembers,
+  partitionEnsemblePermissions,
   shortModelName,
   splitEnsembleMentions,
   ensembleActivitySummary,
@@ -421,7 +423,7 @@ describe("作者、提及、筛选、搜索与分组", () => {
   });
 });
 
-describe("合奏入口行匹配", () => {
+describe("合奏入口行匹配与成员权限拆分", () => {
   function makeInitTool(
     seq: number,
     completedSeq: number | undefined,
@@ -458,5 +460,80 @@ describe("合奏入口行匹配", () => {
     expect(currentEnsembleInitKey([syntheticFirst, syntheticSecond], { createdSeq: 11 })).toBe(
       "t:10",
     );
+  });
+
+  it("partitionEnsemblePermissions 只过滤活动合奏成员的转发请求，保留指挥与 task 子代理卡片顺序", () => {
+    const impl = makeMember("impl", { childSessionId: "child-impl" });
+    const verify = makeMember("verify", {
+      childSessionId: "child-verify",
+      pendingPermissions: [
+        { requestId: "req-v", callId: "c-v", reason: "cmd", subjects: [], options: [] },
+      ],
+    });
+    const removed = makeMember("old", { childSessionId: "child-old", status: "removed" });
+    const ensemble: Pick<EnsembleView, "status" | "members"> = {
+      status: "active",
+      members: [impl, verify, removed],
+    };
+    const pending: AggregatedPendingPermission[] = [
+      {
+        kind: "subagent",
+        permission: {
+          requestId: "req-v",
+          callId: "c-v",
+          toolName: "shell",
+          reason: "cmd",
+          subjects: [],
+          options: ["allow_once", "deny"],
+          childSessionId: "child-verify",
+          parentCallId: "ensemble:verify",
+          profile: "",
+          taskSummary: "verify",
+          afterSeq: 10,
+          order: 1,
+        },
+      },
+      {
+        kind: "subagent",
+        permission: {
+          requestId: "req-task",
+          callId: "c-t",
+          toolName: "shell",
+          reason: "cmd",
+          subjects: [],
+          options: ["allow_once", "deny"],
+          childSessionId: "child-task",
+          parentCallId: "call-task",
+          profile: "deep",
+          taskSummary: "普通子代理",
+          afterSeq: 11,
+          order: 2,
+        },
+      },
+      {
+        kind: "session",
+        permission: {
+          requestId: "req-self",
+          callId: "c-s",
+          toolName: "shell",
+          reason: "cmd",
+          subjects: [],
+          options: ["allow_once", "deny"],
+          seq: 12,
+        },
+      },
+    ];
+
+    const active = partitionEnsemblePermissions(pending, ensemble);
+    expect(active.cards.map((item) => item.permission.requestId)).toEqual(["req-task", "req-self"]);
+    expect(active.awaitingMembers.map((member) => member.name)).toEqual(["verify"]);
+
+    const ended = partitionEnsemblePermissions(pending, { ...ensemble, status: "ended" });
+    expect(ended.cards.map((item) => item.permission.requestId)).toEqual([
+      "req-v",
+      "req-task",
+      "req-self",
+    ]);
+    expect(ended.awaitingMembers).toEqual([]);
   });
 });

@@ -2675,6 +2675,9 @@ export function App({ host }: { host: DesktopHost }) {
                   onOpenEnsemble={() => {
                     sidePanel.openEnsemble();
                   }}
+                  onOpenEnsembleMember={(member) => {
+                    sidePanel.openEnsembleMember(member);
+                  }}
                   onOpenSuiteThread={(thread) => {
                     sidePanel.openSuiteThread(thread);
                   }}
@@ -3051,6 +3054,7 @@ interface SessionPaneProps {
   searchTarget?: { sessionId: string; seq?: number | undefined; nonce: number } | undefined;
   suiteRecord?: SuiteRecord | undefined;
   onOpenEnsemble?: (() => void) | undefined;
+  onOpenEnsembleMember?: ((member: { name: string; childSessionId: string }) => void) | undefined;
   onOpenSuiteThread?:
     ((thread: { threadId: string; childSessionId: string; title: string }) => void) | undefined;
   onShellKindChange?: ((sessionId: string, kind: string | undefined) => void) | undefined;
@@ -3125,6 +3129,7 @@ function SessionPane({
   searchTarget,
   suiteRecord,
   onOpenEnsemble,
+  onOpenEnsembleMember,
   onOpenSuiteThread,
   onShellKindChange,
   ruleEligibleCalls,
@@ -3229,6 +3234,7 @@ function SessionPane({
         fileLinks={fileLinks}
         resolveAppIcon={resolveAppIcon}
         onOpenEnsemble={onOpenEnsemble}
+        onOpenEnsembleMember={onOpenEnsembleMember}
         onOpenSuiteThread={
           view.suite !== undefined && onOpenSuiteThread !== undefined
             ? (threadId) => {

@@ -4,6 +4,7 @@
  * 桌面端与手机网页共用；只依赖 `@nocturne/core/protocol` 与 `./tool-meta`，不依赖 React。
  */
 import type {
+  AggregatedPendingPermission,
   ModelRef,
   EnsembleActivity,
   EnsembleAuthorKind,
@@ -190,6 +191,44 @@ export function currentEnsembleInitKey(
     }
   }
   return fallback?.key;
+}
+
+/**
+ * 桌面端指挥会话拆分待确认请求（ADR-0089 修订）：
+ * 当合奏处于 `active` 时，过滤掉 `childSessionId` 属于当前合奏未移除成员的转发请求
+ * （指挥自身、普通 `task` 子代理与组曲线程的确认卡片保持原顺序），并按加入顺序返回待确认成员列表。
+ */
+export function partitionEnsemblePermissions<T extends AggregatedPendingPermission>(
+  pendingPermissions: readonly T[],
+  ensemble: Pick<EnsembleView, "status" | "members"> | undefined,
+): {
+  cards: T[];
+  awaitingMembers: EnsembleMemberView[];
+} {
+  if (ensemble?.status !== "active") {
+    return { cards: [...pendingPermissions], awaitingMembers: [] };
+  }
+  const activeMemberChildIds = new Set<string>();
+  for (const member of ensemble.members) {
+    if (member.status !== "removed") {
+      activeMemberChildIds.add(member.childSessionId);
+    }
+  }
+  const forwardedChildIds = new Set<string>();
+  const cards: T[] = [];
+  for (const item of pendingPermissions) {
+    if (item.kind === "subagent" && activeMemberChildIds.has(item.permission.childSessionId)) {
+      forwardedChildIds.add(item.permission.childSessionId);
+      continue;
+    }
+    cards.push(item);
+  }
+  const awaitingMembers = ensemble.members.filter(
+    (member) =>
+      member.status !== "removed" &&
+      (member.pendingPermissions.length > 0 || forwardedChildIds.has(member.childSessionId)),
+  );
+  return { cards, awaitingMembers };
 }
 
 /** 指挥行的状态圆点（已结束时统一变成 wait） */

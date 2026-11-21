@@ -1861,6 +1861,65 @@ button.fcard:hover {
   color: var(--a-faint);
 }
 
+/* ── 合奏成员待确认提示行（ADR-0089 修订）：位于底部 conversation-requests ── */
+.conversation .ensemble-ask-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: var(--w-thread);
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  background: var(--a-panel);
+  color: var(--a-text);
+  font-family: var(--sans);
+  font-size: var(--fs-1);
+  text-align: left;
+  cursor: pointer;
+}
+.conversation .ensemble-ask-hint + .ensemble-ask-hint,
+.conversation .ask + .ensemble-ask-hint,
+.conversation .ensemble-ask-hint + .ask {
+  margin-top: var(--space-2);
+}
+.conversation .ensemble-ask-hint:hover {
+  border-color: var(--a-border-strong);
+  background: var(--a-raised);
+}
+.conversation .ensemble-ask-hint:focus-visible {
+  outline: none;
+  border-color: var(--a-accent);
+  box-shadow: var(--shadow-focus);
+}
+.conversation .ensemble-ask-name {
+  flex: none;
+  color: var(--a-text);
+  font-weight: var(--fw-medium);
+}
+.conversation .ensemble-ask-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--a-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation .ensemble-ask-status {
+  flex: none;
+  color: var(--a-warning);
+  font-size: var(--fs-1);
+}
+.conversation .ensemble-ask-chevron {
+  flex: none;
+  color: var(--a-faint);
+}
+
 /* ── 组曲（ADR-0097 §3.4）：线程汇报行 ── */
 
 .conversation .suite-report-row {

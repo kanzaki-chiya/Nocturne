@@ -140,11 +140,13 @@ import {
   currentEnsembleInitKey,
   ensembleAuthorColor,
   ensembleAuthorLabel,
+  ensembleMemberMetaLabel,
   ensemblePostHead,
   ensembleReadFilterParts,
   ensembleReadPostsFromOutput,
   ensembleStatusDot,
   ensembleToolSummary,
+  partitionEnsemblePermissions,
   splitEnsembleMentions,
 } from "./ensemble-ui";
 import { parseSuiteThreadReport, suiteReportDotTone } from "./suite-ui";
@@ -301,6 +303,8 @@ export interface ConversationProps {
   ensembleRecipientLabel?: string | undefined;
   /** 点击合奏工具行打开右侧面板的合奏留言板（仅桌面端指挥会话传入） */
   onOpenEnsemble?: (() => void) | undefined;
+  /** 点击合奏成员待确认提示行打开该成员的会话标签（仅桌面端指挥会话传入） */
+  onOpenEnsembleMember?: ((member: { name: string; childSessionId: string }) => void) | undefined;
   /** 点击组曲汇报行在右侧面板打开对应线程 */
   onOpenSuiteThread?: ((threadId: string) => void) | undefined;
   /** 启用消息列表虚拟化（仅手机网页开启，桌面端保持整段渲染） */
@@ -4980,6 +4984,7 @@ function ConversationContent({
   resolveAppIcon,
   localEntries = [],
   entryKey,
+  onOpenEnsembleMember,
   onOpenSuiteThread,
   virtualize = false,
   enableFind = false,
@@ -6148,8 +6153,13 @@ function ConversationContent({
           ) : null;
         }
         if (hideRequests || !isLiveSession(session)) return null;
-        const pendingPermissions = allPendingPermissions(view);
-        if (pendingPermissions.length === 0) return null;
+        const allPending = allPendingPermissions(view);
+        const { cards: pendingPermissions, awaitingMembers } =
+          onOpenEnsembleMember !== undefined
+            ? partitionEnsemblePermissions(allPending, view.ensemble)
+            : { cards: allPending, awaitingMembers: [] };
+        if (pendingPermissions.length === 0 && awaitingMembers.length === 0) return null;
+        const activeEnsemble = view.ensemble?.status === "active" ? view.ensemble : undefined;
         const mergedRuleEligible =
           liveRuleEligibleRef.current.size === 0
             ? ruleEligibleCalls
@@ -6200,6 +6210,37 @@ function ConversationContent({
                 />
               ),
             )}
+            {activeEnsemble !== undefined && onOpenEnsembleMember !== undefined
+              ? awaitingMembers.map((member) => {
+                  const modelLabel = ensembleMemberMetaLabel(member);
+                  return (
+                    <button
+                      key={`ensemble-ask:${member.childSessionId}`}
+                      type="button"
+                      className="ensemble-ask-hint"
+                      onClick={() => {
+                        onOpenEnsembleMember({
+                          name: member.name,
+                          childSessionId: member.childSessionId,
+                        });
+                      }}
+                    >
+                      <EnsembleAvatar
+                        kind="member"
+                        color={ensembleAuthorColor(activeEnsemble.members, member.name, "member")}
+                        size="sm"
+                        warn
+                      />
+                      <span className="ensemble-ask-name">{member.name}</span>
+                      {modelLabel !== "" ? (
+                        <span className="ensemble-ask-meta">{modelLabel}</span>
+                      ) : null}
+                      <span className="ensemble-ask-status">等待确认</span>
+                      <Icon name="right_small" size={ICON_SM} className="ensemble-ask-chevron" />
+                    </button>
+                  );
+                })
+              : null}
           </div>
         );
       })()}
