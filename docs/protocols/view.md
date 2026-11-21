@@ -64,6 +64,8 @@ interface SessionView {
   todos: TodoItem[];
   /** 当前会话笔记（ADR-0095）；不归档，由模型显式删除 */
   notes: NoteItem[];
+  /** 当前会话有效页面及版本列表（ADR-0109）：按成功 tool.completed 带有效 inline 标记的附件派生，不按工具名硬编码 */
+  pages: SessionPage[];
   backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
   /** Ensemble 派生视图（ADR-0089）：持久骨架由 ensemble.* 事件归约，成员运行态由临时事件 ensemble.member_updated 更新 */
   ensemble?: EnsembleView;
@@ -130,7 +132,7 @@ interface ToolEntry {
   descriptions?: AttachmentDescribedPayload[]; // 图片描述，按 attachmentRef 关联
   /** tool.progress 累计（临时数据）；completed 时清空，收敛点上必为空 */
   liveOutput: string;
-  /** 成功完成后带 inline 标记的页面附件（ADR-0088，纯函数 inlineFilesOfTool 读取）；图形端据此隐藏原工具行并内嵌显示页面 */
+  /** 成功完成后带 inline 标记的页面附件（ADR-0088、ADR-0109，纯函数 inlineFilesOfTool 读取）；图形端据此隐藏原工具行并渲染内嵌页面或面板入口行 */
   inlineFiles?: FileAttachment[];
   result:
     | { status: ToolCallStatus; modelContent: string; output: unknown;
@@ -381,7 +383,9 @@ function allPendingPermissions(
 
 ## 回退
 
-`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、笔记、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；分叉追加的回退（`fork: true`）只截断，不生成通知；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+`session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、笔记、页面列表（`pages`）、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；分叉追加的回退（`fork: true`）只截断，不生成通知；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
+
+`SessionView.pages` 的每项形状为 `SessionPage`（`{ page, title, display, versions }`，其中 `title` 为最新一版标题，`display` 为第一版显示方式；`versions` 每项为 `{ version, file, title, seq }`，定义于 `packages/core/src/protocol/pages.ts`）。`inline` 不含 `page` 字段的旧会话附件各自投影为单版本、`display: "inline"` 的页面，页面 id 为 `legacy-<file>`，不与新建页面 `page-<n>` 冲突（[ADR-0109](../decisions/ADR-0109-page-versions.md)）。
 
 回退目标只取非插话的 `message.user`（`steer !== true`）：回退到一条插话会把 Turn 截成半截（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。`rewindTargets()` 不列插话，`rewind` / `forkSession` 指向插话一律返回 `invalid_command`。
 
