@@ -574,3 +574,124 @@ it("导入技能：无工作区时项目目标置灰", async () => {
     (within(dialog).getByRole("button", { name: "当前工作区" }) as HTMLButtonElement).disabled,
   ).toBe(true);
 });
+
+it("命令文件技能：同组展示、详情显示 .md 入口路径、打开父目录、隐藏支持文件一节", async () => {
+  const commandSkill = skill({
+    name: "deploy",
+    layer: "project",
+    source: ".nocturne",
+    layout: "file",
+    entryPath: "Z:/project/.nocturne/commands/deploy.md",
+    realPath: "Z:/project/.nocturne/commands/deploy.md",
+    description: "部署当前分支到测试环境",
+    displayedDescriptionLength: 11,
+    fields: { name: "deploy", "argument-hint": "<env>" },
+    unknownFields: {},
+    bodyPreview: "# 部署当前分支到测试环境\n执行发布脚本 $ARGUMENTS",
+    files: [],
+    size: 256,
+  });
+  const dirSkill = skill({
+    name: "review",
+    layer: "project",
+    source: ".nocturne",
+    layout: "directory",
+    entryPath: "Z:/project/.nocturne/skills/review",
+    realPath: "Z:/project/.nocturne/skills/review",
+    description: "代码审查",
+    displayedDescriptionLength: 4,
+    files: [
+      { name: "SKILL.md", directory: false },
+      { name: "checklist.md", directory: false },
+    ],
+  });
+  const f = fakeServer(withInit({ "skills.describeSkills": data([commandSkill, dirSkill]) }));
+  await f.initialize();
+  const openDirectory = vi.fn(async () => undefined);
+  render(
+    <SkillsPage
+      client={f.client}
+      workspaceRoot="Z:/project"
+      version={0}
+      openDirectory={openDirectory}
+      openUrl={vi.fn()}
+    />,
+  );
+
+  // 命令文件技能与目录技能在同一项目分组中，不新增分组或徽标
+  const projectGroup = await screen.findByRole("region", { name: /项目.*2/ });
+  expect(within(projectGroup).getByText("deploy")).toBeTruthy();
+  expect(within(projectGroup).getByText("review")).toBeTruthy();
+
+  // 进入命令文件技能详情：位置显示 .md 入口路径，不显示支持文件一节，打开目录传父目录
+  fireEvent.click(within(projectGroup).getByText("deploy"));
+  expect(await screen.findByText("Z:/project/.nocturne/commands/deploy.md")).toBeTruthy();
+  expect(screen.queryByText(/SKILL\.md/)).toBeNull();
+  expect(screen.queryByRole("region", { name: /^支持文件/ })).toBeNull();
+  expect(screen.queryByText(/个支持文件/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "在资源管理器中打开" }));
+  expect(openDirectory).toHaveBeenCalledWith("Z:/project/.nocturne/commands");
+});
+
+it("命令文件技能：桌面斜杠补全能补出并提交 submit.skill", async () => {
+  const commandSkill = skill({
+    name: "deploy",
+    layer: "project",
+    source: ".nocturne",
+    layout: "file",
+    entryPath: "Z:/project/.nocturne/commands/deploy.md",
+    realPath: "Z:/project/.nocturne/commands/deploy.md",
+    description: "部署到测试环境",
+    displayedDescriptionLength: 7,
+    fields: { name: "deploy", "argument-hint": "<env>" },
+    files: [],
+  });
+  const groups = completeSlash("/dep", [commandSkill]);
+  expect(groups.map((g) => g.id)).toEqual(["skills"]);
+  expect(groups[0]?.items[0]).toMatchObject({
+    label: "/deploy",
+    argumentHint: "<env>",
+    summary: "部署到测试环境",
+  });
+
+  const origScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    value: vi.fn(),
+    configurable: true,
+  });
+  try {
+    const onSubmit = vi.fn(async () => true);
+    render(
+      <Composer
+        running={false}
+        fileRefs={null}
+        onSlash={() => false}
+        skills={[commandSkill]}
+        onSubmit={onSubmit}
+        onInterrupt={() => undefined}
+        pickImages={vi.fn(async () => [])}
+      />,
+    );
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "/dep" } });
+    input.setSelectionRange(4, 4);
+    const menu = await screen.findByRole("listbox", { name: "斜杠命令补全" });
+    const option = within(menu).getByRole("option", { name: /\/deploy/ });
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
+    fireEvent.change(input, { target: { value: "staging" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith({
+      text: "/deploy staging",
+      attachments: [],
+      skill: { name: "deploy", arguments: "staging" },
+    });
+  } finally {
+    if (origScrollIntoView) {
+      Object.defineProperty(Element.prototype, "scrollIntoView", origScrollIntoView);
+    } else {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  }
+});

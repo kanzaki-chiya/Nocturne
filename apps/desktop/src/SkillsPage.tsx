@@ -49,6 +49,19 @@ export const skillListMeta = (skill: SkillOverview): string | undefined =>
         ? `${skill.ignored.length} 处不生效`
         : undefined;
 
+const skillDisplayPath = (skill: SkillOverview): string =>
+  skill.layout === "file" ? skill.entryPath : `${skill.realPath}\\SKILL.md`;
+
+const skillFolderPath = (skill: SkillOverview): string => {
+  if (skill.layout !== "file") return skill.realPath;
+  const trimmed = skill.realPath.replace(/[\\/]+$/, "");
+  const sep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (sep < 0) return ".";
+  if (sep === 0) return trimmed.slice(0, 1);
+  if (sep === 2 && /^[a-zA-Z]:/.test(trimmed)) return trimmed.slice(0, 3);
+  return trimmed.slice(0, sep);
+};
+
 export function SkillsPage({
   client,
   workspaceRoot,
@@ -128,7 +141,8 @@ export function SkillsPage({
     !normalizedQuery ||
     s.name.toLowerCase().includes(normalizedQuery) ||
     s.description.toLowerCase().includes(normalizedQuery);
-  const supportFiles = skill ? skill.files.filter((f) => f.name !== "SKILL.md") : [];
+  const supportFiles =
+    skill && skill.layout !== "file" ? skill.files.filter((f) => f.name !== "SKILL.md") : [];
   const argumentHint =
     skill && typeof skill.fields["argument-hint"] === "string"
       ? skill.fields["argument-hint"].trim()
@@ -141,7 +155,7 @@ export function SkillsPage({
       : null;
   const entryTitle =
     skill && skill.otherEntries.length > 0
-      ? `经 ${skill.entryPath} 进入；另有入口 ${skill.otherEntries.join("、")} 指向同一目录，只算一个`
+      ? `经 ${skill.entryPath} 进入；另有入口 ${skill.otherEntries.join("、")} 指向同一${skill.layout === "file" ? "文件" : "目录"}，只算一个`
       : undefined;
   return (
     <div className="page3 skills-page">
@@ -168,7 +182,7 @@ export function SkillsPage({
                     <IconButton
                       aria-label="在资源管理器中打开"
                       title="在资源管理器中打开"
-                      onClick={() => void attempt(() => openDirectory(skill.realPath))}
+                      onClick={() => void attempt(() => openDirectory(skillFolderPath(skill)))}
                     >
                       <Icon name="folder" size={ICON_MD} />
                     </IconButton>
@@ -183,13 +197,13 @@ export function SkillsPage({
               <div className="sbody">
                 <SettingsGroup title="概况" plain>
                   <SettingsRow label="位置">
-                    <code title={entryTitle}>{skill.realPath}\SKILL.md</code>
+                    <code title={entryTitle}>{skillDisplayPath(skill)}</code>
                   </SettingsRow>
                   {shadowed.length > 0 && (
                     <SettingsRow label="同名">
                       {shadowed.map((s) => (
                         <div key={s.entryPath}>
-                          <code>{s.realPath}\SKILL.md</code>
+                          <code>{skillDisplayPath(s)}</code>
                         </div>
                       ))}
                     </SettingsRow>
@@ -276,7 +290,7 @@ export function SkillsPage({
                     ))}
                   </SettingsGroup>
                 )}
-                {supportFiles.length > 0 && (
+                {skill.layout !== "file" && supportFiles.length > 0 && (
                   <SettingsGroup title="支持文件" plain count={supportFiles.length}>
                     <DataTable
                       aria-label="支持文件"

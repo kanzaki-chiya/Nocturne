@@ -1068,4 +1068,66 @@ describe("TUI", () => {
     unmount();
     await session.close();
   });
+
+  it("项目命令文件技能：TUI 斜杠补全能补出并提交 submit.skill", async () => {
+    const ws = tmp("nct-tui-cmd-ws-");
+    const cmdDir = path.join(ws, ".nocturne", "commands");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(cmdDir, { recursive: true });
+    writeFileSync(
+      path.join(cmdDir, "deploy.md"),
+      "---\nargument-hint: <env>\n---\n# 部署到指定环境\n执行部署 $ARGUMENTS",
+    );
+    const provider = new FakeProvider({
+      scripts: [
+        [
+          { type: "text_delta", text: "已收到部署指令" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: tmp("nct-tui-cmd-sd-"),
+      providers: [provider],
+    });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
+    expect(
+      session.describeSkills().skills.some((s) => s.name === "deploy" && s.layout === "file"),
+    ).toBe(true);
+    const submitSpy = vi.spyOn(session, "submit");
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, inline: false }),
+    );
+    try {
+      await vi.waitFor(() => expect(lastFrame() ?? "").toContain("fake-model"));
+
+      // 输入 /dep 触发斜杠补全，确认出现命令文件技能及参数提示和说明
+      stdin.write("/");
+      await flush();
+      stdin.write("dep");
+      await vi.waitFor(() => expect(lastFrame() ?? "").toContain("/deploy"));
+      const popup = lastFrame() ?? "";
+      expect(popup).toContain("/deploy");
+      expect(popup).toContain("<env>");
+      expect(popup).toContain("部署到指定环境");
+
+      // 回车接受补全，再输入参数并回车提交，确认提交带 submit.skill
+      stdin.write("\r");
+      await flush();
+      stdin.write("staging");
+      await flush();
+      stdin.write("\r");
+      await vi.waitFor(() =>
+        expect(submitSpy).toHaveBeenCalledWith({
+          text: "/deploy staging",
+          skill: { name: "deploy", arguments: "staging" },
+        }),
+      );
+      await vi.waitFor(() => expect(lastFrame() ?? "").toContain("已收到部署指令"));
+    } finally {
+      unmount();
+      await session.close();
+    }
+  });
 });

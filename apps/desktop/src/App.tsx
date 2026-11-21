@@ -2398,7 +2398,12 @@ export function App({ host }: { host: DesktopHost }) {
                   <PaneErrorBoundary key="skills">
                     <SkillsPage
                       client={pageClient}
-                      workspaceRoot={effectiveWorkspace ?? undefined}
+                      workspaceRoot={
+                        active?.view.meta?.workspaceRoot ??
+                        conversations.draftWorkspace ??
+                        effectiveWorkspace ??
+                        undefined
+                      }
                       version={settingsVersion}
                       openDirectory={(path, create) =>
                         host.invoke("open_skill_directory", {
