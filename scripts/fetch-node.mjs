@@ -41,16 +41,13 @@ async function download(url, dest) {
 }
 
 function extract(zipFile, dest) {
-  // 产物固定为 win-x64.zip，只在 Windows 构建机使用：直接走 Expand-Archive。
-  // 其他平台若误调用，尝试系统 bsdtar（GNU tar 不支持 zip）。
+  // 产物固定为 win-x64.zip，只在 Windows 构建机使用：用系统自带的 bsdtar 解压。
+  // 不用 Windows PowerShell 的 Expand-Archive：从 pwsh 启动时它会继承 PSModulePath，
+  // 加载 PowerShell 7 的 Archive 模块而失败。写绝对路径，避免 PATH 里的 GNU tar（不支持 zip）。
+  // 其他平台若误调用，尝试系统 tar。
   if (process.platform === "win32") {
-    // PowerShell 单引号字符串：内部单引号写两个
-    const ps = (s) => `'${s.replace(/'/g, "''")}'`;
-    run("powershell", [
-      "-NoProfile",
-      "-Command",
-      `Expand-Archive -LiteralPath ${ps(zipFile)} -DestinationPath ${ps(dest)}`,
-    ]);
+    const tar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+    run(tar, ["-xf", zipFile, "-C", dest]);
   } else {
     run("tar", ["-xf", zipFile, "-C", dest]);
   }
