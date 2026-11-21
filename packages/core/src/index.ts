@@ -75,9 +75,11 @@ import {
 } from "./config/index.js";
 import { MODEL_ROLES } from "./config/index.js";
 import {
+  truncateSubagentTableDescription,
   type HooksDescription,
   type PluginOverview,
   type PluginsDescription,
+  type ProjectSubagentsDescription,
   type SessionAppSurface,
   type SkillImportInput,
   type SkillImportOutput,
@@ -268,9 +270,12 @@ import {
 import { PendingInputs, type PendingInputPatch } from "./pending-inputs.js";
 import { validateSettingsPatch } from "./config/settings.js";
 import {
+  discoverProjectSubagents,
   resolveSubagentProfile,
+  toProjectSubagentOverview,
   type PluginSubagentDefinition,
-} from "./config/subagent-profiles.js";
+  type ProjectSubagentDefinition,
+} from "./config/index.js";
 import { BackgroundSubagents, backgroundAdmission } from "./agent/background-subagents.js";
 import {
   applyWorktreeChanges,
@@ -866,6 +871,9 @@ export interface Runtime {
   close(): Promise<void>;
   describeSkills(input?: { workspaceRoot?: string | undefined }): Promise<SkillsDescription>;
   setSkillEnabled(input: { name: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
+  describeProjectSubagents(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<ProjectSubagentsDescription>;
   describePlugins(): Promise<PluginsDescription>;
   setPluginEnabled(input: { id: string; enabled: boolean }): Promise<{ affectedSessions: number }>;
   installLocalPlugin(input: { path: string }): Promise<PluginOverview>;
@@ -1191,6 +1199,12 @@ function instantiateProvider(
     },
     env,
   );
+}
+
+function includeClaudeProjectSubagents(
+  skillsConfig: { sources?: { claude?: boolean | undefined } | undefined } | undefined,
+): boolean {
+  return skillsConfig?.sources?.claude !== false;
 }
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -1816,6 +1830,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const warning of skillDiscovery.warnings)
       warnings.push(`${warning.path}:${warning.line}：${warning.message}`);
     let catalog = skillCatalog(skillDiscovery.skills, config?.disabledSkills() ?? [], undefined);
+    let projectSubagentsDiscovery = await discoverProjectSubagents(platform, {
+      workspaceRoot: meta.workspaceRoot,
+      cwd: meta.cwd,
+      includeClaude: includeClaudeProjectSubagents(config?.skillConfig()),
+    });
+    warnings.push(...projectSubagentsDiscovery.warnings);
     if (ws?.projectConfig.present === true && !ws.projectConfig.trusted) {
       warnings.push(
         `检测到项目配置 ${ws.projectConfig.path ?? ""}，但该工作区未信任——其中仅收紧方向的规则生效；执行 nctrn trust 信任该工作区`,
@@ -2474,7 +2494,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let pendingSkillEnable = false;
     const applySkills = async () => {
       if (!pendingSkillRescan && !pendingSkillEnable) return;
-      if (pendingSkillRescan)
+      const didRescan = pendingSkillRescan;
+      if (pendingSkillRescan) {
         skillDiscovery = await skillCache.discover({
           nocturneHome,
           workspaceRoot: meta.workspaceRoot,
@@ -2482,10 +2503,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           config: config?.skillConfig(),
           pluginSkillDirs: await resolveActivePluginSkillDirs(platform, pluginDiscoveryOptions),
         });
+        projectSubagentsDiscovery = await discoverProjectSubagents(platform, {
+          workspaceRoot: meta.workspaceRoot,
+          cwd: meta.cwd,
+          includeClaude: includeClaudeProjectSubagents(config?.skillConfig()),
+        });
+      }
       pendingSkillRescan = false;
       pendingSkillEnable = false;
       installSkills();
       policy = buildPolicy(session.state().config.permissionPreset);
+      if (didRescan) refreshSessionExternalAgents();
     };
     const refreshSessionSkills = async (rescan: boolean) => {
       pendingSkillRescan ||= rescan;
@@ -3013,6 +3041,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let enabledExternalAgents: ExternalAgentConfig[] = [];
     let pendingExternalAgents = false;
     const unavailableProfiles = new Set<string>();
+    const warnedProjectPluginConflicts = new Set<string>();
 
     // 子代理（subagent.md 第 3 节）：launcher 捕获本会话装配上下文；
     // task 与内置工具同一注册表——Agent Loop 无工具名分支
@@ -3163,8 +3192,40 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const defaultTaskPricing = pricingForModel(defaultTaskModel);
       const configuredProfiles = resolvedSettingsNow?.subagentProfiles ?? {};
       const configuredPluginModels = resolvedSettingsNow?.pluginSubagentModels ?? {};
+      const projectSubagents: Record<string, ProjectSubagentDefinition> = Object.fromEntries(
+        projectSubagentsDiscovery.active.map((agent) => [
+          agent.id,
+          {
+            id: agent.id,
+            name: agent.name,
+            source: agent.source,
+            path: agent.path,
+            relativePath: agent.relativePath,
+            description: agent.description,
+            prompt: agent.prompt,
+            ...(agent.effort !== undefined ? { effort: agent.effort } : {}),
+            ...(agent.tools !== undefined ? { tools: agent.tools } : {}),
+            ...(agent.disallowedTools !== undefined
+              ? { disallowedTools: agent.disallowedTools }
+              : {}),
+          },
+        ]),
+      );
+      const effectivePluginAgents = sessionPlugins.agents.filter((agent) => {
+        if (projectSubagents[agent.id] === undefined) return true;
+        if (!warnedProjectPluginConflicts.has(agent.id)) {
+          warnedProjectPluginConflicts.add(agent.id);
+          const message = `插件 ${agent.pluginLabel} 的子代理 ${agent.id} 与项目子代理同名，已跳过`;
+          warnings.push(message);
+          session.emitEphemeral("runtime.warning", {
+            code: "config_warning",
+            message,
+          });
+        }
+        return false;
+      });
       const pluginSubagents: Record<string, PluginSubagentDefinition> = Object.fromEntries(
-        sessionPlugins.agents.map((agent) => [
+        effectivePluginAgents.map((agent) => [
           agent.id,
           {
             id: agent.id,
@@ -3205,7 +3266,39 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const pricing = pricingForModel(profile.model);
         return [{ ...profile, name, ...(pricing !== undefined ? { pricing } : {}) }];
       });
-      const pluginProfileSnapshot = sessionPlugins.agents.flatMap((agent) => {
+      const defaultTaskAvailable =
+        defaultTaskModel !== undefined
+          ? resolveModelRole(sessionRegistry, defaultTaskModel, "task") !== undefined
+          : model.model.unavailable === undefined;
+      const defaultTaskLabel =
+        defaultTaskModel ?? `${model.model.ref.provider}/${model.model.ref.model}`;
+      const projectProfileSnapshot = projectSubagentsDiscovery.active.flatMap((agent) => {
+        const key = `${agent.id}/${defaultTaskLabel}`;
+        if (!defaultTaskAvailable) {
+          if (!unavailableProfiles.has(key)) {
+            unavailableProfiles.add(key);
+            const message = `子代理档位 ${agent.id} 的模型 ${defaultTaskLabel} 不可用，已排除`;
+            warnings.push(message);
+            session.emitEphemeral("runtime.warning", {
+              code: "subagent_profile_unavailable",
+              message,
+            });
+          }
+          return [];
+        }
+        unavailableProfiles.delete(key);
+        return [
+          {
+            name: agent.id,
+            description: truncateSubagentTableDescription(agent.description),
+            enabled: true,
+            ...(defaultTaskModel !== undefined ? { model: defaultTaskModel } : {}),
+            ...(agent.effort !== undefined ? { effort: agent.effort } : {}),
+            ...(defaultTaskPricing !== undefined ? { pricing: defaultTaskPricing } : {}),
+          },
+        ];
+      });
+      const pluginProfileSnapshot = effectivePluginAgents.flatMap((agent) => {
         const configuredModel = configuredPluginModels[agent.id];
         const key = `${agent.id}/${configuredModel}`;
         if (
@@ -3238,8 +3331,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           },
         ];
       });
-      // 选择表顺序：default → 用户档位 → 插件子代理 → 外部 agent（ADR-0105）
-      const profileSnapshot = [...userProfileSnapshot, ...pluginProfileSnapshot];
+      // 选择表顺序：default → 用户档位 → 项目子代理 → 插件子代理 → 外部 agent（ADR-0105、ADR-0108）
+      const profileSnapshot = [
+        ...userProfileSnapshot,
+        ...projectProfileSnapshot,
+        ...pluginProfileSnapshot,
+      ];
       const hasExternalAgents = enabledExternalAgents.length > 0;
       // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
       if (
@@ -3376,22 +3473,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               }),
             ),
           resolveModel: (ref) => resolveModelRole(sessionRegistry, ref, "task"),
-          resolveProfile: (name, currentModel) =>
-            resolveSubagentProfile(
+          resolveProfile: (name, currentModel) => {
+            const taskRole = config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles
+              ?.task;
+            const effectiveCurrent = currentModel ?? model;
+            const resolvedTaskRole = resolveModelRole(sessionRegistry, taskRole, "task");
+            if (
+              projectSubagents[name] !== undefined &&
+              taskRole === undefined &&
+              effectiveCurrent.model.unavailable !== undefined
+            ) {
+              return undefined;
+            }
+            return resolveSubagentProfile(
               name,
               configuredProfiles,
               (ref) => resolveModelRole(sessionRegistry, ref, "task"),
-              currentModel ?? model,
-              resolveModelRole(
-                sessionRegistry,
-                config?.resolvedSettings(session.state().meta.workspaceRoot).modelRoles?.task,
-                "task",
-              ) ??
-                currentModel ??
-                model,
+              effectiveCurrent,
+              resolvedTaskRole ?? effectiveCurrent,
               pluginSubagents,
               configuredPluginModels,
-            ),
+              projectSubagents,
+              taskRole,
+            );
+          },
           model: () =>
             resolveModelRole(
               sessionRegistry,
@@ -6557,6 +6662,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (!config) throw new RuntimeCommandError("invalid_command", "技能开关需要配置存储");
       await config.setSkillEnabled(parsed.name, parsed.enabled);
       return { affectedSessions: await broadcast("skills", (hooks) => hooks.refreshSkills(false)) };
+    },
+    async describeProjectSubagents(input = {}) {
+      const parsed = z.object({ workspaceRoot: z.string().min(1).optional() }).parse(input);
+      const root = parsed.workspaceRoot
+        ? await platform.resolveReal(parsed.workspaceRoot)
+        : workspaceRoot;
+      const discovery = await discoverProjectSubagents(platform, {
+        workspaceRoot: root,
+        cwd: root,
+        includeClaude: includeClaudeProjectSubagents(config?.skillConfig()),
+      });
+      return {
+        agents: discovery.agents.map(toProjectSubagentOverview),
+        warnings: discovery.warnings,
+      };
     },
     async describePlugins() {
       const res = await resolvePlugins(platform, {

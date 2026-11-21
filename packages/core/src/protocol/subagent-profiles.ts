@@ -11,6 +11,48 @@ import { subagentProfile } from "./subagent-result.js";
 /** `default` 是保留档位名：即今天的 modelRoles.task 行为，不能用作自定义档位名 */
 export const DEFAULT_SUBAGENT_PROFILE = "default";
 
+/** 项目子代理档位 id 前缀：`project:<name>`（ADR-0108） */
+export const PROJECT_SUBAGENT_PREFIX = "project:";
+
+/** `task` 档位选择表中项目子代理 description 的截断上限（字符数，超出追加省略号） */
+export const MAX_SUBAGENT_TABLE_DESCRIPTION_CHARS = 300;
+
+/** 档位选择表截断：超过上限时截取前 maxChars 个 Unicode 字符并追加省略号 */
+export function truncateSubagentTableDescription(
+  description: string,
+  maxChars = MAX_SUBAGENT_TABLE_DESCRIPTION_CHARS,
+): string {
+  const chars = Array.from(description);
+  if (chars.length <= maxChars) return description;
+  return `${chars.slice(0, maxChars).join("")}…`;
+}
+
+export type ProjectSubagentSource = ".nocturne" | ".claude";
+
+/** 项目级子代理公开概览（Runtime.describeProjectSubagents，ADR-0108） */
+export interface ProjectSubagentOverview {
+  /** 档位 id：`project:<name>` */
+  id: string;
+  /** frontmatter 声明的子代理名 */
+  name: string;
+  /** 完整描述（不截断） */
+  description: string;
+  /** 定义来源目录 */
+  source: ProjectSubagentSource;
+  /** 定义文件路径 */
+  path: string;
+  effort?: ReasoningEffort | undefined;
+  /** 映射后的 Nocturne 工具名清单；未声明 tools 时省略 */
+  tools?: string[] | undefined;
+  /** 同名被更高优先级文件覆盖时，指向生效文件路径 */
+  shadowedBy?: string | undefined;
+}
+
+export interface ProjectSubagentsDescription {
+  agents: ProjectSubagentOverview[];
+  warnings: string[];
+}
+
 /** 档位名：小写字母、数字、`-`，最长 32（与外部 agent 共用命名空间） */
 export function isValidSubagentProfileName(name: string): boolean {
   // (?![\s\S]) 要求真实字符串末尾，不接受 $ 可匹配的末尾换行

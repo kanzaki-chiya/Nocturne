@@ -78,7 +78,7 @@ import type { TurnConfig, TurnDeps } from "./types.js";
 const NON_INTERACTIVE_DENY_HINT =
   "子代理无法请求用户确认；需要写入或执行的操作请在 finish 结果中说明，由父代理执行";
 
-function subagentBasePrompt(interactive: boolean): string {
+export function subagentBasePrompt(interactive: boolean): string {
   const permissionLine = interactive
     ? "- 你可以正常调用所需工具：需要权限确认的操作会经父会话转发给用户确认，放行后即可继续执行；被拒绝时再把受阻原因写进结果里。你仍无法主动向用户提问（ask_user 不可用）。"
     : "- 你无法向用户提问或请求确认：需要确认的操作会被直接拒绝。遇到受阻的写入/执行需求时，把它写进结果里说明，由父代理执行。";
@@ -368,6 +368,13 @@ export interface SubagentDeps {
         model: ResolvedModel;
         profile: SubagentProfileConfig;
         rolePrompt?: string | undefined;
+        sourceProject?:
+          | {
+              source: ".nocturne" | ".claude";
+              path: string;
+              relativePath: string;
+            }
+          | undefined;
         sourcePlugin?:
           | {
               id: string;
@@ -376,6 +383,7 @@ export interface SubagentDeps {
             }
           | undefined;
         allowedTools?: readonly string[] | undefined;
+        disallowedTools?: readonly string[] | undefined;
       }
     | undefined;
   visionModel?(): ResolvedModel | undefined;
@@ -802,12 +810,22 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             ),
           );
         }
-        // 插件子代理声明 tools 白名单时，与第 6 节可选池取交集；不在池内的名字忽略，
-        // 交集为空（只剩 finish）时报错（ADR-0105）
+        // 插件或项目子代理声明 tools 白名单时，与第 6 节可选池取交集；不在池内的名字忽略，
+        // 仅声明 disallowedTools 时从池中剔除；结果为空（只剩 finish）时报错（ADR-0105 / ADR-0108）
         const allowedTools = resolvedProfile?.allowedTools;
         const allowedSet = allowedTools !== undefined ? new Set(allowedTools) : undefined;
+        const disallowedTools = resolvedProfile?.disallowedTools;
+        const disallowedSet = disallowedTools !== undefined ? new Set(disallowedTools) : undefined;
         if (allowedSet !== undefined) {
           pool = pool.filter((t) => allowedSet.has(t.name));
+          if (pool.length === 0) {
+            return error(
+              "invalid_input",
+              `子代理 ${request.profile ?? "default"} 在当前会话没有可用工具`,
+            );
+          }
+        } else if (disallowedSet !== undefined) {
+          pool = pool.filter((t) => !disallowedSet.has(t.name));
           if (pool.length === 0) {
             return error(
               "invalid_input",
@@ -1053,7 +1071,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           const fixedPromptText = subagentBasePrompt(deps.permissions?.interactive() === true);
           const rolePromptSection =
             resolvedProfile?.rolePrompt !== undefined
-              ? `\n\n以下角色说明来自插件 ${resolvedProfile.sourcePlugin?.displayName ?? resolvedProfile.sourcePlugin?.name ?? "unknown"}（${resolvedProfile.sourcePlugin?.id ?? ""}）：\n\n${resolvedProfile.rolePrompt}`
+              ? resolvedProfile.sourceProject !== undefined
+                ? `\n\n以下角色说明来自项目文件 ${resolvedProfile.sourceProject.relativePath}：\n\n${resolvedProfile.rolePrompt}`
+                : `\n\n以下角色说明来自插件 ${resolvedProfile.sourcePlugin?.displayName ?? resolvedProfile.sourcePlugin?.name ?? "unknown"}（${resolvedProfile.sourcePlugin?.id ?? ""}）：\n\n${resolvedProfile.rolePrompt}`
               : "";
           const basePromptText = `${fixedPromptText}${rolePromptSection}`;
           try {

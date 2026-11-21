@@ -3,8 +3,23 @@ export * from "./types.js";
 export {
   resolveSubagentProfile,
   type PluginSubagentDefinition,
+  type ProjectSubagentDefinition,
   type ResolvedSubagentProfile,
 } from "./subagent-profiles.js";
+export {
+  CLAUDE_CODE_TOOL_MAP,
+  MAX_SUBAGENT_BODY_CHARS,
+  MAX_SUBAGENT_DESCRIPTION_CHARS,
+  parseClaudeSubagentMarkdown,
+  parseNocturneSubagentMarkdown,
+  type ParsedSubagentMarkdown,
+} from "./subagent-markdown.js";
+export {
+  discoverProjectSubagents,
+  toProjectSubagentOverview,
+  type DiscoveredProjectSubagent,
+  type ProjectSubagentsDiscovery,
+} from "./project-subagents.js";
 export * from "./reviewer.js";
 export {
   EXTERNAL_AGENT_PRESETS,
