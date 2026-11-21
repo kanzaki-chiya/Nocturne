@@ -85,6 +85,13 @@ import {
   type TuiLocal,
 } from "./outgoing.js";
 import { frameBudget } from "./frame.js";
+import { truncateLine } from "./format.js";
+import {
+  searchInputHistory,
+  splitHighlightSegments,
+  truncateHighlightSegments,
+  type MatchRange,
+} from "./history-search.js";
 import { isAltM, noteBareEscape, shouldSwallowAfterEscape } from "./keys.js";
 import {
   layoutEntry,
@@ -1049,7 +1056,7 @@ function SessionApp({
     setInput(value);
     setCursor(at);
     setCompletionIndex(0);
-    setCompletionOn(true);
+    setCompletionOn(!historySearchOpenRef.current);
   };
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | undefined>(undefined);
@@ -1268,6 +1275,9 @@ function SessionApp({
   }, [pickerOpen, providerPageOpen, overlay]);
   const [completionOn, setCompletionOn] = useState(true);
   const [completionIndex, setCompletionIndex] = useState(0);
+  const [historySearchOpen, setHistorySearchOpen] = useState(false);
+  const historySearchOpenRef = useRef(false);
+  historySearchOpenRef.current = historySearchOpen;
   const [indexed, setIndexed] = useState<
     { session: RuntimeSession; turn: number; entries: readonly FileIndexEntry[] } | undefined
   >();
@@ -2631,8 +2641,13 @@ function SessionApp({
     width,
     alt,
   ]);
+  const composerActive =
+    !pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined && !switchPending;
   const inputIdle =
     !pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined && !busy;
+  useEffect(() => {
+    if (!composerActive) setHistorySearchOpen(false);
+  }, [composerActive]);
   const imageModel = (): { supported: boolean; hint: string } => {
     const ref = session.state().config.model;
     const info = session.visionInfo();
@@ -2806,20 +2821,41 @@ function SessionApp({
     }),
     [session, providerIds, view.revision, externalAgents],
   );
+  const historyOpen = composerActive && historySearchOpen;
   const completedTurn = view.lastTurn?.turnIndex ?? 0;
-  const fileCompletion = completeFileRefs(
-    input,
-    cursor,
-    indexed?.session === session && indexed.turn === completedTurn ? indexed.entries : [],
-  );
+  const fileCompletion = historyOpen
+    ? undefined
+    : completeFileRefs(
+        input,
+        cursor,
+        indexed?.session === session && indexed.turn === completedTurn ? indexed.entries : [],
+      );
   const indexing =
+    !historyOpen &&
     fileCompletion !== undefined &&
     (indexed?.session !== session || indexed.turn !== completedTurn);
-  const candidates: Candidate[] =
-    fileCompletion?.candidates ??
-    (input.startsWith("/") ? completeSlash(input, completionCtx) : []);
-  const completionOpen = inputIdle && completionOn && (candidates.length > 0 || indexing);
-  const selected = candidates[Math.min(completionIndex, Math.max(0, candidates.length - 1))];
+  const historyMatches = useMemo(
+    () => (historyOpen ? searchInputHistory(inputHistory, input) : []),
+    [historyOpen, inputHistory, input],
+  );
+  type PopupCandidate = Omit<Candidate, "group"> & {
+    group?: Candidate["group"] | "history";
+    ranges?: readonly MatchRange[];
+  };
+  const candidates: PopupCandidate[] = historyOpen
+    ? historyMatches.map((item) => ({
+        label: item.label,
+        insert: item.text,
+        group: "history",
+        ranges: item.ranges,
+      }))
+    : (fileCompletion?.candidates ??
+      (input.startsWith("/") ? completeSlash(input, completionCtx) : []));
+  const completionOpen =
+    historyOpen || (inputIdle && completionOn && (candidates.length > 0 || indexing));
+  const activeCompletionIndex =
+    candidates.length === 0 ? 0 : Math.min(completionIndex, candidates.length - 1);
+  const selected = candidates[activeCompletionIndex];
 
   useEffect(() => {
     if (!indexing || !inputIdle) return;
@@ -2853,7 +2889,7 @@ function SessionApp({
     };
   }, [input.startsWith("/provider"), provider]);
 
-  const applyCandidate = (item: Candidate, execute: boolean): void => {
+  const applyCandidate = (item: PopupCandidate, execute: boolean): void => {
     if (fileCompletion !== undefined) {
       const next =
         input.slice(0, fileCompletion.start) + item.insert + input.slice(fileCompletion.end);
@@ -2865,6 +2901,17 @@ function SessionApp({
     if (execute) {
       setCompletionOn(false);
     }
+  };
+
+  const formatHistoryValue = (raw: string): string => files.addPaste(raw) ?? pastes.add(raw) ?? raw;
+
+  const applyHistoryMatch = (raw: string): void => {
+    setHistorySearchOpen(false);
+    historySearchOpenRef.current = false;
+    setHistoryIndex(undefined);
+    const value = formatHistoryValue(raw);
+    updateInput(value, value.length);
+    setCompletionOn(false);
   };
 
   const recallHistory = (direction: -1 | 1): void => {
@@ -2883,12 +2930,7 @@ function SessionApp({
       setHistoryDraft(files.strip(images.strip(files.expandPaste(input))));
     setHistoryIndex(next === inputHistory.length ? undefined : next);
     const value =
-      next === inputHistory.length
-        ? historyDraft
-        : (files.addPaste(inputHistory[next] ?? "") ??
-          pastes.add(inputHistory[next] ?? "") ??
-          inputHistory[next] ??
-          "");
+      next === inputHistory.length ? historyDraft : formatHistoryValue(inputHistory[next] ?? "");
     updateInput(value, value.length);
   };
 
@@ -2948,8 +2990,13 @@ function SessionApp({
         return;
       }
       if (!pageOpen && !dialogOpen && pending === undefined && pendingQ === undefined) {
-        if (completionOpen) setCompletionOn(false);
-        else if (!busy && !submitting.current && !switching.current && inputRef.current === "") {
+        if (historyOpen) {
+          setHistorySearchOpen(false);
+          historySearchOpenRef.current = false;
+          setCompletionOn(false);
+        } else if (completionOpen) {
+          setCompletionOn(false);
+        } else if (!busy && !submitting.current && !switching.current && inputRef.current === "") {
           if (previousEscape > 0 && now - previousEscape <= 600) openRewind();
           else lastEscape.current = now;
         } else {
@@ -3054,10 +3101,50 @@ function SessionApp({
         return;
       }
     }
+    if (composerActive && key.ctrl && !key.meta && !key.shift && (ch === "r" || ch === "R")) {
+      if (!historyOpen) {
+        setHistorySearchOpen(true);
+        historySearchOpenRef.current = true;
+        setCompletionOn(false);
+        setCompletionIndex(0);
+      } else if (candidates.length > 0) {
+        setCompletionIndex((activeCompletionIndex + 1) % candidates.length);
+      }
+      return;
+    }
+    if (composerActive && historyOpen) {
+      if (key.upArrow) {
+        if (candidates.length > 0) {
+          setCompletionIndex((i) => (i <= 0 ? candidates.length - 1 : i - 1));
+        }
+        return;
+      }
+      if (key.downArrow) {
+        if (candidates.length > 0) {
+          setCompletionIndex((i) => (i + 1) % candidates.length);
+        }
+        return;
+      }
+      if (key.tab && !key.shift) {
+        if (selected !== undefined) applyHistoryMatch(selected.insert);
+        return;
+      }
+      if (key.escape) {
+        setHistorySearchOpen(false);
+        historySearchOpenRef.current = false;
+        setCompletionOn(false);
+        return;
+      }
+      if (key.return) {
+        if (selected !== undefined) applyHistoryMatch(selected.insert);
+        return;
+      }
+    }
     if (
       !dialogOpen &&
       !pageOpen &&
       pendingQ === undefined &&
+      !historyOpen &&
       completionOpen &&
       selected !== undefined
     ) {
@@ -3238,11 +3325,15 @@ function SessionApp({
   });
 
   const clearInput = useCallback(() => {
+    setHistorySearchOpen(false);
+    historySearchOpenRef.current = false;
     updateInput("", 0);
   }, []);
 
   useEffect(() => {
     let active = true;
+    setHistorySearchOpen(false);
+    historySearchOpenRef.current = false;
     setHistoryIndex(undefined);
     setInputHistory([]);
     void session.readInputHistory().then((rows) => {
@@ -3289,6 +3380,8 @@ function SessionApp({
         void session.recordInputHistory(historyText);
       }
       setHistoryIndex(undefined);
+      setHistorySearchOpen(false);
+      historySearchOpenRef.current = false;
       const expanded = pastes.expand(text);
       const pendingFiles = files.in(text);
       const allAttachments = [...images.in(text), ...pendingFiles];
@@ -3753,8 +3846,11 @@ function SessionApp({
       ? Math.min(
           8,
           Math.max(
-            indexing ? 1 : 0,
-            candidates.length + new Set(candidates.map((item) => item.group).filter(Boolean)).size,
+            indexing || historyOpen ? 1 : 0,
+            Math.max(historyOpen ? 1 : 0, candidates.length) +
+              (historyOpen
+                ? 1
+                : new Set(candidates.map((item) => item.group).filter(Boolean)).size),
           ),
         )
       : imageHint
@@ -4214,10 +4310,12 @@ function SessionApp({
   const prompt = `${g.prompt} `;
   const inputY = -(budget.input + budget.completion + budget.ensemble + budget.status);
 
-  const groupCount = new Set(candidates.map((item) => item.group).filter(Boolean)).size;
+  const groupCount = historyOpen
+    ? 1
+    : new Set(candidates.map((item) => item.group).filter(Boolean)).size;
   const groupRows = budget.completion > groupCount ? groupCount : 0;
   const candidateRows = Math.max(1, budget.completion - groupRows);
-  const candidateStart = Math.max(0, completionIndex - candidateRows + 1);
+  const candidateStart = Math.max(0, activeCompletionIndex - candidateRows + 1);
   const shownCandidates = candidates.slice(candidateStart, candidateStart + candidateRows);
   const overlayBody =
     pending !== undefined && pendingKey !== undefined ? (
@@ -4607,7 +4705,19 @@ function SessionApp({
           {imageHint}
         </Text>
       ) : null}
-      {budget.completion > 0 && completionOpen && !indexing
+      {budget.completion > 0 && historyOpen && candidates.length === 0 ? (
+        <>
+          {groupRows > 0 ? (
+            <Text key="group-history" dimColor>
+              历史
+            </Text>
+          ) : null}
+          <Text key="history-empty" dimColor wrap="truncate">
+            {truncateLine("没有匹配的历史", width, g.ellipsis)}
+          </Text>
+        </>
+      ) : null}
+      {budget.completion > 0 && completionOpen && !indexing && candidates.length > 0
         ? shownCandidates.flatMap((item, i) => [
             ...(groupRows > 0 &&
             item.group &&
@@ -4618,18 +4728,34 @@ function SessionApp({
                       ? "命令"
                       : item.group === "skills"
                         ? "技能"
-                        : "外部 agent"}
+                        : item.group === "agents"
+                          ? "外部 agent"
+                          : "历史"}
                   </Text>,
                 ]
               : []),
             <Text
               key={item.insert}
               wrap="truncate"
-              {...(i + candidateStart === completionIndex
+              {...(i + candidateStart === activeCompletionIndex
                 ? { color: theme.selected, backgroundColor: theme.selectionBg }
                 : {})}
             >
-              {item.label}
+              {item.ranges !== undefined
+                ? truncateHighlightSegments(
+                    splitHighlightSegments(item.label, item.ranges),
+                    width,
+                    g.ellipsis,
+                  ).map((seg, segIndex) =>
+                    seg.hit && env.animated ? (
+                      <Text key={segIndex} inverse>
+                        {seg.text}
+                      </Text>
+                    ) : (
+                      seg.text
+                    ),
+                  )
+                : item.label}
             </Text>,
           ])
         : null}

@@ -3,12 +3,15 @@
  */
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { render as inkRender } from "ink";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
+import stringWidth from "string-width";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, FakeProvider, type Runtime, type RuntimeSession } from "@nocturne/core";
@@ -33,6 +36,19 @@ const ENV = { ascii: false, animated: false };
 
 async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
   await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
+}
+
+async function waitForLabel(
+  check: () => boolean,
+  label: string,
+  frameFn: () => string | undefined,
+  ms = 1500,
+): Promise<void> {
+  try {
+    await vi.waitFor(() => expect(check()).toBe(true), { timeout: ms, interval: 20 });
+  } catch (e) {
+    throw new Error(`${label} timed out; frame:\n${frameFn() ?? "<none>"}`, { cause: e });
+  }
 }
 
 /**
@@ -1000,5 +1016,266 @@ describe("全屏界面", () => {
     expect(frame).toContain("high");
     unmount();
     await session.close();
+  });
+});
+
+describe("输入历史搜索（Ctrl+R）", () => {
+  const ANSI_CSI = /\x1b\[[0-9;]*[a-zA-Z]/g;
+  const inkChalkPromise = (async (): Promise<{ level: 0 | 1 | 2 | 3 }> => {
+    const req = createRequire(import.meta.resolve("ink"));
+    const mod = (await import(pathToFileURL(req.resolve("chalk")).href)) as {
+      default: { level: 0 | 1 | 2 | 3 };
+    };
+    return mod.default;
+  })();
+
+  async function setupWithHistory(items: string[]) {
+    const { runtime, session } = await sessionWithEffort();
+    for (const item of items) await session.recordInputHistory(item);
+    const historyLoad = vi.spyOn(session, "readInputHistory");
+    return { runtime, session, historyLoad };
+  }
+
+  it("Ctrl+R 打开历史列表、输入过滤、↑/↓ 与再按 Ctrl+R 移动、Enter/Tab 回填不发送、Esc 保留文字", async () => {
+    const chalk = await inkChalkPromise;
+    const savedLevel = chalk.level;
+    chalk.level = 3;
+    const { runtime, session, historyLoad } = await setupWithHistory([
+      "旧一条命令",
+      "检查 worktree 状态",
+      "第一行\n第二行 worktree",
+      "检查 worktree 状态",
+    ]);
+    const submit = vi.spyOn(session, "submit");
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: { ascii: false, animated: true } }),
+    );
+    try {
+      await waitFor(() => historyLoad.mock.results.length > 0);
+      await historyLoad.mock.results[0]?.value;
+      await flush();
+
+      // 1. Ctrl+R 打开历史列表，最新在前且去重，第一行选中
+      stdin.write("\x12");
+      await waitFor(() => (lastFrame() ?? "").includes("历史"));
+      let frame = lastFrame() ?? "";
+      expect(frame).toContain("历史");
+      expect(frame).toContain("检查 worktree 状态");
+      expect(frame).toContain("第一行 第二行 worktree");
+      expect(frame).toContain("旧一条命令");
+      expect(frame).not.toContain("快捷键");
+
+      // 2. 继续输入过滤并回到第一行，命中的部分反色高亮
+      stdin.write("WORKTREE");
+      await waitFor(() => !(lastFrame() ?? "").includes("旧一条命令"));
+      frame = lastFrame() ?? "";
+      expect(frame).toContain("检查 ");
+      expect(frame).toContain("\x1b[7mworktree\x1b[27m");
+      expect(frame).toContain("第一行 第二行 ");
+
+      // 3. 再按 Ctrl+R 移到下一条（更旧），↑/↓ 在列表移动；Enter 回填（走粘贴占位路径）且不发送
+      stdin.write("\x12");
+      await flush();
+      stdin.write("\x1b[B");
+      await flush();
+      stdin.write("\x1b[A");
+      await flush();
+      stdin.write("\r");
+      await waitFor(() => !(lastFrame() ?? "").includes("历史"));
+      expect(lastFrame()).toContain("[Paste #1, +1 lines]");
+      expect(submit).not.toHaveBeenCalled();
+
+      // 4. Esc 关闭并保留当前输入
+      stdin.write("\x15");
+      await flush();
+      stdin.write("worktree");
+      await flush();
+      stdin.write("\x12");
+      await waitFor(() => (lastFrame() ?? "").includes("历史"));
+      await escape(stdin);
+      await waitFor(() => !(lastFrame() ?? "").includes("历史"));
+      expect((lastFrame() ?? "").replace(ANSI_CSI, "")).toContain("› worktree");
+
+      // 5. 空匹配提示与 Tab 回填不发送
+      stdin.write("不存在的词");
+      await flush();
+      stdin.write("\x12");
+      await waitForLabel(() => (lastFrame() ?? "").includes("没有匹配的历史"), "empty", lastFrame);
+      stdin.write("\r");
+      await flush();
+      expect(submit).not.toHaveBeenCalled();
+      expect(lastFrame()).toContain("没有匹配的历史");
+
+      stdin.write("\x15");
+      await flush();
+      stdin.write("旧");
+      await flush();
+      stdin.write("\x12");
+      await waitForLabel(
+        () => (lastFrame() ?? "").replace(ANSI_CSI, "").includes("旧一条命令"),
+        "old-match",
+        lastFrame,
+      );
+      stdin.write("\t");
+      await waitForLabel(() => !(lastFrame() ?? "").includes("历史"), "tab-close", lastFrame);
+      expect((lastFrame() ?? "").replace(ANSI_CSI, "")).toContain("› 旧一条命令");
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      chalk.level = savedLevel;
+      unmount();
+      await session.close();
+    }
+  }, 15_000);
+
+  it("斜杠补全打开时按 Ctrl+R 切换为历史列表，Esc 不回跳补全", async () => {
+    const { runtime, session, historyLoad } = await setupWithHistory([
+      "/compact 历史消息",
+      "普通消息",
+    ]);
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    try {
+      await waitFor(() => historyLoad.mock.results.length > 0);
+      await historyLoad.mock.results[0]?.value;
+      await flush();
+
+      stdin.write("/co");
+      await waitFor(() => (lastFrame() ?? "").includes("命令"));
+      stdin.write("\x12");
+      await waitFor(() => (lastFrame() ?? "").includes("历史"));
+      expect(lastFrame()).not.toContain("命令");
+      expect(lastFrame()).toContain("/compact 历史消息");
+
+      await escape(stdin);
+      await waitFor(() => !(lastFrame() ?? "").includes("历史"));
+      expect(lastFrame()).not.toContain("命令");
+      expect(lastFrame()).toContain("› /co");
+    } finally {
+      unmount();
+      await session.close();
+    }
+  });
+
+  it("40 列窄终端与 ASCII 降级下不折出宽度", async () => {
+    const { runtime, session, historyLoad } = await setupWithHistory([
+      "这是一条非常长的输入历史记录，用来验证在四十列窄终端里会被截断成单行并保留省略号",
+    ]);
+    const screen = render(
+      createElement(App, { session, runtime, env: { ascii: true, animated: false } }),
+    );
+    try {
+      Object.defineProperty(screen.stdout, "columns", { configurable: true, value: 40 });
+      Object.defineProperty(screen.stdout, "rows", { configurable: true, value: 16 });
+      screen.stdout.emit("resize");
+      await waitFor(() => historyLoad.mock.results.length > 0);
+      await historyLoad.mock.results[0]?.value;
+      await flush();
+
+      screen.stdin.write("\x12");
+      await waitFor(() => (screen.lastFrame() ?? "").includes("历史"));
+      const rawFrame = screen.lastFrame() ?? "";
+      expect(rawFrame).toContain("...");
+      expect(rawFrame).not.toContain("\x1b[7m");
+      for (const line of frameLines(rawFrame)) {
+        const plain = line.replace(ANSI_CSI, "");
+        expect(stringWidth(plain)).toBeLessThanOrEqual(40);
+      }
+    } finally {
+      screen.unmount();
+      await session.close();
+    }
+  });
+
+  it("--inline 模式下 Ctrl+R 可用并可回填", async () => {
+    const { runtime, session, historyLoad } = await setupWithHistory(["inline 模式命令"]);
+    const submit = vi.spyOn(session, "submit");
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV, inline: true }),
+    );
+    try {
+      await waitFor(() => historyLoad.mock.results.length > 0);
+      await historyLoad.mock.results[0]?.value;
+      await flush();
+
+      stdin.write("\x12");
+      await waitForLabel(
+        () => (lastFrame() ?? "").includes("inline 模式命令"),
+        "inline-open",
+        lastFrame,
+      );
+      expect(lastFrame()).toContain("历史");
+      stdin.write("\r");
+      await waitForLabel(() => !(lastFrame() ?? "").includes("历史"), "inline-close", lastFrame);
+      expect(lastFrame()).toContain("› inline 模式命令");
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      await session.close();
+    }
+  });
+
+  it("权限确认框或提问面板打开时不响应 Ctrl+R", async () => {
+    const { runtime, session, historyLoad } = await setupWithHistory(["不应显示的历史"]);
+    const { lastFrame, stdin, unmount } = render(
+      createElement(App, { session, runtime, env: ENV }),
+    );
+    try {
+      await waitFor(() => historyLoad.mock.results.length > 0);
+      await historyLoad.mock.results[0]?.value;
+      await flush();
+
+      const raw = internalSession(session);
+      await raw.emit("turn.started", { turnIndex: 1 }, { turnId: "t1" });
+      await raw.emit(
+        "permission.requested",
+        {
+          requestId: "perm-1",
+          callId: "call-1",
+          subjects: [{ kind: "shell", target: "echo hi" }],
+          reason: "需要确认",
+          options: ["allow_once", "deny"],
+        },
+        { turnId: "t1" },
+      );
+      await waitForLabel(() => (lastFrame() ?? "").includes("需要确认"), "perm-open", lastFrame);
+
+      stdin.write("\x12");
+      await flush();
+      expect(lastFrame()).not.toContain("不应显示的历史");
+
+      // 结算权限后改为提问面板，同样不响应 Ctrl+R
+      await raw.emit(
+        "permission.resolved",
+        {
+          requestId: "perm-1",
+          callId: "call-1",
+          action: "allow",
+          source: "user",
+        },
+        { turnId: "t1" },
+      );
+      await waitForLabel(() => !(lastFrame() ?? "").includes("需要确认"), "perm-close", lastFrame);
+      raw.emitEphemeral(
+        "question.requested",
+        {
+          requestId: "q-1",
+          callId: "call-2",
+          questions: [{ question: "继续执行？" }],
+        },
+        { turnId: "t1" },
+      );
+      await waitForLabel(
+        () => (lastFrame() ?? "").includes("继续执行？"),
+        "question-open",
+        lastFrame,
+      );
+      stdin.write("\x12");
+      await flush();
+      expect(lastFrame()).not.toContain("不应显示的历史");
+    } finally {
+      unmount();
+      await session.close();
+    }
   });
 });

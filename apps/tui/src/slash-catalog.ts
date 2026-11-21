@@ -210,7 +210,9 @@ export function helpLines(): string[] {
     "  服务商启停：/provider enable|disable <名称>；/provider model <名称> <模型> on|off，",
   );
   lines.push("  或打开 /provider 页用 Space、模型页用 Space/a/n（停用前页内 y/n 确认）。");
-  lines.push("快捷键：Ctrl+O 展开/收起思考；Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；");
+  lines.push(
+    "快捷键：Ctrl+O 展开/收起思考；Shift+Tab 思考档位；Alt+M 权限预设；Ctrl+J 换行；Ctrl+R 搜索输入历史；",
+  );
   lines.push("Esc 中断；空闲且输入为空时 600ms 内双按 Esc 打开回退列表。");
   lines.push("Ctrl+C 中断（空闲时退出）；Ctrl+D 退出。输入历史按工作区保存为明文 history.jsonl。");
   return lines;
