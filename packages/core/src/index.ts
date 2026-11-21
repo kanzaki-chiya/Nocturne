@@ -1832,7 +1832,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let catalog = skillCatalog(skillDiscovery.skills, config?.disabledSkills() ?? [], undefined);
     let projectSubagentsDiscovery = await discoverProjectSubagents(platform, {
       workspaceRoot: meta.workspaceRoot,
-      cwd: meta.cwd,
+      cwd: projectCwd,
       includeClaude: includeClaudeProjectSubagents(config?.skillConfig()),
     });
     warnings.push(...projectSubagentsDiscovery.warnings);
@@ -2505,7 +2505,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
         projectSubagentsDiscovery = await discoverProjectSubagents(platform, {
           workspaceRoot: meta.workspaceRoot,
-          cwd: meta.cwd,
+          cwd: projectCwd,
           includeClaude: includeClaudeProjectSubagents(config?.skillConfig()),
         });
       }
