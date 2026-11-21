@@ -27,6 +27,7 @@ import {
   descriptionLine,
   fileAttachmentLine,
   inlinePageTitle,
+  inlinePageVersionSuffix,
 } from "./attachment-line.js";
 import { diffSummary, layoutDiffRow, parseDiff, toolFileDiffs } from "./diff-format.js";
 import { interleaveClient, type ClientLine } from "./client-lines.js";
@@ -491,15 +492,20 @@ function layoutEntryBody(
       const inlineFiles = inlineFilesOfTool(entry);
       if (inlineFiles.length > 0 && !diffExpanded) {
         const prefix = ascii ? "[] " : "▣ ";
-        const maxTitleCols = Math.max(4, budget(width) - 4);
         const inlineLines: LaidLine[] = inlineFiles.map((file, i) => {
+          const verSuffix = inlinePageVersionSuffix(file);
+          const maxTitleCols = Math.max(4, budget(width) - 4 - verSuffix.length);
           const title = truncateLine(inlinePageTitle(file), maxTitleCols, ascii ? "..." : "...");
-          const segments = [{ text: prefix, color: theme.secondary }, { text: title }];
+          const segments = [
+            { text: prefix, color: theme.secondary },
+            { text: title },
+            ...(verSuffix !== "" ? [{ text: verSuffix, dim: true }] : []),
+          ];
           const key = `${entry.key}:inline:${i}`;
           return {
             key,
             ...(options.fullscreen ? { toggle: { id: `page:${file.file}`, anchor: key } } : {}),
-            text: `${prefix}${title}`,
+            text: `${prefix}${title}${verSuffix}`,
             segments,
           };
         });

@@ -46,3 +46,12 @@ export function inlinePageTitle(att: FileAttachment): string {
       .trim(),
   );
 }
+
+/** 带版本号的页面在标题后附 " v<n>"；旧会话无 version 字段时返回空串 */
+export function inlinePageVersionSuffix(att: FileAttachment): string {
+  const version = att.inline?.version;
+  if (typeof version === "number" && Number.isInteger(version) && version >= 1) {
+    return ` v${version}`;
+  }
+  return "";
+}

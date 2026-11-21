@@ -106,4 +106,42 @@ describe("TUI 回复内嵌页面显示", () => {
     expect(runningText).not.toContain("very long html");
     expect(runningText).not.toContain("<!doctype html>");
   });
+
+  it("带版本号的页面在标题后显示 v<n>（ADR-0109），ASCII 与 Ink 渲染一致", () => {
+    const base = makeInlineToolEntry("ok");
+    const baseResult = base.result;
+    const baseFile = baseResult?.files?.[0];
+    if (!baseResult || !baseFile) throw new Error("expected inline file attachment");
+    const v2: ToolEntry = {
+      ...base,
+      result: {
+        ...baseResult,
+        files: [
+          {
+            ...baseFile,
+            inline: { title: "每周提交看板", page: "page-1", version: 2, display: "panel" },
+          },
+        ],
+      },
+    };
+
+    const lines = layoutEntry(v2, 100, false);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.text).toBe("▣ 每周提交看板 v2");
+
+    const asciiLines = layoutEntry(v2, 100, true);
+    expect(asciiLines).toHaveLength(1);
+    expect(asciiLines[0]?.text).toBe("[] 每周提交看板 v2");
+
+    const ink = render(createElement(ToolRow, { entry: v2, width: 100 }));
+    expect(ink.lastFrame()).toBe("▣ 每周提交看板 v2");
+    ink.unmount();
+
+    expect(
+      summarizeToolInput("render_html", {
+        page: "page-1",
+        edits: [{ old: "a", new: "b" }],
+      }),
+    ).toBe("page-1");
+  });
 });

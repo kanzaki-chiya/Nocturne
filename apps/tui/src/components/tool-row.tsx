@@ -8,7 +8,12 @@ import { useEffect, useState } from "react";
 
 import { questionToolLines } from "../question-format.js";
 import { webFetchSummary } from "../web-fetch.js";
-import { attachmentLine, fileAttachmentLine, inlinePageTitle } from "../attachment-line.js";
+import {
+  attachmentLine,
+  fileAttachmentLine,
+  inlinePageTitle,
+  inlinePageVersionSuffix,
+} from "../attachment-line.js";
 import { diffSummary, parseDiff, toolFileDiffs, type ToolFileDiff } from "../diff-format.js";
 import { glyphs, useTuiEnv } from "../env.js";
 import {
@@ -189,12 +194,22 @@ export function ToolRow({
     return (
       <Box flexDirection="column">
         {review}
-        {inlineFiles.map((file, i) => (
-          <Text key={`${file.file}:${i}`} wrap="truncate">
-            <Text color={theme.secondary}>{prefix}</Text>
-            <Text>{truncateLine(inlinePageTitle(file), Math.max(4, width - 4), g.ellipsis)}</Text>
-          </Text>
-        ))}
+        {inlineFiles.map((file, i) => {
+          const verSuffix = inlinePageVersionSuffix(file);
+          return (
+            <Text key={`${file.file}:${i}`} wrap="truncate">
+              <Text color={theme.secondary}>{prefix}</Text>
+              <Text>
+                {truncateLine(
+                  inlinePageTitle(file),
+                  Math.max(4, width - 4 - verSuffix.length),
+                  g.ellipsis,
+                )}
+              </Text>
+              {verSuffix !== "" ? <Text dimColor>{verSuffix}</Text> : null}
+            </Text>
+          );
+        })}
       </Box>
     );
   }
