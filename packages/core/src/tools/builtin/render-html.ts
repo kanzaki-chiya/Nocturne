@@ -242,34 +242,23 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "Create or update a self-contained single-file HTML page rendered in an offline sandbox. " +
-    "Use only when a chart, comparison table, diagram, UI mockup, interactive widget, dashboard, or standalone document is clearly better than prose, or when the user asks for one; use Markdown for ordinary explanations and code. " +
-    "Choose display when creating a page (ignored on updates): use 'inline' (default) for charts, diagrams, and comparison tables that accompany the reply; use 'panel' for pages the user will iterate on or use alongside the chat (widgets, dashboards, documents). " +
-    "To update an existing page, pass its page id returned by an earlier call with either 'edits' (preferred for small changes: sequential exact replacements where each old string appears once) or 'html' (full rewrite); omit 'title' to keep the previous title. " +
-    "Use 'read' on the saved file path from the tool result when you need to inspect the current full HTML. " +
-    "Sandbox rules: inline scripts and styles are allowed; all network access is blocked (no external scripts, stylesheets, images, fonts, fetch, or WebSocket—inline SVG or data: URIs only); links, form submissions, popups, and downloads are disabled. " +
-    "To embed local images, list their paths in 'images' and reference the exact same strings in HTML attributes or CSS url(); they are inlined automatically on save. " +
-    "Make layouts responsive (inline width ~720px on desktop and ~360px on mobile; inline pages taller than 420px collapse with expand/fullscreen). " +
-    "Do not repeat the page's data, conclusions, or explanations in your reply text. " +
-    "Theme CSS variables are injected dynamically on display (live-updated for light/dark mode): --bg, --raised, --text, --secondary, --muted, --border, --accent, --ok, --warn, --bad, --sans, --mono.",
+    "新建或更新自包含的单文件 HTML 页面，在断网沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。新建时用 display 选方式（更新时忽略）：inline（默认）随回答内嵌，适合图表、示意图、对比表；panel 在右侧面板打开，适合反复修改或边聊边用的小工具、看板、文档。更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。断网沙箱允许内联脚本与样式，禁联网（无外链/fetch/WebSocket，图与字体用内联 SVG 或 data:），禁跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。",
   inputSchema: {
     type: "object",
     additionalProperties: false,
     properties: {
       title: {
         type: "string",
-        description:
-          "Single-line page title (up to 80 chars). Required when creating a page; optional when updating (defaults to the previous version's title).",
+        description: "单行标题（≤80 字符）；新建必填，更新省略沿用上一版",
       },
       html: {
         type: "string",
-        description:
-          "Self-contained single-file HTML (UTF-8 up to 256 KiB). Required when creating a page; when updating, provide either html (full rewrite) or edits, not both.",
+        description: "自包含单文件 HTML（UTF-8 ≤256 KiB）；新建必填，更新时与 edits 二选一",
       },
       page: {
         type: "string",
         minLength: 1,
-        description: "Existing page id (e.g. 'page-1') to update as a new version.",
+        description: "要更新的已有页面 id（如 page-1）",
       },
       edits: {
         type: "array",
@@ -282,29 +271,28 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
             old: {
               type: "string",
               minLength: 1,
-              description: "Exact substring in the current HTML; must occur once.",
+              description: "原文中恰好出现一次的精确片段",
             },
             new: {
               type: "string",
-              description: "Replacement text.",
+              description: "替换后的文本",
             },
           },
         },
-        description:
-          "Sequential exact replacements applied to the previous version's HTML (update only; mutually exclusive with html). Prefer for small edits.",
+        description: "对上一版 HTML 按序执行的精确替换（仅更新用，与 html 互斥，小改动优先）",
       },
       display: {
         type: "string",
         enum: ["inline", "panel"],
         description:
-          "Presentation mode on creation (default 'inline'; ignored on updates): 'inline' embeds in the reply (charts, diagrams, comparison tables); 'panel' shows a compact entry row and opens in the side panel (widgets, dashboards, iterative documents).",
+          "新建时的显示方式（默认 inline，更新忽略）：inline 随回复内嵌；panel 显示入口行并在右侧面板打开",
       },
       images: {
         type: "array",
         maxItems: MAX_INLINE_HTML_IMAGES,
         items: { type: "string", minLength: 1 },
         description:
-          'Local image paths (relative to cwd or absolute, up to 20) to inline; reference each exact string in HTML attributes or CSS url(), e.g. src="a.png" or url(a.png).',
+          '要内联的本地图片路径（相对 cwd 或绝对路径，≤20 项），html 中用同串引用如 src="a.png" 或 url(a.png)',
       },
     },
   },

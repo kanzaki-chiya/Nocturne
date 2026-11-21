@@ -2002,17 +2002,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const externalResolved = await Promise.all(
       externalPaths.map((path) => platform.resolveReal(path)),
     );
-    const resolvedSessionsDir = await platform.resolveReal(sessionsDir);
-    const inlinePageFilesForSession = (policySessionId: string): string[] => {
-      if (policySessionId !== session.id) return [];
-      const files: string[] = [];
-      for (const page of session.state().pages) {
-        for (const ver of page.versions) {
-          files.push(paths.join(resolvedSessionsDir, "attachments", session.id, ver.file.file));
-        }
-      }
-      return files;
-    };
     // presetContext.sessionId 参数化：子会话重建策略时换自己的 id
     // （attachments 目录等规则绑定子会话自己的落盘位置，subagent.md 7.2）
     const buildPolicy = (
@@ -2034,7 +2023,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           skillFiles: skillDiscovery.skills
             .filter((s) => s.layout === "file")
             .map((s) => s.realPath),
-          inlinePageFiles: () => inlinePageFilesForSession(policySessionId),
           sessionsDir,
           sessionId: policySessionId,
           nocturneHome,

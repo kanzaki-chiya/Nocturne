@@ -4,7 +4,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createRuntime } from "../src/index.js";
-import { createRulePolicy } from "../src/permission/index.js";
 import { FakeProvider } from "../src/provider/index.js";
 import {
   decodeDurableEvent,
@@ -792,40 +791,7 @@ describe("render_html 工具与内嵌页面标记", () => {
       }
     });
 
-    it("预设 read allow 只放行本会话页面文件，其他附件与写入/shell 需要确认", () => {
-      const policy = createRulePolicy({
-        workspaceRoot: "C:/work",
-        caseSensitive: false,
-        preset: "default",
-        presetContext: {
-          inlinePageFiles: ["C:/sessions/attachments/s1/file-1.html"],
-        },
-      });
-      const allowed = policy.evaluate([
-        {
-          kind: "read",
-          target: "C:/sessions/attachments/s1/file-1.html",
-          resolved: "C:/sessions/attachments/s1/file-1.html",
-        },
-      ]);
-      expect(allowed.decision.action).toBe("allow");
-      expect(allowed.decision.matchedRule?.rule?.label).toBe("本会话页面文件");
-
-      for (const [kind, target] of [
-        ["read", "C:/sessions/attachments/s1/file-2.html"],
-        ["read", "C:/sessions/attachments/s1/img-1.png"],
-        ["read", "C:/sessions/attachments/s2/file-1.html"],
-        ["edit", "C:/sessions/attachments/s1/file-1.html"],
-        ["shell", "type C:/sessions/attachments/s1/file-1.html"],
-      ] as const) {
-        expect(
-          policy.evaluate([{ kind, target, ...(kind !== "shell" ? { resolved: target } : {}) }])
-            .decision.action,
-        ).toBe("ask");
-      }
-    });
-
-    it("Runtime 会话中模型用 read 读取 render_html 产出的页面文件自动命中本会话页面文件规则", async () => {
+    it("Runtime 会话中模型用 read 读取 render_html 产出的页面文件自动命中本会话落盘目录规则", async () => {
       const root = mkdtempSync(path.join(tmpdir(), "nct-render-read-"));
       roots.push(root);
       const sessionsDir = path.join(root, "sessions");
@@ -890,7 +856,7 @@ describe("render_html 工具与内嵌页面标记", () => {
               e.type === "tool.started" && e.payload.name === "read",
           );
         expect(readStarted?.payload.permission.action).toBe("allow");
-        expect(readStarted?.payload.permission.rule).toContain("本会话页面文件");
+        expect(readStarted?.payload.permission.rule).toContain("本会话落盘目录");
         const readCompleted = session
           .durableEvents()
           .find(

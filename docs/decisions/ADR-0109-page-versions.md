@@ -3,7 +3,7 @@
 - 状态：已接受
 - 日期：2026-11-21
 - 修订：[ADR-0088](ADR-0088-inline-html.md) 第 1 节第 4 条与第 6 条（新增 `display: "panel"` 显示方式，面板页面在回复里显示为入口行，内嵌页面行为不变）
-- 相关：[ADR-0088](ADR-0088-inline-html.md)（隔离空壳沙箱）、[ADR-0060](ADR-0060-desktop-side-panel.md)（桌面端右侧面板）、[ADR-0041](ADR-0041-checkpoints-rewind-fork.md)（回退与分叉）、[ADR-0048](ADR-0048-skills.md)（预设 `read` 放行模式）
+- 相关：[ADR-0088](ADR-0088-inline-html.md)（隔离空壳沙箱）、[ADR-0060](ADR-0060-desktop-side-panel.md)（桌面端右侧面板）、[ADR-0041](ADR-0041-checkpoints-rewind-fork.md)（回退与分叉）
 
 ## 背景
 
@@ -44,9 +44,9 @@
 - **附件与元数据**：每个版本都落盘为一份完整 HTML 会话附件（`attachments/<sessionId>/file-<k>.html`），规则同 ADR-0088。附件的 `inline` 扩展为 `{ title, page?, version?, display? }`。
 - **工具返回**：成功时的 `modelContent` 写明页面 id、版本号、显示方式及该版本 HTML 文件的绝对路径；模型需要核对当前全文时可用 `read` 直接读取该路径。
 
-### 3. 预设 `read` 放行
+### 3. 读取放行
 
-参照技能目录的预设只读放行做法（[skills.md](../architecture/skills.md) 第 3 节），权限层按本会话有效历史里的 inline 页面附件路径生成逐文件 `read` `allow` 预设规则（不放行目录，也不放行会话内其他附件文件）。判定完全在权限层完成，工具实现与界面不做权限判定；回退后被撤销版本的附件不再列入放行列表。
+页面文件在本会话落盘目录内，由已有的本会话落盘目录 `read` 规则放行（[permissions.md](../architecture/permissions.md) 第 6 节），不另写规则。
 
 ### 4. 派生视图（`SessionView.pages`）与回退/分叉
 
