@@ -37,6 +37,7 @@ function page(
     failure?: boolean;
     themeFailure?: boolean;
     extraItems?: SettingItem[];
+    plugins?: Awaited<ReturnType<Runtime["describePlugins"]>>["plugins"];
   } = {},
 ) {
   let items: SettingItem[] = [
@@ -107,6 +108,7 @@ function page(
   const preview = vi.fn();
   const runtime = createRuntimeStub({
     describeSettings: () => items,
+    describePlugins: async () => ({ plugins: options.plugins ?? [], warnings: [] }),
     updateSettings: update,
     setPreference: preference,
     getPreference: () => undefined,
@@ -504,6 +506,68 @@ describe("ADR-0045 设置页", () => {
     expect(frame.split("\n").length).toBeLessThanOrEqual(15);
     await screen.input("\t");
     expect(screen.lastFrame()).toContain("< 界面 >");
+    screen.unmount();
+  });
+
+  it("只读档位列表列出已启用插件的子代理并带 <插件>: 前缀", async () => {
+    const screen = page({
+      width: 100,
+      height: 30,
+      plugins: [
+        {
+          id: "nocturne:pptx@builtin",
+          host: "nocturne",
+          name: "pptx",
+          marketplace: "builtin",
+          version: "0.57.0",
+          root: "/builtin/pptx",
+          displayName: "演示文档",
+          state: "on",
+          hooks: [],
+          unsupported: [],
+          skills: ["pptx"],
+          mcpServers: [],
+          agents: [
+            {
+              id: "pptx:visual-judge",
+              name: "visual-judge",
+              description: "检查演示文稿视觉效果",
+              tools: ["read", "mcp__slides__render"],
+            },
+          ],
+          warnings: [],
+        },
+        {
+          id: "nocturne:docx@builtin",
+          host: "nocturne",
+          name: "docx",
+          marketplace: "builtin",
+          version: "0.57.0",
+          root: "/builtin/docx",
+          displayName: "Word 文档",
+          state: "off",
+          hooks: [],
+          unsupported: [],
+          skills: ["docx"],
+          mcpServers: [],
+          agents: [
+            {
+              id: "docx:visual-judge",
+              name: "visual-judge",
+              description: "已停用插件不应出现",
+              tools: ["read", "mcp__word__render"],
+            },
+          ],
+          warnings: [],
+        },
+      ],
+    });
+    await screen.ready();
+    await waitFor(() => (screen.lastFrame() ?? "").includes("pptx:visual-judge"));
+    const frame = screen.lastFrame() ?? "";
+    expect(frame).toContain("pptx:visual-judge");
+    expect(frame).toContain("2 个工具");
+    expect(frame).not.toContain("docx:visual-judge");
     screen.unmount();
   });
 });

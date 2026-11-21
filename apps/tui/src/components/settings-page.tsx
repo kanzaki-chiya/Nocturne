@@ -4,8 +4,8 @@
  * 对话框里的「保存」就是落盘，取消不写任何东西。写入失败时值回到原样，错误显示在说明区。
  */
 import { Box } from "ink";
-import type { SubagentProfileConfig } from "@nocturne/core/protocol";
-import { useRef, useState } from "react";
+import type { PluginAgentOverview, SubagentProfileConfig } from "@nocturne/core/protocol";
+import { useEffect, useRef, useState } from "react";
 import type {
   ModelRole,
   PermissionPresetName,
@@ -105,11 +105,38 @@ export function SettingsPage({
 }): React.JSX.Element {
   const palette = useTheme();
   const [items, setItems] = useState(() => runtime.describeSettings());
+  const [pluginAgents, setPluginAgents] = useState<
+    readonly { pluginName: string; agent: PluginAgentOverview }[]
+  >([]);
   const [pending, setPending] = useState<{ preset?: string }>({});
   const pendingRef = useRef<{ preset?: string }>({});
   const [themeSaved, setThemeSaved] = useState(() => runtime.getPreference("theme") !== undefined);
   const [nested, setNested] = useState<Nested | undefined>();
   const [notice, setNotice] = useState<ShellNotice>();
+
+  useEffect(() => {
+    let cancelled = false;
+    void runtime
+      .describePlugins()
+      .then((desc) => {
+        if (cancelled) return;
+        const seenNames = new Set<string>();
+        const list: { pluginName: string; agent: PluginAgentOverview }[] = [];
+        for (const plugin of desc.plugins) {
+          if (plugin.state !== "on" || (plugin.agents?.length ?? 0) === 0) continue;
+          if (seenNames.has(plugin.name)) continue;
+          seenNames.add(plugin.name);
+          for (const agent of plugin.agents ?? []) {
+            list.push({ pluginName: plugin.displayName ?? plugin.name, agent });
+          }
+        }
+        setPluginAgents(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [runtime]);
   const item = (key: SettingItem["key"]) => items.find((entry) => entry.key === key);
   const fail = (text: string) => {
     setNotice({ text: `保存失败：${text}`, tone: "error" });
@@ -296,6 +323,23 @@ export function SettingsPage({
           search: profile.description,
         };
       }),
+    ...pluginAgents.map(({ agent }): ShellRow => {
+      const configuredModel = item(`subagents.pluginModels.${agent.id}`)?.effective;
+      const toolSuffix = agent.tools !== undefined ? ` · ${agent.tools.length} 个工具` : "";
+      return {
+        id: `subagents.plugin.${agent.id}`,
+        group: "roles",
+        cells: [
+          { text: agent.id },
+          {
+            text: `${configuredModel ?? "跟随默认"} · ${agent.effort ?? "跟随会话"}${toolSuffix}`,
+            tone: "muted",
+          },
+        ],
+        trail: [{ text: "只读", tone: "muted" }],
+        search: `${agent.id} ${agent.description}`,
+      };
+    }),
   ];
 
   const labelOf = (id: string): string =>
@@ -331,6 +375,21 @@ export function SettingsPage({
     if (row === undefined) return [];
     if (row.id.startsWith("subagents.profiles."))
       return [[{ text: PROFILE_EDIT_HINT, tone: "muted" }]];
+    if (row.id.startsWith("subagents.plugin.")) {
+      const id = row.id.slice("subagents.plugin.".length);
+      const entry = pluginAgents.find((p) => p.agent.id === id);
+      return [
+        ...(entry !== undefined
+          ? [
+              [
+                { text: entry.agent.id, tone: "secondary" as const },
+                { text: `  ${entry.agent.description}`, tone: "muted" as const },
+              ],
+            ]
+          : []),
+        [{ text: PROFILE_EDIT_HINT, tone: "muted" }],
+      ];
+    }
     const first: ShellSpan[] = [
       { text: labelOf(row.id), tone: "secondary" },
       { text: `  ${EXPLAIN[row.id] ?? ""}`, tone: "muted" },
@@ -423,7 +482,7 @@ export function SettingsPage({
               setNotice({ text: "默认模型与档位请在 /model 页选「设为默认」", tone: "muted" });
             else if (id === "preset")
               setNotice({ text: "用 ←→ 修改，立即保存到 settings.json", tone: "muted" });
-            else if (id.startsWith("subagents.profiles."))
+            else if (id.startsWith("subagents.profiles.") || id.startsWith("subagents.plugin."))
               setNotice({ text: PROFILE_EDIT_HINT, tone: "muted" });
             else setNested(id as Nested);
           }}
