@@ -13,15 +13,28 @@ Nocturne 支持自有插件（随发行包提供的内置插件与本地目录�
 - **Codex**：只读解析 `$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`）中 `[plugins."<name>@<marketplace>"]` 且 `enabled = true` 的条目，并在 `$CODEX_HOME/plugins/cache/<marketplace>/<name>/` 下选取活跃版本（存在 `local` 时优先，否则按版本号取最新），读取 `.codex-plugin/plugin.json` 或 `.claude-plugin/plugin.json`。
 - **Claude Code**：只读解析 `$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json`（默认 `~/.claude/plugins/installed_plugins.json`）中 `scope` 为 `"user"` 的安装路径与 `settings.json` 中 `enabledPlugins[id] === true` 的条目，读取 `.claude-plugin/plugin.json`（缺失时按默认布局尝试 `hooks/hooks.json` 与 `skills/`）。
 
-同一插件在不同宿主同时存在时互相独立，各自单独启停。Codex 系统市场（`openai-bundled`、`openai-primary-runtime`）中的插件，以及解析后既无受支持 Hook、又无技能、也无受支持 MCP 服务器的插件会被跳过，不列出也不加载。
+同一插件在不同宿主同时存在时互相独立，各自单独启停。Codex 系统市场（`openai-bundled`、`openai-primary-runtime`）中的插件，以及解析后既无受支持 Hook、又无技能、也无受支持 MCP 服务器和子代理的插件会被跳过，不列出也不加载。
 
 ## 自有清单格式
 
 自有插件在插件根目录下放置 `.nocturne-plugin/plugin.json`：
 
-- `name` 只允许小写字母、数字和连字符；可选字段包括 `version`、`description`、`skills`、`hooks`、`mcpServers` 与 `interface`（`displayName`、`composerIcon`、`logo` 等）。
+- `name` 只允许小写字母、数字和连字符；可选字段包括 `version`、`description`、`skills`、`agents`、`hooks`、`mcpServers`、`ui` 与 `interface`（`displayName`、`composerIcon`、`logo` 等）。
 - 清单内的相对路径必须以 `./` 开头且解析后不得越出插件根目录。
 - 插件图标优先取 `interface.composerIcon`，回退 `interface.logo`（仅接受插件目录内不超过 64 KB 的 png / jpg / webp / svg）。
+
+### 插件子代理定义（`agents`）
+
+自有清单可声明可选的 `agents` 字段指向插件根目录内的相对目录（例如 `"agents": "./agents"`），目录下每个 `*.md` 文件定义一个子代理：
+
+- **frontmatter 字段**：
+  - `name`（必填）：小写字母、数字和连字符，最长 32 字符，不能为 `default`；生效后的档位 id 为 `<插件 name>:<子代理 name>`（如 `pptx:visual-judge`）。
+  - `description`（必填）：一句话说明何时选用；超过 300 字符时整条跳过并记警告，不截断。
+  - `tools`（可选）：字符串数组，列 Nocturne 工具名（支持 `mcp__<server>__<tool>`），运行时只收窄工具池。
+  - `effort`（可选）：思考档位（`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`）；实际运行时按所选模型支持范围就近降档。
+  - 其他字段（含 `model`）一律忽略并记警告；插件不能替用户指定模型。
+- **正文（必填）**：该子代理的角色说明，非空且最长 10,000 字符；运行时追加在 Nocturne 固定子代理提示词之后并注明来源插件，不替换固定提示词。
+- 单个 `.md` 解析或校验失败只会跳过该文件并记入警告，不影响同一插件的技能、Hook、MCP 服务器和其他有效子代理。Codex 与 Claude Code 兼容插件里的 agent 文件暂不读取。
 
 ## 启用与信任
 
@@ -95,4 +108,4 @@ Nocturne 内置了「插件创建器」（`plugin-creator`，默认开启），�
 - **非命令型 Hook 与 HTTP MCP**：`prompt`、`agent`、`mcp_tool` 等非 `command` 类型 Hook，以及 `type: "http"` MCP 服务器。
 - **异步 Hook**：`async: true` 的条目（标为「异步」）。
 - **用户配置占位符与凭据库引用**：Hook 含 `${user_config.*}`，或插件 MCP 声明 `{ stored: true }`。
-- **自定义命令、界面扩展与子代理定义**：不支持 `commands/`、`modules`、band、statusline 等宿主界面扩展。
+- **自定义命令与兼容插件子代理**：不支持 `commands/`、`modules`、band、statusline 等宿主界面扩展，也不读取 Codex / Claude Code 兼容插件中的子代理定义。

@@ -294,11 +294,11 @@ launch(request, ctx)
 
 ## 14. 角色系统边界（结论）
 
-**本阶段不开放用户/项目自定义的 agent 定义文件**（frontmatter Markdown 那类"名字 + 系统提示 + 工具集 + 模型"的描述文件）：
+**本阶段仍不开放用户/项目自定义的 agent 定义文件**；经 [ADR-0105](../decisions/ADR-0105-plugin-subagents.md) 修订，**仅放开 Nocturne 自有插件通过清单 `agents` 目录提供的子代理定义**：
 
-- 自定义 agent 文件 = 角色系统的雏形（可命名的 persona、独立提示词、独立模型选择）。roadmap 明确不做角色系统；它一旦开放，命名、作用域、信任、模型覆盖会一起进来，超出"受控子会话"的本阶段边界。
-- 本阶段只有**内置工具集预设**（`general`/`explore`）：它们只裁剪工具集，不含独立提示词或角色。`preset` 参数与 launcher 的工具集裁剪点是预留的接入点——将来若要做角色/自定义定义，从这里扩展，而不是现在先建抽象（pitfalls #18）。
-- 子代理的提示词是单一固定文本（第 8 节），不接受用户注入；任务本身由父模型经 `task` 字段传入——自定义"行为"只发生在任务内容这一层，不需要定义文件。
+- 用户级与项目级自定义 agent 文件依然不做：它涉及角色系统、作用域覆盖、不可信项目信任边界与模型覆盖策略，路线图另有独立安排。
+- 原生插件提供的子代理以受控方式接入既有档位解析与 launcher：插件只能提供角色说明、可选工具收窄清单与可选 `effort`，不能指定模型；固定子代理提示词（`subagentBasePrompt`，第 8 节）保持逐字不变，插件角色说明仅以独立段落追加在其后并注明来源插件，不得替换或删减固定提示词。
+- 非插件子代理仍只有内置工具集预设（`general`/`explore`）与配置层档位（第 19 节），任务本身由父模型经 `task` 字段传入。
 
 ## 15. 协议与类型变更清单
 
@@ -374,6 +374,8 @@ Runtime 提供 `describeExternalAgents({workspaceRoot?})`、`saveExternalAgent({
 explore 档位不能请求 general，显式 tools 必须是只读池子集；general 可用 preset/tools 收窄。档位 `timeoutMs` 是可选默认值，显式请求可覆盖，不封顶；profile 配置不再有 3600 秒上限。不存在、停用或模型不可用报 invalid_input 并列出可选档位，不换模型；模型不可用时排除出选择表，并与 `model_role_unavailable` 同一方式提示：写入 `session.warnings`、发 runtime.warning(subagent_profile_unavailable)，同一档位同一模型只提示一次。档位表、default 模型和可用性在设置保存或模型开关后的下一个空闲边界（submit / setModel 开头）随服务商注册表一起重建，当前会话无需重开。枚举外的 profile 在 schema 校验阶段即被拒绝，报错附带可选值。嵌套子会话使用同一内置档位表，但不暴露外部 agent。
 
 选择表由共享 subagentSelectionTable 生成，首行只写一次单位（每百万 token 的输入/输出美元），default 与各自定义档位在括号末尾追加基础档输入/输出单价（`$<input>/$<output>`，与用量统计同源解析；跟随当前模型时写当前模型价格，价格为 0 时照写，查不到完整输入/输出价格时不写价格与占位文字）；外部 agent 不写价格，标记账号费用。选择表在创建 `task` 工具时定下，会话中途刷新价格不会改变已创建工具的选择表；切换会话模型时重建，跟随当前模型的档位随之换价。reason 可选，展示前截到 200 字，不参与判断。profile/reason 留在工具参数中，不新增事件字段；权限主体与第 7 节不变，档位只改变工具上限。配置分层、补丁和名称约束见 [config.md](config.md#子代理档位设置)。
+
+**插件子代理（[ADR-0105](../decisions/ADR-0105-plugin-subagents.md)）**：Nocturne 自有插件可通过清单 `agents` 目录提供子代理定义，档位 id 为 `<插件 name>:<子代理 name>`（如 `pptx:visual-judge`；同名已启用插件按发现顺序保留第一个并警告），排在用户档位之后、外部 agent 之前，随插件启停在下一个空闲边界与档位表一起重建。在配置层解析为同一档位形状（另带角色说明、来源插件与可选工具白名单），launcher 照用解析结果，Agent Loop 不按名字分支。模型优先读取用户设置 `subagents.pluginModels.<id>`，未设时跟随 `default`（`modelRoles.task`）；所选模型不可用时按同一规则排除出选择表并发 `subagent_profile_unavailable` 警告，不回退。`effort` 有定义则用、否则继承父会话，均经 `clampReasoningEffort` 降档；超时用默认值。固定 `subagentBasePrompt` 保持逐字不变，角色说明单独成段追加在其后（段首注明来源插件），工作树段落照旧追加。工具池按第 6 节算出后与 `tools` 取交集（忽略池外工具名），交集只剩 `finish` 时报 `invalid_input` 提示该子代理在当前会话没有可用工具；插件停用后直接调用按不存在/停用档位报 `invalid_input` 并列出可选值。
 
 ## 20. 后台子代理
 

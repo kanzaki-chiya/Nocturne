@@ -192,7 +192,7 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
 2. 四个文档插件：`plugins-src/`、构建、引擎、技能与测试。
 3. 插件详情页：大图标、各节计数、版本与来源、「立即试用」（新开会话并调用该插件的技能）；本地目录安装与卸载。
 4. 查看器：桌面端侧边面板显示文档，加上对应的查看器技能。宿主部分见 [ADR-0101](ADR-0101-mcp-apps-host.md)。
-5. 插件定义子代理（例如视觉验收），届时修订第 2 节「明确不做」。
+5. 插件定义子代理（例如视觉验收），已由 [ADR-0105](ADR-0105-plugin-subagents.md) 与下方「修订：2026-11-21 插件定义子代理」落实。
 
 ### 对「后果」的修订
 
@@ -298,4 +298,12 @@ ADR-0096 第二部分让 Nocturne 只读取 Codex、Claude Code 已安装的插�
   - `installLocalPluginFiles` 先调用 `checkLocalPluginDirectory`，复制后保留对符号链接跳过导致的清单丢失与能力为空校验；
   - `plugins-src` 通过 `devDependencies` 引用 `@nocturne/core` 的 `@nocturne/core/plugin-check`，在构建 `plugins/plugin-creator/server.mjs` 时直接打入单文件产物，运行时无外部依赖且不复制校验逻辑。
 - **桌面入口**：在「设置 › 插件」页头「安装插件…」旁增加「创建插件」按钮，复用 `tryPluginSkill` 新开草稿会话并预填 `/plugin-creator `（不自动发送）；插件创建器关闭或技能不可调用时按钮禁用，界面不加说明文字。
+
+## 修订：2026-11-21 插件定义子代理
+
+落实「修订：四个文档插件」第 5 节分期第 5 项，详见 [ADR-0105](ADR-0105-plugin-subagents.md)：
+
+- **修订第 2 节「明确不做」**：自有清单（`.nocturne-plugin/plugin.json`）新增可选字段 `agents`（插件根目录内的 `./` 相对目录），允许原生插件定义子代理，经 `task.profile` 以 `<插件 name>:<子代理 name>` 调用。斜杠命令（`commands/`）及 Codex / Claude Code 兼容插件中的子代理定义仍不做。
+- **修订第 2 节「可用能力」**：有效子代理一并计入可用能力——技能、受支持 Hook、受支持 MCP 服务器与子代理四者均为空时才跳过不列出；`validateManifestPaths` 与 `checkLocalPluginDirectory` 同步校验 `agents` 目录及 `*.md` 子代理定义。
+- **第一批内置插件子代理**：`docx`、`xlsx`、`pptx`、`pdf` 四个文档插件新增 `agents/visual-judge.md`（仅声明 `read` 与各自 `render` MCP 工具），四份 `SKILL.md` 同步改为交付前优先委派本插件 `visual-judge` 做视觉验收。
 
