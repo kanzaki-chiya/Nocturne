@@ -135,11 +135,15 @@ import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
 import { isNetworkPath } from "./side-panel";
 import { elapsedText, type SubagentLink } from "./subagent-panel";
+import { EnsembleAvatar } from "./EnsembleAvatar";
 import {
+  currentEnsembleInitKey,
+  ensembleAuthorColor,
   ensembleAuthorLabel,
   ensemblePostHead,
   ensembleReadFilterParts,
   ensembleReadPostsFromOutput,
+  ensembleStatusDot,
   ensembleToolSummary,
   splitEnsembleMentions,
 } from "./ensemble-ui";
@@ -295,6 +299,8 @@ export interface ConversationProps {
   saveFile?: SaveFileFn | undefined;
   /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：指挥会话默认「指挥」，成员会话传 `@name` */
   ensembleRecipientLabel?: string | undefined;
+  /** 点击合奏工具行打开右侧面板的合奏留言板（仅桌面端指挥会话传入） */
+  onOpenEnsemble?: (() => void) | undefined;
   /** 点击组曲汇报行在右侧面板打开对应线程 */
   onOpenSuiteThread?: ((threadId: string) => void) | undefined;
   /** 启用消息列表虚拟化（仅手机网页开启，桌面端保持整段渲染） */
@@ -979,6 +985,13 @@ const BackgroundViewContext = createContext<
   pendingSubagentPermissions: [],
 });
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
+
+interface EnsembleRowContextValue {
+  ensemble: EnsembleView | undefined;
+  currentInitKey: string | undefined;
+  onOpen: () => void;
+}
+const EnsembleRowContext = createContext<EnsembleRowContextValue | null>(null);
 
 interface EntryUiStateStore {
   getToggle: (key: string) => boolean | undefined;
@@ -3217,6 +3230,98 @@ function preparingEntry(tool: LiveTool): ToolEntry {
   };
 }
 
+function EnsembleInitRow({
+  entry,
+  searchHit,
+  ensembleRow,
+}: {
+  entry: ToolEntry;
+  searchHit: boolean;
+  ensembleRow: EnsembleRowContextValue;
+}) {
+  const backgroundView = useContext(BackgroundViewContext);
+  const shownName = effectiveToolName(entry);
+  const meta = toolMeta(shownName, entry.subjects);
+  const title = ensembleToolSummary(shownName, inputOf(entry)) ?? "";
+  const isCurrent = ensembleRow.ensemble !== undefined && ensembleRow.currentInitKey === entry.key;
+  const ensemble = isCurrent ? ensembleRow.ensemble : undefined;
+  const active = ensemble?.status === "active";
+  const activeMembers = active
+    ? ensemble.members.filter((member) => member.status !== "removed")
+    : [];
+  const awaitingChildIds = active
+    ? new Set(backgroundView.pendingSubagentPermissions.map((item) => item.childSessionId))
+    : undefined;
+  const dot = active
+    ? ensembleStatusDot(ensemble) === "warn" ||
+      activeMembers.some((member) => awaitingChildIds?.has(member.childSessionId) === true)
+      ? "warn"
+      : "ok"
+    : undefined;
+  const content = (
+    <>
+      <EnsembleAvatar kind="maestro" size="sm" />
+      <span className="tool-name">{meta.label}</span>
+      <span className="tool-arg" title={title !== "" ? title : undefined}>
+        {title}
+      </span>
+      {active ? (
+        <>
+          <span className="ensemble-row-avatars">
+            <EnsembleAvatar kind="maestro" size="sm" />
+            {activeMembers.map((member) => (
+              <EnsembleAvatar
+                key={member.name}
+                kind="member"
+                color={ensembleAuthorColor(ensemble.members, member.name, "member")}
+                size="sm"
+                warn={
+                  member.pendingPermissions.length > 0 ||
+                  awaitingChildIds?.has(member.childSessionId) === true
+                }
+              />
+            ))}
+          </span>
+          {dot !== undefined ? (
+            <span className={`sp-ensemble-dot ${dot} ensemble-row-dot`} aria-hidden="true" />
+          ) : null}
+        </>
+      ) : (
+        <span className="tool-res">已结束</span>
+      )}
+      {isCurrent ? (
+        <Icon name="right_small" size={ICON_SM} className="ensemble-row-chevron" />
+      ) : null}
+    </>
+  );
+  return (
+    <article
+      className={`tool${searchHit ? " search-hit" : ""}`}
+      data-session-seq={entry.seq}
+      data-completed-seq={entry.completedSeq}
+      aria-label={`工具 ${shownName || entry.callId}`}
+    >
+      {isCurrent ? (
+        <button
+          type="button"
+          className="tool-line ensemble-row"
+          onClick={ensembleRow.onOpen}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              ensembleRow.onOpen();
+            }
+          }}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="tool-line ensemble-row ensemble-row-past">{content}</div>
+      )}
+    </article>
+  );
+}
+
 function ToolEntryView({
   entry,
   searchHit = false,
@@ -3240,6 +3345,7 @@ function ToolEntryView({
   session?: Pick<RpcSession, "readAttachment"> | undefined;
 }) {
   const thinkScroll = useContext(ThinkScrollContext);
+  const ensembleRow = useContext(EnsembleRowContext);
   if (entry.status === "denied") {
     const shownName = effectiveToolName(entry);
     return (
@@ -3276,6 +3382,14 @@ function ToolEntryView({
         ))}
       </>
     );
+  }
+  if (
+    !preparing &&
+    effectiveToolName(entry) === "ensemble_init" &&
+    entry.status === "ok" &&
+    ensembleRow !== null
+  ) {
+    return <EnsembleInitRow entry={entry} searchHit={searchHit} ensembleRow={ensembleRow} />;
   }
   return (
     <ToolRow
@@ -6101,21 +6215,32 @@ function ConversationContent({
 export function Conversation(props: ConversationProps | ReadOnlyConversationProps) {
   const readOnly = "readOnly" in props ? props.readOnly : undefined;
   const links = "subagentLinks" in props ? props.subagentLinks : undefined;
+  const onOpenEnsemble = "onOpenEnsemble" in props ? props.onOpenEnsemble : undefined;
+  const ensembleRow: EnsembleRowContextValue | null =
+    readOnly === undefined && onOpenEnsemble !== undefined
+      ? {
+          ensemble: props.view.ensemble,
+          currentInitKey: currentEnsembleInitKey(props.view.entries, props.view.ensemble),
+          onOpen: onOpenEnsemble,
+        }
+      : null;
   return (
     <ImageViewerBoundary saveFile={props.saveFile}>
       <FrozenContext.Provider value={readOnly?.frozen === true}>
         <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
-          <BackgroundViewContext.Provider value={props.view}>
-            <ShellSessionContext.Provider
-              value={
-                readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
-              }
-            >
-              <MessageSkillsContext.Provider value={props.skills}>
-                <ConversationContent key={props.session.id} {...props} />
-              </MessageSkillsContext.Provider>
-            </ShellSessionContext.Provider>
-          </BackgroundViewContext.Provider>
+          <EnsembleRowContext.Provider value={ensembleRow}>
+            <BackgroundViewContext.Provider value={props.view}>
+              <ShellSessionContext.Provider
+                value={
+                  readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
+                }
+              >
+                <MessageSkillsContext.Provider value={props.skills}>
+                  <ConversationContent key={props.session.id} {...props} />
+                </MessageSkillsContext.Provider>
+              </ShellSessionContext.Provider>
+            </BackgroundViewContext.Provider>
+          </EnsembleRowContext.Provider>
         </SubagentLinksContext.Provider>
       </FrozenContext.Provider>
     </ImageViewerBoundary>

@@ -1822,6 +1822,45 @@ button.fcard:hover {
   color: var(--a-secondary);
 }
 
+/* ── 合奏入口行（ADR-0089 修订）：成功的 ensemble_init 行 ── */
+.conversation .tool-line.ensemble-row {
+  align-items: center;
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: transparent;
+  text-align: left;
+}
+.conversation button.tool-line.ensemble-row {
+  cursor: pointer;
+}
+.conversation button.tool-line.ensemble-row:hover {
+  color: var(--a-text);
+}
+.conversation button.tool-line.ensemble-row:hover .tool-name {
+  color: var(--a-text);
+}
+.conversation .tool-line.ensemble-row > .ensemble-av,
+.conversation .ensemble-row-avatars,
+.conversation .ensemble-row-dot,
+.conversation .ensemble-row-chevron {
+  align-self: center;
+}
+.conversation .ensemble-row-avatars {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+.conversation .ensemble-row-dot {
+  margin-left: var(--space-1);
+}
+.conversation .ensemble-row-chevron {
+  flex: none;
+  color: var(--a-faint);
+}
+
 /* ── 组曲（ADR-0097 §3.4）：线程汇报行 ── */
 
 .conversation .suite-report-row {

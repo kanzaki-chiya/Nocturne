@@ -22,6 +22,8 @@ function fakeSession(id = "s-main"): RpcSession {
     id,
     readAttachment: vi.fn(),
     resolveFiles: vi.fn(async () => []),
+    respondPermission: vi.fn(async () => undefined),
+    respondSubagentPermission: vi.fn(async () => undefined),
   } as unknown as RpcSession;
 }
 
@@ -408,5 +410,236 @@ describe("Ensemble 对话内渲染", () => {
     expect(container.textContent).toContain("继续调度成员");
     expect(container.querySelector(".post-in-head")?.textContent).toBe("Runtime → 指挥 · #1");
     expect(container.textContent).toContain("@maestro 旧日志提醒");
+  });
+
+  it("合奏入口行覆盖进行中、有成员待确认、已结束三种状态，且不含「完成」", () => {
+    const onOpenEnsemble = vi.fn();
+    const initEntry: ToolEntry = {
+      ...makeToolEntry(3, "ensemble_init", { title: "r1121j 合奏入口" }),
+      completedSeq: 5,
+    };
+    const baseEnsemble: EnsembleView = {
+      createdSeq: 4,
+      title: "r1121j 合奏入口",
+      status: "active",
+      maestro: {
+        model: { provider: "anthropic", model: "claude-opus-5.5" },
+        status: "working",
+        awaitingPermission: false,
+      },
+      members: [
+        makeMember("impl", { status: "working" }),
+        makeMember("verify", { status: "waiting" }),
+        makeMember("old", { status: "removed" }),
+      ],
+      awaitingPermissionMembers: [],
+      posts: [],
+    };
+    const view = createSessionView();
+    view.entries = [initEntry];
+    view.ensemble = baseEnsemble;
+
+    const { container, rerender } = render(
+      <Conversation
+        session={fakeSession()}
+        view={view}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={onOpenEnsemble}
+      />,
+    );
+
+    const row = container.querySelector("button.ensemble-row");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain("合奏");
+    expect(row?.textContent).toContain("r1121j 合奏入口");
+    expect(row?.textContent).not.toContain("完成");
+    expect(row?.textContent).not.toContain("已结束");
+    // 头像组包含指挥 + 2 名未移除成员（排除 removed），均无 warn
+    const avatars = row?.querySelectorAll(".ensemble-row-avatars .ensemble-av");
+    expect(avatars?.length).toBe(3);
+    expect(row?.querySelectorAll(".ensemble-row-avatars .ensemble-av.warn").length).toBe(0);
+    const dot = row?.querySelector(".sp-ensemble-dot");
+    expect(dot?.classList.contains("ok")).toBe(true);
+    expect(dot?.classList.contains("warn")).toBe(false);
+    expect(row?.querySelector(".ensemble-row-chevron")).not.toBeNull();
+
+    // 点击与 Enter 调用 openEnsemble
+    if (!row) throw new Error("missing ensemble-row");
+    fireEvent.click(row);
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onOpenEnsemble).toHaveBeenCalledTimes(2);
+
+    // 有成员待确认：待确认成员头像加 warn 描边，圆点变 warn
+    const askEnsemble: EnsembleView = {
+      ...baseEnsemble,
+      members: [
+        makeMember("impl", { status: "working" }),
+        makeMember("verify", {
+          status: "working",
+          pendingPermissions: [
+            {
+              requestId: "req-1",
+              callId: "c-1",
+              reason: "执行命令",
+              subjects: [{ kind: "shell", target: "pnpm test" }],
+              options: ["allow_once", "deny"],
+            },
+          ],
+        }),
+        makeMember("old", { status: "removed" }),
+      ],
+      awaitingPermissionMembers: ["verify"],
+    };
+    rerender(
+      <Conversation
+        session={fakeSession()}
+        view={{ ...view, ensemble: askEnsemble }}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={onOpenEnsemble}
+      />,
+    );
+
+    const askRow = container.querySelector("button.ensemble-row");
+    expect(askRow?.querySelectorAll(".ensemble-row-avatars .ensemble-av").length).toBe(3);
+    expect(askRow?.querySelectorAll(".ensemble-row-avatars .ensemble-av.warn").length).toBe(1);
+    expect(askRow?.querySelector(".sp-ensemble-dot")?.classList.contains("warn")).toBe(true);
+    expect(askRow?.textContent).not.toContain("完成");
+
+    // 已结束：右侧只写「已结束」，无头像组与圆点，仍保留箭头且可点/Enter
+    const endedEnsemble: EnsembleView = {
+      ...baseEnsemble,
+      status: "ended",
+      endedSeq: 10,
+      endedReason: "maestro",
+    };
+    rerender(
+      <Conversation
+        session={fakeSession()}
+        view={{ ...view, ensemble: endedEnsemble }}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={onOpenEnsemble}
+      />,
+    );
+
+    const endedRow = container.querySelector("button.ensemble-row");
+    expect(endedRow).not.toBeNull();
+    expect(endedRow?.querySelector(".ensemble-row-avatars")).toBeNull();
+    expect(endedRow?.querySelector(".sp-ensemble-dot")).toBeNull();
+    expect(endedRow?.querySelector(".tool-res")?.textContent).toBe("已结束");
+    expect(endedRow?.textContent).not.toContain("完成");
+    expect(endedRow?.querySelector(".ensemble-row-chevron")).not.toBeNull();
+    if (!endedRow) throw new Error("missing ended ensemble-row");
+    fireEvent.click(endedRow);
+    fireEvent.keyDown(endedRow, { key: "Enter" });
+    expect(onOpenEnsemble).toHaveBeenCalledTimes(4);
+  });
+
+  it("多次合奏时较早的 ensemble_init 行显示「已结束」且无箭头、不可点", () => {
+    const onOpenEnsemble = vi.fn();
+    const firstInit: ToolEntry = {
+      ...makeToolEntry(3, "ensemble_init", { title: "第一次合奏" }),
+      completedSeq: 5,
+    };
+    const secondInit: ToolEntry = {
+      ...makeToolEntry(20, "ensemble_init", { title: "第二次合奏" }),
+      completedSeq: 22,
+    };
+    const view = createSessionView();
+    view.entries = [firstInit, secondInit];
+    view.ensemble = {
+      createdSeq: 21,
+      title: "第二次合奏",
+      status: "active",
+      maestro: {
+        model: { provider: "anthropic", model: "claude-opus-5.5" },
+        status: "working",
+        awaitingPermission: false,
+      },
+      members: [makeMember("impl", { status: "working" })],
+      awaitingPermissionMembers: [],
+      posts: [],
+    };
+
+    const { container } = render(
+      <Conversation
+        session={fakeSession()}
+        view={view}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={false}
+        onOpenEnsemble={onOpenEnsemble}
+      />,
+    );
+
+    const rows = Array.from(container.querySelectorAll(".ensemble-row"));
+    expect(rows).toHaveLength(2);
+    const [earlier, current] = rows;
+    expect(earlier?.tagName).toBe("DIV");
+    expect(earlier?.textContent).toContain("第一次合奏");
+    expect(earlier?.querySelector(".tool-res")?.textContent).toBe("已结束");
+    expect(earlier?.querySelector(".ensemble-row-chevron")).toBeNull();
+    expect(earlier?.querySelector(".ensemble-row-avatars")).toBeNull();
+    if (earlier) fireEvent.click(earlier);
+    expect(onOpenEnsemble).not.toHaveBeenCalled();
+
+    expect(current?.tagName).toBe("BUTTON");
+    expect(current?.textContent).toContain("第二次合奏");
+    expect(current?.querySelector(".ensemble-row-chevron")).not.toBeNull();
+    expect(current?.querySelector(".sp-ensemble-dot")?.classList.contains("ok")).toBe(true);
+    if (current) fireEvent.click(current);
+    expect(onOpenEnsemble).toHaveBeenCalledTimes(1);
+  });
+
+  it("失败或运行中的 ensemble_init 仍渲染为通用工具行", () => {
+    const runningInit: ToolEntry = {
+      ...makeToolEntry(3, "ensemble_init", { title: "初始化中" }),
+      status: "running",
+      result: undefined,
+    };
+    const failedInit: ToolEntry = {
+      ...makeToolEntry(6, "ensemble_init", { title: "已有合奏" }),
+      status: "error",
+      result: {
+        status: "error",
+        durationMs: 2,
+        output: undefined,
+        error: { code: "invalid_input", message: "already active" },
+        truncated: false,
+        spillPath: undefined,
+        modelContent: "error",
+      },
+    };
+    const view = createSessionView();
+    view.entries = [runningInit, failedInit];
+
+    const { container } = render(
+      <Conversation
+        session={fakeSession()}
+        view={view}
+        openUrl={vi.fn()}
+        cwd="/repo"
+        subscribeEvents={() => () => undefined}
+        images={createAttachmentImageSource()}
+        busy={true}
+        onOpenEnsemble={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".ensemble-row")).toBeNull();
+    expect(container.querySelectorAll("details.tool-details")).toHaveLength(2);
   });
 });

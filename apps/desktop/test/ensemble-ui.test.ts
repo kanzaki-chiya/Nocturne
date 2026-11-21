@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { EnsembleMemberView, EnsemblePostView, EnsembleView } from "@nocturne/core/protocol";
+import type {
+  EnsembleMemberView,
+  EnsemblePostView,
+  EnsembleView,
+  ToolEntry,
+} from "@nocturne/core/protocol";
 
 import {
+  currentEnsembleInitKey,
   filterEnsemblePosts,
   formatEnsembleTime,
   groupEnsembleMembers,
@@ -412,5 +418,45 @@ describe("作者、提及、筛选、搜索与分组", () => {
       "all",
     ]);
     expect(ensembleMentionCandidates(ensemble, "zzz")).toEqual([]);
+  });
+});
+
+describe("合奏入口行匹配", () => {
+  function makeInitTool(
+    seq: number,
+    completedSeq: number | undefined,
+    status: ToolEntry["status"] = "ok",
+  ): ToolEntry {
+    return {
+      kind: "tool",
+      key: `t:${seq}`,
+      turnId: "turn-1",
+      seq,
+      ...(completedSeq !== undefined ? { completedSeq } : {}),
+      callId: `c-${seq}`,
+      name: "ensemble_init",
+      status,
+      input: { title: `合奏 ${seq}` },
+      subjects: [],
+      permission: undefined,
+      resolution: undefined,
+      liveOutput: "",
+      result: undefined,
+    };
+  }
+
+  it("currentEnsembleInitKey 按 createdSeq 精确匹配创建当前合奏的 ensemble_init 行", () => {
+    const first = makeInitTool(3, 5, "ok");
+    const second = makeInitTool(20, 22, "ok");
+    const failed = makeInitTool(30, 31, "error");
+    expect(currentEnsembleInitKey([first, second, failed], { createdSeq: 21 })).toBe("t:20");
+    expect(currentEnsembleInitKey([first, failed], { createdSeq: 4 })).toBe("t:3");
+    expect(currentEnsembleInitKey([first, second], undefined)).toBeUndefined();
+    // 未填 completedSeq 时回退取 seq <= createdSeq 且最接近的成功条目
+    const syntheticFirst = makeInitTool(3, undefined, "ok");
+    const syntheticSecond = makeInitTool(10, undefined, "ok");
+    expect(currentEnsembleInitKey([syntheticFirst, syntheticSecond], { createdSeq: 11 })).toBe(
+      "t:10",
+    );
   });
 });

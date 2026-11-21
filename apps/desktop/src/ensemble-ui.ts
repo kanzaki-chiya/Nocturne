@@ -10,6 +10,7 @@ import type {
   EnsembleMemberView,
   EnsemblePostView,
   EnsembleView,
+  ViewEntry,
 } from "@nocturne/core/protocol";
 
 import { toolMeta } from "./tool-meta";
@@ -157,6 +158,38 @@ export function ensembleStatusDot(
 ): EnsembleStatusDot {
   if (ensemble === undefined || ensemble.status === "ended") return undefined;
   return ensemble.awaitingPermissionMembers.length > 0 ? "warn" : "ok";
+}
+
+/**
+ * 找出创建当前 `view.ensemble` 的那一条成功 `ensemble_init` 工具条目的 `key`。
+ * Core 在 `ensemble_init` 执行期间落盘 `ensemble.created`（`tool.started.seq < createdSeq < tool.completed.seq`）；
+ * 若条目未携带 `completedSeq`（例如合成的测试视图），回退为 `seq <= createdSeq` 且最接近 `createdSeq` 的无 `completedSeq` 成功条目。
+ */
+export function currentEnsembleInitKey(
+  entries: readonly ViewEntry[],
+  ensemble: Pick<EnsembleView, "createdSeq"> | undefined,
+): string | undefined {
+  if (ensemble === undefined) return undefined;
+  const createdSeq = ensemble.createdSeq;
+  let fallback: { key: string; seq: number } | undefined;
+  for (const entry of entries) {
+    if (entry.kind !== "tool" || entry.status !== "ok") continue;
+    const name = entry.target?.name ?? entry.name;
+    if (name !== "ensemble_init") continue;
+    if (
+      entry.completedSeq !== undefined &&
+      entry.seq <= createdSeq &&
+      createdSeq <= entry.completedSeq
+    ) {
+      return entry.key;
+    }
+    if (entry.completedSeq === undefined && entry.seq <= createdSeq) {
+      if (fallback === undefined || entry.seq >= fallback.seq) {
+        fallback = { key: entry.key, seq: entry.seq };
+      }
+    }
+  }
+  return fallback?.key;
 }
 
 /** 指挥行的状态圆点（已结束时统一变成 wait） */
