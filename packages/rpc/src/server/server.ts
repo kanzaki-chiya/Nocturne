@@ -1919,6 +1919,8 @@ class Connection implements HubPeer {
         this.runtime().describeHooks({ workspaceRoot: optString(p, "workspaceRoot") }),
       "agents.describeExternalAgents": (p) =>
         this.runtime().describeExternalAgents({ workspaceRoot: optString(p, "workspaceRoot") }),
+      "agents.describeProjectSubagents": (p) =>
+        this.runtime().describeProjectSubagents({ workspaceRoot: optString(p, "workspaceRoot") }),
       "agents.saveExternalAgent": (p) =>
         this.enqueueConfig(async () => {
           const result = await this.runtime().saveExternalAgent(

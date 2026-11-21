@@ -6,6 +6,7 @@ import type {
   MemoryEntry,
   PluginOverview,
   PluginsDescription,
+  ProjectSubagentsDescription,
   ReadMemoryInput,
   Runtime,
   SessionSearchResult,
@@ -441,6 +442,10 @@ export interface RpcMethods {
   "agents.describeExternalAgents": {
     params: { workspaceRoot?: string | undefined };
     result: ExternalAgentsDescription;
+  };
+  "agents.describeProjectSubagents": {
+    params: { workspaceRoot?: string | undefined };
+    result: ProjectSubagentsDescription;
   };
   "agents.saveExternalAgent": { params: ExternalAgentSaveInput; result: ExternalAgentOverview };
   "agents.deleteExternalAgent": { params: { name: string }; result: null };
@@ -1129,6 +1134,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "mcp.describeMcpServers": true,
   "hooks.describeHooks": true,
   "agents.describeExternalAgents": true,
+  "agents.describeProjectSubagents": true,
   "agents.saveExternalAgent": true,
   "agents.deleteExternalAgent": true,
   "agents.setExternalAgentEnabled": true,

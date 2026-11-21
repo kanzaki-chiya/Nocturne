@@ -6,6 +6,7 @@ import type {
   MemoryEntry,
   PluginOverview,
   PluginsDescription,
+  ProjectSubagentsDescription,
   ReadMemoryInput,
   Runtime,
   SkillImportInput,
@@ -329,6 +330,9 @@ export interface RpcRuntime {
   describeExternalAgents(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<ExternalAgentsDescription>;
+  describeProjectSubagents(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<ProjectSubagentsDescription>;
   saveExternalAgent(input: ExternalAgentSaveInput): Promise<ExternalAgentOverview>;
   deleteExternalAgent(input: { name: string }): Promise<void>;
   setExternalAgentEnabled(input: { name: string; enabled: boolean }): Promise<void>;
@@ -1078,6 +1082,7 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       await call("grants.setTrusted", input);
     },
     describeExternalAgents: (input = {}) => call("agents.describeExternalAgents", input),
+    describeProjectSubagents: (input = {}) => call("agents.describeProjectSubagents", input),
     saveExternalAgent: (input) => call("agents.saveExternalAgent", input),
     deleteExternalAgent: async (input) => {
       await call("agents.deleteExternalAgent", input);

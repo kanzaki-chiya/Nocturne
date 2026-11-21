@@ -85,6 +85,7 @@ export const RUNTIME_METHODS: Record<
   describeMcpServers: "mcp.describeMcpServers",
   describeHooks: "hooks.describeHooks",
   describeExternalAgents: "agents.describeExternalAgents",
+  describeProjectSubagents: "agents.describeProjectSubagents",
   saveExternalAgent: "agents.saveExternalAgent",
   deleteExternalAgent: "agents.deleteExternalAgent",
   setExternalAgentEnabled: "agents.setExternalAgentEnabled",
