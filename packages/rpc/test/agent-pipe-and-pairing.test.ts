@@ -1373,6 +1373,13 @@ describe("外部 agent 配对、范围、白名单、权限上限与会话来源
     await expect(
       ownerSess.respondPermission(perm2, { decision: "allow", remember: "always" }),
     ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
+    await expect(
+      ownerSess.respondPermission(perm2, {
+        decision: "allow",
+        remember: "pattern",
+        pattern: "echo *",
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_allowed", rpcCode: -32004 });
 
     // 非持久 allow (remember: "session") 在 bypass 上限下成功
     await expect(

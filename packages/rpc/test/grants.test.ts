@@ -119,3 +119,110 @@ it("会话授权 list/revoke/revokeAll 可经手机调用，变化恰好一次�
   await h.client.shutdown();
   await Promise.all([h.served, phone.served]);
 });
+
+it("模式 Grant 经 RPC 写入、按 match 撤销，远程连接拒绝 remember: pattern", async () => {
+  const shellCmd = (command: string, id: string) => [
+    {
+      type: "tool_call" as const,
+      toolCallId: id,
+      name: "shell",
+      input: { command },
+    },
+    { type: "finish" as const, reason: "tool_calls" as const },
+  ];
+  const h = await connectManyWithConfig({
+    scripts: [
+      shellCmd("echo alpha --one", "s1"),
+      textScript("done1"),
+      shellCmd("echo alpha --two", "s2"),
+      textScript("done2"),
+      shellCmd("echo alpha --three", "s3"),
+      textScript("done3"),
+    ],
+  });
+  const phone = await h.add();
+  const changes: GrantsChangedPayload[] = [];
+  h.client.onNotification("grants.changed", (p) => changes.push(p));
+
+  const { session } = await h.client.runtime.createSession({ model: MODEL });
+  const phoneSession = phone.client.session(session.id);
+  const requests: { requestId: string; ruleSuggestion?: { pattern: string } | undefined }[] = [];
+  let remoteError: unknown;
+  let invalidReplyError: unknown;
+  await session.subscribe((event) => {
+    if (event.type === "permission.requested") {
+      requests.push({
+        requestId: event.payload.requestId,
+        ruleSuggestion: event.payload.ruleSuggestion,
+      });
+      if (requests.length === 1) {
+        void (async () => {
+          try {
+            await phoneSession.respondPermission(event.payload.requestId, {
+              decision: "allow",
+              remember: "pattern",
+              pattern: "echo alpha *",
+            });
+          } catch (e) {
+            remoteError = e;
+          }
+          try {
+            await session.respondPermission(event.payload.requestId, {
+              decision: "allow",
+              remember: "pattern",
+              pattern: "echo beta *",
+            });
+          } catch (e) {
+            invalidReplyError = e;
+          }
+          await session.respondPermission(event.payload.requestId, {
+            decision: "allow",
+            remember: "pattern",
+            pattern: "echo alpha *",
+          });
+        })();
+      } else {
+        void session.respondPermission(event.payload.requestId, { decision: "allow" });
+      }
+    }
+  });
+
+  // 1. 首次询问：远程尝试 remember: "pattern" 被拒；本地提交不匹配模式报 invalid_reply 且保持等待；合法模式成功批准
+  await session.submit({ text: "first" });
+  expect(remoteError).toMatchObject({ code: "remote_not_allowed" });
+  expect(invalidReplyError).toMatchObject({ code: "invalid_reply", rpcCode: -32001 });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.ruleSuggestion).toEqual({ pattern: "echo alpha *" });
+  await until(() => changes.length === 1);
+  const workspace = changes[0]?.workspace;
+  if (!workspace) throw new Error("missing workspace notification");
+
+  const grantsAfterAdd = await h.client.runtime.listGrants({ workspace });
+  expect(grantsAfterAdd).toEqual([
+    expect.objectContaining({
+      kind: "shell",
+      target: "echo alpha *",
+      match: "pattern",
+    }),
+  ]);
+
+  // 2. 同类命令直接放行，不再次询问
+  await session.submit({ text: "second" });
+  expect(requests).toHaveLength(1);
+
+  // 3. 按 (kind, target, match: "pattern") 经 RPC 撤销后，再次执行重新询问
+  await phone.client.runtime.revokeGrant({
+    workspace,
+    kind: "shell",
+    target: "echo alpha *",
+    match: "pattern",
+  });
+  await until(() => changes.length === 2);
+  expect(await h.client.runtime.listGrants({ workspace })).toEqual([]);
+
+  await session.submit({ text: "third" });
+  expect(requests).toHaveLength(2);
+
+  await h.client.shutdown();
+  await Promise.all([h.served, phone.served]);
+});

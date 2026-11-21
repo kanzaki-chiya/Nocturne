@@ -370,7 +370,12 @@ export interface RpcMethods {
   "grants.workspaces": { params: Record<string, never>; result: GrantWorkspace[] };
   "grants.list": { params: { workspace: string }; result: Grant[] };
   "grants.revoke": {
-    params: { workspace: string; kind: Grant["kind"]; target: string };
+    params: {
+      workspace: string;
+      kind: Grant["kind"];
+      target: string;
+      match?: Grant["match"] | undefined;
+    };
     result: null;
   };
   "grants.revokeAll": { params: { workspace: string }; result: null };
@@ -378,7 +383,11 @@ export interface RpcMethods {
   "grants.setTrusted": { params: { workspace: string; trusted: boolean }; result: null };
   "session.listGrants": { params: SessionParams; result: Grant[] };
   "session.revokeGrant": {
-    params: SessionParams & { kind: Grant["kind"]; target: string };
+    params: SessionParams & {
+      kind: Grant["kind"];
+      target: string;
+      match?: Grant["match"] | undefined;
+    };
     result: null;
   };
   "session.revokeAllGrants": { params: SessionParams; result: null };

@@ -749,7 +749,7 @@ class Connection implements HubPeer {
     // 持久授权（写入项目 Grant）只能在电脑上选；会话级与单次批准照常
     if (
       (method === "session.respondPermission" || method === "session.respondSubagentPermission") &&
-      ["project", "always"].includes(String(reqObject(p, "reply").remember))
+      ["project", "always", "pattern"].includes(String(reqObject(p, "reply").remember))
     ) {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
     }
@@ -845,10 +845,10 @@ class Connection implements HubPeer {
       }
       const reply = reqObject(p, "reply");
       const remember = reply.remember;
-      if (remember === "project" || remember === "always") {
+      if (remember === "project" || remember === "always" || remember === "pattern") {
         throw new RpcProtocolError(
           "agent_not_allowed",
-          "外部 agent 不能保存持久授权（project / always）",
+          "外部 agent 不能保存持久授权（project / always / pattern）",
         );
       }
       if (remember !== undefined && remember !== "session") {

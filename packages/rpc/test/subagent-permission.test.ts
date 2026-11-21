@@ -252,9 +252,114 @@ describe("session.respondSubagentPermission RPC 与远程边界", () => {
     await until(() => view.pendingSubagentPermissions.length === 1, "本机收到子权限快照");
     const item = view.pendingSubagentPermissions[0];
     if (item === undefined) throw new Error("预期子权限待决");
+    // 无效回复（如对非 shell 请求提交 remember: "pattern"）报 invalid_reply 且不清除 pending
+    await expect(
+      localSession.respondSubagentPermission(item.childSessionId, item.requestId, {
+        decision: "allow",
+        remember: "pattern",
+        pattern: "echo *",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_reply", rpcCode: -32001 });
+    expect(view.pendingSubagentPermissions).toHaveLength(1);
+
     await localSession.respondSubagentPermission(item.childSessionId, item.requestId, {
       decision: "deny",
       feedback: "改用只读路径",
+    });
+
+    expect(await turn).toBe("done");
+    expect(view.pendingSubagentPermissions).toEqual([]);
+    expect(childCalls).toBe(2);
+
+    h.client.close();
+    await h.served;
+  });
+
+  it("本机连接对子代理 shell 请求提交不匹配模式报 invalid_reply 且不清除 pending，合法模式可正常批准", async () => {
+    let childCalls = 0;
+    const provider = new FakeProvider({
+      models: VISION_MODELS,
+      handler: (req: ModelRequest) => {
+        const isChild = req.tools.some((t) => t.name === "finish");
+        const hasToolResult = req.messages.some((m) => m.role === "tool");
+        if (!isChild) {
+          if (!hasToolResult) {
+            return [
+              {
+                type: "tool_call",
+                toolCallId: "parent-task-pattern",
+                name: "task",
+                input: { task: "测试子代理模式规则", preset: "general" },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            { type: "text_delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ];
+        }
+        childCalls += 1;
+        if (childCalls === 1) {
+          return [
+            {
+              type: "tool_call",
+              toolCallId: "child-shell-pattern",
+              name: "shell",
+              input: { command: "echo sub --flag" },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return [
+          {
+            type: "tool_call",
+            toolCallId: "child-finish-pattern",
+            name: "finish",
+            input: { result: "pattern ok" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ];
+      },
+    });
+
+    const h = await connectMany({ provider });
+    const { session: localSession } = await h.client.runtime.createSession({
+      model: MODEL,
+      cwd: h.ws,
+    });
+
+    const view = createSessionView();
+    await localSession.subscribe((ev) => {
+      reduceSessionView(view, ev);
+    });
+
+    const turn = localSession.submit({ text: "派发 shell 子任务" });
+    await until(() => view.pendingPermission !== undefined, "本机收到父 task 权限确认");
+    const parentPending = view.pendingPermission;
+    if (parentPending === undefined) throw new Error("预期父权限待决");
+    await localSession.respondPermission(parentPending.requestId, {
+      decision: "allow",
+    });
+
+    await until(() => view.pendingSubagentPermissions.length === 1, "本机收到子 shell 权限快照");
+    const item = view.pendingSubagentPermissions[0];
+    if (item === undefined) throw new Error("预期子权限待决");
+    expect(item.ruleSuggestion).toEqual({ pattern: "echo sub *" });
+
+    await expect(
+      localSession.respondSubagentPermission(item.childSessionId, item.requestId, {
+        decision: "allow",
+        remember: "pattern",
+        pattern: "echo other *",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_reply", rpcCode: -32001 });
+    expect(view.pendingSubagentPermissions).toHaveLength(1);
+
+    await localSession.respondSubagentPermission(item.childSessionId, item.requestId, {
+      decision: "allow",
+      remember: "pattern",
+      pattern: "echo sub *",
     });
 
     expect(await turn).toBe("done");
