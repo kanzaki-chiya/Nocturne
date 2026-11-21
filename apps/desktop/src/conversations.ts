@@ -64,6 +64,8 @@ export interface OpenConversation {
    * 订阅后单独取一次 `session.pendingInputs()` 对齐，之后随 `input.pending` 更新。
    */
   pendingInputs: PendingInputsSnapshot;
+  /** 本会话 permission.requested 的 callId → 是否带 ruleSuggestion（Core 证据，用于模式规则匹配预览） */
+  ruleEligibleCalls?: Map<string, boolean>;
   /** 点发送后、正式条目到达前的本地消息与待发行 */
   outgoing: OutgoingBook;
   /** 本地待发行在 Core 返回 id 之前被撤回 */
@@ -265,7 +267,11 @@ export class Conversations {
     client: RpcClient,
     workspace: string,
     result: { session: RpcSession; opened: SessionOpened },
-    continuity?: { view: SessionView; afterSeq: number },
+    continuity?: {
+      view: SessionView;
+      afterSeq: number;
+      ruleEligibleCalls?: Map<string, boolean>;
+    },
   ): Promise<OpenConversation> {
     const entry: OpenConversation = {
       client,
@@ -278,6 +284,7 @@ export class Conversations {
       turnChanges: new Map(),
       changeDiffs: new Map(),
       pendingInputs: { items: [], paused: false },
+      ruleEligibleCalls: continuity?.ruleEligibleCalls ?? new Map<string, boolean>(),
       outgoing: emptyOutgoing(),
       outgoingCancels: new Set(),
       outgoingPatches: new Map(),
@@ -314,6 +321,11 @@ export class Conversations {
             entry.pendingInputs = event.payload;
           } else if (event.type === "mcp.server") {
             seenMcpServers.add(event.payload.name);
+          } else if (event.type === "permission.requested") {
+            (entry.ruleEligibleCalls ??= new Map()).set(
+              event.payload.callId,
+              event.payload.ruleSuggestion !== undefined,
+            );
           }
           this.syncOutgoing(entry);
           if (entry.replaying !== true) {
@@ -1006,6 +1018,9 @@ export class Conversations {
           await this.attach(client, entry.workspace, await client.runtime.resumeSession(id), {
             view: entry.view,
             afterSeq: entry.view.lastSeq,
+            ...(entry.ruleEligibleCalls !== undefined
+              ? { ruleEligibleCalls: entry.ruleEligibleCalls }
+              : {}),
           });
         } catch (error) {
           // attach 抛错时已删掉新条目：把死条目放回去，会话仍可再次尝试

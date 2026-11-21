@@ -16,17 +16,19 @@ import {
 import "./pages.css";
 import "./grants.css";
 
-export const grantKind = (kind: Grant["kind"]): string =>
-  ({
-    read: "读取",
-    edit: "修改",
-    shell: "命令",
-    network: "网络",
-    mcp: "MCP",
-    subagent: "子代理",
-    schedule: "定时任务",
-    app: "电脑操控",
-  })[kind];
+export const grantKind = (kind: Grant["kind"], match?: Grant["match"]): string =>
+  match === "pattern" && kind === "shell"
+    ? "命令规则"
+    : {
+        read: "读取",
+        edit: "修改",
+        shell: "命令",
+        network: "网络",
+        mcp: "MCP",
+        subagent: "子代理",
+        schedule: "定时任务",
+        app: "电脑操控",
+      }[kind];
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).at(-1) ?? value;
 const samePath = (a: string, b: string | undefined) =>
@@ -305,9 +307,11 @@ export function GrantsPage({
                           <div
                             className="grant-row"
                             role="row"
-                            key={`${grant.kind}:${grant.target}`}
+                            key={`${grant.kind}:${grant.match ?? ""}:${grant.target}`}
                           >
-                            <Badge className="grant-kind">{grantKind(grant.kind)}</Badge>
+                            <Badge className="grant-kind">
+                              {grantKind(grant.kind, grant.match)}
+                            </Badge>
                             <GrantTarget target={grant.target} />
                             <time dateTime={grant.createdAt}>
                               {new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}
@@ -325,6 +329,9 @@ export function GrantsPage({
                                         workspace: current.workspace,
                                         kind: grant.kind,
                                         target: grant.target,
+                                        ...(grant.match !== undefined
+                                          ? { match: grant.match }
+                                          : {}),
                                       }),
                                     "已撤销",
                                   );
@@ -429,8 +436,8 @@ export function GrantsPage({
                   >
                     {grants.length > 0 ? (
                       grants.map((g) => (
-                        <div className="grant-item" key={`${g.kind}:${g.target}`}>
-                          <Badge>{grantKind(g.kind)}</Badge>
+                        <div className="grant-item" key={`${g.kind}:${g.match ?? ""}:${g.target}`}>
+                          <Badge>{grantKind(g.kind, g.match)}</Badge>
                           <code className="grant-item-target" title={g.target}>
                             {g.target}
                           </code>
@@ -449,6 +456,7 @@ export function GrantsPage({
                                       workspace: current.workspace,
                                       kind: g.kind,
                                       target: g.target,
+                                      ...(g.match !== undefined ? { match: g.match } : {}),
                                     }),
                                   "已撤销",
                                 );

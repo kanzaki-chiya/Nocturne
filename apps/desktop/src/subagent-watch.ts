@@ -41,6 +41,8 @@ export type WatchPhase =
 export interface WatchState {
   /** 在原地折叠的视图；渲染前以 version 触发刷新 */
   view: SessionView;
+  /** 本子会话 permission.requested 的 callId → 是否带 ruleSuggestion（Core 证据） */
+  ruleEligibleCalls: Map<string, boolean>;
   phase: WatchPhase;
   summary: SubagentSummary | undefined;
   mode: "live" | "snapshot" | undefined;
@@ -134,6 +136,7 @@ export class SubagentWatcher {
       entry = {
         state: {
           view: createSessionView(),
+          ruleEligibleCalls: new Map(),
           phase: "idle",
           summary: undefined,
           mode: undefined,
@@ -186,6 +189,12 @@ export class SubagentWatcher {
         if (!alive()) return;
         // 持久事件按 seq 去重：补读与实时衔接、重连续接都可能重复送达
         if ("seq" in event && event.seq <= state.view.lastSeq) return;
+        if (event.type === "permission.requested") {
+          state.ruleEligibleCalls.set(
+            event.payload.callId,
+            event.payload.ruleSuggestion !== undefined,
+          );
+        }
         reduceSessionView(state.view, event);
         for (const listener of [...entry.eventListeners]) {
           try {
@@ -235,6 +244,7 @@ export class SubagentWatcher {
           if (allowRestart && afterSeq !== undefined && code === "invalid_params") {
             // 保留的 seq 已超出日志（日志被替换/截断）：丢掉缓存视图，从 0 重放一次
             state.view = createSessionView();
+            state.ruleEligibleCalls = new Map();
             this.open(entry, runtime, parentSessionId, childSessionId, false);
             return;
           }

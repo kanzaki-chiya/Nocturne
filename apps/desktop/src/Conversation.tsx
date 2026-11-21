@@ -55,12 +55,14 @@ export function GrantedTag({
   const tooltip =
     grant === undefined
       ? "已授权"
-      : [
-          `${grant.scope === "session" ? "本会话允许" : "本项目允许"} · ${time}`,
-          [kind && grantKind(kind), target].filter(Boolean).join(" · "),
-        ]
-          .filter(Boolean)
-          .join("\n");
+      : grant.match === "pattern"
+        ? [`命令规则 · ${time}`, grant.pattern ?? target].filter(Boolean).join("\n")
+        : [
+            `${grant.scope === "session" ? "本会话允许" : "本项目允许"} · ${time}`,
+            [kind && grantKind(kind), target].filter(Boolean).join(" · "),
+          ]
+            .filter(Boolean)
+            .join("\n");
   return (
     <span
       className="granted-tag granted-tooltip"
@@ -88,6 +90,9 @@ import {
   isRuntimeWorkMode,
   userWorkMode,
   unwrapEnsemblePostText,
+  validateShellRulePattern,
+  matchesShellPatternGrant,
+  shellDialect,
   type SkillOverview,
   thinkingPhrase,
   type FileAttachment,
@@ -98,6 +103,7 @@ import {
   type PendingQuestion,
   type PermissionOption,
   type PermissionReply,
+  type PermissionSubject,
   type QuestionReply,
   type AttachmentInput,
   type RewindMode,
@@ -226,6 +232,8 @@ export interface ConversationProps {
   cwd: string;
   /** 会话生效 Shell 种类（权限主体行前缀） */
   shellKind?: string | undefined;
+  /** 本会话历史 permission.requested 的 callId → 是否带 ruleSuggestion（Core 证据） */
+  ruleEligibleCalls?: ReadonlyMap<string, boolean> | undefined;
   /** 本会话的事件订阅（思考时长簿记；tracker 之外的第二个订阅点） */
   subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void;
   images: AttachmentImageSource;
@@ -3647,6 +3655,45 @@ function useReply<Reply>(send: (reply: Reply) => Promise<void>) {
 
 const appIconCache = new Map<string, string>();
 
+export function shellHistoryFromView(
+  entries: readonly ViewEntry[],
+  ruleEligibleCalls?: ReadonlyMap<string, boolean>,
+): PermissionSubject[] {
+  const out: PermissionSubject[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== "tool") continue;
+    // 规则/Hook/用户等拒绝可能仅结算在 entry.resolution（deny 不发 tool.started）
+    if (entry.resolution?.action === "deny" || entry.permission?.action === "deny") continue;
+
+    const requested = ruleEligibleCalls?.get(entry.callId);
+    if (requested === false) continue;
+
+    const confirmed =
+      requested === true ||
+      // 曾由模式 Grant 放行：Core 已证实非 userOnly、非 forceAsk、非组合/高风险
+      (entry.permission?.action === "allow" &&
+        entry.permission.source === "grant" &&
+        entry.permission.grant?.match === "pattern") ||
+      (entry.resolution?.action === "allow" &&
+        entry.resolution.source === "grant" &&
+        entry.resolution.grant?.match === "pattern") ||
+      // 规则直接放行（未经过人工 ask/userOnly 确认）
+      (entry.permission?.action === "allow" &&
+        entry.permission.source === "rule" &&
+        entry.resolution?.requestId === undefined &&
+        entry.resolution?.source !== "user");
+    if (!confirmed) continue;
+
+    for (const subject of entry.subjects) {
+      if (subject.kind === "shell") out.push(subject);
+    }
+  }
+  return out;
+}
+
+type PermissionActionItem =
+  { kind: "option"; option: PermissionOption } | { kind: "rule"; label: string };
+
 export function PermissionCard({
   pending,
   session,
@@ -3655,6 +3702,7 @@ export function PermissionCard({
   primaryShortcut = true,
   cwd,
   shellKind,
+  shellHistory,
   hidePersistentPermissions = false,
   resolveAppIcon,
 }: {
@@ -3665,11 +3713,18 @@ export function PermissionCard({
   primaryShortcut?: boolean | undefined;
   cwd: string;
   shellKind?: string | undefined;
+  shellHistory?: readonly PermissionSubject[] | undefined;
   hidePersistentPermissions?: boolean;
   resolveAppIcon?: ((app: ApplicationTarget) => Promise<string | undefined>) | undefined;
 }) {
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [rulePattern, setRulePattern] = useState<string | null>(null);
+  const [inPhone, setInPhone] = useState(false);
   const [icons, setIcons] = useState<ReadonlyMap<string, string>>(() => new Map(appIconCache));
+  useEffect(() => {
+    setFeedback(null);
+    setRulePattern(null);
+  }, [pending.requestId]);
   useEffect(() => {
     let alive = true;
     for (const s of pending.subjects) {
@@ -3703,15 +3758,72 @@ export function PermissionCard({
       !hidePersistentPermissions ||
       !["project", "always"].includes(permissionReplies[option].remember ?? ""),
   );
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
+  const shellSubject =
+    pending.subjects.length === 1 && pending.subjects[0]?.kind === "shell"
+      ? pending.subjects[0]
+      : undefined;
+  const canTurnIntoRule =
+    !hidePersistentPermissions &&
+    !inPhone &&
+    pending.ruleSuggestion !== undefined &&
+    options.includes("allow_project") &&
+    shellSubject !== undefined;
+  const actionItems: PermissionActionItem[] = [];
+  for (const option of options) {
+    actionItems.push({ kind: "option", option });
+    if (option === "allow_project" && canTurnIntoRule) {
+      actionItems.push({ kind: "rule", label: "改成规则…" });
+    }
+  }
+  const ruleValidation =
+    rulePattern !== null && shellSubject !== undefined
+      ? validateShellRulePattern(
+          rulePattern,
+          shellSubject.target,
+          shellDialect(shellSubject.shell ?? shellKind),
+        )
+      : undefined;
+  const matchedCommands = useMemo(() => {
+    if (!ruleValidation?.ok || shellSubject === undefined) return [];
+    const fallbackShell =
+      shellSubject.shell !== undefined || shellKind === undefined
+        ? shellSubject
+        : { ...shellSubject, shell: shellKind };
+    const list: string[] = [shellSubject.target];
+    const seen = new Set<string>(list);
+    for (const s of shellHistory ?? []) {
+      if (list.length >= 5) break;
+      if (seen.has(s.target)) continue;
+      if (matchesShellPatternGrant(ruleValidation.pattern, s, fallbackShell)) {
+        seen.add(s.target);
+        list.push(s.target);
+      }
+    }
+    return list;
+  }, [ruleValidation, shellSubject, shellKind, shellHistory]);
+  const actionItemsRef = useRef(actionItems);
+  actionItemsRef.current = actionItems;
   const replyRef = useRef(reply);
   replyRef.current = reply;
   const setFeedbackRef = useRef(setFeedback);
   setFeedbackRef.current = setFeedback;
+  const feedbackRef = useRef(feedback);
+  feedbackRef.current = feedback;
+  const rulePatternRef = useRef(rulePattern);
+  rulePatternRef.current = rulePattern;
+  const ruleSuggestionRef = useRef(pending.ruleSuggestion);
+  ruleSuggestionRef.current = pending.ruleSuggestion;
+  const pendingSubjectsRef = useRef(pending.subjects);
+  pendingSubjectsRef.current = pending.subjects;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
   const primaryShortcutRef = useRef(primaryShortcut);
   primaryShortcutRef.current = primaryShortcut;
   const cardRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    setInPhone(cardRef.current?.closest(".phone") != null);
+  }, []);
 
   // 卡片挂载即拿走焦点：数字键/Esc 立刻可用（多卡并发时不抢已聚焦卡）
   useEffect(() => {
@@ -3721,7 +3833,7 @@ export function PermissionCard({
   }, []);
 
   // 数字键直选、Esc 直接拒绝（捕获阶段 + preventDefault，不与输入框中断冲突）。
-  // Esc 只在两种情况下让位：目标在卡片内部（反馈 textarea 自己处理 Esc 返回选项）、
+  // Esc 只在以下情况让位：规则表单展开中先退回选项、目标在卡片内部（反馈 textarea 自己处理 Esc 返回选项）、
   // 或输入框的补全/菜单弹层开着（Esc 先关弹层）；焦点在输入框时 Esc 也直接拒绝。
   useEffect(() => {
     const editable = (target: EventTarget | null): boolean =>
@@ -3740,20 +3852,36 @@ export function PermissionCard({
       if (activeAsk !== null && activeAsk !== cardRef.current) return;
       if (activeAsk === null && !primaryShortcutRef.current) return;
       if (event.key === "Escape") {
+        if (rulePatternRef.current !== null) {
+          if (!busyRef.current) {
+            event.preventDefault();
+            setRulePattern(null);
+            cardRef.current?.focus();
+          }
+          return;
+        }
         if (insideCard(event.target)) return;
         if (document.querySelector('[role="menu"], .composer-popup') !== null) return;
         event.preventDefault();
         void replyRef.current({ decision: "deny" });
         return;
       }
+      if (feedbackRef.current !== null || rulePatternRef.current !== null) return;
       if (editable(event.target)) return;
       const digit = /^[1-9]$/.exec(event.key);
       if (digit === null) return;
-      const option = optionsRef.current[Number(digit[0]) - 1];
-      if (option === undefined) return;
+      const item = actionItemsRef.current[Number(digit[0]) - 1];
+      if (item === undefined) return;
       event.preventDefault();
+      if (item.kind === "rule") {
+        const suggestion = ruleSuggestionRef.current;
+        if (suggestion !== undefined) setRulePattern(suggestion.pattern);
+        return;
+      }
+      const option = item.option;
       const allApp =
-        pending.subjects.length > 0 && pending.subjects.every((subject) => subject.kind === "app");
+        pendingSubjectsRef.current.length > 0 &&
+        pendingSubjectsRef.current.every((subject) => subject.kind === "app");
       if (option === "deny" && !allApp) {
         setFeedbackRef.current("");
       } else {
@@ -3836,9 +3964,86 @@ export function PermissionCard({
           );
         })}
       </ul>
-      {feedback === null ? (
+      {rulePattern !== null ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!ruleValidation?.ok || busy) return;
+            void reply({
+              decision: "allow",
+              remember: "pattern",
+              pattern: ruleValidation.pattern,
+            });
+          }}
+        >
+          <label>
+            命令规则
+            <input
+              autoFocus
+              className={`input mono ask-rule-input${ruleValidation?.ok ? "" : " invalid"}`}
+              value={rulePattern}
+              disabled={busy}
+              onChange={(event) => {
+                setRulePattern(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !busy) {
+                  event.preventDefault();
+                  setRulePattern(null);
+                  cardRef.current?.focus();
+                }
+              }}
+            />
+          </label>
+          {ruleValidation?.ok ? (
+            <ul className="ask-rule-matches">
+              {matchedCommands.map((cmd) => (
+                <li key={cmd}>
+                  <Icon name="check" size={12} />
+                  <span>{cmd}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="ask-rule-err" role="alert">
+              {ruleValidation?.message}
+            </p>
+          )}
+          <div className="ask-actions">
+            <Button type="submit" variant="primary" disabled={busy || !ruleValidation?.ok}>
+              允许并保存
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setRulePattern(null);
+                cardRef.current?.focus();
+              }}
+            >
+              返回
+            </Button>
+          </div>
+        </form>
+      ) : feedback === null ? (
         <div className="ask-actions">
-          {options.map((option) => {
+          {actionItems.map((item) => {
+            if (item.kind === "rule") {
+              return (
+                <Button
+                  key="turn_into_rule"
+                  variant="default"
+                  disabled={busy}
+                  onClick={() => {
+                    if (pending.ruleSuggestion !== undefined) {
+                      setRulePattern(pending.ruleSuggestion.pattern);
+                    }
+                  }}
+                >
+                  {item.label}
+                </Button>
+              );
+            }
+            const option = item.option;
             const label =
               option === "allow_always" && pending.subjects[0]?.kind === "app"
                 ? `始终允许 ${pending.subjects[0].app?.name ?? pending.subjects[0].target}`
@@ -3875,7 +4080,7 @@ export function PermissionCard({
           <KeyHint
             className="ask-kbd"
             groups={[
-              { keys: ["1", String(options.length)], range: true, label: "选择" },
+              { keys: ["1", String(actionItems.length)], range: true, label: "选择" },
               { keys: ["Esc"], label: "拒绝" },
             ]}
           />
@@ -4639,6 +4844,7 @@ function ConversationContent({
   openUrl,
   cwd,
   shellKind,
+  ruleEligibleCalls,
   subscribeEvents,
   images,
   busy,
@@ -4673,6 +4879,18 @@ function ConversationContent({
   const [following, setFollowing] = useState(true);
   const [highlightedSeq, setHighlightedSeq] = useState<number | undefined>();
   const { parts, now } = useReasoning(subscribeEvents);
+  const liveRuleEligibleRef = useRef<Map<string, boolean>>(new Map());
+  useEffect(() => {
+    liveRuleEligibleRef.current = new Map();
+    return subscribeEvents((event) => {
+      if (event.type === "permission.requested") {
+        liveRuleEligibleRef.current.set(
+          event.payload.callId,
+          event.payload.ruleSuggestion !== undefined,
+        );
+      }
+    });
+  }, [subscribeEvents]);
   const lastEntry = view.entries.at(-1);
   // view.entries 可能在 reduceSessionView 或测试中被原地 push/更新，不能仅以数组引用做 memo 依赖
   const entriesVersion = `${String(view.lastSeq)}:${String(view.entries.length)}:${lastEntry?.key ?? ""}:${
@@ -5818,6 +6036,13 @@ function ConversationContent({
         if (hideRequests || !isLiveSession(session)) return null;
         const pendingPermissions = allPendingPermissions(view);
         if (pendingPermissions.length === 0) return null;
+        const mergedRuleEligible =
+          liveRuleEligibleRef.current.size === 0
+            ? ruleEligibleCalls
+            : ruleEligibleCalls === undefined || ruleEligibleCalls.size === 0
+              ? liveRuleEligibleRef.current
+              : new Map([...ruleEligibleCalls, ...liveRuleEligibleRef.current]);
+        const shellHistory = shellHistoryFromView(view.entries, mergedRuleEligible);
         return (
           <div className="conversation-requests">
             {pendingPermissions.map((item, index) =>
@@ -5828,6 +6053,7 @@ function ConversationContent({
                   session={session}
                   cwd={cwd}
                   primaryShortcut={index === 0}
+                  shellHistory={shellHistory}
                   {...(hidePersistentPermissions !== undefined
                     ? { hidePersistentPermissions }
                     : {})}
@@ -5835,6 +6061,7 @@ function ConversationContent({
                   {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
                 />
               ) : (
+                // 子代理转发请求属于 childSessionId，父对话未加载该子会话视图时不混入父会话历史
                 <PermissionCard
                   key={`subagent-permission:${item.permission.childSessionId}:${item.permission.requestId}`}
                   pending={item.permission}

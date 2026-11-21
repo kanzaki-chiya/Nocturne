@@ -57,7 +57,12 @@ export function SessionGrants({
     setBusy(true);
     setError("");
     try {
-      if (grant) await session.revokeGrant({ kind: grant.kind, target: grant.target });
+      if (grant)
+        await session.revokeGrant({
+          kind: grant.kind,
+          target: grant.target,
+          ...(grant.match !== undefined ? { match: grant.match } : {}),
+        });
       else await session.revokeAllGrants();
       setConfirm(false);
     } catch (reason) {
@@ -70,8 +75,8 @@ export function SessionGrants({
     <section className="session-grants" aria-label="本会话授权">
       <h4>本会话已允许 {grants.length} 项</h4>
       {grants.map((grant) => (
-        <div className="session-grant" key={`${grant.kind}:${grant.target}`}>
-          <span>{grantKind(grant.kind)}</span>
+        <div className="session-grant" key={`${grant.kind}:${grant.match ?? ""}:${grant.target}`}>
+          <span>{grantKind(grant.kind, grant.match)}</span>
           <code title={grant.target}>
             {grant.target.length > 90 ? `${grant.target.slice(0, 86)}…` : grant.target}
           </code>

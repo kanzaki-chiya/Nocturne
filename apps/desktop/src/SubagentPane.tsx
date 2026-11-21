@@ -16,7 +16,13 @@ import {
 import type { RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
-import { Conversation, Markdown, PermissionCard, type ReadOnlySessionRef } from "./Conversation";
+import {
+  Conversation,
+  Markdown,
+  PermissionCard,
+  shellHistoryFromView,
+  type ReadOnlySessionRef,
+} from "./Conversation";
 import type { SubagentTab } from "./side-panel";
 import { elapsedText, finalResult, runningMs, subagentStatus } from "./subagent-panel";
 import type { SubagentWatcher } from "./subagent-watch";
@@ -199,21 +205,33 @@ export function SubagentPane({
   const requestsNode =
     hasPendingPermission && onRespondPermission !== undefined ? (
       <>
-        {pendingPermissions?.map((item) => (
-          <PermissionCard
-            key={`subagent-permission:${item.childSessionId}:${item.requestId}`}
-            pending={item}
-            onRespond={(value) => onRespondPermission(item.childSessionId, item.requestId, value)}
-            {...(item.childSessionId !== child
-              ? { source: { profile: item.profile, taskSummary: item.taskSummary } }
-              : {})}
-            primaryShortcut={false}
-            cwd={workspace}
-            hidePersistentPermissions={hidePersistentPermissions}
-            {...(shellKind !== undefined ? { shellKind } : {})}
-            {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
-          />
-        ))}
+        {pendingPermissions?.map((item) => {
+          // 只使用请求所属会话（childSessionId）自身的已加载历史；嵌套后代未加载视图时不替代为当前子标签历史
+          const ownerWatch =
+            item.childSessionId === child
+              ? watch
+              : watcher.state(parentSessionId, item.childSessionId);
+          const itemShellHistory =
+            ownerWatch !== undefined
+              ? shellHistoryFromView(ownerWatch.view.entries, ownerWatch.ruleEligibleCalls)
+              : undefined;
+          return (
+            <PermissionCard
+              key={`subagent-permission:${item.childSessionId}:${item.requestId}`}
+              pending={item}
+              onRespond={(value) => onRespondPermission(item.childSessionId, item.requestId, value)}
+              {...(item.childSessionId !== child
+                ? { source: { profile: item.profile, taskSummary: item.taskSummary } }
+                : {})}
+              primaryShortcut={false}
+              cwd={workspace}
+              hidePersistentPermissions={hidePersistentPermissions}
+              {...(itemShellHistory !== undefined ? { shellHistory: itemShellHistory } : {})}
+              {...(shellKind !== undefined ? { shellKind } : {})}
+              {...(resolveAppIcon !== undefined ? { resolveAppIcon } : {})}
+            />
+          );
+        })}
       </>
     ) : undefined;
   // 只在真正挂载 Conversation 时把 requests 放进对话区，否则占位（加载中/读取失败/空）会替代 Conversation

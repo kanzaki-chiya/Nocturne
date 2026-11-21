@@ -250,3 +250,93 @@ it("已授权悬停说明的类别用中文名，不显示原始 kind", () => {
   expect(lines[1]).toBe("修改 · Z:\\ws\\grant-demo.txt");
   expect(lines[1]).not.toMatch(/\bedit\b/);
 });
+it("GrantedTag 对模式 Grant 悬停标题显示「命令规则 · 时间」与模式原文，不重复拼类别", () => {
+  const { rerender } = render(
+    <GrantedTag
+      target="git status --short"
+      kind="shell"
+      permission={{
+        action: "allow",
+        source: "grant",
+        rule: undefined,
+        grant: {
+          scope: "project",
+          createdAt: grant.createdAt,
+          match: "pattern",
+          pattern: "git status *",
+        },
+      }}
+    />,
+  );
+  const tag = screen.getByText("已授权");
+  const lines = tag.title.split("\n");
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toMatch(/^命令规则 · 10-20 \d{2}:\d{2}$/);
+  expect(lines[1]).toBe("git status *");
+  expect(lines[1]).not.toContain("命令 · ");
+  expect(lines[1]).not.toContain("命令规则 · ");
+
+  rerender(
+    <GrantedTag
+      target="git status *"
+      kind="shell"
+      permission={{
+        action: "allow",
+        source: "grant",
+        rule: undefined,
+        grant: {
+          scope: "project",
+          createdAt: grant.createdAt,
+          match: "pattern",
+        },
+      }}
+    />,
+  );
+  expect(screen.getByText("已授权").title.split("\n")[1]).toBe("git status *");
+});
+it("GrantsPage（桌面与手机 remote）对模式 Grant 显示「命令规则」且撤销透传 match", async () => {
+  const patternGrant: Grant = {
+    kind: "shell",
+    target: "git status *",
+    match: "pattern",
+    createdAt: "2026-10-21T08:15:00Z",
+  };
+  const exactGrant: Grant = {
+    kind: "shell",
+    target: "git status *",
+    createdAt: "2026-10-20T14:03:00Z",
+  };
+  const h = fixture([patternGrant, exactGrant]);
+  const { unmount } = render(<GrantsPage client={h.client} plainWorkspace="Z:/plain" />);
+  await project();
+  expect(await screen.findByText("命令规则")).toBeTruthy();
+  expect(screen.getByText("命令")).toBeTruthy();
+  const revokeButtons = screen.getAllByRole("button", { name: "撤销" });
+  const firstRevoke = revokeButtons[0];
+  expect(firstRevoke).toBeDefined();
+  if (firstRevoke !== undefined) fireEvent.click(firstRevoke);
+  await waitFor(() =>
+    expect(h.runtime.revokeGrant).toHaveBeenCalledWith({
+      workspace: "Z:/nocturne",
+      kind: "shell",
+      target: "git status *",
+      match: "pattern",
+    }),
+  );
+  unmount();
+
+  const hRemote = fixture([patternGrant]);
+  render(<GrantsPage client={hRemote.client} remote />);
+  const list = await screen.findByRole("navigation", { name: "工作区" });
+  fireEvent.click(await within(list).findByRole("button", { name: /^nocturne/ }));
+  expect(await screen.findByText("命令规则")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+  await waitFor(() =>
+    expect(hRemote.runtime.revokeGrant).toHaveBeenCalledWith({
+      workspace: "Z:/nocturne",
+      kind: "shell",
+      target: "git status *",
+      match: "pattern",
+    }),
+  );
+});

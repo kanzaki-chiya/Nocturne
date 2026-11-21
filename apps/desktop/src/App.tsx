@@ -2574,6 +2574,7 @@ export function App({ host }: { host: DesktopHost }) {
               <PaneErrorBoundary key={active.session.id}>
                 <SessionPane
                   view={active.view}
+                  ruleEligibleCalls={active.ruleEligibleCalls}
                   openWarnings={active.warnings}
                   replaying={active.replaying === true}
                   workspace={active.workspace}
@@ -2978,6 +2979,7 @@ export function App({ host }: { host: DesktopHost }) {
 
 interface SessionPaneProps {
   view: SessionView;
+  ruleEligibleCalls?: ReadonlyMap<string, boolean> | undefined;
   /** 会话打开时的警告，显示在对话页顶部 */
   openWarnings: readonly string[];
   replaying: boolean;
@@ -3120,6 +3122,7 @@ function SessionPane({
   suiteRecord,
   onOpenSuiteThread,
   onShellKindChange,
+  ruleEligibleCalls,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(
@@ -3198,6 +3201,7 @@ function SessionPane({
         skills={skills}
         session={session}
         view={view}
+        ruleEligibleCalls={ruleEligibleCalls}
         openWarnings={openWarnings.map(desktopWarningText)}
         openUrl={openUrl}
         cwd={workspace}
