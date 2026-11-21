@@ -192,8 +192,8 @@ export interface SessionOpened {
   lastSeq: number;
 }
 
-/** `session.state` 的结果：SessionState 去掉可由持久事件折叠得到的 history 与进程内 Map */
-export type SessionStateSummary = Omit<SessionState, "history" | "unsettledCalls">;
+/** `session.state` 的结果：SessionState 去掉可由持久事件折叠得到的 history、pages 与进程内 Map */
+export type SessionStateSummary = Omit<SessionState, "history" | "pages" | "unsettledCalls">;
 
 /** `session.describeContext` 的结果：去掉发给模型的整份请求，只留报告与判定 */
 export type ContextSummary = Omit<BuiltContext, "request">;

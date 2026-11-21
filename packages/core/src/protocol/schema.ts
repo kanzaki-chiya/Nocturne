@@ -155,8 +155,15 @@ const fileAttachmentSchema = z.object({
   source: z.enum(["paste", "upload", "answer"]),
 });
 
+const inlinePageMetaSchema = z.object({
+  title: z.string(),
+  page: z.string().min(1).optional(),
+  version: z.number().int().positive().optional(),
+  display: z.enum(["inline", "panel"]).optional(),
+});
+
 const toolResultFileAttachmentSchema = fileAttachmentSchema.extend({
-  inline: z.object({ title: z.string() }).optional(),
+  inline: inlinePageMetaSchema.optional(),
 });
 
 const fileRefSchema = z.object({

@@ -274,6 +274,15 @@ export interface AttachmentInput {
   source?: "paste" | "upload" | "answer" | undefined;
 }
 
+export type InlinePageDisplay = "inline" | "panel";
+
+export interface InlinePageMeta {
+  title: string;
+  page?: string | undefined;
+  version?: number | undefined;
+  display?: InlinePageDisplay | undefined;
+}
+
 export interface FileAttachment {
   type: "file";
   file: string;
@@ -283,8 +292,8 @@ export interface FileAttachment {
   mimeType?: string | undefined;
   text?: { lines: number } | undefined;
   source: "paste" | "upload" | "answer";
-  /** 回复内嵌页面标记（ADR-0088）：仅在 tool.completed.files 上有效，用户消息入口丢弃 */
-  inline?: { title: string } | undefined;
+  /** 回复页面标记（ADR-0088、ADR-0109）：仅在 tool.completed.files 上有效，用户消息入口丢弃 */
+  inline?: InlinePageMeta | undefined;
 }
 
 /** 一次工具调用的引用。callId 由 Runtime 分配、会话内唯一 */

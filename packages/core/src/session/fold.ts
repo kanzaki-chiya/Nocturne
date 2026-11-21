@@ -4,6 +4,8 @@
  */
 import { shellSwitchNote } from "../platform/index.js";
 import {
+  appendSessionPageFromFile,
+  filterInlinePageFiles,
   formatHookContextEntries,
   todoItemsFromCompletion,
   noteItemsFromCompletion,
@@ -16,6 +18,7 @@ import {
   type HookContextEntry,
   type NoteItem,
   type PlanConfig,
+  type SessionPage,
   type TodoItem,
   type Usage,
 } from "../protocol/index.js";
@@ -64,6 +67,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
   const stoppedTasks: { taskId: string; callId: string }[] = [];
   let todos: TodoItem[] = [];
   let notes: NoteItem[] = [];
+  const pages: SessionPage[] = [];
   let hookContext:
     { SessionStart?: HookContextEntry[]; SubagentStart?: HookContextEntry[] } | undefined;
   const mcpAvailability: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
@@ -279,6 +283,11 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         const p = event.payload;
         todos = todoItemsFromCompletion(p) ?? todos;
         notes = noteItemsFromCompletion(p) ?? notes;
+        if (p.status === "ok") {
+          for (const file of filterInlinePageFiles(p.files)) {
+            appendSessionPageFromFile(pages, file, event.seq);
+          }
+        }
         history.push({
           kind: "tool",
           seq: event.seq,
@@ -374,6 +383,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     ...(plan !== undefined ? { plan } : {}),
     todos,
     notes,
+    pages,
     ...(hookContext !== undefined ? { hookContext } : {}),
     usage,
     lastSeq,

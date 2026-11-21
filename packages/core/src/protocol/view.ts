@@ -41,6 +41,7 @@ import type {
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
 import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
 import { noteItemsFromCompletion, type NoteItem } from "./note.js";
+import { appendSessionPageFromFile, filterInlinePageFiles, type SessionPage } from "./pages.js";
 import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
 export { firstUserText } from "./rewind.js";
 import type {
@@ -78,6 +79,8 @@ export interface SessionView {
   todos: TodoItem[];
   /** 当前会话笔记（ADR-0095）；不归档，由模型自行删除 */
   notes: NoteItem[];
+  /** 当前会话有效页面及版本列表（ADR-0109）；从带有效 inline 标记的成功工具结果派生 */
+  pages: SessionPage[];
   /** 每次归约 +1；不参与重放等价 */
   revision: number;
   meta:
@@ -205,11 +208,6 @@ export function stripInlineFromFiles(
   return files.map(({ inline: _inline, ...rest }) => rest);
 }
 
-function filterInlineFiles(files: readonly FileAttachment[] | undefined): FileAttachment[] {
-  if (files === undefined || files.length === 0) return [];
-  return files.filter((f) => typeof f.inline?.title === "string" && f.inline.title.trim() !== "");
-}
-
 /**
  * 共享派生规则（ADR-0088、view.md）：仅当工具成功完成且结果 files 中带有效 inline 标记时，
  * 返回需作为内嵌页面展示的文件列表；不凭工具名判断。
@@ -220,7 +218,7 @@ export function inlineFilesOfTool(
   if (entry.status !== "ok") return [];
   if (entry.inlineFiles !== undefined) return entry.inlineFiles;
   if (entry.result?.status !== "ok") return [];
-  return filterInlineFiles(entry.result.files);
+  return filterInlinePageFiles(entry.result.files);
 }
 
 /**
@@ -424,6 +422,7 @@ export function createSessionView(): SessionView {
     userTitle: undefined,
     todos: [],
     notes: [],
+    pages: [],
     backgroundShells: [],
     revision: 0,
     meta: undefined,
@@ -562,6 +561,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         view.title = visibleTitle(view);
         view.todos = rebuilt.todos;
         view.notes = rebuilt.notes;
+        view.pages = rebuilt.pages;
         if (rebuilt.ensemble !== undefined) {
           view.ensemble = rebuilt.ensemble;
         } else if (event.payload.fork === true || view.ensemble?.status !== "active") {
@@ -822,9 +822,15 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(p.ui !== undefined ? { ui: p.ui } : {}),
         durationMs: p.durationMs,
       };
-      const inlineFiles = p.status === "ok" ? filterInlineFiles(p.files) : [];
-      if (inlineFiles.length > 0) entry.inlineFiles = inlineFiles;
-      else delete entry.inlineFiles;
+      const inlineFiles = p.status === "ok" ? filterInlinePageFiles(p.files) : [];
+      if (inlineFiles.length > 0) {
+        entry.inlineFiles = inlineFiles;
+        for (const file of inlineFiles) {
+          appendSessionPageFromFile(view.pages, file, event.seq);
+        }
+      } else {
+        delete entry.inlineFiles;
+      }
       b.attachments.set(event.seq, entry);
       // ADR-0032 §3：待回答的提问随对应调用的结算清除
       if (view.pendingQuestion?.callId === p.callId) view.pendingQuestion = undefined;
