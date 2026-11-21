@@ -43,6 +43,22 @@ const message = (error: unknown): string =>
  */
 export const sessionMutationTimeout = { ms: 15_000 };
 
+interface ModelCatalogCache {
+  models: ModelInfo[];
+  recents: ModelRef[];
+}
+
+const DEFAULT_WORKSPACE_CACHE_KEY = Symbol("default");
+const modelCatalogCache = new Map<string | symbol, ModelCatalogCache>();
+
+const workspaceCacheKey = (workspace?: string): string | symbol =>
+  workspace ?? DEFAULT_WORKSPACE_CACHE_KEY;
+
+/** 仅供测试清理模块级模型清单缓存 */
+export function clearModelCatalogCache(): void {
+  modelCatalogCache.clear();
+}
+
 function modelOption(info: ModelInfo) {
   return {
     value: refKey(info.ref),
@@ -125,15 +141,21 @@ export function useSessionControls(
   current.current = session;
   /** 控件变更串行队列：新选择排在上一个变更之后，永不静默丢弃 */
   const mutation = useRef<Promise<void>>(Promise.resolve());
+  const cacheKey = workspaceCacheKey(workspace);
 
   const refresh = useSessionRefresh(session, !replaying, async (isCurrent) => {
+    const targetWorkspace = workspace;
+    const targetKey = workspaceCacheKey(targetWorkspace);
     try {
       if (observed) {
         const [models, recents] = await Promise.all([
-          runtime.listModels(workspace !== undefined ? { workspaceRoot: workspace } : undefined),
+          runtime.listModels(
+            targetWorkspace !== undefined ? { workspaceRoot: targetWorkspace } : undefined,
+          ),
           runtime.listRecentModels(),
         ]);
         if (!isCurrent()) return;
+        modelCatalogCache.set(targetKey, { models, recents });
         const modelRef = view.config.model;
         const info =
           modelRef === undefined
@@ -160,10 +182,13 @@ export function useSessionControls(
         session.state(),
         session.reasoningEffortInfo(),
         session.shellInfo(),
-        runtime.listModels(workspace !== undefined ? { workspaceRoot: workspace } : undefined),
+        runtime.listModels(
+          targetWorkspace !== undefined ? { workspaceRoot: targetWorkspace } : undefined,
+        ),
         runtime.listRecentModels(),
       ]);
       if (!isCurrent()) return;
+      modelCatalogCache.set(targetKey, { models, recents });
       setSnapshot({
         model: state.config.model,
         preset: state.config.permissionPreset,
@@ -248,23 +273,24 @@ export function useSessionControls(
     [session, choose],
   );
 
+  const cachedCatalog = modelCatalogCache.get(cacheKey);
+  const models = snapshot?.models ?? cachedCatalog?.models ?? [];
+  const recents = snapshot?.recents ?? cachedCatalog?.recents ?? [];
   const model = snapshot?.model ?? view.config.model;
   const busy = view.status !== "idle" && view.status !== "failed";
   const effort = snapshot?.effort;
   const currentModel =
-    model === undefined
-      ? undefined
-      : snapshot?.models.find((item) => refKey(item.ref) === refKey(model));
+    model === undefined ? undefined : models.find((item) => refKey(item.ref) === refKey(model));
   const modelLabel = currentModel?.displayName ?? model?.model;
   const modelControl: ChoiceControl = {
     value: model === undefined ? undefined : refKey(model),
     label: modelLabel ?? "模型 —",
-    icon: model === undefined ? "box_3" : modelIconKey(model),
-    groups: modelGroups(snapshot?.models ?? [], snapshot?.recents ?? []),
+    icon: model === undefined ? "box_3" : modelIconKey(currentModel?.ref ?? model),
+    groups: modelGroups(models, recents),
     ...(busy ? { disabled: "本轮结束后可切换" } : {}),
     onSelect: (value) =>
       choose(async () => {
-        const info = snapshot?.models.find((item) => refKey(item.ref) === value);
+        const info = models.find((item) => refKey(item.ref) === value);
         await session.setModel(info?.ref ?? value);
       }),
   };
