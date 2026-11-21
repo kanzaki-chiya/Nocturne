@@ -99,6 +99,13 @@ const permissionSourceSchema = z.enum([
   "cancelled",
 ]);
 
+const grantHitSchema = z.object({
+  scope: z.enum(["session", "project"]),
+  createdAt: z.string(),
+  match: z.literal("pattern").optional(),
+  pattern: z.string().optional(),
+});
+
 const finishReasonSchema = z.enum(["stop", "tool_calls", "length", "content_filter", "other"]);
 
 /** ReasoningEffort（types.ts）：七档中性思考档位，ADR-0018 */
@@ -397,7 +404,7 @@ const payloadSchemas = {
       action: permissionActionSchema,
       source: permissionSourceSchema,
       rule: z.string().optional(),
-      grant: z.object({ scope: z.enum(["session", "project"]), createdAt: z.string() }).optional(),
+      grant: grantHitSchema.optional(),
     }),
     pinResult: z.boolean().optional(),
     mutates: z.boolean().optional(),
@@ -411,6 +418,7 @@ const payloadSchemas = {
     options: z.array(
       z.enum(["allow_once", "allow_session", "allow_project", "allow_always", "deny", "deny_stop"]),
     ),
+    ruleSuggestion: z.object({ pattern: z.string() }).optional(),
   }),
   "permission.reviewed": z.object({
     callId: z.string(),
@@ -429,8 +437,8 @@ const payloadSchemas = {
     action: z.enum(["allow", "deny"]),
     source: permissionSourceSchema,
     rule: z.string().optional(),
-    remember: z.enum(["session", "project", "always"]).optional(),
-    grant: z.object({ scope: z.enum(["session", "project"]), createdAt: z.string() }).optional(),
+    remember: z.enum(["session", "project", "always", "pattern"]).optional(),
+    grant: grantHitSchema.optional(),
     feedback: z.string().optional(),
   }),
   "tool.completed": z.object({

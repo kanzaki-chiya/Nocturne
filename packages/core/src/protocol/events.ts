@@ -220,7 +220,14 @@ export interface ToolStartedPayload {
     action: PermissionAction;
     source: PermissionSource;
     rule?: string | undefined;
-    grant?: { scope: "session" | "project"; createdAt: string } | undefined;
+    grant?:
+      | {
+          scope: "session" | "project";
+          createdAt: string;
+          match?: "pattern" | undefined;
+          pattern?: string | undefined;
+        }
+      | undefined;
   };
   /** 工具声明其结果参与历史折叠（tools.md 第 4 节 pinResult）；缺省同 false */
   pinResult?: boolean | undefined;
@@ -238,6 +245,7 @@ export interface PermissionRequestedPayload {
   subjects: PermissionSubject[];
   reason: string;
   options: PermissionOption[];
+  ruleSuggestion?: { pattern: string } | undefined;
 }
 
 export interface PermissionReviewedPayload {
@@ -259,8 +267,15 @@ export interface PermissionResolvedPayload {
   action: "allow" | "deny";
   source: PermissionSource;
   rule?: string | undefined;
-  remember?: "session" | "project" | "always" | undefined;
-  grant?: { scope: "session" | "project"; createdAt: string } | undefined;
+  remember?: "session" | "project" | "always" | "pattern" | undefined;
+  grant?:
+    | {
+        scope: "session" | "project";
+        createdAt: string;
+        match?: "pattern" | undefined;
+        pattern?: string | undefined;
+      }
+    | undefined;
   feedback?: string | undefined;
 }
 
@@ -479,6 +494,7 @@ export interface SubagentPendingPermission {
   subjects: PermissionSubject[];
   reason: string;
   options: PermissionOption[];
+  ruleSuggestion?: { pattern: string } | undefined;
   review?: PermissionReviewedPayload | undefined;
 }
 

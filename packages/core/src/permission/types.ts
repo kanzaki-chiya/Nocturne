@@ -140,7 +140,7 @@ export interface GateOutcome {
   /** 用户拒绝时附带给模型的反馈（PermissionReply.feedback） */
   feedback?: string | undefined;
   /** 本次应答生成的 Grant 范围（permission.resolved.remember） */
-  remember?: "session" | "project" | "always" | undefined;
+  remember?: "session" | "project" | "always" | "pattern" | undefined;
   resultNotice?: string | undefined;
 }
 
@@ -162,6 +162,9 @@ export interface GateHookContext {
   input?: unknown;
 }
 
+/** 回复等待中权限请求的细粒度结果（供 Runtime 区分 invalid_reply 与 unknown_request） */
+export type PermissionRespondOutcome = "ok" | "invalid_reply" | "unknown_request";
+
 /**
  * 权限闸门（tools.md 第 3 步 5）：Executor 只调用 check，
  * ask 的等待与取消封装在 gate 内部；checkLexical 供枚举工具过滤结果。
@@ -177,10 +180,17 @@ export interface PermissionGate {
   /** 同步词法求值：结果路径位于已解析根目录之下（permissions.md 4.4） */
   checkLexical(request: SubjectRequest): PermissionAction;
   /**
-   * 回复等待中的权限请求；未知或已结算的 requestId 返回 false。
-   * 异步：remember="project" 时要先完成 Grant 落盘（失败降级为会话授权）。
+   * 回复等待中的权限请求；未知、已结算或回复校验失败均返回 false。
+   * 异步：remember="project" / "pattern" 时要先完成 Grant 落盘（失败降级为会话授权）。
    */
   respond?(requestId: string, reply: PermissionReply): Promise<boolean>;
+  /**
+   * 回复等待中的权限请求并区分结果：
+   * - "ok"：已结算；
+   * - "invalid_reply"：请求仍在等待但选项或模式校验失败（不清除 pending）；
+   * - "unknown_request"：请求不存在、已被其他回复接管或已结算/取消。
+   */
+  respondDetailed?(requestId: string, reply: PermissionReply): Promise<PermissionRespondOutcome>;
   /** 查询指定 requestId 当前是否仍在等待用户确认 */
   hasPending?(requestId: string): boolean;
   /** 会话关闭时把全部等待中的请求结算为 cancelled */

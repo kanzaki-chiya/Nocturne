@@ -472,15 +472,18 @@ export interface PermissionRule {
 }
 
 /**
- * 用户对具体请求授予的授权（permissions.md 5.4）：只精确匹配。
+ * 用户对具体请求授予的授权（permissions.md 5.4）：默认精确匹配；
+ * `match: "pattern"` 仅用于项目级 shell 模式授权（ADR-0106）。
  * 会话级 Grant 存会话内存；项目级 Grant 落盘到用户数据目录（config.md 第 4 节）。
  */
 export interface Grant {
   kind: SubjectKind;
-  /** 授权键：路径类为解析后的真实路径（canonical），shell 为完整命令字符串 */
+  /** 授权键：路径类为解析后的真实路径（canonical），shell 为完整命令字符串或模式 */
   target: string;
   /** ISO 8601 */
   createdAt: string;
+  /** 缺省为精确匹配；"pattern" 仅用于项目级 shell 模式授权 */
+  match?: "pattern" | undefined;
 }
 
 /** 命中规则的来源层（permissions.md 5.3 的 matchedRule.origin） */
@@ -498,7 +501,14 @@ export interface RuleHit {
   index?: number | undefined;
   rule?: PermissionRule | undefined;
   description: string;
-  grant?: { scope: "session" | "project"; createdAt: string } | undefined;
+  grant?:
+    | {
+        scope: "session" | "project";
+        createdAt: string;
+        match?: "pattern" | undefined;
+        pattern?: string | undefined;
+      }
+    | undefined;
 }
 
 /** 带来源标注的权限规则：config 合并产物，permission 求值输入 */

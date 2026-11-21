@@ -16,7 +16,7 @@ import type {
   RuleHit,
   RuleOrigin,
 } from "../protocol/index.js";
-import { matchGrant } from "./grants.js";
+import { matchGrant, matchPatternGrant } from "./grants.js";
 import {
   escapesWorktree,
   findSiblingWorktree,
@@ -28,6 +28,7 @@ import {
   isCompositeShell,
   isOpaquePowerShellCommand,
   isPathKind,
+  isShellSubjectEligibleForPatternGrant,
   findRiskySegment,
   matchPattern,
   normalizePathText,
@@ -685,6 +686,14 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       note = [note, "包含 PowerShell -EncodedCommand（内容不透明）"].filter(Boolean).join("；");
     }
 
+    const presetHit = lastMatch(preset, s);
+    const userOnly =
+      smartDirect ||
+      (s.kind === "shell" && isCredentialCommand(s)) ||
+      presetHit?.rule?.userOnly === true ||
+      untrustedHit?.rule?.action === "ask" ||
+      (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
+
     if (action === "ask" && skipApprovals !== true) {
       const sessionGrants = resolveGrants(grantsOpt?.session);
       const projectGrants = resolveGrants(grantsOpt?.project);
@@ -706,6 +715,28 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
           },
         };
       }
+      if (
+        !userOnly &&
+        isShellSubjectEligibleForPatternGrant(s) &&
+        grantsOpt?.project !== undefined
+      ) {
+        const patternHit = matchPatternGrant(projectGrants, s);
+        if (patternHit !== undefined) {
+          return {
+            action: "allow",
+            hit: {
+              origin: "grant",
+              grant: {
+                scope: "project",
+                createdAt: patternHit.createdAt,
+                match: "pattern",
+                pattern: patternHit.target,
+              },
+              description: `Grant（本项目）：shell ${patternHit.target}`,
+            },
+          };
+        }
+      }
       if (autoApproveAsk) {
         return {
           action: "allow",
@@ -714,12 +745,6 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
         };
       }
     }
-    const presetHit = lastMatch(preset, s);
-    const userOnly =
-      smartDirect ||
-      (s.kind === "shell" && isCredentialCommand(s)) ||
-      presetHit?.rule?.userOnly === true ||
-      (hit.rule?.action === "ask" && hit.origin !== "preset" && hit.origin !== "default");
     return { action, hit, note, userOnly };
   }
 

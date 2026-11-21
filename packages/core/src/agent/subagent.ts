@@ -1,5 +1,9 @@
 import type { ModelPricing, SkillOverview, SubagentProfileConfig } from "../protocol/index.js";
-import type { ReviewInputSources, SecurityReviewer } from "../permission/index.js";
+import type {
+  PermissionRespondOutcome,
+  ReviewInputSources,
+  SecurityReviewer,
+} from "../permission/index.js";
 /**
  * SubagentLauncher 实现（subagent.md 第 3–5 节）。
  * 子会话是普通会话：独立 JSONL 日志与锁、同一 runTurn 与执行管线；
@@ -114,7 +118,7 @@ export interface ChildPermissionForwarder {
 /** 将子会话的待决权限请求转发注册到交互父会话活动转发池，并在结算/销毁时撤除。 */
 export function attachChildPermissionForwarder(opts: {
   child: { id: string; subscribe(listener: (event: RuntimeEvent) => void): () => void };
-  gate: Pick<PermissionGate, "hasPending" | "respond" | "cancelAll">;
+  gate: Pick<PermissionGate, "hasPending" | "respond" | "respondDetailed" | "cancelAll">;
   permissions:
     Pick<SubagentPermissionsDeps, "register" | "clearChild" | "onGrantChanged"> | undefined;
   parentCallId: string;
@@ -189,10 +193,17 @@ export function attachChildPermissionForwarder(opts: {
           subjects: e.payload.subjects,
           reason: e.payload.reason,
           options: e.payload.options,
+          ...(e.payload.ruleSuggestion !== undefined
+            ? { ruleSuggestion: e.payload.ruleSuggestion }
+            : {}),
           ...(review !== undefined ? { review } : {}),
         },
         respond: (reply) =>
-          opts.gate.respond?.(e.payload.requestId, reply) ?? Promise.resolve(false),
+          opts.gate.respondDetailed !== undefined
+            ? opts.gate.respondDetailed(e.payload.requestId, reply)
+            : (opts.gate.respond?.(e.payload.requestId, reply) ?? Promise.resolve(false)).then(
+                (ok): PermissionRespondOutcome => (ok ? "ok" : "unknown_request"),
+              ),
         cancel: () => {
           opts.gate.cancelAll?.();
           opts.onCancel?.();
@@ -447,11 +458,14 @@ export interface SubagentPermissionsDeps {
     profile: string;
     taskSummary: string;
     request: Omit<PendingPermission, "seq">;
-    respond(reply: PermissionReply): Promise<boolean>;
+    respond(reply: PermissionReply): Promise<PermissionRespondOutcome>;
     cancel(): void;
   }): () => void;
   clearChild(childSessionId: string): void;
-  onGrantChanged?(remember: "session" | "project" | "always", workspaceRoot: string): void;
+  onGrantChanged?(
+    remember: "session" | "project" | "always" | "pattern",
+    workspaceRoot: string,
+  ): void;
 }
 
 function finishTool(

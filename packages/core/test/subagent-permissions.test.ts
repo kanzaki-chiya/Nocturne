@@ -737,13 +737,13 @@ describe("subagent 权限转发：共享 Grant、app/project、smart 与越界",
     ).rejects.toMatchObject({ code: "unknown_request" });
     expect(view.pendingSubagentPermissions).toHaveLength(1);
 
-    // 不在 confirmationOptions 中的 remember="project" 被拒绝且保留 pending
+    // 不在 confirmationOptions 中的 remember="project" 被拒绝且保留 pending（rpc.md 契约：invalid_reply）
     await expect(
       session.respondSubagentPermission(pending.childSessionId, pending.requestId, {
         decision: "allow",
         remember: "project",
       }),
-    ).rejects.toMatchObject({ code: "unknown_request" });
+    ).rejects.toMatchObject({ code: "invalid_reply" });
     expect(view.pendingSubagentPermissions).toHaveLength(1);
 
     // 正常 deny_stop / deny 结算

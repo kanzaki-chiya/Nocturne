@@ -362,7 +362,7 @@ export interface GrantStore {
   list(): Grant[];
   /** 追加一条并原子重写文件；失败时抛错，由调用方降级为会话 Grant */
   add(grant: Grant): Promise<void>;
-  remove(kind: Grant["kind"], target: string): Promise<void>;
+  remove(kind: Grant["kind"], target: string, match?: Grant["match"]): Promise<void>;
   clear(): Promise<void>;
 }
 

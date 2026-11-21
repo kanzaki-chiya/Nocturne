@@ -4,8 +4,11 @@ export {
   isCompositeShell,
   isOpaquePowerShellCommand,
   isRiskyShellCommand,
+  isShellSubjectEligibleForPatternGrant,
   lexShellCommand,
   matchPattern,
+  matchShellPattern,
+  matchesShellPatternGrant,
   nestedShellPayloads,
   normalizePathText,
   shellDialect,
@@ -13,10 +16,13 @@ export {
   shellTailExecutables,
   shellTailStages,
   stageExecutable,
+  suggestShellRulePattern,
+  validateShellRulePattern,
   type ShellDialect,
+  type ShellRuleValidationResult,
   type ShellToken,
 } from "./pattern.js";
-export { grantFromSubject, grantKey, matchGrant } from "./grants.js";
+export { grantFromSubject, grantKey, matchGrant, matchPatternGrant } from "./grants.js";
 export { isPermissionPresetName, presetRules, PERMISSION_PRESET_NAMES } from "./presets.js";
 export type { PresetContext } from "./presets.js";
 export {

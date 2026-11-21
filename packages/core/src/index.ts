@@ -163,6 +163,7 @@ import {
   UNATTENDED_DENY_HINT,
   isPermissionPresetName,
   type PermissionPolicy,
+  type PermissionRespondOutcome,
 } from "./permission/index.js";
 import {
   createPlatform,
@@ -598,7 +599,11 @@ export interface RuntimeSession {
   shellOutput(taskId: string, offset?: number): ReturnType<BackgroundShells["observe"]>;
   shellKill(taskId: string): Promise<void>;
   listGrants(): Grant[];
-  revokeGrant(input: { kind: Grant["kind"]; target: string }): Promise<void>;
+  revokeGrant(input: {
+    kind: Grant["kind"];
+    target: string;
+    match?: Grant["match"] | undefined;
+  }): Promise<void>;
   revokeAllGrants(): Promise<void>;
   describeSkills(): SkillsDescription;
   describeExternalAgents(): Promise<ExternalAgentsDescription>;
@@ -690,13 +695,14 @@ export interface RuntimeSession {
   interrupt(): void;
   /**
    * 回复 permission.requested（events.md 第 7 节）。
-   * 没有匹配的等待中请求时以 unknown_request 拒绝；reply.remember 生成
-   * 对应范围的 Grant（permissions.md 5.4）。
+   * 没有匹配的等待中请求时以 unknown_request 拒绝；回复选项或模式校验失败以 invalid_reply
+   * 拒绝且请求保持等待；reply.remember 生成对应范围的 Grant（permissions.md 5.4）。
    */
   respondPermission(requestId: string, reply: PermissionReply): Promise<void>;
   /**
    * 回复当前父会话下等待中的子代理权限请求（由 subagent.permissions 聚合到父会话）。
-   * 仅校验本父会话活动转发池中对应 childSessionId 与 requestId，不匹配以 unknown_request 拒绝。
+   * 仅校验本父会话活动转发池中对应 childSessionId 与 requestId，不匹配以 unknown_request 拒绝；
+   * 选项或模式校验失败以 invalid_reply 拒绝且请求保持等待。
    */
   respondSubagentPermission(
     childSessionId: string,
@@ -825,11 +831,17 @@ export interface Runtime {
     sessionId: string;
     kind: Grant["kind"];
     target: string;
+    match?: Grant["match"] | undefined;
   }): Promise<void>;
   revokeAllSessionGrants(input: { sessionId: string }): Promise<void>;
   listGrantWorkspaces(): Promise<GrantWorkspace[]>;
   listGrants(input: { workspace: string }): Promise<Grant[]>;
-  revokeGrant(input: { workspace: string; kind: Grant["kind"]; target: string }): Promise<void>;
+  revokeGrant(input: {
+    workspace: string;
+    kind: Grant["kind"];
+    target: string;
+    match?: Grant["match"] | undefined;
+  }): Promise<void>;
   revokeAllGrants(input: { workspace: string }): Promise<void>;
   describeProject(input: { workspace: string }): Promise<ProjectTrustDescription>;
   setWorkspaceTrusted(input: { workspace: string; trusted: boolean }): Promise<void>;
@@ -3034,7 +3046,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
     interface ForwardedPermissionEntry {
       snapshot: SubagentPendingPermission;
-      respond: (reply: PermissionReply) => Promise<boolean>;
+      respond: (reply: PermissionReply) => Promise<PermissionRespondOutcome>;
       cancel: () => void;
     }
     const forwardedByRequestId = new Map<string, ForwardedPermissionEntry>();
@@ -3053,7 +3065,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         profile: string;
         taskSummary: string;
         request: Omit<PendingPermission, "seq">;
-        respond: (reply: PermissionReply) => Promise<boolean>;
+        respond: (reply: PermissionReply) => Promise<PermissionRespondOutcome>;
         cancel: () => void;
       }): () => void {
         const order = ++forwardedOrderSeq;
@@ -3109,10 +3121,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         childSessionId: string,
         requestId: string,
         reply: PermissionReply,
-      ): Promise<boolean> {
+      ): Promise<PermissionRespondOutcome> {
         const entry = forwardedByRequestId.get(requestId);
         if (entry?.snapshot.childSessionId !== childSessionId) {
-          return false;
+          return "unknown_request";
         }
         return await entry.respond(reply);
       },
@@ -3450,7 +3462,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             },
             onGrantChanged: (remember) => {
               grantsChanged(
-                remember === "project"
+                remember === "project" || remember === "pattern"
                   ? { workspace: meta.workspaceRoot }
                   : { sessionId: grantRootId },
               );
@@ -4783,7 +4795,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const unsubscribeTitle = session.subscribe((event) => {
       if (event.type === "permission.resolved" && event.payload.remember !== undefined) {
         grantsChanged(
-          event.payload.remember === "project"
+          event.payload.remember === "project" || event.payload.remember === "pattern"
             ? { workspace: meta.workspaceRoot }
             : { sessionId: grantRootId },
         );
@@ -5223,14 +5235,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       revokeGrant: (input) => runtime.revokeSessionGrant({ sessionId: session.id, ...input }),
       revokeAllGrants: () => runtime.revokeAllSessionGrants({ sessionId: session.id }),
       async respondPermission(requestId, reply) {
-        if ((await gate.respond?.(requestId, reply)) === true) {
+        const outcome =
+          gate.respondDetailed !== undefined
+            ? await gate.respondDetailed(requestId, reply)
+            : (await gate.respond?.(requestId, reply)) === true
+              ? "ok"
+              : "unknown_request";
+        if (outcome === "ok") {
           return;
+        }
+        if (outcome === "invalid_reply") {
+          throw new RuntimeCommandError("invalid_reply", "权限回复与待确认请求不匹配");
         }
         throw new RuntimeCommandError("unknown_request", "没有等待中的权限请求");
       },
       async respondSubagentPermission(childSessionId, requestId, reply) {
-        if (await forwardedPermissions.respond(childSessionId, requestId, reply)) {
+        const outcome = await forwardedPermissions.respond(childSessionId, requestId, reply);
+        if (outcome === "ok") {
           return;
+        }
+        if (outcome === "invalid_reply") {
+          throw new RuntimeCommandError("invalid_reply", "子代理权限回复与待确认请求不匹配");
         }
         throw new RuntimeCommandError("unknown_request", "没有等待中的子代理权限请求");
       },
@@ -6314,9 +6339,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const root = sessionGrantRoot(input.sessionId);
       const kind = subjectKindSchema.parse(input.kind);
       const target = z.string().min(1).parse(input.target);
+      const match = z.literal("pattern").optional().parse(input.match);
       const entries = grantLists.get(root) ?? [];
       for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i]?.kind === kind && entries[i]?.target === target) entries.splice(i, 1);
+        if (
+          entries[i]?.kind === kind &&
+          entries[i]?.target === target &&
+          entries[i]?.match === match
+        )
+          entries.splice(i, 1);
       }
       grantsChanged({ sessionId: root });
       return Promise.resolve();
@@ -6342,7 +6373,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const workspace = grantWorkspace(input);
       const kind = subjectKindSchema.parse(input.kind);
       const target = z.string().min(1).parse(input.target);
-      await (await grantConfig().forWorkspace(workspace)).grants.remove(kind, target);
+      const match = z.literal("pattern").optional().parse(input.match);
+      await (await grantConfig().forWorkspace(workspace)).grants.remove(kind, target, match);
       grantsChanged({ workspace });
     },
     async revokeAllGrants(input) {

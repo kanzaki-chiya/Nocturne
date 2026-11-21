@@ -14,11 +14,20 @@ import type { Platform } from "../platform/index.js";
 import { enqueueConfigWrite, writeJsonAtomic } from "./files.js";
 import type { GrantStore } from "./types.js";
 
-const grantSchema = z.object({
-  kind: subjectKindSchema,
-  target: z.string().min(1),
-  createdAt: z.string(),
-});
+const grantSchema = z
+  .object({
+    kind: subjectKindSchema,
+    target: z.string().min(1),
+    createdAt: z.string(),
+    match: z.literal("pattern").optional(),
+  })
+  .refine((g) => g.match === undefined || g.kind === "shell");
+
+function normalizeGrant(grant: Grant): Grant {
+  return grant.match === "pattern"
+    ? { kind: grant.kind, target: grant.target, createdAt: grant.createdAt, match: "pattern" }
+    : { kind: grant.kind, target: grant.target, createdAt: grant.createdAt };
+}
 
 const grantsFileSchema = z.object({
   version: z.literal(1),
@@ -144,7 +153,7 @@ export async function loadGrantStore(
         let skipped = 0;
         for (const entry of parsed.data.grants) {
           const item = grantSchema.safeParse(entry);
-          if (item.success) grants.push(item.data);
+          if (item.success) grants.push(normalizeGrant(item.data));
           else skipped += 1;
         }
         if (skipped > 0) {
@@ -183,14 +192,23 @@ export async function loadGrantStore(
   return {
     store: {
       list: () => grants.map((grant) => ({ ...grant })),
-      add: (grant) =>
-        update(() =>
-          grants.some((g) => g.kind === grant.kind && g.target === grant.target)
+      add: (grant) => {
+        const normalized = normalizeGrant(grant);
+        return update(() =>
+          grants.some(
+            (g) =>
+              g.kind === normalized.kind &&
+              g.target === normalized.target &&
+              g.match === normalized.match,
+          )
             ? [...grants]
-            : [...grants, { ...grant }],
+            : [...grants, normalized],
+        );
+      },
+      remove: (kind, target, match) =>
+        update(() =>
+          grants.filter((g) => g.kind !== kind || g.target !== target || g.match !== match),
         ),
-      remove: (kind, target) =>
-        update(() => grants.filter((g) => g.kind !== kind || g.target !== target)),
       clear: () => update(() => [], true),
     },
     warning,

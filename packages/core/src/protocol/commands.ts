@@ -9,8 +9,10 @@ export interface PermissionReply {
   decision: "allow" | "deny";
   /** decision = deny 时可用：拒绝并停止当前 Turn */
   stop?: boolean | undefined;
-  /** decision = allow 时可用：授予会话 / 项目级 Grant */
-  remember?: "session" | "project" | "always" | undefined;
+  /** decision = allow 时可用：授予会话 / 项目级 Grant，或写入项目级 shell 模式授权 */
+  remember?: "session" | "project" | "always" | "pattern" | undefined;
+  /** remember = "pattern" 时用户确认的 shell 命令模式 */
+  pattern?: string | undefined;
   /** 拒绝时可附带给模型的反馈 */
   feedback?: string | undefined;
 }

@@ -11,15 +11,19 @@
 import type {
   Grant,
   PermissionOption,
+  PermissionReply,
   PermissionSubject,
   SubjectRequest,
 } from "../protocol/index.js";
 import { grantFromSubject, grantKey, matchGrant } from "./grants.js";
 import {
   findRiskySegment,
+  isCompositeShell,
   isOpaquePowerShellCommand,
   normalizePathText,
   shellDialect,
+  suggestShellRulePattern,
+  validateShellRulePattern,
 } from "./pattern.js";
 import { budgetUserMessages } from "./review-input.js";
 import type { ReviewFactsProvider } from "./review-facts.js";
@@ -36,6 +40,7 @@ import type {
   GateTurnContext,
   HookRunner,
   PermissionGate,
+  PermissionRespondOutcome,
   ToolEventSink,
 } from "./types.js";
 
@@ -107,6 +112,7 @@ interface PendingRequest {
   options: PermissionOption[];
   subjects: PermissionSubject[];
   reason: string;
+  ruleSuggestion?: { pattern: string } | undefined;
   /** 命中规则的人读说明（写入 permission.resolved.rule） */
   ruleDesc: string;
   turn: GateTurnContext;
@@ -162,7 +168,7 @@ export function createPolicyGate(
     turn: GateTurnContext | undefined,
     extra?: {
       feedback?: string | undefined;
-      remember?: "session" | "project" | "always" | undefined;
+      remember?: "session" | "project" | "always" | "pattern" | undefined;
     },
   ): Promise<void> {
     if (turn === undefined) return;
@@ -535,11 +541,22 @@ export function createPolicyGate(
     };
     const resumeTimeouts = options.pauseTimeouts?.();
     let cleaned = false;
+    const reqOptions = confirmationOptions(evaluation.subjects);
+    const single = evaluation.subjects.length === 1 ? evaluation.subjects[0] : undefined;
+    const ruleSuggestion =
+      single?.kind === "shell" &&
+      !isCompositeShell(single.target, shellDialect(single.shell)) &&
+      reqOptions.includes("allow_project") &&
+      evaluation.userOnly !== true &&
+      !forceAsk
+        ? { pattern: suggestShellRulePattern(single.target, shellDialect(single.shell)) }
+        : undefined;
     pending.set(requestId, {
       callId,
-      options: confirmationOptions(evaluation.subjects),
+      options: reqOptions,
       subjects: evaluation.subjects,
       reason: decision.reason,
+      ruleSuggestion,
       ruleDesc,
       turn,
       resolve: resolveWait,
@@ -562,7 +579,8 @@ export function createPolicyGate(
           callId,
           subjects: evaluation.subjects,
           reason: decision.reason,
-          options: confirmationOptions(evaluation.subjects),
+          options: reqOptions,
+          ...(ruleSuggestion !== undefined ? { ruleSuggestion } : {}),
         },
         { turnId: turn.turnId },
       );
@@ -588,6 +606,165 @@ export function createPolicyGate(
       remember: outcome.remember,
     });
     return withNotice({ ...outcome, resolvedEmitted: true });
+  }
+
+  async function respondDetailed(
+    requestId: string,
+    reply: PermissionReply,
+  ): Promise<PermissionRespondOutcome> {
+    const p = pending.get(requestId);
+    if (p === undefined || p.responding) return "unknown_request";
+    let validatedPattern: string | undefined;
+    if (reply.decision === "allow" && reply.remember === "pattern") {
+      const single = p.subjects.length === 1 ? p.subjects[0] : undefined;
+      if (
+        p.ruleSuggestion === undefined ||
+        !p.options.includes("allow_project") ||
+        single?.kind !== "shell" ||
+        typeof reply.pattern !== "string"
+      ) {
+        return "invalid_reply";
+      }
+      const validation = validateShellRulePattern(
+        reply.pattern,
+        single.target,
+        shellDialect(single.shell),
+      );
+      if (!validation.ok) return "invalid_reply";
+      validatedPattern = validation.pattern;
+    } else {
+      const selected: PermissionOption =
+        reply.decision === "allow"
+          ? reply.remember === "always"
+            ? "allow_always"
+            : reply.remember === "project"
+              ? "allow_project"
+              : reply.remember === "session"
+                ? "allow_session"
+                : "allow_once"
+          : reply.stop
+            ? "deny_stop"
+            : "deny";
+      if (!p.options.includes(selected)) return "invalid_reply";
+    }
+    p.responding = true;
+    try {
+      let remember: "session" | "project" | "always" | "pattern" | undefined;
+      if (reply.decision === "allow" && reply.remember !== undefined) {
+        const grants = p.subjects.map((s) => grantFromSubject(s, caseSensitive));
+        const sink = options.grants;
+        if (reply.remember === "pattern") {
+          if (sink?.project !== undefined && validatedPattern !== undefined) {
+            try {
+              await sink.project.add({
+                kind: "shell",
+                target: validatedPattern,
+                createdAt: new Date().toISOString(),
+                match: "pattern",
+              });
+              if (pending.get(requestId) !== p) return "unknown_request";
+              remember = "pattern";
+            } catch (e) {
+              if (pending.get(requestId) !== p) return "unknown_request";
+              // 写盘失败降级为会话精确 Grant（permissions.md 5.4、ADR-0106）
+              sink.session.push(...grants);
+              remember = "session";
+              p.turn.events.emitEphemeral(
+                "runtime.warning",
+                {
+                  code: "grant_persist_failed",
+                  message: `项目授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+                },
+                { turnId: p.turn.turnId },
+              );
+            }
+          } else {
+            // 无项目存储时降级为会话精确 Grant
+            sink?.session.push(...grants);
+            remember = "session";
+          }
+        } else if (reply.remember === "always") {
+          try {
+            if (options.saveAppPermissions === undefined) throw new Error("用户规则存储不可用");
+            await options.saveAppPermissions(p.subjects);
+            if (pending.get(requestId) !== p) return "unknown_request";
+            remember = "always";
+          } catch (e) {
+            if (pending.get(requestId) !== p) return "unknown_request";
+            sink?.session.push(...grants);
+            remember = "session";
+            p.turn.events.emitEphemeral(
+              "runtime.warning",
+              {
+                code: "app_permission_save_failed",
+                message: `软件授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+              },
+              { turnId: p.turn.turnId },
+            );
+          }
+        } else if (reply.remember === "project" && sink?.project !== undefined) {
+          try {
+            for (const g of grants) {
+              if (pending.get(requestId) !== p) return "unknown_request";
+              await sink.project.add(g);
+            }
+            if (pending.get(requestId) !== p) return "unknown_request";
+            remember = "project";
+          } catch (e) {
+            if (pending.get(requestId) !== p) return "unknown_request";
+            // 写盘失败降级为会话 Grant（permissions.md 5.4）
+            sink.session.push(...grants);
+            remember = "session";
+            p.turn.events.emitEphemeral(
+              "runtime.warning",
+              {
+                code: "grant_persist_failed",
+                message: `项目授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
+              },
+              { turnId: p.turn.turnId },
+            );
+          }
+        } else {
+          // remember === "session"，或无项目存储时的降级
+          sink?.session.push(...grants);
+          remember = "session";
+        }
+      }
+      if (pending.get(requestId) !== p) return "unknown_request";
+      if (reply.decision === "deny") recordDenied(p.turn.turnId, p.subjects);
+      const decision: PermissionDecision =
+        reply.decision === "allow"
+          ? {
+              action: "allow",
+              source: "user",
+              reason:
+                remember === "always"
+                  ? "用户允许：始终允许（已写入用户规则）"
+                  : remember === "project" || remember === "pattern"
+                    ? "用户允许：本项目始终允许（已写入授权）"
+                    : remember === "session"
+                      ? "用户允许：本会话内允许"
+                      : "用户允许一次",
+            }
+          : {
+              action: "deny",
+              source: "user",
+              reason:
+                reply.feedback !== undefined && reply.feedback.length > 0
+                  ? `用户拒绝：${reply.feedback}`
+                  : "用户拒绝",
+            };
+      settle(requestId, {
+        subjects: p.subjects,
+        decision,
+        stopTurn: reply.decision === "deny" && reply.stop === true,
+        feedback: reply.feedback,
+        remember,
+      });
+      return "ok";
+    } finally {
+      if (pending.get(requestId) === p) p.responding = false;
+    }
   }
 
   return {
@@ -622,110 +799,10 @@ export function createPolicyGate(
       return evaluation.decision.action;
     },
 
+    respondDetailed,
+
     async respond(requestId, reply) {
-      const p = pending.get(requestId);
-      if (p === undefined || p.responding) return false;
-      const selected: PermissionOption =
-        reply.decision === "allow"
-          ? reply.remember === "always"
-            ? "allow_always"
-            : reply.remember === "project"
-              ? "allow_project"
-              : reply.remember === "session"
-                ? "allow_session"
-                : "allow_once"
-          : reply.stop
-            ? "deny_stop"
-            : "deny";
-      if (!p.options.includes(selected)) return false;
-      p.responding = true;
-      try {
-        let remember: "session" | "project" | "always" | undefined;
-        if (reply.decision === "allow" && reply.remember !== undefined) {
-          const grants = p.subjects.map((s) => grantFromSubject(s, caseSensitive));
-          const sink = options.grants;
-          if (reply.remember === "always") {
-            try {
-              if (options.saveAppPermissions === undefined) throw new Error("用户规则存储不可用");
-              await options.saveAppPermissions(p.subjects);
-              if (pending.get(requestId) !== p) return false;
-              remember = "always";
-            } catch (e) {
-              if (pending.get(requestId) !== p) return false;
-              sink?.session.push(...grants);
-              remember = "session";
-              p.turn.events.emitEphemeral(
-                "runtime.warning",
-                {
-                  code: "app_permission_save_failed",
-                  message: `软件授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
-                },
-                { turnId: p.turn.turnId },
-              );
-            }
-          } else if (reply.remember === "project" && sink?.project !== undefined) {
-            try {
-              for (const g of grants) {
-                if (pending.get(requestId) !== p) return false;
-                await sink.project.add(g);
-              }
-              if (pending.get(requestId) !== p) return false;
-              remember = "project";
-            } catch (e) {
-              if (pending.get(requestId) !== p) return false;
-              // 写盘失败降级为会话 Grant（permissions.md 5.4）
-              sink.session.push(...grants);
-              remember = "session";
-              p.turn.events.emitEphemeral(
-                "runtime.warning",
-                {
-                  code: "grant_persist_failed",
-                  message: `项目授权写入失败，已降级为本会话授权：${e instanceof Error ? e.message : String(e)}`,
-                },
-                { turnId: p.turn.turnId },
-              );
-            }
-          } else {
-            // remember === "session"，或无项目存储时的降级
-            sink?.session.push(...grants);
-            remember = "session";
-          }
-        }
-        if (pending.get(requestId) !== p) return false;
-        if (reply.decision === "deny") recordDenied(p.turn.turnId, p.subjects);
-        const decision: PermissionDecision =
-          reply.decision === "allow"
-            ? {
-                action: "allow",
-                source: "user",
-                reason:
-                  remember === "always"
-                    ? "用户允许：始终允许（已写入用户规则）"
-                    : remember === "project"
-                      ? "用户允许：本项目始终允许（已写入授权）"
-                      : remember === "session"
-                        ? "用户允许：本会话内允许"
-                        : "用户允许一次",
-              }
-            : {
-                action: "deny",
-                source: "user",
-                reason:
-                  reply.feedback !== undefined && reply.feedback.length > 0
-                    ? `用户拒绝：${reply.feedback}`
-                    : "用户拒绝",
-              };
-        settle(requestId, {
-          subjects: p.subjects,
-          decision,
-          stopTurn: reply.decision === "deny" && reply.stop === true,
-          feedback: reply.feedback,
-          remember,
-        });
-        return true;
-      } finally {
-        if (pending.get(requestId) === p) p.responding = false;
-      }
+      return (await respondDetailed(requestId, reply)) === "ok";
     },
 
     hasPending(requestId) {

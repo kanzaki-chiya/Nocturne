@@ -271,7 +271,14 @@ export interface ToolEntry {
         action: PermissionAction;
         source: PermissionSource;
         rule: string | undefined;
-        grant?: { scope: "session" | "project"; createdAt: string } | undefined;
+        grant?:
+          | {
+              scope: "session" | "project";
+              createdAt: string;
+              match?: "pattern" | undefined;
+              pattern?: string | undefined;
+            }
+          | undefined;
       }
     | undefined;
   resolution: PermissionResolvedPayload | undefined;
@@ -332,6 +339,7 @@ export interface PendingPermission {
   subjects: PermissionSubject[];
   reason: string;
   options: PermissionOption[];
+  ruleSuggestion?: { pattern: string } | undefined;
   review?: PermissionReviewedPayload | undefined;
   /** 持久 permission.requested 的 seq，用于与子代理待决请求按到达顺序混排 */
   seq?: number | undefined;
@@ -738,6 +746,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         subjects: p.subjects,
         reason: p.reason,
         options: p.options,
+        ...(p.ruleSuggestion !== undefined ? { ruleSuggestion: p.ruleSuggestion } : {}),
         review: entry.review,
         seq: event.seq,
       };
@@ -757,7 +766,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       }
       const detail = p.rule !== undefined ? `${p.source}：${p.rule}` : p.source;
       const remembered =
-        p.remember === "project"
+        p.remember === "project" || p.remember === "pattern"
           ? "，已写入项目授权"
           : p.remember === "session"
             ? "，本会话内有效"
