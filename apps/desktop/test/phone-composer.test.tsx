@@ -598,3 +598,33 @@ it("手机手输计划等待组字结束再在工具栏显示执行方式标签"
   expect(tag?.querySelector(".input-label")?.textContent).toBe("计划");
   expect(tag?.nextElementSibling?.className).toBe("phone-tools-sep");
 });
+
+it("手机组字结束后再输入，光标不被拉回组字结束处", async () => {
+  await act(() =>
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        running={false}
+        controls={undefined}
+        onSubmit={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+      />,
+    ),
+  );
+  const field = container.querySelector("textarea");
+  if (!field) throw new Error("缺少输入框");
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  if (!setter) throw new Error("缺少 value setter");
+  const type = (value: string, caret: number) => {
+    setter.call(field, value);
+    field.setSelectionRange(caret, caret);
+    act(() => fireEvent.input(field));
+  };
+  act(() => fireEvent.compositionStart(field));
+  type("你好", 2);
+  act(() => fireEvent.compositionEnd(field));
+  act(() => fireEvent.compositionStart(field));
+  type("你好t", 3);
+  expect(field.selectionStart).toBe(3);
+});

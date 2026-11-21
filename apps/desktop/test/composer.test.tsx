@@ -1500,3 +1500,26 @@ describe("Composer 输入历史搜索", () => {
     ).toBe(false);
   });
 });
+
+it("组字结束后再输入，光标不被拉回组字结束处", () => {
+  render(<Composer {...props()} />);
+  const field = screen.getByLabelText<HTMLTextAreaElement>("消息输入");
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  if (!setter) throw new Error("缺少 value setter");
+  const type = (value: string, caret: number) => {
+    setter.call(field, value);
+    field.setSelectionRange(caret, caret);
+    fireEvent.input(field);
+  };
+  fireEvent.compositionStart(field);
+  type("你好", 2);
+  fireEvent.compositionEnd(field);
+  fireEvent.compositionStart(field);
+  type("你好t", 3);
+  expect(field.selectionStart).toBe(3);
+  fireEvent.compositionEnd(field);
+  field.setSelectionRange(0, 0);
+  fireEvent.select(field);
+  type("x你好t", 1);
+  expect(field.selectionStart).toBe(1);
+});

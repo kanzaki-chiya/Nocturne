@@ -1416,7 +1416,11 @@ export function Composer({
           setComposing(true);
         }}
         onCompositionEnd={(event) => {
-          pendingCaret.current = event.currentTarget.selectionStart + offset;
+          // 只在组字结束后标签出现或消失（可见文本整体平移）时才摆光标；否则这里留下的
+          // 位置会在下一次输入时把光标拉回组字结束处
+          if (draftPresentation.prefix !== prefix) {
+            pendingCaret.current = event.currentTarget.selectionStart + offset;
+          }
           composingRef.current = false;
           setComposing(false);
         }}

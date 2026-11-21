@@ -777,7 +777,10 @@ export function PhoneComposer({
               setComposing(true);
             }}
             onCompositionEnd={(event) => {
-              pendingCaret.current = event.currentTarget.selectionStart + offset;
+              // 同桌面输入框：只在标签随组字结束出现或消失时摆光标
+              if (presentation.prefix !== prefix) {
+                pendingCaret.current = event.currentTarget.selectionStart + offset;
+              }
               composingRef.current = false;
               setComposing(false);
             }}
