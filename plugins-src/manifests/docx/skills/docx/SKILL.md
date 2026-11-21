@@ -20,13 +20,13 @@ description: 处理 Word 文档（.docx/.doc/.odt）：创建、读取段落与�
 
 1. 修改既有文档前先调用 `read`，确认段落索引、标题层级与表格结构。
 2. 用 `edit` 修改或 `create` 生成文档。
-3. 完成后调用 `render` 查看实际分页、排版、表格与中文字体效果；若有错位或遗漏继续调整，再交付给用户。
+3. 交付前做视觉检查：优先用 `task` 调用本插件的 `visual-judge`（`profile: "docx:visual-judge"`，在 `task` 中提供文件绝对路径、要检查的页码范围和用户要求），将其结论直接作为视觉检查结果，按不通过项修改后再交付；仅在 `docx:visual-judge` 不可用时才自己调用 `render` 检查。两条路只走一条，不要先自己调用 `render` 看一遍再交给 `visual-judge`。
 
 ## 在面板中查看
 
 - 创建或编辑完 Word 文档后，调用 `show_in_viewer` 在右侧面板向用户展示成稿；再次修改后可再次调用 `show_in_viewer` 刷新查看器内容。
 - 用户说「打开」「给我看看」某个 Word 文档时，直接调用 `show_in_viewer`。
-- `show_in_viewer` 只返回文件名与页数摘要；模型要检查版式与页面内容仍使用 `render`。
+- `show_in_viewer` 只返回文件名与页数摘要；视觉版式检查走 `docx:visual-judge`（不可用时改用 `render`）。
 
 ## 依赖异常处理
 

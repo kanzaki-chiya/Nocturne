@@ -33,6 +33,7 @@ Nocturne 自有插件的清单位于插件根目录下的 `.nocturne-plugin/plug
 | `version` | 建议必填 | `string` | 推荐使用 SemVer 2.0（如 `0.1.0`、`1.2.3-rc.1`）。满足合法目录名 `/^[A-Za-z0-9.+_-]+$/`（且不为 `.`、`..`）时直接用作安装版本目录名；缺省或不合法时回退为 `local`。 |
 | `description` | 建议 | `string` | 插件说明；缺失时回退取 `interface.shortDescription` 或 `interface.longDescription`。 |
 | `skills` | 可选 | `string \| string[]` | 技能目录相对路径（必须以 `./` 开头）。可指向包含 `SKILL.md` 的单个技能目录，或包含多个 `<skill>/SKILL.md` 子目录的上级目录。省略时自动扫描默认 `./skills`（若存在）。 |
+| `agents` | 可选 | `string` | 仅自有清单读取。子代理定义目录相对路径（必须以 `./` 开头，例如 `"./agents"`）；省略时不读取子代理。目录下每个 `*.md` 定义一个子代理（YAML 前言含必填 `name`、`description` 与可选 `tools`、`effort`，正文为角色说明）。 |
 | `hooks` | 可选 | `string \| object \| (string \| object)[]` | Hook 配置文件相对路径（`./` 开头）或内联 Hook 映射对象，也可传数组合并多个来源。省略时自动读取默认 `hooks/hooks.json`（若存在）。 |
 | `mcpServers` | 可选 | `string \| object \| (string \| object)[]` | MCP 服务器配置文件相对路径（`./` 开头，文件形如 `{ "mcpServers": { ... } }`）或内联服务器映射对象，也可传数组合并。省略时自动读取默认 `.mcp.json`（若存在）。 |
 | `interface` | 可选 | `object` | 展示元数据：`displayName`（界面显示名）、`shortDescription`、`longDescription`、`composerIcon`、`logo`。 |
@@ -40,7 +41,7 @@ Nocturne 自有插件的清单位于插件根目录下的 `.nocturne-plugin/plug
 
 ## 2. 相对路径与复制规则
 
-- 清单内 `skills`、`hooks`、`mcpServers` 中的字符串路径**必须以 `./` 开头**，且词法解析与真实路径（`realpath`）都不得越出插件根目录，否则安装会被拒绝。
+- 清单内 `skills`、`agents`、`hooks`、`mcpServers` 中的字符串路径**必须以 `./` 开头**，且词法解析与真实路径（`realpath`）都不得越出插件根目录，否则安装会被拒绝。
 - 本地安装会把插件目录递归复制到 `<NOCTURNE_HOME>/plugins/installed/local/<name>/<version>/`，复制过程中会**跳过 `.git` 目录和所有符号链接**（不跟随、不复制）。
 - 若 `.nocturne-plugin/plugin.json` 或技能/脚本本身是符号链接，会导致复制后清单丢失或能力为空，安装会在复制后校验阶段拒绝。
 - 源目录不得位于 `<NOCTURNE_HOME>/plugins/` 内部，否则会被拒绝安装。
@@ -55,11 +56,12 @@ Nocturne 自有插件的清单位于插件根目录下的 `.nocturne-plugin/plug
 
 ## 4. 可用能力门槛
 
-安装与发现阶段均要求插件至少具备以下三项之一，否则安装失败（`清单无效：插件不包含可用的技能、Hook 或 MCP 服务器`）：
+安装与发现阶段均要求插件至少具备以下四项之一，否则安装失败（`清单无效：插件不包含可用的技能、Hook、MCP 服务器或子代理`）：
 
 1. 至少一个解析成功的技能（含闭合 YAML 前言 `---` 的 `SKILL.md`）；
 2. 至少一个受支持的 Hook 条目；
-3. 至少一个未被跳过的 stdio MCP 服务器。
+3. 至少一个未被跳过的 stdio MCP 服务器；
+4. 至少一个解析成功的自有插件子代理定义（`agents/*.md`）。
 
 ## 5. MCP 服务器约束与凭据禁止
 

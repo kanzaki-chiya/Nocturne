@@ -21,13 +21,13 @@ description: 处理电子表格（Excel/.xlsx/.xls/.ods）：创建表格、读�
 
 1. 修改前先调用 `read` 查看工作表名称、坐标与现有公式，避免覆盖公式单元格。
 2. 用 `edit` 或 `create` 写入数据与公式，必要时再调用 `read` 核对公式重算后的数值。
-3. 交付前调用 `render` 检查列宽、分页与中文显示效果，确认无截断或乱码后再交付。
+3. 交付前做视觉检查：优先用 `task` 调用本插件的 `visual-judge`（`profile: "xlsx:visual-judge"`，在 `task` 中提供文件绝对路径、要检查的页码范围和用户要求），将其结论直接作为视觉检查结果，按不通过项修改后再交付；仅在 `xlsx:visual-judge` 不可用时才自己调用 `render` 检查。两条路只走一条，不要先自己调用 `render` 看一遍再交给 `visual-judge`。
 
 ## 在面板中查看
 
 - 创建或编辑完电子表格后，调用 `show_in_viewer` 在右侧面板向用户展示；再次修改后可再次调用 `show_in_viewer` 刷新查看器内容。
 - 用户说「打开」「给我看看」某个表格文件时，直接调用 `show_in_viewer`。
-- `show_in_viewer` 只返回文件名与页数摘要；模型要检查数据与排版仍使用 `read` 和 `render`。
+- `show_in_viewer` 只返回文件名与页数摘要；核对数据用 `read`，视觉排版检查走 `xlsx:visual-judge`（不可用时改用 `render`）。
 
 ## 依赖异常处理
 

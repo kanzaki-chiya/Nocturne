@@ -3,6 +3,7 @@
   "version": "0.57.0",
   "description": "创建、读取、编辑、重算、转换与按页预览电子表格。",
   "skills": "./skills",
+  "agents": "./agents",
   "mcpServers": {
     "sheets": {
       "command": "${NOCTURNE_NODE}",

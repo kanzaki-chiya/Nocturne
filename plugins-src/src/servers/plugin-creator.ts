@@ -55,6 +55,7 @@ export interface CheckPluginOutput {
     skipReasonLabel?: string | undefined;
   })[];
   surfaces: LocalPluginCheckResult["surfaces"];
+  agents: LocalPluginCheckResult["agents"];
   skipped: CheckPluginSkippedEntry[];
 }
 
@@ -125,6 +126,7 @@ function formatCheckOutput(result: LocalPluginCheckResult): CheckPluginOutput {
     hooks: result.hooks,
     mcpServers,
     surfaces: result.surfaces,
+    agents: result.agents,
     skipped,
   };
 }

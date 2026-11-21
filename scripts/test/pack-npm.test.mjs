@@ -93,10 +93,18 @@ describe("pack-npm", () => {
     }
     const demoDir = join(dir, "plugins", "demo");
     mkdirSync(join(demoDir, ".nocturne-plugin"), { recursive: true });
+    mkdirSync(join(demoDir, "agents"), { recursive: true });
     mkdirSync(join(demoDir, "test"), { recursive: true });
     mkdirSync(join(demoDir, "node_modules", "dep"), { recursive: true });
-    writeFileSync(join(demoDir, ".nocturne-plugin", "plugin.json"), '{"name":"demo"}');
+    writeFileSync(
+      join(demoDir, ".nocturne-plugin", "plugin.json"),
+      '{"name":"demo","agents":"./agents"}',
+    );
     writeFileSync(join(demoDir, ".nocturne-plugin", "build-id"), "0123456789abcdef");
+    writeFileSync(
+      join(demoDir, "agents", "judge.md"),
+      "---\nname: judge\ndescription: d\n---\nbody",
+    );
     writeFileSync(join(demoDir, "server.mjs"), "export {};");
     writeFileSync(join(demoDir, "test", "a.test.mjs"), "test");
     writeFileSync(join(demoDir, "node_modules", "dep", "index.js"), "dep");
@@ -105,6 +113,7 @@ describe("pack-npm", () => {
     const files = untar(tgz);
     expect(files.has("package/plugins/demo/.nocturne-plugin/plugin.json")).toBe(true);
     expect(files.get("package/plugins/demo/.nocturne-plugin/build-id")).toBe("0123456789abcdef");
+    expect(files.has("package/plugins/demo/agents/judge.md")).toBe(true);
     expect(files.has("package/plugins/demo/server.mjs")).toBe(true);
     expect(files.has("package/plugins/demo/test/a.test.mjs")).toBe(false);
     expect(files.has("package/plugins/demo/node_modules/dep/index.js")).toBe(false);
@@ -127,6 +136,11 @@ describe("pack-npm", () => {
       writeFileSync(join(dir, "wasm", wasmFile), "wasm");
     }
     cpSync(builtCreator, join(dir, "plugins", "plugin-creator"), { recursive: true });
+    for (const docPlugin of ["docx", "xlsx", "pptx", "pdf"]) {
+      cpSync(join(repoRoot, "plugins", docPlugin), join(dir, "plugins", docPlugin), {
+        recursive: true,
+      });
+    }
 
     const tgz = packNpm({ bundleFile: bundle, out: join(dir, "out") });
     const files = untar(tgz);
@@ -139,11 +153,15 @@ describe("pack-npm", () => {
       "package/plugins/plugin-creator/skills/plugin-creator/references/manifest-spec.md",
       "package/plugins/plugin-creator/skills/plugin-creator/references/hooks-and-mcp-examples.md",
       "package/plugins/plugin-creator/skills/plugin-creator/references/install-update-uninstall.md",
+      "package/plugins/docx/agents/visual-judge.md",
+      "package/plugins/xlsx/agents/visual-judge.md",
+      "package/plugins/pptx/agents/visual-judge.md",
+      "package/plugins/pdf/agents/visual-judge.md",
     ];
     for (const entry of expected) {
       expect(files.has(entry), entry).toBe(true);
     }
-  });
+  }, 30_000);
 
   it("bundle 文件不存在时报错", () => {
     expect(() => packNpm({ bundleFile: join(dir, "none.mjs"), out: join(dir, "o") })).toThrow(

@@ -73,12 +73,20 @@ describe("bundle-nctrn --out-dir", () => {
     const demoDir = join(srcPlugins, "demo");
     mkdirSync(join(demoDir, ".nocturne-plugin"), { recursive: true });
     mkdirSync(join(demoDir, "skills", "s1"), { recursive: true });
+    mkdirSync(join(demoDir, "agents"), { recursive: true });
     mkdirSync(join(demoDir, "test"), { recursive: true });
     mkdirSync(join(demoDir, "fixtures"), { recursive: true });
     mkdirSync(join(demoDir, "node_modules", "pkg"), { recursive: true });
-    writeFileSync(join(demoDir, ".nocturne-plugin", "plugin.json"), '{"name":"demo"}');
+    writeFileSync(
+      join(demoDir, ".nocturne-plugin", "plugin.json"),
+      '{"name":"demo","agents":"./agents"}',
+    );
     writeFileSync(join(demoDir, ".nocturne-plugin", "build-id"), "0123456789abcdef");
     writeFileSync(join(demoDir, "skills", "s1", "SKILL.md"), "---\ndescription: d\n---\nbody");
+    writeFileSync(
+      join(demoDir, "agents", "judge.md"),
+      "---\nname: judge\ndescription: d\n---\nbody",
+    );
     writeFileSync(join(demoDir, "server.mjs"), "console.log('ok');");
     writeFileSync(join(demoDir, "server.test.mjs"), "test");
     writeFileSync(join(demoDir, "test", "a.test.mjs"), "test");
@@ -99,6 +107,7 @@ describe("bundle-nctrn --out-dir", () => {
       "0123456789abcdef",
     );
     expect(existsSync(join(out, "plugins", "demo", "skills", "s1", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(out, "plugins", "demo", "agents", "judge.md"))).toBe(true);
     expect(existsSync(join(out, "plugins", "demo", "server.mjs"))).toBe(true);
     expect(existsSync(join(out, "plugins", "demo", "server.test.mjs"))).toBe(false);
     expect(existsSync(join(out, "plugins", "demo", "test"))).toBe(false);
@@ -140,6 +149,12 @@ describe("bundle-nctrn --out-dir", () => {
     ];
     for (const rel of expectedFiles) {
       expect(existsSync(join(creatorOut, rel)), rel).toBe(true);
+    }
+    for (const docPlugin of ["docx", "xlsx", "pptx", "pdf"]) {
+      expect(
+        existsSync(join(out, "plugins", docPlugin, "agents", "visual-judge.md")),
+        `${docPlugin}/agents/visual-judge.md`,
+      ).toBe(true);
     }
   }, 240_000);
 });

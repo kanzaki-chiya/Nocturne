@@ -3,6 +3,7 @@
   "version": "0.57.0",
   "description": "创建、读取、编辑、转换与按页预览 Word 文档。",
   "skills": "./skills",
+  "agents": "./agents",
   "mcpServers": {
     "word": {
       "command": "${NOCTURNE_NODE}",

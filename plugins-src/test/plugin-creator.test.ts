@@ -236,9 +236,9 @@ describe("plugin-creator MCP server: check_plugin", () => {
     });
     const emptyRes = parseCheckText(await handler({ path: emptyDir }));
     expect(emptyRes.installable).toBe(false);
-    expect(emptyRes.errors.some((e) => e.includes("不包含可用的技能、Hook 或 MCP 服务器"))).toBe(
-      true,
-    );
+    expect(
+      emptyRes.errors.some((e) => e.includes("不包含可用的技能、Hook、MCP 服务器或子代理")),
+    ).toBe(true);
   });
 
   it("列出被跳过的 MCP 条目及其原因，且拒绝相对路径输入", async () => {

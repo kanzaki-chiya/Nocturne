@@ -20,13 +20,13 @@ description: 处理演示文档（PPT/PowerPoint/.pptx/.odp）：创建幻灯片
 
 1. 修改前先调用 `read` 了解总页数、各页文案与备注。
 2. 用 `edit` 修改或 `create` 生成演示文稿。
-3. 完成后务必调用 `render` 逐页检查文字溢出、图片遮挡与中文排版，修正问题后再交付。
+3. 交付前做视觉检查：优先用 `task` 调用本插件的 `visual-judge`（`profile: "pptx:visual-judge"`，在 `task` 中提供文件绝对路径、要检查的页码范围和用户要求），将其结论直接作为视觉检查结果，按不通过项修改后再交付；仅在 `pptx:visual-judge` 不可用时才自己调用 `render` 检查。两条路只走一条，不要先自己调用 `render` 看一遍再交给 `visual-judge`。
 
 ## 在面板中查看
 
 - 创建或编辑完演示文稿后，调用 `show_in_viewer` 在右侧面板向用户展示；再次修改后可再次调用 `show_in_viewer` 刷新查看器内容。
 - 用户说「打开」「给我看看」某个演示文稿时，直接调用 `show_in_viewer`。
-- `show_in_viewer` 只返回文件名与页数摘要；模型要检查页面排版仍使用 `render`。
+- `show_in_viewer` 只返回文件名与页数摘要；视觉排版检查走 `pptx:visual-judge`（不可用时改用 `render`）。
 
 ## 依赖异常处理
 

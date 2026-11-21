@@ -1,9 +1,11 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import { createPlatform, createRuntime, loadConfig } from "@nocturne/core";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -171,6 +173,7 @@ describe("built plugins layout, manifests, icons, and skills", () => {
         [
           ".nocturne-plugin/build-id",
           ".nocturne-plugin/plugin.json",
+          "agents/visual-judge.md",
           "engine.py",
           "icon.svg",
           "server.mjs",
@@ -205,6 +208,7 @@ describe("built plugins layout, manifests, icons, and skills", () => {
         name: string;
         version: string;
         description: string;
+        agents?: string;
         mcpServers: Record<string, { command: string; args: string[] }>;
         interface: { displayName: string; composerIcon: string };
         ui?: {
@@ -220,6 +224,7 @@ describe("built plugins layout, manifests, icons, and skills", () => {
       expect(manifest.name).toBe(spec.name);
       expect(manifest.version).toBe(pkgVersion);
       expect(manifest.description.length).toBeGreaterThan(0);
+      expect(manifest.agents).toBe("./agents");
       expect(manifest.interface.displayName).toBe(spec.displayName);
       expect(manifest.interface.composerIcon).toBe("./icon.svg");
       expect(manifest.mcpServers[spec.serverId]).toEqual({
@@ -362,4 +367,63 @@ describe("MCP stdio protocol on built server.mjs", () => {
       }
     },
   );
+});
+
+describe("visual-judge plugin subagents discovery and MCP tool alignment", () => {
+  it("discovers all four visual-judge subagents and matches actual registered MCP tool names", async () => {
+    const tmpHome = mkdtempSync(path.join(tmpdir(), "nct-plugin-agents-"));
+    try {
+      const plat = { ...createPlatform(), env: () => undefined, homeDir: () => tmpHome };
+      const config = await loadConfig(plat, { nocturneHome: tmpHome, env: () => undefined });
+      const rt = await createRuntime({
+        config,
+        cwd: tmpHome,
+        workspaceRoot: tmpHome,
+        sessionsDir: path.join(tmpHome, "sessions"),
+        builtinPluginsDir: pluginsDir,
+      });
+      const desc = await rt.describePlugins();
+      await rt.close();
+
+      for (const spec of EXPECTED_PLUGINS) {
+        const plugin = desc.plugins.find((p) => p.name === spec.name && p.host === "nocturne");
+        expect(plugin, `plugin ${spec.name}`).toBeDefined();
+        expect(plugin?.warnings).toEqual([]);
+        const judge = plugin?.agents?.find((a) => a.name === "visual-judge");
+        expect(judge, `${spec.name}:visual-judge`).toBeDefined();
+        expect(judge?.id).toBe(`${spec.name}:visual-judge`);
+        expect(judge?.description.length).toBeGreaterThan(0);
+
+        // Start the built server.mjs over stdio to obtain the exact MCP tools exposed by this plugin
+        const client = new StdioRpcClient(path.join(pluginsDir, spec.name, "server.mjs"));
+        let registeredMcpTools: Set<string>;
+        try {
+          const initRes = await client.request("initialize", {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "test-client", version: "1.0.0" },
+          });
+          expect(initRes.error).toBeUndefined();
+          client.notify("notifications/initialized");
+          const listRes = await client.request("tools/list");
+          expect(listRes.error).toBeUndefined();
+          const tools = (listRes.result?.tools ?? []) as { name: string }[];
+          registeredMcpTools = new Set(tools.map((t) => `mcp__${spec.serverId}__${t.name}`));
+        } finally {
+          await client.closeStdinAndWaitExit();
+        }
+
+        const expectedRenderTool = `mcp__${spec.serverId}__render`;
+        expect(registeredMcpTools.has(expectedRenderTool)).toBe(true);
+        expect(judge?.tools).toEqual(["read", expectedRenderTool]);
+        for (const toolName of judge?.tools ?? []) {
+          if (toolName.startsWith("mcp__")) {
+            expect(registeredMcpTools.has(toolName), `${spec.name} -> ${toolName}`).toBe(true);
+          }
+        }
+      }
+    } finally {
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
 });
