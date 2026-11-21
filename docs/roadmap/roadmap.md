@@ -243,7 +243,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 **内容**：
 
-- **自定义斜杠命令**：项目 `.nocturne/commands/*.md` 注册为命令；**项目级自定义 agent**：复用 `trust.json` 的项目信任机制，设计定义文件的加载、权限收敛与提示词边界。
+- **自定义斜杠命令**（已实现，2026-11-22，见 [ADR-0048](../decisions/ADR-0048-skills.md) 2026-11-21 修订）：不另设命令概念，`.nocturne/commands`、`.claude/commands`（用户级与项目级）下的 `*.md` 作为技能读入，`/名字 参数` 调用；**项目级自定义 agent**（已实现，2026-11-22，见 [ADR-0108](../decisions/ADR-0108-project-subagents.md)）：`.nocturne/agents`、`.claude/agents` 定义文件作为 `project:<名字>` 档位，只能写角色说明、收窄工具和 `effort`，模型跟随 `default`；不要求项目信任，理由见 ADR。
 - **子会话 ask 冒泡**（已实现，2026-11-14，见 [ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）：交互父会话下一次性内置 `task` 子代理的权限确认请求路由到父会话并实时聚合，支持直接回应与树共享授权；**可展开的子代理进度**：结构化进度替代单行摘要。
 - **MCP 服务器管理**（已随 0.6.0 发布，2026-10-07）：桌面端「MCP」设置页添加、编辑、启停服务器，支持 JSON 导入与 HTTP 传输，已打开的会话在 Turn 边界热重载，见 [ADR-0047](../decisions/ADR-0047-mcp-settings.md)；MCP 工具返回图片走附件通道已于 2026-10-22 实现。
 - **技能**（已随 0.6.0 发布，2026-10-07）：兼容 Agent Skills，自动发现用户级与项目内技能目录，`/技能名` 调用，桌面端「技能」页管理，见 [ADR-0048](../decisions/ADR-0048-skills.md)。
