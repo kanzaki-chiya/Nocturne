@@ -11,6 +11,9 @@
  */
 import { createHash } from "node:crypto";
 import {
+  accessSync,
+  chmodSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -26,9 +29,8 @@ import { fileURLToPath } from "node:url";
 import { run } from "./lib/proc.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const spec = JSON.parse(readFileSync(join(root, "scripts", "node-version.json"), "utf8"));
+const manifest = JSON.parse(readFileSync(join(root, "scripts", "node-version.json"), "utf8"));
 const targetDir = join(root, "apps", "desktop", "src-tauri", "resources", "node");
-const marker = join(targetDir, "node.exe.sha256");
 
 export function sha256File(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -54,18 +56,25 @@ function extract(zipFile, dest) {
 }
 
 async function main() {
-  const nodeExe = join(targetDir, "node.exe");
+  const platform = `${process.platform}-${process.arch}`;
+  const spec = manifest[platform];
+  if (!spec) throw new Error(`不支持随附 Node 的平台：${platform}`);
+  const mac = platform === "darwin-arm64";
+  const binary = mac ? "node" : "node.exe";
+  const marker = join(targetDir, `${binary}.sha256`);
+  const nodeExe = join(targetDir, binary);
   if (existsSync(nodeExe) && existsSync(marker)) {
     const recorded = readFileSync(marker, "utf8").trim();
     if (recorded !== "" && sha256File(nodeExe) === recorded) {
-      console.log(`随附 Node 已就绪（node.exe 哈希与记录一致），跳过下载`);
+      if (mac) accessSync(nodeExe, constants.X_OK);
+      console.log(`随附 Node 已就绪（${binary} 哈希与记录一致），跳过下载`);
       return;
     }
   }
 
   const work = mkdtempSync(join(tmpdir(), "nctrn-node-"));
   try {
-    const zip = join(work, "node.zip");
+    const zip = join(work, mac ? "node.tar.gz" : "node.zip");
     console.log(`下载 ${spec.url}`);
     await download(spec.url, zip);
     const actual = sha256File(zip);
@@ -74,12 +83,16 @@ async function main() {
     }
 
     extract(zip, work);
-    const dir = join(work, `node-v${spec.version}-win-x64`);
+    const dir = join(work, `node-v${manifest.version}-${mac ? "darwin-arm64" : "win-x64"}`);
     mkdirSync(targetDir, { recursive: true });
-    copyFileSync(join(dir, "node.exe"), nodeExe);
+    copyFileSync(mac ? join(dir, "bin", "node") : join(dir, "node.exe"), nodeExe);
+    if (mac) {
+      chmodSync(nodeExe, 0o755);
+      accessSync(nodeExe, constants.X_OK);
+    }
     copyFileSync(join(dir, "LICENSE"), join(targetDir, "LICENSE"));
     writeFileSync(marker, `${sha256File(nodeExe)}\n`);
-    console.log(`随附 Node v${spec.version} 已写入 ${targetDir}`);
+    console.log(`随附 Node v${manifest.version} 已写入 ${targetDir}`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

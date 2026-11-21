@@ -45,6 +45,10 @@ async function download(attempts = 4) {
 }
 
 async function main() {
+  if (process.platform === "darwin") {
+    console.log("macOS 不随附电脑操控驱动");
+    return;
+  }
   if (process.platform !== "win32") throw new Error("电脑操控驱动目前仅打包 Windows x64");
   mkdirSync(cache, { recursive: true });
   const archive = join(cache, "package.zip");
