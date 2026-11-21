@@ -2351,7 +2351,9 @@ export function App({ host }: { host: DesktopHost }) {
                   <PaneErrorBoundary key="agents">
                     <ExternalAgentsPage
                       client={pageClient}
-                      workspaceRoot={effectiveWorkspace ?? undefined}
+                      workspaceRoot={
+                        active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
+                      }
                       version={settingsVersion}
                     />
                   </PaneErrorBoundary>

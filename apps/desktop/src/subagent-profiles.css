@@ -64,6 +64,10 @@
   overflow-wrap: anywhere;
   text-align: right;
 }
+.external-agents-page .project-agent-path {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
 .external-agents-page .plugin-agent-tools {
   display: flex;
   flex-wrap: wrap;

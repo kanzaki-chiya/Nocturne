@@ -3,6 +3,7 @@ import type { ModelInfo, SettingItem, SettingsPatch } from "./rpc-types";
 import {
   REASONING_EFFORT_ORDER,
   subagentSelectionTable,
+  truncateSubagentTableDescription,
   type SubagentProfileConfig,
   type ExternalAgentOverview,
   type ReasoningEffort,
@@ -46,6 +47,12 @@ function timeoutInputValue(timeoutMs: number | undefined): string {
   return timeoutMs === undefined ? "" : String(timeoutMs / 1000);
 }
 
+export interface ProjectAgentPreviewEntry {
+  id: string;
+  description: string;
+  effort?: ReasoningEffort | undefined;
+}
+
 export interface PluginAgentPreviewEntry {
   id: string;
   description: string;
@@ -60,6 +67,7 @@ export function SubagentProfileEditor({
   items,
   models,
   agents,
+  projectAgents = [],
   pluginAgents = [],
   onSave,
   onDelete,
@@ -71,6 +79,7 @@ export function SubagentProfileEditor({
   items: readonly SettingItem[];
   models: readonly ModelInfo[];
   agents: readonly ExternalAgentOverview[];
+  projectAgents?: readonly ProjectAgentPreviewEntry[];
   pluginAgents?: readonly PluginAgentPreviewEntry[];
   onSave: (patch: SettingsPatch) => Promise<void>;
   onDelete: () => Promise<void>;
@@ -121,6 +130,18 @@ export function SubagentProfileEditor({
   const defaultTaskModel = isDefault
     ? draft.model
     : items.find((item) => item.key === "modelRoles.task")?.effective;
+  const defaultTaskModelAvailable =
+    defaultTaskModel === undefined ||
+    models.some((m) => `${m.ref.provider}/${m.ref.model}` === defaultTaskModel && !m.unavailable);
+  const previewProjectProfiles = defaultTaskModelAvailable
+    ? projectAgents.map((agent) => ({
+        name: agent.id,
+        description: truncateSubagentTableDescription(agent.description),
+        enabled: true,
+        ...(agent.effort !== undefined ? { effort: agent.effort } : {}),
+        ...(defaultTaskModel !== undefined ? { model: defaultTaskModel } : {}),
+      }))
+    : [];
   const previewPluginProfiles = pluginAgents
     .filter(
       (agent) =>
@@ -146,6 +167,7 @@ export function SubagentProfileEditor({
               (m) => `${m.ref.provider}/${m.ref.model}` === profile.model && !m.unavailable,
             )),
       ),
+      ...previewProjectProfiles,
       ...previewPluginProfiles,
     ],
     agents.filter((agent) => agent.enabled),

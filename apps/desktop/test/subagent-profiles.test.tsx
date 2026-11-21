@@ -6,6 +6,7 @@ import {
   subagentSelectionTable,
   type ExternalAgentOverview,
   type PluginOverview,
+  type ProjectSubagentOverview,
   type SubagentProfileConfig,
 } from "@nocturne/core/protocol";
 import { ExternalAgentsPage } from "../src/ExternalAgentsPage";
@@ -51,6 +52,10 @@ function profileServer(
   initial: SettingItem[],
   agents: ExternalAgentOverview[] = [],
   plugins: PluginOverview[] = [],
+  projectSubagents: { agents: ProjectSubagentOverview[]; warnings: string[] } = {
+    agents: [],
+    warnings: [],
+  },
 ) {
   let items = initial;
   const patches: SettingsPatch[] = [];
@@ -60,6 +65,7 @@ function profileServer(
       "runtime.listModels": [model, strong],
       "skills.describeSkills": { skills: [], warnings: [] },
       "agents.describeExternalAgents": { agents, warnings: [] },
+      "agents.describeProjectSubagents": projectSubagents,
       "plugins.describePlugins": { plugins, warnings: [] },
       "runtime.updateSettings": (params: Record<string, unknown>) => {
         const patch = params.patch as SettingsPatch;
@@ -556,6 +562,110 @@ it("插件子代理按已启用插件分组，行内改模型即时写入，详�
       { "subagents.pluginModels.pptx:visual-judge": null },
     ]),
   );
+
+  server.close();
+});
+
+it("项目子代理分组排在内置档位与插件之间，展示只读详情与解析警告，无模型选择与开关", async () => {
+  const longDesc = "非常详细的 Claude 代码审查说明。".repeat(25);
+  const pptxPlugin: PluginOverview = {
+    id: "nocturne:pptx@builtin",
+    host: "nocturne",
+    name: "pptx",
+    marketplace: "builtin",
+    version: "0.58.0",
+    root: "/builtin/pptx",
+    displayName: "演示文档",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: [],
+    mcpServers: [],
+    agents: [
+      {
+        id: "pptx:visual-judge",
+        name: "visual-judge",
+        description: "检查演示文稿视觉效果",
+        tools: ["read", "mcp__slides__render"],
+      },
+    ],
+    warnings: [],
+  };
+  const projectAgents: ProjectSubagentOverview[] = [
+    {
+      id: "project:arch",
+      name: "arch",
+      description: "检查架构边界",
+      source: ".nocturne",
+      path: "/work/.nocturne/agents/arch.md",
+      effort: "high",
+      tools: ["read", "grep"],
+    },
+    {
+      id: "project:reviewer",
+      name: "reviewer",
+      description: longDesc,
+      source: ".claude",
+      path: "/work/.claude/agents/reviewer.md",
+      effort: "medium",
+      tools: ["read", "edit", "write", "apply_patch"],
+    },
+    {
+      id: "project:arch",
+      name: "arch",
+      description: "被覆盖的副本",
+      source: ".claude",
+      path: "/work/.claude/agents/arch.md",
+      shadowedBy: "/work/.nocturne/agents/arch.md",
+    },
+  ];
+  const projectWarnings = [
+    "项目子代理 /work/.claude/agents/reviewer.md：忽略不支持的字段：model",
+    '项目子代理 /work/.claude/agents/arch.md：名称 "arch" 已被 /work/.nocturne/agents/arch.md 覆盖，已忽略',
+  ];
+
+  // 无项目子代理时不显示「项目」分组
+  const empty = profileServer([], [], [pptxPlugin], { agents: [], warnings: [] });
+  await empty.server.initialize();
+  render(<ExternalAgentsPage client={empty.server.client} workspaceRoot="/work" version={0} />);
+  await screen.findByRole("region", { name: "演示文档 · 1" });
+  expect(screen.queryByRole("region", { name: /^项目/ })).toBeNull();
+  empty.server.close();
+  cleanup();
+
+  // 有项目子代理时：「项目」排在「内置档位」之后、「演示文档」之前
+  const { server } = profileServer([], [], [pptxPlugin], {
+    agents: projectAgents,
+    warnings: projectWarnings,
+  });
+  await server.initialize();
+  render(<ExternalAgentsPage client={server.client} workspaceRoot="/work" version={0} />);
+  await screen.findByRole("region", { name: "项目 · 2" });
+
+  const regionLabels = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
+  expect(regionLabels).toEqual(["内置档位 · 1", "项目 · 2", "演示文档 · 1"]);
+
+  // 解析警告按现有警告样式展示
+  expect(screen.getByText(/忽略不支持的字段：model/)).toBeTruthy();
+
+  // 项目分组行没有开关、没有模型下拉、没有徽标
+  const projectRegion = screen.getByRole("region", { name: "项目 · 2" });
+  expect(projectRegion.querySelector('[role="switch"]')).toBeNull();
+  expect(projectRegion.querySelector('[role="combobox"]')).toBeNull();
+  expect(projectRegion.querySelector(".badge")).toBeNull();
+
+  // 点进 .claude 项看只读详情：完整长描述、来源路径、工具、effort，无模型选择与开关
+  fireEvent.click(within(projectRegion).getByRole("button", { name: /reviewer/ }));
+  await screen.findByRole("heading", { level: 1, name: /reviewer/ });
+  expect(screen.getByText("project:reviewer")).toBeTruthy();
+  expect(screen.getByText(longDesc)).toBeTruthy();
+  expect(screen.getByText("/work/.claude/agents/reviewer.md")).toBeTruthy();
+  expect(screen.getByText("apply_patch")).toBeTruthy();
+  expect(screen.getByText("medium")).toBeTruthy();
+  expect(screen.queryByRole("combobox")).toBeNull();
+  expect(screen.queryByRole("switch")).toBeNull();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(document.querySelector(".badge")).toBeNull();
 
   server.close();
 });

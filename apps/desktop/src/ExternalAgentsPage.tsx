@@ -7,6 +7,7 @@ import type {
   ExternalAgentProbeResult,
   PluginAgentOverview,
   PluginOverview,
+  ProjectSubagentOverview,
   SkillOverview,
   SubagentProfileConfig,
 } from "@nocturne/core/protocol";
@@ -134,6 +135,7 @@ type SubagentView =
   | { kind: "list" }
   | { kind: "profile"; name: string }
   | { kind: "newProfile" }
+  | { kind: "projectAgent"; id: string }
   | { kind: "pluginAgent"; id: string }
   | { kind: "agent"; name: string }
   | { kind: "agentForm"; config: ExternalAgentConfig; replace: boolean };
@@ -148,6 +150,8 @@ export function ExternalAgentsPage({
   version: number;
 }) {
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
+  const [projectAgents, setProjectAgents] = useState<ProjectSubagentOverview[]>([]);
+  const [projectWarnings, setProjectWarnings] = useState<string[]>([]);
   const [plugins, setPlugins] = useState<PluginOverview[]>([]);
   const [items, setItems] = useState<SettingItem[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -211,6 +215,14 @@ export function ExternalAgentsPage({
           .catch(() => undefined)
           .then((data) => {
             if (accept() && data !== undefined) setPlugins(data.plugins);
+          }),
+        client.runtime
+          .describeProjectSubagents({ workspaceRoot })
+          .catch(() => undefined)
+          .then((data) => {
+            if (!accept() || data === undefined) return;
+            setProjectAgents(data.agents);
+            setProjectWarnings(data.warnings);
           }),
       ]);
     } catch (e) {
@@ -328,8 +340,12 @@ export function ExternalAgentsPage({
     ...agents.filter((agent) => !agent.editable),
   ];
 
+  const activeProjectAgents = projectAgents.filter((agent) => agent.shadowedBy === undefined);
+  const activeProjectIds = new Set(activeProjectAgents.map((agent) => agent.id));
+
   // 与插件页分组顺序一致（内置 → Nocturne → Codex → Claude Code），
-  // 已启用且带子代理的插件按名去重（保留发现顺序的第一个，与 Core 同口径）
+  // 已启用且带子代理的插件按名去重（保留发现顺序的第一个，与 Core 同口径）；
+  // 与项目子代理 id 冲突的插件条目跳过（ADR-0108）
   const pluginAgentGroups = (() => {
     const seenNames = new Set<string>();
     const active: { plugin: PluginOverview; agents: PluginAgentOverview[] }[] = [];
@@ -337,7 +353,9 @@ export function ExternalAgentsPage({
       if (plugin.state !== "on" || (plugin.agents?.length ?? 0) === 0) continue;
       if (seenNames.has(plugin.name)) continue;
       seenNames.add(plugin.name);
-      active.push({ plugin, agents: plugin.agents ?? [] });
+      const visible = (plugin.agents ?? []).filter((agent) => !activeProjectIds.has(agent.id));
+      if (visible.length === 0) continue;
+      active.push({ plugin, agents: visible });
     }
     return active.sort((a, b) => pluginGroupRank(a.plugin) - pluginGroupRank(b.plugin));
   })();
@@ -378,12 +396,23 @@ export function ExternalAgentsPage({
     }
   };
 
+  const currentProjectAgent =
+    view.kind === "projectAgent"
+      ? activeProjectAgents.find((agent) => agent.id === view.id)
+      : undefined;
+
   const currentPluginAgent =
     view.kind === "pluginAgent"
       ? pluginAgentGroups
           .flatMap((group) => group.agents.map((agent) => ({ plugin: group.plugin, agent })))
           .find((entry) => entry.agent.id === view.id)
       : undefined;
+
+  const previewProjectAgents = activeProjectAgents.map((agent) => ({
+    id: agent.id,
+    description: agent.description,
+    effort: agent.effort,
+  }));
 
   const previewPluginAgents = pluginAgentGroups.flatMap((group) =>
     group.agents.map((agent) => ({
@@ -402,6 +431,53 @@ export function ExternalAgentsPage({
   };
 
   const renderBody = () => {
+    if (view.kind === "projectAgent" && currentProjectAgent) {
+      return (
+        <>
+          <PageHeader
+            crumb={{ parent: "子代理", onBack: openList }}
+            title={<span className="mono">{currentProjectAgent.name}</span>}
+          />
+          {error && (
+            <p className="errt" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="sbody">
+            <SettingsGroup plain>
+              <SettingsRow label="名称">
+                <span className="val mono">{currentProjectAgent.id}</span>
+              </SettingsRow>
+              <SettingsRow label="描述">
+                <p className="plugin-agent-detail-desc">{currentProjectAgent.description}</p>
+              </SettingsRow>
+              <SettingsRow label="来源">
+                <span className="val mono project-agent-path">{currentProjectAgent.path}</span>
+              </SettingsRow>
+              <SettingsRow label="工具">
+                {currentProjectAgent.tools !== undefined ? (
+                  currentProjectAgent.tools.length > 0 ? (
+                    <div className="plugin-agent-tools">
+                      {currentProjectAgent.tools.map((tool) => (
+                        <span key={tool}>{tool}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="val">无</span>
+                  )
+                ) : (
+                  <span className="val">全部</span>
+                )}
+              </SettingsRow>
+              <SettingsRow label="思考档位">
+                <span className="val mono">{currentProjectAgent.effort ?? "跟随会话"}</span>
+              </SettingsRow>
+            </SettingsGroup>
+          </div>
+        </>
+      );
+    }
+
     if (view.kind === "pluginAgent" && currentPluginAgent) {
       const { plugin, agent } = currentPluginAgent;
       const modelItem = items.find((item) => item.key === `subagents.pluginModels.${agent.id}`);
@@ -470,6 +546,7 @@ export function ExternalAgentsPage({
           items={items}
           models={models}
           agents={agents}
+          projectAgents={previewProjectAgents}
           pluginAgents={previewPluginAgents}
           onSave={saveProfile}
           onCancel={openList}
@@ -698,7 +775,7 @@ export function ExternalAgentsPage({
             {error}
           </div>
         )}
-        {warnings.map((warning, i) => (
+        {[...warnings, ...projectWarnings].map((warning, i) => (
           <div className="desc err" role="status" key={`${i}-${warning}`}>
             {warning}
           </div>
@@ -753,6 +830,23 @@ export function ExternalAgentsPage({
               );
             })}
           </SettingsGroup>
+          {activeProjectAgents.length > 0 && (
+            <SettingsGroup title="项目" count={activeProjectAgents.length} plain>
+              {activeProjectAgents.map((agent) => (
+                <SettingsListRow
+                  key={agent.id}
+                  className="plugin-agent-row"
+                  name={agent.name}
+                  mono
+                  description={agent.description}
+                  onOpen={() => {
+                    setError("");
+                    setView({ kind: "projectAgent", id: agent.id });
+                  }}
+                />
+              ))}
+            </SettingsGroup>
+          )}
           {pluginAgentGroups.map(({ plugin, agents: pluginAgents }) => (
             <SettingsGroup
               key={plugin.id}
