@@ -154,9 +154,21 @@ import {
   buildVirtualSegments,
   computeVirtualRange,
   DEFAULT_VIEWPORT_HEIGHT,
+  findIndexAtOffset,
   isPinnedInlineHtmlEntry,
   type VirtualRange,
 } from "./virtual-stream";
+import {
+  applyConversationHighlights,
+  canHandleConversationShortcut,
+  clearConversationHighlights,
+  extractSelectionPrefill,
+  FIND_DEBOUNCE_MS,
+  findConversationMatches,
+  pickInitialMatchIndex,
+  stepMatchIndex,
+} from "./conversation-find";
+import { ConversationFindBar } from "./ConversationFindBar";
 import "./conversation.css";
 
 export { toolMeta };
@@ -271,6 +283,8 @@ export interface ConversationProps {
   onOpenSuiteThread?: ((threadId: string) => void) | undefined;
   /** 启用消息列表虚拟化（仅手机网页开启，桌面端保持整段渲染） */
   virtualize?: boolean | undefined;
+  /** 启用会话内搜索（Ctrl+F，仅桌面端主窗口开启） */
+  enableFind?: boolean | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -3459,7 +3473,7 @@ function EntryView({
       if (userRole !== undefined) {
         // 只读：任务原文与催促折叠展示，不当作可编辑的用户气泡（没有编辑、重发、分叉）
         return (
-          <details className="ro-user">
+          <details className="ro-user" open={searchExpand ? true : undefined}>
             <summary>
               <Icon name="right_small" size={ICON_SM} className="fold-arrow" />
               <span className="ro-user-tag">{userRole === "task" ? "任务" : "催促"}</span>
@@ -4546,6 +4560,69 @@ function EnsembleEndedRow({ ensemble }: { ensemble: EnsembleView }) {
   );
 }
 
+export interface ScrollToSessionSeqParams {
+  seq: number;
+  entries: readonly ViewEntry[];
+  entryKeys: readonly string[];
+  measuredHeights: ReadonlyMap<string, number>;
+  scrollEl: HTMLDivElement | null;
+  virtualize: boolean;
+  followRef: { current: boolean };
+  previousTopRef: { current: number };
+  anchorRef: { current: { key: string; topInViewport: number } | null };
+  setFollowing: (following: boolean) => void;
+  setVirtualRange: (updater: (prev: VirtualRange) => VirtualRange) => void;
+}
+
+/**
+ * 跨会话搜索、会话内搜索与轮次导航共用的跳转定位函数：
+ * 关闭粘底跟随，虚拟化时按估算偏移定位 scrollTop 并把目标条目纳入渲染窗口。
+ */
+export function scrollToSessionSeq(params: ScrollToSessionSeqParams): boolean {
+  const {
+    seq,
+    entries,
+    entryKeys,
+    measuredHeights,
+    scrollEl,
+    virtualize,
+    followRef,
+    previousTopRef,
+    anchorRef,
+    setFollowing,
+    setVirtualRange,
+  } = params;
+  followRef.current = false;
+  setFollowing(false);
+  anchorRef.current = null;
+  if (!virtualize) return true;
+  const targetIndex = entries.findIndex((entry) => matchesSearchSeq(entry, seq));
+  if (targetIndex < 0) return false;
+  const currentOffsets = buildVirtualOffsets(entries, entryKeys, measuredHeights);
+  const measuredViewport = scrollEl?.clientHeight ?? 0;
+  const viewportHeight = measuredViewport > 0 ? measuredViewport : DEFAULT_VIEWPORT_HEIGHT;
+  const estScrollTop = Math.max(0, (currentOffsets[targetIndex] ?? 0) - viewportHeight / 2);
+  if (scrollEl) {
+    scrollEl.scrollTop = estScrollTop;
+    previousTopRef.current = scrollEl.scrollTop;
+  }
+  const nextRange = computeVirtualRange({
+    offsets: currentOffsets,
+    count: entries.length,
+    scrollTop: estScrollTop,
+    viewportHeight,
+    followBottom: false,
+  });
+  const clamped: VirtualRange = {
+    start: Math.min(nextRange.start, targetIndex),
+    end: Math.max(nextRange.end, targetIndex),
+  };
+  setVirtualRange((prev) =>
+    prev.start === clamped.start && prev.end === clamped.end ? prev : clamped,
+  );
+  return true;
+}
+
 function ConversationContent({
   session,
   view,
@@ -4575,7 +4652,9 @@ function ConversationContent({
   entryKey,
   onOpenSuiteThread,
   virtualize = false,
+  enableFind = false,
 }: ContentProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -4793,59 +4872,73 @@ function ConversationContent({
     element.scrollTop = element.scrollHeight;
     previousTop.current = element.scrollTop;
   }, []);
+  const entriesRef = useRef(view.entries);
+  entriesRef.current = view.entries;
+  const jumpNonceRef = useRef(0);
+  const [jumpTarget, setJumpTarget] = useState<{ seq: number; nonce: number } | undefined>();
   const scrolledNonce = useRef<number | undefined>(undefined);
+  const jumpToSeq = useCallback(
+    (seq: number): void => {
+      scrollToSessionSeq({
+        seq,
+        entries: entriesRef.current,
+        entryKeys: entryKeysListRef.current,
+        measuredHeights: measuredHeightsRef.current,
+        scrollEl: scroll.current,
+        virtualize,
+        followRef: follow,
+        previousTopRef: previousTop,
+        anchorRef,
+        setFollowing,
+        setVirtualRange,
+      });
+      jumpNonceRef.current += 1;
+      setJumpTarget({ seq, nonce: jumpNonceRef.current });
+    },
+    [virtualize],
+  );
+  const handledSearchNonce = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (searchTarget?.seq === undefined) return;
     const seq = searchTarget.seq;
-    follow.current = false;
-    setFollowing(false);
-    anchorRef.current = null;
-    setHighlightedSeq(seq);
-    if (virtualize) {
-      const targetIndex = view.entries.findIndex((entry) => matchesSearchSeq(entry, seq));
-      if (targetIndex >= 0) {
-        const currentOffsets = buildVirtualOffsets(
-          view.entries,
-          entryKeysListRef.current,
-          measuredHeightsRef.current,
-        );
-        const scrollEl = scroll.current;
-        const measuredViewport = scrollEl?.clientHeight ?? 0;
-        const viewportHeight = measuredViewport > 0 ? measuredViewport : DEFAULT_VIEWPORT_HEIGHT;
-        const estScrollTop = Math.max(0, (currentOffsets[targetIndex] ?? 0) - viewportHeight / 2);
-        if (scrollEl) {
-          scrollEl.scrollTop = estScrollTop;
-          previousTop.current = scrollEl.scrollTop;
-        }
-        const nextRange = computeVirtualRange({
-          offsets: currentOffsets,
-          count: view.entries.length,
-          scrollTop: estScrollTop,
-          viewportHeight,
-          followBottom: false,
-        });
-        setVirtualRange({
-          start: Math.min(nextRange.start, targetIndex),
-          end: Math.max(nextRange.end, targetIndex),
-        });
-      }
+    if (handledSearchNonce.current !== searchTarget.nonce) {
+      handledSearchNonce.current = searchTarget.nonce;
+      jumpToSeq(seq);
     }
+    setHighlightedSeq(seq);
     const timer = window.setTimeout(() => {
       setHighlightedSeq(undefined);
     }, 1800);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [searchTarget, virtualize, view.entries]);
+  }, [searchTarget, jumpToSeq]);
   useEffect(() => {
-    if (searchTarget?.seq === undefined || scrolledNonce.current === searchTarget.nonce) return;
-    const seq = searchTarget.seq;
+    if (jumpTarget === undefined || scrolledNonce.current === jumpTarget.nonce) return;
+    const seq = jumpTarget.seq;
     const anchor = content.current?.querySelector<HTMLElement>(
       `[data-session-seq="${seq}"], [data-completed-seq="${seq}"]`,
     );
-    if (anchor === null || anchor === undefined) return;
+    if (anchor === null || anchor === undefined) {
+      if (virtualize) {
+        scrollToSessionSeq({
+          seq,
+          entries: entriesRef.current,
+          entryKeys: entryKeysListRef.current,
+          measuredHeights: measuredHeightsRef.current,
+          scrollEl: scroll.current,
+          virtualize: true,
+          followRef: follow,
+          previousTopRef: previousTop,
+          anchorRef,
+          setFollowing,
+          setVirtualRange,
+        });
+      }
+      return;
+    }
     const frame = requestAnimationFrame(() => {
-      scrolledNonce.current = searchTarget.nonce;
+      scrolledNonce.current = jumpTarget.nonce;
       anchor.scrollIntoView({ block: "center" });
       if (virtualize) {
         previousTop.current = scroll.current?.scrollTop ?? 0;
@@ -4856,12 +4949,254 @@ function ConversationContent({
       cancelAnimationFrame(frame);
     };
   }, [
-    searchTarget,
-    view.entries.length,
+    jumpTarget,
+    entriesVersion,
     effectiveRange.start,
     effectiveRange.end,
     virtualize,
     captureAnchor,
+  ]);
+
+  // ── 会话内搜索（Ctrl+F，ADR-0107） ──
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [debouncedFindQuery, setDebouncedFindQuery] = useState("");
+  const [findFocusNonce, setFindFocusNonce] = useState(0);
+  const [findCurrentSeq, setFindCurrentSeq] = useState<number | undefined>();
+  const [findFallbackSeq, setFindFallbackSeq] = useState<number | undefined>();
+  const findDebounceTimerRef = useRef<number | undefined>(undefined);
+  const findOpenRef = useRef(findOpen);
+  findOpenRef.current = findOpen;
+  const findQueryRef = useRef(findQuery);
+  findQueryRef.current = findQuery;
+  const debouncedFindQueryRef = useRef(debouncedFindQuery);
+  debouncedFindQueryRef.current = debouncedFindQuery;
+  const findCurrentSeqRef = useRef(findCurrentSeq);
+  findCurrentSeqRef.current = findCurrentSeq;
+
+  const getViewportFirstEntryIndex = useCallback((): number => {
+    const scrollEl = scroll.current;
+    const contentEl = content.current;
+    const entries = entriesRef.current;
+    if (scrollEl !== null && contentEl !== null) {
+      const scrollTopRect = scrollEl.getBoundingClientRect().top;
+      const nodes = contentEl.querySelectorAll<HTMLElement>("[data-session-seq]");
+      let firstVisibleSeq: number | undefined;
+      for (const node of nodes) {
+        const rect = node.getBoundingClientRect();
+        if (rect.height <= 0) continue;
+        if (rect.bottom > scrollTopRect + 1) {
+          const raw = node.getAttribute("data-session-seq");
+          if (raw !== null) {
+            firstVisibleSeq = Number(raw);
+            break;
+          }
+        }
+      }
+      if (firstVisibleSeq !== undefined) {
+        const idx = entries.findIndex((entry) => entry.seq === firstVisibleSeq);
+        if (idx >= 0) return idx;
+      }
+      if (virtualize && scrollEl.scrollTop > 0) {
+        return findIndexAtOffset(offsetsRef.current, entries.length, scrollEl.scrollTop);
+      }
+    }
+    return 0;
+  }, [virtualize]);
+
+  const openFind = useCallback(() => {
+    if (findDebounceTimerRef.current !== undefined) {
+      window.clearTimeout(findDebounceTimerRef.current);
+      findDebounceTimerRef.current = undefined;
+    }
+    const prefill = extractSelectionPrefill(scroll.current);
+    const nextQuery = prefill ?? findQueryRef.current;
+    setFindOpen(true);
+    setFindQuery(nextQuery);
+    setDebouncedFindQuery(nextQuery);
+    setFindFocusNonce((n) => n + 1);
+    if (nextQuery.trim() === "") {
+      setFindCurrentSeq(undefined);
+      setFindFallbackSeq(undefined);
+      return;
+    }
+    const matches = findConversationMatches(entriesRef.current, nextQuery);
+    if (matches.length === 0) {
+      setFindCurrentSeq(undefined);
+      setFindFallbackSeq(undefined);
+      return;
+    }
+    const existing =
+      findOpenRef.current &&
+      findCurrentSeqRef.current !== undefined &&
+      nextQuery === debouncedFindQueryRef.current
+        ? matches.find((item) => item.seq === findCurrentSeqRef.current)
+        : undefined;
+    if (existing !== undefined) return;
+    const initialIdx = pickInitialMatchIndex(matches, getViewportFirstEntryIndex());
+    const target = matches[initialIdx];
+    if (target !== undefined) {
+      setFindCurrentSeq(target.seq);
+      jumpToSeq(target.seq);
+    }
+  }, [getViewportFirstEntryIndex, jumpToSeq]);
+
+  const closeFind = useCallback(() => {
+    if (findDebounceTimerRef.current !== undefined) {
+      window.clearTimeout(findDebounceTimerRef.current);
+      findDebounceTimerRef.current = undefined;
+    }
+    setFindOpen(false);
+    setFindCurrentSeq(undefined);
+    setFindFallbackSeq(undefined);
+    clearConversationHighlights();
+    const mainPane = rootRef.current?.closest(".mainpane") ?? document;
+    mainPane.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  }, []);
+
+  const handleFindQueryChange = useCallback(
+    (value: string) => {
+      setFindQuery(value);
+      if (findDebounceTimerRef.current !== undefined) {
+        window.clearTimeout(findDebounceTimerRef.current);
+        findDebounceTimerRef.current = undefined;
+      }
+      if (value.trim() === "") {
+        setDebouncedFindQuery("");
+        setFindCurrentSeq(undefined);
+        setFindFallbackSeq(undefined);
+        return;
+      }
+      findDebounceTimerRef.current = window.setTimeout(() => {
+        findDebounceTimerRef.current = undefined;
+        setDebouncedFindQuery(value);
+        const matches = findConversationMatches(entriesRef.current, value);
+        if (matches.length === 0) {
+          setFindCurrentSeq(undefined);
+          return;
+        }
+        const initialIdx = pickInitialMatchIndex(matches, getViewportFirstEntryIndex());
+        const target = matches[initialIdx];
+        if (target !== undefined) {
+          setFindCurrentSeq(target.seq);
+          jumpToSeq(target.seq);
+        }
+      }, FIND_DEBOUNCE_MS);
+    },
+    [getViewportFirstEntryIndex, jumpToSeq],
+  );
+
+  const stepFind = useCallback(
+    (direction: 1 | -1) => {
+      const query = findQueryRef.current;
+      if (findDebounceTimerRef.current !== undefined) {
+        window.clearTimeout(findDebounceTimerRef.current);
+        findDebounceTimerRef.current = undefined;
+      }
+      const queryChanged = query !== debouncedFindQueryRef.current;
+      if (queryChanged) {
+        setDebouncedFindQuery(query);
+      }
+      const matches = findConversationMatches(entriesRef.current, query);
+      if (matches.length === 0) {
+        setFindCurrentSeq(undefined);
+        return;
+      }
+      const nextIdx = queryChanged
+        ? pickInitialMatchIndex(matches, getViewportFirstEntryIndex())
+        : stepMatchIndex(
+            matches.findIndex((item) => item.seq === findCurrentSeqRef.current),
+            matches.length,
+            direction,
+          );
+      const target = matches[nextIdx];
+      if (target !== undefined) {
+        setFindCurrentSeq(target.seq);
+        jumpToSeq(target.seq);
+      }
+    },
+    [getViewportFirstEntryIndex, jumpToSeq],
+  );
+
+  useEffect(() => {
+    if (!enableFind) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.isComposing || event.key === "Process") return;
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "f"
+      ) {
+        if (!canHandleConversationShortcut(rootRef.current, event)) return;
+        event.preventDefault();
+        openFind();
+        return;
+      }
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        findOpenRef.current &&
+        rootRef.current !== null &&
+        rootRef.current.closest("[inert]") === null
+      ) {
+        const active = document.activeElement instanceof Element ? document.activeElement : null;
+        if (active === null || active === document.body || rootRef.current.contains(active)) {
+          event.preventDefault();
+          closeFind();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [enableFind, openFind, closeFind]);
+
+  useEffect(() => {
+    return () => {
+      if (findDebounceTimerRef.current !== undefined) {
+        window.clearTimeout(findDebounceTimerRef.current);
+      }
+      clearConversationHighlights();
+    };
+  }, []);
+
+  const findMatches = useMemo(
+    () => (findOpen ? findConversationMatches(view.entries, debouncedFindQuery) : []),
+    [findOpen, view.entries, entriesVersion, debouncedFindQuery],
+  );
+  const findCurrentIndex = useMemo(() => {
+    if (!findOpen || findMatches.length === 0 || findCurrentSeq === undefined) return -1;
+    return findMatches.findIndex((item) => item.seq === findCurrentSeq);
+  }, [findOpen, findMatches, findCurrentSeq]);
+  const activeFindSeq =
+    findOpen && findCurrentIndex >= 0 ? findMatches[findCurrentIndex]?.seq : undefined;
+
+  const liveTextVersion = view.live.assistants
+    .map((assistant) => `${assistant.messageId}:${String(assistant.text.length)}`)
+    .join(",");
+
+  useLayoutEffect(() => {
+    if (!findOpen || debouncedFindQuery.trim() === "") {
+      clearConversationHighlights();
+      setFindFallbackSeq(undefined);
+      return;
+    }
+    const result = applyConversationHighlights(content.current, debouncedFindQuery, activeFindSeq);
+    const nextFallback =
+      activeFindSeq !== undefined && result.currentMounted && !result.currentHasDomMatch
+        ? activeFindSeq
+        : undefined;
+    setFindFallbackSeq((prev) => (prev === nextFallback ? prev : nextFallback));
+  }, [
+    findOpen,
+    debouncedFindQuery,
+    activeFindSeq,
+    entriesVersion,
+    liveTextVersion,
+    effectiveRange.start,
+    effectiveRange.end,
   ]);
   useLayoutEffect(() => {
     if (virtualize) {
@@ -4938,7 +5273,23 @@ function ConversationContent({
     [virtualize, view.entries, captureAnchor],
   );
   const inner = (
-    <div className="conversation">
+    <div className="conversation" ref={rootRef}>
+      {enableFind && findOpen ? (
+        <ConversationFindBar
+          query={findQuery}
+          currentIndex={findCurrentIndex}
+          total={findMatches.length}
+          focusNonce={findFocusNonce}
+          onQueryChange={handleFindQueryChange}
+          onPrev={() => {
+            stepFind(-1);
+          }}
+          onNext={() => {
+            stepFind(1);
+          }}
+          onClose={closeFind}
+        />
+      ) : null}
       <div
         className="stream conversation-stream conversation-scroll"
         ref={scroll}
@@ -5037,8 +5388,14 @@ function ConversationContent({
                 <>
                   <EntryView
                     entry={entry}
-                    searchHit={matchesSearchSeq(entry, highlightedSeq)}
-                    searchExpand={matchesSearchSeq(entry, searchTarget?.seq)}
+                    searchHit={
+                      matchesSearchSeq(entry, highlightedSeq) ||
+                      matchesSearchSeq(entry, findFallbackSeq)
+                    }
+                    searchExpand={
+                      matchesSearchSeq(entry, searchTarget?.seq) ||
+                      matchesSearchSeq(entry, activeFindSeq)
+                    }
                     openUrl={openUrl}
                     cwd={cwd}
                     parts={parts}
@@ -5111,9 +5468,9 @@ function ConversationContent({
                     }
                   }
                 }
-                if (searchTarget?.seq !== undefined) {
+                if (jumpTarget !== undefined) {
                   const targetIdx = view.entries.findIndex((entry) =>
-                    matchesSearchSeq(entry, searchTarget.seq),
+                    matchesSearchSeq(entry, jumpTarget.seq),
                   );
                   if (targetIdx >= 0) pinnedIndices.push(targetIdx);
                 }

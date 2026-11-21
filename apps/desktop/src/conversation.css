@@ -1883,3 +1883,51 @@ button.fcard:hover {
   flex: none;
   pointer-events: none;
 }
+
+/* ── 会话内搜索（ADR-0107） ── */
+::highlight(conv-find) {
+  background-color: var(--cm-search);
+}
+
+::highlight(conv-find-current) {
+  background-color: var(--cm-search-current);
+}
+
+.conv-find {
+  position: absolute;
+  top: 10px;
+  right: 28px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  background: var(--a-panel);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-popover);
+}
+
+.conv-find-ic {
+  display: inline-flex;
+  color: var(--a-muted);
+  margin-right: var(--space-1);
+}
+
+.conv-find-input {
+  width: 200px;
+  min-height: var(--ctl-h-sm);
+}
+
+.conv-find-count {
+  min-width: 3.6em;
+  padding: 0 var(--space-2);
+  text-align: right;
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.conv-find-up {
+  transform: rotate(180deg);
+}
