@@ -4,10 +4,10 @@ import type { Grant } from "@nocturne/core/protocol";
 export function grantLines(entries: readonly { grant: Grant; scope: string }[]): string[] {
   return entries.length === 0
     ? ["还没有授权。"]
-    : entries.map(
-        ({ grant, scope }, i) =>
-          `${i + 1}. [${scope}] ${grant.kind}  ${grant.target}  ${grant.createdAt}`,
-      );
+    : entries.map(({ grant, scope }, i) => {
+        const tag = grant.match === "pattern" ? " [模式]" : "";
+        return `${i + 1}. [${scope}] ${grant.kind}${tag}  ${grant.target}  ${grant.createdAt}`;
+      });
 }
 export async function projectGrants(
   config: RuntimeConfig,
@@ -27,7 +27,8 @@ export async function projectGrants(
   else {
     const grant = entries[(index ?? 0) - 1];
     if (!grant) throw new Error("授权编号不存在；先运行 nctrn grants list 查看。");
-    await store.remove(grant.kind, grant.target);
+    if (grant.match !== undefined) await store.remove(grant.kind, grant.target, grant.match);
+    else await store.remove(grant.kind, grant.target);
   }
   return "已撤销，下一次调用会重新询问。";
 }
@@ -46,8 +47,9 @@ export async function sessionGrants(
     return "用法：/grants [revoke <编号>]";
   const entry = entries[Number(args[1]) - 1];
   if (!entry) return "授权编号不存在；先用 /grants 查看。";
-  const { kind, target } = entry.grant;
-  if (entry.scope === "本会话") await session.revokeGrant({ kind, target });
-  else await runtime.revokeGrant({ workspace, kind, target });
+  const { kind, target, match } = entry.grant;
+  const matchInput = match !== undefined ? { match } : {};
+  if (entry.scope === "本会话") await session.revokeGrant({ kind, target, ...matchInput });
+  else await runtime.revokeGrant({ workspace, kind, target, ...matchInput });
   return "已撤销，下一次调用会重新询问。";
 }

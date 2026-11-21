@@ -236,7 +236,7 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
       if (p.source === "reviewer") return [];
       const detail = p.rule !== undefined ? `${p.source}：${p.rule}` : p.source;
       const remembered =
-        p.remember === "project"
+        p.remember === "project" || p.remember === "pattern"
           ? "，已写入项目授权"
           : p.remember === "session"
             ? "，本会话内有效"

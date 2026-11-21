@@ -511,4 +511,16 @@ describe("智能权限审查行", () => {
     );
     expect(withoutProfile).toContain("子代理 · 修复配置");
   });
+  it("permission.resolved 的 remember: pattern 渲染为已写入项目授权", () => {
+    const lines = renderEvent(
+      durable("permission.resolved", {
+        callId: "c1",
+        action: "allow",
+        source: "user",
+        remember: "pattern",
+      }),
+      "interactive",
+    );
+    expect(lines.map((line) => line.text)).toEqual(["└ 权限：allow（user），已写入项目授权"]);
+  });
 });

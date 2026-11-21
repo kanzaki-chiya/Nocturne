@@ -76,3 +76,45 @@ it("会话内合并本会话 / 本项目、编号路由到对应 Core 入口", a
   });
   expect(await sessionGrants(runtime, session, ["revoke", "3"])).toContain("编号不存在");
 });
+
+it("模式 Grant 显示 [模式] 标识并在撤销时透传 match: pattern", async () => {
+  const patternGrant: Grant = {
+    kind: "shell",
+    target: "git status *",
+    createdAt: "2026-11-21",
+    match: "pattern",
+  };
+  const store = {
+    list: () => [first, patternGrant],
+    remove: vi.fn(async () => undefined),
+    clear: vi.fn(async () => undefined),
+  };
+  const config = {
+    forWorkspace: vi.fn(async () => ({ grants: store })),
+  } as unknown as RuntimeConfig;
+  const listed = await projectGrants(config, "Z:/work", "list");
+  expect(listed).toContain("1. [本项目] shell [模式]  git status *  2026-11-21");
+  expect(listed).toContain("2. [本项目] shell  git status  2026-10-20");
+  await projectGrants(config, "Z:/work", "revoke", 1);
+  expect(store.remove).toHaveBeenCalledWith("shell", "git status *", "pattern");
+
+  const session = {
+    state: () => ({ meta: { workspaceRoot: "Z:/work" } }),
+    listGrants: () => [first],
+    revokeGrant: vi.fn(async () => undefined),
+  } as unknown as RuntimeSession;
+  const runtime = createRuntimeStub({
+    listGrants: async () => [patternGrant],
+    revokeGrant: vi.fn(async () => undefined),
+  });
+  expect(await sessionGrants(runtime, session, [])).toContain(
+    "2. [本项目] shell [模式]  git status *  2026-11-21",
+  );
+  await sessionGrants(runtime, session, ["revoke", "2"]);
+  expect(runtime.revokeGrant).toHaveBeenCalledWith({
+    workspace: "Z:/work",
+    kind: "shell",
+    target: "git status *",
+    match: "pattern",
+  });
+});
