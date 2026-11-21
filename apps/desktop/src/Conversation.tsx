@@ -21,7 +21,7 @@ import {
   type SaveFileFn,
   type ViewerImageItem,
 } from "./ImageViewer";
-import { InlinePage } from "./InlinePage";
+import { InlinePage, PageEntryRow } from "./InlinePage";
 import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
@@ -78,6 +78,8 @@ import {
   allPendingPermissions,
   inlineFilesOfTool,
   isNotReadToolFailure,
+  resolveInlinePageDisplay,
+  resolveInlinePageId,
   parseFileRefs,
   untrackedCallsText,
   todoItemsFromCompletion,
@@ -307,6 +309,10 @@ export interface ConversationProps {
   onOpenEnsembleMember?: ((member: { name: string; childSessionId: string }) => void) | undefined;
   /** 点击组曲汇报行在右侧面板打开对应线程 */
   onOpenSuiteThread?: ((threadId: string) => void) | undefined;
+  /** 点击面板页面入口行或内嵌页面「在面板打开」在右侧面板打开对应页面与版本（仅桌面端传入） */
+  onOpenPage?: ((page: string, version?: number) => void) | undefined;
+  /** 当前右侧面板正在显示的页面与版本号（仅桌面端传入，供入口行高亮选中态） */
+  activePage?: { page: string; version: number } | undefined;
   /** 启用消息列表虚拟化（仅手机网页开启，桌面端保持整段渲染） */
   virtualize?: boolean | undefined;
   /** 启用会话内搜索（Ctrl+F，仅桌面端主窗口开启） */
@@ -982,13 +988,20 @@ const FrozenContext = createContext(false);
 const MessageSkillsContext = createContext<readonly SkillOverview[] | undefined>(undefined);
 const ShellSessionContext = createContext<ShellSession | undefined>(undefined);
 const BackgroundViewContext = createContext<
-  Pick<SessionView, "entries" | "backgroundShells" | "pendingSubagentPermissions">
+  Pick<SessionView, "entries" | "backgroundShells" | "pendingSubagentPermissions" | "pages">
 >({
   entries: [],
   backgroundShells: [],
   pendingSubagentPermissions: [],
+  pages: [],
 });
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
+
+interface PageRowContextValue {
+  onOpenPage?: ((page: string, version?: number) => void) | undefined;
+  activePage?: { page: string; version: number } | undefined;
+}
+const PageRowContext = createContext<PageRowContextValue | null>(null);
 
 interface EnsembleRowContextValue {
   ensemble: EnsembleView | undefined;
@@ -2070,7 +2083,7 @@ function toolArgumentValue(
     case "skill":
       return plain(input === undefined ? "" : text(input.name), true);
     case "render_html":
-      return plain(input === undefined ? "" : text(input.title), false);
+      return plain(input === undefined ? "" : text(input.title) || text(input.page), false);
     case "task":
       return plain(input === undefined ? "" : text(input.task), false);
     case "read":
@@ -3350,6 +3363,8 @@ function ToolEntryView({
 }) {
   const thinkScroll = useContext(ThinkScrollContext);
   const ensembleRow = useContext(EnsembleRowContext);
+  const backgroundView = useContext(BackgroundViewContext);
+  const pageRow = useContext(PageRowContext);
   if (entry.status === "denied") {
     const shownName = effectiveToolName(entry);
     return (
@@ -3368,22 +3383,59 @@ function ToolEntryView({
   if (inlineFiles.length > 0) {
     return (
       <>
-        {inlineFiles.map((file, idx) => (
-          <InlinePage
-            key={file.file}
-            file={file}
-            session={session}
-            searchHit={searchHit && idx === 0}
-            sessionSeq={idx === 0 ? entry.seq : undefined}
-            completedSeq={idx === 0 ? entry.completedSeq : undefined}
-            onCollapseAboveViewport={(el) => {
-              thinkScroll.collapsed(el);
-            }}
-            renderFallback={(err) => (
-              <FileAttachmentCard file={file} session={session} initialError={err} />
-            )}
-          />
-        ))}
+        {inlineFiles.map((file, idx) => {
+          const pageId = resolveInlinePageId(file);
+          const sessionPage = backgroundView.pages.find((p) => p.page === pageId);
+          const display = sessionPage?.display ?? resolveInlinePageDisplay(file);
+          const version =
+            sessionPage?.versions.find((v) => v.file.file === file.file)?.version ??
+            file.inline?.version ??
+            1;
+          const onOpenPage = pageRow?.onOpenPage;
+          const openInPanel =
+            onOpenPage !== undefined
+              ? () => {
+                  onOpenPage(pageId, version);
+                }
+              : undefined;
+          if (display === "panel") {
+            const activePage = pageRow?.activePage;
+            const isActive = activePage?.page === pageId && activePage.version === version;
+            return (
+              <PageEntryRow
+                key={file.file}
+                file={file}
+                version={version}
+                versions={sessionPage?.versions}
+                active={isActive}
+                session={session}
+                onOpenInPanel={openInPanel}
+                searchHit={searchHit && idx === 0}
+                sessionSeq={idx === 0 ? entry.seq : undefined}
+                completedSeq={idx === 0 ? entry.completedSeq : undefined}
+              />
+            );
+          }
+          return (
+            <InlinePage
+              key={file.file}
+              file={file}
+              session={session}
+              versions={sessionPage?.versions}
+              version={version}
+              onOpenInPanel={openInPanel}
+              searchHit={searchHit && idx === 0}
+              sessionSeq={idx === 0 ? entry.seq : undefined}
+              completedSeq={idx === 0 ? entry.completedSeq : undefined}
+              onCollapseAboveViewport={(el) => {
+                thinkScroll.collapsed(el);
+              }}
+              renderFallback={(err) => (
+                <FileAttachmentCard file={file} session={session} initialError={err} />
+              )}
+            />
+          );
+        })}
       </>
     );
   }
@@ -6257,6 +6309,12 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   const readOnly = "readOnly" in props ? props.readOnly : undefined;
   const links = "subagentLinks" in props ? props.subagentLinks : undefined;
   const onOpenEnsemble = "onOpenEnsemble" in props ? props.onOpenEnsemble : undefined;
+  const onOpenPage = "onOpenPage" in props ? props.onOpenPage : undefined;
+  const activePage = "activePage" in props ? props.activePage : undefined;
+  const pageRow: PageRowContextValue | null =
+    readOnly === undefined && (onOpenPage !== undefined || activePage !== undefined)
+      ? { onOpenPage, activePage }
+      : null;
   const ensembleRow: EnsembleRowContextValue | null =
     readOnly === undefined && onOpenEnsemble !== undefined
       ? {
@@ -6270,17 +6328,21 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
       <FrozenContext.Provider value={readOnly?.frozen === true}>
         <SubagentLinksContext.Provider value={readOnly === undefined ? (links ?? null) : null}>
           <EnsembleRowContext.Provider value={ensembleRow}>
-            <BackgroundViewContext.Provider value={props.view}>
-              <ShellSessionContext.Provider
-                value={
-                  readOnly === undefined && isLiveSession(props.session) ? props.session : undefined
-                }
-              >
-                <MessageSkillsContext.Provider value={props.skills}>
-                  <ConversationContent key={props.session.id} {...props} />
-                </MessageSkillsContext.Provider>
-              </ShellSessionContext.Provider>
-            </BackgroundViewContext.Provider>
+            <PageRowContext.Provider value={pageRow}>
+              <BackgroundViewContext.Provider value={props.view}>
+                <ShellSessionContext.Provider
+                  value={
+                    readOnly === undefined && isLiveSession(props.session)
+                      ? props.session
+                      : undefined
+                  }
+                >
+                  <MessageSkillsContext.Provider value={props.skills}>
+                    <ConversationContent key={props.session.id} {...props} />
+                  </MessageSkillsContext.Provider>
+                </ShellSessionContext.Provider>
+              </BackgroundViewContext.Provider>
+            </PageRowContext.Provider>
           </EnsembleRowContext.Provider>
         </SubagentLinksContext.Provider>
       </FrozenContext.Provider>

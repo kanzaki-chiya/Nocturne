@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { FileAttachment } from "@nocturne/core/protocol";
+import type { FileAttachment, SessionPage, SessionPageVersion } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import {
@@ -17,7 +17,7 @@ import {
   useSaveFile,
 } from "./ImageViewer";
 import { Menu, MenuItem } from "./Menu";
-import { ICON_LG, ICON_MD, Icon, IconButton } from "./ui";
+import { ICON_LG, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 import "./inline-page.css";
 
 export const INLINE_PAGE_COLLAPSE_HEIGHT = 420;
@@ -49,6 +49,11 @@ interface ThemePayload {
   theme: Record<string, string>;
   colorScheme: "light" | "dark";
   fontSize: string;
+}
+
+interface LoadedHtml {
+  html: string;
+  bytes: Uint8Array;
 }
 
 export function readInlineTheme(): ThemePayload {
@@ -157,6 +162,22 @@ export function toPngFilename(filename: string): string {
     return filename.replace(/\.html?$/i, ".png");
   }
   return `${filename}.png`;
+}
+
+function versionCacheKey(file: Pick<FileAttachment, "file" | "sha256">): string {
+  return `${file.file}:${file.sha256}`;
+}
+
+function findVersionIndex(
+  versions: readonly SessionPageVersion[],
+  targetVersion: number | undefined,
+): number {
+  if (versions.length === 0) return 0;
+  if (targetVersion !== undefined) {
+    const idx = versions.findIndex((v) => v.version === targetVersion);
+    if (idx >= 0) return idx;
+  }
+  return versions.length - 1;
 }
 
 function useSandboxedHtmlFrame(opts: {
@@ -273,21 +294,75 @@ function useSandboxedHtmlFrame(opts: {
   return { iframeRef, handleLoad: postRender };
 }
 
-function InlinePageFullscreen({
+export function PageVersionNav({
+  index,
+  total,
+  onChange,
+}: {
+  index: number;
+  total: number;
+  onChange: (nextIndex: number) => void;
+}) {
+  const safeTotal = Math.max(1, total);
+  const safeIndex = Math.max(0, Math.min(safeTotal - 1, index));
+  return (
+    <div className="page-ver-nav">
+      <IconButton
+        className="page-ver-btn"
+        aria-label="上一版本"
+        title="上一版本"
+        disabled={safeIndex <= 0}
+        onClick={() => {
+          if (safeIndex > 0) onChange(safeIndex - 1);
+        }}
+      >
+        <Icon name="right_small" size={ICON_SM} className="page-ver-prev-icon" />
+      </IconButton>
+      <span className="page-ver-count">
+        {safeIndex + 1} / {safeTotal}
+      </span>
+      <IconButton
+        className="page-ver-btn"
+        aria-label="下一版本"
+        title="下一版本"
+        disabled={safeIndex >= safeTotal - 1}
+        onClick={() => {
+          if (safeIndex < safeTotal - 1) onChange(safeIndex + 1);
+        }}
+      >
+        <Icon name="right_small" size={ICON_SM} />
+      </IconButton>
+    </div>
+  );
+}
+
+export interface InlinePageFullscreenProps {
+  title: string;
+  filename: string;
+  html?: string | undefined;
+  bytes?: Uint8Array | undefined;
+  versions?: readonly SessionPageVersion[] | undefined;
+  initialVersion?: number | undefined;
+  session?: Pick<RpcSession, "readAttachment"> | undefined;
+  initialLoaded?: { file: string; sha256: string; html: string; bytes: Uint8Array } | undefined;
+  onVersionChange?: ((version: number) => void) | undefined;
+  opener: HTMLElement | null;
+  onClose: () => void;
+}
+
+export function InlinePageFullscreen({
   title,
   filename,
   html,
   bytes,
+  versions,
+  initialVersion,
+  session,
+  initialLoaded,
+  onVersionChange,
   opener,
   onClose,
-}: {
-  title: string;
-  filename: string;
-  html: string;
-  bytes: Uint8Array;
-  opener: HTMLElement | null;
-  onClose: () => void;
-}) {
+}: InlinePageFullscreenProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const downloadBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -300,8 +375,55 @@ function InlinePageFullscreen({
   const pendingCaptureRef = useRef<{ requestId: string; timer: number } | null>(null);
   const captureSeqRef = useRef(0);
   const instanceId = useId();
-  const fullInstanceId = `full:${instanceId}`;
   const sandboxSrc = resolveSandboxFrameSrc();
+
+  const versionList = versions && versions.length > 0 ? versions : undefined;
+  const [activeIdx, setActiveIdx] = useState(() =>
+    versionList ? findVersionIndex(versionList, initialVersion) : 0,
+  );
+  const safeIdx = versionList ? Math.max(0, Math.min(versionList.length - 1, activeIdx)) : 0;
+  const activeVer = versionList?.[safeIdx];
+  const activeTitle = activeVer?.title ?? title;
+  const activeFilename = activeVer?.file.label ?? filename;
+
+  const cacheRef = useRef<Map<string, LoadedHtml>>(new Map());
+  if (initialLoaded !== undefined) {
+    const key = versionCacheKey(initialLoaded);
+    if (!cacheRef.current.has(key)) {
+      cacheRef.current.set(key, { html: initialLoaded.html, bytes: initialLoaded.bytes });
+    }
+  }
+  const [loadedMapVersion, setLoadedMapVersion] = useState(0);
+
+  const activeCacheKey = activeVer ? versionCacheKey(activeVer.file) : undefined;
+  const cachedActive = activeCacheKey ? cacheRef.current.get(activeCacheKey) : undefined;
+  const activeLoaded: LoadedHtml | undefined =
+    activeVer !== undefined
+      ? cachedActive
+      : html !== undefined && bytes !== undefined
+        ? { html, bytes }
+        : undefined;
+
+  useEffect(() => {
+    if (activeVer === undefined || activeCacheKey === undefined) return;
+    if (cacheRef.current.has(activeCacheKey)) return;
+    if (!session) return;
+    let cancelled = false;
+    session.readAttachment(activeVer.file.file).then(
+      (res) => {
+        if (cancelled) return;
+        const decoded = new TextDecoder("utf-8").decode(res.data);
+        cacheRef.current.set(activeCacheKey, { html: decoded, bytes: res.data });
+        setLoadedMapVersion((n) => n + 1);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVer, activeCacheKey, session, loadedMapVersion]);
+
+  const fullInstanceId = `full:${instanceId}:${activeVer?.file.file ?? "single"}`;
 
   useEffect(() => {
     return () => {
@@ -342,20 +464,20 @@ function InlinePageFullscreen({
         return;
       }
       triggerBytesDownload({
-        filename: toPngFilename(filename),
+        filename: toPngFilename(activeFilename),
         mimeType: "image/png",
         bytes: pngBytes,
         saveFile,
         onError: setDownloadError,
       });
     },
-    [filename, saveFile],
+    [activeFilename, saveFile],
   );
 
   useFullscreenDialogTrap({ rootRef, opener, onClose: handleEscape });
 
   const { iframeRef, handleLoad } = useSandboxedHtmlFrame({
-    html,
+    html: activeLoaded?.html,
     instanceId: fullInstanceId,
     fullscreen: true,
     onEscape: handleEscape,
@@ -364,11 +486,12 @@ function InlinePageFullscreen({
 
   const handleDownloadHtml = () => {
     setMenuOpen(false);
+    if (!activeLoaded) return;
     setDownloadError(undefined);
     triggerBytesDownload({
-      filename,
+      filename: activeFilename,
       mimeType: "text/html;charset=utf-8",
-      bytes,
+      bytes: activeLoaded.bytes,
       saveFile,
       onError: setDownloadError,
     });
@@ -410,13 +533,36 @@ function InlinePageFullscreen({
     }
   };
 
+  const hasVersionNav = versionList !== undefined && versionList.length > 1;
+  const actionButtons = (
+    <>
+      <IconButton
+        ref={downloadBtnRef}
+        className="inline-page-btn"
+        aria-label="下载"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title={downloadError ?? "下载"}
+        disabled={capturing || activeLoaded === undefined}
+        onClick={() => {
+          setMenuOpen((open) => !open);
+        }}
+      >
+        <Icon name="download_2" size={ICON_LG} />
+      </IconButton>
+      <IconButton className="inline-page-btn" aria-label="关闭" title="关闭" onClick={onClose}>
+        <Icon name="close" size={ICON_LG} />
+      </IconButton>
+    </>
+  );
+
   return (
     <div
       ref={rootRef}
       className="inline-page-fullscreen"
       role="dialog"
       aria-modal="true"
-      aria-label={title}
+      aria-label={activeTitle}
       tabIndex={-1}
       onClick={(event) => {
         if (event.target === rootRef.current) {
@@ -424,34 +570,36 @@ function InlinePageFullscreen({
         }
       }}
     >
-      <div ref={sheetRef} className="inline-page-sheet">
-        <iframe
-          ref={iframeRef}
-          className="inline-page-frame"
-          sandbox="allow-scripts"
-          src={sandboxSrc}
-          title={title}
-          onLoad={handleLoad}
-        />
-        <div className="inline-page-full-tools">
-          <IconButton
-            ref={downloadBtnRef}
-            className="inline-page-btn"
-            aria-label="下载"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            title={downloadError ?? "下载"}
-            disabled={capturing}
-            onClick={() => {
-              setMenuOpen((open) => !open);
-            }}
-          >
-            <Icon name="download_2" size={ICON_LG} />
-          </IconButton>
-          <IconButton className="inline-page-btn" aria-label="关闭" title="关闭" onClick={onClose}>
-            <Icon name="close" size={ICON_LG} />
-          </IconButton>
+      <div ref={sheetRef} className={`inline-page-sheet${hasVersionNav ? " has-toolbar" : ""}`}>
+        {hasVersionNav && (
+          <div className="inline-page-full-bar">
+            <PageVersionNav
+              index={safeIdx}
+              total={versionList.length}
+              onChange={(nextIdx) => {
+                setActiveIdx(nextIdx);
+                setDownloadError(undefined);
+                const nextVer = versionList[nextIdx];
+                if (nextVer !== undefined) onVersionChange?.(nextVer.version);
+              }}
+            />
+            <div className="inline-page-full-bar-actions">{actionButtons}</div>
+          </div>
+        )}
+        <div className="inline-page-full-body">
+          {activeLoaded !== undefined && (
+            <iframe
+              key={activeVer?.file.file ?? "single"}
+              ref={iframeRef}
+              className="inline-page-frame"
+              sandbox="allow-scripts"
+              src={sandboxSrc}
+              title={activeTitle}
+              onLoad={handleLoad}
+            />
+          )}
         </div>
+        {!hasVersionNav && <div className="inline-page-full-tools">{actionButtons}</div>}
       </div>
       {menuOpen && (
         <Menu
@@ -472,11 +620,247 @@ function InlinePageFullscreen({
   );
 }
 
+export interface PageEntryRowProps {
+  file: FileAttachment;
+  version: number;
+  versions?: readonly SessionPageVersion[] | undefined;
+  active?: boolean | undefined;
+  session: Pick<RpcSession, "readAttachment"> | undefined;
+  /** 桌面端传入：在右侧面板打开对应页面与版本；手机端不传，点击直接进全屏遮罩 */
+  onOpenInPanel?: (() => void) | undefined;
+  searchHit?: boolean | undefined;
+  sessionSeq?: number | undefined;
+  completedSeq?: number | undefined;
+}
+
+export function PageEntryRow({
+  file,
+  version,
+  versions,
+  active = false,
+  session,
+  onOpenInPanel,
+  searchHit = false,
+  sessionSeq,
+  completedSeq,
+}: PageEntryRowProps) {
+  const title = file.inline?.title ?? file.label;
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const overlay = useCustomOverlay();
+
+  const handleClick = () => {
+    if (onOpenInPanel !== undefined) {
+      onOpenInPanel();
+      return;
+    }
+    const opener = btnRef.current;
+    const effectiveVersions: readonly SessionPageVersion[] =
+      versions && versions.length > 0
+        ? versions
+        : [{ version, file, title, seq: completedSeq ?? sessionSeq ?? 0 }];
+    overlay.open(
+      (onClose) => (
+        <InlinePageFullscreen
+          title={title}
+          filename={file.label}
+          versions={effectiveVersions}
+          initialVersion={version}
+          session={session}
+          opener={opener}
+          onClose={onClose}
+        />
+      ),
+      opener,
+    );
+  };
+
+  return (
+    <button
+      ref={btnRef}
+      type="button"
+      className={`page-entry-row${active ? " is-active" : ""}${searchHit ? " search-hit" : ""}`}
+      aria-current={active ? "true" : undefined}
+      data-session-seq={sessionSeq}
+      data-completed-seq={completedSeq}
+      onClick={handleClick}
+    >
+      <Icon name="file" size={ICON_SM} className="page-entry-icon" />
+      <span className="page-entry-title">{title}</span>
+      <span className="page-entry-ver">v{version}</span>
+      <Icon name="right_small" size={ICON_SM} className="page-entry-arrow" />
+    </button>
+  );
+}
+
+export interface PagePaneProps {
+  page: SessionPage | undefined;
+  selectedVersion: number | undefined;
+  session: Pick<RpcSession, "readAttachment"> | undefined;
+  onSelectVersion: (version: number | undefined) => void;
+}
+
+export function PagePane({ page, selectedVersion, session, onSelectVersion }: PagePaneProps) {
+  const fullBtnRef = useRef<HTMLButtonElement | null>(null);
+  const saveFile = useSaveFile();
+  const overlay = useCustomOverlay();
+  const instanceId = useId();
+  const sandboxSrc = resolveSandboxFrameSrc();
+  const [downloadError, setDownloadError] = useState<string>();
+
+  const cacheRef = useRef<Map<string, LoadedHtml>>(new Map());
+  const sessionRef = useRef(session);
+  if (sessionRef.current !== session) {
+    sessionRef.current = session;
+    cacheRef.current = new Map();
+  }
+  const [loadedTick, setLoadedTick] = useState(0);
+
+  const versions = page?.versions ?? [];
+  const activeIdx = findVersionIndex(versions, selectedVersion);
+  const activeVer = versions[activeIdx];
+  const latestVer = versions.at(-1);
+  const cacheKey = activeVer ? versionCacheKey(activeVer.file) : undefined;
+  const loaded = cacheKey ? cacheRef.current.get(cacheKey) : undefined;
+
+  useEffect(() => {
+    if (activeVer === undefined || cacheKey === undefined) return;
+    if (cacheRef.current.has(cacheKey)) return;
+    if (!session) return;
+    let cancelled = false;
+    session.readAttachment(activeVer.file.file).then(
+      (res) => {
+        if (cancelled) return;
+        const html = new TextDecoder("utf-8").decode(res.data);
+        cacheRef.current.set(cacheKey, { html, bytes: res.data });
+        setLoadedTick((n) => n + 1);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVer, cacheKey, session, loadedTick]);
+
+  const paneInstanceId = `pane:${instanceId}:${activeVer?.file.file ?? "empty"}`;
+  const { iframeRef, handleLoad } = useSandboxedHtmlFrame({
+    html: loaded?.html,
+    instanceId: paneInstanceId,
+    fullscreen: true,
+  });
+
+  if (page === undefined || activeVer === undefined) {
+    return <div className="page-pane" />;
+  }
+
+  const handleSelectIndex = (nextIdx: number) => {
+    const next = versions[nextIdx];
+    if (next === undefined) return;
+    setDownloadError(undefined);
+    if (next.version === latestVer?.version) {
+      onSelectVersion(undefined);
+    } else {
+      onSelectVersion(next.version);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!loaded) return;
+    setDownloadError(undefined);
+    triggerBytesDownload({
+      filename: activeVer.file.label,
+      mimeType: "text/html;charset=utf-8",
+      bytes: loaded.bytes,
+      saveFile,
+      onError: setDownloadError,
+    });
+  };
+
+  const handleFullscreen = () => {
+    if (!loaded) return;
+    const opener = fullBtnRef.current;
+    overlay.open(
+      (onClose) => (
+        <InlinePageFullscreen
+          title={activeVer.title}
+          filename={activeVer.file.label}
+          versions={versions}
+          initialVersion={activeVer.version}
+          session={session}
+          initialLoaded={{
+            file: activeVer.file.file,
+            sha256: activeVer.file.sha256,
+            html: loaded.html,
+            bytes: loaded.bytes,
+          }}
+          onVersionChange={(v) => {
+            if (v === latestVer?.version) {
+              onSelectVersion(undefined);
+            } else {
+              onSelectVersion(v);
+            }
+          }}
+          opener={opener}
+          onClose={onClose}
+        />
+      ),
+      opener,
+    );
+  };
+
+  return (
+    <div className="page-pane">
+      <div className="page-pane-bar">
+        <PageVersionNav index={activeIdx} total={versions.length} onChange={handleSelectIndex} />
+        <div className="page-pane-actions">
+          <IconButton
+            className="page-pane-action-btn"
+            aria-label="下载"
+            title={downloadError ?? "下载"}
+            disabled={loaded === undefined}
+            onClick={handleDownload}
+          >
+            <Icon name="download_2" size={ICON_MD} />
+          </IconButton>
+          <IconButton
+            ref={fullBtnRef}
+            className="page-pane-action-btn"
+            aria-label="全屏"
+            title="全屏"
+            disabled={loaded === undefined}
+            onClick={handleFullscreen}
+          >
+            <Icon name="fullscreen" size={ICON_MD} />
+          </IconButton>
+        </div>
+      </div>
+      <div className="page-pane-body">
+        {loaded !== undefined && (
+          <iframe
+            key={activeVer.file.file}
+            ref={iframeRef}
+            className="page-pane-frame"
+            sandbox="allow-scripts"
+            src={sandboxSrc}
+            title={activeVer.title}
+            onLoad={handleLoad}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export interface InlinePageProps {
   file: FileAttachment;
   session: Pick<RpcSession, "readAttachment"> | undefined;
   renderFallback: (errorMessage?: string) => ReactNode;
   onCollapseAboveViewport?: ((container: HTMLElement) => void) | undefined;
+  /** 桌面端传入：在右侧面板打开该页面并定位到本版本；手机端不传 */
+  onOpenInPanel?: (() => void) | undefined;
+  /** 本页面所有版本，供全屏遮罩切换版本 */
+  versions?: readonly SessionPageVersion[] | undefined;
+  /** 本次渲染对应的版本号 */
+  version?: number | undefined;
   searchHit?: boolean | undefined;
   sessionSeq?: number | undefined;
   completedSeq?: number | undefined;
@@ -487,6 +871,9 @@ export function InlinePage({
   session,
   renderFallback,
   onCollapseAboveViewport,
+  onOpenInPanel,
+  versions,
+  version,
   searchHit = false,
   sessionSeq,
   completedSeq,
@@ -495,7 +882,7 @@ export function InlinePage({
   const instanceId = useId();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fullBtnRef = useRef<HTMLButtonElement | null>(null);
-  const [loaded, setLoaded] = useState<{ html: string; bytes: Uint8Array } | null>(null);
+  const [loaded, setLoaded] = useState<LoadedHtml | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -575,6 +962,15 @@ export function InlinePage({
           filename={file.label}
           html={loaded.html}
           bytes={loaded.bytes}
+          versions={versions}
+          initialVersion={version}
+          session={session}
+          initialLoaded={{
+            file: file.file,
+            sha256: file.sha256,
+            html: loaded.html,
+            bytes: loaded.bytes,
+          }}
           opener={opener}
           onClose={onClose}
         />
@@ -617,6 +1013,16 @@ export function InlinePage({
       {collapsible && !expanded && <div className="inline-page-fade" aria-hidden="true" />}
       {loaded !== null && (
         <div className="inline-page-tools">
+          {onOpenInPanel !== undefined && (
+            <IconButton
+              className="inline-page-tool-btn"
+              aria-label="在面板打开"
+              title="在面板打开"
+              onClick={onOpenInPanel}
+            >
+              <Icon name="layout_right" size={ICON_MD} />
+            </IconButton>
+          )}
           <IconButton
             ref={fullBtnRef}
             className="inline-page-tool-btn"

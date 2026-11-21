@@ -86,6 +86,7 @@ import {
   type AppTab,
   type BrowserTab,
   type FileTab,
+  type PageTab,
   type PanelTab,
   type SessionPanel,
   type SubagentTab,
@@ -174,6 +175,12 @@ export interface SidePanelController {
   ) => void;
   /** 打开或切换到当前会话的某个插件 surface 标签（ADR-0101 第 5 节） */
   openAppSurface: (surface: SessionAppSurface) => void;
+  /** 打开或切换到当前会话的某个页面标签并定位到指定版本（ADR-0109） */
+  openPage: (page: string, version?: number) => void;
+  /** 实时收到当前会话面板页面新版本时按自动打开规则更新面板（ADR-0109） */
+  onLivePanelPage: (targetSessionId: string, page: string) => void;
+  /** 面板当前正在显示的页面与版本号；面板关闭或非页面标签时为 undefined */
+  activePage: { page: string; version: number } | undefined;
   /** 实时收到带 ui 的 tool.completed 时打开/切换对应会话的插件标签并投递参数与结果 */
   onToolCompletedUi: (
     targetSessionId: string,
@@ -1254,6 +1261,93 @@ export function useSidePanel({
       });
     });
   }, [hideBrowserThen, update]);
+  const openPage = useCallback(
+    (page: string, version?: number) => {
+      const latestVersion = active?.view.pages
+        .find((item) => item.page === page)
+        ?.versions.at(-1)?.version;
+      const nextVersion =
+        version !== undefined && latestVersion !== undefined && version < latestVersion
+          ? version
+          : undefined;
+      hideBrowserThen(() => {
+        update((panel) => {
+          const found = panel.tabs.find(
+            (tab): tab is PageTab => tab.kind === "page" && tab.page === page,
+          );
+          if (found !== undefined) {
+            return {
+              ...panel,
+              open: true,
+              activeId: found.id,
+              tabs: panel.tabs.map((tab) =>
+                tab.id === found.id ? { ...found, version: nextVersion } : tab,
+              ),
+            };
+          }
+          return withTab(panel, {
+            id: newTabId(),
+            kind: "page",
+            page,
+            ...(nextVersion !== undefined ? { version: nextVersion } : {}),
+          });
+        });
+      });
+    },
+    [active, hideBrowserThen, update],
+  );
+  const onLivePanelPage = useCallback(
+    (targetSessionId: string, page: string) => {
+      if (targetSessionId !== sessionId) return;
+      hideBrowserThen(() => {
+        update((panel) => {
+          const found = panel.tabs.find(
+            (tab): tab is PageTab => tab.kind === "page" && tab.page === page,
+          );
+          // 标签已打开且停在旧版本时，不强行跳到最新版（N 照常随 SessionView 加一）
+          if (panel.open && found?.version !== undefined) {
+            return panel;
+          }
+          if (found !== undefined) {
+            return {
+              ...panel,
+              open: true,
+              activeId: found.id,
+              tabs: panel.tabs.map((tab) =>
+                tab.id === found.id ? { ...found, version: undefined } : tab,
+              ),
+            };
+          }
+          return withTab(panel, { id: newTabId(), kind: "page", page });
+        });
+      });
+    },
+    [sessionId, hideBrowserThen, update],
+  );
+  const selectPageVersion = useCallback(
+    (tabId: string, version: number | undefined) => {
+      update((panel) => ({
+        ...panel,
+        tabs: panel.tabs.map((tab) =>
+          tab.id === tabId && tab.kind === "page" ? { ...tab, version } : tab,
+        ),
+      }));
+    },
+    [update],
+  );
+  const activePage = useMemo(() => {
+    if (!shown || active === undefined) return undefined;
+    const activeTab = current.tabs.find((tab) => tab.id === current.activeId);
+    if (activeTab?.kind !== "page") return undefined;
+    const found = active.view.pages.find((item) => item.page === activeTab.page);
+    const latest = found?.versions.at(-1);
+    if (found === undefined || latest === undefined) return undefined;
+    const version =
+      activeTab.version !== undefined && found.versions.some((v) => v.version === activeTab.version)
+        ? activeTab.version
+        : latest.version;
+    return { page: found.page, version };
+  }, [shown, active, current]);
   const openEnsembleMember = useCallback(
     (member: { name: string; childSessionId: string }, targetSessionId?: string) => {
       const target = targetSessionId ?? sessionId;
@@ -2042,6 +2136,15 @@ export function useSidePanel({
               registerTeardown: registerAppTeardown,
             }
       }
+      page={
+        active === undefined
+          ? undefined
+          : {
+              pages: active.view.pages,
+              session: active.session,
+              onSelectVersion: selectPageVersion,
+            }
+      }
     />
   );
 
@@ -2151,6 +2254,9 @@ export function useSidePanel({
     openSuite,
     openSuiteThread,
     openAppSurface,
+    openPage,
+    onLivePanelPage,
+    activePage,
     onToolCompletedUi,
     subagentLinks,
     bodyClass: docked ? " panel-docked" : "",

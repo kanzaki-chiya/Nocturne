@@ -18,6 +18,7 @@ import type {
   ApplicationTarget,
   PermissionReply,
   SessionAppSurface,
+  SessionPage,
   SubagentPendingPermission,
   SubagentSummary,
   ToolEntry,
@@ -30,6 +31,7 @@ import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import { AppPane } from "./AppPane";
+import { PagePane } from "./InlinePage";
 import type { McpAppToolDelivery } from "./mcp-app-host";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
@@ -197,6 +199,14 @@ export interface SidePanelProps {
   agents?: PanelAgents | undefined;
   /** 插件 MCP App 面板标签与新标签页 surface（ADR-0101） */
   apps?: PanelApps | undefined;
+  /** 会话页面面板标签的数据与版本切换回调（ADR-0109） */
+  page?: PanelPages | undefined;
+}
+
+export interface PanelPages {
+  pages: readonly SessionPage[];
+  session: Pick<RpcSession, "readAttachment"> | undefined;
+  onSelectVersion: (tabId: string, version: number | undefined) => void;
 }
 
 export interface PanelApps {
@@ -302,9 +312,15 @@ function tabTitle(
   ensembleTitle?: string,
   suiteThreads?: readonly SuiteThreadView[],
   resolveAppTitle?: (tab: AppTab) => string,
+  pages?: readonly SessionPage[],
 ): { name: string; project?: string; title: string } {
   if (tab.kind === "changes") return { name: "变更", title: "变更" };
   if (tab.kind === "new") return { name: "新标签页", title: "新标签页" };
+  if (tab.kind === "page") {
+    const found = pages?.find((p) => p.page === tab.page);
+    const name = found?.title ?? tab.page;
+    return { name, title: name };
+  }
   if (tab.kind === "app") {
     const name = resolveAppTitle?.(tab) ?? tab.title;
     return { name, title: name };
@@ -412,6 +428,7 @@ function TabBar(props: SidePanelProps) {
             props.ensemble?.ensemble?.title,
             props.suite?.suiteView?.threads,
             (appTab) => props.apps?.resolveMeta(appTab).title ?? appTab.title,
+            props.page?.pages,
           );
           const active = tab.id === activeId;
           const ensembleDot =
@@ -507,7 +524,9 @@ function TabBar(props: SidePanelProps) {
                         ? "agent"
                         : tab.kind === "shell"
                           ? "terminal"
-                          : tab.kind
+                          : tab.kind === "page"
+                            ? "file"
+                            : tab.kind
                   }
                 />
               )}
@@ -1737,6 +1756,15 @@ export function SidePanel(props: SidePanelProps) {
                   ) : (
                     <div className="sp-ensemble-member" />
                   )
+                ) : tab.kind === "page" ? (
+                  <PagePane
+                    page={props.page?.pages.find((p) => p.page === tab.page)}
+                    selectedVersion={tab.version}
+                    session={props.page?.session}
+                    onSelectVersion={(version) => {
+                      props.page?.onSelectVersion(tab.id, version);
+                    }}
+                  />
                 ) : tab.diffText !== undefined ? (
                   <FileDiffView
                     tab={{ ...tab, diffText: tab.diffText }}

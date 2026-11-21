@@ -25,7 +25,13 @@ import type {
   WorkModeName,
   WorkspaceBranches,
 } from "@nocturne/core/protocol";
-import { goalStatusLines, parseWorkModeSlash } from "@nocturne/core/protocol";
+import {
+  filterInlinePageFiles,
+  goalStatusLines,
+  parseWorkModeSlash,
+  resolveInlinePageDisplay,
+  resolveInlinePageId,
+} from "@nocturne/core/protocol";
 
 import { applyAppearance, applyContentWidth, applyReduceMotion, watchTheme } from "./appearance";
 import { runThemeTransition } from "./motion";
@@ -623,6 +629,23 @@ export function App({ host }: { host: DesktopHost }) {
             ? toolEntry.target.name
             : event.payload.name;
         panelRef.current?.onToolCompletedUi(sessionId, event.payload, toolInput, resolvedToolName);
+      }
+      if (
+        live &&
+        sessionId === state.selectedId &&
+        event.type === "tool.completed" &&
+        event.payload.status === "ok"
+      ) {
+        const entry = conversations.opened.get(sessionId);
+        const panelFiles = filterInlinePageFiles(event.payload.files).filter((file) => {
+          const pageId = resolveInlinePageId(file);
+          const sessionPage = entry?.view.pages.find((p) => p.page === pageId);
+          return (sessionPage?.display ?? resolveInlinePageDisplay(file)) === "panel";
+        });
+        const lastPanelFile = panelFiles.at(-1);
+        if (lastPanelFile !== undefined) {
+          panelRef.current?.onLivePanelPage(sessionId, resolveInlinePageId(lastPanelFile));
+        }
       }
       if (event.type === "turn.started") {
         const started = Date.parse(event.time);
@@ -2688,6 +2711,8 @@ export function App({ host }: { host: DesktopHost }) {
                   onOpenSuiteThread={(thread) => {
                     sidePanel.openSuiteThread(thread);
                   }}
+                  onOpenPage={sidePanel.openPage}
+                  activePage={sidePanel.activePage}
                   onShellKindChange={onShellKindChange}
                 />
               </PaneErrorBoundary>
@@ -3064,6 +3089,8 @@ interface SessionPaneProps {
   onOpenEnsembleMember?: ((member: { name: string; childSessionId: string }) => void) | undefined;
   onOpenSuiteThread?:
     ((thread: { threadId: string; childSessionId: string; title: string }) => void) | undefined;
+  onOpenPage?: ((page: string, version?: number) => void) | undefined;
+  activePage?: { page: string; version: number } | undefined;
   onShellKindChange?: ((sessionId: string, kind: string | undefined) => void) | undefined;
 }
 
@@ -3138,6 +3165,8 @@ function SessionPane({
   onOpenEnsemble,
   onOpenEnsembleMember,
   onOpenSuiteThread,
+  onOpenPage,
+  activePage,
   onShellKindChange,
   ruleEligibleCalls,
 }: SessionPaneProps) {
@@ -3242,6 +3271,8 @@ function SessionPane({
         resolveAppIcon={resolveAppIcon}
         onOpenEnsemble={onOpenEnsemble}
         onOpenEnsembleMember={onOpenEnsembleMember}
+        onOpenPage={onOpenPage}
+        activePage={activePage}
         onOpenSuiteThread={
           view.suite !== undefined && onOpenSuiteThread !== undefined
             ? (threadId) => {

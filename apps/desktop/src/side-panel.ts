@@ -154,6 +154,18 @@ export function appTabKey(tab: Pick<AppTab, "pluginId" | "surface" | "resourceUr
     : `${tab.pluginId}\0u:${tab.resourceUri}`;
 }
 
+/**
+ * 页面面板标签（ADR-0109）：每个会话每个页面至多一个标签；
+ * panelSessions 里只存打开标记（id、kind、page），标题与版本内容来自 SessionView.pages。
+ * version 是当前查看的版本号（undefined 表示跟随最新版），不持久化。
+ */
+export interface PageTab {
+  id: string;
+  kind: "page";
+  page: string;
+  version?: number | undefined;
+}
+
 export type PanelTab =
   | NewTab
   | ChangesTab
@@ -166,9 +178,10 @@ export type PanelTab =
   | EnsembleMemberTab
   | SuiteTab
   | SuiteThreadTab
-  | AppTab;
+  | AppTab
+  | PageTab;
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」「插件面板」（新标签页、终端不恢复） */
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」「插件面板」「页面」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
@@ -176,6 +189,7 @@ export type StoredPanelTab =
   | { id: string; kind: "ensemble_member"; childSessionId: string; memberName: string }
   | { id: string; kind: "suite" }
   | { id: string; kind: "suite_thread"; threadId: string; childSessionId: string; title: string }
+  | { id: string; kind: "page"; page: string }
   | {
       id: string;
       kind: "subagent";
@@ -404,6 +418,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const suiteThreads = new Set<string>();
   const shellTasks = new Set<string>();
   const appKeys = new Set<string>();
+  const pages = new Set<string>();
   let changes = false;
   let ensemble = false;
   let suite = false;
@@ -423,6 +438,10 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       suite = true;
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "suite" });
+    } else if (raw.kind === "page" && str(raw.page) && !pages.has(raw.page)) {
+      pages.add(raw.page);
+      ids.add(raw.id);
+      tabs.push({ id: raw.id, kind: "page", page: raw.page });
     } else if (
       raw.kind === "suite_thread" &&
       str(raw.threadId) &&
@@ -558,6 +577,7 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
     if (tab.kind === "changes") return [{ id: tab.id, kind: "changes" }];
     if (tab.kind === "ensemble") return [{ id: tab.id, kind: "ensemble" }];
     if (tab.kind === "suite") return [{ id: tab.id, kind: "suite" }];
+    if (tab.kind === "page") return [{ id: tab.id, kind: "page", page: tab.page }];
     if (tab.kind === "suite_thread") {
       return [
         {
