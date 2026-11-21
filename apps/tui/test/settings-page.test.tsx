@@ -38,6 +38,7 @@ function page(
     themeFailure?: boolean;
     extraItems?: SettingItem[];
     plugins?: Awaited<ReturnType<Runtime["describePlugins"]>>["plugins"];
+    projectSubagents?: Awaited<ReturnType<Runtime["describeProjectSubagents"]>>["agents"];
   } = {},
 ) {
   let items: SettingItem[] = [
@@ -109,6 +110,10 @@ function page(
   const runtime = createRuntimeStub({
     describeSettings: () => items,
     describePlugins: async () => ({ plugins: options.plugins ?? [], warnings: [] }),
+    describeProjectSubagents: async () => ({
+      agents: options.projectSubagents ?? [],
+      warnings: [],
+    }),
     updateSettings: update,
     setPreference: preference,
     getPreference: () => undefined,
@@ -568,6 +573,50 @@ describe("ADR-0045 设置页", () => {
     expect(frame).toContain("pptx:visual-judge");
     expect(frame).toContain("2 个工具");
     expect(frame).not.toContain("docx:visual-judge");
+    screen.unmount();
+  });
+
+  it("项目子代理在 /settings 单独显示「项目」分组且跳过被覆盖项", async () => {
+    const screen = page({
+      width: 100,
+      height: 36,
+      projectSubagents: [
+        {
+          id: "project:arch",
+          name: "arch",
+          description: "检查架构边界",
+          source: ".nocturne",
+          path: "/ws/.nocturne/agents/arch.md",
+          effort: "high",
+          tools: ["read", "grep"],
+        },
+        {
+          id: "project:reviewer",
+          name: "reviewer",
+          description: "Claude code reviewer",
+          source: ".claude",
+          path: "/ws/.claude/agents/reviewer.md",
+          tools: ["read", "edit", "write", "apply_patch"],
+        },
+        {
+          id: "project:arch",
+          name: "arch",
+          description: "被覆盖项不应展示",
+          source: ".claude",
+          path: "/ws/.claude/agents/arch.md",
+          shadowedBy: "/ws/.nocturne/agents/arch.md",
+        },
+      ],
+    });
+    await screen.ready();
+    await waitFor(() => (screen.lastFrame() ?? "").includes("project:arch"));
+    const frame = screen.lastFrame() ?? "";
+    expect(frame).toContain("项目");
+    expect(frame).toContain("project:arch");
+    expect(frame).toContain("project:reviewer");
+    expect(frame).toContain("2 个工具");
+    expect(frame).toContain("4 个工具");
+    expect(frame).not.toContain("被覆盖项不应展示");
     screen.unmount();
   });
 });

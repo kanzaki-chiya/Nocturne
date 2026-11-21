@@ -4,7 +4,11 @@
  * 对话框里的「保存」就是落盘，取消不写任何东西。写入失败时值回到原样，错误显示在说明区。
  */
 import { Box } from "ink";
-import type { PluginAgentOverview, SubagentProfileConfig } from "@nocturne/core/protocol";
+import type {
+  PluginAgentOverview,
+  ProjectSubagentOverview,
+  SubagentProfileConfig,
+} from "@nocturne/core/protocol";
 import { useEffect, useRef, useState } from "react";
 import type {
   ModelRole,
@@ -105,6 +109,7 @@ export function SettingsPage({
 }): React.JSX.Element {
   const palette = useTheme();
   const [items, setItems] = useState(() => runtime.describeSettings());
+  const [projectAgents, setProjectAgents] = useState<readonly ProjectSubagentOverview[]>([]);
   const [pluginAgents, setPluginAgents] = useState<
     readonly { pluginName: string; agent: PluginAgentOverview }[]
   >([]);
@@ -113,6 +118,8 @@ export function SettingsPage({
   const [themeSaved, setThemeSaved] = useState(() => runtime.getPreference("theme") !== undefined);
   const [nested, setNested] = useState<Nested | undefined>();
   const [notice, setNotice] = useState<ShellNotice>();
+  const workspaceRoot =
+    typeof session.state === "function" ? session.state().meta.workspaceRoot : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -133,10 +140,17 @@ export function SettingsPage({
         setPluginAgents(list);
       })
       .catch(() => undefined);
+    void (runtime as { describeProjectSubagents?: Runtime["describeProjectSubagents"] })
+      .describeProjectSubagents?.({ workspaceRoot })
+      .then((desc) => {
+        if (cancelled) return;
+        setProjectAgents(desc.agents.filter((agent) => agent.shadowedBy === undefined));
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [runtime]);
+  }, [runtime, workspaceRoot]);
   const item = (key: SettingItem["key"]) => items.find((entry) => entry.key === key);
   const fail = (text: string) => {
     setNotice({ text: `保存失败：${text}`, tone: "error" });
@@ -323,16 +337,34 @@ export function SettingsPage({
           search: profile.description,
         };
       }),
-    ...pluginAgents.map(({ agent }): ShellRow => {
-      const configuredModel = item(`subagents.pluginModels.${agent.id}`)?.effective;
+    ...pluginAgents
+      .filter(({ agent }) => !projectAgents.some((projectAgent) => projectAgent.id === agent.id))
+      .map(({ agent }): ShellRow => {
+        const configuredModel = item(`subagents.pluginModels.${agent.id}`)?.effective;
+        const toolSuffix = agent.tools !== undefined ? ` · ${agent.tools.length} 个工具` : "";
+        return {
+          id: `subagents.plugin.${agent.id}`,
+          group: "roles",
+          cells: [
+            { text: agent.id },
+            {
+              text: `${configuredModel ?? "跟随默认"} · ${agent.effort ?? "跟随会话"}${toolSuffix}`,
+              tone: "muted",
+            },
+          ],
+          trail: [{ text: "只读", tone: "muted" }],
+          search: `${agent.id} ${agent.description}`,
+        };
+      }),
+    ...projectAgents.map((agent): ShellRow => {
       const toolSuffix = agent.tools !== undefined ? ` · ${agent.tools.length} 个工具` : "";
       return {
-        id: `subagents.plugin.${agent.id}`,
-        group: "roles",
+        id: `subagents.project.${agent.id}`,
+        group: "projectSubagents",
         cells: [
           { text: agent.id },
           {
-            text: `${configuredModel ?? "跟随默认"} · ${agent.effort ?? "跟随会话"}${toolSuffix}`,
+            text: `跟随默认 · ${agent.effort ?? "跟随会话"}${toolSuffix}`,
             tone: "muted",
           },
         ],
@@ -341,6 +373,8 @@ export function SettingsPage({
       };
     }),
   ];
+  const groups =
+    projectAgents.length > 0 ? [...GROUPS, { id: "projectSubagents", label: "项目" }] : GROUPS;
 
   const labelOf = (id: string): string =>
     id === "preset"
@@ -375,6 +409,19 @@ export function SettingsPage({
     if (row === undefined) return [];
     if (row.id.startsWith("subagents.profiles."))
       return [[{ text: PROFILE_EDIT_HINT, tone: "muted" }]];
+    if (row.id.startsWith("subagents.project.")) {
+      const id = row.id.slice("subagents.project.".length);
+      const entry = projectAgents.find((p) => p.id === id);
+      return entry !== undefined
+        ? [
+            [
+              { text: entry.id, tone: "secondary" as const },
+              { text: `  ${entry.description}`, tone: "muted" as const },
+            ],
+            [{ text: `来源：${entry.path}`, tone: "muted" as const }],
+          ]
+        : [];
+    }
     if (row.id.startsWith("subagents.plugin.")) {
       const id = row.id.slice("subagents.plugin.".length);
       const entry = pluginAgents.find((p) => p.agent.id === id);
@@ -443,8 +490,8 @@ export function SettingsPage({
           title={["设置"]}
           subtitle={SUBTITLE}
           rows={rows}
-          groups={GROUPS}
-          sidebar={{ items: GROUPS, mode: "jump" }}
+          groups={groups}
+          sidebar={{ items: groups, mode: "jump" }}
           arrows="adjust"
           describe={describe}
           notice={notice}
@@ -482,7 +529,14 @@ export function SettingsPage({
               setNotice({ text: "默认模型与档位请在 /model 页选「设为默认」", tone: "muted" });
             else if (id === "preset")
               setNotice({ text: "用 ←→ 修改，立即保存到 settings.json", tone: "muted" });
-            else if (id.startsWith("subagents.profiles.") || id.startsWith("subagents.plugin."))
+            else if (id.startsWith("subagents.project.")) {
+              const agentId = id.slice("subagents.project.".length);
+              const entry = projectAgents.find((p) => p.id === agentId);
+              setNotice({
+                text: entry !== undefined ? `只读：请编辑 ${entry.path}` : "项目子代理为只读",
+                tone: "muted",
+              });
+            } else if (id.startsWith("subagents.profiles.") || id.startsWith("subagents.plugin."))
               setNotice({ text: PROFILE_EDIT_HINT, tone: "muted" });
             else setNested(id as Nested);
           }}
