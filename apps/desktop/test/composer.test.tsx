@@ -1,6 +1,16 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SkillOverview } from "@nocturne/core/protocol";
+import { shouldBlockGlobalRefresh } from "../src/App";
 import { Composer, type ComposerProps } from "../src/Composer";
 import { effortOption, presetOptions } from "../src/choice-info";
 import type { FileIndexEntry } from "../src/file-refs";
@@ -1313,4 +1323,180 @@ it("手输计划在组字结束后显示执行方式标签并保持命令发送�
       workMode: "plan",
     }),
   );
+});
+
+describe("Composer 输入历史搜索", () => {
+  it("Ctrl+R 打开历史列表并阻止默认行为，继续输入实时过滤并高亮命中", async () => {
+    const readInputHistory = vi.fn(async () => [
+      "老日志\n换行展示",
+      "检查 worktree 状态",
+      "无关指令",
+      "检查 worktree 状态",
+      "合进来之后把 Worktree 和分支删掉",
+    ]);
+    render(<Composer {...props({ historyKey: "hist-1", readInputHistory })} />);
+    await waitFor(() => expect(readInputHistory).toHaveBeenCalled());
+
+    const field = input("");
+    const openEv = createEvent.keyDown(field, { key: "r", ctrlKey: true });
+    fireEvent(field, openEv);
+    expect(openEv.defaultPrevented).toBe(true);
+
+    const listbox = screen.getByRole("listbox", { name: "输入历史" });
+    expect(listbox.querySelector(".composer-popup-h")?.textContent).toBe("历史");
+    const allOptions = within(listbox).getAllByRole("option");
+    expect(allOptions.map((o) => o.textContent)).toEqual([
+      "合进来之后把 Worktree 和分支删掉",
+      "检查 worktree 状态",
+      "无关指令",
+      "老日志 换行展示",
+    ]);
+    expect(allOptions[0]?.className).toContain("is-active");
+
+    fireEvent.change(field, { target: { value: "worktree" } });
+    const filtered = within(listbox).getAllByRole("option");
+    expect(filtered.map((o) => o.textContent)).toEqual([
+      "合进来之后把 Worktree 和分支删掉",
+      "检查 worktree 状态",
+    ]);
+    expect(filtered[0]?.className).toContain("is-active");
+    expect(filtered[0]?.querySelector("mark.composer-history-hl")?.textContent).toBe("Worktree");
+    expect(filtered[1]?.querySelector("mark.composer-history-hl")?.textContent).toBe("worktree");
+  });
+
+  it("↑/↓ 与再次按 Ctrl+R 移动选中项，Enter 与 Tab 回填且不发送、光标置末、恢复标签", async () => {
+    const onSubmit = vi.fn(async () => true);
+    const readInputHistory = vi.fn(async () => [
+      "first worktree cmd",
+      "/alpha worktree review",
+      "third worktree cmd",
+    ]);
+    const { container } = render(
+      <Composer
+        {...props({ historyKey: "hist-2", skills: [testSkill()], onSubmit, readInputHistory })}
+      />,
+    );
+    await waitFor(() => expect(readInputHistory).toHaveBeenCalled());
+
+    const field = input("worktree");
+    fireEvent.keyDown(field, { key: "r", ctrlKey: true });
+    const listbox = screen.getByRole("listbox", { name: "输入历史" });
+    const rows = within(listbox).getAllByRole("option");
+    expect(rows[0]?.className).toContain("is-active");
+
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(within(listbox).getAllByRole("option")[1]?.className).toContain("is-active");
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    expect(within(listbox).getAllByRole("option")[0]?.className).toContain("is-active");
+    fireEvent.keyDown(field, { key: "r", ctrlKey: true });
+    expect(within(listbox).getAllByRole("option")[1]?.className).toContain("is-active");
+
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "输入历史" })).toBeNull();
+    expect(container.querySelector(".draft-skill .input-label")?.textContent).toBe("alpha");
+    expect(field.value).toBe("worktree review");
+    expect(field.selectionStart).toBe("worktree review".length);
+    expect(field.selectionEnd).toBe("worktree review".length);
+
+    // Tab 同样回填并关闭列表，不发送
+    field.setSelectionRange(0, 0);
+    fireEvent.keyDown(field, { key: "Backspace" });
+    fireEvent.change(field, { target: { value: "first" } });
+    fireEvent.keyDown(field, { key: "r", ctrlKey: true });
+    fireEvent.keyDown(field, { key: "Tab" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "输入历史" })).toBeNull();
+    expect(field.value).toBe("first worktree cmd");
+    expect(field.selectionStart).toBe("first worktree cmd".length);
+  });
+
+  it("Esc 关闭历史列表并保留当前搜索文字；无匹配时显示空状态且 Enter/↑ 不误触发发送或翻历史", async () => {
+    const onSubmit = vi.fn(async () => true);
+    const readInputHistory = vi.fn(async () => ["已有历史"]);
+    render(<Composer {...props({ historyKey: "hist-3", onSubmit, readInputHistory })} />);
+    await waitFor(() => expect(readInputHistory).toHaveBeenCalled());
+
+    const field = input("不会命中");
+    fireEvent.keyDown(field, { key: "r", ctrlKey: true });
+    const listbox = screen.getByRole("listbox", { name: "输入历史" });
+    expect(listbox.querySelector(".composer-popup-note")?.textContent).toBe("没有匹配的历史");
+
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    expect(field.value).toBe("不会命中");
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("listbox", { name: "输入历史" })).toBeTruthy();
+
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "输入历史" })).toBeNull();
+    expect(field.value).toBe("不会命中");
+  });
+
+  it("斜杠命令或 @ 引用列表打开时按 Ctrl+R 切换为历史列表，Esc 不回跳斜杠列表", async () => {
+    const onSlash = vi.fn(async () => true);
+    const readInputHistory = vi.fn(async () => ["/compact 之前", "检查 @main"]);
+    render(
+      <Composer
+        {...props({
+          historyKey: "hist-4",
+          onSlash,
+          readInputHistory,
+          fileRefs: { key: 1, load: async () => INDEX },
+        })}
+      />,
+    );
+    await waitFor(() => expect(readInputHistory).toHaveBeenCalled());
+
+    const field = input("/co");
+    expect(await screen.findByRole("listbox", { name: "斜杠命令补全" })).toBeTruthy();
+
+    fireEvent.keyDown(field, { key: "r", ctrlKey: true });
+    expect(screen.queryByRole("listbox", { name: "斜杠命令补全" })).toBeNull();
+    const histList = screen.getByRole("listbox", { name: "输入历史" });
+    expect(within(histList).getAllByRole("option")[0]?.textContent).toBe("/compact 之前");
+
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(field.value).toBe("/co");
+
+    fireEvent.change(field, { target: { value: "@main" } });
+    field.setSelectionRange(5, 5);
+    expect(await screen.findByRole("listbox", { name: "文件引用补全" })).toBeTruthy();
+    fireEvent.keyDown(field, { key: "r", ctrlKey: true });
+    expect(screen.queryByRole("listbox", { name: "文件引用补全" })).toBeNull();
+    const histList2 = screen.getByRole("listbox", { name: "输入历史" });
+    expect(within(histList2).getAllByRole("option")[0]?.textContent).toBe("检查 @main");
+  });
+
+  it("焦点在 .xterm 时 Composer 不打开历史且全局不接管 Ctrl+R", async () => {
+    const readInputHistory = vi.fn(async () => ["之前命令"]);
+    render(
+      <div>
+        <Composer {...props({ historyKey: "hist-5", readInputHistory })} />
+        <div className="xterm">
+          <textarea aria-label="终端焦点" />
+        </div>
+      </div>,
+    );
+    await waitFor(() => expect(readInputHistory).toHaveBeenCalled());
+
+    const termField = screen.getByLabelText<HTMLTextAreaElement>("终端焦点");
+    termField.focus();
+    const ev = createEvent.keyDown(termField, {
+      key: "r",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(termField, ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(screen.queryByRole("listbox", { name: "输入历史" })).toBeNull();
+    expect(
+      shouldBlockGlobalRefresh(
+        new KeyboardEvent("keydown", { key: "r", ctrlKey: true, cancelable: true }),
+        false,
+      ),
+    ).toBe(false);
+  });
 });

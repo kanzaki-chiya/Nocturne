@@ -208,6 +208,31 @@ const FOCUS_THROTTLE_MS = 2_000;
 /** 崩溃横幅里 stderr 默认只显示最后几行 */
 const CRASH_STDERR_PREVIEW = 5;
 
+export function shouldBlockGlobalRefresh(
+  event: KeyboardEvent,
+  isDev = import.meta.env.DEV,
+): boolean {
+  if (
+    isDev ||
+    event.isComposing ||
+    event.key === "Process" ||
+    event.altKey ||
+    event.shiftKey ||
+    event.metaKey ||
+    !event.ctrlKey ||
+    event.key.toLowerCase() !== "r"
+  ) {
+    return false;
+  }
+  if (
+    (event.target instanceof Element && event.target.closest(".xterm") !== null) ||
+    (document.activeElement instanceof Element && document.activeElement.closest(".xterm") !== null)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function App({ host }: { host: DesktopHost }) {
   const prefs = useMemo(() => createPrefsStore(globalThis.localStorage), []);
   const workspaceRef = useRef<string | null>(null);
@@ -975,6 +1000,10 @@ export function App({ host }: { host: DesktopHost }) {
       if (event.ctrlKey && event.altKey && !event.shiftKey && event.key === "Escape") {
         event.preventDefault();
         stopActiveComputer();
+        return;
+      }
+      if (shouldBlockGlobalRefresh(event)) {
+        event.preventDefault();
         return;
       }
       if (

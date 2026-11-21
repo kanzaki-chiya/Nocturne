@@ -676,6 +676,13 @@
   color: var(--a-text);
 }
 
+.composer-history-hl {
+  padding: 0;
+  color: inherit;
+  background: var(--cm-search);
+  border-radius: var(--radius-0-5);
+}
+
 .composer-popup-row:has(.composer-popup-summary) .composer-popup-name {
   max-width: 50%;
 }

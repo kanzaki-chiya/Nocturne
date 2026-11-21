@@ -29,6 +29,7 @@ import {
 
 import { isValidGitBranchName, useBranchMenu } from "./BranchMenu";
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
+import { searchInputHistory, splitHighlightSegments, type MatchRange } from "./history-search";
 import {
   completeFileRefs,
   fileRefDeleteRange,
@@ -248,7 +249,7 @@ function materializeAttachment(attachment: ComposerSubmit["attachments"][number]
 }
 
 type MenuKind = "plus" | "model" | "effort" | "preset" | "dir" | "branch";
-type PopupKind = "slash" | "refs";
+type PopupKind = "slash" | "refs" | "history";
 
 const MAX_TEXTAREA_HEIGHT = 280;
 
@@ -269,6 +270,7 @@ interface PopupRow {
   summary?: string;
   insert: string;
   directory?: boolean;
+  ranges?: MatchRange[];
 }
 
 export function Composer({
@@ -331,6 +333,8 @@ export function Composer({
   const [caret, setCaret] = useState(0);
   const [composing, setComposing] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [selected, setSelected] = useState(0);
   const [interrupting, setInterrupting] = useState(false);
   const [error, setError] = useState<string | null>(initialError ?? null);
@@ -341,6 +345,7 @@ export function Composer({
     if (hidden) {
       setMenu(null);
       setDismissed(true);
+      setHistoryOpen(false);
     } else if (wasHidden.current) {
       textarea.current?.focus();
     }
@@ -547,12 +552,15 @@ export function Composer({
     history.current = [];
     historySinceRead.current = [];
     historyIndex.current = null;
+    setHistoryOpen(false);
+    setHistoryVersion((v) => v + 1);
     const readHistory = readHistoryRef.current;
     if (readHistory !== undefined) {
       void readHistory()
         .then((rows) => {
           if (!active) return;
           history.current = historySinceRead.current.reduce(appendHistory, rows.slice(-1000));
+          setHistoryVersion((v) => v + 1);
         })
         .catch((reason: unknown) => {
           if (active) setError(`读取输入历史失败：${errorText(reason)}`);
@@ -598,7 +606,8 @@ export function Composer({
   }, [running, onInterrupt]);
 
   // ── 弹窗与补全 ──
-  const token = focused && !composing ? fileRefToken(draft, caret) : undefined;
+  const showHistoryPopup = historyOpen && !composing;
+  const token = focused && !composing && !showHistoryPopup ? fileRefToken(draft, caret) : undefined;
   const refCompletion =
     token !== undefined && fileRefs !== null && !dismissed
       ? completeFileRefs(draft, caret, indexCache.current?.entries ?? [])
@@ -607,12 +616,27 @@ export function Composer({
     token !== undefined && fileRefs !== null && !dismissed && refCompletion !== undefined;
   const slashGroups = useMemo<SlashGroup[]>(
     () =>
-      focused && !composing && !dismissed && token === undefined
+      focused && !composing && !dismissed && !showHistoryPopup && token === undefined
         ? completeSlash(draft, skills, externalAgents)
         : [],
-    [focused, composing, dismissed, token, draft, skills, externalAgents],
+    [focused, composing, dismissed, showHistoryPopup, token, draft, skills, externalAgents],
   );
-  const popup: PopupKind | null = showRefPopup ? "refs" : slashGroups.length > 0 ? "slash" : null;
+  const historyRows: PopupRow[] = useMemo(() => {
+    if (!showHistoryPopup || historyVersion < 0) return [];
+    return searchInputHistory(history.current, draft).map((item) => ({
+      key: item.text,
+      label: item.label,
+      insert: item.text,
+      ranges: item.ranges,
+    }));
+  }, [showHistoryPopup, historyVersion, draft]);
+  const popup: PopupKind | null = showHistoryPopup
+    ? "history"
+    : showRefPopup
+      ? "refs"
+      : slashGroups.length > 0
+        ? "slash"
+        : null;
 
   const refRows: PopupRow[] =
     popup === "refs" && refCompletion !== undefined
@@ -640,7 +664,12 @@ export function Composer({
       })),
     );
   }, [popup, slashGroups]);
-  const flatRows: PopupRow[] = popup === "refs" ? refRows : slashRows.map((item) => item.row);
+  const flatRows: PopupRow[] =
+    popup === "history"
+      ? historyRows
+      : popup === "refs"
+        ? refRows
+        : slashRows.map((item) => item.row);
   const activeIndex = Math.min(selected, Math.max(0, flatRows.length - 1));
   const indexLoadingNow = showRefPopup && indexCache.current?.key !== fileRefs.key;
 
@@ -648,7 +677,28 @@ export function Composer({
     if (showRefPopup) ensureFileIndex();
   }, [showRefPopup, ensureFileIndex]);
 
+  const fillHistoryDraft = (text: string, fromHistory: boolean) => {
+    const nextOffset = draftLabel(text, skills, false).prefix.length;
+    setShowTypedWorkMode(false);
+    if (text === draftRef.current && nextOffset === offsetRef.current) {
+      pendingCaret.current = null;
+      const localPos = text.length - nextOffset;
+      textarea.current?.setSelectionRange(localPos, localPos);
+      setCaret(text.length);
+    } else {
+      pendingCaret.current = text.length;
+    }
+    updateDraft(text, fromHistory);
+  };
+
   const chooseRow = (row: PopupRow) => {
+    if (popup === "history") {
+      setHistoryOpen(false);
+      fillHistoryDraft(row.insert, false);
+      setDismissed(true);
+      textarea.current?.focus();
+      return;
+    }
     if (popup === "refs") {
       const completion = completeFileRefs(
         draftRef.current,
@@ -832,6 +882,7 @@ export function Composer({
         if (text !== "") {
           history.current = appendHistory(history.current, text);
           historySinceRead.current = appendHistory(historySinceRead.current, text);
+          setHistoryVersion((v) => v + 1);
         }
       } catch (reason) {
         restore();
@@ -877,18 +928,14 @@ export function Composer({
       }
       event.preventDefault();
       const next = history.current[historyIndex.current] ?? "";
-      pendingCaret.current = next.length;
-      setShowTypedWorkMode(false);
-      updateDraft(next, true);
+      fillHistoryDraft(next, true);
     } else if (historyIndex.current !== null) {
       event.preventDefault();
       const next = historyIndex.current + 1;
       historyIndex.current = next < history.current.length ? next : null;
       const nextText =
         historyIndex.current === null ? historyDraft.current : (history.current[next] ?? "");
-      pendingCaret.current = nextText.length;
-      setShowTypedWorkMode(false);
-      updateDraft(nextText, true);
+      fillHistoryDraft(nextText, true);
     }
   };
 
@@ -909,6 +956,24 @@ export function Composer({
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- 旧 IME 用 keyCode 229 标记组合中
     if (event.nativeEvent.isComposing || composingRef.current || event.nativeEvent.keyCode === 229)
       return;
+    if (
+      event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "r"
+    ) {
+      event.preventDefault();
+      closeMenu();
+      if (!historyOpen) {
+        setHistoryOpen(true);
+        setDismissed(true);
+        setSelected(0);
+      } else if (historyRows.length > 0) {
+        setSelected((index) => (Math.min(index, historyRows.length - 1) + 1) % historyRows.length);
+      }
+      return;
+    }
     if (event.key === "Escape") {
       // 权限卡片等捕获阶段处理器已消费时不再处理（否则拒绝后会误触发中断）
       if (event.nativeEvent.defaultPrevented) return;
@@ -917,6 +982,7 @@ export function Composer({
         closeMenu();
       } else if (popup !== null) {
         event.preventDefault();
+        setHistoryOpen(false);
         setDismissed(true);
       } else if (running) {
         event.preventDefault();
@@ -947,23 +1013,29 @@ export function Composer({
         }
       }
     }
-    if (popup !== null && flatRows.length > 0 && plain) {
+    if (popup !== null && plain) {
       if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-        event.preventDefault();
-        const count = flatRows.length;
-        setSelected((index) =>
-          event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? count - 1
-              : (index + (event.key === "ArrowDown" ? 1 : -1) + count) % count,
-        );
-        return;
+        if (flatRows.length > 0 || popup === "history") {
+          event.preventDefault();
+          if (flatRows.length > 0) {
+            const count = flatRows.length;
+            setSelected((index) =>
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? count - 1
+                  : (index + (event.key === "ArrowDown" ? 1 : -1) + count) % count,
+            );
+          }
+          return;
+        }
       }
-      if (event.key === "Tab") {
+      if (event.key === "Tab" && (flatRows.length > 0 || popup === "history")) {
         event.preventDefault();
-        const row = flatRows[activeIndex];
-        if (row !== undefined) chooseRow(row);
+        if (flatRows.length > 0) {
+          const row = flatRows[activeIndex];
+          if (row !== undefined) chooseRow(row);
+        }
         return;
       }
     }
@@ -975,6 +1047,7 @@ export function Composer({
       !event.metaKey &&
       !event.shiftKey
     ) {
+      setHistoryOpen(false);
       const line = draftRef.current;
       const parsed = parseSlash(line, variant, skills, externalAgents);
       if (parsed?.kind === "command") {
@@ -988,6 +1061,11 @@ export function Composer({
     }
     if (event.key === "Enter" && plain) {
       event.preventDefault();
+      if (popup === "history") {
+        const row = flatRows[activeIndex];
+        if (row !== undefined) chooseRow(row);
+        return;
+      }
       const line = draftRef.current;
       const parsed = parseSlash(line, variant, skills, externalAgents);
       if (parsed?.kind === "command") {
@@ -1034,6 +1112,7 @@ export function Composer({
       if (popupOpenRef.current) {
         event.preventDefault();
         closeMenu();
+        setHistoryOpen(false);
         setDismissed(true);
         return;
       }
@@ -1308,12 +1387,15 @@ export function Composer({
         placeholder={draftSkill ? undefined : (placeholder ?? defaultPlaceholder)}
         aria-autocomplete="list"
         aria-controls={popup !== null ? listId : undefined}
-        aria-activedescendant={popup !== null ? `${listId}-${activeIndex}` : undefined}
+        aria-activedescendant={
+          popup !== null && flatRows.length > 0 ? `${listId}-${activeIndex}` : undefined
+        }
         onFocus={() => {
           setFocused(true);
         }}
         onBlur={() => {
           setFocused(false);
+          setHistoryOpen(false);
         }}
         onSelect={(event) => {
           setCaret(event.currentTarget.selectionStart + offset);
@@ -1359,10 +1441,50 @@ export function Composer({
           <div
             className="composer-popup"
             role="listbox"
-            aria-label={popup === "refs" ? "文件引用补全" : "斜杠命令补全"}
+            aria-label={
+              popup === "history" ? "输入历史" : popup === "refs" ? "文件引用补全" : "斜杠命令补全"
+            }
             id={listId}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
           >
-            {popup === "refs" ? (
+            {popup === "history" ? (
+              <>
+                <div className="composer-popup-h">历史</div>
+                {historyRows.length === 0 ? (
+                  <div className="composer-popup-note">没有匹配的历史</div>
+                ) : (
+                  historyRows.map((row, index) => (
+                    <div
+                      id={`${listId}-${index}`}
+                      key={row.key}
+                      role="option"
+                      aria-selected={index === activeIndex}
+                      className={`composer-popup-row${index === activeIndex ? " is-active" : ""}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                      }}
+                      onClick={() => {
+                        chooseRow(row);
+                      }}
+                    >
+                      <span className="composer-popup-name">
+                        {splitHighlightSegments(row.label, row.ranges ?? []).map((seg, segIndex) =>
+                          seg.hit ? (
+                            <mark className="composer-history-hl" key={segIndex}>
+                              {seg.text}
+                            </mark>
+                          ) : (
+                            <Fragment key={segIndex}>{seg.text}</Fragment>
+                          ),
+                        )}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </>
+            ) : popup === "refs" ? (
               <>
                 <div className="composer-popup-h">文件</div>
                 {indexLoadingNow ? (

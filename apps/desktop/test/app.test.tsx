@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 
-import { App } from "../src/App";
+import { App, shouldBlockGlobalRefresh } from "../src/App";
 import { WindowFrame } from "../src/WindowFrame";
 import { SESSIONS_CACHE_KEY, writeSessionsCache } from "../src/sessions-cache";
 import type { DesktopHost } from "../src/host";
@@ -2849,4 +2849,34 @@ it("侧栏对未在 conversations.opened 里的运行中会话排到分组最前
       { title: "older 会话", running: false },
     ]);
   });
+});
+
+it("全局按键仅在非开发模式且焦点不在终端时拦截 Ctrl+R，F5 与开发模式放行", async () => {
+  const host = replayHost();
+  const { container } = render(
+    <div>
+      <App host={host} />
+      <div className="xterm">
+        <textarea aria-label="终端输入" />
+      </div>
+    </div>,
+  );
+  await waitFor(() => expect(container.querySelector("button")).toBeTruthy());
+  const button = container.querySelector("button");
+  if (!(button instanceof HTMLButtonElement)) throw new Error("expected button");
+  button.focus();
+  const ctrlRBtn = new KeyboardEvent("keydown", { key: "r", ctrlKey: true, cancelable: true });
+  Object.defineProperty(ctrlRBtn, "target", { value: button });
+  expect(shouldBlockGlobalRefresh(ctrlRBtn, false)).toBe(true);
+  expect(shouldBlockGlobalRefresh(ctrlRBtn, true)).toBe(false);
+
+  const f5Btn = new KeyboardEvent("keydown", { key: "F5", cancelable: true });
+  Object.defineProperty(f5Btn, "target", { value: button });
+  expect(shouldBlockGlobalRefresh(f5Btn, false)).toBe(false);
+
+  const xtermInput = screen.getByLabelText("终端输入");
+  xtermInput.focus();
+  const ctrlRXterm = new KeyboardEvent("keydown", { key: "r", ctrlKey: true, cancelable: true });
+  Object.defineProperty(ctrlRXterm, "target", { value: xtermInput });
+  expect(shouldBlockGlobalRefresh(ctrlRXterm, false)).toBe(false);
 });
