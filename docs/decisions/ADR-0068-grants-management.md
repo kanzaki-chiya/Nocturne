@@ -1,6 +1,6 @@
 # ADR-0068：授权管理
 
-- 状态：已接受（维护者 2026-10-26 确认：信任与授权同页；手机可单项和全部撤销；不做过期、使用统计、升级成规则）
+- 状态：已接受（维护者 2026-10-26 确认：信任与授权同页；手机可单项和全部撤销；不做过期、使用统计、升级成规则；2026-11-21 由 [ADR-0106](ADR-0106-command-rule-from-confirm.md) 增补项目级 shell 模式授权「命令规则」展示与按 `(kind, target, match)` 撤销）
 - 日期：2026-10-26
 - 修订：[permissions.md](../architecture/permissions.md) 第 5.4、7 节，[config.md](../architecture/config.md) 第 4 节，[rpc.md](../protocols/rpc.md)，[events.md](../protocols/events.md) `tool.started.permission` / `permission.resolved`，[desktop.md](../apps/desktop.md)、[tui.md](../apps/tui.md)、[cli.md](../apps/cli.md)，[ADR-0052](ADR-0052-remote-web-client.md) 远程边界
 
@@ -92,3 +92,9 @@
 - **只做查看，不做撤销**：看得见删不掉，问题只解决一半。
 - **把授权和规则放在同一张表里编辑**：规则是手写配置、可能带注释和顺序语义，授权是程序维护的记录；混在一起要么破坏手写文件，要么让界面承担规则编辑器的复杂度。分开，规则继续手写。
 - **手机也能信任项目**：信任会让仓库里的 MCP 命令和 Hook 在电脑上执行，属于放宽；远程通道只给收紧能力。
+
+## 修订（2026-11-21：[ADR-0106](ADR-0106-command-rule-from-confirm.md)）
+
+- `Grant` 新增可选 `match?: "pattern"`（仅用于项目级 `shell` 模式授权，由桌面确认卡片「改成规则…」产生，授权页仍不提供从已有精确授权「升级」成规则或手动新增规则的入口）。
+- 桌面端、手机网页与 TUI 授权页对 `match: "pattern"` 的项目授权类别显示「命令规则」；`GrantStore.remove`、`grants.revoke` 与 `session.revokeGrant` 均按 `(kind, target, match)` 三元键撤销。
+- 工具行「已授权」标注的 `grant` 元数据增加可选 `match?: "pattern"` 与 `pattern?: string`，桌面端对模式 Grant 悬停显示「命令规则 · <时间>」及模式原文。

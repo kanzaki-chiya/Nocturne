@@ -127,7 +127,7 @@ Markdown 任务列表的 `[ ]` / `[x]` 与首段正文排在同一行，长正�
 | 提交输入 | Enter 提交一行 | Enter 提交输入框内容 |
 | 图片与文件输入 | 无 | Windows 下 `Alt+V` 优先读资源管理器复制的文件列表（逐个占位），无文件才读剪贴板图片；括号粘贴的图片路径照常转图片，非图片路径仍按原文。UTF-8 ≥32 KiB 的文本粘贴转文件附件；图片能力不足时非图片文件仍可提交。见 [ADR-0072](../decisions/ADR-0072-file-attachments.md) |
 | 斜杠命令 | `/help /model /preset /effort /context /compact /resume /rewind /fork /new /clear /mcp /provider /shell /settings /exit /quit`（`/provider` 子命令见 [provider-setup.md](../architecture/provider-setup.md) 第 1 节） | 同一集合，另增 `/search`（仅 TUI，打开跨会话搜索浮层，§6）；`/model` 打开全屏模型选择页（§7），`/provider` 打开全屏服务商页（§8），`/resume` 弹出列表选择器（↑↓ + Enter，Esc 取消），`/rewind` 打开轮次列表，`/fork` 从当前位置分叉（§12）；`/context` 弹出可滚动报告面板（history 段下缩进列出 `breakdown` 对话历史细分 user/assistant/tool/summary、为 0 省略；请求携带图片附件时含 `images <count> 张 ~<tok> tok` 行，context.md 第 4、5 节），`/mcp` 弹出服务器状态面板（复用 Panel 组件，Esc/Enter 关闭），`/shell` 弹出 shell 选择器（`auto` 加五种探测结果，未安装灰显不可选、光标自动跳过，当前值高亮；被 `NOCTURNE_SHELL`/`config.json` 覆盖时页面顶部说明「写入 settings.json 但不生效」，ADR-0022 第 4 节）；`/shell <种类>` 直接切换，未安装的种类在写盘前被拒绝并列出可选项（`invalid_command`）。`/settings` 打开全屏设置页（§11），`/theme` 打开主题预览（仅 TUI）。执行方式命令（`/grill-me <需求>`、`/goal <目标>`、`/plan <任务>`、`/boost <任务>`，[ADR-0076](../decisions/ADR-0076-work-modes.md)）：补全插入「命令名 + 空格」，已完整敲出命令名时回车直接提交；带任务时以 `workMode` 提交，Turn 进行中按排队处理（CLI 在 Turn 期间不收命令）；用户行在正文前显示命令名，Runtime 写入的核对说明只显示 `/goal`，待发列表同样带命令名。`/goal` 无参数在回滚区打印目标、状态、轮数与时长，`/goal stop` 打印「目标已停止」（目标已完成、受阻或已达上限时不改动，打印如「目标已完成，无需停止」），`/goal resume` 空闲时开新 Turn；`/plan approve` 恢复预设并开新 Turn 实施，`/plan cancel` 恢复预设退出计划模式。 |
-| 权限确认 | `a`/`s`/`p`/`d`/`x`，`d <文本>` 带反馈；父会话与转发的子代理请求按 `allPendingPermissions` 混排并注明子代理来源 | 同五键；`d` 先进入反馈行：`Enter` 发送拒绝（内容为空 = 不带反馈，等价裸 `d`），`Esc` 退出反馈行回到五选项；`allPendingPermissions` 混排父会话与内置 `task` 子代理确认，注明子代理档位与任务摘要并经 `respondSubagentPermission` 送回 |
+| 权限确认 | `a`/`s`/`p`/`d`/`x`，`d <文本>` 带反馈；父会话与转发的子代理请求按 `allPendingPermissions` 混排并注明子代理来源 | 同五键；`d` 先进入反馈行：`Enter` 发送拒绝（内容为空 = 不带反馈，等价裸 `d`），`Esc` 退出反馈行回到五选项；`allPendingPermissions` 混排父会话与内置 `task` 子代理确认，注明子代理档位与任务摘要并经 `respondSubagentPermission` 送回；本轮忽略 `permission.requested.ruleSuggestion`（[ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)） |
 
 | 提问面板（`ask_user`，[ADR-0032](../decisions/ADR-0032-ask-user-tool.md)） | 逐题编号选择，最后一项「拒绝回答」；直接文字为「其他」，空行重新提示 | 模型选项之后依次为「其他（自己输入）」「拒绝回答」；无选项题只有输入行与「拒绝回答」。问题正文按终端宽度折行，弹窗放不下时 `PgUp`/`PgDn` 翻看。`↑`/`↓` 移动焦点，单选 `Enter` 选择当前项或拒绝该题并进入下一题；多选 `Space` 勾选（拒绝与其他回答互斥，选择拒绝清除其他勾选与文本，选择其他项取消拒绝），`Enter` 下一题；焦点在「其他」直接输入文本。`←`/`→` 或 `Tab`/`Shift+Tab` 切题；最后一题之后进入确认页，逐题列出问题和回答（或「拒绝回答」），两者各自按宽度折行，窄终端也能看全，`Enter` 提交。`Esc` 输入中退出输入，否则按全局规则中断忙碌 Turn；`Ctrl+C` 沿用中断。选中状态使用文字符号，窄终端、ASCII、NO_COLOR 不依赖颜色。对话仅由 ask_user 工具条目显示「? 提问」（多题加「（N 题）」）及逐题「问题 → 回答」，多选与其他文本以「、」连接，拒绝为「拒绝回答」；取消、超时、非交互分别显示「已取消」「已超时」「无法提问（非交互）」，不显示 JSON 或重复摘要；恢复后一致 |
 | 中断 | Ctrl+C：Turn 中中断；权限提示中取消；空闲退出 | 同：pendingPermission 时先中断（结算为 cancelled）；busy 时中断 Turn；空闲时退出。**例外**：存在选区时 Ctrl+C 复制并清除选区，不中断、不退出 |
@@ -183,9 +183,9 @@ Markdown 任务列表的 `[ ]` / `[x]` 与首段正文排在同一行，长正�
 - **MCP 状态（Phase 5）**：`mcp.server` 是临时事件、不进 `SessionView`（reducer 忽略未知类型）；`failed`/`crashed` 经 `runtime.warning` 进入提示区，`/mcp` 面板按 `session.mcpServers()` 展示每台服务器的状态、工具数与失败原因。Hook 的可见效果走既有事件（`permission.resolved source:"hook"`、`tool.completed`、`runtime.warning(code:"hook_failed")`），不新增 UI 通道。
 - **宽字符**：所有截断/对齐经显示宽度计算（Ink 内建 string-width），中文文本不掰断。
 
-### 4.1 授权管理（ADR-0068）
+### 4.1 授权管理（ADR-0068、ADR-0106）
 
-`/grants` 打开 PageShell 全屏页，普通屏幕模式临时进入备用屏幕、关闭后恢复。左栏切换工作区，右栏展示信任状态与项目授权，空状态与桌面一致。`d` 撤销所选、`D` 打开全部撤销确认、`t` 切换信任；信任前只读展示 MCP 名与命令参数、Hook 分事件计数、放宽规则条数并确认，取消信任直接执行。失败保留列表并显示错误。撤销下一次调用生效，信任新开或重新打开会话生效。页订阅 Core 授权变化刷新，接口与权限边界见 [permissions.md 5.4](../architecture/permissions.md#54-grant-的形状与匹配)。工具行 `permission.source=grant` 时末尾显示「（已授权）」，普通屏幕、全屏与回放一致，不推断旧日志范围。
+`/grants` 打开 PageShell 全屏页，普通屏幕模式临时进入备用屏幕、关闭后恢复。左栏切换工作区，右栏展示信任状态与项目授权，空状态与桌面一致；`match: "pattern"` 的项目模式授权类别显示「命令规则」。`d` 按 `(kind, target, match)` 三元键撤销所选、`D` 打开全部撤销确认、`t` 切换信任；信任前只读展示 MCP 名与命令参数、Hook 分事件计数、放宽规则条数并确认，取消信任直接执行。失败保留列表并显示错误。撤销下一次调用生效，信任新开或重新打开会话生效。页订阅 Core 授权变化刷新，接口与权限边界见 [permissions.md 5.4](../architecture/permissions.md#54-grant-的形状与匹配)。工具行 `permission.source=grant` 时末尾显示「（已授权）」，普通屏幕、全屏与回放一致，不推断旧日志范围。
 
 ## 5. 降级行为
 

@@ -249,6 +249,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 - **技能**（已随 0.6.0 发布，2026-10-07）：兼容 Agent Skills，自动发现用户级与项目内技能目录，`/技能名` 调用，桌面端「技能」页管理，见 [ADR-0048](../decisions/ADR-0048-skills.md)。
 - **外部 agent 子代理**（已随 0.7.0 发布，2026-10-07，见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)）：经 ACP 把子任务交给 omp、Codex 等外部 agent；桌面端「外部 agent」设置页、`/agents` 与 `/<名称> 任务` 点名委派。
 - **MCP 强杀清理**（已实现，2026-11-21，见 [ADR-0104](../decisions/ADR-0104-orphan-process-watchdog.md)）：Core `platform/watchdog.ts` 按需拉起 detached 看门狗进程，经 stdin 管道登记/注销 stdio MCP 服务器与后台命令，父进程死亡触发 EOF 后清理整棵进程树，CLI / TUI / 桌面后台共用；桌面外壳另保持全局 `KILL_ON_JOB_CLOSE` Job Object 兜底。MCP 资源的二进制内容（`resource.blob`）目前只记占位，图片已正常显示。
+- **确认卡片把命令改成规则**（已实现，2026-11-21，见 [ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)）：对满足条件的单条非组合普通 shell 命令，桌面端确认卡片提供「改成规则…」内联表单，预填并实时校验通配符模式、预览本会话可匹配命令，保存为项目级模式 Grant（`match: "pattern"`，存入 `<NOCTURNE_HOME>/grants/`，不改写 `config.json`、不覆盖 `deny` 或显式 `ask` 规则）；桌面、手机网页与 TUI 授权页类别显示「命令规则」，CLI `nctrn grants` 标注为 `shell [模式]`，各端均按 `(kind, target, match)` 撤销，桌面工具行「已授权」悬停展示模式原文。
 - **分发**（已随 0.6.0 发布，2026-10-07，见 [ADR-0050](../decisions/ADR-0050-distribution.md)）：桌面端随附官方 Node 与自动更新、`pnpm release:build` 发布流水线与草稿 Release；命令行版以单文件 tgz 随 Release 发布。rc.1 → rc.2 自动更新端到端验收通过（2026-10-07）。npm 首发暂缓，见 ADR-0050 修订。
 - **补验证**：macOS 钥匙串与 Linux Secret Service 实机验证；Anthropic 格式思考强度在真实端点验证。
 
@@ -276,7 +277,7 @@ Phase 0–6 已验收；本轮把成果整理为可交付的 v0.1.0：公共流�
 
 后台任务的 Core、协议、RPC、TUI、桌面端与手机网页界面已按 [ADR-0083](../decisions/ADR-0083-background-shell.md) 实现；桌面端与手机均可查看后台任务、实时输出与停止任务，结果沿用对话卡片与待发撤回。
 
-OS 级沙箱、Web / IDE 客户端、模型选择页的本机实测首字延迟与吞吐列（tui.md 第 7 节预留列位）、确认弹窗中把本条命令放宽为可编辑的模式规则（显示给用户确认后写入规则）。进入排期前各自先写设计文档。
+OS 级沙箱、Web / IDE 客户端、模型选择页的本机实测首字延迟与吞吐列（tui.md 第 7 节预留列位）。进入排期前各自先写设计文档。
 
 - **输入历史搜索**（2026-11-21 实现，桌面端与 TUI）：焦点在输入框时按 `Ctrl+R` 打开「历史」列表，以输入框当前文字作不区分大小写子串搜索（当前工作区最新在前、同文只留最新、换行压成空格、至多 50 条、命中高亮），`↑`/`↓` 或再按 `Ctrl+R` 移动选中，`Enter`/`Tab` 走与 `↑` 相同的回填路径填入输入框且不发送，`Esc` 关闭并保留当前输入；斜杠命令与 `@` 引用补全打开时按 `Ctrl+R` 直接切换为历史列表。
 - **跨会话搜索**（参照 Claude Code 桌面端侧栏「搜索」，2026-10-31 调研；已按 [ADR-0077](../decisions/ADR-0077-cross-session-search.md) 实现，桌面端 2026-11-03、TUI 2026-11-11）：在所有会话里搜索标题、用户消息、助手正文与工具输出，子串匹配、不区分大小写，每个会话返回一条带上下文片段的结果，点击或回车跳到命中位置。起步时查询时直接扫描会话事件日志、不建索引，会话多到明显变慢再加 SQLite FTS。桌面端放在侧栏与 `Ctrl+K`，TUI 用 `/search` 命令打开。

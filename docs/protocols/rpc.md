@@ -265,7 +265,7 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 - `runtime.createSession` 的参数**不含** `interactive` 与 `schedule`：前者是进程内会话选项，后者只由调度器写入。服务端只摘取列出的字段，客户端强行带上也会被忽略，不能伪造定时来源或把会话开成无人值守。
 - 远程连接：`schedule.list`、`schedule.history`、`schedule.runNow` 在白名单内，`schedule.save`、`schedule.delete` 只在本机（第 7 节）。
 
-### 3.11 `grants.*` 与会话授权（ADR-0068）
+### 3.11 `grants.*` 与会话授权（ADR-0068、ADR-0106）
 
 用户操作入口，不注册成模型工具；授权形状与实时撤销语义见 [permissions.md 5.4](../architecture/permissions.md#54-grant-的形状与匹配)。
 
@@ -273,15 +273,15 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 |---|---|
 | `grants.workspaces` | `{}` → `{ workspace, grantCount, trusted, hasProjectConfig }[]`（真实路径） |
 | `grants.list` | `{ workspace }` → `Grant[]` |
-| `grants.revoke` | `{ workspace, kind, target }` → `null` |
+| `grants.revoke` | `{ workspace, kind, target, match?: "pattern" }` → `null` |
 | `grants.revokeAll` | `{ workspace }` → `null` |
 | `grants.describeProject` | `{ workspace }` → `{ mcpServers: [{ name, command }], hooks: [{ event, count }], relaxedRuleCount }`，只解析、不执行 |
 | `grants.setTrusted` | `{ workspace, trusted }` → `null`，新开或恢复会话生效 |
 | `session.listGrants` | `{ sessionId }` → `Grant[]` |
-| `session.revokeGrant` | `{ sessionId, kind, target }` → `null` |
+| `session.revokeGrant` | `{ sessionId, kind, target, match?: "pattern" }` → `null` |
 | `session.revokeAllGrants` | `{ sessionId }` → `null` |
 
-会话方法由 Core Runtime 的 `listSessionGrants/revokeSessionGrant/revokeAllSessionGrants` 解析会话树根，活动子会话 ID 与根 ID 等效；不打开或恢复子会话。单项以 kind + target 精确匹配，写入失败报错且列表不变。成功新增、撤销、改信任后由 Core 发易失变更，再由 Hub 广播；RPC 不缓存授权、不参与权限求值。工作区汇总与解析输出口径见 [config.md 第 4 节](../architecture/config.md#4-grant-的持久化)。远程只可查看和撤销，信任与命令描述在 Core 调用前拒绝（第 7 节）。
+会话方法由 Core Runtime 的 `listSessionGrants/revokeSessionGrant/revokeAllSessionGrants` 解析会话树根，活动子会话 ID 与根 ID 等效；不打开或恢复子会话。单项以 `(kind, target, match)` 三元键匹配（`match` 缺省匹配精确 Grant，`"pattern"` 匹配项目 `shell` 模式 Grant，见 [ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)），写入失败报错且列表不变。成功新增、撤销、改信任后由 Core 发易失变更，再由 Hub 广播；RPC 不缓存授权、不参与权限求值。工作区汇总与解析输出口径见 [config.md 第 4 节](../architecture/config.md#4-grant-的持久化)。远程只可查看和撤销，信任与命令描述在 Core 调用前拒绝（第 7 节）。
 
 ### 3.12 `workspace.*`（ADR-0079）
 
@@ -550,7 +550,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `session.interrupt` | 请求与通知均允许 |
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作；手机只在后台子代理子视图提供取消 |
 | `subagent.list`、`subagent.subscribe`、`subagent.unsubscribe` | 允许（ADR-0084）：只读、限本连接已打开父会话的直接子会话。总览据 list 区分同步与后台运行项，subscribe / unsubscribe 复用连接内观察和清理机制，不开放子会话交互或工作树操作 |
-| `session.respondPermission`、`session.respondSubagentPermission` | `reply.remember === "project"` 或 `"always"` 拒绝（`-32004 / remote_not_allowed`）并保持待处理；`"session"` 或省略允许（其中 `respondSubagentPermission` 的 `"session"` 写入树共享 `sessionGrants`） |
+| `session.respondPermission`、`session.respondSubagentPermission` | `reply.remember === "project"`、`"pattern"` 或 `"always"` 拒绝（`-32004 / remote_not_allowed`）并保持待处理；`"session"` 或省略允许（其中 `respondSubagentPermission` 的 `"session"` 写入树共享 `sessionGrants`） |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
 | `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |
@@ -568,7 +568,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 
 - **外部 agent 能力白名单（`origin: "agent"`，[ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md) §3）**：从远程白名单独立收窄而来，按该桥登记的范围（`read-only` / `run`）判定；未登记批准前调业务方法触发 `agent.pairingRequested` 并报 `-32004 / agent_pairing_pending`，已批准但方法越界报 `-32004 / agent_not_allowed`，均不调用 Core：
   - **只读范围（`read-only`）**：`initialize`、`shutdown`、`runtime.listSessions`、`runtime.listModels`、`runtime.defaultModel`、`runtime.resumeSession`（只读打开，忽略 `model` / `force`）、`session.open`、`session.subscribe`、`session.unsubscribe`、`session.state`、`session.pendingInputs`、`session.close`。
-  - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`runtime.renameSession`（仅允许重命名目标会话 `client.id` 等于当前 agent id 的会话，否则报 `-32004 / agent_not_allowed`；只读范围不开放）、`session.submit`、`session.enqueueInput`、`session.respondQuestion`（仅允许回答目标会话 `client.id` 等于当前 agent id 的会话中的当前待答提问，否则报 `-32004 / agent_not_allowed`；过期或不存在的 `requestId` 报 `unknown_request`；只读范围不开放）、`session.respondPermission`、`session.respondSubagentPermission`（仅允许处理目标会话或子代理审批父会话 `client.id` 等于当前 agent id 的审批，拒绝类回复在任意上限下均允许，允许类非持久回复仅在权限上限为 `bypass` 时允许，持久授权 `remember: "project" | "always"` 一律报 `-32004 / agent_not_allowed`；只读范围不开放）、`session.interrupt`（含别名 `session.abort`）。
+  - **可运行范围（`run`）**：只读全部 + `runtime.createSession`、`runtime.renameSession`（仅允许重命名目标会话 `client.id` 等于当前 agent id 的会话，否则报 `-32004 / agent_not_allowed`；只读范围不开放）、`session.submit`、`session.enqueueInput`、`session.respondQuestion`（仅允许回答目标会话 `client.id` 等于当前 agent id 的会话中的当前待答提问，否则报 `-32004 / agent_not_allowed`；过期或不存在的 `requestId` 报 `unknown_request`；只读范围不开放）、`session.respondPermission`、`session.respondSubagentPermission`（仅允许处理目标会话或子代理审批父会话 `client.id` 等于当前 agent id 的审批，拒绝类回复在任意上限下均允许，允许类非持久回复仅在权限上限为 `bypass` 时允许，持久授权 `remember: "project" | "pattern" | "always"` 一律报 `-32004 / agent_not_allowed`；只读范围不开放）、`session.interrupt`（含别名 `session.abort`）。
   - `runtime.listSessions` 在 agent 连接中强制排除已归档会话，忽略 `includeArchived: true`；按已知 ID 打开不改既有规则。
   - **一律拒绝**：`runtime.archiveSession`、`runtime.unarchiveSession`、`session.setPermissionPreset`、`session.rewind`、`runtime.forkSession`、待发队列编辑与删除（`session.updateInput` / `cancelInput` / `resumeInputs`）、`schedule.*`、`runtime.readFile`、子代理会话（`parent !== undefined` 报 `subagent_session_not_allowed`），以及全部设置、服务商、凭据、授权、信任、`remote.*`、`agent.*` 方法。
   - **能力同步**：`initialize` 在 `origin === "agent"` 且已登记时返回 `agent: { id, scope, maxPermissionPreset }`；桌面端批准配对或修改范围/上限时向该 agent 的活动连接推送 `agent.selfChanged`。

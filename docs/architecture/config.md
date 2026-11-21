@@ -21,7 +21,7 @@
 | 外部 agent 程序维护 | `<NOCTURNE_HOME>/external-agents.json` | 可信 | 低于用户手写配置，逐条校验与原子串行写；仅用户级，详情见第 2 节 |
 | 用户编辑（`userModels`） | 同上 providers.json 条目的 `userModels` 字段 | 可信 | **合成层**：加载时由条目内 `userModels` 包成 `{providers:[{id,models:userModels}]}`，插在向导层与用户配置之间；只作用于 `models` 逐字段合并，不产生权限规则等其他字段（ADR-0024，见第 2 节） |
 | 程序设置 | `<NOCTURNE_HOME>/settings.json` | 可信 | 白名单设置参与合并，界面偏好只保留；低于所有手写配置（[ADR-0034](../decisions/ADR-0034-settings-layer.md)，见第 2 节） |
-| 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；**程序从不改写它** |
+| 用户配置 | `<NOCTURNE_HOME>/config.json` | 可信 | 用户手写的偏好；除 [ADR-0082](../decisions/ADR-0082-computer-use.md) 软件权限规则（`RuntimeConfig.appPermissions`，见第 6 节）外，程序不改写它 |
 | Magpie 接入 | `<NOCTURNE_HOME>/magpie.json` | 可信（用户级） | 由 Magpie 的 Agent 插件维护，Nocturne **只读**；只贡献默认模型与一条名为 `magpie` 的服务商，位于用户配置之上，使 Magpie 页的模型选择压过旧的默认模型；以 `magpie.baseURL` 存在为「已接入」，断开即视为不存在。契约、鉴权与生命周期见 [magpie.md](magpie.md)、[ADR-0062](../decisions/ADR-0062-magpie-agent-plugin.md) |
 | 项目配置 | `<workspaceRoot>/.nocturne/config.json` | **默认不可信** | 来自被操作的仓库，见第 3 节信任模型 |
 | 环境变量 | `NOCTURNE_*` | 可信 | 见第 5 节；API key 经环境变量或操作系统凭据后端进入。`credentials.json` 默认只存索引或密文；用户显式选择后，账号登录记录可以 `plaintext` 写入该文件（[provider-setup.md](provider-setup.md) 第 3 节） |
@@ -45,7 +45,7 @@
 - 文件不存在即跳过该层；`NOCTURNE_HOME` 改变时全部位置随之移动。
 
 ```ts
-// 配置字段共用一个 schema；程序从不改写用户或项目 config.json
+// 配置字段共用一个 schema；项目 config.json 程序从不改写，用户 config.json 仅 ADR-0082 appPermissions 会写回 kind: "app" 规则
 interface ConfigFile {
   /** 摘要阈值（ADR-0037，缺省 90%，相对可用输入预算或绝对 token）与修剪绝对上限（ADR-0066，缺省 200000，0 不设上限） */
   compaction?: { threshold?: string | number; pruneLimit?: number };
@@ -289,7 +289,7 @@ CLI 注入无状态的 `createAcpConnector(platform)`。Core 从当前合并配�
 
 同一进程内同一 NOCTURNE_HOME 下同一工作区的项目授权共享一份存储，重新加载配置不重建：缓存是进程级的，按规范化的 grants 目录 + 工作区真实路径作键，不论经 `reload()` 还是重新调用 `loadConfig()`（CLI/TUI 的 `/login`、`/provider` 等）都拿到同一对象。加载被拒绝时从缓存移除、下次重试；损坏文件按空集合加载并告警，照常缓存。
 
-项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（`{ version: 1, workspaceRoot, grants }`），形状、匹配、原子增删、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
+项目 Grant 是运行期积累的授权记录（不是配置，不写入 `config.json`），按工作区存放在 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（`{ version: 1, workspaceRoot, grants }`）。条目可选字段 `match?: "pattern"` 用于项目级 `shell` 命令模式授权（[ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)），不提升文件版本号；加载时校验 `match` 只能缺省或为 `"pattern"` 且 `"pattern"` 仅配 `kind: "shell"`，非法条目跳过并告警。增删与去重均按三元键 `(kind, target, match)` 比对（`GrantStore.remove(kind, target, match?)`）。其余形状、匹配、原子增删、坏条目跳过与损坏备份规则见 [permissions.md](permissions.md) 第 5.4 节。
 
 授权管理（[ADR-0068](../decisions/ADR-0068-grants-management.md)）的工作区汇总合并授权文件的 `workspaceRoot`、`trust.json` 和已打开会话目录，按真实路径去重，返回 `{ workspace, grantCount, trusted, hasProjectConfig }[]`。损坏、版本不符、文件名与工作区键不符的授权文件跳过，并向已打开会话发 `runtime.warning(grants_invalid)`（同时记诊断）。信任状态来自 `trust.json`；查询不会启动项目进程。
 

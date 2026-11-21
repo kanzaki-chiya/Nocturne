@@ -2,7 +2,7 @@
 
 [ADR-0081](../decisions/ADR-0081-session-worktree-switch.md)：主会话调用过 `switch_worktree`（且未被回退到首次切换前）时，权限层持有同仓库工作树根目录清单；落入非当前工作树的 `edit` 主体直接 `deny`（不询问，优先于预设与放行规则），`read` 主体沿用原判定，通过后由工具执行层在结果末尾追加一行英文提示。
 
-> 状态：已接受 v0.3 ｜ 前置阅读：[tools.md](tools.md)、[config.md](config.md) ｜ 决策：[ADR-0004](../decisions/ADR-0004-permission-rules.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md)
+> 状态：已接受 v0.3 ｜ 前置阅读：[tools.md](tools.md)、[config.md](config.md) ｜ 决策：[ADR-0004](../decisions/ADR-0004-permission-rules.md)、[ADR-0008](../decisions/ADR-0008-project-trust-grants.md)、[ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)
 
 ## 1. 定位
 
@@ -22,7 +22,7 @@
 | `SubjectRequest` | 工具声明的、未解析的主体：`{ kind, target, detail? }` | 工具的 `permissionSubjects(input)`（纯函数） | — |
 | `PermissionSubject` | 解析后的主体：增加 `resolved`（真实路径）与 `where` | Tool Executor 解析 + 权限层计算 `where` | `tool.started`、`permission.requested` |
 | `PermissionRule` | 一条规则：`{ kind?, pattern, action, where?, label? }`；`kind` 缺省或 `*` 匹配全部类别；`label` 是给人看的短说明，命中时进入解释文本 | 预设、用户配置、项目配置、命令行参数 | 配置文件 |
-| `Grant` | 用户在确认时授予的授权："本会话内允许"或"在此项目中始终允许"，形状 `{ kind, target, createdAt }`（5.4） | 客户端回复 | 会话内存 / 用户数据目录 |
+| `Grant` | 用户在确认时授予的授权："本会话内允许"、"在此项目中始终允许"或项目级 shell 命令模式规则，形状 `{ kind, target, createdAt, match? }`（5.4） | 客户端回复 | 会话内存 / 用户数据目录 |
 | `PermissionDecision` | 求值结果：`{ action, matchedRule?, source, reason }` | `PermissionPolicy.evaluate` | `tool.started.permission`、`permission.resolved` |
 | `PermissionRequest` | `ask` 时发给客户端的待确认请求，有 `requestId` | `PermissionGate` | `permission.requested` |
 | `PermissionReply` | 客户端的回答：允许 / 拒绝、是否授予 Grant、可选反馈 | 客户端 | `permission.resolved` |
@@ -130,9 +130,21 @@ trusted   = lastMatch(内置预设 ++ 用户 ++ [可信项目] ++ 命令行, sub
 untrusted = 项目不可信 ? lastMatch(项目规则中的 ask/deny, subject) : 无
 decision  = stricter(trusted, untrusted)
 if decision == ask:
-  if 有 Grant 匹配 subject:      decision = allow   # source = "grant"
-  elif autoApproveAsk（--yes）:  decision = allow   # source = "rule"，理由注明命令行提升
+  if 有精确 Grant 匹配 subject:          decision = allow   # source = "grant"（会话优先于项目）
+  elif 满足模式 Grant 参与条件且命中项目模式 Grant:
+                                        decision = allow   # source = "grant"（match = "pattern"）
+  elif autoApproveAsk（--yes）:          decision = allow   # source = "rule"，理由注明命令行提升
 ```
+
+模式 Grant（`match: "pattern"`，[ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)）排在精确 Grant 之后、`autoApproveAsk`（`--yes`）之前，仅在**同时满足**以下条件时参与匹配：
+
+- 主体类别为 `shell`；
+- 非组合命令（`!isCompositeShell`，按主体 `shell` 方言判定）；
+- 未命中高风险命令段（`findRiskySegment === undefined`）；
+- 非不透明 PowerShell 命令（`!isOpaquePowerShellCommand`）；
+- 非 `userOnly`（不绕过用户 / 项目 / CLI 的显式 `ask` 规则、可能读取凭据的命令、预设 `userOnly` 规则以及 `smart` 直接交人的命令；例如已有 `git *` 模式 Grant 且用户规则声明 `git push * → ask` 时，执行 `git push origin main` 仍返回 `ask`）。
+
+精确 Grant 命中行为保持不变，不受上述模式 Grant 排除条件收紧影响。
 
 Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
@@ -185,30 +197,32 @@ Jev 的 `usage.input_tokens/output_tokens` 转为 `ReviewResult.usage`，沿用 
 
 附加约束：
 
-- **shell 组合命令**：命令包含 `&&`、`||`、`;`、`|`、换行、反引号、`$(`、重定向等控制符时，基于模式的 `allow` 规则不适用（规则照常匹配，但 `allow` 结果按 `ask` 对待，`deny` 仍为 `deny`）；Grant 对命令本来就只能精确匹配完整字符串（5.4），不受此影响。这避免 `git status*` 放行 `git status && rm -rf .`。例外是全放行规则（`pattern` 为 `*`，如 `guarded` 的 shell 规则）：它本来就放行任何命令，降级只会让带管道、`2>&1` 的普通命令全部来问，所以改为把命令按控制符拆段、逐段求值，任一段得到 `ask`/`deny`（如第 6 节的高风险命令、用户的 `deny` 规则）就取最严格者。拆段按原始文本切分、刻意不做引号感知：`sh -c "cd x; rm -rf build"` 里引号内的命令同样会执行，要切出 `rm -rf build"` 才能命中高风险表；组合判定同样看原始文本。拆分边界随主体 `shell` 字段的方言（ADR-0022）：PowerShell 系额外把脚本块 `{` `}` 视为边界（`&` 在两种方言里都切——调用运算符与后台运算符后面的内容照常成段求值），cmd / POSIX 保持原集合。shell 工具的末尾分页预检用另一个引号感知的词法器（`lexShellCommand`，[tools.md](tools.md) 第 6 节），它只用于提示，不参与权限判定。拆段是基于模式的提示，不是 shell 解析器，与第 6 节高风险命令一样不构成安全边界。
+- **shell 组合命令**：命令包含 `&&`、`||`、`;`、`|`、换行、反引号、`$(`、重定向等控制符时，基于模式的 `allow` 规则不适用（规则照常匹配，但 `allow` 结果按 `ask` 对待，`deny` 仍为 `deny`）；精确 Grant 仅匹配完整命令字符串（5.4），不受此影响，而模式 Grant（`match: "pattern"`）同样不对组合命令生效（5.3）。这避免 `git status*` 放行 `git status && rm -rf .`。例外是全放行规则（`pattern` 为 `*`，如 `guarded` 的 shell 规则）：它本来就放行任何命令，降级只会让带管道、`2>&1` 的普通命令全部来问，所以改为把命令按控制符拆段、逐段求值，任一段得到 `ask`/`deny`（如第 6 节的高风险命令、用户的 `deny` 规则）就取最严格者。拆段按原始文本切分、刻意不做引号感知：`sh -c "cd x; rm -rf build"` 里引号内的命令同样会执行，要切出 `rm -rf build"` 才能命中高风险表；组合判定同样看原始文本。拆分边界随主体 `shell` 字段的方言（ADR-0022）：PowerShell 系额外把脚本块 `{` `}` 视为边界（`&` 在两种方言里都切——调用运算符与后台运算符后面的内容照常成段求值），cmd / POSIX 保持原集合。shell 工具的末尾分页预检用另一个引号感知的词法器（`lexShellCommand`，[tools.md](tools.md) 第 6 节），它只用于提示，不参与权限判定。拆段是基于模式的提示，不是 shell 解析器，与第 6 节高风险命令一样不构成安全边界。
 - **`--yes` 的边界**：`autoApproveAsk` 只把最终求值结果为 `ask` 的调用提升为 `allow`（`source` 记 `rule`，理由注明来自命令行）。它不覆盖显式 `deny`（包括不可信项目规则的 `deny`），不绕过输入校验、主体解析或工具自身边界；转换在权限层完成，CLI 与工具实现不得自行放行。
-- **可解释**：决定中记录命中的规则及其来源：`matchedRule = { origin, index?, rule?, description, grant? }`；授权命中时 `grant = { scope: "session" | "project", createdAt }`，原样写入 `tool.started.permission` 和 `permission.resolved`（旧日志缺省），`origin` 取 `preset` / `user` / `project` / `project-untrusted` / `cli` / `grant` / `default`（兜底 ask，无规则本体）；人读说明形如"预设 default 第 3 条""用户配置第 1 条""项目配置第 2 条（不可信，仅收紧）""Grant（项目）"。没有命中任何规则而落到 `ask` 时 `origin` 为 `default`，说明为"默认询问"。
+- **可解释**：决定中记录命中的规则及其来源：`matchedRule = { origin, index?, rule?, description, grant? }`；授权命中时 `grant = { scope: "session" | "project", createdAt, match?, pattern? }`（精确 Grant 仅填 `scope` 与 `createdAt`，项目模式 Grant 额外填 `match: "pattern"` 与 `pattern: grant.target`），原样写入 `tool.started.permission` 和 `permission.resolved`（旧日志缺省），`origin` 取 `preset` / `user` / `project` / `project-untrusted` / `cli` / `grant` / `default`（兜底 ask，无规则本体）；人读说明形如"预设 default 第 3 条""用户配置第 1 条""项目配置第 2 条（不可信，仅收紧）""Grant（项目）"。没有命中任何规则而落到 `ask` 时 `origin` 为 `default`，说明为"默认询问"。
 
 ### 5.4 Grant 的形状与匹配
 
 ```ts
 interface Grant {
   kind: SubjectKind;
-  /** 授权目标：路径类为解析后的真实路径（canonical），shell 为完整命令字符串 */
+  /** 授权目标：路径类为解析后的真实路径（canonical），shell 精确授权为完整命令字符串，match === "pattern" 时为通配符模式 */
   target: string;
   createdAt: string;
+  /** 缺省为精确匹配；"pattern" 仅允许用于项目级 shell 模式授权（ADR-0106） */
+  match?: "pattern";
 }
 ```
 
-Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。`kind` 直接复用权限主体的全部类别（含 `subagent`，如 `external:omp`），不再维护第二份枚举，以后新增主体类型不会漏。授权键：路径类取 `resolved`（缺失时取规范化 `target`），shell 取完整命令字符串，`network` / `mcp` / `subagent` / `schedule` 取 `target` 原值。`schedule` 的 target 含动作，所以「本会话允许」只覆盖同一任务的同一动作，不看指令内容；因此确认选项不提供「在此项目中始终允许」（见第 7 节）。"允许整个目录 / 某类命令"这类粗粒度授权不在确认选项中提供——需要时由用户显式写规则（配置文件的 `permissions.rules`），而不是在确认框里随手放权。
+Grant 缺省按精确匹配：`kind` 相同、`match` 缺省且 `target` 与主体的授权键相等。`kind` 直接复用权限主体的全部类别（含 `subagent`，如 `external:omp`），不再维护第二份枚举，以后新增主体类型不会漏。授权键：路径类取 `resolved`（缺失时取规范化 `target`），shell 取完整命令字符串，`network` / `mcp` / `subagent` / `schedule` 取 `target` 原值。`schedule` 的 target 含动作，所以「本会话允许」只覆盖同一任务的同一动作，不看指令内容；因此确认选项不提供「在此项目中始终允许」（见第 7 节）。当项目 Grant 带有 `match: "pattern"`（仅限 `kind: "shell"`）时，在精确 Grant 未命中且主体满足 5.3 的模式 Grant 参与条件时，按 shell 通配符语义（`*` 匹配含换行的任意字符、`?` 匹配单字符、大小写敏感）匹配命令原文。路径/目录等粗粒度授权仍不在确认选项中提供——需要时由用户显式写规则（配置文件的 `permissions.rules`）；对于满足条件的单条非组合普通 shell 命令，桌面端确认卡片提供「改成规则…」，经用户编辑并校验通过后存为项目级模式 Grant（`match: "pattern"`，详见 [ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)）。
 
 - **会话 Grant**：保存在会话内存中，会话关闭即失效，恢复后不保留。其作用域是**会话树**：交互式父会话下的一次性 `task` 子会话（[subagent.md](subagent.md) 第 7 节、[ADR-0091](../decisions/ADR-0091-subagent-permission-forward.md)）与 Ensemble 常驻成员（[ADR-0089](../decisions/ADR-0089-ensemble.md) §8）均共享同一会话树 `sessionGrants` 集合——用户在父会话、转发确认或成员会话上确认 `allow_session` 生成的会话 Grant，在同一会话树的父会话与所有子会话（含后续或嵌套子代理）内生效。非交互宿主下的一次性子会话与外部 ACP 子会话仍以只读方式继承父会话 `sessionGrants`，不产生新授权。
-- **项目 Grant**：写入 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（见 [config.md](config.md) 第 4 节），按会话的 `workspaceRoot` 归属；策略每次判定时实时读取存储（传 store 或 getter，不传快照），同一会话内新增的项目授权下一次同目标调用直接放行；写盘失败时降级为会话 Grant 并发出 `runtime.warning`。
-- 客户端回复 `PermissionReply.remember = "session" | "project"` 时生成对应 Grant；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
-- **坏条目与损坏文件**：加载时逐条校验，跳过无效条目并发一次警告，其余照常生效；只有 JSON 解析失败、版本不符或 `workspaceRoot` 不符时才把整份文件按空处理。这种情况下第一次 `add` 之前先把原文件改名备份为 `<原名>.corrupt-<时间戳>.json`，不得直接覆盖。
-- **`add` 去重**：`kind` 和 `target` 都相同的授权已存在时不再追加，也不重写文件。
-- **管理与撤销**（[ADR-0068](../decisions/ADR-0068-grants-management.md)）：`GrantStore.remove(kind, target)`、`clear()` 与 `add` 共用串行原子写，写盘成功后才更新内存，失败抛错且列表不变；全部撤销保留空数组文件。同一进程内按 NOCTURNE_HOME 与真实工作区共享 store，重新加载配置不重建（[config.md 第 4 节](config.md#4-grant-的持久化)），权限层每次求值读取最新集合；撤销从下一次调用生效，不改变等待中或执行中的调用。
-- `RuntimeSession.listGrants/revokeGrant/revokeAllGrants` 管理会话树共享的内存集合。活动子会话没有 RuntimeSession，因此 Runtime 另提供 `listSessionGrants({ sessionId })`、`revokeSessionGrant({ sessionId, kind, target })`、`revokeAllSessionGrants({ sessionId })`，在 Core 内沿活动登记簿解析到根，供 RPC 原有 `session.*` 方法转发；已关闭的树无内存授权。根和子会话的下一次判定同时生效。管理入口不是模型工具，授权数据保护规则不变。
+- **项目 Grant**：写入 `<NOCTURNE_HOME>/grants/<workspaceKey>.json`（见 [config.md](config.md) 第 4 节），按会话的 `workspaceRoot` 归属；策略每次判定时实时读取存储（传 store 或 getter，不传快照），同一会话内新增的项目授权（含模式 Grant）下一次匹配调用直接放行；写盘失败时降级为当前目标的会话精确 Grant 并发出 `runtime.warning`。
+- 客户端回复 `PermissionReply.remember = "session" | "project" | "pattern"` 时生成对应 Grant（`"pattern"` 需附带经校验的 `pattern`，仅写入项目级 `shell` 模式 Grant，不产生会话模式 Grant）；`remember` 与 `decision: "deny"` 组合无意义，忽略 `remember`。
+- **坏条目与损坏文件**：加载时逐条校验（含校验 `match` 只能缺省或为 `"pattern"`，且 `"pattern"` 只能配 `kind: "shell"`），跳过无效条目并发一次警告，其余照常生效；只有 JSON 解析失败、版本不符或 `workspaceRoot` 不符时才把整份文件按空处理。这种情况下第一次 `add` 之前先把原文件改名备份为 `<原名>.corrupt-<时间戳>.json`，不得直接覆盖。
+- **`add` 去重**：按三元键 `(kind, target, match)` 比对，已存在同键授权时不再追加，也不重写文件；同 `target` 的精确 Grant（`match === undefined`）与模式 Grant（`match === "pattern"`）互不覆盖。
+- **管理与撤销**（[ADR-0068](../decisions/ADR-0068-grants-management.md)、[ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)）：`GrantStore.remove(kind, target, match?)`、`clear()` 与 `add` 共用串行原子写，按 `(kind, target, match)` 精确匹配删除，写盘成功后才更新内存，失败抛错且列表不变；全部撤销保留空数组文件。同一进程内按 NOCTURNE_HOME 与真实工作区共享 store，重新加载配置不重建（[config.md 第 4 节](config.md#4-grant-的持久化)），权限层每次求值读取最新集合；撤销从下一次调用生效，不改变等待中或执行中的调用。
+- `RuntimeSession.listGrants/revokeGrant/revokeAllGrants` 管理会话树共享的内存集合。活动子会话没有 RuntimeSession，因此 Runtime 另提供 `listSessionGrants({ sessionId })`、`revokeSessionGrant({ sessionId, kind, target, match? })`、`revokeAllSessionGrants({ sessionId })`，在 Core 内沿活动登记簿解析到根，供 RPC 原有 `session.*` 方法转发；已关闭的树无内存授权。根和子会话的下一次判定同时生效。管理入口不是模型工具，授权数据保护规则不变。
 
 ### 5.6 软件授权（ADR-0082）
 
@@ -268,7 +282,7 @@ Grant 只精确匹配：`kind` 相同且 `target` 与主体的授权键相等。
 
 ```text
 PermissionGate.check(subjects, signal)
-  → emit permission.requested { requestId, callId, subjects, reason, options }
+  → emit permission.requested { requestId, callId, subjects, reason, options, ruleSuggestion? }
   → 等待 session.respondPermission(requestId, reply)，或 signal 中止
   → emit permission.resolved { requestId, action, source: "user" | "cancelled", remember }
 ```
@@ -285,6 +299,17 @@ PermissionGate.check(subjects, signal)
 | 拒绝并停止 | `deny_stop` | 工具结果为拒绝，并中止当前 Turn |
 
 选项集由权限层计算：任一主体命中高风险命令表、`-EncodedCommand` 或工作区外 edit 时，只给 `allow_once`、`deny`、`deny_stop`；任一主体为 `schedule` 时不提供 `allow_project`（Grant 只按 `动作:任务名` 精确匹配、不看指令，项目级授权会放行以后同名任务的不同指令），其余为 `allow_once`、`allow_session`、`deny`、`deny_stop`；其他请求给出上表五项。客户端照 `permission.requested.options` 渲染，权限层也拒绝回复里不在选项集中的长期授权；`PermissionReply.remember` 与所选 Grant 的持久化由权限层完成，客户端只表达意图。
+
+**把命令改成规则（`ruleSuggestion` 与 `remember: "pattern"`，[ADR-0106](../decisions/ADR-0106-command-rule-from-confirm.md)）**：不新增 `PermissionOption` 枚举值，改为在 `permission.requested` 附可选 `ruleSuggestion?: { pattern: string }`，旧客户端忽略该字段。仅当以下六个条件**全部满足**时附带 `ruleSuggestion`（预填模式由 `@nocturne/core/protocol` 的 `suggestShellRulePattern(command, dialect)` 生成）：
+
+1. 单一主体且 `kind === "shell"`；
+2. 非组合命令（`!isCompositeShell`，按主体 `shell` 方言）；
+3. 本次 `options` 包含 `allow_project`；
+4. `evaluation.userOnly !== true`（排除 `smart` 直接交人、可能读取凭据的命令、预设 `userOnly` 规则以及用户 / 项目 / CLI 显式 `ask` 规则）；
+5. 非 `PreToolUse` Hook 强制确认（`!forceAsk`）；
+6. 交互模式（`interactive === true`）。
+
+客户端提交 `PermissionReply = { decision: "allow", remember: "pattern", pattern: string }` 时，`PermissionGate.respond` 仅在请求本身带有 `ruleSuggestion`、单一 `shell` 主体且 `options` 含 `allow_project` 时接受，并用 `@nocturne/core/protocol` 的 `validateShellRulePattern(pattern, command, dialect)` 做二次校验（去首尾空白非空且 ≤200 字、无组合命令控制符、首词无 `*`/`?` 且等于当前命令首词、匹配当前命令）。任一校验不通过均返回 `false`（请求保持等待、不写授权）；通过则写入项目模式 Grant `{ kind: "shell", target: validated.pattern, createdAt, match: "pattern" }` 并结算 `permission.resolved.remember = "pattern"`。写盘失败（或未配置项目 Grant 存储）时降级为写入当前命令的会话精确 Grant、结算 `remember = "session"`，写盘抛错时发出 `runtime.warning(code: "grant_persist_failed")`。
 
 两种 Grant 都只在求值结果为 `ask` 时生效（5.3）。没有交互式客户端时（Runtime 选项 `interactive = false`，或定时会话还没被接手——见 [schedule.md](schedule.md) 第 4 节：`message.user` 少于 2 条），审查后的剩余 `ask` 视为 `deny`（`source: "non_interactive"`，不发 `permission.requested`）；`smart` 的审查 allow 执行，交给你确认（`unsure`）走上述非交互拒绝；要在无人值守场景放行使用 `--yes`（5.3 的命令行提升）或预写规则，不提供"非交互默认允许"的配置项。非交互拒绝的提示文案可由调用方注入（`nonInteractiveDenyHint`）——非交互宿主下的子会话或外部 ACP 用它告诉子模型"无法请求用户确认，需要写入或执行的操作在 `finish` 结果中说明，由父代理执行"（[subagent.md](subagent.md) 7.3），CLI 非交互模式沿用通用文案。
 
