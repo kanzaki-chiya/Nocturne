@@ -145,6 +145,13 @@
   user-select: text;
 }
 
+.plugins-page .plugin-agent-desc {
+  font-size: var(--fs-1);
+  line-height: var(--lh-base);
+  color: var(--a-secondary);
+  overflow-wrap: anywhere;
+}
+
 .plugins-page .plugin-dlg-section {
   display: flex;
   flex-direction: column;

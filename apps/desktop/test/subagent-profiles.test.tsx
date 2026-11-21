@@ -5,6 +5,7 @@ import {
   REASONING_EFFORT_ORDER,
   subagentSelectionTable,
   type ExternalAgentOverview,
+  type PluginOverview,
   type SubagentProfileConfig,
 } from "@nocturne/core/protocol";
 import { ExternalAgentsPage } from "../src/ExternalAgentsPage";
@@ -46,7 +47,11 @@ function settingItem(key: string, value: unknown): SettingItem {
 }
 
 /** 设置项随 updateSettings 补丁就地更新；返回收到的补丁序列 */
-function profileServer(initial: SettingItem[], agents: ExternalAgentOverview[] = []) {
+function profileServer(
+  initial: SettingItem[],
+  agents: ExternalAgentOverview[] = [],
+  plugins: PluginOverview[] = [],
+) {
   let items = initial;
   const patches: SettingsPatch[] = [];
   const server = fakeServer(
@@ -55,6 +60,7 @@ function profileServer(initial: SettingItem[], agents: ExternalAgentOverview[] =
       "runtime.listModels": [model, strong],
       "skills.describeSkills": { skills: [], warnings: [] },
       "agents.describeExternalAgents": { agents, warnings: [] },
+      "plugins.describePlugins": { plugins, warnings: [] },
       "runtime.updateSettings": (params: Record<string, unknown>) => {
         const patch = params.patch as SettingsPatch;
         patches.push(patch);
@@ -421,5 +427,135 @@ it("default 档位的模型写 modelRoles.task；预览与 Core 生成函数逐�
       subagentSelectionTable([{ ...quick, name: "quick" }], [agent], "p/cheap"),
     ),
   );
+  server.close();
+});
+
+it("插件子代理按已启用插件分组，行内改模型即时写入，详情页除模型外只读", async () => {
+  const pptxPlugin: PluginOverview = {
+    id: "nocturne:pptx@builtin",
+    host: "nocturne",
+    name: "pptx",
+    marketplace: "builtin",
+    version: "0.57.0",
+    root: "/builtin/pptx",
+    displayName: "演示文档",
+    description: "演示文稿处理",
+    icon: "data:image/svg+xml;base64,PHN2Zy8+",
+    state: "on",
+    hooks: [],
+    unsupported: [],
+    skills: ["pptx"],
+    mcpServers: [],
+    agents: [
+      {
+        id: "pptx:visual-judge",
+        name: "visual-judge",
+        description: "逐页渲染演示文稿并检查视觉排版、文字溢出与字号可读性",
+        tools: ["read", "mcp__slides__render"],
+      },
+    ],
+    warnings: [],
+  };
+  const pdfPlugin: PluginOverview = {
+    ...pptxPlugin,
+    id: "nocturne:pdf@builtin",
+    name: "pdf",
+    root: "/builtin/pdf",
+    displayName: "PDF",
+    agents: [
+      {
+        id: "pdf:visual-judge",
+        name: "visual-judge",
+        description: "逐页渲染 PDF 检查越界、分栏与分页问题",
+        tools: ["read", "mcp__pdf__render"],
+      },
+    ],
+  };
+  const disabledPlugin: PluginOverview = {
+    ...pptxPlugin,
+    id: "nocturne:docx@builtin",
+    name: "docx",
+    root: "/builtin/docx",
+    displayName: "Word 文档",
+    state: "off",
+    agents: [
+      {
+        id: "docx:visual-judge",
+        name: "visual-judge",
+        description: "停用插件不应出现",
+        tools: ["read", "mcp__word__render"],
+      },
+    ],
+  };
+  const extAgent: ExternalAgentOverview = {
+    name: "offline",
+    description: "离线外部代理",
+    command: "offline",
+    args: [],
+    enabled: true,
+    origin: "app",
+    editable: true,
+    path: "home/external-agents.json",
+  };
+
+  const { server, patches } = profileServer(
+    [],
+    [extAgent],
+    [pptxPlugin, pdfPlugin, disabledPlugin],
+  );
+  await server.initialize();
+  render(<ExternalAgentsPage client={server.client} workspaceRoot={undefined} version={0} />);
+  await screen.findByRole("heading", { level: 1, name: "子代理" });
+
+  // 1. 仅已启用插件出现，分组顺序位于「内置档位」与「外部 Agent」之间，标题与计数正确
+  const regions = await screen.findAllByRole("region");
+  const regionLabels = regions.map((r) => r.getAttribute("aria-label"));
+  expect(regionLabels).toEqual(["内置档位 · 1", "演示文档 · 1", "PDF · 1", "外部 Agent · 1"]);
+  expect(screen.queryByRole("region", { name: /^Word 文档/ })).toBeNull();
+
+  // 2. 行上无前缀子代理名、「2 个工具」、无启用开关、模型下拉首项「跟随默认」
+  const pptxRegion = screen.getByRole("region", { name: "演示文档 · 1" });
+  const rowBtn = within(pptxRegion).getByRole("button", { name: /visual-judge/ });
+  expect(rowBtn.textContent).not.toContain("pptx:visual-judge");
+  expect(within(pptxRegion).getByText("2 个工具")).toBeTruthy();
+  expect(pptxRegion.querySelector('[role="switch"]')).toBeNull();
+
+  const rowDropdown = within(pptxRegion).getByRole("combobox", { name: "visual-judge 模型" });
+  expect(rowDropdown.textContent).toContain("跟随默认");
+
+  // 3. 列表行改模型后即时写入用户设置
+  fireEvent.click(rowDropdown);
+  const listbox = screen.getByRole("listbox");
+  const optionLabels = within(listbox)
+    .getAllByRole("option")
+    .map((o) => o.textContent?.replace(/^✓/, "") ?? "");
+  expect(optionLabels[0]).toBe("跟随默认");
+  fireEvent.click(within(listbox).getByRole("option", { name: /strong/ }));
+  await waitFor(() =>
+    expect(patches).toEqual([{ "subagents.pluginModels.pptx:visual-judge": "p/strong" }]),
+  );
+
+  // 4. 点行进入只读详情页：展示名称、描述、来源插件、工具清单与可改模型，无其他输入或删除操作
+  fireEvent.click(rowBtn);
+  await screen.findByRole("heading", { level: 1, name: /visual-judge/ });
+  expect(screen.getByText("pptx:visual-judge")).toBeTruthy();
+  expect(screen.getByText("演示文档")).toBeTruthy();
+  expect(screen.getByText("read")).toBeTruthy();
+  expect(screen.getByText("mcp__slides__render")).toBeTruthy();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.queryByRole("switch")).toBeNull();
+  expect(screen.queryByRole("button", { name: "删除" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+
+  // 5. 详情页可改模型回「跟随默认」
+  fireEvent.click(screen.getByRole("combobox", { name: "模型" }));
+  fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "跟随默认" }));
+  await waitFor(() =>
+    expect(patches).toEqual([
+      { "subagents.pluginModels.pptx:visual-judge": "p/strong" },
+      { "subagents.pluginModels.pptx:visual-judge": null },
+    ]),
+  );
+
   server.close();
 });

@@ -36,8 +36,21 @@ export function profilesFromSettings(items: readonly SettingItem[]) {
     }));
 }
 
+function profilePatch(name: string, value: SubagentProfileConfig | null): SettingsPatch {
+  const patch: SettingsPatch = {};
+  patch[`subagents.profiles.${name}`] = value;
+  return patch;
+}
+
 function timeoutInputValue(timeoutMs: number | undefined): string {
   return timeoutMs === undefined ? "" : String(timeoutMs / 1000);
+}
+
+export interface PluginAgentPreviewEntry {
+  id: string;
+  description: string;
+  effort?: ReasoningEffort | undefined;
+  model?: string | undefined;
 }
 
 export function SubagentProfileEditor({
@@ -47,6 +60,7 @@ export function SubagentProfileEditor({
   items,
   models,
   agents,
+  pluginAgents = [],
   onSave,
   onDelete,
   onCancel,
@@ -57,6 +71,7 @@ export function SubagentProfileEditor({
   items: readonly SettingItem[];
   models: readonly ModelInfo[];
   agents: readonly ExternalAgentOverview[];
+  pluginAgents?: readonly PluginAgentPreviewEntry[];
   onSave: (patch: SettingsPatch) => Promise<void>;
   onDelete: () => Promise<void>;
   onCancel: () => void;
@@ -103,17 +118,38 @@ export function SubagentProfileEditor({
   if (!isDefault && (creating || name !== "")) {
     previewProfiles.push({ ...draft, name });
   }
+  const defaultTaskModel = isDefault
+    ? draft.model
+    : items.find((item) => item.key === "modelRoles.task")?.effective;
+  const previewPluginProfiles = pluginAgents
+    .filter(
+      (agent) =>
+        agent.model === undefined ||
+        models.some((m) => `${m.ref.provider}/${m.ref.model}` === agent.model && !m.unavailable),
+    )
+    .map((agent) => ({
+      name: agent.id,
+      description: agent.description,
+      enabled: true,
+      ...(agent.effort !== undefined ? { effort: agent.effort } : {}),
+      ...((agent.model ?? defaultTaskModel) !== undefined
+        ? { model: agent.model ?? defaultTaskModel }
+        : {}),
+    }));
   const preview = subagentSelectionTable(
-    previewProfiles.filter(
-      (profile) =>
-        profile.enabled &&
-        (profile.model === undefined ||
-          models.some(
-            (m) => `${m.ref.provider}/${m.ref.model}` === profile.model && !m.unavailable,
-          )),
-    ),
+    [
+      ...previewProfiles.filter(
+        (profile) =>
+          profile.enabled &&
+          (profile.model === undefined ||
+            models.some(
+              (m) => `${m.ref.provider}/${m.ref.model}` === profile.model && !m.unavailable,
+            )),
+      ),
+      ...previewPluginProfiles,
+    ],
     agents.filter((agent) => agent.enabled),
-    isDefault ? draft.model : items.find((item) => item.key === "modelRoles.task")?.effective,
+    defaultTaskModel,
     (ref) =>
       ref !== undefined
         ? models.find((m) => `${m.ref.provider}/${m.ref.model}` === ref)?.pricing
@@ -142,7 +178,7 @@ export function SubagentProfileEditor({
       await onSave(
         isDefault
           ? { "modelRoles.task": nextConfig.model ?? null }
-          : { [`subagents.profiles.${name}`]: nextConfig },
+          : profilePatch(name, nextConfig),
       );
       savedRef.current = nextConfig;
       submittedTimeoutRef.current = nextConfig.timeoutMs;
@@ -386,7 +422,7 @@ export function SubagentProfileEditor({
               event.currentTarget.reportValidity();
               return;
             }
-            void mutate(() => onSave({ [`subagents.profiles.${name}`]: draft }));
+            void mutate(() => onSave(profilePatch(name, draft)));
           }}
         >
           <SettingsGroup plain>

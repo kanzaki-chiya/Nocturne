@@ -1013,3 +1013,48 @@ it("「创建插件」按钮在插件创建器启用时可触发 plugin-creator 
 
   f.close();
 });
+
+it("插件详情页与启用确认框展示「子代理」一节的名称与描述", async () => {
+  const pptx = plugin({
+    id: "nocturne:pptx@local",
+    host: "nocturne",
+    name: "pptx",
+    marketplace: "local",
+    displayName: "演示文档",
+    description: "创建、编辑与渲染演示文稿",
+    state: "off",
+    hooks: [],
+    unsupported: [],
+    skills: ["pptx"],
+    agents: [
+      {
+        id: "pptx:visual-judge",
+        name: "visual-judge",
+        description: "逐页渲染演示文稿并检查视觉排版问题",
+        tools: ["read", "mcp__slides__render"],
+      },
+    ],
+  });
+  const f = fakeServer(
+    withInit({
+      "plugins.describePlugins": desc([pptx]),
+    }),
+  );
+  await f.initialize();
+  render(<PluginsPage client={f.client} version={0} openDirectory={vi.fn()} />);
+
+  // 点开插件详情页
+  fireEvent.click(await screen.findByRole("button", { name: /演示文档/ }));
+  const agentsSection = await screen.findByRole("region", { name: "子代理 · 1" });
+  expect(within(agentsSection).getByText("visual-judge")).toBeTruthy();
+  expect(within(agentsSection).getByText("逐页渲染演示文稿并检查视觉排版问题")).toBeTruthy();
+
+  // 点启用开关打开确认对话框也展示子代理一节
+  fireEvent.click(screen.getByRole("switch", { name: "启用 演示文档" }));
+  const dlg = await screen.findByRole("dialog");
+  expect(within(dlg).getByText("子代理")).toBeTruthy();
+  expect(within(dlg).getByText("visual-judge")).toBeTruthy();
+  expect(within(dlg).getByText("逐页渲染演示文稿并检查视觉排版问题")).toBeTruthy();
+
+  f.close();
+});

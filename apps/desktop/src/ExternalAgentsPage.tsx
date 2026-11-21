@@ -5,11 +5,14 @@ import type {
   ExternalAgentConfig,
   ExternalAgentOverview,
   ExternalAgentProbeResult,
+  PluginAgentOverview,
+  PluginOverview,
   SkillOverview,
   SubagentProfileConfig,
 } from "@nocturne/core/protocol";
 import { Dropdown } from "./Dropdown";
 import { Menu, MenuItem } from "./Menu";
+import { PluginIcon } from "./PluginsPage";
 import { ConfirmDialog } from "./ProvidersPage";
 import { externalAgentSlashConflict } from "./commands";
 import { profilesFromSettings, SubagentProfileEditor } from "./SubagentProfileEditor";
@@ -101,6 +104,18 @@ function readonlyReasonOf(agent: ExternalAgentOverview): string | undefined {
   return `来自 ${sourcePath}，请修改该文件`;
 }
 
+function profilePatch(name: string, value: SubagentProfileConfig | null): SettingsPatch {
+  const patch: SettingsPatch = {};
+  patch[`subagents.profiles.${name}`] = value;
+  return patch;
+}
+
+function pluginModelPatch(id: string, value: string | null): SettingsPatch {
+  const patch: SettingsPatch = {};
+  patch[`subagents.pluginModels.${id}`] = value;
+  return patch;
+}
+
 function modelIdOf(modelRef: string, models: readonly ModelInfo[]): string {
   const found = models.find((m) => `${m.ref.provider}/${m.ref.model}` === modelRef);
   if (found !== undefined) return found.ref.model;
@@ -108,10 +123,18 @@ function modelIdOf(modelRef: string, models: readonly ModelInfo[]): string {
   return slash >= 0 ? modelRef.slice(slash + 1) : modelRef;
 }
 
+function pluginGroupRank(plugin: PluginOverview): number {
+  if (plugin.host === "nocturne" && plugin.marketplace === "builtin") return 0;
+  if (plugin.host === "nocturne") return 1;
+  if (plugin.host === "codex") return 2;
+  return 3;
+}
+
 type SubagentView =
   | { kind: "list" }
   | { kind: "profile"; name: string }
   | { kind: "newProfile" }
+  | { kind: "pluginAgent"; id: string }
   | { kind: "agent"; name: string }
   | { kind: "agentForm"; config: ExternalAgentConfig; replace: boolean };
 
@@ -125,6 +148,7 @@ export function ExternalAgentsPage({
   version: number;
 }) {
   const [agents, setAgents] = useState<ExternalAgentOverview[]>([]);
+  const [plugins, setPlugins] = useState<PluginOverview[]>([]);
   const [items, setItems] = useState<SettingItem[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [skills, setSkills] = useState<SkillOverview[]>([]);
@@ -182,6 +206,12 @@ export function ExternalAgentsPage({
         client.runtime.listModels({ workspaceRoot }).then((data) => {
           if (accept()) setModels(data);
         }),
+        client.runtime
+          .describePlugins()
+          .catch(() => undefined)
+          .then((data) => {
+            if (accept() && data !== undefined) setPlugins(data.plugins);
+          }),
       ]);
     } catch (e) {
       if (accept()) setError(message(e));
@@ -281,10 +311,9 @@ export function ExternalAgentsPage({
     setBusy(true);
     setError("");
     try {
-      await client.runtime.updateSettings(
-        { [`subagents.profiles.${entry.name}`]: { ...entry.config, enabled } },
-        { workspaceRoot },
-      );
+      await client.runtime.updateSettings(profilePatch(entry.name, { ...entry.config, enabled }), {
+        workspaceRoot,
+      });
       await refresh();
       setToast(enabled ? "已启用" : "已停用");
     } catch (e) {
@@ -299,6 +328,72 @@ export function ExternalAgentsPage({
     ...agents.filter((agent) => !agent.editable),
   ];
 
+  // 与插件页分组顺序一致（内置 → Nocturne → Codex → Claude Code），
+  // 已启用且带子代理的插件按名去重（保留发现顺序的第一个，与 Core 同口径）
+  const pluginAgentGroups = (() => {
+    const seenNames = new Set<string>();
+    const active: { plugin: PluginOverview; agents: PluginAgentOverview[] }[] = [];
+    for (const plugin of plugins) {
+      if (plugin.state !== "on" || (plugin.agents?.length ?? 0) === 0) continue;
+      if (seenNames.has(plugin.name)) continue;
+      seenNames.add(plugin.name);
+      active.push({ plugin, agents: plugin.agents ?? [] });
+    }
+    return active.sort((a, b) => pluginGroupRank(a.plugin) - pluginGroupRank(b.plugin));
+  })();
+
+  const basePluginModelOptions = [
+    { value: "", label: "跟随默认" },
+    ...models
+      .filter((m) => !m.unavailable)
+      .map((m) => ({
+        value: `${m.ref.provider}/${m.ref.model}`,
+        label: m.displayName ?? m.ref.model,
+        description: m.ref.provider,
+      })),
+  ];
+  const pluginModelOptionsFor = (selected: string) =>
+    selected !== "" && !basePluginModelOptions.some((opt) => opt.value === selected)
+      ? [
+          ...basePluginModelOptions,
+          { value: selected, label: modelIdOf(selected, models), disabled: "不可用" },
+        ]
+      : basePluginModelOptions;
+
+  const savePluginAgentModel = async (agentId: string, nextModel: string) => {
+    if (!client) return;
+    setBusy(true);
+    setError("");
+    try {
+      await client.runtime.updateSettings(
+        pluginModelPatch(agentId, nextModel === "" ? null : nextModel),
+        { workspaceRoot },
+      );
+      await refresh();
+      setToast("已保存");
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const currentPluginAgent =
+    view.kind === "pluginAgent"
+      ? pluginAgentGroups
+          .flatMap((group) => group.agents.map((agent) => ({ plugin: group.plugin, agent })))
+          .find((entry) => entry.agent.id === view.id)
+      : undefined;
+
+  const previewPluginAgents = pluginAgentGroups.flatMap((group) =>
+    group.agents.map((agent) => ({
+      id: agent.id,
+      description: agent.description,
+      effort: agent.effort,
+      model: items.find((item) => item.key === `subagents.pluginModels.${agent.id}`)?.effective,
+    })),
+  );
+
   const openList = () => {
     setError("");
     setMenuOpen(false);
@@ -307,6 +402,63 @@ export function ExternalAgentsPage({
   };
 
   const renderBody = () => {
+    if (view.kind === "pluginAgent" && currentPluginAgent) {
+      const { plugin, agent } = currentPluginAgent;
+      const modelItem = items.find((item) => item.key === `subagents.pluginModels.${agent.id}`);
+      const selectedModel = modelItem?.effective ?? "";
+      const ro = modelItem !== undefined && modelItem.source !== "settings";
+      return (
+        <>
+          <PageHeader
+            crumb={{ parent: "子代理", onBack: openList }}
+            title={<span className="mono">{agent.name}</span>}
+          />
+          {error && (
+            <p className="errt" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="sbody">
+            <SettingsGroup plain>
+              <SettingsRow label="名称">
+                <span className="val mono">{agent.id}</span>
+              </SettingsRow>
+              <SettingsRow label="描述">
+                <p className="plugin-agent-detail-desc">{agent.description}</p>
+              </SettingsRow>
+              <SettingsRow label="来源插件">
+                <span className="val">{plugin.displayName ?? plugin.name}</span>
+              </SettingsRow>
+              <SettingsRow label="工具清单">
+                {agent.tools !== undefined && agent.tools.length > 0 ? (
+                  <div className="plugin-agent-tools">
+                    {agent.tools.map((tool) => (
+                      <span key={tool}>{tool}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="val">全部</span>
+                )}
+              </SettingsRow>
+              <SettingsRow label="模型">
+                <Dropdown
+                  label="模型"
+                  value={selectedModel}
+                  searchable
+                  disabled={!client || busy || ro ? "不可编辑" : undefined}
+                  options={pluginModelOptionsFor(selectedModel)}
+                  onChange={(next) => {
+                    if (next === selectedModel) return;
+                    void savePluginAgentModel(agent.id, next);
+                  }}
+                />
+              </SettingsRow>
+            </SettingsGroup>
+          </div>
+        </>
+      );
+    }
+
     if (view.kind === "newProfile" || (view.kind === "profile" && currentProfileConfig)) {
       const profileName = view.kind === "newProfile" ? "" : view.name;
       return (
@@ -318,11 +470,12 @@ export function ExternalAgentsPage({
           items={items}
           models={models}
           agents={agents}
+          pluginAgents={previewPluginAgents}
           onSave={saveProfile}
           onCancel={openList}
           onDelete={async () => {
             if (view.kind !== "profile" || view.name === "default") return;
-            await saveProfile({ [`subagents.profiles.${view.name}`]: null });
+            await saveProfile(profilePatch(view.name, null));
           }}
         />
       );
@@ -600,6 +753,62 @@ export function ExternalAgentsPage({
               );
             })}
           </SettingsGroup>
+          {pluginAgentGroups.map(({ plugin, agents: pluginAgents }) => (
+            <SettingsGroup
+              key={plugin.id}
+              title={plugin.displayName ?? plugin.name}
+              count={pluginAgents.length}
+              plain
+            >
+              {pluginAgents.map((agent) => {
+                const modelItem = items.find(
+                  (item) => item.key === `subagents.pluginModels.${agent.id}`,
+                );
+                const selectedModel = modelItem?.effective ?? "";
+                const ro = modelItem !== undefined && modelItem.source !== "settings";
+                return (
+                  <SettingsListRow
+                    key={agent.id}
+                    className="plugin-agent-row"
+                    leading={<PluginIcon icon={plugin.icon} size="md" />}
+                    name={agent.name}
+                    mono
+                    badge={
+                      agent.tools !== undefined ? (
+                        <Badge>{`${agent.tools.length} 个工具`}</Badge>
+                      ) : undefined
+                    }
+                    description={agent.description}
+                    toggle={
+                      <span
+                        className="plugin-agent-model"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                        }}
+                      >
+                        <Dropdown
+                          label={`${agent.name} 模型`}
+                          value={selectedModel}
+                          searchable
+                          disabled={!client || busy || ro ? "不可编辑" : undefined}
+                          options={pluginModelOptionsFor(selectedModel)}
+                          onChange={(next) => {
+                            if (next === selectedModel) return;
+                            void savePluginAgentModel(agent.id, next);
+                          }}
+                        />
+                      </span>
+                    }
+                    onOpen={() => {
+                      setError("");
+                      setMenuOpen(false);
+                      setView({ kind: "pluginAgent", id: agent.id });
+                    }}
+                  />
+                );
+              })}
+            </SettingsGroup>
+          ))}
           {orderedAgents.length > 0 && (
             <SettingsGroup title="外部 Agent" count={orderedAgents.length} plain>
               {orderedAgents.map((agent) => {

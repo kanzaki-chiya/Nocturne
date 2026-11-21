@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import type {
+  PluginAgentOverview,
   PluginHookOverview,
   PluginHost,
   PluginMcpServerOverview,
@@ -521,6 +522,11 @@ export function PluginsPage({
                     </div>
                   </SettingsGroup>
                 )}
+                {(plugin.agents?.length ?? 0) > 0 && (
+                  <SettingsGroup title="子代理" plain count={plugin.agents?.length ?? 0}>
+                    <PluginAgentList agents={plugin.agents ?? []} />
+                  </SettingsGroup>
+                )}
                 {plugin.mcpServers.length > 0 && (
                   <SettingsGroup title="MCP 服务器" plain count={plugin.mcpServers.length}>
                     <PluginMcpServerList servers={plugin.mcpServers} />
@@ -722,6 +728,21 @@ function PluginHookList({ hooks }: { hooks: readonly PluginHookOverview[] }) {
   );
 }
 
+function PluginAgentList({ agents }: { agents: readonly PluginAgentOverview[] }) {
+  return (
+    <div className="plugin-hooks">
+      {agents.map((agent) => (
+        <div key={agent.id} className="plugin-hook-item">
+          <div className="plugin-hook-head">
+            <span className="plugin-hook-point">{agent.name}</span>
+          </div>
+          <span className="plugin-agent-desc">{agent.description}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PluginMcpServerList({ servers }: { servers: readonly PluginMcpServerOverview[] }) {
   return (
     <div className="plugin-hooks">
@@ -792,6 +813,12 @@ function PluginEnableDialog({
                   <span key={name}>{name}</span>
                 ))}
               </div>
+            </div>
+          )}
+          {(plugin.agents?.length ?? 0) > 0 && (
+            <div className="plugin-dlg-section">
+              <div className="plugin-dlg-title">子代理</div>
+              <PluginAgentList agents={plugin.agents ?? []} />
             </div>
           )}
           {plugin.mcpServers.length > 0 && (

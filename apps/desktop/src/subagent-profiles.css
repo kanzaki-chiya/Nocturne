@@ -41,3 +41,42 @@
   border-radius: var(--radius-2);
   color: var(--a-secondary);
 }
+.external-agents-page .plugin-agent-row .slist-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: var(--lh-base);
+}
+.external-agents-page .plugin-agent-row:has(.dd[aria-expanded="true"]) {
+  z-index: 20;
+}
+.external-agents-page .plugin-agent-model {
+  display: inline-flex;
+  align-items: center;
+}
+.external-agents-page .plugin-agent-detail-desc {
+  margin: 0;
+  font-size: var(--fs-2);
+  line-height: var(--lh-base);
+  color: var(--a-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.external-agents-page .plugin-agent-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+.external-agents-page .plugin-agent-tools span {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  line-height: var(--chip-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  border: 1px solid var(--a-border);
+}
