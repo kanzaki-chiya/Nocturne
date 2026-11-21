@@ -352,7 +352,21 @@ export interface SubagentDeps {
   resolveProfile?(
     name: string,
     currentModel?: ResolvedModel,
-  ): { model: ResolvedModel; profile: SubagentProfileConfig } | undefined;
+  ):
+    | {
+        model: ResolvedModel;
+        profile: SubagentProfileConfig;
+        rolePrompt?: string | undefined;
+        sourcePlugin?:
+          | {
+              id: string;
+              name: string;
+              displayName: string;
+            }
+          | undefined;
+        allowedTools?: readonly string[] | undefined;
+      }
+    | undefined;
   visionModel?(): ResolvedModel | undefined;
   permissionPreset(): string;
   reviewer?(): SecurityReviewer | undefined;
@@ -738,7 +752,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
           : [];
         const parentMcpTools = deps.mcpTools();
         const mcpToolNames = new Set(parentMcpTools.map((t) => t.name));
-        const pool: ToolDefinition[] = [...builtinTools(), ...parentMcpTools, ...skillTools].filter(
+        let pool: ToolDefinition[] = [...builtinTools(), ...parentMcpTools, ...skillTools].filter(
           (t) =>
             t.traits.needsUser !== true &&
             t.traits.mutatesSchedule !== true &&
@@ -774,7 +788,24 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             ),
           );
         }
-        const onDemandMcp = deps.mcpOnDemand?.() === true;
+        // 插件子代理声明 tools 白名单时，与第 6 节可选池取交集；不在池内的名字忽略，
+        // 交集为空（只剩 finish）时报错（ADR-0105）
+        const allowedTools = resolvedProfile?.allowedTools;
+        const allowedSet = allowedTools !== undefined ? new Set(allowedTools) : undefined;
+        if (allowedSet !== undefined) {
+          pool = pool.filter((t) => allowedSet.has(t.name));
+          if (pool.length === 0) {
+            return error(
+              "invalid_input",
+              `子代理 ${request.profile ?? "default"} 在当前会话没有可用工具`,
+            );
+          }
+        }
+        const onDemandMcp =
+          deps.mcpOnDemand?.() === true &&
+          (allowedSet === undefined ||
+            allowedSet.has(MCP_SEARCH_TOOL_NAME) ||
+            allowedSet.has(MCP_CALL_TOOL_NAME));
         const names = new Set(pool.map((t) => t.name));
         if (onDemandMcp && parentMcpTools.length > 0) {
           names.add(MCP_SEARCH_TOOL_NAME);
@@ -1005,7 +1036,12 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         ]);
         const execute = async (): Promise<SubagentOutcome> => {
           if (child === undefined) throw new Error("Child session unavailable");
-          const basePromptText = subagentBasePrompt(deps.permissions?.interactive() === true);
+          const fixedPromptText = subagentBasePrompt(deps.permissions?.interactive() === true);
+          const rolePromptSection =
+            resolvedProfile?.rolePrompt !== undefined
+              ? `\n\n以下角色说明来自插件 ${resolvedProfile.sourcePlugin?.displayName ?? resolvedProfile.sourcePlugin?.name ?? "unknown"}（${resolvedProfile.sourcePlugin?.id ?? ""}）：\n\n${resolvedProfile.rolePrompt}`
+              : "";
+          const basePromptText = `${fixedPromptText}${rolePromptSection}`;
           try {
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
               const last = attempt === maxAttempts;

@@ -2271,7 +2271,7 @@ describe("ADR-0100 第三期：本地目录安装与卸载", () => {
       manifest: { name: "empty-cap", version: "1.0.0" },
     });
     await expect(installLocalPlugin(f.plat, { ...discOpts, path: emptyCap })).rejects.toThrow(
-      /不包含可用的技能、Hook 或 MCP 服务器/,
+      /不包含可用的技能、Hook、MCP 服务器或子代理/,
     );
   });
 
@@ -2956,7 +2956,7 @@ describe("插件清单 ui.surfaces（ADR-0101 第 4 节）", () => {
       nocturneHome: f.nocturneHome,
     });
     expect(skippedRes.installable).toBe(false);
-    expect(skippedRes.errors).toEqual(["清单无效：插件不包含可用的技能、Hook 或 MCP 服务器"]);
+    expect(skippedRes.errors).toEqual(["清单无效：插件不包含可用的技能、Hook、MCP 服务器或子代理"]);
     expect(skippedRes.mcpServers).toEqual([
       { id: "remote", command: "https://example.com/mcp", skipped: true, skipReason: "http" },
     ]);

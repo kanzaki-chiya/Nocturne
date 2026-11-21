@@ -141,7 +141,7 @@ export async function installLocalPluginFiles(
       manifestWarnings: stagedLookup.warnings,
     });
     if (!hasUsablePluginCapabilities(built)) {
-      throw new Error("清单无效：插件不包含可用的技能、Hook 或 MCP 服务器");
+      throw new Error("清单无效：插件不包含可用的技能、Hook、MCP 服务器或子代理");
     }
 
     if (await fs.exists(targetNameDir)) {

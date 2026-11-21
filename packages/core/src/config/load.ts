@@ -503,6 +503,15 @@ export async function loadConfig(
                 : JSON.stringify(saved.subagents.profiles[name]),
             ] as const,
         ),
+        ...Object.entries(merged.resolved.pluginSubagentModels ?? {}).map(
+          ([id, modelRef]) =>
+            [
+              `subagents.pluginModels.${id}` as const,
+              `subagents.pluginModels.${id}` as const,
+              modelRef,
+              saved.subagents?.pluginModels?.[id],
+            ] as const,
+        ),
       ] as const
     ).map(([key, field, effective, value]) => {
       const origin =

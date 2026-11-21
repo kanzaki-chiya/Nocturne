@@ -9,6 +9,7 @@ import {
   HOOK_POINTS,
   type HookPoint,
   type McpServerEntry,
+  type PluginAgentOverview,
   type PluginHookOverview,
   type PluginHost,
   type PluginMcpServerOverview,
@@ -17,6 +18,7 @@ import {
   type PluginUnsupportedHook,
 } from "../protocol/index.js";
 import { parseSkill } from "../skills/index.js";
+import { scanPluginAgentsDir } from "./agents.js";
 import { selectActivePluginVersion } from "./semver.js";
 import {
   SUPPORTED_PLUGIN_HOOK_POINTS,
@@ -26,6 +28,7 @@ import {
   type PluginManifestKind,
   type PluginMcpServerSpec,
   type PluginSkillDir,
+  type PluginSubagentSpec,
 } from "./types.js";
 
 const EXACT_MATCHER_RE = /^[A-Za-z0-9_\- ,|]+$/;
@@ -1008,11 +1011,43 @@ export async function buildDiscoveredPlugin(
     }
   }
 
+  // ── 自有插件子代理定义解析（ADR-0105） ──────────────────
+  // 仅自有清单（.nocturne-plugin/plugin.json）显式声明 agents 字段时读取；
+  // 省略不读取，Codex / Claude Code 兼容清单本阶段不读取。
+  const agents: PluginSubagentSpec[] = [];
+  const overviewAgents: PluginAgentOverview[] = [];
+  if (input.manifestKind === "nocturne" && manifest.agents !== undefined) {
+    if (typeof manifest.agents !== "string") {
+      warnings.push(`plugin ${pluginLabel}：agents 字段必须是相对路径字符串`);
+    } else {
+      const resolved = await resolvePluginRelativePath(
+        platform,
+        input.rawRoot,
+        pluginRootReal,
+        manifest.agents,
+      );
+      if (resolved.error !== undefined || resolved.path === undefined) {
+        warnings.push(`plugin ${pluginLabel}：${resolved.error ?? "无效 agents 路径"}`);
+      } else {
+        const scanned = await scanPluginAgentsDir(platform, resolved.path, pluginRootReal, {
+          pluginId: id,
+          pluginName: input.name,
+          pluginDisplayName: displayName ?? input.name,
+          pluginLabel,
+          warnings,
+        });
+        agents.push(...scanned.specs);
+        overviewAgents.push(...scanned.overviews);
+      }
+    }
+  }
+
   return {
     rawRoot: input.rawRoot,
     hooks: parsedHooks.hooks,
     skillDirs,
     mcpServers: parsedMcp.servers,
+    agents,
     overview: {
       id,
       host: input.host,
@@ -1028,6 +1063,7 @@ export async function buildDiscoveredPlugin(
       skills: skillNames,
       mcpServers: parsedMcp.overviewServers,
       surfaces,
+      agents: overviewAgents,
       warnings,
     },
   };
@@ -1405,7 +1441,8 @@ export function hasUsablePluginCapabilities(plugin: DiscoveredPlugin): boolean {
   return (
     plugin.overview.hooks.length > 0 ||
     plugin.overview.skills.length > 0 ||
-    plugin.mcpServers.length > 0
+    plugin.mcpServers.length > 0 ||
+    plugin.agents.length > 0
   );
 }
 

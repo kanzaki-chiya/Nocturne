@@ -19,6 +19,7 @@ import type {
   PluginManifestKind,
   PluginMcpServerSpec,
   PluginSkillDir,
+  PluginSubagentSpec,
 } from "./types.js";
 
 export type {
@@ -29,7 +30,14 @@ export type {
   PluginManifestKind,
   PluginMcpServerSpec,
   PluginSkillDir,
+  PluginSubagentSpec,
 };
+export {
+  MAX_PLUGIN_AGENT_BODY_CHARS,
+  MAX_PLUGIN_AGENT_DESCRIPTION_CHARS,
+  parsePluginSubagentMarkdown,
+  type ParsedPluginAgentMarkdown,
+} from "./agents.js";
 export {
   comparePluginVersions,
   compareSemver,
@@ -59,6 +67,7 @@ export interface ActivePluginsResolution {
   skillDirs: PluginSkillDir[];
   mcpServers: PluginMcpServerSpec[];
   mcpConflicts: PluginMcpConflict[];
+  agents: PluginSubagentSpec[];
   changedPlugins: { id: string; name: string; marketplace: string }[];
   warnings: string[];
 }
@@ -98,6 +107,7 @@ export async function resolvePlugins(
   const skillDirs: PluginSkillDir[] = [];
   const mcpServers: PluginMcpServerSpec[] = [];
   const mcpConflicts: PluginMcpConflict[] = [];
+  const agents: PluginSubagentSpec[] = [];
   const changedPlugins: { id: string; name: string; marketplace: string }[] = [];
   const warnings: string[] = [...discovery.warnings, ...storeState.warnings];
 
@@ -106,6 +116,7 @@ export async function resolvePlugins(
     reservedLower.add(id.toLowerCase());
   }
   const activePluginMcpLower = new Set<string>();
+  const activeAgentPluginNames = new Set<string>();
 
   for (const item of discovery.plugins) {
     const stored = storeState.entries.get(item.overview.id);
@@ -177,6 +188,17 @@ export async function resolvePlugins(
       return m;
     });
 
+    if (state === "on" && item.agents.length > 0) {
+      if (activeAgentPluginNames.has(item.overview.name)) {
+        const msg = `plugin ${pluginLabel}：存在同名已启用插件 "${item.overview.name}"，其子代理定义已跳过（保留按发现顺序的第一个）`;
+        pluginWarnings.push(msg);
+        warnings.push(msg);
+      } else {
+        activeAgentPluginNames.add(item.overview.name);
+        agents.push(...item.agents);
+      }
+    }
+
     overviews.push({
       ...item.overview,
       state,
@@ -211,6 +233,7 @@ export async function resolvePlugins(
     skillDirs,
     mcpServers,
     mcpConflicts,
+    agents,
     changedPlugins,
     warnings,
   };

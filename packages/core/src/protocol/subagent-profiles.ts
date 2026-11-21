@@ -17,6 +17,15 @@ export function isValidSubagentProfileName(name: string): boolean {
   return /^[a-z0-9-]{1,32}$(?![\s\S])/.test(name) && name !== DEFAULT_SUBAGENT_PROFILE;
 }
 
+/** 插件子代理档位 id：`<插件 name>:<子代理 name>`（ADR-0105） */
+export function isValidPluginSubagentId(id: string): boolean {
+  const idx = id.indexOf(":");
+  if (idx <= 0 || idx !== id.lastIndexOf(":")) return false;
+  const pluginName = id.slice(0, idx);
+  const agentName = id.slice(idx + 1);
+  return /^[a-z0-9-]+$(?![\s\S])/.test(pluginName) && isValidSubagentProfileName(agentName);
+}
+
 /** `reason` 的显示上限：超出部分由显示侧截断（slice 即规则，不另设包装） */
 export const MAX_SUBAGENT_REASON_CHARS = 200;
 

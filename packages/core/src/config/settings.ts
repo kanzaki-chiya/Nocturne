@@ -12,7 +12,11 @@ import { parseConfigFile } from "./schema.js";
 import type { ConfigFile, SettingsPatch } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
 import type { CustomTheme, MemorySettings, ReasoningEffort } from "../protocol/index.js";
-import { isValidSubagentProfileName, validateCustomThemes } from "../protocol/index.js";
+import {
+  isValidPluginSubagentId,
+  isValidSubagentProfileName,
+  validateCustomThemes,
+} from "../protocol/index.js";
 
 /** settings.json 的原始 JSON 对象（未知字段保留） */
 type SettingsData = Record<string, unknown>;
@@ -92,6 +96,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "permission.reviewerRules" &&
         !MODEL_ROLES.some((role) => key === `modelRoles.${role}`) &&
         !key.startsWith("subagents.profiles.") &&
+        !key.startsWith("subagents.pluginModels.") &&
         key !== "compaction.threshold" &&
         key !== "compaction.pruneLimit" &&
         key !== "mcp.toolSearch" &&
@@ -127,13 +132,29 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     if (!parsed.ok) throw new TypeError(parsed.reason);
   }
   for (const [key, value] of Object.entries(patch)) {
-    if (!key.startsWith("subagents.profiles.")) continue;
-    const name = key.slice("subagents.profiles.".length);
-    if (!isValidSubagentProfileName(name)) throw new TypeError(`无效档位名：${name}`);
-    if (value == null) continue;
-    const parsed = parseConfigFile({ subagents: { profiles: { [name]: value } } }, "settings.json");
-    if (parsed.subagentProfileWarnings?.length)
-      throw new TypeError(parsed.subagentProfileWarnings.join("；"));
+    if (key.startsWith("subagents.profiles.")) {
+      const name = key.slice("subagents.profiles.".length);
+      if (!isValidSubagentProfileName(name)) throw new TypeError(`无效档位名：${name}`);
+      if (value == null) continue;
+      const parsed = parseConfigFile(
+        { subagents: { profiles: { [name]: value } } },
+        "settings.json",
+      );
+      if (parsed.subagentProfileWarnings?.length)
+        throw new TypeError(parsed.subagentProfileWarnings.join("；"));
+      continue;
+    }
+    if (key.startsWith("subagents.pluginModels.")) {
+      const id = key.slice("subagents.pluginModels.".length);
+      if (!isValidPluginSubagentId(id)) throw new TypeError(`无效插件子代理名：${id}`);
+      if (value == null) continue;
+      const parsed = parseConfigFile(
+        { subagents: { pluginModels: { [id]: value } } },
+        "settings.json",
+      );
+      if (parsed.subagentProfileWarnings?.length)
+        throw new TypeError(parsed.subagentProfileWarnings.join("；"));
+    }
   }
   const preset = patch["permissions.preset"];
   const attention = patch["notifications.events.attention"];
@@ -609,26 +630,49 @@ export async function loadSettingsStore(
             next.modelRoles = roles;
           }
           for (const [key, value] of Object.entries(patch)) {
-            if (!key.startsWith("subagents.profiles.") || value === undefined) continue;
-            const name = key.slice("subagents.profiles.".length);
-            const subagents =
-              typeof next.subagents === "object" &&
-              next.subagents !== null &&
-              !Array.isArray(next.subagents)
-                ? { ...(next.subagents as Record<string, unknown>) }
-                : {};
-            const profiles =
-              typeof subagents.profiles === "object" &&
-              subagents.profiles !== null &&
-              !Array.isArray(subagents.profiles)
-                ? { ...(subagents.profiles as Record<string, unknown>) }
-                : {};
-            if (value === null) Reflect.deleteProperty(profiles, name);
-            else profiles[name] = value;
-            if (Object.keys(profiles).length > 0) subagents.profiles = profiles;
-            else delete subagents.profiles;
-            if (Object.keys(subagents).length > 0) next.subagents = subagents;
-            else delete next.subagents;
+            if (key.startsWith("subagents.profiles.") && value !== undefined) {
+              const name = key.slice("subagents.profiles.".length);
+              const subagents =
+                typeof next.subagents === "object" &&
+                next.subagents !== null &&
+                !Array.isArray(next.subagents)
+                  ? { ...(next.subagents as Record<string, unknown>) }
+                  : {};
+              const profiles =
+                typeof subagents.profiles === "object" &&
+                subagents.profiles !== null &&
+                !Array.isArray(subagents.profiles)
+                  ? { ...(subagents.profiles as Record<string, unknown>) }
+                  : {};
+              if (value === null) Reflect.deleteProperty(profiles, name);
+              else profiles[name] = value;
+              if (Object.keys(profiles).length > 0) subagents.profiles = profiles;
+              else delete subagents.profiles;
+              if (Object.keys(subagents).length > 0) next.subagents = subagents;
+              else delete next.subagents;
+              continue;
+            }
+            if (key.startsWith("subagents.pluginModels.") && value !== undefined) {
+              const id = key.slice("subagents.pluginModels.".length);
+              const subagents =
+                typeof next.subagents === "object" &&
+                next.subagents !== null &&
+                !Array.isArray(next.subagents)
+                  ? { ...(next.subagents as Record<string, unknown>) }
+                  : {};
+              const pluginModels =
+                typeof subagents.pluginModels === "object" &&
+                subagents.pluginModels !== null &&
+                !Array.isArray(subagents.pluginModels)
+                  ? { ...(subagents.pluginModels as Record<string, unknown>) }
+                  : {};
+              if (value === null) Reflect.deleteProperty(pluginModels, id);
+              else pluginModels[id] = value;
+              if (Object.keys(pluginModels).length > 0) subagents.pluginModels = pluginModels;
+              else delete subagents.pluginModels;
+              if (Object.keys(subagents).length > 0) next.subagents = subagents;
+              else delete next.subagents;
+            }
           }
           const threshold = patch["compaction.threshold"];
           const pruneLimit = patch["compaction.pruneLimit"];

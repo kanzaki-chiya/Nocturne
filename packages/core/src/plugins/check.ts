@@ -4,6 +4,7 @@
  */
 import { createPlatform, fsErrorCode, type Platform } from "../platform/index.js";
 import type {
+  PluginAgentOverview,
   PluginHookOverview,
   PluginMcpServerOverview,
   PluginUiSurfaceOverview,
@@ -49,6 +50,7 @@ export interface LocalPluginCheckResult {
   hooks: PluginHookOverview[];
   mcpServers: PluginMcpServerOverview[];
   surfaces: PluginUiSurfaceOverview[];
+  agents: PluginAgentOverview[];
   unsupported: PluginUnsupportedHook[];
 }
 
@@ -69,6 +71,7 @@ function buildInstallTimeChecks(hasNocturneHome: boolean): string[] {
 
 async function collectManifestPathErrors(
   platform: Platform,
+  manifestKind: PluginManifestKind,
   rawRoot: string,
   pluginRootReal: string,
   manifest: Record<string, unknown>,
@@ -119,6 +122,22 @@ async function collectManifestPathErrors(
       }
     }
   }
+
+  if (manifestKind === "nocturne" && manifest.agents !== undefined) {
+    if (typeof manifest.agents !== "string") {
+      errors.push("清单无效：agents 字段必须是相对路径字符串");
+    } else {
+      const res = await resolvePluginRelativePath(
+        platform,
+        rawRoot,
+        pluginRootReal,
+        manifest.agents,
+      );
+      if (res.error !== undefined) {
+        errors.push(`清单无效：${res.error}`);
+      }
+    }
+  }
 }
 
 function validatePluginName(
@@ -161,6 +180,7 @@ function emptyFailure(errors: string[], installTimeChecks: string[]): LocalPlugi
     hooks: [],
     mcpServers: [],
     surfaces: [],
+    agents: [],
     unsupported: [],
   };
 }
@@ -233,7 +253,14 @@ export async function checkLocalPluginDirectory(
 
   const errors: string[] = [];
   const validName = validatePluginName(lookup.manifestKind, lookup.manifest, fallbackName, errors);
-  await collectManifestPathErrors(platform, sourceReal, sourceReal, lookup.manifest, errors);
+  await collectManifestPathErrors(
+    platform,
+    lookup.manifestKind,
+    sourceReal,
+    sourceReal,
+    lookup.manifest,
+    errors,
+  );
 
   const manifestVersion = nonEmptyString(lookup.manifest.version);
   // 与 selectActivePluginVersion 一致：合法版本目录名沿用清单版本，缺省或不合法时用 "local"
@@ -262,7 +289,7 @@ export async function checkLocalPluginDirectory(
   });
 
   if (!hasUsablePluginCapabilities(built)) {
-    errors.push("清单无效：插件不包含可用的技能、Hook 或 MCP 服务器");
+    errors.push("清单无效：插件不包含可用的技能、Hook、MCP 服务器或子代理");
   }
 
   return {
@@ -286,6 +313,7 @@ export async function checkLocalPluginDirectory(
     hooks: built.overview.hooks,
     mcpServers: built.overview.mcpServers,
     surfaces: built.overview.surfaces ?? [],
+    agents: built.overview.agents ?? [],
     unsupported: built.overview.unsupported,
   };
 }

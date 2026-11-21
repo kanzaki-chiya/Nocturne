@@ -244,8 +244,13 @@ export interface ConfigFile {
   subagentProfileWarnings?: string[] | undefined;
   /** 只接受用户级声明；重复 name 保留首条并警告。 */
   externalAgents?: ExternalAgentConfig[] | undefined;
-  /** 子代理档位（ADR-0058）：按档位名逐条合并；不可信项目整段忽略 */
-  subagents?: { profiles?: Record<string, SubagentProfileConfig> | undefined } | undefined;
+  /** 子代理档位与插件子代理模型（ADR-0058、ADR-0105）：按名称逐条合并；不可信项目整段忽略 */
+  subagents?:
+    | {
+        profiles?: Record<string, SubagentProfileConfig> | undefined;
+        pluginModels?: Record<string, string> | undefined;
+      }
+    | undefined;
   compaction?:
     | {
         threshold?: string | number | undefined;
@@ -297,6 +302,8 @@ export interface ResolvedConfig {
   modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
   /** 自定义档位合并结果（不含 `default`——default 的模型即 modelRoles.task） */
   subagentProfiles?: Record<string, SubagentProfileConfig> | undefined;
+  /** 插件子代理模型选择（ADR-0105）：按 `<plugin>:<agent>` 逐条合并 */
+  pluginSubagentModels?: Record<string, string> | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;
   mcpToolSearch?: McpToolSearchMode | undefined;
@@ -612,7 +619,9 @@ export interface SettingItem {
     | "memory.global"
     | "memory.project"
     /** 子代理档位逐条：effective/saved 为档位 JSON（ADR-0058） */
-    | `subagents.profiles.${string}`;
+    | `subagents.profiles.${string}`
+    /** 插件子代理模型逐条：effective/saved 为 provider/model（ADR-0105） */
+    | `subagents.pluginModels.${string}`;
   effective: string | undefined;
   source: "default" | "setup" | "settings" | "user" | "magpie" | "project" | "env" | "cli";
   saved: string | undefined;
@@ -644,7 +653,9 @@ export type SettingsPatch = Partial<{
   "memory.project": boolean | null;
 }> &
   /** 子代理档位逐条补丁：null 删除设置层条目（ADR-0058） */
-  Partial<Record<`subagents.profiles.${string}`, SubagentProfileConfig | null>>;
+  Partial<Record<`subagents.profiles.${string}`, SubagentProfileConfig | null>> &
+  /** 插件子代理模型逐条补丁：null 恢复跟随默认（ADR-0105） */
+  Partial<Record<`subagents.pluginModels.${string}`, string | null>>;
 
 /**
  * loadConfig 的产物（config.md 第 6 节）。

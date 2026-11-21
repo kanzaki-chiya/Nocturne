@@ -88,6 +88,7 @@ export interface MergeResult {
       | "permission.reviewerRules"
       | `modelRoles.${ModelRole}`
       | `subagents.profiles.${string}`
+      | `subagents.pluginModels.${string}`
       | "notifications.enabled"
       | "notifications.events.attention"
       | "notifications.events.error"
@@ -394,6 +395,11 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     for (const [name, profile] of Object.entries(file.subagents?.profiles ?? {})) {
       out.subagentProfiles = { ...out.subagentProfiles, [name]: profile };
       origins[`subagents.profiles.${name}`] = kind;
+    }
+    // 插件子代理模型按 id 逐条合并（ADR-0105，规则同 subagents.profiles）
+    for (const [id, modelRef] of Object.entries(file.subagents?.pluginModels ?? {})) {
+      out.pluginSubagentModels = { ...out.pluginSubagentModels, [id]: modelRef };
+      origins[`subagents.pluginModels.${id}`] = kind;
     }
     // 旧 shell 选择把程序设置、手写配置、环境各作为一份声明；
     // 手写层之间仍逐字段覆盖，跨这些边界时不沿用低层的可执行路径。

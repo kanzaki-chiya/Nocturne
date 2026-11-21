@@ -266,7 +266,10 @@ import {
 } from "./protocol/index.js";
 import { PendingInputs, type PendingInputPatch } from "./pending-inputs.js";
 import { validateSettingsPatch } from "./config/settings.js";
-import { resolveSubagentProfile } from "./config/subagent-profiles.js";
+import {
+  resolveSubagentProfile,
+  type PluginSubagentDefinition,
+} from "./config/subagent-profiles.js";
 import { BackgroundSubagents, backgroundAdmission } from "./agent/background-subagents.js";
 import {
   applyWorktreeChanges,
@@ -2641,7 +2644,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mcpUpdate = mcpUpdate
         .catch(() => undefined)
         .then(async () => {
-          if (mcpSession === undefined) return;
           if (pendingMcp) {
             pendingMcp = false;
             const next = config
@@ -2672,18 +2674,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               ),
             );
             sessionPlugins = nextPlugins;
-            await mcpSession.reconcile([
-              ...(options.mcpServers ?? []),
-              ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
-              ...nextPlugins.mcpServers.map((s) => ({
-                ...s.entry,
-                name: s.id,
-                origin: "plugin" as const,
-                pluginId: s.pluginId,
-                ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
-              })),
-            ]);
+            refreshSessionExternalAgents();
+            if (mcpSession !== undefined) {
+              await mcpSession.reconcile([
+                ...(options.mcpServers ?? []),
+                ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
+                ...nextPlugins.mcpServers.map((s) => ({
+                  ...s.entry,
+                  name: s.id,
+                  origin: "plugin" as const,
+                  pluginId: s.pluginId,
+                  ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
+                })),
+              ]);
+            }
           }
+          if (mcpSession === undefined) return;
           const diff = mcpSession.applyPendingTools();
           for (const name of diff.remove) {
             activeMcpTools.delete(name);
@@ -3135,12 +3141,27 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         return resolvePricing(sessionRegistry, ref)?.pricing;
       };
-      const defaultTaskModel = config?.resolvedSettings(session.state().meta.workspaceRoot)
-        .modelRoles?.task;
+      const resolvedSettingsNow = config?.resolvedSettings(session.state().meta.workspaceRoot);
+      const defaultTaskModel = resolvedSettingsNow?.modelRoles?.task;
       const defaultTaskPricing = pricingForModel(defaultTaskModel);
-      const configuredProfiles =
-        config?.resolvedSettings(session.state().meta.workspaceRoot).subagentProfiles ?? {};
-      const profileSnapshot = Object.entries(configuredProfiles).flatMap(([name, profile]) => {
+      const configuredProfiles = resolvedSettingsNow?.subagentProfiles ?? {};
+      const configuredPluginModels = resolvedSettingsNow?.pluginSubagentModels ?? {};
+      const pluginSubagents: Record<string, PluginSubagentDefinition> = Object.fromEntries(
+        sessionPlugins.agents.map((agent) => [
+          agent.id,
+          {
+            id: agent.id,
+            pluginId: agent.pluginId,
+            pluginName: agent.pluginName,
+            pluginDisplayName: agent.pluginDisplayName,
+            description: agent.description,
+            prompt: agent.prompt,
+            ...(agent.effort !== undefined ? { effort: agent.effort } : {}),
+            ...(agent.tools !== undefined ? { tools: agent.tools } : {}),
+          },
+        ]),
+      );
+      const userProfileSnapshot = Object.entries(configuredProfiles).flatMap(([name, profile]) => {
         if (
           !profile.enabled ||
           agentSnapshot.some((agent) => agent.name.toLowerCase() === name.toLowerCase())
@@ -3167,6 +3188,41 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const pricing = pricingForModel(profile.model);
         return [{ ...profile, name, ...(pricing !== undefined ? { pricing } : {}) }];
       });
+      const pluginProfileSnapshot = sessionPlugins.agents.flatMap((agent) => {
+        const configuredModel = configuredPluginModels[agent.id];
+        const key = `${agent.id}/${configuredModel}`;
+        if (
+          configuredModel !== undefined &&
+          resolveModelRole(sessionRegistry, configuredModel, "task") === undefined
+        ) {
+          if (!unavailableProfiles.has(key)) {
+            unavailableProfiles.add(key);
+            const message = `子代理档位 ${agent.id} 的模型 ${configuredModel} 不可用，已排除`;
+            warnings.push(message);
+            session.emitEphemeral("runtime.warning", {
+              code: "subagent_profile_unavailable",
+              message,
+            });
+          }
+          return [];
+        }
+        unavailableProfiles.delete(key);
+        const effectiveModel = configuredModel ?? defaultTaskModel;
+        const pricing =
+          configuredModel !== undefined ? pricingForModel(configuredModel) : defaultTaskPricing;
+        return [
+          {
+            name: agent.id,
+            description: agent.description,
+            enabled: true,
+            ...(effectiveModel !== undefined ? { model: effectiveModel } : {}),
+            ...(agent.effort !== undefined ? { effort: agent.effort } : {}),
+            ...(pricing !== undefined ? { pricing } : {}),
+          },
+        ];
+      });
+      // 选择表顺序：default → 用户档位 → 插件子代理 → 外部 agent（ADR-0105）
+      const profileSnapshot = [...userProfileSnapshot, ...pluginProfileSnapshot];
       const hasExternalAgents = enabledExternalAgents.length > 0;
       // ADR-0073 §4、§5：宿主开启时只在顶层交互会话可用；子会话与定时任务会话不出现该字段
       if (
@@ -3316,6 +3372,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               ) ??
                 currentModel ??
                 model,
+              pluginSubagents,
+              configuredPluginModels,
             ),
           model: () =>
             resolveModelRole(
@@ -7231,6 +7289,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await broadcast("providers", (hooks) => {
           hooks.markProvidersDirty();
         });
+        if (
+          Object.keys(patch).some(
+            (key) => key.startsWith("subagents.") || key === "modelRoles.task",
+          )
+        ) {
+          await broadcast("externalAgents", (hooks) => {
+            hooks.refreshExternalAgents();
+          });
+        }
         return config.describeSettings(root);
       });
       settingsPending = operation.then(

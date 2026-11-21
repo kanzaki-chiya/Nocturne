@@ -1,4 +1,4 @@
-import type { HookPoint } from "./types.js";
+import type { HookPoint, ReasoningEffort } from "./types.js";
 
 export type PluginHost = "nocturne" | "codex" | "claude";
 
@@ -53,6 +53,16 @@ export interface SessionAppSurface {
   open?: PluginUiSurfaceOpen | undefined;
 }
 
+export interface PluginAgentOverview {
+  /** 档位 id：`<插件 name>:<子代理 name>`，如 `pptx:visual-judge` */
+  id: string;
+  /** 子代理名（不含插件前缀），如 `visual-judge` */
+  name: string;
+  description: string;
+  effort?: ReasoningEffort | undefined;
+  tools?: string[] | undefined;
+}
+
 export interface PluginOverview {
   id: string;
   host: PluginHost;
@@ -69,6 +79,7 @@ export interface PluginOverview {
   skills: string[];
   mcpServers: PluginMcpServerOverview[];
   surfaces?: PluginUiSurfaceOverview[] | undefined;
+  agents?: PluginAgentOverview[] | undefined;
   warnings: string[];
 }
 

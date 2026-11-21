@@ -4,6 +4,7 @@ import type {
   McpServerEntry,
   PluginHost,
   PluginOverview,
+  ReasoningEffort,
 } from "../protocol/index.js";
 
 export const SUPPORTED_PLUGIN_HOOK_POINTS = new Set<string>([
@@ -61,11 +62,32 @@ export interface PluginMcpServerSpec {
     | undefined;
 }
 
+export interface PluginSubagentSpec {
+  /** 档位 id：`<插件 name>:<子代理 name>` */
+  id: string;
+  /** 子代理名（frontmatter name） */
+  name: string;
+  /** 来源插件 id，如 `nocturne:pptx@builtin` */
+  pluginId: string;
+  /** 来源插件 name，如 `pptx` */
+  pluginName: string;
+  /** 来源插件显示名，如 `演示文档` */
+  pluginDisplayName: string;
+  /** `<name>@<marketplace>` */
+  pluginLabel: string;
+  description: string;
+  /** 角色说明正文（已去首尾空白，非空，<= 10,000 字） */
+  prompt: string;
+  effort?: ReasoningEffort | undefined;
+  tools?: readonly string[] | undefined;
+}
+
 export interface DiscoveredPlugin {
   overview: Omit<PluginOverview, "state">;
   hooks: Partial<Record<HookPoint, PluginHookEntry[]>>;
   skillDirs: PluginSkillDir[];
   mcpServers: PluginMcpServerSpec[];
+  agents: PluginSubagentSpec[];
   /** 未解析 realpath 前的原始根目录（用于检测根自身是否为符号链接） */
   rawRoot: string;
 }

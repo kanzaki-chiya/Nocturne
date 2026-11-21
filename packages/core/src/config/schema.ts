@@ -10,6 +10,7 @@ import {
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_ORDER,
   PERMISSION_PRESET_NAMES,
+  isValidPluginSubagentId,
   isValidSubagentProfileName,
   parseCompactionPruneLimit,
   parseCompactionThreshold,
@@ -383,8 +384,13 @@ const configFileSchema = z.object({
         .optional(),
     })
     .optional(),
-  /** 子代理档位（ADR-0058）：profiles 按档位名逐条校验（形状在 parseSubagentProfile） */
-  subagents: z.object({ profiles: z.record(z.string(), z.unknown()).optional() }).optional(),
+  /** 子代理档位（ADR-0058）与插件子代理模型（ADR-0105）：按名称逐条校验 */
+  subagents: z
+    .object({
+      profiles: z.record(z.string(), z.unknown()).optional(),
+      pluginModels: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
   /** 会话默认思考档位（ADR-0018） */
   reasoningEffort: reasoningEffortSchema.optional(),
   /** shell 选择（ADR-0022 第 2 节）：auto | pwsh | powershell | bash | cmd | sh */
@@ -617,10 +623,27 @@ export function parseConfigFile(
       );
   }
   const subagentProfiles: Record<string, SubagentProfileConfig> = {};
+  const pluginSubagentModels: Record<string, string> = {};
   const subagentProfileWarnings: string[] = [];
   for (const [name, entry] of Object.entries(parsed.data.subagents?.profiles ?? {})) {
     const profile = parseSubagentProfile(filePath, name, entry, subagentProfileWarnings);
     if (profile !== undefined) subagentProfiles[name] = profile;
+  }
+  for (const [id, entry] of Object.entries(parsed.data.subagents?.pluginModels ?? {})) {
+    if (!isValidPluginSubagentId(id)) {
+      subagentProfileWarnings.push(
+        `subagent_profile_config_invalid：${filePath} 中的插件子代理名 "${id}" 无效（格式为 <插件名>:<子代理名>），已忽略`,
+      );
+      continue;
+    }
+    const model = profileModelSchema.safeParse(entry);
+    if (!model.success) {
+      subagentProfileWarnings.push(
+        `subagent_profile_config_invalid：${filePath} 中插件子代理 ${id} 的模型无效，已忽略`,
+      );
+      continue;
+    }
+    pluginSubagentModels[id] = model.data;
   }
   const {
     mcp,
@@ -641,7 +664,16 @@ export function parseConfigFile(
       : {}),
     ...(configuredAgents ? { externalAgents } : {}),
     ...(externalAgentWarnings.length > 0 ? { externalAgentWarnings } : {}),
-    ...(configuredSubagents ? { subagents: { profiles: subagentProfiles } } : {}),
+    ...(configuredSubagents
+      ? {
+          subagents: {
+            ...(configuredSubagents.profiles !== undefined ? { profiles: subagentProfiles } : {}),
+            ...(Object.keys(pluginSubagentModels).length > 0
+              ? { pluginModels: pluginSubagentModels }
+              : {}),
+          },
+        }
+      : {}),
     ...(subagentProfileWarnings.length > 0 ? { subagentProfileWarnings } : {}),
   };
 }
