@@ -11,6 +11,8 @@ Runtime 在打开会话时读取一份技能快照。按以下顺序搜索，每
 1. 用户：`<NOCTURNE_HOME>/skills`、`~/.agents/skills`、`~/.claude/skills`、`skills.extraDirs`（配置中的顺序），以及已启用插件（含内置、本地安装与 Codex / Claude Code 来源，[ADR-0100](../decisions/ADR-0100-native-plugins.md)）的技能目录（清单 `skills` 字段或默认 `skills/`；`source: "plugin"`，携带 `plugin: "<name>@<marketplace>"`）。
 2. 项目：从 `cwd` 上溯到 `workspaceRoot`，每一级依次搜索 `.nocturne/skills`、`.agents/skills`、`.claude/skills`。
 
+技能根路径不存在或不是目录（例如普通文件）时直接跳过，不报警告；指向目录的符号链接/junction 照常扫描，读目录的其他失败仍报警告。
+
 用户层优先于项目层，项目内部离 cwd 最近的优先；名字不区分大小写。不同目录同名时保留全部条目，低优先级条目带 `shadowedBy`，不加载。同一真实目录的 symlink/junction 入口按真实路径去重，保留最高优先级来源，其余入口放在 `otherEntries`。项目技能不要求项目信任，规则同项目指令。
 
 `SKILL.md` 使用 YAML 前言和 Markdown 正文；支持 BOM、CRLF、折叠/多行 YAML。解析失败跳过该条，warnings 含入口文件路径、行号和原因，其他技能不受影响。name 缺省取目录名；不符合小写字母/数字/连字符、最多 64 字符的规范只警告。description 缺失时不进入模型目录；when_to_use 接在说明后。

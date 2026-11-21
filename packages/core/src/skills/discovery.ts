@@ -1,5 +1,5 @@
 import { isNode, LineCounter, parseDocument } from "yaml";
-import type { Platform } from "../platform/index.js";
+import { fsErrorCode, type Platform } from "../platform/index.js";
 import {
   BUILTIN_SLASH_COMMANDS,
   type SkillsConfig,
@@ -140,7 +140,16 @@ export async function discoverSkills(
   const realSeen = new Map<string, DiscoveredSkill>();
   const names = new Map<string, DiscoveredSkill>();
   for (const root of roots) {
-    if (!(await fs.exists(root.path))) continue;
+    let rootStat;
+    try {
+      rootStat = await fs.stat(root.path);
+    } catch (e) {
+      const code = fsErrorCode(e);
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      warnings.push({ path: root.path, line: 1, kind: "read", message: String(e) });
+      continue;
+    }
+    if (rootStat.type !== "directory") continue;
     let skillEntries: { name: string; path: string }[] = [];
     const directSkill = root.source === "plugin" ? paths.join(root.path, "SKILL.md") : undefined;
     if (directSkill !== undefined && (await fs.exists(directSkill))) {

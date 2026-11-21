@@ -37,6 +37,10 @@ export function createSkillDiscoveryCache(platform: Platform) {
         watched.add(path);
         return platform.fs.exists(path);
       },
+      stat: (path) => {
+        watched.add(path);
+        return platform.fs.stat(path);
+      },
       readdir: (path) => {
         watched.add(path);
         return platform.fs.readdir(path);

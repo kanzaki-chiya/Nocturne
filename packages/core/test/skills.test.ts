@@ -648,3 +648,107 @@ it("正文超过单次输出预算：开头提示总长和 SKILL.md 的读法；
   expect(big).toContain("offset/limit");
   expect((await tool.execute({ name: "small" }, ctx)).modelContent).not.toContain("提示：正文共");
 });
+
+it("项目层技能根是普通文件时不报警告，其他技能根照常发现", async () => {
+  const f = fixture();
+  mkdirSync(path.join(f.workspace, ".agents"), { recursive: true });
+  mkdirSync(path.join(f.workspace, ".claude"), { recursive: true });
+  writeFileSync(path.join(f.workspace, ".agents/skills"), "../doc/src/devdocs/agents/skills");
+  writeFileSync(path.join(f.workspace, ".claude/skills"), "../doc/src/devdocs/agents/skills");
+  f.skill(path.join(f.home, "skills"), "ok-user");
+  f.skill(path.join(f.workspace, ".nocturne/skills"), "ok-project");
+
+  const result = await f.scan();
+  expect(result.warnings).toEqual([]);
+  expect(result.skills.map((s) => s.name)).toEqual(["ok-user", "ok-project"]);
+});
+
+it("用户层和插件技能根是普通文件时不报警告，其他技能根照常发现且缓存感知替换", async () => {
+  const f = fixture();
+  writeFileSync(path.join(f.home, "skills"), "../other/skills");
+  mkdirSync(path.join(f.root, ".agents"), { recursive: true });
+  writeFileSync(path.join(f.root, ".agents/skills"), "../other/skills");
+  const pluginFile = path.join(f.root, "plugin-skills-file");
+  writeFileSync(pluginFile, "../other/skills");
+  const pluginDir = path.join(f.root, "plugin-skills-dir");
+  f.skill(path.join(f.root, ".claude/skills"), "from-claude");
+  f.skill(pluginDir, "from-plugin");
+
+  const cache = createSkillDiscoveryCache(f.platform);
+  const input = {
+    nocturneHome: f.home,
+    workspaceRoot: f.workspace,
+    cwd: f.workspace,
+    pluginSkillDirs: [
+      { path: pluginFile, plugin: "file-root@local" },
+      { path: pluginDir, plugin: "dir-root@local" },
+    ],
+  };
+  const first = await cache.discover(input);
+  expect(first.warnings).toEqual([]);
+  expect(first.skills.map((s) => s.name)).toEqual(["from-claude", "from-plugin"]);
+
+  // 普通文件被替换为真实目录后，发现缓存应失效并扫出新技能
+  rmSync(path.join(f.root, ".agents/skills"));
+  f.skill(path.join(f.root, ".agents/skills"), "now-a-dir");
+  const second = await cache.discover(input);
+  expect(second.warnings).toEqual([]);
+  expect(second.skills.map((s) => s.name)).toEqual(["now-a-dir", "from-claude", "from-plugin"]);
+});
+
+it("技能根是指向目录的符号链接或目录联接时照常发现技能", async (ctx) => {
+  const f = fixture();
+  const targetDir = path.join(f.root, "real-skills");
+  f.skill(targetDir, "linked-root-skill");
+  mkdirSync(path.join(f.workspace, ".agents"), { recursive: true });
+  try {
+    symlinkSync(
+      targetDir,
+      path.join(f.workspace, ".agents/skills"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+  } catch (error) {
+    ctx.skip(`无法创建目录链接：${String(error)}`);
+    return;
+  }
+
+  const result = await f.scan();
+  expect(result.warnings).toEqual([]);
+  expect(result.skills).toHaveLength(1);
+  expect(item(result.skills, 0)).toMatchObject({
+    name: "linked-root-skill",
+    layer: "project",
+    source: ".agents",
+  });
+});
+
+it("技能根 readdir 因其他错误失败时仍然产生 read 警告", async () => {
+  const f = fixture();
+  const brokenRoot = path.join(f.workspace, ".agents/skills");
+  mkdirSync(brokenRoot, { recursive: true });
+  f.skill(path.join(f.home, "skills"), "ok-user");
+
+  const origReaddir = f.platform.fs.readdir.bind(f.platform.fs);
+  const spy = vi.spyOn(f.platform.fs, "readdir").mockImplementation(async (p) => {
+    if (f.platform.paths.equals(p, brokenRoot)) {
+      throw Object.assign(new Error(`EACCES: permission denied, scandir '${p}'`), {
+        code: "EACCES",
+      });
+    }
+    return origReaddir(p);
+  });
+  try {
+    const result = await f.scan();
+    expect(result.skills.map((s) => s.name)).toEqual(["ok-user"]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        path: brokenRoot,
+        line: 1,
+        kind: "read",
+        message: expect.stringContaining("EACCES"),
+      }),
+    ]);
+  } finally {
+    spy.mockRestore();
+  }
+});
