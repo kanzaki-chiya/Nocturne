@@ -43,6 +43,8 @@ import { layoutEntry, transcriptBlocks } from "../src/lines.js";
 import { NOTIFY_DEFAULTS, ensembleMemberRing } from "../src/notify.js";
 import {
   ensembleMentionCandidates,
+  ensemblePostHead,
+  ensemblePostRecipients,
   filterEnsemblePosts,
   splitEnsembleMentions,
   ensembleActivityText,
@@ -575,6 +577,38 @@ describe("工具行与文案", () => {
     expect(filterEnsemblePosts(posts, "all").map((p) => p.number)).toEqual([1, 2, 3]);
   });
 
+  it("任务书帖收件人与标题合并 charterOf 去重；按成员筛选包含该成员任务书帖", () => {
+    const charterImpl = post(1, { charterOf: "impl-1", mentions: [], recipients: [] });
+    const charterReview = post(2, {
+      charterOf: "review-1",
+      mentions: ["review-1"],
+      recipients: ["review-1"],
+    });
+    const charterBoth = post(3, {
+      charterOf: "qa-1",
+      mentions: ["review-1"],
+      recipients: ["review-1"],
+    });
+    const plain = post(4, { mentions: [], recipients: [] });
+    const dispatch = post(5, { mentions: ["impl-1"], recipients: ["impl-1"] });
+
+    expect(ensemblePostRecipients(charterImpl)).toEqual(["impl-1"]);
+    expect(ensemblePostHead(charterImpl)).toBe("#1 指挥 → @impl-1");
+    expect(ensemblePostRecipients(charterReview)).toEqual(["review-1"]);
+    expect(ensemblePostHead(charterReview)).toBe("#2 指挥 → @review-1");
+    expect(ensemblePostRecipients(charterBoth)).toEqual(["qa-1", "review-1"]);
+    expect(ensemblePostHead(charterBoth)).toBe("#3 指挥 → @qa-1 @review-1");
+    expect(ensemblePostRecipients(plain)).toEqual([]);
+    expect(ensemblePostHead(plain)).toBe("#4 指挥");
+    expect(ensemblePostHead(dispatch)).toBe("#5 指挥 → @impl-1");
+
+    const posts = [charterImpl, charterReview, dispatch, plain];
+    expect(filterEnsemblePosts(posts, "impl-1").map((p) => p.number)).toEqual([1, 5]);
+    expect(filterEnsemblePosts(posts, "review-1").map((p) => p.number)).toEqual([2]);
+    expect(filterEnsemblePosts(posts, "all").map((p) => p.number)).toEqual([1, 2, 5, 4]);
+    expect(filterEnsemblePosts(posts, "maestro").map((p) => p.number)).toEqual([1, 2, 5, 4]);
+  });
+
   it("成员待确认响铃：订阅快照只登记；之后新出现的 requestId 响一次；正在看的成员不重复响", () => {
     const seen = new Set<string>();
     const updated = (eseq: number, name: string, ids: string[]) =>
@@ -852,6 +886,52 @@ describe("/ensemble board", () => {
     await settle(() => !frame().includes("#3 @verifier → @orders"));
     expect(frame()).toContain("#2");
     expect(frame()).not.toContain("#1 指挥");
+    ui.unmount();
+  });
+
+  it("任务书帖列表行与详情头部显示 → @成员且不重复，成员筛选包含本人任务书帖", async () => {
+    const ensemble = boardEnsemble({
+      members: [member("impl-1"), member("review-1")],
+      posts: [
+        post(1, { charterOf: "impl-1", mentions: [], recipients: [] }),
+        post(2, {
+          charterOf: "review-1",
+          mentions: ["review-1"],
+          recipients: ["review-1"],
+        }),
+        post(3, { mentions: ["impl-1"], recipients: ["impl-1"], text: "@impl-1 开始吧" }),
+        post(4, { mentions: [], recipients: [], text: "普通公告" }),
+      ],
+    });
+    const { ui, frame } = renderBoard(ensemble);
+    const initial = frame();
+    expect(initial).toContain("#1  指挥 → @impl-1");
+    expect(initial).toContain("#2  指挥 → @review-1");
+    expect(initial).not.toContain("@review-1 @review-1");
+    expect(initial).toContain("#3  指挥 → @impl-1");
+    expect(initial).toContain("#4 指挥  ");
+    expect(initial).not.toContain("#4 指挥 →");
+
+    // 切到 #2 与 #1 检查详情头部
+    await keys(ui, "\x1b[A", "\x1b[A");
+    await settle(() => frame().includes("#2 指挥 → @review-1  "));
+    expect(frame()).not.toContain("@review-1 @review-1");
+
+    await press(ui, "\x1b[A");
+    await settle(() => frame().includes("#1 指挥 → @impl-1  "));
+
+    // 切到成员列选 impl-1：包含 #1 任务书帖与 #3 派工帖，不含 #2 任务书帖与 #4 普通帖
+    await keys(ui, "\x1b[Z", "\x1b[B");
+    await settle(() => !frame().includes("#2  指挥 → @review-1"));
+    expect(frame()).toContain("#1  指挥 → @impl-1");
+    expect(frame()).toContain("#3  指挥 → @impl-1");
+    expect(frame()).not.toContain("#4");
+
+    // 选 review-1：只含 #2 任务书帖
+    await press(ui, "\x1b[B");
+    await settle(() => frame().includes("#2  指挥 → @review-1"));
+    expect(frame()).not.toContain("#1  指挥 → @impl-1");
+    expect(frame()).not.toContain("#3  指挥 → @impl-1");
     ui.unmount();
   });
 

@@ -344,6 +344,73 @@ describe("Ensemble 面板留言板", () => {
     expect(nodes(page.container, ".ensemble-post-txt")).toHaveLength(1);
   });
 
+  it("任务书帖标题行显示 → @成员名，与普通帖样式一致，带收件人时不重复", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        members: [makeMember("impl-1"), makeMember("review-1"), makeMember("qa-1")],
+        posts: [
+          makePost(1, { charterOf: "impl-1", mentions: [], recipients: [] }),
+          makePost(2, {
+            charterOf: "review-1",
+            mentions: ["review-1"],
+            recipients: ["review-1"],
+          }),
+          makePost(3, {
+            charterOf: "qa-1",
+            mentions: ["review-1"],
+            recipients: ["review-1"],
+          }),
+          makePost(4, { mentions: [], recipients: [], text: "普通公告" }),
+          makePost(5, { mentions: ["impl-1"], recipients: ["impl-1"], text: "@impl-1 开始吧" }),
+        ],
+      }),
+    });
+
+    const posts = nodes(page.container, ".ensemble-post");
+    expect(posts).toHaveLength(5);
+    expect(posts.map((el) => el.querySelector(".ensemble-post-from")?.textContent)).toEqual([
+      "指挥",
+      "指挥",
+      "指挥",
+      "指挥",
+      "指挥",
+    ]);
+    expect(posts.map((el) => el.querySelector(".ensemble-post-to")?.textContent ?? null)).toEqual([
+      " → @impl-1",
+      " → @review-1",
+      " → @qa-1 @review-1",
+      null,
+      " → @impl-1",
+    ]);
+  });
+
+  it("成员筛选选中某成员时包含其任务书帖、不含他人任务书帖", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        members: [makeMember("impl-1"), makeMember("review-1")],
+        posts: [
+          makePost(1, { charterOf: "impl-1", mentions: [], recipients: [] }),
+          makePost(2, { charterOf: "review-1", mentions: [], recipients: [] }),
+          makePost(3, { mentions: ["impl-1"], recipients: ["impl-1"], text: "@impl-1 开始吧" }),
+        ],
+      }),
+    });
+
+    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "@impl-1" }));
+    expect(texts(page.container, ".ensemble-post-meta")).toEqual([
+      `#1 · ${TIME_LABEL}`,
+      `#3 · ${TIME_LABEL}`,
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "@review-1" }));
+    expect(texts(page.container, ".ensemble-post-meta")).toEqual([`#2 · ${TIME_LABEL}`]);
+
+    fireEvent.click(screen.getByRole("button", { name: "全部" }));
+    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
+  });
+
   it("正文只强调 mentions 里的 @token，代码内与未提及的保持原样", () => {
     const page = renderPane({
       ensemble: makeEnsemble({

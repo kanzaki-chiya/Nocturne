@@ -370,6 +370,58 @@ describe("作者、提及、筛选、搜索与分组", () => {
     ).toEqual([]);
   });
 
+  it("ensemblePostRecipients 与 ensemblePostHead 合并任务书帖的 charterOf 且不重复", () => {
+    const charterOnly = makePost(1, {
+      from: "maestro",
+      fromKind: "maestro",
+      mentions: [],
+      recipients: [],
+      charterOf: "impl-1",
+    });
+    expect(ensemblePostRecipients(charterOnly)).toEqual(["impl-1"]);
+    expect(ensemblePostHead(charterOnly)).toBe("#1 指挥 → @impl-1");
+
+    const charterWithSameMention = makePost(2, {
+      from: "maestro",
+      fromKind: "maestro",
+      mentions: ["impl-1"],
+      recipients: ["impl-1"],
+      charterOf: "impl-1",
+    });
+    expect(ensemblePostRecipients(charterWithSameMention)).toEqual(["impl-1"]);
+    expect(ensemblePostHead(charterWithSameMention)).toBe("#2 指挥 → @impl-1");
+
+    const charterWithOtherMention = makePost(3, {
+      from: "maestro",
+      fromKind: "maestro",
+      mentions: ["review-1"],
+      recipients: ["review-1"],
+      charterOf: "impl-1",
+    });
+    expect(ensemblePostRecipients(charterWithOtherMention)).toEqual(["impl-1", "review-1"]);
+    expect(ensemblePostHead(charterWithOtherMention)).toBe("#3 指挥 → @impl-1 @review-1");
+
+    const plainPost = makePost(4, {
+      from: "maestro",
+      fromKind: "maestro",
+      mentions: [],
+      recipients: [],
+    });
+    expect(ensemblePostRecipients(plainPost)).toEqual([]);
+    expect(ensemblePostHead(plainPost)).toBe("#4 指挥");
+  });
+
+  it("filterEnsemblePosts 按成员筛选时包含该成员的任务书帖，不含其他成员的任务书帖", () => {
+    const posts = [
+      makePost(1, { charterOf: "impl-1", mentions: [], recipients: [] }),
+      makePost(2, { charterOf: "review-1", mentions: [], recipients: [] }),
+      makePost(3, { mentions: ["impl-1"], recipients: ["impl-1"], text: "@impl-1 开始吧" }),
+    ];
+    expect(filterEnsemblePosts(posts, { member: "impl-1" }).map((p) => p.number)).toEqual([1, 3]);
+    expect(filterEnsemblePosts(posts, { member: "review-1" }).map((p) => p.number)).toEqual([2]);
+    expect(filterEnsemblePosts(posts, { member: "" }).map((p) => p.number)).toEqual([1, 2, 3]);
+  });
+
   it("ensembleMentionToken 与 ensembleMentionCandidates：顺序、组提及阈值、移除过滤与前缀匹配", () => {
     expect(ensembleMentionToken("@", 1)).toEqual({ start: 0, end: 1, query: "" });
     expect(ensembleMentionToken("请 @d", 4)).toEqual({ start: 2, end: 4, query: "d" });

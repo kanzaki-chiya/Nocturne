@@ -165,17 +165,27 @@ export function ensembleMentionLabel(mention: string): string {
   return mention === "maestro" ? "指挥" : `@${mention}`;
 }
 
-/** 帖子头展示的收件人：剔除作者自身（指挥剔除 `maestro`） */
+/** 帖子头展示的收件人：剔除作者自身（指挥剔除 `maestro`），任务书帖将 `charterOf` 合并在首位并去重 */
 export function ensemblePostRecipients(
-  post: Pick<EnsemblePostView, "from" | "fromKind" | "mentions">,
+  post: Pick<EnsemblePostView, "from" | "fromKind" | "mentions" | "charterOf">,
 ): string[] {
   const self = post.fromKind === "maestro" ? "maestro" : post.from;
-  return post.mentions.filter((mention) => mention !== self);
+  const list = post.mentions.filter((mention) => mention !== self);
+  const charterOf = post.charterOf?.trim();
+  if (
+    charterOf !== undefined &&
+    charterOf !== "" &&
+    charterOf !== self &&
+    !list.includes(charterOf)
+  ) {
+    return [charterOf, ...list];
+  }
+  return list;
 }
 
 /** 帖子标题 `#n 作者 → 提及`（没有提及时省去箭头） */
 export function ensemblePostHead(
-  post: Pick<EnsemblePostView, "number" | "from" | "fromKind" | "mentions">,
+  post: Pick<EnsemblePostView, "number" | "from" | "fromKind" | "mentions" | "charterOf">,
 ): string {
   const mentions = ensemblePostRecipients(post).map(ensembleMentionLabel).join(" ");
   const author = ensembleAuthorLabel(post.from, post.fromKind);
@@ -260,7 +270,7 @@ export function ensembleStripMembers(ensemble: EnsembleView): EnsembleMemberView
   );
 }
 
-/** 留言板筛选：`all` 全部；`maestro` 与成员名按 `from` 或 `recipients` */
+/** 留言板筛选：`all` 全部；`maestro` 按 `from` 或 `recipients`，成员按 `from`、`recipients` 或 `charterOf` */
 export function filterEnsemblePosts(
   posts: readonly EnsemblePostView[],
   target: string,
@@ -269,7 +279,10 @@ export function filterEnsemblePosts(
   if (target === "maestro")
     return posts.filter((p) => p.fromKind === "maestro" || p.recipients.includes("maestro"));
   return posts.filter(
-    (p) => (p.fromKind === "member" && p.from === target) || p.recipients.includes(target),
+    (p) =>
+      (p.fromKind === "member" && p.from === target) ||
+      p.recipients.includes(target) ||
+      p.charterOf === target,
   );
 }
 

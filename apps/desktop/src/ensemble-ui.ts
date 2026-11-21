@@ -308,13 +308,24 @@ export function ensembleMemberMetaLabel(
 
 /**
  * 帖子头显示的收件人列表：从 `mentions` 中去掉作者自身
- * （成员作者去掉 `post.from`，指挥作者去掉 `"maestro"`）。
+ * （成员作者去掉 `post.from`，指挥作者去掉 `"maestro"`）；
+ * 任务书帖将 `charterOf` 合并在首位（与已有项及作者自身去重）。
  */
 export function ensemblePostRecipients(
-  post: Pick<EnsemblePostView, "from" | "fromKind" | "mentions">,
+  post: Pick<EnsemblePostView, "from" | "fromKind" | "mentions" | "charterOf">,
 ): string[] {
   const self = post.fromKind === "maestro" ? "maestro" : post.from;
-  return post.mentions.filter((mention) => mention !== self);
+  const list = post.mentions.filter((mention) => mention !== self);
+  const charterOf = post.charterOf?.trim();
+  if (
+    charterOf !== undefined &&
+    charterOf !== "" &&
+    charterOf !== self &&
+    !list.includes(charterOf)
+  ) {
+    return [charterOf, ...list];
+  }
+  return list;
 }
 
 export interface EnsembleBoardPost {
@@ -327,7 +338,7 @@ export interface EnsembleBoardPost {
 
 /** 帖子标题 `#n 作者 → 提及`（没有提及时省去箭头） */
 export function ensemblePostHead(
-  post: Pick<EnsembleBoardPost, "number" | "from" | "fromKind" | "mentions">,
+  post: Pick<EnsemblePostView, "number" | "from" | "fromKind" | "mentions" | "charterOf">,
 ): string {
   const mentions = ensemblePostRecipients(post).map(ensembleMentionLabel).join(" ");
   const author = ensembleAuthorLabel(post.from, post.fromKind);
@@ -461,7 +472,7 @@ export function ensembleMentionCandidates(
   return out;
 }
 
-/** 留言板按成员筛选（`from` 或 `recipients`）与正文/作者不区分大小写子串搜索 */
+/** 留言板按成员筛选（`from`、`recipients` 或 `charterOf`）与正文/作者不区分大小写子串搜索 */
 export function filterEnsemblePosts<
   T extends Pick<EnsemblePostView, "from" | "fromKind" | "text" | "recipients" | "charterOf">,
 >(
@@ -481,7 +492,9 @@ export function filterEnsemblePosts<
   return posts.filter((post) => {
     if (selected !== "") {
       const isAuthor = post.fromKind === "member" && post.from === selected;
-      if (!isAuthor && !post.recipients.includes(selected)) return false;
+      if (!isAuthor && !post.recipients.includes(selected) && post.charterOf !== selected) {
+        return false;
+      }
     }
     if (needle !== "") {
       const authorLabel = ensembleAuthorLabel(post.from, post.fromKind).toLowerCase();
