@@ -1,6 +1,6 @@
 {
   "name": "pdf",
-  "version": "0.59.0",
+  "version": "0.60.0",
   "description": "生成、提取文本、按页预览、合并与拆分 PDF 文档。",
   "skills": "./skills",
   "agents": "./agents",

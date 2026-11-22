@@ -4,6 +4,10 @@
 
 安装包尚未做代码签名，首次运行触发 Windows SmartScreen 提示属于正常现象。点击弹窗上的「更多信息」→「仍要运行」即可完成安装。
 
+## macOS 提示无法验证、打不开 Nocturne？
+
+安装包没有 Apple 开发者签名。第一次打开时系统提示无法验证、没有打开，到「系统设置 › 隐私与安全性」页面底部点「仍要打开」，再确认一次即可。
+
 ## 为什么写在 `config.json` 里的 API Key 会报错？
 
 为了防止密钥意外随配置文件提交或泄露，Nocturne 拒绝在 `config.json` 或 `providers.json` 中直接写入明文密钥（会触发 `config_credential_rejected` 错误）。请在桌面端「设置」→「服务商」或运行 `nctrn setup` 粘贴密钥（加密保存在系统凭据库），或者使用 `apiKeyEnv` 引用环境变量。

@@ -1,6 +1,6 @@
 {
   "name": "pptx",
-  "version": "0.59.0",
+  "version": "0.60.0",
   "description": "创建、读取、编辑、转换与按页预览演示文稿。",
   "skills": "./skills",
   "agents": "./agents",

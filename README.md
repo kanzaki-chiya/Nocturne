@@ -6,7 +6,7 @@ Nocturne 是在本地代码仓库里工作的编程助手。你可以用自然�
 
 它提供三种使用方式，**共用同一套本地会话、服务商与权限配置**：
 
-- **Windows 桌面版**：左侧按项目组织会话，右侧面板可查看文件、Diff 变更、终端、网页和子代理状态；内置可视化设置页。
+- **桌面版（Windows x64、macOS Apple Silicon）**：左侧按项目组织会话，右侧面板可查看文件、Diff 变更、终端、网页和子代理状态；内置可视化设置页。
 - **终端 (`nctrn`)**：在项目目录直接启动，支持全屏终端界面（TUI）、普通屏幕模式、逐行模式和单次命令执行。
 - **手机远程控制**：通过端到端加密中继在手机浏览器上继续电脑里的会话、审批权限或发送新任务。
 
@@ -14,11 +14,11 @@ Nocturne 是在本地代码仓库里工作的编程助手。你可以用自然�
 
 ## 快速开始
 
-### 方式一：Windows 桌面版（推荐）
+### 方式一：桌面版（推荐）
 
-1. 前往 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载 `Nocturne_<版本>_x64-setup.exe` 并运行。
-   - 安装包内置了 Node.js 运行时，无需额外配置环境，也不需要管理员权限。
-   - 安装包暂未做代码签名，若 Windows SmartScreen 弹出提示，点击「更多信息」→「仍要运行」即可。
+1. 前往 [GitHub Releases](https://github.com/kanzaki-chiya/Nocturne/releases) 下载安装包。安装包内置了 Node.js 运行时，无需额外配置环境。
+   - **Windows x64**：下载 `Nocturne_<版本>_x64-setup.exe` 并运行，不需要管理员权限。安装包暂未做代码签名，若 Windows SmartScreen 弹出提示，点击「更多信息」→「仍要运行」即可。
+   - **macOS（Apple Silicon，macOS 14 或更新）**：下载 `Nocturne_<版本>_aarch64.dmg`，打开后把 Nocturne 拖进「应用程序」。安装包没有 Apple 开发者签名。第一次打开时系统提示无法验证、没有打开，到「系统设置 › 隐私与安全性」页面底部点「仍要打开」，再确认一次即可。
 2. 打开 Nocturne，进入左下角 **「设置 › 服务商」**（见[连接服务商](https://nocturne.koxia.cn/docs/providers/)）：
    - 可以登录 **ChatGPT**、**Grok** 账号，读取本机 **Grok CLI** 登录凭据，或通过浏览器授权 **OpenRouter**；
    - 也可以添加任意 OpenAI 兼容、Anthropic、Gemini 或内置的 OpenCode Zen / Go 服务商并填入 API Key（密钥保存在系统安全凭据库中，不写明文配置）。
@@ -70,7 +70,7 @@ Nocturne 是在本地代码仓库里工作的编程助手。你可以用自然�
 - **切换和新建分支**：点击底部状态栏右侧的分支名可搜索并切换 Git 分支，输入不存在的分支名可从当前提交新建并切换（见[切换 Git 分支](https://nocturne.koxia.cn/docs/context/#桌面端切换-git-分支)）。
 - **会话归档**：在侧栏右键点击会话可选择「归档」；在「设置 › 已归档的会话」中可搜索、查看或恢复已归档会话（见[归档和恢复会话](https://nocturne.koxia.cn/docs/first-session/#归档和恢复会话)）。
 - **外观设置**：在「设置 › 外观」中可切换主题，并分别设置桌面端的界面字体、代码字体与字号（12–20，默认 14，见[配置参考](https://nocturne.koxia.cn/docs/config/#文件位置与职责)）。
-- **通知与定时任务**：当后台会话需要确认、报错停止或长任务完成时，会发送 Windows 系统通知（可在「设置 › 常规」调整）；支持在「定时任务」中配置按日、按周、间隔或 Cron 自动运行的无人值守任务（见[定时任务](https://nocturne.koxia.cn/docs/schedule/)）。
+- **通知与定时任务**：当后台会话需要确认、报错停止或长任务完成时，会发送系统通知（可在「设置 › 常规」调整）；支持在「定时任务」中配置按日、按周、间隔或 Cron 自动运行的无人值守任务（见[定时任务](https://nocturne.koxia.cn/docs/schedule/)）。
 
 ### 终端命令行 (`nctrn`)
 
