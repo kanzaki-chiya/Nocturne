@@ -47,6 +47,7 @@ import type {
   SettingsPatch,
 } from "./rpc-types";
 import { describeUpdateError, type CheckResult } from "./updater";
+import { isMacOS } from "./platform";
 import {
   FILE_OPENER_LABELS,
   FONT_SIZE_DEFAULT,
@@ -371,7 +372,7 @@ export function SettingsPage({
   providersVersion: number;
   /**
    * 通知（ADR-0056）：「发送测试通知」走外壳同一个命令发一条测试通知；
-   * 返回 shown=false + reason="disabled" 表示 Windows 关掉了本应用的通知权限。
+   * 返回 shown=false + reason="disabled" 表示系统关掉了本应用的通知权限。
    */
   notifications: { sendTest: (sound: boolean) => Promise<NotifyResult> };
   /** 写设置成功后调用：桌面端据此刷新会话列表 */
@@ -431,7 +432,7 @@ export function SettingsPage({
   >([]);
   const [shellMenu, setShellMenu] = useState(false);
   const [shellBusy, setShellBusy] = useState(false);
-  /** 「发送测试通知」：busy 防重复点；blocked = Windows 关掉了本应用的通知权限 */
+  /** 「发送测试通知」：busy 防重复点；blocked = 系统关掉了本应用的通知权限 */
   const [notifyTest, setNotifyTest] = useState<null | { busy: boolean; blocked: boolean }>(null);
   const shellTrigger = useRef<HTMLButtonElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -1020,7 +1021,9 @@ export function SettingsPage({
                   dimmed={!notifyEnabled}
                   warning={
                     notifyTest?.blocked === true
-                      ? "Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开"
+                      ? isMacOS()
+                        ? "macOS 已关闭 Nocturne 的通知，请到 系统设置 › 通知 打开"
+                        : "Windows 已关闭 Nocturne 的通知，请到 系统 › 通知 打开"
                       : undefined
                   }
                   error={errs(NOTIFY_TEST_KEY)}

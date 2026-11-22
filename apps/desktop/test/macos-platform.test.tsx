@@ -33,11 +33,14 @@ import {
   setPlatformForTest,
 } from "../src/platform";
 import { createPrefsStore } from "../src/prefs";
+import type { SettingItem } from "../src/rpc-types";
 import { buildSessionTree } from "../src/session-tree";
+import { SettingsPage } from "../src/SettingsPage";
 import { Sidebar, type SidebarProps } from "../src/Sidebar";
 import { SidePanel } from "../src/SidePanel";
 import { mergeMacLoginShell, TerminalPane, terminalShells } from "../src/TerminalPane";
 import { WindowFrame } from "../src/WindowFrame";
+import { fakeServer, withInit } from "./fake-server";
 
 const xtermHandlers: ((event: KeyboardEvent) => boolean)[] = [];
 let xtermHasSelection = false;
@@ -903,6 +906,32 @@ describe("TerminalPane macOS 登录 shell 与 terminal-view copy/copy-keep", () 
     await waitFor(() => expect(opened).toEqual(["/bin/zsh"]));
   });
 
+  it("TerminalPane 在 macOS 无可用 shell 时提示 zsh/bash/sh/fish，不含 Windows", async () => {
+    stubMatchMedia();
+    setPlatformForTest("macos");
+    const host: TerminalHost = {
+      open: vi.fn(async () => 1),
+      write: vi.fn(async () => undefined),
+      resize: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      readClipboard: vi.fn(async () => ""),
+      writeClipboard: vi.fn(async () => undefined),
+      loginShell: vi.fn(async () => null),
+    };
+    render(
+      <TerminalPane
+        tab={{ id: "t-empty", kind: "terminal", cwd: "/repo", label: "repo" }}
+        host={host}
+        loadShells={vi.fn(async () => ({ shells: [], setting: "auto" }))}
+        visible
+        onShellChange={vi.fn()}
+      />,
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("没有找到可用的 shell（zsh、bash、sh、fish）");
+    expect(alert.textContent).not.toContain("Windows");
+  });
+
   it("terminal-view 按 copy / copy-keep 动作决定是否清选区（不再直接看 ctrlKey）", async () => {
     stubMatchMedia();
     const { mountTerminal } = await import("../src/terminal-view");
@@ -926,5 +955,74 @@ describe("TerminalPane macOS 登录 shell 与 terminal-view copy/copy-keep", () 
 
     expect(onCopy.mock.calls).toEqual([[true], [false], [true]]);
     div.remove();
+  });
+});
+
+describe("SettingsPage macOS 测试通知被拒提示", () => {
+  it("macOS 发送测试通知返回 disabled 时提示系统设置 › 通知，不含 Windows", async () => {
+    setPlatformForTest("macos");
+    const items: SettingItem[] = [
+      {
+        key: "notifications.enabled",
+        effective: "true",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+      {
+        key: "notifications.doneAfterSeconds",
+        effective: "30",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+      {
+        key: "notifications.sound",
+        effective: "true",
+        source: "default",
+        saved: undefined,
+        overridden: false,
+      },
+    ];
+    const server = fakeServer(
+      withInit({
+        "runtime.describeSettings": items,
+        "runtime.listModels": [],
+        "runtime.listReviewerProviders": [],
+        "runtime.getPreference": null,
+        "runtime.listShells": [],
+      }),
+    );
+    try {
+      await server.initialize();
+      const sendTest = vi.fn(() => Promise.resolve({ shown: false, reason: "disabled" as const }));
+      render(
+        <SettingsPage
+          section="general"
+          client={server.client}
+          theme="system"
+          workspace="/Users/me/Nocturne"
+          defaultWorkspace="/Users/me/Nocturne"
+          workspaceOverridden={false}
+          onThemeChange={() => true}
+          fileOpener="panel"
+          editors={{ vscode: false, cursor: false }}
+          onFileOpenerChange={() => true}
+          onWorkspaceChange={() => Promise.resolve(undefined)}
+          pickFolder={() => Promise.resolve(null)}
+          providersVersion={0}
+          notifications={{ sendTest }}
+        />,
+      );
+      const btn = await screen.findByRole("button", { name: "发送测试通知" });
+      fireEvent.click(btn);
+      const warning = await screen.findByText(
+        "macOS 已关闭 Nocturne 的通知，请到 系统设置 › 通知 打开",
+      );
+      expect(warning.textContent).not.toContain("Windows");
+      expect(sendTest).toHaveBeenCalledTimes(1);
+    } finally {
+      server.close();
+    }
   });
 });
