@@ -1,6 +1,6 @@
 {
   "name": "plugin-creator",
-  "version": "0.60.0",
+  "version": "0.61.0",
   "description": "编写、校验与指导安装 Nocturne 自有插件。",
   "skills": "./skills",
   "mcpServers": {
