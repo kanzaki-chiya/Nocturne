@@ -1,10 +1,15 @@
-//! 「文件」标签的「打开」菜单：列出 Windows 给这个扩展名的「建议的应用」，并用选中的
-//! 应用打开文件（ADR-0102）。系统关联是唯一事实源：名称、图标、默认程序都从系统读，
-//! 不读注册表拼命令行，不写系统状态（`IAssocHandler::MakeDefault` 绝不调用）。
-//! 应用的身份只以应用键的哈希交给前端，打开时重新枚举、按哈希找回处理器。
+//! 「文件」标签的「打开」菜单：列出系统给这个文件建议的应用，并用选中的
+//! 应用打开文件（ADR-0102、ADR-0110）。系统关联是唯一事实源：名称、图标、默认程序
+//! 都从系统读，不写系统状态。应用的身份只以应用键的哈希交给前端，打开时重新枚举、
+//! 按哈希找回。
 //!
-//! 会被直接执行的类型（`editor::launches_code`）不列系统应用：脚本的「建议的应用」
-//! 往往就是解释器（Python、PowerShell），点了就是运行（ADR-0046 防误运行）。
+//! - **Windows**：经 Shell COM（`IAssocHandler` / `IApplicationAssociationRegistration`）
+//!   查询并 `Invoke`，绝不调用 `MakeDefault`。
+//! - **macOS**：经 `NSWorkspace`（`URLsForApplicationsToOpenURL:`、
+//!   `URLForApplicationToOpenURL:`、`openURLs:withApplicationAtURL:configuration:completionHandler:`、
+//!   `iconForFile:`）与 `NSFileManager::displayNameAtPath:` 查询并打开。
+//!
+//! 会被直接执行的类型（`editor::launches_code_any`）不列系统应用（ADR-0046 防误运行）。
 
 use std::path::{Path, PathBuf};
 
@@ -66,9 +71,16 @@ pub(crate) struct DefaultAssoc {
     pub executable: Option<String>,
 }
 
-/// 应用键规范化：去空白、统一反斜杠、忽略大小写（Windows 路径与包名都不区分大小写）。
+/// 应用键规范化：Windows 统一反斜杠并忽略大小写；macOS / Unix 保留正斜杠、去尾斜杠并忽略大小写。
 fn normalize_key(key: &str) -> String {
-    key.trim().replace('/', "\\").to_lowercase()
+    #[cfg(windows)]
+    {
+        key.trim().replace('/', "\\").to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        key.trim().trim_end_matches('/').to_lowercase()
+    }
 }
 
 /// 应用键的哈希（FNV-1a 64，结果稳定，不依赖 std 的随机哈希种子）。
@@ -148,12 +160,15 @@ pub(crate) fn arrange(handlers: Vec<Handler>, assoc: &DefaultAssoc) -> Vec<(Hand
     list
 }
 
-/// 只接受存在的本机绝对路径文件：目录、网络路径（会向那台主机发起 SMB 连接）一律拒绝。
+/// 只接受存在的本机绝对路径文件：目录、网络路径（Windows 会发起 SMB 连接）一律拒绝。
 pub(crate) fn validate_file(path: &str) -> Result<PathBuf, CommandError> {
     if path.trim().is_empty() || path.contains('\0') {
         return Err(CommandError::new("invalid_path", "文件路径无效"));
     }
+    #[cfg(windows)]
     let unc = path.starts_with("\\\\") || path.starts_with("//");
+    #[cfg(not(windows))]
+    let unc = false;
     let target = PathBuf::from(path);
     if unc || !target.is_absolute() {
         return Err(CommandError::new(
@@ -169,12 +184,20 @@ pub(crate) fn validate_file(path: &str) -> Result<PathBuf, CommandError> {
     if !meta.is_file() {
         return Err(CommandError::new("invalid_path", "这不是普通文件"));
     }
-    // Shell 解析名只认反斜杠（正斜杠让 SHCreateItemFromParsingName 报 E_INVALIDARG）
-    Ok(PathBuf::from(path.replace('/', "\\")))
+    #[cfg(windows)]
+    {
+        // Shell 解析名只认反斜杠（正斜杠让 SHCreateItemFromParsingName 报 E_INVALIDARG）
+        Ok(PathBuf::from(path.replace('/', "\\")))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(target)
+    }
 }
 
 /// 从 `find_editor` 找到的命令向上找真实 exe：`…\Microsoft VS Code\bin\code.cmd` →
 /// `…\Microsoft VS Code\Code.exe`。命令本身就是 `<cmd>.exe` 时直接用它。
+#[cfg(windows)]
 pub(crate) fn editor_exe(command: &Path, cmd: &str) -> Option<PathBuf> {
     let exe_name = format!("{cmd}.exe");
     let is_exe = command
@@ -193,6 +216,7 @@ pub(crate) fn editor_exe(command: &Path, cmd: &str) -> Option<PathBuf> {
 }
 
 /// 两个路径是不是同一个文件：先比真实路径，取不到就比规范化后的字符串。
+#[cfg(windows)]
 fn same_file(left: &Path, right: &Path) -> bool {
     match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
         (Ok(a), Ok(b)) => a == b,
@@ -201,6 +225,7 @@ fn same_file(left: &Path, right: &Path) -> bool {
 }
 
 /// 这个应用键是不是 VS Code / Cursor 的可执行文件：是的话走 `code -g file:line` 带行号打开。
+#[cfg(windows)]
 fn editor_for_key(key: &str) -> Option<&'static str> {
     let key = Path::new(key.trim());
     if !key.is_absolute() {
@@ -214,6 +239,19 @@ fn editor_for_key(key: &str) -> Option<&'static str> {
                 .is_some_and(|exe| same_file(&exe, key))
         })
         .map(|(editor, _)| editor)
+}
+
+/// 预乘 alpha RGBA 转直通 alpha（CoreGraphics 位图上下文输出预乘 alpha，PNG 需要直通 alpha）。
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+pub(crate) fn unpremultiply_rgba(rgba: &mut [u8]) {
+    for px in rgba.chunks_exact_mut(4) {
+        let a = px[3];
+        if a > 0 && a < 255 {
+            for c in &mut px[..3] {
+                *c = ((u16::from(*c) * 255 + u16::from(a) / 2) / u16::from(a)).min(255) as u8;
+            }
+        }
+    }
 }
 
 /// RGBA 像素编码成 PNG data URL（图标提取的最后一步，平台无关）。
@@ -236,15 +274,7 @@ pub(crate) fn png_data_url(width: u32, height: u32, rgba: &[u8]) -> Option<Strin
 }
 
 fn editor_icons() -> EditorIcons {
-    let read = |cmd: &str| {
-        editor::find_editor(cmd)
-            .and_then(|command| editor_exe(&command, cmd))
-            .and_then(|exe| icon_data_url(&exe.to_string_lossy(), 0))
-    };
-    EditorIcons {
-        vscode: read("code"),
-        cursor: read("cursor"),
-    }
+    platform::editor_icons()
 }
 
 /// 列出系统给这个文件的「建议的应用」。每次打开菜单都重新查，不缓存。
@@ -305,17 +335,11 @@ enum Opened {
     Editor(&'static str),
 }
 
-/// 应用图标：`GetIconLocation` 给的路径与索引（也用于兜底编辑器的 exe）→ 32×32 PNG data URL。
-/// 两处共用这一个函数；读不到返回 None，前端换通用图标。
-pub(crate) fn icon_data_url(location: &str, index: i32) -> Option<String> {
-    platform::icon_data_url(location, index)
-}
-
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     use std::path::Path;
 
-    use super::{FileApp, Opened};
+    use super::{EditorIcons, FileApp, Opened};
     use crate::backend::CommandError;
 
     pub fn query(_path: &Path) -> Result<Vec<FileApp>, CommandError> {
@@ -326,8 +350,232 @@ mod platform {
         Err(CommandError::new("unsupported", "无法打开此文件"))
     }
 
-    pub fn icon_data_url(_location: &str, _index: i32) -> Option<String> {
-        None
+    pub fn editor_icons() -> EditorIcons {
+        EditorIcons::default()
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapInfo, CGColorSpace, CGContext, CGImageAlphaInfo,
+        CGInterpolationQuality,
+    };
+    use objc2_foundation::{
+        NSArray, NSBundle, NSError, NSFileManager, NSPoint, NSRect, NSSize, NSString, NSURL,
+    };
+
+    use super::{
+        app_id, arrange, normalize_key, png_data_url, unpremultiply_rgba, DefaultAssoc,
+        EditorIcons, FileApp, Handler, Opened,
+    };
+    use crate::backend::CommandError;
+    use crate::editor;
+
+    const ICON_SIZE: usize = 32;
+    const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
+
+    fn display_name(app_path: &str) -> String {
+        let ns_path = NSString::from_str(app_path);
+        let name = NSFileManager::defaultManager()
+            .displayNameAtPath(&ns_path)
+            .to_string();
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+        Path::new(app_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(app_path)
+            .to_string()
+    }
+
+    fn enumerate(path: &Path) -> Result<(Vec<(Handler, Retained<NSURL>)>, DefaultAssoc), CommandError> {
+        let ns_path = NSString::from_str(&path.to_string_lossy());
+        let file_url = NSURL::fileURLWithPath(&ns_path);
+        let ws = NSWorkspace::sharedWorkspace();
+        let urls = ws.URLsForApplicationsToOpenURL(&file_url);
+        let default_url = ws.URLForApplicationToOpenURL(&file_url);
+        let default_path = default_url
+            .as_deref()
+            .and_then(|u| u.path())
+            .map(|p| p.to_string());
+
+        let mut entries: Vec<(Handler, Retained<NSURL>)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for index in 0..urls.count() {
+            let app_url = urls.objectAtIndex(index);
+            let Some(app_path) = app_url.path().map(|p| p.to_string()) else {
+                continue;
+            };
+            let norm = normalize_key(&app_path);
+            if norm.is_empty() || !seen.insert(norm) {
+                continue;
+            }
+            let handler = Handler {
+                name: display_name(&app_path),
+                key: app_path,
+                prog_id: None,
+                icon: None,
+            };
+            entries.push((handler, app_url));
+        }
+
+        // 若系统返回的默认应用不在列表里，补进末尾交由 `arrange` 提到第一项
+        if let (Some(app_url), Some(app_path)) = (default_url, default_path.as_ref()) {
+            let norm = normalize_key(app_path);
+            if !norm.is_empty() && seen.insert(norm) {
+                let handler = Handler {
+                    name: display_name(app_path),
+                    key: app_path.clone(),
+                    prog_id: None,
+                    icon: None,
+                };
+                entries.push((handler, app_url));
+            }
+        }
+
+        let assoc = DefaultAssoc {
+            prog_id: None,
+            executable: default_path,
+        };
+        Ok((entries, assoc))
+    }
+
+    pub fn query(path: &Path) -> Result<Vec<FileApp>, CommandError> {
+        let (entries, assoc) = enumerate(path)?;
+        let handlers: Vec<Handler> = entries.into_iter().map(|(h, _)| h).collect();
+        let arranged = arrange(handlers, &assoc);
+        Ok(arranged
+            .into_iter()
+            .map(|(handler, is_default)| FileApp {
+                id: app_id(&handler.key),
+                name: handler.name,
+                icon_data_url: icon_for_path(&handler.key),
+                is_default,
+            })
+            .collect())
+    }
+
+    pub fn open(path: &Path, id: &str) -> Result<Opened, CommandError> {
+        let (entries, _assoc) = enumerate(path)?;
+        let Some((_handler, app_url)) = entries
+            .into_iter()
+            .find(|(handler, _)| app_id(&handler.key) == id)
+        else {
+            return Err(CommandError::new("app_unavailable", "无法打开此文件"));
+        };
+
+        // VS Code / Cursor 走 CLI `-g file:line` 以便跳到行号（前提是找得到命令行可执行文件）
+        if let Some(bundle_id) =
+            NSBundle::bundleWithURL(&app_url).and_then(|bundle| bundle.bundleIdentifier())
+        {
+            if let Some((editor_kind, cmd)) =
+                editor::macos_editor_for_bundle_id(&bundle_id.to_string())
+            {
+                if editor::find_editor(cmd).is_some() {
+                    return Ok(Opened::Editor(editor_kind));
+                }
+            }
+        }
+
+        let ws = NSWorkspace::sharedWorkspace();
+        let ns_path = NSString::from_str(&path.to_string_lossy());
+        let file_url = NSURL::fileURLWithPath(&ns_path);
+        let urls = NSArray::from_slice(&[&*file_url]);
+        let config = NSWorkspaceOpenConfiguration::configuration();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        let handler = RcBlock::new(
+            move |_app: *mut NSRunningApplication, error: *mut NSError| {
+                let res = if error.is_null() {
+                    Ok(())
+                } else {
+                    // SAFETY: 非空 NSError 指针在回调期间有效。
+                    Err(unsafe { &*error }.localizedDescription().to_string())
+                };
+                let _ = tx.send(res);
+            },
+        );
+        ws.openURLs_withApplicationAtURL_configuration_completionHandler(
+            &urls,
+            &app_url,
+            &config,
+            Some(&*handler),
+        );
+        match rx.recv_timeout(OPEN_TIMEOUT) {
+            Ok(Ok(())) => Ok(Opened::Invoked),
+            Ok(Err(detail)) => Err(CommandError::new(
+                "open_failed",
+                format!("无法打开此文件：{detail}"),
+            )),
+            Err(_) => Err(CommandError::new("open_failed", "打开文件超时")),
+        }
+    }
+
+    fn icon_for_path(app_path: &str) -> Option<String> {
+        let ws = NSWorkspace::sharedWorkspace();
+        let ns_path = NSString::from_str(app_path);
+        let image = ws.iconForFile(&ns_path);
+        let mut rect = NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(ICON_SIZE as f64, ICON_SIZE as f64),
+        );
+        // SAFETY: `rect` 为有效的栈上 NSRect，context 与 hints 均为 None。
+        let cg_image =
+            unsafe { image.CGImageForProposedRect_context_hints(&mut rect, None, None) }?;
+        let color_space = CGColorSpace::new_device_rgb()?;
+        let mut rgba = vec![0u8; ICON_SIZE * ICON_SIZE * 4];
+        let bitmap_info = CGImageAlphaInfo::PremultipliedLast.0 | CGBitmapInfo::ByteOrder32Big.0;
+        // SAFETY: `rgba` 长度为 ICON_SIZE * ICON_SIZE * 4，在 `ctx` 释放前有效且不重分配。
+        let ctx = unsafe {
+            CGBitmapContextCreate(
+                rgba.as_mut_ptr().cast(),
+                ICON_SIZE,
+                ICON_SIZE,
+                8,
+                ICON_SIZE * 4,
+                Some(&*color_space),
+                bitmap_info,
+            )
+        }?;
+        CGContext::set_interpolation_quality(Some(&*ctx), CGInterpolationQuality::High);
+        CGContext::draw_image(
+            Some(&*ctx),
+            CGRect::new(
+                CGPoint::new(0.0, 0.0),
+                CGSize::new(ICON_SIZE as f64, ICON_SIZE as f64),
+            ),
+            Some(&*cg_image),
+        );
+        drop(ctx);
+        unpremultiply_rgba(&mut rgba);
+        png_data_url(ICON_SIZE as u32, ICON_SIZE as u32, &rgba)
+    }
+
+    fn find_editor_bundle(cmd: &str) -> Option<PathBuf> {
+        editor::macos_editor_bundle(cmd).or_else(|| {
+            let cli = editor::find_editor(cmd)?;
+            let real = std::fs::canonicalize(&cli).unwrap_or(cli);
+            editor::macos_app_bundle_ancestor(&real)
+        })
+    }
+
+    pub fn editor_icons() -> EditorIcons {
+        let read = |cmd: &str| {
+            find_editor_bundle(cmd).and_then(|bundle| icon_for_path(&bundle.to_string_lossy()))
+        };
+        EditorIcons {
+            vscode: read("code"),
+            cursor: read("cursor"),
+        }
     }
 }
 
@@ -356,9 +604,23 @@ mod platform {
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
     use super::{
-        app_id, arrange, editor_for_key, png_data_url, DefaultAssoc, FileApp, Handler, Opened,
+        app_id, arrange, editor_exe, editor_for_key, png_data_url, DefaultAssoc, EditorIcons,
+        FileApp, Handler, Opened,
     };
     use crate::backend::CommandError;
+    use crate::editor;
+
+    pub fn editor_icons() -> EditorIcons {
+        let read = |cmd: &str| {
+            editor::find_editor(cmd)
+                .and_then(|command| editor_exe(&command, cmd))
+                .and_then(|exe| icon_data_url(&exe.to_string_lossy(), 0))
+        };
+        EditorIcons {
+            vscode: read("code"),
+            cursor: read("cursor"),
+        }
+    }
 
     const ICON_SIZE: i32 = 32;
 
@@ -744,11 +1006,24 @@ mod tests {
 
     #[test]
     fn app_id_is_stable_and_hides_the_key() {
-        let a = app_id(r"C:\Program Files\App\App.exe");
-        assert_eq!(a, app_id("c:/program files/app/APP.EXE "));
-        assert_ne!(a, app_id(r"C:\Program Files\Other\Other.exe"));
+        #[cfg(windows)]
+        let (left, same, other) = (
+            r"C:\Program Files\App\App.exe",
+            "c:/program files/app/APP.EXE ",
+            r"C:\Program Files\Other\Other.exe",
+        );
+        #[cfg(not(windows))]
+        let (left, same, other) = (
+            "/Applications/Visual Studio Code.app",
+            "/applications/visual studio code.app/ ",
+            "/Applications/Cursor.app",
+        );
+        let a = app_id(left);
+        assert_eq!(a, app_id(same));
+        assert_ne!(a, app_id(other));
         assert!(a.starts_with("app-") && a.len() == 20, "{a}");
         assert!(!a.to_lowercase().contains("program"));
+        assert!(!a.to_lowercase().contains("applications"));
     }
 
     #[test]
@@ -792,19 +1067,30 @@ mod tests {
 
     #[test]
     fn default_falls_back_to_executable_and_refuses_ambiguity() {
+        #[cfg(windows)]
+        let (a_key, b_key, b_query, b_norm) = (
+            r"C:\A\Code.exe",
+            r"C:\B\Other.exe",
+            "c:/b/other.exe",
+            r"c:\b\other.exe",
+        );
+        #[cfg(not(windows))]
+        let (a_key, b_key, b_query, b_norm) = (
+            "/Applications/Visual Studio Code.app",
+            "/Applications/TextEdit.app",
+            "/applications/textedit.app/",
+            "/applications/textedit.app",
+        );
         let handlers = vec![
-            handler(r"C:\A\Code.exe", "Visual Studio Code", Some("Shared")),
-            handler(r"C:\B\Other.exe", "Other", Some("Shared")),
+            handler(a_key, "Visual Studio Code", Some("Shared")),
+            handler(b_key, "Other", Some("Shared")),
         ];
-        // ProgID 对上两个 → 不唯一，退到可执行文件比对
+        // ProgID 对上两个 → 不唯一，退到可执行文件 / 应用包路径比对
         let assoc = DefaultAssoc {
             prog_id: Some("Shared".into()),
-            executable: Some("c:/b/other.exe".into()),
+            executable: Some(b_query.into()),
         };
-        assert_eq!(
-            default_key(&handlers, &assoc).as_deref(),
-            Some(r"c:\b\other.exe")
-        );
+        assert_eq!(default_key(&handlers, &assoc).as_deref(), Some(b_norm));
         // 都比不出唯一结果就不标
         let assoc = DefaultAssoc {
             prog_id: Some("Shared".into()),
@@ -843,7 +1129,11 @@ mod tests {
     fn scripts_get_no_system_apps() {
         let dir = std::env::temp_dir().join(format!("nct-file-apps-s-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        for name in ["run.ps1", "tool.py", "x.bat"] {
+        #[cfg(target_os = "macos")]
+        let names = ["run.command", "tool.tool", "x.terminal"];
+        #[cfg(not(target_os = "macos"))]
+        let names = ["run.ps1", "tool.py", "x.bat"];
+        for name in names {
             let file = dir.join(name);
             std::fs::write(&file, "x").unwrap();
             let list =
@@ -862,6 +1152,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(windows)]
     #[test]
     fn editor_exe_walks_up_from_the_cli_shim() {
         let root = std::env::temp_dir().join(format!("nct-editor-exe-{}", std::process::id()));
@@ -876,6 +1167,17 @@ mod tests {
         assert!(same_file(&found, &exe), "{}", found.display());
         assert!(same_file(&editor_exe(&exe, "code").unwrap(), &exe));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn unpremultiply_rgba_restores_straight_alpha() {
+        let mut px = vec![
+            128, 64, 0, 128, // 半透明：预乘 128 → 直通 255，64 → 128
+            0, 0, 0, 0, // 全透明保持 0
+            10, 20, 30, 255, // 全不透明不变
+        ];
+        unpremultiply_rgba(&mut px);
+        assert_eq!(px, vec![255, 128, 0, 128, 0, 0, 0, 0, 10, 20, 30, 255]);
     }
 
     #[test]

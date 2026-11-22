@@ -73,3 +73,63 @@ rfd = { version = "=0.16.0", default-features = false, features = ["common-contr
 [target.'cfg(target_os = "macos")'.dependencies]
 # 下载的「另存为」：macOS 同样在下载回调里用 rfd 同步保存对话框（不启 Windows 专用特性）
 rfd = { version = "=0.16.0", default-features = false }
+# macOS 原生桥接：系统通知（UNUserNotificationCenter）、打开方式（NSWorkspace）、
+# 清除浏览数据（WKWebsiteDataStore）。版本均与 Cargo.lock 已有版本一致。
+objc2 = "=0.6.4"
+block2 = "=0.6.2"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSBundle",
+    "NSDate",
+    "NSError",
+    "NSFileManager",
+    "NSGeometry",
+    "NSObject",
+    "NSSet",
+    "NSString",
+    "NSURL",
+    "objc2-core-foundation",
+] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
+    "NSRunningApplication",
+    "NSWorkspace",
+    "block2",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
+] }
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "CGBitmapContext",
+    "CGColorSpace",
+    "CGContext",
+    "CGImage",
+] }
+objc2-user-notifications = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "UNNotification",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSettings",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+    "bitflags",
+    "block2",
+] }
+objc2-web-kit = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "WKWebView",
+    "WKWebViewConfiguration",
+    "WKWebsiteDataStore",
+    "block2",
+] }

@@ -1,25 +1,33 @@
-//! Windows 系统通知（ADR-0056）：会话需要确认、出错停止或跑完时提醒用户。
+//! 桌面系统通知（ADR-0056、ADR-0110）：会话需要确认、出错停止或跑完时提醒用户。
 //!
 //! 为什么自己写而不是用 `tauri-plugin-notification`：桌面端要求「点通知切到那个
-//! 会话」，插件在桌面端不提供点击回调。为什么不经 `tauri-winrt-notification`：
-//! 0.8.1 的公开 API 只能发通知，设不了 toast 的 tag/group，也就做不到「同一会话
-//! 的新通知替换旧的」与「用户切到该会话时撤掉它」；这里直接用 `windows` crate 的
-//! WinRT 绑定（`UI_Notifications`），做法与那个库内部一致，另外补上 tag/group、
-//! 撤销与通知权限查询。
+//! 会话」，插件在桌面端不提供点击回调。
 //!
-//! AppUserModelID：安装版（release 构建，随 NSIS 安装器分发）直接用 Tauri bundle
-//! identifier——NSIS 安装器把同一 id 写进开始菜单快捷方式的 AppUserModelID，
-//! Windows 凭快捷方式显示应用名与图标，不需要在注册表里另有登记；只查
-//! `HKCU\Software\Classes\AppUserModelId` 会把「仅写了快捷方式」的安装版误判成
-//! 未注册而退回 PowerShell 署名。开发模式的 debug 构建才做注册表探测：本机没
-//! 登记时退回库的默认 AUMID（PowerShell 的），通知照常出现，只是署名与图标不对
-//! ——不因为没注册就崩或静默不发。
-//!
-//! 非 Windows 平台：命令照常存在（前端只发布 Windows），调用直接返回
-//! `shown: false, reason: "unsupported"`，编译与运行都不受影响。
+//! - **Windows**：直接用 `windows` crate 的 WinRT 绑定（`UI_Notifications`），支持
+//!   按会话设置 tag/group（新通知替换旧的、切到该会话时撤掉）以及通知权限查询。
+//!   安装版（release）直接用 Tauri bundle identifier 作 AppUserModelID（NSIS 快捷方式
+//!   写入同一 id）；开发构建先查注册表，未登记时退回 PowerShell 默认 AUMID。
+//! - **macOS**：直接用 `UNUserNotificationCenter`（`objc2-user-notifications`）。
+//!   启动时注册常驻 delegate：前台展示回调返回横幅与通知中心列表（`sound = true`
+//!   时加声音），点击回调把主窗口带到前台再发 `notify-activated`。无 `.app` bundle
+//!   （如 `cargo test`、`tauri dev`）时不调用 `currentNotificationCenter`，直接返回
+//!   `unsupported` 以免系统框架崩溃。
+//! - **其他平台**：命令照常存在，调用直接返回 `shown: false, reason: "unsupported"`。
 
 use serde::Serialize;
 use tauri::AppHandle;
+
+/// 通知被点击时给前端的 Tauri 事件名（前端据此切到对应会话）。
+#[cfg(any(windows, target_os = "macos"))]
+pub const ACTIVATED_EVENT: &str = "notify-activated";
+
+/// 通知标识与 Windows tag/group 长度上限一致（macOS 沿用同一规则）。
+const MAX_ID_CHARS: usize = 64;
+
+/// 同一会话使用同一个通知标识，新通知就地替换旧的。
+pub(crate) fn toast_id(session_id: &str) -> String {
+    session_id.chars().take(MAX_ID_CHARS).collect()
+}
 
 /// 通知结果：`disabled` = 系统关掉了本应用的通知；`unsupported` = 平台不支持；
 /// `error` = 调用失败（`detail` 带原文，供诊断，不上界面）。
@@ -34,7 +42,25 @@ pub struct NotifyOutcome {
 }
 
 impl NotifyOutcome {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
+    fn shown() -> Self {
+        Self {
+            shown: true,
+            reason: None,
+            detail: None,
+        }
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    fn disabled() -> Self {
+        Self {
+            shown: false,
+            reason: Some("disabled"),
+            detail: None,
+        }
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
     fn failed(reason: &'static str, detail: impl Into<String>) -> Self {
         Self {
             shown: false,
@@ -53,14 +79,17 @@ impl NotifyOutcome {
     }
 }
 
-/// 外壳持有的通知状态：每个会话当前那条 toast 的对象必须活着，Windows 才会在
-/// 用户点它时回调 `Activated`（对象一 drop，handler 就没了）。
+/// 外壳持有的通知状态：
+/// - Windows：每个会话当前那条 toast 对象必须活着，点击时 `Activated` 回调才有效；
+/// - macOS：通知中心 `delegate` 是弱引用，对象需由外壳长期持有。
 #[derive(Default)]
 pub struct NotifyState {
     #[cfg(windows)]
     live: std::sync::Mutex<
         std::collections::HashMap<String, windows::UI::Notifications::ToastNotification>,
     >,
+    #[cfg(target_os = "macos")]
+    delegate: std::sync::Mutex<Option<objc2::rc::Retained<imp::NotificationDelegate>>>,
 }
 
 #[cfg(windows)]
@@ -76,14 +105,29 @@ impl NotifyState {
     }
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "macos")]
+impl NotifyState {
+    fn set_delegate(&self, delegate: objc2::rc::Retained<imp::NotificationDelegate>) {
+        *lock(&self.delegate) = Some(delegate);
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// 启动时初始化平台通知（macOS 注册 `UNUserNotificationCenter` delegate）。
+pub fn setup(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    imp::setup(app);
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
 #[cfg(windows)]
 mod imp {
-    use super::{AppHandle, NotifyOutcome, NotifyState};
+    use super::{toast_id, AppHandle, NotifyOutcome, NotifyState, ACTIVATED_EVENT};
     use tauri::{Emitter, Manager};
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
@@ -96,16 +140,6 @@ mod imp {
     /// 的默认值，通知照常显示，只是署名不对）。
     const FALLBACK_AUMID: &str = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\
                                  \\WindowsPowerShell\\v1.0\\powershell.exe";
-
-    /// 通知被点击时给前端的 Tauri 事件名（前端据此切到对应会话）。
-    pub const ACTIVATED_EVENT: &str = "notify-activated";
-
-    /// toast 的 tag/group 与 Windows 侧长度上限一致（注入 payload 时的护栏）。
-    const MAX_ID_CHARS: usize = 64;
-
-    fn toast_id(session_id: &str) -> String {
-        session_id.chars().take(MAX_ID_CHARS).collect()
-    }
 
     /// 开发构建才需要探测注册表：安装版（release）直接用 bundle identifier。
     /// NSIS 安装器把同一 id 写进开始菜单快捷方式的 AppUserModelID 即够用，
@@ -190,13 +224,7 @@ mod imp {
         };
         match notifier.Setting() {
             Ok(NotificationSetting::Enabled) => {}
-            Ok(_) => {
-                return NotifyOutcome {
-                    shown: false,
-                    reason: Some("disabled"),
-                    detail: None,
-                }
-            }
+            Ok(_) => return NotifyOutcome::disabled(),
             // 查不到就照发：Windows 自己会吞掉它，比误报「被关掉」好
             Err(_) => {}
         }
@@ -229,11 +257,7 @@ mod imp {
             return NotifyOutcome::failed("error", error.message());
         }
         app.state::<NotifyState>().keep(tag, toast);
-        NotifyOutcome {
-            shown: true,
-            reason: None,
-            detail: None,
-        }
+        NotifyOutcome::shown()
     }
 
     /// 撤掉某个会话的通知：先 Hide 原 toast 对象（屏幕上那条立刻消失），
@@ -257,9 +281,275 @@ mod imp {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod imp {
+    use std::ptr::NonNull;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{Bool, NSObject, ProtocolObject};
+    use objc2::{define_class, msg_send, AnyThread, DefinedClass};
+    use objc2_foundation::{NSArray, NSBundle, NSError, NSObjectProtocol, NSString};
+    use objc2_user_notifications::{
+        UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent,
+        UNNotification, UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
+        UNNotificationRequest, UNNotificationResponse, UNNotificationSetting,
+        UNNotificationSettings, UNNotificationSound, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
+    };
+    use tauri::{AppHandle, Emitter, Manager};
+
+    use super::{toast_id, NotifyOutcome, NotifyState, ACTIVATED_EVENT};
+    use crate::backend::AppState;
+
+    const SETTINGS_TIMEOUT: Duration = Duration::from_secs(5);
+    const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
+    const ADD_TIMEOUT: Duration = Duration::from_secs(10);
+
+    pub struct DelegateIvars {
+        app: AppHandle,
+    }
+
+    define_class!(
+        // SAFETY:
+        // - 父类 NSObject 无额外子类化约束；
+        // - NotificationDelegate 不实现 Drop。
+        #[unsafe(super(NSObject))]
+        #[ivars = DelegateIvars]
+        pub struct NotificationDelegate;
+
+        unsafe impl NSObjectProtocol for NotificationDelegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for NotificationDelegate {
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                notification: &UNNotification,
+                completion_handler: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                let mut options = UNNotificationPresentationOptions::Banner
+                    | UNNotificationPresentationOptions::List;
+                if notification.request().content().sound().is_some() {
+                    options |= UNNotificationPresentationOptions::Sound;
+                }
+                completion_handler.call((options,));
+            }
+
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive_response(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                completion_handler: &block2::DynBlock<dyn Fn()>,
+            ) {
+                // SAFETY: UNNotificationDefaultActionIdentifier 是 UserNotifications 导出的静态 NSString。
+                let is_default = unsafe {
+                    response
+                        .actionIdentifier()
+                        .isEqualToString(UNNotificationDefaultActionIdentifier)
+                };
+                if is_default {
+                    let session_id = response.notification().request().identifier().to_string();
+                    let handle = self.ivars().app.clone();
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                    let _ = handle.emit(ACTIVATED_EVENT, session_id);
+                }
+                completion_handler.call(());
+            }
+        }
+    );
+
+    // SAFETY: `DelegateIvars` 仅持有 `AppHandle`（Send + Sync），创建后只读。
+    unsafe impl Send for NotificationDelegate {}
+    unsafe impl Sync for NotificationDelegate {}
+
+    impl NotificationDelegate {
+        fn new(app: AppHandle) -> Retained<Self> {
+            let this = Self::alloc().set_ivars(DelegateIvars { app });
+            // SAFETY: 调用 NSObject 指定初始化器 `init`。
+            unsafe { msg_send![super(this), init] }
+        }
+    }
+
+    /// 没有 `.app` bundle（如 `cargo test`、`tauri dev`）时不得调用
+    /// `UNUserNotificationCenter::currentNotificationCenter()`，否则框架直接抛异常崩溃。
+    fn has_bundle() -> bool {
+        NSBundle::mainBundle()
+            .bundleIdentifier()
+            .is_some_and(|id| !id.to_string().trim().is_empty())
+    }
+
+    fn log_note(app: &AppHandle, message: &str) {
+        if let Some(state) = app.try_state::<Arc<AppState>>() {
+            state.push_shell_note(message);
+        }
+    }
+
+    /// 启动时注册一次 delegate 并由 `NotifyState` 长期持有；失败只记外壳日志，不影响启动。
+    pub fn setup(app: &AppHandle) {
+        if !has_bundle() {
+            log_note(
+                app,
+                "[notify] 未在 .app bundle 内运行，跳过 UNUserNotificationCenter delegate 注册",
+            );
+            return;
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let delegate = NotificationDelegate::new(app.clone());
+            let center = UNUserNotificationCenter::currentNotificationCenter();
+            center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+            app.state::<NotifyState>().set_delegate(delegate);
+        }));
+        if result.is_err() {
+            log_note(app, "[notify] 注册 UNUserNotificationCenter delegate 失败");
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum AuthState {
+        Allowed,
+        Denied,
+        NotDetermined,
+    }
+
+    async fn query_auth_state() -> Option<AuthState> {
+        // 显式缩小作用域，确保所有 ObjC/block2 对象在 `.await` 前释放，保证 Future 为 Send。
+        let rx = {
+            let (tx, rx) = std::sync::mpsc::channel::<AuthState>();
+            let handler = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+                // SAFETY: UserNotifications 保证回调期间 `settings` 指向有效的 UNNotificationSettings。
+                let settings = unsafe { settings.as_ref() };
+                let state = match settings.authorizationStatus() {
+                    UNAuthorizationStatus::Denied => AuthState::Denied,
+                    UNAuthorizationStatus::NotDetermined => AuthState::NotDetermined,
+                    _ => {
+                        if settings.alertSetting() == UNNotificationSetting::Disabled
+                            && settings.notificationCenterSetting()
+                                == UNNotificationSetting::Disabled
+                        {
+                            AuthState::Denied
+                        } else {
+                            AuthState::Allowed
+                        }
+                    }
+                };
+                let _ = tx.send(state);
+            });
+            UNUserNotificationCenter::currentNotificationCenter()
+                .getNotificationSettingsWithCompletionHandler(&handler);
+            rx
+        };
+        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(SETTINGS_TIMEOUT).ok())
+            .await
+            .ok()
+            .flatten()
+    }
+
+    async fn request_authorization() -> Option<Result<bool, String>> {
+        let rx = {
+            let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
+            let handler = RcBlock::new(move |granted: Bool, error: *mut NSError| {
+                let result = if !error.is_null() {
+                    // SAFETY: 非空 NSError 指针在回调期间有效。
+                    Err(unsafe { &*error }.localizedDescription().to_string())
+                } else {
+                    Ok(granted.as_bool())
+                };
+                let _ = tx.send(result);
+            });
+            let options = UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound;
+            UNUserNotificationCenter::currentNotificationCenter()
+                .requestAuthorizationWithOptions_completionHandler(options, &handler);
+            rx
+        };
+        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(AUTH_TIMEOUT).ok())
+            .await
+            .ok()
+            .flatten()
+    }
+
+    pub async fn show(
+        session_id: &str,
+        title: &str,
+        body: &str,
+        sound: bool,
+    ) -> NotifyOutcome {
+        if !has_bundle() {
+            return NotifyOutcome::unsupported();
+        }
+        match query_auth_state().await {
+            Some(AuthState::Denied) => return NotifyOutcome::disabled(),
+            Some(AuthState::NotDetermined) => match request_authorization().await {
+                Some(Ok(true)) => {}
+                Some(Ok(false)) => return NotifyOutcome::disabled(),
+                // 查询或请求失败时按 Windows 的做法照发，不误报 disabled
+                Some(Err(_)) | None => {}
+            },
+            // 已授权或查询失败：照发
+            Some(AuthState::Allowed) | None => {}
+        }
+
+        let rx = {
+            let tag = toast_id(session_id);
+            let content = UNMutableNotificationContent::new();
+            content.setTitle(&NSString::from_str(title));
+            content.setBody(&NSString::from_str(body));
+            if sound {
+                let default_sound = UNNotificationSound::defaultSound();
+                content.setSound(Some(&*default_sound));
+            }
+            let identifier = NSString::from_str(&tag);
+            let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+                &identifier,
+                &content,
+                None,
+            );
+
+            let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            let handler = RcBlock::new(move |error: *mut NSError| {
+                let result = if error.is_null() {
+                    Ok(())
+                } else {
+                    // SAFETY: 非空 NSError 指针在回调期间有效。
+                    Err(unsafe { &*error }.localizedDescription().to_string())
+                };
+                let _ = tx.send(result);
+            });
+            UNUserNotificationCenter::currentNotificationCenter()
+                .addNotificationRequest_withCompletionHandler(&request, Some(&*handler));
+            rx
+        };
+
+        match tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(ADD_TIMEOUT)).await {
+            Ok(Ok(Ok(()))) => NotifyOutcome::shown(),
+            Ok(Ok(Err(detail))) => NotifyOutcome::failed("error", detail),
+            Ok(Err(_)) => NotifyOutcome::failed("error", "添加系统通知超时"),
+            Err(error) => NotifyOutcome::failed("error", error.to_string()),
+        }
+    }
+
+    pub fn dismiss(session_id: &str) {
+        if !has_bundle() {
+            return;
+        }
+        let tag = toast_id(session_id);
+        let id = NSString::from_str(&tag);
+        let ids = NSArray::from_slice(&[&*id]);
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        center.removeDeliveredNotificationsWithIdentifiers(&ids);
+        center.removePendingNotificationRequestsWithIdentifiers(&ids);
+    }
+}
+
 /// 发一条系统通知（前端 `notify_show`）。
 #[tauri::command]
-pub fn notify_show(
+pub async fn notify_show(
     app: AppHandle,
     session_id: String,
     title: String,
@@ -270,7 +560,12 @@ pub fn notify_show(
     {
         imp::show(&app, &session_id, &title, &body, sound)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = &app;
+        imp::show(&session_id, &title, &body, sound).await
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (&app, &session_id, &title, &body, sound);
         NotifyOutcome::unsupported()
@@ -284,8 +579,27 @@ pub fn notify_dismiss(app: AppHandle, session_id: String) {
     {
         imp::dismiss(&app, &session_id);
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = &app;
+        imp::dismiss(&session_id);
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (&app, &session_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toast_id_keeps_short_id_and_truncates_at_64_chars() {
+        assert_eq!(toast_id("sess-123"), "sess-123");
+        let long = "a".repeat(80);
+        assert_eq!(toast_id(&long).chars().count(), MAX_ID_CHARS);
+        let utf8 = "测".repeat(70);
+        assert_eq!(toast_id(&utf8).chars().count(), MAX_ID_CHARS);
     }
 }

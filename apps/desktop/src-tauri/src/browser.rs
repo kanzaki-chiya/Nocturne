@@ -170,6 +170,12 @@ impl BrowserState {
         ))
     }
 
+    /// 覆盖数据目录（隔离环境 `WEBVIEW2_USER_DATA_FOLDER`），macOS 用于派生独立 `data_store_identifier`。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn data_override(&self) -> Option<&std::path::Path> {
+        self.data_override.as_deref()
+    }
+
     /// 当前存活的用户浏览器标签数。容量判定把 agent 标签另算（desktop-browser.md 第 2 节）。
     pub fn live_count(&self) -> usize {
         lock(&self.browsers).len()

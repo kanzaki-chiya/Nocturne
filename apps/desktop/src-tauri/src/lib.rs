@@ -285,8 +285,9 @@ pub fn run() {
             app.manage(state);
             app.manage(key_diag::KeyDiag::default());
             app.manage(Arc::new(computer::ComputerHotkey::default()));
-            // 通知：持有每个会话当前那条 toast，点击回调才有效（ADR-0056）
+            // 通知：持有每个会话当前那条 toast（Windows）或中心 delegate（macOS）（ADR-0056、ADR-0110）
             app.manage(notify::NotifyState::default());
+            notify::setup(app.handle());
             // 面板终端（ADR-0060 第 4 节）：页面重载、应用退出时全部结束
             app.manage(Arc::new(terminal::TerminalState::default()));
             // 面板浏览器（ADR-0060 第 5 节）：同上，随页面重载、应用退出全部关掉
