@@ -69,3 +69,7 @@ webview2-com = "=0.39.1"
 # 下载的「另存为」：下载回调在主线程同步等结果，用 tauri-plugin-dialog 底下的同一个
 # rfd 的同步对话框（插件的阻塞接口在主线程上会和父窗口互相等待）。
 rfd = { version = "=0.16.0", default-features = false, features = ["common-controls-v6"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# 下载的「另存为」：macOS 同样在下载回调里用 rfd 同步保存对话框（不启 Windows 专用特性）
+rfd = { version = "=0.16.0", default-features = false }

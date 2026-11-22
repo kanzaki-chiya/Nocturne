@@ -565,7 +565,7 @@ fn on_download(app: &AppHandle, browser: &Browser, event: DownloadEvent<'_>) -> 
 
 /// 另存为对话框。下载回调在主线程上同步等结果，Tauri 对话框插件的阻塞接口在主线程上
 /// 会和父窗口互相等待，所以直接用它底下的 rfd 同步对话框（模态，自带消息循环）。
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn save_as(
     app: &AppHandle,
     dir: Option<&std::path::Path>,
@@ -583,7 +583,7 @@ fn save_as(
     dialog.save_file()
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn save_as(_: &AppHandle, _: Option<&std::path::Path>, _: &str) -> Option<std::path::PathBuf> {
     None
 }
@@ -631,6 +631,7 @@ pub async fn browser_create(
     let window = app
         .get_window("main")
         .ok_or_else(|| CommandError::new("browser_failed", "主窗口不存在"))?;
+    #[cfg(not(target_os = "macos"))]
     let data_dir = state.user_data_dir(&app)?;
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
     let browser = Arc::new(Browser {
@@ -656,9 +657,15 @@ pub async fn browser_create(
     let builder = WebviewBuilder::new(
         &browser.label,
         WebviewUrl::External("about:blank".parse().map_err(native_error)?),
-    )
-    .data_directory(data_dir)
-    .on_navigation(move |url| {
+    );
+    #[cfg(target_os = "macos")]
+    let builder = builder.data_store_identifier(browser_policy::browser_data_store_id(
+        state.data_override.as_deref(),
+    ));
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.data_directory(data_dir);
+    let builder = builder
+        .on_navigation(move |url| {
         let mut state = lock(&nav.nav);
         let user = state.user_target.clone();
         match browser_policy::allow_navigation(

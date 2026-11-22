@@ -30,6 +30,7 @@ fn main() {
             "terminal_close",
             "terminal_read_clipboard",
             "terminal_write_clipboard",
+            "terminal_login_shell",
             "browser_create",
             "browser_navigate",
             "browser_layout",

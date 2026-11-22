@@ -17,6 +17,7 @@ mod images;
 mod job;
 mod key_diag;
 mod lines;
+mod login_env;
 mod node;
 mod notify;
 mod plugin_script;
@@ -128,6 +129,58 @@ fn app_close_cancel(state: tauri::State<'_, Arc<AppState>>) {
     state.close_prompt.store(false, Ordering::SeqCst);
 }
 
+#[cfg(target_os = "macos")]
+const QUIT_MENU_ID: &str = "app-quit";
+
+/// macOS 自定义应用菜单（ADR-0110 第 4 节）：替换 Tauri 默认菜单，把 Cmd+Q 接入
+/// `request_close`，使待发输入确认不会被 AppKit `terminate:` 绕过。
+#[cfg(target_os = "macos")]
+fn build_macos_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{
+        AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+        WINDOW_SUBMENU_ID,
+    };
+    let pkg_info = app.package_info();
+    let config = app.config();
+    let about_metadata = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        ..Default::default()
+    };
+    let quit = MenuItemBuilder::with_id(QUIT_MENU_ID, "退出 Nocturne")
+        .accelerator("Cmd+Q")
+        .build(app)?;
+    let app_menu = SubmenuBuilder::new(app, "Nocturne")
+        .item(&PredefinedMenuItem::about(
+            app,
+            Some("关于 Nocturne"),
+            Some(about_metadata),
+        )?)
+        .item(&PredefinedMenuItem::hide(app, Some("隐藏 Nocturne"))?)
+        .item(&PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?)
+        .item(&PredefinedMenuItem::show_all(app, Some("全部显示"))?)
+        .separator()
+        .item(&quit)
+        .build()?;
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+        .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+        .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+        .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+        .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+        .build()?;
+    let window_menu = SubmenuBuilder::with_id(app, WINDOW_SUBMENU_ID, "窗口")
+        .item(&PredefinedMenuItem::minimize(app, Some("最小化"))?)
+        .item(&PredefinedMenuItem::maximize(app, Some("缩放"))?)
+        .build()?;
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &edit_menu, &window_menu])
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 设了 WEBVIEW2_USER_DATA_FOLDER 时它会覆盖每个 WebView2 环境的数据目录，浏览器就和
@@ -173,6 +226,7 @@ pub fn run() {
         terminal::terminal_close,
         terminal::terminal_read_clipboard,
         terminal::terminal_write_clipboard,
+        terminal::terminal_login_shell,
         browser::browser_create,
         browser::browser_navigate,
         browser::browser_layout,
@@ -191,7 +245,7 @@ pub fn run() {
         agent_browser::agent_browser_status,
         computer::computer_set_hotkey,
     ];
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .invoke_system(sandbox::main_frame_only_invoke_script())
         .register_uri_scheme_protocol(sandbox::SANDBOX_SCHEME, |_ctx, request| {
             sandbox::handle_request(&request)
@@ -225,6 +279,8 @@ pub fn run() {
             let state = Arc::new(AppState::new(node::strip_verbatim_prefix(resource_dir)));
             #[cfg(windows)]
             state.init_job();
+            #[cfg(target_os = "macos")]
+            state.init_login_path();
             app.manage(state);
             app.manage(key_diag::KeyDiag::default());
             app.manage(Arc::new(computer::ComputerHotkey::default()));
@@ -332,7 +388,16 @@ pub fn run() {
                 // app_close 继续退出，或 app_close_cancel 留下
                 request_close(window.app_handle());
             }
-        })
+        });
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(build_macos_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == QUIT_MENU_ID {
+                request_close(app);
+            }
+        });
+    builder
         .build(context)
         .expect("error while building tauri application")
         .run(move |app, event| {

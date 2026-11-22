@@ -284,6 +284,9 @@ pub struct AppState {
     /// Job Object 创建失败的原因；打开后台时写入该后台的 stderr 缓冲
     #[cfg(windows)]
     job_error: Mutex<Option<String>>,
+    /// macOS 登录 shell PATH 探测（ADR-0110 第 6 节）
+    #[cfg(target_os = "macos")]
+    login_path: Arc<crate::login_env::LoginPath>,
     /// 退出流程进行中：拦截到的第二次关闭请求直接放行判断用
     pub shutting_down: AtomicBool,
     /// 已把关闭请求交给界面确认（ADR-0070 §6）：等 app_close / app_close_cancel
@@ -305,9 +308,24 @@ impl AppState {
             job: Mutex::new(None),
             #[cfg(windows)]
             job_error: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            login_path: Arc::new(crate::login_env::LoginPath::new()),
             shutting_down: AtomicBool::new(false),
             close_prompt: AtomicBool::new(false),
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn init_login_path(self: &Arc<Self>) {
+        let state = Arc::clone(self);
+        self.login_path.start_probe(move |note| {
+            state.push_shell_note(note);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn wait_login_path(&self) -> String {
+        self.login_path.wait()
     }
 
     #[cfg(windows)]
@@ -602,6 +620,8 @@ fn backend_open(
     // 每次 spawn 都先清掉再按需写入：后台不会从外壳继承到一个过期的凭证
     command.env_remove("NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP");
     command.env_remove("NOCTURNE_COMPUTER_USE_BOOTSTRAP");
+    #[cfg(target_os = "macos")]
+    command.env("PATH", state.wait_login_path());
     #[cfg(windows)]
     {
         let computer = if cfg!(debug_assertions) {

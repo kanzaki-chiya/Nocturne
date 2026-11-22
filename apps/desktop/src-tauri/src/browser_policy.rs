@@ -172,6 +172,58 @@ pub fn agent_data_dir(app_local_data: &Path, user_data_override: Option<&Path>) 
         .join("agent-browser")
 }
 
+/// macOS WKWebsiteDataStore 固定标识（用户浏览，UUID v4；ADR-0110 第 5 节）。
+pub const USER_DATA_STORE_ID: [u8; 16] = [
+    0x7a, 0x3d, 0x91, 0x4c, 0x2e, 0x8f, 0x4b, 0x10, 0x9c, 0x55, 0x13, 0xa8, 0x60, 0xd2, 0xe4, 0x01,
+];
+
+/// macOS WKWebsiteDataStore 固定标识（agent 浏览，UUID v4；预留供二期使用）。
+#[allow(dead_code)]
+pub const AGENT_DATA_STORE_ID: [u8; 16] = [
+    0x7a, 0x3d, 0x91, 0x4c, 0x2e, 0x8f, 0x4b, 0x10, 0x9c, 0x55, 0x13, 0xa8, 0x60, 0xd2, 0xe4, 0x02,
+];
+
+/// 从覆盖路径确定性派生 16 字节 WKWebsiteDataStore 标识（FNV-1a 128-bit + UUID v5 版本位，
+/// 结构上与 v4 固定常量隔离，且不同 scope 互不相同）。
+fn derive_data_store_id(scope: &str, override_dir: &Path) -> [u8; 16] {
+    const FNV_OFFSET_BASIS: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const FNV_PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let mut hash = FNV_OFFSET_BASIS;
+    for &byte in scope.as_bytes() {
+        hash ^= u128::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash ^= 0xff;
+    hash = hash.wrapping_mul(FNV_PRIME);
+    for &byte in override_dir.to_string_lossy().as_bytes() {
+        hash ^= u128::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    let mut bytes = hash.to_be_bytes();
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    bytes
+}
+
+/// macOS 用户浏览 webview 的 WKWebsiteDataStore 标识：未设目录覆盖时用固定常量，
+/// 设了目录覆盖时由路径派生。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn browser_data_store_id(user_data_override: Option<&Path>) -> [u8; 16] {
+    match user_data_override {
+        Some(dir) => derive_data_store_id("nocturne:user-browser", dir),
+        None => USER_DATA_STORE_ID,
+    }
+}
+
+/// macOS agent 浏览 webview 的 WKWebsiteDataStore 标识（预留供二期使用）。
+#[allow(dead_code)]
+pub fn agent_data_store_id(user_data_override: Option<&Path>) -> [u8; 16] {
+    match user_data_override {
+        Some(dir) => derive_data_store_id("nocturne:agent-browser", dir),
+        None => AGENT_DATA_STORE_ID,
+    }
+}
+
 /// agent 是否被禁止访问该 host：应用内部地址（tauri.localhost、*.localhost 等）
 /// 与常见内网后缀一律拦截；**本机回环允许**（desktop-browser.md 第 5 节：
 /// 本机 http 开发服务可用），启动端口的 bootstrap/MCP 路径另由
@@ -958,5 +1010,29 @@ mod tests {
             d.cancelled("https://example.com/x");
         }
         assert!(d.cancelled.len() <= MAX_CANCELLED);
+    }
+
+    #[test]
+    fn data_store_ids_separate_fixed_override_and_agent() {
+        let user_fixed = browser_data_store_id(None);
+        let agent_fixed = agent_data_store_id(None);
+        assert_eq!(user_fixed, USER_DATA_STORE_ID);
+        assert_eq!(agent_fixed, AGENT_DATA_STORE_ID);
+        assert_ne!(user_fixed, agent_fixed);
+
+        let over_a = Path::new("/tmp/nocturne-iso-a");
+        let over_b = Path::new("/tmp/nocturne-iso-b");
+        let user_a = browser_data_store_id(Some(over_a));
+        let user_a_again = browser_data_store_id(Some(over_a));
+        let user_b = browser_data_store_id(Some(over_b));
+        let agent_a = agent_data_store_id(Some(over_a));
+
+        assert_eq!(user_a, user_a_again);
+        assert_ne!(user_a, user_fixed);
+        assert_ne!(user_a, agent_fixed);
+        assert_ne!(agent_a, user_fixed);
+        assert_ne!(agent_a, agent_fixed);
+        assert_ne!(user_a, agent_a);
+        assert_ne!(user_a, user_b);
     }
 }

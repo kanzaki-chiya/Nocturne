@@ -25,10 +25,17 @@ pub enum ShellKind {
     PowerShell,
     Bash,
     Cmd,
+    /// Unix 登录交互 shell（zsh / bash / fish）
+    UnixLogin,
+    /// Unix POSIX sh
+    UnixSh,
+    /// `/etc/shells` 中列出的其他 Unix shell
+    UnixOther,
 }
 
 impl ShellKind {
-    /// 文件名（不分大小写）→ 种类；清单外的一律不认。
+    /// 文件名（不分大小写）→ 种类；清单外的一律不认（Windows）。
+    #[cfg_attr(unix, allow(dead_code))]
     fn from_file_name(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
             "pwsh.exe" => Some(Self::Pwsh),
@@ -39,19 +46,84 @@ impl ShellKind {
         }
     }
 
+    /// Unix 可执行文件名 → 种类（配合 `/etc/shells` 白名单使用）。
+    pub fn from_unix_file_name(name: &str) -> Self {
+        match name {
+            "zsh" | "bash" | "fish" => Self::UnixLogin,
+            "sh" => Self::UnixSh,
+            _ => Self::UnixOther,
+        }
+    }
+
     /// 交互终端的启动参数：PowerShell 照常加载用户配置文件；Git Bash 用登录交互模式
-    /// （与 Git 自带的 git-bash 一致，读 ~/.bash_profile）；cmd 不带参数。
+    /// （与 Git 自带的 git-bash 一致，读 ~/.bash_profile）；cmd 不带参数；
+    /// Unix 的 zsh/bash/fish 用 `-l -i`，sh 用 `-i`。
     pub fn args(self) -> &'static [&'static str] {
         match self {
             Self::Pwsh | Self::PowerShell => &["-NoLogo"],
             Self::Bash => &["--login", "-i"],
             Self::Cmd => &[],
+            Self::UnixLogin => &["-l", "-i"],
+            Self::UnixSh => &["-i"],
+            Self::UnixOther => &[],
         }
     }
 }
 
-/// 校验前端传来的 shell 路径：绝对路径、文件存在、文件名在清单里。
-/// System32 下的 bash.exe 是 WSL 入口（Core 的 Git Bash 探测同样避开它），不认。
+/// 解析 `/etc/shells` 文本：忽略空行、前后空白与 `#` 注释行，只保留绝对路径。
+pub fn parse_etc_shells(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && line.starts_with('/'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// 判断给定绝对路径是否出现在 `/etc/shells` 文本中。
+pub fn is_listed_in_etc_shells(path: &str, etc_shells_content: &str) -> bool {
+    parse_etc_shells(etc_shells_content)
+        .iter()
+        .any(|entry| entry == path)
+}
+
+/// 按 `$SHELL` 与 `/etc/shells` 内容确定 macOS 默认登录 shell：`$SHELL` 在列表中时采用，
+/// 否则兜底 `/bin/zsh`。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn resolve_login_shell_from(env_shell: Option<&str>, etc_shells_content: &str) -> String {
+    if let Some(shell) = env_shell.map(str::trim).filter(|s| !s.is_empty()) {
+        if is_listed_in_etc_shells(shell, etc_shells_content) {
+            return shell.to_string();
+        }
+    }
+    "/bin/zsh".to_string()
+}
+
+/// Unix shell 校验纯函数：要求 `/` 开头的绝对路径、列在 `/etc/shells` 中且目标文件存在。
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn validate_unix_shell(
+    path: &str,
+    etc_shells_content: &str,
+    exists: impl Fn(&Path) -> bool,
+) -> CmdResult<(PathBuf, ShellKind)> {
+    let invalid = |message: &str| CommandError::new("invalid_shell", message);
+    if !path.starts_with('/') {
+        return Err(invalid("Shell 路径必须是绝对路径"));
+    }
+    if !is_listed_in_etc_shells(path, etc_shells_content) {
+        return Err(invalid("Shell 路径不在 /etc/shells 列表中"));
+    }
+    let pb = PathBuf::from(path);
+    if !exists(&pb) {
+        return Err(invalid("Shell 可执行文件不存在"));
+    }
+    let name = path.rsplit('/').next().unwrap_or("");
+    Ok((pb, ShellKind::from_unix_file_name(name)))
+}
+
+/// 校验前端传来的 shell 路径：Windows 上要求绝对路径、文件存在且文件名在固定清单里
+/// （避开 System32 下的 WSL `bash.exe`）；Unix 上要求列在 `/etc/shells` 且文件存在。
+#[cfg(not(unix))]
 pub fn validate_shell(path: &str) -> CmdResult<(PathBuf, ShellKind)> {
     let invalid = |message: &str| CommandError::new("invalid_shell", message);
     let path = PathBuf::from(path);
@@ -72,11 +144,34 @@ pub fn validate_shell(path: &str) -> CmdResult<(PathBuf, ShellKind)> {
     Ok((path, kind))
 }
 
+#[cfg(unix)]
+pub fn validate_shell(path: &str) -> CmdResult<(PathBuf, ShellKind)> {
+    let content = std::fs::read_to_string("/etc/shells").unwrap_or_default();
+    validate_unix_shell(path, &content, |p| p.is_file())
+}
+
+#[cfg(not(unix))]
 fn is_system32_bash(path: &Path) -> bool {
     path.parent()
         .and_then(|dir| dir.file_name())
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.eq_ignore_ascii_case("system32"))
+}
+
+/// 返回 macOS 默认登录 shell 绝对路径（`$SHELL` 在 `/etc/shells` 内则采用，否则 `/bin/zsh`）；
+/// Windows 返回空。
+#[tauri::command]
+pub fn terminal_login_shell() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let env_shell = std::env::var("SHELL").ok();
+        let etc_shells = std::fs::read_to_string("/etc/shells").unwrap_or_default();
+        Some(resolve_login_shell_from(env_shell.as_deref(), &etc_shells))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 /// 工作目录必须是存在的目录（绝对路径）。
@@ -204,7 +299,7 @@ fn wait_done(terminal: &Terminal, timeout: Duration) {
 
 fn open_terminal(
     state: &TerminalState,
-    #[cfg(windows)] app: &crate::backend::AppState,
+    #[cfg(any(windows, target_os = "macos"))] app: &crate::backend::AppState,
     shell: &str,
     cwd: &str,
     cols: u16,
@@ -221,6 +316,8 @@ fn open_terminal(
     command.cwd(&cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
+    #[cfg(target_os = "macos")]
+    command.env("PATH", app.wait_login_path());
     let mut child = pair.slave.spawn_command(command).map_err(spawn_error)?;
     // slave 也持有伪控制台：不放掉的话进程退出后读线程永远等不到 EOF
     drop(pair.slave);
@@ -289,7 +386,7 @@ fn spawn_error(error: impl std::fmt::Display) -> CommandError {
 #[tauri::command]
 pub async fn terminal_open(
     terminals: tauri::State<'_, Arc<TerminalState>>,
-    #[cfg_attr(not(windows), allow(unused_variables))] app: tauri::State<
+    #[cfg_attr(not(any(windows, target_os = "macos")), allow(unused_variables))] app: tauri::State<
         '_,
         Arc<crate::backend::AppState>,
     >,
@@ -300,12 +397,12 @@ pub async fn terminal_open(
     channel: tauri::ipc::Channel<TerminalMessage>,
 ) -> CmdResult<u32> {
     let terminals = Arc::clone(terminals.inner());
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let app = Arc::clone(app.inner());
     tauri::async_runtime::spawn_blocking(move || {
         open_terminal(
             &terminals,
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             &app,
             &shell,
             &cwd,
@@ -422,7 +519,19 @@ fn read_clipboard_text() -> CmdResult<String> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn read_clipboard_text() -> CmdResult<String> {
+    let output = std::process::Command::new("/usr/bin/pbpaste")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| CommandError::new("io", format!("读取剪贴板失败：{e}")))?;
+    if !output.status.success() {
+        return Err(CommandError::new("io", "读取剪贴板失败"));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn read_clipboard_text() -> CmdResult<String> {
     Err(CommandError::new("unsupported", "这个平台还不支持读剪贴板"))
 }
@@ -437,6 +546,7 @@ pub async fn terminal_write_clipboard(text: String) -> CmdResult<()> {
 }
 
 /// CF_UNICODETEXT 的内容：UTF-16 加结尾的 NUL
+#[cfg(any(windows, test))]
 fn clipboard_units(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -495,7 +605,29 @@ fn write_clipboard_text(text: &str) -> CmdResult<()> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn write_clipboard_text(text: &str) -> CmdResult<()> {
+    let mut child = std::process::Command::new("/usr/bin/pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| CommandError::new("io", format!("写入剪贴板失败：{e}")))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| CommandError::new("io", format!("写入剪贴板失败：{e}")))?;
+    }
+    let status = child
+        .wait()
+        .map_err(|e| CommandError::new("io", format!("写入剪贴板失败：{e}")))?;
+    if !status.success() {
+        return Err(CommandError::new("io", "写入剪贴板失败"));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn write_clipboard_text(_text: &str) -> CmdResult<()> {
     Err(CommandError::new("unsupported", "这个平台还不支持写剪贴板"))
 }
@@ -540,6 +672,7 @@ mod tests {
         path.to_string_lossy().into_owned()
     }
 
+    #[cfg(windows)]
     #[test]
     fn accepts_only_listed_shell_names() {
         let dir = temp_dir("names");
@@ -567,6 +700,7 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(windows)]
     #[test]
     fn rejects_missing_relative_and_directory_paths() {
         let dir = temp_dir("missing");
@@ -585,6 +719,7 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(windows)]
     #[test]
     fn rejects_wsl_bash_in_system32() {
         let dir = temp_dir("wsl").join("System32");
@@ -600,6 +735,101 @@ mod tests {
         assert_eq!(ShellKind::PowerShell.args(), ["-NoLogo"]);
         assert_eq!(ShellKind::Bash.args(), ["--login", "-i"]);
         assert!(ShellKind::Cmd.args().is_empty());
+        assert_eq!(ShellKind::UnixLogin.args(), ["-l", "-i"]);
+        assert_eq!(ShellKind::UnixSh.args(), ["-i"]);
+        assert!(ShellKind::UnixOther.args().is_empty());
+    }
+
+    #[test]
+    fn parses_and_matches_etc_shells_content() {
+        let etc = "\
+# List of acceptable shells for chpass(1).
+  # indented comment
+
+/bin/bash
+/bin/sh
+/bin/zsh
+  /opt/homebrew/bin/fish  
+relative/shell
+";
+        assert_eq!(
+            parse_etc_shells(etc),
+            vec!["/bin/bash", "/bin/sh", "/bin/zsh", "/opt/homebrew/bin/fish"]
+        );
+        assert!(is_listed_in_etc_shells("/bin/zsh", etc));
+        assert!(is_listed_in_etc_shells("/opt/homebrew/bin/fish", etc));
+        assert!(!is_listed_in_etc_shells("/usr/bin/python3", etc));
+        assert!(!is_listed_in_etc_shells("relative/shell", etc));
+    }
+
+    #[test]
+    fn resolves_login_shell_from_env_and_etc_shells() {
+        let etc = "/bin/sh\n/bin/bash\n/bin/zsh\n/opt/homebrew/bin/fish\n";
+        assert_eq!(
+            resolve_login_shell_from(Some("/opt/homebrew/bin/fish"), etc),
+            "/opt/homebrew/bin/fish"
+        );
+        assert_eq!(resolve_login_shell_from(Some("/bin/bash"), etc), "/bin/bash");
+        assert_eq!(
+            resolve_login_shell_from(Some("/usr/local/bin/evil"), etc),
+            "/bin/zsh"
+        );
+        assert_eq!(resolve_login_shell_from(Some("  "), etc), "/bin/zsh");
+        assert_eq!(resolve_login_shell_from(None, etc), "/bin/zsh");
+    }
+
+    #[test]
+    fn validates_unix_shells_and_assigns_args() {
+        let etc = "/bin/sh\n/bin/bash\n/bin/zsh\n/opt/homebrew/bin/fish\n/bin/tcsh\n";
+        let (pb, kind) = validate_unix_shell("/bin/zsh", etc, |_| true).unwrap();
+        assert_eq!(pb, PathBuf::from("/bin/zsh"));
+        assert_eq!(kind.args(), ["-l", "-i"]);
+
+        assert_eq!(
+            validate_unix_shell("/bin/bash", etc, |_| true)
+                .unwrap()
+                .1
+                .args(),
+            ["-l", "-i"]
+        );
+        assert_eq!(
+            validate_unix_shell("/opt/homebrew/bin/fish", etc, |_| true)
+                .unwrap()
+                .1
+                .args(),
+            ["-l", "-i"]
+        );
+        assert_eq!(
+            validate_unix_shell("/bin/sh", etc, |_| true)
+                .unwrap()
+                .1
+                .args(),
+            ["-i"]
+        );
+        assert!(validate_unix_shell("/bin/tcsh", etc, |_| true)
+            .unwrap()
+            .1
+            .args()
+            .is_empty());
+
+        assert_eq!(
+            validate_unix_shell("bin/zsh", etc, |_| true)
+                .unwrap_err()
+                .code,
+            "invalid_shell"
+        );
+        assert_eq!(
+            validate_unix_shell("/usr/bin/python3", etc, |_| true)
+                .unwrap_err()
+                .code,
+            "invalid_shell"
+        );
+        assert_eq!(
+            validate_unix_shell("/bin/zsh", etc, |_| false)
+                .unwrap_err()
+                .code,
+            "invalid_shell"
+        );
     }
 
     #[test]

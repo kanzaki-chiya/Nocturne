@@ -66,6 +66,7 @@
     "allow-terminal-close",
     "allow-terminal-read-clipboard",
     "allow-terminal-write-clipboard",
+    "allow-terminal-login-shell",
     "allow-browser-create",
     "allow-browser-navigate",
     "allow-browser-layout",
