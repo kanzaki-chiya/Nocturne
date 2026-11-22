@@ -181,6 +181,21 @@ export interface AttachmentDescribedPayload {
   usage?: Usage | undefined;
 }
 
+export interface PageModelCalledPayload {
+  page: string;
+  model: string;
+  usage?: Usage | undefined;
+  durationMs: number;
+  outcome: "ok" | "error" | "aborted";
+}
+
+export interface PagePermissionRequestedPayload {
+  requestId: string;
+  page: string;
+  title: string;
+  model: string;
+}
+
 export interface SessionTitledPayload {
   title: string;
   /** 旧事件缺省为 generated。 */
@@ -450,6 +465,7 @@ export interface DurablePayloadMap {
   "session.created": SessionCreatedPayload;
   "session.config_changed": SessionConfigChangedPayload;
   "session.titled": SessionTitledPayload;
+  "page.model_called": PageModelCalledPayload;
   "turn.started": TurnStartedPayload;
   "message.user": MessageUserPayload;
   "attachment.described": AttachmentDescribedPayload;
@@ -517,6 +533,7 @@ export interface EphemeralPayloadMap {
   "mcp.server": McpServerPayload;
   "question.requested": QuestionRequestedPayload;
   "input.pending": InputPendingPayload;
+  "page.permission_requested": PagePermissionRequestedPayload;
 }
 
 export type DurableType = keyof DurablePayloadMap;
@@ -570,6 +587,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "session.created",
   "session.config_changed",
   "session.titled",
+  "page.model_called",
   "turn.started",
   "message.user",
   "attachment.described",
@@ -616,6 +634,7 @@ export const EPHEMERAL_EVENT_TYPES: readonly EphemeralType[] = [
   "ensemble.member_updated",
   "suite.thread_updated",
   "subagent.permissions",
+  "page.permission_requested",
 ];
 
 const EPHEMERAL_TYPE_SET: ReadonlySet<string> = new Set(EPHEMERAL_EVENT_TYPES);

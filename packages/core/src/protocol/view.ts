@@ -674,6 +674,12 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       if (entry?.kind === "user") b.attachments.set(event.seq, entry);
       break;
     }
+    case "page.model_called": {
+      if (event.payload.usage && event.sessionId === created?.sessionId) {
+        view.usage = addUsage(view.usage, event.payload.usage);
+      }
+      break;
+    }
     case "attachment.described": {
       const entry = b.attachments.get(event.payload.attachmentRef.seq);
       if (entry !== undefined && event.payload.text !== "")

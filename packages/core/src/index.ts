@@ -147,6 +147,9 @@ import { createCheckpointRecorder } from "./session/checkpoints.js";
 import { assertSafeSessionId, readLogReadonly } from "./session/readonly-log.js";
 import { rewindTargets, restoreCheckpointFiles } from "./session/rewind.js";
 import { createTurnChanges } from "./session/turn-changes.js";
+import { createPageStorage, prunePageData, requireSessionPage } from "./session/page-data.js";
+import { createPagePermissionGate } from "./permission/page.js";
+import { createPageModelCalls } from "./agent/page-model.js";
 import {
   type ReviewerSampleInfo,
   type ReviewerSampleResult,
@@ -226,6 +229,8 @@ import type {
   MemorySettings,
   ModelPricing,
   ModelRef,
+  PageModelInput,
+  PagePermissionReply,
   PendingInputMode,
   PendingInputsSnapshot,
   PermissionReply,
@@ -254,6 +259,7 @@ import type {
 } from "./protocol/index.js";
 import {
   DEFAULT_LOOP_GUARD,
+  deriveSessionPages,
   isMemoryScope,
   isValidMemoryName,
   normalizePermissionPreset,
@@ -625,6 +631,13 @@ export interface RuntimeSession {
   durableEvents(): readonly DurableEvent[];
   /** 只读取本会话持久事件登记的图片附件；每次从磁盘校验大小与 sha256。 */
   readAttachment(file: string): Promise<ReadAttachmentResult>;
+  getPageData(page: string, key: string): Promise<unknown>;
+  setPageData(page: string, key: string, value: unknown): Promise<void>;
+  deletePageData(page: string, key: string): Promise<void>;
+  listPageDataKeys(page: string): Promise<string[]>;
+  callPageModel(page: string, input: PageModelInput, signal?: AbortSignal): Promise<string>;
+  respondPagePermission(page: string, requestId: string, reply: PagePermissionReply): Promise<void>;
+  stopPageModel(page: string): void;
   /** 订阅会话事件（durable + ephemeral），返回退订函数 */
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
   /** 当前工作区的持久输入历史（旧→新）。读取失败时警告并返回空列表。 */
@@ -3715,6 +3728,40 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         throw new RuntimeCommandError("session_failed", "会话已处于 failed 状态");
       }
     };
+    const assertPageUsable = () => {
+      assertUsable();
+      if (rewinding) throw new RuntimeCommandError("session_busy", "会话正在回退或分叉");
+    };
+    const pageStorage = createPageStorage(platform, sessionsDir, session);
+    const pagePermission = createPagePermissionGate({
+      sessionId: session.id,
+      policy: () => policy,
+      emit: (request) => session.emitEphemeral("page.permission_requested", request),
+      grant: async (grant) => {
+        if (!ws) throw new SessionError("page_model_failed", "项目授权存储不可用");
+        await ws.grants.add(grant);
+        grantsChanged({ workspace: meta.workspaceRoot });
+      },
+    });
+    const pageModels = createPageModelCalls({
+      session,
+      model: () =>
+        resolveModelRole(
+          sessionRegistry,
+          config?.resolvedSettings(meta.workspaceRoot).modelRoles?.smol,
+          "smol",
+        ) ?? model,
+      permission: (page, title, modelName, signal) =>
+        pagePermission.check(page, title, modelName, signal),
+      firstEventTimeoutMs: options.turn?.firstEventTimeoutMs,
+      idleTimeoutMs: options.turn?.idleTimeoutMs,
+    });
+    let pageCleanupNeeded = false;
+    const cleanPageData = async () => {
+      const kept = new Set(deriveSessionPages(session.durableEvents()).map(({ page }) => page));
+      await prunePageData(platform, sessionsDir, session.id, kept);
+      pageCleanupNeeded = false;
+    };
     const busy = () => controller !== undefined || rewinding || archiving;
     const compacting = () => compactController !== undefined;
     const idleListeners = new Set<() => void>();
@@ -4588,6 +4635,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // 空闲边界：controller 先置位（busy 语义立即生效），再重建
       // updateProviders 标记的会话级注册表（provider-setup.md 第 6 节）
       try {
+        if (pageCleanupNeeded) await cleanPageData();
         if (residentChild !== undefined) {
           residentChild.onTurnLifecycle.onSlotWaitStart();
           heldSubagentSlot = await subagentLimiter.acquire(ac.signal);
@@ -4985,7 +5033,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         settle = resolve;
       });
       try {
-        await titleSettled;
+        await Promise.all([titleSettled, pageStorage.drain()]);
         return await store.fork(session, targetSeq);
       } finally {
         rewinding = false;
@@ -5152,6 +5200,40 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           file,
         );
       },
+      async getPageData(page, key) {
+        assertPageUsable();
+        return pageStorage.get(page, key);
+      },
+      async setPageData(page, key, value) {
+        assertPageUsable();
+        if (pageCleanupNeeded)
+          throw new SessionError("page_storage_failed", "页面数据清理尚未完成");
+        await pageStorage.set(page, key, value);
+      },
+      async deletePageData(page, key) {
+        assertPageUsable();
+        await pageStorage.delete(page, key);
+      },
+      async listPageDataKeys(page) {
+        assertPageUsable();
+        return pageStorage.keys(page);
+      },
+      async callPageModel(page, input, signal) {
+        assertPageUsable();
+        return pageModels.call(requireSessionPage(session, page), input, signal);
+      },
+      respondPagePermission(page, requestId, reply) {
+        const result = pagePermission.respond(page, requestId, reply);
+        if (result === "unknown_request")
+          return Promise.reject(new RuntimeCommandError(result, "页面确认请求已结束或不存在"));
+        if (result === "invalid_reply")
+          return Promise.reject(new RuntimeCommandError(result, "无效的页面确认回复"));
+        return Promise.resolve();
+      },
+      stopPageModel(page) {
+        requireSessionPage(session, page);
+        pageModels.stop(page);
+      },
       rewindTargets() {
         assertUsable();
         if (busy() || compactController !== undefined)
@@ -5202,8 +5284,33 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             pendingInputStore.dropSubagents(kept);
           }
           // ADR-0076 §2：回退到设定目标、进入计划的那条消息之前（含它本身），模式随之撤回
-          const origins = mode === "files" ? undefined : workModeOrigins(session.durableEvents());
+          const events = session.durableEvents();
+          const origins = mode === "files" ? undefined : workModeOrigins(events);
+          if (origins !== undefined) {
+            await Promise.all([pageModels.stopAll(), pageStorage.drain()]);
+            const kept = new Set(
+              deriveSessionPages(
+                effectiveEvents(events).filter((event) => event.seq < targetSeq),
+              ).map(({ page }) => page),
+            );
+            const pageTargets = new Set(
+              deriveSessionPages(events)
+                .filter(({ page }) => !kept.has(page))
+                .map(({ page }) => `${session.id}/${page}`),
+            );
+            const grants = ws?.grants;
+            const removed =
+              grants
+                ?.list()
+                .filter((grant) => grant.kind === "page" && pageTargets.has(grant.target)) ?? [];
+            for (const grant of removed) await grants?.remove("page", grant.target);
+            if (removed.length > 0) grantsChanged({ workspace: meta.workspaceRoot });
+          }
           await session.emit("session.rewound", { targetSeq, mode, files });
+          if (origins !== undefined) {
+            pageCleanupNeeded = true;
+            await cleanPageData();
+          }
           if (mode !== "files" && forwardedByRequestId.size > 0) emitSubagentPermissions();
           if (origins !== undefined) {
             const goal = session.state().goal;
@@ -6121,7 +6228,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await backgroundShells.discard();
         await ensembleController?.dispose();
         await suiteController?.dispose();
-        await Promise.all([turnSettled, compactSettled, titleSettled, rewindSettled]);
+        await Promise.all([
+          turnSettled,
+          compactSettled,
+          titleSettled,
+          rewindSettled,
+          pageModels.stopAll(),
+          pageStorage.drain(),
+        ]);
         // 父工具可能正在创建 child；等父 Turn 退出后再收束这期间登记的后台任务。
         await backgroundSubagents.discard(session.id);
         await backgroundShells.discard();

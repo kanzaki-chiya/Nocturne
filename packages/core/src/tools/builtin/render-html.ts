@@ -242,7 +242,8 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "新建或更新自包含的单文件 HTML 页面，在断网沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。新建时用 display 选方式（更新时忽略）：inline（默认）随回答内嵌，适合图表、示意图、对比表；panel 在右侧面板打开，适合反复修改或边聊边用的小工具、看板、文档。更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。断网沙箱允许内联脚本与样式，禁联网（无外链/fetch/WebSocket，图与字体用内联 SVG 或 data:），禁跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。",
+    "新建或更新自包含的单文件 HTML 页面，在断网沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。新建时用 display 选方式（更新时忽略）：inline（默认）随回答内嵌，适合图表、示意图、对比表；panel 在右侧面板打开，适合反复修改或边聊边用的小工具、看板、文档。更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。断网沙箱允许内联脚本与样式，禁联网（无外链/fetch/WebSocket，图与字体用内联 SVG 或 data:），禁跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。" +
+    "\nUse window.nocturne.storage to save page data and window.nocturne.ask to call a model. Check for window.nocturne first and render normally when it is unavailable, without saving or calling a model. Model calls may require user approval. Handle rejected and aborted calls.",
   inputSchema: {
     type: "object",
     additionalProperties: false,

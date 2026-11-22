@@ -279,6 +279,11 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     ...numberByOrigin(options.rules ?? []),
   ];
   const untrusted = numberByOrigin(options.untrustedRules ?? []);
+  const nonProjectRules = trusted.filter(({ origin }) => origin !== "project");
+  const pageProjectRules = [...trusted, ...untrusted].filter(
+    ({ origin, rule }) =>
+      (origin === "project" || origin === "project-untrusted") && rule.action !== "allow",
+  );
   const grantsOpt = options.grants;
   function resolveGrants(
     source: readonly Grant[] | { list(): readonly Grant[] } | (() => readonly Grant[]) | undefined,
@@ -398,7 +403,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       evalOptions?.caller !== undefined && evalOptions.caller !== "model"
         ? evalOptions.caller
         : undefined;
-    if (appCaller !== undefined) {
+    if (appCaller?.kind === "app") {
       if (s.kind !== "mcp") {
         return {
           action: "deny",
@@ -532,7 +537,8 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       };
     }
 
-    const trustedHit = lastMatch(trusted, s);
+    const pageCall = s.kind === "page";
+    const trustedHit = lastMatch(pageCall ? nonProjectRules : trusted, s);
     let action: PermissionAction = trustedHit?.rule?.action ?? "ask";
     let hit: RuleHit =
       trustedHit ??
@@ -597,8 +603,8 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       }
     }
 
-    // 不可信项目规则只收紧：取更严格者（permissions.md 5.2）
-    const untrustedHit = lastMatch(untrusted, s);
+    // 页面规则在所有项目层只收紧（ADR-0111）。
+    const untrustedHit = lastMatch(pageCall ? pageProjectRules : untrusted, s);
     const untrustedAction = untrustedHit?.rule?.action;
     if (
       untrustedHit !== undefined &&
@@ -738,7 +744,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
           };
         }
       }
-      if (autoApproveAsk) {
+      if (autoApproveAsk && !pageCall) {
         return {
           action: "allow",
           hit,

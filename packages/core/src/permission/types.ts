@@ -37,7 +37,8 @@ export interface PermissionDecision {
 }
 
 /** 工具调用来源：缺省或 "model" 为模型调用；app 为 MCP App 页面调用（ADR-0101 第 3 节） */
-export type PermissionCaller = "model" | { kind: "app"; serverId: string };
+export type PermissionCaller =
+  "model" | { kind: "app"; serverId: string } | { kind: "page"; page: string };
 
 /** 求值结果：填好 `where` 的主体列表 + 统一决定 */
 export interface SubjectEvaluation {

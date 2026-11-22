@@ -167,6 +167,7 @@ function parse(text: string): FileAggregate {
         if (e.payload.usage && e.payload.model)
           result.requests.push({ time, usage: e.payload.usage, model: modelRef(e.payload.model) });
         break;
+      case "page.model_called":
       case "attachment.described":
         if (e.payload.usage)
           result.requests.push({

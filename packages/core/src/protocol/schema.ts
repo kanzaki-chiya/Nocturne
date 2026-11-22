@@ -62,6 +62,7 @@ export const subjectKindSchema = z.enum([
   "subagent",
   "schedule",
   "app",
+  "page",
 ]);
 
 const permissionSubjectSchema = z.object({
@@ -221,6 +222,13 @@ const payloadSchemas = {
       usage: usageSchema.optional(),
     })
     .refine((p) => p.title !== "" || p.source === "user"),
+  "page.model_called": z.object({
+    page: z.string().min(1),
+    model: z.string().min(1),
+    usage: usageSchema.optional(),
+    durationMs: z.number().nonnegative(),
+    outcome: z.enum(["ok", "error", "aborted"]),
+  }),
   "attachment.described": z.object({
     attachmentRef: z.object({
       seq: z.number().int().positive(),
@@ -627,6 +635,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("session.created", payloadSchemas["session.created"]),
   envelope("session.config_changed", payloadSchemas["session.config_changed"]),
   envelope("session.titled", payloadSchemas["session.titled"]),
+  envelope("page.model_called", payloadSchemas["page.model_called"]),
   envelope("turn.started", payloadSchemas["turn.started"]),
   envelope("message.user", payloadSchemas["message.user"]),
   envelope("message.assistant", payloadSchemas["message.assistant"]),

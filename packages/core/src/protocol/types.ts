@@ -329,7 +329,7 @@ export interface AssistantTiming {
 }
 
 export type SubjectKind =
-  "read" | "edit" | "shell" | "network" | "mcp" | "subagent" | "schedule" | "app";
+  "read" | "edit" | "shell" | "network" | "mcp" | "subagent" | "schedule" | "app" | "page";
 
 /**
  * 每 shell 种类的高风险命令元数据（ADR-0022 第 1 节：表集中在 platform 的
@@ -480,13 +480,21 @@ export interface PermissionRule {
   userOnly?: boolean | undefined;
 }
 
-/**
- * 用户对具体请求授予的授权（permissions.md 5.4）：默认精确匹配；
- * `match: "pattern"` 仅用于项目级 shell 模式授权（ADR-0106）。
- * 会话级 Grant 存会话内存；项目级 Grant 落盘到用户数据目录（config.md 第 4 节）。
- */
+export interface PageModelInput {
+  prompt: string;
+  system?: string | undefined;
+  maxTokens?: number | undefined;
+}
+
+export interface PagePermissionReply {
+  action: "allow" | "deny";
+  remember?: "project" | undefined;
+}
+
+/** 精确用户授权；项目级 Grant 落盘（permissions.md 5.4、config.md 第 4 节）。 */
 export interface Grant {
   kind: SubjectKind;
+  title?: string | undefined;
   /** 授权键：路径类为解析后的真实路径（canonical），shell 为完整命令字符串或模式 */
   target: string;
   /** ISO 8601 */

@@ -29,6 +29,12 @@ export type SessionErrorCode =
   | "attachment_read_failed"
   /** 附件字节大小或 sha256 与日志引用不符 */
   | "attachment_corrupt"
+  | "page_not_found"
+  | "page_storage_full"
+  | "page_storage_failed"
+  | "page_model_denied"
+  | "page_model_aborted"
+  | "page_model_failed"
   /** runtime.readFile：相对路径，或含 ..、控制字符、备用数据流、设备名（ADR-0060） */
   | "invalid_file_path"
   /** runtime.readFile：UNC 等网络路径，或链接指向网络位置；不访问，直接拒绝 */

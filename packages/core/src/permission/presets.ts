@@ -139,6 +139,7 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
 /** 生成预设的规则序列（按"后写优先"排序：靠后的规则覆盖靠前的） */
 export function presetRules(name: PermissionPresetName, ctx: PresetContext): PermissionRule[] {
   const rules: PermissionRule[] = broadRules(name);
+  rules.push({ kind: "page", pattern: "*", action: name === "bypass" ? "allow" : "ask" });
   // ADR-0049：委派入口默认须确认，不继承 guarded/smart/bypass 的宽放行。
   rules.push({
     kind: "subagent",

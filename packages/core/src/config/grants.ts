@@ -19,6 +19,7 @@ const grantSchema = z
     kind: subjectKindSchema,
     target: z.string().min(1),
     createdAt: z.string(),
+    title: z.string().optional(),
     match: z.literal("pattern").optional(),
   })
   .refine((g) => g.match === undefined || g.kind === "shell");
@@ -26,7 +27,12 @@ const grantSchema = z
 function normalizeGrant(grant: Grant): Grant {
   return grant.match === "pattern"
     ? { kind: grant.kind, target: grant.target, createdAt: grant.createdAt, match: "pattern" }
-    : { kind: grant.kind, target: grant.target, createdAt: grant.createdAt };
+    : {
+        kind: grant.kind,
+        target: grant.target,
+        createdAt: grant.createdAt,
+        ...(grant.kind === "page" && grant.title !== undefined ? { title: grant.title } : {}),
+      };
 }
 
 const grantsFileSchema = z.object({

@@ -5,6 +5,8 @@
 import { randomBytes } from "node:crypto";
 import {
   decodeDurableEvent,
+  deriveSessionPages,
+  effectiveEvents,
   encodeDurableEvent,
   LOG_FORMAT_VERSION,
   firstUserText,
@@ -12,6 +14,7 @@ import {
 } from "../protocol/index.js";
 import { fsErrorCode, type DirEntry, type Platform } from "../platform/index.js";
 import { SessionError } from "./errors.js";
+import { pageDataDir, prunePageData } from "./page-data.js";
 import { acquireSessionLock, lockLooksHeld, type SessionLock } from "./lock.js";
 import { foldEvents } from "./fold.js";
 import { assertLogHead, parseLogBytes } from "./log-parse.js";
@@ -577,6 +580,14 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
       const lock = await acquireSessionLock(fs, platform, lockPath(id));
       const pendingLog = `${logPath(id)}.fork`;
       const copied: string[] = [];
+      const sourcePageDir = pageDataDir(platform, sessionsDir, source.id);
+      const pageFiles = new Set(
+        deriveSessionPages(
+          targetSeq === undefined
+            ? events
+            : effectiveEvents(events).filter((event) => event.seq < targetSeq),
+        ).map(({ page }) => `${page}.json`),
+      );
       async function copyDirectory(from: string, to: string): Promise<void> {
         let entries;
         try {
@@ -587,6 +598,8 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         }
         await fs.mkdir(to);
         for (const entry of entries) {
+          if (from === sourcePageDir && (entry.type !== "file" || !pageFiles.has(entry.name)))
+            continue;
           const dest = paths.join(to, entry.name);
           if (entry.type === "directory") await copyDirectory(entry.path, dest);
           else if (entry.type === "file") {
@@ -691,6 +704,12 @@ export function createSessionStore(deps: SessionStoreDeps): SessionStore {
         await reconcileTitle(id, loaded.events);
         await reconcileActivity(id, loaded.events);
         const repaired = await repair(id, loaded.events);
+        await prunePageData(
+          platform,
+          sessionsDir,
+          id,
+          new Set(deriveSessionPages(repaired.events).map(({ page }) => page)),
+        );
         const recovery: SessionRecovery | undefined =
           repaired.recovery !== undefined || loaded.truncatedTail !== undefined
             ? {

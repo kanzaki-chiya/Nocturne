@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createRuntime } from "../src/index.js";
+import { createPlatform, createRuntime, loadConfig } from "../src/index.js";
+import { createRulePolicy, PERMISSION_PRESET_NAMES } from "../src/permission/index.js";
 import { FakeProvider } from "../src/provider/index.js";
 import {
   decodeDurableEvent,
@@ -146,6 +147,191 @@ describe("render_html 工具与内嵌页面标记", () => {
       }
     } finally {
       await session.close();
+    }
+  });
+
+  it("页面权限按预设、用户规则和项目收紧规则求值", () => {
+    const subject = [{ kind: "page", target: "s/page-1" }] as const;
+    const caller = { kind: "page", page: "page-1" } as const;
+    for (const preset of PERMISSION_PRESET_NAMES) {
+      const policy = createRulePolicy({
+        workspaceRoot: "Z:/workspace",
+        caseSensitive: true,
+        preset,
+      });
+      expect(policy.evaluate(subject, { caller }).decision.action).toBe(
+        preset === "bypass" ? "allow" : "ask",
+      );
+    }
+    const projectCannotAllow = createRulePolicy({
+      workspaceRoot: "Z:/workspace",
+      caseSensitive: true,
+      preset: "default",
+      rules: [{ origin: "project", rule: { kind: "page", pattern: "*", action: "allow" } }],
+    });
+    expect(projectCannotAllow.evaluate(subject, { caller }).decision.action).toBe("ask");
+    const projectCanDeny = createRulePolicy({
+      workspaceRoot: "Z:/workspace",
+      caseSensitive: true,
+      preset: "bypass",
+      rules: [{ origin: "project", rule: { kind: "page", pattern: "*", action: "deny" } }],
+    });
+    expect(projectCanDeny.evaluate(subject, { caller }).decision.action).toBe("deny");
+    const userCanDeny = createRulePolicy({
+      workspaceRoot: "Z:/workspace",
+      caseSensitive: true,
+      preset: "bypass",
+      rules: [{ origin: "user", rule: { kind: "page", pattern: "*", action: "deny" } }],
+      grants: {
+        project: [{ kind: "page", target: "s/page-1", createdAt: "2026-11-23T00:00:00Z" }],
+      },
+    });
+    expect(userCanDeny.evaluate(subject, { caller }).decision.action).toBe("deny");
+  });
+
+  it("页面模型调用独立于 Turn，按页面排队、授权、停止并计量", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "nct-page-model-"));
+    roots.push(root);
+    const platform = createPlatform();
+    const config = await loadConfig(platform, {
+      nocturneHome: path.join(root, "home"),
+      credentials: {
+        get: async () => undefined,
+        set: async () => undefined,
+        delete: async () => undefined,
+        has: () => false,
+        backend: () => "plaintext",
+      },
+    });
+    const first = new FakeProvider({});
+    const [main] = first.models();
+    if (!main) throw new Error("缺少测试模型");
+    const provider = new FakeProvider({
+      models: [
+        main,
+        {
+          ...main,
+          ref: { ...main.ref, model: "small" },
+          maxOutputTokens: 500,
+          capabilities: { ...main.capabilities, reasoningEffort: ["high", "low"] },
+        },
+      ],
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "page",
+            name: "render_html",
+            input: { title: "页面", html: "<p>页面</p>" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [
+          { type: "text_delta", text: "页面已创建" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+      roleHandler: (request) => {
+        const content = request.messages[0]?.content;
+        if (
+          request.purpose === "page" &&
+          Array.isArray(content) &&
+          content[0]?.type === "text" &&
+          content[0].text === "slow"
+        ) {
+          return [{ type: "wait" }, { type: "finish", reason: "stop" }];
+        }
+        return [
+          { type: "text_delta", text: "结果" },
+          { type: "usage", usage: { inputTokens: 15, outputTokens: 2 } },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+    const runtime = await createRuntime({
+      cwd: root,
+      config,
+      providers: [provider],
+      interactive: true,
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    try {
+      const requests: Extract<RuntimeEvent, { type: "page.permission_requested" }>[] = [];
+      session.subscribe((event) => {
+        if (event.type === "page.permission_requested") requests.push(event);
+      });
+      await session.submit({ text: "会话原文" });
+      await expect(
+        session.callPageModel("page-1", { prompt: "测".repeat(90_000) }),
+      ).rejects.toMatchObject({ code: "invalid_command" });
+      const denied = session.callPageModel("page-1", { prompt: "拒绝" });
+      const deniedCheck = expect(denied).rejects.toMatchObject({ code: "page_model_denied" });
+      const allowed = session.callPageModel("page-1", { prompt: "成功", system: "系统" });
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      const [firstRequest] = requests;
+      if (!firstRequest) throw new Error("缺少第一条页面确认");
+      expect(firstRequest.payload.model).toBe("fake/fake-1");
+      await session.respondPagePermission("page-1", firstRequest.payload.requestId, {
+        action: "deny",
+      });
+      await deniedCheck;
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      const secondRequest = requests[1];
+      if (!secondRequest) throw new Error("缺少第二条页面确认");
+      await session.respondPagePermission("page-1", secondRequest.payload.requestId, {
+        action: "allow",
+        remember: "project",
+      });
+      expect(await allowed).toBe("结果");
+      expect(await runtime.listGrants({ workspace: root })).toContainEqual(
+        expect.objectContaining({ kind: "page", title: "页面" }),
+      );
+      await runtime.setModelRole("smol", "fake/small");
+      expect(
+        await session.callPageModel(
+          "page-1",
+          { prompt: "small", maxTokens: 900 },
+          AbortSignal.timeout(1000),
+        ),
+      ).toBe("结果");
+      expect(provider.roleRequests.filter((req) => req.purpose === "page")).toMatchObject([
+        {
+          model: "fake-1",
+          maxOutputTokens: 4096,
+          system: [{ text: "系统" }],
+          tools: [],
+          messages: [{ role: "user", content: [{ type: "text", text: "成功" }] }],
+        },
+        { model: "small", maxOutputTokens: 500, reasoningEffort: "low", tools: [] },
+      ]);
+      expect(requests).toHaveLength(2);
+      const slow = session.callPageModel("page-1", { prompt: "slow" });
+      const queued = session.callPageModel("page-1", { prompt: "queued" });
+      const outcomes = Promise.allSettled([slow, queued]);
+      await vi.waitFor(() => expect(provider.waitState.waiting).toBe(1));
+      session.stopPageModel("page-1");
+      expect(await outcomes).toMatchObject([
+        { status: "rejected", reason: { code: "page_model_aborted" } },
+        { status: "rejected", reason: { code: "page_model_aborted" } },
+      ]);
+      const logs = session.durableEvents().filter((event) => event.type === "page.model_called");
+      expect(logs.map((event) => event.payload.outcome)).toEqual([
+        "error",
+        "ok",
+        "ok",
+        "aborted",
+        "aborted",
+      ]);
+      expect(logs.filter((event) => event.payload.usage)).toHaveLength(2);
+      expect(replaySessionView(session.durableEvents()).usage?.inputTokens).toBeGreaterThanOrEqual(
+        30,
+      );
+      await session.setPermissionPreset("bypass");
+      await runtime.revokeAllGrants({ workspace: root });
+      expect(await session.callPageModel("page-1", { prompt: "bypass" })).toBe("结果");
+      expect(requests).toHaveLength(2);
+    } finally {
+      await runtime.close();
     }
   });
 
@@ -931,6 +1117,26 @@ describe("render_html 工具与内嵌页面标记", () => {
         const secondUserSeq = userEvents[1]?.seq;
         if (secondUserSeq === undefined) throw new Error("expected second user event");
 
+        await Promise.all(
+          Array.from({ length: 20 }, (_, i) => session.setPageData("page-1", `key-${i}`, i)),
+        );
+        await session.setPageData("page-1", "__proto__", null);
+        expect(await session.listPageDataKeys("page-1")).toHaveLength(21);
+        expect(await session.getPageData("page-1", "__proto__")).toBeNull();
+        await expect(session.getPageData("page-1", "")).rejects.toMatchObject({
+          code: "invalid_command",
+        });
+        await expect(session.setPageData("page-1", "x".repeat(201), 1)).rejects.toMatchObject({
+          code: "invalid_command",
+        });
+        await expect(session.setPageData("../page-1", "key", 1)).rejects.toMatchObject({
+          code: "page_not_found",
+        });
+        await expect(
+          session.setPageData("page-1", "key-0", "x".repeat(1024 * 1024)),
+        ).rejects.toMatchObject({ code: "page_storage_full" });
+        expect(await session.getPageData("page-1", "key-0")).toBe(0);
+
         // 分叉在第二条用户消息之前：只继承 v1
         const forkedId = await runtime.forkSession(session.id, { targetSeq: secondUserSeq });
         const forkedSession = await runtime.resumeSession(forkedId);
@@ -938,6 +1144,9 @@ describe("render_html 工具与内嵌页面标记", () => {
           const forkedView = replaySessionView(forkedSession.durableEvents());
           expect(forkedView.pages).toHaveLength(1);
           expect(forkedView.pages[0]?.versions.map((v) => v.version)).toEqual([1]);
+          expect(await forkedSession.getPageData("page-1", "key-2")).toBe(2);
+          await forkedSession.setPageData("page-1", "key-2", "fork");
+          expect(await session.getPageData("page-1", "key-2")).toBe(2);
         } finally {
           await forkedSession.close();
         }
@@ -947,6 +1156,24 @@ describe("render_html 工具与内嵌页面标记", () => {
         const afterRewind = replaySessionView(session.durableEvents());
         expect(afterRewind.pages).toHaveLength(1);
         expect(afterRewind.pages[0]?.versions.map((v) => v.version)).toEqual([1]);
+        expect(await session.getPageData("page-1", "key-2")).toBe(2);
+        await session.deletePageData("page-1", "key-2");
+        expect(await session.getPageData("page-1", "key-2")).toBeUndefined();
+        const dataFile = path.join(
+          sessionsDir,
+          "attachments",
+          session.id,
+          "page-data",
+          "page-1.json",
+        );
+        expect(existsSync(dataFile)).toBe(true);
+        const [firstUserEvent] = userEvents;
+        if (!firstUserEvent) throw new Error("缺少首条用户事件");
+        await session.rewind(firstUserEvent.seq, "conversation");
+        expect(existsSync(dataFile)).toBe(false);
+        await expect(session.listPageDataKeys("page-1")).rejects.toMatchObject({
+          code: "page_not_found",
+        });
       } finally {
         await session.close();
       }
