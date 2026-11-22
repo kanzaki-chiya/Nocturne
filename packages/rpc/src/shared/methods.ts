@@ -17,6 +17,7 @@ import type {
   SuiteRecord,
   UpdateSuiteInput,
 } from "@nocturne/core";
+import type { PageModelInput, PagePermissionReply } from "@nocturne/core/protocol";
 /**
  * 方法表：每个 RPC 方法的参数与结果类型（ADR-0044 第 4 节、docs/protocols/rpc.md）。
  * 服务端按它做类型检查地实现，客户端按它生成类型化调用；对 @nocturne/core 只有类型导入。
@@ -850,6 +851,28 @@ export interface RpcMethods {
     params: SessionParams & { file: string };
     result: { data: string; mimeType: string; bytes: number };
   };
+  "session.getPageData": {
+    params: SessionParams & { page: string; key: string };
+    result: { value?: unknown };
+  };
+  "session.setPageData": {
+    params: SessionParams & { page: string; key: string; value: unknown };
+    result: null;
+  };
+  "session.deletePageData": {
+    params: SessionParams & { page: string; key: string };
+    result: null;
+  };
+  "session.listPageDataKeys": { params: SessionParams & { page: string }; result: string[] };
+  "session.callPageModel": {
+    params: SessionParams & { page: string } & PageModelInput;
+    result: string;
+  };
+  "session.respondPagePermission": {
+    params: SessionParams & { page: string; requestId: string; reply: PagePermissionReply };
+    result: null;
+  };
+  "session.stopPageModel": { params: SessionParams & { page: string }; result: null };
   "session.submit": {
     params: SessionParams & WireSubmitFields;
     result: TurnEndReason;
@@ -1207,6 +1230,13 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.subscribe": true,
   "session.unsubscribe": true,
   "session.readAttachment": true,
+  "session.getPageData": true,
+  "session.setPageData": true,
+  "session.deletePageData": true,
+  "session.listPageDataKeys": true,
+  "session.callPageModel": true,
+  "session.respondPagePermission": true,
+  "session.stopPageModel": true,
   "session.submit": true,
   "session.enqueueInput": true,
   "session.updateInput": true,

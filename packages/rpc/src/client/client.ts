@@ -27,6 +27,8 @@ import {
   type SessionSnapshotObserver,
   type SessionView,
   type RuntimeEvent,
+  type PageModelInput,
+  type PagePermissionReply,
   type DurableEvent,
   type SubagentObservation,
   type SubagentObserver,
@@ -226,6 +228,14 @@ export interface RpcSession {
    */
   subscribe(listener: EventListener, options?: SubscribeOptions): Promise<Subscription>;
   readAttachment(file: string): Promise<ReadAttachmentResult>;
+  onEvent(listener: EventListener): () => void;
+  getPageData(page: string, key: string): Promise<unknown>;
+  setPageData(page: string, key: string, value: unknown): Promise<void>;
+  deletePageData(page: string, key: string): Promise<void>;
+  listPageDataKeys(page: string): Promise<string[]>;
+  callPageModel(page: string, input: PageModelInput): Promise<string>;
+  respondPagePermission(page: string, requestId: string, reply: PagePermissionReply): Promise<void>;
+  stopPageModel(page: string): Promise<void>;
   /** 挂到 Turn 结束，结果与进程内 `submit()` 的 resolve 时机相同 */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /**
@@ -926,6 +936,39 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       async readAttachment(file) {
         const result = await call("session.readAttachment", { ...p, file });
         return { data: decodeBase64(result.data), mimeType: result.mimeType, bytes: result.bytes };
+      },
+      onEvent(listener) {
+        const handle = (id: string, event: RuntimeEvent) => {
+          if (id === sessionId) listener(event);
+        };
+        globalListeners.add(handle);
+        return () => {
+          globalListeners.delete(handle);
+        };
+      },
+      async getPageData(page, key) {
+        return (await call("session.getPageData", { ...p, page, key })).value;
+      },
+      async setPageData(page, key, value) {
+        await call("session.setPageData", { ...p, page, key, value });
+      },
+      async deletePageData(page, key) {
+        await call("session.deletePageData", { ...p, page, key });
+      },
+      listPageDataKeys: (page) => call("session.listPageDataKeys", { ...p, page }),
+      callPageModel: (page, input) =>
+        call("session.callPageModel", {
+          ...p,
+          page,
+          prompt: input.prompt,
+          system: input.system,
+          maxTokens: input.maxTokens,
+        }),
+      async respondPagePermission(page, requestId, reply) {
+        await call("session.respondPagePermission", { ...p, page, requestId, reply });
+      },
+      async stopPageModel(page) {
+        await call("session.stopPageModel", { ...p, page });
       },
       submit: async (input) => {
         return await call("session.submit", { ...p, ...wireSubmitInput(input) });

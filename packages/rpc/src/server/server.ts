@@ -297,6 +297,13 @@ export const REMOTE_METHODS = [
   "session.readFile",
   "session.resolveFiles",
   "session.readAttachment",
+  "session.getPageData",
+  "session.setPageData",
+  "session.deletePageData",
+  "session.listPageDataKeys",
+  "session.callPageModel",
+  "session.respondPagePermission",
+  "session.stopPageModel",
   "session.readInputHistory",
   "session.recordInputHistory",
 ] as const satisfies readonly RpcMethodName[];
@@ -748,7 +755,9 @@ class Connection implements HubPeer {
       await this.initPromise.catch(() => undefined);
     // 持久授权（写入项目 Grant）只能在电脑上选；会话级与单次批准照常
     if (
-      (method === "session.respondPermission" || method === "session.respondSubagentPermission") &&
+      (method === "session.respondPermission" ||
+        method === "session.respondSubagentPermission" ||
+        method === "session.respondPagePermission") &&
       ["project", "always", "pattern"].includes(String(reqObject(p, "reply").remember))
     ) {
       deny("远程连接不能保存项目级授权；请求仍待处理，请在本机回复");
@@ -2667,6 +2676,63 @@ class Connection implements HubPeer {
           mimeType: attachment.mimeType,
           bytes: attachment.bytes,
         };
+      },
+      "session.getPageData": async (p) => {
+        const value = await this.session(p).session.getPageData(
+          reqString(p, "page"),
+          reqString(p, "key"),
+        );
+        return value === undefined ? {} : { value };
+      },
+      "session.setPageData": async (p) => {
+        if (!Object.hasOwn(p, "value")) throw new InvalidParamsError("缺少 value");
+        await this.session(p).session.setPageData(
+          reqString(p, "page"),
+          reqString(p, "key"),
+          p.value,
+        );
+        return null;
+      },
+      "session.deletePageData": async (p) => {
+        await this.session(p).session.deletePageData(reqString(p, "page"), reqString(p, "key"));
+        return null;
+      },
+      "session.listPageDataKeys": (p) =>
+        this.session(p).session.listPageDataKeys(reqString(p, "page")),
+      "session.callPageModel": (p) => {
+        const { session } = this.session(p);
+        const prompt = reqString(p, "prompt");
+        const system = optString(p, "system");
+        const maxTokens = p.maxTokens;
+        if (maxTokens !== undefined && typeof maxTokens !== "number") {
+          throw new InvalidParamsError("maxTokens 必须是数字");
+        }
+        return this.hub.operate(session, () =>
+          session.callPageModel(
+            reqString(p, "page"),
+            { prompt, system, maxTokens },
+            this.abort.signal,
+          ),
+        );
+      },
+      "session.respondPagePermission": async (p) => {
+        const { action, remember } = reqObject(p, "reply");
+        if (
+          (action !== "allow" && action !== "deny") ||
+          (remember !== undefined && remember !== "project")
+        ) {
+          throw new InvalidParamsError("无效的页面确认回复");
+        }
+        await this.session(p).session.respondPagePermission(
+          reqString(p, "page"),
+          reqString(p, "requestId"),
+          { action, remember },
+        );
+        return null;
+      },
+      "session.stopPageModel": (p) => {
+        this.session(p).session.stopPageModel(reqString(p, "page"));
+        return null;
       },
       "session.submit": async (p) => {
         const { session } = this.session(p);

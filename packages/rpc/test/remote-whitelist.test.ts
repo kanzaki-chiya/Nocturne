@@ -121,6 +121,73 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     }
   });
 
+  it("手机可操作绑定页面，项目级批准被拦且请求仍可单次批准，agent 无页面权限", async () => {
+    const pageMethods = [
+      "session.getPageData",
+      "session.setPageData",
+      "session.deletePageData",
+      "session.listPageDataKeys",
+      "session.callPageModel",
+      "session.respondPagePermission",
+      "session.stopPageModel",
+    ];
+    for (const method of pageMethods) {
+      expect(REMOTE_METHODS).toContain(method);
+      expect(AGENT_READONLY_METHODS).not.toContain(method);
+      expect(AGENT_RUN_METHODS).not.toContain(method);
+    }
+    const h = await connectMany({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "page",
+            name: "render_html",
+            input: { title: "页面", html: "<p>页面</p>" },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        textScript("好了"),
+      ],
+    });
+    const { session: local } = await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    await local.submit({ text: "做页面" });
+    const remote = await h.add();
+    const { session } = await remote.client.runtime.resumeSession(local.id);
+    const events: RuntimeEvent[] = [];
+    await session.subscribe((event) => events.push(event));
+    expect(await session.getPageData("page-1", "count")).toBeUndefined();
+    await session.setPageData("page-1", "count", null);
+    expect(await local.getPageData("page-1", "count")).toBeNull();
+    expect(await session.listPageDataKeys("page-1")).toEqual(["count"]);
+    await session.deletePageData("page-1", "count");
+    expect(await session.listPageDataKeys("page-1")).toEqual([]);
+    await expect(session.listPageDataKeys("page-9")).rejects.toMatchObject({
+      code: "page_not_found",
+    });
+    const answer = session.callPageModel("page-1", { prompt: "说明" });
+    await until(() => events.some((event) => event.type === "page.permission_requested"));
+    const request = events.find((event) => event.type === "page.permission_requested");
+    if (!request) throw new Error("缺少页面确认事件");
+    const permission = request.payload;
+    await expect(
+      session.respondPagePermission("page-1", permission.requestId, {
+        action: "allow",
+        remember: "project",
+      }),
+    ).rejects.toMatchObject({ code: "remote_not_allowed" });
+    await session.respondPagePermission("page-1", permission.requestId, { action: "allow" });
+    expect(await answer).toBe("测试会话");
+    const aborted = expect(
+      session.callPageModel("page-1", { prompt: "停止" }),
+    ).rejects.toMatchObject({ code: "page_model_aborted" });
+    await until(
+      () => events.filter((event) => event.type === "page.permission_requested").length === 2,
+    );
+    await session.stopPageModel("page-1");
+    await aborted;
+  });
+
   it("新放开的会话方法都能经远程到达 Core", async () => {
     const h = await connectMany({
       scripts: [writeScript, textScript("写好了"), textScript("看到了")],
