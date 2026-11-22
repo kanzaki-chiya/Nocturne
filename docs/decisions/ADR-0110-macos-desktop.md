@@ -85,8 +85,8 @@ Rust 外壳里很多平台相关代码只有 `cfg(windows)` 实现，非 Windows
 - macOS 上，用户浏览使用固定的 16 字节标识；为 agent 浏览独立预留另一个标识（一期不创建 agent webview）。两个标识由外壳写死在 `browser_policy` 里；主界面使用默认存储。设了 `WEBVIEW2_USER_DATA_FOLDER` 时的隔离环境：
   - 不能挪动存储位置；
   - 改为由该路径派生两个不同的标识，与正式环境的标识也不同。
-- 清除浏览数据：临时建一个隐藏 webview，挂到同一个 `data_store_identifier`，调用 `clear_all_browsing_data`，然后关掉。只作用于这一份存储，另一份和主界面不受影响。
-- macOS 上拿不到这两份存储的占用大小，设置页不显示大小，只保留「清除」。
+- 清除浏览数据：wry 0.57.0 的 `clear_all_browsing_data`（`src/wkwebview/mod.rs:832-842`）在 macOS 上向 `removeDataOfTypes:modifiedSince:completionHandler:` 传入空回调块后立即返回，不等实际删除完成。外壳改为临时建一个挂到对应 `data_store_identifier`（用户浏览、agent 浏览各自使用 `browser_policy` 里的标识）的隐藏子 webview，经 `Webview::with_webview` 在主线程取得 `WKWebView` 的 `configuration().websiteDataStore()`，直接调用 `removeDataOfTypes:modifiedSince:completionHandler:`（`allWebsiteDataTypes`、`NSDate::distantPast()`），等完成回调后再经 `browser::close_later` 关掉临时 webview。只作用于这一份存储，另一份和主界面不受影响。
+- macOS 上拿不到这两份存储的占用大小，设置页不显示大小，只保留「清除」（`browser_data_sizes` 与 `browser_data_clear` 均返回 `0`）。
 
 ### 6. 登录 shell 环境
 
@@ -107,9 +107,9 @@ Rust 外壳里很多平台相关代码只有 `cfg(windows)` 实现，非 Windows
 | 终端剪贴板读写 | 系统自带 `pbpaste` / `pbcopy`，文本经 stdin/stdout | 第一轮 |
 | 下载另存为 | `rfd` 的 macOS 保存对话框（下载回调已是跨平台的 `on_download`） | 第一轮 |
 | 面板终端 shell | Core 的 `runtime.listShells` 不包含 `zsh`，一期不改 Core：外壳新增 `terminal_login_shell` 命令返回登录 shell（`$SHELL` 在 `/etc/shells` 内时采用，否则 `/bin/zsh`），前端 `TerminalPane` 将其置为下拉第一项并默认打开，后面接 Core 列出的 shell（macOS 白名单放行 `zsh` / `bash` / `sh` / `fish`）；`validate_shell` 在 Unix 上接受 `/etc/shells` 中的绝对路径，`zsh` / `bash` / `fish` 用 `-l -i`，`sh` 用 `-i` | 第一轮 |
-| 网页数据隔离与清除 | 第 5 节 | 第一轮（隔离）、第二轮（清除） |
-| 系统通知 | `UNUserNotificationCenter`：同一会话用同一个通知标识，新通知替换旧的；切到会话时移除已送达的通知；点击回调把窗口带到前台，再发出与 Windows 相同的激活事件；未获授权返回 `disabled` | 第二轮 |
-| 文件「打开方式」 | `NSWorkspace` 列出能打开该文件的应用并取图标，用指定应用打开；编辑器带行号打开时，沿用 Windows 已有的编辑器规则，换成 macOS 上的可执行路径 | 第二轮 |
+| 网页数据隔离与清除 | 隔离见第 5 节；清除时临时建隐藏子 webview 挂到用户/agent 各自 `data_store_identifier`，经 `with_webview` 调 `WKWebsiteDataStore::removeDataOfTypes:modifiedSince:completionHandler:` 等完成回调后再经 `close_later` 关掉，前端不显示大小仅保留「清除」 | 第一轮（隔离）、第二轮（清除） |
+| 系统通知 | `UNUserNotificationCenter`（`objc2-user-notifications`）：启动时先检查 `NSBundle::mainBundle().bundleIdentifier()`，为空时不调用系统接口并返回 `unsupported`；有 bundle 时注册常驻 `UNUserNotificationCenterDelegate`；`notify_show` 异步查询 `getNotificationSettingsWithCompletionHandler:`（未决定时请求 `Alert \| Sound` 授权且不阻塞主线程，拒绝或通知面全关返回 `disabled`，查询失败照发）；同一会话沿用 `toast_id` 64 字符截断标识就地替换；前台展示回调返回 `Banner \| List`（`sound = true` 时加 `Sound`）；点击回调（默认动作）从请求标识还原会话 id，调 `unminimize` + `set_focus` 后发 `notify-activated`；`notify_dismiss` 同时移除已送达和待送达通知 | 第二轮 |
+| 文件「打开方式」 | `NSWorkspace`（`objc2-app-kit`）：`URLsForApplicationsToOpenURL:` 与 `URLForApplicationToOpenURL:` 枚举应用（键为应用包路径，默认排第一），`NSFileManager::displayNameAtPath:` 取本地化显示名，`iconForFile:` + CoreGraphics `CGBitmapContextCreate` 转 32×32 PNG data URL；打开时按 `id` 重新枚举并走 `openURLs:withApplicationAtURL:configuration:completionHandler:`；通过 `NSBundle::bundleIdentifier` 识别 VS Code（`com.microsoft.VSCode`）与 Cursor（`com.todesktop.230313mzl4w4u92`），配合 `find_editor`（PATH、`/opt/homebrew/bin`、`/usr/local/bin` 与包内 `Contents/Resources/app/bin/<cmd>`）走 `-g file:line` 并取两应用包图标作兜底；防误运行拦截 `.command` / `.tool` / `.terminal`、`.app` / `.pkg` / `.mpkg`、`.workflow` / `.action` 与带可执行位且非已知文本文档名的无扩展名文件（`open_with_default` 改为在访达中显示返回 `Revealed`）；前端界面文案改「访达」/「在访达中显示」 | 第二轮 |
 
 Tauri 自带的通知插件在桌面端没有点击回调（见 `notify.rs` 文件头），满足不了 ADR-0056 的「点通知切到会话」，所以要直接调系统接口。
 

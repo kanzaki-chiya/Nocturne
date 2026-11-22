@@ -34,7 +34,7 @@
 
 ### 3. 兜底
 
-非 Windows、或查询本身出错（`failed: true`）时，应用组退回原来的做法：检测到的 VS Code / Cursor，加「系统默认程序」（`open_with_default`）。列表为空时外壳附带两种编辑器的程序图标（`editorIcons`），与系统应用用同一个取图标函数。
+macOS 经 `NSWorkspace` 实现同一命令与防误运行规则（见 [ADR-0110](ADR-0110-macos-desktop.md) 第 7 节）。其他平台或查询本身出错（`failed: true`）时，应用组退回原来的做法：检测到的 VS Code / Cursor，加「系统默认程序」（`open_with_default`）。列表为空时外壳附带两种编辑器的程序图标（`editorIcons`），与系统应用用同一个取图标函数。
 
 ### 4. 与「默认打开方式」设置的关系
 

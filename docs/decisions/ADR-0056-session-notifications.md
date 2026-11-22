@@ -46,7 +46,7 @@
 
 ### 4. 桌面端：Windows 点击回调为什么不用 notification 插件
 
-`tauri-plugin-notification` 在桌面端不支持点击回调。点击必须切到对应会话并把窗口带到前台，所以在 `src-tauri` 用 WinRT toast 库（`tauri-winrt-notification` 或同等）自实现外壳命令：`on_activated` 回调 emit 带 `sessionId` 事件给前端切会话，外壳负责 unminimize + set_focus。非 Windows 平台编译能过、调用时静默不发。AUMID：安装版用 Tauri bundle 的 identifier；开发模式未注册时退回库默认行为，不崩溃。同一会话新通知替换旧的（tag/group = sessionId），切到该会话时撤掉；`sound: false` 时静音 toast；同时调 `requestUserAttention` 让任务栏闪烁。详情与库版本见桌面端实现报告。
+`tauri-plugin-notification` 在桌面端不支持点击回调。点击必须切到对应会话并把窗口带到前台，所以在 `src-tauri` 用 WinRT toast 库（`tauri-winrt-notification` 或同等）自实现外壳命令：`on_activated` 回调 emit 带 `sessionId` 事件给前端切会话，外壳负责 unminimize + set_focus。macOS 经 `UNUserNotificationCenter` 实现同一语义（见 [ADR-0110](ADR-0110-macos-desktop.md) 第 7 节）；其他平台编译能过、调用时返回 `unsupported`。AUMID：安装版用 Tauri bundle 的 identifier；开发模式未注册时退回库默认行为，不崩溃。同一会话新通知替换旧的（tag/group = sessionId），切到该会话时撤掉；`sound: false` 时静音 toast；同时调 `requestUserAttention` 让任务栏闪烁。详情与库版本见桌面端实现报告。
 
 ### 5. TUI：焦点报告与 BEL
 
