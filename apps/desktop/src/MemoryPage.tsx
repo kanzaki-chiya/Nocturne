@@ -9,6 +9,7 @@ import type {
   OtherProjectMemory,
 } from "@nocturne/core/protocol";
 import { Markdown } from "./Conversation";
+import { isMacOS } from "./platform";
 import { Scrim } from "./ProvidersPage";
 import {
   Button,
@@ -491,8 +492,8 @@ function MemoryScopeGroup({
       action={
         <IconButton
           size="sm"
-          aria-label="在资源管理器中打开"
-          title="在资源管理器中打开"
+          aria-label={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
+          title={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
           onClick={() => {
             onOpenDirectory(overview.dir);
           }}
@@ -573,8 +574,8 @@ export function MemoryEntryDetail({
           <>
             {onOpenDirectory !== undefined && (
               <IconButton
-                aria-label="在资源管理器中打开"
-                title="在资源管理器中打开"
+                aria-label={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
+                title={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
                 onClick={() => {
                   onOpenDirectory(dir);
                 }}

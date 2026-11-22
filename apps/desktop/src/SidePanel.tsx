@@ -46,7 +46,7 @@ import {
 import type { CodeViewer } from "./code-viewer";
 import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
-import { formatShortcut } from "./platform";
+import { formatShortcut, isMacOS } from "./platform";
 import {
   baseName,
   browserTabName,
@@ -1437,7 +1437,7 @@ function FileView({
                     run(() => actions.reveal(tab.absolutePath));
                   }}
                 >
-                  在资源管理器中显示
+                  {isMacOS() ? "在访达中显示" : "在资源管理器中显示"}
                 </Button>
               </div>
             )}

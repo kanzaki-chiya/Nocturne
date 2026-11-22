@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { FileApp, FileAppList } from "./host";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
+import { isMacOS } from "./platform";
 import { Button, ICON_SM, Icon, type IconName } from "./ui";
 
 export interface FileOpenActions {
@@ -211,7 +212,7 @@ export function FileOpenButton(props: FileOpenButtonProps) {
       : [
           {
             key: "reveal",
-            label: "在资源管理器中打开",
+            label: isMacOS() ? "在访达中显示" : "在资源管理器中打开",
             icon: { glyph: "folder" as const },
             run: () => actions.reveal(path),
           },

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RpcClient } from "@nocturne/rpc/client";
 import type { SkillOverview, SkillsDescription } from "@nocturne/core/protocol";
 import { projectName } from "./session-tree";
+import { isMacOS } from "./platform";
 import { Scrim } from "./ProvidersPage";
 import type { SkillImportCommit, SkillImportPreview } from "./rpc-types";
 import {
@@ -180,8 +181,8 @@ export function SkillsPage({
                       onChange={() => void toggleSkill(skill)}
                     />
                     <IconButton
-                      aria-label="在资源管理器中打开"
-                      title="在资源管理器中打开"
+                      aria-label={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
+                      title={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
                       onClick={() => void attempt(() => openDirectory(skillFolderPath(skill)))}
                     >
                       <Icon name="folder" size={ICON_MD} />

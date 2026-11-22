@@ -21,6 +21,7 @@ import { createAttachmentImageSource } from "../src/attachment-images";
 import { BrowserSettingsPage, type BrowsingDataHost } from "../src/BrowserSettingsPage";
 import { Composer, type ComposerProps } from "../src/Composer";
 import { Conversation } from "../src/Conversation";
+import { FileOpenButton, type FileOpenActions } from "../src/FileOpenMenu";
 import type { AgentBrowserHost, DesktopHost, TerminalHost } from "../src/host";
 import { TitlebarSlot } from "../src/PanelChrome";
 import { useSidePanel } from "../src/PanelHost";
@@ -691,18 +692,18 @@ describe("BrowserSettingsPage 在 macOS 隐藏 agent 浏览分组", () => {
     setEnabled: vi.fn(async (enabled: boolean) => ({ enabled, restartRequired: false })),
     status: vi.fn(async () => ({ enabled: false, restartRequired: false })),
   };
-  const browsingData: BrowsingDataHost = {
-    sizes: vi.fn(async () => ({ user: 2048, agent: 4096 })),
-    clear: vi.fn(async () => 0),
-  };
 
-  it("macOS 不渲染 Agent 浏览器分组与 Agent 浏览数据行，保留我的浏览", () => {
+  it("macOS 不渲染 Agent 浏览器分组与 Agent 浏览数据行，保留我的浏览且不显示占用大小", async () => {
     setPlatformForTest("macos");
+    const host: BrowsingDataHost = {
+      sizes: vi.fn(async () => ({ user: 2048, agent: 4096 })),
+      clear: vi.fn(async () => 0),
+    };
     render(
       <BrowserSettingsPage
         prefs={createPrefsStore(memoryStorage())}
         agentBrowser={agentHost}
-        browsingData={browsingData}
+        browsingData={host}
         relaunch={vi.fn(async () => undefined)}
         version={1}
       />,
@@ -711,7 +712,133 @@ describe("BrowserSettingsPage 在 macOS 隐藏 agent 浏览分组", () => {
     const dataGroup = screen.getByRole("region", { name: "浏览数据" });
     expect(within(dataGroup).getByText("我的浏览")).toBeTruthy();
     expect(within(dataGroup).queryByText("Agent 浏览")).toBeNull();
-    expect(browsingData.sizes).not.toHaveBeenCalled();
+    expect(dataGroup.querySelector(".val")).toBeNull();
+    expect(dataGroup.textContent).not.toMatch(/\b\d+(?:\.\d+)?\s*(?:B|KB|MB|GB)\b/);
+    expect(host.sizes).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dataGroup).getByRole("button", { name: "清除…" }));
+    const dialog = screen.getByRole("alertdialog", { name: "清除我的浏览数据" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "清除" }));
+    await waitFor(() => {
+      expect(host.clear).toHaveBeenCalledWith("user");
+    });
+    expect(dataGroup.querySelector(".val")).toBeNull();
+  });
+});
+
+describe("打开菜单与文件引用在 macOS 显示「访达」", () => {
+  it("macOS「打开」菜单显示「在访达中显示」，不出现「资源管理器」", async () => {
+    setPlatformForTest("macos");
+    const reveal = vi.fn(async () => undefined);
+    const actions: FileOpenActions = {
+      listApps: vi.fn(async () => ({
+        apps: [
+          { id: "app-1", name: "Visual Studio Code", isDefault: true },
+          { id: "app-2", name: "文本编辑", isDefault: false },
+        ],
+        launchesCode: false,
+        failed: false,
+        editorIcons: {},
+      })),
+      openWithApp: vi.fn(async () => undefined),
+      openDefault: vi.fn(async () => undefined),
+      editors: { vscode: true, cursor: false },
+      openInEditor: vi.fn(async () => undefined),
+      reveal,
+      copy: vi.fn(async () => undefined),
+      openInBrowser: vi.fn(async () => undefined),
+      browserLabel: "在浏览器标签打开",
+    };
+    render(
+      <FileOpenButton
+        path="/Users/me/proj/src/a.ts"
+        line={12}
+        missing={false}
+        html={false}
+        relativePath="src/a.ts"
+        onSaveAs={vi.fn()}
+        wrap={true}
+        onWrap={vi.fn()}
+        actions={actions}
+        onError={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开方式" }));
+    const menu = await screen.findByRole("menu", { name: "打开方式" });
+    expect(within(menu).getByRole("menuitem", { name: "在访达中显示" })).toBeTruthy();
+    expect(menu.textContent).toContain("访达");
+    expect(menu.textContent).not.toContain("资源管理器");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "在访达中显示" }));
+    await waitFor(() => {
+      expect(reveal).toHaveBeenCalledWith("/Users/me/proj/src/a.ts");
+    });
+  });
+
+  it("macOS 对话内文件引用右键菜单显示「访达」，不出现「资源管理器」", async () => {
+    setPlatformForTest("macos");
+    const view = createSessionView();
+    view.entries = [
+      {
+        kind: "assistant",
+        key: "assistant-1",
+        seq: 1,
+        turnId: "turn-1",
+        messageId: "message-1",
+        time: "2026-11-22T02:00:00.000Z",
+        text: "看 `src/a.ts:12`",
+        reasoning: "",
+        toolCalls: [],
+        model: { provider: "test", model: "model" },
+        usage: undefined,
+        finishReason: "stop",
+      },
+    ];
+    const session = {
+      id: "s-file-ref",
+      readAttachment: vi.fn(),
+      respondPermission: vi.fn(),
+      respondSubagentPermission: vi.fn(),
+      respondQuestion: vi.fn(),
+      resolveFiles: vi.fn(async (paths: string[]) =>
+        paths.map((input) => ({
+          input,
+          exists: true,
+          withinWorkspace: true,
+          isDirectory: false,
+          absolutePath: `/Users/me/proj/${input}`,
+        })),
+      ),
+    } as unknown as RpcSession;
+    const reveal = vi.fn(async () => undefined);
+    render(
+      <Conversation
+        view={view}
+        session={session}
+        cwd="/Users/me/proj"
+        busy={false}
+        images={createAttachmentImageSource()}
+        subscribeEvents={() => () => undefined}
+        openUrl={vi.fn()}
+        fileLinks={{
+          open: vi.fn(async () => undefined),
+          outsideOpenable: () => true,
+          editors: () => ({ vscode: true, cursor: false }),
+          openInEditor: vi.fn(async () => undefined),
+          openFolder: vi.fn(async () => undefined),
+          copy: vi.fn(async () => undefined),
+          reveal,
+        }}
+      />,
+    );
+    const link = await screen.findByRole("button", { name: "src/a.ts:12" });
+    fireEvent.contextMenu(link);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "访达" })).toBeTruthy();
+    expect(menu.textContent).not.toContain("资源管理器");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "访达" }));
+    await waitFor(() => {
+      expect(reveal).toHaveBeenCalledWith("/Users/me/proj/src/a.ts");
+    });
   });
 });
 

@@ -13,6 +13,7 @@ import type {
   SkillOverview,
 } from "@nocturne/core/protocol";
 import { Menu, MenuItem } from "./Menu";
+import { isMacOS } from "./platform";
 import { Scrim } from "./ProvidersPage";
 import {
   Badge,
@@ -399,8 +400,8 @@ export function PluginsPage({
                       }}
                     />
                     <IconButton
-                      aria-label="在资源管理器中打开"
-                      title="在资源管理器中打开"
+                      aria-label={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
+                      title={isMacOS() ? "在访达中显示" : "在资源管理器中打开"}
                       onClick={() => void attempt(() => openDirectory(plugin.root))}
                     >
                       <Icon name="folder" size={ICON_MD} />

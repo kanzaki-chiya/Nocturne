@@ -28,7 +28,7 @@ import { diffRows } from "./code-lines";
 import { useCodeHighlight } from "./use-code-highlight";
 import { shellResultSummary, shellResultText, shellToolStatus } from "./background-shell";
 import { useMotionAllowed } from "./motion";
-import { hasPrimaryModOrMetaOnOther } from "./platform";
+import { hasPrimaryModOrMetaOnOther, isMacOS } from "./platform";
 
 export function GrantedTag({
   permission,
@@ -904,7 +904,7 @@ function CodeRef({ text }: { text: string }) {
           )}
           <MenuItem
             icon={<MenuGlyph kind="folder" />}
-            label="资源管理器"
+            label={isMacOS() ? "访达" : "资源管理器"}
             onSelect={() => {
               run(() => hooks.reveal(hit.absolutePath));
             }}
