@@ -187,18 +187,35 @@ describe("TUI /search 跨会话搜索", () => {
 
       await vi.waitFor(() => {
         const frame = plainFrame(screen.lastFrame());
-        expect(frame).toContain("› 异目录部署脚本重构");
-        expect(frame).toContain(cwdB);
+        const foreignLine = frame.split("\n").find((line) => line.includes("› 异目录部署脚本重构"));
+        expect(foreignLine).toBeDefined();
+        const displayedPath = foreignLine?.match(/› 异目录部署脚本重构\s+刚刚\s+(.*?)\s*│/)?.[1];
+        expect(displayedPath).toBeTruthy();
+        const ellipsis = displayedPath?.endsWith("...")
+          ? "..."
+          : displayedPath?.endsWith("…")
+            ? "…"
+            : undefined;
+        if (ellipsis !== undefined && displayedPath !== undefined) {
+          const prefix = displayedPath.slice(0, -ellipsis.length);
+          expect(prefix.length).toBeGreaterThan(0);
+          expect(cwdB.startsWith(prefix)).toBe(true);
+          expect(cwdB.length).toBeGreaterThan(prefix.length);
+        } else {
+          expect(displayedPath).toBe(cwdB);
+        }
       });
 
       const frame = plainFrame(screen.lastFrame());
       maybeDumpFrame("01-recent-sessions.txt", screen.lastFrame());
 
-      // 当前目录会话不显示 cwdA 路径（注意状态栏只显示 basename，框内列表行不含完整 cwdA）
-      const boxLines = frame.split("\n").filter((line) => line.includes("当前目录主会话"));
-      expect(boxLines.length).toBeGreaterThan(0);
-      for (const line of boxLines) {
-        expect(line).not.toContain(cwdA);
+      // 当前目录会话不显示 cwdA 路径（长路径下若误显示也可能被截断，直接校验框内列表行在「刚刚」之后无路径文本）
+      const currentRows = frame
+        .split("\n")
+        .filter((line) => line.startsWith("│") && line.includes("当前目录主会话"));
+      expect(currentRows.length).toBeGreaterThan(0);
+      for (const line of currentRows) {
+        expect(line).toMatch(/^│\s+当前目录主会话\s+刚刚\s*│$/);
       }
       // 归档会话不在未输入最近列表里
       expect(frame).not.toContain("已归档旧方案记录");
