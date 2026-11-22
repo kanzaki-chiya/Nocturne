@@ -548,8 +548,13 @@ mod imp {
 }
 
 /// 发一条系统通知（前端 `notify_show`）。
+///
+/// Windows 与其他非 macOS 平台保持同步命令（在 Tauri 主线程执行，维持 WinRT toast
+/// 与原有行为一致）；macOS 需要异步等待 `UNUserNotificationCenter` 授权与投递回调，
+/// 单独提供 `async` 版本以免阻塞主线程。
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
-pub async fn notify_show(
+pub fn notify_show(
     app: AppHandle,
     session_id: String,
     title: String,
@@ -560,16 +565,25 @@ pub async fn notify_show(
     {
         imp::show(&app, &session_id, &title, &body, sound)
     }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = &app;
-        imp::show(&session_id, &title, &body, sound).await
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(windows))]
     {
         let _ = (&app, &session_id, &title, &body, sound);
         NotifyOutcome::unsupported()
     }
+}
+
+/// 发一条系统通知（前端 `notify_show`，macOS 异步版本）。
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn notify_show(
+    app: AppHandle,
+    session_id: String,
+    title: String,
+    body: String,
+    sound: bool,
+) -> NotifyOutcome {
+    let _ = &app;
+    imp::show(&session_id, &title, &body, sound).await
 }
 
 /// 撤掉某个会话的通知（前端切到该会话时调用）。

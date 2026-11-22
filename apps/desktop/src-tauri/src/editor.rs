@@ -119,13 +119,39 @@ const LAUNCHING_EXTENSIONS: &[&str] = &[
 /// macOS 上可能是目录包（bundle）也可能是扁平文件、用默认方式打开就会启动或安装的类型：
 /// - `.app`：应用程序包，Launch Services 直接运行包内可执行文件；
 /// - `.pkg` / `.mpkg`：安装器包 / 元包，默认由「安装器」打开并可执行安装脚本；
-/// - `.workflow` / `.action`：Automator 工作流程 / 可加载操作包，打开可触发安装或运行。
-const MACOS_BUNDLE_LAUNCHING_EXTENSIONS: &[&str] = &["app", "pkg", "mpkg", "workflow", "action"];
+/// - `.workflow` / `.action`：Automator 工作流程 / 可加载操作包，打开可触发安装或运行；
+/// - `.prefPane` / `.saver`：偏好设置面板 / 屏幕保护程序包，双击打开「系统设置」触发安装；
+/// - `.qlgenerator`：Quick Look 插件包（含可执行代码，未查到访达双击安全保证，按会运行保守拦截）。
+const MACOS_BUNDLE_LAUNCHING_EXTENSIONS: &[&str] = &[
+    "app",
+    "pkg",
+    "mpkg",
+    "workflow",
+    "action",
+    "prefpane",
+    "saver",
+    "qlgenerator",
+];
 
-/// macOS 上普通文件用默认方式打开就会在「终端」里执行命令的扩展名：
+/// macOS 上普通文件用默认方式打开就会运行代码或触发系统安装的扩展名：
 /// - `.command` / `.tool`：Terminal.app 关联的 shell 脚本，双击直接在新终端窗口运行；
-/// - `.terminal`：Terminal.app 窗口配置文件（plist），含 `CommandString` 时打开即执行命令。
-const MACOS_FILE_LAUNCHING_EXTENSIONS: &[&str] = &["command", "tool", "terminal"];
+/// - `.terminal`：Terminal.app 窗口配置文件（plist），含 `CommandString` 时打开即执行命令；
+/// - `.jar`：由系统 `/System/Library/CoreServices/Jar Launcher.app` 直接启动 JVM 运行；
+/// - `.py` / `.pyw` / `.pyc` / `.pyo` / `.pyz`：python.org 官方安装包随附的 `Python Launcher.app`
+///   注册了 `.py`/`.pyw`/`.pyc`/`.pyo` 并在终端运行；`.pyz` 为 Python 可执行 ZIP 归档，保守一并拦截；
+/// - `.mobileconfig`：系统配置描述文件，双击进入「系统设置」触发安装流程。
+const MACOS_FILE_LAUNCHING_EXTENSIONS: &[&str] = &[
+    "command",
+    "tool",
+    "terminal",
+    "jar",
+    "py",
+    "pyw",
+    "pyc",
+    "pyo",
+    "pyz",
+    "mobileconfig",
+];
 
 /// 常见无扩展名纯文本文档：即便从其他文件系统带入 `+x` 位，也视为已知文档而非可执行文件。
 const MACOS_KNOWN_DOC_NAMES: &[&str] = &[
@@ -188,8 +214,10 @@ fn launches_code_macos_path(path: &Path) -> bool {
 }
 
 /// macOS 防误运行纯函数（ADR-0046、ADR-0110）：
-/// 1. `.app` / `.pkg` / `.mpkg` / `.workflow` / `.action`（无论目录包还是扁平文件）；
-/// 2. 普通文件里的 `.command` / `.tool` / `.terminal`；
+/// 1. `.app` / `.pkg` / `.mpkg` / `.workflow` / `.action` / `.prefPane` / `.saver` /
+///    `.qlgenerator`（无论目录包还是扁平文件）；
+/// 2. 普通文件里的 `.command` / `.tool` / `.terminal` / `.jar` /
+///    `.py` / `.pyw` / `.pyc` / `.pyo` / `.pyz` / `.mobileconfig`；
 /// 3. 带可执行位、无扩展名且不是已知文本文档名的普通文件（Finder 按 `public.unix-executable` 在终端运行）。
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) fn launches_code_macos(path: &Path, is_dir: bool, is_executable: bool) -> bool {
@@ -221,7 +249,7 @@ pub(crate) fn launches_code_macos(path: &Path, is_dir: bool, is_executable: bool
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) const MACOS_VSCODE_BUNDLE_ID: &str = "com.microsoft.VSCode";
 
-/// macOS 上 Cursor 的官方 CFBundleIdentifier（ToDesktop 打包标识，官方确认长期不变）。
+/// macOS 上 Cursor 的官方 CFBundleIdentifier（见 Homebrew cask `Casks/c/cursor.rb` 的 `zap` 路径）。
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) const MACOS_CURSOR_BUNDLE_ID: &str = "com.todesktop.230313mzl4w4u92";
 
@@ -434,20 +462,37 @@ mod tests {
 
     #[test]
     fn launches_code_macos_blocks_terminal_bundles_and_execs() {
-        // 终端脚本与配置
-        for name in ["start.command", "RUN.TOOL", "profile.terminal"] {
+        // 终端脚本、JVM/Python 可执行文件与系统配置描述文件
+        for name in [
+            "start.command",
+            "RUN.TOOL",
+            "profile.terminal",
+            "app.jar",
+            "TOOL.JAR",
+            "main.py",
+            "gui.pyw",
+            "mod.pyc",
+            "opt.pyo",
+            "bundle.pyz",
+            "corp.mobileconfig",
+            "MDM.MOBILECONFIG",
+        ] {
             assert!(
                 launches_code_macos(Path::new(name), false, false),
                 "expected blocked: {name}"
             );
         }
-        // 应用与安装包（扁平文件或目录包均拦）
+        // 应用、安装包、系统扩展与插件包（扁平文件或目录包均拦）
         for name in [
             "MyApp.app",
             "Installer.pkg",
             "Suite.mpkg",
             "Quick.workflow",
             "Step.action",
+            "CornerClick.prefPane",
+            "Legacy.PREFPANE",
+            "FlipClock.saver",
+            "QLMarkdown.qlgenerator",
         ] {
             assert!(
                 launches_code_macos(Path::new(name), true, false),
@@ -468,6 +513,14 @@ mod tests {
                 "expected known doc allowed: {name}"
             );
         }
+        // AppleScript 脚本文件双击在 Script Editor 中打开编辑而非直接运行 → 放行
+        for name in ["demo.scpt", "demo.scptd", "demo.applescript"] {
+            assert!(
+                !launches_code_macos(Path::new(name), false, false),
+                "expected AppleScript file allowed: {name}"
+            );
+        }
+        assert!(!launches_code_macos(Path::new("demo.scptd"), true, false));
         // 有普通扩展名（即使带 +x）与普通目录 → 放行
         for name in ["notes.md", "index.html", "a.ts", "image.png", "script.sh"] {
             assert!(
@@ -476,7 +529,12 @@ mod tests {
             );
         }
         assert!(!launches_code_macos(Path::new("my-folder"), true, true));
-        assert!(!launches_code_macos(Path::new("dir.command"), true, false));
+        for dir_name in ["dir.command", "dir.jar", "dir.py", "dir.mobileconfig"] {
+            assert!(
+                !launches_code_macos(Path::new(dir_name), true, false),
+                "expected directory allowed: {dir_name}"
+            );
+        }
     }
 
     #[test]
