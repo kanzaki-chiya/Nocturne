@@ -1343,13 +1343,19 @@ describe("App 里的 Ensemble", () => {
       const enqueue = vi.spyOn(member, "enqueueInput");
       await press(ui, "a");
       await press(ui, text);
+      await vi.waitFor(() => expect(frame()).toContain(text), { timeout: 3000 });
       await press(ui, "\r");
       await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1), { timeout: 3000 });
-      // 等这条私信真的进了待发列表：同一次 Enter 若重复 enqueue，这里会看到两次调用
+      // 等这条私信落定：要么仍在待发列表，要么已在 shell 结束后的安全点 1 消费成 message.user；
+      // 同一次 Enter 若重复 enqueue，这里及 Turn 结束后仍会暴露两次调用
       await vi.waitFor(
         async () => {
           const pending = await member.pendingInputs();
-          expect(pending.items.some((i) => i.text.includes(text))).toBe(true);
+          const inPending = pending.items.some((i) => i.text.includes(text));
+          const logged = member
+            .durableEvents()
+            .some((e) => e.type === "message.user" && JSON.stringify(e.payload).includes(text));
+          expect(inPending || logged).toBe(true);
         },
         { timeout: 3000 },
       );
