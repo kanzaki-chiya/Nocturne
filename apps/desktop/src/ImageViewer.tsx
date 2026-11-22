@@ -62,6 +62,7 @@ type ActiveModalState =
 const ImageViewerContext = createContext<OpenImageViewer | null>(null);
 const CustomOverlayContext = createContext<{
   open: OpenCustomOverlay;
+  closeFrom: (opener: HTMLElement) => void;
   opener: HTMLElement | null;
 } | null>(null);
 const SaveFileContext = createContext<SaveFileFn | undefined>(undefined);
@@ -112,6 +113,12 @@ export function ImageViewerProvider({
     setActive({ kind: "custom", render, opener: resolveOpener(opener) });
   }, []);
 
+  const closeFrom = useCallback((opener: HTMLElement) => {
+    setActive((current) =>
+      current?.kind === "custom" && current.opener === opener ? null : current,
+    );
+  }, []);
+
   const isOpen = active !== null;
   useEffect(() => {
     if (controlRef !== undefined) {
@@ -135,9 +142,10 @@ export function ImageViewerProvider({
   const customCtx = useMemo(
     () => ({
       open: openCustom,
+      closeFrom,
       opener: active?.kind === "custom" ? active.opener : null,
     }),
-    [active, openCustom],
+    [active, closeFrom, openCustom],
   );
 
   return (
@@ -197,10 +205,18 @@ export function useSaveFile(): SaveFileFn | undefined {
 
 export function useCustomOverlay(): {
   open: OpenCustomOverlay;
+  closeFrom: (opener: HTMLElement) => void;
   opener: HTMLElement | null;
 } {
   const ctx = useContext(CustomOverlayContext);
-  const noop = useMemo(() => ({ open: (() => undefined) as OpenCustomOverlay, opener: null }), []);
+  const noop = useMemo(
+    () => ({
+      open: (() => undefined) as OpenCustomOverlay,
+      closeFrom: () => undefined,
+      opener: null,
+    }),
+    [],
+  );
   return ctx ?? noop;
 }
 

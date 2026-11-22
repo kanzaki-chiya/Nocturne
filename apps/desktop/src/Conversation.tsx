@@ -267,6 +267,8 @@ export interface ConversationProps {
    * 缺省时不显示「分叉」。
    */
   onFork?: ((targetSeq: number) => Promise<void>) | undefined;
+  /** 远程会话的页面使用手机全屏确认。 */
+  remote?: boolean;
   /** 手机端隐藏持久授权选项；缺省保留桌面行为。 */
   hidePersistentPermissions?: boolean;
   /** 底部面板由手机外壳统一渲染。 */
@@ -999,6 +1001,7 @@ const BackgroundViewContext = createContext<
 const SubagentLinksContext = createContext<SubagentLinks | null>(null);
 
 interface PageRowContextValue {
+  remote?: boolean | undefined;
   onOpenPage?: ((page: string, version?: number) => void) | undefined;
   activePage?: { page: string; version: number } | undefined;
 }
@@ -3410,6 +3413,7 @@ function ToolEntryView({
                 versions={sessionPage?.versions}
                 active={isActive}
                 session={session}
+                remote={pageRow?.remote}
                 onOpenInPanel={openInPanel}
                 searchHit={searchHit && idx === 0}
                 sessionSeq={idx === 0 ? entry.seq : undefined}
@@ -3422,6 +3426,7 @@ function ToolEntryView({
               key={file.file}
               file={file}
               session={session}
+              remote={pageRow?.remote}
               versions={sessionPage?.versions}
               version={version}
               onOpenInPanel={openInPanel}
@@ -6313,9 +6318,7 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   const onOpenPage = "onOpenPage" in props ? props.onOpenPage : undefined;
   const activePage = "activePage" in props ? props.activePage : undefined;
   const pageRow: PageRowContextValue | null =
-    readOnly === undefined && (onOpenPage !== undefined || activePage !== undefined)
-      ? { onOpenPage, activePage }
-      : null;
+    readOnly === undefined ? { onOpenPage, activePage, remote: props.remote } : null;
   const ensembleRow: EnsembleRowContextValue | null =
     readOnly === undefined && onOpenEnsemble !== undefined
       ? {

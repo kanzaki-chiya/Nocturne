@@ -8,7 +8,7 @@ import {
   type SessionView,
   type ToolEntry,
 } from "@nocturne/core/protocol";
-import type { RpcSession } from "@nocturne/rpc/client";
+import type { EventListener, RpcSession } from "@nocturne/rpc/client";
 
 import { createAttachmentImageSource } from "../src/attachment-images";
 import { Conversation, type ReadOnlyConversationProps } from "../src/Conversation";
@@ -19,6 +19,7 @@ import {
   INLINE_PAGE_COLLAPSE_HEIGHT,
   INLINE_PAGE_MAX_HEIGHT,
   INLINE_PAGE_MIN_HEIGHT,
+  InlinePage,
 } from "../src/InlinePage";
 
 beforeEach(() => {
@@ -139,6 +140,90 @@ function collectVisibleTextNodes(root: Element): string[] {
 }
 
 describe("InlinePage 回复内嵌页面", () => {
+  it.each([false, true])("只转发本 iframe 的请求并用宿主绑定页，远程视图为 %s", async (remote) => {
+    const file = makeFile({ inlineTitle: "槽位标题" });
+    let listener: EventListener | undefined;
+    let fail: ((error: Error) => void) | undefined;
+    const callPageModel = vi.fn(
+      () =>
+        new Promise<string>((_, reject) => {
+          fail = reject;
+        }),
+    );
+    const stopPageModel = vi.fn(async () => {
+      fail?.(new Error("已停止"));
+    });
+    const setPageData = vi.fn(async () => undefined);
+    const session = {
+      readAttachment: makeConversationProps(createSessionView()).session.readAttachment,
+      onEvent(callback: EventListener) {
+        listener = callback;
+        return () => {
+          listener = undefined;
+        };
+      },
+      setPageData,
+      callPageModel,
+      stopPageModel,
+      respondPagePermission: vi.fn(async () => undefined),
+    };
+    const { container } = render(
+      <InlinePage file={file} session={session} remote={remote} renderFallback={() => null} />,
+    );
+    const source = await waitFor(() => {
+      const frameWindow = container.querySelector("iframe")?.contentWindow;
+      if (!frameWindow) throw new Error("页面 iframe 尚未加载");
+      return frameWindow;
+    });
+    const post = vi.spyOn(source, "postMessage");
+    const send = (fields: Record<string, unknown>, from: Window = source) => {
+      window.dispatchEvent(new MessageEvent("message", { data: fields, source: from }));
+    };
+    act(() => send({ type: "nocturne:inline-html:ready" }));
+    const renderMessage = post.mock.calls.at(-1)?.[0] as { id: string; pageBridge?: boolean };
+    expect(renderMessage.pageBridge).toBe(true);
+    const request = {
+      type: "nocturne:inline-html:request",
+      id: renderMessage.id,
+      requestId: 1,
+      method: "set",
+      sessionId: "forged",
+      page: "page-99",
+      key: "count",
+      value: 2,
+    };
+    act(() => send(request, window));
+    expect(setPageData).not.toHaveBeenCalled();
+    act(() => send(request));
+    await waitFor(() => expect(setPageData).toHaveBeenCalledWith("legacy-file-1.html", "count", 2));
+    act(() => send({ ...request, requestId: 2, method: "ask", prompt: "汇总" }));
+    expect(callPageModel).toHaveBeenCalledWith("legacy-file-1.html", { prompt: "汇总" });
+    const event = {
+      type: "page.permission_requested" as const,
+      sessionId: "s-inline",
+      runId: "run",
+      eseq: 1,
+      afterSeq: 1,
+      time: new Date().toISOString(),
+      payload: { page: "page-99", title: "其他页面", model: "fake/fake", requestId: "request" },
+    };
+    act(() => listener?.(event));
+    expect(screen.queryByRole("button", { name: "允许一次" })).toBeNull();
+    act(() =>
+      listener?.({
+        ...event,
+        payload: { ...event.payload, page: "legacy-file-1.html", title: "槽位标题" },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "允许一次" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeTruthy();
+    expect(Boolean(screen.queryByRole("button", { name: "这个页面以后都允许" }))).toBe(!remote);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    });
+    expect(stopPageModel).toHaveBeenCalledWith("legacy-file-1.html");
+    expect(screen.queryByRole("button", { name: "允许一次" })).toBeNull();
+  });
   it("带 inline 标记的工具结果渲染为沙箱页面框并隐藏原工具行，且页面框内无任何可见文本节点", async () => {
     const view = createSessionView();
     view.entries = [

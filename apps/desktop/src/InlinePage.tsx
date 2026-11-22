@@ -7,8 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { FileAttachment, SessionPage, SessionPageVersion } from "@nocturne/core/protocol";
-import type { RpcSession } from "@nocturne/rpc/client";
+import {
+  resolveInlinePageId,
+  type FileAttachment,
+  type SessionPage,
+  type SessionPageVersion,
+} from "@nocturne/core/protocol";
 
 import {
   triggerBytesDownload,
@@ -17,6 +21,7 @@ import {
   useSaveFile,
 } from "./ImageViewer";
 import { Menu, MenuItem } from "./Menu";
+import { PageModelPermission, PageModelStop, usePageBridge, type PageSession } from "./page-bridge";
 import { ICON_LG, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 import "./inline-page.css";
 
@@ -180,15 +185,35 @@ function findVersionIndex(
   return versions.length - 1;
 }
 
+function usePageOverlay(session: PageSession | undefined) {
+  const { open, closeFrom } = useCustomOverlay();
+  const openerRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(
+    () => () => {
+      if (openerRef.current) closeFrom(openerRef.current);
+    },
+    [closeFrom, session],
+  );
+  return (render: Parameters<typeof open>[0], opener: HTMLElement | null) => {
+    openerRef.current = opener;
+    open(render, opener);
+  };
+}
+
 function useSandboxedHtmlFrame(opts: {
   html: string | undefined;
   instanceId: string;
   fullscreen: boolean;
+  session?: PageSession | undefined;
+  page?: string | undefined;
   onResize?: ((height: number) => void) | undefined;
   onEscape?: (() => void) | undefined;
   onCaptured?: ((message: CapturedMessage) => void) | undefined;
 }) {
-  const { html, instanceId, fullscreen, onResize, onEscape, onCaptured } = opts;
+  const { html, instanceId, fullscreen, onResize, onEscape, onCaptured, page, session } = opts;
+  const bridge = usePageBridge(session, page, instanceId);
+  const onPageMessage = useRef(bridge.onMessage);
+  onPageMessage.current = bridge.onMessage;
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onResizeRef = useRef(onResize);
   onResizeRef.current = onResize;
@@ -213,10 +238,11 @@ function useSandboxedHtmlFrame(opts: {
         colorScheme,
         fontSize,
         fullscreen,
+        pageBridge: bridge.enabled,
       },
       "*",
     );
-  }, [fullscreen, instanceId]);
+  }, [bridge.enabled, fullscreen, instanceId]);
 
   const postTheme = useCallback(() => {
     const win = iframeRef.current?.contentWindow;
@@ -238,6 +264,7 @@ function useSandboxedHtmlFrame(opts: {
       const targetWindow = iframeRef.current?.contentWindow ?? null;
       if (targetWindow === null) return;
       if (event.source !== targetWindow) return;
+      onPageMessage.current(event, targetWindow);
       if (isReadyMessage(event.data)) {
         postRender();
         return;
@@ -291,7 +318,7 @@ function useSandboxedHtmlFrame(opts: {
     };
   }, [html, postTheme]);
 
-  return { iframeRef, handleLoad: postRender };
+  return { iframeRef, handleLoad: postRender, bridge };
 }
 
 export function PageVersionNav({
@@ -343,7 +370,9 @@ export interface InlinePageFullscreenProps {
   bytes?: Uint8Array | undefined;
   versions?: readonly SessionPageVersion[] | undefined;
   initialVersion?: number | undefined;
-  session?: Pick<RpcSession, "readAttachment"> | undefined;
+  session?: PageSession | undefined;
+  pageId?: string | undefined;
+  remote?: boolean | undefined;
   initialLoaded?: { file: string; sha256: string; html: string; bytes: Uint8Array } | undefined;
   onVersionChange?: ((version: number) => void) | undefined;
   opener: HTMLElement | null;
@@ -358,6 +387,8 @@ export function InlinePageFullscreen({
   versions,
   initialVersion,
   session,
+  pageId,
+  remote,
   initialLoaded,
   onVersionChange,
   opener,
@@ -476,10 +507,12 @@ export function InlinePageFullscreen({
 
   useFullscreenDialogTrap({ rootRef, opener, onClose: handleEscape });
 
-  const { iframeRef, handleLoad } = useSandboxedHtmlFrame({
+  const { iframeRef, handleLoad, bridge } = useSandboxedHtmlFrame({
     html: activeLoaded?.html,
     instanceId: fullInstanceId,
     fullscreen: true,
+    session,
+    page: pageId ?? (activeVer && resolveInlinePageId(activeVer.file)),
     onEscape: handleEscape,
     onCaptured: handleCaptured,
   });
@@ -534,8 +567,10 @@ export function InlinePageFullscreen({
   };
 
   const hasVersionNav = versionList !== undefined && versionList.length > 1;
+  const hasToolbar = hasVersionNav || bridge.permission !== undefined;
   const actionButtons = (
     <>
+      <PageModelStop bridge={bridge} className="inline-page-btn" />
       <IconButton
         ref={downloadBtnRef}
         className="inline-page-btn"
@@ -570,22 +605,28 @@ export function InlinePageFullscreen({
         }
       }}
     >
-      <div ref={sheetRef} className={`inline-page-sheet${hasVersionNav ? " has-toolbar" : ""}`}>
-        {hasVersionNav && (
+      <div
+        ref={sheetRef}
+        className={`inline-page-sheet${hasToolbar ? " has-toolbar" : ""}${bridge.permission ? " has-permission" : ""}`}
+      >
+        {hasToolbar && (
           <div className="inline-page-full-bar">
-            <PageVersionNav
-              index={safeIdx}
-              total={versionList.length}
-              onChange={(nextIdx) => {
-                setActiveIdx(nextIdx);
-                setDownloadError(undefined);
-                const nextVer = versionList[nextIdx];
-                if (nextVer !== undefined) onVersionChange?.(nextVer.version);
-              }}
-            />
+            {hasVersionNav ? (
+              <PageVersionNav
+                index={safeIdx}
+                total={versionList.length}
+                onChange={(nextIdx) => {
+                  setActiveIdx(nextIdx);
+                  setDownloadError(undefined);
+                  const nextVer = versionList[nextIdx];
+                  if (nextVer !== undefined) onVersionChange?.(nextVer.version);
+                }}
+              />
+            ) : null}
             <div className="inline-page-full-bar-actions">{actionButtons}</div>
           </div>
         )}
+        <PageModelPermission bridge={bridge} remote={remote} />
         <div className="inline-page-full-body">
           {activeLoaded !== undefined && (
             <iframe
@@ -599,7 +640,7 @@ export function InlinePageFullscreen({
             />
           )}
         </div>
-        {!hasVersionNav && <div className="inline-page-full-tools">{actionButtons}</div>}
+        {!hasToolbar && <div className="inline-page-full-tools">{actionButtons}</div>}
       </div>
       {menuOpen && (
         <Menu
@@ -625,7 +666,8 @@ export interface PageEntryRowProps {
   version: number;
   versions?: readonly SessionPageVersion[] | undefined;
   active?: boolean | undefined;
-  session: Pick<RpcSession, "readAttachment"> | undefined;
+  session: PageSession | undefined;
+  remote?: boolean | undefined;
   /** 桌面端传入：在右侧面板打开对应页面与版本；手机端不传，点击直接进全屏遮罩 */
   onOpenInPanel?: (() => void) | undefined;
   searchHit?: boolean | undefined;
@@ -639,6 +681,7 @@ export function PageEntryRow({
   versions,
   active = false,
   session,
+  remote,
   onOpenInPanel,
   searchHit = false,
   sessionSeq,
@@ -646,7 +689,7 @@ export function PageEntryRow({
 }: PageEntryRowProps) {
   const title = file.inline?.title ?? file.label;
   const btnRef = useRef<HTMLButtonElement | null>(null);
-  const overlay = useCustomOverlay();
+  const openOverlay = usePageOverlay(session);
 
   const handleClick = () => {
     if (onOpenInPanel !== undefined) {
@@ -658,7 +701,7 @@ export function PageEntryRow({
       versions && versions.length > 0
         ? versions
         : [{ version, file, title, seq: completedSeq ?? sessionSeq ?? 0 }];
-    overlay.open(
+    openOverlay(
       (onClose) => (
         <InlinePageFullscreen
           title={title}
@@ -666,6 +709,8 @@ export function PageEntryRow({
           versions={effectiveVersions}
           initialVersion={version}
           session={session}
+          pageId={resolveInlinePageId(file)}
+          remote={remote}
           opener={opener}
           onClose={onClose}
         />
@@ -695,14 +740,14 @@ export function PageEntryRow({
 export interface PagePaneProps {
   page: SessionPage | undefined;
   selectedVersion: number | undefined;
-  session: Pick<RpcSession, "readAttachment"> | undefined;
+  session: PageSession | undefined;
   onSelectVersion: (version: number | undefined) => void;
 }
 
 export function PagePane({ page, selectedVersion, session, onSelectVersion }: PagePaneProps) {
   const fullBtnRef = useRef<HTMLButtonElement | null>(null);
   const saveFile = useSaveFile();
-  const overlay = useCustomOverlay();
+  const openOverlay = usePageOverlay(session);
   const instanceId = useId();
   const sandboxSrc = resolveSandboxFrameSrc();
   const [downloadError, setDownloadError] = useState<string>();
@@ -742,10 +787,12 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
   }, [activeVer, cacheKey, session, loadedTick]);
 
   const paneInstanceId = `pane:${instanceId}:${activeVer?.file.file ?? "empty"}`;
-  const { iframeRef, handleLoad } = useSandboxedHtmlFrame({
+  const { iframeRef, handleLoad, bridge } = useSandboxedHtmlFrame({
     html: loaded?.html,
     instanceId: paneInstanceId,
     fullscreen: true,
+    session,
+    page: page?.page,
   });
 
   if (page === undefined || activeVer === undefined) {
@@ -778,7 +825,7 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
   const handleFullscreen = () => {
     if (!loaded) return;
     const opener = fullBtnRef.current;
-    overlay.open(
+    openOverlay(
       (onClose) => (
         <InlinePageFullscreen
           title={activeVer.title}
@@ -786,6 +833,7 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
           versions={versions}
           initialVersion={activeVer.version}
           session={session}
+          pageId={page.page}
           initialLoaded={{
             file: activeVer.file.file,
             sha256: activeVer.file.sha256,
@@ -812,6 +860,7 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
       <div className="page-pane-bar">
         <PageVersionNav index={activeIdx} total={versions.length} onChange={handleSelectIndex} />
         <div className="page-pane-actions">
+          <PageModelStop bridge={bridge} className="page-pane-action-btn" />
           <IconButton
             className="page-pane-action-btn"
             aria-label="下载"
@@ -833,6 +882,7 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
           </IconButton>
         </div>
       </div>
+      <PageModelPermission bridge={bridge} />
       <div className="page-pane-body">
         {loaded !== undefined && (
           <iframe
@@ -852,7 +902,8 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
 
 export interface InlinePageProps {
   file: FileAttachment;
-  session: Pick<RpcSession, "readAttachment"> | undefined;
+  session: PageSession | undefined;
+  remote?: boolean | undefined;
   renderFallback: (errorMessage?: string) => ReactNode;
   onCollapseAboveViewport?: ((container: HTMLElement) => void) | undefined;
   /** 桌面端传入：在右侧面板打开该页面并定位到本版本；手机端不传 */
@@ -869,6 +920,7 @@ export interface InlinePageProps {
 export function InlinePage({
   file,
   session,
+  remote,
   renderFallback,
   onCollapseAboveViewport,
   onOpenInPanel,
@@ -888,7 +940,7 @@ export function InlinePage({
   const [expanded, setExpanded] = useState(false);
   const prevDisplayedHeightRef = useRef<number>(INLINE_PAGE_INITIAL_HEIGHT);
 
-  const overlay = useCustomOverlay();
+  const openOverlay = usePageOverlay(session);
   const sandboxSrc = resolveSandboxFrameSrc();
 
   useEffect(() => {
@@ -917,12 +969,18 @@ export function InlinePage({
     };
   }, [file.file, file.sha256, session]);
 
-  const { iframeRef, handleLoad } = useSandboxedHtmlFrame({
+  const { iframeRef, handleLoad, bridge } = useSandboxedHtmlFrame({
     html: loaded?.html,
-    instanceId: `inline:${instanceId}`,
+    instanceId: `inline:${instanceId}:${file.file}`,
     fullscreen: false,
     onResize: setContentHeight,
+    session,
+    page: resolveInlinePageId(file),
+    onEscape: () => {
+      if (remote) void session?.stopPageModel?.(resolveInlinePageId(file)).catch(() => undefined);
+    },
   });
+  const phoneFullscreen = remote === true && bridge.busy;
 
   const collapsible = contentHeight !== null && contentHeight > INLINE_PAGE_COLLAPSE_HEIGHT;
   const displayedHeight =
@@ -955,13 +1013,15 @@ export function InlinePage({
   const openFullscreen = () => {
     if (!loaded) return;
     const opener = fullBtnRef.current;
-    overlay.open(
+    openOverlay(
       (onClose) => (
         <InlinePageFullscreen
           title={title}
           filename={file.label}
           html={loaded.html}
           bytes={loaded.bytes}
+          pageId={resolveInlinePageId(file)}
+          remote={remote}
           versions={versions}
           initialVersion={version}
           session={session}
@@ -997,7 +1057,24 @@ export function InlinePage({
       data-session-seq={sessionSeq}
       data-completed-seq={completedSeq}
     >
-      <div className="inline-page-body" style={{ height: `${displayedHeight}px` }}>
+      {!remote && <PageModelPermission bridge={bridge} />}
+      <div
+        className={phoneFullscreen ? "inline-page-body is-phone-fullscreen" : "inline-page-body"}
+        style={phoneFullscreen ? undefined : { height: `${displayedHeight}px` }}
+      >
+        {phoneFullscreen && (
+          <>
+            <div className="inline-page-full-bar">
+              <div className="inline-page-full-bar-actions">
+                <PageModelStop bridge={bridge} className="inline-page-btn" />
+                <IconButton aria-label="关闭" title="关闭" onClick={bridge.stop}>
+                  <Icon name="close" size={ICON_MD} />
+                </IconButton>
+              </div>
+            </div>
+            <PageModelPermission bridge={bridge} remote />
+          </>
+        )}
         {loaded !== null && (
           <iframe
             ref={iframeRef}
@@ -1011,8 +1088,9 @@ export function InlinePage({
         )}
       </div>
       {collapsible && !expanded && <div className="inline-page-fade" aria-hidden="true" />}
-      {loaded !== null && (
-        <div className="inline-page-tools">
+      {loaded !== null && !phoneFullscreen && (
+        <div className={`inline-page-tools${bridge.busy ? " is-busy" : ""}`}>
+          <PageModelStop bridge={bridge} className="inline-page-tool-btn" />
           {onOpenInPanel !== undefined && (
             <IconButton
               className="inline-page-tool-btn"

@@ -32,6 +32,7 @@ import type { PrefsStore } from "./prefs";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import { AppPane } from "./AppPane";
 import { PagePane } from "./InlinePage";
+import type { PageSession } from "./page-bridge";
 import type { McpAppToolDelivery } from "./mcp-app-host";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
@@ -206,7 +207,7 @@ export interface SidePanelProps {
 
 export interface PanelPages {
   pages: readonly SessionPage[];
-  session: Pick<RpcSession, "readAttachment"> | undefined;
+  session: PageSession | undefined;
   onSelectVersion: (tabId: string, version: number | undefined) => void;
 }
 

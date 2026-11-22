@@ -28,6 +28,7 @@ export const grantKind = (kind: Grant["kind"], match?: Grant["match"]): string =
         subagent: "子代理",
         schedule: "定时任务",
         app: "电脑操控",
+        page: "页面",
       }[kind];
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).at(-1) ?? value;
@@ -312,7 +313,11 @@ export function GrantsPage({
                             <Badge className="grant-kind">
                               {grantKind(grant.kind, grant.match)}
                             </Badge>
-                            <GrantTarget target={grant.target} />
+                            <GrantTarget
+                              target={
+                                grant.kind === "page" ? (grant.title ?? grant.target) : grant.target
+                              }
+                            />
                             <time dateTime={grant.createdAt}>
                               {new Date(grant.createdAt).toLocaleString("zh-CN", { hour12: false })}
                             </time>
@@ -439,7 +444,7 @@ export function GrantsPage({
                         <div className="grant-item" key={`${g.kind}:${g.match ?? ""}:${g.target}`}>
                           <Badge>{grantKind(g.kind, g.match)}</Badge>
                           <code className="grant-item-target" title={g.target}>
-                            {g.target}
+                            {g.kind === "page" ? (g.title ?? g.target) : g.target}
                           </code>
                           <time className="grant-item-time" dateTime={g.createdAt}>
                             {new Date(g.createdAt).toLocaleString("zh-CN", { hour12: false })}
