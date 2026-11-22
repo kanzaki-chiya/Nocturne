@@ -16,19 +16,15 @@ use std::sync::{Arc, Condvar, Mutex};
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const START_MARKER: &str = "__NOCTURNE_LOGIN_PATH_START__";
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const END_MARKER: &str = "__NOCTURNE_LOGIN_PATH_END__";
 #[cfg(target_os = "macos")]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(target_os = "macos")]
 const MAX_PROBE_OUTPUT_BYTES: usize = 1024 * 1024;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const FALLBACK_PREFIXES: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 
 /// 从登录 shell 输出中提取标记行之间的 PATH；忽略前后杂散输出，空内容或缺失标记返回 None。
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn parse_marked_path(output: &str) -> Option<String> {
     let lines: Vec<&str> = output
         .split('\n')
@@ -45,7 +41,6 @@ pub fn parse_marked_path(output: &str) -> Option<String> {
 }
 
 /// 探测失败时的兜底 PATH：在现有系统 PATH 前补 `/opt/homebrew/bin`、`/usr/local/bin`（去重）。
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn fallback_path(current_path: Option<&str>) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for &prefix in FALLBACK_PREFIXES {
@@ -65,7 +60,6 @@ pub fn fallback_path(current_path: Option<&str>) -> String {
 
 /// 带超时执行一次探测函数并解析结果；失败（错误、超时、空输出、缺标记）时返回兜底 PATH
 /// 与一行说明，便于单测直接覆盖所有失败路径。
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn resolve_with_timeout<F>(
     probe: F,
     timeout: Duration,
@@ -183,21 +177,11 @@ impl LoginPath {
         let this = Arc::clone(self);
         thread::spawn(move || {
             let current = std::env::var("PATH").ok();
-            let (resolved, note) = match probe_shell_path_output(PROBE_TIMEOUT) {
-                Ok(output) => match parse_marked_path(&output) {
-                    Some(path) => (path, None),
-                    None => (
-                        fallback_path(current.as_deref()),
-                        Some("登录 shell PATH 探测输出缺失有效标记，已改用兜底 PATH".into()),
-                    ),
-                },
-                Err(reason) => (
-                    fallback_path(current.as_deref()),
-                    Some(format!(
-                        "登录 shell PATH 探测失败（{reason}），已改用兜底 PATH"
-                    )),
-                ),
-            };
+            let (resolved, note) = resolve_with_timeout(
+                move || probe_shell_path_output(PROBE_TIMEOUT),
+                PROBE_TIMEOUT + Duration::from_secs(1),
+                current.as_deref(),
+            );
             if let Some(note) = note {
                 log(note);
             }

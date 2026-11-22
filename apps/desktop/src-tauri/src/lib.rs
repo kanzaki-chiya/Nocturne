@@ -17,6 +17,7 @@ mod images;
 mod job;
 mod key_diag;
 mod lines;
+#[cfg(any(target_os = "macos", test))]
 mod login_env;
 mod node;
 mod notify;
