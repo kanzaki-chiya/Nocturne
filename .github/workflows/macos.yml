@@ -22,9 +22,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: |
+          failed=()
           for pkg in packages/core packages/rpc packages/mcp apps/cli apps/tui; do
-            pnpm --dir "$pkg" test --maxWorkers=2
+            if ! pnpm --dir "$pkg" test --maxWorkers=2; then
+              failed+=("$pkg")
+            fi
           done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "Failed packages: ${failed[*]}" >&2
+            exit 1
+          fi
 
   desktop:
     runs-on: macos-latest
