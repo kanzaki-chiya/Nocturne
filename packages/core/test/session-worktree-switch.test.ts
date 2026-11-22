@@ -85,13 +85,14 @@ it("switching keeps trusted project configuration and applies project Grants wit
     path.join(f.worktree, ".nocturne", "config.json"),
     JSON.stringify({ permissions: { rules: [{ kind: "read", pattern: "**", action: "deny" }] } }),
   );
-  const cfg = await loadConfig(createPlatform(), { nocturneHome: home });
+  const platform = createPlatform();
+  const cfg = await loadConfig(platform, { nocturneHome: home });
   await cfg.setWorkspaceTrusted(f.project, true);
   const workspace = await cfg.forWorkspace(f.project);
   await workspace.grants.add(
     grantFromSubject(
       { kind: "read", target: outside, resolved: outside },
-      process.platform !== "win32",
+      platform.caseSensitivePaths,
       "2026-11-04T00:00:00.000Z",
     ),
   );

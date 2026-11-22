@@ -23,13 +23,14 @@ describe("worktree shell hard denial", () => {
     { target: `chdir '${main}'; git status`, shellCwd: root },
     { target: `pushd ${main} && git status`, shellCwd: root },
     { target: "Set-Location ..\\..; git status", shellCwd: root },
+    { target: "cd sub\\..\\.. && git status", shellCwd: root },
     { target: `sl "${main}"; git status`, shellCwd: root },
     { target: "Push-Location ..; git status", shellCwd: root },
     { target: "cd", shellCwd: root },
     { target: "cd ; git status", shellCwd: root },
     { target: "cd ~ && git status", shellCwd: root },
     { target: "cd ~/other && git status", shellCwd: root },
-  ])("denies external git paths, cd targets, and cwd even in bypass: %s", (subject) => {
+  ])("denies external git paths, cd targets, and cwd even in bypass: $target", (subject) => {
     const result = policy.evaluate([{ kind: "shell", ...subject }]);
     expect(result.decision.action).toBe("deny");
     expect(result.decision.reason).toContain(root);

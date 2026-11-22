@@ -3,7 +3,7 @@
  * 路径、不依赖会话、不限工作区；拒绝 ..、备用数据流、网络路径与链接到网络位置的路径；
  * 超过上限报错不截断。
  */
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,7 @@ let ws: string;
 let runtime: Runtime;
 
 beforeEach(async () => {
-  root = mkdtempSync(path.join(tmpdir(), "nct-readfile-"));
+  root = realpathSync.native(mkdtempSync(path.join(tmpdir(), "nct-readfile-")));
   const home = path.join(root, "home");
   ws = path.join(root, "ws");
   mkdirSync(home, { recursive: true });

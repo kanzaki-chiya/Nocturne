@@ -63,7 +63,7 @@ export function escapesWorktree(
   if (subject.kind !== "shell") return false;
   const currentCwd = subject.shellCwd ?? cwd;
   const normalize = (value: string, from = currentCwd) => {
-    const resolved = resolveRealSync(path.resolve(from, value));
+    const resolved = resolveRealSync(path.resolve(from, value.replaceAll("\\", "/")));
     const normalized = resolved.replaceAll("\\", "/").replace(/\/$/, "");
     return caseSensitive ? normalized : normalized.toLowerCase();
   };
