@@ -66,17 +66,17 @@ Rust 外壳里很多平台相关代码只有 `cfg(windows)` 实现，非 Windows
 
 ### 4. 窗口与快捷键
 
-- **标题栏**：macOS 上主窗口使用 `decorations: true`、`titleBarStyle: "Overlay"`、`hiddenTitle: true`：
+- **标题栏**：macOS 上主窗口使用 `decorations: true`、`titleBarStyle: "Overlay"`、`hiddenTitle: true`、`trafficLightPosition: { x: 16, y: 24 }`（匹配 40px 标题栏高度，使系统按钮垂直居中）：
   - 左上角显示系统的红黄绿按钮；
   - 隐藏前端自绘的最小化、最大化、关闭按钮；
-  - 品牌区右移，给系统按钮让出位置，并与标题栏垂直居中对齐。
+  - 品牌区左侧预留 84px 给系统按钮让位，面板停靠占位不再扣除右侧自绘按钮宽度（138px）。
   - Windows 外观不变。
-- **主修饰键**：前端只用一处判断平台（`navigator.userAgent` 含 `Macintosh`）。规则如下：
+- **主修饰键**：前端只用一处判断平台（`apps/desktop/src/platform.ts`，`navigator.userAgent` 含 `Macintosh`，支持测试注入）。规则如下：
   - Windows 上用 `Ctrl` 的应用快捷键，在 macOS 上一律改用 `Cmd`。
-  - `Ctrl` 加字母在 macOS 上不再被应用占用，原样交给终端和输入框。这保证 `Ctrl+C`、`Ctrl+B` 这类终端控制键可用。
+  - `Ctrl` 加字母在 macOS 上不再被应用占用，原样交给终端和输入框。这保证 `Ctrl+C`、`Ctrl+B` 这类终端控制键可用；`Ctrl+Alt+Esc`（停止电脑操控）在 macOS 上不注册。
   - 面板终端：有选区时 `Cmd+C` 复制；`Cmd+V` 粘贴。
   - 界面上的快捷键提示（`<Kbd>`）显示为 `⌘`、`⇧`、`⌥`、`⌃`。
-- **菜单与退出**：保留 Tauri 在 macOS 上的默认应用菜单。其中「编辑」菜单让输入框里的 `Cmd+C`、`Cmd+V`、`Cmd+X`、`Cmd+A`、`Cmd+Z` 可用。默认 Quit 菜单项直接调用 AppKit `terminate:`，不是窗口关闭事件。必须将该菜单项接入 `request_close`，使 `Cmd+Q` 与点红色按钮走同一条关闭流程（`docs/apps/desktop.md` 的关闭窗口拦截：有待发输入时先确认，见 ADR-0070）。
+- **菜单与退出**：Tauri 默认应用菜单里的 `PredefinedMenuItem::quit` 直接映射到 AppKit `terminate:`，触发 `applicationWillTerminate` → `RunEvent::Exit`，绕过可阻止的 `ExitRequested` / `CloseRequested`，拦截不住待发输入确认。因此 macOS 上由外壳自建中文应用菜单替换默认菜单：应用子菜单含关于 Nocturne、隐藏 Nocturne、隐藏其他、全部显示、分隔线与自定义「退出 Nocturne」（快捷键 `Cmd+Q`，在 `on_menu_event` 中接入 `request_close`，与点红色关闭按钮走同一条关闭确认流程，见 ADR-0070）；编辑子菜单保留预定义项（撤销、重做、分隔线、剪切、复制、粘贴、全选）以保障输入框 `Cmd+C/V/X/A/Z` 可用；窗口子菜单含最小化、缩放。
 - **关闭行为**：关闭窗口即退出应用，与 Windows 一致，一期不做「关窗后留在 Dock」。
 
 ### 5. 网页数据隔离
@@ -106,7 +106,7 @@ Rust 外壳里很多平台相关代码只有 `cfg(windows)` 实现，非 Windows
 |---|---|---|
 | 终端剪贴板读写 | 系统自带 `pbpaste` / `pbcopy`，文本经 stdin/stdout | 第一轮 |
 | 下载另存为 | `rfd` 的 macOS 保存对话框（下载回调已是跨平台的 `on_download`） | 第一轮 |
-| 面板终端 shell | 允许 `/etc/shells` 中列出的绝对路径；默认打开登录 shell，带登录交互参数 | 第一轮 |
+| 面板终端 shell | Core 的 `runtime.listShells` 不包含 `zsh`，一期不改 Core：外壳新增 `terminal_login_shell` 命令返回登录 shell（`$SHELL` 在 `/etc/shells` 内时采用，否则 `/bin/zsh`），前端 `TerminalPane` 将其置为下拉第一项并默认打开，后面接 Core 列出的 shell（macOS 白名单放行 `zsh` / `bash` / `sh` / `fish`）；`validate_shell` 在 Unix 上接受 `/etc/shells` 中的绝对路径，`zsh` / `bash` / `fish` 用 `-l -i`，`sh` 用 `-i` | 第一轮 |
 | 网页数据隔离与清除 | 第 5 节 | 第一轮（隔离）、第二轮（清除） |
 | 系统通知 | `UNUserNotificationCenter`：同一会话用同一个通知标识，新通知替换旧的；切到会话时移除已送达的通知；点击回调把窗口带到前台，再发出与 Windows 相同的激活事件；未获授权返回 `disabled` | 第二轮 |
 | 文件「打开方式」 | `NSWorkspace` 列出能打开该文件的应用并取图标，用指定应用打开；编辑器带行号打开时，沿用 Windows 已有的编辑器规则，换成 macOS 上的可执行路径 | 第二轮 |

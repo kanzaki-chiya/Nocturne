@@ -8,7 +8,7 @@
 
 ## 平台差异
 
-[ADR-0110](../decisions/ADR-0110-macos-desktop.md) 规定 Apple Silicon / macOS 14+ 的移植范围。Windows 保留自绘标题栏、Ctrl 快捷键及 WebView2 目录。macOS 的目标是原生窗口按钮、Cmd 快捷键、登录 shell 的 PATH 和独立 WKWebView 数据存储；不提供模型操控的面板浏览器与电脑操控。系统通知、文件打开方式与清除浏览数据留待第二轮。安装包与实机验收分开，不以 Windows 构建结果代替 macOS 验收。
+[ADR-0110](../decisions/ADR-0110-macos-desktop.md) 规定 Apple Silicon / macOS 14+ 的移植范围。Windows 保留自绘标题栏、Ctrl 快捷键及 WebView2 目录。macOS 第一轮已实现：原生红黄绿按钮（`Overlay` + `trafficLightPosition: { x: 16, y: 24 }`，隐藏自绘三钮并在品牌区左侧留 84px，面板占位不扣 138px）、自定义中文应用菜单替换默认菜单（`Cmd+Q` 经 `on_menu_event` 接入 `request_close`）、`src/platform.ts` 统一平台判断与 Cmd 快捷键（不注册 `Ctrl+Alt+Esc`，`<Kbd>` 显示 `⌘` `⇧` `⌥` `⌃`）、启动时后台线程探测登录 shell 的 `PATH`（标记行、10 秒超时、失败兜底并记外壳日志）、`terminal_login_shell` 返回默认登录 shell 且 `terminal_open` 在 Unix 按 `/etc/shells` 白名单校验、终端剪贴板走 `/usr/bin/pbpaste` / `/usr/bin/pbcopy`、下载另存为用 `rfd`、用户浏览 webview 改用 16 字节 `data_store_identifier`，以及不传 agent 浏览器与电脑操控启动凭证并在设置页隐藏「电脑操控」导航与「Agent 浏览器」分组/「Agent 浏览」数据行（保留「我的浏览」清除入口，不显示占用大小）。系统通知、文件打开方式与清除浏览数据留待第二轮。安装包与实机验收分开，不以 Windows 构建结果代替 macOS 验收。
 
 ## 1. 进程结构与后台策略
 
@@ -24,7 +24,7 @@ ADR-0061：服务商页的模型设置对话框增加 Gemini 协议选项及可�
 
 ## 2. 命令与消息格式
 
-Rust 外壳提供四十六个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`，终端另有 `invalid_shell`、`unknown_terminal`、`unsupported`，浏览器另有 `unknown_browser`、`browser_failed` 与导航被拦的 `browser_invalid` / `browser_external` / `browser_internal` / `browser_file` / `browser_unsupported`。
+Rust 外壳提供四十七个 Tauri 命令（经 `tauri_build` 的 `AppManifest::commands` 声明为应用命令，在 `capabilities/main.json` 中逐个授予 `allow-backend-open` 等权限），错误统一返回可序列化的 `{ code, message }`（message 为中文）：`node_unavailable`、`backend_script_missing`、`invalid_workspace`、`spawn_failed`、`unknown_backend`、`workspace_unavailable`、`file_too_large`、`io`，终端另有 `invalid_shell`、`unknown_terminal`、`unsupported`，浏览器另有 `unknown_browser`、`browser_failed` 与导航被拦的 `browser_invalid` / `browser_external` / `browser_internal` / `browser_file` / `browser_unsupported`。
 
 | 命令              | 参数 → 结果                                         | 说明                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,13 +41,14 @@ Rust 外壳提供四十六个 Tauri 命令（经 `tauri_build` 的 `AppManifest:
 | `shell_log` | `{}` → `string[]` | 外壳自身诊断日志的快照（最近 500 行，不写盘）；「后台日志」页的「外壳」条目读它 |
 | `notify_show` | `{ sessionId, title, body, sound }` → `{ shown, reason?, detail? }` | Windows 系统通知（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：同一会话 tag/group 替换旧通知；`sound: false` 时 `<audio silent="true"/>`；系统关掉本应用通知时 `shown: false, reason: "disabled"`；非 Windows `shown: false, reason: "unsupported"`。AUMID：安装版（release）直接用 bundle identifier（与 NSIS 快捷方式一致）；只有开发构建才探测注册表，未登记退回 PowerShell 署名 |
 | `notify_dismiss` | `{ sessionId }` → `null` | 撤掉该会话的通知：先 Hide 原 toast（屏幕上那条立刻消失）再按 tag/group 清通知中心历史，最后放掉对象（点击回调随之失效）；切到该会话、窗口获焦时调用 |
-| `terminal_open` | `{ shell, cwd, cols, rows, channel }` → `terminalId`（u32，自增） | 面板终端（5.10）：portable-pty 起 shell，输出经这个终端自己的 channel 推送。`shell` 必须是存在的绝对路径且文件名是 `pwsh.exe` / `powershell.exe` / `bash.exe` / `cmd.exe` 之一（System32 下的 `bash.exe` 是 WSL 入口，不认），否则 `invalid_shell`；参数由外壳按种类决定（PowerShell `-NoLogo`，Git Bash `--login -i`，cmd 无），前端传不了参数；`cwd` 必须是存在的目录，否则 `invalid_workspace`。Windows 上进程放进外壳的 Job Object |
+| `terminal_open` | `{ shell, cwd, cols, rows, channel }` → `terminalId`（u32，自增） | 面板终端（5.10）：portable-pty 起 shell，输出经这个终端自己的 channel 推送。Windows 上 `shell` 必须是存在的绝对路径且文件名是 `pwsh.exe` / `powershell.exe` / `bash.exe` / `cmd.exe` 之一（System32 下的 `bash.exe` 是 WSL 入口，不认），参数由外壳按种类决定（PowerShell `-NoLogo`，Git Bash `--login -i`，cmd 无）；Unix 上 `shell` 必须是列在 `/etc/shells` 且存在的绝对路径（`zsh` / `bash` / `fish` 用 `-l -i`，`sh` 用 `-i`），macOS 注入登录 shell 探测的 `PATH`。不满足报 `invalid_shell`，前端传不了参数；`cwd` 必须是存在的目录，否则 `invalid_workspace`。Windows 上进程放进外壳的 Job Object |
 | `terminal_write` | `{ id, data }` → `null` | 写入终端输入；未知或已结束的终端报 `unknown_terminal` |
 | `terminal_resize` | `{ id, cols, rows }` → `null` | 调整 pty 尺寸（行列夹在 2–1000） |
 | `terminal_close` | `{ id }` → `null` | 结束进程（连同它启动的程序）；已结束的也返回 `null`。前端页面重新加载、应用退出时外壳结束全部终端 |
-| `terminal_read_clipboard` | `{}` → `string` | 读系统剪贴板文本（CF_UNICODETEXT），终端右键粘贴用：网页里的 `navigator.clipboard.readText` 在 WebView2 会弹权限框。非 Windows 报 `unsupported` |
-| `terminal_write_clipboard` | `{ text }` → `null` | 写系统剪贴板文本（CF_UNICODETEXT，UTF-16 加结尾 NUL），终端 Ctrl+Shift+C 与右键复制用：网页里的 `navigator.clipboard.writeText` 在 WebView2 会静默失败。剪贴板被别的程序占着时重试 10 次后报 `io`；非 Windows 报 `unsupported` |
-| `browser_create` | `{ url, bounds, channel }` → `browserId`（u32，自增） | 面板浏览器（5.10）：`url` 先过导航白名单（`browser_policy::parse_user_url`），再用 `Window::add_child` 在主窗口下建子 webview（标签 `nct-browser-<n>`，数据目录 `<应用本地数据>/browser`，开 devtools），先开 `about:blank`、挂好事件再导航；`bounds` 为 `{ x, y, width, height }`（逻辑像素），为 `null` 时建好即隐藏。页面事件经这个浏览器自己的 channel 推送 |
+| `terminal_read_clipboard` | `{}` → `string` | 读系统剪贴板文本，终端右键粘贴用：Windows 读 CF_UNICODETEXT（网页里的 `navigator.clipboard.readText` 在 WebView2 会弹权限框）；macOS 经 `/usr/bin/pbpaste` stdout 读取；其他平台报 `unsupported` |
+| `terminal_write_clipboard` | `{ text }` → `null` | 写系统剪贴板文本，终端复制用：Windows 写 CF_UNICODETEXT（UTF-16 加结尾 NUL，被占用时重试 10 次后报 `io`）；macOS 经 `/usr/bin/pbcopy` stdin 写入（不经命令行参数）；其他平台报 `unsupported` |
+| `terminal_login_shell` | `{}` → `string \| null` | macOS 返回登录 shell 绝对路径（`$SHELL` 列在 `/etc/shells` 中时采用，否则 `/bin/zsh`），供 `TerminalPane` 作为下拉首项与默认项；Windows 返回 `null` |
+| `browser_create` | `{ url, bounds, channel }` → `browserId`（u32，自增） | 面板浏览器（5.10）：`url` 先过导航白名单（`browser_policy::parse_user_url`），再用 `Window::add_child` 在主窗口下建子 webview（标签 `nct-browser-<n>`；Windows 用独立数据目录 `<应用本地数据>/browser`，macOS 用 16 字节 `data_store_identifier`，开 devtools），先开 `about:blank`、挂好事件再导航；`bounds` 为 `{ x, y, width, height }`（逻辑像素），为 `null` 时建好即隐藏。页面事件经这个浏览器自己的 channel 推送 |
 | `browser_navigate` | `{ id, url }` → `null` | 地址栏导航：同样过白名单，`javascript:` 等报 `browser_unsupported`、自定义协议报 `browser_external`、应用地址报 `browser_internal`；未知的浏览器报 `unknown_browser` |
 | `browser_layout` | `{ id, bounds }` → `null` | 放到 `bounds` 并显示；`null` 隐藏，隐藏前焦点在网页里的把焦点还给主界面。同步命令，在主线程按收到的顺序执行 |
 | `browser_action` | `{ id, action }` → `null` | `back` / `forward` / `reload` / `stop` / `devtools` / `focus`；其余报 `browser_failed` |
