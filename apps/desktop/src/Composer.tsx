@@ -30,6 +30,7 @@ import {
 import { isValidGitBranchName, useBranchMenu } from "./BranchMenu";
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
 import { searchInputHistory, splitHighlightSegments, type MatchRange } from "./history-search";
+import { hasPrimaryMod, hasPrimaryModOrMetaOnOther } from "./platform";
 import {
   completeFileRefs,
   fileRefDeleteRange,
@@ -952,13 +953,12 @@ export function Composer({
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     literalPaste.current =
-      (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v";
+      hasPrimaryModOrMetaOnOther(event) && event.shiftKey && event.key.toLowerCase() === "v";
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- 旧 IME 用 keyCode 229 标记组合中
     if (event.nativeEvent.isComposing || composingRef.current || event.nativeEvent.keyCode === 229)
       return;
     if (
-      event.ctrlKey &&
-      !event.metaKey &&
+      hasPrimaryMod(event) &&
       !event.altKey &&
       !event.shiftKey &&
       event.key.toLowerCase() === "r"

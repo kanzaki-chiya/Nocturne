@@ -9,6 +9,7 @@ import {
   type SessionTree,
 } from "./session-tree";
 import { SKILL_ICON } from "./input-labels";
+import { hasPrimaryModOrMetaOnOther, isMacOS } from "./platform";
 import { ICON_MD, ICON_SM, Icon } from "./ui";
 
 /** 设置区的导航项（ADR-0046 2026-10-05 修订第 1 条；logs = 后台日志页） */
@@ -471,25 +472,31 @@ export function Sidebar(props: SidebarProps) {
           返回
         </button>
         <nav className="nav" aria-label="设置">
-          {SETTINGS_NAV_GROUPS.map((group) => (
-            <Fragment key={group.label}>
-              <h4>{group.label}</h4>
-              {group.items.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={`item${page === item.key ? " on" : ""}`}
-                  aria-current={page === item.key ? "page" : undefined}
-                  onClick={() => {
-                    props.onOpenPage?.(item.key);
-                  }}
-                >
-                  {item.icon}
-                  <span className="t">{item.label}</span>
-                </button>
-              ))}
-            </Fragment>
-          ))}
+          {SETTINGS_NAV_GROUPS.map((group) => {
+            const items = isMacOS()
+              ? group.items.filter((item) => item.key !== "computer")
+              : group.items;
+            if (items.length === 0) return null;
+            return (
+              <Fragment key={group.label}>
+                <h4>{group.label}</h4>
+                {items.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`item${page === item.key ? " on" : ""}`}
+                    aria-current={page === item.key ? "page" : undefined}
+                    onClick={() => {
+                      props.onOpenPage?.(item.key);
+                    }}
+                  >
+                    {item.icon}
+                    <span className="t">{item.label}</span>
+                  </button>
+                ))}
+              </Fragment>
+            );
+          })}
         </nav>
       </aside>
     );
@@ -540,7 +547,7 @@ export function Sidebar(props: SidebarProps) {
   };
 
   const handleRowSelect = (e: React.MouseEvent, groupKey: string, id: string) => {
-    if (e.ctrlKey || e.metaKey) {
+    if (hasPrimaryModOrMetaOnOther(e)) {
       anchorRef.current = { groupKey, id };
       setMultiSelected((prev) => {
         const next = new Set(prev);

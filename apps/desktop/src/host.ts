@@ -43,6 +43,8 @@ export interface TerminalHost {
    * 会静默失败，所以由外壳写；失败时抛错，界面要给出提示。
    */
   writeClipboard: (text: string) => Promise<void>;
+  /** macOS 默认登录 shell 绝对路径（Windows 返回 null） */
+  loginShell?: () => Promise<string | null>;
 }
 
 /** 外壳浏览器推来的页面事件（src-tauri/src/browser.rs BrowserMessage） */

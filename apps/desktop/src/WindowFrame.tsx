@@ -2,16 +2,19 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import type { DesktopHost } from "./host";
 import { TitlebarSlot } from "./PanelChrome";
+import { isMacOS } from "./platform";
 import { MoonMark } from "./ui";
 import "./window-frame.css";
 
 /** 窗口操作仍走宿主；会话、后台与权限判定不进入标题栏。 */
 export function WindowFrame({ host, children }: { host: DesktopHost; children: ReactNode }) {
+  const mac = isMacOS();
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** App 经 TitlebarPortal 把面板与概览按钮放进来（ADR-0060） */
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
+    if (mac) return;
     let disposed = false;
     const refresh = () => {
       void host.invoke("plugin:window|is_maximized", { label: "main" }).then(
@@ -31,7 +34,7 @@ export function WindowFrame({ host, children }: { host: DesktopHost; children: R
       window.removeEventListener("resize", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [host]);
+  }, [host, mac]);
   const act = async (command: string) => {
     try {
       setError(null);
@@ -45,7 +48,10 @@ export function WindowFrame({ host, children }: { host: DesktopHost; children: R
   };
   return (
     <div className="window-frame">
-      <header className="window-titlebar" aria-label="窗口标题栏">
+      <header
+        className={mac ? "window-titlebar is-macos" : "window-titlebar"}
+        aria-label="窗口标题栏"
+      >
         <div className="window-brand" data-tauri-drag-region>
           <MoonMark size={16} />
           <span>Nocturne</span>
@@ -53,43 +59,45 @@ export function WindowFrame({ host, children }: { host: DesktopHost; children: R
         <div className="window-drag-region" data-tauri-drag-region />
         <div className="window-tools" ref={setSlot} />
         <div className="window-panel-gap" data-tauri-drag-region />
-        <div className="window-controls">
-          <button
-            type="button"
-            aria-label="最小化"
-            title="最小化"
-            onClick={() => void act("minimize")}
-          >
-            <svg viewBox="0 0 12 12" aria-hidden="true">
-              <path d="M1 6h10" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            aria-label={maximized ? "还原" : "最大化"}
-            title={maximized ? "还原" : "最大化"}
-            onClick={() => void act("toggle_maximize")}
-          >
-            <svg viewBox="0 0 12 12" aria-hidden="true">
-              {maximized ? (
-                <path d="M3.5 3.5v-2h7v7h-2M1.5 3.5h7v7h-7z" />
-              ) : (
-                <path d="M1.5 1.5h9v9h-9z" />
-              )}
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="window-close"
-            aria-label="关闭"
-            title="关闭"
-            onClick={() => void act("close")}
-          >
-            <svg viewBox="0 0 12 12" aria-hidden="true">
-              <path d="m1.5 1.5 9 9m0-9-9 9" />
-            </svg>
-          </button>
-        </div>
+        {!mac && (
+          <div className="window-controls">
+            <button
+              type="button"
+              aria-label="最小化"
+              title="最小化"
+              onClick={() => void act("minimize")}
+            >
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M1 6h10" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label={maximized ? "还原" : "最大化"}
+              title={maximized ? "还原" : "最大化"}
+              onClick={() => void act("toggle_maximize")}
+            >
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                {maximized ? (
+                  <path d="M3.5 3.5v-2h7v7h-2M1.5 3.5h7v7h-7z" />
+                ) : (
+                  <path d="M1.5 1.5h9v9h-9z" />
+                )}
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="window-close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={() => void act("close")}
+            >
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="m1.5 1.5 9 9m0-9-9 9" />
+              </svg>
+            </button>
+          </div>
+        )}
       </header>
       <TitlebarSlot.Provider value={slot}>{children}</TitlebarSlot.Provider>
       {error !== null && (

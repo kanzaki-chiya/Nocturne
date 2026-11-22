@@ -73,6 +73,7 @@ import {
 } from "./conversations";
 import { parseSlash } from "./commands";
 import { openForkedSession } from "./fork-session";
+import { hasPrimaryMod, hasPrimaryModOrMetaOnOther, isMacOS } from "./platform";
 import { ContextUsage, type StatusPanel } from "./ContextUsage";
 import { BranchMenu } from "./BranchMenu";
 import { ConversationHeader } from "./ConversationHeader";
@@ -224,8 +225,7 @@ export function shouldBlockGlobalRefresh(
     event.key === "Process" ||
     event.altKey ||
     event.shiftKey ||
-    event.metaKey ||
-    !event.ctrlKey ||
+    !hasPrimaryMod(event) ||
     event.key.toLowerCase() !== "r"
   ) {
     return false;
@@ -1020,7 +1020,13 @@ export function App({ host }: { host: DesktopHost }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.altKey && !event.shiftKey && event.key === "Escape") {
+      if (
+        !isMacOS() &&
+        event.ctrlKey &&
+        event.altKey &&
+        !event.shiftKey &&
+        event.key === "Escape"
+      ) {
         event.preventDefault();
         stopActiveComputer();
         return;
@@ -1034,7 +1040,7 @@ export function App({ host }: { host: DesktopHost }) {
         event.key === "Process" ||
         event.altKey ||
         event.shiftKey ||
-        (!event.ctrlKey && !event.metaKey) ||
+        !hasPrimaryModOrMetaOnOther(event) ||
         event.key.toLowerCase() !== "k"
       )
         return;

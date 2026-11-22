@@ -65,6 +65,7 @@ export function createTauriHost(): DesktopHost {
       close: (id) => invoke("terminal_close", { id }),
       readClipboard: () => invoke<string>("terminal_read_clipboard"),
       writeClipboard: (text) => invoke("terminal_write_clipboard", { text }),
+      loginShell: () => invoke<string | null>("terminal_login_shell"),
     },
     browsers: {
       create(url, bounds, onMessage) {

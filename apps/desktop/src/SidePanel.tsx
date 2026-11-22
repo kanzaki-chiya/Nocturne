@@ -46,6 +46,7 @@ import {
 import type { CodeViewer } from "./code-viewer";
 import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
+import { formatShortcut } from "./platform";
 import {
   baseName,
   browserTabName,
@@ -642,7 +643,7 @@ function NewTabPage({
             <span className="sp-tool-text">
               <span className="sp-tool-head">
                 <span className="sp-tool-name">变更</span>
-                <Kbd>Ctrl+Shift+G</Kbd>
+                <Kbd>{formatShortcut("Mod+Shift+G")}</Kbd>
               </span>
             </span>
           </button>
@@ -657,7 +658,7 @@ function NewTabPage({
             <span className="sp-tool-text">
               <span className="sp-tool-head">
                 <span className="sp-tool-name">文件</span>
-                <Kbd>Ctrl+P</Kbd>
+                <Kbd>{formatShortcut("Mod+P")}</Kbd>
               </span>
             </span>
           </button>
@@ -672,7 +673,7 @@ function NewTabPage({
             <span className="sp-tool-text">
               <span className="sp-tool-head">
                 <span className="sp-tool-name">终端</span>
-                <Kbd>Ctrl+`</Kbd>
+                <Kbd>{formatShortcut("Mod+`")}</Kbd>
               </span>
             </span>
           </button>

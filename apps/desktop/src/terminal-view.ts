@@ -121,11 +121,15 @@ export function mountTerminal(parent: HTMLElement, callbacks: TerminalCallbacks)
   term.open(parent);
   term.attachCustomKeyEventHandler((event) => {
     if (event.type !== "keydown") return !isAppShortcut(event);
-    switch (terminalKeyAction(event, term.hasSelection())) {
+    const action = terminalKeyAction(event, term.hasSelection());
+    switch (action) {
       case "copy":
+        event.preventDefault();
+        callbacks.onCopy(true);
+        return false;
       case "copy-keep":
         event.preventDefault();
-        callbacks.onCopy(!(event.ctrlKey && event.shiftKey));
+        callbacks.onCopy(false);
         return false;
       case "paste":
         // 不拦默认行为：浏览器原生粘贴事件进 xterm 的 textarea，xterm 自己处理（含括号粘贴），

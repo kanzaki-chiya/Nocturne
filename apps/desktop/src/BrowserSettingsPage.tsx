@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
 import type { AgentBrowserHost } from "./host";
+import { isMacOS } from "./platform";
 import type { LinkOpener, PrefsStore } from "./prefs";
 import { Button } from "./ui/Button";
 import { PageHeader } from "./ui/PageHeader";
@@ -57,13 +58,14 @@ export function BrowserSettingsPage({
   /** 进入页面时递增：重新读外壳状态 */
   version: number;
 }) {
+  const mac = isMacOS();
   return (
     <section className="page3" aria-label="浏览器">
       <div className="spage">
         <div className="readable">
           <PageHeader title="浏览器" />
           <div className="sbody">
-            {agentBrowser !== undefined && (
+            {!mac && agentBrowser !== undefined && (
               <SettingsGroup title="Agent 浏览器">
                 <AgentBrowserRow
                   host={agentBrowser}
@@ -79,7 +81,7 @@ export function BrowserSettingsPage({
             </SettingsGroup>
             {browsingData !== undefined && (
               <SettingsGroup title="浏览数据">
-                <BrowsingDataRows host={browsingData} version={version} />
+                <BrowsingDataRows host={browsingData} version={version} mac={mac} />
               </SettingsGroup>
             )}
           </div>
@@ -243,13 +245,22 @@ const DATA_ROWS = [
 ] as const;
 
 /** 「我的浏览」「Agent 浏览」：进入页面时刷新大小；「清除…」在行下展开内联确认 */
-function BrowsingDataRows({ host, version }: { host: BrowsingDataHost; version: number }) {
+function BrowsingDataRows({
+  host,
+  version,
+  mac,
+}: {
+  host: BrowsingDataHost;
+  version: number;
+  mac: boolean;
+}) {
   const [sizes, setSizes] = useState<{ user: number; agent: number } | null>(null);
   const [confirming, setConfirming] = useState<"user" | "agent" | null>(null);
   const [clearing, setClearing] = useState<"user" | "agent" | null>(null);
   const [errors, setErrors] = useState<{ user?: string; agent?: string }>({});
 
   useEffect(() => {
+    if (mac) return;
     let live = true;
     host.sizes().then(
       (next) => {
@@ -262,7 +273,7 @@ function BrowsingDataRows({ host, version }: { host: BrowsingDataHost; version: 
     return () => {
       live = false;
     };
-  }, [host, version]);
+  }, [host, version, mac]);
 
   const clear = async (which: "user" | "agent") => {
     setConfirming(null);
@@ -270,7 +281,9 @@ function BrowsingDataRows({ host, version }: { host: BrowsingDataHost; version: 
     setErrors((prev) => ({ ...prev, [which]: undefined }));
     try {
       const size = await host.clear(which);
-      setSizes((prev) => (prev === null ? prev : { ...prev, [which]: size }));
+      if (!mac) {
+        setSizes((prev) => (prev === null ? prev : { ...prev, [which]: size }));
+      }
     } catch (e) {
       setErrors((prev) => ({ ...prev, [which]: errText(e) }));
     } finally {
@@ -278,12 +291,13 @@ function BrowsingDataRows({ host, version }: { host: BrowsingDataHost; version: 
     }
   };
 
+  const rows = mac ? DATA_ROWS.filter((row) => row.which === "user") : DATA_ROWS;
   return (
     <>
-      {DATA_ROWS.map((row) => (
+      {rows.map((row) => (
         <Fragment key={row.which}>
           <SettingsRow label={row.label} error={errors[row.which]}>
-            {sizes !== null && <span className="val">{formatSize(sizes[row.which])}</span>}
+            {!mac && sizes !== null && <span className="val">{formatSize(sizes[row.which])}</span>}
             <Button
               size="sm"
               disabled={clearing !== null}

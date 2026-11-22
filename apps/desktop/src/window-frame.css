@@ -18,6 +18,11 @@
   color: var(--a-muted);
   user-select: none;
 }
+/* macOS 使用系统红黄绿按钮（trafficLightPosition x=16，三钮占至 ~70px），品牌区左侧让位 */
+.window-titlebar.is-macos {
+  --macos-traffic-light-inset: 84px;
+  padding-left: var(--macos-traffic-light-inset);
+}
 .window-brand {
   display: inline-flex;
   align-items: center;
@@ -49,6 +54,10 @@
   flex: none;
   height: 100%;
   width: max(0px, calc(var(--panel-dock, 0px) - 138px));
+}
+/* macOS 没有右侧自绘窗口按钮，面板占位无需扣除 138px */
+.window-titlebar.is-macos .window-panel-gap {
+  width: var(--panel-dock, 0px);
 }
 .window-controls {
   display: flex;

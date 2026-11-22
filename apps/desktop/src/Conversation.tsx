@@ -28,6 +28,7 @@ import { diffRows } from "./code-lines";
 import { useCodeHighlight } from "./use-code-highlight";
 import { shellResultSummary, shellResultText, shellToolStatus } from "./background-shell";
 import { useMotionAllowed } from "./motion";
+import { hasPrimaryModOrMetaOnOther } from "./platform";
 
 export function GrantedTag({
   permission,
@@ -5524,7 +5525,7 @@ function ConversationContent({
     const onKey = (event: KeyboardEvent) => {
       if (event.isComposing || event.key === "Process") return;
       if (
-        (event.ctrlKey || event.metaKey) &&
+        hasPrimaryModOrMetaOnOther(event) &&
         !event.altKey &&
         !event.shiftKey &&
         event.key.toLowerCase() === "f"

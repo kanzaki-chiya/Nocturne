@@ -50,6 +50,7 @@ import {
   type McpAppToolDelivery,
 } from "./mcp-app-host";
 import { motionAllowed, subscribeMotionChange } from "./motion";
+import { hasPrimaryMod } from "./platform";
 import { ConfirmDialog } from "./ProvidersPage";
 import { QuickOpen, SessionOverview, TitlebarButtons, type OverviewSubagents } from "./PanelChrome";
 import type { PrefsStore } from "./prefs";
@@ -1783,7 +1784,7 @@ export function useSidePanel({
         else if (state.hasSession) act.setOverviewOpen(true);
         return;
       }
-      if (!event.ctrlKey || event.altKey || event.metaKey || event.key === "Process") return;
+      if (!hasPrimaryMod(event) || event.altKey || event.key === "Process") return;
       const key = event.key.toLowerCase();
       const panelKey =
         (event.code === "Backquote" && !event.shiftKey) ||

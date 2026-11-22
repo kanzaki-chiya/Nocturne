@@ -8,21 +8,43 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Dropdown } from "./Dropdown";
 import type { TerminalHost } from "./host";
-import { terminalShell, type ShellOption, type TerminalTab } from "./side-panel";
+import { isMacOS } from "./platform";
+import { samePath, terminalShell, type ShellOption, type TerminalTab } from "./side-panel";
 import { TerminalSession, type TerminalStatus } from "./terminal-session";
 import type { MountedTerminal } from "./terminal-view";
 import { Button, ICON_SM, Icon } from "./ui";
 
 /** 外壳只认这几个可执行文件名（src-tauri/src/terminal.rs），下拉里也只列它们 */
 const TERMINAL_EXECUTABLES = new Set(["pwsh.exe", "powershell.exe", "bash.exe", "cmd.exe"]);
+const MACOS_TERMINAL_EXECUTABLES = new Set(["zsh", "bash", "sh", "fish"]);
 
-export function terminalShells(shells: readonly ShellOption[]): ShellOption[] {
+export function terminalShells(shells: readonly ShellOption[], mac = isMacOS()): ShellOption[] {
   return shells.filter((shell) => {
     if (!shell.available || shell.executable === undefined) return false;
     const name = shell.executable.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+    if (mac && MACOS_TERMINAL_EXECUTABLES.has(name)) return true;
     // 非 Windows 没有 .exe 后缀：外壳同样只按文件名放行
     return TERMINAL_EXECUTABLES.has(name) || TERMINAL_EXECUTABLES.has(`${name}.exe`);
   });
+}
+
+/** macOS：把外壳提供的登录 shell 放到下拉第一项，后面接 Core 列出的 shell（去重）。 */
+export function mergeMacLoginShell(
+  shells: readonly ShellOption[],
+  loginShellPath: string | null | undefined,
+): ShellOption[] {
+  const trimmed = loginShellPath?.trim();
+  if (trimmed === undefined || trimmed === "") return [...shells];
+  const existingIndex = shells.findIndex(
+    (s) => s.executable !== undefined && samePath(s.executable, trimmed),
+  );
+  const existing = shells[existingIndex];
+  if (existing !== undefined) {
+    return [existing, ...shells.slice(0, existingIndex), ...shells.slice(existingIndex + 1)];
+  }
+  const popped = trimmed.split("/").pop();
+  const base = popped !== undefined && popped !== "" ? popped : trimmed;
+  return [{ kind: base, name: base, executable: trimmed, available: true }, ...shells];
 }
 
 export function exitText(code: number | undefined): string {
@@ -83,10 +105,17 @@ export function TerminalPane({
   const cwd = tab.cwd;
   useEffect(() => {
     let alive = true;
-    loadShells(cwd)
-      .then((choice) => {
+    const mac = isMacOS();
+    Promise.all([
+      loadShells(cwd),
+      mac && host.loginShell !== undefined
+        ? host.loginShell().catch(() => null)
+        : Promise.resolve(null),
+    ])
+      .then(([choice, loginPath]) => {
         if (!alive) return;
-        setShells(terminalShells(choice.shells));
+        const listed = terminalShells(choice.shells, mac);
+        setShells(mac ? mergeMacLoginShell(listed, loginPath) : listed);
         setSetting(choice.setting);
       })
       .catch((e: unknown) => {
@@ -95,12 +124,20 @@ export function TerminalPane({
     return () => {
       alive = false;
     };
-  }, [loadShells, cwd]);
+  }, [loadShells, cwd, host]);
 
-  const shell = useMemo(
-    () => (shells === undefined ? undefined : terminalShell(shells, tab.shell, setting)),
-    [shells, tab.shell, setting],
-  );
+  const shell = useMemo(() => {
+    if (shells === undefined) return undefined;
+    if (isMacOS()) {
+      const target = tab.shell;
+      const chosen =
+        target !== undefined
+          ? shells.find((s) => s.executable !== undefined && samePath(s.executable, target))
+          : undefined;
+      return chosen ?? shells[0];
+    }
+    return terminalShell(shells, tab.shell, setting);
+  }, [shells, tab.shell, setting]);
 
   // 复制失败的提示几秒后自己消失
   useEffect(() => {
@@ -247,7 +284,10 @@ export function TerminalPane({
       {(shellError !== undefined || noShell) && (
         <div className="sp-term-exit" role="alert">
           <span>
-            {shellError ?? "没有找到可用的 shell（pwsh、Windows PowerShell、Git Bash、cmd）"}
+            {shellError ??
+              (isMacOS()
+                ? "没有找到可用的 shell（zsh、bash、sh、fish）"
+                : "没有找到可用的 shell（pwsh、Windows PowerShell、Git Bash、cmd）")}
           </span>
         </div>
       )}
