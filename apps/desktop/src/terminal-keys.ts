@@ -28,7 +28,7 @@ export type TerminalKeyAction = "copy" | "copy-keep" | "paste" | "app" | "termin
 /** 终端里也交给窗口处理的应用快捷键（面板开关、新标签、变更、快速打开、终端） */
 export function isAppShortcut(event: TerminalKey, mac = isMacOS()): boolean {
   if (!hasPrimaryMod(event, mac) || event.altKey) return false;
-  if (event.code === "Backquote" && !event.shiftKey) return true;
+  if (event.code === "Backquote") return true;
   const key = event.key.toLowerCase();
   if (event.shiftKey) return key === "g";
   return key === "b" || key === "t" || key === "p";
