@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 /** 与 sandbox.html 空壳页一致，另加 form-action 与 base-uri（meta 不支持 frame-ancestors 与 sandbox） */
 export const INLINE_PAGE_SHELL_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
+  "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src data: blob: https://cdnjs.cloudflare.com; font-src data: https://cdnjs.cloudflare.com; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
 /** 桌面端默认主题（tokens.css 的 :root 与 prefers-color-scheme: light）对应的 12 个页面变量 */
 const SANS =

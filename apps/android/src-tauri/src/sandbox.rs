@@ -24,7 +24,7 @@ const FRAME_ANCESTORS: &str = "frame-ancestors http://tauri.localhost";
 
 pub fn sandbox_csp() -> String {
     format!(
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; {FRAME_ANCESTORS}; sandbox allow-scripts"
+        "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src data: blob: https://cdnjs.cloudflare.com; font-src data: https://cdnjs.cloudflare.com; media-src data: blob:; connect-src 'none'; {FRAME_ANCESTORS}; sandbox allow-scripts"
     )
 }
 
@@ -211,15 +211,23 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(csp.contains("default-src 'none'"));
-        assert!(csp.contains("script-src 'unsafe-inline'"));
-        assert!(csp.contains("style-src 'unsafe-inline'"));
-        assert!(csp.contains("img-src data: blob:"));
-        assert!(csp.contains("font-src data:"));
-        assert!(csp.contains("media-src data: blob:"));
+        assert_eq!(csp, sandbox_csp());
+        let directives: Vec<&str> = csp.split("; ").collect();
+        assert_eq!(
+            directives,
+            vec![
+                "default-src 'none'",
+                "script-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+                "style-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+                "img-src data: blob: https://cdnjs.cloudflare.com",
+                "font-src data: https://cdnjs.cloudflare.com",
+                "media-src data: blob:",
+                "connect-src 'none'",
+                FRAME_ANCESTORS,
+                "sandbox allow-scripts",
+            ]
+        );
         assert!(csp.contains("frame-ancestors http://tauri.localhost"));
-        assert!(csp.contains("sandbox allow-scripts"));
-        assert!(!csp.contains("allow-same-origin"));
         assert!(String::from_utf8_lossy(res.body()).contains("nocturne:inline-html:ready"));
     }
 

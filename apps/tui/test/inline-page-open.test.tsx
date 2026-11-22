@@ -47,7 +47,7 @@ describe("内嵌页面外壳文件", () => {
   const html = "<!doctype html><html><head><title>t</title></head><body><p>页</p></body></html>";
   const shell = inlinePageShell(html, '季度 "对比"');
 
-  it("CSP meta 是 <head> 的第一个元素，策略除内联与 data:/blob: 外不放行任何来源", () => {
+  it("CSP meta 是 <head> 的第一个元素，仅放行 cdnjs 外部资源并禁止网络连接", () => {
     expect(shell.startsWith("<!doctype html>")).toBe(true);
     const head = shell.slice(shell.indexOf("<head>") + "<head>".length).trimStart();
     expect(
@@ -55,13 +55,17 @@ describe("内嵌页面外壳文件", () => {
         `<meta http-equiv="Content-Security-Policy" content="${INLINE_PAGE_SHELL_CSP}">`,
       ),
     ).toBe(true);
-    expect(INLINE_PAGE_SHELL_CSP).toBe(
-      "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'",
-    );
-    // 与 sandbox.html 空壳页的响应头策略同源（去掉 meta 不支持的 frame-ancestors 与 sandbox）
-    const sandboxCsp =
-      "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
-    expect(INLINE_PAGE_SHELL_CSP.startsWith(sandboxCsp)).toBe(true);
+    expect(INLINE_PAGE_SHELL_CSP.split("; ")).toEqual([
+      "default-src 'none'",
+      "script-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+      "style-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+      "img-src data: blob: https://cdnjs.cloudflare.com",
+      "font-src data: https://cdnjs.cloudflare.com",
+      "media-src data: blob:",
+      "connect-src 'none'",
+      "form-action 'none'",
+      "base-uri 'none'",
+    ]);
   });
 
   it("页面放在只有 allow-scripts 的 sandbox iframe 的 srcdoc 中，外壳本身没有脚本", () => {

@@ -118,11 +118,56 @@
           }
         }
 
+        let pageRequestId = 0;
+        const pageRequests = new Map();
+
+        function installPageBridge() {
+          const request = (method, fields) =>
+            new Promise((resolve, reject) => {
+              const requestId = ++pageRequestId;
+              pageRequests.set(requestId, { resolve, reject });
+              try {
+                window.parent.postMessage(
+                  {
+                    type: "nocturne:inline-html:request",
+                    id: instanceId,
+                    requestId,
+                    method,
+                    ...fields,
+                  },
+                  "*",
+                );
+              } catch (error) {
+                pageRequests.delete(requestId);
+                reject(error);
+              }
+            });
+          Object.defineProperty(window, "nocturne", {
+            value: Object.freeze({
+              storage: Object.freeze({
+                get: (key) => request("get", { key }),
+                set: async (key, value) => {
+                  const json = JSON.stringify(value);
+                  if (json === undefined) throw new TypeError("页面数据值必须能序列化为 JSON");
+                  return request("set", { key, value: JSON.parse(json) });
+                },
+                delete: (key) => request("delete", { key }),
+                keys: () => request("keys", {}),
+              }),
+              ask: (prompt, { system, maxTokens } = {}) =>
+                request("ask", { prompt, system, maxTokens }),
+            }),
+            writable: false,
+            configurable: false,
+          });
+        }
+
         function renderHtml(payload) {
           if (rendered) return;
           rendered = true;
           instanceId = typeof payload.id === "string" ? payload.id : "";
           fullscreen = payload.fullscreen === true;
+          if (payload.pageBridge === true) installPageBridge();
           if (fullscreen) {
             document.documentElement.setAttribute("data-nct-fullscreen", "true");
           }
@@ -831,6 +876,17 @@
           if (!data || typeof data !== "object") return;
           if (data.type === "nocturne:inline-html:render") {
             renderHtml(data);
+          } else if (data.type === "nocturne:inline-html:response" && data.id === instanceId) {
+            const request = pageRequests.get(data.requestId);
+            if (!request) return;
+            pageRequests.delete(data.requestId);
+            if (data.ok === true) {
+              request.resolve(data.value);
+            } else {
+              const error = new Error(data.error?.message);
+              if (typeof data.error?.code === "string") error.code = data.error.code;
+              request.reject(error);
+            }
           } else if (data.type === "nocturne:inline-html:theme") {
             applyTheme(data.theme, data.colorScheme, data.fontSize);
             scheduleMeasure();

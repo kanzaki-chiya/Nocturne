@@ -1,8 +1,8 @@
 //! 回复内嵌页面（ADR-0088）的隔离空壳协议与子框架 IPC 封锁。
 //!
 //! 1. `nct-sandbox` 自定义协议只返回静态空壳页 `/sandbox.html`，响应头带独立严格的
-//!    Content-Security-Policy（禁止任何网络请求，只允许内联脚本/样式与 `data:`/`blob:` 媒体资源，
-//!    并带 `sandbox allow-scripts` 与受限的 `frame-ancestors`）。其余路径或方法一律返回 404。
+//!    Content-Security-Policy（允许从 cdnjs 加载脚本、样式、图片与字体，禁止 `fetch` 等连接，
+//!    并带 `sandbox allow-scripts` 与受限的 `frame-ancestors`）。
 //! 2. Windows WebView2 与 Android WebView 的底层初始化脚本机制不区分主框架与子框架，会把
 //!    `window.__TAURI_INTERNALS__` 与 `window.ipc` 注入所有子框架，且 Tauri 把用户注册的自定义
 //!    协议视为本地源。通过 `Builder::invoke_system` 将持有 `__INVOKE_KEY__` 的桥接脚本限制在
@@ -25,7 +25,7 @@ const FRAME_ANCESTORS: &str = "frame-ancestors http://tauri.localhost tauri://lo
 
 pub fn sandbox_csp() -> String {
     format!(
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; {FRAME_ANCESTORS}; sandbox allow-scripts"
+        "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src data: blob: https://cdnjs.cloudflare.com; font-src data: https://cdnjs.cloudflare.com; media-src data: blob:; connect-src 'none'; {FRAME_ANCESTORS}; sandbox allow-scripts"
     )
 }
 
@@ -227,16 +227,29 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(csp.contains("default-src 'none'"));
-        assert!(csp.contains("script-src 'unsafe-inline'"));
-        assert!(csp.contains("style-src 'unsafe-inline'"));
-        assert!(csp.contains("img-src data: blob:"));
-        assert!(csp.contains("font-src data:"));
-        assert!(csp.contains("media-src data: blob:"));
-        assert!(csp.contains("frame-ancestors http://tauri.localhost tauri://localhost"));
-        assert!(csp.contains("sandbox allow-scripts"));
-        assert!(!csp.contains("allow-same-origin"));
+        assert_eq!(csp, sandbox_csp());
         assert!(String::from_utf8_lossy(res.body()).contains("nocturne:inline-html:ready"));
+    }
+
+    #[test]
+    fn inline_page_csp_allows_only_cdnjs_resources_and_blocks_connections() {
+        let csp = sandbox_csp();
+        let directives: Vec<&str> = csp.split("; ").collect();
+        assert_eq!(
+            directives,
+            vec![
+                "default-src 'none'",
+                "script-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+                "style-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+                "img-src data: blob: https://cdnjs.cloudflare.com",
+                "font-src data: https://cdnjs.cloudflare.com",
+                "media-src data: blob:",
+                "connect-src 'none'",
+                FRAME_ANCESTORS,
+                "sandbox allow-scripts",
+            ]
+        );
+        assert!(csp.contains("frame-ancestors http://tauri.localhost tauri://localhost"));
     }
 
     #[test]

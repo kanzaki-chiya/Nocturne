@@ -438,8 +438,20 @@ describe("relay", () => {
     expect(sandboxRes.status).toBe(200);
     expect(sandboxRes.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(sandboxRes.headers.get("cache-control")).toBe("no-cache");
-    expect(sandboxRes.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
-    expect(sandboxRes.headers.get("content-security-policy")).not.toBe(staticCsp(f.origin));
+    const csp = required(sandboxRes.headers.get("content-security-policy"));
+    expect(csp).toBe(SANDBOX_CSP);
+    expect(csp).not.toBe(staticCsp(f.origin));
+    expect(csp.split("; ")).toEqual([
+      "default-src 'none'",
+      "script-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+      "style-src 'unsafe-inline' https://cdnjs.cloudflare.com",
+      "img-src data: blob: https://cdnjs.cloudflare.com",
+      "font-src data: https://cdnjs.cloudflare.com",
+      "media-src data: blob:",
+      "connect-src 'none'",
+      "frame-ancestors 'self'",
+      "sandbox allow-scripts",
+    ]);
     expect(await sandboxRes.text()).toContain("nocturne:inline-html:ready");
 
     const desktopSandbox = await readFile(
