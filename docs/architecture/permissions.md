@@ -39,6 +39,7 @@
 | `network` | 小写 hostname；非协议默认端口带 `:端口`，不含协议与路径 | `web_fetch` |
 | `mcp` | `<server>/<tool>`（服务器与工具的**原始名**，不做规范化） | MCP 工具（Phase 5，见 [mcp.md](mcp.md)） |
 | `subagent` | 工具集预设名（`general`/`explore`）、`"custom"`（显式白名单）或 `external:<name>`（外部 agent） | `task` 工具，见 [subagent.md](subagent.md)；`subagent * → deny` 关闭全部委派 |
+| `page` | `<sessionId>/<page>` | `render_html` 页面调用模型。来源为 `PermissionCaller` 的 `{ kind: "page", page }` |
 | `schedule` | `动作:任务名`。`create` 用任务名（如 `create:relay 错误日志巡检`）；`update` / `pause` / `delete` 用任务 id（权限主体是纯函数，那时入参里只有 id） | `schedule` 工具的写入动作；`list` 无主体。见 [tools.md](tools.md) 第 6 节 |
 
 shell 主体另携带可选的 `shell` 字段（执行该命令的 shell 种类，ADR-0022）：`pwsh` / `powershell` / `bash` / `cmd` / `sh`，以及 `shellRisk` 字段——生效 `ShellDescriptor` 上的高风险命令元数据、`shellRiskByDialect` 字段——各方言的高风险表（检查嵌套 shell 调用的命令体用，见第 6 节第 6 项）（第 6 节的按种类表以纯数据形式集中在 platform 层，随主体透传进来；权限层执行匹配判定，platform 不含权限逻辑）。`shell` 只影响方言化判定（5.3 的组合命令拆段），`shellRisk` 只影响第 6 节的高风险匹配，两者都不参与规则 `pattern` 匹配——用户规则始终按命令原文匹配；缺省或未知一律按 POSIX 保守处理。
@@ -237,6 +238,10 @@ Grant 缺省按精确匹配：`kind` 相同、`match` 缺省且 `target` 与主�
 - **同服务器校验**：所有主体必须是 `kind === "mcp"` 且目标服务器与 `expectedMcpServer` 一致；跨服务器或非 MCP 主体一律 `deny`，错误码 `app_tool_not_allowed`（不受预设或显式规则影响）。
 - **非只读工具一律拒绝**：工具未声明 `readOnlyHint: true`（`readOnly !== true`）时一律 `deny`，错误码 `app_tool_not_allowed`，不论规则结果、显式 `allow` 还是 `guarded`/`bypass` 预设。
 - **只读工具按规则结果收口**：对 `readOnly === true` 的工具按正常规则链（5.1–5.3）求值后，规则为 `deny` 则保持 `deny`；规则为 `allow` 或 `ask`（含 `default`、`read-only`、`smart` 等预设）一律直接 `allow`，不弹确认、不走安全审查、不触发 Hook、不写会话日志。
+
+### 5.8 会话页面调用模型
+
+页面调用以 `page` 主体进入权限层。`bypass` 默认允许，其余预设默认确认。用户规则可允许或拒绝，项目规则只收紧，`--yes` 不批准页面请求。项目 Grant 按 `<sessionId>/<page>` 精确匹配，只有本机客户端可保存。见 [ADR-0111](../decisions/ADR-0111-page-storage-and-model.md)。
 
 ## 6. 预设
 

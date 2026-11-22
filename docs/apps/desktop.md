@@ -560,6 +560,8 @@ diff 和目录树之间是分隔条（`role="separator"`，`aria-valuenow` 为�
 
 **页面标签（[ADR-0109](../decisions/ADR-0109-page-versions.md)）**（`src/PagePane.tsx`、`src/InlinePage.tsx`）：标签类型 `kind: "page"`，同一会话每个页面 id 至多一个标签，标签名为 `SessionView.pages` 中的最新标题并带页面图标；`panelSessions` 只存打开标记与标题，内容按版本从 `SessionView.pages` 与会话附件读取。顶部工具栏左侧为等宽 `‹ n / N ›` 版本切换（到达首/末版时对应箭头置灰），右侧为下载（保存当前版本为 `.html` 或 `.png`）与全屏（复用全屏遮罩）；内容区沙箱 iframe 填满、内部滚动、不折叠，复用 ADR-0088 空壳页与主题注入。仅对 `display === "panel"` 的页面：当前会话收到实时 `tool.completed` 新建或更新时自动打开并切到该页面标签显示最新版；若该标签已打开且正停留在旧版本，不强行跳到最新版（`N` 递增）；历史回放、切换会话、重新打开旧会话及内嵌页面均不自动打开。
 
+内嵌、面板和全屏中的页面可保存数据并调用模型。确认条只在发起调用的页面上显示，可单次允许、持久授权或拒绝。工具栏的「停止」取消该页面的调用与排队，持久授权可在「设置 › 授权」撤销。见 [ADR-0111](../decisions/ADR-0111-page-storage-and-model.md)。
+
 **插件面板（MCP Apps，[ADR-0101](../decisions/ADR-0101-mcp-apps-host.md)）**（`src/AppPane.tsx`、`src/mcp-app-host.ts`、`public-web/app.html`、`src-tauri/src/sandbox.rs`）：
 
 - **标签与去重**：标签类型 `kind: "app"`，按 `(pluginId, surface ?? resourceUri)` 在同一会话内去重；持久进 `panelSessions`（保留 `pluginId`、`serverId`、`surface?`、`resourceUri`、`title`、`icon?`、`openCall?`）。

@@ -74,6 +74,8 @@ Git Bash 同理，用 `export JAVA_HOME=...`。产物在 `apps/android/src-tauri
 
 共享层的扩展点是 `PhonePlatform`（`apps/desktop/src/web/platform.ts`）：`relay`（`page` / `link`）、`keepConnected`、`observer`（已配对电脑、连接状态、断线、会话事件、生效主题）、`onForeground`（回到前台）、`imageViewer`（图片查看器可用操作，App 设为 `{ copy: false, download: true }`）、`saveFile`（App 经系统 `ACTION_CREATE_DOCUMENT` 接管图片查看器、回复内嵌页面全屏下载与文件附件卡片的保存，网页版不传则保持 `<a download>`）、`trustText`（只在设置页「关于」完整显示，配对页只留一句指路）、`pairHint`、`background` / `diagnostics`（设置页区块）与 `pages`（App 自己的页面）。网页入口不传即为 `{ relay: "page" }`，行为不变。App 按 `observer.theme(resolved, background)` 调 `set_system_bars`，同步状态栏与导航栏的图标深浅及主题背景色（`#RRGGBB`）；背景色无效时保留原背景，图标深浅仍照常更新；配色随当前电脑的全局预设实时同步，本机模式独立保留，详见 [ADR-0093](../decisions/ADR-0093-appearance-theme-presets.md)。回复内嵌页面在 App 内经 `nct-sandbox` 自定义协议加载空壳页并经 `Builder::invoke_system` 阻断子框架的 Tauri IPC；`display: "panel"` 面板页面在回复里显示为入口行，点击直接进入全屏遮罩并定位到对应版本，全屏工具栏支持 `‹ n / N ›` 版本切换与下载当前版本（内嵌页面的全屏同样支持版本切换），不自动打开，全屏时系统返回键先关闭全屏（[ADR-0088](../decisions/ADR-0088-inline-html.md)、[ADR-0109](../decisions/ADR-0109-page-versions.md)）。
 
+安卓与手机网页共用页面数据和模型调用入口。全屏工具栏下方可「允许一次」或「拒绝」，工具栏的「停止」中止调用。见 [ADR-0111](../decisions/ADR-0111-page-storage-and-model.md)。
+
 ### 扫码、相机权限与更新
 
 扫码使用 ZXing Android Embedded 4.3.0（Apache-2.0，默认 API 24+；工程 minSdk 26），不依赖 Google Play 服务，不带原生 `.so`。`ScanActivity` 是竖屏全屏相机预览，只显示取景框与返回图标（`contentDescription = "返回"`，并通过 `ViewCompat.setOnApplyWindowInsetsListener` 叠加 `displayCutout` 的左、上安全边距），只识别 QR，成功立即返回；取消静默，拒绝权限显示「没有相机权限」与「打开系统设置」（点按打开系统设置不清掉错误，仅在再次扫码成功或取消、或离开配对页时清除）。Manifest 声明 CAMERA 与 required=false 的 camera feature，按使用时申请。拍照继续由 `PhoneComposer` 文件输入和生成的 `RustWebChromeClient` 处理；App 的 `CameraPermissionClient` 在调用原处理器前完成 capture 授权，防止首次授权后仍用授权前的状态回退到选图页，拒绝时取消文件回调。Manifest 的 `queries` 声明 IMAGE_CAPTURE，供原处理器解析系统相机。生成文件保持原样。

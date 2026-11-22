@@ -100,6 +100,10 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `resolveFiles` | `{ paths: string[] }` → `FileRefResolution[]`（`{ input, absolutePath, withinWorkspace, relativePath?, exists, isDirectory }`，`relativePath` 只在工作区内给出）；只读，按会话工作区解析路径（相对路径相对工作区，绝对路径规范化后判定是否越界），`paths` 非字符串数组报 -32602。越界路径照常返回绝对路径与 exists，由客户端按「打开文件用」决定入口（U-09）。Windows 网络路径（`\\server\share`、`\\?\UNC\...`）不去访问，直接按 `exists: false` 返回；逐级解析链接时 junction / 符号链接指向网络位置的同样不访问。每个路径的解析与 `stat` 有 `RESOLVE_FILE_TIMEOUT_MS`（2 秒）时限，超时按 `exists: false` 返回（映射盘主机离线时不拖慢回答渲染，也不给它加链接），同一批里其余路径照常返回 |
 | `readInputHistory` / `recordInputHistory` | → `string[]`；`{ text }` → `null` |
 | `readAttachment` | `{ file }` → `{ data: base64, mimeType, bytes }`；只读取当前会话持久事件登记过的图片附件，见下文 |
+| `getPageData` / `setPageData` / `deletePageData` / `listPageDataKeys` | `{ page, key }` → `{ value? }` / `{ page, key, value }` → `null` / `{ page, key }` → `null` / `{ page }` → `string[]`；`{}` 表示键不存在，`{ value: null }` 表示保存了 JSON `null`。|
+| `callPageModel` | `{ page, prompt, system?, maxTokens? }` → `string`；请求挂到完成、拒绝或停止。|
+| `respondPagePermission` | `{ page, requestId, reply: { action: "allow" \| "deny", remember?: "project" } }` → `null`；远程连接携带 `remember: "project"` 时按第 7 节拒绝，请求继续等待。|
+| `stopPageModel` | `{ page }` → `null`；中止该页当前调用并清空队列。|
 | `close` | → `null`；释放本连接对会话的引用与订阅，最后引用且空闲时才刷盘、释放会话锁，其余会话不受影响 |
 
 `submit` / `enqueueInput` 的 `attachments` 是 `[{ data: base64, mimeType: string, label?, source?: "paste" | "upload" | "answer" }]`，任意 MIME 接受；合格图片沿用图片通道，其余包括不合格图片存为 `files`（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）。单个 20 MiB、合计至多 10 个，Core 超限报 `invalid_command`。`respondQuestion.reply.answers[i].attachments` 形状相同，仅自由回答可附文件，可只附文件；不合规报 `invalid_reply`。一组回答合计限额同提交。远程三个入口统一检查附件原始字节合计不超过 `remoteAttachmentLimit`（`floor(REMOTE_MESSAGE_LIMIT * 3 / 4) - 1024`），超限报 `attachment_too_large`。
@@ -552,6 +556,8 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作；手机只在后台子代理子视图提供取消 |
 | `subagent.list`、`subagent.subscribe`、`subagent.unsubscribe` | 允许（ADR-0084）：只读、限本连接已打开父会话的直接子会话。总览据 list 区分同步与后台运行项，subscribe / unsubscribe 复用连接内观察和清理机制，不开放子会话交互或工作树操作 |
 | `session.respondPermission`、`session.respondSubagentPermission` | `reply.remember === "project"`、`"pattern"` 或 `"always"` 拒绝（`-32004 / remote_not_allowed`）并保持待处理；`"session"` 或省略允许（其中 `respondSubagentPermission` 的 `"session"` 写入树共享 `sessionGrants`） |
+| `session.getPageData` / `session.setPageData` / `session.deletePageData` / `session.listPageDataKeys` / `session.callPageModel` / `session.stopPageModel` | 允许，用本连接打开的会话与该会话有效页面 |
+| `session.respondPagePermission` | 单次允许或拒绝可用。项目级 `remember` 返回 `remote_not_allowed`，请求仍待处理 |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |
 | `session.describeContext`、`session.describeSkills`、`session.describeExternalAgents`、`session.mcpServers`、`session.listShells`、`session.shellInfo`、`session.reasoningEffortInfo`、`session.visionInfo`、`session.fileIndex`、`session.resolveFiles` | 允许（只读） |

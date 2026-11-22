@@ -49,7 +49,7 @@ interface SessionView {
     | undefined;
   /** 已完结 Turn 数 */
   turnCount: number;
-  /** 累计用量（各 turn.completed.usage 累加） */
+  /** 累计用量（turn.completed 与本会话 page.model_called 的用量累加） */
   usage: Usage;
   /** 等待用户回复的权限请求（至多一个：执行管线串行） */
   pendingPermission: PendingPermission | undefined;
@@ -222,6 +222,7 @@ interface SessionNotice {
 |---|---|
 | `session.created` | 填充 `meta`、`config` |
 | `session.titled` | 按 `source`（缺省 `generated`）更新 `userTitle` 或 `generatedTitle`，重算 `title`；空用户标题只清除覆盖，不创建时间线条目、不累计角色用量 |
+| `page.model_called` | 累加本会话调用的用量。回退保留用量，分叉继承的事件不增加用量。不生成时间线条目 |
 | `session.config_changed` | payload 中存在的键覆盖 `config`（`shell` 不进 `config`，ADR-0022）；有用户配置展示文字时追加 `config` notice 条目；仅含 MCP 环境状态时不追加空 notice（ADR-0071，状态已有临时事件展示）。shell 切换文案：`shell 已切换为 <kind>（<path>）` |
 | `turn.started` | `currentTurn = {turnId, turnIndex}`；`turnCount = max(turnCount, turnIndex)` |
 | `message.user` | 当前 `todos` 非空且每项均为 `completed` 且这条**不是插话**（`steer !== true`）时先置空；尚有未完成项或这条是插话时保留，历史工具快照不变（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。若 `ensembleQuietReminder === true`（[ADR-0089](../decisions/ADR-0089-ensemble.md) §9 修订），**不追加**对话条目且不更新 `firstTitle`/`title`。否则追加 `user` 条目（key `u:<messageId>`），保留 `attachments`、`fileRefs`、`skill`，插话另带 `steer: true`（不额外加界面标签，见 [apps/desktop.md](../apps/desktop.md#52-消息输入与交互请求)）；后台子代理结果另带 `subagent`（界面显示为结果卡片/结果行，不显示 `<subagent-result>` 外壳，[ADR-0073](../decisions/ADR-0073-background-subagents.md) §6）；首条消息以 `firstUserText`（第一个文本块的第一个非空行）记录 `firstTitle` 并重算 `title`；引用内容仍在 `content` 中，客户端可用元数据显示摘要 |

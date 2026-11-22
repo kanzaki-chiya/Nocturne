@@ -9,6 +9,7 @@
 | message.assistant | 按事件模型计入每次请求 |
 | session.titled | 按 provider/model 字符串计入标题请求 |
 | attachment.described | 同上，计入图片描述请求 |
+| page.model_called | 按事件中的 provider/model 统计页面调用。记录的用量计入会话，独立于 Turn 的用量 |
 | permission.reviewed | 有模型与用量且 cached=false 时计入，缓存结果不重复收费 |
 | context.compacted | 有模型与用量时计入摘要请求；旧日志与 prune 不贡献用量 |
 | turn.completed | 不计入用量，避免重复；只计算对应 started 到 completed 的时长 |

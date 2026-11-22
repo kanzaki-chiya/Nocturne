@@ -118,6 +118,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0108](ADR-0108-project-subagents.md) | 项目级子代理定义（`.nocturne/agents`、`.claude/agents`）：不要求项目信任、Claude 工具名映射与 description 截断、`project:<名字>` 档位与只读界面 | 已接受 |
 | [ADR-0109](ADR-0109-page-versions.md) | 页面版本与右侧面板（`render_html` `page`/`edits`/`display`、版本派生视图、桌面面板标签与手机全屏版本切换） | 已接受 |
 | [ADR-0110](ADR-0110-macos-desktop.md) | Apple Silicon 桌面端、系统窗口、登录 shell、WKWebView 隔离与发布门槛 | 已接受 |
+| [ADR-0111](ADR-0111-page-storage-and-model.md) | 页面存数据与调用模型 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
