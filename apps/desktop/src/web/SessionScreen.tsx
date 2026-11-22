@@ -450,6 +450,7 @@ export function SessionScreen({
           images.preview(key, data, mimeType);
         })}
         entryKey={(key) => entry.outgoing.keys.get(key) ?? key}
+        remote
         hidePersistentPermissions
         hideRequests
         virtualize
