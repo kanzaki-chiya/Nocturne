@@ -92,6 +92,30 @@ it("普通对话最先、进详情与面包屑返回、空状态 —、撤销后
     target: "git status",
   });
 });
+it("项目页面授权显示类别与页面标题，并按原授权目标撤销", async () => {
+  const h = fixture([
+    {
+      kind: "page",
+      target: "session-1/page-1",
+      title: "日常记账",
+      createdAt: grant.createdAt,
+    },
+  ]);
+  render(<GrantsPage client={h.client} />);
+  await project();
+
+  const group = await screen.findByRole("region", { name: "项目授权 · 1" });
+  expect(within(group).getByText("页面")).toBeTruthy();
+  expect(within(group).getByText("日常记账")).toBeTruthy();
+  fireEvent.click(within(group).getByRole("button", { name: "撤销" }));
+
+  await screen.findByRole("region", { name: "项目授权 · 0" });
+  expect(h.runtime.revokeGrant).toHaveBeenCalledExactlyOnceWith({
+    workspace: "Z:/nocturne",
+    kind: "page",
+    target: "session-1/page-1",
+  });
+});
 it("工作区列表展示全路径、三种信任状态点和非零授权数，无记录显示 —", async () => {
   const h = fixture();
   h.runtime.listGrantWorkspaces.mockImplementation(async () => [

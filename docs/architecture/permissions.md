@@ -241,7 +241,7 @@ Grant 缺省按精确匹配：`kind` 相同、`match` 缺省且 `target` 与主�
 
 ### 5.8 会话页面调用模型
 
-页面调用以 `page` 主体进入权限层。`bypass` 默认允许，其余预设默认确认。用户规则可允许或拒绝，项目规则只收紧，`--yes` 不批准页面请求。项目 Grant 按 `<sessionId>/<page>` 精确匹配，只有本机客户端可保存。见 [ADR-0111](../decisions/ADR-0111-page-storage-and-model.md)。
+页面调用以 `page` 主体进入权限层。`bypass` 默认允许，其余预设默认确认。用户规则可允许或拒绝，项目规则只收紧，`--yes` 不批准页面请求。项目 Grant 按 `<sessionId>/<page>` 精确匹配，只有本机客户端可保存。回退使页面失去全部有效版本时，清除该页面的项目 Grant。分叉会生成新的会话 ID，原页面的项目 Grant 只在源会话有效。见 [ADR-0111](../decisions/ADR-0111-page-storage-and-model.md)。
 
 ## 6. 预设
 
