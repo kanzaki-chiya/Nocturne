@@ -133,9 +133,10 @@ mod tests {
     fn env_absolute_path() {
         let home = PathBuf::from(if cfg!(windows) { "C:\\home" } else { "/home/u" });
         let cwd = Path::new(if cfg!(windows) { "Z:\\repo" } else { "/repo" });
+        let data = if cfg!(windows) { "D:\\data" } else { "/data" };
         assert_eq!(
-            resolve_nocturne_home(os("D:\\data"), Some(home), cwd),
-            Some(PathBuf::from("D:\\data"))
+            resolve_nocturne_home(os(data), Some(home), cwd),
+            Some(PathBuf::from(data))
         );
     }
 

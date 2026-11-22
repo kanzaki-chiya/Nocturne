@@ -1433,8 +1433,12 @@ mod tests {
         use std::path::{Path, PathBuf};
 
         let state = BrowserState::default();
-        let default_dir = PathBuf::from(r"C:\Users\me\Downloads");
-        let initial = PathBuf::from(r"C:\Users\me\Downloads\shot.png");
+        let default_dir = PathBuf::from(if cfg!(windows) {
+            r"C:\Users\me\Downloads"
+        } else {
+            "/Users/me/Downloads"
+        });
+        let initial = default_dir.join("shot.png");
 
         // 1) download_prefs 尚未同步（None）：按询问处理，初始目录回退系统下载目录，取消返回 None
         let mut prompted: Option<(Option<PathBuf>, String)> = None;
@@ -1458,7 +1462,11 @@ mod tests {
         assert!(lock(&state.pending_saves).is_empty());
 
         // 2) ask = true 且配置了自定义目录：初始目录为配置的保存位置，确认后返回所选路径
-        let custom_dir = PathBuf::from(r"D:\Saved");
+        let custom_dir = PathBuf::from(if cfg!(windows) {
+            r"D:\Saved"
+        } else {
+            "/Users/me/Saved"
+        });
         *lock(&state.download_prefs) = Some(DownloadPrefs {
             ask: true,
             dir: Some(custom_dir.clone()),
@@ -1665,7 +1673,11 @@ mod tests {
         use std::path::{Path, PathBuf};
 
         let state = BrowserState::default();
-        let staging = PathBuf::from(r"C:\AppLocal\download-staging\pid-999");
+        let staging = PathBuf::from(if cfg!(windows) {
+            r"C:\AppLocal\download-staging\pid-999"
+        } else {
+            "/tmp/nocturne-download-staging/pid-999"
+        });
         let staged_initial = staging.join("photo.png");
 
         let mut prompted_when_staged: Option<Option<PathBuf>> = None;
