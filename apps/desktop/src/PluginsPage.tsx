@@ -12,6 +12,7 @@ import type {
   PluginsDescription,
   SkillOverview,
 } from "@nocturne/core/protocol";
+import { useDataUriBlobUrl } from "./data-uri";
 import { Menu, MenuItem } from "./Menu";
 import { isMacOS } from "./platform";
 import { Scrim } from "./ProvidersPage";
@@ -87,23 +88,6 @@ const MCP_SKIP_REASON_LABEL: Record<PluginMcpSkipReason, string> = {
 
 const pluginLabel = (plugin: PluginOverview): string => plugin.displayName ?? plugin.name;
 
-function dataUriToBlobUrl(uri: string): string {
-  const match = /^data:([^;,]+);base64,(.+)$/s.exec(uri);
-  if (!match) return uri;
-  const [, mime, payload] = match;
-  if (!mime || !payload) return uri;
-  try {
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return URL.createObjectURL(new Blob([bytes], { type: mime }));
-  } catch {
-    return uri;
-  }
-}
-
 export function PluginIcon({
   icon,
   size = "md",
@@ -111,25 +95,7 @@ export function PluginIcon({
   icon?: string | undefined;
   size?: "sm" | "md" | "lg";
 }) {
-  // 桌面端 CSP 为 img-src 'self' blob:，在支持 ObjectURL 的环境将 data URI 转为 blob URL 渲染
-  const canBlobUrl = typeof URL.createObjectURL === "function";
-  const [blobSrc, setBlobSrc] = useState<string>();
-
-  useEffect(() => {
-    if (!icon || !canBlobUrl) {
-      setBlobSrc(undefined);
-      return;
-    }
-    const url = dataUriToBlobUrl(icon);
-    setBlobSrc(url);
-    return () => {
-      if (url.startsWith("blob:") && typeof URL.revokeObjectURL === "function") {
-        URL.revokeObjectURL(url);
-      }
-    };
-  }, [icon, canBlobUrl]);
-
-  const imgSrc = icon ? (canBlobUrl ? blobSrc : icon) : undefined;
+  const imgSrc = useDataUriBlobUrl(icon);
 
   return (
     <span

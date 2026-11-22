@@ -308,4 +308,38 @@ describe("FileOpenButton", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "打开方式" }));
   });
+
+  it("在支持 URL.createObjectURL 的环境下将应用图标 data URI 转为 blob URL 并在关闭菜单时释放", async () => {
+    const createSpy = vi.fn((blob: Blob) => {
+      expect(blob).toBeInstanceOf(Blob);
+      expect(blob.type).toBe("image/png");
+      return "blob:file-app-icon-1";
+    });
+    const revokeSpy = vi.fn();
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", { value: createSpy, configurable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: revokeSpy, configurable: true });
+    try {
+      const listApps = vi.fn(async () =>
+        list({
+          apps: [app("app-c", "Xcode", { isDefault: true, iconDataUrl: ICON })],
+        }),
+      );
+      renderButton({ actions: actions({ listApps }) });
+      const menu = await openMenu();
+      await waitFor(() => {
+        expect(menu.querySelector("img")?.getAttribute("src")).toBe("blob:file-app-icon-1");
+      });
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(revokeSpy).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(revokeSpy).toHaveBeenCalledWith("blob:file-app-icon-1");
+    } finally {
+      Object.defineProperty(URL, "createObjectURL", { value: origCreate, configurable: true });
+      Object.defineProperty(URL, "revokeObjectURL", { value: origRevoke, configurable: true });
+    }
+  });
 });

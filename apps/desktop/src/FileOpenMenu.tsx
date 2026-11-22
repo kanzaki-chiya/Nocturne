@@ -5,6 +5,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
+import { useDataUriBlobUrl } from "./data-uri";
 import type { FileApp, FileAppList } from "./host";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { isMacOS } from "./platform";
@@ -102,10 +103,13 @@ export function appEntries(
 }
 
 function EntryIcon({ icon }: { icon: MenuEntry["icon"] }) {
+  const imgSrc = useDataUriBlobUrl("src" in icon ? icon.src : undefined);
   return (
     <span className="sp-open-icon" aria-hidden="true">
       {"src" in icon ? (
-        <img src={icon.src} alt="" draggable={false} />
+        imgSrc !== undefined ? (
+          <img src={imgSrc} alt="" draggable={false} />
+        ) : null
       ) : (
         <Icon name={icon.glyph} size={ICON_SM} />
       )}
