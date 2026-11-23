@@ -174,8 +174,6 @@ export interface SidePanelController {
     thread: { threadId: string; childSessionId: string; title: string },
     targetSessionId?: string,
   ) => void;
-  /** 打开或切换到当前会话的某个插件 surface 标签（ADR-0101 第 5 节） */
-  openAppSurface: (surface: SessionAppSurface) => void;
   /** 打开或切换到当前会话的某个页面标签并定位到指定版本（ADR-0109） */
   openPage: (page: string, version?: number) => void;
   /** 实时收到当前会话面板页面新版本时按自动打开规则更新面板（ADR-0109） */
@@ -741,53 +739,6 @@ export function useSidePanel({
       };
     },
     [appSurfaces, pluginsById],
-  );
-
-  const openAppSurface = useCallback(
-    (surface: SessionAppSurface) => {
-      const targetKey = appTabKey({
-        pluginId: surface.pluginId,
-        surface: surface.id,
-        resourceUri: surface.resourceUri,
-      });
-      hideBrowserThen(() => {
-        update((panel) => {
-          const existing = panel.tabs.find(
-            (t): t is AppTab => t.kind === "app" && appTabKey(t) === targetKey,
-          );
-          if (existing !== undefined) {
-            return {
-              ...panel,
-              open: true,
-              activeId: existing.id,
-              tabs: panel.tabs.map((t) =>
-                t.id === existing.id
-                  ? {
-                      ...existing,
-                      serverId: surface.serverId,
-                      resourceUri: surface.resourceUri,
-                      title: surface.title,
-                      ...(surface.icon !== undefined ? { icon: surface.icon } : {}),
-                    }
-                  : t,
-              ),
-            };
-          }
-          const created: AppTab = {
-            id: newTabId(),
-            kind: "app",
-            pluginId: surface.pluginId,
-            serverId: surface.serverId,
-            surface: surface.id,
-            resourceUri: surface.resourceUri,
-            title: surface.title,
-            ...(surface.icon !== undefined ? { icon: surface.icon } : {}),
-          };
-          return withTab(panel, created);
-        });
-      });
-    },
-    [hideBrowserThen, update],
   );
 
   const onToolCompletedUi = useCallback<SidePanelController["onToolCompletedUi"]>(
@@ -2122,8 +2073,6 @@ export function useSidePanel({
           : {
               sessionId,
               session: active?.session,
-              surfaces: appSurfaces,
-              onOpenSurface: openAppSurface,
               deliveryFor: (tab) => appDeliveries.get(`${sessionId}\0${appTabKey(tab)}`),
               openCallSeqFor: (tab) => appOpenSeqs.get(`${sessionId}\0${appTabKey(tab)}`),
               resolveMeta: resolveAppTabMeta,
@@ -2254,7 +2203,6 @@ export function useSidePanel({
     openEnsembleMember,
     openSuite,
     openSuiteThread,
-    openAppSurface,
     openPage,
     onLivePanelPage,
     activePage,

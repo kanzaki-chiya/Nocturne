@@ -6,12 +6,16 @@
  *   tool-input/tool-result/tool-cancelled、tools/call（只读成功/非只读 app_tool_not_allowed/绑定标签服务器）、
  *   resources/read、ui/message、ui/open-link、ui/request-display-mode、ping、notifications/message、
  *   未知方法 -32601、伪造 event.source 忽略、主题变化 host-context-changed、ui/resource-teardown、插件停用错误页；
- * - SidePanel 新标签页 surface 卡片排序（变更/文件/终端之后）、点击打开、以及面板标签持久化/恢复、
+ * - SidePanel 新标签页工具列表、插件标签图标与面板标签持久化/恢复、
  *   模型调用实时打开与历史重放不打开、点击 .nctdemo 文件引用复用同一标签并调用 open.tool。
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionAppSurface, ToolCompletedPayload } from "@nocturne/core/protocol";
+import {
+  createSessionView,
+  type SessionAppSurface,
+  type ToolCompletedPayload,
+} from "@nocturne/core/protocol";
 import { RpcError, type RpcSession } from "@nocturne/rpc/client";
 
 import { AppPane } from "../src/AppPane";
@@ -26,6 +30,10 @@ import {
   readMcpAppTheme,
   type McpAppToolDelivery,
 } from "../src/mcp-app-host";
+import type { OpenConversation } from "../src/conversations";
+import type { DesktopHost } from "../src/host";
+import { useSidePanel } from "../src/PanelHost";
+import { createPrefsStore } from "../src/prefs";
 import { SidePanel, type SidePanelProps } from "../src/SidePanel";
 import {
   appTabKey,
@@ -43,7 +51,7 @@ afterEach(() => {
   document.documentElement.removeAttribute("style");
 });
 
-const DEMO_SURFACE: SessionAppSurface = {
+const DEMO_SURFACE = {
   pluginId: "nocturne:mcp-apps-demo@builtin",
   pluginName: "MCP Apps 示例",
   serverId: "demo",
@@ -55,7 +63,7 @@ const DEMO_SURFACE: SessionAppSurface = {
     tool: "open_demo_file",
     fileTypes: [".nctdemo"],
   },
-};
+} satisfies SessionAppSurface;
 
 function makeFakeSession(overrides?: {
   readAppResource?: RpcSession["readAppResource"];
@@ -641,7 +649,7 @@ describe("AppPane 生命周期、握手与 JSON-RPC 协议（jsdom + 假 iframe�
   });
 });
 
-describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
+describe("SidePanel 新标签页与插件标签", () => {
   function sidePanelProps(overrides: Partial<SidePanelProps>): SidePanelProps {
     return {
       tabs: [{ id: "new-1", kind: "new" }],
@@ -681,40 +689,81 @@ describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
     };
   }
 
-  it("新标签页在「变更」「文件」「终端」之后展示已启用插件的 surface 卡片，点击打开对应 surface", () => {
-    const onOpenSurface = vi.fn();
-    render(
-      <SidePanel
-        {...sidePanelProps({
-          apps: {
-            sessionId: "sess-1",
-            session: makeFakeSession(),
-            surfaces: [DEMO_SURFACE],
-            onOpenSurface,
-            deliveryFor: () => undefined,
-            resolveMeta: (t) => ({ title: t.title, icon: t.icon }),
-            onAppMessage: vi.fn(),
-            openExternalUrl: vi.fn().mockResolvedValue(undefined),
-            registerTeardown: () => () => undefined,
-          },
-        })}
-      />,
-    );
+  it("会话有可用插件面板时，新标签页仍只展示变更、文件和终端", async () => {
+    const listAppSurfaces = vi.fn().mockResolvedValue([DEMO_SURFACE]);
+    const session = makeFakeSession({ listAppSurfaces });
+    const active = {
+      session,
+      workspace: "Z:\\ws",
+      view: createSessionView(),
+      turnChanges: new Map(),
+    } as unknown as OpenConversation;
+    const prefs = createPrefsStore(undefined);
+    prefs.update({ panelSessions: { [session.id]: { open: true, tabs: [] } } });
+    const host = {} as DesktopHost;
 
-    const toolButtons = Array.from(document.querySelectorAll(".sp-tools button.sp-tool"));
+    function Panel() {
+      const panel = useSidePanel({
+        prefs,
+        host,
+        sessionId: session.id,
+        active,
+        sessionCwd: active.workspace,
+        sessions: undefined,
+        openIds: new Set([session.id]),
+        loadDiff: vi.fn(),
+        editors: { vscode: false, cursor: false },
+        settingsOpen: false,
+        plainKey: null,
+        client: undefined,
+        ensureClient: vi.fn(),
+      });
+      return <div ref={panel.bodyRef}>{panel.panel}</div>;
+    }
+
+    const { container } = await act(async () => render(<Panel />));
+    expect(listAppSurfaces).toHaveBeenCalledTimes(1);
+    const toolButtons = Array.from(container.querySelectorAll(".sp-tools button.sp-tool"));
     const names = toolButtons.map((b) => b.querySelector(".sp-tool-name")?.textContent?.trim());
-    expect(names).toEqual(["变更", "文件", "终端", "示例面板"]);
+    expect(names).toEqual(["变更", "文件", "终端"]);
+  });
 
-    const demoBtn = toolButtons[3] as HTMLButtonElement;
-    // 无悬停 title，且只含 surface 标题，不含副标题说明
-    expect(demoBtn.getAttribute("title")).toBeNull();
-    expect(demoBtn.querySelector(".sp-tool-sub")).toBeNull();
-    expect(demoBtn.querySelector("img.sp-plugin-icon")?.getAttribute("src")).toBe(
-      DEMO_SURFACE.icon,
-    );
-
-    fireEvent.click(demoBtn);
-    expect(onOpenSurface).toHaveBeenCalledWith(DEMO_SURFACE);
+  it("插件标签将插件图标的 data URI 转为 blob URL", () => {
+    const createObjectURL = vi.fn(() => "blob:plugin-tab-icon");
+    const revokeObjectURL = vi.fn();
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: revokeObjectURL, configurable: true });
+    try {
+      const tab: AppTab = {
+        id: "app-icon",
+        kind: "app",
+        pluginId: DEMO_SURFACE.pluginId,
+        serverId: DEMO_SURFACE.serverId,
+        surface: DEMO_SURFACE.id,
+        resourceUri: DEMO_SURFACE.resourceUri,
+        title: DEMO_SURFACE.title,
+        icon: DEMO_SURFACE.icon,
+      };
+      const { unmount } = render(
+        <SidePanel {...sidePanelProps({ tabs: [tab], activeId: tab.id })} />,
+      );
+      const icon = screen
+        .getByRole("tab", { name: /示例面板/ })
+        .querySelector("img.sp-plugin-icon");
+      expect(icon?.getAttribute("src")).toBe("blob:plugin-tab-icon");
+      expect(createObjectURL).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "image/svg+xml" }),
+      );
+      unmount();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:plugin-tab-icon");
+    } finally {
+      if (originalCreate) Object.defineProperty(URL, "createObjectURL", originalCreate);
+      else Reflect.deleteProperty(URL, "createObjectURL");
+      if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
+      else Reflect.deleteProperty(URL, "revokeObjectURL");
+    }
   });
 
   it("同一插件同一 surface 复用同一个标签键，点击 .nctdemo 文件引用复用标签并触发 open.tool", async () => {
@@ -744,8 +793,6 @@ describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
           apps: {
             sessionId: "sess-1",
             session,
-            surfaces: [DEMO_SURFACE],
-            onOpenSurface: vi.fn(),
             deliveryFor: () => undefined,
             openCallSeqFor: () => 1,
             resolveMeta: (t) => ({ title: t.title, icon: t.icon }),
@@ -779,8 +826,6 @@ describe("SidePanel 新标签页 surface 卡片与点击打开", () => {
           apps: {
             sessionId: "sess-1",
             session,
-            surfaces: [DEMO_SURFACE],
-            onOpenSurface: vi.fn(),
             deliveryFor: () => undefined,
             openCallSeqFor: () => 2,
             resolveMeta: (t) => ({ title: t.title, icon: t.icon }),

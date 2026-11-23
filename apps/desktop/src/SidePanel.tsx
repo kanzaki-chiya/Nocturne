@@ -17,7 +17,6 @@ import type { LocalFileContent, TurnChangeDiff, TurnChanges } from "@nocturne/co
 import type {
   ApplicationTarget,
   PermissionReply,
-  SessionAppSurface,
   SessionPage,
   SubagentPendingPermission,
   SubagentSummary,
@@ -37,6 +36,7 @@ import type { McpAppToolDelivery } from "./mcp-app-host";
 import type { BrowserPool } from "./browser-pool";
 import { BrowserPane, BrowserTabIcon } from "./BrowserPane";
 import { DiffBody, diffCounts, type FileLinkHooks } from "./Conversation";
+import { useDataUriBlobUrl } from "./data-uri";
 import { FileOpenButton, type FileOpenActions } from "./FileOpenMenu";
 import {
   ImageViewerBoundary,
@@ -199,7 +199,7 @@ export interface SidePanelProps {
   suite?: PanelSuite | undefined;
   /** agent 自己的浏览器标签（外壳建立）；没有时 agent 标签显示说明 */
   agents?: PanelAgents | undefined;
-  /** 插件 MCP App 面板标签与新标签页 surface（ADR-0101） */
+  /** 插件 MCP App 面板标签（ADR-0101） */
   apps?: PanelApps | undefined;
   /** 会话页面面板标签的数据与版本切换回调（ADR-0109） */
   page?: PanelPages | undefined;
@@ -214,8 +214,6 @@ export interface PanelPages {
 export interface PanelApps {
   sessionId: string;
   session: RpcSession | undefined;
-  surfaces: readonly SessionAppSurface[];
-  onOpenSurface: (surface: SessionAppSurface) => void;
   deliveryFor: (tab: AppTab) => McpAppToolDelivery | undefined;
   openCallSeqFor?: ((tab: AppTab) => number | undefined) | undefined;
   resolveMeta: (tab: AppTab) => {
@@ -306,6 +304,15 @@ function Glyph({
   };
   return (
     <Icon name={names[kind]} size={kind === "plus" ? ICON_MD : ICON_SM} className="sp-glyph" />
+  );
+}
+
+function AppTabIcon({ icon }: { icon: string | undefined }) {
+  const src = useDataUriBlobUrl(icon);
+  return src === undefined ? (
+    <Glyph kind="plugin" />
+  ) : (
+    <img src={src} alt="" className="sp-plugin-icon" />
   );
 }
 
@@ -510,11 +517,7 @@ function TabBar(props: SidePanelProps) {
               ) : tab.kind === "browser" && props.browsers !== undefined ? (
                 <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
               ) : tab.kind === "app" ? (
-                (appMeta?.icon ?? tab.icon) !== undefined ? (
-                  <img src={appMeta?.icon ?? tab.icon} alt="" className="sp-plugin-icon" />
-                ) : (
-                  <Glyph kind="plugin" />
-                )
+                <AppTabIcon icon={appMeta?.icon ?? tab.icon} />
               ) : (
                 <Glyph
                   kind={
@@ -583,16 +586,12 @@ function NewTabPage({
   canOpenFiles,
   hasSession,
   hasTerminal,
-  appSurfaces,
-  onOpenAppSurface,
 }: Pick<
   SidePanelProps,
   "onOpenChanges" | "onQuickOpen" | "onOpenTerminal" | "onAddress" | "canOpenFiles"
 > & {
   hasSession: boolean;
   hasTerminal: boolean;
-  appSurfaces?: readonly SessionAppSurface[] | undefined;
-  onOpenAppSurface?: ((surface: SessionAppSurface) => void) | undefined;
 }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string>();
@@ -678,26 +677,6 @@ function NewTabPage({
               </span>
             </span>
           </button>
-          {(appSurfaces ?? []).map((surface) => (
-            <button
-              key={`${surface.pluginId}:${surface.id}`}
-              type="button"
-              className="sp-tool"
-              disabled={!hasSession}
-              onClick={() => onOpenAppSurface?.(surface)}
-            >
-              {surface.icon !== undefined ? (
-                <img src={surface.icon} alt="" className="sp-plugin-icon" />
-              ) : (
-                <Glyph kind="plugin" />
-              )}
-              <span className="sp-tool-text">
-                <span className="sp-tool-head">
-                  <span className="sp-tool-name">{surface.title}</span>
-                </span>
-              </span>
-            </button>
-          ))}
         </div>
       </div>
     </div>
@@ -1575,8 +1554,6 @@ export function SidePanel(props: SidePanelProps) {
                     canOpenFiles={props.canOpenFiles}
                     hasSession={changes !== undefined}
                     hasTerminal={props.terminals !== undefined}
-                    appSurfaces={props.apps?.surfaces}
-                    onOpenAppSurface={props.apps?.onOpenSurface}
                   />
                 ) : tab.kind === "app" ? (
                   props.apps === undefined ? (

@@ -25,7 +25,7 @@
 | 右侧面板 · 后台任务 | 会话概览点后台命令条目 | `apps/desktop/src/ShellPane.tsx`、`apps/desktop/src/ShellRows.tsx` | `apps/desktop/test/shell-overview.test.tsx`、`apps/desktop/test/shell-panel-host.test.tsx` | `await click('button[aria-label="会话概览"]'); await waitFor('.ovpop-shell-open');` |
 | 右侧面板 · 合奏 | `/ensemble` 会话中点合奏卡片或概览中的「合奏」 | `apps/desktop/src/EnsemblePane.tsx`、`apps/desktop/src/EnsembleMemberPane.tsx` | `apps/desktop/test/ensemble-pane.test.tsx`、`apps/desktop/test/ensemble-member-session.test.tsx` | `await waitFor('[aria-label="右侧面板"]');` |
 | 右侧面板 · 组曲 | 打开组曲指挥会话后点线程条目 | `apps/desktop/src/SuitePane.tsx`、`apps/desktop/src/SuiteThreadPane.tsx` | `apps/desktop/test/suites.test.tsx` | `await waitFor('[aria-label="组曲"]');` |
-| 右侧面板 · 插件面板 | 模型调用带界面的插件工具、右侧面板新标签页「工具」区点插件面板卡片，或点匹配扩展名的文件引用 | `apps/desktop/src/AppPane.tsx`、`apps/desktop/src/SidePanel.tsx` | `apps/desktop/test/mcp-apps.test.tsx` | `await waitFor('iframe.sp-app-frame');` |
+| 右侧面板 · 插件面板 | 模型调用带界面的插件工具，或点匹配扩展名的文件引用 | `apps/desktop/src/AppPane.tsx`、`apps/desktop/src/SidePanel.tsx` | `apps/desktop/test/mcp-apps.test.tsx` | `await waitFor('iframe.sp-app-frame');` |
 | 需要 Node.js | 未检测到满足版本的 Node.js 时启动默认显示 | `apps/desktop/src/NodeHelp.tsx` | `apps/desktop/test/node-help.test.tsx` | 触发条件为 Node 探测失败；定位 `.nodecard` |
 
 ### 设置区（侧栏底部点「设置」进入 `nav[aria-label="设置"]`）

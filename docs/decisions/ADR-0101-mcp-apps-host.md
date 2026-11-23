@@ -105,8 +105,7 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
      - 这个会话正在显示时，面板关着就打开；
      - 不在显示时，只把标签加进这个会话的面板，不切换会话。
      - 历史重放的事件不打开标签。
-  2. **新标签页**：工具列表在「变更」「文件」「终端」之后，列出已启用插件声明的 surface，点击打开。
-  3. **文件引用**：对话里的文件引用左键时，如果「默认打开方式」是「Nocturne 面板」，且文件扩展名命中某个已启用插件 surface 的 `open.fileTypes`，就打开那个 surface，再由宿主以页面调用的身份调用 `open.tool`，参数为 `{ "path": <绝对路径> }`，结果交给页面。
+  2. **文件引用**：对话里的文件引用左键时，如果「默认打开方式」是「Nocturne 面板」，且文件扩展名命中某个已启用插件 surface 的 `open.fileTypes`，就打开那个 surface，再由宿主以页面调用的身份调用 `open.tool`，参数为 `{ "path": <绝对路径> }`，结果交给页面。
      - 命中多个插件时，取插件 id 字典序第一个；
      - 都不命中时，行为与现在相同。
 - **生命周期**：
@@ -133,7 +132,7 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
 - **宿主实现的消息**（方法名与参数以规范为准）：
   - `ui/initialize`：返回宿主信息与 `hostContext`，包括主题、样式变量、`displayMode: "inline"` 等。样式变量由主题令牌映射到规范的变量名；
   - `ui/notifications/initialized`：收到之前，宿主不向页面发任何请求或通知；
-  - `ui/notifications/tool-input` 与 `ui/notifications/tool-result`：在第 5 节三种打开方式下发给页面。工具状态为 `error` 时照常发 `tool-result`（`isError: true`）；为 `cancelled`、`interrupted`、`denied` 时发 `ui/notifications/tool-cancelled`。不发 `tool-input-partial`；
+  - `ui/notifications/tool-input` 与 `ui/notifications/tool-result`：在第 5 节的两种打开方式下发给页面。工具状态为 `error` 时照常发 `tool-result`（`isError: true`）；为 `cancelled`、`interrupted`、`denied` 时发 `ui/notifications/tool-cancelled`。不发 `tool-input-partial`；
   - `ping`；
   - `notifications/message`：写入诊断日志；
   - `ui/request-display-mode`：不切换，返回当前模式 `inline`；
@@ -153,7 +152,7 @@ ADR-0100 第 5 节分期第 4 项要求桌面端侧边面板显示文档，并�
 
 - 读取页面资源；
 - 页面调用工具（第 3 节）；
-- 列出当前会话可用的 surface（供新标签页使用）。
+- 列出当前会话可用的 surface，供文件引用匹配、插件标签标题和图标查找，以及模型调用时识别应持久化的 `openCall`。
 
 ## 后果
 
@@ -212,3 +211,7 @@ default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; worker-src bl
 ## 修订：2026-11-20 模型调用 surface `open.tool` 时持久化 `openCall`
 
 补充第 5 节「生命周期」：当模型实时调用关联到某个 surface 的工具、执行成功且工具名正好是该 surface 的 `open.tool`（含 `mcp_call` 代理调用解析后的目标工具名）时，宿主同时将该次调用的参数记为该标签的 `openCall` 并随 `panelSessions` 持久化，使模型打开的标签重启后首次显示时也能重新打开原文档；实时投递期间仍直接使用模型结果，不重复发起 `callAppTool`。
+
+## 修订（2026-11-23）
+
+从新标签页移除插件面板卡片。卡片打开的查看器没有可显示的文档。插件面板用于检视 AI 生成或处理的文档，用户可让模型调用关联工具，或点击对话中的文件引用来打开。
