@@ -57,13 +57,13 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
 | `nocturne_list_sessions` | 只读 | `{ cwd?, limit? }`，返回 id、标题、工作区、模型、状态、最后活动时间，新的在前，缺省 20 条 |
 | `nocturne_read_session` | 只读 | `{ sessionId, turns? }`，打开并订阅，用 `protocol/view` 折叠，返回最近 `turns`（缺省 3）轮的用户消息与最终回复文本（不含思考与工具细节，工具调用只列一行名称和结果状态），以及当前状态 |
 | `nocturne_list_models` | 只读 | 可用模型与默认模型 |
-| `nocturne_start_session` | 可运行 | `{ cwd, prompt, model?, reasoningEffort?, permissionPreset?, wait? }`，新建会话并提交首条消息；返回 `sessionId`，`wait: true` 时同 `nocturne_wait` |
-| `nocturne_send` | 可运行 | `{ sessionId, prompt, wait? }`，走 `enqueueInput` 的 `queue` 模式：**从不打断**，会话忙时排到下一轮，空闲时立即开始 |
-| `nocturne_wait` | 可运行 | `{ sessionId, timeoutSeconds? }`（缺省 300，上限 600），等当前这一轮结束 |
+| `nocturne_start_session` | 可运行 | `{ cwd, prompt, title?, model?, reasoningEffort?, permissionPreset?, wait?, timeoutSeconds? }`，新建会话并提交首条消息；`wait: false` 仅返回排队状态（`sessionId`、`title`、`status`、`queuedInputs`、`message`，改名失败时附 `renameError`），`wait: true` 同 `nocturne_wait` |
+| `nocturne_send` | 可运行 | `{ sessionId, prompt, wait?, timeoutSeconds? }`，走 `enqueueInput` 的 `queue` 模式：**从不打断**，会话忙时排到下一轮，空闲时立即开始；`wait: false` 仅返回排队状态，`wait: true` 同 `nocturne_wait` |
+| `nocturne_wait` | 可运行 | `{ sessionId?, sessionIds?, timeoutSeconds? }`（缺省 300，上限 600），等单个或多个会话当前这一轮结束 |
 | `nocturne_interrupt` | 可运行 | `{ sessionId }` |
 
 - **状态**：`idle`、`running`、`waiting_for_permission`、`waiting_for_answer`、`paused`（待发输入暂停）。
-- **等待结果**：Turn 结束返回 `{ status: "done" | "error" | "aborted", reply }`，`reply` 是最后一条助手消息的文本；超时返回 `{ status: "running" }`，不中断；会话停在权限确认或提问上时立即返回 `waiting_for_permission` / `waiting_for_answer`，附一行 `Ask the user to respond in Nocturne.`。客户端给了 `progressToken` 时，桥按步骤推 MCP 进度通知。
+- **等待结果**：Turn 结束返回 `{ status, turnOutcome, reply, lastTurn, ... }`；助手回复仅放在顶层 `reply`（不重复出现在 `lastTurn`，最后一段回复不截断、较早过程文字按上限截断），`lastTurn.userText` 仅保留本轮首条用户提交文本（截断至 300 字符），其余用户条目计入 `lastTurn.extraInputs`；超时返回 `{ status: "running" }`，不中断；会话停在权限确认或提问上时立即返回 `waiting_for_permission` / `waiting_for_answer`。客户端给了 `progressToken` 时，桥按步骤推 MCP 进度通知。
 - 桥打开的会话引用在 MCP 连接关闭时释放（`session.close`），不影响桌面端已打开的同一会话。
 - 输出是给模型读的纯文本 + `structuredContent`，单次结果超过 64 KB 时截断并说明，完整内容让用户在桌面端看。
 
@@ -118,4 +118,15 @@ Nocturne 目前只是 MCP 客户端（[ADR-0011](ADR-0011-mcp-client.md)）。�
   3. **不写持久授权**：外部 agent 不得写入任何持久授权（Grant / 用户规则）。`PermissionReply.remember` 为 `"project"` 或 `"always"` 的变体在任意权限上限（含 `bypass`）下一律拒绝，返回 `-32004 / agent_not_allowed`。
 - **等待提示与范围同步**：`initialize` 结果在 `origin === "agent"` 且已登记时附带自身 `agent: { id, scope, maxPermissionPreset }`，配对批准与范围变更时向该 agent 连接推送 `agent.selfChanged`。会话停在 `waiting_for_answer` / `waiting_for_permission` 时，等待返回保留 `pendingQuestion` / `pendingPermissions`（子代理转发审批条目附带 `childSessionId`），提示文本说明可调用的工具；若该 agent 不能批准，权限提示仅说明可拒绝或请用户在 Nocturne 中处理。
 - **对原第 77 行规则的替代**：原「后果」第 77 行「权限确认与提问仍由用户本人处理；外部 agent 拿不到任何批准能力」中，在**外部 agent 自己创建的会话**范围内：提问可由该 agent 通过 `nocturne_answer` 回答；审批可由该 agent 通过 `nocturne_respond_permission` 拒绝，且当且仅当其登记权限上限为最高档（`bypass`）时可做非持久允许（本次 / 本会话）。对用户或其他外部 agent 创建的会话、较低权限上限下的批准，以及全部持久授权（`project` / `always`），原规则继续生效。
+
+## 修订：2026-11-23 发送与等待返回瘦身
+
+- **背景**：编码会话中后台命令结束后的 `<shell-result>` 会作为用户输入条目并入当前轮次，导致 `lastTurn.userText` 拼入大段构建/安装日志；同时 `reply` 与 `lastTurn.assistantText` 重复输出，`wait: false` 时也携带了整份等待载荷，使单次 MCP 返回膨胀到数百行。
+- **`wait: false` 仅返回排队状态**：`nocturne_start_session` 与 `nocturne_send` 在 `wait: false` 时仅返回 `{ sessionId, title?, renameError?, status, queuedInputs, message }`，不再包含 `lastTurn`、`reply` 或工具列表。
+- **等待类返回瘦身**（适用于 `nocturne_wait` 单会话/多会话，以及 `nocturne_start_session` / `nocturne_send` / `nocturne_answer` / `nocturne_respond_permission` 的 `wait: true`）：
+  - **`lastTurn.userText` 与 `lastTurn.extraInputs`**：`lastTurn.userText` 仅保留本轮第一条用户提交文本，超出 **300 字符**时截断并加 `…`；本轮其余用户条目（如 `<shell-result>`、插话、Runtime 注入等）不放原文，仅在数量大于 0 时通过 `lastTurn.extraInputs` 返回条数。
+  - **`reply` 与 `lastTurn.assistantText` 去重**：移除 `lastTurn.assistantText`，助手回复仅通过顶层 `reply` 返回；`reply` 保留最后一段完整回复不截断，其前的过程说明文字合并后截断至 **300 字符**（超出加 `…`）。
+  - **工具摘要不变**：`lastTurn.tools` 维持现有按连接增量单行摘要与条数上限（20 条 / 120 字符）。
+- **原文入口与工具说明**：`nocturne_read_session` 行为不变，仍作为读取完整对话与过程原文的入口；`nocturne_start_session`、`nocturne_send`、`nocturne_wait` 的工具 `description` 同步写明上述行为。
+
 

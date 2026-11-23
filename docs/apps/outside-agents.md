@@ -79,8 +79,8 @@ codex mcp add nocturne -- nctrn mcp --name codex
 | `nocturne_list_sessions` | 只读 | `{ cwd?, limit? }`：列出最近会话（默认 20 条）。 |
 | `nocturne_read_session` | 只读 | `{ sessionId, turns? }`：读取会话状态与最近 `turns`（默认 3）轮的用户消息、单行工具摘要与最终回复（单次输出上限 64 KB）。 |
 | `nocturne_list_models` | 只读 | `{ workspaceRoot? }`：列出可用模型与默认模型。 |
-| `nocturne_start_session` | 可运行 | `{ cwd, prompt, title?, model?, reasoningEffort?, permissionPreset?, wait?, timeoutSeconds? }`：在已信任或已有会话用过的工作区新建会话并发送首条消息。传入 `title` 时，在会话建立后、发送首条消息前调用 `runtime.renameSession` 设为手动标题（不被自动标题覆盖）；若改名失败，会话照常创建与运行，返回中附带 `renameError`。`wait: true` 共用下方等待与增量摘要规则。 |
-| `nocturne_send` | 可运行 | `{ sessionId, prompt, wait?, timeoutSeconds? }`：向已有会话发送消息。采用 `queue` 排队模式，**从不打断**正在运行的轮次。`wait: true` 共用下方等待与增量摘要规则。 |
+| `nocturne_start_session` | 可运行 | `{ cwd, prompt, title?, model?, reasoningEffort?, permissionPreset?, wait?, timeoutSeconds? }`：在已信任或已有会话用过的工作区新建会话并发送首条消息。传入 `title` 时，在会话建立后、发送首条消息前调用 `runtime.renameSession` 设为手动标题（不被自动标题覆盖）；若改名失败，会话照常创建与运行，返回中附带 `renameError`。`wait: false` 仅返回排队状态（`sessionId`、`title`、`status`、`queuedInputs`、`message`）；`wait: true` 共用下方等待与增量摘要规则。 |
+| `nocturne_send` | 可运行 | `{ sessionId, prompt, wait?, timeoutSeconds? }`：向已有会话发送消息。采用 `queue` 排队模式，**从不打断**正在运行的轮次。`wait: false` 仅返回排队状态（`sessionId`、`title`、`status`、`queuedInputs`、`message`）；`wait: true` 共用下方等待与增量摘要规则。 |
 | `nocturne_wait` | 可运行 | `{ sessionId?, sessionIds?, timeoutSeconds? }`（`sessionId` 与 `sessionIds` 二选一；默认 300s，上限 600s）：等待单个或多个会话的当前轮及正常 `done` 接续的排队轮次结束；传 `sessionIds` 时，任意一个会话满足停止条件（或调用时已满足）即立即返回 `{ timedOut, readySessionIds, sessions }`，列明就绪会话及各会话状态；超时返回各会话 `running` 不中断会话；停在权限确认或提问上时立即返回 `waiting_for_permission` / `waiting_for_answer`；若因中断或出错导致待发队列暂停，立即返回 `status: "paused"` 及刚结束轮次的 `turnOutcome`（`"aborted"` / `"error"`）。对子代理会话调用等待类工具会直接报错并给出其父会话 ID（取自 `SessionSummary.parent`）。 |
 | `nocturne_interrupt` | 可运行 | `{ sessionId }`：中断指定会话当前正在运行的轮次。 |
 | `nocturne_answer` | 可运行 | `{ sessionId, requestId, answers, wait?, timeoutSeconds? }`：回答自己创建的会话当前挂起的提问（`answers` 与 `session.respondQuestion` 一致：每题为 `{ selected, text? }` 或 `{ declined: true }`）。非本 agent 创建的会话报 `agent_not_allowed`；`wait: true`（默认）共用等待与增量摘要规则。 |
@@ -88,12 +88,13 @@ codex mcp add nocturne -- nctrn mcp --name codex
 
 ### 等待类返回增量摘要规则
 
-适用于 `nocturne_wait`（单会话与多会话的每个会话条目）以及 `nocturne_start_session` / `nocturne_send` 带 `wait: true` 的返回：
+适用于 `nocturne_wait`（单会话与多会话的每个会话条目）以及 `nocturne_start_session` / `nocturne_send` / `nocturne_answer` / `nocturne_respond_permission` 带 `wait: true` 的返回：
 
+- **用户输入截断与额外输入计数**：`lastTurn.userText` 只保留本轮首条用户提交文本，超出 **300 字符**时以 `…` 截断；本轮其余用户条目（如后台命令结束后的 `<shell-result>`、插话、Runtime 注入等）不放原文，仅在数量大于 0 时通过 `lastTurn.extraInputs` 给出条数。
 - **按连接增量输出**：同一 MCP 连接内，对同一会话在同一轮次下只列出上一次等待返回后新增（或状态变化）的工具调用，并在 `lastTurn.omittedPreviousTools` 中注明本次之前已省略的条数；首次等待或进入新轮次时从本轮开头算；不同连接互不影响，连接断开重连后从本轮开头算。
 - **单行压缩与截断上限**：每条工具调用压成单行 `[工具名] 状态 — 目标`；`shell` 命令只取第一个非空行，换行与连续空白折叠为单空格，目标文本长度上限为 **120 字符**（超出或存在后续行时以 `…` 截断）。
 - **单次条数上限**：每次最多列出最近 **20 条**新工具调用，超出时在 `lastTurn.omittedExcessTools` 中注明省略条数。
-- **助手回复与总上限**：轮次结束时在 `reply` 与 `lastTurn.assistantText` 返回最终回复全文，单次输出整体仍受 64 KB 上限约束；完整工具清单始终由 `nocturne_read_session` 提供。
+- **助手回复与总上限**：助手回复仅放在顶层 `reply`（不再在 `lastTurn` 中重复输出），最后一段完整回复不截断，其前的过程说明文字按 **300 字符**截断；单次输出整体仍受 64 KB 上限约束，查看完整过程或原文调用 `nocturne_read_session`。
 
 ## 5. 安全边界说明
 
