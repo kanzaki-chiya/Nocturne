@@ -368,8 +368,11 @@ class SwitchingRpcFacade {
       return this.current;
     };
 
-    const wrapMethodObject = <T extends object>(select: (client: RpcClient) => T): T =>
-      new Proxy({} as T, {
+    const wrapMethodObject = <T extends object>(
+      select: (client: RpcClient) => T,
+      target = {} as T,
+    ): T =>
+      new Proxy(target, {
         get: (_target, prop) => {
           return (...args: unknown[]) =>
             waitReady().then((client) => {
@@ -411,7 +414,11 @@ class SwitchingRpcFacade {
       computer: computerProxy,
       session: (sessionId: string) => {
         type SessionHandle = ReturnType<RpcClient["session"]>;
-        const sessionBase = wrapMethodObject<SessionHandle>((c) => c.session(sessionId));
+        // 只读观察会话通过枚举句柄的方法建立包装，保留实际句柄的属性。
+        const sessionBase = wrapMethodObject(
+          (c) => c.session(sessionId),
+          this.current.session(sessionId),
+        );
         return new Proxy(sessionBase, {
           get: (target, prop): unknown => {
             if (prop === "id") return sessionId;

@@ -149,29 +149,40 @@ export function SessionScreen({
   useEffect(() => {
     sessions.forkDrafts.delete(session.id);
   }, [sessions, session.id]);
+  const runtime = entry.client.runtime;
+  const skillWorkspace = view.meta?.workspaceRoot ?? entry.workspace;
   useEffect(() => {
-    if (observed) return;
     let active = true;
-    void session.describeSkills().then(
-      (result) => {
-        if (active) setSkills(result.skills);
-      },
-      () => {
-        if (active) setSkills([]);
-      },
-    );
-    void session.describeExternalAgents().then(
-      (result) => {
-        if (active) setAgents(result.agents);
-      },
-      () => {
-        if (active) setAgents([]);
-      },
-    );
+    void Promise.resolve()
+      .then(() =>
+        observed
+          ? runtime.describeSkills({ workspaceRoot: skillWorkspace })
+          : session.describeSkills(),
+      )
+      .then(
+        (result) => {
+          if (active) setSkills(result.skills);
+        },
+        () => {
+          if (active) setSkills([]);
+        },
+      );
+    if (!observed) {
+      void Promise.resolve()
+        .then(() => session.describeExternalAgents())
+        .then(
+          (result) => {
+            if (active) setAgents(result.agents);
+          },
+          () => {
+            if (active) setAgents([]);
+          },
+        );
+    }
     return () => {
       active = false;
     };
-  }, [session, view.turnCount, observed]);
+  }, [runtime, session, skillWorkspace, view.turnCount, observed]);
 
   const running =
     busy || entry.busy || view.currentTurn !== undefined || view.status === "compacting";
@@ -669,12 +680,14 @@ export function DraftComposer({
     setSkills([]);
     if (!runtime || !connected) return;
     let active = true;
-    void runtime.describeSkills({ workspaceRoot: workspace }).then(
-      (result) => {
-        if (active) setSkills(result.skills);
-      },
-      () => undefined,
-    );
+    void Promise.resolve()
+      .then(() => runtime.describeSkills({ workspaceRoot: workspace }))
+      .then(
+        (result) => {
+          if (active) setSkills(result.skills);
+        },
+        () => undefined,
+      );
     return () => {
       active = false;
     };

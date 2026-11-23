@@ -541,6 +541,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `initialize` | 仅连接握手，不创建 Runtime |
 | `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件，远程即使传 `includeArchived: true` 仍强制排除归档 |
 | `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeSettings`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限（含读取 `appearance.themePreset` 与 `appearance.customThemes`，ADR-0093、ADR-0094） |
+| `skills.describeSkills` | 允许（只读），`workspaceRoot` 必填，并按 `runtime.createSession` 的目录存在性和工作区信任规则校验。用于手机新建会话和查看历史会话时的技能补全 |
 | `runtime.createSession` | 允许除 `branch` 外的选项（携带 `branch` 报 `remote_not_allowed`，ADR-0085）。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
 | `runtime.resumeSession`、`runtime.forkSession`、`runtime.renameSession` | 允许；恢复可带 `model`、`force`，重命名只改会话标题 |
 | `session.subscribe`、`session.unsubscribe`、`session.close`、`session.state` | 允许 |

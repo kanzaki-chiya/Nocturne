@@ -235,6 +235,7 @@ export const REMOTE_METHODS = [
   "runtime.describeSettings",
   "runtime.describeModelRoles",
   "runtime.listShells",
+  "skills.describeSkills",
   // ADR-0064：手机能看任务与历史、立即运行（不改任务、跑完不留撤销后仍生效的东西，等同会话内操作）；
   // schedule.save / schedule.delete 改持久配置（含启停），只在本机
   "schedule.list",
@@ -769,6 +770,9 @@ class Connection implements HubPeer {
       if (this.initialized && this.hub.available) {
         await this.hub.checkRemoteWorkspace(optString(p, "cwd"), optString(p, "workspaceRoot"));
       }
+    }
+    if (method === "skills.describeSkills" && this.initialized && this.hub.available) {
+      await this.hub.checkRemoteWorkspace(undefined, reqString(p, "workspaceRoot"));
     }
     if (
       (method === "suites.create" || method === "suites.update") &&

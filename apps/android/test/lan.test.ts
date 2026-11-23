@@ -22,6 +22,7 @@ import {
   type PhoneConnectionOptions,
 } from "../../desktop/src/web/connection";
 import { webPlatform } from "../../desktop/src/web/platform";
+import { PhoneSessions } from "../../desktop/src/web/sessions";
 import { encode, type PairedHost } from "../../desktop/src/web/storage";
 import { tauriHost } from "../src/host";
 import {
@@ -252,6 +253,75 @@ describe("安卓端局域网直连（ADR-0087）", () => {
         "tcp://192.168.1.5:41234/subpath",
       ]),
     ).toEqual(["tcp://192.168.1.5:41234", "tcp://10.0.2.2:9000", "tcp://172.20.0.8:5000"]);
+  });
+
+  it("安卓中继会话从只读观察升级后仍可提交消息并读取技能", async () => {
+    const host = await generateIdentity({ extractable: true });
+    const phone = await generateIdentity({ extractable: false });
+    const [transport, serverSide] = createMemoryFramePair();
+    const sessionId = "observed";
+    const workspace = "/workspace";
+    const peer = serveEncryptedPeer(serverSide, host, phone, {
+      customHandler: (method) => {
+        switch (method) {
+          case "runtime.listSessions":
+            return [{ id: sessionId, cwd: workspace, openHere: false, mtimeMs: 1 }];
+          case "session.observe":
+            return {
+              sessionId,
+              cwd: workspace,
+              workspaceRoot: workspace,
+              lastSeq: 0,
+              openHere: false,
+            };
+          case "runtime.resumeSession":
+            return { sessionId, warnings: [], meta: { cwd: workspace } };
+          case "session.subscribe":
+            return { lastSeq: 0 };
+          case "session.pendingInputs":
+            return { items: [], paused: false };
+          case "session.submit":
+            return "done";
+          case "session.describeSkills":
+            return { skills: [{ name: "layout-check" }] };
+          default:
+            return [];
+        }
+      },
+    });
+    const sessions = new PhoneSessions(() => undefined);
+    const conn = new LanPhoneConnection({
+      origin: "https://relay.example",
+      identity: phone,
+      host: makePairedHost(host),
+      endpointStore: memoryLanStore(),
+      connect: async () => ({
+        online: true,
+        transport,
+        onHostOnline: (fn) => fn(),
+        subscribePush: vi.fn(),
+        unsubscribePush: vi.fn(),
+        onClose: vi.fn(),
+      }),
+      changed: () => undefined,
+      connected: (client) => sessions.connected(client),
+      disconnected: () => sessions.disconnected(),
+    });
+    try {
+      conn.start();
+      await vi.waitFor(() => expect(conn.state).toBe("online"));
+      const entry = await sessions.open(sessionId);
+      expect(entry.observed).toBe(true);
+      await sessions.ensureLive(sessionId);
+      expect(entry.observed).toBe(false);
+      await expect(entry.session.describeSkills()).resolves.toEqual({
+        skills: [{ name: "layout-check" }],
+      });
+      await expect(entry.session.submit({ text: "继续对话" })).resolves.toBe("done");
+      expect(peer.calls.map(({ method }) => method)).toContain("session.submit");
+    } finally {
+      conn.stop();
+    }
   });
 
   it("5a. 存有可达直连地址时直连与中继同时发起：直连胜出，同时发起的中继连接被关闭且不触发重试", async () => {

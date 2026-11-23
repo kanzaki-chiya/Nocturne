@@ -8,6 +8,7 @@
  * - SessionScreen 在只读观察态挂载时不触发 listGrants / state / describeSkills 唤醒会话。
  */
 import { act } from "react";
+import { fireEvent } from "@testing-library/react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurableEvent, RuntimeEvent } from "@nocturne/core/protocol";
@@ -353,10 +354,21 @@ describe("PhoneSessions 顶层会话只读观察与按需升级（ADR-0099）", 
     expect(h.subscribedAfterSeqs).toEqual([5]);
   });
 
-  it("SessionScreen 挂载只读观察会话时不触发 state / listGrants / describeSkills 唤醒会话", async () => {
+  it("SessionScreen 在只读观察态通过工作区查询技能并显示在斜杠菜单，不唤醒会话", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("matchMedia", () => ({ matches: false }));
     const h = makeHarness({ list: [{ id: "hist", openHere: false }] });
+    const describeWorkspaceSkills = vi.spyOn(h.client.runtime, "describeSkills").mockResolvedValue({
+      skills: [
+        {
+          name: "layout-check",
+          description: "检查手机布局",
+          enabled: true,
+          invocation: "both",
+          fields: {},
+        },
+      ],
+    } as Awaited<ReturnType<typeof h.client.runtime.describeSkills>>);
     await h.sessions.connected(h.client);
     const entry = await h.sessions.open("hist");
     const images = createAttachmentImageSource();
@@ -384,6 +396,11 @@ describe("PhoneSessions 顶层会话只读观察与按需升级（ADR-0099）", 
       expect(container.textContent).toContain("历史提问");
       expect(container.textContent).toContain("历史回答");
     });
+    const field = container.querySelector("textarea");
+    if (!field) throw new Error("缺少输入框");
+    act(() => fireEvent.change(field, { target: { value: "/" } }));
+    expect(container.querySelector(".phone-slash")?.textContent).toContain("/layout-check");
+    expect(describeWorkspaceSkills).toHaveBeenCalledWith({ workspaceRoot: "Z:/work" });
     expect(entry.observed).toBe(true);
     expect(h.resumeSpy).not.toHaveBeenCalled();
     expect(h.sessionCalls).toEqual([]);

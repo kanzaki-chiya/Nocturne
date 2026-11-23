@@ -408,6 +408,44 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     await Promise.all([h.served, remote.served]);
   });
 
+  it("远程可读取已允许工作区的技能目录，拒绝无工作区、无效目录和未信任的新项目", async () => {
+    const h = await connectManyWithConfig();
+    const remote = await h.add();
+    try {
+      const dir = path.join(h.ws, ".nocturne", "skills", "layout-check");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "SKILL.md"),
+        "---\nname: layout-check\ndescription: Check the mobile layout.\n---\n\nCheck the layout.\n",
+      );
+      await h.config.setWorkspaceTrusted(h.ws, true);
+      await expect(
+        remote.client.runtime.describeSkills({ workspaceRoot: h.ws }),
+      ).resolves.toMatchObject({
+        skills: expect.arrayContaining([expect.objectContaining({ name: "layout-check" })]),
+      });
+      await expect(remote.client.runtime.describeSkills()).rejects.toMatchObject({
+        rpcCode: -32602,
+      });
+      await expect(
+        remote.client.runtime.describeSkills({ workspaceRoot: "relative/dir" }),
+      ).rejects.toMatchObject({
+        code: "workspace_not_found",
+      });
+      const untrusted = tmpDir("nct-rpc-skills-untrusted-");
+      mkdirSync(path.join(untrusted, ".nocturne"));
+      writeFileSync(path.join(untrusted, ".nocturne", "config.json"), "{}");
+      await expect(
+        remote.client.runtime.describeSkills({ workspaceRoot: untrusted }),
+      ).rejects.toMatchObject({
+        code: "workspace_untrusted",
+      });
+    } finally {
+      await h.client.shutdown();
+      await Promise.all([h.served, remote.served]);
+    }
+  });
+
   it("远程结果超过报文上限改报错误，连接保持可用；本机不受限", async () => {
     const limit = 4096;
     const h = await connectMany({ scripts: [textScript("看到了")], remoteMessageLimit: limit });
